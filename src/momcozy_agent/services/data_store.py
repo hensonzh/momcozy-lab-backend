@@ -1439,6 +1439,18 @@ def pump_info(user_id: str) -> dict[str, Any]:
         return {"error": -1, "lactation_info_list": []}
     with _connect() as conn:
         profile = conn.execute("SELECT delivery_date FROM user_profile WHERE user_id = ?", (uid,)).fetchone()
+        # Per-day direct-breastfeeding (亲喂) session counts feed the
+        # `total_milk_estimate` line on the trend chart so it includes the
+        # baby's estimated direct intake on top of measured pump yield.
+        breast_rows = conn.execute(
+            """
+            SELECT substr(feed_time, 1, 10) AS feed_day, COUNT(*) AS breast_count
+            FROM feeding_log
+            WHERE user_id = ? AND feed_type = ?
+            GROUP BY feed_day
+            """,
+            (uid, FEED_TYPE_CODE_TO_TEXT[0]),
+        ).fetchall()
     babies = list_baby_profiles(user_id)
     reference_date = (profile["delivery_date"] if profile else "") or (babies[0]["birth_date"] if babies else "")
     reference_day = _parse_date(reference_date)
@@ -1452,18 +1464,35 @@ def pump_info(user_id: str) -> dict[str, Any]:
             by_day[date_key] = by_day.get(date_key, 0.0) + float(record.get("pump_milk_volum") or 0)
         except Exception:
             pass
+    breast_by_day: dict[str, int] = {}
+    for row in breast_rows:
+        day_key = str(row["feed_day"] or "")
+        if not day_key:
+            continue
+        try:
+            breast_by_day[day_key] = int(row["breast_count"] or 0)
+        except Exception:
+            pass
+    # Use the existing per-session estimate (driven by recent bottle-feed
+    # history). When the user has no bottle data it returns None, which keeps
+    # the legacy behavior `total_milk_estimate == total_milk` intact.
+    breast_per_session_ml = estimate_breastfeeding_milk(user_id=uid) or 0.0
     today = datetime.now().date()
     lactation_info_list = []
     for offset in range(29, -1, -1):
         day = today - timedelta(days=offset)
-        total = int(round(by_day.get(day.isoformat(), 0.0)))
+        date_key = day.isoformat()
+        total = int(round(by_day.get(date_key, 0.0)))
+        breast_count = breast_by_day.get(date_key, 0)
+        estimated_breast_ml = int(round(breast_count * breast_per_session_ml))
+        total_with_breast = max(total, 0) + max(estimated_breast_ml, 0)
         reference = None
         if reference_day is not None:
             reference = get_yield_reference_range((day - reference_day).days + 1)
         lactation_info_list.append(
             {
                 "total_milk": total,
-                "total_milk_estimate": max(total, 0),
+                "total_milk_estimate": total_with_breast,
                 "reference_upper": int(round(float(reference.get("p85") or 0))) if reference else 0,
                 "reference_lower": int(round(float(reference.get("p15") or 0))) if reference else 0,
                 "delivery_date": f"{day.month}/{day.day}",

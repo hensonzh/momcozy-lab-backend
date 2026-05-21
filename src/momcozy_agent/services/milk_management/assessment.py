@@ -7,7 +7,7 @@ from math import floor
 from typing import Any
 
 from .db import fetch_all, fetch_one, get_knowledge_root
-from .feeding import get_yesterday_feeding_snapshot
+from .feeding import estimate_breastfeeding_milk, get_yesterday_feeding_snapshot
 from .schemas import ServiceResult, error_result, norm_text, ok_result, parse_datetime, to_int
 
 
@@ -189,6 +189,16 @@ def _evaluate_milk_normality(
     end_day = as_of_dt.date() if include_today else as_of_dt.date() - timedelta(days=1)
     start_day = end_day - timedelta(days=max(window_days, 1) - 1)
     aggregate = _aggregate_days(pumping_logs, feeding_logs, start_day=start_day, end_day=end_day)
+    # Per-session breastfeeding milk estimate is derived from the user's
+    # bottle-feed history (same logic used by `pump_info()` / the trend chart).
+    # When unavailable, fall back to 0 — equivalent to "pump only" supply.
+    breastfeeding_per_session_ml = (
+        estimate_breastfeeding_milk(
+            user_id=norm_text(profile.get("user_id")),
+            as_of_time=as_of_dt,
+        )
+        or 0.0
+    )
     try:
         yield_points = _build_yield_points(str(_yield_reference_path()))
         freq_points = _build_frequency_points(str(_frequency_reference_path()))
@@ -244,6 +254,7 @@ def _evaluate_milk_normality(
             pumping_ml_total=float(slot["pumping_ml_total"]),
             pumping_count=int(slot["pumping_count"]),
             breastfeeding_count=int(slot["breastfeeding_count"]),
+            breastfeeding_per_session_ml=breastfeeding_per_session_ml,
             frequency_reference=frequency_reference,
             yield_reference=yield_reference,
         )
@@ -343,10 +354,16 @@ def _evaluate_day(
     pumping_ml_total: float,
     pumping_count: int,
     breastfeeding_count: int,
+    breastfeeding_per_session_ml: float,
     frequency_reference: dict[str, int],
     yield_reference: dict[str, float] | None,
 ) -> dict[str, Any]:
     if pumping_count <= 0:
+        # No pump entries today; still surface direct-breastfeeding estimate
+        # so callers don't see a vanished session as zero supply.
+        estimated_breastfeeding_only = round(
+            float(breastfeeding_count) * float(breastfeeding_per_session_ml), 1
+        )
         return {
             "ok": False,
             "status": "insufficient_data",
@@ -354,9 +371,17 @@ def _evaluate_day(
             "rule_hit": "invalid_pumping_count_zero",
             "message": "当天没有可用于估算的吸奶记录。",
             "estimated_frequency": None,
-            "estimated_daily_milk_ml": None,
+            "estimated_daily_milk_ml": estimated_breastfeeding_only or None,
+            "estimated_breastfeeding_ml": estimated_breastfeeding_only,
+            "pumping_ml_total": 0.0,
+            "breastfeeding_per_session_ml": round(float(breastfeeding_per_session_ml), 1),
         }
 
+    # estimated_frequency is reported as the typical daily feeding frequency
+    # for context; it is no longer used to derive estimated_daily_milk_ml,
+    # because the old "pump_avg × total_frequency" formula systematically
+    # over-counted combo-feeding moms (per-pump volume ≠ per-breastfeed
+    # transfer) and routinely tripped a false over-supply alert.
     total_times = int(pumping_count) + int(breastfeeding_count)
     if breastfeeding_count <= 0:
         estimated_frequency = int(pumping_count)
@@ -371,10 +396,21 @@ def _evaluate_day(
         estimated_frequency = total_times
         frequency_rule = "between_p25_p75_use_total_times"
 
-    estimated_daily_milk_ml = round(float(pumping_ml_total) / float(pumping_count) * float(estimated_frequency), 1)
+    # New formula: measured pump volume plus an estimate of direct
+    # breastfeeding transfer (count × per-session estimate from bottle history,
+    # mirroring how `pump_info()` builds `total_milk_estimate`).
+    estimated_breastfeeding_ml = round(
+        float(breastfeeding_count) * float(breastfeeding_per_session_ml), 1
+    )
+    estimated_daily_milk_ml = round(
+        float(pumping_ml_total) + max(estimated_breastfeeding_ml, 0.0), 1
+    )
     base = {
         "estimated_frequency": estimated_frequency,
         "estimated_daily_milk_ml": estimated_daily_milk_ml,
+        "estimated_breastfeeding_ml": estimated_breastfeeding_ml,
+        "pumping_ml_total": round(float(pumping_ml_total), 1),
+        "breastfeeding_per_session_ml": round(float(breastfeeding_per_session_ml), 1),
         "frequency_rule": frequency_rule,
     }
 
