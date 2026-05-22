@@ -235,9 +235,9 @@ skills/<skill-id>/SKILL.md
 ```text
 BASE_AGENT_INSTRUCTIONS
 static_agent_context:
-service_selection
+skill_selection
 global_safety_policy
-skill_manifest
+skill_manifests
 ```
 
 这些内容不放进每轮 `request_context`，以提高 prompt cache 命中：
@@ -247,7 +247,7 @@ skill_manifest
 - 全局安全策略
 - 医疗风险分层策略
 - skill runtime 协议
-- service skill manifest
+- skill manifests
 - 工具使用规则
 
 ### 2. Request Context

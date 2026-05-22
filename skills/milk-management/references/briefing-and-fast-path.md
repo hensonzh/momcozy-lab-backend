@@ -1,5 +1,7 @@
 # 主动健康 briefing 与追奶 fast-path
 
+本 reference 使用的奶量管理工具都在 `milk_management` deferred namespace 中；如尚未加载，先通过 `tool_search` 加载该 namespace，再调用下文提到的具体工具。
+
 当用户表达想要综合概览（不指向具体计划/任务/记录修改），按下面流程做**数据驱动的风险预警**，主动用工具拉数据再回答，不要先反问"你想看哪部分"。
 
 ## 触发条件（命中任意一条即触发）

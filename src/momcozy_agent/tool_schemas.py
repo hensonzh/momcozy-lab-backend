@@ -112,12 +112,12 @@ FORM_FIELD_SCHEMA: dict[str, Any] = {
 FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     "list_skills": _function_tool(
         "list_skills",
-        "列出可用的结构化服务 skill，包括名称、描述、触发条件、服务范围和安全边界。无副作用。只在判断是否需要结构化服务流程时使用；问候或普通问答不要使用。",
+        "列出可用的结构化 skill，包括名称、描述、触发条件、能力范围和安全边界。无副作用。只在判断是否需要结构化 skill 流程时使用；问候或普通问答不要使用。",
         {},
     ),
     "load_skill": _function_tool(
         "load_skill",
-        "加载某个结构化服务 skill 的完整 SKILL.md，以及可用 references、scripts 和 assets 列表。无副作用。当用户需要该流程时使用，例如卡片、个性化计划、转接准备、基于记录的分析或设备专项支持；问候或普通科普回答不要使用。",
+        "加载某个结构化 skill 的完整 SKILL.md，以及可用 references、scripts 和 assets 列表。无副作用。当用户需要该流程时使用，例如卡片、个性化计划、转接准备、基于记录的分析或设备专项支持；问候或普通科普回答不要使用。",
         {"skill_id": {"type": "string", "enum": ["birth-prep", "milk-management", "emotion-support", "device-guidance"]}},
     ),
     "search_skill_assets": _function_tool(
@@ -145,7 +145,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "ui_form_create": _function_tool(
         "ui_form_create",
-        "创建前端可渲染的通用表单规格，用于在生成服务卡片前收集或确认用户信息。无后端副作用。分娩沟通卡应优先使用 birth_plan_form_create；待产包应优先使用 hospital_bag_form_create；只有兼容旧流程时才手写字段。",
+        "创建前端可渲染的通用表单规格，用于在生成卡片前收集或确认用户信息。无后端副作用。分娩沟通卡应优先使用 birth_plan_form_create；待产包应优先使用 hospital_bag_form_create；只有兼容旧流程时才手写字段。",
         {
             "form_id": {"type": "string", "description": "稳定表单 ID，例如 birth_plan_card_intake 或 hospital_bag_intake。"},
             "title": {"type": "string"},
@@ -160,7 +160,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "ui_card_create": _function_tool(
         "ui_card_create",
-        "创建前端可渲染的通用结构化服务卡片产物。无后端副作用。分娩沟通卡应优先使用 birth_plan_card_create；待产包应优先使用 hospital_bag_card_create；只有兼容旧流程时才手写 card_json。",
+        "创建前端可渲染的通用结构化卡片产物。无后端副作用。分娩沟通卡应优先使用 birth_plan_card_create；待产包应优先使用 hospital_bag_card_create；只有兼容旧流程时才手写 card_json。",
         {
             "card_type": {"type": "string", "enum": ["birth_plan_card", "hospital_bag_card"]},
             "schema_version": {"type": "string"},
@@ -207,7 +207,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "profile_get": _function_tool(
         "profile_get",
-        "读取客户端当前会话传入的用户、宝宝和服务状态摘要。无副作用。不需要模型提供用户 ID。",
+        "读取客户端当前会话传入的用户、宝宝和当前状态摘要。无副作用。不需要模型提供用户 ID。",
         {},
     ),
     "handoff_summary_generate": _function_tool(

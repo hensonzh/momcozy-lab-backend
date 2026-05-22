@@ -1,5 +1,7 @@
 # 日程调整流程
 
+本 reference 使用的奶量管理工具都在 `milk_management` deferred namespace 中；如尚未加载，先通过 `tool_search` 加载该 namespace，再调用下文提到的具体工具。
+
 适用于用户查询、新增、修改或删除奶量管理 calendar 内容，包括时间、条目内容、类型和完成状态。真实吸奶/喂养记录的新增、修改、删除使用 `milk_record_mutate`，不要用 calendar 工具代替。
 
 ## 原则
