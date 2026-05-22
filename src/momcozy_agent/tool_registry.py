@@ -3,7 +3,14 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from .contexts import DEFAULT_LOCALE, DEFAULT_TIMEZONE
-from .tool_handlers.cards import create_card, create_form
+from .tool_handlers.cards import (
+    create_birth_plan_card,
+    create_birth_plan_form,
+    create_card,
+    create_form,
+    create_hospital_bag_card,
+    create_hospital_bag_form,
+)
 from .tool_handlers.common import decode_json_argument_strings
 from .tool_handlers.device import create_support_ticket_draft, search_device_manual
 from .tool_handlers.handoff import generate_handoff_summary
@@ -29,6 +36,10 @@ CORE_IMMEDIATE_TOOLS: list[ToolName] = [
     *SKILL_RUNTIME_TOOLS,
     "ui_form_create",
     "ui_card_create",
+    "birth_plan_form_create",
+    "birth_plan_card_create",
+    "hospital_bag_form_create",
+    "hospital_bag_card_create",
     "ibclc_consult_card_create",
 ]
 MILK_MANAGEMENT_TOOLS: list[ToolName] = [
@@ -78,6 +89,10 @@ READ_ONLY_TOOL_NAMES = {
     "profile_get",
     "handoff_summary_generate",
     "ibclc_consult_card_create",
+    "birth_plan_form_create",
+    "birth_plan_card_create",
+    "hospital_bag_form_create",
+    "hospital_bag_card_create",
     "device_manual_search",
     "support_ticket_draft_create",
     *MILK_MANAGEMENT_READ_ONLY_TOOLS,
@@ -91,6 +106,10 @@ TOOL_HANDLERS: dict[ToolName, ToolHandler] = {
     "run_approved_skill_script": run_approved_skill_script,
     "ui_form_create": create_form,
     "ui_card_create": create_card,
+    "birth_plan_form_create": create_birth_plan_form,
+    "birth_plan_card_create": create_birth_plan_card,
+    "hospital_bag_form_create": create_hospital_bag_form,
+    "hospital_bag_card_create": create_hospital_bag_card,
     "ibclc_consult_card_create": create_ibclc_consult_card,
     "profile_get": get_profile,
     "handoff_summary_generate": generate_handoff_summary,

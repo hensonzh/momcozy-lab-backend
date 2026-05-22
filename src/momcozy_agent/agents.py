@@ -289,9 +289,9 @@ def safe_tool_result(result: dict[str, Any]) -> dict[str, Any]:
             for key in ("requires_confirmation", "requires_medical_confirmation", "confirmation_question"):
                 if key in tool_data:
                     safe[key] = tool_data[key]
-        if result.get("tool_name") == "ui_form_create" and isinstance(tool_result.get("form"), dict):
+        if result.get("tool_name") in {"ui_form_create", "birth_plan_form_create", "hospital_bag_form_create"} and isinstance(tool_result.get("form"), dict):
             safe["form"] = tool_result["form"]
-        if result.get("tool_name") == "ui_card_create" and isinstance(tool_result.get("card"), dict):
+        if result.get("tool_name") in {"ui_card_create", "birth_plan_card_create", "hospital_bag_card_create"} and isinstance(tool_result.get("card"), dict):
             safe["card"] = tool_result["card"]
             if isinstance(tool_result.get("assistant_followup"), dict):
                 safe["assistant_followup"] = tool_result["assistant_followup"]

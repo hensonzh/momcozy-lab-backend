@@ -145,7 +145,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "ui_form_create": _function_tool(
         "ui_form_create",
-        "创建前端可渲染的表单规格，用于在生成服务卡片前收集或确认用户信息。无后端副作用。用于生成分娩沟通卡或待产包卡片前的产前服务表单。",
+        "创建前端可渲染的通用表单规格，用于在生成服务卡片前收集或确认用户信息。无后端副作用。分娩沟通卡应优先使用 birth_plan_form_create；待产包应优先使用 hospital_bag_form_create；只有兼容旧流程时才手写字段。",
         {
             "form_id": {"type": "string", "description": "稳定表单 ID，例如 birth_plan_card_intake 或 hospital_bag_intake。"},
             "title": {"type": "string"},
@@ -160,11 +160,40 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "ui_card_create": _function_tool(
         "ui_card_create",
-        "创建前端可渲染的结构化服务卡片产物。无后端副作用。在 confirmed_form_data 可用且服务卡片 JSON 已生成后使用。",
+        "创建前端可渲染的通用结构化服务卡片产物。无后端副作用。分娩沟通卡应优先使用 birth_plan_card_create；待产包应优先使用 hospital_bag_card_create；只有兼容旧流程时才手写 card_json。",
         {
             "card_type": {"type": "string", "enum": ["birth_plan_card", "hospital_bag_card"]},
             "schema_version": {"type": "string"},
             "card_json": JSON_OBJECT_STRING,
+        },
+    ),
+    "birth_plan_form_create": _function_tool(
+        "birth_plan_form_create",
+        "创建分娩沟通卡信息采集表单。LLM 只传已知字段 default_values；表单字段、顺序、分类、选项和排他选项过滤由工具稳定生成。无后端副作用。",
+        {
+            "default_values": JSON_OBJECT_STRING,
+        },
+    ),
+    "birth_plan_card_create": _function_tool(
+        "birth_plan_card_create",
+        "根据分娩沟通卡表单 confirmed_form_data 生成前端可渲染的分娩沟通卡。LLM 不需要生成 card_json；字段映射、强诉求降级、分区压缩、医院问题和安全声明由工具稳定生成。无后端副作用。",
+        {
+            "confirmed_form_data": JSON_OBJECT_STRING,
+        },
+    ),
+    "hospital_bag_form_create": _function_tool(
+        "hospital_bag_form_create",
+        "创建待产包信息采集表单。LLM 只传已知字段 default_values；表单字段、顺序、分类、选项和样式约束由工具稳定生成。无后端副作用。",
+        {
+            "default_values": JSON_OBJECT_STRING,
+        },
+    ),
+    "hospital_bag_card_create": _function_tool(
+        "hospital_bag_card_create",
+        "根据待产包表单 confirmed_form_data 生成前端可渲染的待产包卡片。LLM 不需要生成 card_json；分包、物品、数量、医院确认项、购物车 followup 和兼容字段由工具稳定生成。无后端副作用。",
+        {
+            "confirmed_form_data": JSON_OBJECT_STRING,
+            "generation_mode": {"type": "string", "enum": ["standard", "quick", "immediate"]},
         },
     ),
     "ibclc_consult_card_create": _function_tool(
