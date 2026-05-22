@@ -176,7 +176,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "birth_plan_card_create": _function_tool(
         "birth_plan_card_create",
-        "根据分娩沟通卡表单 confirmed_form_data 生成前端可渲染的分娩沟通卡。LLM 不需要生成 card_json；字段映射、强诉求降级、分区压缩、医院问题和安全声明由工具稳定生成。无后端副作用。",
+        "根据分娩沟通卡表单 confirmed_form_data 生成前端可渲染的分娩沟通卡。LLM 不需要生成 card_json；字段映射、强诉求降级、分区整理、医院问题和安全声明由工具稳定生成。无后端副作用。如果当前 user_message 已包含 confirmed_form_data，confirmed_form_data 参数传 \"{}\" 即可，不要复制整段表单 JSON。",
         {
             "confirmed_form_data": JSON_OBJECT_STRING,
         },
@@ -190,7 +190,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "hospital_bag_card_create": _function_tool(
         "hospital_bag_card_create",
-        "根据待产包表单 confirmed_form_data 生成前端可渲染的待产包卡片。LLM 不需要生成 card_json；分包、物品、数量、医院确认项、购物车 followup 和兼容字段由工具稳定生成。无后端副作用。",
+        "根据待产包表单 confirmed_form_data 生成前端可渲染的待产包卡片。LLM 不需要生成 card_json；分包、物品、数量、医院确认项、购物车 followup 和兼容字段由工具稳定生成。无后端副作用。如果当前 user_message 已包含 confirmed_form_data，confirmed_form_data 参数传 \"{}\" 即可，不要复制整段表单 JSON。",
         {
             "confirmed_form_data": JSON_OBJECT_STRING,
             "generation_mode": {"type": "string", "enum": ["standard", "quick", "immediate"]},

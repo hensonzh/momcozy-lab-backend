@@ -37,8 +37,8 @@ class BirthPlanCardTests(unittest.TestCase):
         self.assertEqual(card["overview"]["birth_path"], "剖宫产")
         self.assertEqual(card["overview"]["birth_setting"], "市妇幼")
         self.assertTrue(any("37周、剖宫产" in item for item in card["personalized_notes"]))
-        self.assertEqual(card["top_priorities"], ["在侧切前，请先和我沟通。"])
-        self.assertIn("在侧切前，请先和我沟通", card["intervention_preferences"])
+        self.assertEqual(card["top_priorities"], ["如果需要侧切，请先说明原因并和我沟通。"])
+        self.assertIn("如果需要侧切，请先说明原因并和我沟通", card["intervention_preferences"])
         self.assertEqual(card["baby_after_birth"], ["出生后尽早肌肤接触"])
         self.assertEqual(card["medical_notes"], ["青霉素过敏"])
         self.assertEqual(card["disclaimer"], "这张卡只用于沟通。请优先遵循医生和医院建议，尤其是因安全原因需要调整计划时。")
@@ -151,6 +151,24 @@ class BirthPlanCardTests(unittest.TestCase):
         self.assertEqual(card["overview"]["support_people"], "伴侣")
         self.assertTrue(any("伴侣" in item for item in card["personalized_notes"]))
 
+    def test_birth_plan_card_create_reads_current_confirmed_form_data_when_args_empty(self) -> None:
+        from momcozy_agent.tool_handlers.cards import create_birth_plan_card
+
+        result = create_birth_plan_card(
+            {"confirmed_form_data": {}},
+            {
+                "user_message": (
+                    "我已确认信息。\n"
+                    "form_id: birth_plan_card_intake\n"
+                    'confirmed_form_data:\n{"birth_path":"顺产","support_person":"伴侣"}'
+                )
+            },
+        )
+
+        card = result["card"]["card_json"]
+        self.assertEqual(card["overview"]["birth_path"], "顺产")
+        self.assertEqual(card["overview"]["support_people"], "伴侣")
+
     def test_birth_plan_maps_expanded_preference_fields(self) -> None:
         result = create_card(
             {
@@ -205,7 +223,55 @@ class BirthPlanCardTests(unittest.TestCase):
         card = result["card"]["card_json"]
         self.assertIn("出生后希望尽早肌肤接触", card["baby_after_birth"])
         self.assertIn("希望尽早尝试母乳", card["baby_after_birth"])
-        self.assertIn("重要决定请同步伴侣/支持人", card["communication"])
+        self.assertIn("重要决定也请同步伴侣/支持人", card["communication"])
+
+    def test_birth_plan_retains_many_selected_options(self) -> None:
+        result = create_card(
+            {
+                "card_type": "birth_plan_card",
+                "schema_version": "1.0",
+                "card_json": {},
+            },
+            {
+                "user_message": (
+                    "confirmed_form_data:\n"
+                    '{"birth_path":"顺产",'
+                    '"communication_preferences":['
+                    '"操作前先告诉我为什么",'
+                    '"做决定前先问我同不同意",'
+                    '"重要决定请同步伴侣/支持人",'
+                    '"计划变化时请先说明原因和选择"],'
+                    '"labor_preferences":['
+                    '"医生允许时，希望可以走动或换姿势",'
+                    '"希望用分娩球、热敷或按摩来缓解不适",'
+                    '"希望生产时可以小口喝水或吃点东西",'
+                    '"希望环境安静一点、灯光柔和一点"],'
+                    '"intervention_preferences":['
+                    '"如果需要侧切，请先说明原因再和我沟通",'
+                    '"如果需要产钳或真空吸引，请先解释原因",'
+                    '"如果需要人工破水，请先和我沟通"],'
+                    '"baby_after_birth_preferences":['
+                    '"如果医院允许，希望晚一点剪脐带",'
+                    '"如果安全允许，希望宝宝出生后尽早肌肤接触",'
+                    '"如果安全允许，希望尽早尝试母乳",'
+                    '"希望宝宝尽量和我在一起"],'
+                    '"hospital_questions_focus":['
+                    '"陪产和探视规则",'
+                    '"拍照或录像规则",'
+                    '"生产时能不能喝水或吃点东西",'
+                    '"无痛或麻醉什么时候可以沟通"]}'
+                )
+            },
+        )
+
+        card = result["card"]["card_json"]
+        self.assertEqual(len(card["communication"]), 4)
+        self.assertEqual(len(card["labor_preferences"]), 4)
+        self.assertEqual(len(card["intervention_preferences"]), 3)
+        self.assertGreaterEqual(len(card["baby_after_birth"]), 4)
+        self.assertGreaterEqual(len(card["questions_for_hospital"]), 4)
+        self.assertIn("希望环境安静一点、灯光柔和一点", card["labor_preferences"])
+        self.assertIn("无痛或麻醉什么时候可以沟通", card["questions_for_hospital"])
 
 
 if __name__ == "__main__":

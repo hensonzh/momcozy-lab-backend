@@ -43,7 +43,7 @@ def generate_status_advice(*, user_id: str, days: int = 7, normality: dict[str, 
     payload = _build_llm_payload(context, normality=normality)
     generated = _request_llm_status_advice(payload)
     if not generated:
-        return None
+        generated = _fallback_status_advice(payload, normality=normality)
     if not generated.get("lactation_advice", "").strip() or not generated.get("feeding_advice", "").strip():
         return None
     return generated
@@ -172,6 +172,112 @@ def _failed_metrics(lactation_normal: bool, feeding_normal: bool, reason: str, m
             }
         )
     return failed
+
+
+def _fallback_status_advice(payload: dict[str, Any], *, normality: dict[str, Any] | None = None) -> dict[str, str]:
+    if not payload.get("has_any_recent_record"):
+        return {
+            "lactation_advice": "最近记录还不多，先连续记录吸奶和亲喂几天。",
+            "feeding_advice": "先把喂养次数和奶量记完整，后面更好判断。",
+        }
+
+    norm = normality if isinstance(normality, dict) else {}
+    if norm.get("result") is True:
+        return {
+            "lactation_advice": "近几天奶量暂无明显异常，继续保持当前节奏。",
+            "feeding_advice": "喂养次数整体在参考范围内，继续观察尿布和精神。",
+        }
+
+    reason = str(norm.get("reason") or "").strip()
+    if reason == "insufficient_minimum_valid_days":
+        return {
+            "lactation_advice": "有效记录还不够，先连续记录吸奶和亲喂几天。",
+            "feeding_advice": "喂养记录还不够完整，先把次数和奶量补起来。",
+        }
+
+    failed_metrics = norm.get("failed_metrics") if isinstance(norm.get("failed_metrics"), list) else []
+    failed_types = {
+        str(item.get("type") or "").strip()
+        for item in failed_metrics
+        if isinstance(item, dict) and str(item.get("type") or "").strip()
+    }
+    if len(failed_types) > 1:
+        return {
+            "lactation_advice": "奶量和喂养都有波动，先把吸奶、亲喂分开记录。",
+            "feeding_advice": "这两天先按需喂养，同时观察尿布、精神和体重。",
+        }
+
+    if "lactation" in failed_types or reason == "lactation_out_of_range":
+        statuses = _failed_day_statuses(failed_metrics, metric_type="lactation")
+        if "low" in statuses and "high" not in statuses:
+            lactation_text = "近几天奶量低于参考，先稳定排乳间隔和记录。"
+        elif "high" in statuses and "low" not in statuses:
+            lactation_text = "近几天奶量高于参考，先留意胀痛和排乳舒适度。"
+        else:
+            lactation_text = "奶量有波动，先固定记录时间观察连续趋势。"
+        return {
+            "lactation_advice": lactation_text,
+            "feeding_advice": "喂养次数先继续观察，重点同步看尿布和精神。",
+        }
+
+    if "feeding" in failed_types or reason == "feeding_out_of_range":
+        directions = _failed_feeding_directions(failed_metrics)
+        if "low" in directions and "high" not in directions:
+            feeding_text = "喂养次数偏少，先留意宝宝精神、尿布和进食间隔。"
+        elif "high" in directions and "low" not in directions:
+            feeding_text = "喂养次数偏多，先观察每次摄入和宝宝满足感。"
+        else:
+            feeding_text = "喂养频次有波动，先连续记录几天再看趋势。"
+        return {
+            "lactation_advice": "排乳记录可以继续保持，重点同步观察宝宝需求。",
+            "feeding_advice": feeding_text,
+        }
+
+    return {
+        "lactation_advice": "近几天记录有波动，先稳定排乳节奏并继续观察。",
+        "feeding_advice": "喂养记录继续补完整，优先观察尿布、精神和体重。",
+    }
+
+
+def _failed_day_statuses(failed_metrics: list[Any], *, metric_type: str) -> set[str]:
+    statuses: set[str] = set()
+    for metric in failed_metrics:
+        if not isinstance(metric, dict) or str(metric.get("type") or "") != metric_type:
+            continue
+        days = metric.get("days") if isinstance(metric.get("days"), list) else []
+        for day in days:
+            if not isinstance(day, dict):
+                continue
+            status = str(day.get("status") or "").strip()
+            if status:
+                statuses.add(status)
+    return statuses
+
+
+def _failed_feeding_directions(failed_metrics: list[Any]) -> set[str]:
+    directions: set[str] = set()
+    for metric in failed_metrics:
+        if not isinstance(metric, dict) or str(metric.get("type") or "") != "feeding":
+            continue
+        days = metric.get("days") if isinstance(metric.get("days"), list) else []
+        for day in days:
+            if not isinstance(day, dict):
+                continue
+            feeding_count = _safe_float(day.get("feeding_count_total"))
+            p25 = _safe_float(day.get("feeding_frequency_p25"))
+            p75 = _safe_float(day.get("feeding_frequency_p75"))
+            if p25 > 0 and feeding_count < p25:
+                directions.add("low")
+            if p75 > 0 and feeding_count > p75:
+                directions.add("high")
+    return directions
+
+
+def _safe_float(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _summarize_pumping(records: list[Any], *, user_id: str, as_of_time: Any = None) -> dict[str, Any]:

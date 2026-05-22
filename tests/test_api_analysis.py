@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 from momcozy_agent.api_app import app
 from momcozy_agent.services import data_store
-from momcozy_agent.services.milk_management.status_advice import evaluate_status_advice_normality
+from momcozy_agent.services.milk_management.status_advice import evaluate_status_advice_normality, generate_status_advice
 
 
 class AnalysisCreateApiTests(unittest.TestCase):
@@ -46,21 +46,55 @@ class AnalysisCreateApiTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            response.json(),
-            {
-                "error": 0,
-                "data": {
-                    "result": True,
-                    "message": "泌乳建议：今天泌乳节奏稳定。  \r喂养建议：喂养记录整体正常。",
-                },
-            },
-        )
+        payload = response.json()
+        self.assertEqual(payload["error"], 0)
+        self.assertEqual(payload["data"]["result"], True)
+        self.assertEqual(payload["data"]["message"], "泌乳建议：今天泌乳节奏稳定。  \r喂养建议：喂养记录整体正常。")
+        card = payload["data"]["analysis_card"]
+        self.assertEqual(card["kind"], "mom_baby")
+        self.assertEqual(card["title"], "每日泌乳/喂养建议")
+        self.assertEqual(card["status"], "normal")
+        self.assertEqual(card["status_label"], "暂无明显异常")
+        self.assertEqual(card["status_tone"], "normal")
+        self.assertEqual([section["title"] for section in card["sections"]], ["泌乳建议", "喂养建议"])
         normality.assert_called_once_with(user_id="u1")
         advice.assert_called_once_with(user_id="u1", normality={"result": True})
         profile = _profile("u1")
         self.assertEqual(profile["lactation_advice"], "今天泌乳节奏稳定。")
         self.assertEqual(profile["feeding_advice"], "喂养记录整体正常。")
+
+    def test_mom_baby_card_surfaces_specific_attention_label(self) -> None:
+        _seed_user("u1")
+        normality_payload = {
+            "result": False,
+            "lactation_normal": False,
+            "feeding_normal": True,
+            "reason": "lactation_out_of_range",
+            "failed_metrics": [
+                {
+                    "type": "lactation",
+                    "days": [{"date": "2026-05-20", "status": "low"}],
+                }
+            ],
+        }
+        with (
+            patch("momcozy_agent.api.routes.evaluate_status_advice_normality", return_value=normality_payload),
+            patch(
+                "momcozy_agent.api.routes.generate_status_advice",
+                return_value={"lactation_advice": "近几天奶量略低，先把排乳节奏稳住。", "feeding_advice": "喂养次数暂时可以继续观察。"},
+            ),
+        ):
+            response = self.client.post(
+                "/v1/analysis/create",
+                json={"user_id": "u1", "type": "mom_baby"},
+                headers=self.headers,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        card = response.json()["data"]["analysis_card"]
+        self.assertEqual(card["status"], "attention")
+        self.assertEqual(card["status_label"], "奶量低于参考")
+        self.assertEqual(card["status_tone"], "attention")
 
     def test_status_create_does_not_evaluate_normality(self) -> None:
         _seed_user("u1")
@@ -91,6 +125,39 @@ class AnalysisCreateApiTests(unittest.TestCase):
         self.assertFalse(result["feeding_normal"])
         self.assertEqual(result["reason"], "insufficient_minimum_valid_days")
 
+    def test_status_advice_uses_rule_fallback_when_llm_generation_fails(self) -> None:
+        context = {
+            "user_profile": {"user_id": "u1", "delivery_date": "2026-04-14"},
+            "infant_profile": {"user_id": "u1", "birth_date": "2026-04-14"},
+            "window": {"end_at": "2026-05-22 12:00:00"},
+            "pumping_records": [
+                {
+                    "pump_type": 0,
+                    "pump_source": 1,
+                    "pump_milk_volum": 80,
+                    "pump_milk_duration": 15,
+                    "pump_start_time": "2026-05-21 09:00:00",
+                    "pump_title": "上午吸奶",
+                }
+            ],
+            "feeding_records": [],
+        }
+        normality = {
+            "result": False,
+            "reason": "lactation_out_of_range",
+            "failed_metrics": [{"type": "lactation", "days": [{"status": "low"}]}],
+        }
+        with (
+            patch("momcozy_agent.services.milk_management.status_advice.data_store.get_status_advice_context", return_value=context),
+            patch("momcozy_agent.services.milk_management.status_advice.estimate_breastfeeding_milk", return_value=0),
+            patch("momcozy_agent.services.milk_management.status_advice._request_llm_status_advice", return_value=None),
+        ):
+            advice = generate_status_advice(user_id="u1", normality=normality)
+
+        self.assertIsNotNone(advice)
+        self.assertIn("奶量低于参考", advice["lactation_advice"])
+        self.assertTrue(advice["feeding_advice"])
+
     def test_rejects_pumping_type(self) -> None:
         response = self.client.post(
             "/v1/analysis/create",
@@ -120,7 +187,13 @@ class AnalysisCreateApiTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), {"error": 0, "data": {"message": "  \r".join(message)}})
+        payload = response.json()
+        self.assertEqual(payload["error"], 0)
+        self.assertEqual(payload["data"]["message"], "  \r".join(message))
+        card = payload["data"]["analysis_card"]
+        self.assertEqual(card["kind"], "daily_summary")
+        self.assertEqual(card["title"], "每日奶量总结")
+        self.assertEqual([section["title"] for section in card["sections"]], ["今日概览", "奶量数据"])
         self.assertEqual(_profile("u1")["daily_summary"], "\n".join(message))
 
 

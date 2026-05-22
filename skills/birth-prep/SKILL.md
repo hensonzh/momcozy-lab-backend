@@ -188,8 +188,8 @@ safety_limits:
 4. 如有必要，可读取用户背景档案，但不要把原始资料暴露给用户。
 5. 如果用户还没有提交 `confirmed_form_data`：分娩沟通卡按对应 reference 调用 `birth_plan_form_create`；待产包先做服务邀约，用户确认后再调用 `hospital_bag_form_create` 生成紧凑的服务表单。
 6. 用户提交或确认表单数据后，创建服务产物：
-   - 分娩沟通卡：把 `confirmed_form_data` 传给 `birth_plan_card_create`，由工具生成结构化卡片。
-   - 待产包：把 `confirmed_form_data` 传给 `hospital_bag_card_create`，由工具生成结构化卡片。
+   - 分娩沟通卡：调用 `birth_plan_card_create`，由工具读取本轮 `confirmed_form_data` 并生成结构化卡片；工具参数里传 `"{}"` 即可，不要复制整段表单 JSON。
+   - 待产包：调用 `hospital_bag_card_create`，由工具读取本轮 `confirmed_form_data` 并生成结构化卡片；工具参数里传 `"{}"` 即可，不要复制整段表单 JSON。
    - 生产全过程计划：按 `references/birth-journey-plan.md` 输出自然语言阶段路线图，不调用 `ui_card_create`。
    - 可以附一小段面向用户的说明，但最终卡片数据必须以工具返回的结构化 `card_json` 为准。
 7. 只有在用户接受产物后，才考虑建议下一步行动；当前没有可调用的保存偏好或创建提醒工具。
@@ -199,11 +199,11 @@ safety_limits:
 
 - `profile_get`：读取已有孕期、生产地点、支持人或偏好信息。待产包或分娩沟通卡创建表单前，优先用它和当前对话信息预填字段 `default_value`。
 - `birth_plan_form_create`：创建分娩沟通卡信息采集表单。模型只传 `default_values`，字段结构由工具生成。
-- `birth_plan_card_create`：根据分娩沟通卡 `confirmed_form_data` 生成卡片。模型不要自行生成分娩沟通卡 `card_json`。
+- `birth_plan_card_create`：根据分娩沟通卡 `confirmed_form_data` 生成卡片。模型不要自行生成分娩沟通卡 `card_json`。当前用户消息已含 `confirmed_form_data` 时，参数传 `"{}"`。
 - `ui_form_create`：兼容旧流程的通用表单工具；分娩沟通卡和待产包优先使用专用工具。
 - `ui_card_create`：兼容旧流程的通用卡片工具；分娩沟通卡和待产包优先使用专用工具。
 - `hospital_bag_form_create`：创建待产包信息采集表单。模型只传 `default_values`，字段结构由工具生成。
-- `hospital_bag_card_create`：根据待产包 `confirmed_form_data` 生成卡片。模型不要自行生成待产包 `card_json`。
+- `hospital_bag_card_create`：根据待产包 `confirmed_form_data` 生成卡片。模型不要自行生成待产包 `card_json`。当前用户消息已含 `confirmed_form_data` 时，参数传 `"{}"`。
 
 生产全过程计划当前没有专属表单、卡片或提醒工具。不要为了这个服务调用 `ui_form_create` 或 `ui_card_create`；如果路线图后续引导用户进入待产包或分娩沟通卡，再按对应服务调用工具。
 

@@ -306,6 +306,74 @@ def safe_tool_result(result: dict[str, Any]) -> dict[str, Any]:
     return safe
 
 
+def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
+    """Keep the follow-up model turn small after UI artifacts are already streamed."""
+
+    safe = safe_tool_result(result)
+    tool_name = str(safe.get("tool_name") or "")
+    if tool_name not in {
+        "ui_form_create",
+        "ui_card_create",
+        "birth_plan_form_create",
+        "birth_plan_card_create",
+        "hospital_bag_form_create",
+        "hospital_bag_card_create",
+        "ibclc_consult_card_create",
+        "support_ticket_draft_create",
+    }:
+        return result
+
+    compact: dict[str, Any] = {
+        "ok": safe.get("ok"),
+        "tool_name": safe.get("tool_name"),
+    }
+    for key in (
+        "id",
+        "skill_id",
+        "status",
+        "resource_id",
+        "side_effect_performed",
+        "summary",
+        "requires_confirmation",
+        "requires_medical_confirmation",
+        "confirmation_question",
+        "submit_label",
+        "assistant_followup",
+        "error",
+    ):
+        if key in safe:
+            compact[key] = safe[key]
+
+    form = safe.get("form")
+    if isinstance(form, dict):
+        fields = form.get("fields")
+        compact["form"] = {
+            "id": form.get("id"),
+            "title": form.get("title"),
+            "field_count": len(fields) if isinstance(fields, list) else 0,
+        }
+
+    card = safe.get("card")
+    if isinstance(card, dict):
+        card_json = card.get("card_json")
+        card_json_dict = card_json if isinstance(card_json, dict) else {}
+        compact["card"] = {
+            "card_type": card.get("card_type") or card_json_dict.get("card_type"),
+            "schema_version": card.get("schema_version") or card_json_dict.get("schema_version"),
+            "created": True,
+        }
+
+    ticket = safe.get("ticket")
+    if isinstance(ticket, dict):
+        compact["ticket"] = {
+            "draft_id": ticket.get("draft_id"),
+            "status": ticket.get("status"),
+            "created": True,
+        }
+
+    return compact
+
+
 def artifact_events_from_tool_result(
     *,
     tool_call_id: str,
@@ -605,7 +673,7 @@ def run_agent_loop(
                 {
                     "type": "function_call_output",
                     "call_id": tool_call["call_id"],
-                    "output": json.dumps(result, ensure_ascii=False),
+                    "output": json.dumps(model_tool_output(result), ensure_ascii=False),
                 }
             )
 

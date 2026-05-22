@@ -498,10 +498,17 @@ async def create_analysis_endpoint(request: Request) -> dict[str, Any]:
             f"喂养建议：{feeding_advice}",
         ]
         message_text = "  \r".join(message)
+        is_normal = bool(normality.get("result") is True)
         return _analysis_create_response(
             error=0,
-            result=bool(normality.get("result") is True),
+            result=is_normal,
             message=message_text,
+            analysis_card=_mom_baby_analysis_card(
+                lactation_advice=lactation_advice,
+                feeding_advice=feeding_advice,
+                normality=normality,
+                is_normal=is_normal,
+            ),
         )
     if analysis_type == "daily_summary":
         summary = create_daily_summary(user_id=uid)
@@ -513,7 +520,7 @@ async def create_analysis_endpoint(request: Request) -> dict[str, Any]:
         response_message = "  \r".join(str(item) for item in message) if isinstance(message, list) else str(message)
         if not data_store.update_user_profile_daily_summary(user_id=uid, daily_summary=daily_summary_text):
             return _analysis_create_response(error=-1, message="failed to update daily summary")
-        return _analysis_create_response(error=0, message=response_message)
+        return _analysis_create_response(error=0, message=response_message, analysis_card=_daily_summary_analysis_card(message))
     return _analysis_create_response(error=-1, result=False, message="unsupported type")
 
 
@@ -1484,12 +1491,136 @@ def _valid_analysis_payload(payload: Any) -> bool:
     return isinstance(payload, dict) and set(payload.keys()) == {"user_id", "type"}
 
 
-def _analysis_create_response(*, error: int, message: Any, result: bool | None = None) -> dict[str, Any]:
+def _analysis_create_response(
+    *,
+    error: int,
+    message: Any,
+    result: bool | None = None,
+    analysis_card: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     response: dict[str, Any] = {"error": int(error), "data": {}}
     if result is not None:
         response["data"]["result"] = bool(result)
     response["data"]["message"] = message
+    if analysis_card is not None:
+        response["data"]["analysis_card"] = analysis_card
     return response
+
+
+def _daily_summary_analysis_card(message: Any) -> dict[str, Any]:
+    lines = [str(item).strip() for item in message] if isinstance(message, list) else [str(message or "").strip()]
+    lines = [line for line in lines if line]
+    titles = ["今日概览", "奶量数据", "节律观察", "需要留意", "明天小建议"]
+    tones = ["overview", "milk", "rhythm", "attention", "next"]
+    sections = [
+        {"id": f"daily_{index}", "title": titles[index], "tone": tones[index], "items": [line]}
+        for index, line in enumerate(lines[: len(titles)])
+    ]
+    return {
+        "kind": "daily_summary",
+        "title": "每日奶量总结",
+        "sections": sections,
+    }
+
+
+def _mom_baby_analysis_card(
+    *,
+    lactation_advice: str,
+    feeding_advice: str,
+    normality: dict[str, Any],
+    is_normal: bool,
+) -> dict[str, Any]:
+    reason = str(normality.get("reason") or "").strip()
+    status_label, status_tone = _mom_baby_status_badge(normality=normality, is_normal=is_normal)
+    return {
+        "kind": "mom_baby",
+        "title": "每日泌乳/喂养建议",
+        "status": "normal" if is_normal else "attention",
+        "status_label": status_label,
+        "status_tone": status_tone,
+        "reason": reason,
+        "sections": [
+            {"id": "lactation", "title": "泌乳建议", "tone": "milk", "items": [lactation_advice]},
+            {"id": "feeding", "title": "喂养建议", "tone": "feeding", "items": [feeding_advice]},
+        ],
+    }
+
+
+def _mom_baby_status_badge(*, normality: dict[str, Any], is_normal: bool) -> tuple[str, str]:
+    if is_normal:
+        return "暂无明显异常", "normal"
+
+    reason = str(normality.get("reason") or "").strip()
+    if reason in {"insufficient_minimum_valid_days", "assessment_failed", "missing_user_id"}:
+        return "记录不足", "insufficient"
+
+    failed_metrics = normality.get("failed_metrics") if isinstance(normality.get("failed_metrics"), list) else []
+    failed_types = {
+        str(item.get("type") or "").strip()
+        for item in failed_metrics
+        if isinstance(item, dict) and str(item.get("type") or "").strip()
+    }
+    if len(failed_types) > 1:
+        return "多项需关注", "attention"
+
+    if "lactation" in failed_types or reason == "lactation_out_of_range":
+        lactation_statuses = _failed_day_statuses(failed_metrics, metric_type="lactation")
+        if "low" in lactation_statuses and "high" not in lactation_statuses:
+            return "奶量低于参考", "attention"
+        if "high" in lactation_statuses and "low" not in lactation_statuses:
+            return "奶量高于参考", "attention"
+        return "奶量波动需关注", "attention"
+
+    if "feeding" in failed_types or reason == "feeding_out_of_range":
+        feeding_directions = _failed_feeding_directions(failed_metrics)
+        if "low" in feeding_directions and "high" not in feeding_directions:
+            return "喂养次数偏少", "attention"
+        if "high" in feeding_directions and "low" not in feeding_directions:
+            return "喂养次数偏多", "attention"
+        return "喂养频次需关注", "attention"
+
+    return "需要留意", "attention"
+
+
+def _failed_day_statuses(failed_metrics: list[Any], *, metric_type: str) -> set[str]:
+    statuses: set[str] = set()
+    for metric in failed_metrics:
+        if not isinstance(metric, dict) or str(metric.get("type") or "") != metric_type:
+            continue
+        days = metric.get("days") if isinstance(metric.get("days"), list) else []
+        for day in days:
+            if not isinstance(day, dict):
+                continue
+            status = str(day.get("status") or "").strip()
+            if status:
+                statuses.add(status)
+    return statuses
+
+
+def _failed_feeding_directions(failed_metrics: list[Any]) -> set[str]:
+    directions: set[str] = set()
+    for metric in failed_metrics:
+        if not isinstance(metric, dict) or str(metric.get("type") or "") != "feeding":
+            continue
+        days = metric.get("days") if isinstance(metric.get("days"), list) else []
+        for day in days:
+            if not isinstance(day, dict):
+                continue
+            feeding_count = _safe_float(day.get("feeding_count_total"))
+            p25 = _safe_float(day.get("feeding_frequency_p25"))
+            p75 = _safe_float(day.get("feeding_frequency_p75"))
+            if p25 > 0 and feeding_count < p25:
+                directions.add("low")
+            if p75 > 0 and feeding_count > p75:
+                directions.add("high")
+    return directions
+
+
+def _safe_float(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _growth_query_response(

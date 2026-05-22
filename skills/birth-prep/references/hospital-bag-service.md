@@ -48,10 +48,12 @@ LLM 只负责判断服务路径、做人话邀约、提取已知信息并下发�
 
 ```json
 {
-  "confirmed_form_data": "{\"due_date_or_week\":\"37周\",\"first_birth\":\"是\",\"birth_path\":\"顺产\",\"feeding_intention\":\"母乳\",\"birth_setting\":\"某某医院\"}",
+  "confirmed_form_data": "{}",
   "generation_mode": "standard"
 }
 ```
+
+当前用户消息已经包含完整 `confirmed_form_data` 时，工具会直接读取，不要把表单 JSON 复制进工具参数。只有在没有 `confirmed_form_data` 注入、但你确实掌握了用户确认后的结构化数据时，才传完整 JSON。
 
 `generation_mode`：
 

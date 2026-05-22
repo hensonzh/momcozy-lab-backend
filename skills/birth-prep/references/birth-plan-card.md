@@ -42,9 +42,11 @@ LLM 只负责判断服务路径、做人话承接、提取已知信息并下发�
 
 ```json
 {
-  "confirmed_form_data": "{\"due_date_or_week\":\"37周\",\"birth_path\":\"顺产\",\"top_priorities\":[\"宝宝出生后，想尽早抱一抱/贴一贴\",\"希望伴侣/支持人尽量陪在身边\"],\"communication_preferences\":[\"做操作前，先告诉我为什么需要\",\"重要决定也请同步伴侣/支持人\"]}"
+  "confirmed_form_data": "{}"
 }
 ```
+
+当前用户消息已经包含完整 `confirmed_form_data` 时，工具会直接读取，不要把表单 JSON 复制进工具参数。只有在没有 `confirmed_form_data` 注入、但你确实掌握了用户确认后的结构化数据时，才传完整 JSON。
 
 不要让 LLM 自己生成分娩沟通卡 `card_json`，也不要再调用 `ui_card_create` 手写分娩沟通卡。工具会生成：
 

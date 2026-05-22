@@ -43,6 +43,7 @@ def build_pump_session_summary(payload: dict[str, Any]) -> dict[str, Any]:
     )
     side_summary = _side_summary(left=left, right=right, total_milk_ml=total_milk)
     process_summary = _process_summary(process_all)
+    letdown_summary = _letdown_summary(left=left, right=right)
     safety_note = (
         "如出现发热、明显红肿、剧痛或硬块加重，建议及时寻求专业帮助。"
     )
@@ -70,6 +71,18 @@ def build_pump_session_summary(payload: dict[str, Any]) -> dict[str, Any]:
     }
     context_text = _agent_context_text(context_event)
     timestamp = _display_time(ended_at)
+    analysis_card = _analysis_card(
+        end_reason=end_reason,
+        duration_seconds=duration_seconds,
+        total_milk_ml=total_milk,
+        left_milk_ml=left_milk,
+        right_milk_ml=right_milk,
+        process_all=process_all,
+        side_summary=side_summary,
+        process_summary=process_summary,
+        letdown_summary=letdown_summary,
+        safety_note=safety_note,
+    )
 
     return {
         "ok": True,
@@ -87,6 +100,7 @@ def build_pump_session_summary(payload: dict[str, Any]) -> dict[str, Any]:
                 "cardData": {
                     "kind": "pump-session-summary",
                     "event_id": event_id,
+                    "analysisCard": analysis_card,
                 },
             },
         },
@@ -175,6 +189,122 @@ def _process_summary(process_all: float | None) -> str:
     if process_all >= 80:
         return "本次吸奶已接近目标，可以按身体感受休息。"
     return "本次吸奶提前结束，不需要强行补足时长，按身体感受休息即可。"
+
+
+def _analysis_card(
+    *,
+    end_reason: str,
+    duration_seconds: int | None,
+    total_milk_ml: float | None,
+    left_milk_ml: float | None,
+    right_milk_ml: float | None,
+    process_all: float | None,
+    side_summary: str,
+    process_summary: str,
+    letdown_summary: str,
+    safety_note: str,
+) -> dict[str, Any]:
+    status_label, status_tone = _status_badge(process_all=process_all, total_milk_ml=total_milk_ml)
+    return {
+        "kind": "pump_session_summary",
+        "title": "吸奶小结",
+        "status": "normal" if status_tone == "normal" else "attention",
+        "status_label": status_label,
+        "status_tone": status_tone,
+        "sections": [
+            {
+                "id": "overview",
+                "title": "本次概览",
+                "tone": "overview",
+                "metrics": [
+                    {"label": "结束方式", "value": END_REASON_TEXT.get(end_reason, "本次吸奶已结束")},
+                    {"label": "用时", "value": _format_duration(duration_seconds) if duration_seconds is not None else "未获取"},
+                    {"label": "总奶量", "value": _format_optional_ml(total_milk_ml)},
+                ],
+            },
+            {
+                "id": "milk",
+                "title": "左右奶量",
+                "tone": "milk",
+                "metrics": [
+                    {"label": "左侧", "value": _format_optional_ml(left_milk_ml)},
+                    {"label": "右侧", "value": _format_optional_ml(right_milk_ml)},
+                    {"label": "左右对比", "value": _side_balance_label(left_milk_ml=left_milk_ml, right_milk_ml=right_milk_ml)},
+                ],
+                "body": side_summary,
+            },
+            {
+                "id": "rhythm",
+                "title": "完成度和奶阵",
+                "tone": "rhythm",
+                "metrics": [
+                    {"label": "完成度", "value": _format_percent(process_all)},
+                    {"label": "奶阵", "value": letdown_summary},
+                ],
+                "body": process_summary,
+            },
+            {
+                "id": "next",
+                "title": "接下来",
+                "tone": "next",
+                "items": [safety_note],
+            },
+        ],
+    }
+
+
+def _status_badge(*, process_all: float | None, total_milk_ml: float | None) -> tuple[str, str]:
+    if total_milk_ml is None and process_all is None:
+        return "数据不完整", "insufficient"
+    if process_all is None:
+        return "已结束", "normal"
+    if process_all >= 100:
+        return "完成度高", "normal"
+    if process_all >= 80:
+        return "接近完成", "normal"
+    return "提前结束", "attention"
+
+
+def _letdown_summary(*, left: dict[str, Any], right: dict[str, Any]) -> str:
+    left_letdown = left.get("has_letdown")
+    right_letdown = right.get("has_letdown")
+    if left_letdown is True and right_letdown is True:
+        return "双侧已检测到"
+    if left_letdown is True and right_letdown is False:
+        return "左侧已检测到，右侧未检测到"
+    if left_letdown is False and right_letdown is True:
+        return "右侧已检测到，左侧未检测到"
+    if left_letdown is True:
+        return "左侧已检测到"
+    if right_letdown is True:
+        return "右侧已检测到"
+    if left_letdown is False and right_letdown is False:
+        return "未检测到"
+    return "未获取"
+
+
+def _side_balance_label(*, left_milk_ml: float | None, right_milk_ml: float | None) -> str:
+    if left_milk_ml is None or right_milk_ml is None:
+        return "未完整记录"
+    diff = abs(float(left_milk_ml) - float(right_milk_ml))
+    if diff <= 15:
+        return "比较接近"
+    return f"相差 {_format_ml(diff)}"
+
+
+def _format_optional_ml(value: float | int | None) -> str:
+    if value is None:
+        return "未获取"
+    return _format_ml(value)
+
+
+def _format_percent(value: float | int | None) -> str:
+    if value is None:
+        return "未获取"
+    numeric = float(value)
+    if math.isclose(numeric, round(numeric)):
+        return f"{int(round(numeric))}%"
+    return f"{round(numeric, 1):g}%"
 
 
 def _agent_context_text(event: dict[str, Any]) -> str:

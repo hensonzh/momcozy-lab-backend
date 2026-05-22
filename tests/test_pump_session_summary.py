@@ -30,13 +30,14 @@ class PumpSessionSummaryTests(unittest.TestCase):
         self.assertIn("总奶量约 100 ml", data["chat_message"]["content"])
         self.assertIn("左右比较接近", data["chat_message"]["content"])
         self.assertEqual(data["chat_message"]["cardType"], "report")
-        self.assertEqual(
-            data["chat_message"]["cardData"],
-            {
-                "kind": "pump-session-summary",
-                "event_id": data["session"]["event_id"],
-            },
-        )
+        card_data = data["chat_message"]["cardData"]
+        self.assertEqual(card_data["kind"], "pump-session-summary")
+        self.assertEqual(card_data["event_id"], data["session"]["event_id"])
+        analysis_card = card_data["analysisCard"]
+        self.assertEqual(analysis_card["title"], "吸奶小结")
+        self.assertEqual(analysis_card["status_label"], "完成度高")
+        self.assertEqual(analysis_card["sections"][1]["metrics"][0]["value"], "52 ml")
+        self.assertEqual(analysis_card["sections"][1]["metrics"][1]["value"], "48 ml")
         self.assertNotIn("content", data)
         self.assertNotIn("summary", data)
         self.assertNotIn("agent_context_event", data)
@@ -59,6 +60,7 @@ class PumpSessionSummaryTests(unittest.TestCase):
         self.assertIn("暂未获取到奶量数据", result["data"]["chat_message"]["content"])
         self.assertIn("提前结束", result["data"]["chat_message"]["content"])
         self.assertIsNone(result["data"]["session"]["total_milk_ml"])
+        self.assertEqual(result["data"]["chat_message"]["cardData"]["analysisCard"]["status_label"], "提前结束")
         self.assertNotIn("total_milk_ml", result["context_text"])
 
     def test_websocket_response_hides_internal_agent_context(self) -> None:

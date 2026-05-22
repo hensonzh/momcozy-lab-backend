@@ -5,6 +5,7 @@ import unittest
 
 from momcozy_agent import ContextState, build_agent_request
 from momcozy_agent.agents import (
+    model_tool_output,
     run_agent_loop,
     tool_call_args_event,
     tool_call_end_event,
@@ -99,6 +100,32 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertEqual(artifact["artifact_type"], "support_ticket")
         confirmation = next(event for event in events if event.get("type") == "CONFIRMATION_REQUIRED")
         self.assertEqual(confirmation["title"], "请确认售后工单")
+
+    def test_model_tool_output_compacts_artifact_payloads(self) -> None:
+        raw = {
+            "ok": True,
+            "tool_name": "birth_plan_card_create",
+            "result": {
+                "status": "card_created",
+                "card": {
+                    "card_type": "birth_plan_card",
+                    "schema_version": "1.0",
+                    "card_json": {
+                        "card_type": "birth_plan_card",
+                        "schema_version": "1.0",
+                        "communication": ["a", "b", "c"],
+                    },
+                },
+                "assistant_followup": {"message": "卡片已经生成好了。"},
+            },
+        }
+
+        compact = model_tool_output(raw)
+
+        self.assertEqual(compact["status"], "card_created")
+        self.assertEqual(compact["assistant_followup"], {"message": "卡片已经生成好了。"})
+        self.assertEqual(compact["card"], {"card_type": "birth_plan_card", "schema_version": "1.0", "created": True})
+        self.assertNotIn("card_json", json.dumps(compact, ensure_ascii=False))
 
     def test_read_skill_file_records_loaded_reference_context(self) -> None:
         context_state = ContextState()

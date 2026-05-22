@@ -31,6 +31,7 @@ BIRTH_PLAN_ASSISTANT_FOLLOWUP = {
     "kind": "birth_plan_card_guidance",
     "message": "你可以提前和医院确认，并在产检或入院前把这张卡给医生/护士看，用它快速沟通你的重点偏好和需要讨论的问题。",
 }
+BIRTH_PLAN_CARD_SECTION_ITEM_LIMIT = 20
 REMOVED_HOSPITAL_BAG_FORM_FIELD_IDS = {
     "hospital_rules_or_notes",
     "existing_checklist_or_photo_note",
@@ -385,7 +386,7 @@ def create_hospital_bag_form(args: dict[str, Any], inputs: RuntimeInputs) -> dic
 
 
 def create_hospital_bag_card(args: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
-    form_data = _dict_value(args.get("confirmed_form_data")) or _confirmed_form_data(inputs)
+    form_data = _confirmed_form_data(inputs) or _dict_value(args.get("confirmed_form_data"))
     generation_mode = str(args.get("generation_mode") or "standard")
     card_json = _build_hospital_bag_card_json(form_data, generation_mode, inputs)
     _normalize_hospital_bag_scene_groups(card_json["packing_groups"])
@@ -427,7 +428,7 @@ def create_birth_plan_form(args: dict[str, Any], inputs: RuntimeInputs) -> dict[
 
 
 def create_birth_plan_card(args: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
-    form_data = _dict_value(args.get("confirmed_form_data")) or _confirmed_form_data(inputs)
+    form_data = _confirmed_form_data(inputs) or _dict_value(args.get("confirmed_form_data"))
     card_json: dict[str, Any] = {
         "card_type": "birth_plan_card",
         "schema_version": "1.0",
@@ -991,7 +992,7 @@ def _prepare_birth_plan_card(card_json: dict[str, Any], inputs: RuntimeInputs, f
         _nested_text(source, "if_plans_change", "what_matters_most"),
         form_data.get("top_priorities"),
         form_data.get("priority_notes"),
-        max_items=3,
+        max_items=BIRTH_PLAN_CARD_SECTION_ITEM_LIMIT,
     )
 
     compact = {
@@ -1037,25 +1038,25 @@ def _prepare_birth_plan_card(card_json: dict[str, Any], inputs: RuntimeInputs, f
             form_data.get("communication_preferences"),
             _birth_plan_priority_communication_items(top_priorities),
             _birth_plan_priority_general_items(top_priorities),
-            max_items=3,
+            max_items=BIRTH_PLAN_CARD_SECTION_ITEM_LIMIT,
         ),
         "labor_preferences": _normalize_birth_plan_items(
             source.get("labor_preferences"),
             form_data.get("labor_preferences"),
-            max_items=3,
+            max_items=BIRTH_PLAN_CARD_SECTION_ITEM_LIMIT,
         ),
         "intervention_preferences": _normalize_birth_plan_items(
             source.get("intervention_preferences"),
             form_data.get("intervention_preferences"),
             _birth_plan_priority_intervention_items(top_priorities),
-            max_items=3,
+            max_items=BIRTH_PLAN_CARD_SECTION_ITEM_LIMIT,
         ),
         "pain_relief": _normalize_birth_plan_items(
             source.get("pain_relief"),
             source.get("pain_relief_preferences"),
             form_data.get("pain_relief_preferences"),
             form_data.get("pain_relief_notes"),
-            max_items=3,
+            max_items=BIRTH_PLAN_CARD_SECTION_ITEM_LIMIT,
         ),
         "baby_after_birth": _normalize_birth_plan_items(
             source.get("baby_after_birth"),
@@ -1063,23 +1064,23 @@ def _prepare_birth_plan_card(card_json: dict[str, Any], inputs: RuntimeInputs, f
             form_data.get("baby_after_birth_preferences"),
             _birth_plan_priority_baby_items(top_priorities),
             _birth_plan_feeding_note(form_data.get("feeding_intention")),
-            max_items=3,
+            max_items=BIRTH_PLAN_CARD_SECTION_ITEM_LIMIT,
         ),
         "if_plans_change": _normalize_birth_plan_items(
             *plan_change_values,
             form_data.get("if_plans_change"),
-            max_items=3,
+            max_items=BIRTH_PLAN_CARD_SECTION_ITEM_LIMIT,
         ),
         "emergency_authorization": _normalize_birth_plan_items(
             source.get("emergency_authorization"),
             form_data.get("emergency_authorization"),
-            max_items=3,
+            max_items=BIRTH_PLAN_CARD_SECTION_ITEM_LIMIT,
         ),
         "questions_for_hospital": _normalize_birth_plan_items(
             source.get("questions_for_hospital"),
             form_data.get("hospital_questions_focus"),
             _birth_plan_default_questions(form_data),
-            max_items=3,
+            max_items=BIRTH_PLAN_CARD_SECTION_ITEM_LIMIT,
         ),
         "medical_notes": _normalize_medical_notes(form_data.get("medical_notes")),
         "disclaimer": _localized_disclaimer(_first_text(source.get("disclaimer"))) or BIRTH_PLAN_DISCLAIMER,
