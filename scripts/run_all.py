@@ -12,9 +12,12 @@ ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
 CHAT_HOST = "127.0.0.1"
 CHAT_PORT = 8768
+WEB_DATA_HOST = "127.0.0.1"
+WEB_DATA_PORT = 8081
 
 
 def main() -> None:
+    sys.path.insert(0, str(ROOT))
     sys.path.insert(0, str(SRC))
 
     from momcozy_agent.config import load_project_env
@@ -27,6 +30,8 @@ def main() -> None:
         os.environ["ENTRY_API_KEY"] = entry_api_key
     CHAT_HOST = os.getenv("CHAT_HOST", "127.0.0.1")
     CHAT_PORT = int(os.getenv("CHAT_PORT", "8768"))
+    web_data_host = os.getenv("WEB_DATA_HOST", "127.0.0.1")
+    web_data_port = int(os.getenv("WEB_DATA_PORT", "8081"))
     os.environ["MOMCOZY_CHAT_SSE_URL"] = f"http://{CHAT_HOST}:{CHAT_PORT}/api/ag-ui"
 
     host = os.getenv("ENTRY_HOST", "0.0.0.0")
@@ -50,9 +55,20 @@ def main() -> None:
     except ImportError as exc:
         raise RuntimeError("uvicorn is not installed. Install dependencies with: py -3.12 -m pip install -r requirements.txt") from exc
 
+    if not _is_port_open(web_data_host, web_data_port):
+        web_data_thread = threading.Thread(
+            target=_run_web_data_server,
+            args=(web_data_host, web_data_port),
+            name="web-data-admin",
+            daemon=True,
+        )
+        web_data_thread.start()
+        _wait_for_port(web_data_host, web_data_port, timeout_seconds=30)
+
     print(f"Momcozy unified API: http://{host}:{port}")
     print(f"Momcozy App WebSocket: ws://{host}:{port}/api/ag-ui-ws")
     print(f"Momcozy chat SSE upstream: http://{CHAT_HOST}:{CHAT_PORT}/api/ag-ui")
+    print(f"Web data admin: http://{web_data_host}:{web_data_port}")
     uvicorn.run("momcozy_agent.api_app:app", host=host, port=port, reload=False)
 
 
@@ -83,6 +99,12 @@ def _read_env_value(path: Path, key: str) -> str:
             return value[1:-1]
         return value
     return ""
+
+
+def _run_web_data_server(host: str, port: int) -> None:
+    import uvicorn
+
+    uvicorn.run("web_data.app:app", host=host, port=port, reload=False)
 
 
 def _wait_for_port(host: str, port: int, *, timeout_seconds: float) -> None:
