@@ -284,7 +284,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "device_manual_search": _function_tool(
         "device_manual_search",
-        "补充 Momcozy 吸奶器设备资料。无副作用。用于获取当前型号说明书、检索 FAQ 问答、查找步骤图片。用户问部件是什么、作用原理、为什么、能不能、多少、区别、是否正常等日常设备知识时，应使用 topic=faq 检索 FAQ。已获得同型号 manual 后，连续步骤应复用已有内容；只有新的 FAQ 问题或缺少步骤图片时才再次调用。",
+        "补充 Momcozy 吸奶器设备资料。无副作用。用于获取当前型号说明书、检索 FAQ 问答、查找步骤图片，并在 Air1 开箱场景返回产品亮点、Quick Start PDF 和操作视频资源。用户问部件是什么、作用原理、为什么、能不能、多少、区别、是否正常等日常设备知识时，应使用 topic=faq 检索 FAQ。已获得同型号 manual 后，连续步骤应复用已有内容；只有新的 FAQ 问题或缺少步骤图片时才再次调用。",
         {
             "model": {"type": "string", "enum": ["Air1", "unknown"], "description": "已确认的设备型号。当前只支持 Air1；未知型号必须传 unknown。"},
             "query": {"type": "string", "description": "用户的设备问题，或需要检索的具体指导主题。"},

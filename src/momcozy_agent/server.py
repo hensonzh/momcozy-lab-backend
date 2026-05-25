@@ -32,6 +32,8 @@ STATIC_CONTENT_TYPES = {
     ".jpeg": "image/jpeg",
     ".jpg": "image/jpeg",
     ".js": "text/javascript; charset=utf-8",
+    ".mp4": "video/mp4",
+    ".pdf": "application/pdf",
     ".png": "image/png",
     ".svg": "image/svg+xml",
     ".webp": "image/webp",
@@ -143,7 +145,7 @@ def create_app(runtime: ChatRuntime | None = None, *, include_websocket_bridge: 
             }
         )
 
-    @app.get("/skill-assets/{skill_id}/{asset_path:path}")
+    @app.api_route("/skill-assets/{skill_id}/{asset_path:path}", methods=["GET", "HEAD"])
     async def skill_asset(skill_id: str, asset_path: str) -> Any:
         asset_full = (SKILLS_ROOT / skill_id / "assets" / asset_path).resolve()
         skill_assets_root = (SKILLS_ROOT / skill_id / "assets").resolve()
