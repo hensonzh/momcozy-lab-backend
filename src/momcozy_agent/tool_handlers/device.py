@@ -14,6 +14,20 @@ WEB_ROOT = PROJECT_ROOT / "web"
 SKILLS_ROOT = PROJECT_ROOT / "skills"
 MAX_RESULT_CHARS = 2600
 AIR1_REFERENCE_KEY = "device-guidance/Air1/references/air1/manual.md"
+AIR1_QUICK_START_RESOURCES: tuple[dict[str, str], ...] = (
+    {
+        "kind": "pdf",
+        "title": "Air1 Quick Start Guide",
+        "description": "官方 Quick Start 指导卡片",
+        "url": "/skill-assets/device-guidance/air1/quick-start/momcozy-air1-quick-start-guidance.pdf",
+    },
+    {
+        "kind": "video",
+        "title": "Air1 中文操作视频",
+        "description": "官方中文操作视频",
+        "url": "/skill-assets/device-guidance/air1/videos/air1-operation-zh.mp4",
+    },
+)
 
 def search_device_manual(args: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
     model = _text(args.get("model"), "unknown")
@@ -36,6 +50,8 @@ def search_device_manual(args: dict[str, Any], inputs: RuntimeInputs) -> dict[st
             "manual": None,
             "faq_results": [],
             "results": [],
+            "product_highlights": [],
+            "quick_start_resources": [],
             "message": "当前只提供 Momcozy Air 1 的本地说明书和 FAQ 内容。",
         }
 
@@ -49,6 +65,8 @@ def search_device_manual(args: dict[str, Any], inputs: RuntimeInputs) -> dict[st
             "topic": topic,
             "manual": None,
             "faq_results": [],
+            "product_highlights": [],
+            "quick_start_resources": [],
             "message": "当前型号的本地说明书未找到。",
         }
 
@@ -88,11 +106,16 @@ def search_device_manual(args: dict[str, Any], inputs: RuntimeInputs) -> dict[st
         "loaded_reference": AIR1_REFERENCE_KEY if manual_already_loaded else None,
         "faq_results": faq_results,
         "relevant_images": _relevant_images(manual.get("module_images", {}), query=query, topic=topic),
+        "product_highlights": _air1_product_highlights(),
+        "quick_start_resources": _air1_quick_start_resources(),
         "usage_guidance": (
             "如果 status 是 manual_already_loaded 或 manual_already_loaded_with_faq，说明当前型号 manual 已在本会话上下文中，不要要求重新加载，直接复用已有 manual。"
             "manual 是当前型号的完整本地官方说明书整理稿，应作为设备步骤的主要事实依据。"
             "faq_results 是按用户问题检索到的相关 FAQ；如果为空，说明没有命中明确 FAQ，但 manual 仍可作为依据。"
             "relevant_images 是按当前 query/topic 预选的步骤图片；讲到对应步骤时，请用 Markdown 图片语法展示最相关图片。"
+            "product_highlights 是确认 Air1 后可先给用户看的产品亮点，只能使用其中事实，不要扩写成资料未覆盖的卖点。"
+            "quick_start_resources 是 Air1 开箱/首次使用资源；用户确认型号后，先简短说明亮点，再给这些资源链接，最后询问是否需要一步步指导。"
+            "在给出 quick_start_resources 的同一轮，不要直接开始 manual 第一步；只有用户确认需要一步步指导后，才进入首次使用推荐路径。"
             "面向用户的步骤要简短；引导式安装或清洁时，一次只给一步并等待用户确认。"
             "不要补造资料中没有的 Air1 专属说明。"
         ),
@@ -154,6 +177,19 @@ def _manual_document(path: Path) -> dict[str, Any] | None:
         "images": _available_images(text),
         "module_images": _module_images(text),
     }
+
+
+def _air1_product_highlights() -> list[str]:
+    return [
+        "无线可穿戴吸奶器，可放入内衣中使用。",
+        "支持充电盒给主机充电，也支持充电线直充主机。",
+        "可通过主机按钮完成开关机、暂停、模式选择和吸力调节。",
+        "连接 App 后可选择 Auto、Manual 或 Customize 模式，并调节 15 级吸力。",
+    ]
+
+
+def _air1_quick_start_resources() -> list[dict[str, str]]:
+    return [dict(resource) for resource in AIR1_QUICK_START_RESOURCES if _static_asset_exists(resource["url"])]
 
 
 def _reference_loaded(inputs: RuntimeInputs, reference_key: str) -> bool:
@@ -416,6 +452,10 @@ def _available_images(content: str) -> list[dict[str, str]]:
 
 
 def _static_image_exists(url: str) -> bool:
+    return _static_asset_exists(url)
+
+
+def _static_asset_exists(url: str) -> bool:
     if url.startswith("/images/"):
         image_path = (WEB_ROOT / url.lstrip("/")).resolve()
         web_root = WEB_ROOT.resolve()
