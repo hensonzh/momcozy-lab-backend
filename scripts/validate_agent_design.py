@@ -52,6 +52,10 @@ def main() -> None:
     assert "ui_form_create" in initial_tool_names
     assert "ui_card_create" in initial_tool_names
     assert "ibclc_consult_card_create" in initial_tool_names
+    assert "hospital_bag_cart_update" not in initial_tool_names
+    assert "hospital_bag_cart_update" in initial_deferred_tool_names
+    assert "hospital_bag_pump_recommend" not in initial_tool_names
+    assert "hospital_bag_pump_recommend" in initial_deferred_tool_names
     assert "memory_search" not in initial_tool_names
     assert "handoff_summary_generate" not in initial_tool_names
     assert "handoff_summary_generate" in initial_deferred_tool_names

@@ -14,6 +14,7 @@ PUMP_ITEM = {
     "quantity": "1台",
     "priority": "recommended",
     "note": "如果计划母乳或混合喂养，可作为初期涨奶或追奶的备用选择；具体使用以医院和哺乳顾问建议为准。",
+    "explain": "涨奶、排奶或回家后储奶时备用。",
 }
 HOSPITAL_BAG_CART_ASSISTANT_FOLLOWUP = {
     "kind": "hospital_bag_cart",
@@ -61,7 +62,211 @@ DEFAULT_HOSPITAL_BAG_CART_GROUPS: list[dict[str, Any]] = [
         ],
     },
 ]
-HOSPITAL_BAG_CART_BUDGET_REMOVAL_IDS = {"milk-pump", "milk-bra", "baby-clothes", "mom-briefs"}
+MOMCOZY_PUMP_OFFICIAL_COLLECTION_URL = "https://momcozy.com/collections/wearable-breast-pump"
+MOMCOZY_PUMP_SUPPORT_GUIDE_URL = "https://support.momcozy.com/article/56837165211801"
+HOSPITAL_BAG_CART_USD_TO_CNY_RATE = 6.8
+MOMCOZY_PUMP_IMAGE_URLS = {
+    "milk-pump": "https://momcozy.com/cdn/shop/files/MomcozyMoblieFlow_BreastPump_7.jpg?v=1776163451",
+    "pump-s9-pro": "https://momcozy.com/cdn/shop/files/S9pro_3ff43646-b9be-4b4d-a8d8-918834d887a0.jpg?v=1699943493",
+    "pump-s12-pro-quick": "https://momcozy.com/cdn/shop/files/1.1_a787cf6f-0656-44dc-86e9-0a4f75846cbc.jpg?v=1776744837",
+    "pump-m5-smart": "https://momcozy.com/cdn/shop/files/1_b8f691a7-6acf-44dc-acbc-ed6bf82e8a9d.jpg?v=1760428066",
+    "pump-m6": "https://momcozy.com/cdn/shop/files/01_56489eac-5396-4685-aacc-3c6c14c39930.jpg?v=1775025039",
+    "pump-v1-pro": "https://momcozy.com/cdn/shop/files/lQDPJws-Zh7cFX_NBdrNBLCwLR71U5WToVIG-TXf9_H4AA_1200_1498.jpg?v=1755159282",
+    "pump-m9": "https://momcozy.com/cdn/shop/files/MomcozyMoblieFlow_BreastPump_7.jpg?v=1776163451",
+    "pump-w1": "https://momcozy.com/cdn/shop/files/1._1_app2.jpg?v=1777030861",
+    "pump-air-1": "https://momcozy.com/cdn/shop/files/MomcozyAir1Ultra-slimBreastPump_1.png?v=1740971384",
+}
+HOSPITAL_BAG_CART_PRODUCT_IMAGE_URLS = {
+    "mom-pad": "https://momcozy.com/cdn/shop/files/01_e3747022-14ff-4a12-a503-044276f89265.webp?v=1779352318",
+    "mom-sanitary": "https://momcozy.com/cdn/shop/files/01_e3747022-14ff-4a12-a503-044276f89265.webp?v=1779352318",
+    "mom-underwear": "https://momcozy.com/cdn/shop/files/PK006-1_-1.png?v=1779351545",
+    "mom-wipes": "https://momcozy.com/cdn/shop/files/12b.jpg?v=1779353160",
+    "mom-bottle": "https://momcozy.com/cdn/shop/files/01_e3747022-14ff-4a12-a503-044276f89265.webp?v=1779352318",
+    "mom-briefs": "https://momcozy.com/cdn/shop/files/b58ce7b99582c961375527c3c6b27ebb_9023fff7-0f2e-42c1-864e-fd2a7a732e72.png?v=1779351709",
+    "baby-diaper": "https://babycozy.com/cdn/shop/files/1.1_8e53efbf-da7d-4997-a472-3a335bedbf31.jpg?v=1711696033",
+    "baby-wipes": "https://momcozy.com/cdn/shop/files/12b.jpg?v=1779353160",
+    "baby-towel": "https://momcozy.com/cdn/shop/files/1_d4e469a4-e733-4cf1-8863-c3c5256eca2a.jpg?v=1779353358",
+    "baby-blanket": "https://momcozy.com/cdn/shop/files/1-1_abb6b92a-ac07-4b73-b3a5-7d995989b721.jpg?v=1779353389",
+    "baby-blanket-basic": "https://momcozy.com/cdn/shop/files/1_7732d4e1-f5a7-4a75-8f7e-c888eed37548.jpg?v=1779352173",
+    "baby-clothes": "https://momcozy.com/cdn/shop/files/1_f348eb24-2845-4b7b-8cff-6f78510fa1fa.webp?v=1779422192",
+    "baby-bath-towel": "https://momcozy.com/cdn/shop/files/yujin.jpg?v=1779353668",
+    "milk-pad": "https://momcozy.com/cdn/shop/files/5_dbb18aeb-7e96-4c95-a1a7-5a9378875b7b.jpg?v=1779352202",
+    "milk-cream": "https://momcozy.com/cdn/shop/files/MomcozyNippleCreramforBreastfeeding_8.jpg?v=1779352434",
+    "milk-storage": "https://momcozy.com/cdn/shop/files/13_5b267527-b032-4c66-bec8-21c675a15007.webp?v=1779430748",
+    "milk-bra": "https://momcozy.com/cdn/shop/files/yn21_ae9a5331-7afc-4dde-abc1-5136e356bcbe.jpg?v=1736236303",
+    "milk-bottle": "https://momcozy.com/cdn/shop/files/619nKXnpNKL._SL1500.jpg?v=1779354235",
+}
+MOMCOZY_PUMP_PRODUCT_CATALOG: list[dict[str, Any]] = [
+    {
+        "sku_id": "pump-s9-pro",
+        "model": "S9 Pro",
+        "name": "Momcozy S9 Pro 便携式吸奶器",
+        "price_usd": 64.99,
+        "sale_price_usd": 51.99,
+        "tier": "entry",
+        "use_cases": ["budget", "hospital_backup", "daily_home"],
+        "preferences": ["budget", "simple", "balanced"],
+        "best_for": "预算优先、想先备一台简单可靠的入门款。",
+        "features": ["长续航", "基础易用", "低噪"],
+        "suction": "最高 -285 mmHg",
+        "battery": "约 5-6 次",
+        "weight": "250 g",
+        "noise": "≤50 dB",
+        "app": False,
+        "supports_single_unit": True,
+    },
+    {
+        "sku_id": "pump-s12-pro-quick",
+        "model": "S12 Pro Quick",
+        "name": "Momcozy S12 Pro Quick 可穿戴吸奶器",
+        "price_usd": 74.99,
+        "sale_price_usd": 59.99,
+        "tier": "entry_plus",
+        "use_cases": ["budget", "hospital_backup", "daily_home", "comfort"],
+        "preferences": ["budget", "comfort", "balanced"],
+        "best_for": "第一次准备吸奶器、希望好上手和清洁方便。",
+        "features": ["新手友好", "清洁方便", "节省时间"],
+        "suction": "最高 -292 mmHg",
+        "battery": "约 7-8 次",
+        "weight": "",
+        "noise": "≤46 dB",
+        "app": False,
+        "supports_single_unit": True,
+    },
+    {
+        "sku_id": "pump-m5-smart",
+        "model": "M5 Smart",
+        "name": "Momcozy M5 Smart 可穿戴吸奶器",
+        "price_usd": 119.99,
+        "sale_price_usd": 95.99,
+        "tier": "mid",
+        "use_cases": ["daily_home", "portable", "work_pumping"],
+        "preferences": ["portable", "app", "balanced"],
+        "best_for": "想要轻一些、日常使用并希望手机 App 调节。",
+        "features": ["轻量", "App 控制", "日常通勤友好"],
+        "suction": "最高 -285 mmHg",
+        "battery": "约 4-5 次",
+        "weight": "230 g",
+        "noise": "≤48 dB",
+        "app": True,
+        "supports_single_unit": True,
+    },
+    {
+        "sku_id": "pump-m6",
+        "model": "M6",
+        "name": "Momcozy M6 Mobile Style 轻薄吸奶器",
+        "price_usd": 129.99,
+        "sale_price_usd": 103.99,
+        "tier": "mid_plus",
+        "use_cases": ["daily_home", "comfort", "balanced"],
+        "preferences": ["comfort", "balanced", "performance"],
+        "best_for": "日常使用频率较高，想要舒适和输出更均衡。",
+        "features": ["舒适贴合", "稳定输出", "轻薄隐蔽"],
+        "suction": "最高 -295 mmHg",
+        "battery": "约 5-6 次",
+        "weight": "293 g",
+        "noise": "≤48 dB",
+        "app": False,
+        "supports_single_unit": True,
+    },
+    {
+        "sku_id": "pump-v1-pro",
+        "model": "V1 Pro",
+        "name": "Momcozy V1 Pro 医院级可穿戴吸奶器",
+        "price_usd": 199.99,
+        "sale_price_usd": 169.99,
+        "tier": "pro",
+        "use_cases": ["daily_home", "performance", "high_output"],
+        "preferences": ["performance", "battery", "balanced"],
+        "best_for": "更看重医院级吸力和长续航，主要在家高频使用。",
+        "features": ["医院级吸力", "长续航", "15 档吸力"],
+        "suction": "最高 -300 mmHg",
+        "battery": "约 7-9 次",
+        "weight": "280 g 电机",
+        "noise": "≤53 dB",
+        "app": False,
+        "supports_single_unit": False,
+    },
+    {
+        "sku_id": "pump-m9",
+        "model": "M9",
+        "name": "Momcozy M9 Mobile Flow 智能吸奶器",
+        "price_usd": 159.99,
+        "sale_price_usd": 127.99,
+        "tier": "pro_app",
+        "use_cases": ["work_pumping", "portable", "performance", "high_output"],
+        "preferences": ["app", "performance", "portable"],
+        "best_for": "上班、外出或高频吸奶，希望效率高并用 App 做个性化控制。",
+        "features": ["强吸力", "App 控制", "个性化节律"],
+        "suction": "最高 -300 mmHg",
+        "battery": "约 4-5 次",
+        "weight": "302 g",
+        "noise": "≤42 dB",
+        "app": True,
+        "supports_single_unit": True,
+    },
+    {
+        "sku_id": "pump-w1",
+        "model": "W1",
+        "name": "Momcozy W1 暖感按摩可穿戴吸奶器",
+        "price_usd": 329.99,
+        "sale_price_usd": 280.49,
+        "tier": "premium_comfort",
+        "use_cases": ["comfort", "daily_home"],
+        "preferences": ["comfort", "premium"],
+        "best_for": "预算更宽松，并且特别在意暖感按摩和舒适感。",
+        "features": ["暖感按摩", "Milk Boost 模式", "透明顶盖"],
+        "suction": "最高 -295 mmHg",
+        "battery": "约 10 次",
+        "weight": "325 g",
+        "noise": "≤50 dB",
+        "app": True,
+        "supports_single_unit": False,
+    },
+    {
+        "sku_id": "pump-air-1",
+        "model": "Air 1",
+        "name": "Momcozy Air 1 超薄吸奶器",
+        "price_usd": 369.99,
+        "sale_price_usd": 295.99,
+        "tier": "premium_portable",
+        "use_cases": ["work_pumping", "portable", "discreet"],
+        "preferences": ["portable", "app", "premium"],
+        "best_for": "预算充足，最在意职场/外出场景里的轻薄隐蔽。",
+        "features": ["超薄", "充电盒", "App 控制"],
+        "suction": "最高 -285 mmHg",
+        "battery": "约 6-7 次，配充电盒约 15 次",
+        "weight": "260 g",
+        "noise": "≤45 dB",
+        "app": True,
+        "supports_single_unit": False,
+    },
+]
+HOSPITAL_BAG_CART_PUMP_ITEM_ID = "milk-pump"
+HOSPITAL_BAG_CART_BUDGET_REMOVE_ORDER = [
+    "baby-clothes",
+    "mom-briefs",
+    "milk-bra",
+    "milk-storage",
+    "baby-bath-towel",
+    "mom-bottle",
+    "milk-bottle",
+    "milk-cream",
+    "mom-wipes",
+    "milk-pad",
+    "baby-towel",
+]
+HOSPITAL_BAG_CART_LIGHT_BUDGET_REMOVE_IDS = {"baby-clothes", "mom-briefs", "milk-bra"}
+HOSPITAL_BAG_CART_PROTECTED_ITEM_IDS = {
+    "mom-pad",
+    "mom-sanitary",
+    "mom-underwear",
+    "baby-diaper",
+    "baby-wipes",
+    "baby-blanket",
+    "baby-blanket-basic",
+    HOSPITAL_BAG_CART_PUMP_ITEM_ID,
+}
 HOSPITAL_BAG_CART_BUDGET_REPLACEMENTS: dict[str, dict[str, Any]] = {
     "baby-blanket": {
         "id": "baby-blanket-basic",
@@ -72,6 +277,28 @@ HOSPITAL_BAG_CART_BUDGET_REPLACEMENTS: dict[str, dict[str, Any]] = {
         "keywords": ["包被"],
     }
 }
+HOSPITAL_BAG_CART_REPLACEMENT_ORIGINAL_BY_ID = {
+    replacement["id"]: original_id
+    for original_id, replacement in HOSPITAL_BAG_CART_BUDGET_REPLACEMENTS.items()
+}
+HOSPITAL_BAG_ITEM_EXPLANATIONS = [
+    (("产褥垫", "产妇卫生巾"), "产后恶露量较多，用来垫床或替代普通卫生巾。"),
+    (("胎监带",), "做胎心监护时固定探头用，有些医院要求自带。"),
+    (("吸管杯",), "产后或宫缩时不方便起身，躺着喝水更省力。"),
+    (("哺乳文胸", "哺乳背心"), "方便产后喂奶，也比普通内衣更不勒。"),
+    (("防溢乳垫",), "放在内衣里吸收漏奶，避免衣服被打湿。"),
+    (("便携式吸奶器", "吸奶器"), "涨奶、排奶或回家后储奶时备用。"),
+    (("储奶袋", "储奶瓶"), "用来保存挤出的母乳，住院期少量准备即可。"),
+    (("乳头霜",), "哺乳初期乳头干痛时可用，先少量准备。"),
+    (("乳盾",), "套在乳头上的辅助亲喂用品，是否需要先听专业建议。"),
+    (("哺乳枕",), "喂奶时托住宝宝和手臂，不是必须。"),
+    (("收腹带",), "产后腹部支撑用品，剖宫产尤其要先问医生。"),
+    (("安全提篮", "安全座椅"), "宝宝出院坐车时使用，提前确认交通方式。"),
+    (("奶瓶清洁用品",), "用来清洗奶瓶、奶嘴或吸奶配件，住院只需少量。"),
+    (("消毒设备",), "回家后消毒奶瓶或吸奶配件用，住院不一定带大件。"),
+    (("喂养记录工具",), "记录吃奶、排尿排便和睡眠，方便家人同步。"),
+    (("分娩沟通卡",), "记录生产偏好和需要提前沟通的事，入院时方便给医护看。"),
+]
 BIRTH_PLAN_DISCLAIMER = (
     "这张卡只用于沟通。请优先遵循医生和医院建议，尤其是因安全原因需要调整计划时。"
 )
@@ -438,6 +665,7 @@ def create_hospital_bag_card(args: dict[str, Any], inputs: RuntimeInputs) -> dic
     generation_mode = str(args.get("generation_mode") or "standard")
     card_json = _build_hospital_bag_card_json(form_data, generation_mode, inputs)
     _normalize_hospital_bag_scene_groups(card_json["packing_groups"])
+    _apply_hospital_bag_item_explanations(card_json["packing_groups"])
     return {
         "tool_name": "ui_card_create",
         "status": "card_created",
@@ -450,6 +678,60 @@ def create_hospital_bag_card(args: dict[str, Any], inputs: RuntimeInputs) -> dic
     }
 
 
+def recommend_hospital_bag_pump(args: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
+    use_case = str(args.get("use_case") or "unknown").strip() or "unknown"
+    preference = str(args.get("preference") or "balanced").strip() or "balanced"
+    feeding_intention = str(args.get("feeding_intention") or "unknown").strip() or "unknown"
+    target_budget_usd = _target_budget(args.get("target_budget_usd"))
+    must_have_app = args.get("must_have_app")
+    need_single_unit = args.get("need_single_unit")
+    ranked = _rank_momcozy_pump_products(
+        use_case=use_case,
+        preference=preference,
+        target_budget_usd=target_budget_usd,
+        must_have_app=must_have_app if isinstance(must_have_app, bool) else None,
+        need_single_unit=need_single_unit if isinstance(need_single_unit, bool) else None,
+    )
+    if not ranked:
+        message = "我先确认一下：你更在意预算、通勤隐蔽，还是吸奶效率？这样我再帮你选型号会更准。"
+        return {
+            "tool_name": "hospital_bag_pump_recommend",
+            "status": "needs_clarification",
+            "summary": message,
+            "message": message,
+            "recommended_product": None,
+            "alternatives": [],
+            "cart_sync_suggestion": None,
+        }
+
+    recommended = ranked[0]
+    alternatives = ranked[1:3]
+    product = _public_pump_product(recommended)
+    summary = _pump_recommendation_message(
+        recommended,
+        alternatives,
+        use_case=use_case,
+        preference=preference,
+        feeding_intention=feeding_intention,
+        target_budget_usd=target_budget_usd,
+    )
+    return {
+        "tool_name": "hospital_bag_pump_recommend",
+        "status": "pump_recommended",
+        "summary": summary,
+        "message": summary,
+        "recommended_product": product,
+        "alternatives": [_public_pump_product(product) for product in alternatives],
+        "cart_sync_suggestion": {
+            "tool_name": "hospital_bag_cart_update",
+            "action": "replace_pump_model",
+            "product_sku_id": recommended["sku_id"],
+            "item_ids": [HOSPITAL_BAG_CART_PUMP_ITEM_ID],
+        },
+        "source_urls": [MOMCOZY_PUMP_OFFICIAL_COLLECTION_URL, MOMCOZY_PUMP_SUPPORT_GUIDE_URL],
+    }
+
+
 def update_hospital_bag_cart(args: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
     action = str(args.get("action") or "").strip()
     assistant_message = str(args.get("assistant_message") or "").strip()
@@ -458,17 +740,69 @@ def update_hospital_bag_cart(args: dict[str, Any], inputs: RuntimeInputs) -> dic
         for item_id in args.get("item_ids", [])
         if str(item_id).strip()
     ]
+    preserve_item_ids = [
+        str(item_id).strip()
+        for item_id in args.get("preserve_item_ids", [])
+        if str(item_id).strip()
+    ]
     current_groups = _hospital_bag_cart_groups_from_inputs(inputs)
 
-    if action == "apply_budget_plan":
-        next_groups = _apply_hospital_bag_budget_plan(current_groups)
+    if action in {"replace_pump_model", "add_pump_model"}:
+        product_sku_id = _first_text(args.get("product_sku_id"))
+        product = _momcozy_pump_product(product_sku_id)
+        if not product:
+            message = assistant_message or "你想换成哪一款 Momcozy 吸奶器？比如 S12 Pro Quick、M5 Smart、M9。"
+            return {
+                "tool_name": "hospital_bag_cart_update",
+                "status": "needs_clarification",
+                "summary": message,
+                "cart_update": {"action": "clarify", "message": message},
+            }
+        next_groups, changed = _upsert_hospital_bag_pump_model(current_groups, product)
         totals = _hospital_bag_cart_totals(next_groups)
-        message = assistant_message or f"可以，我先帮你切到更省钱的方案：贵价备用项先不买，包被换成基础款。现在预计合计 ¥{totals['total']:.2f}。"
-        return _hospital_bag_cart_update_result(action, next_groups, totals, message)
+        if changed["mode"] == "unchanged":
+            message = assistant_message or f"购物车里已经是「{product['name']}」了，我先不重复添加。"
+        elif changed["mode"] == "added":
+            message = assistant_message or f"好，我把「{product['name']}」加到母乳喂养里了，官方价折合约 {_pump_price_cny_label(product)}。"
+        else:
+            from_name = changed.get("from_name") or "原来的吸奶器"
+            message = assistant_message or f"好，我把「{from_name}」换成「{product['name']}」了，官方价折合约 {_pump_price_cny_label(product)}。"
+        return _hospital_bag_cart_update_result(
+            action,
+            next_groups,
+            totals,
+            message,
+            replaced_items=[changed] if changed["mode"] == "replaced" else [],
+            restored_item_ids=[product["sku_id"]] if changed["mode"] == "added" else [],
+            restored_item_names=[product["name"]] if changed["mode"] == "added" else [],
+        )
 
-    if action == "remove_items":
+    if action in {"optimize_budget", "apply_budget_plan"}:
+        budget_result = _optimize_hospital_bag_cart_budget(
+            current_groups,
+            target_budget=_target_budget(args.get("target_budget")),
+            budget_mode=str(args.get("budget_mode") or "cheaper"),
+            preference=str(args.get("preference") or "balanced"),
+            preserve_item_ids=preserve_item_ids,
+            allow_remove_pump=bool(args.get("allow_remove_pump")),
+        )
+        message = assistant_message or _hospital_bag_budget_message(budget_result)
+        return _hospital_bag_cart_update_result(
+            "optimize_budget",
+            budget_result["groups"],
+            budget_result["totals"],
+            message,
+            before_totals=budget_result["before_totals"],
+            removed_item_ids=budget_result["removed_item_ids"],
+            removed_item_names=budget_result["removed_item_names"],
+            replaced_items=budget_result["replaced_items"],
+            target_budget=budget_result["target_budget"],
+            budget_met=budget_result["budget_met"],
+        )
+
+    if action in {"remove_items", "mark_provided", "mark_owned"}:
         if not item_ids:
-            message = assistant_message or "你想删哪一件？直接告诉我商品名就行。"
+            message = assistant_message or _missing_item_message(action)
             return {
                 "tool_name": "hospital_bag_cart_update",
                 "status": "needs_clarification",
@@ -486,7 +820,7 @@ def update_hospital_bag_cart(args: dict[str, Any], inputs: RuntimeInputs) -> dic
             }
         totals = _hospital_bag_cart_totals(next_groups)
         names = "、".join(f"「{name}」" for name in removed_names)
-        message = assistant_message or f"已帮你从购物车里删掉{names}，现在预计合计 ¥{totals['total']:.2f}。"
+        message = assistant_message or _remove_items_message(action, names, totals)
         return _hospital_bag_cart_update_result(
             action,
             next_groups,
@@ -496,10 +830,81 @@ def update_hospital_bag_cart(args: dict[str, Any], inputs: RuntimeInputs) -> dic
             removed_item_names=removed_names,
         )
 
+    if action == "restore_items":
+        if not item_ids:
+            message = assistant_message or "你想加回哪一件？直接告诉我商品名就行。"
+            return {
+                "tool_name": "hospital_bag_cart_update",
+                "status": "needs_clarification",
+                "summary": message,
+                "cart_update": {"action": "clarify", "message": message},
+            }
+        next_groups, restored_names = _restore_hospital_bag_cart_items(current_groups, item_ids)
+        totals = _hospital_bag_cart_totals(next_groups)
+        if not restored_names:
+            message = assistant_message or "这些商品已经在购物车里了，不需要重复添加。"
+        else:
+            names = "、".join(f"「{name}」" for name in restored_names)
+            message = assistant_message or f"好，我把{names}加回购物车了，现在预计合计 {_cart_totals_label(totals)}。"
+        return _hospital_bag_cart_update_result(
+            action,
+            next_groups,
+            totals,
+            message,
+            restored_item_ids=item_ids,
+            restored_item_names=restored_names,
+        )
+
+    if action == "replace_items":
+        next_groups, replaced_items = _replace_hospital_bag_cart_items(current_groups, item_ids)
+        totals = _hospital_bag_cart_totals(next_groups)
+        if not replaced_items:
+            message = assistant_message or "当前购物车里暂时没有可替换成基础款的商品。"
+        else:
+            names = "、".join(f"「{item['from_name']}」换成「{item['to_name']}」" for item in replaced_items)
+            message = assistant_message or f"可以，我先帮你把{names}，现在预计合计 {_cart_totals_label(totals)}。"
+        return _hospital_bag_cart_update_result(
+            action,
+            next_groups,
+            totals,
+            message,
+            replaced_items=replaced_items,
+        )
+
+    if action == "update_quantity":
+        quantity_updates = args.get("quantity_updates")
+        if not isinstance(quantity_updates, list) or not quantity_updates:
+            message = assistant_message or "你想把哪件商品改成几件？直接告诉我商品名和数量就行。"
+            return {
+                "tool_name": "hospital_bag_cart_update",
+                "status": "needs_clarification",
+                "summary": message,
+                "cart_update": {"action": "clarify", "message": message},
+            }
+        next_groups, updated_names, removed_names = _update_hospital_bag_cart_quantities(current_groups, quantity_updates)
+        totals = _hospital_bag_cart_totals(next_groups)
+        if not updated_names and not removed_names:
+            message = assistant_message or "我没有在当前购物车里找到要调整的商品，你可以再说一下商品名。"
+        else:
+            parts = []
+            if updated_names:
+                parts.append("调整了" + "、".join(f"「{name}」" for name in updated_names))
+            if removed_names:
+                parts.append("移除了" + "、".join(f"「{name}」" for name in removed_names))
+            parts_text = "，".join(parts)
+            message = assistant_message or f"好，我已经{parts_text}，现在预计合计 {_cart_totals_label(totals)}。"
+        return _hospital_bag_cart_update_result(
+            action,
+            next_groups,
+            totals,
+            message,
+            removed_item_names=removed_names,
+        )
+
     if action == "reset_cart":
         next_groups = _clone_hospital_bag_cart_groups(DEFAULT_HOSPITAL_BAG_CART_GROUPS)
         totals = _hospital_bag_cart_totals(next_groups)
-        message = assistant_message or f"已经帮你把待产包购物车恢复到默认清单了，现在预计合计 ¥{totals['total']:.2f}。"
+        message = assistant_message or f"已经帮你把待产包购物车恢复到默认清单了，现在预计合计 {_cart_totals_label(totals)}。"
         return _hospital_bag_cart_update_result(action, next_groups, totals, message)
 
     if action == "clarify":
@@ -514,27 +919,253 @@ def update_hospital_bag_cart(args: dict[str, Any], inputs: RuntimeInputs) -> dic
     raise ValueError(f"unsupported hospital bag cart action: {action}")
 
 
+def _rank_momcozy_pump_products(
+    *,
+    use_case: str,
+    preference: str,
+    target_budget_usd: float | None,
+    must_have_app: bool | None,
+    need_single_unit: bool | None,
+) -> list[dict[str, Any]]:
+    scored: list[tuple[float, dict[str, Any]]] = []
+    for product in MOMCOZY_PUMP_PRODUCT_CATALOG:
+        score = 0.0
+        product_use_cases = set(product.get("use_cases") or [])
+        product_preferences = set(product.get("preferences") or [])
+        price = float(product["price_usd"])
+
+        if use_case in product_use_cases:
+            score += 5
+        if preference in product_preferences:
+            score += 4
+        if preference == "budget":
+            score += max(0, 4 - price / 100)
+        if preference == "balanced" and product.get("tier") in {"entry_plus", "mid", "mid_plus", "pro"}:
+            score += 2
+        if preference == "performance" and product.get("suction") == "最高 -300 mmHg":
+            score += 2
+        if must_have_app is not None:
+            score += 4 if bool(product.get("app")) == must_have_app else -5
+        if need_single_unit is not None:
+            score += 3 if bool(product.get("supports_single_unit")) == need_single_unit else -3
+        if target_budget_usd is not None:
+            if price <= target_budget_usd:
+                score += 5
+            else:
+                score -= min(8, (price - target_budget_usd) / 25)
+        score -= price / 1000
+        scored.append((score, product))
+    scored.sort(key=lambda item: (-item[0], float(item[1]["price_usd"])))
+    return [product for _, product in scored]
+
+
+def _pump_recommendation_message(
+    product: dict[str, Any],
+    alternatives: list[dict[str, Any]],
+    *,
+    use_case: str,
+    preference: str,
+    feeding_intention: str,
+    target_budget_usd: float | None,
+) -> str:
+    reason_parts = [str(product.get("best_for") or "").strip()]
+    feature_text = "、".join(str(feature) for feature in product.get("features", [])[:3])
+    if feature_text:
+        reason_parts.append(f"重点是{feature_text}")
+    if target_budget_usd is not None and float(product["price_usd"]) > target_budget_usd:
+        reason_parts.append(f"不过它的官方价折合约 {_pump_price_cny_label(product)}，会超过你说的约 {_money_label(_usd_to_cny(target_budget_usd), 'CNY')} 预算")
+    elif target_budget_usd is not None:
+        reason_parts.append(f"官方价折合约 {_pump_price_cny_label(product)}，在你说的约 {_money_label(_usd_to_cny(target_budget_usd), 'CNY')} 预算内")
+    else:
+        reason_parts.append(f"官方价折合约 {_pump_price_cny_label(product)}")
+
+    prefix = "我会优先看你当前的使用场景和预算，不硬推最贵款。"
+    if feeding_intention == "formula":
+        prefix = "如果你只是少量备用，我会先按轻量备用来选，不建议直接上很贵的型号。"
+    elif use_case in {"work_pumping", "portable"}:
+        prefix = "你这个场景更看重外出时好带、好操作，我会优先选便携和控制体验。"
+    elif preference == "budget":
+        prefix = "你更在意预算的话，我会先选入门里更稳的一款。"
+
+    alternative_text = ""
+    if alternatives:
+        names = "、".join(f"{item['model']}（约 {_pump_price_cny_label(item)}）" for item in alternatives)
+        alternative_text = f"备选可以看 {names}。"
+    return f"{prefix}\n\n我建议先选「{product['model']}」。{'；'.join(part for part in reason_parts if part)}。{alternative_text}"
+
+
+def _public_pump_product(product: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "sku_id": product["sku_id"],
+        "model": product["model"],
+        "name": product["name"],
+        "image_url": MOMCOZY_PUMP_IMAGE_URLS.get(str(product["sku_id"]) or ""),
+        "image_alt": product["name"],
+        "official_price_usd": product["price_usd"],
+        "sale_price_usd": product.get("sale_price_usd"),
+        "price_cny": _usd_to_cny(product["price_usd"]),
+        "sale_price_cny": _usd_to_cny(product.get("sale_price_usd") or product["price_usd"]),
+        "price_label": _pump_price_cny_label(product),
+        "sale_price_label": _pump_sale_price_cny_label(product),
+        "exchange_rate_usd_cny": HOSPITAL_BAG_CART_USD_TO_CNY_RATE,
+        "best_for": product.get("best_for"),
+        "features": list(product.get("features") or []),
+        "suction": product.get("suction"),
+        "battery": product.get("battery"),
+        "weight": product.get("weight"),
+        "noise": product.get("noise"),
+        "app": bool(product.get("app")),
+        "supports_single_unit": bool(product.get("supports_single_unit")),
+        "source_url": MOMCOZY_PUMP_OFFICIAL_COLLECTION_URL,
+    }
+
+
+def _momcozy_pump_product(sku_id_or_model: str) -> dict[str, Any] | None:
+    token = _item_match_key(sku_id_or_model).lower()
+    if not token:
+        return None
+    for product in MOMCOZY_PUMP_PRODUCT_CATALOG:
+        aliases = [
+            product["sku_id"],
+            product["model"],
+            product["name"],
+            str(product["model"]).replace(" ", ""),
+        ]
+        if token in {_item_match_key(alias).lower() for alias in aliases}:
+            return product
+    return None
+
+
+def _hospital_bag_pump_item_ids() -> set[str]:
+    return {HOSPITAL_BAG_CART_PUMP_ITEM_ID, *(str(product["sku_id"]) for product in MOMCOZY_PUMP_PRODUCT_CATALOG)}
+
+
+def _hospital_bag_cart_pump_item(product: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": product["sku_id"],
+        "sku_id": product["sku_id"],
+        "model": product["model"],
+        "name": product["name"],
+        "desc": _pump_cart_description(product),
+        "qty": 1,
+        "price": _usd_to_cny(product["price_usd"]),
+        "currency": "CNY",
+        "price_label": _pump_price_cny_label(product),
+        "sale_price_label": _pump_sale_price_cny_label(product),
+        "official_price_usd": float(product["price_usd"]),
+        "sale_price_usd": float(product.get("sale_price_usd") or product["price_usd"]),
+        "exchange_rate_usd_cny": HOSPITAL_BAG_CART_USD_TO_CNY_RATE,
+        "product_url": MOMCOZY_PUMP_OFFICIAL_COLLECTION_URL,
+        "image_url": MOMCOZY_PUMP_IMAGE_URLS.get(str(product["sku_id"]) or ""),
+        "image_alt": product["name"],
+        "keywords": ["吸奶器", "Momcozy", str(product["model"]), str(product["sku_id"])],
+    }
+
+
+def _pump_cart_description(product: dict[str, Any]) -> str:
+    features = "、".join(str(feature) for feature in product.get("features", [])[:2])
+    if features:
+        return f"{features}；{product.get('best_for') or ''}".strip("；")
+    return str(product.get("best_for") or "")
+
+
+def _pump_price_label(product: dict[str, Any]) -> str:
+    return f"${float(product['price_usd']):.2f} USD"
+
+
+def _pump_sale_price_label(product: dict[str, Any]) -> str:
+    sale_price = product.get("sale_price_usd")
+    if not isinstance(sale_price, (int, float)):
+        return ""
+    prefix = "From " if product.get("supports_single_unit") else ""
+    return f"{prefix}${float(sale_price):.2f} USD"
+
+
+def _pump_price_cny_label(product: dict[str, Any]) -> str:
+    return _money_label(_usd_to_cny(product["price_usd"]), "CNY")
+
+
+def _pump_sale_price_cny_label(product: dict[str, Any]) -> str:
+    sale_price = product.get("sale_price_usd")
+    if not isinstance(sale_price, (int, float)):
+        return ""
+    prefix = "约 " if product.get("supports_single_unit") else ""
+    return f"{prefix}{_money_label(_usd_to_cny(sale_price), 'CNY')}"
+
+
+def _usd_to_cny(value: Any) -> float:
+    return round(_cart_number(value, default=0) * HOSPITAL_BAG_CART_USD_TO_CNY_RATE, 2)
+
+
+def _upsert_hospital_bag_pump_model(
+    groups: list[dict[str, Any]],
+    product: dict[str, Any],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    next_groups = _clone_hospital_bag_cart_groups(groups)
+    pump_ids = _hospital_bag_pump_item_ids()
+    next_item = _hospital_bag_cart_pump_item(product)
+    for group in next_groups:
+        items = group.get("items", [])
+        if not isinstance(items, list):
+            continue
+        for index, item in enumerate(items):
+            if not isinstance(item, dict):
+                continue
+            item_id = str(item.get("id") or "")
+            if item_id == next_item["id"]:
+                return next_groups, {"mode": "unchanged", "item_id": next_item["id"], "name": next_item["name"]}
+            if item_id in pump_ids or "吸奶器" in str(item.get("name") or ""):
+                from_name = _first_text(item.get("name"))
+                items[index] = next_item
+                return next_groups, {
+                    "mode": "replaced",
+                    "from_item_id": item_id,
+                    "from_name": from_name,
+                    "to_item_id": next_item["id"],
+                    "to_name": next_item["name"],
+                }
+    group = _find_or_create_hospital_bag_cart_group(next_groups, "母乳喂养", "sky")
+    group["items"].append(next_item)
+    return next_groups, {"mode": "added", "item_id": next_item["id"], "name": next_item["name"]}
+
+
 def _hospital_bag_cart_update_result(
     action: str,
     groups: list[dict[str, Any]],
     totals: dict[str, Any],
     message: str,
     *,
+    before_totals: dict[str, Any] | None = None,
     removed_item_ids: list[str] | None = None,
     removed_item_names: list[str] | None = None,
+    restored_item_ids: list[str] | None = None,
+    restored_item_names: list[str] | None = None,
+    replaced_items: list[dict[str, Any]] | None = None,
+    target_budget: float | None = None,
+    budget_met: bool | None = None,
 ) -> dict[str, Any]:
+    cart_update: dict[str, Any] = {
+        "action": action,
+        "groups": groups,
+        "totals": totals,
+        "removed_item_ids": removed_item_ids or [],
+        "removed_item_names": removed_item_names or [],
+        "restored_item_ids": restored_item_ids or [],
+        "restored_item_names": restored_item_names or [],
+        "replaced_items": replaced_items or [],
+        "message": message,
+    }
+    if before_totals is not None:
+        cart_update["before_totals"] = before_totals
+    if target_budget is not None:
+        cart_update["target_budget"] = target_budget
+    if budget_met is not None:
+        cart_update["budget_met"] = budget_met
     return {
         "tool_name": "hospital_bag_cart_update",
         "status": "cart_updated",
         "summary": message,
-        "cart_update": {
-            "action": action,
-            "groups": groups,
-            "totals": totals,
-            "removed_item_ids": removed_item_ids or [],
-            "removed_item_names": removed_item_names or [],
-            "message": message,
-        },
+        "cart_update": cart_update,
     }
 
 
@@ -569,18 +1200,19 @@ def _sanitize_hospital_bag_cart_groups(groups: list[Any]) -> list[dict[str, Any]
             qty = _cart_number(item.get("qty"), default=1)
             price = _cart_number(item.get("price"), default=0)
             keywords = item.get("keywords")
-            items.append(
-                {
-                    "id": item_id,
-                    "name": name,
-                    "desc": _first_text(item.get("desc")),
-                    "qty": max(1, int(qty)),
-                    "price": round(price, 2),
-                    "keywords": [str(keyword).strip() for keyword in keywords if str(keyword).strip()]
-                    if isinstance(keywords, list)
-                    else [],
-                }
-            )
+            next_item = {
+                "id": item_id,
+                "name": name,
+                "desc": _first_text(item.get("desc")),
+                "qty": max(1, int(qty)),
+                "price": round(price, 2),
+                "keywords": [str(keyword).strip() for keyword in keywords if str(keyword).strip()]
+                if isinstance(keywords, list)
+                else [],
+            }
+            _copy_optional_cart_item_fields(item, next_item)
+            _apply_default_cart_item_image(next_item)
+            items.append(next_item)
         sanitized.append({"title": title, "tone": tone, "items": items})
     return sanitized
 
@@ -591,14 +1223,7 @@ def _clone_hospital_bag_cart_groups(groups: list[dict[str, Any]]) -> list[dict[s
             "title": str(group.get("title") or ""),
             "tone": str(group.get("tone") or "rose"),
             "items": [
-                {
-                    "id": str(item.get("id") or ""),
-                    "name": str(item.get("name") or ""),
-                    "desc": str(item.get("desc") or ""),
-                    "qty": int(item.get("qty") or 1),
-                    "price": float(item.get("price") or 0),
-                    "keywords": list(item.get("keywords") or []),
-                }
+                _clone_hospital_bag_cart_item(item)
                 for item in group.get("items", [])
                 if isinstance(item, dict)
             ],
@@ -608,35 +1233,237 @@ def _clone_hospital_bag_cart_groups(groups: list[dict[str, Any]]) -> list[dict[s
     ]
 
 
+def _clone_hospital_bag_cart_item(item: dict[str, Any]) -> dict[str, Any]:
+    cloned = {
+        "id": str(item.get("id") or ""),
+        "name": str(item.get("name") or ""),
+        "desc": str(item.get("desc") or ""),
+        "qty": int(item.get("qty") or 1),
+        "price": float(item.get("price") or 0),
+        "keywords": list(item.get("keywords") or []),
+    }
+    _copy_optional_cart_item_fields(item, cloned)
+    _apply_default_cart_item_image(cloned)
+    return cloned
+
+
+def _copy_optional_cart_item_fields(source: dict[str, Any], target: dict[str, Any]) -> None:
+    for key in (
+        "currency",
+        "price_label",
+        "sale_price_label",
+        "official_price_usd",
+        "sale_price_usd",
+        "exchange_rate_usd_cny",
+        "product_url",
+        "image_url",
+        "image_alt",
+        "sku_id",
+        "model",
+    ):
+        if key in source and source[key] is not None:
+            target[key] = source[key]
+
+
+def _apply_default_cart_item_image(item: dict[str, Any]) -> None:
+    if item.get("image_url"):
+        return
+    item_id = str(item.get("id") or "")
+    image_url = MOMCOZY_PUMP_IMAGE_URLS.get(item_id) or HOSPITAL_BAG_CART_PRODUCT_IMAGE_URLS.get(item_id)
+    if not image_url:
+        return
+    item["image_url"] = image_url
+    if not item.get("image_alt"):
+        item["image_alt"] = str(item.get("name") or "商品图")
+
+
 def _hospital_bag_cart_totals(groups: list[dict[str, Any]]) -> dict[str, Any]:
-    subtotal = round(
-        sum(
-            _cart_number(item.get("price"), default=0) * max(1, int(_cart_number(item.get("qty"), default=1)))
-            for group in groups
-            for item in group.get("items", [])
-            if isinstance(item, dict)
-        ),
-        2,
-    )
-    item_count = sum(
-        max(1, int(_cart_number(item.get("qty"), default=1)))
-        for group in groups
-        for item in group.get("items", [])
-        if isinstance(item, dict)
-    )
+    subtotal = 0.0
+    item_count = 0
+    converted_usd_subtotal = 0.0
+    for group in groups:
+        for item in group.get("items", []):
+            if not isinstance(item, dict):
+                continue
+            qty = max(1, int(_cart_number(item.get("qty"), default=1)))
+            line_total = _cart_item_line_total_cny(item, qty)
+            subtotal = round(subtotal + line_total, 2)
+            item_count += qty
+            if _cart_item_currency(item) == "USD":
+                converted_usd_subtotal = round(converted_usd_subtotal + line_total, 2)
     discount = round(subtotal * 0.08, 2) if item_count > 0 else 0
     shipping = 0
     total = round(subtotal - discount + shipping, 2)
+    currency_totals = [
+        {
+            "currency": "CNY",
+            "subtotal": subtotal,
+            "discount": discount,
+            "shipping": shipping,
+            "total": total,
+            "itemCount": item_count,
+        }
+    ]
     return {
         "subtotal": subtotal,
         "itemCount": item_count,
         "discount": discount,
         "shipping": shipping,
         "total": total,
+        "currency_totals": currency_totals,
+        "mixed_currency": False,
+        "exchange_rate_usd_cny": HOSPITAL_BAG_CART_USD_TO_CNY_RATE,
+        "converted_usd_subtotal": converted_usd_subtotal,
     }
 
 
-def _apply_hospital_bag_budget_plan(groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _cart_item_line_total_cny(item: dict[str, Any], qty: int) -> float:
+    price = _cart_number(item.get("price"), default=0)
+    if _cart_item_currency(item) == "USD":
+        price = _usd_to_cny(price)
+    return round(price * qty, 2)
+
+
+def _cart_item_currency(item: dict[str, Any]) -> str:
+    currency = str(item.get("currency") or "CNY").strip().upper()
+    if currency in {"USD", "CNY"}:
+        return currency
+    return "CNY"
+
+
+def _cart_totals_label(totals: dict[str, Any]) -> str:
+    return _money_label(totals.get("total"), "CNY")
+
+
+def _money_label(value: Any, currency: str) -> str:
+    amount = _cart_number(value, default=0)
+    if currency.upper() == "USD":
+        return f"${amount:.2f}"
+    return f"¥{amount:.2f}"
+
+
+def _optimize_hospital_bag_cart_budget(
+    groups: list[dict[str, Any]],
+    *,
+    target_budget: float | None,
+    budget_mode: str,
+    preference: str,
+    preserve_item_ids: list[str],
+    allow_remove_pump: bool,
+) -> dict[str, Any]:
+    before_totals = _hospital_bag_cart_totals(groups)
+    next_groups = _clone_hospital_bag_cart_groups(groups)
+    protected_ids = set(HOSPITAL_BAG_CART_PROTECTED_ITEM_IDS)
+    protected_ids.update(preserve_item_ids)
+    if not allow_remove_pump:
+        protected_ids.update(_hospital_bag_pump_item_ids())
+
+    replaced_items: list[dict[str, Any]] = []
+    if preference != "comfort":
+        next_groups, replaced_items = _replace_hospital_bag_cart_items(next_groups, ["baby-blanket"])
+
+    removed_ids: list[str] = []
+    removed_names: list[str] = []
+    if target_budget is None:
+        candidate_ids = HOSPITAL_BAG_CART_LIGHT_BUDGET_REMOVE_IDS if budget_mode != "minimal" else set(HOSPITAL_BAG_CART_BUDGET_REMOVE_ORDER)
+        next_groups, removed_names = _remove_hospital_bag_cart_items(
+            next_groups,
+            [item_id for item_id in HOSPITAL_BAG_CART_BUDGET_REMOVE_ORDER if item_id in candidate_ids and item_id not in protected_ids],
+        )
+        removed_ids = _ids_for_names(groups, removed_names)
+    else:
+        for item_id in _budget_removal_order(allow_remove_pump=allow_remove_pump, preference=preference):
+            if item_id in protected_ids:
+                continue
+            totals = _hospital_bag_cart_totals(next_groups)
+            if totals["total"] <= target_budget:
+                break
+            next_groups_candidate, names = _remove_hospital_bag_cart_items(next_groups, [item_id])
+            if not names:
+                continue
+            next_groups = next_groups_candidate
+            removed_ids.append(item_id)
+            removed_names.extend(names)
+
+    totals = _hospital_bag_cart_totals(next_groups)
+    budget_met = target_budget is None or totals["total"] <= target_budget
+    return {
+        "groups": next_groups,
+        "before_totals": before_totals,
+        "totals": totals,
+        "target_budget": target_budget,
+        "budget_met": budget_met,
+        "removed_item_ids": removed_ids,
+        "removed_item_names": removed_names,
+        "replaced_items": replaced_items,
+    }
+
+
+def _budget_removal_order(*, allow_remove_pump: bool, preference: str) -> list[str]:
+    order = list(HOSPITAL_BAG_CART_BUDGET_REMOVE_ORDER)
+    if preference == "breastfeeding":
+        order = [item_id for item_id in order if item_id not in {"milk-pad", "milk-cream", "milk-storage", "milk-bottle"}] + [
+            item_id for item_id in order if item_id in {"milk-pad", "milk-cream", "milk-storage", "milk-bottle"}
+        ]
+    if allow_remove_pump:
+        order.extend(sorted(_hospital_bag_pump_item_ids()))
+    return order
+
+
+def _hospital_bag_budget_message(budget_result: dict[str, Any]) -> str:
+    totals = budget_result["totals"]
+    target_budget = budget_result.get("target_budget")
+    budget_met = bool(budget_result.get("budget_met"))
+    removed_names = budget_result.get("removed_item_names") or []
+    replaced_items = budget_result.get("replaced_items") or []
+    changed_parts: list[str] = []
+    if replaced_items:
+        changed_parts.append("包被换成基础款")
+    if removed_names:
+        changed_parts.append("先拿掉" + "、".join(f"「{name}」" for name in removed_names))
+
+    if target_budget is not None and budget_met:
+        prefix = f"好，我按 {target_budget:.0f} 元以内帮你压了一版。"
+    elif target_budget is not None:
+        prefix = f"我先尽量按 {target_budget:.0f} 元以内帮你压了一版，但为了保留吸奶器和基础必需品，目前还会超一点。"
+    else:
+        prefix = "好，我先帮你切到更省钱的一版。"
+
+    if changed_parts:
+        detail = "，".join(changed_parts)
+        return f"{prefix}{detail}；吸奶器我先保留。现在预计合计约 {_cart_totals_label(totals)}，共 {totals['itemCount']} 件。"
+    return f"{prefix}当前购物车已经比较接近这个要求，吸奶器我先保留。现在预计合计约 {_cart_totals_label(totals)}，共 {totals['itemCount']} 件。"
+
+
+def _target_budget(value: Any) -> float | None:
+    budget = _cart_number(value, default=0)
+    if budget <= 0:
+        return None
+    return round(budget, 2)
+
+
+def _missing_item_message(action: str) -> str:
+    if action == "mark_provided":
+        return "医院会提供哪些？你直接告诉我物品名，我帮你从购物车里拿掉。"
+    if action == "mark_owned":
+        return "家里已经有哪些？你直接告诉我物品名，我帮你从购物车里拿掉。"
+    return "你想删哪一件？直接告诉我商品名就行。"
+
+
+def _remove_items_message(action: str, names: str, totals: dict[str, Any]) -> str:
+    if action == "mark_provided":
+        return f"好，医院会提供的{names}我先从购物车里拿掉了，现在预计合计 {_cart_totals_label(totals)}。"
+    if action == "mark_owned":
+        return f"好，家里已经有的{names}我先从购物车里拿掉了，现在预计合计 {_cart_totals_label(totals)}。"
+    return f"已帮你从购物车里删掉{names}，现在预计合计 {_cart_totals_label(totals)}。"
+
+
+def _replace_hospital_bag_cart_items(
+    groups: list[dict[str, Any]],
+    item_ids: list[str],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    requested = set(item_ids) if item_ids else set(HOSPITAL_BAG_CART_BUDGET_REPLACEMENTS)
+    replaced_items: list[dict[str, Any]] = []
     next_groups: list[dict[str, Any]] = []
     for group in groups:
         items: list[dict[str, Any]] = []
@@ -644,12 +1471,21 @@ def _apply_hospital_bag_budget_plan(groups: list[dict[str, Any]]) -> list[dict[s
             if not isinstance(item, dict):
                 continue
             item_id = str(item.get("id") or "")
-            if item_id in HOSPITAL_BAG_CART_BUDGET_REMOVAL_IDS:
-                continue
             replacement = HOSPITAL_BAG_CART_BUDGET_REPLACEMENTS.get(item_id)
-            items.append(dict(replacement) if replacement else dict(item))
+            if item_id in requested and replacement:
+                items.append(_clone_hospital_bag_cart_item(replacement))
+                replaced_items.append(
+                    {
+                        "from_item_id": item_id,
+                        "from_name": _first_text(item.get("name")),
+                        "to_item_id": replacement["id"],
+                        "to_name": replacement["name"],
+                    }
+                )
+                continue
+            items.append(dict(item))
         next_groups.append({**group, "items": items})
-    return next_groups
+    return next_groups, replaced_items
 
 
 def _remove_hospital_bag_cart_items(groups: list[dict[str, Any]], item_ids: list[str]) -> tuple[list[dict[str, Any]], list[str]]:
@@ -669,6 +1505,108 @@ def _remove_hospital_bag_cart_items(groups: list[dict[str, Any]], item_ids: list
             items.append(dict(item))
         next_groups.append({**group, "items": items})
     return next_groups, removed_names
+
+
+def _restore_hospital_bag_cart_items(groups: list[dict[str, Any]], item_ids: list[str]) -> tuple[list[dict[str, Any]], list[str]]:
+    next_groups = _clone_hospital_bag_cart_groups(groups)
+    existing_ids = {
+        str(item.get("id") or "")
+        for group in next_groups
+        for item in group.get("items", [])
+        if isinstance(item, dict)
+    }
+    restored_names: list[str] = []
+    for item_id in item_ids:
+        if item_id in existing_ids:
+            continue
+        original_id = HOSPITAL_BAG_CART_REPLACEMENT_ORIGINAL_BY_ID.get(item_id, item_id)
+        default = _default_hospital_bag_cart_item(original_id)
+        if not default:
+            continue
+        group_title, group_tone, item = default
+        group = _find_or_create_hospital_bag_cart_group(next_groups, group_title, group_tone)
+        group["items"].append(item)
+        existing_ids.add(item["id"])
+        restored_names.append(item["name"])
+    return next_groups, restored_names
+
+
+def _update_hospital_bag_cart_quantities(
+    groups: list[dict[str, Any]],
+    quantity_updates: list[Any],
+) -> tuple[list[dict[str, Any]], list[str], list[str]]:
+    update_by_id: dict[str, int] = {}
+    for update in quantity_updates:
+        if not isinstance(update, dict):
+            continue
+        item_id = _first_text(update.get("item_id"))
+        if not item_id:
+            continue
+        update_by_id[item_id] = max(0, int(_cart_number(update.get("qty"), default=1)))
+
+    updated_names: list[str] = []
+    removed_names: list[str] = []
+    next_groups: list[dict[str, Any]] = []
+    for group in groups:
+        items: list[dict[str, Any]] = []
+        for item in group.get("items", []):
+            if not isinstance(item, dict):
+                continue
+            item_id = str(item.get("id") or "")
+            if item_id not in update_by_id:
+                items.append(dict(item))
+                continue
+            qty = update_by_id[item_id]
+            name = _first_text(item.get("name"))
+            if qty <= 0:
+                if name:
+                    removed_names.append(name)
+                continue
+            next_item = dict(item)
+            next_item["qty"] = qty
+            items.append(next_item)
+            if name:
+                updated_names.append(name)
+        next_groups.append({**group, "items": items})
+    return next_groups, updated_names, removed_names
+
+
+def _default_hospital_bag_cart_item(item_id: str) -> tuple[str, str, dict[str, Any]] | None:
+    product = _momcozy_pump_product(item_id)
+    if product:
+        return "母乳喂养", "sky", _hospital_bag_cart_pump_item(product)
+    for group in DEFAULT_HOSPITAL_BAG_CART_GROUPS:
+        for item in group.get("items", []):
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("id") or "") == item_id:
+                return str(group.get("title") or ""), str(group.get("tone") or "rose"), _clone_hospital_bag_cart_item(item)
+    return None
+
+
+def _find_or_create_hospital_bag_cart_group(
+    groups: list[dict[str, Any]],
+    title: str,
+    tone: str,
+) -> dict[str, Any]:
+    for group in groups:
+        if str(group.get("title") or "") == title:
+            return group
+    group = {"title": title, "tone": tone, "items": []}
+    groups.append(group)
+    return group
+
+
+def _ids_for_names(groups: list[dict[str, Any]], names: list[str]) -> list[str]:
+    wanted = set(names)
+    ids: list[str] = []
+    for group in groups:
+        for item in group.get("items", []):
+            if not isinstance(item, dict):
+                continue
+            if _first_text(item.get("name")) in wanted:
+                ids.append(str(item.get("id") or ""))
+    return [item_id for item_id in ids if item_id]
 
 
 def _cart_number(value: Any, *, default: float) -> float:
@@ -792,16 +1730,18 @@ def _hospital_bag_packing_groups(context: dict[str, Any]) -> list[dict[str, Any]
     postpartum_items = _hospital_bag_postpartum_items(context)
     if postpartum_items:
         groups.append({"group_id": "postpartum_home_first_week", "title": "产后回家第一周用品", "items": postpartum_items})
-    return [
+    filtered_groups = [
         {**group, "items": _filter_provided_items(group["items"], context.get("provided_items", []))}
         for group in groups
         if group.get("items")
     ]
+    _apply_hospital_bag_item_explanations(filtered_groups)
+    return filtered_groups
 
 
 def _hospital_bag_document_items(context: dict[str, Any]) -> list[dict[str, Any]]:
     return [
-        {"label": "身份证件", "priority": "must", "copy_requirement": "原件", "note": "妈妈和陪产人证件分开放，入院登记时更好找。"},
+        {"label": "身份证件", "priority": "must", "copy_requirement": "原件"},
         {"label": "医保卡/保险卡", "priority": "must", "copy_requirement": "原件"},
         {"label": "产检本/产检资料", "priority": "must", "copy_requirement": "原件"},
         {"label": "检查报告/化验单", "priority": "recommended", "copy_requirement": "按医院要求"},
@@ -809,7 +1749,11 @@ def _hospital_bag_document_items(context: dict[str, Any]) -> list[dict[str, Any]
         {"label": "银行卡/手机支付", "priority": "must"},
         {"label": "紧急联系人信息", "priority": "recommended"},
         {"label": "医生/医院联系电话", "priority": "recommended"},
-        {"label": "分娩沟通卡", "priority": "nice_to_have", "note": "如果已经做过，可以和产检资料放在一起。"},
+        {
+            "label": "分娩沟通卡",
+            "priority": "nice_to_have",
+            "explain": "记录生产偏好和需要提前沟通的事，入院时方便给医护看。",
+        },
         {
             "label": "准生证/户口本",
             "priority": "confirm_first",
@@ -1182,6 +2126,31 @@ def _dedupe_strings(values: list[str]) -> list[str]:
     return deduped
 
 
+def _apply_hospital_bag_item_explanations(groups: list[Any]) -> None:
+    for group in groups:
+        if not isinstance(group, dict):
+            continue
+        items = group.get("items")
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict) or _first_text(item.get("explain")):
+                continue
+            explanation = _hospital_bag_item_explanation(item.get("label"))
+            if explanation:
+                item["explain"] = explanation
+
+
+def _hospital_bag_item_explanation(label: Any) -> str:
+    label_text = _first_text(label)
+    if not label_text:
+        return ""
+    for tokens, explanation in HOSPITAL_BAG_ITEM_EXPLANATIONS:
+        if any(token in label_text for token in tokens):
+            return explanation
+    return ""
+
+
 def _normalized_placeholder(value: str) -> str:
     return str(value or "").strip().lower()
 
@@ -1237,6 +2206,7 @@ def _prepare_hospital_bag_card(card_json: dict[str, Any], inputs: RuntimeInputs)
         groups = []
         card_json["packing_groups"] = groups
     _normalize_hospital_bag_scene_groups(groups)
+    _apply_hospital_bag_item_explanations(groups)
 
     if _formula_only_feeding_intention(inputs):
         return dict(HOSPITAL_BAG_CART_ASSISTANT_FOLLOWUP)
@@ -1252,6 +2222,7 @@ def _prepare_hospital_bag_card(card_json: dict[str, Any], inputs: RuntimeInputs)
         group["items"] = items
 
     _ensure_breast_pump_visible(items)
+    _apply_hospital_bag_item_explanations(groups)
 
     return dict(HOSPITAL_BAG_CART_ASSISTANT_FOLLOWUP)
 

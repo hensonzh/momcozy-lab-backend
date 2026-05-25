@@ -203,7 +203,7 @@ WebSocket 客户端连接 `ws://<host>:<port>/api/ag-ui-ws` 后，第一帧必�
 | `service_state` | 可放在 `state` 或 `forwardedProps` 中 |
 | `retrieved_records` | 可放在 `state` 或 `forwardedProps` 中 |
 | `retrieved_knowledge` | 可放在 `state` 或 `forwardedProps` 中 |
-| `hospital_bag_cart` | 可放在 `state` 或 `forwardedProps` 中，供智能体按当前购物车 item_id 调用 `hospital_bag_cart_update` |
+| `hospital_bag_cart` | 可放在 `state` 或 `forwardedProps` 中；智能体进入购物车场景后通过 `tool_search` 加载 deferred 工具 `hospital_bag_cart_update` / `hospital_bag_pump_recommend`，并按当前 item_id 调整购物车或按官方价格推荐 Momcozy 吸奶器型号 |
 
 `/api/ag-ui` 还读取这些 AG-UI 运行字段：
 
@@ -579,7 +579,7 @@ Agent 状态通过 `CUSTOM` / `momcozy.agent.status` 发送：
 - `content` 是 JSON 字符串，需要 `parseJson(event.content)`。
 - 更新 work panel 工具结果状态。
 - 不再直接渲染结构化 UI；结构化 UI 由后续 `ARTIFACT_CREATED` 显式事件驱动。
-- 例外：`hospital_bag_cart_update` 会在 `content.cart_update` 中返回前端可应用的购物车状态，用于对话页自然语言修改购物车，不产生独立 artifact。
+- 例外：`hospital_bag_cart_update` 会在 `content.cart_update` 中返回前端可应用的购物车状态，用于对话页自然语言修改购物车，不产生独立 artifact。该工具支持预算上限、删除/加回、基础款替换、医院提供、家里已有、数量调整和吸奶器型号同步；预算优化默认尽量保留吸奶器。吸奶器推荐由 `hospital_bag_pump_recommend` 先返回型号和官方 USD 价格，再由购物车工具同步。
 
 #### `ARTIFACT_CREATED`
 

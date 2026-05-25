@@ -99,9 +99,12 @@ def _format_hospital_bag_cart_context(value: object) -> list[str]:
                 continue
             price = item.get("price")
             qty = item.get("qty")
+            currency = item.get("currency")
             parts = [f"item_id={item_id}", f"name={name}"]
             if price is not None:
                 parts.append(f"price={price}")
+            if currency is not None:
+                parts.append(f"currency={currency}")
             if qty is not None:
                 parts.append(f"qty={qty}")
             if group_title:

@@ -35,6 +35,7 @@ ToolName = Literal[
     "hospital_bag_form_create",
     "hospital_bag_card_create",
     "hospital_bag_cart_update",
+    "hospital_bag_pump_recommend",
     "ibclc_consult_card_create",
     "profile_get",
     "handoff_summary_generate",

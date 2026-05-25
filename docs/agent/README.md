@@ -311,6 +311,7 @@ message_sent_at: 2026-05-05T17:45:03+08:00
 - `care_handoffs`：`handoff_summary_generate`
 - `device_support`：`device_manual_search`、`support_ticket_draft_create`
 - `milk_management`：聚合后的奶量工具，包括 `milk_snapshot_get`、`milk_records_query`、`milk_record_mutate`、`milk_plan_query`、`milk_plan_preview`、`milk_plan_mutate`、`milk_calendar_query`、`milk_calendar_change_preview`、`milk_calendar_mutate`，以及评估类 `milk_assessment_evaluate`、`infant_growth_evaluate`
+- `hospital_bag_cart`：待产包购物车工具 `hospital_bag_cart_update`、`hospital_bag_pump_recommend`，用于预算上限优化、删除/加回、基础款替换、医院提供、家里已有、数量调整，以及按 Momcozy 官方对外价格推荐吸奶器型号并同步购物车
 
 每个 namespace 中的 function 都设置 `defer_loading: true`。模型开始时只看到 namespace 名称和描述；需要具体工具时由 `tool_search` 加载对应 function schema。
 

@@ -198,11 +198,69 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "hospital_bag_cart_update": _function_tool(
         "hospital_bag_cart_update",
-        "根据用户自然语言修改待产包购物车。当前购物车会在 request_context 的 current_hospital_bag_cart 中提供，包含 item_id/name/price/total。用于用户说太贵、便宜一点、删掉某个商品、不要某类商品、恢复默认购物车等。工具只返回前端可应用的购物车更新，不真正下单。若用户要删除具体物品，应从 request_context 里的 item_id 中选择；不确定具体物品时传空数组并用 assistant_message 简短询问。",
+        "根据用户自然语言修改待产包购物车。当前购物车会在 request_context 的 current_hospital_bag_cart 中提供，包含 item_id/name/price/currency/total。用于用户说预算上限、太贵、便宜一点、删掉/加回某个商品、医院会提供、家里已有、调整数量、恢复默认购物车、把推荐的 Momcozy 吸奶器型号同步到购物车等。用户给出明确金额时必须使用 action=optimize_budget 并设置 target_budget，例如“1000元以内”传 1000。工具只返回前端可应用的购物车更新，不真正下单。预算优化默认尽量保留吸奶器；只有用户明确要求删除吸奶器，或 allow_remove_pump=true 时才可移除。若用户要删除具体物品，应从 request_context 里的 item_id 中选择；不确定具体物品时传空数组并用 assistant_message 简短询问。若要同步吸奶器型号，先用 hospital_bag_pump_recommend 选型，再用 action=replace_pump_model 并传 product_sku_id。",
         {
-            "action": {"type": "string", "enum": ["apply_budget_plan", "remove_items", "reset_cart", "clarify"]},
-            "item_ids": {"type": "array", "items": {"type": "string"}, "description": "action=remove_items 时要删除的购物车 item_id；其他 action 传空数组。"},
+            "action": {
+                "type": "string",
+                "enum": [
+                    "replace_pump_model",
+                    "add_pump_model",
+                    "optimize_budget",
+                    "apply_budget_plan",
+                    "remove_items",
+                    "restore_items",
+                    "replace_items",
+                    "mark_provided",
+                    "mark_owned",
+                    "update_quantity",
+                    "reset_cart",
+                    "clarify",
+                ],
+            },
+            "item_ids": {"type": "array", "items": {"type": "string"}, "description": "要操作的当前购物车 item_id；预算优化或不需要指定物品时传空数组。"},
+            "product_sku_id": _nullable({"type": "string", "description": "action=replace_pump_model 或 add_pump_model 时使用；可取 pump-s9-pro、pump-s12-pro-quick、pump-m5-smart、pump-m6、pump-v1-pro、pump-m9、pump-w1、pump-air-1。其他 action 传 null。"}),
+            "quantity_updates": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "item_id": {"type": "string"},
+                        "qty": {"type": "integer", "minimum": 0},
+                    },
+                },
+                "description": "action=update_quantity 时使用；qty=0 表示移除。",
+            },
+            "target_budget": _nullable({"type": "number", "description": "用户明确预算上限，例如 1000；没有明确预算时传 null。"}),
+            "budget_mode": {"type": "string", "enum": ["under", "around", "cheaper", "minimal", "none"], "description": "预算意图；没有预算相关意图时传 none。"},
+            "preference": {"type": "string", "enum": ["balanced", "cheapest", "comfort", "breastfeeding", "minimal"], "description": "用户偏好；不确定时传 balanced。"},
+            "preserve_item_ids": {"type": "array", "items": {"type": "string"}, "description": "用户明确想保留的 item_id；不确定传空数组。"},
+            "allow_remove_pump": {"type": "boolean", "description": "只有用户明确同意吸奶器后买/删除吸奶器，或预算低到必须移除且用户确认时才传 true。默认 false。"},
             "assistant_message": {"type": "string", "description": "给用户的简短说明。可为空，由工具生成默认文案。"},
+        },
+    ),
+    "hospital_bag_pump_recommend": _function_tool(
+        "hospital_bag_pump_recommend",
+        "根据当前待产包购物车场景、用户预算和使用场景，从 Momcozy 官方吸奶器型号目录里推荐 1 款主推型号和 1-2 款备选。无购物车副作用；如果用户要同步购物车，拿返回的 cart_sync_suggestion 再调用 hospital_bag_cart_update。价格口径使用 Momcozy 官方对外价格，保留官方 USD 标价和活动价字段。",
+        {
+            "use_case": {
+                "type": "string",
+                "enum": ["unknown", "hospital_backup", "daily_home", "work_pumping", "portable", "comfort", "performance", "high_output", "budget"],
+                "description": "用户主要使用场景；不确定传 unknown。",
+            },
+            "preference": {
+                "type": "string",
+                "enum": ["balanced", "budget", "comfort", "portable", "performance", "app", "simple", "premium"],
+                "description": "用户最在意的选择偏好；不确定传 balanced。",
+            },
+            "feeding_intention": {
+                "type": "string",
+                "enum": ["unknown", "breastfeeding", "mixed", "formula"],
+                "description": "用户喂养意向；只在已知时填写。",
+            },
+            "target_budget_usd": _nullable({"type": "number", "description": "用户明确用美元表达的吸奶器预算上限；没有明确美元预算时传 null。"}),
+            "must_have_app": _nullable({"type": "boolean", "description": "用户明确要求 App 控制传 true，明确不要 App 传 false，不确定传 null。"}),
+            "need_single_unit": _nullable({"type": "boolean", "description": "用户明确只想买单边/单台传 true，明确要套装传 false，不确定传 null。"}),
+            "assistant_message": {"type": "string", "description": "可选的简短说明；通常传空字符串，让工具生成默认推荐文案。"},
         },
     ),
     "ibclc_consult_card_create": _function_tool(

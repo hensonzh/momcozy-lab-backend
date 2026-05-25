@@ -11,6 +11,7 @@ from .tool_handlers.cards import (
     create_hospital_bag_card,
     update_hospital_bag_cart,
     create_hospital_bag_form,
+    recommend_hospital_bag_pump,
 )
 from .tool_handlers.common import decode_json_argument_strings
 from .tool_handlers.device import create_support_ticket_draft, search_device_manual
@@ -41,7 +42,6 @@ CORE_IMMEDIATE_TOOLS: list[ToolName] = [
     "birth_plan_card_create",
     "hospital_bag_form_create",
     "hospital_bag_card_create",
-    "hospital_bag_cart_update",
     "ibclc_consult_card_create",
 ]
 MILK_MANAGEMENT_TOOLS: list[ToolName] = [
@@ -85,6 +85,10 @@ DEFERRED_TOOL_NAMESPACES: dict[str, dict[str, Any]] = {
         "description": "用于奶量状态聚合、奶量评估、宝宝生长记录、任意时间段记录读取/修改、追奶/稳奶/减奶计划、计划执行情况读取、任务完成和奶量 calendar 调整的聚合工具。",
         "tool_names": MILK_MANAGEMENT_TOOLS,
     },
+    "hospital_bag_cart": {
+        "description": "用于待产包购物车调整和 Momcozy 吸奶器型号推荐，包括预算上限优化、删除或加回商品、基础款替换、医院提供、家里已有、数量调整、按官方价格推荐吸奶器型号并同步到购物车。仅在当前对话已经进入待产包购物车场景时使用。",
+        "tool_names": ["hospital_bag_cart_update", "hospital_bag_pump_recommend"],
+    },
 }
 
 READ_ONLY_TOOL_NAMES = {
@@ -96,6 +100,7 @@ READ_ONLY_TOOL_NAMES = {
     "hospital_bag_form_create",
     "hospital_bag_card_create",
     "hospital_bag_cart_update",
+    "hospital_bag_pump_recommend",
     "device_manual_search",
     "support_ticket_draft_create",
     *MILK_MANAGEMENT_READ_ONLY_TOOLS,
@@ -114,6 +119,7 @@ TOOL_HANDLERS: dict[ToolName, ToolHandler] = {
     "hospital_bag_form_create": create_hospital_bag_form,
     "hospital_bag_card_create": create_hospital_bag_card,
     "hospital_bag_cart_update": update_hospital_bag_cart,
+    "hospital_bag_pump_recommend": recommend_hospital_bag_pump,
     "ibclc_consult_card_create": create_ibclc_consult_card,
     "profile_get": get_profile,
     "handoff_summary_generate": generate_handoff_summary,

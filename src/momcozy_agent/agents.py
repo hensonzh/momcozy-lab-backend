@@ -306,6 +306,10 @@ def safe_tool_result(result: dict[str, Any]) -> dict[str, Any]:
             message = tool_result["cart_update"].get("message")
             if isinstance(message, str) and message.strip():
                 safe["message"] = message.strip()
+        if result.get("tool_name") == "hospital_bag_pump_recommend":
+            for key in ("recommended_product", "alternatives", "cart_sync_suggestion", "message", "source_urls"):
+                if key in tool_result:
+                    safe[key] = tool_result[key]
     if isinstance(result.get("error"), dict):
         safe["error"] = result["error"]
     return safe
@@ -324,6 +328,7 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
         "hospital_bag_form_create",
         "hospital_bag_card_create",
         "hospital_bag_cart_update",
+        "hospital_bag_pump_recommend",
         "ibclc_consult_card_create",
         "support_ticket_draft_create",
     }:
@@ -347,6 +352,10 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
         "assistant_followup",
         "message",
         "cart_update",
+        "recommended_product",
+        "alternatives",
+        "cart_sync_suggestion",
+        "source_urls",
         "error",
     ):
         if key in safe:
