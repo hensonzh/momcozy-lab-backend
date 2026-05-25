@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import sqlite3
 import sys
 from datetime import datetime, timedelta
@@ -18,8 +19,26 @@ from momcozy_agent.services.milk_management.assessment import get_yield_referenc
 
 USER_ID = "demo_mama_increase_001"
 INFANT_ID = 18
-DELIVERY_DATE = "2026-03-01"
-TODAY = datetime(2026, 5, 21)
+BASE_TODAY = datetime(2026, 5, 21)
+BASE_DELIVERY_DATE = datetime(2026, 3, 1)
+
+
+def _resolve_today() -> datetime:
+    raw = os.getenv("STATUS_DEMO_TODAY", "").strip()
+    if raw:
+        parsed = datetime.fromisoformat(raw)
+        return datetime.combine(parsed.date(), datetime.min.time())
+    return datetime.combine(datetime.now().date(), datetime.min.time())
+
+
+TODAY = _resolve_today()
+SHIFT_DAYS = (TODAY.date() - BASE_TODAY.date()).days
+DELIVERY_DATE = (BASE_DELIVERY_DATE + timedelta(days=SHIFT_DAYS)).date().isoformat()
+
+
+def _shift_timestamp(value: str) -> str:
+    parsed = datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+    return (parsed + timedelta(days=SHIFT_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
 
 
 # Weight curve starts inside the WHO girls P25-P50 band, then visibly
@@ -29,14 +48,14 @@ TODAY = datetime(2026, 5, 21)
 # textbook "milk supply -> baby intake -> weight stall" story that
 # justifies a lactation-boost (追奶) plan.
 GROWTH_POINTS = [
-    ("2026-03-01 09:20:00", 3.00, 49.0, 34.0),  # birth, ~P25
-    ("2026-03-15 09:25:00", 3.55, 52.0, 35.5),  # 2 wk, ~P25-P50 (39 g/d)
-    ("2026-03-29 09:30:00", 4.05, 54.5, 36.6),  # 4 wk, ~P25-P50 (36 g/d)
-    ("2026-04-12 09:40:00", 4.40, 56.0, 37.3),  # 6 wk, slipping toward P25 (25 g/d)
-    ("2026-04-26 09:50:00", 4.55, 57.0, 37.7),  # 8 wk, ~P15-P25 (11 g/d, slow)
-    ("2026-05-10 09:50:00", 4.70, 57.8, 38.0),  # 10 wk, ~P10-P15 (11 g/d, persistent slow)
-    ("2026-05-17 09:40:00", 4.78, 58.1, 38.1),  # 11 wk, ~P10 line (11 g/d)
-    ("2026-05-21 09:21:00", 4.85, 58.3, 38.2),  # 11.4 wk, on P10 (17 g/d, still under-grown)
+    (_shift_timestamp("2026-03-01 09:20:00"), 3.00, 49.0, 34.0),  # birth, ~P25
+    (_shift_timestamp("2026-03-15 09:25:00"), 3.55, 52.0, 35.5),  # 2 wk, ~P25-P50 (39 g/d)
+    (_shift_timestamp("2026-03-29 09:30:00"), 4.05, 54.5, 36.6),  # 4 wk, ~P25-P50 (36 g/d)
+    (_shift_timestamp("2026-04-12 09:40:00"), 4.40, 56.0, 37.3),  # 6 wk, slipping toward P25 (25 g/d)
+    (_shift_timestamp("2026-04-26 09:50:00"), 4.55, 57.0, 37.7),  # 8 wk, ~P15-P25 (11 g/d, slow)
+    (_shift_timestamp("2026-05-10 09:50:00"), 4.70, 57.8, 38.0),  # 10 wk, ~P10-P15 (11 g/d, persistent slow)
+    (_shift_timestamp("2026-05-17 09:40:00"), 4.78, 58.1, 38.1),  # 11 wk, ~P10 line (11 g/d)
+    (_shift_timestamp("2026-05-21 09:21:00"), 4.85, 58.3, 38.2),  # 11.4 wk, on P10 (17 g/d, still under-grown)
 ]
 
 
@@ -167,19 +186,12 @@ def _daily_total_for(day: datetime, index: int) -> int:
 
 def _seed_lactation(conn: sqlite3.Connection) -> None:
     start = TODAY - timedelta(days=29)
-    end = TODAY + timedelta(days=1)
     conn.execute(
         """
         DELETE FROM pumping_log
         WHERE user_id = ?
-          AND pump_start_time >= ?
-          AND pump_start_time < ?
         """,
-        (
-            USER_ID,
-            start.strftime("%Y-%m-%d 00:00:00"),
-            end.strftime("%Y-%m-%d 00:00:00"),
-        ),
+        (USER_ID,),
     )
 
     for index in range(30):
@@ -221,19 +233,12 @@ def _seed_feeding(conn: sqlite3.Connection) -> None:
     含亲喂估算 (`total_milk_estimate`) line has real input to render."""
 
     start = TODAY - timedelta(days=29)
-    end = TODAY + timedelta(days=1)
     conn.execute(
         """
         DELETE FROM feeding_log
         WHERE user_id = ?
-          AND feed_time >= ?
-          AND feed_time < ?
         """,
-        (
-            USER_ID,
-            start.strftime("%Y-%m-%d 00:00:00"),
-            end.strftime("%Y-%m-%d 00:00:00"),
-        ),
+        (USER_ID,),
     )
 
     bottle_time_text, bottle_title, bottle_ml = BOTTLE_FEED

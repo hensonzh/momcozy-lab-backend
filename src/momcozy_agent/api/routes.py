@@ -520,7 +520,11 @@ async def create_analysis_endpoint(request: Request) -> dict[str, Any]:
         response_message = "  \r".join(str(item) for item in message) if isinstance(message, list) else str(message)
         if not data_store.update_user_profile_daily_summary(user_id=uid, daily_summary=daily_summary_text):
             return _analysis_create_response(error=-1, message="failed to update daily summary")
-        return _analysis_create_response(error=0, message=response_message, analysis_card=_daily_summary_analysis_card(message))
+        return _analysis_create_response(
+            error=0,
+            message=response_message,
+            analysis_card=_daily_summary_analysis_card(message, summary_data=data),
+        )
     return _analysis_create_response(error=-1, result=False, message="unsupported type")
 
 
@@ -1507,20 +1511,35 @@ def _analysis_create_response(
     return response
 
 
-def _daily_summary_analysis_card(message: Any) -> dict[str, Any]:
+def _daily_summary_analysis_card(message: Any, *, summary_data: dict[str, Any] | None = None) -> dict[str, Any]:
     lines = [str(item).strip() for item in message] if isinstance(message, list) else [str(message or "").strip()]
     lines = [line for line in lines if line]
-    titles = ["今日概览", "奶量数据", "节律观察", "需要留意", "明天小建议"]
+    data = summary_data if isinstance(summary_data, dict) else {}
+    used_latest_available_record = bool(data.get("used_latest_available_record"))
+    titles = [
+        "最近记录概览" if used_latest_available_record else "今日概览",
+        "奶量数据",
+        "节律观察",
+        "需要留意",
+        "明天小建议",
+    ]
     tones = ["overview", "milk", "rhythm", "attention", "next"]
     sections = [
         {"id": f"daily_{index}", "title": titles[index], "tone": tones[index], "items": [line]}
         for index, line in enumerate(lines[: len(titles)])
     ]
-    return {
+    card = {
         "kind": "daily_summary",
         "title": "每日奶量总结",
         "sections": sections,
     }
+    if used_latest_available_record:
+        card["status_label"] = "最近记录"
+        card["status_tone"] = "insufficient"
+        label = str(data.get("record_date_label") or "").strip()
+        if label:
+            card["subtitle"] = f"按 {label} 的记录生成"
+    return card
 
 
 def _mom_baby_analysis_card(
@@ -1548,11 +1567,11 @@ def _mom_baby_analysis_card(
 
 def _mom_baby_status_badge(*, normality: dict[str, Any], is_normal: bool) -> tuple[str, str]:
     if is_normal:
-        return "暂无明显异常", "normal"
+        return "", ""
 
     reason = str(normality.get("reason") or "").strip()
     if reason in {"insufficient_minimum_valid_days", "assessment_failed", "missing_user_id"}:
-        return "记录不足", "insufficient"
+        return "", ""
 
     failed_metrics = normality.get("failed_metrics") if isinstance(normality.get("failed_metrics"), list) else []
     failed_types = {
@@ -1560,26 +1579,26 @@ def _mom_baby_status_badge(*, normality: dict[str, Any], is_normal: bool) -> tup
         for item in failed_metrics
         if isinstance(item, dict) and str(item.get("type") or "").strip()
     }
+    metrics = normality.get("metrics") if isinstance(normality.get("metrics"), list) else []
+    low_days = [
+        item
+        for item in metrics
+        if isinstance(item, dict)
+        and (str(item.get("status") or "") == "low" or str(item.get("rule_hit") or "") == "percentile_below_p15")
+    ]
+    if len(low_days) >= max(3, min(5, len(metrics) or 0)):
+        return "值得关注", "attention"
+
     if len(failed_types) > 1:
-        return "多项需关注", "attention"
+        return "值得关注", "attention"
 
     if "lactation" in failed_types or reason == "lactation_out_of_range":
-        lactation_statuses = _failed_day_statuses(failed_metrics, metric_type="lactation")
-        if "low" in lactation_statuses and "high" not in lactation_statuses:
-            return "奶量低于参考", "attention"
-        if "high" in lactation_statuses and "low" not in lactation_statuses:
-            return "奶量高于参考", "attention"
-        return "奶量波动需关注", "attention"
+        return "值得关注", "attention"
 
     if "feeding" in failed_types or reason == "feeding_out_of_range":
-        feeding_directions = _failed_feeding_directions(failed_metrics)
-        if "low" in feeding_directions and "high" not in feeding_directions:
-            return "喂养次数偏少", "attention"
-        if "high" in feeding_directions and "low" not in feeding_directions:
-            return "喂养次数偏多", "attention"
-        return "喂养频次需关注", "attention"
+        return "值得关注", "attention"
 
-    return "需要留意", "attention"
+    return "值得关注", "attention"
 
 
 def _failed_day_statuses(failed_metrics: list[Any], *, metric_type: str) -> set[str]:

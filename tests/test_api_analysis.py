@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
+from datetime import datetime
 from unittest.mock import patch
 
 os.environ["ENTRY_API_KEY"] = "test-token"
@@ -12,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from momcozy_agent.api_app import app
 from momcozy_agent.services import data_store
+from momcozy_agent.services.milk_management.daily_summary import create_daily_summary
 from momcozy_agent.services.milk_management.status_advice import evaluate_status_advice_normality, generate_status_advice
 
 
@@ -54,8 +56,8 @@ class AnalysisCreateApiTests(unittest.TestCase):
         self.assertEqual(card["kind"], "mom_baby")
         self.assertEqual(card["title"], "每日泌乳/喂养建议")
         self.assertEqual(card["status"], "normal")
-        self.assertEqual(card["status_label"], "暂无明显异常")
-        self.assertEqual(card["status_tone"], "normal")
+        self.assertEqual(card["status_label"], "")
+        self.assertEqual(card["status_tone"], "")
         self.assertEqual([section["title"] for section in card["sections"]], ["泌乳建议", "喂养建议"])
         normality.assert_called_once_with(user_id="u1")
         advice.assert_called_once_with(user_id="u1", normality={"result": True})
@@ -93,7 +95,7 @@ class AnalysisCreateApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         card = response.json()["data"]["analysis_card"]
         self.assertEqual(card["status"], "attention")
-        self.assertEqual(card["status_label"], "奶量低于参考")
+        self.assertEqual(card["status_label"], "值得关注")
         self.assertEqual(card["status_tone"], "attention")
 
     def test_status_create_does_not_evaluate_normality(self) -> None:
@@ -195,6 +197,52 @@ class AnalysisCreateApiTests(unittest.TestCase):
         self.assertEqual(card["title"], "每日奶量总结")
         self.assertEqual([section["title"] for section in card["sections"]], ["今日概览", "奶量数据"])
         self.assertEqual(_profile("u1")["daily_summary"], "\n".join(message))
+
+    def test_daily_summary_defaults_to_latest_record_day_when_today_is_empty(self) -> None:
+        uid = "u-latest-record"
+        _seed_user(uid)
+        with data_store._connect() as conn:  # type: ignore[attr-defined]
+            conn.execute(
+                """
+                INSERT INTO pumping_log(user_id, pump_start_time, pump_end_time, pump_milk_volum,
+                                        pump_type, pump_milk_duration, pump_source, pump_title)
+                VALUES (?, '2026-05-21 09:00:00', '2026-05-21 09:20:00', 120, 1, 20, 1, '上午吸奶')
+                """,
+                (uid,),
+            )
+            conn.execute(
+                """
+                INSERT INTO feeding_log(user_id, infant_id, feed_time, feed_milk_volum, feed_type, feeding_title, feed_action)
+                VALUES (?, 1, '2026-05-21 11:00:00', NULL, '亲喂', '上午亲喂', 0)
+                """,
+                (uid,),
+            )
+
+        class FixedDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):  # type: ignore[override]
+                return cls(2026, 5, 22, 12, 0, 0, tzinfo=tz)
+
+        llm_message = [
+            "今日喂养 1 次，预估宝宝摄入 0 ml，记录可以继续补充。",
+            "吸奶 1 次，吸奶总量 120 ml。",
+            "今天排乳间隔记录较少，先继续观察。",
+            "暂未发现明确风险提示。",
+            "明天继续记录吸奶和亲喂时间。",
+        ]
+        with (
+            patch("momcozy_agent.services.milk_management.daily_summary.datetime", FixedDateTime),
+            patch("momcozy_agent.services.milk_management.daily_summary._request_llm_daily_summary", return_value=llm_message),
+        ):
+            result = create_daily_summary(user_id=uid)
+
+        self.assertTrue(result["ok"])
+        data = result["data"]
+        self.assertEqual(data["requested_target_date"], "2026-05-22")
+        self.assertEqual(data["target_date"], "2026-05-21")
+        self.assertTrue(data["used_latest_available_record"])
+        self.assertEqual(data["record_date_label"], "5月21日")
+        self.assertTrue(data["message"][0].startswith("最近记录（5月21日）："))
 
 
 def _seed_user(user_id: str) -> None:

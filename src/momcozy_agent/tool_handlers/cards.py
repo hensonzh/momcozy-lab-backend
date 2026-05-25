@@ -379,7 +379,7 @@ def create_hospital_bag_form(args: dict[str, Any], inputs: RuntimeInputs) -> dic
             "id": "hospital_bag_intake",
             "title": "信息采集",
             "description": "",
-            "submit_label": "生成我的卡片",
+            "submit_label": "开始生成",
             "fields": fields,
         },
     }

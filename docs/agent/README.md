@@ -451,7 +451,7 @@ ui_form_create
 
 流程：
 
-1. 用户表达分娩计划、生产偏好、birth plan card 等意图。
+1. 用户表达分娩沟通、生产偏好、birth plan card 等意图。
 2. 模型基于 manifest 调用 `load_skill("birth-prep")`。
 3. skill 要求先调用 `ui_form_create` 生成前端表单。
 4. 用户确认表单后，模型调用 `ui_card_create`。

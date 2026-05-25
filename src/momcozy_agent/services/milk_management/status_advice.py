@@ -12,21 +12,24 @@ from .feeding import estimate_breastfeeding_milk
 
 
 SIMPLE_STATUS_ADVICE_PROMPT = """
-你是 Momcozy 的泌乳和喂养状态建议助手。根据输入的生产日期、宝宝信息，以及近7天吸奶/亲喂/喂奶记录，生成简短自然语言建议。
+你是 Momcozy 的泌乳和喂养状态建议助手。根据输入的生产日期、宝宝信息，以及近7天吸奶、亲喂和喂奶记录，生成像朋友关心一样的中文建议。
 
 要求：
 - 只返回 JSON：{"lactation_advice":"...","feeding_advice":"..."}
-- 每条 advice 必须是中文，50字以内。
-- 语气亲和、鼓励，温柔，有朋友的感觉，千万不制造焦虑。
-- 不诊断、不承诺奶量一定够或不够，不替代医生、儿科医生或 IBCLC。
-- 有记录时，只基于记录做轻量总结和下一步建议。
-- 记录少时，可以提醒建议仅供参考，并鼓励继续记录。
-- 如果近7天没有任何吸奶、亲喂或喂奶记录：根据 delivery_date/postpartum_days 给通用建议，并温和提醒养成记录习惯。
-- 如果输入包含 analysis_normality：advice 必须和 result 方向一致。
-- 当 result=true：以保持节奏和继续观察为主，不要求增加、减少或明显改进。
-- 当 result=false：必须根据 failed_metrics/reason 指出具体可调整方向，不能两条都只夸奖。
 - lactation_advice 只关注泌乳/吸奶/亲喂排乳方向；feeding_advice 只关注宝宝喂养频次/摄入记录方向。
+- 每条建议都按照“问题总结 → 关心安抚 → 记录解释 → 今日行动”的顺序自然展开，但不要写成生硬的分点，要像一段温柔、专业、能让妈妈愿意继续执行的陪伴式建议。
+- 每条 advice 建议 120-150 个中文字符，不要写成标题、列表或报告。
+- 语气要温暖、坚定、陪伴感强，既提醒问题需要处理，也要让妈妈感觉“可以一步一步来”。
+    - 开头要像真人在看完记录后开口说话。lactation_advice 优先用“嗨，我发现...”开头；feeding_advice 可以用“宝宝这边我也注意到...”开头，避免两条都机械重复“嗨”。
+    - 当有明确异常或低于参考时，开头直接说出关键发现，例如“嗨，我发现近期奶量持续偏低，近7天预估日均约657.6ml，已经连续低于参考...”
+- 如果喂养次数低于参考：必须提醒同步观察尿布、精神和体重；出现尿少、精神差、体重增长慢时建议联系儿科或 IBCLC。
+- 不诊断、不承诺奶量一定够或不够，不替代医生、儿科医生或 IBCLC。
+- 如果输入包含 analysis_normality：advice 必须和 result 方向一致。
+- 当 result=true：先肯定当前节奏，再解释为什么可以继续观察，不要求增加、减少或明显改进。
+- 当 result=false：必须根据 failed_metrics/reason 指出具体问题和可调整方向，不能两条都只夸奖。
 """.strip()
+
+STATUS_ADVICE_MAX_CHARS = 180
 
 
 def generate_status_advice(*, user_id: str, days: int = 7, normality: dict[str, Any] | None = None) -> dict[str, Any] | None:
@@ -44,6 +47,7 @@ def generate_status_advice(*, user_id: str, days: int = 7, normality: dict[str, 
     generated = _request_llm_status_advice(payload)
     if not generated:
         generated = _fallback_status_advice(payload, normality=normality)
+    generated = _enforce_attention_advice(generated, payload=payload, normality=normality)
     if not generated.get("lactation_advice", "").strip() or not generated.get("feeding_advice", "").strip():
         return None
     return generated
@@ -177,22 +181,22 @@ def _failed_metrics(lactation_normal: bool, feeding_normal: bool, reason: str, m
 def _fallback_status_advice(payload: dict[str, Any], *, normality: dict[str, Any] | None = None) -> dict[str, str]:
     if not payload.get("has_any_recent_record"):
         return {
-            "lactation_advice": "最近记录还不多，先连续记录吸奶和亲喂几天。",
-            "feeding_advice": "先把喂养次数和奶量记完整，后面更好判断。",
+            "lactation_advice": "这几天还没有看到稳定的吸奶或亲喂记录，先不用急着判断奶量好坏。现在最有帮助的是把每次吸奶、亲喂和大概时长记下来，连续记满几天后，我们就能更清楚地看出排乳节奏。",
+            "feeding_advice": "宝宝这边也先别急着下结论，记录少的时候很容易把情况看得偏轻或偏重。今天开始先把每次亲喂、瓶喂、奶量和尿布情况记完整，后面会更容易判断宝宝摄入是否稳定。",
         }
 
     norm = normality if isinstance(normality, dict) else {}
     if norm.get("result") is True:
         return {
-            "lactation_advice": "近几天奶量暂无明显异常，继续保持当前节奏。",
-            "feeding_advice": "喂养次数整体在参考范围内，继续观察尿布和精神。",
+            "lactation_advice": "这几天的排乳节奏看起来没有明显异常，可以先安心一点。你不用为了追求更多奶量突然加很多次，先保持现在的吸奶和亲喂节奏，继续记录奶量、时长和舒适度就好。",
+            "feeding_advice": "宝宝这几天的喂养次数整体还在参考范围内，先不需要把节奏改得很大。接下来继续看尿布、精神状态和体重变化，如果这些也稳定，就说明目前可以先按现在的方式观察。",
         }
 
     reason = str(norm.get("reason") or "").strip()
     if reason == "insufficient_minimum_valid_days":
         return {
-            "lactation_advice": "有效记录还不够，先连续记录吸奶和亲喂几天。",
-            "feeding_advice": "喂养记录还不够完整，先把次数和奶量补起来。",
+            "lactation_advice": "现在能用来判断奶量趋势的有效记录还不够，不代表一定有问题。先把接下来几天的吸奶、亲喂和每次间隔记完整，尤其是清晨和夜间的排乳情况，这样后面判断会更可靠。",
+            "feeding_advice": "喂养记录目前也还不够完整，所以先不要急着判断宝宝吃多吃少。今天开始把亲喂、瓶喂、奶量和尿布放在一起看，连续几天后，我们再判断是否需要调整节奏会更稳。",
         }
 
     failed_metrics = norm.get("failed_metrics") if isinstance(norm.get("failed_metrics"), list) else []
@@ -203,40 +207,134 @@ def _fallback_status_advice(payload: dict[str, Any], *, normality: dict[str, Any
     }
     if len(failed_types) > 1:
         return {
-            "lactation_advice": "奶量和喂养都有波动，先把吸奶、亲喂分开记录。",
-            "feeding_advice": "这两天先按需喂养，同时观察尿布、精神和体重。",
+            "lactation_advice": "这几天不只是奶量数字偏低，排乳和喂养节奏都值得认真看一下。先别一个人硬扛，今天把吸奶、亲喂和瓶喂分开记清楚，同时尽快整理一版追奶计划，会比零散加次数更有效。",
+            "feeding_advice": "宝宝这边也需要同步关注，尤其是尿布、精神和体重变化。今天先把每次喂养和尿布记下来；如果尿明显少、精神差、吃奶变差或体重增长慢，建议及时联系儿科或 IBCLC。",
         }
 
     if "lactation" in failed_types or reason == "lactation_out_of_range":
         statuses = _failed_day_statuses(failed_metrics, metric_type="lactation")
         if "low" in statuses and "high" not in statuses:
-            lactation_text = "近几天奶量低于参考，先稳定排乳间隔和记录。"
+            lactation_text = "近几天奶量低于参考，这个信号值得尽快处理，但不是要你一下子把自己逼得很累。今天可以先加1次清晨或夜间排乳，同时把每次奶量和间隔记清楚，接下来尽快整理一版追奶计划。"
         elif "high" in statuses and "low" not in statuses:
-            lactation_text = "近几天奶量高于参考，先留意胀痛和排乳舒适度。"
+            lactation_text = "近几天奶量高于参考，先不用急着追求继续增加，重点是看身体舒不舒服。今天留意胀痛、硬块和排乳后的轻松程度，如果开始不适，可以先把节奏放稳，避免过度刺激。"
         else:
-            lactation_text = "奶量有波动，先固定记录时间观察连续趋势。"
+            lactation_text = "这几天奶量有波动，单看某一天容易让人紧张，也不一定代表趋势已经变差。先把记录时间固定一些，尤其看连续几天的总量、间隔和亲喂情况，再决定要不要调整会更稳。"
         return {
             "lactation_advice": lactation_text,
-            "feeding_advice": "喂养次数先继续观察，重点同步看尿布和精神。",
+            "feeding_advice": "奶量偏低时，宝宝摄入也要一起看，不能只盯着吸出来的数字。今天同步观察尿布、精神状态和体重变化；如果尿少、精神差、吃奶变差或体重慢，建议联系儿科或 IBCLC。",
         }
 
     if "feeding" in failed_types or reason == "feeding_out_of_range":
         directions = _failed_feeding_directions(failed_metrics)
         if "low" in directions and "high" not in directions:
-            feeding_text = "喂养次数偏少，先留意宝宝精神、尿布和进食间隔。"
+            feeding_text = "喂养次数偏少时，先别只靠感觉判断宝宝有没有吃够。今天把亲喂、瓶喂、每次奶量和尿布一起记下来；如果尿少、精神差、吃奶明显变弱或体重增长慢，建议联系儿科或 IBCLC。"
         elif "high" in directions and "low" not in directions:
-            feeding_text = "喂养次数偏多，先观察每次摄入和宝宝满足感。"
+            feeding_text = "喂养次数偏多不一定就是坏事，但需要看看每次是不是吃得有效。今天可以观察每次摄入量、宝宝吃完后的满足感和吐奶情况，如果只是频繁少量，可以再慢慢调整节奏。"
         else:
-            feeding_text = "喂养频次有波动，先连续记录几天再看趋势。"
+            feeding_text = "喂养频次有波动时，先不要急着把每一顿都改掉。接下来几天把亲喂、瓶喂、奶量和尿布连续记下来，我们看趋势会比看单次波动更可靠，也更不容易误判。"
         return {
-            "lactation_advice": "排乳记录可以继续保持，重点同步观察宝宝需求。",
+            "lactation_advice": "排乳这边可以先保持当前节奏，不需要因为喂养次数波动就立刻大幅加减。今天重点是把吸奶、亲喂和宝宝需求放在一起看，等喂养记录更完整后再决定是否调整。",
             "feeding_advice": feeding_text,
         }
 
     return {
-        "lactation_advice": "近几天记录有波动，先稳定排乳节奏并继续观察。",
-        "feeding_advice": "喂养记录继续补完整，优先观察尿布、精神和体重。",
+        "lactation_advice": "近几天记录有一些波动，先不用把它理解成确定的问题。你可以先把排乳时间和记录方式稳定下来，继续观察连续几天的奶量、间隔和身体舒适度，再决定是否需要进一步调整。",
+        "feeding_advice": "宝宝喂养这边先把记录补完整会更有帮助。今天优先看每次喂养、尿布、精神状态和体重变化，如果这些信号都还稳，就先不要被单次记录牵着走。",
     }
+
+
+def _enforce_attention_advice(
+    advice: dict[str, Any],
+    *,
+    payload: dict[str, Any],
+    normality: dict[str, Any] | None,
+) -> dict[str, str]:
+    cleaned = {
+        "lactation_advice": _clean_advice(advice.get("lactation_advice")),
+        "feeding_advice": _clean_advice(advice.get("feeding_advice")),
+    }
+    norm = normality if isinstance(normality, dict) else {}
+    if norm.get("result") is True:
+        return _humanize_advice_openings(cleaned)
+
+    metrics = norm.get("metrics") if isinstance(norm.get("metrics"), list) else []
+    low_days = [
+        item
+        for item in metrics
+        if isinstance(item, dict)
+        and (
+            str(item.get("status") or "") == "low"
+            or str(item.get("rule_hit") or "") == "percentile_below_p15"
+        )
+    ]
+    persistent_low = len(low_days) >= max(3, min(5, len(metrics) or 0))
+
+    failed_metrics = norm.get("failed_metrics") if isinstance(norm.get("failed_metrics"), list) else []
+    failed_types = {
+        str(item.get("type") or "").strip()
+        for item in failed_metrics
+        if isinstance(item, dict) and str(item.get("type") or "").strip()
+    }
+    feeding_directions = _failed_feeding_directions(failed_metrics)
+
+    if persistent_low:
+        avg_ml = _average_daily_milk(low_days)
+        if avg_ml > 0:
+            cleaned["lactation_advice"] = (
+                f"近{len(low_days)}天预估日均约{_format_ml(avg_ml)}ml，已经连续低于参考，这个情况需要尽快处理，"
+                "但不是说你做得不好，也不用一下子把自己压垮。今天先加1次清晨或夜间排乳，把间隔、奶量和身体感受记清楚；如果晚上实在累，就优先选最容易坚持的一次。我们先把节奏稳住，再尽快做一版追奶计划。"
+            )
+        else:
+            cleaned["lactation_advice"] = "近几天奶量连续低于参考，这个信号值得尽快处理，但不是要你靠硬撑来解决，也不是说你做得不好。今天先加1次清晨或夜间排乳，把每次奶量、间隔和身体感受记清楚；如果晚上太累，就选最容易坚持的一次。我们先把节奏稳住，再尽快做一版追奶计划。"
+
+        if "feeding" in failed_types or "low" in feeding_directions:
+            cleaned["feeding_advice"] = "喂养次数也低于参考，所以宝宝摄入需要同步认真看。你先别一个人猜宝宝到底够不够，今天把亲喂、瓶喂、每次奶量和尿布一起记下来；如果尿少、精神差、吃奶变弱或体重增长慢，建议及时联系儿科或 IBCLC。我们先把最关键的信号握在手里，这样能更快把风险排清。"
+        else:
+            cleaned["feeding_advice"] = "奶量持续偏低时，宝宝不一定马上表现出来，但摄入信号要一起看。今天同步观察尿布、精神、吃奶状态和体重变化；如果有尿少、精神差、吃奶变弱或体重增长慢，建议及时联系儿科或 IBCLC。我们先把这些信号看清楚，不要只靠感觉硬扛。"
+        return _humanize_advice_openings({key: _clean_advice(value) for key, value in cleaned.items()})
+
+    if "feeding" in failed_types and "low" in feeding_directions:
+        cleaned["feeding_advice"] = "喂养次数低于参考时，先别只凭感觉判断宝宝有没有吃够，也别把压力都放在自己身上。今天把亲喂、瓶喂、每次奶量和尿布补全；如果尿少、精神差、吃奶变弱或体重增长慢，建议联系儿科或 IBCLC。"
+
+    if "lactation" in failed_types and not cleaned["lactation_advice"]:
+        cleaned["lactation_advice"] = "奶量低于参考时，先稳住排乳节奏比临时乱加次数更重要。你不用一下子把安排塞满，今天先固定一个能做到的吸奶或亲喂安排，把每次奶量、时长、间隔和身体感受记下来，后面再看是否需要追奶计划。"
+
+    return _humanize_advice_openings({key: _clean_advice(value) for key, value in cleaned.items()})
+
+
+def _average_daily_milk(days: list[dict[str, Any]]) -> float:
+    values = [_safe_float(item.get("estimated_daily_milk_ml")) for item in days if isinstance(item, dict)]
+    values = [value for value in values if value > 0]
+    return sum(values) / len(values) if values else 0.0
+
+
+def _format_ml(value: float) -> str:
+    rounded = round(float(value or 0), 1)
+    return str(int(rounded)) if rounded.is_integer() else str(rounded)
+
+
+def _humanize_advice_openings(advice: dict[str, str]) -> dict[str, str]:
+    return {
+        "lactation_advice": _ensure_human_opening(
+            advice.get("lactation_advice"),
+            prefixes=("嗨，", "我看到", "我发现", "我注意到"),
+            fallback_prefix="嗨，我看到",
+        ),
+        "feeding_advice": _ensure_human_opening(
+            advice.get("feeding_advice"),
+            prefixes=("宝宝这边", "喂养这边", "我看到", "我发现", "我注意到"),
+            fallback_prefix="宝宝这边我也想提醒一下，",
+        ),
+    }
+
+
+def _ensure_human_opening(value: str | None, *, prefixes: tuple[str, ...], fallback_prefix: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if text.startswith(prefixes):
+        return _clean_advice(text)
+    return _clean_advice(f"{fallback_prefix}{text}")
 
 
 def _failed_day_statuses(failed_metrics: list[Any], *, metric_type: str) -> set[str]:
@@ -340,11 +438,12 @@ def _summarize_feeding(records: list[Any]) -> dict[str, Any]:
             continue
         feed_type = str(raw.get("feed_type") or "")
         amount = _float(raw.get("feed_milk_volum"))
-        if amount <= 0:
+        is_nursing = feed_type == data_store.FEED_TYPE_CODE_TO_TEXT[0]
+        if amount <= 0 and not is_nursing:
             continue
         time_text = str(raw.get("feed_time") or "")
         date_key = time_text[:10]
-        if feed_type == data_store.FEED_TYPE_CODE_TO_TEXT[0]:
+        if is_nursing:
             breastfeeding_count += 1
             amount_kind = "duration_minutes"
         else:
@@ -401,7 +500,7 @@ def _request_llm_status_advice(payload: dict[str, Any]) -> dict[str, str] | None
             reasoning={"effort": "low"},
             text={"format": {"type": "text"}, "verbosity": "low"},
             store=False,
-            prompt_cache_key="momcozy-status-advice-v1",
+            prompt_cache_key="momcozy-status-advice-v4",
         )
     except Exception:
         return None
@@ -438,7 +537,7 @@ def _parse_advice_response(response: object) -> dict[str, str] | None:
 
 def _clean_advice(value: Any) -> str:
     text = " ".join(str(value or "").split())
-    return text[:50]
+    return text[:STATUS_ADVICE_MAX_CHARS]
 
 
 def _response_text(response: object) -> str:

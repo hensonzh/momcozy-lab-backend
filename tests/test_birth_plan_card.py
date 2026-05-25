@@ -105,7 +105,7 @@ class BirthPlanCardTests(unittest.TestCase):
                     },
                 ],
             },
-            {"user_message": "帮我做分娩计划卡"},
+            {"user_message": "帮我做分娩沟通卡"},
         )
 
         fields = result["form"]["fields"]

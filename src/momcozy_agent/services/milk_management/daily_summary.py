@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from ...config import load_project_env
+from .db import fetch_one
 from .records import get_records_range
 from .schemas import ServiceResult, error_result, norm_text, ok_result, parse_datetime, to_int
 from .today import get_today_daily_summary_fallback
@@ -16,6 +17,7 @@ LLM失败时提供数据驱动的 fallback （today），总结吸奶和喂养�
 """
 
 LONG_INTERVAL_MINUTES = 240
+LATEST_RECORD_FALLBACK_DAYS = 7
 
 DAILY_SUMMARY_PROMPT = """
 你是 Momcozy 的母婴喂养日结助手。请基于输入的当天喂养、吸奶、亲喂、间隔和风险数据，生成温和、自然、非诊断的中文日结，像给妈妈的一段轻量提醒，不要像数据报表。
@@ -41,20 +43,18 @@ def create_daily_summary(*, user_id: str, target_date: str | None = None) -> Ser
     if not uid:
         return error_result("missing_user_id", "缺少 user_id，无法生成今日日结。")
 
-    day = _target_date(target_date)
-    start_at = f"{day} 00:00:00"
-    end_at = _next_day_start(day)
-    records_result = get_records_range(
-        user_id=uid,
-        start_at=start_at,
-        end_at=end_at,
-        record_scope="all",
-        include_raw_records=True,
-        summary_granularity="daily",
-        limit=500,
-    )
+    requested_day = _target_date(target_date)
+    day = requested_day
+    records_result = _load_daily_records(uid, day)
     if not records_result.get("ok"):
         return records_result
+    if not norm_text(target_date) and not _has_records(records_result):
+        latest_day = _latest_record_date(uid, requested_day, lookback_days=LATEST_RECORD_FALLBACK_DAYS)
+        if latest_day and latest_day != requested_day:
+            day = latest_day
+            records_result = _load_daily_records(uid, day)
+            if not records_result.get("ok"):
+                return records_result
 
     data = records_result.get("data") if isinstance(records_result.get("data"), dict) else {}
     summary = data.get("summary") if isinstance(data.get("summary"), dict) else {}
@@ -110,6 +110,12 @@ def create_daily_summary(*, user_id: str, target_date: str | None = None) -> Ser
         fallback = get_today_daily_summary_fallback(user_id=uid, target_date=day)
         fallback_data = fallback.get("data") if isinstance(fallback.get("data"), dict) else {}
         message = fallback_data.get("message") if isinstance(fallback_data.get("message"), list) else []
+    used_latest_available_record = day != requested_day
+    message = _apply_record_date_context(
+        message,
+        target_date=day,
+        used_latest_available_record=used_latest_available_record,
+    )
     return ok_result(
         "daily_summary_created",
         "\n".join(message),
@@ -117,9 +123,59 @@ def create_daily_summary(*, user_id: str, target_date: str | None = None) -> Ser
             "message": message,
             "today_feeding_normal": today_feeding_normal,
             "target_date": day,
+            "requested_target_date": requested_day,
+            "used_latest_available_record": used_latest_available_record,
+            "record_date_label": _display_date(day),
             "long_interval_count": len(long_intervals),
         },
     )
+
+
+def _load_daily_records(user_id: str, target_date: str) -> ServiceResult:
+    return get_records_range(
+        user_id=user_id,
+        start_at=f"{target_date} 00:00:00",
+        end_at=_next_day_start(target_date),
+        record_scope="all",
+        include_raw_records=True,
+        summary_granularity="daily",
+        limit=500,
+    )
+
+
+def _has_records(records_result: ServiceResult) -> bool:
+    data = records_result.get("data") if isinstance(records_result.get("data"), dict) else {}
+    return to_int(data.get("record_count"), 0) > 0
+
+
+def _latest_record_date(user_id: str, target_date: str, *, lookback_days: int) -> str | None:
+    target_dt = parse_datetime(target_date)
+    if target_dt is None:
+        return None
+    end_at = _next_day_start(target_date)
+    start_date = target_dt.date() - timedelta(days=max(1, lookback_days) - 1)
+    start_at = f"{start_date.isoformat()} 00:00:00"
+    row = fetch_one(
+        """
+        SELECT MAX(record_date) AS latest_date
+        FROM (
+            SELECT date(pump_start_time) AS record_date
+            FROM pumping_log
+            WHERE user_id = ?
+              AND pump_start_time >= ?
+              AND pump_start_time < ?
+            UNION ALL
+            SELECT date(feed_time) AS record_date
+            FROM feeding_log
+            WHERE user_id = ?
+              AND feed_time >= ?
+              AND feed_time < ?
+        )
+        """,
+        (user_id, start_at, end_at, user_id, start_at, end_at),
+    )
+    latest = norm_text(row.get("latest_date") if row else "")
+    return latest or None
 
 
 def _build_llm_payload(
@@ -280,6 +336,25 @@ def _normalize_message_lines(message: list[str]) -> list[str]:
     return message
 
 
+def _apply_record_date_context(
+    message: Any,
+    *,
+    target_date: str,
+    used_latest_available_record: bool,
+) -> list[str]:
+    lines = [str(item).strip() for item in message] if isinstance(message, list) else []
+    lines = [line for line in lines if line]
+    if not used_latest_available_record or not lines:
+        return lines
+
+    first = lines[0]
+    if first.startswith("今日"):
+        first = first[2:].lstrip("，,：: ")
+    prefix = f"最近记录（{_display_date(target_date)}）"
+    lines[0] = f"{prefix}：{first}" if first else f"{prefix}已同步。"
+    return lines
+
+
 def _milk_removal_events(pumping_records: list[Any], feeding_records: list[Any]) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     for record in pumping_records:
@@ -413,6 +488,13 @@ def _next_day_start(target_date: str) -> str:
     parsed = parse_datetime(target_date)
     base = parsed.date() if parsed is not None else datetime.now().date()
     return (base + timedelta(days=1)).isoformat() + " 00:00:00"
+
+
+def _display_date(value: str) -> str:
+    parsed = parse_datetime(value)
+    if parsed is None:
+        return value
+    return f"{parsed.month}月{parsed.day}日"
 
 
 def _number(value: Any) -> float:
