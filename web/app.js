@@ -1099,6 +1099,7 @@ function renderBirthPlanCardV1(node, cardJson) {
 
 function renderHospitalBagCardV1(node, cardJson) {
   addCardHeader(node, hospitalBagTitle(cardJson.title), hospitalBagSubtitle(cardJson) || cardJson.subtitle || "");
+  addKeyValueSection(node, "用户画像", hospitalBagProfile(cardJson));
   addPackingGroups(node, compactPackingGroups(cardJson.packing_groups));
   addListSection(node, "Timeline", limitList(cardJson.timeline, 2));
   addDisclaimer(node, cardJson.disclaimer);
@@ -1112,11 +1113,16 @@ function hospitalBagTitle(value) {
 }
 
 function hospitalBagSubtitle(cardJson) {
+  return "待产包是什么 | 什么时间准备好";
+}
+
+function hospitalBagProfile(cardJson) {
   const owner = cardJson.owner || {};
-  const values = [hospitalBagMetaValue(owner.due_date_or_week), hospitalBagMetaValue(owner.birth_path), hospitalBagMetaValue(owner.feeding_intention)]
-    .filter((value) => hasDisplayValue(value) && !isConfirmPlaceholder(value))
-    .map(formatPlainValue);
-  return values.join(" | ");
+  return {
+    孕期: hospitalBagMetaValue(owner.due_date_or_week),
+    生产方式: hospitalBagMetaValue(owner.birth_path),
+    喂养意向: hospitalBagMetaValue(owner.feeding_intention),
+  };
 }
 
 function hospitalBagMetaValue(value) {

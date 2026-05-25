@@ -9,6 +9,7 @@ from .tool_handlers.cards import (
     create_card,
     create_form,
     create_hospital_bag_card,
+    update_hospital_bag_cart,
     create_hospital_bag_form,
 )
 from .tool_handlers.common import decode_json_argument_strings
@@ -40,6 +41,7 @@ CORE_IMMEDIATE_TOOLS: list[ToolName] = [
     "birth_plan_card_create",
     "hospital_bag_form_create",
     "hospital_bag_card_create",
+    "hospital_bag_cart_update",
     "ibclc_consult_card_create",
 ]
 MILK_MANAGEMENT_TOOLS: list[ToolName] = [
@@ -93,6 +95,7 @@ READ_ONLY_TOOL_NAMES = {
     "birth_plan_card_create",
     "hospital_bag_form_create",
     "hospital_bag_card_create",
+    "hospital_bag_cart_update",
     "device_manual_search",
     "support_ticket_draft_create",
     *MILK_MANAGEMENT_READ_ONLY_TOOLS,
@@ -110,6 +113,7 @@ TOOL_HANDLERS: dict[ToolName, ToolHandler] = {
     "birth_plan_card_create": create_birth_plan_card,
     "hospital_bag_form_create": create_hospital_bag_form,
     "hospital_bag_card_create": create_hospital_bag_card,
+    "hospital_bag_cart_update": update_hospital_bag_cart,
     "ibclc_consult_card_create": create_ibclc_consult_card,
     "profile_get": get_profile,
     "handoff_summary_generate": generate_handoff_summary,

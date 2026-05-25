@@ -203,6 +203,7 @@ WebSocket 客户端连接 `ws://<host>:<port>/api/ag-ui-ws` 后，第一帧必�
 | `service_state` | 可放在 `state` 或 `forwardedProps` 中 |
 | `retrieved_records` | 可放在 `state` 或 `forwardedProps` 中 |
 | `retrieved_knowledge` | 可放在 `state` 或 `forwardedProps` 中 |
+| `hospital_bag_cart` | 可放在 `state` 或 `forwardedProps` 中，供智能体按当前购物车 item_id 调用 `hospital_bag_cart_update` |
 
 `/api/ag-ui` 还读取这些 AG-UI 运行字段：
 
@@ -578,6 +579,7 @@ Agent 状态通过 `CUSTOM` / `momcozy.agent.status` 发送：
 - `content` 是 JSON 字符串，需要 `parseJson(event.content)`。
 - 更新 work panel 工具结果状态。
 - 不再直接渲染结构化 UI；结构化 UI 由后续 `ARTIFACT_CREATED` 显式事件驱动。
+- 例外：`hospital_bag_cart_update` 会在 `content.cart_update` 中返回前端可应用的购物车状态，用于对话页自然语言修改购物车，不产生独立 artifact。
 
 #### `ARTIFACT_CREATED`
 

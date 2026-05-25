@@ -25,37 +25,27 @@ def main() -> None:
     assert [item.get("role", item.get("type")) for item in initial_request["input"]] == ["user"]
     assert len(initial_request["input"][0]["content"]) == 2
     assert initial_request["input"][0]["content"][0]["text"].startswith("request_context:")
-    assert "service_selection: model_selects_service_skill_from_manifest" in initial_request["instructions"]
-    assert "skill_manifest:" in initial_request["instructions"]
-    assert "global_safety_policy:" in initial_request["instructions"]
-    assert "CoMate 文本回应原则" in initial_request["instructions"]
-    assert "全局响应风格只有这一套" in initial_request["instructions"]
+    assert "## 可用 Skill" in initial_request["instructions"]
+    assert "skill_manifests:" in initial_request["instructions"]
+    assert "CoMate 全局规则" in initial_request["instructions"]
     assert "先接住人，再处理事" in initial_request["instructions"]
-    assert "默认不要提供列表式结构化选项菜单" in initial_request["instructions"]
-    assert "不要用“你想先聊哪一块？”后面跟 1/2/3/4 的菜单" in initial_request["instructions"]
-    assert "需要我现在帮你做吗" in initial_request["instructions"]
-    assert "只有在用户明确要求清单" in initial_request["instructions"]
-    assert "护士式信息剂量" in initial_request["instructions"]
-    assert "默认最多 3 个重点" in initial_request["instructions"]
-    assert "最终回复可见性规则" in initial_request["instructions"]
-    assert "不要把情绪承接、安全边界、关键澄清或下一步行动只写在工具调用前" in initial_request["instructions"]
-    assert "情绪信号主要用于调整陪伴方式和信息量" in initial_request["instructions"]
-    assert "先轻柔祝贺" in initial_request["instructions"]
-    assert "最终回复必须先轻柔祝贺并简短共鸣" in initial_request["instructions"]
-    assert "最终一轮面向用户的回复必须按上面的回应原则重新组织" in initial_request["instructions"]
-    assert "最终一轮面向用户的回复必须重新自然体现情绪承接" not in initial_request["instructions"]
-    assert "我要生孩子了" in initial_request["instructions"]
-    assert "生产全过程计划/孕晚期到产后阶段路线图" in initial_request["instructions"]
-    assert "边界：生产全过程计划用于阶段路线图" in initial_request["instructions"]
-    assert "不要在全局把“生产计划”固定理解为分娩沟通卡" in initial_request["instructions"]
-    assert "物品准备类问题" in initial_request["instructions"]
-    assert "去医院前准备什么/提前准备些什么/要带什么" in initial_request["instructions"]
-    assert "按待产包服务处理" in initial_request["instructions"]
-    assert "入院时机、症状判断或风险不确定问题" in initial_request["instructions"]
-    assert "服务路径连续性协议" in initial_request["instructions"]
-    assert "当前对话已经形成明确服务路径" in initial_request["instructions"]
-    assert "不构成新的并列服务选项" in initial_request["instructions"]
-    assert "skill_manifest:" not in initial_request["input"][0]["content"][0]["text"]
+    assert "### 避免的表达" in initial_request["instructions"]
+    assert "### 优秀回复示例" in initial_request["instructions"]
+    assert "不要用“如果你有以下任何一种情况”开头列风险清单" in initial_request["instructions"]
+    assert "不要像表单一样一次索要很多字段" in initial_request["instructions"]
+    assert "恭喜你呀，真的到这个时候了" in initial_request["instructions"]
+    assert "你先告诉我型号，或者发一张现在装到哪一步的照片" in initial_request["instructions"]
+    assert "是否加载 skill，只根据用户当前意图、对话连续性，以及 skill manifest 中的 description 判断" in initial_request["instructions"]
+    assert "是否调用工具，只根据当前可见工具的名称、description、schema 和用户目标判断" in initial_request["instructions"]
+    assert "不能诊断疾病、开药、承诺治疗结果" in initial_request["instructions"]
+    assert "普通陪伴和轻问答不需要为了显得完整而调用工具" in initial_request["instructions"]
+    assert "static_agent_context:" not in initial_request["instructions"]
+    assert "skill_selection: decide_from_skill_manifests" not in initial_request["instructions"]
+    assert "tool_selection: decide_from_tool_descriptions" not in initial_request["instructions"]
+    assert "默认不要提供列表式结构化选项菜单" not in initial_request["instructions"]
+    assert "护士式信息剂量" not in initial_request["instructions"]
+    assert "服务路径连续性协议" not in initial_request["instructions"]
+    assert "skill_manifests:" not in initial_request["input"][0]["content"][0]["text"]
     assert initial_request["input"][0]["content"][1]["text"].startswith("user_message:")
     assert "tool_search" in initial_tool_types
     assert "load_skill" in initial_tool_names
@@ -174,21 +164,21 @@ def main() -> None:
     assert "references/birth-journey-plan.md" in birth_prep_skill["skill_md"]
     assert "意图优先级链" in birth_prep_skill["skill_md"]
     assert "物品词优先于阶段词" in birth_prep_skill["skill_md"]
-    assert "上一轮明确承接服务优先" in birth_prep_skill["skill_md"]
-    assert "宽泛注意/准备问题默认轻量回答" in birth_prep_skill["skill_md"]
+    assert "上一轮明确承接能力优先" in birth_prep_skill["skill_md"]
+    assert "宽泛注意/准备问题默认轻问答" in birth_prep_skill["skill_md"]
     assert "产前普通问答的信息剂量" in birth_prep_skill["skill_md"]
-    assert "最多 3 个重点" in birth_prep_skill["skill_md"]
+    assert "最多问 1-2 个问题" in birth_prep_skill["skill_md"]
     assert "生产计划歧义" in birth_prep_skill["skill_md"]
     assert "第一反应不是清单" in birth_prep_skill["skill_md"]
-    assert "在最终回复里先轻柔祝贺" in birth_prep_skill["skill_md"]
+    assert "最终回复里先轻柔祝贺" in birth_prep_skill["skill_md"]
     assert "最终回复先表达祝贺和情感共鸣" in birth_prep_skill["skill_md"]
-    assert "先恭喜你，宝宝可能快要来了" in birth_prep_skill["skill_md"]
-    assert "服务路径连续性" in birth_prep_skill["skill_md"]
-    assert "待产包服务入口确认" in birth_prep_skill["skill_md"]
+    assert "先轻柔祝贺" in birth_prep_skill["skill_md"]
+    assert "skill 流程连续性" in birth_prep_skill["skill_md"]
+    assert "待产包入口确认" in birth_prep_skill["skill_md"]
     assert "默认先不调用 `ui_form_create`" in birth_prep_skill["skill_md"]
     assert "已有信息会先填好" in birth_prep_skill["skill_md"]
-    assert "字段的 `default_value`" in birth_prep_skill["skill_md"]
-    assert 'ui_form_create(form_id="hospital_bag_intake")' in birth_prep_skill["skill_md"]
+    assert "字段 `default_value`" in birth_prep_skill["skill_md"]
+    assert "再调用 `hospital_bag_form_create`" in birth_prep_skill["skill_md"]
     journey_plan_reference = execute_skill_runtime_tool(
         "read_skill_file",
         {"skill_id": "birth-prep", "kind": "references", "path": "references/birth-journey-plan.md"},
@@ -199,80 +189,43 @@ def main() -> None:
     assert "默认不用表单" in journey_plan_reference
     assert "回到主 `SKILL.md` 的歧义澄清规则" in journey_plan_reference
     assert "通用安全边界以主 `SKILL.md` 为准" in journey_plan_reference
-    assert "不要为了这个服务调用 `ui_form_create` 或 `ui_card_create`" in birth_prep_skill["skill_md"]
+    assert "不要为了这个能力调用 `ui_form_create` 或 `ui_card_create`" in birth_prep_skill["skill_md"]
     assert "孕晚期准备期" in journey_plan_reference
     assert "临产预备期" in journey_plan_reference
     assert "临产识别期" in journey_plan_reference
     assert "住院分娩期" in journey_plan_reference
     assert "产后启动期" in journey_plan_reference
-    assert "默认用 Markdown 表格呈现阶段路线图" in journey_plan_reference
-    assert "| 阶段 | 时间 | 核心目标 | 重要事项 | 我可以继续帮你 |" in journey_plan_reference
-    assert "每个单元格只放短句或短语" in journey_plan_reference
-    assert "不在表格里塞长段落、嵌套列表或多个并列服务菜单" in journey_plan_reference
+    assert "默认用移动端友好的阶段卡片呈现路线图" in journey_plan_reference
+    assert "|  |  |" in journey_plan_reference
+    assert "第二列固定按这三段写：`阶段目标`、`注意事项`、`准备动作`" in journey_plan_reference
+    assert "每个阶段只集中处理一组准备事项" in journey_plan_reference
     assert "不要在结尾同时抛出待产包、分娩沟通卡、提醒、医院问题清单等多个并列选项" in journey_plan_reference
     birth_plan_reference = execute_skill_runtime_tool(
         "read_skill_file",
         {"skill_id": "birth-prep", "kind": "references", "path": "references/birth-plan-card.md"},
     )["content"]
-    assert "信息采集评估结论" in birth_plan_reference
-    assert "表单门控、短确认延续、预填规则和 `confirmed_form_data` 处理由主 `SKILL.md` 统一规定" in birth_plan_reference
-    assert "`description`: 留空字符串" in birth_plan_reference
-    assert "基本信息｜预产期或当前孕周" in birth_plan_reference
-    assert "基本信息｜计划分娩方式" in birth_plan_reference
-    assert "支持与沟通｜最希望医护团队知道的事" in birth_plan_reference
-    assert '"id": "support_person"' in birth_plan_reference
-    assert '"id": "support_people"' not in birth_plan_reference
-    assert '"id": "communication_preferences"' in birth_plan_reference
-    assert '"required": false' in birth_plan_reference
-    assert "产程偏好｜产程中希望如何度过" in birth_plan_reference
-    assert "助产干预｜希望事先沟通的干预" in birth_plan_reference
-    assert "舒适与镇痛｜疼痛/麻醉沟通偏好" in birth_plan_reference
-    assert '"type": "multi_select"' in birth_plan_reference
-    assert "宝宝出生后｜喂养意向" in birth_plan_reference
-    assert "宝宝出生后｜出生后照护和喂养启动偏好" in birth_plan_reference
-    assert "希望延迟断脐" in birth_plan_reference
-    assert "计划变化与紧急情况｜如果紧急情况无法征求你，希望如何决策" in birth_plan_reference
-    assert "医院确认与安全｜想提前确认的问题方向" in birth_plan_reference
-    assert "需要自带或提前准备的材料" not in birth_plan_reference
-    assert "我还没想好，请帮我整理成温和版本" not in birth_plan_reference
-    assert "不需要持续解释，必要时再说就好" not in birth_plan_reference
-    assert "无特别偏好，听医生安排" not in birth_plan_reference
-    assert "听医生判断即可" not in birth_plan_reference
-    assert "灌肠/剃毛：希望按医院常规即可" not in birth_plan_reference
-    assert "暂未决定，听医生建议" not in birth_plan_reference
-    assert "多选字段不要放" in birth_plan_reference
-    assert "priority_notes" in birth_plan_reference
-    assert "hospital_questions_focus" in birth_plan_reference
-    assert "字段顺序必须按分类排列" in birth_plan_reference
-    assert '"help_text":' not in birth_plan_reference
+    assert "分娩沟通卡不是完整医疗计划" in birth_plan_reference
+    assert "表单字段、字段顺序、选项" in birth_plan_reference
+    assert "把可靠信息写入 `birth_plan_form_create.default_values`" in birth_plan_reference
+    assert "调用 `birth_plan_form_create`" in birth_plan_reference
+    assert "support_people" in birth_plan_reference
+    assert "不要再调用 `ui_form_create` 手写分娩沟通卡字段" in birth_plan_reference
+    assert "直接调用 `birth_plan_card_create`" in birth_plan_reference
+    assert "不要让 LLM 自己生成分娩沟通卡 `card_json`" in birth_plan_reference
+    assert "工具返回 `assistant_followup`" in birth_plan_reference
     hospital_bag_reference = execute_skill_runtime_tool(
         "read_skill_file",
         {"skill_id": "birth-prep", "kind": "references", "path": "references/hospital-bag-service.md"},
     )["content"]
-    assert "基本信息｜预产期或当前孕周" in hospital_bag_reference
-    assert "生产信息｜计划分娩方式" in hospital_bag_reference
-    assert "医院信息｜已知医院会提供的物品" in hospital_bag_reference
-    assert "偏好信息｜喂养意向" in hospital_bag_reference
-    assert "BMI 或身高体重情况" in hospital_bag_reference
-    assert "不要创建仅用于装饰的假字段" in hospital_bag_reference
-    assert "首次进入待产包服务时先做服务邀约，不直接创建表单" in hospital_bag_reference
-    assert "用户确认开始后，再创建 `hospital_bag_intake` 表单" in hospital_bag_reference
-    assert "`description`: 留空字符串" in hospital_bag_reference
-    assert "先确认几件关键背景" not in hospital_bag_reference
-    assert "default_value" in hospital_bag_reference
-    assert "创建表单前的共享预填规则由主 `SKILL.md` 统一规定" in hospital_bag_reference
-    assert "未知信息不要编造默认值" in hospital_bag_reference
-    assert "focus_items` 是兼容摘要字段，可以留空" in hospital_bag_reference
-    assert "hospital_questions` 是兼容摘要字段，可以留空" in hospital_bag_reference
-    assert "packing_style" not in hospital_bag_reference
-    assert "hospital_rules_or_notes" not in hospital_bag_reference
-    assert "existing_checklist_or_photo_note" not in hospital_bag_reference
-    assert "help_text" not in hospital_bag_reference
-    assert "已知医院规则或注意事项" not in hospital_bag_reference
-    assert "已有医院清单或产检材料说明" not in hospital_bag_reference
-    assert "清单风格" not in hospital_bag_reference
-    assert "极简" not in hospital_bag_reference
-    assert "预算优先" not in hospital_bag_reference
+    assert "待产包服务不是让用户自己从长清单里筛东西" in hospital_bag_reference
+    assert "表单字段、字段顺序、卡片 schema" in hospital_bag_reference
+    assert "先自然邀约，不直接创建表单" in hospital_bag_reference
+    assert "把可靠信息写入 `hospital_bag_form_create.default_values`" in hospital_bag_reference
+    assert "调用 `hospital_bag_form_create`" in hospital_bag_reference
+    assert "不要再调用 `ui_form_create` 手写待产包字段" in hospital_bag_reference
+    assert "直接调用 `hospital_bag_card_create`" in hospital_bag_reference
+    assert "不要让 LLM 自己生成待产包 `card_json`" in hospital_bag_reference
+    assert "工具返回 `assistant_followup`" in hospital_bag_reference
 
     prefilled_hospital_bag_form = execute_tool(
         "ui_form_create",
@@ -331,7 +284,7 @@ def main() -> None:
     pump_skill = execute_skill_runtime_tool("load_skill", {"skill_id": "device-guidance"})
     assert "references/air1/faq.md" in pump_skill["references"]
     assert "references/air1/manual.md" in pump_skill["references"]
-    assert "device_manual_search" in pump_skill["skill_md"]
+    assert "设备资料检索工具" in pump_skill["skill_md"]
 
     air1_manual = execute_tool(
         "device_manual_search",
@@ -377,8 +330,8 @@ def main() -> None:
         {"user_message": "confirmed_form_data:\n{}", "locale": "zh-CN", "timezone": "America/Los_Angeles", "message_sent_at": "2026-05-04T09:00:00-07:00"},
     )
     card_json = hospital_bag_card["card"]["card_json"]
-    postpartum_groups = [group for group in card_json["packing_groups"] if group.get("group_id") == "postpartum"]
-    assert postpartum_groups, "hospital bag card should include a postpartum/mom admission group"
+    postpartum_groups = [group for group in card_json["packing_groups"] if group.get("group_id") == "postpartum_home_first_week"]
+    assert postpartum_groups, "hospital bag card should include a postpartum home group"
     pump_item_index = next(
         index
         for index, item in enumerate(postpartum_groups[0]["items"])
@@ -423,7 +376,7 @@ def main() -> None:
     birth_card_json = birth_plan_card["card"]["card_json"]
     assert birth_card_json["top_priorities"] == ["希望每一步先解释", "希望伴侣参与重要决定"]
     assert birth_card_json["overview"]["birth_path"] == "顺产"
-    assert len(birth_card_json["questions_for_hospital"]) == 3
+    assert len(birth_card_json["questions_for_hospital"]) >= 4
     assert birth_card_json["medical_notes"] == ["青霉素过敏"]
     assert "missing_fields" not in birth_card_json
     assert "assistant_followup" in birth_plan_card
@@ -514,8 +467,8 @@ def main() -> None:
     )
     second_context = second_stateful_request["input"][0]["content"][0]["text"]
     assert second_context.startswith("request_context:")
-    assert "skill_manifest:" not in second_context
-    assert "service_selection: model_selects_service_skill_from_manifest" not in second_context
+    assert "skill_manifests:" not in second_context
+    assert "## 可用 Skill" not in second_context
     assert "loaded_skill_context:" not in second_context
     assert "locale:" not in second_context
     assert "timezone:" not in second_context
@@ -606,10 +559,10 @@ def main() -> None:
             f"{skill['id']} must declare safety_limits in SKILL.md frontmatter"
         )
         skill_doc = execute_skill_runtime_tool("load_skill", {"skill_id": skill["id"]})["skill_md"]
-        assert "全局文本回应原则" in skill_doc, (
+        assert "全局声音契约" in skill_doc, (
             f"{skill['id']} must explicitly inherit the global response style"
         )
-        assert "服务路径连续性" in skill_doc, (
+        assert "流程连续性" in skill_doc, (
             f"{skill['id']} must define how current service paths continue"
         )
 

@@ -34,6 +34,7 @@ ToolName = Literal[
     "birth_plan_card_create",
     "hospital_bag_form_create",
     "hospital_bag_card_create",
+    "hospital_bag_cart_update",
     "ibclc_consult_card_create",
     "profile_get",
     "handoff_summary_generate",
@@ -106,6 +107,7 @@ class RuntimeInputs(TypedDict):
     service_state: NotRequired[ServiceStateSummary]
     retrieved_records: NotRequired[list[Any]]
     retrieved_knowledge: NotRequired[list[Any]]
+    hospital_bag_cart: NotRequired[dict[str, Any]]
     images: NotRequired[list[InputImage]]
 
 

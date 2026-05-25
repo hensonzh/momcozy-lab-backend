@@ -190,10 +190,19 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "hospital_bag_card_create": _function_tool(
         "hospital_bag_card_create",
-        "根据待产包表单 confirmed_form_data 生成前端可渲染的待产包卡片。LLM 不需要生成 card_json；分包、物品、数量、医院确认项、购物车 followup 和兼容字段由工具稳定生成。无后端副作用。如果当前 user_message 已包含 confirmed_form_data，confirmed_form_data 参数传 \"{}\" 即可，不要复制整段表单 JSON。",
+        "根据待产包表单 confirmed_form_data 生成前端可渲染的待产包卡片。LLM 不需要生成 card_json；分包、物品、数量、医院确认项、购物车 followup 和兼容字段由工具稳定生成。无后端副作用。如果当前 user_message 已包含 confirmed_form_data，confirmed_form_data 参数传 \"{}\" 即可，不要复制整段表单 JSON。调用本工具后的最终回复只保留工具返回的 assistant_followup.message，不要再复述已确认字段、设计思路、住院天数或医院确认逻辑。",
         {
             "confirmed_form_data": JSON_OBJECT_STRING,
             "generation_mode": {"type": "string", "enum": ["standard", "quick", "immediate"]},
+        },
+    ),
+    "hospital_bag_cart_update": _function_tool(
+        "hospital_bag_cart_update",
+        "根据用户自然语言修改待产包购物车。当前购物车会在 request_context 的 current_hospital_bag_cart 中提供，包含 item_id/name/price/total。用于用户说太贵、便宜一点、删掉某个商品、不要某类商品、恢复默认购物车等。工具只返回前端可应用的购物车更新，不真正下单。若用户要删除具体物品，应从 request_context 里的 item_id 中选择；不确定具体物品时传空数组并用 assistant_message 简短询问。",
+        {
+            "action": {"type": "string", "enum": ["apply_budget_plan", "remove_items", "reset_cart", "clarify"]},
+            "item_ids": {"type": "array", "items": {"type": "string"}, "description": "action=remove_items 时要删除的购物车 item_id；其他 action 传空数组。"},
+            "assistant_message": {"type": "string", "description": "给用户的简短说明。可为空，由工具生成默认文案。"},
         },
     ),
     "ibclc_consult_card_create": _function_tool(

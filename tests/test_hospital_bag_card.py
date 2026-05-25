@@ -27,7 +27,7 @@ class HospitalBagCardTests(unittest.TestCase):
         self.assertEqual(pump["quantity"], "1台")
         self.assertEqual(pump["priority"], "recommended")
         self.assertIn("assistant_followup", result)
-        self.assertIn("你的待产包已经生成好了哦", result["assistant_followup"]["message"])
+        self.assertIn("你的待产包已经设计好了哦", result["assistant_followup"]["message"])
         self.assertIn("/hospital-bag-cart", result["assistant_followup"]["message"])
 
     def test_formula_feeding_does_not_add_breast_pump(self) -> None:

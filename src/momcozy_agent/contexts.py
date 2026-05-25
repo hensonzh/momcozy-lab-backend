@@ -44,6 +44,9 @@ def build_request_context(
         lines.append("client_event_context:")
         for event in state.client_events[-5:]:
             lines.append(f"- {event}")
+    hospital_bag_cart = _format_hospital_bag_cart_context(inputs.get("hospital_bag_cart"))
+    if hospital_bag_cart:
+        lines.extend(hospital_bag_cart)
     return "\n".join(line for line in lines if line)
 
 
@@ -59,3 +62,57 @@ def _unique_strings(values: list[str]) -> list[str]:
         if text and text not in unique:
             unique.append(text)
     return unique
+
+
+def _format_hospital_bag_cart_context(value: object) -> list[str]:
+    if not isinstance(value, dict):
+        return []
+    groups = value.get("groups")
+    if not isinstance(groups, list):
+        return []
+
+    lines = ["current_hospital_bag_cart:"]
+    totals = value.get("totals")
+    if isinstance(totals, dict):
+        total = totals.get("total")
+        item_count = totals.get("itemCount") or totals.get("item_count")
+        total_text = f"total={total}" if total is not None else ""
+        count_text = f"item_count={item_count}" if item_count is not None else ""
+        summary = "; ".join(part for part in (total_text, count_text) if part)
+        if summary:
+            lines.append(f"- {summary}")
+
+    item_lines: list[str] = []
+    for group in groups:
+        if not isinstance(group, dict):
+            continue
+        group_title = str(group.get("title") or "").strip()
+        items = group.get("items")
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            item_id = str(item.get("id") or "").strip()
+            name = str(item.get("name") or "").strip()
+            if not item_id or not name:
+                continue
+            price = item.get("price")
+            qty = item.get("qty")
+            parts = [f"item_id={item_id}", f"name={name}"]
+            if price is not None:
+                parts.append(f"price={price}")
+            if qty is not None:
+                parts.append(f"qty={qty}")
+            if group_title:
+                parts.append(f"group={group_title}")
+            item_lines.append(f"- {'; '.join(parts)}")
+            if len(item_lines) >= 30:
+                break
+        if len(item_lines) >= 30:
+            break
+
+    if not item_lines:
+        return []
+    lines.extend(item_lines)
+    return lines

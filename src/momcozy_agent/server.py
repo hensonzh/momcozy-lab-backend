@@ -458,7 +458,7 @@ def _runtime_inputs_from_ag_ui(payload: dict[str, Any]) -> dict[str, Any]:
     if user_id and isinstance(inputs.get("user_profile"), dict):
         inputs["user_profile"].setdefault("user_id", user_id)
 
-    for key in ("baby_profile", "service_state", "retrieved_records", "retrieved_knowledge"):
+    for key in ("baby_profile", "service_state", "retrieved_records", "retrieved_knowledge", "hospital_bag_cart"):
         value = _context_value(state, forwarded_props, key)
         if value is not None:
             inputs[key] = value
