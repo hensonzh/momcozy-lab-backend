@@ -555,12 +555,9 @@ def main() -> None:
     service_skill_ids = {skill["id"] for skill in service_skills}
     assert service_skill_ids == {"birth-prep", "milk-management", "emotion-support", "device-guidance"}
     for skill in service_skills:
-        allowed_manifest_keys = {"id", "name", "description", "safety_limits"}
+        allowed_manifest_keys = {"id", "name", "description"}
         assert set(skill.keys()) <= allowed_manifest_keys, (
             f"Unexpected manifest keys for {skill['id']}: {sorted(skill.keys())}"
-        )
-        assert isinstance(skill["safety_limits"], list) and skill["safety_limits"], (
-            f"{skill['id']} must declare safety_limits in SKILL.md frontmatter"
         )
         skill_doc = execute_skill_runtime_tool("load_skill", {"skill_id": skill["id"]})["skill_md"]
         assert "全局声音契约" in skill_doc, (

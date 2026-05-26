@@ -112,7 +112,7 @@ FORM_FIELD_SCHEMA: dict[str, Any] = {
 FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     "list_skills": _function_tool(
         "list_skills",
-        "列出可用的结构化 skill，包括名称、描述、触发条件、能力范围和安全边界。无副作用。只在判断是否需要结构化 skill 流程时使用；问候或普通问答不要使用。",
+        "列出可用的结构化 skill，包括名称、描述、触发条件和能力范围。无副作用。只在判断是否需要结构化 skill 流程时使用；问候或普通问答不要使用。",
         {},
     ),
     "load_skill": _function_tool(

@@ -11,7 +11,7 @@
 1. 首轮把 service skill manifest 暴露给模型。
 2. 模型根据用户意图和安全风险自行选择是否调用 `load_skill`。
 3. 应用侧只负责受控加载 skill、执行工具、维护上下文和流式返回事件。
-4. 安全风险由稳定指令和各 service skill 的 safety limits 共同约束；当前不再保留独立 `risk_evaluate` 工具。
+4. 安全风险由稳定指令和已加载 skill 正文中的边界共同约束；当前不再保留独立 `risk_evaluate` 工具。
 
 ## 目标
 
@@ -29,7 +29,7 @@ Comate 是 Momcozy 的孕育与哺乳伙伴，定位是懂妈妈、能陪伴、�
 
 - service skill 由模型基于 manifest 判断并调用 `load_skill`。
 - 应用侧不做预路由，不预先选择内部 skill 或业务 skill。
-- 安全风险由稳定指令和各 service skill 的 safety limits 处理；模型需要在高风险场景优先选择 `emotion-support`、`ibclc-consult` 或其他相关 service skill。
+- 安全风险由稳定指令和已加载 skill 正文中的边界处理；模型需要在高风险场景优先选择 `emotion-support`、`ibclc-consult` 或其他相关 service skill。
 - 回答风格保持：专业但不冷漠、安抚但不哄骗、清晰但不教条。
 - 情绪感知是基础能力：先识别恐惧、内疚、羞耻、疲惫、孤立、反复寻求确认等信号，再决定回答密度、安抚方式、是否需要安全确认或风险升级。
 - skill 渐进式加载，不一次性把所有 `SKILL.md` 塞进上下文。
@@ -181,8 +181,7 @@ input = [
 安全判断不再通过 router 预拦截，而是通过：
 
 - `static_context.py` 中的安全规则
-- 各 service skill 自己的 safety limits
-- 各 service skill 自己的 safety limits
+- 已加载 service skill 正文中的安全边界和流程边界
 
 高风险情绪场景应加载 `emotion-support`。  
 哺乳红旗或需要 IBCLC 的场景应加载 `ibclc-consult`。  

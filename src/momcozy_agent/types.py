@@ -164,7 +164,6 @@ class SkillDefinition(TypedDict):
     id: SkillId
     name: str
     description: str
-    safety_limits: list[str]
 
 
 class FunctionToolDefinition(TypedDict):

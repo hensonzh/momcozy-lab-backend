@@ -172,7 +172,6 @@ def _read_skill_manifest(skill_id: SkillId) -> SkillDefinition:
         "id": skill_id,
         "name": name,
         "description": description.strip(),
-        "safety_limits": _ensure_string_list(front.get("safety_limits")),
     }
     return manifest
 
@@ -238,16 +237,6 @@ def _strip_scalar(value: str) -> str:
     if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
         return value[1:-1]
     return value
-
-
-def _ensure_string_list(value: Any) -> list[str]:
-    if value is None:
-        return []
-    if isinstance(value, list):
-        return [str(item) for item in value]
-    if isinstance(value, str):
-        return [value] if value else []
-    return []
 
 
 def _list_child_files(path: Path) -> list[str]:
