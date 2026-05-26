@@ -484,28 +484,29 @@ async def create_analysis_endpoint(request: Request) -> dict[str, Any]:
         normality = evaluate_status_advice_normality(user_id=uid)
         advice = generate_status_advice(user_id=uid, normality=normality)
         if not advice:
-            return _analysis_create_response(error=-1, result=False, message="failed to generate mom baby advice")
+            return _analysis_create_response(error=-1, result=False, message="failed to generate lactation advice")
         lactation_advice = str(advice.get("lactation_advice") or "").strip()
         feeding_advice = str(advice.get("feeding_advice") or "").strip()
+        summary = str(advice.get("summary") or "").strip()
+        status_prompt = str(advice.get("status_prompt") or "").strip()
+        today_advice = str(advice.get("today_advice") or lactation_advice).strip()
+        followup = str(advice.get("followup") or "现在方便吗？我们聊一下奶量的问题。").strip()
         if not data_store.update_user_profile_advice(
             user_id=uid,
             lactation_advice=lactation_advice,
             feeding_advice=feeding_advice,
         ):
-            return _analysis_create_response(error=-1, result=False, message="failed to update mom baby advice")
-        message = [
-            f"泌乳建议：{lactation_advice}",
-            f"喂养建议：{feeding_advice}",
-        ]
-        message_text = "  \r".join(message)
-        is_normal = bool(normality.get("result") is True)
+            return _analysis_create_response(error=-1, result=False, message="failed to update lactation advice")
+        is_normal = bool(normality.get("lactation_normal") is True or normality.get("result") is True)
         return _analysis_create_response(
             error=0,
             result=is_normal,
-            message=message_text,
-            analysis_card=_mom_baby_analysis_card(
-                lactation_advice=lactation_advice,
-                feeding_advice=feeding_advice,
+            message=followup,
+            analysis_card=_lactation_advice_analysis_card(
+                summary=summary,
+                status_prompt=status_prompt,
+                today_advice=today_advice,
+                followup=followup,
                 normality=normality,
                 is_normal=is_normal,
             ),
@@ -1542,36 +1543,45 @@ def _daily_summary_analysis_card(message: Any, *, summary_data: dict[str, Any] |
     return card
 
 
-def _mom_baby_analysis_card(
+def _lactation_advice_analysis_card(
     *,
-    lactation_advice: str,
-    feeding_advice: str,
+    summary: str,
+    status_prompt: str,
+    today_advice: str,
+    followup: str,
     normality: dict[str, Any],
     is_normal: bool,
 ) -> dict[str, Any]:
     reason = str(normality.get("reason") or "").strip()
-    status_label, status_tone = _mom_baby_status_badge(normality=normality, is_normal=is_normal)
+    status_label, status_tone = _lactation_status_badge(
+        normality=normality,
+        is_normal=is_normal,
+        status_prompt=status_prompt,
+    )
     return {
         "kind": "mom_baby",
-        "title": "每日泌乳/喂养建议",
+        "title": "每日泌乳建议",
         "status": "normal" if is_normal else "attention",
         "status_label": status_label,
         "status_tone": status_tone,
         "reason": reason,
+        "followup": followup,
         "sections": [
-            {"id": "lactation", "title": "泌乳建议", "tone": "milk", "items": [lactation_advice]},
-            {"id": "feeding", "title": "喂养建议", "tone": "feeding", "items": [feeding_advice]},
+            {"id": "summary", "title": "简单总结", "tone": "overview", "items": [summary]},
+            {"id": "status", "title": "状态提示", "tone": "attention" if not is_normal else "milk", "items": [status_prompt]},
+            {"id": "today", "title": "今日建议", "tone": "next", "items": [today_advice]},
         ],
     }
 
 
-def _mom_baby_status_badge(*, normality: dict[str, Any], is_normal: bool) -> tuple[str, str]:
+def _lactation_status_badge(*, normality: dict[str, Any], is_normal: bool, status_prompt: str = "") -> tuple[str, str]:
+    label = status_prompt.strip()
     if is_normal:
-        return "", ""
+        return label or "节奏稳定", "normal"
 
     reason = str(normality.get("reason") or "").strip()
     if reason in {"insufficient_minimum_valid_days", "assessment_failed", "missing_user_id"}:
-        return "", ""
+        return label or "记录补充中", "insufficient"
 
     failed_metrics = normality.get("failed_metrics") if isinstance(normality.get("failed_metrics"), list) else []
     failed_types = {
@@ -1587,18 +1597,18 @@ def _mom_baby_status_badge(*, normality: dict[str, Any], is_normal: bool) -> tup
         and (str(item.get("status") or "") == "low" or str(item.get("rule_hit") or "") == "percentile_below_p15")
     ]
     if len(low_days) >= max(3, min(5, len(metrics) or 0)):
-        return "值得关注", "attention"
+        return label or "密切关注奶量中", "attention"
 
     if len(failed_types) > 1:
-        return "值得关注", "attention"
+        return label or "留意奶量变化", "attention"
 
     if "lactation" in failed_types or reason == "lactation_out_of_range":
-        return "值得关注", "attention"
+        return label or "留意奶量变化", "attention"
 
     if "feeding" in failed_types or reason == "feeding_out_of_range":
-        return "值得关注", "attention"
+        return label or "继续观察中", "insufficient"
 
-    return "值得关注", "attention"
+    return label or "继续观察中", "attention"
 
 
 def _failed_day_statuses(failed_metrics: list[Any], *, metric_type: str) -> set[str]:

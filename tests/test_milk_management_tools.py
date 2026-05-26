@@ -6,7 +6,8 @@ import unittest
 from datetime import datetime, timedelta
 from typing import Any
 
-os.environ["MILK_DB_PATH"] = os.path.join(tempfile.mkdtemp(prefix="momcozy-agent-tests-"), "milk_management.db")
+MILK_MANAGEMENT_TOOLS_DB_PATH = os.path.join(tempfile.mkdtemp(prefix="momcozy-agent-tests-"), "milk_management.db")
+os.environ["MILK_DB_PATH"] = MILK_MANAGEMENT_TOOLS_DB_PATH
 
 from momcozy_agent.services.milk_management.calendar import apply_calendar_adjustment, preview_calendar_adjustment
 from momcozy_agent.services.milk_management.db import transaction
@@ -17,6 +18,9 @@ from momcozy_agent.services.milk_management.task_completion import complete_milk
 
 
 class MilkManagementToolTests(unittest.TestCase):
+    def setUp(self) -> None:
+        os.environ["MILK_DB_PATH"] = MILK_MANAGEMENT_TOOLS_DB_PATH
+
     def test_complete_pumping_without_amount_marks_done_without_creating_record(self) -> None:
         uid, _ = _seed_user("complete-no-amount")
         _add_task(uid, task_id=1, content="吸奶", item_type="吸奶", is_milk_pump=1)
@@ -247,6 +251,27 @@ class MilkManagementToolTests(unittest.TestCase):
         self.assertTrue(second["ok"])
         self.assertEqual(second["status"], "calendar_adjustment_idempotent_replay")
         self.assertEqual(_scalar("SELECT COUNT(*) FROM calendar WHERE user_id = ? AND source = '用户输入'", (uid,)), 1)
+
+    def test_calendar_adjustment_preview_can_use_image_extracted_custom_event(self) -> None:
+        uid, _ = _seed_user("calendar-adjustment-image")
+        item_id = _add_task(uid, task_id=1, content="吸奶", item_type="吸奶", is_milk_pump=1)
+
+        preview = preview_calendar_adjustment(
+            user_id=uid,
+            target_date="2026-05-14",
+            event_start_time="09:00",
+            event_end_time="10:00",
+            duration_minutes=None,
+            content="产检",
+            item_type="自定义",
+            plan_id=None,
+        )
+
+        self.assertTrue(preview["ok"])
+        self.assertEqual(preview["data"]["insert_event"]["type"], "自定义")
+        self.assertEqual(preview["data"]["conflict_count"], 1)
+        self.assertEqual(preview["data"]["updates"][0]["item_id"], item_id)
+        self.assertEqual(preview["data"]["updates"][0]["new_start_time"], "2026-05-14 10:00:00")
 
 
 def _seed_user(user_id: str) -> tuple[str, int]:

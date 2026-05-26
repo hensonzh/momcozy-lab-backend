@@ -4,10 +4,12 @@ import os
 import tempfile
 import unittest
 from datetime import datetime
+from pathlib import Path
 from unittest.mock import patch
 
 os.environ["ENTRY_API_KEY"] = "test-token"
-os.environ["MILK_DB_PATH"] = os.path.join(tempfile.mkdtemp(prefix="momcozy-agent-api-tests-"), "milk_management.db")
+API_ANALYSIS_DB_PATH = os.path.join(tempfile.mkdtemp(prefix="momcozy-agent-api-tests-"), "milk_management.db")
+os.environ["MILK_DB_PATH"] = API_ANALYSIS_DB_PATH
 
 from fastapi.testclient import TestClient
 
@@ -19,6 +21,8 @@ from momcozy_agent.services.milk_management.status_advice import evaluate_status
 
 class AnalysisCreateApiTests(unittest.TestCase):
     def setUp(self) -> None:
+        os.environ["MILK_DB_PATH"] = API_ANALYSIS_DB_PATH
+        data_store.DB_PATH = Path(API_ANALYSIS_DB_PATH)  # type: ignore[attr-defined]
         self.client = TestClient(app)
         self.headers = {"Authorization": "Bearer test-token"}
 
@@ -32,13 +36,20 @@ class AnalysisCreateApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"error": -1, "data": {"result": False, "message": "invalid request body"}})
 
-    def test_mom_baby_returns_two_advice_messages_and_updates_profile_advice(self) -> None:
+    def test_mom_baby_returns_structured_lactation_advice_and_updates_profile_advice(self) -> None:
         _seed_user("u1")
         with (
             patch("momcozy_agent.api.routes.evaluate_status_advice_normality", return_value={"result": True}) as normality,
             patch(
                 "momcozy_agent.api.routes.generate_status_advice",
-                return_value={"lactation_advice": "今天泌乳节奏稳定。", "feeding_advice": "喂养记录整体正常。"},
+                return_value={
+                    "summary": "最近排乳节奏稳定。",
+                    "status_prompt": "节奏稳定",
+                    "today_advice": "今天继续按日程吸奶，我会提前15分钟提醒你。",
+                    "followup": "现在方便吗？我们聊一下奶量的问题。",
+                    "lactation_advice": "今天继续按日程吸奶，我会提前15分钟提醒你。",
+                    "feeding_advice": "",
+                },
             ) as advice,
         ):
             response = self.client.post(
@@ -51,19 +62,20 @@ class AnalysisCreateApiTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["error"], 0)
         self.assertEqual(payload["data"]["result"], True)
-        self.assertEqual(payload["data"]["message"], "泌乳建议：今天泌乳节奏稳定。  \r喂养建议：喂养记录整体正常。")
+        self.assertEqual(payload["data"]["message"], "现在方便吗？我们聊一下奶量的问题。")
         card = payload["data"]["analysis_card"]
         self.assertEqual(card["kind"], "mom_baby")
-        self.assertEqual(card["title"], "每日泌乳/喂养建议")
+        self.assertEqual(card["title"], "每日泌乳建议")
         self.assertEqual(card["status"], "normal")
-        self.assertEqual(card["status_label"], "")
-        self.assertEqual(card["status_tone"], "")
-        self.assertEqual([section["title"] for section in card["sections"]], ["泌乳建议", "喂养建议"])
+        self.assertEqual(card["status_label"], "节奏稳定")
+        self.assertEqual(card["status_tone"], "normal")
+        self.assertEqual(card["followup"], "现在方便吗？我们聊一下奶量的问题。")
+        self.assertEqual([section["title"] for section in card["sections"]], ["简单总结", "状态提示", "今日建议"])
         normality.assert_called_once_with(user_id="u1")
         advice.assert_called_once_with(user_id="u1", normality={"result": True})
         profile = _profile("u1")
-        self.assertEqual(profile["lactation_advice"], "今天泌乳节奏稳定。")
-        self.assertEqual(profile["feeding_advice"], "喂养记录整体正常。")
+        self.assertEqual(profile["lactation_advice"], "今天继续按日程吸奶，我会提前15分钟提醒你。")
+        self.assertEqual(profile["feeding_advice"], "")
 
     def test_mom_baby_card_surfaces_specific_attention_label(self) -> None:
         _seed_user("u1")
@@ -83,7 +95,14 @@ class AnalysisCreateApiTests(unittest.TestCase):
             patch("momcozy_agent.api.routes.evaluate_status_advice_normality", return_value=normality_payload),
             patch(
                 "momcozy_agent.api.routes.generate_status_advice",
-                return_value={"lactation_advice": "近几天奶量略低，先把排乳节奏稳住。", "feeding_advice": "喂养次数暂时可以继续观察。"},
+                return_value={
+                    "summary": "近几天奶量略低。",
+                    "status_prompt": "留意奶量变化",
+                    "today_advice": "今天先把排乳节奏稳住。",
+                    "followup": "现在方便吗？我们聊一下奶量的问题。",
+                    "lactation_advice": "今天先把排乳节奏稳住。",
+                    "feeding_advice": "",
+                },
             ),
         ):
             response = self.client.post(
@@ -95,7 +114,7 @@ class AnalysisCreateApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         card = response.json()["data"]["analysis_card"]
         self.assertEqual(card["status"], "attention")
-        self.assertEqual(card["status_label"], "值得关注")
+        self.assertEqual(card["status_label"], "留意奶量变化")
         self.assertEqual(card["status_tone"], "attention")
 
     def test_status_create_does_not_evaluate_normality(self) -> None:
@@ -158,7 +177,10 @@ class AnalysisCreateApiTests(unittest.TestCase):
 
         self.assertIsNotNone(advice)
         self.assertIn("奶量低于参考", advice["lactation_advice"])
-        self.assertTrue(advice["feeding_advice"])
+        self.assertEqual(advice["feeding_advice"], "")
+        self.assertEqual(advice["followup"], "现在方便吗？我们聊一下奶量的问题。")
+        self.assertTrue(advice["summary"])
+        self.assertTrue(advice["today_advice"])
 
     def test_rejects_pumping_type(self) -> None:
         response = self.client.post(

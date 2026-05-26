@@ -12,28 +12,32 @@ from .feeding import estimate_breastfeeding_milk
 
 
 SIMPLE_STATUS_ADVICE_PROMPT = """
-你是 Momcozy 的泌乳和喂养状态建议助手。根据输入的生产日期、宝宝信息，以及近7天吸奶、亲喂和喂奶记录，生成像朋友关心一样的中文建议。
+你是 Momcozy 的每日泌乳建议助手。根据输入的生产日期、宝宝信息，以及近7天吸奶、亲喂和喂奶记录，生成一张给妈妈看的泌乳建议卡片。
 
 要求：
-- 只返回 JSON：{"lactation_advice":"...","feeding_advice":"..."}
-- lactation_advice 只关注泌乳/吸奶/亲喂排乳方向；feeding_advice 只关注宝宝喂养频次/摄入记录方向。
-- 每条建议都按照“问题总结 → 关心安抚 → 记录解释 → 今日行动”的顺序自然展开，但不要写成生硬的分点，要像一段温柔、专业、能让妈妈愿意继续执行的陪伴式建议。
-- 每条 advice 建议 120-150 个中文字符，不要写成标题、列表或报告。
-- 语气要温暖、坚定、陪伴感强，既提醒问题需要处理，也要让妈妈感觉“可以一步一步来”。
-    - 开头要像真人在看完记录后开口说话。lactation_advice 优先用“嗨，我发现...”开头；feeding_advice 可以用“宝宝这边我也注意到...”开头，避免两条都机械重复“嗨”。
-    - 当有明确异常或低于参考时，开头直接说出关键发现，例如“嗨，我发现近期奶量持续偏低，近7天预估日均约657.6ml，已经连续低于参考...”
-- 如果喂养次数低于参考：必须提醒同步观察尿布、精神和体重；出现尿少、精神差、体重增长慢时建议联系儿科或 IBCLC。
+- 只返回 JSON：{"summary":"...","status_prompt":"...","today_advice":"...","followup":"..."}
+- summary：1 句话简单总结最近泌乳/排乳记录，不写标题。
+- status_prompt：短状态，不超过10个字，例如“节奏稳定”“密切关注奶量中”“记录补充中”。
+- today_advice：1 段今日建议，说明今天建议做什么、为什么，并自然提醒按日程吸奶；可以提到会提前15分钟提醒。
+- followup：固定用“现在方便吗？我们聊一下奶量的问题。”
+- 只关注泌乳、吸奶、亲喂排乳方向；不要生成单独的喂养建议段落。
+- 不要用“AI分析/系统判断/根据模型”这类说法，不要像报告，不要长篇科普。
+- 当有明确偏低或持续低于参考时，直接说出关键发现，但避免给妈妈贴“奶不够”的诊断标签。
+- 如果记录提示可能影响宝宝摄入，只能提醒同步观察尿布、精神和体重；出现尿少、精神差、体重增长慢时建议联系儿科或 IBCLC。
 - 不诊断、不承诺奶量一定够或不够，不替代医生、儿科医生或 IBCLC。
 - 如果输入包含 analysis_normality：advice 必须和 result 方向一致。
-- 当 result=true：先肯定当前节奏，再解释为什么可以继续观察，不要求增加、减少或明显改进。
-- 当 result=false：必须根据 failed_metrics/reason 指出具体问题和可调整方向，不能两条都只夸奖。
+- 当 result=true：先肯定当前节奏，再给保持建议，不要求增加、减少或明显改进。
+- 当 result=false：必须根据 failed_metrics/reason 指出具体问题和可调整方向，不能只夸奖。
 """.strip()
 
 STATUS_ADVICE_MAX_CHARS = 180
+STATUS_SUMMARY_MAX_CHARS = 90
+STATUS_PROMPT_MAX_CHARS = 12
+DEFAULT_LACTATION_FOLLOWUP = "现在方便吗？我们聊一下奶量的问题。"
 
 
 def generate_status_advice(*, user_id: str, days: int = 7, normality: dict[str, Any] | None = None) -> dict[str, Any] | None:
-    """Generate both lactation and feeding advice for status creation."""
+    """Generate the daily lactation advice card payload."""
 
     uid = str(user_id or "").strip()
     if not uid:
@@ -48,7 +52,8 @@ def generate_status_advice(*, user_id: str, days: int = 7, normality: dict[str, 
     if not generated:
         generated = _fallback_status_advice(payload, normality=normality)
     generated = _enforce_attention_advice(generated, payload=payload, normality=normality)
-    if not generated.get("lactation_advice", "").strip() or not generated.get("feeding_advice", "").strip():
+    generated = _normalize_lactation_advice_payload(generated, payload=payload, normality=normality)
+    if not generated.get("lactation_advice", "").strip():
         return None
     return generated
 
@@ -308,6 +313,107 @@ def _average_daily_milk(days: list[dict[str, Any]]) -> float:
     return sum(values) / len(values) if values else 0.0
 
 
+def _normalize_lactation_advice_payload(
+    advice: dict[str, Any],
+    *,
+    payload: dict[str, Any],
+    normality: dict[str, Any] | None,
+) -> dict[str, str]:
+    norm = normality if isinstance(normality, dict) else {}
+    lactation = _clean_advice(advice.get("lactation_advice") or advice.get("today_advice"))
+    summary = _clean_summary(advice.get("summary")) or _fallback_lactation_summary(payload=payload, normality=norm, lactation_advice=lactation)
+    status_prompt = _clean_status_prompt(advice.get("status_prompt")) or _fallback_status_prompt(norm)
+    today_advice = _clean_advice(advice.get("today_advice") or lactation)
+    if not today_advice:
+        today_advice = _fallback_today_advice(norm)
+    followup = _clean_followup(advice.get("followup")) or DEFAULT_LACTATION_FOLLOWUP
+    return {
+        "summary": summary,
+        "status_prompt": status_prompt,
+        "today_advice": today_advice,
+        "followup": followup,
+        "lactation_advice": today_advice,
+        "feeding_advice": "",
+    }
+
+
+def _fallback_lactation_summary(*, payload: dict[str, Any], normality: dict[str, Any], lactation_advice: str) -> str:
+    if lactation_advice:
+        first_sentence = _first_sentence(lactation_advice)
+        if first_sentence:
+            return _clean_summary(first_sentence)
+
+    pumping = payload.get("pumping_summary") if isinstance(payload.get("pumping_summary"), dict) else {}
+    total = _safe_float(pumping.get("total_effective_ml"))
+    count = _int(pumping.get("record_count"), 0)
+    if total > 0 or count > 0:
+        return _clean_summary(f"近几天记录到 {count} 次排乳，累计约 {_format_ml(total)}ml。")
+
+    reason = str(normality.get("reason") or "").strip()
+    if reason == "insufficient_minimum_valid_days":
+        return "最近可用记录还不够，先把排乳时间和奶量记完整。"
+    return "今天先看排乳节奏和身体感受，不急着下结论。"
+
+
+def _fallback_status_prompt(normality: dict[str, Any]) -> str:
+    if not normality:
+        return "继续观察中"
+    if normality.get("result") is True or normality.get("lactation_normal") is True:
+        return "节奏稳定"
+    reason = str(normality.get("reason") or "").strip()
+    if reason in {"insufficient_minimum_valid_days", "assessment_failed", "missing_user_id"}:
+        return "记录补充中"
+    metrics = normality.get("metrics") if isinstance(normality.get("metrics"), list) else []
+    low_days = [
+        item
+        for item in metrics
+        if isinstance(item, dict)
+        and (
+            str(item.get("status") or "") == "low"
+            or str(item.get("rule_hit") or "") == "percentile_below_p15"
+        )
+    ]
+    if len(low_days) >= max(3, min(5, len(metrics) or 0)):
+        return "密切关注奶量中"
+    if normality.get("lactation_normal") is False:
+        return "留意奶量变化"
+    return "继续观察中"
+
+
+def _fallback_today_advice(normality: dict[str, Any]) -> str:
+    if normality.get("result") is True or normality.get("lactation_normal") is True:
+        return "今天先按原来的日程吸奶和亲喂，继续记录每次奶量、时长和舒适度；如果有计划任务，我会提前15分钟提醒你。"
+    if str(normality.get("reason") or "") == "insufficient_minimum_valid_days":
+        return "今天最重要的是把吸奶、亲喂时间和大概奶量记完整；记录够了，我们再判断是否需要调整。"
+    return "今天先固定一个最容易坚持的排乳点，按日程完成吸奶；我会提前15分钟提醒你，避免临时忘记或间隔拉太长。"
+
+
+def _first_sentence(text: str) -> str:
+    token = str(text or "").strip()
+    if not token:
+        return ""
+    for sep in ("。", "！", "？", ";", "；"):
+        idx = token.find(sep)
+        if 0 <= idx < 80:
+            return token[: idx + 1]
+    return token[:80]
+
+
+def _clean_summary(value: Any) -> str:
+    text = " ".join(str(value or "").split())
+    return text[:STATUS_SUMMARY_MAX_CHARS]
+
+
+def _clean_status_prompt(value: Any) -> str:
+    text = " ".join(str(value or "").split())
+    return text[:STATUS_PROMPT_MAX_CHARS]
+
+
+def _clean_followup(value: Any) -> str:
+    text = " ".join(str(value or "").split())
+    return text[:40]
+
+
 def _format_ml(value: float) -> str:
     rounded = round(float(value or 0), 1)
     return str(int(rounded)) if rounded.is_integer() else str(rounded)
@@ -525,11 +631,19 @@ def _parse_advice_response(response: object) -> dict[str, str] | None:
             return None
     if not isinstance(parsed, dict):
         return None
-    lactation_advice = _clean_advice(parsed.get("lactation_advice"))
+    summary = _clean_summary(parsed.get("summary"))
+    status_prompt = _clean_status_prompt(parsed.get("status_prompt"))
+    today_advice = _clean_advice(parsed.get("today_advice"))
+    followup = _clean_followup(parsed.get("followup"))
+    lactation_advice = _clean_advice(parsed.get("lactation_advice") or today_advice)
     feeding_advice = _clean_advice(parsed.get("feeding_advice"))
     if not lactation_advice and not feeding_advice:
         return None
     return {
+        "summary": summary,
+        "status_prompt": status_prompt,
+        "today_advice": today_advice,
+        "followup": followup,
         "lactation_advice": lactation_advice,
         "feeding_advice": feeding_advice,
     }
