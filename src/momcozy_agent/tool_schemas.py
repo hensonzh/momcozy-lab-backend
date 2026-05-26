@@ -411,7 +411,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "milk_calendar_change_preview": _function_tool(
         "milk_calendar_change_preview",
-        "PREVIEW 候选变更工具：预览新增事项导致的 calendar 变更，不写数据库。返回冲突、候选调整和 proposal；写入前必须获得用户确认。",
+        "PREVIEW 候选变更工具：预览新增事项导致的 calendar 变更，不写数据库。适用于用户文字新增事项，也适用于用户发图片后由模型识别出日期/时间/事项名称再预览。返回冲突、候选调整和 proposal；写入前必须获得用户确认。",
         {
             "target_date": ISO_DATE,
             "event_start_time": {"type": "string", "description": "开始时间，例如 09:00 或完整 ISO datetime。"},
