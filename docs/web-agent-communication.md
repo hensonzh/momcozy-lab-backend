@@ -403,6 +403,40 @@ RUN_FINISHED
 - `CUSTOM momcozy.agent.status` 是当前唯一主动发送的状态通道；`ACTIVITY_SNAPSHOT` helper 仅保留兼容，不再由主 loop 发送。
 - `STEP_STARTED` / `STEP_FINISHED` 当前不属于主 loop 可见契约，只作为历史兼容事件保留。
 
+### 5.0.1 事件语义字段 `semantic`
+
+所有主 AG-UI event 都可以携带 `semantic`，用于把原始事件转换成稳定的用户体验语义。App 应优先使用后端下发的 `event.semantic`；如果旧服务没有该字段，App 端用 `event.type + tool_call_name + result.status + artifact_type` 做兼容兜底。
+
+```json
+{
+  "semantic": {
+    "phase": "reading",
+    "label": "正在读取吸奶和喂养记录",
+    "visibility": "work_item",
+    "merge_key": "tool:call_xxx",
+    "priority": 50
+  }
+}
+```
+
+字段说明：
+
+| 字段 | 说明 |
+| --- | --- |
+| `phase` | 语义阶段：`thinking`、`reading`、`evaluating`、`planning`、`saving`、`confirming`、`replying`、`done`、`error`、`working` |
+| `label` | 可展示给用户的短文案，不包含工具函数名、完整参数或敏感数据 |
+| `visibility` | UI 层级：`hidden` 只进状态机；`status` 显示单行状态；`work_item` 合并到工作面板；`artifact` 由结构化 UI 呈现；`action` 表示等待用户确认 |
+| `merge_key` | 前端合并同一语义 work item 的稳定 key，优先使用 `tool:<tool_call_id>`、`artifact:<artifact_id>`、`confirmation:<id>` |
+| `priority` | 同一时刻多条状态竞争时的排序权重，数值越高越接近最终/关键状态 |
+
+前端展示规则：
+
+- 每个事件都要能得到一个 semantic object，但不代表每个事件都新增一行 UI。
+- `TOOL_CALL_START` / `ARGS` / `END` / `RESULT` 应围绕同一个 `merge_key` 更新同一条 work item。
+- `TOOL_CALL_ARGS` 默认不改变已有标题；缺少 start 时可用它补建 work item。
+- `QUICK_REPLIES`、`RUN_FINISHED`、`TEXT_MESSAGE_CONTENT` 通常是 `hidden`，只更新按钮、完成态或正文。
+- `ARTIFACT_CREATED` 的主要反馈是渲染卡片/表单，不需要额外重复播报。
+
 ### 5.1 Run 事件
 
 #### `RUN_STARTED`
@@ -413,7 +447,14 @@ RUN_FINISHED
   "timestamp": 1710000000000,
   "thread_id": "thread_xxx",
   "run_id": "run_xxx",
-  "parent_run_id": "run_parent"
+  "parent_run_id": "run_parent",
+  "semantic": {
+    "phase": "thinking",
+    "label": "收到，我先整理上下文",
+    "visibility": "status",
+    "merge_key": "run:run_xxx",
+    "priority": 10
+  }
 }
 ```
 
@@ -574,7 +615,14 @@ Agent 状态通过 `CUSTOM` / `momcozy.agent.status` 发送：
   "parent_message_id": "run_xxx:tool-results",
   "response_id": "resp_xxx",
   "output_index": 1,
-  "item_id": "fc_xxx"
+  "item_id": "fc_xxx",
+  "semantic": {
+    "phase": "planning",
+    "label": "正在准备确认表单",
+    "visibility": "work_item",
+    "merge_key": "tool:call_xxx",
+    "priority": 50
+  }
 }
 ```
 

@@ -367,13 +367,14 @@ message_sent_at: 2026-05-05T17:45:03+08:00
 
 Work panel 的首个可见进度由 Responses streaming function-call 事件驱动：
 
+- 主 AG-UI event 携带 `semantic` 元信息：`phase`、`label`、`visibility`、`merge_key`、`priority`。前端优先使用后端语义；旧事件没有 `semantic` 时，由前端集中 mapper 兜底生成同一套结构。
 - 后端在 `response.output_item.added` / `response.function_call_arguments.done` 阶段识别 `function_call`，并尽早发送 `TOOL_CALL_START`。
 - Thinking 只由真实 Responses reasoning stream 事件驱动；`RUN_STARTED`、`requesting_model` 和普通文本 idle 不再显示 Thinking。
 - 如果真实 reasoning 发生在 assistant text delta 之后，测试前端显示“正在准备下一步”；`thinking completed` / `failed` 会立即移除该状态。
 - `TOOL_CALL_START` 到达后，测试前端立即创建或更新 work item。
 - `TOOL_CALL_ARGS` 默认不改变可见标题，只作为参数已安全摘要的协议事件；缺少 start 时才补建 work item。
 - `TOOL_CALL_RESULT` 到达后，测试前端立即把同一个 work item 标记为完成或失败。
-- Work panel 只展示阶段语义，不展示具体工具名；`tool_call_name` 仅用于前端合并同一条 work item 和归类为读取、评估、预览、保存、等待确认等阶段。
+- Work panel 只展示阶段语义，不展示具体工具名；`tool_call_name` 仅用于协议兜底、合并同一条 work item 和归类为读取、评估、预览、保存、等待确认等阶段。
 - `ARTIFACT_CREATED` 到达后，前端渲染表单/卡片/工单草稿等结构化 UI。
 - `CONFIRMATION_REQUIRED` 到达后，work panel 显示等待确认状态，具体确认动作由对应 artifact 或业务 UI 承载。
 - `QUICK_REPLIES` 是最终回复后的快捷输入 UI。模型应通过全局 `ui_quick_replies_create` 工具为每轮最终回复生成 3 个提示；如果模型漏调，后端会补 3 个安全默认提示。该工具事件不展示在 work panel，不进入 assistant 正文。

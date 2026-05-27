@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from .agents import QUICK_REPLIES_TOOL_NAME, quick_replies_event, run_agent_loop, run_error_event
+from .agents import QUICK_REPLIES_TOOL_NAME, quick_replies_event, run_agent_loop, run_error_event, text_message_semantic
 from .config import get_openai_client_options, load_project_env
 from .contexts import DEFAULT_LOCALE, DEFAULT_TIMEZONE, ContextState
 from .services.paths import ensure_runtime_dirs
@@ -281,10 +281,24 @@ async def stream_ag_ui_events(
         def send_text_delta(delta: str) -> None:
             nonlocal text_started
             if not text_started:
-                send_event({"type": "TEXT_MESSAGE_START", "message_id": assistant_message_id, "role": "assistant"})
+                send_event(
+                    {
+                        "type": "TEXT_MESSAGE_START",
+                        "message_id": assistant_message_id,
+                        "role": "assistant",
+                        "semantic": text_message_semantic("start", assistant_message_id),
+                    }
+                )
                 text_started = True
             streamed_text_parts.append(delta)
-            send_event({"type": "TEXT_MESSAGE_CONTENT", "message_id": assistant_message_id, "delta": delta})
+            send_event(
+                {
+                    "type": "TEXT_MESSAGE_CONTENT",
+                    "message_id": assistant_message_id,
+                    "delta": delta,
+                    "semantic": text_message_semantic("content", assistant_message_id),
+                }
+            )
 
         response_stream_timing = (
             lambda event_type, metadata: log_timing(f"responses:{event_type}", metadata)
@@ -323,7 +337,13 @@ async def stream_ag_ui_events(
                     send_text_delta(f"\n\n{followup}")
                     current_text = f"{current_text}\n\n{followup}"
             if text_started:
-                send_event({"type": "TEXT_MESSAGE_END", "message_id": assistant_message_id})
+                send_event(
+                    {
+                        "type": "TEXT_MESSAGE_END",
+                        "message_id": assistant_message_id,
+                        "semantic": text_message_semantic("end", assistant_message_id),
+                    }
+                )
             if pending_run_finished:
                 send_event(quick_replies_event(assistant_message_id, pending_quick_replies or _default_quick_replies()))
                 send_event(pending_run_finished)

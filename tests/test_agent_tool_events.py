@@ -10,6 +10,7 @@ from momcozy_agent.agents import (
     _tool_image_metadata,
     model_tool_output,
     run_agent_loop,
+    tool_call_start_event,
     tool_call_args_event,
     tool_call_end_event,
     tool_call_result_event,
@@ -18,6 +19,14 @@ from momcozy_agent.server import ChatRuntime, stream_ag_ui_events
 
 
 class AgentToolEventTests(unittest.TestCase):
+    def test_agent_request_defaults_to_concise_reply_style(self) -> None:
+        request = build_agent_request({"user_message": "奶量够不够", "locale": "zh-CN"})
+
+        self.assertEqual(request["text"]["verbosity"], "low")
+        self.assertIn("默认回复要短", request["instructions"])
+        self.assertIn("优先 1-3 句", request["instructions"])
+        self.assertIn("已经展示的信息不要再完整复述", request["instructions"])
+
     def test_tool_call_phase_events_include_tool_name(self) -> None:
         args_event = tool_call_args_event(
             "call-1",
@@ -48,6 +57,30 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertEqual(end_event["tool_call_name"], "milk_plan_preview")
         self.assertEqual(result_event["tool_call_name"], "milk_plan_preview")
         self.assertEqual(json.loads(result_event["content"])["tool_name"], "milk_plan_preview")
+        self.assertEqual(args_event["semantic"]["visibility"], "work_item")
+        self.assertEqual(args_event["semantic"]["phase"], "planning")
+        self.assertEqual(args_event["semantic"]["label"], "正在生成奶量计划草稿")
+        self.assertEqual(result_event["semantic"]["label"], "奶量计划草稿已生成")
+
+    def test_tool_start_events_include_user_facing_semantic_contract(self) -> None:
+        start_event = tool_call_start_event(
+            "call-1",
+            "milk_records_query",
+            response_id="resp-1",
+            output_index=0,
+            item_id="item-1",
+        )
+
+        self.assertEqual(
+            start_event["semantic"],
+            {
+                "phase": "reading",
+                "label": "正在读取吸奶和喂养记录",
+                "visibility": "work_item",
+                "merge_key": "tool:call-1",
+                "priority": 50,
+            },
+        )
 
     def test_loop_emits_single_status_channel_and_explicit_artifact_events(self) -> None:
         client = _FakeClient(
@@ -102,8 +135,10 @@ class AgentToolEventTests(unittest.TestCase):
 
         artifact = next(event for event in events if event.get("type") == "ARTIFACT_CREATED")
         self.assertEqual(artifact["artifact_type"], "support_ticket")
+        self.assertEqual(artifact["semantic"]["visibility"], "artifact")
         confirmation = next(event for event in events if event.get("type") == "CONFIRMATION_REQUIRED")
         self.assertEqual(confirmation["title"], "请确认售后工单")
+        self.assertEqual(confirmation["semantic"]["phase"], "confirming")
 
     def test_model_tool_output_compacts_artifact_payloads(self) -> None:
         raw = {

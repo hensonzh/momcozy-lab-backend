@@ -19,6 +19,8 @@ AG_UI_STATUS_CUSTOM_NAME = "momcozy.agent.status"
 AG_UI_THINKING_CUSTOM_NAME = "momcozy.agent.thinking"
 QUICK_REPLIES_TOOL_NAME = "ui_quick_replies_create"
 
+AgUiSemantic = dict[str, Any]
+
 MAX_TOOL_ROUNDS = 6
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SKILLS_ROOT = PROJECT_ROOT / "skills"
@@ -52,6 +54,13 @@ def run_started_event(thread_id: str, run_id: str, parent_run_id: str | None = N
         "timestamp": _timestamp_ms(),
         "thread_id": thread_id,
         "run_id": run_id,
+        "semantic": _semantic_payload(
+            "thinking",
+            "收到，我先整理上下文",
+            "status",
+            f"run:{run_id}",
+            priority=10,
+        ),
     }
     if parent_run_id:
         event["parent_run_id"] = parent_run_id
@@ -66,6 +75,7 @@ def run_finished_event(thread_id: str, run_id: str, result: Any | None = None) -
         "timestamp": _timestamp_ms(),
         "thread_id": thread_id,
         "run_id": run_id,
+        "semantic": _semantic_payload("done", "本轮已完成", "hidden", f"run:{run_id}", priority=100),
     }
     if result is not None:
         event["result"] = result
@@ -77,6 +87,7 @@ def run_error_event(message: str, code: str | None = None, *, thread_id: str | N
         "type": "RUN_ERROR",
         "timestamp": _timestamp_ms(),
         "message": message,
+        "semantic": _semantic_payload("error", "这轮处理遇到问题", "status", f"run_error:{code or 'unknown'}", priority=100),
     }
     if thread_id:
         event["thread_id"] = thread_id
@@ -93,6 +104,7 @@ def quick_replies_event(message_id: str, replies: list[dict[str, str]]) -> AgUiE
         "timestamp": _timestamp_ms(),
         "message_id": message_id,
         "replies": replies,
+        "semantic": _semantic_payload("done", "已准备下一步快捷选项", "hidden", f"quick_replies:{message_id}", priority=80),
     }
 
 
@@ -101,6 +113,7 @@ def step_started_event(step_name: str) -> AgUiEvent:
         "type": "STEP_STARTED",
         "timestamp": _timestamp_ms(),
         "step_name": step_name,
+        "semantic": _step_semantic(step_name, "started"),
     }
 
 
@@ -109,6 +122,7 @@ def step_finished_event(step_name: str) -> AgUiEvent:
         "type": "STEP_FINISHED",
         "timestamp": _timestamp_ms(),
         "step_name": step_name,
+        "semantic": _step_semantic(step_name, "finished"),
     }
 
 
@@ -120,12 +134,14 @@ def tool_call_start_event(
     response_id: str | None = None,
     output_index: int | None = None,
     item_id: str | None = None,
+    arguments: dict[str, Any] | None = None,
 ) -> AgUiEvent:
     event: AgUiEvent = {
         "type": "TOOL_CALL_START",
         "timestamp": _timestamp_ms(),
         "tool_call_id": tool_call_id,
         "tool_call_name": tool_call_name,
+        "semantic": _tool_semantic(tool_call_name, "start", tool_call_id=tool_call_id, arguments=arguments),
     }
     if parent_message_id:
         event["parent_message_id"] = parent_message_id
@@ -153,6 +169,7 @@ def tool_call_args_event(
         "tool_call_id": tool_call_id,
         "tool_call_name": tool_name,
         "delta": json.dumps(safe_tool_arguments(tool_name, arguments), ensure_ascii=False),
+        "semantic": _tool_semantic(tool_name, "args", tool_call_id=tool_call_id, arguments=arguments),
     }
     if response_id:
         event["response_id"] = response_id
@@ -176,6 +193,7 @@ def tool_call_end_event(
         "timestamp": _timestamp_ms(),
         "tool_call_id": tool_call_id,
         "tool_call_name": tool_name,
+        "semantic": _tool_semantic(tool_name, "end", tool_call_id=tool_call_id),
     }
     if response_id:
         event["response_id"] = response_id
@@ -204,6 +222,12 @@ def tool_call_result_event(
         "tool_call_name": tool_call_name,
         "content": json.dumps(safe_tool_result(result), ensure_ascii=False),
         "role": "tool",
+        "semantic": _tool_semantic(
+            tool_call_name,
+            "result",
+            tool_call_id=tool_call_id,
+            result=safe_tool_result(result),
+        ),
     }
     if response_id:
         event["response_id"] = response_id
@@ -232,6 +256,7 @@ def artifact_created_event(
         "tool_call_name": tool_call_name,
         "status": status,
         "artifact": artifact,
+        "semantic": _artifact_semantic(artifact_type, artifact_id, tool_call_name),
     }
 
 
@@ -252,6 +277,13 @@ def confirmation_required_event(
         "tool_call_name": tool_call_name,
         "title": title,
         "message": message,
+        "semantic": _semantic_payload(
+            "confirming",
+            title or "需要你确认后再继续",
+            "action",
+            f"confirmation:{confirmation_id}",
+            priority=90,
+        ),
     }
     if artifact_id:
         event["artifact_id"] = artifact_id
@@ -266,6 +298,7 @@ def status_activity_snapshot_event(message_id: str, event: AgentEvent) -> AgUiEv
         "activity_type": AG_UI_STATUS_ACTIVITY_TYPE,
         "content": event,
         "replace": True,
+        "semantic": _status_event_semantic(event),
     }
 
 
@@ -275,10 +308,12 @@ def status_custom_event(event: AgentEvent) -> AgUiEvent:
         "timestamp": _timestamp_ms(),
         "name": AG_UI_STATUS_CUSTOM_NAME,
         "value": event,
+        "semantic": _status_event_semantic(event),
     }
 
 
 def thinking_custom_event(status: str, metadata: dict[str, Any] | None = None) -> AgUiEvent:
+    metadata = metadata or {}
     return {
         "type": "CUSTOM",
         "timestamp": _timestamp_ms(),
@@ -286,9 +321,340 @@ def thinking_custom_event(status: str, metadata: dict[str, Any] | None = None) -
         "value": {
             "type": "agent.thinking",
             "status": status,
-            "metadata": metadata or {},
+            "metadata": metadata,
         },
+        "semantic": _thinking_semantic(status, metadata),
     }
+
+
+def text_message_semantic(stage: str, message_id: str) -> AgUiSemantic:
+    if stage == "start":
+        return _semantic_payload("replying", "正在组织回复", "hidden", f"text:{message_id}", priority=40)
+    if stage == "content":
+        return _semantic_payload("replying", "正在输出回复", "hidden", f"text:{message_id}", priority=40)
+    if stage == "end":
+        return _semantic_payload("done", "回复已完成", "hidden", f"text:{message_id}", priority=80)
+    return _semantic_payload("replying", "正在处理回复", "hidden", f"text:{message_id}", priority=40)
+
+
+def _semantic_payload(phase: str, label: str, visibility: str, merge_key: str, *, priority: int = 0) -> AgUiSemantic:
+    return {
+        "phase": phase,
+        "label": label,
+        "visibility": visibility,
+        "merge_key": merge_key,
+        "priority": priority,
+    }
+
+
+def _step_semantic(step_name: str, state: str) -> AgUiSemantic:
+    if step_name == "routing":
+        label = "正在判断需求" if state == "started" else "需求判断完成"
+        phase = "thinking" if state == "started" else "done"
+    else:
+        label = "正在处理当前步骤" if state == "started" else "当前步骤已完成"
+        phase = "working" if state == "started" else "done"
+    return _semantic_payload(phase, label, "status", f"step:{step_name}", priority=30)
+
+
+def _status_event_semantic(event: AgentEvent) -> AgUiSemantic:
+    message = str(event.get("message") or "").strip()
+    phase = str(event.get("phase") or "").strip()
+    if phase == "failed" or message == "Step failed.":
+        return _semantic_payload("error", "这个步骤没有完成", "status", f"status:{phase or 'failed'}", priority=95)
+    if phase in {"requesting_model", "started", "model_tool_call", "tool_completed"}:
+        return _semantic_payload("thinking", _status_label(message), "hidden", f"status:{phase or 'loop'}", priority=20)
+    return _semantic_payload("working", _status_label(message), "status", f"status:{phase or 'loop'}", priority=20)
+
+
+def _thinking_semantic(status: str, metadata: dict[str, Any]) -> AgUiSemantic:
+    normalized_status = status.strip().lower()
+    if normalized_status in {"started", "running"}:
+        label = "正在准备下一步" if metadata.get("after_output_text") is True else "正在思考"
+        return _semantic_payload("thinking", label, "status", "thinking:current", priority=40)
+    if normalized_status == "failed":
+        return _semantic_payload("error", "思考过程已停止", "hidden", "thinking:current", priority=40)
+    return _semantic_payload("done", "思考已完成", "hidden", "thinking:current", priority=40)
+
+
+def _artifact_semantic(artifact_type: str, artifact_id: str, tool_name: str) -> AgUiSemantic:
+    normalized_artifact_type = str(artifact_type or "").strip()
+    if normalized_artifact_type == "form":
+        label = "表单已准备好"
+    elif normalized_artifact_type in {"support_ticket", "support_ticket_draft"}:
+        label = "售后工单草稿已准备好"
+    elif normalized_artifact_type in {"milk_plan_card", "milk_analysis_card"}:
+        label = "奶量卡片已生成"
+    else:
+        label = "结果卡片已生成"
+    merge_key = f"artifact:{artifact_id or tool_name or normalized_artifact_type or 'current'}"
+    return _semantic_payload("done", label, "artifact", merge_key, priority=70)
+
+
+def _tool_semantic(
+    tool_name: str,
+    stage: str,
+    *,
+    tool_call_id: str,
+    arguments: dict[str, Any] | None = None,
+    result: dict[str, Any] | None = None,
+) -> AgUiSemantic:
+    normalized = _normalize_tool_name(tool_name)
+    phase = _tool_semantic_phase(normalized)
+    label = _tool_stage_label(normalized, stage, arguments or {}, result or {})
+    visibility = "work_item"
+    return _semantic_payload(phase, label, visibility, f"tool:{tool_call_id or normalized or 'current'}", priority=50)
+
+
+def _normalize_tool_name(tool_name: str) -> str:
+    token = str(tool_name or "").strip()
+    if not token:
+        return ""
+    return token.split(".")[-1].removeprefix("milk_management__")
+
+
+def _tool_semantic_phase(tool_name: str) -> str:
+    if tool_name in {"tool_search", "tool_search_call"}:
+        return "thinking"
+    if tool_name in {"milk_assessment_evaluate", "infant_growth_evaluate", "risk_evaluate"}:
+        return "evaluating"
+    if tool_name in {"milk_plan_preview", "milk_calendar_change_preview", "milk_calendar_reschedule_preview"}:
+        return "planning"
+    if tool_name in {
+        "milk_record_mutate",
+        "milk_plan_mutate",
+        "milk_calendar_mutate",
+        "milk_task_complete",
+        "infant_growth_mutate",
+        "hospital_bag_cart_update",
+        "reminder_create",
+        "reminder_update",
+        "reminder_delete",
+    }:
+        return "saving"
+    if tool_name in {"ui_form_create", "ui_card_create", "ibclc_consult_card_create", "support_ticket_draft_create"}:
+        return "planning"
+    if tool_name == "run_approved_skill_script":
+        return "working"
+    return "reading"
+
+
+def _tool_stage_label(
+    tool_name: str,
+    stage: str,
+    arguments: dict[str, Any],
+    result: dict[str, Any],
+) -> str:
+    if stage == "result":
+        return _tool_result_label(tool_name, result)
+    if stage == "end":
+        return _tool_end_label(tool_name)
+    return _tool_start_label(tool_name, arguments)
+
+
+def _tool_start_label(tool_name: str, arguments: dict[str, Any]) -> str:
+    if tool_name in {"tool_search", "tool_search_call"}:
+        return "正在打开相关服务能力"
+    if tool_name == "load_skill":
+        return _load_skill_label(arguments)
+    if tool_name == "list_skills":
+        return "正在查看可用服务"
+    if tool_name == "search_skill_assets":
+        return "正在查找相关资料"
+    if tool_name == "read_skill_file":
+        return "正在查看相关服务规则"
+    if tool_name == "profile_get":
+        return "正在读取你的基础信息"
+    if tool_name == "milk_snapshot_get":
+        return "正在读取奶量概览"
+    if tool_name == "milk_status_query":
+        return "正在读取今日奶量状态"
+    if tool_name == "milk_records_query":
+        return "正在读取吸奶和喂养记录"
+    if tool_name == "milk_plan_query":
+        return "正在读取已保存的奶量计划"
+    if tool_name == "milk_calendar_query":
+        return "正在读取计划和日程任务"
+    if tool_name == "milk_assessment_evaluate":
+        return "正在评估奶量趋势和执行情况"
+    if tool_name == "infant_growth_evaluate":
+        return "正在评估宝宝生长信号"
+    if tool_name == "risk_evaluate":
+        return "正在检查安全边界"
+    if tool_name == "milk_plan_preview":
+        return "正在生成奶量计划草稿"
+    if tool_name in {"milk_calendar_change_preview", "milk_calendar_reschedule_preview"}:
+        return "正在预览日程调整"
+    if tool_name == "milk_record_mutate":
+        return "正在同步记录与补录"
+    if tool_name == "milk_task_complete":
+        return "正在同步任务完成状态"
+    if tool_name == "milk_plan_mutate":
+        return "正在保存奶量计划"
+    if tool_name == "milk_calendar_mutate":
+        return "正在保存日程调整"
+    if tool_name == "infant_growth_mutate":
+        return "正在保存宝宝成长记录"
+    if tool_name == "ui_form_create":
+        return "正在准备确认表单"
+    if tool_name == "ui_card_create":
+        return "正在生成结果卡片"
+    if tool_name == "ibclc_consult_card_create":
+        return "正在准备 IBCLC 咨询卡"
+    if tool_name == "support_ticket_draft_create":
+        return "正在准备售后工单"
+    if tool_name == "hospital_bag_pump_recommend":
+        return "正在读取吸奶器型号目录"
+    if tool_name == "hospital_bag_cart_update":
+        return "正在更新待产包购物车"
+    if tool_name == "device_manual_search":
+        return "正在读取设备说明资料"
+    if tool_name == "knowledge_search":
+        return "正在查找相关资料"
+    if tool_name == "memory_search":
+        return "正在查找历史信息"
+    if tool_name == "reminder_list":
+        return "正在读取提醒"
+    if tool_name == "run_approved_skill_script":
+        return "正在执行处理流程"
+    return "正在执行当前步骤"
+
+
+def _tool_end_label(tool_name: str) -> str:
+    if tool_name in {"tool_search", "tool_search_call"}:
+        return "正在确认可用能力"
+    if tool_name in {"milk_records_query", "milk_status_query", "milk_snapshot_get", "milk_plan_query", "milk_calendar_query"}:
+        return "正在整理奶量数据"
+    if tool_name in {"milk_assessment_evaluate", "infant_growth_evaluate", "risk_evaluate"}:
+        return "正在计算评估结果"
+    if tool_name == "milk_plan_preview":
+        return "正在生成奶量计划草稿"
+    if tool_name in {"milk_calendar_change_preview", "milk_calendar_reschedule_preview"}:
+        return "正在生成日程调整预览"
+    if tool_name in {"milk_record_mutate", "milk_task_complete", "milk_plan_mutate", "milk_calendar_mutate", "infant_growth_mutate"}:
+        return "正在保存修改"
+    if tool_name == "hospital_bag_pump_recommend":
+        return "正在整理吸奶器推荐"
+    if tool_name == "hospital_bag_cart_update":
+        return "正在保存购物车修改"
+    if tool_name == "device_manual_search":
+        return "正在整理设备资料"
+    if tool_name == "support_ticket_draft_create":
+        return "正在生成售后工单草稿"
+    if tool_name in {"ui_form_create", "ui_card_create", "ibclc_consult_card_create"}:
+        return "正在生成结果"
+    return "正在执行当前步骤"
+
+
+def _tool_result_label(tool_name: str, result: dict[str, Any]) -> str:
+    if result.get("ok") is False:
+        return "步骤没有完成"
+    status = str(result.get("status") or "").strip()
+    if status == "plan_preview_needs_revision":
+        return "结果需要调整"
+    if status == "plan_preview_not_recommended":
+        return "当前方案暂不建议继续"
+    if status == "plan_preview_needs_medical_confirmation":
+        return "需要先确认健康边界"
+    if result.get("requires_confirmation") is True:
+        return "预览已准备好"
+    if tool_name in {"tool_search", "tool_search_call"}:
+        return "服务能力已准备好"
+    if tool_name == "load_skill":
+        return "相关服务已进入"
+    if tool_name == "profile_get":
+        return "基础信息已读取"
+    if tool_name == "milk_records_query":
+        return "吸奶和喂养记录已读取"
+    if tool_name == "milk_status_query":
+        return "今日奶量状态已读取"
+    if tool_name == "milk_calendar_query":
+        return "计划和日程任务已读取"
+    if tool_name == "milk_plan_query":
+        return "已保存的奶量计划已读取"
+    if tool_name == "milk_assessment_evaluate":
+        return "奶量评估已完成"
+    if tool_name == "infant_growth_evaluate":
+        return "宝宝生长评估已完成"
+    if tool_name == "milk_record_mutate":
+        return _mutation_result_label(status, "记录已同步")
+    if tool_name == "milk_plan_mutate":
+        return _mutation_result_label(status, "奶量计划已保存")
+    if tool_name == "milk_calendar_mutate":
+        return _mutation_result_label(status, "日程调整已保存")
+    if tool_name == "milk_task_complete":
+        return _task_result_label(status)
+    if tool_name == "infant_growth_mutate":
+        return _mutation_result_label(status, "宝宝成长记录已保存")
+    if tool_name == "milk_plan_preview":
+        return "奶量计划草稿已生成"
+    if tool_name in {"milk_calendar_change_preview", "milk_calendar_reschedule_preview"}:
+        return "日程调整预览已生成"
+    if tool_name == "ui_form_create":
+        return "确认表单已准备好"
+    if tool_name == "ui_card_create":
+        return "结果卡片已生成"
+    if tool_name == "ibclc_consult_card_create":
+        return "IBCLC 咨询卡已准备好"
+    if tool_name == "support_ticket_draft_create":
+        return "售后工单草稿已准备好"
+    if tool_name == "hospital_bag_pump_recommend":
+        return "已完成吸奶器推荐"
+    if tool_name == "hospital_bag_cart_update":
+        return "购物车暂未修改" if status in {"needs_clarification", "cart_unchanged"} else "购物车已更新"
+    if tool_name == "device_manual_search":
+        return "设备资料已读取"
+    if tool_name == "run_approved_skill_script":
+        return "处理流程已完成"
+    if tool_name in {"read_skill_file", "search_skill_assets", "knowledge_search", "memory_search"}:
+        return "相关资料已读取"
+    return "步骤已完成"
+
+
+def _mutation_result_label(status: str, fallback: str) -> str:
+    if "deleted" in status:
+        return "修改已删除"
+    if any(token in status for token in ("updated", "patched", "shifted")):
+        return "修改已保存"
+    if "idempotent_replay" in status:
+        return "已复用已有修改"
+    return fallback
+
+
+def _task_result_label(status: str) -> str:
+    if status == "milk_task_completed":
+        return "任务已完成"
+    if status == "milk_task_completion_cancelled":
+        return "修改已取消"
+    if status == "milk_task_skipped":
+        return "任务已跳过"
+    return "任务状态已保存"
+
+
+def _load_skill_label(arguments: dict[str, Any]) -> str:
+    skill_id = str(arguments.get("skill_id") or arguments.get("id") or "").strip()
+    labels = {
+        "milk-management": "正在进入奶量管理服务",
+        "birth-prep": "正在进入待产准备服务",
+        "device-guidance": "正在进入设备指导服务",
+        "emotion-support": "正在进入情绪支持服务",
+    }
+    return labels.get(skill_id, "正在进入相关服务")
+
+
+def _status_label(message: str) -> str:
+    labels = {
+        "Agent loop started.": "收到，我先整理上下文",
+        "Requesting model response.": "正在思考",
+        "Requesting model response with tool outputs.": "正在准备下一步",
+        "Selecting the next step.": "正在选择下一步",
+        "Loading relevant context.": "正在读取相关信息",
+        "Reading relevant information.": "正在读取相关信息",
+        "Processing relevant information.": "正在整理相关信息",
+        "Step completed.": "当前步骤已完成",
+        "Step failed.": "这个步骤没有完成",
+    }
+    return labels.get(message, message or "正在处理当前步骤")
 
 
 def safe_tool_arguments(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -726,7 +1092,7 @@ def _build_response_request(
         "reasoning": {"effort": "low"},
         "text": {
             "format": {"type": "text"},
-            "verbosity": "medium",
+            "verbosity": "low",
         },
         "store": options.get("store", True),
         "prompt_cache_key": options.get("prompt_cache_key", "momcozy-agent-v2"),
@@ -782,6 +1148,7 @@ def run_agent_loop(
                 response_id=tool_call.get("response_id"),
                 output_index=tool_call.get("output_index"),
                 item_id=tool_call.get("item_id"),
+                arguments=tool_call.get("arguments"),
             ),
         )
 
@@ -832,6 +1199,7 @@ def run_agent_loop(
                         response_id=tool_call.get("response_id"),
                         output_index=tool_call.get("output_index"),
                         item_id=tool_call.get("item_id"),
+                        arguments=tool_call.get("arguments"),
                     ),
                 )
             _emit_ag_ui_event(
