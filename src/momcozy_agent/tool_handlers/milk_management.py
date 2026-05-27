@@ -318,35 +318,20 @@ def _build_milk_analysis_card_json(data: dict[str, Any]) -> dict[str, Any]:
     records_total = pumping_count + feeding_count
     daily_records = _format_number(records_total / window_days) if records_total else "0"
     daily_pumping_records = _format_number(pumping_count / window_days) if pumping_count else "0"
-    daily_calendar_tasks = _format_number(_to_float(calendar.get("average_pump_tasks_per_day"), 0.0))
-    daily_completed_tasks = _format_number(_to_float(calendar.get("average_completed_pump_tasks_per_day"), 0.0))
     feed_type_counts = feeding.get("type_counts") if isinstance(feeding.get("type_counts"), dict) else {}
     feed_parts = _feeding_parts(feed_type_counts, window_days=window_days)
     record_parts = "、".join(part for part in (f"{daily_pumping_records} 条吸奶", feed_parts) if part)
     days = normality.get("days") if isinstance(normality.get("days"), list) else []
     valid_days = [item for item in days if isinstance(item, dict) and item.get("ok") is True]
     estimated_values = [_to_float(item.get("estimated_daily_milk_ml"), 0.0) for item in valid_days if item.get("estimated_daily_milk_ml") is not None]
-    reference_lowers = [
-        _to_float((item.get("yield_reference") if isinstance(item.get("yield_reference"), dict) else {}).get("p15"), 0.0)
-        for item in valid_days
-        if isinstance(item.get("yield_reference"), dict)
-    ]
     estimated_range = _range_text(estimated_values, "ml/天")
-    reference_range = _range_text(reference_lowers, "ml/天")
+    reference_range = _reference_interval_text(valid_days)
     total_ml = _to_float(pumping.get("total_ml"), 0.0)
     daily_measured_ml = total_ml / window_days if window_days > 0 else 0.0
     status = str(normality.get("overall_status") or data.get("assessment_status") or "").strip()
     status_label, status_tone = _milk_status_label(status)
     headline = _milk_analysis_headline(status)
     trend_text = _milk_trend_text(valid_days)
-
-    relationship_items = [
-        f"计划安排：每天约 {daily_calendar_tasks} 个吸奶提醒；计划页标记完成每天约 {daily_completed_tasks} 个。",
-        f"记录与补录：每天约 {daily_records} 条，包含{record_parts or '吸奶、亲喂和瓶喂'}。",
-        f"有奶量的吸奶记录：每天约 {daily_pumping_records} 条，用来计算实测吸奶量。",
-    ]
-    if _to_int(calendar.get("completed_pump_task_count"), 0) and _to_int(calendar.get("completed_pump_task_count"), 0) != pumping_count:
-        relationship_items.append("计划页完成标记和有奶量记录不是同一个口径，所以不要把它们合并成一个“吸奶次数”。")
 
     return {
         "title": "奶量分析",
@@ -357,24 +342,14 @@ def _build_milk_analysis_card_json(data: dict[str, Any]) -> dict[str, Any]:
         "headline": headline,
         "sections": [
             {
-                "id": "relationship",
-                "title": "数据口径",
-                "tone": "info",
-                "metrics": [
-                    {"label": "计划安排", "value": f"{daily_calendar_tasks} 个/天", "detail": "日历吸奶提醒"},
-                    {"label": "记录与补录", "value": f"{daily_records} 条/天", "detail": record_parts or "吸奶、亲喂、瓶喂"},
-                    {"label": "实测吸奶", "value": f"{daily_pumping_records} 条/天", "detail": "带奶量记录"},
-                ],
-                "items": relationship_items,
-            },
-            {
                 "id": "milk",
-                "title": "奶量位置",
+                "title": "数据统计",
                 "tone": "attention" if status in {"under_supply_alert", "over_supply_alert"} else "normal",
                 "metrics": [
+                    {"label": "记录与补录", "value": f"{daily_records} 条/天", "detail": record_parts or "吸奶、亲喂、瓶喂"},
                     {"label": "实测吸奶", "value": f"{_format_number(daily_measured_ml)} ml/天", "detail": f"近 {window_days} 天共 {_format_number(total_ml)} ml"},
                     {"label": "含亲喂估算", "value": estimated_range or "—", "detail": "亲喂部分为估算"},
-                    {"label": "参考下沿", "value": reference_range or "—", "detail": "同阶段 P15"},
+                    {"label": "参考区间", "value": reference_range or "—", "detail": "同阶段 P15-P85"},
                 ],
                 "items": [trend_text],
             },
@@ -711,6 +686,28 @@ def _range_text(values: list[float], unit: str) -> str:
     if abs(low - high) < 0.5:
         return f"{_format_number(low)} {unit}"
     return f"{_format_number(low)}-{_format_number(high)} {unit}"
+
+
+def _reference_interval_text(days: list[dict[str, Any]]) -> str:
+    lows: list[float] = []
+    highs: list[float] = []
+    for item in days:
+        reference = item.get("yield_reference")
+        if not isinstance(reference, dict):
+            continue
+        low = _to_float(reference.get("p15"), 0.0)
+        high = _to_float(reference.get("p85"), 0.0)
+        if low > 0:
+            lows.append(low)
+        if high > 0:
+            highs.append(high)
+    if not lows and not highs:
+        return ""
+    lower = min(lows) if lows else min(highs)
+    upper = max(highs) if highs else max(lows)
+    if abs(lower - upper) < 0.5:
+        return f"{_format_number(lower)} ml/天"
+    return f"{_format_number(lower)}-{_format_number(upper)} ml/天"
 
 
 def _milk_status_label(status: str) -> tuple[str, str]:

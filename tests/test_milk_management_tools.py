@@ -249,8 +249,12 @@ class MilkManagementToolTests(unittest.TestCase):
 
         self.assertEqual(result["card"]["card_type"], "milk_analysis_card")
         card_json = result["card"]["card_json"]
-        self.assertEqual(card_json["sections"][0]["title"], "数据口径")
-        self.assertIn("记录与补录", card_json["sections"][0]["metrics"][1]["label"])
+        self.assertEqual(card_json["sections"][0]["title"], "数据统计")
+        self.assertNotIn("数据口径", [section["title"] for section in card_json["sections"]])
+        metric_labels = [metric["label"] for metric in card_json["sections"][0]["metrics"]]
+        self.assertIn("记录与补录", metric_labels)
+        self.assertIn("参考区间", metric_labels)
+        self.assertNotIn("参考下沿", metric_labels)
         compact = model_tool_output({"ok": True, "tool_name": "milk_assessment_evaluate", "result": result})
         self.assertEqual(compact["card"]["card_type"], "milk_analysis_card")
         self.assertTrue(compact["card"]["created"])
