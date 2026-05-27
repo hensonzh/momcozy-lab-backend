@@ -26,6 +26,7 @@ from .tool_handlers.skill_runtime import (
     run_approved_skill_script,
     search_skill_assets,
 )
+from .tool_handlers.ui import create_quick_replies
 from .tool_schemas import FUNCTION_TOOLS
 from .types import FunctionToolDefinition, RuntimeInputs, ToolDefinition, ToolName
 
@@ -38,6 +39,7 @@ CORE_IMMEDIATE_TOOLS: list[ToolName] = [
     *SKILL_RUNTIME_TOOLS,
     "ui_form_create",
     "ui_card_create",
+    "ui_quick_replies_create",
     "birth_plan_form_create",
     "birth_plan_card_create",
     "hospital_bag_form_create",
@@ -76,20 +78,24 @@ MILK_MANAGEMENT_READ_ONLY_TOOLS: set[ToolName] = {
 
 DEFERRED_TOOL_NAMESPACES: dict[str, dict[str, Any]] = {
     "care_handoffs": {
-        "description": "用于专业支持流程的转接摘要生成工具。",
+        "description": "用于已经决定转接人工或专业支持后的交接摘要生成。只有在用户明确需要/同意转接，或服务流程要求转接时加载；不要用于普通建议、设备售后工单、吸奶器使用排障或购物车调整。",
         "tool_names": ["handoff_summary_generate"],
     },
     "device_support": {
-        "description": "用于吸奶器设备支持的工具，包括本地说明书/FAQ 检索和客服工单草稿。",
+        "description": "用于用户已经拥有或正在使用 Momcozy 吸奶器/设备时的说明书、FAQ、配件、故障排查和售后工单草稿。不要用于购买前型号选型/价格比较，也不要用于奶量记录、喂养计划或待产包购物车调整。",
         "tool_names": ["device_manual_search", "support_ticket_draft_create"],
     },
     "milk_management": {
-        "description": "用于奶量管理的分析与建议工具体系：读取吸奶、亲喂、瓶喂、奶粉、宝宝生长和 calendar 执行数据，评估奶量状态，并生成当下建议、追奶/稳奶/减奶计划或日程调整。",
+        "description": "用于基于用户自身吸奶、亲喂、瓶喂、奶粉、宝宝生长和 calendar 数据的奶量管理：读取事实、评估状态、生成追奶/稳奶/减奶计划、调整日程或写入记录。不要用于吸奶器型号购买选型、设备故障排查、客服工单或待产包购物车调整。",
         "tool_names": MILK_MANAGEMENT_TOOLS,
     },
     "hospital_bag_cart": {
-        "description": "用于待产包购物车调整和 Momcozy 吸奶器型号推荐，包括预算上限优化、删除或加回商品、基础款替换、医院提供、家里已有、数量调整、按官方价格推荐吸奶器型号并同步到购物车。仅在当前对话已经进入待产包购物车场景时使用。",
-        "tool_names": ["hospital_bag_cart_update", "hospital_bag_pump_recommend"],
+        "description": "用于当前对话已经进入待产包购物车后的购物车调整：预算上限优化、删除或加回商品、基础款替换、医院提供、家里已有、数量调整，以及把已推荐的 Momcozy 吸奶器型号同步到购物车。不要用于生成待产包卡片、独立吸奶器型号选型或设备排障。",
+        "tool_names": ["hospital_bag_cart_update"],
+    },
+    "pump_recommendation": {
+        "description": "用于购买前的 Momcozy 吸奶器型号选型、价格比较和按使用场景推荐。用户单独询问哪款吸奶器适合自己、型号差异、预算内怎么选、某型号多少钱或点名追问某型号时使用。Air 1 属于高价轻薄款，不能作为降预算选择描述。不要用于已购设备故障/说明书问题、奶量是否正常或购物车直接修改。",
+        "tool_names": ["hospital_bag_pump_recommend"],
     },
 }
 
@@ -103,6 +109,7 @@ READ_ONLY_TOOL_NAMES = {
     "hospital_bag_card_create",
     "hospital_bag_cart_update",
     "hospital_bag_pump_recommend",
+    "ui_quick_replies_create",
     "device_manual_search",
     "support_ticket_draft_create",
     *MILK_MANAGEMENT_READ_ONLY_TOOLS,
@@ -116,6 +123,7 @@ TOOL_HANDLERS: dict[ToolName, ToolHandler] = {
     "run_approved_skill_script": run_approved_skill_script,
     "ui_form_create": create_form,
     "ui_card_create": create_card,
+    "ui_quick_replies_create": create_quick_replies,
     "birth_plan_form_create": create_birth_plan_form,
     "birth_plan_card_create": create_birth_plan_card,
     "hospital_bag_form_create": create_hospital_bag_form,

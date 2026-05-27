@@ -14,6 +14,42 @@ WEB_ROOT = PROJECT_ROOT / "web"
 SKILLS_ROOT = PROJECT_ROOT / "skills"
 MAX_RESULT_CHARS = 2600
 AIR1_REFERENCE_KEY = "device-guidance/Air1/references/air1/manual.md"
+AIR1_IMAGE_TEXT_BY_URL: dict[str, str] = {
+    "/skill-assets/device-guidance/air1/images/air1_guide_parts_components.png": (
+        "Air1 核心部件编号清单："
+        "编号1=24mm Flange Pump x2；"
+        "编号2=Wireless Charging Case x1；"
+        "编号3=Flange Cover x2；"
+        "编号4=USB Type-C Cable x1；"
+        "编号5=Magnetic Charging Cable x1；"
+        "编号6=17mm Flange Insert x2；"
+        "编号7=19mm Flange Insert x2；"
+        "编号8=21mm Flange Insert x2；"
+        "编号9=Spare Valve x2；"
+        "编号10=Flange Size Ruler x1；"
+        "编号11=Quick Start Guide x1；"
+        "编号12=User Manual x1。"
+    ),
+    "/skill-assets/device-guidance/air1/images/air1_guide_controls_button_indicator.png": (
+        "Air1 主机按钮与指示灯编号清单："
+        "编号1=Mode Selection / 模式选择键；"
+        "编号2=Decrease Suction Level / 降低吸力键；"
+        "编号3=Increase Suction Level / 增加吸力键；"
+        "编号4=On / Off; Pause / Continue / 开关机、暂停、继续键；"
+        "编号5=Indicator Light / 指示灯。"
+        "指示灯：白灯常亮=电量满；红灯常亮=低电量；绿灯闪烁=充电中；绿灯常亮=已充满。"
+    ),
+}
+AIR1_INCLUDED_FLANGE_INSERTS_MM = {17, 19, 21}
+AIR1_FLANGE_SIZE_RANGES: tuple[dict[str, Any], ...] = (
+    {"min_mm": 11.0, "max_mm": 13.0, "range_label": "11-13mm", "recommended_mm": 15, "accessory_type": "flange_insert"},
+    {"min_mm": 13.0, "max_mm": 15.0, "range_label": "13-15mm", "recommended_mm": 17, "accessory_type": "flange_insert"},
+    {"min_mm": 15.0, "max_mm": 17.0, "range_label": "15-17mm", "recommended_mm": 19, "accessory_type": "flange_insert"},
+    {"min_mm": 17.0, "max_mm": 20.0, "range_label": "17-20mm", "recommended_mm": 21, "accessory_type": "flange_insert"},
+    {"min_mm": 20.0, "max_mm": 23.0, "range_label": "20-23mm", "recommended_mm": 24, "accessory_type": "base_flange"},
+    {"min_mm": 23.0, "max_mm": 26.0, "range_label": "23-26mm", "recommended_mm": 27, "accessory_type": "flange_insert"},
+    {"min_mm": 26.0, "max_mm": 29.0, "range_label": "26-29mm", "recommended_mm": 30, "accessory_type": "flange_insert"},
+)
 AIR1_QUICK_START_RESOURCES: tuple[dict[str, str], ...] = (
     {
         "kind": "pdf",
@@ -38,6 +74,12 @@ def search_device_manual(args: dict[str, Any], inputs: RuntimeInputs) -> dict[st
         max_results = 1
     if max_results > 6:
         max_results = 6
+    measured_nipple_mm = _measured_nipple_mm(
+        args.get("measured_nipple_mm"),
+        query=query,
+        user_message=str(inputs.get("user_message") or ""),
+        topic=topic,
+    )
 
     model_key = model.lower()
     if model_key not in {"air1", "air 1", "momcozy air1", "momcozy air 1"}:
@@ -50,6 +92,7 @@ def search_device_manual(args: dict[str, Any], inputs: RuntimeInputs) -> dict[st
             "manual": None,
             "faq_results": [],
             "results": [],
+            "flange_recommendation": None,
             "product_highlights": [],
             "quick_start_resources": [],
             "message": "当前只提供 Momcozy Air 1 的本地说明书和 FAQ 内容。",
@@ -65,11 +108,13 @@ def search_device_manual(args: dict[str, Any], inputs: RuntimeInputs) -> dict[st
             "topic": topic,
             "manual": None,
             "faq_results": [],
+            "flange_recommendation": None,
             "product_highlights": [],
             "quick_start_resources": [],
             "message": "当前型号的本地说明书未找到。",
         }
 
+    flange_recommendation = _air1_flange_recommendation(measured_nipple_mm)
     faq_chunks = _faq_chunks(AIR1_FAQ_PATH)
     terms = _query_terms(f"{query} {topic}")
     scored = sorted(
@@ -106,19 +151,24 @@ def search_device_manual(args: dict[str, Any], inputs: RuntimeInputs) -> dict[st
         "loaded_reference": AIR1_REFERENCE_KEY if manual_already_loaded else None,
         "faq_results": faq_results,
         "relevant_images": _relevant_images(manual.get("module_images", {}), query=query, topic=topic),
+        "flange_recommendation": flange_recommendation,
         "product_highlights": _air1_product_highlights(),
         "quick_start_resources": _air1_quick_start_resources(),
         "usage_guidance": (
             "如果 status 是 manual_already_loaded 或 manual_already_loaded_with_faq，说明当前型号 manual 已在本会话上下文中，不要要求重新加载，直接复用已有 manual。"
             "manual 是当前型号的完整本地官方说明书整理稿，应作为设备步骤的主要事实依据。"
             "faq_results 是按用户问题检索到的相关 FAQ；如果为空，说明没有命中明确 FAQ，但 manual 仍可作为依据。"
-            "relevant_images 是按当前 query/topic 预选的步骤图片；讲到对应步骤时，请用 Markdown 图片语法展示最相关图片。"
+            "relevant_images 是按当前 query/topic 预选的步骤图片；每个图片项都有 markdown_image。讲到对应新视觉步骤的第一轮时，必须复制最相关图片项的 markdown_image 展示图片，不要把 url 当可见正文。"
+            "进入 Air1 开箱分步指导后，每个新视觉步骤首次展示当前步骤图；同一视觉步骤的后续轮次不要重复展示同一张图，应让用户对照上图继续。"
+            "如果当前步骤没有可用 relevant_images 或 manual 图片，先用对应 topic 再调用 device_manual_search 获取步骤图，再继续指导。"
             "product_highlights 是确认 Air1 后可先给用户看的产品亮点，只能使用其中事实，不要扩写成资料未覆盖的卖点。"
             "quick_start_resources 是 Air1 开箱/首次使用资源；如果需要展示资源，只使用每个资源的 markdown_link 字段，禁止直接展示 url 或 /skill-assets/... 原始路径。"
+            "如果 flange_recommendation 不为空，必须直接告诉用户推荐的法兰/硅胶塞尺寸，并说明是否随机附带；不要再让用户自己对照图片。"
             "在给出 quick_start_resources 的同一轮，不要直接开始 manual 第一步；只有用户确认需要一步步指导后，才进入首次使用推荐路径。"
             "开箱路径中 guide.parts 至少包含“取出平铺”和“清点核对”两个回合；用户说“好了”通常只代表平铺完成，"
             "不要从 guide.parts 直接跳到 guide.controls，必须先让用户核对可见物品、独立配件和整机状态是否齐全完整。"
-            "面向用户的步骤要简短；引导式安装或清洁时，一次只给一步并等待用户确认。"
+            "面向用户的步骤要简短；分步指导以 manual 的 guide.* 模块为一轮主步骤，模块内 bullet 是同一步的子动作，通常合并在同一轮给出并等待完成确认。"
+            "除非 manual 明确要求多轮、用户卡住或存在安全风险，不要把每个 bullet 都拆成一轮。进入新视觉步骤时配当前步骤图。"
             "不要补造资料中没有的 Air1 专属说明。"
         ),
     }
@@ -159,6 +209,96 @@ def _int(value: Any, fallback: int) -> int:
         return int(value)
     except (TypeError, ValueError):
         return fallback
+
+
+def _float(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
+def _measured_nipple_mm(value: Any, *, query: str, user_message: str, topic: str) -> float | None:
+    explicit = _float(value)
+    if explicit is not None:
+        return explicit
+
+    text = f"{query}\n{user_message}".strip()
+    unit_match = re.search(r"(?<!\d)(\d{1,2}(?:\.\d+)?)\s*(?:mm|毫米|㎜)\b", text, flags=re.IGNORECASE)
+    if unit_match:
+        return _float(unit_match.group(1))
+
+    if topic.lower() != "flange":
+        return None
+    compact = re.sub(r"\s+", "", text)
+    plain_match = re.fullmatch(r"(?:测到|量到|大概|约|差不多)?(\d{1,2}(?:\.\d+)?)(?:左右)?", compact)
+    if plain_match:
+        return _float(plain_match.group(1))
+    return None
+
+
+def _air1_flange_recommendation(measured_nipple_mm: float | None) -> dict[str, Any] | None:
+    if measured_nipple_mm is None:
+        return None
+
+    rounded = round(measured_nipple_mm, 1)
+    rounded_measurement = int(rounded) if float(rounded).is_integer() else rounded
+    matched = _air1_flange_size_range(measured_nipple_mm)
+    if matched is None:
+        return {
+            "measured_nipple_mm": rounded_measurement,
+            "status": "out_of_official_chart_range",
+            "message": "这个测量值不在 Air1 官方法兰尺寸对照表覆盖范围内，建议重新测量一次，或联系 Momcozy 客服确认合适配件。",
+        }
+
+    recommended_mm = int(matched["recommended_mm"])
+    accessory_type = str(matched["accessory_type"])
+    included = accessory_type == "base_flange" or recommended_mm in AIR1_INCLUDED_FLANGE_INSERTS_MM
+    if accessory_type == "base_flange":
+        accessory_label = "24mm 基础法兰"
+        purchase_note = "24mm 直接使用基础法兰，不需要额外法兰硅胶塞。"
+    else:
+        accessory_label = f"{recommended_mm}mm 法兰硅胶塞"
+        purchase_note = (
+            f"Air1 随机附带 {recommended_mm}mm 法兰硅胶塞。"
+            if included
+            else f"{recommended_mm}mm 法兰硅胶塞通常需要单独购买。"
+        )
+
+    return {
+        "measured_nipple_mm": rounded_measurement,
+        "status": "recommended",
+        "matched_range": matched["range_label"],
+        "recommended_flange_mm": recommended_mm,
+        "recommended_insert_mm": recommended_mm if accessory_type == "flange_insert" else None,
+        "accessory_type": accessory_type,
+        "accessory_label": accessory_label,
+        "included_with_air1": included,
+        "purchase_note": purchase_note,
+        "message": (
+            f"{_format_mm(rounded_measurement)} 落在 {matched['range_label']} 区间，"
+            f"建议使用 {accessory_label}。{purchase_note}"
+        ),
+    }
+
+
+def _air1_flange_size_range(measured_nipple_mm: float) -> dict[str, Any] | None:
+    for item in AIR1_FLANGE_SIZE_RANGES:
+        min_mm = float(item["min_mm"])
+        max_mm = float(item["max_mm"])
+        if min_mm <= measured_nipple_mm < max_mm:
+            return item
+    final = AIR1_FLANGE_SIZE_RANGES[-1]
+    if measured_nipple_mm == float(final["max_mm"]):
+        return final
+    return None
+
+
+def _format_mm(value: float) -> str:
+    if float(value).is_integer():
+        return f"{int(value)}mm"
+    return f"{value:g}mm"
 
 
 def _string_list(value: Any) -> list[str]:
@@ -456,8 +596,18 @@ def _available_images(content: str) -> list[dict[str, str]]:
     images = []
     for alt, url in re.findall(r"!\[([^\]]*)\]\(([^)]+)\)", content):
         if _static_image_exists(url):
-            images.append({"alt": alt, "url": url})
+            images.append(_image_resource(alt, url))
     return images
+
+
+def _image_resource(alt: str, url: str) -> dict[str, str]:
+    image = {"alt": alt, "url": url}
+    if alt and url:
+        image["markdown_image"] = f"![{alt}]({url})"
+    image_text = AIR1_IMAGE_TEXT_BY_URL.get(url)
+    if image_text:
+        image["image_text"] = image_text
+    return image
 
 
 def _static_image_exists(url: str) -> bool:

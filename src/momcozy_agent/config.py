@@ -31,6 +31,14 @@ def get_openai_api_key() -> str:
     return api_key
 
 
+def get_openai_client_options() -> dict[str, float | int]:
+    """Shared OpenAI SDK options for agent-side model calls."""
+    return {
+        "timeout": _float_env("MOMCOZY_OPENAI_TIMEOUT_SECONDS", 90.0),
+        "max_retries": _int_env("MOMCOZY_OPENAI_MAX_RETRIES", 2),
+    }
+
+
 def _find_env_file(start: Path) -> Path | None:
     current = start.resolve()
     for directory in [current, *current.parents]:
@@ -44,3 +52,25 @@ def _strip_quotes(value: str) -> str:
     if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
         return value[1:-1]
     return value
+
+
+def _float_env(key: str, default: float) -> float:
+    raw = os.environ.get(key, "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def _int_env(key: str, default: int) -> int:
+    raw = os.environ.get(key, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value >= 0 else default

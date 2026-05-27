@@ -13,6 +13,10 @@ class ContextState:
     environment_sent: bool = False
     loaded_references: list[str] = field(default_factory=list)
     client_events: list[str] = field(default_factory=list)
+    available_tool_images: list[dict[str, str]] = field(default_factory=list)
+    last_displayed_tool_image: dict[str, str] | None = None
+    active_device_module: str = ""
+    shown_step_image_urls: list[str] = field(default_factory=list)
 
 
 def build_request_context(
@@ -44,6 +48,8 @@ def build_request_context(
         lines.append("client_event_context:")
         for event in state.client_events[-5:]:
             lines.append(f"- {event}")
+    if state is not None:
+        lines.extend(_format_device_image_context(state))
     hospital_bag_cart = _format_hospital_bag_cart_context(inputs.get("hospital_bag_cart"))
     if hospital_bag_cart:
         lines.extend(hospital_bag_cart)
@@ -62,6 +68,29 @@ def _unique_strings(values: list[str]) -> list[str]:
         if text and text not in unique:
             unique.append(text)
     return unique
+
+
+def _format_device_image_context(state: ContextState) -> list[str]:
+    if not state.last_displayed_tool_image and not state.shown_step_image_urls:
+        return []
+
+    lines = ["device_image_context:"]
+    image = state.last_displayed_tool_image or {}
+    if image:
+        parts = []
+        for key in ("alt", "module", "url"):
+            value = str(image.get(key) or "").strip()
+            if value:
+                parts.append(f"{key}={value}")
+        if parts:
+            lines.append(f"- last_displayed_tool_image: {'; '.join(parts)}")
+        lines.append("- 用户问“图中 / 上图 / 编号 / 标号”时，默认只参考 last_displayed_tool_image；不要从其他历史图片里猜。")
+    if state.active_device_module:
+        lines.append(f"- active_device_module: {state.active_device_module}")
+    if state.shown_step_image_urls:
+        lines.append("- shown_step_image_urls: " + ", ".join(state.shown_step_image_urls[-8:]))
+        lines.append("- 同一视觉步骤已展示过图片时，后续轮次优先说“对照上图”，不要重复输出同一张 Markdown 图片。")
+    return lines
 
 
 def _format_hospital_bag_cart_context(value: object) -> list[str]:

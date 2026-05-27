@@ -5,7 +5,7 @@ import os
 from datetime import datetime, timedelta
 from typing import Any
 
-from ...config import load_project_env
+from ...config import get_openai_client_options, load_project_env
 from .db import fetch_one
 from .records import get_records_range
 from .schemas import ServiceResult, error_result, norm_text, ok_result, parse_datetime, to_int
@@ -234,7 +234,7 @@ def _request_llm_daily_summary(payload: dict[str, Any]) -> list[str] | None:
         return None
 
     try:
-        client = OpenAI()
+        client = OpenAI(**get_openai_client_options())
         response = client.responses.create(
             model=os.getenv("DAILY_SUMMARY_MODEL", os.getenv("STATUS_ADVICE_MODEL", "gpt-5.4-mini")),
             instructions=DAILY_SUMMARY_PROMPT,

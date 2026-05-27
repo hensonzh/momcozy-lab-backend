@@ -2,15 +2,19 @@ from __future__ import annotations
 
 import json
 import unittest
+import asyncio
 
 from momcozy_agent import ContextState, build_agent_request
 from momcozy_agent.agents import (
+    _tool_image_input_item_from_metadata,
+    _tool_image_metadata,
     model_tool_output,
     run_agent_loop,
     tool_call_args_event,
     tool_call_end_event,
     tool_call_result_event,
 )
+from momcozy_agent.server import ChatRuntime, stream_ag_ui_events
 
 
 class AgentToolEventTests(unittest.TestCase):
@@ -173,6 +177,348 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertIn("不要重复调用 load_skill", request_context)
         self.assertIn("不要重复调用 read_skill_file", request_context)
 
+    def test_device_manual_search_relevant_images_are_recorded_not_immediately_forwarded(self) -> None:
+        context_state = ContextState()
+        client = _FakeClient(
+            [
+                {
+                    "id": "resp-tool",
+                    "output": [
+                        {
+                            "type": "function_call",
+                            "id": "item-1",
+                            "call_id": "call-1",
+                            "name": "device_manual_search",
+                            "arguments": json.dumps(
+                                {
+                                    "model": "Air1",
+                                    "query": "14mm",
+                                    "topic": "flange",
+                                    "measured_nipple_mm": 14,
+                                    "max_results": 2,
+                                }
+                            ),
+                        }
+                    ],
+                },
+                {"id": "resp-final", "output": []},
+            ]
+        )
+
+        run_agent_loop(
+            client,
+            {"user_message": "14mm", "locale": "zh-CN"},
+            {"context_state": context_state, "loaded_skill_ids": ["device-guidance"]},
+            ag_ui_thread_id="thread-1",
+            ag_ui_run_id="run-1",
+        )
+
+        followup_input = client.responses.requests[1]["input"]
+        self.assertEqual(len(followup_input), 1)
+        self.assertEqual(followup_input[0]["type"], "function_call_output")
+        self.assertTrue(context_state.available_tool_images)
+        self.assertEqual(context_state.available_tool_images[0]["url"], "/skill-assets/device-guidance/air1/images/air1_guide_flange_measurement.png")
+
+    def test_prior_tool_images_are_forwarded_only_when_user_asks_for_image_help(self) -> None:
+        context_state = ContextState()
+        context_state.available_tool_images = [
+            {
+                "alt": "Air1 乳头测量与法兰选择",
+                "module": "guide.flange",
+                "url": "/skill-assets/device-guidance/air1/images/air1_guide_flange_measurement.png",
+            }
+        ]
+
+        regular_request = build_agent_request(
+            {"user_message": "继续下一步", "locale": "zh-CN"},
+            {"context_state": context_state, "loaded_skill_ids": ["device-guidance"]},
+        )
+        self.assertEqual(len(regular_request["input"]), 1)
+
+        image_request = build_agent_request(
+            {"user_message": "刚才这张图怎么看？", "locale": "zh-CN"},
+            {"context_state": context_state, "loaded_skill_ids": ["device-guidance"]},
+        )
+
+        self.assertEqual(len(image_request["input"]), 2)
+        image_item = image_request["input"][1]
+        self.assertEqual(image_item["role"], "user")
+        content = image_item["content"]
+        self.assertIn("官方步骤图", content[0]["text"])
+        image_parts = [part for part in content if part["type"] == "input_image"]
+        self.assertGreaterEqual(len(image_parts), 1)
+        self.assertTrue(image_parts[0]["image_url"].startswith("data:image/png;base64,"))
+
+        numbered_label_request = build_agent_request(
+            {"user_message": "图中编号11是什么？", "locale": "zh-CN"},
+            {"context_state": context_state, "loaded_skill_ids": ["device-guidance"]},
+        )
+        self.assertEqual(len(numbered_label_request["input"]), 2)
+        numbered_label_content = numbered_label_request["input"][1]["content"]
+        self.assertIn("官方步骤图", numbered_label_content[0]["text"])
+        self.assertTrue(
+            any(part["type"] == "input_image" for part in numbered_label_content),
+        )
+
+    def test_prior_tool_image_numbered_label_uses_last_displayed_image(self) -> None:
+        context_state = ContextState()
+        context_state.available_tool_images = [
+            {
+                "alt": "Air1 核心部件",
+                "module": "guide.parts",
+                "url": "/skill-assets/device-guidance/air1/images/air1_guide_parts_components.png",
+                "image_text": "Air1 核心部件编号清单：编号3=Flange Cover x2；编号11=Quick Start Guide x1。",
+            },
+            {
+                "alt": "Air1 主机按钮与指示灯",
+                "module": "guide.controls",
+                "url": "/skill-assets/device-guidance/air1/images/air1_guide_controls_button_indicator.png",
+                "image_text": "Air1 主机按钮与指示灯编号清单：编号3=Increase Suction Level / 增加吸力键。",
+            },
+        ]
+        context_state.last_displayed_tool_image = context_state.available_tool_images[1]
+        context_state.active_device_module = "guide.controls"
+
+        request = build_agent_request(
+            {"user_message": "编号3是什么？", "locale": "zh-CN"},
+            {"context_state": context_state, "loaded_skill_ids": ["device-guidance"]},
+        )
+
+        self.assertEqual(len(request["input"]), 2)
+        content = request["input"][1]["content"]
+        self.assertIn("编号3=Increase Suction Level", content[0]["text"])
+        self.assertNotIn("编号3=Flange Cover", content[0]["text"])
+        self.assertIn("本轮只补充结构化图片文字，没有附带原图", content[0]["text"])
+        self.assertFalse(any(part["type"] == "input_image" for part in content))
+
+    def test_final_markdown_image_records_last_displayed_tool_image(self) -> None:
+        context_state = ContextState()
+        context_state.available_tool_images = [
+            {
+                "alt": "Air1 主机按钮与指示灯",
+                "module": "guide.controls",
+                "url": "/skill-assets/device-guidance/air1/images/air1_guide_controls_button_indicator.png",
+                "image_text": "Air1 主机按钮与指示灯编号清单：编号3=Increase Suction Level / 增加吸力键。",
+            }
+        ]
+        client = _FakeClient(
+            [
+                {
+                    "id": "resp-final",
+                    "output": [
+                        {
+                            "type": "message",
+                            "content": [
+                                {
+                                    "type": "output_text",
+                                    "text": "![Air1 主机按钮与指示灯](/skill-assets/device-guidance/air1/images/air1_guide_controls_button_indicator.png)\n先看按钮。",
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ]
+        )
+
+        run_agent_loop(
+            client,
+            {"user_message": "继续", "locale": "zh-CN"},
+            {"context_state": context_state, "loaded_skill_ids": ["device-guidance"]},
+            ag_ui_thread_id="thread-1",
+            ag_ui_run_id="run-1",
+        )
+
+        self.assertEqual(
+            context_state.last_displayed_tool_image["url"],
+            "/skill-assets/device-guidance/air1/images/air1_guide_controls_button_indicator.png",
+        )
+        self.assertEqual(context_state.active_device_module, "guide.controls")
+        self.assertEqual(
+            context_state.shown_step_image_urls,
+            ["/skill-assets/device-guidance/air1/images/air1_guide_controls_button_indicator.png"],
+        )
+
+        request = build_agent_request(
+            {"user_message": "编号3是什么？", "locale": "zh-CN"},
+            {"context_state": context_state, "loaded_skill_ids": ["device-guidance"]},
+        )
+        self.assertIn("last_displayed_tool_image", request["input"][0]["content"][0]["text"])
+        self.assertIn("对照上图", request["input"][0]["content"][0]["text"])
+
+    def test_prior_tool_images_are_not_forwarded_when_user_uploaded_images(self) -> None:
+        context_state = ContextState()
+        context_state.available_tool_images = [
+            {
+                "alt": "Air1 乳头测量与法兰选择",
+                "url": "/skill-assets/device-guidance/air1/images/air1_guide_flange_measurement.png",
+            }
+        ]
+
+        request = build_agent_request(
+            {
+                "user_message": "这张图怎么看？",
+                "locale": "zh-CN",
+                "images": [{"image_url": "data:image/png;base64,abc", "detail": "auto"}],
+            },
+            {"context_state": context_state, "loaded_skill_ids": ["device-guidance"]},
+        )
+
+        self.assertEqual(len(request["input"]), 1)
+        content = request["input"][0]["content"]
+        self.assertEqual(len([part for part in content if part["type"] == "input_image"]), 1)
+
+    def test_tool_image_input_item_rejects_non_skill_asset_urls(self) -> None:
+        result = {
+            "ok": True,
+            "tool_name": "device_manual_search",
+            "result": {
+                "relevant_images": [
+                    {"alt": "bad", "url": "https://example.com/air1.png"},
+                    {"alt": "bad", "url": "/skill-assets/device-guidance/../SKILL.md"},
+                ]
+            },
+        }
+
+        self.assertEqual(_tool_image_metadata(result), [])
+        self.assertIsNone(_tool_image_input_item_from_metadata(_tool_image_metadata(result)))
+
+    def test_quick_replies_tool_streams_ui_event_after_text_end(self) -> None:
+        async def collect_events() -> list[dict[str, object]]:
+            client = _FakeStreamingClient(
+                [
+                    {
+                        "id": "resp-quick",
+                        "output": [
+                            {
+                                "type": "function_call",
+                                "id": "item-quick",
+                                "call_id": "call-quick",
+                                "name": "ui_quick_replies_create",
+                                "arguments": json.dumps(
+                                    {
+                                        "replies": [
+                                            {"text": "继续下一步", "send_text": "继续下一步"},
+                                            {"text": "换个方案", "send_text": "我想换个方案"},
+                                            {"text": "先帮我总结", "send_text": "先帮我总结"},
+                                        ]
+                                    }
+                                ),
+                            }
+                        ],
+                    },
+                    {
+                        "id": "resp-final",
+                        "output": [
+                            {
+                                "type": "message",
+                                "content": [{"type": "output_text", "text": "我们先从最关键的一步开始。"}],
+                            }
+                        ],
+                    },
+                ]
+            )
+            runtime = ChatRuntime(client, model="test-model")
+            stream = stream_ag_ui_events(
+                {"thread_id": "thread-1", "run_id": "run-quick"},
+                {"user_message": "我该怎么办", "locale": "zh-CN"},
+                runtime,
+            )
+            return [event async for event in stream]
+
+        events = asyncio.run(collect_events())
+        event_types = [str(event.get("type")) for event in events]
+
+        self.assertIn("TEXT_MESSAGE_CONTENT", event_types)
+        self.assertIn("TEXT_MESSAGE_END", event_types)
+        self.assertIn("QUICK_REPLIES", event_types)
+        self.assertIn("RUN_FINISHED", event_types)
+        self.assertLess(event_types.index("TEXT_MESSAGE_END"), event_types.index("QUICK_REPLIES"))
+        self.assertLess(event_types.index("QUICK_REPLIES"), event_types.index("RUN_FINISHED"))
+        self.assertFalse(
+            any(
+                event.get("tool_call_name") == "ui_quick_replies_create"
+                for event in events
+                if str(event.get("type")).startswith("TOOL_CALL")
+            )
+        )
+
+        quick_event = next(event for event in events if event.get("type") == "QUICK_REPLIES")
+        self.assertEqual(quick_event["message_id"], "run-quick:assistant")
+        self.assertEqual(
+            quick_event["replies"],
+            [
+                {"text": "继续下一步", "send_text": "继续下一步"},
+                {"text": "换个方案", "send_text": "我想换个方案"},
+                {"text": "先帮我总结", "send_text": "先帮我总结"},
+            ],
+        )
+
+    def test_stream_adds_default_quick_replies_when_model_omits_tool(self) -> None:
+        async def collect_events() -> list[dict[str, object]]:
+            client = _FakeStreamingClient(
+                [
+                    {
+                        "id": "resp-final",
+                        "output": [
+                            {
+                                "type": "message",
+                                "content": [{"type": "output_text", "text": "我们先从最关键的一步开始。"}],
+                            }
+                        ],
+                    },
+                ]
+            )
+            runtime = ChatRuntime(client, model="test-model")
+            stream = stream_ag_ui_events(
+                {"thread_id": "thread-1", "run_id": "run-default-quick"},
+                {"user_message": "我该怎么办", "locale": "zh-CN"},
+                runtime,
+            )
+            return [event async for event in stream]
+
+        events = asyncio.run(collect_events())
+        event_types = [str(event.get("type")) for event in events]
+
+        self.assertIn("TEXT_MESSAGE_END", event_types)
+        self.assertIn("QUICK_REPLIES", event_types)
+        self.assertIn("RUN_FINISHED", event_types)
+        self.assertLess(event_types.index("TEXT_MESSAGE_END"), event_types.index("QUICK_REPLIES"))
+        self.assertLess(event_types.index("QUICK_REPLIES"), event_types.index("RUN_FINISHED"))
+
+        quick_event = next(event for event in events if event.get("type") == "QUICK_REPLIES")
+        self.assertEqual(quick_event["message_id"], "run-default-quick:assistant")
+        self.assertEqual(
+            quick_event["replies"],
+            [
+                {"text": "继续这个问题", "send_text": "继续这个问题"},
+                {"text": "换个说法", "send_text": "请换个说法再解释一遍"},
+                {"text": "我想问别的", "send_text": "我想问另一个问题"},
+            ],
+        )
+
+    def test_stream_adds_default_quick_replies_even_without_text_message(self) -> None:
+        async def collect_events() -> list[dict[str, object]]:
+            client = _FakeStreamingClient([{"id": "resp-empty", "output": []}])
+            runtime = ChatRuntime(client, model="test-model")
+            stream = stream_ag_ui_events(
+                {"thread_id": "thread-1", "run_id": "run-empty-quick"},
+                {"user_message": "打开表单", "locale": "zh-CN"},
+                runtime,
+            )
+            return [event async for event in stream]
+
+        events = asyncio.run(collect_events())
+        event_types = [str(event.get("type")) for event in events]
+
+        self.assertNotIn("TEXT_MESSAGE_END", event_types)
+        self.assertIn("QUICK_REPLIES", event_types)
+        self.assertIn("RUN_FINISHED", event_types)
+        self.assertLess(event_types.index("QUICK_REPLIES"), event_types.index("RUN_FINISHED"))
+
+        quick_event = next(event for event in events if event.get("type") == "QUICK_REPLIES")
+        self.assertEqual(quick_event["message_id"], "run-empty-quick:assistant")
+        self.assertEqual(len(quick_event["replies"]), 3)
+
 
 class _FakeClient:
     def __init__(self, responses: list[dict[str, object]]) -> None:
@@ -182,12 +528,51 @@ class _FakeClient:
 class _FakeResponses:
     def __init__(self, responses: list[dict[str, object]]) -> None:
         self._responses = list(responses)
+        self.requests: list[dict[str, object]] = []
 
     def create(self, **request: object) -> dict[str, object]:
-        _ = request
+        self.requests.append(request)
         if not self._responses:
             return {"id": "resp-empty", "output": []}
         return self._responses.pop(0)
+
+
+class _FakeStreamingClient:
+    def __init__(self, responses: list[dict[str, object]]) -> None:
+        self.responses = _FakeStreamingResponses(responses)
+
+
+class _FakeStreamingResponses:
+    def __init__(self, responses: list[dict[str, object]]) -> None:
+        self._responses = list(responses)
+        self.requests: list[dict[str, object]] = []
+
+    def create(self, **request: object) -> object:
+        self.requests.append(request)
+        if not self._responses:
+            response = {"id": "resp-empty", "output": []}
+        else:
+            response = self._responses.pop(0)
+        if request.get("stream"):
+            return _response_stream_events(response)
+        return response
+
+
+def _response_stream_events(response: dict[str, object]) -> list[dict[str, object]]:
+    events: list[dict[str, object]] = []
+    for item in response.get("output", []):  # type: ignore[union-attr]
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") != "message":
+            continue
+        content = item.get("content")
+        if not isinstance(content, list):
+            continue
+        for part in content:
+            if isinstance(part, dict) and part.get("type") == "output_text" and isinstance(part.get("text"), str):
+                events.append({"type": "response.output_text.delta", "delta": part["text"]})
+    events.append({"type": "response.completed", "response": response})
+    return events
 
 
 if __name__ == "__main__":

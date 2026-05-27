@@ -171,6 +171,25 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
             "card_json": JSON_OBJECT_STRING,
         },
     ),
+    "ui_quick_replies_create": _function_tool(
+        "ui_quick_replies_create",
+        "为当前最终回复创建 3 个前端快捷输入提示。无后端副作用；每轮最终回复都应调用一次。不要用于替代正文回答，不要在正文里复述这些快捷输入。每次调用必须提供且只提供 3 个短提示；点击后只会作为普通用户消息发送，不能绕过保存、提交、替换、转接等确认流程。",
+        {
+            "replies": {
+                "type": "array",
+                "minItems": 3,
+                "maxItems": 3,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "text": {"type": "string", "description": "按钮上展示的短文案，建议 6-18 个字。"},
+                        "send_text": {"type": "string", "description": "用户点击后发送给智能体的完整文本，通常与 text 相同。"},
+                    },
+                },
+                "description": "恰好 3 个快捷输入提示。",
+            },
+        },
+    ),
     "birth_plan_form_create": _function_tool(
         "birth_plan_form_create",
         "创建分娩沟通卡信息采集表单。LLM 只传已知字段 default_values；表单字段、顺序、分类、选项和排他选项过滤由工具稳定生成。无后端副作用。",
@@ -202,7 +221,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "hospital_bag_cart_update": _function_tool(
         "hospital_bag_cart_update",
-        "根据用户自然语言修改待产包购物车。当前购物车会在 request_context 的 current_hospital_bag_cart 中提供，包含 item_id/name/price/currency/total。用于用户说预算上限、太贵、便宜一点、删掉/加回某个商品、医院会提供、家里已有、调整数量、恢复默认购物车、把推荐的 Momcozy 吸奶器型号同步到购物车等。用户给出明确金额时必须使用 action=optimize_budget 并设置 target_budget，例如“1000元以内”传 1000。工具只返回前端可应用的购物车更新，不真正下单。预算优化默认尽量保留吸奶器；只有用户明确要求删除吸奶器，或 allow_remove_pump=true 时才可移除。若用户要删除具体物品，应从 request_context 里的 item_id 中选择；不确定具体物品时传空数组并用 assistant_message 简短询问。若要同步吸奶器型号，先用 hospital_bag_pump_recommend 选型，再用 action=replace_pump_model 并传 product_sku_id。",
+        "根据用户自然语言修改当前待产包购物车。只在 request_context 已有 current_hospital_bag_cart，或当前对话明确处于待产包购物车页面/购物车调整流程时使用；不要用于首次生成待产包卡片、独立吸奶器型号选型、设备故障排查或真实下单。用于用户说预算上限、太贵、便宜一点、删掉/加回某个商品、医院会提供、家里已有、调整数量、恢复默认购物车、把已推荐的 Momcozy 吸奶器型号同步到购物车等。用户给出明确金额时必须使用 action=optimize_budget 并设置 target_budget，例如“1000元以内”传 1000。工具只返回前端可应用的购物车更新，不真正下单。预算优化默认尽量保留吸奶器；只有用户明确要求删除吸奶器，或 allow_remove_pump=true 时才可移除。若用户要删除具体物品，应从 request_context 里的 item_id 中选择；不确定具体物品时传空数组并用 assistant_message 简短询问。若要同步吸奶器型号，先用 hospital_bag_pump_recommend 选型，再用 action=replace_pump_model 并传 product_sku_id。",
         {
             "action": {
                 "type": "string",
@@ -222,7 +241,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
                 ],
             },
             "item_ids": {"type": "array", "items": {"type": "string"}, "description": "要操作的当前购物车 item_id；预算优化或不需要指定物品时传空数组。"},
-            "product_sku_id": _nullable({"type": "string", "description": "action=replace_pump_model 或 add_pump_model 时使用；可取 pump-s9-pro、pump-s12-pro-quick、pump-m5-smart、pump-m6、pump-v1-pro、pump-m9、pump-w1、pump-air-1。其他 action 传 null。"}),
+            "product_sku_id": _nullable({"type": "string", "description": "action=replace_pump_model 或 add_pump_model 时使用；可取 pump-s9-pro、pump-s12-pro-quick、pump-m5-smart、pump-m6、pump-v1-pro、pump-v2-pro、pump-m9、pump-w1、pump-air-1。其他 action 传 null。"}),
             "quantity_updates": {
                 "type": "array",
                 "items": {
@@ -244,8 +263,9 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "hospital_bag_pump_recommend": _function_tool(
         "hospital_bag_pump_recommend",
-        "根据当前待产包购物车场景、用户预算和使用场景，从 Momcozy 官方吸奶器型号目录里推荐 1 款主推型号和 1-2 款备选。无购物车副作用；如果用户要同步购物车，拿返回的 cart_sync_suggestion 再调用 hospital_bag_cart_update。价格口径使用 Momcozy 官方对外价格，保留官方 USD 标价和活动价字段。",
+        "购买前选型工具：根据用户预算、使用场景和偏好，从 Momcozy 官方吸奶器型号目录里推荐 1 款主推型号和 1-2 款备选。适用于用户问哪款吸奶器适合自己、型号差异、预算内怎么选、某型号多少钱或“Air1 呢”等点名型号追问，也适用于待产包场景中先确定吸奶器型号。不要用于已购设备故障、说明书/FAQ、配件问题或奶量是否正常；这些分别使用 device_support 或 milk_management。无购物车副作用；如果用户要同步购物车，拿返回的 cart_sync_suggestion 再调用 hospital_bag_cart_update。价格口径使用 Momcozy 官方对外价格，保留官方 USD 标价和活动价字段。比较预算必须按 official_price_usd/sale_price_usd/price_label/sale_price_label 数值判断；Air 1 是高价轻薄款，不能描述为降低预算、省钱或更便宜选择。",
         {
+            "requested_model": _nullable({"type": "string", "description": "用户点名询问或追问的型号，例如 Air 1、Air1、M9、S12 Pro Quick；没有点名型号传 null。"}),
             "use_case": {
                 "type": "string",
                 "enum": ["unknown", "hospital_backup", "daily_home", "work_pumping", "portable", "comfort", "performance", "high_output", "budget"],
@@ -283,12 +303,15 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "handoff_summary_generate": _function_tool(
         "handoff_summary_generate",
-        "生成简洁的专业转接摘要。无副作用。",
-        {"issue_type": {"type": "string"}, "facts": JSON_OBJECT_STRING},
+        "生成给人工或专业支持接手用的简洁转接摘要。只在已经决定转接、用户明确需要人工/专业支持，或某个服务流程要求转接时使用；不要用于普通回答总结、设备售后工单草稿、待产包购物车或吸奶器选型。无副作用，不会对外提交。",
+        {
+            "issue_type": {"type": "string", "description": "转接类型，例如 emotion_risk、ibclc、clinical_question、care_support 或 other。"},
+            "facts": {**JSON_OBJECT_STRING, "description": "仅包含用户已提供或工具读取到的关键事实、已尝试步骤和待接手问题；不要包含推测诊断。"},
+        },
     ),
     "device_manual_search": _function_tool(
         "device_manual_search",
-        "补充 Momcozy 吸奶器设备资料。无副作用。用于获取当前型号说明书、检索 FAQ 问答、查找步骤图片，并在 Air1 开箱场景返回产品亮点、Quick Start PDF 和操作视频资源。展示资源时使用工具结果中的 markdown_link，禁止把 /skill-assets/... 原始路径直接输出给用户。用户问部件是什么、作用原理、为什么、能不能、多少、区别、是否正常等日常设备知识时，应使用 topic=faq 检索 FAQ。已获得同型号 manual 后，连续步骤应复用已有内容；只有新的 FAQ 问题或缺少步骤图片时才再次调用。",
+        "补充已购/正在使用的 Momcozy 吸奶器设备资料。无副作用。用于获取当前型号说明书、检索 FAQ 问答、查找步骤图片，并在 Air1 开箱场景返回产品亮点、Quick Start PDF 和操作视频资源。不要用于购买前型号推荐或价格比较；选型使用 hospital_bag_pump_recommend。不要用于判断奶量是否正常或制定喂养计划；奶量数据问题使用 milk_management。展示 Quick Start/PDF/视频资源时使用工具结果中的 markdown_link；展示步骤图片时使用 relevant_images 或 manual 图片项中的 markdown_image，禁止把 /skill-assets/... 原始路径直接输出成可见正文。进入 Air1 开箱分步指导后，每个新视觉步骤首次展示当前步骤图；同一视觉步骤后续轮次不要重复同图，可让用户对照上图。分步指导以 manual 的 guide.* 模块为一轮主步骤，模块内 bullet 是同一步的子动作；除非 manual 明确要求多轮、用户卡住或存在安全风险，不要把每个 bullet 都拆成一轮。用户问“图中/上图/编号/标号”时，只参考当前刚展示给用户的图片，不要用历史图片中相同编号猜。用户问部件是什么、作用原理、为什么、能不能、多少、区别、是否正常等日常设备知识时，应使用 topic=faq 检索 FAQ。用户在法兰步骤给出 14mm、14 毫米等乳头根部测量值时，必须设置 topic=flange 并把数值填入 measured_nipple_mm，随后使用工具返回的 flange_recommendation 直接推荐法兰/硅胶塞尺寸。已获得同型号 manual 后，连续步骤应复用已有内容；只有新的 FAQ 问题、缺少步骤图片或需要根据测量值计算法兰推荐时才再次调用。",
         {
             "model": {"type": "string", "enum": ["Air1", "unknown"], "description": "已确认的设备型号。当前只支持 Air1；未知型号必须传 unknown。"},
             "query": {"type": "string", "description": "用户的设备问题，或需要检索的具体指导主题。"},
@@ -296,12 +319,13 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
                 "type": "string",
                 "enum": ["overview", "unboxing", "setup", "daily_use", "cleaning", "disinfection", "assembly", "flange", "suction", "charging", "bluetooth", "milk_storage", "troubleshooting", "parts", "faq", "other"],
             },
+            "measured_nipple_mm": _nullable({"type": "number", "description": "法兰步骤里用户给出的乳头根部直径，单位 mm，例如用户说 14mm 就传 14；没有测量值时传 null。"}),
             "max_results": {"type": "number", "description": "希望返回的 FAQ 片段数量，通常为 2 到 4。首次加载会按型号返回完整说明书；已加载时可能只返回轻量状态、FAQ 和相关图片。"},
         },
     ),
     "support_ticket_draft_create": _function_tool(
         "support_ticket_draft_create",
-        "为未解决的 Momcozy 吸奶器或设备售后问题创建前端可确认的客服工单草稿。不会对外提交。用于排查未解决、用户明显沮丧、请求客服/退货/保修、反馈缺件或疑似缺陷，或设备安全问题需要升级支持时。",
+        "为未解决的 Momcozy 吸奶器或设备售后问题创建前端可确认的客服工单草稿。不会对外提交。仅在用户明确请求客服/退货/保修，反馈缺件或疑似缺陷，设备安全问题需要升级支持，或经过 device_manual_search 排查后仍未解决且用户愿意升级时使用。不要用于普通操作指导、购买前选型、奶量建议或专业照护转接摘要。",
         {
             "issue_type": {
                 "type": "string",
@@ -320,12 +344,12 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "milk_snapshot_get": _function_tool(
         "milk_snapshot_get",
-        "GET 只读工具：读取当前用户奶量管理快照，包括用户/宝宝资料、最新计划元数据等轻量上下文。只返回结构化事实；最终解释由模型完成。",
+        "GET 只读工具：读取当前用户奶量管理的轻量快照，包括用户/宝宝资料、最新计划元数据等。用于进入奶量管理流程时补足基础上下文，或在生成建议前确认是否已有计划。不要用它替代 milk_status_query 的状态页事实、milk_records_query 的历史明细、milk_assessment_evaluate 的奶量评估或 milk_plan_query 的完整计划读取。只返回结构化事实；最终解释由模型完成。",
         {},
     ),
     "milk_status_query": _function_tool(
         "milk_status_query",
-        "GET 只读工具：读取类似 MaiMomcozy 状态页的奶量聚合信息，包括妈妈宝宝资料、今日产奶/喂养、30 日趋势、宝宝生长记录和当天计划任务。趋势数据包含每日总奶量、含亲喂估算奶量和参考奶量区间。适合用户问“现在状态怎么样”“今天数据”“状态页信息”或需要展示近期趋势事实。",
+        "GET 只读工具：读取类似 MaiMomcozy 状态页的奶量聚合信息，包括妈妈宝宝资料、今日产奶/喂养、30 日趋势、宝宝生长记录和当天计划任务。适合用户问“现在状态怎么样”“今天数据”“状态页信息”或需要展示近期趋势事实。不要用它替代 milk_assessment_evaluate 来回答奶量是否够、是否正常、趋势风险或适合什么计划；不要用它替代 milk_records_query 查可修改的原始记录。",
         {
             "section": {
                 "type": "string",
@@ -356,7 +380,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "milk_record_mutate": _function_tool(
         "milk_record_mutate",
-        "CREATE/UPDATE/DELETE 写入工具：新增、修改或删除真实吸奶/喂养记录。record_kind 支持 pumping、nursing、breastmilk_bottle、formula_bottle。有副作用；只有用户明确确认后才调用。",
+        "CREATE/UPDATE/DELETE 写入工具：新增、修改或删除真实发生过的吸奶/喂养记录。record_kind 支持 pumping、nursing、breastmilk_bottle、formula_bottle。有副作用；只有用户明确确认后才调用。不要用于完成/跳过计划任务；计划任务完成状态使用 milk_task_complete。不要用计划值代替用户提供的实际奶量或时长。",
         {
             "operation": {"type": "string", "enum": ["create", "update", "delete"]},
             "record_kind": {"type": "string", "enum": ["pumping", "nursing", "breastmilk_bottle", "formula_bottle"]},
@@ -372,7 +396,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "milk_plan_query": _function_tool(
         "milk_plan_query",
-        "GET 只读工具：读取已保存奶量计划。用户提到“原计划、已有计划、当前追奶/稳奶/减奶计划、按计划调整”时使用。plan_id 不为 null 时读取单个计划；plan_id 为 null 时按 plan_type/limit 列出计划。具体每天几点执行通常还要配合 milk_calendar_query 读取 calendar。",
+        "GET 只读工具：读取已经保存的奶量计划。用户提到“原计划、已有计划、当前追奶/稳奶/减奶计划、按计划调整”时使用。不要用它生成新计划；新计划草稿使用 milk_plan_preview。plan_id 不为 null 时读取单个计划；plan_id 为 null 时按 plan_type/limit 列出计划。具体每天几点执行通常还要配合 milk_calendar_query 读取 calendar。",
         {
             "plan_id": _nullable({"type": "integer"}),
             "plan_type": _nullable({"type": "string", "enum": ["increase_milk", "maintain_milk", "decrease_milk"]}),
@@ -381,7 +405,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "milk_plan_mutate": _function_tool(
         "milk_plan_mutate",
-        "CREATE/UPDATE/DELETE 写入工具：保存、更新或删除用户已确认的奶量计划。保存计划会从明天开始展开写入 calendar，不覆盖今天；如明天起已有未来计划任务，必须先让用户确认追加还是替换，再传 calendar_write_strategy。有副作用；只有用户明确确认后才调用。",
+        "CREATE/UPDATE/DELETE 写入工具：保存、更新或删除用户已确认的奶量计划。通常在 milk_plan_preview 生成草稿并获得用户确认后调用。保存计划会从明天开始展开写入 calendar，不覆盖今天；如明天起已有未来计划任务，必须先让用户确认追加还是替换，再传 calendar_write_strategy。有副作用；只有用户明确确认后才调用。不要用于单次日程调整或任务完成。",
         {
             "operation": {"type": "string", "enum": ["create", "update", "delete"]},
             "plan_id": _nullable({"type": "integer"}),
@@ -415,7 +439,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "milk_calendar_change_preview": _function_tool(
         "milk_calendar_change_preview",
-        "PREVIEW 候选变更工具：预览新增事项导致的 calendar 变更，不写数据库。适用于用户文字新增事项，也适用于用户发图片后由模型识别出日期/时间/事项名称再预览。返回冲突、候选调整和 proposal；写入前必须获得用户确认。",
+        "PREVIEW 候选变更工具：预览新增单次 calendar 事项导致的变更，不写数据库。适用于用户通过文字或图片提出新增一次会议、外出、临时吸奶/亲喂或其他自定义事项，并需要检查冲突。不要用于生成追奶/稳奶/减奶计划草稿；计划草稿使用 milk_plan_preview。返回冲突、候选调整和 proposal；写入前必须获得用户确认。",
         {
             "target_date": ISO_DATE,
             "event_start_time": {"type": "string", "description": "开始时间，例如 09:00 或完整 ISO datetime。"},
@@ -447,7 +471,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "milk_calendar_mutate": _function_tool(
         "milk_calendar_mutate",
-        "APPLY/UPDATE/DELETE 写入工具：应用日程变更 proposal、应用日程重排 proposal，或批量/单条修改、删除 calendar 条目。有副作用；只有用户明确确认后才调用。任务完成/跳过优先使用 milk_task_complete。",
+        "APPLY/UPDATE/DELETE 写入工具：应用 milk_calendar_change_preview 或 milk_calendar_reschedule_preview 返回的 proposal，或批量/单条修改、删除 calendar 条目。有副作用；只有用户明确确认后才调用。不要用于保存完整奶量计划；使用 milk_plan_mutate。任务完成/跳过优先使用 milk_task_complete。",
         {
             "operation": {"type": "string", "enum": ["apply_adjustment", "apply_reschedule", "range_shift", "range_delete", "patch_items", "update_item", "delete_item"]},
             "target_date": _nullable(ISO_DATE),
@@ -463,7 +487,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "milk_task_complete": _function_tool(
         "milk_task_complete",
-        "COMPLETE/CANCEL/SKIP 写入工具：确认后更新计划任务完成状态，可按用户提供的奶量/时长同步创建或删除关联吸奶/喂养记录。用于“这个完成了”“取消完成”“跳过这次”。有副作用；只有用户明确确认后才调用。",
+        "COMPLETE/CANCEL/SKIP 写入工具：确认后更新已有计划任务或 calendar 条目的完成状态，可按用户提供的真实奶量/时长同步创建或删除关联吸奶/喂养记录。用于“这个完成了”“取消完成”“跳过这次”。不要用于新增、修改或删除独立历史记录；那类记录编辑使用 milk_record_mutate。有副作用；只有用户明确确认后才调用。",
         {
             "operation": {"type": "string", "enum": ["complete", "cancel_complete", "skip"]},
             "target_date": _nullable(ISO_DATE),
@@ -503,7 +527,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "infant_growth_mutate": _function_tool(
         "infant_growth_mutate",
-        "CREATE/UPDATE 写入工具：新增、修改或更新今日宝宝身高、体重、头围记录。有副作用；只有用户明确确认后才调用。",
+        "CREATE/UPDATE 写入工具：新增、修改或更新宝宝身高、体重、头围记录。只在用户明确提供测量值并确认保存/更新时调用；不要根据照片、描述或模型估算写入。有副作用；只有用户明确确认后才调用。",
         {
             "operation": {"type": "string", "enum": ["create", "update", "upsert_today"]},
             "growth_id": _nullable({"type": "integer", "description": "update 必填；create/upsert_today 传 null。"}),
@@ -518,7 +542,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "milk_plan_preview": _function_tool(
         "milk_plan_preview",
-        "PREVIEW 候选方案工具：按确定性规则生成追奶、稳奶或减奶计划草稿，不写数据库，并返回保存前校验结果。只有返回 plan_preview_ready 且 data.validation.valid=true 时才能展示确认保存；如用户给出目标，可同时返回目标校验结果。",
+        "PREVIEW 候选方案工具：按确定性规则生成追奶、稳奶或减奶计划草稿，不写数据库，并返回保存前校验结果。用于用户明确想要生成/调整奶量计划，或评估后需要给出计划草稿时；不要用于读取已有计划、单次 calendar 调整或设备使用指导。只有返回 plan_preview_ready 且 data.validation.valid=true 时才能展示确认保存；如用户给出目标，可同时返回目标校验结果。",
         {
             "plan_type": _nullable({"type": "string", "enum": ["increase_milk", "maintain_milk", "decrease_milk"]}),
             "plan_days": _nullable({"type": "integer"}),

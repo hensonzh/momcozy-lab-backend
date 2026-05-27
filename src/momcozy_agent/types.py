@@ -30,6 +30,7 @@ ToolName = Literal[
     "run_approved_skill_script",
     "ui_form_create",
     "ui_card_create",
+    "ui_quick_replies_create",
     "birth_plan_form_create",
     "birth_plan_card_create",
     "hospital_bag_form_create",
@@ -156,6 +157,7 @@ class AgUiEvent(TypedDict, total=False):
     title: str
     status: str
     submit_label: str
+    replies: Any
 
 
 AgUiEventHandler = Callable[[AgUiEvent], None]

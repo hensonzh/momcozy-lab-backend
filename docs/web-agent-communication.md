@@ -96,6 +96,26 @@ WebSocket 客户端连接 `ws://<host>:<port>/api/ag-ui-ws` 后，第一帧必�
 
 响应体包含前端展示用的 `session`、`chat_message` 和上下文追加状态 `context`。内部追加给智能体的事实型事件不会作为响应字段暴露；后续聊天轮次会以 `pump_session_ended {...}` 的形式进入 `client_event_context`。
 
+### 2.1.3 待产包购物车直接更新：`/api/hospital-bag/cart-update`
+
+对“把购物车里的吸奶器换成某个已确定型号”这类确定性操作，App 可以跳过 agent loop，直接调用 `POST /api/hospital-bag/cart-update`。该入口复用 `hospital_bag_cart_update` 的后端 handler，只执行购物车状态计算，不调用模型、不真实下单。
+
+鉴权方式为 `Authorization: Bearer <ENTRY_API_KEY>`。请求体建议包含：
+
+```json
+{
+  "user_message": "好，换成 Air 1 吧",
+  "locale": "zh-CN",
+  "hospital_bag_cart": { "groups": [] },
+  "args": {
+    "action": "replace_pump_model",
+    "product_sku_id": "pump-air-1"
+  }
+}
+```
+
+响应体与工具结果一致，核心字段为 `status`、`summary` 和 `cart_update.groups/message/totals`。如果用户仍在做开放式选型、预算权衡或需要解释原因，应继续走 `/api/ag-ui-ws`，由模型调用 `pump_recommendation` 或 `hospital_bag_cart` namespace。
+
 ### 2.2 前端请求体
 
 请求体由 `buildAgUiPayload(text, images)` 生成。
@@ -203,7 +223,7 @@ WebSocket 客户端连接 `ws://<host>:<port>/api/ag-ui-ws` 后，第一帧必�
 | `service_state` | 可放在 `state` 或 `forwardedProps` 中 |
 | `retrieved_records` | 可放在 `state` 或 `forwardedProps` 中 |
 | `retrieved_knowledge` | 可放在 `state` 或 `forwardedProps` 中 |
-| `hospital_bag_cart` | 可放在 `state` 或 `forwardedProps` 中；智能体进入购物车场景后通过 `tool_search` 加载 deferred 工具 `hospital_bag_cart_update` / `hospital_bag_pump_recommend`，并按当前 item_id 调整购物车或按官方价格推荐 Momcozy 吸奶器型号 |
+| `hospital_bag_cart` | 可放在 `state` 或 `forwardedProps` 中；智能体进入购物车场景后通过 `tool_search` 加载 deferred 工具 `hospital_bag_cart_update`，并按当前 item_id 调整购物车。吸奶器独立选型或待产包内先选型时，通过 `pump_recommendation` namespace 加载 `hospital_bag_pump_recommend`；已购设备故障/说明书问题走 `device_support` |
 
 `/api/ag-ui` 还读取这些 AG-UI 运行字段：
 
@@ -263,7 +283,11 @@ WebSocket 客户端连接 `ws://<host>:<port>/api/ag-ui-ws` 后，第一帧必�
     "context_state": {
         "environment_sent": bool,
         "loaded_references": list[str],
-        "client_events": list[str]
+        "client_events": list[str],
+        "available_tool_images": list[object],
+        "last_displayed_tool_image": object,
+        "active_device_module": str,
+        "shown_step_image_urls": list[str]
     }
 }
 ```
@@ -275,6 +299,10 @@ WebSocket 客户端连接 `ws://<host>:<port>/api/ag-ui-ws` 后，第一帧必�
 - `environment_sent`：控制 `locale`、`timezone` 只在首轮注入。
 - `loaded_references`：记录已加载过的参考资料，例如设备说明书。
 - `client_events`：记录前端页面事件，例如 IBCLC 在线咨询已结束。
+- `available_tool_images`：记录 `device_manual_search` 最近返回的官方步骤图元数据。
+- `last_displayed_tool_image`：记录上一轮最终回复里实际展示给用户的官方步骤图；用户问“图中/上图/编号/标号”时优先参考它，不从历史图片里用同号编号猜。
+- `active_device_module`：上一张展示图对应的设备指导模块，例如 `guide.parts` 或 `guide.controls`。
+- `shown_step_image_urls`：当前会话已展示过的官方步骤图 URL，用于提示模型同一视觉步骤后续轮次不要重复渲染同一张图。
 
 后续每轮都会注入：
 
@@ -361,13 +389,14 @@ agent.status tool_completed
 agent.status requesting_model
 ...
 TEXT_MESSAGE_END
+QUICK_REPLIES
 RUN_FINISHED
 ```
 
 实现约束：
 
 - `server.py` 负责 SSE framing：每个 JSON event 写成一个 `data:` frame，并用空行结尾。
-- `server.py` 会暂存 `RUN_FINISHED`，等文本 delta、`TEXT_MESSAGE_END` 和 `assistant_followup` 都处理完后再发送。
+- `server.py` 会暂存 `RUN_FINISHED`，等文本 delta、`TEXT_MESSAGE_END`、`assistant_followup` 和 `QUICK_REPLIES` 都处理完后再发送。
 - `agents.py` 会用 `streamed_tool_call_keys` 去重 streamed function call start 和最终 function call arguments。
 - 工具相关事件应尽量携带 `response_id`、`output_index`、`item_id` 和 `tool_call_id`，让前端能稳定合并同一个 work item。
 - `safe_tool_arguments()` 只发送参数摘要；`safe_tool_result()` 只发送前端需要的安全字段和已知 artifact。
@@ -458,6 +487,27 @@ RUN_FINISHED
 前端行为：
 
 - 视为本段 assistant text 输出结束。
+
+#### `QUICK_REPLIES`
+
+```json
+{
+  "type": "QUICK_REPLIES",
+  "message_id": "run_xxx:assistant",
+  "replies": [
+    {"text": "继续下一步", "send_text": "继续下一步"},
+    {"text": "换个方案", "send_text": "我想换个方案"},
+    {"text": "先帮我总结", "send_text": "先帮我总结"}
+  ]
+}
+```
+
+前端行为：
+
+- 只在对应 assistant 回复下方展示这 3 个快捷输入。
+- 收到新一轮 `QUICK_REPLIES` 或用户发送下一条消息时，隐藏历史轮次的快捷输入。
+- 点击后把 `send_text` 当作普通用户消息发送；不得绕过保存、提交、替换、转接等确认流程。
+- 该事件优先由全局 `ui_quick_replies_create` 工具产生。后端会隐藏该工具的 `TOOL_CALL_*` work panel 事件，只保留最终 `QUICK_REPLIES`；如果模型漏调该工具，后端会补 3 个安全默认提示，保证每轮成功回复后都有快捷输入。
 
 ### 5.3 Thinking 事件
 
@@ -579,7 +629,8 @@ Agent 状态通过 `CUSTOM` / `momcozy.agent.status` 发送：
 - `content` 是 JSON 字符串，需要 `parseJson(event.content)`。
 - 更新 work panel 工具结果状态。
 - 不再直接渲染结构化 UI；结构化 UI 由后续 `ARTIFACT_CREATED` 显式事件驱动。
-- 例外：`hospital_bag_cart_update` 会在 `content.cart_update` 中返回前端可应用的购物车状态，用于对话页自然语言修改购物车，不产生独立 artifact。该工具支持预算上限、删除/加回、基础款替换、医院提供、家里已有、数量调整和吸奶器型号同步；预算优化默认尽量保留吸奶器。吸奶器推荐由 `hospital_bag_pump_recommend` 先返回型号和官方 USD 价格，再由购物车工具同步。
+- 例外：`hospital_bag_cart_update` 会在 `content.cart_update` 中返回前端可应用的购物车状态，用于对话页自然语言修改购物车，不产生独立 artifact。该工具支持预算上限、删除/加回、基础款替换、医院提供、家里已有、数量调整和吸奶器型号同步；预算优化默认尽量保留吸奶器。吸奶器推荐由 `pump_recommendation` namespace 下的 `hospital_bag_pump_recommend` 先返回型号和官方 USD 价格，再由购物车工具同步。
+- 例外：`ui_quick_replies_create` 是全局 UI 元数据工具；后端不会把它的 `TOOL_CALL_*` 事件透给前端 work panel，而是在最终回复后发送 `QUICK_REPLIES`。
 
 #### `ARTIFACT_CREATED`
 
@@ -902,6 +953,10 @@ work item 文案由前端按阶段语义映射，核心映射在 `toolWorkPhase(
     "context_state": {
       "environment_sent": true,
       "loaded_references": [],
+      "available_tool_images": [],
+      "last_displayed_tool_image": {},
+      "active_device_module": "",
+      "shown_step_image_urls": [],
       "client_events": [
         "2026-05-12T11:00:00.000Z: 用户已完成一次 IBCLC 在线咨询 ..."
       ]
