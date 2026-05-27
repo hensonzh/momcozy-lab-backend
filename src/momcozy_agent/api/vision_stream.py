@@ -180,7 +180,7 @@ async def _stream_vision_events(websocket: WebSocket, *, data_url: str) -> int:
     if not api_key:
         raise _VisionModelError("OPENAI_API_KEY is not set")
 
-    model = (os.getenv("MOMCOZY_VISION_MODEL") or "gpt-4o-mini").strip()
+    model = (os.getenv("MOMCOZY_VISION_MODEL") or "gpt-5.5").strip()
     client = AsyncOpenAI(api_key=api_key)
 
     try:
