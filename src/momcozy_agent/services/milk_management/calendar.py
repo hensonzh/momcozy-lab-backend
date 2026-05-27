@@ -587,7 +587,6 @@ def update_calendar_item(
     if not current:
         return error_result("calendar_item_not_found", "Calendar item was not found.")
     item_date = str(current.get("date") or "")
-    previous_finish = to_bool(current.get("finish"))
 
     fields: list[str] = []
     params: list[Any] = []
@@ -624,7 +623,7 @@ def update_calendar_item(
         params,
     )
     sync_result = {"pumping_id": 0, "feeding_id": 0}
-    if finish is True and not previous_finish:
+    if finish is True:
         sync_result = data_store.sync_completed_calendar_item_logs(user_id=uid, item_id=int(item_id))
     return ok_result("calendar_item_updated", data={"user_id": uid, "item_id": int(item_id), "synced_logs": sync_result})
 

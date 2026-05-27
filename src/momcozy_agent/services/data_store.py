@@ -1260,7 +1260,8 @@ def revise_plan_task(
             """,
             (uid, date_text, int(task_id)),
         ).fetchone()
-        previous_done = _is_finish_true(current["finish"] if current else None)
+        if current is None:
+            return False
         cursor = conn.execute(
             """
             UPDATE calendar
@@ -1272,6 +1273,19 @@ def revise_plan_task(
             """,
             (f"{date_text} {time_text}:00", content, finish, _now(), uid, date_text, int(task_id)),
         )
+        updated = conn.execute(
+            """
+            SELECT item_id, user_id, date, task_id, start_time, end_time,
+                   content, type, source, is_milk_pump, finish
+            FROM calendar
+            WHERE user_id = ? AND date = ? AND task_id = ?
+            """,
+            (uid, date_text, int(task_id)),
+        ).fetchone()
+        if _is_finish_true(finish):
+            _sync_completed_calendar_item_logs(conn, updated)
+        else:
+            _delete_completed_calendar_item_logs(conn, updated or current)
         conn.commit()
         return int(cursor.rowcount or 0) > 0
 
@@ -1312,20 +1326,9 @@ def _sync_completed_calendar_item_logs(conn: sqlite3.Connection, row: sqlite3.Ro
     if not user_id or not start_time:
         return {"pumping_id": 0, "feeding_id": 0}
 
-    duration = _duration_minutes(start_time, end_time)
     if is_nursing:
-        feeding_id = _ensure_calendar_feeding_log(conn, user_id=user_id, feed_time=start_time, duration_minutes=duration, title=content)
-        pumping_id = _ensure_calendar_pumping_log(
-            conn,
-            user_id=user_id,
-            pump_time=start_time,
-            pump_end_time=end_time,
-            pump_type=2,
-            milk_ml=None,
-            duration_minutes=duration,
-            title=content or "亲喂",
-        )
-        return {"pumping_id": pumping_id, "feeding_id": feeding_id}
+        feeding_id = _ensure_calendar_feeding_log(conn, user_id=user_id, feed_time=start_time, duration_minutes=_duration_minutes(start_time, end_time), title=content)
+        return {"pumping_id": 0, "feeding_id": feeding_id}
 
     pumping_id = _ensure_calendar_pumping_log(
         conn,
@@ -1333,11 +1336,37 @@ def _sync_completed_calendar_item_logs(conn: sqlite3.Connection, row: sqlite3.Ro
         pump_time=start_time,
         pump_end_time=end_time,
         pump_type=0,
-        milk_ml=None,
-        duration_minutes=duration,
+        milk_ml=0.0,
+        duration_minutes=_duration_minutes(start_time, end_time),
         title=content or "吸奶",
     )
     return {"pumping_id": pumping_id, "feeding_id": 0}
+
+
+def _delete_completed_calendar_item_logs(conn: sqlite3.Connection, row: sqlite3.Row | None) -> dict[str, int]:
+    if row is None:
+        return {"deleted_pumping": 0, "deleted_feeding": 0}
+    item_type = str(row["type"] or "").strip()
+    is_pump = str(row["is_milk_pump"]) in {"1", "true", "True"} or item_type == "吸奶"
+    is_nursing = item_type == "亲喂"
+    if not is_pump and not is_nursing:
+        return {"deleted_pumping": 0, "deleted_feeding": 0}
+
+    user_id = str(row["user_id"] or "").strip()
+    start_time = str(row["start_time"] or "").strip()
+    content = str(row["content"] or "").strip()
+    if not user_id or not start_time:
+        return {"deleted_pumping": 0, "deleted_feeding": 0}
+
+    deleted_pumping = 0
+    deleted_feeding = 0
+    if is_nursing:
+        deleted_feeding = _delete_calendar_feeding_log(conn, user_id=user_id, feed_time=start_time, title=content)
+        deleted_pumping = _delete_calendar_pumping_log(conn, user_id=user_id, pump_time=start_time, pump_type=2, title=content or "亲喂")
+        return {"deleted_pumping": deleted_pumping, "deleted_feeding": deleted_feeding}
+
+    deleted_pumping = _delete_calendar_pumping_log(conn, user_id=user_id, pump_time=start_time, pump_type=0, title=content or "吸奶")
+    return {"deleted_pumping": deleted_pumping, "deleted_feeding": 0}
 
 
 def _ensure_calendar_pumping_log(
@@ -1357,24 +1386,50 @@ def _ensure_calendar_pumping_log(
         FROM pumping_log
         WHERE user_id = ?
           AND pump_start_time = ?
-          AND pump_type = ?
           AND COALESCE(pump_title, '') = ?
+          AND pump_source = 2
+          AND (? != 0 OR pump_type IN (0, 1))
+          AND (? = 0 OR pump_type = ?)
         ORDER BY pumping_id DESC
         LIMIT 1
         """,
-        (user_id, pump_time, int(pump_type), str(title or "")),
+        (user_id, pump_time, str(title or ""), int(pump_type), int(pump_type), int(pump_type)),
     ).fetchone()
     if existing:
         return int(existing["pumping_id"] or 0)
+    stored_pump_type = 1 if int(pump_type) == 0 else int(pump_type)
     cursor = conn.execute(
         """
         INSERT INTO pumping_log(user_id, pump_start_time, pump_end_time, pump_milk_volum,
                                 pump_type, pump_milk_duration, pump_source, pump_title, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (user_id, pump_time, pump_end_time or pump_time, milk_ml, int(pump_type), duration_minutes, 2, str(title or ""), _now()),
+        (user_id, pump_time, pump_end_time or pump_time, milk_ml, stored_pump_type, duration_minutes, 2, str(title or ""), _now()),
     )
     return int(cursor.lastrowid or 0)
+
+
+def _delete_calendar_pumping_log(
+    conn: sqlite3.Connection,
+    *,
+    user_id: str,
+    pump_time: str,
+    pump_type: int,
+    title: str,
+) -> int:
+    cursor = conn.execute(
+        """
+        DELETE FROM pumping_log
+        WHERE user_id = ?
+          AND pump_start_time = ?
+          AND pump_source = 2
+          AND COALESCE(pump_title, '') = ?
+          AND (? != 0 OR pump_type IN (0, 1))
+          AND (? = 0 OR pump_type = ?)
+        """,
+        (user_id, pump_time, str(title or ""), int(pump_type), int(pump_type), int(pump_type)),
+    )
+    return int(cursor.rowcount or 0)
 
 
 def _ensure_calendar_feeding_log(
@@ -1400,6 +1455,7 @@ def _ensure_calendar_feeding_log(
         WHERE user_id = ?
           AND feed_time = ?
           AND feed_type = ?
+          AND feed_action = 1
           AND COALESCE(feeding_title, '') = ?
         ORDER BY feeding_id DESC
         LIMIT 1
@@ -1414,9 +1470,30 @@ def _ensure_calendar_feeding_log(
                                 feed_action, feeding_title, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (user_id, infant_id, feed_time, FEED_TYPE_CODE_TO_TEXT[0], float(duration), 0, str(title or ""), _now()),
+        (user_id, infant_id, feed_time, FEED_TYPE_CODE_TO_TEXT[0], float(duration), 1, str(title or ""), _now()),
     )
     return int(cursor.lastrowid or 0)
+
+
+def _delete_calendar_feeding_log(
+    conn: sqlite3.Connection,
+    *,
+    user_id: str,
+    feed_time: str,
+    title: str,
+) -> int:
+    cursor = conn.execute(
+        """
+        DELETE FROM feeding_log
+        WHERE user_id = ?
+          AND feed_time = ?
+          AND feed_type = ?
+          AND feed_action = 1
+          AND COALESCE(feeding_title, '') = ?
+        """,
+        (user_id, feed_time, FEED_TYPE_CODE_TO_TEXT[0], str(title or "")),
+    )
+    return int(cursor.rowcount or 0)
 
 
 def _duration_minutes(start_time: Any, end_time: Any) -> int | None:

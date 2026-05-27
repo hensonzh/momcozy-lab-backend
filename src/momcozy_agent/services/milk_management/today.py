@@ -229,9 +229,10 @@ def confirm_today_tasks(
         return error_result("missing_idempotency_key", "缺少 idempotency_key。")
 
     with transaction() as conn:
-        rows_to_sync = conn.execute(
+        rows_to_confirm = conn.execute(
             """
-            SELECT item_id
+            SELECT item_id, user_id, date, task_id, start_time, end_time,
+                   content, type, source, is_milk_pump, finish
             FROM calendar
             WHERE user_id = ?
               AND date = ?
@@ -241,30 +242,39 @@ def confirm_today_tasks(
             """,
             (uid, date, CALENDAR_TYPE_PUMP, plan_id, plan_id),
         ).fetchall()
-        cursor = conn.execute(
-            """
-            UPDATE calendar
-            SET finish = 'true',
-                modified_at = CURRENT_TIMESTAMP
-            WHERE user_id = ?
-              AND date = ?
-              AND type = ?
-              AND (? IS NULL OR COALESCE(plan_id, 0) = COALESCE(?, 0))
-            """,
-            (uid, date, CALENDAR_TYPE_PUMP, plan_id, plan_id),
-        )
-    synced_logs = [
-        data_store.sync_completed_calendar_item_logs(user_id=uid, item_id=int(row["item_id"] or 0))
-        for row in rows_to_sync
-    ]
+        synced_logs = []
+        updated_count = 0
+        for row in rows_to_confirm:
+            cursor = conn.execute(
+                """
+                UPDATE calendar
+                SET finish = 'true',
+                    modified_at = CURRENT_TIMESTAMP
+                WHERE user_id = ?
+                  AND item_id = ?
+                """,
+                (uid, int(row["item_id"] or 0)),
+            )
+            updated_count += int(cursor.rowcount or 0)
+            updated = conn.execute(
+                """
+                SELECT item_id, user_id, date, task_id, start_time, end_time,
+                       content, type, source, is_milk_pump, finish
+                FROM calendar
+                WHERE user_id = ?
+                  AND item_id = ?
+                """,
+                (uid, int(row["item_id"] or 0)),
+            ).fetchone()
+            synced_logs.append(data_store._sync_completed_calendar_item_logs(conn, updated))
     refreshed = get_today_overview(user_id=uid, target_date=date, plan_id=plan_id)
     return ok_result(
         "today_tasks_confirmed",
-        f"已确认完成 {int(cursor.rowcount or 0)} 个今日吸奶任务。",
+        f"已确认完成 {updated_count} 个今日吸奶任务。",
         {
             "user_id": uid,
             "target_date": date,
-            "updated_count": int(cursor.rowcount or 0),
+            "updated_count": updated_count,
             "synced_logs": synced_logs,
             "calendar": refreshed.get("data") if isinstance(refreshed.get("data"), dict) else {},
         },

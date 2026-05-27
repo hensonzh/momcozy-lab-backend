@@ -295,7 +295,7 @@ def safe_tool_result(result: dict[str, Any]) -> dict[str, Any]:
             safe["card"] = tool_result["card"]
             if isinstance(tool_result.get("assistant_followup"), dict):
                 safe["assistant_followup"] = tool_result["assistant_followup"]
-        if result.get("tool_name") in {"milk_assessment_evaluate", "milk_plan_preview"} and isinstance(tool_result.get("card"), dict):
+        if result.get("tool_name") in {"milk_assessment_evaluate", "milk_plan_preview", "milk_plan_mutate"} and isinstance(tool_result.get("card"), dict):
             safe["card"] = tool_result["card"]
         if result.get("tool_name") == "ibclc_consult_card_create" and isinstance(tool_result.get("card"), dict):
             safe["card"] = tool_result["card"]
@@ -323,19 +323,9 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
     safe = safe_tool_result(result)
     tool_name = str(safe.get("tool_name") or "")
     if tool_name == "milk_assessment_evaluate" and isinstance(safe.get("card"), dict):
-        return _compact_card_tool_output(
-            safe,
-            "分析结果已经通过结构化卡片展示。最终回复只用 1-2 句话承接，不要重复卡片里的标题、指标、章节或清单；可以询问用户是否要生成从明天开始的温和追奶、稳奶或减奶计划。",
-        )
+        return _compact_milk_analysis_card_output(safe)
     if tool_name == "milk_plan_preview" and isinstance(safe.get("card"), dict):
-        compact = _compact_card_tool_output(
-            safe,
-            "计划草稿已经通过结构化卡片展示。最终回复只询问用户是否同步到日历或如何确认，不要重复卡片里的计划方向、目标、安排、观察点或同步说明。",
-        )
-        plan_preview = _compact_milk_plan_preview_for_model(result)
-        if plan_preview:
-            compact["plan_preview"] = plan_preview
-        return compact
+        return _compact_milk_plan_card_output(safe, result)
 
     if tool_name not in {
         "ui_form_create",
@@ -406,6 +396,101 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
         }
 
     return compact
+
+
+def _compact_milk_analysis_card_output(safe: dict[str, Any]) -> dict[str, Any]:
+    card = safe.get("card")
+    card_json = card.get("card_json") if isinstance(card, dict) else None
+    card_json_dict = card_json if isinstance(card_json, dict) else {}
+    analysis_status = str(card_json_dict.get("status") or safe.get("status") or "").strip()
+    status_label = str(card_json_dict.get("status_label") or "").strip()
+    return {
+        "ok": safe.get("ok"),
+        "tool_name": safe.get("tool_name"),
+        "card": {
+            "card_type": (card or {}).get("card_type") if isinstance(card, dict) else "milk_analysis_card",
+            "schema_version": (card or {}).get("schema_version") if isinstance(card, dict) else "1.0",
+            "created": True,
+        },
+        "analysis_status": analysis_status,
+        "status_label": status_label,
+        "next_actions": _milk_analysis_next_actions(analysis_status),
+        "final_response_instruction": (
+            "奶量分析卡片已经展示完整结果。最终回复只能引导用户选择下一步，"
+            "不要复述卡片中的结论、数字、趋势、参考区间、原因推测或建议内容；"
+            "不要输出“整体看/结果是/数据显示”等分析句。用一句自然的话给出 2-3 个可选动作。"
+        ),
+    }
+
+
+def _compact_milk_plan_card_output(safe: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
+    card = safe.get("card")
+    card_json = card.get("card_json") if isinstance(card, dict) else None
+    card_json_dict = card_json if isinstance(card_json, dict) else {}
+    compact: dict[str, Any] = {
+        "ok": safe.get("ok"),
+        "tool_name": safe.get("tool_name"),
+        "card": {
+            "card_type": (card or {}).get("card_type") if isinstance(card, dict) else "milk_plan_card",
+            "schema_version": (card or {}).get("schema_version") if isinstance(card, dict) else "1.0",
+            "created": True,
+        },
+        "plan_status": str(card_json_dict.get("status") or safe.get("status") or "").strip(),
+        "next_actions": ["同步到日历", "调整计划", "展开具体时间表"],
+        "final_response_instruction": (
+            "奶量计划卡片已经展示完整计划。最终回复只能引导用户确认下一步，"
+            "不要复述卡片中的计划方向、目标、安排、数字、周期、任务数或日期范围；"
+            "可以用 calendar_sync_prompt 说明同步到日历的影响，但只保留一句短话；"
+            "给出“同步到日历/先调整/展开时间表”这类选择。"
+        ),
+    }
+    for key in ("requires_confirmation", "requires_medical_confirmation", "confirmation_question"):
+        if key in safe:
+            compact[key] = safe[key]
+
+    data = _tool_result_data(result)
+    calendar_sync_prompt = _milk_plan_calendar_sync_prompt(data)
+    if calendar_sync_prompt:
+        compact["calendar_sync_prompt"] = calendar_sync_prompt
+
+    plan_preview = _compact_milk_plan_preview_for_model(result)
+    if plan_preview:
+        compact["plan_preview"] = plan_preview
+    return compact
+
+
+def _milk_analysis_next_actions(status: str) -> list[str]:
+    if status == "under_supply_alert":
+        return ["生成从明天开始的温和追奶计划", "看看今天怎么吸更合适", "展开可能原因"]
+    if status == "over_supply_alert":
+        return ["看看今天怎么安排更舒服", "展开偏高可能原因", "做一个温和调整方案"]
+    if status == "normal":
+        return ["看看今天怎么保持", "设置两三天后复盘", "展开数据说明"]
+    return ["补充最近一两天记录", "看看需要补哪些数据", "稍后再分析一次"]
+
+
+def _tool_result_data(result: dict[str, Any]) -> dict[str, Any]:
+    tool_result = result.get("result")
+    if not isinstance(tool_result, dict):
+        return {}
+    data = tool_result.get("data")
+    return data if isinstance(data, dict) else {}
+
+
+def _milk_plan_calendar_sync_prompt(data: dict[str, Any]) -> str:
+    calendar_delta = data.get("calendar_delta") if isinstance(data.get("calendar_delta"), dict) else {}
+    date_range = calendar_delta.get("date_range") if isinstance(calendar_delta.get("date_range"), dict) else {}
+    start_date = str(date_range.get("start_date") or "").strip()
+    end_date = str(date_range.get("end_date") or "").strip()
+    task_count = calendar_delta.get("draft_calendar_task_count")
+    strategy_required = bool(calendar_delta.get("calendar_write_strategy_required"))
+    range_text = f"{start_date} 到 {end_date}" if start_date and end_date else "明天开始的计划周期"
+
+    if strategy_required:
+        return f"如果要同步到日历，我会先让你选择追加还是替换未来未完成计划，再写入 {range_text} 的提醒。"
+    if task_count is not None:
+        return f"如果方向没问题，我可以把这版计划同步到 {range_text} 的日历提醒；也可以先帮你调整。"
+    return f"如果方向没问题，我可以把这版计划同步到 {range_text} 的日历提醒。"
 
 
 def _compact_card_tool_output(safe: dict[str, Any], final_response_instruction: str) -> dict[str, Any]:
@@ -500,7 +585,8 @@ def artifact_events_from_tool_result(
     if isinstance(safe_result.get("card"), dict):
         card = safe_result["card"]
         artifact_type = str(card.get("card_type") or "card")
-        artifact_specs.append((artifact_type, str(card.get("id") or f"{tool_call_id}:card"), card, "ready"))
+        if not (tool_call_name == "milk_plan_mutate" and artifact_type == "milk_plan_card"):
+            artifact_specs.append((artifact_type, str(card.get("id") or f"{tool_call_id}:card"), card, "ready"))
     if isinstance(safe_result.get("ticket"), dict):
         ticket = safe_result["ticket"]
         artifact_specs.append(("support_ticket", str(ticket.get("draft_id") or f"{tool_call_id}:ticket"), ticket, "preview"))
@@ -566,7 +652,7 @@ def _confirmation_title(tool_name: str, safe_result: dict[str, Any]) -> str:
     if tool_name == "milk_plan_preview":
         if safe_result.get("requires_medical_confirmation"):
             return "需要先确认健康边界"
-        return "请确认奶量计划草稿"
+        return "请确认奶量计划"
     if tool_name == "milk_calendar_change_preview":
         return "请确认日程调整"
     return "请确认后继续"

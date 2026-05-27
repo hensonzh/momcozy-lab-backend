@@ -21,6 +21,9 @@ USER_ID = "demo_mama_increase_001"
 INFANT_ID = 18
 BASE_TODAY = datetime(2026, 5, 21)
 BASE_DELIVERY_DATE = datetime(2026, 3, 1)
+PLAN_HISTORY_DAYS = 30
+PLAN_PUMP_DURATION_MINUTES = 20
+NURSING_ESTIMATE_ML = 45.0
 
 
 def _resolve_today() -> datetime:
@@ -60,30 +63,22 @@ GROWTH_POINTS = [
 
 
 SESSION_TIMES = [
-    ("06:20", "晨间吸乳", 0.24),
-    ("10:10", "上午吸乳", 0.20),
-    ("14:20", "午后吸乳", 0.19),
-    ("18:30", "傍晚吸乳", 0.18),
-    ("22:20", "睡前吸乳", 0.19),
+    ("06:00", "吸奶", 0.13),
+    ("08:15", "吸奶", 0.13),
+    ("10:30", "吸奶", 0.13),
+    ("12:45", "吸奶", 0.13),
+    ("15:00", "吸奶", 0.12),
+    ("17:15", "吸奶", 0.12),
+    ("19:30", "吸奶", 0.12),
+    ("21:45", "吸奶", 0.12),
 ]
 
-
-# Times for direct breastfeeding (亲喂) and one bottle-feed of pumped milk per
-# day. They sit between pumping slots so the day reads as a realistic combo
-# feeding schedule (pump + nurse + occasional bottle relay).
-BREASTFEEDING_TIMES = [
-    ("03:00", "夜间亲喂"),
-    ("08:00", "早起亲喂"),
-    ("12:30", "午前亲喂"),
-    ("20:30", "睡前亲喂"),
+NURSING_TIMES = [
+    ("07:20", "早间亲喂"),
+    ("11:45", "午间亲喂"),
+    ("16:30", "傍晚亲喂"),
+    ("20:45", "睡前亲喂"),
 ]
-# Bottle volume seeds `estimate_breastfeeding_milk()`, which then becomes
-# the per-session breastfeeding estimate. Drop to ~30ml so the combined
-# estimate also falls clearly below the reference band — modeling a baby
-# who is taking little per session because supply isn't keeping up
-# (low transfer / quick give-up at breast). This is the upstream cause of
-# the weight slowdown shown in GROWTH_POINTS.
-BOTTLE_FEED = ("16:30", "下午瓶喂母乳", 30.0)
 
 
 def _connect() -> sqlite3.Connection:
@@ -114,9 +109,9 @@ def _seed_profiles(conn: sqlite3.Connection) -> None:
             USER_ID,
             "Demo Mama",
             DELIVERY_DATE,
-            "近 30 天吸乳总量持续低于目标参考区间，平均约为 p15 的 70-75%；含亲喂估算也明显在下沿以下，提示母乳产出与宝宝摄入都偏少。需要尽快制定追奶计划，并结合医生/儿科建议评估是否需要短期补充喂养。",
-            "宝宝近 4-6 周体重增长明显放缓，已从 P25-P50 区间逐步下沉到 P10 附近，伴随每日吸乳量持续低于参考区间，需要重点关注摄入和体重曲线。建议尽快与儿科沟通并启动温和追奶方案。",
-            "母乳产出与含亲喂估算都低于目标参考区间，宝宝体重曲线从 P25-P50 滑落到 P10 附近、连续多周增长放缓。叙事一致：是供给不足导致摄入不够，适合直接生成追奶计划并提示就医评估。",
+            "近 30 天吸乳记录稳定在每日 8 次；加入 2-4 次亲喂估算后，日奶量多数略低于 P15 下沿，提示供给接近但仍未完全达到参考区间。建议制定温和追奶计划，并结合宝宝体重增长继续观察。",
+            "宝宝近 4-6 周体重增长放缓，当前估算摄入略低于参考区间下沿，需要继续关注摄入、尿量和体重曲线。建议与儿科或泌乳顾问沟通，并启动温和追奶方案。",
+            "每日吸奶节律稳定，含亲喂估算后的奶量接近 P15 下沿但仍略低，适合生成追奶计划并继续跟踪宝宝成长。",
             now,
             now,
         ),
@@ -165,171 +160,45 @@ def _seed_growth(conn: sqlite3.Connection) -> None:
 
 
 def _daily_total_for(day: datetime, index: int) -> int:
-    # Yield sits ~150-240ml below p15 — clearly insufficient supply that
-    # matches the baby's slowing weight curve. 30-day average around
-    # 70-75% of p15, never crossing back into the band. Weekend bonus
-    # remains to keep a natural rest-day uptick.
+    # Pumped milk plus estimated nursing should sit just below P15. That keeps
+    # the demo in a realistic "needs gentle catch-up" state without making the
+    # daily output look implausibly far below the reference band.
     postpartum_day = (day.date() - datetime.fromisoformat(DELIVERY_DATE).date()).days + 1
     ref = get_yield_reference_range(postpartum_day) or {"p15": 700.0}
     lower = float(ref["p15"])
-    offsets = [
-        180, 165, 200, 155, 225, 170, 145,
-        195, 175, 150, 215, 160, 140, 185,
-        210, 155, 175, 145, 220, 165, 138,
-        190, 170, 150, 205, 165, 142, 180,
-        215, 158,
-    ]
-    weekend_bonus = 10 if day.weekday() >= 5 else 0
-    total = int(round(lower - offsets[index % len(offsets)] + weekend_bonus))
-    return max(440, min(total, int(lower) - 100))
+    margins = [18, 24, 30, 22, 35, 20, 28]
+    nursing_ml = _nursing_count_for_day(index) * NURSING_ESTIMATE_ML
+    total = int(round(lower - nursing_ml - margins[index % len(margins)]))
+    return max(420, total)
 
 
 def _seed_lactation(conn: sqlite3.Connection) -> None:
-    # Seed only completed historical days. Today's records should come from
-    # actual user/device/task actions, otherwise "今日记录" starts polluted.
-    start = TODAY - timedelta(days=30)
-    today_start = f"{TODAY:%Y-%m-%d} 00:00:00"
-    tomorrow_start = f"{TODAY + timedelta(days=1):%Y-%m-%d} 00:00:00"
+    # Pump records are generated from calendar tasks in
+    # `_sync_calendar_records_to_plan()`, so startup cannot leave record rows
+    # that do not exist in the plan list.
     conn.execute(
         """
         DELETE FROM pumping_log
         WHERE user_id = ?
-          AND pump_start_time < ?
+          AND date(pump_start_time) <= ?
         """,
-        (USER_ID, today_start),
+        (USER_ID, TODAY.date().isoformat()),
     )
-    _clear_today_seeded_lactation_artifacts(conn, today_start=today_start, tomorrow_start=tomorrow_start)
-
-    for index in range(30):
-        day = start + timedelta(days=index)
-        total = _daily_total_for(day, index)
-        allocated = 0
-        for session_index, (time_text, title, ratio) in enumerate(SESSION_TIMES):
-            if session_index == len(SESSION_TIMES) - 1:
-                amount = total - allocated
-            else:
-                amount = int(round(total * ratio))
-                allocated += amount
-            start_at = datetime.strptime(f"{day:%Y-%m-%d} {time_text}", "%Y-%m-%d %H:%M")
-            end_at = start_at + timedelta(minutes=20)
-            conn.execute(
-                """
-                INSERT INTO pumping_log(
-                    user_id, pump_start_time, pump_end_time, pump_milk_volum,
-                    pump_type, pump_milk_duration, pump_source, pump_title, created_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    USER_ID,
-                    start_at.strftime("%Y-%m-%d %H:%M:%S"),
-                    end_at.strftime("%Y-%m-%d %H:%M:%S"),
-                    float(amount),
-                    1,
-                    20,
-                    1,
-                    title,
-                    end_at.strftime("%Y-%m-%d %H:%M:%S"),
-                ),
-            )
+    _clear_future_pumping_records(conn)
 
 
 def _seed_feeding(conn: sqlite3.Connection) -> None:
-    """Seed direct breastfeeding + occasional bottle feed so the chart's
-    含亲喂估算 (`total_milk_estimate`) line has real input to render."""
+    """Reset demo feed rows so history can be rebuilt from the seed rules."""
 
-    # Keep feeding history aligned with lactation history: completed days only.
-    start = TODAY - timedelta(days=30)
-    today_start = f"{TODAY:%Y-%m-%d} 00:00:00"
-    tomorrow_start = f"{TODAY + timedelta(days=1):%Y-%m-%d} 00:00:00"
     conn.execute(
         """
         DELETE FROM feeding_log
         WHERE user_id = ?
-          AND feed_time < ?
+          AND date(feed_time) <= ?
         """,
-        (USER_ID, today_start),
+        (USER_ID, TODAY.date().isoformat()),
     )
-    _clear_today_seeded_feeding_artifacts(conn, today_start=today_start, tomorrow_start=tomorrow_start)
-
-    bottle_time_text, bottle_title, bottle_ml = BOTTLE_FEED
-    for index in range(30):
-        day = start + timedelta(days=index)
-        for time_text, title in BREASTFEEDING_TIMES:
-            feed_at = datetime.strptime(f"{day:%Y-%m-%d} {time_text}", "%Y-%m-%d %H:%M")
-            conn.execute(
-                """
-                INSERT INTO feeding_log(
-                    user_id, infant_id, feed_time, feed_milk_volum, feed_type,
-                    feeding_title, feed_action, created_at
-                )
-                VALUES (?, ?, ?, NULL, ?, ?, 0, ?)
-                """,
-                (
-                    USER_ID,
-                    INFANT_ID,
-                    feed_at.strftime("%Y-%m-%d %H:%M:%S"),
-                    "亲喂",
-                    title,
-                    feed_at.strftime("%Y-%m-%d %H:%M:%S"),
-                ),
-            )
-
-        bottle_at = datetime.strptime(f"{day:%Y-%m-%d} {bottle_time_text}", "%Y-%m-%d %H:%M")
-        conn.execute(
-            """
-            INSERT INTO feeding_log(
-                user_id, infant_id, feed_time, feed_milk_volum, feed_type,
-                feeding_title, feed_action, created_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, 0, ?)
-            """,
-            (
-                USER_ID,
-                INFANT_ID,
-                bottle_at.strftime("%Y-%m-%d %H:%M:%S"),
-                float(bottle_ml),
-                "瓶喂母乳",
-                bottle_title,
-                bottle_at.strftime("%Y-%m-%d %H:%M:%S"),
-            ),
-        )
-
-
-def _clear_today_seeded_lactation_artifacts(conn: sqlite3.Connection, *, today_start: str, tomorrow_start: str) -> None:
-    titles = [title for _, title, _ in SESSION_TIMES]
-    placeholders = ",".join("?" for _ in titles)
-    conn.execute(
-        f"""
-        DELETE FROM pumping_log
-        WHERE user_id = ?
-          AND pump_start_time >= ?
-          AND pump_start_time < ?
-          AND pump_source = 1
-          AND pump_type = 1
-          AND created_at = pump_end_time
-          AND COALESCE(pump_title, '') IN ({placeholders})
-        """,
-        (USER_ID, today_start, tomorrow_start, *titles),
-    )
-
-
-def _clear_today_seeded_feeding_artifacts(conn: sqlite3.Connection, *, today_start: str, tomorrow_start: str) -> None:
-    titles = [title for _, title in BREASTFEEDING_TIMES]
-    titles.append(BOTTLE_FEED[1])
-    placeholders = ",".join("?" for _ in titles)
-    conn.execute(
-        f"""
-        DELETE FROM feeding_log
-        WHERE user_id = ?
-          AND feed_time >= ?
-          AND feed_time < ?
-          AND feed_action = 0
-          AND created_at = feed_time
-          AND COALESCE(feeding_title, '') IN ({placeholders})
-        """,
-        (USER_ID, today_start, tomorrow_start, *titles),
-    )
+    _clear_future_feeding_records(conn)
 
 
 def _clear_demo_transient_calendar_items(conn: sqlite3.Connection) -> None:
@@ -396,84 +265,204 @@ def _clear_future_calendar_items(conn: sqlite3.Connection) -> None:
     )
 
 
-def _sync_past_calendar_completion(conn: sqlite3.Connection) -> None:
-    """Keep demo plan execution consistent with seeded historical records."""
-
-    start_date = (TODAY - timedelta(days=29)).date().isoformat()
+def _clear_future_pumping_records(conn: sqlite3.Connection) -> None:
     today_date = TODAY.date().isoformat()
-    modified_at = TODAY.strftime("%Y-%m-%d %H:%M:%S")
     conn.execute(
         """
-        UPDATE calendar
-        SET finish = 'true',
-            modified_at = ?
+        DELETE FROM pumping_log
+        WHERE user_id = ?
+          AND date(pump_start_time) > ?
+        """,
+        (USER_ID, today_date),
+    )
+
+
+def _clear_future_feeding_records(conn: sqlite3.Connection) -> None:
+    today_date = TODAY.date().isoformat()
+    conn.execute(
+        """
+        DELETE FROM feeding_log
+        WHERE user_id = ?
+          AND date(feed_time) > ?
+        """,
+        (USER_ID, today_date),
+    )
+
+
+def _sync_calendar_records_to_plan(conn: sqlite3.Connection) -> None:
+    """Rebuild pump plans/records and historical nursing rows for the demo."""
+
+    start_date = _calendar_plan_start_date(conn)
+    today_date = TODAY.date().isoformat()
+    conn.execute(
+        """
+        DELETE FROM calendar
         WHERE user_id = ?
           AND date >= ?
-          AND date < ?
-          AND type IN ('吸奶', '亲喂')
-          AND finish = 'false'
+          AND date <= ?
         """,
-        (modified_at, USER_ID, start_date, today_date),
+        (USER_ID, start_date.isoformat(), today_date),
     )
-
-
-def _sync_today_elapsed_calendar_completion(conn: sqlite3.Connection) -> None:
-    """Mark today's elapsed demo tasks complete and create linked records."""
-
-    today_date = TODAY.date().isoformat()
-    cutoff = f"{today_date} {datetime.now():%H:%M:%S}"
-    modified_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     conn.execute(
         """
-        UPDATE calendar
-        SET finish = 'false',
-            modified_at = ?
+        DELETE FROM pumping_log
         WHERE user_id = ?
-          AND date = ?
-          AND type IN ('吸奶', '亲喂')
-          AND COALESCE(start_time, date || ' 00:00:00') >= ?
+          AND date(pump_start_time) <= ?
         """,
-        (modified_at, USER_ID, today_date, cutoff),
+        (USER_ID, today_date),
     )
-    rows = conn.execute(
-        """
-        SELECT item_id
-        FROM calendar
-        WHERE user_id = ?
-          AND date = ?
-          AND type IN ('吸奶', '亲喂')
-          AND COALESCE(start_time, date || ' 00:00:00') < ?
-        ORDER BY start_time ASC, item_id ASC
-        """,
-        (USER_ID, today_date, cutoff),
-    ).fetchall()
-    item_ids = [int(row["item_id"] or 0) for row in rows if int(row["item_id"] or 0) > 0]
-    if not item_ids:
-        return
-    placeholders = ",".join("?" for _ in item_ids)
     conn.execute(
-        f"""
-        UPDATE calendar
-        SET finish = 'true',
-            modified_at = ?
+        """
+        DELETE FROM feeding_log
         WHERE user_id = ?
-          AND item_id IN ({placeholders})
+          AND date(feed_time) <= ?
         """,
-        (modified_at, USER_ID, *item_ids),
+        (USER_ID, today_date),
     )
-    synced_rows = conn.execute(
-        f"""
-        SELECT item_id, user_id, date, task_id, start_time, end_time,
-               content, type, source, is_milk_pump, finish
+
+    current_time = _current_demo_time()
+    day = start_date
+    today = TODAY.date()
+    day_index = 0
+    while day <= today:
+        total = _daily_total_for(datetime.combine(day, datetime.min.time()), day_index)
+        amounts = _session_amounts(total)
+        for task_index, (time_text, title, _) in enumerate(SESSION_TIMES, start=1):
+            start_at = datetime.strptime(f"{day.isoformat()} {time_text}", "%Y-%m-%d %H:%M")
+            end_at = start_at + timedelta(minutes=PLAN_PUMP_DURATION_MINUTES)
+            finish = "true" if day < today or start_at <= current_time else "false"
+            conn.execute(
+                """
+                INSERT INTO calendar(
+                    user_id, plan_id, date, task_id, start_time, end_time,
+                    content, type, source, is_milk_pump, finish, created_at, modified_at
+                )
+                VALUES (?, NULL, ?, ?, ?, ?, ?, '吸奶', '系统生成', 1, ?, ?, ?)
+                """,
+                (
+                    USER_ID,
+                    day.isoformat(),
+                    task_index,
+                    start_at.strftime("%Y-%m-%d %H:%M:%S"),
+                    end_at.strftime("%Y-%m-%d %H:%M:%S"),
+                    title,
+                    finish,
+                    start_at.strftime("%Y-%m-%d %H:%M:%S"),
+                    current_time.strftime("%Y-%m-%d %H:%M:%S"),
+                ),
+            )
+            if finish == "true":
+                conn.execute(
+                    """
+                    INSERT INTO pumping_log(
+                        user_id, pump_start_time, pump_end_time, pump_milk_volum,
+                        pump_type, pump_milk_duration, pump_source, pump_title, created_at
+                    )
+                    VALUES (?, ?, ?, ?, 1, ?, 2, ?, ?)
+                    """,
+                    (
+                        USER_ID,
+                        start_at.strftime("%Y-%m-%d %H:%M:%S"),
+                        end_at.strftime("%Y-%m-%d %H:%M:%S"),
+                        float(amounts[task_index - 1]),
+                        PLAN_PUMP_DURATION_MINUTES,
+                        title,
+                        end_at.strftime("%Y-%m-%d %H:%M:%S"),
+                    ),
+                )
+        if day < today:
+            _seed_nursing_records(conn, day=day, day_index=day_index)
+        day += timedelta(days=1)
+        day_index += 1
+    _seed_breastfeeding_estimate_anchor(conn, start_date=start_date)
+
+
+def _calendar_plan_start_date(conn: sqlite3.Connection):
+    fallback = TODAY.date() - timedelta(days=PLAN_HISTORY_DAYS)
+    row = conn.execute(
+        """
+        SELECT MIN(date) AS min_date
         FROM calendar
         WHERE user_id = ?
-          AND item_id IN ({placeholders})
-        ORDER BY start_time ASC, item_id ASC
+          AND date <= ?
         """,
-        (USER_ID, *item_ids),
-    ).fetchall()
-    for row in synced_rows:
-        data_store._sync_completed_calendar_item_logs(conn, row)
+        (USER_ID, TODAY.date().isoformat()),
+    ).fetchone()
+    raw = str(row["min_date"] or "") if row else ""
+    if not raw:
+        return fallback
+    try:
+        existing = datetime.fromisoformat(raw).date()
+    except ValueError:
+        return fallback
+    return min(existing, fallback)
+
+
+def _current_demo_time() -> datetime:
+    now = datetime.now()
+    if now.date() == TODAY.date():
+        return now
+    return TODAY + timedelta(hours=23, minutes=59, seconds=59)
+
+
+def _session_amounts(total: int) -> list[int]:
+    amounts: list[int] = []
+    allocated = 0
+    for index, (_, _, ratio) in enumerate(SESSION_TIMES):
+        if index == len(SESSION_TIMES) - 1:
+            amount = int(total) - allocated
+        else:
+            amount = int(round(total * ratio))
+            allocated += amount
+        amounts.append(max(amount, 0))
+    return amounts
+
+
+def _nursing_count_for_day(index: int) -> int:
+    return [2, 3, 4, 3, 2, 4, 3][index % 7]
+
+
+def _seed_nursing_records(conn: sqlite3.Connection, *, day, day_index: int) -> None:
+    count = _nursing_count_for_day(day_index)
+    for time_text, title in NURSING_TIMES[:count]:
+        feed_at = datetime.strptime(f"{day.isoformat()} {time_text}", "%Y-%m-%d %H:%M")
+        conn.execute(
+            """
+            INSERT INTO feeding_log(
+                user_id, infant_id, feed_time, feed_milk_volum, feed_type,
+                feeding_title, feed_action, created_at
+            )
+            VALUES (?, ?, ?, ?, '亲喂', ?, 0, ?)
+            """,
+            (
+                USER_ID,
+                INFANT_ID,
+                feed_at.strftime("%Y-%m-%d %H:%M:%S"),
+                18.0,
+                title,
+                feed_at.strftime("%Y-%m-%d %H:%M:%S"),
+            ),
+        )
+
+
+def _seed_breastfeeding_estimate_anchor(conn: sqlite3.Connection, *, start_date) -> None:
+    anchor_at = datetime.combine(start_date - timedelta(days=1), datetime.min.time()) + timedelta(hours=16, minutes=30)
+    conn.execute(
+        """
+        INSERT INTO feeding_log(
+            user_id, infant_id, feed_time, feed_milk_volum, feed_type,
+            feeding_title, feed_action, created_at
+        )
+        VALUES (?, ?, ?, ?, '瓶喂母乳', '亲喂估算参考', 0, ?)
+        """,
+        (
+            USER_ID,
+            INFANT_ID,
+            anchor_at.strftime("%Y-%m-%d %H:%M:%S"),
+            NURSING_ESTIMATE_ML,
+            anchor_at.strftime("%Y-%m-%d %H:%M:%S"),
+        ),
+    )
 
 
 def main() -> None:
@@ -485,8 +474,7 @@ def main() -> None:
         _clear_demo_transient_calendar_items(conn)
         _roll_demo_calendar_to_today(conn)
         _clear_future_calendar_items(conn)
-        _sync_past_calendar_completion(conn)
-        _sync_today_elapsed_calendar_completion(conn)
+        _sync_calendar_records_to_plan(conn)
         conn.commit()
     print(f"Seeded status demo data for {USER_ID} in {data_store.DB_PATH}")
 

@@ -34,6 +34,11 @@ INCREASE_DEFAULT_PLAN_DAYS = 30
 DECREASE_MIN_DAILY_DELTA_ML = 50.0
 DECREASE_DEFAULT_DAILY_DELTA_ML = 80.0
 DECREASE_MAX_PLAN_DAYS = 28
+DAYTIME_START_MINUTE = 6 * 60
+DAYTIME_END_MINUTE = 22 * 60
+DAYTIME_STEP_MINUTES = 15
+PLAN_MIN_PUMP_GAP_MINUTES = 60
+MAX_NIGHT_PUMP_TASKS = 1
 CALENDAR_WRITE_STRATEGY_APPEND = "append"
 CALENDAR_WRITE_STRATEGY_REPLACE_FUTURE_PLAN_TASKS = "replace_future_plan_tasks"
 SUPPORTED_CALENDAR_WRITE_STRATEGIES = {
@@ -1114,6 +1119,8 @@ def _build_plan_schedule_items(
         picked = _fill_evenly_spaced(picked, final_desired)
     if final_desired > 0 and len(picked) > final_desired:
         picked = _trim_to_count(picked, final_desired)
+    if plan_type in {PLAN_TYPE_INCREASE, PLAN_TYPE_DECREASE}:
+        picked = _prefer_daytime_times(picked, desired_count=final_desired or len(picked))
 
     action = "双侧同时吸奶15分钟"
     duration_minutes = INCREASE_REGULAR_PUMP_MINUTES
@@ -1128,8 +1135,9 @@ def _build_plan_schedule_items(
         for time in picked
     ]
     if plan_type == PLAN_TYPE_INCREASE and require_pp and items:
-        items[0] = {
-            **items[0],
+        pp_index = _first_daytime_item_index(items)
+        items[pp_index] = {
+            **items[pp_index],
             "kind": "pp",
             "calendar_title": "吸奶",
             "action": "第1-7天执行吸奶：双侧吸20分钟，休息10分钟，再吸10分钟，休息10分钟，再吸10分钟；第8天后改为常规吸奶15分钟",
@@ -2074,8 +2082,23 @@ def _fill_evenly_spaced(times: list[str], desired_count: int) -> list[str]:
     if len(selected) >= desired:
         return selected[:desired]
 
+    if not selected:
+        selected = _evenly_spaced_daytime_times(desired)
+        if len(selected) >= desired:
+            return selected[:desired]
+
+    for min_gap in (PLAN_MIN_PUMP_GAP_MINUTES, 45, 30, 0):
+        while len(selected) < desired:
+            candidate = _best_daytime_candidate(selected, min_gap_minutes=min_gap)
+            if not candidate:
+                break
+            selected.append(candidate)
+            selected = _unique_sorted_times(selected)
+        if len(selected) >= desired:
+            break
+
     interval = max(60, int(round(1440 / max(desired, 1))))
-    offset = 360 if desired >= 4 else 420
+    offset = DAYTIME_START_MINUTE if desired >= 4 else 420
     occupied = list(selected)
     for index in range(desired * 4):
         if len(selected) >= desired:
@@ -2100,6 +2123,107 @@ def _fill_evenly_spaced(times: list[str], desired_count: int) -> list[str]:
                 selected.append(candidate)
 
     return _unique_sorted_times(selected)[:desired]
+
+
+def _prefer_daytime_times(times: list[str], *, desired_count: int) -> list[str]:
+    desired = max(to_int(desired_count, 0), 0)
+    selected = _unique_sorted_times(times)
+    if desired <= 0:
+        desired = len(selected)
+    if desired <= 0:
+        return []
+    if len(selected) > desired:
+        selected = _trim_to_count(selected, desired)
+    if len(selected) < desired:
+        selected = _fill_evenly_spaced(selected, desired)
+    selected = _replace_excess_night_times(
+        selected,
+        max_night_count=MAX_NIGHT_PUMP_TASKS,
+        min_gap_minutes=PLAN_MIN_PUMP_GAP_MINUTES,
+    )
+    if len(selected) < desired:
+        selected = _fill_evenly_spaced(selected, desired)
+    if len(selected) > desired:
+        selected = _trim_to_count(selected, desired)
+    return _unique_sorted_times(selected)[:desired]
+
+
+def _replace_excess_night_times(
+    times: list[str],
+    *,
+    max_night_count: int,
+    min_gap_minutes: int,
+) -> list[str]:
+    selected = _unique_sorted_times(times)
+    night_times = [time for time in selected if _is_night_time_text(time)]
+    excess_count = max(len(night_times) - max(max_night_count, 0), 0)
+    if excess_count <= 0:
+        return selected
+
+    keep_night = set(sorted(night_times, key=_night_keep_score)[: max(max_night_count, 0)])
+    for time in [item for item in night_times if item not in keep_night]:
+        without_time = [item for item in selected if item != time]
+        replacement = ""
+        for gap in (min_gap_minutes, 45, 30, 0):
+            replacement = _best_daytime_candidate(without_time, min_gap_minutes=gap)
+            if replacement:
+                break
+        if replacement:
+            selected = _unique_sorted_times([*without_time, replacement])
+    return selected
+
+
+def _evenly_spaced_daytime_times(desired_count: int) -> list[str]:
+    desired = max(desired_count, 0)
+    if desired <= 0:
+        return []
+    if desired == 1:
+        return [_minute_to_hhmm((DAYTIME_START_MINUTE + DAYTIME_END_MINUTE) // 2)]
+
+    span = DAYTIME_END_MINUTE - DAYTIME_START_MINUTE - DAYTIME_STEP_MINUTES
+    times: list[str] = []
+    for index in range(desired):
+        raw_minute = DAYTIME_START_MINUTE + round((span * index) / max(desired - 1, 1))
+        minute = _round_to_step(raw_minute, DAYTIME_STEP_MINUTES)
+        minute = min(max(minute, DAYTIME_START_MINUTE), DAYTIME_END_MINUTE - DAYTIME_STEP_MINUTES)
+        times.append(_minute_to_hhmm(minute))
+    return _unique_sorted_times(times)
+
+
+def _best_daytime_candidate(occupied_times: list[str], *, min_gap_minutes: int) -> str:
+    occupied_minutes = [
+        minute
+        for minute in (_minute_of_day(time) for time in _unique_sorted_times(occupied_times))
+        if minute is not None
+    ]
+    occupied = set(_unique_sorted_times(occupied_times))
+    midpoint = (DAYTIME_START_MINUTE + DAYTIME_END_MINUTE) // 2
+    candidates: list[tuple[int, int, int, str]] = []
+    for minute in range(DAYTIME_START_MINUTE, DAYTIME_END_MINUTE, DAYTIME_STEP_MINUTES):
+        candidate = _minute_to_hhmm(minute)
+        if candidate in occupied:
+            continue
+        nearest_gap = (
+            min(_minutes_distance(minute, occupied_minute) for occupied_minute in occupied_minutes)
+            if occupied_minutes
+            else DAYTIME_END_MINUTE - DAYTIME_START_MINUTE
+        )
+        if nearest_gap < min_gap_minutes:
+            continue
+        center_score = -abs(minute - midpoint)
+        candidates.append((nearest_gap, center_score, -minute, candidate))
+    if not candidates:
+        return ""
+    candidates.sort(reverse=True)
+    return candidates[0][3]
+
+
+def _first_daytime_item_index(items: list[dict[str, Any]]) -> int:
+    for index, item in enumerate(items):
+        minute = _minute_of_day(norm_text(item.get("time") or item.get("time_point")))
+        if minute is not None and not _is_night_time(minute):
+            return index
+    return 0
 
 
 def _trim_to_count(times: list[str], desired_count: int) -> list[str]:
@@ -2165,7 +2289,26 @@ def _select_reduction_index(items: list[dict[str, Any]]) -> int | None:
 
 
 def _is_night_time(minute_of_day: int) -> bool:
-    return minute_of_day < 360 or minute_of_day >= 1320
+    return minute_of_day < DAYTIME_START_MINUTE or minute_of_day >= DAYTIME_END_MINUTE
+
+
+def _is_night_time_text(time_text: str) -> bool:
+    minute = _minute_of_day(time_text)
+    return minute is not None and _is_night_time(minute)
+
+
+def _night_keep_score(time_text: str) -> tuple[int, int]:
+    minute = _minute_of_day(time_text)
+    if minute is None:
+        return (1440, 1)
+    if minute >= DAYTIME_END_MINUTE:
+        return (minute - DAYTIME_END_MINUTE, 0)
+    return (DAYTIME_START_MINUTE - minute, 1)
+
+
+def _round_to_step(minute: int, step_minutes: int) -> int:
+    step = max(step_minutes, 1)
+    return int(round(minute / step) * step)
 
 
 def _plan_rule_notes(plan_type: str, rules: dict[str, Any]) -> list[str]:
