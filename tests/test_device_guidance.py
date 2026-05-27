@@ -1,12 +1,24 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
+from momcozy_agent.agents import MAX_TOOL_IMAGE_BYTES
 from momcozy_agent.server import STATIC_CONTENT_TYPES
 from momcozy_agent.tool_handlers.device import search_device_manual
 
 
 class DeviceGuidanceTests(unittest.TestCase):
+    def test_air1_step_images_stay_within_model_injection_budget(self) -> None:
+        image_dir = Path(__file__).resolve().parents[1] / "skills" / "device-guidance" / "assets" / "air1" / "images"
+        oversized = [
+            f"{path.name}={path.stat().st_size}"
+            for path in sorted(image_dir.glob("*.png"))
+            if path.stat().st_size > MAX_TOOL_IMAGE_BYTES
+        ]
+
+        self.assertEqual(oversized, [])
+
     def test_air1_unboxing_returns_highlights_and_quick_start_resources(self) -> None:
         result = search_device_manual(
             {"model": "Air1", "query": "我刚收到吸奶器，想开箱", "topic": "unboxing"},
@@ -43,10 +55,41 @@ class DeviceGuidanceTests(unittest.TestCase):
         self.assertIn("禁止直接展示 url 或 /skill-assets/...", result["usage_guidance"])
         self.assertIn("不要直接开始 manual 第一步", result["usage_guidance"])
         self.assertIn("不要从 guide.parts 直接跳到 guide.controls", result["usage_guidance"])
+        self.assertIn("markdown_image", result["usage_guidance"])
+        self.assertIn("每个新视觉步骤首次展示当前步骤图", result["usage_guidance"])
+        self.assertIn("分步指导以 manual 的 guide.* 模块为一轮主步骤", result["usage_guidance"])
+        self.assertIn("不要把每个 bullet 都拆成一轮", result["usage_guidance"])
+
+        relevant_images = result["relevant_images"]
+        self.assertGreaterEqual(len(relevant_images), 1)
+        self.assertEqual(relevant_images[0]["module"], "guide.parts")
+        self.assertEqual(relevant_images[0]["alt"], "Air1 核心部件")
+        self.assertEqual(
+            relevant_images[0]["url"],
+            "/skill-assets/device-guidance/air1/images/air1_guide_parts_components.png",
+        )
+        self.assertEqual(
+            relevant_images[0]["markdown_image"],
+            "![Air1 核心部件](/skill-assets/device-guidance/air1/images/air1_guide_parts_components.png)",
+        )
+        self.assertIn("编号11=Quick Start Guide x1", relevant_images[0]["image_text"])
 
         manual_text = result["manual"]["content"]
+        self.assertIn("每个新视觉步骤首次展示当前步骤对应图片", manual_text)
+        self.assertIn("对话步进粒度以 `guide.*` 模块为一轮主步骤", manual_text)
         self.assertIn("用户回复“好了 / 搞定 / 完成了”后，仍然停留在 `guide.parts`", manual_text)
+        self.assertIn("`guide.disassembly` 作为一个拆卸步骤，不拆成多轮", manual_text)
+        self.assertIn("让用户全部完成后回复“拆好了”", manual_text)
         self.assertIn("主机/整机、充电舱、磁吸充电线", manual_text)
+
+    def test_air1_controls_image_has_structured_numbered_labels(self) -> None:
+        result = search_device_manual(
+            {"model": "Air1", "query": "认识一下主机按钮，编号3是什么", "topic": "unboxing"},
+            {"user_message": "编号3是什么"},
+        )
+
+        controls = next(image for image in result["relevant_images"] if image["module"] == "guide.controls")
+        self.assertIn("编号3=Increase Suction Level / 增加吸力键", controls["image_text"])
 
     def test_air1_quick_start_resources_are_returned_when_manual_already_loaded(self) -> None:
         result = search_device_manual(
@@ -61,6 +104,50 @@ class DeviceGuidanceTests(unittest.TestCase):
         self.assertIsNone(result["manual"])
         self.assertEqual(result["loaded_reference"], "device-guidance/Air1/references/air1/manual.md")
         self.assertEqual([resource["kind"] for resource in result["quick_start_resources"]], ["pdf", "video"])
+
+    def test_air1_flange_recommendation_uses_measured_nipple_size(self) -> None:
+        result = search_device_manual(
+            {"model": "Air1", "query": "法兰尺寸", "topic": "flange", "measured_nipple_mm": 14},
+            {
+                "user_message": "14mm",
+                "_loaded_references": ["device-guidance/Air1/references/air1/manual.md 已在当前会话中加载过"],
+            },
+        )
+
+        recommendation = result["flange_recommendation"]
+        self.assertEqual(recommendation["status"], "recommended")
+        self.assertEqual(recommendation["measured_nipple_mm"], 14)
+        self.assertEqual(recommendation["matched_range"], "13-15mm")
+        self.assertEqual(recommendation["recommended_flange_mm"], 17)
+        self.assertEqual(recommendation["recommended_insert_mm"], 17)
+        self.assertTrue(recommendation["included_with_air1"])
+        self.assertIn("Air1 随机附带 17mm", recommendation["message"])
+        self.assertIn("flange_recommendation", result["usage_guidance"])
+        self.assertIn("不要再让用户自己对照图片", result["usage_guidance"])
+
+    def test_air1_flange_recommendation_parses_measurement_from_user_message(self) -> None:
+        result = search_device_manual(
+            {"model": "Air1", "query": "14 毫米", "topic": "flange"},
+            {"user_message": "量到 14 毫米"},
+        )
+
+        recommendation = result["flange_recommendation"]
+        self.assertEqual(recommendation["measured_nipple_mm"], 14)
+        self.assertEqual(recommendation["recommended_flange_mm"], 17)
+
+    def test_air1_flange_recommendation_handles_base_flange(self) -> None:
+        result = search_device_manual(
+            {"model": "Air1", "query": "22mm", "topic": "flange"},
+            {"user_message": "22mm"},
+        )
+
+        recommendation = result["flange_recommendation"]
+        self.assertEqual(recommendation["matched_range"], "20-23mm")
+        self.assertEqual(recommendation["recommended_flange_mm"], 24)
+        self.assertIsNone(recommendation["recommended_insert_mm"])
+        self.assertEqual(recommendation["accessory_type"], "base_flange")
+        self.assertTrue(recommendation["included_with_air1"])
+        self.assertIn("不需要额外法兰硅胶塞", recommendation["message"])
 
     def test_static_content_types_include_quick_start_media(self) -> None:
         self.assertEqual(STATIC_CONTENT_TYPES[".pdf"], "application/pdf")

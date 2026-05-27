@@ -63,6 +63,7 @@ DEFAULT_HOSPITAL_BAG_CART_GROUPS: list[dict[str, Any]] = [
     },
 ]
 MOMCOZY_PUMP_OFFICIAL_COLLECTION_URL = "https://momcozy.com/collections/wearable-breast-pump"
+MOMCOZY_PUMP_OFFICIAL_OVERVIEW_URL = "https://momcozy.com/collections/electric-breast-pump"
 MOMCOZY_PUMP_SUPPORT_GUIDE_URL = "https://support.momcozy.com/article/56837165211801"
 HOSPITAL_BAG_CART_USD_TO_CNY_RATE = 6.8
 MOMCOZY_PUMP_IMAGE_URLS = {
@@ -72,6 +73,7 @@ MOMCOZY_PUMP_IMAGE_URLS = {
     "pump-m5-smart": "https://momcozy.com/cdn/shop/files/1_b8f691a7-6acf-44dc-acbc-ed6bf82e8a9d.jpg?v=1760428066",
     "pump-m6": "https://momcozy.com/cdn/shop/files/01_56489eac-5396-4685-aacc-3c6c14c39930.jpg?v=1775025039",
     "pump-v1-pro": "https://momcozy.com/cdn/shop/files/lQDPJws-Zh7cFX_NBdrNBLCwLR71U5WToVIG-TXf9_H4AA_1200_1498.jpg?v=1755159282",
+    "pump-v2-pro": "https://momcozy.com/cdn/shop/files/v2pro-4.png?v=1779353933",
     "pump-m9": "https://momcozy.com/cdn/shop/files/MomcozyMoblieFlow_BreastPump_7.jpg?v=1776163451",
     "pump-w1": "https://momcozy.com/cdn/shop/files/1._1_app2.jpg?v=1777030861",
     "pump-air-1": "https://momcozy.com/cdn/shop/files/MomcozyAir1Ultra-slimBreastPump_1.png?v=1740971384",
@@ -102,16 +104,16 @@ MOMCOZY_PUMP_PRODUCT_CATALOG: list[dict[str, Any]] = [
         "model": "S9 Pro",
         "name": "Momcozy S9 Pro 便携式吸奶器",
         "price_usd": 64.99,
-        "sale_price_usd": 51.99,
+        "sale_price_usd": 58.49,
         "tier": "entry",
         "use_cases": ["budget", "hospital_backup", "daily_home"],
         "preferences": ["budget", "simple", "balanced"],
         "best_for": "预算优先、想先备一台简单可靠的入门款。",
-        "features": ["长续航", "基础易用", "低噪"],
+        "features": ["长续航", "LED 显示", "低噪"],
         "suction": "最高 -285 mmHg",
-        "battery": "约 5-6 次",
+        "battery": "约 8-9 次",
         "weight": "250 g",
-        "noise": "≤50 dB",
+        "noise": "≤45 dB",
         "app": False,
         "supports_single_unit": True,
     },
@@ -120,7 +122,7 @@ MOMCOZY_PUMP_PRODUCT_CATALOG: list[dict[str, Any]] = [
         "model": "S12 Pro Quick",
         "name": "Momcozy S12 Pro Quick 可穿戴吸奶器",
         "price_usd": 74.99,
-        "sale_price_usd": 59.99,
+        "sale_price_usd": 67.49,
         "tier": "entry_plus",
         "use_cases": ["budget", "hospital_backup", "daily_home", "comfort"],
         "preferences": ["budget", "comfort", "balanced"],
@@ -138,7 +140,6 @@ MOMCOZY_PUMP_PRODUCT_CATALOG: list[dict[str, Any]] = [
         "model": "M5 Smart",
         "name": "Momcozy M5 Smart 可穿戴吸奶器",
         "price_usd": 119.99,
-        "sale_price_usd": 95.99,
         "tier": "mid",
         "use_cases": ["daily_home", "portable", "work_pumping"],
         "preferences": ["portable", "app", "balanced"],
@@ -156,7 +157,7 @@ MOMCOZY_PUMP_PRODUCT_CATALOG: list[dict[str, Any]] = [
         "model": "M6",
         "name": "Momcozy M6 Mobile Style 轻薄吸奶器",
         "price_usd": 129.99,
-        "sale_price_usd": 103.99,
+        "sale_price_usd": 116.99,
         "tier": "mid_plus",
         "use_cases": ["daily_home", "comfort", "balanced"],
         "preferences": ["comfort", "balanced", "performance"],
@@ -174,7 +175,7 @@ MOMCOZY_PUMP_PRODUCT_CATALOG: list[dict[str, Any]] = [
         "model": "V1 Pro",
         "name": "Momcozy V1 Pro 医院级可穿戴吸奶器",
         "price_usd": 199.99,
-        "sale_price_usd": 169.99,
+        "sale_price_usd": 179.99,
         "tier": "pro",
         "use_cases": ["daily_home", "performance", "high_output"],
         "preferences": ["performance", "battery", "balanced"],
@@ -188,11 +189,29 @@ MOMCOZY_PUMP_PRODUCT_CATALOG: list[dict[str, Any]] = [
         "supports_single_unit": False,
     },
     {
+        "sku_id": "pump-v2-pro",
+        "model": "V2 Pro",
+        "name": "Momcozy V2 Pro 医院级可穿戴吸奶器",
+        "price_usd": 199.99,
+        "sale_price_usd": 169.99,
+        "tier": "pro",
+        "use_cases": ["daily_home", "performance", "high_output", "portable"],
+        "preferences": ["performance", "portable", "balanced"],
+        "best_for": "想要医院级吸力，同时更在意轻量电机和外出便携。",
+        "features": ["医院级吸力", "超轻电机", "低噪便携"],
+        "suction": "最高 -288 mmHg",
+        "battery": "约 4-6 次",
+        "weight": "127 g 电机",
+        "noise": "≤48 dB",
+        "app": False,
+        "supports_single_unit": False,
+    },
+    {
         "sku_id": "pump-m9",
         "model": "M9",
         "name": "Momcozy M9 Mobile Flow 智能吸奶器",
         "price_usd": 159.99,
-        "sale_price_usd": 127.99,
+        "sale_price_usd": 143.99,
         "tier": "pro_app",
         "use_cases": ["work_pumping", "portable", "performance", "high_output"],
         "preferences": ["app", "performance", "portable"],
@@ -210,7 +229,6 @@ MOMCOZY_PUMP_PRODUCT_CATALOG: list[dict[str, Any]] = [
         "model": "W1",
         "name": "Momcozy W1 暖感按摩可穿戴吸奶器",
         "price_usd": 329.99,
-        "sale_price_usd": 280.49,
         "tier": "premium_comfort",
         "use_cases": ["comfort", "daily_home"],
         "preferences": ["comfort", "premium"],
@@ -228,11 +246,10 @@ MOMCOZY_PUMP_PRODUCT_CATALOG: list[dict[str, Any]] = [
         "model": "Air 1",
         "name": "Momcozy Air 1 超薄吸奶器",
         "price_usd": 369.99,
-        "sale_price_usd": 295.99,
         "tier": "premium_portable",
         "use_cases": ["work_pumping", "portable", "discreet"],
         "preferences": ["portable", "app", "premium"],
-        "best_for": "预算充足，最在意职场/外出场景里的轻薄隐蔽。",
+        "best_for": "预算充足，最在意职场/外出场景里的轻薄隐蔽；这是高价轻薄升级款，不是降预算选择。",
         "features": ["超薄", "充电盒", "App 控制"],
         "suction": "最高 -285 mmHg",
         "battery": "约 6-7 次，配充电盒约 15 次",
@@ -682,6 +699,7 @@ def recommend_hospital_bag_pump(args: dict[str, Any], inputs: RuntimeInputs) -> 
     use_case = str(args.get("use_case") or "unknown").strip() or "unknown"
     preference = str(args.get("preference") or "balanced").strip() or "balanced"
     feeding_intention = str(args.get("feeding_intention") or "unknown").strip() or "unknown"
+    requested_model = str(args.get("requested_model") or "").strip()
     target_budget_usd = _target_budget(args.get("target_budget_usd"))
     must_have_app = args.get("must_have_app")
     need_single_unit = args.get("need_single_unit")
@@ -692,6 +710,7 @@ def recommend_hospital_bag_pump(args: dict[str, Any], inputs: RuntimeInputs) -> 
         must_have_app=must_have_app if isinstance(must_have_app, bool) else None,
         need_single_unit=need_single_unit if isinstance(need_single_unit, bool) else None,
     )
+    requested_product = _momcozy_pump_product(requested_model) if requested_model else None
     if not ranked:
         message = "我先确认一下：你更在意预算、通勤隐蔽，还是吸奶效率？这样我再帮你选型号会更准。"
         return {
@@ -704,8 +723,8 @@ def recommend_hospital_bag_pump(args: dict[str, Any], inputs: RuntimeInputs) -> 
             "cart_sync_suggestion": None,
         }
 
-    recommended = ranked[0]
-    alternatives = ranked[1:3]
+    recommended = requested_product or ranked[0]
+    alternatives = [product for product in ranked if product["sku_id"] != recommended["sku_id"]][:2]
     product = _public_pump_product(recommended)
     summary = _pump_recommendation_message(
         recommended,
@@ -714,21 +733,28 @@ def recommend_hospital_bag_pump(args: dict[str, Any], inputs: RuntimeInputs) -> 
         preference=preference,
         feeding_intention=feeding_intention,
         target_budget_usd=target_budget_usd,
+        requested_model=requested_model if requested_product else None,
     )
     return {
         "tool_name": "hospital_bag_pump_recommend",
         "status": "pump_recommended",
+        "recommendation_mode": "requested_model_review" if requested_product else "ranked_recommendation",
         "summary": summary,
         "message": summary,
         "recommended_product": product,
         "alternatives": [_public_pump_product(product) for product in alternatives],
+        "price_guidance": _pump_price_guidance(recommended, alternatives),
         "cart_sync_suggestion": {
             "tool_name": "hospital_bag_cart_update",
             "action": "replace_pump_model",
             "product_sku_id": recommended["sku_id"],
             "item_ids": [HOSPITAL_BAG_CART_PUMP_ITEM_ID],
         },
-        "source_urls": [MOMCOZY_PUMP_OFFICIAL_COLLECTION_URL, MOMCOZY_PUMP_SUPPORT_GUIDE_URL],
+        "source_urls": [
+            MOMCOZY_PUMP_OFFICIAL_OVERVIEW_URL,
+            MOMCOZY_PUMP_OFFICIAL_COLLECTION_URL,
+            MOMCOZY_PUMP_SUPPORT_GUIDE_URL,
+        ],
     }
 
 
@@ -967,6 +993,7 @@ def _pump_recommendation_message(
     preference: str,
     feeding_intention: str,
     target_budget_usd: float | None,
+    requested_model: str | None = None,
 ) -> str:
     reason_parts = [str(product.get("best_for") or "").strip()]
     feature_text = "、".join(str(feature) for feature in product.get("features", [])[:3])
@@ -991,7 +1018,49 @@ def _pump_recommendation_message(
     if alternatives:
         names = "、".join(f"{item['model']}（约 {_pump_price_cny_label(item)}）" for item in alternatives)
         alternative_text = f"备选可以看 {names}。"
+
+    if requested_model:
+        prefix = f"「{product['model']}」可以考虑，我先按它的官方价格和适用场景评估。"
+        if product["sku_id"] == "pump-air-1":
+            prefix = "「Air 1」可以考虑，但它是高价轻薄/隐蔽升级款，不是降低预算选择。"
+        return f"{prefix}\n\n{'；'.join(part for part in reason_parts if part)}。{alternative_text}"
+
     return f"{prefix}\n\n我建议先选「{product['model']}」。{'；'.join(part for part in reason_parts if part)}。{alternative_text}"
+
+
+def _pump_price_guidance(product: dict[str, Any], alternatives: list[dict[str, Any]]) -> str:
+    products = [product, *alternatives]
+    if any(str(item.get("sku_id") or "") == "pump-air-1" for item in products):
+        air = _momcozy_pump_product("pump-air-1") or product
+        return (
+            f"Air 1 是高价轻薄款，官方价折合约 {_pump_price_cny_label(air)}；"
+            "不能把 Air 1 描述为降低预算或省钱选择。"
+            "若用户要省预算，应优先说明 S9 Pro、S12 Pro Quick 等更低价型号。"
+        )
+    return "价格比较必须按 official_price_usd / sale_price_usd 和 price_label / sale_price_label 数值说明；不要把更高价型号描述为省预算。"
+
+
+def _pump_price_position(product: dict[str, Any]) -> str:
+    sku_id = str(product.get("sku_id") or "")
+    price = float(product.get("price_usd") or 0)
+    if sku_id == "pump-air-1":
+        return "premium_highest"
+    if price >= 300:
+        return "premium_high"
+    if price >= 150:
+        return "upper_mid"
+    if price >= 100:
+        return "mid"
+    return "budget"
+
+
+def _pump_budget_note(product: dict[str, Any]) -> str:
+    sku_id = str(product.get("sku_id") or "")
+    if sku_id == "pump-air-1":
+        return "Air 1 是高价轻薄/隐蔽升级选择，不适合描述为降低预算；预算优先时应看 S9 Pro 或 S12 Pro Quick。"
+    if sku_id in {"pump-s9-pro", "pump-s12-pro-quick"}:
+        return "预算优先时更适合优先考虑。"
+    return "按功能、舒适度和预算综合比较。"
 
 
 def _public_pump_product(product: dict[str, Any]) -> dict[str, Any]:
@@ -1008,6 +1077,8 @@ def _public_pump_product(product: dict[str, Any]) -> dict[str, Any]:
         "price_label": _pump_price_cny_label(product),
         "sale_price_label": _pump_sale_price_cny_label(product),
         "exchange_rate_usd_cny": HOSPITAL_BAG_CART_USD_TO_CNY_RATE,
+        "price_position": _pump_price_position(product),
+        "budget_note": _pump_budget_note(product),
         "best_for": product.get("best_for"),
         "features": list(product.get("features") or []),
         "suction": product.get("suction"),

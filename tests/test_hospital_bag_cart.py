@@ -180,8 +180,35 @@ class HospitalBagCartToolTests(unittest.TestCase):
         self.assertTrue(product["price_label"].startswith("¥"))
         self.assertIn("official_price_usd", product)
         self.assertEqual(product["exchange_rate_usd_cny"], 6.8)
+        self.assertIn("price_position", product)
+        self.assertIn("budget_note", product)
         self.assertTrue(product["image_url"].startswith("https://momcozy.com/cdn/shop/files/"))
+        self.assertIn("price_guidance", result)
         self.assertEqual(result["cart_sync_suggestion"]["action"], "replace_pump_model")
+
+    def test_air1_recommendation_marks_premium_not_budget_saving(self) -> None:
+        result = recommend_hospital_bag_pump(
+            {
+                "requested_model": "Air1",
+                "use_case": "portable",
+                "preference": "premium",
+                "feeding_intention": "breastfeeding",
+                "target_budget_usd": None,
+                "must_have_app": True,
+                "need_single_unit": False,
+                "assistant_message": "",
+            },
+            {"user_message": "Air1呢"},
+        )
+
+        product = result["recommended_product"]
+        self.assertEqual(result["recommendation_mode"], "requested_model_review")
+        self.assertEqual(product["sku_id"], "pump-air-1")
+        self.assertEqual(product["price_position"], "premium_highest")
+        self.assertEqual(product["price_label"], "¥2515.93")
+        self.assertIn("不适合描述为降低预算", product["budget_note"])
+        self.assertIn("不是降低预算选择", result["summary"])
+        self.assertIn("不能把 Air 1 描述为降低预算", result["price_guidance"])
 
     def test_replace_pump_model_updates_cart_with_official_price_converted_to_cny(self) -> None:
         result = update_hospital_bag_cart(
@@ -215,6 +242,34 @@ class HospitalBagCartToolTests(unittest.TestCase):
         self.assertTrue(pump["image_url"].startswith("https://momcozy.com/cdn/shop/files/"))
         self.assertFalse(result["cart_update"]["totals"]["mixed_currency"])
         self.assertEqual(result["cart_update"]["totals"]["currency_totals"][0]["currency"], "CNY")
+
+    def test_replace_pump_model_accepts_v2_pro_catalog_entry(self) -> None:
+        result = update_hospital_bag_cart(
+            {
+                "action": "replace_pump_model",
+                "item_ids": [],
+                "product_sku_id": "pump-v2-pro",
+                "quantity_updates": [],
+                "target_budget": None,
+                "budget_mode": "none",
+                "preference": "balanced",
+                "preserve_item_ids": [],
+                "allow_remove_pump": False,
+                "assistant_message": "",
+            },
+            {
+                "user_message": "换成V2 Pro",
+                "hospital_bag_cart": {"groups": DEFAULT_HOSPITAL_BAG_CART_GROUPS},
+            },
+        )
+
+        items = [item for group in result["cart_update"]["groups"] for item in group["items"]]
+        pump = next(item for item in items if item["id"] == "pump-v2-pro")
+        self.assertEqual(pump["model"], "V2 Pro")
+        self.assertEqual(pump["official_price_usd"], 199.99)
+        self.assertEqual(pump["sale_price_usd"], 169.99)
+        self.assertIn("医院级吸力", pump["desc"])
+        self.assertTrue(pump["image_url"].startswith("https://momcozy.com/cdn/shop/files/"))
 
     def test_budget_optimizer_protects_concrete_pump_model(self) -> None:
         replaced = update_hospital_bag_cart(

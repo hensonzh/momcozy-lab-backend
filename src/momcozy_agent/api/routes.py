@@ -43,6 +43,7 @@ from ..services.pump_workstate import (
     record_pump_workstate_update,
     validate_pump_workstate_payload,
 )
+from ..tool_handlers.cards import update_hospital_bag_cart as execute_hospital_bag_cart_update
 
 
 router = APIRouter()
@@ -960,6 +961,30 @@ async def record_client_event(request: Request) -> dict[str, Any]:
     except ValueError:
         data = {}
     return data if isinstance(data, dict) else {"status": "recorded", "conversation_id": thread_id}
+
+
+@router.post("/api/hospital-bag/cart-update")
+async def update_hospital_bag_cart_direct(request: Request) -> dict[str, Any]:
+    verify_api_key(request)
+    body = await _json_body_or_error(request)
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="invalid request body")
+
+    raw_args = body.get("args")
+    args = raw_args if isinstance(raw_args, dict) else body
+    raw_cart = body.get("hospital_bag_cart")
+    current_cart = raw_cart if isinstance(raw_cart, dict) else {"groups": body.get("groups")}
+    user_message = str(body.get("user_message") or body.get("userMessage") or "").strip()
+    locale = str(body.get("locale") or "zh-CN").strip() or "zh-CN"
+    timezone_name = str(body.get("timezone") or "Asia/Shanghai").strip() or "Asia/Shanghai"
+    inputs = {
+        "user_message": user_message,
+        "locale": locale,
+        "timezone": timezone_name,
+        "message_sent_at": datetime.now(timezone.utc).isoformat(),
+        "hospital_bag_cart": current_cart,
+    }
+    return execute_hospital_bag_cart_update(dict(args), inputs)
 
 
 async def _json_body_or_error(request: Request, *, basic: bool = False, pump: bool = False) -> Any:

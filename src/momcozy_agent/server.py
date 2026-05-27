@@ -12,8 +12,8 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from .agents import run_agent_loop, run_error_event
-from .config import load_project_env
+from .agents import QUICK_REPLIES_TOOL_NAME, quick_replies_event, run_agent_loop, run_error_event
+from .config import get_openai_client_options, load_project_env
 from .contexts import DEFAULT_LOCALE, DEFAULT_TIMEZONE, ContextState
 from .services.paths import ensure_runtime_dirs
 from .types import SkillId
@@ -25,6 +25,11 @@ HOST = "127.0.0.1"
 PORT = 8768
 MAX_IMAGE_ATTACHMENTS = 4
 STREAM_TIMING_ENV = "MOMCOZY_DEBUG_STREAM_TIMING"
+DEFAULT_QUICK_REPLIES: tuple[dict[str, str], ...] = (
+    {"text": "继续这个问题", "send_text": "继续这个问题"},
+    {"text": "换个说法", "send_text": "请换个说法再解释一遍"},
+    {"text": "我想问别的", "send_text": "我想问另一个问题"},
+)
 STATIC_CONTENT_TYPES = {
     ".css": "text/css; charset=utf-8",
     ".gif": "image/gif",
@@ -72,7 +77,7 @@ def make_runtime() -> ChatRuntime:
     except ImportError as exc:
         raise RuntimeError("The OpenAI SDK is not installed. Install it with: python3 -m pip install openai") from exc
 
-    return ChatRuntime(OpenAI())
+    return ChatRuntime(OpenAI(**get_openai_client_options()))
 
 
 def create_app(runtime: ChatRuntime | None = None, *, include_websocket_bridge: bool = False) -> Any:
@@ -248,6 +253,7 @@ async def stream_ag_ui_events(
     def worker() -> None:
         pending_run_finished: dict[str, Any] | None = None
         pending_assistant_followups: list[str] = []
+        pending_quick_replies: list[dict[str, str]] | None = None
         text_started = False
         streamed_text_parts: list[str] = []
 
@@ -256,10 +262,16 @@ async def stream_ag_ui_events(
             push(event)
 
         def send_ag_ui_event(event: dict[str, Any]) -> None:
-            nonlocal pending_run_finished
+            nonlocal pending_run_finished, pending_quick_replies
             if event.get("type") == "RUN_FINISHED":
                 log_timing("ag_ui:RUN_FINISHED buffered", _ag_ui_timing_metadata(event))
                 pending_run_finished = event
+                return
+            quick_replies = _quick_replies_from_tool_result_event(event)
+            if quick_replies is not None:
+                pending_quick_replies = quick_replies
+            if _is_quick_replies_tool_event(event):
+                log_timing("ag_ui:quick_replies_tool_event hidden", _ag_ui_timing_metadata(event))
                 return
             followup = _assistant_followup_from_tool_result_event(event)
             if followup and followup not in pending_assistant_followups:
@@ -313,6 +325,7 @@ async def stream_ag_ui_events(
             if text_started:
                 send_event({"type": "TEXT_MESSAGE_END", "message_id": assistant_message_id})
             if pending_run_finished:
+                send_event(quick_replies_event(assistant_message_id, pending_quick_replies or _default_quick_replies()))
                 send_event(pending_run_finished)
         except Exception as exc:
             send_event(run_error_event(str(exc), type(exc).__name__, thread_id=str(thread_id), run_id=str(run_id)))
@@ -491,6 +504,46 @@ def _assistant_followup_from_tool_result_event(event: dict[str, Any]) -> str | N
     return None
 
 
+def _is_quick_replies_tool_event(event: dict[str, Any]) -> bool:
+    if str(event.get("tool_call_name") or "") == QUICK_REPLIES_TOOL_NAME:
+        return True
+    if event.get("type") == "CUSTOM":
+        value = event.get("value")
+        if isinstance(value, dict):
+            metadata = value.get("metadata")
+            return isinstance(metadata, dict) and str(metadata.get("tool_name") or "") == QUICK_REPLIES_TOOL_NAME
+    return False
+
+
+def _quick_replies_from_tool_result_event(event: dict[str, Any]) -> list[dict[str, str]] | None:
+    if event.get("type") != "TOOL_CALL_RESULT" or not _is_quick_replies_tool_event(event):
+        return None
+    content = event.get("content")
+    if not isinstance(content, str):
+        return None
+    try:
+        payload = json.loads(content)
+    except json.JSONDecodeError:
+        return None
+    replies = payload.get("quick_replies")
+    if not isinstance(replies, list) or len(replies) != 3:
+        return None
+    normalized: list[dict[str, str]] = []
+    for item in replies:
+        if not isinstance(item, dict):
+            return None
+        text = str(item.get("text") or "").strip()
+        send_text = str(item.get("send_text") or text).strip()
+        if not text or not send_text:
+            return None
+        normalized.append({"text": text, "send_text": send_text})
+    return normalized
+
+
+def _default_quick_replies() -> list[dict[str, str]]:
+    return [dict(item) for item in DEFAULT_QUICK_REPLIES]
+
+
 def _submit_support_ticket(ticket: dict[str, Any]) -> dict[str, Any]:
     ticket_id = f"mock_ticket_{uuid.uuid4().hex[:8]}"
     return {
@@ -537,6 +590,10 @@ def _session_state_payload(session: ChatSession) -> dict[str, Any]:
             "environment_sent": session.context_state.environment_sent,
             "loaded_references": list(session.context_state.loaded_references),
             "client_events": list(session.context_state.client_events),
+            "available_tool_images": list(session.context_state.available_tool_images),
+            "last_displayed_tool_image": dict(session.context_state.last_displayed_tool_image or {}),
+            "active_device_module": session.context_state.active_device_module,
+            "shown_step_image_urls": list(session.context_state.shown_step_image_urls),
         },
     }
 

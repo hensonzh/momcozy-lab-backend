@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import base64
 import json
+import re
 import time
+from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlsplit
 from uuid import uuid4
 
 from .contexts import ContextState, build_request_context
@@ -13,8 +17,22 @@ from .types import AgUiEvent, AgUiEventHandler, AgentEvent, AgentEventHandler, A
 AG_UI_STATUS_ACTIVITY_TYPE = "MOMCOZY_AGENT_STATUS"
 AG_UI_STATUS_CUSTOM_NAME = "momcozy.agent.status"
 AG_UI_THINKING_CUSTOM_NAME = "momcozy.agent.thinking"
+QUICK_REPLIES_TOOL_NAME = "ui_quick_replies_create"
 
 MAX_TOOL_ROUNDS = 6
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+SKILLS_ROOT = PROJECT_ROOT / "skills"
+MAX_TOOL_IMAGE_INPUTS = 2
+MAX_TOOL_IMAGE_BYTES = 2 * 1024 * 1024
+MAX_TOOL_IMAGE_TOTAL_BYTES = 2 * 1024 * 1024
+TOOL_IMAGE_CONTENT_TYPES = {
+    ".avif": "image/avif",
+    ".gif": "image/gif",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+}
 
 
 def new_ag_ui_run_id() -> str:
@@ -67,6 +85,15 @@ def run_error_event(message: str, code: str | None = None, *, thread_id: str | N
     if code:
         event["code"] = code
     return event
+
+
+def quick_replies_event(message_id: str, replies: list[dict[str, str]]) -> AgUiEvent:
+    return {
+        "type": "QUICK_REPLIES",
+        "timestamp": _timestamp_ms(),
+        "message_id": message_id,
+        "replies": replies,
+    }
 
 
 def step_started_event(step_name: str) -> AgUiEvent:
@@ -312,6 +339,8 @@ def safe_tool_result(result: dict[str, Any]) -> dict[str, Any]:
             for key in ("recommended_product", "alternatives", "cart_sync_suggestion", "message", "source_urls"):
                 if key in tool_result:
                     safe[key] = tool_result[key]
+        if result.get("tool_name") == QUICK_REPLIES_TOOL_NAME and isinstance(tool_result.get("quick_replies"), list):
+            safe["quick_replies"] = tool_result["quick_replies"]
     if isinstance(result.get("error"), dict):
         safe["error"] = result["error"]
     return safe
@@ -336,6 +365,15 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
         if plan_preview:
             compact["plan_preview"] = plan_preview
         return compact
+
+    if tool_name == QUICK_REPLIES_TOOL_NAME:
+        return {
+            "ok": safe.get("ok"),
+            "tool_name": safe.get("tool_name"),
+            "status": safe.get("status"),
+            "quick_replies_ready": bool(safe.get("quick_replies")),
+            "final_response_instruction": "快捷输入已经作为前端 UI 元数据准备好。最终回复不要提到快捷输入，也不要把这些提示写进正文。",
+        }
 
     if tool_name not in {
         "ui_form_create",
@@ -579,7 +617,11 @@ def _timestamp_ms() -> int:
 def build_agent_request(inputs: RuntimeInputs, options: BuildAgentRequestOptions | None = None) -> ResponsesRequest:
     options = options or {}
     request_context = _build_request_context_for_request(inputs, options)
-    return _build_response_request(inputs, options, [_user_input_item(request_context, inputs["user_message"], inputs.get("images", []))])
+    input_items = [_user_input_item(request_context, inputs["user_message"], inputs.get("images", []))]
+    prior_tool_image_input = _prior_tool_image_input_item(inputs, options)
+    if prior_tool_image_input is not None:
+        input_items.append(prior_tool_image_input)
+    return _build_response_request(inputs, options, input_items)
 
 
 def _build_response_request(
@@ -678,6 +720,7 @@ def run_agent_loop(
     for round_index in range(max_tool_rounds):
         tool_calls = _extract_function_calls(response)
         if not tool_calls:
+            _record_displayed_tool_images(options.get("context_state"), response)
             _emit_event(
                 on_event,
                 "completed",
@@ -748,6 +791,7 @@ def run_agent_loop(
                 if skill_id not in loaded_skill_ids:
                     loaded_skill_ids.append(skill_id)
             _record_loaded_reference(options.get("context_state"), tool_call["name"], result)
+            _record_tool_images(options.get("context_state"), tool_call["name"], result)
             safe_result = safe_tool_result(result)
             _emit_ag_ui_event(
                 on_ag_ui_event,
@@ -967,6 +1011,167 @@ def _user_input_item(request_context: str, user_message: str, images: list[dict[
     }
 
 
+def _prior_tool_image_input_item(inputs: RuntimeInputs, options: BuildAgentRequestOptions) -> dict[str, Any] | None:
+    context_state = options.get("context_state")
+    if not isinstance(context_state, ContextState):
+        return None
+    if not context_state.available_tool_images and not context_state.last_displayed_tool_image:
+        return None
+    if inputs.get("images"):
+        return None
+    user_message = str(inputs.get("user_message") or "")
+    if not _user_requests_prior_tool_image(user_message):
+        return None
+    images = _select_tool_images_for_message(context_state, user_message)
+    return _tool_image_input_item_from_metadata(images)
+
+
+def _tool_image_input_item_from_metadata(images: list[dict[str, str]]) -> dict[str, Any] | None:
+    image_parts: list[dict[str, str]] = []
+    image_labels: list[str] = []
+    image_text_lines: list[str] = []
+    total_bytes = 0
+    for item in images:
+        if len(image_parts) >= MAX_TOOL_IMAGE_INPUTS:
+            break
+        url = str(item.get("url") or "").strip()
+        asset = _local_skill_asset_image(url)
+        if asset is None:
+            continue
+        alt = str(item.get("alt") or item.get("module") or "官方步骤图").strip()
+        image_text = str(item.get("image_text") or "").strip()
+        if image_text:
+            if alt:
+                image_labels.append(alt)
+            image_text_lines.append(f"- {alt or '官方步骤图'}：{image_text}")
+            continue
+        path, content_type, byte_count = asset
+        if byte_count > MAX_TOOL_IMAGE_BYTES or total_bytes + byte_count > MAX_TOOL_IMAGE_TOTAL_BYTES:
+            continue
+        data_url = _image_file_data_url(path, content_type)
+        if data_url is None:
+            continue
+        if alt:
+            image_labels.append(alt)
+        image_parts.append({"type": "input_image", "image_url": data_url, "detail": "auto"})
+        total_bytes += byte_count
+
+    if not image_parts and not image_text_lines:
+        return None
+
+    label_text = "、".join(image_labels[:MAX_TOOL_IMAGE_INPUTS]) or "官方步骤图"
+    image_text = ""
+    if image_text_lines:
+        image_text = "\n可读文字/编号：\n" + "\n".join(image_text_lines)
+    attachment_note = "下面附带官方步骤图。" if image_parts else "本轮只补充结构化图片文字，没有附带原图。"
+    return {
+        "role": "user",
+        "content": [
+            {
+                "type": "input_text",
+                "text": (
+                    "系统按需补充：下面是前文 device_manual_search 返回的 Momcozy 官方步骤图，"
+                    f"图片标题：{label_text}。这些图片来自本地官方 skill assets，不是用户上传照片；"
+                    "可用于读取图中文字、标注和部件位置。若工具结果已经提供结构化字段，优先使用结构化字段。"
+                    f"{image_text}\n{attachment_note}"
+                ),
+            },
+            *image_parts,
+        ],
+    }
+
+
+def _select_tool_images_for_message(context_state: ContextState, user_message: str) -> list[dict[str, str]]:
+    if context_state.last_displayed_tool_image:
+        return [dict(context_state.last_displayed_tool_image)]
+
+    if context_state.active_device_module:
+        module_images = [
+            image
+            for image in context_state.available_tool_images
+            if image.get("module") == context_state.active_device_module
+        ]
+        if module_images:
+            return module_images[-MAX_TOOL_IMAGE_INPUTS:]
+
+    return context_state.available_tool_images[-MAX_TOOL_IMAGE_INPUTS:]
+
+
+def _user_requests_prior_tool_image(user_message: str) -> bool:
+    normalized = re.sub(r"\s+", "", user_message).lower()
+    if not normalized:
+        return False
+    direct_terms = (
+        "图上",
+        "图中",
+        "图内",
+        "图里",
+        "图里的",
+        "图片上",
+        "图片中",
+        "图片内",
+        "图片里",
+        "图片里的",
+        "这张图",
+        "刚才的图",
+        "上面的图",
+        "前面的图",
+        "对照图",
+        "示意图",
+        "步骤图",
+        "图示",
+        "标注",
+        "看图",
+        "看一下图",
+        "picture",
+        "image",
+        "diagram",
+        "figure",
+    )
+    if any(term in normalized for term in direct_terms):
+        return True
+    numbered_label_match = re.search(r"(?:编号|标号|序号|数字|#|no\.?)\d+", normalized)
+    question_terms = ("是什么", "是啥", "哪个", "哪一个", "代表什么", "什么意思", "叫什么", "叫啥")
+    image_terms = ("图", "图片", "示意图", "步骤图", "对照图")
+    if numbered_label_match and any(term in normalized for term in image_terms + question_terms):
+        return True
+    object_terms = ("哪个是", "哪里是", "位置", "长什么样", "长啥样", "怎么对照", "怎么看", "是什么", "是啥", "代表什么")
+    device_terms = ("部件", "配件", "法兰", "按钮", "指示灯", "充电", "尺寸", "测量尺", "编号", "标号", "序号")
+    return any(term in normalized for term in object_terms) and any(term in normalized for term in device_terms)
+
+
+def _local_skill_asset_image(url: str) -> tuple[Path, str, int] | None:
+    parsed = urlsplit(url)
+    if parsed.scheme or parsed.netloc:
+        return None
+    path = unquote(parsed.path)
+    if not path.startswith("/skill-assets/"):
+        return None
+
+    relative_path = path.removeprefix("/skill-assets/")
+    skill_id, _, asset_name = relative_path.partition("/")
+    if not skill_id or not asset_name:
+        return None
+    asset_root = (SKILLS_ROOT / skill_id / "assets").resolve()
+    asset_path = (asset_root / asset_name).resolve()
+    try:
+        asset_path.relative_to(asset_root)
+    except ValueError:
+        return None
+    content_type = TOOL_IMAGE_CONTENT_TYPES.get(asset_path.suffix.lower())
+    if content_type is None or not asset_path.is_file():
+        return None
+    return asset_path, content_type, asset_path.stat().st_size
+
+
+def _image_file_data_url(path: Path, content_type: str) -> str | None:
+    try:
+        encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    except OSError:
+        return None
+    return f"data:{content_type};base64,{encoded}"
+
+
 def _image_detail(value: object) -> str:
     if value in {"low", "high", "auto"}:
         return str(value)
@@ -1015,6 +1220,112 @@ def _record_loaded_reference(context_state: object, tool_name: str, result: dict
     source = str(manual.get("source") or "references/air1/manual.md")
     reference = f"device-guidance/{model}/{source} 已在当前会话中加载过；后续同型号连续任务可复用，除非上下文不足或用户提出新的资料需求。"
     _append_loaded_reference(context_state, reference)
+
+
+def _record_tool_images(context_state: object, tool_name: str, result: dict[str, Any]) -> None:
+    if not isinstance(context_state, ContextState):
+        return
+    if tool_name != "device_manual_search" or not result.get("ok"):
+        return
+    for image in _tool_image_metadata(result):
+        existing = [item for item in context_state.available_tool_images if item.get("url") != image.get("url")]
+        existing.append(image)
+        context_state.available_tool_images = existing[-8:]
+
+
+def _record_displayed_tool_images(context_state: object, response: object) -> None:
+    if not isinstance(context_state, ContextState):
+        return
+
+    text = _response_output_text(response)
+    if not text:
+        return
+    displayed_images = _displayed_tool_images_from_text(context_state, text)
+    if not displayed_images:
+        return
+
+    for image in displayed_images:
+        url = image.get("url")
+        if url and url not in context_state.shown_step_image_urls:
+            context_state.shown_step_image_urls.append(url)
+    context_state.shown_step_image_urls = context_state.shown_step_image_urls[-12:]
+
+    last = displayed_images[-1]
+    context_state.last_displayed_tool_image = last
+    context_state.active_device_module = str(last.get("module") or context_state.active_device_module or "").strip()
+
+
+def _displayed_tool_images_from_text(context_state: ContextState, text: str) -> list[dict[str, str]]:
+    images: list[dict[str, str]] = []
+    for url in re.findall(r"!\[[^\]]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)", text):
+        image = _tool_image_metadata_by_url(context_state, url)
+        if image:
+            images.append(image)
+    return images
+
+
+def _tool_image_metadata_by_url(context_state: ContextState, url: str) -> dict[str, str] | None:
+    normalized_url = str(url or "").strip()
+    if _local_skill_asset_image(normalized_url) is None:
+        return None
+    for image in reversed(context_state.available_tool_images):
+        if image.get("url") == normalized_url:
+            return dict(image)
+    return {"url": normalized_url}
+
+
+def _response_output_text(response: object) -> str:
+    output_text = _get_item_value(response, "output_text")
+    if isinstance(output_text, str) and output_text:
+        return output_text
+
+    parts: list[str] = []
+    for item in _get_response_output(response):
+        item_type = _get_item_value(item, "type")
+        if item_type == "output_text":
+            text = _get_item_value(item, "text")
+            if isinstance(text, str):
+                parts.append(text)
+            continue
+        if item_type != "message":
+            continue
+        content = _get_item_value(item, "content")
+        if not isinstance(content, list):
+            continue
+        for content_part in content:
+            part_type = _get_item_value(content_part, "type")
+            if part_type not in {"output_text", "text"}:
+                continue
+            text = _get_item_value(content_part, "text")
+            if isinstance(text, str):
+                parts.append(text)
+    return "\n".join(part for part in parts if part)
+
+
+def _tool_image_metadata(result: dict[str, Any]) -> list[dict[str, str]]:
+    tool_result = result.get("result")
+    if not isinstance(tool_result, dict):
+        return []
+    relevant_images = tool_result.get("relevant_images")
+    if not isinstance(relevant_images, list):
+        return []
+
+    images: list[dict[str, str]] = []
+    for item in relevant_images:
+        if not isinstance(item, dict):
+            continue
+        url = str(item.get("url") or "").strip()
+        if _local_skill_asset_image(url) is None:
+            continue
+        image: dict[str, str] = {"url": url}
+        for key in ("alt", "module", "image_text"):
+            value = str(item.get(key) or "").strip()
+            if value:
+                image[key] = value
+        images.append(image)
+        if len(images) >= MAX_TOOL_IMAGE_INPUTS:
+            break
+    return images
 
 
 def _append_loaded_reference(context_state: ContextState, reference: str) -> None:

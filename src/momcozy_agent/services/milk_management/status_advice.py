@@ -5,7 +5,7 @@ import os
 from datetime import datetime
 from typing import Any
 
-from ...config import load_project_env
+from ...config import get_openai_client_options, load_project_env
 from .. import data_store
 from .assessment import evaluate_milk_status
 from .feeding import estimate_breastfeeding_milk
@@ -588,7 +588,7 @@ def _request_llm_status_advice(payload: dict[str, Any]) -> dict[str, str] | None
         return None
 
     try:
-        client = OpenAI()
+        client = OpenAI(**get_openai_client_options())
         response = client.responses.create(
             model=os.getenv("STATUS_ADVICE_MODEL", "gpt-5.4-mini"),
             instructions=SIMPLE_STATUS_ADVICE_PROMPT,

@@ -87,6 +87,8 @@ App 端 WebSocket 桥接入口：
 
 默认在 `ENTRY_HOST:ENTRY_PORT` 启动统一 FastAPI 服务，默认 `0.0.0.0:8769`。该服务同时提供 Web Demo 的 `POST /api/ag-ui` SSE 接口和 App 的 `WS /api/ag-ui-ws` 接口。App 连接 `/api/ag-ui-ws` 后发送与 `/api/ag-ui` 相同的 AG-UI JSON 请求体，桥接层复用同一套 agent stream，并把每个 AG-UI event 作为 WebSocket JSON text frame 返回。这个入口只做传输协议适配，不改变 agent loop、skill 选择、tool registry 或 session 状态。
 
+确定性 App 操作可以走轻量 HTTP 入口，避免不必要的模型轮次。例如 `POST /api/hospital-bag/cart-update` 复用 `hospital_bag_cart_update` handler，根据当前 `hospital_bag_cart.groups` 和 `args.action/product_sku_id` 返回新的购物车状态；适用于用户已经确认“换成 Air 1 / M9 / S12 Pro Quick”等型号同步，不用于开放式选型或解释。
+
 ## 请求链路
 
 用户从前端发送消息后，整体流程如下：
@@ -148,6 +150,8 @@ input = [
 ```
 
 图片输入是可选的。测试前端会把用户选择的图片读成 Base64 data URL，经 `/api/ag-ui` 传给后端；后端只把最近一轮用户消息里的图片转换成 Responses API 的 `input_image` content part。生产环境建议改为上传到文件/对象存储或 Files API，再传 URL/File ID，避免长期通过 JSON 传大体积 Base64。
+
+工具返回的本地资源 URL 不会被模型自动访问。对 `device_manual_search.relevant_images` 这类官方步骤图，agent loop 先把图片元数据记录到 `ContextState.available_tool_images`；当最终回复实际展示 Markdown 图片时，再记录 `last_displayed_tool_image`、`active_device_module` 和 `shown_step_image_urls`。后续用户明确询问“图上/这张图/对照图/标注/哪个部件”等需要读图的问题时，下一轮模型请求优先参考 `last_displayed_tool_image`，避免从历史图片里用相同编号误猜；必要时才把最多 2 张 `/skill-assets/...` 白名单图片转为 `data:image/...` 的 `input_image`。该能力只读取 `skills/{skill_id}/assets` 下的图片文件，不处理外部 URL、PDF、视频或任意路径；如果当前用户消息已经附带上传图片，则优先用户上传图片，不再自动附加官方步骤图。结构化工具字段仍优先于视觉读取；图片输入只用于补充读取图中文字、标注和部件位置。
 
 后续请求依赖 `previous_response_id` 延续对话状态。
 
@@ -307,10 +311,11 @@ message_sent_at: 2026-05-05T17:45:03+08:00
 
 业务工具不再按 loaded skill 切换暴露，而是放在 deferred namespaces 中。仅保留当前本地有执行结果的工具；纯占位工具已移除：
 
-- `care_handoffs`：`handoff_summary_generate`
-- `device_support`：`device_manual_search`、`support_ticket_draft_create`
-- `milk_management`：聚合后的奶量工具，包括 `milk_snapshot_get`、`milk_records_query`、`milk_record_mutate`、`milk_plan_query`、`milk_plan_preview`、`milk_plan_mutate`、`milk_calendar_query`、`milk_calendar_change_preview`、`milk_calendar_mutate`，以及评估类 `milk_assessment_evaluate`、`infant_growth_evaluate`
-- `hospital_bag_cart`：待产包购物车工具 `hospital_bag_cart_update`、`hospital_bag_pump_recommend`，用于预算上限优化、删除/加回、基础款替换、医院提供、家里已有、数量调整，以及按 Momcozy 官方对外价格推荐吸奶器型号并同步购物车
+- `care_handoffs`：`handoff_summary_generate`，只用于已经决定转接人工或专业支持后的交接摘要；不用于普通建议、设备售后工单、设备排障或购物车调整
+- `device_support`：`device_manual_search`、`support_ticket_draft_create`，用于已购/正在使用的 Momcozy 吸奶器或设备说明书、FAQ、排障和售后工单草稿；不用于购买前选型、奶量计划或待产包购物车
+- `milk_management`：聚合后的奶量工具，包括 `milk_snapshot_get`、`milk_records_query`、`milk_record_mutate`、`milk_plan_query`、`milk_plan_preview`、`milk_plan_mutate`、`milk_calendar_query`、`milk_calendar_change_preview`、`milk_calendar_mutate`，以及评估类 `milk_assessment_evaluate`、`infant_growth_evaluate`；用于用户自身奶量、喂养、宝宝生长和 calendar 数据，不用于吸奶器选型、设备排障或购物车调整
+- `hospital_bag_cart`：待产包购物车工具 `hospital_bag_cart_update`，用于已经进入待产包购物车后的预算上限优化、删除/加回、基础款替换、医院提供、家里已有、数量调整，以及把已推荐的 Momcozy 吸奶器型号同步到购物车；不用于生成待产包卡片、独立吸奶器选型或设备排障
+- `pump_recommendation`：吸奶器型号选型工具 `hospital_bag_pump_recommend`，用于购买前 Momcozy 吸奶器推荐、型号对比、预算内选择，也可在待产包场景里先选型再同步购物车；不用于已购设备故障/说明书、奶量是否正常或直接修改购物车
 
 每个 namespace 中的 function 都设置 `defer_loading: true`。模型开始时只看到 namespace 名称和描述；需要具体工具时由 `tool_search` 加载对应 function schema。
 
@@ -354,6 +359,7 @@ message_sent_at: 2026-05-05T17:45:03+08:00
 - `TEXT_MESSAGE_START`
 - `TEXT_MESSAGE_CONTENT`
 - `TEXT_MESSAGE_END`
+- `QUICK_REPLIES`
 - `RUN_FINISHED`
 - `RUN_ERROR`
 
@@ -370,6 +376,7 @@ Work panel 的首个可见进度由 Responses streaming function-call 事件驱�
 - Work panel 只展示阶段语义，不展示具体工具名；`tool_call_name` 仅用于前端合并同一条 work item 和归类为读取、评估、预览、保存、等待确认等阶段。
 - `ARTIFACT_CREATED` 到达后，前端渲染表单/卡片/工单草稿等结构化 UI。
 - `CONFIRMATION_REQUIRED` 到达后，work panel 显示等待确认状态，具体确认动作由对应 artifact 或业务 UI 承载。
+- `QUICK_REPLIES` 是最终回复后的快捷输入 UI。模型应通过全局 `ui_quick_replies_create` 工具为每轮最终回复生成 3 个提示；如果模型漏调，后端会补 3 个安全默认提示。该工具事件不展示在 work panel，不进入 assistant 正文。
 - Work item 默认只展示简短状态标题；失败时才展示错误详情。
 - `CUSTOM momcozy.agent.status` 是主 loop 当前唯一主动发送的状态通道；`ACTIVITY_SNAPSHOT`、`STEP_STARTED`、`STEP_FINISHED` 只保留历史兼容。
 
