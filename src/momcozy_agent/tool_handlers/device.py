@@ -17,7 +17,7 @@ AIR1_REFERENCE_KEY = "device-guidance/Air1/references/air1/manual.md"
 AIR1_QUICK_START_RESOURCES: tuple[dict[str, str], ...] = (
     {
         "kind": "pdf",
-        "title": "Air1 Quick Start Guide",
+        "title": "Air1 快速上手指南",
         "description": "官方 Quick Start 指导卡片",
         "url": "/skill-assets/device-guidance/air1/quick-start/momcozy-air1-quick-start-guidance.pdf",
     },
@@ -114,8 +114,10 @@ def search_device_manual(args: dict[str, Any], inputs: RuntimeInputs) -> dict[st
             "faq_results 是按用户问题检索到的相关 FAQ；如果为空，说明没有命中明确 FAQ，但 manual 仍可作为依据。"
             "relevant_images 是按当前 query/topic 预选的步骤图片；讲到对应步骤时，请用 Markdown 图片语法展示最相关图片。"
             "product_highlights 是确认 Air1 后可先给用户看的产品亮点，只能使用其中事实，不要扩写成资料未覆盖的卖点。"
-            "quick_start_resources 是 Air1 开箱/首次使用资源；用户确认型号后，先简短说明亮点，再给这些资源链接，最后询问是否需要一步步指导。"
+            "quick_start_resources 是 Air1 开箱/首次使用资源；如果需要展示资源，只使用每个资源的 markdown_link 字段，禁止直接展示 url 或 /skill-assets/... 原始路径。"
             "在给出 quick_start_resources 的同一轮，不要直接开始 manual 第一步；只有用户确认需要一步步指导后，才进入首次使用推荐路径。"
+            "开箱路径中 guide.parts 至少包含“取出平铺”和“清点核对”两个回合；用户说“好了”通常只代表平铺完成，"
+            "不要从 guide.parts 直接跳到 guide.controls，必须先让用户核对可见物品、独立配件和整机状态是否齐全完整。"
             "面向用户的步骤要简短；引导式安装或清洁时，一次只给一步并等待用户确认。"
             "不要补造资料中没有的 Air1 专属说明。"
         ),
@@ -189,7 +191,14 @@ def _air1_product_highlights() -> list[str]:
 
 
 def _air1_quick_start_resources() -> list[dict[str, str]]:
-    return [dict(resource) for resource in AIR1_QUICK_START_RESOURCES if _static_asset_exists(resource["url"])]
+    resources = []
+    for resource in AIR1_QUICK_START_RESOURCES:
+        if not _static_asset_exists(resource["url"]):
+            continue
+        item = dict(resource)
+        item["markdown_link"] = f"[{item['title']}]({item['url']})"
+        resources.append(item)
+    return resources
 
 
 def _reference_loaded(inputs: RuntimeInputs, reference_key: str) -> bool:

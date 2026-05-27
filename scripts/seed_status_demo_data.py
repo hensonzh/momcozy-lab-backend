@@ -185,14 +185,20 @@ def _daily_total_for(day: datetime, index: int) -> int:
 
 
 def _seed_lactation(conn: sqlite3.Connection) -> None:
-    start = TODAY - timedelta(days=29)
+    # Seed only completed historical days. Today's records should come from
+    # actual user/device/task actions, otherwise "今日记录" starts polluted.
+    start = TODAY - timedelta(days=30)
+    today_start = f"{TODAY:%Y-%m-%d} 00:00:00"
+    tomorrow_start = f"{TODAY + timedelta(days=1):%Y-%m-%d} 00:00:00"
     conn.execute(
         """
         DELETE FROM pumping_log
         WHERE user_id = ?
+          AND pump_start_time < ?
         """,
-        (USER_ID,),
+        (USER_ID, today_start),
     )
+    _clear_today_seeded_lactation_artifacts(conn, today_start=today_start, tomorrow_start=tomorrow_start)
 
     for index in range(30):
         day = start + timedelta(days=index)
@@ -232,14 +238,19 @@ def _seed_feeding(conn: sqlite3.Connection) -> None:
     """Seed direct breastfeeding + occasional bottle feed so the chart's
     含亲喂估算 (`total_milk_estimate`) line has real input to render."""
 
-    start = TODAY - timedelta(days=29)
+    # Keep feeding history aligned with lactation history: completed days only.
+    start = TODAY - timedelta(days=30)
+    today_start = f"{TODAY:%Y-%m-%d} 00:00:00"
+    tomorrow_start = f"{TODAY + timedelta(days=1):%Y-%m-%d} 00:00:00"
     conn.execute(
         """
         DELETE FROM feeding_log
         WHERE user_id = ?
+          AND feed_time < ?
         """,
-        (USER_ID,),
+        (USER_ID, today_start),
     )
+    _clear_today_seeded_feeding_artifacts(conn, today_start=today_start, tomorrow_start=tomorrow_start)
 
     bottle_time_text, bottle_title, bottle_ml = BOTTLE_FEED
     for index in range(30):
@@ -285,12 +296,197 @@ def _seed_feeding(conn: sqlite3.Connection) -> None:
         )
 
 
+def _clear_today_seeded_lactation_artifacts(conn: sqlite3.Connection, *, today_start: str, tomorrow_start: str) -> None:
+    titles = [title for _, title, _ in SESSION_TIMES]
+    placeholders = ",".join("?" for _ in titles)
+    conn.execute(
+        f"""
+        DELETE FROM pumping_log
+        WHERE user_id = ?
+          AND pump_start_time >= ?
+          AND pump_start_time < ?
+          AND pump_source = 1
+          AND pump_type = 1
+          AND created_at = pump_end_time
+          AND COALESCE(pump_title, '') IN ({placeholders})
+        """,
+        (USER_ID, today_start, tomorrow_start, *titles),
+    )
+
+
+def _clear_today_seeded_feeding_artifacts(conn: sqlite3.Connection, *, today_start: str, tomorrow_start: str) -> None:
+    titles = [title for _, title in BREASTFEEDING_TIMES]
+    titles.append(BOTTLE_FEED[1])
+    placeholders = ",".join("?" for _ in titles)
+    conn.execute(
+        f"""
+        DELETE FROM feeding_log
+        WHERE user_id = ?
+          AND feed_time >= ?
+          AND feed_time < ?
+          AND feed_action = 0
+          AND created_at = feed_time
+          AND COALESCE(feeding_title, '') IN ({placeholders})
+        """,
+        (USER_ID, today_start, tomorrow_start, *titles),
+    )
+
+
+def _clear_demo_transient_calendar_items(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        DELETE FROM calendar
+        WHERE user_id = ?
+          AND plan_id IS NULL
+          AND source = '用户输入'
+          AND type = '吸奶'
+          AND content IN ('追奶观察版：下午强化排乳')
+        """,
+        (USER_ID,),
+    )
+
+
+def _roll_demo_calendar_to_today(conn: sqlite3.Connection) -> None:
+    row = conn.execute(
+        "SELECT MAX(date) AS max_date FROM calendar WHERE user_id = ?",
+        (USER_ID,),
+    ).fetchone()
+    max_date = str(row["max_date"] or "") if row else ""
+    if not max_date:
+        return
+    try:
+        current_max = datetime.fromisoformat(max_date).date()
+    except ValueError:
+        return
+    shift_days = (TODAY.date() - current_max).days
+    if shift_days == 0:
+        return
+    modifier = f"{shift_days:+d} days"
+    conn.execute(
+        """
+        UPDATE calendar
+        SET date = date(date, ?),
+            start_time = CASE
+                WHEN start_time IS NULL OR start_time = '' THEN start_time
+                ELSE datetime(start_time, ?)
+            END,
+            end_time = CASE
+                WHEN end_time IS NULL OR end_time = '' THEN end_time
+                ELSE datetime(end_time, ?)
+            END,
+            modified_at = CASE
+                WHEN modified_at IS NULL OR modified_at = '' THEN modified_at
+                ELSE datetime(modified_at, ?)
+            END
+        WHERE user_id = ?
+        """,
+        (modifier, modifier, modifier, modifier, USER_ID),
+    )
+
+
+def _clear_future_calendar_items(conn: sqlite3.Connection) -> None:
+    today_date = TODAY.date().isoformat()
+    conn.execute(
+        """
+        DELETE FROM calendar
+        WHERE user_id = ?
+          AND date > ?
+        """,
+        (USER_ID, today_date),
+    )
+
+
+def _sync_past_calendar_completion(conn: sqlite3.Connection) -> None:
+    """Keep demo plan execution consistent with seeded historical records."""
+
+    start_date = (TODAY - timedelta(days=29)).date().isoformat()
+    today_date = TODAY.date().isoformat()
+    modified_at = TODAY.strftime("%Y-%m-%d %H:%M:%S")
+    conn.execute(
+        """
+        UPDATE calendar
+        SET finish = 'true',
+            modified_at = ?
+        WHERE user_id = ?
+          AND date >= ?
+          AND date < ?
+          AND type IN ('吸奶', '亲喂')
+          AND finish = 'false'
+        """,
+        (modified_at, USER_ID, start_date, today_date),
+    )
+
+
+def _sync_today_elapsed_calendar_completion(conn: sqlite3.Connection) -> None:
+    """Mark today's elapsed demo tasks complete and create linked records."""
+
+    today_date = TODAY.date().isoformat()
+    cutoff = f"{today_date} {datetime.now():%H:%M:%S}"
+    modified_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn.execute(
+        """
+        UPDATE calendar
+        SET finish = 'false',
+            modified_at = ?
+        WHERE user_id = ?
+          AND date = ?
+          AND type IN ('吸奶', '亲喂')
+          AND COALESCE(start_time, date || ' 00:00:00') >= ?
+        """,
+        (modified_at, USER_ID, today_date, cutoff),
+    )
+    rows = conn.execute(
+        """
+        SELECT item_id
+        FROM calendar
+        WHERE user_id = ?
+          AND date = ?
+          AND type IN ('吸奶', '亲喂')
+          AND COALESCE(start_time, date || ' 00:00:00') < ?
+        ORDER BY start_time ASC, item_id ASC
+        """,
+        (USER_ID, today_date, cutoff),
+    ).fetchall()
+    item_ids = [int(row["item_id"] or 0) for row in rows if int(row["item_id"] or 0) > 0]
+    if not item_ids:
+        return
+    placeholders = ",".join("?" for _ in item_ids)
+    conn.execute(
+        f"""
+        UPDATE calendar
+        SET finish = 'true',
+            modified_at = ?
+        WHERE user_id = ?
+          AND item_id IN ({placeholders})
+        """,
+        (modified_at, USER_ID, *item_ids),
+    )
+    synced_rows = conn.execute(
+        f"""
+        SELECT item_id, user_id, date, task_id, start_time, end_time,
+               content, type, source, is_milk_pump, finish
+        FROM calendar
+        WHERE user_id = ?
+          AND item_id IN ({placeholders})
+        ORDER BY start_time ASC, item_id ASC
+        """,
+        (USER_ID, *item_ids),
+    ).fetchall()
+    for row in synced_rows:
+        data_store._sync_completed_calendar_item_logs(conn, row)
+
+
 def main() -> None:
     with _connect() as conn:
         _seed_profiles(conn)
         _seed_growth(conn)
         _seed_lactation(conn)
         _seed_feeding(conn)
+        _clear_demo_transient_calendar_items(conn)
+        _roll_demo_calendar_to_today(conn)
+        _clear_future_calendar_items(conn)
+        _sync_past_calendar_completion(conn)
+        _sync_today_elapsed_calendar_completion(conn)
         conn.commit()
     print(f"Seeded status demo data for {USER_ID} in {data_store.DB_PATH}")
 

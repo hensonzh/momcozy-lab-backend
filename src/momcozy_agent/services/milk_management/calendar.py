@@ -20,8 +20,11 @@ from .schemas import (
     to_bool,
     to_int,
 )
+from .scheduling_rules import build_adjusted_schedule_rows, format_hhmm, parse_minute_of_day
 
 VALID_CALENDAR_TYPES = {CALENDAR_TYPE_PUMP, CALENDAR_TYPE_NURSING, CALENDAR_TYPE_CUSTOM}
+DEFAULT_RESCHEDULE_DURATION_MINUTES = 30
+DEFAULT_RESCHEDULE_MIN_GAP_MINUTES = 90
 
 
 def get_calendar_day(
@@ -293,6 +296,192 @@ def apply_calendar_adjustment(
             "inserted_event": _normalize_calendar_row(inserted or {}),
             "item": _normalize_calendar_row(inserted or {}),
             "applied_updates": applied_updates,
+        },
+    )
+
+
+def preview_day_reschedule(
+    *,
+    user_id: str,
+    target_date: str,
+    busy_windows: Any,
+    adjustable_item_types: Any = None,
+    plan_id: int | None = None,
+    default_duration_minutes: int = DEFAULT_RESCHEDULE_DURATION_MINUTES,
+    min_gap_minutes: int = DEFAULT_RESCHEDULE_MIN_GAP_MINUTES,
+    include_busy_events: bool = True,
+) -> ServiceResult:
+    uid = str(user_id or "").strip()
+    date = _date_text(target_date)
+    if not uid or not date:
+        return error_result("missing_required_field", "user_id and target_date are required.")
+
+    windows = _parse_busy_windows(busy_windows, target_date=date)
+    if not windows:
+        return error_result("missing_busy_windows", "需要至少一个明确的不可用时间段。")
+
+    adjustable_types = _parse_adjustable_types(adjustable_item_types)
+    day_rows = fetch_all(
+        """
+        SELECT item_id, user_id, plan_id, date, task_id, start_time, end_time,
+               content, type, source, is_milk_pump, finish, created_at, modified_at
+        FROM calendar
+        WHERE user_id = ?
+          AND date = ?
+          AND (? IS NULL OR COALESCE(plan_id, 0) = COALESCE(?, 0))
+        ORDER BY COALESCE(start_time, ''), COALESCE(task_id, item_id), item_id
+        """,
+        (uid, date, plan_id, plan_id),
+    )
+    items = [_normalize_calendar_row(row) for row in day_rows]
+    adjustable_items = [item for item in items if _is_pending_adjustable_item(item, adjustable_types)]
+    if not adjustable_items:
+        return error_result(
+            "no_adjustable_calendar_items",
+            "这一天没有可重排的吸奶/亲喂计划任务。",
+            data={"user_id": uid, "target_date": date, "busy_windows": windows, "adjustable_item_types": sorted(adjustable_types)},
+        )
+
+    fixed_blocks = _fixed_blocks_for_reschedule(items, adjustable_types)
+    blocked_periods = [*_busy_blocks_for_reschedule(windows), *fixed_blocks]
+    schedule = build_adjusted_schedule_rows(
+        blocked_periods=blocked_periods,
+        original_items=adjustable_items,
+        duration_minutes=max(to_int(default_duration_minutes, DEFAULT_RESCHEDULE_DURATION_MINUTES), 1),
+        min_gap_minutes=max(to_int(min_gap_minutes, DEFAULT_RESCHEDULE_MIN_GAP_MINUTES), 0),
+        blocked_entry_type="busy_window",
+        adjustable_entry_type="calendar_task",
+    )
+    updates = _reschedule_updates(date=date, original_items=adjustable_items, adjusted_items=schedule["adjusted_items"])
+    conflicts = _reschedule_conflicts(windows=windows, adjustable_items=adjustable_items, duration_minutes=default_duration_minutes)
+    proposal = {
+        "action": "reschedule_day_around_busy_windows",
+        "user_id": uid,
+        "target_date": date,
+        "busy_windows": windows,
+        "insert_events": _insert_events_for_reschedule(windows) if include_busy_events else [],
+        "updates": updates,
+        "adjustable_item_types": sorted(adjustable_types),
+        "default_duration_minutes": max(to_int(default_duration_minutes, DEFAULT_RESCHEDULE_DURATION_MINUTES), 1),
+        "min_gap_minutes": max(to_int(min_gap_minutes, DEFAULT_RESCHEDULE_MIN_GAP_MINUTES), 0),
+    }
+    return ok_result(
+        "calendar_reschedule_previewed",
+        data={
+            "proposal": proposal,
+            "proposal_json": json.dumps(proposal, ensure_ascii=False),
+            "target_date": date,
+            "busy_windows": windows,
+            "conflicts": conflicts,
+            "conflict_count": len(conflicts),
+            "updates": updates,
+            "updated_count": len(updates),
+            "unchanged_count": max(len(adjustable_items) - len(updates), 0),
+            "summary": _reschedule_summary(windows=windows, conflicts=conflicts, updates=updates),
+        },
+    )
+
+
+def apply_calendar_reschedule(
+    *,
+    user_id: str,
+    target_date: str,
+    proposal: Any,
+    idempotency_key: str | None = None,
+) -> ServiceResult:
+    uid = str(user_id or "").strip()
+    date = _date_text(target_date)
+    key = norm_text(idempotency_key)
+    proposal_data = _parse_json_object(proposal)
+    if not uid or not date or not proposal_data:
+        return error_result("missing_required_field", "Confirmed calendar reschedule is missing required fields.")
+    if not key:
+        return error_result("missing_idempotency_key", "缺少 idempotency_key。")
+    if norm_text(proposal_data.get("action")) != "reschedule_day_around_busy_windows":
+        return error_result("invalid_reschedule_proposal", "不是有效的日程重排 proposal。")
+
+    replayed = _idempotent_calendar_reschedule_applied(user_id=uid, idempotency_key=key)
+    if replayed:
+        refreshed = get_calendar_range(user_id=uid, start_at=date, end_at=date, include_items=True, limit=200)
+        return ok_result(
+            "calendar_reschedule_idempotent_replay",
+            data={"user_id": uid, "target_date": date, "calendar": refreshed.get("data") if isinstance(refreshed.get("data"), dict) else {}},
+        )
+
+    insert_events = proposal_data.get("insert_events") if isinstance(proposal_data.get("insert_events"), list) else []
+    updates = proposal_data.get("updates") if isinstance(proposal_data.get("updates"), list) else []
+    inserted_events: list[dict[str, Any]] = []
+    applied_updates: list[dict[str, Any]] = []
+    resource_id = 0
+
+    with transaction() as conn:
+        _ensure_idempotency_table(conn)
+        next_task_id = _next_task_id(conn, user_id=uid, target_date=date)
+        for raw in insert_events:
+            if not isinstance(raw, dict):
+                continue
+            start_at = _calendar_datetime(date, raw.get("start_time"))
+            end_at = _calendar_datetime(date, raw.get("end_time")) if raw.get("end_time") else None
+            content = norm_text(raw.get("content")) or "会议"
+            if not start_at:
+                continue
+            cursor = conn.execute(
+                """
+                INSERT INTO calendar (
+                    user_id, plan_id, date, task_id, start_time, end_time,
+                    content, type, source, is_milk_pump, finish, created_at, modified_at
+                )
+                VALUES (?, NULL, ?, ?, ?, ?, ?, '自定义', '用户输入', 0, 'false', CURRENT_TIMESTAMP, NULL)
+                """,
+                (uid, date, next_task_id, start_at, end_at, content),
+            )
+            inserted_id = int(cursor.lastrowid or 0)
+            resource_id = resource_id or inserted_id
+            next_task_id += 1
+            inserted_events.append({"item_id": inserted_id, "start_time": start_at, "end_time": end_at, "content": content, "type": "自定义"})
+
+        for raw in updates:
+            if not isinstance(raw, dict):
+                continue
+            item_id = to_int(raw.get("item_id"), 0)
+            new_start = _calendar_datetime(date, raw.get("new_start_time"))
+            new_end = _calendar_datetime(date, raw.get("new_end_time")) if raw.get("new_end_time") else None
+            if item_id <= 0 or not new_start:
+                continue
+            cursor = conn.execute(
+                """
+                UPDATE calendar
+                SET start_time = ?,
+                    end_time = ?,
+                    modified_at = CURRENT_TIMESTAMP
+                WHERE user_id = ?
+                  AND date = ?
+                  AND item_id = ?
+                  AND finish = 'false'
+                """,
+                (new_start, new_end, uid, date, item_id),
+            )
+            if int(cursor.rowcount or 0) > 0:
+                resource_id = resource_id or item_id
+                applied_updates.append({"item_id": item_id, "new_start_time": new_start, "new_end_time": new_end})
+
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO tool_idempotency_log(user_id, tool_name, idempotency_key, resource_id, created_at)
+            VALUES (?, 'milk_calendar_mutate.apply_reschedule', ?, ?, ?)
+            """,
+            (uid, key, int(resource_id or 0), _now()),
+        )
+
+    refreshed = get_calendar_range(user_id=uid, start_at=date, end_at=date, include_items=True, limit=200)
+    return ok_result(
+        "calendar_reschedule_applied",
+        data={
+            "user_id": uid,
+            "target_date": date,
+            "inserted_events": inserted_events,
+            "applied_updates": applied_updates,
+            "calendar": refreshed.get("data") if isinstance(refreshed.get("data"), dict) else {},
         },
     )
 
@@ -629,6 +818,185 @@ def _patch_calendar_rows(conn: Any, user_id: str, rows: list[Any], patch_data: d
     return changed
 
 
+def _parse_json_list(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        return list(value)
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return []
+        return list(parsed) if isinstance(parsed, list) else []
+    return []
+
+
+def _parse_busy_windows(value: Any, *, target_date: str) -> list[dict[str, Any]]:
+    windows: list[dict[str, Any]] = []
+    for raw in _parse_json_list(value):
+        if not isinstance(raw, dict):
+            continue
+        start_at = _calendar_datetime(target_date, raw.get("start_time"))
+        if not start_at:
+            continue
+        end_at = _calendar_datetime(target_date, raw.get("end_time")) if raw.get("end_time") else ""
+        if not end_at and raw.get("duration_minutes") is not None:
+            end_at = _add_minutes(start_at, max(to_int(raw.get("duration_minutes"), 0), 1))
+        if not end_at:
+            continue
+        if parse_datetime(end_at) is not None and parse_datetime(start_at) is not None and parse_datetime(end_at) <= parse_datetime(start_at):
+            continue
+        windows.append(
+            {
+                "start_time": start_at,
+                "end_time": end_at,
+                "content": norm_text(raw.get("content")) or "会议",
+            }
+        )
+    windows.sort(key=lambda item: item["start_time"])
+    return windows
+
+
+def _parse_adjustable_types(value: Any) -> set[str]:
+    parsed = {norm_text(item) for item in _parse_json_list(value)}
+    selected = {item for item in parsed if item in {CALENDAR_TYPE_PUMP, CALENDAR_TYPE_NURSING}}
+    return selected or {CALENDAR_TYPE_PUMP, CALENDAR_TYPE_NURSING}
+
+
+def _is_pending_adjustable_item(item: CalendarItem, adjustable_types: set[str]) -> bool:
+    return not to_bool(item.get("finish")) and norm_text(item.get("type")) in adjustable_types
+
+
+def _fixed_blocks_for_reschedule(items: list[CalendarItem], adjustable_types: set[str]) -> list[dict[str, Any]]:
+    blocks: list[dict[str, Any]] = []
+    for item in items:
+        item_type = norm_text(item.get("type"))
+        if item_type in adjustable_types and not to_bool(item.get("finish")):
+            continue
+        start = parse_minute_of_day(item.get("start_time") or item.get("time"))
+        if start is None:
+            continue
+        end = parse_minute_of_day(item.get("end_time"))
+        if end is None:
+            end = start + DEFAULT_RESCHEDULE_DURATION_MINUTES
+        blocks.append(
+            {
+                "start_time": format_hhmm(start),
+                "end_time": format_hhmm(end),
+                "content": norm_text(item.get("content")) or item_type or "固定日程",
+                "source_item": dict(item),
+            }
+        )
+    return blocks
+
+
+def _busy_blocks_for_reschedule(windows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "start_time": item["start_time"],
+            "end_time": item["end_time"],
+            "content": norm_text(item.get("content")) or "会议",
+            "source_item": dict(item),
+        }
+        for item in windows
+    ]
+
+
+def _insert_events_for_reschedule(windows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "start_time": item["start_time"],
+            "end_time": item["end_time"],
+            "content": norm_text(item.get("content")) or "会议",
+            "type": CALENDAR_TYPE_CUSTOM,
+            "source": "用户输入",
+            "is_milk_pump": False,
+        }
+        for item in windows
+    ]
+
+
+def _reschedule_updates(*, date: str, original_items: list[CalendarItem], adjusted_items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    adjusted_by_id = {to_int(item.get("item_id"), 0): item for item in adjusted_items}
+    updates: list[dict[str, Any]] = []
+    for original in original_items:
+        item_id = to_int(original.get("item_id"), 0)
+        adjusted = adjusted_by_id.get(item_id)
+        if item_id <= 0 or adjusted is None:
+            continue
+        old_start = hhmm(original.get("start_time"))
+        new_start = hhmm(adjusted.get("start_time"))
+        if not new_start or new_start == old_start:
+            continue
+        old_end = hhmm(original.get("end_time"))
+        new_end = hhmm(adjusted.get("end_time"))
+        updates.append(
+            {
+                "item_id": item_id,
+                "task_id": original.get("task_id"),
+                "content": original.get("content"),
+                "type": original.get("type"),
+                "old_start_time": _calendar_datetime(date, old_start),
+                "old_end_time": _calendar_datetime(date, old_end) if old_end else None,
+                "new_start_time": _calendar_datetime(date, new_start),
+                "new_end_time": _calendar_datetime(date, new_end) if new_end else None,
+            }
+        )
+    return updates
+
+
+def _reschedule_conflicts(
+    *,
+    windows: list[dict[str, Any]],
+    adjustable_items: list[CalendarItem],
+    duration_minutes: int,
+) -> list[dict[str, Any]]:
+    ranges = [
+        (parse_minute_of_day(window.get("start_time")), parse_minute_of_day(window.get("end_time")), norm_text(window.get("content")) or "会议")
+        for window in windows
+    ]
+    conflicts: list[dict[str, Any]] = []
+    fallback_duration = max(to_int(duration_minutes, DEFAULT_RESCHEDULE_DURATION_MINUTES), 1)
+    for item in adjustable_items:
+        start = parse_minute_of_day(item.get("start_time"))
+        if start is None:
+            continue
+        end = parse_minute_of_day(item.get("end_time"))
+        if end is None:
+            end = start + fallback_duration
+        for busy_start, busy_end, content in ranges:
+            if busy_start is None or busy_end is None:
+                continue
+            if start < busy_end and end > busy_start:
+                conflicts.append(
+                    {
+                        "item_id": item.get("item_id"),
+                        "task_id": item.get("task_id"),
+                        "start_time": hhmm(item.get("start_time")),
+                        "end_time": hhmm(item.get("end_time")),
+                        "content": item.get("content"),
+                        "conflict_with": content,
+                    }
+                )
+                break
+    return conflicts
+
+
+def _reschedule_summary(*, windows: list[dict[str, Any]], conflicts: list[dict[str, Any]], updates: list[dict[str, Any]]) -> str:
+    if not windows:
+        return "没有识别到可用于重排的日程。"
+    if not conflicts and not updates:
+        return f"识别到 {len(windows)} 个不可用时间段，但没有影响当前吸奶/亲喂计划。"
+    return f"识别到 {len(windows)} 个不可用时间段，发现 {len(conflicts)} 个冲突，建议调整 {len(updates)} 个吸奶/亲喂任务。"
+
+
+def _next_task_id(conn: Any, *, user_id: str, target_date: str) -> int:
+    row = conn.execute(
+        "SELECT COALESCE(MAX(task_id), 0) AS max_task_id FROM calendar WHERE user_id = ? AND date = ?",
+        (user_id, target_date),
+    ).fetchone()
+    return int(row["max_task_id"] or 0) + 1
+
+
 def _range_window(start_at: Any, end_at: Any) -> dict[str, Any]:
     start_dt = parse_datetime(start_at)
     end_dt = parse_datetime(end_at)
@@ -806,6 +1174,21 @@ def _idempotent_calendar_adjustment_item_id(*, user_id: str, idempotency_key: st
         (user_id, idempotency_key),
     )
     return to_int(row.get("resource_id"), 0) if row else 0
+
+
+def _idempotent_calendar_reschedule_applied(*, user_id: str, idempotency_key: str) -> bool:
+    row = fetch_one(
+        """
+        SELECT resource_id
+        FROM tool_idempotency_log
+        WHERE user_id = ?
+          AND tool_name = 'milk_calendar_mutate.apply_reschedule'
+          AND idempotency_key = ?
+        LIMIT 1
+        """,
+        (user_id, idempotency_key),
+    )
+    return row is not None
 
 
 def _calendar_item_by_id(item_id: int) -> dict[str, Any] | None:

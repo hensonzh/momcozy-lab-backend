@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 import tempfile
 import unittest
 from datetime import datetime, timedelta
@@ -9,12 +10,20 @@ from typing import Any
 MILK_MANAGEMENT_TOOLS_DB_PATH = os.path.join(tempfile.mkdtemp(prefix="momcozy-agent-tests-"), "milk_management.db")
 os.environ["MILK_DB_PATH"] = MILK_MANAGEMENT_TOOLS_DB_PATH
 
-from momcozy_agent.services.milk_management.calendar import apply_calendar_adjustment, preview_calendar_adjustment
-from momcozy_agent.services.milk_management.db import transaction
+from momcozy_agent.services.milk_management.calendar import (
+    apply_calendar_adjustment,
+    apply_calendar_reschedule,
+    preview_calendar_adjustment,
+    preview_day_reschedule,
+)
+from momcozy_agent.services.milk_management.db import fetch_all, transaction
 from momcozy_agent.services.milk_management.growth_mutation import mutate_infant_growth
+from momcozy_agent.services.milk_management.assessment import evaluate_milk_status
 from momcozy_agent.services.milk_management.plan import apply_milk_plan, preview_milk_plan, validate_milk_plan
 from momcozy_agent.services.milk_management.status import query_milk_status
 from momcozy_agent.services.milk_management.task_completion import complete_milk_task
+from momcozy_agent.agents import model_tool_output
+from momcozy_agent.tool_handlers.milk_management import execute_milk_management_tool
 
 
 class MilkManagementToolTests(unittest.TestCase):
@@ -183,6 +192,161 @@ class MilkManagementToolTests(unittest.TestCase):
         validation = validate_milk_plan(user_id=uid, plan=draft)
         self.assertTrue(validation["data"]["valid"])
 
+    def test_assessment_separates_calendar_tasks_from_pumping_records(self) -> None:
+        uid, _ = _seed_user("assessment-calendar-vs-records")
+        for index, time in enumerate(["00:00", "03:00", "06:00", "09:00", "12:00", "15:00", "18:00", "21:00"], start=1):
+            _add_task(
+                uid,
+                task_id=index,
+                content="吸奶",
+                item_type="吸奶",
+                is_milk_pump=1,
+                target_date="2026-05-13",
+                start_time=time,
+                finish="true",
+            )
+        _add_pumping_rows(uid, "2026-05-13", ["06:00", "09:00", "12:00", "18:00", "21:00"])
+
+        result = evaluate_milk_status(
+            user_id=uid,
+            as_of_time="2026-05-14 12:00:00",
+            window_days=1,
+            include_today=False,
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["data"]["pumping_summary"]["count"], 5)
+        calendar_summary = result["data"]["calendar_task_summary"]
+        self.assertEqual(calendar_summary["pump_task_count"], 8)
+        self.assertEqual(calendar_summary["completed_pump_task_count"], 8)
+        self.assertEqual(calendar_summary["average_completed_pump_tasks_per_day"], 8.0)
+
+    def test_assessment_tool_returns_structured_analysis_card(self) -> None:
+        uid, _ = _seed_user("assessment-card")
+        for index, time in enumerate(["00:00", "03:00", "06:00", "09:00", "12:00", "15:00", "18:00", "21:00"], start=1):
+            _add_task(
+                uid,
+                task_id=index,
+                content="吸奶",
+                item_type="吸奶",
+                is_milk_pump=1,
+                target_date="2026-05-13",
+                start_time=time,
+                finish="true",
+            )
+        _add_pumping_rows(uid, "2026-05-13", ["06:00", "09:00", "12:00", "18:00", "21:00"])
+
+        result = execute_milk_management_tool(
+            {
+                "_tool_name": "milk_assessment_evaluate",
+                "user_id": uid,
+                "as_of_time": "2026-05-14 12:00:00",
+                "window_days": 1,
+                "include_today": False,
+            },
+            {"user_message": "分析最近吸奶情况", "locale": "zh-CN", "timezone": "Asia/Shanghai", "message_sent_at": ""},
+        )
+
+        self.assertEqual(result["card"]["card_type"], "milk_analysis_card")
+        card_json = result["card"]["card_json"]
+        self.assertEqual(card_json["sections"][0]["title"], "数据口径")
+        self.assertIn("记录与补录", card_json["sections"][0]["metrics"][1]["label"])
+        compact = model_tool_output({"ok": True, "tool_name": "milk_assessment_evaluate", "result": result})
+        self.assertEqual(compact["card"]["card_type"], "milk_analysis_card")
+        self.assertTrue(compact["card"]["created"])
+        self.assertIn("不要重复卡片", compact["final_response_instruction"])
+        self.assertNotIn("data", compact)
+
+    def test_assessment_tool_suppresses_analysis_card_for_plan_intent(self) -> None:
+        uid, _ = _seed_user("assessment-card-suppressed")
+        _add_pumping_rows(uid, "2026-05-13", ["06:00", "09:00", "12:00", "18:00", "21:00"])
+
+        result = execute_milk_management_tool(
+            {
+                "_tool_name": "milk_assessment_evaluate",
+                "user_id": uid,
+                "as_of_time": "2026-05-14 12:00:00",
+                "window_days": 1,
+                "include_today": False,
+            },
+            {"user_message": "帮我生成追奶计划", "locale": "zh-CN", "timezone": "Asia/Shanghai", "message_sent_at": ""},
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertNotIn("card", result)
+
+    def test_plan_preview_prefers_calendar_pump_schedule_over_measured_records(self) -> None:
+        uid, _ = _seed_user("plan-calendar-schedule")
+        times = ["00:00", "03:00", "06:00", "09:00", "12:00", "15:00", "18:00", "21:00"]
+        for offset, day in enumerate(["2026-05-07", "2026-05-08", "2026-05-09", "2026-05-10", "2026-05-11", "2026-05-12", "2026-05-13"]):
+            for index, time in enumerate(times, start=1):
+                _add_task(
+                    uid,
+                    task_id=offset * 10 + index,
+                    content="吸奶",
+                    item_type="吸奶",
+                    is_milk_pump=1,
+                    target_date=day,
+                    start_time=time,
+                    finish="true",
+                )
+            _add_pumping_rows(uid, day, ["06:00", "09:00", "12:00", "18:00", "21:00"])
+
+        result = preview_milk_plan(
+            user_id=uid,
+            plan_type="increase_milk",
+            plan_days=7,
+            as_of_time="2026-05-14 12:00:00",
+            options={
+                "prepared_growth_assessment": {"status": "normal"},
+                "observed_persistent_abnormal": True,
+            },
+        )
+
+        self.assertTrue(result["ok"])
+        draft = result["data"]["draft"]
+        self.assertEqual(draft["observation_context"]["calendar_pump_tasks_per_day"], 8)
+        self.assertEqual(draft["observation_context"]["recorded_pumping_logs_per_day"], 5)
+        self.assertEqual(draft["generation_context"]["calendar_pump_times"], times)
+
+    def test_plan_preview_tool_returns_structured_plan_card(self) -> None:
+        uid, _ = _seed_user("plan-card")
+        times = ["00:00", "03:00", "06:00", "09:00", "12:00", "15:00", "18:00", "21:00"]
+        for offset, day in enumerate(["2026-05-07", "2026-05-08", "2026-05-09", "2026-05-10", "2026-05-11", "2026-05-12", "2026-05-13"]):
+            for index, time in enumerate(times, start=1):
+                _add_task(
+                    uid,
+                    task_id=offset * 10 + index,
+                    content="吸奶",
+                    item_type="吸奶",
+                    is_milk_pump=1,
+                    target_date=day,
+                    start_time=time,
+                    finish="true",
+                )
+            _add_pumping_rows(uid, day, ["06:00", "09:00", "12:00", "18:00", "21:00"])
+
+        result = execute_milk_management_tool(
+            {
+                "_tool_name": "milk_plan_preview",
+                "user_id": uid,
+                "plan_type": "increase_milk",
+                "plan_days": 7,
+                "as_of_time": "2026-05-14 12:00:00",
+                "options": {"prepared_growth_assessment": {"status": "normal"}, "observed_persistent_abnormal": True},
+            },
+            {"user_message": "", "locale": "zh-CN", "timezone": "Asia/Shanghai", "message_sent_at": ""},
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["card"]["card_type"], "milk_plan_card")
+        self.assertEqual(result["card"]["card_json"]["sections"][0]["title"], "计划方向")
+        compact = model_tool_output({"ok": True, "tool_name": "milk_plan_preview", "result": result})
+        self.assertEqual(compact["card"]["card_type"], "milk_plan_card")
+        self.assertTrue(compact["card"]["created"])
+        self.assertIn("不要重复卡片", compact["final_response_instruction"])
+        self.assertIn("confirmed_plan_for_save", compact["plan_preview"])
+
     def test_plan_create_requires_strategy_when_future_plan_tasks_exist(self) -> None:
         uid, _ = _seed_user("plan-strategy-required")
         _seed_saved_plan_calendar(uid, task_count=3)
@@ -229,6 +393,22 @@ class MilkManagementToolTests(unittest.TestCase):
         self.assertEqual(replaced["data"]["replaced_calendar_count"], 3)
         self.assertEqual(_future_plan_task_count(replace_uid, plan_days=2), 2)
 
+    def test_plan_create_starts_calendar_tomorrow(self) -> None:
+        uid, _ = _seed_user("plan-starts-tomorrow")
+        plan = _simple_maintain_plan(plan_days=2)
+
+        result = apply_milk_plan(
+            user_id=uid,
+            confirmed_plan=plan,
+            idempotency_key="plan-starts-tomorrow",
+        )
+
+        self.assertTrue(result["ok"])
+        tomorrow = datetime.now().date() + timedelta(days=1)
+        self.assertEqual(result["data"]["calendar_delta"]["date_range"]["start_date"], tomorrow.isoformat())
+        rows = _calendar_dates(uid)
+        self.assertEqual(rows, [tomorrow.isoformat(), (tomorrow + timedelta(days=1)).isoformat()])
+
     def test_calendar_adjustment_apply_is_idempotent_for_same_key(self) -> None:
         uid, _ = _seed_user("calendar-adjustment-idempotent")
         today = _today()
@@ -273,6 +453,47 @@ class MilkManagementToolTests(unittest.TestCase):
         self.assertEqual(preview["data"]["updates"][0]["item_id"], item_id)
         self.assertEqual(preview["data"]["updates"][0]["new_start_time"], "2026-05-14 10:00:00")
 
+    def test_calendar_reschedule_preview_and_apply_uses_busy_windows(self) -> None:
+        uid, _ = _seed_user("calendar-reschedule")
+        item_id = _add_task(uid, task_id=1, content="吸奶", item_type="吸奶", is_milk_pump=1, start_time="09:00")
+        _add_task(uid, task_id=2, content="吸奶", item_type="吸奶", is_milk_pump=1, start_time="13:00")
+
+        preview = preview_day_reschedule(
+            user_id=uid,
+            target_date="2026-05-14",
+            busy_windows=json.dumps([{"start_time": "09:00", "end_time": "10:30", "content": "团队会议"}], ensure_ascii=False),
+            adjustable_item_types=json.dumps(["吸奶"], ensure_ascii=False),
+            plan_id=None,
+            default_duration_minutes=20,
+            min_gap_minutes=90,
+            include_busy_events=True,
+        )
+
+        self.assertTrue(preview["ok"])
+        self.assertEqual(preview["data"]["conflict_count"], 1)
+        self.assertEqual(preview["data"]["updates"][0]["item_id"], item_id)
+        self.assertEqual(preview["data"]["updates"][0]["new_start_time"], "2026-05-14 08:40:00")
+
+        applied = apply_calendar_reschedule(
+            user_id=uid,
+            target_date="2026-05-14",
+            proposal=preview["data"]["proposal"],
+            idempotency_key="calendar-reschedule-key",
+        )
+        replay = apply_calendar_reschedule(
+            user_id=uid,
+            target_date="2026-05-14",
+            proposal=preview["data"]["proposal"],
+            idempotency_key="calendar-reschedule-key",
+        )
+
+        self.assertTrue(applied["ok"])
+        self.assertEqual(applied["data"]["applied_updates"][0]["item_id"], item_id)
+        self.assertEqual(_scalar("SELECT COUNT(*) FROM calendar WHERE user_id = ? AND type = '自定义'", (uid,)), 1)
+        self.assertEqual(_scalar_text("SELECT start_time FROM calendar WHERE user_id = ? AND item_id = ?", (uid, item_id)), "2026-05-14 08:40:00")
+        self.assertEqual(replay["status"], "calendar_reschedule_idempotent_replay")
+        self.assertEqual(_scalar("SELECT COUNT(*) FROM calendar WHERE user_id = ? AND type = '自定义'", (uid,)), 1)
+
 
 def _seed_user(user_id: str) -> tuple[str, int]:
     with transaction() as conn:
@@ -292,14 +513,37 @@ def _seed_user(user_id: str) -> tuple[str, int]:
         return user_id, int(cursor.lastrowid or 0)
 
 
-def _add_task(user_id: str, *, task_id: int, content: str, item_type: str, is_milk_pump: int) -> int:
+def _add_task(
+    user_id: str,
+    *,
+    task_id: int,
+    content: str,
+    item_type: str,
+    is_milk_pump: int,
+    target_date: str = "2026-05-14",
+    start_time: str = "09:00",
+    duration_minutes: int = 20,
+    finish: str = "false",
+) -> int:
+    start_at = datetime.fromisoformat(f"{target_date} {start_time}:00")
+    end_at = start_at + timedelta(minutes=duration_minutes)
     with transaction() as conn:
         cursor = conn.execute(
             """
             INSERT INTO calendar(user_id, date, task_id, start_time, end_time, content, type, source, is_milk_pump, finish)
-            VALUES (?, '2026-05-14', ?, '2026-05-14 09:00:00', '2026-05-14 09:20:00', ?, ?, '系统生成', ?, 'false')
+            VALUES (?, ?, ?, ?, ?, ?, ?, '系统生成', ?, ?)
             """,
-            (user_id, int(task_id), content, item_type, int(is_milk_pump)),
+            (
+                user_id,
+                target_date,
+                int(task_id),
+                start_at.strftime("%Y-%m-%d %H:%M:%S"),
+                end_at.strftime("%Y-%m-%d %H:%M:%S"),
+                content,
+                item_type,
+                int(is_milk_pump),
+                finish,
+            ),
         )
         return int(cursor.lastrowid or 0)
 
@@ -346,7 +590,7 @@ def _simple_maintain_plan(*, plan_days: int) -> dict[str, Any]:
 
 
 def _seed_saved_plan_calendar(user_id: str, *, task_count: int) -> None:
-    start = datetime.now().date()
+    start = datetime.now().date() + timedelta(days=1)
     with transaction() as conn:
         cursor = conn.execute(
             """
@@ -376,7 +620,7 @@ def _seed_saved_plan_calendar(user_id: str, *, task_count: int) -> None:
 
 
 def _future_plan_task_count(user_id: str, *, plan_days: int) -> int:
-    start = datetime.now().date()
+    start = datetime.now().date() + timedelta(days=1)
     end = start + timedelta(days=plan_days)
     return _scalar(
         """
@@ -393,6 +637,20 @@ def _future_plan_task_count(user_id: str, *, plan_days: int) -> int:
     )
 
 
+def _calendar_dates(user_id: str) -> list[str]:
+    rows = fetch_all(
+        """
+        SELECT date
+        FROM calendar
+        WHERE user_id = ?
+          AND plan_id IS NOT NULL
+        ORDER BY date ASC, start_time ASC
+        """,
+        (user_id,),
+    )
+    return [str(row["date"]) for row in rows]
+
+
 def _today() -> str:
     return datetime.now().date().isoformat()
 
@@ -406,6 +664,12 @@ def _scalar(sql: str, params: tuple[Any, ...]) -> int:
     with transaction() as conn:
         row = conn.execute(sql, params).fetchone()
         return int(row[0] or 0)
+
+
+def _scalar_text(sql: str, params: tuple[Any, ...]) -> str:
+    with transaction() as conn:
+        row = conn.execute(sql, params).fetchone()
+        return str(row[0] or "") if row else ""
 
 
 if __name__ == "__main__":

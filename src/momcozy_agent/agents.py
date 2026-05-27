@@ -295,6 +295,8 @@ def safe_tool_result(result: dict[str, Any]) -> dict[str, Any]:
             safe["card"] = tool_result["card"]
             if isinstance(tool_result.get("assistant_followup"), dict):
                 safe["assistant_followup"] = tool_result["assistant_followup"]
+        if result.get("tool_name") in {"milk_assessment_evaluate", "milk_plan_preview"} and isinstance(tool_result.get("card"), dict):
+            safe["card"] = tool_result["card"]
         if result.get("tool_name") == "ibclc_consult_card_create" and isinstance(tool_result.get("card"), dict):
             safe["card"] = tool_result["card"]
         if result.get("tool_name") == "support_ticket_draft_create" and isinstance(tool_result.get("ticket"), dict):
@@ -320,6 +322,21 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
 
     safe = safe_tool_result(result)
     tool_name = str(safe.get("tool_name") or "")
+    if tool_name == "milk_assessment_evaluate" and isinstance(safe.get("card"), dict):
+        return _compact_card_tool_output(
+            safe,
+            "分析结果已经通过结构化卡片展示。最终回复只用 1-2 句话承接，不要重复卡片里的标题、指标、章节或清单；可以询问用户是否要生成从明天开始的温和追奶、稳奶或减奶计划。",
+        )
+    if tool_name == "milk_plan_preview" and isinstance(safe.get("card"), dict):
+        compact = _compact_card_tool_output(
+            safe,
+            "计划草稿已经通过结构化卡片展示。最终回复只询问用户是否同步到日历或如何确认，不要重复卡片里的计划方向、目标、安排、观察点或同步说明。",
+        )
+        plan_preview = _compact_milk_plan_preview_for_model(result)
+        if plan_preview:
+            compact["plan_preview"] = plan_preview
+        return compact
+
     if tool_name not in {
         "ui_form_create",
         "ui_card_create",
@@ -387,6 +404,85 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
             "status": ticket.get("status"),
             "created": True,
         }
+
+    return compact
+
+
+def _compact_card_tool_output(safe: dict[str, Any], final_response_instruction: str) -> dict[str, Any]:
+    compact: dict[str, Any] = {
+        "ok": safe.get("ok"),
+        "tool_name": safe.get("tool_name"),
+        "final_response_instruction": final_response_instruction,
+    }
+    for key in (
+        "id",
+        "skill_id",
+        "status",
+        "resource_id",
+        "side_effect_performed",
+        "summary",
+        "requires_confirmation",
+        "requires_medical_confirmation",
+        "confirmation_question",
+        "error",
+    ):
+        if key in safe:
+            compact[key] = safe[key]
+
+    card = safe.get("card")
+    if isinstance(card, dict):
+        card_json = card.get("card_json")
+        card_json_dict = card_json if isinstance(card_json, dict) else {}
+        compact["card"] = {
+            "card_type": card.get("card_type") or card_json_dict.get("card_type"),
+            "schema_version": card.get("schema_version") or card_json_dict.get("schema_version"),
+            "created": True,
+        }
+    return compact
+
+
+def _compact_milk_plan_preview_for_model(result: dict[str, Any]) -> dict[str, Any]:
+    """Keep save-critical plan payload available without asking the model to narrate it."""
+
+    tool_result = result.get("result")
+    if not isinstance(tool_result, dict):
+        return {}
+    data = tool_result.get("data")
+    if not isinstance(data, dict):
+        return {}
+
+    compact: dict[str, Any] = {
+        "usage": "仅供用户确认保存计划时调用 milk_plan_mutate；最终回复不要展开这里的字段。",
+    }
+    for key in ("requires_confirmation", "requires_medical_confirmation", "confirmation_question"):
+        if key in data:
+            compact[key] = data[key]
+
+    validation = data.get("validation")
+    if isinstance(validation, dict):
+        compact["validation"] = {
+            key: validation[key]
+            for key in ("valid", "status", "summary")
+            if key in validation
+        }
+
+    calendar_delta = data.get("calendar_delta")
+    if isinstance(calendar_delta, dict):
+        compact["calendar_delta"] = {
+            key: calendar_delta[key]
+            for key in (
+                "date_range",
+                "draft_calendar_task_count",
+                "existing_future_plan_task_count",
+                "calendar_write_strategy_required",
+                "recommended_calendar_write_strategy",
+            )
+            if key in calendar_delta
+        }
+
+    draft = data.get("draft")
+    if isinstance(draft, dict):
+        compact["confirmed_plan_for_save"] = draft
 
     return compact
 

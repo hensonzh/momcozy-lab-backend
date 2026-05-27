@@ -8,7 +8,17 @@ from typing import Any
 
 from .db import fetch_all, fetch_one, get_knowledge_root
 from .feeding import estimate_breastfeeding_milk, get_yesterday_feeding_snapshot
-from .schemas import ServiceResult, error_result, norm_text, ok_result, parse_datetime, to_int
+from .schemas import (
+    CALENDAR_TYPE_NURSING,
+    CALENDAR_TYPE_PUMP,
+    ServiceResult,
+    error_result,
+    norm_text,
+    ok_result,
+    parse_datetime,
+    to_bool,
+    to_int,
+)
 
 
 def evaluate_milk_status(
@@ -72,9 +82,24 @@ def evaluate_milk_status(
         """,
         (uid, _db_time(start_dt), _db_time(end_dt)),
     )
+    start_day = start_dt.date()
+    end_day = _inclusive_end_day(end_dt)
+    calendar_tasks = fetch_all(
+        """
+        SELECT item_id, user_id, date, task_id, start_time, end_time, content, type, source, is_milk_pump, finish
+        FROM calendar
+        WHERE user_id = ?
+          AND date >= ?
+          AND date <= ?
+          AND type IN (?, ?)
+        ORDER BY date ASC, start_time ASC, task_id ASC
+        """,
+        (uid, start_day.isoformat(), end_day.isoformat(), CALENDAR_TYPE_PUMP, CALENDAR_TYPE_NURSING),
+    )
 
     pumping_summary = _summarize_pumping(pumping_logs)
     feeding_summary = _summarize_feeding(feeding_logs)
+    calendar_task_summary = _summarize_calendar_tasks(calendar_tasks, start_day=start_day, end_day=end_day)
     yesterday_feeding_snapshot = (
         get_yesterday_feeding_snapshot(user_id=uid, as_of_time=_db_time(as_of_dt))
         if days == 1 and not include_today
@@ -101,7 +126,14 @@ def evaluate_milk_status(
     elif normality.get("overall_status") in {"under_supply_alert", "over_supply_alert", "normal"}:
         status = norm_text(normality.get("overall_status"))
 
-    summary = _summary_text(status, pumping_summary, feeding_summary, missing_data, normality)
+    summary = _summary_text(
+        status,
+        pumping_summary,
+        feeding_summary,
+        calendar_task_summary,
+        missing_data,
+        normality,
+    )
     return ok_result(
         "milk_status_evaluated",
         summary,
@@ -118,6 +150,7 @@ def evaluate_milk_status(
             "infants": infants,
             "pumping_summary": pumping_summary,
             "feeding_summary": feeding_summary,
+            "calendar_task_summary": calendar_task_summary,
             "yesterday_feeding_snapshot": yesterday_feeding_snapshot,
             "quick_24h_intake": quick_24h_intake,
             "milk_normality": normality,
@@ -166,6 +199,81 @@ def _summarize_feeding(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "times": times,
         "has_formula": any("奶粉" in key or "formula" in key.lower() for key in type_counts),
         "has_breastfeeding": any("亲喂" in key or "breast" in key.lower() for key in type_counts),
+    }
+
+
+def _summarize_calendar_tasks(
+    rows: list[dict[str, Any]],
+    *,
+    start_day: date,
+    end_day: date,
+) -> dict[str, Any]:
+    days: dict[str, dict[str, Any]] = {}
+    day_ptr = start_day
+    while day_ptr <= end_day:
+        days[day_ptr.isoformat()] = {
+            "date": day_ptr.isoformat(),
+            "task_count": 0,
+            "pump_task_count": 0,
+            "nursing_task_count": 0,
+            "completed_count": 0,
+            "completed_pump_task_count": 0,
+            "completed_nursing_task_count": 0,
+            "pump_times": [],
+            "completed_pump_times": [],
+        }
+        day_ptr += timedelta(days=1)
+
+    totals = {
+        "task_count": 0,
+        "pump_task_count": 0,
+        "nursing_task_count": 0,
+        "completed_count": 0,
+        "completed_pump_task_count": 0,
+        "completed_nursing_task_count": 0,
+    }
+    for row in rows:
+        day = norm_text(row.get("date"))
+        if day not in days:
+            continue
+        item_type = norm_text(row.get("type"))
+        is_pump = item_type == CALENDAR_TYPE_PUMP or to_bool(row.get("is_milk_pump"))
+        is_nursing = item_type == CALENDAR_TYPE_NURSING
+        completed = _is_finished(row.get("finish"))
+        slot = days[day]
+        slot["task_count"] += 1
+        totals["task_count"] += 1
+        if completed:
+            slot["completed_count"] += 1
+            totals["completed_count"] += 1
+        if is_pump:
+            slot["pump_task_count"] += 1
+            totals["pump_task_count"] += 1
+            time_text = _time_text(row.get("start_time"))
+            if time_text:
+                slot["pump_times"].append(time_text)
+            if completed:
+                slot["completed_pump_task_count"] += 1
+                totals["completed_pump_task_count"] += 1
+                if time_text:
+                    slot["completed_pump_times"].append(time_text)
+        elif is_nursing:
+            slot["nursing_task_count"] += 1
+            totals["nursing_task_count"] += 1
+            if completed:
+                slot["completed_nursing_task_count"] += 1
+                totals["completed_nursing_task_count"] += 1
+
+    day_count = max((end_day - start_day).days + 1, 1)
+    daily = list(days.values())
+    return {
+        **totals,
+        "days": day_count,
+        "average_pump_tasks_per_day": round(totals["pump_task_count"] / day_count, 1),
+        "average_completed_pump_tasks_per_day": round(totals["completed_pump_task_count"] / day_count, 1),
+        "average_tasks_per_day": round(totals["task_count"] / day_count, 1),
+        "average_completed_tasks_per_day": round(totals["completed_count"] / day_count, 1),
+        "daily": daily,
     }
 
 
@@ -541,15 +649,25 @@ def _summary_text(
     status: str,
     pumping: dict[str, Any],
     feeding: dict[str, Any],
+    calendar_tasks: dict[str, Any],
     missing: list[str],
     normality: dict[str, Any],
 ) -> str:
     if status == "insufficient_data":
         return "当前奶量评估数据不足，需要补充关键资料或近 24 小时记录。"
     normality_summary = norm_text(normality.get("summary"))
+    completed_pump_tasks = to_int(calendar_tasks.get("completed_pump_task_count"), 0)
+    total_pump_tasks = to_int(calendar_tasks.get("pump_task_count"), 0)
+    total_records = to_int(pumping.get("count"), 0) + to_int(feeding.get("count"), 0)
+    task_text = (
+        f"窗口内计划吸奶任务 {total_pump_tasks} 个，计划页标记完成 {completed_pump_tasks} 个；"
+        if total_pump_tasks > 0
+        else ""
+    )
     return (
-        f"窗口内共有 {pumping['count']} 次吸奶，记录奶量约 {pumping['total_ml']} ml；"
-        f"喂养记录 {feeding['count']} 次。"
+        task_text
+        + f"记录与补录合计 {total_records} 条，其中有奶量的吸奶记录 {pumping['count']} 条，记录奶量约 {pumping['total_ml']} ml；"
+        f"喂养记录 {feeding['count']} 条。"
         + (f" {normality_summary}" if normality_summary else "")
         + (f" 缺失信息：{', '.join(missing)}。" if missing else "")
     )
@@ -676,6 +794,10 @@ def _date_from_value(value: Any) -> date | None:
     return parsed.date() if parsed is not None else None
 
 
+def _inclusive_end_day(end_dt: datetime) -> date:
+    return (end_dt - timedelta(microseconds=1)).date()
+
+
 def _db_time(value: datetime) -> str:
     return value.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -683,6 +805,11 @@ def _db_time(value: datetime) -> str:
 def _time_text(value: Any) -> str:
     parsed = parse_datetime(value)
     return parsed.strftime("%H:%M") if parsed else ""
+
+
+def _is_finished(value: Any) -> bool:
+    token = norm_text(value).lower()
+    return token in {"true", "1", "yes", "done", "completed", "已完成", "完成"}
 
 
 def _float(value: Any) -> float:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import runpy
 import socket
 import sys
 import threading
@@ -21,10 +22,11 @@ def main() -> None:
     sys.path.insert(0, str(SRC))
 
     from momcozy_agent.config import load_project_env
-    from momcozy_agent.server import main as run_chat_server
 
     env_path = ROOT / ".env"
     load_project_env(env_path)
+    from momcozy_agent.server import main as run_chat_server
+
     entry_api_key = _read_env_value(env_path, "ENTRY_API_KEY")
     if entry_api_key:
         os.environ["ENTRY_API_KEY"] = entry_api_key
@@ -44,6 +46,9 @@ def main() -> None:
 
     if not (os.getenv("ENTRY_API_KEY") or "").strip():
         print("Warning: ENTRY_API_KEY is not set; /api/ag-ui-ws will reject WebSocket clients.")
+
+    if _auto_seed_status_demo_enabled():
+        _seed_status_demo_data()
 
     if not _is_port_open(CHAT_HOST, CHAT_PORT):
         chat_thread = threading.Thread(target=run_chat_server, name="momcozy-chat-sse", daemon=True)
@@ -105,6 +110,20 @@ def _run_web_data_server(host: str, port: int) -> None:
     import uvicorn
 
     uvicorn.run("web_data.app:app", host=host, port=port, reload=False)
+
+
+def _auto_seed_status_demo_enabled() -> bool:
+    raw = os.getenv("MOMCOZY_AUTO_SEED_STATUS_DEMO", "1").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
+
+def _seed_status_demo_data() -> None:
+    seed_path = ROOT / "scripts" / "seed_status_demo_data.py"
+    namespace = runpy.run_path(str(seed_path))
+    seed_main = namespace.get("main")
+    if not callable(seed_main):
+        raise RuntimeError(f"Seed script {seed_path} does not expose main().")
+    seed_main()
 
 
 def _wait_for_port(host: str, port: int, *, timeout_seconds: float) -> None:

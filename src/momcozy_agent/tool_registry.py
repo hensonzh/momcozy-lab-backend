@@ -57,6 +57,7 @@ MILK_MANAGEMENT_TOOLS: list[ToolName] = [
     "milk_plan_mutate",
     "milk_calendar_query",
     "milk_calendar_change_preview",
+    "milk_calendar_reschedule_preview",
     "milk_calendar_mutate",
     "milk_task_complete",
 ]
@@ -70,6 +71,7 @@ MILK_MANAGEMENT_READ_ONLY_TOOLS: set[ToolName] = {
     "milk_plan_preview",
     "milk_calendar_query",
     "milk_calendar_change_preview",
+    "milk_calendar_reschedule_preview",
 }
 
 DEFERRED_TOOL_NAMESPACES: dict[str, dict[str, Any]] = {
@@ -82,7 +84,7 @@ DEFERRED_TOOL_NAMESPACES: dict[str, dict[str, Any]] = {
         "tool_names": ["device_manual_search", "support_ticket_draft_create"],
     },
     "milk_management": {
-        "description": "用于奶量状态聚合、奶量评估、宝宝生长记录、任意时间段记录读取/修改、追奶/稳奶/减奶计划、计划执行情况读取、任务完成和奶量 calendar 调整的聚合工具。",
+        "description": "用于奶量管理的分析与建议工具体系：读取吸奶、亲喂、瓶喂、奶粉、宝宝生长和 calendar 执行数据，评估奶量状态，并生成当下建议、追奶/稳奶/减奶计划或日程调整。",
         "tool_names": MILK_MANAGEMENT_TOOLS,
     },
     "hospital_bag_cart": {

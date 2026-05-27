@@ -13,6 +13,10 @@ JSON_OBJECT_STRING = {
     "type": "string",
     "description": '以字符串编码的自由 JSON 对象。不需要字段时使用 "{}"。',
 }
+JSON_ARRAY_STRING = {
+    "type": "string",
+    "description": '以字符串编码的自由 JSON 数组。不需要字段时使用 "[]"。',
+}
 ISO_DATE = {"type": "string", "description": "ISO-8601 日期，例如 2026-05-07。"}
 
 
@@ -284,7 +288,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "device_manual_search": _function_tool(
         "device_manual_search",
-        "补充 Momcozy 吸奶器设备资料。无副作用。用于获取当前型号说明书、检索 FAQ 问答、查找步骤图片，并在 Air1 开箱场景返回产品亮点、Quick Start PDF 和操作视频资源。用户问部件是什么、作用原理、为什么、能不能、多少、区别、是否正常等日常设备知识时，应使用 topic=faq 检索 FAQ。已获得同型号 manual 后，连续步骤应复用已有内容；只有新的 FAQ 问题或缺少步骤图片时才再次调用。",
+        "补充 Momcozy 吸奶器设备资料。无副作用。用于获取当前型号说明书、检索 FAQ 问答、查找步骤图片，并在 Air1 开箱场景返回产品亮点、Quick Start PDF 和操作视频资源。展示资源时使用工具结果中的 markdown_link，禁止把 /skill-assets/... 原始路径直接输出给用户。用户问部件是什么、作用原理、为什么、能不能、多少、区别、是否正常等日常设备知识时，应使用 topic=faq 检索 FAQ。已获得同型号 manual 后，连续步骤应复用已有内容；只有新的 FAQ 问题或缺少步骤图片时才再次调用。",
         {
             "model": {"type": "string", "enum": ["Air1", "unknown"], "description": "已确认的设备型号。当前只支持 Air1；未知型号必须传 unknown。"},
             "query": {"type": "string", "description": "用户的设备问题，或需要检索的具体指导主题。"},
@@ -321,7 +325,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "milk_status_query": _function_tool(
         "milk_status_query",
-        "GET 只读工具：读取类似 MaiMomcozy 状态页的奶量聚合信息，包括妈妈宝宝资料、今日产奶/喂养、30 日趋势、宝宝生长记录和当天计划任务。适合用户问“现在状态怎么样”“今天数据”“状态页信息”。",
+        "GET 只读工具：读取类似 MaiMomcozy 状态页的奶量聚合信息，包括妈妈宝宝资料、今日产奶/喂养、30 日趋势、宝宝生长记录和当天计划任务。趋势数据包含每日总奶量、含亲喂估算奶量和参考奶量区间。适合用户问“现在状态怎么样”“今天数据”“状态页信息”或需要展示近期趋势事实。",
         {
             "section": {
                 "type": "string",
@@ -336,7 +340,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "milk_records_query": _function_tool(
         "milk_records_query",
-        "GET 只读工具：读取任意时间段内的吸奶、亲喂、母乳瓶喂和奶粉瓶喂记录，返回结构化原始记录和聚合摘要。用户问“过去一周/最近几天母乳情况、记录、趋势、每天多少”时优先只用本工具一次，通常 summary_granularity=daily 且 include_raw_records=false。不要在同一轮用相同 start_at/end_at/record_scope 重复调用；需要记录 ID 做修改/删除时才再次查询原始记录。亲喂奶量如出现估算会明确标记为 estimated。",
+        "GET 只读工具：读取任意时间段内的吸奶、亲喂、母乳瓶喂和奶粉瓶喂记录，返回结构化原始记录和聚合摘要。只适合用户明确要“查记录、列出每天多少、看原始记录、修改/删除某条记录”。本工具返回的是实际发生记录，不是计划；不要把记录时间称为“原计划/当前计划”。如果用户说“分析最近吸奶情况、奶量够不够、是否正常、趋势好不好、要不要追奶/稳奶/减奶”，不要只用本工具，必须改用或补用 milk_assessment_evaluate，因为本工具不返回参考奶量区间。不要在同一轮用相同 start_at/end_at/record_scope 重复调用；需要记录 ID 做修改/删除时才再次查询原始记录。亲喂奶量如出现估算会明确标记为 estimated。",
         {
             "start_at": {"type": "string", "description": "起始日期或日期时间，例如 2026-05-01 或 2026-05-01 08:00。"},
             "end_at": {"type": "string", "description": "结束日期或日期时间；日期会按整天处理并作为 exclusive end 的下一日 00:00。"},
@@ -368,7 +372,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "milk_plan_query": _function_tool(
         "milk_plan_query",
-        "GET 只读工具：读取已保存奶量计划。plan_id 不为 null 时读取单个计划；plan_id 为 null 时按 plan_type/limit 列出计划。",
+        "GET 只读工具：读取已保存奶量计划。用户提到“原计划、已有计划、当前追奶/稳奶/减奶计划、按计划调整”时使用。plan_id 不为 null 时读取单个计划；plan_id 为 null 时按 plan_type/limit 列出计划。具体每天几点执行通常还要配合 milk_calendar_query 读取 calendar。",
         {
             "plan_id": _nullable({"type": "integer"}),
             "plan_type": _nullable({"type": "string", "enum": ["increase_milk", "maintain_milk", "decrease_milk"]}),
@@ -377,7 +381,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "milk_plan_mutate": _function_tool(
         "milk_plan_mutate",
-        "CREATE/UPDATE/DELETE 写入工具：保存、更新或删除用户已确认的奶量计划。保存计划会展开写入 calendar；如未来已有计划任务，必须先让用户确认追加还是替换，再传 calendar_write_strategy。有副作用；只有用户明确确认后才调用。",
+        "CREATE/UPDATE/DELETE 写入工具：保存、更新或删除用户已确认的奶量计划。保存计划会从明天开始展开写入 calendar，不覆盖今天；如明天起已有未来计划任务，必须先让用户确认追加还是替换，再传 calendar_write_strategy。有副作用；只有用户明确确认后才调用。",
         {
             "operation": {"type": "string", "enum": ["create", "update", "delete"]},
             "plan_id": _nullable({"type": "integer"}),
@@ -389,7 +393,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
                 {
                     "type": "string",
                     "enum": ["append", "replace_future_plan_tasks"],
-                    "description": "create 保存计划时的日程写入方式。append=追加到现有日程；replace_future_plan_tasks=替换未来未完成的旧计划任务。无已有未来计划任务可传 null。",
+                    "description": "create 保存计划时的日程写入方式。append=追加到明天起现有日程；replace_future_plan_tasks=替换明天起未来未完成的旧计划任务。无已有未来计划任务可传 null。",
                 }
             ),
             "idempotency_key": {"type": "string"},
@@ -397,7 +401,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "milk_calendar_query": _function_tool(
         "milk_calendar_query",
-        "GET 只读工具：读取奶量 calendar/计划执行情况。query_mode=range 读取任意范围；today_overview/today_summary 读取某日概览或日结。",
+        "GET 只读工具：读取奶量 calendar/计划执行情况。calendar 是“今天安排、未来几天安排、原计划展开后的具体时间”的来源；不要用实际吸奶记录替代 calendar。query_mode=range 读取任意范围；today_overview/today_summary 读取某日概览或日结。",
         {
             "query_mode": {"type": "string", "enum": ["range", "today_overview", "today_summary"]},
             "target_date": _nullable(ISO_DATE),
@@ -422,11 +426,30 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
             "plan_id": _nullable({"type": "integer"}),
         },
     ),
+    "milk_calendar_reschedule_preview": _function_tool(
+        "milk_calendar_reschedule_preview",
+        "PREVIEW 日程重排工具：根据用户通过文字或图片提供的会议、通勤、外出等不可用时间段，读取目标日期当前 calendar，并预览如何重排当天吸奶/亲喂计划以避开这些时间段。不写数据库；写入前必须让用户确认。",
+        {
+            "target_date": ISO_DATE,
+            "busy_windows": {
+                **JSON_ARRAY_STRING,
+                "description": 'JSON 数组字符串，每项包含 start_time、end_time 或 duration_minutes、content。例如 [{"start_time":"09:00","end_time":"10:30","content":"会议"}]。图片里的日程先由模型识别成这个结构；不确定日期或时间时不要调用。',
+            },
+            "adjustable_item_types": {
+                **JSON_ARRAY_STRING,
+                "description": 'JSON 数组字符串，允许被重排的 calendar 类型。默认传 ["吸奶","亲喂"]；只想动吸奶计划时传 ["吸奶"]。',
+            },
+            "plan_id": _nullable({"type": "integer"}),
+            "default_duration_minutes": {"type": "integer", "description": "没有 end_time 的吸奶/亲喂任务默认持续时间，建议 20-30。"},
+            "min_gap_minutes": {"type": "integer", "description": "重排后吸奶/亲喂任务之间的最小间隔，建议 90。"},
+            "include_busy_events": {"type": "boolean", "description": "是否把会议/外出等不可用时间作为自定义事项一起写入 calendar；通常传 true。"},
+        },
+    ),
     "milk_calendar_mutate": _function_tool(
         "milk_calendar_mutate",
-        "APPLY/UPDATE/DELETE 写入工具：应用日程变更 proposal，或批量/单条修改、删除 calendar 条目。有副作用；只有用户明确确认后才调用。任务完成/跳过优先使用 milk_task_complete。",
+        "APPLY/UPDATE/DELETE 写入工具：应用日程变更 proposal、应用日程重排 proposal，或批量/单条修改、删除 calendar 条目。有副作用；只有用户明确确认后才调用。任务完成/跳过优先使用 milk_task_complete。",
         {
-            "operation": {"type": "string", "enum": ["apply_adjustment", "range_shift", "range_delete", "patch_items", "update_item", "delete_item"]},
+            "operation": {"type": "string", "enum": ["apply_adjustment", "apply_reschedule", "range_shift", "range_delete", "patch_items", "update_item", "delete_item"]},
             "target_date": _nullable(ISO_DATE),
             "proposal": JSON_OBJECT_STRING,
             "start_at": _nullable({"type": "string"}),
@@ -463,7 +486,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "milk_assessment_evaluate": _function_tool(
         "milk_assessment_evaluate",
-        "EVALUATE 只读工具：基于固定参考数据和记录聚合，返回近期奶量状态、缺失数据和规则命中。仅在用户明确问“是否正常、够不够、偏低/偏高、适合什么计划、生成追奶/稳奶/减奶计划”时调用；用户只问历史记录、过去一周母乳情况或每日趋势时不要默认调用。不是诊断，也不生成最终用户话术。",
+        "EVALUATE 只读工具：基于固定参考数据和记录聚合，返回近期奶量状态、缺失数据、每日参考奶量区间、含亲喂估算奶量和规则命中。用户问“分析最近吸奶情况、奶量够不够、是否正常、偏低/偏高、趋势好不好、适合什么计划、生成追奶/稳奶/减奶计划”时优先调用；只查历史明细或单纯列每天多少时才用 milk_records_query。不是诊断，也不生成最终用户话术。",
         {
             "as_of_time": _nullable({"type": "string", "description": "可选 ISO-8601 评估时间；不确定时传 null。"}),
             "window_days": {"type": "integer", "description": "回看天数。主动追奶/减奶/稳奶通常用 1；全面评估通常用 7。"},

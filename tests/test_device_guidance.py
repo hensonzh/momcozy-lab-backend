@@ -28,11 +28,25 @@ class DeviceGuidanceTests(unittest.TestCase):
             "/skill-assets/device-guidance/air1/quick-start/momcozy-air1-quick-start-guidance.pdf",
         )
         self.assertEqual(
+            resources[0]["markdown_link"],
+            "[Air1 快速上手指南](/skill-assets/device-guidance/air1/quick-start/momcozy-air1-quick-start-guidance.pdf)",
+        )
+        self.assertEqual(
             resources[1]["url"],
             "/skill-assets/device-guidance/air1/videos/air1-operation-zh.mp4",
         )
-        self.assertIn("用户确认型号后，先简短说明亮点", result["usage_guidance"])
+        self.assertEqual(
+            resources[1]["markdown_link"],
+            "[Air1 中文操作视频](/skill-assets/device-guidance/air1/videos/air1-operation-zh.mp4)",
+        )
+        self.assertIn("只使用每个资源的 markdown_link 字段", result["usage_guidance"])
+        self.assertIn("禁止直接展示 url 或 /skill-assets/...", result["usage_guidance"])
         self.assertIn("不要直接开始 manual 第一步", result["usage_guidance"])
+        self.assertIn("不要从 guide.parts 直接跳到 guide.controls", result["usage_guidance"])
+
+        manual_text = result["manual"]["content"]
+        self.assertIn("用户回复“好了 / 搞定 / 完成了”后，仍然停留在 `guide.parts`", manual_text)
+        self.assertIn("主机/整机、充电舱、磁吸充电线", manual_text)
 
     def test_air1_quick_start_resources_are_returned_when_manual_already_loaded(self) -> None:
         result = search_device_manual(

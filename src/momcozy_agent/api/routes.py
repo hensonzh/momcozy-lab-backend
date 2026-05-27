@@ -604,13 +604,13 @@ async def delete_feeding_endpoint(request: Request) -> dict[str, Any]:
 
 
 @router.get("/v1/feeding/query")
-async def query_today_feeding_endpoint(request: Request, user_id: str = "") -> dict[str, Any]:
+async def query_today_feeding_endpoint(request: Request, user_id: str = "", timestamp: str = "") -> dict[str, Any]:
     verify_api_key(request)
     uid = str(user_id or "").strip()
     if not uid:
         return _feeding_query_response(error=-1)
-    today = datetime.now().strftime("%Y-%m-%d")
-    records = data_store.list_feeding_records(user_id=uid, start_at=f"{today} 00:00:00", end_at=f"{today} 23:59:59")
+    target_date = _normalize_date(timestamp) or datetime.now().strftime("%Y-%m-%d")
+    records = data_store.list_feeding_records(user_id=uid, start_at=f"{target_date} 00:00:00", end_at=f"{target_date} 23:59:59")
     feed_list = []
     for record in records:
         code = data_store.FEED_TYPE_TEXT_TO_CODE.get(str(record.get("feed_type")), 0)
@@ -867,13 +867,13 @@ async def upload_pump_milk_endpoint(request: Request) -> dict[str, Any]:
 
 
 @router.get("/v1/pump-milk/query")
-async def query_pump_milk_endpoint(request: Request, user_id: str = "") -> dict[str, Any]:
+async def query_pump_milk_endpoint(request: Request, user_id: str = "", timestamp: str = "") -> dict[str, Any]:
     verify_api_key(request)
     uid = str(user_id or "").strip()
     if not uid:
         return _pump_query_response(error=-1)
-    today = datetime.now().strftime("%Y-%m-%d")
-    records = data_store.list_pumping_records(user_id=uid, start_at=f"{today} 00:00:00", end_at=f"{today} 23:59:59")
+    target_date = _normalize_date(timestamp) or datetime.now().strftime("%Y-%m-%d")
+    records = data_store.list_pumping_records(user_id=uid, start_at=f"{target_date} 00:00:00", end_at=f"{target_date} 23:59:59")
     pump_milk_list = [
         {
             "pump_id": int(r.get("pumping_id") or 0),
