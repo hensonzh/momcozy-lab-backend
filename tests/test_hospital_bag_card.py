@@ -2,10 +2,16 @@ from __future__ import annotations
 
 import unittest
 
-from momcozy_agent.tool_handlers.cards import create_card, create_hospital_bag_card
+from momcozy_agent.tool_handlers.cards import create_card, create_hospital_bag_card, create_hospital_bag_form
 
 
 class HospitalBagCardTests(unittest.TestCase):
+    def test_hospital_bag_form_submit_label_is_submit(self) -> None:
+        result = create_hospital_bag_form({}, {"user_message": ""})
+
+        self.assertEqual(result["form"]["id"], "hospital_bag_intake")
+        self.assertEqual(result["form"]["submit_label"], "提交")
+
     def test_adds_breast_pump_with_quantity_to_lactation_group(self) -> None:
         card_json = {
             "packing_groups": [
@@ -89,12 +95,14 @@ class HospitalBagCardTests(unittest.TestCase):
 
         groups = result["card"]["card_json"]["packing_groups"]
         items = [item for group in groups for item in group["items"]]
+        labels = [item["label"] for item in items]
         breast_pad = next(item for item in items if item["label"] == "防溢乳垫")
         fetal_monitor_band = next(item for item in items if item["label"] == "胎监带")
         belly_band = next(item for item in items if item["label"] == "收腹带")
         identity_document = next(item for item in items if item["label"] == "身份证件")
         birth_communication_card = next(item for item in items if item["label"] == "分娩沟通卡")
 
+        self.assertNotIn("润唇膏", labels)
         self.assertEqual(breast_pad["explain"], "放在内衣里吸收漏奶，避免衣服被打湿。")
         self.assertEqual(fetal_monitor_band["explain"], "做胎心监护时固定探头用，有些医院要求自带。")
         self.assertEqual(belly_band["explain"], "产后腹部支撑用品，剖宫产尤其要先问医生。")

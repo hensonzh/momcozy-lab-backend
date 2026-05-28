@@ -671,7 +671,7 @@ def create_hospital_bag_form(args: dict[str, Any], inputs: RuntimeInputs) -> dic
             "id": "hospital_bag_intake",
             "title": "信息采集",
             "description": "",
-            "submit_label": "开始生成",
+            "submit_label": "提交",
             "fields": fields,
         },
     }
@@ -1847,7 +1847,6 @@ def _hospital_bag_mom_items(context: dict[str, Any]) -> list[dict[str, Any]]:
         {"label": "纸巾/湿巾", "priority": "recommended", "quantity": "少量"},
         {"label": "毛巾", "priority": "recommended", "quantity": "1-2条"},
         {"label": "束发用品", "priority": "nice_to_have"},
-        {"label": "润唇膏", "priority": "nice_to_have"},
         {"label": "外套/披肩", "priority": "recommended", "quantity": "1件"},
         {
             "label": "胎监带",
