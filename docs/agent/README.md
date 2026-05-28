@@ -85,7 +85,9 @@ App 端 WebSocket 桥接入口：
 .venv/bin/python -u scripts/run_all.py
 ```
 
-默认在 `ENTRY_HOST:ENTRY_PORT` 启动统一 FastAPI 服务，默认 `0.0.0.0:8769`。该服务同时提供 Web Demo 的 `POST /api/ag-ui` SSE 接口和 App 的 `WS /api/ag-ui-ws` 接口。App 连接 `/api/ag-ui-ws` 后发送与 `/api/ag-ui` 相同的 AG-UI JSON 请求体，桥接层复用同一套 agent stream，并把每个 AG-UI event 作为 WebSocket JSON text frame 返回。这个入口只做传输协议适配，不改变 agent loop、skill 选择、tool registry 或 session 状态。
+默认在 `ENTRY_HOST:ENTRY_PORT` 启动统一 FastAPI 服务，默认 `0.0.0.0:8769`。该服务同时提供 Web Demo 的 `POST /api/ag-ui` SSE 接口、App 的 `WS /api/ag-ui-ws` 接口，以及 App 新建会话后台预热用的 `POST /api/ag-ui-prewarm`。App 连接 `/api/ag-ui-ws` 后发送与 `/api/ag-ui` 相同的 AG-UI JSON 请求体，桥接层复用同一套 agent stream，并把每个 AG-UI event 作为 WebSocket JSON text frame 返回。这个入口只做传输协议适配，不改变 agent loop、skill 选择、tool registry 或 session 状态。
+
+`/api/ag-ui-prewarm` 使用同一个 `threadId` 执行一轮隐藏、非流式、禁用工具的 Responses 请求，只保存 `ChatSession.previous_response_id`，不向前端生成消息或 work panel 事件。若真实用户消息先完成并写入了同一 session，预热结果会被视为 stale，不覆盖真实对话状态。
 
 确定性 App 操作可以走轻量 HTTP 入口，避免不必要的模型轮次。例如 `POST /api/hospital-bag/cart-update` 复用 `hospital_bag_cart_update` handler，根据当前 `hospital_bag_cart.groups` 和 `args.action/product_sku_id` 返回新的购物车状态；适用于用户已经确认“换成 Air 1 / M9 / S12 Pro Quick”等型号同步，不用于开放式选型或解释。
 

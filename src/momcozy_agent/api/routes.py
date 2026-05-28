@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-import base64
 import asyncio
+import contextlib
 import json
 import os
 import re
 import time
+import uuid
+from collections.abc import AsyncIterator
 from datetime import date, datetime, timedelta, timezone
 from io import BytesIO
 from typing import Any
@@ -52,6 +54,40 @@ _pump_process_data_session_manager = LogDrivenSessionManager(
     json_dir=MILK_PROCESS_CONFIG_ROOT,
     log_dir=MILK_PROCESS_LOG_ROOT,
 )
+
+VOLC_REALTIME_VOICE_MAX_INPUT_CHARS = 4096
+VOLC_REALTIME_VOICE_DEFAULT_WS_URL = "wss://openspeech.bytedance.com/api/v3/tts/bidirection"
+VOLC_REALTIME_VOICE_DEFAULT_RESOURCE_ID = "seed-tts-2.0"
+VOLC_REALTIME_VOICE_DEFAULT_VOICE_TYPE = "saturn_zh_female_qingyingduoduo_cs_tob"
+VOLC_REALTIME_VOICE_DEFAULT_AUDIO_FORMAT = "pcm"
+VOLC_REALTIME_VOICE_SAMPLE_RATE = 24000
+VOLC_REALTIME_VOICE_DEFAULT_SPEED_RATIO = 1.1
+VOLC_REALTIME_VOICE_FIRST_CHUNK_TIMEOUT_SECONDS = 20
+VOLC_REALTIME_VOICE_RESPONSE_TIMEOUT_SECONDS = 30
+VOLC_REALTIME_VOICE_NAMESPACE = "BidirectionalTTS"
+
+VOLC_WS_FULL_CLIENT_REQUEST = 0b0001
+VOLC_WS_FULL_SERVER_RESPONSE = 0b1001
+VOLC_WS_AUDIO_ONLY_RESPONSE = 0b1011
+VOLC_WS_ERROR_INFORMATION = 0b1111
+VOLC_WS_FLAG_WITH_EVENT = 0b0100
+VOLC_WS_NO_SERIALIZATION = 0b0000
+VOLC_WS_JSON = 0b0001
+
+VOLC_EVENT_START_CONNECTION = 1
+VOLC_EVENT_FINISH_CONNECTION = 2
+VOLC_EVENT_CONNECTION_STARTED = 50
+VOLC_EVENT_CONNECTION_FAILED = 51
+VOLC_EVENT_CONNECTION_FINISHED = 52
+VOLC_EVENT_START_SESSION = 100
+VOLC_EVENT_FINISH_SESSION = 102
+VOLC_EVENT_SESSION_STARTED = 150
+VOLC_EVENT_SESSION_FINISHED = 152
+VOLC_EVENT_SESSION_FAILED = 153
+VOLC_EVENT_TASK_REQUEST = 200
+VOLC_EVENT_TTS_SENTENCE_START = 350
+VOLC_EVENT_TTS_SENTENCE_END = 351
+VOLC_EVENT_TTS_RESPONSE = 352
 
 
 async def _upload_image_to_openai(*, filename: str, body: bytes, mime_type: str) -> str:
@@ -360,59 +396,38 @@ async def upload_file(request: Request, file: UploadFile = File(...)) -> dict[st
     return {key: metadata[key] for key in ("id", "name", "size", "extension", "mime_type", "created_by", "created_at")}
 
 
-@router.post("/v1/tts")
-async def tts_endpoint(request: Request) -> dict[str, Any]:
+@router.get("/v1/realtime-voice-stream")
+async def realtime_voice_stream_endpoint(request: Request, text: str) -> StreamingResponse:
     verify_api_key(request)
-    body = await request.json()
-    text = str(body.get("text") or "").strip()
-    if not text:
+    normalized_text = _normalize_text(str(text or ""))
+    if not normalized_text:
         raise HTTPException(status_code=400, detail={"code": "invalid_text", "message": "text is required", "status": 400})
-    if not _xfyun_tts_configured():
-        raise HTTPException(status_code=400, detail={"code": "tts_config_missing", "message": "XFYUN_TTS_APP_ID/API_KEY/API_SECRET not configured", "status": 400})
-    raise HTTPException(status_code=501, detail={"code": "tts_adapter_missing", "message": "TTS adapter package is not installed in momcozy-agent.", "status": 501})
+    user_id = _normalize_text(str(request.query_params.get("user_id") or ""))
+    return await _volc_realtime_voice_streaming_response(
+        normalized_text[:VOLC_REALTIME_VOICE_MAX_INPUT_CHARS],
+        user_id=user_id,
+    )
 
 
-@router.get("/v1/tts-stream")
-async def tts_stream_endpoint(request: Request, text: str) -> StreamingResponse:
-    verify_api_key(request)
-    if not str(text or "").strip():
-        raise HTTPException(status_code=400, detail={"code": "invalid_text", "message": "text is required", "status": 400})
-    if not _xfyun_tts_configured():
-        raise HTTPException(status_code=400, detail={"code": "tts_config_missing", "message": "XFYUN_TTS_APP_ID/API_KEY/API_SECRET not configured", "status": 400})
-    return StreamingResponse(iter(()), media_type="audio/mpeg")
+@router.websocket("/v1/realtime-voice-session")
+async def realtime_voice_session_ws(websocket: WebSocket) -> None:
+    if not _verify_websocket_api_key(websocket):
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
 
-
-@router.post("/v1/asr")
-async def asr_endpoint(request: Request) -> dict[str, Any]:
-    verify_api_key(request)
-    body = await request.json()
-    input_text = body.get("text")
-    if input_text is not None:
-        text = _normalize_text(str(input_text))
-        if not text:
-            raise HTTPException(status_code=400, detail={"code": "invalid_text", "message": "text is required", "status": 400})
-        return {"text": text}
-    audio_b64 = str(body.get("audio_base64") or "")
-    if not audio_b64:
-        raise HTTPException(status_code=400, detail={"code": "invalid_audio", "message": "audio_base64 is required", "status": 400})
+    await websocket.accept()
+    user_id = _normalize_text(str(websocket.query_params.get("user_id") or ""))
     try:
-        base64.b64decode(audio_b64)
-    except Exception:
-        raise HTTPException(status_code=400, detail={"code": "invalid_audio", "message": "audio_base64 decode failed", "status": 400}) from None
-    if not _xfyun_asr_configured():
-        raise HTTPException(status_code=400, detail={"code": "asr_config_missing", "message": "XFYUN_ASR_APP_ID/API_KEY/API_SECRET not configured", "status": 400})
-    raise HTTPException(status_code=501, detail={"code": "asr_adapter_missing", "message": "ASR adapter package is not installed in momcozy-agent.", "status": 501})
-
-
-@router.post("/v1/asr/upload")
-async def asr_upload_endpoint(request: Request, file: UploadFile = File(...)) -> dict[str, Any]:
-    verify_api_key(request)
-    audio_bytes = await file.read()
-    if not audio_bytes:
-        raise HTTPException(status_code=400, detail={"code": "invalid_audio", "message": "empty audio file", "status": 400})
-    if not _xfyun_asr_configured():
-        raise HTTPException(status_code=400, detail={"code": "asr_config_missing", "message": "XFYUN_ASR_APP_ID/API_KEY/API_SECRET not configured", "status": 400})
-    raise HTTPException(status_code=501, detail={"code": "asr_adapter_missing", "message": "ASR adapter package is not installed in momcozy-agent.", "status": 501})
+        await _run_volc_realtime_voice_websocket_session(websocket, user_id=user_id)
+    except WebSocketDisconnect:
+        return
+    except Exception as exc:
+        await _safe_send_websocket_json(
+            websocket,
+            {"type": "error", "code": "volc_realtime_voice_failed", "message": str(exc)},
+        )
+    finally:
+        await _safe_close_websocket(websocket)
 
 
 @router.get("/v1/notify/query")
@@ -961,6 +976,48 @@ async def record_client_event(request: Request) -> dict[str, Any]:
     except ValueError:
         data = {}
     return data if isinstance(data, dict) else {"status": "recorded", "conversation_id": thread_id}
+
+
+@router.post("/api/ag-ui-prewarm")
+async def prewarm_ag_ui_thread(request: Request) -> dict[str, Any]:
+    verify_api_key(request)
+    body = await _json_body_or_error(request, basic=True)
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="ag-ui prewarm requires a JSON object")
+
+    thread_id = str(
+        body.get("thread_id")
+        or body.get("threadId")
+        or body.get("conversation_id")
+        or body.get("conversationId")
+        or ""
+    ).strip()
+    if not thread_id:
+        raise HTTPException(status_code=400, detail="ag-ui prewarm requires thread_id")
+
+    url = (os.getenv("MOMCOZY_AGENT_PREWARM_URL") or "http://127.0.0.1:8768/api/ag-ui-prewarm").strip()
+    if not url or url.lower() in {"none", "disabled", "off"}:
+        return {"status": "disabled", "conversation_id": thread_id, "thread_id": thread_id}
+
+    try:
+        import httpx
+    except ImportError as exc:
+        raise HTTPException(status_code=501, detail="httpx is not installed") from exc
+
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=2.0, read=30.0, write=2.0, pool=2.0), trust_env=False) as client:
+            response = await client.post(url, json=body)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"failed to prewarm ag-ui thread: {exc}") from exc
+
+    if response.status_code < 200 or response.status_code >= 300:
+        preview = response.text[:300]
+        raise HTTPException(status_code=502, detail=f"ag-ui prewarm failed: {response.status_code} {preview}".strip())
+    try:
+        data = response.json()
+    except ValueError:
+        data = {}
+    return data if isinstance(data, dict) else {"status": "warmed", "conversation_id": thread_id, "thread_id": thread_id}
 
 
 @router.post("/api/hospital-bag/cart-update")
@@ -1855,9 +1912,599 @@ def _normalize_text(text: str) -> str:
     return re.sub(r"\s+", " ", normalized)
 
 
-def _xfyun_tts_configured() -> bool:
-    return bool(os.getenv("XFYUN_TTS_APP_ID") and os.getenv("XFYUN_TTS_API_KEY") and os.getenv("XFYUN_TTS_API_SECRET"))
+async def _safe_send_websocket_json(websocket: WebSocket, payload: dict[str, Any]) -> None:
+    try:
+        await websocket.send_json(payload)
+    except Exception:
+        pass
 
 
-def _xfyun_asr_configured() -> bool:
-    return bool((os.getenv("XFYUN_ASR_APP_ID") or os.getenv("XFYUN_TTS_APP_ID")) and (os.getenv("XFYUN_ASR_API_KEY") or os.getenv("XFYUN_TTS_API_KEY")) and (os.getenv("XFYUN_ASR_API_SECRET") or os.getenv("XFYUN_TTS_API_SECRET")))
+def _env_int(key: str, default: int) -> int:
+    raw = os.getenv(key, "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+def _env_float(key: str, default: float, *, minimum: float | None = None, maximum: float | None = None) -> float:
+    raw = os.getenv(key, "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    if minimum is not None and value < minimum:
+        return default
+    if maximum is not None and value > maximum:
+        return default
+    if value != value:
+        return default
+    return value
+
+
+def _volc_speed_ratio_to_speech_rate(speed_ratio: float) -> int:
+    return int(round((speed_ratio - 1.0) * 100))
+
+
+def _volc_realtime_voice_settings() -> dict[str, Any]:
+    api_key = (
+        os.getenv("VOLC_TTS_API_KEY", "").strip()
+        or os.getenv("VOLC_REALTIME_VOICE_API_KEY", "").strip()
+        or os.getenv("VOLCENGINE_TTS_API_KEY", "").strip()
+    )
+    app_id = os.getenv("VOLC_TTS_APP_ID", "").strip() or os.getenv("VOLC_REALTIME_VOICE_APP_ID", "").strip()
+    access_key = (
+        os.getenv("VOLC_TTS_ACCESS_TOKEN", "").strip()
+        or os.getenv("VOLC_TTS_ACCESS_KEY", "").strip()
+        or os.getenv("VOLC_REALTIME_VOICE_ACCESS_TOKEN", "").strip()
+    )
+    if not api_key and not (app_id and access_key):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "volc_tts_config_missing",
+                "message": "VOLC_TTS_API_KEY is not set",
+                "status": 400,
+            },
+        )
+
+    speed_ratio = _env_float(
+        "VOLC_TTS_SPEED_RATIO",
+        VOLC_REALTIME_VOICE_DEFAULT_SPEED_RATIO,
+        minimum=0.5,
+        maximum=2.0,
+    )
+    return {
+        "api_key": api_key,
+        "app_id": app_id,
+        "access_key": access_key,
+        "ws_url": (
+            os.getenv("VOLC_TTS_WS_URL", VOLC_REALTIME_VOICE_DEFAULT_WS_URL).strip()
+            or VOLC_REALTIME_VOICE_DEFAULT_WS_URL
+        ),
+        "resource_id": (
+            os.getenv("VOLC_TTS_RESOURCE_ID", VOLC_REALTIME_VOICE_DEFAULT_RESOURCE_ID).strip()
+            or VOLC_REALTIME_VOICE_DEFAULT_RESOURCE_ID
+        ),
+        "voice_type": (
+            os.getenv("VOLC_TTS_VOICE_TYPE", VOLC_REALTIME_VOICE_DEFAULT_VOICE_TYPE).strip()
+            or VOLC_REALTIME_VOICE_DEFAULT_VOICE_TYPE
+        ),
+        "audio_format": (
+            os.getenv("VOLC_TTS_AUDIO_FORMAT", VOLC_REALTIME_VOICE_DEFAULT_AUDIO_FORMAT).strip().lower()
+            or VOLC_REALTIME_VOICE_DEFAULT_AUDIO_FORMAT
+        ),
+        "sample_rate": _env_int("VOLC_TTS_SAMPLE_RATE", VOLC_REALTIME_VOICE_SAMPLE_RATE),
+        "speed_ratio": speed_ratio,
+        "speech_rate": _volc_speed_ratio_to_speech_rate(speed_ratio),
+    }
+
+
+def _volc_realtime_voice_headers(settings: dict[str, Any]) -> dict[str, str]:
+    headers = {
+        "X-Api-Resource-Id": str(settings["resource_id"]),
+        "X-Api-Connect-Id": str(uuid.uuid4()),
+    }
+    api_key = str(settings.get("api_key") or "").strip()
+    if api_key:
+        headers["X-Api-Key"] = api_key
+    else:
+        headers["X-Api-App-Key"] = str(settings["app_id"])
+        headers["X-Api-Access-Key"] = str(settings["access_key"])
+    return headers
+
+
+async def _volc_realtime_voice_streaming_response(text: str, *, user_id: str = "") -> StreamingResponse:
+    try:
+        import websockets
+    except ImportError as exc:
+        raise HTTPException(
+            status_code=501,
+            detail={"code": "websockets_missing", "message": "websockets package is not installed", "status": 501},
+        ) from exc
+
+    settings = _volc_realtime_voice_settings()
+    audio_iter = _iter_volc_realtime_voice_audio(
+        text=text,
+        settings=settings,
+        user_id=user_id,
+        connect=websockets.connect,
+    )
+    try:
+        first_chunk = await asyncio.wait_for(
+            anext(audio_iter, b""),
+            timeout=VOLC_REALTIME_VOICE_FIRST_CHUNK_TIMEOUT_SECONDS,
+        )
+    except Exception as exc:
+        await audio_iter.aclose()
+        raise HTTPException(
+            status_code=502,
+            detail={"code": "volc_realtime_voice_failed", "message": f"failed to stream realtime voice: {exc}", "status": 502},
+        ) from exc
+    if not first_chunk:
+        await audio_iter.aclose()
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "volc_realtime_voice_empty",
+                "message": "Volcengine realtime TTS did not return audio",
+                "status": 502,
+            },
+        )
+
+    async def stream() -> AsyncIterator[bytes]:
+        try:
+            yield first_chunk
+            async for chunk in audio_iter:
+                if chunk:
+                    yield chunk
+        finally:
+            await audio_iter.aclose()
+
+    return StreamingResponse(
+        stream(),
+        media_type=f"audio/pcm; rate={settings['sample_rate']}; channels=1",
+        headers={
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+            "X-Mai-Audio-Format": "pcm16",
+            "X-Mai-Audio-Sample-Rate": str(settings["sample_rate"]),
+            "X-Mai-Audio-Channels": "1",
+        },
+    )
+
+
+async def _run_volc_realtime_voice_websocket_session(websocket: WebSocket, *, user_id: str = "") -> None:
+    try:
+        import websockets
+    except ImportError:
+        await _safe_send_websocket_json(
+            websocket,
+            {"type": "error", "code": "websockets_missing", "message": "websockets package is not installed"},
+        )
+        return
+
+    try:
+        settings = _volc_realtime_voice_settings()
+    except HTTPException as exc:
+        detail = exc.detail if isinstance(exc.detail, dict) else {}
+        await _safe_send_websocket_json(
+            websocket,
+            {
+                "type": "error",
+                "code": str(detail.get("code") or "volc_tts_config_missing"),
+                "message": str(detail.get("message") or "Volcengine realtime TTS is not configured"),
+            },
+        )
+        return
+
+    session_id = uuid.uuid4().hex
+    session_done = asyncio.Event()
+    send_lock = asyncio.Lock()
+    upstream_error: RuntimeError | None = None
+
+    async with websockets.connect(
+        str(settings["ws_url"]),
+        additional_headers=_volc_realtime_voice_headers(settings),
+        open_timeout=15,
+        max_size=1000000000,
+    ) as volc_ws:
+        await _volc_start_connection(volc_ws)
+        response = await _volc_receive_response(volc_ws)
+        _volc_expect_event(response, VOLC_EVENT_CONNECTION_STARTED, "start connection")
+
+        await _volc_start_session(volc_ws, settings=settings, session_id=session_id, user_id=user_id)
+        response = await _volc_receive_response(volc_ws)
+        _volc_expect_event(response, VOLC_EVENT_SESSION_STARTED, "start session")
+
+        await websocket.send_json(
+            {
+                "type": "ready",
+                "audio_format": "pcm16",
+                "sample_rate": settings["sample_rate"],
+                "channels": 1,
+            }
+        )
+
+        async def volc_reader() -> None:
+            nonlocal upstream_error
+            async for raw in volc_ws:
+                response = _volc_parse_response(raw)
+                event = int(response.get("event") or 0)
+                message_type = int(response.get("message_type") or 0)
+                if message_type == VOLC_WS_ERROR_INFORMATION or event in {
+                    VOLC_EVENT_CONNECTION_FAILED,
+                    VOLC_EVENT_SESSION_FAILED,
+                }:
+                    message = _format_volc_realtime_error(response)
+                    upstream_error = RuntimeError(message)
+                    session_done.set()
+                    await websocket.send_json({"type": "error", "code": "volc_realtime_error", "message": message})
+                    return
+                if event == VOLC_EVENT_TTS_RESPONSE:
+                    payload = response.get("payload")
+                    if isinstance(payload, bytes) and payload:
+                        await websocket.send_bytes(payload)
+                    continue
+                if event in {VOLC_EVENT_TTS_SENTENCE_START, VOLC_EVENT_TTS_SENTENCE_END}:
+                    continue
+                if event == VOLC_EVENT_SESSION_FINISHED:
+                    session_done.set()
+                    return
+
+        async def client_reader() -> None:
+            while True:
+                raw = await websocket.receive_text()
+                try:
+                    payload = json.loads(raw or "{}")
+                except json.JSONDecodeError:
+                    await websocket.send_json(
+                        {"type": "error", "code": "invalid_request", "message": "message must be valid JSON"}
+                    )
+                    continue
+                if not isinstance(payload, dict):
+                    await websocket.send_json(
+                        {"type": "error", "code": "invalid_request", "message": "message must be a JSON object"}
+                    )
+                    continue
+
+                event_type = str(payload.get("type") or "")
+                if event_type == "append":
+                    text = _normalize_text(str(payload.get("text") or ""))
+                    if text:
+                        async with send_lock:
+                            await _volc_send_task_request(
+                                volc_ws,
+                                settings=settings,
+                                session_id=session_id,
+                                text=text[:VOLC_REALTIME_VOICE_MAX_INPUT_CHARS],
+                                user_id=user_id,
+                            )
+                    continue
+                if event_type in {"finish", "cancel"}:
+                    async with send_lock:
+                        await _volc_finish_session(volc_ws, session_id=session_id)
+                    return
+                await websocket.send_json(
+                    {"type": "error", "code": "invalid_request", "message": f"unsupported event type: {event_type}"}
+                )
+
+        reader_task = asyncio.create_task(volc_reader())
+        client_task = asyncio.create_task(client_reader())
+        tasks = {reader_task, client_task}
+        try:
+            done, _pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                exc = task.exception()
+                if exc is not None:
+                    raise exc
+            if reader_task in done and not session_done.is_set():
+                client_task.cancel()
+                raise RuntimeError("Volcengine realtime TTS session closed")
+            if client_task in done:
+                await asyncio.wait_for(
+                    session_done.wait(),
+                    timeout=VOLC_REALTIME_VOICE_RESPONSE_TIMEOUT_SECONDS,
+                )
+                if upstream_error is not None:
+                    raise upstream_error
+                await websocket.send_json({"type": "done"})
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            with contextlib.suppress(Exception):
+                await _volc_finish_connection(volc_ws)
+
+
+async def _iter_volc_realtime_voice_audio(
+    *,
+    text: str,
+    settings: dict[str, Any],
+    user_id: str,
+    connect: Any,
+) -> AsyncIterator[bytes]:
+    session_id = uuid.uuid4().hex
+    async with connect(
+        str(settings["ws_url"]),
+        additional_headers=_volc_realtime_voice_headers(settings),
+        open_timeout=15,
+        max_size=1000000000,
+    ) as ws:
+        await _volc_start_connection(ws)
+        response = await _volc_receive_response(ws)
+        _volc_expect_event(response, VOLC_EVENT_CONNECTION_STARTED, "start connection")
+
+        await _volc_start_session(ws, settings=settings, session_id=session_id, user_id=user_id)
+        response = await _volc_receive_response(ws)
+        _volc_expect_event(response, VOLC_EVENT_SESSION_STARTED, "start session")
+
+        await _volc_send_task_request(ws, settings=settings, session_id=session_id, text=text, user_id=user_id)
+        await _volc_finish_session(ws, session_id=session_id)
+
+        async for raw in ws:
+            response = _volc_parse_response(raw)
+            event = int(response.get("event") or 0)
+            message_type = int(response.get("message_type") or 0)
+            if message_type == VOLC_WS_ERROR_INFORMATION or event in {
+                VOLC_EVENT_CONNECTION_FAILED,
+                VOLC_EVENT_SESSION_FAILED,
+            }:
+                raise RuntimeError(_format_volc_realtime_error(response))
+            if event == VOLC_EVENT_TTS_RESPONSE:
+                payload = response.get("payload")
+                if isinstance(payload, bytes) and payload:
+                    yield payload
+                continue
+            if event == VOLC_EVENT_SESSION_FINISHED:
+                with contextlib.suppress(Exception):
+                    await _volc_finish_connection(ws)
+                break
+
+
+async def _volc_start_connection(ws: Any) -> None:
+    await _volc_send_event(ws, VOLC_EVENT_START_CONNECTION, payload={}, serial_method=VOLC_WS_NO_SERIALIZATION)
+
+
+async def _volc_start_session(ws: Any, *, settings: dict[str, Any], session_id: str, user_id: str) -> None:
+    await _volc_send_event(
+        ws,
+        VOLC_EVENT_START_SESSION,
+        session_id=session_id,
+        payload=_volc_tts_payload(
+            settings=settings,
+            event=VOLC_EVENT_START_SESSION,
+            user_id=user_id,
+        ),
+    )
+
+
+async def _volc_send_task_request(
+    ws: Any,
+    *,
+    settings: dict[str, Any],
+    session_id: str,
+    text: str,
+    user_id: str,
+) -> None:
+    await _volc_send_event(
+        ws,
+        VOLC_EVENT_TASK_REQUEST,
+        session_id=session_id,
+        payload=_volc_tts_payload(
+            settings=settings,
+            event=VOLC_EVENT_TASK_REQUEST,
+            text=text,
+            user_id=user_id,
+        ),
+    )
+
+
+async def _volc_finish_session(ws: Any, *, session_id: str) -> None:
+    await _volc_send_event(ws, VOLC_EVENT_FINISH_SESSION, session_id=session_id, payload={})
+
+
+async def _volc_finish_connection(ws: Any) -> None:
+    await _volc_send_event(ws, VOLC_EVENT_FINISH_CONNECTION, payload={})
+
+
+async def _volc_send_event(
+    ws: Any,
+    event: int,
+    *,
+    session_id: str | None = None,
+    payload: dict[str, Any] | None = None,
+    serial_method: int | None = None,
+) -> None:
+    payload_bytes = None
+    resolved_serial_method = VOLC_WS_NO_SERIALIZATION
+    if payload is not None:
+        payload_bytes = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        resolved_serial_method = VOLC_WS_JSON if serial_method is None else serial_method
+    message = bytearray(
+        _volc_ws_header(
+            message_type=VOLC_WS_FULL_CLIENT_REQUEST,
+            message_type_flags=VOLC_WS_FLAG_WITH_EVENT,
+            serial_method=resolved_serial_method,
+        )
+    )
+    message.extend(_volc_ws_optional(event=event, session_id=session_id))
+    if payload_bytes is not None:
+        message.extend(len(payload_bytes).to_bytes(4, "big", signed=True))
+        message.extend(payload_bytes)
+    await ws.send(bytes(message))
+
+
+def _volc_tts_payload(
+    *,
+    settings: dict[str, Any],
+    event: int,
+    text: str = "",
+    user_id: str = "",
+) -> dict[str, Any]:
+    uid = user_id.strip() or "mai-user"
+    return {
+        "user": {"uid": uid},
+        "event": event,
+        "namespace": VOLC_REALTIME_VOICE_NAMESPACE,
+        "req_params": {
+            "text": text,
+            "speaker": settings["voice_type"],
+            "audio_params": {
+                "format": settings["audio_format"],
+                "sample_rate": settings["sample_rate"],
+                "speech_rate": settings["speech_rate"],
+            },
+        },
+    }
+
+
+def _volc_ws_header(
+    *,
+    message_type: int,
+    message_type_flags: int = 0,
+    serial_method: int = VOLC_WS_NO_SERIALIZATION,
+    compression_type: int = 0,
+) -> bytes:
+    return bytes(
+        [
+            (0b0001 << 4) | 0b0001,
+            (message_type << 4) | message_type_flags,
+            (serial_method << 4) | compression_type,
+            0,
+        ]
+    )
+
+
+def _volc_ws_optional(*, event: int = 0, session_id: str | None = None) -> bytes:
+    option = bytearray()
+    if event:
+        option.extend(event.to_bytes(4, "big", signed=True))
+    if session_id is not None:
+        encoded = session_id.encode("utf-8")
+        option.extend(len(encoded).to_bytes(4, "big", signed=True))
+        option.extend(encoded)
+    return bytes(option)
+
+
+async def _volc_receive_response(ws: Any) -> dict[str, Any]:
+    return _volc_parse_response(await ws.recv())
+
+
+def _volc_parse_response(raw: bytes | str) -> dict[str, Any]:
+    if isinstance(raw, str):
+        raise RuntimeError(f"Volcengine realtime TTS returned text frame: {raw}")
+    if len(raw) < 4:
+        raise RuntimeError("Volcengine realtime TTS returned an invalid frame")
+
+    message_type = (raw[1] >> 4) & 0x0F
+    flags = raw[1] & 0x0F
+    serial_method = (raw[2] >> 4) & 0x0F
+    offset = (raw[0] & 0x0F) * 4
+    response: dict[str, Any] = {
+        "message_type": message_type,
+        "flags": flags,
+        "serial_method": serial_method,
+        "event": 0,
+        "session_id": "",
+        "payload": b"",
+        "payload_json": "",
+        "response_meta_json": "",
+        "error_code": 0,
+    }
+
+    if message_type in {VOLC_WS_FULL_SERVER_RESPONSE, VOLC_WS_AUDIO_ONLY_RESPONSE}:
+        if flags & VOLC_WS_FLAG_WITH_EVENT:
+            event = int.from_bytes(raw[offset : offset + 4], "big", signed=True)
+            response["event"] = event
+            offset += 4
+            if event == VOLC_EVENT_CONNECTION_STARTED:
+                connection_id, offset = _volc_read_content(raw, offset)
+                response["connection_id"] = connection_id
+            elif event == VOLC_EVENT_CONNECTION_FAILED:
+                response["response_meta_json"], offset = _volc_read_content(raw, offset)
+            elif event in {VOLC_EVENT_SESSION_STARTED, VOLC_EVENT_SESSION_FAILED, VOLC_EVENT_SESSION_FINISHED}:
+                response["session_id"], offset = _volc_read_content(raw, offset)
+                if offset + 4 <= len(raw):
+                    response["response_meta_json"], offset = _volc_read_content(raw, offset)
+            elif event == VOLC_EVENT_TTS_RESPONSE:
+                response["session_id"], offset = _volc_read_content(raw, offset)
+                response["payload"], offset = _volc_read_payload(raw, offset)
+            elif event in {VOLC_EVENT_TTS_SENTENCE_START, VOLC_EVENT_TTS_SENTENCE_END}:
+                response["session_id"], offset = _volc_read_content(raw, offset)
+                payload, offset = _volc_read_payload(raw, offset)
+                response["payload"] = payload
+                response["payload_json"] = _decode_bytes(payload)
+
+        if not response["payload"] and not response["payload_json"] and offset + 4 <= len(raw):
+            payload, offset = _volc_read_payload(raw, offset)
+            response["payload"] = payload
+            if serial_method == VOLC_WS_JSON:
+                response["payload_json"] = _decode_bytes(payload)
+
+    elif message_type == VOLC_WS_ERROR_INFORMATION:
+        response["error_code"] = int.from_bytes(raw[offset : offset + 4], "big", signed=True)
+        offset += 4
+        payload, offset = _volc_read_payload(raw, offset)
+        response["payload"] = payload
+        response["payload_json"] = _decode_bytes(payload)
+    else:
+        raise RuntimeError(f"Volcengine realtime TTS returned unsupported message type: {message_type}")
+
+    return response
+
+
+def _volc_read_content(raw: bytes, offset: int) -> tuple[str, int]:
+    size = int.from_bytes(raw[offset : offset + 4], "big", signed=True)
+    offset += 4
+    content = raw[offset : offset + size].decode("utf-8")
+    offset += size
+    return content, offset
+
+
+def _volc_read_payload(raw: bytes, offset: int) -> tuple[bytes, int]:
+    size = int.from_bytes(raw[offset : offset + 4], "big", signed=True)
+    offset += 4
+    payload = raw[offset : offset + size]
+    offset += size
+    return payload, offset
+
+
+def _volc_expect_event(response: dict[str, Any], expected_event: int, operation: str) -> None:
+    event = int(response.get("event") or 0)
+    if event != expected_event:
+        raise RuntimeError(f"Volcengine realtime TTS failed to {operation}: {_format_volc_realtime_error(response)}")
+
+
+def _format_volc_realtime_error(response: dict[str, Any]) -> str:
+    payload_json = str(response.get("payload_json") or response.get("response_meta_json") or "").strip()
+    if payload_json:
+        try:
+            payload = json.loads(payload_json)
+        except json.JSONDecodeError:
+            return payload_json
+        if isinstance(payload, dict):
+            message = str(payload.get("message") or payload.get("error") or payload.get("msg") or "").strip()
+            code = str(payload.get("code") or payload.get("error_code") or response.get("error_code") or "").strip()
+            if message and code:
+                return f"{code}: {message}"
+            if message:
+                return message
+    payload = response.get("payload")
+    if isinstance(payload, bytes) and payload:
+        return _decode_bytes(payload)
+    event = response.get("event")
+    message_type = response.get("message_type")
+    return f"event={event}, message_type={message_type}"
+
+
+def _decode_bytes(payload: bytes) -> str:
+    try:
+        return payload.decode("utf-8")
+    except UnicodeDecodeError:
+        return repr(payload)

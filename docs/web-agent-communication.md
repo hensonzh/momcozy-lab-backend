@@ -68,6 +68,7 @@ Content-Type: text/event-stream; charset=utf-8
 
 - `POST /api/ag-ui`：Web Demo 使用的 SSE 聊天服务。
 - `WS /api/ag-ui-ws`：App 使用的 WebSocket 聊天服务。
+- `POST /api/ag-ui-prewarm`：App 新建会话后的隐藏预热服务。
 - 静态 Web Demo、`/api/support-ticket-submit`、`/api/client-event` 等现有 Web Demo 辅助接口。
 
 默认监听 `ENTRY_HOST:ENTRY_PORT`，默认值是 `0.0.0.0:8769`。单独运行 Web Demo 时仍可使用 `scripts/run_chat_ui.py`，默认监听 `127.0.0.1:8768`。
@@ -82,7 +83,19 @@ WebSocket 客户端连接 `ws://<host>:<port>/api/ag-ui-ws` 后，第一帧必�
 
 如果 `ENTRY_API_KEY` 未设置或校验失败，连接会被关闭。桥接层不保存额外会话状态；WebSocket 和 SSE 入口都通过同一个 FastAPI app 的 `ChatRuntime` 按 `threadId` 维护会话。
 
-### 2.1.2 吸奶小结 WebSocket：`/v1/pump/session-summary`
+### 2.1.2 App 新会话预热：`/api/ag-ui-prewarm`
+
+App 新建会话时可以先本地展示欢迎语，同时后台调用 `POST /api/ag-ui-prewarm`。请求体沿用 AG-UI JSON，必须包含稳定的 `threadId` 和一条隐藏 user message。统一 API 会校验 `ENTRY_API_KEY` 后转发到聊天服务的同名接口。
+
+预热接口只做一轮非流式 Responses 请求：
+
+- 使用同一个 `threadId` 获取 `ChatSession`。
+- 禁用工具，不产生 `TOOL_CALL_*`、artifact、quick replies 或 work panel 事件。
+- 限制短输出，只保存返回的 `previous_response_id`。
+- 如果同一 thread 已有 `previous_response_id`，直接返回 `already_warm`。
+- 如果真实用户请求先完成并写入 session，预热返回 `stale`，不会覆盖真实对话状态。
+
+### 2.1.3 吸奶小结 WebSocket：`/v1/pump/session-summary`
 
 吸奶进程结束后，App 通过 `WS /v1/pump/session-summary` 生成“本次吸奶小结”。该连接是一次性请求：连接成功后，客户端第一帧发送吸奶结束事件 JSON；服务端返回一个 JSON 响应后关闭连接。
 

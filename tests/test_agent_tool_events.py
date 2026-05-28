@@ -15,7 +15,7 @@ from momcozy_agent.agents import (
     tool_call_end_event,
     tool_call_result_event,
 )
-from momcozy_agent.server import ChatRuntime, stream_ag_ui_events
+from momcozy_agent.server import ChatRuntime, create_app, stream_ag_ui_events
 
 
 class AgentToolEventTests(unittest.TestCase):
@@ -26,6 +26,89 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertIn("默认回复要短", request["instructions"])
         self.assertIn("优先 1-3 句", request["instructions"])
         self.assertIn("已经展示的信息不要再完整复述", request["instructions"])
+
+    def test_agent_request_can_disable_tools_for_hidden_prewarm(self) -> None:
+        request = build_agent_request(
+            {"user_message": "隐藏预热", "locale": "zh-CN"},
+            {"enable_tools": False, "max_output_tokens": 24},
+        )
+
+        self.assertNotIn("tools", request)
+        self.assertNotIn("tool_choice", request)
+        self.assertEqual(request["max_output_tokens"], 24)
+
+    def test_ag_ui_prewarm_saves_previous_response_without_tools(self) -> None:
+        try:
+            from fastapi.testclient import TestClient
+        except ImportError:
+            self.skipTest("fastapi test client is not installed")
+
+        fake_client = _FakeClient([{"id": "resp-prewarm", "output": []}])
+        runtime = ChatRuntime(fake_client)
+        client = TestClient(create_app(runtime=runtime))
+
+        response = client.post(
+            "/api/ag-ui-prewarm",
+            json={
+                "threadId": "thread-prewarm",
+                "runId": "run-prewarm",
+                "messages": [
+                    {
+                        "id": "msg-prewarm",
+                        "role": "user",
+                        "content": "隐藏预热，请只回复我在。",
+                    }
+                ],
+                "state": {"locale": "zh-CN"},
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["status"], "warmed")
+        self.assertEqual(payload["thread_id"], "thread-prewarm")
+        self.assertEqual(payload["response_id"], "resp-prewarm")
+        self.assertEqual(runtime.sessions["thread-prewarm"].previous_response_id, "resp-prewarm")
+        self.assertTrue(runtime.sessions["thread-prewarm"].context_state.environment_sent)
+        self.assertEqual(len(fake_client.responses.requests), 1)
+        request = fake_client.responses.requests[0]
+        self.assertNotIn("tools", request)
+        self.assertNotIn("tool_choice", request)
+        self.assertEqual(request["max_output_tokens"], 24)
+
+    def test_ag_ui_prewarm_does_not_overwrite_real_turn_or_context_when_stale(self) -> None:
+        try:
+            from fastapi.testclient import TestClient
+        except ImportError:
+            self.skipTest("fastapi test client is not installed")
+
+        fake_client = _MutatingClient([{"id": "resp-prewarm", "output": []}])
+        runtime = ChatRuntime(fake_client)
+        runtime.get_session("thread-stale")
+        fake_client.responses.on_create = lambda: setattr(runtime.sessions["thread-stale"], "previous_response_id", "resp-real")
+        client = TestClient(create_app(runtime=runtime))
+
+        response = client.post(
+            "/api/ag-ui-prewarm",
+            json={
+                "threadId": "thread-stale",
+                "runId": "run-prewarm",
+                "messages": [
+                    {
+                        "id": "msg-prewarm",
+                        "role": "user",
+                        "content": "隐藏预热，请只回复我在。",
+                    }
+                ],
+                "state": {"locale": "zh-CN"},
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["status"], "stale")
+        self.assertEqual(runtime.sessions["thread-stale"].previous_response_id, "resp-real")
+        self.assertFalse(runtime.sessions["thread-stale"].context_state.environment_sent)
 
     def test_tool_call_phase_events_include_tool_name(self) -> None:
         args_event = tool_call_args_event(
@@ -59,8 +142,8 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertEqual(json.loads(result_event["content"])["tool_name"], "milk_plan_preview")
         self.assertEqual(args_event["semantic"]["visibility"], "work_item")
         self.assertEqual(args_event["semantic"]["phase"], "planning")
-        self.assertEqual(args_event["semantic"]["label"], "正在生成奶量计划草稿")
-        self.assertEqual(result_event["semantic"]["label"], "奶量计划草稿已生成")
+        self.assertEqual(args_event["semantic"]["label"], "我正在帮你拟一版奶量计划")
+        self.assertEqual(result_event["semantic"]["label"], "我已经拟好奶量计划草稿了")
 
     def test_tool_start_events_include_user_facing_semantic_contract(self) -> None:
         start_event = tool_call_start_event(
@@ -75,7 +158,7 @@ class AgentToolEventTests(unittest.TestCase):
             start_event["semantic"],
             {
                 "phase": "reading",
-                "label": "正在读取吸奶和喂养记录",
+                "label": "我正在看吸奶和喂养记录",
                 "visibility": "work_item",
                 "merge_key": "tool:call-1",
                 "priority": 50,
@@ -137,7 +220,7 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertEqual(artifact["artifact_type"], "support_ticket")
         self.assertEqual(artifact["semantic"]["visibility"], "artifact")
         confirmation = next(event for event in events if event.get("type") == "CONFIRMATION_REQUIRED")
-        self.assertEqual(confirmation["title"], "请确认售后工单")
+        self.assertEqual(confirmation["title"], "我需要你确认售后工单")
         self.assertEqual(confirmation["semantic"]["phase"], "confirming")
 
     def test_model_tool_output_compacts_artifact_payloads(self) -> None:
@@ -560,6 +643,11 @@ class _FakeClient:
         self.responses = _FakeResponses(responses)
 
 
+class _MutatingClient:
+    def __init__(self, responses: list[dict[str, object]]) -> None:
+        self.responses = _MutatingResponses(responses)
+
+
 class _FakeResponses:
     def __init__(self, responses: list[dict[str, object]]) -> None:
         self._responses = list(responses)
@@ -567,6 +655,19 @@ class _FakeResponses:
 
     def create(self, **request: object) -> dict[str, object]:
         self.requests.append(request)
+        if not self._responses:
+            return {"id": "resp-empty", "output": []}
+        return self._responses.pop(0)
+
+
+class _MutatingResponses(_FakeResponses):
+    def __init__(self, responses: list[dict[str, object]]) -> None:
+        super().__init__(responses)
+        self.on_create = lambda: None
+
+    def create(self, **request: object) -> dict[str, object]:
+        self.requests.append(request)
+        self.on_create()
         if not self._responses:
             return {"id": "resp-empty", "output": []}
         return self._responses.pop(0)
