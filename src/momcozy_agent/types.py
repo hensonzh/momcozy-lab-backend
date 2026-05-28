@@ -204,6 +204,7 @@ class ResponsesRequest(TypedDict, total=False):
     text: dict[str, Any]
     store: bool
     prompt_cache_key: str
+    max_output_tokens: int
     metadata: dict[str, str]
 
 
@@ -213,6 +214,8 @@ class BuildAgentRequestOptions(TypedDict, total=False):
     prompt_cache_key: str
     loaded_skill_ids: list[SkillId]
     context_state: Any
+    enable_tools: bool
+    max_output_tokens: int
 
 
 class ResponsesClientLike(Protocol):

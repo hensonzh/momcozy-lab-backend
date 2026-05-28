@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from .agents import QUICK_REPLIES_TOOL_NAME, quick_replies_event, run_agent_loop, run_error_event, text_message_semantic
+from .agents import QUICK_REPLIES_TOOL_NAME, quick_replies_event, run_agent_loop, run_agent_turn, run_error_event, text_message_semantic
 from .config import get_openai_client_options, load_project_env
 from .contexts import DEFAULT_LOCALE, DEFAULT_TIMEZONE, ContextState
 from .services.paths import ensure_runtime_dirs
@@ -109,6 +109,20 @@ def create_app(runtime: ChatRuntime | None = None, *, include_websocket_bridge: 
             media_type="text/event-stream; charset=utf-8",
             headers={"Cache-Control": "no-cache", "Connection": "close"},
         )
+
+    @app.post("/api/ag-ui-prewarm")
+    async def ag_ui_prewarm(request: Request) -> Any:
+        try:
+            payload = await _read_json_payload(request)
+            inputs = _runtime_inputs_from_ag_ui(payload)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+
+        try:
+            result = await asyncio.to_thread(prewarm_ag_ui_session, payload, inputs, runtime_from_app(request.app))
+        except Exception as exc:
+            return JSONResponse({"error": str(exc), "code": type(exc).__name__}, status_code=500)
+        return JSONResponse(result)
 
     @app.post("/api/support-ticket-submit")
     async def support_ticket_submit(request: Request) -> Any:
@@ -359,6 +373,61 @@ async def stream_ag_ui_events(
         if item is sentinel:
             break
         yield item
+
+
+def prewarm_ag_ui_session(payload: dict[str, Any], inputs: dict[str, Any], runtime: ChatRuntime) -> dict[str, Any]:
+    thread_id = str(_field(payload, "thread_id", "threadId") or f"thread_{payload.get('conversation_id', 'anonymous')}")
+    run_id = str(_field(payload, "run_id", "runId") or f"prewarm_{date.today().isoformat()}")
+    session = runtime.get_session(thread_id)
+    if session.previous_response_id:
+        return {
+            "status": "already_warm",
+            "conversation_id": session.conversation_id,
+            "thread_id": session.conversation_id,
+            "run_id": run_id,
+            "response_id": session.previous_response_id,
+            "session_state": _session_state_payload(session),
+        }
+
+    starting_previous_response_id = session.previous_response_id
+    prewarm_context_state = _clone_context_state(session.context_state)
+    options: dict[str, Any] = {
+        "model": runtime.model,
+        "store": runtime.store,
+        "loaded_skill_ids": session.loaded_skill_ids,
+        "context_state": prewarm_context_state,
+        "enable_tools": False,
+        "max_output_tokens": 24,
+    }
+    response = run_agent_turn(runtime.client, inputs, options)
+    response_id = _response_id(response)
+    if response_id and session.previous_response_id == starting_previous_response_id:
+        session.previous_response_id = response_id
+        session.context_state = prewarm_context_state
+        status = "warmed"
+    else:
+        status = "stale" if response_id else "no_response_id"
+
+    return {
+        "status": status,
+        "conversation_id": session.conversation_id,
+        "thread_id": session.conversation_id,
+        "run_id": run_id,
+        "response_id": response_id,
+        "session_state": _session_state_payload(session),
+    }
+
+
+def _clone_context_state(state: ContextState) -> ContextState:
+    return ContextState(
+        environment_sent=state.environment_sent,
+        loaded_references=list(state.loaded_references),
+        client_events=list(state.client_events),
+        available_tool_images=[dict(item) for item in state.available_tool_images],
+        last_displayed_tool_image=dict(state.last_displayed_tool_image) if state.last_displayed_tool_image else None,
+        active_device_module=state.active_device_module,
+        shown_step_image_urls=list(state.shown_step_image_urls),
+    )
 
 
 async def stream_sse_bytes(events: AsyncIterator[dict[str, Any]]) -> AsyncIterator[bytes]:
