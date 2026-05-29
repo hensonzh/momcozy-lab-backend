@@ -12,6 +12,52 @@ class HospitalBagCardTests(unittest.TestCase):
         self.assertEqual(result["form"]["id"], "hospital_bag_intake")
         self.assertEqual(result["form"]["submit_label"], "提交")
 
+    def test_hospital_bag_form_uses_revised_intake_questions(self) -> None:
+        result = create_hospital_bag_form({}, {"user_message": ""})
+
+        fields = result["form"]["fields"]
+        field_ids = [field["id"] for field in fields]
+        self.assertEqual(
+            field_ids,
+            [
+                "due_date_or_week",
+                "first_birth",
+                "fetus_count",
+                "pregnancy_history_or_notes",
+                "birth_path",
+                "feeding_intention",
+                "return_to_work_timing",
+                "support_person",
+                "budget_preference",
+                "top_worries",
+            ],
+        )
+        self.assertNotIn("birth_setting", field_ids)
+        self.assertNotIn("hospital_provided_items", field_ids)
+
+        by_id = {field["id"]: field for field in fields}
+        self.assertEqual(by_id["pregnancy_history_or_notes"]["options"][-1], "其它")
+        self.assertTrue(by_id["pregnancy_history_or_notes"]["allow_other_input"])
+        self.assertNotIn("不确定", by_id["pregnancy_history_or_notes"]["options"])
+        self.assertEqual(by_id["birth_path"]["label"], "生产信息｜分娩方式")
+        self.assertEqual(by_id["feeding_intention"]["options"], ["亲喂母乳", "配方奶", "混合喂养", "还不确定"])
+        self.assertEqual(by_id["return_to_work_timing"]["type"], "text")
+        self.assertEqual(by_id["return_to_work_timing"]["label"], "喂养信息｜产后多久返工")
+        self.assertEqual(by_id["budget_preference"]["options"], ["低预算", "中预算", "高预算"])
+        self.assertEqual(by_id["budget_preference"]["label"], "偏好信息｜预算偏好")
+        self.assertEqual(by_id["top_worries"]["label"], "偏好信息｜最焦虑的事")
+        self.assertEqual(by_id["top_worries"]["options"][-1], "其它")
+        self.assertTrue(by_id["top_worries"]["allow_other_input"])
+
+    def test_hospital_bag_form_normalizes_old_feeding_defaults_to_new_options(self) -> None:
+        result = create_hospital_bag_form(
+            {"default_values": {"feeding_intention": "母乳", "birth_path": "顺产"}},
+            {"user_message": ""},
+        )
+
+        by_id = {field["id"]: field for field in result["form"]["fields"]}
+        self.assertEqual(by_id["feeding_intention"]["default_value"], "亲喂母乳")
+
     def test_adds_breast_pump_with_quantity_to_lactation_group(self) -> None:
         card_json = {
             "packing_groups": [
@@ -50,7 +96,7 @@ class HospitalBagCardTests(unittest.TestCase):
                 "schema_version": "1.0",
                 "card_json": card_json,
             },
-            {"user_message": 'confirmed_form_data:\n{"feeding_intention": "配方"}'},
+            {"user_message": 'confirmed_form_data:\n{"feeding_intention": "配方奶"}'},
         )
 
         items = result["card"]["card_json"]["packing_groups"][0]["items"]

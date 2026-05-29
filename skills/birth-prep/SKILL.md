@@ -137,8 +137,15 @@ description: 产前准备服务，用于把分娩前后准备整理成生产全�
 <confirmed_form_data form_id="hospital_bag_intake">
 {
   "due_date_or_week": "37周",
+  "first_birth": "是",
+  "fetus_count": "单胎",
+  "pregnancy_history_or_notes": ["没有"],
   "birth_path": "顺产",
-  "feeding_intention": "母乳"
+  "feeding_intention": "亲喂母乳",
+  "return_to_work_timing": "3 个月后",
+  "support_person": "有人全天帮忙",
+  "budget_preference": "中预算",
+  "top_worries": ["怕漏买", "怕母乳不够"]
 }
 </confirmed_form_data>
 ```
@@ -170,10 +177,10 @@ description: 产前准备服务，用于把分娩前后准备整理成生产全�
 
 - `due_date_or_week`：两个表单共用，表示预产期或当前孕周。
 - `birth_path`：两个表单共用，统一选项为“顺产/剖宫产/还没确定”。用户自然语言里的同义表达同等处理，预填时归一化为“剖宫产”。
-- `birth_setting`：两个表单共用，表示医院、地区或生产地点。
+- `birth_setting`：分娩沟通卡可使用，表示医院、地区或生产地点。待产包表单不要向用户询问医院、城市或生产地点；如需要环境信息，由应用侧能力或后续医院确认事项承接。
 - `first_birth`：两个表单可共用，表示是否第一胎。可从待产包表单预填到分娩沟通卡表单，用于调整解释、陪伴和支持人提示的细致程度。
 - `support_person`：统一作为支持人字段。待产包表单直接使用 `support_person`；分娩沟通卡也应使用 `support_person`。如遇旧字段 `support_people`，可作为兼容输入读取，但不要再新建 `support_people` 表单字段。
-- `feeding_intention`：两个表单共用，选项使用更口语的“母乳喂养/母乳和配方奶都可能/配方奶/还没想好”；可在两表单间双向预填，若用户在分娩沟通卡里改写，以最近一次提交为准。分娩沟通卡端不单独成 card 分区，按 `references/birth-plan-card.md` 的字段规则转化为 `baby_after_birth` 短句；不要覆盖用户在沟通卡里明确选择的 `baby_after_birth_preferences`。
+- `feeding_intention`：两个表单共用。待产包表单使用“亲喂母乳/配方奶/混合喂养/还不确定”；分娩沟通卡使用“母乳喂养/母乳和配方奶都可能/配方奶/还没想好”。可在两表单间双向预填，若用户在分娩沟通卡里改写，以最近一次提交为准。分娩沟通卡端不单独成 card 分区，按 `references/birth-plan-card.md` 的字段规则转化为 `baby_after_birth` 短句；不要覆盖用户在沟通卡里明确选择的 `baby_after_birth_preferences`。
 - `medical_notes`：用户明确希望医护团队知道的过敏、医生说明或医院限制，用于分娩沟通卡。
 - `pregnancy_history_or_notes`：待产包个性化和医院确认参考。若要转入分娩沟通卡，只能在用户明确确认这些信息要给医护团队看时写入 `medical_notes`。
 

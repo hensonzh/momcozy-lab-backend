@@ -32,11 +32,11 @@ LLM 只负责判断服务路径、做人话邀约、提取已知信息并下发�
 
 ```json
 {
-  "default_values": "{\"due_date_or_week\":\"37周\",\"first_birth\":\"是\",\"birth_path\":\"顺产\",\"feeding_intention\":\"母乳\",\"birth_setting\":\"某某医院\",\"expected_stay\":\"2-3 天\",\"support_person\":\"有，且需要准备物品\",\"hospital_provided_items\":\"纸尿裤、产褥垫\"}"
+  "default_values": "{\"due_date_or_week\":\"37周\",\"first_birth\":\"是\",\"fetus_count\":\"单胎\",\"pregnancy_history_or_notes\":[\"没有\"],\"birth_path\":\"顺产\",\"feeding_intention\":\"亲喂母乳\",\"return_to_work_timing\":\"3 个月后\",\"support_person\":\"有人全天帮忙\",\"budget_preference\":\"中预算\",\"top_worries\":[\"怕漏买\",\"怕母乳不够\"]}"
 }
 ```
 
-可传字段由工具决定。常用字段包括：`due_date_or_week`、`first_birth`、`age`、`bmi_or_weight_context`、`pregnancy_history_or_notes`、`birth_path`、`expected_stay`、`support_person`、`birth_setting`、`hospital_provided_items`、`feeding_intention`。
+可传字段由工具决定。常用字段包括：`due_date_or_week`、`first_birth`、`fetus_count`、`pregnancy_history_or_notes`、`birth_path`、`feeding_intention`、`return_to_work_timing`、`support_person`、`budget_preference`、`top_worries`。不要向用户询问医院会提供什么，也不要把医院、城市或生产地点作为待产包表单问题；这类环境信息由应用侧能力或后续医院确认事项处理。
 
 表单标题、分类、选项、必填/选填和字段说明都由工具生成。不要再调用 `ui_form_create` 手写待产包字段。
 

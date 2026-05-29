@@ -339,7 +339,7 @@ EXCLUSIVE_BIRTH_PLAN_MULTI_SELECT_OPTIONS = {
     "还没确定",
     "还没想好",
 }
-PLACEHOLDER_VALUES = {"", "to confirm", "待确认", "未确定", "不确定", "还没确定", "还没想好", "none", "n/a"}
+PLACEHOLDER_VALUES = {"", "to confirm", "待确认", "未确定", "不确定", "还不确定", "还没确定", "还没想好", "none", "n/a"}
 BIRTH_PATH_ALIASES = {
     "vaginal": "顺产",
     "natural": "顺产",
@@ -366,70 +366,84 @@ HOSPITAL_BAG_FORM_FIELDS = [
         "label": "基本信息｜是否第一胎",
         "type": "select",
         "required": True,
-        "options": ["是", "否", "不确定"],
+        "options": ["是", "否"],
     },
     {
-        "id": "age",
-        "label": "基本信息｜妈妈年龄",
-        "type": "text",
-        "required": False,
-        "placeholder": "例如：32；不想填可以留空",
-    },
-    {
-        "id": "bmi_or_weight_context",
-        "label": "基本信息｜BMI 或身高体重情况",
-        "type": "text",
-        "required": False,
-        "placeholder": "例如：BMI 24，或身高体重；不确定可留空",
+        "id": "fetus_count",
+        "label": "基本信息｜这次是单胎、双胎，还是三胎及以上？",
+        "type": "select",
+        "required": True,
+        "options": ["单胎", "双胎", "三胎及以上", "不确定"],
     },
     {
         "id": "pregnancy_history_or_notes",
-        "label": "基本信息｜妊娠病史或特殊注意事项",
-        "type": "textarea",
-        "required": False,
-        "placeholder": "例如：妊娠糖尿病、过敏史、医生提醒、行动不便等；没有可留空。",
+        "label": "基本信息｜医生是否提示过特殊情况",
+        "type": "multi_select",
+        "required": True,
+        "allow_other_input": True,
+        "other_placeholder": "请简单填写医生提示的情况",
+        "options": [
+            "没有",
+            "妊娠糖尿病",
+            "血压或子痫前期风险",
+            "胎盘问题",
+            "早产风险",
+            "计划剖宫产",
+            "宝宝可能 NICU",
+            "其它",
+        ],
     },
     {
         "id": "birth_path",
-        "label": "生产信息｜计划分娩方式",
+        "label": "生产信息｜分娩方式",
         "type": "select",
         "required": True,
-        "options": ["顺产", "剖宫产", "未确定"],
-    },
-    {
-        "id": "expected_stay",
-        "label": "生产信息｜预计住院时长",
-        "type": "select",
-        "required": False,
-        "options": ["不确定", "1 天", "2-3 天", "4 天或以上", "医生/医院建议为准"],
-    },
-    {
-        "id": "support_person",
-        "label": "生产信息｜陪产人或支持人情况",
-        "type": "select",
-        "required": False,
-        "options": ["有，且需要准备物品", "有，但不需要准备物品", "暂时没有", "不确定"],
-    },
-    {
-        "id": "birth_setting",
-        "label": "医院信息｜医院、地区或生产地点",
-        "type": "text",
-        "required": False,
-        "placeholder": "例如：某某医院、公立医院、私立医院、月子中心配套医院，或暂未确定",
-    },
-    {
-        "id": "hospital_provided_items",
-        "label": "医院信息｜已知医院会提供的物品",
-        "type": "textarea",
-        "required": False,
-        "placeholder": "例如：产褥垫、纸尿裤、宝宝衣物、奶瓶、毛巾。不确定可留空。",
+        "options": ["顺产", "剖宫产", "还不确定"],
     },
     {
         "id": "feeding_intention",
-        "label": "偏好信息｜喂养意向",
+        "label": "喂养信息｜喂养意向",
         "type": "select",
         "required": True,
-        "options": ["母乳", "配方", "混合", "未确定"],
+        "options": ["亲喂母乳", "配方奶", "混合喂养", "还不确定"],
+    },
+    {
+        "id": "return_to_work_timing",
+        "label": "喂养信息｜产后多久返工",
+        "type": "text",
+        "required": True,
+        "placeholder": "例如：6 周后、3 个月后、暂不返工",
+    },
+    {
+        "id": "support_person",
+        "label": "照护信息｜产后前两周支持情况",
+        "type": "select",
+        "required": True,
+        "options": ["有人全天帮忙", "白天主要自己", "夜间主要自己", "支持少", "不确定"],
+    },
+    {
+        "id": "budget_preference",
+        "label": "偏好信息｜预算偏好",
+        "type": "select",
+        "required": True,
+        "options": ["低预算", "中预算", "高预算"],
+    },
+    {
+        "id": "top_worries",
+        "label": "偏好信息｜最焦虑的事",
+        "type": "multi_select",
+        "required": True,
+        "allow_other_input": True,
+        "other_placeholder": "请简单写下你最担心的事",
+        "options": [
+            "不知道什么时候去医院",
+            "怕漏买",
+            "怕母乳不够",
+            "怕剖宫产恢复",
+            "怕产后没人帮",
+            "怕宝宝用品准备不全",
+            "其它",
+        ],
     },
 ]
 BIRTH_PLAN_FORM_FIELDS = [
@@ -613,8 +627,14 @@ BIRTH_PLAN_FORM_FIELDS = [
 HOSPITAL_BAG_MISSING_LABELS = {
     "due_date_or_week": "预产期或当前孕周",
     "first_birth": "是否第一胎",
-    "birth_path": "计划分娩方式",
+    "fetus_count": "本次妊娠胎数",
+    "pregnancy_history_or_notes": "医生是否提示过特殊情况",
+    "birth_path": "分娩方式",
     "feeding_intention": "喂养意向",
+    "return_to_work_timing": "产后多久返工",
+    "support_person": "产后前两周支持情况",
+    "budget_preference": "预算偏好",
+    "top_worries": "最焦虑的事",
 }
 HOSPITAL_BAG_DISCLAIMER = "请优先遵循医院要求和医生/助产士的具体指导。"
 HOSPITAL_BAG_PROVIDED_ITEM_ALIASES = {
@@ -1942,7 +1962,7 @@ def _hospital_bag_postpartum_items(context: dict[str, Any]) -> list[dict[str, An
         {"label": "宝宝尿布台用品", "priority": "recommended"},
         {"label": "喂养记录工具", "priority": "recommended"},
     ]
-    return items if feeding in {"母乳", "混合", "待确认", "未确定"} else []
+    return items if feeding in {"母乳", "混合", "纯泵奶", "待确认", "未确定"} else []
 
 
 def _hospital_bag_confirmation_questions(context: dict[str, Any]) -> list[str]:
@@ -1957,7 +1977,7 @@ def _hospital_bag_confirmation_questions(context: dict[str, Any]) -> list[str]:
         questions.append("收腹带/术后用品：剖宫产先问医生或医院是否建议准备。")
     if context.get("feeding_intention") == "配方":
         questions.append("奶瓶/配方奶：确认医院是否允许携带，或是否由医院提供。")
-    elif context.get("feeding_intention") in {"母乳", "混合"}:
+    elif context.get("feeding_intention") in {"母乳", "混合", "纯泵奶"}:
         questions.append("母乳喂养支持：确认医院是否有产后哺乳指导或泌乳顾问资源。")
     if context.get("stage") in {"packing", "immediate"}:
         questions.append("住院时长/出院要求：确认预计住院几天，以及宝宝出院衣物是否有要求。")
@@ -1969,7 +1989,7 @@ def _hospital_bag_focus_items(stage: str, context: dict[str, Any]) -> list[str]:
     if stage in {"packing", "immediate"}:
         base.insert(3, "产褥垫/产妇卫生巾")
         base.insert(4, "一次性内裤")
-    if context.get("feeding_intention") in {"母乳", "混合"}:
+    if context.get("feeding_intention") in {"母乳", "混合", "纯泵奶"}:
         base.append("哺乳文胸/防溢乳垫")
     return base[:7]
 
@@ -1985,7 +2005,7 @@ def _hospital_bag_personalized_notes(context: dict[str, Any], form_data: dict[st
     notes.append(stage_labels.get(context.get("stage"), stage_labels["purchase"]))
     if context.get("birth_path") == "剖宫产":
         notes.append("你选择了剖宫产，所以保留了更宽松、方便拿取和术后更友好的物品提醒。")
-    if context.get("feeding_intention") in {"母乳", "混合"}:
+    if context.get("feeding_intention") in {"母乳", "混合", "纯泵奶"}:
         notes.append("你有母乳喂养意向，所以保留哺乳文胸、防溢乳垫和吸奶器备用项。")
     elif context.get("feeding_intention") == "配方":
         notes.append("你选择配方喂养，所以奶瓶和配方奶先放到医院确认项里，不默认当作必带。")
@@ -2058,7 +2078,7 @@ def _normalize_hospital_bag_form_value(field_id: str, value: str) -> str:
     if field_id == "birth_path":
         return _normalize_birth_path(value) or value
     if field_id == "feeding_intention":
-        return _normalize_feeding_intention(value) or value
+        return _normalize_hospital_bag_feeding_form_value(value) or value
     if field_id == "first_birth":
         return _normalize_first_birth(value) or value
     return value
@@ -2084,7 +2104,7 @@ def _normalize_birth_plan_form_value(field_id: str, value: Any) -> Any:
 
 def _normalize_birth_plan_feeding_intention(value: str) -> str:
     feeding = _normalize_feeding_intention(value)
-    if feeding == "母乳":
+    if feeding in {"母乳", "纯泵奶"}:
         return "母乳喂养"
     if feeding == "混合":
         return "母乳和配方奶都可能"
@@ -2095,17 +2115,34 @@ def _normalize_birth_plan_feeding_intention(value: str) -> str:
     return value
 
 
+def _normalize_hospital_bag_feeding_form_value(value: str) -> str:
+    feeding = _normalize_feeding_intention(value)
+    if feeding == "母乳":
+        return "亲喂母乳"
+    if feeding == "混合":
+        return "混合喂养"
+    if feeding == "纯泵奶":
+        return "亲喂母乳"
+    if feeding == "配方":
+        return "配方奶"
+    if feeding == "未确定":
+        return "还不确定"
+    return value
+
+
 def _normalize_feeding_intention(value: str) -> str:
     text = str(value or "").strip().lower()
     if not text:
         return ""
     if any(token in text for token in ("混合", "combo", "mixed")):
         return "混合"
+    if any(token in text for token in ("纯泵", "泵奶", "吸奶", "exclusive pumping", "pumping")):
+        return "纯泵奶"
     if any(token in text for token in ("配方", "奶粉", "formula")):
         return "配方"
     if any(token in text for token in ("母乳", "亲喂", "breast")):
         return "母乳"
-    if text in {"未确定", "不确定", "还没想好", "unknown"}:
+    if text in {"未确定", "不确定", "还不确定", "还没想好", "unknown"}:
         return "未确定"
     return value
 
@@ -2172,7 +2209,9 @@ def _item_match_key(value: Any) -> str:
 
 def _support_person_needs_bag(context: dict[str, Any]) -> bool:
     value = str(context.get("support_person") or "")
-    return not any(token in value for token in ("暂时没有", "不需要", "没有"))
+    if any(token in value for token in ("白天主要自己", "夜间主要自己", "支持少", "暂时没有", "不需要", "没有", "不确定")):
+        return False
+    return any(token in value for token in ("有人全天帮忙", "陪产", "支持人", "伴侣", "家人", "有，", "有人"))
 
 
 def _postpartum_pad_quantity(context: dict[str, Any]) -> str:
@@ -2466,8 +2505,7 @@ def _breast_pump_item_index(items: list[Any]) -> int | None:
 def _formula_only_feeding_intention(inputs: RuntimeInputs) -> bool:
     data = _confirmed_form_data(inputs)
     if data:
-        feeding_intention = str(data.get("feeding_intention", "")).strip().lower()
-        return feeding_intention in {"配方", "formula", "formula feeding"}
+        return _normalize_feeding_intention(_first_text(data.get("feeding_intention"))) == "配方"
     message = str(inputs.get("user_message", ""))
     marker = "confirmed_form_data:"
     if marker not in message:
@@ -2477,8 +2515,7 @@ def _formula_only_feeding_intention(inputs: RuntimeInputs) -> bool:
         data = json.loads(raw_json)
     except json.JSONDecodeError:
         return False
-    feeding_intention = str(data.get("feeding_intention", "")).strip().lower()
-    return feeding_intention in {"配方", "formula", "formula feeding"}
+    return _normalize_feeding_intention(_first_text(data.get("feeding_intention"))) == "配方"
 
 
 def _confirmed_form_data(inputs: RuntimeInputs) -> dict[str, Any]:
@@ -2756,7 +2793,9 @@ def _normalize_form_fields(raw_fields: Any) -> list[dict[str, Any]]:
             "type": str(field.get("type", "text")),
             "required": bool(field.get("required", False)),
         }
-        for optional_key in ("help_text", "placeholder", "default_value"):
+        if field.get("allow_other_input") is not None:
+            normalized["allow_other_input"] = bool(field.get("allow_other_input"))
+        for optional_key in ("help_text", "placeholder", "other_placeholder", "default_value"):
             value = field.get(optional_key)
             if value is not None and value != "":
                 normalized[optional_key] = value
