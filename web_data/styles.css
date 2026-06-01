@@ -80,7 +80,8 @@ textarea {
 }
 
 .login-panel label,
-#file-form label {
+#file-form label,
+.notification-panel label {
   display: grid;
   gap: 6px;
   color: var(--muted);
@@ -267,6 +268,41 @@ aside {
   grid-template-rows: auto 1fr;
 }
 
+.notification-panel {
+  max-width: 920px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 18px;
+  display: grid;
+  gap: 14px;
+}
+
+.notification-panel h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.notification-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(260px, 1fr);
+  gap: 14px;
+}
+
+.notification-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+#notification-data {
+  font-family: Consolas, "Courier New", monospace;
+}
+
+#notification-status {
+  color: var(--accent-dark);
+}
+
 .editor-toolbar {
   display: flex;
   gap: 10px;
@@ -337,6 +373,10 @@ dialog footer {
   }
 
   .file-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .notification-grid {
     grid-template-columns: 1fr;
   }
 

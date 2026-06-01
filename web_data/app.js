@@ -26,11 +26,13 @@ const $ = (id) => document.getElementById(id);
 
 async function api(path, options = {}) {
   const isForm = options.body instanceof FormData;
+  const suppressAuthRedirect = Boolean(options.suppressAuthRedirect);
+  const { suppressAuthRedirect: _ignored, ...fetchOptions } = options;
   const response = await fetch(path, {
-    ...options,
+    ...fetchOptions,
     headers: isForm ? options.headers || {} : { "Content-Type": "application/json", ...(options.headers || {}) },
   });
-  if (response.status === 401) {
+  if (response.status === 401 && !suppressAuthRedirect) {
     showLogin();
     throw new Error("请先登录");
   }
@@ -98,6 +100,7 @@ function bindEvents() {
   $("file-delete").addEventListener("click", deleteFile);
   $("file-download").addEventListener("click", downloadFile);
   $("file-upload").addEventListener("change", uploadFile);
+  $("notification-form").addEventListener("submit", reportNotification);
   $("row-cancel").addEventListener("click", () => $("row-dialog").close());
 }
 
@@ -402,6 +405,35 @@ async function uploadFile(event) {
   await api("/api/files/upload", { method: "POST", body: form });
   event.target.value = "";
   await loadFiles();
+}
+
+async function reportNotification(event) {
+  event.preventDefault();
+  $("notification-error").textContent = "";
+  $("notification-status").textContent = "";
+  $("notification-submit").disabled = true;
+  try {
+    const dataText = $("notification-data").value.trim();
+    const data = dataText ? JSON.parse(dataText) : {};
+    const token = $("notification-token").value.trim();
+    const headers = token ? { "X-Web-Data-Ws-Token": token } : {};
+    const response = await api("/api/notifications/report", {
+      method: "POST",
+      headers,
+      suppressAuthRedirect: true,
+      body: JSON.stringify({
+        reminder_type: $("notification-type").value,
+        title: $("notification-title").value,
+        message: $("notification-message").value,
+        data,
+      }),
+    });
+    $("notification-status").textContent = `已上报：${response.notification.reminder_type}`;
+  } catch (error) {
+    $("notification-error").textContent = error instanceof SyntaxError ? "扩展数据必须是合法 JSON" : error.message;
+  } finally {
+    $("notification-submit").disabled = false;
+  }
 }
 
 function valueText(value) {
