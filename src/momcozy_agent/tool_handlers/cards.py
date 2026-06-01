@@ -25,10 +25,6 @@ HOSPITAL_BAG_CART_ASSISTANT_FOLLOWUP = {
         f"**{HOSPITAL_BAG_CART_LINK}**"
     ),
 }
-BIRTH_JOURNEY_PLAN_ASSISTANT_FOLLOWUP = {
-    "kind": "birth_journey_plan_card_guidance",
-    "message": "已经根据你的情况整理成生产全过程计划了。你先看当前阶段；如果想继续细化，我可以接着帮你做待产包卡片。",
-}
 DEFAULT_HOSPITAL_BAG_CART_GROUPS: list[dict[str, Any]] = [
     {
         "title": "妈妈护理",
@@ -780,7 +776,7 @@ def create_hospital_bag_card(args: dict[str, Any], inputs: RuntimeInputs) -> dic
     _suppress_hospital_bag_personalization(card_json["packing_groups"])
     _apply_hospital_bag_item_explanations(card_json["packing_groups"])
     return {
-        "tool_name": "ui_card_create",
+        "tool_name": "hospital_bag_card_create",
         "status": "card_created",
         "card": {
             "card_type": "hospital_bag_card",
@@ -1808,7 +1804,7 @@ def create_birth_plan_form(args: dict[str, Any], inputs: RuntimeInputs) -> dict[
     }
 
 
-def create_birth_plan_card(args: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
+def create_labor_communication_card(args: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
     form_data = _confirmed_form_data(inputs) or _dict_value(args.get("confirmed_form_data"))
     card_json: dict[str, Any] = {
         "card_type": "birth_plan_card",
@@ -1817,7 +1813,7 @@ def create_birth_plan_card(args: dict[str, Any], inputs: RuntimeInputs) -> dict[
     }
     assistant_followup = _prepare_birth_plan_card(card_json, inputs, form_data)
     return {
-        "tool_name": "ui_card_create",
+        "tool_name": "labor_communication_card_create",
         "status": "card_created",
         "card": {
             "card_type": "birth_plan_card",
@@ -1830,18 +1826,83 @@ def create_birth_plan_card(args: dict[str, Any], inputs: RuntimeInputs) -> dict[
 
 def create_birth_journey_plan_card(args: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
     plan_context = _dict_value(args.get("plan_context")) or _confirmed_form_data(inputs)
+    missing_context = _missing_birth_journey_required_context(plan_context)
+    if missing_context:
+        question = _birth_journey_required_context_question(missing_context)
+        return {
+            "tool_name": "birth_journey_plan_card_create",
+            "status": "needs_required_context",
+            "summary": "生成生产全过程计划卡片前，需要先确认孕期、分娩方式和支持人。",
+            "missing_fields": missing_context,
+            "data": {
+                "confirmation_question": question,
+            },
+        }
     scope = str(args.get("scope") or "full").strip() or "full"
     card_json = _build_birth_journey_plan_card_json(plan_context, scope, inputs)
     return {
-        "tool_name": "ui_card_create",
+        "tool_name": "birth_journey_plan_card_create",
         "status": "card_created",
         "card": {
             "card_type": "birth_journey_plan_card",
             "schema_version": "1.0",
             "card_json": card_json,
         },
-        "assistant_followup": dict(BIRTH_JOURNEY_PLAN_ASSISTANT_FOLLOWUP),
     }
+
+
+def _missing_birth_journey_required_context(form_data: dict[str, Any]) -> list[str]:
+    missing: list[str] = []
+    due_text = _first_text(form_data.get("due_date_or_week"), form_data.get("due_date"), form_data.get("current_week"))
+    birth_path = _normalize_birth_journey_birth_path(_first_answer_text(form_data.get("birth_path"), form_data.get("delivery_method")))
+    support_person = _first_answer_text(form_data.get("support_person"), form_data.get("support_people"), form_data.get("partner_or_support"))
+    if not _has_meaningful_value(due_text):
+        missing.append("due_date_or_week")
+    if not _birth_journey_has_answer(birth_path):
+        missing.append("birth_path")
+    if not _birth_journey_has_answer(support_person):
+        missing.append("support_person")
+    return missing
+
+
+def _birth_journey_has_answer(value: Any) -> bool:
+    text = str(value or "").strip()
+    return bool(text) and text.lower() not in {"none", "n/a"}
+
+
+def _first_answer_text(*values: Any) -> str:
+    for value in values:
+        if isinstance(value, list):
+            text = ", ".join(str(item).strip() for item in value if _birth_journey_has_answer(item))
+        elif isinstance(value, dict):
+            text = ", ".join(
+                str(nested_value).strip()
+                for nested_value in value.values()
+                if _birth_journey_has_answer(nested_value)
+            )
+        else:
+            text = str(value or "").strip()
+        if _birth_journey_has_answer(text):
+            return text
+    return ""
+
+
+def _normalize_birth_journey_birth_path(value: str) -> str:
+    text = str(value or "").strip()
+    normalized = _normalize_birth_path(text)
+    return normalized if _birth_journey_has_answer(normalized) else text
+
+
+def _birth_journey_required_context_question(missing_fields: list[str]) -> str:
+    labels = {
+        "due_date_or_week": "你现在大概孕几周，或预产期是哪天",
+        "birth_path": "计划顺产、剖宫产，还是还没确定",
+        "support_person": "生产或入院时主要支持人是谁",
+    }
+    if len(missing_fields) >= 3:
+        return "我先确认 3 件事再生成计划：你现在大概孕几周或预产期是哪天？计划顺产、剖宫产还是还没确定？生产或入院时主要支持人是谁？"
+    questions = [labels[field] for field in missing_fields if field in labels]
+    return f"我还差{'、'.join(questions)}，确认后再帮你生成生产全过程计划。"
 
 
 def _build_birth_journey_plan_card_json(form_data: dict[str, Any], scope: str, inputs: RuntimeInputs) -> dict[str, Any]:
@@ -1850,10 +1911,10 @@ def _build_birth_journey_plan_card_json(form_data: dict[str, Any], scope: str, i
     timeline = _birth_journey_timeline(due_text, today, inputs, scope)
     first_birth = _normalize_first_birth(_first_text(form_data.get("first_birth")))
     fetus_count = _first_text(form_data.get("fetus_count"), form_data.get("baby_count"))
-    birth_path = _normalize_birth_path(_first_text(form_data.get("birth_path"), form_data.get("delivery_method")))
+    birth_path = _normalize_birth_journey_birth_path(_first_answer_text(form_data.get("birth_path"), form_data.get("delivery_method")))
     feeding_intention = _normalize_feeding_intention(_first_text(form_data.get("feeding_intention"), form_data.get("feeding_plan")))
     birth_setting = _first_text(form_data.get("birth_setting"), form_data.get("birth_hospital"), form_data.get("hospital"))
-    support_person = _first_text(form_data.get("support_person"), form_data.get("support_people"), form_data.get("partner_or_support"))
+    support_person = _first_answer_text(form_data.get("support_person"), form_data.get("support_people"), form_data.get("partner_or_support"))
     medical_notes = _text_list(
         form_data.get("pregnancy_history_or_notes")
         or form_data.get("medical_notes")
@@ -1880,7 +1941,7 @@ def _build_birth_journey_plan_card_json(form_data: dict[str, Any], scope: str, i
         "support_person": support_person,
         "feeding_intention": feeding_intention,
     }
-    owner = {key: value for key, value in owner.items() if _has_meaningful_value(value)}
+    owner = {key: value for key, value in owner.items() if _birth_journey_owner_has_value(key, value)}
     return {
         "card_type": "birth_journey_plan_card",
         "schema_version": "1.0",
@@ -1891,6 +1952,12 @@ def _build_birth_journey_plan_card_json(form_data: dict[str, Any], scope: str, i
         "next_action": _birth_journey_next_action(timeline, context),
         "disclaimer": "这份计划用于准备和沟通，不能替代医生、助产士或医院的具体建议；有破水、出血、胎动明显减少、规律宫缩加密或明显不适时，请按医院或医生指导处理。",
     }
+
+
+def _birth_journey_owner_has_value(key: str, value: Any) -> bool:
+    if key in {"birth_path", "support_person"}:
+        return _birth_journey_has_answer(value)
+    return _has_meaningful_value(value)
 
 
 def _birth_journey_timeline(due_text: str, today: date, inputs: RuntimeInputs, scope: str) -> dict[str, Any]:
@@ -1994,7 +2061,7 @@ def _birth_journey_base_phase(phase_id: str) -> dict[str, Any]:
     base: dict[str, dict[str, Any]] = {
         "mid_pregnancy": {
             "goal": "确定生产医院方向、下一次产检要问什么、家里谁能提供支持。",
-            "watchouts": ["这个阶段不用买齐物品，也不用做临产判断；先把方向和关键问题定清楚。"],
+            "watchouts": ["这个阶段不用把生产准备一次做完，也不用做临产判断；先把方向和关键问题定清楚。"],
             "actions": ["列出下次产检最想确认的 3-5 个问题。", "确认倾向的生产医院或生产地点。", "初步写下产后前两周谁能帮忙、能帮到什么程度。"],
             "comate_help": ["生成产检问题清单。", "整理医院确认问题。", "梳理产后支持人分工草稿。"],
         },
@@ -2078,11 +2145,17 @@ def _birth_journey_subtitle(timeline: dict[str, Any], scope: str) -> str:
 
 def _birth_journey_next_action(timeline: dict[str, Any], context: dict[str, Any]) -> dict[str, str]:
     week = timeline.get("current_week")
+    if isinstance(week, int) and week < 28:
+        return {"label": "整理产检问题", "send_text": "帮我整理下次产检要问的 3-5 个问题"}
+    if isinstance(week, int) and week < 32:
+        return {"label": "确认医院流程", "send_text": "帮我整理需要向医院确认的生产流程问题"}
     if isinstance(week, int) and week >= 35:
         return {"label": "继续做待产包卡片", "send_text": "帮我做一张随时能出发的待产包卡片"}
+    if isinstance(week, int):
+        return {"label": "整理待产包卡片", "send_text": "帮我做一张个性化待产包卡片"}
     if str(context.get("birth_path") or "") or str(context.get("support_person") or ""):
         return {"label": "整理分娩沟通卡", "send_text": "帮我把生产偏好整理成分娩沟通卡"}
-    return {"label": "细化待产包", "send_text": "帮我继续做一张个性化待产包卡片"}
+    return {"label": "补充孕周", "send_text": "我现在大概孕几周"}
 
 
 def _birth_journey_gestational_days(due_text: str, today: date, inputs: RuntimeInputs) -> int | None:
@@ -3050,33 +3123,6 @@ def _sanitize_birth_plan_form_field(field: dict[str, Any]) -> dict[str, Any]:
         return field
     sanitized = [option for option in options if str(option) not in EXCLUSIVE_BIRTH_PLAN_MULTI_SELECT_OPTIONS]
     return {**field, "options": sanitized}
-
-
-def create_card(args: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
-    card_json = args.get("card_json", {})
-    if not isinstance(card_json, dict):
-        card_json = {}
-    card_type = args.get("card_type", "")
-    assistant_followup = None
-    if card_type == "hospital_bag_card":
-        assistant_followup = _prepare_hospital_bag_card(card_json, inputs)
-    elif card_type == "birth_plan_card":
-        assistant_followup = _prepare_birth_plan_card(card_json, inputs)
-    elif card_type == "birth_journey_plan_card":
-        assistant_followup = dict(BIRTH_JOURNEY_PLAN_ASSISTANT_FOLLOWUP)
-
-    result = {
-        "tool_name": "ui_card_create",
-        "status": "card_created",
-        "card": {
-            "card_type": card_type,
-            "schema_version": args.get("schema_version", ""),
-            "card_json": card_json,
-        },
-    }
-    if assistant_followup:
-        result["assistant_followup"] = assistant_followup
-    return result
 
 
 def _prepare_hospital_bag_card(card_json: dict[str, Any], inputs: RuntimeInputs) -> dict[str, str] | None:

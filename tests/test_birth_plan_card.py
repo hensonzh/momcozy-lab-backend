@@ -2,7 +2,17 @@ from __future__ import annotations
 
 import unittest
 
-from momcozy_agent.tool_handlers.cards import create_card, create_form
+from momcozy_agent.tool_handlers.cards import _confirmed_form_data, create_form, create_labor_communication_card
+
+
+def _create_birth_plan_card_for_test(args: dict, inputs: dict) -> dict:
+    card_json = args.get("card_json") if isinstance(args.get("card_json"), dict) else {}
+    form_data = dict(card_json)
+    form_data.pop("medical_notes", None)
+    if "baby_after_birth" in form_data and "baby_after_birth_preferences" not in form_data:
+        form_data["baby_after_birth_preferences"] = form_data["baby_after_birth"]
+    form_data.update(_confirmed_form_data(inputs))
+    return create_labor_communication_card({"confirmed_form_data": form_data}, {"user_message": ""})
 
 
 class BirthPlanCardTests(unittest.TestCase):
@@ -16,7 +26,7 @@ class BirthPlanCardTests(unittest.TestCase):
             "disclaimer": "This card is for communication only. Please follow clinician and hospital guidance.",
         }
 
-        result = create_card(
+        result = _create_birth_plan_card_for_test(
             {
                 "card_type": "birth_plan_card",
                 "schema_version": "1.0",
@@ -50,7 +60,7 @@ class BirthPlanCardTests(unittest.TestCase):
             "medical_notes": ["医生建议立即改用某方案"],
         }
 
-        result = create_card(
+        result = _create_birth_plan_card_for_test(
             {
                 "card_type": "birth_plan_card",
                 "schema_version": "1.0",
@@ -69,7 +79,7 @@ class BirthPlanCardTests(unittest.TestCase):
             "top_priorities": ["希望伴侣参与重要决定", "1. 希望伴侣参与重要决定"],
         }
 
-        result = create_card(
+        result = _create_birth_plan_card_for_test(
             {
                 "card_type": "birth_plan_card",
                 "schema_version": "1.0",
@@ -116,7 +126,7 @@ class BirthPlanCardTests(unittest.TestCase):
         self.assertTrue(all("help_text" not in field for field in fields))
 
     def test_birth_plan_uses_priority_notes_and_hospital_question_focus(self) -> None:
-        result = create_card(
+        result = _create_birth_plan_card_for_test(
             {
                 "card_type": "birth_plan_card",
                 "schema_version": "1.0",
@@ -138,7 +148,7 @@ class BirthPlanCardTests(unittest.TestCase):
         self.assertIn("产后有没有母乳喂养支持", card["questions_for_hospital"])
 
     def test_birth_plan_prefers_unified_support_person_field(self) -> None:
-        result = create_card(
+        result = _create_birth_plan_card_for_test(
             {
                 "card_type": "birth_plan_card",
                 "schema_version": "1.0",
@@ -151,10 +161,10 @@ class BirthPlanCardTests(unittest.TestCase):
         self.assertEqual(card["overview"]["support_people"], "伴侣")
         self.assertTrue(any("伴侣" in item for item in card["personalized_notes"]))
 
-    def test_birth_plan_card_create_reads_current_confirmed_form_data_when_args_empty(self) -> None:
-        from momcozy_agent.tool_handlers.cards import create_birth_plan_card
+    def test_labor_communication_card_create_reads_current_confirmed_form_data_when_args_empty(self) -> None:
+        from momcozy_agent.tool_handlers.cards import create_labor_communication_card
 
-        result = create_birth_plan_card(
+        result = create_labor_communication_card(
             {"confirmed_form_data": {}},
             {
                 "user_message": (
@@ -170,7 +180,7 @@ class BirthPlanCardTests(unittest.TestCase):
         self.assertEqual(card["overview"]["support_people"], "伴侣")
 
     def test_birth_plan_maps_expanded_preference_fields(self) -> None:
-        result = create_card(
+        result = _create_birth_plan_card_for_test(
             {
                 "card_type": "birth_plan_card",
                 "schema_version": "1.0",
@@ -203,7 +213,7 @@ class BirthPlanCardTests(unittest.TestCase):
         self.assertTrue(any("第一胎" in item for item in card["personalized_notes"]))
 
     def test_birth_plan_maps_top_priorities_into_display_groups(self) -> None:
-        result = create_card(
+        result = _create_birth_plan_card_for_test(
             {
                 "card_type": "birth_plan_card",
                 "schema_version": "1.0",
@@ -226,7 +236,7 @@ class BirthPlanCardTests(unittest.TestCase):
         self.assertIn("重要决定也请同步伴侣/支持人", card["communication"])
 
     def test_birth_plan_retains_many_selected_options(self) -> None:
-        result = create_card(
+        result = _create_birth_plan_card_for_test(
             {
                 "card_type": "birth_plan_card",
                 "schema_version": "1.0",

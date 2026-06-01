@@ -436,8 +436,9 @@ def _tool_semantic_phase(tool_name: str) -> str:
         return "saving"
     if tool_name in {
         "ui_form_create",
-        "ui_card_create",
+        "labor_communication_card_create",
         "birth_journey_plan_card_create",
+        "hospital_bag_card_create",
         "ibclc_consult_card_create",
         "support_ticket_draft_create",
     }:
@@ -505,10 +506,12 @@ def _tool_start_label(tool_name: str, arguments: dict[str, Any]) -> str:
         return "我正在帮你保存宝宝成长记录"
     if tool_name == "ui_form_create":
         return "我正在帮你准备确认内容"
-    if tool_name == "ui_card_create":
-        return "我正在帮你整理成卡片"
+    if tool_name == "labor_communication_card_create":
+        return "我正在帮你整理分娩沟通卡"
     if tool_name == "birth_journey_plan_card_create":
         return "我正在帮你整理生产全过程计划"
+    if tool_name == "hospital_bag_card_create":
+        return "我正在帮你整理待产包卡片"
     if tool_name == "ibclc_consult_card_create":
         return "我正在帮你准备 IBCLC 咨询卡"
     if tool_name == "support_ticket_draft_create":
@@ -551,7 +554,7 @@ def _tool_end_label(tool_name: str) -> str:
         return "我在整理设备内容"
     if tool_name == "support_ticket_draft_create":
         return "我在整理工单草稿"
-    if tool_name in {"ui_form_create", "ui_card_create", "birth_journey_plan_card_create", "ibclc_consult_card_create"}:
+    if tool_name in {"ui_form_create", "labor_communication_card_create", "birth_journey_plan_card_create", "hospital_bag_card_create", "ibclc_consult_card_create"}:
         return "我在生成结果"
     return "我在继续处理"
 
@@ -606,10 +609,14 @@ def _tool_result_label(tool_name: str, result: dict[str, Any]) -> str:
         return "我已经整理好日程调整预览了"
     if tool_name == "ui_form_create":
         return "我已经准备好确认内容了"
-    if tool_name == "ui_card_create":
-        return "我已经生成结果卡片了"
+    if tool_name == "labor_communication_card_create":
+        return "我已经整理好分娩沟通卡了"
+    if status == "needs_required_context":
+        return "我还需要先确认几项信息"
     if tool_name == "birth_journey_plan_card_create":
         return "我已经整理好生产全过程计划了"
+    if tool_name == "hospital_bag_card_create":
+        return "我已经整理好待产包卡片了"
     if tool_name == "ibclc_consult_card_create":
         return "我已经准备好 IBCLC 咨询卡了"
     if tool_name == "support_ticket_draft_create":
@@ -690,7 +697,7 @@ def safe_tool_result(result: dict[str, Any]) -> dict[str, Any]:
     }
     tool_result = result.get("result")
     if isinstance(tool_result, dict):
-        for key in ("id", "skill_id", "status", "resource_id", "side_effect_performed", "summary"):
+        for key in ("id", "skill_id", "status", "resource_id", "side_effect_performed", "summary", "missing_fields"):
             if key in tool_result:
                 safe[key] = tool_result[key]
         tool_data = tool_result.get("data")
@@ -700,7 +707,7 @@ def safe_tool_result(result: dict[str, Any]) -> dict[str, Any]:
                     safe[key] = tool_data[key]
         if result.get("tool_name") in {"ui_form_create", "birth_plan_form_create", "hospital_bag_form_create"} and isinstance(tool_result.get("form"), dict):
             safe["form"] = tool_result["form"]
-        if result.get("tool_name") in {"ui_card_create", "birth_plan_card_create", "birth_journey_plan_card_create", "hospital_bag_card_create"} and isinstance(tool_result.get("card"), dict):
+        if result.get("tool_name") in {"labor_communication_card_create", "birth_journey_plan_card_create", "hospital_bag_card_create"} and isinstance(tool_result.get("card"), dict):
             safe["card"] = tool_result["card"]
             if isinstance(tool_result.get("assistant_followup"), dict):
                 safe["assistant_followup"] = tool_result["assistant_followup"]
@@ -751,9 +758,8 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
 
     if tool_name not in {
         "ui_form_create",
-        "ui_card_create",
         "birth_plan_form_create",
-        "birth_plan_card_create",
+        "labor_communication_card_create",
         "birth_journey_plan_card_create",
         "hospital_bag_form_create",
         "hospital_bag_card_create",
@@ -763,6 +769,24 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
         "support_ticket_draft_create",
     }:
         return result
+
+    if tool_name == "birth_journey_plan_card_create" and isinstance(safe.get("card"), dict):
+        return _compact_birth_journey_plan_card_output(safe)
+    if tool_name == "birth_journey_plan_card_create" and safe.get("status") == "needs_required_context":
+        question = str(safe.get("confirmation_question") or safe.get("summary") or "").strip()
+        compact_missing = {
+            "ok": safe.get("ok"),
+            "tool_name": safe.get("tool_name"),
+            "status": safe.get("status"),
+            "summary": safe.get("summary"),
+            "missing_fields": safe.get("missing_fields"),
+            "confirmation_question": question,
+            "final_response_instruction": (
+                "生产全过程计划卡片还不能生成。最终回复只向用户补问 confirmation_question 中缺失的信息，"
+                "不要输出路线图、不要创建卡片已完成的表达，也不要提待产包或分娩沟通卡。"
+            ),
+        }
+        return {key: value for key, value in compact_missing.items() if value not in (None, "", [])}
 
     compact: dict[str, Any] = {
         "ok": safe.get("ok"),
@@ -775,6 +799,7 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
         "resource_id",
         "side_effect_performed",
         "summary",
+        "missing_fields",
         "requires_confirmation",
         "requires_medical_confirmation",
         "confirmation_question",
@@ -818,7 +843,36 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
             "created": True,
         }
 
+    followup = compact.get("assistant_followup")
+    if isinstance(followup, dict):
+        message = str(followup.get("message") or "").strip()
+        if message:
+            compact["final_response_instruction"] = (
+                "最终回复只能原样输出 assistant_followup.message，不要改写、扩写、重复交付语或再补充下一步。"
+            )
+
     return compact
+
+
+def _compact_birth_journey_plan_card_output(safe: dict[str, Any]) -> dict[str, Any]:
+    card = safe.get("card")
+    card_json = card.get("card_json") if isinstance(card, dict) else None
+    card_json_dict = card_json if isinstance(card_json, dict) else {}
+    next_action = card_json_dict.get("next_action") if isinstance(card_json_dict.get("next_action"), dict) else {}
+    label = str(next_action.get("label") or "").strip()
+    if label:
+        response = f"已经整理好了生产全过程计划。你先看当前阶段；下一步可以继续{label}。"
+    else:
+        response = "已经整理好了生产全过程计划。你先看当前阶段，后面可以再按孕周和医院信息调整。"
+
+    return _compact_card_tool_output(
+        safe,
+        (
+            "生产全过程计划卡片已经展示完整路线图。最终回复只能输出下面这一句，不要改写、扩写，"
+            "也不要复述卡片里的阶段、日期、准备动作，或在这句之外再添加其他服务和多个下一步："
+            f"{response}"
+        ),
+    )
 
 
 def _compact_milk_analysis_card_output(safe: dict[str, Any]) -> dict[str, Any]:

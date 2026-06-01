@@ -83,7 +83,7 @@ LLM 只负责判断服务路径、做人话邀约、提取已知信息并下发�
 - `quick`：用户只要轻量版、快速版或简单版；仍然先用表单确认必要字段，再由工具生成卡片。
 - `immediate`：用户 37 周以后、马上去医院、快生了，且安全确认后适合生成即时可拿取版本。
 
-不要让 LLM 自己生成待产包 `card_json`，也不要再调用 `ui_card_create` 手写待产包卡片。工具会生成：
+不要让 LLM 自己生成待产包 `card_json`。`hospital_bag_card_create` 会生成：
 
 - `hospital_bag_card` artifact。
 - 按场景分包的 `packing_groups`。

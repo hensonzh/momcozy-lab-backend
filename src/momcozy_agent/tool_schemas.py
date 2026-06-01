@@ -162,15 +162,6 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
             },
         },
     ),
-    "ui_card_create": _function_tool(
-        "ui_card_create",
-        "创建前端可渲染的通用结构化卡片产物。无后端副作用。分娩沟通卡应优先使用 birth_plan_card_create；待产包应优先使用 hospital_bag_card_create；只有兼容旧流程时才手写 card_json。",
-        {
-            "card_type": {"type": "string", "enum": ["birth_plan_card", "birth_journey_plan_card", "hospital_bag_card"]},
-            "schema_version": {"type": "string"},
-            "card_json": JSON_OBJECT_STRING,
-        },
-    ),
     "ui_quick_replies_create": _function_tool(
         "ui_quick_replies_create",
         "为当前最终回复创建 3 个前端快捷输入提示。无后端副作用；每轮最终回复都应调用一次。不要用于替代正文回答，不要在正文里复述这些快捷输入。每次调用必须提供且只提供 3 个短提示；点击后只会作为普通用户消息发送，不能绕过保存、提交、替换、转接等确认流程。",
@@ -197,8 +188,8 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
             "default_values": JSON_OBJECT_STRING,
         },
     ),
-    "birth_plan_card_create": _function_tool(
-        "birth_plan_card_create",
+    "labor_communication_card_create": _function_tool(
+        "labor_communication_card_create",
         "根据分娩沟通卡表单 confirmed_form_data 生成前端可渲染的分娩沟通卡。LLM 不需要生成 card_json；字段映射、强诉求降级、分区整理、医院问题和安全声明由工具稳定生成。无后端副作用。如果当前 user_message 已包含 confirmed_form_data，confirmed_form_data 参数传 \"{}\" 即可，不要复制整段表单 JSON。",
         {
             "confirmed_form_data": JSON_OBJECT_STRING,
@@ -297,7 +288,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "ibclc_consult_card_create": _function_tool(
         "ibclc_consult_card_create",
-        "创建前端可渲染的 IBCLC 在线咨询卡片，无后端副作用。仅在用户明确要求或确认需要 IBCLC/哺乳顾问/真人或人工哺乳咨询/在线咨询时使用。若是智能体自主判断需要持证哺乳顾问介入，应先简短说明原因并询问用户是否需要在线咨询 IBCLC；用户同意后再调用本工具。不要因为用户首次提到疼痛、堵奶、奶量担忧或宝宝摄入风险就直接触发。前端只渲染顾问姓名、顾问简介和在线咨询跳转地址。",
+        "创建前端可渲染的 IBCLC 在线咨询卡片，无后端副作用。仅在用户明确要求或确认需要 IBCLC/哺乳顾问/真人或人工哺乳咨询/在线咨询时使用。若是智能体自主判断需要持证哺乳顾问介入，应先主动说明 Momcozy 有在线 IBCLC 咨询服务，并简短说明为什么适合让顾问继续看；用户同意后再调用本工具。不要因为用户首次提到疼痛、堵奶、奶量担忧或宝宝摄入风险就直接触发。前端会渲染顾问姓名、资质、经验、简介、擅长范围、适合咨询的问题、咨询前准备、医疗边界和在线咨询入口。",
         {
             "consultant_name": _nullable({"type": "string", "description": "前端名片展示的 IBCLC 顾问姓名；不确定时传 null，由工具使用默认 demo 顾问。"}),
             "consultant_bio": _nullable({"type": "string", "description": "前端名片展示的顾问简介；不确定时传 null，由工具使用默认简介。"}),

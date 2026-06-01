@@ -771,7 +771,7 @@ Agent 状态通过 `CUSTOM` / `momcozy.agent.status` 发送：
 | 工具 | 附加字段 | 前端消费 |
 | --- | --- | --- |
 | `ui_form_create` | `form` | 后端随后发送 `ARTIFACT_CREATED`，前端渲染表单 |
-| `ui_card_create` | `card`、可选 `assistant_followup` | 后端随后发送 `ARTIFACT_CREATED`，前端渲染卡片 |
+| `labor_communication_card_create` / `birth_journey_plan_card_create` / `hospital_bag_card_create` | `card`、可选 `assistant_followup` | 后端随后发送 `ARTIFACT_CREATED`，前端渲染卡片 |
 | `ibclc_consult_card_create` | `card` | 后端随后发送 `ARTIFACT_CREATED`，前端渲染 IBCLC 咨询卡 |
 | `support_ticket_draft_create` | `ticket`、`submit_label` | 后端随后发送 `ARTIFACT_CREATED` + `CONFIRMATION_REQUIRED` |
 
@@ -870,7 +870,7 @@ work item 文案由前端按阶段语义映射，核心映射在 `toolWorkPhase(
 
 ### 7.5 卡片 UI
 
-`ui_card_create` 返回 card schema。
+专用卡片工具返回 card schema。
 
 前端渲染：
 
@@ -891,6 +891,17 @@ work item 文案由前端按阶段语义映射，核心映射在 `toolWorkPhase(
 
 - `addIbclcConsultCard(card)`
 - 生成一张 IBCLC 咨询卡。
+- 卡片可展示：
+  - `consultant.name`
+  - `consultant.credentials`
+  - `consultant.experience`
+  - `consultant.bio`
+  - `consultant.specialties`
+  - `help_topics`
+  - `prep_items`
+  - `boundary_note`
+  - `chat.label`
+  - `chat.hint`
 - 前端为每张卡生成独立 `consult_id`。
 - “在线咨询”链接会携带：
   - `thread_id`

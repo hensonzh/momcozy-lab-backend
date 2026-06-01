@@ -226,7 +226,7 @@ class AgentToolEventTests(unittest.TestCase):
     def test_model_tool_output_compacts_artifact_payloads(self) -> None:
         raw = {
             "ok": True,
-            "tool_name": "birth_plan_card_create",
+            "tool_name": "labor_communication_card_create",
             "result": {
                 "status": "card_created",
                 "card": {

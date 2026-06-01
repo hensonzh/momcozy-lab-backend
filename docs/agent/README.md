@@ -306,7 +306,9 @@ message_sent_at: 2026-05-05T17:45:03+08:00
 - `read_skill_file`
 - `run_approved_skill_script`
 - `ui_form_create`
-- `ui_card_create`
+- `labor_communication_card_create`
+- `birth_journey_plan_card_create`
+- `hospital_bag_card_create`
 - `ibclc_consult_card_create`
 
 ### Deferred Business Namespaces
@@ -326,7 +328,7 @@ message_sent_at: 2026-05-05T17:45:03+08:00
 - 读类工具从 runtime inputs 返回数据或空结果。
 - milk-management 工具从 runtime inputs 注入 `user_id`，模型不需要也不应该提供用户 ID。
 - `ui_form_create` 返回前端可渲染的 form spec。
-- `ui_card_create` 返回前端可渲染的 card artifact；前端根据 `card_type` 和 `schema_version` 选择组件。
+- 专用卡片工具返回前端可渲染的 card artifact；前端根据 `card_type` 和 `schema_version` 选择组件。
 - 尚未接入真实后端的提醒、booking、case 创建等占位工具当前不暴露给模型。
 
 ### Tool Responsibility Boundary
@@ -434,7 +436,7 @@ ui_form_create tool result
   -> 前端发送 form.submit structured event
   -> 后端校验 form_id 并包装 confirmed_form_data
   -> 当前轮 Responses input 携带 confirmed_form_data
-  -> 模型调用 ui_card_create 生成 card artifact
+  -> 模型调用对应专用卡片工具生成 card artifact
 ```
 
 ## Birth Prep 当前服务流程
@@ -447,12 +449,12 @@ ui_form_create tool result
 ui_form_create
   -> 用户确认表单
   -> 后端注入 confirmed_form_data
-  -> LLM 调用 ui_card_create
+  -> LLM 调用对应专用卡片工具
   -> 前端按 card.card_json 渲染 HTML/移动端卡片
   -> 可选导出 PNG/PDF
 ```
 
-`ui_card_create.card.card_json` 是系统内部和前端渲染的真实数据源。HTML、PNG、PDF 都只是展示或分享载体。
+`card.card_json` 是系统内部和前端渲染的真实数据源。HTML、PNG、PDF 都只是展示或分享载体。
 
 ### Birth Plan Card
 
@@ -460,8 +462,8 @@ ui_form_create
 
 1. 用户表达分娩沟通、生产偏好、birth plan card 等意图。
 2. 模型基于 manifest 调用 `load_skill("birth-prep")`。
-3. skill 要求先调用 `ui_form_create` 生成前端表单。
-4. 用户确认表单后，模型调用 `ui_card_create`。
+3. skill 要求先调用 `birth_plan_form_create` 生成前端表单。
+4. 用户确认表单后，模型调用 `labor_communication_card_create`。
 5. 前端用 `card.card_json` 渲染可分享 Birth Plan Card。
 6. 输出应强调这是沟通卡片，不替代医院或临床决策。
 
@@ -485,7 +487,7 @@ ui_form_create
 2. 模型加载 `birth-prep`。
 3. 首轮先做服务邀约，说明会快速确认几项信息来生成更有针对性的待产包卡片。
 4. 用户确认开始后，模型读取待产包 reference，复用对话上下文或 `profile_get` 中已知信息，并通过字段 `default_value` 预填待产包 intake form。
-5. 用户确认表单后，模型调用 `ui_card_create`。
+5. 用户确认表单后，模型调用 `hospital_bag_card_create`。
 6. 前端用 `card.card_json` 渲染待产包卡片。
 
 核心结构包括：

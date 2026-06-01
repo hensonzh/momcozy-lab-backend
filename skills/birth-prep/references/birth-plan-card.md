@@ -36,7 +36,7 @@ LLM 只负责判断服务路径、做人话承接、提取已知信息并下发�
 
 ## 生成卡片
 
-看到 `confirmed_form_data form_id="birth_plan_card_intake"` 后，除非必填答案明显冲突或存在急症/不安全表达，直接调用 `birth_plan_card_create`。
+看到 `confirmed_form_data form_id="birth_plan_card_intake"` 后，除非必填答案明显冲突或存在急症/不安全表达，直接调用 `labor_communication_card_create`。
 
 调用方式：
 
@@ -48,7 +48,7 @@ LLM 只负责判断服务路径、做人话承接、提取已知信息并下发�
 
 当前用户消息已经包含完整 `confirmed_form_data` 时，工具会直接读取，不要把表单 JSON 复制进工具参数。只有在没有 `confirmed_form_data` 注入、但你确实掌握了用户确认后的结构化数据时，才传完整 JSON。
 
-不要让 LLM 自己生成分娩沟通卡 `card_json`，也不要再调用 `ui_card_create` 手写分娩沟通卡。工具会生成：
+不要让 LLM 自己生成分娩沟通卡 `card_json`。`labor_communication_card_create` 会生成：
 
 - `birth_plan_card` artifact。
 - 适合前端渲染的紧凑 `card_json`。

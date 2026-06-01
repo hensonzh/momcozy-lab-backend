@@ -24,7 +24,7 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
             {"user_message": "", "message_sent_at": "2026-05-31T09:00:00+08:00"},
         )
 
-        self.assertEqual(result["tool_name"], "ui_card_create")
+        self.assertEqual(result["tool_name"], "birth_journey_plan_card_create")
         self.assertEqual(result["card"]["card_type"], "birth_journey_plan_card")
         self.assertEqual(result["card"]["schema_version"], "1.0")
         card = result["card"]["card_json"]
@@ -37,6 +37,8 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         self.assertEqual(sum(phase["status"] == "current" for phase in phases), 1)
         self.assertIn("约 2026/05/31", phases[0]["date_range"])
         self.assertTrue(all(phase.get("goal") and phase.get("watchouts") and phase.get("actions") for phase in phases))
+        self.assertEqual(card["next_action"], {"label": "整理产检问题", "send_text": "帮我整理下次产检要问的 3-5 个问题"})
+        self.assertNotIn("assistant_followup", result)
 
         rendered = json.dumps(card, ensure_ascii=False)
         self.assertIn("剖宫产", rendered)
@@ -51,6 +53,35 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
 
         self.assertIn("birth_journey_plan_card_create", tool_names)
 
+    def test_birth_journey_plan_requires_week_birth_path_and_support_person(self) -> None:
+        result = create_birth_journey_plan_card(
+            {"plan_context": {"due_date_or_week": "26周"}, "scope": "full"},
+            {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00"},
+        )
+
+        self.assertEqual(result["status"], "needs_required_context")
+        self.assertEqual(result["missing_fields"], ["birth_path", "support_person"])
+        self.assertNotIn("card", result)
+        self.assertIn("计划顺产、剖宫产", result["data"]["confirmation_question"])
+
+    def test_birth_journey_plan_accepts_unknown_birth_path_and_no_support_person(self) -> None:
+        result = create_birth_journey_plan_card(
+            {
+                "plan_context": {
+                    "due_date_or_week": "26周",
+                    "birth_path": "还没确定",
+                    "support_person": "暂时没有",
+                },
+                "scope": "full",
+            },
+            {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00"},
+        )
+
+        self.assertEqual(result["status"], "card_created")
+        card = result["card"]["card_json"]
+        self.assertEqual(card["owner"]["birth_path"], "还没确定")
+        self.assertEqual(card["owner"]["support_person"], "暂时没有")
+
     def test_model_tool_output_compacts_birth_journey_card(self) -> None:
         raw = {
             "ok": True,
@@ -62,7 +93,6 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
                     "schema_version": "1.0",
                     "card_json": {"title": "生产全过程计划", "phases": [{"title": "阶段"}]},
                 },
-                "assistant_followup": {"message": "已经根据你的情况整理好了生产全过程计划。"},
             },
         }
 
@@ -70,7 +100,31 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
 
         self.assertEqual(compact["status"], "card_created")
         self.assertEqual(compact["card"], {"card_type": "birth_journey_plan_card", "schema_version": "1.0", "created": True})
+        self.assertIn("最终回复只能输出下面这一句", compact["final_response_instruction"])
+        self.assertIn("已经整理好了生产全过程计划", compact["final_response_instruction"])
+        self.assertNotIn("assistant_followup", compact)
         self.assertNotIn("phases", json.dumps(compact, ensure_ascii=False))
+
+    def test_model_tool_output_for_birth_journey_missing_context_only_asks_question(self) -> None:
+        raw = {
+            "ok": True,
+            "tool_name": "birth_journey_plan_card_create",
+            "result": {
+                "status": "needs_required_context",
+                "summary": "生成生产全过程计划卡片前，需要先确认孕期、分娩方式和支持人。",
+                "missing_fields": ["due_date_or_week", "birth_path", "support_person"],
+                "data": {
+                    "confirmation_question": "我先确认 3 件事再生成计划。",
+                },
+            },
+        }
+
+        compact = model_tool_output(raw)
+
+        self.assertEqual(compact["status"], "needs_required_context")
+        self.assertEqual(compact["missing_fields"], ["due_date_or_week", "birth_path", "support_person"])
+        self.assertIn("最终回复只向用户补问", compact["final_response_instruction"])
+        self.assertNotIn("card", compact)
 
 
 if __name__ == "__main__":

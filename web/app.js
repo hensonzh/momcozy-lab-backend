@@ -2624,8 +2624,7 @@ function toolWorkPhase(toolName) {
   if (
     [
       "ui_form_create",
-      "ui_card_create",
-      "birth_plan_card_create",
+      "labor_communication_card_create",
       "birth_journey_plan_card_create",
       "hospital_bag_card_create",
       "ibclc_consult_card_create",
