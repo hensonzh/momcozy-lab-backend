@@ -4,6 +4,7 @@ from typing import Any, Callable
 
 from .contexts import DEFAULT_LOCALE, DEFAULT_TIMEZONE
 from .tool_handlers.cards import (
+    create_birth_journey_plan_card,
     create_birth_plan_card,
     create_birth_plan_form,
     create_card,
@@ -42,6 +43,7 @@ CORE_IMMEDIATE_TOOLS: list[ToolName] = [
     "ui_quick_replies_create",
     "birth_plan_form_create",
     "birth_plan_card_create",
+    "birth_journey_plan_card_create",
     "hospital_bag_form_create",
     "hospital_bag_card_create",
     "ibclc_consult_card_create",
@@ -105,6 +107,7 @@ READ_ONLY_TOOL_NAMES = {
     "ibclc_consult_card_create",
     "birth_plan_form_create",
     "birth_plan_card_create",
+    "birth_journey_plan_card_create",
     "hospital_bag_form_create",
     "hospital_bag_card_create",
     "hospital_bag_cart_update",
@@ -126,6 +129,7 @@ TOOL_HANDLERS: dict[ToolName, ToolHandler] = {
     "ui_quick_replies_create": create_quick_replies,
     "birth_plan_form_create": create_birth_plan_form,
     "birth_plan_card_create": create_birth_plan_card,
+    "birth_journey_plan_card_create": create_birth_journey_plan_card,
     "hospital_bag_form_create": create_hospital_bag_form,
     "hospital_bag_card_create": create_hospital_bag_card,
     "hospital_bag_cart_update": update_hospital_bag_cart,

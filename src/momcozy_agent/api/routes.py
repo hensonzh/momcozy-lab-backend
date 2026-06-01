@@ -26,6 +26,7 @@ from ..services import data_store
 from ..services.milk_process.breast_pump_FSM_v3 import LogDrivenSessionManager
 from ..services.milk_management.daily_summary import create_daily_summary
 from ..services.milk_management.feeding import assess_feeding_demand_reference
+from ..services.milk_management.status import query_milk_status
 from ..services.milk_management.status_advice import evaluate_status_advice_normality, generate_status_advice
 from ..services.paths import MILK_PROCESS_CONFIG_ROOT, MILK_PROCESS_LOG_ROOT, UPLOAD_ROOT, ensure_runtime_dirs
 from ..services.pump_session_summary import build_pump_session_summary
@@ -456,11 +457,14 @@ async def query_mom_baby_info_endpoint(request: Request, user_id: str = "") -> d
     if not info:
         return _mom_baby_info_response(error=-1)
     delivery_date = str(info.get("delivery_date") or "")
+    status_page = _mom_baby_status_page_payload(uid)
     return _mom_baby_info_response(
         error=0,
         delivery_date=delivery_date,
         lactation_advice=info.get("lactation_advice"),
         feeding_advice=info.get("feeding_advice"),
+        status_page_tabs=status_page.get("tabs"),
+        status_page_card=status_page.get("card"),
     )
 
 
@@ -554,12 +558,27 @@ async def query_mom_baby_today_endpoint(request: Request, user_id: str = "") -> 
     summary = data_store.get_mom_baby_today_summary(uid)
     if not summary:
         return _mom_baby_today_response(error=-1)
+    status_page = _mom_baby_status_page_payload(uid)
     return _mom_baby_today_response(
         error=0,
         pump_milk_volum=float(summary.get("pump_milk_volum") or 0),
         feeding_volum=float(summary.get("feeding_volum") or 0),
         feeding_forecast_volum=float(_feeding_forecast_p50(uid)),
+        status_page_tabs=status_page.get("tabs"),
+        status_page_card=status_page.get("card"),
     )
+
+
+@router.get("/v1/mom-baby/status-page/query")
+async def query_mom_baby_status_page_endpoint(request: Request, user_id: str = "") -> dict[str, Any]:
+    verify_api_key(request)
+    uid = str(user_id or "").strip()
+    if not uid:
+        return {"error": -1, "status_page_tabs": [], "status_page_card": None}
+    payload = _mom_baby_status_page_payload(uid)
+    if not payload.get("tabs"):
+        return {"error": -1, "status_page_tabs": [], "status_page_card": None}
+    return {"error": 0, "status_page_tabs": payload.get("tabs") or [], "status_page_card": payload.get("card")}
 
 
 @router.post("/v1/feeding/add")
@@ -1526,12 +1545,16 @@ def _mom_baby_info_response(
     delivery_date: str = "",
     lactation_advice: Any = None,
     feeding_advice: Any = None,
+    status_page_tabs: Any = None,
+    status_page_card: Any = None,
 ) -> dict[str, Any]:
     return {
         "error": int(error),
         "delivery_date": str(delivery_date or ""),
         "lactation_advice": str(lactation_advice) if lactation_advice is not None else None,
         "feeding_advice": str(feeding_advice) if feeding_advice is not None else None,
+        "status_page_tabs": status_page_tabs if isinstance(status_page_tabs, list) else [],
+        "status_page_card": status_page_card if isinstance(status_page_card, dict) else None,
     }
 
 
@@ -1541,13 +1564,35 @@ def _mom_baby_today_response(
     pump_milk_volum: float = 0,
     feeding_volum: float = 0,
     feeding_forecast_volum: float = 0,
+    status_page_tabs: Any = None,
+    status_page_card: Any = None,
 ) -> dict[str, Any]:
     return {
         "error": int(error),
         "pump_milk_volum": float(pump_milk_volum or 0),
         "feeding_volum": float(feeding_volum or 0),
         "feeding_forecast_volum": float(feeding_forecast_volum or 0),
+        "status_page_tabs": status_page_tabs if isinstance(status_page_tabs, list) else [],
+        "status_page_card": status_page_card if isinstance(status_page_card, dict) else None,
     }
+
+
+def _mom_baby_status_page_payload(user_id: str) -> dict[str, Any]:
+    result = query_milk_status(
+        user_id=user_id,
+        section="all",
+        trend_days=30,
+        growth_history_limit=10,
+        include_tasks=True,
+    )
+    if not result.get("ok"):
+        return {"tabs": [], "card": None}
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    if not data.get("mom_baby_info"):
+        return {"tabs": [], "card": None}
+    card = result.get("card") if isinstance(result.get("card"), dict) else None
+    tabs = data.get("status_page_tabs") if isinstance(data.get("status_page_tabs"), list) else []
+    return {"tabs": tabs, "card": card}
 
 
 def _growth_add_response(*, error: int, growth_id: int = 0) -> dict[str, Any]:

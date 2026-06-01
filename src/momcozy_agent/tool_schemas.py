@@ -166,7 +166,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
         "ui_card_create",
         "创建前端可渲染的通用结构化卡片产物。无后端副作用。分娩沟通卡应优先使用 birth_plan_card_create；待产包应优先使用 hospital_bag_card_create；只有兼容旧流程时才手写 card_json。",
         {
-            "card_type": {"type": "string", "enum": ["birth_plan_card", "hospital_bag_card"]},
+            "card_type": {"type": "string", "enum": ["birth_plan_card", "birth_journey_plan_card", "hospital_bag_card"]},
             "schema_version": {"type": "string"},
             "card_json": JSON_OBJECT_STRING,
         },
@@ -202,6 +202,14 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
         "根据分娩沟通卡表单 confirmed_form_data 生成前端可渲染的分娩沟通卡。LLM 不需要生成 card_json；字段映射、强诉求降级、分区整理、医院问题和安全声明由工具稳定生成。无后端副作用。如果当前 user_message 已包含 confirmed_form_data，confirmed_form_data 参数传 \"{}\" 即可，不要复制整段表单 JSON。",
         {
             "confirmed_form_data": JSON_OBJECT_STRING,
+        },
+    ),
+    "birth_journey_plan_card_create": _function_tool(
+        "birth_journey_plan_card_create",
+        "根据已知的孕周/预产期、胎次/胎数、分娩方式、医院、支持人和喂养意向，生成前端可渲染的生产全过程计划卡片。LLM 不需要生成 card_json；日期换算、阶段拆分、个性化调整和安全声明由工具稳定生成。无后端副作用。",
+        {
+            "plan_context": JSON_OBJECT_STRING,
+            "scope": {"type": "string", "enum": ["full", "prenatal_only", "short_range"]},
         },
     ),
     "hospital_bag_form_create": _function_tool(

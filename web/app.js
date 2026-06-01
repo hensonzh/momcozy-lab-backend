@@ -1,5 +1,5 @@
 const messages = document.querySelector("#messages");
-window.MOMCOZY_APP_BUILD_ID = "tool-status-20260514";
+window.MOMCOZY_APP_BUILD_ID = "form-id-default-guard-20260531";
 const form = document.querySelector("#composer");
 const input = document.querySelector("#message");
 const send = document.querySelector("#send");
@@ -19,6 +19,16 @@ const IMAGE_VIEWER_MAX_ZOOM = 3;
 const IMAGE_VIEWER_ZOOM_STEP = 0.25;
 const IBCLC_CONSULT_COMPLETED_KEY = "momcozy_ibclc_consult_completed";
 const MOMCOZY_LOGO_SRC = "/momcozy_logo.png";
+const HOSPITAL_BAG_REASON_SUPPRESSED_ITEM_LABELS = new Set([
+  "检查报告/化验单",
+  "医院预登记信息",
+  "紧急联系人信息",
+  "医生/医院联系电话",
+  "手机充电线和充电器",
+  "医院路线和停车信息",
+  "夜间入口信息",
+]);
+const HOSPITAL_BAG_REASON_SUPPRESSED_GROUP_IDS = new Set(["support_person_bag"]);
 const NEW_CONVERSATION_GREETING =
   "你好呀，我在。\n\n这次想先聊哪件事？你可以直接说现在最困扰你的情况，不管是孕期准备、产后恢复、喂养奶量，还是设备使用，我都会陪你一步步理清楚。";
 const DOWNLOAD_ICON_SVG = `
@@ -984,8 +994,12 @@ function addCard(card) {
   const cardJson = card.card_json || {};
   if (card.card_type === "birth_plan_card" && card.schema_version === "1.0") {
     renderBirthPlanCardV1(node, cardJson);
+  } else if (card.card_type === "birth_journey_plan_card" && card.schema_version === "1.0") {
+    renderBirthJourneyPlanCardV1(node, cardJson);
   } else if (card.card_type === "hospital_bag_card" && card.schema_version === "1.0") {
     renderHospitalBagCardV1(node, cardJson);
+  } else if (card.card_type === "mom_baby_status_card" && card.schema_version === "1.0") {
+    renderMomBabyStatusCardV1(node, cardJson);
   } else {
     renderUnsupportedCard(node, card);
   }
@@ -1099,10 +1113,234 @@ function renderBirthPlanCardV1(node, cardJson) {
 
 function renderHospitalBagCardV1(node, cardJson) {
   addCardHeader(node, hospitalBagTitle(cardJson.title), hospitalBagSubtitle(cardJson) || cardJson.subtitle || "");
-  addKeyValueSection(node, "用户画像", hospitalBagProfile(cardJson));
   addPackingGroups(node, compactPackingGroups(cardJson.packing_groups));
   addListSection(node, "Timeline", limitList(cardJson.timeline, 2));
   addDisclaimer(node, cardJson.disclaimer);
+}
+
+function renderBirthJourneyPlanCardV1(node, cardJson) {
+  addCardHeader(node, cardJson.title || "生产全过程计划", cardJson.subtitle || "");
+  addBirthJourneyOwnerStrip(node, cardJson.owner || {});
+  const phases = normalizeBirthJourneyPhases(cardJson.phases);
+  if (phases.length) {
+    const timeline = document.createElement("section");
+    timeline.className = "birth-journey-timeline";
+    for (const phase of phases) {
+      const item = document.createElement("article");
+      item.className = `birth-journey-phase ${phase.status === "current" ? "is-current" : ""}`.trim();
+      const marker = document.createElement("span");
+      marker.className = "birth-journey-phase-marker";
+      marker.textContent = phase.status === "current" ? "●" : "○";
+      const body = document.createElement("div");
+      body.className = "birth-journey-phase-body";
+      const heading = document.createElement("div");
+      heading.className = "birth-journey-phase-heading";
+      const titleWrap = document.createElement("div");
+      const dateRange = document.createElement("p");
+      dateRange.textContent = phase.date_range;
+      const title = document.createElement("h3");
+      title.textContent = phase.title;
+      titleWrap.append(dateRange, title);
+      const status = document.createElement("span");
+      status.textContent = phase.status === "current" ? "当前阶段" : "下一阶段";
+      heading.append(titleWrap, status);
+      body.appendChild(heading);
+      if (phase.goal) {
+        const goal = document.createElement("p");
+        goal.className = "birth-journey-goal";
+        goal.textContent = phase.goal;
+        body.appendChild(goal);
+      }
+      const grid = document.createElement("div");
+      grid.className = "birth-journey-section-grid";
+      appendBirthJourneyMiniSection(grid, "注意", phase.watchouts);
+      appendBirthJourneyMiniSection(grid, "准备", phase.actions);
+      appendBirthJourneyMiniSection(grid, "CoMate", phase.comate_help);
+      if (grid.childElementCount) body.appendChild(grid);
+      item.append(marker, body);
+      timeline.appendChild(item);
+    }
+    node.appendChild(timeline);
+  }
+  addDisclaimer(node, cardJson.disclaimer);
+}
+
+function addBirthJourneyOwnerStrip(node, owner) {
+  if (!owner || typeof owner !== "object") return;
+  const entries = [
+    ["孕期", owner.current_week || owner.due_date_or_week],
+    ["预产期", owner.estimated_due_date],
+    ["方式", owner.birth_path],
+    ["支持", owner.support_person],
+  ].filter(([, value]) => hasDisplayValue(value) && !isConfirmPlaceholder(value));
+  if (!entries.length) return;
+  const list = document.createElement("dl");
+  list.className = "birth-journey-owner-strip";
+  for (const [label, value] of entries.slice(0, 4)) {
+    const item = document.createElement("div");
+    const term = document.createElement("dt");
+    term.textContent = label;
+    const desc = document.createElement("dd");
+    desc.textContent = formatPlainValue(value);
+    item.append(term, desc);
+    list.appendChild(item);
+  }
+  node.appendChild(list);
+}
+
+function normalizeBirthJourneyPhases(phases) {
+  if (!Array.isArray(phases)) return [];
+  return phases
+    .filter((phase) => phase && typeof phase === "object")
+    .map((phase, index) => ({
+      id: phase.id || `phase-${index}`,
+      title: phase.title || `阶段 ${index + 1}`,
+      date_range: phase.date_range || "",
+      status: phase.status === "current" ? "current" : "upcoming",
+      goal: phase.goal || "",
+      watchouts: limitList(phase.watchouts, 4),
+      actions: limitList(phase.actions, 4),
+      comate_help: limitList(phase.comate_help, 3),
+    }));
+}
+
+function appendBirthJourneyMiniSection(parent, titleText, values) {
+  const items = limitList(values, 4);
+  if (!items.length) return;
+  const section = document.createElement("section");
+  const title = document.createElement("h4");
+  title.textContent = titleText;
+  const list = document.createElement("ul");
+  for (const value of items) {
+    const item = document.createElement("li");
+    item.textContent = formatPlainValue(value);
+    list.appendChild(item);
+  }
+  section.append(title, list);
+  parent.appendChild(section);
+}
+
+function renderMomBabyStatusCardV1(node, cardJson) {
+  addCardHeader(node, cardJson.title || "母婴状态", cardJson.subtitle || "");
+  const tabs = normalizeMomBabyStatusTabs(cardJson.tabs);
+  if (!tabs.length) {
+    const pre = document.createElement("pre");
+    pre.className = "agent-card-json";
+    pre.textContent = JSON.stringify(cardJson || {}, null, 2);
+    node.appendChild(pre);
+    return;
+  }
+
+  const baseId = `mom-baby-status-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const tabList = document.createElement("div");
+  tabList.className = "mom-baby-tablist";
+  tabList.setAttribute("role", "tablist");
+  tabList.setAttribute("aria-label", "母婴数字分身");
+
+  const panels = document.createElement("div");
+  panels.className = "mom-baby-tabpanels";
+
+  tabs.forEach((tab, index) => {
+    const tabId = `${baseId}-tab-${tab.id}`;
+    const panelId = `${baseId}-panel-${tab.id}`;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.id = tabId;
+    button.className = "mom-baby-tab";
+    button.dataset.tabId = tab.id;
+    button.setAttribute("role", "tab");
+    button.setAttribute("aria-controls", panelId);
+    button.setAttribute("aria-selected", index === 0 ? "true" : "false");
+    button.textContent = tab.title;
+    button.addEventListener("click", () => activateMomBabyStatusTab(node, tab.id));
+    tabList.appendChild(button);
+
+    const panel = document.createElement("section");
+    panel.id = panelId;
+    panel.className = "mom-baby-tabpanel";
+    panel.dataset.tabId = tab.id;
+    panel.setAttribute("role", "tabpanel");
+    panel.setAttribute("aria-labelledby", tabId);
+    panel.hidden = index !== 0;
+    if (tab.summary) {
+      const summary = document.createElement("p");
+      summary.className = "mom-baby-summary";
+      summary.textContent = tab.summary;
+      panel.appendChild(summary);
+    }
+    for (const section of tab.sections) {
+      addMomBabyStatusSection(panel, section);
+    }
+    panels.appendChild(panel);
+  });
+
+  node.append(tabList, panels);
+}
+
+function normalizeMomBabyStatusTabs(tabs) {
+  if (!Array.isArray(tabs)) return [];
+  return tabs
+    .filter((tab) => tab && typeof tab === "object")
+    .map((tab, index) => ({
+      id: slugifyClassName(tab.id || tab.title || `tab-${index}`) || `tab-${index}`,
+      title: String(tab.title || `Tab ${index + 1}`),
+      summary: String(tab.summary || "").trim(),
+      sections: Array.isArray(tab.sections) ? tab.sections.filter((section) => section && typeof section === "object") : [],
+    }))
+    .slice(0, 2);
+}
+
+function activateMomBabyStatusTab(cardNode, tabId) {
+  cardNode.querySelectorAll(".mom-baby-tab").forEach((button) => {
+    button.setAttribute("aria-selected", String(button.dataset.tabId === tabId));
+  });
+  cardNode.querySelectorAll(".mom-baby-tabpanel").forEach((panel) => {
+    panel.hidden = panel.dataset.tabId !== tabId;
+  });
+}
+
+function addMomBabyStatusSection(parent, section) {
+  const sectionNode = document.createElement("section");
+  sectionNode.className = `mom-baby-status-section mom-baby-status-section-${slugifyClassName(section.tone || "default")}`;
+  const title = document.createElement("h3");
+  title.textContent = section.title || "状态";
+  sectionNode.appendChild(title);
+
+  const metrics = Array.isArray(section.metrics) ? section.metrics.filter((metric) => metric && typeof metric === "object") : [];
+  if (metrics.length) {
+    const list = document.createElement("dl");
+    list.className = "mom-baby-metrics";
+    for (const metric of metrics.slice(0, 4)) {
+      const item = document.createElement("div");
+      item.className = "mom-baby-metric";
+      const label = document.createElement("dt");
+      label.textContent = metric.label || "";
+      const value = document.createElement("dd");
+      value.textContent = metric.value || "—";
+      item.append(label, value);
+      if (metric.detail) {
+        const detail = document.createElement("small");
+        detail.textContent = metric.detail;
+        item.appendChild(detail);
+      }
+      list.appendChild(item);
+    }
+    sectionNode.appendChild(list);
+  }
+
+  const items = normalizeList(section.items);
+  if (items.length) {
+    const list = document.createElement("ul");
+    list.className = "agent-card-list mom-baby-status-list";
+    for (const item of items.slice(0, 4)) {
+      const li = document.createElement("li");
+      appendValue(li, item);
+      list.appendChild(li);
+    }
+    sectionNode.appendChild(list);
+  }
+
+  parent.appendChild(sectionNode);
 }
 
 function hospitalBagTitle(value) {
@@ -1369,9 +1607,19 @@ function addPackingGroups(node, groups) {
     for (const item of group.items || []) {
       const li = document.createElement("li");
       li.className = "packing-item";
+      const main = document.createElement("div");
+      main.className = "packing-item-main";
       const label = document.createElement("span");
       label.textContent = item?.label || String(item || "");
-      li.appendChild(label);
+      main.appendChild(label);
+      const personalization = personalizationLabel(item?.personalized_by, item, group);
+      if (personalization) {
+        const source = document.createElement("small");
+        source.className = "packing-item-source";
+        source.textContent = personalization;
+        main.appendChild(source);
+      }
+      li.appendChild(main);
       if (item?.priority) {
         const badge = document.createElement("span");
         badge.className = `priority priority-${String(item.priority).replaceAll("_", "-")}`;
@@ -1389,6 +1637,117 @@ function addPackingGroups(node, groups) {
     section.appendChild(groupNode);
   }
   node.appendChild(section);
+}
+
+function personalizationLabel(sources, item, group) {
+  if (shouldSuppressHospitalBagReason(item, group)) return "";
+  if (!Array.isArray(sources) || !sources.length) return "";
+  const entries = sources
+    .map((source) => {
+      if (!source || typeof source !== "object") return "";
+      return {
+        clause: personalizationClause(source),
+        effect: String(source.effect || ""),
+      };
+    })
+    .filter((entry) => entry?.clause);
+  const clauses = uniquePersonalizationClauses(entries.map((entry) => entry.clause), 4);
+  if (!clauses.length) return "";
+  const userClauses = clauses.filter((clause) => clause.subject === "user").map((clause) => clause.text);
+  const externalClauses = clauses.filter((clause) => clause.subject === "external").map((clause) => clause.text);
+  const reasonParts = [
+    userClauses.length ? `你${userClauses.join("加上")}` : "",
+    externalClauses.join("，"),
+  ].filter(Boolean);
+  const reasonText = reasonParts.join("，且");
+  if (!reasonText) return "";
+  const effects = entries.map((entry) => entry.effect);
+  if (String(item?.priority || "") === "confirm_first") return `${reasonText}，建议准备`;
+  if (effects.some((effect) => effect.includes("数量调整"))) return `${reasonText}，数量已按这个情况调整`;
+  if (effects.some((effect) => effect.includes("降级") || effect.includes("暂缓"))) return `${reasonText}，可以按需准备`;
+  return `${reasonText}，${String(item?.priority || "") === "must" ? "必须准备" : "建议准备"}`;
+}
+
+function shouldSuppressHospitalBagReason(item, group) {
+  const groupId = String(group?.group_id || "");
+  const label = String(item?.label || "");
+  return HOSPITAL_BAG_REASON_SUPPRESSED_GROUP_IDS.has(groupId) || HOSPITAL_BAG_REASON_SUPPRESSED_ITEM_LABELS.has(label);
+}
+
+function uniquePersonalizationClauses(clauses, maxItems) {
+  const seen = new Set();
+  const unique = [];
+  for (const clause of clauses) {
+    if (!clause?.text) continue;
+    const key = `${clause.subject}:${clause.text}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(clause);
+    if (unique.length >= maxItems) break;
+  }
+  return unique;
+}
+
+function personalizationClause(source) {
+  const field = String(source.field || "");
+  const fieldLabel = String(source.field_label || source.field || "");
+  const condition = String(source.condition || "").trim();
+  if (!condition || isConfirmPlaceholder(condition)) return null;
+  if (field === "first_birth" || fieldLabel === "是否第一胎") {
+    if (condition === "是") return { text: "是第一胎", subject: "user" };
+    if (condition === "否") return { text: "不是第一胎", subject: "user" };
+  }
+  if (field === "birth_path" || fieldLabel === "分娩方式") {
+    if (condition.includes("剖")) return { text: "是剖宫产", subject: "user" };
+    if (condition.includes("顺")) return { text: "计划顺产", subject: "user" };
+    return { text: `分娩方式是${condition}`, subject: "user" };
+  }
+  if (field === "feeding_intention" || fieldLabel === "喂养意向") {
+    if (condition.includes("母乳")) return { text: "希望母乳喂养", subject: "user" };
+    if (condition.includes("混合")) return { text: "计划混合喂养", subject: "user" };
+    if (condition.includes("配方")) return { text: "计划配方喂养", subject: "user" };
+    if (condition.includes("泵")) return { text: "计划泵奶喂养", subject: "user" };
+    return { text: "还没确定喂养方式", subject: "user" };
+  }
+  if (field === "fetus_count" || fieldLabel === "胎数") {
+    if (condition.includes("双胎")) return { text: "是双胎", subject: "user" };
+    if (condition.includes("三胎")) return { text: "是三胎及以上", subject: "user" };
+    if (condition.includes("单胎")) return { text: "是单胎", subject: "user" };
+  }
+  if (field === "return_to_work_timing" || fieldLabel === "返工时间") {
+    return { text: returnToWorkClause(condition), subject: "user" };
+  }
+  if (field === "budget_preference" || fieldLabel === "预算偏好") {
+    return { text: `偏好${condition}`, subject: "user" };
+  }
+  if (field === "support_person" || fieldLabel === "支持情况") {
+    if (condition.includes("支持少")) return { text: "产后支持较少", subject: "user" };
+    return { text: `产后支持情况是${condition}`, subject: "user" };
+  }
+  if (field === "top_worries" || fieldLabel === "焦虑点") {
+    return { text: worryClause(condition), subject: "user" };
+  }
+  if (field === "pregnancy_history_or_notes" || fieldLabel === "医生提示") {
+    if (condition === "已填写医生提示") return { text: "医生有特别提示", subject: "external" };
+    return { text: `医生提示${condition}`, subject: "external" };
+  }
+  if (field === "due_date_or_week" || fieldLabel === "孕周/预产期") {
+    return { text: condition.endsWith("版") ? `处于${condition}` : `当前是${condition}`, subject: "user" };
+  }
+  if (!fieldLabel) return null;
+  return { text: `${fieldLabel}是${condition}`, subject: "user" };
+}
+
+function returnToWorkClause(condition) {
+  if (condition.includes("暂不") || condition.includes("不返工")) return "暂不返工";
+  if (condition.startsWith("产后")) return `${condition}返工`;
+  return `产后${condition}返工`;
+}
+
+function worryClause(condition) {
+  if (condition.startsWith("怕")) return `担心${condition.slice(1)}`;
+  if (condition.startsWith("担心")) return condition;
+  return `担心${condition}`;
 }
 
 function addDisclaimer(node, text) {
@@ -1433,6 +1792,7 @@ function createFormField(field) {
     return createCheckboxGroup(field);
   }
 
+  const hasDefaultValue = hasFormDefaultValue(field.default_value);
   const wrapper = document.createElement("label");
   wrapper.className = "agent-form-field";
 
@@ -1441,6 +1801,14 @@ function createFormField(field) {
   let control;
   if (field.type === "select") {
     control = document.createElement("select");
+    if (!hasDefaultValue) {
+      const placeholder = document.createElement("option");
+      placeholder.value = "";
+      placeholder.textContent = field.placeholder || "请选择";
+      placeholder.disabled = true;
+      placeholder.selected = true;
+      control.appendChild(placeholder);
+    }
     for (const option of field.options || []) {
       const optionNode = document.createElement("option");
       optionNode.value = option;
@@ -1458,7 +1826,7 @@ function createFormField(field) {
   control.name = field.id;
   control.required = Boolean(field.required);
   if (field.placeholder) control.placeholder = field.placeholder;
-  if (field.default_value) control.value = field.default_value;
+  if (hasDefaultValue) control.value = field.default_value;
   wrapper.appendChild(control);
 
   if (field.help_text) {
@@ -1472,6 +1840,25 @@ function createFormField(field) {
 
 function normalizeFormSpec(formSpec) {
   const removedHospitalBagFieldIds = new Set(["hospital_rules_or_notes", "existing_checklist_or_photo_note"]);
+  const hospitalBagFieldIds = new Set([
+    "due_date_or_week",
+    "first_birth",
+    "fetus_count",
+    "pregnancy_history_or_notes",
+    "birth_path",
+    "feeding_intention",
+    "return_to_work_timing",
+    "support_person",
+    "budget_preference",
+    "top_worries",
+  ]);
+  const hospitalBagDetectorFieldIds = new Set(["fetus_count", "return_to_work_timing", "budget_preference", "top_worries"]);
+  const hospitalBagDialoguePrefillFieldIds = new Set([
+    "due_date_or_week",
+    "return_to_work_timing",
+    "budget_preference",
+    "top_worries",
+  ]);
   const exclusiveBirthPlanMultiSelectOptions = new Set([
     "我还没想好，请帮我整理成温和版本",
     "不需要持续解释，必要时再说就好",
@@ -1483,15 +1870,25 @@ function normalizeFormSpec(formSpec) {
     "还没确定",
     "还没想好",
   ]);
-  if (!["hospital_bag_intake", "birth_plan_card_intake"].includes(formSpec?.id)) return formSpec;
+  const isHospitalBag = isHospitalBagFormSpec(formSpec, hospitalBagFieldIds, hospitalBagDetectorFieldIds);
+  const isBirthPlan = formSpec?.id === "birth_plan_card_intake";
+  if (!isHospitalBag && !isBirthPlan) return formSpec;
   return {
     ...formSpec,
+    id: isHospitalBag ? "hospital_bag_intake" : formSpec.id,
     description: "",
+    default_values:
+      isHospitalBag
+        ? sanitizeHospitalBagDefaultValues(formSpec.default_values, hospitalBagDialoguePrefillFieldIds)
+        : formSpec.default_values,
     fields: (formSpec.fields || [])
-      .filter((field) => !removedHospitalBagFieldIds.has(field?.id))
+      .filter((field) => !isHospitalBag || !removedHospitalBagFieldIds.has(field?.id))
       .map((field) => {
         const { help_text, ...rest } = field || {};
-        if (formSpec.id === "birth_plan_card_intake" && rest.type === "multi_select" && Array.isArray(rest.options)) {
+        if (isHospitalBag) {
+          return sanitizeHospitalBagField(rest, hospitalBagDialoguePrefillFieldIds);
+        }
+        if (isBirthPlan && rest.type === "multi_select" && Array.isArray(rest.options)) {
           return {
             ...rest,
             options: rest.options.filter((option) => !exclusiveBirthPlanMultiSelectOptions.has(String(option))),
@@ -1500,6 +1897,33 @@ function normalizeFormSpec(formSpec) {
         return rest;
       }),
   };
+}
+
+function isHospitalBagFormSpec(formSpec, hospitalBagFieldIds, detectorFieldIds) {
+  if (formSpec?.id === "hospital_bag_intake") return true;
+  const fieldIds = new Set((formSpec?.fields || []).map((field) => String(field?.id || "")));
+  const matchedHospitalFields = Array.from(fieldIds).filter((id) => hospitalBagFieldIds.has(id)).length;
+  return matchedHospitalFields >= 2 && Array.from(detectorFieldIds).some((id) => fieldIds.has(id));
+}
+
+function sanitizeHospitalBagField(field, allowedDefaultFieldIds) {
+  const nextField = { ...field };
+  if (nextField.id === "pregnancy_history_or_notes" && Array.isArray(nextField.options)) {
+    nextField.options = nextField.options.filter((option) => String(option) !== "计划剖宫产");
+  }
+  if (!allowedDefaultFieldIds.has(String(nextField.id || "")) || !hasFormDefaultValue(nextField.default_value)) {
+    delete nextField.default_value;
+  }
+  return nextField;
+}
+
+function sanitizeHospitalBagDefaultValues(defaultValues, allowedDefaultFieldIds) {
+  if (!defaultValues || typeof defaultValues !== "object" || Array.isArray(defaultValues)) return {};
+  return Object.fromEntries(
+    Object.entries(defaultValues).filter(
+      ([key, value]) => allowedDefaultFieldIds.has(String(key)) && hasFormDefaultValue(value),
+    ),
+  );
 }
 
 function groupFormFields(fields) {
@@ -1644,6 +2068,7 @@ function isMultiSelectField(field) {
 }
 
 function defaultMultiSelectValues(value) {
+  if (!hasFormDefaultValue(value)) return [];
   if (Array.isArray(value)) return value.map(String);
   return String(value || "")
     .split(",")
@@ -1653,11 +2078,21 @@ function defaultMultiSelectValues(value) {
 
 function collectFormValues(node, formSpec) {
   const data = new FormData(node);
-  const values = {};
+  const values = defaultFormValues(formSpec.default_values);
   for (const field of formSpec.fields || []) {
     values[field.id] = isMultiSelectField(field) ? data.getAll(field.id) : data.get(field.id) || "";
   }
   return values;
+}
+
+function defaultFormValues(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value).map(([key, fieldValue]) => [
+      key,
+      Array.isArray(fieldValue) ? fieldValue.map(String) : fieldValue,
+    ]),
+  );
 }
 
 function validateFormSelection(node, formSpec) {
@@ -1687,8 +2122,18 @@ function hasDisplayValue(value) {
   return true;
 }
 
+function hasFormDefaultValue(value) {
+  if (Array.isArray(value)) return value.some((item) => hasFormDefaultValue(item));
+  if (value && typeof value === "object") return Object.values(value).some((item) => hasFormDefaultValue(item));
+  return hasDisplayValue(value) && !isConfirmPlaceholder(value);
+}
+
 function isConfirmPlaceholder(value) {
-  return ["to confirm", "待确认", "未确定", "不确定", "还没确定", "还没想好"].includes(String(value || "").trim().toLowerCase());
+  return ["", "to confirm", "待确认", "未确定", "不确定", "还不确定", "还没确定", "还没想好", "none", "n/a"].includes(
+    String(value || "")
+      .trim()
+      .toLowerCase(),
+  );
 }
 
 function normalizeList(values) {
@@ -2182,6 +2627,9 @@ function toolWorkPhase(toolName) {
     [
       "ui_form_create",
       "ui_card_create",
+      "birth_plan_card_create",
+      "birth_journey_plan_card_create",
+      "hospital_bag_card_create",
       "ibclc_consult_card_create",
       "support_ticket_draft_create",
     ].includes(toolName)

@@ -136,6 +136,42 @@ class AnalysisCreateApiTests(unittest.TestCase):
         self.assertEqual(response.json(), {"error": 0})
         normality.assert_not_called()
 
+    def test_mom_baby_info_includes_status_page_tabs(self) -> None:
+        uid = "u-status-page-info"
+        _seed_user(uid)
+        _seed_infant(uid)
+
+        response = self.client.get(
+            "/v1/mom-baby/info/query",
+            params={"user_id": uid},
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["error"], 0)
+        self.assertEqual([tab["title"] for tab in payload["status_page_tabs"]], ["妈妈数字分身", "宝宝数字分身"])
+        self.assertEqual(payload["status_page_card"]["card_type"], "mom_baby_status_card")
+        self.assertEqual(payload["status_page_card"]["card_json"]["tabs"], payload["status_page_tabs"])
+
+    def test_mom_baby_status_page_query_returns_tab_card(self) -> None:
+        uid = "u-status-page-direct"
+        _seed_user(uid)
+        _seed_infant(uid)
+
+        response = self.client.get(
+            "/v1/mom-baby/status-page/query",
+            params={"user_id": uid},
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["error"], 0)
+        self.assertEqual([tab["id"] for tab in payload["status_page_tabs"]], ["mom", "baby"])
+        self.assertEqual([tab["title"] for tab in payload["status_page_tabs"]], ["妈妈数字分身", "宝宝数字分身"])
+        self.assertEqual(payload["status_page_card"]["card_type"], "mom_baby_status_card")
+
     def test_status_advice_normality_is_false_below_3_valid_days(self) -> None:
         _seed_user("u1")
 
@@ -275,6 +311,19 @@ def _seed_user(user_id: str) -> None:
             "INSERT INTO user_profile(user_id, user_nickname, delivery_date) VALUES (?, 'Test User', '2026-04-14')",
             (user_id,),
         )
+
+
+def _seed_infant(user_id: str) -> int:
+    with data_store._connect() as conn:  # type: ignore[attr-defined]
+        conn.execute("DELETE FROM infant_profile WHERE user_id = ?", (user_id,))
+        cursor = conn.execute(
+            """
+            INSERT INTO infant_profile(user_id, user_nickname, infant_name, sex, birth_date)
+            VALUES (?, 'Test User', 'Baby', 'female', '2026-04-14')
+            """,
+            (user_id,),
+        )
+        return int(cursor.lastrowid or 0)
 
 
 def _profile(user_id: str) -> dict[str, object]:

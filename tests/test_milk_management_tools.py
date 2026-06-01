@@ -149,6 +149,42 @@ class MilkManagementToolTests(unittest.TestCase):
         self.assertIn("tasks", result["data"])
         self.assertEqual(len(result["data"]["tasks"]["task_list"]), 1)
 
+    def test_status_query_returns_mom_baby_tab_card_for_full_status_page(self) -> None:
+        uid, infant_id = _seed_user("status-tab-card")
+        _add_pumping_rows(uid, "2026-05-14", ["08:00", "12:00"])
+        _add_task(uid, task_id=1, content="吸奶", item_type="吸奶", is_milk_pump=1)
+        _add_task(uid, task_id=2, content="亲喂", item_type="亲喂", is_milk_pump=0, start_time="11:00")
+        mutate_infant_growth(
+            user_id=uid,
+            operation="create",
+            infant_id=infant_id,
+            height_cm=56,
+            weight_kg=4.8,
+            head_cm=39,
+            target_date="2026-05-14",
+            history_limit=5,
+            idempotency_key="status-tab-growth",
+        )
+
+        result = query_milk_status(
+            user_id=uid,
+            section="all",
+            target_date="2026-05-14",
+            trend_days=7,
+            growth_history_limit=5,
+            include_tasks=True,
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["card"]["card_type"], "mom_baby_status_card")
+        tabs = result["card"]["card_json"]["tabs"]
+        self.assertEqual([tab["title"] for tab in tabs], ["妈妈数字分身", "宝宝数字分身"])
+        self.assertEqual(result["data"]["status_page_tabs"], tabs)
+        self.assertEqual(tabs[0]["sections"][0]["title"], "今日泌乳")
+        self.assertEqual(tabs[1]["sections"][0]["title"], "今日喂养")
+        self.assertEqual(tabs[0]["sections"][0]["metrics"][0]["value"], "140 ml")
+        self.assertEqual(tabs[1]["sections"][1]["metrics"][0]["value"], "4.8 kg")
+
     def test_increase_plan_preview_is_saveable_when_current_frequency_is_high(self) -> None:
         uid, _ = _seed_user("increase-preview-saveable")
         _add_pumping_rows(

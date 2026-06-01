@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from ..types import RuntimeInputs
@@ -19,10 +19,15 @@ PUMP_ITEM = {
 HOSPITAL_BAG_CART_ASSISTANT_FOLLOWUP = {
     "kind": "hospital_bag_cart",
     "message": (
-        "你的待产包已经设计好了哦～我顺手把清单里适合直接购买的妈妈/宝宝用品整理到了购物车，"
+        "已经根据你的情况为你制作了待产包。\n\n"
+        "我顺手把清单里适合直接购买的妈妈/宝宝用品整理到了购物车，"
         "方便直接下单购买，不用一次买完，先按医院会提供什么、家里有什么，删一删再下单就好。\n\n"
         f"**{HOSPITAL_BAG_CART_LINK}**"
     ),
+}
+BIRTH_JOURNEY_PLAN_ASSISTANT_FOLLOWUP = {
+    "kind": "birth_journey_plan_card_guidance",
+    "message": "已经根据你的情况整理成生产全过程计划了。你先看当前阶段；如果想继续细化，我可以接着帮你做待产包卡片。",
 }
 DEFAULT_HOSPITAL_BAG_CART_GROUPS: list[dict[str, Any]] = [
     {
@@ -340,6 +345,12 @@ EXCLUSIVE_BIRTH_PLAN_MULTI_SELECT_OPTIONS = {
     "还没想好",
 }
 PLACEHOLDER_VALUES = {"", "to confirm", "待确认", "未确定", "不确定", "还不确定", "还没确定", "还没想好", "none", "n/a"}
+HOSPITAL_BAG_DIALOGUE_PREFILL_FIELD_IDS = (
+    "due_date_or_week",
+    "return_to_work_timing",
+    "budget_preference",
+    "top_worries",
+)
 BIRTH_PATH_ALIASES = {
     "vaginal": "顺产",
     "natural": "顺产",
@@ -388,7 +399,6 @@ HOSPITAL_BAG_FORM_FIELDS = [
             "血压或子痫前期风险",
             "胎盘问题",
             "早产风险",
-            "计划剖宫产",
             "宝宝可能 NICU",
             "其它",
         ],
@@ -446,6 +456,13 @@ HOSPITAL_BAG_FORM_FIELDS = [
         ],
     },
 ]
+HOSPITAL_BAG_FORM_FIELD_IDS = {str(field["id"]) for field in HOSPITAL_BAG_FORM_FIELDS}
+HOSPITAL_BAG_FORM_DETECTOR_FIELD_IDS = {
+    "fetus_count",
+    "return_to_work_timing",
+    "budget_preference",
+    "top_worries",
+}
 BIRTH_PLAN_FORM_FIELDS = [
     {
         "id": "due_date_or_week",
@@ -636,6 +653,28 @@ HOSPITAL_BAG_MISSING_LABELS = {
     "budget_preference": "预算偏好",
     "top_worries": "最焦虑的事",
 }
+HOSPITAL_BAG_FIELD_LABELS = {
+    "due_date_or_week": "孕周/预产期",
+    "first_birth": "是否第一胎",
+    "fetus_count": "胎数",
+    "pregnancy_history_or_notes": "医生提示",
+    "birth_path": "分娩方式",
+    "feeding_intention": "喂养意向",
+    "return_to_work_timing": "返工时间",
+    "support_person": "支持情况",
+    "budget_preference": "预算偏好",
+    "top_worries": "焦虑点",
+}
+HOSPITAL_BAG_REASON_SUPPRESSED_ITEM_LABELS = {
+    "检查报告/化验单",
+    "医院预登记信息",
+    "紧急联系人信息",
+    "医生/医院联系电话",
+    "手机充电线和充电器",
+    "医院路线和停车信息",
+    "夜间入口信息",
+}
+HOSPITAL_BAG_REASON_SUPPRESSED_GROUP_IDS = {"support_person_bag"}
 HOSPITAL_BAG_DISCLAIMER = "请优先遵循医院要求和医生/助产士的具体指导。"
 HOSPITAL_BAG_PROVIDED_ITEM_ALIASES = {
     "尿布": ("纸尿裤",),
@@ -655,35 +694,35 @@ def create_form(args: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
     form_id = str(args.get("form_id", "form"))
     fields = _normalize_form_fields(args.get("fields", []))
     description = str(args.get("description", ""))
-    if form_id == "hospital_bag_intake":
-        fields = [field for field in fields if field.get("id") not in REMOVED_HOSPITAL_BAG_FORM_FIELD_IDS]
-        fields = [_without_field_help_text(field) for field in fields]
+    hospital_bag_default_values: dict[str, Any] | None = None
+    if _looks_like_hospital_bag_form(form_id, fields):
+        form_id = "hospital_bag_intake"
+        hospital_bag_default_values = _hospital_bag_allowed_default_values(_default_values_from_form_fields(fields))
+        fields = _hospital_bag_fields_with_defaults(hospital_bag_default_values)
         description = ""
     elif form_id == "birth_plan_card_intake":
         fields = [_sanitize_birth_plan_form_field(_without_field_help_text(field)) for field in fields]
         description = ""
+    form = {
+        "id": form_id,
+        "title": args.get("title", ""),
+        "description": description,
+        "submit_label": args.get("submit_label", "确认"),
+        "fields": fields,
+    }
+    if hospital_bag_default_values is not None:
+        form["default_values"] = hospital_bag_default_values
     return {
         "tool_name": "ui_form_create",
         "status": "form_created",
-        "form": {
-            "id": form_id,
-            "title": args.get("title", ""),
-            "description": description,
-            "submit_label": args.get("submit_label", "确认"),
-            "fields": fields,
-        },
+        "form": form,
     }
 
 
 def create_hospital_bag_form(args: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
     default_values = _dict_value(args.get("default_values"))
-    fields: list[dict[str, Any]] = []
-    for template in HOSPITAL_BAG_FORM_FIELDS:
-        field = dict(template)
-        value = _first_text(default_values.get(field["id"]))
-        if value and _normalized_placeholder(value) not in PLACEHOLDER_VALUES:
-            field["default_value"] = _normalize_hospital_bag_form_value(field["id"], value)
-        fields.append(field)
+    form_default_values = _hospital_bag_allowed_default_values(default_values)
+    fields = _hospital_bag_fields_with_defaults(form_default_values)
     return {
         "tool_name": "ui_form_create",
         "status": "form_created",
@@ -693,8 +732,44 @@ def create_hospital_bag_form(args: dict[str, Any], inputs: RuntimeInputs) -> dic
             "description": "",
             "submit_label": "提交",
             "fields": fields,
+            "default_values": form_default_values,
         },
     }
+
+
+def _hospital_bag_fields_with_defaults(form_default_values: dict[str, Any]) -> list[dict[str, Any]]:
+    fields: list[dict[str, Any]] = []
+    for template in HOSPITAL_BAG_FORM_FIELDS:
+        field = dict(template)
+        value = _first_text(form_default_values.get(field["id"]))
+        if value and _normalized_placeholder(value) not in PLACEHOLDER_VALUES:
+            field["default_value"] = _normalize_hospital_bag_form_value(field["id"], value)
+        fields.append(field)
+    return fields
+
+
+def _hospital_bag_allowed_default_values(default_values: dict[str, Any]) -> dict[str, Any]:
+    normalized_default_values = _normalize_hospital_bag_default_values(default_values)
+    return {
+        field_id: normalized_default_values[field_id]
+        for field_id in HOSPITAL_BAG_DIALOGUE_PREFILL_FIELD_IDS
+        if field_id in normalized_default_values
+    }
+
+
+def _default_values_from_form_fields(fields: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        str(field.get("id") or ""): field.get("default_value")
+        for field in fields
+        if isinstance(field, dict) and field.get("id") and field.get("default_value") is not None
+    }
+
+
+def _looks_like_hospital_bag_form(form_id: str, fields: list[dict[str, Any]]) -> bool:
+    if form_id == "hospital_bag_intake":
+        return True
+    field_ids = {str(field.get("id") or "") for field in fields if isinstance(field, dict)}
+    return bool(field_ids & HOSPITAL_BAG_FORM_DETECTOR_FIELD_IDS) and len(field_ids & HOSPITAL_BAG_FORM_FIELD_IDS) >= 2
 
 
 def create_hospital_bag_card(args: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
@@ -702,6 +777,7 @@ def create_hospital_bag_card(args: dict[str, Any], inputs: RuntimeInputs) -> dic
     generation_mode = str(args.get("generation_mode") or "standard")
     card_json = _build_hospital_bag_card_json(form_data, generation_mode, inputs)
     _normalize_hospital_bag_scene_groups(card_json["packing_groups"])
+    _suppress_hospital_bag_personalization(card_json["packing_groups"])
     _apply_hospital_bag_item_explanations(card_json["packing_groups"])
     return {
         "tool_name": "ui_card_create",
@@ -1752,11 +1828,372 @@ def create_birth_plan_card(args: dict[str, Any], inputs: RuntimeInputs) -> dict[
     }
 
 
+def create_birth_journey_plan_card(args: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
+    plan_context = _dict_value(args.get("plan_context")) or _confirmed_form_data(inputs)
+    scope = str(args.get("scope") or "full").strip() or "full"
+    card_json = _build_birth_journey_plan_card_json(plan_context, scope, inputs)
+    return {
+        "tool_name": "ui_card_create",
+        "status": "card_created",
+        "card": {
+            "card_type": "birth_journey_plan_card",
+            "schema_version": "1.0",
+            "card_json": card_json,
+        },
+        "assistant_followup": dict(BIRTH_JOURNEY_PLAN_ASSISTANT_FOLLOWUP),
+    }
+
+
+def _build_birth_journey_plan_card_json(form_data: dict[str, Any], scope: str, inputs: RuntimeInputs) -> dict[str, Any]:
+    today = _message_date(inputs)
+    due_text = _first_text(form_data.get("due_date_or_week"), form_data.get("due_date"), form_data.get("current_week"))
+    timeline = _birth_journey_timeline(due_text, today, inputs, scope)
+    first_birth = _normalize_first_birth(_first_text(form_data.get("first_birth")))
+    fetus_count = _first_text(form_data.get("fetus_count"), form_data.get("baby_count"))
+    birth_path = _normalize_birth_path(_first_text(form_data.get("birth_path"), form_data.get("delivery_method")))
+    feeding_intention = _normalize_feeding_intention(_first_text(form_data.get("feeding_intention"), form_data.get("feeding_plan")))
+    birth_setting = _first_text(form_data.get("birth_setting"), form_data.get("birth_hospital"), form_data.get("hospital"))
+    support_person = _first_text(form_data.get("support_person"), form_data.get("support_people"), form_data.get("partner_or_support"))
+    medical_notes = _text_list(
+        form_data.get("pregnancy_history_or_notes")
+        or form_data.get("medical_notes")
+        or form_data.get("special_notes")
+        or form_data.get("doctor_notes")
+    )
+    context = {
+        "first_birth": first_birth,
+        "fetus_count": fetus_count,
+        "birth_path": birth_path,
+        "feeding_intention": feeding_intention,
+        "birth_setting": birth_setting,
+        "support_person": support_person,
+        "medical_notes": medical_notes,
+    }
+    phases = [_birth_journey_phase_payload(spec, context) for spec in timeline["phase_specs"]]
+    _mark_birth_journey_current_phase(phases)
+    owner = {
+        "due_date_or_week": due_text or "待确认",
+        "current_week": f"孕{timeline['current_week']}周" if timeline.get("current_week") else "",
+        "estimated_due_date": _format_birth_journey_date(timeline.get("due_date")) if timeline.get("due_date") else "",
+        "birth_path": birth_path,
+        "birth_setting": birth_setting,
+        "support_person": support_person,
+        "feeding_intention": feeding_intention,
+    }
+    owner = {key: value for key, value in owner.items() if _has_meaningful_value(value)}
+    return {
+        "card_type": "birth_journey_plan_card",
+        "schema_version": "1.0",
+        "title": "生产全过程计划",
+        "subtitle": _birth_journey_subtitle(timeline, scope),
+        "owner": owner,
+        "phases": phases,
+        "next_action": _birth_journey_next_action(timeline, context),
+        "disclaimer": "这份计划用于准备和沟通，不能替代医生、助产士或医院的具体建议；有破水、出血、胎动明显减少、规律宫缩加密或明显不适时，请按医院或医生指导处理。",
+    }
+
+
+def _birth_journey_timeline(due_text: str, today: date, inputs: RuntimeInputs, scope: str) -> dict[str, Any]:
+    gestational_days = _birth_journey_gestational_days(due_text, today, inputs)
+    due_date = _birth_journey_due_date(due_text, today, gestational_days)
+    estimated = due_date is not None and not _date_from_text(due_text)
+    current_week = gestational_days // 7 if gestational_days is not None else None
+    phase_specs = _birth_journey_phase_specs(due_date, gestational_days, today, estimated, scope)
+    return {
+        "due_date": due_date,
+        "estimated": estimated,
+        "current_week": current_week,
+        "phase_specs": phase_specs,
+    }
+
+
+def _birth_journey_phase_specs(
+    due_date: date | None,
+    gestational_days: int | None,
+    today: date,
+    estimated: bool,
+    scope: str,
+) -> list[dict[str, Any]]:
+    if due_date is None:
+        specs = [
+            {"id": "foundation", "title": "问清流程", "date_range": "补充孕周后换算具体日期", "is_current": True},
+            {"id": "cards_ready", "title": "完成两卡", "date_range": "补充孕周后换算具体日期"},
+            {"id": "departure_ready", "title": "出发演练", "date_range": "补充孕周后换算具体日期"},
+            {"id": "labor_recognition", "title": "判断临产", "date_range": "补充孕周后换算具体日期"},
+            {"id": "hospital_birth", "title": "住院生产", "date_range": "入院当天～出院当天"},
+            {"id": "home_week", "title": "回家照护", "date_range": "出院后 0～7 天"},
+            {"id": "postpartum_review", "title": "42天复盘", "date_range": "产后 8～42 天"},
+        ]
+        return _limit_birth_journey_phase_specs(specs, scope)
+
+    raw_specs: list[dict[str, Any]] = []
+    foundation_start = due_date - timedelta(days=84)
+    foundation_end = due_date - timedelta(days=57)
+    cards_start = due_date - timedelta(days=56)
+    cards_end = due_date - timedelta(days=36)
+    departure_start = due_date - timedelta(days=35)
+    departure_end = due_date - timedelta(days=22)
+    labor_start = due_date - timedelta(days=21)
+    labor_end = due_date + timedelta(days=7)
+
+    if gestational_days is not None and gestational_days < 28 * 7 and today < foundation_start:
+        raw_specs.append(
+            {
+                "id": "mid_pregnancy_bridge",
+                "title": "确认医院",
+                "start_date": today,
+                "end_date": foundation_start - timedelta(days=1),
+                "is_current": True,
+            }
+        )
+    raw_specs.extend(
+        [
+            {"id": "foundation", "title": "问清流程", "start_date": foundation_start, "end_date": foundation_end},
+            {"id": "cards_ready", "title": "完成两卡", "start_date": cards_start, "end_date": cards_end},
+            {"id": "departure_ready", "title": "出发演练", "start_date": departure_start, "end_date": departure_end},
+            {"id": "labor_recognition", "title": "判断临产", "start_date": labor_start, "end_date": labor_end},
+            {"id": "hospital_birth", "title": "住院生产", "date_range": "入院当天～出院当天"},
+            {"id": "home_week", "title": "回家照护", "date_range": "出院后 0～7 天"},
+            {"id": "postpartum_review", "title": "42天复盘", "date_range": "产后 8～42 天"},
+        ]
+    )
+
+    specs: list[dict[str, Any]] = []
+    for spec in raw_specs:
+        start_date = spec.get("start_date")
+        end_date = spec.get("end_date")
+        if isinstance(end_date, date) and end_date < today and spec["id"] not in {"hospital_birth", "postpartum_start"}:
+            continue
+        display_spec = dict(spec)
+        if isinstance(start_date, date) and isinstance(end_date, date):
+            display_start = max(today, start_date) if start_date <= today <= end_date else start_date
+            display_spec["date_range"] = _birth_journey_date_range(display_start, end_date, estimated)
+            display_spec["is_current"] = display_spec.get("is_current") or (start_date <= today <= end_date)
+        specs.append(display_spec)
+
+    if not any(spec.get("is_current") for spec in specs) and specs:
+        specs[0]["is_current"] = True
+    return _limit_birth_journey_phase_specs(specs, scope)
+
+
+def _limit_birth_journey_phase_specs(specs: list[dict[str, Any]], scope: str) -> list[dict[str, Any]]:
+    if scope == "short_range":
+        return specs[:3]
+    if scope == "prenatal_only":
+        return [spec for spec in specs if spec["id"] not in {"hospital_birth", "home_week", "postpartum_review"}][:5]
+    return specs[:8]
+
+
+def _birth_journey_phase_payload(spec: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    phase = _birth_journey_base_phase(spec["id"])
+    phase.update(
+        {
+            "id": spec["id"],
+            "title": spec["title"],
+            "date_range": spec.get("date_range") or "",
+            "status": "current" if spec.get("is_current") else "upcoming",
+        }
+    )
+    _personalize_birth_journey_phase(phase, context)
+    for key in ("watchouts", "actions", "comate_help"):
+        phase[key] = _unique_birth_journey_items(phase.get(key), 4)
+    return phase
+
+
+def _birth_journey_base_phase(phase_id: str) -> dict[str, Any]:
+    base: dict[str, dict[str, Any]] = {
+        "mid_pregnancy_bridge": {
+            "goal": "确定生产医院方向、下一次产检要问什么、家里谁能提供支持。",
+            "watchouts": ["这个阶段不用买齐物品，也不用做临产判断；先把方向和关键问题定清楚。"],
+            "actions": ["列出下次产检最想确认的 3-5 个问题。", "确认倾向的生产医院或生产地点。", "初步写下产后前两周谁能帮忙、能帮到什么程度。"],
+            "comate_help": ["生成产检问题清单。", "整理医院确认问题。", "梳理产后支持人分工草稿。"],
+        },
+        "foundation": {
+            "goal": "把产检节奏、医院流程和医生提醒变成清楚的问题清单。",
+            "watchouts": ["不要把这一阶段变成采购清单；重点是确认医院规则和医生给过的特殊提醒。"],
+            "actions": ["问清预登记、陪产、探视、夜间入口和联系医院的基本规则。", "把医生提醒转成下次产检要追问的问题。", "确认 32 周后是否需要开始做待产包卡片和分娩沟通卡。"],
+            "comate_help": ["生成医院确认清单。", "把医生提醒整理成追问问题。", "提醒下一阶段开始做两张核心卡片。"],
+        },
+        "cards_ready": {
+            "goal": "形成待产包卡片和分娩沟通卡初版，让准备内容从口头想法变成可查看产物。",
+            "watchouts": ["不要在聊天里手写长清单；清单类内容统一交给待产包卡片承载。"],
+            "actions": ["生成个性化待产包卡片。", "生成给医护团队看的分娩沟通卡。", "把仍需问医院确认的事项标出来。"],
+            "comate_help": ["生成待产包卡片。", "生成分娩沟通卡。", "标记需要和医院确认的事项。"],
+        },
+        "departure_ready": {
+            "goal": "把路线、出发规则和支持人分工确认到随时能执行。",
+            "watchouts": ["这一阶段不再重新拆物品清单；只确认待产包卡片是否可直接使用，以及出发时谁做什么。"],
+            "actions": ["按待产包卡片做一次最终核对。", "确认夜间入口、停车/打车路线和备用交通。", "让支持人明确出发、联系医院、院内记录各自负责什么。"],
+            "comate_help": ["生成出发核对清单。", "整理支持人分工卡。", "把待产包卡片更新成随时出发版。"],
+        },
+        "labor_recognition": {
+            "goal": "知道什么时候联系医院，以及联系时该怎么说。",
+            "watchouts": ["破水、阴道出血多、胎动明显减少、规律宫缩越来越密、剧烈腹痛或头晕胸痛时，不要硬扛。"],
+            "actions": ["把医院电话置顶。", "提前写好联系医院时要说的几句话：孕周、宫缩间隔、是否破水/出血、胎动变化和预计到院时间。", "让支持人也知道这套话术。"],
+            "comate_help": ["生成联系医院话术。", "生成宫缩/破水/胎动记录模板。", "把出发核对清单压缩成临产版。"],
+        },
+        "hospital_birth": {
+            "goal": "把院内沟通、喂养启动和重要记录交给明确的人负责。",
+            "watchouts": ["医疗处置以医院团队为准；疼痛缓解、麻醉沟通、宝宝出生后肌肤接触和喂养启动，可以提前说清楚。"],
+            "actions": ["入院后把分娩沟通卡给支持人和医护团队看。", "约定谁记录宝宝出生时间、喂养时间、尿布、妈妈用药/检查和出院医嘱。", "需要调整计划时，优先听医院团队说明。"],
+            "comate_help": ["打开分娩沟通卡。", "生成院内记录清单。", "整理出院前要问医生的问题。"],
+        },
+        "home_week": {
+            "goal": "把回家第一周的妈妈恢复、宝宝喂养、夜间分工和复诊安排跑起来。",
+            "watchouts": ["发热、恶露突然增多或有异味、伤口红肿加重、乳房红肿疼痛，或宝宝尿布明显减少、精神差时，要联系医生、儿科或哺乳专业人士。"],
+            "actions": ["确认妈妈复诊和宝宝儿科检查时间。", "建立喂养、尿布和妈妈恢复记录。", "和家人说好夜间谁负责喂、换、哄、休息。"],
+            "comate_help": ["生成夜间分工卡。", "整理喂养和尿布记录入口。", "提示需要联系医生或 IBCLC 的信号。"],
+        },
+        "postpartum_review": {
+            "goal": "复盘妈妈恢复、宝宝喂养节奏和家庭支持缺口，决定下一阶段计划。",
+            "watchouts": ["不要把短期混乱误认为长期失败；先看记录，再判断是否需要医生、儿科或哺乳顾问支持。"],
+            "actions": ["复盘过去一周的喂养、睡眠、尿布和妈妈恢复记录。", "整理复诊或儿科要问的问题。", "需要返工或奶量安排时，再进入奶量管理计划。"],
+            "comate_help": ["生成产后复盘问题清单。", "承接奶量管理计划。", "整理返工前喂养安排。"],
+        },
+    }
+    return dict(base.get(phase_id) or base["foundation"])
+
+
+def _personalize_birth_journey_phase(phase: dict[str, Any], context: dict[str, Any]) -> None:
+    phase_id = str(phase.get("id") or "")
+    first_birth = str(context.get("first_birth") or "")
+    fetus_count = str(context.get("fetus_count") or "")
+    birth_path = str(context.get("birth_path") or "")
+    feeding = str(context.get("feeding_intention") or "")
+    birth_setting = str(context.get("birth_setting") or "")
+    support = str(context.get("support_person") or "")
+    medical_notes = context.get("medical_notes") if isinstance(context.get("medical_notes"), list) else []
+
+    if first_birth == "是" and phase_id in {"foundation", "labor_recognition"}:
+        phase["actions"].append("你是第一胎，可以提前让支持人也看一遍入院流程和临产信号，避免到时只靠你一个人判断。")
+    if first_birth == "否" and phase_id in {"cards_ready", "departure_ready"}:
+        phase["actions"].append("提前安排大宝接送、陪伴和夜间照护，临产时不要临时找人。")
+    if any(token in fetus_count for token in ("双", "多", "三")) and phase_id in {"foundation", "departure_ready"}:
+        phase["watchouts"].append("你是多胎，产检和入院节奏更要按医生给出的安排来，别用单胎时间表硬套。")
+    if "剖" in birth_path and phase_id in {"cards_ready", "hospital_birth", "home_week"}:
+        phase["actions"].append("你是剖宫产，提前问清术前禁食、入院时间、住院天数和术后下床/伤口护理口径。")
+    if any(token in feeding for token in ("母乳", "混合", "纯泵")) and phase_id in {"hospital_birth", "home_week", "postpartum_review"}:
+        phase["actions"].append("你希望母乳或混合喂养，入院后可以尽早确认含乳、涨奶处理和 IBCLC/泌乳顾问支持。")
+    if birth_setting and phase_id in {"foundation", "departure_ready"}:
+        phase["actions"].append(f"围绕{birth_setting}确认预登记、陪产、探视、夜间入口和停车/打车规则。")
+    if support and phase_id in {"departure_ready", "home_week"}:
+        phase["actions"].append(f"把{support}要负责的事提前写下来：出发、联系医院、记录、夜间照护和补给。")
+    if medical_notes and phase_id in {"foundation", "cards_ready"}:
+        phase["watchouts"].append("医生已经提醒过的特殊情况要以医院方案为准，产检时把后续观察和入院时机问清楚。")
+
+
+def _mark_birth_journey_current_phase(phases: list[dict[str, Any]]) -> None:
+    if not phases:
+        return
+    current_seen = False
+    for phase in phases:
+        if phase.get("status") == "current" and not current_seen:
+            current_seen = True
+        elif phase.get("status") == "current":
+            phase["status"] = "upcoming"
+    if not current_seen:
+        phases[0]["status"] = "current"
+
+
+def _birth_journey_subtitle(timeline: dict[str, Any], scope: str) -> str:
+    week = timeline.get("current_week")
+    if scope == "prenatal_only":
+        return f"从孕{week}周到生产前的阶段路线图" if week else "从现在到生产前的阶段路线图"
+    if scope == "short_range":
+        return f"从孕{week}周开始的近期准备节奏" if week else "从现在开始的近期准备节奏"
+    return f"从孕{week}周到产后 42 天的阶段路线图" if week else "从现在到产后 42 天的阶段路线图"
+
+
+def _birth_journey_next_action(timeline: dict[str, Any], context: dict[str, Any]) -> dict[str, str]:
+    week = timeline.get("current_week")
+    if isinstance(week, int) and week >= 35:
+        return {"label": "继续做待产包卡片", "send_text": "帮我做一张随时能出发的待产包卡片"}
+    if str(context.get("birth_path") or "") or str(context.get("support_person") or ""):
+        return {"label": "整理分娩沟通卡", "send_text": "帮我把生产偏好整理成分娩沟通卡"}
+    return {"label": "细化待产包", "send_text": "帮我继续做一张个性化待产包卡片"}
+
+
+def _birth_journey_gestational_days(due_text: str, today: date, inputs: RuntimeInputs) -> int | None:
+    due_date = _date_from_text(due_text)
+    if due_date is not None:
+        days = 280 - (due_date - today).days
+        return max(1, min(294, days)) if days >= 0 else None
+    text = str(due_text or "")
+    match = re.search(r"(\d{1,2})\s*(?:周|w|week)?\s*(?:\+|加)?\s*(\d{1,2})?", text, re.IGNORECASE)
+    if match:
+        weeks = int(match.group(1))
+        if 1 <= weeks <= 42:
+            days = int(match.group(2) or 0)
+            return max(1, min(294, weeks * 7 + days))
+    week = _pregnancy_week(due_text, inputs)
+    return week * 7 if week is not None else None
+
+
+def _birth_journey_due_date(due_text: str, today: date, gestational_days: int | None) -> date | None:
+    due_date = _date_from_text(due_text)
+    if due_date is not None:
+        return due_date
+    if gestational_days is None:
+        return None
+    return today + timedelta(days=max(0, 280 - gestational_days))
+
+
+def _date_from_text(value: str) -> date | None:
+    match = re.search(r"(\d{4})[-/](\d{1,2})[-/](\d{1,2})", str(value or ""))
+    if not match:
+        return None
+    return _safe_date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+
+
+def _birth_journey_date_range(start_date: date, end_date: date, estimated: bool) -> str:
+    prefix = "约 " if estimated else ""
+    return f"{prefix}{_format_birth_journey_date(start_date)}～{_format_birth_journey_date(end_date)}"
+
+
+def _format_birth_journey_date(value: Any) -> str:
+    if isinstance(value, date):
+        return value.strftime("%Y/%m/%d")
+    return ""
+
+
+def _unique_text_list(value: Any, max_items: int) -> list[str]:
+    seen: set[str] = set()
+    items: list[str] = []
+    for item in _text_list(value):
+        if item in seen:
+            continue
+        seen.add(item)
+        items.append(item)
+        if len(items) >= max_items:
+            break
+    return items
+
+
+def _unique_birth_journey_items(value: Any, max_items: int) -> list[str]:
+    raw_items = value if isinstance(value, list) else [value]
+    seen: set[str] = set()
+    items: list[str] = []
+    for raw_item in raw_items:
+        text = _first_text(raw_item)
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        items.append(text)
+        if len(items) >= max_items:
+            break
+    return items
+
+
 def _build_hospital_bag_card_json(form_data: dict[str, Any], generation_mode: str, inputs: RuntimeInputs) -> dict[str, Any]:
     due_date_or_week = _first_text(form_data.get("due_date_or_week")) or "待确认"
     birth_path = _normalize_birth_path(_first_text(form_data.get("birth_path"))) or "待确认"
     feeding_intention = _normalize_feeding_intention(_first_text(form_data.get("feeding_intention"))) or "待确认"
     first_birth = _normalize_first_birth(_first_text(form_data.get("first_birth"))) or "待确认"
+    fetus_count = _first_text(form_data.get("fetus_count")) or "待确认"
+    pregnancy_history_or_notes = _text_list(form_data.get("pregnancy_history_or_notes"))
+    return_to_work_timing = _first_text(form_data.get("return_to_work_timing")) or "待确认"
+    budget_preference = _first_text(form_data.get("budget_preference")) or "待确认"
+    top_worries = _text_list(form_data.get("top_worries"))
     birth_setting = _first_text(form_data.get("birth_setting")) or "待确认"
     expected_stay = _first_text(form_data.get("expected_stay")) or "待确认"
     support_person = _first_text(form_data.get("support_person")) or "待确认"
@@ -1772,6 +2209,11 @@ def _build_hospital_bag_card_json(form_data: dict[str, Any], generation_mode: st
         "birth_path": birth_path,
         "feeding_intention": feeding_intention,
         "first_birth": first_birth,
+        "fetus_count": fetus_count,
+        "pregnancy_history_or_notes": pregnancy_history_or_notes,
+        "return_to_work_timing": return_to_work_timing,
+        "budget_preference": budget_preference,
+        "top_worries": top_worries,
         "expected_stay": expected_stay,
         "support_person": support_person,
         "provided_items": provided_items,
@@ -1793,6 +2235,9 @@ def _build_hospital_bag_card_json(form_data: dict[str, Any], generation_mode: st
             "first_birth": first_birth,
             "feeding_intention": feeding_intention,
             "support_person": support_person,
+            "fetus_count": fetus_count,
+            "return_to_work_timing": return_to_work_timing,
+            "budget_preference": budget_preference,
         },
         "hospital_context": {
             "expected_stay": expected_stay,
@@ -1826,47 +2271,206 @@ def _hospital_bag_packing_groups(context: dict[str, Any]) -> list[dict[str, Any]
         for group in groups
         if group.get("items")
     ]
+    _suppress_hospital_bag_personalization(filtered_groups)
     _apply_hospital_bag_item_explanations(filtered_groups)
     return filtered_groups
 
 
+def _suppress_hospital_bag_personalization(groups: list[Any]) -> None:
+    for group in groups:
+        if not isinstance(group, dict):
+            continue
+        group_id = _first_text(group.get("group_id"))
+        suppress_group = group_id in HOSPITAL_BAG_REASON_SUPPRESSED_GROUP_IDS
+        items = group.get("items")
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            label = _first_text(item.get("label"))
+            if suppress_group or label in HOSPITAL_BAG_REASON_SUPPRESSED_ITEM_LABELS:
+                item.pop("personalized_by", None)
+
+
+def _personalization_source(field_id: str, condition: Any, effect: str = "调整") -> dict[str, str] | None:
+    condition_text = _first_text(condition)
+    if _normalized_placeholder(condition_text) in PLACEHOLDER_VALUES:
+        return None
+    return {
+        "field": field_id,
+        "field_label": HOSPITAL_BAG_FIELD_LABELS.get(field_id, field_id),
+        "condition": condition_text,
+        "effect": effect,
+    }
+
+
+def _with_personalized_by(item: dict[str, Any], *sources: dict[str, str] | None) -> dict[str, Any]:
+    cleaned = [source for source in sources if source]
+    if not cleaned:
+        return item
+    existing = item.get("personalized_by")
+    if isinstance(existing, list):
+        cleaned = [*existing, *cleaned]
+    deduped: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for source in cleaned:
+        key = (
+            str(source.get("field") or ""),
+            str(source.get("condition") or ""),
+            str(source.get("effect") or ""),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(source)
+    next_item = dict(item)
+    next_item["personalized_by"] = deduped
+    return next_item
+
+
+def _stage_source(context: dict[str, Any], effect: str = "调整") -> dict[str, str] | None:
+    stage = str(context.get("stage") or "")
+    stage_labels = {
+        "planning": "32周前计划版",
+        "purchase": "32-35周采购版",
+        "packing": "36周打包版",
+        "immediate": "37周后临产版",
+    }
+    return _personalization_source("due_date_or_week", stage_labels.get(stage, stage), effect)
+
+
+def _context_source(context: dict[str, Any], field_id: str, effect: str = "调整") -> dict[str, str] | None:
+    return _personalization_source(field_id, context.get(field_id), effect)
+
+
+def _multi_source(field_id: str, condition: str, effect: str = "调整") -> dict[str, str] | None:
+    return _personalization_source(field_id, condition, effect)
+
+
+def _has_context_choice(context: dict[str, Any], field_id: str, *tokens: str) -> bool:
+    values = _text_list(context.get(field_id))
+    return any(any(token in value for token in tokens) for value in values)
+
+
 def _hospital_bag_document_items(context: dict[str, Any]) -> list[dict[str, Any]]:
-    return [
+    pregnancy_source = None
+    if _meaningful_pregnancy_history(context):
+        pregnancy_source = _multi_source("pregnancy_history_or_notes", "已填写医生提示", "提权")
+    first_birth_source = _context_source(context, "first_birth", "新增") if context.get("first_birth") == "是" else None
+    prior_birth_source = _context_source(context, "first_birth", "新增") if context.get("first_birth") == "否" else None
+    timing_worry_source = (
+        _multi_source("top_worries", "不知道什么时候去医院", "提权")
+        if _has_context_choice(context, "top_worries", "不知道什么时候去医院")
+        else None
+    )
+    support_source = (
+        _context_source(context, "support_person", "提权")
+        if _support_is_limited(context)
+        else None
+    )
+    items = [
         {"label": "身份证件", "priority": "must", "copy_requirement": "原件"},
         {"label": "医保卡/保险卡", "priority": "must", "copy_requirement": "原件"},
         {"label": "产检本/产检资料", "priority": "must", "copy_requirement": "原件"},
-        {"label": "检查报告/化验单", "priority": "recommended", "copy_requirement": "按医院要求"},
-        {"label": "医院预登记信息", "priority": "confirm_first", "confirm_question": "确认是否已完成医院预登记，以及入院当天需要出示什么。"},
+        _with_personalized_by(
+            {"label": "检查报告/化验单", "priority": "must" if pregnancy_source else "recommended", "copy_requirement": "按医院要求"},
+            pregnancy_source,
+        ),
+        _with_personalized_by(
+            {"label": "医院预登记信息", "priority": "confirm_first", "confirm_question": "确认是否已完成医院预登记，以及入院当天需要出示什么。"},
+            first_birth_source,
+        ),
         {"label": "银行卡/手机支付", "priority": "must"},
-        {"label": "紧急联系人信息", "priority": "recommended"},
-        {"label": "医生/医院联系电话", "priority": "recommended"},
-        {
-            "label": "分娩沟通卡",
-            "priority": "nice_to_have",
-            "explain": "记录生产偏好和需要提前沟通的事，入院时方便给医护看。",
-        },
+        _with_personalized_by({"label": "紧急联系人信息", "priority": "recommended"}, support_source, timing_worry_source),
+        _with_personalized_by({"label": "医生/医院联系电话", "priority": "recommended"}, pregnancy_source, timing_worry_source),
+        _with_personalized_by(
+            {
+                "label": "分娩沟通卡",
+                "priority": "recommended" if first_birth_source else "nice_to_have",
+                "explain": "记录生产偏好和需要提前沟通的事，入院时方便给医护看。",
+            },
+            first_birth_source,
+        ),
         {
             "label": "准生证/户口本",
             "priority": "confirm_first",
             "confirm_question": "确认医院是否要求携带准生证、户口本及复印件。",
         },
     ]
+    if prior_birth_source:
+        items.append(
+            _with_personalized_by(
+                {"label": "大宝照护安排", "priority": "recommended", "note": "入院、住院和出院当天分别确认谁负责。"},
+                prior_birth_source,
+            )
+        )
+    return items
 
 
 def _hospital_bag_mom_items(context: dict[str, Any]) -> list[dict[str, Any]]:
+    stage = str(context.get("stage") or "")
+    stage_priority_source = _stage_source(context, "提权") if stage in {"packing", "immediate"} else _stage_source(context, "暂缓囤货")
+    birth_path_source = _context_source(context, "birth_path", "新增") if context.get("birth_path") == "剖宫产" else None
+    birth_path_priority_source = _context_source(context, "birth_path", "提权") if context.get("birth_path") == "剖宫产" else None
+    c_section_worry_source = (
+        _multi_source("top_worries", "怕剖宫产恢复", "新增")
+        if _has_context_choice(context, "top_worries", "怕剖宫产恢复")
+        else None
+    )
+    feeding_source = (
+        _context_source(context, "feeding_intention", "保留")
+        if context.get("feeding_intention") in {"母乳", "混合", "纯泵奶", "未确定", "待确认"}
+        else None
+    )
+    support_source = (
+        _context_source(context, "support_person", "提权")
+        if _support_is_limited(context)
+        else None
+    )
+    low_budget_source = (
+        _context_source(context, "budget_preference", "降级")
+        if context.get("budget_preference") == "低预算"
+        else None
+    )
+    high_budget_source = (
+        _context_source(context, "budget_preference", "新增")
+        if context.get("budget_preference") == "高预算"
+        else None
+    )
+    postpartum_priority = "must" if stage in {"packing", "immediate"} else "recommended"
+    disposable_underwear_priority = "must" if stage in {"packing", "immediate"} else "recommended"
     items = [
-        {"label": "手机充电线和充电器", "priority": "must", "note": "长充电线更适合病床旁使用。"},
+        _with_personalized_by(
+            {"label": "手机充电线和充电器", "priority": "must", "note": "长充电线更适合病床旁使用。"},
+            support_source,
+            birth_path_priority_source,
+        ),
         {"label": "宽松出院衣物", "priority": "must", "quantity": "1套"},
-        {"label": "开襟睡衣/哺乳睡衣", "priority": "recommended", "quantity": "1-2套"},
-        {"label": "哺乳文胸/舒适内衣", "priority": "recommended", "quantity": "2-3件"},
+        _with_personalized_by(
+            {"label": "开襟睡衣/哺乳睡衣", "priority": "recommended", "quantity": "1-2套"},
+            birth_path_priority_source,
+            feeding_source,
+        ),
+        _with_personalized_by(
+            {"label": "哺乳文胸/舒适内衣", "priority": "recommended", "quantity": "2-3件"},
+            feeding_source,
+        ),
         {"label": "防滑拖鞋", "priority": "must", "quantity": "1双"},
         {"label": "吸管杯", "priority": "must", "quantity": "1个"},
-        {"label": "产褥垫/产妇卫生巾", "priority": "must", "quantity": _postpartum_pad_quantity(context)},
-        {"label": "一次性内裤", "priority": "recommended", "quantity": "若干条"},
+        _with_personalized_by(
+            {"label": "产褥垫/产妇卫生巾", "priority": postpartum_priority, "quantity": _postpartum_pad_quantity(context)},
+            stage_priority_source,
+            _context_source(context, "birth_path", "数量调整") if context.get("birth_path") == "剖宫产" else None,
+        ),
+        _with_personalized_by(
+            {"label": "一次性内裤", "priority": disposable_underwear_priority, "quantity": "若干条"},
+            stage_priority_source,
+        ),
         {"label": "洗漱用品", "priority": "recommended", "quantity": "旅行装"},
         {"label": "纸巾/湿巾", "priority": "recommended", "quantity": "少量"},
         {"label": "毛巾", "priority": "recommended", "quantity": "1-2条"},
-        {"label": "束发用品", "priority": "nice_to_have"},
+        _with_personalized_by({"label": "束发用品", "priority": "nice_to_have"}, low_budget_source),
         {"label": "外套/披肩", "priority": "recommended", "quantity": "1件"},
         {
             "label": "胎监带",
@@ -1874,94 +2478,242 @@ def _hospital_bag_mom_items(context: dict[str, Any]) -> list[dict[str, Any]]:
             "confirm_question": "确认医院是否要求自带胎监带，以及需要几条。",
         },
     ]
-    if context.get("birth_path") == "剖宫产":
-        items.insert(2, {"label": "高腰宽松内裤", "priority": "recommended", "quantity": "若干条", "note": "更不容易压到腹部。"})
-        items.insert(3, {"label": "不压腹出院裤/裙", "priority": "recommended", "quantity": "1套"})
+    if context.get("birth_path") == "剖宫产" or c_section_worry_source:
+        source = birth_path_source or c_section_worry_source
+        items.insert(2, _with_personalized_by({"label": "高腰宽松内裤", "priority": "recommended", "quantity": "若干条", "note": "更不容易压到腹部。"}, source))
+        items.insert(3, _with_personalized_by({"label": "不压腹出院裤/裙", "priority": "recommended", "quantity": "1套"}, source))
         items.append(
-            {
-                "label": "收腹带",
-                "priority": "confirm_first",
-                "confirm_question": "剖宫产先确认医生或医院是否建议使用收腹带。",
-            }
+            _with_personalized_by(
+                {
+                    "label": "收腹带",
+                    "priority": "confirm_first",
+                    "confirm_question": "剖宫产先确认医生或医院是否建议使用收腹带。",
+                },
+                source,
+            )
+        )
+    if _has_context_choice(context, "pregnancy_history_or_notes", "妊娠糖尿病"):
+        items.append(
+            _with_personalized_by(
+                {"label": "血糖记录/饮食医嘱", "priority": "must", "note": "只按医生已经给出的方案准备。"},
+                _multi_source("pregnancy_history_or_notes", "妊娠糖尿病", "新增"),
+            )
+        )
+        items.append(
+            _with_personalized_by(
+                {"label": "医生允许的加餐", "priority": "confirm_first", "confirm_question": "确认产房和病区允许携带的食物类型。"},
+                _multi_source("pregnancy_history_or_notes", "妊娠糖尿病", "新增"),
+            )
+        )
+    if _has_context_choice(context, "pregnancy_history_or_notes", "血压", "子痫"):
+        items.append(
+            _with_personalized_by(
+                {"label": "血压记录/用药清单", "priority": "must", "note": "只记录医生已确认的信息，不自行调整用药。"},
+                _multi_source("pregnancy_history_or_notes", "血压或子痫前期风险", "新增"),
+            )
+        )
+    if _has_context_choice(context, "pregnancy_history_or_notes", "胎盘问题"):
+        items.append(
+            _with_personalized_by(
+                {"label": "近期B超/医生医嘱", "priority": "must", "copy_requirement": "按医院要求"},
+                _multi_source("pregnancy_history_or_notes", "胎盘问题", "提权"),
+            )
+        )
+    if support_source or high_budget_source:
+        items.append(
+            _with_personalized_by(
+                {"label": "床边收纳袋", "priority": "recommended" if support_source else "nice_to_have", "note": "把手机、证件、水杯和护理用品放在伸手可及的位置。"},
+                support_source,
+                high_budget_source,
+            )
         )
     return items
 
 
 def _hospital_bag_baby_items(context: dict[str, Any]) -> list[dict[str, Any]]:
-    return [
-        {"label": "宝宝出院衣物", "priority": "must", "quantity": "1套"},
-        {"label": "备用连体衣", "priority": "recommended", "quantity": "1-2套"},
-        {"label": "包被", "priority": "must", "quantity": "1条"},
-        {"label": "小毯子", "priority": "nice_to_have", "quantity": "1条"},
-        {"label": "纸尿裤", "priority": "confirm_first", "confirm_question": "确认医院是否提供纸尿裤；如果不提供，再问建议数量。"},
-        {"label": "湿巾/棉柔巾", "priority": "recommended", "quantity": "1-2包"},
-        {"label": "帽子/袜子", "priority": "recommended", "quantity": "各1-2件"},
+    fetus_count = str(context.get("fetus_count") or "")
+    fetus_source = _context_source(context, "fetus_count", "数量调整") if fetus_count in {"双胎", "三胎及以上"} else None
+    baby_worry_source = (
+        _multi_source("top_worries", "怕宝宝用品准备不全", "提权")
+        if _has_context_choice(context, "top_worries", "怕宝宝用品准备不全")
+        else None
+    )
+    nicu_source = (
+        _multi_source("pregnancy_history_or_notes", "宝宝可能 NICU", "新增")
+        if _has_context_choice(context, "pregnancy_history_or_notes", "NICU")
+        else None
+    )
+    early_birth_source = (
+        _multi_source("pregnancy_history_or_notes", "早产风险", "新增")
+        if _has_context_choice(context, "pregnancy_history_or_notes", "早产")
+        else None
+    )
+    baby_quantity = _baby_quantity(context, "1套")
+    blanket_quantity = _baby_quantity(context, "1条")
+    small_item_quantity = _baby_quantity(context, "各1-2件")
+    items = [
+        _with_personalized_by({"label": "宝宝出院衣物", "priority": "must", "quantity": baby_quantity}, fetus_source, baby_worry_source),
+        _with_personalized_by({"label": "备用连体衣", "priority": "recommended", "quantity": _baby_quantity(context, "1-2套")}, fetus_source, baby_worry_source),
+        _with_personalized_by({"label": "包被", "priority": "must", "quantity": blanket_quantity}, fetus_source, baby_worry_source),
+        _with_personalized_by({"label": "小毯子", "priority": "nice_to_have", "quantity": blanket_quantity}, fetus_source),
+        _with_personalized_by({"label": "纸尿裤", "priority": "confirm_first", "confirm_question": "确认医院是否提供纸尿裤；如果不提供，再问建议数量。"}, fetus_source, baby_worry_source),
+        _with_personalized_by({"label": "湿巾/棉柔巾", "priority": "recommended", "quantity": _baby_quantity(context, "1-2包")}, fetus_source, baby_worry_source),
+        _with_personalized_by({"label": "帽子/袜子", "priority": "recommended", "quantity": small_item_quantity}, fetus_source, baby_worry_source),
         {"label": "口水巾/小方巾", "priority": "nice_to_have", "quantity": "2-3条"},
         {"label": "奶瓶", "priority": "confirm_first", "confirm_question": "确认医院是否允许或需要自带奶瓶。"},
-        {"label": "安全提篮/安全座椅", "priority": "confirm_first", "confirm_question": "确认出院交通是否需要安全提篮或安全座椅。"},
+        _with_personalized_by(
+            {"label": "安全提篮/安全座椅", "priority": "confirm_first", "confirm_question": "确认出院交通是否需要安全提篮或安全座椅。"},
+            fetus_source,
+        ),
     ]
+    if nicu_source or early_birth_source:
+        source = nicu_source or early_birth_source
+        items.append(
+            _with_personalized_by(
+                {"label": "NICU探视/送奶规则确认", "priority": "confirm_first", "confirm_question": "确认宝宝如需 NICU 时，探视、送奶和标签要求。"},
+                source,
+            )
+        )
+    if early_birth_source:
+        items.append(
+            _with_personalized_by(
+                {"label": "小码/早产儿衣物确认", "priority": "confirm_first", "confirm_question": "先问医院是否需要自备特殊尺码衣物。"},
+                early_birth_source,
+            )
+        )
+    return items
 
 
 def _hospital_bag_support_items(context: dict[str, Any]) -> list[dict[str, Any]]:
+    support_source = _context_source(context, "support_person", "调整")
+    prior_birth_source = _context_source(context, "first_birth", "新增") if context.get("first_birth") == "否" else None
     if not _support_person_needs_bag(context):
         return [
-            {"label": "远程联系人名单", "priority": "must", "note": "写清楚临产、入院和出院时分别联系谁。"},
-            {"label": "去医院交通方案", "priority": "must"},
-            {"label": "出院接送安排", "priority": "recommended"},
-            {"label": "家中照护安排", "priority": "recommended", "note": "如有大宝、宠物或家务支持，提前定好负责人。"},
-            {"label": "紧急备用联系人", "priority": "recommended"},
+            _with_personalized_by({"label": "远程联系人名单", "priority": "must", "note": "写清楚临产、入院和出院时分别联系谁。"}, support_source),
+            _with_personalized_by({"label": "去医院交通方案", "priority": "must"}, support_source),
+            _with_personalized_by({"label": "出院接送安排", "priority": "recommended"}, support_source),
+            _with_personalized_by({"label": "家中照护安排", "priority": "recommended", "note": "如有大宝、宠物或家务支持，提前定好负责人。"}, support_source, prior_birth_source),
+            _with_personalized_by({"label": "紧急备用联系人", "priority": "recommended"}, support_source),
         ]
     return [
-        {"label": "陪产人身份证件", "priority": "must", "copy_requirement": "原件"},
-        {"label": "手机充电器", "priority": "must"},
-        {"label": "充电宝", "priority": "recommended"},
-        {"label": "换洗衣物", "priority": "recommended", "quantity": "1套"},
-        {"label": "外套", "priority": "recommended", "quantity": "1件"},
-        {"label": "洗漱用品", "priority": "recommended", "quantity": "1套"},
-        {"label": "水和零食", "priority": "recommended", "quantity": "按住院天数"},
-        {"label": "停车/支付用品", "priority": "recommended"},
-        {"label": "记录工具", "priority": "nice_to_have", "note": "用于记医生交代、出生信息和喂养时间。"},
-        {"label": "妈妈的沟通偏好", "priority": "nice_to_have", "note": "提前知道哪些事要先问妈妈。"},
+        _with_personalized_by({"label": "陪产人身份证件", "priority": "must", "copy_requirement": "原件"}, support_source),
+        _with_personalized_by({"label": "手机充电器", "priority": "must"}, support_source),
+        _with_personalized_by({"label": "充电宝", "priority": "recommended"}, support_source),
+        _with_personalized_by({"label": "换洗衣物", "priority": "recommended", "quantity": "1套"}, support_source),
+        _with_personalized_by({"label": "外套", "priority": "recommended", "quantity": "1件"}, support_source),
+        _with_personalized_by({"label": "洗漱用品", "priority": "recommended", "quantity": "1套"}, support_source),
+        _with_personalized_by({"label": "水和零食", "priority": "recommended", "quantity": "按住院天数"}, support_source),
+        _with_personalized_by({"label": "停车/支付用品", "priority": "recommended"}, support_source),
+        _with_personalized_by({"label": "记录工具", "priority": "nice_to_have", "note": "用于记医生交代、出生信息和喂养时间。"}, support_source),
+        _with_personalized_by({"label": "妈妈的沟通偏好", "priority": "nice_to_have", "note": "提前知道哪些事要先问妈妈。"}, support_source),
     ]
 
 
 def _hospital_bag_car_items(context: dict[str, Any]) -> list[dict[str, Any]]:
+    support_source = _context_source(context, "support_person", "提权") if _support_is_limited(context) else None
+    timing_worry_source = (
+        _multi_source("top_worries", "不知道什么时候去医院", "提权")
+        if _has_context_choice(context, "top_worries", "不知道什么时候去医院")
+        else None
+    )
+    first_birth_source = _context_source(context, "first_birth", "提权") if context.get("first_birth") == "是" else None
     return [
         {"label": "备用产褥垫/卫生巾", "priority": "recommended", "quantity": "少量"},
         {"label": "纸巾/湿巾", "priority": "recommended", "quantity": "少量"},
         {"label": "水", "priority": "recommended", "quantity": "少量"},
         {"label": "备用衣物", "priority": "nice_to_have", "quantity": "1套"},
-        {"label": "医院路线和停车信息", "priority": "recommended"},
+        _with_personalized_by({"label": "医院路线和停车信息", "priority": "recommended"}, support_source, timing_worry_source),
         {"label": "塑料袋/收纳袋", "priority": "recommended"},
         {"label": "备用毛巾", "priority": "nice_to_have", "quantity": "1条"},
         {"label": "车内充电线", "priority": "recommended"},
-        {"label": "夜间入口信息", "priority": "confirm_first", "confirm_question": "确认夜间急诊或产科入口在哪里。"},
+        _with_personalized_by(
+            {"label": "夜间入口信息", "priority": "confirm_first", "confirm_question": "确认夜间急诊或产科入口在哪里。"},
+            first_birth_source,
+            timing_worry_source,
+        ),
     ]
 
 
 def _hospital_bag_postpartum_items(context: dict[str, Any]) -> list[dict[str, Any]]:
     feeding = context.get("feeding_intention")
+    feeding_source = _context_source(context, "feeding_intention", "新增")
+    return_work_source = (
+        _context_source(context, "return_to_work_timing", "提权")
+        if _early_return_to_work(context)
+        else None
+    )
+    low_budget_source = (
+        _context_source(context, "budget_preference", "降级")
+        if context.get("budget_preference") == "低预算"
+        else None
+    )
+    high_budget_source = (
+        _context_source(context, "budget_preference", "新增")
+        if context.get("budget_preference") == "高预算"
+        else None
+    )
+    milk_worry_source = (
+        _multi_source("top_worries", "怕母乳不够", "提权")
+        if _has_context_choice(context, "top_worries", "怕母乳不够")
+        else None
+    )
+    nicu_source = (
+        _multi_source("pregnancy_history_or_notes", "宝宝可能 NICU", "提权")
+        if _has_context_choice(context, "pregnancy_history_or_notes", "NICU")
+        else None
+    )
     if feeding == "配方":
         return [
-            {"label": "奶瓶", "priority": "confirm_first", "confirm_question": "确认医院是否允许自带奶瓶，或是否由医院提供。"},
-            {"label": "配方奶", "priority": "confirm_first", "confirm_question": "确认医院是否允许自带配方奶，以及品牌或规格要求。"},
-            {"label": "奶瓶清洁用品", "priority": "recommended", "quantity": "少量"},
-            {"label": "奶嘴", "priority": "recommended", "quantity": "少量"},
-            {"label": "消毒设备", "priority": "nice_to_have", "note": "按家庭习惯准备，不一定需要提前买大件。"},
-            {"label": "喂养记录工具", "priority": "recommended"},
+            _with_personalized_by({"label": "奶瓶", "priority": "confirm_first", "confirm_question": "确认医院是否允许自带奶瓶，或是否由医院提供。"}, feeding_source),
+            _with_personalized_by({"label": "配方奶", "priority": "confirm_first", "confirm_question": "确认医院是否允许自带配方奶，以及品牌或规格要求。"}, feeding_source),
+            _with_personalized_by({"label": "奶瓶清洁用品", "priority": "recommended", "quantity": "少量"}, feeding_source),
+            _with_personalized_by({"label": "奶嘴", "priority": "recommended", "quantity": "少量"}, feeding_source),
+            _with_personalized_by({"label": "消毒设备", "priority": "nice_to_have", "note": "按家庭习惯准备，不一定需要提前买大件。"}, feeding_source, low_budget_source),
+            _with_personalized_by({"label": "喂养记录工具", "priority": "recommended"}, feeding_source),
         ]
     items = [
-        {"label": "哺乳文胸/哺乳背心", "priority": "recommended", "quantity": "2-3件"},
-        {"label": "防溢乳垫", "priority": "recommended", "quantity": "5-10片"},
-        {"label": "便携式吸奶器", "priority": "recommended", "quantity": "1台", "note": "母乳或混合喂养时可作为备用，不是必须购买。"},
-        {"label": "储奶袋/储奶瓶", "priority": "recommended", "quantity": "少量"},
-        {"label": "乳头霜", "priority": "recommended", "quantity": "1支"},
-        {"label": "乳盾", "priority": "confirm_first", "confirm_question": "是否需要乳盾，建议先听医院或哺乳顾问建议。"},
-        {"label": "哺乳枕", "priority": "nice_to_have"},
+        _with_personalized_by({"label": "哺乳文胸/哺乳背心", "priority": "recommended", "quantity": "2-3件"}, feeding_source),
+        _with_personalized_by({"label": "防溢乳垫", "priority": "recommended", "quantity": "5-10片"}, feeding_source),
+        _with_personalized_by(
+            {
+                "label": "便携式吸奶器",
+                "priority": "recommended" if not (return_work_source or nicu_source or milk_worry_source) else "must",
+                "quantity": "1台",
+                "note": "母乳或混合喂养时可作为备用，不是必须购买。",
+            },
+            feeding_source,
+            return_work_source,
+            nicu_source,
+            milk_worry_source,
+        ),
+        _with_personalized_by(
+            {"label": "储奶袋/储奶瓶", "priority": "recommended" if not (return_work_source or nicu_source) else "must", "quantity": "少量"},
+            feeding_source,
+            return_work_source,
+            nicu_source,
+        ),
+        _with_personalized_by({"label": "乳头霜", "priority": "recommended", "quantity": "1支"}, feeding_source, milk_worry_source),
+        _with_personalized_by({"label": "乳盾", "priority": "confirm_first", "confirm_question": "是否需要乳盾，建议先听医院或哺乳顾问建议。"}, feeding_source, milk_worry_source),
+        _with_personalized_by({"label": "哺乳枕", "priority": "nice_to_have"}, feeding_source, low_budget_source, high_budget_source),
         {"label": "小夜灯", "priority": "nice_to_have"},
         {"label": "宝宝尿布台用品", "priority": "recommended"},
-        {"label": "喂养记录工具", "priority": "recommended"},
+        _with_personalized_by({"label": "喂养记录工具", "priority": "recommended"}, feeding_source),
     ]
+    if return_work_source:
+        items.extend(
+            [
+                _with_personalized_by({"label": "冷藏包/冰袋", "priority": "recommended", "quantity": "1套"}, return_work_source),
+                _with_personalized_by({"label": "标签笔", "priority": "recommended", "quantity": "1支"}, return_work_source, nicu_source),
+                _with_personalized_by({"label": "吸奶配件清洁包", "priority": "recommended", "quantity": "1套"}, return_work_source),
+            ]
+        )
+    if feeding == "混合":
+        items.extend(
+            [
+                _with_personalized_by({"label": "奶瓶", "priority": "confirm_first", "confirm_question": "确认医院是否允许或需要自带奶瓶。"}, feeding_source),
+                _with_personalized_by({"label": "奶瓶清洁用品", "priority": "recommended", "quantity": "少量"}, feeding_source),
+            ]
+        )
     return items if feeding in {"母乳", "混合", "纯泵奶", "待确认", "未确定"} else []
 
 
@@ -2082,6 +2834,28 @@ def _normalize_hospital_bag_form_value(field_id: str, value: str) -> str:
     if field_id == "first_birth":
         return _normalize_first_birth(value) or value
     return value
+
+
+def _normalize_hospital_bag_default_values(default_values: dict[str, Any]) -> dict[str, Any]:
+    normalized: dict[str, Any] = {}
+    known_field_ids = {field["id"] for field in HOSPITAL_BAG_FORM_FIELDS}
+    for field_id in known_field_ids:
+        if field_id not in default_values:
+            continue
+        raw_value = default_values.get(field_id)
+        if isinstance(raw_value, list):
+            values = [
+                _normalize_hospital_bag_form_value(field_id, str(item).strip())
+                for item in raw_value
+                if _has_meaningful_value(item)
+            ]
+            if values:
+                normalized[field_id] = values
+            continue
+        value = _first_text(raw_value)
+        if _has_meaningful_value(value):
+            normalized[field_id] = _normalize_hospital_bag_form_value(field_id, value)
+    return normalized
 
 
 def _normalize_birth_plan_form_value(field_id: str, value: Any) -> Any:
@@ -2207,6 +2981,16 @@ def _item_match_key(value: Any) -> str:
     return re.sub(r"\s+", "", str(value or "").strip())
 
 
+def _meaningful_pregnancy_history(context: dict[str, Any]) -> bool:
+    values = _text_list(context.get("pregnancy_history_or_notes"))
+    return any("没有" not in value for value in values)
+
+
+def _support_is_limited(context: dict[str, Any]) -> bool:
+    value = str(context.get("support_person") or "")
+    return any(token in value for token in ("白天主要自己", "夜间主要自己", "支持少", "暂时没有", "不需要", "没有"))
+
+
 def _support_person_needs_bag(context: dict[str, Any]) -> bool:
     value = str(context.get("support_person") or "")
     if any(token in value for token in ("白天主要自己", "夜间主要自己", "支持少", "暂时没有", "不需要", "没有", "不确定")):
@@ -2218,6 +3002,24 @@ def _postpartum_pad_quantity(context: dict[str, Any]) -> str:
     if context.get("birth_path") == "剖宫产" or str(context.get("expected_stay")) in {"4 天或以上"}:
         return "20片左右"
     return "10-20片"
+
+
+def _baby_quantity(context: dict[str, Any], default: str) -> str:
+    fetus_count = str(context.get("fetus_count") or "")
+    if fetus_count == "双胎":
+        return default.replace("1套", "2套").replace("1条", "2条").replace("1-2套", "2-3套").replace("1-2包", "2-3包").replace("各1-2件", "各2份")
+    if fetus_count == "三胎及以上":
+        return default.replace("1套", "按宝宝数各1套").replace("1条", "按宝宝数各1条").replace("1-2套", "按宝宝数各1套+备用").replace("1-2包", "按宝宝数上调").replace("各1-2件", "按宝宝数各1份")
+    return default
+
+
+def _early_return_to_work(context: dict[str, Any]) -> bool:
+    value = str(context.get("return_to_work_timing") or "")
+    if not value:
+        return False
+    if any(token in value for token in ("暂不", "不返工", "半年", "6个月", "六个月", "一年", "较晚")):
+        return False
+    return bool(re.search(r"(?:[168]|一|六|八)\s*周|(?:[12]|一|两)\s*个?月", value))
 
 
 def _limit_items(items: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
@@ -2288,6 +3090,8 @@ def create_card(args: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
         assistant_followup = _prepare_hospital_bag_card(card_json, inputs)
     elif card_type == "birth_plan_card":
         assistant_followup = _prepare_birth_plan_card(card_json, inputs)
+    elif card_type == "birth_journey_plan_card":
+        assistant_followup = dict(BIRTH_JOURNEY_PLAN_ASSISTANT_FOLLOWUP)
 
     result = {
         "tool_name": "ui_card_create",
@@ -2315,6 +3119,7 @@ def _prepare_hospital_bag_card(card_json: dict[str, Any], inputs: RuntimeInputs)
         groups = []
         card_json["packing_groups"] = groups
     _normalize_hospital_bag_scene_groups(groups)
+    _suppress_hospital_bag_personalization(groups)
     _apply_hospital_bag_item_explanations(groups)
 
     if _formula_only_feeding_intention(inputs):
@@ -2331,6 +3136,7 @@ def _prepare_hospital_bag_card(card_json: dict[str, Any], inputs: RuntimeInputs)
         group["items"] = items
 
     _ensure_breast_pump_visible(items)
+    _suppress_hospital_bag_personalization(groups)
     _apply_hospital_bag_item_explanations(groups)
 
     return dict(HOSPITAL_BAG_CART_ASSISTANT_FOLLOWUP)
@@ -2532,7 +3338,15 @@ def _confirmed_form_data(inputs: RuntimeInputs) -> dict[str, Any]:
 
 
 def _dict_value(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
 
 
 def _first_text(*values: Any) -> str:
@@ -2550,6 +3364,26 @@ def _first_text(*values: Any) -> str:
         if _has_meaningful_value(text):
             return text
     return ""
+
+
+def _text_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        items: list[str] = []
+        for item in value:
+            items.extend(_text_list(item))
+        return items
+    if isinstance(value, dict):
+        items: list[str] = []
+        for item in value.values():
+            items.extend(_text_list(item))
+        return items
+    text = str(value or "").strip()
+    if not _has_meaningful_value(text):
+        return []
+    parts = re.split(r"[、,，;；\n]+", text)
+    return [part.strip() for part in parts if _has_meaningful_value(part)]
 
 
 def _localized_disclaimer(value: str) -> str:

@@ -383,6 +383,8 @@ def _artifact_semantic(artifact_type: str, artifact_id: str, tool_name: str) -> 
         label = "我已经准备好确认内容了"
     elif normalized_artifact_type in {"support_ticket", "support_ticket_draft"}:
         label = "我已经准备好售后工单草稿了"
+    elif normalized_artifact_type == "mom_baby_status_card":
+        label = "我已经生成母婴状态页了"
     elif normalized_artifact_type in {"milk_plan_card", "milk_analysis_card"}:
         label = "我已经生成奶量卡片了"
     else:
@@ -432,7 +434,13 @@ def _tool_semantic_phase(tool_name: str) -> str:
         "reminder_delete",
     }:
         return "saving"
-    if tool_name in {"ui_form_create", "ui_card_create", "ibclc_consult_card_create", "support_ticket_draft_create"}:
+    if tool_name in {
+        "ui_form_create",
+        "ui_card_create",
+        "birth_journey_plan_card_create",
+        "ibclc_consult_card_create",
+        "support_ticket_draft_create",
+    }:
         return "planning"
     if tool_name == "run_approved_skill_script":
         return "working"
@@ -499,6 +507,8 @@ def _tool_start_label(tool_name: str, arguments: dict[str, Any]) -> str:
         return "我正在帮你准备确认内容"
     if tool_name == "ui_card_create":
         return "我正在帮你整理成卡片"
+    if tool_name == "birth_journey_plan_card_create":
+        return "我正在帮你整理生产全过程计划"
     if tool_name == "ibclc_consult_card_create":
         return "我正在帮你准备 IBCLC 咨询卡"
     if tool_name == "support_ticket_draft_create":
@@ -541,7 +551,7 @@ def _tool_end_label(tool_name: str) -> str:
         return "我在整理设备内容"
     if tool_name == "support_ticket_draft_create":
         return "我在整理工单草稿"
-    if tool_name in {"ui_form_create", "ui_card_create", "ibclc_consult_card_create"}:
+    if tool_name in {"ui_form_create", "ui_card_create", "birth_journey_plan_card_create", "ibclc_consult_card_create"}:
         return "我在生成结果"
     return "我在继续处理"
 
@@ -598,6 +608,8 @@ def _tool_result_label(tool_name: str, result: dict[str, Any]) -> str:
         return "我已经准备好确认内容了"
     if tool_name == "ui_card_create":
         return "我已经生成结果卡片了"
+    if tool_name == "birth_journey_plan_card_create":
+        return "我已经整理好生产全过程计划了"
     if tool_name == "ibclc_consult_card_create":
         return "我已经准备好 IBCLC 咨询卡了"
     if tool_name == "support_ticket_draft_create":
@@ -688,11 +700,11 @@ def safe_tool_result(result: dict[str, Any]) -> dict[str, Any]:
                     safe[key] = tool_data[key]
         if result.get("tool_name") in {"ui_form_create", "birth_plan_form_create", "hospital_bag_form_create"} and isinstance(tool_result.get("form"), dict):
             safe["form"] = tool_result["form"]
-        if result.get("tool_name") in {"ui_card_create", "birth_plan_card_create", "hospital_bag_card_create"} and isinstance(tool_result.get("card"), dict):
+        if result.get("tool_name") in {"ui_card_create", "birth_plan_card_create", "birth_journey_plan_card_create", "hospital_bag_card_create"} and isinstance(tool_result.get("card"), dict):
             safe["card"] = tool_result["card"]
             if isinstance(tool_result.get("assistant_followup"), dict):
                 safe["assistant_followup"] = tool_result["assistant_followup"]
-        if result.get("tool_name") in {"milk_assessment_evaluate", "milk_plan_preview", "milk_plan_mutate"} and isinstance(tool_result.get("card"), dict):
+        if result.get("tool_name") in {"milk_status_query", "milk_assessment_evaluate", "milk_plan_preview", "milk_plan_mutate"} and isinstance(tool_result.get("card"), dict):
             safe["card"] = tool_result["card"]
         if result.get("tool_name") == "ibclc_consult_card_create" and isinstance(tool_result.get("card"), dict):
             safe["card"] = tool_result["card"]
@@ -723,6 +735,8 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
     tool_name = str(safe.get("tool_name") or "")
     if tool_name == "milk_assessment_evaluate" and isinstance(safe.get("card"), dict):
         return _compact_milk_analysis_card_output(safe)
+    if tool_name == "milk_status_query" and isinstance(safe.get("card"), dict):
+        return _compact_mom_baby_status_card_output(safe)
     if tool_name == "milk_plan_preview" and isinstance(safe.get("card"), dict):
         return _compact_milk_plan_card_output(safe, result)
 
@@ -740,6 +754,7 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
         "ui_card_create",
         "birth_plan_form_create",
         "birth_plan_card_create",
+        "birth_journey_plan_card_create",
         "hospital_bag_form_create",
         "hospital_bag_card_create",
         "hospital_bag_cart_update",
@@ -827,6 +842,31 @@ def _compact_milk_analysis_card_output(safe: dict[str, Any]) -> dict[str, Any]:
             "奶量分析卡片已经展示完整结果。最终回复只能引导用户选择下一步，"
             "不要复述卡片中的结论、数字、趋势、参考区间、原因推测或建议内容；"
             "不要输出“整体看/结果是/数据显示”等分析句。用一句自然的话给出 2-3 个可选动作。"
+        ),
+    }
+
+
+def _compact_mom_baby_status_card_output(safe: dict[str, Any]) -> dict[str, Any]:
+    card = safe.get("card")
+    card_json = card.get("card_json") if isinstance(card, dict) else None
+    card_json_dict = card_json if isinstance(card_json, dict) else {}
+    tabs = card_json_dict.get("tabs") if isinstance(card_json_dict.get("tabs"), list) else []
+    return {
+        "ok": safe.get("ok"),
+        "tool_name": safe.get("tool_name"),
+        "card": {
+            "card_type": (card or {}).get("card_type") if isinstance(card, dict) else "mom_baby_status_card",
+            "schema_version": (card or {}).get("schema_version") if isinstance(card, dict) else "1.0",
+            "created": True,
+        },
+        "status_tabs": [
+            {"id": tab.get("id"), "title": tab.get("title")}
+            for tab in tabs
+            if isinstance(tab, dict)
+        ],
+        "final_response_instruction": (
+            "母婴状态页已经按“妈妈数字分身”和“宝宝数字分身”两个顶部 tab 展示。"
+            "最终回复只提示用户可以切换 tab 查看，不要把两个 tab 的指标和建议逐条复述到正文里。"
         ),
     }
 

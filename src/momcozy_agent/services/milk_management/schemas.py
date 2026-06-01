@@ -24,6 +24,7 @@ class ServiceResult(TypedDict, total=False):
     status: str
     summary: str
     data: dict[str, Any]
+    card: dict[str, Any]
     error: str
 
 
@@ -120,4 +121,3 @@ def hhmm(value: Any) -> str:
     if parsed is None:
         return ""
     return f"{parsed.hour:02d}:{parsed.minute:02d}"
-
