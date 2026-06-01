@@ -11,7 +11,18 @@ import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -28,6 +39,7 @@ SESSION_TTL_SECONDS = 12 * 60 * 60
 DEFAULT_USERNAME = "admin"
 DEFAULT_PASSWORD = "admin123"
 CORE_TABLES = ["user_profile", "infant_profile", "feeding_log", "pumping_log", "milk_plan", "calendar"]
+WS_TOKEN_ENV = "WEB_DATA_WS_TOKEN"
 
 
 def create_app(db_path: str | Path | None = None, file_root: str | Path | None = None) -> FastAPI:
@@ -35,6 +47,8 @@ def create_app(db_path: str | Path | None = None, file_root: str | Path | None =
     app.state.db_path = Path(db_path or DEFAULT_DB_PATH)
     app.state.file_root = Path(file_root or DEFAULT_FILE_ROOT)
     app.state.session_secret = _session_secret()
+    app.state.ws_token = _websocket_token()
+    app.state.ws_manager = WebDataConnectionManager()
     _ensure_database(app.state.db_path)
     app.state.file_root.mkdir(parents=True, exist_ok=True)
 
@@ -69,6 +83,31 @@ def create_app(db_path: str | Path | None = None, file_root: str | Path | None =
         if user is None:
             return {"authenticated": False}
         return {"authenticated": True, "username": user["username"]}
+
+    @app.post("/api/notifications/report")
+    async def report_notification(request: Request) -> dict[str, Any]:
+        if not _verify_request_token(request):
+            raise HTTPException(status_code=401, detail={"message": "invalid websocket token"})
+
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail={"message": "notification payload must be a JSON object"})
+
+        reminder_type = str(payload.get("reminder_type") or payload.get("type") or "").strip()
+        if not reminder_type:
+            raise HTTPException(status_code=400, detail={"message": "reminder_type is required"})
+
+        notification = {
+            "reminder_type": reminder_type,
+            "title": str(payload.get("title", "")),
+            "message": str(payload.get("message", "")),
+            "data": payload.get("data", {}),
+            "reported_at": int(time.time()),
+        }
+        await request.app.state.ws_manager.broadcast(
+            {"type": "notification.reported", "payload": notification}
+        )
+        return {"reported": True, "notification": notification}
 
     @app.get("/api/db/tables")
     async def list_tables(request: Request, _: dict[str, Any] = Depends(require_session)) -> dict[str, Any]:
@@ -140,6 +179,9 @@ def create_app(db_path: str | Path | None = None, file_root: str | Path | None =
             )
             conn.commit()
             row = _fetch_inserted_row(conn, table, schema, values, cursor.lastrowid)
+        await request.app.state.ws_manager.broadcast(
+            {"type": "db.row.created", "payload": {"table": table, "row": row}}
+        )
         return {"created": True, "row": row}
 
     @app.put("/api/db/tables/{table}/rows/{primary_key}")
@@ -168,6 +210,9 @@ def create_app(db_path: str | Path | None = None, file_root: str | Path | None =
                 raise HTTPException(status_code=404, detail={"message": "row not found"})
             conn.commit()
             row = _fetch_row(conn, table, pk, primary_key)
+        await request.app.state.ws_manager.broadcast(
+            {"type": "db.row.updated", "payload": {"table": table, "primary_key": primary_key, "row": row}}
+        )
         return {"updated": True, "row": row}
 
     @app.delete("/api/db/tables/{table}/rows/{primary_key}")
@@ -184,6 +229,9 @@ def create_app(db_path: str | Path | None = None, file_root: str | Path | None =
             conn.commit()
         if cursor.rowcount < 1:
             raise HTTPException(status_code=404, detail={"message": "row not found"})
+        await request.app.state.ws_manager.broadcast(
+            {"type": "db.row.deleted", "payload": {"table": table, "primary_key": primary_key}}
+        )
         return {"deleted": True}
 
     @app.get("/api/files")
@@ -225,7 +273,11 @@ def create_app(db_path: str | Path | None = None, file_root: str | Path | None =
         if target.exists():
             raise HTTPException(status_code=409, detail={"message": "file already exists"})
         target.write_text(content, encoding="utf-8")
-        return {"created": True, "path": _relative_path(request.app.state.file_root, target)}
+        relative_path = _relative_path(request.app.state.file_root, target)
+        await request.app.state.ws_manager.broadcast(
+            {"type": "file.created", "payload": {"path": relative_path}}
+        )
+        return {"created": True, "path": relative_path}
 
     @app.put("/api/files/content")
     async def update_file(request: Request, _: dict[str, Any] = Depends(require_session)) -> dict[str, Any]:
@@ -236,14 +288,22 @@ def create_app(db_path: str | Path | None = None, file_root: str | Path | None =
         if not _is_text_file(target):
             raise HTTPException(status_code=400, detail={"message": "binary file cannot be edited"})
         target.write_text(str(payload.get("content", "")), encoding="utf-8")
-        return {"updated": True, "path": _relative_path(request.app.state.file_root, target)}
+        relative_path = _relative_path(request.app.state.file_root, target)
+        await request.app.state.ws_manager.broadcast(
+            {"type": "file.updated", "payload": {"path": relative_path}}
+        )
+        return {"updated": True, "path": relative_path}
 
     @app.delete("/api/files")
     async def delete_file(path: str, request: Request, _: dict[str, Any] = Depends(require_session)) -> dict[str, Any]:
         target = _safe_file_path(request.app.state.file_root, path)
         if not target.is_file():
             raise HTTPException(status_code=404, detail={"message": "file not found"})
+        relative_path = _relative_path(request.app.state.file_root, target)
         target.unlink()
+        await request.app.state.ws_manager.broadcast(
+            {"type": "file.deleted", "payload": {"path": relative_path}}
+        )
         return {"deleted": True}
 
     @app.post("/api/files/upload")
@@ -260,7 +320,11 @@ def create_app(db_path: str | Path | None = None, file_root: str | Path | None =
         target.parent.mkdir(parents=True, exist_ok=True)
         body = await upload.read()
         target.write_bytes(body)
-        return {"uploaded": True, "path": _relative_path(request.app.state.file_root, target), "size": len(body)}
+        relative_path = _relative_path(request.app.state.file_root, target)
+        await request.app.state.ws_manager.broadcast(
+            {"type": "file.uploaded", "payload": {"path": relative_path, "size": len(body)}}
+        )
+        return {"uploaded": True, "path": relative_path, "size": len(body)}
 
     @app.get("/api/files/download")
     async def download_file(path: str, request: Request, _: dict[str, Any] = Depends(require_session)) -> FileResponse:
@@ -269,8 +333,141 @@ def create_app(db_path: str | Path | None = None, file_root: str | Path | None =
             raise HTTPException(status_code=404, detail={"message": "file not found"})
         return FileResponse(target, filename=target.name)
 
+    @app.websocket("/api/ws")
+    async def websocket_endpoint(websocket: WebSocket) -> None:
+        if not _verify_websocket_token(websocket):
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+
+        manager = websocket.app.state.ws_manager
+        await manager.connect(websocket)
+        try:
+            await websocket.send_json(
+                {"type": "connection.accepted", "payload": {"token_required": bool(websocket.app.state.ws_token)}}
+            )
+            while True:
+                raw_message = await websocket.receive_text()
+                await _handle_websocket_message(websocket, raw_message)
+        except WebSocketDisconnect:
+            pass
+        finally:
+            manager.disconnect(websocket)
+
     app.mount("/static", StaticFiles(directory=str(WEB_DATA_ROOT)), name="web_data_static")
     return app
+
+
+class WebDataConnectionManager:
+    def __init__(self) -> None:
+        self._connections: set[WebSocket] = set()
+
+    async def connect(self, websocket: WebSocket) -> None:
+        await websocket.accept()
+        self._connections.add(websocket)
+
+    def disconnect(self, websocket: WebSocket) -> None:
+        self._connections.discard(websocket)
+
+    async def broadcast(self, message: dict[str, Any]) -> None:
+        stale_connections: list[WebSocket] = []
+        for websocket in list(self._connections):
+            try:
+                await websocket.send_json(message)
+            except Exception:
+                stale_connections.append(websocket)
+        for websocket in stale_connections:
+            self.disconnect(websocket)
+
+
+async def _handle_websocket_message(websocket: WebSocket, raw_message: str) -> None:
+    try:
+        message = json.loads(raw_message or "{}")
+    except json.JSONDecodeError:
+        await websocket.send_json(
+            {"type": "error", "payload": {"code": "INVALID_JSON", "message": "message must be valid JSON"}}
+        )
+        return
+    if not isinstance(message, dict):
+        await websocket.send_json(
+            {"type": "error", "payload": {"code": "INVALID_MESSAGE", "message": "message must be a JSON object"}}
+        )
+        return
+
+    message_type = str(message.get("type", "")).strip()
+    request_id = message.get("request_id")
+    if message_type == "ping":
+        await websocket.send_json(
+            {
+                "type": "pong",
+                "request_id": request_id,
+                "payload": {"server_time": int(time.time())},
+            }
+        )
+        return
+    if message_type == "echo":
+        await websocket.send_json(
+            {"type": "echo", "request_id": request_id, "payload": message.get("payload", {})}
+        )
+        return
+    if message_type in {"subscribe", "unsubscribe"}:
+        await websocket.send_json(
+            {"type": f"{message_type}.ack", "request_id": request_id, "payload": message.get("payload", {})}
+        )
+        return
+
+    await websocket.send_json(
+        {
+            "type": "error",
+            "request_id": request_id,
+            "payload": {"code": "UNKNOWN_MESSAGE_TYPE", "message": f"unsupported message type: {message_type}"},
+        }
+    )
+
+
+def _verify_websocket_token(websocket: WebSocket) -> bool:
+    expected = websocket.app.state.ws_token
+    if not expected:
+        return True
+
+    query_token = (websocket.query_params.get("token") or "").strip()
+    if query_token and hmac.compare_digest(query_token, expected):
+        return True
+
+    auth_header = websocket.headers.get("authorization") or ""
+    if auth_header.startswith("Bearer "):
+        header_token = auth_header[7:].strip()
+        if header_token and hmac.compare_digest(header_token, expected):
+            return True
+
+    protocol_header = websocket.headers.get("sec-websocket-protocol") or ""
+    for fragment in protocol_header.split(","):
+        protocol_token = fragment.strip()
+        if protocol_token and hmac.compare_digest(protocol_token, expected):
+            return True
+
+    return False
+
+
+def _verify_request_token(request: Request) -> bool:
+    expected = request.app.state.ws_token
+    if not expected:
+        return True
+
+    query_token = (request.query_params.get("token") or "").strip()
+    if query_token and hmac.compare_digest(query_token, expected):
+        return True
+
+    auth_header = request.headers.get("authorization") or ""
+    if auth_header.startswith("Bearer "):
+        header_token = auth_header[7:].strip()
+        if header_token and hmac.compare_digest(header_token, expected):
+            return True
+
+    explicit_header = request.headers.get("x-web-data-ws-token") or ""
+    if explicit_header.strip() and hmac.compare_digest(explicit_header.strip(), expected):
+        return True
+
+    return False
 
 
 def require_session(request: Request) -> dict[str, Any]:
@@ -427,6 +624,10 @@ def _is_text_file(path: Path) -> bool:
 def _session_secret() -> bytes:
     configured = os.getenv("WEB_DATA_SESSION_SECRET", "").strip()
     return (configured or "momcozy-web-data-local-secret").encode("utf-8")
+
+
+def _websocket_token() -> str:
+    return os.getenv(WS_TOKEN_ENV, "").strip()
 
 
 def _sign_session(payload: dict[str, Any], secret: bytes) -> str:
