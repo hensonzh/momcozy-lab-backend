@@ -1115,7 +1115,6 @@ function renderHospitalBagCardV1(node, cardJson) {
   addCardHeader(node, hospitalBagTitle(cardJson.title), hospitalBagSubtitle(cardJson) || cardJson.subtitle || "");
   addPackingGroups(node, compactPackingGroups(cardJson.packing_groups));
   addListSection(node, "Timeline", limitList(cardJson.timeline, 2));
-  addDisclaimer(node, cardJson.disclaimer);
 }
 
 function renderBirthJourneyPlanCardV1(node, cardJson) {
@@ -1125,12 +1124,12 @@ function renderBirthJourneyPlanCardV1(node, cardJson) {
   if (phases.length) {
     const timeline = document.createElement("section");
     timeline.className = "birth-journey-timeline";
-    for (const phase of phases) {
+    for (const [index, phase] of phases.entries()) {
       const item = document.createElement("article");
       item.className = `birth-journey-phase ${phase.status === "current" ? "is-current" : ""}`.trim();
       const marker = document.createElement("span");
       marker.className = "birth-journey-phase-marker";
-      marker.textContent = phase.status === "current" ? "●" : "○";
+      marker.textContent = String(index + 1);
       const body = document.createElement("div");
       body.className = "birth-journey-phase-body";
       const heading = document.createElement("div");
@@ -1162,14 +1161,13 @@ function renderBirthJourneyPlanCardV1(node, cardJson) {
     }
     node.appendChild(timeline);
   }
-  addDisclaimer(node, cardJson.disclaimer);
 }
 
 function addBirthJourneyOwnerStrip(node, owner) {
   if (!owner || typeof owner !== "object") return;
   const entries = [
     ["孕期", owner.current_week || owner.due_date_or_week],
-    ["预产期", owner.estimated_due_date],
+    ["预产期预计", owner.estimated_due_date],
     ["方式", owner.birth_path],
     ["支持", owner.support_person],
   ].filter(([, value]) => hasDisplayValue(value) && !isConfirmPlaceholder(value));

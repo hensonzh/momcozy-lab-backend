@@ -1916,45 +1916,35 @@ def _birth_journey_phase_specs(
 ) -> list[dict[str, Any]]:
     if due_date is None:
         specs = [
-            {"id": "foundation", "title": "问清流程", "date_range": "补充孕周后换算具体日期", "is_current": True},
-            {"id": "cards_ready", "title": "完成两卡", "date_range": "补充孕周后换算具体日期"},
-            {"id": "departure_ready", "title": "出发演练", "date_range": "补充孕周后换算具体日期"},
-            {"id": "labor_recognition", "title": "判断临产", "date_range": "补充孕周后换算具体日期"},
-            {"id": "hospital_birth", "title": "住院生产", "date_range": "入院当天～出院当天"},
-            {"id": "home_week", "title": "回家照护", "date_range": "出院后 0～7 天"},
-            {"id": "postpartum_review", "title": "42天复盘", "date_range": "产后 8～42 天"},
+            {"id": "late_pregnancy", "title": "孕晚期", "date_range": "补充孕周后换算具体日期", "is_current": True},
+            {"id": "labor_recognition", "title": "临产期", "date_range": "补充孕周后换算具体日期"},
+            {"id": "hospital_birth", "title": "住院期", "date_range": "入院当天～出院当天"},
+            {"id": "postpartum", "title": "产后期", "date_range": "出院后 0～42 天"},
         ]
         return _limit_birth_journey_phase_specs(specs, scope)
 
     raw_specs: list[dict[str, Any]] = []
-    foundation_start = due_date - timedelta(days=84)
-    foundation_end = due_date - timedelta(days=57)
-    cards_start = due_date - timedelta(days=56)
-    cards_end = due_date - timedelta(days=36)
-    departure_start = due_date - timedelta(days=35)
-    departure_end = due_date - timedelta(days=22)
+    late_start = due_date - timedelta(days=84)
+    late_end = due_date - timedelta(days=22)
     labor_start = due_date - timedelta(days=21)
     labor_end = due_date + timedelta(days=7)
 
-    if gestational_days is not None and gestational_days < 28 * 7 and today < foundation_start:
+    if gestational_days is not None and gestational_days < 28 * 7 and today < late_start:
         raw_specs.append(
             {
-                "id": "mid_pregnancy_bridge",
-                "title": "确认医院",
+                "id": "mid_pregnancy",
+                "title": "孕中期",
                 "start_date": today,
-                "end_date": foundation_start - timedelta(days=1),
+                "end_date": late_start - timedelta(days=1),
                 "is_current": True,
             }
         )
     raw_specs.extend(
         [
-            {"id": "foundation", "title": "问清流程", "start_date": foundation_start, "end_date": foundation_end},
-            {"id": "cards_ready", "title": "完成两卡", "start_date": cards_start, "end_date": cards_end},
-            {"id": "departure_ready", "title": "出发演练", "start_date": departure_start, "end_date": departure_end},
-            {"id": "labor_recognition", "title": "判断临产", "start_date": labor_start, "end_date": labor_end},
-            {"id": "hospital_birth", "title": "住院生产", "date_range": "入院当天～出院当天"},
-            {"id": "home_week", "title": "回家照护", "date_range": "出院后 0～7 天"},
-            {"id": "postpartum_review", "title": "42天复盘", "date_range": "产后 8～42 天"},
+            {"id": "late_pregnancy", "title": "孕晚期", "start_date": late_start, "end_date": late_end},
+            {"id": "labor_recognition", "title": "临产期", "start_date": labor_start, "end_date": labor_end},
+            {"id": "hospital_birth", "title": "住院期", "date_range": "入院当天～出院当天"},
+            {"id": "postpartum", "title": "产后期", "date_range": "出院后 0～42 天"},
         ]
     )
 
@@ -1962,7 +1952,7 @@ def _birth_journey_phase_specs(
     for spec in raw_specs:
         start_date = spec.get("start_date")
         end_date = spec.get("end_date")
-        if isinstance(end_date, date) and end_date < today and spec["id"] not in {"hospital_birth", "postpartum_start"}:
+        if isinstance(end_date, date) and end_date < today and spec["id"] not in {"hospital_birth", "postpartum"}:
             continue
         display_spec = dict(spec)
         if isinstance(start_date, date) and isinstance(end_date, date):
@@ -1978,10 +1968,10 @@ def _birth_journey_phase_specs(
 
 def _limit_birth_journey_phase_specs(specs: list[dict[str, Any]], scope: str) -> list[dict[str, Any]]:
     if scope == "short_range":
-        return specs[:3]
+        return specs[:2]
     if scope == "prenatal_only":
-        return [spec for spec in specs if spec["id"] not in {"hospital_birth", "home_week", "postpartum_review"}][:5]
-    return specs[:8]
+        return [spec for spec in specs if spec["id"] not in {"hospital_birth", "postpartum"}][:3]
+    return specs[:5]
 
 
 def _birth_journey_phase_payload(spec: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
@@ -2002,29 +1992,17 @@ def _birth_journey_phase_payload(spec: dict[str, Any], context: dict[str, Any]) 
 
 def _birth_journey_base_phase(phase_id: str) -> dict[str, Any]:
     base: dict[str, dict[str, Any]] = {
-        "mid_pregnancy_bridge": {
+        "mid_pregnancy": {
             "goal": "确定生产医院方向、下一次产检要问什么、家里谁能提供支持。",
             "watchouts": ["这个阶段不用买齐物品，也不用做临产判断；先把方向和关键问题定清楚。"],
             "actions": ["列出下次产检最想确认的 3-5 个问题。", "确认倾向的生产医院或生产地点。", "初步写下产后前两周谁能帮忙、能帮到什么程度。"],
             "comate_help": ["生成产检问题清单。", "整理医院确认问题。", "梳理产后支持人分工草稿。"],
         },
-        "foundation": {
-            "goal": "把产检节奏、医院流程和医生提醒变成清楚的问题清单。",
-            "watchouts": ["不要把这一阶段变成采购清单；重点是确认医院规则和医生给过的特殊提醒。"],
-            "actions": ["问清预登记、陪产、探视、夜间入口和联系医院的基本规则。", "把医生提醒转成下次产检要追问的问题。", "确认 32 周后是否需要开始做待产包卡片和分娩沟通卡。"],
-            "comate_help": ["生成医院确认清单。", "把医生提醒整理成追问问题。", "提醒下一阶段开始做两张核心卡片。"],
-        },
-        "cards_ready": {
-            "goal": "形成待产包卡片和分娩沟通卡初版，让准备内容从口头想法变成可查看产物。",
-            "watchouts": ["不要在聊天里手写长清单；清单类内容统一交给待产包卡片承载。"],
-            "actions": ["生成个性化待产包卡片。", "生成给医护团队看的分娩沟通卡。", "把仍需问医院确认的事项标出来。"],
-            "comate_help": ["生成待产包卡片。", "生成分娩沟通卡。", "标记需要和医院确认的事项。"],
-        },
-        "departure_ready": {
-            "goal": "把路线、出发规则和支持人分工确认到随时能执行。",
-            "watchouts": ["这一阶段不再重新拆物品清单；只确认待产包卡片是否可直接使用，以及出发时谁做什么。"],
-            "actions": ["按待产包卡片做一次最终核对。", "确认夜间入口、停车/打车路线和备用交通。", "让支持人明确出发、联系医院、院内记录各自负责什么。"],
-            "comate_help": ["生成出发核对清单。", "整理支持人分工卡。", "把待产包卡片更新成随时出发版。"],
+        "late_pregnancy": {
+            "goal": "把医院流程、待产包卡片、分娩沟通卡和出发安排逐步落地。",
+            "watchouts": ["不要把这一阶段拆成一堆零散任务；先问清医院流程，再完成两张核心卡片，最后做出发核对。"],
+            "actions": ["问清预登记、陪产、探视、夜间入口和联系医院的基本规则。", "生成个性化待产包卡片和给医护团队看的分娩沟通卡。", "按待产包卡片做一次最终核对。", "确认停车/打车路线、备用交通和支持人分工。"],
+            "comate_help": ["生成医院确认清单。", "生成待产包卡片和分娩沟通卡。", "整理出发核对清单和支持人分工。"],
         },
         "labor_recognition": {
             "goal": "知道什么时候联系医院，以及联系时该怎么说。",
@@ -2038,20 +2016,14 @@ def _birth_journey_base_phase(phase_id: str) -> dict[str, Any]:
             "actions": ["入院后把分娩沟通卡给支持人和医护团队看。", "约定谁记录宝宝出生时间、喂养时间、尿布、妈妈用药/检查和出院医嘱。", "需要调整计划时，优先听医院团队说明。"],
             "comate_help": ["打开分娩沟通卡。", "生成院内记录清单。", "整理出院前要问医生的问题。"],
         },
-        "home_week": {
-            "goal": "把回家第一周的妈妈恢复、宝宝喂养、夜间分工和复诊安排跑起来。",
+        "postpartum": {
+            "goal": "把出院后 42 天内的妈妈恢复、宝宝喂养、夜间分工和复盘安排跑起来。",
             "watchouts": ["发热、恶露突然增多或有异味、伤口红肿加重、乳房红肿疼痛，或宝宝尿布明显减少、精神差时，要联系医生、儿科或哺乳专业人士。"],
-            "actions": ["确认妈妈复诊和宝宝儿科检查时间。", "建立喂养、尿布和妈妈恢复记录。", "和家人说好夜间谁负责喂、换、哄、休息。"],
-            "comate_help": ["生成夜间分工卡。", "整理喂养和尿布记录入口。", "提示需要联系医生或 IBCLC 的信号。"],
-        },
-        "postpartum_review": {
-            "goal": "复盘妈妈恢复、宝宝喂养节奏和家庭支持缺口，决定下一阶段计划。",
-            "watchouts": ["不要把短期混乱误认为长期失败；先看记录，再判断是否需要医生、儿科或哺乳顾问支持。"],
-            "actions": ["复盘过去一周的喂养、睡眠、尿布和妈妈恢复记录。", "整理复诊或儿科要问的问题。", "需要返工或奶量安排时，再进入奶量管理计划。"],
-            "comate_help": ["生成产后复盘问题清单。", "承接奶量管理计划。", "整理返工前喂养安排。"],
+            "actions": ["确认妈妈复诊和宝宝儿科检查时间。", "建立喂养、尿布和妈妈恢复记录。", "和家人说好夜间谁负责喂、换、哄、休息。", "产后 2-6 周复盘恢复、喂养和家庭支持缺口。"],
+            "comate_help": ["生成夜间分工卡。", "整理喂养和尿布记录入口。", "提示需要联系医生或 IBCLC 的信号。", "承接奶量管理计划。"],
         },
     }
-    return dict(base.get(phase_id) or base["foundation"])
+    return dict(base.get(phase_id) or base["late_pregnancy"])
 
 
 def _personalize_birth_journey_phase(phase: dict[str, Any], context: dict[str, Any]) -> None:
@@ -2064,21 +2036,21 @@ def _personalize_birth_journey_phase(phase: dict[str, Any], context: dict[str, A
     support = str(context.get("support_person") or "")
     medical_notes = context.get("medical_notes") if isinstance(context.get("medical_notes"), list) else []
 
-    if first_birth == "是" and phase_id in {"foundation", "labor_recognition"}:
+    if first_birth == "是" and phase_id in {"late_pregnancy", "labor_recognition"}:
         phase["actions"].append("你是第一胎，可以提前让支持人也看一遍入院流程和临产信号，避免到时只靠你一个人判断。")
-    if first_birth == "否" and phase_id in {"cards_ready", "departure_ready"}:
+    if first_birth == "否" and phase_id == "late_pregnancy":
         phase["actions"].append("提前安排大宝接送、陪伴和夜间照护，临产时不要临时找人。")
-    if any(token in fetus_count for token in ("双", "多", "三")) and phase_id in {"foundation", "departure_ready"}:
+    if any(token in fetus_count for token in ("双", "多", "三")) and phase_id == "late_pregnancy":
         phase["watchouts"].append("你是多胎，产检和入院节奏更要按医生给出的安排来，别用单胎时间表硬套。")
-    if "剖" in birth_path and phase_id in {"cards_ready", "hospital_birth", "home_week"}:
+    if "剖" in birth_path and phase_id in {"late_pregnancy", "hospital_birth", "postpartum"}:
         phase["actions"].append("你是剖宫产，提前问清术前禁食、入院时间、住院天数和术后下床/伤口护理口径。")
-    if any(token in feeding for token in ("母乳", "混合", "纯泵")) and phase_id in {"hospital_birth", "home_week", "postpartum_review"}:
+    if any(token in feeding for token in ("母乳", "混合", "纯泵")) and phase_id in {"hospital_birth", "postpartum"}:
         phase["actions"].append("你希望母乳或混合喂养，入院后可以尽早确认含乳、涨奶处理和 IBCLC/泌乳顾问支持。")
-    if birth_setting and phase_id in {"foundation", "departure_ready"}:
+    if birth_setting and phase_id == "late_pregnancy":
         phase["actions"].append(f"围绕{birth_setting}确认预登记、陪产、探视、夜间入口和停车/打车规则。")
-    if support and phase_id in {"departure_ready", "home_week"}:
+    if support and phase_id in {"late_pregnancy", "postpartum"}:
         phase["actions"].append(f"把{support}要负责的事提前写下来：出发、联系医院、记录、夜间照护和补给。")
-    if medical_notes and phase_id in {"foundation", "cards_ready"}:
+    if medical_notes and phase_id in {"mid_pregnancy", "late_pregnancy"}:
         phase["watchouts"].append("医生已经提醒过的特殊情况要以医院方案为准，产检时把后续观察和入院时机问清楚。")
 
 

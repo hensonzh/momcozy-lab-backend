@@ -33,9 +33,8 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         self.assertEqual(card["owner"]["estimated_due_date"], "2026/09/13")
 
         phases = card["phases"]
-        self.assertGreaterEqual(len(phases), 5)
+        self.assertEqual([phase["title"] for phase in phases], ["孕中期", "孕晚期", "临产期", "住院期", "产后期"])
         self.assertEqual(sum(phase["status"] == "current" for phase in phases), 1)
-        self.assertEqual(phases[0]["title"], "确认医院")
         self.assertIn("约 2026/05/31", phases[0]["date_range"])
         self.assertTrue(all(phase.get("goal") and phase.get("watchouts") and phase.get("actions") for phase in phases))
 
