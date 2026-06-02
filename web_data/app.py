@@ -96,18 +96,23 @@ def create_app(db_path: str | Path | None = None, file_root: str | Path | None =
         reminder_type = str(payload.get("reminder_type") or payload.get("type") or "").strip()
         if not reminder_type:
             raise HTTPException(status_code=400, detail={"message": "reminder_type is required"})
+        user_id = str(payload.get("user_id") or "").strip()
+        if not user_id:
+            raise HTTPException(status_code=400, detail={"message": "user_id is required"})
 
         notification = {
+            "user_id": user_id,
             "reminder_type": reminder_type,
             "title": str(payload.get("title", "")),
             "message": str(payload.get("message", "")),
             "data": payload.get("data", {}),
             "reported_at": int(time.time()),
         }
-        await request.app.state.ws_manager.broadcast(
+        delivered = await request.app.state.ws_manager.send_to_user(
+            user_id,
             {"type": "notification.reported", "payload": notification}
         )
-        return {"reported": True, "notification": notification}
+        return {"reported": True, "delivered": delivered, "notification": notification}
 
     @app.get("/api/db/tables")
     async def list_tables(request: Request, _: dict[str, Any] = Depends(require_session)) -> dict[str, Any]:
@@ -339,11 +344,15 @@ def create_app(db_path: str | Path | None = None, file_root: str | Path | None =
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             return
 
+        user_id = _websocket_user_id(websocket)
         manager = websocket.app.state.ws_manager
-        await manager.connect(websocket)
+        await manager.connect(websocket, user_id=user_id)
         try:
             await websocket.send_json(
-                {"type": "connection.accepted", "payload": {"token_required": bool(websocket.app.state.ws_token)}}
+                {
+                    "type": "connection.accepted",
+                    "payload": {"token_required": bool(websocket.app.state.ws_token), "user_id": user_id},
+                }
             )
             while True:
                 raw_message = await websocket.receive_text()
@@ -360,13 +369,25 @@ def create_app(db_path: str | Path | None = None, file_root: str | Path | None =
 class WebDataConnectionManager:
     def __init__(self) -> None:
         self._connections: set[WebSocket] = set()
+        self._connection_user_ids: dict[WebSocket, str] = {}
+        self._user_connections: dict[str, set[WebSocket]] = {}
 
-    async def connect(self, websocket: WebSocket) -> None:
+    async def connect(self, websocket: WebSocket, *, user_id: str = "") -> None:
         await websocket.accept()
         self._connections.add(websocket)
+        if user_id:
+            self._connection_user_ids[websocket] = user_id
+            self._user_connections.setdefault(user_id, set()).add(websocket)
 
     def disconnect(self, websocket: WebSocket) -> None:
         self._connections.discard(websocket)
+        user_id = self._connection_user_ids.pop(websocket, "")
+        if user_id:
+            user_connections = self._user_connections.get(user_id)
+            if user_connections is not None:
+                user_connections.discard(websocket)
+                if not user_connections:
+                    self._user_connections.pop(user_id, None)
 
     async def broadcast(self, message: dict[str, Any]) -> None:
         stale_connections: list[WebSocket] = []
@@ -377,6 +398,19 @@ class WebDataConnectionManager:
                 stale_connections.append(websocket)
         for websocket in stale_connections:
             self.disconnect(websocket)
+
+    async def send_to_user(self, user_id: str, message: dict[str, Any]) -> int:
+        delivered = 0
+        stale_connections: list[WebSocket] = []
+        for websocket in list(self._user_connections.get(user_id, set())):
+            try:
+                await websocket.send_json(message)
+                delivered += 1
+            except Exception:
+                stale_connections.append(websocket)
+        for websocket in stale_connections:
+            self.disconnect(websocket)
+        return delivered
 
 
 async def _handle_websocket_message(websocket: WebSocket, raw_message: str) -> None:
@@ -446,6 +480,18 @@ def _verify_websocket_token(websocket: WebSocket) -> bool:
             return True
 
     return False
+
+
+def _websocket_user_id(websocket: WebSocket) -> str:
+    query_user_id = (websocket.query_params.get("user_id") or "").strip()
+    if query_user_id:
+        return query_user_id
+
+    header_user_id = (websocket.headers.get("x-web-data-user-id") or "").strip()
+    if header_user_id:
+        return header_user_id
+
+    return ""
 
 
 def _verify_request_token(request: Request) -> bool:

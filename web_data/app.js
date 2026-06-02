@@ -422,13 +422,14 @@ async function reportNotification(event) {
       headers,
       suppressAuthRedirect: true,
       body: JSON.stringify({
+        user_id: $("notification-user-id").value.trim(),
         reminder_type: $("notification-type").value,
         title: $("notification-title").value,
         message: $("notification-message").value,
         data,
       }),
     });
-    $("notification-status").textContent = `已上报：${response.notification.reminder_type}`;
+    $("notification-status").textContent = `已上报：${response.notification.reminder_type}，已投递 ${response.delivered} 个连接`;
   } catch (error) {
     $("notification-error").textContent = error instanceof SyntaxError ? "扩展数据必须是合法 JSON" : error.message;
   } finally {

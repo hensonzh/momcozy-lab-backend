@@ -46,10 +46,11 @@ class WebDataAppTests(unittest.TestCase):
         self.assertEqual(response.json(), {"authenticated": False})
 
     def test_websocket_connects_without_login_when_token_is_not_configured(self) -> None:
-        with self.client.websocket_connect("/api/ws") as websocket:
+        with self.client.websocket_connect("/api/ws?user_id=user-1") as websocket:
             accepted = websocket.receive_json()
             self.assertEqual(accepted["type"], "connection.accepted")
             self.assertEqual(accepted["payload"]["token_required"], False)
+            self.assertEqual(accepted["payload"]["user_id"], "user-1")
 
             websocket.send_json({"type": "ping", "request_id": "ping-1"})
             pong = websocket.receive_json()
@@ -99,29 +100,39 @@ class WebDataAppTests(unittest.TestCase):
         self.assertEqual(event["payload"]["table"], "test_items")
         self.assertEqual(event["payload"]["row"]["name"], "first")
 
-    def test_notification_report_broadcasts_to_websocket_without_login(self) -> None:
-        with self.client.websocket_connect("/api/ws") as websocket:
-            websocket.receive_json()
-            response = self.client.post(
-                "/api/notifications/report",
-                json={
-                    "reminder_type": "feeding_due",
-                    "title": "Feeding reminder",
-                    "message": "Bottle is due",
-                    "data": {"infant_id": "baby-1"},
-                },
-            )
-            event = websocket.receive_json()
+    def test_notification_report_sends_to_target_user_websocket_without_login(self) -> None:
+        with self.client.websocket_connect("/api/ws?user_id=user-1") as user_websocket:
+            user_websocket.receive_json()
+            with self.client.websocket_connect("/api/ws?user_id=other-user") as other_websocket:
+                other_websocket.receive_json()
+                response = self.client.post(
+                    "/api/notifications/report",
+                    json={
+                        "user_id": "user-1",
+                        "reminder_type": "feeding_due",
+                        "title": "Feeding reminder",
+                        "message": "Bottle is due",
+                        "data": {"infant_id": "baby-1"},
+                    },
+                )
+                event = user_websocket.receive_json()
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["reported"], True)
+        self.assertEqual(response.json()["delivered"], 1)
         self.assertEqual(event["type"], "notification.reported")
+        self.assertEqual(event["payload"]["user_id"], "user-1")
         self.assertEqual(event["payload"]["reminder_type"], "feeding_due")
         self.assertEqual(event["payload"]["data"], {"infant_id": "baby-1"})
         self.assertIn("reported_at", event["payload"])
 
     def test_notification_report_requires_reminder_type(self) -> None:
-        response = self.client.post("/api/notifications/report", json={"message": "missing type"})
+        response = self.client.post("/api/notifications/report", json={"user_id": "user-1", "message": "missing type"})
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_notification_report_requires_user_id(self) -> None:
+        response = self.client.post("/api/notifications/report", json={"reminder_type": "feeding_due"})
 
         self.assertEqual(response.status_code, 400)
 
@@ -131,20 +142,20 @@ class WebDataAppTests(unittest.TestCase):
         with patch.dict(os.environ, {"WEB_DATA_WS_TOKEN": "secret-token"}):
             client = TestClient(create_app(db_path=self.db_path, file_root=self.file_root))
 
-        missing = client.post("/api/notifications/report", json={"reminder_type": "feeding_due"})
+        missing = client.post("/api/notifications/report", json={"user_id": "user-1", "reminder_type": "feeding_due"})
         self.assertEqual(missing.status_code, 401)
 
         wrong = client.post(
             "/api/notifications/report",
             headers={"Authorization": "Bearer wrong"},
-            json={"reminder_type": "feeding_due"},
+            json={"user_id": "user-1", "reminder_type": "feeding_due"},
         )
         self.assertEqual(wrong.status_code, 401)
 
         good = client.post(
             "/api/notifications/report",
             headers={"Authorization": "Bearer secret-token"},
-            json={"type": "feeding_due", "message": "ok"},
+            json={"user_id": "user-1", "type": "feeding_due", "message": "ok"},
         )
         self.assertEqual(good.status_code, 200)
         self.assertEqual(good.json()["notification"]["reminder_type"], "feeding_due")
@@ -302,6 +313,7 @@ class WebDataAppTests(unittest.TestCase):
 
         self.assertIn("notifications-view", index_html)
         self.assertIn("notification-form", index_html)
+        self.assertIn("notification-user-id", index_html)
         self.assertIn("task_reminder", index_html)
         self.assertIn("lactation_feeding_reminder", index_html)
         self.assertIn("daily_summary_reminder", index_html)
