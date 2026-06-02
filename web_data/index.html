@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Momcozy 数据管理后台</title>
-    <link rel="stylesheet" href="/static/styles.css?v=20260521-hidden-fix" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260601-notifications" />
   </head>
   <body>
     <main class="app-shell">
@@ -37,6 +37,7 @@
           <button class="tab active" data-view="core-view" type="button">核心数据</button>
           <button class="tab" data-view="tables-view" type="button">全部表</button>
           <button class="tab" data-view="files-view" type="button">配置文件</button>
+          <button class="tab" data-view="notifications-view" type="button">消息提醒</button>
         </nav>
 
         <section id="core-view" class="view active-view">
@@ -97,6 +98,50 @@
             </article>
           </div>
         </section>
+
+        <section id="notifications-view" class="view">
+          <form id="notification-form" class="notification-panel">
+            <h2>消息提醒上报</h2>
+            <div class="notification-grid">
+              <label>
+                用户 ID
+                <input id="notification-user-id" placeholder="例如：user-001" autocomplete="off" required />
+              </label>
+              <label>
+                消息提醒类型
+                <select id="notification-type" required>
+                  <option value="task_reminder">任务提醒</option>
+                  <option value="lactation_feeding_reminder">泌乳及喂养提醒</option>
+                  <option value="daily_summary_reminder">每日小结提醒</option>
+                  <option value="baby_growth_update_reminder">宝宝生长发育更新提醒</option>
+                </select>
+              </label>
+              <label>
+                WebSocket Token
+                <input id="notification-token" placeholder="未配置 WEB_DATA_WS_TOKEN 时可留空" autocomplete="off" />
+              </label>
+            </div>
+            <label>
+              标题
+              <input id="notification-title" placeholder="例如：今日喂养提醒" />
+            </label>
+            <label>
+              消息内容
+              <textarea id="notification-message" rows="4" placeholder="输入要推送给客户端的提醒内容"></textarea>
+            </label>
+            <label>
+              扩展数据 JSON
+              <textarea id="notification-data" rows="8" spellcheck="false">{
+  "source": "web_data"
+}</textarea>
+            </label>
+            <div class="notification-actions">
+              <button id="notification-submit" type="submit">上报消息提醒</button>
+              <span id="notification-status"></span>
+            </div>
+            <p id="notification-error" class="error-text"></p>
+          </form>
+        </section>
       </section>
     </main>
 
@@ -131,6 +176,6 @@
       </form>
     </dialog>
 
-    <script src="/static/app.js?v=20260521-bulk-select"></script>
+    <script src="/static/app.js?v=20260601-notifications"></script>
   </body>
 </html>

@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+import os
 import sqlite3
 import unittest
 import uuid
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 
 class WebDataAppTests(unittest.TestCase):
     def setUp(self) -> None:
+        self.env_patcher = patch.dict(os.environ, {"WEB_DATA_WS_TOKEN": ""})
+        self.env_patcher.start()
         test_tmp = Path.cwd() / "data" / "test_tmp"
         test_tmp.mkdir(parents=True, exist_ok=True)
         self.root = test_tmp / f"momcozy-web-data-tests-{uuid.uuid4().hex}"
@@ -20,6 +25,9 @@ class WebDataAppTests(unittest.TestCase):
         from web_data.app import create_app
 
         self.client = TestClient(create_app(db_path=self.db_path, file_root=self.file_root))
+
+    def tearDown(self) -> None:
+        self.env_patcher.stop()
 
     def login(self) -> None:
         response = self.client.post("/api/login", json={"username": "admin", "password": "admin123"})
@@ -36,6 +44,121 @@ class WebDataAppTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"authenticated": False})
+
+    def test_websocket_connects_without_login_when_token_is_not_configured(self) -> None:
+        with self.client.websocket_connect("/api/ws?user_id=user-1") as websocket:
+            accepted = websocket.receive_json()
+            self.assertEqual(accepted["type"], "connection.accepted")
+            self.assertEqual(accepted["payload"]["token_required"], False)
+            self.assertEqual(accepted["payload"]["user_id"], "user-1")
+
+            websocket.send_json({"type": "ping", "request_id": "ping-1"})
+            pong = websocket.receive_json()
+
+        self.assertEqual(pong["type"], "pong")
+        self.assertEqual(pong["request_id"], "ping-1")
+        self.assertIn("server_time", pong["payload"])
+
+    def test_websocket_requires_token_when_configured(self) -> None:
+        from web_data.app import create_app
+
+        with patch.dict(os.environ, {"WEB_DATA_WS_TOKEN": "secret-token"}):
+            client = TestClient(create_app(db_path=self.db_path, file_root=self.file_root))
+
+        with self.assertRaises(WebSocketDisconnect):
+            with client.websocket_connect("/api/ws"):
+                pass
+
+        with self.assertRaises(WebSocketDisconnect):
+            with client.websocket_connect("/api/ws?token=wrong"):
+                pass
+
+        with client.websocket_connect("/api/ws?token=secret-token") as websocket:
+            accepted = websocket.receive_json()
+            self.assertEqual(accepted["type"], "connection.accepted")
+            self.assertEqual(accepted["payload"]["token_required"], True)
+
+            websocket.send_json({"type": "echo", "request_id": "echo-1", "payload": {"ok": True}})
+            echo = websocket.receive_json()
+
+        self.assertEqual(echo, {"type": "echo", "request_id": "echo-1", "payload": {"ok": True}})
+
+    def test_websocket_receives_db_change_events(self) -> None:
+        self.login()
+        self._create_test_table()
+
+        with self.client.websocket_connect("/api/ws") as websocket:
+            websocket.receive_json()
+            create = self.client.post(
+                "/api/db/tables/test_items/rows",
+                json={"id": 1, "name": "first", "quantity": 2},
+            )
+            event = websocket.receive_json()
+
+        self.assertEqual(create.status_code, 200)
+        self.assertEqual(event["type"], "db.row.created")
+        self.assertEqual(event["payload"]["table"], "test_items")
+        self.assertEqual(event["payload"]["row"]["name"], "first")
+
+    def test_notification_report_sends_to_target_user_websocket_without_login(self) -> None:
+        with self.client.websocket_connect("/api/ws?user_id=user-1") as user_websocket:
+            user_websocket.receive_json()
+            with self.client.websocket_connect("/api/ws?user_id=other-user") as other_websocket:
+                other_websocket.receive_json()
+                response = self.client.post(
+                    "/api/notifications/report",
+                    json={
+                        "user_id": "user-1",
+                        "reminder_type": "feeding_due",
+                        "title": "Feeding reminder",
+                        "message": "Bottle is due",
+                        "data": {"infant_id": "baby-1"},
+                    },
+                )
+                event = user_websocket.receive_json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["reported"], True)
+        self.assertEqual(response.json()["delivered"], 1)
+        self.assertEqual(event["type"], "notification.reported")
+        self.assertEqual(event["payload"]["user_id"], "user-1")
+        self.assertEqual(event["payload"]["reminder_type"], "feeding_due")
+        self.assertEqual(event["payload"]["data"], {"infant_id": "baby-1"})
+        self.assertIn("reported_at", event["payload"])
+
+    def test_notification_report_requires_reminder_type(self) -> None:
+        response = self.client.post("/api/notifications/report", json={"user_id": "user-1", "message": "missing type"})
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_notification_report_requires_user_id(self) -> None:
+        response = self.client.post("/api/notifications/report", json={"reminder_type": "feeding_due"})
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_notification_report_requires_token_when_configured(self) -> None:
+        from web_data.app import create_app
+
+        with patch.dict(os.environ, {"WEB_DATA_WS_TOKEN": "secret-token"}):
+            client = TestClient(create_app(db_path=self.db_path, file_root=self.file_root))
+
+        missing = client.post("/api/notifications/report", json={"user_id": "user-1", "reminder_type": "feeding_due"})
+        self.assertEqual(missing.status_code, 401)
+
+        wrong = client.post(
+            "/api/notifications/report",
+            headers={"Authorization": "Bearer wrong"},
+            json={"user_id": "user-1", "reminder_type": "feeding_due"},
+        )
+        self.assertEqual(wrong.status_code, 401)
+
+        good = client.post(
+            "/api/notifications/report",
+            headers={"Authorization": "Bearer secret-token"},
+            json={"user_id": "user-1", "type": "feeding_due", "message": "ok"},
+        )
+        self.assertEqual(good.status_code, 200)
+        self.assertEqual(good.json()["notification"]["reminder_type"], "feeding_due")
 
     def test_login_accepts_default_credentials_and_rejects_bad_password(self) -> None:
         bad = self.client.post("/api/login", json={"username": "admin", "password": "wrong"})
@@ -183,6 +306,21 @@ class WebDataAppTests(unittest.TestCase):
         self.assertIn("data-action=\"select-row\"", app_js)
         self.assertIn("deleteSelectedRows(kind)", app_js)
         self.assertIn("updateSelectionToolbar(prefix, kind)", app_js)
+
+    def test_notification_report_ui_is_available(self) -> None:
+        app_js = (Path.cwd() / "web_data" / "app.js").read_text(encoding="utf-8", errors="replace")
+        index_html = (Path.cwd() / "web_data" / "index.html").read_text(encoding="utf-8")
+
+        self.assertIn("notifications-view", index_html)
+        self.assertIn("notification-form", index_html)
+        self.assertIn("notification-user-id", index_html)
+        self.assertIn("task_reminder", index_html)
+        self.assertIn("lactation_feeding_reminder", index_html)
+        self.assertIn("daily_summary_reminder", index_html)
+        self.assertIn("baby_growth_update_reminder", index_html)
+        self.assertIn("reportNotification", app_js)
+        self.assertIn("/api/notifications/report", app_js)
+        self.assertIn("X-Web-Data-Ws-Token", app_js)
 
     def _create_test_table(self) -> None:
         with sqlite3.connect(self.db_path) as conn:
