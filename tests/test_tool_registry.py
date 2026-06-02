@@ -42,13 +42,49 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertIn("只提供 3 个短提示", description)
         self.assertIn("不能绕过保存、提交、替换、转接等确认流程", description)
 
+    def test_runtime_tools_do_not_expose_generic_form_tool(self) -> None:
+        tool_names = {
+            str(tool.get("name"))
+            for tool in select_runtime_tools()
+            if tool.get("type") == "function"
+        }
+
+        self.assertNotIn("ui_form_create", tool_names)
+        self.assertNotIn("birth_plan_form_create", tool_names)
+        self.assertNotIn("labor_communication_card_create", tool_names)
+        self.assertNotIn("birth_journey_plan_card_create", tool_names)
+        self.assertNotIn("hospital_bag_form_create", tool_names)
+        self.assertNotIn("hospital_bag_card_create", tool_names)
+
+    def test_runtime_tools_defer_birth_prep_artifact_tools(self) -> None:
+        namespaces = {
+            str(tool.get("name")): tool
+            for tool in select_runtime_tools()
+            if tool.get("type") == "namespace"
+        }
+
+        self.assertIn("birth_prep", namespaces)
+        tool_names = [tool["name"] for tool in namespaces["birth_prep"]["tools"]]
+        self.assertEqual(
+            tool_names,
+            [
+                "birth_plan_form_create",
+                "labor_communication_card_create",
+                "birth_journey_plan_card_create",
+                "hospital_bag_form_create",
+                "hospital_bag_card_create",
+            ],
+        )
+        self.assertTrue(all(tool["defer_loading"] for tool in namespaces["birth_prep"]["tools"]))
+
     def test_deferred_namespace_descriptions_include_boundaries(self) -> None:
         expected_tokens = {
             "care_handoffs": ("已经决定转接", "不要用于", "设备售后工单"),
             "device_support": ("已经拥有或正在使用", "不要用于购买前型号选型", "奶量记录"),
             "milk_management": ("用户自身", "不要用于吸奶器型号购买选型", "设备故障排查"),
-            "hospital_bag_cart": ("已经进入待产包购物车", "不要用于生成待产包卡片", "独立吸奶器型号选型"),
+            "hospital_bag_cart": ("已经进入待产包购物车", "不要用于生成待产包清单", "独立吸奶器型号选型"),
             "pump_recommendation": ("购买前", "不要用于已购设备故障", "购物车直接修改"),
+            "birth_prep": ("具体产物流程", "不要用于普通孕期问答", "必须已有对应确认信息"),
         }
 
         for namespace, tokens in expected_tokens.items():
@@ -63,7 +99,7 @@ class ToolRegistryTests(unittest.TestCase):
             "support_ticket_draft_create": ("不会对外提交", "device_manual_search", "不要用于普通操作指导"),
             "milk_snapshot_get": ("不要用它替代 milk_status_query", "milk_assessment_evaluate", "milk_plan_query"),
             "milk_status_query": ("不要用它替代 milk_assessment_evaluate", "milk_records_query"),
-            "hospital_bag_cart_update": ("current_hospital_bag_cart", "不要用于首次生成待产包卡片", "独立吸奶器型号选型"),
+            "hospital_bag_cart_update": ("current_hospital_bag_cart", "不要用于首次生成待产包清单", "独立吸奶器型号选型"),
             "hospital_bag_pump_recommend": ("购买前选型工具", "不要用于已购设备故障", "milk_management"),
         }
 

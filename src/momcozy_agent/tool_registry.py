@@ -37,13 +37,7 @@ SKILL_RUNTIME_TOOLS: list[ToolName] = ["list_skills", "load_skill", "search_skil
 CORE_IMMEDIATE_TOOLS: list[ToolName] = [
     *ALWAYS_ON_TOOLS,
     *SKILL_RUNTIME_TOOLS,
-    "ui_form_create",
     "ui_quick_replies_create",
-    "birth_plan_form_create",
-    "labor_communication_card_create",
-    "birth_journey_plan_card_create",
-    "hospital_bag_form_create",
-    "hospital_bag_card_create",
     "ibclc_consult_card_create",
 ]
 MILK_MANAGEMENT_TOOLS: list[ToolName] = [
@@ -90,12 +84,22 @@ DEFERRED_TOOL_NAMESPACES: dict[str, dict[str, Any]] = {
         "tool_names": MILK_MANAGEMENT_TOOLS,
     },
     "hospital_bag_cart": {
-        "description": "用于当前对话已经进入待产包购物车后的购物车调整：预算上限优化、删除或加回商品、基础款替换、医院提供、家里已有、数量调整，以及把已推荐的 Momcozy 吸奶器型号同步到购物车。不要用于生成待产包卡片、独立吸奶器型号选型或设备排障。",
+        "description": "用于当前对话已经进入待产包购物车后的购物车调整：预算上限优化、删除或加回商品、基础款替换、医院提供、家里已有、数量调整，以及把已推荐的 Momcozy 吸奶器型号同步到购物车。不要用于生成待产包清单、独立吸奶器型号选型或设备排障。",
         "tool_names": ["hospital_bag_cart_update"],
     },
     "pump_recommendation": {
         "description": "用于购买前的 Momcozy 吸奶器型号选型、价格比较和按使用场景推荐。用户单独询问哪款吸奶器适合自己、型号差异、预算内怎么选、某型号多少钱或点名追问某型号时使用。Air 1 属于高价轻薄款，不能作为降预算选择描述。不要用于已购设备故障/说明书问题、奶量是否正常或购物车直接修改。",
         "tool_names": ["hospital_bag_pump_recommend"],
+    },
+    "birth_prep": {
+        "description": "用于产前准备服务已经进入具体产物流程后的专用表单和结构化内容：生产全过程计划、待产包清单、分娩沟通单。不要用于普通孕期问答；创建待产包表单前必须已通过对话收集规定基础字段；生成结构化内容前必须已有对应确认信息。",
+        "tool_names": [
+            "birth_plan_form_create",
+            "labor_communication_card_create",
+            "birth_journey_plan_card_create",
+            "hospital_bag_form_create",
+            "hospital_bag_card_create",
+        ],
     },
 }
 

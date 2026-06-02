@@ -155,6 +155,8 @@ input = [
 
 工具返回的本地资源 URL 不会被模型自动访问。对 `device_manual_search.relevant_images` 这类官方步骤图，agent loop 先把图片元数据记录到 `ContextState.available_tool_images`；当最终回复实际展示 Markdown 图片时，再记录 `last_displayed_tool_image`、`active_device_module` 和 `shown_step_image_urls`。后续用户明确询问“图上/这张图/对照图/标注/哪个部件”等需要读图的问题时，下一轮模型请求优先参考 `last_displayed_tool_image`，避免从历史图片里用相同编号误猜；必要时才把最多 2 张 `/skill-assets/...` 白名单图片转为 `data:image/...` 的 `input_image`。该能力只读取 `skills/{skill_id}/assets` 下的图片文件，不处理外部 URL、PDF、视频或任意路径；如果当前用户消息已经附带上传图片，则优先用户上传图片，不再自动附加官方步骤图。结构化工具字段仍优先于视觉读取；图片输入只用于补充读取图中文字、标注和部件位置。
 
+产前准备的待产包基础字段会记录在 `ContextState.birth_prep_slots`。当用户按一问一答补充孕周/预产期、复工或外出计划、预算偏好和最担心的问题时，后端保存这些字段，并在 `hospital_bag_form_create` 时自动合并到 `default_values`，避免模型漏传导致表单没有预填。
+
 后续请求依赖 `previous_response_id` 延续对话状态。
 
 ## Skill Selection
@@ -305,10 +307,7 @@ message_sent_at: 2026-05-05T17:45:03+08:00
 - `search_skill_assets`
 - `read_skill_file`
 - `run_approved_skill_script`
-- `ui_form_create`
-- `labor_communication_card_create`
-- `birth_journey_plan_card_create`
-- `hospital_bag_card_create`
+- `ui_quick_replies_create`
 - `ibclc_consult_card_create`
 
 ### Deferred Business Namespaces
@@ -318,8 +317,9 @@ message_sent_at: 2026-05-05T17:45:03+08:00
 - `care_handoffs`：`handoff_summary_generate`，只用于已经决定转接人工或专业支持后的交接摘要；不用于普通建议、设备售后工单、设备排障或购物车调整
 - `device_support`：`device_manual_search`、`support_ticket_draft_create`，用于已购/正在使用的 Momcozy 吸奶器或设备说明书、FAQ、排障和售后工单草稿；不用于购买前选型、奶量计划或待产包购物车
 - `milk_management`：聚合后的奶量工具，包括 `milk_snapshot_get`、`milk_records_query`、`milk_record_mutate`、`milk_plan_query`、`milk_plan_preview`、`milk_plan_mutate`、`milk_calendar_query`、`milk_calendar_change_preview`、`milk_calendar_mutate`，以及评估类 `milk_assessment_evaluate`、`infant_growth_evaluate`；用于用户自身奶量、喂养、宝宝生长和 calendar 数据，不用于吸奶器选型、设备排障或购物车调整
-- `hospital_bag_cart`：待产包购物车工具 `hospital_bag_cart_update`，用于已经进入待产包购物车后的预算上限优化、删除/加回、基础款替换、医院提供、家里已有、数量调整，以及把已推荐的 Momcozy 吸奶器型号同步到购物车；不用于生成待产包卡片、独立吸奶器选型或设备排障
+- `hospital_bag_cart`：待产包购物车工具 `hospital_bag_cart_update`，用于已经进入待产包购物车后的预算上限优化、删除/加回、基础款替换、医院提供、家里已有、数量调整，以及把已推荐的 Momcozy 吸奶器型号同步到购物车；不用于生成待产包清单、独立吸奶器选型或设备排障
 - `pump_recommendation`：吸奶器型号选型工具 `hospital_bag_pump_recommend`，用于购买前 Momcozy 吸奶器推荐、型号对比、预算内选择，也可在待产包场景里先选型再同步购物车；不用于已购设备故障/说明书、奶量是否正常或直接修改购物车
+- `birth_prep`：产前准备专用产物工具，包括 `birth_plan_form_create`、`labor_communication_card_create`、`birth_journey_plan_card_create`、`hospital_bag_form_create`、`hospital_bag_card_create`；用于已经进入生产全过程计划、待产包清单或分娩沟通单流程后的表单/结构化内容生成，不用于普通孕期问答
 
 每个 namespace 中的 function 都设置 `defer_loading: true`。模型开始时只看到 namespace 名称和描述；需要具体工具时由 `tool_search` 加载对应 function schema。
 
@@ -327,8 +327,8 @@ message_sent_at: 2026-05-05T17:45:03+08:00
 
 - 读类工具从 runtime inputs 返回数据或空结果。
 - milk-management 工具从 runtime inputs 注入 `user_id`，模型不需要也不应该提供用户 ID。
-- `ui_form_create` 返回前端可渲染的 form spec。
-- 专用卡片工具返回前端可渲染的 card artifact；前端根据 `card_type` 和 `schema_version` 选择组件。
+- 专用表单工具返回前端可渲染的 form spec。通用 `ui_form_create` handler 仍保留兼容旧流程，但不在 runtime tools 中直接暴露。
+- 专用 card 工具返回前端可渲染的 card artifact；前端根据 `card_type` 和 `schema_version` 选择组件。待产包清单和分娩沟通单工具只接受应用侧注入的对应表单提交数据，不能靠模型参数伪造确认结果。用户可见服务名称不使用“卡片”，该词只描述内部渲染形态。
 - 尚未接入真实后端的提醒、booking、case 创建等占位工具当前不暴露给模型。
 
 ### Tool Responsibility Boundary
@@ -387,7 +387,7 @@ Work panel 的首个可见进度由 Responses streaming function-call 事件驱�
 
 测试前端支持在 composer 中附加最多 4 张图片。图片会作为当前用户消息的一部分发送给模型；前端仅做本地预览，不把图片当作工具结果或长期状态保存。
 
-当工具结果是 `ui_form_create` 时，前端渲染表单。当前测试前端可以把表单提交转换成用户消息回传，但生产方案应使用结构化 application event，不依赖模型从自然语言里猜测这是不是已确认表单数据。
+当工具结果包含 `form` 时，前端渲染表单。当前测试前端可以把表单提交转换成用户消息回传，但生产方案应使用结构化 application event，不依赖模型从自然语言里猜测这是不是已确认表单数据。
 
 ### 表单提交契约
 
@@ -425,47 +425,49 @@ confirmed_form_data:
 }
 ```
 
-模型看到 `confirmed_form_data` 后，可以把这些字段视为用户已确认的信息，并进入对应卡片生成步骤。除非字段明显冲突、不安全，或缺少生成卡片所必需的信息，否则不要重复询问同一组表单问题。
+模型看到 `confirmed_form_data` 后，可以把这些字段视为用户已确认的信息，并进入对应结构化内容生成步骤。除非字段明显冲突、不安全，或缺少生成对应内容所必需的信息，否则不要重复询问同一组表单问题。
 
 推荐链路：
 
 ```text
-ui_form_create tool result
+birth_plan_form_create / hospital_bag_form_create tool result
   -> 前端渲染表单
   -> 用户提交表单
   -> 前端发送 form.submit structured event
   -> 后端校验 form_id 并包装 confirmed_form_data
   -> 当前轮 Responses input 携带 confirmed_form_data
-  -> 模型调用对应专用卡片工具生成 card artifact
+  -> 模型调用对应专用 card 工具生成 card artifact
 ```
 
 ## Birth Prep 当前服务流程
 
-`birth-prep` skill 当前提供两个服务：
+`birth-prep` skill 当前提供生产全过程计划、待产包清单和分娩沟通单三个产物服务：
 
-两项服务都采用同一个产物机制：
+待产包清单和分娩沟通单采用同一个表单确认机制：
 
 ```text
-ui_form_create
+专用表单工具
   -> 用户确认表单
   -> 后端注入 confirmed_form_data
-  -> LLM 调用对应专用卡片工具
+  -> LLM 调用对应专用 card 工具
   -> 前端按 card.card_json 渲染 HTML/移动端卡片
   -> 可选导出 PNG/PDF
 ```
 
 `card.card_json` 是系统内部和前端渲染的真实数据源。HTML、PNG、PDF 都只是展示或分享载体。
 
-### Birth Plan Card
+生产全过程计划不走表单，但生成前必须先确认孕期、分娩方式和主要支持人；缺信息时 handler 返回 `needs_required_context`，不产生 artifact。
+
+### 分娩沟通单
 
 流程：
 
-1. 用户表达分娩沟通、生产偏好、birth plan card 等意图。
+1. 用户表达分娩沟通、生产偏好、给医护看的沟通内容等意图。
 2. 模型基于 manifest 调用 `load_skill("birth-prep")`。
 3. skill 要求先调用 `birth_plan_form_create` 生成前端表单。
 4. 用户确认表单后，模型调用 `labor_communication_card_create`。
-5. 前端用 `card.card_json` 渲染可分享 Birth Plan Card。
-6. 输出应强调这是沟通卡片，不替代医院或临床决策。
+5. 前端用 `card.card_json` 渲染可分享分娩沟通单。
+6. 输出应强调这是沟通单，不替代医院或临床决策。
 
 核心结构包括：
 
@@ -485,10 +487,10 @@ ui_form_create
 
 1. 用户表达待产包、入院准备等意图。
 2. 模型加载 `birth-prep`。
-3. 首轮先做服务邀约，说明会快速确认几项信息来生成更有针对性的待产包卡片。
-4. 用户确认开始后，模型读取待产包 reference，复用对话上下文或 `profile_get` 中已知信息，并通过字段 `default_value` 预填待产包 intake form。
+3. 首轮先做服务邀约，说明会快速确认几项信息来生成更有针对性的待产包清单。
+4. 用户确认开始后，先通过对话确认孕周/预产期、复工/外出计划、预算偏好和最担心的问题，再把这些字段作为 `default_values` 传给 `hospital_bag_form_create`。
 5. 用户确认表单后，模型调用 `hospital_bag_card_create`。
-6. 前端用 `card.card_json` 渲染待产包卡片。
+6. 前端用 `card.card_json` 渲染待产包清单。
 
 核心结构包括：
 

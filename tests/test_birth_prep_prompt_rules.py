@@ -1,0 +1,169 @@
+from __future__ import annotations
+
+import unittest
+from pathlib import Path
+
+from momcozy_agent.agents import _record_birth_prep_tool_state, model_tool_output
+from momcozy_agent.contexts import (
+    ContextState,
+    build_request_context,
+    capture_birth_prep_user_message,
+    hospital_bag_slots,
+    record_birth_prep_assistant_message,
+)
+from momcozy_agent.tool_handlers.cards import (
+    create_birth_journey_plan_card,
+    create_hospital_bag_card,
+    create_hospital_bag_form,
+    create_labor_communication_card,
+)
+from momcozy_agent.tool_registry import DEFERRED_TOOL_NAMESPACES
+from momcozy_agent.tool_schemas import FUNCTION_TOOLS
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+class BirthPrepPromptRuleTests(unittest.TestCase):
+    def test_birth_prep_collection_style_avoids_repeating_known_slots(self) -> None:
+        skill = (ROOT / "skills" / "birth-prep" / "SKILL.md").read_text(encoding="utf-8")
+        reference = (ROOT / "skills" / "birth-prep" / "references" / "birth-journey-plan.md").read_text(encoding="utf-8")
+
+        self.assertIn("采用 slot-filling 风格", skill)
+        self.assertIn("不要在下一轮重述上轮已经采集到的信息", skill)
+        self.assertIn("每轮最多问一个缺失字段", skill)
+        self.assertIn("已知字段不要在下一轮重述", reference)
+        self.assertIn("分娩方式这块", reference)
+        self.assertIn("不要说：“你现在 30 周", reference)
+
+    def test_broad_week_preparation_question_is_not_shopping_by_default(self) -> None:
+        skill = (ROOT / "skills" / "birth-prep" / "SKILL.md").read_text(encoding="utf-8")
+
+        self.assertIn("单独的“准备什么/该准备什么”不算物品词", skill)
+        self.assertIn("孕 26 周该准备什么", skill)
+        self.assertIn("不默认进入购买、下单或待产包语义", skill)
+        self.assertIn("产检问题、医院流程、家庭照护和产后支持沟通", skill)
+        self.assertIn("不要主动说买齐、购买、下单或待产包", skill)
+
+    def test_light_birth_prep_answer_must_end_with_one_service_when_intent_is_unclear(self) -> None:
+        skill = (ROOT / "skills" / "birth-prep" / "SKILL.md").read_text(encoding="utf-8")
+
+        self.assertIn("如果妈妈没有表达非常清晰的问题意图", skill)
+        self.assertIn("最终回复的最后一句必须引导三项产前服务中的一个", skill)
+        self.assertIn("不要停在纯建议，也不要同时列出三个服务", skill)
+        self.assertIn("完全没有取向时默认引导生产全过程计划", skill)
+        self.assertIn("临近生产、准备去医院或想先把眼前事情稳住时引导待产包清单", skill)
+        self.assertIn("提到医院、医生、护士、陪产、生产偏好或产房沟通时引导分娩沟通单", skill)
+        self.assertIn("轻问答的服务引导只做邀约，不直接调用工具", skill)
+
+    def test_birth_prep_runtime_wording_does_not_expose_prefill_jargon(self) -> None:
+        runtime_text = "\n".join(
+            [
+                (ROOT / "skills" / "birth-prep" / "SKILL.md").read_text(encoding="utf-8"),
+                (ROOT / "skills" / "birth-prep" / "references" / "hospital-bag-service.md").read_text(encoding="utf-8"),
+                str(DEFERRED_TOOL_NAMESPACES["birth_prep"]["description"]),
+                str(create_hospital_bag_form({"default_values": {"due_date_or_week": "35 周"}}, {"user_message": ""})),
+            ]
+        )
+
+        self.assertNotIn("预采集", runtime_text)
+
+    def test_birth_prep_user_visible_wording_avoids_card_as_service_name(self) -> None:
+        birth_journey_missing = create_birth_journey_plan_card({"plan_context": {}}, {"user_message": ""})
+        birth_journey_compact = model_tool_output(
+            {
+                "ok": True,
+                "tool_name": "birth_journey_plan_card_create",
+                "result": birth_journey_missing,
+            }
+        )
+        runtime_text = "\n".join(
+            [
+                (ROOT / "skills" / "birth-prep" / "SKILL.md").read_text(encoding="utf-8"),
+                (ROOT / "skills" / "birth-prep" / "references" / "hospital-bag-service.md").read_text(encoding="utf-8"),
+                (ROOT / "skills" / "birth-prep" / "references" / "labor-communication-card.md").read_text(encoding="utf-8"),
+                (ROOT / "skills" / "birth-prep" / "references" / "birth-journey-plan.md").read_text(encoding="utf-8"),
+                str(DEFERRED_TOOL_NAMESPACES["birth_prep"]["description"]),
+                str(FUNCTION_TOOLS["birth_plan_form_create"]),
+                str(FUNCTION_TOOLS["labor_communication_card_create"]),
+                str(FUNCTION_TOOLS["birth_journey_plan_card_create"]),
+                str(FUNCTION_TOOLS["hospital_bag_form_create"]),
+                str(FUNCTION_TOOLS["hospital_bag_card_create"]),
+                str(create_hospital_bag_card({}, {"user_message": ""})),
+                str(create_labor_communication_card({}, {"user_message": ""})),
+                str(birth_journey_compact),
+            ]
+        )
+
+        for phrase in (
+            "待产包" + "卡片",
+            "分娩沟通" + "卡片",
+            "生产全过程计划" + "卡片",
+            "生产全计划" + "卡片",
+            "分娩沟通" + "卡",
+            "产房沟通优先级" + "卡片",
+            "这张" + "卡",
+        ):
+            self.assertNotIn(phrase, runtime_text)
+
+        self.assertIn("待产包清单", runtime_text)
+        self.assertIn("分娩沟通单", runtime_text)
+        self.assertIn("生产全过程计划", runtime_text)
+
+    def test_birth_prep_slots_capture_pending_hospital_bag_answer(self) -> None:
+        state = ContextState()
+
+        record_birth_prep_assistant_message(state, "最后想知道你最担心的 1-3 件事，比如怕漏买、怕母乳不够。")
+        capture_birth_prep_user_message({"user_message": "怕漏带、怕住院不舒服、怕母乳喂不好", "locale": "zh-CN"}, state)
+
+        context = build_request_context({"user_message": "继续", "locale": "zh-CN"}, state, ["birth-prep"])
+
+        self.assertIn("birth_prep_context:", context)
+        self.assertIn("top_worries=怕漏带、怕住院不舒服、怕母乳喂不好", context)
+        self.assertIn("创建待产包表单时复用这些字段", context)
+
+    def test_birth_journey_week_reused_by_hospital_bag_form(self) -> None:
+        state = ContextState()
+        plan_context = {
+            "due_date_or_week": "孕30周",
+            "birth_path": "顺产",
+            "support_person": "伴侣",
+        }
+        tool_result = create_birth_journey_plan_card({"plan_context": plan_context}, {"user_message": ""})
+
+        _record_birth_prep_tool_state(
+            state,
+            "birth_journey_plan_card_create",
+            {"plan_context": plan_context},
+            {
+                "ok": True,
+                "tool_name": "birth_journey_plan_card_create",
+                "result": tool_result,
+            },
+        )
+
+        context = build_request_context({"user_message": "继续", "locale": "zh-CN"}, state, ["birth-prep"])
+        self.assertIn("due_date_or_week=孕30周", context)
+
+        form_result = create_hospital_bag_form(
+            {
+                "default_values": {
+                    "return_to_work_timing": "产假后返工",
+                    "budget_preference": "高预算",
+                    "top_worries": ["怕漏带"],
+                }
+            },
+            {
+                "user_message": "",
+                "_birth_prep_hospital_bag_slots": hospital_bag_slots(state),
+            },
+        )
+
+        self.assertEqual(form_result["status"], "form_created")
+        self.assertEqual(form_result["form"]["default_values"]["due_date_or_week"], "孕30周")
+        self.assertNotIn("birth_path", form_result["form"]["default_values"])
+        self.assertNotIn("support_person", form_result["form"]["default_values"])
+
+
+if __name__ == "__main__":
+    unittest.main()

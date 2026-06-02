@@ -9,6 +9,21 @@ from momcozy_agent.tool_handlers.device import search_device_manual
 
 
 class DeviceGuidanceTests(unittest.TestCase):
+    def test_support_ticket_prompt_asks_order_details_only_when_relevant(self) -> None:
+        skill_path = Path(__file__).resolve().parents[1] / "skills" / "device-guidance" / "SKILL.md"
+        skill_text = skill_path.read_text(encoding="utf-8")
+
+        self.assertNotIn("尽量收集型号、订单号、购买渠道、问题摘要", skill_text)
+        self.assertIn("不要为了完整而固定追问订单号", skill_text)
+        self.assertIn("只有退货/退款、换货、保修、订单/物流等需要定位购买记录的场景，才询问订单号和购买渠道", skill_text)
+
+    def test_support_ticket_progress_query_is_declared_unsupported(self) -> None:
+        skill_path = Path(__file__).resolve().parents[1] / "skills" / "device-guidance" / "SKILL.md"
+        skill_text = skill_path.read_text(encoding="utf-8")
+
+        self.assertIn("目前系统不支持查看工单进度", skill_text)
+        self.assertIn("不要编造确认页、短信/邮件、账户售后记录或其他查看路径", skill_text)
+
     def test_air1_step_images_stay_within_model_injection_budget(self) -> None:
         image_dir = Path(__file__).resolve().parents[1] / "skills" / "device-guidance" / "assets" / "air1" / "images"
         oversized = [

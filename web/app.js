@@ -1322,8 +1322,7 @@ function addMomBabyStatusSection(parent, section) {
 
 function hospitalBagTitle(value) {
   const title = String(value || "").trim();
-  if (!title || title === "待产包卡片" || title === "Hospital Bag Card") return "待产包";
-  if (title.includes("待产包卡片")) return title.replaceAll("待产包卡片", "待产包");
+  if (!title || title === "Hospital Bag Card" || (title.includes("待产包") && title.includes("卡片"))) return "待产包";
   return title;
 }
 

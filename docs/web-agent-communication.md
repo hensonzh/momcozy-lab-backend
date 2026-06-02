@@ -624,7 +624,7 @@ Agent 状态通过 `CUSTOM` / `momcozy.agent.status` 发送：
   "type": "TOOL_CALL_START",
   "timestamp": 1710000000000,
   "tool_call_id": "call_xxx",
-  "tool_call_name": "ui_form_create",
+  "tool_call_name": "birth_plan_form_create",
   "parent_message_id": "run_xxx:tool-results",
   "response_id": "resp_xxx",
   "output_index": 1,
@@ -701,7 +701,7 @@ Agent 状态通过 `CUSTOM` / `momcozy.agent.status` 发送：
   "artifact_id": "form_xxx",
   "artifact_type": "form",
   "tool_call_id": "call_xxx",
-  "tool_call_name": "ui_form_create",
+  "tool_call_name": "birth_plan_form_create",
   "status": "ready",
   "artifact": {
     "id": "form_xxx",
@@ -770,7 +770,7 @@ Agent 状态通过 `CUSTOM` / `momcozy.agent.status` 发送：
 
 | 工具 | 附加字段 | 前端消费 |
 | --- | --- | --- |
-| `ui_form_create` | `form` | 后端随后发送 `ARTIFACT_CREATED`，前端渲染表单 |
+| `ui_form_create` / `birth_plan_form_create` / `hospital_bag_form_create` | `form` | 后端随后发送 `ARTIFACT_CREATED`，前端渲染表单 |
 | `labor_communication_card_create` / `birth_journey_plan_card_create` / `hospital_bag_card_create` | `card`、可选 `assistant_followup` | 后端随后发送 `ARTIFACT_CREATED`，前端渲染卡片 |
 | `ibclc_consult_card_create` | `card` | 后端随后发送 `ARTIFACT_CREATED`，前端渲染 IBCLC 咨询卡 |
 | `support_ticket_draft_create` | `ticket`、`submit_label` | 后端随后发送 `ARTIFACT_CREATED` + `CONFIRMATION_REQUIRED` |
@@ -845,7 +845,7 @@ work item 文案由前端按阶段语义映射，核心映射在 `toolWorkPhase(
 
 ### 7.4 表单 UI
 
-`ui_form_create` 返回的是 form schema，不是 HTML。
+表单工具返回的是 form schema，不是 HTML。当前 runtime 主要通过 `birth_plan_form_create`、`hospital_bag_form_create` 生成专用表单；通用 `ui_form_create` 只保留兼容旧流程。
 
 前端渲染：
 

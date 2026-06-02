@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 
 from momcozy_agent.tool_handlers.cards import _confirmed_form_data, create_form, create_labor_communication_card
@@ -12,7 +13,17 @@ def _create_birth_plan_card_for_test(args: dict, inputs: dict) -> dict:
     if "baby_after_birth" in form_data and "baby_after_birth_preferences" not in form_data:
         form_data["baby_after_birth_preferences"] = form_data["baby_after_birth"]
     form_data.update(_confirmed_form_data(inputs))
-    return create_labor_communication_card({"confirmed_form_data": form_data}, {"user_message": ""})
+    return create_labor_communication_card(
+        {"confirmed_form_data": {}},
+        {
+            "user_message": (
+                "我已确认分娩沟通单信息。\n"
+                "form_id: birth_plan_card_intake\n"
+                "confirmed_form_data:\n"
+                f"{json.dumps(form_data, ensure_ascii=False)}"
+            )
+        },
+    )
 
 
 class BirthPlanCardTests(unittest.TestCase):
@@ -42,8 +53,8 @@ class BirthPlanCardTests(unittest.TestCase):
         )
 
         card = result["card"]["card_json"]
-        self.assertEqual(card["title"], "分娩沟通卡")
-        self.assertEqual(card["subtitle"], "产房沟通优先级卡片")
+        self.assertEqual(card["title"], "分娩沟通单")
+        self.assertEqual(card["subtitle"], "产房沟通重点")
         self.assertEqual(card["overview"]["birth_path"], "剖宫产")
         self.assertEqual(card["overview"]["birth_setting"], "市妇幼")
         self.assertTrue(any("37周、剖宫产" in item for item in card["personalized_notes"]))
@@ -51,7 +62,7 @@ class BirthPlanCardTests(unittest.TestCase):
         self.assertIn("如果需要侧切，请先说明原因并和我沟通", card["intervention_preferences"])
         self.assertEqual(card["baby_after_birth"], ["出生后尽早肌肤接触"])
         self.assertEqual(card["medical_notes"], ["青霉素过敏"])
-        self.assertEqual(card["disclaimer"], "这张卡只用于沟通。请优先遵循医生和医院建议，尤其是因安全原因需要调整计划时。")
+        self.assertEqual(card["disclaimer"], "这份沟通单只用于沟通。请优先遵循医生和医院建议，尤其是因安全原因需要调整计划时。")
         self.assertTrue(any("术后接触宝宝" in item for item in card["questions_for_hospital"]))
         self.assertIn("assistant_followup", result)
 
@@ -115,7 +126,7 @@ class BirthPlanCardTests(unittest.TestCase):
                     },
                 ],
             },
-            {"user_message": "帮我做分娩沟通卡"},
+            {"user_message": "帮我做分娩沟通单"},
         )
 
         fields = result["form"]["fields"]
@@ -179,6 +190,15 @@ class BirthPlanCardTests(unittest.TestCase):
         self.assertEqual(card["overview"]["birth_path"], "顺产")
         self.assertEqual(card["overview"]["support_people"], "伴侣")
 
+    def test_labor_communication_card_rejects_model_supplied_form_data_without_frontend_submission(self) -> None:
+        result = create_labor_communication_card(
+            {"confirmed_form_data": {"birth_path": "顺产", "support_person": "伴侣"}},
+            {"user_message": ""},
+        )
+
+        self.assertEqual(result["status"], "needs_confirmed_form_data")
+        self.assertNotIn("card", result)
+
     def test_birth_plan_maps_expanded_preference_fields(self) -> None:
         result = _create_birth_plan_card_for_test(
             {
@@ -209,7 +229,7 @@ class BirthPlanCardTests(unittest.TestCase):
         self.assertIn("喂养意向：母乳", card["baby_after_birth"])
         self.assertIn("希望先联系我的伴侣/支持人", card["emergency_authorization"])
         self.assertIn("生产时能不能喝水或吃点东西", card["questions_for_hospital"])
-        self.assertFalse(any("分娩沟通卡" in item for item in card["questions_for_hospital"]))
+        self.assertFalse(any(("分娩沟通" + "卡") in item for item in card["questions_for_hospital"]))
         self.assertTrue(any("第一胎" in item for item in card["personalized_notes"]))
 
     def test_birth_plan_maps_top_priorities_into_display_groups(self) -> None:

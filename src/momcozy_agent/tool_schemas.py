@@ -149,7 +149,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "ui_form_create": _function_tool(
         "ui_form_create",
-        "创建前端可渲染的通用表单规格，用于在生成卡片前收集或确认用户信息。无后端副作用。分娩沟通卡应优先使用 birth_plan_form_create；待产包应优先使用 hospital_bag_form_create；只有兼容旧流程时才手写字段。",
+        "创建前端可渲染的通用表单规格，用于在生成结构化内容前收集或确认用户信息。无后端副作用。分娩沟通单应优先使用 birth_plan_form_create；待产包应优先使用 hospital_bag_form_create；只有兼容旧流程时才手写字段。",
         {
             "form_id": {"type": "string", "description": "稳定表单 ID，例如 birth_plan_card_intake 或 hospital_bag_intake。"},
             "title": {"type": "string"},
@@ -183,21 +183,21 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "birth_plan_form_create": _function_tool(
         "birth_plan_form_create",
-        "创建分娩沟通卡信息采集表单。LLM 只传已知字段 default_values；表单字段、顺序、分类、选项和排他选项过滤由工具稳定生成。无后端副作用。",
+        "创建分娩沟通单信息采集表单。LLM 只传已知字段 default_values；表单字段、顺序、分类、选项和排他选项过滤由工具稳定生成。无后端副作用。",
         {
             "default_values": JSON_OBJECT_STRING,
         },
     ),
     "labor_communication_card_create": _function_tool(
         "labor_communication_card_create",
-        "根据分娩沟通卡表单 confirmed_form_data 生成前端可渲染的分娩沟通卡。LLM 不需要生成 card_json；字段映射、强诉求降级、分区整理、医院问题和安全声明由工具稳定生成。无后端副作用。如果当前 user_message 已包含 confirmed_form_data，confirmed_form_data 参数传 \"{}\" 即可，不要复制整段表单 JSON。",
+        "根据应用侧注入的 birth_plan_card_intake 表单提交数据生成前端可渲染的分娩沟通单。LLM 不需要生成 card_json，也不能用参数伪造表单提交；字段映射、强诉求降级、分区整理、医院问题和安全声明由工具稳定生成。无后端副作用。confirmed_form_data 参数传 \"{}\" 即可。",
         {
             "confirmed_form_data": JSON_OBJECT_STRING,
         },
     ),
     "birth_journey_plan_card_create": _function_tool(
         "birth_journey_plan_card_create",
-        "根据已知的孕周/预产期、胎次/胎数、分娩方式、医院、支持人和喂养意向，生成前端可渲染的生产全过程计划卡片。LLM 不需要生成 card_json；日期换算、阶段拆分、个性化调整和安全声明由工具稳定生成。无后端副作用。",
+        "根据已知的孕周/预产期、胎次/胎数、分娩方式、医院、支持人和喂养意向，生成前端可渲染的生产全过程计划。LLM 不需要生成 card_json；日期换算、阶段拆分、个性化调整和安全声明由工具稳定生成。无后端副作用。",
         {
             "plan_context": JSON_OBJECT_STRING,
             "scope": {"type": "string", "enum": ["full", "prenatal_only", "short_range"]},
@@ -205,14 +205,14 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "hospital_bag_form_create": _function_tool(
         "hospital_bag_form_create",
-        "创建待产包信息采集表单。LLM 只传已知字段 default_values；表单字段、顺序、分类、选项和样式约束由工具稳定生成。无后端副作用。",
+        "创建待产包信息采集表单。调用前必须已经通过对话确认预产期/孕周、复工/外出计划、预算偏好和最担心的问题；LLM 只传这些已知字段 default_values。表单字段、顺序、分类、选项和样式约束由工具稳定生成。无后端副作用。",
         {
             "default_values": JSON_OBJECT_STRING,
         },
     ),
     "hospital_bag_card_create": _function_tool(
         "hospital_bag_card_create",
-        "根据待产包表单 confirmed_form_data 生成前端可渲染的待产包卡片。LLM 不需要生成 card_json；分包、物品、数量、医院确认项、购物车 followup 和兼容字段由工具稳定生成。无后端副作用。如果当前 user_message 已包含 confirmed_form_data，confirmed_form_data 参数传 \"{}\" 即可，不要复制整段表单 JSON。调用本工具后的最终回复只保留工具返回的 assistant_followup.message，不要再复述已确认字段、设计思路、住院天数或医院确认逻辑。",
+        "根据应用侧注入的 hospital_bag_intake 表单提交数据生成前端可渲染的待产包清单。LLM 不需要生成 card_json，也不能用参数伪造表单提交；分包、物品、数量、医院确认项、购物车 followup 和兼容字段由工具稳定生成。无后端副作用。confirmed_form_data 参数传 \"{}\" 即可。调用本工具后的最终回复只保留工具返回的 assistant_followup.message，不要再复述已确认字段、设计思路、住院天数或医院确认逻辑。",
         {
             "confirmed_form_data": JSON_OBJECT_STRING,
             "generation_mode": {"type": "string", "enum": ["standard", "quick", "immediate"]},
@@ -220,7 +220,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "hospital_bag_cart_update": _function_tool(
         "hospital_bag_cart_update",
-        "根据用户自然语言修改当前待产包购物车。只在 request_context 已有 current_hospital_bag_cart，或当前对话明确处于待产包购物车页面/购物车调整流程时使用；不要用于首次生成待产包卡片、独立吸奶器型号选型、设备故障排查或真实下单。用于用户说预算上限、太贵、便宜一点、删掉/加回某个商品、医院会提供、家里已有、调整数量、恢复默认购物车、把已推荐的 Momcozy 吸奶器型号同步到购物车等。用户给出明确金额时必须使用 action=optimize_budget 并设置 target_budget，例如“1000元以内”传 1000。工具只返回前端可应用的购物车更新，不真正下单。预算优化默认尽量保留吸奶器；只有用户明确要求删除吸奶器，或 allow_remove_pump=true 时才可移除。若用户要删除具体物品，应从 request_context 里的 item_id 中选择；不确定具体物品时传空数组并用 assistant_message 简短询问。若要同步吸奶器型号，先用 hospital_bag_pump_recommend 选型，再用 action=replace_pump_model 并传 product_sku_id。",
+        "根据用户自然语言修改当前待产包购物车。只在 request_context 已有 current_hospital_bag_cart，或当前对话明确处于待产包购物车页面/购物车调整流程时使用；不要用于首次生成待产包清单、独立吸奶器型号选型、设备故障排查或真实下单。用于用户说预算上限、太贵、便宜一点、删掉/加回某个商品、医院会提供、家里已有、调整数量、恢复默认购物车、把已推荐的 Momcozy 吸奶器型号同步到购物车等。用户给出明确金额时必须使用 action=optimize_budget 并设置 target_budget，例如“1000元以内”传 1000。工具只返回前端可应用的购物车更新，不真正下单。预算优化默认尽量保留吸奶器；只有用户明确要求删除吸奶器，或 allow_remove_pump=true 时才可移除。若用户要删除具体物品，应从 request_context 里的 item_id 中选择；不确定具体物品时传空数组并用 assistant_message 简短询问。若要同步吸奶器型号，先用 hospital_bag_pump_recommend 选型，再用 action=replace_pump_model 并传 product_sku_id。",
         {
             "action": {
                 "type": "string",

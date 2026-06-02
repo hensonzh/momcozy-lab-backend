@@ -28,18 +28,18 @@ def main() -> None:
     assert "## 可用 Skill" in initial_request["instructions"]
     assert "skill_manifests:" in initial_request["instructions"]
     assert "CoMate 全局规则" in initial_request["instructions"]
-    assert "默认极简回答风格、自然聊天" in initial_request["instructions"]
+    assert "回答风格：默认极简、自然聊天" in initial_request["instructions"]
     assert "### 优秀回复示例" in initial_request["instructions"]
     assert "临产前：“恭喜你呀！要见到宝宝了啦" in initial_request["instructions"]
     assert "吸奶器不会装：“不用急～有我呢！你是什么型号的" in initial_request["instructions"]
     assert "不要用“如果你愿意”、“要不要...”这种表达开头" in initial_request["instructions"]
     assert "默认回复要短：优先 1-3 句" in initial_request["instructions"]
-    assert "健康、哺乳、孕产不适或宝宝状态咨询是例外" in initial_request["instructions"]
-    assert "语气仍然是陪伴型" in initial_request["instructions"]
-    assert "主动告诉用户可以使用在线 IBCLC 咨询服务" in initial_request["instructions"]
+    assert "健康咨询流程：针对妈妈的健康问题" in initial_request["instructions"]
+    assert "母婴陪伴型智能体" in initial_request["instructions"]
+    assert "主动告知妈妈有在线IBCLC支持" in initial_request["instructions"]
     assert "是否加载 skill，只根据用户当前意图、对话连续性，以及 skill manifest 中的 description 判断" in initial_request["instructions"]
     assert "是否调用工具，只根据当前可见工具的名称、description、schema 和用户目标判断" in initial_request["instructions"]
-    assert "明显风险（高烧、剧烈疼痛、宝宝异常、设备危险等）" in initial_request["instructions"]
+    assert "明显风险（如高烧、剧烈疼痛、宝宝异常、设备危险等）" in initial_request["instructions"]
     assert "普通陪伴和轻问答不需要为了显得完整而调用工具" in initial_request["instructions"]
     assert "static_agent_context:" not in initial_request["instructions"]
     assert "skill_selection: decide_from_skill_manifests" not in initial_request["instructions"]
@@ -51,10 +51,17 @@ def main() -> None:
     assert initial_request["input"][0]["content"][1]["text"].startswith("user_message:")
     assert "tool_search" in initial_tool_types
     assert "load_skill" in initial_tool_names
-    assert "ui_form_create" in initial_tool_names
-    assert "labor_communication_card_create" in initial_tool_names
-    assert "birth_journey_plan_card_create" in initial_tool_names
-    assert "hospital_bag_card_create" in initial_tool_names
+    assert "ui_form_create" not in initial_tool_names
+    assert "birth_plan_form_create" not in initial_tool_names
+    assert "birth_plan_form_create" in initial_deferred_tool_names
+    assert "labor_communication_card_create" not in initial_tool_names
+    assert "labor_communication_card_create" in initial_deferred_tool_names
+    assert "birth_journey_plan_card_create" not in initial_tool_names
+    assert "birth_journey_plan_card_create" in initial_deferred_tool_names
+    assert "hospital_bag_form_create" not in initial_tool_names
+    assert "hospital_bag_form_create" in initial_deferred_tool_names
+    assert "hospital_bag_card_create" not in initial_tool_names
+    assert "hospital_bag_card_create" in initial_deferred_tool_names
     assert "ibclc_consult_card_create" in initial_tool_names
     assert "hospital_bag_cart_update" not in initial_tool_names
     assert "hospital_bag_cart_update" in initial_deferred_tool_names
@@ -167,72 +174,67 @@ def main() -> None:
     assert isinstance(loaded["description"], str) and loaded["description"]
 
     birth_prep_skill = execute_skill_runtime_tool("load_skill", {"skill_id": "birth-prep"})
-    assert "临产表达的回应节奏" in birth_prep_skill["skill_md"]
+    assert "## 核心服务" in birth_prep_skill["skill_md"]
     assert "生产全过程计划" in birth_prep_skill["skill_md"]
     assert "references/birth-journey-plan.md" in birth_prep_skill["skill_md"]
-    assert "意图优先级链" in birth_prep_skill["skill_md"]
-    assert "物品词优先于阶段词" in birth_prep_skill["skill_md"]
-    assert "上一轮明确承接能力优先" in birth_prep_skill["skill_md"]
+    assert "待产包清单" in birth_prep_skill["skill_md"]
+    assert "分娩沟通单" in birth_prep_skill["skill_md"]
+    assert "用户可见命名" in birth_prep_skill["skill_md"]
+    assert "卡片只是前端展示形式" in birth_prep_skill["skill_md"]
+    assert "物品词优先待产包" in birth_prep_skill["skill_md"]
+    assert "流程连续" in birth_prep_skill["skill_md"]
     assert "宽泛注意/准备问题默认轻问答" in birth_prep_skill["skill_md"]
-    assert "产前普通问答的信息剂量" in birth_prep_skill["skill_md"]
-    assert "最多问 1-2 个问题" in birth_prep_skill["skill_md"]
-    assert "生产计划歧义" in birth_prep_skill["skill_md"]
-    assert "第一反应不是清单" in birth_prep_skill["skill_md"]
-    assert "最终回复里先轻柔祝贺" in birth_prep_skill["skill_md"]
-    assert "最终回复先表达祝贺和情感共鸣" in birth_prep_skill["skill_md"]
-    assert "先轻柔祝贺" in birth_prep_skill["skill_md"]
-    assert "skill 流程连续性" in birth_prep_skill["skill_md"]
-    assert "待产包入口确认" in birth_prep_skill["skill_md"]
-    assert "默认先不调用 `ui_form_create`" in birth_prep_skill["skill_md"]
-    assert "前面确认过的信息会先填好" in birth_prep_skill["skill_md"]
-    assert "字段 `default_value`" in birth_prep_skill["skill_md"]
-    assert "再调用 `hospital_bag_form_create`" in birth_prep_skill["skill_md"]
+    assert "对话采集风格" in birth_prep_skill["skill_md"]
+    assert "采用 slot-filling 风格" in birth_prep_skill["skill_md"]
+    assert "每轮最多问一个缺失字段" in birth_prep_skill["skill_md"]
+    assert "已知字段来自当前对话" in birth_prep_skill["skill_md"]
+    assert "birth_plan_form_create" in birth_prep_skill["skill_md"]
+    assert "hospital_bag_form_create" in birth_prep_skill["skill_md"]
     journey_plan_reference = execute_skill_runtime_tool(
         "read_skill_file",
         {"skill_id": "birth-prep", "kind": "references", "path": "references/birth-journey-plan.md"},
     )["content"]
     assert "生产全过程计划是一份阶段路线图" in journey_plan_reference
     assert "待产包、入院包或住院包物品清单" in journey_plan_reference
-    assert "给医生、护士或助产士看的分娩沟通卡" in journey_plan_reference
-    assert "默认不用表单" in journey_plan_reference
-    assert "回到主 `SKILL.md` 的歧义澄清规则" in journey_plan_reference
+    assert "给医生、护士或助产士看的分娩沟通单" in journey_plan_reference
+    assert "本服务默认不用表单" in journey_plan_reference
     assert "通用安全边界以主 `SKILL.md` 为准" in journey_plan_reference
-    assert "必须先确认 3 个必填信息" in journey_plan_reference
+    assert "必须确认 3 个信息" in journey_plan_reference
     assert "当前孕周或预产期" in journey_plan_reference
-    assert "分娩方式和主要支持人" in journey_plan_reference
-    assert "不要为了这个能力调用 `ui_form_create`" in birth_prep_skill["skill_md"]
+    assert "分娩方式：顺产" in journey_plan_reference
+    assert "主要支持人" in journey_plan_reference
     assert "孕中期" in journey_plan_reference
     assert "孕晚期" in journey_plan_reference
     assert "临产期" in journey_plan_reference
     assert "住院期" in journey_plan_reference
     assert "产后期" in journey_plan_reference
-    assert "最终计划必须通过 `birth_journey_plan_card_create` 生成结构化卡片" in journey_plan_reference
+    assert "最终计划必须通过 `birth_journey_plan_card_create` 生成结构化内容" in journey_plan_reference
     assert "不要在普通回复里输出 Markdown 表格" in journey_plan_reference
-    assert "阶段名称、具体日期范围、阶段目标、注意事项、准备动作" in journey_plan_reference
-    assert "不要在结尾同时抛出待产包、分娩沟通卡、提醒、医院问题清单等多个并列选项" in journey_plan_reference
+    assert "复述计划里的所有阶段" in journey_plan_reference
+    assert "同时抛出待产包、分娩沟通单、提醒、医院问题清单等多个并列选项" in journey_plan_reference
     birth_plan_reference = execute_skill_runtime_tool(
         "read_skill_file",
-        {"skill_id": "birth-prep", "kind": "references", "path": "references/birth-plan-card.md"},
+        {"skill_id": "birth-prep", "kind": "references", "path": "references/labor-communication-card.md"},
     )["content"]
-    assert "分娩沟通卡不是完整医疗计划" in birth_plan_reference
+    assert "分娩沟通单把用户最在意的沟通偏好" in birth_plan_reference
     assert "表单字段、字段顺序、选项" in birth_plan_reference
     assert "把可靠信息写入 `birth_plan_form_create.default_values`" in birth_plan_reference
     assert "调用 `birth_plan_form_create`" in birth_plan_reference
     assert "support_people" in birth_plan_reference
-    assert "不要再调用 `ui_form_create` 手写分娩沟通卡字段" in birth_plan_reference
+    assert "不要手写分娩沟通单字段" in birth_plan_reference
     assert "直接调用 `labor_communication_card_create`" in birth_plan_reference
-    assert "不要让 LLM 自己生成分娩沟通卡 `card_json`" in birth_plan_reference
+    assert "不要让 LLM 自己生成分娩沟通单 `card_json`" in birth_plan_reference
     assert "工具返回 `assistant_followup`" in birth_plan_reference
     hospital_bag_reference = execute_skill_runtime_tool(
         "read_skill_file",
         {"skill_id": "birth-prep", "kind": "references", "path": "references/hospital-bag-service.md"},
     )["content"]
     assert "待产包服务不是让用户自己从长清单里筛东西" in hospital_bag_reference
-    assert "表单字段、字段顺序、卡片 schema" in hospital_bag_reference
+    assert "表单字段、字段顺序、结构化 schema" in hospital_bag_reference
     assert "先自然邀约，不直接创建表单" in hospital_bag_reference
-    assert "只把 4 个对话预采集字段写入 `hospital_bag_form_create.default_values`" in hospital_bag_reference
+    assert "只把 `due_date_or_week`、`return_to_work_timing`、`budget_preference`、`top_worries` 写入" in hospital_bag_reference
     assert "调用 `hospital_bag_form_create`" in hospital_bag_reference
-    assert "不要再调用 `ui_form_create` 手写待产包字段" in hospital_bag_reference
+    assert "表单标题、分类、选项、必填/选填和字段说明都由专用工具生成" in hospital_bag_reference
     assert "直接调用 `hospital_bag_card_create`" in hospital_bag_reference
     assert "不要让 LLM 自己生成待产包 `card_json`" in hospital_bag_reference
     assert "工具返回 `assistant_followup`" in hospital_bag_reference
@@ -243,7 +245,7 @@ def main() -> None:
             "form_id": "hospital_bag_intake",
             "title": "信息采集",
             "description": "先确认几件关键背景，帮你少带错、少漏带。",
-            "submit_label": "生成我的卡片",
+            "submit_label": "生成我的清单",
             "fields": [
                 {
                     "id": "due_date_or_week",
@@ -327,13 +329,24 @@ def main() -> None:
     hospital_bag_card = execute_tool(
         "hospital_bag_card_create",
         {
-            "confirmed_form_data": {
-                "due_date_or_week": "32 周",
-                "feeding_intention": "母乳喂养",
-            },
+            "confirmed_form_data": {},
             "generation_mode": "standard",
         },
-        {"user_message": "confirmed_form_data:\n{}", "locale": "zh-CN", "timezone": "America/Los_Angeles", "message_sent_at": "2026-05-04T09:00:00-07:00"},
+        {
+            "user_message": (
+                "我已确认待产包信息。\n"
+                "form_id: hospital_bag_intake\n"
+                "confirmed_form_data:\n"
+                '{"due_date_or_week":"32 周","first_birth":"是","fetus_count":"单胎",'
+                '"pregnancy_history_or_notes":["没有"],"birth_path":"顺产",'
+                '"feeding_intention":"母乳喂养","return_to_work_timing":"6 周后",'
+                '"support_person":"伴侣","budget_preference":"中预算",'
+                '"top_worries":["怕漏买","怕母乳不够"]}'
+            ),
+            "locale": "zh-CN",
+            "timezone": "America/Los_Angeles",
+            "message_sent_at": "2026-05-04T09:00:00-07:00",
+        },
     )
     card_json = hospital_bag_card["card"]["card_json"]
     postpartum_groups = [group for group in card_json["packing_groups"] if group.get("group_id") == "postpartum_home_first_week"]
@@ -351,18 +364,12 @@ def main() -> None:
     birth_plan_card = execute_tool(
         "labor_communication_card_create",
         {
-            "confirmed_form_data": {
-                "due_date_or_week": "37 周",
-                "birth_path": "顺产",
-                "birth_setting": "待确认",
-                "top_priorities": "希望每一步先解释；希望伴侣参与重要决定",
-                "communication_preferences": ["干预前先解释", "先征求同意"],
-                "support_person": "伴侣",
-                "medical_notes": "青霉素过敏",
-            },
+            "confirmed_form_data": {},
         },
         {
             "user_message": (
+                "我已确认分娩沟通单信息。\n"
+                "form_id: birth_plan_card_intake\n"
                 "confirmed_form_data:\n"
                 '{"due_date_or_week":"37 周","birth_path":"顺产","top_priorities":"希望每一步先解释；希望伴侣参与重要决定",'
                 '"communication_preferences":["干预前先解释","先征求同意"],"support_person":"伴侣",'
@@ -494,11 +501,11 @@ def main() -> None:
 
     reference_state = ContextState()
     reference_state.loaded_references.append(
-        "birth-prep/references/birth-plan-card.md 已在当前会话中读取过；连续同一子服务任务优先复用，不要重复调用 read_skill_file，除非用户切换到新 reference 或上下文不足。"
+        "birth-prep/references/labor-communication-card.md 已在当前会话中读取过；连续同一子服务任务优先复用，不要重复调用 read_skill_file，除非用户切换到新 reference 或上下文不足。"
     )
     reference_context_request = build_agent_request(
         {
-            "user_message": "继续生成分娩沟通卡",
+            "user_message": "继续生成分娩沟通单",
             "locale": "zh-CN",
             "timezone": "Asia/Shanghai",
             "message_sent_at": "2026-05-04T20:03:00+08:00",
@@ -508,7 +515,7 @@ def main() -> None:
     )
     reference_context = reference_context_request["input"][0]["content"][0]["text"]
     assert "loaded_reference_context:" in reference_context
-    assert "birth-prep/references/birth-plan-card.md 已在当前会话中读取过" in reference_context
+    assert "birth-prep/references/labor-communication-card.md 已在当前会话中读取过" in reference_context
     assert "不要重复调用 read_skill_file" in reference_context
 
     profile_state = ContextState()
@@ -557,7 +564,7 @@ def main() -> None:
         )
         skill_doc = execute_skill_runtime_tool("load_skill", {"skill_id": skill["id"]})["skill_md"]
         expected_skill_markers = {
-            "birth-prep": ("全局声音契约", "skill 流程连续性", "生成卡片前必须先确认 3 个信息"),
+            "birth-prep": ("用户可见命名", "对话采集风格", "生成计划前必须确认 3 个信息"),
             "milk-management": ("全局 CoMate 回复风格", "用户的“好/可以/继续”", "健康/哺乳咨询追问方式", "不直接给诊断名或疑似诊断", "主动说明 Momcozy 有在线 IBCLC 咨询服务"),
             "emotion-support": ("全局人设和回复风格", "## 连续性"),
             "device-guidance": ("用户已经着急或沮丧时", "## 流程连续性"),

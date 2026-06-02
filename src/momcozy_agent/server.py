@@ -14,7 +14,13 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .agents import QUICK_REPLIES_TOOL_NAME, quick_replies_event, run_agent_loop, run_agent_turn, run_error_event, text_message_semantic
 from .config import get_openai_client_options, load_project_env
-from .contexts import DEFAULT_LOCALE, DEFAULT_TIMEZONE, ContextState
+from .contexts import (
+    DEFAULT_LOCALE,
+    DEFAULT_TIMEZONE,
+    ContextState,
+    capture_birth_prep_user_message,
+    record_birth_prep_assistant_message,
+)
 from .services.paths import ensure_runtime_dirs
 from .types import SkillId
 
@@ -247,6 +253,7 @@ async def stream_ag_ui_events(
     session = runtime.get_session(str(thread_id))
     if session.previous_response_id and "previous_response_id" not in inputs:
         inputs["previous_response_id"] = session.previous_response_id
+    capture_birth_prep_user_message(inputs, session.context_state)
 
     sentinel = object()
     output_queue: asyncio.Queue[Any] = asyncio.Queue()
@@ -350,6 +357,7 @@ async def stream_ag_ui_events(
                 if _should_send_assistant_followup(followup, current_text):
                     send_text_delta(f"\n\n{followup}")
                     current_text = f"{current_text}\n\n{followup}"
+            record_birth_prep_assistant_message(session.context_state, current_text)
             if text_started:
                 send_event(
                     {
@@ -427,6 +435,7 @@ def _clone_context_state(state: ContextState) -> ContextState:
         last_displayed_tool_image=dict(state.last_displayed_tool_image) if state.last_displayed_tool_image else None,
         active_device_module=state.active_device_module,
         shown_step_image_urls=list(state.shown_step_image_urls),
+        birth_prep_slots={key: dict(value) for key, value in state.birth_prep_slots.items()},
     )
 
 
@@ -683,6 +692,7 @@ def _session_state_payload(session: ChatSession) -> dict[str, Any]:
             "last_displayed_tool_image": dict(session.context_state.last_displayed_tool_image or {}),
             "active_device_module": session.context_state.active_device_module,
             "shown_step_image_urls": list(session.context_state.shown_step_image_urls),
+            "birth_prep_slots": {key: dict(value) for key, value in session.context_state.birth_prep_slots.items()},
         },
     }
 

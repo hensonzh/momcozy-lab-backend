@@ -9,7 +9,14 @@ from typing import Any
 from urllib.parse import unquote, urlsplit
 from uuid import uuid4
 
-from .contexts import ContextState, build_request_context
+from .contexts import (
+    ContextState,
+    build_request_context,
+    clear_pending_hospital_bag_slot,
+    hospital_bag_slots,
+    merge_hospital_bag_slots,
+    set_pending_hospital_bag_slot,
+)
 from .static_context import STATIC_AGENT_INSTRUCTIONS
 from .tool_registry import execute_tool, select_runtime_tools
 from .types import AgUiEvent, AgUiEventHandler, AgentEvent, AgentEventHandler, AgentEventPhase, BuildAgentRequestOptions, ResponsesClientLike, ResponsesRequest, RuntimeInputs, TextDeltaHandler
@@ -56,7 +63,7 @@ def run_started_event(thread_id: str, run_id: str, parent_run_id: str | None = N
         "run_id": run_id,
         "semantic": _semantic_payload(
             "thinking",
-            "我在～接收消息中",
+            "我在接收你的消息～",
             "status",
             f"run:{run_id}",
             priority=10,
@@ -75,7 +82,7 @@ def run_finished_event(thread_id: str, run_id: str, result: Any | None = None) -
         "timestamp": _timestamp_ms(),
         "thread_id": thread_id,
         "run_id": run_id,
-        "semantic": _semantic_payload("done", "我处理完了", "hidden", f"run:{run_id}", priority=100),
+        "semantic": _semantic_payload("done", "我处理好啦", "hidden", f"run:{run_id}", priority=100),
     }
     if result is not None:
         event["result"] = result
@@ -87,7 +94,7 @@ def run_error_event(message: str, code: str | None = None, *, thread_id: str | N
         "type": "RUN_ERROR",
         "timestamp": _timestamp_ms(),
         "message": message,
-        "semantic": _semantic_payload("error", "这轮我没能处理好", "status", f"run_error:{code or 'unknown'}", priority=100),
+        "semantic": _semantic_payload("error", "这轮暂时没处理好", "status", f"run_error:{code or 'unknown'}", priority=100),
     }
     if thread_id:
         event["thread_id"] = thread_id
@@ -104,7 +111,7 @@ def quick_replies_event(message_id: str, replies: list[dict[str, str]]) -> AgUiE
         "timestamp": _timestamp_ms(),
         "message_id": message_id,
         "replies": replies,
-        "semantic": _semantic_payload("done", "我已经准备好几个下一步选项", "hidden", f"quick_replies:{message_id}", priority=80),
+        "semantic": _semantic_payload("done", "我准备好几个下一步选项啦", "hidden", f"quick_replies:{message_id}", priority=80),
     }
 
 
@@ -329,12 +336,12 @@ def thinking_custom_event(status: str, metadata: dict[str, Any] | None = None) -
 
 def text_message_semantic(stage: str, message_id: str) -> AgUiSemantic:
     if stage == "start":
-        return _semantic_payload("replying", "我正在组织回复", "hidden", f"text:{message_id}", priority=40)
+        return _semantic_payload("replying", "我在组织回复～", "hidden", f"text:{message_id}", priority=40)
     if stage == "content":
-        return _semantic_payload("replying", "我正在输出回复", "hidden", f"text:{message_id}", priority=40)
+        return _semantic_payload("replying", "我在回复你～", "hidden", f"text:{message_id}", priority=40)
     if stage == "end":
-        return _semantic_payload("done", "我已经整理好回复了", "hidden", f"text:{message_id}", priority=80)
-    return _semantic_payload("replying", "我正在处理回复", "hidden", f"text:{message_id}", priority=40)
+        return _semantic_payload("done", "我整理好回复啦", "hidden", f"text:{message_id}", priority=80)
+    return _semantic_payload("replying", "我在处理回复～", "hidden", f"text:{message_id}", priority=40)
 
 
 def _semantic_payload(phase: str, label: str, visibility: str, merge_key: str, *, priority: int = 0) -> AgUiSemantic:
@@ -349,10 +356,10 @@ def _semantic_payload(phase: str, label: str, visibility: str, merge_key: str, *
 
 def _step_semantic(step_name: str, state: str) -> AgUiSemantic:
     if step_name == "routing":
-        label = "我在判断你需要什么" if state == "started" else "我判断好你的需求了"
+        label = "我先理解一下你的需求～" if state == "started" else "我判断好你的需求啦"
         phase = "thinking" if state == "started" else "done"
     else:
-        label = "我正在处理这一步" if state == "started" else "我处理完这一步了"
+        label = "我先处理这一步～" if state == "started" else "这一步处理好啦"
         phase = "working" if state == "started" else "done"
     return _semantic_payload(phase, label, "status", f"step:{step_name}", priority=30)
 
@@ -361,7 +368,7 @@ def _status_event_semantic(event: AgentEvent) -> AgUiSemantic:
     message = str(event.get("message") or "").strip()
     phase = str(event.get("phase") or "").strip()
     if phase == "failed" or message == "Step failed.":
-        return _semantic_payload("error", "这一步我没能处理好", "status", f"status:{phase or 'failed'}", priority=95)
+        return _semantic_payload("error", "这一步暂时没处理好", "status", f"status:{phase or 'failed'}", priority=95)
     if phase in {"requesting_model", "started", "model_tool_call", "tool_completed"}:
         return _semantic_payload("thinking", _status_label(message), "hidden", f"status:{phase or 'loop'}", priority=20)
     return _semantic_payload("working", _status_label(message), "status", f"status:{phase or 'loop'}", priority=20)
@@ -370,25 +377,25 @@ def _status_event_semantic(event: AgentEvent) -> AgUiSemantic:
 def _thinking_semantic(status: str, metadata: dict[str, Any]) -> AgUiSemantic:
     normalized_status = status.strip().lower()
     if normalized_status in {"started", "running"}:
-        label = "我正在准备下一步" if metadata.get("after_output_text") is True else "我正在想怎么帮你处理"
+        label = "我在准备下一步～" if metadata.get("after_output_text") is True else "我想一下"
         return _semantic_payload("thinking", label, "status", "thinking:current", priority=40)
     if normalized_status == "failed":
-        return _semantic_payload("error", "这一步我没能想清楚", "hidden", "thinking:current", priority=40)
-    return _semantic_payload("done", "我已经想好了", "hidden", "thinking:current", priority=40)
+        return _semantic_payload("error", "这一步我还没想清楚", "hidden", "thinking:current", priority=40)
+    return _semantic_payload("done", "我想好啦", "hidden", "thinking:current", priority=40)
 
 
 def _artifact_semantic(artifact_type: str, artifact_id: str, tool_name: str) -> AgUiSemantic:
     normalized_artifact_type = str(artifact_type or "").strip()
     if normalized_artifact_type == "form":
-        label = "我已经准备好确认内容了"
+        label = "我已经准备好确认内容啦"
     elif normalized_artifact_type in {"support_ticket", "support_ticket_draft"}:
-        label = "我已经准备好售后工单草稿了"
+        label = "我已经准备好售后工单草稿啦"
     elif normalized_artifact_type == "mom_baby_status_card":
-        label = "我已经生成母婴状态页了"
+        label = "我已经整理好母婴状态页啦"
     elif normalized_artifact_type in {"milk_plan_card", "milk_analysis_card"}:
-        label = "我已经生成奶量卡片了"
+        label = "我已经整理好奶量计划啦"
     else:
-        label = "我已经生成结果卡片了"
+        label = "我已经整理好结果啦"
     merge_key = f"artifact:{artifact_id or tool_name or normalized_artifact_type or 'current'}"
     return _semantic_payload("done", label, "artifact", merge_key, priority=70)
 
@@ -436,6 +443,8 @@ def _tool_semantic_phase(tool_name: str) -> str:
         return "saving"
     if tool_name in {
         "ui_form_create",
+        "birth_plan_form_create",
+        "hospital_bag_form_create",
         "labor_communication_card_create",
         "birth_journey_plan_card_create",
         "hospital_bag_card_create",
@@ -463,221 +472,221 @@ def _tool_stage_label(
 
 def _tool_start_label(tool_name: str, arguments: dict[str, Any]) -> str:
     if tool_name in {"tool_search", "tool_search_call"}:
-        return "我正在找合适的处理方式"
+        return "让我看看如何处理～"
     if tool_name == "load_skill":
         return _load_skill_label(arguments)
     if tool_name == "list_skills":
-        return "我正在看看可以怎么帮你"
+        return "我看看可以怎么帮你～"
     if tool_name == "search_skill_assets":
-        return "我正在找相关资料"
+        return "我去找找相关资料～"
     if tool_name == "read_skill_file":
-        return "我正在看相关说明"
+        return "我先看一下相关说明～"
     if tool_name == "profile_get":
-        return "我正在看你的基础信息"
+        return "我先看一下你的基础信息～"
     if tool_name == "milk_snapshot_get":
-        return "我正在看你的奶量情况"
+        return "我先看看你的奶量情况～"
     if tool_name == "milk_status_query":
-        return "我正在看今天的奶量状态"
+        return "我先看看今天的奶量状态～"
     if tool_name == "milk_records_query":
-        return "我正在看吸奶和喂养记录"
+        return "我先看看吸奶和喂养记录～"
     if tool_name == "milk_plan_query":
-        return "我正在看之前保存的奶量计划"
+        return "我先看看之前保存的奶量计划～"
     if tool_name == "milk_calendar_query":
-        return "我正在看计划和日程任务"
+        return "我先看看计划和日程任务～"
     if tool_name == "milk_assessment_evaluate":
-        return "我正在看奶量趋势和执行情况"
+        return "我来看看奶量趋势和执行情况～"
     if tool_name == "infant_growth_evaluate":
-        return "我正在看宝宝的生长信号"
+        return "我来看看宝宝的生长信号～"
     if tool_name == "risk_evaluate":
-        return "我正在确认有没有需要谨慎处理的地方"
+        return "我先确认一下安全边界～"
     if tool_name == "milk_plan_preview":
-        return "我正在帮你拟一版奶量计划"
+        return "我先帮你拟一版奶量计划～"
     if tool_name in {"milk_calendar_change_preview", "milk_calendar_reschedule_preview"}:
-        return "我正在帮你排一下日程调整"
+        return "我先帮你排一下日程调整～"
     if tool_name == "milk_record_mutate":
-        return "我正在帮你处理这条记录"
+        return "我先帮你处理这条记录～"
     if tool_name == "milk_task_complete":
-        return "我正在帮你记录任务完成情况"
+        return "我先帮你记录任务完成情况～"
     if tool_name == "milk_plan_mutate":
-        return "我正在帮你保存奶量计划"
+        return "我先帮你保存奶量计划～"
     if tool_name == "milk_calendar_mutate":
-        return "我正在帮你保存日程调整"
+        return "我先帮你保存日程调整～"
     if tool_name == "infant_growth_mutate":
-        return "我正在帮你保存宝宝成长记录"
-    if tool_name == "ui_form_create":
-        return "我正在帮你准备确认内容"
+        return "我先帮你保存宝宝成长记录～"
+    if tool_name in {"ui_form_create", "birth_plan_form_create", "hospital_bag_form_create"}:
+        return "我先帮你准备确认内容～"
     if tool_name == "labor_communication_card_create":
-        return "我正在帮你整理分娩沟通卡"
+        return "我先帮你整理分娩沟通单～"
     if tool_name == "birth_journey_plan_card_create":
-        return "我正在帮你整理生产全过程计划"
+        return "我先帮你整理生产全过程计划～"
     if tool_name == "hospital_bag_card_create":
-        return "我正在帮你整理待产包卡片"
+        return "我先帮你整理待产包清单～"
     if tool_name == "ibclc_consult_card_create":
-        return "我正在帮你准备 IBCLC 咨询卡"
+        return "我先帮你准备 IBCLC 咨询入口～"
     if tool_name == "support_ticket_draft_create":
-        return "我正在帮你准备售后工单"
+        return "我先帮你准备售后工单～"
     if tool_name == "hospital_bag_pump_recommend":
-        return "我正在看适合你的吸奶器型号"
+        return "我先看看适合你的吸奶器型号～"
     if tool_name == "hospital_bag_cart_update":
-        return "我正在帮你调整待产包购物车"
+        return "我先帮你调整待产包购物车～"
     if tool_name == "device_manual_search":
-        return "我正在看设备说明"
+        return "我先看看设备说明～"
     if tool_name == "knowledge_search":
-        return "我正在找相关资料"
+        return "我去找找相关资料～"
     if tool_name == "memory_search":
-        return "我正在找之前的信息"
+        return "我去找一下之前的信息～"
     if tool_name == "reminder_list":
-        return "我正在看你的提醒"
+        return "我先看看你的提醒～"
     if tool_name == "run_approved_skill_script":
-        return "我正在处理这一步"
-    return "我正在处理这一步"
+        return "我先处理这一步～"
+    return "我先处理这一步～"
 
 
 def _tool_end_label(tool_name: str) -> str:
     if tool_name in {"tool_search", "tool_search_call"}:
-        return "我在确认能怎么帮你"
+        return "我找到合适的方案啦"
     if tool_name in {"milk_records_query", "milk_status_query", "milk_snapshot_get", "milk_plan_query", "milk_calendar_query"}:
-        return "我在整理奶量和日程信息"
+        return "我把奶量和日程信息整理一下～"
     if tool_name in {"milk_assessment_evaluate", "infant_growth_evaluate", "risk_evaluate"}:
-        return "我在整理评估结果"
+        return "我把评估结果整理一下～"
     if tool_name == "milk_plan_preview":
-        return "我在完善计划草稿"
+        return "我再完善一下计划草稿～"
     if tool_name in {"milk_calendar_change_preview", "milk_calendar_reschedule_preview"}:
-        return "我在整理调整后的安排"
+        return "我把调整后的安排整理一下～"
     if tool_name in {"milk_record_mutate", "milk_task_complete", "milk_plan_mutate", "milk_calendar_mutate", "infant_growth_mutate"}:
-        return "我在保存这次修改"
+        return "我在保存这次修改～"
     if tool_name == "hospital_bag_pump_recommend":
-        return "我在整理推荐结果"
+        return "我把推荐结果整理一下～"
     if tool_name == "hospital_bag_cart_update":
-        return "我在保存购物车修改"
+        return "我在保存购物车修改～"
     if tool_name == "device_manual_search":
-        return "我在整理设备内容"
+        return "我把设备内容整理一下～"
     if tool_name == "support_ticket_draft_create":
-        return "我在整理工单草稿"
-    if tool_name in {"ui_form_create", "labor_communication_card_create", "birth_journey_plan_card_create", "hospital_bag_card_create", "ibclc_consult_card_create"}:
-        return "我在生成结果"
-    return "我在继续处理"
+        return "我在整理工单草稿～"
+    if tool_name in {"ui_form_create", "birth_plan_form_create", "hospital_bag_form_create", "labor_communication_card_create", "birth_journey_plan_card_create", "hospital_bag_card_create", "ibclc_consult_card_create"}:
+        return "我在把结果整理出来～"
+    return "我继续处理一下～"
 
 
 def _tool_result_label(tool_name: str, result: dict[str, Any]) -> str:
     if result.get("ok") is False:
-        return "这一步我没能处理好"
+        return "这一步暂时没处理好"
     status = str(result.get("status") or "").strip()
+    if status.startswith("needs_"):
+        return "我还需要先确认几件事～"
     if status == "plan_preview_needs_revision":
-        return "这版结果还需要调整"
+        return "这版结果还需要再调一下"
     if status == "plan_preview_not_recommended":
-        return "这版方案我不建议继续"
+        return "这版方案我不建议继续用"
     if status == "plan_preview_needs_medical_confirmation":
-        return "我需要先确认健康边界"
+        return "我需要先确认健康边界～"
     if result.get("requires_confirmation") is True:
-        return "我已经准备好预览，等你确认"
+        return "我已经准备好预览，等你确认～"
     if tool_name in {"tool_search", "tool_search_call"}:
-        return "我已经选好处理方式了"
+        return "我在执行这个方案啦～"
     if tool_name == "load_skill":
-        return "我已经准备好继续处理了"
+        return "我准备好继续处理啦"
     if tool_name == "profile_get":
-        return "我已经看过你的基础信息了"
+        return "我看过你的基础信息啦"
     if tool_name == "milk_records_query":
-        return "我已经整理好吸奶和喂养记录了"
+        return "我把吸奶和喂养记录整理好啦"
     if tool_name == "milk_status_query":
-        return "我已经看好今天的奶量状态了"
+        return "我看好今天的奶量状态啦"
     if tool_name == "milk_snapshot_get":
-        return "我已经整理好奶量情况了"
+        return "我把奶量情况整理好啦"
     if tool_name == "milk_calendar_query":
-        return "我已经整理好计划和日程了"
+        return "我把计划和日程整理好啦"
     if tool_name == "milk_plan_query":
-        return "我已经看好之前的奶量计划了"
+        return "我看好之前的奶量计划啦"
     if tool_name == "milk_assessment_evaluate":
-        return "我已经完成奶量评估了"
+        return "我完成奶量评估啦"
     if tool_name == "infant_growth_evaluate":
-        return "我已经完成宝宝生长评估了"
+        return "我完成宝宝生长评估啦"
     if tool_name == "risk_evaluate":
-        return "我已经确认安全边界了"
+        return "我确认好安全边界啦"
     if tool_name == "milk_record_mutate":
-        return _mutation_result_label(status, "我已经保存好这条记录了")
+        return _mutation_result_label(status, "我已经保存好这条记录啦")
     if tool_name == "milk_plan_mutate":
-        return _mutation_result_label(status, "我已经保存好奶量计划了")
+        return _mutation_result_label(status, "我已经保存好奶量计划啦")
     if tool_name == "milk_calendar_mutate":
-        return _mutation_result_label(status, "我已经保存好日程调整了")
+        return _mutation_result_label(status, "我已经保存好日程调整啦")
     if tool_name == "milk_task_complete":
         return _task_result_label(status)
     if tool_name == "infant_growth_mutate":
-        return _mutation_result_label(status, "我已经保存好宝宝成长记录了")
+        return _mutation_result_label(status, "我已经保存好宝宝成长记录啦")
     if tool_name == "milk_plan_preview":
-        return "我已经拟好奶量计划草稿了"
+        return "我拟好奶量计划草稿啦"
     if tool_name in {"milk_calendar_change_preview", "milk_calendar_reschedule_preview"}:
-        return "我已经整理好日程调整预览了"
-    if tool_name == "ui_form_create":
-        return "我已经准备好确认内容了"
+        return "我整理好日程调整预览啦"
+    if tool_name in {"ui_form_create", "birth_plan_form_create", "hospital_bag_form_create"}:
+        return "我已经准备好确认内容啦"
     if tool_name == "labor_communication_card_create":
-        return "我已经整理好分娩沟通卡了"
-    if status == "needs_required_context":
-        return "我还需要先确认几项信息"
+        return "我已经帮你整理好分娩沟通单啦"
     if tool_name == "birth_journey_plan_card_create":
-        return "我已经整理好生产全过程计划了"
+        return "我已经帮你整理好生产全过程计划啦"
     if tool_name == "hospital_bag_card_create":
-        return "我已经整理好待产包卡片了"
+        return "我已经帮你生成好待产包清单啦"
     if tool_name == "ibclc_consult_card_create":
-        return "我已经准备好 IBCLC 咨询卡了"
+        return "我已经准备好 IBCLC 咨询入口啦"
     if tool_name == "support_ticket_draft_create":
-        return "我已经准备好售后工单草稿了"
+        return "我已经准备好售后工单草稿啦"
     if tool_name == "hospital_bag_pump_recommend":
-        return "我已经整理好吸奶器推荐了"
+        return "我已经帮你整理好吸奶器推荐啦"
     if tool_name == "hospital_bag_cart_update":
-        return "这次购物车先不改" if status in {"needs_clarification", "cart_unchanged"} else "我已经更新待产包购物车了"
+        return "这次购物车先不改" if status in {"needs_clarification", "cart_unchanged"} else "我已经帮你更新好待产包购物车啦"
     if tool_name == "device_manual_search":
-        return "我已经整理好设备资料了"
+        return "我把设备资料整理好啦"
     if tool_name == "run_approved_skill_script":
-        return "我处理完这一步了"
+        return "这一步处理好啦"
     if tool_name in {"read_skill_file", "search_skill_assets", "knowledge_search", "memory_search"}:
-        return "我已经找到相关资料了"
-    return "我处理完这一步了"
+        return "我找到相关资料啦"
+    return "这一步处理好啦"
 
 
 def _mutation_result_label(status: str, fallback: str) -> str:
     if "deleted" in status:
-        return "我已经删除相关修改了"
+        return "我已经删除相关修改啦"
     if any(token in status for token in ("updated", "patched", "shifted")):
-        return "我已经保存好修改了"
+        return "我已经保存好修改啦"
     if "idempotent_replay" in status:
-        return "我已经用上之前保存的修改了"
+        return "我已经用上之前保存的修改啦"
     return fallback
 
 
 def _task_result_label(status: str) -> str:
     if status == "milk_task_completed":
-        return "我已经记录好任务完成了"
+        return "我已经记录好任务完成啦"
     if status == "milk_task_completion_cancelled":
-        return "我已经取消这次修改了"
+        return "我已经取消这次修改啦"
     if status == "milk_task_skipped":
-        return "我已经记录为跳过了"
-    return "我已经记录好任务状态了"
+        return "我已经记录为跳过啦"
+    return "我已经记录好任务状态啦"
 
 
 def _load_skill_label(arguments: dict[str, Any]) -> str:
     skill_id = str(arguments.get("skill_id") or arguments.get("id") or "").strip()
     labels = {
-        "milk-management": "我正在切到奶量管理这件事上",
-        "birth-prep": "我正在切到待产准备这件事上",
-        "device-guidance": "我正在切到设备指导这件事上",
-        "emotion-support": "我正在切到情绪支持这件事上",
+        "milk-management": "我先切到奶量管理这件事上～",
+        "birth-prep": "我先切到待产准备这件事上～",
+        "device-guidance": "我先切到设备指导这件事上～",
+        "emotion-support": "我先切到情绪支持这件事上～",
     }
-    return labels.get(skill_id, "我正在准备这个场景")
+    return labels.get(skill_id, "我先准备一下这个场景～")
 
 
 def _status_label(message: str) -> str:
     labels = {
-        "Agent loop started.": "我在～接收消息中",
-        "Requesting model response.": "我正在想怎么帮你处理",
-        "Requesting model response with tool outputs.": "我正在准备下一步",
-        "Selecting the next step.": "我在判断下一步怎么做",
-        "Loading relevant context.": "我正在看相关信息",
-        "Reading relevant information.": "我正在看相关信息",
-        "Processing relevant information.": "我正在整理刚看到的信息",
-        "Step completed.": "我处理完这一步了",
-        "Step failed.": "这一步我没能处理好",
+        "Agent loop started.": "我在接收你的消息～",
+        "Requesting model response.": "我想一下",
+        "Requesting model response with tool outputs.": "我在准备下一步～",
+        "Selecting the next step.": "我来判断下一步怎么做～",
+        "Loading relevant context.": "我去看一下相关信息～",
+        "Reading relevant information.": "我去看一下相关信息～",
+        "Processing relevant information.": "我把刚看到的信息整理一下～",
+        "Step completed.": "这一步处理好啦",
+        "Step failed.": "这一步暂时没处理好",
     }
-    return labels.get(message, message or "我正在处理这一步")
+    return labels.get(message, message or "我先处理这一步～")
 
 
 def safe_tool_arguments(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -782,8 +791,23 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
             "missing_fields": safe.get("missing_fields"),
             "confirmation_question": question,
             "final_response_instruction": (
-                "生产全过程计划卡片还不能生成。最终回复只向用户补问 confirmation_question 中缺失的信息，"
-                "不要输出路线图、不要创建卡片已完成的表达，也不要提待产包或分娩沟通卡。"
+                "生产全过程计划还不能生成。最终回复只向用户补问 confirmation_question 中缺失的信息，"
+                "不要输出路线图、不要表达已经创建完成，也不要提待产包或分娩沟通单。"
+            ),
+        }
+        return {key: value for key, value in compact_missing.items() if value not in (None, "", [])}
+    if tool_name in {"hospital_bag_form_create", "hospital_bag_card_create", "labor_communication_card_create"} and str(safe.get("status") or "").startswith("needs_"):
+        question = str(safe.get("confirmation_question") or safe.get("summary") or "").strip()
+        compact_missing = {
+            "ok": safe.get("ok"),
+            "tool_name": safe.get("tool_name"),
+            "status": safe.get("status"),
+            "summary": safe.get("summary"),
+            "missing_fields": safe.get("missing_fields"),
+            "confirmation_question": question,
+            "final_response_instruction": (
+                "工具没有生成表单或结构化内容。最终回复只根据 confirmation_question 补问或提示用户先提交对应表单；"
+                "不要说已经生成、不要输出清单或结构化内容，也不要改走其它产前服务。"
             ),
         }
         return {key: value for key, value in compact_missing.items() if value not in (None, "", [])}
@@ -848,7 +872,8 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
         message = str(followup.get("message") or "").strip()
         if message:
             compact["final_response_instruction"] = (
-                "最终回复只能原样输出 assistant_followup.message，不要改写、扩写、重复交付语或再补充下一步。"
+                "最终回复只能原样输出 assistant_followup.message，保留其中的段落换行；"
+                "不要改写、扩写、重复交付语或再补充下一步。"
             )
 
     return compact
@@ -863,8 +888,9 @@ def _compact_birth_journey_plan_card_output(safe: dict[str, Any]) -> dict[str, A
     return _compact_card_tool_output(
         safe,
         (
-            "生产全过程计划卡片已经展示完整路线图。最终回复直接输出下面这段 1-3 句中文，不要改写、扩写，"
-            "语气要保持自然陪伴，不要复述卡片里的所有阶段、日期或完整清单："
+            "生产全过程计划已经展示完整路线图。最终回复按段落直接输出下面这段 1-3 句中文，"
+            "保留空行，不要改写、扩写，语气要保持自然陪伴，"
+            "不要复述计划里的所有阶段、日期或完整清单：\n\n"
             f"{response}"
         ),
     )
@@ -880,9 +906,9 @@ def _birth_journey_plan_final_response(card_json: dict[str, Any]) -> str:
     label = str(next_action.get("label") or "").strip()
     help_item = _first_birth_journey_item(current_phase.get("comate_help"))
 
-    return "".join(
+    return "\n\n".join(
         [
-            "我把生产全过程计划整理好了。",
+            "生产全过程计划我整理好了。",
             _birth_journey_phase_summary_sentence(phase_title, watchout, action, goal),
             _birth_journey_service_sentence(label or help_item),
         ]
@@ -892,17 +918,21 @@ def _birth_journey_plan_final_response(card_json: dict[str, Any]) -> str:
 def _birth_journey_phase_summary_sentence(phase_title: str, watchout: str, action: str, goal: str) -> str:
     watchout = _birth_journey_watchout_fragment(watchout)
     action_fragment = _birth_journey_action_fragment(action)
+    if phase_title and watchout and action_fragment:
+        return f"你现在在{phase_title}，{watchout}；准备上先{action_fragment}。"
     if phase_title and watchout:
         return f"你现在在{phase_title}，{watchout}。"
+    if phase_title and action_fragment:
+        return f"你现在在{phase_title}，准备上先{action_fragment}。"
     if phase_title and goal:
         return f"你现在在{phase_title}，这阶段先{goal}。"
     if phase_title:
-        return f"你现在在{phase_title}，可以先看卡片里的当前阶段。"
+        return f"你现在在{phase_title}，可以先看计划里的当前阶段。"
     if watchout:
         return f"{watchout}。"
     if action_fragment:
         return f"你可以先{action_fragment}。"
-    return "你可以先看卡片里的当前阶段。"
+    return "你可以先看计划里的当前阶段。"
 
 
 def _birth_journey_current_phase(card_json: dict[str, Any]) -> dict[str, Any]:
@@ -937,6 +967,8 @@ def _birth_journey_action_fragment(action: str) -> str:
     for prefix in ("你可以先", "可以先", "先"):
         if text.startswith(prefix):
             return text[len(prefix) :].strip()
+    if text.startswith("生成"):
+        return f"整理{text.removeprefix('生成').strip()}"
     return text
 
 
@@ -1430,6 +1462,7 @@ def run_agent_loop(
                     loaded_skill_ids.append(skill_id)
             _record_loaded_reference(options.get("context_state"), tool_call["name"], result)
             _record_tool_images(options.get("context_state"), tool_call["name"], result)
+            _record_birth_prep_tool_state(options.get("context_state"), tool_call["name"], tool_call["arguments"], result)
             safe_result = safe_tool_result(result)
             _emit_ag_ui_event(
                 on_ag_ui_event,
@@ -1977,7 +2010,82 @@ def _tool_inputs_for_call(inputs: RuntimeInputs, options: BuildAgentRequestOptio
     context_state = options.get("context_state")
     if isinstance(context_state, ContextState):
         tool_inputs["_loaded_references"] = list(context_state.loaded_references)
+        tool_inputs["_birth_prep_hospital_bag_slots"] = hospital_bag_slots(context_state)
     return tool_inputs
+
+
+def _record_birth_prep_tool_state(context_state: object, tool_name: str, arguments: dict[str, Any], result: dict[str, Any]) -> None:
+    if not isinstance(context_state, ContextState):
+        return
+
+    if tool_name == "birth_journey_plan_card_create":
+        _record_birth_journey_plan_state(context_state, arguments, result)
+        return
+
+    if tool_name != "hospital_bag_form_create":
+        return
+
+    default_values = _object_argument(arguments.get("default_values"))
+    if default_values:
+        merge_hospital_bag_slots(context_state, default_values)
+
+    tool_result = result.get("result")
+    if not isinstance(tool_result, dict):
+        return
+
+    form = tool_result.get("form")
+    if isinstance(form, dict):
+        form_defaults = form.get("default_values")
+        if isinstance(form_defaults, dict):
+            merge_hospital_bag_slots(context_state, form_defaults)
+
+    status = str(tool_result.get("status") or "").strip()
+    missing_fields = tool_result.get("missing_fields")
+    if status == "needs_dialogue_prefill" and isinstance(missing_fields, list) and missing_fields:
+        set_pending_hospital_bag_slot(context_state, str(missing_fields[0]))
+    elif status == "form_created":
+        clear_pending_hospital_bag_slot(context_state)
+
+
+def _record_birth_journey_plan_state(context_state: ContextState, arguments: dict[str, Any], result: dict[str, Any]) -> None:
+    tool_result = result.get("result")
+    if not isinstance(tool_result, dict) or tool_result.get("status") != "card_created":
+        return
+
+    plan_context = _object_argument(arguments.get("plan_context"))
+    card = tool_result.get("card")
+    card_json = card.get("card_json") if isinstance(card, dict) else None
+    owner = card_json.get("owner") if isinstance(card_json, dict) else None
+    overview = card_json.get("overview") if isinstance(card_json, dict) else None
+    due_date_or_week = _first_tool_state_text(
+        plan_context.get("due_date_or_week"),
+        plan_context.get("due_date"),
+        plan_context.get("current_week"),
+        owner.get("due_date_or_week") if isinstance(owner, dict) else None,
+        overview.get("due_date_or_week") if isinstance(overview, dict) else None,
+    )
+    if due_date_or_week:
+        merge_hospital_bag_slots(context_state, {"due_date_or_week": due_date_or_week})
+
+
+def _first_tool_state_text(*values: Any) -> str:
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def _object_argument(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
 
 
 def _execute_project_tool(name: str, arguments: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:

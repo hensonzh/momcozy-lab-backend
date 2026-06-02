@@ -142,8 +142,8 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertEqual(json.loads(result_event["content"])["tool_name"], "milk_plan_preview")
         self.assertEqual(args_event["semantic"]["visibility"], "work_item")
         self.assertEqual(args_event["semantic"]["phase"], "planning")
-        self.assertEqual(args_event["semantic"]["label"], "我正在帮你拟一版奶量计划")
-        self.assertEqual(result_event["semantic"]["label"], "我已经拟好奶量计划草稿了")
+        self.assertEqual(args_event["semantic"]["label"], "我先帮你拟一版奶量计划～")
+        self.assertEqual(result_event["semantic"]["label"], "我拟好奶量计划草稿啦")
 
     def test_tool_start_events_include_user_facing_semantic_contract(self) -> None:
         start_event = tool_call_start_event(
@@ -158,12 +158,26 @@ class AgentToolEventTests(unittest.TestCase):
             start_event["semantic"],
             {
                 "phase": "reading",
-                "label": "我正在看吸奶和喂养记录",
+                "label": "我先看看吸奶和喂养记录～",
                 "visibility": "work_item",
                 "merge_key": "tool:call-1",
                 "priority": 50,
             },
         )
+
+    def test_artifact_tool_result_events_include_specific_done_label(self) -> None:
+        result_event = tool_call_result_event(
+            "message-1",
+            "call-bag",
+            "hospital_bag_card_create",
+            {"ok": True, "tool_name": "hospital_bag_card_create", "result": {"status": "card_created"}},
+            response_id="resp-1",
+            output_index=0,
+            item_id="item-1",
+        )
+
+        self.assertEqual(result_event["semantic"]["visibility"], "work_item")
+        self.assertEqual(result_event["semantic"]["label"], "我已经帮你生成好待产包清单啦")
 
     def test_loop_emits_single_status_channel_and_explicit_artifact_events(self) -> None:
         client = _FakeClient(
@@ -247,6 +261,7 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertEqual(compact["status"], "card_created")
         self.assertEqual(compact["assistant_followup"], {"message": "卡片已经生成好了。"})
         self.assertEqual(compact["card"], {"card_type": "birth_plan_card", "schema_version": "1.0", "created": True})
+        self.assertIn("保留其中的段落换行", compact["final_response_instruction"])
         self.assertNotIn("card_json", json.dumps(compact, ensure_ascii=False))
 
     def test_read_skill_file_records_loaded_reference_context(self) -> None:
@@ -265,7 +280,7 @@ class AgentToolEventTests(unittest.TestCase):
                                 {
                                     "skill_id": "birth-prep",
                                     "kind": "references",
-                                    "path": "references/birth-plan-card.md",
+                                    "path": "references/labor-communication-card.md",
                                 }
                             ),
                         }
@@ -277,13 +292,13 @@ class AgentToolEventTests(unittest.TestCase):
 
         run_agent_loop(
             client,
-            {"user_message": "帮我做分娩沟通卡", "locale": "zh-CN"},
+            {"user_message": "帮我做分娩沟通单", "locale": "zh-CN"},
             {"context_state": context_state, "loaded_skill_ids": ["birth-prep"]},
             ag_ui_thread_id="thread-1",
             ag_ui_run_id="run-1",
         )
 
-        self.assertTrue(any("birth-prep/references/birth-plan-card.md 已在当前会话中读取过" in item for item in context_state.loaded_references))
+        self.assertTrue(any("birth-prep/references/labor-communication-card.md 已在当前会话中读取过" in item for item in context_state.loaded_references))
 
         request = build_agent_request(
             {"user_message": "继续", "locale": "zh-CN", "previous_response_id": "resp-final"},

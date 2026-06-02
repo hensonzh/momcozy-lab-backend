@@ -9,6 +9,29 @@ from momcozy_agent.tool_registry import select_runtime_tools
 
 
 class BirthJourneyPlanCardTests(unittest.TestCase):
+    def test_creates_early_pregnancy_phase_for_newly_pregnant_users(self) -> None:
+        result = create_birth_journey_plan_card(
+            {
+                "plan_context": {
+                    "due_date_or_week": "5周",
+                    "birth_path": "还没确定",
+                    "support_person": "伴侣",
+                },
+                "scope": "full",
+            },
+            {"user_message": "", "message_sent_at": "2026-06-02T09:00:00+08:00"},
+        )
+
+        self.assertEqual(result["status"], "card_created")
+        card = result["card"]["card_json"]
+        self.assertEqual(card["owner"]["current_week"], "孕5周")
+        phases = card["phases"]
+        self.assertEqual([phase["title"] for phase in phases], ["孕早期", "孕中期", "孕晚期", "临产期", "住院期", "产后期"])
+        self.assertEqual(phases[0]["status"], "current")
+        self.assertIn("约 2026/06/02", phases[0]["date_range"])
+        self.assertIn("首次产检", phases[0]["goal"])
+        self.assertEqual(phases[-1]["title"], "产后期")
+
     def test_creates_structured_birth_journey_plan_card_from_week_context(self) -> None:
         result = create_birth_journey_plan_card(
             {
@@ -45,11 +68,20 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         self.assertIn("母乳", rendered)
         self.assertNotIn("证件", rendered)
         self.assertNotIn("产检资料", rendered)
+        self.assertNotIn("生成产检问题清单", rendered)
+        self.assertNotIn("打开分娩沟通单", rendered)
+        self.assertNotIn("生成夜间分工卡", rendered)
+        self.assertNotIn("承接奶量管理计划", rendered)
         self.assertNotIn("| --- |", rendered)
         self.assertNotIn("<br>", rendered)
 
     def test_exposes_birth_journey_plan_tool(self) -> None:
-        tool_names = [tool.get("name") for tool in select_runtime_tools() if isinstance(tool, dict)]
+        namespaces = {
+            str(tool.get("name")): tool
+            for tool in select_runtime_tools()
+            if isinstance(tool, dict) and tool.get("type") == "namespace"
+        }
+        tool_names = [tool.get("name") for tool in namespaces["birth_prep"]["tools"]]
 
         self.assertIn("birth_journey_plan_card_create", tool_names)
 
@@ -112,11 +144,15 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
 
         self.assertEqual(compact["status"], "card_created")
         self.assertEqual(compact["card"], {"card_type": "birth_journey_plan_card", "schema_version": "1.0", "created": True})
-        self.assertIn("最终回复直接输出下面这段 1-3 句中文", compact["final_response_instruction"])
-        self.assertIn("我把生产全过程计划整理好了", compact["final_response_instruction"])
+        self.assertIn("最终回复按段落直接输出下面这段 1-3 句中文", compact["final_response_instruction"])
+        self.assertIn("保留空行", compact["final_response_instruction"])
+        self.assertIn("生产全过程计划我整理好了", compact["final_response_instruction"])
         self.assertIn("你现在在孕中期", compact["final_response_instruction"])
         self.assertIn("先不用把生产准备一次做完", compact["final_response_instruction"])
+        self.assertIn("准备上先列出下次产检最想确认的 3-5 个问题", compact["final_response_instruction"])
         self.assertIn("接下来我可以先陪你整理产检问题", compact["final_response_instruction"])
+        self.assertIn("生产全过程计划我整理好了。\n\n你现在在孕中期", compact["final_response_instruction"])
+        self.assertIn("题。\n\n接下来我可以先陪你整理产检问题。", compact["final_response_instruction"])
         self.assertNotIn("当前阶段是", compact["final_response_instruction"])
         self.assertNotIn("重点先留意", compact["final_response_instruction"])
         self.assertNotIn("准备动作先从这件事开始", compact["final_response_instruction"])
@@ -129,7 +165,7 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
             "tool_name": "birth_journey_plan_card_create",
             "result": {
                 "status": "needs_required_context",
-                "summary": "生成生产全过程计划卡片前，需要先确认孕期、分娩方式和支持人。",
+                "summary": "生成生产全过程计划前，需要先确认孕期、分娩方式和支持人。",
                 "missing_fields": ["due_date_or_week", "birth_path", "support_person"],
                 "data": {
                     "confirmation_question": "我先确认 3 件事再生成计划。",

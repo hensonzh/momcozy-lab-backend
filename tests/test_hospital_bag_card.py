@@ -1,19 +1,67 @@
 from __future__ import annotations
 
+import json
 import unittest
 
+from momcozy_agent.agents import artifact_events_from_tool_result, model_tool_output, safe_tool_result
 from momcozy_agent.tool_handlers.cards import create_form, create_hospital_bag_card, create_hospital_bag_form
+
+
+def _hospital_bag_prefill(**overrides: object) -> dict:
+    values = {
+        "due_date_or_week": "35 周",
+        "return_to_work_timing": "6 周后",
+        "budget_preference": "中预算",
+        "top_worries": ["怕漏买", "怕母乳不够", "怕产后没人帮"],
+    }
+    values.update(overrides)
+    return values
+
+
+def _hospital_bag_form_data(**overrides: object) -> dict:
+    values = {
+        "due_date_or_week": "36 周",
+        "first_birth": "是",
+        "fetus_count": "单胎",
+        "pregnancy_history_or_notes": ["没有"],
+        "birth_path": "顺产",
+        "feeding_intention": "母乳",
+        "return_to_work_timing": "6 周后",
+        "support_person": "有人全天帮忙",
+        "budget_preference": "中预算",
+        "top_worries": ["怕漏买", "怕母乳不够"],
+    }
+    values.update(overrides)
+    return values
+
+
+def _hospital_bag_confirmed_inputs(form_data: dict) -> dict:
+    return {
+        "user_message": (
+            "我已确认待产包信息。\n"
+            "form_id: hospital_bag_intake\n"
+            "confirmed_form_data:\n"
+            f"{json.dumps(form_data, ensure_ascii=False)}"
+        )
+    }
+
+
+def _create_hospital_bag_card_for_test(form_data: dict) -> dict:
+    return create_hospital_bag_card(
+        {"confirmed_form_data": {}},
+        _hospital_bag_confirmed_inputs(form_data),
+    )
 
 
 class HospitalBagCardTests(unittest.TestCase):
     def test_hospital_bag_form_submit_label_is_submit(self) -> None:
-        result = create_hospital_bag_form({}, {"user_message": ""})
+        result = create_hospital_bag_form({"default_values": _hospital_bag_prefill()}, {"user_message": ""})
 
         self.assertEqual(result["form"]["id"], "hospital_bag_intake")
         self.assertEqual(result["form"]["submit_label"], "提交")
 
     def test_hospital_bag_form_uses_revised_intake_questions(self) -> None:
-        result = create_hospital_bag_form({}, {"user_message": ""})
+        result = create_hospital_bag_form({"default_values": _hospital_bag_prefill()}, {"user_message": ""})
 
         fields = result["form"]["fields"]
         field_ids = [field["id"] for field in fields]
@@ -54,6 +102,7 @@ class HospitalBagCardTests(unittest.TestCase):
         result = create_hospital_bag_form(
             {
                 "default_values": {
+                    **_hospital_bag_prefill(),
                     "first_birth": "是",
                     "fetus_count": "单胎",
                     "pregnancy_history_or_notes": ["没有"],
@@ -72,7 +121,28 @@ class HospitalBagCardTests(unittest.TestCase):
         self.assertNotIn("default_value", by_id["birth_path"])
         self.assertNotIn("default_value", by_id["feeding_intention"])
         self.assertNotIn("default_value", by_id["support_person"])
-        self.assertEqual(result["form"]["default_values"], {})
+        self.assertEqual(result["form"]["default_values"], _hospital_bag_prefill())
+
+    def test_hospital_bag_form_uses_session_slots_when_model_omits_defaults(self) -> None:
+        result = create_hospital_bag_form(
+            {"default_values": {}},
+            {
+                "user_message": "",
+                "_birth_prep_hospital_bag_slots": _hospital_bag_prefill(
+                    budget_preference="高预算",
+                    top_worries=["怕漏带", "怕住院不舒服"],
+                ),
+            },
+        )
+
+        self.assertEqual(result["status"], "form_created")
+        self.assertEqual(
+            result["form"]["default_values"],
+            _hospital_bag_prefill(
+                budget_preference="高预算",
+                top_worries=["怕漏带", "怕住院不舒服"],
+            ),
+        )
 
     def test_generic_hospital_bag_form_strips_non_dialogue_field_defaults(self) -> None:
         result = create_form(
@@ -159,7 +229,7 @@ class HospitalBagCardTests(unittest.TestCase):
 
     def test_hospital_bag_form_does_not_default_uncollected_fields(self) -> None:
         result = create_hospital_bag_form(
-            {"default_values": {"due_date_or_week": "35 周"}},
+            {"default_values": _hospital_bag_prefill(due_date_or_week="35 周")},
             {"user_message": ""},
         )
 
@@ -168,7 +238,16 @@ class HospitalBagCardTests(unittest.TestCase):
         self.assertNotIn("default_value", by_id["first_birth"])
         self.assertNotIn("default_value", by_id["birth_path"])
         self.assertNotIn("default_value", by_id["feeding_intention"])
-        self.assertNotIn("default_value", by_id["budget_preference"])
+
+    def test_hospital_bag_form_requires_dialogue_prefill_before_rendering(self) -> None:
+        result = create_hospital_bag_form(
+            {"default_values": {"due_date_or_week": "35 周"}},
+            {"user_message": ""},
+        )
+
+        self.assertEqual(result["status"], "needs_dialogue_prefill")
+        self.assertEqual(result["missing_fields"], ["return_to_work_timing", "budget_preference", "top_worries"])
+        self.assertNotIn("form", result)
 
     def test_hospital_bag_form_prefills_pre_dialogue_fields_when_collected(self) -> None:
         result = create_hospital_bag_form(
@@ -199,17 +278,58 @@ class HospitalBagCardTests(unittest.TestCase):
         self.assertNotIn("default_value", by_id["feeding_intention"])
         self.assertEqual(result["form"]["default_values"]["top_worries"], ["怕漏买", "怕母乳不够", "怕产后没人帮"])
 
-    def test_generated_card_adds_uncommon_item_explanations(self) -> None:
+    def test_hospital_bag_card_requires_frontend_confirmed_form_submission(self) -> None:
         result = create_hospital_bag_card(
-            {
-                "confirmed_form_data": {
-                    "due_date_or_week": "32 周",
-                    "birth_path": "剖宫产",
-                    "feeding_intention": "母乳",
-                    "support_person": "有，且需要准备物品",
-                }
-            },
+            {"confirmed_form_data": _hospital_bag_form_data()},
             {"user_message": ""},
+        )
+
+        self.assertEqual(result["status"], "needs_confirmed_form_data")
+        self.assertNotIn("card", result)
+
+    def test_hospital_bag_card_guard_does_not_emit_artifact(self) -> None:
+        raw = {
+            "ok": True,
+            "tool_name": "hospital_bag_card_create",
+            "result": create_hospital_bag_card(
+                {"confirmed_form_data": _hospital_bag_form_data()},
+                {"user_message": ""},
+            ),
+        }
+
+        safe = safe_tool_result(raw)
+        events = artifact_events_from_tool_result(
+            tool_call_id="call_hospital_bag",
+            tool_call_name="hospital_bag_card_create",
+            safe_result=safe,
+        )
+        compact = model_tool_output(raw)
+
+        self.assertEqual(events, [])
+        self.assertNotIn("card", safe)
+        self.assertIn("工具没有生成表单或结构化内容", compact["final_response_instruction"])
+
+    def test_hospital_bag_card_requires_all_required_form_fields(self) -> None:
+        form_data = _hospital_bag_form_data()
+        form_data.pop("birth_path")
+
+        result = create_hospital_bag_card(
+            {"confirmed_form_data": {}},
+            _hospital_bag_confirmed_inputs(form_data),
+        )
+
+        self.assertEqual(result["status"], "needs_required_form_fields")
+        self.assertEqual(result["missing_fields"], ["birth_path"])
+        self.assertNotIn("card", result)
+
+    def test_generated_card_adds_uncommon_item_explanations(self) -> None:
+        result = _create_hospital_bag_card_for_test(
+            _hospital_bag_form_data(
+                due_date_or_week="32 周",
+                birth_path="剖宫产",
+                feeding_intention="母乳",
+                support_person="有，且需要准备物品",
+            )
         )
 
         groups = result["card"]["card_json"]["packing_groups"]
@@ -219,7 +339,7 @@ class HospitalBagCardTests(unittest.TestCase):
         fetal_monitor_band = next(item for item in items if item["label"] == "胎监带")
         belly_band = next(item for item in items if item["label"] == "收腹带")
         identity_document = next(item for item in items if item["label"] == "身份证件")
-        birth_communication_card = next(item for item in items if item["label"] == "分娩沟通卡")
+        birth_communication_card = next(item for item in items if item["label"] == "分娩沟通单")
 
         self.assertNotIn("润唇膏", labels)
         self.assertEqual(breast_pad["explain"], "放在内衣里吸收漏奶，避免衣服被打湿。")
@@ -233,22 +353,18 @@ class HospitalBagCardTests(unittest.TestCase):
         )
 
     def test_generated_card_marks_field_driven_items(self) -> None:
-        result = create_hospital_bag_card(
-            {
-                "confirmed_form_data": {
-                    "due_date_or_week": "36 周",
-                    "first_birth": "否",
-                    "fetus_count": "双胎",
-                    "pregnancy_history_or_notes": ["宝宝可能 NICU"],
-                    "birth_path": "剖宫产",
-                    "feeding_intention": "混合喂养",
-                    "return_to_work_timing": "6 周后",
-                    "support_person": "支持少",
-                    "budget_preference": "低预算",
-                    "top_worries": ["怕母乳不够", "怕宝宝用品准备不全"],
-                }
-            },
-            {"user_message": ""},
+        result = _create_hospital_bag_card_for_test(
+            _hospital_bag_form_data(
+                first_birth="否",
+                fetus_count="双胎",
+                pregnancy_history_or_notes=["宝宝可能 NICU"],
+                birth_path="剖宫产",
+                feeding_intention="混合喂养",
+                return_to_work_timing="6 周后",
+                support_person="支持少",
+                budget_preference="低预算",
+                top_worries=["怕母乳不够", "怕宝宝用品准备不全"],
+            )
         )
 
         groups = result["card"]["card_json"]["packing_groups"]
@@ -264,23 +380,23 @@ class HospitalBagCardTests(unittest.TestCase):
         self.assertTrue(_has_source(pump, "return_to_work_timing", "6 周后"))
         self.assertNotIn("personalized_by", remote_contacts)
 
+        followup = result["assistant_followup"]["message"]
+        self.assertIn("待产包清单我整理好了", followup)
+        self.assertIn("特殊物品我只保留和你情况强相关的", followup)
+        self.assertIn("分娩方式保留术后友好或需要先问医生的用品", followup)
+        self.assertIn("喂养意向决定哺乳、吸奶和储奶相关用品", followup)
+        self.assertIn("返工时间决定冷藏、储奶和吸奶配件是否提前准备", followup)
+        self.assertIn("/hospital-bag-cart", followup)
+
     def test_generated_card_suppresses_selected_personalization_reasons(self) -> None:
-        result = create_hospital_bag_card(
-            {
-                "confirmed_form_data": {
-                    "due_date_or_week": "36 周",
-                    "first_birth": "是",
-                    "fetus_count": "双胎",
-                    "pregnancy_history_or_notes": ["妊娠糖尿病", "宝宝可能 NICU"],
-                    "birth_path": "剖宫产",
-                    "feeding_intention": "混合喂养",
-                    "return_to_work_timing": "6 周后",
-                    "support_person": "有人全天帮忙",
-                    "budget_preference": "中预算",
-                    "top_worries": ["不知道什么时候去医院", "怕宝宝用品准备不全"],
-                }
-            },
-            {"user_message": ""},
+        result = _create_hospital_bag_card_for_test(
+            _hospital_bag_form_data(
+                fetus_count="双胎",
+                pregnancy_history_or_notes=["妊娠糖尿病", "宝宝可能 NICU"],
+                birth_path="剖宫产",
+                feeding_intention="混合喂养",
+                top_worries=["不知道什么时候去医院", "怕宝宝用品准备不全"],
+            )
         )
 
         groups = result["card"]["card_json"]["packing_groups"]
