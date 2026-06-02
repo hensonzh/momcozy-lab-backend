@@ -91,7 +91,19 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
                 "card": {
                     "card_type": "birth_journey_plan_card",
                     "schema_version": "1.0",
-                    "card_json": {"title": "生产全过程计划", "phases": [{"title": "阶段"}]},
+                    "card_json": {
+                        "title": "生产全过程计划",
+                        "phases": [
+                            {
+                                "title": "孕中期",
+                                "status": "current",
+                                "watchouts": ["这个阶段不用把生产准备一次做完。"],
+                                "actions": ["列出下次产检最想确认的 3-5 个问题。"],
+                                "comate_help": ["生成产检问题清单。"],
+                            }
+                        ],
+                        "next_action": {"label": "整理产检问题", "send_text": "帮我整理下次产检要问的 3-5 个问题"},
+                    },
                 },
             },
         }
@@ -100,8 +112,14 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
 
         self.assertEqual(compact["status"], "card_created")
         self.assertEqual(compact["card"], {"card_type": "birth_journey_plan_card", "schema_version": "1.0", "created": True})
-        self.assertIn("最终回复只能输出下面这一句", compact["final_response_instruction"])
-        self.assertIn("已经整理好了生产全过程计划", compact["final_response_instruction"])
+        self.assertIn("最终回复直接输出下面这段 1-3 句中文", compact["final_response_instruction"])
+        self.assertIn("我把生产全过程计划整理好了", compact["final_response_instruction"])
+        self.assertIn("你现在在孕中期", compact["final_response_instruction"])
+        self.assertIn("先不用把生产准备一次做完", compact["final_response_instruction"])
+        self.assertIn("接下来我可以先陪你整理产检问题", compact["final_response_instruction"])
+        self.assertNotIn("当前阶段是", compact["final_response_instruction"])
+        self.assertNotIn("重点先留意", compact["final_response_instruction"])
+        self.assertNotIn("准备动作先从这件事开始", compact["final_response_instruction"])
         self.assertNotIn("assistant_followup", compact)
         self.assertNotIn("phases", json.dumps(compact, ensure_ascii=False))
 

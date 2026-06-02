@@ -642,7 +642,7 @@ Agent 状态通过 `CUSTOM` / `momcozy.agent.status` 发送：
 前端行为：
 
 - 记录当前 tool name。
-- 将 provisional assistant text 移入 work panel。
+- 已经流出的 provisional assistant text 保留在 assistant 文本气泡中。
 - 调用 `addWorkToolStart()`，显示工具开始状态。
 
 #### `TOOL_CALL_ARGS`
@@ -790,12 +790,12 @@ Agent 状态通过 `CUSTOM` / `momcozy.agent.status` 发送：
 
 如果模型在 loop 中先输出了一段 assistant text，随后又发生工具调用：
 
-1. 前端先临时显示 assistant bubble。
-2. 收到 `TOOL_CALL_START` / `ARGS` / `END` / `RESULT` 时调用 `moveProvisionalTextToWorkPanel()`。
-3. 这段文本会被移入 work panel，作为本轮中间 narration。
-4. 最后一轮 assistant text 才保留在最终 assistant bubble。
+1. 前端先显示 assistant bubble。
+2. 收到 `TOOL_CALL_START` / `ARGS` / `END` / `RESULT` 时，文本仍保留在 assistant bubble 中。
+3. 如果后续出现 `ARTIFACT_CREATED`，结构化 UI 追加在同一轮消息流中，展示在这段文本之后。
+4. 最后一轮 assistant text 继续追加在当前消息流里，通常展示在 artifact 之后。
 
-这个设计用于区分“loop 中间过程”和“最终回答”。
+这个设计让模型主动给出的简短说明保持在对话主线里；work panel 只展示工具执行状态，不承载这类自然语言说明。
 
 业务响应约束：情绪承接、安全边界和关键下一步不能只出现在中间 assistant text。模型需要在最后一轮 assistant text 中重新自然体现这些内容，尤其是产前、奶量、宝宝健康、设备受挫和情绪支持场景。
 
@@ -821,7 +821,6 @@ work panel 懒创建。只有出现工具调用、中间 narration、失败信�
 - `TOOL_CALL_ARGS`
 - `TOOL_CALL_END`
 - `TOOL_CALL_RESULT`
-- loop 中间 assistant text
 - thinking / preparing 状态
 
 工具 work item 必须用稳定 key 合并，避免 start、args、end、result 分裂成多行。前端当前按以下别名查找同一个 item：
@@ -896,12 +895,8 @@ work item 文案由前端按阶段语义映射，核心映射在 `toolWorkPhase(
   - `consultant.credentials`
   - `consultant.experience`
   - `consultant.bio`
-  - `consultant.specialties`
-  - `help_topics`
-  - `prep_items`
-  - `boundary_note`
   - `chat.label`
-  - `chat.hint`
+  - `chat.note`
 - 前端为每张卡生成独立 `consult_id`。
 - “在线咨询”链接会携带：
   - `thread_id`
@@ -1133,7 +1128,7 @@ IBCLC 页面中，事件提交失败不会阻止用户结束咨询；它会走�
 1. 前端只负责渲染结构化 UI，不直接生成业务内容。
 2. 表单、卡片、工单、IBCLC 咨询卡都由工具结果驱动。
 3. 工具原始结果不会完整暴露给前端，后端会做 `safe_tool_result()` 裁剪。
-4. loop 中间文本和工具状态进入 work panel，最终 assistant text 保留为普通 assistant bubble。
+4. loop 中间文本保留在普通 assistant bubble，工具状态进入 work panel。
 5. 会话连续性由后端 session + Responses API `previous_response_id` 维护，前端需要稳定传 `threadId`。
 6. 外部 H5 页面事件通过 `/api/client-event` 回写 session，再通过 `client_event_context` 进入后续智能体上下文。
 7. IBCLC 咨询完成状态按 `consult_id` 绑定单张卡片，避免同一会话中新卡片误继承旧状态。
@@ -1148,7 +1143,7 @@ IBCLC 页面中，事件提交失败不会阻止用户结束咨询；它会走�
 3. `TEXT_MESSAGE_END` 在需要时先于 `RUN_FINISHED` 发送。
 4. 工具参数和结果仍然经过 `safe_tool_arguments()`、`safe_tool_result()` 脱敏。
 5. 工具事件保留足够 ID，前端可以把同一个工具调用合并成一条 work item。
-6. 中间 assistant text 仍然迁移到 work panel，最终 assistant text 保留在普通 assistant bubble。
+6. 中间 assistant text 仍然保留在普通 assistant bubble；工具状态仍然进入 work panel。
 7. 表单、卡片、工单、IBCLC 咨询卡仍由结构化工具结果驱动，前端不从 assistant 文本猜业务含义。
 8. `docs/web-agent-communication.md` 与事件名、payload 字段和事件顺序同步更新。
 9. 至少验证四类路径：纯文本回复、工具调用、工具调用并渲染表单或卡片、`RUN_ERROR` 失败流。

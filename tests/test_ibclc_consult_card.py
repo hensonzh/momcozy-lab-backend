@@ -16,19 +16,34 @@ class IbclcConsultCardTests(unittest.TestCase):
         self.assertEqual(card["card_type"], "ibclc_consult_card")
         self.assertEqual(card["schema_version"], "1.1")
         self.assertEqual(card["title"], "IBCLC 在线咨询")
+        self.assertNotIn("subtitle", card)
 
         consultant = card["consultant"]
         self.assertEqual(consultant["credentials"], "IBCLC 国际认证哺乳顾问")
-        self.assertIn("产后哺乳支持经验", consultant["experience"])
-        self.assertGreaterEqual(len(consultant["specialties"]), 4)
+        self.assertNotIn("国际认证哺乳顾问，", consultant["bio"])
+        self.assertEqual(consultant["experience"], "8 年产后哺乳支持经验")
+        self.assertIn("拥有 8 年产后哺乳支持经验", consultant["bio"])
+        self.assertIn("核心擅长含乳评估", consultant["bio"])
+        self.assertIn("有效吸吮与母乳移出观察", consultant["bio"])
+        self.assertIn("判断摄入信号", consultant["bio"])
+        self.assertIn("个性化调整建议", consultant["bio"])
+        self.assertNotIn("specialties", consultant)
 
-        self.assertGreaterEqual(len(card["help_topics"]), 4)
-        self.assertTrue(all(topic["title"] for topic in card["help_topics"]))
-        self.assertGreaterEqual(len(card["prep_items"]), 4)
-        self.assertIn("医生", card["boundary_note"])
+        self.assertNotIn("help_topics", card)
+        self.assertNotIn("prep_items", card)
+        self.assertNotIn("boundary_note", card)
 
         self.assertEqual(card["chat"]["label"], "咨询 IBCLC")
-        self.assertIn("快速接手", card["chat"]["hint"])
+        self.assertEqual(card["chat"]["note"], "启动咨询后，会自动将你的问题同步给顾问")
+        self.assertNotIn("hint", card["chat"])
+
+    def test_custom_bio_removes_repeated_certification_prefix(self) -> None:
+        result = create_ibclc_consult_card(
+            {"consultant_bio": "国际认证泌乳顾问，专注亲喂和堵奶支持。"},
+            {"user_message": "", "locale": "zh-CN"},
+        )
+
+        self.assertEqual(result["card"]["consultant"]["bio"], "专注亲喂和堵奶支持。")
 
 
 if __name__ == "__main__":

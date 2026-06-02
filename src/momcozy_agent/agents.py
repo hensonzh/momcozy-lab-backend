@@ -858,21 +858,104 @@ def _compact_birth_journey_plan_card_output(safe: dict[str, Any]) -> dict[str, A
     card = safe.get("card")
     card_json = card.get("card_json") if isinstance(card, dict) else None
     card_json_dict = card_json if isinstance(card_json, dict) else {}
-    next_action = card_json_dict.get("next_action") if isinstance(card_json_dict.get("next_action"), dict) else {}
-    label = str(next_action.get("label") or "").strip()
-    if label:
-        response = f"已经整理好了生产全过程计划。你先看当前阶段；下一步可以继续{label}。"
-    else:
-        response = "已经整理好了生产全过程计划。你先看当前阶段，后面可以再按孕周和医院信息调整。"
+    response = _birth_journey_plan_final_response(card_json_dict)
 
     return _compact_card_tool_output(
         safe,
         (
-            "生产全过程计划卡片已经展示完整路线图。最终回复只能输出下面这一句，不要改写、扩写，"
-            "也不要复述卡片里的阶段、日期、准备动作，或在这句之外再添加其他服务和多个下一步："
+            "生产全过程计划卡片已经展示完整路线图。最终回复直接输出下面这段 1-3 句中文，不要改写、扩写，"
+            "语气要保持自然陪伴，不要复述卡片里的所有阶段、日期或完整清单："
             f"{response}"
         ),
     )
+
+
+def _birth_journey_plan_final_response(card_json: dict[str, Any]) -> str:
+    current_phase = _birth_journey_current_phase(card_json)
+    phase_title = str(current_phase.get("title") or "").strip()
+    watchout = _first_birth_journey_item(current_phase.get("watchouts"))
+    action = _first_birth_journey_item(current_phase.get("actions"))
+    goal = _clean_birth_journey_fragment(current_phase.get("goal"))
+    next_action = card_json.get("next_action") if isinstance(card_json.get("next_action"), dict) else {}
+    label = str(next_action.get("label") or "").strip()
+    help_item = _first_birth_journey_item(current_phase.get("comate_help"))
+
+    return "".join(
+        [
+            "我把生产全过程计划整理好了。",
+            _birth_journey_phase_summary_sentence(phase_title, watchout, action, goal),
+            _birth_journey_service_sentence(label or help_item),
+        ]
+    )
+
+
+def _birth_journey_phase_summary_sentence(phase_title: str, watchout: str, action: str, goal: str) -> str:
+    watchout = _birth_journey_watchout_fragment(watchout)
+    action_fragment = _birth_journey_action_fragment(action)
+    if phase_title and watchout:
+        return f"你现在在{phase_title}，{watchout}。"
+    if phase_title and goal:
+        return f"你现在在{phase_title}，这阶段先{goal}。"
+    if phase_title:
+        return f"你现在在{phase_title}，可以先看卡片里的当前阶段。"
+    if watchout:
+        return f"{watchout}。"
+    if action_fragment:
+        return f"你可以先{action_fragment}。"
+    return "你可以先看卡片里的当前阶段。"
+
+
+def _birth_journey_current_phase(card_json: dict[str, Any]) -> dict[str, Any]:
+    phases = card_json.get("phases")
+    if not isinstance(phases, list):
+        return {}
+    for phase in phases:
+        if isinstance(phase, dict) and phase.get("status") == "current":
+            return phase
+    for phase in phases:
+        if isinstance(phase, dict):
+            return phase
+    return {}
+
+
+def _first_birth_journey_item(value: Any) -> str:
+    if not isinstance(value, list):
+        return ""
+    for item in value:
+        text = _clean_birth_journey_fragment(item)
+        if text:
+            return text
+    return ""
+
+
+def _clean_birth_journey_fragment(value: Any) -> str:
+    return str(value or "").strip().rstrip("。；;，, ")
+
+
+def _birth_journey_action_fragment(action: str) -> str:
+    text = _clean_birth_journey_fragment(action)
+    for prefix in ("你可以先", "可以先", "先"):
+        if text.startswith(prefix):
+            return text[len(prefix) :].strip()
+    return text
+
+
+def _birth_journey_watchout_fragment(watchout: str) -> str:
+    text = _clean_birth_journey_fragment(watchout).replace("；", "，")
+    if text.startswith("这个阶段"):
+        text = text.removeprefix("这个阶段").lstrip("，, ")
+    if text.startswith("不用"):
+        text = f"先{text}"
+    return text
+
+
+def _birth_journey_service_sentence(label: str) -> str:
+    service = str(label or "").strip().rstrip("。；;，, ")
+    if not service:
+        return "接下来我可以再陪你按孕周、医院流程和支持人分工继续细化。"
+    if service.startswith("继续"):
+        service = service.removeprefix("继续").strip()
+    return f"接下来我可以先陪你{service}。"
 
 
 def _compact_milk_analysis_card_output(safe: dict[str, Any]) -> dict[str, Any]:

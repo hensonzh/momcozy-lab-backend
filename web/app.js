@@ -495,27 +495,6 @@ function addWorkToolResult(run, event, result, toolName) {
   });
 }
 
-function addWorkNarration(run, markdown) {
-  const text = String(markdown || "").trim();
-  if (!run || !text) return null;
-  run.hasAction = true;
-  const workPanel = ensureWorkPanel(run);
-  const list = workPanel?.querySelector(".work-list");
-  if (!list) return null;
-
-  const item = document.createElement("li");
-  item.className = "work-item work-narration";
-
-  const content = document.createElement("div");
-  content.className = "work-narration-content";
-  setAssistantMarkdown(content, text);
-  item.appendChild(content);
-
-  list.appendChild(item);
-  messages.scrollTop = messages.scrollHeight;
-  return item;
-}
-
 function workItemKeyForToolCall(event) {
   return workItemKeysForToolCall(event)[0] || "tool:unknown";
 }
@@ -2406,14 +2385,6 @@ async function streamChat(text, workRun, images = []) {
     return assistantNode;
   }
 
-  function moveProvisionalTextToWorkPanel() {
-    if (!assistantNode) return;
-    const markdown = getAssistantMarkdown(assistantNode);
-    removeMessageElement(assistantNode);
-    assistantNode = null;
-    addWorkNarration(workRun, markdown);
-  }
-
   function rememberToolName(event, toolName) {
     toolName = normalizeToolName(toolName);
     if (!toolName) return;
@@ -2459,34 +2430,28 @@ async function streamChat(text, workRun, images = []) {
         activeToolName = normalizeToolName(event.tool_call_name || "");
         if (activeToolName) usedTools.add(activeToolName);
         rememberToolName(event, activeToolName);
-        moveProvisionalTextToWorkPanel();
         addWorkToolStart(workRun, event);
       } else if (event.type === "TOOL_CALL_ARGS") {
         const toolName = toolNameForEvent(event);
         if (toolName) usedTools.add(toolName);
-        moveProvisionalTextToWorkPanel();
         addWorkToolArgs(workRun, event, toolName);
       } else if (event.type === "TOOL_CALL_END") {
         const toolName = toolNameForEvent(event);
         if (toolName) usedTools.add(toolName);
-        moveProvisionalTextToWorkPanel();
         addWorkToolEnd(workRun, event, toolName);
       } else if (event.type === "TOOL_CALL_RESULT") {
         const result = parseJson(event.content) || {};
         const toolName = normalizeToolName(result.tool_name || event.tool_call_name || toolNameForEvent(event));
         usedTools.add(toolName);
         rememberToolName(event, toolName);
-        moveProvisionalTextToWorkPanel();
         updateMeta({ loaded_skill_ids: result.skill_id ? [result.skill_id] : undefined });
         addWorkToolResult(workRun, event, result, toolName);
       } else if (event.type === "ARTIFACT_CREATED") {
-        moveProvisionalTextToWorkPanel();
         const artifactKind = addArtifactFromEvent(event);
         if (artifactKind === "form") formShown = true;
         if (artifactKind === "card") cardShown = true;
         if (artifactKind) assistantNode = null;
       } else if (event.type === "CONFIRMATION_REQUIRED") {
-        moveProvisionalTextToWorkPanel();
         addWorkConfirmationRequired(workRun, event);
       } else if (event.type === "TEXT_MESSAGE_CONTENT") {
         workRun.hasOutput = true;
