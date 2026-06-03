@@ -397,15 +397,46 @@ class HospitalBagCardTests(unittest.TestCase):
 
         followup = result["assistant_followup"]["message"]
         self.assertIn("待产包清单我整理好了", followup)
-        self.assertIn("特殊物品我只保留和你情况强相关的", followup)
-        self.assertIn("分娩方式保留术后友好或需要先问医生的用品", followup)
-        self.assertIn("喂养意向决定哺乳、吸奶和储奶相关用品", followup)
-        self.assertIn("返工时间决定冷藏、储奶和吸奶配件是否提前准备", followup)
+        self.assertIn("考虑到你倾向剖宫产", followup)
+        self.assertIn("我为你准备了高腰宽松内裤和不压腹出院裤/裙", followup)
+        self.assertIn("收腹带先放在需要问医生的项目里", followup)
+        self.assertIn("考虑到你准备混合喂养", followup)
+        self.assertIn("哺乳文胸/哺乳背心、防溢乳垫、便携式吸奶器和储奶袋/储奶瓶", followup)
+        self.assertIn("考虑到你预计6 周后返工", followup)
+        self.assertIn("冷藏包/冰袋", followup)
+        self.assertIn("吸奶配件清洁包", followup)
+        self.assertIn("具体可以看下面的待产包清单", followup)
         self.assertIn("按实际情况删减后再决定是否购买", followup)
+        self.assertNotIn("配方奶", followup)
         self.assertNotIn("家里有什么", followup)
         self.assertNotIn("直接下单", followup)
         self.assertNotIn("一键打包下单", followup)
         self.assertIn("/hospital-bag-cart", followup)
+
+    def test_hospital_bag_followup_only_mentions_existing_special_items(self) -> None:
+        result = _create_hospital_bag_card_for_test(
+            _hospital_bag_form_data(
+                fetus_count="双胎",
+                birth_path="顺产",
+                feeding_intention="母乳",
+                return_to_work_timing="暂不返工",
+                top_worries=["怕宝宝用品准备不全"],
+            )
+        )
+
+        groups = result["card"]["card_json"]["packing_groups"]
+        labels = {item["label"] for group in groups for item in group["items"]}
+        followup = result["assistant_followup"]["message"]
+
+        self.assertIn("考虑到这次是双胎", followup)
+        self.assertIn("宝宝出院衣物", followup)
+        self.assertIn("包被", followup)
+        self.assertIn("具体可以看下面的待产包清单", followup)
+        self.assertNotIn("冷藏包/冰袋", followup)
+        self.assertNotIn("吸奶配件清洁包", followup)
+        self.assertNotIn("配方奶", followup)
+        for absent_label in ["冷藏包/冰袋", "吸奶配件清洁包", "配方奶"]:
+            self.assertNotIn(absent_label, labels)
 
     def test_generated_card_suppresses_selected_personalization_reasons(self) -> None:
         result = _create_hospital_bag_card_for_test(

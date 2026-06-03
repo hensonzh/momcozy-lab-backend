@@ -133,6 +133,24 @@ class BirthPrepPromptRuleTests(unittest.TestCase):
         self.assertIn("不要先用自然对话收集 3 个字段", reference)
         self.assertIn("用户确认开始待产包整理后可直接调用", schema_text)
 
+    def test_hospital_bag_entry_invite_does_not_reference_removed_fields(self) -> None:
+        reference = (ROOT / "skills" / "birth-prep" / "references" / "hospital-bag-service.md").read_text(encoding="utf-8")
+        entry_section = reference.split("## 进入与邀约", 1)[1].split("## 创建表单", 1)[0]
+        positive_section = entry_section.split("入口邀约不要说", 1)[0]
+
+        self.assertIn("会按你的孕周、分娩方式、喂养意向、产后支持和最担心的事来取舍", entry_section)
+        self.assertIn("入口邀约不要说", entry_section)
+        for phrase in (
+            "按你的医院",
+            "医院情况",
+            "住院天数",
+            "家里已有物品",
+            "已有物品",
+        ):
+            self.assertNotIn(phrase, positive_section)
+            self.assertIn(phrase, entry_section)
+        self.assertNotIn("医院要求不一致", entry_section)
+
     def test_hospital_bag_slots_do_not_capture_budget_preference(self) -> None:
         state = ContextState()
 

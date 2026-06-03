@@ -3381,9 +3381,9 @@ def _hospital_bag_cart_followup(card_json: dict[str, Any]) -> dict[str, str]:
     special_logic = _hospital_bag_special_item_logic_summary(card_json)
     message_parts = ["待产包清单我整理好了。"]
     if special_logic:
-        message_parts.append(f"特殊物品我只保留和你情况强相关的，主要按{special_logic}来取舍；医院规则不确定的，先放在需要确认的项目里。")
+        message_parts.append(special_logic)
     else:
-        message_parts.append("特殊物品我只保留和孕周、喂养、医院确认真正相关的项目；不确定的先放在需要确认的项目里。")
+        message_parts.append("我只保留和孕周、喂养、医院确认真正相关的非常规物品；不确定的先放在需要确认的项目里。具体可以看下面的待产包清单。")
     message_parts.append(
         "我也把适合放入购物车参考的妈妈/宝宝用品整理好了，不用一次买完，先看清单里的优先级，按实际情况删减后再决定是否购买。"
     )
@@ -3394,8 +3394,46 @@ def _hospital_bag_cart_followup(card_json: dict[str, Any]) -> dict[str, str]:
     }
 
 
+HOSPITAL_BAG_SPECIAL_LOGIC_FIELD_ORDER = [
+    "birth_path",
+    "feeding_intention",
+    "return_to_work_timing",
+    "fetus_count",
+    "pregnancy_history_or_notes",
+    "top_worries",
+    "support_person",
+]
+
+HOSPITAL_BAG_SPECIAL_LOGIC_ITEM_ORDER: dict[str, list[str]] = {
+    "birth_path": ["高腰宽松内裤", "不压腹出院裤/裙", "收腹带"],
+    "feeding_intention": ["哺乳文胸/哺乳背心", "防溢乳垫", "便携式吸奶器", "储奶袋/储奶瓶", "乳头霜", "乳盾", "奶瓶", "配方奶"],
+    "return_to_work_timing": ["冷藏包/冰袋", "储奶袋/储奶瓶", "吸奶配件清洁包", "便携式吸奶器", "标签笔"],
+    "fetus_count": ["宝宝出院衣物", "备用连体衣", "包被", "小毯子", "纸尿裤", "湿巾/棉柔巾", "帽子/袜子", "安全提篮/安全座椅"],
+    "pregnancy_history_or_notes": ["血糖记录/饮食医嘱", "医生允许的加餐", "血压记录/用药清单", "近期B超/医生医嘱", "NICU探视/送奶规则确认", "小码/早产儿衣物确认", "标签笔"],
+    "top_worries": ["便携式吸奶器", "乳头霜", "乳盾", "宝宝出院衣物", "备用连体衣", "包被", "医院路线和停车信息", "夜间入口信息"],
+    "support_person": ["床边收纳袋", "陪产人身份证件", "手机充电器", "充电宝", "换洗衣物", "外套", "洗漱用品"],
+}
+
+
 def _hospital_bag_special_item_logic_summary(card_json: dict[str, Any]) -> str:
-    fields: set[str] = set()
+    entries_by_field = _hospital_bag_special_item_entries_by_field(card_json)
+    sentences: list[str] = []
+    for field in HOSPITAL_BAG_SPECIAL_LOGIC_FIELD_ORDER:
+        entries = entries_by_field.get(field) or []
+        if not entries:
+            continue
+        sentence = _hospital_bag_special_item_logic_sentence(field, entries)
+        if sentence:
+            sentences.append(sentence)
+        if len(sentences) >= 3:
+            break
+    if not sentences:
+        return ""
+    return "".join(sentences) + "具体可以看下面的待产包清单。"
+
+
+def _hospital_bag_special_item_entries_by_field(card_json: dict[str, Any]) -> dict[str, list[dict[str, str]]]:
+    entries_by_field: dict[str, list[dict[str, str]]] = {}
     groups = card_json.get("packing_groups")
     if not isinstance(groups, list):
         groups = []
@@ -3408,6 +3446,10 @@ def _hospital_bag_special_item_logic_summary(card_json: dict[str, Any]) -> str:
         for item in items:
             if not isinstance(item, dict):
                 continue
+            label = _first_text(item.get("label"))
+            if not label:
+                continue
+            priority = _first_text(item.get("priority"))
             sources = item.get("personalized_by")
             if not isinstance(sources, list):
                 continue
@@ -3415,25 +3457,97 @@ def _hospital_bag_special_item_logic_summary(card_json: dict[str, Any]) -> str:
                 if isinstance(source, dict):
                     field = _first_text(source.get("field"))
                     if field:
-                        fields.add(field)
-    summaries = [
-        summary
-        for field, summary in (
-            ("birth_path", "分娩方式保留术后友好或需要先问医生的用品"),
-            ("feeding_intention", "喂养意向决定哺乳、吸奶和储奶相关用品"),
-            ("return_to_work_timing", "返工时间决定冷藏、储奶和吸奶配件是否提前准备"),
-            ("fetus_count", "胎数调整宝宝衣物、包被和消耗品数量"),
-            ("pregnancy_history_or_notes", "医生提示只转成医嘱资料或医院确认项"),
-            ("top_worries", "你最担心的点把相关项目提到更靠前"),
-            ("support_person", "支持人情况影响联系人、交通和陪产人用品"),
-            ("due_date_or_week", "当前孕周决定先问医院、开始采购还是直接打包"),
-            ("first_birth", "是否第一胎影响预登记、沟通和家庭照护安排"),
-        )
-        if field in fields
-    ]
-    if not summaries:
+                        entries_by_field.setdefault(field, []).append(
+                            {
+                                "label": label,
+                                "priority": priority,
+                                "condition": _first_text(source.get("condition")),
+                                "effect": _first_text(source.get("effect")),
+                            }
+                        )
+    return entries_by_field
+
+
+def _hospital_bag_special_item_logic_sentence(field: str, entries: list[dict[str, str]]) -> str:
+    condition = _hospital_bag_first_entry_condition(entries)
+    prepared_limit = 3 if field in {"return_to_work_timing", "fetus_count", "pregnancy_history_or_notes", "top_worries"} else 4
+    if field == "birth_path":
+        prepared_limit = 2
+    prepared = _hospital_bag_special_item_labels(field, entries, confirm_first=False, limit=prepared_limit)
+    confirm_first = _hospital_bag_special_item_labels(field, entries, confirm_first=True, limit=2)
+    if field == "birth_path":
+        intro = "考虑到你倾向剖宫产" if "剖" in condition else f"考虑到你的分娩方式是{condition}"
+        return _hospital_bag_prepared_sentence(intro, prepared, confirm_first, confirm_text="先放在需要问医生的项目里")
+    if field == "feeding_intention":
+        intro = f"考虑到你准备{condition or '母乳或混合'}喂养"
+        return _hospital_bag_prepared_sentence(intro, prepared, confirm_first)
+    if field == "return_to_work_timing":
+        intro = f"考虑到你预计{condition}返工" if condition else "考虑到你产后不久要返工"
+        return _hospital_bag_prepared_sentence(intro, prepared, confirm_first)
+    if field == "fetus_count":
+        labels = prepared or confirm_first
+        if not labels:
+            return ""
+        subject = f"这次是{condition}" if condition else "宝宝数量"
+        return f"考虑到{subject}，我把{_join_chinese_labels(labels[:3])}的数量按你的情况做了调整。"
+    if field == "pregnancy_history_or_notes":
+        labels = prepared or confirm_first
+        if not labels:
+            return ""
+        detail = condition or "医生提示"
+        return f"考虑到你填写了{detail}，我为你准备了{_join_chinese_labels(labels[:3])}，并把需要按医院规则确认的项目留在清单里。"
+    if field == "top_worries":
+        labels = prepared or confirm_first
+        if not labels:
+            return ""
+        detail = condition or "最担心的事"
+        return f"考虑到你担心{detail}，我为你准备了{_join_chinese_labels(labels[:3])}。"
+    if field == "support_person":
+        return _hospital_bag_prepared_sentence("考虑到你的支持人安排", prepared, confirm_first)
+    return ""
+
+
+def _hospital_bag_prepared_sentence(intro: str, prepared: list[str], confirm_first: list[str], *, confirm_text: str = "先放在需要确认的项目里") -> str:
+    parts: list[str] = []
+    if prepared:
+        parts.append(f"我为你准备了{_join_chinese_labels(prepared)}")
+    if confirm_first:
+        parts.append(f"{_join_chinese_labels(confirm_first)}{confirm_text}")
+    if not parts:
         return ""
-    return "、".join(summaries[:3])
+    return f"{intro}，{'，'.join(parts)}。"
+
+
+def _hospital_bag_special_item_labels(field: str, entries: list[dict[str, str]], *, confirm_first: bool, limit: int) -> list[str]:
+    preferred = HOSPITAL_BAG_SPECIAL_LOGIC_ITEM_ORDER.get(field, [])
+    preferred_rank = {label: index for index, label in enumerate(preferred)}
+    filtered = [
+        entry
+        for entry in entries
+        if (_first_text(entry.get("priority")) == "confirm_first") is confirm_first
+    ]
+    filtered.sort(key=lambda entry: (preferred_rank.get(_first_text(entry.get("label")), len(preferred_rank)), _first_text(entry.get("label"))))
+    labels = _dedupe_strings([_first_text(entry.get("label")) for entry in filtered if _first_text(entry.get("label"))])
+    return labels[:limit]
+
+
+def _hospital_bag_first_entry_condition(entries: list[dict[str, str]]) -> str:
+    for entry in entries:
+        condition = _first_text(entry.get("condition"))
+        if condition:
+            return condition
+    return ""
+
+
+def _join_chinese_labels(labels: list[str]) -> str:
+    clean = [label for label in labels if label]
+    if not clean:
+        return ""
+    if len(clean) == 1:
+        return clean[0]
+    if len(clean) == 2:
+        return "和".join(clean)
+    return "、".join(clean[:-1]) + "和" + clean[-1]
 
 
 def _prepare_birth_plan_card(card_json: dict[str, Any], inputs: RuntimeInputs, form_data_override: dict[str, Any] | None = None) -> dict[str, str]:
