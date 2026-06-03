@@ -125,6 +125,7 @@ def _normalize_side(value: Any) -> dict[str, Any]:
         "duration_seconds": _number(_first_present(value, "duration_seconds", "duration")),
         "has_milk": _optional_bool(value.get("has_milk") if "has_milk" in value else value.get("hasMilk")),
         "has_letdown": _optional_bool(value.get("has_letdown") if "has_letdown" in value else value.get("hasLetdown")),
+        "letdown_count": _count(_first_present(value, "letdown_count", "letdownCount")),
     }
 
 
@@ -266,21 +267,14 @@ def _status_badge(*, process_all: float | None, total_milk_ml: float | None) -> 
 
 
 def _letdown_summary(*, left: dict[str, Any], right: dict[str, Any]) -> str:
-    left_letdown = left.get("has_letdown")
-    right_letdown = right.get("has_letdown")
-    if left_letdown is True and right_letdown is True:
-        return "双侧已检测到"
-    if left_letdown is True and right_letdown is False:
-        return "左侧已检测到，右侧未检测到"
-    if left_letdown is False and right_letdown is True:
-        return "右侧已检测到，左侧未检测到"
-    if left_letdown is True:
-        return "左侧已检测到"
-    if right_letdown is True:
-        return "右侧已检测到"
-    if left_letdown is False and right_letdown is False:
-        return "未检测到"
-    return "未获取"
+    left_count = left.get("letdown_count")
+    right_count = right.get("letdown_count")
+    return "\n".join(
+        (
+            f"右侧检测到{_format_count(right_count)}次奶阵",
+            f"左侧检测到{_format_count(left_count)}次奶阵",
+        )
+    )
 
 
 def _side_balance_label(*, left_milk_ml: float | None, right_milk_ml: float | None) -> str:
@@ -305,6 +299,12 @@ def _format_percent(value: float | int | None) -> str:
     if math.isclose(numeric, round(numeric)):
         return f"{int(round(numeric))}%"
     return f"{round(numeric, 1):g}%"
+
+
+def _format_count(value: int | None) -> str:
+    if value is None:
+        return "0"
+    return str(value)
 
 
 def _agent_context_text(event: dict[str, Any]) -> str:
@@ -392,6 +392,13 @@ def _number(value: Any) -> float | None:
     if not math.isfinite(parsed):
         return None
     return round(parsed, 1)
+
+
+def _count(value: Any) -> int | None:
+    number = _number(value)
+    if number is None:
+        return None
+    return max(int(round(number)), 0)
 
 
 def _bool(value: Any, *, default: bool) -> bool:
