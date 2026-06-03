@@ -275,6 +275,7 @@ async def stream_ag_ui_events(
         pending_run_finished: dict[str, Any] | None = None
         pending_assistant_followups: list[str] = []
         pending_quick_replies: list[dict[str, str]] | None = None
+        suppress_quick_replies = False
         text_started = False
         streamed_text_parts: list[str] = []
 
@@ -283,11 +284,13 @@ async def stream_ag_ui_events(
             push(event)
 
         def send_ag_ui_event(event: dict[str, Any]) -> None:
-            nonlocal pending_run_finished, pending_quick_replies
+            nonlocal pending_run_finished, pending_quick_replies, suppress_quick_replies
             if event.get("type") == "RUN_FINISHED":
                 log_timing("ag_ui:RUN_FINISHED buffered", _ag_ui_timing_metadata(event))
                 pending_run_finished = event
                 return
+            if _is_form_like_artifact_event(event):
+                suppress_quick_replies = True
             quick_replies = _quick_replies_from_tool_result_event(event)
             if quick_replies is not None:
                 pending_quick_replies = quick_replies
@@ -367,7 +370,8 @@ async def stream_ag_ui_events(
                     }
                 )
             if pending_run_finished:
-                send_event(quick_replies_event(assistant_message_id, pending_quick_replies or _default_quick_replies()))
+                if not suppress_quick_replies:
+                    send_event(quick_replies_event(assistant_message_id, pending_quick_replies or _default_quick_replies()))
                 send_event(pending_run_finished)
         except Exception as exc:
             send_event(run_error_event(str(exc), type(exc).__name__, thread_id=str(thread_id), run_id=str(run_id)))
@@ -611,6 +615,21 @@ def _is_quick_replies_tool_event(event: dict[str, Any]) -> bool:
             metadata = value.get("metadata")
             return isinstance(metadata, dict) and str(metadata.get("tool_name") or "") == QUICK_REPLIES_TOOL_NAME
     return False
+
+
+def _is_form_like_artifact_event(event: dict[str, Any]) -> bool:
+    if event.get("type") != "ARTIFACT_CREATED":
+        return False
+    artifact_type = str(event.get("artifact_type") or event.get("artifactType") or "").strip()
+    if artifact_type in {"form", "support_ticket", "support_ticket_draft"}:
+        return True
+    tool_name = str(event.get("tool_call_name") or event.get("toolCallName") or "").strip()
+    return tool_name in {
+        "ui_form_create",
+        "birth_plan_form_create",
+        "hospital_bag_form_create",
+        "support_ticket_draft_create",
+    }
 
 
 def _quick_replies_from_tool_result_event(event: dict[str, Any]) -> list[dict[str, str]] | None:

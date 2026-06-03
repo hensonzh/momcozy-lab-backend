@@ -652,6 +652,127 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertEqual(quick_event["message_id"], "run-empty-quick:assistant")
         self.assertEqual(len(quick_event["replies"]), 3)
 
+    def test_stream_suppresses_quick_replies_when_form_artifact_created(self) -> None:
+        async def collect_events() -> list[dict[str, object]]:
+            client = _FakeStreamingClient(
+                [
+                    {
+                        "id": "resp-form",
+                        "output": [
+                            {
+                                "type": "function_call",
+                                "id": "item-form",
+                                "call_id": "call-form",
+                                "name": "birth_plan_form_create",
+                                "arguments": json.dumps(
+                                    {
+                                        "default_values": {
+                                            "due_date_or_week": "孕36周",
+                                            "birth_path": "顺产",
+                                        }
+                                    }
+                                ),
+                            }
+                        ],
+                    },
+                    {
+                        "id": "resp-quick",
+                        "output": [
+                            {
+                                "type": "function_call",
+                                "id": "item-quick",
+                                "call_id": "call-quick",
+                                "name": "ui_quick_replies_create",
+                                "arguments": json.dumps(
+                                    {
+                                        "replies": [
+                                            {"text": "我来填写", "send_text": "我来填写"},
+                                            {"text": "先解释一下", "send_text": "先解释一下这些问题"},
+                                            {"text": "晚点再说", "send_text": "晚点再说"},
+                                        ]
+                                    }
+                                ),
+                            }
+                        ],
+                    },
+                    {
+                        "id": "resp-final",
+                        "output": [
+                            {
+                                "type": "message",
+                                "content": [{"type": "output_text", "text": "我先把需要确认的信息准备好了。"}],
+                            }
+                        ],
+                    },
+                ]
+            )
+            runtime = ChatRuntime(client, model="test-model")
+            stream = stream_ag_ui_events(
+                {"thread_id": "thread-1", "run_id": "run-form-no-quick"},
+                {"user_message": "帮我做分娩沟通单", "locale": "zh-CN"},
+                runtime,
+            )
+            return [event async for event in stream]
+
+        events = asyncio.run(collect_events())
+        event_types = [str(event.get("type")) for event in events]
+
+        self.assertIn("ARTIFACT_CREATED", event_types)
+        self.assertNotIn("QUICK_REPLIES", event_types)
+        self.assertIn("RUN_FINISHED", event_types)
+        artifact = next(event for event in events if event.get("type") == "ARTIFACT_CREATED")
+        self.assertEqual(artifact["artifact_type"], "form")
+
+    def test_stream_suppresses_default_quick_replies_when_support_ticket_form_created(self) -> None:
+        async def collect_events() -> list[dict[str, object]]:
+            client = _FakeStreamingClient(
+                [
+                    {
+                        "id": "resp-ticket",
+                        "output": [
+                            {
+                                "type": "function_call",
+                                "id": "item-ticket",
+                                "call_id": "call-ticket",
+                                "name": "support_ticket_draft_create",
+                                "arguments": json.dumps(
+                                    {
+                                        "issue_type": "malfunction",
+                                        "issue_summary": "吸奶器无法启动",
+                                        "product_model": "Air1",
+                                    }
+                                ),
+                            }
+                        ],
+                    },
+                    {
+                        "id": "resp-final",
+                        "output": [
+                            {
+                                "type": "message",
+                                "content": [{"type": "output_text", "text": "售后工单草稿已经准备好了。"}],
+                            }
+                        ],
+                    },
+                ]
+            )
+            runtime = ChatRuntime(client, model="test-model")
+            stream = stream_ag_ui_events(
+                {"thread_id": "thread-1", "run_id": "run-ticket-no-quick"},
+                {"user_message": "帮我建售后工单", "locale": "zh-CN"},
+                runtime,
+            )
+            return [event async for event in stream]
+
+        events = asyncio.run(collect_events())
+        event_types = [str(event.get("type")) for event in events]
+
+        self.assertIn("ARTIFACT_CREATED", event_types)
+        self.assertNotIn("QUICK_REPLIES", event_types)
+        self.assertIn("RUN_FINISHED", event_types)
+        artifact = next(event for event in events if event.get("type") == "ARTIFACT_CREATED")
+        self.assertEqual(artifact["artifact_type"], "support_ticket")
+
 
 class _FakeClient:
     def __init__(self, responses: list[dict[str, object]]) -> None:
