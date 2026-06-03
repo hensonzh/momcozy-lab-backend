@@ -123,8 +123,10 @@ def execute_milk_management_tool(args: dict[str, Any], inputs: RuntimeInputs) ->
             )
         )
     if name == "milk_assessment_evaluate":
-        result = dict(evaluate_milk_status(**_pick(arguments, "user_id", "as_of_time", "window_days", "include_today")))
-        if _should_render_milk_analysis_card(arguments, inputs):
+        render_card = _should_render_milk_analysis_card(arguments, inputs)
+        assessment_arguments = _milk_assessment_arguments(arguments, render_card=render_card)
+        result = dict(evaluate_milk_status(**assessment_arguments))
+        if render_card:
             return _with_milk_analysis_card(result)
         return result
     if name == "infant_growth_evaluate":
@@ -163,6 +165,14 @@ def _with_milk_analysis_card(result: dict[str, Any]) -> dict[str, Any]:
         "card_json": _build_milk_analysis_card_json(data),
     }
     return result
+
+
+def _milk_assessment_arguments(arguments: dict[str, Any], *, render_card: bool) -> dict[str, Any]:
+    assessment_arguments = _pick(arguments, "user_id", "as_of_time", "window_days", "include_today")
+    if render_card:
+        assessment_arguments["window_days"] = 7
+        assessment_arguments["include_today"] = False
+    return assessment_arguments
 
 
 def _with_milk_plan_card(result: dict[str, Any]) -> dict[str, Any]:

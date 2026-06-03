@@ -317,6 +317,7 @@ class WebDataAppTests(unittest.TestCase):
         self.assertIn("task_reminder", index_html)
         self.assertIn("lactation_feeding_reminder", index_html)
         self.assertIn("daily_summary_reminder", index_html)
+        self.assertIn("milk_analysis_reminder", index_html)
         self.assertIn("baby_growth_update_reminder", index_html)
         self.assertIn("reportNotification", app_js)
         self.assertIn("/api/notifications/report", app_js)
