@@ -30,7 +30,7 @@
 
 - 当前状态、今日数据、30 日趋势、宝宝生长和任务概览：`milk_status_query`。
 - 指定时间段的吸奶、亲喂、母乳瓶喂、奶粉瓶喂明细：`milk_records_query`。它只回答“记录是什么/每天多少”，不能单独用于判断是否正常。
-- 用户要求分析近期吸奶/奶量趋势，或问“是否正常、够不够、偏低/偏高、是否需要计划、适合什么计划”：`milk_assessment_evaluate`。
+- 用户要求分析近期吸奶/奶量趋势，或问“分析最近吸奶情况、是否正常、够不够、偏低/偏高、是否需要计划、适合什么计划”：`milk_assessment_evaluate(window_days=7, include_today=false)`。
 - 用户问“最近吸奶情况”，且前端计划页或用户提到“任务、计划、记录与补录、完成了几次”时，优先使用 `milk_assessment_evaluate.data.calendar_task_summary`；如果需要展开具体时间，再读取 `milk_records_query` 和 `milk_calendar_query(query_mode="range")`。
 - 用户提到宝宝体重、增长、发育、尿布、精神状态或摄入是否足够：`infant_growth_evaluate`。
 

@@ -512,7 +512,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
         "EVALUATE 只读工具：基于固定参考数据和记录聚合，返回近期奶量状态、缺失数据、每日参考奶量区间、含亲喂估算奶量和规则命中。用户问“分析最近吸奶情况、奶量够不够、是否正常、偏低/偏高、趋势好不好、适合什么计划、生成追奶/稳奶/减奶计划”时优先调用；只查历史明细或单纯列每天多少时才用 milk_records_query。不是诊断，也不生成最终用户话术。",
         {
             "as_of_time": _nullable({"type": "string", "description": "可选 ISO-8601 评估时间；不确定时传 null。"}),
-            "window_days": {"type": "integer", "description": "回看天数。主动追奶/减奶/稳奶通常用 1；全面评估通常用 7。"},
+            "window_days": {"type": "integer", "description": "回看天数。分析最近吸奶情况、奶量趋势或全面评估通常用 7；用户已明确追奶/稳奶/减奶计划方向时可用 1。"},
             "include_today": {"type": "boolean", "description": "是否包含当前日未完整记录。通常评估完整日时传 false。"},
         },
     ),

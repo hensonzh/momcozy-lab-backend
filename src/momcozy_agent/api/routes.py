@@ -12,7 +12,7 @@ from datetime import date, datetime, timedelta, timezone
 from io import BytesIO
 from typing import Any
 
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import StreamingResponse
 
 from .auth import verify_api_key
@@ -24,6 +24,7 @@ from .responses import (
 )
 from ..services import data_store
 from ..services.milk_process.breast_pump_FSM_v3 import LogDrivenSessionManager
+from ..services.milk_management.assessment import evaluate_milk_status
 from ..services.milk_management.daily_summary import create_daily_summary
 from ..services.milk_management.feeding import assess_feeding_demand_reference
 from ..services.milk_management.status import query_milk_status
@@ -47,6 +48,7 @@ from ..services.pump_workstate import (
     validate_pump_workstate_payload,
 )
 from ..tool_handlers.cards import update_hospital_bag_cart as execute_hospital_bag_cart_update
+from ..tool_handlers.milk_management import _build_milk_analysis_card_json
 
 
 router = APIRouter()
@@ -90,6 +92,26 @@ VOLC_EVENT_TTS_SENTENCE_START = 350
 VOLC_EVENT_TTS_SENTENCE_END = 351
 VOLC_EVENT_TTS_RESPONSE = 352
 
+OPENAI_STT_DEFAULT_MODEL = "whisper-1"
+OPENAI_STT_MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+OPENAI_STT_ALLOWED_EXTENSIONS = {"flac", "mp3", "mp4", "mpeg", "mpga", "m4a", "ogg", "wav", "webm"}
+OPENAI_STT_ALLOWED_MIME_TYPES = {
+    "audio/aac",
+    "audio/flac",
+    "audio/m4a",
+    "audio/mp3",
+    "audio/mp4",
+    "audio/mpeg",
+    "audio/mpga",
+    "audio/ogg",
+    "audio/wav",
+    "audio/webm",
+    "audio/x-m4a",
+    "audio/x-wav",
+    "video/mp4",
+    "video/webm",
+}
+
 
 async def _upload_image_to_openai(*, filename: str, body: bytes, mime_type: str) -> str:
     try:
@@ -126,6 +148,51 @@ async def _upload_image_to_openai(*, filename: str, body: bytes, mime_type: str)
             detail={"code": "openai_file_upload_failed", "message": "OpenAI file upload did not return a file id", "status": 502},
         )
     return file_id
+
+
+async def _transcribe_audio_with_openai_whisper(*, filename: str, body: bytes, mime_type: str, language: str = "") -> str:
+    api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
+    if not api_key:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "openai_stt_config_missing", "message": "OPENAI_API_KEY is not set", "status": 400},
+        )
+
+    try:
+        from openai import AsyncOpenAI
+    except ImportError as exc:
+        raise HTTPException(
+            status_code=501,
+            detail={"code": "openai_sdk_missing", "message": "OpenAI SDK is not installed", "status": 501},
+        ) from exc
+
+    model = (os.getenv("OPENAI_STT_MODEL") or OPENAI_STT_DEFAULT_MODEL).strip() or OPENAI_STT_DEFAULT_MODEL
+    kwargs: dict[str, Any] = {
+        "model": model,
+        "file": (filename, BytesIO(body), mime_type),
+        "response_format": "json",
+    }
+    normalized_language = language.strip() or (os.getenv("OPENAI_STT_LANGUAGE") or "").strip()
+    if normalized_language:
+        kwargs["language"] = normalized_language
+    prompt = (os.getenv("OPENAI_STT_PROMPT") or "").strip()
+    if prompt:
+        kwargs["prompt"] = prompt
+
+    try:
+        async with AsyncOpenAI(api_key=api_key) as client:
+            transcription = await client.audio.transcriptions.create(**kwargs)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={"code": "openai_stt_failed", "message": f"failed to transcribe audio with OpenAI: {exc}", "status": 502},
+        ) from exc
+
+    if isinstance(transcription, dict):
+        text = transcription.get("text")
+    else:
+        text = getattr(transcription, "text", None)
+    return str(text or "").strip()
 
 
 @router.post("/v1/device/info")
@@ -397,6 +464,49 @@ async def upload_file(request: Request, file: UploadFile = File(...)) -> dict[st
     return {key: metadata[key] for key in ("id", "name", "size", "extension", "mime_type", "created_by", "created_at")}
 
 
+@router.post("/v1/speech/transcribe-chunk")
+async def transcribe_speech_chunk_endpoint(
+    request: Request,
+    user_id: str = Form(...),
+    file: UploadFile = File(...),
+    language: str = Form(""),
+) -> dict[str, Any]:
+    verify_api_key(request)
+    uid = _normalize_text(str(user_id or ""))
+    if not uid:
+        raise HTTPException(status_code=400, detail={"code": "invalid_user_id", "message": "user_id is required", "status": 400})
+
+    filename = file.filename or "speech.wav"
+    extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    mime_type = (file.content_type or "audio/wav").split(";", 1)[0].strip().lower()
+    if extension not in OPENAI_STT_ALLOWED_EXTENSIONS and mime_type not in OPENAI_STT_ALLOWED_MIME_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "invalid_audio_file_type",
+                "message": f"Only {', '.join(sorted(OPENAI_STT_ALLOWED_EXTENSIONS))} audio files are allowed",
+                "status": 400,
+            },
+        )
+
+    body = await file.read()
+    if not body:
+        raise HTTPException(status_code=400, detail={"code": "empty_audio_file", "message": "audio file is empty", "status": 400})
+    if len(body) > OPENAI_STT_MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail={"code": "audio_file_too_large", "message": "audio file must be 25 MB or smaller", "status": 413},
+        )
+
+    text = await _transcribe_audio_with_openai_whisper(
+        filename=filename,
+        body=body,
+        mime_type=mime_type or "audio/wav",
+        language=language,
+    )
+    return {"status": 200, "message": "success", "data": {"text": text, "transcript": text}}
+
+
 @router.get("/v1/realtime-voice-stream")
 async def realtime_voice_stream_endpoint(request: Request, text: str) -> StreamingResponse:
     verify_api_key(request)
@@ -545,6 +655,19 @@ async def create_analysis_endpoint(request: Request) -> dict[str, Any]:
             error=0,
             message=response_message,
             analysis_card=_daily_summary_analysis_card(message, summary_data=data),
+        )
+    if analysis_type == "milk_analysis":
+        analysis = evaluate_milk_status(user_id=uid, window_days=7, include_today=False)
+        if not analysis.get("ok"):
+            return _analysis_create_response(error=-1, result=False, message=str(analysis.get("summary") or "failed to generate milk analysis"))
+        data = analysis.get("data") if isinstance(analysis.get("data"), dict) else {}
+        card = _milk_analysis_report_card(data)
+        message = str(card.get("headline") or analysis.get("summary") or "已生成奶量分析。")
+        return _analysis_create_response(
+            error=0,
+            result=str(card.get("status") or "") == "normal",
+            message=message,
+            analysis_card=card,
         )
     return _analysis_create_response(error=-1, result=False, message="unsupported type")
 
@@ -1637,6 +1760,21 @@ def _analysis_create_response(
     if analysis_card is not None:
         response["data"]["analysis_card"] = analysis_card
     return response
+
+
+def _milk_analysis_report_card(data: dict[str, Any]) -> dict[str, Any]:
+    card = dict(_build_milk_analysis_card_json(data))
+    card["kind"] = "milk_analysis"
+    headline = str(card.get("headline") or "").strip()
+    sections = card.get("sections") if isinstance(card.get("sections"), list) else []
+    if headline:
+        card["sections"] = [
+            {"id": "headline", "title": "结论", "tone": card.get("status_tone") or "overview", "items": [headline]},
+            *sections,
+        ]
+    else:
+        card["sections"] = sections
+    return card
 
 
 def _daily_summary_analysis_card(message: Any, *, summary_data: dict[str, Any] | None = None) -> dict[str, Any]:

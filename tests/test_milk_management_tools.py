@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta
 from typing import Any
+from unittest.mock import patch
 
 MILK_MANAGEMENT_TOOLS_DB_PATH = os.path.join(tempfile.mkdtemp(prefix="momcozy-agent-tests-"), "milk_management.db")
 os.environ["MILK_DB_PATH"] = MILK_MANAGEMENT_TOOLS_DB_PATH
@@ -369,7 +370,7 @@ class MilkManagementToolTests(unittest.TestCase):
                 "_tool_name": "milk_assessment_evaluate",
                 "user_id": uid,
                 "as_of_time": "2026-05-14 12:00:00",
-                "window_days": 1,
+                "window_days": 7,
                 "include_today": False,
             },
             {"user_message": "分析最近吸奶情况", "locale": "zh-CN", "timezone": "Asia/Shanghai", "message_sent_at": ""},
@@ -392,6 +393,42 @@ class MilkManagementToolTests(unittest.TestCase):
         self.assertIn("只能引导用户选择下一步", compact["final_response_instruction"])
         self.assertNotIn("summary", compact)
         self.assertNotIn("data", compact)
+
+    def test_assessment_card_intent_forces_seven_complete_days(self) -> None:
+        analysis_data = {
+            "window": {
+                "start_at": "2026-05-07 00:00:00",
+                "end_at": "2026-05-14 00:00:00",
+                "window_days": 7,
+                "include_today": False,
+            },
+            "pumping_summary": {"count": 5, "total_ml": 520},
+            "calendar_task_summary": {"days": 7},
+            "milk_normality": {"overall_status": "normal", "days": []},
+            "assessment_status": "normal",
+        }
+        with patch(
+            "momcozy_agent.tool_handlers.milk_management.evaluate_milk_status",
+            return_value={"ok": True, "status": "milk_status_evaluated", "summary": "ok", "data": analysis_data},
+        ) as evaluate:
+            result = execute_milk_management_tool(
+                {
+                    "_tool_name": "milk_assessment_evaluate",
+                    "user_id": "u1",
+                    "as_of_time": "2026-05-14 12:00:00",
+                    "window_days": 1,
+                    "include_today": True,
+                },
+                {"user_message": "分析最近吸奶情况", "locale": "zh-CN", "timezone": "Asia/Shanghai", "message_sent_at": ""},
+            )
+
+        evaluate.assert_called_once_with(
+            user_id="u1",
+            as_of_time="2026-05-14 12:00:00",
+            window_days=7,
+            include_today=False,
+        )
+        self.assertEqual(result["card"]["card_json"]["subtitle"], "近 7 天 · 5/7-5/14")
 
     def test_assessment_tool_suppresses_analysis_card_for_plan_intent(self) -> None:
         uid, _ = _seed_user("assessment-card-suppressed")
