@@ -1693,9 +1693,6 @@ function personalizationClause(source) {
   if (field === "return_to_work_timing" || fieldLabel === "返工时间") {
     return { text: returnToWorkClause(condition), subject: "user" };
   }
-  if (field === "budget_preference" || fieldLabel === "预算偏好") {
-    return { text: `偏好${condition}`, subject: "user" };
-  }
   if (field === "support_person" || fieldLabel === "支持情况") {
     if (condition.includes("支持少")) return { text: "产后支持较少", subject: "user" };
     return { text: `产后支持情况是${condition}`, subject: "user" };
@@ -1825,14 +1822,12 @@ function normalizeFormSpec(formSpec) {
     "feeding_intention",
     "return_to_work_timing",
     "support_person",
-    "budget_preference",
     "top_worries",
   ]);
-  const hospitalBagDetectorFieldIds = new Set(["fetus_count", "return_to_work_timing", "budget_preference", "top_worries"]);
+  const hospitalBagDetectorFieldIds = new Set(["fetus_count", "return_to_work_timing", "top_worries"]);
   const hospitalBagDialoguePrefillFieldIds = new Set([
     "due_date_or_week",
     "return_to_work_timing",
-    "budget_preference",
     "top_worries",
   ]);
   const exclusiveBirthPlanMultiSelectOptions = new Set([

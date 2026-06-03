@@ -24,8 +24,13 @@ class ContextState:
 
 HOSPITAL_BAG_SLOT_FIELDS = (
     "due_date_or_week",
+    "first_birth",
+    "fetus_count",
+    "pregnancy_history_or_notes",
+    "birth_path",
+    "feeding_intention",
     "return_to_work_timing",
-    "budget_preference",
+    "support_person",
     "top_worries",
 )
 _HOSPITAL_BAG_SLOT_KEY = "hospital_bag"
@@ -148,8 +153,8 @@ def _format_birth_prep_context(state: ContextState) -> list[str]:
         return []
     lines = ["birth_prep_context:"]
     if values:
-        lines.append("- hospital_bag_confirmed_fields: " + "; ".join(values))
-        lines.append("- 创建待产包表单时复用这些字段，不要让用户重复回答。")
+        lines.append("- birth_prep_known_fields: " + "; ".join(values))
+        lines.append("- 创建产前表单或待产包表单时复用这些字段作为默认值，让用户在表单里确认或修改，不要重复追问。")
     if pending_field:
         lines.append(f"- hospital_bag_next_field: {pending_field}")
     return lines
@@ -162,9 +167,29 @@ def _explicit_hospital_bag_slots(message: str) -> dict[str, Any]:
     if due:
         slots["due_date_or_week"] = due
 
-    budget = _normalize_budget_preference(message)
-    if budget:
-        slots["budget_preference"] = budget
+    first_birth = _extract_first_birth(message)
+    if first_birth:
+        slots["first_birth"] = first_birth
+
+    fetus_count = _extract_fetus_count(message)
+    if fetus_count:
+        slots["fetus_count"] = fetus_count
+
+    birth_path = _extract_birth_path(message)
+    if birth_path:
+        slots["birth_path"] = birth_path
+
+    feeding = _extract_feeding_intention(message)
+    if feeding:
+        slots["feeding_intention"] = feeding
+
+    support = _extract_support_person(message)
+    if support:
+        slots["support_person"] = support
+
+    history = _extract_pregnancy_history(message)
+    if history:
+        slots["pregnancy_history_or_notes"] = history
 
     if _mentions_return_to_work(message):
         slots["return_to_work_timing"] = _clip_slot_text(message)
@@ -178,11 +203,23 @@ def _explicit_hospital_bag_slots(message: str) -> dict[str, Any]:
 
 def _hospital_bag_slot_value_from_text(field_id: str, message: str) -> Any:
     if field_id == "due_date_or_week":
-        return _extract_due_or_week(message) or _clip_slot_text(message)
-    if field_id == "budget_preference":
-        return _normalize_budget_preference(message) or _clip_slot_text(message)
+        return _extract_due_or_week(message) or _extract_bare_pregnancy_week(message)
     if field_id == "top_worries":
         return _extract_top_worries(message) or [_clip_slot_text(message)]
+    if field_id == "first_birth":
+        return _extract_first_birth(message)
+    if field_id == "fetus_count":
+        return _extract_fetus_count(message)
+    if field_id == "birth_path":
+        return _extract_birth_path(message)
+    if field_id == "feeding_intention":
+        return _extract_feeding_intention(message)
+    if field_id == "support_person":
+        return _extract_support_person(message)
+    if field_id == "pregnancy_history_or_notes":
+        return _extract_pregnancy_history(message)
+    if field_id == "return_to_work_timing" and _mentions_return_to_work(message):
+        return _clip_slot_text(message)
     return _clip_slot_text(message)
 
 
@@ -190,8 +227,6 @@ def _infer_pending_hospital_bag_field(message: str) -> str:
     text = str(message or "")
     if any(token in text for token in ("最担心", "焦虑", "怕漏", "怕住院", "怕母乳", "担心的")):
         return "top_worries"
-    if any(token in text for token in ("预算", "低预算", "中预算", "高预算", "舒适", "省钱")):
-        return "budget_preference"
     if any(token in text for token in ("返工", "复工", "上班", "外出计划", "回去工作")):
         return "return_to_work_timing"
     if any(token in text for token in ("孕几周", "孕周", "预产期", "哪天生", "什么时候生")):
@@ -217,20 +252,102 @@ def _extract_due_or_week(message: str) -> str:
     return ""
 
 
-def _normalize_budget_preference(message: str) -> str:
-    text = str(message or "")
-    if "高预算" in text or "舒适" in text or "不太在意价格" in text:
-        return "高预算"
-    if "中预算" in text or "稳妥" in text or "性价比" in text:
-        return "中预算"
-    if "低预算" in text or "省钱" in text or "够用" in text:
-        return "低预算"
+def _extract_bare_pregnancy_week(message: str) -> str:
+    text = str(message or "").strip()
+    if not re.fullmatch(r"\d{1,2}", text):
+        return ""
+    week = int(text)
+    if 1 <= week <= 42:
+        return f"孕{week}周"
     return ""
 
 
 def _mentions_return_to_work(message: str) -> bool:
     text = str(message or "")
     return any(token in text for token in ("返工", "复工", "上班", "外出", "工作"))
+
+
+def _extract_first_birth(message: str) -> str:
+    text = str(message or "")
+    if any(token in text for token in ("不是第一胎", "不是头胎", "二胎", "第二胎", "三胎", "第3胎")):
+        return "否"
+    if any(token in text for token in ("第一胎", "头胎", "一胎", "第1胎")):
+        return "是"
+    stripped = text.strip()
+    if stripped in {"是", "对", "是的"}:
+        return "是"
+    if stripped in {"否", "不是", "不是的"}:
+        return "否"
+    return ""
+
+
+def _extract_fetus_count(message: str) -> str:
+    text = str(message or "")
+    if any(token in text for token in ("三胎", "三胞胎", "多胎", "三胎及以上")):
+        return "三胎及以上"
+    if any(token in text for token in ("双胎", "双胞胎")):
+        return "双胎"
+    if "单胎" in text:
+        return "单胎"
+    return ""
+
+
+def _extract_birth_path(message: str) -> str:
+    text = str(message or "")
+    if any(token in text for token in ("剖宫产", "剖腹产", "刨腹产", "剖产")):
+        return "剖宫产"
+    if any(token in text for token in ("顺产", "自然分娩")):
+        return "顺产"
+    if any(token in text for token in ("分娩方式还没确定", "生产方式还没确定", "还没确定分娩方式", "可能剖", "不确定顺产")):
+        return "还不确定"
+    return ""
+
+
+def _extract_feeding_intention(message: str) -> str:
+    text = str(message or "")
+    if any(token in text for token in ("混合喂养", "混合")):
+        return "混合喂养"
+    if any(token in text for token in ("配方奶", "奶粉", "配方")):
+        return "配方奶"
+    if any(token in text for token in ("母乳", "亲喂", "纯泵", "泵奶")):
+        return "亲喂母乳"
+    if any(token in text for token in ("喂养还不确定", "还不确定怎么喂", "还没想好怎么喂")):
+        return "还不确定"
+    return ""
+
+
+def _extract_support_person(message: str) -> str:
+    text = str(message or "")
+    if any(token in text for token in ("支持少", "没人帮", "没人照顾", "一个人", "主要自己")):
+        return "支持少"
+    if any(token in text for token in ("白天自己", "白天主要自己")):
+        return "白天主要自己"
+    if any(token in text for token in ("夜里自己", "夜间自己", "夜间主要自己")):
+        return "夜间主要自己"
+    if any(token in text for token in ("老公", "丈夫", "伴侣", "妈妈", "婆婆", "家人", "有人帮", "有人陪", "陪我", "全天帮")):
+        return "有人全天帮忙"
+    if any(token in text for token in ("支持人还不确定", "暂时没有支持人", "不确定谁陪")):
+        return "不确定"
+    return ""
+
+
+def _extract_pregnancy_history(message: str) -> list[str]:
+    text = str(message or "")
+    if any(token in text for token in ("没有特殊情况", "医生没说特殊", "医生没有提示", "没有高危")):
+        return ["没有"]
+    values: list[str] = []
+    for token, value in (
+        ("妊娠糖尿病", "妊娠糖尿病"),
+        ("血压", "血压或子痫前期风险"),
+        ("子痫", "血压或子痫前期风险"),
+        ("胎盘", "胎盘问题"),
+        ("早产", "早产风险"),
+        ("nicu", "宝宝可能 NICU"),
+        ("NICU", "宝宝可能 NICU"),
+    ):
+        if token in text and value not in values:
+            values.append(value)
+    return values
 
 
 def _extract_top_worries(message: str) -> list[str]:

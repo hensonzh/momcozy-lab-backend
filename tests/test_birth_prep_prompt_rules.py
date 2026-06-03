@@ -120,7 +120,29 @@ class BirthPrepPromptRuleTests(unittest.TestCase):
 
         self.assertIn("birth_prep_context:", context)
         self.assertIn("top_worries=怕漏带、怕住院不舒服、怕母乳喂不好", context)
-        self.assertIn("创建待产包表单时复用这些字段", context)
+        self.assertIn("创建产前表单或待产包表单时复用这些字段", context)
+
+    def test_hospital_bag_flow_uses_form_without_three_dialogue_questions(self) -> None:
+        skill = (ROOT / "skills" / "birth-prep" / "SKILL.md").read_text(encoding="utf-8")
+        reference = (ROOT / "skills" / "birth-prep" / "references" / "hospital-bag-service.md").read_text(encoding="utf-8")
+        schema_text = str(FUNCTION_TOOLS["hospital_bag_form_create"])
+
+        self.assertIn("直接调用 `hospital_bag_form_create`", skill)
+        self.assertIn("不要先用聊天追问三项基础信息", skill)
+        self.assertIn("用户确认开始后，直接调用 `hospital_bag_form_create`", reference)
+        self.assertIn("不要先用自然对话收集 3 个字段", reference)
+        self.assertIn("用户确认开始待产包整理后可直接调用", schema_text)
+
+    def test_hospital_bag_slots_do_not_capture_budget_preference(self) -> None:
+        state = ContextState()
+
+        record_birth_prep_assistant_message(state, "你更在意预算、舒适还是省钱？")
+        capture_birth_prep_user_message({"user_message": "高预算", "locale": "zh-CN"}, state)
+
+        context = build_request_context({"user_message": "继续", "locale": "zh-CN"}, state, ["birth-prep"])
+
+        self.assertNotIn("budget_preference", hospital_bag_slots(state))
+        self.assertNotIn("budget_preference", context)
 
     def test_birth_journey_week_reused_by_hospital_bag_form(self) -> None:
         state = ContextState()
@@ -144,12 +166,13 @@ class BirthPrepPromptRuleTests(unittest.TestCase):
 
         context = build_request_context({"user_message": "继续", "locale": "zh-CN"}, state, ["birth-prep"])
         self.assertIn("due_date_or_week=孕30周", context)
+        self.assertIn("birth_path=顺产", context)
+        self.assertIn("support_person=伴侣", context)
 
         form_result = create_hospital_bag_form(
             {
                 "default_values": {
                     "return_to_work_timing": "产假后返工",
-                    "budget_preference": "高预算",
                     "top_worries": ["怕漏带"],
                 }
             },
@@ -161,8 +184,73 @@ class BirthPrepPromptRuleTests(unittest.TestCase):
 
         self.assertEqual(form_result["status"], "form_created")
         self.assertEqual(form_result["form"]["default_values"]["due_date_or_week"], "孕30周")
-        self.assertNotIn("birth_path", form_result["form"]["default_values"])
-        self.assertNotIn("support_person", form_result["form"]["default_values"])
+        self.assertEqual(form_result["form"]["default_values"]["birth_path"], "顺产")
+        self.assertEqual(form_result["form"]["default_values"]["support_person"], "有人全天帮忙")
+
+    def test_hospital_bag_form_state_records_cleaned_defaults_only(self) -> None:
+        state = ContextState()
+        tool_result = create_hospital_bag_form(
+            {
+                "default_values": {
+                    "due_date_or_week": "我想先整理待产包",
+                    "feeding_intention": "母乳",
+                }
+            },
+            {"user_message": ""},
+        )
+
+        _record_birth_prep_tool_state(
+            state,
+            "hospital_bag_form_create",
+            {
+                "default_values": {
+                    "due_date_or_week": "我想先整理待产包",
+                    "feeding_intention": "母乳",
+                }
+            },
+            {
+                "ok": True,
+                "tool_name": "hospital_bag_form_create",
+                "result": tool_result,
+            },
+        )
+
+        slots = hospital_bag_slots(state)
+        self.assertNotIn("due_date_or_week", slots)
+        self.assertEqual(slots["feeding_intention"], "亲喂母乳")
+
+    def test_hospital_bag_form_output_constrains_final_reply_to_real_form_fields(self) -> None:
+        compact = model_tool_output(
+            {
+                "ok": True,
+                "tool_name": "hospital_bag_form_create",
+                "result": create_hospital_bag_form({"default_values": {}}, {"user_message": ""}),
+            }
+        )
+
+        instruction = compact["final_response_instruction"]
+        self.assertIn("按表单里确认的信息整理成一份清单", instruction)
+        self.assertIn("不要提医院、家里已有物品", instruction)
+
+    def test_birth_prep_context_extracts_shared_fields_for_hospital_bag_form(self) -> None:
+        state = ContextState()
+
+        capture_birth_prep_user_message(
+            {
+                "user_message": "我现在孕30周，第一胎，单胎，倾向剖宫产，准备母乳，老公陪我，医生说没有特殊情况。",
+                "locale": "zh-CN",
+            },
+            state,
+        )
+
+        defaults = hospital_bag_slots(state)
+        self.assertEqual(defaults["due_date_or_week"], "孕30周")
+        self.assertEqual(defaults["first_birth"], "是")
+        self.assertEqual(defaults["fetus_count"], "单胎")
+        self.assertEqual(defaults["birth_path"], "剖宫产")
+        self.assertEqual(defaults["feeding_intention"], "亲喂母乳")
+        self.assertEqual(defaults["support_person"], "有人全天帮忙")
+        self.assertEqual(defaults["pregnancy_history_or_notes"], ["没有"])
 
 
 if __name__ == "__main__":

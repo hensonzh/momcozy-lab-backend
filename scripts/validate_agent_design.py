@@ -232,7 +232,7 @@ def main() -> None:
     assert "待产包服务不是让用户自己从长清单里筛东西" in hospital_bag_reference
     assert "表单字段、字段顺序、结构化 schema" in hospital_bag_reference
     assert "先自然邀约，不直接创建表单" in hospital_bag_reference
-    assert "只把 `due_date_or_week`、`return_to_work_timing`、`budget_preference`、`top_worries` 写入" in hospital_bag_reference
+    assert "只把 `due_date_or_week`、`return_to_work_timing`、`top_worries` 写入" in hospital_bag_reference
     assert "调用 `hospital_bag_form_create`" in hospital_bag_reference
     assert "表单标题、分类、选项、必填/选填和字段说明都由专用工具生成" in hospital_bag_reference
     assert "直接调用 `hospital_bag_card_create`" in hospital_bag_reference
@@ -340,8 +340,7 @@ def main() -> None:
                 '{"due_date_or_week":"32 周","first_birth":"是","fetus_count":"单胎",'
                 '"pregnancy_history_or_notes":["没有"],"birth_path":"顺产",'
                 '"feeding_intention":"母乳喂养","return_to_work_timing":"6 周后",'
-                '"support_person":"伴侣","budget_preference":"中预算",'
-                '"top_worries":["怕漏买","怕母乳不够"]}'
+                '"support_person":"伴侣","top_worries":["怕漏买","怕母乳不够"]}'
             ),
             "locale": "zh-CN",
             "timezone": "America/Los_Angeles",

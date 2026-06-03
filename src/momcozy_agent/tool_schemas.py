@@ -205,7 +205,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "hospital_bag_form_create": _function_tool(
         "hospital_bag_form_create",
-        "创建待产包信息采集表单。调用前必须已经通过对话确认预产期/孕周、复工/外出计划、预算偏好和最担心的问题；LLM 只传这些已知字段 default_values。表单字段、顺序、分类、选项和样式约束由工具稳定生成。无后端副作用。",
+        "创建待产包信息采集表单。用户确认开始待产包整理后可直接调用；LLM 只在 default_values 里传当前对话、request_context、已提交表单或 profile_get 中可靠的已知字段。表单字段、顺序、分类、选项和样式约束由工具稳定生成。无后端副作用。",
         {
             "default_values": JSON_OBJECT_STRING,
         },

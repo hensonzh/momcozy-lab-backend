@@ -6,6 +6,7 @@ import asyncio
 
 from momcozy_agent import ContextState, build_agent_request
 from momcozy_agent.agents import (
+    artifact_created_event,
     _tool_image_input_item_from_metadata,
     _tool_image_metadata,
     model_tool_output,
@@ -178,6 +179,64 @@ class AgentToolEventTests(unittest.TestCase):
 
         self.assertEqual(result_event["semantic"]["visibility"], "work_item")
         self.assertEqual(result_event["semantic"]["label"], "我已经帮你生成好待产包清单啦")
+
+    def test_milk_analysis_artifact_uses_analysis_done_label(self) -> None:
+        event = artifact_created_event(
+            artifact_id="analysis-1",
+            artifact_type="milk_analysis_card",
+            tool_call_id="call-analysis",
+            tool_call_name="milk_assessment_evaluate",
+            artifact={"card_type": "milk_analysis_card"},
+        )
+
+        self.assertEqual(event["semantic"]["label"], "我已经整理好奶量分析结果啦")
+
+    def test_artifact_tool_outputs_include_specific_final_response_instructions(self) -> None:
+        birth_plan_form = model_tool_output(
+            {
+                "ok": True,
+                "tool_name": "birth_plan_form_create",
+                "result": {
+                    "tool_name": "ui_form_create",
+                    "status": "form_created",
+                    "form": {"id": "birth_plan_card_intake", "title": "信息采集", "fields": []},
+                },
+            }
+        )
+        ibclc_card = model_tool_output(
+            {
+                "ok": True,
+                "tool_name": "ibclc_consult_card_create",
+                "result": {
+                    "tool_name": "ibclc_consult_card_create",
+                    "status": "ibclc_consult_card_created",
+                    "card": {
+                        "card_type": "ibclc_consult_card",
+                        "schema_version": "1.1",
+                        "chat": {"note": "启动咨询后，会自动将你的问题同步给顾问"},
+                    },
+                },
+            }
+        )
+        support_ticket = model_tool_output(
+            {
+                "ok": True,
+                "tool_name": "support_ticket_draft_create",
+                "result": {
+                    "tool_name": "support_ticket_draft_create",
+                    "status": "ticket_draft_created",
+                    "ticket": {"draft_id": "draft_1"},
+                    "submit_label": "确认并提交",
+                },
+            }
+        )
+
+        self.assertIn("分娩沟通单信息表已经展示", birth_plan_form["final_response_instruction"])
+        self.assertIn("不要提表单里没有的字段", birth_plan_form["final_response_instruction"])
+        self.assertIn("IBCLC 咨询入口已经展示", ibclc_card["final_response_instruction"])
+        self.assertIn("不要承诺已经预约、已经接通", ibclc_card["final_response_instruction"])
+        self.assertIn("售后工单草稿已经展示", support_ticket["final_response_instruction"])
+        self.assertIn("现在还没有对外提交", support_ticket["final_response_instruction"])
 
     def test_loop_emits_single_status_channel_and_explicit_artifact_events(self) -> None:
         client = _FakeClient(

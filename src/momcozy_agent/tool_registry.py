@@ -92,7 +92,7 @@ DEFERRED_TOOL_NAMESPACES: dict[str, dict[str, Any]] = {
         "tool_names": ["hospital_bag_pump_recommend"],
     },
     "birth_prep": {
-        "description": "用于产前准备服务已经进入具体产物流程后的专用表单和结构化内容：生产全过程计划、待产包清单、分娩沟通单。不要用于普通孕期问答；创建待产包表单前必须已通过对话收集规定基础字段；生成结构化内容前必须已有对应确认信息。",
+        "description": "用于产前准备服务已经进入具体产物流程后的专用表单和结构化内容：生产全过程计划、待产包清单、分娩沟通单。不要用于普通孕期问答；用户确认开始待产包整理后可直接创建待产包信息表，通过表单采集或确认必要信息；生成生产全过程计划、待产包清单或分娩沟通单前必须已有对应确认信息。",
         "tool_names": [
             "birth_plan_form_create",
             "labor_communication_card_create",

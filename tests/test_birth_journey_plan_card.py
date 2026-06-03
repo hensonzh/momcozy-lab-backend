@@ -114,6 +114,25 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         self.assertEqual(card["owner"]["birth_path"], "还没确定")
         self.assertEqual(card["owner"]["support_person"], "暂时没有")
 
+    def test_birth_journey_late_pregnancy_wording_avoids_aiish_pile_up_phrase(self) -> None:
+        result = create_birth_journey_plan_card(
+            {
+                "plan_context": {
+                    "due_date_or_week": "30周",
+                    "birth_path": "顺产",
+                    "support_person": "伴侣",
+                },
+                "scope": "full",
+            },
+            {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00"},
+        )
+
+        self.assertEqual(result["status"], "card_created")
+        card = result["card"]["card_json"]
+        rendered = json.dumps(card, ensure_ascii=False)
+        self.assertIn("这个阶段先按顺序准备", rendered)
+        self.assertNotIn("铺太多", rendered)
+
     def test_model_tool_output_compacts_birth_journey_card(self) -> None:
         raw = {
             "ok": True,

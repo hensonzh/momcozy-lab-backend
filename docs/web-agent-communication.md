@@ -792,8 +792,8 @@ Agent 状态通过 `CUSTOM` / `momcozy.agent.status` 发送：
 
 1. 前端先显示 assistant bubble。
 2. 收到 `TOOL_CALL_START` / `ARGS` / `END` / `RESULT` 时，文本仍保留在 assistant bubble 中。
-3. 如果后续出现 `ARTIFACT_CREATED`，结构化 UI 追加在同一轮消息流中，展示在这段文本之后。
-4. 最后一轮 assistant text 继续追加在当前消息流里，通常展示在 artifact 之后。
+3. 如果后续出现 `ARTIFACT_CREATED`，结构化 UI 仍归属同一轮消息，但展示位置应在最终 assistant text 之后。
+4. 如果工具先于最终文本完成，前端应等最终 assistant text 开始输出后再渲染结构化 UI，避免用户先看到表单/卡片却长时间没有正文反馈。
 
 这个设计让模型主动给出的简短说明保持在对话主线里；work panel 只展示工具执行状态，不承载这类自然语言说明。
 

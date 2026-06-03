@@ -15,7 +15,6 @@ from .contexts import (
     clear_pending_hospital_bag_slot,
     hospital_bag_slots,
     merge_hospital_bag_slots,
-    set_pending_hospital_bag_slot,
 )
 from .static_context import STATIC_AGENT_INSTRUCTIONS
 from .tool_registry import execute_tool, select_runtime_tools
@@ -392,7 +391,9 @@ def _artifact_semantic(artifact_type: str, artifact_id: str, tool_name: str) -> 
         label = "我已经准备好售后工单草稿啦"
     elif normalized_artifact_type == "mom_baby_status_card":
         label = "我已经整理好母婴状态页啦"
-    elif normalized_artifact_type in {"milk_plan_card", "milk_analysis_card"}:
+    elif normalized_artifact_type == "milk_analysis_card":
+        label = "我已经整理好奶量分析结果啦"
+    elif normalized_artifact_type == "milk_plan_card":
         label = "我已经整理好奶量计划啦"
     else:
         label = "我已经整理好结果啦"
@@ -848,6 +849,9 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
             "title": form.get("title"),
             "field_count": len(fields) if isinstance(fields, list) else 0,
         }
+        instruction = _form_artifact_final_response_instruction(tool_name)
+        if instruction:
+            compact["final_response_instruction"] = instruction
 
     card = safe.get("card")
     if isinstance(card, dict):
@@ -858,6 +862,9 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
             "schema_version": card.get("schema_version") or card_json_dict.get("schema_version"),
             "created": True,
         }
+        instruction = _card_artifact_final_response_instruction(tool_name, card)
+        if instruction:
+            compact["final_response_instruction"] = instruction
 
     ticket = safe.get("ticket")
     if isinstance(ticket, dict):
@@ -866,6 +873,9 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
             "status": ticket.get("status"),
             "created": True,
         }
+        instruction = _ticket_artifact_final_response_instruction(tool_name)
+        if instruction:
+            compact["final_response_instruction"] = instruction
 
     followup = compact.get("assistant_followup")
     if isinstance(followup, dict):
@@ -877,6 +887,55 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
             )
 
     return compact
+
+
+def _form_artifact_final_response_instruction(tool_name: str) -> str:
+    if tool_name == "birth_plan_form_create":
+        return (
+            "分娩沟通单信息表已经展示。最终回复只输出下面两段中文，保留空行，"
+            "不要改写、扩写，不要提表单里没有的字段、医院会额外确认什么或已经生成沟通单：\n\n"
+            "好，我先帮你把分娩沟通单信息表打开了。\n\n"
+            "你填完并提交后，我会按表单里确认的信息整理成一份给医生/护士看的沟通单。"
+        )
+    if tool_name == "hospital_bag_form_create":
+        return (
+            "待产包信息采集表已经展示。最终回复只输出下面两段中文，保留空行，"
+            "不要改写、扩写，不要提医院、家里已有物品、购物或下单：\n\n"
+            "好，我先帮你把待产包信息表打开了。\n\n"
+            "你填完并提交后，我会按表单里确认的信息整理成一份清单。"
+        )
+    if tool_name == "ui_form_create":
+        return (
+            "信息确认表已经展示。最终回复只简短说明表单已打开，并请用户提交后继续处理；"
+            "不要补充表单中没有的字段、不要承诺已经生成后续结果，也不要承诺任何外部提交。"
+        )
+    return ""
+
+
+def _card_artifact_final_response_instruction(tool_name: str, card: dict[str, Any]) -> str:
+    if tool_name != "ibclc_consult_card_create":
+        return ""
+    card_json = card.get("card_json")
+    card_body = card_json if isinstance(card_json, dict) else card
+    chat = card_body.get("chat") if isinstance(card_body.get("chat"), dict) else {}
+    note = str(chat.get("note") or "启动咨询后，会自动将你的问题同步给顾问").strip()
+    return (
+        "IBCLC 咨询入口已经展示。最终回复只输出下面两段中文，保留空行，"
+        "不要改写、扩写，不要承诺已经预约、已经接通、顾问正在处理或任何入口内容里没有的服务能力：\n\n"
+        "IBCLC 咨询入口我准备好了。\n\n"
+        f"你勾选隐私政策和服务协议后，就可以启动咨询；{note}。"
+    )
+
+
+def _ticket_artifact_final_response_instruction(tool_name: str) -> str:
+    if tool_name != "support_ticket_draft_create":
+        return ""
+    return (
+        "售后工单草稿已经展示。最终回复只输出下面两段中文，保留空行，"
+        "不要改写、扩写，不要承诺已经提交、客服已经接手或会在具体时间联系用户：\n\n"
+        "售后工单草稿我整理好了。\n\n"
+        "你确认并提交后，才会进入售后处理；现在还没有对外提交。"
+    )
 
 
 def _compact_birth_journey_plan_card_output(safe: dict[str, Any]) -> dict[str, Any]:
@@ -2025,10 +2084,6 @@ def _record_birth_prep_tool_state(context_state: object, tool_name: str, argumen
     if tool_name != "hospital_bag_form_create":
         return
 
-    default_values = _object_argument(arguments.get("default_values"))
-    if default_values:
-        merge_hospital_bag_slots(context_state, default_values)
-
     tool_result = result.get("result")
     if not isinstance(tool_result, dict):
         return
@@ -2040,10 +2095,7 @@ def _record_birth_prep_tool_state(context_state: object, tool_name: str, argumen
             merge_hospital_bag_slots(context_state, form_defaults)
 
     status = str(tool_result.get("status") or "").strip()
-    missing_fields = tool_result.get("missing_fields")
-    if status == "needs_dialogue_prefill" and isinstance(missing_fields, list) and missing_fields:
-        set_pending_hospital_bag_slot(context_state, str(missing_fields[0]))
-    elif status == "form_created":
+    if status == "form_created":
         clear_pending_hospital_bag_slot(context_state)
 
 
@@ -2064,8 +2116,15 @@ def _record_birth_journey_plan_state(context_state: ContextState, arguments: dic
         owner.get("due_date_or_week") if isinstance(owner, dict) else None,
         overview.get("due_date_or_week") if isinstance(overview, dict) else None,
     )
-    if due_date_or_week:
-        merge_hospital_bag_slots(context_state, {"due_date_or_week": due_date_or_week})
+    known_values = {
+        "due_date_or_week": due_date_or_week,
+        "first_birth": _first_tool_state_text(plan_context.get("first_birth"), owner.get("first_birth") if isinstance(owner, dict) else None),
+        "fetus_count": _first_tool_state_text(plan_context.get("fetus_count"), owner.get("fetus_count") if isinstance(owner, dict) else None),
+        "birth_path": _first_tool_state_text(plan_context.get("birth_path"), owner.get("birth_path") if isinstance(owner, dict) else None),
+        "feeding_intention": _first_tool_state_text(plan_context.get("feeding_intention"), owner.get("feeding_intention") if isinstance(owner, dict) else None),
+        "support_person": _first_tool_state_text(plan_context.get("support_person"), owner.get("support_person") if isinstance(owner, dict) else None),
+    }
+    merge_hospital_bag_slots(context_state, known_values)
 
 
 def _first_tool_state_text(*values: Any) -> str:

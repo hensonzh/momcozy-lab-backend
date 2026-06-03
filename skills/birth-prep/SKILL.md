@@ -31,7 +31,7 @@ description: 产前准备服务，用于把分娩前后准备整理成生产全�
 
 - 用户说“待产包”“入院包”“住院包”“随身包”“去医院前要带什么”“生产前要准备什么东西”时，进入本服务。
 - 首次进入时先自然邀约，不直接创建表单。
-- 用户确认开始后，按 reference 先通过对话确认基础信息，再调用 `hospital_bag_form_create`。
+- 用户确认开始后，直接调用 `hospital_bag_form_create`，通过表单采集或确认信息；不要先用聊天追问三项基础信息。
 - 快速版、轻量版、通用版也走待产包服务流程，不在普通回复里手写完整清单。
 - 需要具体流程时，读取 `references/hospital-bag-service.md`。
 
@@ -107,7 +107,7 @@ description: 产前准备服务，用于把分娩前后准备整理成生产全�
 - `profile_get`：只在需要复用已有孕周、分娩方式、生产地点、支持人或偏好时使用。只采用可靠信息，不猜测。
 - `birth_plan_form_create`：创建分娩沟通单表单。
 - `labor_communication_card_create`：根据分娩沟通单表单数据生成结构化内容。
-- `hospital_bag_form_create`：创建待产包表单。待产包 `default_values` 只放 reference 规定的对话确认字段。
+- `hospital_bag_form_create`：创建待产包表单。待产包 `default_values` 放当前对话、`request_context`、已提交表单或 `profile_get` 中可靠的已知字段；工具会让用户在表单里确认或修改。
 - `hospital_bag_card_create`：根据待产包表单数据生成待产包清单。
 - `birth_journey_plan_card_create`：根据已确认的孕周/预产期、分娩方式和主要支持人生成生产全过程计划。
 
@@ -126,7 +126,7 @@ description: 产前准备服务，用于把分娩前后准备整理成生产全�
 
 ## 连续性
 
-- 待产包流程中，用户短确认后继续按 `hospital-bag-service.md` 收集信息或创建表单，不改成普通清单。
+- 待产包流程中，用户短确认后继续按 `hospital-bag-service.md` 创建表单或生成清单，不改成普通清单。
 - 分娩沟通单流程中，用户短确认后继续按 `labor-communication-card.md` 创建或确认表单，不改成生产全过程计划。
 - 生产全过程计划流程中，用户短确认后继续按 `birth-journey-plan.md` 收集 3 个必填信息或生成计划，不改成待产包或分娩沟通单。
 - 上一轮如果只提出一个明确下一步，用户回复“好/可以/继续/要/帮我做”就承接该下一步。

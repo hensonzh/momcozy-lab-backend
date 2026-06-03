@@ -84,13 +84,14 @@ class ToolRegistryTests(unittest.TestCase):
             "milk_management": ("用户自身", "不要用于吸奶器型号购买选型", "设备故障排查"),
             "hospital_bag_cart": ("已经进入待产包购物车", "不要用于生成待产包清单", "独立吸奶器型号选型"),
             "pump_recommendation": ("购买前", "不要用于已购设备故障", "购物车直接修改"),
-            "birth_prep": ("具体产物流程", "不要用于普通孕期问答", "必须已有对应确认信息"),
+            "birth_prep": ("具体产物流程", "用户确认开始待产包整理后", "必须已有对应确认信息"),
         }
 
         for namespace, tokens in expected_tokens.items():
             description = str(DEFERRED_TOOL_NAMESPACES[namespace]["description"])
             for token in tokens:
                 self.assertIn(token, description)
+        self.assertNotIn("创建待产包表单前必须已通过对话收集规定基础字段", DEFERRED_TOOL_NAMESPACES["birth_prep"]["description"])
 
     def test_deferred_tool_descriptions_include_cross_namespace_boundaries(self) -> None:
         expected_tokens = {

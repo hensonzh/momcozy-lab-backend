@@ -155,7 +155,7 @@ input = [
 
 工具返回的本地资源 URL 不会被模型自动访问。对 `device_manual_search.relevant_images` 这类官方步骤图，agent loop 先把图片元数据记录到 `ContextState.available_tool_images`；当最终回复实际展示 Markdown 图片时，再记录 `last_displayed_tool_image`、`active_device_module` 和 `shown_step_image_urls`。后续用户明确询问“图上/这张图/对照图/标注/哪个部件”等需要读图的问题时，下一轮模型请求优先参考 `last_displayed_tool_image`，避免从历史图片里用相同编号误猜；必要时才把最多 2 张 `/skill-assets/...` 白名单图片转为 `data:image/...` 的 `input_image`。该能力只读取 `skills/{skill_id}/assets` 下的图片文件，不处理外部 URL、PDF、视频或任意路径；如果当前用户消息已经附带上传图片，则优先用户上传图片，不再自动附加官方步骤图。结构化工具字段仍优先于视觉读取；图片输入只用于补充读取图中文字、标注和部件位置。
 
-产前准备的待产包基础字段会记录在 `ContextState.birth_prep_slots`。当用户按一问一答补充孕周/预产期、复工或外出计划、预算偏好和最担心的问题时，后端保存这些字段，并在 `hospital_bag_form_create` 时自动合并到 `default_values`，避免模型漏传导致表单没有预填。
+产前准备的待产包基础字段会记录在 `ContextState.birth_prep_slots`。当用户按一问一答补充孕周/预产期、复工或外出计划和最担心的问题时，后端保存这些字段，并在 `hospital_bag_form_create` 时自动合并到 `default_values`，避免模型漏传导致表单没有预填。
 
 后续请求依赖 `previous_response_id` 延续对话状态。
 
@@ -488,7 +488,7 @@ birth_plan_form_create / hospital_bag_form_create tool result
 1. 用户表达待产包、入院准备等意图。
 2. 模型加载 `birth-prep`。
 3. 首轮先做服务邀约，说明会快速确认几项信息来生成更有针对性的待产包清单。
-4. 用户确认开始后，先通过对话确认孕周/预产期、复工/外出计划、预算偏好和最担心的问题，再把这些字段作为 `default_values` 传给 `hospital_bag_form_create`。
+4. 用户确认开始后，先通过对话确认孕周/预产期、复工/外出计划和最担心的问题，再把这些字段作为 `default_values` 传给 `hospital_bag_form_create`。
 5. 用户确认表单后，模型调用 `hospital_bag_card_create`。
 6. 前端用 `card.card_json` 渲染待产包清单。
 
