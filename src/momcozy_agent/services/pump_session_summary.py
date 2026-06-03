@@ -271,8 +271,8 @@ def _letdown_summary(*, left: dict[str, Any], right: dict[str, Any]) -> str:
     right_count = right.get("letdown_count")
     return "\n".join(
         (
-            f"右侧检测到{_format_count(right_count)}次奶阵",
-            f"左侧检测到{_format_count(left_count)}次奶阵",
+            f"右侧:{_format_count(right_count)}次",
+            f"左侧:{_format_count(left_count)}次",
         )
     )
 
