@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 
+from momcozy_agent.health_guidance import HEALTH_GUIDANCE_ALLOWED_DOMAINS
 from momcozy_agent.tool_schemas import FUNCTION_TOOLS
 from momcozy_agent.tool_registry import DEFERRED_TOOL_NAMESPACES, select_runtime_tools
 
@@ -41,6 +42,30 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertIn("每轮最终回复都应调用一次", description)
         self.assertIn("只提供 3 个短提示", description)
         self.assertIn("不能绕过保存、提交、替换、转接等确认流程", description)
+
+    def test_runtime_tools_always_include_domain_limited_health_web_search(self) -> None:
+        light_tools = select_runtime_tools({"user_message": "hello", "locale": "zh-CN"})
+        light_web_tools = [tool for tool in light_tools if tool.get("type") == "web_search"]
+        self.assertEqual(len(light_web_tools), 1)
+
+        health_tools = select_runtime_tools({"user_message": "乳房红肿还有点发热怎么办", "locale": "zh-CN"})
+        web_tools = [tool for tool in health_tools if tool.get("type") == "web_search"]
+        self.assertEqual(len(web_tools), 1)
+        self.assertEqual(web_tools[0]["filters"]["allowed_domains"], HEALTH_GUIDANCE_ALLOWED_DOMAINS)
+        self.assertIn("www.who.int", web_tools[0]["filters"]["allowed_domains"])
+        self.assertIn("www.cdc.gov", web_tools[0]["filters"]["allowed_domains"])
+        self.assertIn("www.bfmed.org", web_tools[0]["filters"]["allowed_domains"])
+
+        short_health_tools = select_runtime_tools({"user_message": "堵奶疼怎么办", "locale": "zh-CN"})
+        self.assertTrue(any(tool.get("type") == "web_search" for tool in short_health_tools))
+
+    def test_runtime_tools_keep_web_search_stable_for_product_flows(self) -> None:
+        tools = select_runtime_tools({"user_message": "我想整理待产包清单", "locale": "zh-CN"})
+        self.assertEqual(len([tool for tool in tools if tool.get("type") == "web_search"]), 1)
+
+    def test_runtime_tools_keep_web_search_stable_for_urgent_red_flags(self) -> None:
+        tools = select_runtime_tools({"user_message": "今天胎动明显减少怎么办", "locale": "zh-CN"})
+        self.assertEqual(len([tool for tool in tools if tool.get("type") == "web_search"]), 1)
 
     def test_runtime_tools_do_not_expose_generic_form_tool(self) -> None:
         tool_names = {

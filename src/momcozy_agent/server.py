@@ -343,6 +343,7 @@ async def stream_ag_ui_events(
                 ag_ui_thread_id=str(thread_id),
                 ag_ui_run_id=str(run_id),
                 ag_ui_parent_run_id=str(parent_run_id) if parent_run_id else None,
+                ag_ui_message_id=assistant_message_id,
                 on_text_delta=send_text_delta,
                 on_response_stream_event=response_stream_timing,
             )

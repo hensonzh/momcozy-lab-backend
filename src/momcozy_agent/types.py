@@ -190,7 +190,13 @@ class ToolSearchDefinition(TypedDict, total=False):
     execution: Literal["server", "client"]
 
 
-ToolDefinition = FunctionToolDefinition | NamespaceToolDefinition | ToolSearchDefinition
+class WebSearchToolDefinition(TypedDict, total=False):
+    type: Literal["web_search"]
+    filters: dict[str, Any]
+    external_web_access: bool
+
+
+ToolDefinition = FunctionToolDefinition | NamespaceToolDefinition | ToolSearchDefinition | WebSearchToolDefinition
 
 
 class ResponsesRequest(TypedDict, total=False):
@@ -199,7 +205,8 @@ class ResponsesRequest(TypedDict, total=False):
     input: list[dict[str, Any]]
     previous_response_id: str
     tools: list[ToolDefinition]
-    tool_choice: Literal["auto"]
+    tool_choice: Literal["auto"] | dict[str, Any]
+    include: list[str]
     reasoning: dict[str, Literal["low", "medium", "high"]]
     text: dict[str, Any]
     store: bool
