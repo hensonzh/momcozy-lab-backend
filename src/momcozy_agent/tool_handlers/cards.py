@@ -5,6 +5,7 @@ import re
 from datetime import date, datetime, timedelta
 from typing import Any
 
+from ..services import data_store
 from ..types import RuntimeInputs
 
 HOSPITAL_BAG_CART_URL = "/hospital-bag-cart"
@@ -1898,6 +1899,7 @@ def create_birth_journey_plan_card(args: dict[str, Any], inputs: RuntimeInputs) 
         }
     scope = str(args.get("scope") or "full").strip() or "full"
     card_json = _build_birth_journey_plan_card_json(plan_context, scope, inputs)
+    saved_plan = _save_birth_journey_care_plan(card_json, inputs)
     return {
         "tool_name": "birth_journey_plan_card_create",
         "status": "card_created",
@@ -1906,7 +1908,30 @@ def create_birth_journey_plan_card(args: dict[str, Any], inputs: RuntimeInputs) 
             "schema_version": "1.0",
             "card_json": card_json,
         },
+        "plan": saved_plan,
     }
+
+
+def _save_birth_journey_care_plan(card_json: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any] | None:
+    user_profile = inputs.get("user_profile") if isinstance(inputs.get("user_profile"), dict) else {}
+    user_id = str(inputs.get("user_id") or user_profile.get("user_id") or "").strip()
+    if not user_id:
+        return None
+    phases = card_json.get("phases") if isinstance(card_json.get("phases"), list) else []
+    current_phase = next((phase for phase in phases if isinstance(phase, dict) and phase.get("status") == "current"), None)
+    summary_parts = [
+        str(card_json.get("subtitle") or "").strip(),
+        f"当前阶段：{current_phase.get('title')}" if isinstance(current_phase, dict) and current_phase.get("title") else "",
+    ]
+    summary = "；".join(part for part in summary_parts if part)
+    return data_store.save_care_plan_artifact(
+        user_id=user_id,
+        plan_type="birth_journey",
+        title=str(card_json.get("title") or "生产全过程计划"),
+        summary=summary,
+        payload=card_json,
+        source_artifact_type="birth_journey_plan_card",
+    )
 
 
 def _missing_birth_journey_required_context(form_data: dict[str, Any]) -> list[str]:
@@ -3417,19 +3442,19 @@ HOSPITAL_BAG_SPECIAL_LOGIC_ITEM_ORDER: dict[str, list[str]] = {
 
 def _hospital_bag_special_item_logic_summary(card_json: dict[str, Any]) -> str:
     entries_by_field = _hospital_bag_special_item_entries_by_field(card_json)
-    sentences: list[str] = []
+    bullets: list[str] = []
     for field in HOSPITAL_BAG_SPECIAL_LOGIC_FIELD_ORDER:
         entries = entries_by_field.get(field) or []
         if not entries:
             continue
         sentence = _hospital_bag_special_item_logic_sentence(field, entries)
         if sentence:
-            sentences.append(sentence)
-        if len(sentences) >= 3:
+            bullets.append(f"- {sentence}")
+        if len(bullets) >= 3:
             break
-    if not sentences:
+    if not bullets:
         return ""
-    return "".join(sentences) + "具体可以看下面的待产包清单。"
+    return "特殊物品我按这几个情况做了取舍：\n" + "\n".join(bullets) + "\n具体可以看下面的待产包清单。"
 
 
 def _hospital_bag_special_item_entries_by_field(card_json: dict[str, Any]) -> dict[str, list[dict[str, str]]]:

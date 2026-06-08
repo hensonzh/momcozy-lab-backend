@@ -28,6 +28,7 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertIn("默认回复要短", request["instructions"])
         self.assertIn("优先 1-3 句", request["instructions"])
         self.assertIn("已经展示的信息不要再完整复述", request["instructions"])
+        self.assertIn("使用 `ui_quick_replies_create` 创建", request["instructions"])
 
     def test_agent_request_can_disable_tools_for_hidden_prewarm(self) -> None:
         request = build_agent_request(
@@ -62,8 +63,7 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertIn("health_guidance_context:", request_context)
         self.assertIn("优先使用 web_search 检索", request_context)
         self.assertIn("明显急症或红旗信号先给医生/急救分流", request_context)
-        self.assertIn("复杂母婴健康咨询", request["instructions"])
-        self.assertIn("没有 health_guidance_context，不要", request["instructions"])
+        self.assertNotIn("## 健康咨询和 web_search", request["instructions"])
 
     def test_light_product_or_urgent_questions_do_not_add_health_guidance_context(self) -> None:
         light_request = build_agent_request({"user_message": "孕26周该准备什么", "locale": "zh-CN"})
@@ -540,7 +540,7 @@ class AgentToolEventTests(unittest.TestCase):
                                 {
                                     "skill_id": "birth-prep",
                                     "kind": "references",
-                                    "path": "references/labor-communication-card.md",
+                                    "path": "references/birth-journey-plan.md",
                                 }
                             ),
                         }
@@ -558,7 +558,7 @@ class AgentToolEventTests(unittest.TestCase):
             ag_ui_run_id="run-1",
         )
 
-        self.assertTrue(any("birth-prep/references/labor-communication-card.md 已在当前会话中读取过" in item for item in context_state.loaded_references))
+        self.assertTrue(any("birth-prep/references/birth-journey-plan.md 已在当前会话中读取过" in item for item in context_state.loaded_references))
 
         request = build_agent_request(
             {"user_message": "继续", "locale": "zh-CN", "previous_response_id": "resp-final"},
@@ -936,26 +936,6 @@ class AgentToolEventTests(unittest.TestCase):
                         ],
                     },
                     {
-                        "id": "resp-quick",
-                        "output": [
-                            {
-                                "type": "function_call",
-                                "id": "item-quick",
-                                "call_id": "call-quick",
-                                "name": "ui_quick_replies_create",
-                                "arguments": json.dumps(
-                                    {
-                                        "replies": [
-                                            {"text": "我来填写", "send_text": "我来填写"},
-                                            {"text": "先解释一下", "send_text": "先解释一下这些问题"},
-                                            {"text": "晚点再说", "send_text": "晚点再说"},
-                                        ]
-                                    }
-                                ),
-                            }
-                        ],
-                    },
-                    {
                         "id": "resp-final",
                         "output": [
                             {
@@ -1032,6 +1012,50 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertIn("RUN_FINISHED", event_types)
         artifact = next(event for event in events if event.get("type") == "ARTIFACT_CREATED")
         self.assertEqual(artifact["artifact_type"], "support_ticket")
+
+    def test_stream_suppresses_quick_replies_when_card_artifact_created(self) -> None:
+        async def collect_events() -> list[dict[str, object]]:
+            client = _FakeStreamingClient(
+                [
+                    {
+                        "id": "resp-card",
+                        "output": [
+                            {
+                                "type": "function_call",
+                                "id": "item-card",
+                                "call_id": "call-card",
+                                "name": "ibclc_consult_card_create",
+                                "arguments": json.dumps({}),
+                            }
+                        ],
+                    },
+                    {
+                        "id": "resp-final",
+                        "output": [
+                            {
+                                "type": "message",
+                                "content": [{"type": "output_text", "text": "IBCLC 咨询入口我准备好了。"}],
+                            }
+                        ],
+                    },
+                ]
+            )
+            runtime = ChatRuntime(client, model="test-model")
+            stream = stream_ag_ui_events(
+                {"thread_id": "thread-1", "run_id": "run-card-no-quick"},
+                {"user_message": "我想找 IBCLC", "locale": "zh-CN"},
+                runtime,
+            )
+            return [event async for event in stream]
+
+        events = asyncio.run(collect_events())
+        event_types = [str(event.get("type")) for event in events]
+
+        self.assertIn("ARTIFACT_CREATED", event_types)
+        self.assertNotIn("QUICK_REPLIES", event_types)
+        self.assertIn("RUN_FINISHED", event_types)
+        artifact = next(event for event in events if event.get("type") == "ARTIFACT_CREATED")
+        self.assertEqual(artifact["artifact_type"], "ibclc_consult_card")
 
 
 class _FakeClient:

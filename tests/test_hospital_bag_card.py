@@ -397,11 +397,15 @@ class HospitalBagCardTests(unittest.TestCase):
 
         followup = result["assistant_followup"]["message"]
         self.assertIn("待产包清单我整理好了", followup)
+        self.assertIn("特殊物品我按这几个情况做了取舍：", followup)
+        self.assertIn("\n- 考虑到你倾向剖宫产", followup)
         self.assertIn("考虑到你倾向剖宫产", followup)
         self.assertIn("我为你准备了高腰宽松内裤和不压腹出院裤/裙", followup)
         self.assertIn("收腹带先放在需要问医生的项目里", followup)
+        self.assertIn("\n- 考虑到你准备混合喂养", followup)
         self.assertIn("考虑到你准备混合喂养", followup)
         self.assertIn("哺乳文胸/哺乳背心、防溢乳垫、便携式吸奶器和储奶袋/储奶瓶", followup)
+        self.assertIn("\n- 考虑到你预计6 周后返工", followup)
         self.assertIn("考虑到你预计6 周后返工", followup)
         self.assertIn("冷藏包/冰袋", followup)
         self.assertIn("吸奶配件清洁包", followup)
@@ -428,7 +432,8 @@ class HospitalBagCardTests(unittest.TestCase):
         labels = {item["label"] for group in groups for item in group["items"]}
         followup = result["assistant_followup"]["message"]
 
-        self.assertIn("考虑到这次是双胎", followup)
+        self.assertIn("特殊物品我按这几个情况做了取舍：", followup)
+        self.assertIn("\n- 考虑到这次是双胎", followup)
         self.assertIn("宝宝出院衣物", followup)
         self.assertIn("包被", followup)
         self.assertIn("具体可以看下面的待产包清单", followup)

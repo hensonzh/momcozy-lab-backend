@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import tempfile
 import unittest
+from pathlib import Path
 
 from momcozy_agent.agents import model_tool_output
+from momcozy_agent.services import data_store
 from momcozy_agent.tool_handlers.cards import create_birth_journey_plan_card
 from momcozy_agent.tool_registry import select_runtime_tools
 
@@ -74,6 +77,33 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         self.assertNotIn("承接奶量管理计划", rendered)
         self.assertNotIn("| --- |", rendered)
         self.assertNotIn("<br>", rendered)
+
+    def test_birth_journey_plan_is_saved_as_care_plan_artifact_when_user_id_exists(self) -> None:
+        old_db_path = data_store.DB_PATH
+        with tempfile.TemporaryDirectory() as tmp:
+            data_store.DB_PATH = Path(tmp) / "milk_management.db"  # type: ignore[assignment]
+            try:
+                result = create_birth_journey_plan_card(
+                    {
+                        "plan_context": {
+                            "due_date_or_week": "30周",
+                            "birth_path": "剖宫产",
+                            "support_person": "伴侣",
+                        },
+                        "scope": "full",
+                    },
+                    {"user_message": "", "user_id": "app-user", "message_sent_at": "2026-06-08T09:00:00+08:00"},
+                )
+
+                self.assertEqual(result["status"], "card_created")
+                self.assertIsNotNone(result.get("plan"))
+                plans = data_store.list_care_plan_artifacts(user_id="app-user")
+                self.assertEqual(len(plans), 1)
+                self.assertEqual(plans[0]["plan_type"], "birth_journey")
+                self.assertEqual(plans[0]["title"], "生产全过程计划")
+                self.assertEqual(plans[0]["payload"]["owner"]["current_week"], "孕30周")
+            finally:
+                data_store.DB_PATH = old_db_path  # type: ignore[assignment]
 
     def test_exposes_birth_journey_plan_tool(self) -> None:
         namespaces = {
@@ -165,12 +195,13 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         self.assertEqual(compact["card"], {"card_type": "birth_journey_plan_card", "schema_version": "1.0", "created": True})
         self.assertIn("最终回复按段落直接输出下面这段 1-3 句中文", compact["final_response_instruction"])
         self.assertIn("保留空行", compact["final_response_instruction"])
-        self.assertIn("生产全过程计划我整理好了", compact["final_response_instruction"])
+        self.assertIn("不要使用“卡片”这类界面形式词", compact["final_response_instruction"])
+        self.assertIn("不要再输出“我先帮你生成”或“我整理好了”", compact["final_response_instruction"])
+        self.assertNotIn("生产全过程计划我整理好了", compact["final_response_instruction"])
         self.assertIn("你现在在孕中期", compact["final_response_instruction"])
         self.assertIn("先不用把生产准备一次做完", compact["final_response_instruction"])
         self.assertIn("准备上先列出下次产检最想确认的 3-5 个问题", compact["final_response_instruction"])
         self.assertIn("接下来我可以先陪你整理产检问题", compact["final_response_instruction"])
-        self.assertIn("生产全过程计划我整理好了。\n\n你现在在孕中期", compact["final_response_instruction"])
         self.assertIn("题。\n\n接下来我可以先陪你整理产检问题。", compact["final_response_instruction"])
         self.assertNotIn("当前阶段是", compact["final_response_instruction"])
         self.assertNotIn("重点先留意", compact["final_response_instruction"])

@@ -916,6 +916,28 @@ async def query_plan_task_endpoint(request: Request, user_id: str = "", timestam
     )
 
 
+@router.get("/v1/plan/list")
+async def query_plan_list_endpoint(request: Request, user_id: str = "", status: str = "active") -> dict[str, Any]:
+    verify_api_key(request)
+    uid = str(user_id or "").strip()
+    if not uid:
+        return {"error": -1, "plan_list": []}
+    return {
+        "error": 0,
+        "plan_list": data_store.list_care_plan_artifacts(user_id=uid, status=status or "active"),
+    }
+
+
+@router.get("/v1/plan/detail")
+async def query_plan_detail_endpoint(request: Request, user_id: str = "", plan_id: int = 0) -> dict[str, Any]:
+    verify_api_key(request)
+    uid = str(user_id or "").strip()
+    plan = data_store.get_care_plan_artifact(user_id=uid, plan_id=plan_id)
+    if not plan:
+        return {"error": -1, "plan": None}
+    return {"error": 0, "plan": plan}
+
+
 @router.post("/v1/plan/add-task")
 async def add_plan_task_endpoint(request: Request) -> dict[str, Any]:
     verify_api_key(request)

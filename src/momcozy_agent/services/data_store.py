@@ -110,6 +110,20 @@ def init_db() -> None:
             );
             CREATE INDEX IF NOT EXISTS idx_plan_user_type ON milk_plan(user_id, plan_type, plan_id DESC);
 
+            CREATE TABLE IF NOT EXISTS care_plan_artifact (
+                plan_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                plan_type TEXT NOT NULL,
+                title TEXT NOT NULL,
+                summary TEXT,
+                status TEXT NOT NULL DEFAULT 'active',
+                payload_json TEXT NOT NULL,
+                source_artifact_type TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS idx_care_plan_artifact_user ON care_plan_artifact(user_id, status, updated_at DESC);
+
             CREATE TABLE IF NOT EXISTS calendar (
                 item_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id TEXT NOT NULL,
@@ -1015,6 +1029,78 @@ def get_uploaded_file(file_id: str) -> dict[str, Any] | None:
         return _row_dict(row) if row else None
 
 
+def save_care_plan_artifact(
+    *,
+    user_id: str,
+    plan_type: str,
+    title: str,
+    summary: str,
+    payload: dict[str, Any],
+    source_artifact_type: str = "",
+) -> dict[str, Any] | None:
+    init_db()
+    uid = str(user_id or "").strip()
+    normalized_type = str(plan_type or "").strip()
+    normalized_title = str(title or "").strip()
+    if not uid or not normalized_type or not normalized_title or not isinstance(payload, dict):
+        return None
+    payload_json = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    with _connect() as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO care_plan_artifact(
+                user_id, plan_type, title, summary, status, payload_json, source_artifact_type, updated_at
+            )
+            VALUES (?, ?, ?, ?, 'active', ?, ?, CURRENT_TIMESTAMP)
+            """,
+            (uid, normalized_type, normalized_title, str(summary or "").strip(), payload_json, str(source_artifact_type or "").strip()),
+        )
+        plan_id = int(cursor.lastrowid)
+    return get_care_plan_artifact(user_id=uid, plan_id=plan_id)
+
+
+def list_care_plan_artifacts(*, user_id: str, status: str = "active") -> list[dict[str, Any]]:
+    init_db()
+    uid = str(user_id or "").strip()
+    normalized_status = str(status or "active").strip() or "active"
+    if not uid:
+        return []
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT plan_id, user_id, plan_type, title, summary, status, payload_json,
+                   source_artifact_type, created_at, updated_at
+            FROM care_plan_artifact
+            WHERE user_id = ? AND status = ?
+            ORDER BY updated_at DESC, plan_id DESC
+            """,
+            (uid, normalized_status),
+        ).fetchall()
+    return [_care_plan_artifact_from_row(row) for row in rows]
+
+
+def get_care_plan_artifact(*, user_id: str, plan_id: int) -> dict[str, Any] | None:
+    init_db()
+    uid = str(user_id or "").strip()
+    try:
+        pid = int(plan_id)
+    except Exception:
+        pid = 0
+    if not uid or pid <= 0:
+        return None
+    with _connect() as conn:
+        row = conn.execute(
+            """
+            SELECT plan_id, user_id, plan_type, title, summary, status, payload_json,
+                   source_artifact_type, created_at, updated_at
+            FROM care_plan_artifact
+            WHERE user_id = ? AND plan_id = ?
+            """,
+            (uid, pid),
+        ).fetchone()
+    return _care_plan_artifact_from_row(row) if row else None
+
+
 def query_plan_tasks(*, user_id: str, target_date: str) -> dict[str, Any] | None:
     init_db()
     uid = str(user_id or "").strip()
@@ -1602,6 +1688,22 @@ def _loads(raw: Any) -> dict[str, Any]:
     except Exception:
         return {}
     return loaded if isinstance(loaded, dict) else {}
+
+
+def _care_plan_artifact_from_row(row: Any) -> dict[str, Any]:
+    payload = _loads(row["payload_json"])
+    return {
+        "plan_id": int(row["plan_id"] or 0),
+        "user_id": str(row["user_id"] or ""),
+        "plan_type": str(row["plan_type"] or ""),
+        "title": str(row["title"] or ""),
+        "summary": str(row["summary"] or ""),
+        "status": str(row["status"] or ""),
+        "source_artifact_type": str(row["source_artifact_type"] or ""),
+        "created_at": str(row["created_at"] or ""),
+        "updated_at": str(row["updated_at"] or ""),
+        "payload": payload,
+    }
 
 
 def _first_plan_id(rows: list[Any]) -> int | None:

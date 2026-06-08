@@ -1005,7 +1005,8 @@ def _compact_birth_journey_plan_card_output(safe: dict[str, Any]) -> dict[str, A
         safe,
         (
             "生产全过程计划已经展示完整路线图。最终回复按段落直接输出下面这段 1-3 句中文，"
-            "保留空行，不要改写、扩写，语气要保持自然陪伴，"
+            "保留空行，不要改写、扩写，语气要保持自然陪伴。"
+            "不要使用“卡片”这类界面形式词，不要再输出“我先帮你生成”或“我整理好了”这类重复交付句，"
             "不要复述计划里的所有阶段、日期或完整清单：\n\n"
             f"{response}"
         ),
@@ -1024,7 +1025,6 @@ def _birth_journey_plan_final_response(card_json: dict[str, Any]) -> str:
 
     return "\n\n".join(
         [
-            "生产全过程计划我整理好了。",
             _birth_journey_phase_summary_sentence(phase_title, watchout, action, goal),
             _birth_journey_service_sentence(label or help_item),
         ]

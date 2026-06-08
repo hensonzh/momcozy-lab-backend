@@ -31,6 +31,7 @@ HOST = "127.0.0.1"
 PORT = 8768
 MAX_IMAGE_ATTACHMENTS = 4
 STREAM_TIMING_ENV = "MOMCOZY_DEBUG_STREAM_TIMING"
+MAX_QUICK_REPLY_TEXT_CHARS = 32
 DEFAULT_QUICK_REPLIES: tuple[dict[str, str], ...] = (
     {"text": "继续这个问题", "send_text": "继续这个问题"},
     {"text": "换个说法", "send_text": "请换个说法再解释一遍"},
@@ -289,7 +290,7 @@ async def stream_ag_ui_events(
                 log_timing("ag_ui:RUN_FINISHED buffered", _ag_ui_timing_metadata(event))
                 pending_run_finished = event
                 return
-            if _is_form_like_artifact_event(event):
+            if _is_artifact_event(event):
                 suppress_quick_replies = True
             quick_replies = _quick_replies_from_tool_result_event(event)
             if quick_replies is not None:
@@ -618,19 +619,31 @@ def _is_quick_replies_tool_event(event: dict[str, Any]) -> bool:
     return False
 
 
-def _is_form_like_artifact_event(event: dict[str, Any]) -> bool:
+def _is_artifact_event(event: dict[str, Any]) -> bool:
     if event.get("type") != "ARTIFACT_CREATED":
         return False
     artifact_type = str(event.get("artifact_type") or event.get("artifactType") or "").strip()
-    if artifact_type in {"form", "support_ticket", "support_ticket_draft"}:
+    if artifact_type:
         return True
     tool_name = str(event.get("tool_call_name") or event.get("toolCallName") or "").strip()
     return tool_name in {
         "ui_form_create",
         "birth_plan_form_create",
         "hospital_bag_form_create",
+        "labor_communication_card_create",
+        "birth_journey_plan_card_create",
+        "hospital_bag_card_create",
+        "ibclc_consult_card_create",
+        "milk_status_query",
+        "milk_assessment_evaluate",
+        "milk_plan_preview",
+        "milk_plan_mutate",
         "support_ticket_draft_create",
     }
+
+
+def _default_quick_replies() -> list[dict[str, str]]:
+    return [dict(item) for item in DEFAULT_QUICK_REPLIES]
 
 
 def _quick_replies_from_tool_result_event(event: dict[str, Any]) -> list[dict[str, str]] | None:
@@ -643,23 +656,37 @@ def _quick_replies_from_tool_result_event(event: dict[str, Any]) -> list[dict[st
         payload = json.loads(content)
     except json.JSONDecodeError:
         return None
-    replies = payload.get("quick_replies")
-    if not isinstance(replies, list) or len(replies) != 3:
+    if not isinstance(payload, dict):
+        return None
+    return _validated_quick_replies(payload.get("quick_replies"))
+
+
+def _validated_quick_replies(value: Any) -> list[dict[str, str]] | None:
+    if not isinstance(value, list) or len(value) != 3:
         return None
     normalized: list[dict[str, str]] = []
-    for item in replies:
+    seen: set[str] = set()
+    for item in value:
         if not isinstance(item, dict):
             return None
-        text = str(item.get("text") or "").strip()
-        send_text = str(item.get("send_text") or text).strip()
+        text = _trim_quick_reply_text(item.get("text"))
+        send_text = _trim_quick_reply_text(item.get("send_text") or item.get("sendText")) or text
         if not text or not send_text:
             return None
+        key = send_text.casefold()
+        if key in seen:
+            return None
+        seen.add(key)
         normalized.append({"text": text, "send_text": send_text})
     return normalized
 
 
-def _default_quick_replies() -> list[dict[str, str]]:
-    return [dict(item) for item in DEFAULT_QUICK_REPLIES]
+def _trim_quick_reply_text(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    text = " ".join(text.split())
+    return text[:MAX_QUICK_REPLY_TEXT_CHARS]
 
 
 def _submit_support_ticket(ticket: dict[str, Any]) -> dict[str, Any]:
