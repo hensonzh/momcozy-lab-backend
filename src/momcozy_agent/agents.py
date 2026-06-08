@@ -16,6 +16,7 @@ from .contexts import (
     hospital_bag_slots,
     merge_hospital_bag_slots,
 )
+from .health_guidance import health_guidance_request_context_lines, health_guidance_required_web_search_tool_choice
 from .static_context import STATIC_AGENT_INSTRUCTIONS
 from .tool_registry import execute_tool, select_runtime_tools
 from .types import AgUiEvent, AgUiEventHandler, AgentEvent, AgentEventHandler, AgentEventPhase, BuildAgentRequestOptions, ResponsesClientLike, ResponsesRequest, RuntimeInputs, TextDeltaHandler
@@ -23,6 +24,8 @@ from .types import AgUiEvent, AgUiEventHandler, AgentEvent, AgentEventHandler, A
 AG_UI_STATUS_ACTIVITY_TYPE = "MOMCOZY_AGENT_STATUS"
 AG_UI_STATUS_CUSTOM_NAME = "momcozy.agent.status"
 AG_UI_THINKING_CUSTOM_NAME = "momcozy.agent.thinking"
+AG_UI_WEB_SEARCH_CUSTOM_NAME = "momcozy.agent.web_search"
+AG_UI_WEB_SEARCH_CITATIONS_CUSTOM_NAME = "momcozy.web_search.citations"
 QUICK_REPLIES_TOOL_NAME = "ui_quick_replies_create"
 
 AgUiSemantic = dict[str, Any]
@@ -62,7 +65,7 @@ def run_started_event(thread_id: str, run_id: str, parent_run_id: str | None = N
         "run_id": run_id,
         "semantic": _semantic_payload(
             "thinking",
-            "我在接收你的消息～",
+            "我已经收到你的消息啦～",
             "status",
             f"run:{run_id}",
             priority=10,
@@ -111,6 +114,33 @@ def quick_replies_event(message_id: str, replies: list[dict[str, str]]) -> AgUiE
         "message_id": message_id,
         "replies": replies,
         "semantic": _semantic_payload("done", "我准备好几个下一步选项啦", "hidden", f"quick_replies:{message_id}", priority=80),
+    }
+
+
+def web_search_citations_event(message_id: str, citations: list[dict[str, Any]]) -> AgUiEvent:
+    return {
+        "type": "CUSTOM",
+        "timestamp": _timestamp_ms(),
+        "name": AG_UI_WEB_SEARCH_CITATIONS_CUSTOM_NAME,
+        "message_id": message_id,
+        "value": {"citations": _compact_web_search_citations_for_display(citations)},
+        "semantic": _semantic_payload("done", "我整理好参考来源啦", "hidden", f"citations:{message_id}", priority=75),
+    }
+
+
+def web_search_status_event(status: str, metadata: dict[str, Any] | None = None) -> AgUiEvent:
+    label = _web_search_status_label(status)
+    return {
+        "type": "CUSTOM",
+        "timestamp": _timestamp_ms(),
+        "name": AG_UI_WEB_SEARCH_CUSTOM_NAME,
+        "value": {
+            "type": "agent.web_search",
+            "status": _normalize_web_search_status(status),
+            "label": label,
+            "metadata": metadata or {},
+        },
+        "semantic": _web_search_semantic(status, metadata or {}),
     }
 
 
@@ -381,6 +411,33 @@ def _thinking_semantic(status: str, metadata: dict[str, Any]) -> AgUiSemantic:
     if normalized_status == "failed":
         return _semantic_payload("error", "这一步我还没想清楚", "hidden", "thinking:current", priority=40)
     return _semantic_payload("done", "我想好啦", "hidden", "thinking:current", priority=40)
+
+
+def _web_search_semantic(status: str, metadata: dict[str, Any]) -> AgUiSemantic:
+    normalized_status = _normalize_web_search_status(status)
+    if normalized_status == "failed":
+        return _semantic_payload("error", _web_search_status_label(status), "work_item", "web_search:current", priority=55)
+    if normalized_status == "completed":
+        return _semantic_payload("done", _web_search_status_label(status), "work_item", "web_search:current", priority=55)
+    return _semantic_payload("reading", _web_search_status_label(status), "work_item", "web_search:current", priority=55)
+
+
+def _normalize_web_search_status(status: str) -> str:
+    normalized = str(status or "").strip().lower()
+    if normalized in {"completed", "done", "finished", "succeeded", "success"}:
+        return "completed"
+    if normalized in {"failed", "error"}:
+        return "failed"
+    return "searching"
+
+
+def _web_search_status_label(status: str) -> str:
+    normalized_status = _normalize_web_search_status(status)
+    if normalized_status == "completed":
+        return "我查好专业资料啦"
+    if normalized_status == "failed":
+        return "专业资料暂时没查好"
+    return "我在查专业资料～"
 
 
 def _artifact_semantic(artifact_type: str, artifact_id: str, tool_name: str) -> AgUiSemantic:
@@ -1366,8 +1423,9 @@ def _build_response_request(
         "prompt_cache_key": options.get("prompt_cache_key", "momcozy-agent-v2"),
     }
     if options.get("enable_tools", True):
-        request["tools"] = select_runtime_tools()
-        request["tool_choice"] = "auto"
+        request["tools"] = select_runtime_tools(inputs)
+        request["tool_choice"] = health_guidance_required_web_search_tool_choice(inputs) or "auto"
+        request["include"] = ["web_search_call.action.sources"]
 
     max_output_tokens = options.get("max_output_tokens")
     if isinstance(max_output_tokens, int) and max_output_tokens > 0:
@@ -1399,6 +1457,7 @@ def run_agent_loop(
     ag_ui_thread_id: str | None = None,
     ag_ui_run_id: str | None = None,
     ag_ui_parent_run_id: str | None = None,
+    ag_ui_message_id: str | None = None,
     on_text_delta: TextDeltaHandler | None = None,
     on_response_stream_event: Any | None = None,
 ) -> object:
@@ -1406,9 +1465,11 @@ def run_agent_loop(
     loaded_skill_ids = list(options.get("loaded_skill_ids", []))
     ag_ui_thread_id = ag_ui_thread_id or default_ag_ui_thread_id(inputs)
     ag_ui_run_id = ag_ui_run_id or new_ag_ui_run_id()
+    ag_ui_message_id = ag_ui_message_id or ag_ui_run_id
     ag_ui_status_message_id = f"{ag_ui_run_id}:status"
     ag_ui_tool_result_message_id = f"{ag_ui_run_id}:tool-results"
     streamed_tool_call_keys: set[str] = set()
+    streamed_web_search_citations: list[dict[str, Any]] = []
 
     def emit_streamed_tool_start(tool_call: dict[str, Any]) -> None:
         if _tool_call_was_seen(streamed_tool_call_keys, tool_call):
@@ -1427,6 +1488,10 @@ def run_agent_loop(
             ),
         )
 
+    def remember_streamed_web_search_citations(citations: list[dict[str, Any]]) -> None:
+        nonlocal streamed_web_search_citations
+        streamed_web_search_citations = _merge_web_search_citations(streamed_web_search_citations, citations)
+
     _emit_ag_ui_event(on_ag_ui_event, run_started_event(ag_ui_thread_id, ag_ui_run_id, ag_ui_parent_run_id))
     _emit_event(on_event, "started", "Agent loop started.", {"max_tool_rounds": max_tool_rounds}, on_ag_ui_event, ag_ui_status_message_id)
     _emit_event(on_event, "requesting_model", "Requesting model response.", {"round": 0}, on_ag_ui_event, ag_ui_status_message_id)
@@ -1438,6 +1503,8 @@ def run_agent_loop(
             on_text_delta,
             lambda status, metadata: _emit_thinking(on_ag_ui_event, status, metadata),
             emit_streamed_tool_start,
+            lambda status, metadata: _emit_web_search_status(on_ag_ui_event, status, metadata),
+            remember_streamed_web_search_citations,
             on_response_stream_event,
         )
     except Exception as exc:
@@ -1449,6 +1516,9 @@ def run_agent_loop(
         tool_calls = _extract_function_calls(response)
         if not tool_calls:
             _record_displayed_tool_images(options.get("context_state"), response)
+            citations = _merge_web_search_citations(_web_search_citations_from_response(response), streamed_web_search_citations)
+            if citations:
+                _emit_ag_ui_event(on_ag_ui_event, web_search_citations_event(ag_ui_message_id, citations))
             _emit_event(
                 on_event,
                 "completed",
@@ -1586,6 +1656,8 @@ def run_agent_loop(
                 on_text_delta,
                 lambda status, metadata: _emit_thinking(on_ag_ui_event, status, metadata),
                 emit_streamed_tool_start,
+                lambda status, metadata: _emit_web_search_status(on_ag_ui_event, status, metadata),
+                remember_streamed_web_search_citations,
                 on_response_stream_event,
             )
         except Exception as exc:
@@ -1611,6 +1683,8 @@ def _create_response(
     on_text_delta: TextDeltaHandler | None = None,
     on_reasoning_event: Any | None = None,
     on_function_call_start: Any | None = None,
+    on_web_search_event: Any | None = None,
+    on_web_search_citations: Any | None = None,
     on_stream_event: Any | None = None,
 ) -> object:
     if on_text_delta is None:
@@ -1619,10 +1693,22 @@ def _create_response(
     final_response = None
     reasoning_active = False
     output_text_seen = False
+    web_search_statuses_seen: set[tuple[str, str]] = set()
     stream = client.responses.create(**request, stream=True)
     for event in stream:
         event_type = _get_item_value(event, "type")
         _emit_stream_event(on_stream_event, event_type, event)
+        stream_citations = _web_search_citations_from_stream_event(event_type, event)
+        if stream_citations and on_web_search_citations is not None:
+            on_web_search_citations(stream_citations)
+        web_search_event = _web_search_status_from_stream_event(event_type, event)
+        if web_search_event and on_web_search_event is not None:
+            status = str(web_search_event.get("status") or "searching")
+            key = str(web_search_event.get("key") or "current")
+            dedupe_key = (key, _normalize_web_search_status(status))
+            if dedupe_key not in web_search_statuses_seen:
+                web_search_statuses_seen.add(dedupe_key)
+                on_web_search_event(status, web_search_event.get("metadata") or {})
         if _is_reasoning_start_event(event_type, event):
             if not reasoning_active:
                 reasoning_active = True
@@ -1697,6 +1783,10 @@ def _emit_thinking(on_ag_ui_event: AgUiEventHandler | None, status: str, metadat
     _emit_ag_ui_event(on_ag_ui_event, thinking_custom_event(status, metadata))
 
 
+def _emit_web_search_status(on_ag_ui_event: AgUiEventHandler | None, status: str, metadata: dict[str, Any] | None = None) -> None:
+    _emit_ag_ui_event(on_ag_ui_event, web_search_status_event(status, metadata))
+
+
 def _is_reasoning_start_event(event_type: Any, event: object) -> bool:
     if not isinstance(event_type, str):
         return False
@@ -1706,6 +1796,49 @@ def _is_reasoning_start_event(event_type: Any, event: object) -> bool:
         item = _get_item_value(event, "item")
         return _get_item_value(item, "type") == "reasoning"
     return False
+
+
+def _web_search_status_from_stream_event(event_type: Any, event: object) -> dict[str, Any] | None:
+    if not isinstance(event_type, str):
+        return None
+    item = _get_item_value(event, "item")
+    item_type = _get_item_value(item, "type")
+    output_index = _get_item_value(event, "output_index")
+    item_id = _get_item_value(item, "id") or _get_item_value(event, "item_id")
+    key = str(item_id or output_index or "current")
+    metadata = _safe_stream_event_metadata(event_type, event)
+
+    if event_type == "response.output_item.added" and item_type == "web_search_call":
+        return {"status": "searching", "key": key, "metadata": metadata}
+    if event_type == "response.output_item.done" and item_type == "web_search_call":
+        status = _get_item_value(item, "status")
+        if str(status or "").strip().lower() in {"failed", "error"}:
+            return {"status": "failed", "key": key, "metadata": metadata}
+        return {"status": "completed", "key": key, "metadata": metadata}
+    if event_type.startswith("response.web_search_call."):
+        suffix = event_type.rsplit(".", 1)[-1]
+        if suffix in {"completed", "done"}:
+            return {"status": "completed", "key": key, "metadata": metadata}
+        if suffix in {"failed", "error"}:
+            return {"status": "failed", "key": key, "metadata": metadata}
+        return {"status": "searching", "key": key, "metadata": metadata}
+    return None
+
+
+def _web_search_citations_from_stream_event(event_type: Any, event: object) -> list[dict[str, Any]]:
+    if not isinstance(event_type, str):
+        return []
+    candidates = [
+        _get_item_value(event, "item"),
+        _get_item_value(event, "web_search_call"),
+        event,
+    ]
+    citations: list[dict[str, Any]] = []
+    for candidate in candidates:
+        citations = _merge_web_search_citations(citations, _web_search_citations_from_web_search_item(candidate))
+        if _get_item_value(candidate, "type") == "message":
+            citations = _merge_web_search_citations(citations, _web_search_citations_from_response({"output": [candidate]}))
+    return citations
 
 
 def _is_reasoning_done_event(event_type: Any, event: object) -> bool:
@@ -1917,8 +2050,14 @@ def _build_request_context_for_request(
     if not isinstance(loaded_skill_ids, list):
         loaded_skill_ids = None
     if isinstance(context_state, ContextState):
-        return build_request_context(inputs, context_state, loaded_skill_ids)
-    return build_request_context(inputs, None, loaded_skill_ids)
+        request_context = build_request_context(inputs, context_state, loaded_skill_ids)
+    else:
+        request_context = build_request_context(inputs, None, loaded_skill_ids)
+    if options.get("enable_tools", True):
+        extra_lines = health_guidance_request_context_lines(inputs)
+        if extra_lines:
+            request_context = "\n".join([request_context, *extra_lines])
+    return request_context
 
 
 def _record_loaded_reference(context_state: object, tool_name: str, result: dict[str, Any]) -> None:
@@ -2030,6 +2169,175 @@ def _response_output_text(response: object) -> str:
             if isinstance(text, str):
                 parts.append(text)
     return "\n".join(part for part in parts if part)
+
+
+def _web_search_citations_from_response(response: object) -> list[dict[str, Any]]:
+    citations: list[dict[str, Any]] = []
+    seen_urls: set[str] = set()
+
+    for item in _get_response_output(response):
+        if _get_item_value(item, "type") != "message":
+            continue
+        content = _get_item_value(item, "content")
+        if not isinstance(content, list):
+            continue
+        for content_part in content:
+            annotations = _get_item_value(content_part, "annotations")
+            if not isinstance(annotations, list):
+                continue
+            for annotation in annotations:
+                citation = _web_search_citation_from_annotation(annotation)
+                if not citation:
+                    continue
+                url = citation["url"]
+                if url in seen_urls:
+                    continue
+                seen_urls.add(url)
+                citation["index"] = len(citations) + 1
+                citations.append(citation)
+
+    if citations:
+        return citations[:8]
+
+    for item in _get_response_output(response):
+        citations = _merge_web_search_citations(citations, _web_search_citations_from_web_search_item(item))
+        if len(citations) >= 8:
+            return citations[:8]
+    return citations[:8]
+
+
+def _merge_web_search_citations(*groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    merged: list[dict[str, Any]] = []
+    seen_urls: set[str] = set()
+    for group in groups:
+        for item in group:
+            url = _clean_url(item.get("url"))
+            if not url or url in seen_urls:
+                continue
+            seen_urls.add(url)
+            citation = dict(item)
+            citation["url"] = url
+            citation["title"] = _clean_citation_title(citation.get("title"), url)
+            citation["index"] = len(merged) + 1
+            merged.append(citation)
+            if len(merged) >= 8:
+                return merged
+    return merged
+
+
+def _compact_web_search_citations_for_display(citations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    compact: list[dict[str, Any]] = []
+    seen_keys: set[str] = set()
+    host_counts: dict[str, int] = {}
+    for item in citations:
+        url = _clean_url(item.get("url"))
+        if not url:
+            continue
+        host = _citation_host(url)
+        title = _clean_citation_title(item.get("title"), url)
+        title_key = _citation_title_key(title, host)
+        dedupe_key = f"{host}:{title_key}"
+        if dedupe_key in seen_keys:
+            continue
+        if host and host_counts.get(host, 0) >= 2:
+            continue
+        seen_keys.add(dedupe_key)
+        if host:
+            host_counts[host] = host_counts.get(host, 0) + 1
+        citation = dict(item)
+        citation["url"] = url
+        citation["title"] = title
+        citation["index"] = len(compact) + 1
+        compact.append(citation)
+        if len(compact) >= 4:
+            break
+    return compact
+
+
+def _citation_host(url: str) -> str:
+    try:
+        return urlsplit(url).netloc.removeprefix("www.").lower()
+    except Exception:
+        return ""
+
+
+def _citation_title_key(title: str, host: str) -> str:
+    normalized = re.sub(r"\s+", " ", str(title or "").strip().lower())
+    normalized = normalized.removeprefix("www.")
+    if not normalized or normalized in {"参考来源", host, f"www.{host}", "protocols"}:
+        return host or normalized
+    return normalized
+
+
+def _web_search_citations_from_web_search_item(item: object) -> list[dict[str, Any]]:
+    citations: list[dict[str, Any]] = []
+    if item is None:
+        return citations
+    containers = [
+        _get_item_value(item, "action"),
+        item,
+    ]
+    for container in containers:
+        for key in ("sources", "results"):
+            values = _get_item_value(container, key)
+            if not isinstance(values, list):
+                continue
+            for source in values:
+                citation = _web_search_citation_from_source(source)
+                if citation:
+                    citations = _merge_web_search_citations(citations, [citation])
+    return citations
+
+
+def _web_search_citation_from_annotation(annotation: object) -> dict[str, Any] | None:
+    annotation_type = _get_item_value(annotation, "type")
+    if annotation_type not in {"url_citation", "citation"}:
+        return None
+    url = _clean_url(_get_item_value(annotation, "url"))
+    if not url:
+        return None
+    citation: dict[str, Any] = {
+        "url": url,
+        "title": _clean_citation_title(_get_item_value(annotation, "title"), url),
+    }
+    start_index = _get_item_value(annotation, "start_index")
+    end_index = _get_item_value(annotation, "end_index")
+    if isinstance(start_index, int):
+        citation["start_index"] = start_index
+    if isinstance(end_index, int):
+        citation["end_index"] = end_index
+    return citation
+
+
+def _web_search_citation_from_source(source: object) -> dict[str, Any] | None:
+    url = _clean_url(_get_item_value(source, "url"))
+    if not url:
+        return None
+    return {
+        "url": url,
+        "title": _clean_citation_title(_get_item_value(source, "title"), url),
+    }
+
+
+def _clean_url(value: object) -> str:
+    if not isinstance(value, str):
+        return ""
+    url = value.strip()
+    if not url:
+        return ""
+    if url.startswith(("http://", "https://")):
+        return url
+    return ""
+
+
+def _clean_citation_title(value: object, url: str) -> str:
+    if isinstance(value, str) and value.strip():
+        return value.strip()[:120]
+    try:
+        host = urlsplit(url).netloc
+    except Exception:
+        host = ""
+    return host or "参考来源"
 
 
 def _tool_image_metadata(result: dict[str, Any]) -> list[dict[str, str]]:

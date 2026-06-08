@@ -15,6 +15,7 @@ from momcozy_agent.agents import (
     tool_call_args_event,
     tool_call_end_event,
     tool_call_result_event,
+    web_search_status_event,
 )
 from momcozy_agent.server import ChatRuntime, create_app, stream_ag_ui_events
 
@@ -37,6 +38,206 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertNotIn("tools", request)
         self.assertNotIn("tool_choice", request)
         self.assertEqual(request["max_output_tokens"], 24)
+        self.assertNotIn("include", request)
+
+    def test_complex_health_question_adds_health_guidance_context_for_web_search(self) -> None:
+        request = build_agent_request({"user_message": "乳房红肿还有点发热怎么办", "locale": "zh-CN"})
+
+        web_tools = [tool for tool in request["tools"] if tool.get("type") == "web_search"]
+        self.assertEqual(len(web_tools), 1)
+        allowed_domains = web_tools[0]["filters"]["allowed_domains"]
+        self.assertIn("www.who.int", allowed_domains)
+        self.assertIn("www.acog.org", allowed_domains)
+        self.assertIn("www.bfmed.org", allowed_domains)
+        self.assertEqual(
+            request["tool_choice"],
+            {
+                "type": "allowed_tools",
+                "mode": "required",
+                "tools": [{"type": "web_search"}],
+            },
+        )
+        self.assertEqual(request["include"], ["web_search_call.action.sources"])
+        request_context = request["input"][0]["content"][0]["text"]
+        self.assertIn("health_guidance_context:", request_context)
+        self.assertIn("优先使用 web_search 检索", request_context)
+        self.assertIn("明显急症或红旗信号先给医生/急救分流", request_context)
+        self.assertIn("复杂母婴健康咨询", request["instructions"])
+        self.assertIn("没有 health_guidance_context，不要", request["instructions"])
+
+    def test_light_product_or_urgent_questions_do_not_add_health_guidance_context(self) -> None:
+        light_request = build_agent_request({"user_message": "孕26周该准备什么", "locale": "zh-CN"})
+        product_request = build_agent_request({"user_message": "帮我整理待产包清单", "locale": "zh-CN"})
+        urgent_request = build_agent_request({"user_message": "今天胎动明显减少怎么办", "locale": "zh-CN"})
+
+        for request in (light_request, product_request, urgent_request):
+            self.assertEqual(len([tool for tool in request["tools"] if tool.get("type") == "web_search"]), 1)
+            self.assertEqual(request["tool_choice"], "auto")
+            self.assertEqual(request["include"], ["web_search_call.action.sources"])
+            request_context = request["input"][0]["content"][0]["text"]
+            self.assertNotIn("health_guidance_context:", request_context)
+
+    def test_ag_ui_emits_clickable_web_search_citations(self) -> None:
+        fake_client = _FakeStreamingClient(
+            [
+                {
+                    "id": "resp-citations",
+                    "output": [
+                        {
+                            "type": "message",
+                            "content": [
+                                {
+                                    "type": "output_text",
+                                    "text": "乳房红肿发热需要警惕乳腺炎风险。",
+                                    "annotations": [
+                                        {
+                                            "type": "url_citation",
+                                            "url": "https://www.bfmed.org/protocols",
+                                            "title": "Academy of Breastfeeding Medicine Protocols",
+                                            "start_index": 0,
+                                            "end_index": 8,
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ]
+        )
+        events: list[dict[str, object]] = []
+
+        run_agent_loop(
+            fake_client,
+            {"user_message": "乳房红肿还有点发热怎么办", "locale": "zh-CN"},
+            on_ag_ui_event=events.append,
+            on_text_delta=lambda _delta: None,
+            ag_ui_run_id="run-citations",
+            ag_ui_message_id="assistant-citations",
+        )
+
+        citation_events = [
+            event
+            for event in events
+            if event.get("type") == "CUSTOM" and event.get("name") == "momcozy.web_search.citations"
+        ]
+        self.assertEqual(len(citation_events), 1)
+        self.assertEqual(citation_events[0]["message_id"], "assistant-citations")
+        value = citation_events[0]["value"]
+        self.assertIsInstance(value, dict)
+        citations = value["citations"]  # type: ignore[index]
+        self.assertEqual(citations[0]["url"], "https://www.bfmed.org/protocols")  # type: ignore[index]
+        self.assertEqual(citations[0]["title"], "Academy of Breastfeeding Medicine Protocols")  # type: ignore[index]
+        self.assertEqual(citations[0]["index"], 1)  # type: ignore[index]
+
+    def test_ag_ui_emits_web_search_process_status(self) -> None:
+        fake_client = _FakeStreamingClient(
+            [
+                {
+                    "id": "resp-web-search",
+                    "output": [
+                        {
+                            "type": "web_search_call",
+                            "id": "ws-1",
+                            "status": "completed",
+                        },
+                        {
+                            "type": "message",
+                            "content": [
+                                {
+                                    "type": "output_text",
+                                    "text": "先看专业资料里的处理边界。",
+                                }
+                            ],
+                        },
+                    ],
+                }
+            ]
+        )
+        events: list[dict[str, object]] = []
+
+        run_agent_loop(
+            fake_client,
+            {"user_message": "乳房红肿还有点发热怎么办", "locale": "zh-CN"},
+            on_ag_ui_event=events.append,
+            on_text_delta=lambda _delta: None,
+            ag_ui_run_id="run-web-search",
+            ag_ui_message_id="assistant-web-search",
+        )
+
+        web_search_events = [
+            event
+            for event in events
+            if event.get("type") == "CUSTOM" and event.get("name") == "momcozy.agent.web_search"
+        ]
+        self.assertGreaterEqual(len(web_search_events), 2)
+        statuses = [event["value"]["status"] for event in web_search_events]  # type: ignore[index]
+        self.assertIn("searching", statuses)
+        self.assertIn("completed", statuses)
+        self.assertEqual(web_search_events[0]["semantic"]["label"], "我在查专业资料～")  # type: ignore[index]
+        self.assertEqual(web_search_events[-1]["semantic"]["label"], "我查好专业资料啦")  # type: ignore[index]
+        self.assertEqual(web_search_events[-1]["semantic"]["merge_key"], "web_search:current")  # type: ignore[index]
+
+    def test_ag_ui_uses_streamed_web_search_sources_when_final_response_has_no_annotations(self) -> None:
+        fake_client = _FakeStreamingClient(
+            [
+                {
+                    "id": "resp-web-search-sources",
+                    "output": [
+                        {
+                            "type": "web_search_call",
+                            "id": "ws-1",
+                            "status": "completed",
+                            "action": {
+                                "sources": [
+                                    {
+                                        "url": "https://www.bfmed.org/protocols",
+                                        "title": "Academy of Breastfeeding Medicine Protocols",
+                                    }
+                                ]
+                            },
+                        },
+                        {
+                            "type": "message",
+                            "content": [
+                                {
+                                    "type": "output_text",
+                                    "text": "先别用力揉，也别热敷很久。",
+                                }
+                            ],
+                        },
+                    ],
+                }
+            ]
+        )
+        events: list[dict[str, object]] = []
+
+        run_agent_loop(
+            fake_client,
+            {"user_message": "我堵奶疼怎么办", "locale": "zh-CN"},
+            on_ag_ui_event=events.append,
+            on_text_delta=lambda _delta: None,
+            ag_ui_run_id="run-stream-sources",
+            ag_ui_message_id="assistant-stream-sources",
+        )
+
+        citation_events = [
+            event
+            for event in events
+            if event.get("type") == "CUSTOM" and event.get("name") == "momcozy.web_search.citations"
+        ]
+        self.assertEqual(len(citation_events), 1)
+        citations = citation_events[0]["value"]["citations"]  # type: ignore[index]
+        self.assertEqual(citations[0]["url"], "https://www.bfmed.org/protocols")  # type: ignore[index]
+        self.assertEqual(citations[0]["index"], 1)  # type: ignore[index]
+
+    def test_web_search_process_status_event_has_user_facing_semantics(self) -> None:
+        event = web_search_status_event("searching", {"source_event": "response.web_search_call.searching"})
+
+        self.assertEqual(event["name"], "momcozy.agent.web_search")
+        self.assertEqual(event["value"]["label"], "我在查专业资料～")  # type: ignore[index]
+        self.assertEqual(event["semantic"]["visibility"], "work_item")
+        self.assertEqual(event["semantic"]["merge_key"], "web_search:current")
 
     def test_ag_ui_prewarm_saves_previous_response_without_tools(self) -> None:
         try:
@@ -891,8 +1092,14 @@ class _FakeStreamingResponses:
 
 def _response_stream_events(response: dict[str, object]) -> list[dict[str, object]]:
     events: list[dict[str, object]] = []
-    for item in response.get("output", []):  # type: ignore[union-attr]
+    for output_index, item in enumerate(response.get("output", [])):  # type: ignore[union-attr]
         if not isinstance(item, dict):
+            continue
+        if item.get("type") == "web_search_call":
+            events.append({"type": "response.output_item.added", "output_index": output_index, "item": item})
+            events.append({"type": "response.web_search_call.searching", "output_index": output_index, "item": item})
+            done_item = {**item, "status": item.get("status") or "completed"}
+            events.append({"type": "response.output_item.done", "output_index": output_index, "item": done_item})
             continue
         if item.get("type") != "message":
             continue

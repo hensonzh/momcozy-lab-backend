@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from .contexts import DEFAULT_LOCALE, DEFAULT_TIMEZONE
+from .health_guidance import health_guidance_web_search_tool
 from .tool_handlers.cards import (
     create_birth_journey_plan_card,
     create_labor_communication_card,
@@ -144,8 +145,8 @@ TOOL_HANDLERS: dict[ToolName, ToolHandler] = {
 TOOL_HANDLERS.update({tool_name: execute_milk_management_tool for tool_name in MILK_MANAGEMENT_TOOLS})
 
 
-def select_runtime_tools() -> list[ToolDefinition]:
-    tools: list[ToolDefinition] = [{"type": "tool_search"}]
+def select_runtime_tools(inputs: RuntimeInputs | None = None) -> list[ToolDefinition]:
+    tools: list[ToolDefinition] = [{"type": "tool_search"}, health_guidance_web_search_tool()]  # type: ignore[list-item]
     tools.extend(FUNCTION_TOOLS[name] for name in CORE_IMMEDIATE_TOOLS)
     tools.extend(_deferred_tool_namespaces())
 
