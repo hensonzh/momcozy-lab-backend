@@ -56,6 +56,17 @@ class BirthPrepPromptRuleTests(unittest.TestCase):
         self.assertIn("提到医院、医生、护士、陪产、生产偏好或产房沟通时引导分娩沟通单", skill)
         self.assertIn("轻问答的服务引导只做邀约，不直接调用工具", skill)
 
+    def test_birth_journey_generation_does_not_duplicate_pre_tool_and_final_summary(self) -> None:
+        skill = (ROOT / "skills" / "birth-prep" / "SKILL.md").read_text(encoding="utf-8")
+
+        self.assertIn("调用 birth_journey_plan_card_create 前不要输出给用户可见的过渡文本", skill)
+        self.assertIn("直接调用工具", skill)
+        self.assertIn("不要在工具调用前展开阶段、目标、注意事项、准备工作或我能帮你做什么", skill)
+        self.assertIn("只在工具调用后的最终回复里表达一次", skill)
+        self.assertNotIn("好，我来帮你整理生产全过程计划", skill)
+        self.assertNotIn("最多只说一句简短过渡", skill)
+        self.assertNotIn("首先对整个生产全过程进行一个口头概述", skill)
+
     def test_birth_prep_runtime_wording_does_not_expose_prefill_jargon(self) -> None:
         runtime_text = "\n".join(
             [

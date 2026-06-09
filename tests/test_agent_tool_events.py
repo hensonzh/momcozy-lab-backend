@@ -28,6 +28,8 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertIn("默认回复要短", request["instructions"])
         self.assertIn("优先 1-3 句", request["instructions"])
         self.assertIn("已经展示的信息不要再完整复述", request["instructions"])
+        self.assertIn("不要先输出用户可见的过渡说明或中间解释", request["instructions"])
+        self.assertIn("Agent loop 过程中的中间判断、准备动作和工具选择不要写进正文", request["instructions"])
         self.assertIn("使用 `ui_quick_replies_create` 创建", request["instructions"])
 
     def test_agent_request_can_disable_tools_for_hidden_prewarm(self) -> None:
@@ -845,6 +847,60 @@ class AgentToolEventTests(unittest.TestCase):
                 {"text": "先帮我总结", "send_text": "先帮我总结"},
             ],
         )
+
+    def test_stream_forwards_text_deltas_during_tool_loop(self) -> None:
+        async def collect_events() -> list[dict[str, object]]:
+            client = _FakeStreamingClient(
+                [
+                    {
+                        "id": "resp-intermediate",
+                        "output": [
+                            {
+                                "type": "message",
+                                "content": [{"type": "output_text", "text": "我先整理一下，再继续处理。"}],
+                            },
+                            {
+                                "type": "function_call",
+                                "id": "item-quick",
+                                "call_id": "call-quick",
+                                "name": "ui_quick_replies_create",
+                                "arguments": json.dumps(
+                                    {
+                                        "replies": [
+                                            {"text": "继续", "send_text": "继续"},
+                                        ]
+                                    }
+                                ),
+                            },
+                        ],
+                    },
+                    {
+                        "id": "resp-final",
+                        "output": [
+                            {
+                                "type": "message",
+                                "content": [{"type": "output_text", "text": "这是最终回复。"}],
+                            }
+                        ],
+                    },
+                ]
+            )
+            runtime = ChatRuntime(client, model="test-model")
+            stream = stream_ag_ui_events(
+                {"thread_id": "thread-1", "run_id": "run-intermediate"},
+                {"user_message": "帮我处理一下", "locale": "zh-CN"},
+                runtime,
+            )
+            return [event async for event in stream]
+
+        events = asyncio.run(collect_events())
+        text = "".join(
+            str(event.get("delta") or "")
+            for event in events
+            if event.get("type") == "TEXT_MESSAGE_CONTENT"
+        )
+
+        self.assertEqual(text, "我先整理一下，再继续处理。这是最终回复。")
 
     def test_stream_adds_default_quick_replies_when_model_omits_tool(self) -> None:
         async def collect_events() -> list[dict[str, object]]:
