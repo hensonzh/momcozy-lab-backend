@@ -197,10 +197,17 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "birth_journey_plan_card_create": _function_tool(
         "birth_journey_plan_card_create",
-        "根据已知的孕周/预产期、胎次/胎数、分娩方式、医院、支持人和喂养意向，生成前端可渲染的生产全过程计划。LLM 不需要生成 card_json；日期换算、阶段拆分、个性化调整和安全声明由工具稳定生成。无后端副作用。",
+        "根据已知的孕周/预产期、胎次/胎数、分娩方式、医院、支持人和喂养意向，生成前端可渲染并保存为 active care plan 的生产全过程计划。LLM 不需要生成 card_json；日期换算、阶段拆分、个性化调整和安全声明由工具稳定生成。已有 active 生产全过程计划时工具会返回 existing_plan_found，不要重复生成。",
         {
             "plan_context": JSON_OBJECT_STRING,
             "scope": {"type": "string", "enum": ["full", "prenatal_only", "short_range"]},
+        },
+    ),
+    "birth_journey_plan_delete": _function_tool(
+        "birth_journey_plan_delete",
+        "删除当前用户已保存的 active 生产全过程计划。“生产计划”“已有生产计划”“生产过程计划”在 birth-prep 场景下都指这份生产全过程计划。具有后端副作用；只有用户明确要求并确认删除生产全过程计划后才调用。不要用于删除奶量计划、待产包清单、分娩沟通单或普通聊天记录。confirmed 必须为 true，否则工具不会删除。",
+        {
+            "confirmed": {"type": "boolean", "description": "用户是否已经明确确认删除生产全过程计划。只有 true 才执行删除。"},
         },
     ),
     "hospital_bag_form_create": _function_tool(

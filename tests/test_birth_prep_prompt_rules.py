@@ -61,11 +61,16 @@ class BirthPrepPromptRuleTests(unittest.TestCase):
 
         self.assertIn("调用 birth_journey_plan_card_create 前不要输出给用户可见的过渡文本", skill)
         self.assertIn("直接调用工具", skill)
-        self.assertIn("不要在工具调用前展开阶段、目标、注意事项、准备工作或我能帮你做什么", skill)
+        self.assertIn("不要在工具调用前展开阶段、当前重点、温馨提醒、接下来建议或我能帮你做", skill)
         self.assertIn("只在工具调用后的最终回复里表达一次", skill)
         self.assertNotIn("好，我来帮你整理生产全过程计划", skill)
         self.assertNotIn("最多只说一句简短过渡", skill)
         self.assertNotIn("首先对整个生产全过程进行一个口头概述", skill)
+        self.assertIn("STATE_D: 删除生产全过程计划", skill)
+        self.assertIn("生产计划", skill)
+        self.assertIn("已有生产计划", skill)
+        self.assertIn("birth_journey_plan_delete", skill)
+        self.assertIn("confirmed=true", skill)
 
     def test_birth_prep_runtime_wording_does_not_expose_prefill_jargon(self) -> None:
         runtime_text = "\n".join(

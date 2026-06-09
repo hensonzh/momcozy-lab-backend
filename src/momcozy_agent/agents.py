@@ -497,6 +497,7 @@ def _tool_semantic_phase(tool_name: str) -> str:
         "reminder_create",
         "reminder_update",
         "reminder_delete",
+        "birth_journey_plan_delete",
     }:
         return "saving"
     if tool_name in {
@@ -577,6 +578,8 @@ def _tool_start_label(tool_name: str, arguments: dict[str, Any]) -> str:
         return "我先帮你整理分娩沟通单～"
     if tool_name == "birth_journey_plan_card_create":
         return "我先帮你整理生产全过程计划～"
+    if tool_name == "birth_journey_plan_delete":
+        return "我先帮你删除生产全过程计划～"
     if tool_name == "hospital_bag_card_create":
         return "我先帮你整理待产包清单～"
     if tool_name == "ibclc_consult_card_create":
@@ -621,6 +624,8 @@ def _tool_end_label(tool_name: str) -> str:
         return "我把设备内容整理一下～"
     if tool_name == "support_ticket_draft_create":
         return "我在整理工单草稿～"
+    if tool_name == "birth_journey_plan_delete":
+        return "我在处理删除结果～"
     if tool_name in {"ui_form_create", "birth_plan_form_create", "hospital_bag_form_create", "labor_communication_card_create", "birth_journey_plan_card_create", "hospital_bag_card_create", "ibclc_consult_card_create"}:
         return "我在把结果整理出来～"
     return "我继续处理一下～"
@@ -682,6 +687,13 @@ def _tool_result_label(tool_name: str, result: dict[str, Any]) -> str:
         return "我已经帮你整理好分娩沟通单啦"
     if tool_name == "birth_journey_plan_card_create":
         return "我已经帮你整理好生产全过程计划啦"
+    if tool_name == "birth_journey_plan_delete":
+        status = str(result.get("status") or "").strip()
+        if status == "needs_delete_confirmation":
+            return "删除前还需要你确认一下"
+        if status == "plan_not_found":
+            return "当前没有生产全过程计划可删除"
+        return "我已经删除生产全过程计划啦" if status == "plan_deleted" else "删除生产全过程计划暂时没成功"
     if tool_name == "hospital_bag_card_create":
         return "我已经帮你生成好待产包清单啦"
     if tool_name == "ibclc_consult_card_create":
@@ -764,7 +776,7 @@ def safe_tool_result(result: dict[str, Any]) -> dict[str, Any]:
     }
     tool_result = result.get("result")
     if isinstance(tool_result, dict):
-        for key in ("id", "skill_id", "status", "resource_id", "side_effect_performed", "summary", "missing_fields"):
+        for key in ("id", "skill_id", "status", "resource_id", "side_effect_performed", "summary", "missing_fields", "plan_id", "plan_type"):
             if key in tool_result:
                 safe[key] = tool_result[key]
         tool_data = tool_result.get("data")
@@ -828,6 +840,7 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
         "birth_plan_form_create",
         "labor_communication_card_create",
         "birth_journey_plan_card_create",
+        "birth_journey_plan_delete",
         "hospital_bag_form_create",
         "hospital_bag_card_create",
         "hospital_bag_cart_update",
@@ -839,6 +852,24 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
 
     if tool_name == "birth_journey_plan_card_create" and isinstance(safe.get("card"), dict):
         return _compact_birth_journey_plan_card_output(safe)
+    if tool_name == "birth_journey_plan_delete":
+        status = str(safe.get("status") or "").strip()
+        instructions = {
+            "plan_deleted": "生产全过程计划已经删除。最终回复只说：已删除生产全过程计划，状态页不会再展示这份计划。需要时可以重新制定。",
+            "plan_not_found": "没有找到 active 生产全过程计划。最终回复只说明当前没有可删除的生产全过程计划，不要说已经删除。",
+            "plan_delete_failed": "删除生产全过程计划失败。最终回复简短说明暂时删除失败，请稍后再试。",
+            "needs_delete_confirmation": "删除生产全过程计划前还需要用户明确确认。最终回复只询问是否确认删除，不要调用生成计划，也不要说已经删除。",
+        }
+        return {
+            "ok": safe.get("ok"),
+            "tool_name": safe.get("tool_name"),
+            "status": safe.get("status"),
+            "side_effect_performed": safe.get("side_effect_performed"),
+            "plan_type": safe.get("plan_type"),
+            "plan_id": safe.get("plan_id"),
+            "summary": safe.get("summary"),
+            "final_response_instruction": instructions.get(status, "最终回复简短说明删除生产全过程计划的处理结果。"),
+        }
     if tool_name == "birth_journey_plan_card_create" and safe.get("status") == "needs_required_context":
         question = str(safe.get("confirmation_question") or safe.get("summary") or "").strip()
         compact_missing = {
@@ -1000,11 +1031,15 @@ def _compact_birth_journey_plan_card_output(safe: dict[str, Any]) -> dict[str, A
     card_json = card.get("card_json") if isinstance(card, dict) else None
     card_json_dict = card_json if isinstance(card_json, dict) else {}
     response = _birth_journey_plan_final_response(card_json_dict)
+    reused_existing_plan = safe.get("status") == "existing_plan_found"
+    if reused_existing_plan:
+        response = "你之前已经有一份生产全过程计划，我先沿用这份，不重复生成。\n\n" + response
 
     return _compact_card_tool_output(
         safe,
         (
-            "生产全过程计划已经展示完整路线图。最终回复按段落直接输出下面这段 1-3 句中文，"
+            ("已找到用户已有的生产全过程计划并展示完整路线图。" if reused_existing_plan else "生产全过程计划已经展示完整路线图。")
+            + "最终回复按段落直接输出下面这段 1-3 句中文，"
             "保留空行，不要改写、扩写，语气要保持自然陪伴。"
             "不要使用“卡片”这类界面形式词，不要再输出“我先帮你生成”或“我整理好了”这类重复交付句，"
             "不要复述计划里的所有阶段、日期或完整清单：\n\n"

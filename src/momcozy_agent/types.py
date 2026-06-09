@@ -33,6 +33,7 @@ ToolName = Literal[
     "birth_plan_form_create",
     "labor_communication_card_create",
     "birth_journey_plan_card_create",
+    "birth_journey_plan_delete",
     "hospital_bag_form_create",
     "hospital_bag_card_create",
     "hospital_bag_cart_update",

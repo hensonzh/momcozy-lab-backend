@@ -1884,6 +1884,22 @@ def _has_any_confirmed_form_data(form_data: dict[str, Any]) -> bool:
 
 
 def create_birth_journey_plan_card(args: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
+    existing_plan = _existing_birth_journey_care_plan(inputs)
+    if existing_plan is not None:
+        existing_payload = existing_plan.get("payload") if isinstance(existing_plan.get("payload"), dict) else {}
+        return {
+            "tool_name": "birth_journey_plan_card_create",
+            "status": "existing_plan_found",
+            "summary": "已存在生产全过程计划，未重复生成。",
+            "side_effect_performed": False,
+            "card": {
+                "card_type": "birth_journey_plan_card",
+                "schema_version": str(existing_payload.get("schema_version") or "1.0"),
+                "card_json": existing_payload,
+            },
+            "plan": existing_plan,
+        }
+
     plan_context = _dict_value(args.get("plan_context")) or _confirmed_form_data(inputs)
     missing_context = _missing_birth_journey_required_context(plan_context)
     if missing_context:
@@ -1910,6 +1926,59 @@ def create_birth_journey_plan_card(args: dict[str, Any], inputs: RuntimeInputs) 
         },
         "plan": saved_plan,
     }
+
+
+def delete_birth_journey_plan(args: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
+    if args.get("confirmed") is not True:
+        return {
+            "tool_name": "birth_journey_plan_delete",
+            "status": "needs_delete_confirmation",
+            "summary": "删除生产全过程计划前，需要用户明确确认。",
+            "side_effect_performed": False,
+            "data": {
+                "confirmation_question": "确认要删除生产全过程计划吗？删除后状态页不再展示这份计划，需要时可以重新制定。",
+            },
+        }
+
+    existing_plan = _existing_birth_journey_care_plan(inputs)
+    if existing_plan is None:
+        return {
+            "tool_name": "birth_journey_plan_delete",
+            "status": "plan_not_found",
+            "summary": "当前没有 active 生产全过程计划可删除。",
+            "side_effect_performed": False,
+            "plan_type": "birth_journey",
+        }
+
+    plan_id = int(existing_plan.get("plan_id") or 0)
+    user_profile = inputs.get("user_profile") if isinstance(inputs.get("user_profile"), dict) else {}
+    user_id = str(inputs.get("user_id") or user_profile.get("user_id") or "").strip()
+    deleted = data_store.delete_care_plan_artifact(user_id=user_id, plan_id=plan_id)
+    return {
+        "tool_name": "birth_journey_plan_delete",
+        "status": "plan_deleted" if deleted else "plan_delete_failed",
+        "summary": "已删除生产全过程计划。" if deleted else "删除生产全过程计划失败。",
+        "side_effect_performed": bool(deleted),
+        "plan_type": "birth_journey",
+        "plan_id": plan_id,
+    }
+
+
+def _existing_birth_journey_care_plan(inputs: RuntimeInputs) -> dict[str, Any] | None:
+    user_profile = inputs.get("user_profile") if isinstance(inputs.get("user_profile"), dict) else {}
+    user_id = str(inputs.get("user_id") or user_profile.get("user_id") or "").strip()
+    if not user_id:
+        return None
+    try:
+        active_plans = data_store.list_care_plan_artifacts(user_id=user_id, status="active")
+    except Exception:
+        return None
+    for plan in active_plans:
+        if isinstance(plan, dict) and plan.get("plan_type") == "birth_journey":
+            payload = plan.get("payload")
+            if isinstance(payload, dict) and payload:
+                return plan
+    return None
 
 
 def _save_birth_journey_care_plan(card_json: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any] | None:
@@ -2067,9 +2136,9 @@ def _birth_journey_phase_specs(
     if due_date is None:
         specs = [
             {"id": "late_pregnancy", "title": "孕晚期", "date_range": "补充孕周后换算具体日期", "is_current": True},
-            {"id": "labor_recognition", "title": "临产期", "date_range": "补充孕周后换算具体日期"},
-            {"id": "hospital_birth", "title": "住院期", "date_range": "入院当天～出院当天"},
-            {"id": "postpartum", "title": "产后期", "date_range": "出院后 0～42 天"},
+            {"id": "labor_recognition", "title": "临产阶段", "date_range": "补充孕周后换算具体日期"},
+            {"id": "hospital_birth", "title": "住院分娩", "date_range": "入院当天～出院当天"},
+            {"id": "postpartum", "title": "产后恢复", "date_range": "出院后 0～42 天"},
         ]
         return _limit_birth_journey_phase_specs(specs, scope)
 
@@ -2105,9 +2174,9 @@ def _birth_journey_phase_specs(
     raw_specs.extend(
         [
             {"id": "late_pregnancy", "title": "孕晚期", "start_date": late_start, "end_date": late_end},
-            {"id": "labor_recognition", "title": "临产期", "start_date": labor_start, "end_date": labor_end},
-            {"id": "hospital_birth", "title": "住院期", "date_range": "入院当天～出院当天"},
-            {"id": "postpartum", "title": "产后期", "date_range": "出院后 0～42 天"},
+            {"id": "labor_recognition", "title": "临产阶段", "start_date": labor_start, "end_date": labor_end},
+            {"id": "hospital_birth", "title": "住院分娩", "date_range": "入院当天～出院当天"},
+            {"id": "postpartum", "title": "产后恢复", "date_range": "出院后 0～42 天"},
         ]
     )
 
@@ -2155,42 +2224,42 @@ def _birth_journey_phase_payload(spec: dict[str, Any], context: dict[str, Any]) 
 
 def _birth_journey_base_phase(phase_id: str) -> dict[str, Any]:
     base: dict[str, dict[str, Any]] = {
-        "early_pregnancy": {
-            "goal": "先确认怀孕和首次产检/建档安排，把需要带去问医生的信息准备好。",
-            "watchouts": ["不用急着准备待产包或分娩细节，先把产检安排和身体信号看住。"],
-            "actions": ["确认首次产检或建档时间，并记下医院要求携带的材料。", "把末次月经、验孕/检查结果、正在吃的药和补充剂整理好，下次产检带上。", "把既往病史、过敏史、流产史或特殊情况列成要问医生的问题。", "和支持人先说好产检陪同、接送、请假和休息安排。"],
-            "comate_help": ["帮你整理首次产检要问医生的问题。", "帮你做建档/产检前准备清单。", "帮你梳理早孕期需要联系医生的信号。", "帮你记录预产期、检查结果和待确认事项。"],
-        },
-        "mid_pregnancy": {
-            "goal": "把产检节奏、生产医院方向和产后前两周支持人先定出框架。",
-            "watchouts": ["不用把生产准备一次做完，先把下次产检、医院选择和家里支持这三件事问清楚。"],
-            "actions": ["把下次产检最想确认的 3-5 个问题写下来，优先问检查结果、后续产检节奏和是否有特殊提醒。", "确认生产医院或生产地点的候选项，记录建档、转诊或预约规则。", "和支持人初步分工：产检谁陪、临时不舒服谁接送、产后前两周谁能到场。", "如果还没想好喂养方式，先记下想问医生、护士或 IBCLC 的问题。"],
-            "comate_help": ["帮你把下次产检问题整理成 3-5 个重点。", "帮你整理要向医院确认的流程问题。", "帮你把产后前两周支持人分工写成草稿。", "帮你按孕周拆出下一步准备顺序。"],
-        },
-        "late_pregnancy": {
-            "goal": "把医院流程、待产包、分娩沟通和出发安排逐项落地。",
-            "watchouts": ["这个阶段先按顺序准备，先确认医院规则，再整理待产物品和分娩沟通，最后做出发核对。"],
-            "actions": ["向医院确认预登记、入院条件、陪产/探视、夜间入口、停车或打车路线。", "按你的分娩方式、喂养计划和住院天数整理待产包，只补真正缺的关键物品。", "把疼痛缓解、陪产、生产偏好和宝宝出生后安排整理成给医护看的分娩沟通单。", "和支持人约好临产时谁联系医院、谁拿包、谁负责交通和家里照护。"],
-            "comate_help": ["帮你整理医院流程确认清单。", "帮你整理个性化待产包清单。", "帮你把生产偏好整理成分娩沟通单。", "帮你做出发前核对和支持人分工。"],
-        },
-        "labor_recognition": {
-            "goal": "把联系医院的条件、话术和出发动作提前准备好。",
-            "watchouts": ["出现破水、出血多、胎动明显减少、规律宫缩加密、剧烈腹痛或头晕胸痛时，不要硬扛，按医院或医生指导联系医院。"],
-            "actions": ["把医院电话、产科急诊入口和支持人电话放到最容易找到的位置。", "提前写好联系医院时要说的内容：孕周、宫缩间隔、是否破水/出血、胎动变化和预计到院时间。", "让支持人熟悉这套说法，并知道出发物品和重要材料放在哪里。"],
-            "comate_help": ["帮你整理联系医院时的简短话术。", "帮你做宫缩、破水和胎动变化记录模板。", "帮你把出发核对压缩成临产版。"],
-        },
-        "hospital_birth": {
-            "goal": "把院内沟通、喂养启动和重要信息记录交给明确的人负责。",
-            "watchouts": ["医疗处置以医院团队为准，但疼痛缓解、麻醉沟通、肌肤接触、喂养启动和陪护分工可以提前说清楚。"],
-            "actions": ["入院后让支持人把分娩沟通单交给医护，并在你不方便说话时帮你补充重点。", "约定谁记录宝宝出生时间、喂养时间、尿布、妈妈用药/检查和医生交代。", "出院前集中问清复诊、伤口/恶露、喂养、宝宝黄疸或体重观察这些问题。"],
-            "comate_help": ["帮你查看分娩沟通单里的重点。", "帮你整理院内记录清单。", "帮你整理出院前要问医生的问题。", "帮你把住院期间的喂养问题带给 IBCLC 咨询。"],
-        },
-        "postpartum": {
-            "goal": "先把妈妈恢复、宝宝喂养和夜间照护安排跑顺。",
-            "watchouts": ["发热、恶露突然增多或有异味、伤口红肿加重、乳房红肿疼痛，或宝宝尿布明显减少、精神差时，要联系医生、儿科或哺乳专业人士。"],
-            "actions": ["出院当天确认妈妈复诊、宝宝儿科检查和需要观察的身体信号。", "前一周记录喂养次数、尿布、妈妈疼痛/恶露/伤口和休息情况。", "把夜间照护分清楚：谁喂、谁换尿布、谁安抚、谁保证妈妈连续睡一段。", "产后 2-6 周复盘喂养、恢复和家庭支持缺口，必要时找医生或 IBCLC。"],
-            "comate_help": ["帮你整理夜间照护分工。", "帮你整理喂养、尿布和妈妈恢复记录。", "帮你区分哪些信号需要联系医生或 IBCLC。", "继续帮你看奶量、含乳和排乳节奏。"],
-        },
+            "early_pregnancy": {
+                "goal": "确认怀孕情况，顺利完成首次产检，把重要信息准备好。",
+                "watchouts": ["现阶段先关注产检和身体变化，不用着急考虑生产和待产准备。"],
+                "actions": ["确认首次产检或建档时间", "整理检查结果、用药和补充剂信息", "记下想咨询医生的问题"],
+                "comate_help": [],
+            },
+            "mid_pregnancy": {
+                "goal": "关注宝宝发育，跟上产检节奏，并开始规划生产和产后支持。",
+                "watchouts": ["很多事情不用一次准备完成，先把医院选择和家庭支持安排理顺。"],
+                "actions": ["准备下次产检想问的问题", "了解生产医院和相关流程", "和家人讨论产后支持安排"],
+                "comate_help": [],
+            },
+            "late_pregnancy": {
+                "goal": "逐步落实生产前准备，让临产时更从容。",
+                "watchouts": ["距离生产越来越近，提前做好准备会让临产和住院过程更顺利。"],
+                "actions": ["确认医院入院和陪产要求", "准备待产包和重要证件", "和家人明确临产时的分工安排", "提前想好分娩和喂养方面的重要偏好"],
+                "comate_help": ["制定个性化待产清单"],
+            },
+            "labor_recognition": {
+                "goal": "了解临产信号，知道什么时候联系医院、什么时候出发。",
+                "watchouts": ["如果出现破水、大量出血、胎动明显减少或其他异常情况，请及时联系医院。"],
+                "actions": ["保存医院和重要联系人的电话", "熟悉去医院的路线和交通方案", "把证件和住院材料放在容易拿取的位置", "留意宫缩和身体变化"],
+                "comate_help": [],
+            },
+            "hospital_birth": {
+                "goal": "专注分娩和恢复，把重要沟通和记录安排好。",
+                "watchouts": ["医疗决策以医护团队建议为准，有任何需求或担忧都可以及时沟通。"],
+                "actions": ["和医护确认你的重点需求", "记录妈妈和宝宝的重要情况", "出院前确认复诊和护理事项"],
+                "comate_help": [],
+            },
+            "postpartum": {
+                "goal": "关注妈妈恢复和宝宝喂养，让家庭逐步适应新的节奏。",
+                "watchouts": ["如果妈妈或宝宝出现异常情况，请及时联系医生、儿科医生或 IBCLC。"],
+                "actions": ["记录喂养、尿布和宝宝情况", "关注身体恢复情况", "安排夜间照护和休息时间", "遇到喂养问题及时寻求支持"],
+                "comate_help": [],
+            },
     }
     return dict(base.get(phase_id) or base["late_pregnancy"])
 

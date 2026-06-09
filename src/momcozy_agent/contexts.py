@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 import re
 from typing import Any
 
+from .services import data_store
 from .types import RuntimeInputs
 
 DEFAULT_LOCALE = "en-US"
@@ -70,6 +71,7 @@ def build_request_context(
     if state is not None:
         lines.extend(_format_birth_prep_context(state))
         lines.extend(_format_device_image_context(state))
+    lines.extend(_format_active_care_plan_context(inputs))
     hospital_bag_cart = _format_hospital_bag_cart_context(inputs.get("hospital_bag_cart"))
     if hospital_bag_cart:
         lines.extend(hospital_bag_cart)
@@ -158,6 +160,55 @@ def _format_birth_prep_context(state: ContextState) -> list[str]:
     if pending_field:
         lines.append(f"- hospital_bag_next_field: {pending_field}")
     return lines
+
+
+def _format_active_care_plan_context(inputs: RuntimeInputs) -> list[str]:
+    user_id = _runtime_user_id(inputs)
+    if not user_id:
+        return []
+    try:
+        active_plans = data_store.list_care_plan_artifacts(user_id=user_id, status="active")
+    except Exception:
+        return []
+    birth_journey_plan = next(
+        (plan for plan in active_plans if isinstance(plan, dict) and plan.get("plan_type") == "birth_journey"),
+        None,
+    )
+    if not isinstance(birth_journey_plan, dict):
+        return []
+    payload = birth_journey_plan.get("payload") if isinstance(birth_journey_plan.get("payload"), dict) else {}
+    phases = payload.get("phases") if isinstance(payload.get("phases"), list) else []
+    current_phase = next(
+        (phase for phase in phases if isinstance(phase, dict) and phase.get("status") == "current"),
+        None,
+    )
+    current_phase_title = _trim_context_value(current_phase.get("title") if isinstance(current_phase, dict) else "")
+    summary = _trim_context_value(birth_journey_plan.get("summary"), 120)
+    updated_at = _trim_context_value(birth_journey_plan.get("updated_at"), 40)
+    plan_id = str(birth_journey_plan.get("plan_id") or "").strip()
+    detail_parts = [
+        f"plan_id={plan_id}" if plan_id else "",
+        f"current_phase={current_phase_title}" if current_phase_title else "",
+        f"summary={summary}" if summary else "",
+        f"updated_at={updated_at}" if updated_at else "",
+    ]
+    return [
+        "active_care_plan_context:",
+        "- birth_journey_plan: 已存在 active 生产全过程计划；" + "；".join(part for part in detail_parts if part),
+        "- 只要该计划未被删除，就把它视为用户已有计划；用户要求生成/制定生产全过程计划时，不要再次调用 birth_journey_plan_card_create 创建新计划，先说明已有计划并继续查看或推进。",
+    ]
+
+
+def _runtime_user_id(inputs: RuntimeInputs) -> str:
+    user_profile = inputs.get("user_profile") if isinstance(inputs.get("user_profile"), dict) else {}
+    return str(inputs.get("user_id") or user_profile.get("user_id") or "").strip()
+
+
+def _trim_context_value(value: Any, max_length: int = _MAX_SLOT_TEXT_LENGTH) -> str:
+    text = str(value or "").strip()
+    if len(text) <= max_length:
+        return text
+    return text[: max_length - 1].rstrip() + "…"
 
 
 def _explicit_hospital_bag_slots(message: str) -> dict[str, Any]:

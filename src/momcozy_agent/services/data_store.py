@@ -124,6 +124,25 @@ def init_db() -> None:
             );
             CREATE INDEX IF NOT EXISTS idx_care_plan_artifact_user ON care_plan_artifact(user_id, status, updated_at DESC);
 
+            CREATE TABLE IF NOT EXISTS pregnancy_diary_entry (
+                entry_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                entry_date TEXT NOT NULL,
+                gestational_week TEXT,
+                mood TEXT,
+                energy_level TEXT,
+                sleep_summary TEXT,
+                fetal_movement TEXT,
+                symptom_tags_json TEXT,
+                appointment_note TEXT,
+                nutrition_note TEXT,
+                content TEXT,
+                attachments_json TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS idx_pregnancy_diary_user_date ON pregnancy_diary_entry(user_id, entry_date DESC, entry_id DESC);
+
             CREATE TABLE IF NOT EXISTS calendar (
                 item_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id TEXT NOT NULL,
@@ -1101,6 +1120,235 @@ def get_care_plan_artifact(*, user_id: str, plan_id: int) -> dict[str, Any] | No
     return _care_plan_artifact_from_row(row) if row else None
 
 
+def delete_care_plan_artifact(*, user_id: str, plan_id: int) -> bool:
+    init_db()
+    uid = str(user_id or "").strip()
+    try:
+        pid = int(plan_id)
+    except Exception:
+        pid = 0
+    if not uid or pid <= 0:
+        return False
+    with _connect() as conn:
+        cursor = conn.execute(
+            """
+            UPDATE care_plan_artifact
+            SET status = 'deleted', updated_at = CURRENT_TIMESTAMP
+            WHERE user_id = ? AND plan_id = ? AND status <> 'deleted'
+            """,
+            (uid, pid),
+        )
+    return cursor.rowcount > 0
+
+
+def list_pregnancy_diary_entries(
+    *,
+    user_id: str,
+    start_date: str = "",
+    end_date: str = "",
+    limit: int = 30,
+) -> list[dict[str, Any]]:
+    init_db()
+    uid = str(user_id or "").strip()
+    if not uid:
+        return []
+    safe_limit = min(max(int(limit or 30), 1), 100)
+    clauses = ["user_id = ?"]
+    args: list[Any] = [uid]
+    if start_date:
+        clauses.append("entry_date >= ?")
+        args.append(str(start_date))
+    if end_date:
+        clauses.append("entry_date <= ?")
+        args.append(str(end_date))
+    args.append(safe_limit)
+    with _connect() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT entry_id, user_id, entry_date, gestational_week, mood, energy_level,
+                   sleep_summary, fetal_movement, symptom_tags_json, appointment_note,
+                   nutrition_note, content, attachments_json, created_at, updated_at
+            FROM pregnancy_diary_entry
+            WHERE {" AND ".join(clauses)}
+            ORDER BY entry_date DESC, entry_id DESC
+            LIMIT ?
+            """,
+            tuple(args),
+        ).fetchall()
+    return [_pregnancy_diary_entry_from_row(row) for row in rows]
+
+
+def get_pregnancy_diary_entry(*, user_id: str, entry_id: int) -> dict[str, Any] | None:
+    init_db()
+    uid = str(user_id or "").strip()
+    try:
+        eid = int(entry_id)
+    except Exception:
+        eid = 0
+    if not uid or eid <= 0:
+        return None
+    with _connect() as conn:
+        row = conn.execute(
+            """
+            SELECT entry_id, user_id, entry_date, gestational_week, mood, energy_level,
+                   sleep_summary, fetal_movement, symptom_tags_json, appointment_note,
+                   nutrition_note, content, attachments_json, created_at, updated_at
+            FROM pregnancy_diary_entry
+            WHERE user_id = ? AND entry_id = ?
+            """,
+            (uid, eid),
+        ).fetchone()
+    return _pregnancy_diary_entry_from_row(row) if row else None
+
+
+def get_pregnancy_diary_entry_by_date(*, user_id: str, entry_date: str) -> dict[str, Any] | None:
+    init_db()
+    uid = str(user_id or "").strip()
+    day = str(entry_date or "").strip()
+    if not uid or not day:
+        return None
+    with _connect() as conn:
+        row = conn.execute(
+            """
+            SELECT entry_id, user_id, entry_date, gestational_week, mood, energy_level,
+                   sleep_summary, fetal_movement, symptom_tags_json, appointment_note,
+                   nutrition_note, content, attachments_json, created_at, updated_at
+            FROM pregnancy_diary_entry
+            WHERE user_id = ? AND entry_date = ?
+            ORDER BY entry_id DESC
+            LIMIT 1
+            """,
+            (uid, day),
+        ).fetchone()
+    return _pregnancy_diary_entry_from_row(row) if row else None
+
+
+def save_pregnancy_diary_entry(
+    *,
+    user_id: str,
+    entry_date: str,
+    gestational_week: str = "",
+    mood: str = "",
+    energy_level: str = "",
+    sleep_summary: str = "",
+    fetal_movement: str = "",
+    symptom_tags: list[str] | None = None,
+    appointment_note: str = "",
+    nutrition_note: str = "",
+    content: str = "",
+    attachments: list[dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
+    init_db()
+    uid = str(user_id or "").strip()
+    day = str(entry_date or "").strip()
+    if not uid or not day:
+        return None
+    tags_json = json.dumps([str(tag).strip() for tag in (symptom_tags or []) if str(tag).strip()], ensure_ascii=False)
+    attachments_json = json.dumps(attachments or [], ensure_ascii=False, sort_keys=True)
+    with _connect() as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO pregnancy_diary_entry(
+                user_id, entry_date, gestational_week, mood, energy_level, sleep_summary,
+                fetal_movement, symptom_tags_json, appointment_note, nutrition_note,
+                content, attachments_json, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """,
+            (
+                uid,
+                day,
+                str(gestational_week or "").strip(),
+                str(mood or "").strip(),
+                str(energy_level or "").strip(),
+                str(sleep_summary or "").strip(),
+                str(fetal_movement or "").strip(),
+                tags_json,
+                str(appointment_note or "").strip(),
+                str(nutrition_note or "").strip(),
+                str(content or "").strip(),
+                attachments_json,
+            ),
+        )
+        entry_id = int(cursor.lastrowid)
+    return get_pregnancy_diary_entry(user_id=uid, entry_id=entry_id)
+
+
+def update_pregnancy_diary_entry(
+    *,
+    user_id: str,
+    entry_id: int,
+    entry_date: str,
+    gestational_week: str = "",
+    mood: str = "",
+    energy_level: str = "",
+    sleep_summary: str = "",
+    fetal_movement: str = "",
+    symptom_tags: list[str] | None = None,
+    appointment_note: str = "",
+    nutrition_note: str = "",
+    content: str = "",
+    attachments: list[dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
+    init_db()
+    uid = str(user_id or "").strip()
+    try:
+        eid = int(entry_id)
+    except Exception:
+        eid = 0
+    day = str(entry_date or "").strip()
+    if not uid or eid <= 0 or not day:
+        return None
+    tags_json = json.dumps([str(tag).strip() for tag in (symptom_tags or []) if str(tag).strip()], ensure_ascii=False)
+    attachments_json = json.dumps(attachments or [], ensure_ascii=False, sort_keys=True)
+    with _connect() as conn:
+        cursor = conn.execute(
+            """
+            UPDATE pregnancy_diary_entry
+            SET entry_date = ?, gestational_week = ?, mood = ?, energy_level = ?,
+                sleep_summary = ?, fetal_movement = ?, symptom_tags_json = ?,
+                appointment_note = ?, nutrition_note = ?, content = ?,
+                attachments_json = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE user_id = ? AND entry_id = ?
+            """,
+            (
+                day,
+                str(gestational_week or "").strip(),
+                str(mood or "").strip(),
+                str(energy_level or "").strip(),
+                str(sleep_summary or "").strip(),
+                str(fetal_movement or "").strip(),
+                tags_json,
+                str(appointment_note or "").strip(),
+                str(nutrition_note or "").strip(),
+                str(content or "").strip(),
+                attachments_json,
+                uid,
+                eid,
+            ),
+        )
+        if cursor.rowcount <= 0:
+            return None
+    return get_pregnancy_diary_entry(user_id=uid, entry_id=eid)
+
+
+def delete_pregnancy_diary_entry(*, user_id: str, entry_id: int) -> bool:
+    init_db()
+    uid = str(user_id or "").strip()
+    try:
+        eid = int(entry_id)
+    except Exception:
+        eid = 0
+    if not uid or eid <= 0:
+        return False
+    with _connect() as conn:
+        cursor = conn.execute(
+            "DELETE FROM pregnancy_diary_entry WHERE user_id = ? AND entry_id = ?",
+            (uid, eid),
+        )
+    return cursor.rowcount > 0
+
+
 def query_plan_tasks(*, user_id: str, target_date: str) -> dict[str, Any] | None:
     init_db()
     uid = str(user_id or "").strip()
@@ -1703,6 +1951,34 @@ def _care_plan_artifact_from_row(row: Any) -> dict[str, Any]:
         "created_at": str(row["created_at"] or ""),
         "updated_at": str(row["updated_at"] or ""),
         "payload": payload,
+    }
+
+
+def _loads_list(raw: Any) -> list[Any]:
+    try:
+        loaded = json.loads(raw or "[]")
+    except Exception:
+        return []
+    return loaded if isinstance(loaded, list) else []
+
+
+def _pregnancy_diary_entry_from_row(row: Any) -> dict[str, Any]:
+    return {
+        "entry_id": int(row["entry_id"] or 0),
+        "user_id": str(row["user_id"] or ""),
+        "entry_date": str(row["entry_date"] or ""),
+        "gestational_week": str(row["gestational_week"] or ""),
+        "mood": str(row["mood"] or ""),
+        "energy_level": str(row["energy_level"] or ""),
+        "sleep_summary": str(row["sleep_summary"] or ""),
+        "fetal_movement": str(row["fetal_movement"] or ""),
+        "symptom_tags": [str(item) for item in _loads_list(row["symptom_tags_json"]) if str(item).strip()],
+        "appointment_note": str(row["appointment_note"] or ""),
+        "nutrition_note": str(row["nutrition_note"] or ""),
+        "content": str(row["content"] or ""),
+        "attachments": [item for item in _loads_list(row["attachments_json"]) if isinstance(item, dict)],
+        "created_at": str(row["created_at"] or ""),
+        "updated_at": str(row["updated_at"] or ""),
     }
 
 

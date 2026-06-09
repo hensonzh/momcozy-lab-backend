@@ -6,6 +6,7 @@ from .contexts import DEFAULT_LOCALE, DEFAULT_TIMEZONE
 from .health_guidance import health_guidance_web_search_tool
 from .tool_handlers.cards import (
     create_birth_journey_plan_card,
+    delete_birth_journey_plan,
     create_labor_communication_card,
     create_birth_plan_form,
     create_form,
@@ -93,11 +94,12 @@ DEFERRED_TOOL_NAMESPACES: dict[str, dict[str, Any]] = {
         "tool_names": ["hospital_bag_pump_recommend"],
     },
     "birth_prep": {
-        "description": "用于产前准备服务已经进入具体产物流程后的专用表单和结构化内容：生产全过程计划、待产包清单、分娩沟通单。不要用于普通孕期问答；用户确认开始待产包整理后可直接创建待产包信息表，通过表单采集或确认必要信息；生成生产全过程计划、待产包清单或分娩沟通单前必须已有对应确认信息。",
+        "description": "用于产前准备服务已经进入具体产物流程后的专用表单和结构化内容：生产全过程计划、待产包清单、分娩沟通单，以及删除已保存的生产全过程计划。不要用于普通孕期问答；用户确认开始待产包整理后可直接创建待产包信息表，通过表单采集或确认必要信息；生成生产全过程计划、待产包清单或分娩沟通单前必须已有对应确认信息；删除生产全过程计划前必须已有用户明确确认。",
         "tool_names": [
             "birth_plan_form_create",
             "labor_communication_card_create",
             "birth_journey_plan_card_create",
+            "birth_journey_plan_delete",
             "hospital_bag_form_create",
             "hospital_bag_card_create",
         ],
@@ -132,6 +134,7 @@ TOOL_HANDLERS: dict[ToolName, ToolHandler] = {
     "birth_plan_form_create": create_birth_plan_form,
     "labor_communication_card_create": create_labor_communication_card,
     "birth_journey_plan_card_create": create_birth_journey_plan_card,
+    "birth_journey_plan_delete": delete_birth_journey_plan,
     "hospital_bag_form_create": create_hospital_bag_form,
     "hospital_bag_card_create": create_hospital_bag_card,
     "hospital_bag_cart_update": update_hospital_bag_cart,

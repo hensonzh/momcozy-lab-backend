@@ -4,7 +4,7 @@ import unittest
 
 from momcozy_agent.health_guidance import HEALTH_GUIDANCE_ALLOWED_DOMAINS
 from momcozy_agent.tool_schemas import FUNCTION_TOOLS
-from momcozy_agent.tool_registry import DEFERRED_TOOL_NAMESPACES, select_runtime_tools
+from momcozy_agent.tool_registry import DEFERRED_TOOL_NAMESPACES, READ_ONLY_TOOL_NAMES, select_runtime_tools
 
 
 class ToolRegistryTests(unittest.TestCase):
@@ -96,11 +96,13 @@ class ToolRegistryTests(unittest.TestCase):
                 "birth_plan_form_create",
                 "labor_communication_card_create",
                 "birth_journey_plan_card_create",
+                "birth_journey_plan_delete",
                 "hospital_bag_form_create",
                 "hospital_bag_card_create",
             ],
         )
         self.assertTrue(all(tool["defer_loading"] for tool in namespaces["birth_prep"]["tools"]))
+        self.assertNotIn("birth_journey_plan_delete", READ_ONLY_TOOL_NAMES)
 
     def test_deferred_namespace_descriptions_include_boundaries(self) -> None:
         expected_tokens = {
@@ -109,7 +111,7 @@ class ToolRegistryTests(unittest.TestCase):
             "milk_management": ("用户自身", "不要用于吸奶器型号购买选型", "设备故障排查"),
             "hospital_bag_cart": ("已经进入待产包购物车", "不要用于生成待产包清单", "独立吸奶器型号选型"),
             "pump_recommendation": ("购买前", "不要用于已购设备故障", "购物车直接修改"),
-            "birth_prep": ("具体产物流程", "用户确认开始待产包整理后", "必须已有对应确认信息"),
+            "birth_prep": ("具体产物流程", "删除已保存的生产全过程计划", "删除生产全过程计划前必须已有用户明确确认"),
         }
 
         for namespace, tokens in expected_tokens.items():
