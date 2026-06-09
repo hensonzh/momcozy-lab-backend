@@ -1069,7 +1069,7 @@ class AgentToolEventTests(unittest.TestCase):
         artifact = next(event for event in events if event.get("type") == "ARTIFACT_CREATED")
         self.assertEqual(artifact["artifact_type"], "support_ticket")
 
-    def test_stream_suppresses_quick_replies_when_card_artifact_created(self) -> None:
+    def test_stream_keeps_quick_replies_when_card_artifact_created(self) -> None:
         async def collect_events() -> list[dict[str, object]]:
             client = _FakeStreamingClient(
                 [
@@ -1098,7 +1098,7 @@ class AgentToolEventTests(unittest.TestCase):
             )
             runtime = ChatRuntime(client, model="test-model")
             stream = stream_ag_ui_events(
-                {"thread_id": "thread-1", "run_id": "run-card-no-quick"},
+                {"thread_id": "thread-1", "run_id": "run-card-quick"},
                 {"user_message": "我想找 IBCLC", "locale": "zh-CN"},
                 runtime,
             )
@@ -1108,10 +1108,14 @@ class AgentToolEventTests(unittest.TestCase):
         event_types = [str(event.get("type")) for event in events]
 
         self.assertIn("ARTIFACT_CREATED", event_types)
-        self.assertNotIn("QUICK_REPLIES", event_types)
+        self.assertIn("QUICK_REPLIES", event_types)
         self.assertIn("RUN_FINISHED", event_types)
+        self.assertLess(event_types.index("QUICK_REPLIES"), event_types.index("RUN_FINISHED"))
         artifact = next(event for event in events if event.get("type") == "ARTIFACT_CREATED")
         self.assertEqual(artifact["artifact_type"], "ibclc_consult_card")
+        quick_event = next(event for event in events if event.get("type") == "QUICK_REPLIES")
+        self.assertEqual(quick_event["message_id"], "run-card-quick:assistant")
+        self.assertEqual(len(quick_event["replies"]), 3)
 
 
 class _FakeClient:

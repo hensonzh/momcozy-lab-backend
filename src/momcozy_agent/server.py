@@ -290,7 +290,7 @@ async def stream_ag_ui_events(
                 log_timing("ag_ui:RUN_FINISHED buffered", _ag_ui_timing_metadata(event))
                 pending_run_finished = event
                 return
-            if _is_artifact_event(event):
+            if _is_form_like_artifact_event(event):
                 suppress_quick_replies = True
             quick_replies = _quick_replies_from_tool_result_event(event)
             if quick_replies is not None:
@@ -619,25 +619,17 @@ def _is_quick_replies_tool_event(event: dict[str, Any]) -> bool:
     return False
 
 
-def _is_artifact_event(event: dict[str, Any]) -> bool:
+def _is_form_like_artifact_event(event: dict[str, Any]) -> bool:
     if event.get("type") != "ARTIFACT_CREATED":
         return False
     artifact_type = str(event.get("artifact_type") or event.get("artifactType") or "").strip()
-    if artifact_type:
+    if artifact_type in {"form", "support_ticket", "support_ticket_draft"}:
         return True
     tool_name = str(event.get("tool_call_name") or event.get("toolCallName") or "").strip()
     return tool_name in {
         "ui_form_create",
         "birth_plan_form_create",
         "hospital_bag_form_create",
-        "labor_communication_card_create",
-        "birth_journey_plan_card_create",
-        "hospital_bag_card_create",
-        "ibclc_consult_card_create",
-        "milk_status_query",
-        "milk_assessment_evaluate",
-        "milk_plan_preview",
-        "milk_plan_mutate",
         "support_ticket_draft_create",
     }
 
