@@ -938,6 +938,134 @@ async def query_plan_detail_endpoint(request: Request, user_id: str = "", plan_i
     return {"error": 0, "plan": plan}
 
 
+@router.post("/v1/plan/delete-artifact")
+async def delete_plan_artifact_endpoint(request: Request) -> dict[str, Any]:
+    verify_api_key(request)
+    body = await _json_body_or_error(request, basic=True)
+    if not isinstance(body, dict):
+        return _basic_error_response(error=-1)
+    uid = str(body.get("user_id") or "").strip()
+    try:
+        plan_id = _positive_int(body.get("plan_id"), "plan_id")
+    except ValueError:
+        return _basic_error_response(error=-1)
+    if not uid:
+        return _basic_error_response(error=-1)
+    deleted = data_store.delete_care_plan_artifact(user_id=uid, plan_id=plan_id)
+    return _basic_error_response(error=0 if deleted else -1)
+
+
+@router.get("/v1/pregnancy-diary/list")
+async def query_pregnancy_diary_list_endpoint(
+    request: Request,
+    user_id: str = "",
+    start_date: str = "",
+    end_date: str = "",
+    limit: int = 30,
+) -> dict[str, Any]:
+    verify_api_key(request)
+    uid = str(user_id or "").strip()
+    if not uid:
+        return _pregnancy_diary_list_response(error=-1)
+    return _pregnancy_diary_list_response(
+        error=0,
+        diary_list=data_store.list_pregnancy_diary_entries(
+            user_id=uid,
+            start_date=_normalize_date(start_date),
+            end_date=_normalize_date(end_date),
+            limit=limit,
+        ),
+    )
+
+
+@router.get("/v1/pregnancy-diary/today")
+async def query_pregnancy_diary_today_endpoint(request: Request, user_id: str = "", timestamp: str = "") -> dict[str, Any]:
+    verify_api_key(request)
+    uid = str(user_id or "").strip()
+    target_date = _normalize_date(timestamp) or date.today().isoformat()
+    if not uid:
+        return _pregnancy_diary_entry_response(error=-1)
+    return _pregnancy_diary_entry_response(
+        error=0,
+        diary=data_store.get_pregnancy_diary_entry_by_date(user_id=uid, entry_date=target_date),
+    )
+
+
+@router.post("/v1/pregnancy-diary/create")
+async def create_pregnancy_diary_endpoint(request: Request) -> dict[str, Any]:
+    verify_api_key(request)
+    body = await _json_body_or_error(request, basic=True)
+    if not isinstance(body, dict):
+        return _pregnancy_diary_entry_response(error=-1)
+    uid = str(body.get("user_id") or "").strip()
+    target_date = _normalize_date(body.get("entry_date"))
+    if not uid or not target_date:
+        return _pregnancy_diary_entry_response(error=-1)
+    diary = data_store.save_pregnancy_diary_entry(
+        user_id=uid,
+        entry_date=target_date,
+        gestational_week=str(body.get("gestational_week") or ""),
+        mood=str(body.get("mood") or ""),
+        energy_level=str(body.get("energy_level") or ""),
+        sleep_summary=str(body.get("sleep_summary") or ""),
+        fetal_movement=str(body.get("fetal_movement") or ""),
+        symptom_tags=_string_list(body.get("symptom_tags")),
+        appointment_note=str(body.get("appointment_note") or ""),
+        nutrition_note=str(body.get("nutrition_note") or ""),
+        content=str(body.get("content") or ""),
+        attachments=_dict_list(body.get("attachments")),
+    )
+    return _pregnancy_diary_entry_response(error=0 if diary else -1, diary=diary)
+
+
+@router.post("/v1/pregnancy-diary/update")
+async def update_pregnancy_diary_endpoint(request: Request) -> dict[str, Any]:
+    verify_api_key(request)
+    body = await _json_body_or_error(request, basic=True)
+    if not isinstance(body, dict):
+        return _pregnancy_diary_entry_response(error=-1)
+    uid = str(body.get("user_id") or "").strip()
+    target_date = _normalize_date(body.get("entry_date"))
+    try:
+        entry_id = int(body.get("entry_id") or 0)
+    except Exception:
+        entry_id = 0
+    if not uid or not target_date or entry_id <= 0:
+        return _pregnancy_diary_entry_response(error=-1)
+    diary = data_store.update_pregnancy_diary_entry(
+        user_id=uid,
+        entry_id=entry_id,
+        entry_date=target_date,
+        gestational_week=str(body.get("gestational_week") or ""),
+        mood=str(body.get("mood") or ""),
+        energy_level=str(body.get("energy_level") or ""),
+        sleep_summary=str(body.get("sleep_summary") or ""),
+        fetal_movement=str(body.get("fetal_movement") or ""),
+        symptom_tags=_string_list(body.get("symptom_tags")),
+        appointment_note=str(body.get("appointment_note") or ""),
+        nutrition_note=str(body.get("nutrition_note") or ""),
+        content=str(body.get("content") or ""),
+        attachments=_dict_list(body.get("attachments")),
+    )
+    return _pregnancy_diary_entry_response(error=0 if diary else -1, diary=diary)
+
+
+@router.post("/v1/pregnancy-diary/delete")
+async def delete_pregnancy_diary_endpoint(request: Request) -> dict[str, Any]:
+    verify_api_key(request)
+    body = await _json_body_or_error(request, basic=True)
+    if not isinstance(body, dict):
+        return _basic_error_response(error=-1)
+    uid = str(body.get("user_id") or "").strip()
+    try:
+        entry_id = int(body.get("entry_id") or 0)
+    except Exception:
+        entry_id = 0
+    if not uid or entry_id <= 0:
+        return _basic_error_response(error=-1)
+    return _basic_error_response(error=0 if data_store.delete_pregnancy_diary_entry(user_id=uid, entry_id=entry_id) else -1)
+
+
 @router.post("/v1/plan/add-task")
 async def add_plan_task_endpoint(request: Request) -> dict[str, Any]:
     verify_api_key(request)
@@ -1979,6 +2107,32 @@ def _plan_task_mutation_response(*, error: int, task_list: list[dict[str, Any]] 
         "error": int(error),
         "task_list": task_list if isinstance(task_list, list) else [],
     }
+
+
+def _pregnancy_diary_list_response(*, error: int, diary_list: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    return {
+        "error": int(error),
+        "diary_list": diary_list if isinstance(diary_list, list) else [],
+    }
+
+
+def _pregnancy_diary_entry_response(*, error: int, diary: dict[str, Any] | None = None) -> dict[str, Any]:
+    return {
+        "error": int(error),
+        "diary": diary if isinstance(diary, dict) else None,
+    }
+
+
+def _string_list(raw: Any) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    return [str(item).strip() for item in raw if str(item).strip()]
+
+
+def _dict_list(raw: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw, list):
+        return []
+    return [item for item in raw if isinstance(item, dict)]
 
 
 def _feeding_forecast_p50(user_id: str) -> float:
