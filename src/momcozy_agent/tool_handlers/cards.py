@@ -1827,7 +1827,8 @@ def _cart_number(value: Any, *, default: float) -> float:
 
 
 def create_birth_plan_form(args: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
-    default_values = _dict_value(args.get("default_values"))
+    state_default_values = _dict_value(inputs.get("_birth_prep_hospital_bag_slots"))
+    default_values = {**state_default_values, **_dict_value(args.get("default_values"))}
     fields: list[dict[str, Any]] = []
     for template in BIRTH_PLAN_FORM_FIELDS:
         field = _sanitize_birth_plan_form_field(dict(template))

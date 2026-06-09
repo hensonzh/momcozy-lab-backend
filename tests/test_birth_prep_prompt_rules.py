@@ -15,6 +15,7 @@ from momcozy_agent.tool_handlers.cards import (
     create_birth_journey_plan_card,
     create_hospital_bag_card,
     create_hospital_bag_form,
+    create_birth_plan_form,
     create_labor_communication_card,
 )
 from momcozy_agent.tool_registry import DEFERRED_TOOL_NAMESPACES
@@ -280,6 +281,30 @@ class BirthPrepPromptRuleTests(unittest.TestCase):
         self.assertEqual(defaults["feeding_intention"], "亲喂母乳")
         self.assertEqual(defaults["support_person"], "有人全天帮忙")
         self.assertEqual(defaults["pregnancy_history_or_notes"], ["没有"])
+
+    def test_birth_prep_context_reuses_birth_path_for_birth_plan_form(self) -> None:
+        state = ContextState()
+
+        capture_birth_prep_user_message(
+            {
+                "user_message": "我现在孕30周，可能剖宫产，老公陪我。",
+                "locale": "zh-CN",
+            },
+            state,
+        )
+
+        form_result = create_birth_plan_form(
+            {"default_values": {}},
+            {
+                "user_message": "",
+                "_birth_prep_hospital_bag_slots": hospital_bag_slots(state),
+            },
+        )
+
+        fields = {field["id"]: field for field in form_result["form"]["fields"]}
+        self.assertEqual(fields["due_date_or_week"]["default_value"], "孕30周")
+        self.assertEqual(fields["birth_path"]["default_value"], "剖宫产")
+        self.assertEqual(fields["support_person"]["default_value"], "有人全天帮忙")
 
 
 if __name__ == "__main__":
