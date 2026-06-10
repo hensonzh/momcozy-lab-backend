@@ -72,6 +72,7 @@ def build_request_context(
         lines.extend(_format_birth_prep_context(state))
         lines.extend(_format_device_image_context(state))
     lines.extend(_format_active_care_plan_context(inputs))
+    lines.extend(_format_pregnancy_diary_context(inputs))
     hospital_bag_cart = _format_hospital_bag_cart_context(inputs.get("hospital_bag_cart"))
     if hospital_bag_cart:
         lines.extend(hospital_bag_cart)
@@ -196,6 +197,46 @@ def _format_active_care_plan_context(inputs: RuntimeInputs) -> list[str]:
         "active_care_plan_context:",
         "- birth_journey_plan: 已存在 active 生产全过程计划；" + "；".join(part for part in detail_parts if part),
         "- 只要该计划未被删除，就把它视为用户已有计划；用户要求生成/制定生产全过程计划时，不要再次调用 birth_journey_plan_card_create 创建新计划，先说明已有计划并继续查看或推进。",
+    ]
+
+
+def _format_pregnancy_diary_context(inputs: RuntimeInputs) -> list[str]:
+    user_id = _runtime_user_id(inputs)
+    if not user_id:
+        return []
+    try:
+        entries = data_store.list_pregnancy_diary_entries(user_id=user_id, limit=7)
+    except Exception:
+        return []
+    if not entries:
+        return []
+    question_count = 0
+    tags: list[str] = []
+    for entry in entries:
+        note = _trim_context_value(entry.get("appointment_note"), 80)
+        if note:
+            question_count += max(1, len([part for part in re.split(r"[？?\n；;]", note) if part.strip()]))
+        for tag in entry.get("symptom_tags") or []:
+            text = _trim_context_value(tag, 20)
+            if text and text not in tags:
+                tags.append(text)
+    latest = entries[0]
+    latest_parts = [
+        _trim_context_value(latest.get("entry_date"), 20),
+        _trim_context_value(latest.get("gestational_week"), 20),
+        _trim_context_value(latest.get("mood"), 30),
+        _trim_context_value(latest.get("fetal_movement"), 40),
+    ]
+    detail_parts = [
+        f"recent_days={len(entries)}",
+        f"appointment_questions={question_count}",
+        f"recent_tags={','.join(tags[:5])}" if tags else "",
+        f"latest={'/'.join(part for part in latest_parts if part)}",
+    ]
+    return [
+        "pregnancy_diary_context:",
+        "- " + "；".join(part for part in detail_parts if part),
+        "- 需要查看、整理、写入、更新或删除孕期日记时，使用 pregnancy_diary_manage；不要仅凭摘要臆造完整记录。",
     ]
 
 

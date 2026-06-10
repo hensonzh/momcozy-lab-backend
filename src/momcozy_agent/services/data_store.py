@@ -143,6 +143,13 @@ def init_db() -> None:
             );
             CREATE INDEX IF NOT EXISTS idx_pregnancy_diary_user_date ON pregnancy_diary_entry(user_id, entry_date DESC, entry_id DESC);
 
+            CREATE TABLE IF NOT EXISTS demo_seed_state (
+                user_id TEXT NOT NULL,
+                seed_key TEXT NOT NULL,
+                seeded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (user_id, seed_key)
+            );
+
             CREATE TABLE IF NOT EXISTS calendar (
                 item_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id TEXT NOT NULL,
@@ -1176,6 +1183,127 @@ def list_pregnancy_diary_entries(
             tuple(args),
         ).fetchall()
     return [_pregnancy_diary_entry_from_row(row) for row in rows]
+
+
+def ensure_demo_pregnancy_diary_entries(*, user_id: str, base_date: str = "") -> list[dict[str, Any]]:
+    uid = str(user_id or "").strip()
+    if not uid:
+        return []
+    seed_key = "pregnancy_diary_demo_v1"
+    if _demo_seed_has_run(user_id=uid, seed_key=seed_key):
+        return []
+    existing = list_pregnancy_diary_entries(user_id=uid, limit=1)
+    if existing:
+        _mark_demo_seed(user_id=uid, seed_key=seed_key)
+        return []
+    try:
+        base_day = datetime.fromisoformat(str(base_date or "").strip()).date() if base_date else datetime.now().date()
+    except Exception:
+        base_day = datetime.now().date()
+
+    templates = [
+        {
+            "gestational_week": "孕32周",
+            "mood": "平稳",
+            "energy_level": "一般",
+            "sleep_summary": "易醒",
+            "fetal_movement": "胎动正常",
+            "symptom_tags": ["腰酸", "水肿"],
+            "appointment_note": "下次产检想问水肿是否需要控制盐分？",
+            "content": "今天下午走路有点累，晚上胎动和平时差不多。",
+        },
+        {
+            "gestational_week": "孕32周",
+            "mood": "有点焦虑",
+            "energy_level": "很累",
+            "sleep_summary": "白天补觉",
+            "fetal_movement": "胎动正常",
+            "symptom_tags": ["胃口变化", "腰酸"],
+            "appointment_note": "想问医生最近胃口变差是否正常。",
+            "content": "午后补睡了半小时，心里还是有点担心待产准备。",
+        },
+        {
+            "gestational_week": "孕32周",
+            "mood": "开心",
+            "energy_level": "不错",
+            "sleep_summary": "睡得好",
+            "fetal_movement": "比平时频繁",
+            "symptom_tags": ["胎动变化"],
+            "appointment_note": "想确认胎动比平时频繁时要不要额外观察。",
+            "content": "宝宝今天动得很明显，家人也一起感受到了。",
+        },
+        {
+            "gestational_week": "孕31周",
+            "mood": "平稳",
+            "energy_level": "一般",
+            "sleep_summary": "易醒",
+            "fetal_movement": "胎动正常",
+            "symptom_tags": ["水肿"],
+            "appointment_note": "",
+            "content": "脚踝晚上有点肿，抬腿后舒服一些。",
+        },
+        {
+            "gestational_week": "孕31周",
+            "mood": "容易烦躁",
+            "energy_level": "很累",
+            "sleep_summary": "失眠",
+            "fetal_movement": "胎动正常",
+            "symptom_tags": ["腰酸", "宫缩感"],
+            "appointment_note": "想问偶尔发紧是不是假性宫缩。",
+            "content": "晚上醒了几次，肚子偶尔发紧，但很快缓解。",
+        },
+        {
+            "gestational_week": "孕31周",
+            "mood": "平稳",
+            "energy_level": "一般",
+            "sleep_summary": "易醒",
+            "fetal_movement": "胎动正常",
+            "symptom_tags": ["腰酸"],
+            "appointment_note": "",
+            "content": "整理了一点待产资料，感觉事情开始变具体了。",
+        },
+        {
+            "gestational_week": "孕31周",
+            "mood": "低落",
+            "energy_level": "很累",
+            "sleep_summary": "白天补觉",
+            "fetal_movement": "胎动正常",
+            "symptom_tags": ["头晕"],
+            "appointment_note": "想问偶尔头晕是否需要检查血压或贫血。",
+            "content": "上午有点头晕，休息后缓解，准备下次产检问问。",
+        },
+    ]
+    created: list[dict[str, Any]] = []
+    for index, template in enumerate(templates):
+        day = (base_day - timedelta(days=index)).isoformat()
+        entry = save_pregnancy_diary_entry(user_id=uid, entry_date=day, **template)
+        if entry:
+            created.append(entry)
+    _mark_demo_seed(user_id=uid, seed_key=seed_key)
+    return created
+
+
+def _demo_seed_has_run(*, user_id: str, seed_key: str) -> bool:
+    init_db()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM demo_seed_state WHERE user_id = ? AND seed_key = ?",
+            (str(user_id or "").strip(), str(seed_key or "").strip()),
+        ).fetchone()
+    return row is not None
+
+
+def _mark_demo_seed(*, user_id: str, seed_key: str) -> None:
+    init_db()
+    uid = str(user_id or "").strip()
+    key = str(seed_key or "").strip()
+    if not uid or not key:
+        return
+    with _connect() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO demo_seed_state(user_id, seed_key) VALUES (?, ?)",
+            (uid, key),
+        )
 
 
 def get_pregnancy_diary_entry(*, user_id: str, entry_id: int) -> dict[str, Any] | None:

@@ -498,6 +498,7 @@ def _tool_semantic_phase(tool_name: str) -> str:
         "reminder_update",
         "reminder_delete",
         "birth_journey_plan_delete",
+        "pregnancy_diary_manage",
     }:
         return "saving"
     if tool_name in {
@@ -580,6 +581,13 @@ def _tool_start_label(tool_name: str, arguments: dict[str, Any]) -> str:
         return "我先帮你整理生产全过程计划～"
     if tool_name == "birth_journey_plan_delete":
         return "我先帮你删除生产全过程计划～"
+    if tool_name == "pregnancy_diary_manage":
+        action = str(arguments.get("action") or "").strip()
+        if action in {"create", "update"}:
+            return "我先帮你保存孕期日记～"
+        if action == "delete":
+            return "我先帮你删除孕期日记～"
+        return "我先看看孕期日记～"
     if tool_name == "hospital_bag_card_create":
         return "我先帮你整理待产包清单～"
     if tool_name == "ibclc_consult_card_create":
@@ -626,6 +634,8 @@ def _tool_end_label(tool_name: str) -> str:
         return "我在整理工单草稿～"
     if tool_name == "birth_journey_plan_delete":
         return "我在处理删除结果～"
+    if tool_name == "pregnancy_diary_manage":
+        return "我在整理孕期日记结果～"
     if tool_name in {"ui_form_create", "birth_plan_form_create", "hospital_bag_form_create", "labor_communication_card_create", "birth_journey_plan_card_create", "hospital_bag_card_create", "ibclc_consult_card_create"}:
         return "我在把结果整理出来～"
     return "我继续处理一下～"
@@ -694,6 +704,19 @@ def _tool_result_label(tool_name: str, result: dict[str, Any]) -> str:
         if status == "plan_not_found":
             return "当前没有生产全过程计划可删除"
         return "我已经删除生产全过程计划啦" if status == "plan_deleted" else "删除生产全过程计划暂时没成功"
+    if tool_name == "pregnancy_diary_manage":
+        status = str(result.get("status") or "").strip()
+        if status == "needs_delete_confirmation":
+            return "删除前还需要你确认一下"
+        if status == "entry_not_found":
+            return "没有找到这条孕期日记"
+        if status == "diary_entry_deleted":
+            return "我已经删除这条孕期日记啦"
+        if status in {"diary_entry_created", "diary_entry_updated"}:
+            return "我已经保存好孕期日记啦"
+        if status in {"diary_list_read", "diary_entry_read"}:
+            return "我看好孕期日记啦"
+        return "孕期日记这一步处理好了"
     if tool_name == "hospital_bag_card_create":
         return "我已经帮你生成好待产包清单啦"
     if tool_name == "ibclc_consult_card_create":
@@ -776,7 +799,7 @@ def safe_tool_result(result: dict[str, Any]) -> dict[str, Any]:
     }
     tool_result = result.get("result")
     if isinstance(tool_result, dict):
-        for key in ("id", "skill_id", "status", "resource_id", "side_effect_performed", "summary", "missing_fields", "plan_id", "plan_type"):
+        for key in ("id", "skill_id", "status", "resource_id", "side_effect_performed", "summary", "missing_fields", "plan_id", "plan_type", "action", "entry_id", "entry_date"):
             if key in tool_result:
                 safe[key] = tool_result[key]
         tool_data = tool_result.get("data")
