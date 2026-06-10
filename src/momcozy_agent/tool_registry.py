@@ -20,6 +20,7 @@ from .tool_handlers.device import create_support_ticket_draft, search_device_man
 from .tool_handlers.handoff import generate_handoff_summary
 from .tool_handlers.ibclc import create_ibclc_consult_card
 from .tool_handlers.milk_management import execute_milk_management_tool
+from .tool_handlers.pregnancy_diary import manage_pregnancy_diary
 from .tool_handlers.profile import get_profile
 from .tool_handlers.skill_runtime import (
     list_skills,
@@ -104,6 +105,10 @@ DEFERRED_TOOL_NAMESPACES: dict[str, dict[str, Any]] = {
             "hospital_bag_card_create",
         ],
     },
+    "pregnancy_diary": {
+        "description": "用于读取、记录、更新、删除孕期日记，以及基于日记整理最近孕期状态或产检问题。通过一个 pregnancy_diary_manage 工具的 action 参数区分 list/get_today/create/update/delete；不要用于生产全过程计划、奶量记录、宝宝成长记录或医学诊断；删除前必须已有用户明确确认。",
+        "tool_names": ["pregnancy_diary_manage"],
+    },
 }
 
 READ_ONLY_TOOL_NAMES = {
@@ -135,6 +140,7 @@ TOOL_HANDLERS: dict[ToolName, ToolHandler] = {
     "labor_communication_card_create": create_labor_communication_card,
     "birth_journey_plan_card_create": create_birth_journey_plan_card,
     "birth_journey_plan_delete": delete_birth_journey_plan,
+    "pregnancy_diary_manage": manage_pregnancy_diary,
     "hospital_bag_form_create": create_hospital_bag_form,
     "hospital_bag_card_create": create_hospital_bag_card,
     "hospital_bag_cart_update": update_hospital_bag_cart,
