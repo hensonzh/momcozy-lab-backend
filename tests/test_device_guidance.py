@@ -3,9 +3,9 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from momcozy_agent.agents import MAX_TOOL_IMAGE_BYTES
+from momcozy_agent.agents import MAX_TOOL_IMAGE_BYTES, model_tool_output, safe_tool_result
 from momcozy_agent.server import STATIC_CONTENT_TYPES
-from momcozy_agent.tool_handlers.device import search_device_manual
+from momcozy_agent.tool_handlers.device import create_support_ticket_draft, search_device_manual
 
 
 class DeviceGuidanceTests(unittest.TestCase):
@@ -23,6 +23,68 @@ class DeviceGuidanceTests(unittest.TestCase):
 
         self.assertIn("目前系统不支持查看工单进度", skill_text)
         self.assertIn("不要编造确认页、短信/邮件、账户售后记录或其他查看路径", skill_text)
+        self.assertIn("创建售后工单前必须先和用户确认", skill_text)
+        self.assertIn("如果用户只是继续描述问题或说“还是不行”，不要直接创建工单", skill_text)
+
+    def test_support_ticket_service_prioritizes_emotion_and_resolution_before_ticket(self) -> None:
+        skill_path = Path(__file__).resolve().parents[1] / "skills" / "device-guidance" / "SKILL.md"
+        skill_text = skill_path.read_text(encoding="utf-8")
+
+        self.assertIn("### 处理原则", skill_text)
+        self.assertIn("先识别用户情绪", skill_text)
+        self.assertIn("默认目标是尽量帮助用户当场解决问题", skill_text)
+        self.assertIn("只有安全风险、缺件/破损/明显产品缺陷", skill_text)
+
+    def test_support_ticket_tool_asks_confirmation_before_creating_ticket(self) -> None:
+        result = create_support_ticket_draft(
+            {
+                "issue_type": "malfunction",
+                "issue_summary": "换了 5V/2A 适配器和线，还是完全没灯",
+                "product_model": "Air1",
+                "troubleshooting_done": ["更换 5V/2A 适配器", "更换 USB 线"],
+                "urgency": "high",
+                "user_confirmed": False,
+            },
+            {"locale": "zh-CN", "user_message": "换了 5V/2A 适配器和线，还是完全没灯"},
+        )
+
+        self.assertEqual(result["status"], "needs_support_ticket_confirmation")
+        self.assertNotIn("ticket", result)
+        message = result["assistant_followup"]["message"]
+        self.assertIn("非常抱歉没有解决你的问题", message)
+        self.assertIn("需要我现在帮你创建吗", message)
+
+        compact = model_tool_output({"ok": True, "tool_name": "support_ticket_draft_create", "result": result})
+        self.assertTrue(compact["requires_confirmation"])
+        self.assertEqual(compact["assistant_followup"], {"message": message})
+        self.assertIn("参考 assistant_followup.message", compact["final_response_instruction"])
+        self.assertIn("自然表达", compact["final_response_instruction"])
+        self.assertIn("最多两段", compact["final_response_instruction"])
+
+    def test_support_ticket_tool_returns_warm_followup_for_model_after_confirmation(self) -> None:
+        result = create_support_ticket_draft(
+            {
+                "issue_type": "malfunction",
+                "issue_summary": "换了 5V/2A 适配器和线，还是完全没灯",
+                "product_model": "Air1",
+                "troubleshooting_done": ["更换 5V/2A 适配器", "更换 USB 线"],
+                "urgency": "high",
+                "user_confirmed": True,
+            },
+            {"locale": "zh-CN", "user_message": "需要，请帮我创建售后工单"},
+        )
+
+        followup = result["assistant_followup"]["message"]
+        self.assertIn("确实很让人着急", followup)
+        self.assertIn("我已经帮你把售后信息整理好了", followup)
+        self.assertNotIn("草稿", followup)
+        self.assertNotIn("未提交", followup)
+
+        compact = model_tool_output({"ok": True, "tool_name": "support_ticket_draft_create", "result": result})
+        self.assertEqual(compact["assistant_followup"], {"message": followup})
+        self.assertIn("参考 assistant_followup.message", compact["final_response_instruction"])
+        self.assertIn("不要提“草稿”“未提交”“确认后才提交”", compact["final_response_instruction"])
+        self.assertIn("交付信息只能出现一次", compact["final_response_instruction"])
 
     def test_air1_step_images_stay_within_model_injection_budget(self) -> None:
         image_dir = Path(__file__).resolve().parents[1] / "skills" / "device-guidance" / "assets" / "air1" / "images"
@@ -88,6 +150,17 @@ class DeviceGuidanceTests(unittest.TestCase):
             "![Air1 核心部件](/skill-assets/device-guidance/air1/images/air1_guide_parts_components.png)",
         )
         self.assertIn("编号11=Quick Start Guide x1", relevant_images[0]["image_text"])
+        self.assertEqual(relevant_images[0]["voice_policy"], "announce")
+        self.assertEqual(
+            relevant_images[0]["spoken_label"],
+            "我放了一张当前步骤的对照图，你可以边看图边完成这一步。",
+        )
+
+        safe = safe_tool_result({"ok": True, "tool_name": "device_manual_search", "result": result})
+        self.assertEqual(safe["media_voice"][0]["media_id"], relevant_images[0]["url"])
+        self.assertEqual(safe["media_voice"][0]["voice_policy"], "announce")
+        self.assertEqual(safe["media_voice"][0]["spoken_label"], relevant_images[0]["spoken_label"])
+        self.assertLessEqual(len(safe["media_voice"]), 2)
 
         manual_text = result["manual"]["content"]
         self.assertIn("每个新视觉步骤首次展示当前步骤对应图片", manual_text)

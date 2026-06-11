@@ -56,12 +56,16 @@ AIR1_QUICK_START_RESOURCES: tuple[dict[str, str], ...] = (
         "title": "Air1 快速上手指南",
         "description": "官方 Quick Start 指导卡片",
         "url": "/skill-assets/device-guidance/air1/quick-start/momcozy-air1-quick-start-guidance.pdf",
+        "voice_policy": "describe_on_request",
+        "spoken_label": "这里有 Air1 官方快速上手指南，需要时可以打开对照。",
     },
     {
         "kind": "video",
         "title": "Air1 中文操作视频",
         "description": "官方中文操作视频",
         "url": "/skill-assets/device-guidance/air1/videos/air1-operation-zh.mp4",
+        "voice_policy": "describe_on_request",
+        "spoken_label": "这里有 Air1 官方中文操作视频，需要时可以打开查看。",
     },
 )
 
@@ -175,6 +179,18 @@ def search_device_manual(args: dict[str, Any], inputs: RuntimeInputs) -> dict[st
 
 
 def create_support_ticket_draft(args: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
+    if not _support_ticket_creation_confirmed(args, inputs):
+        message = _support_ticket_confirmation_message()
+        return {
+            "tool_name": "support_ticket_draft_create",
+            "status": "needs_support_ticket_confirmation",
+            "data": {
+                "requires_confirmation": True,
+                "confirmation_question": message,
+            },
+            "assistant_followup": {"message": message},
+        }
+
     ticket = {
         "draft_id": f"draft_{uuid.uuid4().hex[:10]}",
         "issue_type": _text(args.get("issue_type"), "other"),
@@ -194,7 +210,78 @@ def create_support_ticket_draft(args: dict[str, Any], inputs: RuntimeInputs) -> 
         "status": "ticket_draft_created",
         "ticket": ticket,
         "submit_label": "确认并提交",
+        "assistant_followup": {"message": _support_ticket_followup_message(ticket)},
     }
+
+
+def _support_ticket_creation_confirmed(args: dict[str, Any], inputs: RuntimeInputs) -> bool:
+    if args.get("user_confirmed") is not True:
+        return False
+    message = _normalize_compact_text(inputs.get("user_message"))
+    if not message:
+        return False
+    negative_terms = (
+        "不需要",
+        "不用",
+        "先不用",
+        "暂时不用",
+        "不要",
+        "别创建",
+        "先别",
+        "不用创建",
+        "不要创建",
+    )
+    if any(term in message for term in negative_terms):
+        return False
+    confirmation_terms = (
+        "需要",
+        "可以",
+        "好",
+        "好的",
+        "确认",
+        "同意",
+        "创建",
+        "帮我创建",
+        "帮我建",
+        "建售后",
+        "建工单",
+        "创建售后",
+        "提交工单",
+        "提交售后",
+        "售后工单",
+        "联系客服",
+        "现在帮我",
+        "现在创建",
+    )
+    return any(term in message for term in confirmation_terms)
+
+
+def _support_ticket_confirmation_message() -> str:
+    return "非常抱歉没有解决你的问题，我可以帮你创建一个售后工单，我们客服团队会在 24 小时之内联系到你。你看，需要我现在帮你创建吗？"
+
+
+def _normalize_compact_text(value: Any) -> str:
+    return re.sub(r"\s+", "", str(value or "").strip().lower())
+
+
+def _support_ticket_followup_message(ticket: dict[str, str]) -> str:
+    issue_type = str(ticket.get("issue_type") or "").strip()
+    if issue_type == "missing_parts":
+        opening = "收到设备却发现配件不完整，确实很影响体验，也会耽误正常使用。"
+    elif issue_type in {"malfunction", "defect"}:
+        opening = "设备还是没法正常使用，确实很让人着急，尤其是已经按步骤排查过还没有变化的时候。"
+    elif issue_type == "safety_concern":
+        opening = "这个情况会让人不放心，先把安全放在第一位是对的。"
+    elif issue_type == "return_or_refund":
+        opening = "退换货这类事情本来就很耗心力，我先帮你把关键信息整理清楚。"
+    elif issue_type == "order_or_shipping":
+        opening = "订单或物流问题拖着不清楚，确实容易让人焦虑。"
+    else:
+        opening = "这件事确实会影响使用体验，也容易让人着急。"
+    return (
+        f"{opening}\n\n"
+        "我已经帮你把售后信息整理好了，你可以看一下有没有需要补充或修改的地方。"
+    )
 
 
 def _text(value: Any, fallback: str = "") -> str:
@@ -377,7 +464,7 @@ def _relevant_images(module_images: dict[str, list[dict[str, str]]], *, query: s
         (("组装", "安装", "漏气", "没吸力"), ["guide.assembly"]),
         (("蓝牙", "配网", "连接"), ["guide.bluetooth"]),
         (("app", "控制", "同步"), ["guide.app_control"]),
-        (("穿戴", "开机", "吸奶", "吸乳"), ["guide.wearing_start"]),
+        (("穿戴", "开机", "启动设备", "开始使用"), ["guide.wearing_start"]),
         (("储奶", "倒奶", "结束"), ["guide.finish_storage"]),
     ]
     for keywords, modules in keyword_modules:
@@ -601,13 +688,23 @@ def _available_images(content: str) -> list[dict[str, str]]:
 
 
 def _image_resource(alt: str, url: str) -> dict[str, str]:
-    image = {"alt": alt, "url": url}
+    image = {
+        "alt": alt,
+        "url": url,
+        "voice_policy": "announce",
+        "priority": "instructional",
+        "spoken_label": _image_spoken_label(),
+    }
     if alt and url:
         image["markdown_image"] = f"![{alt}]({url})"
     image_text = AIR1_IMAGE_TEXT_BY_URL.get(url)
     if image_text:
         image["image_text"] = image_text
     return image
+
+
+def _image_spoken_label() -> str:
+    return "我放了一张当前步骤的对照图，你可以边看图边完成这一步。"
 
 
 def _static_image_exists(url: str) -> bool:

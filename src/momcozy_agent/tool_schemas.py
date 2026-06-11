@@ -331,7 +331,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "handoff_summary_generate": _function_tool(
         "handoff_summary_generate",
-        "生成给人工或专业支持接手用的简洁转接摘要。只在已经决定转接、用户明确需要人工/专业支持，或某个服务流程要求转接时使用；不要用于普通回答总结、设备售后工单草稿、待产包购物车或吸奶器选型。无副作用，不会对外提交。",
+        "生成给人工或专业支持接手用的简洁转接摘要。只在已经决定转接、用户明确需要人工/专业支持，或某个服务流程要求转接时使用；不要用于普通回答总结、设备售后工单、待产包购物车或吸奶器选型。无副作用，不会对外提交。",
         {
             "issue_type": {"type": "string", "description": "转接类型，例如 emotion_risk、ibclc、clinical_question、care_support 或 other。"},
             "facts": {**JSON_OBJECT_STRING, "description": "仅包含用户已提供或工具读取到的关键事实、已尝试步骤和待接手问题；不要包含推测诊断。"},
@@ -353,7 +353,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "support_ticket_draft_create": _function_tool(
         "support_ticket_draft_create",
-        "为未解决的 Momcozy 吸奶器或设备售后问题创建前端可确认的客服工单草稿。不会对外提交。仅在用户明确请求客服/退货/保修，反馈缺件或疑似缺陷，设备安全问题需要升级支持，或经过 device_manual_search 排查后仍未解决且用户愿意升级时使用。不要用于普通操作指导、购买前选型、奶量建议或专业照护转接摘要。",
+        "为未解决的 Momcozy 吸奶器或设备售后问题整理前端可确认的客服工单信息。创建前必须先向用户确认是否需要现在创建售后工单；只有用户已经明确同意时，user_confirmed 才能为 true。适用于用户明确请求客服/退货/保修，反馈缺件或疑似缺陷，设备安全问题需要升级支持，或经过 device_manual_search 排查后仍未解决且用户愿意升级时使用。不要用于普通操作指导、购买前选型、奶量建议或专业照护转接摘要。",
         {
             "issue_type": {
                 "type": "string",
@@ -368,6 +368,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
             "urgency": {"type": "string", "enum": ["normal", "high", "safety"]},
             "user_emotion": _nullable({"type": "string", "description": "简短描述观察到的用户情绪，例如沮丧、焦虑或生气。"}),
             "attachments_note": _nullable({"type": "string", "description": "说明已提供或仍需要的相关图片/视频附件。"}),
+            "user_confirmed": {"type": "boolean", "description": "用户是否已经明确同意现在创建售后工单。只有用户说需要、可以、确认、帮我创建、现在创建等明确同意表达时才为 true。"},
         },
     ),
     "milk_snapshot_get": _function_tool(

@@ -79,7 +79,7 @@ DEFERRED_TOOL_NAMESPACES: dict[str, dict[str, Any]] = {
         "tool_names": ["handoff_summary_generate"],
     },
     "device_support": {
-        "description": "用于用户已经拥有或正在使用 Momcozy 吸奶器/设备时的说明书、FAQ、配件、故障排查和售后工单草稿。不要用于购买前型号选型/价格比较，也不要用于奶量记录、喂养计划或待产包购物车调整。",
+        "description": "用于用户已经拥有或正在使用 Momcozy 吸奶器/设备时的说明书、FAQ、配件、故障排查和售后工单信息。不要用于购买前型号选型/价格比较，也不要用于奶量记录、喂养计划或待产包购物车调整。",
         "tool_names": ["device_manual_search", "support_ticket_draft_create"],
     },
     "milk_management": {

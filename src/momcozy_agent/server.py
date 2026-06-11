@@ -599,6 +599,8 @@ def _assistant_followup_from_tool_result_event(event: dict[str, Any]) -> str | N
         payload = json.loads(content)
     except json.JSONDecodeError:
         return None
+    if str(payload.get("tool_name") or "").strip() == "support_ticket_draft_create":
+        return None
     followup = payload.get("assistant_followup")
     if not isinstance(followup, dict):
         return None

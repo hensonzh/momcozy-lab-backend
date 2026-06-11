@@ -34,6 +34,7 @@ MAX_TOOL_ROUNDS = 6
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SKILLS_ROOT = PROJECT_ROOT / "skills"
 MAX_TOOL_IMAGE_INPUTS = 2
+MAX_TOOL_IMAGE_METADATA = 8
 MAX_TOOL_IMAGE_BYTES = 2 * 1024 * 1024
 MAX_TOOL_IMAGE_TOTAL_BYTES = 2 * 1024 * 1024
 TOOL_IMAGE_CONTENT_TYPES = {
@@ -445,7 +446,7 @@ def _artifact_semantic(artifact_type: str, artifact_id: str, tool_name: str) -> 
     if normalized_artifact_type == "form":
         label = "我已经准备好确认内容啦"
     elif normalized_artifact_type in {"support_ticket", "support_ticket_draft"}:
-        label = "我已经准备好售后工单草稿啦"
+        label = "请确认售后信息"
     elif normalized_artifact_type == "mom_baby_status_card":
         label = "我已经整理好母婴状态页啦"
     elif normalized_artifact_type == "milk_analysis_card":
@@ -593,7 +594,7 @@ def _tool_start_label(tool_name: str, arguments: dict[str, Any]) -> str:
     if tool_name == "ibclc_consult_card_create":
         return "我先帮你准备 IBCLC 咨询入口～"
     if tool_name == "support_ticket_draft_create":
-        return "我先帮你准备售后工单～"
+        return "我先帮你准备售后信息表～"
     if tool_name == "hospital_bag_pump_recommend":
         return "我先看看适合你的吸奶器型号～"
     if tool_name == "hospital_bag_cart_update":
@@ -631,7 +632,7 @@ def _tool_end_label(tool_name: str) -> str:
     if tool_name == "device_manual_search":
         return "我把设备内容整理一下～"
     if tool_name == "support_ticket_draft_create":
-        return "我在整理工单草稿～"
+        return "我在准备售后信息表～"
     if tool_name == "birth_journey_plan_delete":
         return "我在处理删除结果～"
     if tool_name == "pregnancy_diary_manage":
@@ -722,7 +723,7 @@ def _tool_result_label(tool_name: str, result: dict[str, Any]) -> str:
     if tool_name == "ibclc_consult_card_create":
         return "我已经准备好 IBCLC 咨询入口啦"
     if tool_name == "support_ticket_draft_create":
-        return "我已经准备好售后工单草稿啦"
+        return "请确认售后信息"
     if tool_name == "hospital_bag_pump_recommend":
         return "我已经帮你整理好吸奶器推荐啦"
     if tool_name == "hospital_bag_cart_update":
@@ -819,8 +820,12 @@ def safe_tool_result(result: dict[str, Any]) -> dict[str, Any]:
             safe["card"] = tool_result["card"]
         if result.get("tool_name") == "support_ticket_draft_create" and isinstance(tool_result.get("ticket"), dict):
             safe["ticket"] = tool_result["ticket"]
+            if isinstance(tool_result.get("assistant_followup"), dict):
+                safe["assistant_followup"] = tool_result["assistant_followup"]
             if "submit_label" in tool_result:
                 safe["submit_label"] = tool_result["submit_label"]
+        elif result.get("tool_name") == "support_ticket_draft_create" and isinstance(tool_result.get("assistant_followup"), dict):
+            safe["assistant_followup"] = tool_result["assistant_followup"]
         if result.get("tool_name") == "hospital_bag_cart_update" and isinstance(tool_result.get("cart_update"), dict):
             safe["cart_update"] = tool_result["cart_update"]
             message = tool_result["cart_update"].get("message")
@@ -830,6 +835,10 @@ def safe_tool_result(result: dict[str, Any]) -> dict[str, Any]:
             for key in ("recommended_product", "alternatives", "cart_sync_suggestion", "message", "source_urls"):
                 if key in tool_result:
                     safe[key] = tool_result[key]
+        if result.get("tool_name") == "device_manual_search":
+            media_voice = _media_voice_from_tool_result(tool_result)
+            if media_voice:
+                safe["media_voice"] = media_voice
         if result.get("tool_name") == QUICK_REPLIES_TOOL_NAME and isinstance(tool_result.get("quick_replies"), list):
             safe["quick_replies"] = tool_result["quick_replies"]
     if isinstance(result.get("error"), dict):
@@ -992,10 +1001,7 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
     if isinstance(followup, dict):
         message = str(followup.get("message") or "").strip()
         if message:
-            compact["final_response_instruction"] = (
-                "最终回复只能原样输出 assistant_followup.message，保留其中的段落换行；"
-                "不要改写、扩写、重复交付语或再补充下一步。"
-            )
+            compact["final_response_instruction"] = _followup_final_response_instruction(tool_name)
 
     return compact
 
@@ -1042,10 +1048,27 @@ def _ticket_artifact_final_response_instruction(tool_name: str) -> str:
     if tool_name != "support_ticket_draft_create":
         return ""
     return (
-        "售后工单草稿已经展示。最终回复只输出下面两段中文，保留空行，"
-        "不要改写、扩写，不要承诺已经提交、客服已经接手或会在具体时间联系用户：\n\n"
-        "售后工单草稿我整理好了。\n\n"
-        "你确认并提交后，才会进入售后处理；现在还没有对外提交。"
+        "售后工单信息表已经展示。最终回复要简短、温暖，并结合当前问题场景做情绪承接；"
+        "参考 assistant_followup.message 的语气、结构和关键信息自然表达，不要机械照抄。"
+        "最终回复最多两段，每段 1 句；“售后信息已经整理好”这个交付信息只能出现一次。"
+        "不要提“草稿”“未提交”“确认后才提交”，也不要暴露内部服务是否打通；"
+        "不要继续排查，不要重复工单字段，也不要列举购买渠道、照片、视频、联系方式等补充字段示例。"
+    )
+
+
+def _followup_final_response_instruction(tool_name: str) -> str:
+    if tool_name == "support_ticket_draft_create":
+        return (
+            "最终回复参考 assistant_followup.message 的情绪承接、语气和结构，"
+            "结合当前售后问题场景自然表达，不要机械照抄；"
+            "最终回复最多两段，每段 1 句；"
+            "必须说明售后信息已经整理好，并请用户查看是否需要补充或修改，但这类交付信息只能出现一次。"
+            "不要提“草稿”“未提交”“确认后才提交”、demo、模拟提交或内部服务是否打通；"
+            "不要重复工单字段，不要继续排查，也不要列举购买渠道、照片、视频、联系方式等补充字段示例。"
+        )
+    return (
+        "最终回复参考 assistant_followup.message 的语气、结构和关键信息自然表达；"
+        "不要机械照抄、不要重复交付语或再补充无关下一步。"
     )
 
 
@@ -1412,8 +1435,8 @@ def confirmation_event_from_tool_result(
             tool_call_id=tool_call_id,
             tool_call_name=tool_call_name,
             artifact_id=artifact_id,
-            title="我需要你确认售后工单",
-            message="工单仍是草稿，确认后才会提交。",
+            title="我需要你确认售后信息",
+            message="请核对信息是否准确，有需要可以直接修改。",
         )
     if safe_result.get("requires_confirmation") is True:
         title = _confirmation_title(tool_call_name, safe_result)
@@ -1651,6 +1674,7 @@ def run_agent_loop(
             _record_tool_images(options.get("context_state"), tool_call["name"], result)
             _record_birth_prep_tool_state(options.get("context_state"), tool_call["name"], tool_call["arguments"], result)
             safe_result = safe_tool_result(result)
+            model_output = model_tool_output(result)
             _emit_ag_ui_event(
                 on_ag_ui_event,
                 tool_call_result_event(
@@ -1688,7 +1712,7 @@ def run_agent_loop(
                 {
                     "type": "function_call_output",
                     "call_id": tool_call["call_id"],
-                    "output": json.dumps(model_tool_output(result), ensure_ascii=False),
+                    "output": json.dumps(model_output, ensure_ascii=False),
                 }
             )
 
@@ -2157,7 +2181,7 @@ def _record_tool_images(context_state: object, tool_name: str, result: dict[str,
     for image in _tool_image_metadata(result):
         existing = [item for item in context_state.available_tool_images if item.get("url") != image.get("url")]
         existing.append(image)
-        context_state.available_tool_images = existing[-8:]
+        context_state.available_tool_images = existing[-MAX_TOOL_IMAGE_METADATA:]
 
 
 def _record_displayed_tool_images(context_state: object, response: object) -> None:
@@ -2414,14 +2438,46 @@ def _tool_image_metadata(result: dict[str, Any]) -> list[dict[str, str]]:
         if _local_skill_asset_image(url) is None:
             continue
         image: dict[str, str] = {"url": url}
-        for key in ("alt", "module", "image_text"):
+        for key in ("alt", "module", "image_text", "voice_policy", "spoken_label", "priority"):
             value = str(item.get(key) or "").strip()
             if value:
                 image[key] = value
         images.append(image)
-        if len(images) >= MAX_TOOL_IMAGE_INPUTS:
+        if len(images) >= MAX_TOOL_IMAGE_METADATA:
             break
     return images
+
+
+def _media_voice_from_tool_result(tool_result: dict[str, Any]) -> list[dict[str, str]]:
+    relevant_images = tool_result.get("relevant_images")
+    if not isinstance(relevant_images, list):
+        return []
+
+    items: list[dict[str, str]] = []
+    for image in relevant_images:
+        if not isinstance(image, dict):
+            continue
+        url = str(image.get("url") or "").strip()
+        if not url:
+            continue
+        spoken_label = str(image.get("spoken_label") or "").strip()
+        voice_policy = str(image.get("voice_policy") or "").strip()
+        if not spoken_label or voice_policy not in {"announce", "read_text"}:
+            continue
+        item: dict[str, str] = {
+            "media_id": url,
+            "kind": "image",
+            "voice_policy": voice_policy,
+            "spoken_label": spoken_label,
+        }
+        alt = str(image.get("alt") or "").strip()
+        if alt:
+            item["visual_label"] = alt
+        priority = str(image.get("priority") or "").strip()
+        if priority:
+            item["priority"] = priority
+        items.append(item)
+    return items[:MAX_TOOL_IMAGE_INPUTS]
 
 
 def _append_loaded_reference(context_state: ContextState, reference: str) -> None:
