@@ -122,7 +122,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     "load_skill": _function_tool(
         "load_skill",
         "加载某个结构化 skill 的完整 SKILL.md，以及可用 references、scripts 和 assets 列表。无副作用。当用户需要该流程时使用，例如卡片、个性化计划、转接准备、基于记录的分析或设备专项支持；问候或普通科普回答不要使用。",
-        {"skill_id": {"type": "string", "enum": ["birth-prep", "milk-management", "emotion-support", "device-guidance"]}},
+        {"skill_id": {"type": "string", "enum": ["birth-prep", "milk-management", "health-consultation", "emotion-support", "device-guidance"]}},
     ),
     "search_skill_assets": _function_tool(
         "search_skill_assets",
@@ -317,7 +317,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "ibclc_consult_card_create": _function_tool(
         "ibclc_consult_card_create",
-        "创建前端可渲染的 IBCLC 在线咨询卡片，无后端副作用。仅在用户明确要求或确认需要 IBCLC/哺乳顾问/真人或人工哺乳咨询/在线咨询时使用。若是智能体自主判断需要持证哺乳顾问介入，应先主动说明 Momcozy 有在线 IBCLC 咨询服务，并简短说明为什么适合让顾问继续看；用户同意后再调用本工具。不要因为用户首次提到疼痛、堵奶、奶量担忧或宝宝摄入风险就直接触发。前端会渲染顾问姓名、资质、经验、简介和在线咨询入口。",
+        "创建前端可渲染的 IBCLC 在线咨询卡片，无后端副作用。仅在用户明确要求或确认需要 IBCLC/哺乳顾问/真人或人工哺乳咨询/在线咨询时使用。若是智能体自主判断问题已经进入含乳、排乳、泵奶节奏、反复堵奶、宝宝摄入细节或反复尝试无效，应先承接用户处境，完成至少一轮必要问诊，主动说明更适合让 IBCLC 顾问继续看，并询问是否现在打开咨询入口；用户同意后再调用本工具。不要因为用户首次提到疼痛、堵奶、奶量担忧或宝宝摄入风险就直接触发。前端会渲染顾问姓名、资质、经验、简介和在线咨询入口。",
         {
             "consultant_name": _nullable({"type": "string", "description": "前端名片展示的 IBCLC 顾问姓名；不确定时传 null，由工具使用默认 demo 顾问。"}),
             "consultant_bio": _nullable({"type": "string", "description": "前端名片展示的顾问简介；不确定时传 null，由工具使用默认简介。"}),

@@ -762,6 +762,7 @@ def _load_skill_label(arguments: dict[str, Any]) -> str:
     labels = {
         "milk-management": "我先切到奶量管理这件事上～",
         "birth-prep": "我先切到待产准备这件事上～",
+        "health-consultation": "我先帮你看健康咨询这件事～",
         "device-guidance": "我先切到设备指导这件事上～",
         "emotion-support": "我先切到情绪支持这件事上～",
     }
@@ -1038,9 +1039,10 @@ def _card_artifact_final_response_instruction(tool_name: str, card: dict[str, An
     note = str(chat.get("note") or "启动咨询后，会自动将你的问题同步给顾问").strip()
     return (
         "IBCLC 咨询入口已经展示。最终回复只输出下面两段中文，保留空行，"
-        "不要改写、扩写，不要承诺已经预约、已经接通、顾问正在处理或任何入口内容里没有的服务能力：\n\n"
+        "不要改写、扩写，不要承诺已经预约、已经接通、顾问正在处理或任何入口内容里没有的服务能力。"
+        "语气要温柔承接，不要像系统通知：\n\n"
         "IBCLC 咨询入口我准备好了。\n\n"
-        f"你勾选隐私政策和服务协议后，就可以启动咨询；{note}。"
+        f"你刚才这个情况不用一个人反复猜。勾选隐私政策和服务协议后，就可以启动咨询；{note}。"
     )
 
 
@@ -2330,6 +2332,9 @@ def _compact_web_search_citations_for_display(citations: list[dict[str, Any]]) -
         citation["url"] = url
         citation["title"] = title
         citation["index"] = len(compact) + 1
+        display_text = f"{_citation_display_topic(title, url)}：{_citation_short_url(url)}"
+        citation["display_text"] = display_text
+        citation["displayText"] = display_text
         compact.append(citation)
         if len(compact) >= 4:
             break
@@ -2349,6 +2354,72 @@ def _citation_title_key(title: str, host: str) -> str:
     if not normalized or normalized in {"参考来源", host, f"www.{host}", "protocols"}:
         return host or normalized
     return normalized
+
+
+def _citation_display_topic(title: str, url: str) -> str:
+    host = _citation_host(url)
+    title_text = re.sub(r"\s+", " ", str(title or "").strip())
+    title_key = _citation_title_key(title_text, host)
+    lower_title = title_text.lower()
+
+    if title_text and title_key != (host or title_key) and _contains_cjk(title_text):
+        return title_text[:48]
+    if "mastitis" in lower_title:
+        return "哺乳期乳腺炎资料"
+    if "hand expression" in lower_title:
+        return "手挤奶指导"
+    if "breastfeeding medicine" in lower_title or "protocol" in lower_title:
+        return "ABM 哺乳医学临床指南"
+    if "breastfeeding" in lower_title:
+        return "母乳喂养专业资料"
+    if "infant and child feeding" in lower_title:
+        return "婴幼儿喂养指导"
+    if "pregnancy" in lower_title or "obstetric" in lower_title:
+        return "孕产健康专业资料"
+    if "postpartum" in lower_title:
+        return "产后健康专业资料"
+
+    if "bfmed.org" in host or "abm.memberclicks.net" in host:
+        return "ABM 哺乳医学资料"
+    if "ncbi.nlm.nih.gov" in host:
+        return "NCBI 医学资料"
+    if "cdc.gov" in host:
+        return "CDC 健康指南"
+    if "who.int" in host:
+        return "WHO 健康指南"
+    if "nice.org.uk" in host:
+        return "NICE 临床指南"
+    if "acog.org" in host:
+        return "ACOG 妇产科指南"
+    if "aap.org" in host:
+        return "AAP 儿科资料"
+    if "nhc.gov.cn" in host:
+        return "国家卫健委资料"
+    if "unicef.org" in host:
+        return "UNICEF 母婴健康资料"
+    if "yiigle.com" in host or "cmcha.org" in host or "jundaodsj.com" in host:
+        return "中文医学资料"
+    return "专业资料"
+
+
+def _contains_cjk(text: str) -> bool:
+    return any("\u4e00" <= char <= "\u9fff" for char in text)
+
+
+def _citation_short_url(url: str) -> str:
+    try:
+        parsed = urlsplit(url)
+    except Exception:
+        return url
+    host = parsed.netloc.removeprefix("www.")
+    if not host:
+        return url
+    segments = [segment for segment in parsed.path.split("/") if segment]
+    if not segments:
+        return host
+    if len(segments) == 1:
+        return f"{host}/{segments[0]}"
+    return f"{host}/{segments[0]}/..."
 
 
 def _web_search_citations_from_web_search_item(item: object) -> list[dict[str, Any]]:

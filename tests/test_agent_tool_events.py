@@ -5,6 +5,7 @@ import unittest
 import asyncio
 
 from momcozy_agent import ContextState, build_agent_request
+from momcozy_agent.tool_schemas import FUNCTION_TOOLS
 from momcozy_agent.agents import (
     artifact_created_event,
     _tool_image_input_item_from_metadata,
@@ -64,8 +65,46 @@ class AgentToolEventTests(unittest.TestCase):
         request_context = request["input"][0]["content"][0]["text"]
         self.assertIn("health_guidance_context:", request_context)
         self.assertIn("优先使用 web_search 检索", request_context)
-        self.assertIn("明显急症或红旗信号先给医生/急救分流", request_context)
+        self.assertIn("不要把医生、儿科、药师或 IBCLC 当成默认结论", request_context)
+        self.assertIn("只有明显在变严重、持续不缓解", request_context)
+        self.assertIn("第一轮先确认几个要紧情况", request_context)
+        self.assertIn("先给低风险处理和观察建议", request_context)
+        self.assertIn("要主动引导 IBCLC 在线咨询", request_context)
         self.assertNotIn("## 健康咨询和 web_search", request["instructions"])
+
+    def test_more_complex_health_question_terms_trigger_web_search(self) -> None:
+        messages = (
+            "乳汁电导率连续三天偏高正常吗",
+            "宝宝尿布变少要紧吗",
+            "产后伤口渗液有没有事",
+        )
+
+        for message in messages:
+            with self.subTest(message=message):
+                request = build_agent_request({"user_message": message, "locale": "zh-CN"})
+                self.assertEqual(len([tool for tool in request["tools"] if tool.get("type") == "web_search"]), 1)
+                self.assertEqual(
+                    request["tool_choice"],
+                    {
+                        "type": "allowed_tools",
+                        "mode": "required",
+                        "tools": [{"type": "web_search"}],
+                    },
+                )
+                request_context = request["input"][0]["content"][0]["text"]
+                self.assertIn("health_guidance_context:", request_context)
+
+    def test_breast_lump_first_turn_asks_triage_without_web_search(self) -> None:
+        request = build_agent_request({"user_message": "我有硬块疼痛", "locale": "zh-CN"})
+
+        self.assertEqual(len([tool for tool in request["tools"] if tool.get("type") == "web_search"]), 0)
+        self.assertEqual(request["tool_choice"], "auto")
+        request_context = request["input"][0]["content"][0]["text"]
+        self.assertIn("health_guidance_context:", request_context)
+        self.assertIn("不需要 web_search", request_context)
+        self.assertIn("最终回复只做一句承接 + 关键问题", request_context)
+        self.assertIn("有没有发烧、寒战", request_context)
+        self.assertIn("不要输出冷敷、按摩、排乳、用药、资料引用或 IBCLC 入口推荐", request_context)
 
     def test_light_product_or_urgent_questions_do_not_add_health_guidance_context(self) -> None:
         light_request = build_agent_request({"user_message": "孕26周该准备什么", "locale": "zh-CN"})
@@ -98,6 +137,13 @@ class AgentToolEventTests(unittest.TestCase):
                                             "title": "Academy of Breastfeeding Medicine Protocols",
                                             "start_index": 0,
                                             "end_index": 8,
+                                        },
+                                        {
+                                            "type": "url_citation",
+                                            "url": "https://www.ncbi.nlm.nih.gov/books/NBK148970/",
+                                            "title": "",
+                                            "start_index": 9,
+                                            "end_index": 16,
                                         }
                                     ],
                                 }
@@ -131,6 +177,16 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertEqual(citations[0]["url"], "https://www.bfmed.org/protocols")  # type: ignore[index]
         self.assertEqual(citations[0]["title"], "Academy of Breastfeeding Medicine Protocols")  # type: ignore[index]
         self.assertEqual(citations[0]["index"], 1)  # type: ignore[index]
+        self.assertEqual(
+            citations[0]["display_text"],  # type: ignore[index]
+            "ABM 哺乳医学临床指南：bfmed.org/protocols",
+        )
+        self.assertEqual(
+            citations[0]["displayText"],  # type: ignore[index]
+            "ABM 哺乳医学临床指南：bfmed.org/protocols",
+        )
+        self.assertEqual(citations[1]["title"], "www.ncbi.nlm.nih.gov")  # type: ignore[index]
+        self.assertEqual(citations[1]["displayText"], "NCBI 医学资料：ncbi.nlm.nih.gov/books/...")  # type: ignore[index]
 
     def test_ag_ui_emits_web_search_process_status(self) -> None:
         fake_client = _FakeStreamingClient(
@@ -232,6 +288,10 @@ class AgentToolEventTests(unittest.TestCase):
         citations = citation_events[0]["value"]["citations"]  # type: ignore[index]
         self.assertEqual(citations[0]["url"], "https://www.bfmed.org/protocols")  # type: ignore[index]
         self.assertEqual(citations[0]["index"], 1)  # type: ignore[index]
+        self.assertEqual(
+            citations[0]["displayText"],  # type: ignore[index]
+            "ABM 哺乳医学临床指南：bfmed.org/protocols",
+        )
 
     def test_web_search_process_status_event_has_user_facing_semantics(self) -> None:
         event = web_search_status_event("searching", {"source_event": "response.web_search_call.searching"})
@@ -438,6 +498,8 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertIn("不要提表单里没有的字段", birth_plan_form["final_response_instruction"])
         self.assertIn("IBCLC 咨询入口已经展示", ibclc_card["final_response_instruction"])
         self.assertIn("不要承诺已经预约、已经接通", ibclc_card["final_response_instruction"])
+        self.assertIn("不用一个人反复猜", ibclc_card["final_response_instruction"])
+        self.assertIn("主动说明更适合让 IBCLC 顾问继续看", FUNCTION_TOOLS["ibclc_consult_card_create"]["description"])
         self.assertIn("售后工单信息表已经展示", support_ticket["final_response_instruction"])
         self.assertIn("不要提“草稿”“未提交”“确认后才提交”", support_ticket["final_response_instruction"])
         self.assertIn("结合当前问题场景做情绪承接", support_ticket["final_response_instruction"])

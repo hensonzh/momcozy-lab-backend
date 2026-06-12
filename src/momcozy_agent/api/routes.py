@@ -1664,7 +1664,11 @@ def mock_notify_list(user_id: str, timestamp: str) -> list[dict[str, Any]]:
     if summary_notice:
         notify_list.append(summary_notice)
 
-    priority = {"warning": 0, "pump": 1, "grown": 2, "summary": 3}
+    health_issue_notice = _health_issue_notify(normalized_user_id, now)
+    if health_issue_notice:
+        notify_list.append(health_issue_notice)
+
+    priority = {"warning": 0, "health_issue": 1, "pump": 2, "grown": 3, "summary": 4}
     notify_list.sort(key=lambda item: (priority.get(str(item.get("event") or ""), 99), str(item.get("time") or "")))
     return notify_list
 
@@ -1787,6 +1791,24 @@ def _summary_notify(user_id: str, now: datetime) -> dict[str, Any] | None:
     else:
         message += " 整体节奏正常。"
     return {"event": "summary", "time": "21:00", "message": message}
+
+
+def _health_issue_notify(user_id: str, now: datetime) -> dict[str, Any] | None:
+    health = data_store.get_pump_health(user_id)
+    if not health:
+        return None
+    try:
+        health_l = int(health.get("health_l") or 0)
+        health_r = int(health.get("health_r") or 0)
+    except Exception:
+        return None
+    if health_l <= 0 and health_r <= 0:
+        return None
+    return {
+        "event": "health_issue",
+        "time": now.strftime("%H:%M"),
+        "message": "嗨，我发现你的乳汁电导率有点异常，可以和你聊聊吗",
+    }
 
 
 def _date_from_datetime_text(raw: Any) -> date | None:

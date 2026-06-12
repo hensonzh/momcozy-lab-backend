@@ -319,6 +319,7 @@ class WebDataAppTests(unittest.TestCase):
         self.assertIn("daily_summary_reminder", index_html)
         self.assertIn("milk_analysis_reminder", index_html)
         self.assertIn("baby_growth_update_reminder", index_html)
+        self.assertIn("health_issue_reminder", index_html)
         self.assertIn("reportNotification", app_js)
         self.assertIn("/api/notifications/report", app_js)
         self.assertIn("X-Web-Data-Ws-Token", app_js)
