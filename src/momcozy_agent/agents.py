@@ -821,6 +821,8 @@ def safe_tool_result(result: dict[str, Any]) -> dict[str, Any]:
                 safe["assistant_followup"] = tool_result["assistant_followup"]
         if result.get("tool_name") in {"milk_status_query", "milk_assessment_evaluate", "milk_plan_preview", "milk_plan_mutate"} and isinstance(tool_result.get("card"), dict):
             safe["card"] = tool_result["card"]
+            if isinstance(tool_result.get("assistant_followup"), dict):
+                safe["assistant_followup"] = tool_result["assistant_followup"]
         if result.get("tool_name") == "ibclc_consult_card_create" and isinstance(tool_result.get("card"), dict):
             safe["card"] = tool_result["card"]
         if result.get("tool_name") == "support_ticket_draft_create" and isinstance(tool_result.get("ticket"), dict):
@@ -862,6 +864,8 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
         return _compact_mom_baby_status_card_output(safe)
     if tool_name == "milk_plan_preview" and isinstance(safe.get("card"), dict):
         return _compact_milk_plan_card_output(safe, result)
+    if tool_name == "milk_plan_mutate" and isinstance(safe.get("card"), dict):
+        return _compact_milk_plan_saved_output(safe)
 
     if tool_name == QUICK_REPLIES_TOOL_NAME:
         return {
@@ -1199,7 +1203,7 @@ def _compact_milk_analysis_card_output(safe: dict[str, Any]) -> dict[str, Any]:
     card_json_dict = card_json if isinstance(card_json, dict) else {}
     analysis_status = str(card_json_dict.get("status") or safe.get("status") or "").strip()
     status_label = str(card_json_dict.get("status_label") or "").strip()
-    return {
+    compact = {
         "ok": safe.get("ok"),
         "tool_name": safe.get("tool_name"),
         "card": {
@@ -1213,9 +1217,14 @@ def _compact_milk_analysis_card_output(safe: dict[str, Any]) -> dict[str, Any]:
         "final_response_instruction": (
             "奶量分析卡片已经展示完整结果。最终回复只能引导用户选择下一步，"
             "不要复述卡片中的结论、数字、趋势、参考区间、原因推测或建议内容；"
-            "不要输出“整体看/结果是/数据显示”等分析句。用一句自然的话给出 2-3 个可选动作。"
+            "不要输出“整体看/结果是/数据显示”等分析句。优先参考 assistant_followup.message，"
+            "自然询问用户是否继续制定追奶/稳奶/减奶计划，或是否先补齐漏记记录。"
         ),
     }
+    followup = safe.get("assistant_followup")
+    if isinstance(followup, dict):
+        compact["assistant_followup"] = followup
+    return compact
 
 
 def _compact_mom_baby_status_card_output(safe: dict[str, Any]) -> dict[str, Any]:
@@ -1261,9 +1270,12 @@ def _compact_milk_plan_card_output(safe: dict[str, Any], result: dict[str, Any])
             "奶量计划卡片已经展示完整计划。最终回复只能引导用户确认下一步，"
             "不要复述卡片中的计划方向、目标、安排、数字、周期、任务数或日期范围；"
             "可以用 calendar_sync_prompt 说明同步到日历的影响，但只保留一句短话；"
-            "给出“同步到日历/先调整/展开时间表”这类选择。"
+            "优先参考 assistant_followup.message，给出“同步到日历/先调整/展开时间表”这类选择。"
         ),
     }
+    followup = safe.get("assistant_followup")
+    if isinstance(followup, dict):
+        compact["assistant_followup"] = followup
     for key in ("requires_confirmation", "requires_medical_confirmation", "confirmation_question"):
         if key in safe:
             compact[key] = safe[key]
@@ -1276,6 +1288,29 @@ def _compact_milk_plan_card_output(safe: dict[str, Any], result: dict[str, Any])
     plan_preview = _compact_milk_plan_preview_for_model(result)
     if plan_preview:
         compact["plan_preview"] = plan_preview
+    return compact
+
+
+def _compact_milk_plan_saved_output(safe: dict[str, Any]) -> dict[str, Any]:
+    compact: dict[str, Any] = {
+        "ok": safe.get("ok"),
+        "tool_name": safe.get("tool_name"),
+        "status": safe.get("status"),
+        "card": {
+            "card_type": "milk_plan_card",
+            "schema_version": "1.0",
+            "created": True,
+        },
+        "next_actions": ["调整近期日程", "查看计划页", "先这样执行"],
+        "final_response_instruction": (
+            "奶量计划已经保存。最终回复不要复述计划内容、数字或日程明细；"
+            "优先参考 assistant_followup.message，说明计划已经同步到日程、接下来会定时提醒，"
+            "并引导先按计划执行一段时间，后面再根据奶量、宝宝状态和作息调整。"
+        ),
+    }
+    followup = safe.get("assistant_followup")
+    if isinstance(followup, dict):
+        compact["assistant_followup"] = followup
     return compact
 
 

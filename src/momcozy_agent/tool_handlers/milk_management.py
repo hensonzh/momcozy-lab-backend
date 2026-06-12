@@ -184,6 +184,7 @@ def _with_milk_analysis_card(result: dict[str, Any]) -> dict[str, Any]:
         "schema_version": "1.0",
         "card_json": _build_milk_analysis_card_json(data),
     }
+    result["assistant_followup"] = {"message": _milk_analysis_followup_message(data)}
     return result
 
 
@@ -201,6 +202,7 @@ def _with_milk_plan_card(result: dict[str, Any]) -> dict[str, Any]:
     if not result.get("ok") or not draft:
         return result
     result["card"] = _milk_plan_card(draft, card_status=str(data.get("card_status") or "preview"), data=data)
+    result["assistant_followup"] = {"message": _milk_plan_preview_followup_message(data)}
     return result
 
 
@@ -302,6 +304,9 @@ def _preview_plan(arguments: dict[str, Any]) -> dict[str, Any]:
                 "status": "milk_plan_target_invalid",
                 "summary": target_validation.get("summary", "计划目标不符合当前边界。"),
                 "data": {"target_validation": validation_data},
+                "assistant_followup": {
+                    "message": "这个目标现在有点偏急了。\n\n我可以先帮你把目标调得温和一点，再生成计划，这样身体会更好跟上。"
+                },
             }
         if target_daily_ml is None and validation_data.get("target_daily_ml") is not None:
             target_daily_ml = validation_data.get("target_daily_ml")
@@ -328,6 +333,7 @@ def _preview_plan(arguments: dict[str, Any]) -> dict[str, Any]:
                 "status": "milk_plan_preview_missing_plan_type",
                 "summary": "缺少 plan_type，无法生成新的奶量计划草稿。",
                 "data": {"missing_fields": ["plan_type"]},
+                "assistant_followup": {"message": "我先确认一下方向，这样不会帮你排偏：你现在更想追奶、稳奶，还是减奶？"},
             }
         clinical_gate = _clinical_gate_for_plan(arguments, plan_type=plan_type, options=options)
         if clinical_gate is not None:
@@ -373,6 +379,7 @@ def _clinical_gate_for_plan(arguments: dict[str, Any], *, plan_type: Any, option
                 "clinical_assessment": _compact_clinical_data(clinical_data),
                 "requires_confirmation": False,
             },
+            "assistant_followup": {"message": _milk_plan_gate_followup_message(clinical_data)},
         }
     options.setdefault("prepared_assessment", clinical_data.get("milk_assessment"))
     options.setdefault("prepared_growth_assessment", clinical_data.get("growth_assessment"))
@@ -404,6 +411,12 @@ def _clinical_gate_for_analysis(arguments: dict[str, Any], *, result: dict[str, 
                     "你现在有没有发热、乳房明显红肿、硬块，或疼痛越来越重？",
                 ],
             },
+            "assistant_followup": {
+                "message": (
+                    "我还想先确认几件会影响判断的信息，这样不会只盯着奶量数字看。\n\n"
+                    "宝宝近 24 小时尿布和精神状态怎么样？你现在有没有发热、乳房明显红肿、硬块，或疼痛越来越重？"
+                )
+            },
         }
     risk_level = str(clinical_data.get("risk_level") or "").strip()
     if risk_level in {"medical_recommended", "urgent"}:
@@ -412,6 +425,7 @@ def _clinical_gate_for_analysis(arguments: dict[str, Any], *, result: dict[str, 
             "status": "analysis_medical_gate_blocked",
             "summary": "当前有需要优先医学评估的信号，先不要只看奶量数据下结论。",
             "data": {"clinical_assessment": _compact_clinical_data(clinical_data)},
+            "assistant_followup": {"message": "这次我们先不只看奶量数字。\n\n你描述的情况更适合先联系医生或线下医疗渠道确认；等身体这边稳住了，我再陪你继续看奶量和计划。"},
         }
     if risk_level == "ibclc_recommended":
         return {
@@ -419,6 +433,7 @@ def _clinical_gate_for_analysis(arguments: dict[str, Any], *, result: dict[str, 
             "status": "analysis_ibclc_gate_blocked",
             "summary": "当前更适合先结合 IBCLC 看含乳、移乳效率或乳房不适。",
             "data": {"clinical_assessment": _compact_clinical_data(clinical_data)},
+            "assistant_followup": {"message": "这次不只是看奶量数字就能说清楚。\n\n更适合把含乳、排乳和乳房不适一起看一遍；如果你愿意，我可以帮你打开 IBCLC 咨询入口，让顾问一起看。"},
         }
     if str(clinical_data.get("data_confidence") or "").strip() == "low":
         return {
@@ -426,6 +441,7 @@ def _clinical_gate_for_analysis(arguments: dict[str, Any], *, result: dict[str, 
             "status": "needs_more_records_for_analysis",
             "summary": "当前关键记录不足，先补充记录后再做奶量分析。",
             "data": {"clinical_assessment": _compact_clinical_data(clinical_data)},
+            "assistant_followup": {"message": "现在记录还不够完整，先不用急着下结论。\n\n你可以先补一下最近的吸奶、亲喂或瓶喂记录；补完后我再帮你重新分析，会更接近真实情况。"},
         }
     return None
 
@@ -597,6 +613,90 @@ def _milk_plan_title(draft: dict[str, Any]) -> str:
     return plan_name or "奶量计划"
 
 
+def _milk_analysis_followup_message(data: dict[str, Any]) -> str:
+    normality = data.get("milk_normality") if isinstance(data.get("milk_normality"), dict) else {}
+    status = str(normality.get("overall_status") or data.get("assessment_status") or "").strip()
+    if status == "under_supply_alert":
+        return (
+            "我把近期奶量情况看完了。先别急着责怪自己，奶量波动很常见，我们先把记录和节奏一项项顺清楚。\n\n"
+            "如果这些记录已经完整，我可以接着陪你做一份温和追奶计划；如果你担心有漏记，我们先补齐，再判断会更踏实。"
+        )
+    if status == "over_supply_alert":
+        return (
+            "我把近期奶量情况看完了。先不用急着一下子减吸，身体通常更吃温和、慢一点的调整。\n\n"
+            "接下来我们可以先把节奏调得舒服些；如果你有胀痛、硬块或不舒服，也可以先从这里看。"
+        )
+    if status == "normal":
+        return (
+            "我把近期奶量情况看完了。现在这个节奏整体撑得住，可以先松一口气。\n\n"
+            "接下来更适合稳住，不用大改；如果你愿意，我也可以陪你做一份稳奶计划。"
+        )
+    return (
+        "我先帮你看了一遍近期奶量情况。现在还差一点关键信息，我们先不急着下结论。\n\n"
+        "你把关键记录补一下，我再陪你继续判断要不要做计划。"
+    )
+
+
+def _milk_plan_preview_followup_message(data: dict[str, Any]) -> str:
+    draft = data.get("draft") if isinstance(data.get("draft"), dict) else {}
+    title = _milk_plan_title(draft)
+    session_guidance = _milk_plan_session_guidance(draft)
+    calendar_delta = data.get("calendar_delta") if isinstance(data.get("calendar_delta"), dict) else {}
+    requires_strategy = bool(calendar_delta.get("requires_calendar_write_strategy") or calendar_delta.get("calendar_write_strategy_required"))
+    if requires_strategy:
+        return (
+            f"{title}我先帮你理好了。它不是让你硬扛，而是帮你把接下来几天变得更有把握一点。\n\n"
+            f"{session_guidance}\n\n"
+            "如果要同步到计划页，我先和你确认一下：是追加到现有日程，还是替换未来未完成的旧计划任务？"
+        )
+    return (
+        f"{title}我先帮你理好了。它不是让你硬扛，而是帮你把接下来几天变得更有把握一点。\n\n"
+        f"{session_guidance}\n\n"
+        "如果方向没问题，我可以帮你同步到计划页；也可以先照着你的作息，把时间再调顺一点。"
+    )
+
+
+def _milk_plan_session_guidance(draft: dict[str, Any]) -> str:
+    plan_type = str(draft.get("plan_type") or "").strip()
+    if plan_type == "increase_milk":
+        return "单次吸奶或亲喂的重点是有效移出，不是把自己耗到很久；吸奶到奶流明显变慢后再多 1-2 分钟就够了，亲喂就看吞咽变少和宝宝状态。不舒服时先停下来，我们优先调吸力、法兰或含乳。"
+    if plan_type == "decrease_milk":
+        return "单次吸奶或亲喂不用刻意排得特别空，重点是让身体舒服下来；如果只是胀，吸到不难受就可以停，不要继续给身体太强的增奶信号。"
+    return "单次吸奶或亲喂不用硬拖很久，重点是稳定、舒服地移出；吸奶到奶流明显变慢、乳房舒服一些就可以，亲喂就看宝宝吞咽和满足感。"
+
+
+def _milk_plan_saved_followup_message(result: dict[str, Any]) -> str:
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    inserted = _to_int(data.get("inserted_calendar_count"), 0)
+    if inserted > 0:
+        return (
+            "已经把计划同步到了日程，接下来会定时提醒。你不用一直靠脑子记着，我们先让提醒帮你托住节奏。\n\n"
+            "先按照这个计划执行一段时间就好，后面我再陪你看奶量、宝宝状态和你的作息，一起慢慢调整。"
+        )
+    return (
+        "计划已经保存好了。你不用一下子把后面每一步都想清楚，我们先把方向稳住。\n\n"
+        "如果这几天有会议、外出、旅行、上班或想多睡一段，我也可以继续陪你把时间顺一下。"
+    )
+
+
+def _milk_plan_gate_followup_message(clinical_data: dict[str, Any]) -> str:
+    risk_level = str(clinical_data.get("risk_level") or "").strip()
+    if risk_level in {"medical_recommended", "urgent"}:
+        return (
+            "现在先不急着做奶量计划，这一步我们慢一点来。\n\n"
+            "你描述的情况更适合先联系医生或线下医疗渠道确认；等身体这边稳住了，我再陪你继续整理奶量安排。"
+        )
+    if risk_level == "ibclc_recommended":
+        return (
+            "现在先不急着做完整计划，这不是你做得不够好。\n\n"
+            "更适合先把含乳、排乳和乳房不适一起看一遍；如果你愿意，我可以帮你打开 IBCLC 咨询入口。"
+        )
+    return (
+        "现在先不急着做完整计划。我们把会影响判断的信息补齐，后面会更稳。\n\n"
+        "你补充完这些情况后，我再继续陪你做安排。"
+    )
+
+
 def _query_plan(arguments: dict[str, Any]) -> dict[str, Any]:
     plan_id = arguments.get("plan_id")
     if plan_id is not None:
@@ -636,6 +736,7 @@ def _mutate_plan(arguments: dict[str, Any]) -> dict[str, Any]:
             result["data"]["validation"] = validation_data
         if result.get("ok") and isinstance(plan, dict):
             result["card"] = _milk_plan_card(plan, card_status="confirmed")
+            result["assistant_followup"] = {"message": _milk_plan_saved_followup_message(result)}
         return result
     if operation == "update":
         plan = _plan_from_patch_for_validation(arguments.get("patch"))

@@ -666,6 +666,7 @@ async def create_analysis_endpoint(request: Request) -> dict[str, Any]:
             error=0,
             result=str(card.get("status") or "") == "normal",
             message="嗨，我注意到你近期奶量偏低，可以和你聊聊吗？",
+            analysis_context=card,
         )
     return _analysis_create_response(error=-1, result=False, message="unsupported type")
 
@@ -1924,6 +1925,7 @@ def _analysis_create_response(
     message: Any,
     result: bool | None = None,
     analysis_card: dict[str, Any] | None = None,
+    analysis_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     response: dict[str, Any] = {"error": int(error), "data": {}}
     if result is not None:
@@ -1931,6 +1933,8 @@ def _analysis_create_response(
     response["data"]["message"] = message
     if analysis_card is not None:
         response["data"]["analysis_card"] = analysis_card
+    if analysis_context is not None:
+        response["data"]["analysis_context"] = analysis_context
     return response
 
 

@@ -271,6 +271,8 @@ class AnalysisCreateApiTests(unittest.TestCase):
         self.assertEqual(payload["data"]["result"], True)
         self.assertEqual(payload["data"]["message"], "嗨，我注意到你近期奶量偏低，可以和你聊聊吗？")
         self.assertNotIn("analysis_card", payload["data"])
+        self.assertEqual(payload["data"]["analysis_context"]["kind"], "milk_analysis")
+        self.assertEqual(payload["data"]["analysis_context"]["status"], "normal")
         evaluate.assert_called_once_with(user_id="u1", window_days=7, include_today=False)
 
     def test_daily_summary_returns_summary_message_and_updates_profile_summary(self) -> None:

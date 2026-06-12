@@ -76,3 +76,122 @@ INFO:     127.0.0.1:61633 - "WebSocket /v1/realtime-voice-session?token=app-test
 INFO:     connection open
 INFO:     connection closed
 INFO:     connection closed
+INFO:     connection closed
+INFO:     127.0.0.1:62156 - "WebSocket /api/ws?user_id=demo_mama_increase_001" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:62208 - "GET /v1/mom-baby/info/query?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62209 - "GET /v1/mom-baby/today/query?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62210 - "GET /v1/growth/query?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62211 - "GET /v1/growth/history?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62212 - "GET /v1/pump/info/get?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62213 - "GET /v1/pump-milk/query?user_id=demo_mama_increase_001&timestamp=2026-06-12 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62215 - "GET /v1/feeding/query?user_id=demo_mama_increase_001&timestamp=2026-06-12 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62217 - "GET /v1/plan/list?user_id=demo_mama_increase_001&status=active HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62219 - "GET /v1/pregnancy-diary/today?user_id=demo_mama_increase_001&timestamp=2026-06-12 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62221 - "GET /v1/pregnancy-diary/list?user_id=demo_mama_increase_001&limit=12 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62374 - "GET /v1/pump/info/get?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62400 - "GET /v1/pump/info/get?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62485 - "GET /v1/pump/info/get?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62487 - "GET /v1/pump/info/get?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62488 - "GET /v1/pump/info/get?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62491 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62491 - "GET /api/session HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62491 - "GET /api/db/tables HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62492 - "GET /api/files HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62492 - "GET /api/db/tables/user_profile/rows?page=1&page_size=20&q=&field= HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62492 - "GET /api/db/tables/calendar/rows?page=1&page_size=20&q=&field= HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62499 - "GET /v1/pump/info/get?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62500 - "GET /v1/pump/info/get?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62504 - "POST /api/notifications/report HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62507 - "GET /v1/pump/info/get?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     connection closed
+INFO:     127.0.0.1:62540 - "WebSocket /api/ws?user_id=demo_mama_increase_001" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:62542 - "GET /v1/mom-baby/info/query?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62543 - "GET /v1/mom-baby/today/query?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62544 - "GET /v1/growth/query?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62545 - "GET /v1/growth/history?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62546 - "GET /v1/pump/info/get?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62547 - "GET /v1/pump-milk/query?user_id=demo_mama_increase_001&timestamp=2026-06-12 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62549 - "GET /v1/feeding/query?user_id=demo_mama_increase_001&timestamp=2026-06-12 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62551 - "GET /v1/plan/list?user_id=demo_mama_increase_001&status=active HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62553 - "GET /v1/pregnancy-diary/today?user_id=demo_mama_increase_001&timestamp=2026-06-12 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62555 - "GET /v1/pregnancy-diary/list?user_id=demo_mama_increase_001&limit=12 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62568 - "POST /api/notifications/report HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62570 - "POST /v1/analysis/create HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62573 - "POST /api/client-event HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62572 - "POST /api/client-event HTTP/1.1" 200 OK
+INFO:     connection closed
+INFO:     127.0.0.1:63084 - "WebSocket /api/ws?user_id=demo_mama_increase_001" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     127.0.0.1:63102 - "WebSocket /api/ws?user_id=demo_mama_increase_001" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     127.0.0.1:63129 - "WebSocket /api/ws?user_id=demo_mama_increase_001" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     127.0.0.1:63141 - "WebSocket /api/ws?user_id=demo_mama_increase_001" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     127.0.0.1:63158 - "WebSocket /api/ws?user_id=demo_mama_increase_001" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     127.0.0.1:63220 - "WebSocket /api/ws?user_id=demo_mama_increase_001" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:63388 - "POST /api/notifications/report HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63390 - "POST /v1/analysis/create HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63393 - "POST /api/client-event HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63392 - "POST /api/client-event HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63394 - "WebSocket /api/ag-ui-ws?token=app-test" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:63395 - "POST /api/ag-ui HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63402 - "WebSocket /v1/realtime-voice-session?token=app-test&user_id=demo_mama_increase_001" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     127.0.0.1:63414 - "WebSocket /api/ag-ui-ws?token=app-test" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:63415 - "POST /api/ag-ui HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63421 - "WebSocket /v1/realtime-voice-session?token=app-test&user_id=demo_mama_increase_001" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     127.0.0.1:63433 - "WebSocket /api/ag-ui-ws?token=app-test" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:63434 - "POST /api/ag-ui HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63437 - "WebSocket /v1/realtime-voice-session?token=app-test&user_id=demo_mama_increase_001" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     127.0.0.1:63451 - "WebSocket /api/ag-ui-ws?token=app-test" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:63452 - "POST /api/ag-ui HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63455 - "WebSocket /v1/realtime-voice-session?token=app-test&user_id=demo_mama_increase_001" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     127.0.0.1:63468 - "WebSocket /api/ag-ui-ws?token=app-test" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:63469 - "POST /api/ag-ui HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63478 - "WebSocket /v1/realtime-voice-session?token=app-test&user_id=demo_mama_increase_001" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     127.0.0.1:63496 - "WebSocket /api/ag-ui-ws?token=app-test" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:63497 - "POST /api/ag-ui HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63504 - "WebSocket /v1/realtime-voice-session?token=app-test&user_id=demo_mama_increase_001" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     127.0.0.1:63518 - "WebSocket /api/ag-ui-ws?token=app-test" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:63519 - "POST /api/ag-ui HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63524 - "WebSocket /v1/realtime-voice-session?token=app-test&user_id=demo_mama_increase_001" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     connection closed
+INFO:     127.0.0.1:64365 - "WebSocket /api/ws?user_id=demo_mama_increase_001" [accepted]
+INFO:     connection open

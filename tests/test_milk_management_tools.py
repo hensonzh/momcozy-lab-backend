@@ -381,6 +381,8 @@ class MilkManagementToolTests(unittest.TestCase):
         )
 
         self.assertEqual(result["card"]["card_type"], "milk_analysis_card")
+        self.assertIn("assistant_followup", result)
+        self.assertIn("追奶计划", result["assistant_followup"]["message"])
         card_json = result["card"]["card_json"]
         self.assertEqual(card_json["status_label"], "低于参考区间")
         self.assertEqual(card_json["sections"][0]["title"], "数据统计")
@@ -395,6 +397,8 @@ class MilkManagementToolTests(unittest.TestCase):
         self.assertEqual(compact["analysis_status"], "under_supply_alert")
         self.assertEqual(compact["next_actions"][0], "确认有没有未记录奶量")
         self.assertIn("记录完整后再生成温和追奶计划", compact["next_actions"])
+        self.assertIn("assistant_followup", compact)
+        self.assertIn("assistant_followup.message", compact["final_response_instruction"])
         self.assertIn("只能引导用户选择下一步", compact["final_response_instruction"])
         self.assertNotIn("summary", compact)
         self.assertNotIn("data", compact)
@@ -417,6 +421,9 @@ class MilkManagementToolTests(unittest.TestCase):
 
         self.assertTrue(result["ok"])
         self.assertEqual(result["status"], "needs_clinical_context")
+        self.assertIn("assistant_followup", result)
+        self.assertIn("尿布", result["assistant_followup"]["message"])
+        self.assertIn("乳房", result["assistant_followup"]["message"])
         self.assertNotIn("card", result)
         self.assertIn("clinical_assessment", result["data"])
         self.assertEqual(result["data"]["workflow_intent"], "milk_analysis")
@@ -547,6 +554,10 @@ class MilkManagementToolTests(unittest.TestCase):
 
         self.assertTrue(result["ok"])
         self.assertEqual(result["card"]["card_type"], "milk_plan_card")
+        self.assertIn("assistant_followup", result)
+        self.assertIn("同步到计划页", result["assistant_followup"]["message"])
+        self.assertIn("单次吸奶或亲喂", result["assistant_followup"]["message"])
+        self.assertIn("有效移出", result["assistant_followup"]["message"])
         card_json = result["card"]["card_json"]
         self.assertEqual(card_json["title"], "追奶计划")
         self.assertEqual(card_json["status_label"], "待确认")
@@ -575,6 +586,8 @@ class MilkManagementToolTests(unittest.TestCase):
         self.assertNotIn("草稿", compact["final_response_instruction"])
         self.assertIn("calendar_sync_prompt", compact)
         self.assertIn("同步到日历", compact["next_actions"])
+        self.assertIn("assistant_followup", compact)
+        self.assertIn("assistant_followup.message", compact["final_response_instruction"])
         self.assertNotIn("summary", compact)
         self.assertIn("confirmed_plan_for_save", compact["plan_preview"])
 
@@ -589,10 +602,19 @@ class MilkManagementToolTests(unittest.TestCase):
             {"user_message": "", "locale": "zh-CN", "timezone": "Asia/Shanghai", "message_sent_at": ""},
         )
         self.assertTrue(confirmed["ok"])
+        self.assertIn("assistant_followup", confirmed)
+        self.assertIn("同步到了日程", confirmed["assistant_followup"]["message"])
+        self.assertIn("定时提醒", confirmed["assistant_followup"]["message"])
+        self.assertIn("执行一段时间", confirmed["assistant_followup"]["message"])
         self.assertEqual(confirmed["card"]["id"], result["card"]["id"])
         self.assertEqual(confirmed["card"]["card_json"]["status_label"], "已确认")
         safe_confirmed = safe_tool_result({"ok": True, "tool_name": "milk_plan_mutate", "result": confirmed})
         self.assertEqual(safe_confirmed["card"]["card_type"], "milk_plan_card")
+        self.assertIn("assistant_followup", safe_confirmed)
+        compact_confirmed = model_tool_output({"ok": True, "tool_name": "milk_plan_mutate", "result": confirmed})
+        self.assertIn("assistant_followup", compact_confirmed)
+        self.assertIn("同步到日程", compact_confirmed["final_response_instruction"])
+        self.assertIn("执行一段时间", compact_confirmed["final_response_instruction"])
         self.assertEqual(
             artifact_events_from_tool_result(
                 tool_call_id="call_confirm",
@@ -677,6 +699,8 @@ class MilkManagementToolTests(unittest.TestCase):
 
         self.assertFalse(result["ok"])
         self.assertEqual(result["status"], "milk_plan_clinical_gate_blocked")
+        self.assertIn("assistant_followup", result)
+        self.assertIn("先不急着做", result["assistant_followup"]["message"])
         self.assertNotIn("card", result)
         clinical = result["data"]["clinical_assessment"]
         self.assertEqual(clinical["risk_level"], "medical_recommended")
