@@ -43,7 +43,7 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertIn("只提供 3 个短提示", description)
         self.assertIn("不能绕过保存、提交、替换、转接等确认流程", description)
 
-    def test_runtime_tools_always_include_domain_limited_health_web_search(self) -> None:
+    def test_runtime_tools_include_domain_limited_health_web_search_when_appropriate(self) -> None:
         light_tools = select_runtime_tools({"user_message": "hello", "locale": "zh-CN"})
         light_web_tools = [tool for tool in light_tools if tool.get("type") == "web_search"]
         self.assertEqual(len(light_web_tools), 1)
@@ -57,7 +57,13 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertIn("www.bfmed.org", web_tools[0]["filters"]["allowed_domains"])
 
         short_health_tools = select_runtime_tools({"user_message": "堵奶疼怎么办", "locale": "zh-CN"})
-        self.assertTrue(any(tool.get("type") == "web_search" for tool in short_health_tools))
+        self.assertFalse(any(tool.get("type") == "web_search" for tool in short_health_tools))
+
+        answered_breast_tools = select_runtime_tools({"user_message": "堵奶疼，没有发烧也不红肿", "locale": "zh-CN"})
+        self.assertTrue(any(tool.get("type") == "web_search" for tool in answered_breast_tools))
+
+        broader_health_tools = select_runtime_tools({"user_message": "乳汁电导率连续三天偏高正常吗", "locale": "zh-CN"})
+        self.assertTrue(any(tool.get("type") == "web_search" for tool in broader_health_tools))
 
     def test_runtime_tools_keep_web_search_stable_for_product_flows(self) -> None:
         tools = select_runtime_tools({"user_message": "我想整理待产包清单", "locale": "zh-CN"})
@@ -125,7 +131,7 @@ class ToolRegistryTests(unittest.TestCase):
         expected_tokens = {
             "handoff_summary_generate": ("已经决定转接", "不要用于普通回答总结", "设备售后工单"),
             "device_manual_search": ("已购/正在使用", "不要用于购买前型号推荐", "milk_management"),
-            "support_ticket_draft_create": ("不会对外提交", "device_manual_search", "不要用于普通操作指导"),
+            "support_ticket_draft_create": ("创建前必须先向用户确认", "user_confirmed", "不要用于普通操作指导"),
             "milk_snapshot_get": ("不要用它替代 milk_status_query", "milk_assessment_evaluate", "milk_plan_query"),
             "milk_status_query": ("不要用它替代 milk_assessment_evaluate", "milk_records_query"),
             "hospital_bag_cart_update": ("current_hospital_bag_cart", "不要用于首次生成待产包清单", "独立吸奶器型号选型"),

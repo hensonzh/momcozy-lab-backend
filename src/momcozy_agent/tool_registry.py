@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from .contexts import DEFAULT_LOCALE, DEFAULT_TIMEZONE
-from .health_guidance import health_guidance_web_search_tool
+from .health_guidance import health_guidance_web_search_tool, needs_breast_triage_first
 from .tool_handlers.cards import (
     create_birth_journey_plan_card,
     delete_birth_journey_plan,
@@ -81,7 +81,7 @@ DEFERRED_TOOL_NAMESPACES: dict[str, dict[str, Any]] = {
         "tool_names": ["handoff_summary_generate"],
     },
     "device_support": {
-        "description": "用于用户已经拥有或正在使用 Momcozy 吸奶器/设备时的说明书、FAQ、配件、故障排查和售后工单草稿。不要用于购买前型号选型/价格比较，也不要用于奶量记录、喂养计划或待产包购物车调整。",
+        "description": "用于用户已经拥有或正在使用 Momcozy 吸奶器/设备时的说明书、FAQ、配件、故障排查和售后工单信息。不要用于购买前型号选型/价格比较，也不要用于奶量记录、喂养计划或待产包购物车调整。",
         "tool_names": ["device_manual_search", "support_ticket_draft_create"],
     },
     "milk_management": {
@@ -157,7 +157,9 @@ TOOL_HANDLERS.update({tool_name: execute_milk_management_tool for tool_name in M
 
 
 def select_runtime_tools(inputs: RuntimeInputs | None = None) -> list[ToolDefinition]:
-    tools: list[ToolDefinition] = [{"type": "tool_search"}, health_guidance_web_search_tool()]  # type: ignore[list-item]
+    tools: list[ToolDefinition] = [{"type": "tool_search"}]
+    if not needs_breast_triage_first(inputs or {}):
+        tools.append(health_guidance_web_search_tool())  # type: ignore[arg-type]
     tools.extend(FUNCTION_TOOLS[name] for name in CORE_IMMEDIATE_TOOLS)
     tools.extend(_deferred_tool_namespaces())
 

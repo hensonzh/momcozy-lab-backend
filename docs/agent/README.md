@@ -29,7 +29,7 @@ Comate 是 Momcozy 的孕育与哺乳伙伴，定位是懂妈妈、能陪伴、�
 
 - service skill 由模型基于 manifest 判断并调用 `load_skill`。
 - 应用侧不做预路由，不预先选择内部 skill 或业务 skill。
-- 安全风险由稳定指令和已加载 skill 正文中的边界处理；模型需要在高风险场景优先选择 `emotion-support`、`ibclc-consult` 或其他相关 service skill。
+- 安全风险由稳定指令和已加载 skill 正文中的边界处理；模型需要在高风险场景优先选择 `emotion-support`、`health-consultation` 或其他相关 service skill。
 - 回答风格保持：专业但不冷漠、安抚但不哄骗、清晰但不教条。
 - 情绪感知是基础能力：先识别恐惧、内疚、羞耻、疲惫、孤立、反复寻求确认等信号，再决定回答密度、安抚方式、是否需要安全确认或风险升级。
 - skill 渐进式加载，不一次性把所有 `SKILL.md` 塞进上下文。
@@ -186,13 +186,22 @@ input = [
 }
 ```
 
+或：
+
+```json
+{
+  "skill_id": "health-consultation"
+}
+```
+
 安全判断不再通过 router 预拦截，而是通过：
 
 - `static_context.py` 中的安全规则
 - 已加载 service skill 正文中的安全边界和流程边界
 
-高风险情绪场景应加载 `emotion-support`。  
-哺乳红旗或需要 IBCLC 的场景应加载 `ibclc-consult`。  
+高风险情绪场景应加载 `emotion-support`。
+孕期、产后、宝宝、哺乳相关的一般健康咨询应加载 `health-consultation`。
+需要 IBCLC/哺乳顾问介入时，用户同意后再调用 `ibclc_consult_card_create`。
 紧急情况不能被常规服务流程延迟。
 
 ## Skill Runtime
@@ -536,5 +545,5 @@ birth_plan_form_create / hospital_bag_form_create tool result
 1. 把表单提交改成结构化 application event，写入 `service_state`。
 2. 为 `run_agent_loop`、`load_skill`、`read_skill_file`、`run_approved_skill_script`、`/api/ag-ui` 增加测试。
 3. 接入真实业务 adapter：profile 写入、case、memory、retrieval、reminder、device support。
-4. 补齐 birth-prep、milk-management、ibclc、device-guidance 的 references/assets。
+4. 补齐 birth-prep、milk-management、health-consultation、device-guidance 的 references/assets。
 5. 为 FastAPI 入口补齐认证、限流、持久化 session 和生产观测。

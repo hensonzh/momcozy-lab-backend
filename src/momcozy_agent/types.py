@@ -5,6 +5,7 @@ from typing import Any, Callable, Literal, NotRequired, Protocol, TypedDict
 SkillId = Literal[
     "birth-prep",
     "milk-management",
+    "health-consultation",
     "emotion-support",
     "device-guidance",
 ]

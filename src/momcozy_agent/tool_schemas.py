@@ -122,7 +122,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     "load_skill": _function_tool(
         "load_skill",
         "加载某个结构化 skill 的完整 SKILL.md，以及可用 references、scripts 和 assets 列表。无副作用。当用户需要该流程时使用，例如卡片、个性化计划、转接准备、基于记录的分析或设备专项支持；问候或普通科普回答不要使用。",
-        {"skill_id": {"type": "string", "enum": ["birth-prep", "milk-management", "emotion-support", "device-guidance"]}},
+        {"skill_id": {"type": "string", "enum": ["birth-prep", "milk-management", "health-consultation", "emotion-support", "device-guidance"]}},
     ),
     "search_skill_assets": _function_tool(
         "search_skill_assets",
@@ -317,7 +317,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "ibclc_consult_card_create": _function_tool(
         "ibclc_consult_card_create",
-        "创建前端可渲染的 IBCLC 在线咨询卡片，无后端副作用。仅在用户明确要求或确认需要 IBCLC/哺乳顾问/真人或人工哺乳咨询/在线咨询时使用。若是智能体自主判断需要持证哺乳顾问介入，应先主动说明 Momcozy 有在线 IBCLC 咨询服务，并简短说明为什么适合让顾问继续看；用户同意后再调用本工具。不要因为用户首次提到疼痛、堵奶、奶量担忧或宝宝摄入风险就直接触发。前端会渲染顾问姓名、资质、经验、简介和在线咨询入口。",
+        "创建前端可渲染的 IBCLC 在线咨询卡片，无后端副作用。仅在用户明确要求或确认需要 IBCLC/哺乳顾问/真人或人工哺乳咨询/在线咨询时使用。若是智能体自主判断问题已经进入含乳、排乳、泵奶节奏、反复堵奶、宝宝摄入细节或反复尝试无效，应先承接用户处境，完成至少一轮必要问诊，主动说明更适合让 IBCLC 顾问继续看，并询问是否现在打开咨询入口；用户同意后再调用本工具。不要因为用户首次提到疼痛、堵奶、奶量担忧或宝宝摄入风险就直接触发。前端会渲染顾问姓名、资质、经验、简介和在线咨询入口。",
         {
             "consultant_name": _nullable({"type": "string", "description": "前端名片展示的 IBCLC 顾问姓名；不确定时传 null，由工具使用默认 demo 顾问。"}),
             "consultant_bio": _nullable({"type": "string", "description": "前端名片展示的顾问简介；不确定时传 null，由工具使用默认简介。"}),
@@ -331,7 +331,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "handoff_summary_generate": _function_tool(
         "handoff_summary_generate",
-        "生成给人工或专业支持接手用的简洁转接摘要。只在已经决定转接、用户明确需要人工/专业支持，或某个服务流程要求转接时使用；不要用于普通回答总结、设备售后工单草稿、待产包购物车或吸奶器选型。无副作用，不会对外提交。",
+        "生成给人工或专业支持接手用的简洁转接摘要。只在已经决定转接、用户明确需要人工/专业支持，或某个服务流程要求转接时使用；不要用于普通回答总结、设备售后工单、待产包购物车或吸奶器选型。无副作用，不会对外提交。",
         {
             "issue_type": {"type": "string", "description": "转接类型，例如 emotion_risk、ibclc、clinical_question、care_support 或 other。"},
             "facts": {**JSON_OBJECT_STRING, "description": "仅包含用户已提供或工具读取到的关键事实、已尝试步骤和待接手问题；不要包含推测诊断。"},
@@ -353,7 +353,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "support_ticket_draft_create": _function_tool(
         "support_ticket_draft_create",
-        "为未解决的 Momcozy 吸奶器或设备售后问题创建前端可确认的客服工单草稿。不会对外提交。仅在用户明确请求客服/退货/保修，反馈缺件或疑似缺陷，设备安全问题需要升级支持，或经过 device_manual_search 排查后仍未解决且用户愿意升级时使用。不要用于普通操作指导、购买前选型、奶量建议或专业照护转接摘要。",
+        "为未解决的 Momcozy 吸奶器或设备售后问题整理前端可确认的客服工单信息。创建前必须先向用户确认是否需要现在创建售后工单；只有用户已经明确同意时，user_confirmed 才能为 true。适用于用户明确请求客服/退货/保修，反馈缺件或疑似缺陷，设备安全问题需要升级支持，或经过 device_manual_search 排查后仍未解决且用户愿意升级时使用。不要用于普通操作指导、购买前选型、奶量建议或专业照护转接摘要。",
         {
             "issue_type": {
                 "type": "string",
@@ -368,6 +368,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
             "urgency": {"type": "string", "enum": ["normal", "high", "safety"]},
             "user_emotion": _nullable({"type": "string", "description": "简短描述观察到的用户情绪，例如沮丧、焦虑或生气。"}),
             "attachments_note": _nullable({"type": "string", "description": "说明已提供或仍需要的相关图片/视频附件。"}),
+            "user_confirmed": {"type": "boolean", "description": "用户是否已经明确同意现在创建售后工单。只有用户说需要、可以、确认、帮我创建、现在创建等明确同意表达时才为 true。"},
         },
     ),
     "milk_snapshot_get": _function_tool(

@@ -9,6 +9,7 @@ from .types import SkillDefinition, SkillId
 SERVICE_SKILL_IDS: tuple[SkillId, ...] = (
     "birth-prep",
     "milk-management",
+    "health-consultation",
     "emotion-support",
     "device-guidance",
 )
