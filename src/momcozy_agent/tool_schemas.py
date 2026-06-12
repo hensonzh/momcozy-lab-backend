@@ -538,11 +538,37 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "milk_assessment_evaluate": _function_tool(
         "milk_assessment_evaluate",
-        "EVALUATE 只读工具：基于固定参考数据和记录聚合，返回近期奶量状态、缺失数据、每日参考奶量区间、含亲喂估算奶量和规则命中。用户问“分析最近吸奶情况、奶量够不够、是否正常、偏低/偏高、趋势好不好、适合什么计划、生成追奶/稳奶/减奶计划”时优先调用；只查历史明细或单纯列每天多少时才用 milk_records_query。不是诊断，也不生成最终用户话术。",
+        "EVALUATE 只读工具：基于固定参考数据和记录聚合，返回近期奶量状态、缺失数据、每日参考奶量区间、含亲喂估算奶量和规则命中。所有奶量分析请求都要先确认宝宝摄入/精神状态和妈妈乳房/全身状态；缺少这些关键信息或存在风险时不会生成分析卡，而是返回 needs_clinical_context 或 gate 结果。只查历史明细或单纯列每天多少时才用 milk_records_query。不是诊断，也不生成最终用户话术。",
         {
             "as_of_time": _nullable({"type": "string", "description": "可选 ISO-8601 评估时间；不确定时传 null。"}),
             "window_days": {"type": "integer", "description": "回看天数。分析最近吸奶情况、奶量趋势或全面评估通常用 7；用户已明确追奶/稳奶/减奶计划方向时可用 1。"},
             "include_today": {"type": "boolean", "description": "是否包含当前日未完整记录。通常评估完整日时传 false。"},
+            "maternal_symptoms": {
+                **JSON_OBJECT_STRING,
+                "description": "字符串编码 JSON。可包含 fever、chills、breast_redness、lump_or_hard_area、worsening_pain、nipple_damage、recurrent_plug、pain_level。没有信息传 {}。",
+            },
+            "infant_signals": {
+                **JSON_OBJECT_STRING,
+                "description": "字符串编码 JSON。可包含 wet_diapers_24h、stool_24h、baby_state、poor_feeding、poor_latch、lethargy、recent_weight、growth_concern。没有信息传 {}。",
+            },
+        },
+    ),
+    "milk_clinical_assessment_evaluate": _function_tool(
+        "milk_clinical_assessment_evaluate",
+        "EVALUATE 只读工具：在奶量评估之上综合宝宝摄入/生长、妈妈乳房症状和记录完整度，返回数据可信度、风险等级、计划准入 plan_gate 和下一步动作。用于复杂奶量判断、是否适合追奶/稳奶/减奶、是否需要 IBCLC/医生优先介入。不是诊断，不写数据库，不生成最终用户话术。",
+        {
+            "as_of_time": _nullable({"type": "string", "description": "可选 ISO-8601 评估时间；不确定时传 null。"}),
+            "window_days": {"type": "integer", "description": "回看天数。通常用 7；用户已明确计划方向且只看最近完整日时可用 1。"},
+            "include_today": {"type": "boolean", "description": "是否包含当前日未完整记录。通常评估完整日时传 false。"},
+            "requested_plan_type": _nullable({"type": "string", "enum": ["increase_milk", "maintain_milk", "decrease_milk"]}),
+            "maternal_symptoms": {
+                **JSON_OBJECT_STRING,
+                "description": "字符串编码 JSON。可包含 fever、chills、breast_redness、lump_or_hard_area、worsening_pain、nipple_damage、recurrent_plug、pain_level。未知字段传 {}。",
+            },
+            "infant_signals": {
+                **JSON_OBJECT_STRING,
+                "description": "字符串编码 JSON。可包含 wet_diapers_24h、stool_24h、baby_state、poor_feeding、poor_latch、lethargy、recent_weight、growth_concern。未知字段传 {}。",
+            },
         },
     ),
     "infant_growth_evaluate": _function_tool(
@@ -582,7 +608,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
             "options": _nullable(
                 {
                     **JSON_OBJECT_STRING,
-                    "description": "字符串编码 JSON。可包含 prepared_assessment、prepared_growth_assessment、observed_persistent_abnormal 或 medical_confirmation_confirmed。",
+                    "description": "字符串编码 JSON。可包含 prepared_assessment、prepared_growth_assessment、maternal_symptoms、infant_signals、observed_persistent_abnormal 或 medical_confirmation_confirmed。",
                 }
             ),
         },

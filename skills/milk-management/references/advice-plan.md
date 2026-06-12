@@ -21,6 +21,7 @@
 需要工具时，先通过 `tool_search` 加载 `milk_management` namespace。
 
 - `milk_assessment_evaluate`：评估近期奶量状态和记录完整性。
+- `milk_clinical_assessment_evaluate`：评估数据可信度、宝宝摄入/生长信号、妈妈乳房症状和计划准入。复杂奶量判断、宝宝摄入/生长信号、妈妈乳房症状或是否适合计划时优先使用。
 - `infant_growth_evaluate`：仅在宝宝增长、体重或摄入是否足够与计划决策相关时调用。
 - `milk_plan_query`：读取已有计划。
 - `milk_calendar_query`：读取已保存计划展开到 calendar 后的具体安排。
@@ -57,8 +58,8 @@
 ### 3. 评估基础数据
 
 - 用户已明确计划方向：通常调用 `milk_assessment_evaluate(window_days=1, include_today=false)`，用于快速看最近完整 24 小时。
-- 用户问“我适合什么计划”：调用 `milk_assessment_evaluate(window_days=7, include_today=false)`。
-- 用户提到宝宝体重、增长、尿布、摄入是否足够：调用 `infant_growth_evaluate`。
+- 用户问“我适合什么计划”，或提到宝宝体重、增长、尿布、摄入是否足够，或妈妈有乳房疼痛、堵奶、发热、红肿：调用 `milk_clinical_assessment_evaluate(window_days=7, include_today=false)`。
+- 如果 `milk_clinical_assessment_evaluate.data.plan_gate.allowed=false`，不要继续手写或强行生成计划；按工具给出的 `next_actions` 引导补信息、IBCLC 或医生分流。
 - 用户要在现有计划上调整：先读取已有计划或目标日期 calendar，再生成或预览调整。
 - 如果工具提示关键数据不足，先补问或引导补记录，不继续生成计划。
 

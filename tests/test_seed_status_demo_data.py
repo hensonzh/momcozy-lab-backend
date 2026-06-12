@@ -73,11 +73,42 @@ class SeedStatusDemoDataTest(unittest.TestCase):
                         "SELECT COUNT(*) FROM feeding_log WHERE user_id = ? AND feed_type = '瓶喂母乳' AND feeding_title = '亲喂估算参考'",
                         (module.USER_ID,),
                     )
-                    yesterday_pump_ml = _scalar(
-                        conn,
-                        "SELECT SUM(pump_milk_volum) FROM pumping_log WHERE user_id = ? AND date(pump_start_time) = ?",
-                        (module.USER_ID, "2026-05-26"),
-                    )
+                    recent_rows = conn.execute(
+                        """
+                        SELECT date(pump_start_time) AS day, SUM(pump_milk_volum) AS total
+                        FROM pumping_log
+                        WHERE user_id = ?
+                          AND date(pump_start_time) BETWEEN ? AND ?
+                        GROUP BY day
+                        ORDER BY day
+                        """,
+                        (module.USER_ID, "2026-05-20", "2026-05-26"),
+                    ).fetchall()
+                    recent_nursing = {
+                        str(row[0]): int(row[1] or 0)
+                        for row in conn.execute(
+                            """
+                            SELECT date(feed_time) AS day, COUNT(*) AS count
+                            FROM feeding_log
+                            WHERE user_id = ?
+                              AND feed_type = '亲喂'
+                              AND date(feed_time) BETWEEN ? AND ?
+                            GROUP BY day
+                            """,
+                            (module.USER_ID, "2026-05-20", "2026-05-26"),
+                        ).fetchall()
+                    }
+                    earlier_month_rows = conn.execute(
+                        """
+                        SELECT date(pump_start_time) AS day, SUM(pump_milk_volum) AS total, COUNT(*) AS records
+                        FROM pumping_log
+                        WHERE user_id = ?
+                          AND date(pump_start_time) BETWEEN ? AND ?
+                        GROUP BY day
+                        ORDER BY day
+                        """,
+                        (module.USER_ID, "2026-04-27", "2026-05-19"),
+                    ).fetchall()
                     future_calendar = _scalar(
                         conn,
                         "SELECT COUNT(*) FROM calendar WHERE user_id = ? AND date > ?",
@@ -97,10 +128,37 @@ class SeedStatusDemoDataTest(unittest.TestCase):
         self.assertEqual(today_feeding, 0)
         self.assertTrue(2 <= yesterday_nursing <= 4)
         self.assertEqual(estimate_anchor, 1)
-        reference = module.get_yield_reference_range((datetime(2026, 5, 26).date() - datetime.fromisoformat(module.DELIVERY_DATE).date()).days + 1)
-        estimated_total = yesterday_pump_ml + yesterday_nursing * module.NURSING_ESTIMATE_ML
-        self.assertGreater(reference["p15"] - estimated_total, 0)
-        self.assertLess(reference["p15"] - estimated_total, 50)
+        self.assertEqual(len(earlier_month_rows), 23)
+        self.assertEqual(len(recent_rows), 7)
+        earlier_month_deltas = []
+        earlier_missing_record_days = 0
+        for day_text, pump_total, record_count in earlier_month_rows:
+            reference = module.get_yield_reference_range((datetime.fromisoformat(day_text).date() - datetime.fromisoformat(module.DELIVERY_DATE).date()).days + 1)
+            earlier_month_deltas.append(float(pump_total or 0) - float(reference["p15"]))
+            if int(record_count or 0) < 8:
+                earlier_missing_record_days += 1
+        earlier_normal_days = sum(1 for delta in earlier_month_deltas if delta >= 0)
+        earlier_low_days = sum(1 for delta in earlier_month_deltas if delta < 0)
+        self.assertGreater(earlier_normal_days, earlier_low_days)
+        self.assertGreaterEqual(earlier_missing_record_days, 3)
+        self.assertGreaterEqual(len({round(delta) for delta in earlier_month_deltas}), 12)
+        deltas = []
+        estimate_deltas = []
+        for day_text, pump_total in recent_rows:
+            reference = module.get_yield_reference_range((datetime.fromisoformat(day_text).date() - datetime.fromisoformat(module.DELIVERY_DATE).date()).days + 1)
+            deltas.append(float(pump_total or 0) - float(reference["p15"]))
+            estimate_deltas.append(float(pump_total or 0) + recent_nursing.get(str(day_text), 0) * module.NURSING_ESTIMATE_ML - float(reference["p15"]))
+        normal_days = sum(1 for delta in deltas if delta >= 0)
+        low_days = sum(1 for delta in deltas if delta < 0)
+        self.assertLess(normal_days, low_days)
+        self.assertEqual(normal_days, 2)
+        self.assertTrue(any(-110 <= delta < 0 for delta in deltas))
+        self.assertTrue(any(delta <= -120 for delta in deltas))
+        self.assertLess(deltas[-1] - deltas[0], -180)
+        estimate_normal_days = sum(1 for delta in estimate_deltas if delta >= 0)
+        estimate_low_days = sum(1 for delta in estimate_deltas if delta < 0)
+        self.assertLess(estimate_normal_days, estimate_low_days)
+        self.assertEqual(estimate_normal_days, 2)
         self.assertEqual(future_calendar, 0)
 
     def test_startup_seed_removes_records_not_in_plan_list(self) -> None:

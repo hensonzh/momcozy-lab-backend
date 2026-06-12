@@ -2018,7 +2018,9 @@ def pump_info(user_id: str) -> dict[str, Any]:
     breast_per_session_ml = estimate_breastfeeding_milk(user_id=uid) or 0.0
     today = datetime.now().date()
     lactation_info_list = []
-    for offset in range(29, -1, -1):
+    # Return one extra day because the status chart intentionally excludes
+    # today; this keeps the 30-day view from losing its oldest day.
+    for offset in range(30, -1, -1):
         day = today - timedelta(days=offset)
         date_key = day.isoformat()
         total = int(round(by_day.get(date_key, 0.0)))

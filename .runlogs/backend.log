@@ -1,0 +1,78 @@
+Seeded status demo data for demo_mama_increase_001 in /Users/lute/project/MomCozyAgent/data/milk_management.db
+Momcozy agent test UI: http://127.0.0.1:8768
+INFO:     Started server process [86342]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8081 (Press CTRL+C to quit)
+Momcozy unified API: http://0.0.0.0:8769
+Momcozy App WebSocket: ws://0.0.0.0:8769/api/ag-ui-ws
+Momcozy chat SSE upstream: http://127.0.0.1:8768/api/ag-ui
+Web data admin: http://127.0.0.1:8081
+INFO:     Started server process [86342]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8769 (Press CTRL+C to quit)
+[LogDrivenSessionManager] 初始化完成 | json_dir=/Users/lute/project/MomCozyAgent/data/milk_process/configs | log_dir=/Users/lute/project/MomCozyAgent/logs/milk_process
+INFO:     127.0.0.1:59281 - "POST /v1/analysis/create HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59289 - "POST /v1/analysis/create HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59294 - "GET /v1/pump/info/get?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59348 - "GET /v1/pump/info/get?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59398 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59398 - "GET /static/styles.css?v=20260601-notifications HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59399 - "GET /static/app.js?v=20260601-notifications HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59399 - "GET /api/session HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59399 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59398 - "GET /api/db/tables HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:59399 - "GET /api/files HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:59399 - "POST /api/login HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59399 - "GET /api/db/tables HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59398 - "GET /api/files HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59398 - "GET /api/db/tables/user_profile/rows?page=1&page_size=20&q=&field= HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59398 - "GET /api/db/tables/calendar/rows?page=1&page_size=20&q=&field= HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59400 - "POST /api/notifications/report HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59429 - "GET /v1/pump/info/get?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59431 - "POST /api/notifications/report HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59647 - "WebSocket /api/ws?user_id=demo_mama_increase_001" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:59648 - "POST /api/notifications/report HTTP/1.1" 200 OK
+INFO:     connection closed
+INFO:     127.0.0.1:60668 - "WebSocket /api/ws?user_id=demo_mama_increase_001" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:60669 - "POST /api/notifications/report HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60670 - "POST /v1/analysis/create HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60672 - "POST /api/client-event HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60671 - "POST /api/client-event HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60684 - "WebSocket /api/ag-ui-ws?token=app-test" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:60685 - "POST /api/ag-ui HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60696 - "WebSocket /v1/realtime-voice-session?token=app-test&user_id=demo_mama_increase_001" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     connection closed
+INFO:     127.0.0.1:60853 - "WebSocket /api/ws?user_id=demo_mama_increase_001" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     127.0.0.1:60866 - "WebSocket /api/ws?user_id=demo_mama_increase_001" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     127.0.0.1:60966 - "WebSocket /api/ws?user_id=demo_mama_increase_001" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:61004 - "POST /api/notifications/report HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61006 - "POST /v1/analysis/create HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61009 - "POST /api/client-event HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61008 - "POST /api/client-event HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61251 - "WebSocket /api/ag-ui-ws?token=app-test" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:61252 - "POST /api/ag-ui HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61257 - "WebSocket /v1/realtime-voice-session?token=app-test&user_id=demo_mama_increase_001" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     127.0.0.1:61625 - "WebSocket /api/ag-ui-ws?token=app-test" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:61626 - "POST /api/ag-ui HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61633 - "WebSocket /v1/realtime-voice-session?token=app-test&user_id=demo_mama_increase_001" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed

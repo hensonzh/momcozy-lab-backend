@@ -662,12 +662,10 @@ async def create_analysis_endpoint(request: Request) -> dict[str, Any]:
             return _analysis_create_response(error=-1, result=False, message=str(analysis.get("summary") or "failed to generate milk analysis"))
         data = analysis.get("data") if isinstance(analysis.get("data"), dict) else {}
         card = _milk_analysis_report_card(data)
-        message = str(card.get("headline") or analysis.get("summary") or "已生成奶量分析。")
         return _analysis_create_response(
             error=0,
             result=str(card.get("status") or "") == "normal",
-            message=message,
-            analysis_card=card,
+            message="嗨，我注意到你近期奶量偏低，可以和你聊聊吗？",
         )
     return _analysis_create_response(error=-1, result=False, message="unsupported type")
 

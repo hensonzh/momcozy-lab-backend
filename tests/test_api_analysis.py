@@ -228,7 +228,7 @@ class AnalysisCreateApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"error": -1, "data": {"result": False, "message": "unsupported type"}})
 
-    def test_milk_analysis_returns_preset_card(self) -> None:
+    def test_milk_analysis_returns_plain_reminder_message(self) -> None:
         analysis_data = {
             "window": {
                 "start_at": "2026-05-15 00:00:00",
@@ -269,13 +269,8 @@ class AnalysisCreateApiTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["error"], 0)
         self.assertEqual(payload["data"]["result"], True)
-        self.assertTrue(payload["data"]["message"].startswith("最近整体在同阶段常见范围内"))
-        card = payload["data"]["analysis_card"]
-        self.assertEqual(card["kind"], "milk_analysis")
-        self.assertEqual(card["title"], "奶量分析")
-        self.assertEqual(card["status_label"], "整体正常")
-        self.assertEqual(card["sections"][0]["title"], "结论")
-        self.assertEqual(card["sections"][1]["title"], "数据统计")
+        self.assertEqual(payload["data"]["message"], "嗨，我注意到你近期奶量偏低，可以和你聊聊吗？")
+        self.assertNotIn("analysis_card", payload["data"])
         evaluate.assert_called_once_with(user_id="u1", window_days=7, include_today=False)
 
     def test_daily_summary_returns_summary_message_and_updates_profile_summary(self) -> None:

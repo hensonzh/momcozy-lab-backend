@@ -17,6 +17,7 @@ from momcozy_agent.services.milk_management.calendar import (
     preview_calendar_adjustment,
     preview_day_reschedule,
 )
+from momcozy_agent.services.milk_management.clinical_assessment import evaluate_lactation_clinical_status
 from momcozy_agent.services.milk_management.db import fetch_all, transaction
 from momcozy_agent.services.milk_management.growth_mutation import mutate_infant_growth
 from momcozy_agent.services.milk_management.assessment import evaluate_milk_status
@@ -26,6 +27,7 @@ from momcozy_agent.services.milk_management.task_completion import complete_milk
 from momcozy_agent.agents import artifact_events_from_tool_result, model_tool_output, safe_tool_result
 from momcozy_agent.tool_handlers.milk_management import (
     _milk_analysis_headline,
+    _milk_next_step,
     _milk_trend_text,
     execute_milk_management_tool,
 )
@@ -372,6 +374,8 @@ class MilkManagementToolTests(unittest.TestCase):
                 "as_of_time": "2026-05-14 12:00:00",
                 "window_days": 7,
                 "include_today": False,
+                "infant_signals": {"wet_diapers_24h": 6, "baby_state": "精神状态正常"},
+                "maternal_symptoms": {"fever": False, "breast_redness": False, "lump_or_hard_area": False},
             },
             {"user_message": "分析最近吸奶情况", "locale": "zh-CN", "timezone": "Asia/Shanghai", "message_sent_at": ""},
         )
@@ -389,10 +393,38 @@ class MilkManagementToolTests(unittest.TestCase):
         self.assertEqual(compact["card"]["card_type"], "milk_analysis_card")
         self.assertTrue(compact["card"]["created"])
         self.assertEqual(compact["analysis_status"], "under_supply_alert")
-        self.assertIn("生成从明天开始的温和追奶计划", compact["next_actions"])
+        self.assertEqual(compact["next_actions"][0], "确认有没有未记录奶量")
+        self.assertIn("记录完整后再生成温和追奶计划", compact["next_actions"])
         self.assertIn("只能引导用户选择下一步", compact["final_response_instruction"])
         self.assertNotIn("summary", compact)
         self.assertNotIn("data", compact)
+        json.dumps(result, ensure_ascii=False)
+
+    def test_assessment_tool_requires_clinical_context_before_analysis_card(self) -> None:
+        uid, _ = _seed_user("assessment-needs-clinical-context")
+        _add_pumping_rows(uid, "2026-05-13", ["06:00", "09:00", "12:00", "18:00", "21:00"])
+
+        result = execute_milk_management_tool(
+            {
+                "_tool_name": "milk_assessment_evaluate",
+                "user_id": uid,
+                "as_of_time": "2026-05-14 12:00:00",
+                "window_days": 7,
+                "include_today": False,
+            },
+            {"user_message": "分析最近吸奶情况", "locale": "zh-CN", "timezone": "Asia/Shanghai", "message_sent_at": ""},
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["status"], "needs_clinical_context")
+        self.assertNotIn("card", result)
+        self.assertIn("clinical_assessment", result["data"])
+        self.assertEqual(result["data"]["workflow_intent"], "milk_analysis")
+        self.assertIn("继续调用 milk_assessment_evaluate", result["data"]["continuation_instruction"])
+        self.assertIn("不要因为出现", result["data"]["continuation_instruction"])
+        self.assertEqual(result["data"]["missing_fields"], ["infant_signals", "maternal_symptoms"])
+        self.assertIn("再继续分析吸奶和奶量", result["summary"])
+        json.dumps(result, ensure_ascii=False)
 
     def test_assessment_card_intent_forces_seven_complete_days(self) -> None:
         analysis_data = {
@@ -404,7 +436,7 @@ class MilkManagementToolTests(unittest.TestCase):
             },
             "pumping_summary": {"count": 5, "total_ml": 520},
             "calendar_task_summary": {"days": 7},
-            "milk_normality": {"overall_status": "normal", "days": []},
+            "milk_normality": {"overall_status": "normal", "stats": {"valid_days": 7}, "days": []},
             "assessment_status": "normal",
         }
         with patch(
@@ -418,6 +450,8 @@ class MilkManagementToolTests(unittest.TestCase):
                     "as_of_time": "2026-05-14 12:00:00",
                     "window_days": 1,
                     "include_today": True,
+                    "infant_signals": {"wet_diapers_24h": 6, "baby_state": "正常"},
+                    "maternal_symptoms": {"fever": False, "breast_redness": False},
                 },
                 {"user_message": "分析最近吸奶情况", "locale": "zh-CN", "timezone": "Asia/Shanghai", "message_sent_at": ""},
             )
@@ -568,11 +602,92 @@ class MilkManagementToolTests(unittest.TestCase):
             [],
         )
 
+    def test_clinical_assessment_blocks_plan_when_maternal_red_flags_exist(self) -> None:
+        uid, _ = _seed_user("clinical-red-flags")
+        prepared_assessment = {
+            "pumping_summary": {"count": 8, "total_ml": 520},
+            "feeding_summary": {"type_counts": {}},
+            "window": {"window_days": 1},
+            "milk_normality": {
+                "overall_status": "under_supply_alert",
+                "stats": {"valid_days": 1},
+                "days": [
+                    {
+                        "ok": True,
+                        "date": "2026-05-13",
+                        "status": "low",
+                        "estimated_daily_milk_ml": 520,
+                        "yield_reference": {"p15": 720, "p85": 950},
+                    }
+                ],
+            },
+        }
+
+        result = evaluate_lactation_clinical_status(
+            user_id=uid,
+            as_of_time="2026-05-14 12:00:00",
+            window_days=1,
+            include_today=False,
+            milk_assessment=prepared_assessment,
+            growth_assessment={"status": "normal"},
+            maternal_symptoms={"fever": True, "breast_redness": True, "worsening_pain": True},
+            infant_signals={},
+            requested_plan_type="increase_milk",
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["data"]["risk_level"], "medical_recommended")
+        self.assertFalse(result["data"]["plan_gate"]["allowed"])
+        self.assertIn("ABM_MASTITIS_PROTOCOL", [item["id"] for item in result["data"]["evidence"]])
+
+    def test_plan_preview_tool_uses_clinical_gate_before_generating_plan(self) -> None:
+        uid, _ = _seed_user("plan-clinical-gate")
+        result = execute_milk_management_tool(
+            {
+                "_tool_name": "milk_plan_preview",
+                "user_id": uid,
+                "plan_type": "increase_milk",
+                "plan_days": 7,
+                "as_of_time": "2026-05-14 12:00:00",
+                "options": {
+                    "maternal_symptoms": {"fever": True, "breast_redness": True, "worsening_pain": True},
+                    "prepared_assessment": {
+                        "pumping_summary": {"count": 8, "total_ml": 520},
+                        "feeding_summary": {"type_counts": {}},
+                        "window": {"window_days": 1},
+                        "milk_normality": {
+                            "overall_status": "under_supply_alert",
+                            "stats": {"valid_days": 1},
+                            "days": [
+                                {
+                                    "ok": True,
+                                    "date": "2026-05-13",
+                                    "status": "low",
+                                    "estimated_daily_milk_ml": 520,
+                                    "yield_reference": {"p15": 720, "p85": 950},
+                                }
+                            ],
+                        },
+                    },
+                    "prepared_growth_assessment": {"status": "normal"},
+                },
+            },
+            {"user_message": "帮我生成追奶计划", "locale": "zh-CN", "timezone": "Asia/Shanghai", "message_sent_at": ""},
+        )
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["status"], "milk_plan_clinical_gate_blocked")
+        self.assertNotIn("card", result)
+        clinical = result["data"]["clinical_assessment"]
+        self.assertEqual(clinical["risk_level"], "medical_recommended")
+        self.assertFalse(clinical["plan_gate"]["allowed"])
+
     def test_milk_analysis_preset_copy_matches_status_and_trend_conditions(self) -> None:
         self.assertTrue(_milk_analysis_headline("under_supply_alert").startswith("最近整体偏低。"))
         self.assertTrue(_milk_analysis_headline("over_supply_alert").startswith("最近整体偏高。"))
         self.assertIn("压力", _milk_analysis_headline("under_supply_alert"))
         self.assertIn("不要突然减吸", _milk_analysis_headline("over_supply_alert"))
+        self.assertIn("没记进来的吸奶", _milk_next_step("under_supply_alert"))
 
         self.assertIn("记录还少", _milk_trend_text([]))
         self.assertIn("往下走", _milk_trend_text([{"estimated_daily_milk_ml": 700}, {"estimated_daily_milk_ml": 600}]))

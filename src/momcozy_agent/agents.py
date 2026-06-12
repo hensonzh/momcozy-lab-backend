@@ -483,7 +483,7 @@ def _normalize_tool_name(tool_name: str) -> str:
 def _tool_semantic_phase(tool_name: str) -> str:
     if tool_name in {"tool_search", "tool_search_call"}:
         return "thinking"
-    if tool_name in {"milk_assessment_evaluate", "infant_growth_evaluate", "risk_evaluate"}:
+    if tool_name in {"milk_assessment_evaluate", "milk_clinical_assessment_evaluate", "infant_growth_evaluate", "risk_evaluate"}:
         return "evaluating"
     if tool_name in {"milk_plan_preview", "milk_calendar_change_preview", "milk_calendar_reschedule_preview"}:
         return "planning"
@@ -555,6 +555,8 @@ def _tool_start_label(tool_name: str, arguments: dict[str, Any]) -> str:
         return "我先看看计划和日程任务～"
     if tool_name == "milk_assessment_evaluate":
         return "我来看看奶量趋势和执行情况～"
+    if tool_name == "milk_clinical_assessment_evaluate":
+        return "我先把宝宝和妈妈的情况一起看一下～"
     if tool_name == "infant_growth_evaluate":
         return "我来看看宝宝的生长信号～"
     if tool_name == "risk_evaluate":
@@ -616,7 +618,7 @@ def _tool_end_label(tool_name: str) -> str:
         return "我找到合适的方案啦"
     if tool_name in {"milk_records_query", "milk_status_query", "milk_snapshot_get", "milk_plan_query", "milk_calendar_query"}:
         return "我把奶量和日程信息整理一下～"
-    if tool_name in {"milk_assessment_evaluate", "infant_growth_evaluate", "risk_evaluate"}:
+    if tool_name in {"milk_assessment_evaluate", "milk_clinical_assessment_evaluate", "infant_growth_evaluate", "risk_evaluate"}:
         return "我把评估结果整理一下～"
     if tool_name == "milk_plan_preview":
         return "我再完善一下计划草稿～"
@@ -673,6 +675,8 @@ def _tool_result_label(tool_name: str, result: dict[str, Any]) -> str:
         return "我看好之前的奶量计划啦"
     if tool_name == "milk_assessment_evaluate":
         return "我完成奶量评估啦"
+    if tool_name == "milk_clinical_assessment_evaluate":
+        return "我把宝宝和妈妈的情况看好啦"
     if tool_name == "infant_growth_evaluate":
         return "我完成宝宝生长评估啦"
     if tool_name == "risk_evaluate":
@@ -1252,7 +1256,7 @@ def _compact_milk_plan_card_output(safe: dict[str, Any], result: dict[str, Any])
 
 def _milk_analysis_next_actions(status: str) -> list[str]:
     if status == "under_supply_alert":
-        return ["生成从明天开始的温和追奶计划", "看看今天怎么吸更合适", "展开可能原因"]
+        return ["确认有没有未记录奶量", "看看今天怎么吸更合适", "记录完整后再生成温和追奶计划"]
     if status == "over_supply_alert":
         return ["看看今天怎么安排更舒服", "展开偏高可能原因", "做一个温和调整方案"]
     if status == "normal":

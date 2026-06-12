@@ -23,7 +23,7 @@ BASE_TODAY = datetime(2026, 5, 21)
 BASE_DELIVERY_DATE = datetime(2026, 3, 1)
 PLAN_HISTORY_DAYS = 30
 PLAN_PUMP_DURATION_MINUTES = 20
-NURSING_ESTIMATE_ML = 45.0
+NURSING_ESTIMATE_ML = 15.0
 
 
 def _resolve_today() -> datetime:
@@ -80,6 +80,37 @@ NURSING_TIMES = [
     ("20:45", "睡前亲喂"),
 ]
 
+# Demo chart shape for the previous 30 days. Values are pumped milk totals
+# relative to the P15 lower reference line. The first three weeks look mostly
+# steady with a few plausible missed-record dips; the final week is the current
+# low-supply signal used by the assessment demo.
+PUMP_TOTAL_REFERENCE_OFFSETS = [
+    45, 58, 66, 60, 54, 49, 62, 74, 68, 42,
+    30, 12, -28, -52, -35, 18, 44, 70, 88, 76,
+    50, 64, 82,
+    28, 6, -62, -118, -170, -132, -205,
+]
+
+NURSING_COUNT_BY_DAY = [
+    2, 2, 3, 2, 1, 3, 2, 2, 1, 3,
+    2, 1, 2, 3, 2, 2, 1, 3, 2, 1,
+    2, 2, 3,
+    2, 1, 2, 3, 2, 1, 3,
+]
+
+# A handful of historical days deliberately miss one or two pump records, which
+# makes the monthly chart read like real app usage instead of perfect lab data.
+SKIPPED_PUMP_SESSION_INDEXES_BY_DAY = {
+    2: {7},
+    6: {0},
+    9: {0, 6},
+    13: {4},
+    17: {7},
+    20: {5},
+    25: {0},
+    27: {6},
+}
+
 
 def _connect() -> sqlite3.Connection:
     data_store.init_db()
@@ -109,9 +140,9 @@ def _seed_profiles(conn: sqlite3.Connection) -> None:
             USER_ID,
             "Demo Mama",
             DELIVERY_DATE,
-            "近 30 天吸乳记录稳定在每日 8 次；加入 2-4 次亲喂估算后，日奶量多数略低于 P15 下沿，提示供给接近但仍未完全达到参考区间。建议制定温和追奶计划，并结合宝宝体重增长继续观察。",
+            "近 30 天吸乳记录整体在参考区间附近波动，少数天可能存在漏记；最近 7 天多数低于 P15 下沿，需要先确认是否有未记录的吸奶/亲喂，再考虑温和追奶计划。",
             "宝宝近 4-6 周体重增长放缓，当前估算摄入略低于参考区间下沿，需要继续关注摄入、尿量和体重曲线。建议与儿科或泌乳顾问沟通，并启动温和追奶方案。",
-            "每日吸奶节律稳定，含亲喂估算后的奶量接近 P15 下沿但仍略低，适合生成追奶计划并继续跟踪宝宝成长。",
+            "近 30 天奶量整体有正常波动，最近一周开始连续偏低，适合先核对漏记情况，再生成温和追奶计划并继续跟踪宝宝成长。",
             now,
             now,
         ),
@@ -160,16 +191,14 @@ def _seed_growth(conn: sqlite3.Connection) -> None:
 
 
 def _daily_total_for(day: datetime, index: int) -> int:
-    # Pumped milk plus estimated nursing should sit just below P15. That keeps
-    # the demo in a realistic "needs gentle catch-up" state without making the
-    # daily output look implausibly far below the reference band.
+    # Keep the demo trend varied: some pumped totals are within the reference
+    # band, some are slightly below, and some are clearly below.
     postpartum_day = (day.date() - datetime.fromisoformat(DELIVERY_DATE).date()).days + 1
     ref = get_yield_reference_range(postpartum_day) or {"p15": 700.0}
     lower = float(ref["p15"])
-    margins = [18, 24, 30, 22, 35, 20, 28]
-    nursing_ml = _nursing_count_for_day(index) * NURSING_ESTIMATE_ML
-    total = int(round(lower - nursing_ml - margins[index % len(margins)]))
-    return max(420, total)
+    offset = PUMP_TOTAL_REFERENCE_OFFSETS[min(index, len(PUMP_TOTAL_REFERENCE_OFFSETS) - 1)]
+    total = int(round(lower + offset))
+    return max(360, total)
 
 
 def _seed_lactation(conn: sqlite3.Connection) -> None:
@@ -326,11 +355,15 @@ def _sync_calendar_records_to_plan(conn: sqlite3.Connection) -> None:
     day_index = 0
     while day <= today:
         total = _daily_total_for(datetime.combine(day, datetime.min.time()), day_index)
-        amounts = _session_amounts(total)
+        completed_session_indexes = set(
+            _completed_session_indexes_for_day(day=day, day_index=day_index, current_time=current_time),
+        )
+        amounts = _session_amounts_by_index(total, completed_session_indexes)
         for task_index, (time_text, title, _) in enumerate(SESSION_TIMES, start=1):
+            session_index = task_index - 1
             start_at = datetime.strptime(f"{day.isoformat()} {time_text}", "%Y-%m-%d %H:%M")
             end_at = start_at + timedelta(minutes=PLAN_PUMP_DURATION_MINUTES)
-            finish = "true" if day < today or start_at <= current_time else "false"
+            finish = "true" if session_index in completed_session_indexes else "false"
             conn.execute(
                 """
                 INSERT INTO calendar(
@@ -364,7 +397,7 @@ def _sync_calendar_records_to_plan(conn: sqlite3.Connection) -> None:
                         USER_ID,
                         start_at.strftime("%Y-%m-%d %H:%M:%S"),
                         end_at.strftime("%Y-%m-%d %H:%M:%S"),
-                        float(amounts[task_index - 1]),
+                        float(amounts[session_index]),
                         PLAN_PUMP_DURATION_MINUTES,
                         title,
                         end_at.strftime("%Y-%m-%d %H:%M:%S"),
@@ -406,20 +439,45 @@ def _current_demo_time() -> datetime:
 
 
 def _session_amounts(total: int) -> list[int]:
+    return [
+        _session_amounts_by_index(total, set(range(len(SESSION_TIMES))))[index]
+        for index in range(len(SESSION_TIMES))
+    ]
+
+
+def _session_amounts_by_index(total: int, session_indexes: set[int]) -> dict[int, int]:
+    selected = [index for index in range(len(SESSION_TIMES)) if index in session_indexes]
+    if not selected:
+        return {}
+    ratio_sum = sum(SESSION_TIMES[index][2] for index in selected)
     amounts: list[int] = []
     allocated = 0
-    for index, (_, _, ratio) in enumerate(SESSION_TIMES):
-        if index == len(SESSION_TIMES) - 1:
+    for position, session_index in enumerate(selected):
+        ratio = SESSION_TIMES[session_index][2] / ratio_sum if ratio_sum > 0 else 1 / len(selected)
+        if position == len(selected) - 1:
             amount = int(total) - allocated
         else:
             amount = int(round(total * ratio))
             allocated += amount
         amounts.append(max(amount, 0))
-    return amounts
+    return dict(zip(selected, amounts))
+
+
+def _completed_session_indexes_for_day(*, day, day_index: int, current_time: datetime) -> list[int]:
+    today = TODAY.date()
+    if day >= today:
+        completed: list[int] = []
+        for index, (time_text, _, _) in enumerate(SESSION_TIMES):
+            start_at = datetime.strptime(f"{day.isoformat()} {time_text}", "%Y-%m-%d %H:%M")
+            if start_at <= current_time:
+                completed.append(index)
+        return completed
+    skipped = SKIPPED_PUMP_SESSION_INDEXES_BY_DAY.get(day_index, set())
+    return [index for index in range(len(SESSION_TIMES)) if index not in skipped]
 
 
 def _nursing_count_for_day(index: int) -> int:
-    return [2, 3, 4, 3, 2, 4, 3][index % 7]
+    return NURSING_COUNT_BY_DAY[min(index, len(NURSING_COUNT_BY_DAY) - 1)]
 
 
 def _seed_nursing_records(conn: sqlite3.Connection, *, day, day_index: int) -> None:
