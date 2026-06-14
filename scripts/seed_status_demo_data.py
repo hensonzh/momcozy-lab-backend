@@ -18,6 +18,20 @@ from momcozy_agent.services.milk_management.assessment import get_yield_referenc
 
 
 USER_ID = "demo_mama_increase_001"
+LEGACY_PREGNANCY_DIARY_DEMO_USER_ID = os.getenv("PREGNANCY_DIARY_DEMO_USER_ID", "app-user").strip() or "app-user"
+LEGACY_PREGNANCY_DIARY_DEMO_USER_IDS = tuple(
+    dict.fromkeys(
+        user_id
+        for user_id in (
+            USER_ID,
+            LEGACY_PREGNANCY_DIARY_DEMO_USER_ID,
+            "app-user",
+            "default",
+            "default-user",
+        )
+        if user_id
+    )
+)
 INFANT_ID = 18
 BASE_TODAY = datetime(2026, 5, 21)
 BASE_DELIVERY_DATE = datetime(2026, 3, 1)
@@ -506,6 +520,28 @@ def _seed_breastfeeding_estimate_anchor(conn: sqlite3.Connection, *, start_date)
     )
 
 
+def _clear_legacy_pregnancy_diary_demo(conn: sqlite3.Connection) -> None:
+    for user_id in LEGACY_PREGNANCY_DIARY_DEMO_USER_IDS:
+        marker = conn.execute(
+            "SELECT 1 FROM demo_seed_state WHERE user_id = ? AND seed_key = 'pregnancy_diary_demo_v1'",
+            (user_id,),
+        ).fetchone()
+        if marker is None:
+            continue
+        conn.execute(
+            "DELETE FROM pregnancy_diary_health_note WHERE user_id = ?",
+            (user_id,),
+        )
+        conn.execute(
+            "DELETE FROM pregnancy_diary_entry WHERE user_id = ?",
+            (user_id,),
+        )
+        conn.execute(
+            "DELETE FROM demo_seed_state WHERE user_id = ? AND seed_key = 'pregnancy_diary_demo_v1'",
+            (user_id,),
+        )
+
+
 def main() -> None:
     with _connect() as conn:
         _seed_profiles(conn)
@@ -516,6 +552,7 @@ def main() -> None:
         _roll_demo_calendar_to_today(conn)
         _clear_future_calendar_items(conn)
         _sync_calendar_records_to_plan(conn)
+        _clear_legacy_pregnancy_diary_demo(conn)
         conn.commit()
     print(f"Seeded status demo data for {USER_ID} in {data_store.DB_PATH}")
 

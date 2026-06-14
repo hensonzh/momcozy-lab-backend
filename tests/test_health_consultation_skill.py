@@ -65,6 +65,9 @@ class HealthConsultationSkillTests(unittest.TestCase):
         self.assertIn("不要默认问年龄、既往病史、过敏史", health_skill)
         self.assertIn("给完建议后，要留一个跟进点", health_skill)
         self.assertIn("你晚点把变化告诉我，我再陪你一起看下一步", health_skill)
+        self.assertIn("把健康咨询沉淀到孕期日记", health_skill)
+        self.assertIn("action=record_health_consultation", health_skill)
+        self.assertIn("如果只是纯科普问题", health_skill)
         self.assertIn("医生是用来处理身体状态明显不对", health_skill)
         self.assertIn("不要把医生当成普通健康咨询的默认下一步", health_skill)
 

@@ -108,7 +108,7 @@ DEFERRED_TOOL_NAMESPACES: dict[str, dict[str, Any]] = {
         ],
     },
     "pregnancy_diary": {
-        "description": "用于读取、记录、更新、删除孕期日记，以及基于日记整理最近孕期状态或产检问题。通过一个 pregnancy_diary_manage 工具的 action 参数区分 list/get_today/create/update/delete；不要用于生产全过程计划、奶量记录、宝宝成长记录或医学诊断；删除前必须已有用户明确确认。",
+        "description": "用于读取、记录、更新、删除孕期日记，以及把健康咨询沉淀为当天的预问诊记录。通过一个 pregnancy_diary_manage 工具的 action 参数区分 list/get_today/create/update/delete/record_health_consultation；不要用于生产全过程计划、奶量记录、宝宝成长记录或医学诊断；删除前必须已有用户明确确认。",
         "tool_names": ["pregnancy_diary_manage"],
     },
 }

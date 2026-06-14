@@ -976,7 +976,6 @@ async def query_pregnancy_diary_list_endpoint(
     uid = str(user_id or "").strip()
     if not uid:
         return _pregnancy_diary_list_response(error=-1)
-    data_store.ensure_demo_pregnancy_diary_entries(user_id=uid, base_date=_normalize_date(end_date) or date.today().isoformat())
     return _pregnancy_diary_list_response(
         error=0,
         diary_list=data_store.list_pregnancy_diary_entries(
@@ -995,7 +994,6 @@ async def query_pregnancy_diary_today_endpoint(request: Request, user_id: str = 
     target_date = _normalize_date(timestamp) or date.today().isoformat()
     if not uid:
         return _pregnancy_diary_entry_response(error=-1)
-    data_store.ensure_demo_pregnancy_diary_entries(user_id=uid, base_date=target_date)
     return _pregnancy_diary_entry_response(
         error=0,
         diary=data_store.get_pregnancy_diary_entry_by_date(user_id=uid, entry_date=target_date),

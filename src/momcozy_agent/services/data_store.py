@@ -150,6 +150,22 @@ def init_db() -> None:
             );
             CREATE INDEX IF NOT EXISTS idx_pregnancy_diary_user_date ON pregnancy_diary_entry(user_id, entry_date DESC, entry_id DESC);
 
+            CREATE TABLE IF NOT EXISTS pregnancy_diary_health_note (
+                note_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                entry_id INTEGER NOT NULL,
+                user_id TEXT NOT NULL,
+                entry_date TEXT NOT NULL,
+                topic TEXT,
+                user_report TEXT,
+                asked_questions_json TEXT,
+                known_answers_json TEXT,
+                suggestion_summary TEXT,
+                follow_up TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS idx_pregnancy_diary_health_note_entry ON pregnancy_diary_health_note(entry_id, note_id DESC);
+            CREATE INDEX IF NOT EXISTS idx_pregnancy_diary_health_note_user_date ON pregnancy_diary_health_note(user_id, entry_date DESC, note_id DESC);
+
             CREATE TABLE IF NOT EXISTS demo_seed_state (
                 user_id TEXT NOT NULL,
                 seed_key TEXT NOT NULL,
@@ -1370,6 +1386,15 @@ def reset_birth_journey_care_plans_for_dev() -> int:
         return int(cursor.rowcount or 0)
 
 
+def reset_pregnancy_diary_for_dev() -> int:
+    """Clear pregnancy diary records on local demo startup."""
+    init_db()
+    with _connect() as conn:
+        notes = conn.execute("DELETE FROM pregnancy_diary_health_note")
+        entries = conn.execute("DELETE FROM pregnancy_diary_entry")
+        return int(notes.rowcount or 0) + int(entries.rowcount or 0)
+
+
 def list_pregnancy_diary_entries(
     *,
     user_id: str,
@@ -1405,104 +1430,6 @@ def list_pregnancy_diary_entries(
             tuple(args),
         ).fetchall()
     return [_pregnancy_diary_entry_from_row(row) for row in rows]
-
-
-def ensure_demo_pregnancy_diary_entries(*, user_id: str, base_date: str = "") -> list[dict[str, Any]]:
-    uid = str(user_id or "").strip()
-    if not uid:
-        return []
-    seed_key = "pregnancy_diary_demo_v1"
-    if _demo_seed_has_run(user_id=uid, seed_key=seed_key):
-        return []
-    existing = list_pregnancy_diary_entries(user_id=uid, limit=1)
-    if existing:
-        _mark_demo_seed(user_id=uid, seed_key=seed_key)
-        return []
-    try:
-        base_day = datetime.fromisoformat(str(base_date or "").strip()).date() if base_date else datetime.now().date()
-    except Exception:
-        base_day = datetime.now().date()
-
-    templates = [
-        {
-            "gestational_week": "孕32周",
-            "mood": "平稳",
-            "energy_level": "一般",
-            "sleep_summary": "易醒",
-            "fetal_movement": "胎动正常",
-            "symptom_tags": ["腰酸", "水肿"],
-            "appointment_note": "下次产检想问水肿是否需要控制盐分？",
-            "content": "今天下午走路有点累，晚上胎动和平时差不多。",
-        },
-        {
-            "gestational_week": "孕32周",
-            "mood": "有点焦虑",
-            "energy_level": "很累",
-            "sleep_summary": "白天补觉",
-            "fetal_movement": "胎动正常",
-            "symptom_tags": ["胃口变化", "腰酸"],
-            "appointment_note": "想问医生最近胃口变差是否正常。",
-            "content": "午后补睡了半小时，心里还是有点担心待产准备。",
-        },
-        {
-            "gestational_week": "孕32周",
-            "mood": "开心",
-            "energy_level": "不错",
-            "sleep_summary": "睡得好",
-            "fetal_movement": "比平时频繁",
-            "symptom_tags": ["胎动变化"],
-            "appointment_note": "想确认胎动比平时频繁时要不要额外观察。",
-            "content": "宝宝今天动得很明显，家人也一起感受到了。",
-        },
-        {
-            "gestational_week": "孕31周",
-            "mood": "平稳",
-            "energy_level": "一般",
-            "sleep_summary": "易醒",
-            "fetal_movement": "胎动正常",
-            "symptom_tags": ["水肿"],
-            "appointment_note": "",
-            "content": "脚踝晚上有点肿，抬腿后舒服一些。",
-        },
-        {
-            "gestational_week": "孕31周",
-            "mood": "容易烦躁",
-            "energy_level": "很累",
-            "sleep_summary": "失眠",
-            "fetal_movement": "胎动正常",
-            "symptom_tags": ["腰酸", "宫缩感"],
-            "appointment_note": "想问偶尔发紧是不是假性宫缩。",
-            "content": "晚上醒了几次，肚子偶尔发紧，但很快缓解。",
-        },
-        {
-            "gestational_week": "孕31周",
-            "mood": "平稳",
-            "energy_level": "一般",
-            "sleep_summary": "易醒",
-            "fetal_movement": "胎动正常",
-            "symptom_tags": ["腰酸"],
-            "appointment_note": "",
-            "content": "整理了一点待产资料，感觉事情开始变具体了。",
-        },
-        {
-            "gestational_week": "孕31周",
-            "mood": "低落",
-            "energy_level": "很累",
-            "sleep_summary": "白天补觉",
-            "fetal_movement": "胎动正常",
-            "symptom_tags": ["头晕"],
-            "appointment_note": "想问偶尔头晕是否需要检查血压或贫血。",
-            "content": "上午有点头晕，休息后缓解，准备下次产检问问。",
-        },
-    ]
-    created: list[dict[str, Any]] = []
-    for index, template in enumerate(templates):
-        day = (base_day - timedelta(days=index)).isoformat()
-        entry = save_pregnancy_diary_entry(user_id=uid, entry_date=day, **template)
-        if entry:
-            created.append(entry)
-    _mark_demo_seed(user_id=uid, seed_key=seed_key)
-    return created
 
 
 def _demo_seed_has_run(*, user_id: str, seed_key: str) -> bool:
@@ -1624,6 +1551,184 @@ def save_pregnancy_diary_entry(
     return get_pregnancy_diary_entry(user_id=uid, entry_id=entry_id)
 
 
+def add_pregnancy_diary_health_note(
+    *,
+    user_id: str,
+    entry_date: str,
+    topic: str = "",
+    user_report: str = "",
+    asked_questions: list[str] | None = None,
+    known_answers: list[str] | None = None,
+    suggestion_summary: str = "",
+    follow_up: str = "",
+) -> dict[str, Any] | None:
+    init_db()
+    uid = str(user_id or "").strip()
+    day = str(entry_date or "").strip()
+    if not uid or not day:
+        return None
+    entry = get_pregnancy_diary_entry_by_date(user_id=uid, entry_date=day)
+    if not entry:
+        entry = save_pregnancy_diary_entry(user_id=uid, entry_date=day)
+    if not entry:
+        return None
+    existing_note = _find_mergeable_pregnancy_diary_health_note(
+        user_id=uid,
+        entry_id=int(entry["entry_id"]),
+        topic=topic,
+    )
+    asked_json = json.dumps([str(item).strip() for item in (asked_questions or []) if str(item).strip()], ensure_ascii=False)
+    answers_json = json.dumps([str(item).strip() for item in (known_answers or []) if str(item).strip()], ensure_ascii=False)
+    if existing_note:
+        merged_asked = _merge_unique_strings(existing_note.get("asked_questions"), asked_questions)
+        merged_answers = _merge_unique_strings(existing_note.get("known_answers"), known_answers)
+        merged_user_report = _merge_distinct_text(existing_note.get("user_report"), user_report)
+        merged_summary = _merge_distinct_text(existing_note.get("suggestion_summary"), suggestion_summary)
+        merged_follow_up = _merge_distinct_text(existing_note.get("follow_up"), follow_up)
+        with _connect() as conn:
+            conn.execute(
+                """
+                UPDATE pregnancy_diary_health_note
+                SET user_report = ?, asked_questions_json = ?, known_answers_json = ?,
+                    suggestion_summary = ?, follow_up = ?
+                WHERE user_id = ? AND note_id = ?
+                """,
+                (
+                    merged_user_report,
+                    json.dumps(merged_asked, ensure_ascii=False),
+                    json.dumps(merged_answers, ensure_ascii=False),
+                    merged_summary,
+                    merged_follow_up,
+                    uid,
+                    int(existing_note["note_id"]),
+                ),
+            )
+        note = get_pregnancy_diary_health_note(user_id=uid, note_id=int(existing_note["note_id"]))
+        if note:
+            note["mutation"] = "updated"
+            note["merged_existing"] = True
+        return note
+
+    with _connect() as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO pregnancy_diary_health_note(
+                entry_id, user_id, entry_date, topic, user_report, asked_questions_json,
+                known_answers_json, suggestion_summary, follow_up
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                int(entry["entry_id"]),
+                uid,
+                day,
+                str(topic or "").strip(),
+                str(user_report or "").strip(),
+                asked_json,
+                answers_json,
+                str(suggestion_summary or "").strip(),
+                str(follow_up or "").strip(),
+            ),
+        )
+        note_id = int(cursor.lastrowid)
+    note = get_pregnancy_diary_health_note(user_id=uid, note_id=note_id)
+    if note:
+        note["mutation"] = "created"
+        note["merged_existing"] = False
+    return note
+
+
+def _find_mergeable_pregnancy_diary_health_note(*, user_id: str, entry_id: int, topic: str) -> dict[str, Any] | None:
+    normalized_topic = _normalize_health_note_topic(topic)
+    if not normalized_topic:
+        return None
+    for note in list_pregnancy_diary_health_notes(user_id=user_id, entry_id=entry_id):
+        if _normalize_health_note_topic(note.get("topic")) == normalized_topic:
+            return note
+    return None
+
+
+def _normalize_health_note_topic(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    return "".join(ch for ch in text if ch.isalnum() or "\u3400" <= ch <= "\u9fff")
+
+
+def _merge_unique_strings(existing: Any, incoming: Any) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in list(existing or []) + list(incoming or []):
+        text = str(item or "").strip()
+        key = " ".join(text.split())
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        result.append(text)
+    return result
+
+
+def _merge_distinct_text(existing: Any, incoming: Any) -> str:
+    parts: list[str] = []
+    seen: set[str] = set()
+    for raw in (existing, incoming):
+        text = str(raw or "").strip()
+        if not text:
+            continue
+        for piece in [line.strip() for line in text.splitlines() if line.strip()] or [text]:
+            key = " ".join(piece.split())
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            parts.append(piece)
+    return "\n".join(parts)
+
+
+def get_pregnancy_diary_health_note(*, user_id: str, note_id: int) -> dict[str, Any] | None:
+    init_db()
+    uid = str(user_id or "").strip()
+    try:
+        nid = int(note_id)
+    except Exception:
+        nid = 0
+    if not uid or nid <= 0:
+        return None
+    with _connect() as conn:
+        row = conn.execute(
+            """
+            SELECT note_id, entry_id, user_id, entry_date, topic, user_report,
+                   asked_questions_json, known_answers_json, suggestion_summary,
+                   follow_up, created_at
+            FROM pregnancy_diary_health_note
+            WHERE user_id = ? AND note_id = ?
+            """,
+            (uid, nid),
+        ).fetchone()
+    return _pregnancy_diary_health_note_from_row(row) if row else None
+
+
+def list_pregnancy_diary_health_notes(*, user_id: str, entry_id: int) -> list[dict[str, Any]]:
+    init_db()
+    uid = str(user_id or "").strip()
+    try:
+        eid = int(entry_id)
+    except Exception:
+        eid = 0
+    if not uid or eid <= 0:
+        return []
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT note_id, entry_id, user_id, entry_date, topic, user_report,
+                   asked_questions_json, known_answers_json, suggestion_summary,
+                   follow_up, created_at
+            FROM pregnancy_diary_health_note
+            WHERE user_id = ? AND entry_id = ?
+            ORDER BY note_id DESC
+            """,
+            (uid, eid),
+        ).fetchall()
+    return [_pregnancy_diary_health_note_from_row(row) for row in rows]
+
+
 def update_pregnancy_diary_entry(
     *,
     user_id: str,
@@ -1692,6 +1797,10 @@ def delete_pregnancy_diary_entry(*, user_id: str, entry_id: int) -> bool:
     if not uid or eid <= 0:
         return False
     with _connect() as conn:
+        conn.execute(
+            "DELETE FROM pregnancy_diary_health_note WHERE user_id = ? AND entry_id = ?",
+            (uid, eid),
+        )
         cursor = conn.execute(
             "DELETE FROM pregnancy_diary_entry WHERE user_id = ? AND entry_id = ?",
             (uid, eid),
@@ -2351,9 +2460,11 @@ def _loads_list(raw: Any) -> list[Any]:
 
 
 def _pregnancy_diary_entry_from_row(row: Any) -> dict[str, Any]:
+    entry_id = int(row["entry_id"] or 0)
+    user_id = str(row["user_id"] or "")
     return {
-        "entry_id": int(row["entry_id"] or 0),
-        "user_id": str(row["user_id"] or ""),
+        "entry_id": entry_id,
+        "user_id": user_id,
         "entry_date": str(row["entry_date"] or ""),
         "gestational_week": str(row["gestational_week"] or ""),
         "mood": str(row["mood"] or ""),
@@ -2365,8 +2476,25 @@ def _pregnancy_diary_entry_from_row(row: Any) -> dict[str, Any]:
         "nutrition_note": str(row["nutrition_note"] or ""),
         "content": str(row["content"] or ""),
         "attachments": [item for item in _loads_list(row["attachments_json"]) if isinstance(item, dict)],
+        "health_notes": list_pregnancy_diary_health_notes(user_id=user_id, entry_id=entry_id),
         "created_at": str(row["created_at"] or ""),
         "updated_at": str(row["updated_at"] or ""),
+    }
+
+
+def _pregnancy_diary_health_note_from_row(row: Any) -> dict[str, Any]:
+    return {
+        "note_id": int(row["note_id"] or 0),
+        "entry_id": int(row["entry_id"] or 0),
+        "user_id": str(row["user_id"] or ""),
+        "entry_date": str(row["entry_date"] or ""),
+        "topic": str(row["topic"] or ""),
+        "user_report": str(row["user_report"] or ""),
+        "asked_questions": [str(item) for item in _loads_list(row["asked_questions_json"]) if str(item).strip()],
+        "known_answers": [str(item) for item in _loads_list(row["known_answers_json"]) if str(item).strip()],
+        "suggestion_summary": str(row["suggestion_summary"] or ""),
+        "follow_up": str(row["follow_up"] or ""),
+        "created_at": str(row["created_at"] or ""),
     }
 
 
