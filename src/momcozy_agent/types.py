@@ -42,6 +42,7 @@ ToolName = Literal[
     "hospital_bag_pump_recommend",
     "ibclc_consult_card_create",
     "profile_get",
+    "profile_update",
     "handoff_summary_generate",
     "device_manual_search",
     "support_ticket_draft_create",
@@ -66,6 +67,12 @@ ToolName = Literal[
 
 class UserProfileSummary(TypedDict, total=False):
     user_id: str
+    display_name: str
+    age: int | None
+    profile_onboarding_complete: bool
+    profile_onboarding_skipped: bool
+    profile_onboarding_skipped_at: str | None
+    profile_onboarding_completed_at: str | None
     role: str
     pregnancy_status: str
     due_date: str | None

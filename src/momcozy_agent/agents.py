@@ -544,6 +544,8 @@ def _tool_start_label(tool_name: str, arguments: dict[str, Any]) -> str:
         return "我先看一下相关说明～"
     if tool_name == "profile_get":
         return "我先看一下你的基础信息～"
+    if tool_name == "profile_update":
+        return "我先帮你记一下基础信息～"
     if tool_name == "milk_snapshot_get":
         return "我先看看你的奶量情况～"
     if tool_name == "milk_status_query":
@@ -664,6 +666,8 @@ def _tool_result_label(tool_name: str, result: dict[str, Any]) -> str:
         return "我准备好继续处理啦"
     if tool_name == "profile_get":
         return "我看过你的基础信息啦"
+    if tool_name == "profile_update":
+        return "我已经记好了"
     if tool_name == "milk_records_query":
         return "我把吸奶和喂养记录整理好啦"
     if tool_name == "milk_status_query":
@@ -805,7 +809,7 @@ def safe_tool_result(result: dict[str, Any]) -> dict[str, Any]:
     }
     tool_result = result.get("result")
     if isinstance(tool_result, dict):
-        for key in ("id", "skill_id", "status", "resource_id", "side_effect_performed", "summary", "missing_fields", "plan_id", "plan_type", "action", "entry_id", "entry_date"):
+        for key in ("id", "skill_id", "status", "resource_id", "side_effect_performed", "summary", "missing_fields", "plan_id", "plan_type", "action", "entry_id", "entry_date", "profile_onboarding_complete", "profile_onboarding_skipped"):
             if key in tool_result:
                 safe[key] = tool_result[key]
         tool_data = tool_result.get("data")
@@ -961,6 +965,8 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
         "alternatives",
         "cart_sync_suggestion",
         "source_urls",
+        "profile_onboarding_complete",
+        "profile_onboarding_skipped",
         "error",
     ):
         if key in safe:

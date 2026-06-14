@@ -326,8 +326,17 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "profile_get": _function_tool(
         "profile_get",
-        "读取客户端当前会话传入的用户、宝宝和当前状态摘要。无副作用。不需要模型提供用户 ID。",
+        "读取当前用户已保存的基础资料、产前准备共享信息（孕周/预产期、分娩方式、主要支持人）、宝宝和当前状态摘要。无副作用。不需要模型提供用户 ID。",
         {},
+    ),
+    "profile_update": _function_tool(
+        "profile_update",
+        "保存当前用户明确提供的基础资料。只用于用户主动说明或更正自己的称呼/名字、当前年龄，或明确表示本次先跳过基础资料收集。不要猜测、推断或从图片/语气中提取；用户没有明确表达时不要调用。",
+        {
+            "display_name": _nullable({"type": "string", "description": "用户希望被如何称呼；没有明确提供时传 null。"}),
+            "age": _nullable({"type": "integer", "description": "用户明确提供的当前年龄；没有明确提供时传 null。"}),
+            "onboarding_skipped": _nullable({"type": "boolean", "description": "用户明确表示暂时不想提供基础资料/先跳过时传 true；用户补充资料时传 false；无关时传 null。"}),
+        },
     ),
     "handoff_summary_generate": _function_tool(
         "handoff_summary_generate",

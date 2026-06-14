@@ -21,6 +21,7 @@ from .contexts import (
     capture_birth_prep_user_message,
     record_birth_prep_assistant_message,
 )
+from .services import data_store
 from .services.paths import ensure_runtime_dirs
 from .types import SkillId
 
@@ -570,8 +571,11 @@ def _runtime_inputs_from_ag_ui(payload: dict[str, Any]) -> dict[str, Any]:
         inputs["images"] = images
 
     user_profile = _context_value(state, forwarded_props, "user_profile")
+    persisted_profile = data_store.get_user_profile(user_id) if user_id else {}
     if isinstance(user_profile, dict):
-        inputs["user_profile"] = dict(user_profile)
+        inputs["user_profile"] = _merge_profile_context(persisted_profile, user_profile)
+    elif persisted_profile:
+        inputs["user_profile"] = dict(persisted_profile)
     elif user_id:
         inputs["user_profile"] = {"user_id": user_id}
     if user_id and isinstance(inputs.get("user_profile"), dict):
@@ -587,6 +591,16 @@ def _runtime_inputs_from_ag_ui(payload: dict[str, Any]) -> dict[str, Any]:
         inputs["previous_response_id"] = previous_response_id
 
     return inputs
+
+
+def _merge_profile_context(persisted: dict[str, Any], provided: dict[str, Any]) -> dict[str, Any]:
+    merged: dict[str, Any] = {}
+    for source in (persisted, provided):
+        for key, value in source.items():
+            if value in (None, "") and key in merged:
+                continue
+            merged[key] = value
+    return merged
 
 
 def _assistant_followup_from_tool_result_event(event: dict[str, Any]) -> str | None:

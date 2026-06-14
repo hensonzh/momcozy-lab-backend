@@ -701,8 +701,9 @@ def create_form(args: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
 
 
 def create_hospital_bag_form(args: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
+    profile_default_values = _birth_prep_profile_default_values(inputs)
     state_default_values = _dict_value(inputs.get("_birth_prep_hospital_bag_slots"))
-    default_values = {**state_default_values, **_dict_value(args.get("default_values"))}
+    default_values = {**profile_default_values, **state_default_values, **_dict_value(args.get("default_values"))}
     form_default_values = _hospital_bag_allowed_default_values(default_values)
     fields = _hospital_bag_fields_with_defaults(form_default_values)
     return {
@@ -818,6 +819,7 @@ def create_hospital_bag_card(args: dict[str, Any], inputs: RuntimeInputs) -> dic
             _hospital_bag_required_form_question(missing_form_fields),
         )
     generation_mode = str(args.get("generation_mode") or "standard")
+    _persist_birth_prep_profile_memory(inputs, form_data)
     card_json = _build_hospital_bag_card_json(form_data, generation_mode, inputs)
     _normalize_hospital_bag_scene_groups(card_json["packing_groups"])
     _suppress_hospital_bag_personalization(card_json["packing_groups"])
@@ -1827,8 +1829,9 @@ def _cart_number(value: Any, *, default: float) -> float:
 
 
 def create_birth_plan_form(args: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
+    profile_default_values = _birth_prep_profile_default_values(inputs)
     state_default_values = _dict_value(inputs.get("_birth_prep_hospital_bag_slots"))
-    default_values = {**state_default_values, **_dict_value(args.get("default_values"))}
+    default_values = {**profile_default_values, **state_default_values, **_dict_value(args.get("default_values"))}
     fields: list[dict[str, Any]] = []
     for template in BIRTH_PLAN_FORM_FIELDS:
         field = _sanitize_birth_plan_form_field(dict(template))
@@ -1862,6 +1865,7 @@ def create_labor_communication_card(args: dict[str, Any], inputs: RuntimeInputs)
             ["confirmed_form_data"],
             "请先完成并提交分娩沟通单信息采集表单，我再根据确认后的信息整理沟通单。",
         )
+    _persist_birth_prep_profile_memory(inputs, form_data)
     card_json: dict[str, Any] = {
         "card_type": "birth_plan_card",
         "schema_version": "1.0",
@@ -1901,7 +1905,8 @@ def create_birth_journey_plan_card(args: dict[str, Any], inputs: RuntimeInputs) 
             "plan": existing_plan,
         }
 
-    plan_context = _dict_value(args.get("plan_context")) or _confirmed_form_data(inputs)
+    raw_plan_context = _dict_value(args.get("plan_context")) or _confirmed_form_data(inputs)
+    plan_context = {**_birth_prep_profile_default_values(inputs), **raw_plan_context}
     missing_context = _missing_birth_journey_required_context(plan_context)
     if missing_context:
         question = _birth_journey_required_context_question(missing_context)
@@ -1916,6 +1921,7 @@ def create_birth_journey_plan_card(args: dict[str, Any], inputs: RuntimeInputs) 
         }
     scope = str(args.get("scope") or "full").strip() or "full"
     card_json = _build_birth_journey_plan_card_json(plan_context, scope, inputs)
+    _persist_birth_prep_profile_memory(inputs, plan_context)
     saved_plan = _save_birth_journey_care_plan(card_json, inputs)
     return {
         "tool_name": "birth_journey_plan_card_create",
@@ -3866,6 +3872,37 @@ def _dict_value(value: Any) -> dict[str, Any]:
             return {}
         return parsed if isinstance(parsed, dict) else {}
     return {}
+
+
+def _birth_prep_profile_default_values(inputs: RuntimeInputs) -> dict[str, Any]:
+    profile = inputs.get("user_profile") if isinstance(inputs.get("user_profile"), dict) else {}
+    defaults = {
+        "due_date_or_week": _first_text(profile.get("birth_prep_due_date_or_week")),
+        "birth_path": _normalize_birth_path(_first_text(profile.get("birth_prep_birth_path"))),
+        "support_person": _first_text(profile.get("birth_prep_support_person")),
+    }
+    return {key: value for key, value in defaults.items() if _has_meaningful_value(value)}
+
+
+def _persist_birth_prep_profile_memory(inputs: RuntimeInputs, values: dict[str, Any]) -> None:
+    user_profile = inputs.get("user_profile") if isinstance(inputs.get("user_profile"), dict) else {}
+    user_id = str(inputs.get("user_id") or user_profile.get("user_id") or "").strip()
+    if not user_id:
+        return
+    due = _first_text(values.get("due_date_or_week"), values.get("due_date"), values.get("current_week"))
+    birth_path = _normalize_birth_path(_first_text(values.get("birth_path"), values.get("delivery_method")))
+    support_person = _first_text(values.get("support_person"), values.get("support_people"), values.get("partner_or_support"))
+    if not any(_has_meaningful_value(value) for value in (due, birth_path, support_person)):
+        return
+    try:
+        data_store.update_birth_prep_profile_memory(
+            user_id=user_id,
+            due_date_or_week=due,
+            birth_path=birth_path,
+            support_person=support_person,
+        )
+    except Exception:
+        return
 
 
 def _first_text(*values: Any) -> str:

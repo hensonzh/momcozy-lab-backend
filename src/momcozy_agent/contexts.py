@@ -37,6 +37,7 @@ HOSPITAL_BAG_SLOT_FIELDS = (
 _HOSPITAL_BAG_SLOT_KEY = "hospital_bag"
 _PENDING_FIELD_KEY = "_pending_field"
 _MAX_SLOT_TEXT_LENGTH = 160
+_BIRTH_PREP_SHARED_MEMORY_FIELDS = {"due_date_or_week", "birth_path", "support_person"}
 
 
 def build_request_context(
@@ -50,10 +51,12 @@ def build_request_context(
     if include_environment:
         lines.append(f"locale: {inputs.get('locale') or DEFAULT_LOCALE}")
         lines.append(f"timezone: {inputs.get('timezone') or DEFAULT_TIMEZONE}")
+        lines.extend(_format_user_profile_context(inputs))
         if state is not None:
             state.environment_sent = True
 
     lines.append(f"message_sent_at: {_message_sent_at(inputs)}")
+    lines.extend(_format_birth_prep_profile_context(inputs))
     if loaded_skill_ids:
         lines.append("loaded_skill_context:")
         for skill_id in _unique_strings(loaded_skill_ids):
@@ -84,17 +87,23 @@ def capture_birth_prep_user_message(inputs: RuntimeInputs, state: ContextState) 
     if not message or "confirmed_form_data:" in message:
         return
 
+    shared_values: dict[str, Any] = {}
     slots = _hospital_bag_slots(state)
     pending_field = _valid_hospital_bag_slot_field(slots.get(_PENDING_FIELD_KEY))
     if pending_field:
         value = _hospital_bag_slot_value_from_text(pending_field, message)
         if _slot_value_has_content(value):
             slots[pending_field] = value
+            if pending_field in _BIRTH_PREP_SHARED_MEMORY_FIELDS:
+                shared_values[pending_field] = value
         slots.pop(_PENDING_FIELD_KEY, None)
 
     for field_id, value in _explicit_hospital_bag_slots(message).items():
         if _slot_value_has_content(value):
             slots[field_id] = value
+            if field_id in _BIRTH_PREP_SHARED_MEMORY_FIELDS:
+                shared_values[field_id] = value
+    _persist_birth_prep_shared_memory(inputs, shared_values)
 
 
 def record_birth_prep_assistant_message(state: ContextState, message: str) -> None:
@@ -109,6 +118,23 @@ def merge_hospital_bag_slots(state: ContextState, values: dict[str, Any]) -> Non
         value = values.get(field_id)
         if _slot_value_has_content(value):
             slots[field_id] = value
+
+
+def _persist_birth_prep_shared_memory(inputs: RuntimeInputs, values: dict[str, Any]) -> None:
+    if not any(_slot_value_has_content(values.get(field_id)) for field_id in _BIRTH_PREP_SHARED_MEMORY_FIELDS):
+        return
+    user_id = _runtime_user_id(inputs)
+    if not user_id:
+        return
+    try:
+        data_store.update_birth_prep_profile_memory(
+            user_id=user_id,
+            due_date_or_week=values.get("due_date_or_week"),
+            birth_path=values.get("birth_path"),
+            support_person=values.get("support_person"),
+        )
+    except Exception:
+        return
 
 
 def hospital_bag_slots(state: ContextState | None) -> dict[str, Any]:
@@ -240,9 +266,65 @@ def _format_pregnancy_diary_context(inputs: RuntimeInputs) -> list[str]:
     ]
 
 
+def _format_user_profile_context(inputs: RuntimeInputs) -> list[str]:
+    profile = inputs.get("user_profile") if isinstance(inputs.get("user_profile"), dict) else {}
+    if not profile:
+        return []
+    display_name = _trim_context_value(profile.get("display_name") or profile.get("user_nickname"), 40)
+    age = _profile_age_text(profile.get("age"))
+    skipped = bool(profile.get("profile_onboarding_skipped")) or bool(str(profile.get("profile_onboarding_skipped_at") or "").strip())
+    missing: list[str] = []
+    if not display_name:
+        missing.append("display_name")
+    if not age:
+        missing.append("age")
+    details = [
+        f"display_name={display_name}" if display_name else "",
+        f"age={age}" if age else "",
+        "onboarding=skipped" if skipped else "",
+        f"missing={','.join(missing)}" if missing else "onboarding=complete",
+    ]
+    lines = ["user_profile_context:", "- " + "；".join(part for part in details if part)]
+    if skipped:
+        lines.append("- 用户已选择暂时跳过基础资料收集；不要因为缺少名字或年龄而在新会话里主动反复追问。")
+    return lines
+
+
+def _format_birth_prep_profile_context(inputs: RuntimeInputs) -> list[str]:
+    profile = inputs.get("user_profile") if isinstance(inputs.get("user_profile"), dict) else {}
+    if not profile:
+        return []
+    due = _trim_context_value(profile.get("birth_prep_due_date_or_week"), 80)
+    birth_path = _trim_context_value(profile.get("birth_prep_birth_path"), 80)
+    support_person = _trim_context_value(profile.get("birth_prep_support_person"), 80)
+    details = [
+        f"due_date_or_week={due}" if due else "",
+        f"birth_path={birth_path}" if birth_path else "",
+        f"support_person={support_person}" if support_person else "",
+    ]
+    context_line = "；".join(part for part in details if part)
+    if not context_line:
+        return []
+    return [
+        "birth_prep_profile_context:",
+        f"- {context_line}",
+        "- 这些是生产全过程计划、待产包和分娩沟通单共享的已确认信息；相关服务优先复用，不要重复询问同一个已知字段。",
+    ]
+
+
 def _runtime_user_id(inputs: RuntimeInputs) -> str:
     user_profile = inputs.get("user_profile") if isinstance(inputs.get("user_profile"), dict) else {}
     return str(inputs.get("user_id") or user_profile.get("user_id") or "").strip()
+
+
+def _profile_age_text(value: Any) -> str:
+    try:
+        age = int(value)
+    except Exception:
+        return ""
+    if age < 0 or age > 120:
+        return ""
+    return str(age)
 
 
 def _trim_context_value(value: Any, max_length: int = _MAX_SLOT_TEXT_LENGTH) -> str:

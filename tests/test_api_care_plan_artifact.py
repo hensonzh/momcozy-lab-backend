@@ -68,6 +68,30 @@ class CarePlanArtifactApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"error": -1})
 
+    def test_dev_startup_reset_only_deletes_active_birth_journey_plans(self) -> None:
+        birth_plan = data_store.save_care_plan_artifact(
+            user_id="u-plan",
+            plan_type="birth_journey",
+            title="生产全过程计划",
+            summary="孕晚期生产准备",
+            payload={"title": "生产全过程计划", "phases": []},
+            source_artifact_type="birth_journey_plan_card",
+        )
+        other_plan = data_store.save_care_plan_artifact(
+            user_id="u-plan",
+            plan_type="milk_management",
+            title="奶量管理计划",
+            summary="稳奶计划",
+            payload={"title": "奶量管理计划"},
+            source_artifact_type="milk_plan_card",
+        )
+
+        cleared = data_store.reset_birth_journey_care_plans_for_dev()
+
+        self.assertEqual(cleared, 1)
+        self.assertEqual(data_store.get_care_plan_artifact(user_id="u-plan", plan_id=int(birth_plan["plan_id"]))["status"], "deleted")
+        self.assertEqual(data_store.get_care_plan_artifact(user_id="u-plan", plan_id=int(other_plan["plan_id"]))["status"], "active")
+
 
 if __name__ == "__main__":
     unittest.main()

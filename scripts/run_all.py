@@ -49,6 +49,8 @@ def main() -> None:
 
     if _auto_seed_status_demo_enabled():
         _seed_status_demo_data()
+    _reset_profile_onboarding_memory_for_dev()
+    _reset_birth_journey_care_plans_for_dev()
 
     if not _is_port_open(CHAT_HOST, CHAT_PORT):
         chat_thread = threading.Thread(target=run_chat_server, name="momcozy-chat-sse", daemon=True)
@@ -124,6 +126,20 @@ def _seed_status_demo_data() -> None:
     if not callable(seed_main):
         raise RuntimeError(f"Seed script {seed_path} does not expose main().")
     seed_main()
+
+
+def _reset_profile_onboarding_memory_for_dev() -> None:
+    from momcozy_agent.services import data_store
+
+    cleared = data_store.reset_profile_onboarding_memory_for_dev()
+    print(f"Reset profile onboarding memory for local startup: cleared {cleared} profile(s).")
+
+
+def _reset_birth_journey_care_plans_for_dev() -> None:
+    from momcozy_agent.services import data_store
+
+    cleared = data_store.reset_birth_journey_care_plans_for_dev()
+    print(f"Reset birth journey plans for local startup: deleted {cleared} active plan(s).")
 
 
 def _wait_for_port(host: str, port: int, *, timeout_seconds: float) -> None:

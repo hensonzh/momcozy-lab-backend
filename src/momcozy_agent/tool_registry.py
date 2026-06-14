@@ -21,7 +21,7 @@ from .tool_handlers.handoff import generate_handoff_summary
 from .tool_handlers.ibclc import create_ibclc_consult_card
 from .tool_handlers.milk_management import execute_milk_management_tool
 from .tool_handlers.pregnancy_diary import manage_pregnancy_diary
-from .tool_handlers.profile import get_profile
+from .tool_handlers.profile import get_profile, update_profile
 from .tool_handlers.skill_runtime import (
     list_skills,
     load_skill,
@@ -35,7 +35,7 @@ from .types import FunctionToolDefinition, RuntimeInputs, ToolDefinition, ToolNa
 
 ToolHandler = Callable[[dict[str, Any], RuntimeInputs], dict[str, Any]]
 
-ALWAYS_ON_TOOLS: list[ToolName] = ["profile_get"]
+ALWAYS_ON_TOOLS: list[ToolName] = ["profile_get", "profile_update"]
 SKILL_RUNTIME_TOOLS: list[ToolName] = ["list_skills", "load_skill", "search_skill_assets", "read_skill_file", "run_approved_skill_script"]
 CORE_IMMEDIATE_TOOLS: list[ToolName] = [
     *ALWAYS_ON_TOOLS,
@@ -149,6 +149,7 @@ TOOL_HANDLERS: dict[ToolName, ToolHandler] = {
     "hospital_bag_pump_recommend": recommend_hospital_bag_pump,
     "ibclc_consult_card_create": create_ibclc_consult_card,
     "profile_get": get_profile,
+    "profile_update": update_profile,
     "handoff_summary_generate": generate_handoff_summary,
     "device_manual_search": search_device_manual,
     "support_ticket_draft_create": create_support_ticket_draft,
