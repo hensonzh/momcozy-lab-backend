@@ -554,7 +554,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "milk_assessment_evaluate": _function_tool(
         "milk_assessment_evaluate",
-        "EVALUATE 只读工具：综合评估近期奶量、记录完整度、宝宝摄入/精神状态和妈妈乳房/全身状态，返回参考区间、含亲喂估算、趋势、记录可信度、风险提示和下一步。所有奶量分析请求都要先确认宝宝摄入/精神状态和妈妈乳房/全身状态；缺少这些关键信息或存在风险时返回 needs_clinical_context 或 gate 结果。奶量分析/计划流程中，用户说胀、涨、排不空、吸完还胀但否认发热/红肿/硬块加重/疼痛加重时，仍属于奶量管理流程，应通过 maternal_symptoms 标记 breast_fullness 或 incomplete_emptying，不要直接切成普通健康咨询。只查历史明细或单纯列每天多少时才用 milk_records_query。不是诊断，不生成卡片，也不生成最终用户话术。",
+        "EVALUATE 只读工具：综合评估近期奶量、记录完整度、宝宝摄入/精神状态和妈妈乳房/全身状态，返回参考区间、含亲喂估算、趋势、记录可信度、风险提示和下一步。所有奶量分析请求都要先确认宝宝摄入/精神状态和妈妈乳房/全身状态；缺少这些关键信息或存在风险时返回 needs_clinical_context 或 gate 结果。当 request_context 里有 milk_management_context，且用户本轮是在补充上一轮奶量评估缺失信息时，应继续调用本工具，把用户补充的信息整理进 infant_signals 或 maternal_symptoms，再获取新的流程结论，不要直接回复建议。奶量分析/计划流程中，用户说胀、涨、排不空、吸完还胀但否认发热/红肿/硬块加重/疼痛加重时，仍属于奶量管理流程，应通过 maternal_symptoms 标记 breast_fullness 或 incomplete_emptying，不要直接切成普通健康咨询。只查历史明细或单纯列每天多少时才用 milk_records_query。不是诊断，不生成卡片，也不生成最终用户话术。",
         {
             "as_of_time": _nullable({"type": "string", "description": "可选 ISO-8601 评估时间；不确定时传 null。"}),
             "window_days": {"type": "integer", "description": "回看天数。分析最近吸奶情况、奶量趋势或全面评估通常用 7；用户已明确追奶/稳奶/减奶计划方向时可用 1。"},
@@ -567,7 +567,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
             },
             "infant_signals": {
                 **JSON_OBJECT_STRING,
-                "description": "字符串编码 JSON。可包含 wet_diapers_24h、stool_24h、baby_state、poor_feeding、poor_latch、lethargy、recent_weight、growth_concern。没有信息传 {}。",
+                "description": "字符串编码 JSON。可包含 wet_diapers_24h、stool_24h、baby_state、feeding_satisfaction、poor_feeding、poor_latch、lethargy、recent_weight、weight_trend、growth_concern。没有信息传 {}。",
             },
         },
     ),
@@ -585,7 +585,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
             },
             "infant_signals": {
                 **JSON_OBJECT_STRING,
-                "description": "字符串编码 JSON。可包含 wet_diapers_24h、stool_24h、baby_state、poor_feeding、poor_latch、lethargy、recent_weight、growth_concern。未知字段传 {}。",
+                "description": "字符串编码 JSON。可包含 wet_diapers_24h、stool_24h、baby_state、feeding_satisfaction、poor_feeding、poor_latch、lethargy、recent_weight、weight_trend、growth_concern。未知字段传 {}。",
             },
         },
     ),

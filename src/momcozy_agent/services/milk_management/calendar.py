@@ -625,17 +625,26 @@ def update_calendar_item(
     sync_result = {"pumping_id": 0, "feeding_id": 0}
     if finish is True:
         sync_result = data_store.sync_completed_calendar_item_logs(user_id=uid, item_id=int(item_id))
-    return ok_result("calendar_item_updated", data={"user_id": uid, "item_id": int(item_id), "synced_logs": sync_result})
+    return ok_result("calendar_item_updated", data={"user_id": uid, "target_date": item_date, "item_id": int(item_id), "synced_logs": sync_result})
 
 
 def delete_calendar_item(*, user_id: str, item_id: int) -> ServiceResult:
     uid = str(user_id or "").strip()
     if not uid or not item_id:
         return error_result("missing_required_field", "user_id and item_id are required.")
+    current = fetch_one(
+        """
+        SELECT date
+        FROM calendar
+        WHERE user_id = ? AND item_id = ?
+        """,
+        (uid, int(item_id)),
+    )
+    target_date = str(current.get("date") or "") if current else ""
     changed = execute("DELETE FROM calendar WHERE user_id = ? AND item_id = ?", [uid, int(item_id)])
     if changed <= 0:
         return error_result("calendar_item_not_found", "Calendar item was not found.")
-    return ok_result("calendar_item_deleted", data={"user_id": uid, "item_id": int(item_id)})
+    return ok_result("calendar_item_deleted", data={"user_id": uid, "target_date": target_date, "item_id": int(item_id)})
 
 
 def _fetch_calendar_range_rows(

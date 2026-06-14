@@ -131,6 +131,7 @@ def execute_milk_management_tool(args: dict[str, Any], inputs: RuntimeInputs) ->
         if clinical_gate is not None:
             return clinical_gate
         _attach_clinical_assessment(result, arguments)
+        _attach_milk_flow_decision(result)
         return result
     if name == "milk_clinical_assessment_evaluate":
         return dict(
@@ -168,7 +169,7 @@ def execute_milk_management_tool(args: dict[str, Any], inputs: RuntimeInputs) ->
             )
         )
     if name == "milk_plan_preview":
-        return _with_milk_plan_card(_preview_plan(arguments))
+        return _with_milk_plan_card(_preview_plan(arguments, inputs))
     raise ValueError(f"Unknown milk-management tool: {name}")
 
 
@@ -265,14 +266,17 @@ def _should_run_comprehensive_milk_assessment(arguments: dict[str, Any], inputs:
     return any(token in user_message for token in analysis_tokens)
 
 
-def _preview_plan(arguments: dict[str, Any]) -> dict[str, Any]:
+def _preview_plan(arguments: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
     plan_type = arguments.get("plan_type")
     target_daily_ml = arguments.get("target_daily_ml")
     if target_daily_ml is None:
         target_daily_ml = arguments.get("custom_target_daily_ml")
     delta_ml = arguments.get("delta_ml")
     source_plan_id = arguments.get("source_plan_id") or arguments.get("plan_id")
-    options = _normalized_options(arguments.get("options"))
+    options = _options_with_previous_milk_assessment(
+        _normalized_options(arguments.get("options")),
+        inputs,
+    )
 
     target_validation: dict[str, Any] | None = None
     if (target_daily_ml is not None or delta_ml is not None) and plan_type is not None:
@@ -320,7 +324,10 @@ def _preview_plan(arguments: dict[str, Any]) -> dict[str, Any]:
                 "ok": False,
                 "status": "milk_plan_preview_missing_plan_type",
                 "summary": "缺少 plan_type，无法生成新的奶量计划草稿。",
-                "data": {"missing_fields": ["plan_type"]},
+                "data": {
+                    "missing_fields": ["plan_type"],
+                    "milk_flow_decision": _milk_flow_decision_for_missing_plan_type(),
+                },
                 "assistant_followup": {"message": "我先确认一下方向，这样不会帮你排偏：你现在更想追奶、稳奶，还是减奶？"},
             }
         clinical_gate = _clinical_gate_for_plan(arguments, plan_type=plan_type, options=options)
@@ -341,31 +348,38 @@ def _preview_plan(arguments: dict[str, Any]) -> dict[str, Any]:
         data = preview.setdefault("data", {})
         if isinstance(data, dict):
             data["target_validation"] = target_validation.get("data", {})
+    _attach_milk_plan_flow_decision(preview)
     return preview
 
 
 def _clinical_gate_for_plan(arguments: dict[str, Any], *, plan_type: Any, options: dict[str, Any]) -> dict[str, Any] | None:
-    clinical = evaluate_lactation_clinical_status(
-        user_id=arguments["user_id"],
-        as_of_time=arguments.get("as_of_time"),
-        window_days=_to_int(arguments.get("window_days"), 1),
-        include_today=False,
-        milk_assessment=options.get("prepared_assessment") if isinstance(options.get("prepared_assessment"), dict) else None,
-        growth_assessment=options.get("prepared_growth_assessment") if isinstance(options.get("prepared_growth_assessment"), dict) else None,
-        maternal_symptoms=options.get("maternal_symptoms") if isinstance(options.get("maternal_symptoms"), dict) else {},
-        infant_signals=options.get("infant_signals") if isinstance(options.get("infant_signals"), dict) else {},
-        requested_plan_type=str(plan_type or ""),
-    )
-    clinical_data = clinical.get("data") if isinstance(clinical.get("data"), dict) else {}
+    prepared_clinical = options.get("prepared_clinical_assessment")
+    if isinstance(prepared_clinical, dict) and prepared_clinical:
+        clinical_data = dict(prepared_clinical)
+    else:
+        clinical = evaluate_lactation_clinical_status(
+            user_id=arguments["user_id"],
+            as_of_time=arguments.get("as_of_time"),
+            window_days=_to_int(arguments.get("window_days"), 1),
+            include_today=False,
+            milk_assessment=options.get("prepared_assessment") if isinstance(options.get("prepared_assessment"), dict) else None,
+            growth_assessment=options.get("prepared_growth_assessment") if isinstance(options.get("prepared_growth_assessment"), dict) else None,
+            maternal_symptoms=options.get("maternal_symptoms") if isinstance(options.get("maternal_symptoms"), dict) else {},
+            infant_signals=options.get("infant_signals") if isinstance(options.get("infant_signals"), dict) else {},
+            requested_plan_type=str(plan_type or ""),
+        )
+        clinical_data = clinical.get("data") if isinstance(clinical.get("data"), dict) else {}
     plan_gate = clinical_data.get("plan_gate") if isinstance(clinical_data.get("plan_gate"), dict) else {}
     if plan_gate.get("allowed") is False:
+        decision = _milk_flow_decision_for_plan_blocked(clinical_data, str(plan_type or ""))
         return {
             "ok": False,
             "status": "milk_plan_clinical_gate_blocked",
-            "summary": str(plan_gate.get("reason") or clinical.get("summary") or "当前不适合直接生成奶量计划。"),
+            "summary": str(plan_gate.get("reason") or "当前不适合直接生成奶量计划。"),
             "data": {
                 "clinical_assessment": _compact_clinical_data(clinical_data),
                 "requires_confirmation": False,
+                "milk_flow_decision": decision,
             },
             "assistant_followup": {"message": _milk_plan_gate_followup_message(clinical_data)},
         }
@@ -380,11 +394,16 @@ def _clinical_gate_for_plan(arguments: dict[str, Any], *, plan_type: Any, option
                 "missing_fields": missing_fields,
                 "suggested_questions": _clinical_context_questions(missing_fields),
                 "workflow_intent": "milk_plan_preview",
+                "milk_flow_decision": _milk_flow_decision_for_missing_context(
+                    missing_fields,
+                    stage="need_more_user_context",
+                    next_tool="milk_plan_preview",
+                ),
                 "continuation_instruction": (
-                    "当前仍处于奶量计划生成流程，不是计划失败。"
-                    "必须继续向用户追问 missing_fields 对应的信息；"
+                    "当前仍处于奶量计划生成流程。"
+                    "继续向用户确认 missing_fields 对应的信息；"
                     "收集齐宝宝状态和妈妈乳房/全身状态后，再调用 milk_plan_preview 生成计划。"
-                    "不要跳过缺失项，不要直接生成计划，也不要说无法生成计划。"
+                    "不要跳过缺失项，也不要直接生成计划。"
                 ),
                 "requires_confirmation": False,
             },
@@ -403,6 +422,11 @@ def _clinical_gate_for_analysis(arguments: dict[str, Any], *, result: dict[str, 
     missing_fields = _missing_clinical_context_fields(clinical_data)
     if missing_fields:
         result_data = result.get("data") if isinstance(result.get("data"), dict) else {}
+        decision = _milk_flow_decision_for_missing_context(
+            missing_fields,
+            stage="need_more_user_context",
+            next_tool="milk_assessment_evaluate",
+        )
         return {
             "ok": True,
             "status": "needs_clinical_context",
@@ -411,6 +435,7 @@ def _clinical_gate_for_analysis(arguments: dict[str, Any], *, result: dict[str, 
                 "clinical_assessment": _compact_clinical_data(clinical_data),
                 "control_suggestion": result_data.get("control_suggestion") if isinstance(result_data.get("control_suggestion"), dict) else {},
                 "workflow_intent": "milk_analysis",
+                "milk_flow_decision": decision,
                 "continuation_instruction": (
                     "当前仍处于奶量/吸奶分析流程。下一轮用户回复通常是在补充这些判断信息，"
                     "不要因为出现“疼、红肿、硬块、发热”等词就切换成独立健康咨询或直接调用 web_search。"
@@ -425,27 +450,30 @@ def _clinical_gate_for_analysis(arguments: dict[str, Any], *, result: dict[str, 
         }
     risk_level = str(clinical_data.get("risk_level") or "").strip()
     if risk_level in {"medical_recommended", "urgent"}:
+        decision = _milk_flow_decision_for_plan_blocked(clinical_data, "")
         return {
             "ok": True,
             "status": "analysis_medical_gate_blocked",
             "summary": "当前有需要优先医学评估的信号，先不要只看奶量数据下结论。",
-            "data": {"clinical_assessment": _compact_clinical_data(clinical_data)},
+            "data": {"clinical_assessment": _compact_clinical_data(clinical_data), "milk_flow_decision": decision},
             "assistant_followup": {"message": "这次我们先不只看奶量数字。\n\n你描述的情况更适合先联系医生或线下医疗渠道确认；等身体这边稳住了，我再陪你继续看奶量和计划。"},
         }
     if risk_level == "ibclc_recommended":
+        decision = _milk_flow_decision_for_plan_blocked(clinical_data, "")
         return {
             "ok": True,
             "status": "analysis_ibclc_gate_blocked",
             "summary": "当前更适合先结合 IBCLC 看含乳、吸奶或亲喂效果，以及乳房不适。",
-            "data": {"clinical_assessment": _compact_clinical_data(clinical_data)},
+            "data": {"clinical_assessment": _compact_clinical_data(clinical_data), "milk_flow_decision": decision},
             "assistant_followup": {"message": "这次不只是看奶量数字就能说清楚。\n\n更适合把含乳、排乳和乳房不适一起看一遍；如果你愿意，我可以帮你打开 IBCLC 咨询入口，让顾问一起看。"},
         }
     if str(clinical_data.get("data_confidence") or "").strip() == "low":
+        decision = _milk_flow_decision_for_more_records()
         return {
             "ok": True,
             "status": "needs_more_records_for_analysis",
             "summary": "当前关键记录不足，先补充记录后再做奶量分析。",
-            "data": {"clinical_assessment": _compact_clinical_data(clinical_data)},
+            "data": {"clinical_assessment": _compact_clinical_data(clinical_data), "milk_flow_decision": decision},
             "assistant_followup": {"message": "现在记录还不够完整，先不用急着下结论。\n\n你可以先补一下最近的吸奶、亲喂或瓶喂记录；补完后我再帮你重新分析，会更接近真实情况。"},
         }
     return None
@@ -477,23 +505,38 @@ def _clinical_assessment_for_result(arguments: dict[str, Any], *, result: dict[s
 def _missing_clinical_context_fields(clinical_data: dict[str, Any]) -> list[str]:
     domains = clinical_data.get("domains") if isinstance(clinical_data.get("domains"), dict) else {}
     infant = domains.get("infant_intake") if isinstance(domains.get("infant_intake"), dict) else {}
+    growth = domains.get("infant_growth") if isinstance(domains.get("infant_growth"), dict) else {}
     maternal = domains.get("maternal_breast_symptoms") if isinstance(domains.get("maternal_breast_symptoms"), dict) else {}
-    infant_known = str(infant.get("status") or "").strip() != "unknown"
-    maternal_known = str(maternal.get("status") or "").strip() != "unknown"
+    infant_fields = {str(item) for item in infant.get("provided_fields", [])} if isinstance(infant.get("provided_fields"), list) else set()
+    maternal_fields = {str(item) for item in maternal.get("provided_fields", [])} if isinstance(maternal.get("provided_fields"), list) else set()
     missing: list[str] = []
-    if not infant_known:
-        missing.append("infant_signals")
-    if not maternal_known:
-        missing.append("maternal_symptoms")
+    if infant.get("wet_diapers_24h") is None:
+        missing.append("infant_wet_diapers")
+    if not str(infant.get("baby_state") or "").strip() and not str(infant.get("feeding_satisfaction") or "").strip():
+        missing.append("infant_state_or_feeding_satisfaction")
+    if str(growth.get("status") or "").strip() == "unknown" and not ({"recent_weight", "weight_trend", "growth_concern"} & infant_fields):
+        missing.append("infant_growth_signal")
+    red_flag_fields = {"fever", "chills", "breast_redness", "lump_or_hard_area", "worsening_pain"}
+    if not red_flag_fields.issubset(maternal_fields):
+        missing.append("maternal_red_flags")
+    comfort_fields = {"breast_fullness", "engorgement", "post_pump_fullness", "incomplete_emptying", "pain_level", "symptom_text"}
+    if not (comfort_fields & maternal_fields):
+        missing.append("maternal_breast_comfort")
     return missing
 
 
 def _clinical_context_questions(missing_fields: list[str]) -> list[str]:
     questions: list[str] = []
-    if "infant_signals" in missing_fields:
-        questions.append("宝宝近 24 小时尿布、精神状态和吃奶后满足感怎么样？")
-    if "maternal_symptoms" in missing_fields:
-        questions.append("你现在有没有发热、乳房明显红肿、硬块，或疼痛越来越重？")
+    if "infant_wet_diapers" in missing_fields:
+        questions.append("宝宝近 24 小时尿量/尿布大概正常吗？")
+    if "infant_state_or_feeding_satisfaction" in missing_fields:
+        questions.append("宝宝精神状态怎么样，吃奶后通常能安稳一会儿吗？")
+    if "infant_growth_signal" in missing_fields:
+        questions.append("宝宝最近体重增长看起来还正常吗？")
+    if "maternal_red_flags" in missing_fields:
+        questions.append("你有没有发热、寒战、乳房明显红肿、硬块，或疼痛越来越重？")
+    if "maternal_breast_comfort" in missing_fields:
+        questions.append("吸奶或亲喂后乳房是比较舒服，还是还会胀、排不空或疼？")
     return questions
 
 
@@ -512,6 +555,188 @@ def _compact_clinical_data(clinical_data: dict[str, Any]) -> dict[str, Any]:
         for key in ("risk_level", "data_confidence", "domains", "risk_reasons", "plan_gate", "next_actions", "evidence")
         if key in clinical_data
     }
+
+
+def _options_with_previous_milk_assessment(options: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
+    state = inputs.get("_milk_management_state")
+    if not isinstance(state, dict):
+        return options
+    previous = state.get("last_assessment")
+    if not isinstance(previous, dict):
+        return options
+    if not isinstance(options.get("prepared_assessment"), dict) and isinstance(previous.get("assessment_data"), dict):
+        options["prepared_assessment"] = previous["assessment_data"]
+    if not isinstance(options.get("prepared_clinical_assessment"), dict) and isinstance(previous.get("clinical_assessment"), dict):
+        options["prepared_clinical_assessment"] = previous["clinical_assessment"]
+    if not isinstance(options.get("prepared_growth_assessment"), dict) and isinstance(previous.get("growth_assessment"), dict):
+        options["prepared_growth_assessment"] = previous["growth_assessment"]
+    return options
+
+
+def _attach_milk_flow_decision(result: dict[str, Any]) -> None:
+    data = result.get("data")
+    if not isinstance(data, dict):
+        return
+    data["milk_flow_decision"] = _milk_flow_decision_for_assessment(data)
+
+
+def _attach_milk_plan_flow_decision(result: dict[str, Any]) -> None:
+    data = result.get("data")
+    if not isinstance(data, dict):
+        return
+    if isinstance(data.get("milk_flow_decision"), dict):
+        return
+    if str(result.get("status") or "").strip() == "plan_preview_ready":
+        data["milk_flow_decision"] = {
+            "stage": "plan_preview_ready",
+            "missing_user_inputs": [],
+            "plan_decision": {
+                "can_start_plan": True,
+                "recommended_plan_type": _plan_type_from_draft(data.get("draft")),
+                "reason_for_user": "已经生成计划草稿，保存前需要用户确认。",
+                "next_tool": "milk_plan_mutate",
+            },
+        }
+    elif str(result.get("status") or "").strip() == "plan_preview_not_recommended":
+        eligibility = data.get("eligibility") if isinstance(data.get("eligibility"), dict) else {}
+        data["milk_flow_decision"] = {
+            "stage": "plan_blocked",
+            "missing_user_inputs": [],
+            "plan_decision": {
+                "can_start_plan": False,
+                "recommended_plan_type": eligibility.get("suggested_plan_type"),
+                "reason_for_user": str(eligibility.get("message") or result.get("summary") or "当前不适合直接生成计划。"),
+                "next_tool": None,
+            },
+        }
+
+
+def _milk_flow_decision_for_assessment(data: dict[str, Any]) -> dict[str, Any]:
+    normality = data.get("milk_normality") if isinstance(data.get("milk_normality"), dict) else {}
+    status = str(normality.get("overall_status") or data.get("assessment_status") or "").strip()
+    clinical = data.get("clinical_assessment") if isinstance(data.get("clinical_assessment"), dict) else {}
+    missing_fields = _missing_clinical_context_fields(clinical)
+    if missing_fields:
+        return _milk_flow_decision_for_missing_context(
+            missing_fields,
+            stage="need_more_user_context",
+            next_tool="milk_assessment_evaluate",
+        )
+    plan_gate = clinical.get("plan_gate") if isinstance(clinical.get("plan_gate"), dict) else {}
+    if plan_gate.get("allowed") is False:
+        return _milk_flow_decision_for_plan_blocked(clinical, "")
+    if status == "under_supply_alert":
+        return {
+            "stage": "plan_ready_to_preview",
+            "missing_user_inputs": [],
+            "facts_from_database": _milk_flow_database_facts(data),
+            "plan_decision": {
+                "can_start_plan": True,
+                "recommended_plan_type": "increase_milk",
+                "reason_for_user": "近期奶量产出偏低，宝宝和妈妈当前信息没有提示需要先暂停计划。",
+                "next_tool": "milk_plan_preview",
+            },
+        }
+    if status == "normal":
+        return {
+            "stage": "analysis_complete",
+            "missing_user_inputs": [],
+            "facts_from_database": _milk_flow_database_facts(data),
+            "plan_decision": {
+                "can_start_plan": True,
+                "recommended_plan_type": "maintain_milk",
+                "reason_for_user": "近期奶量大体可接受，如果用户想要计划，更适合做维持节奏的安排。",
+                "next_tool": "milk_plan_preview",
+            },
+        }
+    return {
+        "stage": "analysis_complete",
+        "missing_user_inputs": [],
+        "facts_from_database": _milk_flow_database_facts(data),
+        "plan_decision": {
+            "can_start_plan": False,
+            "recommended_plan_type": None,
+            "reason_for_user": "当前更适合先解释分析结论或继续观察，不适合直接进入新计划。",
+            "next_tool": None,
+        },
+    }
+
+
+def _milk_flow_database_facts(data: dict[str, Any]) -> dict[str, Any]:
+    normality = data.get("milk_normality") if isinstance(data.get("milk_normality"), dict) else {}
+    days = normality.get("days") if isinstance(normality.get("days"), list) else []
+    valid_days = [item for item in days if isinstance(item, dict) and item.get("ok") is True]
+    rhythm = data.get("recent_milk_rhythm") if isinstance(data.get("recent_milk_rhythm"), dict) else {}
+    rhythm_summary = rhythm.get("summary") if isinstance(rhythm.get("summary"), dict) else {}
+    return {
+        "window": data.get("window"),
+        "valid_days": len(valid_days),
+        "low_days": len([item for item in valid_days if str(item.get("status") or "") == "low"]),
+        "recent_rhythm_usable_for_schedule": rhythm_summary.get("usable_for_schedule"),
+        "recent_rhythm_basis_date": rhythm_summary.get("basis_date"),
+        "typical_pumping_times": rhythm_summary.get("typical_pumping_times"),
+        "typical_nursing_times": rhythm_summary.get("typical_nursing_times"),
+    }
+
+
+def _milk_flow_decision_for_missing_context(missing_fields: list[str], *, stage: str, next_tool: str) -> dict[str, Any]:
+    return {
+        "stage": stage,
+        "missing_user_inputs": missing_fields,
+        "plan_decision": {
+            "can_start_plan": False,
+            "recommended_plan_type": None,
+            "reason_for_user": "还缺少会影响下一步安排的宝宝或妈妈状态。",
+            "next_tool": next_tool,
+        },
+    }
+
+
+def _milk_flow_decision_for_more_records() -> dict[str, Any]:
+    return {
+        "stage": "need_more_records",
+        "missing_user_inputs": [],
+        "plan_decision": {
+            "can_start_plan": False,
+            "recommended_plan_type": None,
+            "reason_for_user": "近期记录还不足，先补记录再判断更稳。",
+            "next_tool": None,
+        },
+    }
+
+
+def _milk_flow_decision_for_missing_plan_type() -> dict[str, Any]:
+    return {
+        "stage": "need_plan_direction",
+        "missing_user_inputs": ["plan_type"],
+        "plan_decision": {
+            "can_start_plan": False,
+            "recommended_plan_type": None,
+            "reason_for_user": "还需要确认计划方向。",
+            "next_tool": "milk_plan_preview",
+        },
+    }
+
+
+def _milk_flow_decision_for_plan_blocked(clinical_data: dict[str, Any], plan_type: str) -> dict[str, Any]:
+    plan_gate = clinical_data.get("plan_gate") if isinstance(clinical_data.get("plan_gate"), dict) else {}
+    reason = str(plan_gate.get("reason") or "当前不适合直接生成计划。")
+    return {
+        "stage": "plan_blocked",
+        "missing_user_inputs": [],
+        "plan_decision": {
+            "can_start_plan": False,
+            "recommended_plan_type": plan_type or None,
+            "reason_for_user": reason,
+            "next_tool": None,
+        },
+    }
+
+
+def _plan_type_from_draft(value: Any) -> str | None:
+    draft = value if isinstance(value, dict) else {}
+    plan_type = str(draft.get("plan_type") or "").strip()
+    return plan_type or None
 
 
 def _normalized_options(value: Any) -> dict[str, Any]:

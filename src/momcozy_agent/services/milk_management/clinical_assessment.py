@@ -200,19 +200,23 @@ def _milk_volume_domain(milk_data: dict[str, Any]) -> dict[str, Any]:
 def _infant_intake_domain(infant_signals: dict[str, Any]) -> dict[str, Any]:
     wet_diapers = _optional_int(infant_signals.get("wet_diapers_24h"))
     baby_state = norm_text(infant_signals.get("baby_state")).lower()
+    feeding_satisfaction = norm_text(infant_signals.get("feeding_satisfaction")).lower()
     poor_intake = to_bool(infant_signals.get("poor_feeding")) or to_bool(infant_signals.get("poor_latch"))
     lethargic = to_bool(infant_signals.get("lethargy")) or any(token in baby_state for token in ("嗜睡", "精神差", "无力", "letharg"))
+    unsettled_after_feeding = any(token in feeding_satisfaction for token in ("不安稳", "很快", "哭", "找奶", "不满足", "fussy"))
     fewer_wet_diapers = wet_diapers is not None and wet_diapers < 4
-    if lethargic or fewer_wet_diapers or poor_intake:
+    if lethargic or fewer_wet_diapers or poor_intake or unsettled_after_feeding:
         status = "concern"
-    elif wet_diapers is None and not baby_state:
+    elif wet_diapers is None and not baby_state and not feeding_satisfaction:
         status = "unknown"
     else:
         status = "reassuring"
     return {
         "status": status,
+        "provided_fields": sorted(str(key) for key in infant_signals.keys()),
         "wet_diapers_24h": wet_diapers,
         "baby_state": infant_signals.get("baby_state"),
+        "feeding_satisfaction": infant_signals.get("feeding_satisfaction"),
         "poor_feeding": poor_intake,
         "lethargy": lethargic,
     }
@@ -251,6 +255,7 @@ def _maternal_symptoms_domain(maternal_symptoms: dict[str, Any]) -> dict[str, An
         status = "unknown"
     return {
         "status": status,
+        "provided_fields": sorted(str(key) for key in maternal_symptoms.keys()),
         "fever": fever,
         "chills": chills,
         "breast_redness": redness,
