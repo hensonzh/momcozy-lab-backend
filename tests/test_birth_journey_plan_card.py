@@ -341,8 +341,10 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
 
         self.assertEqual(compact["status"], "card_created")
         self.assertEqual(compact["card"], {"card_type": "birth_journey_plan_card", "schema_version": "1.0", "created": True})
-        self.assertIn("最终回复按段落直接输出下面这段 1-3 句中文", compact["final_response_instruction"])
-        self.assertIn("保留空行", compact["final_response_instruction"])
+        self.assertIn("最终回复用 2-4 句中文自然组织语言", compact["final_response_instruction"])
+        self.assertIn("不要机械照抄", compact["final_response_instruction"])
+        self.assertIn("计划已生成，可以在宝宝和我页面查看", compact["final_response_instruction"])
+        self.assertIn("接下来我会按照计划主动提醒你哦", compact["final_response_instruction"])
         self.assertIn("不要使用“卡片”这类界面形式词", compact["final_response_instruction"])
         self.assertIn("不要再输出“我先帮你生成”或“我整理好了”", compact["final_response_instruction"])
         self.assertNotIn("生产全过程计划我整理好了", compact["final_response_instruction"])
