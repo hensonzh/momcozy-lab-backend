@@ -118,7 +118,7 @@ class ToolRegistryTests(unittest.TestCase):
             "hospital_bag_cart": ("已经进入待产包购物车", "不要用于生成待产包清单", "独立吸奶器型号选型"),
             "pump_recommendation": ("购买前", "不要用于已购设备故障", "购物车直接修改"),
             "birth_prep": ("具体产物流程", "删除已保存的生产全过程计划", "删除生产全过程计划前必须已有用户明确确认"),
-            "pregnancy_diary": ("读取、记录、更新、删除孕期日记", "pregnancy_diary_manage", "删除前必须已有用户明确确认"),
+            "pregnancy_diary": ("健康咨询沉淀为当天的预问诊记录", "pregnancy_diary_manage", "删除前必须已有用户明确确认"),
         }
 
         for namespace, tokens in expected_tokens.items():
@@ -136,7 +136,7 @@ class ToolRegistryTests(unittest.TestCase):
             "milk_status_query": ("不要用它替代 milk_assessment_evaluate", "milk_records_query"),
             "hospital_bag_cart_update": ("current_hospital_bag_cart", "不要用于首次生成待产包清单", "独立吸奶器型号选型"),
             "hospital_bag_pump_recommend": ("购买前选型工具", "不要用于已购设备故障", "milk_management"),
-            "pregnancy_diary_manage": ("action 区分读取、写入、更新和删除", "删除必须 confirmed=true", "不要用于生产全过程计划"),
+            "pregnancy_diary_manage": ("record_health_consultation", "删除必须 confirmed=true", "不要用于生产全过程计划"),
         }
 
         for tool_name, tokens in expected_tokens.items():

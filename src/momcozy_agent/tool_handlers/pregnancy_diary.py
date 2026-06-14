@@ -35,13 +35,13 @@ def manage_pregnancy_diary(args: dict[str, Any], inputs: RuntimeInputs) -> dict[
         return _update_entry(args, inputs, user_id)
     if action == "delete":
         return _delete_entry(args, inputs, user_id)
+    if action == "record_health_consultation":
+        return _record_health_consultation(args, inputs, user_id)
     return _result("unsupported_action", action=action)
 
 
 def _list_entries(args: dict[str, Any], inputs: RuntimeInputs, user_id: str) -> dict[str, Any]:
     limit = _safe_limit(args.get("limit"), default=7)
-    base_date = _date_arg(args.get("end_date")) or _today(inputs)
-    data_store.ensure_demo_pregnancy_diary_entries(user_id=user_id, base_date=base_date)
     entries = data_store.list_pregnancy_diary_entries(
         user_id=user_id,
         start_date=_date_arg(args.get("start_date")),
@@ -58,7 +58,6 @@ def _list_entries(args: dict[str, Any], inputs: RuntimeInputs, user_id: str) -> 
 
 def _get_today(args: dict[str, Any], inputs: RuntimeInputs, user_id: str) -> dict[str, Any]:
     entry_date = _date_arg(args.get("entry_date")) or _today(inputs)
-    data_store.ensure_demo_pregnancy_diary_entries(user_id=user_id, base_date=entry_date)
     entry = data_store.get_pregnancy_diary_entry_by_date(user_id=user_id, entry_date=entry_date)
     return _result("diary_entry_read", action="get_today", diary=entry, summary=_entry_summary(entry))
 
@@ -149,6 +148,40 @@ def _delete_entry(args: dict[str, Any], inputs: RuntimeInputs, user_id: str) -> 
     )
 
 
+def _record_health_consultation(args: dict[str, Any], inputs: RuntimeInputs, user_id: str) -> dict[str, Any]:
+    entry_date = _date_arg(args.get("entry_date")) or _today(inputs)
+    if not _has_health_note_content(args):
+        return _result(
+            "needs_health_consultation_content",
+            action="record_health_consultation",
+            side_effect_performed=False,
+            entry_date=entry_date,
+        )
+    note = data_store.add_pregnancy_diary_health_note(
+        user_id=user_id,
+        entry_date=entry_date,
+        topic=_text(args.get("health_topic")),
+        user_report=_text(args.get("health_user_report")),
+        asked_questions=_string_list(args.get("health_asked_questions")),
+        known_answers=_string_list(args.get("health_known_answers")),
+        suggestion_summary=_text(args.get("health_suggestion_summary")),
+        follow_up=_text(args.get("health_follow_up")),
+    )
+    diary = data_store.get_pregnancy_diary_entry_by_date(user_id=user_id, entry_date=entry_date)
+    status = "health_consultation_record_failed"
+    if note:
+        status = "health_consultation_updated" if note.get("mutation") == "updated" else "health_consultation_recorded"
+    return _result(
+        status,
+        action="record_health_consultation",
+        side_effect_performed=bool(note),
+        entry_date=entry_date,
+        health_note=note,
+        diary=diary,
+        summary=_health_note_summary(note),
+    )
+
+
 def _target_entry(args: dict[str, Any], inputs: RuntimeInputs, user_id: str) -> dict[str, Any] | None:
     try:
         entry_id = int(args.get("entry_id") or 0)
@@ -164,6 +197,13 @@ def _has_diary_content(args: dict[str, Any]) -> bool:
     if any(args.get(field) is not None for field in PREGNANCY_DIARY_FIELDS):
         return True
     return args.get("symptom_tags") is not None
+
+
+def _has_health_note_content(args: dict[str, Any]) -> bool:
+    return any(
+        _text(args.get(field))
+        for field in ("health_topic", "health_user_report", "health_suggestion_summary", "health_follow_up")
+    ) or bool(_string_list(args.get("health_asked_questions"))) or bool(_string_list(args.get("health_known_answers")))
 
 
 def _merge_text(args: dict[str, Any], existing: dict[str, Any], field: str) -> str:
@@ -190,6 +230,17 @@ def _entry_summary(entry: dict[str, Any] | None) -> str:
         str(entry.get("fetal_movement") or "").strip(),
     ]
     return "，".join(part for part in parts if part) or "孕期日记已保存。"
+
+
+def _health_note_summary(note: dict[str, Any] | None) -> str:
+    if not note:
+        return "健康咨询记录保存失败。"
+    parts = [
+        str(note.get("entry_date") or "").strip(),
+        str(note.get("topic") or "").strip(),
+        str(note.get("user_report") or "").strip(),
+    ]
+    return "，".join(part for part in parts if part) or "健康咨询已记录到孕期日记。"
 
 
 def _result(status: str, *, action: str, **extra: Any) -> dict[str, Any]:

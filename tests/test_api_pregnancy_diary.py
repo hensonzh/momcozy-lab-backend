@@ -74,6 +74,22 @@ class PregnancyDiaryApiTests(unittest.TestCase):
         self.assertEqual(len(diaries), 1)
         self.assertEqual(diaries[0]["symptom_tags"], ["腰酸"])
 
+    def test_read_endpoints_do_not_seed_demo_diary_data(self) -> None:
+        list_response = self.client.get(
+            "/v1/pregnancy-diary/list",
+            params={"user_id": "u-empty", "limit": 10},
+            headers=self.headers,
+        )
+        today_response = self.client.get(
+            "/v1/pregnancy-diary/today",
+            params={"user_id": "u-empty", "timestamp": "2026-06-09"},
+            headers=self.headers,
+        )
+
+        self.assertEqual(list_response.json()["diary_list"], [])
+        self.assertIsNone(today_response.json()["diary"])
+        self.assertEqual(data_store.list_pregnancy_diary_entries(user_id="u-empty", limit=10), [])
+
     def test_rejects_missing_user(self) -> None:
         response = self.client.post(
             "/v1/pregnancy-diary/create",

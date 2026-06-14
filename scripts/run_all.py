@@ -55,6 +55,7 @@ def main() -> None:
     else:
         print("Keep birth prep profile memory for local startup: MOMCOZY_RESET_BIRTH_PREP_MEMORY_ON_START=0.")
     _reset_birth_journey_care_plans_for_dev()
+    _reset_pregnancy_diary_for_dev()
 
     if not _is_port_open(CHAT_HOST, CHAT_PORT):
         chat_thread = threading.Thread(target=run_chat_server, name="momcozy-chat-sse", daemon=True)
@@ -156,6 +157,13 @@ def _reset_birth_journey_care_plans_for_dev() -> None:
 
     cleared = data_store.reset_birth_journey_care_plans_for_dev()
     print(f"Reset birth journey plans for local startup: deleted {cleared} active plan(s).")
+
+
+def _reset_pregnancy_diary_for_dev() -> None:
+    from momcozy_agent.services import data_store
+
+    cleared = data_store.reset_pregnancy_diary_for_dev()
+    print(f"Reset pregnancy diary for local startup: deleted {cleared} record(s).")
 
 
 def _wait_for_port(host: str, port: int, *, timeout_seconds: float) -> None:

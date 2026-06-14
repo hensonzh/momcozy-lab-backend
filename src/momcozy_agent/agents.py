@@ -721,6 +721,8 @@ def _tool_result_label(tool_name: str, result: dict[str, Any]) -> str:
             return "没有找到这条孕期日记"
         if status == "diary_entry_deleted":
             return "我已经删除这条孕期日记啦"
+        if status in {"health_consultation_recorded", "health_consultation_updated"}:
+            return "我已经记录到孕期日记啦"
         if status in {"diary_entry_created", "diary_entry_updated"}:
             return "我已经保存好孕期日记啦"
         if status in {"diary_list_read", "diary_entry_read"}:
@@ -1083,6 +1085,14 @@ def _compact_pregnancy_diary_output(safe: dict[str, Any]) -> dict[str, Any]:
         )
     elif status == "needs_diary_content":
         compact["final_response_instruction"] = "孕期日记还不能保存。最终回复只温和补问用户想记录或修改的具体内容，不要说已经保存。"
+    elif status in {"health_consultation_recorded", "health_consultation_updated"}:
+        compact["final_response_instruction"] = (
+            "本轮健康咨询已经作为预问诊记录写入今天的孕期日记。最终回复用 1-2 句中文自然告诉用户："
+            "已经把今天这个健康问题记录到宝宝和我页面的孕期日记里，后面她反馈变化时可以接着这次记录继续看。"
+            "不要复述完整记录内容，不要说这是诊断。"
+        )
+    elif status == "needs_health_consultation_content":
+        compact["final_response_instruction"] = "健康咨询记录还不能保存。最终回复继续完成当前问诊或建议，不要说已经记录。"
     elif status == "entry_already_exists":
         compact["final_response_instruction"] = "今天已经有孕期日记。最终回复说明可以继续补充或修改今天的记录，不要说已经新建。"
     elif status == "entry_not_found":

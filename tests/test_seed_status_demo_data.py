@@ -23,6 +23,30 @@ class SeedStatusDemoDataTest(unittest.TestCase):
                 module.TODAY = datetime(2026, 5, 27)
                 module.DELIVERY_DATE = "2026-03-07"
                 module._current_demo_time = lambda: datetime(2026, 5, 27, 16, 30)
+                data_store.init_db()
+                with sqlite3.connect(data_store.DB_PATH) as conn:
+                    conn.execute(
+                        """
+                        INSERT INTO pregnancy_diary_entry(user_id, entry_date, gestational_week, content, attachments_json)
+                        VALUES (?, '2026-05-21', '孕32周', '旧 demo 日记', '[]')
+                        """,
+                        (module.LEGACY_PREGNANCY_DIARY_DEMO_USER_ID,),
+                    )
+                    conn.execute(
+                        "INSERT INTO demo_seed_state(user_id, seed_key) VALUES (?, 'pregnancy_diary_demo_v1')",
+                        (module.LEGACY_PREGNANCY_DIARY_DEMO_USER_ID,),
+                    )
+                    conn.execute(
+                        """
+                        INSERT INTO pregnancy_diary_entry(user_id, entry_date, gestational_week, content, attachments_json)
+                        VALUES (?, '2026-05-21', '孕32周', '旧默认 demo 日记', '[]')
+                        """,
+                        (module.USER_ID,),
+                    )
+                    conn.execute(
+                        "INSERT INTO demo_seed_state(user_id, seed_key) VALUES (?, 'pregnancy_diary_demo_v1')",
+                        (module.USER_ID,),
+                    )
 
                 module.main()
 
@@ -114,6 +138,7 @@ class SeedStatusDemoDataTest(unittest.TestCase):
                         "SELECT COUNT(*) FROM calendar WHERE user_id = ? AND date > ?",
                         (module.USER_ID, "2026-05-27"),
                     )
+                    pregnancy_diary_count = _scalar(conn, "SELECT COUNT(*) FROM pregnancy_diary_entry", ())
                 finally:
                     conn.close()
             finally:
@@ -160,6 +185,7 @@ class SeedStatusDemoDataTest(unittest.TestCase):
         self.assertLess(estimate_normal_days, estimate_low_days)
         self.assertEqual(estimate_normal_days, 2)
         self.assertEqual(future_calendar, 0)
+        self.assertEqual(pregnancy_diary_count, 0)
 
     def test_startup_seed_removes_records_not_in_plan_list(self) -> None:
         old_db_path = data_store.DB_PATH

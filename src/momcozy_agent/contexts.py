@@ -238,6 +238,8 @@ def _format_pregnancy_diary_context(inputs: RuntimeInputs) -> list[str]:
         return []
     question_count = 0
     tags: list[str] = []
+    health_note_count = 0
+    latest_health_topic = ""
     for entry in entries:
         note = _trim_context_value(entry.get("appointment_note"), 80)
         if note:
@@ -246,6 +248,10 @@ def _format_pregnancy_diary_context(inputs: RuntimeInputs) -> list[str]:
             text = _trim_context_value(tag, 20)
             if text and text not in tags:
                 tags.append(text)
+        health_notes = entry.get("health_notes") if isinstance(entry.get("health_notes"), list) else []
+        health_note_count += len(health_notes)
+        if not latest_health_topic and health_notes:
+            latest_health_topic = _trim_context_value(health_notes[0].get("topic") if isinstance(health_notes[0], dict) else "", 40)
     latest = entries[0]
     latest_parts = [
         _trim_context_value(latest.get("entry_date"), 20),
@@ -256,6 +262,8 @@ def _format_pregnancy_diary_context(inputs: RuntimeInputs) -> list[str]:
     detail_parts = [
         f"recent_days={len(entries)}",
         f"appointment_questions={question_count}",
+        f"health_consultations={health_note_count}" if health_note_count else "",
+        f"latest_health_topic={latest_health_topic}" if latest_health_topic else "",
         f"recent_tags={','.join(tags[:5])}" if tags else "",
         f"latest={'/'.join(part for part in latest_parts if part)}",
     ]
