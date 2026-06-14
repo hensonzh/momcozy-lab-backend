@@ -385,8 +385,10 @@ class MilkManagementToolTests(unittest.TestCase):
         self.assertIn("clinical_assessment", result["data"])
         compact = model_tool_output({"ok": True, "tool_name": "milk_assessment_evaluate", "result": result})
         self.assertNotIn("card", compact)
-        self.assertIn("给用户解释时可用的信息", compact)
-        reply_context = compact["给用户解释时可用的信息"]
+        self.assertIn("user_context", compact)
+        self.assertNotIn("status", compact)
+        self.assertNotIn("assistant_followup", compact)
+        reply_context = compact["user_context"]
         self.assertIn("最近整体偏低", reply_context["判断结果"]["奶量产出"])
         self.assertTrue(any("近几天含亲喂估算" in item for item in reply_context["判断依据"]))
         self.assertTrue(any("记录大致可用" in item for item in reply_context["判断结果"]["记录情况"]))
@@ -399,13 +401,12 @@ class MilkManagementToolTests(unittest.TestCase):
         self.assertTrue(all("缩短最长间隔" not in item for item in reply_context["下一步要确认的信息"]))
         self.assertNotIn("记录完整后的推荐承接", reply_context)
         self.assertNotIn("接下来怎么调", reply_context)
-        self.assertEqual(compact["next_actions"][0], "询问是否制定温和追奶计划")
-        self.assertIn("用户同意后生成计划草稿", compact["next_actions"])
-        self.assertIn("制定温和追奶计划", compact["plan_suggestion"])
-        self.assertIn("不生成卡片", compact["final_response_instruction"])
+        self.assertEqual(compact["适合的下一步"][0], "询问是否制定温和追奶计划")
+        self.assertIn("用户同意后生成计划草稿", compact["适合的下一步"])
+        self.assertIn("只需要文本回复", compact["final_response_instruction"])
         self.assertIn("用户只回答了其中一部分", compact["final_response_instruction"])
         self.assertIn("明确下一步", compact["final_response_instruction"])
-        self.assertIn("plan_suggestion 表示适合制定计划", compact["final_response_instruction"])
+        self.assertIn("user_context 里显示适合进入计划", compact["final_response_instruction"])
         self.assertIn("不要把宝宝实际需求变高说成奶量产出偏低的原因", compact["final_response_instruction"])
         self.assertNotIn("固定模板", json.dumps(reply_context, ensure_ascii=False))
         self.assertNotIn("工具建议话术", compact)
@@ -443,12 +444,15 @@ class MilkManagementToolTests(unittest.TestCase):
         self.assertIn("再继续分析吸奶和奶量", result["summary"])
         compact = model_tool_output({"ok": True, "tool_name": "milk_assessment_evaluate", "result": result})
         self.assertNotIn("card", compact)
-        self.assertEqual(compact["status"], "needs_clinical_context")
+        self.assertNotIn("status", compact)
+        self.assertNotIn("workflow_intent", compact)
+        self.assertNotIn("continuation_instruction", compact)
+        self.assertNotIn("assistant_followup", compact)
         self.assertEqual(
-            compact["还需要补充的信息"],
+            compact["需要继续确认"]["还需要确认"],
             ["宝宝近 24 小时尿布、精神和吃奶表现", "妈妈有没有发热、乳房红肿、硬块或疼痛加重"],
         )
-        self.assertIn("尿布", " ".join(compact["建议追问"]))
+        self.assertIn("尿布", " ".join(compact["需要继续确认"]["可以这样问用户"]))
         self.assertNotIn("工具建议话术", compact)
         self.assertIn("不要硬下结论", compact["final_response_instruction"])
         self.assertIn("一轮只问一个关键问题", compact["final_response_instruction"])
@@ -478,7 +482,7 @@ class MilkManagementToolTests(unittest.TestCase):
         self.assertIn("乳房", " ".join(result["data"]["suggested_questions"]))
         self.assertNotIn("尿布", " ".join(result["data"]["suggested_questions"]))
         compact = model_tool_output({"ok": True, "tool_name": "milk_assessment_evaluate", "result": result})
-        self.assertEqual(compact["还需要补充的信息"], ["妈妈有没有发热、乳房红肿、硬块或疼痛加重"])
+        self.assertEqual(compact["需要继续确认"]["还需要确认"], ["妈妈有没有发热、乳房红肿、硬块或疼痛加重"])
 
     def test_assessment_tool_keeps_asking_when_only_maternal_context_is_answered(self) -> None:
         uid, _ = _seed_user("assessment-missing-infant-context")
@@ -502,7 +506,7 @@ class MilkManagementToolTests(unittest.TestCase):
         self.assertIn("尿布", " ".join(result["data"]["suggested_questions"]))
         self.assertNotIn("乳房", " ".join(result["data"]["suggested_questions"]))
         compact = model_tool_output({"ok": True, "tool_name": "milk_assessment_evaluate", "result": result})
-        self.assertEqual(compact["还需要补充的信息"], ["宝宝近 24 小时尿布、精神和吃奶表现"])
+        self.assertEqual(compact["需要继续确认"]["还需要确认"], ["宝宝近 24 小时尿布、精神和吃奶表现"])
 
     def test_comprehensive_assessment_intent_forces_seven_complete_days(self) -> None:
         analysis_data = {
@@ -595,6 +599,69 @@ class MilkManagementToolTests(unittest.TestCase):
         self.assertEqual(draft["observation_context"]["calendar_pump_tasks_per_day"], 8)
         self.assertEqual(draft["observation_context"]["recorded_pumping_logs_per_day"], 5)
         self.assertEqual(draft["generation_context"]["calendar_pump_times"], times)
+        self.assertEqual(draft["schedule_basis"]["source"], "recent_calendar_schedule")
+        self.assertEqual(draft["schedule_basis"]["confidence"], "high")
+        self.assertFalse(draft["schedule_basis"]["ask_daily_counts"])
+
+    def test_plan_preview_uses_recent_records_when_previous_day_is_empty(self) -> None:
+        uid, infant_id = _seed_user("plan-recent-records")
+        pumping_times = ["06:30", "10:30", "14:30", "18:30", "22:30"]
+        breastfeeding_times = ["03:00", "08:00"]
+        _add_pumping_rows(uid, "2026-05-12", pumping_times)
+        _add_feeding_rows(uid, infant_id, "2026-05-12", breastfeeding_times)
+
+        result = execute_milk_management_tool(
+            {
+                "_tool_name": "milk_plan_preview",
+                "user_id": uid,
+                "plan_type": "increase_milk",
+                "plan_days": 7,
+                "as_of_time": "2026-05-14 12:00:00",
+                "options": {
+                    "prepared_assessment": {
+                        "pumping_summary": {"count": 35, "total_ml": 2450},
+                        "feeding_summary": {"count": 14, "type_counts": {"亲喂": 14}},
+                        "window": {"window_days": 7},
+                        "milk_normality": {
+                            "overall_status": "under_supply_alert",
+                            "stats": {"valid_days": 7, "low_days": 5},
+                            "days": [
+                                {
+                                    "ok": True,
+                                    "date": "2026-05-12",
+                                    "status": "low",
+                                    "estimated_daily_milk_ml": 620,
+                                    "yield_reference": {"p15": 700, "p85": 900},
+                                }
+                            ],
+                        },
+                    },
+                    "prepared_growth_assessment": {"status": "normal"},
+                    "observed_persistent_abnormal": True,
+                    "infant_signals": {"wet_diapers_24h": 6, "baby_state": "正常"},
+                    "maternal_symptoms": {"fever": False, "breast_redness": False, "lump_or_hard_area": False},
+                },
+            },
+            {"user_message": "好的，帮我生成追奶计划", "locale": "zh-CN", "timezone": "Asia/Shanghai", "message_sent_at": ""},
+        )
+
+        self.assertTrue(result["ok"])
+        draft = result["data"]["draft"]
+        basis = draft["schedule_basis"]
+        self.assertEqual(basis["source"], "recent_records")
+        self.assertEqual(basis["confidence"], "medium")
+        self.assertEqual(basis["used_days"], ["2026-05-12"])
+        self.assertEqual(basis["pumping_count_per_day"], len(pumping_times))
+        self.assertEqual(basis["breastfeeding_count_per_day"], len(breastfeeding_times))
+        self.assertFalse(basis["ask_daily_counts"])
+        self.assertEqual(draft["generation_context"]["schedule_basis"]["used_days"], ["2026-05-12"])
+        self.assertEqual(draft["generation_context"]["pumping_times"], pumping_times)
+        self.assertEqual(draft["generation_context"]["breastfeeding_times"], breastfeeding_times)
+
+        compact = model_tool_output({"ok": True, "tool_name": "milk_plan_preview", "result": result})
+        plan_context = compact["plan_preview"]["plan_context"]
+        self.assertTrue(any("不需要再向用户确认每天吸奶或亲喂次数" in item for item in plan_context["计划依据"]))
+        self.assertIn("不要再问用户每天吸奶几次或亲喂几次", compact["final_response_instruction"])
 
     def test_plan_preview_tool_returns_structured_plan_card(self) -> None:
         uid, _ = _seed_user("plan-card")
@@ -706,7 +773,9 @@ class MilkManagementToolTests(unittest.TestCase):
         self.assertEqual(safe_confirmed["card"]["card_type"], "milk_plan_card")
         self.assertIn("assistant_followup", safe_confirmed)
         compact_confirmed = model_tool_output({"ok": True, "tool_name": "milk_plan_mutate", "result": confirmed})
-        self.assertIn("assistant_followup", compact_confirmed)
+        self.assertNotIn("assistant_followup", compact_confirmed)
+        self.assertNotIn("status", compact_confirmed)
+        self.assertIn("user_context", compact_confirmed)
         self.assertIn("同步到日程", compact_confirmed["final_response_instruction"])
         self.assertIn("执行一段时间", compact_confirmed["final_response_instruction"])
         self.assertEqual(
@@ -889,13 +958,13 @@ class MilkManagementToolTests(unittest.TestCase):
         self.assertEqual(result["data"]["missing_fields"], ["infant_signals"])
         self.assertNotIn("card", result)
         compact = model_tool_output({"ok": False, "tool_name": "milk_plan_preview", "result": result})
-        self.assertEqual(compact["status"], "milk_plan_needs_clinical_context")
-        self.assertEqual(compact["workflow_intent"], "milk_plan_preview")
-        self.assertEqual(compact["missing_fields"], ["infant_signals"])
-        self.assertIn("尿布", " ".join(compact["suggested_questions"]))
+        self.assertNotIn("status", compact)
+        self.assertNotIn("workflow_intent", compact)
+        self.assertNotIn("continuation_instruction", compact)
+        self.assertNotIn("assistant_followup", compact)
+        self.assertIn("尿布", " ".join(compact["user_context"]["需要继续确认"]["可以这样问用户"]))
         self.assertIn("继续推进", compact["final_response_instruction"])
-        self.assertIn("不要说计划失败", compact["final_response_instruction"])
-        self.assertIn("assistant_followup", compact)
+        self.assertIn("不要提工具", compact["final_response_instruction"])
 
     def test_plan_preview_keeps_fullness_without_red_flags_in_milk_plan_flow(self) -> None:
         uid, _ = _seed_user("plan-fullness-no-red-flags")
@@ -1178,6 +1247,21 @@ def _add_pumping_rows(user_id: str, target_date: str, times: list[str]) -> None:
                 VALUES (?, ?, ?, 70, 0, 15, 1, '吸奶')
                 """,
                 (user_id, f"{target_date} {time}:00", f"{target_date} {time}:00"),
+            )
+
+
+def _add_feeding_rows(user_id: str, infant_id: int, target_date: str, times: list[str]) -> None:
+    with transaction() as conn:
+        for time in times:
+            conn.execute(
+                """
+                INSERT INTO feeding_log(
+                    user_id, infant_id, feed_time, feed_type, feed_milk_volum,
+                    feed_action, feeding_title
+                )
+                VALUES (?, ?, ?, '亲喂', 0, 0, '亲喂')
+                """,
+                (user_id, infant_id, f"{target_date} {time}:00"),
             )
 
 

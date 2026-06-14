@@ -822,10 +822,15 @@ def safe_tool_result(result: dict[str, Any]) -> dict[str, Any]:
                 for key in ("workflow_intent", "continuation_instruction", "missing_fields", "suggested_questions"):
                     if key in tool_data:
                         safe[key] = tool_data[key]
+            if result.get("tool_name") == "milk_clinical_assessment_evaluate":
+                safe["clinical_assessment"] = _compact_milk_clinical_assessment_data(tool_data)
             if result.get("tool_name") == "milk_plan_preview":
                 for key in ("workflow_intent", "continuation_instruction", "missing_fields", "suggested_questions"):
                     if key in tool_data:
                         safe[key] = tool_data[key]
+                clinical_data = tool_data.get("clinical_assessment")
+                if isinstance(clinical_data, dict):
+                    safe["clinical_assessment"] = _compact_milk_clinical_assessment_data(clinical_data)
         if result.get("tool_name") == "milk_assessment_evaluate" and isinstance(tool_result.get("assistant_followup"), dict):
             safe["assistant_followup"] = tool_result["assistant_followup"]
         if result.get("tool_name") == "milk_plan_preview" and isinstance(tool_result.get("assistant_followup"), dict):
@@ -877,12 +882,16 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
     tool_name = str(safe.get("tool_name") or "")
     if tool_name == "milk_assessment_evaluate":
         return _compact_milk_assessment_output(safe)
+    if tool_name == "milk_clinical_assessment_evaluate":
+        return _compact_milk_clinical_assessment_output(safe)
     if tool_name == "milk_status_query" and isinstance(safe.get("card"), dict):
         return _compact_mom_baby_status_card_output(safe)
     if tool_name == "milk_plan_preview" and safe.get("status") == "milk_plan_needs_clinical_context":
         return _compact_milk_plan_missing_context_output(safe)
     if tool_name == "milk_plan_preview" and isinstance(safe.get("card"), dict):
         return _compact_milk_plan_card_output(safe, result)
+    if tool_name == "milk_plan_preview":
+        return _compact_milk_plan_no_card_output(safe)
     if tool_name == "milk_plan_mutate" and isinstance(safe.get("card"), dict):
         return _compact_milk_plan_saved_output(safe)
 
@@ -1301,22 +1310,37 @@ def _compact_milk_assessment_data(data: dict[str, Any]) -> dict[str, Any]:
     return _drop_empty(compact)
 
 
+def _compact_milk_clinical_assessment_data(data: dict[str, Any]) -> dict[str, Any]:
+    domains = data.get("domains") if isinstance(data.get("domains"), dict) else {}
+    baby_domain = domains.get("infant_intake") if isinstance(domains.get("infant_intake"), dict) else {}
+    mother_domain = domains.get("maternal_breast_symptoms") if isinstance(domains.get("maternal_breast_symptoms"), dict) else {}
+    record_domain = domains.get("record_completeness") if isinstance(domains.get("record_completeness"), dict) else {}
+    return _drop_empty(
+        {
+            "user_context": {
+                "宝宝摄入信号": _plain_baby_status(baby_domain),
+                "妈妈状态": _plain_mother_status(mother_domain),
+                "记录情况": _plain_record_confidence(record_domain),
+                "需要留意的情况": data.get("risk_reasons"),
+                "下一步": _plain_clinical_next_step(data),
+            }
+        }
+    )
+
+
 def _compact_milk_assessment_output(safe: dict[str, Any]) -> dict[str, Any]:
     assessment = safe.get("assessment") if isinstance(safe.get("assessment"), dict) else {}
     status = str(assessment.get("overall_status") or safe.get("status") or "").strip()
     plan_suggestion = _milk_analysis_plan_suggestion(assessment, status=status)
+    missing_context = _missing_milk_context_for_model(safe.get("missing_fields"), suggested_questions=safe.get("suggested_questions"))
     compact = {
         "ok": safe.get("ok"),
         "tool_name": safe.get("tool_name"),
-        "status": safe.get("status"),
-        "summary": safe.get("summary"),
-        "给用户解释时可用的信息": _plain_milk_assessment_context(assessment, status=status),
-        "还需要补充的信息": _plain_missing_milk_assessment_fields(safe.get("missing_fields")),
-        "建议追问": safe.get("suggested_questions"),
-        "plan_suggestion": plan_suggestion,
-        "next_actions": _milk_analysis_next_actions(status, plan_suggestion=plan_suggestion),
+        "user_context": _plain_milk_assessment_context(assessment, status=status),
+        "需要继续确认": missing_context,
+        "适合的下一步": _milk_analysis_next_actions(status, plan_suggestion=plan_suggestion),
         "final_response_instruction": (
-            "本次奶量评估不生成卡片。最终回复只根据结构化事实自然组织语言："
+            "本次奶量评估只需要文本回复。最终回复只根据结构化事实自然组织语言："
             "先说结论，再用最多 3 个关键依据解释，最后只问一个最影响下一步判断的问题；"
             "如果上一轮追问包含多个判断点，而用户只回答了其中一部分，只承接已回答的信息，并继续问未回答的那个关键问题；"
             "不要把“最近比较累”“宝宝状态还好”这类单点回答当成全部信息已收集完；"
@@ -1324,17 +1348,17 @@ def _compact_milk_assessment_output(safe: dict[str, Any]) -> dict[str, Any]:
             "不要罗列字段，不要说“卡片”，不要照抄字段名，也不要把工程字段拼成生硬句子；"
             "如果记录完整且状态偏低，只表达“记录完整”和“近期奶量产出偏低”这两个事实的关系，不要使用固定模板；"
             "不要说“记录完整下的偏低”，不要说“现在最关键的是分辨”，不要把宝宝实际需求变高说成奶量产出偏低的原因；"
-            "如果 plan_suggestion 表示适合制定计划，最后可以主动问用户是否现在制定对应计划，但不要直接调用计划工具；"
-            "如果没有 plan_suggestion，且用户没有明确要求制定计划，不要主动说追奶计划、稳奶计划或减奶计划。"
+            "如果 user_context 里显示适合进入计划，最后可以主动问用户是否现在制定对应计划，但不要直接调用计划工具；"
+            "如果不适合进入计划，先说明当前更适合补信息、观察或处理不适。"
         ),
     }
     if str(safe.get("status") or "").strip() in {"needs_clinical_context", "needs_more_records_for_analysis"}:
         compact["final_response_instruction"] = (
             "本次奶量评估还缺少会影响判断的信息，不要硬下结论。"
-            "最终回复优先参考工具给出的追问建议，用自然语气补问最关键的问题；"
+            "最终回复根据“需要继续确认”自然补问最关键的问题；"
             "一轮只问一个关键问题；如果用户只回答了部分追问，继续问未回答项，不要跳过。"
             "回复最后一句必须是明确问题或明确下一步；"
-            "不要说工具状态或内部字段名。"
+            "不要提工具、系统、内部状态或字段名。"
         )
     return _drop_empty(compact)
 
@@ -1372,7 +1396,7 @@ def _plain_milk_assessment_context(assessment: dict[str, Any], *, status: str) -
     elif confidence == "high":
         record_facts.append("记录比较完整，可以作为这次判断的主要依据")
     if missing:
-        record_facts.append("系统里有一些关键记录缺口")
+        record_facts.append("最近记录里有一些关键缺口")
     if records.get("has_breastfeeding"):
         record_facts.append("里面包含亲喂，亲喂奶量只能按估算看")
 
@@ -1406,7 +1430,7 @@ def _plain_milk_assessment_context(assessment: dict[str, Any], *, status: str) -
                 "妈妈状态": mother_text,
             },
             "判断依据": milk_facts,
-            "工具判断原因": clinical.get("risk_reasons"),
+            "需要留意的情况": clinical.get("risk_reasons"),
             "下一步要确认的信息": next_information_needed,
             "为什么要问这些": why_ask_next,
             "适合的下一步计划": plan_suggestion,
@@ -1422,6 +1446,61 @@ def _plain_missing_milk_assessment_fields(value: Any) -> list[str]:
         "maternal_symptoms": "妈妈有没有发热、乳房红肿、硬块或疼痛加重",
     }
     return [labels.get(str(item), str(item)) for item in raw_items if str(item).strip()]
+
+
+def _missing_milk_context_for_model(value: Any, *, suggested_questions: Any = None) -> dict[str, Any]:
+    labels = _plain_missing_milk_assessment_fields(value)
+    raw_items = [str(item) for item in value if str(item).strip()] if isinstance(value, list) else []
+    question_list = [str(item).strip() for item in suggested_questions if str(item).strip()] if isinstance(suggested_questions, list) else []
+    why = []
+    if "infant_signals" in raw_items:
+        why.append("宝宝尿布、精神和吃奶表现会影响下一步是继续观察、调整节奏，还是先联系专业支持。")
+    if "maternal_symptoms" in raw_items:
+        why.append("妈妈有没有发热、红肿、硬块或疼痛加重，会影响是否适合继续调整奶量安排。")
+    return _drop_empty(
+        {
+            "还需要确认": labels,
+            "为什么要确认": why,
+            "可以这样问用户": question_list[:2],
+        }
+    )
+
+
+def _plain_record_confidence(record_domain: dict[str, Any]) -> str:
+    confidence = str(record_domain.get("data_confidence") or "").strip()
+    if confidence == "high":
+        return "记录比较完整，可以作为这次判断的主要依据。"
+    if confidence == "medium":
+        return "记录大致可用，但还要留意有没有漏记。"
+    if confidence == "low":
+        return "记录还不够，需要先补最近吸奶、亲喂或瓶喂情况。"
+    return "还没有足够记录信息。"
+
+
+def _plain_clinical_next_step(data: dict[str, Any]) -> str:
+    risk_level = str(data.get("risk_level") or "").strip()
+    if risk_level in {"medical_recommended", "urgent"}:
+        return "先联系医生或线下医疗渠道确认身体情况。"
+    if risk_level == "ibclc_recommended":
+        return "适合结合 IBCLC 一起看含乳、吸奶或亲喂效果，以及乳房不适。"
+    if str(data.get("data_confidence") or "").strip() == "low":
+        return "先补齐宝宝状态和妈妈乳房/全身状态，再继续判断。"
+    return "宝宝和妈妈状态目前没有提示需要先暂停计划的信号，可以继续结合奶量记录看下一步。"
+
+
+def _compact_milk_clinical_assessment_output(safe: dict[str, Any]) -> dict[str, Any]:
+    clinical = safe.get("clinical_assessment") if isinstance(safe.get("clinical_assessment"), dict) else {}
+    return _drop_empty(
+        {
+            "ok": safe.get("ok"),
+            "tool_name": safe.get("tool_name"),
+            "user_context": clinical.get("user_context") if isinstance(clinical.get("user_context"), dict) else {},
+            "final_response_instruction": (
+                "最终回复只根据 user_context 自然说明宝宝和妈妈当前情况，以及下一步；"
+                "不要提工具、系统、内部状态、状态码、gate、blocked 或 allowed。"
+            ),
+        }
+    )
 
 
 def _milk_assessment_do_not_infer(status: str) -> list[str]:
@@ -1555,11 +1634,11 @@ def _compact_milk_plan_card_output(safe: dict[str, Any], result: dict[str, Any])
             "schema_version": (card or {}).get("schema_version") if isinstance(card, dict) else "1.0",
             "created": True,
         },
-        "plan_status": str(card_json_dict.get("status") or safe.get("status") or "").strip(),
         "next_actions": ["同步到日历", "调整计划", "展开具体时间表"],
         "final_response_instruction": (
             "奶量计划已经展示完整内容。最终回复根据 plan_context 自然组织语言，"
             "只简短说明计划已准备好，并询问用户下一步想同步到计划页还是先调整时间；"
+            "如果 plan_context.计划依据 表示已经参考最近记录，就不要再问用户每天吸奶几次或亲喂几次；"
             "不要复述完整计划、数字、周期、任务数或日期范围；保存或同步前必须获得用户确认。"
         ),
     }
@@ -1582,45 +1661,87 @@ def _compact_milk_plan_saved_output(safe: dict[str, Any]) -> dict[str, Any]:
     compact: dict[str, Any] = {
         "ok": safe.get("ok"),
         "tool_name": safe.get("tool_name"),
-        "status": safe.get("status"),
         "card": {
             "card_type": "milk_plan_card",
             "schema_version": "1.0",
             "created": True,
         },
+        "user_context": {
+            "结果": "奶量计划已经同步到日程。",
+            "接下来": "后续会按计划提醒；执行一段时间后，再结合奶量、宝宝状态和妈妈作息调整。",
+        },
         "next_actions": ["调整近期日程", "查看计划页", "先这样执行"],
         "final_response_instruction": (
             "奶量计划已经保存。最终回复不要复述计划内容、数字或日程明细；"
-            "优先参考 assistant_followup.message，说明计划已经同步到日程、接下来会定时提醒，"
-            "并引导先按计划执行一段时间，后面再根据奶量、宝宝状态和作息调整。"
+            "根据 user_context 自然说明计划已经同步到日程、接下来会提醒，"
+            "并引导先按计划执行一段时间，后面再一起调整。"
         ),
     }
-    followup = safe.get("assistant_followup")
-    if isinstance(followup, dict):
-        compact["assistant_followup"] = followup
     return compact
 
 
 def _compact_milk_plan_missing_context_output(safe: dict[str, Any]) -> dict[str, Any]:
+    missing_context = _missing_milk_context_for_model(safe.get("missing_fields"), suggested_questions=safe.get("suggested_questions"))
     compact: dict[str, Any] = {
         "ok": safe.get("ok"),
         "tool_name": safe.get("tool_name"),
-        "status": safe.get("status"),
-        "summary": safe.get("summary"),
-        "workflow_intent": safe.get("workflow_intent"),
-        "missing_fields": safe.get("missing_fields"),
-        "suggested_questions": safe.get("suggested_questions"),
-        "continuation_instruction": safe.get("continuation_instruction"),
+        "user_context": {
+            "当前进度": "正在制定奶量计划，但还需要先补齐会影响计划安全和方向的信息。",
+            "需要继续确认": missing_context,
+            "补齐后": "再继续生成奶量计划。",
+        },
         "final_response_instruction": (
-            "奶量计划还在继续推进，只是缺少必要信息。最终回复不要说计划失败、无法生成或不生成计划；"
-            "只说明还需要补齐会影响计划的关键信息，并继续追问 suggested_questions 里的缺失项。"
-            "用户补齐后，再继续调用 milk_plan_preview。"
+            "奶量计划还在继续推进。最终回复只说明还需要补齐会影响计划的关键信息，"
+            "并根据 user_context.需要继续确认 自然追问一个最关键问题；"
+            "用户补齐后，再继续制定计划。不要提工具、系统、内部状态、状态码、gate、blocked、allowed、计划失败或无法生成。"
         ),
     }
-    followup = safe.get("assistant_followup")
-    if isinstance(followup, dict):
-        compact["assistant_followup"] = followup
     return _drop_empty(compact)
+
+
+def _compact_milk_plan_no_card_output(safe: dict[str, Any]) -> dict[str, Any]:
+    clinical = safe.get("clinical_assessment") if isinstance(safe.get("clinical_assessment"), dict) else {}
+    clinical_context = clinical.get("user_context") if isinstance(clinical.get("user_context"), dict) else {}
+    summary = str(safe.get("summary") or "").strip()
+    user_context: dict[str, Any] = {
+        "当前结果": _plain_milk_plan_no_card_result(safe, clinical_context=clinical_context, summary=summary),
+        "宝宝和妈妈情况": clinical_context,
+        "下一步": _plain_milk_plan_no_card_next_step(safe, clinical_context=clinical_context),
+    }
+    return _drop_empty(
+        {
+            "ok": safe.get("ok"),
+            "tool_name": safe.get("tool_name"),
+            "user_context": user_context,
+            "final_response_instruction": (
+                "这次还没有进入完整奶量计划。最终回复只根据 user_context 自然说明原因和下一步；"
+                "不要提工具、系统、内部状态、状态码、gate、blocked、allowed、计划失败或无法生成。"
+            ),
+        }
+    )
+
+
+def _plain_milk_plan_no_card_result(safe: dict[str, Any], *, clinical_context: dict[str, Any], summary: str) -> str:
+    status = str(safe.get("status") or "").strip()
+    if status == "milk_plan_clinical_gate_blocked":
+        next_step = str(clinical_context.get("下一步") or "").strip()
+        return next_step or "当前更适合先确认宝宝或妈妈状态，再继续安排奶量计划。"
+    if status == "milk_plan_preview_missing_plan_type":
+        return "还需要先确认计划方向。"
+    if status == "milk_plan_target_invalid":
+        return "计划目标需要再确认一下。"
+    return "这次还需要补充一点信息，再继续安排奶量计划。"
+
+
+def _plain_milk_plan_no_card_next_step(safe: dict[str, Any], *, clinical_context: dict[str, Any]) -> str:
+    status = str(safe.get("status") or "").strip()
+    if status == "milk_plan_clinical_gate_blocked":
+        return str(clinical_context.get("下一步") or "先处理会影响计划的宝宝或妈妈状态。")
+    if status == "milk_plan_preview_missing_plan_type":
+        return "问用户现在更想追奶、稳奶，还是减奶。"
+    if status == "milk_plan_target_invalid":
+        return "问用户希望调整到什么方向或目标。"
+    return "补齐关键信息后再继续制定计划。"
 
 
 def _milk_analysis_plan_suggestion(assessment: dict[str, Any], *, status: str) -> str:
@@ -1642,7 +1763,7 @@ def _milk_analysis_plan_suggestion(assessment: dict[str, Any], *, status: str) -
         return ""
     if str(mother.get("status") or "").strip() in {"", "unknown", "ibclc_concern", "medical_concern"}:
         return ""
-    return "适合先征求用户是否制定温和追奶计划；用户同意后再调用 milk_plan_preview。"
+    return "适合先征求用户是否制定温和追奶计划；用户同意后再生成计划草稿。"
 
 
 def _milk_analysis_next_actions(status: str, *, plan_suggestion: str = "") -> list[str]:
@@ -1769,11 +1890,46 @@ def _plain_milk_plan_context(draft: dict[str, Any]) -> dict[str, Any]:
         {
             "计划类型": _plain_plan_type(plan_type),
             **plan_context,
+            **_plain_schedule_basis_context(draft),
             "计划天数": f"{draft.get('plan_days')} 天" if draft.get("plan_days") else "",
             "预计每天提醒次数": f"{rules.get('desired_pumping_count')} 次" if rules.get("desired_pumping_count") else "",
             "下一步": "询问用户是否同步到计划页，或是否要先调整时间。",
         }
     )
+
+
+def _plain_schedule_basis_context(draft: dict[str, Any]) -> dict[str, Any]:
+    basis = draft.get("schedule_basis") if isinstance(draft.get("schedule_basis"), dict) else {}
+    if not basis:
+        generation_context = draft.get("generation_context") if isinstance(draft.get("generation_context"), dict) else {}
+        basis = generation_context.get("schedule_basis") if isinstance(generation_context.get("schedule_basis"), dict) else {}
+    if not basis:
+        return {}
+
+    facts = []
+    summary = str(basis.get("basis_summary") or "").strip()
+    if summary:
+        facts.append(summary)
+    source = str(basis.get("source") or "").strip()
+    confidence = str(basis.get("confidence") or "").strip()
+    source_label = {
+        "recent_calendar_schedule": "最近计划提醒",
+        "recent_records": "最近实际记录",
+        "recent_pumping_records": "最近吸奶记录",
+        "recent_breastfeeding_records": "最近亲喂记录",
+        "default_template": "通用节奏",
+    }.get(source, "")
+    confidence_label = {"high": "比较可靠", "medium": "可参考", "low": "不足"}.get(confidence, "")
+    if source_label and confidence_label:
+        facts.append(f"排程参考的是{source_label}，信息{confidence_label}。")
+    if basis.get("ask_daily_counts") is False:
+        facts.append("已经有可用记录，不需要再向用户确认每天吸奶或亲喂次数。")
+    else:
+        facts.append("记录不足时，才需要向用户确认大概节奏。")
+    longest_gap = basis.get("longest_gap_hours")
+    if longest_gap is not None:
+        facts.append(f"最近参考节奏里最长间隔约 {longest_gap} 小时。")
+    return {"计划依据": facts}
 
 
 def _plain_plan_context_by_type(plan_type: str, *, draft: dict[str, Any]) -> dict[str, Any]:
