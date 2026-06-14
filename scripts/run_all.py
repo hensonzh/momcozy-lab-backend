@@ -50,7 +50,10 @@ def main() -> None:
     if _auto_seed_status_demo_enabled():
         _seed_status_demo_data()
     _reset_profile_onboarding_memory_for_dev()
-    _reset_birth_prep_profile_memory_for_dev()
+    if _reset_birth_prep_profile_memory_enabled():
+        _reset_birth_prep_profile_memory_for_dev()
+    else:
+        print("Keep birth prep profile memory for local startup: MOMCOZY_RESET_BIRTH_PREP_MEMORY_ON_START=0.")
     _reset_birth_journey_care_plans_for_dev()
 
     if not _is_port_open(CHAT_HOST, CHAT_PORT):
@@ -117,6 +120,11 @@ def _run_web_data_server(host: str, port: int) -> None:
 
 def _auto_seed_status_demo_enabled() -> bool:
     raw = os.getenv("MOMCOZY_AUTO_SEED_STATUS_DEMO", "1").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
+
+def _reset_birth_prep_profile_memory_enabled() -> bool:
+    raw = os.getenv("MOMCOZY_RESET_BIRTH_PREP_MEMORY_ON_START", "1").strip().lower()
     return raw not in {"0", "false", "no", "off"}
 
 

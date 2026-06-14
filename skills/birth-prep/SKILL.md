@@ -120,7 +120,7 @@ Step3：推荐生产全过程计划服务
 
 待产包服务通过表单固定确认 9 项信息：预产期或当前孕周、是否第一胎、胎数、医生提示过的特殊情况、分娩方式、喂养意向、产后多久返工、产后前两周支持情况、最焦虑的三件事。入口邀约可以不逐项展开，但不要在聊天里逐项追问。
 
-`hospital_bag_form_create.default_values` 只放当前对话、`request_context`、已提交表单或 `profile_get` 中可靠的已知字段。可用字段包括：`due_date_or_week`、`first_birth`、`fetus_count`、`pregnancy_history_or_notes`、`birth_path`、`feeding_intention`、`return_to_work_timing`、`support_person`、`top_worries`。
+`hospital_bag_form_create` 会自动合并当前会话、用户 profile 和已有 active 生产全过程计划里的产前准备共享信息（孕周/预产期、分娩方式、主要支持人）。`default_values` 只放当前对话中新确认的可靠字段；不要为了“搬运”已保存字段而重复读取或复述。可用字段包括：`due_date_or_week`、`first_birth`、`fetus_count`、`pregnancy_history_or_notes`、`birth_path`、`feeding_intention`、`return_to_work_timing`、`support_person`、`top_worries`。
 
 工具会把已知字段继续放在表单里并预填答案，供用户确认或修改；不要把它们从表单里剔除。缺少的字段留空，让用户在表单里补。
 
