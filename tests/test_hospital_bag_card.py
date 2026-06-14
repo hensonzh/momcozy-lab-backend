@@ -4,7 +4,7 @@ import json
 import unittest
 
 from momcozy_agent.agents import artifact_events_from_tool_result, model_tool_output, safe_tool_result
-from momcozy_agent.tool_handlers.cards import create_form, create_hospital_bag_card, create_hospital_bag_form
+from momcozy_agent.tool_handlers.cards import create_birth_plan_form, create_form, create_hospital_bag_card, create_hospital_bag_form
 
 
 def _hospital_bag_prefill(**overrides: object) -> dict:
@@ -120,6 +120,30 @@ class HospitalBagCardTests(unittest.TestCase):
         self.assertEqual(result["form"]["default_values"]["first_birth"], "是")
         self.assertEqual(result["form"]["default_values"]["birth_path"], "顺产")
         self.assertEqual(result["form"]["default_values"]["feeding_intention"], "亲喂母乳")
+
+    def test_hospital_bag_form_prefills_birth_path_from_delivery_method_alias(self) -> None:
+        result = create_hospital_bag_form(
+            {
+                "default_values": {
+                    "delivery_method": "剖腹产",
+                    "due_date_or_week": "孕35周",
+                }
+            },
+            {"user_message": ""},
+        )
+
+        by_id = {field["id"]: field for field in result["form"]["fields"]}
+        self.assertEqual(by_id["birth_path"]["default_value"], "剖宫产")
+        self.assertEqual(result["form"]["default_values"]["birth_path"], "剖宫产")
+
+    def test_birth_plan_form_prefills_birth_path_from_shared_unknown_answer(self) -> None:
+        result = create_birth_plan_form(
+            {"default_values": {"delivery_method": "还不确定"}},
+            {"user_message": ""},
+        )
+
+        by_id = {field["id"]: field for field in result["form"]["fields"]}
+        self.assertEqual(by_id["birth_path"]["default_value"], "还没确定")
 
     def test_hospital_bag_form_uses_session_slots_when_model_omits_defaults(self) -> None:
         result = create_hospital_bag_form(

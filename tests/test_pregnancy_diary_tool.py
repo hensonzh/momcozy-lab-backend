@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from momcozy_agent.agents import model_tool_output
 from momcozy_agent.contexts import build_request_context
 from momcozy_agent.services import data_store
 from momcozy_agent.tool_handlers.pregnancy_diary import manage_pregnancy_diary
@@ -180,6 +181,62 @@ class PregnancyDiaryToolTests(unittest.TestCase):
                 self.assertNotIn("今天下午走路有点累", context)
             finally:
                 data_store.DB_PATH = old_db_path  # type: ignore[assignment]
+
+    def test_model_output_instructs_created_diary_final_reply_without_followup(self) -> None:
+        compact = model_tool_output(
+            {
+                "ok": True,
+                "tool_name": "pregnancy_diary_manage",
+                "result": {
+                    "ok": True,
+                    "tool_name": "pregnancy_diary_manage",
+                    "status": "diary_entry_created",
+                    "action": "create",
+                    "side_effect_performed": True,
+                    "summary": "2026-06-10，孕32周，心情平稳",
+                    "diary": {
+                        "entry_id": 7,
+                        "entry_date": "2026-06-10",
+                        "content": "今天走路有点累，胎动正常。",
+                    },
+                },
+            }
+        )
+
+        self.assertIn("final_response_instruction", compact)
+        self.assertIn("孕期日记已经记录", compact["final_response_instruction"])
+        self.assertIn("宝宝和我页面的孕期日记模块查看", compact["final_response_instruction"])
+        self.assertEqual(compact["diary"]["entry_id"], 7)
+        self.assertNotIn("assistant_followup", compact)
+        self.assertNotIn("content", compact["diary"])
+
+    def test_model_output_instructs_updated_diary_final_reply_without_followup(self) -> None:
+        compact = model_tool_output(
+            {
+                "ok": True,
+                "tool_name": "pregnancy_diary_manage",
+                "result": {
+                    "ok": True,
+                    "tool_name": "pregnancy_diary_manage",
+                    "status": "diary_entry_updated",
+                    "action": "update",
+                    "side_effect_performed": True,
+                    "summary": "2026-06-10，补充了产检问题",
+                    "diary": {
+                        "entry_id": 8,
+                        "entry_date": "2026-06-10",
+                        "appointment_note": "下次问医生睡眠不好怎么办。",
+                    },
+                },
+            }
+        )
+
+        self.assertIn("final_response_instruction", compact)
+        self.assertIn("孕期日记已经修改", compact["final_response_instruction"])
+        self.assertIn("宝宝和我页面的孕期日记模块查看", compact["final_response_instruction"])
+        self.assertEqual(compact["diary"]["entry_id"], 8)
+        self.assertNotIn("assistant_followup", compact)
+        self.assertNotIn("appointment_note", compact["diary"])
 
 
 if __name__ == "__main__":

@@ -234,7 +234,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "hospital_bag_form_create": _function_tool(
         "hospital_bag_form_create",
-        "创建待产包信息采集表单。用户确认开始待产包整理后可直接调用；LLM 只在 default_values 里传当前对话、request_context、已提交表单或 profile_get 中可靠的已知字段。表单字段、顺序、分类、选项和样式约束由工具稳定生成。无后端副作用。",
+        "创建待产包信息采集表单。用户确认开始待产包整理后可直接调用；工具会自动合并当前会话、用户 profile 和已有 active 生产全过程计划里的产前准备共享信息（孕周/预产期、分娩方式、主要支持人）。LLM 只在 default_values 里传当前对话中新确认的可靠字段，不需要重复搬运已保存字段。表单字段、顺序、分类、选项和样式约束由工具稳定生成。无后端副作用。",
         {
             "default_values": JSON_OBJECT_STRING,
         },

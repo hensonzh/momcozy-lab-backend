@@ -701,9 +701,16 @@ def create_form(args: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
 
 
 def create_hospital_bag_form(args: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
-    profile_default_values = _birth_prep_profile_default_values(inputs)
+    profile_default_values = _birth_prep_shared_default_values(inputs)
     state_default_values = _dict_value(inputs.get("_birth_prep_hospital_bag_slots"))
-    default_values = {**profile_default_values, **state_default_values, **_dict_value(args.get("default_values"))}
+    arg_default_values = _dict_value(args.get("default_values"))
+    default_values = {
+        **profile_default_values,
+        **_birth_prep_shared_values_from_source(state_default_values),
+        **state_default_values,
+        **_birth_prep_shared_values_from_source(arg_default_values),
+        **arg_default_values,
+    }
     form_default_values = _hospital_bag_allowed_default_values(default_values)
     fields = _hospital_bag_fields_with_defaults(form_default_values)
     return {
@@ -725,7 +732,8 @@ def _hospital_bag_fields_with_defaults(form_default_values: dict[str, Any]) -> l
     for template in HOSPITAL_BAG_FORM_FIELDS:
         field = dict(template)
         value = _first_text(form_default_values.get(field["id"]))
-        if value and _normalized_placeholder(value) not in PLACEHOLDER_VALUES:
+        is_unknown_birth_path = field["id"] == "birth_path" and _normalize_hospital_bag_birth_path(value) == "还不确定"
+        if value and (_normalized_placeholder(value) not in PLACEHOLDER_VALUES or is_unknown_birth_path):
             normalized_value = _normalize_hospital_bag_default_value(field["id"], value)
             if normalized_value is not None:
                 field["default_value"] = normalized_value
@@ -1829,9 +1837,16 @@ def _cart_number(value: Any, *, default: float) -> float:
 
 
 def create_birth_plan_form(args: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
-    profile_default_values = _birth_prep_profile_default_values(inputs)
+    profile_default_values = _birth_prep_shared_default_values(inputs)
     state_default_values = _dict_value(inputs.get("_birth_prep_hospital_bag_slots"))
-    default_values = {**profile_default_values, **state_default_values, **_dict_value(args.get("default_values"))}
+    arg_default_values = _dict_value(args.get("default_values"))
+    default_values = {
+        **profile_default_values,
+        **_birth_prep_shared_values_from_source(state_default_values),
+        **state_default_values,
+        **_birth_prep_shared_values_from_source(arg_default_values),
+        **arg_default_values,
+    }
     fields: list[dict[str, Any]] = []
     for template in BIRTH_PLAN_FORM_FIELDS:
         field = _sanitize_birth_plan_form_field(dict(template))
@@ -1839,7 +1854,7 @@ def create_birth_plan_form(args: dict[str, Any], inputs: RuntimeInputs) -> dict[
         if field["id"] == "support_person":
             value = _first_text(value, default_values.get("support_people"))
         normalized_value = _normalize_birth_plan_form_value(field["id"], value)
-        if _has_meaningful_value(normalized_value):
+        if _has_meaningful_value(normalized_value) or (field["id"] == "birth_path" and normalized_value == "还没确定"):
             field["default_value"] = normalized_value
         fields.append(field)
     return {
@@ -1906,7 +1921,7 @@ def create_birth_journey_plan_card(args: dict[str, Any], inputs: RuntimeInputs) 
         }
 
     raw_plan_context = _dict_value(args.get("plan_context")) or _confirmed_form_data(inputs)
-    plan_context = {**_birth_prep_profile_default_values(inputs), **raw_plan_context}
+    plan_context = {**_birth_prep_shared_default_values(inputs, raw_plan_context), **raw_plan_context}
     missing_context = _missing_birth_journey_required_context(plan_context)
     if missing_context:
         question = _birth_journey_required_context_question(missing_context)
@@ -3179,10 +3194,15 @@ def _looks_like_pregnancy_history_note(value: str) -> bool:
 
 def _normalize_birth_plan_form_value(field_id: str, value: Any) -> Any:
     if field_id == "birth_path":
-        normalized = _normalize_birth_path(_first_text(value))
-        if normalized == "未确定":
+        raw_text = _first_nonempty_text(value)
+        if any(token in raw_text for token in ("还不确定", "还没确定", "未确定", "不确定")):
             return "还没确定"
-        return normalized or _first_text(value)
+        if _normalized_placeholder(raw_text) in PLACEHOLDER_VALUES:
+            return ""
+        normalized = _normalize_birth_path(raw_text)
+        if normalized == "未确定" or any(token in raw_text for token in ("还不确定", "还没确定", "未确定", "不确定")):
+            return "还没确定"
+        return normalized or raw_text
     if field_id == "first_birth":
         normalized = _normalize_first_birth(_first_text(value))
         if normalized == "不确定":
@@ -3874,14 +3894,95 @@ def _dict_value(value: Any) -> dict[str, Any]:
     return {}
 
 
+def _birth_prep_shared_default_values(inputs: RuntimeInputs, explicit_values: dict[str, Any] | None = None) -> dict[str, Any]:
+    defaults: dict[str, Any] = {}
+    for source in (
+        _active_birth_journey_plan_default_values(inputs),
+        _birth_prep_profile_default_values(inputs),
+        _dict_value(inputs.get("_birth_prep_hospital_bag_slots")),
+        explicit_values or {},
+    ):
+        defaults.update(_birth_prep_shared_values_from_source(source))
+    return defaults
+
+
+def _birth_prep_shared_values_from_source(source: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(source, dict):
+        return {}
+    due = _first_text(
+        source.get("due_date_or_week"),
+        source.get("birth_prep_due_date_or_week"),
+        source.get("due_date"),
+        source.get("current_week"),
+        source.get("gestational_week"),
+    )
+    birth_path = _normalize_birth_prep_shared_birth_path(
+        source.get("birth_path"),
+        source.get("birth_prep_birth_path"),
+        source.get("delivery_method"),
+        source.get("birth_method"),
+        source.get("planned_birth_method"),
+        source.get("delivery_mode"),
+    )
+    support_person = _first_text(
+        source.get("support_person"),
+        source.get("birth_prep_support_person"),
+        source.get("support_people"),
+        source.get("partner_or_support"),
+        source.get("primary_support_person"),
+    )
+    defaults: dict[str, Any] = {}
+    if _has_meaningful_value(due):
+        defaults["due_date_or_week"] = due
+    if birth_path:
+        defaults["birth_path"] = birth_path
+    if _has_meaningful_value(support_person):
+        defaults["support_person"] = support_person
+    return defaults
+
+
+def _normalize_birth_prep_shared_birth_path(*values: Any) -> str:
+    text = _first_nonempty_text(*values)
+    if not text:
+        return ""
+    return _normalize_hospital_bag_birth_path(text) or _normalize_birth_journey_birth_path(text) or _normalize_birth_path(text) or text
+
+
+def _active_birth_journey_plan_default_values(inputs: RuntimeInputs) -> dict[str, Any]:
+    user_id = _birth_prep_runtime_user_id(inputs)
+    if not user_id:
+        return {}
+    try:
+        active_plans = data_store.list_care_plan_artifacts(user_id=user_id, status="active")
+    except Exception:
+        return {}
+    birth_journey_plan = next(
+        (plan for plan in active_plans if isinstance(plan, dict) and plan.get("plan_type") == "birth_journey"),
+        None,
+    )
+    if not isinstance(birth_journey_plan, dict):
+        return {}
+    payload = birth_journey_plan.get("payload") if isinstance(birth_journey_plan.get("payload"), dict) else {}
+    owner = payload.get("owner") if isinstance(payload.get("owner"), dict) else {}
+    overview = payload.get("overview") if isinstance(payload.get("overview"), dict) else {}
+    birth_preferences = payload.get("birth_preferences") if isinstance(payload.get("birth_preferences"), dict) else {}
+    return _birth_prep_shared_values_from_source(
+        {
+            "due_date_or_week": _first_text(overview.get("due_date_or_week"), owner.get("due_date_or_week")),
+            "birth_path": _first_text(overview.get("birth_path"), birth_preferences.get("birth_path"), owner.get("birth_path")),
+            "support_person": _first_text(overview.get("support_person"), owner.get("support_person")),
+        }
+    )
+
+
 def _birth_prep_profile_default_values(inputs: RuntimeInputs) -> dict[str, Any]:
     profile = inputs.get("user_profile") if isinstance(inputs.get("user_profile"), dict) else {}
-    defaults = {
-        "due_date_or_week": _first_text(profile.get("birth_prep_due_date_or_week")),
-        "birth_path": _normalize_birth_path(_first_text(profile.get("birth_prep_birth_path"))),
-        "support_person": _first_text(profile.get("birth_prep_support_person")),
-    }
-    return {key: value for key, value in defaults.items() if _has_meaningful_value(value)}
+    return _birth_prep_shared_values_from_source(profile)
+
+
+def _birth_prep_runtime_user_id(inputs: RuntimeInputs) -> str:
+    user_profile = inputs.get("user_profile") if isinstance(inputs.get("user_profile"), dict) else {}
+    return str(inputs.get("user_id") or user_profile.get("user_id") or "").strip()
 
 
 def _persist_birth_prep_profile_memory(inputs: RuntimeInputs, values: dict[str, Any]) -> None:
@@ -3918,6 +4019,19 @@ def _first_text(*values: Any) -> str:
         else:
             text = str(value or "").strip()
         if _has_meaningful_value(text):
+            return text
+    return ""
+
+
+def _first_nonempty_text(*values: Any) -> str:
+    for value in values:
+        if isinstance(value, list):
+            text = ", ".join(str(item).strip() for item in value if str(item or "").strip())
+        elif isinstance(value, dict):
+            text = ", ".join(str(nested_value).strip() for nested_value in value.values() if str(nested_value or "").strip())
+        else:
+            text = str(value or "").strip()
+        if text:
             return text
     return ""
 

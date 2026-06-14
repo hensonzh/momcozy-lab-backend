@@ -166,6 +166,39 @@ class ProfileMemoryTests(unittest.TestCase):
         self.assertEqual(defaults["birth_path"], "顺产")
         self.assertEqual(defaults["support_person"], "有人全天帮忙")
 
+    def test_active_birth_journey_plan_reused_by_hospital_bag_form_when_profile_memory_is_empty(self) -> None:
+        create_birth_journey_plan_card(
+            {
+                "plan_context": {
+                    "due_date_or_week": "孕34周",
+                    "delivery_method": "剖腹产",
+                    "support_person": "伴侣",
+                }
+            },
+            {
+                "user_id": "profile-birth-prep-active-plan",
+                "user_profile": {"user_id": "profile-birth-prep-active-plan"},
+                "user_message": "",
+                "locale": "zh-CN",
+                "message_sent_at": "2026-06-13T10:00:00+08:00",
+            },
+        )
+        data_store.reset_birth_prep_profile_memory_for_dev()
+
+        form = create_hospital_bag_form(
+            {"default_values": {}},
+            {
+                "user_id": "profile-birth-prep-active-plan",
+                "user_profile": {"user_id": "profile-birth-prep-active-plan"},
+                "user_message": "",
+            },
+        )
+
+        defaults = form["form"]["default_values"]
+        self.assertEqual(defaults["due_date_or_week"], "孕34周")
+        self.assertEqual(defaults["birth_path"], "剖宫产")
+        self.assertEqual(defaults["support_person"], "有人全天帮忙")
+
     def test_hospital_bag_memory_reused_by_birth_journey_plan(self) -> None:
         form_data = {
             "due_date_or_week": "孕35周",

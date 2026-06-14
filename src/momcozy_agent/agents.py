@@ -848,6 +848,12 @@ def safe_tool_result(result: dict[str, Any]) -> dict[str, Any]:
             media_voice = _media_voice_from_tool_result(tool_result)
             if media_voice:
                 safe["media_voice"] = media_voice
+        if result.get("tool_name") == "pregnancy_diary_manage" and isinstance(tool_result.get("diary"), dict):
+            diary = tool_result["diary"]
+            safe["diary"] = {
+                "entry_id": diary.get("entry_id"),
+                "entry_date": diary.get("entry_date"),
+            }
         if result.get("tool_name") == QUICK_REPLIES_TOOL_NAME and isinstance(tool_result.get("quick_replies"), list):
             safe["quick_replies"] = tool_result["quick_replies"]
     if isinstance(result.get("error"), dict):
@@ -866,6 +872,8 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
         return _compact_mom_baby_status_card_output(safe)
     if tool_name == "milk_plan_preview" and isinstance(safe.get("card"), dict):
         return _compact_milk_plan_card_output(safe, result)
+    if tool_name == "pregnancy_diary_manage":
+        return _compact_pregnancy_diary_output(safe)
 
     if tool_name == QUICK_REPLIES_TOOL_NAME:
         return {
@@ -1015,6 +1023,47 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
             compact["final_response_instruction"] = _followup_final_response_instruction(tool_name)
 
     return compact
+
+
+def _compact_pregnancy_diary_output(safe: dict[str, Any]) -> dict[str, Any]:
+    status = str(safe.get("status") or "").strip()
+    compact: dict[str, Any] = {
+        "ok": safe.get("ok"),
+        "tool_name": safe.get("tool_name"),
+        "status": safe.get("status"),
+        "action": safe.get("action"),
+        "side_effect_performed": safe.get("side_effect_performed"),
+        "summary": safe.get("summary"),
+    }
+    diary = safe.get("diary")
+    if isinstance(diary, dict):
+        compact["diary"] = {
+            "entry_id": diary.get("entry_id"),
+            "entry_date": diary.get("entry_date"),
+        }
+    if status == "diary_entry_created":
+        compact["final_response_instruction"] = (
+            "孕期日记已经记录。最终回复用 1-2 句中文自然告诉用户："
+            "已经帮她记录好这篇孕期日记，可以在宝宝和我页面的孕期日记模块查看。"
+            "可以顺带轻轻承接她今天记录里的一个状态，但不要复述完整日记内容。"
+        )
+    elif status == "diary_entry_updated":
+        compact["final_response_instruction"] = (
+            "孕期日记已经修改。最终回复用 1-2 句中文自然告诉用户："
+            "已经帮她修改好这篇孕期日记，可以在宝宝和我页面的孕期日记模块查看。"
+            "可以顺带轻轻承接她修改后的一个状态，但不要复述完整日记内容。"
+        )
+    elif status == "needs_diary_content":
+        compact["final_response_instruction"] = "孕期日记还不能保存。最终回复只温和补问用户想记录或修改的具体内容，不要说已经保存。"
+    elif status == "entry_already_exists":
+        compact["final_response_instruction"] = "今天已经有孕期日记。最终回复说明可以继续补充或修改今天的记录，不要说已经新建。"
+    elif status == "entry_not_found":
+        compact["final_response_instruction"] = "没有找到要修改的孕期日记。最终回复说明没有找到对应记录，并请用户补充日期或要修改的内容。"
+    elif status == "diary_entry_deleted":
+        compact["final_response_instruction"] = "孕期日记已经删除。最终回复只简短说明已删除这条孕期日记。"
+    elif status == "needs_delete_confirmation":
+        compact["final_response_instruction"] = "删除孕期日记前还需要用户明确确认。最终回复只询问是否确认删除，不要说已经删除。"
+    return {key: value for key, value in compact.items() if value not in (None, "", [])}
 
 
 def _form_artifact_final_response_instruction(tool_name: str) -> str:
