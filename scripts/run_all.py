@@ -50,6 +50,7 @@ def main() -> None:
     if _auto_seed_status_demo_enabled():
         _seed_status_demo_data()
     _reset_profile_onboarding_memory_for_dev()
+    _reset_birth_prep_profile_memory_for_dev()
     _reset_birth_journey_care_plans_for_dev()
 
     if not _is_port_open(CHAT_HOST, CHAT_PORT):
@@ -133,6 +134,13 @@ def _reset_profile_onboarding_memory_for_dev() -> None:
 
     cleared = data_store.reset_profile_onboarding_memory_for_dev()
     print(f"Reset profile onboarding memory for local startup: cleared {cleared} profile(s).")
+
+
+def _reset_birth_prep_profile_memory_for_dev() -> None:
+    from momcozy_agent.services import data_store
+
+    cleared = data_store.reset_birth_prep_profile_memory_for_dev()
+    print(f"Reset birth prep profile memory for local startup: cleared {cleared} profile(s).")
 
 
 def _reset_birth_journey_care_plans_for_dev() -> None:

@@ -423,6 +423,27 @@ def reset_profile_onboarding_memory_for_dev() -> int:
         return int(cursor.rowcount or 0)
 
 
+def reset_birth_prep_profile_memory_for_dev() -> int:
+    """Clear shared birth-prep answers so local demo startup can collect them again."""
+    init_db()
+    now = _now()
+    with _connect() as conn:
+        cursor = conn.execute(
+            """
+            UPDATE user_profile
+            SET birth_prep_due_date_or_week = NULL,
+                birth_prep_birth_path = NULL,
+                birth_prep_support_person = NULL,
+                updated_at = ?
+            WHERE birth_prep_due_date_or_week IS NOT NULL
+               OR birth_prep_birth_path IS NOT NULL
+               OR birth_prep_support_person IS NOT NULL
+            """,
+            (now,),
+        )
+        return int(cursor.rowcount or 0)
+
+
 def update_user_profile_memory(
     *,
     user_id: str,
