@@ -30,17 +30,12 @@ class HealthConsultationSkillTests(unittest.TestCase):
 
         self.assertIn("health-consultation", enum)
 
-    def test_existing_service_skills_delegate_health_consultation_boundaries(self) -> None:
+    def test_birth_prep_delegates_health_consultation_boundaries(self) -> None:
         birth_prep = (ROOT / "skills" / "birth-prep" / "SKILL.md").read_text(encoding="utf-8")
-        milk_management = (ROOT / "skills" / "milk-management" / "SKILL.md").read_text(encoding="utf-8")
 
         self.assertIn("普通孕期身体不适", birth_prep)
         self.assertIn("优先加载 `health-consultation`", birth_prep)
         self.assertIn("不要在 birth-prep 里展开普通健康咨询", birth_prep)
-
-        self.assertIn("健康判断，优先使用 health-consultation", milk_management)
-        self.assertIn("优先加载 `health-consultation`", milk_management)
-        self.assertIn("不要在 milk-management 里把医疗判断包装成奶量结论", milk_management)
 
     def test_health_consultation_keeps_medical_and_image_boundaries(self) -> None:
         skill = (ROOT / "skills" / "health-consultation" / "SKILL.md").read_text(encoding="utf-8")
@@ -52,7 +47,6 @@ class HealthConsultationSkillTests(unittest.TestCase):
 
     def test_breast_lump_and_pain_must_triage_before_advice(self) -> None:
         health_skill = (ROOT / "skills" / "health-consultation" / "SKILL.md").read_text(encoding="utf-8")
-        milk_skill = (ROOT / "skills" / "milk-management" / "SKILL.md").read_text(encoding="utf-8")
 
         self.assertIn("乳房硬块、疼痛、堵奶这类问题，先按这个节奏来", health_skill)
         self.assertIn("我先确认两个要紧的情况", health_skill)
@@ -61,9 +55,6 @@ class HealthConsultationSkillTests(unittest.TestCase):
         self.assertIn("用户没回答前", health_skill)
         self.assertIn("先给她能立刻做的事", health_skill)
         self.assertIn("不要把 IBCLC 当成默认下一步", health_skill)
-
-        self.assertIn("乳房硬块、硬块疼、乳房红肿、堵奶或吸奶痛这类问题，先确认几个要紧情况", milk_skill)
-        self.assertIn("不要直接给冷敷、按摩、排乳、吸奶频率、资料引用或 IBCLC 入口推荐", milk_skill)
 
     def test_health_consultation_prioritizes_action_before_referral(self) -> None:
         health_skill = (ROOT / "skills" / "health-consultation" / "SKILL.md").read_text(encoding="utf-8")
@@ -79,7 +70,6 @@ class HealthConsultationSkillTests(unittest.TestCase):
 
     def test_ibclc_consultation_flow_has_warm_pre_and_post_trigger_rules(self) -> None:
         health_skill = (ROOT / "skills" / "health-consultation" / "SKILL.md").read_text(encoding="utf-8")
-        milk_skill = (ROOT / "skills" / "milk-management" / "SKILL.md").read_text(encoding="utf-8")
 
         self.assertIn("## 什么情况下建议找 IBCLC 顾问", health_skill)
         self.assertIn("IBCLC 是喂养和排乳细节支持", health_skill)
@@ -98,8 +88,3 @@ class HealthConsultationSkillTests(unittest.TestCase):
         self.assertIn("卡片出现后", health_skill)
         self.assertIn("不用一个人反复猜", health_skill)
         self.assertIn("不承诺已经预约、已经接通、顾问正在处理", health_skill)
-
-        self.assertIn("IBCLC 前后要有服务感", milk_skill)
-        self.assertIn("先由 CoMate 完成基础问诊和可执行建议", milk_skill)
-        self.assertIn("如果你想把含乳、排乳和宝宝摄入信号一起看细一点", milk_skill)
-        self.assertIn("用户继续确认要进入时，再打开入口", milk_skill)

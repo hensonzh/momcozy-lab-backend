@@ -539,14 +539,16 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "milk_assessment_evaluate": _function_tool(
         "milk_assessment_evaluate",
-        "EVALUATE 只读工具：基于固定参考数据和记录聚合，返回近期奶量状态、缺失数据、每日参考奶量区间、含亲喂估算奶量和规则命中。所有奶量分析请求都要先确认宝宝摄入/精神状态和妈妈乳房/全身状态；缺少这些关键信息或存在风险时不会生成分析卡，而是返回 needs_clinical_context 或 gate 结果。只查历史明细或单纯列每天多少时才用 milk_records_query。不是诊断，也不生成最终用户话术。",
+        "EVALUATE 只读工具：综合评估近期奶量、记录完整度、宝宝摄入/精神状态和妈妈乳房/全身状态，返回参考区间、含亲喂估算、趋势、记录可信度、风险提示和下一步。所有奶量分析请求都要先确认宝宝摄入/精神状态和妈妈乳房/全身状态；缺少这些关键信息或存在风险时返回 needs_clinical_context 或 gate 结果。奶量分析/计划流程中，用户说胀、涨、排不空、吸完还胀但否认发热/红肿/硬块加重/疼痛加重时，仍属于奶量管理流程，应通过 maternal_symptoms 标记 breast_fullness 或 incomplete_emptying，不要直接切成普通健康咨询。只查历史明细或单纯列每天多少时才用 milk_records_query。不是诊断，不生成卡片，也不生成最终用户话术。",
         {
             "as_of_time": _nullable({"type": "string", "description": "可选 ISO-8601 评估时间；不确定时传 null。"}),
             "window_days": {"type": "integer", "description": "回看天数。分析最近吸奶情况、奶量趋势或全面评估通常用 7；用户已明确追奶/稳奶/减奶计划方向时可用 1。"},
             "include_today": {"type": "boolean", "description": "是否包含当前日未完整记录。通常评估完整日时传 false。"},
+            "comprehensive_assessment": {"type": "boolean", "description": "本轮是否是在做综合奶量评估。用户要求分析奶量、补充了上一轮评估追问信息、或从奶量提醒进入时传 true；只是为计划工具准备最近一天输入时可传 false。"},
+            "workflow_intent": _nullable({"type": "string", "description": "当前奶量流程意图。用户正在分析奶量或正在补充上一轮奶量分析追问时传 milk_analysis，避免因为本轮只是回答问题而跳过综合评估。"}),
             "maternal_symptoms": {
                 **JSON_OBJECT_STRING,
-                "description": "字符串编码 JSON。可包含 fever、chills、breast_redness、lump_or_hard_area、worsening_pain、nipple_damage、recurrent_plug、pain_level。没有信息传 {}。",
+                "description": "字符串编码 JSON。可包含 fever、chills、breast_redness、lump_or_hard_area、worsening_pain、nipple_damage、recurrent_plug、pain_level、breast_fullness、engorgement、post_pump_fullness、incomplete_emptying、symptom_text。用户说胀、涨、排不空、吸完还胀但否认红旗信号时，设置 breast_fullness 或 incomplete_emptying 为 true，并把 fever/breast_redness/lump_or_hard_area/worsening_pain 按用户回答设置为 false。没有信息传 {}。",
             },
             "infant_signals": {
                 **JSON_OBJECT_STRING,
@@ -564,7 +566,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
             "requested_plan_type": _nullable({"type": "string", "enum": ["increase_milk", "maintain_milk", "decrease_milk"]}),
             "maternal_symptoms": {
                 **JSON_OBJECT_STRING,
-                "description": "字符串编码 JSON。可包含 fever、chills、breast_redness、lump_or_hard_area、worsening_pain、nipple_damage、recurrent_plug、pain_level。未知字段传 {}。",
+                "description": "字符串编码 JSON。可包含 fever、chills、breast_redness、lump_or_hard_area、worsening_pain、nipple_damage、recurrent_plug、pain_level、breast_fullness、engorgement、post_pump_fullness、incomplete_emptying、symptom_text。用户说胀、涨、排不空、吸完还胀但否认红旗信号时，设置 breast_fullness 或 incomplete_emptying 为 true，并把 fever/breast_redness/lump_or_hard_area/worsening_pain 按用户回答设置为 false。未知字段传 {}。",
             },
             "infant_signals": {
                 **JSON_OBJECT_STRING,
@@ -597,7 +599,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "milk_plan_preview": _function_tool(
         "milk_plan_preview",
-        "PREVIEW 候选方案工具：按确定性规则生成追奶、稳奶或减奶计划草稿，不写数据库，并返回保存前校验结果。用于用户明确想要生成/调整奶量计划，或评估后需要给出计划草稿时；不要用于读取已有计划、单次 calendar 调整或设备使用指导。只有返回 plan_preview_ready 且 data.validation.valid=true 时才能展示确认保存；如用户给出目标，可同时返回目标校验结果。",
+        "PREVIEW 候选方案工具：按确定性规则生成追奶、稳奶或减奶计划草稿，不写数据库，并返回保存前校验结果。用于用户明确想要生成/调整奶量计划，或评估后需要给出计划草稿时；如果用户在奶量计划流程中说胀、涨、排不空、吸完还胀但否认发热/红肿/硬块加重/疼痛加重，不要改走普通健康咨询，应把这些作为 maternal_symptoms 放进 options，让计划把单次有效移出和结束标准一起考虑。不要用于读取已有计划、单次 calendar 调整或设备使用指导。只有返回 plan_preview_ready 且 data.validation.valid=true 时才能展示确认保存；如用户给出目标，可同时返回目标校验结果。",
         {
             "plan_type": _nullable({"type": "string", "enum": ["increase_milk", "maintain_milk", "decrease_milk"]}),
             "plan_days": _nullable({"type": "integer"}),
@@ -609,7 +611,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
             "options": _nullable(
                 {
                     **JSON_OBJECT_STRING,
-                    "description": "字符串编码 JSON。可包含 prepared_assessment、prepared_growth_assessment、maternal_symptoms、infant_signals、observed_persistent_abnormal 或 medical_confirmation_confirmed。",
+                    "description": "字符串编码 JSON。可包含 prepared_assessment、prepared_growth_assessment、maternal_symptoms、infant_signals、observed_persistent_abnormal 或 medical_confirmation_confirmed。maternal_symptoms 可包含 breast_fullness、engorgement、post_pump_fullness、incomplete_emptying、symptom_text；无红旗的胀/排不空要作为计划约束传入。",
                 }
             ),
         },

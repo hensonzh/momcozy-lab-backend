@@ -168,6 +168,9 @@ def preview_milk_plan(
         milk_normality=milk_normality,
         infant_age_months=plan_context.get("infant_age_months"),
     )
+    maternal_symptoms = _maternal_symptoms_from_options(parsed_options)
+    if _has_breast_fullness_without_red_flags(maternal_symptoms):
+        plan_rules["breast_fullness_without_red_flags"] = True
     if (
         normalized_type == PLAN_TYPE_DECREASE
         and bool(plan_rules.get("medical_confirmation_required"))
@@ -205,6 +208,7 @@ def preview_milk_plan(
     schedule_templates = _daily_schedule_templates(normalized_type, days, schedule_items, plan_rules)
     title = _plan_title(normalized_type)
     rule_notes = _plan_rule_notes(normalized_type, plan_rules)
+    control_strategy = _plan_control_strategy(normalized_type, plan_rules)
     draft = {
         "plan_type": normalized_type,
         "plan_name": f"{title}{days}天",
@@ -229,6 +233,7 @@ def preview_milk_plan(
             "items": schedule_templates[0]["items"] if schedule_templates else schedule_items,
         },
         "daily_schedule_templates": schedule_templates,
+        "control_strategy": control_strategy,
         "rule_notes": rule_notes,
         "advice": rule_notes,
         "review_note": _review_note(normalized_type),
@@ -2314,6 +2319,8 @@ def _round_to_step(minute: int, step_minutes: int) -> int:
 def _plan_rule_notes(plan_type: str, rules: dict[str, Any]) -> list[str]:
     if plan_type == PLAN_TYPE_INCREASE:
         notes = ["优先保证可执行性，新增频次不要造成明显疲惫。", "每次吸奶后记录奶量，连续 3 天后复盘。"]
+        if rules.get("breast_fullness_without_red_flags"):
+            notes.insert(0, "目前主要是胀或感觉没排空，且没有发热、红肿、硬块加重等信号；计划会把单次有效移出和结束标准一起考虑。")
         if rules.get("require_pp"):
             notes.insert(0, "如身体允许，可在第1-7天安排一次吸奶；第8天后改回常规吸奶。")
         if rules.get("needs_referral"):
@@ -2335,6 +2342,49 @@ def _plan_rule_notes(plan_type: str, rules: dict[str, Any]) -> list[str]:
             notes.append("宝宝已满10月龄且频次较低时，可每3天减少1次，但仍以妈妈舒适度为准。")
         return notes
     return ["沿用近期可执行节奏，重点保持稳定记录。", "第3天和第7天复盘奶量、宝宝表现和妈妈舒适度。"]
+
+
+def _plan_control_strategy(plan_type: str, rules: dict[str, Any]) -> dict[str, Any]:
+    hard_stop = "如果发热、寒战、乳房红肿热痛扩大、疼痛明显加重，或宝宝尿布/精神/体重让人担心，先暂停自动调整，联系医生或 IBCLC。"
+    if plan_type == PLAN_TYPE_INCREASE:
+        if rules.get("breast_fullness_without_red_flags"):
+            return {
+                "why_this_way": "这版不是单纯猛加次数，而是把奶量偏低和吸完还胀一起看：先让移出更有效，再小步增加刺激。",
+                "schedule_focus": "优先把 24 小时里的吸奶/亲喂安排得更均匀，避免很长空档，同时不把单次拖得太久。",
+                "session_goal": "每次先看有效移出：吸力舒服、法兰合适、奶流变慢后再多 1-2 分钟即可。",
+                "when_to_stop_each_time": "如果吸完还胀，先轻柔按摩或短暂停一下再看；不要为了追奶硬吸到疼。",
+                "how_to_adjust": "一次只改一件事，先调单次有效移出和最长间隔；连续 2-3 天后再看平均变化。",
+                "review_timing": "连续执行 2-3 天后，复盘总奶量、吸奶次数、宝宝尿布/精神和妈妈胀感。",
+                "hard_stop": hard_stop,
+            }
+        return {
+            "why_this_way": "这版先增加有效移乳信号，但不靠把少数几次吸得很久来硬追。",
+            "schedule_focus": "优先把 24 小时里的吸奶/亲喂安排得更均匀，少留很长空档。",
+            "session_goal": "每次重点是有效移出，不是把自己耗到很久。",
+            "when_to_stop_each_time": "吸奶到奶流明显变慢后，再多 1-2 分钟就可以；亲喂就看吞咽变少和宝宝状态。",
+            "how_to_adjust": "一次只改一件事，先加一次或缩短最长间隔，连续 2-3 天后看平均变化。",
+            "review_timing": "连续执行 2-3 天后，复盘总奶量、吸奶次数、宝宝尿布/精神和妈妈舒适度。",
+            "hard_stop": hard_stop,
+        }
+    if plan_type == PLAN_TYPE_DECREASE:
+        return {
+            "why_this_way": "这版先减少过强刺激，让身体慢慢降下来，不突然大幅停掉。",
+            "schedule_focus": "先取消不必要的额外吸奶；容易堵奶时，先少取一点或缩短单次时间，再慢慢拉长间隔或合并场次。",
+            "session_goal": "每次只吸到舒服，不追求排得很空。",
+            "when_to_stop_each_time": "胀得难受时少量移出到舒服就停，不继续给身体很强的增奶信号。",
+            "how_to_adjust": f"每 {to_int(rules.get('strategy_interval_days'), 7)} 天作为一个小阶段；一次只减一个吸奶点或一小段时长。",
+            "review_timing": "每 2-3 天看胀痛、硬块、总量、宝宝摄入和睡眠，再决定要不要进入下一步。",
+            "hard_stop": hard_stop,
+        }
+    return {
+        "why_this_way": "这版目标是稳住供需，不追求最大产量，也不突然减少。",
+        "schedule_focus": "让吸奶/亲喂节奏尽量贴近宝宝真实需求，避免忽多忽少。",
+        "session_goal": "每次稳定、舒服地移出即可。",
+        "when_to_stop_each_time": "吸奶到奶流明显变慢、乳房舒服一些就可以；亲喂就看宝宝吞咽和满足感。",
+        "how_to_adjust": "一次只改一件事；如果作息变化，先调时间，再看是否需要调次数。",
+        "review_timing": "第 3 天和第 7 天复盘奶量、宝宝表现和妈妈舒适度。",
+        "hard_stop": hard_stop,
+    }
 
 
 def _review_note(plan_type: str) -> str:
@@ -2531,6 +2581,40 @@ def _parse_options(options: dict[str, Any] | str | None) -> dict[str, Any]:
     except json.JSONDecodeError:
         return {}
     return parsed if isinstance(parsed, dict) else {}
+
+
+def _maternal_symptoms_from_options(options: dict[str, Any]) -> dict[str, Any]:
+    value = options.get("maternal_symptoms")
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
+def _has_breast_fullness_without_red_flags(maternal_symptoms: dict[str, Any]) -> bool:
+    if not _has_breast_fullness_signal(maternal_symptoms):
+        return False
+    return not any(
+        to_bool(maternal_symptoms.get(key))
+        for key in ("fever", "chills", "breast_redness", "lump_or_hard_area", "worsening_pain")
+    )
+
+
+def _has_breast_fullness_signal(maternal_symptoms: dict[str, Any]) -> bool:
+    for key in ("breast_fullness", "engorgement", "post_pump_fullness", "incomplete_emptying"):
+        if to_bool(maternal_symptoms.get(key)):
+            return True
+    text = " ".join(
+        norm_text(maternal_symptoms.get(key))
+        for key in ("symptom_text", "description", "notes")
+        if norm_text(maternal_symptoms.get(key))
+    )
+    return any(token in text for token in ("胀", "涨", "排不空", "没排空", "没有排空", "吸完还胀", "吸完还涨"))
 
 
 def _prepared_data_from_options(options: dict[str, Any], *keys: str) -> dict[str, Any]:

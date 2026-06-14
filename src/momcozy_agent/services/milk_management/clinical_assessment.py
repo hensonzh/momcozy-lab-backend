@@ -238,6 +238,7 @@ def _maternal_symptoms_domain(maternal_symptoms: dict[str, Any]) -> dict[str, An
     worsening_pain = to_bool(maternal_symptoms.get("worsening_pain"))
     nipple_damage = to_bool(maternal_symptoms.get("nipple_damage"))
     recurrent_plug = to_bool(maternal_symptoms.get("recurrent_plug"))
+    breast_fullness = _has_breast_fullness_signal(maternal_symptoms)
     pain_level = _optional_int(maternal_symptoms.get("pain_level"))
 
     if fever and (chills or redness or lump or worsening_pain):
@@ -257,6 +258,8 @@ def _maternal_symptoms_domain(maternal_symptoms: dict[str, Any]) -> dict[str, An
         "worsening_pain": worsening_pain,
         "nipple_damage": nipple_damage,
         "recurrent_plug": recurrent_plug,
+        "breast_fullness": breast_fullness,
+        "fullness_without_red_flags": breast_fullness and not (fever or chills or redness or lump or worsening_pain),
         "pain_level": pain_level,
     }
 
@@ -356,7 +359,10 @@ def _next_actions(risk_level: str, domains: dict[str, dict[str, Any]], plan_gate
     if not plan_gate.get("allowed"):
         return ["先补充关键记录。", "记录完整后再判断是否生成奶量计划。"]
     if domains["milk_volume"].get("status") == "under_supply_alert":
-        return ["可以生成温和追奶计划。", "连续记录 3 天后复盘宝宝信号和妈妈舒适度。"]
+        maternal = domains["maternal_breast_symptoms"]
+        if maternal.get("fullness_without_red_flags") is True:
+            return ["如果用户明确需要计划，可以继续生成温和追奶计划，并把胀/排不空作为计划约束。", "连续记录 3 天后复盘宝宝信号和妈妈舒适度。"]
+        return ["如果用户明确需要计划，可以继续生成温和追奶计划。", "连续记录 3 天后复盘宝宝信号和妈妈舒适度。"]
     if domains["milk_volume"].get("status") == "over_supply_alert":
         return ["先观察 3-5 天。", "如果持续胀痛、堵奶或喷乳明显，再考虑温和减奶。"]
     return ["可以继续按当前节奏观察。", "需要时可生成稳奶计划。"]
@@ -373,6 +379,18 @@ def _evidence_ids(domains: dict[str, dict[str, Any]], risk_level: str) -> list[s
     if risk_level in {RISK_LOW, RISK_WATCH}:
         ids.append("CDC_PUMPING_BREAST_MILK")
     return list(dict.fromkeys(ids))
+
+
+def _has_breast_fullness_signal(maternal_symptoms: dict[str, Any]) -> bool:
+    for key in ("breast_fullness", "engorgement", "post_pump_fullness", "incomplete_emptying"):
+        if to_bool(maternal_symptoms.get(key)):
+            return True
+    text = " ".join(
+        norm_text(maternal_symptoms.get(key))
+        for key in ("symptom_text", "description", "notes")
+        if norm_text(maternal_symptoms.get(key))
+    )
+    return any(token in text for token in ("胀", "涨", "排不空", "没排空", "没有排空", "吸完还胀", "吸完还涨"))
 
 
 def _evidence_item(evidence_id: str) -> dict[str, str]:

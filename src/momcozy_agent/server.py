@@ -359,7 +359,7 @@ async def stream_ag_ui_events(
                 send_text_delta(text)
             current_text = "".join(streamed_text_parts) or text
             for followup in pending_assistant_followups:
-                if _should_send_assistant_followup(followup, current_text):
+                if _should_send_assistant_followup(followup, current_text, allow_only_when_no_text=True):
                     send_text_delta(f"\n\n{followup}")
                     current_text = f"{current_text}\n\n{followup}"
             record_birth_prep_assistant_message(session.context_state, current_text)
@@ -738,8 +738,10 @@ def _session_state_payload(session: ChatSession) -> dict[str, Any]:
     }
 
 
-def _should_send_assistant_followup(followup: str, current_text: str) -> bool:
+def _should_send_assistant_followup(followup: str, current_text: str, *, allow_only_when_no_text: bool = False) -> bool:
     if not followup.strip():
+        return False
+    if allow_only_when_no_text and current_text.strip():
         return False
     if followup in current_text:
         return False

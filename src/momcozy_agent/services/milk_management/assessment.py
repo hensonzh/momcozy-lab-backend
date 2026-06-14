@@ -155,9 +155,80 @@ def evaluate_milk_status(
             "quick_24h_intake": quick_24h_intake,
             "milk_normality": normality,
             "missing_data": missing_data,
+            "control_suggestion": _control_suggestion(
+                status=status,
+                normality=normality,
+                missing_data=missing_data,
+                pumping_summary=pumping_summary,
+                feeding_summary=feeding_summary,
+                calendar_task_summary=calendar_task_summary,
+            ),
             "assessment_status": status,
         },
     )
+
+
+def _control_suggestion(
+    *,
+    status: str,
+    normality: dict[str, Any],
+    missing_data: list[str],
+    pumping_summary: dict[str, Any],
+    feeding_summary: dict[str, Any],
+    calendar_task_summary: dict[str, Any],
+) -> dict[str, Any]:
+    days = normality.get("days") if isinstance(normality.get("days"), list) else []
+    valid_days = [item for item in days if isinstance(item, dict) and item.get("ok") is True]
+    low_days = [item for item in valid_days if norm_text(item.get("status")) == "low"]
+    high_days = [item for item in valid_days if norm_text(item.get("status")) == "high"]
+    has_breastfeeding = bool(feeding_summary.get("has_breastfeeding"))
+    recorded_pumping_count = to_int(pumping_summary.get("count"), 0)
+    planned_pump_count = to_int(calendar_task_summary.get("pump_task_count"), 0)
+    completed_pump_count = to_int(calendar_task_summary.get("completed_pump_task_count"), 0)
+    maybe_missing_records = bool(missing_data) or (
+        planned_pump_count > completed_pump_count and recorded_pumping_count < completed_pump_count
+    )
+
+    base = {
+        "review_window": "先连续看 2-3 天平均变化，不按某一次高低马上改计划。",
+        "change_rule": "一次只改一件事，先看身体和宝宝反应，再决定下一步。",
+        "hard_stop": "如果发热、寒战、红肿热痛扩大、疼痛加重，或宝宝尿布/精神/体重让人担心，先暂停自动调整，联系医生或 IBCLC。",
+    }
+    if maybe_missing_records:
+        return {
+            **base,
+            "main_focus": "先确认记录有没有漏掉。",
+            "schedule_move": "把亲喂、手挤、夜间吸奶、其它吸奶器或瓶喂记录补齐后，再判断要不要调次数和间隔。",
+            "session_move": "现在先不要因为数字偏低就强行拉长每次吸奶。",
+            "next_step": "先问用户有没有没记进去的亲喂、手挤、吸奶或瓶喂。",
+        }
+    if status == "under_supply_alert" or len(low_days) >= 2:
+        return {
+            **base,
+            "main_focus": "先确认偏低是不是由漏记造成；如果记录完整，下一步看宝宝摄入信号和妈妈状态。",
+            "schedule_move": "只有在记录完整、宝宝状态稳定、妈妈没有明显不适时，才考虑优先缩短最长间隔，或增加一次更容易坚持的吸奶/亲喂。",
+            "session_move": "每次吸到奶流明显变慢后，再多 1-2 分钟就可以；不要靠少数几次痛苦干吸很久。",
+            "next_step": "如果用户确认没有漏记，先问宝宝尿布、精神、吃奶后满足感是否还好。",
+        }
+    if status == "over_supply_alert" or high_days:
+        return {
+            **base,
+            "main_focus": "下一步优先减少过强刺激，让身体慢慢降下来。",
+            "schedule_move": "先取消不必要的额外吸奶；如果容易堵，先少取一点或缩短单次时间，再慢慢拉长间隔。",
+            "session_move": "每次只吸到舒服，不追求排得很空；胀得难受时少量移出即可。",
+            "next_step": "可以做一个温和减奶或舒适调整方案。",
+        }
+    if has_breastfeeding:
+        session_move = "亲喂看宝宝吞咽变少和满足感；吸奶到奶流变慢、乳房舒服一些就可以。"
+    else:
+        session_move = "吸奶到奶流明显变慢、乳房舒服一些就可以，不需要硬拖很久。"
+    return {
+        **base,
+        "main_focus": "先保持现在能执行的节奏，不为了追求更高数字大改。",
+        "schedule_move": "让吸奶/亲喂尽量贴近宝宝真实需求，避免忽多忽少。",
+        "session_move": session_move,
+        "next_step": "可以继续稳住现在节奏，过几天再复盘。",
+    }
 
 
 def _summarize_pumping(rows: list[dict[str, Any]]) -> dict[str, Any]:

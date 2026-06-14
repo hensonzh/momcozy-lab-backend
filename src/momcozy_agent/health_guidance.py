@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from .types import RuntimeInputs
@@ -236,7 +237,10 @@ _URGENT_RED_FLAG_TERMS = (
 )
 
 
-def should_include_health_guidance_context(inputs: RuntimeInputs) -> bool:
+def should_include_health_guidance_context(
+    inputs: RuntimeInputs,
+    loaded_skill_ids: list[str] | None = None,
+) -> bool:
     message = str(inputs.get("user_message") or "").strip()
     if not message or "confirmed_form_data:" in message:
         return False
@@ -244,11 +248,69 @@ def should_include_health_guidance_context(inputs: RuntimeInputs) -> bool:
         return False
     if any(term in message for term in _URGENT_RED_FLAG_TERMS):
         return False
+    if _is_milk_management_fullness_followup(message, loaded_skill_ids):
+        return False
 
     has_health_domain = any(term in message for term in _HEALTH_DOMAIN_TERMS)
     has_complex_signal = any(term in message for term in _COMPLEX_HEALTH_TERMS)
 
     return has_health_domain and has_complex_signal
+
+
+def _is_milk_management_fullness_followup(message: str, loaded_skill_ids: list[str] | None) -> bool:
+    if not _has_loaded_skill(loaded_skill_ids, "milk-management"):
+        return False
+    has_fullness_signal = any(
+        term in message
+        for term in (
+            "胀",
+            "涨",
+            "排不空",
+            "没排空",
+            "没有排空",
+            "吸完还胀",
+            "吸完还涨",
+        )
+    )
+    if not has_fullness_signal:
+        return False
+    return not _has_unnegated_fullness_red_flag(message)
+
+
+def _has_unnegated_fullness_red_flag(message: str) -> bool:
+    for term in (
+        "发热",
+        "发烧",
+        "寒战",
+        "红肿",
+        "发红",
+        "红热",
+        "硬块",
+        "越来越痛",
+        "疼痛加重",
+        "变大",
+        "扩大",
+        "破皮",
+        "出血",
+        "化脓",
+    ):
+        if _contains_unnegated_term(message, term):
+            return True
+    return False
+
+
+def _contains_unnegated_term(message: str, term: str) -> bool:
+    if term not in message:
+        return False
+    denied_pattern = rf"(没有|没|无|不|否认)[^，。；;、\n]{{0,8}}{re.escape(term)}"
+    return re.search(denied_pattern, message) is None
+
+
+def _has_loaded_skill(loaded_skill_ids: list[str] | None, skill_id: str) -> bool:
+    if not loaded_skill_ids:
+        return False
+    normalized = {str(value).strip().replace("_", "-") for value in loaded_skill_ids}
+    return skill_id in normalized
 
 
 def needs_breast_triage_first(inputs: RuntimeInputs) -> bool:
@@ -269,8 +331,11 @@ def health_guidance_web_search_tool() -> dict[str, Any]:
     }
 
 
-def health_guidance_required_web_search_tool_choice(inputs: RuntimeInputs) -> dict[str, Any] | None:
-    if not should_include_health_guidance_context(inputs):
+def health_guidance_required_web_search_tool_choice(
+    inputs: RuntimeInputs,
+    loaded_skill_ids: list[str] | None = None,
+) -> dict[str, Any] | None:
+    if not should_include_health_guidance_context(inputs, loaded_skill_ids):
         return None
     if needs_breast_triage_first(inputs):
         return None
@@ -281,8 +346,11 @@ def health_guidance_required_web_search_tool_choice(inputs: RuntimeInputs) -> di
     }
 
 
-def health_guidance_request_context_lines(inputs: RuntimeInputs) -> list[str]:
-    if not should_include_health_guidance_context(inputs):
+def health_guidance_request_context_lines(
+    inputs: RuntimeInputs,
+    loaded_skill_ids: list[str] | None = None,
+) -> list[str]:
+    if not should_include_health_guidance_context(inputs, loaded_skill_ids):
         return []
     lines = [
         "health_guidance_context:",

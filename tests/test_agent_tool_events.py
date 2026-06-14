@@ -106,6 +106,34 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertIn("有没有发烧、寒战", request_context)
         self.assertIn("不要输出冷敷、按摩、排乳、用药、资料引用或 IBCLC 入口推荐", request_context)
 
+    def test_milk_management_fullness_without_red_flags_does_not_force_health_search(self) -> None:
+        request = build_agent_request(
+            {"user_message": "没有红肿发热，就是吸完还胀", "locale": "zh-CN"},
+            {"loaded_skill_ids": ["milk-management"]},
+        )
+
+        self.assertEqual(request["tool_choice"], "auto")
+        request_context = request["input"][0]["content"][0]["text"]
+        self.assertIn("loaded_skill_context:", request_context)
+        self.assertNotIn("health_guidance_context:", request_context)
+
+    def test_milk_management_fullness_with_red_flags_still_forces_health_search(self) -> None:
+        request = build_agent_request(
+            {"user_message": "吸完还胀，而且乳房红肿发热", "locale": "zh-CN"},
+            {"loaded_skill_ids": ["milk-management"]},
+        )
+
+        self.assertEqual(
+            request["tool_choice"],
+            {
+                "type": "allowed_tools",
+                "mode": "required",
+                "tools": [{"type": "web_search"}],
+            },
+        )
+        request_context = request["input"][0]["content"][0]["text"]
+        self.assertIn("health_guidance_context:", request_context)
+
     def test_light_product_or_urgent_questions_do_not_add_health_guidance_context(self) -> None:
         light_request = build_agent_request({"user_message": "孕26周该准备什么", "locale": "zh-CN"})
         product_request = build_agent_request({"user_message": "帮我整理待产包清单", "locale": "zh-CN"})
@@ -1028,6 +1056,64 @@ class AgentToolEventTests(unittest.TestCase):
         )
 
         self.assertEqual(text, "我先整理一下，再继续处理。这是最终回复。")
+
+    def test_stream_does_not_append_tool_followup_when_final_text_exists(self) -> None:
+        async def collect_events() -> list[dict[str, object]]:
+            client = _FakeStreamingClient(
+                [
+                    {
+                        "id": "resp-card",
+                        "output": [
+                            {
+                                "type": "function_call",
+                                "id": "item-card",
+                                "call_id": "call-card",
+                                "name": "labor_communication_card_create",
+                                "arguments": json.dumps({"confirmed_form_data": {}}),
+                            }
+                        ],
+                    },
+                    {
+                        "id": "resp-final",
+                        "output": [
+                            {
+                                "type": "message",
+                                "content": [
+                                    {
+                                        "type": "output_text",
+                                        "text": "你可以提前和医院确认，并在产检或入院前把这份沟通单给医生/护士看。",
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                ]
+            )
+            runtime = ChatRuntime(client, model="test-model")
+            stream = stream_ag_ui_events(
+                {"thread_id": "thread-1", "run_id": "run-followup-no-dup"},
+                {
+                    "user_message": (
+                        "我已确认信息。\n"
+                        "form_id: birth_plan_card_intake\n"
+                        'confirmed_form_data:\n{"birth_path":"顺产","support_person":"伴侣"}'
+                    ),
+                    "locale": "zh-CN",
+                },
+                runtime,
+            )
+            return [event async for event in stream]
+
+        events = asyncio.run(collect_events())
+        text = "".join(
+            str(event.get("delta") or "")
+            for event in events
+            if event.get("type") == "TEXT_MESSAGE_CONTENT"
+        )
+
+        self.assertIn("你可以提前和医院确认", text)
+        self.assertEqual(text.count("你可以提前和医院确认"), 1)
+        self.assertIn("ARTIFACT_CREATED", [event.get("type") for event in events])
 
     def test_stream_adds_default_quick_replies_when_model_omits_tool(self) -> None:
         async def collect_events() -> list[dict[str, object]]:
