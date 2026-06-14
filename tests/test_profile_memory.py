@@ -64,6 +64,22 @@ class ProfileMemoryTests(unittest.TestCase):
         self.assertFalse(remembered_profile["profile_onboarding_skipped"])
         self.assertFalse(skipped_profile["profile_onboarding_skipped"])
 
+    def test_dev_startup_reset_clears_birth_prep_shared_memory(self) -> None:
+        data_store.update_birth_prep_profile_memory(
+            user_id="profile-birth-prep-reset",
+            due_date_or_week="孕32周",
+            birth_path="剖宫产",
+            support_person="伴侣",
+        )
+
+        cleared = data_store.reset_birth_prep_profile_memory_for_dev()
+
+        self.assertGreaterEqual(cleared, 1)
+        profile = data_store.get_user_profile("profile-birth-prep-reset")
+        self.assertEqual(profile["birth_prep_due_date_or_week"], "")
+        self.assertEqual(profile["birth_prep_birth_path"], "")
+        self.assertEqual(profile["birth_prep_support_person"], "")
+
     def test_user_profile_context_is_only_injected_at_session_start(self) -> None:
         state = ContextState()
         inputs = {
