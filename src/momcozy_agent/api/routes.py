@@ -578,6 +578,16 @@ async def query_mom_baby_info_endpoint(request: Request, user_id: str = "") -> d
     )
 
 
+@router.get("/v1/user/profile/query")
+async def query_user_profile_endpoint(request: Request, user_id: str = "") -> dict[str, Any]:
+    verify_api_key(request)
+    uid = str(user_id or "").strip()
+    if not uid:
+        return {"status": 400, "message": "user_id is required", "data": {"error": -1}}
+    profile = data_store.get_user_profile(uid)
+    return {"status": 200, "message": "success", "data": _public_user_profile_payload(profile)}
+
+
 @router.post("/v1/status/create")
 async def create_status_endpoint(request: Request) -> dict[str, Any]:
     verify_api_key(request)
@@ -1913,6 +1923,38 @@ def _pump_query_response(*, error: int, pump_milk_list: list[dict[str, Any]] | N
 
 def _basic_error_response(*, error: int = -1) -> dict[str, Any]:
     return {"error": int(error)}
+
+
+def _public_user_profile_payload(profile: dict[str, Any]) -> dict[str, Any]:
+    display_name = str(profile.get("display_name") or profile.get("user_nickname") or "").strip()
+    age = _profile_age_value(profile.get("age"))
+    skipped_at = str(profile.get("profile_onboarding_skipped_at") or "").strip()
+    completed_at = str(profile.get("profile_onboarding_completed_at") or "").strip()
+    return {
+        "error": 0,
+        "user_id": str(profile.get("user_id") or "").strip(),
+        "display_name": display_name,
+        "age": age,
+        "profile_onboarding_complete": bool(display_name and age is not None),
+        "profile_onboarding_skipped": bool(skipped_at),
+        "profile_onboarding_skipped_at": skipped_at,
+        "profile_onboarding_completed_at": completed_at,
+        "birth_prep_due_date_or_week": str(profile.get("birth_prep_due_date_or_week") or "").strip(),
+        "birth_prep_birth_path": str(profile.get("birth_prep_birth_path") or "").strip(),
+        "birth_prep_support_person": str(profile.get("birth_prep_support_person") or "").strip(),
+    }
+
+
+def _profile_age_value(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        age = int(value)
+    except Exception:
+        return None
+    if age < 0 or age > 120:
+        return None
+    return age
 
 
 def _valid_analysis_payload(payload: Any) -> bool:

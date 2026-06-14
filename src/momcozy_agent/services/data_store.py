@@ -34,6 +34,13 @@ def init_db() -> None:
             CREATE TABLE IF NOT EXISTS user_profile (
                 user_id TEXT PRIMARY KEY,
                 user_nickname TEXT,
+                display_name TEXT,
+                age INTEGER,
+                profile_onboarding_skipped_at TEXT,
+                profile_onboarding_completed_at TEXT,
+                birth_prep_due_date_or_week TEXT,
+                birth_prep_birth_path TEXT,
+                birth_prep_support_person TEXT,
                 delivery_date TEXT,
                 lactation_advice TEXT,
                 feeding_advice TEXT,
@@ -243,6 +250,13 @@ def init_db() -> None:
         _ensure_column(conn, "user_profile", "lactation_advice", "TEXT")
         _ensure_column(conn, "user_profile", "feeding_advice", "TEXT")
         _ensure_column(conn, "user_profile", "daily_summary", "TEXT")
+        _ensure_column(conn, "user_profile", "display_name", "TEXT")
+        _ensure_column(conn, "user_profile", "age", "INTEGER")
+        _ensure_column(conn, "user_profile", "profile_onboarding_skipped_at", "TEXT")
+        _ensure_column(conn, "user_profile", "profile_onboarding_completed_at", "TEXT")
+        _ensure_column(conn, "user_profile", "birth_prep_due_date_or_week", "TEXT")
+        _ensure_column(conn, "user_profile", "birth_prep_birth_path", "TEXT")
+        _ensure_column(conn, "user_profile", "birth_prep_support_person", "TEXT")
         _ensure_calendar_schema(conn)
         _ensure_column(conn, "feeding_log", "feed_action", "INTEGER NOT NULL DEFAULT 0")
         _ensure_column(conn, "feeding_log", "feeding_title", "TEXT")
@@ -361,6 +375,179 @@ def get_mom_baby_info(user_id: str) -> dict[str, Any] | None:
         "lactation_advice": user_data.get("lactation_advice"),
         "feeding_advice": user_data.get("feeding_advice"),
     }
+
+
+def get_user_profile(user_id: str) -> dict[str, Any]:
+    init_db()
+    uid = str(user_id or "").strip()
+    if not uid:
+        return {}
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM user_profile WHERE user_id = ?", (uid,)).fetchone()
+    if row is None:
+        return {"user_id": uid}
+    profile = _row_dict(row)
+    profile["user_id"] = uid
+    profile["display_name"] = str(profile.get("display_name") or profile.get("user_nickname") or "").strip()
+    profile["age"] = _profile_age_value(profile.get("age"))
+    profile["birth_prep_due_date_or_week"] = _normalize_birth_prep_memory_text(profile.get("birth_prep_due_date_or_week"))
+    profile["birth_prep_birth_path"] = _normalize_birth_prep_memory_text(profile.get("birth_prep_birth_path"))
+    profile["birth_prep_support_person"] = _normalize_birth_prep_memory_text(profile.get("birth_prep_support_person"))
+    profile["profile_onboarding_complete"] = bool(profile.get("display_name")) and profile.get("age") is not None
+    profile["profile_onboarding_skipped"] = bool(str(profile.get("profile_onboarding_skipped_at") or "").strip())
+    return profile
+
+
+def reset_profile_onboarding_memory_for_dev() -> int:
+    """Clear profile onboarding answers so local demo startup can ask again."""
+    init_db()
+    now = _now()
+    with _connect() as conn:
+        cursor = conn.execute(
+            """
+            UPDATE user_profile
+            SET display_name = NULL,
+                user_nickname = NULL,
+                age = NULL,
+                profile_onboarding_skipped_at = NULL,
+                profile_onboarding_completed_at = NULL,
+                updated_at = ?
+            WHERE display_name IS NOT NULL
+               OR user_nickname IS NOT NULL
+               OR age IS NOT NULL
+               OR profile_onboarding_skipped_at IS NOT NULL
+               OR profile_onboarding_completed_at IS NOT NULL
+            """,
+            (now,),
+        )
+        return int(cursor.rowcount or 0)
+
+
+def update_user_profile_memory(
+    *,
+    user_id: str,
+    display_name: str | None = None,
+    age: int | None = None,
+    onboarding_skipped: bool | None = None,
+) -> dict[str, Any] | None:
+    init_db()
+    uid = str(user_id or "").strip()
+    if not uid:
+        return None
+
+    now = _now()
+    name_value = _normalize_display_name(display_name) if display_name is not None else None
+    age_value = _profile_age_value(age) if age is not None else None
+
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO user_profile(user_id, created_at, updated_at)
+            VALUES (?, ?, ?)
+            """,
+            (uid, now, now),
+        )
+        assignments: list[str] = []
+        values: list[Any] = []
+        if name_value:
+            assignments.append("display_name = ?")
+            values.append(name_value)
+            assignments.append("user_nickname = COALESCE(NULLIF(user_nickname, ''), ?)")
+            values.append(name_value)
+        if age_value is not None:
+            assignments.append("age = ?")
+            values.append(age_value)
+        if onboarding_skipped is True:
+            assignments.append("profile_onboarding_skipped_at = ?")
+            values.append(now)
+        elif onboarding_skipped is False:
+            assignments.append("profile_onboarding_skipped_at = NULL")
+        if name_value or age_value is not None:
+            assignments.append("profile_onboarding_skipped_at = NULL")
+        if assignments:
+            assignments.append("updated_at = ?")
+            values.append(now)
+            values.append(uid)
+            conn.execute(
+                f"""
+                UPDATE user_profile
+                SET {", ".join(assignments)}
+                WHERE user_id = ?
+                """,
+                tuple(values),
+            )
+        row = conn.execute("SELECT * FROM user_profile WHERE user_id = ?", (uid,)).fetchone()
+
+    if row is None:
+        return {"user_id": uid}
+    profile = _row_dict(row)
+    profile["display_name"] = str(profile.get("display_name") or profile.get("user_nickname") or "").strip()
+    profile["age"] = _profile_age_value(profile.get("age"))
+    completed = bool(profile.get("display_name")) and profile.get("age") is not None
+    profile["profile_onboarding_complete"] = completed
+    profile["profile_onboarding_skipped"] = bool(str(profile.get("profile_onboarding_skipped_at") or "").strip())
+    if completed and not profile.get("profile_onboarding_completed_at"):
+        with _connect() as conn:
+            conn.execute(
+                """
+                UPDATE user_profile
+                SET profile_onboarding_completed_at = ?,
+                    updated_at = ?
+                WHERE user_id = ?
+                """,
+                (now, now, uid),
+            )
+        profile["profile_onboarding_completed_at"] = now
+    return profile
+
+
+def update_birth_prep_profile_memory(
+    *,
+    user_id: str,
+    due_date_or_week: Any = None,
+    birth_path: Any = None,
+    support_person: Any = None,
+) -> dict[str, Any] | None:
+    init_db()
+    uid = str(user_id or "").strip()
+    if not uid:
+        return None
+
+    values_by_column = {
+        "birth_prep_due_date_or_week": _normalize_birth_prep_memory_text(due_date_or_week),
+        "birth_prep_birth_path": _normalize_birth_prep_memory_text(birth_path),
+        "birth_prep_support_person": _normalize_birth_prep_memory_text(support_person),
+    }
+    assignments: list[str] = []
+    values: list[Any] = []
+    for column, value in values_by_column.items():
+        if not value:
+            continue
+        assignments.append(f"{column} = ?")
+        values.append(value)
+
+    now = _now()
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO user_profile(user_id, created_at, updated_at)
+            VALUES (?, ?, ?)
+            """,
+            (uid, now, now),
+        )
+        if assignments:
+            assignments.append("updated_at = ?")
+            values.append(now)
+            values.append(uid)
+            conn.execute(
+                f"""
+                UPDATE user_profile
+                SET {", ".join(assignments)}
+                WHERE user_id = ?
+                """,
+                tuple(values),
+            )
+    return get_user_profile(uid)
 
 
 def update_user_profile_advice(*, user_id: str, lactation_advice: str, feeding_advice: str) -> bool:
@@ -1146,6 +1333,20 @@ def delete_care_plan_artifact(*, user_id: str, plan_id: int) -> bool:
             (uid, pid),
         )
     return cursor.rowcount > 0
+
+
+def reset_birth_journey_care_plans_for_dev() -> int:
+    """Hide saved birth journey plans on local demo startup."""
+    init_db()
+    with _connect() as conn:
+        cursor = conn.execute(
+            """
+            UPDATE care_plan_artifact
+            SET status = 'deleted', updated_at = CURRENT_TIMESTAMP
+            WHERE plan_type = 'birth_journey' AND status = 'active'
+            """
+        )
+        return int(cursor.rowcount or 0)
 
 
 def list_pregnancy_diary_entries(
@@ -2058,6 +2259,42 @@ def _connect() -> sqlite3.Connection:
 
 def _row_dict(row: sqlite3.Row) -> dict[str, Any]:
     return {key: row[key] for key in row.keys()}
+
+
+def _normalize_display_name(value: Any) -> str:
+    text = str(value or "").strip()
+    if len(text) > 40:
+        text = text[:40].strip()
+    return text
+
+
+def _normalize_birth_prep_memory_text(value: Any) -> str:
+    if isinstance(value, list):
+        text = "、".join(str(item).strip() for item in value if str(item or "").strip())
+    elif isinstance(value, dict):
+        text = "、".join(str(item).strip() for item in value.values() if str(item or "").strip())
+    else:
+        text = str(value or "").strip()
+    text = text.strip(" \t\r\n，,。.")
+    if not text or text.lower() in {"none", "n/a", "null", "unknown"}:
+        return ""
+    if text in {"待确认", "不确定", "还没确定", "未知", "无"}:
+        return ""
+    if len(text) > 80:
+        text = text[:80].strip()
+    return text
+
+
+def _profile_age_value(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        age = int(value)
+    except Exception:
+        return None
+    if age < 0 or age > 120:
+        return None
+    return age
 
 
 def _loads(raw: Any) -> dict[str, Any]:
