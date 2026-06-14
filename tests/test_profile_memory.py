@@ -16,6 +16,25 @@ from momcozy_agent.tool_handlers.profile import get_profile, update_profile
 from momcozy_agent.tool_registry import READ_ONLY_TOOL_NAMES, select_runtime_tools
 
 
+def _birth_journey_plan_context(**overrides: object) -> dict[str, object]:
+    context: dict[str, object] = {
+        "due_date_or_week": "孕32周",
+        "birth_path": "还没确定",
+        "support_person": "暂时没有",
+        "first_birth": "跳过",
+        "fetus_count": "跳过",
+        "age": "跳过",
+        "city_or_country": "跳过",
+        "checkup_status": "跳过",
+        "current_symptoms": "跳过",
+        "risk_factors": "跳过",
+        "lifestyle_context": "跳过",
+        "feeding_ibclc_context": "跳过",
+    }
+    context.update(overrides)
+    return context
+
+
 class ProfileMemoryTests(unittest.TestCase):
     def test_profile_update_persists_name_and_age(self) -> None:
         result = update_profile(
@@ -71,6 +90,11 @@ class ProfileMemoryTests(unittest.TestCase):
             birth_path="剖宫产",
             support_person="伴侣",
         )
+        data_store.update_current_care_stage(
+            user_id="profile-birth-prep-reset",
+            stage="pregnancy",
+            source="user_intent",
+        )
 
         cleared = data_store.reset_birth_prep_profile_memory_for_dev()
 
@@ -79,6 +103,20 @@ class ProfileMemoryTests(unittest.TestCase):
         self.assertEqual(profile["birth_prep_due_date_or_week"], "")
         self.assertEqual(profile["birth_prep_birth_path"], "")
         self.assertEqual(profile["birth_prep_support_person"], "")
+        self.assertEqual(profile["current_care_stage"], "")
+        self.assertEqual(profile["current_care_stage_source"], "")
+
+    def test_current_care_stage_persists_in_profile(self) -> None:
+        profile = data_store.update_current_care_stage(
+            user_id="profile-care-stage",
+            stage="postpartum",
+            source="user_intent",
+        )
+
+        self.assertIsNotNone(profile)
+        saved = data_store.get_user_profile("profile-care-stage")
+        self.assertEqual(saved["current_care_stage"], "postpartum")
+        self.assertEqual(saved["current_care_stage_source"], "user_intent")
 
     def test_user_profile_context_is_only_injected_at_session_start(self) -> None:
         state = ContextState()
@@ -136,11 +174,11 @@ class ProfileMemoryTests(unittest.TestCase):
     def test_birth_journey_plan_memory_reused_by_hospital_bag_form(self) -> None:
         create_birth_journey_plan_card(
             {
-                "plan_context": {
-                    "due_date_or_week": "孕32周",
-                    "birth_path": "顺产",
-                    "support_person": "伴侣",
-                }
+                "plan_context": _birth_journey_plan_context(
+                    due_date_or_week="孕32周",
+                    birth_path="顺产",
+                    support_person="伴侣",
+                )
             },
             {
                 "user_id": "profile-birth-prep-2",
@@ -169,11 +207,11 @@ class ProfileMemoryTests(unittest.TestCase):
     def test_active_birth_journey_plan_reused_by_hospital_bag_form_when_profile_memory_is_empty(self) -> None:
         create_birth_journey_plan_card(
             {
-                "plan_context": {
-                    "due_date_or_week": "孕34周",
-                    "delivery_method": "剖腹产",
-                    "support_person": "伴侣",
-                }
+                "plan_context": _birth_journey_plan_context(
+                    due_date_or_week="孕34周",
+                    delivery_method="剖腹产",
+                    support_person="伴侣",
+                )
             },
             {
                 "user_id": "profile-birth-prep-active-plan",
@@ -227,7 +265,19 @@ class ProfileMemoryTests(unittest.TestCase):
         profile = data_store.get_user_profile("profile-birth-prep-3")
 
         result = create_birth_journey_plan_card(
-            {"plan_context": {}},
+            {
+                "plan_context": _birth_journey_plan_context(
+                    due_date_or_week="孕35周",
+                    birth_path="剖宫产",
+                    support_person="有人全天帮忙",
+                    first_birth="是",
+                    fetus_count="单胎",
+                    feeding_intention="母乳",
+                    risk_factors=["没有"],
+                    lifestyle_context="怕漏买",
+                    feeding_ibclc_context="母乳",
+                )
+            },
             {
                 "user_id": "profile-birth-prep-3",
                 "user_profile": profile,

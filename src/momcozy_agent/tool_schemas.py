@@ -197,7 +197,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "birth_journey_plan_card_create": _function_tool(
         "birth_journey_plan_card_create",
-        "根据已知的孕周/预产期、胎次/胎数、分娩方式、医院、支持人和喂养意向，生成前端可渲染并保存为 active care plan 的生产全过程计划。LLM 不需要生成 card_json；日期换算、阶段拆分、个性化调整和安全声明由工具稳定生成。已有 active 生产全过程计划时工具会返回 existing_plan_found，不要重复生成。",
+        "根据已知或已问过的孕周/预产期、分娩方式、支持人、基础情况、产检情况、当前症状、风险因素、生活场景、喂养/IBCLC 信息，生成前端可渲染并保存为 active care plan 的生产全过程计划。生成前必须把这些字段都问到；用户回答不清楚、跳过、暂不提供也算已问到，并应在 plan_context 中显式传入对应字段。LLM 不需要生成 card_json；规则分层、日期换算、行动清单和安全声明由工具稳定生成。已有 active 生产全过程计划时工具会返回 existing_plan_found，不要重复生成。",
         {
             "plan_context": JSON_OBJECT_STRING,
             "scope": {"type": "string", "enum": ["full", "prenatal_only", "short_range"]},
