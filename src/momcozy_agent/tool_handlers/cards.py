@@ -1943,7 +1943,7 @@ def delete_birth_journey_plan(args: dict[str, Any], inputs: RuntimeInputs) -> di
             "summary": "删除生产全过程计划前，需要用户明确确认。",
             "side_effect_performed": False,
             "data": {
-                "confirmation_question": "确认要删除生产全过程计划吗？删除后状态页不再展示这份计划，需要时可以重新制定。",
+                "confirmation_question": "确认要删除生产全过程计划吗？删除后宝宝和我页面不再展示这份计划，需要时可以重新制定。",
             },
         }
 

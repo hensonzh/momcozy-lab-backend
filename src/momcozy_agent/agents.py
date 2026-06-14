@@ -448,7 +448,7 @@ def _artifact_semantic(artifact_type: str, artifact_id: str, tool_name: str) -> 
     elif normalized_artifact_type in {"support_ticket", "support_ticket_draft"}:
         label = "请确认售后信息"
     elif normalized_artifact_type == "mom_baby_status_card":
-        label = "我已经整理好母婴状态页啦"
+        label = "我已经整理好宝宝和我页面啦"
     elif normalized_artifact_type == "milk_analysis_card":
         label = "我已经整理好奶量分析结果啦"
     elif normalized_artifact_type == "milk_plan_card":
@@ -896,7 +896,7 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
     if tool_name == "birth_journey_plan_delete":
         status = str(safe.get("status") or "").strip()
         instructions = {
-            "plan_deleted": "生产全过程计划已经删除。最终回复只说：已删除生产全过程计划，状态页不会再展示这份计划。需要时可以重新制定。",
+            "plan_deleted": "生产全过程计划已经删除。最终回复只说：已删除生产全过程计划，宝宝和我页面不会再展示这份计划。需要时可以重新制定。",
             "plan_not_found": "没有找到 active 生产全过程计划。最终回复只说明当前没有可删除的生产全过程计划，不要说已经删除。",
             "plan_delete_failed": "删除生产全过程计划失败。最终回复简短说明暂时删除失败，请稍后再试。",
             "needs_delete_confirmation": "删除生产全过程计划前还需要用户明确确认。最终回复只询问是否确认删除，不要调用生成计划，也不要说已经删除。",
@@ -1097,10 +1097,15 @@ def _compact_birth_journey_plan_card_output(safe: dict[str, Any]) -> dict[str, A
         safe,
         (
             ("已找到用户已有的生产全过程计划并展示完整路线图。" if reused_existing_plan else "生产全过程计划已经展示完整路线图。")
-            + "最终回复按段落直接输出下面这段 1-3 句中文，"
-            "保留空行，不要改写、扩写，语气要保持自然陪伴。"
-            "不要使用“卡片”这类界面形式词，不要再输出“我先帮你生成”或“我整理好了”这类重复交付句，"
-            "不要复述计划里的所有阶段、日期或完整清单：\n\n"
+            + "最终回复用 2-4 句中文自然组织语言，"
+            "需要覆盖下面的当前阶段总结和下一步服务，但不要机械照抄。"
+            + (
+                "这是已有计划，最终回复说明已沿用这份计划，不要说新生成。"
+                if reused_existing_plan
+                else "这是新生成计划，最终回复必须自然表达：计划已生成，可以在宝宝和我页面查看，接下来我会按照计划主动提醒你哦。"
+            )
+            + "不要使用“卡片”这类界面形式词，不要再输出“我先帮你生成”或“我整理好了”这类重复交付句，"
+            "不要复述计划里的所有阶段、日期或完整清单。参考信息：\n\n"
             f"{response}"
         ),
     )
@@ -1243,7 +1248,7 @@ def _compact_mom_baby_status_card_output(safe: dict[str, Any]) -> dict[str, Any]
             if isinstance(tab, dict)
         ],
         "final_response_instruction": (
-            "母婴状态页已经按“妈妈数字分身”和“宝宝数字分身”两个顶部 tab 展示。"
+            "宝宝和我页面已经按“妈妈数字分身”和“宝宝数字分身”两个顶部 tab 展示。"
             "最终回复只提示用户可以切换 tab 查看，不要把两个 tab 的指标和建议逐条复述到正文里。"
         ),
     }
