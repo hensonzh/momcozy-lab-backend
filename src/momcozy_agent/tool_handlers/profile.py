@@ -96,6 +96,8 @@ def _public_profile(profile: dict[str, Any]) -> dict[str, Any]:
         "birth_prep_due_date_or_week": _optional_text(profile.get("birth_prep_due_date_or_week")),
         "birth_prep_birth_path": _optional_text(profile.get("birth_prep_birth_path")),
         "birth_prep_support_person": _optional_text(profile.get("birth_prep_support_person")),
+        "current_care_stage": _current_care_stage(profile.get("current_care_stage")),
+        "current_care_stage_source": _optional_text(profile.get("current_care_stage_source")),
         "language": _optional_text(profile.get("language")),
     }
 
@@ -119,3 +121,8 @@ def _optional_age(value: Any) -> int | None:
     if age < 0 or age > 120:
         return None
     return age
+
+
+def _current_care_stage(value: Any) -> str:
+    text = str(value or "").strip()
+    return text if text in {"pregnancy", "postpartum"} else ""

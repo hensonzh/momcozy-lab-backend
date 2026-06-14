@@ -41,6 +41,8 @@ def init_db() -> None:
                 birth_prep_due_date_or_week TEXT,
                 birth_prep_birth_path TEXT,
                 birth_prep_support_person TEXT,
+                current_care_stage TEXT,
+                current_care_stage_source TEXT,
                 delivery_date TEXT,
                 lactation_advice TEXT,
                 feeding_advice TEXT,
@@ -273,6 +275,8 @@ def init_db() -> None:
         _ensure_column(conn, "user_profile", "birth_prep_due_date_or_week", "TEXT")
         _ensure_column(conn, "user_profile", "birth_prep_birth_path", "TEXT")
         _ensure_column(conn, "user_profile", "birth_prep_support_person", "TEXT")
+        _ensure_column(conn, "user_profile", "current_care_stage", "TEXT")
+        _ensure_column(conn, "user_profile", "current_care_stage_source", "TEXT")
         _ensure_calendar_schema(conn)
         _ensure_column(conn, "feeding_log", "feed_action", "INTEGER NOT NULL DEFAULT 0")
         _ensure_column(conn, "feeding_log", "feeding_title", "TEXT")
@@ -409,6 +413,8 @@ def get_user_profile(user_id: str) -> dict[str, Any]:
     profile["birth_prep_due_date_or_week"] = _normalize_birth_prep_memory_text(profile.get("birth_prep_due_date_or_week"))
     profile["birth_prep_birth_path"] = _normalize_birth_prep_memory_text(profile.get("birth_prep_birth_path"))
     profile["birth_prep_support_person"] = _normalize_birth_prep_memory_text(profile.get("birth_prep_support_person"))
+    profile["current_care_stage"] = _normalize_current_care_stage(profile.get("current_care_stage"))
+    profile["current_care_stage_source"] = _normalize_birth_prep_memory_text(profile.get("current_care_stage_source"))
     profile["profile_onboarding_complete"] = bool(profile.get("display_name")) and profile.get("age") is not None
     profile["profile_onboarding_skipped"] = bool(str(profile.get("profile_onboarding_skipped_at") or "").strip())
     return profile
@@ -450,10 +456,14 @@ def reset_birth_prep_profile_memory_for_dev() -> int:
             SET birth_prep_due_date_or_week = NULL,
                 birth_prep_birth_path = NULL,
                 birth_prep_support_person = NULL,
+                current_care_stage = NULL,
+                current_care_stage_source = NULL,
                 updated_at = ?
             WHERE birth_prep_due_date_or_week IS NOT NULL
                OR birth_prep_birth_path IS NOT NULL
                OR birth_prep_support_person IS NOT NULL
+               OR current_care_stage IS NOT NULL
+               OR current_care_stage_source IS NOT NULL
             """,
             (now,),
         )
@@ -584,6 +594,41 @@ def update_birth_prep_profile_memory(
                 """,
                 tuple(values),
             )
+    return get_user_profile(uid)
+
+
+def update_current_care_stage(
+    *,
+    user_id: str,
+    stage: str,
+    source: str = "agent_intent",
+) -> dict[str, Any] | None:
+    init_db()
+    uid = str(user_id or "").strip()
+    stage_value = _normalize_current_care_stage(stage)
+    if not uid or not stage_value:
+        return None
+
+    source_value = _normalize_birth_prep_memory_text(source) or "agent_intent"
+    now = _now()
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO user_profile(user_id, created_at, updated_at)
+            VALUES (?, ?, ?)
+            """,
+            (uid, now, now),
+        )
+        conn.execute(
+            """
+            UPDATE user_profile
+            SET current_care_stage = ?,
+                current_care_stage_source = ?,
+                updated_at = ?
+            WHERE user_id = ?
+            """,
+            (stage_value, source_value, now, uid),
+        )
     return get_user_profile(uid)
 
 
@@ -2413,6 +2458,15 @@ def _normalize_birth_prep_memory_text(value: Any) -> str:
     if len(text) > 80:
         text = text[:80].strip()
     return text
+
+
+def _normalize_current_care_stage(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    if text in {"pregnancy", "prenatal", "孕期", "产前"}:
+        return "pregnancy"
+    if text in {"postpartum", "lactation", "breastfeeding", "哺乳期", "产后"}:
+        return "postpartum"
+    return ""
 
 
 def _profile_age_value(value: Any) -> int | None:

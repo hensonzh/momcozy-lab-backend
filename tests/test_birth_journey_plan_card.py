@@ -12,15 +12,34 @@ from momcozy_agent.tool_handlers.cards import create_birth_journey_plan_card, de
 from momcozy_agent.tool_registry import select_runtime_tools
 
 
+def _plan_context(**overrides: object) -> dict[str, object]:
+    context: dict[str, object] = {
+        "due_date_or_week": "30周",
+        "birth_path": "还没确定",
+        "support_person": "暂时没有",
+        "first_birth": "跳过",
+        "fetus_count": "跳过",
+        "age": "跳过",
+        "city_or_country": "跳过",
+        "checkup_status": "跳过",
+        "current_symptoms": "跳过",
+        "risk_factors": "跳过",
+        "lifestyle_context": "跳过",
+        "feeding_ibclc_context": "跳过",
+    }
+    context.update(overrides)
+    return context
+
+
 class BirthJourneyPlanCardTests(unittest.TestCase):
     def test_creates_early_pregnancy_phase_for_newly_pregnant_users(self) -> None:
         result = create_birth_journey_plan_card(
             {
-                "plan_context": {
-                    "due_date_or_week": "5周",
-                    "birth_path": "还没确定",
-                    "support_person": "伴侣",
-                },
+                "plan_context": _plan_context(
+                    due_date_or_week="5周",
+                    birth_path="还没确定",
+                    support_person="伴侣",
+                ),
                 "scope": "full",
             },
             {"user_message": "", "message_sent_at": "2026-06-02T09:00:00+08:00"},
@@ -39,13 +58,18 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
     def test_creates_structured_birth_journey_plan_card_from_week_context(self) -> None:
         result = create_birth_journey_plan_card(
             {
-                "plan_context": {
-                    "due_date_or_week": "25周",
-                    "first_birth": "是",
-                    "birth_path": "剖宫产",
-                    "feeding_intention": "母乳",
-                    "support_person": "伴侣",
-                },
+                "plan_context": _plan_context(
+                    due_date_or_week="25周",
+                    first_birth="是",
+                    birth_path="剖宫产",
+                    feeding_intention="母乳",
+                    feeding_ibclc_context="计划母乳，想了解产后支持",
+                    checkup_status="已做 NT、NIPT、大排畸，结果正常，还没预约糖耐",
+                    current_symptoms="最近久坐上班，腰酸，晚上腿抽筋",
+                    risk_factors="孕前 BMI 28",
+                    lifestyle_context="久坐上班，晚上腿抽筋",
+                    support_person="伴侣",
+                ),
                 "scope": "full",
             },
             {"user_message": "", "message_sent_at": "2026-05-31T09:00:00+08:00"},
@@ -58,6 +82,13 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         self.assertEqual(card["title"], "生产全过程计划")
         self.assertEqual(card["owner"]["current_week"], "孕25周")
         self.assertEqual(card["owner"]["estimated_due_date"], "2026/09/13")
+        layers = card["planning_layers"]
+        self.assertEqual(layers["current_week"], 25)
+        self.assertIn("你的本周重点", layers["current_week_focus"]["title"])
+        self.assertTrue(layers["current_week_focus"]["items"])
+        self.assertTrue(layers["next_7_days"]["items"])
+        self.assertTrue(layers["next_2_4_weeks"]["items"])
+        self.assertTrue(layers["later_milestones"]["items"])
 
         phases = card["phases"]
         self.assertEqual([phase["title"] for phase in phases], ["孕中期", "孕晚期", "临产阶段", "住院分娩", "产后恢复"])
@@ -95,11 +126,11 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
             try:
                 result = create_birth_journey_plan_card(
                     {
-                        "plan_context": {
-                            "due_date_or_week": "30周",
-                            "birth_path": "剖宫产",
-                            "support_person": "伴侣",
-                        },
+                        "plan_context": _plan_context(
+                            due_date_or_week="30周",
+                            birth_path="剖宫产",
+                            support_person="伴侣",
+                        ),
                         "scope": "full",
                     },
                     {"user_message": "", "user_id": "app-user", "message_sent_at": "2026-06-08T09:00:00+08:00"},
@@ -122,11 +153,11 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
             try:
                 first = create_birth_journey_plan_card(
                     {
-                        "plan_context": {
-                            "due_date_or_week": "30周",
-                            "birth_path": "顺产",
-                            "support_person": "伴侣",
-                        },
+                        "plan_context": _plan_context(
+                            due_date_or_week="30周",
+                            birth_path="顺产",
+                            support_person="伴侣",
+                        ),
                         "scope": "full",
                     },
                     {"user_message": "", "user_id": "app-user", "message_sent_at": "2026-06-08T09:00:00+08:00"},
@@ -263,25 +294,30 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
 
         self.assertIn("birth_journey_plan_card_create", tool_names)
 
-    def test_birth_journey_plan_requires_week_birth_path_and_support_person(self) -> None:
+    def test_birth_journey_plan_requires_every_survey_group_to_be_asked(self) -> None:
         result = create_birth_journey_plan_card(
             {"plan_context": {"due_date_or_week": "26周"}, "scope": "full"},
             {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00"},
         )
 
         self.assertEqual(result["status"], "needs_required_context")
-        self.assertEqual(result["missing_fields"], ["birth_path", "support_person"])
+        self.assertIn("birth_path", result["missing_fields"])
+        self.assertIn("support_person", result["missing_fields"])
+        self.assertIn("checkup_status", result["missing_fields"])
+        self.assertIn("feeding_ibclc_context", result["missing_fields"])
         self.assertNotIn("card", result)
-        self.assertIn("计划顺产、剖宫产", result["data"]["confirmation_question"])
+        self.assertIn("只答知道的", result["data"]["confirmation_question"])
+        self.assertIn("不清楚", result["data"]["confirmation_question"])
+        self.assertIn("是否计划母乳", result["data"]["confirmation_question"])
 
     def test_birth_journey_plan_accepts_unknown_birth_path_and_no_support_person(self) -> None:
         result = create_birth_journey_plan_card(
             {
-                "plan_context": {
-                    "due_date_or_week": "26周",
-                    "birth_path": "还没确定",
-                    "support_person": "暂时没有",
-                },
+                "plan_context": _plan_context(
+                    due_date_or_week="26周",
+                    birth_path="还没确定",
+                    support_person="暂时没有",
+                ),
                 "scope": "full",
             },
             {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00"},
@@ -289,17 +325,17 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "card_created")
         card = result["card"]["card_json"]
-        self.assertEqual(card["owner"]["birth_path"], "还没确定")
+        self.assertNotIn("birth_path", card["owner"])
         self.assertEqual(card["owner"]["support_person"], "暂时没有")
 
     def test_birth_journey_late_pregnancy_wording_avoids_aiish_pile_up_phrase(self) -> None:
         result = create_birth_journey_plan_card(
             {
-                "plan_context": {
-                    "due_date_or_week": "30周",
-                    "birth_path": "顺产",
-                    "support_person": "伴侣",
-                },
+                "plan_context": _plan_context(
+                    due_date_or_week="30周",
+                    birth_path="顺产",
+                    support_person="伴侣",
+                ),
                 "scope": "full",
             },
             {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00"},

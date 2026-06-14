@@ -185,6 +185,15 @@ class BirthPrepPromptRuleTests(unittest.TestCase):
             "due_date_or_week": "孕30周",
             "birth_path": "顺产",
             "support_person": "伴侣",
+            "first_birth": "跳过",
+            "fetus_count": "跳过",
+            "age": "跳过",
+            "city_or_country": "跳过",
+            "checkup_status": "跳过",
+            "current_symptoms": "跳过",
+            "risk_factors": "跳过",
+            "lifestyle_context": "跳过",
+            "feeding_ibclc_context": "跳过",
         }
         tool_result = create_birth_journey_plan_card({"plan_context": plan_context}, {"user_message": ""})
 

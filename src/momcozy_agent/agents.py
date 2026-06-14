@@ -18,6 +18,7 @@ from .contexts import (
     record_milk_management_tool_state,
 )
 from .health_guidance import health_guidance_request_context_lines, health_guidance_required_web_search_tool_choice
+from .services import data_store
 from .static_context import STATIC_AGENT_INSTRUCTIONS
 from .tool_registry import execute_tool, select_runtime_tools
 from .types import AgUiEvent, AgUiEventHandler, AgentEvent, AgentEventHandler, AgentEventPhase, BuildAgentRequestOptions, ResponsesClientLike, ResponsesRequest, RuntimeInputs, TextDeltaHandler
@@ -1252,7 +1253,7 @@ def _form_artifact_final_response_instruction(tool_name: str) -> str:
     if tool_name == "hospital_bag_form_create":
         return (
             "待产包信息采集表已经展示。最终回复只用一句简短中文说明表单已打开，"
-            "请用户填完提交后继续整理；不要复述调用工具前已经说过的理由，"
+            "请用户填完提交后会按表单里确认的信息整理成一份清单；不要复述调用工具前已经说过的理由，"
             "不要提医院、家里已有物品、购物或下单。"
         )
     if tool_name == "ui_form_create":
@@ -1335,6 +1336,32 @@ def _compact_birth_journey_plan_card_output(safe: dict[str, Any]) -> dict[str, A
 
 
 def _birth_journey_plan_final_response(card_json: dict[str, Any]) -> str:
+    layers = card_json.get("planning_layers") if isinstance(card_json.get("planning_layers"), dict) else {}
+    current_focus = layers.get("current_week_focus") if isinstance(layers.get("current_week_focus"), dict) else {}
+    focus_items = current_focus.get("items") if isinstance(current_focus.get("items"), list) else []
+    if focus_items:
+        summaries: list[str] = []
+        for item in focus_items[:3]:
+            if isinstance(item, dict):
+                title = _clean_birth_journey_fragment(item.get("title"))
+                reason = _clean_birth_journey_fragment(item.get("reason"))
+                if title and reason:
+                    summaries.append(f"{title}，因为{reason}")
+                elif title:
+                    summaries.append(title)
+            else:
+                title = _clean_birth_journey_fragment(item)
+                if title:
+                    summaries.append(title)
+        next_action = card_json.get("next_action") if isinstance(card_json.get("next_action"), dict) else {}
+        label = str(next_action.get("label") or "").strip()
+        return "\n\n".join(
+            [
+                "本周重点：" + "；".join(summaries) + "。",
+                _birth_journey_service_sentence(label),
+            ]
+        )
+
     current_phase = _birth_journey_current_phase(card_json)
     phase_title = str(current_phase.get("title") or "").strip()
     watchout = _first_birth_journey_item(current_phase.get("watchouts"))
@@ -2479,6 +2506,7 @@ def run_agent_loop(
     ag_ui_tool_result_message_id = f"{ag_ui_run_id}:tool-results"
     streamed_tool_call_keys: set[str] = set()
     streamed_web_search_citations: list[dict[str, Any]] = []
+    _maybe_update_current_care_stage_from_user_message(inputs)
 
     def emit_streamed_tool_start(tool_call: dict[str, Any]) -> None:
         if _tool_call_was_seen(streamed_tool_call_keys, tool_call):
@@ -2593,7 +2621,9 @@ def run_agent_loop(
                 on_ag_ui_event,
                 ag_ui_status_message_id,
             )
-            result = _execute_project_tool(tool_call["name"], tool_call["arguments"], _tool_inputs_for_call(inputs, options))
+            tool_inputs = _tool_inputs_for_call(inputs, options)
+            result = _execute_project_tool(tool_call["name"], tool_call["arguments"], tool_inputs)
+            _maybe_update_current_care_stage_from_tool(tool_call["name"], tool_call["arguments"], result, tool_inputs)
             if tool_call["name"] == "load_skill" and result.get("ok") and result.get("result", {}).get("id"):
                 skill_id = result["result"]["id"]
                 if skill_id not in loaded_skill_ids:
@@ -3571,6 +3601,168 @@ def _object_argument(value: Any) -> dict[str, Any]:
             return {}
         return parsed if isinstance(parsed, dict) else {}
     return {}
+
+
+_PREGNANCY_STAGE_TOOLS = {
+    "birth_plan_form_create",
+    "labor_communication_card_create",
+    "birth_journey_plan_card_create",
+    "birth_journey_plan_delete",
+    "pregnancy_diary_manage",
+    "hospital_bag_form_create",
+    "hospital_bag_card_create",
+    "hospital_bag_cart_update",
+    "hospital_bag_pump_recommend",
+}
+_POSTPARTUM_STAGE_TOOLS = {
+    "ibclc_consult_card_create",
+    "milk_snapshot_get",
+    "milk_status_query",
+    "milk_records_query",
+    "milk_record_mutate",
+    "milk_plan_query",
+    "milk_plan_mutate",
+    "milk_calendar_query",
+    "milk_calendar_change_preview",
+    "milk_calendar_reschedule_preview",
+    "milk_calendar_mutate",
+    "milk_task_complete",
+    "milk_assessment_evaluate",
+    "milk_clinical_assessment_evaluate",
+    "infant_growth_evaluate",
+    "infant_growth_mutate",
+}
+_POSTPARTUM_INTENT_KEYWORDS = (
+    "奶量",
+    "母乳",
+    "泌乳",
+    "吸奶",
+    "喂奶",
+    "哺乳",
+    "亲喂",
+    "瓶喂",
+    "喂养",
+    "乳房",
+    "乳头",
+    "乳汁",
+    "堵奶",
+    "涨奶",
+    "追奶",
+    "回奶",
+    "硬块",
+    "ibclc",
+    "哺乳顾问",
+    "宝宝吃奶",
+    "产后恢复",
+)
+_PREGNANCY_INTENT_KEYWORDS = (
+    "孕周",
+    "预产期",
+    "孕期",
+    "怀孕",
+    "孕早期",
+    "孕中期",
+    "孕晚期",
+    "产检",
+    "胎动",
+    "待产",
+    "待产包",
+    "临产",
+    "分娩",
+    "生产全过程",
+    "生产计划",
+    "生产过程计划",
+    "入院",
+    "陪产",
+    "剖宫产",
+    "剖腹产",
+    "顺产",
+)
+_PREGNANCY_SERVICE_ANCHORS = (
+    "孕周",
+    "预产期",
+    "孕期",
+    "怀孕",
+    "孕早期",
+    "孕中期",
+    "孕晚期",
+    "产检",
+    "胎动",
+    "待产",
+    "待产包",
+    "临产",
+    "分娩",
+    "生产全过程",
+    "生产计划",
+    "生产过程计划",
+)
+
+
+def _maybe_update_current_care_stage_from_user_message(inputs: RuntimeInputs) -> None:
+    stage = _current_care_stage_from_text(inputs.get("user_message"))
+    if stage:
+        _persist_current_care_stage(inputs, stage, "user_intent")
+
+
+def _maybe_update_current_care_stage_from_tool(
+    tool_name: str,
+    arguments: dict[str, Any],
+    result: dict[str, Any],
+    inputs: RuntimeInputs,
+) -> None:
+    if not result.get("ok"):
+        return
+    stage = _current_care_stage_from_tool(tool_name, arguments, result)
+    if stage:
+        _persist_current_care_stage(inputs, stage, "tool_intent")
+
+
+def _current_care_stage_from_tool(tool_name: str, arguments: dict[str, Any], result: dict[str, Any]) -> str:
+    if tool_name in _POSTPARTUM_STAGE_TOOLS:
+        return "postpartum"
+    if tool_name in _PREGNANCY_STAGE_TOOLS:
+        return "pregnancy"
+    if tool_name == "device_manual_search":
+        topic = str(arguments.get("topic") or "").strip()
+        text = json.dumps({"arguments": arguments, "result": safe_tool_result(result)}, ensure_ascii=False)
+        if topic in {"flange", "suction", "milk_storage"} or _contains_any(text, _POSTPARTUM_INTENT_KEYWORDS):
+            return "postpartum"
+    return ""
+
+
+def _current_care_stage_from_text(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    if not text:
+        return ""
+    has_pregnancy_intent = _contains_any(text, _PREGNANCY_INTENT_KEYWORDS)
+    has_postpartum_intent = _contains_any(text, _POSTPARTUM_INTENT_KEYWORDS)
+    if has_pregnancy_intent and (not has_postpartum_intent or _contains_any(text, _PREGNANCY_SERVICE_ANCHORS)):
+        return "pregnancy"
+    if has_postpartum_intent:
+        return "postpartum"
+    if has_pregnancy_intent:
+        return "pregnancy"
+    return ""
+
+
+def _contains_any(text: str, keywords: tuple[str, ...]) -> bool:
+    return any(keyword.lower() in text for keyword in keywords)
+
+
+def _persist_current_care_stage(inputs: RuntimeInputs, stage: str, source: str) -> None:
+    user_id = _runtime_profile_user_id(inputs)
+    if not user_id or stage not in {"pregnancy", "postpartum"}:
+        return
+    profile = data_store.update_current_care_stage(user_id=user_id, stage=stage, source=source)
+    if not profile:
+        return
+    existing = inputs.get("user_profile") if isinstance(inputs.get("user_profile"), dict) else {}
+    inputs["user_profile"] = {**existing, **profile}
+
+
+def _runtime_profile_user_id(inputs: RuntimeInputs) -> str:
+    profile = inputs.get("user_profile") if isinstance(inputs.get("user_profile"), dict) else {}
+    return str(inputs.get("user_id") or profile.get("user_id") or "").strip()
 
 
 def _execute_project_tool(name: str, arguments: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
