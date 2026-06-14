@@ -320,7 +320,7 @@ def _plan_gate(*, risk_level: str, domains: dict[str, dict[str, Any]], requested
             "allowed": requested in {"", PLAN_TYPE_MAINTAIN},
             "allowed_plan_types": allowed,
             "blocked_plan_types": [item for item in ALL_PLAN_TYPES if item not in allowed],
-            "reason": "当前更适合先看含乳、移乳效率或乳房不适，再决定是否追奶/减奶。",
+            "reason": "当前更适合先看含乳、吸奶或亲喂效果，以及乳房不适，再决定是否追奶/减奶。",
         }
     if confidence == "low":
         return {
@@ -355,7 +355,7 @@ def _next_actions(risk_level: str, domains: dict[str, dict[str, Any]], plan_gate
     if risk_level == RISK_MEDICAL_RECOMMENDED:
         return ["优先联系医生/医院或 IBCLC。", "暂停普通追奶、稳奶或减奶计划判断。"]
     if risk_level == RISK_IBCLC_RECOMMENDED:
-        return ["建议让 IBCLC 一起看含乳、移乳效率和乳房不适。", "先记录 24 小时尿布、喂养和乳房舒适度。"]
+        return ["建议让 IBCLC 一起看含乳、吸奶或亲喂效果和乳房不适。", "先记录 24 小时尿布、喂养和乳房舒适度。"]
     if not plan_gate.get("allowed"):
         return ["先补充关键记录。", "记录完整后再判断是否生成奶量计划。"]
     if domains["milk_volume"].get("status") == "under_supply_alert":

@@ -1299,6 +1299,7 @@ def _compact_milk_assessment_data(data: dict[str, Any]) -> dict[str, Any]:
 def _compact_milk_assessment_output(safe: dict[str, Any]) -> dict[str, Any]:
     assessment = safe.get("assessment") if isinstance(safe.get("assessment"), dict) else {}
     status = str(assessment.get("overall_status") or safe.get("status") or "").strip()
+    plan_suggestion = _milk_analysis_plan_suggestion(assessment, status=status)
     compact = {
         "ok": safe.get("ok"),
         "tool_name": safe.get("tool_name"),
@@ -1307,7 +1308,8 @@ def _compact_milk_assessment_output(safe: dict[str, Any]) -> dict[str, Any]:
         "给用户解释时可用的信息": _plain_milk_assessment_context(assessment, status=status),
         "还需要补充的信息": _plain_missing_milk_assessment_fields(safe.get("missing_fields")),
         "建议追问": safe.get("suggested_questions"),
-        "next_actions": _milk_analysis_next_actions(status),
+        "plan_suggestion": plan_suggestion,
+        "next_actions": _milk_analysis_next_actions(status, plan_suggestion=plan_suggestion),
         "final_response_instruction": (
             "本次奶量评估不生成卡片。最终回复只根据结构化事实自然组织语言："
             "先说结论，再用最多 3 个关键依据解释，最后只问一个最影响下一步判断的问题；"
@@ -1317,7 +1319,8 @@ def _compact_milk_assessment_output(safe: dict[str, Any]) -> dict[str, Any]:
             "不要罗列字段，不要说“卡片”，不要照抄字段名，也不要把工程字段拼成生硬句子；"
             "如果记录完整且状态偏低，只表达“记录完整”和“近期奶量产出偏低”这两个事实的关系，不要使用固定模板；"
             "不要说“记录完整下的偏低”，不要说“现在最关键的是分辨”，不要把宝宝实际需求变高说成奶量产出偏低的原因；"
-            "如果用户没有明确要求制定计划，不要主动说追奶计划、稳奶计划或减奶计划，也不要暗示记录完整就会进入计划制定。"
+            "如果 plan_suggestion 表示适合制定计划，最后可以主动问用户是否现在制定对应计划，但不要直接调用计划工具；"
+            "如果没有 plan_suggestion，且用户没有明确要求制定计划，不要主动说追奶计划、稳奶计划或减奶计划。"
         ),
     }
     if str(safe.get("status") or "").strip() in {"needs_clinical_context", "needs_more_records_for_analysis"}:
@@ -1370,9 +1373,13 @@ def _plain_milk_assessment_context(assessment: dict[str, Any], *, status: str) -
 
     baby_text = _plain_baby_status(baby)
     mother_text = _plain_mother_status(mother)
+    plan_suggestion = _milk_analysis_plan_suggestion(assessment, status=status)
     next_information_needed = []
     why_ask_next = ""
-    if status == "under_supply_alert":
+    if plan_suggestion:
+        next_information_needed = ["问用户是否现在制定温和追奶计划"]
+        why_ask_next = "奶量偏低，宝宝和妈妈状态目前没有阻断计划的信号，可以先征求用户是否进入计划制定。"
+    elif status == "under_supply_alert":
         next_information_needed = ["宝宝这两天尿布是否正常", "宝宝精神状态是否正常", "吃奶后是否有满足感"]
         why_ask_next = "这些信息用于判断宝宝摄入是否够，不用于解释奶量产出偏低的原因。"
     else:
@@ -1397,6 +1404,7 @@ def _plain_milk_assessment_context(assessment: dict[str, Any], *, status: str) -
             "工具判断原因": clinical.get("risk_reasons"),
             "下一步要确认的信息": next_information_needed,
             "为什么要问这些": why_ask_next,
+            "适合的下一步计划": plan_suggestion,
             "不能这样推断": _milk_assessment_do_not_infer(status),
         }
     )
@@ -1412,7 +1420,7 @@ def _plain_missing_milk_assessment_fields(value: Any) -> list[str]:
 
 
 def _milk_assessment_do_not_infer(status: str) -> list[str]:
-    rules = ["不要只按 ml 数字诊断宝宝是否吃够", "不要把一次评估自动扩展成计划制定"]
+    rules = ["宝宝是否吃够要结合尿布、精神和吃奶表现一起看", "不要把一次评估自动扩展成计划制定"]
     if status == "under_supply_alert":
         rules.extend(
             [
@@ -1434,7 +1442,7 @@ def _plain_milk_status(status: str) -> str:
     if status == "normal":
         return "最近整体在可接受范围里，重点是稳住节奏。"
     if status == "needs_clinical_context":
-        return "还差宝宝和妈妈状态，先不能只按奶量数字判断。"
+        return "还差宝宝和妈妈状态，先把会影响判断的信息补齐。"
     return "现在信息还不够完整，先补关键情况再判断。"
 
 
@@ -1450,7 +1458,7 @@ def _plain_baby_status(baby: dict[str, Any]) -> str:
 def _plain_mother_status(mother: dict[str, Any]) -> str:
     status = str(mother.get("status") or "").strip()
     if status == "medical_concern":
-        return "妈妈有发热或明显乳房不适信号，先不要只按奶量计划推进。"
+        return "妈妈有发热或明显乳房不适信号，先优先处理身体不适，再看奶量计划。"
     if status == "ibclc_concern":
         return "妈妈有乳房不适、乳头损伤或反复堵奶信号，适合结合 IBCLC 看。"
     if status == "reassuring":
@@ -1545,15 +1553,11 @@ def _compact_milk_plan_card_output(safe: dict[str, Any], result: dict[str, Any])
         "plan_status": str(card_json_dict.get("status") or safe.get("status") or "").strip(),
         "next_actions": ["同步到日历", "调整计划", "展开具体时间表"],
         "final_response_instruction": (
-            "奶量计划卡片已经展示完整计划。最终回复只能引导用户确认下一步，"
-            "不要复述卡片中的计划方向、目标、安排、数字、周期、任务数或日期范围；"
-            "可以用 calendar_sync_prompt 说明同步到日历的影响，但只保留一句短话；"
-            "优先参考 assistant_followup.message，给出“同步到日历/先调整/展开时间表”这类选择。"
+            "奶量计划已经展示完整内容。最终回复根据 plan_context 自然组织语言，"
+            "只简短说明计划已准备好，并询问用户下一步想同步到计划页还是先调整时间；"
+            "不要复述完整计划、数字、周期、任务数或日期范围；保存或同步前必须获得用户确认。"
         ),
     }
-    followup = safe.get("assistant_followup")
-    if isinstance(followup, dict):
-        compact["assistant_followup"] = followup
     for key in ("requires_confirmation", "requires_medical_confirmation", "confirmation_question"):
         if key in safe:
             compact[key] = safe[key]
@@ -1614,7 +1618,31 @@ def _compact_milk_plan_missing_context_output(safe: dict[str, Any]) -> dict[str,
     return _drop_empty(compact)
 
 
-def _milk_analysis_next_actions(status: str) -> list[str]:
+def _milk_analysis_plan_suggestion(assessment: dict[str, Any], *, status: str) -> str:
+    if status != "under_supply_alert":
+        return ""
+    clinical = assessment.get("clinical") if isinstance(assessment.get("clinical"), dict) else {}
+    plan_gate = clinical.get("plan_gate") if isinstance(clinical.get("plan_gate"), dict) else {}
+    if plan_gate.get("allowed") is not True:
+        return ""
+    allowed_types = plan_gate.get("allowed_plan_types") if isinstance(plan_gate.get("allowed_plan_types"), list) else []
+    if allowed_types and "increase_milk" not in {str(item) for item in allowed_types}:
+        return ""
+    baby = assessment.get("baby_intake") if isinstance(assessment.get("baby_intake"), dict) else {}
+    mother = assessment.get("maternal_state") if isinstance(assessment.get("maternal_state"), dict) else {}
+    records = assessment.get("records") if isinstance(assessment.get("records"), dict) else {}
+    if str(records.get("data_confidence") or "").strip() == "low":
+        return ""
+    if str(baby.get("status") or "").strip() in {"", "unknown", "concern"}:
+        return ""
+    if str(mother.get("status") or "").strip() in {"", "unknown", "ibclc_concern", "medical_concern"}:
+        return ""
+    return "适合先征求用户是否制定温和追奶计划；用户同意后再调用 milk_plan_preview。"
+
+
+def _milk_analysis_next_actions(status: str, *, plan_suggestion: str = "") -> list[str]:
+    if plan_suggestion:
+        return ["询问是否制定温和追奶计划", "用户同意后生成计划草稿", "计划确认后再同步到日程"]
     if status == "under_supply_alert":
         return ["确认有没有未记录奶量", "结合宝宝和妈妈状态判断", "需要的话再看下一步怎么调整"]
     if status == "over_supply_alert":
@@ -1722,30 +1750,89 @@ def _compact_milk_plan_preview_for_model(result: dict[str, Any]) -> dict[str, An
 
     draft = data.get("draft")
     if isinstance(draft, dict):
-        compact["给用户解释计划时可用的信息"] = _plain_milk_plan_context(draft)
+        compact["plan_context"] = _plain_milk_plan_context(draft)
         compact["confirmed_plan_for_save"] = draft
 
     return compact
 
 
 def _plain_milk_plan_context(draft: dict[str, Any]) -> dict[str, Any]:
-    strategy = draft.get("control_strategy") if isinstance(draft.get("control_strategy"), dict) else {}
     rules = draft.get("plan_rules") if isinstance(draft.get("plan_rules"), dict) else {}
     plan_type = str(draft.get("plan_type") or "").strip()
+    plan_context = _plain_plan_context_by_type(plan_type, draft=draft)
     return _drop_empty(
         {
-            "这是什么计划": _plain_plan_type(plan_type),
-            "为什么这样排": strategy.get("why_this_way"),
-            "时间安排重点": strategy.get("schedule_focus"),
-            "每次怎么吸": strategy.get("session_goal"),
-            "什么时候停": strategy.get("when_to_stop_each_time"),
-            "怎么慢慢调整": strategy.get("how_to_adjust"),
-            "多久复盘": strategy.get("review_timing"),
-            "什么情况先停下来": strategy.get("hard_stop"),
+            "计划类型": _plain_plan_type(plan_type),
+            **plan_context,
             "计划天数": f"{draft.get('plan_days')} 天" if draft.get("plan_days") else "",
             "预计每天提醒次数": f"{rules.get('desired_pumping_count')} 次" if rules.get("desired_pumping_count") else "",
+            "下一步": "询问用户是否同步到计划页，或是否要先调整时间。",
         }
     )
+
+
+def _plain_plan_context_by_type(plan_type: str, *, draft: dict[str, Any]) -> dict[str, Any]:
+    if plan_type == "increase_milk":
+        return {
+            "为什么建议这个方向": [
+                "近期多数天低于参考区间。",
+                "宝宝和妈妈目前没有提示需要先暂停计划的信号。",
+                "这版计划先做小幅调整，不一下子改太多。",
+            ],
+            "时间安排逻辑": [
+                "尽量减少太长的间隔。",
+                "必要时增加一次更容易坚持的吸奶或亲喂提醒。",
+            ],
+            "每次吸奶或亲喂": [
+                "每次不需要无限延长。",
+                "吸奶到奶流明显变慢后，再多 1-2 分钟即可。",
+                "疼或不舒服时先停，再调整吸力、法兰或姿势。",
+            ],
+            "复盘方式": [
+                "连续执行 2-3 天后，看平均奶量、宝宝尿布/精神和妈妈舒适度。",
+            ],
+            "需要先停下来的情况": [
+                "如果发热、寒战、乳房红肿热痛扩大、疼痛明显加重，或宝宝尿布/精神/体重让人担心，先暂停调整并联系医生或 IBCLC。",
+            ],
+        }
+    if plan_type == "decrease_milk":
+        return {
+            "为什么建议这个方向": [
+                "当前更适合逐步减少过强刺激。",
+                "调整幅度要小，避免突然变化带来胀痛或堵奶。",
+            ],
+            "时间安排逻辑": [
+                "先减少不必要的额外吸奶。",
+                "容易胀或堵时，优先少量减少单次时长或单次量，再考虑拉长间隔。",
+            ],
+            "每次吸奶或亲喂": [
+                "只吸到舒服即可，不追求特别空。",
+                "如果只是胀，少量吸出到不难受就可以停。",
+            ],
+            "复盘方式": [
+                "每 2-3 天看胀痛、硬块、总量和宝宝状态，再决定下一步。",
+            ],
+            "需要先停下来的情况": [
+                "如果胀痛、硬块、发热或明显不适加重，先暂停减量并联系医生或 IBCLC。",
+            ],
+        }
+    return {
+        "为什么建议这个方向": [
+            "当前更适合先保持稳定节奏。",
+            "先观察几天平均变化，比只看单次波动更可靠。",
+        ],
+        "时间安排逻辑": [
+            "尽量沿用已经能坚持的时间。",
+            "不要因为一两次波动大改安排。",
+        ],
+        "每次吸奶或亲喂": [
+            "保持舒服、稳定即可。",
+            "吸奶到奶流明显变慢、乳房舒服一些就可以。",
+        ],
+        "复盘方式": [
+            "第 3 天和第 7 天复盘奶量、宝宝表现和妈妈舒适度。",
+        ],
+    }
 
 
 def _plain_plan_type(plan_type: str) -> str:

@@ -436,7 +436,7 @@ def _clinical_gate_for_analysis(arguments: dict[str, Any], *, result: dict[str, 
         return {
             "ok": True,
             "status": "analysis_ibclc_gate_blocked",
-            "summary": "当前更适合先结合 IBCLC 看含乳、移乳效率或乳房不适。",
+            "summary": "当前更适合先结合 IBCLC 看含乳、吸奶或亲喂效果，以及乳房不适。",
             "data": {"clinical_assessment": _compact_clinical_data(clinical_data)},
             "assistant_followup": {"message": "这次不只是看奶量数字就能说清楚。\n\n更适合把含乳、排乳和乳房不适一起看一遍；如果你愿意，我可以帮你打开 IBCLC 咨询入口，让顾问一起看。"},
         }
@@ -655,7 +655,7 @@ def _milk_plan_title(draft: dict[str, Any]) -> str:
 def _milk_plan_session_goal(draft: dict[str, Any]) -> str:
     plan_type = str(draft.get("plan_type") or "").strip()
     if plan_type == "increase_milk":
-        return "每次重点是有效移出，不是把自己耗到很久。"
+        return "每次不需要无限延长，保持舒服、规律更重要。"
     if plan_type == "decrease_milk":
         return "每次只吸到舒服，不追求排得很空。"
     return "每次稳定、舒服地移出即可。"
@@ -706,18 +706,15 @@ def _milk_analysis_followup_message(data: dict[str, Any]) -> str:
 def _milk_plan_preview_followup_message(data: dict[str, Any]) -> str:
     draft = data.get("draft") if isinstance(data.get("draft"), dict) else {}
     title = _milk_plan_title(draft)
-    session_guidance = _milk_plan_session_guidance(draft)
     calendar_delta = data.get("calendar_delta") if isinstance(data.get("calendar_delta"), dict) else {}
     requires_strategy = bool(calendar_delta.get("requires_calendar_write_strategy") or calendar_delta.get("calendar_write_strategy_required"))
     if requires_strategy:
         return (
-            f"{title}我先帮你理好了。它不是让你硬扛，而是帮你把接下来几天变得更有把握一点。\n\n"
-            f"{session_guidance}\n\n"
+            f"{title}已经准备好了。\n\n"
             "如果要同步到计划页，我先和你确认一下：是追加到现有日程，还是替换未来未完成的旧计划任务？"
         )
     return (
-        f"{title}我先帮你理好了。它不是让你硬扛，而是帮你把接下来几天变得更有把握一点。\n\n"
-        f"{session_guidance}\n\n"
+        f"{title}已经准备好了。\n\n"
         "如果方向没问题，我可以帮你同步到计划页；也可以先照着你的作息，把时间再调顺一点。"
     )
 
@@ -725,10 +722,10 @@ def _milk_plan_preview_followup_message(data: dict[str, Any]) -> str:
 def _milk_plan_session_guidance(draft: dict[str, Any]) -> str:
     plan_type = str(draft.get("plan_type") or "").strip()
     if plan_type == "increase_milk":
-        return "单次吸奶或亲喂的重点是有效移出，不是把自己耗到很久；吸奶到奶流明显变慢后再多 1-2 分钟就够了，亲喂就看吞咽变少和宝宝状态。不舒服时先停下来，我们优先调吸力、法兰或含乳。"
+        return "吸奶到奶流明显变慢后再多 1-2 分钟就够了；亲喂就看吞咽变少和宝宝状态。不舒服时先停下来，再调整吸力、法兰或姿势。"
     if plan_type == "decrease_milk":
         return "单次吸奶或亲喂不用刻意排得特别空，重点是让身体舒服下来；如果只是胀，吸到不难受就可以停，不要继续给身体太强的增奶信号。"
-    return "单次吸奶或亲喂不用硬拖很久，重点是稳定、舒服地移出；吸奶到奶流明显变慢、乳房舒服一些就可以，亲喂就看宝宝吞咽和满足感。"
+    return "单次吸奶或亲喂保持稳定、舒服即可；吸奶到奶流明显变慢、乳房舒服一些就可以，亲喂就看宝宝吞咽和满足感。"
 
 
 def _milk_plan_saved_followup_message(result: dict[str, Any]) -> str:

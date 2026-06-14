@@ -2320,7 +2320,7 @@ def _plan_rule_notes(plan_type: str, rules: dict[str, Any]) -> list[str]:
     if plan_type == PLAN_TYPE_INCREASE:
         notes = ["优先保证可执行性，新增频次不要造成明显疲惫。", "每次吸奶后记录奶量，连续 3 天后复盘。"]
         if rules.get("breast_fullness_without_red_flags"):
-            notes.insert(0, "目前主要是胀或感觉没排空，且没有发热、红肿、硬块加重等信号；计划会把单次有效移出和结束标准一起考虑。")
+            notes.insert(0, "目前主要是胀或感觉没排空，且没有发热、红肿、硬块加重等信号；计划会把单次吸奶或亲喂效果和结束标准一起考虑。")
         if rules.get("require_pp"):
             notes.insert(0, "如身体允许，可在第1-7天安排一次吸奶；第8天后改回常规吸奶。")
         if rules.get("needs_referral"):
@@ -2349,18 +2349,18 @@ def _plan_control_strategy(plan_type: str, rules: dict[str, Any]) -> dict[str, A
     if plan_type == PLAN_TYPE_INCREASE:
         if rules.get("breast_fullness_without_red_flags"):
             return {
-                "why_this_way": "这版不是单纯猛加次数，而是把奶量偏低和吸完还胀一起看：先让移出更有效，再小步增加刺激。",
+                "why_this_way": "这版会把奶量偏低和吸完还胀一起看，先改善每次吸奶或亲喂的效果，再小步调整节奏。",
                 "schedule_focus": "优先把 24 小时里的吸奶/亲喂安排得更均匀，避免很长空档，同时不把单次拖得太久。",
-                "session_goal": "每次先看有效移出：吸力舒服、法兰合适、奶流变慢后再多 1-2 分钟即可。",
-                "when_to_stop_each_time": "如果吸完还胀，先轻柔按摩或短暂停一下再看；不要为了追奶硬吸到疼。",
-                "how_to_adjust": "一次只改一件事，先调单次有效移出和最长间隔；连续 2-3 天后再看平均变化。",
+                "session_goal": "每次先看吸奶是否舒服、法兰是否合适，奶流变慢后再多 1-2 分钟即可。",
+                "when_to_stop_each_time": "如果吸完还胀，先轻柔按摩或短暂停一下再看；不要吸到疼。",
+                "how_to_adjust": "一次只改一件事，先调单次吸奶或亲喂效果和最长间隔；连续 2-3 天后再看平均变化。",
                 "review_timing": "连续执行 2-3 天后，复盘总奶量、吸奶次数、宝宝尿布/精神和妈妈胀感。",
                 "hard_stop": hard_stop,
             }
         return {
-            "why_this_way": "这版先增加有效移乳信号，但不靠把少数几次吸得很久来硬追。",
+            "why_this_way": "这版先做小幅调整，重点是减少太长的间隔，不靠把少数几次吸得很久来增加负担。",
             "schedule_focus": "优先把 24 小时里的吸奶/亲喂安排得更均匀，少留很长空档。",
-            "session_goal": "每次重点是有效移出，不是把自己耗到很久。",
+            "session_goal": "每次不需要无限延长，保持舒服、规律更重要。",
             "when_to_stop_each_time": "吸奶到奶流明显变慢后，再多 1-2 分钟就可以；亲喂就看吞咽变少和宝宝状态。",
             "how_to_adjust": "一次只改一件事，先加一次或缩短最长间隔，连续 2-3 天后看平均变化。",
             "review_timing": "连续执行 2-3 天后，复盘总奶量、吸奶次数、宝宝尿布/精神和妈妈舒适度。",

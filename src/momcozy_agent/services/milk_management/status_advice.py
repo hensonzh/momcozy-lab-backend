@@ -212,7 +212,7 @@ def _fallback_status_advice(payload: dict[str, Any], *, normality: dict[str, Any
     }
     if len(failed_types) > 1:
         return {
-            "lactation_advice": "这几天不只是奶量数字偏低，排乳和喂养节奏都值得认真看一下。先别一个人硬扛，今天把吸奶、亲喂和瓶喂分开记清楚，同时尽快整理一版追奶计划，会比零散加次数更有效。",
+            "lactation_advice": "这几天不只是奶量数字偏低，吸奶和喂养节奏都值得认真看一下。今天把吸奶、亲喂和瓶喂分开记清楚，同时尽快整理一版追奶计划，会比零散加次数更有效。",
             "feeding_advice": "宝宝这边也需要同步关注，尤其是尿布、精神和体重变化。今天先把每次喂养和尿布记下来；如果尿明显少、精神差、吃奶变差或体重增长慢，建议及时联系儿科或 IBCLC。",
         }
 
@@ -290,12 +290,12 @@ def _enforce_attention_advice(
                 "但不是说你做得不好，也不用一下子把自己压垮。今天先加1次清晨或夜间排乳，把间隔、奶量和身体感受记清楚；如果晚上实在累，就优先选最容易坚持的一次。我们先把节奏稳住，再尽快做一版追奶计划。"
             )
         else:
-            cleaned["lactation_advice"] = "近几天奶量连续低于参考，这个信号值得尽快处理，但不是要你靠硬撑来解决，也不是说你做得不好。今天先加1次清晨或夜间排乳，把每次奶量、间隔和身体感受记清楚；如果晚上太累，就选最容易坚持的一次。我们先把节奏稳住，再尽快做一版追奶计划。"
+            cleaned["lactation_advice"] = "近几天奶量连续低于参考，这个信号值得尽快处理，但不是说你做得不好。今天先加1次清晨或夜间吸奶，把每次奶量、间隔和身体感受记清楚；如果晚上太累，就选最容易坚持的一次。我们先把节奏稳住，再尽快做一版追奶计划。"
 
         if "feeding" in failed_types or "low" in feeding_directions:
             cleaned["feeding_advice"] = "喂养次数也低于参考，所以宝宝摄入需要同步认真看。你先别一个人猜宝宝到底够不够，今天把亲喂、瓶喂、每次奶量和尿布一起记下来；如果尿少、精神差、吃奶变弱或体重增长慢，建议及时联系儿科或 IBCLC。我们先把最关键的信号握在手里，这样能更快把风险排清。"
         else:
-            cleaned["feeding_advice"] = "奶量持续偏低时，宝宝不一定马上表现出来，但摄入信号要一起看。今天同步观察尿布、精神、吃奶状态和体重变化；如果有尿少、精神差、吃奶变弱或体重增长慢，建议及时联系儿科或 IBCLC。我们先把这些信号看清楚，不要只靠感觉硬扛。"
+            cleaned["feeding_advice"] = "奶量持续偏低时，宝宝不一定马上表现出来，但摄入信号要一起看。今天同步观察尿布、精神、吃奶状态和体重变化；如果有尿少、精神差、吃奶变弱或体重增长慢，建议及时联系儿科或 IBCLC。"
         return _humanize_advice_openings({key: _clean_advice(value) for key, value in cleaned.items()})
 
     if "feeding" in failed_types and "low" in feeding_directions:
