@@ -1076,10 +1076,9 @@ def _form_artifact_final_response_instruction(tool_name: str) -> str:
         )
     if tool_name == "hospital_bag_form_create":
         return (
-            "待产包信息采集表已经展示。最终回复只输出下面两段中文，保留空行，"
-            "不要改写、扩写，不要提医院、家里已有物品、购物或下单：\n\n"
-            "好，我先帮你把待产包信息表打开了。\n\n"
-            "你填完并提交后，我会按表单里确认的信息整理成一份清单。"
+            "待产包信息采集表已经展示。最终回复只用一句简短中文说明表单已打开，"
+            "请用户填完提交后继续整理；不要复述调用工具前已经说过的理由，"
+            "不要提医院、家里已有物品、购物或下单。"
         )
     if tool_name == "ui_form_create":
         return (
