@@ -7,6 +7,7 @@ from typing import Any
 from .assessment import evaluate_milk_status
 from .db import fetch_all, fetch_one, transaction
 from .growth import evaluate_infant_growth
+from .rhythm import build_recent_milk_rhythm_context
 from .schemas import (
     CALENDAR_TYPE_NURSING,
     CALENDAR_SOURCE_SYSTEM,
@@ -1300,49 +1301,14 @@ def _recent_pumping_times(user_id: str, *, as_of_time: str | None, limit: int) -
     return sorted(set(times))[:limit]
 
 
+def _events_from_times(times: list[str], *, source: str) -> list[dict[str, Any]]:
+    return [{"time": time, "source": source} for time in _unique_sorted_times(times)]
+
+
 def _collect_recent_plan_context(user_id: str, *, as_of_time: str | None) -> dict[str, Any]:
     as_of_dt = parse_datetime(as_of_time) if as_of_time else datetime.now()
     if as_of_dt is None:
         as_of_dt = datetime.now()
-    end_day = as_of_dt.date()
-    start_day = end_day - timedelta(days=7)
-    start_dt = datetime.combine(start_day, datetime.min.time())
-    end_dt = datetime.combine(end_day, datetime.min.time())
-
-    pumping_rows = fetch_all(
-        """
-        SELECT pumping_id, pump_start_time, pump_milk_volum, pump_type
-        FROM pumping_log
-        WHERE user_id = ?
-          AND pump_start_time >= ?
-          AND pump_start_time < ?
-        ORDER BY pump_start_time ASC
-        """,
-        (user_id, _db_time(start_dt), _db_time(end_dt)),
-    )
-    feeding_rows = fetch_all(
-        """
-        SELECT feeding_id, infant_id, feed_time, feed_type
-        FROM feeding_log
-        WHERE user_id = ?
-          AND feed_time >= ?
-          AND feed_time < ?
-        ORDER BY feed_time ASC
-        """,
-        (user_id, _db_time(start_dt), _db_time(end_dt)),
-    )
-    calendar_rows = fetch_all(
-        """
-        SELECT item_id, date, start_time, end_time, content, type, finish, is_milk_pump
-        FROM calendar
-        WHERE user_id = ?
-          AND date >= ?
-          AND date < ?
-          AND type = ?
-        ORDER BY start_time ASC, task_id ASC
-        """,
-        (user_id, start_day.isoformat(), end_day.isoformat(), CALENDAR_TYPE_PUMP),
-    )
     infant_rows = fetch_all(
         """
         SELECT infant_id, birth_date
@@ -1353,135 +1319,71 @@ def _collect_recent_plan_context(user_id: str, *, as_of_time: str | None) -> dic
         (user_id,),
     )
 
-    pumping_events_by_day: dict[str, list[dict[str, Any]]] = {}
-    for row in pumping_rows:
-        if to_int(row.get("pump_type"), 0) == 2:
-            continue
-        event_day = _date_from_value(row.get("pump_start_time"))
-        if not event_day:
-            continue
-        hhmm = _hhmm_from_value(row.get("pump_start_time"))
-        if not hhmm:
-            continue
-        pumping_events_by_day.setdefault(event_day, []).append(
-            {
-                "time": hhmm,
-                "source": "pumping",
-                "milk_ml": round(_to_float(row.get("pump_milk_volum")), 1),
-            }
-        )
-
-    breastfeeding_events_by_day: dict[str, list[dict[str, Any]]] = {}
-    seen_feeding_ids: set[int] = set()
-    for row in feeding_rows:
-        feeding_id = to_int(row.get("feeding_id"), 0)
-        if feeding_id in seen_feeding_ids:
-            continue
-        seen_feeding_ids.add(feeding_id)
-        if not _is_direct_breastfeeding_type(row.get("feed_type")):
-            continue
-        event_day = _date_from_value(row.get("feed_time"))
-        if not event_day:
-            continue
-        hhmm = _hhmm_from_value(row.get("feed_time"))
-        if hhmm:
-            breastfeeding_events_by_day.setdefault(event_day, []).append({"time": hhmm, "source": "breastfeeding"})
-
-    calendar_pump_events_by_day: dict[str, list[dict[str, Any]]] = {}
-    for row in calendar_rows:
-        event_day = str(row.get("date") or "").strip()
-        if not event_day:
-            event_day = _date_from_value(row.get("start_time"))
-        if not event_day:
-            continue
-        hhmm = _hhmm_from_value(row.get("start_time"))
-        if not hhmm:
-            continue
-        calendar_pump_events_by_day.setdefault(event_day, []).append(
-            {
-                "time": hhmm,
-                "source": "calendar",
-                "completed": _calendar_task_finished(row.get("finish")),
-            }
-        )
-
-    candidate_days: list[dict[str, Any]] = []
-    for offset in range(1, 8):
-        day = (end_day - timedelta(days=offset)).isoformat()
-        pumping_events = _dedupe_events_by_time(pumping_events_by_day.get(day, []))
-        breastfeeding_events = _dedupe_events_by_time(breastfeeding_events_by_day.get(day, []))
-        calendar_pump_events = _dedupe_events_by_time(calendar_pump_events_by_day.get(day, []))
-        measured_pumping_times = _unique_sorted_times([str(item.get("time") or "") for item in pumping_events])
-        calendar_pump_times = _unique_sorted_times([str(item.get("time") or "") for item in calendar_pump_events])
-        completed_calendar_pump_times = _unique_sorted_times(
-            [str(item.get("time") or "") for item in calendar_pump_events if bool(item.get("completed"))]
-        )
-        breastfeeding_times = _unique_sorted_times([str(item.get("time") or "") for item in breastfeeding_events])
-        pumping_times = calendar_pump_times or measured_pumping_times
-        all_event_times = _unique_sorted_times([*pumping_times, *breastfeeding_times])
-        score = len(calendar_pump_times) * 4 + len(measured_pumping_times) * 2 + len(breastfeeding_times) * 2
-        if completed_calendar_pump_times:
-            score += 2
-        if all_event_times:
-            candidate_days.append(
-                {
-                    "target_day": day,
-                    "score": score,
-                    "pumping_events": pumping_events,
-                    "calendar_pump_events": calendar_pump_events,
-                    "breastfeeding_events": breastfeeding_events,
-                    "pumping_times": pumping_times,
-                    "measured_pumping_times": measured_pumping_times,
-                    "calendar_pump_times": calendar_pump_times,
-                    "completed_calendar_pump_times": completed_calendar_pump_times,
-                    "breastfeeding_times": breastfeeding_times,
-                    "all_event_times": all_event_times,
-                }
-            )
-
-    calendar_candidates = [
-        item
-        for item in candidate_days
-        if isinstance(item.get("calendar_pump_times"), list) and bool(item.get("calendar_pump_times"))
-    ]
-    selection_pool = calendar_candidates or candidate_days
-    best_day = max(selection_pool, key=lambda item: (to_int(item.get("score"), 0), str(item.get("target_day") or "")), default={})
-    target_day = str(best_day.get("target_day") or (end_day - timedelta(days=1)).isoformat())
-    pumping_events = best_day.get("pumping_events") if isinstance(best_day.get("pumping_events"), list) else []
-    calendar_pump_events = best_day.get("calendar_pump_events") if isinstance(best_day.get("calendar_pump_events"), list) else []
-    breastfeeding_events = best_day.get("breastfeeding_events") if isinstance(best_day.get("breastfeeding_events"), list) else []
-    measured_pumping_times = _unique_sorted_times(best_day.get("measured_pumping_times") if isinstance(best_day.get("measured_pumping_times"), list) else [])
-    calendar_pump_times = _unique_sorted_times(best_day.get("calendar_pump_times") if isinstance(best_day.get("calendar_pump_times"), list) else [])
-    completed_calendar_pump_times = _unique_sorted_times(
-        best_day.get("completed_calendar_pump_times") if isinstance(best_day.get("completed_calendar_pump_times"), list) else []
+    rhythm = build_recent_milk_rhythm_context(
+        user_id=user_id,
+        as_of_time=_db_time(as_of_dt),
+        days=7,
+        include_today=False,
     )
+    selected_day = rhythm.get("selected_day") if isinstance(rhythm.get("selected_day"), dict) else {}
+    summary = rhythm.get("summary") if isinstance(rhythm.get("summary"), dict) else {}
+    target_day = str(selected_day.get("date") or (as_of_dt.date() - timedelta(days=1)).isoformat())
+    calendar_pump_times = _unique_sorted_times(selected_day.get("planned_pumping_times") if isinstance(selected_day.get("planned_pumping_times"), list) else [])
+    calendar_nursing_times = _unique_sorted_times(selected_day.get("planned_nursing_times") if isinstance(selected_day.get("planned_nursing_times"), list) else [])
+    measured_pumping_times = _unique_sorted_times(selected_day.get("actual_pumping_times") if isinstance(selected_day.get("actual_pumping_times"), list) else [])
+    actual_nursing_times = _unique_sorted_times(selected_day.get("actual_nursing_times") if isinstance(selected_day.get("actual_nursing_times"), list) else [])
     pumping_times = calendar_pump_times or measured_pumping_times
-    breastfeeding_times = _unique_sorted_times(best_day.get("breastfeeding_times") if isinstance(best_day.get("breastfeeding_times"), list) else [])
-    recent_pumping_times = calendar_pump_times or _recent_pumping_times(user_id, as_of_time=as_of_time, limit=8)
+    breastfeeding_times = calendar_nursing_times or actual_nursing_times
+    recent_pumping_times = (
+        _unique_sorted_times(summary.get("typical_pumping_times") if isinstance(summary.get("typical_pumping_times"), list) else [])
+        or _recent_pumping_times(user_id, as_of_time=as_of_time, limit=8)
+    )
     all_event_times = _unique_sorted_times([*pumping_times, *breastfeeding_times])
+    calendar_pump_events = _events_from_times(calendar_pump_times, source="calendar")
+    calendar_nursing_events = _events_from_times(calendar_nursing_times, source="calendar")
+    pumping_events = _events_from_times(measured_pumping_times, source="pumping")
+    breastfeeding_events = _events_from_times(actual_nursing_times, source="breastfeeding")
 
     return {
         "target_day": target_day,
         "lookback_days": 7,
         "candidate_days": [
             {
-                "target_day": str(day.get("target_day") or ""),
-                "score": to_int(day.get("score"), 0),
-                "pumping_count": len(day.get("pumping_times") if isinstance(day.get("pumping_times"), list) else []),
-                "breastfeeding_count": len(day.get("breastfeeding_times") if isinstance(day.get("breastfeeding_times"), list) else []),
+                "target_day": str(day.get("date") or ""),
+                "pumping_count": len(day.get("planned_pumping_times") or day.get("actual_pumping_times") or []),
+                "breastfeeding_count": len(day.get("planned_nursing_times") or day.get("actual_nursing_times") or []),
+                "completeness": day.get("completeness"),
             }
-            for day in candidate_days
+            for day in rhythm.get("days", [])
+            if isinstance(day, dict) and day.get("all_times")
         ],
         "pumping_events": pumping_events,
         "calendar_pump_events": calendar_pump_events,
+        "calendar_nursing_events": calendar_nursing_events,
         "breastfeeding_events": breastfeeding_events,
         "pumping_times": pumping_times,
         "measured_pumping_times": measured_pumping_times,
         "calendar_pump_times": calendar_pump_times,
-        "completed_calendar_pump_times": completed_calendar_pump_times,
+        "calendar_nursing_times": calendar_nursing_times,
+        "completed_calendar_pump_times": _unique_sorted_times(
+            [
+                str(item.get("time") or "")
+                for item in selected_day.get("planned_pumping", [])
+                if isinstance(item, dict) and bool(item.get("completed"))
+            ]
+        ),
+        "completed_calendar_nursing_times": _unique_sorted_times(
+            [
+                str(item.get("time") or "")
+                for item in selected_day.get("planned_nursing", [])
+                if isinstance(item, dict) and bool(item.get("completed"))
+            ]
+        ),
         "breastfeeding_times": breastfeeding_times,
+        "actual_nursing_times": actual_nursing_times,
         "all_event_times": all_event_times,
         "recent_pumping_times": recent_pumping_times,
+        "recent_milk_rhythm": rhythm,
         "infant_age_months": _infant_age_months(infant_rows, as_of_dt.date()),
         "source": _plan_context_source(calendar_pump_times=calendar_pump_times, measured_pumping_times=measured_pumping_times, breastfeeding_times=breastfeeding_times),
     }
@@ -1501,6 +1403,8 @@ def _schedule_basis_from_plan_context(
     recent_pumping_times = _list_from_context(plan_context, "recent_pumping_times")
     selected_pumping_times = pumping_times or recent_pumping_times
     selected_all_times = _unique_sorted_times([*selected_pumping_times, *breastfeeding_times])
+    rhythm = plan_context.get("recent_milk_rhythm") if isinstance(plan_context.get("recent_milk_rhythm"), dict) else {}
+    rhythm_summary = rhythm.get("summary") if isinstance(rhythm.get("summary"), dict) else {}
     source = _plan_context_source(
         calendar_pump_times=calendar_pump_times,
         measured_pumping_times=measured_pumping_times,
@@ -1522,12 +1426,22 @@ def _schedule_basis_from_plan_context(
     elif summary_event_count >= 3:
         confidence = "medium"
 
-    ask_daily_counts = confidence == "low"
+    rhythm_confidence = norm_text(rhythm_summary.get("confidence"))
+    if rhythm_confidence in {"high", "medium", "low"} and source != "default_template":
+        confidence = rhythm_confidence
+    ask_daily_counts = bool(rhythm_summary.get("ask_daily_counts")) if rhythm_summary else confidence == "low"
     target_day = norm_text(plan_context.get("target_day"))
     used_days = [target_day] if target_day and selected_count > 0 else []
     pumping_count = len(selected_pumping_times)
     breastfeeding_count = len(breastfeeding_times)
     longest_gap_hours = _longest_gap_hours(selected_all_times)
+    basis_summary = norm_text(rhythm_summary.get("basis_summary")) or _schedule_basis_summary(
+        source=source,
+        target_day=target_day,
+        pumping_count=pumping_count,
+        breastfeeding_count=breastfeeding_count,
+        confidence=confidence,
+    )
     return _drop_empty_dict(
         {
             "source": source,
@@ -1539,13 +1453,7 @@ def _schedule_basis_from_plan_context(
             "total_count_per_day": pumping_count + breastfeeding_count,
             "longest_gap_hours": longest_gap_hours,
             "ask_daily_counts": ask_daily_counts,
-            "basis_summary": _schedule_basis_summary(
-                source=source,
-                target_day=target_day,
-                pumping_count=pumping_count,
-                breastfeeding_count=breastfeeding_count,
-                confidence=confidence,
-            ),
+            "basis_summary": basis_summary,
         }
     )
 
@@ -2691,8 +2599,68 @@ def _public_plan_generation_context(plan_context: dict[str, Any]) -> dict[str, A
         "measured_pumping_times": _list_from_context(plan_context, "measured_pumping_times"),
         "breastfeeding_times": _list_from_context(plan_context, "breastfeeding_times"),
         "recent_pumping_times": _list_from_context(plan_context, "recent_pumping_times"),
+        "recent_milk_rhythm": _public_recent_milk_rhythm_context(plan_context.get("recent_milk_rhythm")),
         "infant_age_months": plan_context.get("infant_age_months"),
     }
+
+
+def _public_recent_milk_rhythm_context(value: Any) -> dict[str, Any]:
+    rhythm = value if isinstance(value, dict) else {}
+    summary = rhythm.get("summary") if isinstance(rhythm.get("summary"), dict) else {}
+    selected_day = rhythm.get("selected_day") if isinstance(rhythm.get("selected_day"), dict) else {}
+    days = rhythm.get("days") if isinstance(rhythm.get("days"), list) else []
+    return _drop_empty_dict(
+        {
+            "summary": _drop_empty_dict(
+                {
+                    "basis_date": summary.get("basis_date"),
+                    "confidence": summary.get("confidence"),
+                    "usable_for_schedule": summary.get("usable_for_schedule"),
+                    "ask_daily_counts": summary.get("ask_daily_counts"),
+                    "ask_missing_records": summary.get("ask_missing_records"),
+                    "basis_summary": summary.get("basis_summary"),
+                    "average_pumping_count_per_day": summary.get("average_pumping_count_per_day"),
+                    "average_nursing_count_per_day": summary.get("average_nursing_count_per_day"),
+                    "typical_pumping_times": summary.get("typical_pumping_times"),
+                    "typical_nursing_times": summary.get("typical_nursing_times"),
+                    "longest_gap_hours": summary.get("longest_gap_hours"),
+                }
+            ),
+            "selected_day": _public_recent_milk_day(selected_day),
+            "days": [_public_recent_milk_day(day) for day in days if isinstance(day, dict)],
+        }
+    )
+
+
+def _public_recent_milk_day(day: dict[str, Any]) -> dict[str, Any]:
+    return _drop_empty_dict(
+        {
+            "date": day.get("date"),
+            "completeness": day.get("completeness"),
+            "planned_pumping_times": day.get("planned_pumping_times"),
+            "planned_nursing_times": day.get("planned_nursing_times"),
+            "actual_pumping": _public_recent_events(day.get("actual_pumping"), include_amount=True, include_duration=True),
+            "actual_nursing_times": day.get("actual_nursing_times"),
+            "breastmilk_bottle": _public_recent_events(day.get("breastmilk_bottle"), include_amount=True),
+            "formula_bottle": _public_recent_events(day.get("formula_bottle"), include_amount=True),
+            "all_times": day.get("all_times"),
+        }
+    )
+
+
+def _public_recent_events(value: Any, *, include_amount: bool = False, include_duration: bool = False) -> list[dict[str, Any]]:
+    events = value if isinstance(value, list) else []
+    compact = []
+    for item in events:
+        if not isinstance(item, dict):
+            continue
+        event = {"time": item.get("time")}
+        if include_amount:
+            event["milk_ml"] = item.get("milk_ml")
+        if include_duration:
+            event["duration_minutes"] = item.get("duration_minutes")
+        compact.append(_drop_empty_dict(event))
+    return compact
 
 
 def _plan_observation_context(

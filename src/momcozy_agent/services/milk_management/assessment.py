@@ -8,6 +8,7 @@ from typing import Any
 
 from .db import fetch_all, fetch_one, get_knowledge_root
 from .feeding import estimate_breastfeeding_milk, get_yesterday_feeding_snapshot
+from .rhythm import build_recent_milk_rhythm_context
 from .schemas import (
     CALENDAR_TYPE_NURSING,
     CALENDAR_TYPE_PUMP,
@@ -100,6 +101,12 @@ def evaluate_milk_status(
     pumping_summary = _summarize_pumping(pumping_logs)
     feeding_summary = _summarize_feeding(feeding_logs)
     calendar_task_summary = _summarize_calendar_tasks(calendar_tasks, start_day=start_day, end_day=end_day)
+    recent_milk_rhythm = build_recent_milk_rhythm_context(
+        user_id=uid,
+        as_of_time=_db_time(as_of_dt),
+        days=7,
+        include_today=False,
+    )
     yesterday_feeding_snapshot = (
         get_yesterday_feeding_snapshot(user_id=uid, as_of_time=_db_time(as_of_dt))
         if days == 1 and not include_today
@@ -151,6 +158,7 @@ def evaluate_milk_status(
             "pumping_summary": pumping_summary,
             "feeding_summary": feeding_summary,
             "calendar_task_summary": calendar_task_summary,
+            "recent_milk_rhythm": recent_milk_rhythm,
             "yesterday_feeding_snapshot": yesterday_feeding_snapshot,
             "quick_24h_intake": quick_24h_intake,
             "milk_normality": normality,

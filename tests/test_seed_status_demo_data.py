@@ -236,6 +236,72 @@ class SeedStatusDemoDataTest(unittest.TestCase):
         self.assertEqual(future_calendar, 0)
         self.assertEqual(yesterday_records, 8)
 
+    def test_startup_seed_keeps_recent_trend_shape_with_stale_calendar_history(self) -> None:
+        old_db_path = data_store.DB_PATH
+        with tempfile.TemporaryDirectory() as tmp:
+            data_store.DB_PATH = Path(tmp) / "milk_management.db"
+            try:
+                module = _load_seed_module()
+                module.TODAY = datetime(2026, 5, 27)
+                module.DELIVERY_DATE = "2026-03-07"
+                module._current_demo_time = lambda: datetime(2026, 5, 27, 16, 30)
+
+                with module._connect() as conn:
+                    module._seed_profiles(conn)
+                    conn.execute(
+                        """
+                        INSERT INTO calendar(user_id, date, task_id, start_time, content, type, source, is_milk_pump, finish)
+                        VALUES (?, '2026-04-12', 1, '2026-04-12 09:00:00', '旧吸奶计划', '吸奶', '系统生成', 1, 'true')
+                        """,
+                        (module.USER_ID,),
+                    )
+                    conn.commit()
+
+                module.main()
+
+                conn = sqlite3.connect(data_store.DB_PATH)
+                try:
+                    recent_rows = conn.execute(
+                        """
+                        SELECT date(pump_start_time) AS day, SUM(pump_milk_volum) AS total
+                        FROM pumping_log
+                        WHERE user_id = ?
+                          AND date(pump_start_time) BETWEEN ? AND ?
+                        GROUP BY day
+                        ORDER BY day
+                        """,
+                        (module.USER_ID, "2026-05-20", "2026-05-26"),
+                    ).fetchall()
+                    recent_nursing = {
+                        str(row[0]): int(row[1] or 0)
+                        for row in conn.execute(
+                            """
+                            SELECT date(feed_time) AS day, COUNT(*) AS count
+                            FROM feeding_log
+                            WHERE user_id = ?
+                              AND feed_type = '亲喂'
+                              AND date(feed_time) BETWEEN ? AND ?
+                            GROUP BY day
+                            """,
+                            (module.USER_ID, "2026-05-20", "2026-05-26"),
+                        ).fetchall()
+                    }
+                finally:
+                    conn.close()
+            finally:
+                data_store.DB_PATH = old_db_path
+
+        deltas = []
+        estimate_deltas = []
+        for day_text, pump_total in recent_rows:
+            reference = module.get_yield_reference_range((datetime.fromisoformat(day_text).date() - datetime.fromisoformat(module.DELIVERY_DATE).date()).days + 1)
+            deltas.append(float(pump_total or 0) - float(reference["p15"]))
+            estimate_deltas.append(float(pump_total or 0) + recent_nursing.get(str(day_text), 0) * module.NURSING_ESTIMATE_ML - float(reference["p15"]))
+
+        self.assertEqual(len(recent_rows), 7)
+        self.assertEqual(sum(1 for delta in deltas if delta >= 0), 2)
+        self.assertEqual(sum(1 for delta in estimate_deltas if delta >= 0), 2)
+
 
 def _scalar(conn: sqlite3.Connection, sql: str, params: tuple[object, ...]) -> int:
     return int(conn.execute(sql, params).fetchone()[0] or 0)

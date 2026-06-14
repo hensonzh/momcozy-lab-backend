@@ -411,24 +411,7 @@ def _sync_calendar_records_to_plan(conn: sqlite3.Connection) -> None:
 
 
 def _calendar_plan_start_date(conn: sqlite3.Connection):
-    fallback = TODAY.date() - timedelta(days=PLAN_HISTORY_DAYS)
-    row = conn.execute(
-        """
-        SELECT MIN(date) AS min_date
-        FROM calendar
-        WHERE user_id = ?
-          AND date <= ?
-        """,
-        (USER_ID, TODAY.date().isoformat()),
-    ).fetchone()
-    raw = str(row["min_date"] or "") if row else ""
-    if not raw:
-        return fallback
-    try:
-        existing = datetime.fromisoformat(raw).date()
-    except ValueError:
-        return fallback
-    return min(existing, fallback)
+    return TODAY.date() - timedelta(days=PLAN_HISTORY_DAYS)
 
 
 def _current_demo_time() -> datetime:

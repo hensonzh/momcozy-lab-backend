@@ -25,6 +25,7 @@ from momcozy_agent.services.milk_management.plan import apply_milk_plan, preview
 from momcozy_agent.services.milk_management.status import query_milk_status
 from momcozy_agent.services.milk_management.task_completion import complete_milk_task
 from momcozy_agent.agents import artifact_events_from_tool_result, model_tool_output, safe_tool_result
+from momcozy_agent.contexts import ContextState, build_request_context, record_milk_management_tool_state
 from momcozy_agent.tool_handlers.milk_management import (
     _milk_analysis_headline,
     _milk_next_step,
@@ -383,6 +384,8 @@ class MilkManagementToolTests(unittest.TestCase):
         self.assertNotIn("card", result)
         self.assertIn("data", result)
         self.assertIn("clinical_assessment", result["data"])
+        self.assertIn("recent_milk_rhythm", result["data"])
+        self.assertEqual(result["data"]["recent_milk_rhythm"]["selected_day"]["date"], "2026-05-13")
         compact = model_tool_output({"ok": True, "tool_name": "milk_assessment_evaluate", "result": result})
         self.assertNotIn("card", compact)
         self.assertIn("user_context", compact)
@@ -394,25 +397,76 @@ class MilkManagementToolTests(unittest.TestCase):
         self.assertTrue(any("记录大致可用" in item for item in reply_context["判断结果"]["记录情况"]))
         self.assertIn("比较安心", reply_context["判断结果"]["宝宝摄入信号"])
         self.assertIn("暂时没有明显发热", reply_context["判断结果"]["妈妈状态"])
-        self.assertIn("问用户是否现在制定温和追奶计划", reply_context["下一步要确认的信息"])
+        self.assertIn("用户是否希望现在生成一版温和追奶计划", reply_context["下一步要确认的信息"])
         self.assertIn("可以先征求用户是否进入计划制定", reply_context["为什么要问这些"])
-        self.assertIn("制定温和追奶计划", reply_context["适合的下一步计划"])
+        self.assertIn("生成一版温和追奶计划", reply_context["适合的下一步计划"])
+        rhythm_context = reply_context["最近7天吸奶和亲喂节奏"]
+        self.assertTrue(any("不需要重复追问已知节奏信息" in item for item in rhythm_context["摘要"]))
+        self.assertTrue(any(day["日期"] == "2026-05-13" for day in rhythm_context["每天明细"]))
         self.assertTrue(any("宝宝需求变高" in item for item in reply_context["不能这样推断"]))
         self.assertTrue(all("缩短最长间隔" not in item for item in reply_context["下一步要确认的信息"]))
         self.assertNotIn("记录完整后的推荐承接", reply_context)
         self.assertNotIn("接下来怎么调", reply_context)
-        self.assertEqual(compact["适合的下一步"][0], "询问是否制定温和追奶计划")
-        self.assertIn("用户同意后生成计划草稿", compact["适合的下一步"])
+        self.assertEqual(compact["适合的下一步"][0], "直接询问是否现在生成温和追奶计划")
+        self.assertIn("用户确认后生成计划草稿", compact["适合的下一步"])
         self.assertIn("只需要文本回复", compact["final_response_instruction"])
         self.assertIn("用户只回答了其中一部分", compact["final_response_instruction"])
         self.assertIn("明确下一步", compact["final_response_instruction"])
-        self.assertIn("user_context 里显示适合进入计划", compact["final_response_instruction"])
+        self.assertIn("最后必须用一个直接问题确认用户是否现在进入计划制定", compact["final_response_instruction"])
         self.assertIn("不要把宝宝实际需求变高说成奶量产出偏低的原因", compact["final_response_instruction"])
         self.assertNotIn("固定模板", json.dumps(reply_context, ensure_ascii=False))
         self.assertNotIn("工具建议话术", compact)
         self.assertNotIn("assessment", compact["final_response_instruction"])
         self.assertNotIn("data", compact)
         json.dumps(result, ensure_ascii=False)
+
+    def test_assessment_state_tells_next_confirmation_to_continue_plan_flow_without_reasking_records(self) -> None:
+        uid, _ = _seed_user("assessment-state-plan")
+        for index, time in enumerate(["00:00", "03:00", "06:00", "09:00", "12:00", "15:00", "18:00", "21:00"], start=1):
+            _add_task(
+                uid,
+                task_id=index,
+                content="吸奶",
+                item_type="吸奶",
+                is_milk_pump=1,
+                target_date="2026-05-13",
+                start_time=time,
+                finish="true",
+            )
+        _add_pumping_rows(uid, "2026-05-13", ["06:00", "09:00", "12:00", "18:00", "21:00"])
+
+        result = execute_milk_management_tool(
+            {
+                "_tool_name": "milk_assessment_evaluate",
+                "user_id": uid,
+                "as_of_time": "2026-05-14 12:00:00",
+                "window_days": 7,
+                "include_today": False,
+                "infant_signals": {"wet_diapers_24h": 6, "baby_state": "正常"},
+                "maternal_symptoms": {"fever": False, "breast_redness": False, "lump_or_hard_area": False},
+            },
+            {"user_message": "分析最近吸奶情况", "locale": "zh-CN", "timezone": "Asia/Shanghai", "message_sent_at": ""},
+        )
+        state = ContextState()
+        record_milk_management_tool_state(state, "milk_assessment_evaluate", {"ok": True, "tool_name": "milk_assessment_evaluate", "result": result})
+
+        context = build_request_context(
+            {
+                "user_message": "继续",
+                "user_profile": {"user_id": uid},
+                "locale": "zh-CN",
+                "timezone": "Asia/Shanghai",
+                "message_sent_at": "2026-05-14 12:10:00",
+            },
+            state,
+        )
+
+        self.assertIn("milk_management_context:", context)
+        self.assertIn("last_assessment_suggested_plan_type: increase_milk", context)
+        self.assertIn("表达接受上一轮计划建议", context)
+        self.assertIn("进入奶量计划预览流程", context)
+        self.assertIn("不要把已由工具可读取的近期吸奶、亲喂或日程节奏再次作为前置追问", context)
+        self.assertIn("recent_typical_pumping_times", context)
 
     def test_assessment_tool_requires_clinical_context_before_comprehensive_analysis(self) -> None:
         uid, _ = _seed_user("assessment-needs-clinical-context")
@@ -657,11 +711,17 @@ class MilkManagementToolTests(unittest.TestCase):
         self.assertEqual(draft["generation_context"]["schedule_basis"]["used_days"], ["2026-05-12"])
         self.assertEqual(draft["generation_context"]["pumping_times"], pumping_times)
         self.assertEqual(draft["generation_context"]["breastfeeding_times"], breastfeeding_times)
+        rhythm = draft["generation_context"]["recent_milk_rhythm"]
+        self.assertEqual(rhythm["summary"]["basis_date"], "2026-05-12")
+        self.assertEqual(rhythm["selected_day"]["actual_nursing_times"], breastfeeding_times)
+        self.assertEqual([item["time"] for item in rhythm["selected_day"]["actual_pumping"]], pumping_times)
 
         compact = model_tool_output({"ok": True, "tool_name": "milk_plan_preview", "result": result})
         plan_context = compact["plan_preview"]["plan_context"]
-        self.assertTrue(any("不需要再向用户确认每天吸奶或亲喂次数" in item for item in plan_context["计划依据"]))
-        self.assertIn("不要再问用户每天吸奶几次或亲喂几次", compact["final_response_instruction"])
+        self.assertTrue(any("不需要再向用户确认已知节奏信息" in item for item in plan_context["计划依据"]))
+        self.assertTrue(any("不需要重复追问已知节奏信息" in item for item in plan_context["最近7天吸奶和亲喂节奏"]["摘要"]))
+        self.assertTrue(any(day["日期"] == "2026-05-12" for day in plan_context["最近7天吸奶和亲喂节奏"]["每天明细"]))
+        self.assertIn("不要重复追问这些已知节奏信息", compact["final_response_instruction"])
 
     def test_plan_preview_tool_returns_structured_plan_card(self) -> None:
         uid, _ = _seed_user("plan-card")
@@ -764,20 +824,22 @@ class MilkManagementToolTests(unittest.TestCase):
         )
         self.assertTrue(confirmed["ok"])
         self.assertIn("assistant_followup", confirmed)
-        self.assertIn("同步到了日程", confirmed["assistant_followup"]["message"])
-        self.assertIn("定时提醒", confirmed["assistant_followup"]["message"])
-        self.assertIn("执行一段时间", confirmed["assistant_followup"]["message"])
+        self.assertIn("同步到计划页", confirmed["assistant_followup"]["message"])
+        self.assertIn("提醒", confirmed["assistant_followup"]["message"])
+        self.assertIn("最近几天", confirmed["assistant_followup"]["message"])
         self.assertEqual(confirmed["card"]["id"], result["card"]["id"])
         self.assertEqual(confirmed["card"]["card_json"]["status_label"], "已确认")
         safe_confirmed = safe_tool_result({"ok": True, "tool_name": "milk_plan_mutate", "result": confirmed})
         self.assertEqual(safe_confirmed["card"]["card_type"], "milk_plan_card")
         self.assertIn("assistant_followup", safe_confirmed)
+        self.assertIn("calendar_dates", safe_confirmed)
+        self.assertTrue(all(date.startswith("2026-") for date in safe_confirmed["calendar_dates"]))
         compact_confirmed = model_tool_output({"ok": True, "tool_name": "milk_plan_mutate", "result": confirmed})
         self.assertNotIn("assistant_followup", compact_confirmed)
         self.assertNotIn("status", compact_confirmed)
         self.assertIn("user_context", compact_confirmed)
-        self.assertIn("同步到日程", compact_confirmed["final_response_instruction"])
-        self.assertIn("执行一段时间", compact_confirmed["final_response_instruction"])
+        self.assertIn("计划页", compact_confirmed["final_response_instruction"])
+        self.assertIn("最近几天", compact_confirmed["final_response_instruction"])
         self.assertEqual(
             artifact_events_from_tool_result(
                 tool_call_id="call_confirm",

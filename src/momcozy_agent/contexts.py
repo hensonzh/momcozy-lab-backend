@@ -21,6 +21,7 @@ class ContextState:
     active_device_module: str = ""
     shown_step_image_urls: list[str] = field(default_factory=list)
     birth_prep_slots: dict[str, dict[str, Any]] = field(default_factory=dict)
+    milk_management_state: dict[str, Any] = field(default_factory=dict)
 
 
 HOSPITAL_BAG_SLOT_FIELDS = (
@@ -73,6 +74,7 @@ def build_request_context(
             lines.append(f"- {event}")
     if state is not None:
         lines.extend(_format_birth_prep_context(state))
+        lines.extend(_format_milk_management_context(state))
         lines.extend(_format_device_image_context(state))
     lines.extend(_format_active_care_plan_context(inputs))
     lines.extend(_format_pregnancy_diary_context(inputs))
@@ -186,6 +188,71 @@ def _format_birth_prep_context(state: ContextState) -> list[str]:
         lines.append("- 创建产前表单或待产包表单时复用这些字段作为默认值，让用户在表单里确认或修改，不要重复追问。")
     if pending_field:
         lines.append(f"- hospital_bag_next_field: {pending_field}")
+    return lines
+
+
+def record_milk_management_tool_state(state: ContextState, tool_name: str, result: dict[str, Any]) -> None:
+    if tool_name == "milk_assessment_evaluate":
+        _record_milk_assessment_state(state, result)
+        return
+    if tool_name in {"milk_plan_preview", "milk_plan_mutate"}:
+        state.milk_management_state.pop("pending_plan_after_assessment", None)
+
+
+def _record_milk_assessment_state(state: ContextState, result: dict[str, Any]) -> None:
+    tool_result = result.get("result")
+    if not isinstance(tool_result, dict) or tool_result.get("ok") is not True:
+        return
+    data = tool_result.get("data")
+    if not isinstance(data, dict):
+        return
+    normality = data.get("milk_normality") if isinstance(data.get("milk_normality"), dict) else {}
+    status = str(normality.get("overall_status") or data.get("assessment_status") or "").strip()
+    clinical = data.get("clinical_assessment") if isinstance(data.get("clinical_assessment"), dict) else {}
+    plan_gate = clinical.get("plan_gate") if isinstance(clinical.get("plan_gate"), dict) else {}
+    if status != "under_supply_alert" or plan_gate.get("allowed") is not True:
+        state.milk_management_state.pop("pending_plan_after_assessment", None)
+        return
+    allowed_types = plan_gate.get("allowed_plan_types") if isinstance(plan_gate.get("allowed_plan_types"), list) else []
+    if allowed_types and "increase_milk" not in {str(item) for item in allowed_types}:
+        state.milk_management_state.pop("pending_plan_after_assessment", None)
+        return
+    rhythm = data.get("recent_milk_rhythm") if isinstance(data.get("recent_milk_rhythm"), dict) else {}
+    rhythm_summary = rhythm.get("summary") if isinstance(rhythm.get("summary"), dict) else {}
+    state.milk_management_state["pending_plan_after_assessment"] = {
+        "plan_type": "increase_milk",
+        "as_of_time": data.get("as_of_time"),
+        "basis_date": rhythm_summary.get("basis_date"),
+        "typical_pumping_times": rhythm_summary.get("typical_pumping_times"),
+        "typical_nursing_times": rhythm_summary.get("typical_nursing_times"),
+        "usable_for_schedule": rhythm_summary.get("usable_for_schedule"),
+    }
+
+
+def _format_milk_management_context(state: ContextState) -> list[str]:
+    pending = state.milk_management_state.get("pending_plan_after_assessment")
+    if not isinstance(pending, dict):
+        return []
+    plan_type = str(pending.get("plan_type") or "").strip()
+    if not plan_type:
+        return []
+    lines = [
+        "milk_management_context:",
+        f"- last_assessment_suggested_plan_type: {plan_type}",
+        "- 如果用户本轮表达接受上一轮计划建议、确认继续或希望进入下一步，就进入奶量计划预览流程；不要把已由工具可读取的近期吸奶、亲喂或日程节奏再次作为前置追问。",
+        "- 奶量计划预览会自动读取最近 7 天吸奶、亲喂和日程记录来排时间；只有工具返回仍缺少宝宝或妈妈状态时，才继续追问对应缺失信息。",
+    ]
+    basis_date = str(pending.get("basis_date") or "").strip()
+    if basis_date:
+        lines.append(f"- recent_milk_rhythm_basis_date: {basis_date}")
+    pumping_times = pending.get("typical_pumping_times") if isinstance(pending.get("typical_pumping_times"), list) else []
+    nursing_times = pending.get("typical_nursing_times") if isinstance(pending.get("typical_nursing_times"), list) else []
+    pumping_text = "、".join(str(item) for item in pumping_times if str(item).strip())
+    nursing_text = "、".join(str(item) for item in nursing_times if str(item).strip())
+    if pumping_text:
+        lines.append(f"- recent_typical_pumping_times: {pumping_text}")
+    if nursing_text:
+        lines.append(f"- recent_typical_nursing_times: {nursing_text}")
     return lines
 
 

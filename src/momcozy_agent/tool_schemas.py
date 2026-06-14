@@ -608,7 +608,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "milk_plan_preview": _function_tool(
         "milk_plan_preview",
-        "PREVIEW 候选方案工具：按确定性规则生成追奶、稳奶或减奶计划草稿，不写数据库，并返回保存前校验结果。用于用户明确想要生成/调整奶量计划，或评估后需要给出计划草稿时；如果用户在奶量计划流程中说胀、涨、排不空、吸完还胀但否认发热/红肿/硬块加重/疼痛加重，不要改走普通健康咨询，应把这些作为 maternal_symptoms 放进 options，让计划把单次吸奶或亲喂效果和结束标准一起考虑。不要用于读取已有计划、单次 calendar 调整或设备使用指导。只有返回 plan_preview_ready 且 data.validation.valid=true 时才能展示确认保存；如用户给出目标，可同时返回目标校验结果。",
+        "PREVIEW 候选方案工具：按确定性规则生成追奶、稳奶或减奶计划草稿，不写数据库，并返回保存前校验结果。用于用户明确想要生成/调整奶量计划，或完成奶量评估后表达接受上一轮建议、确认继续或希望进入下一步时；不要先追问工具可自动读取的近期吸奶、亲喂或日程节奏，本工具会自动读取最近 7 天吸奶、亲喂和日程记录来排时间。如果用户在奶量计划流程中说胀、涨、排不空、吸完还胀但否认发热/红肿/硬块加重/疼痛加重，不要改走普通健康咨询，应把这些作为 maternal_symptoms 放进 options，让计划把单次吸奶或亲喂效果和结束标准一起考虑。不要用于读取已有计划、单次 calendar 调整或设备使用指导。只有返回 plan_preview_ready 且 data.validation.valid=true 时才能展示确认保存；如用户给出目标，可同时返回目标校验结果。",
         {
             "plan_type": _nullable({"type": "string", "enum": ["increase_milk", "maintain_milk", "decrease_milk"]}),
             "plan_days": _nullable({"type": "integer"}),
