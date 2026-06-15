@@ -155,7 +155,7 @@ input = [
 
 工具返回的本地资源 URL 不会被模型自动访问。对 `device_manual_search.relevant_images` 这类官方步骤图，agent loop 先把图片元数据记录到 `ContextState.available_tool_images`；当最终回复实际展示 Markdown 图片时，再记录 `last_displayed_tool_image`、`active_device_module` 和 `shown_step_image_urls`。后续用户明确询问“图上/这张图/对照图/标注/哪个部件”等需要读图的问题时，下一轮模型请求优先参考 `last_displayed_tool_image`，避免从历史图片里用相同编号误猜；必要时才把最多 2 张 `/skill-assets/...` 白名单图片转为 `data:image/...` 的 `input_image`。该能力只读取 `skills/{skill_id}/assets` 下的图片文件，不处理外部 URL、PDF、视频或任意路径；如果当前用户消息已经附带上传图片，则优先用户上传图片，不再自动附加官方步骤图。结构化工具字段仍优先于视觉读取；图片输入只用于补充读取图中文字、标注和部件位置。
 
-产前准备的待产包基础字段会记录在 `ContextState.birth_prep_slots`。当用户按一问一答补充孕周/预产期、复工或外出计划和最担心的问题时，后端保存这些字段，并在 `hospital_bag_form_create` 时自动合并到 `default_values`，避免模型漏传导致表单没有预填。
+产前准备共享字段会记录在 `ContextState.birth_prep_slots`，并把明确可复用的信息持久化到 user profile。孕期计划、待产包和分娩沟通单都会从同一套资料读取默认值，例如孕周、年龄、单双胎、IVF、城市/医院、分娩方式、喂养意向、支持方、复工时间和焦虑点，避免模型漏传导致表单没有预填。
 
 后续请求依赖 `previous_response_id` 延续对话状态。
 
@@ -328,7 +328,7 @@ message_sent_at: 2026-05-05T17:45:03+08:00
 - `milk_management`：聚合后的奶量工具，包括 `milk_snapshot_get`、`milk_records_query`、`milk_record_mutate`、`milk_plan_query`、`milk_plan_preview`、`milk_plan_mutate`、`milk_calendar_query`、`milk_calendar_change_preview`、`milk_calendar_mutate`，以及评估类 `milk_assessment_evaluate`、`infant_growth_evaluate`；用于用户自身奶量、喂养、宝宝生长和 calendar 数据，不用于吸奶器选型、设备排障或购物车调整
 - `hospital_bag_cart`：待产包购物车工具 `hospital_bag_cart_update`，用于已经进入待产包购物车后的预算上限优化、删除/加回、基础款替换、医院提供、家里已有、数量调整，以及把已推荐的 Momcozy 吸奶器型号同步到购物车；不用于生成待产包清单、独立吸奶器选型或设备排障
 - `pump_recommendation`：吸奶器型号选型工具 `hospital_bag_pump_recommend`，用于购买前 Momcozy 吸奶器推荐、型号对比、预算内选择，也可在待产包场景里先选型再同步购物车；不用于已购设备故障/说明书、奶量是否正常或直接修改购物车
-- `birth_prep`：产前准备专用产物工具，包括 `birth_plan_form_create`、`labor_communication_card_create`、`birth_journey_plan_card_create`、`hospital_bag_form_create`、`hospital_bag_card_create`；用于已经进入生产全过程计划、待产包清单或分娩沟通单流程后的表单/结构化内容生成，不用于普通孕期问答
+- `birth_prep`：产前准备专用产物工具，包括 `birth_plan_form_create`、`labor_communication_card_create`、`birth_journey_plan_card_create`、`hospital_bag_form_create`、`hospital_bag_card_create`；用于已经进入孕期计划、待产包清单或分娩沟通单流程后的表单/结构化内容生成，不用于普通孕期问答
 
 每个 namespace 中的 function 都设置 `defer_loading: true`。模型开始时只看到 namespace 名称和描述；需要具体工具时由 `tool_search` 加载对应 function schema。
 
@@ -450,7 +450,7 @@ birth_plan_form_create / hospital_bag_form_create tool result
 
 ## Birth Prep 当前服务流程
 
-`birth-prep` skill 当前提供生产全过程计划、待产包清单和分娩沟通单三个产物服务：
+`birth-prep` skill 当前提供孕期计划、待产包清单和分娩沟通单三个产物服务：
 
 待产包清单和分娩沟通单采用同一个表单确认机制：
 
@@ -465,7 +465,7 @@ birth_plan_form_create / hospital_bag_form_create tool result
 
 `card.card_json` 是系统内部和前端渲染的真实数据源。HTML、PNG、PDF 都只是展示或分享载体。
 
-生产全过程计划不走表单，但生成前必须先确认孕期、分娩方式和主要支持人；缺信息时 handler 返回 `needs_required_context`，不产生 artifact。
+孕期计划不走表单，但生成前必须先确认孕期、分娩方式和主要支持人；缺信息时 handler 返回 `needs_required_context`，不产生 artifact。
 
 ### 分娩沟通单
 

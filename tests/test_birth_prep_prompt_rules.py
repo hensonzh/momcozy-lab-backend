@@ -37,6 +37,8 @@ class BirthPrepPromptRuleTests(unittest.TestCase):
         self.assertIn("工具返回 `ready_to_generate` 后", skill)
         self.assertIn("工具返回 `ready_to_generate` 后，直接调用 `birth_journey_plan_card_create`", skill)
         self.assertNotIn("references/birth-journey-plan.md", skill)
+        self.assertIn("当前孕周、是否 IVF（体外受精）", skill)
+        self.assertNotIn("一次性收集末次月经、预产期、当前孕周", skill)
 
     def test_broad_week_preparation_question_is_not_shopping_by_default(self) -> None:
         skill = (ROOT / "skills" / "birth-prep" / "SKILL.md").read_text(encoding="utf-8")
@@ -53,7 +55,7 @@ class BirthPrepPromptRuleTests(unittest.TestCase):
         self.assertIn("如果妈妈没有表达非常清晰的问题意图", skill)
         self.assertIn("最终回复的最后一句必须引导三项产前服务中的一个", skill)
         self.assertIn("不要停在纯建议，也不要同时列出三个服务", skill)
-        self.assertIn("完全没有取向时默认引导生产全过程计划", skill)
+        self.assertIn("完全没有取向时默认引导孕期计划", skill)
         self.assertIn("临近生产、准备去医院或想先把眼前事情稳住时引导待产包清单", skill)
         self.assertIn("提到医院、医生、护士、陪产、生产偏好或产房沟通时引导分娩沟通单", skill)
         self.assertIn("轻问答的服务引导只做邀约，不直接调用工具", skill)
@@ -61,16 +63,19 @@ class BirthPrepPromptRuleTests(unittest.TestCase):
     def test_birth_journey_generation_does_not_duplicate_pre_tool_and_final_summary(self) -> None:
         skill = (ROOT / "skills" / "birth-prep" / "SKILL.md").read_text(encoding="utf-8")
 
+        self.assertNotIn("可以把从现在到入院、分娩、出院和产后 42 天按阶段理清楚", skill)
+        self.assertIn("可以先把你当前孕周最该做的事理清楚", skill)
         self.assertIn("调用 birth_journey_plan_card_create 前不要输出给用户可见的过渡文本", skill)
         self.assertIn("直接调用工具", skill)
         self.assertIn("不要在工具调用前展开阶段、当前重点、温馨提醒、接下来建议或我能帮你做", skill)
         self.assertIn("只在工具调用后的最终回复里表达一次", skill)
-        self.assertNotIn("好，我来帮你整理生产全过程计划", skill)
+        self.assertNotIn("好，我来帮你整理孕期计划", skill)
         self.assertNotIn("最多只说一句简短过渡", skill)
-        self.assertNotIn("首先对整个生产全过程进行一个口头概述", skill)
-        self.assertIn("STATE_D: 删除生产全过程计划", skill)
-        self.assertIn("生产计划", skill)
-        self.assertIn("已有生产计划", skill)
+        self.assertNotIn("首先对完整阶段进行一个口头概述", skill)
+        self.assertIn("STATE_D: 删除孕期计划", skill)
+        self.assertIn("孕期计划", skill)
+        self.assertIn("已经存在 active 孕期计划", skill)
+        self.assertIn("不要再次调用 `birth_journey_plan_card_create` 重新生成", skill)
         self.assertIn("birth_journey_plan_delete", skill)
         self.assertIn("confirmed=true", skill)
 
@@ -78,7 +83,6 @@ class BirthPrepPromptRuleTests(unittest.TestCase):
         runtime_text = "\n".join(
             [
                 (ROOT / "skills" / "birth-prep" / "SKILL.md").read_text(encoding="utf-8"),
-                (ROOT / "skills" / "birth-prep" / "references" / "hospital-bag-service.md").read_text(encoding="utf-8"),
                 str(DEFERRED_TOOL_NAMESPACES["birth_prep"]["description"]),
                 str(create_hospital_bag_form({"default_values": {"due_date_or_week": "35 周"}}, {"user_message": ""})),
             ]
@@ -98,8 +102,6 @@ class BirthPrepPromptRuleTests(unittest.TestCase):
         runtime_text = "\n".join(
             [
                 (ROOT / "skills" / "birth-prep" / "SKILL.md").read_text(encoding="utf-8"),
-                (ROOT / "skills" / "birth-prep" / "references" / "hospital-bag-service.md").read_text(encoding="utf-8"),
-                (ROOT / "skills" / "birth-prep" / "references" / "labor-communication-card.md").read_text(encoding="utf-8"),
                 str(DEFERRED_TOOL_NAMESPACES["birth_prep"]["description"]),
                 str(FUNCTION_TOOLS["birth_plan_form_create"]),
                 str(FUNCTION_TOOLS["labor_communication_card_create"]),
@@ -115,8 +117,7 @@ class BirthPrepPromptRuleTests(unittest.TestCase):
         for phrase in (
             "待产包" + "卡片",
             "分娩沟通" + "卡片",
-            "生产全过程计划" + "卡片",
-            "生产全计划" + "卡片",
+            "孕期计划" + "卡片",
             "分娩沟通" + "卡",
             "产房沟通优先级" + "卡片",
             "这张" + "卡",
@@ -125,7 +126,7 @@ class BirthPrepPromptRuleTests(unittest.TestCase):
 
         self.assertIn("待产包清单", runtime_text)
         self.assertIn("分娩沟通单", runtime_text)
-        self.assertIn("生产全过程计划", runtime_text)
+        self.assertIn("孕期计划", runtime_text)
 
     def test_birth_prep_slots_capture_pending_hospital_bag_answer(self) -> None:
         state = ContextState()
@@ -141,18 +142,16 @@ class BirthPrepPromptRuleTests(unittest.TestCase):
 
     def test_hospital_bag_flow_uses_form_without_three_dialogue_questions(self) -> None:
         skill = (ROOT / "skills" / "birth-prep" / "SKILL.md").read_text(encoding="utf-8")
-        reference = (ROOT / "skills" / "birth-prep" / "references" / "hospital-bag-service.md").read_text(encoding="utf-8")
         schema_text = str(FUNCTION_TOOLS["hospital_bag_form_create"])
 
-        self.assertIn("直接调用 `hospital_bag_form_create`", skill)
+        self.assertIn("用户确认开始后，直接调用 `hospital_bag_form_create`", skill)
         self.assertIn("不要先用聊天追问三项基础信息", skill)
-        self.assertIn("用户确认开始后，直接调用 `hospital_bag_form_create`", reference)
-        self.assertIn("不要先用自然对话收集 3 个字段", reference)
+        self.assertIn("不要先用自然对话收集 3 个字段", skill)
         self.assertIn("用户确认开始待产包整理后可直接调用", schema_text)
 
     def test_hospital_bag_entry_invite_does_not_reference_removed_fields(self) -> None:
-        reference = (ROOT / "skills" / "birth-prep" / "references" / "hospital-bag-service.md").read_text(encoding="utf-8")
-        entry_section = reference.split("## 进入与邀约", 1)[1].split("## 创建表单", 1)[0]
+        skill = (ROOT / "skills" / "birth-prep" / "SKILL.md").read_text(encoding="utf-8")
+        entry_section = skill.split("### STATE_A: 进入与邀约", 1)[1].split("### STATE_B: 收集信息", 1)[0]
         positive_section = entry_section.split("入口邀约不要说", 1)[0]
 
         self.assertIn("会按你的孕周、分娩方式、喂养意向、产后支持和最担心的事来取舍", entry_section)
@@ -167,6 +166,24 @@ class BirthPrepPromptRuleTests(unittest.TestCase):
             self.assertNotIn(phrase, positive_section)
             self.assertIn(phrase, entry_section)
         self.assertNotIn("医院要求不一致", entry_section)
+
+    def test_labor_communication_flow_lives_in_skill_not_reference(self) -> None:
+        skill = (ROOT / "skills" / "birth-prep" / "SKILL.md").read_text(encoding="utf-8")
+        schema_text = "\n".join(
+            [
+                str(FUNCTION_TOOLS["birth_plan_form_create"]),
+                str(FUNCTION_TOOLS["labor_communication_card_create"]),
+            ]
+        )
+
+        self.assertIn("服务3：[SERVICE S3] “分娩沟通单” 服务", skill)
+        self.assertIn("用户确认开始后，调用 `birth_plan_form_create`", skill)
+        self.assertIn("不要手写分娩沟通单字段", skill)
+        self.assertIn("看到 `confirmed_form_data form_id=\"birth_plan_card_intake\"` 后", skill)
+        self.assertIn("直接调用 `labor_communication_card_create`", skill)
+        self.assertIn("不要让 LLM 自己生成分娩沟通单 `card_json`", skill)
+        self.assertIn("创建分娩沟通单信息采集表单", schema_text)
+        self.assertIn("生成前端可渲染的分娩沟通单", schema_text)
 
     def test_hospital_bag_slots_do_not_capture_budget_preference(self) -> None:
         state = ContextState()

@@ -174,50 +174,25 @@ def main() -> None:
     assert isinstance(loaded["description"], str) and loaded["description"]
 
     birth_prep_skill = execute_skill_runtime_tool("load_skill", {"skill_id": "birth-prep"})
-    assert "## 核心服务" in birth_prep_skill["skill_md"]
-    assert "生产全过程计划" in birth_prep_skill["skill_md"]
+    assert "# 全局回复规则" in birth_prep_skill["skill_md"]
+    assert "孕期计划" in birth_prep_skill["skill_md"]
     assert "references/birth-journey-plan.md" not in birth_prep_skill["skill_md"]
+    assert "hospital-bag-service.md" not in birth_prep_skill["references"]
+    assert "labor-communication-card.md" not in birth_prep_skill["references"]
     assert "birth_journey_intake_manage" in birth_prep_skill["skill_md"]
     assert "birth_journey_plan_card_create" in birth_prep_skill["skill_md"]
     assert "待产包清单" in birth_prep_skill["skill_md"]
     assert "分娩沟通单" in birth_prep_skill["skill_md"]
-    assert "用户可见命名" in birth_prep_skill["skill_md"]
-    assert "卡片只是前端展示形式" in birth_prep_skill["skill_md"]
-    assert "物品词优先待产包" in birth_prep_skill["skill_md"]
-    assert "流程连续" in birth_prep_skill["skill_md"]
-    assert "宽泛注意/准备问题默认轻问答" in birth_prep_skill["skill_md"]
-    assert "对话采集风格" in birth_prep_skill["skill_md"]
+    assert "用户可见名称使用“分娩沟通单”" in birth_prep_skill["skill_md"]
+    assert "不要让 LLM 自己生成待产包 `card_json`" in birth_prep_skill["skill_md"]
+    assert "不要让 LLM 自己生成分娩沟通单 `card_json`" in birth_prep_skill["skill_md"]
+    assert "不默认进入购买、下单或待产包语义" in birth_prep_skill["skill_md"]
+    assert "轻问答的服务引导只做邀约" in birth_prep_skill["skill_md"]
     assert "采用 slot-filling 风格" in birth_prep_skill["skill_md"]
     assert "每轮最多问一个缺失字段" in birth_prep_skill["skill_md"]
-    assert "已知字段来自当前对话" in birth_prep_skill["skill_md"]
+    assert "default_values` 只放当前对话中新确认的可靠字段" in birth_prep_skill["skill_md"]
     assert "birth_plan_form_create" in birth_prep_skill["skill_md"]
     assert "hospital_bag_form_create" in birth_prep_skill["skill_md"]
-    birth_plan_reference = execute_skill_runtime_tool(
-        "read_skill_file",
-        {"skill_id": "birth-prep", "kind": "references", "path": "references/labor-communication-card.md"},
-    )["content"]
-    assert "分娩沟通单把用户最在意的沟通偏好" in birth_plan_reference
-    assert "表单字段、字段顺序、选项" in birth_plan_reference
-    assert "把可靠信息写入 `birth_plan_form_create.default_values`" in birth_plan_reference
-    assert "调用 `birth_plan_form_create`" in birth_plan_reference
-    assert "support_people" in birth_plan_reference
-    assert "不要手写分娩沟通单字段" in birth_plan_reference
-    assert "直接调用 `labor_communication_card_create`" in birth_plan_reference
-    assert "不要让 LLM 自己生成分娩沟通单 `card_json`" in birth_plan_reference
-    assert "工具返回 `assistant_followup`" in birth_plan_reference
-    hospital_bag_reference = execute_skill_runtime_tool(
-        "read_skill_file",
-        {"skill_id": "birth-prep", "kind": "references", "path": "references/hospital-bag-service.md"},
-    )["content"]
-    assert "待产包服务不是让用户自己从长清单里筛东西" in hospital_bag_reference
-    assert "表单字段、字段顺序、结构化 schema" in hospital_bag_reference
-    assert "先自然邀约，不直接创建表单" in hospital_bag_reference
-    assert "只把 `due_date_or_week`、`return_to_work_timing`、`top_worries` 写入" in hospital_bag_reference
-    assert "调用 `hospital_bag_form_create`" in hospital_bag_reference
-    assert "表单标题、分类、选项、必填/选填和字段说明都由专用工具生成" in hospital_bag_reference
-    assert "直接调用 `hospital_bag_card_create`" in hospital_bag_reference
-    assert "不要让 LLM 自己生成待产包 `card_json`" in hospital_bag_reference
-    assert "工具返回 `assistant_followup`" in hospital_bag_reference
 
     prefilled_hospital_bag_form = execute_tool(
         "ui_form_create",
@@ -480,7 +455,7 @@ def main() -> None:
 
     reference_state = ContextState()
     reference_state.loaded_references.append(
-        "birth-prep/references/labor-communication-card.md 已在当前会话中读取过；连续同一子服务任务优先复用，不要重复调用 read_skill_file，除非用户切换到新 reference 或上下文不足。"
+        "device-guidance/references/air1/manual.md 已在当前会话中读取过；连续同一子服务任务优先复用，不要重复调用 read_skill_file，除非用户切换到新 reference 或上下文不足。"
     )
     reference_context_request = build_agent_request(
         {
@@ -490,11 +465,11 @@ def main() -> None:
             "message_sent_at": "2026-05-04T20:03:00+08:00",
             "previous_response_id": "resp_previous",
         },
-        {"context_state": reference_state, "loaded_skill_ids": ["birth-prep"]},
+        {"context_state": reference_state, "loaded_skill_ids": ["device-guidance"]},
     )
     reference_context = reference_context_request["input"][0]["content"][0]["text"]
     assert "loaded_reference_context:" in reference_context
-    assert "birth-prep/references/labor-communication-card.md 已在当前会话中读取过" in reference_context
+    assert "device-guidance/references/air1/manual.md 已在当前会话中读取过" in reference_context
     assert "不要重复调用 read_skill_file" in reference_context
 
     profile_state = ContextState()

@@ -694,7 +694,19 @@ def create_form(args: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
     hospital_bag_default_values: dict[str, Any] | None = None
     if _looks_like_hospital_bag_form(form_id, fields):
         form_id = "hospital_bag_intake"
-        hospital_bag_default_values = _hospital_bag_allowed_default_values(_default_values_from_form_fields(fields))
+        state_default_values = _dict_value(inputs.get("_birth_prep_hospital_bag_slots"))
+        field_default_values = _default_values_from_form_fields(fields)
+        arg_default_values = _dict_value(args.get("default_values"))
+        default_values = {
+            **_birth_prep_shared_default_values(inputs),
+            **_birth_prep_shared_values_from_source(state_default_values),
+            **state_default_values,
+            **_birth_prep_shared_values_from_source(field_default_values),
+            **field_default_values,
+            **_birth_prep_shared_values_from_source(arg_default_values),
+            **arg_default_values,
+        }
+        hospital_bag_default_values = _hospital_bag_allowed_default_values(default_values)
         fields = _hospital_bag_fields_with_defaults(hospital_bag_default_values)
         description = ""
     elif form_id == "birth_plan_card_intake":
@@ -1926,7 +1938,7 @@ def create_birth_journey_plan_card(args: dict[str, Any], inputs: RuntimeInputs) 
         return {
             "tool_name": "birth_journey_plan_card_create",
             "status": "existing_plan_found",
-            "summary": "已存在生产全过程计划，未重复生成。",
+            "summary": "已存在孕期计划，未重复生成。",
             "side_effect_performed": False,
             "card": {
                 "card_type": "birth_journey_plan_card",
@@ -1944,7 +1956,7 @@ def create_birth_journey_plan_card(args: dict[str, Any], inputs: RuntimeInputs) 
         return {
             "tool_name": "birth_journey_plan_card_create",
             "status": "needs_required_context",
-            "summary": "生成生产全过程计划前，需要先完成分层信息采集。",
+            "summary": "生成孕期计划前，需要先完成分层信息采集。",
             "missing_fields": missing_context,
             "data": {
                 "confirmation_question": question,
@@ -1971,10 +1983,10 @@ def delete_birth_journey_plan(args: dict[str, Any], inputs: RuntimeInputs) -> di
         return {
             "tool_name": "birth_journey_plan_delete",
             "status": "needs_delete_confirmation",
-            "summary": "删除生产全过程计划前，需要用户明确确认。",
+            "summary": "删除孕期计划前，需要用户明确确认。",
             "side_effect_performed": False,
             "data": {
-                "confirmation_question": "确认要删除生产全过程计划吗？删除后宝宝和我页面不再展示这份计划，需要时可以重新制定。",
+                "confirmation_question": "确认要删除孕期计划吗？删除后宝宝和我页面不再展示这份计划，需要时可以重新制定。",
             },
         }
 
@@ -1983,7 +1995,7 @@ def delete_birth_journey_plan(args: dict[str, Any], inputs: RuntimeInputs) -> di
         return {
             "tool_name": "birth_journey_plan_delete",
             "status": "plan_not_found",
-            "summary": "当前没有 active 生产全过程计划可删除。",
+            "summary": "当前没有 active 孕期计划可删除。",
             "side_effect_performed": False,
             "plan_type": "birth_journey",
         }
@@ -1995,7 +2007,7 @@ def delete_birth_journey_plan(args: dict[str, Any], inputs: RuntimeInputs) -> di
     return {
         "tool_name": "birth_journey_plan_delete",
         "status": "plan_deleted" if deleted else "plan_delete_failed",
-        "summary": "已删除生产全过程计划。" if deleted else "删除生产全过程计划失败。",
+        "summary": "已删除孕期计划。" if deleted else "删除孕期计划失败。",
         "side_effect_performed": bool(deleted),
         "plan_type": "birth_journey",
         "plan_id": plan_id,
@@ -2013,6 +2025,7 @@ def manage_birth_journey_intake(args: dict[str, Any], inputs: RuntimeInputs) -> 
         basic_info = _birth_journey_basic_info_payload(payload)
         if basic_info:
             intake_state["basic_info"] = {**_dict_value(intake_state.get("basic_info")), **basic_info}
+            _persist_birth_prep_profile_memory(inputs, basic_info)
     elif action == "mark_checkup_records_uploaded":
         intake_state["checkup_records_uploaded"] = True
         note = _first_text(payload.get("checkup_status"), payload.get("checkup_note"), payload.get("note"))
@@ -2050,7 +2063,7 @@ def manage_birth_journey_intake(args: dict[str, Any], inputs: RuntimeInputs) -> 
         },
     }
     if next_step == "basic_info_form":
-        result["form"] = _birth_journey_basic_info_form(plan_context)
+        result["form"] = _birth_journey_basic_info_form(plan_context, inputs)
     if next_step == "checkup_records_upload":
         result["data"]["upload_panel"] = {
             "title": "上传产检记录",
@@ -2094,7 +2107,7 @@ def _save_birth_journey_care_plan(card_json: dict[str, Any], inputs: RuntimeInpu
     return data_store.save_care_plan_artifact(
         user_id=user_id,
         plan_type="birth_journey",
-        title=str(card_json.get("title") or "生产全过程计划"),
+        title=str(card_json.get("title") or "孕期计划"),
         summary=summary,
         payload=card_json,
         source_artifact_type="birth_journey_plan_card",
@@ -2103,30 +2116,10 @@ def _save_birth_journey_care_plan(card_json: dict[str, Any], inputs: RuntimeInpu
 
 BIRTH_JOURNEY_BASIC_INFO_FIELDS: tuple[dict[str, Any], ...] = (
     {
-        "id": "last_menstrual_period",
-        "label": "末次月经",
-        "type": "date",
-        "required": False,
-        "help_text": "如果记不清，可以留空。",
-        "placeholder": None,
-        "default_value": None,
-        "options": None,
-    },
-    {
-        "id": "due_date",
-        "label": "预产期",
-        "type": "date",
-        "required": False,
-        "help_text": "末次月经、预产期、当前孕周至少填一个即可。",
-        "placeholder": None,
-        "default_value": None,
-        "options": None,
-    },
-    {
         "id": "current_week",
         "label": "当前孕周",
         "type": "text",
-        "required": False,
+        "required": True,
         "help_text": None,
         "placeholder": "例如：28周、28+3",
         "default_value": None,
@@ -2134,7 +2127,7 @@ BIRTH_JOURNEY_BASIC_INFO_FIELDS: tuple[dict[str, Any], ...] = (
     },
     {
         "id": "ivf",
-        "label": "是否 IVF",
+        "label": "是否 IVF（体外受精）",
         "type": "select",
         "required": False,
         "help_text": None,
@@ -2146,7 +2139,7 @@ BIRTH_JOURNEY_BASIC_INFO_FIELDS: tuple[dict[str, Any], ...] = (
         "id": "fetus_count",
         "label": "单胎/双胎",
         "type": "select",
-        "required": False,
+        "required": True,
         "help_text": None,
         "placeholder": None,
         "default_value": None,
@@ -2156,7 +2149,7 @@ BIRTH_JOURNEY_BASIC_INFO_FIELDS: tuple[dict[str, Any], ...] = (
         "id": "age",
         "label": "年龄",
         "type": "number",
-        "required": False,
+        "required": True,
         "help_text": None,
         "placeholder": "例如：32",
         "default_value": None,
@@ -2221,12 +2214,10 @@ BIRTH_JOURNEY_SURVEY_FIELDS: tuple[dict[str, Any], ...] = (
     {
         "id": "basic_info",
         "label": "孕周与基本情况",
-        "question": "请先填写孕周与基本情况表单；末次月经、预产期、当前孕周至少提供一个，不清楚的可以留空。",
+        "question": "请先填写孕周与基本情况表单；当前孕周请尽量填写，其它不清楚的可以留空。",
         "keys": (
             "due_date_or_week",
-            "due_date",
             "current_week",
-            "last_menstrual_period",
             "ivf",
             "fetus_count",
             "age",
@@ -2372,12 +2363,12 @@ def _birth_journey_intake_summary(next_step: str) -> str:
         "checkup_records_upload": "基础信息已记录，下一步需要上传产检记录。",
         "risk_question": "产检记录上传状态已确认，下一步补问孕期高风险因素。",
         "symptom_question": "高风险因素已问到，下一步确认当前不适或异常。",
-        "pause_for_symptoms": "用户报告了需要先处理的当前症状，暂停生成生产全过程计划。",
+        "pause_for_symptoms": "用户报告了需要先处理的当前症状，暂停生成孕期计划。",
         "lifestyle_question": "当前症状已确认，下一步少量了解生活方式与场景。",
         "feeding_question": "生活场景已问到，下一步确认喂养和 IBCLC 相关信息。",
-        "generate_plan": "生产全过程计划信息采集已完成，可以调用 birth_journey_plan_card_create。",
+        "generate_plan": "孕期计划信息采集已完成，可以调用 birth_journey_plan_card_create。",
     }
-    return summaries.get(next_step, "继续推进生产全过程计划信息采集。")
+    return summaries.get(next_step, "继续推进孕期计划信息采集。")
 
 
 def _birth_journey_intake_instruction(next_step: str) -> str:
@@ -2386,7 +2377,7 @@ def _birth_journey_intake_instruction(next_step: str) -> str:
         "checkup_records_upload": "请用户上传目前全部产检记录，并告诉用户上传完毕后说“产检记录上传完毕”。",
         "risk_question": "只补问孕期高风险因素这一件事；用户不清楚也可以说不清楚。",
         "symptom_question": "只补问当前不适或异常这一件事；如果用户确认有明显异常，先不要生成计划。",
-        "pause_for_symptoms": "先承接用户情况，建议优先联系医生/医院确认；不要继续生成生产全过程计划。",
+        "pause_for_symptoms": "先承接用户情况，建议优先联系医生/医院确认；不要继续生成孕期计划。",
         "lifestyle_question": "根据用户孕周少量追问生活方式与场景，不要变成长问卷。",
         "feeding_question": "一次性问完喂养和 IBCLC 相关信息，允许用户跳过。",
         "generate_plan": "直接调用 birth_journey_plan_card_create，plan_context 使用本工具返回的 plan_context；工具调用前不要先输出路线图。",
@@ -2410,22 +2401,64 @@ def _birth_journey_intake_question(next_step: str, plan_context: dict[str, Any])
     return ""
 
 
-def _birth_journey_basic_info_form(plan_context: dict[str, Any]) -> dict[str, Any]:
+def _birth_journey_basic_info_form(plan_context: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
     fields: list[dict[str, Any]] = []
+    default_city_or_country = _birth_journey_default_city_or_country(inputs)
+    default_values = {key: value for key, value in plan_context.items() if key in BIRTH_JOURNEY_BASIC_INFO_FIELD_IDS}
     for template in BIRTH_JOURNEY_BASIC_INFO_FIELDS:
         field = dict(template)
         value = _first_text(plan_context.get(field["id"]))
+        if field["id"] == "current_week" and not value:
+            value = _birth_journey_default_current_week(plan_context)
+        if field["id"] == "city_or_country" and not value:
+            value = default_city_or_country
         if _has_meaningful_value(value):
             field["default_value"] = value
+            default_values[field["id"]] = value
         fields.append(field)
     return {
         "id": "birth_journey_basic_info_intake",
         "title": "孕周与基本情况",
-        "description": "末次月经、预产期、当前孕周至少填一个；其它不清楚可以留空。",
+        "description": "",
         "submit_label": "提交",
         "fields": fields,
-        "default_values": {key: value for key, value in plan_context.items() if key in BIRTH_JOURNEY_BASIC_INFO_FIELD_IDS},
+        "default_values": default_values,
     }
+
+
+def _birth_journey_default_current_week(plan_context: dict[str, Any]) -> str:
+    text = _first_text(
+        plan_context.get("current_week"),
+        plan_context.get("due_date_or_week"),
+        plan_context.get("birth_prep_due_date_or_week"),
+        plan_context.get("gestational_week"),
+    )
+    if not text:
+        return ""
+    week_match = re.search(r"(?:孕\s*)?(\d{1,2})(?:\s*\+\s*\d{1,2})?\s*周", text)
+    if week_match:
+        return text
+    bare_week_match = re.search(r"^(\d{1,2})(?:\s*\+\s*\d{1,2})?$", text)
+    if bare_week_match:
+        return f"{text}周"
+    return ""
+
+
+def _birth_journey_default_city_or_country(inputs: RuntimeInputs) -> str:
+    profile = inputs.get("user_profile") if isinstance(inputs.get("user_profile"), dict) else {}
+    return _first_text(
+        inputs.get("city_or_country"),
+        inputs.get("region"),
+        inputs.get("city"),
+        inputs.get("country"),
+        inputs.get("location"),
+        profile.get("city_or_country"),
+        profile.get("region"),
+        profile.get("city"),
+        profile.get("country"),
+        profile.get("location"),
+        "深圳",
+    )
 
 
 def _birth_journey_plan_context_from_intake(state: dict[str, Any]) -> dict[str, Any]:
@@ -2595,7 +2628,7 @@ def _build_birth_journey_plan_card_json(form_data: dict[str, Any], scope: str, i
     return {
         "card_type": "birth_journey_plan_card",
         "schema_version": "1.0",
-        "title": "生产全过程计划",
+        "title": "孕期计划",
         "subtitle": _birth_journey_subtitle(timeline, scope),
         "owner": owner,
         "planning_layers": planning_layers,
@@ -2823,7 +2856,7 @@ def _birth_journey_next_7_day_items(week: Any, context: dict[str, Any]) -> list[
     if context.get("checkup_status"):
         items.append(_birth_journey_plan_item("整理已做检查和异常结果", "你已经提供了产检相关信息，把检查结果集中整理，后面问医生和复查会更省力。", "未来 7 天", ["checkup_status"]))
     else:
-        items.append(_birth_journey_plan_item("把已做产检和下次产检时间整理出来", "生产计划需要知道哪些检查已经完成、哪些窗口快到了。", "未来 7 天", ["checkup_status"]))
+        items.append(_birth_journey_plan_item("把已做产检和下次产检时间整理出来", "孕期计划需要知道哪些检查已经完成、哪些窗口快到了。", "未来 7 天", ["checkup_status"]))
     if isinstance(week, int) and week >= 24:
         items.append(_birth_journey_plan_item("开始记录体重、血压和水肿变化", "24 周后更需要持续关注血压、尿蛋白、胎儿生长和身体变化。", "每周固定 2-3 次", ["current_week"]))
     if context.get("support_person"):
@@ -4530,12 +4563,35 @@ def _birth_prep_shared_default_values(inputs: RuntimeInputs, explicit_values: di
 def _birth_prep_shared_values_from_source(source: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(source, dict):
         return {}
-    due = _first_text(
+    age = _first_text(source.get("age"), source.get("birth_prep_age"))
+    due = _normalize_birth_prep_shared_due_or_week(
         source.get("due_date_or_week"),
         source.get("birth_prep_due_date_or_week"),
         source.get("due_date"),
         source.get("current_week"),
         source.get("gestational_week"),
+    )
+    ivf = _first_text(source.get("ivf"), source.get("birth_prep_ivf"), source.get("is_ivf"))
+    fetus_count = _first_text(
+        source.get("fetus_count"),
+        source.get("birth_prep_fetus_count"),
+        source.get("baby_count"),
+        source.get("singleton_or_multiple"),
+    )
+    city_or_country = _first_text(
+        source.get("city_or_country"),
+        source.get("birth_prep_city_or_country"),
+        source.get("region"),
+        source.get("city"),
+        source.get("country"),
+        source.get("location"),
+    )
+    birth_hospital = _first_text(
+        source.get("birth_hospital"),
+        source.get("birth_prep_birth_hospital"),
+        source.get("birth_setting"),
+        source.get("hospital"),
+        source.get("registered_hospital"),
     )
     birth_path = _normalize_birth_prep_shared_birth_path(
         source.get("birth_path"),
@@ -4545,6 +4601,23 @@ def _birth_prep_shared_values_from_source(source: dict[str, Any]) -> dict[str, A
         source.get("planned_birth_method"),
         source.get("delivery_mode"),
     )
+    first_birth = _normalize_first_birth(_first_text(source.get("first_birth"), source.get("birth_prep_first_birth")))
+    feeding_intention = _normalize_feeding_intention(
+        _first_text(source.get("feeding_intention"), source.get("birth_prep_feeding_intention"), source.get("feeding_plan"))
+    )
+    if feeding_intention == "母乳":
+        feeding_intention = "亲喂母乳"
+    elif feeding_intention == "混合":
+        feeding_intention = "混合喂养"
+    elif feeding_intention == "配方":
+        feeding_intention = "配方奶"
+    elif feeding_intention == "未确定":
+        feeding_intention = "还不确定"
+    return_to_work_timing = _first_text(
+        source.get("return_to_work_timing"),
+        source.get("birth_prep_return_to_work_timing"),
+        source.get("maternity_leave"),
+    )
     support_person = _first_text(
         source.get("support_person"),
         source.get("birth_prep_support_person"),
@@ -4552,14 +4625,62 @@ def _birth_prep_shared_values_from_source(source: dict[str, Any]) -> dict[str, A
         source.get("partner_or_support"),
         source.get("primary_support_person"),
     )
+    pregnancy_history_or_notes = _first_text(
+        source.get("pregnancy_history_or_notes"),
+        source.get("birth_prep_pregnancy_history_or_notes"),
+        source.get("medical_notes"),
+        source.get("special_notes"),
+        source.get("doctor_notes"),
+        source.get("risk_factors"),
+        source.get("high_risk_factors"),
+    )
+    top_worries = _first_text(source.get("top_worries"), source.get("birth_prep_top_worries"))
     defaults: dict[str, Any] = {}
+    if _has_meaningful_value(age):
+        defaults["age"] = age
     if _has_meaningful_value(due):
         defaults["due_date_or_week"] = due
+        current_week = _birth_journey_default_current_week({"due_date_or_week": due})
+        if current_week:
+            defaults["current_week"] = current_week
+    if _has_meaningful_value(ivf):
+        defaults["ivf"] = ivf
+    if _has_meaningful_value(fetus_count):
+        defaults["fetus_count"] = fetus_count
+    if _has_meaningful_value(city_or_country):
+        defaults["city_or_country"] = city_or_country
+    if _has_meaningful_value(birth_hospital):
+        defaults["birth_hospital"] = birth_hospital
+        defaults["birth_setting"] = birth_hospital
     if birth_path:
         defaults["birth_path"] = birth_path
+    if _has_meaningful_value(first_birth):
+        defaults["first_birth"] = first_birth
+    if _has_meaningful_value(feeding_intention):
+        defaults["feeding_intention"] = feeding_intention
+    if _has_meaningful_value(return_to_work_timing):
+        defaults["return_to_work_timing"] = return_to_work_timing
     if _has_meaningful_value(support_person):
         defaults["support_person"] = support_person
+    if _has_meaningful_value(pregnancy_history_or_notes):
+        defaults["pregnancy_history_or_notes"] = pregnancy_history_or_notes
+    if _has_meaningful_value(top_worries):
+        defaults["top_worries"] = top_worries
     return defaults
+
+
+def _normalize_birth_prep_shared_due_or_week(*values: Any) -> str:
+    for value in values:
+        text = _first_text(value)
+        if not text:
+            continue
+        normalized = _normalize_hospital_bag_due_or_week(text)
+        if normalized:
+            return normalized
+        current_week = _birth_journey_default_current_week({"current_week": text})
+        if current_week:
+            return current_week
+    return ""
 
 
 def _normalize_birth_prep_shared_birth_path(*values: Any) -> str:
@@ -4590,7 +4711,10 @@ def _active_birth_journey_plan_default_values(inputs: RuntimeInputs) -> dict[str
     return _birth_prep_shared_values_from_source(
         {
             "due_date_or_week": _first_text(overview.get("due_date_or_week"), owner.get("due_date_or_week")),
+            "fetus_count": _first_text(overview.get("fetus_count"), owner.get("fetus_count")),
+            "birth_hospital": _first_text(overview.get("birth_setting"), owner.get("birth_setting")),
             "birth_path": _first_text(overview.get("birth_path"), birth_preferences.get("birth_path"), owner.get("birth_path")),
+            "feeding_intention": _first_text(overview.get("feeding_intention"), owner.get("feeding_intention")),
             "support_person": _first_text(overview.get("support_person"), owner.get("support_person")),
         }
     )
@@ -4611,17 +4735,30 @@ def _persist_birth_prep_profile_memory(inputs: RuntimeInputs, values: dict[str, 
     user_id = str(inputs.get("user_id") or user_profile.get("user_id") or "").strip()
     if not user_id:
         return
-    due = _first_text(values.get("due_date_or_week"), values.get("due_date"), values.get("current_week"))
+    shared_values = _birth_prep_shared_values_from_source(values)
+    due = _first_text(shared_values.get("due_date_or_week"), values.get("due_date"), values.get("current_week"))
     birth_path = _normalize_birth_path(_first_text(values.get("birth_path"), values.get("delivery_method")))
-    support_person = _first_text(values.get("support_person"), values.get("support_people"), values.get("partner_or_support"))
-    if not any(_has_meaningful_value(value) for value in (due, birth_path, support_person)):
+    if not birth_path:
+        birth_path = _first_text(shared_values.get("birth_path"))
+    support_person = _first_text(shared_values.get("support_person"), values.get("support_people"), values.get("partner_or_support"))
+    if not any(_has_meaningful_value(value) for value in shared_values.values()):
         return
     try:
         data_store.update_birth_prep_profile_memory(
             user_id=user_id,
+            age=shared_values.get("age"),
             due_date_or_week=due,
+            ivf=shared_values.get("ivf"),
+            fetus_count=shared_values.get("fetus_count"),
+            city_or_country=shared_values.get("city_or_country"),
+            birth_hospital=shared_values.get("birth_hospital"),
             birth_path=birth_path,
+            first_birth=shared_values.get("first_birth"),
+            feeding_intention=shared_values.get("feeding_intention"),
+            return_to_work_timing=shared_values.get("return_to_work_timing"),
             support_person=support_person,
+            pregnancy_history_or_notes=shared_values.get("pregnancy_history_or_notes"),
+            top_worries=shared_values.get("top_worries"),
         )
     except Exception:
         return

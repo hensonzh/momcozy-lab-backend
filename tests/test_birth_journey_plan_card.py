@@ -79,7 +79,7 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         self.assertEqual(result["card"]["card_type"], "birth_journey_plan_card")
         self.assertEqual(result["card"]["schema_version"], "1.0")
         card = result["card"]["card_json"]
-        self.assertEqual(card["title"], "生产全过程计划")
+        self.assertEqual(card["title"], "孕期计划")
         self.assertEqual(card["owner"]["current_week"], "孕25周")
         self.assertEqual(card["owner"]["estimated_due_date"], "2026/09/13")
         layers = card["planning_layers"]
@@ -141,7 +141,7 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
                 plans = data_store.list_care_plan_artifacts(user_id="app-user")
                 self.assertEqual(len(plans), 1)
                 self.assertEqual(plans[0]["plan_type"], "birth_journey")
-                self.assertEqual(plans[0]["title"], "生产全过程计划")
+                self.assertEqual(plans[0]["title"], "孕期计划")
                 self.assertEqual(plans[0]["payload"]["owner"]["current_week"], "孕30周")
             finally:
                 data_store.DB_PATH = old_db_path  # type: ignore[assignment]
@@ -172,7 +172,7 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
                 self.assertEqual(reused["status"], "existing_plan_found")
                 self.assertFalse(reused["side_effect_performed"])
                 self.assertEqual(reused["plan"]["plan_id"], first_plan_id)
-                self.assertEqual(reused["card"]["card_json"]["title"], "生产全过程计划")
+                self.assertEqual(reused["card"]["card_json"]["title"], "孕期计划")
                 compact = model_tool_output({"ok": True, "tool_name": "birth_journey_plan_card_create", "result": reused})
                 self.assertIn("不重复生成", compact["final_response_instruction"])
                 plans = data_store.list_care_plan_artifacts(user_id="app-user")
@@ -188,9 +188,9 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
                 saved = data_store.save_care_plan_artifact(
                     user_id="app-user",
                     plan_type="birth_journey",
-                    title="生产全过程计划",
+                    title="孕期计划",
                     summary="孕晚期生产准备",
-                    payload={"title": "生产全过程计划", "phases": []},
+                    payload={"title": "孕期计划", "phases": []},
                     source_artifact_type="birth_journey_plan_card",
                 )
                 self.assertIsNotNone(saved)
@@ -214,9 +214,9 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
                 saved = data_store.save_care_plan_artifact(
                     user_id="app-user",
                     plan_type="birth_journey",
-                    title="生产全过程计划",
+                    title="孕期计划",
                     summary="孕晚期生产准备",
-                    payload={"title": "生产全过程计划", "phases": []},
+                    payload={"title": "孕期计划", "phases": []},
                     source_artifact_type="birth_journey_plan_card",
                 )
                 self.assertIsNotNone(saved)
@@ -233,7 +233,7 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
                 self.assertEqual(data_store.list_care_plan_artifacts(user_id="app-user", status="active"), [])
                 self.assertEqual(len(data_store.list_care_plan_artifacts(user_id="app-user", status="deleted")), 1)
                 compact = model_tool_output({"ok": True, "tool_name": "birth_journey_plan_delete", "result": result})
-                self.assertIn("已删除生产全过程计划", compact["final_response_instruction"])
+                self.assertIn("已删除孕期计划", compact["final_response_instruction"])
             finally:
                 data_store.DB_PATH = old_db_path  # type: ignore[assignment]
 
@@ -250,7 +250,7 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
                 self.assertEqual(result["status"], "plan_not_found")
                 self.assertFalse(result["side_effect_performed"])
                 compact = model_tool_output({"ok": True, "tool_name": "birth_journey_plan_delete", "result": result})
-                self.assertIn("没有找到 active 生产全过程计划", compact["final_response_instruction"])
+                self.assertIn("没有找到 active 孕期计划", compact["final_response_instruction"])
             finally:
                 data_store.DB_PATH = old_db_path  # type: ignore[assignment]
 
@@ -262,23 +262,23 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
                 data_store.save_care_plan_artifact(
                     user_id="app-user",
                     plan_type="birth_journey",
-                    title="生产全过程计划",
+                    title="孕期计划",
                     summary="从孕30周到产后 42 天的阶段路线图；当前阶段：孕晚期",
                     payload={
-                        "title": "生产全过程计划",
+                        "title": "孕期计划",
                         "phases": [{"title": "孕晚期", "status": "current"}],
                     },
                     source_artifact_type="birth_journey_plan_card",
                 )
 
                 context = build_request_context(
-                    {"user_message": "帮我制定生产全过程计划", "locale": "zh-CN", "user_id": "app-user"},
+                    {"user_message": "帮我制定孕期计划", "locale": "zh-CN", "user_id": "app-user"},
                     None,
                     ["birth-prep"],
                 )
 
                 self.assertIn("active_care_plan_context:", context)
-                self.assertIn("birth_journey_plan: 已存在 active 生产全过程计划", context)
+                self.assertIn("birth_journey_plan: 已存在 active 孕期计划", context)
                 self.assertIn("current_phase=孕晚期", context)
                 self.assertIn("不要再次调用 birth_journey_plan_card_create 创建新计划", context)
             finally:
@@ -357,6 +357,57 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         self.assertEqual(feeding["plan_context"]["checkup_records_uploaded"], "是")
         self.assertIn("久坐上班", feeding["plan_context"]["lifestyle_context"])
 
+    def test_birth_journey_basic_info_form_omits_date_fields_and_prefills_city(self) -> None:
+        inputs = {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00", "_birth_journey_intake_state": {}}
+
+        started = manage_birth_journey_intake({"action": "start", "payload": {}}, inputs)
+
+        fields = started["form"]["fields"]
+        labels = [field["label"] for field in fields]
+        ids = [field["id"] for field in fields]
+        self.assertNotIn("末次月经", labels)
+        self.assertNotIn("预产期", labels)
+        self.assertNotIn("last_menstrual_period", ids)
+        self.assertNotIn("due_date", ids)
+        self.assertIn("是否 IVF（体外受精）", labels)
+        required_by_id = {field["id"]: field["required"] for field in fields}
+        self.assertTrue(required_by_id["current_week"])
+        self.assertTrue(required_by_id["fetus_count"])
+        self.assertTrue(required_by_id["age"])
+        self.assertFalse(required_by_id["ivf"])
+        self.assertEqual(started["form"]["description"], "")
+        self.assertEqual(started["form"]["default_values"]["city_or_country"], "深圳")
+
+        with_region = manage_birth_journey_intake(
+            {"action": "start", "payload": {}},
+            {**inputs, "user_profile": {"region": "广州"}},
+        )
+        self.assertEqual(with_region["form"]["default_values"]["city_or_country"], "广州")
+
+        with_pregnancy_week = manage_birth_journey_intake(
+            {"action": "start", "payload": {}},
+            {**inputs, "user_profile": {"birth_prep_due_date_or_week": "孕25周"}},
+        )
+        self.assertEqual(with_pregnancy_week["form"]["default_values"]["current_week"], "孕25周")
+
+        with_profile_defaults = manage_birth_journey_intake(
+            {"action": "start", "payload": {}},
+            {
+                **inputs,
+                "user_profile": {
+                    "age": 32,
+                    "birth_prep_ivf": "是",
+                    "birth_prep_fetus_count": "双胎",
+                    "birth_prep_birth_hospital": "深圳市妇幼",
+                },
+            },
+        )
+        profile_defaults = with_profile_defaults["form"]["default_values"]
+        self.assertEqual(profile_defaults["age"], "32")
+        self.assertEqual(profile_defaults["ivf"], "是")
+        self.assertEqual(profile_defaults["fetus_count"], "双胎")
+        self.assertEqual(profile_defaults["birth_hospital"], "深圳市妇幼")
+
     def test_birth_journey_plan_accepts_unknown_birth_path_and_no_support_person(self) -> None:
         result = create_birth_journey_plan_card(
             {
@@ -404,7 +455,7 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
                     "card_type": "birth_journey_plan_card",
                     "schema_version": "1.0",
                     "card_json": {
-                        "title": "生产全过程计划",
+                        "title": "孕期计划",
                         "phases": [
                             {
                                 "title": "孕中期",
@@ -430,7 +481,7 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         self.assertIn("接下来我会按照计划主动提醒你哦", compact["final_response_instruction"])
         self.assertIn("不要使用“卡片”这类界面形式词", compact["final_response_instruction"])
         self.assertIn("不要再输出“我先帮你生成”或“我整理好了”", compact["final_response_instruction"])
-        self.assertNotIn("生产全过程计划我整理好了", compact["final_response_instruction"])
+        self.assertNotIn("孕期计划我整理好了", compact["final_response_instruction"])
         self.assertIn("你现在在孕中期", compact["final_response_instruction"])
         self.assertIn("先不用把生产准备一次做完", compact["final_response_instruction"])
         self.assertIn("准备上先列出下次产检最想确认的 3-5 个问题", compact["final_response_instruction"])
@@ -448,7 +499,7 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
             "tool_name": "birth_journey_plan_card_create",
             "result": {
                 "status": "needs_required_context",
-                "summary": "生成生产全过程计划前，需要先完成分层信息采集。",
+                "summary": "生成孕期计划前，需要先完成分层信息采集。",
                 "missing_fields": ["due_date_or_week", "birth_path", "support_person"],
                 "data": {
                     "confirmation_question": "我先确认 3 件事再生成计划。",

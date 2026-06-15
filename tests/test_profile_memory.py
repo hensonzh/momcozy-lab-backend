@@ -11,7 +11,13 @@ os.environ["MILK_DB_PATH"] = PROFILE_MEMORY_DB_PATH
 
 from momcozy_agent.contexts import ContextState, build_request_context
 from momcozy_agent.services import data_store
-from momcozy_agent.tool_handlers.cards import create_birth_journey_plan_card, create_hospital_bag_card, create_hospital_bag_form
+from momcozy_agent.tool_handlers.cards import (
+    create_form,
+    create_birth_journey_plan_card,
+    create_hospital_bag_card,
+    create_hospital_bag_form,
+    manage_birth_journey_intake,
+)
 from momcozy_agent.tool_handlers.profile import get_profile, update_profile
 from momcozy_agent.tool_registry import READ_ONLY_TOOL_NAMES, select_runtime_tools
 
@@ -86,9 +92,19 @@ class ProfileMemoryTests(unittest.TestCase):
     def test_dev_startup_reset_clears_birth_prep_shared_memory(self) -> None:
         data_store.update_birth_prep_profile_memory(
             user_id="profile-birth-prep-reset",
+            age=32,
             due_date_or_week="孕32周",
+            ivf="否",
+            fetus_count="单胎",
+            city_or_country="深圳",
+            birth_hospital="深圳市妇幼",
             birth_path="剖宫产",
+            first_birth="是",
+            feeding_intention="母乳",
+            return_to_work_timing="6 周后",
             support_person="伴侣",
+            pregnancy_history_or_notes=["没有"],
+            top_worries=["怕漏买"],
         )
         data_store.update_current_care_stage(
             user_id="profile-birth-prep-reset",
@@ -101,8 +117,17 @@ class ProfileMemoryTests(unittest.TestCase):
         self.assertGreaterEqual(cleared, 1)
         profile = data_store.get_user_profile("profile-birth-prep-reset")
         self.assertEqual(profile["birth_prep_due_date_or_week"], "")
+        self.assertEqual(profile["birth_prep_ivf"], "")
+        self.assertEqual(profile["birth_prep_fetus_count"], "")
+        self.assertEqual(profile["birth_prep_city_or_country"], "")
+        self.assertEqual(profile["birth_prep_birth_hospital"], "")
         self.assertEqual(profile["birth_prep_birth_path"], "")
+        self.assertEqual(profile["birth_prep_first_birth"], "")
+        self.assertEqual(profile["birth_prep_feeding_intention"], "")
+        self.assertEqual(profile["birth_prep_return_to_work_timing"], "")
         self.assertEqual(profile["birth_prep_support_person"], "")
+        self.assertEqual(profile["birth_prep_pregnancy_history_or_notes"], "")
+        self.assertEqual(profile["birth_prep_top_worries"], "")
         self.assertEqual(profile["current_care_stage"], "")
         self.assertEqual(profile["current_care_stage_source"], "")
 
@@ -127,9 +152,9 @@ class ProfileMemoryTests(unittest.TestCase):
         data_store.save_care_plan_artifact(
             user_id="profile-startup-reset",
             plan_type="birth_journey",
-            title="生产全过程计划",
+            title="孕期计划",
             summary="孕晚期准备",
-            payload={"title": "生产全过程计划"},
+            payload={"title": "孕期计划"},
             source_artifact_type="birth_journey_plan_card",
         )
         data_store.save_pregnancy_diary_entry(
@@ -232,7 +257,7 @@ class ProfileMemoryTests(unittest.TestCase):
             "locale": "zh-CN",
             "timezone": "Asia/Shanghai",
             "message_sent_at": "2026-06-13T10:00:00+08:00",
-            "user_message": "我现在孕30周，计划剖宫产，老公陪我。",
+            "user_message": "我今年32岁，现在孕30周，试管，双胎，在深圳，建档医院是深圳市妇幼，计划剖宫产，老公陪我。",
         }
 
         from momcozy_agent.contexts import capture_birth_prep_user_message
@@ -240,7 +265,12 @@ class ProfileMemoryTests(unittest.TestCase):
         capture_birth_prep_user_message(inputs, state)
 
         profile = data_store.get_user_profile("profile-birth-prep-1")
+        self.assertEqual(profile["age"], 32)
         self.assertEqual(profile["birth_prep_due_date_or_week"], "孕30周")
+        self.assertEqual(profile["birth_prep_ivf"], "是")
+        self.assertEqual(profile["birth_prep_fetus_count"], "双胎")
+        self.assertEqual(profile["birth_prep_city_or_country"], "深圳")
+        self.assertEqual(profile["birth_prep_birth_hospital"], "深圳市妇幼")
         self.assertEqual(profile["birth_prep_birth_path"], "剖宫产")
         self.assertEqual(profile["birth_prep_support_person"], "有人全天帮忙")
 
@@ -336,6 +366,11 @@ class ProfileMemoryTests(unittest.TestCase):
             },
         )
         profile = data_store.get_user_profile("profile-birth-prep-3")
+        self.assertEqual(profile["birth_prep_fetus_count"], "单胎")
+        self.assertEqual(profile["birth_prep_first_birth"], "是")
+        self.assertEqual(profile["birth_prep_feeding_intention"], "亲喂母乳")
+        self.assertEqual(profile["birth_prep_return_to_work_timing"], "6 周后")
+        self.assertEqual(profile["birth_prep_top_worries"], "怕漏买")
 
         result = create_birth_journey_plan_card(
             {
@@ -365,6 +400,62 @@ class ProfileMemoryTests(unittest.TestCase):
         self.assertEqual(owner["due_date_or_week"], "孕35周")
         self.assertEqual(owner["birth_path"], "剖宫产")
         self.assertEqual(owner["support_person"], "有人全天帮忙")
+
+    def test_birth_journey_basic_info_prefills_hospital_bag_form(self) -> None:
+        user_id = "profile-birth-prep-basic-info"
+        manage_birth_journey_intake(
+            {
+                "action": "submit_basic_info",
+                "payload": {
+                    "current_week": "25",
+                    "age": 29,
+                    "fetus_count": "单胎",
+                    "city_or_country": "深圳",
+                },
+            },
+            {
+                "user_id": user_id,
+                "user_profile": {"user_id": user_id},
+                "user_message": "",
+            },
+        )
+        profile = data_store.get_user_profile(user_id)
+        form = create_hospital_bag_form(
+            {"default_values": {"feeding_intention": "母乳"}},
+            {
+                "user_id": user_id,
+                "user_profile": profile,
+                "user_message": "",
+            },
+        )
+
+        defaults = form["form"]["default_values"]
+        self.assertEqual(defaults["due_date_or_week"], "25周")
+        self.assertEqual(defaults["fetus_count"], "单胎")
+        self.assertEqual(defaults["feeding_intention"], "亲喂母乳")
+        default_by_id = {field["id"]: field.get("default_value") for field in form["form"]["fields"]}
+        self.assertEqual(default_by_id["due_date_or_week"], "25周")
+        self.assertEqual(default_by_id["fetus_count"], "单胎")
+
+        generic_form = create_form(
+            {
+                "form_id": "custom_hospital_bag_form",
+                "title": "信息采集",
+                "fields": [
+                    {"id": "due_date_or_week", "label": "预产期或当前孕周", "type": "text"},
+                    {"id": "fetus_count", "label": "胎数", "type": "select", "options": ["单胎", "双胎", "三胎及以上", "不确定"]},
+                    {"id": "feeding_intention", "label": "喂养意向", "type": "select", "options": ["亲喂母乳", "配方奶", "混合喂养", "还不确定"]},
+                ],
+            },
+            {
+                "user_id": user_id,
+                "user_profile": profile,
+                "user_message": "",
+            },
+        )
+        generic_defaults = generic_form["form"]["default_values"]
+        self.assertEqual(generic_defaults["due_date_or_week"], "25周")
+        self.assertEqual(generic_defaults["fetus_count"], "单胎")
 
     def test_profile_update_is_available_but_not_read_only(self) -> None:
         tool_names = [str(tool.get("name")) for tool in select_runtime_tools() if tool.get("type") == "function"]

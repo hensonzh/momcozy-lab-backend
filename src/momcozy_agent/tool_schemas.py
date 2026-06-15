@@ -197,7 +197,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "birth_journey_intake_manage": _function_tool(
         "birth_journey_intake_manage",
-        "推进生产全过程计划的信息采集状态机。模型只负责识别用户是否要制定计划、把用户本轮回答交给本工具，并根据 next_step 继续；不要自己维护字段清单。工具会依次处理：基础信息表单、产检记录上传、孕期高风险因素、当前症状、生活方式与场景、喂养/IBCLC 信息。状态 ready_to_generate 时，使用工具返回的 plan_context 调用 birth_journey_plan_card_create。",
+        "推进孕期计划的信息采集状态机。模型只负责识别用户是否要制定计划、把用户本轮回答交给本工具，并根据 next_step 继续；不要自己维护字段清单。工具会依次处理：基础信息表单、产检记录上传、孕期高风险因素、当前症状、生活方式与场景、喂养/IBCLC 信息。状态 ready_to_generate 时，使用工具返回的 plan_context 调用 birth_journey_plan_card_create。",
         {
             "action": {
                 "type": "string",
@@ -218,7 +218,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "birth_journey_plan_card_create": _function_tool(
         "birth_journey_plan_card_create",
-        "根据 birth_journey_intake_manage 已采集或已问过的信息，生成前端可渲染并保存为 active care plan 的生产全过程计划。生成前必须完成基础信息、产检记录上传状态、高风险因素、当前症状、生活方式与场景、喂养/IBCLC 信息这些采集组；用户回答不清楚、跳过、暂不提供也算已问到，并应在 plan_context 中显式传入对应字段。LLM 不需要生成 card_json；规则分层、日期换算、行动清单和安全声明由工具稳定生成。已有 active 生产全过程计划时工具会返回 existing_plan_found，不要重复生成。",
+        "根据 birth_journey_intake_manage 已采集或已问过的信息，生成前端可渲染并保存为 active care plan 的孕期计划。生成前必须完成基础信息、产检记录上传状态、高风险因素、当前症状、生活方式与场景、喂养/IBCLC 信息这些采集组；用户回答不清楚、跳过、暂不提供也算已问到，并应在 plan_context 中显式传入对应字段。LLM 不需要生成 card_json；规则分层、日期换算、行动清单和安全声明由工具稳定生成。已有 active 孕期计划时工具会返回 existing_plan_found，不要重复生成。",
         {
             "plan_context": JSON_OBJECT_STRING,
             "scope": {"type": "string", "enum": ["full", "prenatal_only", "short_range"]},
@@ -226,14 +226,14 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "birth_journey_plan_delete": _function_tool(
         "birth_journey_plan_delete",
-        "删除当前用户已保存的 active 生产全过程计划。“生产计划”“已有生产计划”“生产过程计划”在 birth-prep 场景下都指这份生产全过程计划。具有后端副作用；只有用户明确要求并确认删除生产全过程计划后才调用。不要用于删除奶量计划、待产包清单、分娩沟通单或普通聊天记录。confirmed 必须为 true，否则工具不会删除。",
+        "删除当前用户已保存的 active 孕期计划。用户提到删除当前计划、已有计划或这份计划时，在 birth-prep 场景下都指这份孕期计划。具有后端副作用；只有用户明确要求并确认删除孕期计划后才调用。不要用于删除奶量计划、待产包清单、分娩沟通单或普通聊天记录。confirmed 必须为 true，否则工具不会删除。",
         {
-            "confirmed": {"type": "boolean", "description": "用户是否已经明确确认删除生产全过程计划。只有 true 才执行删除。"},
+            "confirmed": {"type": "boolean", "description": "用户是否已经明确确认删除孕期计划。只有 true 才执行删除。"},
         },
     ),
     "pregnancy_diary_manage": _function_tool(
         "pregnancy_diary_manage",
-        "读写当前用户的孕期日记。通过 action 区分读取、写入、更新、删除和健康咨询沉淀：list 读取最近记录；get_today 读取指定日期或今天；create 新建一条日记；update 合并更新已有日记；delete 删除已有日记；record_health_consultation 把本轮健康咨询作为当天的预问诊记录写入日记；同一天同主题会合并更新到同一条健康咨询记录。用于用户要求记录孕期生活、回顾最近孕期状态、整理日记里的产检问题、删除日记，或健康咨询中已经收集到症状/身体感受/宝宝状态/处理建议等有价值信息。不要用于生产全过程计划、奶量记录、宝宝成长记录或医学诊断。删除必须 confirmed=true；更新只传要改的字段，未传字段会保留。",
+        "读写当前用户的孕期日记。通过 action 区分读取、写入、更新、删除和健康咨询沉淀：list 读取最近记录；get_today 读取指定日期或今天；create 新建一条日记；update 合并更新已有日记；delete 删除已有日记；record_health_consultation 把本轮健康咨询作为当天的预问诊记录写入日记；同一天同主题会合并更新到同一条健康咨询记录。用于用户要求记录孕期生活、回顾最近孕期状态、整理日记里的产检问题、删除日记，或健康咨询中已经收集到症状/身体感受/宝宝状态/处理建议等有价值信息。不要用于孕期计划、奶量记录、宝宝成长记录或医学诊断。删除必须 confirmed=true；更新只传要改的字段，未传字段会保留。",
         {
             "action": {"type": "string", "enum": ["list", "get_today", "create", "update", "delete", "record_health_consultation"]},
             "entry_id": _nullable({"type": "integer", "description": "更新或删除指定日记时使用；未知时传 null。"}),
@@ -261,7 +261,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "hospital_bag_form_create": _function_tool(
         "hospital_bag_form_create",
-        "创建待产包信息采集表单。用户确认开始待产包整理后可直接调用；工具会自动合并当前会话、用户 profile 和已有 active 生产全过程计划里的产前准备共享信息（孕周/预产期、分娩方式、主要支持人）。LLM 只在 default_values 里传当前对话中新确认的可靠字段，不需要重复搬运已保存字段。表单字段、顺序、分类、选项和样式约束由工具稳定生成。无后端副作用。",
+        "创建待产包信息采集表单。用户确认开始待产包整理后可直接调用；工具会自动合并当前会话、用户 profile 和已有 active 孕期计划里的产前准备共享信息（如孕周、年龄、单双胎、IVF、城市/医院、分娩方式、喂养意向、支持方）。LLM 只在 default_values 里传当前对话中新确认的可靠字段，不需要重复搬运已保存字段。表单字段、顺序、分类、选项和样式约束由工具稳定生成。无后端副作用。",
         {
             "default_values": JSON_OBJECT_STRING,
         },
@@ -353,7 +353,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "profile_get": _function_tool(
         "profile_get",
-        "读取当前用户已保存的基础资料、产前准备共享信息（孕周/预产期、分娩方式、主要支持人）、宝宝和当前状态摘要。无副作用。不需要模型提供用户 ID。",
+        "读取当前用户已保存的基础资料、产前准备共享信息（如孕周、年龄、单双胎、IVF、城市/医院、分娩方式、喂养意向、支持方）、宝宝和当前状态摘要。无副作用。不需要模型提供用户 ID。",
         {},
     ),
     "profile_update": _function_tool(

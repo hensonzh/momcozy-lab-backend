@@ -39,8 +39,17 @@ def init_db() -> None:
                 profile_onboarding_skipped_at TEXT,
                 profile_onboarding_completed_at TEXT,
                 birth_prep_due_date_or_week TEXT,
+                birth_prep_ivf TEXT,
+                birth_prep_fetus_count TEXT,
+                birth_prep_city_or_country TEXT,
+                birth_prep_birth_hospital TEXT,
                 birth_prep_birth_path TEXT,
+                birth_prep_first_birth TEXT,
+                birth_prep_feeding_intention TEXT,
+                birth_prep_return_to_work_timing TEXT,
                 birth_prep_support_person TEXT,
+                birth_prep_pregnancy_history_or_notes TEXT,
+                birth_prep_top_worries TEXT,
                 current_care_stage TEXT,
                 current_care_stage_source TEXT,
                 delivery_date TEXT,
@@ -273,8 +282,17 @@ def init_db() -> None:
         _ensure_column(conn, "user_profile", "profile_onboarding_skipped_at", "TEXT")
         _ensure_column(conn, "user_profile", "profile_onboarding_completed_at", "TEXT")
         _ensure_column(conn, "user_profile", "birth_prep_due_date_or_week", "TEXT")
+        _ensure_column(conn, "user_profile", "birth_prep_ivf", "TEXT")
+        _ensure_column(conn, "user_profile", "birth_prep_fetus_count", "TEXT")
+        _ensure_column(conn, "user_profile", "birth_prep_city_or_country", "TEXT")
+        _ensure_column(conn, "user_profile", "birth_prep_birth_hospital", "TEXT")
         _ensure_column(conn, "user_profile", "birth_prep_birth_path", "TEXT")
+        _ensure_column(conn, "user_profile", "birth_prep_first_birth", "TEXT")
+        _ensure_column(conn, "user_profile", "birth_prep_feeding_intention", "TEXT")
+        _ensure_column(conn, "user_profile", "birth_prep_return_to_work_timing", "TEXT")
         _ensure_column(conn, "user_profile", "birth_prep_support_person", "TEXT")
+        _ensure_column(conn, "user_profile", "birth_prep_pregnancy_history_or_notes", "TEXT")
+        _ensure_column(conn, "user_profile", "birth_prep_top_worries", "TEXT")
         _ensure_column(conn, "user_profile", "current_care_stage", "TEXT")
         _ensure_column(conn, "user_profile", "current_care_stage_source", "TEXT")
         _ensure_calendar_schema(conn)
@@ -411,8 +429,19 @@ def get_user_profile(user_id: str) -> dict[str, Any]:
     profile["display_name"] = str(profile.get("display_name") or profile.get("user_nickname") or "").strip()
     profile["age"] = _profile_age_value(profile.get("age"))
     profile["birth_prep_due_date_or_week"] = _normalize_birth_prep_memory_text(profile.get("birth_prep_due_date_or_week"))
+    profile["birth_prep_ivf"] = _normalize_birth_prep_memory_text(profile.get("birth_prep_ivf"))
+    profile["birth_prep_fetus_count"] = _normalize_birth_prep_memory_text(profile.get("birth_prep_fetus_count"))
+    profile["birth_prep_city_or_country"] = _normalize_birth_prep_memory_text(profile.get("birth_prep_city_or_country"))
+    profile["birth_prep_birth_hospital"] = _normalize_birth_prep_memory_text(profile.get("birth_prep_birth_hospital"))
     profile["birth_prep_birth_path"] = _normalize_birth_prep_memory_text(profile.get("birth_prep_birth_path"))
+    profile["birth_prep_first_birth"] = _normalize_birth_prep_memory_text(profile.get("birth_prep_first_birth"))
+    profile["birth_prep_feeding_intention"] = _normalize_birth_prep_memory_text(profile.get("birth_prep_feeding_intention"))
+    profile["birth_prep_return_to_work_timing"] = _normalize_birth_prep_memory_text(profile.get("birth_prep_return_to_work_timing"))
     profile["birth_prep_support_person"] = _normalize_birth_prep_memory_text(profile.get("birth_prep_support_person"))
+    profile["birth_prep_pregnancy_history_or_notes"] = _normalize_birth_prep_memory_text(
+        profile.get("birth_prep_pregnancy_history_or_notes")
+    )
+    profile["birth_prep_top_worries"] = _normalize_birth_prep_memory_text(profile.get("birth_prep_top_worries"))
     profile["current_care_stage"] = _normalize_current_care_stage(profile.get("current_care_stage"))
     profile["current_care_stage_source"] = _normalize_birth_prep_memory_text(profile.get("current_care_stage_source"))
     profile["profile_onboarding_complete"] = bool(profile.get("display_name")) and profile.get("age") is not None
@@ -454,14 +483,32 @@ def reset_birth_prep_profile_memory_for_dev() -> int:
             """
             UPDATE user_profile
             SET birth_prep_due_date_or_week = NULL,
+                birth_prep_ivf = NULL,
+                birth_prep_fetus_count = NULL,
+                birth_prep_city_or_country = NULL,
+                birth_prep_birth_hospital = NULL,
                 birth_prep_birth_path = NULL,
+                birth_prep_first_birth = NULL,
+                birth_prep_feeding_intention = NULL,
+                birth_prep_return_to_work_timing = NULL,
                 birth_prep_support_person = NULL,
+                birth_prep_pregnancy_history_or_notes = NULL,
+                birth_prep_top_worries = NULL,
                 current_care_stage = NULL,
                 current_care_stage_source = NULL,
                 updated_at = ?
             WHERE birth_prep_due_date_or_week IS NOT NULL
+               OR birth_prep_ivf IS NOT NULL
+               OR birth_prep_fetus_count IS NOT NULL
+               OR birth_prep_city_or_country IS NOT NULL
+               OR birth_prep_birth_hospital IS NOT NULL
                OR birth_prep_birth_path IS NOT NULL
+               OR birth_prep_first_birth IS NOT NULL
+               OR birth_prep_feeding_intention IS NOT NULL
+               OR birth_prep_return_to_work_timing IS NOT NULL
                OR birth_prep_support_person IS NOT NULL
+               OR birth_prep_pregnancy_history_or_notes IS NOT NULL
+               OR birth_prep_top_worries IS NOT NULL
                OR current_care_stage IS NOT NULL
                OR current_care_stage_source IS NOT NULL
             """,
@@ -609,20 +656,42 @@ def update_user_profile_memory(
 def update_birth_prep_profile_memory(
     *,
     user_id: str,
+    age: Any = None,
     due_date_or_week: Any = None,
+    ivf: Any = None,
+    fetus_count: Any = None,
+    city_or_country: Any = None,
+    birth_hospital: Any = None,
     birth_path: Any = None,
+    first_birth: Any = None,
+    feeding_intention: Any = None,
+    return_to_work_timing: Any = None,
     support_person: Any = None,
+    pregnancy_history_or_notes: Any = None,
+    top_worries: Any = None,
 ) -> dict[str, Any] | None:
     init_db()
     uid = str(user_id or "").strip()
     if not uid:
         return None
 
-    values_by_column = {
+    values_by_column: dict[str, Any] = {
         "birth_prep_due_date_or_week": _normalize_birth_prep_memory_text(due_date_or_week),
+        "birth_prep_ivf": _normalize_birth_prep_memory_text(ivf),
+        "birth_prep_fetus_count": _normalize_birth_prep_memory_text(fetus_count),
+        "birth_prep_city_or_country": _normalize_birth_prep_memory_text(city_or_country),
+        "birth_prep_birth_hospital": _normalize_birth_prep_memory_text(birth_hospital),
         "birth_prep_birth_path": _normalize_birth_prep_memory_text(birth_path),
+        "birth_prep_first_birth": _normalize_birth_prep_memory_text(first_birth),
+        "birth_prep_feeding_intention": _normalize_birth_prep_memory_text(feeding_intention),
+        "birth_prep_return_to_work_timing": _normalize_birth_prep_memory_text(return_to_work_timing),
         "birth_prep_support_person": _normalize_birth_prep_memory_text(support_person),
+        "birth_prep_pregnancy_history_or_notes": _normalize_birth_prep_memory_text(pregnancy_history_or_notes),
+        "birth_prep_top_worries": _normalize_birth_prep_memory_text(top_worries),
     }
+    age_value = _profile_age_value(age) if age is not None else None
+    if age_value is not None:
+        values_by_column["age"] = age_value
     assignments: list[str] = []
     values: list[Any] = []
     for column, value in values_by_column.items():
