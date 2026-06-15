@@ -24,9 +24,9 @@ class CarePlanArtifactApiTests(unittest.TestCase):
         saved = data_store.save_care_plan_artifact(
             user_id="u-plan",
             plan_type="birth_journey",
-            title="生产全过程计划",
+            title="孕期计划",
             summary="孕晚期生产准备",
-            payload={"title": "生产全过程计划", "phases": []},
+            payload={"title": "孕期计划", "phases": []},
             source_artifact_type="birth_journey_plan_card",
         )
         self.assertIsNotNone(saved)
@@ -72,9 +72,9 @@ class CarePlanArtifactApiTests(unittest.TestCase):
         birth_plan = data_store.save_care_plan_artifact(
             user_id="u-plan",
             plan_type="birth_journey",
-            title="生产全过程计划",
+            title="孕期计划",
             summary="孕晚期生产准备",
-            payload={"title": "生产全过程计划", "phases": []},
+            payload={"title": "孕期计划", "phases": []},
             source_artifact_type="birth_journey_plan_card",
         )
         other_plan = data_store.save_care_plan_artifact(

@@ -585,9 +585,9 @@ def _tool_start_label(tool_name: str, arguments: dict[str, Any]) -> str:
     if tool_name == "labor_communication_card_create":
         return "我先帮你整理分娩沟通单～"
     if tool_name == "birth_journey_plan_card_create":
-        return "我先帮你整理生产全过程计划～"
+        return "我先帮你整理孕期计划～"
     if tool_name == "birth_journey_plan_delete":
-        return "我先帮你删除生产全过程计划～"
+        return "我先帮你删除孕期计划～"
     if tool_name == "pregnancy_diary_manage":
         action = str(arguments.get("action") or "").strip()
         if action in {"create", "update"}:
@@ -708,19 +708,19 @@ def _tool_result_label(tool_name: str, result: dict[str, Any]) -> str:
         return "我已经帮你整理好分娩沟通单啦"
     if tool_name == "birth_journey_intake_manage":
         if status == "ready_to_generate":
-            return "生产计划信息已经确认好啦"
+            return "孕期计划信息已经确认好啦"
         if status == "blocked_by_symptoms":
             return "我先帮你确认当前情况"
         return "我准备好下一步啦"
     if tool_name == "birth_journey_plan_card_create":
-        return "我已经帮你整理好生产全过程计划啦"
+        return "我已经帮你整理好孕期计划啦"
     if tool_name == "birth_journey_plan_delete":
         status = str(result.get("status") or "").strip()
         if status == "needs_delete_confirmation":
             return "删除前还需要你确认一下"
         if status == "plan_not_found":
-            return "当前没有生产全过程计划可删除"
-        return "我已经删除生产全过程计划啦" if status == "plan_deleted" else "删除生产全过程计划暂时没成功"
+            return "当前没有孕期计划可删除"
+        return "我已经删除孕期计划啦" if status == "plan_deleted" else "删除孕期计划暂时没成功"
     if tool_name == "pregnancy_diary_manage":
         status = str(result.get("status") or "").strip()
         if status == "needs_delete_confirmation":
@@ -1085,10 +1085,10 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
     if tool_name == "birth_journey_plan_delete":
         status = str(safe.get("status") or "").strip()
         instructions = {
-            "plan_deleted": "生产全过程计划已经删除。最终回复只说：已删除生产全过程计划，宝宝和我页面不会再展示这份计划。需要时可以重新制定。",
-            "plan_not_found": "没有找到 active 生产全过程计划。最终回复只说明当前没有可删除的生产全过程计划，不要说已经删除。",
-            "plan_delete_failed": "删除生产全过程计划失败。最终回复简短说明暂时删除失败，请稍后再试。",
-            "needs_delete_confirmation": "删除生产全过程计划前还需要用户明确确认。最终回复只询问是否确认删除，不要调用生成计划，也不要说已经删除。",
+            "plan_deleted": "孕期计划已经删除。最终回复只说：已删除孕期计划，宝宝和我页面不会再展示这份计划。需要时可以重新制定。",
+            "plan_not_found": "没有找到 active 孕期计划。最终回复只说明当前没有可删除的孕期计划，不要说已经删除。",
+            "plan_delete_failed": "删除孕期计划失败。最终回复简短说明暂时删除失败，请稍后再试。",
+            "needs_delete_confirmation": "删除孕期计划前还需要用户明确确认。最终回复只询问是否确认删除，不要调用生成计划，也不要说已经删除。",
         }
         return {
             "ok": safe.get("ok"),
@@ -1098,7 +1098,7 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
             "plan_type": safe.get("plan_type"),
             "plan_id": safe.get("plan_id"),
             "summary": safe.get("summary"),
-            "final_response_instruction": instructions.get(status, "最终回复简短说明删除生产全过程计划的处理结果。"),
+            "final_response_instruction": instructions.get(status, "最终回复简短说明删除孕期计划的处理结果。"),
         }
     if tool_name == "birth_journey_plan_card_create" and safe.get("status") == "needs_required_context":
         question = str(safe.get("confirmation_question") or safe.get("summary") or "").strip()
@@ -1110,7 +1110,7 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
             "missing_fields": safe.get("missing_fields"),
             "confirmation_question": question,
             "final_response_instruction": (
-                "生产全过程计划还不能生成。最终回复只向用户补问 confirmation_question 中缺失的信息，"
+                "孕期计划还不能生成。最终回复只向用户补问 confirmation_question 中缺失的信息，"
                 "不要输出路线图、不要表达已经创建完成，也不要提待产包或分娩沟通单。"
             ),
         }
@@ -1258,7 +1258,7 @@ def _compact_pregnancy_diary_output(safe: dict[str, Any]) -> dict[str, Any]:
 def _form_artifact_final_response_instruction(tool_name: str) -> str:
     if tool_name == "birth_journey_intake_manage":
         return (
-            "生产全过程计划基础信息表已经展示。最终回复只简短说明表单已打开，"
+            "孕期计划基础信息表已经展示。最终回复只简短说明表单已打开，"
             "请用户填完提交；不要在聊天里重复表单字段，也不要说计划已经生成。"
         )
     if tool_name == "birth_plan_form_create":
@@ -1311,7 +1311,7 @@ def _compact_birth_journey_intake_output(safe: dict[str, Any], raw_result: dict[
         if isinstance(plan_context, dict):
             compact["plan_context"] = plan_context
         compact["final_response_instruction"] = (
-            "生产全过程计划信息采集已完成。下一步必须直接调用 birth_journey_plan_card_create，"
+            "孕期计划信息采集已完成。下一步必须直接调用 birth_journey_plan_card_create，"
             "plan_context 使用本工具返回的 plan_context；不要先对用户输出路线图或总结。"
         )
     elif safe.get("status") == "blocked_by_symptoms":
@@ -1322,7 +1322,7 @@ def _compact_birth_journey_intake_output(safe: dict[str, Any], raw_result: dict[
     else:
         compact["final_response_instruction"] = (
             "最终回复只推进 next_step 对应的一步：如果有 confirmation_question，就只问这个问题；"
-            "不要同时询问多个后续阶段，也不要生成生产全过程计划。"
+            "不要同时询问多个后续阶段，也不要生成孕期计划。"
         )
     return {key: value for key, value in compact.items() if value not in (None, "", [])}
 
@@ -1378,12 +1378,12 @@ def _compact_birth_journey_plan_card_output(safe: dict[str, Any]) -> dict[str, A
     response = _birth_journey_plan_final_response(card_json_dict)
     reused_existing_plan = safe.get("status") == "existing_plan_found"
     if reused_existing_plan:
-        response = "你之前已经有一份生产全过程计划，我先沿用这份，不重复生成。\n\n" + response
+        response = "你之前已经有一份孕期计划，我先沿用这份，不重复生成。\n\n" + response
 
     return _compact_card_tool_output(
         safe,
         (
-            ("已找到用户已有的生产全过程计划并展示完整路线图。" if reused_existing_plan else "生产全过程计划已经展示完整路线图。")
+            ("已找到用户已有的孕期计划并展示完整路线图。" if reused_existing_plan else "孕期计划已经展示完整路线图。")
             + "最终回复用 2-4 句中文自然组织语言，"
             "需要覆盖下面的当前阶段总结和下一步服务，但不要机械照抄。"
             + (
@@ -3718,9 +3718,8 @@ _PREGNANCY_INTENT_KEYWORDS = (
     "待产包",
     "临产",
     "分娩",
-    "生产全过程",
-    "生产计划",
-    "生产过程计划",
+    "孕期计划",
+    "孕期安排",
     "入院",
     "陪产",
     "剖宫产",
@@ -3741,9 +3740,8 @@ _PREGNANCY_SERVICE_ANCHORS = (
     "待产包",
     "临产",
     "分娩",
-    "生产全过程",
-    "生产计划",
-    "生产过程计划",
+    "孕期计划",
+    "孕期安排",
 )
 
 

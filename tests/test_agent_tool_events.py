@@ -639,9 +639,9 @@ class AgentToolEventTests(unittest.TestCase):
                             "name": "read_skill_file",
                             "arguments": json.dumps(
                                 {
-                                    "skill_id": "birth-prep",
+                                    "skill_id": "device-guidance",
                                     "kind": "references",
-                                    "path": "references/hospital-bag-service.md",
+                                    "path": "references/air1/faq.md",
                                 }
                             ),
                         }
@@ -653,17 +653,17 @@ class AgentToolEventTests(unittest.TestCase):
 
         run_agent_loop(
             client,
-            {"user_message": "帮我做分娩沟通单", "locale": "zh-CN"},
-            {"context_state": context_state, "loaded_skill_ids": ["birth-prep"]},
+            {"user_message": "Air1 指示灯是什么意思", "locale": "zh-CN"},
+            {"context_state": context_state, "loaded_skill_ids": ["device-guidance"]},
             ag_ui_thread_id="thread-1",
             ag_ui_run_id="run-1",
         )
 
-        self.assertTrue(any("birth-prep/references/hospital-bag-service.md 已在当前会话中读取过" in item for item in context_state.loaded_references))
+        self.assertTrue(any("device-guidance/references/air1/faq.md 已在当前会话中读取过" in item for item in context_state.loaded_references))
 
         request = build_agent_request(
             {"user_message": "继续", "locale": "zh-CN", "previous_response_id": "resp-final"},
-            {"context_state": context_state, "loaded_skill_ids": ["birth-prep"]},
+            {"context_state": context_state, "loaded_skill_ids": ["device-guidance"]},
         )
         request_context = request["input"][0]["content"][0]["text"]
         self.assertIn("loaded_skill_context:", request_context)

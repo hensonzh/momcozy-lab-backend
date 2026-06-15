@@ -28,9 +28,13 @@ class ContextState:
 
 
 HOSPITAL_BAG_SLOT_FIELDS = (
+    "age",
     "due_date_or_week",
+    "ivf",
     "first_birth",
     "fetus_count",
+    "city_or_country",
+    "birth_hospital",
     "pregnancy_history_or_notes",
     "birth_path",
     "feeding_intention",
@@ -41,7 +45,7 @@ HOSPITAL_BAG_SLOT_FIELDS = (
 _HOSPITAL_BAG_SLOT_KEY = "hospital_bag"
 _PENDING_FIELD_KEY = "_pending_field"
 _MAX_SLOT_TEXT_LENGTH = 160
-_BIRTH_PREP_SHARED_MEMORY_FIELDS = {"due_date_or_week", "birth_path", "support_person"}
+_BIRTH_PREP_SHARED_MEMORY_FIELDS = set(HOSPITAL_BAG_SLOT_FIELDS)
 
 
 def build_request_context(
@@ -134,9 +138,19 @@ def _persist_birth_prep_shared_memory(inputs: RuntimeInputs, values: dict[str, A
     try:
         data_store.update_birth_prep_profile_memory(
             user_id=user_id,
+            age=values.get("age"),
             due_date_or_week=values.get("due_date_or_week"),
+            ivf=values.get("ivf"),
+            fetus_count=values.get("fetus_count"),
+            city_or_country=values.get("city_or_country"),
+            birth_hospital=values.get("birth_hospital"),
             birth_path=values.get("birth_path"),
+            first_birth=values.get("first_birth"),
+            feeding_intention=values.get("feeding_intention"),
+            return_to_work_timing=values.get("return_to_work_timing"),
             support_person=values.get("support_person"),
+            pregnancy_history_or_notes=values.get("pregnancy_history_or_notes"),
+            top_worries=values.get("top_worries"),
         )
     except Exception:
         return
@@ -212,7 +226,7 @@ def _format_birth_prep_context(state: ContextState) -> list[str]:
         lines.append(f"- birth_journey_intake_next_step: {intake_step}")
         if intake_groups:
             lines.append("- birth_journey_intake_completed_groups: " + ", ".join(str(group) for group in intake_groups))
-        lines.append("- 生产全过程计划信息采集优先调用 birth_journey_intake_manage 继续推进，不要自己凭记忆判断流程。")
+        lines.append("- 孕期计划信息采集优先调用 birth_journey_intake_manage 继续推进，不要自己凭记忆判断流程。")
     return lines
 
 
@@ -482,8 +496,8 @@ def _format_active_care_plan_context(inputs: RuntimeInputs) -> list[str]:
     ]
     return [
         "active_care_plan_context:",
-        "- birth_journey_plan: 已存在 active 生产全过程计划；" + "；".join(part for part in detail_parts if part),
-        "- 只要该计划未被删除，就把它视为用户已有计划；用户要求生成/制定生产全过程计划时，不要再次调用 birth_journey_plan_card_create 创建新计划，先说明已有计划并继续查看或推进。",
+        "- birth_journey_plan: 已存在 active 孕期计划；" + "；".join(part for part in detail_parts if part),
+        "- 只要该计划未被删除，就把它视为用户已有计划；用户要求生成/制定孕期计划时，不要再次调用 birth_journey_plan_card_create 创建新计划，先说明已有计划并继续查看或推进。",
     ]
 
 
@@ -563,13 +577,25 @@ def _format_birth_prep_profile_context(inputs: RuntimeInputs) -> list[str]:
     profile = inputs.get("user_profile") if isinstance(inputs.get("user_profile"), dict) else {}
     if not profile:
         return []
-    due = _trim_context_value(profile.get("birth_prep_due_date_or_week"), 80)
-    birth_path = _trim_context_value(profile.get("birth_prep_birth_path"), 80)
-    support_person = _trim_context_value(profile.get("birth_prep_support_person"), 80)
+    fields = (
+        ("age", profile.get("age")),
+        ("due_date_or_week", profile.get("birth_prep_due_date_or_week")),
+        ("ivf", profile.get("birth_prep_ivf")),
+        ("fetus_count", profile.get("birth_prep_fetus_count")),
+        ("city_or_country", profile.get("birth_prep_city_or_country")),
+        ("birth_hospital", profile.get("birth_prep_birth_hospital")),
+        ("birth_path", profile.get("birth_prep_birth_path")),
+        ("first_birth", profile.get("birth_prep_first_birth")),
+        ("feeding_intention", profile.get("birth_prep_feeding_intention")),
+        ("return_to_work_timing", profile.get("birth_prep_return_to_work_timing")),
+        ("support_person", profile.get("birth_prep_support_person")),
+        ("pregnancy_history_or_notes", profile.get("birth_prep_pregnancy_history_or_notes")),
+        ("top_worries", profile.get("birth_prep_top_worries")),
+    )
     details = [
-        f"due_date_or_week={due}" if due else "",
-        f"birth_path={birth_path}" if birth_path else "",
-        f"support_person={support_person}" if support_person else "",
+        f"{field_id}={value_text}"
+        for field_id, raw_value in fields
+        if (value_text := _trim_context_value(raw_value, 80))
     ]
     context_line = "；".join(part for part in details if part)
     if not context_line:
@@ -577,7 +603,7 @@ def _format_birth_prep_profile_context(inputs: RuntimeInputs) -> list[str]:
     return [
         "birth_prep_profile_context:",
         f"- {context_line}",
-        "- 这些是生产全过程计划、待产包和分娩沟通单共享的已确认信息；相关服务优先复用，不要重复询问同一个已知字段。",
+        "- 这些是孕期计划、待产包和分娩沟通单共享的已确认信息；相关服务优先复用，创建表单时作为默认值，不要重复询问同一个已知字段。",
     ]
 
 
@@ -606,9 +632,17 @@ def _trim_context_value(value: Any, max_length: int = _MAX_SLOT_TEXT_LENGTH) -> 
 def _explicit_hospital_bag_slots(message: str) -> dict[str, Any]:
     slots: dict[str, Any] = {}
 
+    age = _extract_age(message)
+    if age:
+        slots["age"] = age
+
     due = _extract_due_or_week(message)
     if due:
         slots["due_date_or_week"] = due
+
+    ivf = _extract_ivf(message)
+    if ivf:
+        slots["ivf"] = ivf
 
     first_birth = _extract_first_birth(message)
     if first_birth:
@@ -617,6 +651,14 @@ def _explicit_hospital_bag_slots(message: str) -> dict[str, Any]:
     fetus_count = _extract_fetus_count(message)
     if fetus_count:
         slots["fetus_count"] = fetus_count
+
+    city_or_country = _extract_city_or_country(message)
+    if city_or_country:
+        slots["city_or_country"] = city_or_country
+
+    birth_hospital = _extract_birth_hospital(message)
+    if birth_hospital:
+        slots["birth_hospital"] = birth_hospital
 
     birth_path = _extract_birth_path(message)
     if birth_path:
@@ -645,14 +687,22 @@ def _explicit_hospital_bag_slots(message: str) -> dict[str, Any]:
 
 
 def _hospital_bag_slot_value_from_text(field_id: str, message: str) -> Any:
+    if field_id == "age":
+        return _extract_age(message)
     if field_id == "due_date_or_week":
         return _extract_due_or_week(message) or _extract_bare_pregnancy_week(message)
+    if field_id == "ivf":
+        return _extract_ivf(message)
     if field_id == "top_worries":
         return _extract_top_worries(message) or [_clip_slot_text(message)]
     if field_id == "first_birth":
         return _extract_first_birth(message)
     if field_id == "fetus_count":
         return _extract_fetus_count(message)
+    if field_id == "city_or_country":
+        return _extract_city_or_country(message) or _clip_slot_text(message)
+    if field_id == "birth_hospital":
+        return _extract_birth_hospital(message) or _clip_slot_text(message)
     if field_id == "birth_path":
         return _extract_birth_path(message)
     if field_id == "feeding_intention":
@@ -682,6 +732,22 @@ def _valid_hospital_bag_slot_field(value: Any) -> str:
     return field_id if field_id in HOSPITAL_BAG_SLOT_FIELDS else ""
 
 
+def _extract_age(message: str) -> int | None:
+    text = str(message or "").strip()
+    patterns = (
+        r"(?:我今年|今年|年龄|我)\s*(\d{1,2})\s*岁",
+        r"(?:年龄|我今年|今年)\s*(?:是|:|：)?\s*(\d{1,2})",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if not match:
+            continue
+        age = int(match.group(1))
+        if 12 <= age <= 60:
+            return age
+    return None
+
+
 def _extract_due_or_week(message: str) -> str:
     text = str(message or "").strip()
     week_match = re.search(r"孕?\s*(\d{1,2})\s*(?:周|週)(?:\s*[+＋]\s*(\d)\s*天?)?", text)
@@ -702,6 +768,15 @@ def _extract_bare_pregnancy_week(message: str) -> str:
     week = int(text)
     if 1 <= week <= 42:
         return f"孕{week}周"
+    return ""
+
+
+def _extract_ivf(message: str) -> str:
+    text = str(message or "")
+    if any(token in text for token in ("不是试管", "非试管", "没有做试管", "自然怀孕", "自然受孕")):
+        return "否"
+    if any(token in text for token in ("IVF", "ivf", "试管", "体外受精", "辅助生殖")):
+        return "是"
     return ""
 
 
@@ -732,6 +807,33 @@ def _extract_fetus_count(message: str) -> str:
         return "双胎"
     if "单胎" in text:
         return "单胎"
+    return ""
+
+
+def _extract_city_or_country(message: str) -> str:
+    text = str(message or "").strip()
+    match = re.search(r"(?:我在|人在|坐标|在|所在城市(?:/国家)?(?:是|在|:|：)?|城市(?:是|在|:|：)?)\s*([\u4e00-\u9fa5A-Za-z][\u4e00-\u9fa5A-Za-z\s]{1,24})", text)
+    if not match:
+        return ""
+    value = match.group(1).strip(" ，。,.；;")
+    value = re.split(r"[，。,.；;\n]", value, maxsplit=1)[0].strip()
+    return value[:30]
+
+
+def _extract_birth_hospital(message: str) -> str:
+    text = str(message or "").strip()
+    patterns = (
+        r"建档医院(?:是|在|:|：)?\s*([^，。；;\n]{2,40})",
+        r"(?:在|去|准备在)\s*([^，。；;\n]{2,40}?医院)\s*(?:建档|产检|生|分娩)",
+        r"([^，。；;\n]{2,40}?医院)\s*(?:建档|产检|生|分娩)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if not match:
+            continue
+        value = match.group(1).strip(" ，。,.；;")
+        if value:
+            return value[:40]
     return ""
 
 

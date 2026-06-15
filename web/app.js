@@ -1097,7 +1097,7 @@ function renderHospitalBagCardV1(node, cardJson) {
 }
 
 function renderBirthJourneyPlanCardV1(node, cardJson) {
-  addCardHeader(node, cardJson.title || "生产全过程计划", cardJson.subtitle || "");
+  addCardHeader(node, cardJson.title || "孕期计划", cardJson.subtitle || "");
   addBirthJourneyOwnerStrip(node, cardJson.owner || {});
   const phases = normalizeBirthJourneyPhases(cardJson.phases);
   if (phases.length) {
