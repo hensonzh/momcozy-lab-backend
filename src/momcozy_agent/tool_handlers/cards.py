@@ -1944,7 +1944,7 @@ def create_birth_journey_plan_card(args: dict[str, Any], inputs: RuntimeInputs) 
         return {
             "tool_name": "birth_journey_plan_card_create",
             "status": "needs_required_context",
-            "summary": "生成生产全过程计划前，需要先确认孕期、分娩方式和支持人。",
+            "summary": "生成生产全过程计划前，需要先完成分层信息采集。",
             "missing_fields": missing_context,
             "data": {
                 "confirmation_question": question,
@@ -2002,6 +2002,66 @@ def delete_birth_journey_plan(args: dict[str, Any], inputs: RuntimeInputs) -> di
     }
 
 
+def manage_birth_journey_intake(args: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
+    action = str(args.get("action") or "get_state").strip() or "get_state"
+    payload = _dict_value(args.get("payload")) or _confirmed_form_data(inputs)
+    intake_state = _normalize_birth_journey_intake_state(_dict_value(inputs.get("_birth_journey_intake_state")))
+    if action in {"start", "get_state"} and not intake_state.get("started"):
+        intake_state["started"] = True
+
+    if action == "submit_basic_info":
+        basic_info = _birth_journey_basic_info_payload(payload)
+        if basic_info:
+            intake_state["basic_info"] = {**_dict_value(intake_state.get("basic_info")), **basic_info}
+    elif action == "mark_checkup_records_uploaded":
+        intake_state["checkup_records_uploaded"] = True
+        note = _first_text(payload.get("checkup_status"), payload.get("checkup_note"), payload.get("note"))
+        intake_state["checkup_status"] = note or "已上传产检记录，等待 CozyMate 整理。"
+    elif action == "submit_risk_factors":
+        intake_state["risk_factors"] = _birth_journey_text_or_skipped(payload, "risk_factors")
+    elif action == "submit_current_symptoms":
+        intake_state["current_symptoms"] = _birth_journey_text_or_skipped(payload, "current_symptoms")
+    elif action == "submit_lifestyle_context":
+        intake_state["lifestyle_context"] = _birth_journey_text_or_skipped(payload, "lifestyle_context")
+    elif action == "submit_feeding_context":
+        intake_state["feeding_ibclc_context"] = _birth_journey_text_or_skipped(payload, "feeding_ibclc_context")
+        feeding_intention = _first_text(payload.get("feeding_intention"), payload.get("feeding_plan"))
+        if feeding_intention:
+            intake_state["feeding_intention"] = feeding_intention
+    elif action == "complete":
+        intake_state["completed"] = True
+
+    next_step = _birth_journey_intake_next_step(intake_state)
+    intake_state["next_step"] = next_step
+    intake_state["completed_groups"] = _birth_journey_intake_completed_groups(intake_state)
+    plan_context = {**_birth_prep_shared_default_values(inputs), **_birth_journey_plan_context_from_intake(intake_state)}
+    status = _birth_journey_intake_status(next_step, intake_state)
+    result: dict[str, Any] = {
+        "tool_name": "birth_journey_intake_manage",
+        "status": status,
+        "action": action,
+        "next_step": next_step,
+        "summary": _birth_journey_intake_summary(next_step),
+        "intake_state": intake_state,
+        "data": {
+            "assistant_instruction": _birth_journey_intake_instruction(next_step),
+            "confirmation_question": _birth_journey_intake_question(next_step, plan_context),
+            "completed_groups": intake_state["completed_groups"],
+        },
+    }
+    if next_step == "basic_info_form":
+        result["form"] = _birth_journey_basic_info_form(plan_context)
+    if next_step == "checkup_records_upload":
+        result["data"]["upload_panel"] = {
+            "title": "上传产检记录",
+            "description": "请把目前能找到的产检记录都上传；上传完后告诉我“产检记录上传完毕”。",
+            "done_text": "产检记录上传完毕",
+        }
+    if next_step == "generate_plan":
+        result["plan_context"] = plan_context
+    return result
+
+
 def _existing_birth_journey_care_plan(inputs: RuntimeInputs) -> dict[str, Any] | None:
     user_profile = inputs.get("user_profile") if isinstance(inputs.get("user_profile"), dict) else {}
     user_id = str(inputs.get("user_id") or user_profile.get("user_id") or "").strip()
@@ -2041,62 +2101,361 @@ def _save_birth_journey_care_plan(card_json: dict[str, Any], inputs: RuntimeInpu
     )
 
 
+BIRTH_JOURNEY_BASIC_INFO_FIELDS: tuple[dict[str, Any], ...] = (
+    {
+        "id": "last_menstrual_period",
+        "label": "末次月经",
+        "type": "date",
+        "required": False,
+        "help_text": "如果记不清，可以留空。",
+        "placeholder": None,
+        "default_value": None,
+        "options": None,
+    },
+    {
+        "id": "due_date",
+        "label": "预产期",
+        "type": "date",
+        "required": False,
+        "help_text": "末次月经、预产期、当前孕周至少填一个即可。",
+        "placeholder": None,
+        "default_value": None,
+        "options": None,
+    },
+    {
+        "id": "current_week",
+        "label": "当前孕周",
+        "type": "text",
+        "required": False,
+        "help_text": None,
+        "placeholder": "例如：28周、28+3",
+        "default_value": None,
+        "options": None,
+    },
+    {
+        "id": "ivf",
+        "label": "是否 IVF",
+        "type": "select",
+        "required": False,
+        "help_text": None,
+        "placeholder": None,
+        "default_value": None,
+        "options": ["是", "否", "不确定/暂不说"],
+    },
+    {
+        "id": "fetus_count",
+        "label": "单胎/双胎",
+        "type": "select",
+        "required": False,
+        "help_text": None,
+        "placeholder": None,
+        "default_value": None,
+        "options": ["单胎", "双胎", "多胎", "不确定/暂不说"],
+    },
+    {
+        "id": "age",
+        "label": "年龄",
+        "type": "number",
+        "required": False,
+        "help_text": None,
+        "placeholder": "例如：32",
+        "default_value": None,
+        "options": None,
+    },
+    {
+        "id": "height_cm",
+        "label": "身高",
+        "type": "number",
+        "required": False,
+        "help_text": None,
+        "placeholder": "cm",
+        "default_value": None,
+        "options": None,
+    },
+    {
+        "id": "pre_pregnancy_weight_kg",
+        "label": "孕前体重",
+        "type": "number",
+        "required": False,
+        "help_text": None,
+        "placeholder": "kg",
+        "default_value": None,
+        "options": None,
+    },
+    {
+        "id": "current_weight_kg",
+        "label": "当前体重",
+        "type": "number",
+        "required": False,
+        "help_text": None,
+        "placeholder": "kg",
+        "default_value": None,
+        "options": None,
+    },
+    {
+        "id": "city_or_country",
+        "label": "所在城市/国家",
+        "type": "text",
+        "required": False,
+        "help_text": None,
+        "placeholder": "例如：上海 / 美国加州",
+        "default_value": None,
+        "options": None,
+    },
+    {
+        "id": "birth_hospital",
+        "label": "建档医院",
+        "type": "text",
+        "required": False,
+        "help_text": None,
+        "placeholder": "如果还没建档，可以写“还没确定”",
+        "default_value": None,
+        "options": None,
+    },
+)
+
+BIRTH_JOURNEY_BASIC_INFO_FIELD_IDS = tuple(field["id"] for field in BIRTH_JOURNEY_BASIC_INFO_FIELDS)
+
+
 BIRTH_JOURNEY_SURVEY_FIELDS: tuple[dict[str, Any], ...] = (
     {
-        "id": "due_date_or_week",
-        "label": "当前孕周或预产期",
-        "question": "你现在大概孕几周，或预产期是哪天？",
-        "keys": ("due_date_or_week", "due_date", "current_week"),
+        "id": "basic_info",
+        "label": "孕周与基本情况",
+        "question": "请先填写孕周与基本情况表单；末次月经、预产期、当前孕周至少提供一个，不清楚的可以留空。",
+        "keys": (
+            "due_date_or_week",
+            "due_date",
+            "current_week",
+            "last_menstrual_period",
+            "ivf",
+            "fetus_count",
+            "age",
+            "height_cm",
+            "pre_pregnancy_weight_kg",
+            "current_weight_kg",
+            "city_or_country",
+            "birth_hospital",
+            "hospital",
+        ),
     },
     {
-        "id": "birth_path",
-        "label": "分娩方式",
-        "question": "分娩方式这块，你现在更倾向顺产、剖宫产，还是还没确定？",
-        "keys": ("birth_path", "delivery_method"),
+        "id": "checkup_records",
+        "label": "产检记录",
+        "question": "请上传目前全部产检记录；上传完后告诉我“产检记录上传完毕”。",
+        "keys": ("checkup_records_uploaded", "checkup_status", "checkup_records", "uploaded_checkup_records"),
     },
     {
-        "id": "support_person",
-        "label": "主要支持人",
-        "question": "入院或生产时，主要是谁陪你或帮你处理事情？",
-        "keys": ("support_person", "support_people", "partner_or_support"),
-    },
-    {
-        "id": "basic_profile",
-        "label": "基础情况",
-        "question": "这次是第几胎/单胎还是多胎、年龄、所在城市或建档医院，有哪些你愿意补充？",
-        "keys": ("first_birth", "fetus_count", "baby_count", "age", "city_or_country", "birth_setting", "birth_hospital", "hospital"),
-    },
-    {
-        "id": "checkup_status",
-        "label": "产检情况",
-        "question": "是否已建档、下次产检时间、做过哪些检查，以及有没有异常结果？",
-        "keys": ("checkup_status", "established_record", "next_checkup_time", "completed_checks", "abnormal_results", "checkup_records"),
+        "id": "risk_factors",
+        "label": "孕期高风险因素",
+        "question": "你了解自己是否有什么孕期高风险因素吗，比如慢性高血压、糖尿病、肾病、自身免疫病、甲状腺病、心脏病，或既往剖宫产、早产/流产史等？",
+        "keys": ("risk_factors", "high_risk_factors", "pregnancy_history_or_notes", "medical_notes", "special_notes", "doctor_notes"),
     },
     {
         "id": "current_symptoms",
         "label": "当前不适或异常",
-        "question": "最近有没有出血、流水、腹痛、发热、严重头痛、视物模糊、胎动变化或其他不舒服？",
+        "question": "那你现在有没有一些不舒服或异常情况？比如阴道流血/流水、腹痛、发热、严重呕吐、头痛、视物模糊、胸痛气短、手脸明显水肿、胎动变化，或情绪崩溃、自伤想法。",
         "keys": ("current_symptoms", "symptoms", "discomforts", "urgent_symptoms"),
-    },
-    {
-        "id": "risk_factors",
-        "label": "孕期风险因素",
-        "question": "有没有高血压、糖尿病、肾病、甲状腺、自身免疫、既往剖宫产/早产/流产、多胎或医生特别提醒？",
-        "keys": ("risk_factors", "high_risk_factors", "pregnancy_history_or_notes", "medical_notes", "special_notes", "doctor_notes"),
     },
     {
         "id": "lifestyle_context",
         "label": "生活和工作场景",
-        "question": "你的饮食、睡眠、运动、久站/夜班/通勤、家庭支持、预算或焦虑点里，有哪些会影响接下来准备？",
-        "keys": ("lifestyle_context", "work_context", "sleep_context", "exercise_context", "family_support", "budget", "top_worries"),
+        "question": "结合你现在的孕周，我再少量了解会影响执行的生活场景：饮食/补剂、运动睡眠、久站夜班通勤、家庭支持、是否一胎、焦虑点里，哪些比较需要我纳入计划？",
+        "keys": ("lifestyle_context", "work_context", "sleep_context", "exercise_context", "family_support", "budget", "top_worries", "first_birth", "support_person"),
     },
     {
         "id": "feeding_ibclc_context",
         "label": "喂养和 IBCLC 相关信息",
-        "question": "是否计划母乳/混合/配方，是否要吸奶或背奶，是否担心低奶量、乳腺炎、宝宝含乳，或希望产前了解 IBCLC 支持？",
+        "question": "最后想了解喂养准备：你是否计划母乳/混合/配方？是否需要吸奶或背奶？预计产假多久？之前有没有低奶量、乳腺炎、宝宝含乳困难的经历？是否可能早产、剖宫产或母婴分离？",
         "keys": ("feeding_ibclc_context", "feeding_intention", "feeding_plan", "pump_plan", "ibclc_plan", "lactation_history"),
     },
 )
+
+
+def _normalize_birth_journey_intake_state(value: dict[str, Any] | None) -> dict[str, Any]:
+    state = dict(value or {})
+    if not isinstance(state.get("basic_info"), dict):
+        state["basic_info"] = {}
+    return state
+
+
+def _birth_journey_basic_info_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    source = _dict_value(payload.get("basic_info")) or payload
+    return {
+        field_id: source[field_id]
+        for field_id in BIRTH_JOURNEY_BASIC_INFO_FIELD_IDS
+        if _has_meaningful_value(source.get(field_id))
+    }
+
+
+def _birth_journey_text_or_skipped(payload: dict[str, Any], field_id: str) -> str:
+    text = _first_answer_text(
+        payload.get(field_id),
+        payload.get("answer"),
+        payload.get("text"),
+        payload.get("note"),
+        payload.get("content"),
+    )
+    return text or "跳过"
+
+
+def _birth_journey_intake_completed_groups(state: dict[str, Any]) -> list[str]:
+    groups: list[str] = []
+    if _dict_value(state.get("basic_info")):
+        groups.append("basic_info")
+    if state.get("checkup_records_uploaded") is True or _has_meaningful_value(state.get("checkup_status")):
+        groups.append("checkup_records")
+    for field_id in ("risk_factors", "current_symptoms", "lifestyle_context", "feeding_ibclc_context"):
+        if field_id in state:
+            groups.append(field_id)
+    return groups
+
+
+def _birth_journey_intake_next_step(state: dict[str, Any]) -> str:
+    if not _dict_value(state.get("basic_info")):
+        return "basic_info_form"
+    if state.get("checkup_records_uploaded") is not True and not _has_meaningful_value(state.get("checkup_status")):
+        return "checkup_records_upload"
+    if "risk_factors" not in state:
+        return "risk_question"
+    if "current_symptoms" not in state:
+        return "symptom_question"
+    if _birth_journey_symptoms_need_pause(str(state.get("current_symptoms") or "")):
+        return "pause_for_symptoms"
+    if "lifestyle_context" not in state:
+        return "lifestyle_question"
+    if "feeding_ibclc_context" not in state:
+        return "feeding_question"
+    return "generate_plan"
+
+
+def _birth_journey_intake_status(next_step: str, state: dict[str, Any]) -> str:
+    if next_step == "pause_for_symptoms":
+        return "blocked_by_symptoms"
+    if next_step == "generate_plan":
+        return "ready_to_generate"
+    return "in_progress"
+
+
+def _birth_journey_symptoms_need_pause(text: str) -> bool:
+    normalized = text.strip()
+    if not normalized or _normalized_placeholder(normalized) in PLACEHOLDER_VALUES:
+        return False
+    if any(token in normalized for token in ("没有", "无", "暂时没有", "没什么", "正常")) and not any(
+        token in normalized for token in ("但是", "不过", "除了")
+    ):
+        return False
+    return any(
+        token in normalized
+        for token in (
+            "出血",
+            "流血",
+            "流水",
+            "破水",
+            "腹痛",
+            "发热",
+            "呕吐",
+            "头痛",
+            "视物",
+            "胸痛",
+            "气短",
+            "水肿",
+            "胎动",
+            "情绪崩溃",
+            "自伤",
+        )
+    )
+
+
+def _birth_journey_intake_summary(next_step: str) -> str:
+    summaries = {
+        "basic_info_form": "需要先填写孕周与基本情况表单。",
+        "checkup_records_upload": "基础信息已记录，下一步需要上传产检记录。",
+        "risk_question": "产检记录上传状态已确认，下一步补问孕期高风险因素。",
+        "symptom_question": "高风险因素已问到，下一步确认当前不适或异常。",
+        "pause_for_symptoms": "用户报告了需要先处理的当前症状，暂停生成生产全过程计划。",
+        "lifestyle_question": "当前症状已确认，下一步少量了解生活方式与场景。",
+        "feeding_question": "生活场景已问到，下一步确认喂养和 IBCLC 相关信息。",
+        "generate_plan": "生产全过程计划信息采集已完成，可以调用 birth_journey_plan_card_create。",
+    }
+    return summaries.get(next_step, "继续推进生产全过程计划信息采集。")
+
+
+def _birth_journey_intake_instruction(next_step: str) -> str:
+    instructions = {
+        "basic_info_form": "最终回复只说明已打开基础信息表单，请用户填完提交；不要在聊天里逐项追问这些字段。",
+        "checkup_records_upload": "请用户上传目前全部产检记录，并告诉用户上传完毕后说“产检记录上传完毕”。",
+        "risk_question": "只补问孕期高风险因素这一件事；用户不清楚也可以说不清楚。",
+        "symptom_question": "只补问当前不适或异常这一件事；如果用户确认有明显异常，先不要生成计划。",
+        "pause_for_symptoms": "先承接用户情况，建议优先联系医生/医院确认；不要继续生成生产全过程计划。",
+        "lifestyle_question": "根据用户孕周少量追问生活方式与场景，不要变成长问卷。",
+        "feeding_question": "一次性问完喂养和 IBCLC 相关信息，允许用户跳过。",
+        "generate_plan": "直接调用 birth_journey_plan_card_create，plan_context 使用本工具返回的 plan_context；工具调用前不要先输出路线图。",
+    }
+    return instructions.get(next_step, "按 next_step 继续推进。")
+
+
+def _birth_journey_intake_question(next_step: str, plan_context: dict[str, Any]) -> str:
+    if next_step == "risk_question":
+        return "你了解自己是否有什么孕期高风险因素吗，比如慢性高血压、糖尿病、肾病、自身免疫病、甲状腺病、心脏病，或既往剖宫产、早产/流产史等？不清楚也可以说不清楚。"
+    if next_step == "symptom_question":
+        return "那你现在有没有一些不舒服或异常情况？比如阴道流血/流水、腹痛、发热、严重呕吐、头痛、视物模糊、胸痛气短、手脸明显水肿、胎动变化，或情绪崩溃、自伤想法。"
+    if next_step == "lifestyle_question":
+        week_text = str(plan_context.get("due_date_or_week") or plan_context.get("current_week") or "").strip()
+        prefix = f"结合你现在{week_text}，" if week_text else ""
+        return prefix + "我再少量了解会影响执行的生活场景：饮食/补剂、运动睡眠、久站夜班通勤、家庭支持、是否一胎、焦虑点里，哪些比较需要我纳入计划？"
+    if next_step == "feeding_question":
+        return "最后想了解喂养准备：你是否计划母乳/混合/配方？是否需要吸奶或背奶？预计产假多久？之前有没有低奶量、乳腺炎、宝宝含乳困难的经历？是否可能早产、剖宫产或母婴分离？不确定的可以跳过。"
+    if next_step == "pause_for_symptoms":
+        return "你提到的情况需要先确认安全边界。我们先暂停制定计划，优先按医生或医院建议处理当前症状。"
+    return ""
+
+
+def _birth_journey_basic_info_form(plan_context: dict[str, Any]) -> dict[str, Any]:
+    fields: list[dict[str, Any]] = []
+    for template in BIRTH_JOURNEY_BASIC_INFO_FIELDS:
+        field = dict(template)
+        value = _first_text(plan_context.get(field["id"]))
+        if _has_meaningful_value(value):
+            field["default_value"] = value
+        fields.append(field)
+    return {
+        "id": "birth_journey_basic_info_intake",
+        "title": "孕周与基本情况",
+        "description": "末次月经、预产期、当前孕周至少填一个；其它不清楚可以留空。",
+        "submit_label": "提交",
+        "fields": fields,
+        "default_values": {key: value for key, value in plan_context.items() if key in BIRTH_JOURNEY_BASIC_INFO_FIELD_IDS},
+    }
+
+
+def _birth_journey_plan_context_from_intake(state: dict[str, Any]) -> dict[str, Any]:
+    basic_info = _dict_value(state.get("basic_info"))
+    context: dict[str, Any] = dict(basic_info)
+    due_or_week = _first_text(
+        basic_info.get("due_date_or_week"),
+        basic_info.get("due_date"),
+        basic_info.get("current_week"),
+        _birth_journey_due_date_from_lmp(basic_info.get("last_menstrual_period")),
+    )
+    if due_or_week:
+        context["due_date_or_week"] = due_or_week
+    if _has_meaningful_value(state.get("checkup_status")):
+        context["checkup_status"] = state["checkup_status"]
+    elif state.get("checkup_records_uploaded") is True:
+        context["checkup_status"] = "已上传产检记录，等待 CozyMate 整理。"
+    if state.get("checkup_records_uploaded") is True:
+        context["checkup_records_uploaded"] = "是"
+    for key in ("risk_factors", "current_symptoms", "lifestyle_context", "feeding_ibclc_context", "feeding_intention"):
+        if key in state and _has_meaningful_value(state.get(key)):
+            context[key] = state[key]
+    return context
+
+
+def _birth_journey_due_date_from_lmp(value: Any) -> str:
+    lmp = _date_from_text(str(value or ""))
+    if lmp is None:
+        return ""
+    return _format_birth_journey_date(lmp + timedelta(days=280))
 
 
 def _missing_birth_journey_required_context(form_data: dict[str, Any]) -> list[str]:
@@ -2155,7 +2514,12 @@ def _birth_journey_required_context_question(missing_fields: list[str]) -> str:
 
 def _build_birth_journey_plan_card_json(form_data: dict[str, Any], scope: str, inputs: RuntimeInputs) -> dict[str, Any]:
     today = _message_date(inputs)
-    due_text = _first_text(form_data.get("due_date_or_week"), form_data.get("due_date"), form_data.get("current_week"))
+    due_text = _first_text(
+        form_data.get("due_date_or_week"),
+        form_data.get("due_date"),
+        form_data.get("current_week"),
+        _birth_journey_due_date_from_lmp(form_data.get("last_menstrual_period")),
+    )
     timeline = _birth_journey_timeline(due_text, today, inputs, scope)
     first_birth = _normalize_first_birth(_first_text(form_data.get("first_birth")))
     fetus_count = _first_text(form_data.get("fetus_count"), form_data.get("baby_count"))

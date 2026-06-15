@@ -106,6 +106,79 @@ class ProfileMemoryTests(unittest.TestCase):
         self.assertEqual(profile["current_care_stage"], "")
         self.assertEqual(profile["current_care_stage_source"], "")
 
+    def test_dev_startup_reset_keeps_status_demo_fields_and_clears_other_data(self) -> None:
+        data_store.update_user_profile_memory(
+            user_id="profile-startup-reset",
+            display_name="小雨",
+            age=29,
+            onboarding_skipped=False,
+        )
+        data_store.update_birth_prep_profile_memory(
+            user_id="profile-startup-reset",
+            due_date_or_week="孕32周",
+            birth_path="剖宫产",
+            support_person="伴侣",
+        )
+        data_store.update_user_profile_advice(
+            user_id="profile-startup-reset",
+            lactation_advice="奶量偏低",
+            feeding_advice="关注宝宝摄入",
+        )
+        data_store.save_care_plan_artifact(
+            user_id="profile-startup-reset",
+            plan_type="birth_journey",
+            title="生产全过程计划",
+            summary="孕晚期准备",
+            payload={"title": "生产全过程计划"},
+            source_artifact_type="birth_journey_plan_card",
+        )
+        data_store.save_pregnancy_diary_entry(
+            user_id="profile-startup-reset",
+            entry_date="2026-06-10",
+            content="今天记录。",
+        )
+        data_store.save_uploaded_file(
+            {
+                "id": "file-reset",
+                "name": "产检记录.pdf",
+                "extension": ".pdf",
+                "mime_type": "application/pdf",
+                "size": 123,
+                "path": "/tmp/file-reset.pdf",
+                "created_at": 123456,
+            }
+        )
+        data_store.upsert_pump_health("profile-startup-reset", 1, 0)
+        with data_store._connect() as conn:  # type: ignore[attr-defined]
+            conn.execute(
+                """
+                INSERT INTO milk_plan(user_id, plan_name, plan_type, plan_days, plan_summary)
+                VALUES ('profile-startup-reset', '追奶计划', 'increase', 7, 'demo')
+                """
+            )
+
+        cleared = data_store.reset_non_status_demo_data_for_dev()
+
+        self.assertGreaterEqual(cleared["profile_onboarding"], 1)
+        self.assertGreaterEqual(cleared["birth_prep_profile"], 1)
+        self.assertGreaterEqual(cleared["generated_plans"], 1)
+        self.assertGreaterEqual(cleared["milk_plans"], 1)
+        self.assertGreaterEqual(cleared["pregnancy_diary"], 1)
+        self.assertGreaterEqual(cleared["uploaded_files"], 1)
+        self.assertGreaterEqual(cleared["device_runtime"], 1)
+        profile = data_store.get_user_profile("profile-startup-reset")
+        self.assertEqual(profile["display_name"], "")
+        self.assertIsNone(profile["age"])
+        self.assertEqual(profile["birth_prep_due_date_or_week"], "")
+        self.assertEqual(profile["birth_prep_birth_path"], "")
+        self.assertEqual(profile["birth_prep_support_person"], "")
+        self.assertEqual(profile["lactation_advice"], "奶量偏低")
+        self.assertEqual(profile["feeding_advice"], "关注宝宝摄入")
+        self.assertEqual(data_store.list_care_plan_artifacts(user_id="profile-startup-reset"), [])
+        self.assertEqual(data_store.list_pregnancy_diary_entries(user_id="profile-startup-reset"), [])
+        self.assertIsNone(data_store.get_uploaded_file("file-reset"))
+        self.assertIsNone(data_store.get_pump_health("profile-startup-reset"))
+
     def test_current_care_stage_persists_in_profile(self) -> None:
         profile = data_store.update_current_care_stage(
             user_id="profile-care-stage",

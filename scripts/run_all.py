@@ -49,13 +49,7 @@ def main() -> None:
 
     if _auto_seed_status_demo_enabled():
         _seed_status_demo_data()
-    _reset_profile_onboarding_memory_for_dev()
-    if _reset_birth_prep_profile_memory_enabled():
-        _reset_birth_prep_profile_memory_for_dev()
-    else:
-        print("Keep birth prep profile memory for local startup: MOMCOZY_RESET_BIRTH_PREP_MEMORY_ON_START=0.")
-    _reset_birth_journey_care_plans_for_dev()
-    _reset_pregnancy_diary_for_dev()
+    _reset_non_status_demo_data_for_dev()
 
     if not _is_port_open(CHAT_HOST, CHAT_PORT):
         chat_thread = threading.Thread(target=run_chat_server, name="momcozy-chat-sse", daemon=True)
@@ -124,11 +118,6 @@ def _auto_seed_status_demo_enabled() -> bool:
     return raw not in {"0", "false", "no", "off"}
 
 
-def _reset_birth_prep_profile_memory_enabled() -> bool:
-    raw = os.getenv("MOMCOZY_RESET_BIRTH_PREP_MEMORY_ON_START", "1").strip().lower()
-    return raw not in {"0", "false", "no", "off"}
-
-
 def _seed_status_demo_data() -> None:
     seed_path = ROOT / "scripts" / "seed_status_demo_data.py"
     namespace = runpy.run_path(str(seed_path))
@@ -138,32 +127,20 @@ def _seed_status_demo_data() -> None:
     seed_main()
 
 
-def _reset_profile_onboarding_memory_for_dev() -> None:
+def _reset_non_status_demo_data_for_dev() -> None:
     from momcozy_agent.services import data_store
 
-    cleared = data_store.reset_profile_onboarding_memory_for_dev()
-    print(f"Reset profile onboarding memory for local startup: cleared {cleared} profile(s).")
-
-
-def _reset_birth_prep_profile_memory_for_dev() -> None:
-    from momcozy_agent.services import data_store
-
-    cleared = data_store.reset_birth_prep_profile_memory_for_dev()
-    print(f"Reset birth prep profile memory for local startup: cleared {cleared} profile(s).")
-
-
-def _reset_birth_journey_care_plans_for_dev() -> None:
-    from momcozy_agent.services import data_store
-
-    cleared = data_store.reset_birth_journey_care_plans_for_dev()
-    print(f"Reset birth journey plans for local startup: deleted {cleared} active plan(s).")
-
-
-def _reset_pregnancy_diary_for_dev() -> None:
-    from momcozy_agent.services import data_store
-
-    cleared = data_store.reset_pregnancy_diary_for_dev()
-    print(f"Reset pregnancy diary for local startup: deleted {cleared} record(s).")
+    cleared = data_store.reset_non_status_demo_data_for_dev()
+    print(
+        "Reset non-status demo data for local startup: "
+        f"profile={cleared['profile_onboarding']}, "
+        f"birth_prep={cleared['birth_prep_profile']}, "
+        f"plans={cleared['generated_plans']}, "
+        f"milk_plans={cleared['milk_plans']}, "
+        f"pregnancy_diary={cleared['pregnancy_diary']}, "
+        f"uploads={cleared['uploaded_files']}, "
+        f"device_runtime={cleared['device_runtime']}."
+    )
 
 
 def _wait_for_port(host: str, port: int, *, timeout_seconds: float) -> None:

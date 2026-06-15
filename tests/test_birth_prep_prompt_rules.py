@@ -28,14 +28,15 @@ ROOT = Path(__file__).resolve().parents[1]
 class BirthPrepPromptRuleTests(unittest.TestCase):
     def test_birth_prep_collection_style_avoids_repeating_known_slots(self) -> None:
         skill = (ROOT / "skills" / "birth-prep" / "SKILL.md").read_text(encoding="utf-8")
-        reference = (ROOT / "skills" / "birth-prep" / "references" / "birth-journey-plan.md").read_text(encoding="utf-8")
 
         self.assertIn("采用 slot-filling 风格", skill)
         self.assertIn("不要在下一轮重述上轮已经采集到的信息", skill)
         self.assertIn("每轮最多问一个缺失字段", skill)
-        self.assertIn("已知字段不要在下一轮重述", reference)
-        self.assertIn("分娩方式这块", reference)
-        self.assertIn("不要说：“你现在 30 周", reference)
+        self.assertIn("调用 `birth_journey_intake_manage`", skill)
+        self.assertIn("不要自己在聊天里维护字段清单", skill)
+        self.assertIn("工具返回 `ready_to_generate` 后", skill)
+        self.assertIn("工具返回 `ready_to_generate` 后，直接调用 `birth_journey_plan_card_create`", skill)
+        self.assertNotIn("references/birth-journey-plan.md", skill)
 
     def test_broad_week_preparation_question_is_not_shopping_by_default(self) -> None:
         skill = (ROOT / "skills" / "birth-prep" / "SKILL.md").read_text(encoding="utf-8")
@@ -99,7 +100,6 @@ class BirthPrepPromptRuleTests(unittest.TestCase):
                 (ROOT / "skills" / "birth-prep" / "SKILL.md").read_text(encoding="utf-8"),
                 (ROOT / "skills" / "birth-prep" / "references" / "hospital-bag-service.md").read_text(encoding="utf-8"),
                 (ROOT / "skills" / "birth-prep" / "references" / "labor-communication-card.md").read_text(encoding="utf-8"),
-                (ROOT / "skills" / "birth-prep" / "references" / "birth-journey-plan.md").read_text(encoding="utf-8"),
                 str(DEFERRED_TOOL_NAMESPACES["birth_prep"]["description"]),
                 str(FUNCTION_TOOLS["birth_plan_form_create"]),
                 str(FUNCTION_TOOLS["labor_communication_card_create"]),

@@ -21,6 +21,7 @@ class ContextState:
     active_device_module: str = ""
     shown_step_image_urls: list[str] = field(default_factory=list)
     birth_prep_slots: dict[str, dict[str, Any]] = field(default_factory=dict)
+    birth_journey_intake: dict[str, Any] = field(default_factory=dict)
     milk_management_state: dict[str, Any] = field(default_factory=dict)
 
 
@@ -152,6 +153,18 @@ def hospital_bag_slots(state: ContextState | None) -> dict[str, Any]:
     }
 
 
+def birth_journey_intake_state(state: ContextState | None) -> dict[str, Any]:
+    if state is None or not isinstance(state.birth_journey_intake, dict):
+        return {}
+    return dict(state.birth_journey_intake)
+
+
+def merge_birth_journey_intake_state(state: ContextState, values: dict[str, Any]) -> None:
+    if not isinstance(values, dict):
+        return
+    state.birth_journey_intake = dict(values)
+
+
 def set_pending_hospital_bag_slot(state: ContextState, field_id: str) -> None:
     valid_field = _valid_hospital_bag_slot_field(field_id)
     if valid_field:
@@ -172,22 +185,32 @@ def _hospital_bag_slots(state: ContextState) -> dict[str, Any]:
 
 def _format_birth_prep_context(state: ContextState) -> list[str]:
     slots = state.birth_prep_slots.get(_HOSPITAL_BAG_SLOT_KEY)
-    if not isinstance(slots, dict):
-        return []
-    values = [
-        f"{field_id}={_display_slot_value(slots[field_id])}"
-        for field_id in HOSPITAL_BAG_SLOT_FIELDS
-        if _slot_value_has_content(slots.get(field_id))
-    ]
-    pending_field = _valid_hospital_bag_slot_field(slots.get(_PENDING_FIELD_KEY))
-    if not values and not pending_field:
+    hospital_bag_values: list[str] = []
+    pending_field = ""
+    if isinstance(slots, dict):
+        hospital_bag_values = [
+            f"{field_id}={_display_slot_value(slots[field_id])}"
+            for field_id in HOSPITAL_BAG_SLOT_FIELDS
+            if _slot_value_has_content(slots.get(field_id))
+        ]
+        pending_field = _valid_hospital_bag_slot_field(slots.get(_PENDING_FIELD_KEY))
+
+    intake = state.birth_journey_intake if isinstance(state.birth_journey_intake, dict) else {}
+    intake_step = str(intake.get("next_step") or "").strip()
+    intake_groups = intake.get("completed_groups") if isinstance(intake.get("completed_groups"), list) else []
+    if not hospital_bag_values and not pending_field and not intake_step:
         return []
     lines = ["birth_prep_context:"]
-    if values:
-        lines.append("- birth_prep_known_fields: " + "; ".join(values))
+    if hospital_bag_values:
+        lines.append("- birth_prep_known_fields: " + "; ".join(hospital_bag_values))
         lines.append("- 创建产前表单或待产包表单时复用这些字段作为默认值，让用户在表单里确认或修改，不要重复追问。")
     if pending_field:
         lines.append(f"- hospital_bag_next_field: {pending_field}")
+    if intake_step:
+        lines.append(f"- birth_journey_intake_next_step: {intake_step}")
+        if intake_groups:
+            lines.append("- birth_journey_intake_completed_groups: " + ", ".join(str(group) for group in intake_groups))
+        lines.append("- 生产全过程计划信息采集优先调用 birth_journey_intake_manage 继续推进，不要自己凭记忆判断流程。")
     return lines
 
 

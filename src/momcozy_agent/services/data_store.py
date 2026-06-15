@@ -470,6 +470,64 @@ def reset_birth_prep_profile_memory_for_dev() -> int:
         return int(cursor.rowcount or 0)
 
 
+def reset_generated_plan_artifacts_for_dev() -> int:
+    """Clear generated service plan artifacts from local demo startup."""
+    init_db()
+    with _connect() as conn:
+        cursor = conn.execute("DELETE FROM care_plan_artifact")
+        return int(cursor.rowcount or 0)
+
+
+def reset_milk_plans_for_dev() -> int:
+    """Clear generated milk-management plans from local demo startup."""
+    init_db()
+    with _connect() as conn:
+        cursor = conn.execute("DELETE FROM milk_plan")
+        return int(cursor.rowcount or 0)
+
+
+def reset_uploaded_files_for_dev() -> int:
+    """Clear uploaded-file metadata from local demo startup."""
+    init_db()
+    with _connect() as conn:
+        cursor = conn.execute("DELETE FROM uploaded_file")
+        return int(cursor.rowcount or 0)
+
+
+def reset_device_runtime_state_for_dev() -> int:
+    """Clear transient pump/device runtime rows from local demo startup."""
+    init_db()
+    tables = (
+        "pump_threshold",
+        "pump_health",
+        "pump_device_info",
+        "pump_workstate_event",
+        "pump_workstate_pending_reply",
+        "pump_process_point",
+        "pump_workstate_reply_state",
+        "pump_process_reply_state",
+    )
+    cleared = 0
+    with _connect() as conn:
+        for table in tables:
+            cursor = conn.execute(f"DELETE FROM {table}")
+            cleared += int(cursor.rowcount or 0)
+    return cleared
+
+
+def reset_non_status_demo_data_for_dev() -> dict[str, int]:
+    """Keep seeded status demo rows, and clear generated/session data on local startup."""
+    return {
+        "profile_onboarding": reset_profile_onboarding_memory_for_dev(),
+        "birth_prep_profile": reset_birth_prep_profile_memory_for_dev(),
+        "generated_plans": reset_generated_plan_artifacts_for_dev(),
+        "milk_plans": reset_milk_plans_for_dev(),
+        "pregnancy_diary": reset_pregnancy_diary_for_dev(),
+        "uploaded_files": reset_uploaded_files_for_dev(),
+        "device_runtime": reset_device_runtime_state_for_dev(),
+    }
+
+
 def update_user_profile_memory(
     *,
     user_id: str,

@@ -195,9 +195,30 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
             "confirmed_form_data": JSON_OBJECT_STRING,
         },
     ),
+    "birth_journey_intake_manage": _function_tool(
+        "birth_journey_intake_manage",
+        "推进生产全过程计划的信息采集状态机。模型只负责识别用户是否要制定计划、把用户本轮回答交给本工具，并根据 next_step 继续；不要自己维护字段清单。工具会依次处理：基础信息表单、产检记录上传、孕期高风险因素、当前症状、生活方式与场景、喂养/IBCLC 信息。状态 ready_to_generate 时，使用工具返回的 plan_context 调用 birth_journey_plan_card_create。",
+        {
+            "action": {
+                "type": "string",
+                "enum": [
+                    "start",
+                    "get_state",
+                    "submit_basic_info",
+                    "mark_checkup_records_uploaded",
+                    "submit_risk_factors",
+                    "submit_current_symptoms",
+                    "submit_lifestyle_context",
+                    "submit_feeding_context",
+                    "complete",
+                ],
+            },
+            "payload": JSON_OBJECT_STRING,
+        },
+    ),
     "birth_journey_plan_card_create": _function_tool(
         "birth_journey_plan_card_create",
-        "根据已知或已问过的孕周/预产期、分娩方式、支持人、基础情况、产检情况、当前症状、风险因素、生活场景、喂养/IBCLC 信息，生成前端可渲染并保存为 active care plan 的生产全过程计划。生成前必须把这些字段都问到；用户回答不清楚、跳过、暂不提供也算已问到，并应在 plan_context 中显式传入对应字段。LLM 不需要生成 card_json；规则分层、日期换算、行动清单和安全声明由工具稳定生成。已有 active 生产全过程计划时工具会返回 existing_plan_found，不要重复生成。",
+        "根据 birth_journey_intake_manage 已采集或已问过的信息，生成前端可渲染并保存为 active care plan 的生产全过程计划。生成前必须完成基础信息、产检记录上传状态、高风险因素、当前症状、生活方式与场景、喂养/IBCLC 信息这些采集组；用户回答不清楚、跳过、暂不提供也算已问到，并应在 plan_context 中显式传入对应字段。LLM 不需要生成 card_json；规则分层、日期换算、行动清单和安全声明由工具稳定生成。已有 active 生产全过程计划时工具会返回 existing_plan_found，不要重复生成。",
         {
             "plan_context": JSON_OBJECT_STRING,
             "scope": {"type": "string", "enum": ["full", "prenatal_only", "short_range"]},

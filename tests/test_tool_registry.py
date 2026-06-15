@@ -83,6 +83,7 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertNotIn("ui_form_create", tool_names)
         self.assertNotIn("birth_plan_form_create", tool_names)
         self.assertNotIn("labor_communication_card_create", tool_names)
+        self.assertNotIn("birth_journey_intake_manage", tool_names)
         self.assertNotIn("birth_journey_plan_card_create", tool_names)
         self.assertNotIn("hospital_bag_form_create", tool_names)
         self.assertNotIn("hospital_bag_card_create", tool_names)
@@ -101,6 +102,7 @@ class ToolRegistryTests(unittest.TestCase):
             [
                 "birth_plan_form_create",
                 "labor_communication_card_create",
+                "birth_journey_intake_manage",
                 "birth_journey_plan_card_create",
                 "birth_journey_plan_delete",
                 "hospital_bag_form_create",
