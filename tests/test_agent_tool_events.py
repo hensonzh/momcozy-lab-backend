@@ -641,7 +641,7 @@ class AgentToolEventTests(unittest.TestCase):
                                 {
                                     "skill_id": "birth-prep",
                                     "kind": "references",
-                                    "path": "references/birth-journey-plan.md",
+                                    "path": "references/hospital-bag-service.md",
                                 }
                             ),
                         }
@@ -659,7 +659,7 @@ class AgentToolEventTests(unittest.TestCase):
             ag_ui_run_id="run-1",
         )
 
-        self.assertTrue(any("birth-prep/references/birth-journey-plan.md 已在当前会话中读取过" in item for item in context_state.loaded_references))
+        self.assertTrue(any("birth-prep/references/hospital-bag-service.md 已在当前会话中读取过" in item for item in context_state.loaded_references))
 
         request = build_agent_request(
             {"user_message": "继续", "locale": "zh-CN", "previous_response_id": "resp-final"},

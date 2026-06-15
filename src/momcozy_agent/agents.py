@@ -11,9 +11,11 @@ from uuid import uuid4
 
 from .contexts import (
     ContextState,
+    birth_journey_intake_state,
     build_request_context,
     clear_pending_hospital_bag_slot,
     hospital_bag_slots,
+    merge_birth_journey_intake_state,
     merge_hospital_bag_slots,
     record_milk_management_tool_state,
 )
@@ -641,6 +643,8 @@ def _tool_end_label(tool_name: str) -> str:
         return "我在准备售后信息表～"
     if tool_name == "birth_journey_plan_delete":
         return "我在处理删除结果～"
+    if tool_name == "birth_journey_intake_manage":
+        return "我在整理下一步需要确认的信息～"
     if tool_name == "pregnancy_diary_manage":
         return "我在整理孕期日记结果～"
     if tool_name in {"ui_form_create", "birth_plan_form_create", "hospital_bag_form_create", "labor_communication_card_create", "birth_journey_plan_card_create", "hospital_bag_card_create", "ibclc_consult_card_create"}:
@@ -706,6 +710,12 @@ def _tool_result_label(tool_name: str, result: dict[str, Any]) -> str:
         return "我已经准备好确认内容啦"
     if tool_name == "labor_communication_card_create":
         return "我已经帮你整理好分娩沟通单啦"
+    if tool_name == "birth_journey_intake_manage":
+        if status == "ready_to_generate":
+            return "生产计划信息已经确认好啦"
+        if status == "blocked_by_symptoms":
+            return "我先帮你确认当前情况"
+        return "我准备好下一步啦"
     if tool_name == "birth_journey_plan_card_create":
         return "我已经帮你整理好生产全过程计划啦"
     if tool_name == "birth_journey_plan_delete":
@@ -935,12 +945,12 @@ def safe_tool_result(result: dict[str, Any]) -> dict[str, Any]:
     }
     tool_result = result.get("result")
     if isinstance(tool_result, dict):
-        for key in ("id", "skill_id", "status", "resource_id", "side_effect_performed", "summary", "missing_fields", "plan_id", "plan_type", "action", "entry_id", "entry_date", "profile_onboarding_complete", "profile_onboarding_skipped"):
+        for key in ("id", "skill_id", "status", "resource_id", "side_effect_performed", "summary", "missing_fields", "plan_id", "plan_type", "action", "next_step", "entry_id", "entry_date", "profile_onboarding_complete", "profile_onboarding_skipped"):
             if key in tool_result:
                 safe[key] = tool_result[key]
         tool_data = tool_result.get("data")
         if isinstance(tool_data, dict):
-            for key in ("requires_confirmation", "requires_medical_confirmation", "confirmation_question"):
+            for key in ("requires_confirmation", "requires_medical_confirmation", "confirmation_question", "assistant_instruction"):
                 if key in tool_data:
                     safe[key] = tool_data[key]
             if isinstance(tool_data.get("milk_flow_decision"), dict):
@@ -963,7 +973,7 @@ def safe_tool_result(result: dict[str, Any]) -> dict[str, Any]:
             safe["assistant_followup"] = tool_result["assistant_followup"]
         if result.get("tool_name") == "milk_plan_preview" and isinstance(tool_result.get("assistant_followup"), dict):
             safe["assistant_followup"] = tool_result["assistant_followup"]
-        if result.get("tool_name") in {"ui_form_create", "birth_plan_form_create", "hospital_bag_form_create"} and isinstance(tool_result.get("form"), dict):
+        if result.get("tool_name") in {"ui_form_create", "birth_plan_form_create", "hospital_bag_form_create", "birth_journey_intake_manage"} and isinstance(tool_result.get("form"), dict):
             safe["form"] = tool_result["form"]
         if result.get("tool_name") in {"labor_communication_card_create", "birth_journey_plan_card_create", "hospital_bag_card_create"} and isinstance(tool_result.get("card"), dict):
             safe["card"] = tool_result["card"]
@@ -1042,6 +1052,8 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
         return _compact_milk_plan_saved_output(safe)
     if tool_name == "pregnancy_diary_manage":
         return _compact_pregnancy_diary_output(safe)
+    if tool_name == "birth_journey_intake_manage":
+        return _compact_birth_journey_intake_output(safe, result)
 
     if tool_name == QUICK_REPLIES_TOOL_NAME:
         return {
@@ -1055,6 +1067,7 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
     if tool_name not in {
         "ui_form_create",
         "birth_plan_form_create",
+        "birth_journey_intake_manage",
         "labor_communication_card_create",
         "birth_journey_plan_card_create",
         "birth_journey_plan_delete",
@@ -1243,6 +1256,11 @@ def _compact_pregnancy_diary_output(safe: dict[str, Any]) -> dict[str, Any]:
 
 
 def _form_artifact_final_response_instruction(tool_name: str) -> str:
+    if tool_name == "birth_journey_intake_manage":
+        return (
+            "生产全过程计划基础信息表已经展示。最终回复只简短说明表单已打开，"
+            "请用户填完提交；不要在聊天里重复表单字段，也不要说计划已经生成。"
+        )
     if tool_name == "birth_plan_form_create":
         return (
             "分娩沟通单信息表已经展示。最终回复只输出下面两段中文，保留空行，"
@@ -1262,6 +1280,51 @@ def _form_artifact_final_response_instruction(tool_name: str) -> str:
             "不要补充表单中没有的字段、不要承诺已经生成后续结果，也不要承诺任何外部提交。"
         )
     return ""
+
+
+def _compact_birth_journey_intake_output(safe: dict[str, Any], raw_result: dict[str, Any]) -> dict[str, Any]:
+    tool_result = raw_result.get("result") if isinstance(raw_result.get("result"), dict) else {}
+    next_step = str(safe.get("next_step") or tool_result.get("next_step") or "").strip()
+    data = tool_result.get("data") if isinstance(tool_result.get("data"), dict) else {}
+    compact: dict[str, Any] = {
+        "ok": safe.get("ok"),
+        "tool_name": safe.get("tool_name"),
+        "status": safe.get("status"),
+        "action": safe.get("action"),
+        "next_step": next_step,
+        "summary": safe.get("summary"),
+        "confirmation_question": safe.get("confirmation_question"),
+        "assistant_instruction": safe.get("assistant_instruction") or data.get("assistant_instruction"),
+        "completed_groups": data.get("completed_groups"),
+    }
+    if isinstance(safe.get("form"), dict):
+        form = safe["form"]
+        fields = form.get("fields")
+        compact["form"] = {
+            "id": form.get("id"),
+            "title": form.get("title"),
+            "field_count": len(fields) if isinstance(fields, list) else 0,
+        }
+        compact["final_response_instruction"] = _form_artifact_final_response_instruction("birth_journey_intake_manage")
+    elif safe.get("status") == "ready_to_generate":
+        plan_context = tool_result.get("plan_context")
+        if isinstance(plan_context, dict):
+            compact["plan_context"] = plan_context
+        compact["final_response_instruction"] = (
+            "生产全过程计划信息采集已完成。下一步必须直接调用 birth_journey_plan_card_create，"
+            "plan_context 使用本工具返回的 plan_context；不要先对用户输出路线图或总结。"
+        )
+    elif safe.get("status") == "blocked_by_symptoms":
+        compact["final_response_instruction"] = (
+            "用户报告了需要先处理的当前症状。最终回复先承接用户，再建议优先联系医生/医院确认；"
+            "不要继续调用 birth_journey_plan_card_create。"
+        )
+    else:
+        compact["final_response_instruction"] = (
+            "最终回复只推进 next_step 对应的一步：如果有 confirmation_question，就只问这个问题；"
+            "不要同时询问多个后续阶段，也不要生成生产全过程计划。"
+        )
+    return {key: value for key, value in compact.items() if value not in (None, "", [])}
 
 
 def _card_artifact_final_response_instruction(tool_name: str, card: dict[str, Any]) -> str:
@@ -3520,6 +3583,7 @@ def _tool_inputs_for_call(inputs: RuntimeInputs, options: BuildAgentRequestOptio
     if isinstance(context_state, ContextState):
         tool_inputs["_loaded_references"] = list(context_state.loaded_references)
         tool_inputs["_birth_prep_hospital_bag_slots"] = hospital_bag_slots(context_state)
+        tool_inputs["_birth_journey_intake_state"] = birth_journey_intake_state(context_state)
         tool_inputs["_milk_management_state"] = dict(context_state.milk_management_state)
     return tool_inputs
 
@@ -3530,6 +3594,12 @@ def _record_birth_prep_tool_state(context_state: object, tool_name: str, argumen
 
     if tool_name == "birth_journey_plan_card_create":
         _record_birth_journey_plan_state(context_state, arguments, result)
+        return
+
+    if tool_name == "birth_journey_intake_manage":
+        tool_result = result.get("result")
+        if isinstance(tool_result, dict) and isinstance(tool_result.get("intake_state"), dict):
+            merge_birth_journey_intake_state(context_state, tool_result["intake_state"])
         return
 
     if tool_name != "hospital_bag_form_create":

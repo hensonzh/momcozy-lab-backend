@@ -8,7 +8,7 @@ from pathlib import Path
 from momcozy_agent.agents import model_tool_output
 from momcozy_agent.contexts import build_request_context
 from momcozy_agent.services import data_store
-from momcozy_agent.tool_handlers.cards import create_birth_journey_plan_card, delete_birth_journey_plan
+from momcozy_agent.tool_handlers.cards import create_birth_journey_plan_card, delete_birth_journey_plan, manage_birth_journey_intake
 from momcozy_agent.tool_registry import select_runtime_tools
 
 
@@ -292,6 +292,7 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         }
         tool_names = [tool.get("name") for tool in namespaces["birth_prep"]["tools"]]
 
+        self.assertIn("birth_journey_intake_manage", tool_names)
         self.assertIn("birth_journey_plan_card_create", tool_names)
 
     def test_birth_journey_plan_requires_every_survey_group_to_be_asked(self) -> None:
@@ -301,14 +302,60 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         )
 
         self.assertEqual(result["status"], "needs_required_context")
-        self.assertIn("birth_path", result["missing_fields"])
-        self.assertIn("support_person", result["missing_fields"])
-        self.assertIn("checkup_status", result["missing_fields"])
+        self.assertIn("checkup_records", result["missing_fields"])
+        self.assertIn("risk_factors", result["missing_fields"])
+        self.assertIn("current_symptoms", result["missing_fields"])
+        self.assertIn("lifestyle_context", result["missing_fields"])
         self.assertIn("feeding_ibclc_context", result["missing_fields"])
         self.assertNotIn("card", result)
         self.assertIn("只答知道的", result["data"]["confirmation_question"])
         self.assertIn("不清楚", result["data"]["confirmation_question"])
-        self.assertIn("是否计划母乳", result["data"]["confirmation_question"])
+        self.assertIn("上传目前全部产检记录", result["data"]["confirmation_question"])
+
+    def test_birth_journey_intake_flow_returns_plan_context_when_ready(self) -> None:
+        inputs = {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00", "_birth_journey_intake_state": {}}
+        started = manage_birth_journey_intake({"action": "start", "payload": {}}, inputs)
+
+        self.assertEqual(started["status"], "in_progress")
+        self.assertEqual(started["next_step"], "basic_info_form")
+        self.assertEqual(started["form"]["id"], "birth_journey_basic_info_intake")
+
+        state = started["intake_state"]
+        basic = manage_birth_journey_intake(
+            {"action": "submit_basic_info", "payload": {"current_week": "28周", "fetus_count": "单胎", "age": "32"}},
+            {**inputs, "_birth_journey_intake_state": state},
+        )
+        state = basic["intake_state"]
+        uploaded = manage_birth_journey_intake(
+            {"action": "mark_checkup_records_uploaded", "payload": {}},
+            {**inputs, "_birth_journey_intake_state": state},
+        )
+        state = uploaded["intake_state"]
+        risk = manage_birth_journey_intake(
+            {"action": "submit_risk_factors", "payload": {"risk_factors": "不清楚"}},
+            {**inputs, "_birth_journey_intake_state": state},
+        )
+        state = risk["intake_state"]
+        symptoms = manage_birth_journey_intake(
+            {"action": "submit_current_symptoms", "payload": {"current_symptoms": "没有明显不舒服"}},
+            {**inputs, "_birth_journey_intake_state": state},
+        )
+        state = symptoms["intake_state"]
+        lifestyle = manage_birth_journey_intake(
+            {"action": "submit_lifestyle_context", "payload": {"lifestyle_context": "久坐上班，伴侣支持"}},
+            {**inputs, "_birth_journey_intake_state": state},
+        )
+        state = lifestyle["intake_state"]
+        feeding = manage_birth_journey_intake(
+            {"action": "submit_feeding_context", "payload": {"feeding_ibclc_context": "计划母乳，想了解吸奶和背奶"}},
+            {**inputs, "_birth_journey_intake_state": state},
+        )
+
+        self.assertEqual(feeding["status"], "ready_to_generate")
+        self.assertEqual(feeding["next_step"], "generate_plan")
+        self.assertEqual(feeding["plan_context"]["due_date_or_week"], "28周")
+        self.assertEqual(feeding["plan_context"]["checkup_records_uploaded"], "是")
+        self.assertIn("久坐上班", feeding["plan_context"]["lifestyle_context"])
 
     def test_birth_journey_plan_accepts_unknown_birth_path_and_no_support_person(self) -> None:
         result = create_birth_journey_plan_card(
@@ -401,7 +448,7 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
             "tool_name": "birth_journey_plan_card_create",
             "result": {
                 "status": "needs_required_context",
-                "summary": "生成生产全过程计划前，需要先确认孕期、分娩方式和支持人。",
+                "summary": "生成生产全过程计划前，需要先完成分层信息采集。",
                 "missing_fields": ["due_date_or_week", "birth_path", "support_person"],
                 "data": {
                     "confirmation_question": "我先确认 3 件事再生成计划。",

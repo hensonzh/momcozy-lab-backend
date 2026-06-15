@@ -32,6 +32,7 @@ ToolName = Literal[
     "ui_form_create",
     "ui_quick_replies_create",
     "birth_plan_form_create",
+    "birth_journey_intake_manage",
     "labor_communication_card_create",
     "birth_journey_plan_card_create",
     "birth_journey_plan_delete",

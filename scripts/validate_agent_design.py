@@ -176,7 +176,9 @@ def main() -> None:
     birth_prep_skill = execute_skill_runtime_tool("load_skill", {"skill_id": "birth-prep"})
     assert "## 核心服务" in birth_prep_skill["skill_md"]
     assert "生产全过程计划" in birth_prep_skill["skill_md"]
-    assert "references/birth-journey-plan.md" in birth_prep_skill["skill_md"]
+    assert "references/birth-journey-plan.md" not in birth_prep_skill["skill_md"]
+    assert "birth_journey_intake_manage" in birth_prep_skill["skill_md"]
+    assert "birth_journey_plan_card_create" in birth_prep_skill["skill_md"]
     assert "待产包清单" in birth_prep_skill["skill_md"]
     assert "分娩沟通单" in birth_prep_skill["skill_md"]
     assert "用户可见命名" in birth_prep_skill["skill_md"]
@@ -190,28 +192,6 @@ def main() -> None:
     assert "已知字段来自当前对话" in birth_prep_skill["skill_md"]
     assert "birth_plan_form_create" in birth_prep_skill["skill_md"]
     assert "hospital_bag_form_create" in birth_prep_skill["skill_md"]
-    journey_plan_reference = execute_skill_runtime_tool(
-        "read_skill_file",
-        {"skill_id": "birth-prep", "kind": "references", "path": "references/birth-journey-plan.md"},
-    )["content"]
-    assert "生产全过程计划是一份阶段路线图" in journey_plan_reference
-    assert "待产包、入院包或住院包物品清单" in journey_plan_reference
-    assert "给医生、护士或助产士看的分娩沟通单" in journey_plan_reference
-    assert "本服务默认不用表单" in journey_plan_reference
-    assert "通用安全边界以主 `SKILL.md` 为准" in journey_plan_reference
-    assert "必须确认 3 个信息" in journey_plan_reference
-    assert "当前孕周或预产期" in journey_plan_reference
-    assert "分娩方式：顺产" in journey_plan_reference
-    assert "主要支持人" in journey_plan_reference
-    assert "孕中期" in journey_plan_reference
-    assert "孕晚期" in journey_plan_reference
-    assert "临产期" in journey_plan_reference
-    assert "住院期" in journey_plan_reference
-    assert "产后期" in journey_plan_reference
-    assert "最终计划必须通过 `birth_journey_plan_card_create` 生成结构化内容" in journey_plan_reference
-    assert "不要在普通回复里输出 Markdown 表格" in journey_plan_reference
-    assert "复述计划里的所有阶段" in journey_plan_reference
-    assert "同时抛出待产包、分娩沟通单、提醒、医院问题清单等多个并列选项" in journey_plan_reference
     birth_plan_reference = execute_skill_runtime_tool(
         "read_skill_file",
         {"skill_id": "birth-prep", "kind": "references", "path": "references/labor-communication-card.md"},

@@ -7,6 +7,7 @@ from .health_guidance import health_guidance_web_search_tool, needs_breast_triag
 from .tool_handlers.cards import (
     create_birth_journey_plan_card,
     delete_birth_journey_plan,
+    manage_birth_journey_intake,
     create_labor_communication_card,
     create_birth_plan_form,
     create_form,
@@ -101,6 +102,7 @@ DEFERRED_TOOL_NAMESPACES: dict[str, dict[str, Any]] = {
         "tool_names": [
             "birth_plan_form_create",
             "labor_communication_card_create",
+            "birth_journey_intake_manage",
             "birth_journey_plan_card_create",
             "birth_journey_plan_delete",
             "hospital_bag_form_create",
@@ -119,6 +121,7 @@ READ_ONLY_TOOL_NAMES = {
     "ibclc_consult_card_create",
     "birth_plan_form_create",
     "labor_communication_card_create",
+    "birth_journey_intake_manage",
     "birth_journey_plan_card_create",
     "hospital_bag_form_create",
     "hospital_bag_card_create",
@@ -140,6 +143,7 @@ TOOL_HANDLERS: dict[ToolName, ToolHandler] = {
     "ui_quick_replies_create": create_quick_replies,
     "birth_plan_form_create": create_birth_plan_form,
     "labor_communication_card_create": create_labor_communication_card,
+    "birth_journey_intake_manage": manage_birth_journey_intake,
     "birth_journey_plan_card_create": create_birth_journey_plan_card,
     "birth_journey_plan_delete": delete_birth_journey_plan,
     "pregnancy_diary_manage": manage_pregnancy_diary,
