@@ -967,6 +967,8 @@ def safe_tool_result(result: dict[str, Any]) -> dict[str, Any]:
             safe["assistant_followup"] = tool_result["assistant_followup"]
         if result.get("tool_name") == "milk_plan_preview" and isinstance(tool_result.get("assistant_followup"), dict):
             safe["assistant_followup"] = tool_result["assistant_followup"]
+        if result.get("tool_name") == "milk_plan_mutate" and isinstance(tool_result.get("assistant_followup"), dict):
+            safe["assistant_followup"] = tool_result["assistant_followup"]
         if result.get("tool_name") in {"ui_form_create", "birth_plan_form_create", "hospital_bag_form_create", "birth_journey_intake_manage"} and isinstance(tool_result.get("form"), dict):
             safe["form"] = tool_result["form"]
         if result.get("tool_name") in {"labor_communication_card_create", "birth_journey_plan_card_create", "hospital_bag_card_create"} and isinstance(tool_result.get("card"), dict):
@@ -983,6 +985,12 @@ def safe_tool_result(result: dict[str, Any]) -> dict[str, Any]:
                     safe["plan_feedback"] = plan_feedback
                     if isinstance(plan_feedback.get("dates"), list):
                         safe["calendar_dates"] = plan_feedback.get("dates")
+        if result.get("tool_name") == "milk_plan_mutate" and not isinstance(tool_result.get("card"), dict):
+            plan_feedback = _plan_feedback_from_safe_tool_result(result.get("tool_name"), tool_result)
+            if plan_feedback:
+                safe["plan_feedback"] = plan_feedback
+                if isinstance(plan_feedback.get("dates"), list):
+                    safe["calendar_dates"] = plan_feedback.get("dates")
         if result.get("tool_name") == "milk_calendar_mutate":
             plan_feedback = _plan_feedback_from_safe_tool_result(result.get("tool_name"), tool_result)
             if plan_feedback:
@@ -1040,7 +1048,7 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
         return _compact_milk_plan_card_output(safe, result)
     if tool_name == "milk_plan_preview":
         return _compact_milk_plan_no_card_output(safe)
-    if tool_name == "milk_plan_mutate" and isinstance(safe.get("card"), dict):
+    if tool_name == "milk_plan_mutate":
         return _compact_milk_plan_saved_output(safe)
     if tool_name == "pregnancy_diary_manage":
         return _compact_pregnancy_diary_output(safe)
@@ -1679,22 +1687,19 @@ def _compact_milk_assessment_output(safe: dict[str, Any], original_result: dict[
         "milk_flow_decision": _plain_milk_flow_decision(flow_decision),
         "需要继续确认": missing_context,
         "final_response_instruction": (
-            "本次奶量评估只需要文本回复，除非用户本轮已经明确要求继续制定计划且 milk_flow_decision.plan_decision.next_tool 是 milk_plan_preview。"
-            "最终回复根据 data 和 milk_flow_decision 自然组织语言：先说结论，再说最相关的依据，最后给明确下一步。"
-            "如果 milk_flow_decision.missing_user_inputs 不为空，只补问缺失信息。"
-            "如果 milk_flow_decision.plan_decision.can_start_plan 为 true，说明当前可以进入对应计划；用户已确认继续时调用 next_tool，用户还没确认时再问是否现在开始。"
-            "如果 can_start_plan 为 false，说明原因和下一步，不要强行制定计划。"
-            "不要提工具、系统、内部状态、状态码或英文流程字段；不要使用生硬专业词和机械化安慰话术。"
-            "如果最近 7 天吸奶和亲喂节奏显示可用于排计划，不要重复追问这些已知节奏信息。"
+            "根据 data 和 milk_flow_decision 回复用户。"
+            "先说明结论和最相关依据，再给一个明确下一步。"
+            "如果还缺信息，只问最影响下一步判断的信息。"
+            "如果可以进入计划，说明适合方向并询问是否开始。"
+            "不要提工具、系统或内部字段。"
         ),
     }
     if str(safe.get("status") or "").strip() in {"needs_clinical_context", "needs_more_records_for_analysis"}:
         compact["final_response_instruction"] = (
-            "本次奶量评估还缺少会影响判断的信息，不要硬下结论。"
-            "最终回复根据“需要继续确认”自然补问最关键的问题；"
-            "一轮只问一个关键问题；如果用户只回答了部分追问，继续问未回答项，不要跳过。"
-            "回复最后一句必须是明确问题或明确下一步；"
-            "不要提工具、系统、内部状态或字段名。"
+            "根据 data、milk_flow_decision 和“需要继续确认”回复用户。"
+            "信息不足时不要下最终结论，只问最影响下一步判断的信息。"
+            "回复最后一句给明确问题或明确下一步。"
+            "不要提工具、系统或内部字段。"
         )
     return _drop_empty(compact)
 
@@ -1863,7 +1868,6 @@ def _plain_missing_milk_assessment_fields(value: Any) -> list[str]:
 def _missing_milk_context_for_model(value: Any, *, suggested_questions: Any = None) -> dict[str, Any]:
     labels = _plain_missing_milk_assessment_fields(value)
     raw_items = [str(item) for item in value if str(item).strip()] if isinstance(value, list) else []
-    question_list = [str(item).strip() for item in suggested_questions if str(item).strip()] if isinstance(suggested_questions, list) else []
     why = []
     if "infant_signals" in raw_items or any(item in raw_items for item in ("infant_wet_diapers", "infant_state_or_feeding_satisfaction", "infant_growth_signal")):
         why.append("宝宝尿布、精神和吃奶表现会影响下一步是继续观察、调整节奏，还是先联系专业支持。")
@@ -1873,7 +1877,6 @@ def _missing_milk_context_for_model(value: Any, *, suggested_questions: Any = No
         {
             "还需要确认": labels,
             "为什么要确认": why,
-            "可以这样问用户": question_list[:2],
         }
     )
 

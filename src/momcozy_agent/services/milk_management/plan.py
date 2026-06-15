@@ -31,7 +31,7 @@ INCREASE_LOW_FREQUENCY_TARGET = 8
 INCREASE_HIGHER_FREQUENCY_TARGET = 10
 INCREASE_REGULAR_PUMP_MINUTES = 15
 INCREASE_PP_MINUTES = 60
-INCREASE_DEFAULT_PLAN_DAYS = 30
+INCREASE_DEFAULT_PLAN_DAYS = 3
 DECREASE_MIN_DAILY_DELTA_ML = 50.0
 DECREASE_DEFAULT_DAILY_DELTA_ML = 80.0
 DECREASE_MAX_PLAN_DAYS = 28
@@ -1154,7 +1154,7 @@ def _build_plan_schedule_items(
             **items[pp_index],
             "kind": "pp",
             "calendar_title": "吸奶",
-            "action": "第1-7天执行吸奶：双侧吸20分钟，休息10分钟，再吸10分钟，休息10分钟，再吸10分钟；第8天后改为常规吸奶15分钟",
+            "action": "本阶段执行吸奶：双侧吸20分钟，休息10分钟，再吸10分钟，休息10分钟，再吸10分钟",
             "duration_minutes": INCREASE_PP_MINUTES,
         }
     return items
@@ -2416,7 +2416,7 @@ def _plan_rule_notes(plan_type: str, rules: dict[str, Any]) -> list[str]:
         if rules.get("breast_fullness_without_red_flags"):
             notes.insert(0, "目前主要是胀或感觉没排空，且没有发热、红肿、硬块加重等信号；计划会把单次吸奶或亲喂效果和结束标准一起考虑。")
         if rules.get("require_pp"):
-            notes.insert(0, "如身体允许，可在第1-7天安排一次吸奶；第8天后改回常规吸奶。")
+            notes.insert(0, "如身体允许，可在本阶段安排一次加强吸奶；复盘后再决定是否继续。")
         if rules.get("needs_referral"):
             notes.append("当前频次已较高，如仍明显担忧奶量，建议考虑 IBCLC 支持。")
         return notes
@@ -2445,19 +2445,19 @@ def _plan_control_strategy(plan_type: str, rules: dict[str, Any]) -> dict[str, A
             return {
                 "why_this_way": "这版会把奶量偏低和吸完还胀一起看，先改善每次吸奶或亲喂的效果，再小步调整节奏。",
                 "schedule_focus": "优先把 24 小时里的吸奶/亲喂安排得更均匀，避免很长空档，同时不把单次拖得太久。",
-                "session_goal": "每次先看吸奶是否舒服、法兰是否合适，奶流变慢后再多 1-2 分钟即可。",
-                "when_to_stop_each_time": "如果吸完还胀，先轻柔按摩或短暂停一下再看；不要吸到疼。",
+                "session_goal": "每次结束吸奶时看是否还有胀感，如果有的话可以多吸一会儿（1～2分钟）直到胀感减轻或消失。",
+                "when_to_stop_each_time": "吸奶过程中如果有明显痛感，暂停吸奶并联系医生或IBCLC顾问，我可以帮你在线接通IBCLC顾问。",
                 "how_to_adjust": "一次只改一件事，先调单次吸奶或亲喂效果和最长间隔；连续 2-3 天后再看平均变化。",
-                "review_timing": "连续执行 2-3 天后，复盘总奶量、吸奶次数、宝宝尿布/精神和妈妈胀感。",
+                "review_timing": "",
                 "hard_stop": hard_stop,
             }
         return {
             "why_this_way": "这版先做小幅调整，重点是减少太长的间隔，不靠把少数几次吸得很久来增加负担。",
             "schedule_focus": "优先把 24 小时里的吸奶/亲喂安排得更均匀，少留很长空档。",
-            "session_goal": "每次不需要无限延长，保持舒服、规律更重要。",
-            "when_to_stop_each_time": "吸奶到奶流明显变慢后，再多 1-2 分钟就可以；亲喂就看吞咽变少和宝宝状态。",
+            "session_goal": "每次结束吸奶时看是否还有胀感，如果有的话可以多吸一会儿（1～2分钟）直到胀感减轻或消失。",
+            "when_to_stop_each_time": "吸奶过程中如果有明显痛感，暂停吸奶并联系医生或IBCLC顾问，我可以帮你在线接通IBCLC顾问。",
             "how_to_adjust": "一次只改一件事，先加一次或缩短最长间隔，连续 2-3 天后看平均变化。",
-            "review_timing": "连续执行 2-3 天后，复盘总奶量、吸奶次数、宝宝尿布/精神和妈妈舒适度。",
+            "review_timing": "",
             "hard_stop": hard_stop,
         }
     if plan_type == PLAN_TYPE_DECREASE:
@@ -2491,7 +2491,7 @@ def _review_note(plan_type: str) -> str:
 
 def _repeat_note(plan_type: str, days: int, rules: dict[str, Any]) -> str:
     if plan_type == PLAN_TYPE_INCREASE and rules.get("require_pp") and days > 7:
-        return "第1-7天保留吸奶安排，第8天起该时段改为常规吸奶。"
+        return "本阶段保留加强吸奶安排，复盘后再决定是否继续或改回常规吸奶。"
     if plan_type == PLAN_TYPE_DECREASE:
         return f"每 {to_int(rules.get('strategy_interval_days'), 7)} 天作为一个阶段，确认舒适后再进入下一阶段；不排空，必要时冷敷。"
     return "按同一时间表执行，按复盘结果微调。"

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import hashlib
+import json
 import re
 from typing import Any
 
@@ -272,15 +274,20 @@ def _record_milk_plan_preview_state(state: ContextState, result: dict[str, Any])
     data = tool_result.get("data")
     data = data if isinstance(data, dict) else {}
     flow_decision = data.get("milk_flow_decision") if isinstance(data.get("milk_flow_decision"), dict) else {}
-    if flow_decision:
+    draft = data.get("draft") if isinstance(data.get("draft"), dict) else {}
+    calendar_delta = data.get("calendar_delta") if isinstance(data.get("calendar_delta"), dict) else {}
+    if flow_decision or draft:
         state.milk_management_state["last_plan_preview"] = {
             "status": tool_result.get("status"),
             "flow_decision": flow_decision,
+            "draft": draft,
+            "calendar_delta": calendar_delta,
+            "idempotency_key": _milk_plan_preview_idempotency_key(draft),
         }
         if tool_result.get("ok") is False:
             return
     state.milk_management_state.pop("pending_plan_after_assessment", None)
-    if tool_result.get("ok") is True:
+    if tool_result.get("ok") is True and not draft:
         state.milk_management_state.pop("last_plan_preview", None)
 
 
@@ -311,6 +318,9 @@ def _format_last_milk_assessment_context(last_assessment: dict[str, Any]) -> lis
     missing = [str(item).strip() for item in flow_decision.get("missing_user_inputs", []) if str(item).strip()]
     if missing:
         lines.append("- last_assessment_missing_fields: " + ", ".join(missing))
+        current_field = missing[0]
+        lines.append(f"- last_assessment_current_missing_field: {current_field}")
+        lines.append(f"- last_assessment_current_missing_question: {_milk_context_field_label(current_field)}")
     plan_decision = flow_decision.get("plan_decision") if isinstance(flow_decision.get("plan_decision"), dict) else {}
     next_tool = str(plan_decision.get("next_tool") or "").strip()
     if next_tool:
@@ -328,6 +338,10 @@ def _format_last_milk_assessment_context(last_assessment: dict[str, Any]) -> lis
             "- 如果用户本轮是在补充上述缺失信息，先继续奶量评估流程：调用 last_assessment_next_tool，"
             "把用户补充的信息整理进 infant_signals 或 maternal_symptoms；不要直接给调整建议，也不要自行结束流程。"
         )
+        lines.append(
+            "- 如果用户本轮是简短肯定、否定或状态描述，优先理解为对 last_assessment_current_missing_question 的回答；"
+            "调用工具时带上已确认过的宝宝/妈妈信息，不要重复追问同一项。"
+        )
     elif plan_decision.get("can_start_plan") is True and next_tool:
         lines.append(
             "- 如果用户本轮表达愿意继续或进入计划，调用 last_assessment_next_tool；"
@@ -336,9 +350,23 @@ def _format_last_milk_assessment_context(last_assessment: dict[str, Any]) -> lis
     return lines
 
 
+def _milk_context_field_label(field_id: str) -> str:
+    labels = {
+        "infant_signals": "宝宝近 24 小时尿布、精神和吃奶表现",
+        "maternal_symptoms": "妈妈有没有发热、乳房红肿、硬块或疼痛加重",
+        "infant_wet_diapers": "宝宝近 24 小时尿量/尿布情况",
+        "infant_state_or_feeding_satisfaction": "宝宝精神状态和吃奶后表现",
+        "infant_growth_signal": "宝宝近期体重增长情况",
+        "maternal_red_flags": "妈妈有没有发热、寒战、红肿、硬块或疼痛加重",
+        "maternal_breast_comfort": "吸奶或亲喂后乳房舒适度",
+    }
+    return labels.get(field_id, field_id)
+
+
 def _format_last_milk_plan_preview_context(last_plan_preview: dict[str, Any]) -> list[str]:
     flow_decision = last_plan_preview.get("flow_decision") if isinstance(last_plan_preview.get("flow_decision"), dict) else {}
-    if not flow_decision:
+    draft = last_plan_preview.get("draft") if isinstance(last_plan_preview.get("draft"), dict) else {}
+    if not flow_decision and not draft:
         return []
     lines: list[str] = []
     status = str(last_plan_preview.get("status") or "").strip()
@@ -359,7 +387,36 @@ def _format_last_milk_plan_preview_context(last_plan_preview: dict[str, Any]) ->
             "- 如果用户本轮是在补充上一轮奶量计划预览缺失信息，先继续计划预览流程：调用 last_plan_preview_next_tool，"
             "把用户补充的信息整理进 infant_signals 或 maternal_symptoms；不要直接给调整建议，也不要自行结束流程。"
         )
+    elif status == "plan_preview_ready" and draft:
+        strategy = _last_plan_preview_calendar_strategy(last_plan_preview)
+        lines.append("- last_plan_preview_ready_for_save: true")
+        lines.append(
+            "- 如果用户本轮明确确认同步、保存、写入日历或按这版计划执行，调用 milk_plan_mutate 创建计划；"
+            "不要只用文字说已经同步。"
+        )
+        if strategy:
+            lines.append(f"- last_plan_preview_calendar_write_strategy: {strategy}")
+        key = str(last_plan_preview.get("idempotency_key") or "").strip()
+        if key:
+            lines.append(f"- last_plan_preview_idempotency_key: {key}")
     return lines
+
+
+def _milk_plan_preview_idempotency_key(draft: dict[str, Any]) -> str:
+    if not draft:
+        return ""
+    payload = json.dumps(draft, ensure_ascii=False, sort_keys=True, default=str)
+    digest = hashlib.sha1(payload.encode("utf-8")).hexdigest()[:16]
+    return f"milk-plan-preview-{digest}"
+
+
+def _last_plan_preview_calendar_strategy(last_plan_preview: dict[str, Any]) -> str:
+    calendar_delta = last_plan_preview.get("calendar_delta") if isinstance(last_plan_preview.get("calendar_delta"), dict) else {}
+    required = bool(calendar_delta.get("calendar_write_strategy_required") or calendar_delta.get("requires_calendar_write_strategy"))
+    if required:
+        return ""
+    recommended = str(calendar_delta.get("recommended_calendar_write_strategy") or "").strip()
+    return recommended
 
 
 def _format_pending_milk_plan_context(pending: dict[str, Any]) -> list[str]:

@@ -97,6 +97,7 @@ def execute_milk_management_tool(args: dict[str, Any], inputs: RuntimeInputs) ->
     if name == "milk_plan_query":
         return _query_plan(arguments)
     if name == "milk_plan_mutate":
+        arguments = _arguments_with_previous_milk_plan_preview(arguments, inputs)
         return _mutate_plan(arguments)
     if name == "milk_calendar_query":
         return _query_calendar(arguments)
@@ -155,6 +156,7 @@ def execute_milk_management_tool(args: dict[str, Any], inputs: RuntimeInputs) ->
             )
         )
     if name == "milk_assessment_evaluate":
+        arguments = _arguments_with_previous_milk_context(arguments, inputs)
         comprehensive_assessment = _should_run_comprehensive_milk_assessment(arguments, inputs)
         assessment_arguments = _milk_assessment_arguments(arguments, comprehensive_assessment=comprehensive_assessment)
         result = dict(evaluate_milk_status(**assessment_arguments))
@@ -675,16 +677,18 @@ def _milk_volume_domain(milk_data: dict[str, Any]) -> dict[str, Any]:
 
 
 def _infant_intake_domain(infant_signals: dict[str, Any]) -> dict[str, Any]:
+    wet_diapers_raw = norm_text(infant_signals.get("wet_diapers_24h"))
     wet_diapers = _optional_int(infant_signals.get("wet_diapers_24h"))
+    wet_diapers_provided = bool(wet_diapers_raw)
     baby_state = norm_text(infant_signals.get("baby_state")).lower()
     feeding_satisfaction = norm_text(infant_signals.get("feeding_satisfaction")).lower()
     poor_intake = to_bool(infant_signals.get("poor_feeding")) or to_bool(infant_signals.get("poor_latch"))
     lethargic = to_bool(infant_signals.get("lethargy")) or any(token in baby_state for token in ("嗜睡", "精神差", "无力", "letharg"))
     unsettled_after_feeding = any(token in feeding_satisfaction for token in ("不安稳", "很快", "哭", "找奶", "不满足", "fussy"))
-    fewer_wet_diapers = wet_diapers is not None and wet_diapers < 4
+    fewer_wet_diapers = (wet_diapers is not None and wet_diapers < 4) or _wet_diaper_text_suggests_low(wet_diapers_raw)
     if lethargic or fewer_wet_diapers or poor_intake or unsettled_after_feeding:
         status = "concern"
-    elif wet_diapers is None and not baby_state and not feeding_satisfaction:
+    elif not wet_diapers_provided and not baby_state and not feeding_satisfaction:
         status = "unknown"
     else:
         status = "reassuring"
@@ -692,11 +696,22 @@ def _infant_intake_domain(infant_signals: dict[str, Any]) -> dict[str, Any]:
         "status": status,
         "provided_fields": sorted(str(key) for key in infant_signals.keys()),
         "wet_diapers_24h": wet_diapers,
+        "wet_diapers_text": wet_diapers_raw if wet_diapers is None else "",
+        "wet_diapers_provided": wet_diapers_provided,
         "baby_state": infant_signals.get("baby_state"),
         "feeding_satisfaction": infant_signals.get("feeding_satisfaction"),
         "poor_feeding": poor_intake,
         "lethargy": lethargic,
     }
+
+
+def _wet_diaper_text_suggests_low(text: str) -> bool:
+    if not text:
+        return False
+    reassuring_tokens = ("正常", "差不多", "和平时", "没少", "没有少", "不少", "够", "还好", "可以")
+    if any(token in text for token in reassuring_tokens):
+        return False
+    return any(token in text for token in ("尿少", "变少", "少了", "偏少", "很少", "明显少"))
 
 
 def _infant_growth_domain(growth_data: dict[str, Any]) -> dict[str, Any]:
@@ -920,7 +935,7 @@ def _missing_clinical_context_fields(clinical_data: dict[str, Any]) -> list[str]
     infant_fields = {str(item) for item in infant.get("provided_fields", [])} if isinstance(infant.get("provided_fields"), list) else set()
     maternal_fields = {str(item) for item in maternal.get("provided_fields", [])} if isinstance(maternal.get("provided_fields"), list) else set()
     missing: list[str] = []
-    if infant.get("wet_diapers_24h") is None:
+    if infant.get("wet_diapers_provided") is not True:
         missing.append("infant_wet_diapers")
     if not str(infant.get("baby_state") or "").strip() and not str(infant.get("feeding_satisfaction") or "").strip():
         missing.append("infant_state_or_feeding_satisfaction")
@@ -983,6 +998,110 @@ def _options_with_previous_milk_assessment(options: dict[str, Any], inputs: Runt
     return options
 
 
+def _arguments_with_previous_milk_context(arguments: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
+    state = inputs.get("_milk_management_state")
+    if not isinstance(state, dict):
+        return arguments
+    previous = state.get("last_assessment")
+    if not isinstance(previous, dict):
+        return arguments
+    clinical = previous.get("clinical_assessment")
+    if not isinstance(clinical, dict):
+        return arguments
+    domains = clinical.get("domains") if isinstance(clinical.get("domains"), dict) else {}
+    previous_infant = _signals_from_previous_infant_domain(domains.get("infant_intake"))
+    previous_maternal = _signals_from_previous_maternal_domain(domains.get("maternal_breast_symptoms"))
+    if not previous_infant and not previous_maternal:
+        return arguments
+
+    merged = dict(arguments)
+    current_infant = merged.get("infant_signals") if isinstance(merged.get("infant_signals"), dict) else {}
+    current_maternal = merged.get("maternal_symptoms") if isinstance(merged.get("maternal_symptoms"), dict) else {}
+    if previous_infant:
+        merged["infant_signals"] = {**previous_infant, **current_infant}
+    if previous_maternal:
+        merged["maternal_symptoms"] = {**previous_maternal, **current_maternal}
+    return merged
+
+
+def _arguments_with_previous_milk_plan_preview(arguments: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
+    if str(arguments.get("operation") or "").strip() != "create":
+        return arguments
+    state = inputs.get("_milk_management_state")
+    if not isinstance(state, dict):
+        return arguments
+    preview = state.get("last_plan_preview")
+    if not isinstance(preview, dict) or str(preview.get("status") or "").strip() != "plan_preview_ready":
+        return arguments
+    draft = preview.get("draft") if isinstance(preview.get("draft"), dict) else {}
+    if not draft:
+        return arguments
+
+    merged = dict(arguments)
+    if not isinstance(merged.get("confirmed_plan"), dict):
+        merged["confirmed_plan"] = draft
+    if not norm_text(merged.get("idempotency_key")):
+        key = norm_text(preview.get("idempotency_key"))
+        if key:
+            merged["idempotency_key"] = key
+    if not norm_text(merged.get("calendar_write_strategy")):
+        strategy = _calendar_write_strategy_from_preview(preview)
+        if strategy:
+            merged["calendar_write_strategy"] = strategy
+    return merged
+
+
+def _calendar_write_strategy_from_preview(preview: dict[str, Any]) -> str:
+    calendar_delta = preview.get("calendar_delta") if isinstance(preview.get("calendar_delta"), dict) else {}
+    if calendar_delta.get("calendar_write_strategy_required") or calendar_delta.get("requires_calendar_write_strategy"):
+        return ""
+    return norm_text(calendar_delta.get("recommended_calendar_write_strategy"))
+
+
+def _signals_from_previous_infant_domain(domain_value: Any) -> dict[str, Any]:
+    domain = domain_value if isinstance(domain_value, dict) else {}
+    provided = {str(item) for item in domain.get("provided_fields", [])} if isinstance(domain.get("provided_fields"), list) else set()
+    signals: dict[str, Any] = {}
+    for key in ("wet_diapers_24h", "baby_state", "feeding_satisfaction", "poor_feeding", "poor_latch", "lethargy", "recent_weight", "weight_trend", "growth_concern"):
+        value = domain.get(key)
+        if key in provided or _provided_signal_value(value):
+            signals[key] = value
+    if "wet_diapers_24h" not in signals and domain.get("wet_diapers_text"):
+        signals["wet_diapers_24h"] = domain.get("wet_diapers_text")
+    return signals
+
+
+def _signals_from_previous_maternal_domain(domain_value: Any) -> dict[str, Any]:
+    domain = domain_value if isinstance(domain_value, dict) else {}
+    provided = {str(item) for item in domain.get("provided_fields", [])} if isinstance(domain.get("provided_fields"), list) else set()
+    signals: dict[str, Any] = {}
+    for key in (
+        "fever",
+        "chills",
+        "breast_redness",
+        "lump_or_hard_area",
+        "worsening_pain",
+        "nipple_damage",
+        "recurrent_plug",
+        "breast_fullness",
+        "engorgement",
+        "post_pump_fullness",
+        "incomplete_emptying",
+        "pain_level",
+        "symptom_text",
+    ):
+        value = domain.get(key)
+        if key in provided or _provided_signal_value(value):
+            signals[key] = value
+    return signals
+
+
+def _provided_signal_value(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value is True
+    return value not in (None, "", [])
+
+
 def _attach_milk_flow_decision(result: dict[str, Any]) -> None:
     data = result.get("data")
     if not isinstance(data, dict):
@@ -1043,7 +1162,7 @@ def _milk_flow_decision_for_assessment(data: dict[str, Any]) -> dict[str, Any]:
             "plan_decision": {
                 "can_start_plan": True,
                 "recommended_plan_type": "increase_milk",
-                "reason_for_user": "近期奶量产出偏低，宝宝和妈妈当前信息没有提示需要先暂停计划。",
+                "reason_for_user": "近 7 天奶量产出偏低；宝宝和妈妈当前信息没有提示需要先暂停计划。",
                 "next_tool": "milk_plan_preview",
             },
         }
@@ -1055,7 +1174,7 @@ def _milk_flow_decision_for_assessment(data: dict[str, Any]) -> dict[str, Any]:
             "plan_decision": {
                 "can_start_plan": True,
                 "recommended_plan_type": "maintain_milk",
-                "reason_for_user": "近期奶量大体可接受，如果用户想要计划，更适合做维持节奏的安排。",
+                "reason_for_user": "近期奶量大体在可接受范围；如需更稳定安排，可进入稳奶计划。",
                 "next_tool": "milk_plan_preview",
             },
         }
@@ -1066,7 +1185,7 @@ def _milk_flow_decision_for_assessment(data: dict[str, Any]) -> dict[str, Any]:
         "plan_decision": {
             "can_start_plan": False,
             "recommended_plan_type": None,
-            "reason_for_user": "当前更适合先解释分析结论或继续观察，不适合直接进入新计划。",
+            "reason_for_user": "当前没有明确的新计划方向，先解释分析结论或继续观察。",
             "next_tool": None,
         },
     }
@@ -1096,7 +1215,7 @@ def _milk_flow_decision_for_missing_context(missing_fields: list[str], *, stage:
         "plan_decision": {
             "can_start_plan": False,
             "recommended_plan_type": None,
-            "reason_for_user": "还缺少会影响下一步安排的宝宝或妈妈状态。",
+            "reason_for_user": "缺少会影响下一步安排的宝宝或妈妈状态。",
             "next_tool": next_tool,
         },
     }
@@ -1109,7 +1228,7 @@ def _milk_flow_decision_for_more_records() -> dict[str, Any]:
         "plan_decision": {
             "can_start_plan": False,
             "recommended_plan_type": None,
-            "reason_for_user": "近期记录还不足，先补记录再判断更稳。",
+            "reason_for_user": "近期记录不足。",
             "next_tool": None,
         },
     }
@@ -1122,7 +1241,7 @@ def _milk_flow_decision_for_missing_plan_type() -> dict[str, Any]:
         "plan_decision": {
             "can_start_plan": False,
             "recommended_plan_type": None,
-            "reason_for_user": "还需要确认计划方向。",
+            "reason_for_user": "缺少计划方向。",
             "next_tool": "milk_plan_preview",
         },
     }
@@ -1215,6 +1334,13 @@ def _build_milk_plan_card_json(data: dict[str, Any]) -> dict[str, Any]:
     current_count = _to_int(rules.get("current_pumping_count"), 0)
     planned_count = desired_count or current_count
     added = max(desired_count - current_count, 0)
+    plan_type = str(draft.get("plan_type") or "").strip()
+    how_items = [
+        str(control.get("session_goal") or _milk_plan_session_goal(draft)),
+        str(control.get("when_to_stop_each_time") or _milk_plan_stop_rule(draft)),
+    ]
+    if plan_type != "increase_milk":
+        how_items.append(str(control.get("review_timing") or _milk_plan_review_rule(draft)))
 
     return {
         "title": _milk_plan_title(draft),
@@ -1238,31 +1364,27 @@ def _build_milk_plan_card_json(data: dict[str, Any]) -> dict[str, Any]:
                 "metrics": [
                     {"label": "周期", "value": f"{plan_days} 天", "detail": "从明天开始"},
                     {
-                        "label": "原方案",
+                        "label": "现在",
                         "value": f"{_format_number(_to_float(observation.get('calendar_pump_tasks_per_day'), 0.0))} 次/天",
                         "detail": "吸奶任务",
                     },
                     {
-                        "label": "新方案",
+                        "label": "计划",
                         "value": f"{planned_count} 次/天",
                         "detail": "吸奶任务",
                     },
                 ],
                 "items": [
-                    "先按现有节奏微调，不一下子大改。",
-                    f"保留原有 {current_count} 个吸奶提醒，新增/强化 {added} 个关键时段。",
-                    "具体时间表先不全部展开，需要时再展开具体时段。",
+                    "先在当前吸奶/亲喂节奏上微调，三天后我们根据奶量变化重新调整。",
+                    f"保留原有 {current_count} 个吸奶任务，新增 {added} 个吸奶任务。",
+                    "具体日程表不在这里展开，可到计划页查看或直接向我追问。",
                 ],
             },
             {
                 "id": "how",
                 "title": "每次怎么做",
                 "tone": "default",
-                "items": [
-                    str(control.get("session_goal") or _milk_plan_session_goal(draft)),
-                    str(control.get("when_to_stop_each_time") or _milk_plan_stop_rule(draft)),
-                    str(control.get("review_timing") or _milk_plan_review_rule(draft)),
-                ],
+                "items": how_items,
             },
         ],
     }
@@ -1290,7 +1412,7 @@ def _milk_plan_title(draft: dict[str, Any]) -> str:
 def _milk_plan_session_goal(draft: dict[str, Any]) -> str:
     plan_type = str(draft.get("plan_type") or "").strip()
     if plan_type == "increase_milk":
-        return "每次不需要无限延长，保持舒服、规律更重要。"
+        return "每次结束吸奶时看是否还有胀感，如果有的话可以多吸一会儿（1～2分钟）直到胀感减轻或消失。"
     if plan_type == "decrease_milk":
         return "每次只吸到舒服，不追求排得很空。"
     return "每次稳定、舒服地移出即可。"
@@ -1299,7 +1421,7 @@ def _milk_plan_session_goal(draft: dict[str, Any]) -> str:
 def _milk_plan_stop_rule(draft: dict[str, Any]) -> str:
     plan_type = str(draft.get("plan_type") or "").strip()
     if plan_type == "increase_milk":
-        return "吸奶到奶流明显变慢后，再多 1-2 分钟就可以。"
+        return "吸奶过程中如果有明显痛感，暂停吸奶并联系医生或IBCLC顾问，我可以帮你在线接通IBCLC顾问。"
     if plan_type == "decrease_milk":
         return "胀得难受时少量移出到舒服就停。"
     return "吸奶到奶流明显变慢、乳房舒服一些就可以。"
@@ -1310,7 +1432,7 @@ def _milk_plan_review_rule(draft: dict[str, Any]) -> str:
     if plan_type == "decrease_milk":
         return "每 2-3 天看胀痛、硬块、总量和宝宝状态，再决定下一步。"
     if plan_type == "increase_milk":
-        return "连续执行 2-3 天后，看平均奶量、宝宝状态和妈妈舒适度。"
+        return ""
     return "第 3 天和第 7 天复盘奶量、宝宝表现和妈妈舒适度。"
 
 
@@ -1341,23 +1463,50 @@ def _milk_analysis_followup_message(data: dict[str, Any]) -> str:
 def _milk_plan_preview_followup_message(data: dict[str, Any]) -> str:
     draft = data.get("draft") if isinstance(data.get("draft"), dict) else {}
     title = _milk_plan_title(draft)
+    overview = _milk_plan_followup_overview(draft)
     calendar_delta = data.get("calendar_delta") if isinstance(data.get("calendar_delta"), dict) else {}
     requires_strategy = bool(calendar_delta.get("requires_calendar_write_strategy") or calendar_delta.get("calendar_write_strategy_required"))
     if requires_strategy:
         return (
             f"{title}已经准备好了。\n\n"
+            f"{overview}\n\n"
             "如果要同步到计划页，我先和你确认一下：是追加到现有日程，还是替换未来未完成的旧计划任务？"
         )
     return (
         f"{title}已经准备好了。\n\n"
+        f"{overview}\n\n"
         "如果方向没问题，我可以帮你同步到计划页；也可以先照着你的作息，把时间再调顺一点。"
     )
+
+
+def _milk_plan_followup_overview(draft: dict[str, Any]) -> str:
+    rules = draft.get("plan_rules") if isinstance(draft.get("plan_rules"), dict) else {}
+    plan_days = _to_int(draft.get("plan_days"), 0)
+    desired_count = _to_int(rules.get("desired_pumping_count"), 0)
+    current_count = _to_int(rules.get("current_pumping_count"), 0)
+    planned_count = desired_count or current_count or _daily_schedule_count(draft)
+    period = f"从明天开始，连续 {plan_days} 天" if plan_days > 0 else "从明天开始"
+    count_line = f"{period}，每天安排 {planned_count} 次吸奶任务。" if planned_count > 0 else f"{period}执行。"
+    return f"{count_line}\n\n每次怎么做：{_milk_plan_session_guidance(draft)}"
+
+
+def _daily_schedule_count(draft: dict[str, Any]) -> int:
+    templates = draft.get("daily_schedule_templates") if isinstance(draft.get("daily_schedule_templates"), list) else []
+    for template in templates:
+        if not isinstance(template, dict):
+            continue
+        items = template.get("items") if isinstance(template.get("items"), list) else []
+        if items:
+            return len(items)
+    template = draft.get("daily_schedule_template") if isinstance(draft.get("daily_schedule_template"), dict) else {}
+    items = template.get("items") if isinstance(template.get("items"), list) else []
+    return len(items)
 
 
 def _milk_plan_session_guidance(draft: dict[str, Any]) -> str:
     plan_type = str(draft.get("plan_type") or "").strip()
     if plan_type == "increase_milk":
-        return "吸奶到奶流明显变慢后再多 1-2 分钟就够了；亲喂就看吞咽变少和宝宝状态。不舒服时先停下来，再调整吸力、法兰或姿势。"
+        return "每次结束吸奶时看是否还有胀感，如果有的话可以多吸一会儿（1～2分钟）直到胀感减轻或消失。吸奶过程中如果有明显痛感，暂停吸奶并联系医生或IBCLC顾问，我可以帮你在线接通IBCLC顾问。"
     if plan_type == "decrease_milk":
         return "单次吸奶或亲喂不用刻意排得特别空，重点是让身体舒服下来；如果只是胀，吸到不难受就可以停，不要继续给身体太强的增奶信号。"
     return "单次吸奶或亲喂保持稳定、舒服即可；吸奶到奶流明显变慢、乳房舒服一些就可以，亲喂就看宝宝吞咽和满足感。"
@@ -1365,11 +1514,25 @@ def _milk_plan_session_guidance(draft: dict[str, Any]) -> str:
 
 def _milk_plan_saved_followup_message(result: dict[str, Any]) -> str:
     data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    plan = data.get("plan") if isinstance(data.get("plan"), dict) else {}
+    overview = _milk_plan_followup_overview(plan) if plan else ""
     inserted = _to_int(data.get("inserted_calendar_count"), 0)
     if inserted > 0:
+        if overview:
+            return (
+                "已经同步到计划页了，接下来会按这个节奏提醒你。\n\n"
+                f"{overview}\n\n"
+                "你可以去「计划」里查看这几天的安排。最近几天如果有会议、外出、上班、睡眠安排，或者其他不方便吸奶的时间，也可以告诉我，我再帮你把时间调顺一点。"
+            )
         return (
             "已经同步到计划页了，接下来会按这个节奏提醒你。\n\n"
             "你可以去「计划」里查看这几天的安排。最近几天如果有会议、外出、上班、睡眠安排，或者其他不方便吸奶的时间，也可以告诉我，我再帮你把时间调顺一点。"
+        )
+    if overview:
+        return (
+            "计划已经保存好了，你可以去「计划」里查看。\n\n"
+            f"{overview}\n\n"
+            "最近几天如果有会议、外出、上班、睡眠安排，或者其他不方便吸奶的时间，也可以告诉我，我再帮你把时间调顺一点。"
         )
     return (
         "计划已经保存好了，你可以去「计划」里查看。\n\n"
