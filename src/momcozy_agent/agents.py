@@ -486,7 +486,7 @@ def _normalize_tool_name(tool_name: str) -> str:
 def _tool_semantic_phase(tool_name: str) -> str:
     if tool_name in {"tool_search", "tool_search_call"}:
         return "thinking"
-    if tool_name in {"milk_assessment_evaluate", "milk_clinical_assessment_evaluate", "infant_growth_evaluate", "risk_evaluate"}:
+    if tool_name in {"milk_assessment_evaluate", "infant_growth_evaluate", "risk_evaluate"}:
         return "evaluating"
     if tool_name in {"milk_plan_preview", "milk_calendar_change_preview", "milk_calendar_reschedule_preview"}:
         return "planning"
@@ -560,8 +560,6 @@ def _tool_start_label(tool_name: str, arguments: dict[str, Any]) -> str:
         return "我先看看计划和日程任务～"
     if tool_name == "milk_assessment_evaluate":
         return "我来看看奶量趋势和执行情况～"
-    if tool_name == "milk_clinical_assessment_evaluate":
-        return "我先把宝宝和妈妈的情况一起看一下～"
     if tool_name == "infant_growth_evaluate":
         return "我来看看宝宝的生长信号～"
     if tool_name == "risk_evaluate":
@@ -623,7 +621,7 @@ def _tool_end_label(tool_name: str) -> str:
         return "我找到合适的方案啦"
     if tool_name in {"milk_records_query", "milk_status_query", "milk_snapshot_get", "milk_plan_query", "milk_calendar_query"}:
         return "我把奶量和日程信息整理一下～"
-    if tool_name in {"milk_assessment_evaluate", "milk_clinical_assessment_evaluate", "infant_growth_evaluate", "risk_evaluate"}:
+    if tool_name in {"milk_assessment_evaluate", "infant_growth_evaluate", "risk_evaluate"}:
         return "我把评估结果整理一下～"
     if tool_name == "milk_plan_preview":
         return "我再完善一下计划草稿～"
@@ -682,8 +680,6 @@ def _tool_result_label(tool_name: str, result: dict[str, Any]) -> str:
         return "我看好之前的奶量计划啦"
     if tool_name == "milk_assessment_evaluate":
         return "我完成奶量评估啦"
-    if tool_name == "milk_clinical_assessment_evaluate":
-        return "我把宝宝和妈妈的情况看好啦"
     if tool_name == "infant_growth_evaluate":
         return "我完成宝宝生长评估啦"
     if tool_name == "risk_evaluate":
@@ -950,15 +946,13 @@ def safe_tool_result(result: dict[str, Any]) -> dict[str, Any]:
                 for key in ("workflow_intent", "continuation_instruction", "missing_fields", "suggested_questions"):
                     if key in tool_data:
                         safe[key] = tool_data[key]
-            if result.get("tool_name") == "milk_clinical_assessment_evaluate":
-                safe["clinical_assessment"] = _compact_milk_clinical_assessment_data(tool_data)
             if result.get("tool_name") == "milk_plan_preview":
                 for key in ("workflow_intent", "continuation_instruction", "missing_fields", "suggested_questions"):
                     if key in tool_data:
                         safe[key] = tool_data[key]
                 clinical_data = tool_data.get("clinical_assessment")
                 if isinstance(clinical_data, dict):
-                    safe["clinical_assessment"] = _compact_milk_clinical_assessment_data(clinical_data)
+                    safe["clinical_assessment"] = _compact_milk_context_status_data(clinical_data)
         if result.get("tool_name") == "milk_assessment_evaluate" and isinstance(tool_result.get("assistant_followup"), dict):
             safe["assistant_followup"] = tool_result["assistant_followup"]
         if result.get("tool_name") == "milk_plan_preview" and isinstance(tool_result.get("assistant_followup"), dict):
@@ -1028,8 +1022,6 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
     tool_name = str(safe.get("tool_name") or "")
     if tool_name == "milk_assessment_evaluate":
         return _compact_milk_assessment_output(safe, result)
-    if tool_name == "milk_clinical_assessment_evaluate":
-        return _compact_milk_clinical_assessment_output(safe)
     if tool_name == "milk_status_query" and isinstance(safe.get("card"), dict):
         return _compact_mom_baby_status_card_output(safe)
     if tool_name == "milk_plan_preview" and safe.get("status") == "milk_plan_needs_clinical_context":
@@ -1592,7 +1584,7 @@ def _compact_recent_milk_events(value: Any, *, include_amount: bool = False, inc
     return _drop_empty(compact)
 
 
-def _compact_milk_clinical_assessment_data(data: dict[str, Any]) -> dict[str, Any]:
+def _compact_milk_context_status_data(data: dict[str, Any]) -> dict[str, Any]:
     domains = data.get("domains") if isinstance(data.get("domains"), dict) else {}
     baby_domain = domains.get("infant_intake") if isinstance(domains.get("infant_intake"), dict) else {}
     mother_domain = domains.get("maternal_breast_symptoms") if isinstance(domains.get("maternal_breast_symptoms"), dict) else {}
@@ -1843,21 +1835,6 @@ def _plain_clinical_next_step(data: dict[str, Any]) -> str:
     if str(data.get("data_confidence") or "").strip() == "low":
         return "先补齐宝宝状态和妈妈乳房/全身状态，再继续判断。"
     return "宝宝和妈妈状态目前没有提示需要先暂停计划的信号，可以继续结合奶量记录看下一步。"
-
-
-def _compact_milk_clinical_assessment_output(safe: dict[str, Any]) -> dict[str, Any]:
-    clinical = safe.get("clinical_assessment") if isinstance(safe.get("clinical_assessment"), dict) else {}
-    return _drop_empty(
-        {
-            "ok": safe.get("ok"),
-            "tool_name": safe.get("tool_name"),
-            "user_context": clinical.get("user_context") if isinstance(clinical.get("user_context"), dict) else {},
-            "final_response_instruction": (
-                "最终回复只根据 user_context 自然说明宝宝和妈妈当前情况，以及下一步；"
-            "不要提工具、系统、内部状态、状态码或英文流程字段。"
-            ),
-        }
-    )
 
 
 def _milk_assessment_do_not_infer(status: str) -> list[str]:
@@ -3628,7 +3605,6 @@ _POSTPARTUM_STAGE_TOOLS = {
     "milk_calendar_mutate",
     "milk_task_complete",
     "milk_assessment_evaluate",
-    "milk_clinical_assessment_evaluate",
     "infant_growth_evaluate",
     "infant_growth_mutate",
 }

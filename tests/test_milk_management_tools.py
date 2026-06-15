@@ -17,7 +17,6 @@ from momcozy_agent.services.milk_management.calendar import (
     preview_calendar_adjustment,
     preview_day_reschedule,
 )
-from momcozy_agent.services.milk_management.clinical_assessment import evaluate_lactation_clinical_status
 from momcozy_agent.services.milk_management.db import fetch_all, transaction
 from momcozy_agent.services.milk_management.growth_mutation import mutate_infant_growth
 from momcozy_agent.services.milk_management.assessment import evaluate_milk_status
@@ -985,90 +984,6 @@ class MilkManagementToolTests(unittest.TestCase):
             ),
             [],
         )
-
-    def test_clinical_assessment_blocks_plan_when_maternal_red_flags_exist(self) -> None:
-        uid, _ = _seed_user("clinical-red-flags")
-        prepared_assessment = {
-            "pumping_summary": {"count": 8, "total_ml": 520},
-            "feeding_summary": {"type_counts": {}},
-            "window": {"window_days": 1},
-            "milk_normality": {
-                "overall_status": "under_supply_alert",
-                "stats": {"valid_days": 1},
-                "days": [
-                    {
-                        "ok": True,
-                        "date": "2026-05-13",
-                        "status": "low",
-                        "estimated_daily_milk_ml": 520,
-                        "yield_reference": {"p15": 720, "p85": 950},
-                    }
-                ],
-            },
-        }
-
-        result = evaluate_lactation_clinical_status(
-            user_id=uid,
-            as_of_time="2026-05-14 12:00:00",
-            window_days=1,
-            include_today=False,
-            milk_assessment=prepared_assessment,
-            growth_assessment={"status": "normal"},
-            maternal_symptoms={"fever": True, "breast_redness": True, "worsening_pain": True},
-            infant_signals={},
-            requested_plan_type="increase_milk",
-        )
-
-        self.assertTrue(result["ok"])
-        self.assertEqual(result["data"]["risk_level"], "medical_recommended")
-        self.assertFalse(result["data"]["plan_gate"]["allowed"])
-        self.assertIn("ABM_MASTITIS_PROTOCOL", [item["id"] for item in result["data"]["evidence"]])
-
-    def test_clinical_assessment_allows_plan_when_fullness_has_no_red_flags(self) -> None:
-        uid, _ = _seed_user("clinical-fullness-no-red-flags")
-        prepared_assessment = {
-            "pumping_summary": {"count": 8, "total_ml": 520},
-            "feeding_summary": {"type_counts": {}},
-            "window": {"window_days": 1},
-            "milk_normality": {
-                "overall_status": "under_supply_alert",
-                "stats": {"valid_days": 1},
-                "days": [
-                    {
-                        "ok": True,
-                        "date": "2026-05-13",
-                        "status": "low",
-                        "estimated_daily_milk_ml": 520,
-                        "yield_reference": {"p15": 720, "p85": 950},
-                    }
-                ],
-            },
-        }
-
-        result = evaluate_lactation_clinical_status(
-            user_id=uid,
-            as_of_time="2026-05-14 12:00:00",
-            window_days=1,
-            include_today=False,
-            milk_assessment=prepared_assessment,
-            growth_assessment={"status": "normal"},
-            maternal_symptoms={
-                "breast_fullness": True,
-                "incomplete_emptying": True,
-                "fever": False,
-                "breast_redness": False,
-                "lump_or_hard_area": False,
-                "worsening_pain": False,
-            },
-            infant_signals=_reassuring_infant_signals(),
-            requested_plan_type="increase_milk",
-        )
-
-        self.assertTrue(result["ok"])
-        self.assertEqual(result["data"]["domains"]["maternal_breast_symptoms"]["status"], "reassuring")
-        self.assertTrue(result["data"]["domains"]["maternal_breast_symptoms"]["fullness_without_red_flags"])
-        self.assertTrue(result["data"]["plan_gate"]["allowed"])
-        self.assertIn("胀/排不空作为计划约束", " ".join(result["data"]["next_actions"]))
 
     def test_plan_preview_tool_uses_clinical_gate_before_generating_plan(self) -> None:
         uid, _ = _seed_user("plan-clinical-gate")

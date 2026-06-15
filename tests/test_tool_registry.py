@@ -127,6 +127,13 @@ class ToolRegistryTests(unittest.TestCase):
                 self.assertIn(token, description)
         self.assertNotIn("创建待产包表单前必须已通过对话收集规定基础字段", DEFERRED_TOOL_NAMESPACES["birth_prep"]["description"])
 
+    def test_milk_clinical_assessment_tool_is_not_exposed(self) -> None:
+        removed_tool = "milk_clinical_assessment_evaluate"
+
+        self.assertNotIn(removed_tool, FUNCTION_TOOLS)
+        self.assertNotIn(removed_tool, READ_ONLY_TOOL_NAMES)
+        self.assertNotIn(removed_tool, DEFERRED_TOOL_NAMESPACES["milk_management"]["tool_names"])
+
     def test_deferred_tool_descriptions_include_cross_namespace_boundaries(self) -> None:
         expected_tokens = {
             "handoff_summary_generate": ("已经决定转接", "不要用于普通回答总结", "设备售后工单"),

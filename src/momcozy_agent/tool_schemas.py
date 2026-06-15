@@ -571,24 +571,6 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
             },
         },
     ),
-    "milk_clinical_assessment_evaluate": _function_tool(
-        "milk_clinical_assessment_evaluate",
-        "EVALUATE 只读工具：在奶量评估之上综合宝宝摄入/生长、妈妈乳房症状和记录完整度，返回数据可信度、风险等级、计划准入 plan_gate 和下一步动作。用于复杂奶量判断、是否适合追奶/稳奶/减奶、是否需要 IBCLC/医生优先介入。不是诊断，不写数据库，不生成最终用户话术。",
-        {
-            "as_of_time": _nullable({"type": "string", "description": "可选 ISO-8601 评估时间；不确定时传 null。"}),
-            "window_days": {"type": "integer", "description": "回看天数。通常用 7；用户已明确计划方向且只看最近完整日时可用 1。"},
-            "include_today": {"type": "boolean", "description": "是否包含当前日未完整记录。通常评估完整日时传 false。"},
-            "requested_plan_type": _nullable({"type": "string", "enum": ["increase_milk", "maintain_milk", "decrease_milk"]}),
-            "maternal_symptoms": {
-                **JSON_OBJECT_STRING,
-                "description": "字符串编码 JSON。可包含 fever、chills、breast_redness、lump_or_hard_area、worsening_pain、nipple_damage、recurrent_plug、pain_level、breast_fullness、engorgement、post_pump_fullness、incomplete_emptying、symptom_text。用户说胀、涨、排不空、吸完还胀但否认红旗信号时，设置 breast_fullness 或 incomplete_emptying 为 true，并把 fever/breast_redness/lump_or_hard_area/worsening_pain 按用户回答设置为 false。未知字段传 {}。",
-            },
-            "infant_signals": {
-                **JSON_OBJECT_STRING,
-                "description": "字符串编码 JSON。可包含 wet_diapers_24h、stool_24h、baby_state、feeding_satisfaction、poor_feeding、poor_latch、lethargy、recent_weight、weight_trend、growth_concern。未知字段传 {}。",
-            },
-        },
-    ),
     "infant_growth_evaluate": _function_tool(
         "infant_growth_evaluate",
         "EVALUATE 只读工具：基于宝宝档案、生长记录和固定参考数据返回生长趋势规则结果。不是诊断；仅在用户提到身高、体重、增长或摄入是否足够时使用。",
