@@ -2250,7 +2250,7 @@ BIRTH_JOURNEY_SURVEY_FIELDS: tuple[dict[str, Any], ...] = (
     {
         "id": "lifestyle_context",
         "label": "生活和工作场景",
-        "question": "结合你现在的孕周，我再少量了解会影响执行的生活场景：饮食/补剂、运动睡眠、久站夜班通勤、家庭支持、是否一胎、焦虑点里，哪些比较需要我纳入计划？",
+        "question": "结合你现在的孕周，我再少量了解会影响执行的生活场景：饮食/补剂、运动/睡眠、久站通勤、家庭支持、焦虑点里，哪些比较需要我纳入计划？",
         "keys": ("lifestyle_context", "work_context", "sleep_context", "exercise_context", "family_support", "budget", "top_worries", "first_birth", "support_person"),
     },
     {

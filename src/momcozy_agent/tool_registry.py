@@ -47,13 +47,14 @@ CORE_IMMEDIATE_TOOLS: list[ToolName] = [
 MILK_MANAGEMENT_TOOLS: list[ToolName] = [
     "milk_snapshot_get",
     "milk_status_query",
-    "milk_assessment_evaluate",
+    "milk_analysis_intake_manage",
+    "milk_analysis_evaluate",
+    "milk_plan_preview_create",
     "infant_growth_evaluate",
     "infant_growth_mutate",
     "milk_records_query",
     "milk_record_mutate",
     "milk_plan_query",
-    "milk_plan_preview",
     "milk_plan_mutate",
     "milk_calendar_query",
     "milk_calendar_change_preview",
@@ -64,14 +65,19 @@ MILK_MANAGEMENT_TOOLS: list[ToolName] = [
 MILK_MANAGEMENT_READ_ONLY_TOOLS: set[ToolName] = {
     "milk_snapshot_get",
     "milk_status_query",
-    "milk_assessment_evaluate",
+    "milk_analysis_intake_manage",
+    "milk_analysis_evaluate",
+    "milk_plan_preview_create",
     "infant_growth_evaluate",
     "milk_records_query",
     "milk_plan_query",
-    "milk_plan_preview",
     "milk_calendar_query",
     "milk_calendar_change_preview",
     "milk_calendar_reschedule_preview",
+}
+MILK_MANAGEMENT_INTERNAL_TOOLS: set[ToolName] = {
+    "milk_assessment_evaluate",
+    "milk_plan_preview",
 }
 
 DEFERRED_TOOL_NAMESPACES: dict[str, dict[str, Any]] = {
@@ -156,7 +162,7 @@ TOOL_HANDLERS: dict[ToolName, ToolHandler] = {
     "device_manual_search": search_device_manual,
     "support_ticket_draft_create": create_support_ticket_draft,
 }
-TOOL_HANDLERS.update({tool_name: execute_milk_management_tool for tool_name in MILK_MANAGEMENT_TOOLS})
+TOOL_HANDLERS.update({tool_name: execute_milk_management_tool for tool_name in [*MILK_MANAGEMENT_TOOLS, *MILK_MANAGEMENT_INTERNAL_TOOLS]})
 
 
 def select_runtime_tools(inputs: RuntimeInputs | None = None) -> list[ToolDefinition]:

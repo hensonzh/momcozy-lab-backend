@@ -74,11 +74,13 @@ def preview_milk_plan(
         "assessment",
         "assessment_data",
     )
-    if prepared_assessment:
+    prepared_from_context = to_bool(parsed_options.get("_prepared_assessment_from_context"))
+    if prepared_assessment and (not prepared_from_context or _assessment_window_days(prepared_assessment) >= 7):
         assessment_data = prepared_assessment
     else:
         assessment = _evaluate_plan_window(uid, as_of_time=as_of_time)
-        assessment_data = assessment.get("data") if isinstance(assessment.get("data"), dict) else {}
+        evaluated_data = assessment.get("data") if isinstance(assessment.get("data"), dict) else {}
+        assessment_data = evaluated_data if _assessment_has_milk_basis(evaluated_data) else prepared_assessment or evaluated_data
 
     prepared_growth = _prepared_data_from_options(
         parsed_options,
@@ -155,6 +157,32 @@ def preview_milk_plan(
         infant_age_months=plan_context.get("infant_age_months"),
     )
     current_daily_ml = _current_daily_ml(pumping_summary, window_days=window_days, milk_normality=milk_normality)
+    if current_daily_ml <= 0:
+        return ok_result(
+            "milk_plan_needs_milk_records",
+            "过去 7 天还没有可用于计算计划目标的有效奶量数据，请先补充吸奶奶量、瓶喂奶量，或可估算亲喂量的瓶喂参考。",
+            {
+                "requires_confirmation": False,
+                "missing_fields": ["recent_milk_volume"],
+                "suggested_questions": [
+                    "过去 7 天每天大约吸奶多少 ml？如果有亲喂，也请补充瓶喂或补奶量，方便估算亲喂量。"
+                ],
+                "workflow_intent": "milk_plan_preview",
+                "milk_flow_decision": {
+                    "stage": "need_more_record_context",
+                    "missing_user_inputs": ["recent_milk_volume"],
+                    "plan_decision": {
+                        "can_start_plan": False,
+                        "recommended_plan_type": normalized_type,
+                        "reason_for_user": "缺少过去 7 天可用于计算计划目标的有效奶量数据。",
+                        "next_tool": "milk_plan_preview",
+                    },
+                },
+                "assessment": assessment_data,
+                "growth_assessment": growth_data,
+                "options": parsed_options,
+            },
+        )
     preview_target_daily_ml = _target_daily_ml_from_options(
         plan_type=normalized_type,
         current_daily_ml=current_daily_ml,
@@ -1246,6 +1274,21 @@ def _evaluate_plan_window(user_id: str, *, as_of_time: str | None) -> ServiceRes
     )
 
 
+def _assessment_window_days(assessment_data: dict[str, Any]) -> int:
+    window = assessment_data.get("window") if isinstance(assessment_data.get("window"), dict) else {}
+    return to_int(window.get("window_days"), 0)
+
+
+def _assessment_has_milk_basis(assessment_data: dict[str, Any]) -> bool:
+    pumping = assessment_data.get("pumping_summary") if isinstance(assessment_data.get("pumping_summary"), dict) else {}
+    feeding = assessment_data.get("feeding_summary") if isinstance(assessment_data.get("feeding_summary"), dict) else {}
+    if to_int(pumping.get("count"), 0) > 0 or to_int(feeding.get("count"), 0) > 0:
+        return True
+    milk_normality = assessment_data.get("milk_normality") if isinstance(assessment_data.get("milk_normality"), dict) else {}
+    days = milk_normality.get("days") if isinstance(milk_normality.get("days"), list) else []
+    return any(isinstance(item, dict) and isinstance(item.get("estimated_daily_milk_ml"), (int, float)) for item in days)
+
+
 def _evaluate_growth_for_plan(user_id: str, *, as_of_time: str | None) -> ServiceResult:
     try:
         return evaluate_infant_growth(user_id=user_id, infant_id=None, as_of_time=as_of_time)
@@ -1429,7 +1472,7 @@ def _schedule_basis_from_plan_context(
     rhythm_confidence = norm_text(rhythm_summary.get("confidence"))
     if rhythm_confidence in {"high", "medium", "low"} and source != "default_template":
         confidence = rhythm_confidence
-    ask_daily_counts = bool(rhythm_summary.get("ask_daily_counts")) if rhythm_summary else confidence == "low"
+    ask_daily_counts = False
     target_day = norm_text(plan_context.get("target_day"))
     used_days = [target_day] if target_day and selected_count > 0 else []
     pumping_count = len(selected_pumping_times)
@@ -1842,12 +1885,25 @@ def _normalize_plan_type(value: Any) -> str:
 
 
 def _current_daily_ml(pumping_summary: dict[str, Any], *, window_days: int, milk_normality: dict[str, Any]) -> float:
-    latest = _latest_valid_normality_day(milk_normality)
-    estimated = latest.get("estimated_daily_milk_ml") if latest else None
-    if isinstance(estimated, (int, float)) and estimated > 0:
-        return round(float(estimated), 1)
+    average = _average_daily_milk_ml(milk_normality)
+    if average is not None:
+        return average
     total = float(pumping_summary.get("total_ml") or 0.0)
     return round(total / max(window_days, 1), 1)
+
+
+def _average_daily_milk_ml(milk_normality: dict[str, Any]) -> float | None:
+    days = milk_normality.get("days") if isinstance(milk_normality.get("days"), list) else []
+    values: list[float] = []
+    for item in days:
+        if not isinstance(item, dict):
+            continue
+        estimated = item.get("estimated_daily_milk_ml")
+        if isinstance(estimated, (int, float)) and estimated >= 0:
+            values.append(float(estimated))
+    if not values:
+        return None
+    return round(sum(values) / len(values), 1)
 
 
 def _target_daily_ml(

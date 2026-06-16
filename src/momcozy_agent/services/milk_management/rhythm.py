@@ -238,11 +238,10 @@ def _summarize_rhythm(days: list[dict[str, Any]], *, selected_day: dict[str, Any
         confidence = "high"
     elif non_empty_days:
         confidence = "medium"
-    ask_daily_counts = confidence == "low"
     return {
         "basis_date": selected_day.get("date") or "",
         "confidence": confidence,
-        "ask_daily_counts": ask_daily_counts,
+        "ask_daily_counts": False,
         "ask_missing_records": confidence != "high",
         "usable_for_schedule": confidence != "low",
         "non_empty_days": len(non_empty_days),

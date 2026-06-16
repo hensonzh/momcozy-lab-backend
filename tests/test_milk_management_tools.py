@@ -406,33 +406,42 @@ class MilkManagementToolTests(unittest.TestCase):
         self.assertIn("data", result)
         self.assertIn("clinical_assessment", result["data"])
         self.assertIn("recent_milk_rhythm", result["data"])
+        self.assertIn("source_record_context", result["data"])
         self.assertEqual(result["data"]["recent_milk_rhythm"]["selected_day"]["date"], "2026-05-13")
+        self.assertEqual(result["data"]["source_record_context"]["record_counts"]["pumping"], 5)
+        self.assertTrue(result["data"]["source_record_context"]["raw_records"]["pumping"])
+        safe = safe_tool_result({"ok": True, "tool_name": "milk_assessment_evaluate", "result": result})
+        self.assertNotIn("source_record_context", json.dumps(safe, ensure_ascii=False))
+        self.assertNotIn("raw_records", json.dumps(safe, ensure_ascii=False))
         compact = model_tool_output({"ok": True, "tool_name": "milk_assessment_evaluate", "result": result})
         self.assertNotIn("card", compact)
-        self.assertIn("data", compact)
+        self.assertIn("facts", compact)
+        self.assertIn("interpretation", compact)
+        self.assertIn("workflow", compact)
+        self.assertNotIn("response_instruction", compact)
         self.assertNotIn("status", compact)
         self.assertNotIn("assistant_followup", compact)
-        reply_context = compact["data"]
-        self.assertEqual(reply_context["milk_normality"]["overall_status"], "under_supply_alert")
-        self.assertIn("recent_milk_rhythm", reply_context)
-        self.assertIn("clinical_assessment", reply_context)
-        self.assertIn("control_suggestion", reply_context)
+        reply_facts = compact["facts"]
+        reply_interpretation = compact["interpretation"]
+        self.assertEqual(reply_interpretation["overall_status"], "under_supply_alert")
+        self.assertEqual(reply_facts["record_counts"]["pumping"], 5)
+        self.assertTrue(reply_facts["raw_records"]["pumping"])
+        self.assertTrue(any(day["date"] == "2026-05-13" for day in reply_facts["daily_rollups"]))
+        self.assertIn("recent_milk_rhythm", reply_facts)
+        self.assertIn("control_suggestion", reply_interpretation)
         flow_decision = compact["milk_flow_decision"]
         self.assertTrue(flow_decision["现在能不能开始制定计划"])
         self.assertEqual(flow_decision["建议计划方向"], "追奶计划")
         self.assertEqual(flow_decision["下一步工具"], "milk_plan_preview")
         self.assertIn("近 7 天奶量产出偏低", flow_decision["原因"])
-        rhythm_context = reply_context["recent_milk_rhythm"]
+        rhythm_context = reply_facts["recent_milk_rhythm"]
         self.assertTrue(rhythm_context["summary"]["usable_for_schedule"])
-        self.assertTrue(any(day["date"] == "2026-05-13" for day in rhythm_context["days"]))
-        self.assertNotIn("记录完整后的推荐承接", reply_context)
-        self.assertNotIn("接下来怎么调", reply_context)
-        self.assertIn("根据 data 和 milk_flow_decision", compact["final_response_instruction"])
-        self.assertIn("明确下一步", compact["final_response_instruction"])
-        self.assertIn("如果可以进入计划", compact["final_response_instruction"])
-        self.assertNotIn("固定模板", json.dumps(reply_context, ensure_ascii=False))
+        self.assertTrue(any(day["date"] == "2026-05-13" for day in rhythm_context["daily_records"]))
+        self.assertNotIn("记录完整后的推荐承接", reply_interpretation)
+        self.assertNotIn("接下来怎么调", reply_interpretation)
+        self.assertNotIn("final_response_instruction", compact)
+        self.assertNotIn("固定模板", json.dumps(compact, ensure_ascii=False))
         self.assertNotIn("工具建议话术", compact)
-        self.assertNotIn("assessment", compact["final_response_instruction"])
         json.dumps(result, ensure_ascii=False)
 
     def test_assessment_state_tells_next_confirmation_to_continue_plan_flow_without_reasking_records(self) -> None:
@@ -538,6 +547,163 @@ class MilkManagementToolTests(unittest.TestCase):
         self.assertFalse(draft["schedule_basis"]["ask_daily_counts"])
         self.assertEqual(draft["schedule_basis"]["pumping_count_per_day"], 8)
 
+    def test_analysis_intake_evaluate_preview_then_save_plan(self) -> None:
+        uid, _ = _seed_user("analysis-intake-plan-preview")
+        times = ["00:00", "03:00", "06:00", "09:00", "12:00", "15:00", "18:00", "21:00"]
+        for offset, day in enumerate(["2026-05-07", "2026-05-08", "2026-05-09", "2026-05-10", "2026-05-11", "2026-05-12", "2026-05-13"]):
+            for index, time in enumerate(times, start=1):
+                _add_task(
+                    uid,
+                    task_id=offset * 10 + index,
+                    content="吸奶",
+                    item_type="吸奶",
+                    is_milk_pump=1,
+                    target_date=day,
+                    start_time=time,
+                    finish="true",
+                )
+            _add_pumping_rows(uid, day, ["06:00", "09:00", "12:00", "18:00", "21:00"])
+
+        state = ContextState()
+
+        first = execute_milk_management_tool(
+            {
+                "_tool_name": "milk_analysis_intake_manage",
+                "user_id": uid,
+                "action": "start",
+                "user_update": "分析最近吸奶情况",
+                "as_of_time": "2026-05-14 12:00:00",
+            },
+            {"user_message": "分析最近吸奶情况", "locale": "zh-CN", "timezone": "Asia/Shanghai", "message_sent_at": ""},
+        )
+        self.assertTrue(first["ok"])
+        self.assertEqual(first["status"], "milk_analysis_intake_collecting")
+        self.assertEqual(first["data"]["executed_step"], "intake")
+        self.assertEqual(first["data"]["current_field"], "infant_wet_diapers")
+        self.assertIn("records_7d", [item["id"] for item in first["data"]["checklist"] if item["status"] == "collected"])
+        record_milk_management_tool_state(state, "milk_analysis_intake_manage", {"ok": True, "tool_name": "milk_analysis_intake_manage", "result": first})
+
+        answers = [
+            ("宝宝近24小时尿量正常", "infant_state_or_satisfaction"),
+            ("精神好，吃完能安稳一会儿", "infant_growth_signal"),
+            ("体重增长正常", "maternal_red_flags"),
+            ("没有发热寒战红肿硬块，疼痛也没有加重", "maternal_breast_comfort"),
+            ("吸完比较舒服，乳房状态正常", None),
+        ]
+        latest = first
+        for user_update, expected_next_field in answers:
+            latest = execute_milk_management_tool(
+                {
+                    "_tool_name": "milk_analysis_intake_manage",
+                    "user_id": uid,
+                    "action": "update",
+                    "user_update": user_update,
+                    "as_of_time": "2026-05-14 12:00:00",
+                },
+                {
+                    "user_message": user_update,
+                    "locale": "zh-CN",
+                    "timezone": "Asia/Shanghai",
+                    "message_sent_at": "",
+                    "_milk_management_state": state.milk_management_state,
+                },
+            )
+            record_milk_management_tool_state(state, "milk_analysis_intake_manage", {"ok": True, "tool_name": "milk_analysis_intake_manage", "result": latest})
+            if expected_next_field:
+                self.assertEqual(latest["data"]["current_field"], expected_next_field)
+        self.assertEqual(latest["status"], "milk_analysis_ready_to_evaluate")
+        self.assertEqual(latest["data"]["executed_step"], "intake")
+        self.assertIn("analysis_context", latest["data"])
+        self.assertIn("raw_records", latest["data"]["analysis_context"]["source_records"])
+        self.assertEqual(state.milk_management_state["analysis_intake"]["stage"], "ready_to_evaluate")
+        self.assertFalse([item for item in latest["data"]["checklist"] if item["status"] != "collected"])
+
+        intake_compact = model_tool_output({"ok": True, "tool_name": "milk_analysis_intake_manage", "result": latest})
+        self.assertEqual(intake_compact["tool_name"], "milk_analysis_intake_manage")
+        self.assertIn("analysis_context", intake_compact)
+        self.assertNotIn("response_instruction", intake_compact)
+
+        assessment = execute_milk_management_tool(
+            {
+                "_tool_name": "milk_analysis_evaluate",
+                "user_id": uid,
+                "analysis_context": latest["data"]["analysis_context"],
+                "as_of_time": "2026-05-14 12:00:00",
+            },
+            {
+                "user_message": "继续分析",
+                "locale": "zh-CN",
+                "timezone": "Asia/Shanghai",
+                "message_sent_at": "",
+                "_milk_management_state": state.milk_management_state,
+            },
+        )
+        self.assertTrue(assessment["ok"])
+        self.assertEqual(assessment["data"]["executed_step"], "assessment")
+        self.assertIn("assessment_result", assessment["data"])
+        self.assertEqual(assessment["data"]["next_tool"], "milk_plan_preview_create")
+        record_milk_management_tool_state(state, "milk_analysis_evaluate", {"ok": True, "tool_name": "milk_analysis_evaluate", "result": assessment})
+        self.assertEqual(state.milk_management_state["analysis_intake"]["stage"], "analysis_ready")
+
+        result = execute_milk_management_tool(
+            {
+                "_tool_name": "milk_plan_preview_create",
+                "user_id": uid,
+                "analysis_context": latest["data"]["analysis_context"],
+                "assessment_result": assessment["data"]["assessment_result"],
+                "user_update": "先按每天多50ml来做",
+                "plan_days": 7,
+                "as_of_time": "2026-05-14 12:00:00",
+            },
+            {
+                "user_message": "先按每天多50ml来做",
+                "locale": "zh-CN",
+                "timezone": "Asia/Shanghai",
+                "message_sent_at": "",
+                "_milk_management_state": state.milk_management_state,
+            },
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["status"], "plan_preview_ready")
+        self.assertEqual(result["data"]["executed_step"], "plan_preview")
+        self.assertIn("card", result)
+        self.assertEqual(result["data"]["analysis_context"]["delta_ml"], 50.0)
+        self.assertEqual(result["data"]["plan_preview"]["status"], "plan_preview_ready")
+        compact = model_tool_output({"ok": True, "tool_name": "milk_plan_preview_create", "result": result})
+        self.assertEqual(compact["tool_name"], "milk_plan_preview_create")
+        self.assertIn("workflow", compact)
+        self.assertNotIn("response_instruction", compact)
+
+        record_milk_management_tool_state(state, "milk_plan_preview_create", {"ok": True, "tool_name": "milk_plan_preview_create", "result": result})
+        self.assertEqual(state.milk_management_state["analysis_intake"]["stage"], "plan_preview")
+        self.assertEqual(state.milk_management_state["analysis_intake"]["plan_preview"]["status"], "plan_preview_ready")
+
+        saved = execute_milk_management_tool(
+            {
+                "_tool_name": "milk_plan_mutate",
+                "user_id": uid,
+                "operation": "create",
+                "confirmed": True,
+                "confirmed_plan": "{}",
+                "patch": "{}",
+                "reexpand_calendar": True,
+                "delete_calendar_items": False,
+                "calendar_write_strategy": None,
+                "idempotency_key": "",
+            },
+            {
+                "user_message": "保存并同步",
+                "locale": "zh-CN",
+                "timezone": "Asia/Shanghai",
+                "message_sent_at": "",
+                "_milk_management_state": state.milk_management_state,
+            },
+        )
+        self.assertTrue(saved["ok"])
+        self.assertEqual(saved["status"], "plan_applied")
+        self.assertGreater(saved["data"]["inserted_calendar_count"], 0)
+
     def test_assessment_tool_requires_clinical_context_before_comprehensive_analysis(self) -> None:
         uid, _ = _seed_user("assessment-needs-clinical-context")
         _add_pumping_rows(uid, "2026-05-13", ["06:00", "09:00", "12:00", "18:00", "21:00"])
@@ -593,9 +759,7 @@ class MilkManagementToolTests(unittest.TestCase):
         )
         self.assertNotIn("可以这样问用户", compact["需要继续确认"])
         self.assertNotIn("工具建议话术", compact)
-        self.assertIn("信息不足时不要下最终结论", compact["final_response_instruction"])
-        self.assertIn("只问最影响下一步判断的信息", compact["final_response_instruction"])
-        self.assertIn("明确问题或明确下一步", compact["final_response_instruction"])
+        self.assertNotIn("final_response_instruction", compact)
         json.dumps(result, ensure_ascii=False)
 
     def test_assessment_missing_context_state_forces_next_turn_to_continue_evaluation(self) -> None:
@@ -637,7 +801,7 @@ class MilkManagementToolTests(unittest.TestCase):
         self.assertIn("last_assessment_next_tool: milk_assessment_evaluate", context)
         self.assertIn("用户本轮是在补充上述缺失信息", context)
         self.assertIn("不要重复追问同一项", context)
-        self.assertIn("调用 last_assessment_next_tool", context)
+        self.assertIn("调用 milk_analysis_intake_manage 继续奶量分析信息采集", context)
         self.assertIn("不要直接给调整建议", context)
         self.assertNotIn("last_assessment_suggested_plan_type", context)
 
@@ -927,11 +1091,12 @@ class MilkManagementToolTests(unittest.TestCase):
         self.assertEqual([item["time"] for item in rhythm["selected_day"]["actual_pumping"]], pumping_times)
 
         compact = model_tool_output({"ok": True, "tool_name": "milk_plan_preview", "result": result})
+        self.assertNotIn("response_instruction", compact)
         plan_context = compact["plan_preview"]["plan_context"]
         self.assertTrue(any("不需要再向用户确认已知节奏信息" in item for item in plan_context["计划依据"]))
         self.assertTrue(any("不需要重复追问已知节奏信息" in item for item in plan_context["最近7天吸奶和亲喂节奏"]["摘要"]))
         self.assertTrue(any(day["日期"] == "2026-05-12" for day in plan_context["最近7天吸奶和亲喂节奏"]["每天明细"]))
-        self.assertIn("不要重复追问这些已知节奏信息", compact["final_response_instruction"])
+        self.assertNotIn("final_response_instruction", compact)
 
     def test_plan_preview_tool_returns_structured_plan_card(self) -> None:
         uid, _ = _seed_user("plan-card")
@@ -1003,13 +1168,16 @@ class MilkManagementToolTests(unittest.TestCase):
         compact = model_tool_output({"ok": True, "tool_name": "milk_plan_preview", "result": result})
         self.assertEqual(compact["card"]["card_type"], "milk_plan_card")
         self.assertTrue(compact["card"]["created"])
-        self.assertIn("根据 plan_context 自然组织语言", compact["final_response_instruction"])
-        self.assertNotIn("草稿", compact["final_response_instruction"])
+        self.assertNotIn("final_response_instruction", compact)
         self.assertIn("calendar_sync_prompt", compact)
         self.assertIn("同步到日历", compact["next_actions"])
         self.assertNotIn("assistant_followup", compact)
-        self.assertNotIn("assistant_followup.message", compact["final_response_instruction"])
         self.assertNotIn("summary", compact)
+        self.assertIn("facts", compact)
+        self.assertIn("interpretation", compact)
+        self.assertIn("workflow", compact)
+        self.assertIn("raw_records", compact["facts"])
+        self.assertTrue(compact["facts"]["daily_rollups"])
         self.assertIn("confirmed_plan_for_save", compact["plan_preview"])
         self.assertIn("plan_context", compact["plan_preview"])
         plan_context = compact["plan_preview"]["plan_context"]
@@ -1028,10 +1196,11 @@ class MilkManagementToolTests(unittest.TestCase):
                 "_tool_name": "milk_plan_mutate",
                 "user_id": uid,
                 "operation": "create",
+                "confirmed": True,
                 "confirmed_plan": result["data"]["draft"],
                 "idempotency_key": "plan-card-confirmed",
             },
-            {"user_message": "", "locale": "zh-CN", "timezone": "Asia/Shanghai", "message_sent_at": ""},
+            {"user_message": "确认同步这版计划", "locale": "zh-CN", "timezone": "Asia/Shanghai", "message_sent_at": ""},
         )
         self.assertTrue(confirmed["ok"])
         self.assertIn("assistant_followup", confirmed)
@@ -1052,8 +1221,7 @@ class MilkManagementToolTests(unittest.TestCase):
         self.assertEqual(compact_confirmed["card"]["card_type"], "milk_plan_card")
         self.assertNotIn("status", compact_confirmed)
         self.assertIn("user_context", compact_confirmed)
-        self.assertIn("计划页", compact_confirmed["final_response_instruction"])
-        self.assertIn("最近几天", compact_confirmed["final_response_instruction"])
+        self.assertNotIn("final_response_instruction", compact_confirmed)
         self.assertEqual(
             artifact_events_from_tool_result(
                 tool_call_id="call_confirm",
@@ -1062,6 +1230,241 @@ class MilkManagementToolTests(unittest.TestCase):
             ),
             [],
         )
+
+    def test_plan_preview_uses_seven_day_average_current_daily_milk(self) -> None:
+        uid, _ = _seed_user("plan-average-current-milk")
+        daily_estimates = [540, 550, 560, 570, 580, 590, 900]
+        result = execute_milk_management_tool(
+            {
+                "_tool_name": "milk_plan_preview",
+                "user_id": uid,
+                "plan_type": "increase_milk",
+                "plan_days": 7,
+                "as_of_time": "2026-05-14 12:00:00",
+                "options": {
+                    "prepared_assessment": {
+                        "pumping_summary": {"count": 56, "total_ml": sum(daily_estimates)},
+                        "feeding_summary": {"count": 0, "type_counts": {}},
+                        "window": {"window_days": 7},
+                        "milk_normality": {
+                            "overall_status": "under_supply_alert",
+                            "stats": {"valid_days": 7, "low_days": 6},
+                            "days": [
+                                {
+                                    "ok": True,
+                                    "date": f"2026-05-{day:02d}",
+                                    "status": "low" if estimate < 600 else "normal",
+                                    "estimated_daily_milk_ml": estimate,
+                                    "yield_reference": {"p15": 720, "p85": 950},
+                                }
+                                for day, estimate in zip(range(7, 14), daily_estimates)
+                            ],
+                        },
+                    },
+                    "prepared_growth_assessment": {"status": "normal"},
+                    "observed_persistent_abnormal": True,
+                    "infant_signals": _reassuring_infant_signals(),
+                    "maternal_symptoms": _reassuring_maternal_symptoms(),
+                },
+            },
+            {"user_message": "帮我生成追奶计划", "locale": "zh-CN", "timezone": "Asia/Shanghai", "message_sent_at": ""},
+        )
+
+        self.assertTrue(result["ok"])
+        draft = result["data"]["draft"]
+        self.assertEqual(draft["current_daily_ml"], 612.9)
+        self.assertNotEqual(draft["current_daily_ml"], daily_estimates[-1])
+        target_items = " ".join(result["card"]["card_json"]["sections"][0]["items"])
+        self.assertIn("当前每日奶量约 612.9 ml", target_items)
+
+    def test_plan_preview_reloads_seven_day_window_when_prepared_assessment_is_one_day(self) -> None:
+        uid, _ = _seed_user("plan-reload-seven-day-average")
+        daily_counts = [6, 7, 8, 9, 10, 11, 12]
+        for offset, count in enumerate(daily_counts, start=7):
+            _add_pumping_rows(uid, f"2026-05-{offset:02d}", [f"{index * 2:02d}:00" for index in range(count)])
+        state = ContextState()
+        state.milk_management_state["last_assessment"] = {
+            "assessment_data": {
+                "pumping_summary": {"count": 8, "total_ml": 900},
+                "feeding_summary": {"count": 0, "type_counts": {}},
+                "window": {"window_days": 1},
+                "milk_normality": {
+                    "overall_status": "under_supply_alert",
+                    "days": [
+                        {
+                            "ok": True,
+                            "date": "2026-05-13",
+                            "status": "low",
+                            "estimated_daily_milk_ml": 900,
+                            "yield_reference": {"p15": 720, "p85": 950},
+                        }
+                    ],
+                },
+            },
+            "clinical_assessment": {
+                "plan_gate": {"allowed": False, "reason": "stale one-day clinical gate should not be reused for plan preview."}
+            },
+        }
+
+        result = execute_milk_management_tool(
+            {
+                "_tool_name": "milk_plan_preview",
+                "user_id": uid,
+                "plan_type": "increase_milk",
+                "plan_days": 7,
+                "as_of_time": "2026-05-14 12:00:00",
+                "options": {
+                    "prepared_growth_assessment": {"status": "normal"},
+                    "observed_persistent_abnormal": True,
+                    "infant_signals": _reassuring_infant_signals(),
+                    "maternal_symptoms": _reassuring_maternal_symptoms(),
+                },
+            },
+            {
+                "user_message": "帮我生成追奶计划",
+                "locale": "zh-CN",
+                "timezone": "Asia/Shanghai",
+                "message_sent_at": "",
+                "_milk_management_state": state.milk_management_state,
+            },
+        )
+
+        self.assertTrue(result["ok"])
+        draft = result["data"]["draft"]
+        self.assertEqual(draft["current_daily_ml"], 630.0)
+        self.assertNotEqual(draft["current_daily_ml"], 900)
+
+    def test_plan_preview_uses_breastmilk_bottle_average_when_pumping_missing(self) -> None:
+        uid, infant_id = _seed_user("plan-breastmilk-bottle-average")
+        daily_amounts = [480, 500, 520, 540, 560, 580, 600]
+        for offset, amount in enumerate(daily_amounts, start=7):
+            _add_breastmilk_bottle_rows(uid, infant_id, f"2026-05-{offset:02d}", [("09:00", amount)])
+
+        result = execute_milk_management_tool(
+            {
+                "_tool_name": "milk_plan_preview",
+                "user_id": uid,
+                "plan_type": "increase_milk",
+                "plan_days": 7,
+                "as_of_time": "2026-05-14 12:00:00",
+                "options": {
+                    "prepared_growth_assessment": {"status": "normal"},
+                    "observed_persistent_abnormal": True,
+                    "infant_signals": _reassuring_infant_signals(),
+                    "maternal_symptoms": _reassuring_maternal_symptoms(),
+                },
+            },
+            {"user_message": "帮我生成追奶计划", "locale": "zh-CN", "timezone": "Asia/Shanghai", "message_sent_at": ""},
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["status"], "plan_preview_ready")
+        draft = result["data"]["draft"]
+        self.assertEqual(draft["current_daily_ml"], 540.0)
+        assessment = result["data"]["assessment"]
+        days = assessment["milk_normality"]["days"]
+        self.assertEqual(assessment["milk_normality"]["stats"]["valid_days"], 7)
+        self.assertTrue(all(day["milk_basis_rule"] == "breastmilk_bottle_fallback_no_pumping" for day in days))
+        target_items = " ".join(result["card"]["card_json"]["sections"][0]["items"])
+        self.assertIn("当前每日奶量约 540 ml", target_items)
+
+    def test_plan_preview_does_not_create_zero_to_fifty_target_card(self) -> None:
+        uid, _ = _seed_user("plan-zero-current-milk")
+        result = execute_milk_management_tool(
+            {
+                "_tool_name": "milk_plan_preview",
+                "user_id": uid,
+                "plan_type": "increase_milk",
+                "plan_days": 7,
+                "as_of_time": "2026-05-14 12:00:00",
+                "options": {
+                    "prepared_assessment": {
+                        "pumping_summary": {"count": 0, "total_ml": 0},
+                        "feeding_summary": {"count": 0, "type_counts": {}},
+                        "window": {"window_days": 7},
+                        "milk_normality": {
+                            "overall_status": "under_supply_alert",
+                            "stats": {"valid_days": 7, "low_days": 7},
+                            "days": [
+                                {
+                                    "ok": True,
+                                    "date": f"2026-05-{day:02d}",
+                                    "status": "low",
+                                    "estimated_daily_milk_ml": 0,
+                                    "yield_reference": {"p15": 720, "p85": 950},
+                                }
+                                for day in range(7, 14)
+                            ],
+                        },
+                    },
+                    "prepared_growth_assessment": {"status": "normal"},
+                    "observed_persistent_abnormal": True,
+                    "infant_signals": _reassuring_infant_signals(),
+                    "maternal_symptoms": _reassuring_maternal_symptoms(),
+                },
+            },
+            {"user_message": "帮我生成追奶计划", "locale": "zh-CN", "timezone": "Asia/Shanghai", "message_sent_at": ""},
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["status"], "milk_plan_needs_milk_records")
+        self.assertFalse(result["data"]["requires_confirmation"])
+        self.assertNotIn("draft", result["data"])
+        self.assertNotIn("card", result)
+        compact = model_tool_output({"ok": True, "tool_name": "milk_plan_preview", "result": result})
+        self.assertIn("过去 7 天", compact["user_context"]["当前结果"])
+        self.assertNotIn("card", compact)
+        self.assertNotIn("plan_preview", compact)
+        self.assertNotIn("target_daily_ml", json.dumps(compact.get("facts"), ensure_ascii=False))
+
+    def test_plan_preview_does_not_ask_user_for_daily_counts_when_schedule_basis_is_low(self) -> None:
+        uid, _ = _seed_user("plan-no-daily-count-followup")
+        daily_estimates = [610, 620, 615, 625, 630, 620, 618]
+        result = execute_milk_management_tool(
+            {
+                "_tool_name": "milk_plan_preview",
+                "user_id": uid,
+                "plan_type": "increase_milk",
+                "plan_days": 7,
+                "as_of_time": "2026-05-14 12:00:00",
+                "options": {
+                    "prepared_assessment": {
+                        "pumping_summary": {"count": 0, "total_ml": 0},
+                        "feeding_summary": {"count": 0, "type_counts": {}},
+                        "window": {"window_days": 7},
+                        "milk_normality": {
+                            "overall_status": "under_supply_alert",
+                            "stats": {"valid_days": 7, "low_days": 7},
+                            "days": [
+                                {
+                                    "ok": True,
+                                    "date": f"2026-05-{day:02d}",
+                                    "status": "low",
+                                    "estimated_daily_milk_ml": estimate,
+                                    "yield_reference": {"p15": 720, "p85": 950},
+                                }
+                                for day, estimate in zip(range(7, 14), daily_estimates)
+                            ],
+                        },
+                    },
+                    "prepared_growth_assessment": {"status": "normal"},
+                    "observed_persistent_abnormal": True,
+                    "infant_signals": _reassuring_infant_signals(),
+                    "maternal_symptoms": _reassuring_maternal_symptoms(),
+                },
+            },
+            {"user_message": "帮我生成追奶计划", "locale": "zh-CN", "timezone": "Asia/Shanghai", "message_sent_at": ""},
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["status"], "plan_preview_ready")
+        self.assertFalse(result["data"]["draft"]["schedule_basis"]["ask_daily_counts"])
+        compact = model_tool_output({"ok": True, "tool_name": "milk_plan_preview", "result": result})
+        compact_text = json.dumps(compact, ensure_ascii=False)
+        self.assertNotIn("每天几次", compact_text)
+        self.assertNotIn("大概节奏", compact_text)
+        self.assertNotIn("大概次数", compact_text)
+        self.assertNotIn("final_response_instruction", compact)
 
     def test_plan_confirm_can_save_from_runtime_preview_context(self) -> None:
         uid, _ = _seed_user("plan-confirm-context")
@@ -1111,6 +1514,9 @@ class MilkManagementToolTests(unittest.TestCase):
                 "_tool_name": "milk_plan_mutate",
                 "user_id": uid,
                 "operation": "create",
+                "confirmed": True,
+                "confirmed_plan": {},
+                "idempotency_key": "",
             },
             {
                 "user_message": "确认，把这版计划同步到日历提醒",
@@ -1127,6 +1533,146 @@ class MilkManagementToolTests(unittest.TestCase):
         self.assertIn("calendar_items", confirmed["data"])
         self.assertEqual(confirmed["card"]["card_type"], "milk_plan_card")
         self.assertEqual(confirmed["card"]["card_json"]["status_label"], "已确认")
+
+    def test_plan_confirm_uses_cached_preview_even_when_model_passes_invalid_plan(self) -> None:
+        uid, _ = _seed_user("plan-confirm-overrides-invalid-model-plan")
+        for offset, day in enumerate(["2026-05-07", "2026-05-08", "2026-05-09", "2026-05-10", "2026-05-11", "2026-05-12", "2026-05-13"]):
+            _add_pumping_rows(uid, day, ["06:00", "09:00", "12:00", "18:00", "21:00"])
+
+        preview = execute_milk_management_tool(
+            {
+                "_tool_name": "milk_plan_preview",
+                "user_id": uid,
+                "plan_type": "increase_milk",
+                "plan_days": 3,
+                "as_of_time": "2026-05-14 12:00:00",
+                "options": {
+                    "prepared_growth_assessment": {"status": "normal"},
+                    "observed_persistent_abnormal": True,
+                    "infant_signals": _reassuring_infant_signals(),
+                    "maternal_symptoms": _reassuring_maternal_symptoms(),
+                },
+            },
+            {"user_message": "", "locale": "zh-CN", "timezone": "Asia/Shanghai", "message_sent_at": ""},
+        )
+        self.assertEqual(preview["status"], "plan_preview_ready")
+        state = ContextState()
+        record_milk_management_tool_state(state, "milk_plan_preview", {"ok": True, "tool_name": "milk_plan_preview", "result": preview})
+
+        invalid_model_plan = {
+            "plan_type": "increase_milk",
+            "plan_name": "模型重拼的无效追奶计划",
+            "plan_days": 3,
+            "current_daily_ml": 615,
+            "target_daily_ml": 665,
+            "plan_rules": {"current_pumping_count": 5, "desired_pumping_count": 5},
+            "daily_schedule_templates": [
+                {
+                    "day_start": 1,
+                    "day_end": 3,
+                    "items": [{"time": time, "calendar_title": "吸奶"} for time in ["06:00", "09:00", "12:00", "18:00", "21:00"]],
+                }
+            ],
+        }
+        self.assertFalse(validate_milk_plan(user_id=uid, plan=invalid_model_plan)["data"]["valid"])
+
+        confirmed = execute_milk_management_tool(
+            {
+                "_tool_name": "milk_plan_mutate",
+                "user_id": uid,
+                "operation": "create",
+                "confirmed": True,
+                "confirmed_plan": invalid_model_plan,
+                "idempotency_key": "",
+            },
+            {
+                "user_message": "确认，把这版计划同步到日历提醒",
+                "locale": "zh-CN",
+                "timezone": "Asia/Shanghai",
+                "message_sent_at": "",
+                "_milk_management_state": state.milk_management_state,
+            },
+        )
+
+        self.assertTrue(confirmed["ok"])
+        self.assertEqual(confirmed["status"], "plan_applied")
+        saved_names = [
+            row["plan_name"]
+            for row in fetch_all("SELECT plan_name FROM milk_plan WHERE user_id = ?", (uid,))
+        ]
+        self.assertNotIn("模型重拼的无效追奶计划", saved_names)
+
+    def test_milk_write_tool_requires_confirmed_flag_and_current_user_confirmation(self) -> None:
+        uid, _ = _seed_user("write-confirmation-guard")
+
+        result = execute_milk_management_tool(
+            {
+                "_tool_name": "milk_record_mutate",
+                "user_id": uid,
+                "operation": "create",
+                "confirmed": False,
+                "record_kind": "pumping",
+                "record_id": None,
+                "occurred_at": "2026-05-14 09:30:00",
+                "amount_ml": 80,
+                "duration_minutes": 18,
+                "infant_id": None,
+                "title": None,
+                "patch": "{}",
+                "idempotency_key": "write-confirmation-guard",
+            },
+            {"user_message": "帮我记录 80ml", "locale": "zh-CN", "timezone": "Asia/Shanghai", "message_sent_at": ""},
+        )
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["status"], "needs_write_confirmation")
+        self.assertTrue(result["data"]["requires_confirmation"])
+        self.assertEqual(_scalar("SELECT COUNT(*) FROM pumping_log WHERE user_id = ?", (uid,)), 0)
+        compact = model_tool_output({"ok": True, "tool_name": "milk_record_mutate", "result": result})
+        self.assertEqual(compact["status"], "needs_write_confirmation")
+        self.assertTrue(compact["requires_confirmation"])
+        self.assertNotIn("final_response_instruction", compact)
+
+        missing_current_confirmation = execute_milk_management_tool(
+            {
+                "_tool_name": "milk_record_mutate",
+                "user_id": uid,
+                "operation": "create",
+                "confirmed": True,
+                "record_kind": "pumping",
+                "record_id": None,
+                "occurred_at": "2026-05-14 10:30:00",
+                "amount_ml": 90,
+                "duration_minutes": 20,
+                "infant_id": None,
+                "title": None,
+                "patch": "{}",
+                "idempotency_key": "write-confirmation-guard-2",
+            },
+            {"user_message": "今天 90ml", "locale": "zh-CN", "timezone": "Asia/Shanghai", "message_sent_at": ""},
+        )
+
+        self.assertFalse(missing_current_confirmation["ok"])
+        self.assertEqual(missing_current_confirmation["status"], "needs_write_confirmation")
+        self.assertEqual(_scalar("SELECT COUNT(*) FROM pumping_log WHERE user_id = ?", (uid,)), 0)
+
+    def test_successful_milk_write_invalidates_cached_milk_context(self) -> None:
+        state = ContextState()
+        state.milk_management_state = {
+            "last_assessment": {"assessment_data": {"status": "old"}},
+            "pending_plan_after_assessment": {"plan_type": "increase_milk"},
+            "last_plan_preview": {"status": "plan_preview_ready", "draft": {"plan_type": "increase_milk"}},
+        }
+
+        record_milk_management_tool_state(
+            state,
+            "milk_record_mutate",
+            {"ok": True, "tool_name": "milk_record_mutate", "result": {"ok": True, "status": "record_created"}},
+        )
+
+        self.assertNotIn("last_assessment", state.milk_management_state)
+        self.assertNotIn("pending_plan_after_assessment", state.milk_management_state)
+        self.assertNotIn("last_plan_preview", state.milk_management_state)
 
     def test_plan_preview_tool_uses_clinical_gate_before_generating_plan(self) -> None:
         uid, _ = _seed_user("plan-clinical-gate")
@@ -1222,10 +1768,10 @@ class MilkManagementToolTests(unittest.TestCase):
         self.assertNotIn("workflow_intent", compact)
         self.assertNotIn("continuation_instruction", compact)
         self.assertNotIn("assistant_followup", compact)
+        self.assertNotIn("response_instruction", compact)
+        self.assertNotIn("final_response_instruction", compact)
         self.assertIn("宝宝近 24 小时尿量/尿布情况", compact["user_context"]["需要继续确认"]["还需要确认"])
         self.assertNotIn("可以这样问用户", compact["user_context"]["需要继续确认"])
-        self.assertIn("继续推进", compact["final_response_instruction"])
-        self.assertIn("不要提工具", compact["final_response_instruction"])
 
     def test_plan_preview_missing_context_state_continues_plan_flow_next_turn(self) -> None:
         uid, _ = _seed_user("plan-missing-context-state")
@@ -1279,7 +1825,7 @@ class MilkManagementToolTests(unittest.TestCase):
         self.assertIn("last_plan_preview_status: milk_plan_needs_clinical_context", context)
         self.assertIn("last_plan_preview_missing_fields: infant_wet_diapers, infant_state_or_feeding_satisfaction", context)
         self.assertIn("last_plan_preview_next_tool: milk_plan_preview", context)
-        self.assertIn("继续计划预览流程", context)
+        self.assertIn("继续补齐信息", context)
         self.assertIn("不要直接给调整建议", context)
 
     def test_plan_preview_keeps_fullness_without_red_flags_in_milk_plan_flow(self) -> None:
@@ -1365,6 +1911,104 @@ class MilkManagementToolTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertEqual(result["status"], "calendar_write_strategy_required")
         self.assertEqual(result["data"]["calendar_delta"]["existing_future_plan_task_count"], 3)
+
+    def test_plan_mutate_strategy_required_output_does_not_claim_saved(self) -> None:
+        uid, _ = _seed_user("plan-strategy-required-output")
+        _seed_saved_plan_calendar(uid, task_count=3)
+        plan = _simple_maintain_plan(plan_days=2)
+
+        result = execute_milk_management_tool(
+            {
+                "_tool_name": "milk_plan_mutate",
+                "user_id": uid,
+                "operation": "create",
+                "confirmed": True,
+                "confirmed_plan": plan,
+                "idempotency_key": "strategy-required-output",
+            },
+            {"user_message": "确认保存这版计划", "locale": "zh-CN", "timezone": "Asia/Shanghai", "message_sent_at": ""},
+        )
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["status"], "calendar_write_strategy_required")
+        self.assertEqual(_scalar("SELECT COUNT(*) FROM milk_plan WHERE user_id = ? AND plan_name = '稳奶计划'", (uid,)), 0)
+
+        safe = safe_tool_result({"ok": True, "tool_name": "milk_plan_mutate", "result": result})
+        self.assertFalse(safe["result_ok"])
+        self.assertEqual(safe["calendar_delta"]["existing_future_plan_task_count"], 3)
+
+        compact = model_tool_output({"ok": True, "tool_name": "milk_plan_mutate", "result": result})
+        compact_text = json.dumps(compact, ensure_ascii=False)
+        self.assertFalse(compact["ok"])
+        self.assertEqual(compact["status"], "calendar_write_strategy_required")
+        self.assertNotIn("final_response_instruction", compact)
+        self.assertIn("追加到现有日程", compact_text)
+        self.assertIn("替换未来未完成", compact_text)
+        self.assertNotIn("计划已经保存", compact_text)
+        self.assertNotIn("已经同步到计划页", compact_text)
+        self.assertNotIn("接下来会提醒", compact_text)
+
+    def test_invalid_plan_preview_does_not_create_saveable_card_or_state(self) -> None:
+        uid, _ = _seed_user("invalid-preview-no-card")
+        invalid_preview = {
+            "ok": True,
+            "status": "plan_preview_needs_revision",
+            "summary": "追奶计划修改后吸奶任务次数必须大于当前吸奶次数。",
+            "data": {
+                "draft": {
+                    "plan_type": "increase_milk",
+                    "plan_days": 7,
+                    "current_daily_ml": 615,
+                    "target_daily_ml": 665,
+                    "current_frequency": 6,
+                    "plan_rules": {"current_pumping_count": 5, "desired_pumping_count": 5},
+                    "daily_schedule_templates": [
+                        {
+                            "day_start": 1,
+                            "day_end": 7,
+                            "items": [
+                                {"time": "06:00", "calendar_title": "吸奶"},
+                                {"time": "09:00", "calendar_title": "吸奶"},
+                                {"time": "12:00", "calendar_title": "吸奶"},
+                                {"time": "15:00", "calendar_title": "吸奶"},
+                                {"time": "18:00", "calendar_title": "吸奶"},
+                            ],
+                        }
+                    ],
+                },
+                "validation": {
+                    "valid": False,
+                    "violations": ["追奶计划修改后吸奶任务次数必须大于当前吸奶次数。"],
+                },
+                "intake_state": {"stage": "analysis_ready"},
+            },
+        }
+
+        with patch("momcozy_agent.tool_handlers.milk_management._preview_plan", return_value=invalid_preview):
+            result = execute_milk_management_tool(
+                {
+                    "_tool_name": "milk_plan_preview",
+                    "user_id": uid,
+                    "plan_type": "increase_milk",
+                    "plan_days": 7,
+                },
+                {"user_message": "生成计划", "locale": "zh-CN", "timezone": "Asia/Shanghai", "message_sent_at": ""},
+            )
+
+        self.assertEqual(result["status"], "plan_preview_needs_revision")
+        self.assertNotIn("card", result)
+        self.assertNotIn("assistant_followup", result)
+
+        compact = model_tool_output({"ok": True, "tool_name": "milk_plan_preview", "result": result})
+        self.assertNotIn("card", compact)
+        self.assertFalse(compact["workflow"].get("requires_confirmation", False))
+
+        state = ContextState()
+        record_milk_management_tool_state(state, "milk_plan_preview_create", {"ok": True, "tool_name": "milk_plan_preview_create", "result": result})
+        intake = state.milk_management_state.get("analysis_intake", {})
+        self.assertNotEqual(intake.get("stage"), "plan_preview")
+        self.assertNotIn("plan_preview", intake)
+        self.assertNotIn("last_plan_preview", state.milk_management_state)
 
     def test_plan_create_can_append_or_replace_future_plan_tasks(self) -> None:
         append_uid, _ = _seed_user("plan-strategy-append")
@@ -1586,6 +2230,21 @@ def _add_feeding_rows(user_id: str, infant_id: int, target_date: str, times: lis
                 VALUES (?, ?, ?, '亲喂', 0, 0, '亲喂')
                 """,
                 (user_id, infant_id, f"{target_date} {time}:00"),
+            )
+
+
+def _add_breastmilk_bottle_rows(user_id: str, infant_id: int, target_date: str, entries: list[tuple[str, float]]) -> None:
+    with transaction() as conn:
+        for time, amount in entries:
+            conn.execute(
+                """
+                INSERT INTO feeding_log(
+                    user_id, infant_id, feed_time, feed_type, feed_milk_volum,
+                    feed_action, feeding_title
+                )
+                VALUES (?, ?, ?, '瓶喂母乳', ?, 0, '瓶喂母乳')
+                """,
+                (user_id, infant_id, f"{target_date} {time}:00", float(amount)),
             )
 
 

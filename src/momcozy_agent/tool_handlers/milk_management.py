@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 from typing import Any
 
 from ..services.milk_management.assessment import evaluate_milk_status
@@ -50,6 +52,22 @@ RISK_MEDICAL_RECOMMENDED = "medical_recommended"
 RISK_URGENT = "urgent"
 
 ALL_PLAN_TYPES = [PLAN_TYPE_INCREASE, PLAN_TYPE_MAINTAIN, PLAN_TYPE_DECREASE]
+FLOW_REQUIRED_FIELDS = [
+    "records_7d",
+    "infant_wet_diapers",
+    "infant_state_or_satisfaction",
+    "infant_growth_signal",
+    "maternal_red_flags",
+    "maternal_breast_comfort",
+]
+FLOW_FIELD_LABELS = {
+    "records_7d": "过去 7 天可计算奶量记录",
+    "infant_wet_diapers": "宝宝近 24 小时尿量/尿布情况",
+    "infant_state_or_satisfaction": "宝宝精神状态和吃奶后表现",
+    "infant_growth_signal": "宝宝近期体重增长情况",
+    "maternal_red_flags": "妈妈有没有发热、寒战、红肿、硬块或疼痛加重",
+    "maternal_breast_comfort": "吸奶或亲喂后乳房舒适度",
+}
 
 EVIDENCE_SOURCES: dict[str, dict[str, str]] = {
     "CDC_BREASTFEEDING_FREQUENCY": {
@@ -74,6 +92,15 @@ EVIDENCE_SOURCES: dict[str, dict[str, str]] = {
     },
 }
 
+MILK_WRITE_TOOL_NAMES = {
+    "milk_record_mutate",
+    "milk_plan_mutate",
+    "milk_calendar_mutate",
+    "milk_task_complete",
+    "infant_growth_mutate",
+}
+
+
 def execute_milk_management_tool(args: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
     name = str(args.get("_tool_name") or "")
     arguments = _with_user_id(args, inputs)
@@ -81,6 +108,10 @@ def execute_milk_management_tool(args: dict[str, Any], inputs: RuntimeInputs) ->
         runtime_date = _runtime_target_date(inputs)
         if runtime_date:
             arguments["target_date"] = runtime_date
+
+    confirmation_result = _milk_write_confirmation_result(name, arguments, inputs)
+    if confirmation_result is not None:
+        return confirmation_result
 
     if name == "milk_snapshot_get":
         return dict(get_milk_context(**_pick(arguments, "user_id")))
@@ -155,17 +186,14 @@ def execute_milk_management_tool(args: dict[str, Any], inputs: RuntimeInputs) ->
                 )
             )
         )
+    if name == "milk_analysis_intake_manage":
+        return _analysis_intake_manage(arguments, inputs)
+    if name == "milk_analysis_evaluate":
+        return _analysis_evaluate(arguments, inputs)
+    if name == "milk_plan_preview_create":
+        return _plan_preview_create(arguments, inputs)
     if name == "milk_assessment_evaluate":
-        arguments = _arguments_with_previous_milk_context(arguments, inputs)
-        comprehensive_assessment = _should_run_comprehensive_milk_assessment(arguments, inputs)
-        assessment_arguments = _milk_assessment_arguments(arguments, comprehensive_assessment=comprehensive_assessment)
-        result = dict(evaluate_milk_status(**assessment_arguments))
-        clinical_gate = _clinical_gate_for_analysis(arguments, result=result, comprehensive_assessment=comprehensive_assessment)
-        if clinical_gate is not None:
-            return clinical_gate
-        _attach_clinical_assessment(result, arguments)
-        _attach_milk_flow_decision(result)
-        return result
+        return _evaluate_milk_assessment_tool(arguments, inputs)
     if name == "infant_growth_evaluate":
         return dict(evaluate_infant_growth(**_pick(arguments, "user_id", "infant_id", "as_of_time")))
     if name == "infant_growth_mutate":
@@ -191,6 +219,79 @@ def execute_milk_management_tool(args: dict[str, Any], inputs: RuntimeInputs) ->
     raise ValueError(f"Unknown milk-management tool: {name}")
 
 
+def _milk_write_confirmation_result(name: str, arguments: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any] | None:
+    if name not in MILK_WRITE_TOOL_NAMES:
+        return None
+    if arguments.get("confirmed") is True and _current_user_message_confirms_write(inputs):
+        return None
+    return {
+        "ok": False,
+        "status": "needs_write_confirmation",
+        "summary": "写入前需要用户明确确认。",
+        "data": {
+            "requires_confirmation": True,
+            "confirmation_question": _milk_write_confirmation_question(name, arguments),
+            "blocked_tool": name,
+            "operation": str(arguments.get("operation") or "").strip(),
+        },
+    }
+
+
+def _current_user_message_confirms_write(inputs: RuntimeInputs) -> bool:
+    text = norm_text(inputs.get("user_message"))
+    if not text:
+        return False
+    lowered = text.lower()
+    negative_tokens = ("不要", "别", "先不", "暂不", "不保存", "不写", "不删除", "不用", "算了", "等等", "等一下")
+    if any(token in text for token in negative_tokens):
+        return False
+    if any(token in lowered for token in ("don't", "do not", "not now", "no thanks")):
+        return False
+    if text in {"好", "好的", "可以", "行", "确认", "同意", "是的", "对"}:
+        return True
+    positive_tokens = (
+        "确认",
+        "同意",
+        "保存",
+        "同步",
+        "写入",
+        "记下",
+        "记录",
+        "完成",
+        "跳过",
+        "删除",
+        "更新",
+        "修改",
+        "按这版",
+        "就这样",
+        "执行",
+    )
+    if any(token in text for token in positive_tokens):
+        return True
+    return any(token in lowered for token in ("yes", "confirm", "confirmed", "save", "sync", "apply", "record", "complete", "delete", "update"))
+
+
+def _milk_write_confirmation_question(name: str, arguments: dict[str, Any]) -> str:
+    operation = str(arguments.get("operation") or "").strip()
+    if name == "milk_plan_mutate":
+        if operation == "delete":
+            return "确认删除这份奶量计划吗？"
+        if operation == "update":
+            return "确认更新这份奶量计划吗？"
+        return "确认把这版奶量计划保存并同步到计划页吗？"
+    if name == "milk_calendar_mutate":
+        return "确认应用这次日程调整吗？"
+    if name == "milk_task_complete":
+        if operation == "skip":
+            return "确认跳过这次计划任务吗？"
+        if operation == "cancel_complete":
+            return "确认取消这次任务的完成状态吗？"
+        return "确认把这次计划任务标记为完成吗？"
+    if name == "infant_growth_mutate":
+        return "确认保存这条宝宝成长记录吗？"
+    return "确认保存这条奶量或喂养记录吗？"
+
+
 def _milk_assessment_arguments(arguments: dict[str, Any], *, comprehensive_assessment: bool) -> dict[str, Any]:
     assessment_arguments = _pick(arguments, "user_id", "as_of_time", "window_days", "include_today")
     if comprehensive_assessment:
@@ -199,10 +300,659 @@ def _milk_assessment_arguments(arguments: dict[str, Any], *, comprehensive_asses
     return assessment_arguments
 
 
+def _analysis_intake_manage(arguments: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
+    state = inputs.get("_milk_management_state") if isinstance(inputs.get("_milk_management_state"), dict) else {}
+    previous = _previous_analysis_intake_state(state)
+    action = norm_text(arguments.get("action")) or "auto"
+    if action == "reset":
+        previous = {}
+    user_update = norm_text(arguments.get("user_update")) or norm_text(inputs.get("user_message"))
+    flow = _flow_seed(previous)
+    flow["goal"] = "milk_analysis"
+    flow["user_update"] = user_update
+    flow["as_of_time"] = arguments.get("as_of_time") or previous.get("as_of_time")
+
+    records_result = _flow_records_result(arguments)
+    records_data = records_result.get("data") if isinstance(records_result.get("data"), dict) else {}
+    flow["records_snapshot"] = _flow_records_snapshot(records_data)
+
+    infant_signals, maternal_symptoms = _flow_context_updates(arguments, flow, user_update)
+    flow["infant_signals"] = infant_signals
+    flow["maternal_symptoms"] = maternal_symptoms
+    arguments = {**arguments, "user_update": user_update}
+
+    plan_type = _flow_plan_type(arguments, flow)
+    target_daily_ml = arguments.get("target_daily_ml")
+    delta_ml = arguments.get("delta_ml")
+    extracted_target_daily_ml, extracted_delta_ml = _workflow_plan_numbers_from_text(user_update)
+    if target_daily_ml is None:
+        target_daily_ml = flow.get("target_daily_ml") or extracted_target_daily_ml
+    if delta_ml is None:
+        delta_ml = flow.get("delta_ml") or extracted_delta_ml
+    if plan_type:
+        flow["plan_type"] = plan_type
+    if target_daily_ml is not None:
+        flow["target_daily_ml"] = target_daily_ml
+    if delta_ml is not None:
+        flow["delta_ml"] = delta_ml
+
+    checklist = _flow_checklist(flow)
+    flow["checklist"] = checklist
+    missing = _flow_missing_fields(checklist)
+    if missing:
+        flow["stage"] = "intake_collecting"
+        flow["current_field"] = missing[0]
+        flow["next_question"] = _flow_question_for_field(missing[0])
+        return _intake_collecting_result(flow, records_result)
+
+    analysis_context = _analysis_context_from_flow(flow, records_result=records_result)
+    flow["stage"] = "ready_to_evaluate"
+    flow["current_field"] = None
+    flow["next_question"] = None
+    flow["analysis_context"] = analysis_context
+    return {
+        "ok": True,
+        "status": "milk_analysis_ready_to_evaluate",
+        "summary": "奶量分析信息采集已完成。",
+        "data": {
+            "intake_state": _analysis_intake_state_for_storage(flow),
+            "flow_state": _analysis_intake_state_for_storage(flow),
+            "analysis_context": analysis_context,
+            "checklist": checklist,
+            "missing_fields": [],
+            "current_field": None,
+            "next_question": None,
+            "executed_step": "intake",
+            "next_tool": "milk_analysis_evaluate",
+        },
+    }
+
+
+def _analysis_evaluate(arguments: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
+    analysis_context = _analysis_context_from_args_or_state(arguments, inputs)
+    if not analysis_context:
+        return _needs_analysis_context_result()
+    flow = _flow_from_analysis_context(analysis_context)
+    assessment_args = _flow_assessment_arguments(arguments, flow)
+    assessment = _evaluate_milk_assessment_tool(assessment_args, inputs)
+    if not flow.get("plan_type"):
+        flow["plan_type"] = _flow_plan_type_from_assessment(assessment)
+    flow["assessment_result"] = assessment
+    flow["stage"] = "analysis_ready"
+    flow["analysis_context"] = analysis_context
+    flow["checklist"] = analysis_context.get("checklist") if isinstance(analysis_context.get("checklist"), list) else _flow_checklist(flow)
+    flow["next_question"] = _flow_analysis_next_question(assessment)
+
+    data = assessment.get("data") if isinstance(assessment.get("data"), dict) else {}
+    flow_decision = data.get("milk_flow_decision") if isinstance(data.get("milk_flow_decision"), dict) else {}
+    plan_decision = flow_decision.get("plan_decision") if isinstance(flow_decision.get("plan_decision"), dict) else {}
+    next_tool = "milk_plan_preview_create" if plan_decision.get("can_start_plan") is True else None
+    return {
+        "ok": assessment.get("ok") is not False,
+        "status": assessment.get("status") or "milk_analysis_ready",
+        "summary": assessment.get("summary") or "奶量分析已完成。",
+        "data": {
+            "intake_state": _analysis_intake_state_for_storage(flow),
+            "analysis_context": analysis_context,
+            "assessment_result": assessment,
+            "milk_flow_decision": flow_decision,
+            "executed_step": "assessment",
+            "next_tool": next_tool,
+        },
+        "assistant_followup": assessment.get("assistant_followup")
+        if isinstance(assessment.get("assistant_followup"), dict)
+        else {"message": str(flow.get("next_question") or "")},
+    }
+
+
+def _plan_preview_create(arguments: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
+    analysis_context = _analysis_context_from_args_or_state(arguments, inputs)
+    if not analysis_context:
+        return _needs_analysis_context_result()
+    assessment = _assessment_result_from_args_or_state(arguments, inputs)
+    if not assessment:
+        return {
+            "ok": False,
+            "status": "milk_plan_preview_needs_analysis_evaluation",
+            "summary": "生成奶量计划前需要先完成奶量分析。",
+            "data": {
+                "analysis_context": analysis_context,
+                "missing_fields": ["assessment_result"],
+                "next_tool": "milk_analysis_evaluate",
+            },
+            "assistant_followup": {"message": "我已经拿到关键信息了，先完成奶量分析，再继续生成计划。"},
+        }
+
+    flow = _flow_from_analysis_context(analysis_context)
+    flow["assessment_result"] = assessment
+    user_update = norm_text(arguments.get("user_update")) or norm_text(inputs.get("user_message"))
+    preview_arguments = {**arguments, "user_update": user_update}
+    flow["user_update"] = user_update
+    flow["plan_type"] = _flow_plan_type(preview_arguments, flow) or _flow_plan_type_from_assessment(assessment)
+    target_daily_ml = arguments.get("target_daily_ml")
+    delta_ml = arguments.get("delta_ml")
+    extracted_target_daily_ml, extracted_delta_ml = _workflow_plan_numbers_from_text(norm_text(inputs.get("user_message")))
+    if target_daily_ml is None:
+        target_daily_ml = analysis_context.get("target_daily_ml") or extracted_target_daily_ml
+    if delta_ml is None:
+        delta_ml = analysis_context.get("delta_ml") or extracted_delta_ml
+    if target_daily_ml is not None:
+        flow["target_daily_ml"] = target_daily_ml
+    if delta_ml is not None:
+        flow["delta_ml"] = delta_ml
+
+    if not _flow_plan_type_from_flow(flow):
+        return {
+            "ok": False,
+            "status": "milk_plan_preview_missing_plan_type",
+            "summary": "缺少 plan_type，无法生成新的奶量计划草稿。",
+            "data": {
+                "analysis_context": analysis_context,
+                "assessment_result": assessment,
+                "missing_fields": ["plan_type"],
+                "milk_flow_decision": _milk_flow_decision_for_missing_plan_type(),
+                "next_tool": "milk_plan_preview_create",
+            },
+            "assistant_followup": {"message": "我先确认一下方向，这样不会帮你排偏：你现在更想追奶、稳奶，还是减奶？"},
+        }
+
+    preview_args = _flow_plan_preview_arguments(preview_arguments, flow)
+    preview = _with_milk_plan_card(_preview_plan(preview_args, inputs))
+    _rewrite_milk_flow_next_tool(preview, from_tool="milk_plan_preview", to_tool="milk_plan_preview_create")
+    preview_data = preview.setdefault("data", {})
+    if isinstance(preview_data, dict):
+        updated_context = _analysis_context_from_flow(flow, records_result=None)
+        updated_context.update({key: value for key, value in analysis_context.items() if key not in updated_context})
+        updated_context["plan_type"] = flow.get("plan_type")
+        updated_context["target_daily_ml"] = flow.get("target_daily_ml")
+        updated_context["delta_ml"] = flow.get("delta_ml")
+        flow["analysis_context"] = updated_context
+        if str(preview.get("status") or "").strip() == "plan_preview_ready":
+            flow["plan_preview"] = _flow_plan_preview_state(preview)
+            flow["stage"] = "plan_preview"
+            preview_data["plan_preview"] = flow["plan_preview"]
+        else:
+            flow["plan_preview"] = {}
+            flow["stage"] = "analysis_ready"
+        preview_data["analysis_context"] = updated_context
+        preview_data["assessment_result"] = assessment
+        preview_data["intake_state"] = _analysis_intake_state_for_storage(flow)
+        preview_data["executed_step"] = "plan_preview"
+    return preview
+
+
+def _previous_analysis_intake_state(state: dict[str, Any]) -> dict[str, Any]:
+    intake = state.get("analysis_intake") if isinstance(state.get("analysis_intake"), dict) else {}
+    return intake
+
+
+def _intake_collecting_result(flow: dict[str, Any], records_result: dict[str, Any]) -> dict[str, Any]:
+    missing = _flow_missing_fields(flow.get("checklist") if isinstance(flow.get("checklist"), list) else [])
+    status = "milk_analysis_intake_needs_records" if missing and missing[0] == "records_7d" else "milk_analysis_intake_collecting"
+    return {
+        "ok": True,
+        "status": status,
+        "summary": "奶量分析信息采集中。",
+        "data": {
+            "intake_state": _analysis_intake_state_for_storage(flow),
+            "flow_state": _analysis_intake_state_for_storage(flow),
+            "checklist": flow.get("checklist", []),
+            "missing_fields": missing,
+            "current_field": flow.get("current_field"),
+            "next_question": flow.get("next_question"),
+            "records_result": records_result,
+            "executed_step": "intake",
+            "next_tool": "milk_analysis_intake_manage",
+        },
+        "assistant_followup": {"message": str(flow.get("next_question") or "")},
+    }
+
+
+def _analysis_context_from_flow(flow: dict[str, Any], *, records_result: dict[str, Any] | None) -> dict[str, Any]:
+    records_snapshot = flow.get("records_snapshot") if isinstance(flow.get("records_snapshot"), dict) else {}
+    context = {
+        "as_of_time": flow.get("as_of_time"),
+        "records_snapshot": records_snapshot,
+        "records_interpretation": {
+            "status": records_snapshot.get("status"),
+            "valid_days": records_snapshot.get("valid_days"),
+            "positive_days": records_snapshot.get("positive_days"),
+            "record_counts": records_snapshot.get("record_counts"),
+        },
+        "source_records": {
+            "daily_rollups": records_snapshot.get("daily_rollups") if isinstance(records_snapshot.get("daily_rollups"), list) else [],
+            "raw_records": records_snapshot.get("raw_records") if isinstance(records_snapshot.get("raw_records"), dict) else {},
+        },
+        "infant_signals": flow.get("infant_signals") if isinstance(flow.get("infant_signals"), dict) else {},
+        "maternal_symptoms": flow.get("maternal_symptoms") if isinstance(flow.get("maternal_symptoms"), dict) else {},
+        "checklist": flow.get("checklist") if isinstance(flow.get("checklist"), list) else [],
+        "plan_type": flow.get("plan_type"),
+        "target_daily_ml": flow.get("target_daily_ml"),
+        "delta_ml": flow.get("delta_ml"),
+    }
+    if isinstance(records_result, dict):
+        context["records_result_status"] = records_result.get("status")
+        records_data = records_result.get("data") if isinstance(records_result.get("data"), dict) else {}
+        if records_data:
+            context["records_assessment_data"] = records_data
+    return _drop_empty_context(context)
+
+
+def _analysis_intake_state_for_storage(flow: dict[str, Any]) -> dict[str, Any]:
+    stored = _flow_state_for_storage(flow)
+    if isinstance(flow.get("analysis_context"), dict):
+        stored["analysis_context"] = flow["analysis_context"]
+    return stored
+
+
+def _analysis_context_from_args_or_state(arguments: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
+    explicit = _parse_json_object(arguments.get("analysis_context"))
+    if explicit:
+        return explicit
+    state = inputs.get("_milk_management_state")
+    if not isinstance(state, dict):
+        return {}
+    candidate = state.get("analysis_intake") if isinstance(state.get("analysis_intake"), dict) else {}
+    context = candidate.get("analysis_context") if isinstance(candidate.get("analysis_context"), dict) else {}
+    if context:
+        return context
+    if candidate and isinstance(candidate.get("records_snapshot"), dict):
+        return _analysis_context_from_flow(candidate, records_result=None)
+    return {}
+
+
+def _assessment_result_from_args_or_state(arguments: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
+    explicit = _parse_json_object(arguments.get("assessment_result"))
+    if explicit:
+        return explicit
+    state = inputs.get("_milk_management_state")
+    if not isinstance(state, dict):
+        return {}
+    candidate = state.get("analysis_intake") if isinstance(state.get("analysis_intake"), dict) else {}
+    assessment = candidate.get("assessment_result") if isinstance(candidate.get("assessment_result"), dict) else {}
+    if assessment:
+        return assessment
+    previous = state.get("last_assessment") if isinstance(state.get("last_assessment"), dict) else {}
+    data = previous.get("assessment_data") if isinstance(previous.get("assessment_data"), dict) else {}
+    if data:
+        return {"ok": True, "status": previous.get("assessment_status") or "milk_assessment_ready", "data": data}
+    return {}
+
+
+def _flow_from_analysis_context(context: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "stage": "ready_to_evaluate",
+        "goal": "milk_analysis",
+        "as_of_time": context.get("as_of_time"),
+        "records_snapshot": context.get("records_snapshot") if isinstance(context.get("records_snapshot"), dict) else {},
+        "infant_signals": context.get("infant_signals") if isinstance(context.get("infant_signals"), dict) else {},
+        "maternal_symptoms": context.get("maternal_symptoms") if isinstance(context.get("maternal_symptoms"), dict) else {},
+        "checklist": context.get("checklist") if isinstance(context.get("checklist"), list) else [],
+        "plan_type": norm_text(context.get("plan_type")),
+        "target_daily_ml": context.get("target_daily_ml"),
+        "delta_ml": context.get("delta_ml"),
+        "analysis_context": context,
+    }
+
+
+def _needs_analysis_context_result() -> dict[str, Any]:
+    return {
+        "ok": False,
+        "status": "milk_analysis_needs_intake_context",
+        "summary": "奶量分析前需要先完成信息采集。",
+        "data": {
+            "missing_fields": ["analysis_context"],
+            "next_tool": "milk_analysis_intake_manage",
+        },
+        "assistant_followup": {"message": "我先把近期记录和宝宝、妈妈状态补齐，再继续分析。"},
+    }
+
+
+def _rewrite_milk_flow_next_tool(result: dict[str, Any], *, from_tool: str, to_tool: str) -> None:
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    decision = data.get("milk_flow_decision") if isinstance(data.get("milk_flow_decision"), dict) else {}
+    plan = decision.get("plan_decision") if isinstance(decision.get("plan_decision"), dict) else {}
+    if plan.get("next_tool") == from_tool:
+        plan["next_tool"] = to_tool
+
+
+def _drop_empty_context(value: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: item
+        for key, item in value.items()
+        if item not in (None, "", [], {})
+    }
+
+
+def _flow_seed(previous: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "stage": norm_text(previous.get("stage")) or "intake_collecting",
+        "goal": norm_text(previous.get("goal")) or "milk_analysis",
+        "current_field": norm_text(previous.get("current_field")),
+        "infant_signals": previous.get("infant_signals") if isinstance(previous.get("infant_signals"), dict) else {},
+        "maternal_symptoms": previous.get("maternal_symptoms") if isinstance(previous.get("maternal_symptoms"), dict) else {},
+        "plan_type": norm_text(previous.get("plan_type")),
+        "target_daily_ml": previous.get("target_daily_ml"),
+        "delta_ml": previous.get("delta_ml"),
+        "assessment_result": previous.get("assessment_result") if isinstance(previous.get("assessment_result"), dict) else {},
+        "plan_preview": previous.get("plan_preview") if isinstance(previous.get("plan_preview"), dict) else {},
+    }
+
+
+def _flow_records_result(arguments: dict[str, Any]) -> dict[str, Any]:
+    return dict(
+        evaluate_milk_status(
+            user_id=arguments["user_id"],
+            as_of_time=arguments.get("as_of_time"),
+            window_days=7,
+            include_today=False,
+        )
+    )
+
+
+def _flow_records_snapshot(records_data: dict[str, Any]) -> dict[str, Any]:
+    source = records_data.get("source_record_context") if isinstance(records_data.get("source_record_context"), dict) else {}
+    normality = records_data.get("milk_normality") if isinstance(records_data.get("milk_normality"), dict) else {}
+    stats = normality.get("stats") if isinstance(normality.get("stats"), dict) else {}
+    days = normality.get("days") if isinstance(normality.get("days"), list) else []
+    valid_days = to_int(stats.get("valid_days"), 0)
+    positive_days = [
+        day
+        for day in days
+        if isinstance(day, dict)
+        and day.get("ok") is True
+        and _to_float(day.get("estimated_daily_milk_ml"), 0.0) > 0
+    ]
+    counts = source.get("record_counts") if isinstance(source.get("record_counts"), dict) else {}
+    return {
+        "status": "collected" if valid_days > 0 and positive_days else "missing",
+        "valid_days": valid_days,
+        "positive_days": len(positive_days),
+        "record_counts": counts,
+        "daily_rollups": source.get("daily_rollups") if isinstance(source.get("daily_rollups"), list) else [],
+        "raw_records": source.get("raw_records") if isinstance(source.get("raw_records"), dict) else {},
+    }
+
+
+def _flow_context_updates(arguments: dict[str, Any], flow: dict[str, Any], user_update: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    infant = dict(flow.get("infant_signals") if isinstance(flow.get("infant_signals"), dict) else {})
+    maternal = dict(flow.get("maternal_symptoms") if isinstance(flow.get("maternal_symptoms"), dict) else {})
+    inferred_infant, inferred_maternal = _workflow_infer_context_from_text(user_update)
+    infant.update(inferred_infant)
+    maternal.update(inferred_maternal)
+    infant.update(_normalized_options(arguments.get("infant_signals")))
+    maternal.update(_normalized_options(arguments.get("maternal_symptoms")))
+    _flow_apply_current_field_answer(flow.get("current_field"), user_update, infant, maternal)
+    return infant, maternal
+
+
+def _flow_apply_current_field_answer(current_field: Any, user_update: str, infant: dict[str, Any], maternal: dict[str, Any]) -> None:
+    field = norm_text(current_field)
+    text = norm_text(user_update)
+    if not field or not text:
+        return
+    negative = any(token in text for token in ("没有", "没", "无", "否认", "不发", "不红", "不痛"))
+    normal = any(token in text for token in ("正常", "还好", "可以", "稳定", "没问题", "不少"))
+    if field == "infant_wet_diapers":
+        infant.setdefault("wet_diapers_24h", text)
+    elif field == "infant_state_or_satisfaction":
+        infant.setdefault("baby_state", text)
+        infant.setdefault("feeding_satisfaction", text)
+    elif field == "infant_growth_signal":
+        infant.setdefault("weight_trend", text)
+        infant.setdefault("recent_weight", text)
+    elif field == "maternal_red_flags":
+        if negative or normal:
+            maternal.update({"fever": False, "chills": False, "breast_redness": False, "lump_or_hard_area": False, "worsening_pain": False})
+        else:
+            maternal.setdefault("symptom_text", text)
+    elif field == "maternal_breast_comfort":
+        if any(token in text for token in ("胀", "涨", "排不空", "硬", "痛", "疼", "不舒服")):
+            maternal["breast_fullness"] = True
+            maternal["incomplete_emptying"] = True
+        else:
+            maternal.setdefault("symptom_text", text)
+
+
+def _flow_checklist(flow: dict[str, Any]) -> list[dict[str, Any]]:
+    records = flow.get("records_snapshot") if isinstance(flow.get("records_snapshot"), dict) else {}
+    infant = flow.get("infant_signals") if isinstance(flow.get("infant_signals"), dict) else {}
+    maternal = flow.get("maternal_symptoms") if isinstance(flow.get("maternal_symptoms"), dict) else {}
+    checks = {
+        "records_7d": records.get("status") == "collected",
+        "infant_wet_diapers": _flow_has_value(infant.get("wet_diapers_24h")),
+        "infant_state_or_satisfaction": any(_flow_has_value(infant.get(key)) for key in ("baby_state", "feeding_satisfaction", "poor_feeding", "poor_latch", "lethargy")),
+        "infant_growth_signal": any(_flow_has_value(infant.get(key)) for key in ("recent_weight", "weight_trend", "growth_concern")),
+        "maternal_red_flags": any(key in maternal for key in ("fever", "chills", "breast_redness", "lump_or_hard_area", "worsening_pain")),
+        "maternal_breast_comfort": any(
+            key in maternal
+            for key in ("breast_fullness", "engorgement", "post_pump_fullness", "incomplete_emptying", "pain_level", "symptom_text")
+        ),
+    }
+    return [
+        {
+            "id": field,
+            "label": FLOW_FIELD_LABELS[field],
+            "status": "collected" if checks.get(field) else "missing",
+        }
+        for field in FLOW_REQUIRED_FIELDS
+    ]
+
+
+def _flow_has_value(value: Any) -> bool:
+    return value not in (None, "", [], {})
+
+
+def _flow_missing_fields(checklist: list[dict[str, Any]]) -> list[str]:
+    return [str(item.get("id")) for item in checklist if item.get("status") != "collected"]
+
+
+def _flow_question_for_field(field: str) -> str:
+    if field == "records_7d":
+        return "过去 7 天好像还缺少可计算的奶量记录。有没有漏记的吸奶、瓶喂母乳或补奶记录需要先补一下？"
+    if field == "infant_wet_diapers":
+        return "宝宝近 24 小时尿量或尿布情况大概怎么样？"
+    if field == "infant_state_or_satisfaction":
+        return "宝宝精神状态怎么样，吃奶后通常能安稳一会儿吗？"
+    if field == "infant_growth_signal":
+        return "宝宝最近体重增长看起来还正常吗？"
+    if field == "maternal_red_flags":
+        return "你有没有发热、寒战、乳房明显红肿、硬块，或疼痛越来越重？"
+    if field == "maternal_breast_comfort":
+        return "吸奶或亲喂后乳房是比较舒服，还是还会胀、排不空或疼？"
+    return "我还需要再确认一个会影响判断的信息。"
+
+
+def _flow_assessment_arguments(arguments: dict[str, Any], flow: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "user_id": arguments["user_id"],
+        "as_of_time": arguments.get("as_of_time") or flow.get("as_of_time"),
+        "window_days": 7,
+        "include_today": False,
+        "comprehensive_assessment": True,
+        "workflow_intent": "milk_analysis",
+        "infant_signals": flow.get("infant_signals") if isinstance(flow.get("infant_signals"), dict) else {},
+        "maternal_symptoms": flow.get("maternal_symptoms") if isinstance(flow.get("maternal_symptoms"), dict) else {},
+    }
+
+
+def _flow_plan_type(arguments: dict[str, Any], flow: dict[str, Any]) -> str | None:
+    explicit = norm_text(arguments.get("plan_type"))
+    if explicit in ALL_PLAN_TYPES:
+        return explicit
+    value = norm_text(flow.get("plan_type"))
+    if value in ALL_PLAN_TYPES:
+        return value
+    text = norm_text(arguments.get("user_update"))
+    if "减奶" in text:
+        return PLAN_TYPE_DECREASE
+    if "稳奶" in text:
+        return PLAN_TYPE_MAINTAIN
+    if "追奶" in text or "增加" in text or "每天多" in text:
+        return PLAN_TYPE_INCREASE
+    return None
+
+
+def _flow_plan_type_from_assessment(assessment: dict[str, Any]) -> str | None:
+    data = assessment.get("data") if isinstance(assessment.get("data"), dict) else {}
+    flow_decision = data.get("milk_flow_decision") if isinstance(data.get("milk_flow_decision"), dict) else {}
+    plan_decision = flow_decision.get("plan_decision") if isinstance(flow_decision.get("plan_decision"), dict) else {}
+    value = norm_text(plan_decision.get("recommended_plan_type"))
+    return value if value in ALL_PLAN_TYPES else None
+
+
+def _flow_plan_type_from_flow(flow: dict[str, Any]) -> str | None:
+    value = norm_text(flow.get("plan_type"))
+    return value if value in ALL_PLAN_TYPES else None
+
+
+def _flow_plan_preview_arguments(arguments: dict[str, Any], flow: dict[str, Any]) -> dict[str, Any]:
+    options = _normalized_options(arguments.get("options"))
+    assessment = flow.get("assessment_result") if isinstance(flow.get("assessment_result"), dict) else {}
+    assessment_data = assessment.get("data") if isinstance(assessment.get("data"), dict) else {}
+    clinical = assessment_data.get("clinical_assessment") if isinstance(assessment_data.get("clinical_assessment"), dict) else {}
+    if assessment_data:
+        options["prepared_assessment"] = assessment_data
+    if isinstance(clinical.get("growth_assessment"), dict):
+        options["prepared_growth_assessment"] = clinical["growth_assessment"]
+    options["infant_signals"] = flow.get("infant_signals") if isinstance(flow.get("infant_signals"), dict) else {}
+    options["maternal_symptoms"] = flow.get("maternal_symptoms") if isinstance(flow.get("maternal_symptoms"), dict) else {}
+    return {
+        "user_id": arguments["user_id"],
+        "plan_type": _flow_plan_type_from_flow(flow),
+        "plan_days": arguments.get("plan_days"),
+        "target_daily_ml": flow.get("target_daily_ml"),
+        "delta_ml": flow.get("delta_ml"),
+        "source_plan_id": arguments.get("source_plan_id"),
+        "as_of_time": arguments.get("as_of_time") or flow.get("as_of_time"),
+        "options": options,
+    }
+
+
+def _flow_plan_preview_state(preview: dict[str, Any]) -> dict[str, Any]:
+    data = preview.get("data") if isinstance(preview.get("data"), dict) else {}
+    draft = data.get("draft") if isinstance(data.get("draft"), dict) else {}
+    return {
+        "status": preview.get("status"),
+        "draft": draft,
+        "calendar_delta": data.get("calendar_delta") if isinstance(data.get("calendar_delta"), dict) else {},
+        "idempotency_key": _milk_plan_preview_idempotency_key(draft),
+    }
+
+
+def _milk_plan_preview_idempotency_key(draft: dict[str, Any]) -> str:
+    if not draft:
+        return ""
+    payload = json.dumps(draft, ensure_ascii=False, sort_keys=True, default=str)
+    digest = hashlib.sha1(payload.encode("utf-8")).hexdigest()[:16]
+    return f"milk-plan-preview-{digest}"
+
+
+def _flow_analysis_next_question(assessment: dict[str, Any]) -> str:
+    data = assessment.get("data") if isinstance(assessment.get("data"), dict) else {}
+    flow_decision = data.get("milk_flow_decision") if isinstance(data.get("milk_flow_decision"), dict) else {}
+    plan_decision = flow_decision.get("plan_decision") if isinstance(flow_decision.get("plan_decision"), dict) else {}
+    if plan_decision.get("can_start_plan") is True:
+        return "这些关键信息已经齐了。你想现在按这个方向生成一版奶量计划吗？"
+    return "这些关键信息已经齐了，我先按当前结果给你一个下一步处理建议。"
+
+
+def _flow_state_for_storage(flow: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "stage": flow.get("stage"),
+        "goal": flow.get("goal"),
+        "current_field": flow.get("current_field"),
+        "next_question": flow.get("next_question"),
+        "checklist": flow.get("checklist", []),
+        "records_snapshot": flow.get("records_snapshot") if isinstance(flow.get("records_snapshot"), dict) else {},
+        "infant_signals": flow.get("infant_signals") if isinstance(flow.get("infant_signals"), dict) else {},
+        "maternal_symptoms": flow.get("maternal_symptoms") if isinstance(flow.get("maternal_symptoms"), dict) else {},
+        "plan_type": flow.get("plan_type"),
+        "target_daily_ml": flow.get("target_daily_ml"),
+        "delta_ml": flow.get("delta_ml"),
+        "assessment_result": flow.get("assessment_result") if isinstance(flow.get("assessment_result"), dict) else {},
+        "plan_preview": flow.get("plan_preview") if isinstance(flow.get("plan_preview"), dict) else {},
+    }
+
+
+def _evaluate_milk_assessment_tool(arguments: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
+    arguments = _arguments_with_previous_milk_context(arguments, inputs)
+    comprehensive_assessment = _should_run_comprehensive_milk_assessment(arguments, inputs)
+    assessment_arguments = _milk_assessment_arguments(arguments, comprehensive_assessment=comprehensive_assessment)
+    result = dict(evaluate_milk_status(**assessment_arguments))
+    clinical_gate = _clinical_gate_for_analysis(arguments, result=result, comprehensive_assessment=comprehensive_assessment)
+    if clinical_gate is not None:
+        return clinical_gate
+    _attach_clinical_assessment(result, arguments)
+    _attach_milk_flow_decision(result)
+    return result
+
+
+def _workflow_infer_context_from_text(text: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    normalized = norm_text(text).lower()
+    if not normalized:
+        return {}, {}
+    infant: dict[str, Any] = {}
+    maternal: dict[str, Any] = {}
+    negative = any(token in normalized for token in ("没有", "没", "无", "否认", "不发", "不红", "不痛", "not"))
+    if any(token in normalized for token in ("红旗", "异常")) and negative:
+        maternal.update({"fever": False, "breast_redness": False, "lump_or_hard_area": False, "worsening_pain": False})
+    if any(token in normalized for token in ("发热", "发烧", "fever")):
+        maternal["fever"] = not negative
+    if any(token in normalized for token in ("红肿", "红热", "发红", "redness")):
+        maternal["breast_redness"] = not negative
+    if any(token in normalized for token in ("硬块", "肿块", "结块", "lump")):
+        maternal["lump_or_hard_area"] = not negative
+    if any(token in normalized for token in ("疼痛加重", "更痛", "越来越痛", "worsening")):
+        maternal["worsening_pain"] = not negative
+    if any(token in normalized for token in ("胀", "涨", "排不空", "吸完还")):
+        maternal["breast_fullness"] = True
+        maternal["incomplete_emptying"] = True
+    if any(token in normalized for token in ("尿布正常", "尿量正常", "尿不少", "小便正常")):
+        infant["wet_diapers_24h"] = "normal"
+    if any(token in normalized for token in ("精神正常", "精神好", "精神可以", "状态正常")):
+        infant["baby_state"] = "normal"
+    if any(token in normalized for token in ("吃完满足", "吃完还好", "吃奶正常")):
+        infant["feeding_satisfaction"] = "normal"
+    if any(token in normalized for token in ("体重正常", "增长正常", "体重增长")):
+        infant["weight_trend"] = "normal"
+    return infant, maternal
+
+
+def _workflow_plan_numbers_from_text(text: str) -> tuple[float | None, float | None]:
+    normalized = norm_text(text)
+    if not normalized:
+        return None, None
+
+    target_daily_ml: float | None = None
+    delta_ml: float | None = None
+    target_match = re.search(r"(?:目标|做到|达到|到)\D{0,8}(\d+(?:\.\d+)?)\s*(?:ml|毫升)?", normalized, flags=re.IGNORECASE)
+    if target_match:
+        target_daily_ml = _workflow_float(target_match.group(1))
+
+    delta_match = re.search(r"(?:每天|一天)?(?:多|增加|加|少|减少|减)\s*(\d+(?:\.\d+)?)\s*(?:ml|毫升)?", normalized, flags=re.IGNORECASE)
+    if delta_match:
+        delta_ml = _workflow_float(delta_match.group(1))
+    return target_daily_ml, delta_ml
+
+
+def _workflow_float(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value.strip())
+        except ValueError:
+            return None
+    return None
+
+
 def _with_milk_plan_card(result: dict[str, Any]) -> dict[str, Any]:
     data = result.get("data") if isinstance(result.get("data"), dict) else {}
     draft = data.get("draft") if isinstance(data.get("draft"), dict) else {}
-    if not result.get("ok") or not draft:
+    if not result.get("ok") or not draft or str(result.get("status") or "").strip() != "plan_preview_ready":
         return result
     result["card"] = _milk_plan_card(draft, card_status=str(data.get("card_status") or "preview"), data=data)
     result["assistant_followup"] = {"message": _milk_plan_preview_followup_message(data)}
@@ -375,12 +1125,17 @@ def _clinical_gate_for_plan(arguments: dict[str, Any], *, plan_type: Any, option
     if isinstance(prepared_clinical, dict) and prepared_clinical:
         clinical_data = dict(prepared_clinical)
     else:
+        prepared_assessment = options.get("prepared_assessment") if isinstance(options.get("prepared_assessment"), dict) else None
+        prepared_from_context = bool(options.get("_prepared_assessment_from_context"))
+        prepared_window_days = _to_int(options.get("_prepared_assessment_window_days"), _milk_assessment_window_days(prepared_assessment))
+        needs_plan_window = prepared_from_context and prepared_window_days < 7
+        plan_window_days = max(_to_int(arguments.get("window_days"), 7), 7)
         clinical = _evaluate_milk_context_status(
             user_id=arguments["user_id"],
             as_of_time=arguments.get("as_of_time"),
-            window_days=_to_int(arguments.get("window_days"), 1),
+            window_days=7 if needs_plan_window else plan_window_days,
             include_today=False,
-            milk_assessment=options.get("prepared_assessment") if isinstance(options.get("prepared_assessment"), dict) else None,
+            milk_assessment=None if needs_plan_window else prepared_assessment,
             growth_assessment=options.get("prepared_growth_assessment") if isinstance(options.get("prepared_growth_assessment"), dict) else None,
             maternal_symptoms=options.get("maternal_symptoms") if isinstance(options.get("maternal_symptoms"), dict) else {},
             infant_signals=options.get("infant_signals") if isinstance(options.get("infant_signals"), dict) else {},
@@ -492,7 +1247,7 @@ def _clinical_gate_for_analysis(arguments: dict[str, Any], *, result: dict[str, 
             "status": "needs_more_records_for_analysis",
             "summary": "当前关键记录不足，先补充记录后再做奶量分析。",
             "data": {"clinical_assessment": _compact_clinical_data(clinical_data), "milk_flow_decision": decision},
-            "assistant_followup": {"message": "现在记录还不够完整，先不用急着下结论。\n\n你可以先补一下最近的吸奶、亲喂或瓶喂记录；补完后我再帮你重新分析，会更接近真实情况。"},
+            "assistant_followup": {"message": "现在可计算奶量的记录还不够完整，先不用急着下结论。\n\n你可以先补一下过去几天有毫升数的吸奶、瓶喂母乳或补奶记录；如果只有亲喂，我会结合已有瓶喂参考估算，不需要你重复补充频次。补完后我再帮你重新分析，会更接近真实情况。"},
         }
     return None
 
@@ -986,16 +1741,49 @@ def _options_with_previous_milk_assessment(options: dict[str, Any], inputs: Runt
     state = inputs.get("_milk_management_state")
     if not isinstance(state, dict):
         return options
+    intake = state.get("analysis_intake") if isinstance(state.get("analysis_intake"), dict) else {}
+    intake_assessment = intake.get("assessment_result") if isinstance(intake.get("assessment_result"), dict) else {}
+    if intake_assessment:
+        intake_data = intake_assessment.get("data") if isinstance(intake_assessment.get("data"), dict) else {}
+        if intake_data and not isinstance(options.get("prepared_assessment"), dict):
+            options["prepared_assessment"] = intake_data
+            options["_prepared_assessment_from_context"] = True
+            options["_prepared_assessment_window_days"] = _milk_assessment_window_days(intake_data)
+        intake_clinical = intake_data.get("clinical_assessment") if isinstance(intake_data.get("clinical_assessment"), dict) else {}
+        if intake_clinical and not isinstance(options.get("prepared_clinical_assessment"), dict):
+            options["prepared_clinical_assessment"] = intake_clinical
+        return options
+
     previous = state.get("last_assessment")
     if not isinstance(previous, dict):
         return options
-    if not isinstance(options.get("prepared_assessment"), dict) and isinstance(previous.get("assessment_data"), dict):
-        options["prepared_assessment"] = previous["assessment_data"]
-    if not isinstance(options.get("prepared_clinical_assessment"), dict) and isinstance(previous.get("clinical_assessment"), dict):
+    previous_assessment = previous.get("assessment_data") if isinstance(previous.get("assessment_data"), dict) else None
+    previous_window_days = _milk_assessment_window_days(previous_assessment)
+    if not isinstance(options.get("prepared_assessment"), dict) and previous_assessment:
+        options["prepared_assessment"] = previous_assessment
+        options["_prepared_assessment_from_context"] = True
+        options["_prepared_assessment_window_days"] = previous_window_days
+    has_current_context = bool(
+        (isinstance(options.get("infant_signals"), dict) and options.get("infant_signals"))
+        or (isinstance(options.get("maternal_symptoms"), dict) and options.get("maternal_symptoms"))
+    )
+    if (
+        previous_window_days >= 7
+        and not has_current_context
+        and not isinstance(options.get("prepared_clinical_assessment"), dict)
+        and isinstance(previous.get("clinical_assessment"), dict)
+    ):
         options["prepared_clinical_assessment"] = previous["clinical_assessment"]
     if not isinstance(options.get("prepared_growth_assessment"), dict) and isinstance(previous.get("growth_assessment"), dict):
         options["prepared_growth_assessment"] = previous["growth_assessment"]
     return options
+
+
+def _milk_assessment_window_days(assessment_data: Any) -> int:
+    if not isinstance(assessment_data, dict):
+        return 0
+    window = assessment_data.get("window") if isinstance(assessment_data.get("window"), dict) else {}
+    return _to_int(window.get("window_days"), 0)
 
 
 def _arguments_with_previous_milk_context(arguments: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
@@ -1030,7 +1818,10 @@ def _arguments_with_previous_milk_plan_preview(arguments: dict[str, Any], inputs
     state = inputs.get("_milk_management_state")
     if not isinstance(state, dict):
         return arguments
-    preview = state.get("last_plan_preview")
+    intake = state.get("analysis_intake") if isinstance(state.get("analysis_intake"), dict) else {}
+    preview = intake.get("plan_preview") if isinstance(intake.get("plan_preview"), dict) else {}
+    if not preview:
+        preview = state.get("last_plan_preview")
     if not isinstance(preview, dict) or str(preview.get("status") or "").strip() != "plan_preview_ready":
         return arguments
     draft = preview.get("draft") if isinstance(preview.get("draft"), dict) else {}
@@ -1038,8 +1829,7 @@ def _arguments_with_previous_milk_plan_preview(arguments: dict[str, Any], inputs
         return arguments
 
     merged = dict(arguments)
-    if not isinstance(merged.get("confirmed_plan"), dict):
-        merged["confirmed_plan"] = draft
+    merged["confirmed_plan"] = draft
     if not norm_text(merged.get("idempotency_key")):
         key = norm_text(preview.get("idempotency_key"))
         if key:
@@ -1377,7 +2167,7 @@ def _build_milk_plan_card_json(data: dict[str, Any]) -> dict[str, Any]:
                 "items": [
                     "先在当前吸奶/亲喂节奏上微调，三天后我们根据奶量变化重新调整。",
                     f"保留原有 {current_count} 个吸奶任务，新增 {added} 个吸奶任务。",
-                    "具体日程表不在这里展开，可到计划页查看或直接向我追问。",
+                    "具体日程表不在这里展开，可以向我提问，也可以在保存计划后到计划页查看。",
                 ],
             },
             {
@@ -1584,11 +2374,19 @@ def _mutate_plan(arguments: dict[str, Any]) -> dict[str, Any]:
                 "summary": validation.get("summary", "计划校验未通过。"),
                 "data": {"validation": validation_data},
             }
+        idempotency_key = norm_text(arguments.get("idempotency_key")) or _milk_plan_preview_idempotency_key(_parse_json_object(plan))
+        if not idempotency_key:
+            return {
+                "ok": False,
+                "status": "milk_plan_invalid",
+                "summary": "缺少计划同步标识，暂时不能保存计划。",
+                "data": {"validation": validation_data},
+            }
         result = dict(
             apply_milk_plan(
                 user_id=arguments["user_id"],
                 confirmed_plan=plan,
-                idempotency_key=arguments["idempotency_key"],
+                idempotency_key=idempotency_key,
                 calendar_write_strategy=arguments.get("calendar_write_strategy"),
             )
         )

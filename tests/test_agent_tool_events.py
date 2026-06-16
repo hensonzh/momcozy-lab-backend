@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import unittest
 import asyncio
+from unittest.mock import patch
 
 from momcozy_agent import ContextState, build_agent_request
 from momcozy_agent.tool_schemas import FUNCTION_TOOLS
@@ -18,7 +19,7 @@ from momcozy_agent.agents import (
     tool_call_result_event,
     web_search_status_event,
 )
-from momcozy_agent.server import ChatRuntime, create_app, stream_ag_ui_events
+from momcozy_agent.server import ChatRuntime, _clone_context_state, create_app, stream_ag_ui_events
 
 
 class AgentToolEventTests(unittest.TestCase):
@@ -116,6 +117,632 @@ class AgentToolEventTests(unittest.TestCase):
         request_context = request["input"][0]["content"][0]["text"]
         self.assertIn("loaded_skill_context:", request_context)
         self.assertNotIn("health_guidance_context:", request_context)
+
+    def test_milk_plan_acceptance_forces_plan_preview_tool(self) -> None:
+        context_state = ContextState()
+        context_state.milk_management_state = {
+            "analysis_intake": {
+                "stage": "analysis_ready",
+                "goal": "milk_analysis",
+                "plan_type": "increase_milk",
+                "checklist": [
+                    {"id": field, "status": "collected"}
+                    for field in [
+                        "records_7d",
+                        "infant_wet_diapers",
+                        "infant_state_or_satisfaction",
+                        "infant_growth_signal",
+                        "maternal_red_flags",
+                        "maternal_breast_comfort",
+                    ]
+                ],
+                "next_question": "这些关键信息已经齐了。你想现在按这个方向生成一版奶量计划吗？",
+                "analysis_context": {"records_snapshot": {"status": "collected", "valid_days": 7}},
+                "assessment_result": {"ok": True, "status": "milk_assessment_ready", "data": {}},
+            },
+        }
+
+        request = build_agent_request(
+            {"user_message": "先按每天多50ml来做", "locale": "zh-CN"},
+            {"context_state": context_state, "loaded_skill_ids": ["milk-management"]},
+        )
+
+        self.assertEqual(
+            request["tool_choice"],
+            {
+                "type": "allowed_tools",
+                "mode": "required",
+                "tools": [{"type": "function", "name": "milk_plan_preview_create"}],
+            },
+        )
+        request_context = request["input"][0]["content"][0]["text"]
+        self.assertIn("milk_analysis_intake_stage: analysis_ready", request_context)
+        self.assertIn("milk_analysis_intake_plan_type: increase_milk", request_context)
+        self.assertIn("调用 milk_plan_preview_create", request_context)
+        self.assertNotIn("milk_workflow_step", request_context)
+        top_level_functions = [tool["name"] for tool in request["tools"] if tool.get("type") == "function"]
+        self.assertIn("milk_plan_preview_create", top_level_functions)
+        milk_namespace = next(tool for tool in request["tools"] if tool.get("type") == "namespace" and tool.get("name") == "milk_management")
+        self.assertNotIn("milk_plan_preview_create", [tool["name"] for tool in milk_namespace["tools"]])
+
+    def test_milk_plan_context_answer_forces_intake_tool(self) -> None:
+        context_state = ContextState()
+        context_state.milk_management_state = {
+            "analysis_intake": {
+                "stage": "intake_collecting",
+                "goal": "plan_preview",
+                "plan_type": "increase_milk",
+                "current_field": "infant_wet_diapers",
+                "next_question": "宝宝近 24 小时尿量或尿布情况大概怎么样？",
+                "checklist": [
+                    {"id": "records_7d", "status": "collected"},
+                    {"id": "infant_wet_diapers", "status": "missing"},
+                    {"id": "infant_state_or_satisfaction", "status": "missing"},
+                ],
+            },
+        }
+
+        request = build_agent_request(
+            {"user_message": "宝宝尿量正常，精神也正常", "locale": "zh-CN"},
+            {"context_state": context_state, "loaded_skill_ids": ["milk-management"]},
+        )
+
+        self.assertEqual(
+            request["tool_choice"],
+            {
+                "type": "allowed_tools",
+                "mode": "required",
+                "tools": [{"type": "function", "name": "milk_analysis_intake_manage"}],
+            },
+        )
+        request_context = request["input"][0]["content"][0]["text"]
+        self.assertIn("milk_analysis_intake_stage: intake_collecting", request_context)
+        self.assertIn("milk_analysis_intake_current_field: infant_wet_diapers", request_context)
+        self.assertIn("milk_analysis_intake_next_question: 宝宝近 24 小时尿量或尿布情况大概怎么样？", request_context)
+        self.assertNotIn("milk_workflow_step", request_context)
+
+    def test_forced_milk_intake_does_not_repeat_after_tool_output(self) -> None:
+        context_state = ContextState()
+        context_state.milk_management_state = {
+            "analysis_intake": {
+                "stage": "intake_collecting",
+                "current_field": "records_7d",
+                "next_question": "过去 7 天好像还缺少可计算的奶量记录。",
+                "checklist": [{"id": "records_7d", "status": "missing"}],
+            },
+        }
+        client = _FakeClient(
+            [
+                {
+                    "id": "resp-intake-call",
+                    "output": [
+                        {
+                            "type": "function_call",
+                            "call_id": "call-intake",
+                            "name": "milk_analysis_intake_manage",
+                            "arguments": json.dumps(
+                                {
+                                    "action": "update",
+                                    "user_update": "记录是完整的，帮我看看怎么调整",
+                                    "as_of_time": None,
+                                    "maternal_symptoms": {},
+                                    "infant_signals": {},
+                                    "plan_type": None,
+                                    "target_daily_ml": None,
+                                    "delta_ml": None,
+                                },
+                                ensure_ascii=False,
+                            ),
+                        }
+                    ],
+                },
+                {
+                    "id": "resp-final",
+                    "output": [
+                        {
+                            "type": "message",
+                            "content": [
+                                {
+                                    "type": "output_text",
+                                    "text": "我先确认一下记录同步情况。",
+                                }
+                            ],
+                        }
+                    ],
+                },
+            ]
+        )
+
+        run_agent_loop(
+            client,
+            {
+                "user_message": "记录是完整的，帮我看看怎么调整",
+                "user_profile": {"user_id": "force-intake-loop-guard"},
+                "locale": "zh-CN",
+                "timezone": "Asia/Shanghai",
+                "message_sent_at": "2026-05-14 12:10:00",
+            },
+            {"context_state": context_state, "loaded_skill_ids": ["milk-management"]},
+        )
+
+        first_request, second_request = client.responses.requests[:2]
+        self.assertEqual(
+            first_request["tool_choice"],
+            {
+                "type": "allowed_tools",
+                "mode": "required",
+                "tools": [{"type": "function", "name": "milk_analysis_intake_manage"}],
+            },
+        )
+        self.assertEqual(second_request["tool_choice"], "auto")
+        self.assertEqual(second_request["input"][0]["type"], "function_call_output")
+
+    def test_milk_intake_ready_forces_analysis_after_tool_output(self) -> None:
+        context_state = ContextState()
+        context_state.milk_management_state = {
+            "analysis_intake": {
+                "stage": "intake_collecting",
+                "current_field": "maternal_breast_comfort",
+                "next_question": "吸奶或亲喂后乳房是比较舒服，还是还会胀、排不空或疼？",
+                "checklist": [{"id": "maternal_breast_comfort", "status": "missing"}],
+            },
+        }
+        intake_result = {
+            "ok": True,
+            "status": "milk_analysis_ready_to_evaluate",
+            "summary": "奶量分析信息采集已完成。",
+            "data": {
+                "intake_state": {
+                    "stage": "ready_to_evaluate",
+                    "checklist": [{"id": "records_7d", "status": "collected"}],
+                    "analysis_context": {"records_snapshot": {"status": "collected", "valid_days": 7}},
+                },
+                "analysis_context": {"records_snapshot": {"status": "collected", "valid_days": 7}},
+                "checklist": [{"id": "records_7d", "status": "collected"}],
+                "missing_fields": [],
+                "executed_step": "intake",
+                "next_tool": "milk_analysis_evaluate",
+            },
+        }
+        client = _FakeClient(
+            [
+                {
+                    "id": "resp-intake-call",
+                    "output": [
+                        {
+                            "type": "function_call",
+                            "call_id": "call-intake-ready",
+                            "name": "milk_analysis_intake_manage",
+                            "arguments": json.dumps({"user_update": "吸完比较舒服"}),
+                        }
+                    ],
+                },
+                {"id": "resp-final", "output": [{"type": "message", "content": [{"type": "output_text", "text": "我继续分析。"}]}]},
+            ]
+        )
+
+        with patch(
+            "momcozy_agent.agents._execute_project_tool",
+            return_value={"ok": True, "tool_name": "milk_analysis_intake_manage", "result": intake_result},
+        ):
+            run_agent_loop(
+                client,
+                {
+                    "user_message": "吸完比较舒服",
+                    "user_profile": {"user_id": "intake-ready-force-analysis"},
+                    "locale": "zh-CN",
+                    "timezone": "Asia/Shanghai",
+                    "message_sent_at": "2026-05-14 12:10:00",
+                },
+                {"context_state": context_state, "loaded_skill_ids": ["milk-management"]},
+            )
+
+        self.assertEqual(
+            client.responses.requests[1]["tool_choice"],
+            {
+                "type": "allowed_tools",
+                "mode": "required",
+                "tools": [{"type": "function", "name": "milk_analysis_evaluate"}],
+            },
+        )
+
+    def test_milk_analysis_evaluate_forces_plan_preview_when_user_accepts_plan(self) -> None:
+        context_state = ContextState()
+        context_state.milk_management_state = {
+            "analysis_intake": {
+                "stage": "ready_to_evaluate",
+                "plan_type": "increase_milk",
+                "checklist": [{"id": "records_7d", "status": "collected"}],
+                "analysis_context": {"records_snapshot": {"status": "collected", "valid_days": 7}},
+            },
+        }
+        flow_decision = {
+            "stage": "plan_ready_to_preview",
+            "missing_user_inputs": [],
+            "plan_decision": {
+                "can_start_plan": True,
+                "recommended_plan_type": "increase_milk",
+                "next_tool": "milk_plan_preview_create",
+            },
+        }
+        analysis_result = {
+            "ok": True,
+            "status": "milk_analysis_ready",
+            "summary": "奶量分析已完成。",
+            "data": {
+                "intake_state": {
+                    "stage": "analysis_ready",
+                    "plan_type": "increase_milk",
+                    "analysis_context": {"records_snapshot": {"status": "collected", "valid_days": 7}},
+                },
+                "analysis_context": {"records_snapshot": {"status": "collected", "valid_days": 7}},
+                "assessment_result": {
+                    "ok": True,
+                    "status": "milk_assessment_ready",
+                    "data": {"milk_flow_decision": flow_decision},
+                },
+                "milk_flow_decision": flow_decision,
+                "executed_step": "assessment",
+                "next_tool": "milk_plan_preview_create",
+            },
+        }
+        client = _FakeClient(
+            [
+                {
+                    "id": "resp-analysis-call",
+                    "output": [
+                        {
+                            "type": "function_call",
+                            "call_id": "call-analysis",
+                            "name": "milk_analysis_evaluate",
+                            "arguments": json.dumps({}),
+                        }
+                    ],
+                },
+                {"id": "resp-final", "output": [{"type": "message", "content": [{"type": "output_text", "text": "我开始生成计划。"}]}]},
+            ]
+        )
+
+        with patch(
+            "momcozy_agent.agents._execute_project_tool",
+            return_value={"ok": True, "tool_name": "milk_analysis_evaluate", "result": analysis_result},
+        ):
+            run_agent_loop(
+                client,
+                {
+                    "user_message": "可以，帮我开始温和追奶",
+                    "user_profile": {"user_id": "analysis-force-preview"},
+                    "locale": "zh-CN",
+                    "timezone": "Asia/Shanghai",
+                    "message_sent_at": "2026-05-14 12:10:00",
+                },
+                {"context_state": context_state, "loaded_skill_ids": ["milk-management"]},
+            )
+
+        self.assertEqual(
+            client.responses.requests[1]["tool_choice"],
+            {
+                "type": "allowed_tools",
+                "mode": "required",
+                "tools": [{"type": "function", "name": "milk_plan_preview_create"}],
+            },
+        )
+        top_level_functions = [tool["name"] for tool in client.responses.requests[1]["tools"] if tool.get("type") == "function"]
+        self.assertIn("milk_plan_preview_create", top_level_functions)
+
+    def test_milk_analysis_evaluate_does_not_force_plan_preview_for_analysis_only_request(self) -> None:
+        context_state = ContextState()
+        context_state.milk_management_state = {
+            "analysis_intake": {
+                "stage": "ready_to_evaluate",
+                "checklist": [{"id": "records_7d", "status": "collected"}],
+                "analysis_context": {"records_snapshot": {"status": "collected", "valid_days": 7}},
+            },
+        }
+        analysis_result = {
+            "ok": True,
+            "status": "milk_analysis_ready",
+            "summary": "奶量分析已完成。",
+            "data": {
+                "intake_state": {"stage": "analysis_ready"},
+                "assessment_result": {"ok": True, "status": "milk_assessment_ready", "data": {}},
+                "executed_step": "assessment",
+                "next_tool": "milk_plan_preview_create",
+            },
+        }
+        client = _FakeClient(
+            [
+                {
+                    "id": "resp-analysis-call",
+                    "output": [
+                        {
+                            "type": "function_call",
+                            "call_id": "call-analysis-only",
+                            "name": "milk_analysis_evaluate",
+                            "arguments": json.dumps({}),
+                        }
+                    ],
+                },
+                {"id": "resp-final", "output": [{"type": "message", "content": [{"type": "output_text", "text": "奶量分析完成。"}]}]},
+            ]
+        )
+
+        with patch(
+            "momcozy_agent.agents._execute_project_tool",
+            return_value={"ok": True, "tool_name": "milk_analysis_evaluate", "result": analysis_result},
+        ):
+            run_agent_loop(
+                client,
+                {
+                    "user_message": "帮我分析最近奶量",
+                    "user_profile": {"user_id": "analysis-only-no-preview"},
+                    "locale": "zh-CN",
+                    "timezone": "Asia/Shanghai",
+                    "message_sent_at": "2026-05-14 12:10:00",
+                },
+                {"context_state": context_state, "loaded_skill_ids": ["milk-management"]},
+            )
+
+        self.assertEqual(client.responses.requests[1]["tool_choice"], "auto")
+        self.assertEqual(client.responses.requests[1]["input"][0]["type"], "function_call_output")
+
+    def test_milk_plan_preview_create_disables_followup_tools(self) -> None:
+        context_state = ContextState()
+        context_state.milk_management_state = {
+            "analysis_intake": {
+                "stage": "analysis_ready",
+                "plan_type": "increase_milk",
+                "checklist": [{"id": "records_7d", "status": "collected"}],
+                "analysis_context": {"records_snapshot": {"status": "collected", "valid_days": 7}},
+                "assessment_result": {"ok": True, "status": "milk_assessment_ready", "data": {}},
+            },
+        }
+        preview_result = {
+            "ok": True,
+            "status": "plan_preview_ready",
+            "summary": "奶量计划草稿已生成。",
+            "data": {
+                "draft": {
+                    "plan_type": "increase_milk",
+                    "plan_days": 7,
+                    "current_daily_ml": 615,
+                    "target_daily_ml": 665,
+                    "current_frequency": 5,
+                    "summary": "温和追奶计划",
+                    "plan_rules": {"desired_pumping_count": 6},
+                },
+                "requires_confirmation": True,
+                "confirmation_question": "要同步到计划页吗？",
+                "calendar_delta": {"recommended_calendar_write_strategy": "append"},
+            },
+            "card": {
+                "card_type": "milk_plan_card",
+                "schema_version": "1.0",
+                "card_json": {"card_type": "milk_plan_card", "schema_version": "1.0"},
+            },
+        }
+        client = _FakeClient(
+            [
+                {
+                    "id": "resp-preview-call",
+                    "output": [
+                        {
+                            "type": "function_call",
+                            "call_id": "call-preview",
+                            "name": "milk_plan_preview_create",
+                            "arguments": json.dumps({"user_id": "preview-stop", "user_update": "好"}),
+                        }
+                    ],
+                },
+                {
+                    "id": "resp-final",
+                    "output": [
+                        {
+                            "type": "message",
+                            "content": [{"type": "output_text", "text": "计划草稿已准备好，先看一下要不要同步。"}],
+                        }
+                    ],
+                },
+            ]
+        )
+
+        with patch(
+            "momcozy_agent.agents._execute_project_tool",
+            return_value={"ok": True, "tool_name": "milk_plan_preview_create", "result": preview_result},
+        ):
+            run_agent_loop(
+                client,
+                {
+                    "user_message": "好",
+                    "user_profile": {"user_id": "preview-stop"},
+                    "locale": "zh-CN",
+                    "timezone": "Asia/Shanghai",
+                    "message_sent_at": "2026-05-14 12:10:00",
+                },
+                {"context_state": context_state, "loaded_skill_ids": ["milk-management"]},
+            )
+
+        first_request, second_request = client.responses.requests[:2]
+        self.assertEqual(
+            first_request["tool_choice"],
+            {
+                "type": "allowed_tools",
+                "mode": "required",
+                "tools": [{"type": "function", "name": "milk_plan_preview_create"}],
+            },
+        )
+        self.assertNotIn("tools", second_request)
+        self.assertNotIn("tool_choice", second_request)
+        self.assertEqual(second_request["input"][0]["type"], "function_call_output")
+
+    def test_milk_write_confirmation_disables_followup_tools(self) -> None:
+        context_state = ContextState()
+        context_state.milk_management_state = {
+            "analysis_intake": {
+                "stage": "plan_preview",
+                "plan_preview": {
+                    "status": "plan_preview_ready",
+                    "draft": {"plan_type": "increase_milk", "plan_days": 7},
+                    "idempotency_key": "milk-plan-preview-test",
+                },
+            },
+        }
+        confirmation_result = {
+            "ok": False,
+            "status": "needs_write_confirmation",
+            "summary": "写入前需要用户明确确认。",
+            "data": {
+                "requires_confirmation": True,
+                "confirmation_question": "确认把这版奶量计划保存并同步到计划页吗？",
+            },
+        }
+        client = _FakeClient(
+            [
+                {
+                    "id": "resp-write-call",
+                    "output": [
+                        {
+                            "type": "function_call",
+                            "call_id": "call-write",
+                            "name": "milk_plan_mutate",
+                            "arguments": json.dumps({"user_id": "write-stop", "operation": "create"}),
+                        }
+                    ],
+                },
+                {
+                    "id": "resp-final",
+                    "output": [
+                        {
+                            "type": "message",
+                            "content": [{"type": "output_text", "text": "保存前我需要你再确认一下。"}],
+                        }
+                    ],
+                },
+            ]
+        )
+
+        with patch(
+            "momcozy_agent.agents._execute_project_tool",
+            return_value={"ok": True, "tool_name": "milk_plan_mutate", "result": confirmation_result},
+        ):
+            run_agent_loop(
+                client,
+                {
+                    "user_message": "保存并同步",
+                    "user_profile": {"user_id": "write-stop"},
+                    "locale": "zh-CN",
+                    "timezone": "Asia/Shanghai",
+                    "message_sent_at": "2026-05-14 12:12:00",
+                },
+                {"context_state": context_state, "loaded_skill_ids": ["milk-management"]},
+            )
+
+        self.assertNotIn("tools", client.responses.requests[1])
+        self.assertNotIn("tool_choice", client.responses.requests[1])
+        self.assertEqual(client.responses.requests[1]["input"][0]["type"], "function_call_output")
+
+    def test_invalid_milk_plan_preview_disables_followup_tools(self) -> None:
+        context_state = ContextState()
+        context_state.milk_management_state = {
+            "analysis_intake": {
+                "stage": "analysis_ready",
+                "plan_type": "increase_milk",
+                "checklist": [{"id": "records_7d", "status": "collected"}],
+                "analysis_context": {"records_snapshot": {"status": "collected", "valid_days": 7}},
+                "assessment_result": {"ok": True, "status": "milk_assessment_ready", "data": {}},
+            },
+        }
+        preview_result = {
+            "ok": True,
+            "status": "plan_preview_needs_revision",
+            "summary": "追奶计划修改后吸奶任务次数必须大于当前吸奶次数。",
+            "data": {
+                "draft": {"plan_type": "increase_milk", "plan_days": 7},
+                "validation": {
+                    "valid": False,
+                    "violations": ["追奶计划修改后吸奶任务次数必须大于当前吸奶次数。"],
+                },
+            },
+        }
+        client = _FakeClient(
+            [
+                {
+                    "id": "resp-preview-call",
+                    "output": [
+                        {
+                            "type": "function_call",
+                            "call_id": "call-preview-invalid",
+                            "name": "milk_plan_preview_create",
+                            "arguments": json.dumps({"user_id": "invalid-preview-stop", "user_update": "好"}),
+                        }
+                    ],
+                },
+                {"id": "resp-final", "output": [{"type": "message", "content": [{"type": "output_text", "text": "这版还需要调整一下。"}]}]},
+            ]
+        )
+
+        with patch(
+            "momcozy_agent.agents._execute_project_tool",
+            return_value={"ok": True, "tool_name": "milk_plan_preview_create", "result": preview_result},
+        ):
+            run_agent_loop(
+                client,
+                {
+                    "user_message": "好",
+                    "user_profile": {"user_id": "invalid-preview-stop"},
+                    "locale": "zh-CN",
+                    "timezone": "Asia/Shanghai",
+                    "message_sent_at": "2026-05-14 12:10:00",
+                },
+                {"context_state": context_state, "loaded_skill_ids": ["milk-management"]},
+            )
+
+        self.assertNotIn("tools", client.responses.requests[1])
+        self.assertNotIn("tool_choice", client.responses.requests[1])
+
+    def test_failed_milk_plan_save_result_label_does_not_claim_saved(self) -> None:
+        event = tool_call_result_event(
+            "message-1",
+            "call-save",
+            "milk_plan_mutate",
+            {
+                "ok": True,
+                "tool_name": "milk_plan_mutate",
+                "result": {
+                    "ok": False,
+                    "status": "milk_plan_invalid",
+                    "summary": "追奶计划修改后吸奶任务次数必须大于当前吸奶次数。",
+                    "data": {"validation": {"valid": False}},
+                },
+            },
+        )
+
+        self.assertEqual(event["semantic"]["label"], "这次还没保存成功")
+        self.assertNotIn("保存好奶量计划", event["semantic"]["label"])
+
+    def test_milk_plan_decline_keeps_tool_choice_auto(self) -> None:
+        context_state = ContextState()
+        context_state.milk_management_state = {
+            "last_assessment": {
+                "flow_decision": {
+                    "stage": "plan_ready",
+                    "missing_user_inputs": [],
+                    "plan_decision": {
+                        "can_start_plan": True,
+                        "next_tool": "milk_plan_preview",
+                        "recommended_plan_type": "increase_milk",
+                    },
+                },
+            },
+            "pending_plan_after_assessment": {"plan_type": "increase_milk"},
+        }
+
+        request = build_agent_request(
+            {"user_message": "先不做计划，我想再看看原因", "locale": "zh-CN"},
+            {"context_state": context_state, "loaded_skill_ids": ["milk-management"]},
+        )
+
+        self.assertEqual(request["tool_choice"], "auto")
 
     def test_milk_management_fullness_with_red_flags_still_forces_health_search(self) -> None:
         request = build_agent_request(
@@ -401,6 +1028,31 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertEqual(payload["status"], "stale")
         self.assertEqual(runtime.sessions["thread-stale"].previous_response_id, "resp-real")
         self.assertFalse(runtime.sessions["thread-stale"].context_state.environment_sent)
+
+    def test_context_clone_preserves_milk_and_birth_intake_state(self) -> None:
+        state = ContextState()
+        state.birth_journey_intake = {"next_step": "birth_path", "profile": {"first_birth": True}}
+        state.milk_management_state = {"last_plan_preview": {"draft": {"plan_type": "increase_milk"}}}
+
+        cloned = _clone_context_state(state)
+        cloned.birth_journey_intake["profile"]["first_birth"] = False
+        cloned.milk_management_state["last_plan_preview"]["draft"]["plan_type"] = "maintain_milk"
+
+        self.assertTrue(state.birth_journey_intake["profile"]["first_birth"])
+        self.assertEqual(state.milk_management_state["last_plan_preview"]["draft"]["plan_type"], "increase_milk")
+        self.assertFalse(cloned.birth_journey_intake["profile"]["first_birth"])
+        self.assertEqual(cloned.milk_management_state["last_plan_preview"]["draft"]["plan_type"], "maintain_milk")
+
+    def test_chat_runtime_sessions_have_distinct_run_locks(self) -> None:
+        runtime = ChatRuntime(object())
+        first = runtime.get_session("thread-lock-a")
+        second = runtime.get_session("thread-lock-b")
+
+        self.assertIsNot(first.run_lock, second.run_lock)
+        self.assertTrue(first.run_lock.acquire(blocking=False))
+        self.addCleanup(first.run_lock.release)
+        self.assertTrue(second.run_lock.acquire(blocking=False))
+        self.addCleanup(second.run_lock.release)
 
     def test_tool_call_phase_events_include_tool_name(self) -> None:
         args_event = tool_call_args_event(

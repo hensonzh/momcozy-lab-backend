@@ -6,6 +6,7 @@ import threading
 import time
 import uuid
 from collections.abc import AsyncIterator
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
@@ -59,6 +60,7 @@ class ChatSession:
     previous_response_id: str | None = None
     loaded_skill_ids: list[SkillId] = field(default_factory=list)
     context_state: ContextState = field(default_factory=ContextState)
+    run_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
 
 class ChatRuntime:
@@ -253,9 +255,6 @@ async def stream_ag_ui_events(
     assistant_message_id = f"{run_id}:assistant"
 
     session = runtime.get_session(str(thread_id))
-    if session.previous_response_id and "previous_response_id" not in inputs:
-        inputs["previous_response_id"] = session.previous_response_id
-    capture_birth_prep_user_message(inputs, session.context_state)
 
     sentinel = object()
     output_queue: asyncio.Queue[Any] = asyncio.Queue()
@@ -331,51 +330,55 @@ async def stream_ag_ui_events(
         ) if debug_stream_timing else None
 
         try:
-            agent_options: dict[str, Any] = {
-                "model": runtime.model,
-                "store": runtime.store,
-                "loaded_skill_ids": session.loaded_skill_ids,
-                "context_state": session.context_state,
-            }
-            response = run_agent_loop(
-                runtime.client,
-                inputs,
-                agent_options,
-                on_ag_ui_event=send_ag_ui_event,
-                ag_ui_thread_id=str(thread_id),
-                ag_ui_run_id=str(run_id),
-                ag_ui_parent_run_id=str(parent_run_id) if parent_run_id else None,
-                ag_ui_message_id=assistant_message_id,
-                on_text_delta=send_text_delta,
-                on_response_stream_event=response_stream_timing,
-            )
-            response_id = _response_id(response)
-            if response_id:
-                session.previous_response_id = response_id
-            loaded_skill_ids = agent_options.get("loaded_skill_ids")
-            if isinstance(loaded_skill_ids, list):
-                session.loaded_skill_ids = loaded_skill_ids
-            text = _response_text(response)
-            if not streamed_text_parts and text:
-                send_text_delta(text)
-            current_text = "".join(streamed_text_parts) or text
-            for followup in pending_assistant_followups:
-                if _should_send_assistant_followup(followup, current_text, allow_only_when_no_text=True):
-                    send_text_delta(f"\n\n{followup}")
-                    current_text = f"{current_text}\n\n{followup}"
-            record_birth_prep_assistant_message(session.context_state, current_text)
-            if text_started:
-                send_event(
-                    {
-                        "type": "TEXT_MESSAGE_END",
-                        "message_id": assistant_message_id,
-                        "semantic": text_message_semantic("end", assistant_message_id),
-                    }
+            with session.run_lock:
+                if session.previous_response_id and "previous_response_id" not in inputs:
+                    inputs["previous_response_id"] = session.previous_response_id
+                capture_birth_prep_user_message(inputs, session.context_state)
+                agent_options: dict[str, Any] = {
+                    "model": runtime.model,
+                    "store": runtime.store,
+                    "loaded_skill_ids": session.loaded_skill_ids,
+                    "context_state": session.context_state,
+                }
+                response = run_agent_loop(
+                    runtime.client,
+                    inputs,
+                    agent_options,
+                    on_ag_ui_event=send_ag_ui_event,
+                    ag_ui_thread_id=str(thread_id),
+                    ag_ui_run_id=str(run_id),
+                    ag_ui_parent_run_id=str(parent_run_id) if parent_run_id else None,
+                    ag_ui_message_id=assistant_message_id,
+                    on_text_delta=send_text_delta,
+                    on_response_stream_event=response_stream_timing,
                 )
-            if pending_run_finished:
-                if not suppress_quick_replies:
-                    send_event(quick_replies_event(assistant_message_id, pending_quick_replies or _default_quick_replies()))
-                send_event(pending_run_finished)
+                response_id = _response_id(response)
+                if response_id:
+                    session.previous_response_id = response_id
+                loaded_skill_ids = agent_options.get("loaded_skill_ids")
+                if isinstance(loaded_skill_ids, list):
+                    session.loaded_skill_ids = loaded_skill_ids
+                text = _response_text(response)
+                if not streamed_text_parts and text:
+                    send_text_delta(text)
+                current_text = "".join(streamed_text_parts) or text
+                for followup in pending_assistant_followups:
+                    if _should_send_assistant_followup(followup, current_text, allow_only_when_no_text=True):
+                        send_text_delta(f"\n\n{followup}")
+                        current_text = f"{current_text}\n\n{followup}"
+                record_birth_prep_assistant_message(session.context_state, current_text)
+                if text_started:
+                    send_event(
+                        {
+                            "type": "TEXT_MESSAGE_END",
+                            "message_id": assistant_message_id,
+                            "semantic": text_message_semantic("end", assistant_message_id),
+                        }
+                    )
+                if pending_run_finished:
+                    if not suppress_quick_replies:
+                        send_event(quick_replies_event(assistant_message_id, pending_quick_replies or _default_quick_replies()))
+                    send_event(pending_run_finished)
         except Exception as exc:
             send_event(run_error_event(str(exc), type(exc).__name__, thread_id=str(thread_id), run_id=str(run_id)))
         finally:
@@ -394,43 +397,44 @@ def prewarm_ag_ui_session(payload: dict[str, Any], inputs: dict[str, Any], runti
     thread_id = str(_field(payload, "thread_id", "threadId") or f"thread_{payload.get('conversation_id', 'anonymous')}")
     run_id = str(_field(payload, "run_id", "runId") or f"prewarm_{date.today().isoformat()}")
     session = runtime.get_session(thread_id)
-    if session.previous_response_id:
+    with session.run_lock:
+        if session.previous_response_id:
+            return {
+                "status": "already_warm",
+                "conversation_id": session.conversation_id,
+                "thread_id": session.conversation_id,
+                "run_id": run_id,
+                "response_id": session.previous_response_id,
+                "session_state": _session_state_payload(session),
+            }
+
+        starting_previous_response_id = session.previous_response_id
+        prewarm_context_state = _clone_context_state(session.context_state)
+        options: dict[str, Any] = {
+            "model": runtime.model,
+            "store": runtime.store,
+            "loaded_skill_ids": session.loaded_skill_ids,
+            "context_state": prewarm_context_state,
+            "enable_tools": False,
+            "max_output_tokens": 24,
+        }
+        response = run_agent_turn(runtime.client, inputs, options)
+        response_id = _response_id(response)
+        if response_id and session.previous_response_id == starting_previous_response_id:
+            session.previous_response_id = response_id
+            session.context_state = prewarm_context_state
+            status = "warmed"
+        else:
+            status = "stale" if response_id else "no_response_id"
+
         return {
-            "status": "already_warm",
+            "status": status,
             "conversation_id": session.conversation_id,
             "thread_id": session.conversation_id,
             "run_id": run_id,
-            "response_id": session.previous_response_id,
+            "response_id": response_id,
             "session_state": _session_state_payload(session),
         }
-
-    starting_previous_response_id = session.previous_response_id
-    prewarm_context_state = _clone_context_state(session.context_state)
-    options: dict[str, Any] = {
-        "model": runtime.model,
-        "store": runtime.store,
-        "loaded_skill_ids": session.loaded_skill_ids,
-        "context_state": prewarm_context_state,
-        "enable_tools": False,
-        "max_output_tokens": 24,
-    }
-    response = run_agent_turn(runtime.client, inputs, options)
-    response_id = _response_id(response)
-    if response_id and session.previous_response_id == starting_previous_response_id:
-        session.previous_response_id = response_id
-        session.context_state = prewarm_context_state
-        status = "warmed"
-    else:
-        status = "stale" if response_id else "no_response_id"
-
-    return {
-        "status": status,
-        "conversation_id": session.conversation_id,
-        "thread_id": session.conversation_id,
-        "run_id": run_id,
-        "response_id": response_id,
-        "session_state": _session_state_payload(session),
-    }
 
 
 def _clone_context_state(state: ContextState) -> ContextState:
@@ -443,6 +447,8 @@ def _clone_context_state(state: ContextState) -> ContextState:
         active_device_module=state.active_device_module,
         shown_step_image_urls=list(state.shown_step_image_urls),
         birth_prep_slots={key: dict(value) for key, value in state.birth_prep_slots.items()},
+        birth_journey_intake=deepcopy(state.birth_journey_intake),
+        milk_management_state=deepcopy(state.milk_management_state),
     )
 
 

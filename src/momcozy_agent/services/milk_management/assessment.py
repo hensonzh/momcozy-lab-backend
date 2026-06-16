@@ -21,6 +21,8 @@ from .schemas import (
     to_int,
 )
 
+SOURCE_RECORD_CONTEXT_LIMIT = 160
+
 
 def evaluate_milk_status(
     *,
@@ -63,7 +65,7 @@ def evaluate_milk_status(
     pumping_logs = fetch_all(
         """
         SELECT pumping_id, user_id, pump_start_time, pump_end_time, pump_milk_volum,
-               pump_type, pump_milk_duration, created_at
+               pump_type, pump_milk_duration, pump_source, pump_title, created_at
         FROM pumping_log
         WHERE user_id = ?
           AND pump_start_time >= ?
@@ -74,7 +76,8 @@ def evaluate_milk_status(
     )
     feeding_logs = fetch_all(
         """
-        SELECT feeding_id, user_id, infant_id, feed_time, feed_milk_volum, feed_type, created_at
+        SELECT feeding_id, user_id, infant_id, feed_time, feed_milk_volum,
+               feed_type, feed_action, feeding_title, created_at
         FROM feeding_log
         WHERE user_id = ?
           AND feed_time >= ?
@@ -126,6 +129,17 @@ def evaluate_milk_status(
         window_days=days,
         include_today=include_today,
     )
+    source_record_context = _source_record_context(
+        pumping_logs=pumping_logs,
+        feeding_logs=feeding_logs,
+        normality=normality,
+        window={
+            "start_at": _db_time(start_dt),
+            "end_at": _db_time(end_dt),
+            "window_days": days,
+            "include_today": bool(include_today),
+        },
+    )
 
     status = "ready"
     if "delivery_date" in missing_data or ("pumping_logs" in missing_data and "feeding_logs" in missing_data):
@@ -162,6 +176,7 @@ def evaluate_milk_status(
             "yesterday_feeding_snapshot": yesterday_feeding_snapshot,
             "quick_24h_intake": quick_24h_intake,
             "milk_normality": normality,
+            "source_record_context": source_record_context,
             "missing_data": missing_data,
             "control_suggestion": _control_suggestion(
                 status=status,
@@ -241,9 +256,13 @@ def _control_suggestion(
 
 def _summarize_pumping(rows: list[dict[str, Any]]) -> dict[str, Any]:
     total_ml = 0.0
+    count = 0
     times: list[str] = []
     durations: list[int] = []
     for row in rows:
+        if to_int(row.get("pump_type"), 0) == 2:
+            continue
+        count += 1
         total_ml += _float(row.get("pump_milk_volum"))
         time_text = _time_text(row.get("pump_start_time"))
         if time_text:
@@ -252,10 +271,10 @@ def _summarize_pumping(rows: list[dict[str, Any]]) -> dict[str, Any]:
         if duration > 0:
             durations.append(duration)
     return {
-        "count": len(rows),
+        "count": count,
         "total_ml": round(total_ml, 1),
         "times": times,
-        "average_ml": round(total_ml / len(rows), 1) if rows else 0.0,
+        "average_ml": round(total_ml / count, 1) if count else 0.0,
         "average_duration_minutes": round(sum(durations) / len(durations), 1) if durations else None,
     }
 
@@ -279,6 +298,130 @@ def _summarize_feeding(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "has_formula": any("奶粉" in key or "formula" in key.lower() for key in type_counts),
         "has_breastfeeding": any("亲喂" in key or "breast" in key.lower() for key in type_counts),
     }
+
+
+def _source_record_context(
+    *,
+    pumping_logs: list[dict[str, Any]],
+    feeding_logs: list[dict[str, Any]],
+    normality: dict[str, Any],
+    window: dict[str, Any],
+) -> dict[str, Any]:
+    records = []
+    for row in pumping_logs:
+        record = _source_pumping_record(row)
+        if record:
+            records.append(record)
+    for row in feeding_logs:
+        record = _source_feeding_record(row)
+        if record:
+            records.append(record)
+
+    records.sort(key=lambda item: (norm_text(item.get("occurred_at")), norm_text(item.get("record_table")), item.get("record_id") or 0))
+    limited_records = records[-SOURCE_RECORD_CONTEXT_LIMIT:]
+    return _compact_source_value(
+        {
+            "window": window,
+            "record_limit": SOURCE_RECORD_CONTEXT_LIMIT,
+            "truncated": len(records) > SOURCE_RECORD_CONTEXT_LIMIT,
+            "record_counts": {
+                "pumping": len([item for item in records if item.get("record_table") == "pumping_log"]),
+                "feeding": len([item for item in records if item.get("record_table") == "feeding_log"]),
+                "returned": len(limited_records),
+            },
+            "raw_records": {
+                "pumping": [item for item in limited_records if item.get("record_table") == "pumping_log"],
+                "feeding": [item for item in limited_records if item.get("record_table") == "feeding_log"],
+            },
+            "daily_rollups": _source_daily_rollups(normality),
+        }
+    )
+
+
+def _source_pumping_record(row: dict[str, Any]) -> dict[str, Any]:
+    pump_type = to_int(row.get("pump_type"), 0)
+    return _compact_source_value(
+        {
+            "record_id": to_int(row.get("pumping_id"), 0),
+            "record_table": "pumping_log",
+            "record_kind": "nursing" if pump_type == 2 else "pumping",
+            "occurred_at": row.get("pump_start_time"),
+            "ended_at": row.get("pump_end_time"),
+            "amount_ml": _nullable_float(row.get("pump_milk_volum")),
+            "duration_minutes": _optional_positive_int(row.get("pump_milk_duration")),
+            "pump_type": pump_type,
+            "source": row.get("pump_source"),
+            "title": row.get("pump_title"),
+            "included_in_daily_rollup": pump_type != 2,
+        }
+    )
+
+
+def _source_feeding_record(row: dict[str, Any]) -> dict[str, Any]:
+    kind = _feeding_record_kind(row.get("feed_type"))
+    amount = _nullable_float(row.get("feed_milk_volum"))
+    return _compact_source_value(
+        {
+            "record_id": to_int(row.get("feeding_id"), 0),
+            "record_table": "feeding_log",
+            "record_kind": kind,
+            "infant_id": row.get("infant_id"),
+            "occurred_at": row.get("feed_time"),
+            "amount_ml": amount if kind != "nursing" else None,
+            "duration_minutes": int(amount) if kind == "nursing" and amount is not None else None,
+            "feed_type": row.get("feed_type"),
+            "feed_action": row.get("feed_action"),
+            "title": row.get("feeding_title"),
+            "included_in_daily_rollup": kind in {"nursing", "breastmilk_bottle"},
+        }
+    )
+
+
+def _feeding_record_kind(value: Any) -> str:
+    if _is_breastfeeding_type(value):
+        return "nursing"
+    if _is_breastmilk_bottle_type(value):
+        return "breastmilk_bottle"
+    if _is_formula_bottle_type(value):
+        return "formula_bottle"
+    return "feeding_other"
+
+
+def _source_daily_rollups(normality: dict[str, Any]) -> list[dict[str, Any]]:
+    days = normality.get("days") if isinstance(normality.get("days"), list) else []
+    rollups = []
+    for day in days:
+        if not isinstance(day, dict):
+            continue
+        rollups.append(
+            _compact_source_value(
+                {
+                    "date": day.get("date"),
+                    "postpartum_day": day.get("postpartum_day"),
+                    "pumping_ml_total": day.get("pumping_ml_total"),
+                    "pumping_count": day.get("pumping_count"),
+                    "breastfeeding_count": day.get("breastfeeding_count"),
+                    "breastmilk_bottle_ml": day.get("breastmilk_bottle_ml"),
+                    "breastmilk_bottle_count": day.get("breastmilk_bottle_count"),
+                    "feeding_count_total": day.get("feeding_count_total"),
+                    "estimated_daily_milk_ml": day.get("estimated_daily_milk_ml"),
+                    "estimated_breastfeeding_ml": day.get("estimated_breastfeeding_ml"),
+                    "estimated_breastmilk_bottle_ml": day.get("estimated_breastmilk_bottle_ml"),
+                    "breastfeeding_per_session_ml": day.get("breastfeeding_per_session_ml"),
+                    "yield_reference": day.get("yield_reference"),
+                    "frequency_reference": day.get("frequency_reference"),
+                    "estimated_frequency": day.get("estimated_frequency"),
+                    "milk_basis_rule": day.get("milk_basis_rule"),
+                    "frequency_rule": day.get("frequency_rule"),
+                    "status": day.get("status"),
+                    "normal": day.get("normal"),
+                    "ok": day.get("ok"),
+                    "rule_hit": day.get("rule_hit"),
+                    "message": day.get("message"),
+                }
+            )
+        )
+    return rollups
 
 
 def _summarize_calendar_tasks(
@@ -408,6 +551,8 @@ def _evaluate_milk_normality(
                 "pumping_ml_total": 0.0,
                 "pumping_count": 0,
                 "breastfeeding_count": 0,
+                "breastmilk_bottle_ml": 0.0,
+                "breastmilk_bottle_count": 0,
                 "feeding_count_total": 0,
             },
         )
@@ -420,6 +565,8 @@ def _evaluate_milk_normality(
                     "pumping_ml_total": round(float(slot["pumping_ml_total"]), 1),
                     "pumping_count": int(slot["pumping_count"]),
                     "breastfeeding_count": int(slot["breastfeeding_count"]),
+                    "breastmilk_bottle_ml": round(float(slot["breastmilk_bottle_ml"]), 1),
+                    "breastmilk_bottle_count": int(slot["breastmilk_bottle_count"]),
                     "feeding_count_total": int(slot["feeding_count_total"]),
                     "frequency_reference": None,
                     "yield_reference": None,
@@ -441,6 +588,8 @@ def _evaluate_milk_normality(
             pumping_ml_total=float(slot["pumping_ml_total"]),
             pumping_count=int(slot["pumping_count"]),
             breastfeeding_count=int(slot["breastfeeding_count"]),
+            breastmilk_bottle_ml=float(slot["breastmilk_bottle_ml"]),
+            breastmilk_bottle_count=int(slot["breastmilk_bottle_count"]),
             breastfeeding_per_session_ml=breastfeeding_per_session_ml,
             frequency_reference=frequency_reference,
             yield_reference=yield_reference,
@@ -452,6 +601,8 @@ def _evaluate_milk_normality(
                 "pumping_ml_total": round(float(slot["pumping_ml_total"]), 1),
                 "pumping_count": int(slot["pumping_count"]),
                 "breastfeeding_count": int(slot["breastfeeding_count"]),
+                "breastmilk_bottle_ml": round(float(slot["breastmilk_bottle_ml"]), 1),
+                "breastmilk_bottle_count": int(slot["breastmilk_bottle_count"]),
                 "feeding_count_total": int(slot["feeding_count_total"]),
                 "frequency_reference": frequency_reference,
                 "yield_reference": yield_reference,
@@ -520,6 +671,9 @@ def _aggregate_days(
         slot["feeding_count_total"] += 1
         if _is_breastfeeding_type(row.get("feed_type")):
             slot["breastfeeding_count"] += 1
+        elif _is_breastmilk_bottle_type(row.get("feed_type")):
+            slot["breastmilk_bottle_ml"] += _float(row.get("feed_milk_volum"))
+            slot["breastmilk_bottle_count"] += 1
     return aggregate
 
 
@@ -530,6 +684,8 @@ def _day_slot(aggregate: dict[str, dict[str, Any]], day: date) -> dict[str, Any]
             "pumping_ml_total": 0.0,
             "pumping_count": 0,
             "breastfeeding_count": 0,
+            "breastmilk_bottle_ml": 0.0,
+            "breastmilk_bottle_count": 0,
             "feeding_count_total": 0,
         },
     )
@@ -541,11 +697,16 @@ def _evaluate_day(
     pumping_ml_total: float,
     pumping_count: int,
     breastfeeding_count: int,
+    breastmilk_bottle_ml: float,
+    breastmilk_bottle_count: int,
     breastfeeding_per_session_ml: float,
     frequency_reference: dict[str, int],
     yield_reference: dict[str, float] | None,
 ) -> dict[str, Any]:
-    if pumping_count <= 0:
+    observed_breastmilk_bottle_ml = round(max(float(breastmilk_bottle_ml), 0.0), 1)
+    use_breastmilk_bottle_fallback = pumping_count <= 0 and observed_breastmilk_bottle_ml > 0
+
+    if pumping_count <= 0 and not use_breastmilk_bottle_fallback:
         # No pump entries today; still surface direct-breastfeeding estimate
         # so callers don't see a vanished session as zero supply.
         estimated_breastfeeding_only = round(
@@ -560,7 +721,11 @@ def _evaluate_day(
             "estimated_frequency": None,
             "estimated_daily_milk_ml": estimated_breastfeeding_only or None,
             "estimated_breastfeeding_ml": estimated_breastfeeding_only,
+            "estimated_breastmilk_bottle_ml": observed_breastmilk_bottle_ml,
             "pumping_ml_total": 0.0,
+            "breastmilk_bottle_ml": observed_breastmilk_bottle_ml,
+            "breastmilk_bottle_count": int(breastmilk_bottle_count),
+            "milk_basis_rule": "no_measured_milk_output",
             "breastfeeding_per_session_ml": round(float(breastfeeding_per_session_ml), 1),
         }
 
@@ -569,10 +734,11 @@ def _evaluate_day(
     # because the old "pump_avg × total_frequency" formula systematically
     # over-counted combo-feeding moms (per-pump volume ≠ per-breastfeed
     # transfer) and routinely tripped a false over-supply alert.
-    total_times = int(pumping_count) + int(breastfeeding_count)
+    measured_session_count = int(pumping_count) if int(pumping_count) > 0 else int(breastmilk_bottle_count)
+    total_times = measured_session_count + int(breastfeeding_count)
     if breastfeeding_count <= 0:
-        estimated_frequency = int(pumping_count)
-        frequency_rule = "no_breastfeeding_use_pumping_count"
+        estimated_frequency = measured_session_count
+        frequency_rule = "no_breastfeeding_use_measured_output_count"
     elif total_times <= int(frequency_reference.get("p25", 0)):
         estimated_frequency = total_times
         frequency_rule = "within_or_below_p25_use_total_times"
@@ -589,15 +755,20 @@ def _evaluate_day(
     estimated_breastfeeding_ml = round(
         float(breastfeeding_count) * float(breastfeeding_per_session_ml), 1
     )
+    measured_output_ml = observed_breastmilk_bottle_ml if use_breastmilk_bottle_fallback else float(pumping_ml_total)
     estimated_daily_milk_ml = round(
-        float(pumping_ml_total) + max(estimated_breastfeeding_ml, 0.0), 1
+        measured_output_ml + max(estimated_breastfeeding_ml, 0.0), 1
     )
     base = {
         "estimated_frequency": estimated_frequency,
         "estimated_daily_milk_ml": estimated_daily_milk_ml,
         "estimated_breastfeeding_ml": estimated_breastfeeding_ml,
+        "estimated_breastmilk_bottle_ml": observed_breastmilk_bottle_ml if use_breastmilk_bottle_fallback else 0.0,
         "pumping_ml_total": round(float(pumping_ml_total), 1),
+        "breastmilk_bottle_ml": observed_breastmilk_bottle_ml,
+        "breastmilk_bottle_count": int(breastmilk_bottle_count),
         "breastfeeding_per_session_ml": round(float(breastfeeding_per_session_ml), 1),
+        "milk_basis_rule": "breastmilk_bottle_fallback_no_pumping" if use_breastmilk_bottle_fallback else "pumping_log",
         "frequency_rule": frequency_rule,
     }
 
@@ -865,7 +1036,21 @@ def _round_half_up(value: float) -> int:
 
 def _is_breastfeeding_type(value: Any) -> bool:
     token = norm_text(value).lower()
-    return "亲喂" in token or "breast" in token
+    if not token or _is_breastmilk_bottle_type(token) or _is_formula_bottle_type(token):
+        return False
+    return token in {"direct", "breastfeeding", "breast", "nursing", "母乳亲喂"} or "亲喂" in token or "nursing" in token
+
+
+def _is_breastmilk_bottle_type(value: Any) -> bool:
+    token = norm_text(value).lower()
+    return token in {"bottle_breastmilk", "breastmilk_bottle"} or (
+        ("母乳" in token or "breastmilk" in token) and ("瓶" in token or "bottle" in token)
+    )
+
+
+def _is_formula_bottle_type(value: Any) -> bool:
+    token = norm_text(value).lower()
+    return token in {"formula", "formula_bottle", "奶粉", "配方奶"} or "formula" in token or "奶粉" in token or "配方" in token
 
 
 def _date_from_value(value: Any) -> date | None:
@@ -896,3 +1081,29 @@ def _float(value: Any) -> float:
         return float(value or 0.0)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _nullable_float(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _optional_positive_int(value: Any) -> int | None:
+    integer = to_int(value, 0)
+    return integer if integer > 0 else None
+
+
+def _compact_source_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: cleaned
+            for key, item in value.items()
+            if (cleaned := _compact_source_value(item)) not in (None, "", [], {})
+        }
+    if isinstance(value, list):
+        return [cleaned for item in value if (cleaned := _compact_source_value(item)) not in (None, "", [], {})]
+    return value
