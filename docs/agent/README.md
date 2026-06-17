@@ -173,6 +173,8 @@ Air1 FAQ 图片位于 `skills/device-guidance/assets/air1/faq-images/`。`faq.md
 
 产前准备共享字段会记录在 `ContextState.birth_prep_slots`。每轮用户消息进入主 agent loop 的同时，后端会启动一个轻量模型 sidecar 异步抽取用户明确说出的 slots；抽取结果标记为 `confirmed`，但只影响后续轮次的 session slots，不直接写入 user profile。孕期计划、待产包和分娩沟通单都会从同一套 session slots 读取默认值，例如孕周、年龄、单双胎、IVF、城市/医院、分娩方式、喂养意向、支持方、复工时间和焦虑点，避免模型漏传导致表单没有预填。长期画像仍由表单确认、孕期计划卡片或 profile 工具等明确写入路径更新。sidecar 默认模型可通过 `MOMCOZY_SLOT_EXTRACTOR_MODEL` 配置；设置 `MOMCOZY_SLOT_EXTRACTOR_DISABLED=1` 可关闭该异步抽取。
 
+`birth_prep_context` 和 `birth_prep_profile_context` 受 `active_service_domain` gate 控制：domain 为空或为 `birth_prep` 时注入，明确为 `milk_management`、`device_guidance` 或 `emotion_support` 时不注入，避免孕期 slots 污染产后或设备服务。App 可通过 `service_domain` / `active_service_domain` / `current_service` 显式传入；服务工具或 `load_skill` 成功后也会更新 session domain。
+
 后续请求依赖 `previous_response_id` 延续对话状态。
 
 ## Skill Selection

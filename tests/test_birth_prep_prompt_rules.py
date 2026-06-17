@@ -209,6 +209,63 @@ class BirthPrepPromptRuleTests(unittest.TestCase):
 
         self.assertEqual(hospital_bag_slots(state)["city_or_country"], "深圳")
 
+    def test_birth_prep_context_is_injected_when_service_domain_is_empty(self) -> None:
+        state = ContextState()
+
+        merge_extracted_birth_prep_slots(
+            state,
+            [{"field_id": "due_date_or_week", "value": "孕32周", "evidence": "孕32周", "confidence": 0.9}],
+            turn_id=1,
+        )
+
+        context = build_request_context({"user_message": "继续", "locale": "zh-CN"}, state, ["milk-management"])
+
+        self.assertIn("birth_prep_context:", context)
+        self.assertIn("due_date_or_week=孕32周", context)
+
+    def test_birth_prep_context_is_suppressed_for_milk_management_domain(self) -> None:
+        state = ContextState()
+        state.active_service_domain = "milk_management"
+
+        merge_extracted_birth_prep_slots(
+            state,
+            [{"field_id": "due_date_or_week", "value": "孕32周", "evidence": "孕32周", "confidence": 0.9}],
+            turn_id=1,
+        )
+
+        context = build_request_context(
+            {
+                "user_message": "继续",
+                "locale": "zh-CN",
+                "user_profile": {"birth_prep_due_date_or_week": "孕32周"},
+            },
+            state,
+            ["milk-management"],
+        )
+
+        self.assertNotIn("birth_prep_context:", context)
+        self.assertNotIn("birth_prep_profile_context:", context)
+        self.assertNotIn("due_date_or_week=孕32周", context)
+
+    def test_explicit_service_domain_overrides_session_domain_for_context_gate(self) -> None:
+        state = ContextState()
+        state.active_service_domain = "birth_prep"
+
+        merge_extracted_birth_prep_slots(
+            state,
+            [{"field_id": "due_date_or_week", "value": "孕32周", "evidence": "孕32周", "confidence": 0.9}],
+            turn_id=1,
+        )
+
+        context = build_request_context(
+            {"user_message": "继续", "locale": "zh-CN", "service_domain": "milk-management"},
+            state,
+            ["birth-prep"],
+        )
+
+        self.assertNotIn("birth_prep_context:", context)
+        self.assertNotIn("due_date_or_week=孕32周", context)
+
     def test_hospital_bag_flow_uses_form_without_three_dialogue_questions(self) -> None:
         skill = (ROOT / "skills" / "birth-prep" / "SKILL.md").read_text(encoding="utf-8")
         schema_text = str(FUNCTION_TOOLS["hospital_bag_form_create"])
@@ -301,6 +358,7 @@ class BirthPrepPromptRuleTests(unittest.TestCase):
         self.assertIn("due_date_or_week=孕30周", context)
         self.assertIn("birth_path=顺产", context)
         self.assertIn("support_person=伴侣", context)
+        self.assertEqual(state.active_service_domain, "birth_prep")
 
         form_result = create_hospital_bag_form(
             {

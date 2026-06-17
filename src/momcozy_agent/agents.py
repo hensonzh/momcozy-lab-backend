@@ -17,6 +17,7 @@ from .contexts import (
     merge_birth_journey_intake_state,
     merge_hospital_bag_slots,
     record_milk_management_tool_state,
+    set_active_service_domain,
 )
 from .health_guidance import health_guidance_request_context_lines, health_guidance_required_web_search_tool_choice
 from .services import data_store
@@ -40,6 +41,12 @@ MILK_WRITE_TOOL_NAMES = {
     "milk_calendar_mutate",
     "milk_task_complete",
     "infant_growth_mutate",
+}
+_SERVICE_DOMAIN_BY_SKILL_ID = {
+    "birth-prep": "birth_prep",
+    "milk-management": "milk_management",
+    "device-guidance": "device_guidance",
+    "emotion-support": "emotion_support",
 }
 
 AgUiSemantic = dict[str, Any]
@@ -3293,6 +3300,9 @@ def run_agent_loop(
                 skill_id = result["result"]["id"]
                 if skill_id not in loaded_skill_ids:
                     loaded_skill_ids.append(skill_id)
+                domain = _SERVICE_DOMAIN_BY_SKILL_ID.get(str(skill_id))
+                if domain and isinstance(options.get("context_state"), ContextState):
+                    set_active_service_domain(options["context_state"], domain)
             _record_loaded_reference(options.get("context_state"), tool_call["name"], result)
             _record_tool_images(options.get("context_state"), tool_call["name"], result)
             _record_birth_prep_tool_state(options.get("context_state"), tool_call["name"], tool_call["arguments"], result)
@@ -3889,6 +3899,7 @@ def _record_tool_images(context_state: object, tool_name: str, result: dict[str,
         return
     if tool_name != "device_manual_search" or not result.get("ok"):
         return
+    set_active_service_domain(context_state, "device_guidance")
     for image in _tool_image_metadata(result):
         existing = [item for item in context_state.available_tool_images if item.get("url") != image.get("url")]
         existing.append(image)
@@ -4280,6 +4291,8 @@ def _tool_inputs_for_call(inputs: RuntimeInputs, options: BuildAgentRequestOptio
 def _record_birth_prep_tool_state(context_state: object, tool_name: str, arguments: dict[str, Any], result: dict[str, Any]) -> None:
     if not isinstance(context_state, ContextState):
         return
+    if tool_name in _PREGNANCY_STAGE_TOOLS:
+        set_active_service_domain(context_state, "birth_prep")
 
     if tool_name == "birth_journey_plan_card_create":
         _record_birth_journey_plan_state(context_state, arguments, result)
@@ -4361,6 +4374,7 @@ def _object_argument(value: Any) -> dict[str, Any]:
 _PREGNANCY_STAGE_TOOLS = {
     "birth_plan_form_create",
     "labor_communication_card_create",
+    "birth_journey_intake_manage",
     "birth_journey_plan_card_create",
     "birth_journey_plan_delete",
     "pregnancy_diary_manage",

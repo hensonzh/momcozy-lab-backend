@@ -21,6 +21,7 @@ class ContextState:
     available_tool_images: list[dict[str, str]] = field(default_factory=list)
     last_displayed_tool_image: dict[str, str] | None = None
     active_device_module: str = ""
+    active_service_domain: str = ""
     shown_step_image_urls: list[str] = field(default_factory=list)
     birth_prep_slots: dict[str, dict[str, Any]] = field(default_factory=dict)
     last_assistant_message: str = ""
@@ -49,6 +50,28 @@ _MAX_SLOT_TEXT_LENGTH = 160
 _SLOT_RECORD_MARKER_KEYS = frozenset({"value", "status", "source"})
 _SLOT_STATUS_CONFIRMED = "confirmed"
 _SLOT_SOURCE_USER_TEXT = "user_text"
+_SERVICE_DOMAIN_ALIASES = {
+    "birth-prep": "birth_prep",
+    "birth_prep": "birth_prep",
+    "birthprep": "birth_prep",
+    "pregnancy": "birth_prep",
+    "pregnancy_plan": "birth_prep",
+    "hospital_bag": "birth_prep",
+    "labor_communication": "birth_prep",
+    "milk-management": "milk_management",
+    "milk_management": "milk_management",
+    "milkmanagement": "milk_management",
+    "postpartum": "milk_management",
+    "lactation": "milk_management",
+    "device-guidance": "device_guidance",
+    "device_guidance": "device_guidance",
+    "deviceguidance": "device_guidance",
+    "emotion-support": "emotion_support",
+    "emotion_support": "emotion_support",
+    "emotionsupport": "emotion_support",
+}
+_BIRTH_PREP_DOMAIN = "birth_prep"
+_MILK_MANAGEMENT_DOMAIN = "milk_management"
 _MILK_STATE_INVALIDATING_WRITE_TOOLS = {
     "milk_record_mutate",
     "milk_plan_mutate",
@@ -64,6 +87,7 @@ def build_request_context(
     loaded_skill_ids: list[str] | None = None,
 ) -> str:
     include_environment = state is None or not state.environment_sent
+    service_domain = active_service_domain(inputs, state)
     lines = ["request_context:"]
 
     if include_environment:
@@ -74,7 +98,8 @@ def build_request_context(
             state.environment_sent = True
 
     lines.append(f"message_sent_at: {_message_sent_at(inputs)}")
-    lines.extend(_format_birth_prep_profile_context(inputs))
+    if _should_inject_birth_prep_domain_context(service_domain):
+        lines.extend(_format_birth_prep_profile_context(inputs))
     if loaded_skill_ids:
         lines.append("loaded_skill_context:")
         for skill_id in _unique_strings(loaded_skill_ids):
@@ -90,8 +115,10 @@ def build_request_context(
         for event in state.client_events[-5:]:
             lines.append(f"- {event}")
     if state is not None:
-        lines.extend(_format_birth_prep_context(state))
-        lines.extend(_format_milk_management_context(state))
+        if _should_inject_birth_prep_domain_context(service_domain):
+            lines.extend(_format_birth_prep_context(state))
+        if _should_inject_milk_management_context(service_domain):
+            lines.extend(_format_milk_management_context(state))
         lines.extend(_format_device_image_context(state))
     lines.extend(_format_active_care_plan_context(inputs))
     lines.extend(_format_pregnancy_diary_context(inputs))
@@ -113,6 +140,39 @@ def capture_birth_prep_user_message(inputs: RuntimeInputs, state: ContextState) 
 
 def record_birth_prep_assistant_message(state: ContextState, message: str) -> None:
     state.last_assistant_message = _clip_slot_text(message, max_length=1200)
+
+
+def active_service_domain(inputs: RuntimeInputs | None, state: ContextState | None = None) -> str:
+    if isinstance(inputs, dict):
+        for key in ("service_domain", "active_service_domain", "current_service"):
+            domain = normalize_service_domain(inputs.get(key))
+            if domain:
+                return domain
+    if state is not None:
+        return normalize_service_domain(state.active_service_domain)
+    return ""
+
+
+def set_active_service_domain(state: ContextState, domain: Any) -> None:
+    normalized = normalize_service_domain(domain)
+    if normalized:
+        state.active_service_domain = normalized
+
+
+def normalize_service_domain(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    normalized = text.replace(" ", "_").replace("-", "_").lower()
+    return _SERVICE_DOMAIN_ALIASES.get(normalized, _SERVICE_DOMAIN_ALIASES.get(text.lower(), ""))
+
+
+def _should_inject_birth_prep_domain_context(service_domain: str) -> bool:
+    return service_domain in {"", _BIRTH_PREP_DOMAIN}
+
+
+def _should_inject_milk_management_context(service_domain: str) -> bool:
+    return service_domain in {"", _MILK_MANAGEMENT_DOMAIN}
 
 
 def merge_hospital_bag_slots(
@@ -242,6 +302,7 @@ def _format_birth_prep_context(state: ContextState) -> list[str]:
 
 
 def record_milk_management_tool_state(state: ContextState, tool_name: str, result: dict[str, Any]) -> None:
+    set_active_service_domain(state, _MILK_MANAGEMENT_DOMAIN)
     if tool_name == "milk_analysis_intake_manage":
         _record_milk_analysis_intake_state(state, result)
         return

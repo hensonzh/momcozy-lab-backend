@@ -525,6 +525,7 @@ def _clone_context_state(state: ContextState) -> ContextState:
         available_tool_images=[dict(item) for item in state.available_tool_images],
         last_displayed_tool_image=dict(state.last_displayed_tool_image) if state.last_displayed_tool_image else None,
         active_device_module=state.active_device_module,
+        active_service_domain=state.active_service_domain,
         shown_step_image_urls=list(state.shown_step_image_urls),
         birth_prep_slots=deepcopy(state.birth_prep_slots),
         last_assistant_message=state.last_assistant_message,
@@ -653,6 +654,24 @@ def _runtime_inputs_from_ag_ui(payload: dict[str, Any]) -> dict[str, Any]:
         "timezone": timezone,
         "message_sent_at": message_sent_at,
     }
+    service_domain = (
+        forwarded_props.get("service_domain")
+        or forwarded_props.get("active_service_domain")
+        or forwarded_props.get("current_service")
+        or forwarded_props.get("serviceDomain")
+        or forwarded_props.get("activeServiceDomain")
+        or forwarded_props.get("currentService")
+        or state.get("service_domain")
+        or state.get("active_service_domain")
+        or state.get("current_service")
+        or state.get("serviceDomain")
+        or state.get("activeServiceDomain")
+        or state.get("currentService")
+        or payload.get("service_domain")
+        or payload.get("serviceDomain")
+    )
+    if service_domain:
+        inputs["service_domain"] = service_domain
     if user_id:
         inputs["user_id"] = user_id
     if images:
@@ -834,6 +853,7 @@ def _session_state_payload(session: ChatSession) -> dict[str, Any]:
             "available_tool_images": list(session.context_state.available_tool_images),
             "last_displayed_tool_image": dict(session.context_state.last_displayed_tool_image or {}),
             "active_device_module": session.context_state.active_device_module,
+            "active_service_domain": session.context_state.active_service_domain,
             "shown_step_image_urls": list(session.context_state.shown_step_image_urls),
             "birth_prep_slots": deepcopy(session.context_state.birth_prep_slots),
             "slot_turn_index": session.context_state.slot_turn_index,
