@@ -9,7 +9,7 @@ import unittest
 PROFILE_MEMORY_DB_PATH = os.path.join(tempfile.mkdtemp(prefix="momcozy-profile-tests-"), "profile.db")
 os.environ["MILK_DB_PATH"] = PROFILE_MEMORY_DB_PATH
 
-from momcozy_agent.contexts import ContextState, build_request_context
+from momcozy_agent.contexts import ContextState, build_request_context, merge_extracted_birth_prep_slots
 from momcozy_agent.services import data_store
 from momcozy_agent.tool_handlers.cards import (
     create_form,
@@ -250,7 +250,7 @@ class ProfileMemoryTests(unittest.TestCase):
         self.assertIn("birth_prep_profile_context:", second)
         self.assertIn("due_date_or_week=孕30周", second)
 
-    def test_birth_prep_shared_fields_persist_from_natural_message(self) -> None:
+    def test_birth_prep_user_text_slots_do_not_persist_profile_memory(self) -> None:
         state = ContextState()
         inputs = {
             "user_id": "profile-birth-prep-1",
@@ -260,19 +260,33 @@ class ProfileMemoryTests(unittest.TestCase):
             "user_message": "我今年32岁，现在孕30周，试管，双胎，在深圳，建档医院是深圳市妇幼，计划剖宫产，老公陪我。",
         }
 
-        from momcozy_agent.contexts import capture_birth_prep_user_message
-
-        capture_birth_prep_user_message(inputs, state)
+        merge_extracted_birth_prep_slots(
+            state,
+            [
+                {"field_id": "age", "value": 32, "evidence": "我今年32岁", "confidence": 0.9},
+                {"field_id": "due_date_or_week", "value": "孕30周", "evidence": "孕30周", "confidence": 0.9},
+                {"field_id": "ivf", "value": "是", "evidence": "试管", "confidence": 0.9},
+                {"field_id": "fetus_count", "value": "双胎", "evidence": "双胎", "confidence": 0.9},
+                {"field_id": "city_or_country", "value": "深圳", "evidence": "在深圳", "confidence": 0.9},
+                {"field_id": "birth_hospital", "value": "深圳市妇幼", "evidence": "建档医院是深圳市妇幼", "confidence": 0.9},
+                {"field_id": "birth_path", "value": "剖宫产", "evidence": "计划剖宫产", "confidence": 0.9},
+                {"field_id": "support_person", "value": "有人全天帮忙", "evidence": "老公陪我", "confidence": 0.9},
+            ],
+            turn_id=1,
+            updated_at=inputs["message_sent_at"],
+        )
 
         profile = data_store.get_user_profile("profile-birth-prep-1")
-        self.assertEqual(profile["age"], 32)
-        self.assertEqual(profile["birth_prep_due_date_or_week"], "孕30周")
-        self.assertEqual(profile["birth_prep_ivf"], "是")
-        self.assertEqual(profile["birth_prep_fetus_count"], "双胎")
-        self.assertEqual(profile["birth_prep_city_or_country"], "深圳")
-        self.assertEqual(profile["birth_prep_birth_hospital"], "深圳市妇幼")
-        self.assertEqual(profile["birth_prep_birth_path"], "剖宫产")
-        self.assertEqual(profile["birth_prep_support_person"], "有人全天帮忙")
+        self.assertEqual(profile["birth_prep_due_date_or_week"], "")
+        self.assertEqual(profile["birth_prep_ivf"], "")
+        self.assertEqual(profile["birth_prep_fetus_count"], "")
+        self.assertEqual(profile["birth_prep_city_or_country"], "")
+        self.assertEqual(profile["birth_prep_birth_hospital"], "")
+        self.assertEqual(profile["birth_prep_birth_path"], "")
+        self.assertEqual(profile["birth_prep_support_person"], "")
+        slot_record = state.birth_prep_slots["hospital_bag"]["due_date_or_week"]
+        self.assertEqual(slot_record["value"], "孕30周")
+        self.assertEqual(slot_record["status"], "confirmed")
 
     def test_birth_journey_plan_memory_reused_by_hospital_bag_form(self) -> None:
         create_birth_journey_plan_card(

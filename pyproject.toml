@@ -17,6 +17,7 @@ server = [
 ]
 
 [project.scripts]
+momcozy-chat-sse = "momcozy_agent.server:main"
 momcozy-chat-ui = "momcozy_agent.server:main"
 momcozy-api = "momcozy_agent.api_app:main"
 

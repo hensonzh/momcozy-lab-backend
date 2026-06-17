@@ -1,11 +1,12 @@
-# Web 端与智能体通信方案
+# App 端与智能体通信方案
 
-本文档梳理当前测试 Web 前端与 `momcozy-agent` 智能体服务之间的通信协议、请求字段、响应事件、前端消费方式，以及几个结构化 UI 的回传闭环。
+本文档梳理当前 App 前端与 `momcozy-agent` 智能体服务之间的通信协议、请求字段、响应事件、前端消费方式，以及几个结构化 UI 的回传闭环。
 
 相关代码入口：
 
-- 主前端：`web/index.html`、`web/app.js`、`web/styles.css`
-- IBCLC 在线咨询页：`web/ibclc-chat.html`
+- App 主前端：`../MomCozyApp/src/pages/AgentHub.tsx`
+- App 流式事件消费：`../MomCozyApp/src/lib/agentApi.ts`、`../MomCozyApp/src/lib/agUiStreamSideEffects.ts`
+- IBCLC 在线咨询页：`../MomCozyApp/src/pages/IbclcChat.tsx`
 - FastAPI 服务：`src/momcozy_agent/server.py`
 - WebSocket 桥接服务：`src/momcozy_agent/api_app.py`、`src/momcozy_agent/api/chat_ws_bridge.py`
 - Agent loop：`src/momcozy_agent/agents.py`
@@ -13,21 +14,21 @@
 
 ## 1. 总体链路
 
-当前 Web Demo 和智能体之间有三类通信，App 端可通过新增 WebSocket 桥接层复用主聊天流：
+当前 App 和智能体之间有三类通信：
 
 1. 主聊天流式接口：`POST /api/ag-ui`
-   - 前端发送用户消息、图片、会话 id。
+   - 客户端发送用户消息、图片、会话 id。
    - 后端转换成 `RuntimeInputs`，调用 Responses API agent loop。
    - 后端用 SSE 返回文本、工具调用状态、结构化工具结果和 run 状态。
 
 2. 售后工单模拟提交：`POST /api/support-ticket-submit`
-   - 前端提交售后工单表单。
+   - 客户端提交售后工单表单。
    - 后端模拟生成工单编号。
-   - 前端再把“工单已提交”作为用户消息发回 `/api/ag-ui`，让智能体做情绪承接。
+   - 客户端再把“工单已提交”作为用户消息发回 `/api/ag-ui`，让智能体做情绪承接。
 
 3. 前端页面事件回传：`POST /api/client-event`
    - 当前用于 IBCLC 在线咨询结束事件。
-   - IBCLC H5 页把 `ibclc_consult_completed` 写入后端 session。
+   - IBCLC 页面把 `ibclc_consult_completed` 写入后端 session。
    - 后续主聊天轮次会把该事件注入 `client_event_context`，智能体能感知用户已经完成过一次 IBCLC 在线咨询。
 
 App 端 WebSocket 链路：
@@ -60,18 +61,20 @@ Accept: text/event-stream
 Content-Type: text/event-stream; charset=utf-8
 ```
 
-前端发送位置：`web/app.js` 的 `streamChat()`。
+App 发送位置：`../MomCozyApp/src/lib/agentApi.ts` 的 ag-ui WebSocket 流。
 
 ### 2.1.1 App WebSocket 桥接：`/api/ag-ui-ws`
 
 运行 `scripts/run_all.py` 时会同时启动：
 
-- `POST /api/ag-ui`：Web Demo 使用的 SSE 聊天服务。
+- `POST /api/ag-ui`：内部 SSE 聊天服务，可单独用于后端调试。
 - `WS /api/ag-ui-ws`：App 使用的 WebSocket 聊天服务。
 - `POST /api/ag-ui-prewarm`：App 新建会话后的隐藏预热服务。
-- 静态 Web Demo、`/api/support-ticket-submit`、`/api/client-event` 等现有 Web Demo 辅助接口。
+- `/api/support-ticket-submit`、`/api/client-event` 等业务辅助接口。
 
-默认监听 `ENTRY_HOST:ENTRY_PORT`，默认值是 `0.0.0.0:8769`。单独运行 Web Demo 时仍可使用 `scripts/run_chat_ui.py`，默认监听 `127.0.0.1:8768`。
+默认监听 `ENTRY_HOST:ENTRY_PORT`，默认值是 `0.0.0.0:8769`。单独运行 SSE 聊天服务时可使用 `scripts/run_chat_sse.py`，默认监听 `127.0.0.1:8768`。统一 API 和 SSE 服务的 `/`、`/health` 都返回 JSON 健康检查信息；`momcozy-chat-sse` 是当前控制台入口，`momcozy-chat-ui` 仅作为旧脚本兼容 alias，实际不会恢复 HTML web demo。
+
+旧 web demo 静态页面已删除，但 skill assets 仍通过 `/skill-assets/{skill_id}/{asset_path}` 提供。Air1 FAQ 图片从旧 `/images/Air_img/` 迁移到 `skills/device-guidance/assets/air1/faq-images/`；后端保留 `/images/Air_img/...` 兼容路由，以免历史消息里的图片链接失效。
 
 WebSocket 客户端连接 `ws://<host>:<port>/api/ag-ui-ws` 后，第一帧必须发送与 `/api/ag-ui` 相同的 AG-UI JSON 请求体。后端会复用同一套 agent stream，并把每个 AG-UI event JSON 以 WebSocket text frame 原样发回 App。事件结构仍然是 `RUN_STARTED`、`CUSTOM`、`TOOL_CALL_*`、`TEXT_MESSAGE_*`、`RUN_FINISHED`、`RUN_ERROR` 等 AG-UI 事件。
 
@@ -207,14 +210,14 @@ App 新建会话时可以先本地展示欢迎语，同时后台调用 `POST /ap
 
 以下字段属于客户端或宿主 App，不应由智能体服务端自行生成业务含义：
 
-| 字段 | 当前 Web Demo 实现 | 原因 |
+| 字段 | 当前客户端实现 | 原因 |
 | --- | --- | --- |
 | `user_id` / `userId` | 首次打开时生成 `user_${crypto.randomUUID()}`，保存到 `localStorage.momcozy_user_id` | 用户身份应来自 App 登录态或客户端会话，不应由 agent 服务猜测 |
 | `threadId` | 当前聊天会话 id，保存到 `localStorage.momcozy_conversation_id` | 决定后端 session 和 Responses API 多轮上下文 |
 | `locale` | `navigator.language` | 属于用户设备/客户端环境 |
 | `timezone` | `Intl.DateTimeFormat().resolvedOptions().timeZone` | 属于用户设备/客户端环境 |
 | `message_sent_at` | 前端发送消息时生成，格式包含本地 UTC offset | 消息发生时间应在客户端发送动作发生时冻结 |
-| `user_profile` / `baby_profile` / `service_state` | 当前 demo 只传最小 `user_profile.user_id`；真实 App 应从客户端状态或业务 API 注入 | 这些是应用侧用户状态，不应由模型生成 |
+| `user_profile` / `baby_profile` / `service_state` | App 可先传最小 `user_profile.user_id`；完整资料应从客户端状态或业务 API 注入 | 这些是应用侧用户状态，不应由模型生成 |
 
 ### 2.3 后端兼容读取字段
 
@@ -279,7 +282,7 @@ App 新建会话时可以先本地展示欢迎语，同时后台调用 `POST /ap
 注意：
 
 - 前端现在显式传 `user_id`、`locale`、`timezone` 和 `message_sent_at`。
-- `timezone` 仍保留后端默认值 `America/Los_Angeles` 作为兼容兜底，但正常 Web Demo 不依赖这个兜底。
+- `timezone` 仍保留后端默认值 `America/Los_Angeles` 作为兼容兜底，但正常 App 客户端不依赖这个兜底。
 - `message_sent_at` 如果前端不传，后端仍会按 timezone 实时生成；但正式客户端应在发送时生成并传入。
 - 如果前端只传 `user_id`，没有传 `user_profile`，后端会自动补成 `user_profile: {"user_id": ...}`。
 - `previous_response_id` 前端不需要传；后端 session 会自动保存上一轮 Responses API 的 response id 并在下一轮补上。
@@ -380,7 +383,7 @@ data: {"type":"TEXT_MESSAGE_CONTENT", "delta":"..."}
 
 1. `agents.py` 中 `_create_response(..., stream=True)` 消费 Responses API stream events。
 2. `run_agent_loop()` 把模型文本、function call、工具执行结果转换为本项目的 AG-UI event。
-3. `web/app.js` 在 `workRun`、work panel、assistant bubble 和 artifact 组件中渲染这些事件。
+3. `MomCozyApp` 在 AgentHub、work panel、assistant bubble 和 artifact 组件中渲染这些事件。
 
 前端不直接消费 Responses API 原始事件。所有浏览器可见状态都必须先在后端转换成稳定的应用侧 AG-UI 事件，并且只发送已经脱敏、可解释、可复用的字段。
 
@@ -526,7 +529,7 @@ RUN_FINISHED
 
 - 创建或复用 assistant bubble。
 - 将 `delta` 追加到 Markdown 内容。
-- 使用 `marked + DOMPurify` 渲染。
+- 使用 App 内的 `ChatMarkdown` 组件渲染；该组件基于 `react-markdown`、`remark-gfm`、`remark-breaks`，并会把 `/skill-assets/...` 等资源链接解析为可加载地址。
 - 如果后续发生工具调用，当前这段 provisional assistant text 会被移动进 work panel，作为中间过程 narration。
 
 #### `TEXT_MESSAGE_END`
@@ -864,7 +867,7 @@ work item 文案由前端按阶段语义映射，核心映射在 `toolWorkPhase(
    confirmed_form_data:
    {...}
    ```
-3. 调用 `sendUserText()` 再次进入 `/api/ag-ui`。
+3. 作为新的用户消息再次进入 `/api/ag-ui-ws` 或 `/api/ag-ui`。
 4. 智能体基于表单数据生成卡片或下一步回复。
 
 ### 7.5 卡片 UI
@@ -1136,7 +1139,7 @@ IBCLC 页面中，事件提交失败不会阻止用户结束咨询；它会走�
 
 ## 13. 修改 streaming 行为时的检查清单
 
-改动 `agents.py`、`server.py`、`web/app.js` 或 AG-UI 事件结构时，至少检查以下事项：
+改动 `agents.py`、`server.py`、`MomCozyApp` 流式渲染代码或 AG-UI 事件结构时，至少检查以下事项：
 
 1. SSE 仍然是一条 JSON event 对应一个 `data:` frame，并用空行结束。
 2. 成功流中 `RUN_FINISHED` 仍然是最后一个事件。

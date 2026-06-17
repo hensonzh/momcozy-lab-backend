@@ -254,7 +254,7 @@ Source: Momcozy Air 1 全量说明书 QA workbook. 本文件为静态 FAQ 资料
 
 法兰盖 (Flange Cover)。
 
-![Air1 FAQ image 63-1](/images/Air_img/image1.png)
+![Air1 FAQ image 63-1](/skill-assets/device-guidance/air1/faq-images/image1.png)
 
 ## 64. 单元格D64中2号部件是什么？
 
@@ -284,7 +284,7 @@ Source: Momcozy Air 1 全量说明书 QA workbook. 本文件为静态 FAQ 资料
 
 磁吸充电线 (Magnetic Charging Cable)。
 
-![Air1 FAQ image 70-1](/images/Air_img/image18.png)
+![Air1 FAQ image 70-1](/skill-assets/device-guidance/air1/faq-images/image18.png)
 
 ## 71. Description of Breast Pump Unit8号配件指的是什么整体部分？图D71
 
@@ -302,7 +302,7 @@ Source: Momcozy Air 1 全量说明书 QA workbook. 本文件为静态 FAQ 资料
 
 模式选择 (Mode Selection)。
 
-![Air1 FAQ image 74-1](/images/Air_img/image2.png)
+![Air1 FAQ image 74-1](/skill-assets/device-guidance/air1/faq-images/image2.png)
 
 ## 75. 单元格D75控制面板上带有减号(-)的2号按钮功能是什么？
 
@@ -588,7 +588,7 @@ Source: Momcozy Air 1 全量说明书 QA workbook. 本文件为静态 FAQ 资料
 
 先盖好隔膜的上下盖，再将其装入集乳器中，确保安装到位。参考图D146
 
-![Air1 FAQ image 145-1](/images/Air_img/image17.png)
+![Air1 FAQ image 145-1](/skill-assets/device-guidance/air1/faq-images/image17.png)
 
 ## 146. 吸奶器在每个模式下有几个吸力级别设置？
 
@@ -729,11 +729,11 @@ DC 3.8 V/5500mAh。
 5. 彻底晾干：将集乳装置、洗涤盆和奶瓶刷各部件放置在干净、未使用过的洗碗巾或纸巾上，置于防尘防污的区域。请勿用洗碗巾擦拭或拍干物品，因为这样做可能会将细菌转移到物品上！（配图F177）
 6. 清洁洗涤盆和奶瓶刷：每次使用后，彻底冲洗洗涤盆和刷子，并让其风干。每隔几天，用肥皂和温水手洗。如果您的宝宝不满3个月、早产或因病（如HIV）或治疗（如癌症化疗）导致免疫系统较弱，则每次使用后都要清洗洗涤盆和奶瓶刷。
 
-![Air1 FAQ image 176-1](/images/Air_img/image4.png)
+![Air1 FAQ image 176-1](/skill-assets/device-guidance/air1/faq-images/image4.png)
 
-![Air1 FAQ image 176-2](/images/Air_img/image5.png)
+![Air1 FAQ image 176-2](/skill-assets/device-guidance/air1/faq-images/image5.png)
 
-![Air1 FAQ image 176-3](/images/Air_img/image3.png)
+![Air1 FAQ image 176-3](/skill-assets/device-guidance/air1/faq-images/image3.png)
 
 ## 177. 详细的消毒方法和操作方法是什么
 
@@ -772,13 +772,13 @@ DC 3.8 V/5500mAh。
 | 800-1100W：3分钟 |
 | 500-750W：5分钟 |
 
-![Air1 FAQ image 177-1](/images/Air_img/image6.png)
+![Air1 FAQ image 177-1](/skill-assets/device-guidance/air1/faq-images/image6.png)
 
-![Air1 FAQ image 177-2](/images/Air_img/image7.png)
+![Air1 FAQ image 177-2](/skill-assets/device-guidance/air1/faq-images/image7.png)
 
-![Air1 FAQ image 177-3](/images/Air_img/image8.png)
+![Air1 FAQ image 177-3](/skill-assets/device-guidance/air1/faq-images/image8.png)
 
-![Air1 FAQ image 177-4](/images/Air_img/image9.png)
+![Air1 FAQ image 177-4](/skill-assets/device-guidance/air1/faq-images/image9.png)
 
 ## 178. 吸奶器消毒后如何安全存放
 
@@ -824,17 +824,17 @@ DC 3.8 V/5500mAh。
 ● 将主机和法兰紧密正确地组装在一起，确保不漏气。（H181）
 ● 将法兰安装到主机上。确保法兰尺寸正确，安装妥当。（I181）
 
-![Air1 FAQ image 180-1](/images/Air_img/image10.png)
+![Air1 FAQ image 180-1](/skill-assets/device-guidance/air1/faq-images/image10.png)
 
-![Air1 FAQ image 180-2](/images/Air_img/image11.png)
+![Air1 FAQ image 180-2](/skill-assets/device-guidance/air1/faq-images/image11.png)
 
-![Air1 FAQ image 180-3](/images/Air_img/image12.png)
+![Air1 FAQ image 180-3](/skill-assets/device-guidance/air1/faq-images/image12.png)
 
-![Air1 FAQ image 180-4](/images/Air_img/image13.png)
+![Air1 FAQ image 180-4](/skill-assets/device-guidance/air1/faq-images/image13.png)
 
-![Air1 FAQ image 180-5](/images/Air_img/image14.png)
+![Air1 FAQ image 180-5](/skill-assets/device-guidance/air1/faq-images/image14.png)
 
-![Air1 FAQ image 180-6](/images/Air_img/image15.png)
+![Air1 FAQ image 180-6](/skill-assets/device-guidance/air1/faq-images/image15.png)
 
 ## 181. 如何使用吸奶器
 
@@ -867,7 +867,7 @@ Momcozy 吸奶器的每种模式均设有 15 档吸力调节，让您在全模�
 这些指导仅适用于健康的足月婴儿，早产儿或患病婴儿可能有所不同，请咨询医护人员指导。
 可参考D184
 
-![Air1 FAQ image 183-1](/images/Air_img/image16.png)
+![Air1 FAQ image 183-1](/skill-assets/device-guidance/air1/faq-images/image16.png)
 
 ## 184. 母乳储存有什么小技巧
 

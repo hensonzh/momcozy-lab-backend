@@ -23,6 +23,8 @@ class ContextState:
     active_device_module: str = ""
     shown_step_image_urls: list[str] = field(default_factory=list)
     birth_prep_slots: dict[str, dict[str, Any]] = field(default_factory=dict)
+    last_assistant_message: str = ""
+    slot_turn_index: int = 0
     birth_journey_intake: dict[str, Any] = field(default_factory=dict)
     milk_management_state: dict[str, Any] = field(default_factory=dict)
 
@@ -43,9 +45,10 @@ HOSPITAL_BAG_SLOT_FIELDS = (
     "top_worries",
 )
 _HOSPITAL_BAG_SLOT_KEY = "hospital_bag"
-_PENDING_FIELD_KEY = "_pending_field"
 _MAX_SLOT_TEXT_LENGTH = 160
-_BIRTH_PREP_SHARED_MEMORY_FIELDS = set(HOSPITAL_BAG_SLOT_FIELDS)
+_SLOT_RECORD_MARKER_KEYS = frozenset({"value", "status", "source"})
+_SLOT_STATUS_CONFIRMED = "confirmed"
+_SLOT_SOURCE_USER_TEXT = "user_text"
 _MILK_STATE_INVALIDATING_WRITE_TOOLS = {
     "milk_record_mutate",
     "milk_plan_mutate",
@@ -99,68 +102,82 @@ def build_request_context(
 
 
 def capture_birth_prep_user_message(inputs: RuntimeInputs, state: ContextState) -> None:
-    message = str(inputs.get("user_message") or "").strip()
-    if not message or "confirmed_form_data:" in message:
-        return
+    """Legacy compatibility hook.
 
-    shared_values: dict[str, Any] = {}
-    slots = _hospital_bag_slots(state)
-    pending_field = _valid_hospital_bag_slot_field(slots.get(_PENDING_FIELD_KEY))
-    if pending_field:
-        value = _hospital_bag_slot_value_from_text(pending_field, message)
-        if _slot_value_has_content(value):
-            slots[pending_field] = value
-            if pending_field in _BIRTH_PREP_SHARED_MEMORY_FIELDS:
-                shared_values[pending_field] = value
-        slots.pop(_PENDING_FIELD_KEY, None)
-
-    for field_id, value in _explicit_hospital_bag_slots(message).items():
-        if _slot_value_has_content(value):
-            slots[field_id] = value
-            if field_id in _BIRTH_PREP_SHARED_MEMORY_FIELDS:
-                shared_values[field_id] = value
-    _persist_birth_prep_shared_memory(inputs, shared_values)
+    Session slots are now extracted by the async sidecar in server.py. This
+    synchronous hook intentionally does not parse natural language or write
+    persistent profile memory.
+    """
+    return
 
 
 def record_birth_prep_assistant_message(state: ContextState, message: str) -> None:
-    pending_field = _infer_pending_hospital_bag_field(message)
-    if pending_field:
-        _hospital_bag_slots(state)[_PENDING_FIELD_KEY] = pending_field
+    state.last_assistant_message = _clip_slot_text(message, max_length=1200)
 
 
-def merge_hospital_bag_slots(state: ContextState, values: dict[str, Any]) -> None:
-    slots = _hospital_bag_slots(state)
-    for field_id in HOSPITAL_BAG_SLOT_FIELDS:
-        value = values.get(field_id)
-        if _slot_value_has_content(value):
-            slots[field_id] = value
+def merge_hospital_bag_slots(
+    state: ContextState,
+    values: dict[str, Any],
+    *,
+    source: str = "tool",
+    status: str = _SLOT_STATUS_CONFIRMED,
+    turn_id: int | None = None,
+) -> None:
+    _merge_hospital_bag_slot_values(state, values, source=source, status=status, turn_id=turn_id)
 
 
-def _persist_birth_prep_shared_memory(inputs: RuntimeInputs, values: dict[str, Any]) -> None:
-    if not any(_slot_value_has_content(values.get(field_id)) for field_id in _BIRTH_PREP_SHARED_MEMORY_FIELDS):
-        return
-    user_id = _runtime_user_id(inputs)
-    if not user_id:
-        return
-    try:
-        data_store.update_birth_prep_profile_memory(
-            user_id=user_id,
-            age=values.get("age"),
-            due_date_or_week=values.get("due_date_or_week"),
-            ivf=values.get("ivf"),
-            fetus_count=values.get("fetus_count"),
-            city_or_country=values.get("city_or_country"),
-            birth_hospital=values.get("birth_hospital"),
-            birth_path=values.get("birth_path"),
-            first_birth=values.get("first_birth"),
-            feeding_intention=values.get("feeding_intention"),
-            return_to_work_timing=values.get("return_to_work_timing"),
-            support_person=values.get("support_person"),
-            pregnancy_history_or_notes=values.get("pregnancy_history_or_notes"),
-            top_worries=values.get("top_worries"),
-        )
-    except Exception:
-        return
+def merge_extracted_birth_prep_slots(
+    state: ContextState,
+    candidates: list[dict[str, Any]] | dict[str, Any] | None,
+    *,
+    turn_id: int | None = None,
+    run_id: str = "",
+    updated_at: str = "",
+    extractor_version: str = "",
+) -> dict[str, Any]:
+    if not candidates:
+        return {}
+    items: list[dict[str, Any]]
+    if isinstance(candidates, dict):
+        raw_items = candidates.get("slots") if isinstance(candidates.get("slots"), list) else [candidates]
+        items = [item for item in raw_items if isinstance(item, dict)]
+    elif isinstance(candidates, list):
+        items = [item for item in candidates if isinstance(item, dict)]
+    else:
+        return {}
+
+    accepted: dict[str, Any] = {}
+    slot_metadata: dict[str, dict[str, Any]] = {}
+    for item in items:
+        field_id = _valid_hospital_bag_slot_field(item.get("field_id") or item.get("field"))
+        if not field_id:
+            continue
+        normalized = _normalize_hospital_bag_slot_value(field_id, item.get("value"))
+        if not _slot_value_has_content(normalized):
+            continue
+        accepted[field_id] = normalized
+        slot_metadata[field_id] = {
+            "evidence": _clip_slot_text(item.get("evidence"), max_length=120),
+            "confidence": _normalized_confidence(item.get("confidence")),
+            "updated_at": str(updated_at or "").strip(),
+            "run_id": str(run_id or "").strip(),
+            "extractor_version": str(extractor_version or "").strip(),
+        }
+
+    _merge_hospital_bag_slot_values(
+        state,
+        accepted,
+        source=_SLOT_SOURCE_USER_TEXT,
+        status=_SLOT_STATUS_CONFIRMED,
+        turn_id=turn_id,
+        metadata_by_field=slot_metadata,
+    )
+    return accepted
+
+
+def next_slot_extraction_turn(state: ContextState) -> int:
+    state.slot_turn_index += 1
+    return state.slot_turn_index
 
 
 def hospital_bag_slots(state: ContextState | None) -> dict[str, Any]:
@@ -170,7 +187,7 @@ def hospital_bag_slots(state: ContextState | None) -> dict[str, Any]:
     if not isinstance(slots, dict):
         return {}
     return {
-        field_id: slots[field_id]
+        field_id: _slot_record_value(slots[field_id])
         for field_id in HOSPITAL_BAG_SLOT_FIELDS
         if _slot_value_has_content(slots.get(field_id))
     }
@@ -188,16 +205,6 @@ def merge_birth_journey_intake_state(state: ContextState, values: dict[str, Any]
     state.birth_journey_intake = dict(values)
 
 
-def set_pending_hospital_bag_slot(state: ContextState, field_id: str) -> None:
-    valid_field = _valid_hospital_bag_slot_field(field_id)
-    if valid_field:
-        _hospital_bag_slots(state)[_PENDING_FIELD_KEY] = valid_field
-
-
-def clear_pending_hospital_bag_slot(state: ContextState) -> None:
-    _hospital_bag_slots(state).pop(_PENDING_FIELD_KEY, None)
-
-
 def _hospital_bag_slots(state: ContextState) -> dict[str, Any]:
     slots = state.birth_prep_slots.get(_HOSPITAL_BAG_SLOT_KEY)
     if not isinstance(slots, dict):
@@ -209,26 +216,23 @@ def _hospital_bag_slots(state: ContextState) -> dict[str, Any]:
 def _format_birth_prep_context(state: ContextState) -> list[str]:
     slots = state.birth_prep_slots.get(_HOSPITAL_BAG_SLOT_KEY)
     hospital_bag_values: list[str] = []
-    pending_field = ""
     if isinstance(slots, dict):
         hospital_bag_values = [
             f"{field_id}={_display_slot_value(slots[field_id])}"
             for field_id in HOSPITAL_BAG_SLOT_FIELDS
             if _slot_value_has_content(slots.get(field_id))
         ]
-        pending_field = _valid_hospital_bag_slot_field(slots.get(_PENDING_FIELD_KEY))
 
     intake = state.birth_journey_intake if isinstance(state.birth_journey_intake, dict) else {}
     intake_step = str(intake.get("next_step") or "").strip()
     intake_groups = intake.get("completed_groups") if isinstance(intake.get("completed_groups"), list) else []
-    if not hospital_bag_values and not pending_field and not intake_step:
+    if not hospital_bag_values and not intake_step:
         return []
     lines = ["birth_prep_context:"]
     if hospital_bag_values:
         lines.append("- birth_prep_known_fields: " + "; ".join(hospital_bag_values))
-        lines.append("- 创建产前表单或待产包表单时复用这些字段作为默认值，让用户在表单里确认或修改，不要重复追问。")
-    if pending_field:
-        lines.append(f"- hospital_bag_next_field: {pending_field}")
+        lines.append("- birth_prep_slot_status: listed fields are confirmed session slots.")
+        lines.append("- 这些字段来自用户文本、表单或工具结果；创建产前表单或待产包表单时复用这些字段作为默认值，让用户在表单里确认或修改，不要重复追问。")
     if intake_step:
         lines.append(f"- birth_journey_intake_next_step: {intake_step}")
         if intake_groups:
@@ -898,297 +902,221 @@ def _trim_context_value(value: Any, max_length: int = _MAX_SLOT_TEXT_LENGTH) -> 
     return text[: max_length - 1].rstrip() + "…"
 
 
-def _explicit_hospital_bag_slots(message: str) -> dict[str, Any]:
-    slots: dict[str, Any] = {}
-
-    age = _extract_age(message)
-    if age:
-        slots["age"] = age
-
-    due = _extract_due_or_week(message)
-    if due:
-        slots["due_date_or_week"] = due
-
-    ivf = _extract_ivf(message)
-    if ivf:
-        slots["ivf"] = ivf
-
-    first_birth = _extract_first_birth(message)
-    if first_birth:
-        slots["first_birth"] = first_birth
-
-    fetus_count = _extract_fetus_count(message)
-    if fetus_count:
-        slots["fetus_count"] = fetus_count
-
-    city_or_country = _extract_city_or_country(message)
-    if city_or_country:
-        slots["city_or_country"] = city_or_country
-
-    birth_hospital = _extract_birth_hospital(message)
-    if birth_hospital:
-        slots["birth_hospital"] = birth_hospital
-
-    birth_path = _extract_birth_path(message)
-    if birth_path:
-        slots["birth_path"] = birth_path
-
-    feeding = _extract_feeding_intention(message)
-    if feeding:
-        slots["feeding_intention"] = feeding
-
-    support = _extract_support_person(message)
-    if support:
-        slots["support_person"] = support
-
-    history = _extract_pregnancy_history(message)
-    if history:
-        slots["pregnancy_history_or_notes"] = history
-
-    if _mentions_return_to_work(message):
-        slots["return_to_work_timing"] = _clip_slot_text(message)
-
-    worries = _extract_top_worries(message)
-    if worries:
-        slots["top_worries"] = worries
-
-    return slots
-
-
-def _hospital_bag_slot_value_from_text(field_id: str, message: str) -> Any:
-    if field_id == "age":
-        return _extract_age(message)
-    if field_id == "due_date_or_week":
-        return _extract_due_or_week(message) or _extract_bare_pregnancy_week(message)
-    if field_id == "ivf":
-        return _extract_ivf(message)
-    if field_id == "top_worries":
-        return _extract_top_worries(message) or [_clip_slot_text(message)]
-    if field_id == "first_birth":
-        return _extract_first_birth(message)
-    if field_id == "fetus_count":
-        return _extract_fetus_count(message)
-    if field_id == "city_or_country":
-        return _extract_city_or_country(message) or _clip_slot_text(message)
-    if field_id == "birth_hospital":
-        return _extract_birth_hospital(message) or _clip_slot_text(message)
-    if field_id == "birth_path":
-        return _extract_birth_path(message)
-    if field_id == "feeding_intention":
-        return _extract_feeding_intention(message)
-    if field_id == "support_person":
-        return _extract_support_person(message)
-    if field_id == "pregnancy_history_or_notes":
-        return _extract_pregnancy_history(message)
-    if field_id == "return_to_work_timing" and _mentions_return_to_work(message):
-        return _clip_slot_text(message)
-    return _clip_slot_text(message)
-
-
-def _infer_pending_hospital_bag_field(message: str) -> str:
-    text = str(message or "")
-    if any(token in text for token in ("最担心", "焦虑", "怕漏", "怕住院", "怕母乳", "担心的")):
-        return "top_worries"
-    if any(token in text for token in ("返工", "复工", "上班", "外出计划", "回去工作")):
-        return "return_to_work_timing"
-    if any(token in text for token in ("孕几周", "孕周", "预产期", "哪天生", "什么时候生")):
-        return "due_date_or_week"
-    return ""
-
-
 def _valid_hospital_bag_slot_field(value: Any) -> str:
     field_id = str(value or "").strip()
     return field_id if field_id in HOSPITAL_BAG_SLOT_FIELDS else ""
 
 
-def _extract_age(message: str) -> int | None:
-    text = str(message or "").strip()
-    patterns = (
-        r"(?:我今年|今年|年龄|我)\s*(\d{1,2})\s*岁",
-        r"(?:年龄|我今年|今年)\s*(?:是|:|：)?\s*(\d{1,2})",
-    )
-    for pattern in patterns:
-        match = re.search(pattern, text)
-        if not match:
+def _merge_hospital_bag_slot_values(
+    state: ContextState,
+    values: dict[str, Any],
+    *,
+    source: str,
+    status: str,
+    turn_id: int | None = None,
+    metadata_by_field: dict[str, dict[str, Any]] | None = None,
+) -> None:
+    if not isinstance(values, dict):
+        return
+    slots = _hospital_bag_slots(state)
+    effective_turn_id = turn_id if turn_id is not None else state.slot_turn_index
+    for field_id in HOSPITAL_BAG_SLOT_FIELDS:
+        if field_id not in values:
             continue
-        age = int(match.group(1))
-        if 12 <= age <= 60:
-            return age
+        value = _normalize_hospital_bag_slot_value(field_id, values.get(field_id))
+        if not _slot_value_has_content(value):
+            continue
+        existing = slots.get(field_id)
+        if effective_turn_id is not None and _slot_record_turn_id(existing) > effective_turn_id:
+            continue
+        metadata = dict((metadata_by_field or {}).get(field_id) or {})
+        slots[field_id] = _slot_record(
+            value,
+            status=status,
+            source=source,
+            turn_id=effective_turn_id if effective_turn_id > 0 else None,
+            **metadata,
+        )
+
+
+def _slot_record(value: Any, *, status: str, source: str, turn_id: int | None = None, **metadata: Any) -> dict[str, Any]:
+    record = {
+        "value": value,
+        "status": status or _SLOT_STATUS_CONFIRMED,
+        "source": source or "unknown",
+    }
+    if turn_id is not None:
+        record["turn_id"] = turn_id
+    for key, meta_value in metadata.items():
+        if _slot_value_has_content(meta_value):
+            record[key] = meta_value
+    return record
+
+
+def _is_slot_record(value: Any) -> bool:
+    return isinstance(value, dict) and bool(_SLOT_RECORD_MARKER_KEYS.intersection(value.keys())) and "value" in value
+
+
+def _slot_record_value(value: Any) -> Any:
+    if _is_slot_record(value):
+        return value.get("value")
+    return value
+
+
+def _slot_record_turn_id(value: Any) -> int:
+    if not _is_slot_record(value):
+        return 0
+    try:
+        return int(value.get("turn_id") or 0)
+    except Exception:
+        return 0
+
+
+def _normalized_confidence(value: Any) -> float | None:
+    try:
+        confidence = float(value)
+    except Exception:
+        return None
+    if confidence < 0:
+        return 0.0
+    if confidence > 1:
+        return 1.0
+    return confidence
+
+
+def _normalize_hospital_bag_slot_value(field_id: str, value: Any) -> Any:
+    if _is_slot_record(value):
+        value = value.get("value")
+    if field_id == "age":
+        return _normalize_age(value)
+    if field_id == "due_date_or_week":
+        return _normalize_due_or_week(value)
+    if field_id in {"ivf", "first_birth"}:
+        return _normalize_yes_no(value)
+    if field_id == "fetus_count":
+        return _normalize_enum(value, {"单胎", "双胎", "多胎", "三胎及以上", "不确定", "还不确定"})
+    if field_id == "city_or_country":
+        return _normalize_short_text(value, max_length=30, reject_sentence=True)
+    if field_id == "birth_hospital":
+        return _normalize_short_text(value, max_length=40, reject_sentence=True)
+    if field_id == "birth_path":
+        return _normalize_enum(value, {"顺产", "自然分娩", "剖宫产", "剖腹产", "计划剖宫产", "还不确定", "不确定"})
+    if field_id == "feeding_intention":
+        return _normalize_enum(value, {"亲喂母乳", "母乳喂养", "混合喂养", "配方奶", "纯泵", "还不确定", "不确定"})
+    if field_id in {"pregnancy_history_or_notes", "top_worries"}:
+        return _normalize_text_list(value, max_items=6 if field_id == "pregnancy_history_or_notes" else 3)
+    if field_id in {"return_to_work_timing", "support_person"}:
+        return _normalize_short_text(value, max_length=80, reject_sentence=False)
+    return _normalize_short_text(value, max_length=_MAX_SLOT_TEXT_LENGTH, reject_sentence=False)
+
+
+def _normalize_age(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        age = int(value)
+    except Exception:
+        text = str(value or "").strip()
+        if not text.isdigit():
+            return None
+        age = int(text)
+    if 12 <= age <= 60:
+        return age
     return None
 
 
-def _extract_due_or_week(message: str) -> str:
-    text = str(message or "").strip()
-    week_match = re.search(r"孕?\s*(\d{1,2})\s*(?:周|週)(?:\s*[+＋]\s*(\d)\s*天?)?", text)
-    if week_match:
-        week = week_match.group(1)
-        days = week_match.group(2)
-        return f"孕{week}周" + (f"+{days}天" if days else "")
-    due_match = re.search(r"预产期\s*(?:是|在|:|：)?\s*([0-9]{4}[/-][0-9]{1,2}[/-][0-9]{1,2}|[0-9]{1,2}\s*月\s*[0-9]{1,2}\s*[日号]?)", text)
-    if due_match:
-        return f"预产期{due_match.group(1).replace(' ', '')}"
-    return ""
-
-
-def _extract_bare_pregnancy_week(message: str) -> str:
-    text = str(message or "").strip()
-    if not re.fullmatch(r"\d{1,2}", text):
+def _normalize_due_or_week(value: Any) -> str:
+    if isinstance(value, bool):
         return ""
-    week = int(text)
-    if 1 <= week <= 42:
-        return f"孕{week}周"
-    return ""
-
-
-def _extract_ivf(message: str) -> str:
-    text = str(message or "")
-    if any(token in text for token in ("不是试管", "非试管", "没有做试管", "自然怀孕", "自然受孕")):
-        return "否"
-    if any(token in text for token in ("IVF", "ivf", "试管", "体外受精", "辅助生殖")):
-        return "是"
-    return ""
-
-
-def _mentions_return_to_work(message: str) -> bool:
-    text = str(message or "")
-    return any(token in text for token in ("返工", "复工", "上班", "外出", "工作"))
-
-
-def _extract_first_birth(message: str) -> str:
-    text = str(message or "")
-    if any(token in text for token in ("不是第一胎", "不是头胎", "二胎", "第二胎", "三胎", "第3胎")):
-        return "否"
-    if any(token in text for token in ("第一胎", "头胎", "一胎", "第1胎")):
-        return "是"
-    stripped = text.strip()
-    if stripped in {"是", "对", "是的"}:
-        return "是"
-    if stripped in {"否", "不是", "不是的"}:
-        return "否"
-    return ""
-
-
-def _extract_fetus_count(message: str) -> str:
-    text = str(message or "")
-    if any(token in text for token in ("三胎", "三胞胎", "多胎", "三胎及以上")):
-        return "三胎及以上"
-    if any(token in text for token in ("双胎", "双胞胎")):
-        return "双胎"
-    if "单胎" in text:
-        return "单胎"
-    return ""
-
-
-def _extract_city_or_country(message: str) -> str:
-    text = str(message or "").strip()
-    match = re.search(r"(?:我在|人在|坐标|在|所在城市(?:/国家)?(?:是|在|:|：)?|城市(?:是|在|:|：)?)\s*([\u4e00-\u9fa5A-Za-z][\u4e00-\u9fa5A-Za-z\s]{1,24})", text)
-    if not match:
+    if isinstance(value, (int, float)):
+        try:
+            week = int(value)
+        except Exception:
+            return ""
+        if week == value:
+            return f"孕{week}周" if 1 <= week <= 42 else ""
         return ""
-    value = match.group(1).strip(" ，。,.；;")
-    value = re.split(r"[，。,.；;\n]", value, maxsplit=1)[0].strip()
-    return value[:30]
+    text = _normalize_short_text(value, max_length=40, reject_sentence=True)
+    if not text:
+        return ""
+    compact = text.replace(" ", "")
+    if compact.isdigit():
+        week = int(compact)
+        return f"孕{week}周" if 1 <= week <= 42 else ""
+    return compact
 
 
-def _extract_birth_hospital(message: str) -> str:
-    text = str(message or "").strip()
-    patterns = (
-        r"建档医院(?:是|在|:|：)?\s*([^，。；;\n]{2,40})",
-        r"(?:在|去|准备在)\s*([^，。；;\n]{2,40}?医院)\s*(?:建档|产检|生|分娩)",
-        r"([^，。；;\n]{2,40}?医院)\s*(?:建档|产检|生|分娩)",
-    )
-    for pattern in patterns:
-        match = re.search(pattern, text)
-        if not match:
-            continue
-        value = match.group(1).strip(" ，。,.；;")
-        if value:
-            return value[:40]
-    return ""
-
-
-def _extract_birth_path(message: str) -> str:
-    text = str(message or "")
-    if any(token in text for token in ("剖宫产", "剖腹产", "刨腹产", "剖产")):
-        return "剖宫产"
-    if any(token in text for token in ("顺产", "自然分娩")):
-        return "顺产"
-    if any(token in text for token in ("分娩方式还没确定", "生产方式还没确定", "还没确定分娩方式", "可能剖", "不确定顺产")):
-        return "还不确定"
-    return ""
-
-
-def _extract_feeding_intention(message: str) -> str:
-    text = str(message or "")
-    if any(token in text for token in ("混合喂养", "混合")):
-        return "混合喂养"
-    if any(token in text for token in ("配方奶", "奶粉", "配方")):
-        return "配方奶"
-    if any(token in text for token in ("母乳", "亲喂", "纯泵", "泵奶")):
-        return "亲喂母乳"
-    if any(token in text for token in ("喂养还不确定", "还不确定怎么喂", "还没想好怎么喂")):
-        return "还不确定"
-    return ""
-
-
-def _extract_support_person(message: str) -> str:
-    text = str(message or "")
-    if any(token in text for token in ("支持少", "没人帮", "没人照顾", "一个人", "主要自己")):
-        return "支持少"
-    if any(token in text for token in ("白天自己", "白天主要自己")):
-        return "白天主要自己"
-    if any(token in text for token in ("夜里自己", "夜间自己", "夜间主要自己")):
-        return "夜间主要自己"
-    if any(token in text for token in ("老公", "丈夫", "伴侣", "妈妈", "婆婆", "家人", "有人帮", "有人陪", "陪我", "全天帮")):
-        return "有人全天帮忙"
-    if any(token in text for token in ("支持人还不确定", "暂时没有支持人", "不确定谁陪")):
+def _normalize_yes_no(value: Any) -> str:
+    text = _normalize_short_text(value, max_length=12, reject_sentence=True)
+    if not text:
+        return ""
+    normalized = text.strip().lower()
+    yes_values = {"是", "对", "是的", "yes", "true", "ivf", "试管", "有"}
+    no_values = {"否", "不是", "不是的", "no", "false", "自然怀孕", "自然受孕", "没有", "无"}
+    unknown_values = {"不确定", "还不确定", "不知道", "暂不确定"}
+    if normalized in yes_values:
+        return "是"
+    if normalized in no_values:
+        return "否"
+    if normalized in unknown_values:
         return "不确定"
-    return ""
+    return text if text in {"是", "否", "不确定"} else ""
 
 
-def _extract_pregnancy_history(message: str) -> list[str]:
-    text = str(message or "")
-    if any(token in text for token in ("没有特殊情况", "医生没说特殊", "医生没有提示", "没有高危")):
-        return ["没有"]
-    values: list[str] = []
-    for token, value in (
-        ("妊娠糖尿病", "妊娠糖尿病"),
-        ("血压", "血压或子痫前期风险"),
-        ("子痫", "血压或子痫前期风险"),
-        ("胎盘", "胎盘问题"),
-        ("早产", "早产风险"),
-        ("nicu", "宝宝可能 NICU"),
-        ("NICU", "宝宝可能 NICU"),
-    ):
-        if token in text and value not in values:
-            values.append(value)
-    return values
+def _normalize_enum(value: Any, allowed: set[str]) -> str:
+    text = _normalize_short_text(value, max_length=30, reject_sentence=True)
+    if not text:
+        return ""
+    alias = {
+        "自然分娩": "顺产",
+        "剖腹产": "剖宫产",
+        "计划剖宫产": "剖宫产",
+        "母乳喂养": "亲喂母乳",
+        "不确定": "还不确定",
+    }.get(text, text)
+    return alias if alias in allowed else text if text in allowed else ""
 
 
-def _extract_top_worries(message: str) -> list[str]:
-    text = str(message or "").strip()
-    if not any(token in text for token in ("担心", "焦虑", "怕")):
-        return []
-    cleaned = re.sub(r"^(最)?(担心|焦虑)(的)?(三件事|事情)?(是|有|：|:)?", "", text).strip()
-    parts = [
-        _clip_slot_text(part)
-        for part in re.split(r"[、，,；;。]\s*", cleaned)
-        if _clip_slot_text(part)
-    ]
-    return parts[:3] if parts else []
+def _normalize_text_list(value: Any, *, max_items: int) -> list[str]:
+    if isinstance(value, list):
+        raw_items = value
+    else:
+        raw_items = [value]
+    items: list[str] = []
+    for item in raw_items:
+        text = _normalize_short_text(item, max_length=80, reject_sentence=False)
+        if text and text not in items:
+            items.append(text)
+    return items[:max_items]
 
 
-def _clip_slot_text(value: Any) -> str:
+def _normalize_short_text(value: Any, *, max_length: int, reject_sentence: bool) -> str:
     text = str(value or "").strip()
-    return text[:_MAX_SLOT_TEXT_LENGTH]
+    if not text:
+        return ""
+    if "\n" in text or "\r" in text:
+        return ""
+    if reject_sentence and any(mark in text for mark in ("。", "？", "?", "！", "!", "；", ";")):
+        return ""
+    if len(text) > max_length:
+        return ""
+    return text
+
+
+def _clip_slot_text(value: Any, max_length: int = _MAX_SLOT_TEXT_LENGTH) -> str:
+    text = str(value or "").strip()
+    return text[:max_length]
 
 
 def _display_slot_value(value: Any) -> str:
+    value = _slot_record_value(value)
     if isinstance(value, list):
         return "、".join(_clip_slot_text(item) for item in value if _clip_slot_text(item))
     return _clip_slot_text(value)
 
 
 def _slot_value_has_content(value: Any) -> bool:
+    value = _slot_record_value(value)
     if isinstance(value, list):
         return any(_slot_value_has_content(item) for item in value)
     if isinstance(value, dict):

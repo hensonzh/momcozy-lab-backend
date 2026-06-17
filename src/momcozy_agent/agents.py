@@ -13,7 +13,6 @@ from .contexts import (
     ContextState,
     birth_journey_intake_state,
     build_request_context,
-    clear_pending_hospital_bag_slot,
     hospital_bag_slots,
     merge_birth_journey_intake_state,
     merge_hospital_bag_slots,
@@ -4304,10 +4303,6 @@ def _record_birth_prep_tool_state(context_state: object, tool_name: str, argumen
         form_defaults = form.get("default_values")
         if isinstance(form_defaults, dict):
             merge_hospital_bag_slots(context_state, form_defaults)
-
-    status = str(tool_result.get("status") or "").strip()
-    if status == "form_created":
-        clear_pending_hospital_bag_slot(context_state)
 
 
 def _record_birth_journey_plan_state(context_state: ContextState, arguments: dict[str, Any], result: dict[str, Any]) -> None:

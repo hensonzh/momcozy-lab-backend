@@ -19,16 +19,19 @@ from .contexts import (
     DEFAULT_LOCALE,
     DEFAULT_TIMEZONE,
     ContextState,
-    capture_birth_prep_user_message,
+    hospital_bag_slots,
+    merge_extracted_birth_prep_slots,
+    next_slot_extraction_turn,
     record_birth_prep_assistant_message,
 )
 from .services import data_store
 from .services.paths import ensure_runtime_dirs
+from .slot_extractor import BirthPrepSlotExtractionRequest, BirthPrepSlotExtractor, SLOT_EXTRACTOR_VERSION
 from .types import SkillId
 
 ROOT = Path(__file__).resolve().parents[2]
-WEB_ROOT = ROOT / "web"
 SKILLS_ROOT = ROOT / "skills"
+LEGACY_AIR1_FAQ_IMAGE_ROOT = SKILLS_ROOT / "device-guidance" / "assets" / "air1" / "faq-images"
 HOST = "127.0.0.1"
 PORT = 8768
 MAX_IMAGE_ATTACHMENTS = 4
@@ -64,10 +67,18 @@ class ChatSession:
 
 
 class ChatRuntime:
-    def __init__(self, client: Any, *, model: str = "gpt-5.5", store: bool = True) -> None:
+    def __init__(
+        self,
+        client: Any,
+        *,
+        model: str = "gpt-5.5",
+        store: bool = True,
+        slot_extractor: Any | None = None,
+    ) -> None:
         self.client = client
         self.model = model
         self.store = store
+        self.slot_extractor = slot_extractor
         self.sessions: dict[str, ChatSession] = {}
 
     def get_session(self, conversation_id: str | None) -> ChatSession:
@@ -80,6 +91,66 @@ class ChatRuntime:
         return session
 
 
+def _schedule_birth_prep_slot_extraction(
+    session: ChatSession,
+    runtime: ChatRuntime,
+    inputs: dict[str, Any],
+    *,
+    run_id: str,
+) -> threading.Thread | None:
+    extractor = getattr(runtime, "slot_extractor", None)
+    if extractor is None:
+        return None
+    user_message = str(inputs.get("user_message") or "").strip()
+    if not user_message or "confirmed_form_data:" in user_message:
+        return None
+
+    turn_id = next_slot_extraction_turn(session.context_state)
+    request = BirthPrepSlotExtractionRequest(
+        user_message=user_message,
+        previous_assistant_message=session.context_state.last_assistant_message,
+        current_slots=hospital_bag_slots(session.context_state),
+        loaded_skill_ids=list(session.loaded_skill_ids),
+        locale=str(inputs.get("locale") or ""),
+        timezone=str(inputs.get("timezone") or ""),
+        message_sent_at=str(inputs.get("message_sent_at") or inputs.get("current_date") or ""),
+    )
+    thread = threading.Thread(
+        target=_run_birth_prep_slot_extraction,
+        args=(session, extractor, request),
+        kwargs={"run_id": run_id, "turn_id": turn_id},
+        daemon=True,
+        name=f"momcozy-slot-extractor-{turn_id}",
+    )
+    thread.start()
+    return thread
+
+
+def _run_birth_prep_slot_extraction(
+    session: ChatSession,
+    extractor: Any,
+    request: BirthPrepSlotExtractionRequest,
+    *,
+    run_id: str,
+    turn_id: int,
+) -> None:
+    try:
+        candidates = extractor.extract(request)
+    except Exception:
+        return
+    if not candidates:
+        return
+    with session.run_lock:
+        merge_extracted_birth_prep_slots(
+            session.context_state,
+            candidates,
+            turn_id=turn_id,
+            run_id=run_id,
+            updated_at=request.message_sent_at,
+            extractor_version=SLOT_EXTRACTOR_VERSION,
+        )
+
+
 def make_runtime() -> ChatRuntime:
     load_project_env(ROOT / ".env")
     try:
@@ -87,14 +158,14 @@ def make_runtime() -> ChatRuntime:
     except ImportError as exc:
         raise RuntimeError("The OpenAI SDK is not installed. Install it with: python3 -m pip install openai") from exc
 
-    return ChatRuntime(OpenAI(**get_openai_client_options()))
+    client = OpenAI(**get_openai_client_options())
+    return ChatRuntime(client, slot_extractor=BirthPrepSlotExtractor(client))
 
 
 def create_app(runtime: ChatRuntime | None = None, *, include_websocket_bridge: bool = False) -> Any:
     try:
         from fastapi import FastAPI, Request
         from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
-        from fastapi.staticfiles import StaticFiles
     except ImportError as exc:
         raise RuntimeError("FastAPI is not installed. Install the 'server' optional dependencies.") from exc
 
@@ -104,6 +175,14 @@ def create_app(runtime: ChatRuntime | None = None, *, include_websocket_bridge: 
     app = FastAPI(title="Momcozy Agent API")
     app.state.runtime = runtime
     app.state.runtime_lock = threading.Lock()
+
+    @app.api_route("/", methods=["GET", "HEAD"])
+    async def service_index() -> Any:
+        return JSONResponse(_service_info())
+
+    @app.api_route("/health", methods=["GET", "HEAD"])
+    async def health() -> Any:
+        return JSONResponse(_service_info())
 
     @app.post("/api/ag-ui")
     async def ag_ui_stream(request: Request) -> Any:
@@ -185,43 +264,44 @@ def create_app(runtime: ChatRuntime | None = None, *, include_websocket_bridge: 
             return JSONResponse({"error": "not found"}, status_code=404)
         return FileResponse(asset_full, media_type=content_type)
 
-    @app.get("/")
-    async def web_index() -> Any:
-        return _web_file_response(WEB_ROOT / "index.html")
-
-    @app.get("/app.js")
-    async def web_app_js() -> Any:
-        return _web_file_response(WEB_ROOT / "app.js")
-
-    @app.get("/styles.css")
-    async def web_styles_css() -> Any:
-        return _web_file_response(WEB_ROOT / "styles.css")
+    @app.api_route("/images/Air_img/{asset_path:path}", methods=["GET", "HEAD"])
+    async def legacy_air_image(asset_path: str) -> Any:
+        asset_full = legacy_air_image_path(asset_path)
+        if asset_full is None:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        return FileResponse(asset_full, media_type=STATIC_CONTENT_TYPES.get(asset_full.suffix.lower()))
 
     if include_websocket_bridge:
         from .api.chat_ws_bridge import router as chat_ws_router
 
         app.include_router(chat_ws_router)
 
-    if WEB_ROOT.exists():
-        app.mount("/", StaticFiles(directory=str(WEB_ROOT), html=True), name="web")
-
     return app
 
 
-def _web_file_response(path: Path) -> Any:
-    from fastapi.responses import FileResponse, JSONResponse
+def legacy_air_image_path(asset_path: str) -> Path | None:
+    candidate = (LEGACY_AIR1_FAQ_IMAGE_ROOT / asset_path).resolve()
+    root = LEGACY_AIR1_FAQ_IMAGE_ROOT.resolve()
+    if root not in candidate.parents or not candidate.is_file():
+        return None
+    if STATIC_CONTENT_TYPES.get(candidate.suffix.lower()) is None:
+        return None
+    return candidate
 
-    if not path.is_file():
-        return JSONResponse({"error": "not found"}, status_code=404)
-    return FileResponse(
-        path,
-        media_type=STATIC_CONTENT_TYPES.get(path.suffix.lower()),
-        headers={
-            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-            "Pragma": "no-cache",
-            "Expires": "0",
+
+def _service_info() -> dict[str, Any]:
+    return {
+        "status": "ok",
+        "service": "momcozy-chat-sse",
+        "web_demo": "removed",
+        "endpoints": {
+            "ag_ui": "/api/ag-ui",
+            "ag_ui_prewarm": "/api/ag-ui-prewarm",
+            "client_event": "/api/client-event",
+            "support_ticket_submit": "/api/support-ticket-submit",
+            "skill_assets": "/skill-assets/{skill_id}/{asset_path}",
         },
-    )
+    }
 
 
 def runtime_from_app(app: Any) -> ChatRuntime:
@@ -333,7 +413,7 @@ async def stream_ag_ui_events(
             with session.run_lock:
                 if session.previous_response_id and "previous_response_id" not in inputs:
                     inputs["previous_response_id"] = session.previous_response_id
-                capture_birth_prep_user_message(inputs, session.context_state)
+                _schedule_birth_prep_slot_extraction(session, runtime, inputs, run_id=str(run_id))
                 agent_options: dict[str, Any] = {
                     "model": runtime.model,
                     "store": runtime.store,
@@ -446,7 +526,9 @@ def _clone_context_state(state: ContextState) -> ContextState:
         last_displayed_tool_image=dict(state.last_displayed_tool_image) if state.last_displayed_tool_image else None,
         active_device_module=state.active_device_module,
         shown_step_image_urls=list(state.shown_step_image_urls),
-        birth_prep_slots={key: dict(value) for key, value in state.birth_prep_slots.items()},
+        birth_prep_slots=deepcopy(state.birth_prep_slots),
+        last_assistant_message=state.last_assistant_message,
+        slot_turn_index=state.slot_turn_index,
         birth_journey_intake=deepcopy(state.birth_journey_intake),
         milk_management_state=deepcopy(state.milk_management_state),
     )
@@ -471,7 +553,7 @@ def main() -> None:
     port = int(os.getenv("CHAT_PORT", "8768"))
 
     application = create_app(runtime=make_runtime())
-    print(f"Momcozy agent test UI: http://{host}:{port}")
+    print(f"Momcozy agent SSE service: http://{host}:{port}/api/ag-ui")
     uvicorn.run(application, host=host, port=port, log_level="warning")
 
 
@@ -753,7 +835,8 @@ def _session_state_payload(session: ChatSession) -> dict[str, Any]:
             "last_displayed_tool_image": dict(session.context_state.last_displayed_tool_image or {}),
             "active_device_module": session.context_state.active_device_module,
             "shown_step_image_urls": list(session.context_state.shown_step_image_urls),
-            "birth_prep_slots": {key: dict(value) for key, value in session.context_state.birth_prep_slots.items()},
+            "birth_prep_slots": deepcopy(session.context_state.birth_prep_slots),
+            "slot_turn_index": session.context_state.slot_turn_index,
         },
     }
 

@@ -52,31 +52,42 @@ src/momcozy_agent/
   tool_handlers/    # 应用侧 tool handler adapter/mock
   services/         # 业务服务层；当前包含 milk-management 的数据访问和计划/calendar 逻辑
   api/          # App 端 WebSocket adapter；当前包含 AG-UI WebSocket 桥接
-  api_app.py    # App/Web 统一 FastAPI app 入口
-  server.py      # FastAPI Web Demo、AG-UI SSE endpoint、thread session、共享 agent stream
+  api_app.py    # App 统一 FastAPI app 入口
+  server.py      # FastAPI AG-UI SSE endpoint、thread session、共享 agent stream
   config.py      # .env / 配置加载
   types.py       # 共享类型
 ```
 
-本地测试界面：
+本地聊天 SSE 服务：
 
 ```text
-web/
-  index.html
-  app.js
-  styles.css
+src/momcozy_agent/server.py
+  GET /
+  GET /health
+  POST /api/ag-ui
+  POST /api/ag-ui-prewarm
+  GET /skill-assets/...
 ```
 
 运行入口：
 
 ```bash
-.venv/bin/python -u scripts/run_chat_ui.py
+.venv/bin/python -u scripts/run_chat_sse.py
 ```
 
-默认地址：
+`momcozy-chat-sse` 是当前控制台入口；`momcozy-chat-ui` 仅保留为旧脚本兼容 alias，实际启动的仍是同一个 SSE 服务，不再提供 HTML web demo。
+
+默认接口：
+
+```text
+http://127.0.0.1:8768/api/ag-ui
+```
+
+健康检查：
 
 ```text
 http://127.0.0.1:8768/
+http://127.0.0.1:8768/health
 ```
 
 App 端 WebSocket 桥接入口：
@@ -85,7 +96,9 @@ App 端 WebSocket 桥接入口：
 .venv/bin/python -u scripts/run_all.py
 ```
 
-默认在 `ENTRY_HOST:ENTRY_PORT` 启动统一 FastAPI 服务，默认 `0.0.0.0:8769`。该服务同时提供 Web Demo 的 `POST /api/ag-ui` SSE 接口、App 的 `WS /api/ag-ui-ws` 接口，以及 App 新建会话后台预热用的 `POST /api/ag-ui-prewarm`。App 连接 `/api/ag-ui-ws` 后发送与 `/api/ag-ui` 相同的 AG-UI JSON 请求体，桥接层复用同一套 agent stream，并把每个 AG-UI event 作为 WebSocket JSON text frame 返回。这个入口只做传输协议适配，不改变 agent loop、skill 选择、tool registry 或 session 状态。
+默认在 `ENTRY_HOST:ENTRY_PORT` 启动统一 FastAPI 服务，默认 `0.0.0.0:8769`。该服务提供 App 的 `WS /api/ag-ui-ws` 接口、App 新建会话后台预热用的 `POST /api/ag-ui-prewarm`，并通过内部 SSE upstream 复用 `POST /api/ag-ui` agent stream。App 连接 `/api/ag-ui-ws` 后发送与 `/api/ag-ui` 相同的 AG-UI JSON 请求体，桥接层复用同一套 agent stream，并把每个 AG-UI event 作为 WebSocket JSON text frame 返回。这个入口只做传输协议适配，不改变 agent loop、skill 选择、tool registry 或 session 状态。
+
+统一 FastAPI 服务同样提供 `/` 和 `/health` JSON 健康检查入口；它们只用于 smoke test，不恢复旧 HTML web demo。
 
 `/api/ag-ui-prewarm` 使用同一个 `threadId` 执行一轮隐藏、非流式、禁用工具的 Responses 请求，只保存 `ChatSession.previous_response_id`，不向前端生成消息或 work panel 事件。若真实用户消息先完成并写入了同一 session，预热结果会被视为 stale，不覆盖真实对话状态。
 
@@ -96,8 +109,9 @@ App 端 WebSocket 桥接入口：
 用户从前端发送消息后，整体流程如下：
 
 ```text
-web/app.js
-  -> POST /api/ag-ui
+MomCozyApp AgentHub
+  -> WS /api/ag-ui-ws
+  -> FastAPI bridge / POST /api/ag-ui
   -> FastAPI server.py 解析 AG-UI payload
   -> 按 threadId 获取 ChatSession
   -> 恢复 previous_response_id、loaded_skill_ids、ContextState
@@ -107,7 +121,7 @@ web/app.js
   -> 模型输出文本或 function_call
   -> 应用侧执行工具
   -> function_call_output 回传 Responses API
-  -> 文本 delta 和过程事件通过 SSE 返回前端
+  -> 文本 delta 和过程事件通过 SSE/WS 返回前端
   -> RUN_FINISHED 作为成功流最后事件
 ```
 
@@ -151,11 +165,13 @@ input = [
 ]
 ```
 
-图片输入是可选的。测试前端会把用户选择的图片读成 Base64 data URL，经 `/api/ag-ui` 传给后端；后端只把最近一轮用户消息里的图片转换成 Responses API 的 `input_image` content part。生产环境建议改为上传到文件/对象存储或 Files API，再传 URL/File ID，避免长期通过 JSON 传大体积 Base64。
+图片输入是可选的。客户端会把用户选择的图片读成 Base64 data URL，经 `/api/ag-ui-ws` 或 `/api/ag-ui` 传给后端；后端只把最近一轮用户消息里的图片转换成 Responses API 的 `input_image` content part。生产环境建议改为上传到文件/对象存储或 Files API，再传 URL/File ID，避免长期通过 JSON 传大体积 Base64。
 
 工具返回的本地资源 URL 不会被模型自动访问。对 `device_manual_search.relevant_images` 这类官方步骤图，agent loop 先把图片元数据记录到 `ContextState.available_tool_images`；当最终回复实际展示 Markdown 图片时，再记录 `last_displayed_tool_image`、`active_device_module` 和 `shown_step_image_urls`。后续用户明确询问“图上/这张图/对照图/标注/哪个部件”等需要读图的问题时，下一轮模型请求优先参考 `last_displayed_tool_image`，避免从历史图片里用相同编号误猜；必要时才把最多 2 张 `/skill-assets/...` 白名单图片转为 `data:image/...` 的 `input_image`。该能力只读取 `skills/{skill_id}/assets` 下的图片文件，不处理外部 URL、PDF、视频或任意路径；如果当前用户消息已经附带上传图片，则优先用户上传图片，不再自动附加官方步骤图。结构化工具字段仍优先于视觉读取；图片输入只用于补充读取图中文字、标注和部件位置。
 
-产前准备共享字段会记录在 `ContextState.birth_prep_slots`，并把明确可复用的信息持久化到 user profile。孕期计划、待产包和分娩沟通单都会从同一套资料读取默认值，例如孕周、年龄、单双胎、IVF、城市/医院、分娩方式、喂养意向、支持方、复工时间和焦虑点，避免模型漏传导致表单没有预填。
+Air1 FAQ 图片位于 `skills/device-guidance/assets/air1/faq-images/`。`faq.md` 当前静态引用 `image1.png` 到 `image18.png`；同目录下的 `air1_unboxing_step*.png` 是从旧 `/images/Air_img/` 迁移来的历史兼容资产，可能被旧会话消息直接引用。不要仅因为它们没有被当前 FAQ 正文静态引用就删除；后端会把 `/images/Air_img/...` 映射到该目录。
+
+产前准备共享字段会记录在 `ContextState.birth_prep_slots`。每轮用户消息进入主 agent loop 的同时，后端会启动一个轻量模型 sidecar 异步抽取用户明确说出的 slots；抽取结果标记为 `confirmed`，但只影响后续轮次的 session slots，不直接写入 user profile。孕期计划、待产包和分娩沟通单都会从同一套 session slots 读取默认值，例如孕周、年龄、单双胎、IVF、城市/医院、分娩方式、喂养意向、支持方、复工时间和焦虑点，避免模型漏传导致表单没有预填。长期画像仍由表单确认、孕期计划卡片或 profile 工具等明确写入路径更新。sidecar 默认模型可通过 `MOMCOZY_SLOT_EXTRACTOR_MODEL` 配置；设置 `MOMCOZY_SLOT_EXTRACTOR_DISABLED=1` 可关闭该异步抽取。
 
 后续请求依赖 `previous_response_id` 延续对话状态。
 
@@ -358,9 +374,7 @@ message_sent_at: 2026-05-05T17:45:03+08:00
 
 ## 前端交互
 
-本地测试前端在 `web/`。
-
-它通过 `POST /api/ag-ui` 接入后端，并处理 SSE 事件：
+主前端在 `MomCozyApp`。App 通过 `WS /api/ag-ui-ws` 接入统一 API；桥接层复用 `POST /api/ag-ui` SSE agent stream，并把事件作为 WebSocket JSON text frame 返回。前端消费这些 AG-UI 事件：
 
 - `RUN_STARTED`
 - `TOOL_CALL_START`
@@ -383,10 +397,10 @@ Work panel 的首个可见进度由 Responses streaming function-call 事件驱�
 - 主 AG-UI event 携带 `semantic` 元信息：`phase`、`label`、`visibility`、`merge_key`、`priority`。前端优先使用后端语义；旧事件没有 `semantic` 时，由前端集中 mapper 兜底生成同一套结构。
 - 后端在 `response.output_item.added` / `response.function_call_arguments.done` 阶段识别 `function_call`，并尽早发送 `TOOL_CALL_START`。
 - Thinking 只由真实 Responses reasoning stream 事件驱动；`RUN_STARTED`、`requesting_model` 和普通文本 idle 不再显示 Thinking。
-- 如果真实 reasoning 发生在 assistant text delta 之后，测试前端显示“正在准备下一步”；`thinking completed` / `failed` 会立即移除该状态。
-- `TOOL_CALL_START` 到达后，测试前端立即创建或更新 work item。
+- 如果真实 reasoning 发生在 assistant text delta 之后，前端显示“正在准备下一步”；`thinking completed` / `failed` 会立即移除该状态。
+- `TOOL_CALL_START` 到达后，前端立即创建或更新 work item。
 - `TOOL_CALL_ARGS` 默认不改变可见标题，只作为参数已安全摘要的协议事件；缺少 start 时才补建 work item。
-- `TOOL_CALL_RESULT` 到达后，测试前端立即把同一个 work item 标记为完成或失败。
+- `TOOL_CALL_RESULT` 到达后，前端立即把同一个 work item 标记为完成或失败。
 - Work panel 只展示阶段语义，不展示具体工具名；`tool_call_name` 仅用于协议兜底、合并同一条 work item 和归类为读取、评估、预览、保存、等待确认等阶段。
 - `ARTIFACT_CREATED` 到达后，前端渲染表单/卡片/工单草稿等结构化 UI。
 - `CONFIRMATION_REQUIRED` 到达后，work panel 显示等待确认状态，具体确认动作由对应 artifact 或业务 UI 承载。
@@ -394,9 +408,9 @@ Work panel 的首个可见进度由 Responses streaming function-call 事件驱�
 - Work item 默认只展示简短状态标题；失败时才展示错误详情。
 - `CUSTOM momcozy.agent.status` 是主 loop 当前唯一主动发送的状态通道；`ACTIVITY_SNAPSHOT`、`STEP_STARTED`、`STEP_FINISHED` 只保留历史兼容。
 
-测试前端支持在 composer 中附加最多 4 张图片。图片会作为当前用户消息的一部分发送给模型；前端仅做本地预览，不把图片当作工具结果或长期状态保存。
+App 前端支持在 composer 中附加最多 4 张图片。图片会作为当前用户消息的一部分发送给模型；前端仅做本地预览，不把图片当作工具结果或长期状态保存。
 
-当工具结果包含 `form` 时，前端渲染表单。当前测试前端可以把表单提交转换成用户消息回传，但生产方案应使用结构化 application event，不依赖模型从自然语言里猜测这是不是已确认表单数据。
+当工具结果包含 `form` 时，前端渲染表单。当前客户端可以把表单提交转换成用户消息回传；涉及强一致写入时，应优先使用结构化 application event，不依赖模型从自然语言里猜测这是不是已确认表单数据。
 
 ### 表单提交契约
 

@@ -7,9 +7,9 @@ from momcozy_agent.agents import _record_birth_prep_tool_state, model_tool_outpu
 from momcozy_agent.contexts import (
     ContextState,
     build_request_context,
-    capture_birth_prep_user_message,
     hospital_bag_slots,
-    record_birth_prep_assistant_message,
+    merge_extracted_birth_prep_slots,
+    merge_hospital_bag_slots,
 )
 from momcozy_agent.tool_handlers.cards import (
     create_birth_journey_plan_card,
@@ -128,17 +128,86 @@ class BirthPrepPromptRuleTests(unittest.TestCase):
         self.assertIn("分娩沟通单", runtime_text)
         self.assertIn("孕期计划", runtime_text)
 
-    def test_birth_prep_slots_capture_pending_hospital_bag_answer(self) -> None:
+    def test_birth_prep_slots_merge_async_extracted_confirmed_answer(self) -> None:
         state = ContextState()
 
-        record_birth_prep_assistant_message(state, "最后想知道你最担心的 1-3 件事，比如怕漏买、怕母乳不够。")
-        capture_birth_prep_user_message({"user_message": "怕漏带、怕住院不舒服、怕母乳喂不好", "locale": "zh-CN"}, state)
+        accepted = merge_extracted_birth_prep_slots(
+            state,
+            [
+                {
+                    "field_id": "top_worries",
+                    "value": ["怕漏带", "怕住院不舒服", "怕母乳喂不好"],
+                    "evidence": "怕漏带、怕住院不舒服、怕母乳喂不好",
+                    "confidence": 0.94,
+                }
+            ],
+            turn_id=1,
+            run_id="run-slot-test",
+            updated_at="2026-06-17T09:00:00+08:00",
+        )
 
         context = build_request_context({"user_message": "继续", "locale": "zh-CN"}, state, ["birth-prep"])
 
+        self.assertEqual(accepted["top_worries"], ["怕漏带", "怕住院不舒服", "怕母乳喂不好"])
         self.assertIn("birth_prep_context:", context)
         self.assertIn("top_worries=怕漏带、怕住院不舒服、怕母乳喂不好", context)
         self.assertIn("创建产前表单或待产包表单时复用这些字段", context)
+        self.assertNotIn("hospital_bag_next_field", context)
+        record = state.birth_prep_slots["hospital_bag"]["top_worries"]
+        self.assertEqual(record["status"], "confirmed")
+        self.assertEqual(record["source"], "user_text")
+
+    def test_birth_prep_user_text_updates_latest_slot_value(self) -> None:
+        state = ContextState()
+
+        merge_extracted_birth_prep_slots(
+            state,
+            [{"field_id": "due_date_or_week", "value": "孕30周", "evidence": "孕30周", "confidence": 0.9}],
+            turn_id=1,
+        )
+        merge_extracted_birth_prep_slots(
+            state,
+            [{"field_id": "due_date_or_week", "value": "孕32周", "evidence": "孕32周", "confidence": 0.9}],
+            turn_id=2,
+        )
+
+        self.assertEqual(hospital_bag_slots(state)["due_date_or_week"], "孕32周")
+        self.assertIn(
+            "due_date_or_week=孕32周",
+            build_request_context({"user_message": "继续", "locale": "zh-CN"}, state, ["birth-prep"]),
+        )
+
+    def test_stale_slot_extraction_does_not_overwrite_newer_tool_value(self) -> None:
+        state = ContextState()
+        state.slot_turn_index = 2
+
+        merge_hospital_bag_slots(state, {"due_date_or_week": "孕33周"})
+        merge_extracted_birth_prep_slots(
+            state,
+            [{"field_id": "due_date_or_week", "value": "孕32周", "evidence": "孕32周", "confidence": 0.9}],
+            turn_id=1,
+        )
+
+        self.assertEqual(hospital_bag_slots(state)["due_date_or_week"], "孕33周")
+
+    def test_city_or_country_rejects_long_sentence_prefill(self) -> None:
+        state = ContextState()
+
+        merge_extracted_birth_prep_slots(
+            state,
+            [
+                {
+                    "field_id": "city_or_country",
+                    "value": "我现在住在深圳，最近想了解待产包和孕期计划怎么安排。",
+                    "evidence": "我现在住在深圳，最近想了解待产包和孕期计划怎么安排。",
+                    "confidence": 0.8,
+                },
+                {"field_id": "city_or_country", "value": "深圳", "evidence": "住在深圳", "confidence": 0.95},
+            ],
+            turn_id=1,
+        )
+
+        self.assertEqual(hospital_bag_slots(state)["city_or_country"], "深圳")
 
     def test_hospital_bag_flow_uses_form_without_three_dialogue_questions(self) -> None:
         skill = (ROOT / "skills" / "birth-prep" / "SKILL.md").read_text(encoding="utf-8")
@@ -188,8 +257,11 @@ class BirthPrepPromptRuleTests(unittest.TestCase):
     def test_hospital_bag_slots_do_not_capture_budget_preference(self) -> None:
         state = ContextState()
 
-        record_birth_prep_assistant_message(state, "你更在意预算、舒适还是省钱？")
-        capture_birth_prep_user_message({"user_message": "高预算", "locale": "zh-CN"}, state)
+        merge_extracted_birth_prep_slots(
+            state,
+            [{"field_id": "budget_preference", "value": "高预算", "evidence": "高预算", "confidence": 0.8}],
+            turn_id=1,
+        )
 
         context = build_request_context({"user_message": "继续", "locale": "zh-CN"}, state, ["birth-prep"])
 
@@ -296,12 +368,18 @@ class BirthPrepPromptRuleTests(unittest.TestCase):
     def test_birth_prep_context_extracts_shared_fields_for_hospital_bag_form(self) -> None:
         state = ContextState()
 
-        capture_birth_prep_user_message(
-            {
-                "user_message": "我现在孕30周，第一胎，单胎，倾向剖宫产，准备母乳，老公陪我，医生说没有特殊情况。",
-                "locale": "zh-CN",
-            },
+        merge_extracted_birth_prep_slots(
             state,
+            [
+                {"field_id": "due_date_or_week", "value": "孕30周", "evidence": "孕30周", "confidence": 0.9},
+                {"field_id": "first_birth", "value": "是", "evidence": "第一胎", "confidence": 0.9},
+                {"field_id": "fetus_count", "value": "单胎", "evidence": "单胎", "confidence": 0.9},
+                {"field_id": "birth_path", "value": "剖宫产", "evidence": "倾向剖宫产", "confidence": 0.9},
+                {"field_id": "feeding_intention", "value": "亲喂母乳", "evidence": "准备母乳", "confidence": 0.9},
+                {"field_id": "support_person", "value": "有人全天帮忙", "evidence": "老公陪我", "confidence": 0.9},
+                {"field_id": "pregnancy_history_or_notes", "value": ["没有"], "evidence": "没有特殊情况", "confidence": 0.9},
+            ],
+            turn_id=1,
         )
 
         defaults = hospital_bag_slots(state)
@@ -316,12 +394,14 @@ class BirthPrepPromptRuleTests(unittest.TestCase):
     def test_birth_prep_context_reuses_birth_path_for_birth_plan_form(self) -> None:
         state = ContextState()
 
-        capture_birth_prep_user_message(
-            {
-                "user_message": "我现在孕30周，可能剖宫产，老公陪我。",
-                "locale": "zh-CN",
-            },
+        merge_extracted_birth_prep_slots(
             state,
+            [
+                {"field_id": "due_date_or_week", "value": "孕30周", "evidence": "孕30周", "confidence": 0.9},
+                {"field_id": "birth_path", "value": "剖宫产", "evidence": "可能剖宫产", "confidence": 0.9},
+                {"field_id": "support_person", "value": "有人全天帮忙", "evidence": "老公陪我", "confidence": 0.9},
+            ],
+            turn_id=1,
         )
 
         form_result = create_birth_plan_form(

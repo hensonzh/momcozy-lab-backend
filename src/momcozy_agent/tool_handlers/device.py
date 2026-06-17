@@ -10,8 +10,8 @@ from ..types import RuntimeInputs
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 AIR1_MANUAL_PATH = PROJECT_ROOT / "skills" / "device-guidance" / "references" / "air1" / "manual.md"
 AIR1_FAQ_PATH = PROJECT_ROOT / "skills" / "device-guidance" / "references" / "air1" / "faq.md"
-WEB_ROOT = PROJECT_ROOT / "web"
 SKILLS_ROOT = PROJECT_ROOT / "skills"
+LEGACY_AIR1_FAQ_IMAGE_ROOT = SKILLS_ROOT / "device-guidance" / "assets" / "air1" / "faq-images"
 MAX_RESULT_CHARS = 2600
 AIR1_REFERENCE_KEY = "device-guidance/Air1/references/air1/manual.md"
 AIR1_IMAGE_TEXT_BY_URL: dict[str, str] = {
@@ -712,10 +712,10 @@ def _static_image_exists(url: str) -> bool:
 
 
 def _static_asset_exists(url: str) -> bool:
-    if url.startswith("/images/"):
-        image_path = (WEB_ROOT / url.lstrip("/")).resolve()
-        web_root = WEB_ROOT.resolve()
-        return web_root in image_path.parents and image_path.exists()
+    if url.startswith("/images/Air_img/"):
+        image_path = (LEGACY_AIR1_FAQ_IMAGE_ROOT / url.removeprefix("/images/Air_img/")).resolve()
+        root = LEGACY_AIR1_FAQ_IMAGE_ROOT.resolve()
+        return root in image_path.parents and image_path.exists()
     if url.startswith("/skill-assets/"):
         relative_path = url.removeprefix("/skill-assets/")
         skill_id, _, asset_name = relative_path.partition("/")

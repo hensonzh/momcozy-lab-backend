@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 from .config import load_project_env
-from .server import STATIC_CONTENT_TYPES
+from .server import STATIC_CONTENT_TYPES, legacy_air_image_path
 from .services.paths import ensure_runtime_dirs
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -29,6 +29,14 @@ def create_app():
     app.include_router(vision_router)
     app.include_router(chat_ws_router)
 
+    @app.api_route("/", methods=["GET", "HEAD"])
+    async def service_index():
+        return JSONResponse(_service_info())
+
+    @app.api_route("/health", methods=["GET", "HEAD"])
+    async def health():
+        return JSONResponse(_service_info())
+
     @app.api_route("/skill-assets/{skill_id}/{asset_path:path}", methods=["GET", "HEAD"])
     async def skill_asset(skill_id: str, asset_path: str):
         asset_full = (SKILLS_ROOT / skill_id / "assets" / asset_path).resolve()
@@ -40,10 +48,32 @@ def create_app():
             return JSONResponse({"error": "not found"}, status_code=404)
         return FileResponse(asset_full, media_type=content_type)
 
+    @app.api_route("/images/Air_img/{asset_path:path}", methods=["GET", "HEAD"])
+    async def legacy_air_image(asset_path: str):
+        asset_full = legacy_air_image_path(asset_path)
+        if asset_full is None:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        return FileResponse(asset_full, media_type=STATIC_CONTENT_TYPES.get(asset_full.suffix.lower()))
+
     return app
 
 
 app = create_app()
+
+
+def _service_info() -> dict[str, object]:
+    return {
+        "status": "ok",
+        "service": "momcozy-api",
+        "web_demo": "removed",
+        "endpoints": {
+            "ag_ui_ws": "/api/ag-ui-ws",
+            "ag_ui_prewarm": "/api/ag-ui-prewarm",
+            "client_event": "/api/client-event",
+            "support_ticket_submit": "/api/support-ticket-submit",
+            "skill_assets": "/skill-assets/{skill_id}/{asset_path}",
+        },
+    }
 
 
 def main() -> None:

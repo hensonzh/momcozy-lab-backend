@@ -6,6 +6,7 @@ import asyncio
 from unittest.mock import patch
 
 from momcozy_agent import ContextState, build_agent_request
+from momcozy_agent.contexts import hospital_bag_slots, merge_hospital_bag_slots
 from momcozy_agent.tool_schemas import FUNCTION_TOOLS
 from momcozy_agent.agents import (
     artifact_created_event,
@@ -20,7 +21,7 @@ from momcozy_agent.agents import (
     tool_call_result_event,
     web_search_status_event,
 )
-from momcozy_agent.server import ChatRuntime, _clone_context_state, create_app, stream_ag_ui_events
+from momcozy_agent.server import ChatRuntime, _clone_context_state, _schedule_birth_prep_slot_extraction, create_app, stream_ag_ui_events
 
 
 class AgentToolEventTests(unittest.TestCase):
@@ -1109,6 +1110,53 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertEqual(state.milk_management_state["last_plan_preview"]["draft"]["plan_type"], "increase_milk")
         self.assertFalse(cloned.birth_journey_intake["profile"]["first_birth"])
         self.assertEqual(cloned.milk_management_state["last_plan_preview"]["draft"]["plan_type"], "maintain_milk")
+
+    def test_birth_prep_slot_extraction_runs_sidecar_and_merges_confirmed_slots(self) -> None:
+        class FakeSlotExtractor:
+            def __init__(self) -> None:
+                self.requests = []
+
+            def extract(self, request):
+                self.requests.append(request)
+                return [
+                    {
+                        "field_id": "due_date_or_week",
+                        "value": "孕32周",
+                        "evidence": "我现在孕32周",
+                        "confidence": 0.91,
+                    }
+                ]
+
+        extractor = FakeSlotExtractor()
+        runtime = ChatRuntime(object(), slot_extractor=extractor)
+        session = runtime.get_session("thread-slots")
+        merge_hospital_bag_slots(session.context_state, {"due_date_or_week": "孕30周"})
+        session.context_state.last_assistant_message = "你现在孕几周？"
+
+        with session.run_lock:
+            thread = _schedule_birth_prep_slot_extraction(
+                session,
+                runtime,
+                {
+                    "user_message": "我现在孕32周",
+                    "locale": "zh-CN",
+                    "timezone": "Asia/Shanghai",
+                    "message_sent_at": "2026-06-17T09:00:00+08:00",
+                },
+                run_id="run-slots",
+            )
+            self.assertIsNotNone(thread)
+
+        thread.join(timeout=1)
+
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(extractor.requests[0].current_slots["due_date_or_week"], "孕30周")
+        self.assertEqual(extractor.requests[0].previous_assistant_message, "你现在孕几周？")
+        self.assertEqual(hospital_bag_slots(session.context_state)["due_date_or_week"], "孕32周")
+        record = session.context_state.birth_prep_slots["hospital_bag"]["due_date_or_week"]
+        self.assertEqual(record["status"], "confirmed")
+        self.assertEqual(record["source"], "user_text")
+        self.assertEqual(record["turn_id"], 1)
 
     def test_chat_runtime_sessions_have_distinct_run_locks(self) -> None:
         runtime = ChatRuntime(object())

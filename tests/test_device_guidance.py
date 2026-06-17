@@ -256,6 +256,14 @@ class DeviceGuidanceTests(unittest.TestCase):
                 "/skill-assets/device-guidance/air1/videos/air1-operation-zh.mp4",
                 "video/mp4",
             ),
+            (
+                "/skill-assets/device-guidance/air1/faq-images/image1.png",
+                "image/png",
+            ),
+            (
+                "/images/Air_img/image1.png",
+                "image/png",
+            ),
         ]
 
         for path, expected_content_type in cases:
@@ -267,6 +275,26 @@ class DeviceGuidanceTests(unittest.TestCase):
                 head_response = client.head(path)
                 self.assertEqual(head_response.status_code, 200)
                 self.assertTrue(head_response.headers["content-type"].startswith(expected_content_type))
+
+    def test_chat_sse_status_routes_replace_removed_demo_root(self) -> None:
+        from fastapi.testclient import TestClient
+
+        from momcozy_agent.server import create_app
+
+        client = TestClient(create_app())
+
+        root_response = client.get("/")
+        self.assertEqual(root_response.status_code, 200)
+        self.assertEqual(root_response.json()["service"], "momcozy-chat-sse")
+        self.assertEqual(root_response.json()["web_demo"], "removed")
+        self.assertEqual(root_response.json()["endpoints"]["ag_ui"], "/api/ag-ui")
+
+        health_response = client.head("/health")
+        self.assertEqual(health_response.status_code, 200)
+        self.assertTrue(health_response.headers["content-type"].startswith("application/json"))
+
+        removed_demo_asset = client.get("/app.js")
+        self.assertEqual(removed_demo_asset.status_code, 404)
 
     def test_unified_api_serves_quick_start_media(self) -> None:
         from fastapi.testclient import TestClient
@@ -286,6 +314,37 @@ class DeviceGuidanceTests(unittest.TestCase):
         )
         self.assertEqual(head_response.status_code, 200)
         self.assertTrue(head_response.headers["content-type"].startswith("application/pdf"))
+
+    def test_unified_api_status_routes(self) -> None:
+        from fastapi.testclient import TestClient
+
+        from momcozy_agent.api_app import create_app
+
+        client = TestClient(create_app())
+
+        root_response = client.get("/")
+        self.assertEqual(root_response.status_code, 200)
+        self.assertEqual(root_response.json()["service"], "momcozy-api")
+        self.assertEqual(root_response.json()["web_demo"], "removed")
+        self.assertEqual(root_response.json()["endpoints"]["ag_ui_ws"], "/api/ag-ui-ws")
+
+        health_response = client.head("/health")
+        self.assertEqual(health_response.status_code, 200)
+        self.assertTrue(health_response.headers["content-type"].startswith("application/json"))
+
+    def test_unified_api_serves_legacy_air_faq_images(self) -> None:
+        from fastapi.testclient import TestClient
+
+        from momcozy_agent.api_app import create_app
+
+        client = TestClient(create_app())
+        response = client.get("/images/Air_img/image1.png", headers={"range": "bytes=0-15"})
+
+        self.assertIn(response.status_code, {200, 206})
+        self.assertTrue(response.headers["content-type"].startswith("image/png"))
+        head_response = client.head("/images/Air_img/image1.png")
+        self.assertEqual(head_response.status_code, 200)
+        self.assertTrue(head_response.headers["content-type"].startswith("image/png"))
 
 
 if __name__ == "__main__":
