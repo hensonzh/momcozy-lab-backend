@@ -2374,7 +2374,7 @@ def _birth_journey_intake_summary(next_step: str) -> str:
 def _birth_journey_intake_instruction(next_step: str) -> str:
     instructions = {
         "basic_info_form": "最终回复只说明已打开基础信息表单，请用户填完提交；不要在聊天里逐项追问这些字段。",
-        "checkup_records_upload": "请用户上传目前全部产检记录，并告诉用户上传完毕后说“产检记录上传完毕”。",
+        "checkup_records_upload": "请用户上传最新一次的产检记录，如果没有或者不在手边也可以先跳过。",
         "risk_question": "只补问孕期高风险因素这一件事；用户不清楚也可以说不清楚。",
         "symptom_question": "只补问当前不适或异常这一件事；如果用户确认有明显异常，先不要生成计划。",
         "pause_for_symptoms": "先承接用户情况，建议优先联系医生/医院确认；不要继续生成孕期计划。",
@@ -2387,17 +2387,17 @@ def _birth_journey_intake_instruction(next_step: str) -> str:
 
 def _birth_journey_intake_question(next_step: str, plan_context: dict[str, Any]) -> str:
     if next_step == "risk_question":
-        return "你了解自己是否有什么孕期高风险因素吗，比如慢性高血压、糖尿病、肾病、自身免疫病、甲状腺病、心脏病，或既往剖宫产、早产/流产史等？不清楚也可以说不清楚。"
+        return "你了解自己是否有什么孕期高风险因素吗，比如慢性高血压、糖尿病、肾病、自身免疫病、甲状腺病、心脏病，或既往剖宫产、早产/流产史等？不清楚也可以先跳过。"
     if next_step == "symptom_question":
-        return "那你现在有没有一些不舒服或异常情况？比如阴道流血/流水、腹痛、发热、严重呕吐、头痛、视物模糊、胸痛气短、手脸明显水肿、胎动变化，或情绪崩溃、自伤想法。"
+        return "那你现在有没有一些不舒服或异常情况？比如阴道流血、腹痛、发热、呕吐、头痛、视物模糊、胸痛气短、手脸明显水肿、胎动变化等。"
     if next_step == "lifestyle_question":
         week_text = str(plan_context.get("due_date_or_week") or plan_context.get("current_week") or "").strip()
         prefix = f"结合你现在{week_text}，" if week_text else ""
-        return prefix + "我再少量了解会影响执行的生活场景：饮食/补剂、运动睡眠、久站夜班通勤、家庭支持、是否一胎、焦虑点里，哪些比较需要我纳入计划？"
+        return prefix + "我再了解一下可能会影响孕期计划的生活习惯活生活方式，比如饮食、运动、睡眠、工作、家庭支持等，这些里面如果有什么想对我说的也可以告诉我"
     if next_step == "feeding_question":
-        return "最后想了解喂养准备：你是否计划母乳/混合/配方？是否需要吸奶或背奶？预计产假多久？之前有没有低奶量、乳腺炎、宝宝含乳困难的经历？是否可能早产、剖宫产或母婴分离？不确定的可以跳过。"
+        return "最后再了解一下喂养计划：你是否计划母乳/混合/配方？预计产假多久？之前有没有低奶量、乳腺炎、宝宝含乳困难的经历？是否存在早产风险？计划剖宫产还是顺产？不确定的可以跳过。"
     if next_step == "pause_for_symptoms":
-        return "你提到的情况需要先确认安全边界。我们先暂停制定计划，优先按医生或医院建议处理当前症状。"
+        return "针对你挡下的这种情况。我建议可以先暂停制定计划，优先按医生或医院建议处理当前症状。"
     return ""
 
 

@@ -17,6 +17,7 @@ DEFAULT_TIMEZONE = "America/Los_Angeles"
 class ContextState:
     environment_sent: bool = False
     loaded_references: list[str] = field(default_factory=list)
+    loaded_tools: list[str] = field(default_factory=list)
     client_events: list[str] = field(default_factory=list)
     available_tool_images: list[dict[str, str]] = field(default_factory=list)
     last_displayed_tool_image: dict[str, str] | None = None
@@ -50,6 +51,7 @@ _MAX_SLOT_TEXT_LENGTH = 160
 _SLOT_RECORD_MARKER_KEYS = frozenset({"value", "status", "source"})
 _SLOT_STATUS_CONFIRMED = "confirmed"
 _SLOT_SOURCE_USER_TEXT = "user_text"
+_MAX_LOADED_TOOL_CONTEXT_ITEMS = 12
 _SERVICE_DOMAIN_ALIASES = {
     "birth-prep": "birth_prep",
     "birth_prep": "birth_prep",
@@ -72,6 +74,58 @@ _SERVICE_DOMAIN_ALIASES = {
 }
 _BIRTH_PREP_DOMAIN = "birth_prep"
 _MILK_MANAGEMENT_DOMAIN = "milk_management"
+_LOADED_TOOL_GUIDANCE = {
+    "birth_journey_intake_manage": (
+        "birth_journey_intake_manage 已在当前会话中加载/使用过；孕期计划信息采集继续用它推进状态机，"
+        "不要重复调用 tool_search 查找 birth_prep 工具，除非用户切换服务或本轮无法直接调用该工具。"
+    ),
+    "birth_journey_plan_card_create": (
+        "birth_journey_plan_card_create 已在当前会话中加载/使用过；只有 birth_journey_intake_manage 返回 ready_to_generate "
+        "或用户明确处理已有孕期计划时才调用，不要重复 tool_search 查找 birth_prep 工具。"
+    ),
+    "hospital_bag_form_create": (
+        "hospital_bag_form_create 已在当前会话中加载/使用过；待产包信息表场景优先复用该工具，不要重复 tool_search 查找 birth_prep 工具。"
+    ),
+    "hospital_bag_card_create": (
+        "hospital_bag_card_create 已在当前会话中加载/使用过；已有确认表单数据时优先复用该工具生成清单，不要重复 tool_search 查找 birth_prep 工具。"
+    ),
+    "labor_communication_card_create": (
+        "labor_communication_card_create 已在当前会话中加载/使用过；分娩沟通单场景优先复用该工具，不要重复 tool_search 查找 birth_prep 工具。"
+    ),
+    "device_manual_search": (
+        "device_manual_search 已在当前会话中加载/使用过；同一设备说明或 FAQ 场景优先复用已读内容和该工具，不要重复搜索同一资料。"
+    ),
+}
+_LOADED_TOOL_SERVICE_DOMAINS = {
+    "birth_plan_form_create": _BIRTH_PREP_DOMAIN,
+    "labor_communication_card_create": _BIRTH_PREP_DOMAIN,
+    "birth_journey_intake_manage": _BIRTH_PREP_DOMAIN,
+    "birth_journey_plan_card_create": _BIRTH_PREP_DOMAIN,
+    "birth_journey_plan_delete": _BIRTH_PREP_DOMAIN,
+    "hospital_bag_form_create": _BIRTH_PREP_DOMAIN,
+    "hospital_bag_card_create": _BIRTH_PREP_DOMAIN,
+    "hospital_bag_cart_update": _BIRTH_PREP_DOMAIN,
+    "hospital_bag_pump_recommend": _BIRTH_PREP_DOMAIN,
+    "pregnancy_diary_manage": _BIRTH_PREP_DOMAIN,
+    "device_manual_search": "device_guidance",
+    "support_ticket_draft_create": "device_guidance",
+    "milk_snapshot_get": _MILK_MANAGEMENT_DOMAIN,
+    "milk_status_query": _MILK_MANAGEMENT_DOMAIN,
+    "milk_analysis_intake_manage": _MILK_MANAGEMENT_DOMAIN,
+    "milk_analysis_evaluate": _MILK_MANAGEMENT_DOMAIN,
+    "milk_plan_preview_create": _MILK_MANAGEMENT_DOMAIN,
+    "infant_growth_evaluate": _MILK_MANAGEMENT_DOMAIN,
+    "infant_growth_mutate": _MILK_MANAGEMENT_DOMAIN,
+    "milk_records_query": _MILK_MANAGEMENT_DOMAIN,
+    "milk_record_mutate": _MILK_MANAGEMENT_DOMAIN,
+    "milk_plan_query": _MILK_MANAGEMENT_DOMAIN,
+    "milk_plan_mutate": _MILK_MANAGEMENT_DOMAIN,
+    "milk_calendar_query": _MILK_MANAGEMENT_DOMAIN,
+    "milk_calendar_change_preview": _MILK_MANAGEMENT_DOMAIN,
+    "milk_calendar_reschedule_preview": _MILK_MANAGEMENT_DOMAIN,
+    "milk_calendar_mutate": _MILK_MANAGEMENT_DOMAIN,
+    "milk_task_complete": _MILK_MANAGEMENT_DOMAIN,
+}
 _MILK_STATE_INVALIDATING_WRITE_TOOLS = {
     "milk_record_mutate",
     "milk_plan_mutate",
@@ -106,6 +160,8 @@ def build_request_context(
             lines.append(
                 f"- {skill_id}/SKILL.md 已在当前会话中读取过；连续同一服务任务优先复用，不要重复调用 load_skill，除非用户切换服务或需要新的未读资料。"
             )
+    if state is not None:
+        lines.extend(_format_loaded_tool_context(state, service_domain))
     if state is not None and state.loaded_references:
         lines.append("loaded_reference_context:")
         for reference in state.loaded_references:
@@ -159,6 +215,15 @@ def set_active_service_domain(state: ContextState, domain: Any) -> None:
         state.active_service_domain = normalized
 
 
+def record_loaded_tool(state: ContextState, tool_name: Any) -> None:
+    name = str(tool_name or "").strip()
+    if not name:
+        return
+    if name not in state.loaded_tools:
+        state.loaded_tools.append(name)
+    state.loaded_tools = state.loaded_tools[-_MAX_LOADED_TOOL_CONTEXT_ITEMS:]
+
+
 def normalize_service_domain(value: Any) -> str:
     text = str(value or "").strip()
     if not text:
@@ -173,6 +238,31 @@ def _should_inject_birth_prep_domain_context(service_domain: str) -> bool:
 
 def _should_inject_milk_management_context(service_domain: str) -> bool:
     return service_domain in {"", _MILK_MANAGEMENT_DOMAIN}
+
+
+def _format_loaded_tool_context(state: ContextState, service_domain: str) -> list[str]:
+    tool_names = [
+        tool_name
+        for tool_name in _unique_strings(state.loaded_tools)[-_MAX_LOADED_TOOL_CONTEXT_ITEMS:]
+        if _should_inject_loaded_tool_context(tool_name, service_domain)
+    ]
+    if not tool_names:
+        return []
+    lines = ["loaded_tool_context:"]
+    for tool_name in tool_names:
+        guidance = _LOADED_TOOL_GUIDANCE.get(
+            tool_name,
+            f"{tool_name} 已在当前会话中加载/使用过；连续同一服务任务优先复用，避免重复调用 tool_search 查找同一工具，除非用户切换服务或本轮无法直接调用。",
+        )
+        lines.append(f"- {guidance}")
+    return lines
+
+
+def _should_inject_loaded_tool_context(tool_name: str, service_domain: str) -> bool:
+    if not service_domain:
+        return True
+    tool_domain = _LOADED_TOOL_SERVICE_DOMAINS.get(tool_name)
+    return not tool_domain or tool_domain == service_domain
 
 
 def merge_hospital_bag_slots(

@@ -3,13 +3,14 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from momcozy_agent.agents import _record_birth_prep_tool_state, model_tool_output
+from momcozy_agent.agents import _record_birth_prep_tool_state, _record_loaded_business_tool, model_tool_output
 from momcozy_agent.contexts import (
     ContextState,
     build_request_context,
     hospital_bag_slots,
     merge_extracted_birth_prep_slots,
     merge_hospital_bag_slots,
+    record_loaded_tool,
 )
 from momcozy_agent.tool_handlers.cards import (
     create_birth_journey_plan_card,
@@ -265,6 +266,42 @@ class BirthPrepPromptRuleTests(unittest.TestCase):
 
         self.assertNotIn("birth_prep_context:", context)
         self.assertNotIn("due_date_or_week=孕32周", context)
+
+    def test_loaded_tool_context_marks_loaded_birth_prep_tool(self) -> None:
+        state = ContextState()
+        record_loaded_tool(state, "birth_journey_intake_manage")
+
+        context = build_request_context({"user_message": "继续", "locale": "zh-CN"}, state, ["birth-prep"])
+
+        self.assertIn("loaded_tool_context:", context)
+        self.assertIn("birth_journey_intake_manage 已在当前会话中加载/使用过", context)
+        self.assertIn("不要重复调用 tool_search 查找 birth_prep 工具", context)
+
+    def test_loaded_tool_context_respects_service_domain_gate(self) -> None:
+        state = ContextState()
+        record_loaded_tool(state, "birth_journey_intake_manage")
+
+        context = build_request_context(
+            {"user_message": "看一下今天奶量", "locale": "zh-CN", "service_domain": "milk-management"},
+            state,
+            ["milk-management"],
+        )
+
+        self.assertNotIn("loaded_tool_context:", context)
+        self.assertNotIn("birth_journey_intake_manage", context)
+
+    def test_loaded_business_tool_records_only_deferred_tools(self) -> None:
+        state = ContextState()
+
+        _record_loaded_business_tool(state, "profile_get", {"ok": True, "tool_name": "profile_get", "result": {}})
+        _record_loaded_business_tool(
+            state,
+            "birth_journey_intake_manage",
+            {"ok": True, "tool_name": "birth_journey_intake_manage", "result": {"status": "in_progress"}},
+        )
+
+        self.assertNotIn("profile_get", state.loaded_tools)
+        self.assertIn("birth_journey_intake_manage", state.loaded_tools)
 
     def test_hospital_bag_flow_uses_form_without_three_dialogue_questions(self) -> None:
         skill = (ROOT / "skills" / "birth-prep" / "SKILL.md").read_text(encoding="utf-8")

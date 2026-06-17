@@ -521,6 +521,7 @@ def _clone_context_state(state: ContextState) -> ContextState:
     return ContextState(
         environment_sent=state.environment_sent,
         loaded_references=list(state.loaded_references),
+        loaded_tools=list(state.loaded_tools),
         client_events=list(state.client_events),
         available_tool_images=[dict(item) for item in state.available_tool_images],
         last_displayed_tool_image=dict(state.last_displayed_tool_image) if state.last_displayed_tool_image else None,
@@ -849,6 +850,7 @@ def _session_state_payload(session: ChatSession) -> dict[str, Any]:
         "context_state": {
             "environment_sent": session.context_state.environment_sent,
             "loaded_references": list(session.context_state.loaded_references),
+            "loaded_tools": list(session.context_state.loaded_tools),
             "client_events": list(session.context_state.client_events),
             "available_tool_images": list(session.context_state.available_tool_images),
             "last_displayed_tool_image": dict(session.context_state.last_displayed_tool_image or {}),

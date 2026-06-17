@@ -175,6 +175,8 @@ Air1 FAQ 图片位于 `skills/device-guidance/assets/air1/faq-images/`。`faq.md
 
 `birth_prep_context` 和 `birth_prep_profile_context` 受 `active_service_domain` gate 控制：domain 为空或为 `birth_prep` 时注入，明确为 `milk_management`、`device_guidance` 或 `emotion_support` 时不注入，避免孕期 slots 污染产后或设备服务。App 可通过 `service_domain` / `active_service_domain` / `current_service` 显式传入；服务工具或 `load_skill` 成功后也会更新 session domain。
 
+已通过 deferred namespace 调用成功的业务工具会记录在 `ContextState.loaded_tools`，下一轮以 `loaded_tool_context` 的形式提示模型：连续同一服务任务优先复用已加载/已使用过的工具和历史上下文，不要重复 `tool_search` 查找同一工具。该机制只改变 request context 提示，不把业务工具 promote 到顶层 `tools` 字段，也不替代必要的业务工具调用；例如孕期计划信息采集仍需要继续调用 `birth_journey_intake_manage` 推进状态机。
+
 后续请求依赖 `previous_response_id` 延续对话状态。
 
 ## Skill Selection
@@ -346,7 +348,7 @@ message_sent_at: 2026-05-05T17:45:03+08:00
 - `milk_management`：聚合后的奶量工具，包括 `milk_snapshot_get`、`milk_records_query`、`milk_record_mutate`、`milk_plan_query`、`milk_plan_preview`、`milk_plan_mutate`、`milk_calendar_query`、`milk_calendar_change_preview`、`milk_calendar_mutate`，以及评估类 `milk_assessment_evaluate`、`infant_growth_evaluate`；用于用户自身奶量、喂养、宝宝生长和 calendar 数据，不用于吸奶器选型、设备排障或购物车调整
 - `hospital_bag_cart`：待产包购物车工具 `hospital_bag_cart_update`，用于已经进入待产包购物车后的预算上限优化、删除/加回、基础款替换、医院提供、家里已有、数量调整，以及把已推荐的 Momcozy 吸奶器型号同步到购物车；不用于生成待产包清单、独立吸奶器选型或设备排障
 - `pump_recommendation`：吸奶器型号选型工具 `hospital_bag_pump_recommend`，用于购买前 Momcozy 吸奶器推荐、型号对比、预算内选择，也可在待产包场景里先选型再同步购物车；不用于已购设备故障/说明书、奶量是否正常或直接修改购物车
-- `birth_prep`：产前准备专用产物工具，包括 `birth_plan_form_create`、`labor_communication_card_create`、`birth_journey_plan_card_create`、`hospital_bag_form_create`、`hospital_bag_card_create`；用于已经进入孕期计划、待产包清单或分娩沟通单流程后的表单/结构化内容生成，不用于普通孕期问答
+- `birth_prep`：产前准备专用产物工具，包括 `birth_plan_form_create`、`labor_communication_card_create`、`birth_journey_intake_manage`、`birth_journey_plan_card_create`、`birth_journey_plan_delete`、`hospital_bag_form_create`、`hospital_bag_card_create`；用于已经进入孕期计划、待产包清单或分娩沟通单流程后的表单/结构化内容生成，不用于普通孕期问答
 
 每个 namespace 中的 function 都设置 `defer_loading: true`。模型开始时只看到 namespace 名称和描述；需要具体工具时由 `tool_search` 加载对应 function schema。
 

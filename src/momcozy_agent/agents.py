@@ -16,6 +16,7 @@ from .contexts import (
     hospital_bag_slots,
     merge_birth_journey_intake_state,
     merge_hospital_bag_slots,
+    record_loaded_tool,
     record_milk_management_tool_state,
     set_active_service_domain,
 )
@@ -23,7 +24,7 @@ from .health_guidance import health_guidance_request_context_lines, health_guida
 from .services import data_store
 from .static_context import STATIC_AGENT_INSTRUCTIONS
 from .tool_schemas import FUNCTION_TOOLS
-from .tool_registry import execute_tool, select_runtime_tools
+from .tool_registry import DEFERRED_TOOL_NAMESPACES, execute_tool, select_runtime_tools
 from .types import AgUiEvent, AgUiEventHandler, AgentEvent, AgentEventHandler, AgentEventPhase, BuildAgentRequestOptions, ResponsesClientLike, ResponsesRequest, RuntimeInputs, TextDeltaHandler
 
 AG_UI_STATUS_ACTIVITY_TYPE = "MOMCOZY_AGENT_STATUS"
@@ -47,6 +48,11 @@ _SERVICE_DOMAIN_BY_SKILL_ID = {
     "milk-management": "milk_management",
     "device-guidance": "device_guidance",
     "emotion-support": "emotion_support",
+}
+_DEFERRED_TOOL_NAMES = {
+    str(tool_name)
+    for namespace in DEFERRED_TOOL_NAMESPACES.values()
+    for tool_name in namespace.get("tool_names", [])
 }
 
 AgUiSemantic = dict[str, Any]
@@ -3304,6 +3310,7 @@ def run_agent_loop(
                 if domain and isinstance(options.get("context_state"), ContextState):
                     set_active_service_domain(options["context_state"], domain)
             _record_loaded_reference(options.get("context_state"), tool_call["name"], result)
+            _record_loaded_business_tool(options.get("context_state"), tool_call["name"], result)
             _record_tool_images(options.get("context_state"), tool_call["name"], result)
             _record_birth_prep_tool_state(options.get("context_state"), tool_call["name"], tool_call["arguments"], result)
             _record_milk_tool_state(options.get("context_state"), tool_call["name"], result)
@@ -3892,6 +3899,16 @@ def _record_loaded_reference(context_state: object, tool_name: str, result: dict
     source = str(manual.get("source") or "references/air1/manual.md")
     reference = f"device-guidance/{model}/{source} 已在当前会话中加载过；后续同型号连续任务可复用，除非上下文不足或用户提出新的资料需求。"
     _append_loaded_reference(context_state, reference)
+
+
+def _record_loaded_business_tool(context_state: object, tool_name: str, result: dict[str, Any]) -> None:
+    if not isinstance(context_state, ContextState):
+        return
+    if not result.get("ok"):
+        return
+    if str(tool_name or "").strip() not in _DEFERRED_TOOL_NAMES:
+        return
+    record_loaded_tool(context_state, tool_name)
 
 
 def _record_tool_images(context_state: object, tool_name: str, result: dict[str, Any]) -> None:
