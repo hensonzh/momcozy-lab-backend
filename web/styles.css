@@ -254,6 +254,50 @@ button:disabled {
   overflow-x: auto;
 }
 
+.web-search-citations {
+  margin-top: 12px;
+  padding-top: 9px;
+  border-top: 1px solid #dce7ec;
+  color: #536371;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.web-search-citations-title {
+  margin-bottom: 6px;
+  color: #7b5666;
+  font-weight: 750;
+}
+
+.web-search-citation-list {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.web-search-citation-link {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px;
+  align-items: baseline;
+  color: #277487;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.web-search-citation-link:hover {
+  text-decoration: underline;
+}
+
+.web-search-citation-index {
+  color: #a88696;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .message.assistant img,
 .work-narration-content img {
   display: block;

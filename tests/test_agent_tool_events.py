@@ -11,6 +11,7 @@ from momcozy_agent.agents import (
     artifact_created_event,
     _tool_image_input_item_from_metadata,
     _tool_image_metadata,
+    clean_web_search_citation_markers,
     model_tool_output,
     run_agent_loop,
     tool_call_start_event,
@@ -842,6 +843,72 @@ class AgentToolEventTests(unittest.TestCase):
         )
         self.assertEqual(citations[1]["title"], "www.ncbi.nlm.nih.gov")  # type: ignore[index]
         self.assertEqual(citations[1]["displayText"], "NCBI 医学资料：ncbi.nlm.nih.gov/books/...")  # type: ignore[index]
+
+    def test_web_search_inline_citation_markers_are_removed_from_streamed_text(self) -> None:
+        response = {
+            "id": "resp-citation-markers",
+            "output": [
+                {
+                    "type": "message",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": "乳房红肿\ue200cite\ue202turn0search0\ue201需要尽快评估【1†source】。",
+                            "annotations": [
+                                {
+                                    "type": "url_citation",
+                                    "url": "https://www.cdc.gov/breastfeeding/",
+                                    "title": "CDC Breastfeeding",
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+        stream_events = [
+            {"type": "response.output_text.delta", "delta": "乳房红肿"},
+            {"type": "response.output_text.delta", "delta": "\ue200cite\ue202turn0"},
+            {"type": "response.output_text.delta", "delta": "search0\ue201需要尽快评估"},
+            {"type": "response.output_text.delta", "delta": "【1†source】。"},
+            {"type": "response.completed", "response": response},
+        ]
+
+        class _SplitCitationClient:
+            def __init__(self) -> None:
+                self.responses = self
+
+            def create(self, **request: object) -> object:
+                return stream_events if request.get("stream") else response
+
+        text_parts: list[str] = []
+        events: list[dict[str, object]] = []
+        run_agent_loop(
+            _SplitCitationClient(),
+            {"user_message": "乳房红肿还有点发热怎么办", "locale": "zh-CN"},
+            on_text_delta=text_parts.append,
+            on_ag_ui_event=events.append,
+            ag_ui_run_id="run-citation-marker-clean",
+            ag_ui_message_id="assistant-citation-marker-clean",
+        )
+
+        text = "".join(text_parts)
+        self.assertEqual(text, "乳房红肿需要尽快评估。")
+        self.assertNotIn("\ue200", text)
+        self.assertNotIn("†source", text)
+        citation_events = [
+            event
+            for event in events
+            if event.get("type") == "CUSTOM" and event.get("name") == "momcozy.web_search.citations"
+        ]
+        self.assertEqual(len(citation_events), 1)
+
+    def test_web_search_citation_marker_cleaner_preserves_normal_text(self) -> None:
+        self.assertEqual(clean_web_search_citation_markers("请先看【重点】不要用力揉。"), "请先看【重点】不要用力揉。")
+        self.assertEqual(
+            clean_web_search_citation_markers("参考 \ue200cite\ue202turn0search0\ue201 专业资料【1†source】。"),
+            "参考 专业资料。",
+        )
 
     def test_ag_ui_emits_web_search_process_status(self) -> None:
         fake_client = _FakeStreamingClient(

@@ -1,5 +1,5 @@
 const messages = document.querySelector("#messages");
-window.MOMCOZY_APP_BUILD_ID = "form-id-default-guard-20260531";
+window.MOMCOZY_APP_BUILD_ID = "web-search-citations-20260616";
 const form = document.querySelector("#composer");
 const input = document.querySelector("#message");
 const send = document.querySelector("#send");
@@ -11,6 +11,7 @@ const conversationLabel = document.querySelector("#conversation");
 const skillsLabel = document.querySelector("#skills");
 
 const THINKING_EVENT_NAME = "momcozy.agent.thinking";
+const WEB_SEARCH_CITATIONS_EVENT_NAME = "momcozy.web_search.citations";
 const MAX_IMAGE_ATTACHMENTS = 4;
 const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
 const CLIENT_USER_ID_KEY = "momcozy_user_id";
@@ -105,10 +106,11 @@ function getAssistantMarkdown(node) {
 }
 
 function renderAssistantMarkdown(node) {
-  const markdown = node._rawMarkdown || "";
+  const markdown = cleanAssistantCitationMarkers(node._rawMarkdown || "");
   if (!window.marked || !window.DOMPurify) {
     node.classList.remove("has-markdown-image");
     node.textContent = markdown;
+    renderWebSearchCitations(node);
     return;
   }
   const rawHtml = window.marked.parse(markdown, {
@@ -123,6 +125,7 @@ function renderAssistantMarkdown(node) {
   node.classList.toggle("has-markdown-image", markdownImages.length > 0);
   const markdownTables = node.querySelectorAll("table");
   node.classList.toggle("has-markdown-table", markdownTables.length > 0);
+  renderWebSearchCitations(node);
   markdownImages.forEach((img) => {
     img.decoding = "async";
     enableImageViewer(img);
@@ -130,6 +133,82 @@ function renderAssistantMarkdown(node) {
       messages.scrollTop = messages.scrollHeight;
     }, { once: true });
   });
+}
+
+function cleanAssistantCitationMarkers(text) {
+  return String(text || "")
+    .replace(/\ue200cite\ue202[\s\S]{0,240}?\ue201/g, "")
+    .replace(/【[^】\n\r]{0,160}†[^】\n\r]{0,160}】/g, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/[ \t]+([，。！？；：,.!?;:])/g, "$1");
+}
+
+function setWebSearchCitations(node, citations) {
+  if (!node) return;
+  const normalized = normalizeWebSearchCitations(citations);
+  if (!normalized.length) return;
+  node._webSearchCitations = normalized;
+  renderAssistantMarkdown(node);
+  messages.scrollTop = messages.scrollHeight;
+}
+
+function normalizeWebSearchCitations(citations) {
+  if (!Array.isArray(citations)) return [];
+  const normalized = [];
+  const seen = new Set();
+  for (const citation of citations) {
+    if (!citation || typeof citation !== "object") continue;
+    const url = String(citation.url || "").trim();
+    if (!/^https?:\/\//i.test(url) || seen.has(url)) continue;
+    seen.add(url);
+    const index = Number.isFinite(Number(citation.index)) ? Number(citation.index) : normalized.length + 1;
+    const title = String(citation.displayText || citation.display_text || citation.title || url).trim();
+    normalized.push({ url, index, title });
+    if (normalized.length >= 4) break;
+  }
+  return normalized;
+}
+
+function renderWebSearchCitations(node) {
+  const citations = node._webSearchCitations || [];
+  if (!Array.isArray(citations) || !citations.length) return;
+
+  const section = document.createElement("aside");
+  section.className = "web-search-citations";
+  section.setAttribute("aria-label", "专业信息源");
+
+  const title = document.createElement("div");
+  title.className = "web-search-citations-title";
+  title.textContent = "专业信息源";
+  section.appendChild(title);
+
+  const list = document.createElement("ol");
+  list.className = "web-search-citation-list";
+  for (const citation of citations) {
+    const item = document.createElement("li");
+    item.className = "web-search-citation-item";
+
+    const link = document.createElement("a");
+    link.className = "web-search-citation-link";
+    link.href = citation.url;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+
+    const index = document.createElement("span");
+    index.className = "web-search-citation-index";
+    index.textContent = `[${citation.index}]`;
+    link.appendChild(index);
+
+    const label = document.createElement("span");
+    label.className = "web-search-citation-label";
+    label.textContent = citation.title;
+    link.appendChild(label);
+
+    item.appendChild(link);
+    list.appendChild(item);
+  }
+  section.appendChild(list);
+  node.appendChild(section);
 }
 
 function enableImageViewer(img) {
@@ -2414,6 +2493,8 @@ async function streamChat(text, workRun, images = []) {
         } else if (["completed", "failed"].includes(event.value?.status)) {
           completeThinking(workRun);
         }
+      } else if (event.type === "CUSTOM" && event.name === WEB_SEARCH_CITATIONS_EVENT_NAME) {
+        setWebSearchCitations(ensureAssistantNode(), event.value?.citations || []);
       } else if (event.type === "CUSTOM" && event.name === "momcozy.agent.status") {
         updateMeta(event.value?.metadata || {});
       } else if (event.type === "STEP_STARTED") {

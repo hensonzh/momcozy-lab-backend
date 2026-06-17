@@ -31,6 +31,9 @@ AG_UI_STATUS_CUSTOM_NAME = "momcozy.agent.status"
 AG_UI_THINKING_CUSTOM_NAME = "momcozy.agent.thinking"
 AG_UI_WEB_SEARCH_CUSTOM_NAME = "momcozy.agent.web_search"
 AG_UI_WEB_SEARCH_CITATIONS_CUSTOM_NAME = "momcozy.web_search.citations"
+PRIVATE_USE_CITATION_START = "\ue200"
+PRIVATE_USE_CITATION_END = "\ue201"
+MAX_INLINE_CITATION_MARKER_CHARS = 240
 QUICK_REPLIES_TOOL_NAME = "ui_quick_replies_create"
 MILK_WRITE_TOOL_NAMES = {
     "milk_record_mutate",
@@ -3406,6 +3409,7 @@ def _create_response(
     reasoning_active = False
     output_text_seen = False
     web_search_statuses_seen: set[tuple[str, str]] = set()
+    citation_marker_cleaner = _WebSearchCitationMarkerCleaner()
     stream = client.responses.create(**request, stream=True)
     for event in stream:
         event_type = _get_item_value(event, "type")
@@ -3429,8 +3433,10 @@ def _create_response(
         if event_type == "response.output_text.delta":
             delta = _get_item_value(event, "delta")
             if isinstance(delta, str) and delta:
-                output_text_seen = True
-                on_text_delta(delta)
+                clean_delta = citation_marker_cleaner.feed(delta)
+                if clean_delta:
+                    output_text_seen = True
+                    on_text_delta(clean_delta)
         elif event_type == "response.output_item.added":
             item = _get_item_value(event, "item")
             if _is_function_call_item(item) and on_function_call_start is not None:
@@ -3444,6 +3450,10 @@ def _create_response(
                 on_reasoning_event("completed", {"source_event": event_type})
             reasoning_active = False
         elif event_type == "response.completed":
+            clean_delta = citation_marker_cleaner.flush()
+            if clean_delta:
+                output_text_seen = True
+                on_text_delta(clean_delta)
             if reasoning_active and on_reasoning_event is not None:
                 on_reasoning_event("completed", {"source_event": event_type})
             reasoning_active = False
@@ -3460,6 +3470,78 @@ def _create_response(
     if final_response is None:
         raise RuntimeError("Response stream ended without a completed response.")
     return final_response
+
+
+class _WebSearchCitationMarkerCleaner:
+    def __init__(self) -> None:
+        self._mode = ""
+        self._marker = ""
+
+    def feed(self, delta: str) -> str:
+        output: list[str] = []
+        for char in delta:
+            if self._mode == "private":
+                self._marker += char
+                if char == PRIVATE_USE_CITATION_END:
+                    if not _private_use_marker_is_citation(self._marker):
+                        output.append(self._marker)
+                    self._reset_marker()
+                elif len(self._marker) > MAX_INLINE_CITATION_MARKER_CHARS or char in "\n\r":
+                    output.append(self._marker)
+                    self._reset_marker()
+                continue
+
+            if self._mode == "bracket":
+                self._marker += char
+                if char == "】":
+                    if not _bracket_marker_is_citation(self._marker):
+                        output.append(self._marker)
+                    self._reset_marker()
+                elif len(self._marker) > MAX_INLINE_CITATION_MARKER_CHARS or char in "\n\r":
+                    output.append(self._marker)
+                    self._reset_marker()
+                continue
+
+            if char == PRIVATE_USE_CITATION_START:
+                self._mode = "private"
+                self._marker = char
+            elif char == "【":
+                self._mode = "bracket"
+                self._marker = char
+            else:
+                output.append(char)
+        return clean_web_search_citation_markers("".join(output))
+
+    def flush(self) -> str:
+        if not self._marker:
+            return ""
+        marker = self._marker
+        self._reset_marker()
+        if _private_use_marker_is_citation(marker) or _bracket_marker_is_citation(marker):
+            return ""
+        return clean_web_search_citation_markers(marker)
+
+    def _reset_marker(self) -> None:
+        self._mode = ""
+        self._marker = ""
+
+
+def clean_web_search_citation_markers(text: str) -> str:
+    if not text:
+        return ""
+    cleaned = re.sub(r"\ue200cite\ue202[\s\S]{0,240}?\ue201", "", text)
+    cleaned = re.sub(r"【[^】\n\r]{0,160}†[^】\n\r]{0,160}】", "", cleaned)
+    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+    cleaned = re.sub(r"[ \t]+([，。！？；：,.!?;:])", r"\1", cleaned)
+    return cleaned
+
+
+def _private_use_marker_is_citation(value: str) -> bool:
+    return value.startswith(PRIVATE_USE_CITATION_START) and "cite" in value.lower()
+
+
+def _bracket_marker_is_citation(value: str) -> bool:
+    return value.startswith("【") and value.endswith("】") and "†" in value
 
 
 def _emit_stream_event(handler: Any | None, event_type: Any, event: object) -> None:
