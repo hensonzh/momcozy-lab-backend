@@ -12,9 +12,12 @@ from momcozy_agent.agents import (
     artifact_created_event,
     _tool_image_input_item_from_metadata,
     _tool_image_metadata,
+    _tool_start_label,
     clean_web_search_citation_markers,
     model_tool_output,
     run_agent_loop,
+    status_custom_event,
+    thinking_custom_event,
     tool_call_start_event,
     tool_call_args_event,
     tool_call_end_event,
@@ -35,6 +38,62 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertIn("不要先输出用户可见的过渡说明或中间解释", request["instructions"])
         self.assertIn("Agent loop 过程中的中间判断、准备动作和工具选择不要写进正文", request["instructions"])
         self.assertIn("使用 `ui_quick_replies_create` 创建", request["instructions"])
+
+    def test_tool_output_model_request_status_is_user_visible(self) -> None:
+        event = status_custom_event(
+            {
+                "type": "agent.status",
+                "phase": "requesting_model",
+                "message": "Requesting model response with tool outputs.",
+                "metadata": {"round": 1},
+            }
+        )
+
+        self.assertEqual(event["semantic"]["visibility"], "status")
+        self.assertEqual(event["semantic"]["label"], "我接着处理下一步")
+
+        initial_event = status_custom_event(
+            {
+                "type": "agent.status",
+                "phase": "requesting_model",
+                "message": "Requesting model response.",
+                "metadata": {"round": 0},
+            }
+        )
+        self.assertEqual(initial_event["semantic"]["visibility"], "hidden")
+
+    def test_thinking_event_is_not_main_status_visible(self) -> None:
+        event = thinking_custom_event("started")
+
+        self.assertEqual(event["semantic"]["label"], "我想一下")
+        self.assertEqual(event["semantic"]["visibility"], "hidden")
+
+        next_event = thinking_custom_event("running", {"after_output_text": True})
+        self.assertEqual(next_event["semantic"]["label"], "我接着处理下一步")
+        self.assertEqual(next_event["semantic"]["visibility"], "hidden")
+
+    def test_tool_start_labels_are_specific_for_exposed_tools(self) -> None:
+        labels = {name: _tool_start_label(name, {}) for name in FUNCTION_TOOLS}
+
+        self.assertEqual(labels["birth_journey_intake_manage"], "我先整理孕期计划信息～")
+        self.assertEqual(labels["handoff_summary_generate"], "我先整理转接摘要～")
+        self.assertEqual(labels["run_approved_skill_script"], "我按场景说明处理这一步～")
+        self.assertEqual(labels["ui_quick_replies_create"], "我在帮你准备下一轮的快捷输入～")
+        self.assertNotIn("我先处理这一步～", labels.values())
+
+    def test_birth_journey_intake_default_result_label_is_specific(self) -> None:
+        event = tool_call_result_event(
+            "message-1",
+            "call-birth-intake",
+            "birth_journey_intake_manage",
+            {
+                "ok": True,
+                "tool_name": "birth_journey_intake_manage",
+                "result": {"status": "risk_question"},
+            },
+        )
+
+        self.assertEqual(event["semantic"]["label"], "我整理好这一步信息啦")
 
     def test_agent_request_can_disable_tools_for_hidden_prewarm(self) -> None:
         request = build_agent_request(
@@ -1714,9 +1773,9 @@ class AgentToolEventTests(unittest.TestCase):
                                 "arguments": json.dumps(
                                     {
                                         "replies": [
-                                            {"text": "继续下一步", "send_text": "继续下一步"},
-                                            {"text": "换个方案", "send_text": "我想换个方案"},
-                                            {"text": "先帮我总结", "send_text": "先帮我总结"},
+                                            {"text": "继续下一步"},
+                                            {"text": "换个方案"},
+                                            {"text": "先帮我总结"},
                                         ]
                                     }
                                 ),
@@ -1773,9 +1832,9 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertEqual(
             quick_event["replies"],
             [
-                {"text": "继续下一步", "send_text": "继续下一步"},
-                {"text": "换个方案", "send_text": "我想换个方案"},
-                {"text": "先帮我总结", "send_text": "先帮我总结"},
+                {"text": "继续下一步"},
+                {"text": "换个方案"},
+                {"text": "先帮我总结"},
             ],
         )
 
@@ -1798,7 +1857,7 @@ class AgentToolEventTests(unittest.TestCase):
                                 "arguments": json.dumps(
                                     {
                                         "replies": [
-                                            {"text": "继续", "send_text": "继续"},
+                                            {"text": "继续"},
                                         ]
                                     }
                                 ),
@@ -1891,7 +1950,7 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertEqual(text.count("你可以提前和医院确认"), 1)
         self.assertIn("ARTIFACT_CREATED", [event.get("type") for event in events])
 
-    def test_stream_adds_default_quick_replies_when_model_omits_tool(self) -> None:
+    def test_stream_omits_quick_replies_when_model_omits_tool(self) -> None:
         async def collect_events() -> list[dict[str, object]]:
             client = _FakeStreamingClient(
                 [
@@ -1918,23 +1977,11 @@ class AgentToolEventTests(unittest.TestCase):
         event_types = [str(event.get("type")) for event in events]
 
         self.assertIn("TEXT_MESSAGE_END", event_types)
-        self.assertIn("QUICK_REPLIES", event_types)
+        self.assertNotIn("QUICK_REPLIES", event_types)
         self.assertIn("RUN_FINISHED", event_types)
-        self.assertLess(event_types.index("TEXT_MESSAGE_END"), event_types.index("QUICK_REPLIES"))
-        self.assertLess(event_types.index("QUICK_REPLIES"), event_types.index("RUN_FINISHED"))
+        self.assertLess(event_types.index("TEXT_MESSAGE_END"), event_types.index("RUN_FINISHED"))
 
-        quick_event = next(event for event in events if event.get("type") == "QUICK_REPLIES")
-        self.assertEqual(quick_event["message_id"], "run-default-quick:assistant")
-        self.assertEqual(
-            quick_event["replies"],
-            [
-                {"text": "继续这个问题", "send_text": "继续这个问题"},
-                {"text": "换个说法", "send_text": "请换个说法再解释一遍"},
-                {"text": "我想问别的", "send_text": "我想问另一个问题"},
-            ],
-        )
-
-    def test_stream_adds_default_quick_replies_even_without_text_message(self) -> None:
+    def test_stream_omits_quick_replies_without_text_message_when_model_omits_tool(self) -> None:
         async def collect_events() -> list[dict[str, object]]:
             client = _FakeStreamingClient([{"id": "resp-empty", "output": []}])
             runtime = ChatRuntime(client, model="test-model")
@@ -1949,13 +1996,8 @@ class AgentToolEventTests(unittest.TestCase):
         event_types = [str(event.get("type")) for event in events]
 
         self.assertNotIn("TEXT_MESSAGE_END", event_types)
-        self.assertIn("QUICK_REPLIES", event_types)
+        self.assertNotIn("QUICK_REPLIES", event_types)
         self.assertIn("RUN_FINISHED", event_types)
-        self.assertLess(event_types.index("QUICK_REPLIES"), event_types.index("RUN_FINISHED"))
-
-        quick_event = next(event for event in events if event.get("type") == "QUICK_REPLIES")
-        self.assertEqual(quick_event["message_id"], "run-empty-quick:assistant")
-        self.assertEqual(len(quick_event["replies"]), 3)
 
     def test_stream_suppresses_quick_replies_when_form_artifact_created(self) -> None:
         async def collect_events() -> list[dict[str, object]]:
@@ -2008,7 +2050,7 @@ class AgentToolEventTests(unittest.TestCase):
         artifact = next(event for event in events if event.get("type") == "ARTIFACT_CREATED")
         self.assertEqual(artifact["artifact_type"], "form")
 
-    def test_stream_suppresses_default_quick_replies_when_support_ticket_form_created(self) -> None:
+    def test_stream_suppresses_quick_replies_when_support_ticket_form_created(self) -> None:
         async def collect_events() -> tuple[list[dict[str, object]], list[dict[str, object]]]:
             client = _FakeStreamingClient(
                 [
@@ -2080,7 +2122,7 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertNotIn("设备还是没法正常使用", text)
         self.assertNotIn("售后工单草稿", text)
 
-    def test_stream_keeps_quick_replies_when_card_artifact_created(self) -> None:
+    def test_stream_omits_quick_replies_for_card_artifact_when_model_omits_tool(self) -> None:
         async def collect_events() -> list[dict[str, object]]:
             client = _FakeStreamingClient(
                 [
@@ -2119,14 +2161,10 @@ class AgentToolEventTests(unittest.TestCase):
         event_types = [str(event.get("type")) for event in events]
 
         self.assertIn("ARTIFACT_CREATED", event_types)
-        self.assertIn("QUICK_REPLIES", event_types)
+        self.assertNotIn("QUICK_REPLIES", event_types)
         self.assertIn("RUN_FINISHED", event_types)
-        self.assertLess(event_types.index("QUICK_REPLIES"), event_types.index("RUN_FINISHED"))
         artifact = next(event for event in events if event.get("type") == "ARTIFACT_CREATED")
         self.assertEqual(artifact["artifact_type"], "ibclc_consult_card")
-        quick_event = next(event for event in events if event.get("type") == "QUICK_REPLIES")
-        self.assertEqual(quick_event["message_id"], "run-card-quick:assistant")
-        self.assertEqual(len(quick_event["replies"]), 3)
 
 
 class _FakeClient:

@@ -448,6 +448,7 @@ RUN_FINISHED
 前端展示规则：
 
 - 每个事件都要能得到一个 semantic object，但不代表每个事件都新增一行 UI。
+- App 状态条显示最新到达的可见语义：`status`、`work_item`、`artifact`、`action` 的非空 `semantic.label` 会立即覆盖上一条状态；`hidden` 不覆盖当前状态，正文开始后主状态条停止展示。
 - `TOOL_CALL_START` / `ARGS` / `END` / `RESULT` 应围绕同一个 `merge_key` 更新同一条 work item。
 - `TOOL_CALL_ARGS` 默认不改变已有标题；缺少 start 时可用它补建 work item。
 - `QUICK_REPLIES`、`RUN_FINISHED`、`TEXT_MESSAGE_CONTENT` 通常是 `hidden`，只更新按钮、完成态或正文。
@@ -552,9 +553,9 @@ RUN_FINISHED
   "type": "QUICK_REPLIES",
   "message_id": "run_xxx:assistant",
   "replies": [
-    {"text": "继续下一步", "send_text": "继续下一步"},
-    {"text": "换个方案", "send_text": "我想换个方案"},
-    {"text": "先帮我总结", "send_text": "先帮我总结"}
+    {"text": "继续下一步"},
+    {"text": "换个方案"},
+    {"text": "先帮我总结"}
   ]
 }
 ```
@@ -563,8 +564,8 @@ RUN_FINISHED
 
 - 只在对应 assistant 回复下方展示这 3 个快捷输入。
 - 收到新一轮 `QUICK_REPLIES` 或用户发送下一条消息时，隐藏历史轮次的快捷输入。
-- 点击后把 `send_text` 当作普通用户消息发送；不得绕过保存、提交、替换、转接等确认流程。
-- 该事件优先由全局 `ui_quick_replies_create` 工具产生。后端会隐藏该工具的 `TOOL_CALL_*` work panel 事件，只保留最终 `QUICK_REPLIES`；如果模型漏调该工具，后端会补 3 个安全默认提示，保证每轮成功回复后都有快捷输入。
+- 点击后把 `text` 当作普通用户消息发送；不得绕过保存、提交、替换、转接等确认流程。
+- 该事件由全局 `ui_quick_replies_create` 工具产生。该工具的 `TOOL_CALL_*` 事件会携带状态条语义透传给前端，但不展示为 work panel 行；如果模型漏调该工具或结果无效，本轮不展示快捷输入。
 
 ### 5.3 Thinking 事件
 
@@ -592,10 +593,11 @@ Thinking 通过 `CUSTOM` 事件返回：
 
 前端行为：
 
-- `started` / `running`：展示“正在思考”。
-- 如果 `metadata.after_output_text === true`：展示“正在准备下一步”。
+- `started` / `running`：在主状态条下方的 thinking note 展示“正在思考”，不覆盖主状态条。
+- 如果 `metadata.after_output_text === true`：在 thinking note 展示“我接着处理下一步”，不覆盖主状态条。
 - `completed` / `failed`：立即移除 Thinking 状态。
 - 前端只在后端收到真实 Responses reasoning stream 事件时展示 Thinking；`RUN_STARTED`、`requesting_model` 和普通文本 idle 不再兜底显示 Thinking。
+- 该事件的 `semantic.visibility` 固定为 `hidden`；主状态条只消费其它可见业务语义。
 
 ### 5.4 Agent 状态事件
 
@@ -614,7 +616,7 @@ Agent 状态通过 `CUSTOM` / `momcozy.agent.status` 发送：
 }
 ```
 
-前端主要用它更新 meta。`requesting_model` 不再触发 `Thinking` 兜底；真正可见的 work panel 主要来自真实 reasoning 事件、tool call 事件、artifact 和 confirmation 事件。
+前端主要用它更新 meta。`requesting_model` 不再触发 `Thinking` 兜底；初始模型请求保持隐藏，工具结果回传后的 `Requesting model response with tool outputs.` 会作为状态条显示“我接着处理下一步”。真正可见的 work panel 主要来自真实 reasoning 事件、tool call 事件、artifact 和 confirmation 事件。
 
 兼容说明：`ACTIVITY_SNAPSHOT` helper 仍保留，但主 agent loop 不再主动发送，避免每个状态重复两帧。
 
@@ -694,7 +696,7 @@ Agent 状态通过 `CUSTOM` / `momcozy.agent.status` 发送：
 - 更新 work panel 工具结果状态。
 - 不再直接渲染结构化 UI；结构化 UI 由后续 `ARTIFACT_CREATED` 显式事件驱动。
 - 例外：`hospital_bag_cart_update` 会在 `content.cart_update` 中返回前端可应用的购物车状态，用于对话页自然语言修改购物车，不产生独立 artifact。该工具支持预算上限、删除/加回、基础款替换、医院提供、家里已有、数量调整和吸奶器型号同步；预算优化默认尽量保留吸奶器。吸奶器推荐由 `pump_recommendation` namespace 下的 `hospital_bag_pump_recommend` 先返回型号和官方 USD 价格，再由购物车工具同步。
-- 例外：`ui_quick_replies_create` 是全局 UI 元数据工具；后端不会把它的 `TOOL_CALL_*` 事件透给前端 work panel，而是在最终回复后发送 `QUICK_REPLIES`。
+- 例外：`ui_quick_replies_create` 是全局 UI 元数据工具；后端会把它的 `TOOL_CALL_*` 事件以状态条语义透给前端，不作为 work panel 行展示，并在最终回复后发送 `QUICK_REPLIES`。
 
 #### `ARTIFACT_CREATED`
 
@@ -745,7 +747,7 @@ Agent 状态通过 `CUSTOM` / `momcozy.agent.status` 发送：
 
 - 如果 `responses:response.output_text.delta` 本身很晚，慢点主要在 Responses API 首包/模型侧。
 - 如果 `sse:TEXT_MESSAGE_CONTENT` 很早但浏览器很晚才显示，再排查浏览器、代理或本地网络。
-- 如果文本 delta 很早、`response.output_item.done` 后到 `response.completed` 很晚，前端不会仅因尾部完成事件较晚显示“正在准备下一步”；只有真实 reasoning 事件才会显示 Thinking/Preparing。
+- 如果文本 delta 很早、`response.output_item.done` 后到 `response.completed` 很晚，前端不会仅因尾部完成事件较晚显示“我接着处理下一步”；只有真实 reasoning 事件才会显示 Thinking/Preparing。
 
 ## 6. Tool result 安全响应体
 

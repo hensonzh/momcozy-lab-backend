@@ -19,14 +19,13 @@ def create_quick_replies(args: dict[str, Any], inputs: RuntimeInputs) -> dict[st
         if not isinstance(item, dict):
             continue
         text = _trim_text(item.get("text"))
-        send_text = _trim_text(item.get("send_text")) or text
-        if not text or not send_text:
+        if not text:
             continue
-        key = send_text.casefold()
+        key = text.casefold()
         if key in seen:
             continue
         seen.add(key)
-        normalized.append({"text": text, "send_text": send_text})
+        normalized.append({"text": text})
 
     if len(normalized) != 3:
         raise ValueError("quick replies require exactly 3 unique non-empty items.")

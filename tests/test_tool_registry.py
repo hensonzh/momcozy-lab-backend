@@ -42,6 +42,9 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertIn("每轮最终回复都应调用一次", description)
         self.assertIn("只提供 3 个短提示", description)
         self.assertIn("不能绕过保存、提交、替换、转接等确认流程", description)
+        parameters = tools["ui_quick_replies_create"]["parameters"]
+        reply_item_properties = parameters["properties"]["replies"]["items"]["properties"]
+        self.assertEqual(set(reply_item_properties.keys()), {"text"})
 
     def test_runtime_tools_include_domain_limited_health_web_search_when_appropriate(self) -> None:
         light_tools = select_runtime_tools({"user_message": "hello", "locale": "zh-CN"})

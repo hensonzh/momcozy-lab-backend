@@ -164,7 +164,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "ui_quick_replies_create": _function_tool(
         "ui_quick_replies_create",
-        "为当前最终回复创建 3 个前端快捷输入提示。无后端副作用；每轮最终回复都应调用一次。不要用于替代正文回答，不要在正文里复述这些快捷输入。每次调用必须提供且只提供 3 个短提示；点击后只会作为普通用户消息发送，不能绕过保存、提交、替换、转接等确认流程。",
+        "为当前最终回复创建 3 个前端快捷输入提示。无后端副作用；每轮最终回复都应调用一次。不要用于替代正文回答，不要在正文里复述这些快捷输入。每次调用必须提供且只提供 3 个短提示；点击后只会把该提示文案作为普通用户消息发送，不能绕过保存、提交、替换、转接等确认流程。",
         {
             "replies": {
                 "type": "array",
@@ -174,7 +174,6 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
                     "type": "object",
                     "properties": {
                         "text": {"type": "string", "description": "按钮上展示的短文案，建议 6-18 个字。"},
-                        "send_text": {"type": "string", "description": "用户点击后发送给智能体的完整文本，通常与 text 相同。"},
                     },
                 },
                 "description": "恰好 3 个快捷输入提示。",

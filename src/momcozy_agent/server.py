@@ -37,11 +37,6 @@ PORT = 8768
 MAX_IMAGE_ATTACHMENTS = 4
 STREAM_TIMING_ENV = "MOMCOZY_DEBUG_STREAM_TIMING"
 MAX_QUICK_REPLY_TEXT_CHARS = 32
-DEFAULT_QUICK_REPLIES: tuple[dict[str, str], ...] = (
-    {"text": "继续这个问题", "send_text": "继续这个问题"},
-    {"text": "换个说法", "send_text": "请换个说法再解释一遍"},
-    {"text": "我想问别的", "send_text": "我想问另一个问题"},
-)
 PROFILE_LOADED_FROM_DB_FLAG = "_user_profile_loaded_from_db"
 STATIC_CONTENT_TYPES = {
     ".css": "text/css; charset=utf-8",
@@ -459,8 +454,8 @@ async def stream_ag_ui_events(
                             }
                         )
                     if pending_run_finished:
-                        if not suppress_quick_replies:
-                            send_event(quick_replies_event(assistant_message_id, pending_quick_replies or _default_quick_replies()))
+                        if not suppress_quick_replies and pending_quick_replies is not None:
+                            send_event(quick_replies_event(assistant_message_id, pending_quick_replies))
                         send_event(pending_run_finished)
                 finally:
                     _refresh_session_profile_cache_from_inputs(session, inputs)
@@ -816,10 +811,6 @@ def _is_form_like_artifact_event(event: dict[str, Any]) -> bool:
     }
 
 
-def _default_quick_replies() -> list[dict[str, str]]:
-    return [dict(item) for item in DEFAULT_QUICK_REPLIES]
-
-
 def _quick_replies_from_tool_result_event(event: dict[str, Any]) -> list[dict[str, str]] | None:
     if event.get("type") != "TOOL_CALL_RESULT" or not _is_quick_replies_tool_event(event):
         return None
@@ -844,14 +835,13 @@ def _validated_quick_replies(value: Any) -> list[dict[str, str]] | None:
         if not isinstance(item, dict):
             return None
         text = _trim_quick_reply_text(item.get("text"))
-        send_text = _trim_quick_reply_text(item.get("send_text") or item.get("sendText")) or text
-        if not text or not send_text:
+        if not text:
             return None
-        key = send_text.casefold()
+        key = text.casefold()
         if key in seen:
             return None
         seen.add(key)
-        normalized.append({"text": text, "send_text": send_text})
+        normalized.append({"text": text})
     return normalized
 
 

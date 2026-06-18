@@ -153,7 +153,7 @@ def quick_replies_event(message_id: str, replies: list[dict[str, str]]) -> AgUiE
         "timestamp": _timestamp_ms(),
         "message_id": message_id,
         "replies": replies,
-        "semantic": _semantic_payload("done", "我准备好几个下一步选项啦", "hidden", f"quick_replies:{message_id}", priority=80),
+        "semantic": _semantic_payload("done", "我帮你准备好下一轮的快捷输入啦", "hidden", f"quick_replies:{message_id}", priority=80),
     }
 
 
@@ -428,7 +428,7 @@ def _step_semantic(step_name: str, state: str) -> AgUiSemantic:
         label = "我先理解一下你的需求～" if state == "started" else "我理解你的需求啦"
         phase = "thinking" if state == "started" else "done"
     else:
-        label = "我先处理这一步～" if state == "started" else "这一步处理好啦"
+        label = "我继续处理当前步骤～" if state == "started" else "这一步处理好啦"
         phase = "working" if state == "started" else "done"
     return _semantic_payload(phase, label, "status", f"step:{step_name}", priority=30)
 
@@ -438,6 +438,8 @@ def _status_event_semantic(event: AgentEvent) -> AgUiSemantic:
     phase = str(event.get("phase") or "").strip()
     if phase == "failed" or message == "Step failed.":
         return _semantic_payload("error", "这一步暂时没处理好", "status", f"status:{phase or 'failed'}", priority=95)
+    if phase == "requesting_model" and message == "Requesting model response with tool outputs.":
+        return _semantic_payload("thinking", _status_label(message), "status", f"status:{phase or 'loop'}", priority=20)
     if phase in {"requesting_model", "started", "model_tool_call", "tool_completed"}:
         return _semantic_payload("thinking", _status_label(message), "hidden", f"status:{phase or 'loop'}", priority=20)
     return _semantic_payload("working", _status_label(message), "status", f"status:{phase or 'loop'}", priority=20)
@@ -446,8 +448,8 @@ def _status_event_semantic(event: AgentEvent) -> AgUiSemantic:
 def _thinking_semantic(status: str, metadata: dict[str, Any]) -> AgUiSemantic:
     normalized_status = status.strip().lower()
     if normalized_status in {"started", "running"}:
-        label = "我在准备下一步～" if metadata.get("after_output_text") is True else "我想一下"
-        return _semantic_payload("thinking", label, "status", "thinking:current", priority=40)
+        label = "我接着处理下一步" if metadata.get("after_output_text") is True else "我想一下"
+        return _semantic_payload("thinking", label, "hidden", "thinking:current", priority=40)
     if normalized_status == "failed":
         return _semantic_payload("error", "这一步我还没想清楚", "hidden", "thinking:current", priority=40)
     return _semantic_payload("done", "我想好啦", "hidden", "thinking:current", priority=40)
@@ -563,6 +565,7 @@ def _tool_semantic_phase(tool_name: str) -> str:
         "reminder_delete",
         "birth_journey_plan_delete",
         "pregnancy_diary_manage",
+        "profile_update",
     }:
         return "saving"
     if tool_name in {
@@ -570,10 +573,12 @@ def _tool_semantic_phase(tool_name: str) -> str:
         "birth_plan_form_create",
         "hospital_bag_form_create",
         "labor_communication_card_create",
+        "birth_journey_intake_manage",
         "birth_journey_plan_card_create",
         "hospital_bag_card_create",
         "ibclc_consult_card_create",
         "support_ticket_draft_create",
+        "handoff_summary_generate",
     }:
         return "planning"
     if tool_name == "run_approved_skill_script":
@@ -678,9 +683,15 @@ def _tool_start_label(tool_name: str, arguments: dict[str, Any]) -> str:
         return "我去找一下之前的信息～"
     if tool_name == "reminder_list":
         return "我先看看你的提醒～"
+    if tool_name == "birth_journey_intake_manage":
+        return "我先整理孕期计划信息～"
+    if tool_name == "handoff_summary_generate":
+        return "我先整理转接摘要～"
+    if tool_name == "ui_quick_replies_create":
+        return "我在帮你准备下一轮的快捷输入～"
     if tool_name == "run_approved_skill_script":
-        return "我先处理这一步～"
-    return "我先处理这一步～"
+        return "我按场景说明处理这一步～"
+    return "我按当前场景继续处理～"
 
 
 def _tool_end_label(tool_name: str) -> str:
@@ -736,7 +747,7 @@ def _tool_result_label(tool_name: str, result: dict[str, Any]) -> str:
     if status == "plan_preview_needs_medical_confirmation":
         return "我需要先确认一下医疗边界～"
     if result.get("requires_confirmation") is True:
-        return "我已经准备好预览，等你确认～"
+        return "我已经准备好预览～"
     if tool_name in {"tool_search", "tool_search_call"}:
         return "我在执行这个方案啦～"
     if tool_name == "load_skill":
@@ -788,7 +799,7 @@ def _tool_result_label(tool_name: str, result: dict[str, Any]) -> str:
             return "孕期计划信息已经确认好啦"
         if status == "blocked_by_symptoms":
             return "我先帮你确认当前情况"
-        return "我准备好下一步啦"
+        return "我整理好这一步信息啦"
     if tool_name == "birth_journey_plan_card_create":
         return "我已经帮你整理好孕期计划啦"
     if tool_name == "birth_journey_plan_delete":
@@ -868,7 +879,7 @@ def _status_label(message: str) -> str:
     labels = {
         "Agent loop started.": "我在接收你的消息～",
         "Requesting model response.": "我想一下",
-        "Requesting model response with tool outputs.": "我在准备下一步～",
+        "Requesting model response with tool outputs.": "我接着处理下一步",
         "Selecting the next step.": "我来判断下一步怎么做～",
         "Loading relevant context.": "我去看一下相关信息～",
         "Reading relevant information.": "我去看一下相关信息～",
@@ -876,7 +887,7 @@ def _status_label(message: str) -> str:
         "Step completed.": "这一步处理好啦",
         "Step failed.": "这一步暂时没处理好",
     }
-    return labels.get(message, message or "我先处理这一步～")
+    return labels.get(message, message or "我继续处理当前步骤～")
 
 
 def safe_tool_arguments(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -2950,7 +2961,7 @@ def _confirmation_title(tool_name: str, safe_result: dict[str, Any]) -> str:
         return "我需要你确认奶量计划"
     if tool_name == "milk_calendar_change_preview":
         return "我需要你确认日程调整"
-    return "我需要你确认一下，再继续处理"
+    return "我需要你确认后，再继续处理"
 
 
 def _timestamp_ms() -> int:
