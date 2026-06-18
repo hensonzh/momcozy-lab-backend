@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
-from ..services import data_store
+from ..services import data_store, profile_write_queue
 from ..types import RuntimeInputs
+
+_PROFILE_LOADED_FROM_DB_FLAG = "_user_profile_loaded_from_db"
 
 
 def get_profile(args: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
@@ -42,19 +45,26 @@ def update_profile(args: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any
             "user_profile": _runtime_profile(inputs),
         }
 
-    profile = data_store.update_user_profile_memory(
+    profile = _apply_runtime_profile_update(
+        inputs,
         user_id=user_id,
         display_name=display_name,
         age=age,
         onboarding_skipped=onboarding_skipped,
     )
-    if profile is None:
+    if profile is None or not profile_write_queue.enqueue_user_profile_update(
+        user_id=user_id,
+        display_name=display_name or None,
+        age=age,
+        onboarding_skipped=onboarding_skipped,
+    ):
         return {
             "tool_name": "profile_update",
             "status": "profile_update_failed",
             "ok": False,
             "summary": "基础资料保存失败。",
         }
+    _store_runtime_profile(inputs, profile)
     return {
         "tool_name": "profile_update",
         "status": "profile_updated",
@@ -67,8 +77,8 @@ def update_profile(args: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any
 
 def _runtime_profile(inputs: RuntimeInputs) -> dict[str, Any]:
     user_id = _runtime_user_id(inputs)
-    persisted = data_store.get_user_profile(user_id) if user_id else {}
     provided = inputs.get("user_profile") if isinstance(inputs.get("user_profile"), dict) else {}
+    persisted = {} if inputs.get(_PROFILE_LOADED_FROM_DB_FLAG) is True else (data_store.get_user_profile(user_id) if user_id else {})
     merged: dict[str, Any] = {}
     for source in (persisted, provided):
         for key, value in source.items():
@@ -78,6 +88,51 @@ def _runtime_profile(inputs: RuntimeInputs) -> dict[str, Any]:
     if user_id:
         merged["user_id"] = user_id
     return _public_profile(merged)
+
+
+def _apply_runtime_profile_update(
+    inputs: RuntimeInputs,
+    *,
+    user_id: str,
+    display_name: str,
+    age: int | None,
+    onboarding_skipped: bool | None,
+) -> dict[str, Any] | None:
+    if not user_id:
+        return None
+    profile = _runtime_profile(inputs)
+    profile["user_id"] = user_id
+    now = _now_text()
+
+    if display_name:
+        profile["display_name"] = display_name
+    if age is not None:
+        profile["age"] = age
+    if onboarding_skipped is True:
+        profile["profile_onboarding_skipped"] = True
+        profile["profile_onboarding_skipped_at"] = _optional_text(profile.get("profile_onboarding_skipped_at")) or now
+    elif onboarding_skipped is False:
+        profile["profile_onboarding_skipped"] = False
+        profile["profile_onboarding_skipped_at"] = ""
+
+    if display_name or age is not None:
+        profile["profile_onboarding_skipped"] = False
+        profile["profile_onboarding_skipped_at"] = ""
+
+    completed = bool(_optional_text(profile.get("display_name"))) and _optional_age(profile.get("age")) is not None
+    profile["profile_onboarding_complete"] = completed
+    if completed and not _optional_text(profile.get("profile_onboarding_completed_at")):
+        profile["profile_onboarding_completed_at"] = now
+
+    return _public_profile(profile)
+
+
+def _store_runtime_profile(inputs: RuntimeInputs, profile: dict[str, Any]) -> None:
+    if not isinstance(profile, dict) or not profile:
+        return
+    existing = inputs.get("user_profile") if isinstance(inputs.get("user_profile"), dict) else {}
+    inputs["user_profile"] = {**existing, **profile}
+    inputs[_PROFILE_LOADED_FROM_DB_FLAG] = True
 
 
 def _public_profile(profile: dict[str, Any]) -> dict[str, Any]:
@@ -105,8 +160,6 @@ def _public_profile(profile: dict[str, Any]) -> dict[str, Any]:
         "birth_prep_support_person": _optional_text(profile.get("birth_prep_support_person")),
         "birth_prep_pregnancy_history_or_notes": _optional_text(profile.get("birth_prep_pregnancy_history_or_notes")),
         "birth_prep_top_worries": _optional_text(profile.get("birth_prep_top_worries")),
-        "current_care_stage": _current_care_stage(profile.get("current_care_stage")),
-        "current_care_stage_source": _optional_text(profile.get("current_care_stage_source")),
         "language": _optional_text(profile.get("language")),
     }
 
@@ -120,6 +173,10 @@ def _optional_text(value: Any) -> str:
     return str(value or "").strip()
 
 
+def _now_text() -> str:
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
 def _optional_age(value: Any) -> int | None:
     if value is None or value == "":
         return None
@@ -130,8 +187,3 @@ def _optional_age(value: Any) -> int | None:
     if age < 0 or age > 120:
         return None
     return age
-
-
-def _current_care_stage(value: Any) -> str:
-    text = str(value or "").strip()
-    return text if text in {"pregnancy", "postpartum"} else ""

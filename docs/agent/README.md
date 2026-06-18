@@ -175,6 +175,8 @@ Air1 FAQ 图片位于 `skills/device-guidance/assets/air1/faq-images/`。`faq.md
 
 `birth_prep_context` 和 `birth_prep_profile_context` 受 `active_service_domain` gate 控制：domain 为空或为 `birth_prep` 时注入，明确为 `milk_management`、`device_guidance` 或 `emotion_support` 时不注入，避免孕期 slots 污染产后或设备服务。App 可通过 `service_domain` / `active_service_domain` / `current_service` 显式传入；服务工具或 `load_skill` 成功后也会更新 session domain。
 
+`user_id` 由应用侧保留在 `RuntimeInputs`，不会作为明文行写进 `request_context`。AG-UI payload 解析阶段只做字段解析，不直接读取 profile DB；拿到 `ChatSession` 后才会 hydrate `user_profile`。同一 `threadId + user_id` 下的 profile cache 不按时间过期，只有 user_id 变化、cache 为空或运行态 profile 被明确更新时才刷新。`profile_get` 优先复用已 hydrate 的 `inputs["user_profile"]`；`profile_update`、孕期基础信息表单和孕期计划卡片会先同步刷新本轮 profile 投影，并在本轮结束后回写 session cache。DB 持久化通过内存 profile write queue 异步执行，避免 profile 写入阻塞主智能体 loop；后台写入失败只记录日志/重试，不改变当前轮的模型返回。`data_store.init_db()` 仍可在各数据访问入口调用，但同一 DB path 下只执行一次 schema 初始化/迁移保护，避免把 schema 检查放进每次 profile read 热路径。
+
 已通过 deferred namespace 调用成功的业务工具会记录在 `ContextState.loaded_tools`，下一轮以 `loaded_tool_context` 的形式提示模型：连续同一服务任务优先复用已加载/已使用过的工具和历史上下文，不要重复 `tool_search` 查找同一工具。该机制只改变 request context 提示，不把业务工具 promote 到顶层 `tools` 字段，也不替代必要的业务工具调用；例如孕期计划信息采集仍需要继续调用 `birth_journey_intake_manage` 推进状态机。
 
 后续请求依赖 `previous_response_id` 延续对话状态。

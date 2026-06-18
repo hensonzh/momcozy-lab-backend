@@ -1949,8 +1949,6 @@ def _public_user_profile_payload(profile: dict[str, Any]) -> dict[str, Any]:
         "birth_prep_support_person": str(profile.get("birth_prep_support_person") or "").strip(),
         "birth_prep_pregnancy_history_or_notes": str(profile.get("birth_prep_pregnancy_history_or_notes") or "").strip(),
         "birth_prep_top_worries": str(profile.get("birth_prep_top_worries") or "").strip(),
-        "current_care_stage": _current_care_stage_value(profile.get("current_care_stage")),
-        "current_care_stage_source": str(profile.get("current_care_stage_source") or "").strip(),
     }
 
 
@@ -1964,12 +1962,6 @@ def _profile_age_value(value: Any) -> int | None:
     if age < 0 or age > 120:
         return None
     return age
-
-
-def _current_care_stage_value(value: Any) -> str:
-    text = str(value or "").strip()
-    return text if text in {"pregnancy", "postpartum"} else ""
-
 
 def _valid_analysis_payload(payload: Any) -> bool:
     return isinstance(payload, dict) and set(payload.keys()) == {"user_id", "type"}

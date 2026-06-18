@@ -21,7 +21,6 @@ from .contexts import (
     set_active_service_domain,
 )
 from .health_guidance import health_guidance_request_context_lines, health_guidance_required_web_search_tool_choice
-from .services import data_store
 from .static_context import STATIC_AGENT_INSTRUCTIONS
 from .tool_schemas import FUNCTION_TOOLS
 from .tool_registry import DEFERRED_TOOL_NAMESPACES, execute_tool, select_runtime_tools
@@ -43,6 +42,18 @@ MILK_WRITE_TOOL_NAMES = {
     "milk_task_complete",
     "infant_growth_mutate",
 }
+_BIRTH_PREP_TOOL_NAMES = {
+    "birth_plan_form_create",
+    "labor_communication_card_create",
+    "birth_journey_intake_manage",
+    "birth_journey_plan_card_create",
+    "birth_journey_plan_delete",
+    "pregnancy_diary_manage",
+    "hospital_bag_form_create",
+    "hospital_bag_card_create",
+    "hospital_bag_cart_update",
+    "hospital_bag_pump_recommend",
+}
 _SERVICE_DOMAIN_BY_SKILL_ID = {
     "birth-prep": "birth_prep",
     "milk-management": "milk_management",
@@ -54,6 +65,7 @@ _DEFERRED_TOOL_NAMES = {
     for namespace in DEFERRED_TOOL_NAMESPACES.values()
     for tool_name in namespace.get("tool_names", [])
 }
+_PROFILE_LOADED_FROM_DB_FLAG = "_user_profile_loaded_from_db"
 
 AgUiSemantic = dict[str, Any]
 
@@ -413,7 +425,7 @@ def _semantic_payload(phase: str, label: str, visibility: str, merge_key: str, *
 
 def _step_semantic(step_name: str, state: str) -> AgUiSemantic:
     if step_name == "routing":
-        label = "我先理解一下你的需求～" if state == "started" else "我判断好你的需求啦"
+        label = "我先理解一下你的需求～" if state == "started" else "我理解你的需求啦"
         phase = "thinking" if state == "started" else "done"
     else:
         label = "我先处理这一步～" if state == "started" else "这一步处理好啦"
@@ -464,7 +476,7 @@ def _web_search_status_label(status: str) -> str:
     if normalized_status == "completed":
         return "我查好专业资料啦"
     if normalized_status == "failed":
-        return "专业资料暂时没查好"
+        return "我查好专业资料啦"
     return "我在查专业资料～"
 
 
@@ -495,10 +507,34 @@ def _tool_semantic(
     result: dict[str, Any] | None = None,
 ) -> AgUiSemantic:
     normalized = _normalize_tool_name(tool_name)
+    if normalized == QUICK_REPLIES_TOOL_NAME:
+        return _quick_replies_tool_semantic(stage, tool_call_id)
     phase = _tool_semantic_phase(normalized)
     label = _tool_stage_label(normalized, stage, arguments or {}, result or {})
     visibility = "work_item"
     return _semantic_payload(phase, label, visibility, f"tool:{tool_call_id or normalized or 'current'}", priority=50)
+
+
+def _quick_replies_tool_semantic(stage: str, tool_call_id: str) -> AgUiSemantic:
+    if stage == "result":
+        return _semantic_payload(
+            "done",
+            "我帮你准备好下一轮的快捷输入啦",
+            "status",
+            f"quick_replies:{tool_call_id or 'current'}",
+            priority=60,
+        )
+    if stage == "end":
+        label = "我在帮你准备下一轮的快捷输入～"
+    else:
+        label = "我在帮你准备下一轮的快捷输入～"
+    return _semantic_payload(
+        "planning",
+        label,
+        "status",
+        f"quick_replies:{tool_call_id or 'current'}",
+        priority=60,
+    )
 
 
 def _normalize_tool_name(tool_name: str) -> str:
@@ -560,13 +596,13 @@ def _tool_stage_label(
 
 def _tool_start_label(tool_name: str, arguments: dict[str, Any]) -> str:
     if tool_name in {"tool_search", "tool_search_call"}:
-        return "让我看看如何处理～"
+        return "让我看看怎么处理～"
     if tool_name == "load_skill":
         return _load_skill_label(arguments)
     if tool_name == "list_skills":
         return "我看看可以怎么帮你～"
     if tool_name == "search_skill_assets":
-        return "我去找找相关资料～"
+        return "我先找一下相关资料～"
     if tool_name == "read_skill_file":
         return "我先看一下相关说明～"
     if tool_name == "profile_get":
@@ -578,7 +614,7 @@ def _tool_start_label(tool_name: str, arguments: dict[str, Any]) -> str:
     if tool_name == "milk_status_query":
         return "我先看看今天的奶量状态～"
     if tool_name == "milk_analysis_intake_manage":
-        return "我先把关键信息核齐～"
+        return "我先把关键信息核对齐全～"
     if tool_name == "milk_records_query":
         return "我先看看吸奶和喂养记录～"
     if tool_name == "milk_plan_query":
@@ -588,17 +624,17 @@ def _tool_start_label(tool_name: str, arguments: dict[str, Any]) -> str:
     if tool_name == "milk_assessment_evaluate":
         return "我来看看奶量趋势和执行情况～"
     if tool_name == "milk_analysis_evaluate":
-        return "我来完成奶量分析～"
+        return "我来综合评估一下奶量问题～"
     if tool_name == "infant_growth_evaluate":
-        return "我来看看宝宝的生长信号～"
+        return "我先看看宝宝的生长信号～"
     if tool_name == "risk_evaluate":
-        return "我先确认一下安全边界～"
+        return "我先确认一下有没有相关风险～"
     if tool_name == "milk_plan_preview":
         return "我先帮你拟一版奶量计划～"
     if tool_name == "milk_plan_preview_create":
         return "我先帮你拟一版奶量计划～"
     if tool_name in {"milk_calendar_change_preview", "milk_calendar_reschedule_preview"}:
-        return "我先帮你排一下日程调整～"
+        return "我先帮你调整一下日程～"
     if tool_name == "milk_record_mutate":
         return "我先帮你处理这条记录～"
     if tool_name == "milk_task_complete":
@@ -657,7 +693,7 @@ def _tool_end_label(tool_name: str) -> str:
     if tool_name in {"milk_plan_preview_create", "milk_plan_preview"}:
         return "我再完善一下计划草稿～"
     if tool_name in {"milk_calendar_change_preview", "milk_calendar_reschedule_preview"}:
-        return "我把调整后的安排整理一下～"
+        return "我把调整后的日程整理一下～"
     if tool_name in {"milk_record_mutate", "milk_task_complete", "milk_plan_mutate", "milk_calendar_mutate", "infant_growth_mutate"}:
         return "我在保存这次修改～"
     if tool_name == "hospital_bag_pump_recommend":
@@ -683,7 +719,7 @@ def _tool_result_label(tool_name: str, result: dict[str, Any]) -> str:
     status = str(result.get("status") or "").strip()
     if result.get("result_ok") is False:
         if status == "needs_write_confirmation":
-            return "我还需要你确认一下～"
+            return "接下来需要你确认一下～"
         if status == "calendar_write_strategy_required":
             return "这版计划还需要确认写入方式"
         if tool_name == "milk_plan_mutate":
@@ -698,7 +734,7 @@ def _tool_result_label(tool_name: str, result: dict[str, Any]) -> str:
     if status == "plan_preview_not_recommended":
         return "这版方案我不建议继续用"
     if status == "plan_preview_needs_medical_confirmation":
-        return "我需要先确认健康边界～"
+        return "我需要先确认一下医疗边界～"
     if result.get("requires_confirmation") is True:
         return "我已经准备好预览，等你确认～"
     if tool_name in {"tool_search", "tool_search_call"}:
@@ -728,7 +764,7 @@ def _tool_result_label(tool_name: str, result: dict[str, Any]) -> str:
     if tool_name == "infant_growth_evaluate":
         return "我完成宝宝生长评估啦"
     if tool_name == "risk_evaluate":
-        return "我确认好安全边界啦"
+        return "我确认好风险边界啦"
     if tool_name == "milk_record_mutate":
         return _mutation_result_label(status, "我已经保存好这条记录啦")
     if tool_name == "milk_plan_mutate":
@@ -3182,7 +3218,6 @@ def run_agent_loop(
     ag_ui_tool_result_message_id = f"{ag_ui_run_id}:tool-results"
     streamed_tool_call_keys: set[str] = set()
     streamed_web_search_citations: list[dict[str, Any]] = []
-    _maybe_update_current_care_stage_from_user_message(inputs)
 
     def emit_streamed_tool_start(tool_call: dict[str, Any]) -> None:
         if _tool_call_was_seen(streamed_tool_call_keys, tool_call):
@@ -3301,7 +3336,7 @@ def run_agent_loop(
             tool_inputs = _tool_inputs_for_call(inputs, options)
             result = _execute_project_tool(tool_call["name"], tool_call["arguments"], tool_inputs)
             executed_tool_results.append(result)
-            _maybe_update_current_care_stage_from_tool(tool_call["name"], tool_call["arguments"], result, tool_inputs)
+            _sync_runtime_profile_from_tool_inputs(inputs, tool_inputs)
             if tool_call["name"] == "load_skill" and result.get("ok") and result.get("result", {}).get("id"):
                 skill_id = result["result"]["id"]
                 if skill_id not in loaded_skill_ids:
@@ -4305,10 +4340,20 @@ def _tool_inputs_for_call(inputs: RuntimeInputs, options: BuildAgentRequestOptio
     return tool_inputs
 
 
+def _sync_runtime_profile_from_tool_inputs(inputs: RuntimeInputs, tool_inputs: RuntimeInputs) -> None:
+    profile = tool_inputs.get("user_profile") if isinstance(tool_inputs.get("user_profile"), dict) else {}
+    if not profile:
+        return
+    existing = inputs.get("user_profile") if isinstance(inputs.get("user_profile"), dict) else {}
+    inputs["user_profile"] = {**existing, **profile}
+    if tool_inputs.get(_PROFILE_LOADED_FROM_DB_FLAG) is True:
+        inputs[_PROFILE_LOADED_FROM_DB_FLAG] = True
+
+
 def _record_birth_prep_tool_state(context_state: object, tool_name: str, arguments: dict[str, Any], result: dict[str, Any]) -> None:
     if not isinstance(context_state, ContextState):
         return
-    if tool_name in _PREGNANCY_STAGE_TOOLS:
+    if tool_name in _BIRTH_PREP_TOOL_NAMES:
         set_active_service_domain(context_state, "birth_prep")
 
     if tool_name == "birth_journey_plan_card_create":
@@ -4386,166 +4431,6 @@ def _object_argument(value: Any) -> dict[str, Any]:
             return {}
         return parsed if isinstance(parsed, dict) else {}
     return {}
-
-
-_PREGNANCY_STAGE_TOOLS = {
-    "birth_plan_form_create",
-    "labor_communication_card_create",
-    "birth_journey_intake_manage",
-    "birth_journey_plan_card_create",
-    "birth_journey_plan_delete",
-    "pregnancy_diary_manage",
-    "hospital_bag_form_create",
-    "hospital_bag_card_create",
-    "hospital_bag_cart_update",
-    "hospital_bag_pump_recommend",
-}
-_POSTPARTUM_STAGE_TOOLS = {
-    "ibclc_consult_card_create",
-    "milk_snapshot_get",
-    "milk_status_query",
-    "milk_records_query",
-    "milk_record_mutate",
-    "milk_plan_query",
-    "milk_plan_mutate",
-    "milk_calendar_query",
-    "milk_calendar_change_preview",
-    "milk_calendar_reschedule_preview",
-    "milk_calendar_mutate",
-    "milk_task_complete",
-    "milk_assessment_evaluate",
-    "infant_growth_evaluate",
-    "infant_growth_mutate",
-}
-_POSTPARTUM_INTENT_KEYWORDS = (
-    "奶量",
-    "母乳",
-    "泌乳",
-    "吸奶",
-    "喂奶",
-    "哺乳",
-    "亲喂",
-    "瓶喂",
-    "喂养",
-    "乳房",
-    "乳头",
-    "乳汁",
-    "堵奶",
-    "涨奶",
-    "追奶",
-    "回奶",
-    "硬块",
-    "ibclc",
-    "哺乳顾问",
-    "宝宝吃奶",
-    "产后恢复",
-)
-_PREGNANCY_INTENT_KEYWORDS = (
-    "孕周",
-    "预产期",
-    "孕期",
-    "怀孕",
-    "孕早期",
-    "孕中期",
-    "孕晚期",
-    "产检",
-    "胎动",
-    "待产",
-    "待产包",
-    "临产",
-    "分娩",
-    "孕期计划",
-    "孕期安排",
-    "入院",
-    "陪产",
-    "剖宫产",
-    "剖腹产",
-    "顺产",
-)
-_PREGNANCY_SERVICE_ANCHORS = (
-    "孕周",
-    "预产期",
-    "孕期",
-    "怀孕",
-    "孕早期",
-    "孕中期",
-    "孕晚期",
-    "产检",
-    "胎动",
-    "待产",
-    "待产包",
-    "临产",
-    "分娩",
-    "孕期计划",
-    "孕期安排",
-)
-
-
-def _maybe_update_current_care_stage_from_user_message(inputs: RuntimeInputs) -> None:
-    stage = _current_care_stage_from_text(inputs.get("user_message"))
-    if stage:
-        _persist_current_care_stage(inputs, stage, "user_intent")
-
-
-def _maybe_update_current_care_stage_from_tool(
-    tool_name: str,
-    arguments: dict[str, Any],
-    result: dict[str, Any],
-    inputs: RuntimeInputs,
-) -> None:
-    if not result.get("ok"):
-        return
-    stage = _current_care_stage_from_tool(tool_name, arguments, result)
-    if stage:
-        _persist_current_care_stage(inputs, stage, "tool_intent")
-
-
-def _current_care_stage_from_tool(tool_name: str, arguments: dict[str, Any], result: dict[str, Any]) -> str:
-    if tool_name in _POSTPARTUM_STAGE_TOOLS:
-        return "postpartum"
-    if tool_name in _PREGNANCY_STAGE_TOOLS:
-        return "pregnancy"
-    if tool_name == "device_manual_search":
-        topic = str(arguments.get("topic") or "").strip()
-        text = json.dumps({"arguments": arguments, "result": safe_tool_result(result)}, ensure_ascii=False)
-        if topic in {"flange", "suction", "milk_storage"} or _contains_any(text, _POSTPARTUM_INTENT_KEYWORDS):
-            return "postpartum"
-    return ""
-
-
-def _current_care_stage_from_text(value: Any) -> str:
-    text = str(value or "").strip().lower()
-    if not text:
-        return ""
-    has_pregnancy_intent = _contains_any(text, _PREGNANCY_INTENT_KEYWORDS)
-    has_postpartum_intent = _contains_any(text, _POSTPARTUM_INTENT_KEYWORDS)
-    if has_pregnancy_intent and (not has_postpartum_intent or _contains_any(text, _PREGNANCY_SERVICE_ANCHORS)):
-        return "pregnancy"
-    if has_postpartum_intent:
-        return "postpartum"
-    if has_pregnancy_intent:
-        return "pregnancy"
-    return ""
-
-
-def _contains_any(text: str, keywords: tuple[str, ...]) -> bool:
-    return any(keyword.lower() in text for keyword in keywords)
-
-
-def _persist_current_care_stage(inputs: RuntimeInputs, stage: str, source: str) -> None:
-    user_id = _runtime_profile_user_id(inputs)
-    if not user_id or stage not in {"pregnancy", "postpartum"}:
-        return
-    profile = data_store.update_current_care_stage(user_id=user_id, stage=stage, source=source)
-    if not profile:
-        return
-    existing = inputs.get("user_profile") if isinstance(inputs.get("user_profile"), dict) else {}
-    inputs["user_profile"] = {**existing, **profile}
-
-
-def _runtime_profile_user_id(inputs: RuntimeInputs) -> str:
-    profile = inputs.get("user_profile") if isinstance(inputs.get("user_profile"), dict) else {}
-    return str(inputs.get("user_id") or profile.get("user_id") or "").strip()
 
 
 def _execute_project_tool(name: str, arguments: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:

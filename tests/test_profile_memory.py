@@ -1,22 +1,34 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 
 PROFILE_MEMORY_DB_PATH = os.path.join(tempfile.mkdtemp(prefix="momcozy-profile-tests-"), "profile.db")
 os.environ["MILK_DB_PATH"] = PROFILE_MEMORY_DB_PATH
 
 from momcozy_agent.contexts import ContextState, build_request_context, merge_extracted_birth_prep_slots
-from momcozy_agent.services import data_store
+from momcozy_agent.server import (
+    ChatRuntime,
+    ChatSession,
+    _hydrate_session_user_profile,
+    _refresh_session_profile_cache_from_inputs,
+    _runtime_inputs_from_ag_ui,
+    stream_ag_ui_events,
+)
+from momcozy_agent.services import data_store, profile_write_queue
 from momcozy_agent.tool_handlers.cards import (
     create_form,
     create_birth_journey_plan_card,
     create_hospital_bag_card,
     create_hospital_bag_form,
     manage_birth_journey_intake,
+    _persist_birth_prep_profile_memory,
 )
 from momcozy_agent.tool_handlers.profile import get_profile, update_profile
 from momcozy_agent.tool_registry import READ_ONLY_TOOL_NAMES, select_runtime_tools
@@ -42,6 +54,154 @@ def _birth_journey_plan_context(**overrides: object) -> dict[str, object]:
 
 
 class ProfileMemoryTests(unittest.TestCase):
+    def tearDown(self) -> None:
+        profile_write_queue.wait_for_pending_profile_writes()
+
+    def test_runtime_input_parsing_does_not_read_profile_db(self) -> None:
+        with patch.object(data_store, "get_user_profile", side_effect=AssertionError("unexpected profile read")):
+            inputs = _runtime_inputs_from_ag_ui({"message": "你好", "user_id": "profile-parse-no-db"})
+
+        self.assertEqual(inputs["user_id"], "profile-parse-no-db")
+        self.assertEqual(inputs["user_profile"], {"user_id": "profile-parse-no-db"})
+
+    def test_session_profile_cache_avoids_repeated_entry_read(self) -> None:
+        user_id = "profile-cache-user"
+        data_store.update_user_profile_memory(user_id=user_id, display_name="小雨", age=29)
+        session = ChatSession("profile-cache-thread")
+
+        first_inputs = {"user_id": user_id, "user_profile": {"user_id": user_id}, "user_message": "你好"}
+        _hydrate_session_user_profile(first_inputs, session)
+        self.assertEqual(first_inputs["user_profile"]["display_name"], "小雨")
+
+        second_inputs = {"user_id": user_id, "user_profile": {"user_id": user_id}, "user_message": "继续"}
+        session.profile_cache_loaded_at = 0.0
+        with patch.object(data_store, "get_user_profile", side_effect=AssertionError("cache miss")):
+            _hydrate_session_user_profile(second_inputs, session)
+
+        self.assertEqual(second_inputs["user_profile"]["display_name"], "小雨")
+
+    def test_profile_tool_reuses_hydrated_profile_context(self) -> None:
+        inputs = {
+            "user_id": "profile-tool-cache",
+            "user_profile": {"user_id": "profile-tool-cache", "display_name": "小雨", "age": 29},
+            "_user_profile_loaded_from_db": True,
+        }
+
+        with patch.object(data_store, "get_user_profile", side_effect=AssertionError("unexpected profile read")):
+            profile = get_profile({}, inputs)["user_profile"]
+
+        self.assertEqual(profile["display_name"], "小雨")
+        self.assertEqual(profile["age"], 29)
+
+    def test_profile_update_refreshes_runtime_profile_and_session_cache(self) -> None:
+        user_id = "profile-cache-update"
+        session = ChatSession("profile-cache-update-thread")
+        inputs = {"user_id": user_id, "user_profile": {"user_id": user_id}, "user_message": "我叫小雨"}
+        _hydrate_session_user_profile(inputs, session)
+
+        update_profile({"display_name": "小雨", "age": 29, "onboarding_skipped": False}, inputs)
+        _refresh_session_profile_cache_from_inputs(session, inputs)
+
+        next_inputs = {"user_id": user_id, "user_profile": {"user_id": user_id}, "user_message": "继续"}
+        with patch.object(data_store, "get_user_profile", side_effect=AssertionError("cache miss after update")):
+            _hydrate_session_user_profile(next_inputs, session)
+
+        self.assertEqual(next_inputs["user_profile"]["display_name"], "小雨")
+        self.assertEqual(next_inputs["user_profile"]["age"], 29)
+
+    def test_stream_error_still_refreshes_runtime_profile_cache(self) -> None:
+        user_id = "profile-error-cache"
+        runtime = ChatRuntime(object(), slot_extractor=None)
+        payload = {"thread_id": "profile-error-cache-thread", "run_id": "profile-error-cache-run"}
+        inputs = {"user_id": user_id, "user_profile": {"user_id": user_id}, "user_message": "我叫小雨"}
+
+        def failing_agent_loop(client: object, runtime_inputs: dict[str, object], *args: object, **kwargs: object) -> object:
+            runtime_inputs["user_profile"] = {
+                **runtime_inputs.get("user_profile", {}),
+                "display_name": "小雨",
+                "age": 29,
+            }
+            runtime_inputs["_user_profile_loaded_from_db"] = True
+            raise RuntimeError("model failed after profile update")
+
+        async def collect_events() -> list[dict[str, object]]:
+            return [event async for event in stream_ag_ui_events(payload, inputs, runtime)]
+
+        with patch("momcozy_agent.server.run_agent_loop", side_effect=failing_agent_loop):
+            events = asyncio.run(collect_events())
+
+        self.assertTrue(any(event.get("type") == "RUN_ERROR" for event in events))
+        session = runtime.get_session("profile-error-cache-thread")
+        next_inputs = {"user_id": user_id, "user_profile": {"user_id": user_id}, "user_message": "继续"}
+        with patch.object(data_store, "get_user_profile", side_effect=AssertionError("cache miss after error")):
+            _hydrate_session_user_profile(next_inputs, session)
+
+        self.assertEqual(next_inputs["user_profile"]["display_name"], "小雨")
+        self.assertEqual(next_inputs["user_profile"]["age"], 29)
+
+    def test_profile_update_queues_db_write_and_updates_runtime_without_sync_write(self) -> None:
+        inputs = {
+            "user_id": "profile-async-update",
+            "user_profile": {"user_id": "profile-async-update"},
+            "_user_profile_loaded_from_db": True,
+        }
+
+        with patch.object(data_store, "update_user_profile_memory", side_effect=AssertionError("sync profile write")):
+            with patch.object(profile_write_queue, "enqueue_user_profile_update", return_value=True) as enqueue:
+                result = update_profile({"display_name": "小雨", "age": 29, "onboarding_skipped": False}, inputs)
+
+        self.assertEqual(result["status"], "profile_updated")
+        self.assertEqual(inputs["user_profile"]["display_name"], "小雨")
+        self.assertEqual(inputs["user_profile"]["age"], 29)
+        enqueue.assert_called_once()
+
+    def test_birth_prep_profile_memory_queues_db_write_and_updates_runtime_without_sync_write(self) -> None:
+        inputs = {
+            "user_id": "profile-birth-prep-async",
+            "user_profile": {"user_id": "profile-birth-prep-async"},
+        }
+
+        with patch.object(data_store, "update_birth_prep_profile_memory", side_effect=AssertionError("sync birth prep write")):
+            with patch.object(profile_write_queue, "enqueue_birth_prep_profile_update", return_value=True) as enqueue:
+                _persist_birth_prep_profile_memory(
+                    inputs,
+                    {"due_date_or_week": "孕32周", "city_or_country": "深圳", "birth_path": "剖宫产"},
+                )
+
+        self.assertEqual(inputs["user_profile"]["birth_prep_due_date_or_week"], "孕32周")
+        self.assertEqual(inputs["user_profile"]["birth_prep_city_or_country"], "深圳")
+        self.assertEqual(inputs["user_profile"]["birth_prep_birth_path"], "剖宫产")
+        enqueue.assert_called_once()
+
+    def test_profile_write_retry_preserves_enqueue_order(self) -> None:
+        self.assertTrue(profile_write_queue.wait_for_pending_profile_writes())
+        calls: list[str] = []
+
+        def flaky_update_user_profile_memory(**kwargs: object) -> dict[str, object]:
+            display_name = str(kwargs.get("display_name") or "")
+            calls.append(display_name)
+            if display_name == "旧名字" and calls.count("旧名字") == 1:
+                raise RuntimeError("temporary db lock")
+            return {"user_id": kwargs.get("user_id"), "display_name": display_name}
+
+        with patch.object(data_store, "update_user_profile_memory", side_effect=flaky_update_user_profile_memory):
+            profile_write_queue.enqueue_user_profile_update(user_id="profile-write-order", display_name="旧名字")
+            profile_write_queue.enqueue_user_profile_update(user_id="profile-write-order", display_name="新名字")
+            self.assertTrue(profile_write_queue.wait_for_pending_profile_writes())
+
+        self.assertEqual(calls, ["旧名字", "旧名字", "新名字"])
+
+    def test_init_db_skips_schema_work_after_same_path_initialized(self) -> None:
+        old_db_path = data_store.DB_PATH
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                data_store.DB_PATH = Path(tmp) / "profile-init-cache.db"  # type: ignore[assignment]
+                data_store.init_db(force=True)
+                with patch.object(data_store, "_ensure_column", side_effect=AssertionError("schema check repeated")):
+                    data_store.init_db()
+        finally:
+            data_store.DB_PATH = old_db_path  # type: ignore[assignment]
+
     def test_profile_update_persists_name_and_age(self) -> None:
         result = update_profile(
             {"display_name": "小雨", "age": 29, "onboarding_skipped": False},
@@ -50,6 +210,7 @@ class ProfileMemoryTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "profile_updated")
         self.assertTrue(result["profile_onboarding_complete"])
+        self.assertTrue(profile_write_queue.wait_for_pending_profile_writes())
         profile = data_store.get_user_profile("profile-user-1")
         self.assertEqual(profile["display_name"], "小雨")
         self.assertEqual(profile["age"], 29)
@@ -65,6 +226,7 @@ class ProfileMemoryTests(unittest.TestCase):
         self.assertEqual(result["status"], "profile_updated")
         self.assertFalse(result["profile_onboarding_complete"])
         self.assertTrue(result["profile_onboarding_skipped"])
+        self.assertTrue(profile_write_queue.wait_for_pending_profile_writes())
         profile = get_profile({}, {"user_id": "profile-user-2", "locale": "zh-CN", "user_message": ""})["user_profile"]
         self.assertTrue(profile["profile_onboarding_skipped"])
 
@@ -77,6 +239,7 @@ class ProfileMemoryTests(unittest.TestCase):
             {"display_name": None, "age": None, "onboarding_skipped": True},
             {"user_id": "profile-user-skipped", "locale": "zh-CN", "user_message": "先跳过"},
         )
+        self.assertTrue(profile_write_queue.wait_for_pending_profile_writes())
 
         cleared = data_store.reset_profile_onboarding_memory_for_dev()
 
@@ -106,12 +269,6 @@ class ProfileMemoryTests(unittest.TestCase):
             pregnancy_history_or_notes=["没有"],
             top_worries=["怕漏买"],
         )
-        data_store.update_current_care_stage(
-            user_id="profile-birth-prep-reset",
-            stage="pregnancy",
-            source="user_intent",
-        )
-
         cleared = data_store.reset_birth_prep_profile_memory_for_dev()
 
         self.assertGreaterEqual(cleared, 1)
@@ -128,8 +285,6 @@ class ProfileMemoryTests(unittest.TestCase):
         self.assertEqual(profile["birth_prep_support_person"], "")
         self.assertEqual(profile["birth_prep_pregnancy_history_or_notes"], "")
         self.assertEqual(profile["birth_prep_top_worries"], "")
-        self.assertEqual(profile["current_care_stage"], "")
-        self.assertEqual(profile["current_care_stage_source"], "")
 
     def test_dev_startup_reset_keeps_status_demo_fields_and_clears_other_data(self) -> None:
         data_store.update_user_profile_memory(
@@ -203,18 +358,6 @@ class ProfileMemoryTests(unittest.TestCase):
         self.assertEqual(data_store.list_pregnancy_diary_entries(user_id="profile-startup-reset"), [])
         self.assertIsNone(data_store.get_uploaded_file("file-reset"))
         self.assertIsNone(data_store.get_pump_health("profile-startup-reset"))
-
-    def test_current_care_stage_persists_in_profile(self) -> None:
-        profile = data_store.update_current_care_stage(
-            user_id="profile-care-stage",
-            stage="postpartum",
-            source="user_intent",
-        )
-
-        self.assertIsNotNone(profile)
-        saved = data_store.get_user_profile("profile-care-stage")
-        self.assertEqual(saved["current_care_stage"], "postpartum")
-        self.assertEqual(saved["current_care_stage_source"], "user_intent")
 
     def test_user_profile_context_is_only_injected_at_session_start(self) -> None:
         state = ContextState()
@@ -305,6 +448,7 @@ class ProfileMemoryTests(unittest.TestCase):
                 "message_sent_at": "2026-06-13T10:00:00+08:00",
             },
         )
+        self.assertTrue(profile_write_queue.wait_for_pending_profile_writes())
         profile = data_store.get_user_profile("profile-birth-prep-2")
 
         form = create_hospital_bag_form(
@@ -338,6 +482,7 @@ class ProfileMemoryTests(unittest.TestCase):
                 "message_sent_at": "2026-06-13T10:00:00+08:00",
             },
         )
+        self.assertTrue(profile_write_queue.wait_for_pending_profile_writes())
         data_store.reset_birth_prep_profile_memory_for_dev()
 
         form = create_hospital_bag_form(
@@ -379,6 +524,7 @@ class ProfileMemoryTests(unittest.TestCase):
                 ),
             },
         )
+        self.assertTrue(profile_write_queue.wait_for_pending_profile_writes())
         profile = data_store.get_user_profile("profile-birth-prep-3")
         self.assertEqual(profile["birth_prep_fetus_count"], "单胎")
         self.assertEqual(profile["birth_prep_first_birth"], "是")
@@ -433,6 +579,7 @@ class ProfileMemoryTests(unittest.TestCase):
                 "user_message": "",
             },
         )
+        self.assertTrue(profile_write_queue.wait_for_pending_profile_writes())
         profile = data_store.get_user_profile(user_id)
         form = create_hospital_bag_form(
             {"default_values": {"feeding_intention": "母乳"}},

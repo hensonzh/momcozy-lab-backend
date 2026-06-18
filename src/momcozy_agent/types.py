@@ -76,8 +76,6 @@ class UserProfileSummary(TypedDict, total=False):
     profile_onboarding_skipped: bool
     profile_onboarding_skipped_at: str | None
     profile_onboarding_completed_at: str | None
-    current_care_stage: str
-    current_care_stage_source: str
     role: str
     pregnancy_status: str
     due_date: str | None

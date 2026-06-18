@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,8 @@ from .paths import DATA_ROOT
 
 
 DB_PATH = Path(os.getenv("MILK_DB_PATH", str(DATA_ROOT / "milk_management.db")))
+_DB_INIT_LOCK = threading.Lock()
+_INITIALIZED_DB_PATH: Path | None = None
 
 FEED_TYPE_CODE_TO_TEXT = {
     0: "亲喂",
@@ -24,13 +27,51 @@ FEED_TYPE_TEXT_TO_CODE = {
     "瓶喂母乳": 1,
     "配方奶": 2,
 }
+USER_PROFILE_COLUMNS = (
+    "user_id",
+    "user_nickname",
+    "display_name",
+    "age",
+    "profile_onboarding_skipped_at",
+    "profile_onboarding_completed_at",
+    "birth_prep_due_date_or_week",
+    "birth_prep_ivf",
+    "birth_prep_fetus_count",
+    "birth_prep_city_or_country",
+    "birth_prep_birth_hospital",
+    "birth_prep_birth_path",
+    "birth_prep_first_birth",
+    "birth_prep_feeding_intention",
+    "birth_prep_return_to_work_timing",
+    "birth_prep_support_person",
+    "birth_prep_pregnancy_history_or_notes",
+    "birth_prep_top_worries",
+    "delivery_date",
+    "lactation_advice",
+    "feeding_advice",
+    "daily_summary",
+    "updated_at",
+    "created_at",
+)
+USER_PROFILE_SELECT = ", ".join(USER_PROFILE_COLUMNS)
 
 
-def init_db() -> None:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with _connect() as conn:
-        conn.executescript(
-            """
+def init_db(*, force: bool = False) -> None:
+    global _INITIALIZED_DB_PATH
+
+    db_path = Path(DB_PATH)
+    if not force and _INITIALIZED_DB_PATH == db_path and db_path.exists():
+        return
+
+    with _DB_INIT_LOCK:
+        db_path = Path(DB_PATH)
+        if not force and _INITIALIZED_DB_PATH == db_path and db_path.exists():
+            return
+
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        with _connect() as conn:
+            conn.executescript(
+                """
             CREATE TABLE IF NOT EXISTS user_profile (
                 user_id TEXT PRIMARY KEY,
                 user_nickname TEXT,
@@ -50,8 +91,6 @@ def init_db() -> None:
                 birth_prep_support_person TEXT,
                 birth_prep_pregnancy_history_or_notes TEXT,
                 birth_prep_top_worries TEXT,
-                current_care_stage TEXT,
-                current_care_stage_source TEXT,
                 delivery_date TEXT,
                 lactation_advice TEXT,
                 feeding_advice TEXT,
@@ -272,34 +311,33 @@ def init_db() -> None:
                 path TEXT NOT NULL,
                 created_at INTEGER NOT NULL
             );
-            """
-        )
-        _ensure_column(conn, "user_profile", "lactation_advice", "TEXT")
-        _ensure_column(conn, "user_profile", "feeding_advice", "TEXT")
-        _ensure_column(conn, "user_profile", "daily_summary", "TEXT")
-        _ensure_column(conn, "user_profile", "display_name", "TEXT")
-        _ensure_column(conn, "user_profile", "age", "INTEGER")
-        _ensure_column(conn, "user_profile", "profile_onboarding_skipped_at", "TEXT")
-        _ensure_column(conn, "user_profile", "profile_onboarding_completed_at", "TEXT")
-        _ensure_column(conn, "user_profile", "birth_prep_due_date_or_week", "TEXT")
-        _ensure_column(conn, "user_profile", "birth_prep_ivf", "TEXT")
-        _ensure_column(conn, "user_profile", "birth_prep_fetus_count", "TEXT")
-        _ensure_column(conn, "user_profile", "birth_prep_city_or_country", "TEXT")
-        _ensure_column(conn, "user_profile", "birth_prep_birth_hospital", "TEXT")
-        _ensure_column(conn, "user_profile", "birth_prep_birth_path", "TEXT")
-        _ensure_column(conn, "user_profile", "birth_prep_first_birth", "TEXT")
-        _ensure_column(conn, "user_profile", "birth_prep_feeding_intention", "TEXT")
-        _ensure_column(conn, "user_profile", "birth_prep_return_to_work_timing", "TEXT")
-        _ensure_column(conn, "user_profile", "birth_prep_support_person", "TEXT")
-        _ensure_column(conn, "user_profile", "birth_prep_pregnancy_history_or_notes", "TEXT")
-        _ensure_column(conn, "user_profile", "birth_prep_top_worries", "TEXT")
-        _ensure_column(conn, "user_profile", "current_care_stage", "TEXT")
-        _ensure_column(conn, "user_profile", "current_care_stage_source", "TEXT")
-        _ensure_calendar_schema(conn)
-        _ensure_column(conn, "feeding_log", "feed_action", "INTEGER NOT NULL DEFAULT 0")
-        _ensure_column(conn, "feeding_log", "feeding_title", "TEXT")
-        _ensure_column(conn, "pumping_log", "pump_source", "INTEGER NOT NULL DEFAULT 1")
-        _ensure_column(conn, "pumping_log", "pump_title", "TEXT")
+                """
+            )
+            _ensure_column(conn, "user_profile", "lactation_advice", "TEXT")
+            _ensure_column(conn, "user_profile", "feeding_advice", "TEXT")
+            _ensure_column(conn, "user_profile", "daily_summary", "TEXT")
+            _ensure_column(conn, "user_profile", "display_name", "TEXT")
+            _ensure_column(conn, "user_profile", "age", "INTEGER")
+            _ensure_column(conn, "user_profile", "profile_onboarding_skipped_at", "TEXT")
+            _ensure_column(conn, "user_profile", "profile_onboarding_completed_at", "TEXT")
+            _ensure_column(conn, "user_profile", "birth_prep_due_date_or_week", "TEXT")
+            _ensure_column(conn, "user_profile", "birth_prep_ivf", "TEXT")
+            _ensure_column(conn, "user_profile", "birth_prep_fetus_count", "TEXT")
+            _ensure_column(conn, "user_profile", "birth_prep_city_or_country", "TEXT")
+            _ensure_column(conn, "user_profile", "birth_prep_birth_hospital", "TEXT")
+            _ensure_column(conn, "user_profile", "birth_prep_birth_path", "TEXT")
+            _ensure_column(conn, "user_profile", "birth_prep_first_birth", "TEXT")
+            _ensure_column(conn, "user_profile", "birth_prep_feeding_intention", "TEXT")
+            _ensure_column(conn, "user_profile", "birth_prep_return_to_work_timing", "TEXT")
+            _ensure_column(conn, "user_profile", "birth_prep_support_person", "TEXT")
+            _ensure_column(conn, "user_profile", "birth_prep_pregnancy_history_or_notes", "TEXT")
+            _ensure_column(conn, "user_profile", "birth_prep_top_worries", "TEXT")
+            _ensure_calendar_schema(conn)
+            _ensure_column(conn, "feeding_log", "feed_action", "INTEGER NOT NULL DEFAULT 0")
+            _ensure_column(conn, "feeding_log", "feeding_title", "TEXT")
+            _ensure_column(conn, "pumping_log", "pump_source", "INTEGER NOT NULL DEFAULT 1")
+            _ensure_column(conn, "pumping_log", "pump_title", "TEXT")
+        _INITIALIZED_DB_PATH = db_path
 
 
 def db_file() -> Path:
@@ -397,7 +435,7 @@ def get_mom_baby_info(user_id: str) -> dict[str, Any] | None:
     if not uid:
         return None
     with _connect() as conn:
-        user = conn.execute("SELECT * FROM user_profile WHERE user_id = ?", (uid,)).fetchone()
+        user = conn.execute(f"SELECT {USER_PROFILE_SELECT} FROM user_profile WHERE user_id = ?", (uid,)).fetchone()
         baby = conn.execute(
             "SELECT * FROM infant_profile WHERE user_id = ? ORDER BY infant_id LIMIT 1",
             (uid,),
@@ -421,9 +459,9 @@ def get_user_profile(user_id: str) -> dict[str, Any]:
     if not uid:
         return {}
     with _connect() as conn:
-        row = conn.execute("SELECT * FROM user_profile WHERE user_id = ?", (uid,)).fetchone()
+        row = conn.execute(f"SELECT {USER_PROFILE_SELECT} FROM user_profile WHERE user_id = ?", (uid,)).fetchone()
     if row is None:
-        return {"user_id": uid}
+        return _empty_user_profile(uid)
     profile = _row_dict(row)
     profile["user_id"] = uid
     profile["display_name"] = str(profile.get("display_name") or profile.get("user_nickname") or "").strip()
@@ -442,11 +480,31 @@ def get_user_profile(user_id: str) -> dict[str, Any]:
         profile.get("birth_prep_pregnancy_history_or_notes")
     )
     profile["birth_prep_top_worries"] = _normalize_birth_prep_memory_text(profile.get("birth_prep_top_worries"))
-    profile["current_care_stage"] = _normalize_current_care_stage(profile.get("current_care_stage"))
-    profile["current_care_stage_source"] = _normalize_birth_prep_memory_text(profile.get("current_care_stage_source"))
     profile["profile_onboarding_complete"] = bool(profile.get("display_name")) and profile.get("age") is not None
     profile["profile_onboarding_skipped"] = bool(str(profile.get("profile_onboarding_skipped_at") or "").strip())
     return profile
+
+
+def _empty_user_profile(user_id: str) -> dict[str, Any]:
+    return {
+        "user_id": user_id,
+        "display_name": "",
+        "age": None,
+        "birth_prep_due_date_or_week": "",
+        "birth_prep_ivf": "",
+        "birth_prep_fetus_count": "",
+        "birth_prep_city_or_country": "",
+        "birth_prep_birth_hospital": "",
+        "birth_prep_birth_path": "",
+        "birth_prep_first_birth": "",
+        "birth_prep_feeding_intention": "",
+        "birth_prep_return_to_work_timing": "",
+        "birth_prep_support_person": "",
+        "birth_prep_pregnancy_history_or_notes": "",
+        "birth_prep_top_worries": "",
+        "profile_onboarding_complete": False,
+        "profile_onboarding_skipped": False,
+    }
 
 
 def reset_profile_onboarding_memory_for_dev() -> int:
@@ -494,8 +552,6 @@ def reset_birth_prep_profile_memory_for_dev() -> int:
                 birth_prep_support_person = NULL,
                 birth_prep_pregnancy_history_or_notes = NULL,
                 birth_prep_top_worries = NULL,
-                current_care_stage = NULL,
-                current_care_stage_source = NULL,
                 updated_at = ?
             WHERE birth_prep_due_date_or_week IS NOT NULL
                OR birth_prep_ivf IS NOT NULL
@@ -509,8 +565,6 @@ def reset_birth_prep_profile_memory_for_dev() -> int:
                OR birth_prep_support_person IS NOT NULL
                OR birth_prep_pregnancy_history_or_notes IS NOT NULL
                OR birth_prep_top_worries IS NOT NULL
-               OR current_care_stage IS NOT NULL
-               OR current_care_stage_source IS NOT NULL
             """,
             (now,),
         )
@@ -628,7 +682,7 @@ def update_user_profile_memory(
                 """,
                 tuple(values),
             )
-        row = conn.execute("SELECT * FROM user_profile WHERE user_id = ?", (uid,)).fetchone()
+        row = conn.execute(f"SELECT {USER_PROFILE_SELECT} FROM user_profile WHERE user_id = ?", (uid,)).fetchone()
 
     if row is None:
         return {"user_id": uid}
@@ -724,41 +778,6 @@ def update_birth_prep_profile_memory(
     return get_user_profile(uid)
 
 
-def update_current_care_stage(
-    *,
-    user_id: str,
-    stage: str,
-    source: str = "agent_intent",
-) -> dict[str, Any] | None:
-    init_db()
-    uid = str(user_id or "").strip()
-    stage_value = _normalize_current_care_stage(stage)
-    if not uid or not stage_value:
-        return None
-
-    source_value = _normalize_birth_prep_memory_text(source) or "agent_intent"
-    now = _now()
-    with _connect() as conn:
-        conn.execute(
-            """
-            INSERT OR IGNORE INTO user_profile(user_id, created_at, updated_at)
-            VALUES (?, ?, ?)
-            """,
-            (uid, now, now),
-        )
-        conn.execute(
-            """
-            UPDATE user_profile
-            SET current_care_stage = ?,
-                current_care_stage_source = ?,
-                updated_at = ?
-            WHERE user_id = ?
-            """,
-            (stage_value, source_value, now, uid),
-        )
-    return get_user_profile(uid)
-
-
 def update_user_profile_advice(*, user_id: str, lactation_advice: str, feeding_advice: str) -> bool:
     init_db()
     uid = str(user_id or "").strip()
@@ -808,7 +827,7 @@ def get_status_advice_context(*, user_id: str, days: int = 7) -> dict[str, Any] 
     end_at = f"{end_dt.date().isoformat()} 23:59:59"
 
     with _connect() as conn:
-        user = conn.execute("SELECT * FROM user_profile WHERE user_id = ?", (uid,)).fetchone()
+        user = conn.execute(f"SELECT {USER_PROFILE_SELECT} FROM user_profile WHERE user_id = ?", (uid,)).fetchone()
         baby = conn.execute(
             "SELECT * FROM infant_profile WHERE user_id = ? ORDER BY infant_id LIMIT 1",
             (uid,),
@@ -2585,15 +2604,6 @@ def _normalize_birth_prep_memory_text(value: Any) -> str:
     if len(text) > 80:
         text = text[:80].strip()
     return text
-
-
-def _normalize_current_care_stage(value: Any) -> str:
-    text = str(value or "").strip().lower()
-    if text in {"pregnancy", "prenatal", "孕期", "产前"}:
-        return "pregnancy"
-    if text in {"postpartum", "lactation", "breastfeeding", "哺乳期", "产后"}:
-        return "postpartum"
-    return ""
 
 
 def _profile_age_value(value: Any) -> int | None:

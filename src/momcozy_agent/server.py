@@ -42,6 +42,7 @@ DEFAULT_QUICK_REPLIES: tuple[dict[str, str], ...] = (
     {"text": "换个说法", "send_text": "请换个说法再解释一遍"},
     {"text": "我想问别的", "send_text": "我想问另一个问题"},
 )
+PROFILE_LOADED_FROM_DB_FLAG = "_user_profile_loaded_from_db"
 STATIC_CONTENT_TYPES = {
     ".css": "text/css; charset=utf-8",
     ".gif": "image/gif",
@@ -63,6 +64,9 @@ class ChatSession:
     previous_response_id: str | None = None
     loaded_skill_ids: list[SkillId] = field(default_factory=list)
     context_state: ContextState = field(default_factory=ContextState)
+    profile_cache_user_id: str = ""
+    profile_cache: dict[str, Any] = field(default_factory=dict)
+    profile_cache_loaded_at: float = 0.0
     run_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
 
@@ -375,9 +379,6 @@ async def stream_ag_ui_events(
             quick_replies = _quick_replies_from_tool_result_event(event)
             if quick_replies is not None:
                 pending_quick_replies = quick_replies
-            if _is_quick_replies_tool_event(event):
-                log_timing("ag_ui:quick_replies_tool_event hidden", _ag_ui_timing_metadata(event))
-                return
             followup = _assistant_followup_from_tool_result_event(event)
             if followup and followup not in pending_assistant_followups:
                 pending_assistant_followups.append(followup)
@@ -411,54 +412,58 @@ async def stream_ag_ui_events(
 
         try:
             with session.run_lock:
-                if session.previous_response_id and "previous_response_id" not in inputs:
-                    inputs["previous_response_id"] = session.previous_response_id
-                _schedule_birth_prep_slot_extraction(session, runtime, inputs, run_id=str(run_id))
-                agent_options: dict[str, Any] = {
-                    "model": runtime.model,
-                    "store": runtime.store,
-                    "loaded_skill_ids": session.loaded_skill_ids,
-                    "context_state": session.context_state,
-                }
-                response = run_agent_loop(
-                    runtime.client,
-                    inputs,
-                    agent_options,
-                    on_ag_ui_event=send_ag_ui_event,
-                    ag_ui_thread_id=str(thread_id),
-                    ag_ui_run_id=str(run_id),
-                    ag_ui_parent_run_id=str(parent_run_id) if parent_run_id else None,
-                    ag_ui_message_id=assistant_message_id,
-                    on_text_delta=send_text_delta,
-                    on_response_stream_event=response_stream_timing,
-                )
-                response_id = _response_id(response)
-                if response_id:
-                    session.previous_response_id = response_id
-                loaded_skill_ids = agent_options.get("loaded_skill_ids")
-                if isinstance(loaded_skill_ids, list):
-                    session.loaded_skill_ids = loaded_skill_ids
-                text = _response_text(response)
-                if not streamed_text_parts and text:
-                    send_text_delta(text)
-                current_text = "".join(streamed_text_parts) or text
-                for followup in pending_assistant_followups:
-                    if _should_send_assistant_followup(followup, current_text, allow_only_when_no_text=True):
-                        send_text_delta(f"\n\n{followup}")
-                        current_text = f"{current_text}\n\n{followup}"
-                record_birth_prep_assistant_message(session.context_state, current_text)
-                if text_started:
-                    send_event(
-                        {
-                            "type": "TEXT_MESSAGE_END",
-                            "message_id": assistant_message_id,
-                            "semantic": text_message_semantic("end", assistant_message_id),
-                        }
+                _hydrate_session_user_profile(inputs, session)
+                try:
+                    if session.previous_response_id and "previous_response_id" not in inputs:
+                        inputs["previous_response_id"] = session.previous_response_id
+                    _schedule_birth_prep_slot_extraction(session, runtime, inputs, run_id=str(run_id))
+                    agent_options: dict[str, Any] = {
+                        "model": runtime.model,
+                        "store": runtime.store,
+                        "loaded_skill_ids": session.loaded_skill_ids,
+                        "context_state": session.context_state,
+                    }
+                    response = run_agent_loop(
+                        runtime.client,
+                        inputs,
+                        agent_options,
+                        on_ag_ui_event=send_ag_ui_event,
+                        ag_ui_thread_id=str(thread_id),
+                        ag_ui_run_id=str(run_id),
+                        ag_ui_parent_run_id=str(parent_run_id) if parent_run_id else None,
+                        ag_ui_message_id=assistant_message_id,
+                        on_text_delta=send_text_delta,
+                        on_response_stream_event=response_stream_timing,
                     )
-                if pending_run_finished:
-                    if not suppress_quick_replies:
-                        send_event(quick_replies_event(assistant_message_id, pending_quick_replies or _default_quick_replies()))
-                    send_event(pending_run_finished)
+                    response_id = _response_id(response)
+                    if response_id:
+                        session.previous_response_id = response_id
+                    loaded_skill_ids = agent_options.get("loaded_skill_ids")
+                    if isinstance(loaded_skill_ids, list):
+                        session.loaded_skill_ids = loaded_skill_ids
+                    text = _response_text(response)
+                    if not streamed_text_parts and text:
+                        send_text_delta(text)
+                    current_text = "".join(streamed_text_parts) or text
+                    for followup in pending_assistant_followups:
+                        if _should_send_assistant_followup(followup, current_text, allow_only_when_no_text=True):
+                            send_text_delta(f"\n\n{followup}")
+                            current_text = f"{current_text}\n\n{followup}"
+                    record_birth_prep_assistant_message(session.context_state, current_text)
+                    if text_started:
+                        send_event(
+                            {
+                                "type": "TEXT_MESSAGE_END",
+                                "message_id": assistant_message_id,
+                                "semantic": text_message_semantic("end", assistant_message_id),
+                            }
+                        )
+                    if pending_run_finished:
+                        if not suppress_quick_replies:
+                            send_event(quick_replies_event(assistant_message_id, pending_quick_replies or _default_quick_replies()))
+                        send_event(pending_run_finished)
+                finally:
+                    _refresh_session_profile_cache_from_inputs(session, inputs)
         except Exception as exc:
             send_event(run_error_event(str(exc), type(exc).__name__, thread_id=str(thread_id), run_id=str(run_id)))
         finally:
@@ -478,6 +483,7 @@ def prewarm_ag_ui_session(payload: dict[str, Any], inputs: dict[str, Any], runti
     run_id = str(_field(payload, "run_id", "runId") or f"prewarm_{date.today().isoformat()}")
     session = runtime.get_session(thread_id)
     with session.run_lock:
+        _hydrate_session_user_profile(inputs, session)
         if session.previous_response_id:
             return {
                 "status": "already_warm",
@@ -503,6 +509,7 @@ def prewarm_ag_ui_session(payload: dict[str, Any], inputs: dict[str, Any], runti
         if response_id and session.previous_response_id == starting_previous_response_id:
             session.previous_response_id = response_id
             session.context_state = prewarm_context_state
+            _refresh_session_profile_cache_from_inputs(session, inputs)
             status = "warmed"
         else:
             status = "stale" if response_id else "no_response_id"
@@ -679,11 +686,8 @@ def _runtime_inputs_from_ag_ui(payload: dict[str, Any]) -> dict[str, Any]:
         inputs["images"] = images
 
     user_profile = _context_value(state, forwarded_props, "user_profile")
-    persisted_profile = data_store.get_user_profile(user_id) if user_id else {}
     if isinstance(user_profile, dict):
-        inputs["user_profile"] = _merge_profile_context(persisted_profile, user_profile)
-    elif persisted_profile:
-        inputs["user_profile"] = dict(persisted_profile)
+        inputs["user_profile"] = dict(user_profile)
     elif user_id:
         inputs["user_profile"] = {"user_id": user_id}
     if user_id and isinstance(inputs.get("user_profile"), dict):
@@ -699,6 +703,60 @@ def _runtime_inputs_from_ag_ui(payload: dict[str, Any]) -> dict[str, Any]:
         inputs["previous_response_id"] = previous_response_id
 
     return inputs
+
+
+def _hydrate_session_user_profile(inputs: dict[str, Any], session: ChatSession) -> None:
+    user_id = _runtime_input_user_id(inputs)
+    if not user_id:
+        return
+
+    provided_profile = inputs.get("user_profile") if isinstance(inputs.get("user_profile"), dict) else {}
+    persisted_profile = _fresh_session_profile_cache(session, user_id)
+    if persisted_profile is None:
+        persisted_profile = data_store.get_user_profile(user_id)
+        _store_session_profile_cache(session, user_id, persisted_profile)
+
+    if provided_profile:
+        profile = _merge_profile_context(persisted_profile, provided_profile)
+    elif persisted_profile:
+        profile = dict(persisted_profile)
+    else:
+        profile = {"user_id": user_id}
+    profile.setdefault("user_id", user_id)
+    inputs["user_profile"] = profile
+    inputs[PROFILE_LOADED_FROM_DB_FLAG] = True
+
+
+def _fresh_session_profile_cache(session: ChatSession, user_id: str) -> dict[str, Any] | None:
+    if session.profile_cache_user_id != user_id:
+        return None
+    if not session.profile_cache:
+        return None
+    return dict(session.profile_cache)
+
+
+def _store_session_profile_cache(session: ChatSession, user_id: str, profile: dict[str, Any]) -> None:
+    cached = dict(profile or {})
+    if user_id:
+        cached.setdefault("user_id", user_id)
+    session.profile_cache_user_id = user_id
+    session.profile_cache = cached
+    session.profile_cache_loaded_at = time.monotonic()
+
+
+def _refresh_session_profile_cache_from_inputs(session: ChatSession, inputs: dict[str, Any]) -> None:
+    user_id = _runtime_input_user_id(inputs)
+    profile = inputs.get("user_profile") if isinstance(inputs.get("user_profile"), dict) else {}
+    if not user_id or not profile:
+        return
+    if inputs.get(PROFILE_LOADED_FROM_DB_FLAG) is not True and session.profile_cache_user_id != user_id:
+        return
+    _store_session_profile_cache(session, user_id, profile)
+
+
+def _runtime_input_user_id(inputs: dict[str, Any]) -> str:
+    profile = inputs.get("user_profile") if isinstance(inputs.get("user_profile"), dict) else {}
+    return str(inputs.get("user_id") or profile.get("user_id") or "").strip()
 
 
 def _merge_profile_context(persisted: dict[str, Any], provided: dict[str, Any]) -> dict[str, Any]:

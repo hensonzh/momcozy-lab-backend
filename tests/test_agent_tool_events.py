@@ -1751,13 +1751,22 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertIn("RUN_FINISHED", event_types)
         self.assertLess(event_types.index("TEXT_MESSAGE_END"), event_types.index("QUICK_REPLIES"))
         self.assertLess(event_types.index("QUICK_REPLIES"), event_types.index("RUN_FINISHED"))
-        self.assertFalse(
-            any(
-                event.get("tool_call_name") == "ui_quick_replies_create"
-                for event in events
-                if str(event.get("type")).startswith("TOOL_CALL")
-            )
+        quick_tool_events = [
+            event
+            for event in events
+            if str(event.get("type")).startswith("TOOL_CALL")
+            and event.get("tool_call_name") == "ui_quick_replies_create"
+        ]
+        self.assertEqual(
+            [event.get("type") for event in quick_tool_events],
+            ["TOOL_CALL_START", "TOOL_CALL_ARGS", "TOOL_CALL_END", "TOOL_CALL_RESULT"],
         )
+        self.assertLess(event_types.index("TOOL_CALL_START"), event_types.index("TEXT_MESSAGE_CONTENT"))
+        for event in quick_tool_events:
+            semantic = event.get("semantic")
+            self.assertIsInstance(semantic, dict)
+            self.assertEqual(semantic.get("visibility"), "status")  # type: ignore[union-attr]
+            self.assertTrue(str(semantic.get("merge_key") or "").startswith("quick_replies:"))  # type: ignore[union-attr]
 
         quick_event = next(event for event in events if event.get("type") == "QUICK_REPLIES")
         self.assertEqual(quick_event["message_id"], "run-quick:assistant")

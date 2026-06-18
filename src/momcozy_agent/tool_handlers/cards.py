@@ -5,7 +5,7 @@ import re
 from datetime import date, datetime, timedelta
 from typing import Any
 
-from ..services import data_store
+from ..services import data_store, profile_write_queue
 from ..types import RuntimeInputs
 
 HOSPITAL_BAG_CART_URL = "/hospital-bag-cart"
@@ -4743,25 +4743,69 @@ def _persist_birth_prep_profile_memory(inputs: RuntimeInputs, values: dict[str, 
     support_person = _first_text(shared_values.get("support_person"), values.get("support_people"), values.get("partner_or_support"))
     if not any(_has_meaningful_value(value) for value in shared_values.values()):
         return
+    update_kwargs = {
+        "user_id": user_id,
+        "age": shared_values.get("age"),
+        "due_date_or_week": due,
+        "ivf": shared_values.get("ivf"),
+        "fetus_count": shared_values.get("fetus_count"),
+        "city_or_country": shared_values.get("city_or_country"),
+        "birth_hospital": shared_values.get("birth_hospital"),
+        "birth_path": birth_path,
+        "first_birth": shared_values.get("first_birth"),
+        "feeding_intention": shared_values.get("feeding_intention"),
+        "return_to_work_timing": shared_values.get("return_to_work_timing"),
+        "support_person": support_person,
+        "pregnancy_history_or_notes": shared_values.get("pregnancy_history_or_notes"),
+        "top_worries": shared_values.get("top_worries"),
+    }
+    profile_patch = _birth_prep_profile_runtime_patch(update_kwargs)
+    if profile_patch:
+        inputs["user_profile"] = {**user_profile, **profile_patch}
+        inputs["_user_profile_loaded_from_db"] = True
     try:
-        data_store.update_birth_prep_profile_memory(
-            user_id=user_id,
-            age=shared_values.get("age"),
-            due_date_or_week=due,
-            ivf=shared_values.get("ivf"),
-            fetus_count=shared_values.get("fetus_count"),
-            city_or_country=shared_values.get("city_or_country"),
-            birth_hospital=shared_values.get("birth_hospital"),
-            birth_path=birth_path,
-            first_birth=shared_values.get("first_birth"),
-            feeding_intention=shared_values.get("feeding_intention"),
-            return_to_work_timing=shared_values.get("return_to_work_timing"),
-            support_person=support_person,
-            pregnancy_history_or_notes=shared_values.get("pregnancy_history_or_notes"),
-            top_worries=shared_values.get("top_worries"),
-        )
+        profile_write_queue.enqueue_birth_prep_profile_update(**update_kwargs)
     except Exception:
         return
+
+
+def _birth_prep_profile_runtime_patch(values: dict[str, Any]) -> dict[str, Any]:
+    patch: dict[str, Any] = {}
+    age = _runtime_age_value(values.get("age"))
+    if age is not None:
+        patch["age"] = age
+    field_map = {
+        "due_date_or_week": "birth_prep_due_date_or_week",
+        "ivf": "birth_prep_ivf",
+        "fetus_count": "birth_prep_fetus_count",
+        "city_or_country": "birth_prep_city_or_country",
+        "birth_hospital": "birth_prep_birth_hospital",
+        "birth_path": "birth_prep_birth_path",
+        "first_birth": "birth_prep_first_birth",
+        "feeding_intention": "birth_prep_feeding_intention",
+        "return_to_work_timing": "birth_prep_return_to_work_timing",
+        "support_person": "birth_prep_support_person",
+        "pregnancy_history_or_notes": "birth_prep_pregnancy_history_or_notes",
+        "top_worries": "birth_prep_top_worries",
+    }
+    for source_key, profile_key in field_map.items():
+        text = _first_text(values.get(source_key))
+        if text:
+            patch[profile_key] = text
+    return patch
+
+
+def _runtime_age_value(value: Any) -> int | None:
+    text = _first_text(value)
+    if not text:
+        return None
+    try:
+        age = int(float(text))
+    except Exception:
+        return None
+    if age < 0 or age > 120:
+        return None
+    return age
 
 
 def _first_text(*values: Any) -> str:
