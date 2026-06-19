@@ -22,6 +22,7 @@ from .contexts import (
 )
 from .health_guidance import health_guidance_request_context_lines, health_guidance_required_web_search_tool_choice
 from .static_context import STATIC_AGENT_INSTRUCTIONS
+from .tool_handlers.cards import birth_journey_intake_quick_reply_guidance
 from .tool_schemas import FUNCTION_TOOLS
 from .tool_registry import DEFERRED_TOOL_NAMESPACES, execute_tool, select_runtime_tools
 from .types import AgUiEvent, AgUiEventHandler, AgentEvent, AgentEventHandler, AgentEventPhase, BuildAgentRequestOptions, ResponsesClientLike, ResponsesRequest, RuntimeInputs, TextDeltaHandler
@@ -48,6 +49,7 @@ _BIRTH_PREP_TOOL_NAMES = {
     "birth_journey_intake_manage",
     "birth_journey_plan_card_create",
     "birth_journey_plan_delete",
+    "birth_journey_plan_todo_update",
     "pregnancy_diary_manage",
     "hospital_bag_form_create",
     "hospital_bag_card_create",
@@ -564,6 +566,7 @@ def _tool_semantic_phase(tool_name: str) -> str:
         "reminder_update",
         "reminder_delete",
         "birth_journey_plan_delete",
+        "birth_journey_plan_todo_update",
         "pregnancy_diary_manage",
         "profile_update",
     }:
@@ -658,9 +661,11 @@ def _tool_start_label(tool_name: str, arguments: dict[str, Any]) -> str:
         return "我先帮你整理孕期计划～"
     if tool_name == "birth_journey_plan_delete":
         return "我先帮你删除孕期计划～"
+    if tool_name == "birth_journey_plan_todo_update":
+        return "我先帮你同步计划完成状态～"
     if tool_name == "pregnancy_diary_manage":
         action = str(arguments.get("action") or "").strip()
-        if action in {"create", "update"}:
+        if action in {"write", "update", "create"}:
             return "我先帮你保存孕期日记～"
         if action == "delete":
             return "我先帮你删除孕期日记～"
@@ -717,6 +722,8 @@ def _tool_end_label(tool_name: str) -> str:
         return "我在准备售后信息表～"
     if tool_name == "birth_journey_plan_delete":
         return "我在处理删除结果～"
+    if tool_name == "birth_journey_plan_todo_update":
+        return "我在同步这项计划进度～"
     if tool_name == "birth_journey_intake_manage":
         return "我在整理下一步需要确认的信息～"
     if tool_name == "pregnancy_diary_manage":
@@ -809,6 +816,15 @@ def _tool_result_label(tool_name: str, result: dict[str, Any]) -> str:
         if status == "plan_not_found":
             return "当前没有孕期计划可删除"
         return "我已经删除孕期计划啦" if status == "plan_deleted" else "删除孕期计划暂时没成功"
+    if tool_name == "birth_journey_plan_todo_update":
+        status = str(result.get("status") or "").strip()
+        if status == "todo_completion_updated":
+            return "我已经同步计划完成状态啦"
+        if status in {"needs_todo_reference", "todo_not_found"}:
+            return "我还需要确认是哪一项"
+        if status == "plan_not_found":
+            return "当前没有孕期计划可更新"
+        return "计划完成状态暂时没同步成功"
     if tool_name == "pregnancy_diary_manage":
         status = str(result.get("status") or "").strip()
         if status == "needs_delete_confirmation":
@@ -817,9 +833,7 @@ def _tool_result_label(tool_name: str, result: dict[str, Any]) -> str:
             return "没有找到这条孕期日记"
         if status == "diary_entry_deleted":
             return "我已经删除这条孕期日记啦"
-        if status in {"health_consultation_recorded", "health_consultation_updated"}:
-            return "我已经记录到孕期日记啦"
-        if status in {"diary_entry_created", "diary_entry_updated"}:
+        if status in {"diary_entry_written", "diary_entry_created", "diary_entry_updated"}:
             return "我已经保存好孕期日记啦"
         if status in {"diary_list_read", "diary_entry_read"}:
             return "我看好孕期日记啦"
@@ -1194,7 +1208,7 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
     if tool_name == "milk_plan_mutate":
         return _compact_milk_plan_mutate_output(safe)
     if tool_name == "pregnancy_diary_manage":
-        return _compact_pregnancy_diary_output(safe)
+        return _compact_pregnancy_diary_output(safe, result)
     if tool_name == "birth_journey_intake_manage":
         return _compact_birth_journey_intake_output(safe, result)
 
@@ -1214,6 +1228,7 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
         "labor_communication_card_create",
         "birth_journey_plan_card_create",
         "birth_journey_plan_delete",
+        "birth_journey_plan_todo_update",
         "hospital_bag_form_create",
         "hospital_bag_card_create",
         "hospital_bag_cart_update",
@@ -1242,6 +1257,30 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
             "plan_id": safe.get("plan_id"),
             "summary": safe.get("summary"),
             "final_response_instruction": instructions.get(status, "最终回复简短说明删除孕期计划的处理结果。"),
+        }
+    if tool_name == "birth_journey_plan_todo_update":
+        status = str(safe.get("status") or "").strip()
+        updated_items = safe.get("updated_items") if isinstance(safe.get("updated_items"), list) else []
+        instructions = {
+            "todo_completion_updated": "孕期计划待办完成状态已经同步。最终回复只简短说明已同步，并点名已更新的事项；不要重新生成计划，不要复述完整计划。",
+            "needs_todo_reference": "还不能确定要更新哪一项。最终回复只请用户提供接下来 7 天行动清单里的编号或事项名。",
+            "todo_not_found": "没有匹配到对应事项。最终回复只请用户提供接下来 7 天行动清单里的编号或完整事项名，不要猜测。",
+            "plan_not_found": "没有找到 active 孕期计划。最终回复只说明当前没有可更新的孕期计划。",
+            "todo_update_failed": "更新孕期计划待办失败。最终回复简短说明暂时没同步成功，请稍后再试。",
+        }
+        return {
+            "ok": safe.get("ok"),
+            "tool_name": safe.get("tool_name"),
+            "status": safe.get("status"),
+            "side_effect_performed": safe.get("side_effect_performed"),
+            "plan_type": safe.get("plan_type"),
+            "plan_id": safe.get("plan_id"),
+            "completed": safe.get("completed"),
+            "updated_items": updated_items,
+            "missing_refs": safe.get("missing_refs"),
+            "ambiguous_refs": safe.get("ambiguous_refs"),
+            "summary": safe.get("summary"),
+            "final_response_instruction": instructions.get(status, "最终回复简短说明孕期计划待办完成状态的处理结果。"),
         }
     if tool_name == "birth_journey_plan_card_create" and safe.get("status") == "needs_required_context":
         question = str(safe.get("confirmation_question") or safe.get("summary") or "").strip()
@@ -1350,7 +1389,7 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
     return compact
 
 
-def _compact_pregnancy_diary_output(safe: dict[str, Any]) -> dict[str, Any]:
+def _compact_pregnancy_diary_output(safe: dict[str, Any], raw_result: dict[str, Any]) -> dict[str, Any]:
     status = str(safe.get("status") or "").strip()
     compact: dict[str, Any] = {
         "ok": safe.get("ok"),
@@ -1366,37 +1405,70 @@ def _compact_pregnancy_diary_output(safe: dict[str, Any]) -> dict[str, Any]:
             "entry_id": diary.get("entry_id"),
             "entry_date": diary.get("entry_date"),
         }
-    if status == "diary_entry_created":
+    tool_result = raw_result.get("result") if isinstance(raw_result.get("result"), dict) else {}
+    raw_diary = tool_result.get("diary") if isinstance(tool_result.get("diary"), dict) else {}
+    if status in {"diary_entry_read", "entry_already_exists"} and raw_diary:
+        compact["diary"] = {
+            "entry_id": raw_diary.get("entry_id"),
+            "entry_date": raw_diary.get("entry_date"),
+            "content": str(raw_diary.get("content") or ""),
+        }
+    if status == "diary_list_read":
+        diary_list = tool_result.get("diary_list") if isinstance(tool_result.get("diary_list"), list) else []
+        compact["diary_list"] = [
+            {
+                "entry_id": entry.get("entry_id"),
+                "entry_date": entry.get("entry_date"),
+                "content_preview": _text_preview(entry.get("content"), 160),
+            }
+            for entry in diary_list
+            if isinstance(entry, dict)
+        ]
+        compact["final_response_instruction"] = (
+            "孕期日记列表已经读取。最终回复根据 diary_list 里的日期和 content_preview 简短回答；"
+            "如果用户要查看某一天完整内容，继续调用 pregnancy_diary_manage action=read，不要凭摘要补全。"
+        )
+    elif status == "diary_entry_read":
+        if raw_diary:
+            compact["final_response_instruction"] = "孕期日记已经读取。最终回复只根据 diary.content 回答用户，不要编造未返回的内容。"
+        else:
+            compact["final_response_instruction"] = "该日期暂无孕期日记。最终回复简短说明没有找到，并询问是否需要现在记录。"
+    elif status in {"diary_entry_written", "diary_entry_created"}:
         compact["final_response_instruction"] = (
             "孕期日记已经记录。最终回复用 1-2 句中文自然告诉用户："
             "已经帮她记录好这篇孕期日记，可以在宝宝和我页面的孕期日记模块查看。"
-            "可以顺带轻轻承接她今天记录里的一个状态，但不要复述完整日记内容。"
+            "不要复述完整日记内容，不要加入新的建议或判断。"
         )
     elif status == "diary_entry_updated":
         compact["final_response_instruction"] = (
             "孕期日记已经修改。最终回复用 1-2 句中文自然告诉用户："
             "已经帮她修改好这篇孕期日记，可以在宝宝和我页面的孕期日记模块查看。"
-            "可以顺带轻轻承接她修改后的一个状态，但不要复述完整日记内容。"
+            "不要复述完整日记内容，不要加入新的建议或判断。"
         )
     elif status == "needs_diary_content":
         compact["final_response_instruction"] = "孕期日记还不能保存。最终回复只温和补问用户想记录或修改的具体内容，不要说已经保存。"
-    elif status in {"health_consultation_recorded", "health_consultation_updated"}:
-        compact["final_response_instruction"] = (
-            "本轮健康咨询已经作为预问诊记录写入今天的孕期日记。最终回复用 1-2 句中文自然告诉用户："
-            "已经把今天这个健康问题记录到宝宝和我页面的孕期日记里，后面她反馈变化时可以接着这次记录继续看。"
-            "不要复述完整记录内容，不要说这是诊断。"
-        )
-    elif status == "needs_health_consultation_content":
-        compact["final_response_instruction"] = "健康咨询记录还不能保存。最终回复继续完成当前问诊或建议，不要说已经记录。"
     elif status == "entry_already_exists":
-        compact["final_response_instruction"] = "今天已经有孕期日记。最终回复说明可以继续补充或修改今天的记录，不要说已经新建。"
+        compact["final_response_instruction"] = (
+            "该日期已经有孕期日记。若本轮用户提供了新的日记内容，不要输出最终回复，"
+            "应结合 diary.content 和用户补充信息重新组织完整正文后调用 pregnancy_diary_manage action=update。"
+            "如果用户只是询问是否已有记录，最终回复说明该日期已有记录即可；不要说已经新建。"
+        )
     elif status == "entry_not_found":
         compact["final_response_instruction"] = "没有找到要修改的孕期日记。最终回复说明没有找到对应记录，并请用户补充日期或要修改的内容。"
     elif status == "diary_entry_deleted":
         compact["final_response_instruction"] = "孕期日记已经删除。最终回复只简短说明已删除这条孕期日记。"
     elif status == "needs_delete_confirmation":
         compact["final_response_instruction"] = "删除孕期日记前还需要用户明确确认。最终回复只询问是否确认删除，不要说已经删除。"
+    elif status == "unsupported_action":
+        compact["final_response_instruction"] = "这个孕期日记动作已停用。最终回复不要说已经记录；如果用户要记录，请改用 write 或 update，只记录用户明确表达的日记内容。"
     return {key: value for key, value in compact.items() if value not in (None, "", [])}
+
+
+def _text_preview(value: Any, max_chars: int) -> str:
+    text = " ".join(str(value or "").split())
+    if len(text) <= max_chars:
+        return text
+    return text[: max_chars - 1].rstrip() + "…"
 
 
 def _form_artifact_final_response_instruction(tool_name: str) -> str:
@@ -1430,6 +1502,7 @@ def _compact_birth_journey_intake_output(safe: dict[str, Any], raw_result: dict[
     tool_result = raw_result.get("result") if isinstance(raw_result.get("result"), dict) else {}
     next_step = str(safe.get("next_step") or tool_result.get("next_step") or "").strip()
     data = tool_result.get("data") if isinstance(tool_result.get("data"), dict) else {}
+    auto_tool_result = tool_result.get("auto_tool_result") if isinstance(tool_result.get("auto_tool_result"), dict) else None
     compact: dict[str, Any] = {
         "ok": safe.get("ok"),
         "tool_name": safe.get("tool_name"),
@@ -1441,6 +1514,19 @@ def _compact_birth_journey_intake_output(safe: dict[str, Any], raw_result: dict[
         "assistant_instruction": safe.get("assistant_instruction") or data.get("assistant_instruction"),
         "completed_groups": data.get("completed_groups"),
     }
+    if auto_tool_result:
+        auto_compact = model_tool_output(auto_tool_result)
+        compact["auto_executed_tool"] = "birth_journey_plan_card_create"
+        compact["plan_result"] = {
+            "status": auto_compact.get("status"),
+            "card": auto_compact.get("card"),
+        }
+        compact["final_response_instruction"] = (
+            str(auto_compact.get("final_response_instruction") or "孕期计划已经处理完成。最终回复简短说明处理结果。")
+            + "\n\nbirth_journey_plan_card_create 已由应用侧自动执行，"
+            "不要再次调用 birth_journey_plan_card_create，也不要再调用 ui_quick_replies_create。"
+        )
+        return {key: value for key, value in compact.items() if value not in (None, "", [])}
     if isinstance(safe.get("form"), dict):
         form = safe["form"]
         fields = form.get("fields")
@@ -1455,8 +1541,9 @@ def _compact_birth_journey_intake_output(safe: dict[str, Any], raw_result: dict[
         if isinstance(plan_context, dict):
             compact["plan_context"] = plan_context
         compact["final_response_instruction"] = (
-            "孕期计划信息采集已完成。下一步必须直接调用 birth_journey_plan_card_create，"
-            "plan_context 使用本工具返回的 plan_context；不要先对用户输出路线图或总结。"
+            "孕期计划信息采集已完成，但本轮没有收到应用侧自动生成计划的结果。"
+            "最终回复简短说明正在整理计划，请用户稍后重试；不要自行输出路线图或总结，"
+            "也不要再次调用 birth_journey_plan_card_create。"
         )
     elif safe.get("status") == "blocked_by_symptoms":
         compact["final_response_instruction"] = (
@@ -1467,6 +1554,7 @@ def _compact_birth_journey_intake_output(safe: dict[str, Any], raw_result: dict[
         compact["final_response_instruction"] = (
             "最终回复只推进 next_step 对应的一步：如果有 confirmation_question，就只问这个问题；"
             "不要同时询问多个后续阶段，也不要生成孕期计划。"
+            "当前步骤的快捷回复已由应用侧准备好，不要再调用 ui_quick_replies_create。"
         )
     return {key: value for key, value in compact.items() if value not in (None, "", [])}
 
@@ -1591,14 +1679,15 @@ def _compact_birth_journey_plan_card_output(safe: dict[str, Any]) -> dict[str, A
         (
             ("已找到用户已有的孕期计划并展示完整路线图。" if reused_existing_plan else "孕期计划已经展示完整路线图。")
             + "最终回复用 2-4 句中文自然组织语言，"
-            "需要覆盖下面的当前阶段总结和下一步服务，但不要机械照抄。"
+            "需要覆盖下面的接下来 7 天行动清单和完成项追问，但不要机械照抄。"
             + (
                 "这是已有计划，最终回复说明已沿用这份计划，不要说新生成。"
                 if reused_existing_plan
                 else "这是新生成计划，最终回复必须自然表达：计划已生成，可以在宝宝和我页面查看，接下来我会按照计划主动提醒你哦。"
             )
-            + "不要使用“卡片”这类界面形式词，不要再输出“我先帮你生成”或“我整理好了”这类重复交付句，"
-            "不要复述计划里的所有阶段、日期或完整清单。参考信息：\n\n"
+            + "不要提本周重点、当前优先级或当前阶段总结；不要补充外部资料、来源引用或引用编号。"
+            "不要使用“卡片”这类界面形式词，不要再输出“我先帮你生成”或“我整理好了”这类重复交付句，"
+            "不要复述未来 2-4 周、后续大节点或完整计划。参考信息：\n\n"
             f"{response}"
         ),
     )
@@ -1606,46 +1695,32 @@ def _compact_birth_journey_plan_card_output(safe: dict[str, Any]) -> dict[str, A
 
 def _birth_journey_plan_final_response(card_json: dict[str, Any]) -> str:
     layers = card_json.get("planning_layers") if isinstance(card_json.get("planning_layers"), dict) else {}
-    current_focus = layers.get("current_week_focus") if isinstance(layers.get("current_week_focus"), dict) else {}
-    focus_items = current_focus.get("items") if isinstance(current_focus.get("items"), list) else []
-    if focus_items:
-        summaries: list[str] = []
-        for item in focus_items[:3]:
-            if isinstance(item, dict):
-                title = _clean_birth_journey_fragment(item.get("title"))
-                reason = _clean_birth_journey_fragment(item.get("reason"))
-                if title and reason:
-                    summaries.append(f"{title}，因为{reason}")
-                elif title:
-                    summaries.append(title)
-            else:
-                title = _clean_birth_journey_fragment(item)
-                if title:
-                    summaries.append(title)
-        next_action = card_json.get("next_action") if isinstance(card_json.get("next_action"), dict) else {}
-        label = str(next_action.get("label") or "").strip()
-        return "\n\n".join(
-            [
-                "本周重点：" + "；".join(summaries) + "。",
-                _birth_journey_service_sentence(label),
-            ]
-        )
-
-    current_phase = _birth_journey_current_phase(card_json)
-    phase_title = str(current_phase.get("title") or "").strip()
-    watchout = _first_birth_journey_item(current_phase.get("watchouts"))
-    action = _first_birth_journey_item(current_phase.get("actions"))
-    goal = _clean_birth_journey_fragment(current_phase.get("goal"))
-    next_action = card_json.get("next_action") if isinstance(card_json.get("next_action"), dict) else {}
-    label = str(next_action.get("label") or "").strip()
-    help_item = _first_birth_journey_item(current_phase.get("comate_help"))
-
-    return "\n\n".join(
-        [
-            _birth_journey_phase_summary_sentence(phase_title, watchout, action, goal),
-            _birth_journey_service_sentence(label or help_item),
+    next_7_days = layers.get("next_7_days") if isinstance(layers.get("next_7_days"), dict) else {}
+    next_7_items = next_7_days.get("items") if isinstance(next_7_days.get("items"), list) else []
+    next_7_summary = _birth_journey_next_7_todo_summary(next_7_items)
+    if next_7_summary:
+        lines = [
+            "接下来 7 天行动清单：" + next_7_summary + "。",
+            "最终回复需要追问：这里面是否有已经完成的事项；如果有，可以让用户直接回复编号或事项名，你会同步更新完成状态。",
         ]
+        return "\n\n".join(lines)
+
+    return (
+        "接下来 7 天行动清单暂时没有可复述的事项。"
+        "最终回复只说明计划已生成，可以在宝宝和我页面查看；不要提本周重点、当前优先级或当前阶段总结。"
     )
+
+
+def _birth_journey_next_7_todo_summary(items: list[Any]) -> str:
+    titles: list[str] = []
+    for item in items:
+        if isinstance(item, dict):
+            title = _clean_birth_journey_fragment(item.get("title"))
+        else:
+            title = _clean_birth_journey_fragment(item)
+        if title:
+            titles.append(title)
+    return "；".join(f"{index + 1}. {title}" for index, title in enumerate(titles))
 
 
 def _birth_journey_phase_summary_sentence(phase_title: str, watchout: str, action: str, goal: str) -> str:
@@ -3044,6 +3119,9 @@ def _build_response_request(
     }
     if options.get("enable_tools", True):
         tools = select_runtime_tools(inputs)
+        disabled_tool_names = _disabled_tool_names_from_options(options)
+        if disabled_tool_names:
+            tools = _remove_function_tools(tools, disabled_tool_names)
         required_milk_tool = _forced_required_tool_from_options(options) or (
             _required_milk_management_tool(inputs, options) if _is_initial_user_request(input_items) else None
         )
@@ -3099,10 +3177,21 @@ def _required_milk_tool_after_tool_results(results: list[dict[str, Any]], inputs
     return None
 
 
+def _tool_calls_with_quick_replies_last(tool_calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(
+        tool_calls,
+        key=lambda tool_call: 1 if str(tool_call.get("name") or "") == QUICK_REPLIES_TOOL_NAME else 0,
+    )
+
+
 def _tool_result_disables_followup_tools(result: dict[str, Any]) -> bool:
     tool_name = str(result.get("tool_name") or "")
     tool_result = result.get("result") if isinstance(result.get("result"), dict) else {}
     status = str(tool_result.get("status") or "").strip()
+    if tool_name == "birth_journey_intake_manage":
+        return status == "blocked_by_symptoms" or isinstance(tool_result.get("auto_tool_result"), dict)
+    if tool_name == "birth_journey_plan_card_create" and isinstance(tool_result.get("card"), dict):
+        return True
     if tool_name in {"milk_plan_preview_create", "milk_plan_preview"}:
         if status == "milk_plan_preview_needs_analysis_evaluation":
             data = tool_result.get("data") if isinstance(tool_result.get("data"), dict) else {}
@@ -3122,6 +3211,33 @@ def _tool_result_disables_followup_tools(result: dict[str, Any]) -> bool:
     if tool_name in MILK_WRITE_TOOL_NAMES:
         return True
     return False
+
+
+def _disabled_tool_names_from_options(options: BuildAgentRequestOptions) -> set[str]:
+    value = options.get("_disabled_tool_names")  # type: ignore[typeddict-item]
+    if not isinstance(value, list):
+        return set()
+    return {str(item).strip() for item in value if str(item or "").strip()}
+
+
+def _remove_function_tools(tools: list[dict[str, Any]], disabled_names: set[str]) -> list[dict[str, Any]]:
+    if not disabled_names:
+        return tools
+    next_tools: list[dict[str, Any]] = []
+    for tool in tools:
+        if tool.get("type") == "function" and str(tool.get("name") or "") in disabled_names:
+            continue
+        if tool.get("type") == "namespace" and isinstance(tool.get("tools"), list):
+            copied = dict(tool)
+            copied["tools"] = [
+                item
+                for item in tool["tools"]
+                if not (isinstance(item, dict) and item.get("type") == "function" and str(item.get("name") or "") in disabled_names)
+            ]
+            next_tools.append(copied)
+            continue
+        next_tools.append(tool)
+    return next_tools
 
 
 def _promote_deferred_function_tool(tools: list[dict[str, Any]], tool_name: str) -> list[dict[str, Any]]:
@@ -3338,7 +3454,8 @@ def run_agent_loop(
 
         tool_outputs = []
         executed_tool_results = []
-        for tool_call in tool_calls:
+        direct_quick_replies_sent = False
+        for tool_call in _tool_calls_with_quick_replies_last(tool_calls):
             tool_name = tool_call["name"]
             if not _tool_call_was_seen(streamed_tool_call_keys, tool_call):
                 _remember_tool_call(streamed_tool_call_keys, tool_call)
@@ -3406,9 +3523,94 @@ def run_agent_loop(
             _record_loaded_business_tool(options.get("context_state"), tool_call["name"], result)
             _record_tool_images(options.get("context_state"), tool_call["name"], result)
             _record_birth_prep_tool_state(options.get("context_state"), tool_call["name"], tool_call["arguments"], result)
+            _update_quick_reply_guidance(options, result)
             _record_milk_tool_state(options.get("context_state"), tool_call["name"], result)
+            direct_quick_replies = _birth_journey_intake_direct_quick_replies(result)
+            if direct_quick_replies:
+                direct_quick_replies_sent = True
+                _emit_ag_ui_event(on_ag_ui_event, quick_replies_event(ag_ui_message_id, direct_quick_replies))
+
+            auto_tool_result: dict[str, Any] | None = None
+            auto_arguments = _birth_journey_auto_plan_arguments(result)
+            if auto_arguments is not None:
+                auto_tool_name = "birth_journey_plan_card_create"
+                auto_call_id = f"{tool_call['call_id']}:{auto_tool_name}"
+                _emit_ag_ui_event(
+                    on_ag_ui_event,
+                    tool_call_start_event(
+                        auto_call_id,
+                        auto_tool_name,
+                        ag_ui_tool_result_message_id,
+                        arguments=auto_arguments,
+                    ),
+                )
+                _emit_ag_ui_event(
+                    on_ag_ui_event,
+                    tool_call_args_event(auto_call_id, auto_tool_name, auto_arguments),
+                )
+                _emit_ag_ui_event(
+                    on_ag_ui_event,
+                    tool_call_end_event(auto_call_id, auto_tool_name),
+                )
+                _emit_event(
+                    on_event,
+                    "model_tool_call",
+                    _tool_call_message(auto_tool_name),
+                    {"round": round_index, "tool_name": auto_tool_name, "auto_chained": True},
+                    on_ag_ui_event,
+                    ag_ui_status_message_id,
+                )
+                _emit_event(
+                    on_event,
+                    _tool_execution_phase(auto_tool_name),
+                    _tool_execution_message(auto_tool_name),
+                    {"round": round_index, "tool_name": auto_tool_name, "auto_chained": True},
+                    on_ag_ui_event,
+                    ag_ui_status_message_id,
+                )
+                auto_tool_result = _execute_project_tool(auto_tool_name, auto_arguments, tool_inputs)
+                executed_tool_results.append(auto_tool_result)
+                _sync_runtime_profile_from_tool_inputs(inputs, tool_inputs)
+                _record_loaded_reference(options.get("context_state"), auto_tool_name, auto_tool_result)
+                _record_loaded_business_tool(options.get("context_state"), auto_tool_name, auto_tool_result)
+                _record_tool_images(options.get("context_state"), auto_tool_name, auto_tool_result)
+                _record_birth_prep_tool_state(options.get("context_state"), auto_tool_name, auto_arguments, auto_tool_result)
+                _record_milk_tool_state(options.get("context_state"), auto_tool_name, auto_tool_result)
+                auto_safe_result = safe_tool_result(auto_tool_result)
+                _emit_ag_ui_event(
+                    on_ag_ui_event,
+                    tool_call_result_event(
+                        ag_ui_tool_result_message_id,
+                        auto_call_id,
+                        auto_tool_name,
+                        auto_tool_result,
+                    ),
+                )
+                for artifact_event in artifact_events_from_tool_result(
+                    tool_call_id=auto_call_id,
+                    tool_call_name=auto_tool_name,
+                    safe_result=auto_safe_result,
+                ):
+                    _emit_ag_ui_event(on_ag_ui_event, artifact_event)
+                auto_confirmation_event = confirmation_event_from_tool_result(
+                    tool_call_id=auto_call_id,
+                    tool_call_name=auto_tool_name,
+                    safe_result=auto_safe_result,
+                )
+                if auto_confirmation_event is not None:
+                    _emit_ag_ui_event(on_ag_ui_event, auto_confirmation_event)
+                _emit_event(
+                    on_event,
+                    "tool_completed",
+                    _tool_completed_message(auto_tool_name, bool(auto_tool_result.get("ok"))),
+                    _tool_result_metadata(round_index, auto_tool_name, auto_tool_result),
+                    on_ag_ui_event,
+                    ag_ui_status_message_id,
+                )
+
             safe_result = safe_tool_result(result)
-            model_output = model_tool_output(result)
+            model_result = _with_auto_birth_journey_plan_result(result, auto_tool_result)
+            model_output = model_tool_output(model_result)
             _emit_ag_ui_event(
                 on_ag_ui_event,
                 tool_call_result_event(
@@ -3460,6 +3662,11 @@ def run_agent_loop(
         if _should_disable_tools_after_tool_results(executed_tool_results):
             next_options["enable_tools"] = False
         else:
+            if direct_quick_replies_sent:
+                disabled_tool_names = list(_disabled_tool_names_from_options(next_options))
+                if QUICK_REPLIES_TOOL_NAME not in disabled_tool_names:
+                    disabled_tool_names.append(QUICK_REPLIES_TOOL_NAME)
+                next_options["_disabled_tool_names"] = disabled_tool_names  # type: ignore[typeddict-unknown-key]
             required_next_tool = _required_milk_tool_after_tool_results(executed_tool_results, inputs)
             if required_next_tool:
                 next_options["_required_tool_name"] = required_next_tool
@@ -4389,6 +4596,9 @@ def _append_loaded_reference(context_state: ContextState, reference: str) -> Non
 
 def _tool_inputs_for_call(inputs: RuntimeInputs, options: BuildAgentRequestOptions) -> RuntimeInputs:
     tool_inputs = dict(inputs)
+    quick_reply_guidance = options.get("_quick_reply_guidance")
+    if isinstance(quick_reply_guidance, list):
+        tool_inputs["_quick_reply_guidance"] = quick_reply_guidance
     context_state = options.get("context_state")
     if isinstance(context_state, ContextState):
         tool_inputs["_loaded_references"] = list(context_state.loaded_references)
@@ -4406,6 +4616,61 @@ def _sync_runtime_profile_from_tool_inputs(inputs: RuntimeInputs, tool_inputs: R
     inputs["user_profile"] = {**existing, **profile}
     if tool_inputs.get(_PROFILE_LOADED_FROM_DB_FLAG) is True:
         inputs[_PROFILE_LOADED_FROM_DB_FLAG] = True
+
+
+def _update_quick_reply_guidance(options: BuildAgentRequestOptions, result: dict[str, Any]) -> None:
+    if str(result.get("tool_name") or "") != "birth_journey_intake_manage":
+        return
+
+    tool_result = result.get("result") if isinstance(result.get("result"), dict) else {}
+    status = str(tool_result.get("status") or "").strip()
+    next_step = str(tool_result.get("next_step") or "").strip()
+    guidance = birth_journey_intake_quick_reply_guidance(next_step) if status == "in_progress" else []
+    if guidance:
+        options["_quick_reply_guidance"] = guidance  # type: ignore[typeddict-unknown-key]
+    else:
+        options.pop("_quick_reply_guidance", None)  # type: ignore[typeddict-item]
+
+
+def _birth_journey_intake_direct_quick_replies(result: dict[str, Any]) -> list[dict[str, str]] | None:
+    if str(result.get("tool_name") or "") != "birth_journey_intake_manage":
+        return None
+    tool_result = result.get("result") if isinstance(result.get("result"), dict) else {}
+    if str(tool_result.get("status") or "").strip() != "in_progress":
+        return None
+    next_step = str(tool_result.get("next_step") or "").strip()
+    guidance = birth_journey_intake_quick_reply_guidance(next_step)
+    return guidance or None
+
+
+def _birth_journey_auto_plan_arguments(result: dict[str, Any]) -> dict[str, Any] | None:
+    if str(result.get("tool_name") or "") != "birth_journey_intake_manage":
+        return None
+    tool_result = result.get("result") if isinstance(result.get("result"), dict) else {}
+    if str(tool_result.get("status") or "").strip() != "ready_to_generate":
+        return None
+    plan_context = tool_result.get("plan_context")
+    if not isinstance(plan_context, dict):
+        return None
+    return {"plan_context": plan_context}
+
+
+def _with_auto_birth_journey_plan_result(
+    result: dict[str, Any],
+    auto_tool_result: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if not auto_tool_result:
+        return result
+    if str(result.get("tool_name") or "") != "birth_journey_intake_manage":
+        return result
+    tool_result = result.get("result")
+    if not isinstance(tool_result, dict):
+        return result
+    next_result = dict(result)
+    next_tool_result = dict(tool_result)
+    next_tool_result["auto_tool_result"] = auto_tool_result
+    next_result["result"] = next_tool_result
+    return next_result
 
 
 def _record_birth_prep_tool_state(context_state: object, tool_name: str, arguments: dict[str, Any], result: dict[str, Any]) -> None:

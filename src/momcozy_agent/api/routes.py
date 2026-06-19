@@ -47,7 +47,10 @@ from ..services.pump_workstate import (
     record_pump_workstate_update,
     validate_pump_workstate_payload,
 )
-from ..tool_handlers.cards import update_hospital_bag_cart as execute_hospital_bag_cart_update
+from ..tool_handlers.cards import (
+    update_birth_journey_plan_todo_completion_for_user,
+    update_hospital_bag_cart as execute_hospital_bag_cart_update,
+)
 from ..tool_handlers.milk_management import _build_milk_analysis_card_json
 
 
@@ -962,6 +965,52 @@ async def delete_plan_artifact_endpoint(request: Request) -> dict[str, Any]:
         return _basic_error_response(error=-1)
     deleted = data_store.delete_care_plan_artifact(user_id=uid, plan_id=plan_id)
     return _basic_error_response(error=0 if deleted else -1)
+
+
+@router.post("/v1/plan/birth-journey/todo-completion")
+async def update_birth_journey_todo_completion_endpoint(request: Request) -> dict[str, Any]:
+    verify_api_key(request)
+    body = await _json_body_or_error(request, basic=True)
+    if not isinstance(body, dict):
+        return {"error": -1, "plan": None}
+    uid = str(body.get("user_id") or "").strip()
+    try:
+        plan_id = _positive_int(body.get("plan_id"), "plan_id")
+    except ValueError:
+        return {"error": -1, "plan": None}
+    refs: list[Any] = []
+    item_id = str(body.get("item_id") or "").strip()
+    if item_id:
+        refs.append(item_id)
+    item_ids = body.get("item_ids")
+    if isinstance(item_ids, list):
+        refs.extend(item_ids)
+    item_number = body.get("item_number")
+    if item_number is not None:
+        refs.append(item_number)
+    completed = body.get("completed") is not False
+    result = update_birth_journey_plan_todo_completion_for_user(
+        user_id=uid,
+        plan_id=plan_id,
+        item_refs=refs,
+        completed=completed,
+        source="app",
+    )
+    if result.get("status") != "todo_completion_updated":
+        return {
+            "error": -1,
+            "status": result.get("status"),
+            "message": result.get("summary"),
+            "plan": result.get("plan"),
+            "todo_items": result.get("todo_items"),
+        }
+    return {
+        "error": 0,
+        "status": result.get("status"),
+        "plan": result.get("plan"),
+        "todo_items": result.get("todo_items"),
+        "updated_items": result.get("updated_items"),
+    }
 
 
 @router.get("/v1/pregnancy-diary/list")

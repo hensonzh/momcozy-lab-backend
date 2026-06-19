@@ -107,6 +107,7 @@ _LOADED_TOOL_SERVICE_DOMAINS = {
     "birth_journey_intake_manage": _BIRTH_PREP_DOMAIN,
     "birth_journey_plan_card_create": _BIRTH_PREP_DOMAIN,
     "birth_journey_plan_delete": _BIRTH_PREP_DOMAIN,
+    "birth_journey_plan_todo_update": _BIRTH_PREP_DOMAIN,
     "hospital_bag_form_create": _BIRTH_PREP_DOMAIN,
     "hospital_bag_card_create": _BIRTH_PREP_DOMAIN,
     "hospital_bag_cart_update": _BIRTH_PREP_DOMAIN,
@@ -182,7 +183,12 @@ def build_request_context(
         if _should_inject_milk_management_context(service_domain):
             lines.extend(_format_milk_management_context(state))
         lines.extend(_format_device_image_context(state))
-    lines.extend(_format_active_care_plan_context(inputs))
+    lines.extend(
+        _format_active_care_plan_context(
+            inputs,
+            include_birth_journey_todos=_should_inject_birth_prep_domain_context(service_domain),
+        )
+    )
     lines.extend(_format_pregnancy_diary_context(inputs))
     hospital_bag_cart = _format_hospital_bag_cart_context(inputs.get("hospital_bag_cart"))
     if hospital_bag_cart:
@@ -942,7 +948,7 @@ def _bool_context_value(value: Any) -> str:
     return str(value)
 
 
-def _format_active_care_plan_context(inputs: RuntimeInputs) -> list[str]:
+def _format_active_care_plan_context(inputs: RuntimeInputs, *, include_birth_journey_todos: bool = False) -> list[str]:
     user_id = _runtime_user_id(inputs)
     if not user_id:
         return []
@@ -972,11 +978,44 @@ def _format_active_care_plan_context(inputs: RuntimeInputs) -> list[str]:
         f"summary={summary}" if summary else "",
         f"updated_at={updated_at}" if updated_at else "",
     ]
-    return [
+    lines = [
         "active_care_plan_context:",
         "- birth_journey_plan: 已存在 active 孕期计划；" + "；".join(part for part in detail_parts if part),
         "- 只要该计划未被删除，就把它视为用户已有计划；用户要求生成/制定孕期计划时，不要再次调用 birth_journey_plan_card_create 创建新计划，先说明已有计划并继续查看或推进。",
     ]
+    if include_birth_journey_todos:
+        lines.extend(_format_birth_journey_next_7_todo_context(payload))
+    return lines
+
+
+def _format_birth_journey_next_7_todo_context(payload: dict[str, Any]) -> list[str]:
+    layers = payload.get("planning_layers") if isinstance(payload.get("planning_layers"), dict) else {}
+    next_7 = layers.get("next_7_days") if isinstance(layers.get("next_7_days"), dict) else {}
+    items = next_7.get("items") if isinstance(next_7.get("items"), list) else []
+    todo_lines: list[str] = []
+    for index, item in enumerate(items):
+        if not isinstance(item, dict):
+            continue
+        title = _trim_context_value(item.get("title"), 36)
+        if not title:
+            continue
+        item_id = _trim_context_value(item.get("id"), 20) or f"next7_{index + 1:02d}"
+        state = "done" if _context_completed_bool(item.get("completed")) else "todo"
+        todo_lines.append(f"  {index + 1}. [{state}] {item_id} {title}")
+    if not todo_lines:
+        return []
+    return [
+        "- next_7_days_todos: 用户说已完成/取消完成这些事项时，调用 birth_journey_plan_todo_update；优先传 item_id，也可传编号。",
+        *todo_lines,
+    ]
+
+
+def _context_completed_bool(value: Any) -> bool:
+    if value is True:
+        return True
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "1", "yes", "done", "completed", "完成", "已完成"}
+    return bool(value) if isinstance(value, int) else False
 
 
 def _format_pregnancy_diary_context(inputs: RuntimeInputs) -> list[str]:
@@ -987,43 +1026,24 @@ def _format_pregnancy_diary_context(inputs: RuntimeInputs) -> list[str]:
         entries = data_store.list_pregnancy_diary_entries(user_id=user_id, limit=7)
     except Exception:
         return []
-    if not entries:
-        return []
-    question_count = 0
-    tags: list[str] = []
-    health_note_count = 0
-    latest_health_topic = ""
-    for entry in entries:
-        note = _trim_context_value(entry.get("appointment_note"), 80)
-        if note:
-            question_count += max(1, len([part for part in re.split(r"[？?\n；;]", note) if part.strip()]))
-        for tag in entry.get("symptom_tags") or []:
-            text = _trim_context_value(tag, 20)
-            if text and text not in tags:
-                tags.append(text)
-        health_notes = entry.get("health_notes") if isinstance(entry.get("health_notes"), list) else []
-        health_note_count += len(health_notes)
-        if not latest_health_topic and health_notes:
-            latest_health_topic = _trim_context_value(health_notes[0].get("topic") if isinstance(health_notes[0], dict) else "", 40)
-    latest = entries[0]
-    latest_parts = [
-        _trim_context_value(latest.get("entry_date"), 20),
-        _trim_context_value(latest.get("gestational_week"), 20),
-        _trim_context_value(latest.get("mood"), 30),
-        _trim_context_value(latest.get("fetal_movement"), 40),
-    ]
-    detail_parts = [
-        f"recent_days={len(entries)}",
-        f"appointment_questions={question_count}",
-        f"health_consultations={health_note_count}" if health_note_count else "",
-        f"latest_health_topic={latest_health_topic}" if latest_health_topic else "",
-        f"recent_tags={','.join(tags[:5])}" if tags else "",
-        f"latest={'/'.join(part for part in latest_parts if part)}",
-    ]
+    detail_parts = [f"recent_entries={len(entries)}"]
+    if entries:
+        latest = entries[0]
+        recent_dates = [_trim_context_value(entry.get("entry_date"), 20) for entry in entries]
+        detail_parts.extend(
+            [
+                f"recent_dates={','.join(date for date in recent_dates if date)}",
+                f"latest_date={_trim_context_value(latest.get('entry_date'), 20)}",
+                f"latest_has_content={bool(str(latest.get('content') or '').strip())}",
+            ]
+        )
     return [
         "pregnancy_diary_context:",
         "- " + "；".join(part for part in detail_parts if part),
-        "- 需要查看、整理、写入、更新或删除孕期日记时，使用 pregnancy_diary_manage；不要仅凭摘要臆造完整记录。",
+        "- 用户明确要查看、整理、写入、更新或删除孕期日记时，使用 pregnancy_diary_manage。",
+        "- 用户具体讲述今天/近期的孕期生活、身体感受、情绪、产检、胎动、睡眠、饮食、用药/补剂、已尝试措施或想问医生的问题时，可以主动写入孕期日记；写入不必另行追问确认，用户主动说出的事实可视为可记录内容。",
+        "- 读取具体日期必须调用 read/list，不要仅凭摘要臆造完整记录；如果当天已有日记，先 read 再结合新补充 update。",
+        "- 写入或更新孕期日记只记录用户明确表达的日记内容；纯科普、泛泛咨询、模型建议、安抚、风险判断、医疗提醒或观察计划不要写入；用户说不用记录时不要记录；删除仍必须 confirmed=true。",
     ]
 
 

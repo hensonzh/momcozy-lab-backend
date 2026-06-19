@@ -7,6 +7,7 @@ from .health_guidance import health_guidance_web_search_tool, needs_breast_triag
 from .tool_handlers.cards import (
     create_birth_journey_plan_card,
     delete_birth_journey_plan,
+    update_birth_journey_plan_todo,
     manage_birth_journey_intake,
     create_labor_communication_card,
     create_birth_plan_form,
@@ -43,6 +44,7 @@ CORE_IMMEDIATE_TOOLS: list[ToolName] = [
     *SKILL_RUNTIME_TOOLS,
     "ui_quick_replies_create",
     "ibclc_consult_card_create",
+    "pregnancy_diary_manage",
 ]
 MILK_MANAGEMENT_TOOLS: list[ToolName] = [
     "milk_snapshot_get",
@@ -102,20 +104,17 @@ DEFERRED_TOOL_NAMESPACES: dict[str, dict[str, Any]] = {
         "tool_names": ["hospital_bag_pump_recommend"],
     },
     "birth_prep": {
-        "description": "用于产前准备服务已经进入具体产物流程后的专用表单和结构化内容：孕期计划、待产包清单、分娩沟通单，以及删除已保存的孕期计划。不要用于普通孕期问答；用户确认开始待产包整理后可直接创建待产包信息表，通过表单采集或确认必要信息；生成孕期计划、待产包清单或分娩沟通单前必须已有对应确认信息；删除孕期计划前必须已有用户明确确认。",
+        "description": "用于产前准备服务已经进入具体产物流程后的专用表单和结构化内容：孕期计划、待产包清单、分娩沟通单，以及删除已保存的孕期计划或更新孕期计划 7 天行动清单完成状态。不要用于普通孕期问答；用户确认开始待产包整理后可直接创建待产包信息表，通过表单采集或确认必要信息；生成孕期计划、待产包清单或分娩沟通单前必须已有对应确认信息；删除孕期计划前必须已有用户明确确认。",
         "tool_names": [
             "birth_plan_form_create",
             "labor_communication_card_create",
             "birth_journey_intake_manage",
             "birth_journey_plan_card_create",
             "birth_journey_plan_delete",
+            "birth_journey_plan_todo_update",
             "hospital_bag_form_create",
             "hospital_bag_card_create",
         ],
-    },
-    "pregnancy_diary": {
-        "description": "用于读取、记录、更新、删除孕期日记，以及把健康咨询沉淀为当天的预问诊记录。通过一个 pregnancy_diary_manage 工具的 action 参数区分 list/get_today/create/update/delete/record_health_consultation；不要用于孕期计划、奶量记录、宝宝成长记录或医学诊断；删除前必须已有用户明确确认。",
-        "tool_names": ["pregnancy_diary_manage"],
     },
 }
 
@@ -150,6 +149,7 @@ TOOL_HANDLERS: dict[ToolName, ToolHandler] = {
     "birth_journey_intake_manage": manage_birth_journey_intake,
     "birth_journey_plan_card_create": create_birth_journey_plan_card,
     "birth_journey_plan_delete": delete_birth_journey_plan,
+    "birth_journey_plan_todo_update": update_birth_journey_plan_todo,
     "pregnancy_diary_manage": manage_pregnancy_diary,
     "hospital_bag_form_create": create_hospital_bag_form,
     "hospital_bag_card_create": create_hospital_bag_card,

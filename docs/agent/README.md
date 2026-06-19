@@ -190,7 +190,7 @@ Air1 FAQ 图片位于 `skills/device-guidance/assets/air1/faq-images/`。`faq.md
 - instructions 中的 service skill manifest
 - 立即可用的核心工具
 - `tool_search`
-- deferred namespaces 中的业务工具
+- deferred namespaces 中的业务工具；`pregnancy_diary_manage` 作为孕期日记读写的高频工具直接暴露。写入不要求用户先说“记一下”：用户具体讲述可留存的孕期事实时可主动记录，但不写入模型建议，删除仍需确认。
 
 模型根据用户意图和安全风险自主决定是否调用：
 
@@ -326,7 +326,7 @@ message_sent_at: 2026-05-05T17:45:03+08:00
 
 工具 schema、暴露策略和执行 adapter 已拆分为 `tool_schemas.py`、`tool_registry.py` 和 `tool_handlers/`。旧的 `tools.py` 兼容层已移除，代码应直接从这些模块或包入口导入。
 
-当前采用 Responses API 的 `tool_search` + deferred namespaces。每轮顶层 `tools` 配置保持稳定，业务工具 schema 由模型按需通过 tool search 加载到上下文末尾，以减少工具 schema 对 prompt cache 的破坏。
+当前采用 Responses API 的核心工具 + `tool_search` + deferred namespaces。每轮顶层 `tools` 配置保持稳定；大多数业务工具 schema 由模型按需通过 tool search 加载到上下文末尾，以减少工具 schema 对 prompt cache 的破坏。`pregnancy_diary_manage` 是例外：它是读取、写入、更新和删除孕期日记的高频工具，直接放在顶层 tools 中；用户具体讲述可留存的孕期生活或身体状态时，不必等用户额外说“记一下”才可写入。
 
 ### Core Immediate Tools
 
@@ -340,17 +340,18 @@ message_sent_at: 2026-05-05T17:45:03+08:00
 - `run_approved_skill_script`
 - `ui_quick_replies_create`
 - `ibclc_consult_card_create`
+- `pregnancy_diary_manage`
 
 ### Deferred Business Namespaces
 
-业务工具不再按 loaded skill 切换暴露，而是放在 deferred namespaces 中。仅保留当前本地有执行结果的工具；纯占位工具已移除：
+业务工具不再按 loaded skill 切换暴露。除直接暴露的 `pregnancy_diary_manage` 外，其余专用业务工具放在 deferred namespaces 中。仅保留当前本地有执行结果的工具；纯占位工具已移除：
 
 - `care_handoffs`：`handoff_summary_generate`，只用于已经决定转接人工或专业支持后的交接摘要；不用于普通建议、设备售后工单、设备排障或购物车调整
 - `device_support`：`device_manual_search`、`support_ticket_draft_create`，用于已购/正在使用的 Momcozy 吸奶器或设备说明书、FAQ、排障和售后工单草稿；不用于购买前选型、奶量计划或待产包购物车
 - `milk_management`：聚合后的奶量工具，包括 `milk_snapshot_get`、`milk_records_query`、`milk_record_mutate`、`milk_plan_query`、`milk_plan_preview`、`milk_plan_mutate`、`milk_calendar_query`、`milk_calendar_change_preview`、`milk_calendar_mutate`，以及评估类 `milk_assessment_evaluate`、`infant_growth_evaluate`；用于用户自身奶量、喂养、宝宝生长和 calendar 数据，不用于吸奶器选型、设备排障或购物车调整
 - `hospital_bag_cart`：待产包购物车工具 `hospital_bag_cart_update`，用于已经进入待产包购物车后的预算上限优化、删除/加回、基础款替换、医院提供、家里已有、数量调整，以及把已推荐的 Momcozy 吸奶器型号同步到购物车；不用于生成待产包清单、独立吸奶器选型或设备排障
 - `pump_recommendation`：吸奶器型号选型工具 `hospital_bag_pump_recommend`，用于购买前 Momcozy 吸奶器推荐、型号对比、预算内选择，也可在待产包场景里先选型再同步购物车；不用于已购设备故障/说明书、奶量是否正常或直接修改购物车
-- `birth_prep`：产前准备专用产物工具，包括 `birth_plan_form_create`、`labor_communication_card_create`、`birth_journey_intake_manage`、`birth_journey_plan_card_create`、`birth_journey_plan_delete`、`hospital_bag_form_create`、`hospital_bag_card_create`；用于已经进入孕期计划、待产包清单或分娩沟通单流程后的表单/结构化内容生成，不用于普通孕期问答
+- `birth_prep`：产前准备专用产物工具，包括 `birth_plan_form_create`、`labor_communication_card_create`、`birth_journey_intake_manage`、`birth_journey_plan_card_create`、`birth_journey_plan_delete`、`birth_journey_plan_todo_update`、`hospital_bag_form_create`、`hospital_bag_card_create`；用于已经进入孕期计划、待产包清单或分娩沟通单流程后的表单/结构化内容生成与 7 天行动清单完成状态同步，不用于普通孕期问答
 
 每个 namespace 中的 function 都设置 `defer_loading: true`。模型开始时只看到 namespace 名称和描述；需要具体工具时由 `tool_search` 加载对应 function schema。
 

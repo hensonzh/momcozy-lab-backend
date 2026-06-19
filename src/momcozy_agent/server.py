@@ -371,6 +371,12 @@ async def stream_ag_ui_events(
                 log_timing("ag_ui:RUN_FINISHED buffered", _ag_ui_timing_metadata(event))
                 pending_run_finished = event
                 return
+            if event.get("type") == "QUICK_REPLIES":
+                quick_replies = _validated_quick_replies(event.get("replies"))
+                if quick_replies is not None:
+                    log_timing("ag_ui:QUICK_REPLIES buffered", _ag_ui_timing_metadata(event))
+                    pending_quick_replies = quick_replies
+                return
             if _is_form_like_artifact_event(event):
                 suppress_quick_replies = True
             quick_replies = _quick_replies_from_tool_result_event(event)

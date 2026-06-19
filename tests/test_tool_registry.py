@@ -46,6 +46,30 @@ class ToolRegistryTests(unittest.TestCase):
         reply_item_properties = parameters["properties"]["replies"]["items"]["properties"]
         self.assertEqual(set(reply_item_properties.keys()), {"text"})
 
+    def test_runtime_tools_expose_global_pregnancy_diary_tool(self) -> None:
+        tools = {
+            str(tool.get("name")): tool
+            for tool in select_runtime_tools()
+            if tool.get("type") == "function"
+        }
+        namespaces = {
+            str(tool.get("name")): tool
+            for tool in select_runtime_tools()
+            if tool.get("type") == "namespace"
+        }
+
+        self.assertIn("pregnancy_diary_manage", tools)
+        self.assertNotIn("pregnancy_diary", DEFERRED_TOOL_NAMESPACES)
+        self.assertNotIn("pregnancy_diary", namespaces)
+        self.assertNotIn("defer_loading", tools["pregnancy_diary_manage"])
+        description = str(tools["pregnancy_diary_manage"]["description"])
+        self.assertIn("read 读取指定日期或今天", description)
+        self.assertIn("write 新建某天日记", description)
+        self.assertIn("不要写入模型建议", description)
+        self.assertIn("写入不要求用户先说", description)
+        self.assertIn("不需要额外确认", description)
+        self.assertIn("删除必须 confirmed=true", description)
+
     def test_runtime_tools_include_domain_limited_health_web_search_when_appropriate(self) -> None:
         light_tools = select_runtime_tools({"user_message": "hello", "locale": "zh-CN"})
         light_web_tools = [tool for tool in light_tools if tool.get("type") == "web_search"]
@@ -108,12 +132,14 @@ class ToolRegistryTests(unittest.TestCase):
                 "birth_journey_intake_manage",
                 "birth_journey_plan_card_create",
                 "birth_journey_plan_delete",
+                "birth_journey_plan_todo_update",
                 "hospital_bag_form_create",
                 "hospital_bag_card_create",
             ],
         )
         self.assertTrue(all(tool["defer_loading"] for tool in namespaces["birth_prep"]["tools"]))
         self.assertNotIn("birth_journey_plan_delete", READ_ONLY_TOOL_NAMES)
+        self.assertNotIn("birth_journey_plan_todo_update", READ_ONLY_TOOL_NAMES)
 
     def test_deferred_namespace_descriptions_include_boundaries(self) -> None:
         expected_tokens = {
@@ -122,8 +148,7 @@ class ToolRegistryTests(unittest.TestCase):
             "milk_management": ("用户自身", "不要用于吸奶器型号购买选型", "设备故障排查"),
             "hospital_bag_cart": ("已经进入待产包购物车", "不要用于生成待产包清单", "独立吸奶器型号选型"),
             "pump_recommendation": ("购买前", "不要用于已购设备故障", "购物车直接修改"),
-            "birth_prep": ("具体产物流程", "删除已保存的孕期计划", "删除孕期计划前必须已有用户明确确认"),
-            "pregnancy_diary": ("健康咨询沉淀为当天的预问诊记录", "pregnancy_diary_manage", "删除前必须已有用户明确确认"),
+            "birth_prep": ("具体产物流程", "删除已保存的孕期计划", "7 天行动清单完成状态"),
         }
 
         for namespace, tokens in expected_tokens.items():
@@ -148,7 +173,8 @@ class ToolRegistryTests(unittest.TestCase):
             "milk_status_query": ("不要用它替代 milk_analysis_intake_manage", "milk_records_query"),
             "hospital_bag_cart_update": ("current_hospital_bag_cart", "不要用于首次生成待产包清单", "独立吸奶器型号选型"),
             "hospital_bag_pump_recommend": ("购买前选型工具", "不要用于已购设备故障", "milk_management"),
-            "pregnancy_diary_manage": ("record_health_consultation", "删除必须 confirmed=true", "不要用于孕期计划"),
+            "pregnancy_diary_manage": ("read", "write", "update", "delete", "不要写入模型建议", "写入不要求用户先说", "不需要额外确认", "删除必须 confirmed=true", "不要用于孕期计划"),
+            "birth_journey_plan_todo_update": ("接下来 7 天行动清单", "完成状态", "不要猜测", "不重新生成计划"),
         }
 
         for tool_name, tokens in expected_tokens.items():

@@ -1875,6 +1875,271 @@ class AgentToolEventTests(unittest.TestCase):
             ],
         )
 
+    def test_birth_journey_intake_guides_quick_replies_after_tool_output(self) -> None:
+        async def collect_events() -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+            client = _FakeStreamingClient(
+                [
+                    {
+                        "id": "resp-intake",
+                        "output": [
+                            {
+                                "type": "function_call",
+                                "id": "item-intake",
+                                "call_id": "call-intake",
+                                "name": "birth_journey_intake_manage",
+                                "arguments": json.dumps(
+                                    {
+                                        "action": "submit_lifestyle_context",
+                                        "payload": json.dumps({"lifestyle_context": "最近睡眠不太好"}, ensure_ascii=False),
+                                    },
+                                    ensure_ascii=False,
+                                ),
+                            }
+                        ],
+                    },
+                    {
+                        "id": "resp-final",
+                        "output": [
+                            {
+                                "type": "message",
+                                "content": [{"type": "output_text", "text": "最后再了解一下喂养准备。"}],
+                            }
+                        ],
+                    },
+                ]
+            )
+            runtime = ChatRuntime(client, model="test-model")
+            session = runtime.get_session("thread-birth-quick")
+            session.loaded_skill_ids = ["birth-prep"]
+            session.context_state.birth_journey_intake = _birth_journey_lifestyle_state()
+            stream = stream_ag_ui_events(
+                {"thread_id": "thread-birth-quick", "run_id": "run-birth-quick"},
+                {"user_message": "最近睡眠不太好", "locale": "zh-CN"},
+                runtime,
+            )
+            events = [event async for event in stream]
+            return events, client.responses.requests
+
+        events, requests = asyncio.run(collect_events())
+        event_types = [str(event.get("type")) for event in events]
+        quick_event = next(event for event in events if event.get("type") == "QUICK_REPLIES")
+
+        self.assertEqual(len(requests), 2)
+        self.assertIn("tools", requests[1])
+        self.assertNotIn("ui_quick_replies_create", json.dumps(requests[1].get("tools"), ensure_ascii=False))
+        self.assertIn("TEXT_MESSAGE_END", event_types)
+        self.assertLess(event_types.index("TEXT_MESSAGE_END"), event_types.index("QUICK_REPLIES"))
+        self.assertNotIn("ui_quick_replies_create", json.dumps(events, ensure_ascii=False))
+        self.assertEqual(
+            quick_event["replies"],
+            [
+                {"text": "计划母乳喂养"},
+                {"text": "还不确定先跳过"},
+                {"text": "可能需要背奶"},
+            ],
+        )
+
+    def test_birth_journey_start_keeps_followup_tools_for_basic_info_form(self) -> None:
+        async def collect_events() -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+            client = _FakeStreamingClient(
+                [
+                    {
+                        "id": "resp-intake-start",
+                        "output": [
+                            {
+                                "type": "function_call",
+                                "id": "item-intake",
+                                "call_id": "call-intake",
+                                "name": "birth_journey_intake_manage",
+                                "arguments": json.dumps({"action": "start", "payload": {}}),
+                            }
+                        ],
+                    },
+                    {
+                        "id": "resp-final",
+                        "output": [
+                            {
+                                "type": "message",
+                                "content": [{"type": "output_text", "text": "我先打开孕周与基本情况表单。"}],
+                            }
+                        ],
+                    },
+                ]
+            )
+            runtime = ChatRuntime(client, model="test-model")
+            session = runtime.get_session("thread-birth-start")
+            session.loaded_skill_ids = ["birth-prep"]
+            stream = stream_ag_ui_events(
+                {"thread_id": "thread-birth-start", "run_id": "run-birth-start"},
+                {"user_message": "好，开始制定", "locale": "zh-CN"},
+                runtime,
+            )
+            events = [event async for event in stream]
+            return events, client.responses.requests
+
+        events, requests = asyncio.run(collect_events())
+        event_types = [str(event.get("type")) for event in events]
+
+        self.assertEqual(len(requests), 2)
+        self.assertIn("tools", requests[1])
+        self.assertIn("TEXT_MESSAGE_CONTENT", event_types)
+        self.assertIn("ARTIFACT_CREATED", event_types)
+        self.assertIn("RUN_FINISHED", event_types)
+        artifact = next(event for event in events if event.get("type") == "ARTIFACT_CREATED")
+        self.assertEqual(artifact["artifact_type"], "form")
+        self.assertEqual(artifact["artifact_id"], "birth_journey_basic_info_intake")
+        self.assertNotIn("QUICK_REPLIES", event_types)
+
+    def test_birth_journey_ready_auto_generates_plan_without_extra_model_tool_round(self) -> None:
+        async def collect_events() -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+            client = _FakeStreamingClient(
+                [
+                    {
+                        "id": "resp-intake-ready",
+                        "output": [
+                            {
+                                "type": "function_call",
+                                "id": "item-intake",
+                                "call_id": "call-intake",
+                                "name": "birth_journey_intake_manage",
+                                "arguments": json.dumps(
+                                    {
+                                        "action": "submit_feeding_context",
+                                        "payload": json.dumps(
+                                            {
+                                                "feeding_ibclc_context": "计划母乳，可能需要背奶，产假 6 个月",
+                                                "feeding_intention": "母乳",
+                                            },
+                                            ensure_ascii=False,
+                                        ),
+                                    },
+                                    ensure_ascii=False,
+                                ),
+                            }
+                        ],
+                    },
+                    {
+                        "id": "resp-final",
+                        "output": [
+                            {
+                                "type": "message",
+                                "content": [{"type": "output_text", "text": "你的孕期计划已生成，可以在宝宝和我页面查看。"}],
+                            }
+                        ],
+                    },
+                ]
+            )
+            runtime = ChatRuntime(client, model="test-model")
+            session = runtime.get_session("thread-birth-auto-plan")
+            session.loaded_skill_ids = ["birth-prep"]
+            session.context_state.birth_journey_intake = _birth_journey_feeding_state()
+            stream = stream_ag_ui_events(
+                {"thread_id": "thread-birth-auto-plan", "run_id": "run-birth-auto-plan"},
+                {"user_message": "计划母乳，可能需要背奶，产假 6 个月", "locale": "zh-CN"},
+                runtime,
+            )
+            events = [event async for event in stream]
+            return events, client.responses.requests
+
+        events, requests = asyncio.run(collect_events())
+        event_types = [str(event.get("type")) for event in events]
+        plan_tool_events = [
+            event
+            for event in events
+            if str(event.get("type")).startswith("TOOL_CALL")
+            and event.get("tool_call_name") == "birth_journey_plan_card_create"
+        ]
+
+        self.assertEqual(len(requests), 2)
+        self.assertIn("ARTIFACT_CREATED", event_types)
+        self.assertIn("TEXT_MESSAGE_CONTENT", event_types)
+        self.assertNotIn("QUICK_REPLIES", event_types)
+        self.assertEqual(
+            [event.get("type") for event in plan_tool_events],
+            ["TOOL_CALL_START", "TOOL_CALL_ARGS", "TOOL_CALL_END", "TOOL_CALL_RESULT"],
+        )
+        artifact = next(event for event in events if event.get("type") == "ARTIFACT_CREATED")
+        self.assertEqual(artifact["artifact_type"], "birth_journey_plan_card")
+        followup_input = requests[1]["input"]
+        self.assertEqual(len(followup_input), 1)
+        self.assertEqual(followup_input[0]["call_id"], "call-intake")
+        model_output = json.loads(str(followup_input[0]["output"]))
+        self.assertEqual(model_output["auto_executed_tool"], "birth_journey_plan_card_create")
+        self.assertIn("不要再次调用 birth_journey_plan_card_create", model_output["final_response_instruction"])
+        self.assertNotIn("下一步必须直接调用 birth_journey_plan_card_create", model_output["final_response_instruction"])
+
+    def test_birth_journey_intake_guides_quick_replies_when_model_emits_quick_first(self) -> None:
+        async def collect_events() -> list[dict[str, object]]:
+            client = _FakeStreamingClient(
+                [
+                    {
+                        "id": "resp-parallel",
+                        "output": [
+                            {
+                                "type": "function_call",
+                                "id": "item-quick",
+                                "call_id": "call-quick",
+                                "name": "ui_quick_replies_create",
+                                "arguments": json.dumps(
+                                    {
+                                        "replies": [
+                                            {"text": "帮我准备待产包"},
+                                            {"text": "看看本周重点"},
+                                            {"text": "整理分娩沟通单"},
+                                        ]
+                                    },
+                                    ensure_ascii=False,
+                                ),
+                            },
+                            {
+                                "type": "function_call",
+                                "id": "item-intake",
+                                "call_id": "call-intake",
+                                "name": "birth_journey_intake_manage",
+                                "arguments": json.dumps(
+                                    {
+                                        "action": "submit_lifestyle_context",
+                                        "payload": json.dumps({"lifestyle_context": "最近睡眠不太好"}, ensure_ascii=False),
+                                    },
+                                    ensure_ascii=False,
+                                ),
+                            },
+                        ],
+                    },
+                    {
+                        "id": "resp-final",
+                        "output": [
+                            {
+                                "type": "message",
+                                "content": [{"type": "output_text", "text": "最后再了解一下喂养准备。"}],
+                            }
+                        ],
+                    },
+                ]
+            )
+            runtime = ChatRuntime(client, model="test-model")
+            session = runtime.get_session("thread-birth-quick-parallel")
+            session.loaded_skill_ids = ["birth-prep"]
+            session.context_state.birth_journey_intake = _birth_journey_lifestyle_state()
+            stream = stream_ag_ui_events(
+                {"thread_id": "thread-birth-quick-parallel", "run_id": "run-birth-quick-parallel"},
+                {"user_message": "最近睡眠不太好", "locale": "zh-CN"},
+                runtime,
+            )
+            return [event async for event in stream]
+
+        events = asyncio.run(collect_events())
+        quick_event = next(event for event in events if event.get("type") == "QUICK_REPLIES")
+
+        self.assertEqual(
+            quick_event["replies"],
+            [
+                {"text": "计划母乳喂养"},
+                {"text": "还不确定先跳过"},
+                {"text": "可能需要背奶"},
+            ],
+        )
+
     def test_stream_forwards_text_deltas_during_tool_loop(self) -> None:
         async def collect_events() -> list[dict[str, object]]:
             client = _FakeStreamingClient(
@@ -2207,6 +2472,37 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertIn("RUN_FINISHED", event_types)
         artifact = next(event for event in events if event.get("type") == "ARTIFACT_CREATED")
         self.assertEqual(artifact["artifact_type"], "ibclc_consult_card")
+
+
+def _birth_journey_lifestyle_state() -> dict[str, object]:
+    return {
+        "started": True,
+        "basic_info": {
+            "current_week": "30周",
+            "age": "32",
+            "fetus_count": "单胎",
+        },
+        "checkup_records_uploaded": False,
+        "checkup_status": "未上传产检记录",
+        "risk_factors": "没有",
+        "current_symptoms": "没有",
+        "next_step": "lifestyle_question",
+        "completed_groups": ["basic_info", "checkup_records", "risk_factors", "current_symptoms"],
+    }
+
+
+def _birth_journey_feeding_state() -> dict[str, object]:
+    state = _birth_journey_lifestyle_state()
+    state["lifestyle_context"] = "睡眠一般，工作通勤有压力"
+    state["next_step"] = "feeding_question"
+    state["completed_groups"] = [
+        "basic_info",
+        "checkup_records",
+        "risk_factors",
+        "current_symptoms",
+        "lifestyle_context",
+    ]
+    return state
 
 
 class _FakeClient:

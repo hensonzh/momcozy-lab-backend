@@ -1542,6 +1542,46 @@ def get_care_plan_artifact(*, user_id: str, plan_id: int) -> dict[str, Any] | No
     return _care_plan_artifact_from_row(row) if row else None
 
 
+def update_care_plan_artifact_payload(
+    *,
+    user_id: str,
+    plan_id: int,
+    payload: dict[str, Any],
+    summary: str | None = None,
+) -> dict[str, Any] | None:
+    init_db()
+    uid = str(user_id or "").strip()
+    try:
+        pid = int(plan_id)
+    except Exception:
+        pid = 0
+    if not uid or pid <= 0 or not isinstance(payload, dict):
+        return None
+    payload_json = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    with _connect() as conn:
+        if summary is None:
+            cursor = conn.execute(
+                """
+                UPDATE care_plan_artifact
+                SET payload_json = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = ? AND plan_id = ? AND status = 'active'
+                """,
+                (payload_json, uid, pid),
+            )
+        else:
+            cursor = conn.execute(
+                """
+                UPDATE care_plan_artifact
+                SET payload_json = ?, summary = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = ? AND plan_id = ? AND status = 'active'
+                """,
+                (payload_json, str(summary or "").strip(), uid, pid),
+            )
+    if cursor.rowcount <= 0:
+        return None
+    return get_care_plan_artifact(user_id=uid, plan_id=pid)
+
+
 def delete_care_plan_artifact(*, user_id: str, plan_id: int) -> bool:
     init_db()
     uid = str(user_id or "").strip()
