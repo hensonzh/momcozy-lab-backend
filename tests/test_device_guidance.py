@@ -56,8 +56,13 @@ class DeviceGuidanceTests(unittest.TestCase):
 
         compact = model_tool_output({"ok": True, "tool_name": "support_ticket_draft_create", "result": result})
         self.assertTrue(compact["requires_confirmation"])
-        self.assertEqual(compact["assistant_followup"], {"message": message})
-        self.assertIn("参考 assistant_followup.message", compact["final_response_instruction"])
+        self.assertNotIn("assistant_followup", compact)
+        self.assertNotIn("assistant_followup.message", compact["final_response_instruction"])
+        self.assertIn("建议内容", compact["final_response_instruction"])
+        self.assertIn("非常抱歉没有解决你的问题", compact["final_response_instruction"])
+        self.assertIn("售后工单还没有创建", compact["final_response_instruction"])
+        self.assertNotIn("售后工单信息表已经展示", compact["final_response_instruction"])
+        self.assertNotIn("必须说明售后信息已经整理好", compact["final_response_instruction"])
         self.assertIn("自然表达", compact["final_response_instruction"])
         self.assertIn("最多两段", compact["final_response_instruction"])
 
@@ -81,8 +86,10 @@ class DeviceGuidanceTests(unittest.TestCase):
         self.assertNotIn("未提交", followup)
 
         compact = model_tool_output({"ok": True, "tool_name": "support_ticket_draft_create", "result": result})
-        self.assertEqual(compact["assistant_followup"], {"message": followup})
-        self.assertIn("参考 assistant_followup.message", compact["final_response_instruction"])
+        self.assertNotIn("assistant_followup", compact)
+        self.assertNotIn("assistant_followup.message", compact["final_response_instruction"])
+        self.assertIn("建议内容", compact["final_response_instruction"])
+        self.assertIn("确实很让人着急", compact["final_response_instruction"])
         self.assertIn("不要提“草稿”“未提交”“确认后才提交”", compact["final_response_instruction"])
         self.assertIn("交付信息只能出现一次", compact["final_response_instruction"])
 

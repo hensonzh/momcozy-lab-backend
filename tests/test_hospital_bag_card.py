@@ -362,6 +362,37 @@ class HospitalBagCardTests(unittest.TestCase):
         self.assertEqual(result["missing_fields"], ["birth_path"])
         self.assertNotIn("card", result)
 
+    def test_hospital_bag_card_model_instruction_requires_cart_link_and_specific_examples(self) -> None:
+        result = _create_hospital_bag_card_for_test(
+            _hospital_bag_form_data(
+                fetus_count="双胎",
+                birth_path="剖宫产",
+                feeding_intention="混合喂养",
+                return_to_work_timing="6 周后",
+            )
+        )
+
+        compact = model_tool_output({"ok": True, "tool_name": "hospital_bag_card_create", "result": result})
+        instruction = compact["final_response_instruction"]
+
+        self.assertNotIn("assistant_followup", compact)
+        self.assertNotIn("建议内容", instruction)
+        self.assertNotIn("工具素材", instruction)
+        self.assertNotIn("生成依据", instruction)
+        self.assertIn("最终回复的内容结构", instruction)
+        self.assertIn("正文要提炼其中 2-4 条", instruction)
+        self.assertIn("回复示例", instruction)
+        self.assertIn("最后一行必须使用回复示例里的 Markdown 购物车链接", instruction)
+        self.assertIn("**[打开待产包购物车](/hospital-bag-cart)**", instruction)
+        self.assertIn("下方内容只供提炼最终回复", instruction)
+        self.assertIn("剖宫产时可以说准备了高腰宽松内裤/不压腹出院裤", instruction)
+        self.assertIn("混合喂养时可以说保留哺乳文胸/哺乳背心、防溢乳垫", instruction)
+        self.assertIn("双胎时可以说宝宝出院衣物和包被数量按双胎调整", instruction)
+        self.assertIn("产后返工时可以说加入冷藏包/冰袋和吸奶配件清洁包", instruction)
+        self.assertIn("考虑到你倾向剖宫产", instruction)
+        self.assertIn("哺乳文胸/哺乳背心、防溢乳垫、便携式吸奶器和储奶袋/储奶瓶", instruction)
+        self.assertEqual(instruction.count("/hospital-bag-cart"), 1)
+
     def test_generated_card_adds_uncommon_item_explanations(self) -> None:
         result = _create_hospital_bag_card_for_test(
             _hospital_bag_form_data(

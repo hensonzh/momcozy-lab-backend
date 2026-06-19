@@ -22,6 +22,7 @@ from .contexts import (
     hospital_bag_slots,
     merge_extracted_birth_prep_slots,
     next_slot_extraction_turn,
+    profile_slots,
     record_birth_prep_assistant_message,
 )
 from .services import data_store
@@ -104,11 +105,13 @@ def _schedule_birth_prep_slot_extraction(
     if not user_message or "confirmed_form_data:" in user_message:
         return None
 
+    recent_user_messages = _recent_user_messages_from_inputs(inputs, user_message)
     turn_id = next_slot_extraction_turn(session.context_state)
     request = BirthPrepSlotExtractionRequest(
         user_message=user_message,
+        recent_user_messages=recent_user_messages,
         previous_assistant_message=session.context_state.last_assistant_message,
-        current_slots=hospital_bag_slots(session.context_state),
+        current_slots={**hospital_bag_slots(session.context_state), **profile_slots(session.context_state)},
         loaded_skill_ids=list(session.loaded_skill_ids),
         locale=str(inputs.get("locale") or ""),
         timezone=str(inputs.get("timezone") or ""),
@@ -353,7 +356,6 @@ async def stream_ag_ui_events(
 
     def worker() -> None:
         pending_run_finished: dict[str, Any] | None = None
-        pending_assistant_followups: list[str] = []
         pending_quick_replies: list[dict[str, str]] | None = None
         suppress_quick_replies = False
         text_started = False
@@ -374,9 +376,6 @@ async def stream_ag_ui_events(
             quick_replies = _quick_replies_from_tool_result_event(event)
             if quick_replies is not None:
                 pending_quick_replies = quick_replies
-            followup = _assistant_followup_from_tool_result_event(event)
-            if followup and followup not in pending_assistant_followups:
-                pending_assistant_followups.append(followup)
             send_event(event)
 
         def send_text_delta(delta: str) -> None:
@@ -440,10 +439,6 @@ async def stream_ag_ui_events(
                     if not streamed_text_parts and text:
                         send_text_delta(text)
                     current_text = "".join(streamed_text_parts) or text
-                    for followup in pending_assistant_followups:
-                        if _should_send_assistant_followup(followup, current_text, allow_only_when_no_text=True):
-                            send_text_delta(f"\n\n{followup}")
-                            current_text = f"{current_text}\n\n{followup}"
                     record_birth_prep_assistant_message(session.context_state, current_text)
                     if text_started:
                         send_event(
@@ -530,6 +525,7 @@ def _clone_context_state(state: ContextState) -> ContextState:
         active_device_module=state.active_device_module,
         active_service_domain=state.active_service_domain,
         shown_step_image_urls=list(state.shown_step_image_urls),
+        profile_slots=deepcopy(state.profile_slots),
         birth_prep_slots=deepcopy(state.birth_prep_slots),
         last_assistant_message=state.last_assistant_message,
         slot_turn_index=state.slot_turn_index,
@@ -628,12 +624,17 @@ def _runtime_inputs_from_ag_ui(payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError("AG-UI input requires a JSON object.")
 
-    message = _latest_user_message(payload.get("messages", []))
-    images = _latest_user_images(payload.get("messages", []))
+    messages = payload.get("messages", [])
+    recent_user_messages = _recent_user_messages(messages, limit=3)
+    message = recent_user_messages[-1] if recent_user_messages else ""
+    images = _latest_user_images(messages)
     if not message:
         message = str(payload.get("message", "")).strip()
+        if message:
+            recent_user_messages = [message]
     if not message and images:
         message = "请根据我发送的图片提供帮助。"
+        recent_user_messages = [message]
     if not message:
         raise ValueError("AG-UI input requires a user message.")
 
@@ -653,6 +654,7 @@ def _runtime_inputs_from_ag_ui(payload: dict[str, Any]) -> dict[str, Any]:
 
     inputs: dict[str, Any] = {
         "user_message": message,
+        "recent_user_messages": recent_user_messages[-3:] or [message],
         "locale": forwarded_props.get("locale") or state.get("locale") or payload.get("locale", DEFAULT_LOCALE),
         "timezone": timezone,
         "message_sent_at": message_sent_at,
@@ -762,27 +764,6 @@ def _merge_profile_context(persisted: dict[str, Any], provided: dict[str, Any]) 
                 continue
             merged[key] = value
     return merged
-
-
-def _assistant_followup_from_tool_result_event(event: dict[str, Any]) -> str | None:
-    if event.get("type") != "TOOL_CALL_RESULT":
-        return None
-    content = event.get("content")
-    if not isinstance(content, str):
-        return None
-    try:
-        payload = json.loads(content)
-    except json.JSONDecodeError:
-        return None
-    if str(payload.get("tool_name") or "").strip() == "support_ticket_draft_create":
-        return None
-    followup = payload.get("assistant_followup")
-    if not isinstance(followup, dict):
-        return None
-    message = followup.get("message")
-    if isinstance(message, str) and message.strip():
-        return message.strip()
-    return None
 
 
 def _is_quick_replies_tool_event(event: dict[str, Any]) -> bool:
@@ -905,44 +886,56 @@ def _session_state_payload(session: ChatSession) -> dict[str, Any]:
             "active_device_module": session.context_state.active_device_module,
             "active_service_domain": session.context_state.active_service_domain,
             "shown_step_image_urls": list(session.context_state.shown_step_image_urls),
+            "profile_slots": deepcopy(session.context_state.profile_slots),
             "birth_prep_slots": deepcopy(session.context_state.birth_prep_slots),
             "slot_turn_index": session.context_state.slot_turn_index,
         },
     }
 
 
-def _should_send_assistant_followup(followup: str, current_text: str, *, allow_only_when_no_text: bool = False) -> bool:
-    if not followup.strip():
-        return False
-    if allow_only_when_no_text and current_text.strip():
-        return False
-    if followup in current_text:
-        return False
-    if "sea.momcozy.com" in followup and "sea.momcozy.com" in current_text:
-        return False
-    if "/hospital-bag-cart" in followup and "/hospital-bag-cart" in current_text:
-        return False
-    return True
-
-
 def _latest_user_message(messages: Any) -> str:
-    if not isinstance(messages, list):
-        return ""
+    recent_messages = _recent_user_messages(messages, limit=1)
+    return recent_messages[-1] if recent_messages else ""
+
+
+def _recent_user_messages(messages: Any, *, limit: int = 3) -> list[str]:
+    if not isinstance(messages, list) or limit <= 0:
+        return []
+    collected: list[str] = []
     for message in reversed(messages):
         if not isinstance(message, dict) or message.get("role") != "user":
             continue
-        content = message.get("content", "")
-        if isinstance(content, str):
-            return content.strip()
-        if isinstance(content, list):
-            parts = []
-            for item in content:
-                if isinstance(item, dict):
-                    text = item.get("text")
-                    if isinstance(text, str):
-                        parts.append(text)
-            return "\n".join(parts).strip()
+        text = _user_message_text(message)
+        if text:
+            collected.append(text)
+        if len(collected) >= limit:
+            break
+    return list(reversed(collected))
+
+
+def _user_message_text(message: dict[str, Any]) -> str:
+    content = message.get("content", "")
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, dict):
+                text = item.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+        return "\n".join(parts).strip()
     return ""
+
+
+def _recent_user_messages_from_inputs(inputs: dict[str, Any], user_message: str) -> list[str]:
+    raw_messages = inputs.get("recent_user_messages")
+    if not isinstance(raw_messages, list):
+        return [user_message] if user_message else []
+    messages = [str(message or "").strip() for message in raw_messages if str(message or "").strip()]
+    if user_message and (not messages or messages[-1] != user_message):
+        messages.append(user_message)
+    return messages[-3:]
 
 
 def _latest_user_images(messages: Any) -> list[dict[str, Any]]:

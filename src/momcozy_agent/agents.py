@@ -1108,28 +1108,12 @@ def safe_tool_result(result: dict[str, Any]) -> dict[str, Any]:
                 clinical_data = tool_data.get("clinical_assessment")
                 if isinstance(clinical_data, dict):
                     safe["clinical_assessment"] = _compact_milk_context_status_data(clinical_data)
-        if result.get("tool_name") == "milk_assessment_evaluate" and isinstance(tool_result.get("assistant_followup"), dict):
-            safe["assistant_followup"] = tool_result["assistant_followup"]
-        if result.get("tool_name") == "milk_analysis_intake_manage" and isinstance(tool_result.get("assistant_followup"), dict):
-            safe["assistant_followup"] = tool_result["assistant_followup"]
-        if result.get("tool_name") == "milk_analysis_evaluate" and isinstance(tool_result.get("assistant_followup"), dict):
-            safe["assistant_followup"] = tool_result["assistant_followup"]
-        if result.get("tool_name") == "milk_plan_preview" and isinstance(tool_result.get("assistant_followup"), dict):
-            safe["assistant_followup"] = tool_result["assistant_followup"]
-        if result.get("tool_name") == "milk_plan_preview_create" and isinstance(tool_result.get("assistant_followup"), dict):
-            safe["assistant_followup"] = tool_result["assistant_followup"]
-        if result.get("tool_name") == "milk_plan_mutate" and isinstance(tool_result.get("assistant_followup"), dict):
-            safe["assistant_followup"] = tool_result["assistant_followup"]
         if result.get("tool_name") in {"ui_form_create", "birth_plan_form_create", "hospital_bag_form_create", "birth_journey_intake_manage"} and isinstance(tool_result.get("form"), dict):
             safe["form"] = tool_result["form"]
         if result.get("tool_name") in {"labor_communication_card_create", "birth_journey_plan_card_create", "hospital_bag_card_create"} and isinstance(tool_result.get("card"), dict):
             safe["card"] = tool_result["card"]
-            if isinstance(tool_result.get("assistant_followup"), dict):
-                safe["assistant_followup"] = tool_result["assistant_followup"]
         if result.get("tool_name") in {"milk_status_query", "milk_analysis_evaluate", "milk_assessment_evaluate", "milk_plan_preview_create", "milk_plan_preview", "milk_plan_mutate"} and isinstance(tool_result.get("card"), dict):
             safe["card"] = tool_result["card"]
-            if isinstance(tool_result.get("assistant_followup"), dict):
-                safe["assistant_followup"] = tool_result["assistant_followup"]
             if result.get("tool_name") == "milk_plan_mutate":
                 plan_feedback = _plan_feedback_from_safe_tool_result(result.get("tool_name"), tool_result)
                 if plan_feedback:
@@ -1152,12 +1136,8 @@ def safe_tool_result(result: dict[str, Any]) -> dict[str, Any]:
             safe["card"] = tool_result["card"]
         if result.get("tool_name") == "support_ticket_draft_create" and isinstance(tool_result.get("ticket"), dict):
             safe["ticket"] = tool_result["ticket"]
-            if isinstance(tool_result.get("assistant_followup"), dict):
-                safe["assistant_followup"] = tool_result["assistant_followup"]
             if "submit_label" in tool_result:
                 safe["submit_label"] = tool_result["submit_label"]
-        elif result.get("tool_name") == "support_ticket_draft_create" and isinstance(tool_result.get("assistant_followup"), dict):
-            safe["assistant_followup"] = tool_result["assistant_followup"]
         if result.get("tool_name") == "hospital_bag_cart_update" and isinstance(tool_result.get("cart_update"), dict):
             safe["cart_update"] = tool_result["cart_update"]
             message = tool_result["cart_update"].get("message")
@@ -1298,6 +1278,7 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
         "ok": safe.get("ok"),
         "tool_name": safe.get("tool_name"),
     }
+    followup_message = _assistant_followup_message(result)
     for key in (
         "id",
         "skill_id",
@@ -1310,7 +1291,6 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
         "requires_medical_confirmation",
         "confirmation_question",
         "submit_label",
-        "assistant_followup",
         "message",
         "cart_update",
         "recommended_product",
@@ -1360,11 +1340,12 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
         if instruction:
             compact["final_response_instruction"] = instruction
 
-    followup = compact.get("assistant_followup")
-    if isinstance(followup, dict):
-        message = str(followup.get("message") or "").strip()
-        if message:
-            compact["final_response_instruction"] = _followup_final_response_instruction(tool_name)
+    if followup_message:
+        compact["final_response_instruction"] = _followup_final_response_instruction(
+            tool_name,
+            followup_message,
+            artifact_created=isinstance(ticket, dict) or isinstance(card, dict) or isinstance(form, dict),
+        )
 
     return compact
 
@@ -1511,27 +1492,89 @@ def _ticket_artifact_final_response_instruction(tool_name: str) -> str:
         return ""
     return (
         "售后工单信息表已经展示。最终回复要简短、温暖，并结合当前问题场景做情绪承接；"
-        "参考 assistant_followup.message 的语气、结构和关键信息自然表达，不要机械照抄。"
+        "自然表达，不要机械照抄工具结果或重复字段。"
         "最终回复最多两段，每段 1 句；“售后信息已经整理好”这个交付信息只能出现一次。"
         "不要提“草稿”“未提交”“确认后才提交”，也不要暴露内部服务是否打通；"
         "不要继续排查，不要重复工单字段，也不要列举购买渠道、照片、视频、联系方式等补充字段示例。"
     )
 
 
-def _followup_final_response_instruction(tool_name: str) -> str:
+def _assistant_followup_message(result: dict[str, Any]) -> str:
+    tool_result = result.get("result") if isinstance(result.get("result"), dict) else {}
+    followup = tool_result.get("assistant_followup") if isinstance(tool_result, dict) else None
+    if not isinstance(followup, dict):
+        return ""
+    message = followup.get("message")
+    return str(message or "").strip() if isinstance(message, str) else ""
+
+
+def _followup_final_response_instruction(tool_name: str, message: str, *, artifact_created: bool = False) -> str:
+    message = str(message or "").strip()
+    if not message:
+        return ""
+    if tool_name == "hospital_bag_card_create":
+        return _hospital_bag_final_response_instruction(message)
     if tool_name == "support_ticket_draft_create":
+        if not artifact_created:
+            return (
+                "售后工单还没有创建。最终回复参考下面建议内容的情绪承接、语气和结构，"
+                "自然表达并询问用户是否需要现在创建售后工单，不要机械照抄建议内容；"
+                "最终回复最多两段，每段 1 句。"
+                "不要说售后信息已经整理好、不要说工单信息表已经展示，"
+                "不要提“草稿”“未提交”“确认后才提交”、demo、模拟提交或内部服务是否打通；"
+                "不要继续排查，也不要列举购买渠道、照片、视频、联系方式等补充字段示例。"
+                f"\n\n建议内容：\n{message}"
+            )
         return (
-            "最终回复参考 assistant_followup.message 的情绪承接、语气和结构，"
-            "结合当前售后问题场景自然表达，不要机械照抄；"
+            "售后工单信息表已经展示。最终回复参考下面建议内容的情绪承接、语气和结构，"
+            "结合当前售后问题场景自然表达，不要机械照抄建议内容；"
             "最终回复最多两段，每段 1 句；"
             "必须说明售后信息已经整理好，并请用户查看是否需要补充或修改，但这类交付信息只能出现一次。"
             "不要提“草稿”“未提交”“确认后才提交”、demo、模拟提交或内部服务是否打通；"
             "不要重复工单字段，不要继续排查，也不要列举购买渠道、照片、视频、联系方式等补充字段示例。"
+            f"\n\n建议内容：\n{message}"
         )
     return (
-        "最终回复参考 assistant_followup.message 的语气、结构和关键信息自然表达；"
+        "最终回复参考下面建议内容的语气、结构和关键信息自然表达；"
         "不要机械照抄、不要重复交付语或再补充无关下一步。"
+        "如果建议内容里包含链接，不要在正文重复裸链接，相关入口由前端卡片展示。"
+        f"\n\n建议内容：\n{message}"
     )
+
+
+def _hospital_bag_final_response_instruction(message: str) -> str:
+    material = _remove_hospital_bag_cart_link(message)
+    return (
+        "最终回复的内容结构：第一段 1 句说明待产包清单已整理好；"
+        "第二段根据下方可参考内容，用 1-3 句说清楚特殊物品取舍，必须尽量保留具体条件和物品名；"
+        "第三段说明购物车只是购买参考、不用一次买完，可以按清单优先级删减后再决定是否购买；"
+        "最后一行必须使用回复示例里的 Markdown 购物车链接。"
+        "如果下方内容里有“特殊物品我按这几个情况做了取舍”，正文要提炼其中 2-4 条，避免只说“做了取舍”；"
+        "可参考这些具体表达：剖宫产时可以说准备了高腰宽松内裤/不压腹出院裤，收腹带先放在医生确认项；"
+        "混合喂养时可以说保留哺乳文胸/哺乳背心、防溢乳垫、便携式吸奶器和储奶袋/储奶瓶；"
+        "双胎时可以说宝宝出院衣物和包被数量按双胎调整；"
+        "产后返工时可以说加入冷藏包/冰袋和吸奶配件清洁包。"
+        "如果下方内容没有特殊物品取舍，就只说按孕周、喂养方式和医院确认项保留必要非常规物品，"
+        "不要编造用户没给的情况。"
+        "不要复述表单字段、设计思路、住院天数或完整清单；"
+        "不要承诺真实下单、一键打包下单或医疗建议。"
+        "\n\n回复示例：\n"
+        "待产包清单我整理好了。\n\n"
+        "特殊物品我按这几个情况做了取舍：\n\n"
+        "- 考虑到你倾向剖宫产，我为你准备了高腰宽松内裤和不压腹出院裤/裙，收腹带先放在需要问医生的项目里。\n"
+        "- 考虑到你准备混合喂养，我为你准备了哺乳文胸/哺乳背心、防溢乳垫、便携式吸奶器和储奶袋/储奶瓶，乳盾和奶瓶先放在需要确认的项目里。\n"
+        "- 考虑到你预计6 周后返工，我为你准备了冷藏包/冰袋、储奶袋/储奶瓶和吸奶配件清洁包。\n"
+        "具体可以看下面的待产包清单。\n\n"
+        "我也把适合放入购物车参考的妈妈/宝宝用品整理好了，不用一次买完，先看清单里的优先级，按实际情况删减后再决定是否购买。\n\n"
+        "**[打开待产包购物车](/hospital-bag-cart)**"
+        f"\n\n下方内容只供提炼最终回复，不要原样输出本行说明：\n{material}"
+    )
+
+
+def _remove_hospital_bag_cart_link(message: str) -> str:
+    paragraphs = [paragraph.strip() for paragraph in str(message or "").split("\n\n")]
+    kept = [paragraph for paragraph in paragraphs if paragraph and "/hospital-bag-cart" not in paragraph]
+    return "\n\n".join(kept).strip()
 
 
 def _compact_birth_journey_plan_card_output(safe: dict[str, Any]) -> dict[str, Any]:
@@ -1855,18 +1898,22 @@ def _compact_milk_analysis_intake_output(safe: dict[str, Any], original_result: 
                 "analysis_context": analysis_context,
             }
         )
-    return _drop_empty(
-        {
-            "ok": safe.get("ok"),
-            "tool_name": safe.get("tool_name"),
-            "status": safe.get("status"),
-            "workflow": {
-                "intake": intake,
-                "next_tool": "milk_analysis_intake_manage",
-            },
-            "assistant_followup": safe.get("assistant_followup"),
-        }
-    )
+    compact = {
+        "ok": safe.get("ok"),
+        "tool_name": safe.get("tool_name"),
+        "status": safe.get("status"),
+        "workflow": {
+            "intake": intake,
+            "next_tool": "milk_analysis_intake_manage",
+        },
+    }
+    followup_message = _assistant_followup_message(original_result)
+    if followup_message:
+        compact["final_response_instruction"] = _followup_final_response_instruction(
+            str(safe.get("tool_name") or ""),
+            followup_message,
+        )
+    return _drop_empty(compact)
 
 
 def _compact_milk_analysis_evaluate_output(safe: dict[str, Any], original_result: dict[str, Any]) -> dict[str, Any]:

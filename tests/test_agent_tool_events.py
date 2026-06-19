@@ -6,7 +6,7 @@ import asyncio
 from unittest.mock import patch
 
 from momcozy_agent import ContextState, build_agent_request
-from momcozy_agent.contexts import hospital_bag_slots, merge_hospital_bag_slots
+from momcozy_agent.contexts import hospital_bag_slots, merge_extracted_birth_prep_slots, merge_hospital_bag_slots, profile_slots
 from momcozy_agent.tool_schemas import FUNCTION_TOOLS
 from momcozy_agent.agents import (
     artifact_created_event,
@@ -24,7 +24,14 @@ from momcozy_agent.agents import (
     tool_call_result_event,
     web_search_status_event,
 )
-from momcozy_agent.server import ChatRuntime, _clone_context_state, _schedule_birth_prep_slot_extraction, create_app, stream_ag_ui_events
+from momcozy_agent.server import (
+    ChatRuntime,
+    _clone_context_state,
+    _runtime_inputs_from_ag_ui,
+    _schedule_birth_prep_slot_extraction,
+    create_app,
+    stream_ag_ui_events,
+)
 
 
 class AgentToolEventTests(unittest.TestCase):
@@ -1190,6 +1197,11 @@ class AgentToolEventTests(unittest.TestCase):
         runtime = ChatRuntime(object(), slot_extractor=extractor)
         session = runtime.get_session("thread-slots")
         merge_hospital_bag_slots(session.context_state, {"due_date_or_week": "孕30周"})
+        merge_extracted_birth_prep_slots(
+            session.context_state,
+            [{"field_id": "display_name", "value": "Henson", "evidence": "我叫 Henson", "confidence": 0.95}],
+            turn_id=1,
+        )
         session.context_state.last_assistant_message = "你现在孕几周？"
 
         with session.run_lock:
@@ -1198,6 +1210,7 @@ class AgentToolEventTests(unittest.TestCase):
                 runtime,
                 {
                     "user_message": "我现在孕32周",
+                    "recent_user_messages": ["我叫 Henson", "我 28 岁", "我现在孕32周"],
                     "locale": "zh-CN",
                     "timezone": "Asia/Shanghai",
                     "message_sent_at": "2026-06-17T09:00:00+08:00",
@@ -1210,12 +1223,34 @@ class AgentToolEventTests(unittest.TestCase):
 
         self.assertFalse(thread.is_alive())
         self.assertEqual(extractor.requests[0].current_slots["due_date_or_week"], "孕30周")
+        self.assertEqual(extractor.requests[0].current_slots["display_name"], "Henson")
+        self.assertEqual(extractor.requests[0].recent_user_messages, ["我叫 Henson", "我 28 岁", "我现在孕32周"])
         self.assertEqual(extractor.requests[0].previous_assistant_message, "你现在孕几周？")
         self.assertEqual(hospital_bag_slots(session.context_state)["due_date_or_week"], "孕32周")
+        self.assertEqual(profile_slots(session.context_state)["display_name"], "Henson")
         record = session.context_state.birth_prep_slots["hospital_bag"]["due_date_or_week"]
         self.assertEqual(record["status"], "confirmed")
         self.assertEqual(record["source"], "user_text")
         self.assertEqual(record["turn_id"], 1)
+
+    def test_runtime_inputs_include_recent_three_user_messages_for_slot_extraction(self) -> None:
+        inputs = _runtime_inputs_from_ag_ui(
+            {
+                "messages": [
+                    {"role": "user", "content": "我想制定孕期计划"},
+                    {"role": "assistant", "content": "你叫什么？"},
+                    {"role": "user", "content": "我叫 Henson"},
+                    {"role": "assistant", "content": "你今年多大？"},
+                    {"role": "user", "content": "28 岁"},
+                    {"role": "assistant", "content": "你现在孕几周？"},
+                    {"role": "user", "content": "孕32周"},
+                ],
+                "state": {"locale": "zh-CN"},
+            }
+        )
+
+        self.assertEqual(inputs["user_message"], "孕32周")
+        self.assertEqual(inputs["recent_user_messages"], ["我叫 Henson", "28 岁", "孕32周"])
 
     def test_chat_runtime_sessions_have_distinct_run_locks(self) -> None:
         runtime = ChatRuntime(object())
@@ -1357,7 +1392,8 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertIn("售后工单信息表已经展示", support_ticket["final_response_instruction"])
         self.assertIn("不要提“草稿”“未提交”“确认后才提交”", support_ticket["final_response_instruction"])
         self.assertIn("结合当前问题场景做情绪承接", support_ticket["final_response_instruction"])
-        self.assertIn("参考 assistant_followup.message", support_ticket["final_response_instruction"])
+        self.assertNotIn("assistant_followup", support_ticket)
+        self.assertNotIn("assistant_followup.message", support_ticket["final_response_instruction"])
         self.assertIn("最多两段", support_ticket["final_response_instruction"])
         self.assertIn("交付信息只能出现一次", support_ticket["final_response_instruction"])
         self.assertIn("不要列举购买渠道、照片、视频、联系方式", support_ticket["final_response_instruction"])
@@ -1445,9 +1481,10 @@ class AgentToolEventTests(unittest.TestCase):
         compact = model_tool_output(raw)
 
         self.assertEqual(compact["status"], "card_created")
-        self.assertEqual(compact["assistant_followup"], {"message": "卡片已经生成好了。"})
+        self.assertNotIn("assistant_followup", compact)
         self.assertEqual(compact["card"], {"card_type": "birth_plan_card", "schema_version": "1.0", "created": True})
-        self.assertIn("参考 assistant_followup.message", compact["final_response_instruction"])
+        self.assertIn("建议内容", compact["final_response_instruction"])
+        self.assertIn("卡片已经生成好了", compact["final_response_instruction"])
         self.assertIn("自然表达", compact["final_response_instruction"])
         self.assertNotIn("card_json", json.dumps(compact, ensure_ascii=False))
 
@@ -2103,11 +2140,16 @@ class AgentToolEventTests(unittest.TestCase):
         followup_input = requests[1]["input"]
         self.assertEqual(len(followup_input), 1)
         model_output = json.loads(str(followup_input[0]["output"]))
-        self.assertIn("assistant_followup", model_output)
-        self.assertIn("参考 assistant_followup.message", model_output["final_response_instruction"])
+        self.assertNotIn("assistant_followup", model_output)
+        self.assertNotIn("assistant_followup.message", model_output["final_response_instruction"])
+        self.assertIn("建议内容", model_output["final_response_instruction"])
+        self.assertIn("确实很让人着急", model_output["final_response_instruction"])
         self.assertIn("不要提“草稿”“未提交”“确认后才提交”", model_output["final_response_instruction"])
         self.assertIn("交付信息只能出现一次", model_output["final_response_instruction"])
         self.assertIn("不要列举购买渠道、照片、视频、联系方式", model_output["final_response_instruction"])
+        tool_result_event = next(event for event in events if event.get("type") == "TOOL_CALL_RESULT")
+        tool_result_payload = json.loads(str(tool_result_event.get("content") or "{}"))
+        self.assertNotIn("assistant_followup", tool_result_payload)
         artifact = next(event for event in events if event.get("type") == "ARTIFACT_CREATED")
         self.assertEqual(artifact["artifact_type"], "support_ticket")
         self.assertEqual(artifact["semantic"]["label"], "请确认售后信息")

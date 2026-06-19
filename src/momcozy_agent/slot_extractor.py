@@ -5,7 +5,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Any
 
-from .contexts import HOSPITAL_BAG_SLOT_FIELDS
+from .contexts import HOSPITAL_BAG_SLOT_FIELDS, PROFILE_SLOT_FIELDS
 
 DEFAULT_SLOT_EXTRACTOR_MODEL = "gpt-5.4-mini"
 SLOT_EXTRACTOR_VERSION = "birth_prep_slots_async_v1"
@@ -14,6 +14,7 @@ SLOT_EXTRACTOR_VERSION = "birth_prep_slots_async_v1"
 @dataclass(frozen=True)
 class BirthPrepSlotExtractionRequest:
     user_message: str
+    recent_user_messages: list[str] = field(default_factory=list)
     previous_assistant_message: str = ""
     current_slots: dict[str, Any] = field(default_factory=dict)
     loaded_skill_ids: list[str] = field(default_factory=list)
@@ -71,23 +72,37 @@ def parse_slot_extractor_response_text(text: str) -> list[dict[str, Any]]:
 
 
 def _slot_extractor_instructions() -> str:
-    field_list = ", ".join(HOSPITAL_BAG_SLOT_FIELDS)
+    profile_field_list = ", ".join(PROFILE_SLOT_FIELDS)
+    birth_prep_field_list = ", ".join(HOSPITAL_BAG_SLOT_FIELDS)
+    field_list = ", ".join(dict.fromkeys((*PROFILE_SLOT_FIELDS, *HOSPITAL_BAG_SLOT_FIELDS)))
     return (
-        "You extract MomCozy birth-prep session slots from the latest user message. "
-        "Return JSON only, shaped as {\"slots\":[{\"field_id\":\"...\",\"value\":...,\"evidence\":\"...\",\"confidence\":0.0-1.0}]}. "
-        "Only extract information the user explicitly states in the latest user message; do not infer from the assistant question, "
-        "do not copy long prose into short fields, and do not invent missing values. "
-        f"Allowed field_id values: {field_list}. "
-        "If no explicit slot is present, return {\"slots\":[]}. "
-        "For city_or_country, output only the city/country phrase, never a full sentence. "
-        "For due_date_or_week, keep pregnancy week or due date exactly and compactly. "
-        "Treat user-stated updates as the latest value."
+        "在进行 MomCozy 备产会话信息抽取时，必须综合最近历史上下文 + 当前用户最新输入进行联合判断，不得仅依赖单条消息。\n\n"
+        "抽取过程中必须结合 field_id 的语义进行校验，避免字段错配（例如不能将人名、关系名等误判为 city_or_country）。\n\n"
+        "规则要求如下：\n\n"
+        "- 必须基于最近上下文与当前用户输入共同提取信息。\n"
+        "- 严格按照 field_id 的语义进行归类，禁止“关键词匹配式”填充。\n"
+        "- city_or_country 仅允许填写明确的城市或国家名称，禁止填入人名、机构名或关系描述。\n"
+        "- display_name 仅允许填写用户希望被如何称呼的名字/称呼，禁止填入城市、医院、关系名或长句。\n"
+        "- age 仅允许填写用户明确提供的当前年龄，不要把孕周、宝宝月龄或住院天数填入 age。\n"
+        "- value 必须与字段语义一致，不得跨字段混用或泛化。\n"
+        "- 若存在冲突信息，以最新用户输入为准。\n"
+        "- 若无法确定字段归属，则不填该字段，不得猜测或补全。\n"
+        "- 只抽取用户在最近上下文或当前最新输入中明确表达的信息；不要复制长段文本到短字段。\n"
+        "- 必须只返回 JSON，不要输出解释、Markdown 或代码块。\n"
+        f"- profile slot field_id values: {profile_field_list}。\n"
+        f"- birth-prep slot field_id values: {birth_prep_field_list}。\n"
+        f"- Allowed field_id values: {field_list}。\n"
+        "- For due_date_or_week, keep pregnancy week or due date exactly and compactly。\n\n"
+        "输出格式仍保持：\n\n"
+        "{\"slots\":[{\"field_id\":\"...\",\"value\":...,\"evidence\":\"...\",\"confidence\":0.0-1.0}]}\n\n"
+        "如果没有明确可归属字段，返回 {\"slots\":[]}。"
     )
 
 
 def _request_payload(request: BirthPrepSlotExtractionRequest) -> dict[str, Any]:
     return {
         "latest_user_message": request.user_message,
+        "recent_user_messages": request.recent_user_messages or ([request.user_message] if request.user_message else []),
         "previous_assistant_message": request.previous_assistant_message,
         "current_slots": request.current_slots,
         "loaded_skill_ids": request.loaded_skill_ids,

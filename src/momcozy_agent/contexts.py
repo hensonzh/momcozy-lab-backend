@@ -24,6 +24,7 @@ class ContextState:
     active_device_module: str = ""
     active_service_domain: str = ""
     shown_step_image_urls: list[str] = field(default_factory=list)
+    profile_slots: dict[str, dict[str, Any]] = field(default_factory=dict)
     birth_prep_slots: dict[str, dict[str, Any]] = field(default_factory=dict)
     last_assistant_message: str = ""
     slot_turn_index: int = 0
@@ -31,6 +32,10 @@ class ContextState:
     milk_management_state: dict[str, Any] = field(default_factory=dict)
 
 
+PROFILE_SLOT_FIELDS = (
+    "display_name",
+    "age",
+)
 HOSPITAL_BAG_SLOT_FIELDS = (
     "age",
     "due_date_or_week",
@@ -173,6 +178,7 @@ def build_request_context(
     if state is not None:
         if _should_inject_birth_prep_domain_context(service_domain):
             lines.extend(_format_birth_prep_context(state))
+        lines.extend(_format_profile_slot_context(state))
         if _should_inject_milk_management_context(service_domain):
             lines.extend(_format_milk_management_context(state))
         lines.extend(_format_device_image_context(state))
@@ -298,22 +304,45 @@ def merge_extracted_birth_prep_slots(
 
     accepted: dict[str, Any] = {}
     slot_metadata: dict[str, dict[str, Any]] = {}
+    accepted_profile: dict[str, Any] = {}
+    profile_slot_metadata: dict[str, dict[str, Any]] = {}
     for item in items:
-        field_id = _valid_hospital_bag_slot_field(item.get("field_id") or item.get("field"))
-        if not field_id:
-            continue
-        normalized = _normalize_hospital_bag_slot_value(field_id, item.get("value"))
-        if not _slot_value_has_content(normalized):
-            continue
-        accepted[field_id] = normalized
-        slot_metadata[field_id] = {
+        raw_field_id = item.get("field_id") or item.get("field")
+        metadata = {
             "evidence": _clip_slot_text(item.get("evidence"), max_length=120),
             "confidence": _normalized_confidence(item.get("confidence")),
             "updated_at": str(updated_at or "").strip(),
             "run_id": str(run_id or "").strip(),
             "extractor_version": str(extractor_version or "").strip(),
         }
+        profile_field_id = _valid_profile_slot_field(raw_field_id)
+        if profile_field_id:
+            normalized_profile = _normalize_profile_slot_value(profile_field_id, item.get("value"))
+            if _slot_value_has_content(normalized_profile):
+                accepted_profile[profile_field_id] = normalized_profile
+                profile_slot_metadata[profile_field_id] = metadata
+                if profile_field_id == "age":
+                    accepted["age"] = normalized_profile
+                    slot_metadata["age"] = metadata
+            continue
 
+        field_id = _valid_hospital_bag_slot_field(raw_field_id)
+        if not field_id:
+            continue
+        normalized = _normalize_hospital_bag_slot_value(field_id, item.get("value"))
+        if not _slot_value_has_content(normalized):
+            continue
+        accepted[field_id] = normalized
+        slot_metadata[field_id] = metadata
+
+    _merge_profile_slot_values(
+        state,
+        accepted_profile,
+        source=_SLOT_SOURCE_USER_TEXT,
+        status=_SLOT_STATUS_CONFIRMED,
+        turn_id=turn_id,
+        metadata_by_field=profile_slot_metadata,
+    )
     _merge_hospital_bag_slot_values(
         state,
         accepted,
@@ -322,7 +351,7 @@ def merge_extracted_birth_prep_slots(
         turn_id=turn_id,
         metadata_by_field=slot_metadata,
     )
-    return accepted
+    return {**accepted, **accepted_profile}
 
 
 def next_slot_extraction_turn(state: ContextState) -> int:
@@ -340,6 +369,16 @@ def hospital_bag_slots(state: ContextState | None) -> dict[str, Any]:
         field_id: _slot_record_value(slots[field_id])
         for field_id in HOSPITAL_BAG_SLOT_FIELDS
         if _slot_value_has_content(slots.get(field_id))
+    }
+
+
+def profile_slots(state: ContextState | None) -> dict[str, Any]:
+    if state is None or not isinstance(state.profile_slots, dict):
+        return {}
+    return {
+        field_id: _slot_record_value(state.profile_slots[field_id])
+        for field_id in PROFILE_SLOT_FIELDS
+        if _slot_value_has_content(state.profile_slots.get(field_id))
     }
 
 
@@ -361,6 +400,21 @@ def _hospital_bag_slots(state: ContextState) -> dict[str, Any]:
         slots = {}
         state.birth_prep_slots[_HOSPITAL_BAG_SLOT_KEY] = slots
     return slots
+
+
+def _format_profile_slot_context(state: ContextState) -> list[str]:
+    profile_values = [
+        f"{field_id}={_display_slot_value(state.profile_slots[field_id])}"
+        for field_id in PROFILE_SLOT_FIELDS
+        if _slot_value_has_content(state.profile_slots.get(field_id))
+    ]
+    if not profile_values:
+        return []
+    return [
+        "profile_slot_context:",
+        "- profile_known_fields: " + "; ".join(profile_values),
+        "- profile_slot_status: listed fields are confirmed session slots from user text; use them as the latest session-level user profile context, but keep persistent profile writes on the profile_update path.",
+    ]
 
 
 def _format_birth_prep_context(state: ContextState) -> list[str]:
@@ -1058,6 +1112,42 @@ def _valid_hospital_bag_slot_field(value: Any) -> str:
     return field_id if field_id in HOSPITAL_BAG_SLOT_FIELDS else ""
 
 
+def _valid_profile_slot_field(value: Any) -> str:
+    field_id = str(value or "").strip()
+    return field_id if field_id in PROFILE_SLOT_FIELDS else ""
+
+
+def _merge_profile_slot_values(
+    state: ContextState,
+    values: dict[str, Any],
+    *,
+    source: str,
+    status: str,
+    turn_id: int | None = None,
+    metadata_by_field: dict[str, dict[str, Any]] | None = None,
+) -> None:
+    if not isinstance(values, dict):
+        return
+    effective_turn_id = turn_id if turn_id is not None else state.slot_turn_index
+    for field_id in PROFILE_SLOT_FIELDS:
+        if field_id not in values:
+            continue
+        value = _normalize_profile_slot_value(field_id, values.get(field_id))
+        if not _slot_value_has_content(value):
+            continue
+        existing = state.profile_slots.get(field_id)
+        if effective_turn_id is not None and _slot_record_turn_id(existing) > effective_turn_id:
+            continue
+        metadata = dict((metadata_by_field or {}).get(field_id) or {})
+        state.profile_slots[field_id] = _slot_record(
+            value,
+            status=status,
+            source=source,
+            turn_id=effective_turn_id if effective_turn_id > 0 else None,
+            **metadata,
+        )
+
+
 def _merge_hospital_bag_slot_values(
     state: ContextState,
     values: dict[str, Any],
@@ -1159,6 +1249,16 @@ def _normalize_hospital_bag_slot_value(field_id: str, value: Any) -> Any:
     if field_id in {"return_to_work_timing", "support_person"}:
         return _normalize_short_text(value, max_length=80, reject_sentence=False)
     return _normalize_short_text(value, max_length=_MAX_SLOT_TEXT_LENGTH, reject_sentence=False)
+
+
+def _normalize_profile_slot_value(field_id: str, value: Any) -> Any:
+    if _is_slot_record(value):
+        value = value.get("value")
+    if field_id == "display_name":
+        return _normalize_short_text(value, max_length=40, reject_sentence=True)
+    if field_id == "age":
+        return _normalize_age(value)
+    return ""
 
 
 def _normalize_age(value: Any) -> int | None:

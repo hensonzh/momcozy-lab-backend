@@ -267,7 +267,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "hospital_bag_card_create": _function_tool(
         "hospital_bag_card_create",
-        "根据应用侧注入的 hospital_bag_intake 表单提交数据生成前端可渲染的待产包清单。LLM 不需要生成 card_json，也不能用参数伪造表单提交；分包、物品、数量、医院确认项、购物车 followup 和兼容字段由工具稳定生成。无后端副作用。confirmed_form_data 参数传 \"{}\" 即可。调用本工具后的最终回复只保留工具返回的 assistant_followup.message，不要再复述已确认字段、设计思路、住院天数或医院确认逻辑。",
+        "根据应用侧注入的 hospital_bag_intake 表单提交数据生成前端可渲染的待产包清单。LLM 不需要生成 card_json，也不能用参数伪造表单提交；分包、物品、数量、医院确认项、购物车入口和兼容字段由工具稳定生成。无后端副作用。confirmed_form_data 参数传 \"{}\" 即可。调用本工具后的最终回复遵循工具返回的 final_response_instruction，不要再复述已确认字段、设计思路、住院天数或医院确认逻辑。",
         {
             "confirmed_form_data": JSON_OBJECT_STRING,
             "generation_mode": {"type": "string", "enum": ["standard", "quick", "immediate"]},

@@ -2256,7 +2256,7 @@ BIRTH_JOURNEY_SURVEY_FIELDS: tuple[dict[str, Any], ...] = (
     {
         "id": "feeding_ibclc_context",
         "label": "喂养和 IBCLC 相关信息",
-        "question": "最后想了解喂养准备：你是否计划母乳/混合/配方？是否需要吸奶或背奶？预计产假多久？之前有没有低奶量、乳腺炎、宝宝含乳困难的经历？是否可能早产、剖宫产或母婴分离？",
+        "question": "最后想了解喂养准备：你是否计划母乳/混合/配方？是否可能需要背奶？预计产假多久？之前有没有低奶量、乳腺炎、宝宝含乳困难的经历？是否可能早产、剖宫产？",
         "keys": ("feeding_ibclc_context", "feeding_intention", "feeding_plan", "pump_plan", "ibclc_plan", "lactation_history"),
     },
 )

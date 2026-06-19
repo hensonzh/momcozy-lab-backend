@@ -10,6 +10,7 @@ from momcozy_agent.contexts import (
     hospital_bag_slots,
     merge_extracted_birth_prep_slots,
     merge_hospital_bag_slots,
+    profile_slots,
     record_loaded_tool,
 )
 from momcozy_agent.tool_handlers.cards import (
@@ -21,6 +22,7 @@ from momcozy_agent.tool_handlers.cards import (
 )
 from momcozy_agent.tool_registry import DEFERRED_TOOL_NAMESPACES
 from momcozy_agent.tool_schemas import FUNCTION_TOOLS
+from momcozy_agent.slot_extractor import _slot_extractor_instructions
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -40,6 +42,18 @@ class BirthPrepPromptRuleTests(unittest.TestCase):
         self.assertNotIn("references/birth-journey-plan.md", skill)
         self.assertIn("当前孕周、是否 IVF（体外受精）", skill)
         self.assertNotIn("一次性收集末次月经、预产期、当前孕周", skill)
+
+    def test_birth_prep_slot_extractor_prompt_requires_context_and_field_semantics(self) -> None:
+        instructions = _slot_extractor_instructions()
+
+        self.assertIn("必须综合最近历史上下文 + 当前用户最新输入进行联合判断", instructions)
+        self.assertIn("不得仅依赖单条消息", instructions)
+        self.assertIn("严格按照 field_id 的语义进行归类", instructions)
+        self.assertIn("city_or_country 仅允许填写明确的城市或国家名称", instructions)
+        self.assertIn("display_name 仅允许填写用户希望被如何称呼", instructions)
+        self.assertIn("age 仅允许填写用户明确提供的当前年龄", instructions)
+        self.assertIn("禁止填入人名、机构名或关系描述", instructions)
+        self.assertIn('{"slots":[{"field_id":"...","value":...,"evidence":"...","confidence":0.0-1.0}]}', instructions)
 
     def test_broad_week_preparation_question_is_not_shopping_by_default(self) -> None:
         skill = (ROOT / "skills" / "birth-prep" / "SKILL.md").read_text(encoding="utf-8")
@@ -157,6 +171,30 @@ class BirthPrepPromptRuleTests(unittest.TestCase):
         record = state.birth_prep_slots["hospital_bag"]["top_worries"]
         self.assertEqual(record["status"], "confirmed")
         self.assertEqual(record["source"], "user_text")
+
+    def test_profile_slots_merge_display_name_and_age_from_async_extraction(self) -> None:
+        state = ContextState()
+
+        accepted = merge_extracted_birth_prep_slots(
+            state,
+            [
+                {"field_id": "display_name", "value": "Henson", "evidence": "我叫 Henson", "confidence": 0.95},
+                {"field_id": "age", "value": 28, "evidence": "我 28 岁", "confidence": 0.94},
+            ],
+            turn_id=1,
+            run_id="run-profile-slots",
+            updated_at="2026-06-17T09:00:00+08:00",
+        )
+
+        context = build_request_context({"user_message": "继续", "locale": "zh-CN"}, state, ["birth-prep"])
+
+        self.assertEqual(accepted["display_name"], "Henson")
+        self.assertEqual(accepted["age"], 28)
+        self.assertEqual(profile_slots(state), {"display_name": "Henson", "age": 28})
+        self.assertEqual(hospital_bag_slots(state)["age"], 28)
+        self.assertIn("profile_slot_context:", context)
+        self.assertIn("display_name=Henson", context)
+        self.assertIn("age=28", context)
 
     def test_birth_prep_user_text_updates_latest_slot_value(self) -> None:
         state = ContextState()

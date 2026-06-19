@@ -1211,7 +1211,7 @@ class MilkManagementToolTests(unittest.TestCase):
         self.assertEqual(confirmed["card"]["card_json"]["status_label"], "已确认")
         safe_confirmed = safe_tool_result({"ok": True, "tool_name": "milk_plan_mutate", "result": confirmed})
         self.assertEqual(safe_confirmed["card"]["card_type"], "milk_plan_card")
-        self.assertIn("assistant_followup", safe_confirmed)
+        self.assertNotIn("assistant_followup", safe_confirmed)
         self.assertEqual(safe_confirmed["plan_feedback"]["kind"], "milk_plan")
         self.assertEqual(safe_confirmed["plan_feedback"]["reason"], "synced")
         self.assertIn("calendar_dates", safe_confirmed)

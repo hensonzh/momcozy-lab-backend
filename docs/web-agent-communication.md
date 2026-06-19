@@ -412,7 +412,7 @@ RUN_FINISHED
 实现约束：
 
 - `server.py` 负责 SSE framing：每个 JSON event 写成一个 `data:` frame，并用空行结尾。
-- `server.py` 会暂存 `RUN_FINISHED`，等文本 delta、`TEXT_MESSAGE_END`、`assistant_followup` 和 `QUICK_REPLIES` 都处理完后再发送。
+- `server.py` 会暂存 `RUN_FINISHED`，等文本 delta、`TEXT_MESSAGE_END` 和 `QUICK_REPLIES` 都处理完后再发送。
 - `agents.py` 会用 `streamed_tool_call_keys` 去重 streamed function call start 和最终 function call arguments。
 - 工具相关事件应尽量携带 `response_id`、`output_index`、`item_id` 和 `tool_call_id`，让前端能稳定合并同一个 work item。
 - `safe_tool_arguments()` 只发送参数摘要；`safe_tool_result()` 只发送前端需要的安全字段和已知 artifact。
@@ -500,7 +500,7 @@ RUN_FINISHED
 - 如果没有文本、表单、卡片，则展示 `(No text response)`。
 - 调用 `finishWorkPanel()` 收起 work panel。
 
-注意：后端会暂存 `RUN_FINISHED`，等文本流结束和 assistant followup 处理完后再发送。
+注意：后端会暂存 `RUN_FINISHED`，等文本流结束和快捷回复处理完后再发送。
 
 ### 5.2 Assistant 文本事件
 
@@ -776,7 +776,7 @@ Agent 状态通过 `CUSTOM` / `momcozy.agent.status` 发送：
 | 工具 | 附加字段 | 前端消费 |
 | --- | --- | --- |
 | `ui_form_create` / `birth_plan_form_create` / `hospital_bag_form_create` | `form` | 后端随后发送 `ARTIFACT_CREATED`，前端渲染表单 |
-| `labor_communication_card_create` / `birth_journey_plan_card_create` / `hospital_bag_card_create` | `card`、可选 `assistant_followup` | 后端随后发送 `ARTIFACT_CREATED`，前端渲染卡片 |
+| `labor_communication_card_create` / `birth_journey_plan_card_create` / `hospital_bag_card_create` | `card` | 后端随后发送 `ARTIFACT_CREATED`，前端渲染卡片 |
 | `ibclc_consult_card_create` | `card` | 后端随后发送 `ARTIFACT_CREATED`，前端渲染 IBCLC 咨询卡 |
 | `support_ticket_draft_create` | `ticket`、`submit_label` | 后端随后发送 `ARTIFACT_CREATED` + `CONFIRMATION_REQUIRED` |
 
