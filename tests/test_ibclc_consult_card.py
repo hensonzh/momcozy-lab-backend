@@ -28,6 +28,10 @@ class IbclcConsultCardTests(unittest.TestCase):
         self.assertIn("判断摄入信号", consultant["bio"])
         self.assertIn("个性化调整建议", consultant["bio"])
         self.assertNotIn("specialties", consultant)
+        self.assertEqual(
+            card["recommendation_reason"],
+            "我推荐 Emily Chen，是因为这位顾问是 IBCLC 国际认证哺乳顾问，适合帮你一起看含乳、排乳、亲喂/吸奶效果和乳房不适这类问题。",
+        )
 
         self.assertNotIn("help_topics", card)
         self.assertNotIn("prep_items", card)

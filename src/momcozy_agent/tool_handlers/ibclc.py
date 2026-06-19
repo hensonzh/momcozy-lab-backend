@@ -6,6 +6,7 @@ from ..types import RuntimeInputs
 
 DEFAULT_CHAT_URL = "/ibclc-chat.html"
 DEFAULT_CONSULTANT_BIO = "拥有 8 年产后哺乳支持经验，核心擅长含乳评估、有效吸吮与母乳移出观察。可结合宝宝尿布、体重和吃奶表现判断摄入信号，并围绕亲喂姿势、乳头疼痛、堵奶/乳房不适、吸奶器使用和排乳计划给出个性化调整建议。"
+DEFAULT_RECOMMENDATION_TOPIC = "含乳、排乳、亲喂/吸奶效果和乳房不适"
 
 
 def create_ibclc_consult_card(args: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
@@ -25,6 +26,7 @@ def create_ibclc_consult_card(args: dict[str, Any], inputs: RuntimeInputs) -> di
         "schema_version": "1.1",
         "title": "IBCLC 在线咨询",
         "consultant": consultant,
+        "recommendation_reason": _consultant_recommendation_reason(consultant),
         "chat": {
             "url": _text(args.get("chat_url"), DEFAULT_CHAT_URL),
             "label": _text(args.get("chat_label"), "咨询 IBCLC"),
@@ -58,3 +60,9 @@ def _clean_consultant_bio(text: str) -> str:
             cleaned = cleaned[len(prefix):].lstrip(" ，,、。")
             break
     return cleaned or DEFAULT_CONSULTANT_BIO
+
+
+def _consultant_recommendation_reason(consultant: dict[str, str]) -> str:
+    name = _text(consultant.get("name"), "这位顾问")
+    credentials = _text(consultant.get("credentials"), "IBCLC 国际认证哺乳顾问")
+    return f"我推荐 {name}，是因为这位顾问是 {credentials}，适合帮你一起看{DEFAULT_RECOMMENDATION_TOPIC}这类问题。"
