@@ -35,6 +35,7 @@ def get_today_overview(
             "plan_id": plan_id,
             "summary": summary,
             "items": items,
+            "plan_context": day_data.get("plan_context"),
         },
     )
 
@@ -72,6 +73,7 @@ def get_today_summary(
             "target_date": date,
             "plan_id": plan_id,
             "calendar_summary": calendar_summary,
+            "plan_context": overview_data.get("plan_context"),
             "pumping_summary": pumping_summary,
             "feeding_summary": feeding_summary,
             "items": items,

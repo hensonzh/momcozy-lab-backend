@@ -370,7 +370,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "device_manual_search": _function_tool(
         "device_manual_search",
-        "补充已购/正在使用的 Momcozy 吸奶器设备资料。无副作用。用于获取当前型号说明书、检索 FAQ 问答、查找步骤图片，并在 Air1 开箱场景返回产品亮点、Quick Start PDF 和操作视频资源。不要用于购买前型号推荐或价格比较；选型使用 hospital_bag_pump_recommend。不要用于判断奶量是否正常或制定喂养计划；奶量数据问题使用 milk_management。展示 Quick Start/PDF/视频资源时使用工具结果中的 markdown_link；展示步骤图片时使用 relevant_images 或 manual 图片项中的 markdown_image，禁止把 /skill-assets/... 原始路径直接输出成可见正文。进入 Air1 开箱分步指导后，每个新视觉步骤首次展示当前步骤图；同一视觉步骤后续轮次不要重复同图，可让用户对照上图。分步指导以 manual 的 guide.* 模块为一轮主步骤，模块内 bullet 是同一步的子动作；除非 manual 明确要求多轮、用户卡住或存在安全风险，不要把每个 bullet 都拆成一轮。用户问“图中/上图/编号/标号”时，只参考当前刚展示给用户的图片，不要用历史图片中相同编号猜。用户问部件是什么、作用原理、为什么、能不能、多少、区别、是否正常等日常设备知识时，应使用 topic=faq 检索 FAQ。用户在法兰步骤给出 14mm、14 毫米等乳头根部测量值时，必须设置 topic=flange 并把数值填入 measured_nipple_mm，随后使用工具返回的 flange_recommendation 直接推荐法兰/硅胶塞尺寸。已获得同型号 manual 后，连续步骤应复用已有内容；只有新的 FAQ 问题、缺少步骤图片或需要根据测量值计算法兰推荐时才再次调用。",
+        "补充已购/正在使用的 Momcozy 吸奶器设备资料。无副作用。用于获取当前型号说明书、检索 FAQ 问答、查找步骤图片，并在 Air1 开箱场景返回产品亮点、Quick Start PDF 和操作视频资源。开箱/刚收到/第一次上手但型号未知时，不要调用本工具，不要默认 Air1，先直接询问设备型号或让用户看包装盒/机身型号。不要用于购买前型号推荐或价格比较；选型使用 hospital_bag_pump_recommend。不要用于判断奶量是否正常或制定喂养计划；奶量数据问题使用 milk_management。展示 Quick Start/PDF/视频资源时使用工具结果中的 markdown_link；展示步骤图片时使用 relevant_images 或 manual 图片项中的 markdown_image，禁止把 /skill-assets/... 原始路径直接输出成可见正文。进入 Air1 开箱分步指导后，每个新视觉步骤首次展示当前步骤图；同一视觉步骤后续轮次不要重复同图，可让用户对照上图。分步指导以 manual 的 guide.* 模块为一轮主步骤，模块内 bullet 是同一步的子动作；除非 manual 明确要求多轮、用户卡住或存在安全风险，不要把每个 bullet 都拆成一轮。用户问“图中/上图/编号/标号”时，只参考当前刚展示给用户的图片，不要用历史图片中相同编号猜。用户问部件是什么、作用原理、为什么、能不能、多少、区别、是否正常等日常设备知识时，应使用 topic=faq 检索 FAQ。用户在法兰步骤给出 14mm、14 毫米等乳头根部测量值时，必须设置 topic=flange 并把数值填入 measured_nipple_mm，随后使用工具返回的 flange_recommendation 直接推荐法兰/硅胶塞尺寸。已获得同型号 manual 后，连续步骤应复用已有内容；只有新的 FAQ 问题、缺少步骤图片或需要根据测量值计算法兰推荐时才再次调用。",
         {
             "model": {"type": "string", "enum": ["Air1", "unknown"], "description": "已确认的设备型号。当前只支持 Air1；未知型号必须传 unknown。"},
             "query": {"type": "string", "description": "用户的设备问题，或需要检索的具体指导主题。"},
@@ -384,7 +384,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "support_ticket_draft_create": _function_tool(
         "support_ticket_draft_create",
-        "为未解决的 Momcozy 吸奶器或设备售后问题整理前端可确认的客服工单信息。创建前必须先向用户确认是否需要现在创建售后工单；只有用户已经明确同意时，user_confirmed 才能为 true。适用于用户明确请求客服/退货/保修，反馈缺件或疑似缺陷，设备安全问题需要升级支持，或经过 device_manual_search 排查后仍未解决且用户愿意升级时使用。不要用于普通操作指导、购买前选型、奶量建议或专业照护转接摘要。",
+        "为未解决的 Momcozy 吸奶器或设备售后问题整理前端可确认的客服工单信息。创建前必须先向用户确认是否需要现在创建售后工单；只有用户已经明确同意时，user_confirmed 才能为 true。适用于用户明确请求客服/退货/保修，反馈缺件或疑似缺陷，设备安全问题需要升级支持，或经过 device_manual_search 排查后仍未解决且用户愿意升级时使用。若售后倾向问题中用户明显生气、失望、烦躁、着急或不想继续折腾，应尽早调用本工具但传 user_confirmed=false，用工具返回的确认问题询问是否现在创建；不要等多轮完整排查。不要用于普通操作指导、购买前选型、奶量建议或专业照护转接摘要。",
         {
             "issue_type": {
                 "type": "string",
@@ -457,7 +457,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "milk_plan_query": _function_tool(
         "milk_plan_query",
-        "GET 只读工具：读取已经保存的奶量计划。用户提到“原计划、已有计划、当前追奶/稳奶/减奶计划、按计划调整”时使用。不要用它生成新计划；新计划草稿通过 milk_plan_preview_create 生成。plan_id 不为 null 时读取单个计划；plan_id 为 null 时按 plan_type/limit 列出计划。具体每天几点执行通常还要配合 milk_calendar_query 读取 calendar。",
+        "GET 只读工具：读取已经保存的奶量计划列表或指定 plan_id 的完整计划。不要用它判断“当前/今天/明天正在采用哪套计划”；这类日期相关问题必须先用 milk_calendar_query 按日期读取 calendar，并根据返回的 plan_context 判断。不要用它生成新计划；新计划草稿通过 milk_plan_preview_create 生成。",
         {
             "plan_id": _nullable({"type": "integer"}),
             "plan_type": _nullable({"type": "string", "enum": ["increase_milk", "maintain_milk", "decrease_milk"]}),
@@ -487,15 +487,16 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "milk_calendar_query": _function_tool(
         "milk_calendar_query",
-        "GET 只读工具：读取奶量 calendar/计划执行情况。calendar 是“今天安排、未来几天安排、原计划展开后的具体时间”的来源；不要用实际吸奶记录替代 calendar。query_mode=range 读取任意范围；today_overview/today_summary 读取某日概览或日结。",
+        "GET 只读工具：读取奶量 calendar/计划执行情况。calendar 是“当前计划、今天/明天/某日安排、未来几天安排、原计划展开后的具体时间”的来源；不要用最新保存计划或实际吸奶记录替代 calendar。用户问“当前正在采用的奶量计划/今天按哪个计划/明天的计划”时优先调用本工具，并根据返回的 plan_context 回答。query_mode=current_plan 用于当前正在采用的计划；by_date 用于指定日期；range 读取任意范围；today_overview/today_summary 读取某日概览或日结。",
         {
-            "query_mode": {"type": "string", "enum": ["range", "today_overview", "today_summary"]},
+            "query_mode": {"type": "string", "enum": ["current_plan", "by_date", "range", "today_overview", "today_summary"]},
             "target_date": _nullable(ISO_DATE),
             "start_at": _nullable({"type": "string", "description": "range 查询起始日期或日期时间。"}),
             "end_at": _nullable({"type": "string", "description": "range 查询结束日期或日期时间。"}),
             "plan_id": _nullable({"type": "integer"}),
             "item_type": _nullable({"type": "string", "enum": ["吸奶", "亲喂", "自定义"]}),
             "include_items": {"type": "boolean", "description": "range 查询时是否返回条目列表；只要统计时传 false。"},
+            "lookahead_days": {"type": "integer", "description": "current_plan 查询当天没有计划任务时向后查找最近计划任务的天数，默认 14。"},
             "limit": {"type": "integer", "description": "range 查询最多返回条目数量，建议 50-200。"},
         },
     ),

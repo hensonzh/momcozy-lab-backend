@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from datetime import datetime
 from typing import Any
 
 from ..services.milk_management.assessment import evaluate_milk_status
@@ -10,7 +11,9 @@ from ..services.milk_management.calendar import (
     apply_calendar_adjustment,
     apply_calendar_reschedule,
     delete_calendar_item,
+    get_calendar_day,
     get_calendar_range,
+    get_current_calendar_plan,
     preview_calendar_adjustment,
     preview_day_reschedule,
     update_calendar_range,
@@ -131,7 +134,7 @@ def execute_milk_management_tool(args: dict[str, Any], inputs: RuntimeInputs) ->
         arguments = _arguments_with_previous_milk_plan_preview(arguments, inputs)
         return _mutate_plan(arguments)
     if name == "milk_calendar_query":
-        return _query_calendar(arguments)
+        return _query_calendar(arguments, inputs)
     if name == "milk_calendar_change_preview":
         return dict(
             preview_calendar_adjustment(
@@ -2445,20 +2448,42 @@ def _mutate_record(arguments: dict[str, Any]) -> dict[str, Any]:
     raise ValueError(f"Unsupported milk_record_mutate operation: {operation}")
 
 
-def _query_calendar(arguments: dict[str, Any]) -> dict[str, Any]:
+def _query_calendar(arguments: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
     query_mode = str(arguments.get("query_mode") or "range").strip()
+    runtime_date = _runtime_target_date(inputs) or datetime.now().date().isoformat()
+    target_date = str(arguments.get("target_date") or runtime_date).strip()
+    if query_mode == "current_plan":
+        return dict(
+            get_current_calendar_plan(
+                user_id=arguments["user_id"],
+                target_date=target_date,
+                lookahead_days=arguments.get("lookahead_days", 14),
+                item_type=arguments.get("item_type"),
+                include_items=arguments.get("include_items") is not False,
+                limit=arguments.get("limit", 200),
+            )
+        )
+    if query_mode in {"by_date", "day"}:
+        return dict(
+            get_calendar_day(
+                user_id=arguments["user_id"],
+                target_date=target_date,
+                plan_id=arguments.get("plan_id"),
+                item_type=arguments.get("item_type"),
+            )
+        )
     if query_mode == "today_overview":
-        return dict(get_today_overview(**_pick(arguments, "user_id", "target_date", "plan_id")))
+        return dict(get_today_overview(user_id=arguments["user_id"], target_date=target_date, plan_id=arguments.get("plan_id")))
     if query_mode == "today_summary":
-        return dict(get_today_summary(**_pick(arguments, "user_id", "target_date", "plan_id")))
+        return dict(get_today_summary(user_id=arguments["user_id"], target_date=target_date, plan_id=arguments.get("plan_id")))
     return dict(
         get_calendar_range(
             user_id=arguments["user_id"],
-            start_at=arguments.get("start_at") or arguments.get("target_date"),
-            end_at=arguments.get("end_at") or arguments.get("target_date"),
+            start_at=arguments.get("start_at") or target_date,
+            end_at=arguments.get("end_at") or target_date,
             plan_id=arguments.get("plan_id"),
             item_type=arguments.get("item_type"),
-            include_items=bool(arguments.get("include_items")),
+            include_items=arguments.get("include_items") is not False,
             limit=arguments.get("limit", 200),
         )
     )

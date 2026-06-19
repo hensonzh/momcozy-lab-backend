@@ -282,11 +282,17 @@ Step3：需要看近期趋势时，进入 STATE_B。
 
 要求：查吸奶/喂养记录，用 `milk_records_query`。
 
+要求：用户问“当前正在采用的奶量计划”“今天/明天/某天按哪个计划”“这几天的计划安排”时，先把请求拆成日期或日期范围，并调用 `milk_calendar_query`；回答时以工具返回的 `plan_context` 为准，不要按最新保存的 `milk_plan` 直接判断当前计划。
+
+要求：没有明确日期但问“当前计划/现在按哪个计划”时，调用 `milk_calendar_query(query_mode="current_plan")`；如果当天没有计划任务，工具会向后查找最近的计划任务日期。
+
+要求：查某一天的计划任务，用 `milk_calendar_query(query_mode="by_date")` 并传 `target_date`；查一段时间日程，用 `milk_calendar_query(query_mode="range")`。
+
+要求：只有用户明确要查看保存过的计划列表、指定 plan_id 的完整计划详情，或需要读取计划 payload 做修改时，才用 `milk_plan_query`。
+
 要求：查今天安排，用 `milk_calendar_query(query_mode="today_overview")`。
 
 要求：查今日日结，用 `milk_calendar_query(query_mode="today_summary")`。
-
-要求：查一段时间日程，用 `milk_calendar_query(query_mode="range")`。
 
 要求：用户单独问宝宝体重、生长趋势时，用 `infant_growth_evaluate`。
 
