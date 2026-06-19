@@ -196,7 +196,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "birth_journey_intake_manage": _function_tool(
         "birth_journey_intake_manage",
-        "推进孕期计划的信息采集状态机。模型只负责识别用户是否要制定计划、把用户本轮回答交给本工具，并根据 next_step 继续；不要自己维护字段清单。工具会依次处理：基础信息表单、产检记录上传、孕期高风险因素、当前症状、生活方式与场景、喂养/IBCLC 信息。状态 ready_to_generate 时，使用工具返回的 plan_context 调用 birth_journey_plan_card_create。",
+        "推进孕期计划的信息采集状态机。模型只负责识别用户是否要制定计划、把用户本轮回答交给本工具，并根据 next_step 继续；不要自己维护字段清单。进入采集后，用户回答当前 next_step/confirmation_question 时，必须调用本工具提交对应 action/payload 推进状态；不要自行判断还缺哪个字段，也不要追加询问工具未返回的字段。已提供大致孕周即可继续，例如 30周/孕30周/30+几天 都是可接受表达，不要为精确到天而追问。工具会依次处理：基础信息表单、产检记录上传、孕期高风险因素、当前症状、生活方式与场景、喂养/IBCLC 信息。状态 ready_to_generate 时，使用工具返回的 plan_context 调用 birth_journey_plan_card_create。",
         {
             "action": {
                 "type": "string",
@@ -409,7 +409,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "milk_status_query": _function_tool(
         "milk_status_query",
-        "GET 只读工具：读取类似 MaiMomcozy 状态页的奶量聚合信息，包括妈妈宝宝资料、今日产奶/喂养、30 日趋势、宝宝生长记录和当天计划任务。适合用户问“现在状态怎么样”“今天数据”“状态页信息”或需要展示近期趋势事实。不要用它替代 milk_analysis_intake_manage + milk_analysis_evaluate 来回答奶量是否够、是否正常、趋势风险或适合什么计划；不要用它替代 milk_records_query 查可修改的原始记录。",
+        "GET 只读工具：读取类似 MaiMomcozy 状态页的奶量聚合信息，包括妈妈宝宝资料、今日产奶/喂养、30 日趋势、宝宝生长记录和当天计划任务。适合用户问“现在状态怎么样”“今天数据”“状态页信息”或需要展示近期趋势事实。不要用它替代 milk_analysis_intake_manage + milk_analysis_evaluate 来回答奶量是否够、是否正常、趋势风险或适合什么计划；不要用它生成或暗示计划前追问，也不要把状态页建议改写成用户问题；不要用它替代 milk_records_query 查可修改的原始记录。",
         {
             "section": {
                 "type": "string",
@@ -424,7 +424,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "milk_records_query": _function_tool(
         "milk_records_query",
-        "GET 只读工具：读取任意时间段内的吸奶、亲喂、母乳瓶喂和奶粉瓶喂记录，返回结构化原始记录和聚合摘要。只适合用户明确要“查记录、列出每天多少、看原始记录、修改/删除某条记录”。本工具返回的是实际发生记录，不是计划；不要把记录时间称为“原计划/当前计划”。如果用户说“分析最近吸奶情况、奶量够不够、是否正常、趋势好不好、要不要追奶/稳奶/减奶”，不要只用本工具，必须改用 milk_analysis_intake_manage，因为本工具不维护完整分析采集表。不要在同一轮用相同 start_at/end_at/record_scope 重复调用；需要记录 ID 做修改/删除时才再次查询原始记录。亲喂奶量如出现估算会明确标记为 estimated。",
+        "GET 只读工具：读取任意时间段内的吸奶、亲喂、母乳瓶喂和奶粉瓶喂记录，返回结构化原始记录和聚合摘要。只适合用户明确要“查记录、列出每天多少、看原始记录、修改/删除某条记录”。本工具返回的是实际发生记录，不是计划；不要把记录时间称为“原计划/当前计划”。如果用户说“分析最近吸奶情况、奶量够不够、是否正常、趋势好不好、要不要追奶/稳奶/减奶”，不要只用本工具，必须改用 milk_analysis_intake_manage，因为本工具不维护完整分析采集表，也不能决定下一项用户追问。不要在同一轮用相同 start_at/end_at/record_scope 重复调用；需要记录 ID 做修改/删除时才再次查询原始记录。亲喂奶量如出现估算会明确标记为 estimated。",
         {
             "start_at": {"type": "string", "description": "起始日期或日期时间，例如 2026-05-01 或 2026-05-01 08:00。"},
             "end_at": {"type": "string", "description": "结束日期或日期时间；日期会按整天处理并作为 exclusive end 的下一日 00:00。"},
@@ -575,7 +575,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "milk_analysis_intake_manage": _function_tool(
         "milk_analysis_intake_manage",
-        "FLOW 只读工具：推进奶量分析的信息采集状态机，不写数据库。工具会自动读取/复用过去 7 天原始奶量记录和日级汇总，维护记录、宝宝状态、宝宝生长信号、妈妈红旗症状、乳房舒适度的信息采集表；信息未齐时只返回下一项追问，信息齐后返回 analysis_context。模型只传本轮用户原话和已知宝宝/妈妈状态，不要自己维护字段清单；analysis_context ready 后下一步调用 milk_analysis_evaluate。",
+        "FLOW 只读工具：推进奶量分析的信息采集状态机，不写数据库。工具会自动读取/复用过去 7 天原始奶量记录和日级汇总，维护记录、宝宝状态、宝宝生长信号、妈妈红旗症状、乳房舒适度的信息采集表；信息未齐时只返回当前一项追问 next_question，最终回复只能问这一项，不要说最后一个/只差一个，也不要同时追问其它 missing_fields；信息齐后返回 analysis_context。模型只传本轮用户原话和已知宝宝/妈妈状态，不要自己维护字段清单；analysis_context ready 后下一步调用 milk_analysis_evaluate。",
         {
             "action": {
                 "type": "string",
@@ -599,7 +599,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "milk_analysis_evaluate": _function_tool(
         "milk_analysis_evaluate",
-        "EVALUATE 只读工具：基于 milk_analysis_intake_manage 返回或会话状态中的 analysis_context 完成奶量分析，不写数据库，不生成计划草稿。工具会复用过去 7 天原始记录、日级汇总、宝宝状态和妈妈状态，返回奶量结论、风险边界和是否适合进入计划；如果缺 analysis_context，先回到 milk_analysis_intake_manage。",
+        "EVALUATE 只读工具：基于 milk_analysis_intake_manage 返回或会话状态中的 analysis_context 完成奶量分析，不写数据库，不生成计划草稿。工具会复用过去 7 天原始记录、日级汇总、宝宝状态和妈妈状态，返回奶量结论、风险边界和是否适合进入计划；如果缺 analysis_context，先回到 milk_analysis_intake_manage；如果工具返回缺宝宝/妈妈上下文，只能按 next_question 追问当前一项，不要自行拼多个问题。信息齐并完成分析后，最终回复只总结判断并询问是否生成奶量计划；不要把记录节奏、分析素材或计划排程参考改写成新问题。",
         {
             "analysis_context": _nullable(
                 {
@@ -612,7 +612,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "milk_plan_preview_create": _function_tool(
         "milk_plan_preview_create",
-        "PREVIEW 只读工具：在 milk_analysis_evaluate 完成后生成追奶、稳奶或减奶计划草稿，不写数据库。工具只负责计划预览和卡片；保存必须等用户确认后调用 milk_plan_mutate。参数优先使用 analysis_context 和 assessment_result，缺上下文时先回到 milk_analysis_intake_manage 或 milk_analysis_evaluate；不要向用户重复索要工具已读取到的过去 7 天记录或日程节奏。",
+        "PREVIEW 只读工具：在 milk_analysis_evaluate 完成后生成追奶、稳奶或减奶计划草稿，不写数据库。工具只负责计划预览和卡片；保存必须等用户确认后调用 milk_plan_mutate。参数优先使用 analysis_context 和 assessment_result，缺上下文时先回到 milk_analysis_intake_manage 或 milk_analysis_evaluate；如果工具返回缺宝宝/妈妈上下文，只能按 next_question 追问当前一项，不要自行拼多个问题；不要向用户重复索要工具已读取到的过去 7 天记录或日程节奏。",
         {
             "analysis_context": _nullable(
                 {
@@ -640,25 +640,6 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
             ),
         },
     ),
-    "milk_assessment_evaluate": _function_tool(
-        "milk_assessment_evaluate",
-        "EVALUATE 只读工具：综合评估近期奶量、记录完整度、宝宝摄入/精神状态和妈妈乳房/全身状态，返回参考区间、含亲喂估算、趋势、记录可信度、风险提示和下一步。所有奶量分析请求都要先确认宝宝摄入/精神状态和妈妈乳房/全身状态；缺少这些关键信息或存在风险时返回 needs_clinical_context 或 gate 结果。当 request_context 里有 milk_management_context，且用户本轮是在补充上一轮奶量评估缺失信息时，应继续调用本工具，把用户补充的信息整理进 infant_signals 或 maternal_symptoms，再获取新的流程结论，不要直接回复建议。奶量分析/计划流程中，用户说胀、涨、排不空、吸完还胀但否认发热/红肿/硬块加重/疼痛加重时，仍属于奶量管理流程，应通过 maternal_symptoms 标记 breast_fullness 或 incomplete_emptying，不要直接切成普通健康咨询。只查历史明细或单纯列每天多少时才用 milk_records_query。不是诊断，不生成卡片，也不生成最终用户话术。",
-        {
-            "as_of_time": _nullable({"type": "string", "description": "可选 ISO-8601 评估时间；不确定时传 null。"}),
-            "window_days": {"type": "integer", "description": "回看天数。分析最近吸奶情况、奶量趋势或全面评估通常用 7；用户已明确追奶/稳奶/减奶计划方向时可用 1。"},
-            "include_today": {"type": "boolean", "description": "是否包含当前日未完整记录。通常评估完整日时传 false。"},
-            "comprehensive_assessment": {"type": "boolean", "description": "本轮是否是在做综合奶量评估。用户要求分析奶量、补充了上一轮评估追问信息、或从奶量提醒进入时传 true；只是为计划工具准备最近一天输入时可传 false。"},
-            "workflow_intent": _nullable({"type": "string", "description": "当前奶量流程意图。用户正在分析奶量或正在补充上一轮奶量分析追问时传 milk_analysis，避免因为本轮只是回答问题而跳过综合评估。"}),
-            "maternal_symptoms": {
-                **JSON_OBJECT_STRING,
-                "description": "字符串编码 JSON。可包含 fever、chills、breast_redness、lump_or_hard_area、worsening_pain、nipple_damage、recurrent_plug、pain_level、breast_fullness、engorgement、post_pump_fullness、incomplete_emptying、symptom_text。用户说胀、涨、排不空、吸完还胀但否认红旗信号时，设置 breast_fullness 或 incomplete_emptying 为 true，并把 fever/breast_redness/lump_or_hard_area/worsening_pain 按用户回答设置为 false。没有信息传 {}。",
-            },
-            "infant_signals": {
-                **JSON_OBJECT_STRING,
-                "description": "字符串编码 JSON。可包含 wet_diapers_24h、stool_24h、baby_state、feeding_satisfaction、poor_feeding、poor_latch、lethargy、recent_weight、weight_trend、growth_concern。没有信息传 {}。",
-            },
-        },
-    ),
     "infant_growth_evaluate": _function_tool(
         "infant_growth_evaluate",
         "EVALUATE 只读工具：基于宝宝档案、生长记录和固定参考数据返回生长趋势规则结果。不是诊断；仅在用户提到身高、体重、增长或摄入是否足够时使用。",
@@ -681,25 +662,6 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
             "target_date": _nullable({**ISO_DATE, "description": "记录日期；不确定传 null，由运行时当前日期补齐。"}),
             "history_limit": {"type": "integer", "description": "写入后返回的历史记录条数，建议 5-10。"},
             "idempotency_key": {"type": "string"},
-        },
-    ),
-    "milk_plan_preview": _function_tool(
-        "milk_plan_preview",
-        "PREVIEW 候选方案工具：按确定性规则生成追奶、稳奶或减奶计划草稿，不写数据库，并返回保存前校验结果。用于用户明确想要生成/调整奶量计划，或完成奶量评估后表达接受上一轮建议、确认继续或希望进入下一步时；不要先追问工具可自动读取的近期吸奶、亲喂或日程节奏，本工具会自动读取最近 7 天吸奶、亲喂和日程记录来排时间。如果用户在奶量计划流程中说胀、涨、排不空、吸完还胀但否认发热/红肿/硬块加重/疼痛加重，不要改走普通健康咨询，应把这些作为 maternal_symptoms 放进 options，让计划把单次吸奶或亲喂效果和结束标准一起考虑。不要用于读取已有计划、单次 calendar 调整或设备使用指导。只有返回 plan_preview_ready 且 data.validation.valid=true 时才能展示确认保存；如用户给出目标，可同时返回目标校验结果。",
-        {
-            "plan_type": _nullable({"type": "string", "enum": ["increase_milk", "maintain_milk", "decrease_milk"]}),
-            "plan_days": _nullable({"type": "integer"}),
-            "custom_target_daily_ml": _nullable({"type": "number"}),
-            "target_daily_ml": _nullable({"type": "number"}),
-            "delta_ml": _nullable({"type": "number", "description": "未提供 target_daily_ml 时使用的每日增加或减少量。"}),
-            "source_plan_id": _nullable({"type": "integer", "description": "基于已有计划重新生成时传计划 ID；普通新计划传 null。"}),
-            "as_of_time": _nullable({"type": "string"}),
-            "options": _nullable(
-                {
-                    **JSON_OBJECT_STRING,
-                    "description": "字符串编码 JSON。可包含 prepared_assessment、prepared_growth_assessment、maternal_symptoms、infant_signals、observed_persistent_abnormal 或 medical_confirmation_confirmed。maternal_symptoms 可包含 breast_fullness、engorgement、post_pump_fullness、incomplete_emptying、symptom_text；无红旗的胀/排不空要作为计划约束传入。",
-                }
-            ),
         },
     ),
 }

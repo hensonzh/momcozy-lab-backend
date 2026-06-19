@@ -11,6 +11,7 @@ from uuid import uuid4
 
 from .contexts import (
     ContextState,
+    active_service_domain,
     birth_journey_intake_state,
     build_request_context,
     hospital_bag_slots,
@@ -551,9 +552,9 @@ def _normalize_tool_name(tool_name: str) -> str:
 def _tool_semantic_phase(tool_name: str) -> str:
     if tool_name in {"tool_search", "tool_search_call"}:
         return "thinking"
-    if tool_name in {"milk_analysis_evaluate", "milk_assessment_evaluate", "infant_growth_evaluate", "risk_evaluate"}:
+    if tool_name in {"milk_analysis_evaluate", "infant_growth_evaluate", "risk_evaluate"}:
         return "evaluating"
-    if tool_name in {"milk_plan_preview_create", "milk_plan_preview", "milk_calendar_change_preview", "milk_calendar_reschedule_preview"}:
+    if tool_name in {"milk_plan_preview_create", "milk_calendar_change_preview", "milk_calendar_reschedule_preview"}:
         return "planning"
     if tool_name in {
         "milk_record_mutate",
@@ -629,16 +630,12 @@ def _tool_start_label(tool_name: str, arguments: dict[str, Any]) -> str:
         return "我先看看之前保存的奶量计划～"
     if tool_name == "milk_calendar_query":
         return "我先看看计划和日程任务～"
-    if tool_name == "milk_assessment_evaluate":
-        return "我来看看奶量趋势和执行情况～"
     if tool_name == "milk_analysis_evaluate":
         return "我来综合评估一下奶量问题～"
     if tool_name == "infant_growth_evaluate":
         return "我先看看宝宝的生长信号～"
     if tool_name == "risk_evaluate":
         return "我先确认一下有没有相关风险～"
-    if tool_name == "milk_plan_preview":
-        return "我先帮你拟一版奶量计划～"
     if tool_name == "milk_plan_preview_create":
         return "我先帮你拟一版奶量计划～"
     if tool_name in {"milk_calendar_change_preview", "milk_calendar_reschedule_preview"}:
@@ -704,9 +701,9 @@ def _tool_end_label(tool_name: str) -> str:
         return "我找到合适的方案啦"
     if tool_name in {"milk_records_query", "milk_status_query", "milk_snapshot_get", "milk_plan_query", "milk_calendar_query"}:
         return "我把奶量和日程信息整理一下～"
-    if tool_name in {"milk_analysis_evaluate", "milk_assessment_evaluate", "infant_growth_evaluate", "risk_evaluate"}:
+    if tool_name in {"milk_analysis_evaluate", "infant_growth_evaluate", "risk_evaluate"}:
         return "我把评估结果整理一下～"
-    if tool_name in {"milk_plan_preview_create", "milk_plan_preview"}:
+    if tool_name == "milk_plan_preview_create":
         return "我再完善一下计划草稿～"
     if tool_name in {"milk_calendar_change_preview", "milk_calendar_reschedule_preview"}:
         return "我把调整后的日程整理一下～"
@@ -773,8 +770,6 @@ def _tool_result_label(tool_name: str, result: dict[str, Any]) -> str:
         return "我把计划和日程整理好啦"
     if tool_name == "milk_plan_query":
         return "我看好之前的奶量计划啦"
-    if tool_name == "milk_assessment_evaluate":
-        return "我完成奶量评估啦"
     if tool_name == "milk_analysis_intake_manage":
         return "我把需要的信息核对好啦"
     if tool_name == "milk_analysis_evaluate":
@@ -793,7 +788,7 @@ def _tool_result_label(tool_name: str, result: dict[str, Any]) -> str:
         return _task_result_label(status)
     if tool_name == "infant_growth_mutate":
         return _mutation_result_label(status, "我已经保存好宝宝成长记录啦")
-    if tool_name in {"milk_plan_preview_create", "milk_plan_preview"}:
+    if tool_name == "milk_plan_preview_create":
         return "我拟好奶量计划草稿啦"
     if tool_name in {"milk_calendar_change_preview", "milk_calendar_reschedule_preview"}:
         return "我整理好日程调整预览啦"
@@ -1084,7 +1079,7 @@ def safe_tool_result(result: dict[str, Any]) -> dict[str, Any]:
             if isinstance(tool_data.get("milk_flow_decision"), dict):
                 safe["milk_flow_decision"] = tool_data["milk_flow_decision"]
             if result.get("tool_name") == "milk_analysis_intake_manage":
-                for key in ("checklist", "missing_fields", "current_field", "next_question", "executed_step", "next_tool"):
+                for key in ("checklist", "missing_fields", "current_field", "next_question", "remaining_count", "executed_step", "next_tool"):
                     if key in tool_data:
                         safe[key] = tool_data[key]
                 if isinstance(tool_data.get("analysis_context"), dict):
@@ -1094,7 +1089,15 @@ def safe_tool_result(result: dict[str, Any]) -> dict[str, Any]:
                 assessment_data = assessment_result.get("data") if isinstance(assessment_result.get("data"), dict) else {}
                 if assessment_data:
                     safe["assessment"] = _compact_milk_assessment_data(assessment_data)
-                for key in ("analysis_context", "assessment_result", "next_tool", "executed_step"):
+                for key in (
+                    "missing_fields",
+                    "suggested_questions",
+                    "current_field",
+                    "next_question",
+                    "remaining_count",
+                    "next_tool",
+                    "executed_step",
+                ):
                     if key in tool_data:
                         safe[key] = tool_data[key]
             if result.get("tool_name") == "milk_plan_mutate":
@@ -1103,20 +1106,8 @@ def safe_tool_result(result: dict[str, Any]) -> dict[str, Any]:
                         safe[key] = tool_data[key]
                 if isinstance(tool_data.get("calendar_delta"), dict):
                     safe["calendar_delta"] = _compact_milk_plan_calendar_delta(tool_data["calendar_delta"])
-            if result.get("tool_name") == "milk_assessment_evaluate":
-                safe["assessment"] = _compact_milk_assessment_data(tool_data)
-                for key in ("workflow_intent", "continuation_instruction", "missing_fields", "suggested_questions"):
-                    if key in tool_data:
-                        safe[key] = tool_data[key]
-            if result.get("tool_name") == "milk_plan_preview":
-                for key in ("workflow_intent", "continuation_instruction", "missing_fields", "suggested_questions"):
-                    if key in tool_data:
-                        safe[key] = tool_data[key]
-                clinical_data = tool_data.get("clinical_assessment")
-                if isinstance(clinical_data, dict):
-                    safe["clinical_assessment"] = _compact_milk_context_status_data(clinical_data)
             if result.get("tool_name") == "milk_plan_preview_create":
-                for key in ("workflow_intent", "continuation_instruction", "missing_fields", "suggested_questions", "analysis_context", "assessment_result"):
+                for key in ("workflow_intent", "continuation_instruction", "missing_fields", "suggested_questions", "current_field", "next_question", "remaining_count", "analysis_context"):
                     if key in tool_data:
                         safe[key] = tool_data[key]
                 clinical_data = tool_data.get("clinical_assessment")
@@ -1126,7 +1117,7 @@ def safe_tool_result(result: dict[str, Any]) -> dict[str, Any]:
             safe["form"] = tool_result["form"]
         if result.get("tool_name") in {"labor_communication_card_create", "birth_journey_plan_card_create", "hospital_bag_card_create"} and isinstance(tool_result.get("card"), dict):
             safe["card"] = tool_result["card"]
-        if result.get("tool_name") in {"milk_status_query", "milk_analysis_evaluate", "milk_assessment_evaluate", "milk_plan_preview_create", "milk_plan_preview", "milk_plan_mutate"} and isinstance(tool_result.get("card"), dict):
+        if result.get("tool_name") in {"milk_status_query", "milk_analysis_evaluate", "milk_plan_preview_create", "milk_plan_mutate"} and isinstance(tool_result.get("card"), dict):
             safe["card"] = tool_result["card"]
             if result.get("tool_name") == "milk_plan_mutate":
                 plan_feedback = _plan_feedback_from_safe_tool_result(result.get("tool_name"), tool_result)
@@ -1193,16 +1184,8 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
         return _compact_milk_plan_card_output(safe, result)
     if tool_name == "milk_plan_preview_create":
         return _compact_milk_plan_no_card_output(safe, result)
-    if tool_name == "milk_assessment_evaluate":
-        return _compact_milk_assessment_output(safe, result)
     if tool_name == "milk_status_query" and isinstance(safe.get("card"), dict):
         return _compact_mom_baby_status_card_output(safe)
-    if tool_name == "milk_plan_preview" and safe.get("status") == "milk_plan_needs_clinical_context":
-        return _compact_milk_plan_missing_context_output(safe)
-    if tool_name == "milk_plan_preview" and isinstance(safe.get("card"), dict):
-        return _compact_milk_plan_card_output(safe, result)
-    if tool_name == "milk_plan_preview":
-        return _compact_milk_plan_no_card_output(safe, result)
     if tool_name in MILK_WRITE_TOOL_NAMES and safe.get("status") == "needs_write_confirmation":
         return _compact_milk_write_confirmation_output(safe)
     if tool_name == "milk_plan_mutate":
@@ -1553,7 +1536,9 @@ def _compact_birth_journey_intake_output(safe: dict[str, Any], raw_result: dict[
     else:
         compact["final_response_instruction"] = (
             "最终回复只推进 next_step 对应的一步：如果有 confirmation_question，就只问这个问题；"
-            "不要同时询问多个后续阶段，也不要生成孕期计划。"
+            "confirmation_question 是本轮唯一要问的问题；不要同时询问多个后续阶段，也不要生成孕期计划。"
+            "不要自行追加字段完整性判断，尤其不要追问已经填写过的孕周是否为整周或 30+几天；"
+            "如果已有 30周/孕30周 这类大致孕周，视为可用信息。"
             "当前步骤的快捷回复已由应用侧准备好，不要再调用 ui_quick_replies_create。"
         )
     return {key: value for key, value in compact.items() if value not in (None, "", [])}
@@ -1983,10 +1968,12 @@ def _compact_milk_analysis_intake_output(safe: dict[str, Any], original_result: 
         },
     }
     followup_message = _assistant_followup_message(original_result)
-    if followup_message:
-        compact["final_response_instruction"] = _followup_final_response_instruction(
-            str(safe.get("tool_name") or ""),
-            followup_message,
+    next_question = str(intake.get("next_question") or followup_message or "").strip()
+    if next_question:
+        compact["final_response_instruction"] = _milk_single_question_final_response_instruction(
+            next_question,
+            field_id=intake.get("current_field"),
+            remaining_count=intake.get("remaining_count"),
         )
     return _drop_empty(compact)
 
@@ -1994,15 +1981,48 @@ def _compact_milk_analysis_intake_output(safe: dict[str, Any], original_result: 
 def _compact_milk_analysis_evaluate_output(safe: dict[str, Any], original_result: dict[str, Any]) -> dict[str, Any]:
     tool_result = original_result.get("result") if isinstance(original_result.get("result"), dict) else {}
     data = tool_result.get("data") if isinstance(tool_result.get("data"), dict) else {}
+    missing_fields = safe.get("missing_fields") if isinstance(safe.get("missing_fields"), list) else []
+    if missing_fields:
+        missing_context = _missing_milk_context_for_model(
+            missing_fields,
+            suggested_questions=safe.get("suggested_questions"),
+            current_field=safe.get("current_field"),
+            next_question=safe.get("next_question"),
+            remaining_count=safe.get("remaining_count"),
+        )
+        compact = {
+            "ok": safe.get("ok"),
+            "tool_name": safe.get("tool_name"),
+            "status": safe.get("status"),
+            "workflow": {
+                "missing_context": missing_context,
+                "next_tool": data.get("next_tool"),
+            },
+            "需要继续确认": missing_context,
+        }
+        current_question = str(missing_context.get("current_question") or "").strip()
+        if current_question:
+            compact["final_response_instruction"] = _milk_single_question_final_response_instruction(
+                current_question,
+                field_id=missing_context.get("current_field"),
+                remaining_count=missing_context.get("remaining_count"),
+            )
+        return _drop_empty(compact)
     assessment = data.get("assessment_result") if isinstance(data.get("assessment_result"), dict) else {}
     if assessment:
-        compact = model_tool_output(
-            {
-                "ok": assessment.get("ok") is not False,
-                "tool_name": "milk_assessment_evaluate",
-                "result": assessment,
-            }
-        )
+        assessment_data = assessment.get("data") if isinstance(assessment.get("data"), dict) else {}
+        assessment_safe: dict[str, Any] = {
+            "ok": assessment.get("ok") is not False,
+            "result_ok": assessment.get("ok") is not False,
+            "tool_name": "milk_analysis_evaluate",
+            "status": assessment.get("status"),
+            "summary": assessment.get("summary"),
+            "assessment": _compact_milk_assessment_data(assessment_data) if assessment_data else {},
+        }
+        for key in ("workflow_intent", "continuation_instruction", "missing_fields", "suggested_questions", "current_field", "next_question", "remaining_count"):
+            if key in assessment_data:
+                assessment_safe[key] = assessment_data[key]
+        compact = _compact_milk_assessment_output(assessment_safe, {"result": assessment})
         if isinstance(compact, dict):
             workflow = compact.get("workflow") if isinstance(compact.get("workflow"), dict) else {}
             compact["workflow"] = _drop_empty(
@@ -2012,7 +2032,6 @@ def _compact_milk_analysis_evaluate_output(safe: dict[str, Any], original_result
                     "intake_complete": True,
                 }
             )
-            compact["tool_name"] = "milk_analysis_evaluate"
             return compact
     return _drop_empty(
         {
@@ -2040,6 +2059,7 @@ def _compact_milk_intake_flow(data: dict[str, Any]) -> dict[str, Any]:
             ],
             "current_field": data.get("current_field") or flow_state.get("current_field"),
             "next_question": data.get("next_question") or flow_state.get("next_question"),
+            "remaining_count": data.get("remaining_count"),
         }
     )
 
@@ -2061,12 +2081,27 @@ def _compact_milk_assessment_output(safe: dict[str, Any], original_result: dict[
         if isinstance(assessment.get("milk_flow_decision"), dict)
         else {}
     )
-    missing_context = _missing_milk_context_for_model(safe.get("missing_fields"), suggested_questions=safe.get("suggested_questions"))
+    missing_context = _missing_milk_context_for_model(
+        safe.get("missing_fields"),
+        suggested_questions=safe.get("suggested_questions"),
+        current_field=safe.get("current_field"),
+        next_question=safe.get("next_question"),
+        remaining_count=safe.get("remaining_count"),
+    )
     compact = {
         "ok": safe.get("result_ok", safe.get("ok")),
         "tool_name": safe.get("tool_name"),
-        "facts": _milk_assessment_facts_for_model(original_data, compact_assessment=assessment),
-        "interpretation": _milk_assessment_interpretation_for_model(original_data, compact_assessment=assessment, status=status),
+        "facts": _milk_assessment_facts_for_model(
+            original_data,
+            compact_assessment=assessment,
+            include_recent_milk_rhythm=False,
+        ),
+        "interpretation": _milk_assessment_interpretation_for_model(
+            original_data,
+            compact_assessment=assessment,
+            status=status,
+            include_control_suggestion=False,
+        ),
         "workflow": _drop_empty(
             {
                 "status": safe.get("status"),
@@ -2079,10 +2114,33 @@ def _compact_milk_assessment_output(safe: dict[str, Any], original_result: dict[
         "milk_flow_decision": _plain_milk_flow_decision(flow_decision),
         "需要继续确认": missing_context,
     }
+    current_question = str(missing_context.get("current_question") or "").strip()
+    if current_question:
+        compact["final_response_instruction"] = _milk_single_question_final_response_instruction(
+            current_question,
+            field_id=missing_context.get("current_field"),
+            remaining_count=missing_context.get("remaining_count"),
+        )
+    else:
+        plan_decision = flow_decision.get("plan_decision") if isinstance(flow_decision.get("plan_decision"), dict) else {}
+        if plan_decision.get("can_start_plan") is True:
+            compact["final_response_instruction"] = (
+                "奶量分析已经完成，信息采集已经结束。最终回复只能包含两部分："
+                "1) 用 1-2 句说明当前判断和适合的方向；"
+                "2) 只询问用户是否现在生成奶量计划。"
+                "不要继续追问任何新的诊断、排程或计划细节；不要把记录节奏、分析素材或计划排程参考改写成新问题。"
+                "任何用户追问都必须来自 milk_analysis_intake_manage 当前返回的 next_question。"
+                "不要说已经开始制定计划，不要直接给完整计划，也不要调用或暗示已经生成计划卡片。"
+            )
     return _drop_empty(compact)
 
 
-def _milk_assessment_facts_for_model(data: dict[str, Any], *, compact_assessment: dict[str, Any] | None = None) -> dict[str, Any]:
+def _milk_assessment_facts_for_model(
+    data: dict[str, Any],
+    *,
+    compact_assessment: dict[str, Any] | None = None,
+    include_recent_milk_rhythm: bool = True,
+) -> dict[str, Any]:
     compact_assessment = compact_assessment if isinstance(compact_assessment, dict) else {}
     source_context = data.get("source_record_context") if isinstance(data.get("source_record_context"), dict) else {}
     normality = data.get("milk_normality") if isinstance(data.get("milk_normality"), dict) else {}
@@ -2102,9 +2160,13 @@ def _milk_assessment_facts_for_model(data: dict[str, Any], *, compact_assessment
                 "calendar_tasks": calendar,
             },
             "recent_milk_rhythm": (
-                _compact_recent_milk_rhythm_for_model(recent_milk_rhythm)
-                if recent_milk_rhythm
-                else compact_assessment.get("recent_milk_rhythm")
+                (
+                    _compact_recent_milk_rhythm_for_model(recent_milk_rhythm)
+                    if recent_milk_rhythm
+                    else compact_assessment.get("recent_milk_rhythm")
+                )
+                if include_recent_milk_rhythm
+                else None
             ),
         }
     )
@@ -2115,6 +2177,7 @@ def _milk_assessment_interpretation_for_model(
     *,
     compact_assessment: dict[str, Any] | None = None,
     status: str = "",
+    include_control_suggestion: bool = True,
 ) -> dict[str, Any]:
     compact_assessment = compact_assessment if isinstance(compact_assessment, dict) else {}
     normality = data.get("milk_normality") if isinstance(data.get("milk_normality"), dict) else {}
@@ -2130,7 +2193,11 @@ def _milk_assessment_interpretation_for_model(
             "baby_intake": compact_assessment.get("baby_intake"),
             "maternal_state": compact_assessment.get("maternal_state"),
             "clinical": compact_clinical or clinical,
-            "control_suggestion": data.get("control_suggestion") or compact_assessment.get("control_suggestion"),
+            "control_suggestion": (
+                data.get("control_suggestion") or compact_assessment.get("control_suggestion")
+            )
+            if include_control_suggestion
+            else None,
         }
     )
 
@@ -2218,7 +2285,7 @@ def _plain_milk_assessment_context(assessment: dict[str, Any], *, status: str) -
     if confidence == "low":
         record_facts.append("现在记录还不够，不适合直接下结论")
     elif confidence == "medium":
-        record_facts.append("记录大致可用，但还要留意有没有漏记")
+        record_facts.append("记录大致可用，完整度以综合奶量分析状态机为准")
     elif confidence == "high":
         record_facts.append("记录比较完整，可以作为这次判断的主要依据")
     if missing:
@@ -2337,6 +2404,7 @@ def _plain_missing_milk_assessment_fields(value: Any) -> list[str]:
         "infant_signals": "宝宝近 24 小时尿布、精神和吃奶表现",
         "maternal_symptoms": "妈妈有没有发热、乳房红肿、硬块或疼痛加重",
         "infant_wet_diapers": "宝宝近 24 小时尿量/尿布情况",
+        "infant_state_or_satisfaction": "宝宝精神状态和吃奶后表现",
         "infant_state_or_feeding_satisfaction": "宝宝精神状态和吃奶后表现",
         "infant_growth_signal": "宝宝近期体重增长情况",
         "maternal_red_flags": "妈妈有没有发热、寒战、红肿、硬块或疼痛加重",
@@ -2345,9 +2413,55 @@ def _plain_missing_milk_assessment_fields(value: Any) -> list[str]:
     return [labels.get(str(item), str(item)) for item in raw_items if str(item).strip()]
 
 
-def _missing_milk_context_for_model(value: Any, *, suggested_questions: Any = None) -> dict[str, Any]:
+def _milk_question_for_missing_field(field_id: str) -> str:
+    questions = {
+        "infant_wet_diapers": "宝宝近 24 小时尿量/尿布大概正常吗？",
+        "infant_state_or_satisfaction": "宝宝精神状态怎么样，吃奶后通常能安稳一会儿吗？",
+        "infant_state_or_feeding_satisfaction": "宝宝精神状态怎么样，吃奶后通常能安稳一会儿吗？",
+        "infant_growth_signal": "宝宝最近体重增长看起来还正常吗？",
+        "maternal_red_flags": "你有没有发热、寒战、乳房明显红肿、硬块，或疼痛越来越重？",
+        "maternal_breast_comfort": "吸奶或亲喂后乳房是比较舒服，还是还会胀、排不空或疼？",
+    }
+    return questions.get(str(field_id or "").strip(), "")
+
+
+def _milk_single_question_final_response_instruction(question: str, *, field_id: Any = None, remaining_count: Any = None) -> str:
+    question = str(question or "").strip()
+    if not question:
+        return ""
+    field_text = str(field_id or "").strip()
+    count_text = ""
+    if isinstance(remaining_count, int) and remaining_count > 0:
+        count_text = f" 当前内部仍有 {remaining_count} 项待确认，但本轮只问当前这一项。"
+    return (
+        "当前仍处于奶量分析信息采集阶段。最终回复可以先用一句话简短承接用户刚补充的信息，"
+        "但必须只追问下面这一项。"
+        "不要说“最后一个”“最后再问”“只差一个”“再确认最后一个”；"
+        "不要同时追问其它缺失项，不要输出奶量结论，不要给追奶、稳奶或减奶计划。"
+        f"{count_text}"
+        + (f"\n\n当前字段：{field_text}" if field_text else "")
+        + f"\n\n当前只问：\n{question}"
+    )
+
+
+def _missing_milk_context_for_model(
+    value: Any,
+    *,
+    suggested_questions: Any = None,
+    current_field: Any = None,
+    next_question: Any = None,
+    remaining_count: Any = None,
+) -> dict[str, Any]:
     labels = _plain_missing_milk_assessment_fields(value)
     raw_items = [str(item) for item in value if str(item).strip()] if isinstance(value, list) else []
+    current_field_text = str(current_field or "").strip() or (raw_items[0] if raw_items else "")
+    suggested = [str(item).strip() for item in suggested_questions if str(item).strip()] if isinstance(suggested_questions, list) else []
+    current_question = str(next_question or "").strip()
+    if not current_question and suggested:
+        current_question = suggested[0]
+    if not current_question and current_field_text:
+        current_question = _milk_question_for_missing_field(current_field_text)
+    remaining_count_value = remaining_count if isinstance(remaining_count, int) else len(raw_items)
     why = []
     if "infant_signals" in raw_items or any(item in raw_items for item in ("infant_wet_diapers", "infant_state_or_feeding_satisfaction", "infant_growth_signal")):
         why.append("宝宝尿布、精神和吃奶表现会影响下一步是继续观察、调整节奏，还是先联系专业支持。")
@@ -2356,6 +2470,11 @@ def _missing_milk_context_for_model(value: Any, *, suggested_questions: Any = No
     return _drop_empty(
         {
             "还需要确认": labels,
+            "current_field": current_field_text,
+            "current_question": current_question,
+            "remaining_count": remaining_count_value,
+            "当前只问": current_question,
+            "回复限制": "最终回复只问 current_question 这一项，不要说最后一个或只差一个，也不要同时追问其它字段。",
             "为什么要确认": why,
         }
     )
@@ -2366,7 +2485,7 @@ def _plain_record_confidence(record_domain: dict[str, Any]) -> str:
     if confidence == "high":
         return "记录比较完整，可以作为这次判断的主要依据。"
     if confidence == "medium":
-        return "记录大致可用，但还要留意有没有漏记。"
+        return "记录大致可用，完整度以综合奶量分析状态机为准。"
     if confidence == "low":
         return "记录还不够，需要先补最近吸奶、亲喂或瓶喂情况。"
     return "还没有足够记录信息。"
@@ -2694,7 +2813,13 @@ def _compact_milk_write_confirmation_output(safe: dict[str, Any]) -> dict[str, A
 
 
 def _compact_milk_plan_missing_context_output(safe: dict[str, Any]) -> dict[str, Any]:
-    missing_context = _missing_milk_context_for_model(safe.get("missing_fields"), suggested_questions=safe.get("suggested_questions"))
+    missing_context = _missing_milk_context_for_model(
+        safe.get("missing_fields"),
+        suggested_questions=safe.get("suggested_questions"),
+        current_field=safe.get("current_field"),
+        next_question=safe.get("next_question"),
+        remaining_count=safe.get("remaining_count"),
+    )
     compact: dict[str, Any] = {
         "ok": safe.get("ok"),
         "tool_name": safe.get("tool_name"),
@@ -2705,6 +2830,13 @@ def _compact_milk_plan_missing_context_output(safe: dict[str, Any]) -> dict[str,
             "补齐后": "再继续生成奶量计划。",
         },
     }
+    current_question = str(missing_context.get("current_question") or "").strip()
+    if current_question:
+        compact["final_response_instruction"] = _milk_single_question_final_response_instruction(
+            current_question,
+            field_id=missing_context.get("current_field"),
+            remaining_count=missing_context.get("remaining_count"),
+        )
     return _drop_empty(compact)
 
 
@@ -2713,30 +2845,40 @@ def _compact_milk_plan_no_card_output(safe: dict[str, Any], result: dict[str, An
     clinical_context = clinical.get("user_context") if isinstance(clinical.get("user_context"), dict) else {}
     summary = str(safe.get("summary") or "").strip()
     data = _tool_result_data(result or {}) if isinstance(result, dict) else {}
+    missing_context = _missing_milk_context_for_model(
+        safe.get("missing_fields"),
+        suggested_questions=safe.get("suggested_questions"),
+        current_field=safe.get("current_field"),
+        next_question=safe.get("next_question"),
+        remaining_count=safe.get("remaining_count"),
+    )
     user_context: dict[str, Any] = {
         "当前结果": _plain_milk_plan_no_card_result(safe, clinical_context=clinical_context, summary=summary),
         "宝宝和妈妈情况": clinical_context,
         "下一步": _plain_milk_plan_no_card_next_step(safe, clinical_context=clinical_context),
     }
-    return _drop_empty(
-        {
-            "ok": safe.get("ok"),
-            "tool_name": safe.get("tool_name"),
-            "facts": _milk_plan_facts_for_model(data),
-            "interpretation": _milk_plan_interpretation_for_model(data),
-            "workflow": {
-                "status": safe.get("status"),
-                "requires_confirmation": safe.get("requires_confirmation"),
-                "missing_context": _missing_milk_context_for_model(
-                    safe.get("missing_fields"),
-                    suggested_questions=safe.get("suggested_questions"),
-                ),
-                "milk_flow_decision": _plain_milk_flow_decision(safe.get("milk_flow_decision") if isinstance(safe.get("milk_flow_decision"), dict) else {}),
-            },
+    compact = {
+        "ok": safe.get("ok"),
+        "tool_name": safe.get("tool_name"),
+        "facts": _milk_plan_facts_for_model(data),
+        "interpretation": _milk_plan_interpretation_for_model(data),
+        "workflow": {
+            "status": safe.get("status"),
+            "requires_confirmation": safe.get("requires_confirmation"),
+            "missing_context": missing_context,
             "milk_flow_decision": _plain_milk_flow_decision(safe.get("milk_flow_decision") if isinstance(safe.get("milk_flow_decision"), dict) else {}),
-            "user_context": user_context,
-        }
-    )
+        },
+        "milk_flow_decision": _plain_milk_flow_decision(safe.get("milk_flow_decision") if isinstance(safe.get("milk_flow_decision"), dict) else {}),
+        "user_context": user_context,
+    }
+    current_question = str(missing_context.get("current_question") or "").strip()
+    if current_question:
+        compact["final_response_instruction"] = _milk_single_question_final_response_instruction(
+            current_question,
+            field_id=missing_context.get("current_field"),
+            remaining_count=missing_context.get("remaining_count"),
+        )
+    return _drop_empty(compact)
 
 
 def _plain_milk_plan_no_card_result(safe: dict[str, Any], *, clinical_context: dict[str, Any], summary: str) -> str:
@@ -3077,7 +3219,7 @@ def _primary_artifact_id(tool_call_id: str, safe_result: dict[str, Any]) -> str 
 
 
 def _confirmation_title(tool_name: str, safe_result: dict[str, Any]) -> str:
-    if tool_name in {"milk_plan_preview_create", "milk_plan_preview"}:
+    if tool_name == "milk_plan_preview_create":
         if safe_result.get("requires_medical_confirmation"):
             return "我需要先确认健康边界"
         return "我需要你确认奶量计划"
@@ -3165,6 +3307,8 @@ def _required_milk_tool_after_tool_results(results: list[dict[str, Any]], inputs
         tool_result = result.get("result") if isinstance(result.get("result"), dict) else {}
         data = tool_result.get("data") if isinstance(tool_result.get("data"), dict) else {}
         status = str(tool_result.get("status") or "").strip()
+        if tool_name != "milk_analysis_intake_manage" and str(data.get("next_tool") or "").strip() == "milk_analysis_intake_manage":
+            return "milk_analysis_intake_manage"
         if tool_name == "milk_analysis_intake_manage" and status == "milk_analysis_ready_to_evaluate":
             if isinstance(data.get("analysis_context"), dict):
                 return "milk_analysis_evaluate"
@@ -3188,13 +3332,20 @@ def _tool_result_disables_followup_tools(result: dict[str, Any]) -> bool:
     tool_name = str(result.get("tool_name") or "")
     tool_result = result.get("result") if isinstance(result.get("result"), dict) else {}
     status = str(tool_result.get("status") or "").strip()
+    data = tool_result.get("data") if isinstance(tool_result.get("data"), dict) else {}
     if tool_name == "birth_journey_intake_manage":
         return status == "blocked_by_symptoms" or isinstance(tool_result.get("auto_tool_result"), dict)
     if tool_name == "birth_journey_plan_card_create" and isinstance(tool_result.get("card"), dict):
         return True
-    if tool_name in {"milk_plan_preview_create", "milk_plan_preview"}:
+    if tool_name.startswith("milk_"):
+        missing = data.get("missing_fields") if isinstance(data.get("missing_fields"), list) else []
+        if missing and str(data.get("next_tool") or "").strip() == "milk_analysis_intake_manage":
+            return True
+    if tool_name == "milk_analysis_intake_manage":
+        if status in {"milk_analysis_intake_collecting", "milk_analysis_intake_needs_records"}:
+            return True
+    if tool_name == "milk_plan_preview_create":
         if status == "milk_plan_preview_needs_analysis_evaluation":
-            data = tool_result.get("data") if isinstance(tool_result.get("data"), dict) else {}
             return str(data.get("next_tool") or "").strip() != "milk_analysis_evaluate"
         if isinstance(tool_result.get("card"), dict):
             return True
@@ -3288,6 +3439,10 @@ def _required_milk_management_tool(inputs: RuntimeInputs, options: BuildAgentReq
         return "milk_calendar_query"
     state = _milk_management_state_from_options(options)
     intake = state.get("analysis_intake") if isinstance(state.get("analysis_intake"), dict) else {}
+    if not intake and _user_message_starts_milk_analysis_flow(inputs.get("user_message")):
+        return "milk_analysis_intake_manage"
+    if not intake and _user_message_should_resume_milk_analysis_intake(inputs, options, state):
+        return "milk_analysis_intake_manage"
     if not intake:
         return None
     if _milk_analysis_intake_ready_for_save(intake):
@@ -3319,6 +3474,81 @@ def _milk_management_state_from_options(options: BuildAgentRequestOptions) -> di
     if isinstance(context_state, ContextState) and isinstance(context_state.milk_management_state, dict):
         return context_state.milk_management_state
     return {}
+
+
+def _user_message_should_resume_milk_analysis_intake(
+    inputs: RuntimeInputs,
+    options: BuildAgentRequestOptions,
+    state: dict[str, Any],
+) -> bool:
+    message = inputs.get("user_message")
+    if not _user_message_looks_like_milk_analysis_followup_answer(message):
+        return False
+    if isinstance(state.get("last_fact_read"), dict):
+        return True
+    if not _user_message_answers_milk_record_completeness(message):
+        return False
+    loaded_skill_ids = options.get("loaded_skill_ids")
+    if isinstance(loaded_skill_ids, list) and "milk-management" in {str(item) for item in loaded_skill_ids}:
+        return True
+    context_state = options.get("context_state")
+    domain = active_service_domain(inputs, context_state if isinstance(context_state, ContextState) else None)
+    return domain == "milk_management"
+
+
+def _user_message_looks_like_milk_analysis_followup_answer(message: Any) -> bool:
+    text = str(message or "").strip()
+    if not text:
+        return False
+    if _user_message_answers_milk_record_completeness(text):
+        return True
+    context_terms = (
+        "尿布",
+        "尿量",
+        "精神",
+        "体重",
+        "吃奶",
+        "安稳",
+        "发热",
+        "寒战",
+        "红肿",
+        "硬块",
+        "疼",
+        "痛",
+        "乳房",
+        "胀",
+        "涨",
+        "排不空",
+        "舒服",
+    )
+    answer_terms = ("正常", "还好", "没有", "没", "无", "可以", "稳定", "不")
+    return any(term in text for term in context_terms) and any(term in text for term in answer_terms)
+
+
+def _user_message_answers_milk_record_completeness(message: Any) -> bool:
+    text = str(message or "").strip()
+    if not text:
+        return False
+    return any(
+        token in text
+        for token in (
+            "没有漏",
+            "没漏",
+            "无漏",
+            "不漏",
+            "漏记",
+            "记录完整",
+            "记录是完整",
+            "完整的",
+            "都记",
+            "都有记",
+            "全记",
+            "没少记",
+            "没有少记",
+            "补记录",
+            "补充记录",
+        )
+    )
 
 
 def _milk_analysis_intake_ready_for_save(intake: dict[str, Any]) -> bool:
@@ -3360,6 +3590,43 @@ def _user_message_requests_milk_calendar_plan(message: Any) -> bool:
     return False
 
 
+def _user_message_starts_milk_analysis_flow(message: Any) -> bool:
+    text = str(message or "").strip()
+    if not text:
+        return False
+    normalized = text.lower()
+    if any(term in text for term in ("追奶", "稳奶", "减奶")):
+        return True
+    milk_terms = ("奶量", "吸奶", "亲喂", "喂奶", "泌乳")
+    english_terms = ("milk", "pumping", "breastfeeding", "lactation")
+    has_milk_domain = any(term in text for term in milk_terms) or any(term in normalized for term in english_terms)
+    if not has_milk_domain:
+        return False
+    analysis_terms = (
+        "分析",
+        "够不够",
+        "是否够",
+        "正常吗",
+        "是否正常",
+        "趋势",
+        "偏低",
+        "偏高",
+        "下降",
+        "下滑",
+        "怎么调",
+        "怎么调整",
+        "调整",
+        "制定",
+        "生成",
+        "做计划",
+        "做一版",
+        "计划",
+        "增加",
+        "减少",
+    )
+    return any(term in text for term in analysis_terms)
+
+
 def _user_message_accepts_milk_plan_preview(message: Any) -> bool:
     text = str(message or "").strip()
     if not text:
@@ -3369,7 +3636,7 @@ def _user_message_accepts_milk_plan_preview(message: Any) -> bool:
         return False
     if _workflow_text_accepts_plan_for_request(text):
         return True
-    return any(token in text for token in ("每天多", "每天少", "增加", "减少", "做到", "目标", "追奶", "稳奶", "减奶", "生成计划", "制定计划", "做计划", "继续"))
+    return any(token in text for token in ("每天多", "每天少", "做到", "目标", "追奶计划", "稳奶计划", "减奶计划", "生成计划", "制定计划", "做计划"))
 
 
 def _workflow_text_accepts_plan_for_request(text: str) -> bool:

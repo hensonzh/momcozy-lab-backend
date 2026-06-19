@@ -77,10 +77,6 @@ MILK_MANAGEMENT_READ_ONLY_TOOLS: set[ToolName] = {
     "milk_calendar_change_preview",
     "milk_calendar_reschedule_preview",
 }
-MILK_MANAGEMENT_INTERNAL_TOOLS: set[ToolName] = {
-    "milk_assessment_evaluate",
-    "milk_plan_preview",
-}
 
 DEFERRED_TOOL_NAMESPACES: dict[str, dict[str, Any]] = {
     "care_handoffs": {
@@ -162,7 +158,7 @@ TOOL_HANDLERS: dict[ToolName, ToolHandler] = {
     "device_manual_search": search_device_manual,
     "support_ticket_draft_create": create_support_ticket_draft,
 }
-TOOL_HANDLERS.update({tool_name: execute_milk_management_tool for tool_name in [*MILK_MANAGEMENT_TOOLS, *MILK_MANAGEMENT_INTERNAL_TOOLS]})
+TOOL_HANDLERS.update({tool_name: execute_milk_management_tool for tool_name in MILK_MANAGEMENT_TOOLS})
 
 
 def select_runtime_tools(inputs: RuntimeInputs | None = None) -> list[ToolDefinition]:

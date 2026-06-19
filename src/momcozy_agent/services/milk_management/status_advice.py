@@ -200,7 +200,7 @@ def _fallback_status_advice(payload: dict[str, Any], *, normality: dict[str, Any
     reason = str(norm.get("reason") or "").strip()
     if reason == "insufficient_minimum_valid_days":
         return {
-            "lactation_advice": "现在能用来判断奶量趋势的有效记录还不够，不代表一定有问题。先把接下来几天的吸奶、亲喂和每次间隔记完整，尤其是清晨和夜间的排乳情况，这样后面判断会更可靠。",
+            "lactation_advice": "现在能用来判断奶量趋势的有效记录还不够，不代表一定有问题。先把接下来几天的吸奶、亲喂、奶量和身体感受记完整，这样后面判断会更可靠。",
             "feeding_advice": "喂养记录目前也还不够完整，所以先不要急着判断宝宝吃多吃少。今天开始把亲喂、瓶喂、奶量和尿布放在一起看，连续几天后，我们再判断是否需要调整节奏会更稳。",
         }
 
@@ -219,11 +219,11 @@ def _fallback_status_advice(payload: dict[str, Any], *, normality: dict[str, Any
     if "lactation" in failed_types or reason == "lactation_out_of_range":
         statuses = _failed_day_statuses(failed_metrics, metric_type="lactation")
         if "low" in statuses and "high" not in statuses:
-            lactation_text = "近几天奶量低于参考，这个信号值得尽快处理，但不是要你一下子把自己逼得很累。今天可以先加1次清晨或夜间排乳，同时把每次奶量和间隔记清楚，接下来尽快整理一版追奶计划。"
+            lactation_text = "近几天奶量低于参考，这个信号值得认真看，但不是要你一下子把自己逼得很累。今天先固定一个能坚持的记录和排乳节奏，把奶量和身体感受记清楚；如果要做完整分析，进入综合奶量分析流程会更稳。"
         elif "high" in statuses and "low" not in statuses:
             lactation_text = "近几天奶量高于参考，先不用急着追求继续增加，重点是看身体舒不舒服。今天留意胀痛、硬块和排乳后的轻松程度，如果开始不适，可以先把节奏放稳，避免过度刺激。"
         else:
-            lactation_text = "这几天奶量有波动，单看某一天容易让人紧张，也不一定代表趋势已经变差。先把记录时间固定一些，尤其看连续几天的总量、间隔和亲喂情况，再决定要不要调整会更稳。"
+            lactation_text = "这几天奶量有波动，单看某一天容易让人紧张，也不一定代表趋势已经变差。先把记录方式固定一些，连续看总量、亲喂情况和身体舒适度，再决定要不要调整会更稳。"
         return {
             "lactation_advice": lactation_text,
             "feeding_advice": "奶量偏低时，宝宝摄入也要一起看，不能只盯着吸出来的数字。今天同步观察尿布、精神状态和体重变化；如果尿少、精神差、吃奶变差或体重慢，建议联系儿科或 IBCLC。",
@@ -243,7 +243,7 @@ def _fallback_status_advice(payload: dict[str, Any], *, normality: dict[str, Any
         }
 
     return {
-        "lactation_advice": "近几天记录有一些波动，先不用把它理解成确定的问题。你可以先把排乳时间和记录方式稳定下来，继续观察连续几天的奶量、间隔和身体舒适度，再决定是否需要进一步调整。",
+        "lactation_advice": "近几天记录有一些波动，先不用把它理解成确定的问题。你可以先把排乳时间和记录方式稳定下来，继续观察连续几天的奶量和身体舒适度，再决定是否需要进一步调整。",
         "feeding_advice": "宝宝喂养这边先把记录补完整会更有帮助。今天优先看每次喂养、尿布、精神状态和体重变化，如果这些信号都还稳，就先不要被单次记录牵着走。",
     }
 
@@ -287,10 +287,10 @@ def _enforce_attention_advice(
         if avg_ml > 0:
             cleaned["lactation_advice"] = (
                 f"近{len(low_days)}天预估日均约{_format_ml(avg_ml)}ml，已经连续低于参考，这个情况需要尽快处理，"
-                "但不是说你做得不好，也不用一下子把自己压垮。今天先加1次清晨或夜间排乳，把间隔、奶量和身体感受记清楚；如果晚上实在累，就优先选最容易坚持的一次。我们先把节奏稳住，再尽快做一版追奶计划。"
+                "但不是说你做得不好，也不用一下子把自己压垮。今天先固定一个能坚持的记录和排乳节奏，把奶量和身体感受记清楚；需要完整判断时，再进入综合奶量分析流程。"
             )
         else:
-            cleaned["lactation_advice"] = "近几天奶量连续低于参考，这个信号值得尽快处理，但不是说你做得不好。今天先加1次清晨或夜间吸奶，把每次奶量、间隔和身体感受记清楚；如果晚上太累，就选最容易坚持的一次。我们先把节奏稳住，再尽快做一版追奶计划。"
+            cleaned["lactation_advice"] = "近几天奶量连续低于参考，这个信号值得认真看，但不是说你做得不好。今天先固定一个能坚持的记录和排乳节奏，把奶量和身体感受记清楚；需要完整判断时，再进入综合奶量分析流程。"
 
         if "feeding" in failed_types or "low" in feeding_directions:
             cleaned["feeding_advice"] = "喂养次数也低于参考，所以宝宝摄入需要同步认真看。你先别一个人猜宝宝到底够不够，今天把亲喂、瓶喂、每次奶量和尿布一起记下来；如果尿少、精神差、吃奶变弱或体重增长慢，建议及时联系儿科或 IBCLC。我们先把最关键的信号握在手里，这样能更快把风险排清。"
@@ -299,10 +299,10 @@ def _enforce_attention_advice(
         return _humanize_advice_openings({key: _clean_advice(value) for key, value in cleaned.items()})
 
     if "feeding" in failed_types and "low" in feeding_directions:
-        cleaned["feeding_advice"] = "喂养次数低于参考时，先别只凭感觉判断宝宝有没有吃够，也别把压力都放在自己身上。今天把亲喂、瓶喂、每次奶量和尿布补全；如果尿少、精神差、吃奶变弱或体重增长慢，建议联系儿科或 IBCLC。"
+        cleaned["feeding_advice"] = "喂养次数低于参考时，先别只凭感觉判断宝宝有没有吃够，也别把所有责任都放在自己身上。今天把亲喂、瓶喂、每次奶量和尿布补全；如果尿少、精神差、吃奶变弱或体重增长慢，建议联系儿科或 IBCLC。"
 
     if "lactation" in failed_types and not cleaned["lactation_advice"]:
-        cleaned["lactation_advice"] = "奶量低于参考时，先稳住排乳节奏比临时乱加次数更重要。你不用一下子把安排塞满，今天先固定一个能做到的吸奶或亲喂安排，把每次奶量、时长、间隔和身体感受记下来，后面再看是否需要追奶计划。"
+        cleaned["lactation_advice"] = "奶量低于参考时，先稳住排乳节奏比临时乱加次数更重要。你不用一下子把安排塞满，今天先固定一个能做到的吸奶或亲喂安排，把奶量、时长和身体感受记下来，后面再看是否需要追奶计划。"
 
     return _humanize_advice_openings({key: _clean_advice(value) for key, value in cleaned.items()})
 
@@ -385,7 +385,7 @@ def _fallback_today_advice(normality: dict[str, Any]) -> str:
         return "今天先按原来的日程吸奶和亲喂，继续记录每次奶量、时长和舒适度；如果有计划任务，我会提前15分钟提醒你。"
     if str(normality.get("reason") or "") == "insufficient_minimum_valid_days":
         return "今天最重要的是把吸奶、亲喂时间和大概奶量记完整；记录够了，我们再判断是否需要调整。"
-    return "今天先固定一个最容易坚持的排乳点，按日程完成吸奶；我会提前15分钟提醒你，避免临时忘记或间隔拉太长。"
+    return "今天先固定一个最容易坚持的排乳点，按日程完成吸奶；我会提前15分钟提醒你，避免临时忘记。"
 
 
 def _first_sentence(text: str) -> str:

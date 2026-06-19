@@ -541,6 +541,47 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         self.assertIn("不清楚", result["data"]["confirmation_question"])
         self.assertIn("上传目前全部产检记录", result["data"]["confirmation_question"])
 
+    def test_birth_journey_plan_merges_active_intake_state_when_model_passes_partial_context(self) -> None:
+        inputs = {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00", "_birth_journey_intake_state": {}}
+        started = manage_birth_journey_intake({"action": "start", "payload": {}}, inputs)
+        basic = manage_birth_journey_intake(
+            {"action": "submit_basic_info", "payload": {"current_week": "30周", "fetus_count": "单胎", "age": "30"}},
+            {**inputs, "_birth_journey_intake_state": started["intake_state"]},
+        )
+        skipped = manage_birth_journey_intake(
+            {"action": "skip_checkup_records", "payload": {}},
+            {**inputs, "_birth_journey_intake_state": basic["intake_state"]},
+        )
+        risk = manage_birth_journey_intake(
+            {"action": "submit_risk_factors", "payload": {"risk_factors": "不清楚"}},
+            {**inputs, "_birth_journey_intake_state": skipped["intake_state"]},
+        )
+        symptoms = manage_birth_journey_intake(
+            {"action": "submit_current_symptoms", "payload": {"current_symptoms": "没有明显不舒服"}},
+            {**inputs, "_birth_journey_intake_state": risk["intake_state"]},
+        )
+        lifestyle = manage_birth_journey_intake(
+            {"action": "submit_lifestyle_context", "payload": {"lifestyle_context": "睡眠不太好"}},
+            {**inputs, "_birth_journey_intake_state": symptoms["intake_state"]},
+        )
+
+        result = create_birth_journey_plan_card(
+            {
+                "plan_context": {
+                    "feeding_intention": "母乳",
+                    "feeding_ibclc_context": "计划母乳喂养",
+                },
+                "scope": "full",
+            },
+            {**inputs, "_birth_journey_intake_state": lifestyle["intake_state"]},
+        )
+
+        self.assertEqual(result["status"], "card_created")
+        card = result["card"]["card_json"]
+        self.assertEqual(card["owner"]["due_date_or_week"], "30周")
+        self.assertEqual(card["owner"]["current_week"], "孕30周")
+        self.assertNotIn("missing_fields", result)
+
     def test_birth_journey_intake_flow_returns_plan_context_when_ready(self) -> None:
         inputs = {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00", "_birth_journey_intake_state": {}}
         started = manage_birth_journey_intake({"action": "start", "payload": {}}, inputs)

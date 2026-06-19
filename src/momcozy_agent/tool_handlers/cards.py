@@ -1954,7 +1954,11 @@ def create_birth_journey_plan_card(args: dict[str, Any], inputs: RuntimeInputs) 
         }
 
     raw_plan_context = _dict_value(args.get("plan_context")) or _confirmed_form_data(inputs)
-    plan_context = {**_birth_prep_shared_default_values(inputs, raw_plan_context), **raw_plan_context}
+    intake_context = _birth_journey_plan_context_from_intake(
+        _normalize_birth_journey_intake_state(_dict_value(inputs.get("_birth_journey_intake_state")))
+    )
+    explicit_context = {**intake_context, **raw_plan_context}
+    plan_context = {**_birth_prep_shared_default_values(inputs, explicit_context), **explicit_context}
     missing_context = _missing_birth_journey_required_context(plan_context)
     if missing_context:
         question = _birth_journey_required_context_question(missing_context)
@@ -2799,7 +2803,7 @@ def _birth_journey_plan_context_from_intake(state: dict[str, Any]) -> dict[str, 
     if state.get("checkup_records_uploaded") is True:
         context["checkup_records_uploaded"] = "是"
     for key in ("risk_factors", "current_symptoms", "lifestyle_context", "feeding_ibclc_context", "feeding_intention"):
-        if key in state and _has_meaningful_value(state.get(key)):
+        if key in state:
             context[key] = state[key]
     return context
 

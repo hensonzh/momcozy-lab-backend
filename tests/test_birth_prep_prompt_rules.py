@@ -504,6 +504,42 @@ class BirthPrepPromptRuleTests(unittest.TestCase):
         self.assertIn("按表单里确认的信息整理成一份清单", instruction)
         self.assertIn("不要提医院、家里已有物品", instruction)
 
+    def test_birth_journey_intake_schema_prevents_extra_week_precision_questions(self) -> None:
+        description = str(FUNCTION_TOOLS["birth_journey_intake_manage"]["description"])
+
+        self.assertIn("用户回答当前 next_step/confirmation_question 时，必须调用本工具", description)
+        self.assertIn("不要自行判断还缺哪个字段", description)
+        self.assertIn("不要追加询问工具未返回的字段", description)
+        self.assertIn("30周/孕30周/30+几天", description)
+        self.assertIn("不要为精确到天而追问", description)
+
+    def test_birth_journey_intake_output_keeps_followup_to_tool_next_step_only(self) -> None:
+        compact = model_tool_output(
+            {
+                "ok": True,
+                "tool_name": "birth_journey_intake_manage",
+                "result": {
+                    "tool_name": "birth_journey_intake_manage",
+                    "status": "in_progress",
+                    "action": "submit_lifestyle_context",
+                    "next_step": "feeding_question",
+                    "summary": "生活场景已问到，下一步确认喂养和 IBCLC 相关信息。",
+                    "data": {
+                        "assistant_instruction": "一次性问完喂养和 IBCLC 相关信息，允许用户跳过。",
+                        "confirmation_question": "最后再了解一下喂养计划。",
+                        "completed_groups": ["basic_info", "checkup_records", "risk_factors", "current_symptoms", "lifestyle_context"],
+                    },
+                },
+            }
+        )
+
+        instruction = compact["final_response_instruction"]
+        self.assertIn("confirmation_question 是本轮唯一要问的问题", instruction)
+        self.assertIn("不要自行追加字段完整性判断", instruction)
+        self.assertIn("不要追问已经填写过的孕周是否为整周或 30+几天", instruction)
+        self.assertIn("30周/孕30周", instruction)
+        self.assertIn("不要再调用 ui_quick_replies_create", instruction)
+
     def test_birth_prep_context_extracts_shared_fields_for_hospital_bag_form(self) -> None:
         state = ContextState()
 

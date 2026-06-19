@@ -167,7 +167,7 @@ def preview_milk_plan(
                 "suggested_questions": [
                     "过去 7 天每天大约吸奶多少 ml？如果有亲喂，也请补充瓶喂或补奶量，方便估算亲喂量。"
                 ],
-                "workflow_intent": "milk_plan_preview",
+                "workflow_intent": "milk_plan_preview_create",
                 "milk_flow_decision": {
                     "stage": "need_more_record_context",
                     "missing_user_inputs": ["recent_milk_volume"],
@@ -175,7 +175,7 @@ def preview_milk_plan(
                         "can_start_plan": False,
                         "recommended_plan_type": normalized_type,
                         "reason_for_user": "缺少过去 7 天可用于计算计划目标的有效奶量数据。",
-                        "next_tool": "milk_plan_preview",
+                        "next_tool": "milk_plan_preview_create",
                     },
                 },
                 "assessment": assessment_data,

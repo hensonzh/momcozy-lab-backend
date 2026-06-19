@@ -220,25 +220,25 @@ def _control_suggestion(
     if maybe_missing_records:
         return {
             **base,
-            "main_focus": "先确认记录有没有漏掉。",
-            "schedule_move": "把亲喂、手挤、夜间吸奶、其它吸奶器或瓶喂记录补齐后，再判断要不要调次数和间隔。",
-            "session_move": "现在先不要因为数字偏低就强行拉长每次吸奶。",
-            "next_step": "先问用户有没有没记进去的亲喂、手挤、吸奶或瓶喂。",
+            "main_focus": "记录完整度由综合奶量分析状态机确认。",
+            "schedule_move": "信息采集完成前，不把记录节奏或排程参考改写成用户追问。",
+            "session_move": "信息采集完成前，不输出单次调整建议。",
+            "next_step": "按 milk_analysis_intake_manage 返回的 next_question 继续。",
         }
     if status == "under_supply_alert" or len(low_days) >= 2:
         return {
             **base,
-            "main_focus": "先确认偏低是不是由漏记造成；如果记录完整，下一步看宝宝摄入信号和妈妈状态。",
-            "schedule_move": "只有在记录完整、宝宝状态稳定、妈妈没有明显不适时，才考虑优先缩短最长间隔，或增加一次更容易坚持的吸奶/亲喂。",
-            "session_move": "每次吸到奶流明显变慢后，再多 1-2 分钟就可以；不要靠少数几次痛苦干吸很久。",
-            "next_step": "如果用户确认没有漏记，先问宝宝尿布、精神、吃奶后满足感是否还好。",
+            "main_focus": "已完成综合分析时，只给出偏低判断和是否进入计划的承接。",
+            "schedule_move": "不要在分析结论里追加排程追问；用户同意后再进入计划预览工具。",
+            "session_move": "不要把单次吸奶细节改写成新的采集问题。",
+            "next_step": "询问用户是否现在生成奶量计划。",
         }
     if status == "over_supply_alert" or high_days:
         return {
             **base,
             "main_focus": "下一步优先减少过强刺激，让身体慢慢降下来。",
-            "schedule_move": "先取消不必要的额外吸奶；如果容易堵，先少取一点或缩短单次时间，再慢慢拉长间隔。",
-            "session_move": "每次只吸到舒服，不追求排得很空；胀得难受时少量移出即可。",
+            "schedule_move": "不要在分析结论里追加排程追问；用户同意后再进入计划预览工具。",
+            "session_move": "单次处理建议只在计划预览或计划说明里输出。",
             "next_step": "可以做一个温和减奶或舒适调整方案。",
         }
     if has_breastfeeding:

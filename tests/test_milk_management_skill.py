@@ -28,8 +28,11 @@ class MilkManagementSkillTests(unittest.TestCase):
         self.assertIn("milk_calendar_query(query_mode=\"current_plan\")", skill)
         self.assertIn("`plan_context` 为准", skill)
         self.assertIn("本轮只追问最影响判断的 1 个问题", skill)
-        self.assertIn("用户只回答部分问题时", skill)
-        self.assertIn("继续问未回答且仍影响判断的点", skill)
+        self.assertIn("追问范围必须完全以 `milk_analysis_intake_manage` 返回", skill)
+        self.assertIn("分析关注点、记录节奏、计划排程参考都不能被模型自行改写成新的用户追问", skill)
+        self.assertNotIn("夜里或清晨是否有很长间隔", skill)
+        self.assertNotIn("是否可能漏记亲喂", skill)
+        self.assertNotIn("其它吸奶器、瓶喂或奶粉", skill)
         self.assertIn("回复结尾必须给出明确的下一步行动", skill)
 
     def test_reference_files_are_merged_into_skill(self) -> None:

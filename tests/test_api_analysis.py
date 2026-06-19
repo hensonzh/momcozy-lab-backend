@@ -213,6 +213,9 @@ class AnalysisCreateApiTests(unittest.TestCase):
 
         self.assertIsNotNone(advice)
         self.assertIn("奶量低于参考", advice["lactation_advice"])
+        self.assertNotIn("清晨", advice["lactation_advice"])
+        self.assertNotIn("夜间", advice["lactation_advice"])
+        self.assertNotIn("间隔", advice["lactation_advice"])
         self.assertEqual(advice["feeding_advice"], "")
         self.assertEqual(advice["followup"], "现在方便吗？我们聊一下奶量的问题。")
         self.assertTrue(advice["summary"])

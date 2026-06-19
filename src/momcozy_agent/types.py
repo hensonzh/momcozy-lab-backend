@@ -62,10 +62,8 @@ ToolName = Literal[
     "milk_calendar_reschedule_preview",
     "milk_calendar_mutate",
     "milk_task_complete",
-    "milk_assessment_evaluate",
     "infant_growth_evaluate",
     "infant_growth_mutate",
-    "milk_plan_preview",
 ]
 
 
