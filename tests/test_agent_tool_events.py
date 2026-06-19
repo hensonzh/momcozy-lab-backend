@@ -1507,6 +1507,8 @@ class AgentToolEventTests(unittest.TestCase):
                     "card": {
                         "card_type": "ibclc_consult_card",
                         "schema_version": "1.1",
+                        "consultant": {"name": "Emily Chen"},
+                        "recommendation_reason": "我推荐 Emily Chen，是因为这位顾问是 IBCLC 国际认证哺乳顾问，适合帮你一起看含乳和排乳细节问题。",
                         "chat": {"note": "启动咨询后，会自动将你的问题同步给顾问"},
                     },
                 },
@@ -1530,6 +1532,8 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertIn("IBCLC 咨询入口已经展示", ibclc_card["final_response_instruction"])
         self.assertIn("不要承诺已经预约、已经接通", ibclc_card["final_response_instruction"])
         self.assertIn("不用一个人反复猜", ibclc_card["final_response_instruction"])
+        self.assertIn("我推荐 Emily Chen", ibclc_card["final_response_instruction"])
+        self.assertIn("不要补写位置、距离、排班", ibclc_card["final_response_instruction"])
         self.assertIn("主动说明更适合让 IBCLC 顾问继续看", FUNCTION_TOOLS["ibclc_consult_card_create"]["description"])
         self.assertIn("售后工单信息表已经展示", support_ticket["final_response_instruction"])
         self.assertIn("不要提“草稿”“未提交”“确认后才提交”", support_ticket["final_response_instruction"])

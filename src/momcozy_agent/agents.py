@@ -1551,12 +1551,23 @@ def _card_artifact_final_response_instruction(tool_name: str, card: dict[str, An
     card_body = card_json if isinstance(card_json, dict) else card
     chat = card_body.get("chat") if isinstance(card_body.get("chat"), dict) else {}
     note = str(chat.get("note") or "启动咨询后，会自动将你的问题同步给顾问").strip()
+    consultant = card_body.get("consultant") if isinstance(card_body.get("consultant"), dict) else {}
+    consultant_name = str(consultant.get("name") or "").strip()
+    recommendation_reason = str(card_body.get("recommendation_reason") or "").strip()
+    if not recommendation_reason:
+        consultant_label = consultant_name or "这位 IBCLC 顾问"
+        recommendation_reason = (
+            f"我推荐 {consultant_label}，是因为这位顾问适合继续看含乳、排乳、亲喂/吸奶效果和乳房不适这类细节问题。"
+        )
+    if recommendation_reason[-1] not in "。！？!?":
+        recommendation_reason = f"{recommendation_reason}。"
     return (
         "IBCLC 咨询入口已经展示。最终回复只输出下面两段中文，保留空行，"
         "不要改写、扩写，不要承诺已经预约、已经接通、顾问正在处理或任何入口内容里没有的服务能力。"
+        "必须保留推荐理由；不要补写位置、距离、排班或更快接入，除非推荐理由里已经明确包含这些信息。"
         "语气要温柔承接，不要像系统通知：\n\n"
         "IBCLC 咨询入口我准备好了。\n\n"
-        f"你刚才这个情况不用一个人反复猜。勾选隐私政策和服务协议后，就可以启动咨询；{note}。"
+        f"你刚才这个情况不用一个人反复猜。{recommendation_reason}勾选隐私政策和服务协议后，就可以启动咨询；{note}。"
     )
 
 
