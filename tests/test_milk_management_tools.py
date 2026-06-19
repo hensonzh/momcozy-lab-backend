@@ -2057,6 +2057,129 @@ class MilkManagementToolTests(unittest.TestCase):
         rows = _calendar_dates(uid)
         self.assertEqual(rows, [tomorrow.isoformat(), (tomorrow + timedelta(days=1)).isoformat()])
 
+    def test_calendar_query_by_date_returns_plan_context(self) -> None:
+        uid, _ = _seed_user("calendar-by-date-plan-context")
+        plan = _simple_maintain_plan(plan_days=2)
+        applied = apply_milk_plan(
+            user_id=uid,
+            confirmed_plan=plan,
+            idempotency_key="calendar-by-date-plan-context",
+        )
+        self.assertTrue(applied["ok"])
+        plan_id = applied["data"]["plan_id"]
+        tomorrow = (datetime.now().date() + timedelta(days=1)).isoformat()
+
+        result = execute_milk_management_tool(
+            {
+                "_tool_name": "milk_calendar_query",
+                "user_id": uid,
+                "query_mode": "by_date",
+                "target_date": tomorrow,
+                "include_items": True,
+                "limit": 20,
+            },
+            {"user_message": "明天的奶量计划是什么", "locale": "zh-CN", "timezone": "Asia/Shanghai", "message_sent_at": ""},
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["status"], "calendar_day_loaded")
+        self.assertEqual(result["data"]["target_date"], tomorrow)
+        self.assertEqual(result["data"]["plan_context"]["plan_ids"], [plan_id])
+        self.assertEqual(result["data"]["plan_context"]["primary_plan"]["plan_name"], "稳奶计划")
+        self.assertEqual(result["data"]["plan_context"]["task_count_by_plan_id"][str(plan_id)], 1)
+
+    def test_calendar_current_plan_looks_ahead_when_today_has_no_plan_tasks(self) -> None:
+        uid, _ = _seed_user("calendar-current-plan-context")
+        plan = _simple_maintain_plan(plan_days=2)
+        applied = apply_milk_plan(
+            user_id=uid,
+            confirmed_plan=plan,
+            idempotency_key="calendar-current-plan-context",
+        )
+        self.assertTrue(applied["ok"])
+        plan_id = applied["data"]["plan_id"]
+        today = datetime.now().date()
+        tomorrow = today + timedelta(days=1)
+
+        result = execute_milk_management_tool(
+            {
+                "_tool_name": "milk_calendar_query",
+                "user_id": uid,
+                "query_mode": "current_plan",
+                "lookahead_days": 3,
+            },
+            {
+                "user_message": "我当前的奶量计划是什么",
+                "locale": "zh-CN",
+                "timezone": "Asia/Shanghai",
+                "message_sent_at": f"{today.isoformat()} 09:00:00",
+            },
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["status"], "calendar_current_plan_loaded")
+        self.assertEqual(result["data"]["requested_date"], today.isoformat())
+        self.assertEqual(result["data"]["target_date"], tomorrow.isoformat())
+        self.assertTrue(result["data"]["used_lookahead"])
+        self.assertEqual(result["data"]["plan_context"]["primary_plan_id"], plan_id)
+        self.assertEqual(result["data"]["plan_context"]["primary_plan"]["plan_name"], "稳奶计划")
+
+    def test_calendar_current_plan_infers_legacy_system_schedule_without_plan_id(self) -> None:
+        uid, _ = _seed_user("calendar-current-plan-inferred")
+        _add_task(uid, task_id=1, content="吸奶", item_type="吸奶", is_milk_pump=1)
+        _add_task(uid, task_id=2, content="吸奶", item_type="吸奶", is_milk_pump=1, start_time="12:00")
+
+        result = execute_milk_management_tool(
+            {
+                "_tool_name": "milk_calendar_query",
+                "user_id": uid,
+                "query_mode": "current_plan",
+                "target_date": "2026-05-14",
+                "lookahead_days": 3,
+            },
+            {
+                "user_message": "我当前的奶量计划是什么",
+                "locale": "zh-CN",
+                "timezone": "Asia/Shanghai",
+                "message_sent_at": "2026-05-14 09:00:00",
+            },
+        )
+
+        plan_context = result["data"]["plan_context"]
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["status"], "calendar_current_plan_loaded")
+        self.assertEqual(result["data"]["target_date"], "2026-05-14")
+        self.assertEqual(plan_context["plan_ids"], [])
+        self.assertTrue(plan_context["has_plan_tasks"])
+        self.assertTrue(plan_context["inferred_from_calendar"])
+        self.assertEqual(plan_context["task_count_without_plan_id"], 2)
+        self.assertEqual(plan_context["primary_plan"]["plan_name"], "稳奶计划")
+        self.assertEqual(plan_context["primary_plan"]["plan_type"], "maintain_milk")
+
+    def test_calendar_current_plan_does_not_infer_user_input_task_as_plan(self) -> None:
+        uid, _ = _seed_user("calendar-current-plan-user-input")
+        _add_user_input_task(uid, target_date="2026-05-14")
+
+        result = execute_milk_management_tool(
+            {
+                "_tool_name": "milk_calendar_query",
+                "user_id": uid,
+                "query_mode": "current_plan",
+                "target_date": "2026-05-14",
+                "lookahead_days": 3,
+            },
+            {
+                "user_message": "我当前的奶量计划是什么",
+                "locale": "zh-CN",
+                "timezone": "Asia/Shanghai",
+                "message_sent_at": "2026-05-14 09:00:00",
+            },
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["status"], "calendar_current_plan_not_found")
+        self.assertFalse(result["data"]["plan_context"]["has_plan_tasks"])
+
     def test_calendar_adjustment_apply_is_idempotent_for_same_key(self) -> None:
         uid, _ = _seed_user("calendar-adjustment-idempotent")
         today = _today()
@@ -2198,6 +2321,25 @@ def _add_task(
                 item_type,
                 int(is_milk_pump),
                 finish,
+            ),
+        )
+        return int(cursor.lastrowid or 0)
+
+
+def _add_user_input_task(user_id: str, *, target_date: str) -> int:
+    start_at = datetime.fromisoformat(f"{target_date} 09:00:00")
+    end_at = start_at + timedelta(minutes=20)
+    with transaction() as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO calendar(user_id, date, task_id, start_time, end_time, content, type, source, is_milk_pump, finish)
+            VALUES (?, ?, 1, ?, ?, '临时吸奶', '吸奶', '用户输入', 1, 'false')
+            """,
+            (
+                user_id,
+                target_date,
+                start_at.strftime("%Y-%m-%d %H:%M:%S"),
+                end_at.strftime("%Y-%m-%d %H:%M:%S"),
             ),
         )
         return int(cursor.lastrowid or 0)

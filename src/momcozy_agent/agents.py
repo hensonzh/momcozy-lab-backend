@@ -676,7 +676,7 @@ def _tool_start_label(tool_name: str, arguments: dict[str, Any]) -> str:
     if tool_name == "hospital_bag_cart_update":
         return "我先帮你调整待产包购物车～"
     if tool_name == "device_manual_search":
-        return "我先看看设备说明～"
+        return "我先确认设备这一步～"
     if tool_name == "knowledge_search":
         return "我去找找相关资料～"
     if tool_name == "memory_search":
@@ -712,7 +712,7 @@ def _tool_end_label(tool_name: str) -> str:
     if tool_name == "hospital_bag_cart_update":
         return "我在保存购物车修改～"
     if tool_name == "device_manual_search":
-        return "我把设备内容整理一下～"
+        return "我把这一步整理好了～"
     if tool_name == "support_ticket_draft_create":
         return "我在准备售后信息表～"
     if tool_name == "birth_journey_plan_delete":
@@ -3168,6 +3168,8 @@ def _tool_choice_with_milk_plan_contract(
 
 
 def _required_milk_management_tool(inputs: RuntimeInputs, options: BuildAgentRequestOptions) -> str | None:
+    if _user_message_requests_milk_calendar_plan(inputs.get("user_message")):
+        return "milk_calendar_query"
     state = _milk_management_state_from_options(options)
     intake = state.get("analysis_intake") if isinstance(state.get("analysis_intake"), dict) else {}
     if not intake:
@@ -3213,6 +3215,33 @@ def _milk_analysis_intake_has_missing_fields(intake: dict[str, Any]) -> bool:
     if any(isinstance(item, dict) and item.get("status") != "collected" for item in checklist):
         return True
     return str(intake.get("stage") or "").strip() == "intake_collecting"
+
+
+def _user_message_requests_milk_calendar_plan(message: Any) -> bool:
+    text = str(message or "").strip()
+    if not text:
+        return False
+    normalized = text.lower()
+    creation_terms = ("制定", "生成", "创建", "新建", "做一个", "做一版", "帮我做", "帮我安排")
+    explicit_query_terms = ("当前", "现在", "正在", "采用", "执行", "已有", "原计划", "查看", "查", "看看", "什么", "哪个", "安排", "日程")
+    date_terms = ("今天", "明天", "后天", "本周", "这周", "下周", "周一", "周二", "周三", "周四", "周五", "周六", "周日", "星期", "接下来", "未来")
+    if any(term in text for term in creation_terms) and not any(term in text for term in (*explicit_query_terms, *date_terms)):
+        return False
+    if any(term in text for term in creation_terms) and "计划" in text and not any(term in text for term in explicit_query_terms):
+        return False
+
+    milk_terms = ("奶量", "吸奶", "亲喂", "喂奶", "追奶", "稳奶", "减奶", "泌乳")
+    plan_terms = ("计划", "安排", "日程", "任务", "提醒", "几点", "几次", "怎么吸", "怎么喂")
+    current_terms = ("当前", "现在", "正在", "采用", "执行", "按哪个", "哪个计划", "什么计划")
+    english_terms = ("milk plan", "pumping plan", "feeding plan")
+    has_milk_domain = any(term in text for term in milk_terms) or any(term in normalized for term in english_terms)
+    has_plan_intent = any(term in text for term in plan_terms)
+    has_current_or_date = any(term in text for term in (*current_terms, *date_terms))
+    if has_milk_domain and has_plan_intent and (has_current_or_date or any(term in text for term in ("查看", "查", "看看"))):
+        return True
+    if "计划" in text and has_current_or_date and any(term in text for term in current_terms):
+        return True
+    return False
 
 
 def _user_message_accepts_milk_plan_preview(message: Any) -> bool:

@@ -161,6 +161,9 @@ def search_device_manual(args: dict[str, Any], inputs: RuntimeInputs) -> dict[st
         "usage_guidance": (
             "如果 status 是 manual_already_loaded 或 manual_already_loaded_with_faq，说明当前型号 manual 已在本会话上下文中，不要要求重新加载，直接复用已有 manual。"
             "manual 是当前型号的完整本地官方说明书整理稿，应作为设备步骤的主要事实依据。"
+            "最终回复只把 manual/FAQ 当事实依据，不要把“查文档、按官方文档、根据说明书/FAQ、我从资料里看到”等过程性来源话术写给用户；"
+            "除非用户主动询问来源，才可简短说明这些步骤来自 Momcozy Air1 官方使用资料。"
+            "面向用户时直接给专业指导，例如“我来带你核对这一步”“先确认这一处”“Air1 这里重点看两个地方”。"
             "faq_results 是按用户问题检索到的相关 FAQ；如果为空，说明没有命中明确 FAQ，但 manual 仍可作为依据。"
             "relevant_images 是按当前 query/topic 预选的步骤图片；每个图片项都有 markdown_image。讲到对应新视觉步骤的第一轮时，必须复制最相关图片项的 markdown_image 展示图片，不要把 url 当可见正文。"
             "进入 Air1 开箱分步指导后，每个新视觉步骤首次展示当前步骤图；同一视觉步骤的后续轮次不要重复展示同一张图，应让用户对照上图继续。"
@@ -180,7 +183,7 @@ def search_device_manual(args: dict[str, Any], inputs: RuntimeInputs) -> dict[st
 
 def create_support_ticket_draft(args: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
     if not _support_ticket_creation_confirmed(args, inputs):
-        message = _support_ticket_confirmation_message()
+        message = _support_ticket_confirmation_message(args)
         return {
             "tool_name": "support_ticket_draft_create",
             "status": "needs_support_ticket_confirmation",
@@ -256,7 +259,13 @@ def _support_ticket_creation_confirmed(args: dict[str, Any], inputs: RuntimeInpu
     return any(term in message for term in confirmation_terms)
 
 
-def _support_ticket_confirmation_message() -> str:
+def _support_ticket_confirmation_message(args: dict[str, Any] | None = None) -> str:
+    data = args or {}
+    if not _string_list(data.get("troubleshooting_done")) and (
+        _text(data.get("user_emotion"))
+        or _text(data.get("issue_type")) in {"missing_parts", "defect", "safety_concern", "return_or_refund", "warranty"}
+    ):
+        return "这件事确实很影响使用体验，我可以帮你创建一个售后工单，我们客服团队会在 24 小时之内联系到你。你看，需要我现在帮你创建吗？"
     return "非常抱歉没有解决你的问题，我可以帮你创建一个售后工单，我们客服团队会在 24 小时之内联系到你。你看，需要我现在帮你创建吗？"
 
 

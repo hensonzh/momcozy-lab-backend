@@ -62,12 +62,14 @@ def get_calendar_day(
     )
     items = [_normalize_calendar_row(row) for row in rows]
     completed = len([item for item in items if item.get("finish")])
+    plan_context = _calendar_plan_context(uid, items, target_date=date)
     return ok_result(
         "calendar_day_loaded",
         data={
             "user_id": uid,
             "target_date": date,
             "items": items,
+            "plan_context": plan_context,
             "summary": {
                 "total_count": len(items),
                 "completed_count": completed,
@@ -105,6 +107,11 @@ def get_calendar_range(
     )
     items = [_normalize_calendar_row(row) for row in rows]
     raw_limit = min(max(to_int(limit, 200), 1), 500)
+    plan_context = _calendar_plan_context(
+        uid,
+        items,
+        window={"start_at": _db_time(window["start_dt"]), "end_at": _db_time(window["end_dt"]), "end_exclusive": True},
+    )
     return ok_result(
         "calendar_range_loaded",
         f"已读取 {window['start_text']} 到 {window['end_text']} 的计划执行情况。",
@@ -118,9 +125,86 @@ def get_calendar_range(
             "plan_id": plan_id,
             "item_type": item_type,
             "summary": _calendar_range_summary(items),
+            "plan_context": plan_context,
             "items": items[:raw_limit] if include_items else [],
             "item_count": len(items),
             "raw_item_limit": raw_limit,
+        },
+    )
+
+
+def get_current_calendar_plan(
+    *,
+    user_id: str,
+    target_date: str,
+    lookahead_days: int = 14,
+    item_type: str | None = None,
+    include_items: bool = True,
+    limit: int = 200,
+) -> ServiceResult:
+    uid = str(user_id or "").strip()
+    date = _date_text(target_date)
+    if not uid or not date:
+        return error_result("missing_required_field", "user_id and target_date are required.")
+    start_dt = parse_datetime(date)
+    if start_dt is None:
+        return error_result("invalid_target_date", "target_date must be a valid date.")
+    if item_type and item_type not in VALID_CALENDAR_TYPES:
+        return error_result("invalid_calendar_type", f"Unsupported calendar type: {item_type}")
+
+    lookahead = min(max(to_int(lookahead_days, 14), 0), 60)
+    end_dt = start_dt + timedelta(days=lookahead + 1)
+    rows = _fetch_calendar_range_rows(
+        user_id=uid,
+        start_at=_db_time(start_dt),
+        end_at=_db_time(end_dt),
+        plan_id=None,
+        item_type=item_type,
+    )
+    items = [_normalize_calendar_row(row) for row in rows]
+    search_window = {"start_at": _db_time(start_dt), "end_at": _db_time(end_dt), "end_exclusive": True}
+    requested_date = start_dt.date().isoformat()
+    plan_items = [item for item in items if _is_calendar_plan_task(item)]
+    same_day_items = [item for item in plan_items if norm_text(item.get("date")) == requested_date]
+    chosen_date = requested_date if same_day_items else _first_item_date(plan_items)
+    if not chosen_date:
+        return ok_result(
+            "calendar_current_plan_not_found",
+            "暂未找到当前或近期计划任务。",
+            {
+                "user_id": uid,
+                "requested_date": requested_date,
+                "target_date": requested_date,
+                "current_plan_date": None,
+                "used_lookahead": False,
+                "lookahead_days": lookahead,
+                "search_window": search_window,
+                "items": [],
+                "item_count": 0,
+                "raw_item_limit": min(max(to_int(limit, 200), 1), 500),
+                "summary": _calendar_range_summary([]),
+                "plan_context": _calendar_plan_context(uid, [], target_date=requested_date),
+            },
+        )
+
+    chosen_items = [item for item in items if norm_text(item.get("date")) == chosen_date]
+    raw_limit = min(max(to_int(limit, 200), 1), 500)
+    return ok_result(
+        "calendar_current_plan_loaded",
+        f"已读取 {chosen_date} 的当前奶量计划任务。",
+        {
+            "user_id": uid,
+            "requested_date": requested_date,
+            "target_date": chosen_date,
+            "current_plan_date": chosen_date,
+            "used_lookahead": chosen_date != requested_date,
+            "lookahead_days": lookahead,
+            "search_window": search_window,
+            "items": chosen_items[:raw_limit] if include_items else [],
+            "item_count": len(chosen_items),
+            "raw_item_limit": raw_limit,
+            "summary": _calendar_range_summary(chosen_items),
+            "plan_context": _calendar_plan_context(uid, chosen_items, target_date=chosen_date),
         },
     )
 
@@ -1025,6 +1109,148 @@ def _range_window(start_at: Any, end_at: Any) -> dict[str, Any]:
 def _is_date_only(value: Any) -> bool:
     token = norm_text(value)
     return len(token) == 10 and token[4:5] in {"-", "/"} and token[7:8] in {"-", "/"}
+
+
+def _calendar_plan_context(
+    user_id: str,
+    items: list[CalendarItem],
+    *,
+    target_date: str | None = None,
+    window: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    plan_counts = _plan_task_counts(items)
+    plan_ids = [int(plan_id) for plan_id in plan_counts]
+    plans_by_id = _fetch_plan_summaries(user_id, plan_ids)
+    plans = [plans_by_id[plan_id] for plan_id in plan_ids if plan_id in plans_by_id]
+    primary_plan_id = _primary_plan_id(items, plan_ids)
+    primary_plan = plans_by_id.get(primary_plan_id) if primary_plan_id is not None else None
+    inferred_count = _inferred_plan_task_count(items)
+    inferred_plan = _inferred_calendar_plan_summary(items, inferred_count) if primary_plan is None and inferred_count > 0 else None
+    return {
+        "source": "calendar_plan_id" if plan_ids else ("calendar_inferred_schedule" if inferred_plan else "calendar"),
+        "policy": "按所查日期或日期范围内 calendar 任务判断当前计划；优先使用关联 plan_id，旧数据或演示数据缺少 plan_id 时按系统生成的吸奶/亲喂任务推断，不按最新保存计划排序判断。",
+        "target_date": target_date,
+        "window": window,
+        "has_plan_tasks": bool(plan_ids) or inferred_count > 0,
+        "plan_ids": plan_ids,
+        "primary_plan_id": primary_plan_id,
+        "primary_plan": primary_plan or inferred_plan,
+        "plans": plans,
+        "task_count_by_plan_id": {str(plan_id): count for plan_id, count in plan_counts.items()},
+        "task_count_without_plan_id": inferred_count,
+        "inferred_from_calendar": bool(inferred_plan),
+        "multiple_plans": len(plan_ids) > 1,
+    }
+
+
+def _plan_task_counts(items: list[CalendarItem]) -> dict[int, int]:
+    counts: dict[int, int] = {}
+    for item in items:
+        plan_id = _item_plan_id(item)
+        if plan_id is None:
+            continue
+        counts[plan_id] = counts.get(plan_id, 0) + 1
+    return dict(sorted(counts.items(), key=lambda pair: pair[0]))
+
+
+def _item_plan_id(item: dict[str, Any]) -> int | None:
+    try:
+        plan_id = int(item.get("plan_id") or 0)
+    except (TypeError, ValueError):
+        return None
+    return plan_id if plan_id > 0 else None
+
+
+def _is_calendar_plan_task(item: dict[str, Any]) -> bool:
+    if _item_plan_id(item) is not None:
+        return True
+    return _is_inferred_plan_task(item)
+
+
+def _is_inferred_plan_task(item: dict[str, Any]) -> bool:
+    item_type = norm_text(item.get("type"))
+    source = norm_text(item.get("source"))
+    if item_type not in {CALENDAR_TYPE_PUMP, CALENDAR_TYPE_NURSING}:
+        return False
+    if source == "用户输入":
+        return False
+    return bool(item.get("is_milk_pump") or item_type == CALENDAR_TYPE_NURSING)
+
+
+def _inferred_plan_task_count(items: list[CalendarItem]) -> int:
+    return sum(1 for item in items if _item_plan_id(item) is None and _is_inferred_plan_task(item))
+
+
+def _inferred_calendar_plan_summary(items: list[CalendarItem], task_count: int) -> dict[str, Any] | None:
+    if task_count <= 0:
+        return None
+    milk_types = {norm_text(item.get("type")) for item in items if _is_inferred_plan_task(item)}
+    if milk_types == {CALENDAR_TYPE_PUMP}:
+        plan_summary = "日历中已有系统生成的吸奶任务，按稳奶日程执行。"
+    elif milk_types == {CALENDAR_TYPE_NURSING}:
+        plan_summary = "日历中已有系统生成的亲喂任务，按稳奶日程执行。"
+    else:
+        plan_summary = "日历中已有系统生成的吸奶/亲喂任务，按稳奶日程执行。"
+    return {
+        "plan_id": None,
+        "plan_name": "稳奶计划",
+        "plan_type": "maintain_milk",
+        "plan_days": None,
+        "plan_summary": plan_summary,
+        "milestone_summary": None,
+        "milestone_list": [],
+        "created_at": None,
+        "updated_at": None,
+        "inferred_from_calendar": True,
+    }
+
+
+def _primary_plan_id(items: list[CalendarItem], plan_ids: list[int]) -> int | None:
+    if not plan_ids:
+        return None
+    ordered = sorted(
+        (item for item in items if _item_plan_id(item) is not None),
+        key=lambda item: (norm_text(item.get("date")), norm_text(item.get("start_time")), to_int(item.get("task_id"), 0), to_int(item.get("item_id"), 0)),
+    )
+    if ordered:
+        return _item_plan_id(ordered[0])
+    return plan_ids[0]
+
+
+def _first_item_date(items: list[CalendarItem]) -> str:
+    dates = sorted({norm_text(item.get("date")) for item in items if norm_text(item.get("date"))})
+    return dates[0] if dates else ""
+
+
+def _fetch_plan_summaries(user_id: str, plan_ids: list[int]) -> dict[int, dict[str, Any]]:
+    if not plan_ids:
+        return {}
+    placeholders = ", ".join(["?"] * len(plan_ids))
+    rows = fetch_all(
+        f"""
+        SELECT plan_id, user_id, plan_name, plan_type, plan_days, plan_summary,
+               milestone_summary, milestone_list, created_at, updated_at
+        FROM milk_plan
+        WHERE user_id = ?
+          AND plan_id IN ({placeholders})
+        ORDER BY plan_id ASC
+        """,
+        [user_id, *plan_ids],
+    )
+    return {int(row["plan_id"]): _normalize_plan_summary_row(row) for row in rows if row.get("plan_id") is not None}
+
+
+def _normalize_plan_summary_row(row: dict[str, Any]) -> dict[str, Any]:
+    result = dict(row)
+    milestone_list = norm_text(result.get("milestone_list"))
+    if milestone_list:
+        try:
+            result["milestone_list"] = json.loads(milestone_list)
+        except json.JSONDecodeError:
+            result["milestone_list"] = []
+    else:
+        result["milestone_list"] = []
+    return result
 
 
 def _normalize_calendar_row(row: dict[str, Any]) -> CalendarItem:

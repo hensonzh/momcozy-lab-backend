@@ -3,8 +3,15 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from momcozy_agent.agents import MAX_TOOL_IMAGE_BYTES, model_tool_output, safe_tool_result
+from momcozy_agent.agents import (
+    MAX_TOOL_IMAGE_BYTES,
+    _tool_end_label,
+    _tool_start_label,
+    model_tool_output,
+    safe_tool_result,
+)
 from momcozy_agent.server import STATIC_CONTENT_TYPES
+from momcozy_agent.tool_schemas import FUNCTION_TOOLS
 from momcozy_agent.tool_handlers.device import create_support_ticket_draft, search_device_manual
 
 
@@ -32,8 +39,53 @@ class DeviceGuidanceTests(unittest.TestCase):
 
         self.assertIn("### 处理原则", skill_text)
         self.assertIn("先识别用户情绪", skill_text)
+        self.assertIn("明显表达负面情绪", skill_text)
+        self.assertIn("尽可能早地调用 `support_ticket_draft_create`", skill_text)
+        self.assertIn("`user_confirmed=false`", skill_text)
         self.assertIn("默认目标是尽量帮助用户当场解决问题", skill_text)
         self.assertIn("只有安全风险、缺件/破损/明显产品缺陷", skill_text)
+        self.assertIn("不改变确认规则", skill_text)
+
+    def test_unboxing_unknown_model_asks_model_before_manual_search(self) -> None:
+        skill_path = Path(__file__).resolve().parents[1] / "skills" / "device-guidance" / "SKILL.md"
+        skill_text = skill_path.read_text(encoding="utf-8")
+
+        self.assertIn("一旦识别到这是开箱/首次上手需求，先确认设备型号", skill_text)
+        self.assertIn("第一轮只问", skill_text)
+        self.assertIn("不要调用工具", skill_text)
+        self.assertIn("不要默认 Air1", skill_text)
+        self.assertIn("不要先给 Air1 资源", skill_text)
+
+        manual_description = str(FUNCTION_TOOLS["device_manual_search"]["description"])
+        self.assertIn("型号未知时，不要调用本工具", manual_description)
+        self.assertIn("先直接询问设备型号", manual_description)
+
+    def test_support_ticket_schema_allows_early_confirmation_for_negative_emotion(self) -> None:
+        description = str(FUNCTION_TOOLS["support_ticket_draft_create"]["description"])
+
+        self.assertIn("明显生气、失望、烦躁、着急", description)
+        self.assertIn("尽早调用本工具但传 user_confirmed=false", description)
+        self.assertIn("用工具返回的确认问题询问是否现在创建", description)
+        self.assertIn("只有用户已经明确同意时，user_confirmed 才能为 true", description)
+
+    def test_device_guidance_final_reply_uses_professional_direct_tone(self) -> None:
+        skill_path = Path(__file__).resolve().parents[1] / "skills" / "device-guidance" / "SKILL.md"
+        skill_text = skill_path.read_text(encoding="utf-8")
+
+        self.assertIn("不要暴露“查资料/按文档核对”的过程感", skill_text)
+        self.assertIn("不要在最终回复中说“我先查”", skill_text)
+        self.assertIn("“我按官方文档”", skill_text)
+        self.assertIn("“根据说明书”", skill_text)
+        self.assertIn("“我来带你核对这一步”", skill_text)
+
+    def test_device_manual_progress_labels_do_not_sound_like_document_lookup(self) -> None:
+        start_label = _tool_start_label("device_manual_search", {})
+        end_label = _tool_end_label("device_manual_search")
+
+        self.assertEqual(start_label, "我先确认设备这一步～")
+        self.assertEqual(end_label, "我把这一步整理好了～")
+        self.assertNotIn("说明", start_label)
+        self.assertNotIn("内容", end_label)
 
     def test_support_ticket_tool_asks_confirmation_before_creating_ticket(self) -> None:
         result = create_support_ticket_draft(
@@ -65,6 +117,27 @@ class DeviceGuidanceTests(unittest.TestCase):
         self.assertNotIn("必须说明售后信息已经整理好", compact["final_response_instruction"])
         self.assertIn("自然表达", compact["final_response_instruction"])
         self.assertIn("最多两段", compact["final_response_instruction"])
+
+    def test_support_ticket_tool_can_ask_early_confirmation_for_negative_emotion(self) -> None:
+        result = create_support_ticket_draft(
+            {
+                "issue_type": "defect",
+                "issue_summary": "新机拆开就有裂痕，用户很生气",
+                "product_model": "Air1",
+                "troubleshooting_done": [],
+                "urgency": "high",
+                "user_emotion": "生气、失望",
+                "user_confirmed": False,
+            },
+            {"locale": "zh-CN", "user_message": "我真的很生气，刚拆开就坏了，别再让我折腾了"},
+        )
+
+        self.assertEqual(result["status"], "needs_support_ticket_confirmation")
+        self.assertNotIn("ticket", result)
+        message = result["assistant_followup"]["message"]
+        self.assertIn("很影响使用体验", message)
+        self.assertIn("需要我现在帮你创建吗", message)
+        self.assertNotIn("没有解决你的问题", message)
 
     def test_support_ticket_tool_returns_warm_followup_for_model_after_confirmation(self) -> None:
         result = create_support_ticket_draft(
@@ -143,6 +216,9 @@ class DeviceGuidanceTests(unittest.TestCase):
         self.assertIn("每个新视觉步骤首次展示当前步骤图", result["usage_guidance"])
         self.assertIn("分步指导以 manual 的 guide.* 模块为一轮主步骤", result["usage_guidance"])
         self.assertIn("不要把每个 bullet 都拆成一轮", result["usage_guidance"])
+        self.assertIn("不要把“查文档、按官方文档、根据说明书/FAQ、我从资料里看到”等过程性来源话术写给用户", result["usage_guidance"])
+        self.assertIn("除非用户主动询问来源", result["usage_guidance"])
+        self.assertIn("我来带你核对这一步", result["usage_guidance"])
 
         relevant_images = result["relevant_images"]
         self.assertGreaterEqual(len(relevant_images), 1)

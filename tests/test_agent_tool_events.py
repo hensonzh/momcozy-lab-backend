@@ -233,6 +233,25 @@ class AgentToolEventTests(unittest.TestCase):
         milk_namespace = next(tool for tool in request["tools"] if tool.get("type") == "namespace" and tool.get("name") == "milk_management")
         self.assertNotIn("milk_plan_preview_create", [tool["name"] for tool in milk_namespace["tools"]])
 
+    def test_current_milk_plan_question_forces_calendar_query_tool(self) -> None:
+        request = build_agent_request(
+            {"user_message": "我当前的奶量计划是什么", "locale": "zh-CN", "message_sent_at": "2026-05-14 09:00:00"},
+            {"context_state": ContextState(), "loaded_skill_ids": ["milk-management"]},
+        )
+
+        self.assertEqual(
+            request["tool_choice"],
+            {
+                "type": "allowed_tools",
+                "mode": "required",
+                "tools": [{"type": "function", "name": "milk_calendar_query"}],
+            },
+        )
+        top_level_functions = [tool["name"] for tool in request["tools"] if tool.get("type") == "function"]
+        self.assertIn("milk_calendar_query", top_level_functions)
+        milk_namespace = next(tool for tool in request["tools"] if tool.get("type") == "namespace" and tool.get("name") == "milk_management")
+        self.assertNotIn("milk_calendar_query", [tool["name"] for tool in milk_namespace["tools"]])
+
     def test_milk_plan_context_answer_forces_intake_tool(self) -> None:
         context_state = ContextState()
         context_state.milk_management_state = {
