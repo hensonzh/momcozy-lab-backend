@@ -375,6 +375,42 @@ class AgentToolEventTests(unittest.TestCase):
             },
         )
 
+    def test_hospital_bag_confirmed_form_forces_card_tool(self) -> None:
+        form_data = {
+            "due_date_or_week": "20周",
+            "first_birth": "是",
+            "fetus_count": "双胎",
+            "pregnancy_history_or_notes": ["妊娠糖尿病"],
+            "birth_path": "剖宫产",
+            "feeding_intention": "亲喂母乳",
+            "return_to_work_timing": "6周后",
+            "support_person": "伴侣",
+            "top_worries": ["怕漏买"],
+        }
+        request = build_agent_request(
+            {
+                "user_message": (
+                    "我已确认待产包信息。\n"
+                    "form_id: hospital_bag_intake\n"
+                    "confirmed_form_data:\n"
+                    f"{json.dumps(form_data, ensure_ascii=False)}"
+                ),
+                "locale": "zh-CN",
+            },
+            {"context_state": ContextState(), "loaded_skill_ids": ["birth-prep"]},
+        )
+
+        self.assertEqual(
+            request["tool_choice"],
+            {
+                "type": "allowed_tools",
+                "mode": "required",
+                "tools": [{"type": "function", "name": "hospital_bag_card_create"}],
+            },
+        )
+        top_level_functions = [tool["name"] for tool in request["tools"] if tool.get("type") == "function"]
+        self.assertIn("hospital_bag_card_create", top_level_functions)
+
     def test_forced_milk_intake_does_not_repeat_after_tool_output(self) -> None:
         context_state = ContextState()
         context_state.milk_management_state = {
@@ -2618,6 +2654,79 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertIn("RUN_FINISHED", event_types)
         artifact = next(event for event in events if event.get("type") == "ARTIFACT_CREATED")
         self.assertEqual(artifact["artifact_type"], "ibclc_consult_card")
+
+    def test_stream_executes_pseudo_tool_use_text_without_leaking_markup(self) -> None:
+        form_data = {
+            "due_date_or_week": "20周",
+            "first_birth": "是",
+            "fetus_count": "双胎",
+            "pregnancy_history_or_notes": ["妊娠糖尿病"],
+            "birth_path": "剖宫产",
+            "feeding_intention": "亲喂母乳",
+            "return_to_work_timing": "6周后",
+            "support_person": "伴侣",
+            "top_worries": ["怕漏买"],
+        }
+        pseudo_tool_text = (
+            '<tool_use>{"recipient_name":"birth_prep.hospital_bag_card_create","parameters":{}}</tool_use>'
+            '<tool_use>{"recipient_name":"functions.ui_quick_replies_create","parameters":{"replies":[{"text":"哪些要先买"},{"text":"帮我做简单版"},{"text":"还想改信息"}]}}</tool_use>'
+            "表单我看到了，但这次卡片生成没有接上。"
+        )
+
+        async def collect_events() -> list[dict[str, object]]:
+            client = _FakeStreamingClient(
+                [
+                    {
+                        "id": "resp-pseudo-tool",
+                        "output": [
+                            {
+                                "type": "message",
+                                "content": [{"type": "output_text", "text": pseudo_tool_text}],
+                            }
+                        ],
+                    },
+                    {
+                        "id": "resp-final",
+                        "output": [
+                            {
+                                "type": "message",
+                                "content": [{"type": "output_text", "text": "待产包清单我整理好了。"}],
+                            }
+                        ],
+                    },
+                ]
+            )
+            runtime = ChatRuntime(client, model="test-model")
+            stream = stream_ag_ui_events(
+                {"thread_id": "thread-1", "run_id": "run-pseudo-tool"},
+                {
+                    "user_message": (
+                        "我已确认待产包信息。\n"
+                        "form_id: hospital_bag_intake\n"
+                        "confirmed_form_data:\n"
+                        f"{json.dumps(form_data, ensure_ascii=False)}"
+                    ),
+                    "locale": "zh-CN",
+                },
+                runtime,
+            )
+            return [event async for event in stream]
+
+        events = asyncio.run(collect_events())
+        text = "".join(
+            str(event.get("delta") or "")
+            for event in events
+            if event.get("type") == "TEXT_MESSAGE_CONTENT"
+        )
+        event_types = [str(event.get("type")) for event in events]
+
+        self.assertIn("ARTIFACT_CREATED", event_types)
+        artifact = next(event for event in events if event.get("type") == "ARTIFACT_CREATED")
+        self.assertEqual(artifact["artifact_type"], "hospital_bag_card")
+        self.assertIn("待产包清单我整理好了", text)
+        self.assertNotIn("<tool_use>", text)
+        self.assertNotIn("recipient_name", text)
+        self.assertNotIn("表单我看到了", text)
 
 
 def _birth_journey_lifestyle_state() -> dict[str, object]:

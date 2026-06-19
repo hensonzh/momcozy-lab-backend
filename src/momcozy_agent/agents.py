@@ -37,6 +37,8 @@ PRIVATE_USE_CITATION_START = "\ue200"
 PRIVATE_USE_CITATION_END = "\ue201"
 MAX_INLINE_CITATION_MARKER_CHARS = 240
 QUICK_REPLIES_TOOL_NAME = "ui_quick_replies_create"
+PSEUDO_TOOL_USE_OPEN = "<tool_use"
+PSEUDO_TOOL_USE_RE = re.compile(r"<tool_use>\s*(\{[\s\S]*?\})\s*</tool_use>", re.IGNORECASE)
 MILK_WRITE_TOOL_NAMES = {
     "milk_record_mutate",
     "milk_plan_mutate",
@@ -3275,17 +3277,17 @@ def _build_response_request(
         disabled_tool_names = _disabled_tool_names_from_options(options)
         if disabled_tool_names:
             tools = _remove_function_tools(tools, disabled_tool_names)
-        required_milk_tool = _forced_required_tool_from_options(options) or (
-            _required_milk_management_tool(inputs, options) if _is_initial_user_request(input_items) else None
-        )
-        if required_milk_tool:
-            tools = _promote_deferred_function_tool(tools, required_milk_tool)
+        required_tool = _forced_required_tool_from_options(options)
+        if required_tool is None and _is_initial_user_request(input_items):
+            required_tool = _required_birth_prep_tool(inputs) or _required_milk_management_tool(inputs, options)
+        if required_tool:
+            tools = _promote_deferred_function_tool(tools, required_tool)
         request["tools"] = tools
         loaded_skill_ids = options.get("loaded_skill_ids")
         if not isinstance(loaded_skill_ids, list):
             loaded_skill_ids = None
         tool_choice = health_guidance_required_web_search_tool_choice(inputs, loaded_skill_ids) or "auto"
-        request["tool_choice"] = _tool_choice_with_milk_plan_contract(required_milk_tool, tools, tool_choice)
+        request["tool_choice"] = _tool_choice_with_milk_plan_contract(required_tool, tools, tool_choice)
         request["include"] = ["web_search_call.action.sources"]
 
     max_output_tokens = options.get("max_output_tokens")
@@ -3306,6 +3308,15 @@ def _is_initial_user_request(input_items: list[dict[str, Any]]) -> bool:
 def _forced_required_tool_from_options(options: BuildAgentRequestOptions) -> str | None:
     tool_name = str(options.get("_required_tool_name") or "").strip()
     return tool_name or None
+
+
+def _required_birth_prep_tool(inputs: RuntimeInputs) -> str | None:
+    message = str(inputs.get("user_message") or "")
+    if "confirmed_form_data:" not in message:
+        return None
+    if not re.search(r"form_id\s*[:=]\s*[\"']?hospital_bag_intake[\"']?", message):
+        return None
+    return "hospital_bag_card_create"
 
 
 def _should_disable_tools_after_tool_results(results: list[dict[str, Any]]) -> bool:
@@ -4033,6 +4044,7 @@ def _create_response(
     output_text_seen = False
     web_search_statuses_seen: set[tuple[str, str]] = set()
     citation_marker_cleaner = _WebSearchCitationMarkerCleaner()
+    pseudo_tool_text_suppressor = _PseudoToolUseTextSuppressor()
     stream = client.responses.create(**request, stream=True)
     for event in stream:
         event_type = _get_item_value(event, "type")
@@ -4057,6 +4069,7 @@ def _create_response(
             delta = _get_item_value(event, "delta")
             if isinstance(delta, str) and delta:
                 clean_delta = citation_marker_cleaner.feed(delta)
+                clean_delta = pseudo_tool_text_suppressor.feed(clean_delta)
                 if clean_delta:
                     output_text_seen = True
                     on_text_delta(clean_delta)
@@ -4074,6 +4087,9 @@ def _create_response(
             reasoning_active = False
         elif event_type == "response.completed":
             clean_delta = citation_marker_cleaner.flush()
+            if clean_delta:
+                clean_delta = pseudo_tool_text_suppressor.feed(clean_delta)
+            clean_delta += pseudo_tool_text_suppressor.flush()
             if clean_delta:
                 output_text_seen = True
                 on_text_delta(clean_delta)
@@ -4147,6 +4163,47 @@ class _WebSearchCitationMarkerCleaner:
     def _reset_marker(self) -> None:
         self._mode = ""
         self._marker = ""
+
+
+class _PseudoToolUseTextSuppressor:
+    def __init__(self) -> None:
+        self._pending = ""
+        self._passthrough = False
+        self.detected = False
+
+    def feed(self, delta: str) -> str:
+        if not delta:
+            return ""
+        if self.detected:
+            return ""
+        if self._passthrough:
+            return delta
+
+        self._pending += delta
+        visible = self._pending.lstrip()
+        if not visible:
+            return ""
+        lower = visible.lower()
+        if PSEUDO_TOOL_USE_OPEN.startswith(lower) and len(lower) < len(PSEUDO_TOOL_USE_OPEN):
+            return ""
+        if lower.startswith(PSEUDO_TOOL_USE_OPEN):
+            self.detected = True
+            self._pending = ""
+            return ""
+
+        self._passthrough = True
+        output = self._pending
+        self._pending = ""
+        return output
+
+    def flush(self) -> str:
+        if self.detected:
+            self._pending = ""
+            return ""
+        output = self._pending
+        self._pending = ""
+        self._passthrough = True
+        return output
 
 
 def clean_web_search_citation_markers(text: str) -> str:
@@ -5100,7 +5157,53 @@ def _extract_function_calls(response: object) -> list[dict[str, Any]]:
                     "output_index": output_index,
                 }
             )
+    if calls:
+        return calls
+    return _extract_pseudo_tool_use_calls(response, response_id)
+
+
+def _extract_pseudo_tool_use_calls(response: object, response_id: str | None) -> list[dict[str, Any]]:
+    text = _response_output_text(response)
+    if PSEUDO_TOOL_USE_OPEN not in text.lower():
+        return []
+
+    calls: list[dict[str, Any]] = []
+    for index, match in enumerate(PSEUDO_TOOL_USE_RE.finditer(text)):
+        try:
+            payload = json.loads(match.group(1))
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        tool_name = _normalize_pseudo_tool_name(payload.get("recipient_name") or payload.get("name"))
+        if not tool_name:
+            continue
+        raw_arguments = payload.get("parameters", payload.get("arguments", {}))
+        arguments = _parse_tool_arguments(raw_arguments)
+        calls.append(
+            {
+                "name": tool_name,
+                "call_id": f"pseudo:{response_id or 'response'}:{index}:{tool_name}",
+                "item_id": f"pseudo-tool-use-{index}",
+                "arguments": arguments,
+                "response_id": response_id,
+                "output_index": index,
+            }
+        )
     return calls
+
+
+def _normalize_pseudo_tool_name(value: Any) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    candidates = [raw]
+    if "." in raw:
+        candidates.append(raw.rsplit(".", 1)[-1])
+    for candidate in candidates:
+        if candidate in FUNCTION_TOOLS:
+            return candidate
+    return ""
 
 
 def _stream_function_call_from_event(event: object, item: object) -> dict[str, Any]:
