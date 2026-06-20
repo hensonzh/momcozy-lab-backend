@@ -2069,12 +2069,15 @@ def manage_birth_journey_intake(args: dict[str, Any], inputs: RuntimeInputs) -> 
     intake_state = _normalize_birth_journey_intake_state(_dict_value(inputs.get("_birth_journey_intake_state")))
     if action in {"start", "get_state"} and not intake_state.get("started"):
         intake_state["started"] = True
+        _merge_birth_journey_entry_context(intake_state, payload, inputs)
 
     if action == "submit_basic_info":
         basic_info = _birth_journey_basic_info_payload(payload)
         if basic_info:
             intake_state["basic_info"] = {**_dict_value(intake_state.get("basic_info")), **basic_info}
             _persist_birth_prep_profile_memory(inputs, basic_info)
+    elif action == "submit_entry_concern":
+        intake_state["entry_concern_followup"] = _birth_journey_text_or_skipped(payload, "entry_concern_followup")
     elif action == "mark_checkup_records_uploaded":
         intake_state["checkup_records_uploaded"] = True
         note = _first_text(payload.get("checkup_status"), payload.get("checkup_note"), payload.get("note"))
@@ -2599,10 +2602,120 @@ def _birth_journey_text_or_skipped(payload: dict[str, Any], field_id: str) -> st
     return text or "跳过"
 
 
+def _merge_birth_journey_entry_context(state: dict[str, Any], payload: dict[str, Any], inputs: RuntimeInputs) -> None:
+    entry_reason = _first_answer_text(
+        payload.get("entry_reason"),
+        payload.get("initial_message"),
+        payload.get("user_message"),
+        payload.get("reason"),
+    )
+    current_message = _first_answer_text(inputs.get("user_message"))
+    if not entry_reason and _birth_journey_entry_message_has_signal(current_message):
+        entry_reason = current_message
+    if entry_reason:
+        state["entry_reason"] = entry_reason
+
+    concerns = _birth_journey_initial_concerns(payload, entry_reason)
+    if concerns:
+        state["initial_concerns"] = concerns
+
+    known_values = {
+        **_birth_journey_known_values_from_text(entry_reason),
+        **_birth_journey_known_values_from_payload(payload),
+    }
+    if known_values:
+        state["entry_known_values"] = known_values
+
+
+def _birth_journey_initial_concerns(payload: dict[str, Any], entry_reason: str) -> list[str]:
+    values: list[str] = []
+    raw = payload.get("initial_concerns") or payload.get("concerns") or payload.get("top_worries")
+    if isinstance(raw, list):
+        values.extend(str(item).strip() for item in raw if _has_meaningful_value(item))
+    elif _has_meaningful_value(raw):
+        values.append(str(raw).strip())
+    if _birth_journey_entry_message_has_signal(entry_reason):
+        values.append(entry_reason)
+    return _unique_text_list(values, 5)
+
+
+def _birth_journey_entry_message_has_signal(text: str) -> bool:
+    return any(
+        token in text
+        for token in (
+            "焦虑",
+            "无助",
+            "迷茫",
+            "心里没底",
+            "不知道",
+            "怎么办",
+            "先做什么",
+            "怕漏",
+            "漏事",
+            "手忙脚乱",
+            "慌",
+            "压力",
+        )
+    )
+
+
+def _birth_journey_known_values_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    source = _dict_value(payload.get("known_values")) or payload
+    known: dict[str, Any] = {}
+    for field_id in ("age", "current_week", "due_date_or_week"):
+        if _has_meaningful_value(source.get(field_id)):
+            known[field_id] = source[field_id]
+    return known
+
+
+def _birth_journey_known_values_from_text(text: str) -> dict[str, str]:
+    known: dict[str, str] = {}
+    age_match = re.search(r"(\d{2})\s*岁", text)
+    if age_match:
+        known["age"] = age_match.group(1)
+    week_match = re.search(r"(?:怀孕|孕)?\s*(\d{1,2})(?:\s*\+\s*(\d{1,2}))?\s*周", text)
+    if week_match:
+        known["current_week"] = f"{week_match.group(1)}+{week_match.group(2)}周" if week_match.group(2) else f"{week_match.group(1)}周"
+    return known
+
+
+def _birth_journey_entry_context_text(state: dict[str, Any]) -> str:
+    values: list[Any] = [state.get("entry_reason")]
+    concerns = state.get("initial_concerns")
+    if isinstance(concerns, list):
+        values.extend(concerns)
+    values.append(state.get("entry_concern_followup"))
+    return "；".join(_unique_text_list(values, 8))
+
+
+def _birth_journey_entry_known_age(state: dict[str, Any]) -> int | None:
+    basic_info = _dict_value(state.get("basic_info"))
+    known_values = _dict_value(state.get("entry_known_values"))
+    for value in (basic_info.get("age"), known_values.get("age")):
+        try:
+            age = int(str(value).strip())
+        except (TypeError, ValueError):
+            continue
+        if 12 <= age <= 60:
+            return age
+    return None
+
+
+def _birth_journey_should_ask_entry_concern(state: dict[str, Any]) -> bool:
+    if "entry_concern_followup" in state:
+        return False
+    age = _birth_journey_entry_known_age(state)
+    if age is not None and age >= 35:
+        return True
+    return bool(_birth_journey_entry_context_text(state))
+
+
 def _birth_journey_intake_completed_groups(state: dict[str, Any]) -> list[str]:
     groups: list[str] = []
     if _dict_value(state.get("basic_info")):
         groups.append("basic_info")
+    if "entry_concern_followup" in state:
+        groups.append("entry_concern")
     if state.get("checkup_records_uploaded") is True or _has_meaningful_value(state.get("checkup_status")):
         groups.append("checkup_records")
     for field_id in ("risk_factors", "current_symptoms", "lifestyle_context", "feeding_ibclc_context"):
@@ -2614,6 +2727,8 @@ def _birth_journey_intake_completed_groups(state: dict[str, Any]) -> list[str]:
 def _birth_journey_intake_next_step(state: dict[str, Any]) -> str:
     if not _dict_value(state.get("basic_info")):
         return "basic_info_form"
+    if _birth_journey_should_ask_entry_concern(state):
+        return "entry_concern_question"
     if state.get("checkup_records_uploaded") is not True and "checkup_status" not in state:
         return "checkup_records_upload"
     if "risk_factors" not in state:
@@ -2670,6 +2785,7 @@ def _birth_journey_symptoms_need_pause(text: str) -> bool:
 def _birth_journey_intake_summary(next_step: str) -> str:
     summaries = {
         "basic_info_form": "需要先填写孕周与基本情况表单。",
+        "entry_concern_question": "基础信息已记录，下一步沿着用户最初提到的关键线索追问。",
         "checkup_records_upload": "基础信息已记录，下一步需要上传产检记录。",
         "risk_question": "产检记录上传状态已确认，下一步补问孕期高风险因素。",
         "symptom_question": "高风险因素已问到，下一步确认当前不适或异常。",
@@ -2684,6 +2800,7 @@ def _birth_journey_intake_summary(next_step: str) -> str:
 def _birth_journey_intake_instruction(next_step: str) -> str:
     instructions = {
         "basic_info_form": "最终回复说明基础信息表已打开，并温和解释这是为了后面更贴合用户情况地整理孕期计划；请用户简单填写知道的部分，不确定的地方可以选“不确定/暂不说”。不要在聊天里逐项追问这些字段。",
+        "entry_concern_question": "只围绕用户最初提到的年龄、焦虑、无助、心里没底或不知道怎么办等关键线索追问 1 个问题；不要展开成问卷，用户不清楚也可以说不清楚。",
         "checkup_records_upload": "请用户上传最新一次的产检记录，如果没有或者不在手边也可以先跳过。",
         "risk_question": "只补问孕期高风险因素这一件事；用户不清楚也可以说不清楚。",
         "symptom_question": "只补问当前不适或异常这一件事；如果用户确认有明显异常，先不要生成计划。",
@@ -2696,6 +2813,8 @@ def _birth_journey_intake_instruction(next_step: str) -> str:
 
 
 def _birth_journey_intake_question(next_step: str, plan_context: dict[str, Any]) -> str:
+    if next_step == "entry_concern_question":
+        return _birth_journey_entry_concern_question(plan_context)
     if next_step == "risk_question":
         return "你了解自己是否有什么孕期高风险因素吗，比如慢性高血压、糖尿病、肾病、自身免疫病、甲状腺病、心脏病，或既往剖宫产、早产/流产史等？不清楚也可以先跳过。"
     if next_step == "symptom_question":
@@ -2711,8 +2830,39 @@ def _birth_journey_intake_question(next_step: str, plan_context: dict[str, Any])
     return ""
 
 
+def _birth_journey_entry_concern_question(plan_context: dict[str, Any]) -> str:
+    age = _birth_journey_context_age(plan_context)
+    concern_text = _first_answer_text(
+        plan_context.get("entry_concern_followup"),
+        plan_context.get("initial_concerns"),
+        plan_context.get("entry_reason"),
+        plan_context.get("top_worries"),
+    )
+    has_anxiety = _birth_journey_entry_message_has_signal(concern_text)
+    if age is not None and age >= 35 and has_anxiety:
+        return (
+            f"我看到你这里是 {age} 岁，也提到有点焦虑，这个我会纳入计划里。"
+            "我想先确认最关键的一点：医生有没有特别提醒过高龄孕期相关的产检频率、血压血糖、胎儿监测或分娩方式安排？不清楚也可以说不清楚。"
+        )
+    if age is not None and age >= 35:
+        return (
+            f"我看到你这里是 {age} 岁，这个我会纳入计划里。"
+            "医生有没有特别提醒过高龄孕期相关的产检频率、血压血糖、胎儿监测或分娩方式安排？不清楚也可以说不清楚。"
+        )
+    return "你刚才提到有点焦虑，我想先抓住最压着你的那个点：你现在更担心产检或宝宝情况、后面要准备什么、每天该怎么安排，还是身边支持不够？"
+
+
+def _birth_journey_context_age(context: dict[str, Any]) -> int | None:
+    try:
+        age = int(str(context.get("age") or "").strip())
+    except (TypeError, ValueError):
+        return None
+    return age if 12 <= age <= 60 else None
+
+
 def birth_journey_intake_quick_reply_guidance(next_step: str) -> list[dict[str, str]]:
     replies_by_step = {
+        "entry_concern_question": ("医生说要多监测", "目前没特别提醒", "我主要是心里焦虑"),
         "checkup_records_upload": ("产检记录上传完毕", "先跳过这步", "我现在没有记录"),
         "risk_question": ("没有高风险因素", "不清楚先跳过", "有一些风险因素"),
         "symptom_question": ("目前没有异常", "有些不舒服", "不确定先跳过"),
@@ -2787,11 +2937,13 @@ def _birth_journey_default_city_or_country(inputs: RuntimeInputs) -> str:
 
 def _birth_journey_plan_context_from_intake(state: dict[str, Any]) -> dict[str, Any]:
     basic_info = _dict_value(state.get("basic_info"))
-    context: dict[str, Any] = dict(basic_info)
+    context: dict[str, Any] = {**_dict_value(state.get("entry_known_values")), **basic_info}
     due_or_week = _first_text(
         basic_info.get("due_date_or_week"),
         basic_info.get("due_date"),
         basic_info.get("current_week"),
+        context.get("due_date_or_week"),
+        context.get("current_week"),
         _birth_journey_due_date_from_lmp(basic_info.get("last_menstrual_period")),
     )
     if due_or_week:
@@ -2805,6 +2957,22 @@ def _birth_journey_plan_context_from_intake(state: dict[str, Any]) -> dict[str, 
     for key in ("risk_factors", "current_symptoms", "lifestyle_context", "feeding_ibclc_context", "feeding_intention"):
         if key in state:
             context[key] = state[key]
+    if _has_meaningful_value(state.get("entry_reason")):
+        context["entry_reason"] = state["entry_reason"]
+    initial_concerns = state.get("initial_concerns")
+    if isinstance(initial_concerns, list) and initial_concerns:
+        context["initial_concerns"] = initial_concerns
+    entry_followup = _first_answer_text(state.get("entry_concern_followup"))
+    entry_context_text = _birth_journey_entry_context_text(state)
+    if entry_followup:
+        context["entry_concern_followup"] = entry_followup
+    if entry_context_text:
+        context["top_worries"] = _first_answer_text(entry_followup, initial_concerns, state.get("entry_reason"))
+    if entry_followup:
+        existing_lifestyle = _first_answer_text(context.get("lifestyle_context"))
+        context["lifestyle_context"] = (
+            f"{existing_lifestyle}；前期关键担心：{entry_followup}" if existing_lifestyle else entry_followup
+        )
     return context
 
 
