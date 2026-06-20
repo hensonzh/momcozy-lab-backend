@@ -1699,8 +1699,10 @@ def _birth_journey_plan_final_response(card_json: dict[str, Any]) -> str:
     next_7_items = next_7_days.get("items") if isinstance(next_7_days.get("items"), list) else []
     next_7_summary = _birth_journey_next_7_todo_summary(next_7_items)
     if next_7_summary:
+        context_reason = _clean_birth_journey_fragment(next_7_days.get("context_reason"))
+        intro = f"{context_reason}，" if context_reason else ""
         lines = [
-            "接下来 7 天行动清单：" + next_7_summary + "。",
+            intro + "接下来 7 天先做这几件：" + next_7_summary + "。",
             "最终回复需要追问：这里面是否有已经完成的事项；如果有，可以让用户直接回复编号或事项名，你会同步更新完成状态。",
         ]
         return "\n\n".join(lines)

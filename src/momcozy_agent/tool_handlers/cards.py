@@ -3068,6 +3068,18 @@ def _build_birth_journey_plan_card_json(form_data: dict[str, Any], scope: str, i
         form_data.get("risk_factors") or form_data.get("high_risk_factors"),
         8,
     )
+    age = _first_text(form_data.get("age"), form_data.get("birth_prep_age"))
+    top_worries = _first_answer_text(form_data.get("top_worries"), form_data.get("birth_prep_top_worries"))
+    entry_reason = _first_answer_text(
+        form_data.get("entry_reason"),
+        form_data.get("initial_message"),
+        form_data.get("user_message"),
+    )
+    initial_concerns = _unique_text_list(
+        form_data.get("initial_concerns") or form_data.get("concerns"),
+        6,
+    )
+    entry_concern_followup = _first_answer_text(form_data.get("entry_concern_followup"))
     lifestyle_context = _first_answer_text(
         form_data.get("lifestyle_context"),
         form_data.get("work_context"),
@@ -3100,6 +3112,11 @@ def _build_birth_journey_plan_card_json(form_data: dict[str, Any], scope: str, i
         "checkup_status": checkup_status,
         "current_symptoms": current_symptoms,
         "risk_factors": risk_factors,
+        "age": age,
+        "top_worries": top_worries,
+        "entry_reason": entry_reason,
+        "initial_concerns": initial_concerns,
+        "entry_concern_followup": entry_concern_followup,
         "lifestyle_context": lifestyle_context,
         "medical_notes": medical_notes,
         "current_week": timeline.get("current_week"),
@@ -3259,6 +3276,7 @@ def _birth_journey_planning_layers(
         [*safety_items, *_birth_journey_current_focus_items(week, context, current_phase)],
     )
     next_7_items = _normalize_birth_journey_next_7_todo_items(_birth_journey_next_7_day_items(week, context))
+    next_7_context_reason = _birth_journey_next_7_context_reason(week, context)
     next_2_4_weeks = _birth_journey_next_2_4_week_items(week, context)
     later_milestones = _birth_journey_later_milestones(week, context)
     return {
@@ -3276,6 +3294,7 @@ def _birth_journey_planning_layers(
         "next_7_days": {
             "title": "接下来 7 天行动清单",
             "subtitle": "把当前优先级拆成这周能完成的几个小动作。",
+            "context_reason": next_7_context_reason,
             "items": next_7_items,
         },
         "next_2_4_weeks": {
@@ -3290,16 +3309,48 @@ def _birth_journey_planning_layers(
 
 
 BIRTH_JOURNEY_PLAN_ITEM_TITLE_MAX_CHARS = 22
-BIRTH_JOURNEY_PLAN_ITEM_REASON_MAX_CHARS = 36
+BIRTH_JOURNEY_PLAN_ITEM_REASON_MAX_CHARS = 84
 
 
 def _birth_journey_plan_item(title: str, reason: str, timeframe: str, based_on: list[str] | None = None) -> dict[str, Any]:
     return {
         "title": _truncate_birth_journey_plan_text(title, BIRTH_JOURNEY_PLAN_ITEM_TITLE_MAX_CHARS),
-        "reason": _truncate_birth_journey_plan_text(reason, BIRTH_JOURNEY_PLAN_ITEM_REASON_MAX_CHARS),
+        "reason": _truncate_birth_journey_plan_text(
+            _birth_journey_plan_reason_text(reason),
+            BIRTH_JOURNEY_PLAN_ITEM_REASON_MAX_CHARS,
+        ),
         "timeframe": timeframe,
         "based_on": based_on or [],
     }
+
+
+def _birth_journey_plan_reason_text(reason: str) -> str:
+    text = str(reason or "").strip()
+    if not text:
+        return ""
+    if text.startswith(("考虑到", "目的是", "为了")):
+        return text
+    action_starters = (
+        "先",
+        "把",
+        "确认",
+        "问清",
+        "定好",
+        "整理",
+        "固定",
+        "选",
+        "写清",
+        "聚焦",
+        "重点",
+        "明确",
+        "补齐",
+        "拆成",
+        "分开",
+        "落到",
+    )
+    if text.startswith(action_starters):
+        return f"目的是{text}"
+    return f"目的是让你知道：{text}"
 
 
 def _truncate_birth_journey_plan_text(value: str, max_chars: int) -> str:
@@ -3364,6 +3415,131 @@ def _birth_journey_support_text(value: Any) -> str:
     if any(token in text for token in unsupported_tokens):
         return ""
     return text
+
+
+def _birth_journey_context_concern_text(context: dict[str, Any]) -> str:
+    return "；".join(
+        _unique_text_list(
+            [
+                context.get("entry_concern_followup"),
+                context.get("top_worries"),
+                context.get("initial_concerns"),
+                context.get("entry_reason"),
+                context.get("lifestyle_context"),
+            ],
+            6,
+        )
+    )
+
+
+def _birth_journey_context_concern_labels(context: dict[str, Any], max_labels: int = 3) -> list[str]:
+    text = _birth_journey_context_concern_text(context)
+    if not text:
+        return []
+    labels: list[str] = []
+    if _birth_journey_entry_message_has_signal(text):
+        labels.append("焦虑")
+    if any(token in text for token in ("血压", "血糖", "监测", "糖耐", "高血压", "糖尿病")):
+        labels.append("血压血糖监测")
+    if any(token in text for token in ("宝宝", "胎儿", "胎动", "发育", "生长")):
+        labels.append("宝宝情况")
+    if any(token in text for token in ("产检", "复查", "检查", "报告")):
+        labels.append("产检复查")
+    if any(token in text for token in ("准备", "安排", "不知道", "怎么办", "先做什么")):
+        labels.append("后续安排")
+    if not labels:
+        label = text.replace("我主要是", "").replace("我主要", "").strip("，。；、 ")
+        if label:
+            labels.append(_truncate_birth_journey_plan_text(label, 18))
+    return _unique_text_list(labels, max_labels)
+
+
+def _birth_journey_join_concern_labels(labels: list[str]) -> str:
+    clean_labels = _unique_text_list(labels, 3)
+    if len(clean_labels) <= 1:
+        return clean_labels[0] if clean_labels else ""
+    return "、".join(clean_labels[:-1]) + "和" + clean_labels[-1]
+
+
+def _birth_journey_next_7_context_reason(week: Any, context: dict[str, Any]) -> str:
+    parts: list[str] = []
+    age = _birth_journey_context_age(context)
+    if age is not None and age >= 35:
+        parts.append(f"{age} 岁")
+    if isinstance(week, int):
+        parts.append(f"孕 {week} 周")
+    concern_label = _birth_journey_join_concern_labels(_birth_journey_context_concern_labels(context, 2))
+    if concern_label:
+        parts.append(f"提到{concern_label}")
+    if parts:
+        spacer = "" if parts[0].startswith("提到") else " "
+        return "考虑到你" + spacer + "、".join(parts)
+    return "结合你当前孕周和已提供的信息"
+
+
+def _birth_journey_personalized_next_7_items(week: Any, context: dict[str, Any]) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    age = _birth_journey_context_age(context)
+    concern_text = _birth_journey_context_concern_text(context)
+    has_anxiety = _birth_journey_entry_message_has_signal(concern_text)
+    has_monitoring_concern = any(token in concern_text for token in ("血压", "血糖", "监测", "糖耐", "高血压", "糖尿病"))
+    has_baby_concern = any(token in concern_text for token in ("宝宝", "胎儿", "胎动", "发育", "生长"))
+
+    if has_anxiety:
+        items.append(
+            _birth_journey_plan_item(
+                "拆开最焦虑的三件事",
+                "考虑到你提到焦虑，目的是把担心分成能问医生、能安排和需要家人支持的事项。",
+                "今天",
+                ["entry_reason", "top_worries", "entry_concern_followup"],
+            )
+        )
+    if age is not None and age >= 35 and has_monitoring_concern:
+        items.append(
+            _birth_journey_plan_item(
+                "确认高龄孕期监测安排",
+                f"考虑到你 {age} 岁且提到监测，目的是问清血压血糖、复查频率和异常时联系谁。",
+                "下次产检前",
+                ["age", "entry_concern_followup"],
+            )
+        )
+    elif age is not None and age >= 35:
+        items.append(
+            _birth_journey_plan_item(
+                "确认高龄孕期关注重点",
+                f"考虑到你 {age} 岁，目的是问清产检频率、胎儿监测和分娩方式是否需要特别安排。",
+                "下次产检前",
+                ["age", "entry_reason"],
+            )
+        )
+    elif has_monitoring_concern:
+        items.append(
+            _birth_journey_plan_item(
+                "确认血压血糖监测安排",
+                "考虑到你提到监测，目的是问清记录频率、异常阈值和复查节点。",
+                "下次产检前",
+                ["entry_concern_followup"],
+            )
+        )
+    if has_baby_concern:
+        items.append(
+            _birth_journey_plan_item(
+                "把宝宝情况问题列给医生",
+                "考虑到你担心宝宝情况，目的是把胎动、胎儿生长和需要复查的点一次问清楚。",
+                "下次产检前",
+                ["entry_concern_followup", "top_worries"],
+            )
+        )
+    if not items and concern_text:
+        items.append(
+            _birth_journey_plan_item(
+                "把最担心的问题列成三条",
+                "考虑到你已经说出担心点，目的是把模糊压力变成医生能回答、自己能安排的具体问题。",
+                "今天",
+                ["entry_reason", "top_worries"],
+            )
+        )
+    return _unique_birth_journey_plan_items(items)[:3]
 
 
 def _birth_journey_current_focus_subtitle(week: Any, context: dict[str, Any]) -> str:
@@ -3446,6 +3622,7 @@ def _birth_journey_next_7_day_items(week: Any, context: dict[str, Any]) -> list[
     feeding = _birth_journey_substantive_text(context.get("feeding_intention")) or _birth_journey_substantive_text(context.get("feeding_ibclc_context"))
     birth_setting = _birth_journey_substantive_text(context.get("birth_setting"))
     birth_path = _birth_journey_substantive_text(context.get("birth_path"))
+    items.extend(_birth_journey_personalized_next_7_items(week, context))
     if checkup_status:
         items.append(_birth_journey_plan_item("整理产检报告里的待确认项", "分开记录已做检查、异常提示、未预约项和医生备注。", "未来 7 天", ["checkup_status"]))
     else:
@@ -3473,7 +3650,7 @@ def _birth_journey_next_7_day_items(week: Any, context: dict[str, Any]) -> list[
         items.append(_birth_journey_plan_item("补问剖宫产准备", "确认禁食禁水、入院时间、下床和伤口观察。", "下次产检", ["birth_path"]))
     if lifestyle_text:
         items.append(_birth_journey_plan_item("给生活压力留缓冲", "把久坐、通勤、睡眠压力拆成可调整的小安排。", "从今天开始", ["lifestyle_context"]))
-    return items
+    return _unique_birth_journey_plan_items(items)
 
 
 def _birth_journey_next_2_4_week_items(week: Any, context: dict[str, Any]) -> list[dict[str, Any]]:
