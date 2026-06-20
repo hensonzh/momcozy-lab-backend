@@ -30,7 +30,7 @@ class IbclcConsultCardTests(unittest.TestCase):
         self.assertNotIn("specialties", consultant)
         self.assertEqual(
             card["recommendation_reason"],
-            "我推荐 Emily Chen，是因为这位顾问是 IBCLC 国际认证哺乳顾问，适合帮你一起看含乳、排乳、亲喂/吸奶效果和乳房不适这类问题。",
+            "我推荐 Emily Chen，是因为她擅长含乳、排乳、亲喂/吸奶效果和乳房不适；她也恰好和你同城，后面有必要也可以上门服务。",
         )
 
         self.assertNotIn("help_topics", card)
@@ -48,6 +48,31 @@ class IbclcConsultCardTests(unittest.TestCase):
         )
 
         self.assertEqual(result["card"]["consultant"]["bio"], "专注亲喂和堵奶支持。")
+
+    def test_recommendation_reason_matches_user_issue(self) -> None:
+        result = create_ibclc_consult_card(
+            {},
+            {"user_message": "宝宝尿布变少了，我担心她没吃饱，想找 IBCLC 看看。", "locale": "zh-CN"},
+        )
+
+        reason = result["card"]["recommendation_reason"]
+        self.assertIn("宝宝摄入判断、尿布/体重信号和喂养安排", reason)
+        self.assertIn("正好对应你刚才提到的宝宝摄入不够安心", reason)
+        self.assertIn("恰好和你同城", reason)
+        self.assertIn("上门服务", reason)
+
+    def test_recommendation_reason_uses_explicit_issue_summary(self) -> None:
+        result = create_ibclc_consult_card(
+            {
+                "issue_summary": "乳头疼，宝宝总是吸不住",
+                "recommendation_topic": "含乳评估和亲喂姿势",
+            },
+            {"user_message": "", "locale": "zh-CN"},
+        )
+
+        reason = result["card"]["recommendation_reason"]
+        self.assertIn("她擅长含乳评估和亲喂姿势", reason)
+        self.assertIn("正好对应你刚才提到的乳头疼，宝宝总是吸不住", reason)
 
 
 if __name__ == "__main__":

@@ -253,6 +253,32 @@ class PregnancyDiaryToolTests(unittest.TestCase):
                     self.assertNotIn("content", compact["diary"])
                 self.assertNotIn("assistant_followup", compact)
 
+    def test_diary_write_instruction_does_not_stop_health_consultation(self) -> None:
+        compact = model_tool_output(
+            {
+                "ok": True,
+                "tool_name": "pregnancy_diary_manage",
+                "result": {
+                    "ok": True,
+                    "tool_name": "pregnancy_diary_manage",
+                    "status": "diary_entry_written",
+                    "action": "write",
+                    "side_effect_performed": True,
+                    "summary": "2026-06-10，没有发烧，也没有红肿。",
+                    "diary": {
+                        "entry_id": 7,
+                        "entry_date": "2026-06-10",
+                        "content": "今天堵奶后确认没有发烧，也没有红肿。",
+                    },
+                },
+            }
+        )
+
+        instruction = compact["final_response_instruction"]
+        self.assertIn("不要停在记录结果", instruction)
+        self.assertIn("继续完成当前健康咨询的下一步", instruction)
+        self.assertIn("追问关键问题、给低风险建议", instruction)
+
 
 if __name__ == "__main__":
     unittest.main()

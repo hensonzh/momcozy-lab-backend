@@ -144,7 +144,10 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertIn("只有明显在变严重、持续不缓解", request_context)
         self.assertIn("第一轮先确认几个要紧情况", request_context)
         self.assertIn("先给低风险处理和观察建议", request_context)
+        self.assertIn("不能只回复已记录", request_context)
+        self.assertIn("第 3 轮左右或关键问题已回答后再分流", request_context)
         self.assertIn("要主动引导 IBCLC 在线咨询", request_context)
+        self.assertIn("我这里有很多优秀的 IBCLC 可以帮助到你，你需要我帮你推荐吗", request_context)
         self.assertNotIn("## 健康咨询和 web_search", request["instructions"])
 
     def test_more_complex_health_question_terms_trigger_web_search(self) -> None:

@@ -54,7 +54,7 @@ class HealthConsultationSkillTests(unittest.TestCase):
         self.assertIn("硬块有没有变大或越来越痛", health_skill)
         self.assertIn("用户没回答前", health_skill)
         self.assertIn("先给她能立刻做的事", health_skill)
-        self.assertIn("不要把 IBCLC 当成默认下一步", health_skill)
+        self.assertIn("不要把医院、医生或 IBCLC 当成默认下一步", health_skill)
 
     def test_health_consultation_prioritizes_action_before_referral(self) -> None:
         health_skill = (ROOT / "skills" / "health-consultation" / "SKILL.md").read_text(encoding="utf-8")
@@ -72,8 +72,21 @@ class HealthConsultationSkillTests(unittest.TestCase):
         self.assertIn("记录不需要用户额外说“记一下”", health_skill)
         self.assertIn("写入或更新不需要额外确认", health_skill)
         self.assertIn("如果用户只是纯科普问题", health_skill)
+        self.assertIn("不要停在“已记录”", health_skill)
+        self.assertIn("必须继续完成当前健康咨询的下一步", health_skill)
         self.assertIn("医生是用来处理身体状态明显不对", health_skill)
         self.assertIn("不要把医生当成普通健康咨询的默认下一步", health_skill)
+
+    def test_health_consultation_triage_before_hospital_or_ibclc_referral(self) -> None:
+        health_skill = (ROOT / "skills" / "health-consultation" / "SKILL.md").read_text(encoding="utf-8")
+
+        self.assertIn("健康咨询的分流节奏", health_skill)
+        self.assertIn("急症信号例外", health_skill)
+        self.assertIn("不要在信息没了解完整前推荐去医院", health_skill)
+        self.assertIn("第 1 轮只承接 + 问最关键的安全问题", health_skill)
+        self.assertIn("第 2 轮在用户回答安全问题后", health_skill)
+        self.assertIn("第 3 轮左右", health_skill)
+        self.assertIn("我这里有很多优秀的 IBCLC 可以帮助到你，你需要我帮你推荐吗", health_skill)
 
     def test_ibclc_consultation_flow_has_warm_pre_and_post_trigger_rules(self) -> None:
         health_skill = (ROOT / "skills" / "health-consultation" / "SKILL.md").read_text(encoding="utf-8")
@@ -91,6 +104,7 @@ class HealthConsultationSkillTests(unittest.TestCase):
         self.assertIn("先完成必要的基础问诊和当前建议", health_skill)
         self.assertIn("一旦命中上面的情况，就主动引导", health_skill)
         self.assertIn("更适合让 IBCLC 顾问接着看含乳、排乳和喂养节奏", health_skill)
+        self.assertIn("我这里有很多优秀的 IBCLC 可以帮助到你，你需要我帮你推荐吗", health_skill)
         self.assertIn("用户明确同意后", health_skill)
         self.assertIn("卡片出现后", health_skill)
         self.assertIn("不用一个人反复猜", health_skill)
