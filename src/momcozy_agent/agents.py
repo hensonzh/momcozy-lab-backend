@@ -1459,8 +1459,10 @@ def _text_preview(value: Any, max_chars: int) -> str:
 def _form_artifact_final_response_instruction(tool_name: str) -> str:
     if tool_name == "birth_journey_intake_manage":
         return (
-            "孕期计划基础信息表已经展示。最终回复只简短说明表单已打开，"
-            "请用户填完提交；不要在聊天里重复表单字段，也不要说计划已经生成。"
+            "孕期计划基础信息表已经展示。最终回复只输出下面两段中文，保留空行，"
+            "不要改写、扩写，不要在聊天里重复表单字段，也不要说计划已经生成：\n\n"
+            "好，我先把孕周与基本情况表打开了。\n\n"
+            "为了后面能更贴合你的情况，我想先和你一起把关键信息理一下；你简单填一下知道的部分，不确定的地方选“不确定/暂不说”就好。"
         )
     if tool_name == "birth_plan_form_create":
         return (

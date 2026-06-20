@@ -2683,7 +2683,7 @@ def _birth_journey_intake_summary(next_step: str) -> str:
 
 def _birth_journey_intake_instruction(next_step: str) -> str:
     instructions = {
-        "basic_info_form": "最终回复只说明已打开基础信息表单，请用户填完提交；不要在聊天里逐项追问这些字段。",
+        "basic_info_form": "最终回复说明基础信息表已打开，并温和解释这是为了后面更贴合用户情况地整理孕期计划；请用户简单填写知道的部分，不确定的地方可以选“不确定/暂不说”。不要在聊天里逐项追问这些字段。",
         "checkup_records_upload": "请用户上传最新一次的产检记录，如果没有或者不在手边也可以先跳过。",
         "risk_question": "只补问孕期高风险因素这一件事；用户不清楚也可以说不清楚。",
         "symptom_question": "只补问当前不适或异常这一件事；如果用户确认有明显异常，先不要生成计划。",
@@ -2743,7 +2743,7 @@ def _birth_journey_basic_info_form(plan_context: dict[str, Any], inputs: Runtime
     return {
         "id": "birth_journey_basic_info_intake",
         "title": "孕周与基本情况",
-        "description": "",
+        "description": "先填写几项基础信息，后面我会按你的孕周、身体情况和准备状态来整理更贴合你的孕期计划。",
         "submit_label": "提交",
         "fields": fields,
         "default_values": default_values,
