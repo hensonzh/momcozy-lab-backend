@@ -57,6 +57,7 @@ STATIC_CONTENT_TYPES = {
 @dataclass
 class ChatSession:
     conversation_id: str
+    user_id: str = ""
     previous_response_id: str | None = None
     loaded_skill_ids: list[SkillId] = field(default_factory=list)
     context_state: ContextState = field(default_factory=ContextState)
@@ -81,14 +82,34 @@ class ChatRuntime:
         self.slot_extractor = slot_extractor
         self.sessions: dict[str, ChatSession] = {}
 
-    def get_session(self, conversation_id: str | None) -> ChatSession:
-        if conversation_id and conversation_id in self.sessions:
-            return self.sessions[conversation_id]
-
+    def get_session(self, conversation_id: str | None, *, user_id: str | None = None) -> ChatSession:
         new_id = conversation_id or str(uuid.uuid4())
-        session = ChatSession(conversation_id=new_id)
-        self.sessions[new_id] = session
+        normalized_user_id = _normalize_session_user_id(user_id)
+        session_key = _session_storage_key(new_id, normalized_user_id)
+        if session_key in self.sessions:
+            return self.sessions[session_key]
+
+        session = ChatSession(conversation_id=new_id, user_id=normalized_user_id)
+        self.sessions[session_key] = session
         return session
+
+    def get_existing_session(self, conversation_id: str, *, user_id: str | None = None) -> ChatSession | None:
+        session_key = _session_storage_key(conversation_id, _normalize_session_user_id(user_id))
+        return self.sessions.get(session_key)
+
+    def sessions_for_conversation(self, conversation_id: str) -> list[ChatSession]:
+        return [session for session in self.sessions.values() if session.conversation_id == conversation_id]
+
+
+def _normalize_session_user_id(user_id: str | None) -> str:
+    return str(user_id or "").strip()
+
+
+def _session_storage_key(conversation_id: str, user_id: str | None = None) -> str:
+    normalized_user_id = _normalize_session_user_id(user_id)
+    if not normalized_user_id:
+        return conversation_id
+    return f"user:{len(normalized_user_id)}:{normalized_user_id}:thread:{conversation_id}"
 
 
 def _schedule_birth_prep_slot_extraction(
@@ -240,7 +261,8 @@ def create_app(runtime: ChatRuntime | None = None, *, include_websocket_bridge: 
             return JSONResponse({"error": "client event requires thread_id."}, status_code=400)
 
         event = _format_client_event(payload)
-        session = runtime_from_app(request.app).get_session(thread_id)
+        runtime = runtime_from_app(request.app)
+        session = _client_event_session(runtime, thread_id, _payload_user_id(payload))
         if event not in session.context_state.client_events:
             session.context_state.client_events.append(event)
             session.context_state.client_events = session.context_state.client_events[-10:]
@@ -336,7 +358,8 @@ async def stream_ag_ui_events(
     parent_run_id = _field(payload, "parent_run_id", "parentRunId")
     assistant_message_id = f"{run_id}:assistant"
 
-    session = runtime.get_session(str(thread_id))
+    session = runtime.get_session(str(thread_id), user_id=_runtime_input_user_id(inputs))
+    inputs.pop("previous_response_id", None)
 
     sentinel = object()
     output_queue: asyncio.Queue[Any] = asyncio.Queue()
@@ -414,7 +437,7 @@ async def stream_ag_ui_events(
             with session.run_lock:
                 _hydrate_session_user_profile(inputs, session)
                 try:
-                    if session.previous_response_id and "previous_response_id" not in inputs:
+                    if session.previous_response_id:
                         inputs["previous_response_id"] = session.previous_response_id
                     _schedule_birth_prep_slot_extraction(session, runtime, inputs, run_id=str(run_id))
                     agent_options: dict[str, Any] = {
@@ -477,7 +500,8 @@ async def stream_ag_ui_events(
 def prewarm_ag_ui_session(payload: dict[str, Any], inputs: dict[str, Any], runtime: ChatRuntime) -> dict[str, Any]:
     thread_id = str(_field(payload, "thread_id", "threadId") or f"thread_{payload.get('conversation_id', 'anonymous')}")
     run_id = str(_field(payload, "run_id", "runId") or f"prewarm_{date.today().isoformat()}")
-    session = runtime.get_session(thread_id)
+    session = runtime.get_session(thread_id, user_id=_runtime_input_user_id(inputs))
+    inputs.pop("previous_response_id", None)
     with session.run_lock:
         _hydrate_session_user_profile(inputs, session)
         if session.previous_response_id:
@@ -701,10 +725,6 @@ def _runtime_inputs_from_ag_ui(payload: dict[str, Any]) -> dict[str, Any]:
         if value is not None:
             inputs[key] = value
 
-    previous_response_id = forwarded_props.get("previous_response_id") or state.get("previous_response_id")
-    if previous_response_id:
-        inputs["previous_response_id"] = previous_response_id
-
     return inputs
 
 
@@ -760,6 +780,52 @@ def _refresh_session_profile_cache_from_inputs(session: ChatSession, inputs: dic
 def _runtime_input_user_id(inputs: dict[str, Any]) -> str:
     profile = inputs.get("user_profile") if isinstance(inputs.get("user_profile"), dict) else {}
     return str(inputs.get("user_id") or profile.get("user_id") or "").strip()
+
+
+def _payload_user_id(payload: dict[str, Any]) -> str:
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+    return str(
+        payload.get("user_id")
+        or payload.get("userId")
+        or metadata.get("user_id")
+        or metadata.get("userId")
+        or ""
+    ).strip()
+
+
+def _client_event_session(runtime: ChatRuntime, thread_id: str, user_id: str) -> ChatSession:
+    exact_session = None
+    if user_id:
+        exact_session = runtime.get_existing_session(thread_id, user_id=user_id)
+        if exact_session is not None and _session_has_agent_history(exact_session):
+            return exact_session
+
+    agent_history_sessions = [
+        session
+        for session in runtime.sessions_for_conversation(thread_id)
+        if _session_has_agent_history(session)
+    ]
+    if len(agent_history_sessions) == 1:
+        return agent_history_sessions[0]
+
+    if exact_session is not None:
+        return exact_session
+
+    return runtime.get_session(thread_id, user_id=user_id)
+
+
+def _session_has_agent_history(session: ChatSession) -> bool:
+    state = session.context_state
+    return bool(
+        session.previous_response_id
+        or session.loaded_skill_ids
+        or state.environment_sent
+        or state.loaded_references
+        or state.loaded_tools
+        or state.last_assistant_message
+        or state.birth_journey_intake
+        or state.milk_management_state
+    )
 
 
 def _merge_profile_context(persisted: dict[str, Any], provided: dict[str, Any]) -> dict[str, Any]:

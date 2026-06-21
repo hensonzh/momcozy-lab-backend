@@ -100,7 +100,7 @@ App 端 WebSocket 桥接入口：
 
 统一 FastAPI 服务同样提供 `/` 和 `/health` JSON 健康检查入口；它们只用于 smoke test，不恢复旧 HTML web demo。
 
-`/api/ag-ui-prewarm` 使用同一个 `threadId` 执行一轮隐藏、非流式、禁用工具的 Responses 请求，只保存 `ChatSession.previous_response_id`，不向前端生成消息或 work panel 事件。若真实用户消息先完成并写入了同一 session，预热结果会被视为 stale，不覆盖真实对话状态。
+`/api/ag-ui-prewarm` 使用同一个 `user_id + threadId` 会话命名空间执行一轮隐藏、非流式、禁用工具的 Responses 请求，只保存 `ChatSession.previous_response_id`，不向前端生成消息或 work panel 事件。若真实用户消息先完成并写入了同一 session，预热结果会被视为 stale，不覆盖真实对话状态。
 
 确定性 App 操作可以走轻量 HTTP 入口，避免不必要的模型轮次。例如 `POST /api/hospital-bag/cart-update` 复用 `hospital_bag_cart_update` handler，根据当前 `hospital_bag_cart.groups` 和 `args.action/product_sku_id` 返回新的购物车状态；适用于用户已经确认“换成 Air 1 / M9 / S12 Pro Quick”等型号同步，不用于开放式选型或解释。
 
@@ -113,7 +113,7 @@ MomCozyApp AgentHub
   -> WS /api/ag-ui-ws
   -> FastAPI bridge / POST /api/ag-ui
   -> FastAPI server.py 解析 AG-UI payload
-  -> 按 threadId 获取 ChatSession
+  -> 按 user_id + threadId 获取 ChatSession
   -> 恢复 previous_response_id、loaded_skill_ids、ContextState
   -> run_agent_loop()
   -> build_agent_request()
@@ -125,7 +125,7 @@ MomCozyApp AgentHub
   -> RUN_FINISHED 作为成功流最后事件
 ```
 
-`server.py` 保存每个 `threadId` 的会话状态：
+`server.py` 保存每个 `user_id + threadId` 命名空间的会话状态；缺少 `user_id` 的请求会落到匿名 thread 命名空间：
 
 - `previous_response_id`
 - `loaded_skill_ids`
@@ -175,7 +175,7 @@ Air1 FAQ 图片位于 `skills/device-guidance/assets/air1/faq-images/`。`faq.md
 
 `birth_prep_context` 和 `birth_prep_profile_context` 受 `active_service_domain` gate 控制：domain 为空或为 `birth_prep` 时注入，明确为 `milk_management`、`device_guidance` 或 `emotion_support` 时不注入，避免孕期 slots 污染产后或设备服务。App 可通过 `service_domain` / `active_service_domain` / `current_service` 显式传入；服务工具或 `load_skill` 成功后也会更新 session domain。
 
-`user_id` 由应用侧保留在 `RuntimeInputs`，不会作为明文行写进 `request_context`。AG-UI payload 解析阶段只做字段解析，不直接读取 profile DB；拿到 `ChatSession` 后才会 hydrate `user_profile`。同一 `threadId + user_id` 下的 profile cache 不按时间过期，只有 user_id 变化、cache 为空或运行态 profile 被明确更新时才刷新。`profile_get` 优先复用已 hydrate 的 `inputs["user_profile"]`；`profile_update`、孕期基础信息表单和孕期计划卡片会先同步刷新本轮 profile 投影，并在本轮结束后回写 session cache。DB 持久化通过内存 profile write queue 异步执行，避免 profile 写入阻塞主智能体 loop；后台写入失败只记录日志/重试，不改变当前轮的模型返回。`data_store.init_db()` 仍可在各数据访问入口调用，但同一 DB path 下只执行一次 schema 初始化/迁移保护，避免把 schema 检查放进每次 profile read 热路径。
+`user_id` 由应用侧保留在 `RuntimeInputs`，不会作为明文行写进 `request_context`。AG-UI payload 解析阶段只做字段解析，不直接读取 profile DB；后端先按 `user_id + threadId` 取得 `ChatSession`，再 hydrate `user_profile`。同一 `user_id + threadId` 下的 profile cache 不按时间过期，只有 user_id 变化、cache 为空或运行态 profile 被明确更新时才刷新。`profile_get` 优先复用已 hydrate 的 `inputs["user_profile"]`；`profile_update`、孕期基础信息表单和孕期计划卡片会先同步刷新本轮 profile 投影，并在本轮结束后回写 session cache。DB 持久化通过内存 profile write queue 异步执行，避免 profile 写入阻塞主智能体 loop；后台写入失败只记录日志/重试，不改变当前轮的模型返回。`data_store.init_db()` 仍可在各数据访问入口调用，但同一 DB path 下只执行一次 schema 初始化/迁移保护，避免把 schema 检查放进每次 profile read 热路径。
 
 已通过 deferred namespace 调用成功的业务工具会记录在 `ContextState.loaded_tools`，下一轮以 `loaded_tool_context` 的形式提示模型：连续同一服务任务优先复用已加载/已使用过的工具和历史上下文，不要重复 `tool_search` 查找同一工具。该机制只改变 request context 提示，不把业务工具 promote 到顶层 `tools` 字段，也不替代必要的业务工具调用；例如孕期计划信息采集仍需要继续调用 `birth_journey_intake_manage` 推进状态机。
 

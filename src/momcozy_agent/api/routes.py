@@ -1566,7 +1566,12 @@ async def _append_pump_session_summary_context(
     if not conversation_id:
         return {"appended": False, "reason": "missing_conversation_id"}
 
-    if _append_local_agent_context(connection, conversation_id=conversation_id, context_text=context_text):
+    if _append_local_agent_context(
+        connection,
+        conversation_id=conversation_id,
+        context_text=context_text,
+        user_id=str(body.get("user_id") or ""),
+    ):
         return {"appended": True, "target": "local_runtime"}
 
     forwarded = await _forward_client_event_context(
@@ -1590,14 +1595,14 @@ def _pump_session_conversation_id(body: dict[str, Any]) -> str:
     ).strip()
 
 
-def _append_local_agent_context(connection: Any, *, conversation_id: str, context_text: str) -> bool:
+def _append_local_agent_context(connection: Any, *, conversation_id: str, context_text: str, user_id: str = "") -> bool:
     app = getattr(connection, "app", None)
     runtime = getattr(getattr(app, "state", None), "runtime", None)
     get_session = getattr(runtime, "get_session", None)
     if not callable(get_session):
         return False
     try:
-        session = get_session(conversation_id)
+        session = get_session(conversation_id, user_id=user_id)
         context_state = getattr(session, "context_state", None)
         events = getattr(context_state, "client_events", None)
         if not isinstance(events, list):

@@ -84,7 +84,7 @@ WebSocket 客户端连接 `ws://<host>:<port>/api/ag-ui-ws` 后，第一帧必�
 - Header：`Authorization: Bearer <ENTRY_API_KEY>`
 - WebSocket protocol fragment：`Sec-WebSocket-Protocol: <ENTRY_API_KEY>`
 
-如果 `ENTRY_API_KEY` 未设置或校验失败，连接会被关闭。桥接层不保存额外会话状态；WebSocket 和 SSE 入口都通过同一个 FastAPI app 的 `ChatRuntime` 按 `threadId` 维护会话。
+如果 `ENTRY_API_KEY` 未设置或校验失败，连接会被关闭。桥接层不保存额外会话状态；WebSocket 和 SSE 入口都通过同一个 FastAPI app 的 `ChatRuntime` 按 `user_id + threadId` 命名空间维护会话。
 
 ### 2.1.2 App 新会话预热：`/api/ag-ui-prewarm`
 
@@ -92,10 +92,10 @@ App 新建会话时可以先本地展示欢迎语，同时后台调用 `POST /ap
 
 预热接口只做一轮非流式 Responses 请求：
 
-- 使用同一个 `threadId` 获取 `ChatSession`。
+- 使用同一个 `user_id + threadId` 命名空间获取 `ChatSession`。
 - 禁用工具，不产生 `TOOL_CALL_*`、artifact、quick replies 或 work panel 事件。
 - 限制短输出，只保存返回的 `previous_response_id`。
-- 如果同一 thread 已有 `previous_response_id`，直接返回 `already_warm`。
+- 如果同一用户同一 thread 已有 `previous_response_id`，直接返回 `already_warm`。
 - 如果真实用户请求先完成并写入 session，预热返回 `stale`，不会覆盖真实对话状态。
 
 ### 2.1.3 吸奶小结 WebSocket：`/v1/pump/session-summary`
@@ -192,8 +192,8 @@ App 新建会话时可以先本地展示欢迎语，同时后台调用 `POST /ap
 
 | 字段 | 来源 | 当前用途 |
 | --- | --- | --- |
-| `threadId` | `localStorage.momcozy_conversation_id`；没有则前端生成 | 后端 session id，决定是否复用 `previous_response_id`、已加载 skill、上下文状态 |
-| `userId` | `localStorage.momcozy_user_id`；没有则前端生成 | 客户端用户身份，后端同步到 `RuntimeInputs.user_id` 和 `user_profile.user_id` |
+| `threadId` | `localStorage.momcozy_conversation_id`；没有则前端生成 | 与 `user_id` 一起决定后端 session，进而决定是否复用 `previous_response_id`、已加载 skill、上下文状态 |
+| `userId` | `localStorage.mai_debug_user_id`、构建期默认值，或 `localStorage.mai_anonymous_user_id` 生成的 `demo-user-*` | 客户端用户身份，后端同步到 `RuntimeInputs.user_id` 和 `user_profile.user_id` |
 | `runId` | 前端按时间戳和 `runCount` 生成 | 本轮 run id，用于 SSE 事件关联 |
 | `state.locale` | `navigator.language || "en-US"` | 后端转为 `RuntimeInputs.locale` |
 | `state.timezone` | `Intl.DateTimeFormat().resolvedOptions().timeZone` | 后端转为 `RuntimeInputs.timezone`，首轮注入 request context |
@@ -212,8 +212,8 @@ App 新建会话时可以先本地展示欢迎语，同时后台调用 `POST /ap
 
 | 字段 | 当前客户端实现 | 原因 |
 | --- | --- | --- |
-| `user_id` / `userId` | 首次打开时生成 `user_${crypto.randomUUID()}`，保存到 `localStorage.momcozy_user_id` | 用户身份应来自 App 登录态或客户端会话，不应由 agent 服务猜测 |
-| `threadId` | 当前聊天会话 id，保存到 `localStorage.momcozy_conversation_id` | 决定后端 session 和 Responses API 多轮上下文 |
+| `user_id` / `userId` | demo/debug 阶段来自 `mai_debug_user_id`、构建期默认值，或首次打开生成 `demo-user-*` 并保存到 `localStorage.mai_anonymous_user_id` | 用户身份应来自 App 登录态或客户端会话，不应由 agent 服务猜测 |
+| `threadId` | 当前聊天会话 id，保存到 `localStorage.momcozy_conversation_id` | 与 `user_id` 一起决定后端 session 和 Responses API 多轮上下文 |
 | `locale` | `navigator.language` | 属于用户设备/客户端环境 |
 | `timezone` | `Intl.DateTimeFormat().resolvedOptions().timeZone` | 属于用户设备/客户端环境 |
 | `message_sent_at` | 前端发送消息时生成，格式包含本地 UTC offset | 消息发生时间应在客户端发送动作发生时冻结 |
@@ -233,7 +233,7 @@ App 新建会话时可以先本地展示欢迎语，同时后台调用 `POST /ap
 | `locale` | 顶层兜底 |
 | `timezone` | 顶层兜底 |
 | `message_sent_at` | 顶层兜底 |
-| `previous_response_id` | 可放在 `state` 或 `forwardedProps` 中 |
+| `previous_response_id` | 后端会忽略客户端传入值，只使用服务端 session 保存的上一轮 response id |
 | `user_profile` | 可放在 `state` 或 `forwardedProps` 中 |
 | `baby_profile` | 可放在 `state` 或 `forwardedProps` 中 |
 | `service_state` | 可放在 `state` 或 `forwardedProps` 中 |
@@ -245,7 +245,7 @@ App 新建会话时可以先本地展示欢迎语，同时后台调用 `POST /ap
 
 | 字段 | 说明 |
 | --- | --- |
-| `threadId` / `thread_id` | 后端 session id |
+| `threadId` / `thread_id` | 后端 session id 的线程部分；实际 session 命名空间还包含 `user_id` |
 | `runId` / `run_id` | 本轮 run id |
 | `parentRunId` / `parent_run_id` | 可选父 run id |
 | `conversation_id` | `threadId` 缺失时的 fallback |
@@ -285,11 +285,11 @@ App 新建会话时可以先本地展示欢迎语，同时后台调用 `POST /ap
 - `timezone` 仍保留后端默认值 `America/Los_Angeles` 作为兼容兜底，但正常 App 客户端不依赖这个兜底。
 - `message_sent_at` 如果前端不传，后端仍会按 timezone 实时生成；但正式客户端应在发送时生成并传入。
 - 如果前端只传 `user_id`，没有传 `user_profile`，后端会自动补成 `user_profile: {"user_id": ...}`。
-- `previous_response_id` 前端不需要传；后端 session 会自动保存上一轮 Responses API 的 response id 并在下一轮补上。
+- `previous_response_id` 前端不需要传；即使传入也会被后端忽略。后端 session 会自动保存上一轮 Responses API 的 response id 并在下一轮补上。
 
 ## 3. 后端 session 状态
 
-每个 `threadId` 对应一个 `ChatSession`：
+每个 `user_id + threadId` 命名空间对应一个 `ChatSession`；缺少 `user_id` 的请求会使用匿名 thread 命名空间：
 
 ```python
 {
@@ -906,11 +906,12 @@ work item 文案由前端按阶段语义映射，核心映射在 `toolWorkPhase(
 - “在线咨询”链接会携带：
   - `thread_id`
   - `consult_id`
+  - `user_id`（创建该咨询卡时的 AgentHub 用户 id，用于把完成事件写回同一 `user_id + threadId` session）
 
 链接示例：
 
 ```text
-/ibclc-chat.html?thread_id=thread_xxx&consult_id=ibclc_xxx
+/ibclc-chat.html?thread_id=thread_xxx&consult_id=ibclc_xxx&user_id=user_xxx
 ```
 
 当 IBCLC 页结束咨询后，主聊天页只会把匹配同一个 `consult_id` 的卡片改为：
@@ -981,6 +982,8 @@ work item 文案由前端按阶段语义映射，核心映射在 `toolWorkPhase(
 ## 9. 客户端事件接口：`POST /api/client-event`
 
 当前用于 IBCLC 在线咨询结束事件。
+
+IBCLC 结束事件的 `user_id` 必须使用创建咨询卡时传入 H5 URL 的 AgentHub 用户 id；不要用 H5 兼容缓存里的旧 `momcozy_user_id` 覆盖它，否则事件可能写入不同的 `user_id + threadId` session。后端仅在同一 `threadId` 下能找到唯一已有 agent 历史 session 时，才会把旧 H5 事件兼容归回创建卡片的 session。
 
 请求体：
 
@@ -1063,7 +1066,9 @@ IBCLC 页还会把结果通过两条前端通道通知主页面：
 
 | Key | 说明 |
 | --- | --- |
-| `momcozy_user_id` | 当前客户端用户 id；demo 中首次打开自动生成，Reset 不清空 |
+| `mai_debug_user_id` | demo/debug 显式选择的当前客户端用户 id |
+| `mai_anonymous_user_id` | 未配置 debug/env 用户时首次打开自动生成的 `demo-user-*` |
+| `momcozy_user_id` | IBCLC 独立 H5 兼容用客户端用户 id |
 | `momcozy_conversation_id` | 当前主聊天会话 id |
 | `momcozy_run_count` | 当前会话 run 计数，用于生成 runId |
 | `momcozy_ibclc_consult_completed` | 最近一次 IBCLC 在线咨询完成事件 |
@@ -1073,7 +1078,7 @@ IBCLC 页还会把结果通过两条前端通道通知主页面：
 - `momcozy_conversation_id`
 - `momcozy_ibclc_consult_completed`
 
-Reset 不清空 `momcozy_user_id`，因为用户身份应独立于单次聊天会话。真实 App 中该值应来自登录态、匿名用户 id 或设备侧用户映射。
+Reset 不应把用户身份和单次聊天会话混为一谈。真实 App 中用户 id 应来自登录态、匿名用户 id 或设备侧用户映射。
 
 ## 11. 错误处理
 
@@ -1134,7 +1139,7 @@ IBCLC 页面中，事件提交失败不会阻止用户结束咨询；它会走�
 2. 表单、卡片、工单、IBCLC 咨询卡都由工具结果驱动。
 3. 工具原始结果不会完整暴露给前端，后端会做 `safe_tool_result()` 裁剪。
 4. loop 中间文本保留在普通 assistant bubble，工具状态进入 work panel。
-5. 会话连续性由后端 session + Responses API `previous_response_id` 维护，前端需要稳定传 `threadId`。
+5. 会话连续性由后端 session + Responses API `previous_response_id` 维护，前端需要稳定传 `user_id` 和 `threadId`。
 6. 外部 H5 页面事件通过 `/api/client-event` 回写 session，再通过 `client_event_context` 进入后续智能体上下文。
 7. IBCLC 咨询完成状态按 `consult_id` 绑定单张卡片，避免同一会话中新卡片误继承旧状态。
 8. 用户身份、locale、timezone 和每条消息的发送时间由客户端负责，后端只做兼容兜底和 runtime 转换。

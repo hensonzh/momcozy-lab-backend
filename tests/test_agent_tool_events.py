@@ -1310,6 +1310,44 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertNotIn("tool_choice", request)
         self.assertEqual(request["max_output_tokens"], 24)
 
+    def test_ag_ui_prewarm_namespaces_sessions_by_user_id(self) -> None:
+        try:
+            from fastapi.testclient import TestClient
+        except ImportError:
+            self.skipTest("fastapi test client is not installed")
+
+        fake_client = _FakeClient([{"id": "resp-user-a", "output": []}, {"id": "resp-user-b", "output": []}])
+        runtime = ChatRuntime(fake_client)
+        client = TestClient(create_app(runtime=runtime))
+
+        for user_id in ("demo-phone-a", "demo-phone-b"):
+            response = client.post(
+                "/api/ag-ui-prewarm",
+                json={
+                    "threadId": "thread-shared-demo",
+                    "runId": f"run-{user_id}",
+                    "messages": [
+                        {
+                            "id": f"msg-{user_id}",
+                            "role": "user",
+                            "content": "隐藏预热，请只回复我在。",
+                        }
+                    ],
+                    "forwardedProps": {"user_id": user_id, "locale": "zh-CN"},
+                },
+            )
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["status"], "warmed")
+
+        self.assertEqual(len(runtime.sessions), 2)
+        user_a = runtime.get_session("thread-shared-demo", user_id="demo-phone-a")
+        user_b = runtime.get_session("thread-shared-demo", user_id="demo-phone-b")
+        self.assertIsNot(user_a, user_b)
+        self.assertEqual(user_a.previous_response_id, "resp-user-a")
+        self.assertEqual(user_b.previous_response_id, "resp-user-b")
+        self.assertEqual(user_a.conversation_id, "thread-shared-demo")
+        self.assertEqual(user_b.conversation_id, "thread-shared-demo")
+
     def test_ag_ui_prewarm_does_not_overwrite_real_turn_or_context_when_stale(self) -> None:
         try:
             from fastapi.testclient import TestClient
@@ -1343,6 +1381,102 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertEqual(payload["status"], "stale")
         self.assertEqual(runtime.sessions["thread-stale"].previous_response_id, "resp-real")
         self.assertFalse(runtime.sessions["thread-stale"].context_state.environment_sent)
+
+    def test_ag_ui_ignores_client_supplied_previous_response_id(self) -> None:
+        async def collect_events() -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+            client = _FakeStreamingClient(
+                [
+                    {
+                        "id": "resp-next",
+                        "output": [
+                            {
+                                "type": "message",
+                                "content": [{"type": "output_text", "text": "继续处理。"}],
+                            }
+                        ],
+                    }
+                ]
+            )
+            runtime = ChatRuntime(client, model="test-model")
+            runtime.get_session("thread-prev", user_id="demo-phone-a").previous_response_id = "resp-server"
+            payload = {
+                "threadId": "thread-prev",
+                "runId": "run-prev",
+                "messages": [{"role": "user", "content": "继续"}],
+                "forwardedProps": {
+                    "user_id": "demo-phone-a",
+                    "previous_response_id": "resp-client",
+                },
+            }
+            inputs = _runtime_inputs_from_ag_ui(payload)
+            self.assertNotIn("previous_response_id", inputs)
+            stream = stream_ag_ui_events(payload, inputs, runtime)
+            events = [event async for event in stream]
+            return events, client.responses.requests
+
+        events, requests = asyncio.run(collect_events())
+
+        self.assertTrue(any(event.get("type") == "RUN_FINISHED" for event in events))
+        self.assertEqual(requests[0].get("previous_response_id"), "resp-server")
+        self.assertNotEqual(requests[0].get("previous_response_id"), "resp-client")
+
+    def test_client_event_context_is_namespaced_by_user_id(self) -> None:
+        try:
+            from fastapi.testclient import TestClient
+        except ImportError:
+            self.skipTest("fastapi test client is not installed")
+
+        runtime = ChatRuntime(object())
+        client = TestClient(create_app(runtime=runtime))
+
+        for user_id, label in (("demo-phone-a", "A 完成咨询"), ("demo-phone-b", "B 完成咨询")):
+            response = client.post(
+                "/api/client-event",
+                json={
+                    "thread_id": "thread-client-event",
+                    "user_id": user_id,
+                    "event_type": "ibclc_completed",
+                    "label": label,
+                },
+            )
+            self.assertEqual(response.status_code, 200)
+
+        user_a_events = runtime.get_session("thread-client-event", user_id="demo-phone-a").context_state.client_events
+        user_b_events = runtime.get_session("thread-client-event", user_id="demo-phone-b").context_state.client_events
+
+        self.assertEqual(len(user_a_events), 1)
+        self.assertEqual(len(user_b_events), 1)
+        self.assertIn("A 完成咨询", user_a_events[0])
+        self.assertIn("B 完成咨询", user_b_events[0])
+        self.assertNotIn("B 完成咨询", user_a_events[0])
+
+    def test_client_event_prefers_existing_agent_session_for_legacy_user_id(self) -> None:
+        try:
+            from fastapi.testclient import TestClient
+        except ImportError:
+            self.skipTest("fastapi test client is not installed")
+
+        runtime = ChatRuntime(object())
+        creating_session = runtime.get_session("thread-ibclc-card", user_id="demo-phone-a")
+        creating_session.previous_response_id = "resp-card"
+        legacy_session = runtime.get_session("thread-ibclc-card", user_id="old-ibclc-user")
+        legacy_session.context_state.client_events.append("old empty event")
+        client = TestClient(create_app(runtime=runtime))
+
+        response = client.post(
+            "/api/client-event",
+            json={
+                "thread_id": "thread-ibclc-card",
+                "user_id": "old-ibclc-user",
+                "event_type": "ibclc_completed",
+                "label": "IBCLC 已结束",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(creating_session.context_state.client_events), 1)
+        self.assertIn("IBCLC 已结束", creating_session.context_state.client_events[0])
+        self.assertEqual(legacy_session.context_state.client_events, ["old empty event"])
 
     def test_context_clone_preserves_milk_and_birth_intake_state(self) -> None:
         state = ContextState()
@@ -1443,6 +1577,22 @@ class AgentToolEventTests(unittest.TestCase):
         self.addCleanup(first.run_lock.release)
         self.assertTrue(second.run_lock.acquire(blocking=False))
         self.addCleanup(second.run_lock.release)
+
+    def test_chat_runtime_sessions_are_distinct_for_same_thread_and_different_users(self) -> None:
+        runtime = ChatRuntime(object())
+        first = runtime.get_session("thread-same", user_id="demo-phone-a")
+        second = runtime.get_session("thread-same", user_id="demo-phone-b")
+        anonymous = runtime.get_session("thread-same")
+
+        first.previous_response_id = "resp-a"
+        second.previous_response_id = "resp-b"
+
+        self.assertIsNot(first, second)
+        self.assertIsNot(first, anonymous)
+        self.assertIsNot(second, anonymous)
+        self.assertEqual(runtime.get_session("thread-same", user_id="demo-phone-a").previous_response_id, "resp-a")
+        self.assertEqual(runtime.get_session("thread-same", user_id="demo-phone-b").previous_response_id, "resp-b")
+        self.assertIsNone(anonymous.previous_response_id)
 
     def test_tool_call_phase_events_include_tool_name(self) -> None:
         args_event = tool_call_args_event(

@@ -29,8 +29,23 @@ from momcozy_agent.tool_handlers.milk_management import (
     _milk_analysis_headline,
     _milk_next_step,
     _milk_trend_text,
-    execute_milk_management_tool,
+    execute_milk_management_tool as _execute_milk_management_tool,
 )
+
+
+def execute_milk_management_tool(args: dict[str, Any], inputs: dict[str, Any]) -> dict[str, Any]:
+    runtime_user_id = str(
+        inputs.get("user_id")
+        or (inputs.get("user_profile", {}) if isinstance(inputs.get("user_profile"), dict) else {}).get("user_id")
+        or ""
+    ).strip()
+    if runtime_user_id or not args.get("user_id"):
+        return _execute_milk_management_tool(args, inputs)
+    test_inputs = dict(inputs)
+    profile = dict(test_inputs.get("user_profile") or {}) if isinstance(test_inputs.get("user_profile"), dict) else {}
+    profile["user_id"] = str(args["user_id"])
+    test_inputs["user_profile"] = profile
+    return _execute_milk_management_tool(args, test_inputs)
 
 
 def _reassuring_infant_signals() -> dict[str, Any]:
@@ -185,6 +200,32 @@ def _execute_milk_plan_preview_create(arguments: dict[str, Any], inputs: dict[st
 class MilkManagementToolTests(unittest.TestCase):
     def setUp(self) -> None:
         os.environ["MILK_DB_PATH"] = MILK_MANAGEMENT_TOOLS_DB_PATH
+
+    def test_tool_argument_user_id_cannot_override_runtime_user_id(self) -> None:
+        runtime_uid, _ = _seed_user("runtime-user-override")
+        other_uid, _ = _seed_user("tool-arg-user-override")
+        _add_pumping_rows(runtime_uid, "2026-05-14", ["08:00"])
+        _add_pumping_rows(other_uid, "2026-05-14", ["09:00", "10:00"])
+
+        result = execute_milk_management_tool(
+            {
+                "_tool_name": "milk_records_query",
+                "user_id": other_uid,
+                "start_at": "2026-05-14",
+                "end_at": "2026-05-14",
+                "record_scope": "pumping",
+                "include_raw_records": True,
+                "summary_granularity": "none",
+                "limit": 20,
+            },
+            {"user_profile": {"user_id": runtime_uid}},
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["data"]["user_id"], runtime_uid)
+        records = result["data"].get("records", {})
+        self.assertEqual(len(records.get("pumping", [])), 1)
+        self.assertIn("08:00", records["pumping"][0]["occurred_at"])
 
     def test_complete_pumping_without_amount_marks_done_without_creating_record(self) -> None:
         uid, _ = _seed_user("complete-no-amount")

@@ -2571,8 +2571,6 @@ def _mutate_calendar(arguments: dict[str, Any]) -> dict[str, Any]:
 
 def _with_user_id(args: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
     arguments = {key: value for key, value in args.items() if key != "_tool_name"}
-    if arguments.get("user_id"):
-        return arguments
     user_id = inputs.get("user_id") or inputs.get("user_profile", {}).get("user_id")
     if not user_id:
         raise ValueError("Milk-management tools require a user_id in runtime inputs.")

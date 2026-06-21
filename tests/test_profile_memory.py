@@ -131,7 +131,7 @@ class ProfileMemoryTests(unittest.TestCase):
             events = asyncio.run(collect_events())
 
         self.assertTrue(any(event.get("type") == "RUN_ERROR" for event in events))
-        session = runtime.get_session("profile-error-cache-thread")
+        session = runtime.get_session("profile-error-cache-thread", user_id=user_id)
         next_inputs = {"user_id": user_id, "user_profile": {"user_id": user_id}, "user_message": "继续"}
         with patch.object(data_store, "get_user_profile", side_effect=AssertionError("cache miss after error")):
             _hydrate_session_user_profile(next_inputs, session)
