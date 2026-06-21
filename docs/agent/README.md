@@ -348,7 +348,7 @@ message_sent_at: 2026-05-05T17:45:03+08:00
 
 - `care_handoffs`：`handoff_summary_generate`，只用于已经决定转接人工或专业支持后的交接摘要；不用于普通建议、设备售后工单、设备排障或购物车调整
 - `device_support`：`device_manual_search`、`support_ticket_draft_create`，用于已购/正在使用的 Momcozy 吸奶器或设备说明书、FAQ、排障和售后工单草稿；不用于购买前选型、奶量计划或待产包购物车
-- `milk_management`：聚合后的奶量工具，包括 `milk_snapshot_get`、`milk_records_query`、`milk_record_mutate`、`milk_plan_query`、`milk_plan_preview`、`milk_plan_mutate`、`milk_calendar_query`、`milk_calendar_change_preview`、`milk_calendar_mutate`，以及评估类 `milk_assessment_evaluate`、`infant_growth_evaluate`；用于用户自身奶量、喂养、宝宝生长和 calendar 数据，不用于吸奶器选型、设备排障或购物车调整
+- `milk_management`：聚合后的奶量工具，包括 `milk_snapshot_get`、`milk_status_query`、`milk_analysis_intake_manage`、`milk_analysis_evaluate`、`infant_growth_evaluate`、`infant_growth_mutate`、`milk_records_query`、`milk_record_mutate`、`milk_plan_query`、`milk_plan_preview_create`、`milk_plan_mutate`、`milk_calendar_query`、`milk_calendar_change_preview`、`milk_calendar_reschedule_preview`、`milk_calendar_mutate`、`milk_task_complete`；用于用户自身奶量、喂养、宝宝生长和 calendar 数据，不用于吸奶器选型、设备排障或购物车调整
 - `hospital_bag_cart`：待产包购物车工具 `hospital_bag_cart_update`，用于已经进入待产包购物车后的预算上限优化、删除/加回、基础款替换、医院提供、家里已有、数量调整，以及把已推荐的 Momcozy 吸奶器型号同步到购物车；不用于生成待产包清单、独立吸奶器选型或设备排障
 - `pump_recommendation`：吸奶器型号选型工具 `hospital_bag_pump_recommend`，用于购买前 Momcozy 吸奶器推荐、型号对比、预算内选择，也可在待产包场景里先选型再同步购物车；不用于已购设备故障/说明书、奶量是否正常或直接修改购物车
 - `birth_prep`：产前准备专用产物工具，包括 `birth_plan_form_create`、`labor_communication_card_create`、`birth_journey_intake_manage`、`birth_journey_plan_card_create`、`birth_journey_plan_delete`、`birth_journey_plan_todo_update`、`hospital_bag_form_create`、`hospital_bag_card_create`；用于已经进入孕期计划、待产包清单或分娩沟通单流程后的表单/结构化内容生成与 7 天行动清单完成状态同步，不用于普通孕期问答

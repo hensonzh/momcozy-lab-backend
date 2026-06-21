@@ -727,7 +727,7 @@ Agent 状态通过 `CUSTOM` / `momcozy.agent.status` 发送：
   "type": "CONFIRMATION_REQUIRED",
   "confirmation_id": "call_xxx:confirm",
   "tool_call_id": "call_xxx",
-  "tool_call_name": "milk_plan_preview",
+  "tool_call_name": "milk_plan_preview_create",
   "artifact_id": "draft_xxx",
   "title": "请确认奶量计划草稿",
   "message": "确认后才会保存。"

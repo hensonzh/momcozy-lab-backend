@@ -27,19 +27,15 @@ def main() -> None:
     assert initial_request["input"][0]["content"][0]["text"].startswith("request_context:")
     assert "## 可用 Skill" in initial_request["instructions"]
     assert "skill_manifests:" in initial_request["instructions"]
-    assert "CoMate 全局规则" in initial_request["instructions"]
-    assert "回答风格：默认极简、自然聊天" in initial_request["instructions"]
-    assert "### 优秀回复示例" in initial_request["instructions"]
-    assert "临产前：“恭喜你呀！要见到宝宝了啦" in initial_request["instructions"]
-    assert "吸奶器不会装：“不用急～有我呢！你是什么型号的" in initial_request["instructions"]
-    assert "不要用“如果你愿意”、“要不要...”这种表达开头" in initial_request["instructions"]
+    assert "# 全局规则" in initial_request["instructions"]
+    assert "## 全局人设" in initial_request["instructions"]
+    assert "你叫 CozyMate，来自 Momcozy 团队。" in initial_request["instructions"]
+    assert "温柔不啰嗦，默认极简、自然聊天" in initial_request["instructions"]
     assert "默认回复要短：优先 1-3 句" in initial_request["instructions"]
-    assert "健康咨询流程：针对妈妈的健康问题" in initial_request["instructions"]
-    assert "母婴陪伴型智能体" in initial_request["instructions"]
-    assert "主动告知妈妈有在线IBCLC支持" in initial_request["instructions"]
+    assert "Agent loop 过程中的中间判断、准备动作和工具选择不要写进正文" in initial_request["instructions"]
+    assert "每轮最终回复后都要展示快捷输入" in initial_request["instructions"]
     assert "是否加载 skill，只根据用户当前意图、对话连续性，以及 skill manifest 中的 description 判断" in initial_request["instructions"]
     assert "是否调用工具，只根据当前可见工具的名称、description、schema 和用户目标判断" in initial_request["instructions"]
-    assert "明显风险（如高烧、剧烈疼痛、宝宝异常、设备危险等）" in initial_request["instructions"]
     assert "普通陪伴和轻问答不需要为了显得完整而调用工具" in initial_request["instructions"]
     assert "static_agent_context:" not in initial_request["instructions"]
     assert "skill_selection: decide_from_skill_manifests" not in initial_request["instructions"]
@@ -76,24 +72,29 @@ def main() -> None:
     assert "device_manual_search" in initial_deferred_tool_names
     assert "milk_snapshot_get" not in initial_tool_names
     assert "milk_snapshot_get" in initial_deferred_tool_names
+    assert "milk_analysis_intake_manage" in initial_tool_names
     assert "milk_context_get" not in initial_deferred_tool_names
-    assert "milk_plan_preview" not in initial_tool_names
-    assert "milk_plan_preview" in initial_deferred_tool_names
+    assert "milk_plan_preview_create" not in initial_tool_names
+    assert "milk_plan_preview_create" in initial_deferred_tool_names
     assert "milk_calendar_mutate" not in initial_tool_names
     assert "milk_calendar_mutate" in initial_deferred_tool_names
     assert "milk_calendar_adjustment_apply" not in initial_deferred_tool_names
     expected_milk_deferred_tools = {
         "milk_snapshot_get",
-        "milk_assessment_evaluate",
+        "milk_status_query",
+        "milk_analysis_evaluate",
         "infant_growth_evaluate",
+        "infant_growth_mutate",
         "milk_records_query",
         "milk_record_mutate",
         "milk_plan_query",
-        "milk_plan_preview",
+        "milk_plan_preview_create",
         "milk_plan_mutate",
         "milk_calendar_query",
         "milk_calendar_change_preview",
+        "milk_calendar_reschedule_preview",
         "milk_calendar_mutate",
+        "milk_task_complete",
     }
     assert expected_milk_deferred_tools <= initial_deferred_tool_names
     for removed_tool_name in (
@@ -167,7 +168,10 @@ def main() -> None:
     assert image_content[2] == {"type": "input_image", "image_url": image_data_url, "detail": "auto"}
 
     loaded = execute_skill_runtime_tool("load_skill", {"skill_id": "milk-management"})
-    assert "# 奶量管理" in loaded["skill_md"]
+    assert "# 全局回复规则" in loaded["skill_md"]
+    assert "奶量管理仅处理三类任务" in loaded["skill_md"]
+    assert "milk_analysis_intake_manage" in loaded["skill_md"]
+    assert "milk_plan_preview_create" in loaded["skill_md"]
     assert "tool_names" not in loaded, "load_skill must not advertise per-skill tool_names"
     assert loaded["id"] == "milk-management"
     assert loaded["name"] == "milk-management"
