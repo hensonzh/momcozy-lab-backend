@@ -135,6 +135,7 @@ def _connect() -> sqlite3.Connection:
 
 def _seed_profiles(conn: sqlite3.Connection) -> None:
     now = TODAY.strftime("%Y-%m-%d %H:%M:%S")
+    legacy_nickname = "Demo Mama"
     conn.execute(
         """
         INSERT INTO user_profile(
@@ -152,7 +153,7 @@ def _seed_profiles(conn: sqlite3.Connection) -> None:
         """,
         (
             USER_ID,
-            "Demo Mama",
+            legacy_nickname,
             DELIVERY_DATE,
             "近 30 天吸乳记录整体在参考区间附近波动，少数天可能存在漏记；最近 7 天多数低于 P15 下沿，需要先确认是否有未记录的吸奶/亲喂，再考虑温和追奶计划。",
             "宝宝近 4-6 周体重增长放缓，当前估算摄入略低于参考区间下沿，需要继续关注摄入、尿量和体重曲线。建议与儿科或泌乳顾问沟通，并启动温和追奶方案。",
@@ -161,6 +162,8 @@ def _seed_profiles(conn: sqlite3.Connection) -> None:
             now,
         ),
     )
+    # `user_nickname` is deprecated but still filled for legacy milk-management
+    # queries and existing SQLite files that predate `display_name`.
     conn.execute(
         """
         INSERT INTO infant_profile(
@@ -175,7 +178,7 @@ def _seed_profiles(conn: sqlite3.Connection) -> None:
             birth_date = excluded.birth_date,
             updated_at = excluded.updated_at
         """,
-        (INFANT_ID, USER_ID, "Demo Mama", "Demo Baby", "girls", DELIVERY_DATE, now, now),
+        (INFANT_ID, USER_ID, legacy_nickname, "Demo Baby", "girls", DELIVERY_DATE, now, now),
     )
 
 

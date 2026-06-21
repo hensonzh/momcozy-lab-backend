@@ -684,7 +684,10 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         self.assertTrue(required_by_id["fetus_count"])
         self.assertTrue(required_by_id["age"])
         self.assertFalse(required_by_id["ivf"])
-        self.assertEqual(started["form"]["description"], "")
+        self.assertEqual(
+            started["form"]["description"],
+            "先填写几项基础信息，后面我会按你的孕周、身体情况和准备状态来整理更贴合你的孕期计划。",
+        )
         self.assertEqual(started["form"]["default_values"]["city_or_country"], "深圳")
 
         with_region = manage_birth_journey_intake(

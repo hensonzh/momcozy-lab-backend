@@ -29,6 +29,8 @@ FEED_TYPE_TEXT_TO_CODE = {
 }
 USER_PROFILE_COLUMNS = (
     "user_id",
+    # Deprecated legacy display-name fallback. New profile writes and UI/API
+    # contracts should use `display_name`; keep this column for old milk data.
     "user_nickname",
     "display_name",
     "age",
@@ -54,6 +56,10 @@ USER_PROFILE_COLUMNS = (
     "created_at",
 )
 USER_PROFILE_SELECT = ", ".join(USER_PROFILE_COLUMNS)
+DEPRECATED_PROFILE_COLUMNS = {
+    "user_profile.user_nickname": "Legacy display-name fallback; use user_profile.display_name for new code.",
+    "infant_profile.user_nickname": "Legacy duplicated parent nickname; use user_profile.display_name for new code.",
+}
 
 
 def init_db(*, force: bool = False) -> None:

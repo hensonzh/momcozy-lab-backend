@@ -138,6 +138,10 @@ class SeedStatusDemoDataTest(unittest.TestCase):
                         "SELECT COUNT(*) FROM calendar WHERE user_id = ? AND date > ?",
                         (module.USER_ID, "2026-05-27"),
                     )
+                    profile_row = conn.execute(
+                        "SELECT display_name, user_nickname FROM user_profile WHERE user_id = ?",
+                        (module.USER_ID,),
+                    ).fetchone()
                     pregnancy_diary_count = _scalar(conn, "SELECT COUNT(*) FROM pregnancy_diary_entry", ())
                 finally:
                     conn.close()
@@ -167,6 +171,9 @@ class SeedStatusDemoDataTest(unittest.TestCase):
         self.assertGreater(earlier_normal_days, earlier_low_days)
         self.assertGreaterEqual(earlier_missing_record_days, 3)
         self.assertGreaterEqual(len({round(delta) for delta in earlier_month_deltas}), 12)
+        self.assertIsNotNone(profile_row)
+        self.assertIsNone(profile_row[0])
+        self.assertEqual(profile_row[1], "Demo Mama")
         deltas = []
         estimate_deltas = []
         for day_text, pump_total in recent_rows:
