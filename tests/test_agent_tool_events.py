@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import os
+import tempfile
 import json
 import unittest
 import asyncio
+import threading
 from unittest.mock import patch
 
 from momcozy_agent import ContextState, build_agent_request
@@ -44,6 +47,48 @@ from momcozy_agent.server import (
 
 
 class AgentToolEventTests(unittest.TestCase):
+    def test_ag_ui_timing_log_endpoint_records_jsonl(self) -> None:
+        try:
+            from fastapi.testclient import TestClient
+        except ImportError:
+            self.skipTest("fastapi test client is not installed")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            log_path = os.path.join(tmp, "timing.jsonl")
+            with patch.dict(
+                os.environ,
+                {
+                    "MOMCOZY_AG_UI_TIMING_LOG": "1",
+                    "MOMCOZY_AG_UI_TIMING_LOG_PATH": log_path,
+                },
+            ):
+                client = TestClient(create_app(runtime=ChatRuntime(object()), include_websocket_bridge=True))
+                response = client.post(
+                    "/api/ag-ui-timing-log",
+                    json={
+                        "source": "client",
+                        "stage": "client.send_start",
+                        "thread_id": "thread-timing",
+                        "run_id": "run-timing",
+                        "client_timing_id": "ct-test",
+                        "user_id": "demo-user",
+                        "elapsed_ms": 12.5,
+                        "metadata": {"text_len": 8},
+                    },
+                )
+
+            self.assertEqual(response.status_code, 200)
+            with open(log_path, encoding="utf-8") as fh:
+                lines = [line for line in fh.read().splitlines() if line.strip()]
+            self.assertEqual(len(lines), 1)
+            record = json.loads(lines[0])
+            self.assertEqual(record["stage"], "client.send_start")
+            self.assertEqual(record["source"], "client")
+            self.assertEqual(record["thread_id"], "thread-timing")
+            self.assertEqual(record["run_id"], "run-timing")
+            self.assertEqual(record["client_timing_id"], "ct-test")
+            self.assertEqual(record["metadata"]["text_len"], 8)
+
     def test_agent_request_defaults_to_concise_reply_style(self) -> None:
         request = build_agent_request({"user_message": "奶量够不够", "locale": "zh-CN"})
 
@@ -1980,6 +2025,52 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertEqual(requests[0].get("previous_response_id"), "resp-server")
         self.assertNotEqual(requests[0].get("previous_response_id"), "resp-client")
 
+    def test_profile_onboarding_short_answer_forces_profile_update(self) -> None:
+        async def collect_events() -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+            client = _FakeStreamingClient(
+                [
+                    {
+                        "id": "resp-profile",
+                        "output": [
+                            {
+                                "type": "message",
+                                "content": [{"type": "output_text", "text": "很高兴认识你。"}],
+                            }
+                        ],
+                    }
+                ]
+            )
+            runtime = ChatRuntime(client, model="test-model")
+            payload = {
+                "threadId": "thread-profile-onboarding",
+                "runId": "run-profile-onboarding",
+                "messages": [{"role": "user", "content": "小雨，29岁"}],
+                "forwardedProps": {
+                    "user_id": "profile-onboarding-short",
+                    "profile_onboarding_pending": True,
+                },
+            }
+            inputs = _runtime_inputs_from_ag_ui(payload)
+            events = [event async for event in stream_ag_ui_events(payload, inputs, runtime)]
+            return events, client.responses.requests
+
+        events, requests = asyncio.run(collect_events())
+
+        self.assertTrue(any(event.get("type") == "RUN_FINISHED" for event in events))
+        request = requests[0]
+        self.assertEqual(
+            request.get("tool_choice"),
+            {
+                "type": "allowed_tools",
+                "mode": "required",
+                "tools": [{"type": "function", "name": "profile_update"}],
+            },
+        )
+        request_context = request["input"][0]["content"][0]["text"]
+        self.assertIn("profile_onboarding_context:", request_context)
+        self.assertIn("parsed_profile_update_args: display_name=小雨；age=29", request_context)
+        self.assertIn("本轮必须先调用 profile_update", request_context)
+
     def test_ag_ui_cancel_marks_active_run_without_waiting_for_run_lock(self) -> None:
         runtime = ChatRuntime(object())
         session = runtime.get_session("thread-cancel-api", user_id="demo-phone-a")
@@ -2036,6 +2127,54 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertEqual(value.get("message"), "上一轮正在安全收尾，我马上继续。")
         self.assertEqual(first_event.get("semantic", {}).get("visibility"), "status")
         self.assertTrue(any(event.get("type") == "RUN_FINISHED" for event in remaining_events))
+
+    def test_ag_ui_cancelled_queued_run_exits_without_waiting_for_run_lock_release(self) -> None:
+        async def collect_events() -> tuple[dict[str, object], dict[str, object], bool, list[dict[str, object]]]:
+            client = _FakeStreamingClient(
+                [
+                    {
+                        "id": "resp-should-not-start",
+                        "output": [
+                            {
+                                "type": "message",
+                                "content": [{"type": "output_text", "text": "不应开始。"}],
+                            }
+                        ],
+                    }
+                ]
+            )
+            runtime = ChatRuntime(client, model="test-model")
+            session = runtime.get_session("thread-queued", user_id="demo-phone-a")
+            session.run_lock.acquire()
+            payload = {
+                "threadId": "thread-queued",
+                "runId": "run-queued",
+                "messages": [{"role": "user", "content": "继续"}],
+                "forwardedProps": {"user_id": "demo-phone-a"},
+            }
+            inputs = _runtime_inputs_from_ag_ui(payload)
+            stream = stream_ag_ui_events(payload, inputs, runtime)
+            try:
+                first = await asyncio.wait_for(stream.__anext__(), timeout=1)
+                runtime.cancel_run("thread-queued", user_id="demo-phone-a", run_id="run-queued")
+                second = await asyncio.wait_for(stream.__anext__(), timeout=1)
+                try:
+                    await asyncio.wait_for(stream.__anext__(), timeout=1)
+                    ended = False
+                except StopAsyncIteration:
+                    ended = True
+                return first, second, ended, client.responses.requests
+            finally:
+                if session.run_lock.locked():
+                    session.run_lock.release()
+
+        first_event, second_event, ended, requests = asyncio.run(collect_events())
+
+        self.assertEqual(first_event.get("type"), "CUSTOM")
+        self.assertEqual(second_event.get("type"), "RUN_ERROR")
+        self.assertEqual(second_event.get("code"), "RUN_CANCELLED")
+        self.assertTrue(ended)
+        self.assertFalse(requests)
 
     def test_ag_ui_cancelled_run_does_not_commit_previous_response_id(self) -> None:
         async def collect_events() -> tuple[list[dict[str, object]], list[dict[str, object]], str | None]:
@@ -2103,6 +2242,65 @@ class AgentToolEventTests(unittest.TestCase):
                 cancel_requested=lambda: cancelled,
             )
 
+        self.assertEqual(len(client.responses.requests), 1)
+
+    def test_agent_loop_cancel_during_blocking_response_stream_closes_stream(self) -> None:
+        class BlockingResponseStream:
+            def __init__(self) -> None:
+                self.iter_started = threading.Event()
+                self.closed = threading.Event()
+
+            def __iter__(self) -> "BlockingResponseStream":
+                return self
+
+            def __next__(self) -> dict[str, object]:
+                self.iter_started.set()
+                self.closed.wait(timeout=5)
+                raise StopIteration
+
+            def close(self) -> None:
+                self.closed.set()
+
+        class BlockingStreamingResponses:
+            def __init__(self, stream: BlockingResponseStream) -> None:
+                self.stream = stream
+                self.requests: list[dict[str, object]] = []
+
+            def create(self, **request: object) -> object:
+                self.requests.append(request)
+                if request.get("stream"):
+                    return self.stream
+                return {"id": "resp-non-stream", "output": []}
+
+        class BlockingStreamingClient:
+            def __init__(self, stream: BlockingResponseStream) -> None:
+                self.responses = BlockingStreamingResponses(stream)
+
+        cancel_event = threading.Event()
+        response_stream = BlockingResponseStream()
+        client = BlockingStreamingClient(response_stream)
+        result: dict[str, BaseException] = {}
+
+        def run_loop() -> None:
+            try:
+                run_agent_loop(
+                    client,
+                    {"user_message": "继续", "locale": "zh-CN"},
+                    on_text_delta=lambda _delta: None,
+                    cancel_requested=cancel_event.is_set,
+                )
+            except BaseException as exc:
+                result["exception"] = exc
+
+        thread = threading.Thread(target=run_loop, daemon=True)
+        thread.start()
+        self.assertTrue(response_stream.iter_started.wait(timeout=1))
+        cancel_event.set()
+        thread.join(timeout=2)
+
+        self.assertFalse(thread.is_alive())
+        self.assertIsInstance(result.get("exception"), AgentRunCancelled)
+        self.assertTrue(response_stream.closed.is_set())
         self.assertEqual(len(client.responses.requests), 1)
 
     def test_client_event_context_is_namespaced_by_user_id(self) -> None:
