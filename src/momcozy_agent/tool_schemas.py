@@ -634,6 +634,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
             "plan_days": _nullable({"type": "integer"}),
             "target_daily_ml": _nullable({"type": "number"}),
             "delta_ml": _nullable({"type": "number", "description": "未提供 target_daily_ml 时使用的每日增加或减少量。"}),
+            "user_update": _nullable({"type": "string", "description": "用户本轮自然语言原话；不确定传 null，工具会读取 runtime user_message。"}),
             "source_plan_id": _nullable({"type": "integer", "description": "基于已有计划重新生成时传计划 ID；普通新计划传 null。"}),
             "as_of_time": _nullable({"type": "string"}),
             "options": _nullable(

@@ -43,6 +43,31 @@ PSEUDO_TOOL_CALL_BLOCKS = (
     ("<tool_call", "</tool_call>"),
     ("«tool_call»", "«/tool_call»"),
 )
+INTERNAL_TOOL_ERROR_MARKERS = (
+    "invalid tool call",
+    "שגיאה",
+    "错误",
+)
+PLAN_PREVIEW_QUICK_REPLY_GUIDANCE = [
+    {"text": "保存到日历"},
+    {"text": "调整计划"},
+    {"text": "先不保存"},
+]
+PLAN_SAVED_QUICK_REPLY_GUIDANCE = [
+    {"text": "调整时间"},
+    {"text": "看看计划安排"},
+    {"text": "先这样执行"},
+]
+PLAN_SAVE_CONFIRM_QUICK_REPLY_GUIDANCE = [
+    {"text": "确认保存"},
+    {"text": "调整一下"},
+    {"text": "先不保存"},
+]
+MILK_FLOW_QUICK_REPLY_GUIDANCE = [
+    {"text": "继续调整"},
+    {"text": "查看计划"},
+    {"text": "先这样"},
+]
 MILK_WRITE_TOOL_NAMES = {
     "milk_record_mutate",
     "milk_plan_mutate",
@@ -3534,10 +3559,14 @@ def _tool_results_require_quick_replies_window(results: list[dict[str, Any]]) ->
 
 def _tool_result_requires_quick_replies_window(result: dict[str, Any]) -> bool:
     tool_name = str(result.get("tool_name") or "")
+    if _milk_tool_result_would_disable_followup_tools(result):
+        return True
     if tool_name not in {"milk_analysis_intake_manage", "milk_analysis_evaluate", "milk_plan_preview_create"}:
         return False
     tool_result = result.get("result") if isinstance(result.get("result"), dict) else {}
     status = str(tool_result.get("status") or "").strip()
+    if tool_name == "milk_plan_preview_create":
+        return status == "plan_preview_ready" or isinstance(tool_result.get("card"), dict)
     if status not in {
         "milk_analysis_intake_collecting",
         "milk_analysis_intake_needs_records",
@@ -3548,6 +3577,15 @@ def _tool_result_requires_quick_replies_window(result: dict[str, Any]) -> bool:
     if not workflow_control:
         return False
     return _workflow_control_requires_user_turn(workflow_control)
+
+
+def _milk_tool_result_would_disable_followup_tools(result: dict[str, Any]) -> bool:
+    tool_name = str(result.get("tool_name") or "")
+    if tool_name == QUICK_REPLIES_TOOL_NAME:
+        return False
+    if not (tool_name.startswith("milk_") or tool_name in MILK_WRITE_TOOL_NAMES):
+        return False
+    return _tool_result_disables_followup_tools(result)
 
 
 def _tool_result_disables_followup_tools(result: dict[str, Any]) -> bool:
@@ -4420,6 +4458,7 @@ def _create_response(
     citation_marker_cleaner = _WebSearchCitationMarkerCleaner()
     pseudo_tool_call_stripper = _PseudoToolCallTextStripper()
     pseudo_tool_text_suppressor = _PseudoToolUseTextSuppressor()
+    internal_tool_error_suppressor = _InternalToolErrorTextSuppressor()
     stream = client.responses.create(**request, stream=True)
     for event in stream:
         event_type = _get_item_value(event, "type")
@@ -4446,6 +4485,7 @@ def _create_response(
                 clean_delta = citation_marker_cleaner.feed(delta)
                 clean_delta = pseudo_tool_call_stripper.feed(clean_delta)
                 clean_delta = pseudo_tool_text_suppressor.feed(clean_delta)
+                clean_delta = internal_tool_error_suppressor.feed(clean_delta)
                 if clean_delta:
                     output_text_seen = True
                     on_text_delta(clean_delta)
@@ -4468,6 +4508,10 @@ def _create_response(
                 clean_delta = pseudo_tool_text_suppressor.feed(clean_delta)
             clean_delta += pseudo_tool_call_stripper.flush()
             clean_delta += pseudo_tool_text_suppressor.flush()
+            clean_delta = (
+                internal_tool_error_suppressor.feed(clean_delta)
+                + internal_tool_error_suppressor.flush()
+            )
             if clean_delta:
                 output_text_seen = True
                 on_text_delta(clean_delta)
@@ -4654,6 +4698,81 @@ class _PseudoToolUseTextSuppressor:
         self._pending = ""
         self._passthrough = True
         return output
+
+
+class _InternalToolErrorTextSuppressor:
+    def __init__(self) -> None:
+        self._line = ""
+        self._mode = "undecided"
+
+    def feed(self, delta: str) -> str:
+        if not delta:
+            return ""
+        output: list[str] = []
+        for char in delta:
+            if self._mode == "drop":
+                if char in "\n\r":
+                    self._reset()
+                continue
+            if self._mode == "pass":
+                output.append(char)
+                if char in "\n\r":
+                    self._reset()
+                continue
+
+            self._line += char
+            if _line_is_internal_tool_error(self._line):
+                self._line = ""
+                self._mode = "drop"
+                continue
+            if char in "\n\r":
+                output.append(self._line)
+                self._reset()
+                continue
+            if not _line_could_be_internal_tool_error_prefix(self._line):
+                output.append(self._line)
+                self._line = ""
+                self._mode = "pass"
+
+        return "".join(output)
+
+    def flush(self) -> str:
+        if self._mode == "drop":
+            self._reset()
+            return ""
+        output = self._line
+        self._reset()
+        return output
+
+    def _reset(self) -> None:
+        self._line = ""
+        self._mode = "undecided"
+
+
+def clean_internal_tool_error_text(text: str) -> str:
+    if not text:
+        return ""
+    return "".join(
+        line
+        for line in text.splitlines(keepends=True)
+        if not _line_is_internal_tool_error(line)
+    )
+
+
+def _line_is_internal_tool_error(line: str) -> bool:
+    normalized = line.strip().strip('"“”')
+    lower = normalized.lower()
+    return "invalid tool call" in lower
+
+
+def _line_could_be_internal_tool_error_prefix(line: str) -> bool:
+    normalized = line.lstrip().lstrip('"“”')
+    if not normalized:
+        return True
+    lower = normalized.lower()
+    if "invalid tool call" in lower:
+        return True
+    return any(marker.startswith(lower) or lower.startswith(marker) for marker in INTERNAL_TOOL_ERROR_MARKERS)
 
 
 def clean_web_search_citation_markers(text: str) -> str:
@@ -5081,7 +5200,7 @@ def _tool_image_metadata_by_url(context_state: ContextState, url: str) -> dict[s
 def _response_output_text(response: object) -> str:
     output_text = _get_item_value(response, "output_text")
     if isinstance(output_text, str) and output_text:
-        return output_text
+        return clean_internal_tool_error_text(output_text)
 
     parts: list[str] = []
     for item in _get_response_output(response):
@@ -5103,7 +5222,7 @@ def _response_output_text(response: object) -> str:
             text = _get_item_value(content_part, "text")
             if isinstance(text, str):
                 parts.append(text)
-    return "\n".join(part for part in parts if part)
+    return clean_internal_tool_error_text("\n".join(part for part in parts if part))
 
 
 def _web_search_citations_from_response(response: object) -> list[dict[str, Any]]:
@@ -5433,7 +5552,33 @@ def _sync_runtime_profile_from_tool_inputs(inputs: RuntimeInputs, tool_inputs: R
 
 
 def _update_quick_reply_guidance(options: BuildAgentRequestOptions, result: dict[str, Any]) -> None:
-    if str(result.get("tool_name") or "") != "birth_journey_intake_manage":
+    tool_name = str(result.get("tool_name") or "")
+    if tool_name == "milk_plan_mutate":
+        tool_result = result.get("result") if isinstance(result.get("result"), dict) else {}
+        status = str(tool_result.get("status") or "").strip()
+        result_ok = tool_result.get("ok")
+        if result_ok is True and status == "plan_applied":
+            options["_quick_reply_guidance"] = PLAN_SAVED_QUICK_REPLY_GUIDANCE  # type: ignore[typeddict-unknown-key]
+        elif status == "needs_write_confirmation":
+            options["_quick_reply_guidance"] = PLAN_SAVE_CONFIRM_QUICK_REPLY_GUIDANCE  # type: ignore[typeddict-unknown-key]
+        else:
+            options["_quick_reply_guidance"] = MILK_FLOW_QUICK_REPLY_GUIDANCE  # type: ignore[typeddict-unknown-key]
+        return
+
+    if tool_name in MILK_WRITE_TOOL_NAMES:
+        options["_quick_reply_guidance"] = MILK_FLOW_QUICK_REPLY_GUIDANCE  # type: ignore[typeddict-unknown-key]
+        return
+
+    if tool_name == "milk_plan_preview_create":
+        tool_result = result.get("result") if isinstance(result.get("result"), dict) else {}
+        status = str(tool_result.get("status") or "").strip()
+        if status == "plan_preview_ready" or isinstance(tool_result.get("card"), dict):
+            options["_quick_reply_guidance"] = PLAN_PREVIEW_QUICK_REPLY_GUIDANCE  # type: ignore[typeddict-unknown-key]
+        else:
+            options.pop("_quick_reply_guidance", None)  # type: ignore[typeddict-item]
+        return
+
+    if tool_name != "birth_journey_intake_manage":
         return
 
     tool_result = result.get("result") if isinstance(result.get("result"), dict) else {}

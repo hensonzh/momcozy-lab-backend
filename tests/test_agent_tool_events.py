@@ -19,7 +19,9 @@ from momcozy_agent.agents import (
     _tool_image_input_item_from_metadata,
     _tool_image_metadata,
     _tool_start_label,
+    _InternalToolErrorTextSuppressor,
     clean_web_search_citation_markers,
+    clean_internal_tool_error_text,
     model_tool_output,
     run_agent_loop,
     status_custom_event,
@@ -74,6 +76,34 @@ class AgentToolEventTests(unittest.TestCase):
             }
         )
         self.assertEqual(initial_event["semantic"]["visibility"], "hidden")
+
+    def test_internal_tool_call_errors_are_removed_from_assistant_text(self) -> None:
+        text = (
+            'שגיאה: "Invalid tool call: anyOf schema"\n'
+            '错误: "Invalid tool call: anyOf schema"\n'
+            "我已经生成一版温和追奶计划了。\n"
+            "如果方向可以，我再帮你同步到日历提醒。"
+        )
+
+        cleaned = clean_internal_tool_error_text(text)
+
+        self.assertNotIn("Invalid tool call", cleaned)
+        self.assertNotIn("שגיאה", cleaned)
+        self.assertIn("我已经生成一版温和追奶计划了。", cleaned)
+        self.assertIn("同步到日历提醒", cleaned)
+
+    def test_streaming_internal_tool_call_error_suppressor_handles_split_deltas(self) -> None:
+        suppressor = _InternalToolErrorTextSuppressor()
+        chunks = [
+            "שג",
+            'יאה: "Invalid ',
+            'tool call: anyOf schema"\n',
+            "我已经生成一版温和追奶计划了。",
+        ]
+
+        cleaned = "".join(suppressor.feed(chunk) for chunk in chunks) + suppressor.flush()
+
+        self.assertEqual(cleaned, "我已经生成一版温和追奶计划了。")
 
     def test_thinking_event_is_not_main_status_visible(self) -> None:
         event = thinking_custom_event("started")
@@ -982,7 +1012,7 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertEqual(client.responses.requests[1]["tool_choice"], "auto")
         self.assertEqual(client.responses.requests[1]["input"][0]["type"], "function_call_output")
 
-    def test_milk_plan_preview_create_disables_followup_tools(self) -> None:
+    def test_milk_plan_preview_create_uses_quick_replies_window_before_final_reply(self) -> None:
         context_state = ContextState()
         context_state.milk_management_state = {
             "analysis_intake": {
@@ -1031,6 +1061,26 @@ class AgentToolEventTests(unittest.TestCase):
                     ],
                 },
                 {
+                    "id": "resp-quick-window",
+                    "output": [
+                        {
+                            "type": "function_call",
+                            "call_id": "call-plan-quick",
+                            "name": "ui_quick_replies_create",
+                            "arguments": json.dumps(
+                                {
+                                    "replies": [
+                                        {"text": "保存到日历"},
+                                        {"text": "调整计划"},
+                                        {"text": "先不保存"},
+                                    ]
+                                },
+                                ensure_ascii=False,
+                            ),
+                        }
+                    ],
+                },
+                {
                     "id": "resp-final",
                     "output": [
                         {
@@ -1042,9 +1092,25 @@ class AgentToolEventTests(unittest.TestCase):
             ]
         )
 
+        def execute_tool(name: str, arguments: dict[str, object], inputs: dict[str, object]) -> dict[str, object]:
+            if name == "ui_quick_replies_create":
+                return {
+                    "ok": True,
+                    "tool_name": "ui_quick_replies_create",
+                    "result": {
+                        "status": "quick_replies_ready",
+                        "quick_replies": [
+                            {"text": "保存到日历"},
+                            {"text": "调整计划"},
+                            {"text": "先不保存"},
+                        ],
+                    },
+                }
+            return {"ok": True, "tool_name": "milk_plan_preview_create", "result": preview_result}
+
         with patch(
             "momcozy_agent.agents._execute_project_tool",
-            return_value={"ok": True, "tool_name": "milk_plan_preview_create", "result": preview_result},
+            side_effect=execute_tool,
         ):
             run_agent_loop(
                 client,
@@ -1058,7 +1124,7 @@ class AgentToolEventTests(unittest.TestCase):
                 {"context_state": context_state, "loaded_skill_ids": ["milk-management"]},
             )
 
-        first_request, second_request = client.responses.requests[:2]
+        first_request, second_request, third_request = client.responses.requests[:3]
         self.assertEqual(
             first_request["tool_choice"],
             {
@@ -1067,11 +1133,24 @@ class AgentToolEventTests(unittest.TestCase):
                 "tools": [{"type": "function", "name": "milk_plan_preview_create"}],
             },
         )
-        self.assertNotIn("tools", second_request)
-        self.assertNotIn("tool_choice", second_request)
         self.assertEqual(second_request["input"][0]["type"], "function_call_output")
+        self.assertEqual(
+            second_request["tool_choice"],
+            {
+                "type": "allowed_tools",
+                "mode": "required",
+                "tools": [{"type": "function", "name": "ui_quick_replies_create"}],
+            },
+        )
+        self.assertEqual(
+            [tool["name"] for tool in second_request["tools"] if tool.get("type") == "function"],
+            ["ui_quick_replies_create"],
+        )
+        self.assertNotIn("milk_plan_preview_create", json.dumps(second_request["tools"], ensure_ascii=False))
+        self.assertNotIn("tools", third_request)
+        self.assertNotIn("tool_choice", third_request)
 
-    def test_milk_write_confirmation_disables_followup_tools(self) -> None:
+    def test_milk_write_confirmation_uses_quick_replies_window_before_final_reply(self) -> None:
         context_state = ContextState()
         context_state.milk_management_state = {
             "analysis_intake": {
@@ -1106,6 +1185,26 @@ class AgentToolEventTests(unittest.TestCase):
                     ],
                 },
                 {
+                    "id": "resp-quick-window",
+                    "output": [
+                        {
+                            "type": "function_call",
+                            "call_id": "call-write-quick",
+                            "name": "ui_quick_replies_create",
+                            "arguments": json.dumps(
+                                {
+                                    "replies": [
+                                        {"text": "确认保存"},
+                                        {"text": "调整一下"},
+                                        {"text": "先不保存"},
+                                    ]
+                                },
+                                ensure_ascii=False,
+                            ),
+                        }
+                    ],
+                },
+                {
                     "id": "resp-final",
                     "output": [
                         {
@@ -1117,9 +1216,33 @@ class AgentToolEventTests(unittest.TestCase):
             ]
         )
 
+        def execute_tool(name: str, arguments: dict[str, object], inputs: dict[str, object]) -> dict[str, object]:
+            if name == "ui_quick_replies_create":
+                self.assertEqual(
+                    inputs.get("_quick_reply_guidance"),
+                    [
+                        {"text": "确认保存"},
+                        {"text": "调整一下"},
+                        {"text": "先不保存"},
+                    ],
+                )
+                return {
+                    "ok": True,
+                    "tool_name": "ui_quick_replies_create",
+                    "result": {
+                        "status": "quick_replies_ready",
+                        "quick_replies": [
+                            {"text": "确认保存"},
+                            {"text": "调整一下"},
+                            {"text": "先不保存"},
+                        ],
+                    },
+                }
+            return {"ok": True, "tool_name": "milk_plan_mutate", "result": confirmation_result}
+
         with patch(
             "momcozy_agent.agents._execute_project_tool",
-            return_value={"ok": True, "tool_name": "milk_plan_mutate", "result": confirmation_result},
+            side_effect=execute_tool,
         ):
             run_agent_loop(
                 client,
@@ -1133,11 +1256,150 @@ class AgentToolEventTests(unittest.TestCase):
                 {"context_state": context_state, "loaded_skill_ids": ["milk-management"]},
             )
 
-        self.assertNotIn("tools", client.responses.requests[1])
-        self.assertNotIn("tool_choice", client.responses.requests[1])
-        self.assertEqual(client.responses.requests[1]["input"][0]["type"], "function_call_output")
+        second_request, third_request = client.responses.requests[1:3]
+        self.assertEqual(second_request["input"][0]["type"], "function_call_output")
+        self.assertEqual(
+            second_request["tool_choice"],
+            {
+                "type": "allowed_tools",
+                "mode": "required",
+                "tools": [{"type": "function", "name": "ui_quick_replies_create"}],
+            },
+        )
+        self.assertEqual(
+            [tool["name"] for tool in second_request["tools"] if tool.get("type") == "function"],
+            ["ui_quick_replies_create"],
+        )
+        self.assertNotIn("milk_plan_mutate", json.dumps(second_request["tools"], ensure_ascii=False))
+        self.assertNotIn("tools", third_request)
+        self.assertNotIn("tool_choice", third_request)
 
-    def test_invalid_milk_plan_preview_disables_followup_tools(self) -> None:
+    def test_successful_milk_plan_save_uses_quick_replies_window_before_final_reply(self) -> None:
+        context_state = ContextState()
+        context_state.milk_management_state = {
+            "analysis_intake": {
+                "stage": "plan_preview",
+                "plan_preview": {
+                    "status": "plan_preview_ready",
+                    "draft": {"plan_type": "increase_milk", "plan_days": 3},
+                    "idempotency_key": "milk-plan-save-test",
+                },
+            },
+        }
+        save_result = {
+            "ok": True,
+            "status": "plan_applied",
+            "summary": "奶量计划已同步到计划页。",
+            "plan_id": 12,
+            "data": {"calendar_dates": ["2026-05-15", "2026-05-16", "2026-05-17"]},
+        }
+        client = _FakeClient(
+            [
+                {
+                    "id": "resp-save-call",
+                    "output": [
+                        {
+                            "type": "function_call",
+                            "call_id": "call-save",
+                            "name": "milk_plan_mutate",
+                            "arguments": json.dumps(
+                                {"user_id": "write-success", "operation": "create", "confirmed": True}
+                            ),
+                        }
+                    ],
+                },
+                {
+                    "id": "resp-quick-window",
+                    "output": [
+                        {
+                            "type": "function_call",
+                            "call_id": "call-save-quick",
+                            "name": "ui_quick_replies_create",
+                            "arguments": json.dumps(
+                                {
+                                    "replies": [
+                                        {"text": "调整时间"},
+                                        {"text": "看看计划安排"},
+                                        {"text": "先这样执行"},
+                                    ]
+                                },
+                                ensure_ascii=False,
+                            ),
+                        }
+                    ],
+                },
+                {
+                    "id": "resp-final",
+                    "output": [
+                        {
+                            "type": "message",
+                            "content": [
+                                {
+                                    "type": "output_text",
+                                    "text": "已经保存到日历啦。接下来会按这版 3 天计划提醒你执行。",
+                                }
+                            ],
+                        }
+                    ],
+                },
+            ]
+        )
+
+        def execute_tool(name: str, arguments: dict[str, object], inputs: dict[str, object]) -> dict[str, object]:
+            if name == "ui_quick_replies_create":
+                self.assertEqual(
+                    inputs.get("_quick_reply_guidance"),
+                    [
+                        {"text": "调整时间"},
+                        {"text": "看看计划安排"},
+                        {"text": "先这样执行"},
+                    ],
+                )
+                return {
+                    "ok": True,
+                    "tool_name": "ui_quick_replies_create",
+                    "result": {
+                        "status": "quick_replies_ready",
+                        "quick_replies": [
+                            {"text": "调整时间"},
+                            {"text": "看看计划安排"},
+                            {"text": "先这样执行"},
+                        ],
+                    },
+                }
+            return {"ok": True, "tool_name": "milk_plan_mutate", "result": save_result}
+
+        with patch("momcozy_agent.agents._execute_project_tool", side_effect=execute_tool):
+            run_agent_loop(
+                client,
+                {
+                    "user_message": "保存到日历",
+                    "user_profile": {"user_id": "write-success"},
+                    "locale": "zh-CN",
+                    "timezone": "Asia/Shanghai",
+                    "message_sent_at": "2026-05-14 12:12:00",
+                },
+                {"context_state": context_state, "loaded_skill_ids": ["milk-management"]},
+            )
+
+        second_request, third_request = client.responses.requests[1:3]
+        self.assertEqual(
+            second_request["tool_choice"],
+            {
+                "type": "allowed_tools",
+                "mode": "required",
+                "tools": [{"type": "function", "name": "ui_quick_replies_create"}],
+            },
+        )
+        self.assertEqual(
+            [tool["name"] for tool in second_request["tools"] if tool.get("type") == "function"],
+            ["ui_quick_replies_create"],
+        )
+        self.assertNotIn("milk_plan_mutate", json.dumps(second_request["tools"], ensure_ascii=False))
+        self.assertNotIn("tools", third_request)
+        self.assertNotIn("tool_choice", third_request)
+
+    def test_invalid_milk_plan_preview_uses_quick_replies_window_before_final_reply(self) -> None:
         context_state = ContextState()
         context_state.milk_management_state = {
             "analysis_intake": {
@@ -1173,13 +1435,49 @@ class AgentToolEventTests(unittest.TestCase):
                         }
                     ],
                 },
+                {
+                    "id": "resp-quick-window",
+                    "output": [
+                        {
+                            "type": "function_call",
+                            "call_id": "call-invalid-preview-quick",
+                            "name": "ui_quick_replies_create",
+                            "arguments": json.dumps(
+                                {
+                                    "replies": [
+                                        {"text": "继续调整"},
+                                        {"text": "换个目标"},
+                                        {"text": "先不生成"},
+                                    ]
+                                },
+                                ensure_ascii=False,
+                            ),
+                        }
+                    ],
+                },
                 {"id": "resp-final", "output": [{"type": "message", "content": [{"type": "output_text", "text": "这版还需要调整一下。"}]}]},
             ]
         )
 
+        def execute_tool(name: str, arguments: dict[str, object], inputs: dict[str, object]) -> dict[str, object]:
+            if name == "ui_quick_replies_create":
+                return {
+                    "ok": True,
+                    "tool_name": "ui_quick_replies_create",
+                    "result": {
+                        "status": "quick_replies_ready",
+                        "quick_replies": [
+                            {"text": "继续调整"},
+                            {"text": "查看计划"},
+                            {"text": "先这样"},
+                        ],
+                    },
+                }
+            return {"ok": True, "tool_name": "milk_plan_preview_create", "result": preview_result}
+
         with patch(
             "momcozy_agent.agents._execute_project_tool",
-            return_value={"ok": True, "tool_name": "milk_plan_preview_create", "result": preview_result},
+            side_effect=execute_tool,
         ):
             run_agent_loop(
                 client,
@@ -1193,8 +1491,18 @@ class AgentToolEventTests(unittest.TestCase):
                 {"context_state": context_state, "loaded_skill_ids": ["milk-management"]},
             )
 
-        self.assertNotIn("tools", client.responses.requests[1])
-        self.assertNotIn("tool_choice", client.responses.requests[1])
+        second_request, third_request = client.responses.requests[1:3]
+        self.assertEqual(
+            second_request["tool_choice"],
+            {
+                "type": "allowed_tools",
+                "mode": "required",
+                "tools": [{"type": "function", "name": "ui_quick_replies_create"}],
+            },
+        )
+        self.assertNotIn("milk_plan_preview_create", json.dumps(second_request["tools"], ensure_ascii=False))
+        self.assertNotIn("tools", third_request)
+        self.assertNotIn("tool_choice", third_request)
 
     def test_failed_milk_plan_save_result_label_does_not_claim_saved(self) -> None:
         event = tool_call_result_event(

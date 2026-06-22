@@ -13,7 +13,16 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from .agents import QUICK_REPLIES_TOOL_NAME, clean_web_search_citation_markers, quick_replies_event, run_agent_loop, run_agent_turn, run_error_event, text_message_semantic
+from .agents import (
+    QUICK_REPLIES_TOOL_NAME,
+    clean_internal_tool_error_text,
+    clean_web_search_citation_markers,
+    quick_replies_event,
+    run_agent_loop,
+    run_agent_turn,
+    run_error_event,
+    text_message_semantic,
+)
 from .config import get_openai_client_options, load_project_env
 from .contexts import (
     DEFAULT_LOCALE,
@@ -1106,7 +1115,7 @@ def _string_context_value(
 def _response_text(response: Any) -> str:
     output_text = getattr(response, "output_text", None)
     if output_text:
-        return clean_web_search_citation_markers(str(output_text))
+        return clean_internal_tool_error_text(clean_web_search_citation_markers(str(output_text)))
 
     parts: list[str] = []
     for item in _output_items(response):
@@ -1117,7 +1126,7 @@ def _response_text(response: Any) -> str:
                 text = _get(content, "text")
                 if text:
                     parts.append(text)
-    return clean_web_search_citation_markers("\n".join(parts).strip())
+    return clean_internal_tool_error_text(clean_web_search_citation_markers("\n".join(parts).strip()))
 
 
 def _response_id(response: Any) -> str | None:

@@ -164,6 +164,13 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertNotIn(removed_tool, READ_ONLY_TOOL_NAMES)
         self.assertNotIn(removed_tool, DEFERRED_TOOL_NAMESPACES["milk_management"]["tool_names"])
 
+    def test_milk_plan_preview_schema_accepts_user_update(self) -> None:
+        parameters = FUNCTION_TOOLS["milk_plan_preview_create"]["parameters"]
+
+        self.assertIn("user_update", parameters["properties"])
+        self.assertIn("user_update", parameters["required"])
+        self.assertEqual(parameters["properties"]["user_update"]["type"], ["string", "null"])
+
     def test_deferred_tool_descriptions_include_cross_namespace_boundaries(self) -> None:
         expected_tokens = {
             "handoff_summary_generate": ("已经决定转接", "不要用于普通回答总结", "设备售后工单"),

@@ -775,6 +775,122 @@ class MilkManagementToolTests(unittest.TestCase):
         self.assertEqual(result["data"]["next_tool"], "milk_analysis_evaluate")
         self.assertNotEqual(result["status"], "milk_plan_needs_clinical_context")
 
+    def test_plan_preview_trusts_completed_intake_over_stale_clinical_missing_fields(self) -> None:
+        uid, _ = _seed_user("completed-intake-over-stale-clinical")
+        _add_pumping_rows(uid, "2026-05-13", ["06:00", "09:00", "12:00", "18:00", "21:00"])
+        assessment_data = evaluate_milk_status(
+            user_id=uid,
+            as_of_time="2026-05-14 12:00:00",
+            window_days=7,
+            include_today=False,
+        )["data"]
+        analysis_context = _complete_milk_analysis_context(
+            plan_type="increase_milk",
+            assessment_data=assessment_data,
+        )
+        stale_clinical_assessment = {
+            "risk_level": "watch",
+            "plan_gate": {"allowed": True},
+            "domains": {
+                "infant_intake": {"provided_fields": []},
+                "infant_growth": {"status": "unknown"},
+                "maternal_breast_symptoms": {"provided_fields": []},
+            },
+        }
+        assessment_result = _assessment_result({**assessment_data, "clinical_assessment": stale_clinical_assessment})
+
+        result = execute_milk_management_tool(
+            {
+                "_tool_name": "milk_plan_preview_create",
+                "user_id": uid,
+                "plan_type": "increase_milk",
+                "plan_days": 7,
+                "as_of_time": "2026-05-14 12:00:00",
+                "analysis_context": analysis_context,
+                "assessment_result": assessment_result,
+            },
+            {
+                "user_message": "现在生成计划",
+                "locale": "zh-CN",
+                "timezone": "Asia/Shanghai",
+                "message_sent_at": "",
+            },
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["status"], "plan_preview_ready")
+        self.assertNotEqual(result["status"], "milk_plan_needs_clinical_context")
+
+    def test_plan_preview_completed_intake_still_blocks_true_clinical_risk(self) -> None:
+        uid, _ = _seed_user("completed-intake-risk-gate")
+        _add_pumping_rows(uid, "2026-05-13", ["06:00", "09:00", "12:00", "18:00", "21:00"])
+        maternal_symptoms = {
+            **_reassuring_maternal_symptoms(),
+            "fever": True,
+            "chills": True,
+            "breast_redness": True,
+            "lump_or_hard_area": True,
+            "worsening_pain": True,
+        }
+        analysis_context = _complete_milk_analysis_context(
+            plan_type="increase_milk",
+            maternal_symptoms=maternal_symptoms,
+        )
+        assessment_data = evaluate_milk_status(
+            user_id=uid,
+            as_of_time="2026-05-14 12:00:00",
+            window_days=7,
+            include_today=False,
+        )["data"]
+        assessment_result = _assessment_result(
+            {
+                **assessment_data,
+                "clinical_assessment": {
+                    "risk_level": "medical_recommended",
+                    "plan_gate": {
+                        "allowed": False,
+                        "reason": "当前有需要优先医学评估的信号，先不要进入普通奶量计划。",
+                    },
+                    "domains": {
+                        "infant_intake": {"provided_fields": ["wet_diapers_24h"], "wet_diapers_provided": True},
+                        "infant_growth": {"status": "normal"},
+                        "maternal_breast_symptoms": {
+                            "provided_fields": [
+                                "fever",
+                                "chills",
+                                "breast_redness",
+                                "lump_or_hard_area",
+                                "worsening_pain",
+                                "symptom_text",
+                            ],
+                        },
+                    },
+                },
+            }
+        )
+
+        result = execute_milk_management_tool(
+            {
+                "_tool_name": "milk_plan_preview_create",
+                "user_id": uid,
+                "plan_type": "increase_milk",
+                "plan_days": 7,
+                "as_of_time": "2026-05-14 12:00:00",
+                "analysis_context": analysis_context,
+                "assessment_result": assessment_result,
+            },
+            {
+                "user_message": "现在生成计划",
+                "locale": "zh-CN",
+                "timezone": "Asia/Shanghai",
+                "message_sent_at": "",
+            },
+        )
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["status"], "milk_plan_clinical_gate_blocked")
+        self.assertNotEqual(result["status"], "milk_plan_needs_clinical_context")
+
     def test_intake_user_update_invalidates_cached_assessment_and_plan_preview(self) -> None:
         uid, _ = _seed_user("intake-update-invalidates-assessment")
         for index, time in enumerate(["00:00", "03:00", "06:00", "09:00", "12:00"], start=1):

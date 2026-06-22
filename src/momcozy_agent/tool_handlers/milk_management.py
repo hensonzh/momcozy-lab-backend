@@ -1119,6 +1119,9 @@ def _flow_plan_preview_arguments(arguments: dict[str, Any], flow: dict[str, Any]
         options["prepared_growth_assessment"] = clinical["growth_assessment"]
     options["infant_signals"] = flow.get("infant_signals") if isinstance(flow.get("infant_signals"), dict) else {}
     options["maternal_symptoms"] = flow.get("maternal_symptoms") if isinstance(flow.get("maternal_symptoms"), dict) else {}
+    checklist = flow.get("checklist") if isinstance(flow.get("checklist"), list) else []
+    if checklist and not _flow_missing_fields(checklist):
+        options["_analysis_intake_complete"] = True
     return {
         "user_id": arguments["user_id"],
         "plan_type": _flow_plan_type_from_flow(flow),
@@ -1432,27 +1435,14 @@ def _create_milk_plan_preview_core(arguments: dict[str, Any], inputs: RuntimeInp
 
 
 def _clinical_gate_for_plan(arguments: dict[str, Any], *, plan_type: Any, options: dict[str, Any]) -> dict[str, Any] | None:
+    intake_complete = bool(options.get("_analysis_intake_complete"))
     prepared_clinical = options.get("prepared_clinical_assessment")
     if isinstance(prepared_clinical, dict) and prepared_clinical:
         clinical_data = dict(prepared_clinical)
+        if intake_complete and _missing_clinical_context_fields(clinical_data):
+            clinical_data = _clinical_data_from_plan_options(arguments, plan_type=plan_type, options=options)
     else:
-        prepared_assessment = options.get("prepared_assessment") if isinstance(options.get("prepared_assessment"), dict) else None
-        prepared_from_context = bool(options.get("_prepared_assessment_from_context"))
-        prepared_window_days = _to_int(options.get("_prepared_assessment_window_days"), _milk_assessment_window_days(prepared_assessment))
-        needs_plan_window = prepared_from_context and prepared_window_days < 7
-        plan_window_days = max(_to_int(arguments.get("window_days"), 7), 7)
-        clinical = _evaluate_milk_context_status(
-            user_id=arguments["user_id"],
-            as_of_time=arguments.get("as_of_time"),
-            window_days=7 if needs_plan_window else plan_window_days,
-            include_today=False,
-            milk_assessment=None if needs_plan_window else prepared_assessment,
-            growth_assessment=options.get("prepared_growth_assessment") if isinstance(options.get("prepared_growth_assessment"), dict) else None,
-            maternal_symptoms=options.get("maternal_symptoms") if isinstance(options.get("maternal_symptoms"), dict) else {},
-            infant_signals=options.get("infant_signals") if isinstance(options.get("infant_signals"), dict) else {},
-            requested_plan_type=str(plan_type or ""),
-        )
-        clinical_data = clinical.get("data") if isinstance(clinical.get("data"), dict) else {}
+        clinical_data = _clinical_data_from_plan_options(arguments, plan_type=plan_type, options=options)
     plan_gate = clinical_data.get("plan_gate") if isinstance(clinical_data.get("plan_gate"), dict) else {}
     if plan_gate.get("allowed") is False:
         decision = _milk_flow_decision_for_plan_blocked(clinical_data, str(plan_type or ""))
@@ -1468,7 +1458,7 @@ def _clinical_gate_for_plan(arguments: dict[str, Any], *, plan_type: Any, option
             "assistant_followup": {"message": _milk_plan_gate_followup_message(clinical_data)},
         }
     missing_fields = _missing_clinical_context_fields(clinical_data)
-    if missing_fields:
+    if missing_fields and not intake_complete:
         current_field, next_question = _clinical_context_current_question(missing_fields)
         return {
             "ok": False,
@@ -1500,6 +1490,26 @@ def _clinical_gate_for_plan(arguments: dict[str, Any], *, plan_type: Any, option
     options.setdefault("prepared_assessment", clinical_data.get("milk_assessment"))
     options.setdefault("prepared_growth_assessment", clinical_data.get("growth_assessment"))
     return None
+
+
+def _clinical_data_from_plan_options(arguments: dict[str, Any], *, plan_type: Any, options: dict[str, Any]) -> dict[str, Any]:
+    prepared_assessment = options.get("prepared_assessment") if isinstance(options.get("prepared_assessment"), dict) else None
+    prepared_from_context = bool(options.get("_prepared_assessment_from_context"))
+    prepared_window_days = _to_int(options.get("_prepared_assessment_window_days"), _milk_assessment_window_days(prepared_assessment))
+    needs_plan_window = prepared_from_context and prepared_window_days < 7
+    plan_window_days = max(_to_int(arguments.get("window_days"), 7), 7)
+    clinical = _evaluate_milk_context_status(
+        user_id=arguments["user_id"],
+        as_of_time=arguments.get("as_of_time"),
+        window_days=7 if needs_plan_window else plan_window_days,
+        include_today=False,
+        milk_assessment=None if needs_plan_window else prepared_assessment,
+        growth_assessment=options.get("prepared_growth_assessment") if isinstance(options.get("prepared_growth_assessment"), dict) else None,
+        maternal_symptoms=options.get("maternal_symptoms") if isinstance(options.get("maternal_symptoms"), dict) else {},
+        infant_signals=options.get("infant_signals") if isinstance(options.get("infant_signals"), dict) else {},
+        requested_plan_type=str(plan_type or ""),
+    )
+    return clinical.get("data") if isinstance(clinical.get("data"), dict) else {}
 
 
 def _clinical_gate_for_analysis(arguments: dict[str, Any], *, result: dict[str, Any], comprehensive_assessment: bool) -> dict[str, Any] | None:
