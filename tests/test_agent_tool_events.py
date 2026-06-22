@@ -2537,6 +2537,63 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertIn("自然表达", compact["final_response_instruction"])
         self.assertNotIn("card_json", json.dumps(compact, ensure_ascii=False))
 
+    def test_hospital_bag_cart_update_final_response_links_to_cart(self) -> None:
+        raw = {
+            "ok": True,
+            "tool_name": "hospital_bag_cart_update",
+            "result": {
+                "tool_name": "hospital_bag_cart_update",
+                "status": "cart_updated",
+                "summary": "已帮你从购物车里删掉「防溢乳垫」。",
+                "cart_update": {
+                    "action": "remove_items",
+                    "message": "已帮你从购物车里删掉「防溢乳垫」。",
+                    "groups": [],
+                    "totals": {"total": 120, "itemCount": 2},
+                },
+            },
+        }
+
+        compact = model_tool_output(raw)
+        instruction = compact["final_response_instruction"]
+
+        self.assertIn("待产包购物车已经处理完本次调整或确认没有变化", instruction)
+        self.assertIn("最后一行必须单独使用这个 Markdown 购物车链接", instruction)
+        self.assertIn("**[打开待产包购物车](/hospital-bag-cart)**", instruction)
+        self.assertEqual(instruction.count("/hospital-bag-cart"), 1)
+        self.assertIn("已帮你从购物车里删掉", instruction)
+
+        unchanged = model_tool_output(
+            {
+                "ok": True,
+                "tool_name": "hospital_bag_cart_update",
+                "result": {
+                    "tool_name": "hospital_bag_cart_update",
+                    "status": "cart_unchanged",
+                    "summary": "当前购物车先不改。",
+                    "cart_update": {"action": "clarify", "message": "当前购物车先不改。"},
+                },
+            }
+        )
+        self.assertIn("**[打开待产包购物车](/hospital-bag-cart)**", unchanged["final_response_instruction"])
+
+    def test_hospital_bag_cart_update_clarification_does_not_force_cart_link(self) -> None:
+        raw = {
+            "ok": True,
+            "tool_name": "hospital_bag_cart_update",
+            "result": {
+                "tool_name": "hospital_bag_cart_update",
+                "status": "needs_clarification",
+                "summary": "你想删掉哪一件？",
+                "cart_update": {"action": "clarify", "message": "你想删掉哪一件？"},
+            },
+        }
+
+        compact = model_tool_output(raw)
+
+        self.assertNotIn("final_response_instruction", compact)
+        self.assertNotIn("/hospital-bag-cart", json.dumps(compact, ensure_ascii=False))
+
     def test_read_skill_file_records_loaded_reference_context(self) -> None:
         context_state = ContextState()
         client = _FakeClient(

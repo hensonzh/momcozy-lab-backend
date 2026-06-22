@@ -362,6 +362,21 @@ class HospitalBagCardTests(unittest.TestCase):
         self.assertEqual(result["missing_fields"], ["birth_path"])
         self.assertNotIn("card", result)
 
+    def test_hospital_bag_card_allows_unknown_birth_path_option(self) -> None:
+        result = _create_hospital_bag_card_for_test(
+            _hospital_bag_form_data(
+                birth_path="不确定",
+            )
+        )
+
+        self.assertEqual(result["status"], "card_created")
+        card_json = result["card"]["card_json"]
+        self.assertEqual(card_json["owner"]["birth_path"], "还不确定")
+        self.assertNotIn("分娩方式", card_json["missing_fields"])
+        labels = {item["label"] for group in card_json["packing_groups"] for item in group["items"]}
+        self.assertNotIn("高腰宽松内裤", labels)
+        self.assertNotIn("考虑到你倾向剖宫产", result["assistant_followup"]["message"])
+
     def test_hospital_bag_card_model_instruction_requires_cart_link_and_specific_examples(self) -> None:
         result = _create_hospital_bag_card_for_test(
             _hospital_bag_form_data(

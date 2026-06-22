@@ -804,7 +804,7 @@ def _missing_hospital_bag_required_form_fields(form_data: dict[str, Any]) -> lis
     return [
         field_id
         for field_id in HOSPITAL_BAG_MISSING_LABELS
-        if not _has_confirmed_form_value(form_data.get(field_id))
+        if not _has_confirmed_hospital_bag_form_value(field_id, form_data.get(field_id))
     ]
 
 
@@ -822,6 +822,20 @@ def _has_confirmed_form_value(value: Any) -> bool:
         return any(_has_confirmed_form_value(item) for item in value.values())
     text = _first_text(value)
     return _has_meaningful_value(text) and _normalized_placeholder(text) not in PLACEHOLDER_VALUES
+
+
+def _has_confirmed_hospital_bag_form_value(field_id: str, value: Any) -> bool:
+    if isinstance(value, list):
+        return any(_has_confirmed_hospital_bag_form_value(field_id, item) for item in value)
+    if isinstance(value, dict):
+        return any(_has_confirmed_hospital_bag_form_value(field_id, item) for item in value.values())
+    text = _first_nonempty_text(value)
+    if not text:
+        return False
+    normalized = _normalize_hospital_bag_form_value(field_id, text)
+    if normalized in _hospital_bag_field_options(field_id):
+        return True
+    return _has_confirmed_form_value(text)
 
 
 def _default_values_from_form_fields(fields: list[dict[str, Any]]) -> dict[str, Any]:
@@ -4606,22 +4620,22 @@ def _unique_birth_journey_items(value: Any, max_items: int) -> list[str]:
 
 def _build_hospital_bag_card_json(form_data: dict[str, Any], generation_mode: str, inputs: RuntimeInputs) -> dict[str, Any]:
     due_date_or_week = _first_text(form_data.get("due_date_or_week")) or "待确认"
-    birth_path = _normalize_birth_path(_first_text(form_data.get("birth_path"))) or "待确认"
-    feeding_intention = _normalize_feeding_intention(_first_text(form_data.get("feeding_intention"))) or "待确认"
+    birth_path = _normalize_hospital_bag_birth_path(_first_nonempty_text(form_data.get("birth_path"))) or "待确认"
+    feeding_intention = _normalize_feeding_intention(_first_nonempty_text(form_data.get("feeding_intention"))) or "待确认"
     first_birth = _normalize_first_birth(_first_text(form_data.get("first_birth"))) or "待确认"
-    fetus_count = _first_text(form_data.get("fetus_count")) or "待确认"
+    fetus_count = _normalize_hospital_bag_fetus_count(_first_nonempty_text(form_data.get("fetus_count"))) or "待确认"
     pregnancy_history_or_notes = _text_list(form_data.get("pregnancy_history_or_notes"))
     return_to_work_timing = _first_text(form_data.get("return_to_work_timing")) or "待确认"
     top_worries = _text_list(form_data.get("top_worries"))
     birth_setting = _first_text(form_data.get("birth_setting")) or "待确认"
     expected_stay = _first_text(form_data.get("expected_stay")) or "待确认"
-    support_person = _first_text(form_data.get("support_person")) or "待确认"
+    support_person = _normalize_hospital_bag_support_person(_first_nonempty_text(form_data.get("support_person"))) or "待确认"
     provided_items = _split_hospital_provided_items(form_data.get("hospital_provided_items"))
     stage = _hospital_bag_stage(due_date_or_week, generation_mode, inputs)
     missing_fields = [
         label
         for field_id, label in HOSPITAL_BAG_MISSING_LABELS.items()
-        if _normalized_placeholder(_first_text(form_data.get(field_id))) in PLACEHOLDER_VALUES
+        if not _has_confirmed_hospital_bag_form_value(field_id, form_data.get(field_id))
     ]
     context: dict[str, Any] = {
         "stage": stage,

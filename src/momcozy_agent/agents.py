@@ -1428,6 +1428,11 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
             artifact_created=isinstance(ticket, dict) or isinstance(card, dict) or isinstance(form, dict),
         )
 
+    if tool_name == "hospital_bag_cart_update":
+        instruction = _hospital_bag_cart_update_final_response_instruction(compact)
+        if instruction:
+            compact["final_response_instruction"] = instruction
+
     return compact
 
 
@@ -1685,6 +1690,21 @@ def _followup_final_response_instruction(tool_name: str, message: str, *, artifa
         "最终回复参考下面建议内容的语气、结构和关键信息自然表达；"
         "不要机械照抄、不要重复交付语或再补充无关下一步。"
         "如果建议内容里包含链接，不要在正文重复裸链接，相关入口由前端卡片展示。"
+        f"\n\n建议内容：\n{message}"
+    )
+
+
+def _hospital_bag_cart_update_final_response_instruction(compact: dict[str, Any]) -> str:
+    status = str(compact.get("status") or "").strip()
+    if status not in {"cart_updated", "cart_unchanged"}:
+        return ""
+    message = str(compact.get("message") or compact.get("summary") or "").strip()
+    return (
+        "待产包购物车已经处理完本次调整或确认没有变化。最终回复最多两段，每段 1 句；"
+        "先根据下方建议内容简短说明调整结果，不要复述完整购物车、不要列长清单、不要承诺真实下单或一键购买；"
+        "如果购物车没有变化，可以说明当前购物车先不改，并提醒用户可点开核对。"
+        "最后一行必须单独使用这个 Markdown 购物车链接，且整段回复里只出现一次购物车链接："
+        "**[打开待产包购物车](/hospital-bag-cart)**"
         f"\n\n建议内容：\n{message}"
     )
 
