@@ -52,6 +52,20 @@ def _assert_birth_journey_item_text_lengths(testcase: unittest.TestCase, layers:
             testcase.assertLessEqual(len(reason), BIRTH_JOURNEY_PLAN_ITEM_REASON_MAX_CHARS)
 
 
+def _assert_birth_journey_item_reasons_are_not_personalized(testcase: unittest.TestCase, layers: dict[str, object]) -> None:
+    blocked_fragments = ("考虑到你", "你提到", "目的是")
+    for section_id in ("current_week_focus", "next_7_days", "next_2_4_weeks", "later_milestones"):
+        section = layers.get(section_id)
+        items = section.get("items") if isinstance(section, dict) else []
+        testcase.assertIsInstance(items, list)
+        for item in items:
+            testcase.assertIsInstance(item, dict)
+            for key in ("reason", "why_for_you"):
+                text = str(item.get(key) or "")
+                for fragment in blocked_fragments:
+                    testcase.assertNotIn(fragment, text)
+
+
 def _assert_next_7_todo_items(testcase: unittest.TestCase, layers: dict[str, object]) -> None:
     next_7 = layers.get("next_7_days")
     items = next_7.get("items") if isinstance(next_7, dict) else []
@@ -72,10 +86,7 @@ def _assert_next_7_todo_items(testcase: unittest.TestCase, layers: dict[str, obj
         testcase.assertIsNone(item.get("completed_source"))
         testcase.assertIn(item.get("priority_type"), {"essential", "supportive"})
         testcase.assertIn(item.get("priority_label"), {"优先确认事项", "支持性建议"})
-        if item.get("priority_type") == "essential":
-            testcase.assertTrue(str(item.get("title") or "").startswith("【重要】"))
-        else:
-            testcase.assertTrue(str(item.get("title") or "").startswith("【建议】"))
+        testcase.assertFalse(str(item.get("title") or "").startswith(("【重要】", "【建议】")))
         for fragment in weak_title_fragments:
             testcase.assertNotIn(fragment, str(item.get("title") or ""))
         testcase.assertIsInstance(item.get("steps"), list)
@@ -155,6 +166,8 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         self.assertIn("做完后", next_7_rendered)
         self.assertNotIn("给生活压力留缓冲", next_7_rendered)
         self.assertNotIn("补齐下次产检时间", next_7_rendered)
+        self.assertNotIn("考虑到你", next_7_rendered)
+        self.assertNotIn("目的是", next_7_rendered)
         grouped = layers["next_7_days"]["grouped_items"]
         self.assertIn("essential", grouped)
         self.assertIn("按照你现在孕 25 周", grouped["essential"]["intro"])
@@ -192,6 +205,7 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         self.assertNotIn("承接奶量管理计划", rendered)
         self.assertNotIn("| --- |", rendered)
         self.assertNotIn("<br>", rendered)
+        _assert_birth_journey_item_reasons_are_not_personalized(self, layers)
 
     def test_birth_journey_plan_merges_safety_gate_into_current_focus(self) -> None:
         result = create_birth_journey_plan_card(
@@ -235,6 +249,105 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         self.assertIn("32-36 周", rendered)
         self.assertIn("36 周后", rendered)
         self.assertIn("产后 0-42 天", rendered)
+
+    def test_birth_journey_plan_uses_weekly_guide_for_nt_window(self) -> None:
+        result = create_birth_journey_plan_card(
+            {
+                "plan_context": _plan_context(due_date_or_week="12周"),
+                "scope": "full",
+            },
+            {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00"},
+        )
+
+        layers = result["card"]["card_json"]["planning_layers"]
+        rendered = json.dumps(layers, ensure_ascii=False)
+        self.assertIn("安排建档、NT和早唐回看", rendered)
+        self.assertIn("把NT/早唐安排写进日历", rendered)
+        self.assertIn("设置报告回看提醒", rendered)
+        self.assertIn("11-14 周：建档和NT早筛", rendered)
+        self.assertNotIn("无花果", rendered)
+
+    def test_birth_journey_next_7_ignores_generic_intent_and_remote_preparation(self) -> None:
+        result = create_birth_journey_plan_card(
+            {
+                "plan_context": _plan_context(
+                    due_date_or_week="12周",
+                    entry_reason="用户希望制定孕期计划、饮食和运动建议",
+                    initial_concerns=["用户希望制定孕期计划、饮食和运动建议"],
+                    top_worries="用户希望制定孕期计划、饮食和运动建议",
+                    risk_factors="有一些风险因素",
+                    feeding_intention="混合",
+                    feeding_ibclc_context="计划混合喂养",
+                    lifestyle_context="跳过",
+                ),
+                "scope": "full",
+            },
+            {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00"},
+        )
+
+        layers = result["card"]["card_json"]["planning_layers"]
+        next_7_rendered = json.dumps(layers["next_7_days"], ensure_ascii=False)
+        self.assertIn("把NT/早唐安排写进日历", next_7_rendered)
+        self.assertIn("记录孕反、饮食和补剂执行", next_7_rendered)
+        self.assertNotIn("目的是", next_7_rendered)
+        self.assertNotIn("【重要】", next_7_rendered)
+        self.assertNotIn("【建议】", next_7_rendered)
+        self.assertNotIn("把担心点整理成", next_7_rendered)
+        self.assertNotIn("风险指标", next_7_rendered)
+        self.assertNotIn("产后 48 小时喂养", next_7_rendered)
+        basis_rendered = json.dumps(layers["plan_basis"], ensure_ascii=False)
+        self.assertNotIn("你提到的担心", basis_rendered)
+
+    def test_birth_journey_plan_uses_weekly_guide_for_anomaly_scan_window(self) -> None:
+        result = create_birth_journey_plan_card(
+            {
+                "plan_context": _plan_context(due_date_or_week="21周"),
+                "scope": "full",
+            },
+            {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00"},
+        )
+
+        layers = result["card"]["card_json"]["planning_layers"]
+        rendered = json.dumps(layers, ensure_ascii=False)
+        self.assertIn("完成大排畸并问清复查", rendered)
+        self.assertIn("准备大排畸当天和复查问题", rendered)
+        self.assertIn("问报告异常或不清楚时怎么复查", rendered)
+        self.assertIn("20-24 周：完成大排畸", rendered)
+        self.assertNotIn("小甜瓜", rendered)
+
+    def test_birth_journey_plan_uses_weekly_guide_for_gbs_and_admission_window(self) -> None:
+        result = create_birth_journey_plan_card(
+            {
+                "plan_context": _plan_context(due_date_or_week="35周"),
+                "scope": "full",
+            },
+            {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00"},
+        )
+
+        layers = result["card"]["card_json"]["planning_layers"]
+        rendered = json.dumps(layers, ensure_ascii=False)
+        self.assertIn("问清GBS筛查和入院材料", rendered)
+        self.assertIn("确认GBS筛查和待产证件", rendered)
+        self.assertIn("确认医院入院或夜间入口", rendered)
+        self.assertIn("35-37 周：问清GBS筛查", rendered)
+        self.assertNotIn("白兰瓜", rendered)
+
+    def test_birth_journey_plan_safety_gate_includes_unexplained_itching(self) -> None:
+        result = create_birth_journey_plan_card(
+            {
+                "plan_context": _plan_context(
+                    due_date_or_week="30周",
+                    current_symptoms="最近皮肤瘙痒明显",
+                ),
+                "scope": "full",
+            },
+            {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00"},
+        )
+
+        layers = result["card"]["card_json"]["planning_layers"]
+        safety_items = layers["safety_gate"]["items"]
+        self.assertTrue(safety_items)
+        self.assertIn("先确认是否需要联系医院或医生", safety_items[0]["title"])
 
     def test_birth_journey_plan_does_not_personalize_from_skipped_or_unknown_answers(self) -> None:
         result = create_birth_journey_plan_card(
@@ -474,6 +587,53 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
                 self.assertIn("不重复生成", compact["final_response_instruction"])
                 plans = data_store.list_care_plan_artifacts(user_id="app-user")
                 self.assertEqual(len(plans), 1)
+            finally:
+                data_store.DB_PATH = old_db_path  # type: ignore[assignment]
+
+    def test_stale_birth_journey_plan_with_old_explanation_phrasing_is_not_reused(self) -> None:
+        old_db_path = data_store.DB_PATH
+        with tempfile.TemporaryDirectory() as tmp:
+            data_store.DB_PATH = Path(tmp) / "milk_management.db"  # type: ignore[assignment]
+            try:
+                stale = data_store.save_care_plan_artifact(
+                    user_id="app-user",
+                    plan_type="birth_journey",
+                    title="孕期计划",
+                    summary="旧版孕期计划",
+                    payload={
+                        "title": "孕期计划",
+                        "planning_layers": {
+                            "next_7_days": {
+                                "items": [
+                                    {
+                                        "id": "next7_01",
+                                        "title": "把担心点整理成 3 个医生问题",
+                                        "reason": "考虑到你提到生活或工作压力，目的是把担心点整理成医生问题。",
+                                    }
+                                ],
+                            }
+                        },
+                    },
+                    source_artifact_type="birth_journey_plan_card",
+                )
+                self.assertIsNotNone(stale)
+
+                result = create_birth_journey_plan_card(
+                    {
+                        "plan_context": _plan_context(due_date_or_week="12周"),
+                        "scope": "full",
+                    },
+                    {"user_message": "", "user_id": "app-user", "message_sent_at": "2026-06-09T09:00:00+08:00"},
+                )
+
+                self.assertEqual(result["status"], "card_created")
+                self.assertNotEqual(result["plan"]["plan_id"], stale["plan_id"])
+                rendered = json.dumps(result["card"]["card_json"]["planning_layers"]["next_7_days"], ensure_ascii=False)
+                self.assertNotIn("【重要】", rendered)
+                self.assertNotIn("目的是", rendered)
+                self.assertNotIn("考虑到你", rendered)
+                self.assertIn("把NT/早唐安排写进日历", rendered)
+                self.assertEqual(len(data_store.list_care_plan_artifacts(user_id="app-user")), 2)
             finally:
                 data_store.DB_PATH = old_db_path  # type: ignore[assignment]
 

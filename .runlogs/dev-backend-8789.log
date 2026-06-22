@@ -1,7 +1,7 @@
 Seeded status demo data for demo_mama_increase_001 in /Users/lute/project/MomCozyWorktrees/worktree-1/MomCozyAgent/data/milk_management.db
-Reset non-status demo data for local startup: profile=1, birth_prep=0, plans=0, milk_plans=0, pregnancy_diary=0, uploads=0, device_runtime=0.
+Reset non-status demo data for local startup: profile=1, birth_prep=1, plans=1, milk_plans=0, pregnancy_diary=0, uploads=0, device_runtime=0.
 Momcozy agent SSE service: http://127.0.0.1:8788/api/ag-ui
-INFO:     Started server process [71123]
+INFO:     Started server process [3901]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://127.0.0.1:8182 (Press CTRL+C to quit)
@@ -9,55 +9,67 @@ Momcozy unified API: http://127.0.0.1:8789
 Momcozy App WebSocket: ws://127.0.0.1:8789/api/ag-ui-ws
 Momcozy chat SSE upstream: http://127.0.0.1:8788/api/ag-ui
 Web data admin: http://127.0.0.1:8182
-INFO:     Started server process [71123]
+INFO:     Started server process [3901]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://127.0.0.1:8789 (Press CTRL+C to quit)
 [LogDrivenSessionManager] 初始化完成 | json_dir=/Users/lute/project/MomCozyWorktrees/worktree-1/MomCozyAgent/data/milk_process/configs | log_dir=/Users/lute/project/MomCozyWorktrees/worktree-1/MomCozyAgent/logs/milk_process
-INFO:     127.0.0.1:64223 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64233 - "GET /v1/user/profile/query?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64234 - "GET /v1/user/profile/query?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64240 - "GET /v1/realtime-voice-stream?user_id=demo_mama_increase_001&text=%E5%97%A8%EF%BC%8C%E6%88%91%E6%98%AF+CozyMate%EF%BC%8C%E6%9D%A5%E8%87%AA+Momcozy%E5%9B%A2%E9%98%9F%E3%80%82+%E4%BD%A0%E5%B8%8C%E6%9C%9B%E6%88%91%E6%80%8E%E4%B9%88%E7%A7%B0%E5%91%BC%E4%BD%A0%EF%BC%9F%E4%BB%8A%E5%B9%B4%E5%A4%9A%E5%A4%A7%E5%95%A6%EF%BC%9F HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64238 - "POST /api/ag-ui-prewarm HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64253 - "WebSocket /api/ag-ui-ws?token=app-test" [accepted]
+INFO:     127.0.0.1:50534 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50535 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50723 - "GET /v1/user/profile/query?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50724 - "GET /v1/user/profile/query?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50737 - "WebSocket /api/ag-ui-ws?token=app-test" [accepted]
 INFO:     connection open
-INFO:     127.0.0.1:64255 - "POST /api/ag-ui HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64266 - "WebSocket /v1/realtime-voice-session?token=app-test&user_id=demo_mama_increase_001" [accepted]
-INFO:     connection open
-INFO:     connection closed
-INFO:     connection closed
-INFO:     127.0.0.1:64293 - "WebSocket /api/ag-ui-ws?token=app-test" [accepted]
-INFO:     connection open
-INFO:     127.0.0.1:64295 - "POST /api/ag-ui HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64299 - "WebSocket /v1/realtime-voice-session?token=app-test&user_id=demo_mama_increase_001" [accepted]
+INFO:     127.0.0.1:50738 - "POST /api/ag-ui HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50782 - "WebSocket /v1/realtime-voice-session?token=app-test&user_id=demo_mama_increase_001" [accepted]
 INFO:     connection open
 INFO:     connection closed
 INFO:     connection closed
-INFO:     127.0.0.1:64305 - "WebSocket /api/ag-ui-ws?token=app-test" [accepted]
+INFO:     127.0.0.1:50807 - "WebSocket /api/ag-ui-ws?token=app-test" [accepted]
 INFO:     connection open
-INFO:     127.0.0.1:64306 - "POST /api/ag-ui HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64310 - "WebSocket /v1/realtime-voice-session?token=app-test&user_id=demo_mama_increase_001" [accepted]
-INFO:     connection open
-INFO:     connection closed
-INFO:     connection closed
-INFO:     127.0.0.1:64316 - "WebSocket /api/ag-ui-ws?token=app-test" [accepted]
-INFO:     connection open
-INFO:     127.0.0.1:64317 - "POST /api/ag-ui HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64321 - "WebSocket /v1/realtime-voice-session?token=app-test&user_id=demo_mama_increase_001" [accepted]
+INFO:     127.0.0.1:50808 - "POST /api/ag-ui HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50834 - "WebSocket /v1/realtime-voice-session?token=app-test&user_id=demo_mama_increase_001" [accepted]
 INFO:     connection open
 INFO:     connection closed
 INFO:     connection closed
-INFO:     127.0.0.1:64323 - "WebSocket /api/ag-ui-ws?token=app-test" [accepted]
+INFO:     127.0.0.1:50851 - "WebSocket /api/ag-ui-ws?token=app-test" [accepted]
 INFO:     connection open
-INFO:     127.0.0.1:64324 - "POST /api/ag-ui HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64328 - "WebSocket /v1/realtime-voice-session?token=app-test&user_id=demo_mama_increase_001" [accepted]
-INFO:     connection open
-INFO:     connection closed
-INFO:     connection closed
-INFO:     127.0.0.1:64330 - "WebSocket /api/ag-ui-ws?token=app-test" [accepted]
-INFO:     connection open
-INFO:     127.0.0.1:64331 - "POST /api/ag-ui HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64336 - "WebSocket /v1/realtime-voice-session?token=app-test&user_id=demo_mama_increase_001" [accepted]
+INFO:     127.0.0.1:50854 - "POST /api/ag-ui HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50869 - "WebSocket /v1/realtime-voice-session?token=app-test&user_id=demo_mama_increase_001" [accepted]
 INFO:     connection open
 INFO:     connection closed
 INFO:     connection closed
+INFO:     127.0.0.1:50880 - "WebSocket /api/ag-ui-ws?token=app-test" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:50883 - "POST /api/ag-ui HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50894 - "WebSocket /v1/realtime-voice-session?token=app-test&user_id=demo_mama_increase_001" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     127.0.0.1:50899 - "WebSocket /api/ag-ui-ws?token=app-test" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:50900 - "POST /api/ag-ui HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50912 - "WebSocket /v1/realtime-voice-session?token=app-test&user_id=demo_mama_increase_001" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     127.0.0.1:50921 - "WebSocket /api/ag-ui-ws?token=app-test" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:50922 - "POST /api/ag-ui HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50933 - "WebSocket /v1/realtime-voice-session?token=app-test&user_id=demo_mama_increase_001" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     127.0.0.1:50967 - "WebSocket /api/ag-ui-ws?token=app-test" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:50969 - "POST /api/ag-ui HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50985 - "WebSocket /v1/realtime-voice-session?token=app-test&user_id=demo_mama_increase_001" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     127.0.0.1:51597 - "GET /v1/user/profile/query?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51598 - "GET /v1/user/profile/query?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51599 - "GET /v1/realtime-voice-stream?user_id=demo_mama_increase_001&text=%E5%97%A8%EF%BC%8C%E6%88%91%E6%98%AF+CozyMate%EF%BC%8C%E6%9D%A5%E8%87%AA+Momcozy%E5%9B%A2%E9%98%9F%E3%80%82+%E4%BD%A0%E5%B8%8C%E6%9C%9B%E6%88%91%E6%80%8E%E4%B9%88%E7%A7%B0%E5%91%BC%E4%BD%A0%EF%BC%9F%E4%BB%8A%E5%B9%B4%E5%A4%9A%E5%A4%A7%E5%95%A6%EF%BC%9F HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51622 - "GET /v1/user/profile/query?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51623 - "GET /v1/user/profile/query?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51624 - "GET /v1/realtime-voice-stream?user_id=demo_mama_increase_001&text=%E5%97%A8%EF%BC%8C%E6%88%91%E6%98%AF+CozyMate%EF%BC%8C%E6%9D%A5%E8%87%AA+Momcozy%E5%9B%A2%E9%98%9F%E3%80%82+%E4%BD%A0%E5%B8%8C%E6%9C%9B%E6%88%91%E6%80%8E%E4%B9%88%E7%A7%B0%E5%91%BC%E4%BD%A0%EF%BC%9F%E4%BB%8A%E5%B9%B4%E5%A4%9A%E5%A4%A7%E5%95%A6%EF%BC%9F HTTP/1.1" 200 OK

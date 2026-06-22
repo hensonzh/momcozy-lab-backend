@@ -2156,9 +2156,20 @@ def _existing_birth_journey_care_plan(inputs: RuntimeInputs) -> dict[str, Any] |
     for plan in active_plans:
         if isinstance(plan, dict) and plan.get("plan_type") == "birth_journey":
             payload = plan.get("payload")
-            if isinstance(payload, dict) and payload:
+            if isinstance(payload, dict) and payload and _birth_journey_existing_plan_is_reusable(payload):
                 return plan
     return None
+
+
+def _birth_journey_existing_plan_is_reusable(payload: dict[str, Any]) -> bool:
+    rendered = json.dumps(payload, ensure_ascii=False)
+    if any(prefix in rendered for prefix in BIRTH_JOURNEY_PRIORITY_TITLE_PREFIXES.values()):
+        return False
+    if "目的是" in rendered or "考虑到你" in rendered:
+        return False
+    if any(token in rendered for token in ("用户希望制定孕期计划", "用户想制定孕期计划", "饮食和运动建议")):
+        return False
+    return True
 
 
 def _save_birth_journey_care_plan(card_json: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any] | None:
@@ -2992,18 +3003,24 @@ def _birth_journey_plan_context_from_intake(state: dict[str, Any]) -> dict[str, 
     for key in ("risk_factors", "current_symptoms", "lifestyle_context", "feeding_ibclc_context", "feeding_intention"):
         if key in state:
             context[key] = state[key]
-    if _has_meaningful_value(state.get("entry_reason")):
+    if _has_meaningful_value(state.get("entry_reason")) and not _birth_journey_is_generic_plan_request(_first_answer_text(state.get("entry_reason"))):
         context["entry_reason"] = state["entry_reason"]
     initial_concerns = state.get("initial_concerns")
     if isinstance(initial_concerns, list) and initial_concerns:
-        context["initial_concerns"] = initial_concerns
+        specific_concerns = [
+            concern
+            for concern in initial_concerns
+            if _has_meaningful_value(concern) and not _birth_journey_is_generic_plan_request(str(concern))
+        ]
+        if specific_concerns:
+            context["initial_concerns"] = specific_concerns
     entry_followup = _first_answer_text(state.get("entry_concern_followup"))
     entry_context_text = _birth_journey_entry_context_text(state)
-    if entry_followup:
+    if entry_followup and not _birth_journey_is_generic_plan_request(entry_followup):
         context["entry_concern_followup"] = entry_followup
-    if entry_context_text:
+    if entry_context_text and not _birth_journey_is_generic_plan_request(entry_context_text):
         context["top_worries"] = _first_answer_text(entry_followup, initial_concerns, state.get("entry_reason"))
-    if entry_followup:
+    if entry_followup and not _birth_journey_is_generic_plan_request(entry_followup):
         existing_lifestyle = _first_answer_text(context.get("lifestyle_context"))
         context["lifestyle_context"] = (
             f"{existing_lifestyle}；前期关键担心：{entry_followup}" if existing_lifestyle else entry_followup
@@ -3104,17 +3121,23 @@ def _build_birth_journey_plan_card_json(form_data: dict[str, Any], scope: str, i
         8,
     )
     age = _first_text(form_data.get("age"), form_data.get("birth_prep_age"))
-    top_worries = _first_answer_text(form_data.get("top_worries"), form_data.get("birth_prep_top_worries"))
-    entry_reason = _first_answer_text(
-        form_data.get("entry_reason"),
-        form_data.get("initial_message"),
-        form_data.get("user_message"),
+    top_worries = _birth_journey_specific_concern_text(_first_answer_text(form_data.get("top_worries"), form_data.get("birth_prep_top_worries")))
+    entry_reason = _birth_journey_specific_concern_text(
+        _first_answer_text(
+            form_data.get("entry_reason"),
+            form_data.get("initial_message"),
+            form_data.get("user_message"),
+        )
     )
-    initial_concerns = _unique_text_list(
+    initial_concerns = [
+        concern
+        for concern in _unique_text_list(
         form_data.get("initial_concerns") or form_data.get("concerns"),
         6,
-    )
-    entry_concern_followup = _first_answer_text(form_data.get("entry_concern_followup"))
+        )
+        if not _birth_journey_is_generic_plan_request(concern)
+    ]
+    entry_concern_followup = _birth_journey_specific_concern_text(_first_answer_text(form_data.get("entry_concern_followup")))
     lifestyle_context = _first_answer_text(
         form_data.get("lifestyle_context"),
         form_data.get("work_context"),
@@ -3122,7 +3145,6 @@ def _build_birth_journey_plan_card_json(form_data: dict[str, Any], scope: str, i
         form_data.get("exercise_context"),
         form_data.get("family_support"),
         form_data.get("budget"),
-        form_data.get("top_worries"),
     )
     feeding_ibclc_context = _first_answer_text(
         form_data.get("feeding_ibclc_context"),
@@ -3379,11 +3401,7 @@ def _birth_journey_title_without_priority_prefix(title: Any) -> str:
 
 def _birth_journey_visible_priority_title(title: Any, priority_type: str) -> str:
     base_title = _birth_journey_title_without_priority_prefix(title)
-    prefix = BIRTH_JOURNEY_PRIORITY_TITLE_PREFIXES.get(str(priority_type or "").strip())
-    if not prefix:
-        return _truncate_birth_journey_plan_text(base_title, BIRTH_JOURNEY_PLAN_ITEM_TITLE_MAX_CHARS)
-    max_base_chars = max(1, BIRTH_JOURNEY_PLAN_ITEM_TITLE_MAX_CHARS - len(prefix))
-    return prefix + _truncate_birth_journey_plan_text(base_title, max_base_chars)
+    return _truncate_birth_journey_plan_text(base_title, BIRTH_JOURNEY_PLAN_ITEM_TITLE_MAX_CHARS)
 
 
 def _birth_journey_legacy_next_7_item_upgrade(title: str) -> dict[str, Any]:
@@ -3559,16 +3577,7 @@ def _birth_journey_supportive_group_intro(week: Any, context: dict[str, Any]) ->
 def _birth_journey_plan_basis_items(week: Any, context: dict[str, Any], current_phase_title: str) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     if isinstance(week, int):
-        if week < 14:
-            detail = f"你现在孕 {week} 周，计划先围绕首次产检、建档和早孕筛查闭环来排。"
-        elif week < 24:
-            detail = f"你现在孕 {week} 周，计划先把常规产检、大排畸和生产支持准备接起来。"
-        elif week < 29:
-            detail = f"你现在孕 {week} 周，计划先围绕糖耐、产检复查和接下来几周的安排来排。"
-        elif week < 35:
-            detail = f"你现在孕 {week} 周，计划先把胎动观察、产检节奏和入院准备接起来。"
-        else:
-            detail = f"你现在孕 {week} 周，计划优先收口入院信号、证件材料和陪产分工。"
+        detail = _birth_journey_week_basis_detail(week)
         items.append(_birth_journey_basis_item("当前孕周", detail, ["current_week"]))
     elif current_phase_title:
         items.append(
@@ -3712,6 +3721,7 @@ def _birth_journey_plan_item_priority(title: str, based_on: list[str]) -> tuple[
         "entry_concern_followup",
         "top_worries",
         "lifestyle_context",
+        "stage_attention",
         "support_person",
         "feeding_intention",
         "feeding_ibclc_context",
@@ -3855,29 +3865,20 @@ def _birth_journey_plan_reason_text(reason: str) -> str:
     text = str(reason or "").strip()
     if not text:
         return ""
-    if text.startswith(("考虑到", "目的是", "为了")):
-        return text
-    action_starters = (
-        "先",
-        "把",
-        "确认",
-        "问清",
-        "定好",
-        "整理",
-        "固定",
-        "选",
-        "写清",
-        "聚焦",
-        "重点",
-        "明确",
-        "补齐",
-        "拆成",
-        "分开",
-        "落到",
-    )
-    if text.startswith(action_starters):
-        return f"目的是{text}"
-    return f"目的是让你知道：{text}"
+    previous = ""
+    while text and text != previous:
+        previous = text
+        for prefix in ("目的是让你知道：", "目的是让你知道:", "目的是：", "目的是:", "目的是"):
+            if text.startswith(prefix):
+                text = text[len(prefix) :].strip(" ，,")
+                break
+        personal_clause = re.match(
+            r"^(?:考虑到你|你提到|针对你提到的|针对你|结合你|按照你)[^，,。！？!?]*[，,](.+)$",
+            text,
+        )
+        if personal_clause:
+            text = personal_clause.group(1).strip(" ，,")
+    return text
 
 
 def _truncate_birth_journey_plan_text(value: str, max_chars: int) -> str:
@@ -3928,6 +3929,12 @@ def _birth_journey_substantive_text(value: Any) -> str:
         "跳过产检记录",
         "跳过上传产检记录",
         "暂不上传产检记录",
+        "先跳过这步",
+        "不清楚先跳过",
+        "不确定先跳过",
+        "还不确定先跳过",
+        "没有高风险因素",
+        "有一些风险因素",
     }
     if lowered in negative_values:
         return ""
@@ -3948,15 +3955,63 @@ def _birth_journey_context_concern_text(context: dict[str, Any]) -> str:
     return "；".join(
         _unique_text_list(
             [
-                context.get("entry_concern_followup"),
-                context.get("top_worries"),
-                context.get("initial_concerns"),
-                context.get("entry_reason"),
+                _birth_journey_specific_concern_text(context.get("entry_concern_followup")),
+                _birth_journey_specific_concern_text(context.get("top_worries")),
+                _birth_journey_specific_concern_text(context.get("initial_concerns")),
+                _birth_journey_specific_concern_text(context.get("entry_reason")),
                 context.get("lifestyle_context"),
             ],
             6,
         )
     )
+
+
+def _birth_journey_specific_concern_text(value: Any) -> str:
+    text = _first_answer_text(value)
+    if not text:
+        return ""
+    return "" if _birth_journey_is_generic_plan_request(text) else text
+
+
+def _birth_journey_is_generic_plan_request(text: str) -> bool:
+    clean = str(text or "").strip()
+    if not clean:
+        return False
+    generic_tokens = (
+        "制定孕期计划",
+        "生成孕期计划",
+        "整理孕期计划",
+        "孕期计划",
+        "当前孕期计划",
+        "饮食和运动建议",
+        "饮食运动建议",
+        "饮食和运动",
+        "饮食建议",
+        "运动建议",
+    )
+    third_person_tokens = ("用户希望", "用户想", "用户需要", "用户咨询", "用户询问", "用户要求")
+    specific_tokens = (
+        "焦虑",
+        "无助",
+        "迷茫",
+        "心里没底",
+        "不知道",
+        "怎么办",
+        "先做什么",
+        "怕",
+        "担心",
+        "担忧",
+        "漏事",
+        "压力",
+        "血压",
+        "血糖",
+        "胎动",
+        "出血",
+        "腹痛",
+    )
+    if any(token in clean for token in specific_tokens):
+        return False
+    return any(token in clean for token in generic_tokens) or any(token in clean for token in third_person_tokens)
 
 
 def _birth_journey_context_concern_labels(context: dict[str, Any], max_labels: int = 3) -> list[str]:
@@ -3995,16 +4050,15 @@ def _birth_journey_next_7_context_reason(week: Any, context: dict[str, Any]) -> 
     parts: list[str] = []
     age = _birth_journey_context_age(context)
     if age is not None and age >= 35:
-        parts.append(f"{age} 岁")
+        parts.append(f"{age} 岁高龄因素")
     if isinstance(week, int):
         parts.append(f"孕 {week} 周")
     concern_label = _birth_journey_join_concern_labels(_birth_journey_context_concern_labels(context, 2))
     if concern_label:
-        parts.append(f"提到{concern_label}")
+        parts.append(f"{concern_label}相关事项")
     if parts:
-        spacer = "" if parts[0].startswith("提到") else " "
-        return "考虑到你" + spacer + "、".join(parts)
-    return "结合你当前孕周和已提供的信息"
+        return "按" + "、".join(parts) + "安排"
+    return "按当前孕周和已提供信息安排"
 
 
 def _birth_journey_personalized_next_7_items(week: Any, context: dict[str, Any]) -> list[dict[str, Any]]:
@@ -4117,12 +4171,447 @@ def _birth_journey_current_focus_subtitle(week: Any, context: dict[str, Any]) ->
     return f"{week_text}，先抓最影响后续准备和安全感的几件事。"
 
 
+BIRTH_JOURNEY_BABY_SIZE_REFERENCES: tuple[tuple[range, str], ...] = (
+    (range(1, 2), "草莓籽"),
+    (range(2, 4), "芝麻粒"),
+    (range(4, 5), "扁豆"),
+    (range(5, 6), "蓝莓"),
+    (range(6, 7), "芸豆"),
+    (range(7, 8), "葡萄"),
+    (range(8, 11), "金桔"),
+    (range(11, 13), "无花果"),
+    (range(13, 15), "小苹果"),
+    (range(15, 18), "牛油果"),
+    (range(18, 19), "番茄"),
+    (range(19, 21), "小圆萝卜"),
+    (range(21, 23), "小甜瓜"),
+    (range(23, 25), "紫甘蓝"),
+    (range(25, 28), "花菜"),
+    (range(28, 30), "卷心菜"),
+    (range(30, 32), "椰子"),
+    (range(32, 34), "金丝瓜"),
+    (range(34, 37), "白兰瓜"),
+    (range(37, 39), "小西瓜"),
+    (range(39, 40), "小南瓜"),
+    (range(40, 41), "快出生啦"),
+)
+
+
+def _birth_journey_week_guide(week: Any) -> dict[str, Any]:
+    if not isinstance(week, int):
+        return {}
+    safe_week = max(1, min(40, week))
+    return {
+        "week": safe_week,
+        "baby_size_reference": _birth_journey_baby_size_reference(safe_week),
+        "stage_attention": _birth_journey_stage_attention(safe_week),
+        "checkup_focus": _birth_journey_checkup_focus_sentence(safe_week),
+    }
+
+
+def _birth_journey_baby_size_reference(week: int) -> str:
+    for week_range, label in BIRTH_JOURNEY_BABY_SIZE_REFERENCES:
+        if week in week_range:
+            return label
+    return ""
+
+
+def _birth_journey_stage_attention(week: int) -> str:
+    if week <= 14:
+        return "孕早期常见孕吐、反酸、乏力、嗜睡、口水多或尿频，计划会把补剂、饮食和首次产检先排清楚。"
+    if week <= 27:
+        return "孕中期可能出现乳房胀痛、便秘或睡眠变差，计划会把运动、加餐、补铁补钙和产检窗口拆开安排。"
+    return "孕晚期可能出现腰痛、耻骨疼、假性宫缩或妊娠纹，计划会优先放入胎动观察、体重管理和待产准备。"
+
+
+def _birth_journey_checkup_focus_sentence(week: int) -> str:
+    if week <= 5:
+        return "先确认验孕结果、末次月经和首次就诊入口，暂时不用把生产准备提前压上来。"
+    if week <= 8:
+        return "重点把血 hCG、B 超、宫内妊娠、胎心胎芽和报告回看路径确认清楚。"
+    if week <= 10:
+        return "适合开始整理建档材料、既往检查、用药补剂和下次产检要问的问题。"
+    if week <= 14:
+        return "建档、NT、早孕筛查和报告回看是主线，检查时间通常不要拖到窗口外。"
+    if week <= 17:
+        return "如果早期筛查没有完成，要问清中期唐筛、无创 DNA 或羊水穿刺是否需要接上。"
+    if week <= 19:
+        return "开始把大排畸预约、检查地点、陪同规则和复查方式提前锁定。"
+    if week <= 24:
+        return "大排畸是这几周重点，要确认当天流程、报告回看和是否需要复查。"
+    if week <= 28:
+        return "糖耐和 24-28 周产检是重点，要提前排好禁食、抽血、进食和返程。"
+    if week <= 31:
+        return "进入晚孕期后，要把胎动、血压、体重、水肿和胎儿生长观察固定下来。"
+    if week <= 34:
+        return "这几周要把胎位、生长评估、医院入院流程和待产准备逐步收口。"
+    if week <= 36:
+        return "要问清 GBS 筛查、胎位、生长评估、待产包证件和入院入口。"
+    return "36 周后通常进入更密集产检，要把胎动、宫缩、破水、见红和入院联系步骤放在最前面。"
+
+
+def _clean_birth_journey_fragment(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _birth_journey_week_basis_detail(week: int) -> str:
+    guide = _birth_journey_week_guide(week)
+    focus = _clean_birth_journey_fragment(guide.get("checkup_focus"))
+    return f"你现在孕 {week} 周，计划先按本周产检窗口和身体变化来排：{focus}"
+
+
+def _birth_journey_week_current_focus_items(week: int) -> list[dict[str, Any]]:
+    if week <= 5:
+        return [
+            _birth_journey_plan_item(
+                "确认怀孕后的首次检查安排",
+                "刚确认怀孕时，先把就诊入口、末次月经和现有用药补剂整理清楚。",
+                "本周",
+                ["current_week"],
+            )
+        ]
+    if week <= 8:
+        return [
+            _birth_journey_plan_item(
+                "确认宫内妊娠和胎心胎芽",
+                "这一阶段重点看血 hCG 和 B 超信息，并问清报告什么时候回看。",
+                "本周",
+                ["current_week", "checkup_window"],
+            )
+        ]
+    if week <= 10:
+        return [
+            _birth_journey_plan_item(
+                "整理建档和早孕检查材料",
+                "把既往检查、用药补剂、证件材料和下次要问医生的问题放到一起。",
+                "本周",
+                ["current_week"],
+            )
+        ]
+    if week <= 14:
+        return [
+            _birth_journey_plan_item(
+                "安排建档、NT和早唐回看",
+                "确认建档材料、NT 日期、早孕筛查抽血和报告异常时联系谁。",
+                "本周",
+                ["current_week", "checkup_window"],
+            )
+        ]
+    if week <= 17:
+        return [
+            _birth_journey_plan_item(
+                "确认中期筛查是否要接上",
+                "如果早筛没完成，问清中期唐筛、无创 DNA 或羊水穿刺的适用窗口。",
+                "本周",
+                ["current_week", "checkup_window"],
+            )
+        ]
+    if week <= 19:
+        return [
+            _birth_journey_plan_item(
+                "提前锁定大排畸预约",
+                "先确认预约入口、检查地点、预计时长和需要复查时怎么接上。",
+                "本周",
+                ["current_week", "checkup_window"],
+            )
+        ]
+    if week <= 24:
+        return [
+            _birth_journey_plan_item(
+                "完成大排畸并问清复查",
+                "重点确认结构筛查结果、胎盘羊水提示、报告回看和复查方式。",
+                "本周",
+                ["current_week", "checkup_window"],
+            )
+        ]
+    if week <= 28:
+        return [
+            _birth_journey_plan_item(
+                "确认糖耐和 24-28 周产检",
+                "问清禁食时长、抽血流程、结果回看和复查时间。",
+                "今天或明天",
+                ["current_week", "checkup_window"],
+            )
+        ]
+    if week <= 31:
+        return [
+            _birth_journey_plan_item(
+                "建立胎动、血压和水肿观察节奏",
+                "每天固定观察胎动和明显不适，写清哪些情况要联系医院。",
+                "每天",
+                ["current_week"],
+            )
+        ]
+    if week <= 34:
+        return [
+            _birth_journey_plan_item(
+                "确认胎位、生长评估和医院流程",
+                "重点问胎位、生长情况、入院材料、陪产探视和夜间入口。",
+                "本周",
+                ["current_week", "birth_setting"],
+            )
+        ]
+    if week <= 36:
+        return [
+            _birth_journey_plan_item(
+                "问清GBS筛查和入院材料",
+                "确认 GBS 筛查时间、胎位评估、待产包证件和医院入院入口。",
+                "本周",
+                ["current_week", "checkup_window", "birth_setting"],
+            )
+        ]
+    return [
+        _birth_journey_plan_item(
+            "收口每周产检和入院信号",
+            "确认宫缩、破水、见红、胎动变化时怎么联系医院，谁负责出发和材料。",
+            "本周",
+            ["current_week", "support_person"],
+        )
+    ]
+
+
+def _birth_journey_week_next_7_day_items(week: int) -> list[dict[str, Any]]:
+    if week <= 5:
+        return [
+            _birth_journey_plan_item(
+                "记录末次月经和验孕时间",
+                "这些信息会影响孕周换算、首次检查和医生判断后续检查窗口。",
+                "今天",
+                ["current_week"],
+                steps=["写下末次月经第一天", "记录验孕日期和结果", "把正在吃的药和补剂列出来"],
+                done_criteria="已记录末次月经、验孕日期、结果和当前用药补剂。",
+                after_done_value="做完后，首次检查时能更快换算孕周，也更容易问清补剂和用药。",
+            )
+        ]
+    if week <= 8:
+        return [
+            _birth_journey_plan_item(
+                "确认B超和报告回看路径",
+                "这一阶段不要只做检查，要提前知道报告何时看、异常时联系谁。",
+                "本周内",
+                ["current_week", "checkup_window"],
+                steps=["确认 B 超日期和地点", "问清报告领取或线上查看时间", "保存异常时联系医院的方式"],
+                done_criteria="已记录 B 超安排、报告回看时间和异常联系路径。",
+                after_done_value="做完后，你不会只等检查结果，后续怎么处理也会更清楚。",
+            )
+        ]
+    if week <= 10:
+        return [
+            _birth_journey_plan_item(
+                "整理建档前要带的材料",
+                "建档前先把证件、已有报告、病史和补剂信息放一起，避免临时补材料。",
+                "本周内",
+                ["current_week"],
+                steps=["列出身份证件和医保材料", "整理已有检查报告", "写下病史、过敏史和补剂"],
+                done_criteria="已把建档或下次产检要带的材料放在同一处。",
+                after_done_value="做完后，建档和下次产检不会因为材料分散而反复跑。",
+            )
+        ]
+    if week <= 14:
+        return [
+            _birth_journey_plan_item(
+                "把NT/早唐安排写进日历",
+                "NT 和早孕筛查有时间窗口，提前写清日期、地点和报告回看时间。",
+                "今天或明天",
+                ["current_week", "checkup_window"],
+                steps=["确认 NT 和抽血日期", "记录地点和当天准备", "设置报告回看提醒"],
+                done_criteria="已记录 NT/早唐日期、地点、当天准备和报告回看提醒。",
+                after_done_value="做完后，早孕筛查不会只停在预约上，结果也能按时回看。",
+            )
+        ]
+    if week <= 17:
+        return [
+            _birth_journey_plan_item(
+                "问清中期筛查选择",
+                "如果早筛没做或结果需复核，这周先问清唐筛、无创或羊穿的适用路径。",
+                "下次产检前",
+                ["current_week", "checkup_window"],
+                steps=["确认早筛是否已完成", "问医生中期唐筛或无创是否适合", "记录需要进一步检查的条件"],
+                done_criteria="已知道是否需要中期唐筛、无创 DNA 或羊水穿刺。",
+                after_done_value="做完后，筛查路径会更清楚，不会错过 15-20 周左右的确认窗口。",
+            )
+        ]
+    if week <= 19:
+        return [
+            _birth_journey_plan_item(
+                "提前锁定大排畸预约",
+                "大排畸通常需要提前排队，先把时间、地点、陪同和复查方式问清。",
+                "本周内",
+                ["current_week", "checkup_window"],
+                steps=["确认预约日期和地点", "问检查当天是否需要陪同", "问需要复查时怎么预约"],
+                done_criteria="已记录大排畸预约、陪同规则和复查方式。",
+                after_done_value="做完后，大排畸不会临近窗口才发现没约上。",
+            )
+        ]
+    if week <= 23:
+        return [
+            _birth_journey_plan_item(
+                "准备大排畸当天和复查问题",
+                "检查前把流程和问题准备好，报告出来后也知道哪些点要追问。",
+                "本周内",
+                ["current_week", "checkup_window"],
+                steps=["确认检查地点和预计时长", "写下要问的结构筛查问题", "问报告异常或不清楚时怎么复查"],
+                done_criteria="已记录检查流程、要问的问题和复查路径。",
+                after_done_value="做完后，大排畸当天安排和报告回看都会更可控。",
+            )
+        ]
+    if week <= 28:
+        return [
+            _birth_journey_plan_item(
+                "排好糖耐禁食抽血和返程",
+                "定好禁食时间、抽血流程、检查后第一餐和返程。",
+                "本周内",
+                ["current_week", "checkup_window"],
+                steps=["确认禁食开始时间", "问清抽血流程和耗时", "安排检查后第一餐和返程"],
+                done_criteria="已记录禁食时间、抽血流程、检查后进食和返程安排。",
+                after_done_value="做完后，糖耐当天不容易因为空腹、等待或返程安排临时慌乱。",
+            )
+        ]
+    if week <= 31:
+        return [
+            _birth_journey_plan_item(
+                "固定胎动记录和异常联系规则",
+                "每天选固定时段了解胎动规律，并写清胎动明显变化时联系医院的步骤。",
+                "每天",
+                ["current_week", "current_symptoms"],
+                steps=["选一个每天固定观察时段", "记录胎动和明显不适变化", "保存异常时联系医院的步骤"],
+                done_criteria="已固定观察时段，并写清异常时联系医院的步骤。",
+                after_done_value="做完后，你会有连续记录，异常时也知道先联系哪里。",
+            )
+        ]
+    if week <= 34:
+        return [
+            _birth_journey_plan_item(
+                "问清胎位和胎儿生长评估",
+                "这几周要把胎位、胎儿生长、羊水胎盘和是否需要复查问清楚。",
+                "下次产检前",
+                ["current_week", "checkup_window"],
+                steps=["写下胎位和生长相关问题", "问是否需要复查 B 超或胎心监护", "记录下次产检间隔"],
+                done_criteria="已记录胎位、生长评估、复查项目和下次产检间隔。",
+                after_done_value="做完后，你会知道晚孕期接下来重点观察什么、多久复查。",
+            )
+        ]
+    if week <= 36:
+        return [
+            _birth_journey_plan_item(
+                "确认GBS筛查和待产证件",
+                "把 GBS 筛查、产检报告、证件材料和入院入口提前放到同一张清单里。",
+                "本周内",
+                ["current_week", "checkup_window", "birth_setting"],
+                steps=["问清 GBS 筛查时间", "整理证件和产检报告", "确认医院入院或夜间入口"],
+                done_criteria="已记录 GBS 筛查时间、证件报告位置和医院入口。",
+                after_done_value="做完后，进入每周产检前，入院相关材料会更稳。",
+            )
+        ]
+    return [
+        _birth_journey_plan_item(
+            "确认临产信号后的联系步骤",
+            "36 周后要把宫缩、破水、见红和胎动变化时的医院联系口径放在手机里。",
+            "今天或明天",
+            ["current_week", "birth_setting", "support_person"],
+            steps=["记录医院产科或急诊电话", "写清宫缩、破水、见红时怎么做", "和陪同人同步出发分工"],
+            done_criteria="已保存医院联系路径，并和陪同人确认临产后的出发分工。",
+            after_done_value="做完后，出现入院信号时不用临时查流程，能直接按医院口径处理。",
+        )
+    ]
+
+
+def _birth_journey_week_attention_next_7_item(week: int) -> dict[str, Any]:
+    if week <= 14:
+        return _birth_journey_plan_item(
+            "记录孕反、饮食和补剂执行",
+            "孕早期常见孕吐、反酸、乏力或尿频，把每天最影响生活的变化记录下来更方便问医生。",
+            "未来 7 天",
+            ["stage_attention"],
+            steps=["记录最难受的时段和诱因", "按医生口径核对叶酸和维D", "准备更容易入口的碳水和饮水"],
+            done_criteria="已记录孕反、饮食、饮水和补剂执行情况。",
+            after_done_value="做完后，下次产检更容易说清具体不适，也知道哪些安排需要医生确认。",
+        )
+    if week <= 27:
+        return _birth_journey_plan_item(
+            "安排运动、加餐和补铁补钙提醒",
+            "孕中期常见便秘、失眠或乳房胀痛，先把运动、加餐和补铁补钙放进可执行日程。",
+            "未来 7 天",
+            ["stage_attention"],
+            steps=["选 3 天安排轻量活动", "准备一份加餐或补水提醒", "记录补铁补钙是否需问医生"],
+            done_criteria="已安排本周运动、加餐或补水提醒，并记录补铁补钙问题。",
+            after_done_value="做完后，身体注意点会变成具体日程，而不是只停留在笼统提醒。",
+        )
+    return _birth_journey_plan_item(
+        "记录胎动和晚孕身体变化",
+        "孕晚期要留意胎动、腰痛、耻骨疼、假性宫缩和体重变化，异常时优先按医院口径处理。",
+        "每天",
+        ["stage_attention"],
+        steps=["固定胎动观察时段", "记录腰痛、宫缩或水肿变化", "保存异常时联系医院的路径"],
+        done_criteria="已开始记录胎动和晚孕身体变化，并保存医院联系路径。",
+        after_done_value="做完后，你会更容易分辨日常变化和需要联系医院的情况。",
+    )
+
+
+def _birth_journey_week_next_2_4_item(week: int) -> dict[str, Any]:
+    if week <= 10:
+        return _birth_journey_plan_item(
+            "接上建档、NT和早孕筛查",
+            "接下来几周要把建档材料、NT 时间、抽血和报告回看连成闭环。",
+            f"孕 {week + 1}-{min(14, week + 4)} 周",
+            ["current_week", "checkup_window"],
+        )
+    if week <= 14:
+        return _birth_journey_plan_item(
+            "完成建档和早孕筛查闭环",
+            "确认建档材料、NT/早筛报告、复查口径和下次产检安排。",
+            f"孕 {week + 1}-{min(18, week + 4)} 周",
+            ["current_week", "checkup_window"],
+        )
+    if week <= 19:
+        return _birth_journey_plan_item(
+            "接上中期筛查和大排畸",
+            "如果需要中期唐筛或无创，先确认路径；同时把大排畸预约锁定。",
+            f"孕 {week + 1}-{min(24, week + 4)} 周",
+            ["current_week", "checkup_window"],
+        )
+    if week <= 23:
+        return _birth_journey_plan_item(
+            "完成大排畸并预约糖耐",
+            "大排畸报告回看后，顺手确认 24-28 周糖耐预约和抽血流程。",
+            f"孕 {week + 1}-{min(28, week + 4)} 周",
+            ["current_week", "checkup_window"],
+        )
+    if week <= 27:
+        return _birth_journey_plan_item(
+            "完成糖耐并确认复查重点",
+            "一起回看糖耐、血常规、尿常规、血压和胎儿生长，问清是否要复查。",
+            f"孕 {week + 1}-{min(31, week + 4)} 周",
+            ["current_week", "checkup_window"],
+        )
+    if week <= 31:
+        return _birth_journey_plan_item(
+            "按晚孕期节奏观察胎动生长",
+            "把胎动、血压、体重、水肿、贫血和胎儿生长放到固定观察里。",
+            f"孕 {week + 1}-{min(35, week + 4)} 周",
+            ["current_week"],
+        )
+    if week <= 34:
+        return _birth_journey_plan_item(
+            "确认胎位、GBS和入院流程",
+            "接下来要问清胎位和生长评估，并把 GBS 筛查、待产包证件和医院入口接上。",
+            f"孕 {week + 1}-{min(38, week + 4)} 周",
+            ["current_week", "checkup_window", "birth_setting"],
+        )
+    return _birth_journey_plan_item(
+        "进入每周产检和临产收口",
+        "把胎动变化、宫缩、破水、见红、入院路线、证件和陪产分工放到同一张清单里。",
+        f"孕 {week + 1}-{min(40, week + 4)} 周",
+        ["current_week", "birth_setting", "support_person"],
+    )
+
+
 def _birth_journey_safety_items(context: dict[str, Any]) -> list[dict[str, Any]]:
     symptoms_text = "、".join(_text_list(context.get("current_symptoms")))
     if not symptoms_text:
         return []
     items: list[dict[str, Any]] = []
-    if any(token in symptoms_text for token in ("出血", "流血", "流水", "破水", "胎动", "腹痛", "头痛", "视物", "发热", "胸痛", "气短")):
+    if any(token in symptoms_text for token in ("出血", "流血", "流水", "破水", "胎动", "腹痛", "头痛", "视物", "发热", "胸痛", "气短", "瘙痒", "皮肤痒", "胆汁酸")):
         items.append(
             _birth_journey_plan_item(
                 "先确认是否需要联系医院或医生",
@@ -4143,24 +4632,7 @@ def _birth_journey_current_focus_items(week: Any, context: dict[str, Any], curre
     birth_path = _birth_journey_substantive_text(context.get("birth_path"))
     fetus_count = _birth_journey_substantive_text(context.get("fetus_count"))
     if isinstance(week, int):
-        if week < 12:
-            items.append(_birth_journey_plan_item("确认首次产检或建档", "先问清预约入口、证件材料、既往检查和用药补剂怎么带。", "本周", ["current_week"]))
-        elif 11 <= week <= 14:
-            items.append(_birth_journey_plan_item("锁定 NT 或早孕筛查窗口", "确认检查日期、当天准备、报告领取和异常结果联系路径。", "本周", ["current_week"]))
-        elif 15 <= week < 18:
-            items.append(_birth_journey_plan_item("接上下次产检和筛查节奏", "把检查结果、下次产检和大排畸预约时间串起来。", "本周", ["current_week"]))
-        elif 18 <= week <= 22:
-            items.append(_birth_journey_plan_item("确认大排畸安排", "问清预约时间、当天流程、是否陪同，以及需要复查时怎么处理。", "本周", ["current_week"]))
-        elif 23 <= week < 24:
-            items.append(_birth_journey_plan_item("提前排好糖耐窗口", "先确认糖耐预约、抽血流程和当天饮食安排。", "本周", ["current_week", "checkup_window"]))
-        elif 24 <= week <= 28:
-            items.append(_birth_journey_plan_item("确认糖耐和 24-28 周产检", "问清禁食时长、抽血流程、结果回看和复查时间。", "今天或明天", ["current_week", "checkup_window"]))
-        elif 29 <= week < 32:
-            items.append(_birth_journey_plan_item("建立胎动、血压和水肿观察节奏", "固定每天观察时间，写清哪些情况要联系医院。", "每天", ["current_week"]))
-        elif 32 <= week < 35:
-            items.append(_birth_journey_plan_item("确认胎位、生长评估和医院流程", "重点问胎位、生长情况、入院材料、陪产探视和夜间入口。", "本周", ["current_week", "birth_setting"]))
-        else:
-            items.append(_birth_journey_plan_item("收口入院信号和陪产分工", "确认何时联系医院、证件放哪里、谁负责出发和沟通。", "本周", ["current_week", "support_person"]))
+        items.extend(_birth_journey_week_current_focus_items(week))
     if checkup_status:
         items.append(_birth_journey_plan_item("整理产检信息和复查问题", "把已做检查、异常提示、未预约项和要问医生的问题分开。", "下次产检前", ["checkup_status"]))
     if risk_text or medical_notes:
@@ -4242,7 +4714,7 @@ def _birth_journey_next_7_day_items(week: Any, context: dict[str, Any]) -> list[
     feeding = _birth_journey_substantive_text(context.get("feeding_intention")) or _birth_journey_substantive_text(context.get("feeding_ibclc_context"))
     birth_setting = _birth_journey_substantive_text(context.get("birth_setting"))
     birth_path = _birth_journey_substantive_text(context.get("birth_path"))
-    items.extend(_birth_journey_personalized_next_7_items(week, context))
+    is_late_pregnancy = isinstance(week, int) and week >= 32
     if checkup_status:
         items.append(
             _birth_journey_plan_item(
@@ -4268,66 +4740,9 @@ def _birth_journey_next_7_day_items(week: Any, context: dict[str, Any]) -> list[
             )
         )
     if isinstance(week, int):
-        if week < 12:
-            items.append(
-                _birth_journey_plan_item(
-                    "准备首次产检资料清单",
-                    "整理末次月经、既往病史、用药补剂和早孕检查，让首次产检少漏信息。",
-                    "本周内",
-                    ["current_week"],
-                    steps=["写下末次月经和既往病史", "整理用药补剂和早孕检查", "确认建档或首次产检材料"],
-                    done_criteria="已把首次产检要带的信息和材料整理在同一处。",
-                    after_done_value="做完后，首次产检时医生能更快了解你的基础情况。",
-                )
-            )
-        elif 11 <= week <= 14:
-            items.append(
-                _birth_journey_plan_item(
-                    "核对 NT/早筛时间和报告回看",
-                    "确认检查准备、报告领取和异常结果联系路径。",
-                    "本周内",
-                    ["current_week"],
-                    steps=["确认检查日期、地点和当天准备", "问清报告领取时间", "保存异常结果联系路径"],
-                    done_criteria="已记录检查安排、报告回看时间和异常联系路径。",
-                    after_done_value="做完后，NT/早筛不会只停在预约上，后续报告也能接得上。",
-                )
-            )
-        elif 18 <= week <= 22:
-            items.append(
-                _birth_journey_plan_item(
-                    "确认大排畸地点流程和复查方式",
-                    "问清地点、时长、陪同要求和复查方式。",
-                    "本周内",
-                    ["current_week"],
-                    steps=["确认检查地点和预计时长", "问是否允许陪同", "问需要复查时怎么预约"],
-                    done_criteria="已记录地点、流程、陪同规则和复查方式。",
-                    after_done_value="做完后，大排畸当天安排会更可控，复查也知道怎么接上。",
-                )
-            )
-        elif 23 <= week <= 28:
-            items.append(
-                _birth_journey_plan_item(
-                    "排好糖耐禁食抽血和返程",
-                    "定好禁食时间、抽血流程、检查后第一餐和返程。",
-                    "本周内",
-                    ["current_week"],
-                    steps=["确认禁食开始时间", "问清抽血流程和耗时", "安排检查后第一餐和返程"],
-                    done_criteria="已记录禁食时间、抽血流程、检查后进食和返程安排。",
-                    after_done_value="做完后，糖耐当天不容易因为空腹、等待或返程安排临时慌乱。",
-                )
-            )
-        elif week >= 29:
-            items.append(
-                _birth_journey_plan_item(
-                    "固定胎动记录和异常联系规则",
-                    "选固定时段记录，并写清异常时联系医院的步骤。",
-                    "每天",
-                    ["current_week", "current_symptoms"],
-                    steps=["选一个每天固定观察时段", "记录胎动和明显不适变化", "保存异常时联系医院的步骤"],
-                    done_criteria="已固定观察时段，并写清异常时联系医院的步骤。",
-                    after_done_value="做完后，你会有连续记录，异常时也知道先联系哪里。",
-                )
-            )
+        items.extend(_birth_journey_week_next_7_day_items(week))
+        items.append(_birth_journey_week_attention_next_7_item(week))
+    items.extend(_birth_journey_personalized_next_7_items(week, context))
     if risk_text or medical_notes:
         items.append(
             _birth_journey_plan_item(
@@ -4340,7 +4755,7 @@ def _birth_journey_next_7_day_items(week: Any, context: dict[str, Any]) -> list[
                 after_done_value="做完后，风险因素会变成明确观察规则，而不是一直悬着的担心。",
             )
         )
-    if birth_setting:
+    if birth_setting and is_late_pregnancy:
         items.append(
             _birth_journey_plan_item(
                 "问清生产医院入院入口和证件",
@@ -4352,7 +4767,7 @@ def _birth_journey_next_7_day_items(week: Any, context: dict[str, Any]) -> list[
                 after_done_value="做完后，临产时不用临时查入口、材料和陪同规则。",
             )
         )
-    if support:
+    if support and is_late_pregnancy:
         items.append(
             _birth_journey_plan_item(
                 "和支持人确认 4 项临产分工",
@@ -4364,7 +4779,7 @@ def _birth_journey_next_7_day_items(week: Any, context: dict[str, Any]) -> list[
                 after_done_value="做完后，临产时每个人知道自己负责什么，减少现场混乱。",
             )
         )
-    if feeding:
+    if feeding and is_late_pregnancy:
         items.append(
             _birth_journey_plan_item(
                 "列出产后 48 小时喂养求助问题",
@@ -4376,7 +4791,7 @@ def _birth_journey_next_7_day_items(week: Any, context: dict[str, Any]) -> list[
                 after_done_value="做完后，产后最初 48 小时遇到含乳、涨奶或泵奶问题时更知道找谁。",
             )
         )
-    if "剖" in birth_path:
+    if "剖" in birth_path and is_late_pregnancy:
         items.append(
             _birth_journey_plan_item(
                 "补问剖宫产术前术后 4 件事",
@@ -4404,16 +4819,7 @@ def _birth_journey_next_2_4_week_items(week: Any, context: dict[str, Any]) -> li
             _birth_journey_plan_item("整理产检节奏和医院要求", "先确认下次产检、医院材料和医生备注。", "未来 2-4 周", ["checkup_status"]),
         ]
     items: list[dict[str, Any]] = []
-    if week < 14:
-        items.append(_birth_journey_plan_item("完成建档和早孕筛查闭环", "确认建档材料、筛查时间、报告领取和复查路径。", f"孕 {week + 1}-{min(14, week + 4)} 周", ["current_week"]))
-    elif week < 24:
-        items.append(_birth_journey_plan_item("跟进大排畸和常规产检", "重点看结构筛查、胎儿生长和医生要求的复查。", f"孕 {week + 1}-{week + 4} 周", ["current_week"]))
-    elif week < 28:
-        items.append(_birth_journey_plan_item("完成糖耐并确认复查重点", "一起回看糖耐、血常规、尿常规、血压和胎儿生长。", f"孕 {week + 1}-{min(28, week + 4)} 周", ["current_week"]))
-    elif week < 32:
-        items.append(_birth_journey_plan_item("关注贫血、生长、胎位和胎动", "把血压水肿、胎动、胎位和胎儿生长放到固定观察里。", f"孕 {week + 1}-{week + 4} 周", ["current_week"]))
-    else:
-        items.append(_birth_journey_plan_item("确认入院流程和待产准备", "落实待产包、证件、入院信号、路线和陪产探视。", f"孕 {week + 1}-{week + 4} 周", ["current_week"]))
+    items.append(_birth_journey_week_next_2_4_item(week))
     if birth_path:
         items.append(_birth_journey_plan_item("确认分娩方式相关问题", "问清适用条件、风险提示、变更口径和住院流程差异。", "下次产检", ["birth_path"]))
     if birth_setting:
@@ -4427,12 +4833,15 @@ def _birth_journey_next_2_4_week_items(week: Any, context: dict[str, Any]) -> li
 
 def _birth_journey_later_milestones(week: Any, context: dict[str, Any]) -> list[dict[str, Any]]:
     milestones = [
-        (14, _birth_journey_plan_item("12-14 周：完成 NT/早筛和建档", "确认报告、复查口径、下次产检和建档材料。", "12-14 周", ["milestone"])),
-        (24, _birth_journey_plan_item("18-24 周：完成大排畸", "重点看结构筛查、胎盘羊水和医生要求的复查。", "18-24 周", ["milestone"])),
-        (28, _birth_journey_plan_item("24-28 周：完成糖耐", "一起回看糖耐、血常规、尿常规、血压和胎儿生长。", "24-28 周", ["milestone"])),
-        (32, _birth_journey_plan_item("28-32 周：建立观察节奏", "关注胎动、血压水肿、贫血和胎儿生长。", "28-32 周", ["milestone"])),
-        (36, _birth_journey_plan_item("32-36 周：落实待产准备", "整理证件、待产包、分娩偏好和喂养求助方式。", "32-36 周", ["milestone"])),
-        (42, _birth_journey_plan_item("36 周后：确认入院安排", "确认入院信号、路线、材料和陪产分工。", "36 周后", ["milestone"])),
+        (8, _birth_journey_plan_item("6-8 周：确认宫内妊娠", "结合血 hCG 和 B 超，问清胎心胎芽、报告回看和异常联系路径。", "6-8 周", ["milestone"])),
+        (14, _birth_journey_plan_item("11-14 周：建档和NT早筛", "确认建档材料、NT、早孕筛查抽血、报告领取和复查口径。", "11-14 周", ["milestone"])),
+        (20, _birth_journey_plan_item("15-20 周：确认中期筛查", "如果早筛没完成，问清中期唐筛、无创 DNA 或羊穿是否需要接上。", "15-20 周", ["milestone"])),
+        (24, _birth_journey_plan_item("20-24 周：完成大排畸", "重点看结构筛查、胎盘羊水、报告回看和医生要求的复查。", "20-24 周", ["milestone"])),
+        (28, _birth_journey_plan_item("24-28 周：完成糖耐", "排好禁食、抽血、检查后进食和结果回看，并问清是否需要复查。", "24-28 周", ["milestone"])),
+        (32, _birth_journey_plan_item("28-32 周：固定晚孕观察", "把胎动、血压、体重、水肿、贫血和胎儿生长放到固定观察里。", "28-32 周", ["milestone"])),
+        (36, _birth_journey_plan_item("32-36 周：胎位和待产收口", "确认胎位、生长评估、待产包证件、医院入口和陪产探视规则。", "32-36 周", ["milestone"])),
+        (37, _birth_journey_plan_item("35-37 周：问清GBS筛查", "按医院安排确认 GBS 筛查时间、结果查看和分娩时是否需要特别说明。", "35-37 周", ["milestone"])),
+        (42, _birth_journey_plan_item("36 周后：每周产检和入院", "确认胎动变化、宫缩、破水、见红、入院路线、材料和陪产分工。", "36 周后", ["milestone"])),
         (99, _birth_journey_plan_item("产后 0-42 天：保留恢复支持", "出院前确认复诊、身体恢复和喂养求助方式。", "产后 0-42 天", ["milestone"])),
     ]
     if not isinstance(week, int):
