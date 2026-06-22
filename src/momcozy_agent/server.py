@@ -14,6 +14,7 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .agents import (
+    AgentRunCancelled,
     QUICK_REPLIES_TOOL_NAME,
     clean_internal_tool_error_text,
     clean_web_search_citation_markers,
@@ -21,6 +22,7 @@ from .agents import (
     run_agent_loop,
     run_agent_turn,
     run_error_event,
+    status_custom_event,
     text_message_semantic,
 )
 from .config import get_openai_client_options, load_project_env
@@ -74,6 +76,9 @@ class ChatSession:
     profile_cache: dict[str, Any] = field(default_factory=dict)
     profile_cache_loaded_at: float = 0.0
     run_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    run_state_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    active_run_id: str = ""
+    cancelled_run_ids: set[str] = field(default_factory=set, repr=False)
 
 
 class ChatRuntime:
@@ -109,6 +114,38 @@ class ChatRuntime:
     def sessions_for_conversation(self, conversation_id: str) -> list[ChatSession]:
         return [session for session in self.sessions.values() if session.conversation_id == conversation_id]
 
+    def cancel_run(
+        self,
+        conversation_id: str,
+        *,
+        user_id: str | None = None,
+        run_id: str | None = None,
+    ) -> dict[str, Any]:
+        session = self.get_existing_session(conversation_id, user_id=user_id)
+        if session is None:
+            return {
+                "status": "not_found",
+                "conversation_id": conversation_id,
+                "thread_id": conversation_id,
+                "run_id": str(run_id or "").strip(),
+                "cancelled": False,
+            }
+
+        normalized_run_id = str(run_id or "").strip()
+        with session.run_state_lock:
+            active_run_id = session.active_run_id
+            target_run_id = normalized_run_id or active_run_id
+            if target_run_id:
+                session.cancelled_run_ids.add(target_run_id)
+            return {
+                "status": "cancel_requested" if target_run_id else "not_running",
+                "conversation_id": session.conversation_id,
+                "thread_id": session.conversation_id,
+                "run_id": target_run_id,
+                "active_run_id": active_run_id,
+                "cancelled": bool(target_run_id),
+            }
+
 
 def _normalize_session_user_id(user_id: str | None) -> str:
     return str(user_id or "").strip()
@@ -119,6 +156,17 @@ def _session_storage_key(conversation_id: str, user_id: str | None = None) -> st
     if not normalized_user_id:
         return conversation_id
     return f"user:{len(normalized_user_id)}:{normalized_user_id}:thread:{conversation_id}"
+
+
+def _ag_ui_status_event(phase: str, message: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+    return status_custom_event(
+        {
+            "type": "agent.status",
+            "phase": phase,
+            "message": message,
+            "metadata": metadata or {},
+        }
+    )
 
 
 def _schedule_birth_prep_slot_extraction(
@@ -173,6 +221,9 @@ def _run_birth_prep_slot_extraction(
     if not candidates:
         return
     with session.run_lock:
+        with session.run_state_lock:
+            if run_id in session.cancelled_run_ids:
+                return
         merge_extracted_birth_prep_slots(
             session.context_state,
             candidates,
@@ -244,6 +295,27 @@ def create_app(runtime: ChatRuntime | None = None, *, include_websocket_bridge: 
         except Exception as exc:
             return JSONResponse({"error": str(exc), "code": type(exc).__name__}, status_code=500)
         return JSONResponse(result)
+
+    @app.post("/api/ag-ui-cancel")
+    async def ag_ui_cancel(request: Request) -> Any:
+        try:
+            payload = await _read_json_payload(request)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        if not isinstance(payload, dict):
+            return JSONResponse({"error": "ag-ui cancel requires a JSON object."}, status_code=400)
+
+        thread_id = str(_field(payload, "thread_id", "threadId") or payload.get("conversation_id") or "").strip()
+        if not thread_id:
+            return JSONResponse({"error": "ag-ui cancel requires thread_id."}, status_code=400)
+
+        run_id = str(_field(payload, "run_id", "runId") or "").strip()
+        result = runtime_from_app(request.app).cancel_run(
+            thread_id,
+            user_id=_payload_user_id(payload),
+            run_id=run_id or None,
+        )
+        return JSONResponse(result, status_code=200 if result.get("status") != "not_found" else 404)
 
     @app.post("/api/support-ticket-submit")
     async def support_ticket_submit(request: Request) -> Any:
@@ -330,6 +402,7 @@ def _service_info() -> dict[str, Any]:
         "endpoints": {
             "ag_ui": "/api/ag-ui",
             "ag_ui_prewarm": "/api/ag-ui-prewarm",
+            "ag_ui_cancel": "/api/ag-ui-cancel",
             "client_event": "/api/client-event",
             "support_ticket_submit": "/api/support-ticket-submit",
             "skill_assets": "/skill-assets/{skill_id}/{asset_path}",
@@ -442,58 +515,99 @@ async def stream_ag_ui_events(
             lambda event_type, metadata: log_timing(f"responses:{event_type}", metadata)
         ) if debug_stream_timing else None
 
+        run_id_text = str(run_id)
+
+        def run_cancelled() -> bool:
+            with session.run_state_lock:
+                return run_id_text in session.cancelled_run_ids
+
+        def mark_run_active() -> None:
+            with session.run_state_lock:
+                session.active_run_id = run_id_text
+
+        def clear_run_active() -> None:
+            with session.run_state_lock:
+                was_cancelled = run_id_text in session.cancelled_run_ids
+                if session.active_run_id == run_id_text:
+                    session.active_run_id = ""
+                if not was_cancelled:
+                    session.cancelled_run_ids.discard(run_id_text)
+
         try:
-            with session.run_lock:
-                _hydrate_session_user_profile(inputs, session)
-                try:
-                    if session.previous_response_id:
-                        inputs["previous_response_id"] = session.previous_response_id
-                    _schedule_birth_prep_slot_extraction(session, runtime, inputs, run_id=str(run_id))
-                    agent_options: dict[str, Any] = {
-                        "model": runtime.model,
-                        "store": runtime.store,
-                        "loaded_skill_ids": session.loaded_skill_ids,
-                        "context_state": session.context_state,
-                    }
-                    response = run_agent_loop(
-                        runtime.client,
-                        inputs,
-                        agent_options,
-                        on_ag_ui_event=send_ag_ui_event,
-                        ag_ui_thread_id=str(thread_id),
-                        ag_ui_run_id=str(run_id),
-                        ag_ui_parent_run_id=str(parent_run_id) if parent_run_id else None,
-                        ag_ui_message_id=assistant_message_id,
-                        on_text_delta=send_text_delta,
-                        on_response_stream_event=response_stream_timing,
+            lock_acquired = session.run_lock.acquire(blocking=False)
+            if not lock_acquired:
+                send_event(
+                    _ag_ui_status_event(
+                        "waiting_for_previous_run",
+                        "上一轮正在安全收尾，我马上继续。",
+                        {"run_id": run_id_text, "thread_id": str(thread_id)},
                     )
-                    response_id = _response_id(response)
-                    if response_id:
-                        session.previous_response_id = response_id
-                    loaded_skill_ids = agent_options.get("loaded_skill_ids")
-                    if isinstance(loaded_skill_ids, list):
-                        session.loaded_skill_ids = loaded_skill_ids
-                    text = _response_text(response)
-                    if not streamed_text_parts and text:
-                        send_text_delta(text)
-                    current_text = "".join(streamed_text_parts) or text
-                    record_birth_prep_assistant_message(session.context_state, current_text)
-                    if text_started:
-                        send_event(
-                            {
-                                "type": "TEXT_MESSAGE_END",
-                                "message_id": assistant_message_id,
-                                "semantic": text_message_semantic("end", assistant_message_id),
-                            }
-                        )
-                    if pending_run_finished:
-                        if not suppress_quick_replies and pending_quick_replies is not None:
-                            send_event(quick_replies_event(assistant_message_id, pending_quick_replies))
-                        send_event(pending_run_finished)
-                finally:
-                    _refresh_session_profile_cache_from_inputs(session, inputs)
+                )
+                session.run_lock.acquire()
+            try:
+                mark_run_active()
+                if run_cancelled():
+                    raise AgentRunCancelled("Run cancelled by user.")
+                _hydrate_session_user_profile(inputs, session)
+                working_context_state = _clone_context_state(session.context_state)
+                if session.previous_response_id:
+                    inputs["previous_response_id"] = session.previous_response_id
+                _schedule_birth_prep_slot_extraction(session, runtime, inputs, run_id=run_id_text)
+                agent_options: dict[str, Any] = {
+                    "model": runtime.model,
+                    "store": runtime.store,
+                    "loaded_skill_ids": list(session.loaded_skill_ids),
+                    "context_state": working_context_state,
+                }
+                response = run_agent_loop(
+                    runtime.client,
+                    inputs,
+                    agent_options,
+                    on_ag_ui_event=send_ag_ui_event,
+                    ag_ui_thread_id=str(thread_id),
+                    ag_ui_run_id=run_id_text,
+                    ag_ui_parent_run_id=str(parent_run_id) if parent_run_id else None,
+                    ag_ui_message_id=assistant_message_id,
+                    on_text_delta=send_text_delta,
+                    on_response_stream_event=response_stream_timing,
+                    cancel_requested=run_cancelled,
+                )
+                if run_cancelled():
+                    raise AgentRunCancelled("Run cancelled by user.")
+                response_id = _response_id(response)
+                loaded_skill_ids = agent_options.get("loaded_skill_ids")
+                text = _response_text(response)
+                if not streamed_text_parts and text:
+                    send_text_delta(text)
+                current_text = "".join(streamed_text_parts) or text
+                record_birth_prep_assistant_message(working_context_state, current_text)
+                if run_cancelled():
+                    raise AgentRunCancelled("Run cancelled by user.")
+                if response_id:
+                    session.previous_response_id = response_id
+                if isinstance(loaded_skill_ids, list):
+                    session.loaded_skill_ids = loaded_skill_ids
+                session.context_state = working_context_state
+                if text_started:
+                    send_event(
+                        {
+                            "type": "TEXT_MESSAGE_END",
+                            "message_id": assistant_message_id,
+                            "semantic": text_message_semantic("end", assistant_message_id),
+                        }
+                    )
+                if pending_run_finished:
+                    if not suppress_quick_replies and pending_quick_replies is not None:
+                        send_event(quick_replies_event(assistant_message_id, pending_quick_replies))
+                    send_event(pending_run_finished)
+            finally:
+                _refresh_session_profile_cache_from_inputs(session, inputs)
+                clear_run_active()
+                session.run_lock.release()
+        except AgentRunCancelled:
+            send_event(run_error_event("本轮已停止。", "RUN_CANCELLED", thread_id=str(thread_id), run_id=run_id_text))
         except Exception as exc:
-            send_event(run_error_event(str(exc), type(exc).__name__, thread_id=str(thread_id), run_id=str(run_id)))
+            send_event(run_error_event(str(exc), type(exc).__name__, thread_id=str(thread_id), run_id=run_id_text))
         finally:
             push(sentinel)
 

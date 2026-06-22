@@ -196,7 +196,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "birth_journey_intake_manage": _function_tool(
         "birth_journey_intake_manage",
-        "推进孕期计划的信息采集状态机。模型只负责识别用户是否要制定计划、把用户本轮回答交给本工具，并根据 next_step 继续；不要自己维护字段清单。进入采集时，如果前文有用户最初表达的关键线索，例如年龄、孕周、焦虑、无助、不知道怎么办、怕漏事等，调用 action=start 时在 payload 中传 entry_reason、initial_concerns 和 known_values，工具会用于表单预填和后续针对性追问。进入采集后，用户回答当前 next_step/confirmation_question 时，必须调用本工具提交对应 action/payload 推进状态；不要自行判断还缺哪个字段，也不要追加询问工具未返回的字段。已提供大致孕周即可继续，例如 30周/孕30周/30+几天 都是可接受表达，不要为精确到天而追问。工具会依次处理：基础信息表单、首句关键线索追问、产检记录上传、孕期高风险因素、当前症状、生活方式与场景、喂养/IBCLC 信息。状态 ready_to_generate 时，使用工具返回的 plan_context 调用 birth_journey_plan_card_create。",
+        "推进孕期计划的信息采集状态机。模型只负责识别用户是否要制定计划、把用户本轮回答交给本工具，并根据 next_step 继续；不要自己维护字段清单。进入采集时，如果前文有用户最初表达的关键线索，例如年龄、孕周、焦虑、无助、不知道怎么办、怕漏事等，调用 action=start 时在 payload 中传 entry_reason、initial_concerns 和 known_values，工具会用于表单预填、plan_context 和最终计划个性化，不会作为单独追问节点阻塞主流程。submit_entry_concern 仅用于历史会话兼容，正常主流程不要主动使用。进入采集后，用户回答当前 next_step/confirmation_question 时，必须调用本工具提交对应 action/payload 推进状态；不要自行判断还缺哪个字段，也不要追加询问工具未返回的字段。已提供大致孕周即可继续，例如 30周/孕30周/30+几天 都是可接受表达，不要为精确到天而追问。工具会依次处理：基础信息表单、产检记录上传、孕期高风险因素、当前症状、生活方式与场景、喂养/IBCLC 信息。状态 ready_to_generate 时，使用工具返回的 plan_context 调用 birth_journey_plan_card_create。",
         {
             "action": {
                 "type": "string",

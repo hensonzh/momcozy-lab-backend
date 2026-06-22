@@ -172,6 +172,42 @@ class AnalysisCreateApiTests(unittest.TestCase):
         self.assertEqual([tab["title"] for tab in payload["status_page_tabs"]], ["妈妈数字分身", "宝宝数字分身"])
         self.assertEqual(payload["status_page_card"]["card_type"], "mom_baby_status_card")
 
+    def test_mom_baby_today_returns_unified_pumping_counts_for_requested_date(self) -> None:
+        uid = "u-today-pump-counts"
+        _seed_user(uid)
+        _seed_infant(uid)
+        with data_store._connect() as conn:  # type: ignore[attr-defined]
+            conn.executemany(
+                """
+                INSERT INTO pumping_log(user_id, pump_start_time, pump_end_time, pump_milk_volum,
+                                        pump_type, pump_milk_duration, pump_source, pump_title)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (uid, "2026-05-21 08:00:00", "2026-05-21 08:20:00", 40, 0, 20, 0, "设备吸奶"),
+                    (uid, "2026-05-21 10:00:00", "2026-05-21 10:20:00", 35, 1, 20, 1, "手动补录"),
+                    (uid, "2026-05-21 12:00:00", "2026-05-21 12:20:00", 25, 0, 20, 2, "计划同步"),
+                    (uid, "2026-05-21 14:00:00", "2026-05-21 14:20:00", 999, 2, 20, 1, "亲喂估算"),
+                    (uid, "2026-05-22 08:00:00", "2026-05-22 08:20:00", 999, 0, 20, 0, "其他日期"),
+                ],
+            )
+
+        with patch("momcozy_agent.services.data_store.estimate_breastfeeding_milk", return_value=0):
+            response = self.client.get(
+                "/v1/mom-baby/today/query",
+                params={"user_id": uid, "timestamp": "2026-05-21"},
+                headers=self.headers,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["error"], 0)
+        self.assertEqual(payload["pump_milk_volum"], 100.0)
+        self.assertEqual(payload["pumping_count"], 3)
+        self.assertEqual(payload["device_pumping_count"], 1)
+        self.assertEqual(payload["manual_pumping_count"], 1)
+        self.assertEqual(payload["plan_pumping_count"], 1)
+
     def test_status_advice_normality_is_false_below_3_valid_days(self) -> None:
         _seed_user("u1")
 

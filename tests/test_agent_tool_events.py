@@ -15,6 +15,7 @@ from momcozy_agent.contexts import (
 )
 from momcozy_agent.tool_schemas import FUNCTION_TOOLS
 from momcozy_agent.agents import (
+    AgentRunCancelled,
     artifact_created_event,
     _tool_image_input_item_from_metadata,
     _tool_image_metadata,
@@ -1978,6 +1979,131 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertTrue(any(event.get("type") == "RUN_FINISHED" for event in events))
         self.assertEqual(requests[0].get("previous_response_id"), "resp-server")
         self.assertNotEqual(requests[0].get("previous_response_id"), "resp-client")
+
+    def test_ag_ui_cancel_marks_active_run_without_waiting_for_run_lock(self) -> None:
+        runtime = ChatRuntime(object())
+        session = runtime.get_session("thread-cancel-api", user_id="demo-phone-a")
+        session.active_run_id = "run-active"
+        session.run_lock.acquire()
+        try:
+            result = runtime.cancel_run("thread-cancel-api", user_id="demo-phone-a", run_id="run-active")
+        finally:
+            session.run_lock.release()
+
+        self.assertEqual(result["status"], "cancel_requested")
+        self.assertTrue(result["cancelled"])
+        self.assertIn("run-active", session.cancelled_run_ids)
+
+    def test_ag_ui_waiting_for_previous_run_emits_visible_status(self) -> None:
+        async def collect_events() -> tuple[dict[str, object], list[dict[str, object]]]:
+            client = _FakeStreamingClient(
+                [
+                    {
+                        "id": "resp-after-wait",
+                        "output": [
+                            {
+                                "type": "message",
+                                "content": [{"type": "output_text", "text": "继续处理。"}],
+                            }
+                        ],
+                    }
+                ]
+            )
+            runtime = ChatRuntime(client, model="test-model")
+            session = runtime.get_session("thread-busy", user_id="demo-phone-a")
+            session.run_lock.acquire()
+            payload = {
+                "threadId": "thread-busy",
+                "runId": "run-wait",
+                "messages": [{"role": "user", "content": "继续"}],
+                "forwardedProps": {"user_id": "demo-phone-a"},
+            }
+            inputs = _runtime_inputs_from_ag_ui(payload)
+            stream = stream_ag_ui_events(payload, inputs, runtime)
+            try:
+                first = await asyncio.wait_for(stream.__anext__(), timeout=1)
+            finally:
+                session.run_lock.release()
+            events = [event async for event in stream]
+            return first, events
+
+        first_event, remaining_events = asyncio.run(collect_events())
+
+        self.assertEqual(first_event.get("type"), "CUSTOM")
+        self.assertEqual(first_event.get("name"), "momcozy.agent.status")
+        value = first_event.get("value")
+        self.assertIsInstance(value, dict)
+        self.assertEqual(value.get("message"), "上一轮正在安全收尾，我马上继续。")
+        self.assertEqual(first_event.get("semantic", {}).get("visibility"), "status")
+        self.assertTrue(any(event.get("type") == "RUN_FINISHED" for event in remaining_events))
+
+    def test_ag_ui_cancelled_run_does_not_commit_previous_response_id(self) -> None:
+        async def collect_events() -> tuple[list[dict[str, object]], list[dict[str, object]], str | None]:
+            client = _FakeStreamingClient(
+                [
+                    {
+                        "id": "resp-should-not-commit",
+                        "output": [
+                            {
+                                "type": "message",
+                                "content": [{"type": "output_text", "text": "不应提交。"}],
+                            }
+                        ],
+                    }
+                ]
+            )
+            runtime = ChatRuntime(client, model="test-model")
+            session = runtime.get_session("thread-cancelled", user_id="demo-phone-a")
+            session.previous_response_id = "resp-stable"
+            runtime.cancel_run("thread-cancelled", user_id="demo-phone-a", run_id="run-cancelled")
+            payload = {
+                "threadId": "thread-cancelled",
+                "runId": "run-cancelled",
+                "messages": [{"role": "user", "content": "停止这一轮"}],
+                "forwardedProps": {"user_id": "demo-phone-a"},
+            }
+            inputs = _runtime_inputs_from_ag_ui(payload)
+            events = [event async for event in stream_ag_ui_events(payload, inputs, runtime)]
+            return events, client.responses.requests, session.previous_response_id
+
+        events, requests, previous_response_id = asyncio.run(collect_events())
+
+        self.assertFalse(requests)
+        self.assertEqual(previous_response_id, "resp-stable")
+        self.assertTrue(any(event.get("type") == "RUN_ERROR" and event.get("code") == "RUN_CANCELLED" for event in events))
+
+    def test_agent_loop_cancel_after_tool_call_response_stops_before_tool_output_request(self) -> None:
+        cancelled = False
+        client = _MutatingClient(
+            [
+                {
+                    "id": "resp-tool-call",
+                    "output": [
+                        {
+                            "type": "function_call",
+                            "call_id": "call-status",
+                            "name": "milk_status_query",
+                            "arguments": "{}",
+                        }
+                    ],
+                }
+            ]
+        )
+
+        def cancel_after_model_response() -> None:
+            nonlocal cancelled
+            cancelled = True
+
+        client.responses.on_create = cancel_after_model_response
+
+        with self.assertRaises(AgentRunCancelled):
+            run_agent_loop(
+                client,
+                {"user_message": "看看奶量", "locale": "zh-CN"},
+                cancel_requested=lambda: cancelled,
+            )
+
+        self.assertEqual(len(client.responses.requests), 1)
 
     def test_client_event_context_is_namespaced_by_user_id(self) -> None:
         try:

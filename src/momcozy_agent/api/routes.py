@@ -685,12 +685,13 @@ async def create_analysis_endpoint(request: Request) -> dict[str, Any]:
 
 
 @router.get("/v1/mom-baby/today/query")
-async def query_mom_baby_today_endpoint(request: Request, user_id: str = "") -> dict[str, Any]:
+async def query_mom_baby_today_endpoint(request: Request, user_id: str = "", timestamp: str = "") -> dict[str, Any]:
     verify_api_key(request)
     uid = str(user_id or "").strip()
     if not uid:
         return _mom_baby_today_response(error=-1)
-    summary = data_store.get_mom_baby_today_summary(uid)
+    target_date = _normalize_date(timestamp) or datetime.now().strftime("%Y-%m-%d")
+    summary = data_store.get_mom_baby_today_summary(uid, target_date=target_date)
     if not summary:
         return _mom_baby_today_response(error=-1)
     status_page = _mom_baby_status_page_payload(uid)
@@ -699,6 +700,10 @@ async def query_mom_baby_today_endpoint(request: Request, user_id: str = "") -> 
         pump_milk_volum=float(summary.get("pump_milk_volum") or 0),
         feeding_volum=float(summary.get("feeding_volum") or 0),
         feeding_forecast_volum=float(_feeding_forecast_p50(uid)),
+        pumping_count=int(summary.get("pumping_count") or 0),
+        device_pumping_count=int(summary.get("device_pumping_count") or 0),
+        manual_pumping_count=int(summary.get("manual_pumping_count") or 0),
+        plan_pumping_count=int(summary.get("plan_pumping_count") or 0),
         status_page_tabs=status_page.get("tabs"),
         status_page_card=status_page.get("card"),
     )
@@ -1922,6 +1927,10 @@ def _mom_baby_today_response(
     pump_milk_volum: float = 0,
     feeding_volum: float = 0,
     feeding_forecast_volum: float = 0,
+    pumping_count: int = 0,
+    device_pumping_count: int = 0,
+    manual_pumping_count: int = 0,
+    plan_pumping_count: int = 0,
     status_page_tabs: Any = None,
     status_page_card: Any = None,
 ) -> dict[str, Any]:
@@ -1930,6 +1939,10 @@ def _mom_baby_today_response(
         "pump_milk_volum": float(pump_milk_volum or 0),
         "feeding_volum": float(feeding_volum or 0),
         "feeding_forecast_volum": float(feeding_forecast_volum or 0),
+        "pumping_count": int(pumping_count or 0),
+        "device_pumping_count": int(device_pumping_count or 0),
+        "manual_pumping_count": int(manual_pumping_count or 0),
+        "plan_pumping_count": int(plan_pumping_count or 0),
         "status_page_tabs": status_page_tabs if isinstance(status_page_tabs, list) else [],
         "status_page_card": status_page_card if isinstance(status_page_card, dict) else None,
     }

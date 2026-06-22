@@ -695,6 +695,113 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         self.assertEqual(feeding["plan_context"]["checkup_records_uploaded"], "是")
         self.assertIn("久坐上班", feeding["plan_context"]["lifestyle_context"])
 
+    def test_birth_journey_entry_context_does_not_insert_extra_concern_step(self) -> None:
+        inputs = {
+            "user_message": "我不知道接下来要准备什么",
+            "message_sent_at": "2026-06-01T12:00:00+08:00",
+            "_birth_journey_intake_state": {},
+        }
+        started = manage_birth_journey_intake(
+            {
+                "action": "start",
+                "payload": {
+                    "entry_reason": "我不知道接下来要准备什么",
+                    "initial_concerns": ["怕漏事"],
+                    "known_values": {"current_week": "30周", "age": "43"},
+                },
+            },
+            inputs,
+        )
+
+        self.assertEqual(started["next_step"], "basic_info_form")
+        self.assertEqual(started["form"]["default_values"]["current_week"], "30周")
+        self.assertEqual(started["form"]["default_values"]["age"], "43")
+
+        basic = manage_birth_journey_intake(
+            {"action": "submit_basic_info", "payload": {"current_week": "30周", "fetus_count": "单胎", "age": "43"}},
+            {**inputs, "_birth_journey_intake_state": started["intake_state"]},
+        )
+
+        self.assertEqual(basic["next_step"], "checkup_records_upload")
+        rendered_basic = json.dumps(basic, ensure_ascii=False)
+        self.assertNotIn("entry_concern_question", rendered_basic)
+        self.assertNotIn("你刚才提到有点焦虑", rendered_basic)
+
+        skipped = manage_birth_journey_intake(
+            {"action": "skip_checkup_records", "payload": {}},
+            {**inputs, "_birth_journey_intake_state": basic["intake_state"]},
+        )
+        risk = manage_birth_journey_intake(
+            {"action": "submit_risk_factors", "payload": {"risk_factors": "不清楚"}},
+            {**inputs, "_birth_journey_intake_state": skipped["intake_state"]},
+        )
+        symptoms = manage_birth_journey_intake(
+            {"action": "submit_current_symptoms", "payload": {"current_symptoms": "没有明显不舒服"}},
+            {**inputs, "_birth_journey_intake_state": risk["intake_state"]},
+        )
+        lifestyle = manage_birth_journey_intake(
+            {"action": "submit_lifestyle_context", "payload": {"lifestyle_context": "通勤比较久"}},
+            {**inputs, "_birth_journey_intake_state": symptoms["intake_state"]},
+        )
+        feeding = manage_birth_journey_intake(
+            {"action": "submit_feeding_context", "payload": {"feeding_ibclc_context": "计划母乳"}},
+            {**inputs, "_birth_journey_intake_state": lifestyle["intake_state"]},
+        )
+
+        self.assertEqual(feeding["status"], "ready_to_generate")
+        self.assertEqual(feeding["plan_context"]["entry_reason"], "我不知道接下来要准备什么")
+        self.assertEqual(feeding["plan_context"]["initial_concerns"], ["怕漏事", "我不知道接下来要准备什么"])
+        self.assertEqual(feeding["plan_context"]["top_worries"], "怕漏事, 我不知道接下来要准备什么")
+
+        plan = create_birth_journey_plan_card(
+            {"plan_context": feeding["plan_context"], "scope": "full"},
+            {**inputs, "_birth_journey_intake_state": feeding["intake_state"]},
+        )
+
+        self.assertEqual(plan["status"], "card_created")
+        rendered_plan = json.dumps(plan["card"]["card_json"], ensure_ascii=False)
+        self.assertNotIn("把焦虑", rendered_plan)
+        self.assertNotIn("你提到焦虑", rendered_plan)
+        self.assertNotIn("考虑到你提到焦虑", rendered_plan)
+
+    def test_birth_journey_plan_still_acknowledges_explicit_anxiety(self) -> None:
+        result = create_birth_journey_plan_card(
+            {
+                "plan_context": _plan_context(
+                    due_date_or_week="30周",
+                    entry_reason="我很焦虑，不知道接下来怎么办",
+                    initial_concerns=["焦虑", "不知道接下来怎么办"],
+                    top_worries="焦虑，不知道接下来怎么办",
+                ),
+                "scope": "full",
+            },
+            {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00"},
+        )
+
+        self.assertEqual(result["status"], "card_created")
+        rendered = json.dumps(result["card"]["card_json"], ensure_ascii=False)
+        self.assertIn("焦虑", rendered)
+
+    def test_birth_journey_plan_does_not_relabel_other_emotions_as_anxiety(self) -> None:
+        result = create_birth_journey_plan_card(
+            {
+                "plan_context": _plan_context(
+                    due_date_or_week="30周",
+                    entry_reason="我有点心里没底，不知道接下来怎么办",
+                    initial_concerns=["心里没底", "不知道接下来怎么办"],
+                    top_worries="心里没底，不知道接下来怎么办",
+                ),
+                "scope": "full",
+            },
+            {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00"},
+        )
+
+        self.assertEqual(result["status"], "card_created")
+        rendered = json.dumps(result["card"]["card_json"], ensure_ascii=False)
+        self.assertIn("心里没底", rendered)
+        self.assertNotIn("你提到焦虑", rendered)
+        self.assertNotIn("把焦虑", rendered)
+
     def test_birth_journey_intake_skip_checkup_records_does_not_mark_uploaded(self) -> None:
         inputs = {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00", "_birth_journey_intake_state": {}}
         started = manage_birth_journey_intake({"action": "start", "payload": {}}, inputs)

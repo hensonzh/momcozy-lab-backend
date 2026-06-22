@@ -2712,6 +2712,25 @@ def _birth_journey_entry_message_has_signal(text: str) -> bool:
     )
 
 
+def _birth_journey_explicit_emotion_label(text: str) -> str:
+    emotion_labels = (
+        ("焦虑", "焦虑"),
+        ("心里没底", "心里没底"),
+        ("压力", "压力"),
+        ("无助", "无助"),
+        ("迷茫", "迷茫"),
+        ("慌", "慌乱感"),
+    )
+    for token, label in emotion_labels:
+        if token in text:
+            return label
+    return ""
+
+
+def _birth_journey_text_has_explicit_worry(text: str) -> bool:
+    return any(token in text for token in ("担心", "担忧", "害怕", "怕"))
+
+
 def _birth_journey_known_values_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
     source = _dict_value(payload.get("known_values")) or payload
     known: dict[str, Any] = {}
@@ -2741,28 +2760,6 @@ def _birth_journey_entry_context_text(state: dict[str, Any]) -> str:
     return "；".join(_unique_text_list(values, 8))
 
 
-def _birth_journey_entry_known_age(state: dict[str, Any]) -> int | None:
-    basic_info = _dict_value(state.get("basic_info"))
-    known_values = _dict_value(state.get("entry_known_values"))
-    for value in (basic_info.get("age"), known_values.get("age")):
-        try:
-            age = int(str(value).strip())
-        except (TypeError, ValueError):
-            continue
-        if 12 <= age <= 60:
-            return age
-    return None
-
-
-def _birth_journey_should_ask_entry_concern(state: dict[str, Any]) -> bool:
-    if "entry_concern_followup" in state:
-        return False
-    age = _birth_journey_entry_known_age(state)
-    if age is not None and age >= 35:
-        return True
-    return bool(_birth_journey_entry_context_text(state))
-
-
 def _birth_journey_intake_completed_groups(state: dict[str, Any]) -> list[str]:
     groups: list[str] = []
     if _dict_value(state.get("basic_info")):
@@ -2780,8 +2777,6 @@ def _birth_journey_intake_completed_groups(state: dict[str, Any]) -> list[str]:
 def _birth_journey_intake_next_step(state: dict[str, Any]) -> str:
     if not _dict_value(state.get("basic_info")):
         return "basic_info_form"
-    if _birth_journey_should_ask_entry_concern(state):
-        return "entry_concern_question"
     if state.get("checkup_records_uploaded") is not True and "checkup_status" not in state:
         return "checkup_records_upload"
     if "risk_factors" not in state:
@@ -2838,7 +2833,6 @@ def _birth_journey_symptoms_need_pause(text: str) -> bool:
 def _birth_journey_intake_summary(next_step: str) -> str:
     summaries = {
         "basic_info_form": "需要先填写孕周与基本情况表单。",
-        "entry_concern_question": "基础信息已记录，下一步沿着用户最初提到的关键线索追问。",
         "checkup_records_upload": "基础信息已记录，下一步需要上传产检记录。",
         "risk_question": "产检记录上传状态已确认，下一步补问孕期高风险因素。",
         "symptom_question": "高风险因素已问到，下一步确认当前不适或异常。",
@@ -2853,7 +2847,6 @@ def _birth_journey_intake_summary(next_step: str) -> str:
 def _birth_journey_intake_instruction(next_step: str) -> str:
     instructions = {
         "basic_info_form": "最终回复说明基础信息表已打开，并温和解释这是为了后面更贴合用户情况地整理孕期计划；请用户简单填写知道的部分，不确定的地方可以选“不确定/暂不说”。不要在聊天里逐项追问这些字段。",
-        "entry_concern_question": "只围绕用户最初提到的年龄、焦虑、无助、心里没底或不知道怎么办等关键线索追问 1 个问题；不要展开成问卷，用户不清楚也可以说不清楚。",
         "checkup_records_upload": "请用户上传最新一次的产检记录，如果没有或者不在手边也可以先跳过。",
         "risk_question": "只补问孕期高风险因素这一件事；用户不清楚也可以说不清楚。",
         "symptom_question": "只补问当前不适或异常这一件事；如果用户确认有明显异常，先不要生成计划。",
@@ -2866,8 +2859,6 @@ def _birth_journey_intake_instruction(next_step: str) -> str:
 
 
 def _birth_journey_intake_question(next_step: str, plan_context: dict[str, Any]) -> str:
-    if next_step == "entry_concern_question":
-        return _birth_journey_entry_concern_question(plan_context)
     if next_step == "risk_question":
         return "你了解自己是否有什么孕期高风险因素吗，比如慢性高血压、糖尿病、肾病、自身免疫病、甲状腺病、心脏病，或既往剖宫产、早产/流产史等？不清楚也可以先跳过。"
     if next_step == "symptom_question":
@@ -2883,28 +2874,6 @@ def _birth_journey_intake_question(next_step: str, plan_context: dict[str, Any])
     return ""
 
 
-def _birth_journey_entry_concern_question(plan_context: dict[str, Any]) -> str:
-    age = _birth_journey_context_age(plan_context)
-    concern_text = _first_answer_text(
-        plan_context.get("entry_concern_followup"),
-        plan_context.get("initial_concerns"),
-        plan_context.get("entry_reason"),
-        plan_context.get("top_worries"),
-    )
-    has_anxiety = _birth_journey_entry_message_has_signal(concern_text)
-    if age is not None and age >= 35 and has_anxiety:
-        return (
-            f"我看到你这里是 {age} 岁，也提到有点焦虑，这个我会纳入计划里。"
-            "我想先确认最关键的一点：医生有没有特别提醒过高龄孕期相关的产检频率、血压血糖、胎儿监测或分娩方式安排？不清楚也可以说不清楚。"
-        )
-    if age is not None and age >= 35:
-        return (
-            f"我看到你这里是 {age} 岁，这个我会纳入计划里。"
-            "医生有没有特别提醒过高龄孕期相关的产检频率、血压血糖、胎儿监测或分娩方式安排？不清楚也可以说不清楚。"
-        )
-    return "你刚才提到有点焦虑，我想先抓住最压着你的那个点：你现在更担心产检或宝宝情况、后面要准备什么、每天该怎么安排，还是身边支持不够？"
-
-
 def _birth_journey_context_age(context: dict[str, Any]) -> int | None:
     try:
         age = int(str(context.get("age") or "").strip())
@@ -2915,7 +2884,6 @@ def _birth_journey_context_age(context: dict[str, Any]) -> int | None:
 
 def birth_journey_intake_quick_reply_guidance(next_step: str) -> list[dict[str, str]]:
     replies_by_step = {
-        "entry_concern_question": ("医生说要多监测", "目前没特别提醒", "我主要是心里焦虑"),
         "checkup_records_upload": ("产检记录上传完毕", "先跳过这步", "我现在没有记录"),
         "risk_question": ("没有高风险因素", "不清楚先跳过", "有一些风险因素"),
         "symptom_question": ("目前没有异常", "有些不舒服", "不确定先跳过"),
@@ -3982,8 +3950,11 @@ def _birth_journey_context_concern_labels(context: dict[str, Any], max_labels: i
     if not text:
         return []
     labels: list[str] = []
-    if _birth_journey_entry_message_has_signal(text):
-        labels.append("焦虑")
+    emotion_label = _birth_journey_explicit_emotion_label(text)
+    if emotion_label:
+        labels.append(emotion_label)
+    elif _birth_journey_text_has_explicit_worry(text):
+        labels.append("担心点")
     if any(token in text for token in ("血压", "血糖", "监测", "糖耐", "高血压", "糖尿病")):
         labels.append("血压血糖监测")
     if any(token in text for token in ("宝宝", "胎儿", "胎动", "发育", "生长")):
@@ -4037,20 +4008,29 @@ def _birth_journey_personalized_next_7_items(week: Any, context: dict[str, Any])
             5,
         )
     )
-    has_anxiety = _birth_journey_entry_message_has_signal(concern_text)
+    emotion_label = _birth_journey_explicit_emotion_label(concern_text)
     has_monitoring_concern = any(token in concern_text for token in ("血压", "血糖", "监测", "糖耐", "高血压", "糖尿病"))
     has_baby_concern = any(token in concern_text for token in ("宝宝", "胎儿", "胎动", "发育", "生长"))
 
-    if has_anxiety:
+    if emotion_label:
+        is_anxiety = emotion_label == "焦虑"
         items.append(
             _birth_journey_plan_item(
-                "把焦虑拆成 3 个可处理问题",
-                "考虑到你提到焦虑，目的是把担心分成能问医生、能安排和需要家人支持的事项。",
+                "把焦虑拆成 3 个可处理问题" if is_anxiety else "把压力点拆成 3 个可处理问题",
+                (
+                    "考虑到你明确提到焦虑，目的是把担心分成能问医生、能安排和需要家人支持的事项。"
+                    if is_anxiety
+                    else f"考虑到你表达了{emotion_label}，目的是把压力分成能问医生、能安排和需要家人支持的事项。"
+                ),
                 "今天",
                 ["entry_reason", "top_worries", "entry_concern_followup"],
                 steps=["写下最担心的 3 件事", "标出需要问医生的一件", "标出今天能安排的一件"],
                 done_criteria="已把担心分成医生确认、自己安排、家人支持三类。",
-                after_done_value="做完后，焦虑会变成可提问、可安排、可求助的清单。",
+                after_done_value=(
+                    "做完后，焦虑会变成可提问、可安排、可求助的清单。"
+                    if is_anxiety
+                    else "做完后，压力点会变成可提问、可安排、可求助的清单。"
+                ),
             )
         )
     if age is not None and age >= 35 and has_monitoring_concern:

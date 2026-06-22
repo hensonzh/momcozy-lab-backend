@@ -4,6 +4,7 @@ import base64
 import json
 import re
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlsplit
@@ -118,6 +119,10 @@ TOOL_IMAGE_CONTENT_TYPES = {
     ".png": "image/png",
     ".webp": "image/webp",
 }
+
+
+class AgentRunCancelled(RuntimeError):
+    """Raised when the application cancels an in-flight agent run at a safe point."""
 
 
 def new_ag_ui_run_id() -> str:
@@ -4106,6 +4111,7 @@ def run_agent_loop(
     ag_ui_message_id: str | None = None,
     on_text_delta: TextDeltaHandler | None = None,
     on_response_stream_event: Any | None = None,
+    cancel_requested: Callable[[], bool] | None = None,
 ) -> object:
     options = dict(options or {})
     loaded_skill_ids = list(options.get("loaded_skill_ids", []))
@@ -4116,6 +4122,18 @@ def run_agent_loop(
     ag_ui_tool_result_message_id = f"{ag_ui_run_id}:tool-results"
     streamed_tool_call_keys: set[str] = set()
     streamed_web_search_citations: list[dict[str, Any]] = []
+
+    def raise_if_cancelled() -> None:
+        if cancel_requested is not None and cancel_requested():
+            _emit_event(
+                on_event,
+                "cancelled",
+                "Agent loop cancelled.",
+                {},
+                on_ag_ui_event,
+                ag_ui_status_message_id,
+            )
+            raise AgentRunCancelled("Run cancelled by user.")
 
     def emit_streamed_tool_start(tool_call: dict[str, Any]) -> None:
         if _tool_call_was_seen(streamed_tool_call_keys, tool_call):
@@ -4139,6 +4157,7 @@ def run_agent_loop(
         streamed_web_search_citations = _merge_web_search_citations(streamed_web_search_citations, citations)
 
     _emit_ag_ui_event(on_ag_ui_event, run_started_event(ag_ui_thread_id, ag_ui_run_id, ag_ui_parent_run_id))
+    raise_if_cancelled()
     _emit_event(on_event, "started", "Agent loop started.", {"max_tool_rounds": max_tool_rounds}, on_ag_ui_event, ag_ui_status_message_id)
     _emit_event(on_event, "requesting_model", "Requesting model response.", {"round": 0}, on_ag_ui_event, ag_ui_status_message_id)
     try:
@@ -4153,12 +4172,16 @@ def run_agent_loop(
             remember_streamed_web_search_citations,
             on_response_stream_event,
         )
+        raise_if_cancelled()
+    except AgentRunCancelled:
+        raise
     except Exception as exc:
         _emit_event(on_event, "failed", "Model request failed.", _error_metadata(exc), on_ag_ui_event, ag_ui_status_message_id)
         _emit_ag_ui_event(on_ag_ui_event, run_error_event(str(exc), type(exc).__name__, thread_id=ag_ui_thread_id, run_id=ag_ui_run_id))
         raise
 
     for round_index in range(max_tool_rounds):
+        raise_if_cancelled()
         tool_calls = _extract_function_calls(response)
         if not tool_calls:
             _record_displayed_tool_images(options.get("context_state"), response)
@@ -4180,6 +4203,7 @@ def run_agent_loop(
         executed_tool_results = []
         direct_quick_replies_sent = False
         for tool_call in _tool_calls_with_quick_replies_last(tool_calls):
+            raise_if_cancelled()
             tool_name = tool_call["name"]
             if not _tool_call_was_seen(streamed_tool_call_keys, tool_call):
                 _remember_tool_call(streamed_tool_call_keys, tool_call)
@@ -4234,6 +4258,7 @@ def run_agent_loop(
             )
             tool_inputs = _tool_inputs_for_call(inputs, options)
             result = _execute_project_tool(tool_call["name"], tool_call["arguments"], tool_inputs)
+            raise_if_cancelled()
             executed_tool_results.append(result)
             _sync_runtime_profile_from_tool_inputs(inputs, tool_inputs)
             if tool_call["name"] == "load_skill" and result.get("ok") and result.get("result", {}).get("id"):
@@ -4293,6 +4318,7 @@ def run_agent_loop(
                     ag_ui_status_message_id,
                 )
                 auto_tool_result = _execute_project_tool(auto_tool_name, auto_arguments, tool_inputs)
+                raise_if_cancelled()
                 executed_tool_results.append(auto_tool_result)
                 _sync_runtime_profile_from_tool_inputs(inputs, tool_inputs)
                 _record_loaded_reference(options.get("context_state"), auto_tool_name, auto_tool_result)
@@ -4377,6 +4403,7 @@ def run_agent_loop(
             )
 
         options["loaded_skill_ids"] = loaded_skill_ids
+        raise_if_cancelled()
         next_inputs = dict(inputs)
         response_id = _get_response_id(response)
         if response_id:
@@ -4411,6 +4438,7 @@ def run_agent_loop(
             ag_ui_status_message_id,
         )
         try:
+            raise_if_cancelled()
             response = _create_response(
                 client,
                 request,
@@ -4421,6 +4449,9 @@ def run_agent_loop(
                 remember_streamed_web_search_citations,
                 on_response_stream_event,
             )
+            raise_if_cancelled()
+        except AgentRunCancelled:
+            raise
         except Exception as exc:
             _emit_event(on_event, "failed", "Model request failed.", _error_metadata(exc, {"round": round_index + 1}), on_ag_ui_event, ag_ui_status_message_id)
             _emit_ag_ui_event(on_ag_ui_event, run_error_event(str(exc), type(exc).__name__, thread_id=ag_ui_thread_id, run_id=ag_ui_run_id))

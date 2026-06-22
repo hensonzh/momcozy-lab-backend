@@ -874,7 +874,7 @@ def get_status_advice_context(*, user_id: str, days: int = 7) -> dict[str, Any] 
     }
 
 
-def get_mom_baby_today_summary(user_id: str, target_date: str | None = None) -> dict[str, float] | None:
+def get_mom_baby_today_summary(user_id: str, target_date: str | None = None) -> dict[str, float | int] | None:
     init_db()
     uid = str(user_id or "").strip()
     if not uid:
@@ -896,7 +896,7 @@ def get_mom_baby_today_summary(user_id: str, target_date: str | None = None) -> 
             return None
         pumping_rows = conn.execute(
             """
-            SELECT pump_milk_volum, pump_type, pump_milk_duration
+            SELECT pump_milk_volum, pump_type, pump_milk_duration, pump_source
             FROM pumping_log
             WHERE user_id = ? AND pump_start_time >= ? AND pump_start_time <= ?
             """,
@@ -914,10 +914,23 @@ def get_mom_baby_today_summary(user_id: str, target_date: str | None = None) -> 
     breastfeeding_estimate = estimate_breastfeeding_milk(user_id=uid, as_of_time=end_at)
 
     pump_total = 0.0
+    pumping_count = 0
+    device_pumping_count = 0
+    manual_pumping_count = 0
+    plan_pumping_count = 0
     for row in pumping_rows:
-        if int(row["pump_type"] or 0) == 2:
+        pump_type = int(row["pump_type"] or 0)
+        if pump_type == 2:
             pump_total += breastfeeding_estimate or 0.0
         else:
+            pumping_count += 1
+            pump_source = int(row["pump_source"] if row["pump_source"] is not None else 1)
+            if pump_source == 0:
+                device_pumping_count += 1
+            elif pump_source == 2:
+                plan_pumping_count += 1
+            else:
+                manual_pumping_count += 1
             pump_total += _to_float(row["pump_milk_volum"])
 
     feeding_total = 0.0
@@ -935,6 +948,10 @@ def get_mom_baby_today_summary(user_id: str, target_date: str | None = None) -> 
         "pump_milk_volum": round(pump_total, 1),
         "feeding_volum": round(feeding_total, 1),
         "feeding_forecast_volum": round(feeding_estimated_total, 1),
+        "pumping_count": pumping_count,
+        "device_pumping_count": device_pumping_count,
+        "manual_pumping_count": manual_pumping_count,
+        "plan_pumping_count": plan_pumping_count,
     }
 
 

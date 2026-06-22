@@ -42,6 +42,9 @@ class BirthPrepPromptRuleTests(unittest.TestCase):
         self.assertIn("工具返回 `ready_to_generate` 后，应用侧会自动串联执行 `birth_journey_plan_card_create`", skill)
         self.assertIn("快捷输入必须是当前 `next_step`/`confirmation_question` 的可能回答", skill)
         self.assertIn("不要生成“帮我准备待产包”“看看本周重点”“整理分娩沟通单”等跨服务入口", skill)
+        self.assertIn("不要把它们变成主流程之外的额外追问节点", skill)
+        self.assertIn("不要把模型基于年龄、IVF、双胎、产检信息或用户措辞做出的推断", skill)
+        self.assertNotIn("entry_concern_question", skill)
         self.assertNotIn("references/birth-journey-plan.md", skill)
         self.assertIn("当前孕周、是否 IVF（体外受精）", skill)
         self.assertNotIn("一次性收集末次月经、预产期、当前孕周", skill)
@@ -512,6 +515,9 @@ class BirthPrepPromptRuleTests(unittest.TestCase):
         self.assertIn("不要追加询问工具未返回的字段", description)
         self.assertIn("30周/孕30周/30+几天", description)
         self.assertIn("不要为精确到天而追问", description)
+        self.assertIn("不会作为单独追问节点阻塞主流程", description)
+        self.assertIn("submit_entry_concern 仅用于历史会话兼容", description)
+        self.assertNotIn("首句关键线索追问", description)
 
     def test_birth_journey_intake_output_keeps_followup_to_tool_next_step_only(self) -> None:
         compact = model_tool_output(
