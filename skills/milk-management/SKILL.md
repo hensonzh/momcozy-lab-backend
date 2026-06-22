@@ -76,6 +76,10 @@ Step3：需要看近期趋势时，进入 STATE_B。
 
 要求：`milk_analysis_intake_manage` 返回仍缺信息时，只追问工具返回的下一项；返回 `analysis_context` 后，下一步直接调用 `milk_analysis_evaluate`，不要先输出完整分析。
 
+要求：`milk_analysis_intake_manage` 返回的 `workflow_control` 是奶量分析流程控制协议；当 `allowed_next_action=ask_user` 时，本轮只向用户追问 `next_question`，等待用户回答前不要继续调用业务工具。`workflow_control.step` 表示当前采集进度，表达时可以说“现在确认第 N/6 项”，但不要说“最后一个”“只差一个”或类似话术。
+
+要求：采集过程中如果用户问主流程外的问题，可以基于已知 7 天记录、当前字段说明和 `joint_reasoning_guidance` 简短回答；回答结尾必须逐字询问：“我们要继续刚才的奶量分析流程吗？”
+
 要求：`milk_analysis_evaluate` 会复用 `analysis_context` 里的过去 7 天原始记录、日级汇总、宝宝状态和妈妈状态，返回分析结论和是否适合进入计划。
 
 要求：不要只凭用户一句补充直接输出完整结论；先让信息采集或评估工具续跑并返回新的判断。

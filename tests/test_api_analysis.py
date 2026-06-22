@@ -246,7 +246,13 @@ class AnalysisCreateApiTests(unittest.TestCase):
                 "days": [
                     {
                         "ok": True,
+                        "date": "2026-05-21",
+                        "status": "normal",
                         "estimated_daily_milk_ml": 620,
+                        "pumping_ml_total": 520,
+                        "pumping_count": 5,
+                        "breastfeeding_count": 2,
+                        "breastmilk_bottle_ml": 100,
                         "yield_reference": {"p15": 550, "p85": 800},
                     }
                 ],
@@ -276,6 +282,13 @@ class AnalysisCreateApiTests(unittest.TestCase):
         self.assertNotIn("analysis_card", payload["data"])
         self.assertEqual(payload["data"]["analysis_context"]["kind"], "milk_analysis")
         self.assertEqual(payload["data"]["analysis_context"]["status"], "normal")
+        sections = payload["data"]["analysis_context"]["sections"]
+        daily = next(section for section in sections if section["id"] == "daily_records")
+        self.assertIn("5/21：估算620 ml", daily["items"][0])
+        self.assertIn("吸奶520 ml/5次", daily["items"][0])
+        self.assertIn("亲喂2次", daily["items"][0])
+        self.assertIn("母乳瓶喂100 ml", daily["items"][0])
+        self.assertIn("参考550-800 ml/天", daily["items"][0])
         evaluate.assert_called_once_with(user_id="u1", window_days=7, include_today=False)
 
     def test_daily_summary_returns_summary_message_and_updates_profile_summary(self) -> None:

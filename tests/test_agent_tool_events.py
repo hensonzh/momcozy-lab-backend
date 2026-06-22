@@ -195,6 +195,35 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertIn("loaded_skill_context:", request_context)
         self.assertNotIn("health_guidance_context:", request_context)
 
+    def test_background_milk_analysis_reminder_followup_uses_milk_intake_not_web_search(self) -> None:
+        message = "\n".join(
+            [
+                "这是后台奶量分析提醒后的自动接续，不是用户新输入的问题。",
+                "请基于下面的奶量分析上下文，用自然简短的话继续解释近期奶量偏低的具体情况。",
+                "如果用户继续追问奶量分析、追奶、稳奶、减奶或计划制定，必须按新版奶量管理流程核对必要信息，并通过奶量管理工具推进。",
+                "不要生成卡片、表单或清单，不要诊断或开药。",
+                "",
+                "已展示提醒：嗨，我注意到你近期奶量偏低，可以和你聊聊吗？",
+                "奶量分析上下文：已生成预置奶量分析；状态：奶量偏低；卡片摘要：数据统计：近7天总量=3600 ml",
+            ]
+        )
+        request = build_agent_request(
+            {"user_message": message, "locale": "zh-CN"},
+            {"context_state": ContextState(), "loaded_skill_ids": ["milk-management"]},
+        )
+
+        self.assertEqual(len([tool for tool in request["tools"] if tool.get("type") == "web_search"]), 1)
+        self.assertEqual(
+            request["tool_choice"],
+            {
+                "type": "allowed_tools",
+                "mode": "required",
+                "tools": [{"type": "function", "name": "milk_analysis_intake_manage"}],
+            },
+        )
+        request_context = request["input"][0]["content"][0]["text"]
+        self.assertNotIn("health_guidance_context:", request_context)
+
     def test_milk_plan_acceptance_forces_plan_preview_tool(self) -> None:
         context_state = ContextState()
         context_state.milk_management_state = {
@@ -219,35 +248,68 @@ class AgentToolEventTests(unittest.TestCase):
             },
         }
 
-        request = build_agent_request(
-            {"user_message": "先按每天多50ml来做", "locale": "zh-CN"},
-            {"context_state": context_state, "loaded_skill_ids": ["milk-management"]},
-        )
+        for message in ("先按每天多50ml来做", "现在生成计划", "现在制定计划", "生成奶量计划", "帮我生成奶量计划"):
+            with self.subTest(message=message):
+                request = build_agent_request(
+                    {"user_message": message, "locale": "zh-CN"},
+                    {"context_state": context_state, "loaded_skill_ids": ["milk-management"]},
+                )
 
-        self.assertEqual(
-            request["tool_choice"],
-            {
-                "type": "allowed_tools",
-                "mode": "required",
-                "tools": [{"type": "function", "name": "milk_plan_preview_create"}],
-            },
-        )
-        request_context = request["input"][0]["content"][0]["text"]
-        self.assertIn("milk_analysis_intake_stage: analysis_ready", request_context)
-        self.assertIn("milk_analysis_intake_plan_type: increase_milk", request_context)
-        self.assertIn("调用 milk_plan_preview_create", request_context)
-        self.assertNotIn("milk_workflow_step", request_context)
-        top_level_functions = [tool["name"] for tool in request["tools"] if tool.get("type") == "function"]
-        self.assertIn("milk_plan_preview_create", top_level_functions)
-        milk_namespace = next(tool for tool in request["tools"] if tool.get("type") == "namespace" and tool.get("name") == "milk_management")
-        self.assertNotIn("milk_plan_preview_create", [tool["name"] for tool in milk_namespace["tools"]])
+                self.assertEqual(
+                    request["tool_choice"],
+                    {
+                        "type": "allowed_tools",
+                        "mode": "required",
+                        "tools": [{"type": "function", "name": "milk_plan_preview_create"}],
+                    },
+                )
+                request_context = request["input"][0]["content"][0]["text"]
+                self.assertIn("milk_analysis_intake_stage: analysis_ready", request_context)
+                self.assertIn("milk_analysis_runtime_directive: offer_or_create_plan_preview", request_context)
+                self.assertIn("milk_analysis_intake_plan_type: increase_milk", request_context)
+                self.assertIn("调用 milk_plan_preview_create", request_context)
+                self.assertNotIn("milk_workflow_step", request_context)
+                top_level_functions = [tool["name"] for tool in request["tools"] if tool.get("type") == "function"]
+                self.assertIn("milk_plan_preview_create", top_level_functions)
+                milk_namespace = next(
+                    tool for tool in request["tools"] if tool.get("type") == "namespace" and tool.get("name") == "milk_management"
+                )
+                self.assertNotIn("milk_plan_preview_create", [tool["name"] for tool in milk_namespace["tools"]])
 
     def test_current_milk_plan_question_forces_calendar_query_tool(self) -> None:
-        request = build_agent_request(
-            {"user_message": "我当前的奶量计划是什么", "locale": "zh-CN", "message_sent_at": "2026-05-14 09:00:00"},
-            {"context_state": ContextState(), "loaded_skill_ids": ["milk-management"]},
-        )
+        for message in ("我当前的奶量计划是什么", "现在按哪个计划"):
+            with self.subTest(message=message):
+                request = build_agent_request(
+                    {"user_message": message, "locale": "zh-CN", "message_sent_at": "2026-05-14 09:00:00"},
+                    {"context_state": ContextState(), "loaded_skill_ids": ["milk-management"]},
+                )
 
+                self.assertEqual(
+                    request["tool_choice"],
+                    {
+                        "type": "allowed_tools",
+                        "mode": "required",
+                        "tools": [{"type": "function", "name": "milk_calendar_query"}],
+                    },
+                )
+                top_level_functions = [tool["name"] for tool in request["tools"] if tool.get("type") == "function"]
+                self.assertIn("milk_calendar_query", top_level_functions)
+                milk_namespace = next(
+                    tool for tool in request["tools"] if tool.get("type") == "namespace" and tool.get("name") == "milk_management"
+                )
+                self.assertNotIn("milk_calendar_query", [tool["name"] for tool in milk_namespace["tools"]])
+
+        context_state = ContextState()
+        context_state.milk_management_state = {
+            "analysis_intake": {
+                "stage": "analysis_ready",
+                "assessment_result": {"ok": True, "status": "milk_assessment_ready", "data": {}},
+            },
+        }
+        request = build_agent_request(
+            {"user_message": "现在按哪个计划", "locale": "zh-CN", "message_sent_at": "2026-05-14 09:00:00"},
+            {"context_state": context_state, "loaded_skill_ids": ["milk-management"]},
+        )
         self.assertEqual(
             request["tool_choice"],
             {
@@ -256,10 +318,39 @@ class AgentToolEventTests(unittest.TestCase):
                 "tools": [{"type": "function", "name": "milk_calendar_query"}],
             },
         )
-        top_level_functions = [tool["name"] for tool in request["tools"] if tool.get("type") == "function"]
-        self.assertIn("milk_calendar_query", top_level_functions)
-        milk_namespace = next(tool for tool in request["tools"] if tool.get("type") == "namespace" and tool.get("name") == "milk_management")
-        self.assertNotIn("milk_calendar_query", [tool["name"] for tool in milk_namespace["tools"]])
+
+    def test_pending_calendar_adjustment_confirmation_forces_calendar_mutate_tool(self) -> None:
+        context_state = ContextState()
+        context_state.milk_management_state = {
+            "pending_calendar_adjustment": {
+                "operation": "apply_reschedule",
+                "target_date": "2026-05-14",
+                "proposal": {
+                    "action": "reschedule_day_around_busy_windows",
+                    "user_id": "app-user",
+                    "target_date": "2026-05-14",
+                    "updates": [],
+                },
+                "idempotency_key": "calendar-adjustment-key",
+            },
+        }
+
+        request = build_agent_request(
+            {"user_message": "好的，保存", "locale": "zh-CN", "message_sent_at": "2026-05-14 09:00:00"},
+            {"context_state": context_state, "loaded_skill_ids": ["milk-management"]},
+        )
+
+        self.assertEqual(
+            request["tool_choice"],
+            {
+                "type": "allowed_tools",
+                "mode": "required",
+                "tools": [{"type": "function", "name": "milk_calendar_mutate"}],
+            },
+        )
+        request_context = request["input"][0]["content"][0]["text"]
+        self.assertIn("pending_calendar_adjustment_ready_for_save: true", request_context)
+        self.assertIn("pending_calendar_adjustment_operation: apply_reschedule", request_context)
 
     def test_milk_plan_context_answer_forces_intake_tool(self) -> None:
         context_state = ContextState()
@@ -296,6 +387,69 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertIn("milk_analysis_intake_current_field: infant_wet_diapers", request_context)
         self.assertIn("milk_analysis_intake_next_question: 宝宝近 24 小时尿量或尿布情况大概怎么样？", request_context)
         self.assertNotIn("milk_workflow_step", request_context)
+
+    def test_milk_intake_side_question_can_answer_before_resume_confirmation(self) -> None:
+        context_state = ContextState()
+        context_state.milk_management_state = {
+            "analysis_intake": {
+                "stage": "intake_collecting",
+                "goal": "milk_analysis",
+                "current_field": "infant_wet_diapers",
+                "next_question": "宝宝近 24 小时尿量或尿布情况大概怎么样？",
+                "checklist": [
+                    {"id": "records_7d", "status": "collected"},
+                    {"id": "infant_wet_diapers", "status": "missing"},
+                    {"id": "infant_state_or_satisfaction", "status": "missing"},
+                ],
+                "progress": {"index": 2, "total": 6, "display": "第 2/6 项"},
+                "workflow_control": {"allowed_next_action": "ask_user", "awaiting_user_input": True},
+                "field_guidance": {
+                    "why_this_field_matters": "尿布/尿量是判断宝宝短期摄入是否足够的重要信号。",
+                    "how_to_interpret_answers": "尿布正常会降低短期摄入风险。",
+                },
+                "joint_reasoning_guidance": ["7 天奶量偏低 + 尿布偏少时要更谨慎。"],
+            },
+        }
+
+        request = build_agent_request(
+            {"user_message": "为什么要问尿布？", "locale": "zh-CN"},
+            {"context_state": context_state, "loaded_skill_ids": ["milk-management"]},
+        )
+
+        self.assertEqual(request["tool_choice"], "auto")
+        request_context = request["input"][0]["content"][0]["text"]
+        self.assertIn("milk_analysis_intake_progress: 2/6", request_context)
+        self.assertIn("milk_analysis_current_field_why: 尿布/尿量是判断宝宝短期摄入是否足够的重要信号。", request_context)
+        self.assertIn("回复结尾必须逐字询问：我们要继续刚才的奶量分析流程吗？", request_context)
+
+    def test_milk_intake_resume_confirmation_forces_intake_tool(self) -> None:
+        context_state = ContextState()
+        context_state.milk_management_state = {
+            "analysis_intake": {
+                "stage": "intake_collecting",
+                "goal": "milk_analysis",
+                "current_field": "infant_wet_diapers",
+                "next_question": "宝宝近 24 小时尿量或尿布情况大概怎么样？",
+                "checklist": [
+                    {"id": "records_7d", "status": "collected"},
+                    {"id": "infant_wet_diapers", "status": "missing"},
+                ],
+            },
+        }
+
+        request = build_agent_request(
+            {"user_message": "继续刚才的奶量分析", "locale": "zh-CN"},
+            {"context_state": context_state, "loaded_skill_ids": ["milk-management"]},
+        )
+
+        self.assertEqual(
+            request["tool_choice"],
+            {
+                "type": "allowed_tools",
+                "mode": "required",
+                "tools": [{"type": "function", "name": "milk_analysis_intake_manage"}],
+            },
+        )
 
     def test_new_milk_plan_request_without_state_starts_intake_tool(self) -> None:
         request = build_agent_request(
@@ -341,9 +495,10 @@ class AgentToolEventTests(unittest.TestCase):
             },
         )
         request_context = request["input"][0]["content"][0]["text"]
-        self.assertIn("milk_analysis_fact_read_tool: milk_status_query", request_context)
-        self.assertIn("上一轮只读取了奶量事实", request_context)
-        self.assertIn("不要自行拼接睡眠、压力、经期、生病、吸奶间隔", request_context)
+        self.assertNotIn("milk_analysis_fact_read_tool", request_context)
+        self.assertNotIn("milk_analysis_fact_read_status", request_context)
+        self.assertNotIn("上一轮只读取了奶量事实", request_context)
+        self.assertNotIn("不要自行拼接睡眠、压力、经期、生病、吸奶间隔", request_context)
 
     def test_milk_domain_record_completeness_answer_without_state_forces_intake_tool(self) -> None:
         context_state = ContextState()
@@ -450,6 +605,26 @@ class AgentToolEventTests(unittest.TestCase):
                     ],
                 },
                 {
+                    "id": "resp-quick-window",
+                    "output": [
+                        {
+                            "type": "function_call",
+                            "call_id": "call-quick-window",
+                            "name": "ui_quick_replies_create",
+                            "arguments": json.dumps(
+                                {
+                                    "replies": [
+                                        {"text": "尿布挺多的"},
+                                        {"text": "尿布有点少"},
+                                        {"text": "不太确定"},
+                                    ]
+                                },
+                                ensure_ascii=False,
+                            ),
+                        }
+                    ],
+                },
+                {
                     "id": "resp-final",
                     "output": [
                         {
@@ -487,15 +662,37 @@ class AgentToolEventTests(unittest.TestCase):
                 "current_field": "infant_wet_diapers",
                 "next_question": "宝宝近 24 小时尿量或尿布情况大概怎么样？",
                 "remaining_count": 1,
+                "workflow_control": {"allowed_next_action": "ask_user", "awaiting_user_input": True},
+                "quick_replies": [
+                    {"text": "尿布挺多的"},
+                    {"text": "尿布有点少"},
+                    {"text": "不太确定"},
+                ],
                 "executed_step": "intake",
                 "next_tool": "milk_analysis_intake_manage",
             },
             "assistant_followup": {"message": "宝宝近 24 小时尿量或尿布情况大概怎么样？"},
         }
 
+        def execute_tool(name: str, arguments: dict[str, object], inputs: dict[str, object]) -> dict[str, object]:
+            if name == "ui_quick_replies_create":
+                return {
+                    "ok": True,
+                    "tool_name": "ui_quick_replies_create",
+                    "result": {
+                        "status": "quick_replies_ready",
+                        "quick_replies": [
+                            {"text": "尿布挺多的"},
+                            {"text": "尿布有点少"},
+                            {"text": "不太确定"},
+                        ],
+                    },
+                }
+            return {"ok": True, "tool_name": "milk_analysis_intake_manage", "result": intake_result}
+
         with patch(
             "momcozy_agent.agents._execute_project_tool",
-            return_value={"ok": True, "tool_name": "milk_analysis_intake_manage", "result": intake_result},
+            side_effect=execute_tool,
         ):
             run_agent_loop(
                 client,
@@ -518,9 +715,23 @@ class AgentToolEventTests(unittest.TestCase):
                 "tools": [{"type": "function", "name": "milk_analysis_intake_manage"}],
             },
         )
-        self.assertNotIn("tools", second_request)
-        self.assertNotIn("tool_choice", second_request)
+        self.assertEqual(
+            second_request["tool_choice"],
+            {
+                "type": "allowed_tools",
+                "mode": "required",
+                "tools": [{"type": "function", "name": "ui_quick_replies_create"}],
+            },
+        )
+        self.assertEqual(
+            [tool["name"] for tool in second_request["tools"] if tool.get("type") == "function"],
+            ["ui_quick_replies_create"],
+        )
+        self.assertNotIn("milk_analysis_intake_manage", json.dumps(second_request["tools"], ensure_ascii=False))
         self.assertEqual(second_request["input"][0]["type"], "function_call_output")
+        third_request = client.responses.requests[2]
+        self.assertNotIn("tools", third_request)
+        self.assertNotIn("tool_choice", third_request)
 
     def test_milk_intake_ready_forces_analysis_after_tool_output(self) -> None:
         context_state = ContextState()
@@ -674,6 +885,46 @@ class AgentToolEventTests(unittest.TestCase):
         )
         top_level_functions = [tool["name"] for tool in client.responses.requests[1]["tools"] if tool.get("type") == "function"]
         self.assertIn("milk_plan_preview_create", top_level_functions)
+
+    def test_milk_analysis_ready_simple_acceptance_does_not_return_to_intake(self) -> None:
+        context_state = ContextState()
+        context_state.milk_management_state = {
+            "analysis_intake": {
+                "stage": "analysis_ready",
+                "goal": "milk_analysis",
+                "plan_type": "increase_milk",
+                "checklist": [
+                    {"id": field, "status": "collected"}
+                    for field in [
+                        "records_7d",
+                        "infant_wet_diapers",
+                        "infant_state_or_satisfaction",
+                        "infant_growth_signal",
+                        "maternal_red_flags",
+                        "maternal_breast_comfort",
+                    ]
+                ],
+                "analysis_context": {"records_snapshot": {"status": "collected", "valid_days": 7}},
+                "assessment_result": {"ok": True, "status": "milk_assessment_ready", "data": {}},
+            },
+        }
+
+        request = build_agent_request(
+            {"user_message": "好的", "locale": "zh-CN"},
+            {"context_state": context_state, "loaded_skill_ids": ["milk-management"]},
+        )
+
+        self.assertEqual(
+            request["tool_choice"],
+            {
+                "type": "allowed_tools",
+                "mode": "required",
+                "tools": [{"type": "function", "name": "milk_plan_preview_create"}],
+            },
+        )
+        request_context = request["input"][0]["content"][0]["text"]
+        self.assertNotIn("任何用户追问都必须来自 milk_analysis_intake_manage", request_context)
+        self.assertNotIn("milk_analysis_intake_next_question", request_context)
 
     def test_milk_analysis_evaluate_does_not_force_plan_preview_for_analysis_only_request(self) -> None:
         context_state = ContextState()
@@ -1468,8 +1719,9 @@ class AgentToolEventTests(unittest.TestCase):
             json={
                 "thread_id": "thread-ibclc-card",
                 "user_id": "old-ibclc-user",
-                "event_type": "ibclc_completed",
+                "event_type": "ibclc_consult_completed",
                 "label": "IBCLC 已结束",
+                "metadata": {"source": "ibclc-chat"},
             },
         )
 
@@ -1477,6 +1729,34 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertEqual(len(creating_session.context_state.client_events), 1)
         self.assertIn("IBCLC 已结束", creating_session.context_state.client_events[0])
         self.assertEqual(legacy_session.context_state.client_events, ["old empty event"])
+
+    def test_client_event_with_wrong_user_id_stays_in_requested_namespace_unless_legacy_ibclc(self) -> None:
+        try:
+            from fastapi.testclient import TestClient
+        except ImportError:
+            self.skipTest("fastapi test client is not installed")
+
+        runtime = ChatRuntime(object())
+        creating_session = runtime.get_session("thread-client-event-fallback", user_id="demo-phone-a")
+        creating_session.previous_response_id = "resp-card"
+        stale_session = runtime.get_session("thread-client-event-fallback", user_id="stale-device-user")
+        client = TestClient(create_app(runtime=runtime))
+
+        response = client.post(
+            "/api/client-event",
+            json={
+                "thread_id": "thread-client-event-fallback",
+                "user_id": "stale-device-user",
+                "event_type": "pump_session_ended",
+                "label": "吸奶已结束",
+                "metadata": {"source": "pump-session"},
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(creating_session.context_state.client_events, [])
+        self.assertEqual(len(stale_session.context_state.client_events), 1)
+        self.assertIn("吸奶已结束", stale_session.context_state.client_events[0])
 
     def test_context_clone_preserves_milk_and_birth_intake_state(self) -> None:
         state = ContextState()
@@ -2210,6 +2490,147 @@ class AgentToolEventTests(unittest.TestCase):
             ],
         )
 
+    def test_milk_intake_uses_model_quick_replies_window_without_duplicate_events(self) -> None:
+        intake_result = {
+            "ok": True,
+            "status": "milk_analysis_intake_collecting",
+            "summary": "奶量分析信息采集中。",
+            "data": {
+                "intake_state": {
+                    "stage": "intake_collecting",
+                    "current_field": "infant_wet_diapers",
+                    "next_question": "宝宝近 24 小时尿量或尿布情况大概怎么样？",
+                    "checklist": [
+                        {"id": "records_7d", "status": "collected"},
+                        {"id": "infant_wet_diapers", "status": "missing"},
+                    ],
+                },
+                "missing_fields": ["infant_wet_diapers"],
+                "current_field": "infant_wet_diapers",
+                "next_question": "宝宝近 24 小时尿量或尿布情况大概怎么样？",
+                "workflow_control": {"allowed_next_action": "ask_user", "awaiting_user_input": True},
+                "quick_replies": [
+                    {"text": "尿布挺多的"},
+                    {"text": "尿布有点少"},
+                    {"text": "不太确定"},
+                ],
+                "executed_step": "intake",
+                "next_tool": "milk_analysis_intake_manage",
+            },
+        }
+
+        async def collect_events() -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+            client = _FakeStreamingClient(
+                [
+                    {
+                        "id": "resp-intake",
+                        "output": [
+                            {
+                                "type": "function_call",
+                                "id": "item-intake",
+                                "call_id": "call-intake",
+                                "name": "milk_analysis_intake_manage",
+                                "arguments": json.dumps({"user_update": "记录是完整的"}, ensure_ascii=False),
+                            }
+                        ],
+                    },
+                    {
+                        "id": "resp-quick",
+                        "output": [
+                            {
+                                "type": "function_call",
+                                "id": "item-quick",
+                                "call_id": "call-quick",
+                                "name": "ui_quick_replies_create",
+                                "arguments": json.dumps(
+                                    {
+                                        "replies": [
+                                            {"text": "尿布挺多的"},
+                                            {"text": "尿布有点少"},
+                                            {"text": "不太确定"},
+                                        ]
+                                    },
+                                    ensure_ascii=False,
+                                ),
+                            }
+                        ],
+                    },
+                    {
+                        "id": "resp-final",
+                        "output": [
+                            {
+                                "type": "message",
+                                "content": [
+                                    {
+                                        "type": "output_text",
+                                        "text": "好，那这个下降趋势更值得认真看一下。宝宝近 24 小时尿量或尿布情况大概怎么样？",
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                ]
+            )
+            runtime = ChatRuntime(client, model="test-model")
+            session = runtime.get_session("thread-milk-quick-window")
+            session.loaded_skill_ids = ["milk-management"]
+
+            def execute_tool(name: str, arguments: dict[str, object], inputs: dict[str, object]) -> dict[str, object]:
+                if name == "ui_quick_replies_create":
+                    return {
+                        "ok": True,
+                        "tool_name": "ui_quick_replies_create",
+                        "result": {
+                            "status": "quick_replies_ready",
+                            "quick_replies": [
+                                {"text": "尿布挺多的"},
+                                {"text": "尿布有点少"},
+                                {"text": "不太确定"},
+                            ],
+                        },
+                    }
+                return {"ok": True, "tool_name": "milk_analysis_intake_manage", "result": intake_result}
+
+            with patch("momcozy_agent.agents._execute_project_tool", side_effect=execute_tool):
+                stream = stream_ag_ui_events(
+                    {"thread_id": "thread-milk-quick-window", "run_id": "run-milk-quick-window"},
+                    {"user_message": "记录是完整的", "locale": "zh-CN"},
+                    runtime,
+                )
+                events = [event async for event in stream]
+            return events, client.responses.requests
+
+        events, requests = asyncio.run(collect_events())
+        event_types = [str(event.get("type")) for event in events]
+        quick_events = [event for event in events if event.get("type") == "QUICK_REPLIES"]
+
+        self.assertEqual(len(requests), 3)
+        self.assertEqual(
+            requests[1]["tool_choice"],
+            {
+                "type": "allowed_tools",
+                "mode": "required",
+                "tools": [{"type": "function", "name": "ui_quick_replies_create"}],
+            },
+        )
+        self.assertEqual(
+            [tool["name"] for tool in requests[1]["tools"] if tool.get("type") == "function"],
+            ["ui_quick_replies_create"],
+        )
+        self.assertNotIn("milk_analysis_intake_manage", json.dumps(requests[1]["tools"], ensure_ascii=False))
+        self.assertNotIn("tools", requests[2])
+        self.assertEqual(len(quick_events), 1)
+        self.assertLess(event_types.index("TEXT_MESSAGE_END"), event_types.index("QUICK_REPLIES"))
+        self.assertLess(event_types.index("QUICK_REPLIES"), event_types.index("RUN_FINISHED"))
+        self.assertEqual(
+            quick_events[0]["replies"],
+            [
+                {"text": "尿布挺多的"},
+                {"text": "尿布有点少"},
+                {"text": "不太确定"},
+            ],
+        )
+
     def test_birth_journey_intake_guides_quick_replies_after_tool_output(self) -> None:
         async def collect_events() -> tuple[list[dict[str, object]], list[dict[str, object]]]:
             client = _FakeStreamingClient(
@@ -2880,6 +3301,46 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertNotIn("<tool_use>", text)
         self.assertNotIn("recipient_name", text)
         self.assertNotIn("表单我看到了", text)
+
+    def test_stream_strips_pseudo_tool_call_markup_but_keeps_reply_text(self) -> None:
+        pseudo_tool_text = (
+            '<tool_call>ui_quick_replies_create {"replies":[{"text":"尿布挺多的"},{"text":"尿布有点少"},{"text":"不太确定"}]}</tool_call>'
+            "好，那这个下降趋势就更值得认真看一下。宝宝近 24 小时尿量或尿布情况大概怎么样？"
+        )
+
+        async def collect_events() -> list[dict[str, object]]:
+            client = _FakeStreamingClient(
+                [
+                    {
+                        "id": "resp-pseudo-tool-call",
+                        "output": [
+                            {
+                                "type": "message",
+                                "content": [{"type": "output_text", "text": pseudo_tool_text}],
+                            }
+                        ],
+                    },
+                ]
+            )
+            runtime = ChatRuntime(client, model="test-model")
+            stream = stream_ag_ui_events(
+                {"thread_id": "thread-1", "run_id": "run-pseudo-tool-call"},
+                {"user_message": "记录是完整的", "locale": "zh-CN"},
+                runtime,
+            )
+            return [event async for event in stream]
+
+        events = asyncio.run(collect_events())
+        text = "".join(
+            str(event.get("delta") or "")
+            for event in events
+            if event.get("type") == "TEXT_MESSAGE_CONTENT"
+        )
+
+        self.assertIn("好，那这个下降趋势", text)
+        self.assertIn("尿量或尿布情况", text)
+        self.assertNotIn("<tool_call>", text)
+        self.assertNotIn("ui_quick_replies_create", text)
 
 
 def _birth_journey_lifestyle_state() -> dict[str, object]:

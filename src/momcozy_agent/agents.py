@@ -39,6 +39,10 @@ MAX_INLINE_CITATION_MARKER_CHARS = 240
 QUICK_REPLIES_TOOL_NAME = "ui_quick_replies_create"
 PSEUDO_TOOL_USE_OPEN = "<tool_use"
 PSEUDO_TOOL_USE_RE = re.compile(r"<tool_use>\s*(\{[\s\S]*?\})\s*</tool_use>", re.IGNORECASE)
+PSEUDO_TOOL_CALL_BLOCKS = (
+    ("<tool_call", "</tool_call>"),
+    ("«tool_call»", "«/tool_call»"),
+)
 MILK_WRITE_TOOL_NAMES = {
     "milk_record_mutate",
     "milk_plan_mutate",
@@ -1081,7 +1085,20 @@ def safe_tool_result(result: dict[str, Any]) -> dict[str, Any]:
             if isinstance(tool_data.get("milk_flow_decision"), dict):
                 safe["milk_flow_decision"] = tool_data["milk_flow_decision"]
             if result.get("tool_name") == "milk_analysis_intake_manage":
-                for key in ("checklist", "missing_fields", "current_field", "next_question", "remaining_count", "executed_step", "next_tool"):
+                for key in (
+                    "checklist",
+                    "missing_fields",
+                    "current_field",
+                    "next_question",
+                    "remaining_count",
+                    "executed_step",
+                    "next_tool",
+                    "workflow_control",
+                    "progress",
+                    "field_guidance",
+                    "joint_reasoning_guidance",
+                    "quick_replies",
+                ):
                     if key in tool_data:
                         safe[key] = tool_data[key]
                 if isinstance(tool_data.get("analysis_context"), dict):
@@ -1993,6 +2010,7 @@ def _compact_milk_analysis_intake_output(safe: dict[str, Any], original_result: 
             next_question,
             field_id=intake.get("current_field"),
             remaining_count=intake.get("remaining_count"),
+            progress=intake.get("progress"),
         )
     return _drop_empty(compact)
 
@@ -2072,6 +2090,8 @@ def _compact_milk_intake_flow(data: dict[str, Any]) -> dict[str, Any]:
         {
             "stage": flow_state.get("stage"),
             "executed_step": data.get("executed_step"),
+            "workflow_control": data.get("workflow_control") if isinstance(data.get("workflow_control"), dict) else flow_state.get("workflow_control"),
+            "progress": data.get("progress") if isinstance(data.get("progress"), dict) else flow_state.get("progress"),
             "completed_fields": [item.get("id") for item in checklist if isinstance(item, dict) and item.get("status") == "collected"],
             "missing_fields": data.get("missing_fields") if isinstance(data.get("missing_fields"), list) else [
                 item.get("id") for item in checklist if isinstance(item, dict) and item.get("status") != "collected"
@@ -2079,6 +2099,8 @@ def _compact_milk_intake_flow(data: dict[str, Any]) -> dict[str, Any]:
             "current_field": data.get("current_field") or flow_state.get("current_field"),
             "next_question": data.get("next_question") or flow_state.get("next_question"),
             "remaining_count": data.get("remaining_count"),
+            "field_guidance": data.get("field_guidance") if isinstance(data.get("field_guidance"), dict) else flow_state.get("field_guidance"),
+            "joint_reasoning_guidance": data.get("joint_reasoning_guidance") if isinstance(data.get("joint_reasoning_guidance"), list) else flow_state.get("joint_reasoning_guidance"),
         }
     )
 
@@ -2147,8 +2169,8 @@ def _compact_milk_assessment_output(safe: dict[str, Any], original_result: dict[
                 "奶量分析已经完成，信息采集已经结束。最终回复只能包含两部分："
                 "1) 用 1-2 句说明当前判断和适合的方向；"
                 "2) 只询问用户是否现在生成奶量计划。"
-                "不要继续追问任何新的诊断、排程或计划细节；不要把记录节奏、分析素材或计划排程参考改写成新问题。"
-                "任何用户追问都必须来自 milk_analysis_intake_manage 当前返回的 next_question。"
+                "不要继续追问任何新的诊断、排程或计划细节；不要把记录节奏、分析素材或计划排程参考改写成新问题；"
+                "不要使用“重新追问”“不重新追问”“最后再问”等流程控制话术。"
                 "不要说已经开始制定计划，不要直接给完整计划，也不要调用或暗示已经生成计划卡片。"
             )
     return _drop_empty(compact)
@@ -2444,11 +2466,23 @@ def _milk_question_for_missing_field(field_id: str) -> str:
     return questions.get(str(field_id or "").strip(), "")
 
 
-def _milk_single_question_final_response_instruction(question: str, *, field_id: Any = None, remaining_count: Any = None) -> str:
+def _milk_single_question_final_response_instruction(
+    question: str,
+    *,
+    field_id: Any = None,
+    remaining_count: Any = None,
+    progress: Any = None,
+) -> str:
     question = str(question or "").strip()
     if not question:
         return ""
     field_text = str(field_id or "").strip()
+    progress_text = ""
+    if isinstance(progress, dict):
+        index = progress.get("index")
+        total = progress.get("total")
+        if isinstance(index, int) and isinstance(total, int) and total > 0:
+            progress_text = f" 当前采集进度是第 {index}/{total} 项；不要根据剩余项数改写成“最后一个问题”。"
     count_text = ""
     if isinstance(remaining_count, int) and remaining_count > 0:
         count_text = f" 当前内部仍有 {remaining_count} 项待确认，但本轮只问当前这一项。"
@@ -2457,6 +2491,10 @@ def _milk_single_question_final_response_instruction(question: str, *, field_id:
         "但必须只追问下面这一项。"
         "不要说“最后一个”“最后再问”“只差一个”“再确认最后一个”；"
         "不要同时追问其它缺失项，不要输出奶量结论，不要给追奶、稳奶或减奶计划。"
+        "在输出最终回复前，必须先调用 ui_quick_replies_create 创建恰好 3 个快捷输入；"
+        "快捷输入优先使用工具结果里的 quick_replies，不要把快捷输入写进正文。"
+        "不要输出 <tool_call>、</tool_call>、«tool_call» 或 «/tool_call»。"
+        f"{progress_text}"
         f"{count_text}"
         + (f"\n\n当前字段：{field_text}" if field_text else "")
         + f"\n\n当前只问：\n{question}"
@@ -3288,6 +3326,9 @@ def _build_response_request(
             required_tool = _required_birth_prep_tool(inputs) or _required_milk_management_tool(inputs, options)
         if required_tool:
             tools = _promote_deferred_function_tool(tools, required_tool)
+        allowed_tool_names = _allowed_tool_names_from_options(options)
+        if allowed_tool_names:
+            tools = _keep_only_function_tools(tools, allowed_tool_names)
         request["tools"] = tools
         loaded_skill_ids = options.get("loaded_skill_ids")
         if not isinstance(loaded_skill_ids, list):
@@ -3356,11 +3397,40 @@ def _tool_calls_with_quick_replies_last(tool_calls: list[dict[str, Any]]) -> lis
     )
 
 
+def _tool_results_require_quick_replies_window(results: list[dict[str, Any]]) -> bool:
+    if any(str(result.get("tool_name") or "") == QUICK_REPLIES_TOOL_NAME for result in results):
+        return False
+    return any(_tool_result_requires_quick_replies_window(result) for result in results)
+
+
+def _tool_result_requires_quick_replies_window(result: dict[str, Any]) -> bool:
+    tool_name = str(result.get("tool_name") or "")
+    if tool_name not in {"milk_analysis_intake_manage", "milk_analysis_evaluate", "milk_plan_preview_create"}:
+        return False
+    tool_result = result.get("result") if isinstance(result.get("result"), dict) else {}
+    status = str(tool_result.get("status") or "").strip()
+    if status not in {
+        "milk_analysis_intake_collecting",
+        "milk_analysis_intake_needs_records",
+        "milk_plan_needs_clinical_context",
+    }:
+        return False
+    workflow_control = _workflow_control_from_tool_result(result)
+    if not workflow_control:
+        return False
+    return _workflow_control_requires_user_turn(workflow_control)
+
+
 def _tool_result_disables_followup_tools(result: dict[str, Any]) -> bool:
     tool_name = str(result.get("tool_name") or "")
+    if tool_name == QUICK_REPLIES_TOOL_NAME:
+        return True
     tool_result = result.get("result") if isinstance(result.get("result"), dict) else {}
     status = str(tool_result.get("status") or "").strip()
     data = tool_result.get("data") if isinstance(tool_result.get("data"), dict) else {}
+    workflow_control = _workflow_control_from_tool_result(result)
+    if workflow_control:
+        return _workflow_control_requires_user_turn(workflow_control)
     if tool_name == "birth_journey_intake_manage":
         return status == "blocked_by_symptoms" or isinstance(tool_result.get("auto_tool_result"), dict)
     if tool_name == "birth_journey_plan_card_create" and isinstance(tool_result.get("card"), dict):
@@ -3392,8 +3462,32 @@ def _tool_result_disables_followup_tools(result: dict[str, Any]) -> bool:
     return False
 
 
+def _workflow_control_from_tool_result(result: dict[str, Any]) -> dict[str, Any]:
+    tool_result = result.get("result") if isinstance(result.get("result"), dict) else {}
+    data = tool_result.get("data") if isinstance(tool_result.get("data"), dict) else {}
+    workflow_control = data.get("workflow_control") if isinstance(data.get("workflow_control"), dict) else {}
+    return workflow_control
+
+
+def _workflow_control_requires_user_turn(workflow_control: dict[str, Any]) -> bool:
+    action = str(workflow_control.get("allowed_next_action") or "").strip()
+    if action == "ask_user":
+        return True
+    if workflow_control.get("awaiting_user_input") is True:
+        return True
+    contract = workflow_control.get("response_contract") if isinstance(workflow_control.get("response_contract"), dict) else {}
+    return contract.get("do_not_continue_tools_before_user_answer") is True
+
+
 def _disabled_tool_names_from_options(options: BuildAgentRequestOptions) -> set[str]:
     value = options.get("_disabled_tool_names")  # type: ignore[typeddict-item]
+    if not isinstance(value, list):
+        return set()
+    return {str(item).strip() for item in value if str(item or "").strip()}
+
+
+def _allowed_tool_names_from_options(options: BuildAgentRequestOptions) -> set[str]:
+    value = options.get("_allowed_tool_names")  # type: ignore[typeddict-item]
     if not isinstance(value, list):
         return set()
     return {str(item).strip() for item in value if str(item or "").strip()}
@@ -3416,6 +3510,31 @@ def _remove_function_tools(tools: list[dict[str, Any]], disabled_names: set[str]
             next_tools.append(copied)
             continue
         next_tools.append(tool)
+    return next_tools
+
+
+def _keep_only_function_tools(tools: list[dict[str, Any]], allowed_names: set[str]) -> list[dict[str, Any]]:
+    if not allowed_names:
+        return tools
+    next_tools: list[dict[str, Any]] = []
+    for tool in tools:
+        if tool.get("type") == "function":
+            if str(tool.get("name") or "") in allowed_names:
+                next_tools.append(tool)
+            continue
+        if tool.get("type") == "namespace" and isinstance(tool.get("tools"), list):
+            nested = [
+                item
+                for item in tool["tools"]
+                if isinstance(item, dict)
+                and item.get("type") == "function"
+                and str(item.get("name") or "") in allowed_names
+            ]
+            if nested:
+                copied = dict(tool)
+                copied["tools"] = nested
+                next_tools.append(copied)
+            continue
     return next_tools
 
 
@@ -3463,27 +3582,29 @@ def _tool_choice_with_milk_plan_contract(
 
 
 def _required_milk_management_tool(inputs: RuntimeInputs, options: BuildAgentRequestOptions) -> str | None:
-    if _user_message_requests_milk_calendar_plan(inputs.get("user_message")):
-        return "milk_calendar_query"
+    user_message = inputs.get("user_message")
     state = _milk_management_state_from_options(options)
+    if _pending_calendar_adjustment_ready_for_save(state) and _user_message_confirms_calendar_adjustment_save(user_message):
+        return "milk_calendar_mutate"
     intake = state.get("analysis_intake") if isinstance(state.get("analysis_intake"), dict) else {}
-    if not intake and _user_message_starts_milk_analysis_flow(inputs.get("user_message")):
+    if intake:
+        if _milk_analysis_intake_ready_for_save(intake) and _user_message_confirms_milk_plan_save(user_message):
+            return "milk_plan_mutate"
+        if _milk_analysis_intake_has_missing_fields(intake):
+            if _user_message_pauses_milk_intake_for_side_question(user_message, intake):
+                return None
+            return "milk_analysis_intake_manage"
+        stage = str(intake.get("stage") or "").strip()
+        if stage == "ready_to_evaluate":
+            return "milk_analysis_evaluate"
+        if stage == "analysis_ready" and _user_message_accepts_milk_plan_preview(user_message):
+            return "milk_plan_preview_create"
+    if _user_message_requests_milk_calendar_plan(user_message):
+        return "milk_calendar_query"
+    if not intake and _user_message_starts_milk_analysis_flow(user_message):
         return "milk_analysis_intake_manage"
     if not intake and _user_message_should_resume_milk_analysis_intake(inputs, options, state):
         return "milk_analysis_intake_manage"
-    if not intake:
-        return None
-    if _milk_analysis_intake_ready_for_save(intake):
-        return "milk_plan_mutate" if _user_message_confirms_milk_plan_save(inputs.get("user_message")) else None
-    if _milk_analysis_intake_has_missing_fields(intake):
-        return "milk_analysis_intake_manage"
-    stage = str(intake.get("stage") or "").strip()
-    if stage == "ready_to_evaluate" and not isinstance(intake.get("assessment_result"), dict):
-        return "milk_analysis_evaluate"
-    if stage == "ready_to_evaluate":
-        return "milk_analysis_evaluate"
-    if stage == "analysis_ready" and _user_message_accepts_milk_plan_preview(inputs.get("user_message")):
-        return "milk_plan_preview_create"
     return None
 
 
@@ -3502,6 +3623,25 @@ def _milk_management_state_from_options(options: BuildAgentRequestOptions) -> di
     if isinstance(context_state, ContextState) and isinstance(context_state.milk_management_state, dict):
         return context_state.milk_management_state
     return {}
+
+
+def _pending_calendar_adjustment_ready_for_save(state: dict[str, Any]) -> bool:
+    pending = state.get("pending_calendar_adjustment") if isinstance(state.get("pending_calendar_adjustment"), dict) else {}
+    if not pending:
+        return False
+    operation = str(pending.get("operation") or "").strip()
+    proposal = pending.get("proposal") if isinstance(pending.get("proposal"), dict) else {}
+    return operation in {"apply_adjustment", "apply_reschedule"} and bool(proposal)
+
+
+def _user_message_confirms_calendar_adjustment_save(message: Any) -> bool:
+    text = str(message or "").strip()
+    if not text:
+        return False
+    negative = ("不要", "不用", "先不", "暂不", "取消", "不保存", "不同步", "再改", "先别")
+    if any(token in text for token in negative):
+        return False
+    return any(token in text for token in ("保存", "确认", "同步", "应用", "执行", "好的", "可以", "行", "就这样", "按这个"))
 
 
 def _user_message_should_resume_milk_analysis_intake(
@@ -3591,11 +3731,72 @@ def _milk_analysis_intake_has_missing_fields(intake: dict[str, Any]) -> bool:
     return str(intake.get("stage") or "").strip() == "intake_collecting"
 
 
+def _user_message_pauses_milk_intake_for_side_question(message: Any, intake: dict[str, Any]) -> bool:
+    text = str(message or "").strip()
+    if not text:
+        return False
+    if _user_message_confirms_milk_intake_resume(text):
+        return False
+    current_field = str(intake.get("current_field") or "").strip()
+    if _user_message_directly_answers_milk_intake_field(text, current_field):
+        return False
+    return _user_message_looks_like_question(text)
+
+
+def _user_message_confirms_milk_intake_resume(message: Any) -> bool:
+    text = str(message or "").strip()
+    if not text:
+        return False
+    return any(token in text for token in ("继续", "回到", "接着", "可以继续", "继续刚才", "继续奶量分析", "要继续"))
+
+
+def _user_message_looks_like_question(text: str) -> bool:
+    if "?" in text or "？" in text:
+        return True
+    question_terms = (
+        "为什么",
+        "怎么",
+        "怎么办",
+        "如何",
+        "是不是",
+        "会不会",
+        "能不能",
+        "可以吗",
+        "需要吗",
+        "什么意思",
+        "啥意思",
+        "原因",
+        "影响",
+        "有没有必要",
+    )
+    return any(term in text for term in question_terms)
+
+
+def _user_message_directly_answers_milk_intake_field(text: str, current_field: str) -> bool:
+    if _user_message_answers_milk_record_completeness(text):
+        return current_field in {"", "records_7d"}
+    if current_field == "infant_wet_diapers":
+        return any(term in text for term in ("尿布", "尿量", "小便", "尿")) and any(
+            term in text for term in ("正常", "多", "少", "不少", "挺", "片", "次", "湿", "不确定")
+        )
+    if current_field == "infant_state_or_satisfaction":
+        return any(term in text for term in ("精神", "状态", "吃奶", "吃完", "安稳", "哭闹", "满足", "烦躁"))
+    if current_field == "infant_growth_signal":
+        return any(term in text for term in ("体重", "增长", "称重", "长得", "没称"))
+    if current_field == "maternal_red_flags":
+        return any(term in text for term in ("发热", "发烧", "寒战", "红肿", "硬块", "疼", "痛", "没有", "没", "无"))
+    if current_field == "maternal_breast_comfort":
+        return any(term in text for term in ("乳房", "吸完", "亲喂后", "舒服", "胀", "涨", "排不空", "疼", "痛"))
+    return _user_message_looks_like_milk_analysis_followup_answer(text)
+
+
 def _user_message_requests_milk_calendar_plan(message: Any) -> bool:
     text = str(message or "").strip()
     if not text:
         return False
     normalized = text.lower()
+    if _user_message_has_milk_plan_creation_intent(text):
+        return False
     creation_terms = ("制定", "生成", "创建", "新建", "做一个", "做一版", "帮我做", "帮我安排")
     explicit_query_terms = ("当前", "现在", "正在", "采用", "执行", "已有", "原计划", "查看", "查", "看看", "什么", "哪个", "安排", "日程")
     date_terms = ("今天", "明天", "后天", "本周", "这周", "下周", "周一", "周二", "周三", "周四", "周五", "周六", "周日", "星期", "接下来", "未来")
@@ -3616,6 +3817,36 @@ def _user_message_requests_milk_calendar_plan(message: Any) -> bool:
     if "计划" in text and has_current_or_date and any(term in text for term in current_terms):
         return True
     return False
+
+
+def _user_message_has_milk_plan_creation_intent(text: str) -> bool:
+    normalized = text.strip().lower()
+    if not normalized:
+        return False
+    explicit_creation_phrases = (
+        "生成计划",
+        "制定计划",
+        "创建计划",
+        "新建计划",
+        "做计划",
+        "做一个计划",
+        "做一版计划",
+        "生成奶量计划",
+        "制定奶量计划",
+        "生成追奶计划",
+        "制定追奶计划",
+        "生成稳奶计划",
+        "制定稳奶计划",
+        "生成减奶计划",
+        "制定减奶计划",
+        "帮我生成",
+        "帮我制定",
+        "帮我做",
+        "milk plan",
+    )
+    if any(phrase in normalized for phrase in explicit_creation_phrases):
+        return True
+    return "计划" in normalized and any(term in normalized for term in ("生成", "制定", "创建", "新建", "做一版"))
 
 
 def _user_message_starts_milk_analysis_flow(message: Any) -> bool:
@@ -3662,6 +3893,8 @@ def _user_message_accepts_milk_plan_preview(message: Any) -> bool:
     negative = ("不要", "不用", "先不", "暂不", "不做", "不生成", "不继续", "算了")
     if any(token in text for token in negative):
         return False
+    if _user_message_has_milk_plan_creation_intent(text):
+        return True
     if _workflow_text_accepts_plan_for_request(text):
         return True
     return any(token in text for token in ("每天多", "每天少", "做到", "目标", "追奶计划", "稳奶计划", "减奶计划", "生成计划", "制定计划", "做计划"))
@@ -3983,7 +4216,13 @@ def run_agent_loop(
             next_inputs["previous_response_id"] = response_id
 
         next_options = dict(options)
-        if _should_disable_tools_after_tool_results(executed_tool_results):
+        next_options.pop("_required_tool_name", None)  # type: ignore[typeddict-item]
+        next_options.pop("_allowed_tool_names", None)  # type: ignore[typeddict-item]
+        if _tool_results_require_quick_replies_window(executed_tool_results):
+            next_options["enable_tools"] = True
+            next_options["_allowed_tool_names"] = [QUICK_REPLIES_TOOL_NAME]  # type: ignore[typeddict-unknown-key]
+            next_options["_required_tool_name"] = QUICK_REPLIES_TOOL_NAME  # type: ignore[typeddict-unknown-key]
+        elif _should_disable_tools_after_tool_results(executed_tool_results):
             next_options["enable_tools"] = False
         else:
             if direct_quick_replies_sent:
@@ -4050,6 +4289,7 @@ def _create_response(
     output_text_seen = False
     web_search_statuses_seen: set[tuple[str, str]] = set()
     citation_marker_cleaner = _WebSearchCitationMarkerCleaner()
+    pseudo_tool_call_stripper = _PseudoToolCallTextStripper()
     pseudo_tool_text_suppressor = _PseudoToolUseTextSuppressor()
     stream = client.responses.create(**request, stream=True)
     for event in stream:
@@ -4075,6 +4315,7 @@ def _create_response(
             delta = _get_item_value(event, "delta")
             if isinstance(delta, str) and delta:
                 clean_delta = citation_marker_cleaner.feed(delta)
+                clean_delta = pseudo_tool_call_stripper.feed(clean_delta)
                 clean_delta = pseudo_tool_text_suppressor.feed(clean_delta)
                 if clean_delta:
                     output_text_seen = True
@@ -4094,7 +4335,9 @@ def _create_response(
         elif event_type == "response.completed":
             clean_delta = citation_marker_cleaner.flush()
             if clean_delta:
+                clean_delta = pseudo_tool_call_stripper.feed(clean_delta)
                 clean_delta = pseudo_tool_text_suppressor.feed(clean_delta)
+            clean_delta += pseudo_tool_call_stripper.flush()
             clean_delta += pseudo_tool_text_suppressor.flush()
             if clean_delta:
                 output_text_seen = True
@@ -4169,6 +4412,78 @@ class _WebSearchCitationMarkerCleaner:
     def _reset_marker(self) -> None:
         self._mode = ""
         self._marker = ""
+
+
+class _PseudoToolCallTextStripper:
+    def __init__(self) -> None:
+        self._pending = ""
+        self._dropping_close = ""
+
+    def feed(self, delta: str) -> str:
+        if not delta:
+            return ""
+        self._pending += delta
+        output: list[str] = []
+
+        while self._pending:
+            if self._dropping_close:
+                lower = self._pending.lower()
+                close = self._dropping_close.lower()
+                index = lower.find(close)
+                if index < 0:
+                    self._pending = self._pending[-max(len(close) - 1, 0):]
+                    return "".join(output)
+                self._pending = self._pending[index + len(self._dropping_close):]
+                self._dropping_close = ""
+                continue
+
+            match = self._next_open_match(self._pending)
+            if match is None:
+                tail_len = self._open_prefix_tail_len(self._pending)
+                if tail_len:
+                    output.append(self._pending[:-tail_len])
+                    self._pending = self._pending[-tail_len:]
+                    return "".join(output)
+                output.append(self._pending)
+                self._pending = ""
+                return "".join(output)
+
+            index, close = match
+            output.append(self._pending[:index])
+            self._pending = self._pending[index:]
+            self._dropping_close = close
+
+        return "".join(output)
+
+    def flush(self) -> str:
+        if self._dropping_close:
+            self._pending = ""
+            self._dropping_close = ""
+            return ""
+        output = self._pending
+        self._pending = ""
+        return output
+
+    def _next_open_match(self, text: str) -> tuple[int, str] | None:
+        lower = text.lower()
+        best: tuple[int, str] | None = None
+        for open_token, close_token in PSEUDO_TOOL_CALL_BLOCKS:
+            index = lower.find(open_token.lower())
+            if index < 0:
+                continue
+            if best is None or index < best[0]:
+                best = (index, close_token)
+        return best
+
+    def _open_prefix_tail_len(self, text: str) -> int:
+        lower = text.lower()
+        max_len = 0
+        for open_token, _ in PSEUDO_TOOL_CALL_BLOCKS:
+            token = open_token.lower()
+            for size in range(1, min(len(token), len(lower)) + 1):
+                if token.startswith(lower[-size:]):
+                    max_len = max(max_len, size)
+        return max_len
 
 
 class _PseudoToolUseTextSuppressor:

@@ -244,17 +244,28 @@ def should_include_health_guidance_context(
     message = str(inputs.get("user_message") or "").strip()
     if not message or "confirmed_form_data:" in message:
         return False
+    if _is_background_milk_analysis_reminder_followup(message):
+        return False
     if any(term in message for term in _NON_HEALTH_PRODUCT_TERMS):
         return False
     if any(term in message for term in _URGENT_RED_FLAG_TERMS):
         return False
     if _is_milk_management_fullness_followup(message, loaded_skill_ids):
         return False
+    if _is_milk_management_intake_field_question(message, loaded_skill_ids):
+        return False
 
     has_health_domain = any(term in message for term in _HEALTH_DOMAIN_TERMS)
     has_complex_signal = any(term in message for term in _COMPLEX_HEALTH_TERMS)
 
     return has_health_domain and has_complex_signal
+
+
+def _is_background_milk_analysis_reminder_followup(message: str) -> bool:
+    return (
+        "后台奶量分析提醒后的自动接续" in message
+        and "奶量分析上下文" in message
+    )
 
 
 def _is_milk_management_fullness_followup(message: str, loaded_skill_ids: list[str] | None) -> bool:
@@ -275,6 +286,48 @@ def _is_milk_management_fullness_followup(message: str, loaded_skill_ids: list[s
     if not has_fullness_signal:
         return False
     return not _has_unnegated_fullness_red_flag(message)
+
+
+def _is_milk_management_intake_field_question(message: str, loaded_skill_ids: list[str] | None) -> bool:
+    if not _has_loaded_skill(loaded_skill_ids, "milk-management"):
+        return False
+    has_question_signal = any(
+        term in message
+        for term in (
+            "为什么",
+            "怎么判断",
+            "怎么影响",
+            "有什么影响",
+            "有没有必要",
+            "为什么要问",
+            "为什么要看",
+            "为啥",
+            "啥意思",
+        )
+    )
+    if not has_question_signal:
+        return False
+    has_intake_field = any(
+        term in message
+        for term in (
+            "尿布",
+            "尿量",
+            "精神",
+            "吃奶后",
+            "体重",
+            "增长",
+            "记录完整",
+            "漏记",
+            "发热",
+            "寒战",
+            "红肿",
+            "硬块",
+            "疼痛加重",
+            "乳房舒适",
+            "排不空",
+        )
+    )
+    return has_intake_field
 
 
 def _has_unnegated_fullness_red_flag(message: str) -> bool:

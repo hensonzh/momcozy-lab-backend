@@ -12,6 +12,7 @@ __pycache__/
 .runtime-venv/
 
 data/*.db
+.worktree-runtime/*.db
 logs/
 
 dist/

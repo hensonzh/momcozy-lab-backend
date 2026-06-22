@@ -579,7 +579,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "milk_analysis_intake_manage": _function_tool(
         "milk_analysis_intake_manage",
-        "FLOW 只读工具：推进奶量分析的信息采集状态机，不写数据库。工具会自动读取/复用过去 7 天原始奶量记录和日级汇总，维护记录、宝宝状态、宝宝生长信号、妈妈红旗症状、乳房舒适度的信息采集表；信息未齐时只返回当前一项追问 next_question，最终回复只能问这一项，不要说最后一个/只差一个，也不要同时追问其它 missing_fields；信息齐后返回 analysis_context。模型只传本轮用户原话和已知宝宝/妈妈状态，不要自己维护字段清单；analysis_context ready 后下一步调用 milk_analysis_evaluate。",
+        "FLOW 只读工具：推进奶量分析的信息采集状态机，不写数据库。工具会自动读取/复用过去 7 天原始奶量记录和日级汇总，维护记录、宝宝状态、宝宝生长信号、妈妈红旗症状、乳房舒适度的信息采集表；信息未齐时返回 workflow_control.allowed_next_action=ask_user、step 进度、field_guidance、joint_reasoning_guidance、quick_replies 和当前一项追问 next_question，最终回复只能问这一项，不要说最后一个/只差一个，也不要同时追问其它 missing_fields；信息齐后返回 workflow_control.allowed_next_action=call_tool 和 analysis_context。模型只传本轮用户原话和已知宝宝/妈妈状态，不要自己维护字段清单；analysis_context ready 后下一步调用 milk_analysis_evaluate。若用户在采集过程中问主流程外问题，先回答，结尾必须确认：我们要继续刚才的奶量分析流程吗？",
         {
             "action": {
                 "type": "string",

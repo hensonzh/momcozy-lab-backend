@@ -262,7 +262,7 @@ def create_app(runtime: ChatRuntime | None = None, *, include_websocket_bridge: 
 
         event = _format_client_event(payload)
         runtime = runtime_from_app(request.app)
-        session = _client_event_session(runtime, thread_id, _payload_user_id(payload))
+        session = _client_event_session(runtime, thread_id, _payload_user_id(payload), payload)
         if event not in session.context_state.client_events:
             session.context_state.client_events.append(event)
             session.context_state.client_events = session.context_state.client_events[-10:]
@@ -793,25 +793,47 @@ def _payload_user_id(payload: dict[str, Any]) -> str:
     ).strip()
 
 
-def _client_event_session(runtime: ChatRuntime, thread_id: str, user_id: str) -> ChatSession:
+_LEGACY_IBCLC_CLIENT_EVENT_SOURCES = {"ibclc-chat", "ibclc_chat", "ibclc-h5", "ibclc_h5"}
+_LEGACY_IBCLC_CLIENT_EVENT_TYPES = {
+    "ibclc_completed",
+    "ibclc_consult_completed",
+    "momcozy.ibclc_consult_completed",
+}
+
+
+def _client_event_session(runtime: ChatRuntime, thread_id: str, user_id: str, payload: dict[str, Any]) -> ChatSession:
     exact_session = None
     if user_id:
         exact_session = runtime.get_existing_session(thread_id, user_id=user_id)
         if exact_session is not None and _session_has_agent_history(exact_session):
             return exact_session
 
-    agent_history_sessions = [
-        session
-        for session in runtime.sessions_for_conversation(thread_id)
-        if _session_has_agent_history(session)
-    ]
-    if len(agent_history_sessions) == 1:
-        return agent_history_sessions[0]
+    if not user_id or _is_legacy_ibclc_client_event(payload):
+        agent_history_sessions = [
+            session
+            for session in runtime.sessions_for_conversation(thread_id)
+            if _session_has_agent_history(session)
+        ]
+        if len(agent_history_sessions) == 1:
+            return agent_history_sessions[0]
 
     if exact_session is not None:
         return exact_session
 
     return runtime.get_session(thread_id, user_id=user_id)
+
+
+def _is_legacy_ibclc_client_event(payload: dict[str, Any]) -> bool:
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+    source = str(payload.get("source") or metadata.get("source") or "").strip().lower()
+    event_type = str(
+        payload.get("event_type")
+        or payload.get("type")
+        or metadata.get("event_type")
+        or metadata.get("type")
+        or ""
+    ).strip().lower()
+    return source in _LEGACY_IBCLC_CLIENT_EVENT_SOURCES and event_type in _LEGACY_IBCLC_CLIENT_EVENT_TYPES
 
 
 def _session_has_agent_history(session: ChatSession) -> bool:

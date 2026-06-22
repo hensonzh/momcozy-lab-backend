@@ -236,6 +236,9 @@ class BuildAgentRequestOptions(TypedDict, total=False):
     context_state: Any
     enable_tools: bool
     max_output_tokens: int
+    _required_tool_name: str
+    _disabled_tool_names: list[str]
+    _allowed_tool_names: list[str]
 
 
 class ResponsesClientLike(Protocol):
