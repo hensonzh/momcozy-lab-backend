@@ -162,6 +162,7 @@ def build_request_context(
             state.environment_sent = True
 
     lines.append(f"message_sent_at: {_message_sent_at(inputs)}")
+    lines.extend(_format_profile_onboarding_context(inputs))
     if _should_inject_birth_prep_domain_context(service_domain):
         lines.extend(_format_birth_prep_profile_context(inputs))
     if loaded_skill_ids:
@@ -1094,6 +1095,35 @@ def _format_user_profile_context(inputs: RuntimeInputs) -> list[str]:
     lines = ["user_profile_context:", "- " + "；".join(part for part in details if part)]
     if skipped:
         lines.append("- 用户已选择暂时跳过基础资料收集；不要因为缺少名字或年龄而在新会话里主动反复追问。")
+    return lines
+
+
+def _format_profile_onboarding_context(inputs: RuntimeInputs) -> list[str]:
+    if inputs.get("profile_onboarding_pending") is not True:
+        return []
+
+    lines = [
+        "profile_onboarding_context:",
+        "- 客户端刚展示过新会话资料采集问候；当前 user_message 可能是在回答“怎么称呼你、今年多大”。",
+    ]
+    candidate = inputs.get("profile_onboarding_update_candidate")
+    if isinstance(candidate, dict) and candidate:
+        fields: list[str] = []
+        display_name = _trim_context_value(candidate.get("display_name"), 40)
+        age = _profile_age_text(candidate.get("age"))
+        if display_name:
+            fields.append(f"display_name={display_name}")
+        if age:
+            fields.append(f"age={age}")
+        if candidate.get("onboarding_skipped") is True:
+            fields.append("onboarding_skipped=true")
+        if fields:
+            lines.append("- parsed_profile_update_args: " + "；".join(fields))
+            lines.append(
+                "- 本轮必须先调用 profile_update 保存以上字段；未解析字段传 null。工具完成后再自然继续对话，不要重复保存同一字段。"
+            )
+    else:
+        lines.append("- 如果用户明确提供称呼/年龄或明确跳过，调用 profile_update；如果本轮不是资料回答，就按用户真实意图继续。")
     return lines
 
 

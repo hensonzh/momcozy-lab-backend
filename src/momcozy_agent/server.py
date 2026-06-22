@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -38,6 +39,7 @@ from .contexts import (
 )
 from .services import data_store
 from .services.paths import ensure_runtime_dirs
+from .services.timing_log import record_ag_ui_timing_event
 from .slot_extractor import BirthPrepSlotExtractionRequest, BirthPrepSlotExtractor, SLOT_EXTRACTOR_VERSION
 from .types import SkillId
 
@@ -50,6 +52,7 @@ MAX_IMAGE_ATTACHMENTS = 4
 STREAM_TIMING_ENV = "MOMCOZY_DEBUG_STREAM_TIMING"
 MAX_QUICK_REPLY_TEXT_CHARS = 32
 PROFILE_LOADED_FROM_DB_FLAG = "_user_profile_loaded_from_db"
+RUN_LOCK_CANCEL_POLL_SECONDS = 0.2
 STATIC_CONTENT_TYPES = {
     ".css": "text/css; charset=utf-8",
     ".gif": "image/gif",
@@ -275,6 +278,16 @@ def create_app(runtime: ChatRuntime | None = None, *, include_websocket_bridge: 
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
 
+        _record_ag_ui_stream_timing(
+            "backend.sse_http_received",
+            payload,
+            inputs,
+            metadata={
+                "message_count": len(payload.get("messages") or []),
+                "image_count": len(inputs.get("images") or []),
+                "text_len": len(str(inputs.get("user_message") or "")),
+            },
+        )
         stream = stream_ag_ui_events(payload, inputs, runtime_from_app(request.app))
         return StreamingResponse(
             stream_sse_bytes(stream),
@@ -314,6 +327,12 @@ def create_app(runtime: ChatRuntime | None = None, *, include_websocket_bridge: 
             thread_id,
             user_id=_payload_user_id(payload),
             run_id=run_id or None,
+        )
+        _record_ag_ui_stream_timing(
+            "backend.cancel_requested",
+            payload,
+            {"user_id": _payload_user_id(payload)},
+            metadata={"result_status": result.get("status")},
         )
         return JSONResponse(result, status_code=200 if result.get("status") != "not_found" else 404)
 
@@ -459,6 +478,14 @@ async def stream_ag_ui_events(
         details = _format_timing_metadata(metadata)
         print(f"[momcozy.stream] +{elapsed_ms:7.1f}ms {run_id} {label}{details}", file=sys.stderr, flush=True)
 
+    def record_timing(label: str, metadata: dict[str, Any] | None = None) -> None:
+        _record_ag_ui_stream_timing(label, payload, inputs, started_at=stream_started_at, metadata=metadata)
+
+    record_timing(
+        "backend.stream_created",
+        {"parent_run_id": str(parent_run_id or ""), "has_previous_response_id": bool(session.previous_response_id)},
+    )
+
     def worker() -> None:
         pending_run_finished: dict[str, Any] | None = None
         pending_quick_replies: list[dict[str, str]] | None = None
@@ -467,19 +494,26 @@ async def stream_ag_ui_events(
         streamed_text_parts: list[str] = []
 
         def send_event(event: dict[str, Any]) -> None:
-            log_timing(f"sse:{event.get('type', 'unknown')}", _ag_ui_timing_metadata(event))
+            metadata = _ag_ui_timing_metadata(event)
+            log_timing(f"sse:{event.get('type', 'unknown')}", metadata)
+            record_timing("backend.sse_event", metadata)
             push(event)
 
         def send_ag_ui_event(event: dict[str, Any]) -> None:
             nonlocal pending_run_finished, pending_quick_replies, suppress_quick_replies
             if event.get("type") == "RUN_FINISHED":
                 log_timing("ag_ui:RUN_FINISHED buffered", _ag_ui_timing_metadata(event))
+                record_timing("backend.ag_ui_run_finished_buffered", _ag_ui_timing_metadata(event))
                 pending_run_finished = event
                 return
             if event.get("type") == "QUICK_REPLIES":
                 quick_replies = _validated_quick_replies(event.get("replies"))
                 if quick_replies is not None:
                     log_timing("ag_ui:QUICK_REPLIES buffered", _ag_ui_timing_metadata(event))
+                    record_timing(
+                        "backend.quick_replies_buffered",
+                        {"reply_count": len(quick_replies), **_ag_ui_timing_metadata(event)},
+                    )
                     pending_quick_replies = quick_replies
                 return
             if _is_form_like_artifact_event(event):
@@ -492,6 +526,7 @@ async def stream_ag_ui_events(
         def send_text_delta(delta: str) -> None:
             nonlocal text_started
             if not text_started:
+                record_timing("backend.first_text_delta", {"delta_len": len(delta)})
                 send_event(
                     {
                         "type": "TEXT_MESSAGE_START",
@@ -511,9 +546,10 @@ async def stream_ag_ui_events(
                 }
             )
 
-        response_stream_timing = (
-            lambda event_type, metadata: log_timing(f"responses:{event_type}", metadata)
-        ) if debug_stream_timing else None
+        def response_stream_timing(event_type: str, metadata: dict[str, Any] | None = None) -> None:
+            metadata = metadata or {}
+            log_timing(f"responses:{event_type}", metadata)
+            record_timing(f"backend.responses.{event_type}", metadata)
 
         run_id_text = str(run_id)
 
@@ -534,8 +570,11 @@ async def stream_ag_ui_events(
                     session.cancelled_run_ids.discard(run_id_text)
 
         try:
+            record_timing("backend.worker_started")
+            record_timing("backend.lock_acquire_start")
             lock_acquired = session.run_lock.acquire(blocking=False)
             if not lock_acquired:
+                record_timing("backend.lock_wait_start")
                 send_event(
                     _ag_ui_status_event(
                         "waiting_for_previous_run",
@@ -543,22 +582,51 @@ async def stream_ag_ui_events(
                         {"run_id": run_id_text, "thread_id": str(thread_id)},
                     )
                 )
-                session.run_lock.acquire()
+                while not session.run_lock.acquire(timeout=RUN_LOCK_CANCEL_POLL_SECONDS):
+                    if run_cancelled():
+                        raise AgentRunCancelled("Run cancelled by user.")
+                lock_acquired = True
+            record_timing("backend.lock_acquired")
             try:
                 mark_run_active()
                 if run_cancelled():
                     raise AgentRunCancelled("Run cancelled by user.")
+                record_timing("backend.profile_hydrate_start")
                 _hydrate_session_user_profile(inputs, session)
+                record_timing("backend.profile_hydrate_end")
+                force_profile_update = _prepare_profile_onboarding_update_candidate(inputs)
+                if force_profile_update:
+                    record_timing("backend.profile_update_forced")
                 working_context_state = _clone_context_state(session.context_state)
                 if session.previous_response_id:
                     inputs["previous_response_id"] = session.previous_response_id
+                record_timing(
+                    "backend.context_prepared",
+                    {
+                        "has_previous_response_id": bool(inputs.get("previous_response_id")),
+                        "loaded_skill_count": len(session.loaded_skill_ids),
+                        "client_event_count": len(working_context_state.client_events),
+                    },
+                )
+                record_timing("backend.slot_extraction_schedule_start")
                 _schedule_birth_prep_slot_extraction(session, runtime, inputs, run_id=run_id_text)
+                record_timing("backend.slot_extraction_scheduled")
                 agent_options: dict[str, Any] = {
                     "model": runtime.model,
                     "store": runtime.store,
                     "loaded_skill_ids": list(session.loaded_skill_ids),
                     "context_state": working_context_state,
                 }
+                if force_profile_update:
+                    agent_options["_required_tool_name"] = "profile_update"
+                record_timing(
+                    "backend.agent_loop_start",
+                    {
+                        "model": runtime.model,
+                        "store": runtime.store,
+                        "required_tool": agent_options.get("_required_tool_name") or "",
+                    },
+                )
                 response = run_agent_loop(
                     runtime.client,
                     inputs,
@@ -572,6 +640,7 @@ async def stream_ag_ui_events(
                     on_response_stream_event=response_stream_timing,
                     cancel_requested=run_cancelled,
                 )
+                record_timing("backend.agent_loop_returned", {"response_id": _response_id(response) or ""})
                 if run_cancelled():
                     raise AgentRunCancelled("Run cancelled by user.")
                 response_id = _response_id(response)
@@ -601,14 +670,19 @@ async def stream_ag_ui_events(
                         send_event(quick_replies_event(assistant_message_id, pending_quick_replies))
                     send_event(pending_run_finished)
             finally:
-                _refresh_session_profile_cache_from_inputs(session, inputs)
-                clear_run_active()
-                session.run_lock.release()
+                if lock_acquired:
+                    _refresh_session_profile_cache_from_inputs(session, inputs)
+                    clear_run_active()
+                    session.run_lock.release()
+                    record_timing("backend.lock_released")
         except AgentRunCancelled:
+            record_timing("backend.run_cancelled")
             send_event(run_error_event("本轮已停止。", "RUN_CANCELLED", thread_id=str(thread_id), run_id=run_id_text))
         except Exception as exc:
+            record_timing("backend.run_error", {"error_type": type(exc).__name__})
             send_event(run_error_event(str(exc), type(exc).__name__, thread_id=str(thread_id), run_id=run_id_text))
         finally:
+            record_timing("backend.worker_finished")
             push(sentinel)
 
     threading.Thread(target=worker, daemon=True).start()
@@ -742,6 +816,41 @@ def _format_timing_metadata(metadata: dict[str, Any] | None) -> str:
     return f" {' '.join(parts)}" if parts else ""
 
 
+def _record_ag_ui_stream_timing(
+    stage: str,
+    payload: dict[str, Any],
+    inputs: dict[str, Any] | None = None,
+    *,
+    started_at: float | None = None,
+    source: str = "backend",
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    elapsed_ms = (time.perf_counter() - started_at) * 1000 if started_at is not None else None
+    record_ag_ui_timing_event(
+        stage=stage,
+        source=source,
+        run_id=str(_field(payload, "run_id", "runId") or "").strip(),
+        thread_id=str(_field(payload, "thread_id", "threadId") or payload.get("conversation_id") or "").strip(),
+        client_timing_id=_payload_context_string(payload, "client_timing_id", "clientTimingId"),
+        user_id=_runtime_input_user_id(inputs or {}) or _payload_context_string(payload, "user_id", "userId"),
+        elapsed_ms=elapsed_ms,
+        metadata=metadata or {},
+    )
+
+
+def _payload_context_string(payload: dict[str, Any], snake_case: str, camel_case: str) -> str:
+    state = payload.get("state") if isinstance(payload.get("state"), dict) else {}
+    forwarded_props = _field(payload, "forwarded_props", "forwardedProps")
+    if not isinstance(forwarded_props, dict):
+        forwarded_props = {}
+    value = (
+        _field(forwarded_props, snake_case, camel_case)
+        or _field(state, snake_case, camel_case)
+        or _field(payload, snake_case, camel_case)
+    )
+    return str(value or "").strip()
+
+
 def _ag_ui_timing_metadata(event: dict[str, Any]) -> dict[str, Any]:
     metadata: dict[str, Any] = {}
     event_type = event.get("type")
@@ -832,6 +941,9 @@ def _runtime_inputs_from_ag_ui(payload: dict[str, Any]) -> dict[str, Any]:
         inputs["service_domain"] = service_domain
     if user_id:
         inputs["user_id"] = user_id
+    profile_onboarding_pending = _bool_context_value(state, forwarded_props, payload, "profile_onboarding_pending", "profileOnboardingPending")
+    if profile_onboarding_pending:
+        inputs["profile_onboarding_pending"] = True
     if images:
         inputs["images"] = images
 
@@ -849,6 +961,86 @@ def _runtime_inputs_from_ag_ui(payload: dict[str, Any]) -> dict[str, Any]:
             inputs[key] = value
 
     return inputs
+
+
+def _prepare_profile_onboarding_update_candidate(inputs: dict[str, Any]) -> bool:
+    if inputs.get("profile_onboarding_pending") is not True:
+        return False
+    profile = inputs.get("user_profile") if isinstance(inputs.get("user_profile"), dict) else {}
+    if _profile_onboarding_complete_or_skipped(profile):
+        return False
+    candidate = _parse_profile_onboarding_answer(str(inputs.get("user_message") or ""), profile)
+    if not candidate:
+        return False
+    inputs["profile_onboarding_update_candidate"] = candidate
+    return True
+
+
+def _profile_onboarding_complete_or_skipped(profile: dict[str, Any]) -> bool:
+    display_name = str(profile.get("display_name") or profile.get("user_nickname") or "").strip()
+    age = _optional_age(profile.get("age"))
+    skipped = profile.get("profile_onboarding_skipped") is True or bool(str(profile.get("profile_onboarding_skipped_at") or "").strip())
+    return skipped or bool(display_name and age is not None)
+
+
+def _parse_profile_onboarding_answer(message: str, profile: dict[str, Any]) -> dict[str, Any] | None:
+    text = _normalize_profile_onboarding_text(message)
+    if not text:
+        return None
+    if _looks_like_profile_onboarding_skip(text):
+        return {"display_name": None, "age": None, "onboarding_skipped": True}
+
+    has_display_name = bool(str(profile.get("display_name") or profile.get("user_nickname") or "").strip())
+    has_age = _optional_age(profile.get("age")) is not None
+    display_name = None if has_display_name else _parse_onboarding_display_name(text)
+    age = None if has_age else _parse_onboarding_age(text)
+    if display_name or age is not None:
+        return {"display_name": display_name, "age": age, "onboarding_skipped": False}
+    return None
+
+
+def _normalize_profile_onboarding_text(message: str) -> str:
+    return re.sub(r"\s+", " ", str(message or "").strip())
+
+
+def _looks_like_profile_onboarding_skip(text: str) -> bool:
+    return bool(re.search(r"(先|暂时|这次)?\s*(跳过|不说|不用提供|不想提供|以后再说|稍后再说)", text))
+
+
+def _parse_onboarding_age(text: str) -> int | None:
+    candidates = re.findall(r"(?<!\d)(\d{1,3})(?:\s*(?:岁|周岁))?", text)
+    for raw in candidates:
+        age = _optional_age(raw)
+        if age is not None:
+            return age
+    return None
+
+
+def _parse_onboarding_display_name(text: str) -> str:
+    explicit_patterns = [
+        r"(?:我叫|叫我|可以叫我|你可以叫我|我的名字是|名字是|称呼我)\s*([A-Za-z\u4e00-\u9fff][A-Za-z0-9_\-\u4e00-\u9fff]{0,19}?)(?=$|[\s，,。；;！!？?、]|今年|\d{1,3}\s*岁)",
+    ]
+    for pattern in explicit_patterns:
+        match = re.search(pattern, text)
+        if match:
+            return _clean_onboarding_display_name(match.group(1))
+
+    stripped = re.sub(r"(?<!\d)\d{1,3}\s*(?:岁|周岁)?", "", text)
+    stripped = re.sub(r"(我今年|今年|我|叫|名字是|我的名字是|可以叫我|你可以叫我)", "", stripped)
+    return _clean_onboarding_display_name(stripped)
+
+
+def _clean_onboarding_display_name(value: str) -> str:
+    name = str(value or "").strip(" \t\r\n，,。；;：:！!？?、")
+    if not name or len(name) > 20:
+        return ""
+    if re.search(r"[？?]", name):
+        return ""
+    if re.search(r"(想|帮|做|管理|计划|奶量|孕期|吸奶|宝宝|咨询|怎么|为什么|今天|明天|提醒|保存|生成)", name):
+        return ""
+    if re.fullmatch(r"\d+", name):
+        return ""
+    return name
 
 
 def _hydrate_session_user_profile(inputs: dict[str, Any], session: ChatSession) -> None:
@@ -1211,6 +1403,27 @@ def _context_value(state: dict[str, Any], forwarded_props: dict[str, Any], key: 
     return None
 
 
+def _bool_context_value(
+    state: dict[str, Any],
+    forwarded_props: dict[str, Any],
+    payload: dict[str, Any],
+    snake_case: str,
+    camel_case: str,
+) -> bool:
+    value = (
+        _field(forwarded_props, snake_case, camel_case)
+        if snake_case in forwarded_props or camel_case in forwarded_props
+        else _field(state, snake_case, camel_case)
+    )
+    if value is None:
+        value = _field(payload, snake_case, camel_case)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y"}
+    return bool(value)
+
+
 def _string_context_value(
     payload: dict[str, Any],
     state: dict[str, Any],
@@ -1224,6 +1437,18 @@ def _string_context_value(
         or _field(payload, snake_case, camel_case)
     )
     return str(value or "").strip()
+
+
+def _optional_age(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        age = int(value)
+    except Exception:
+        return None
+    if age < 0 or age > 120:
+        return None
+    return age
 
 
 def _response_text(response: Any) -> str:

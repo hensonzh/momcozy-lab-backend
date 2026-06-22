@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from typing import Any
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect, status
+from fastapi.responses import JSONResponse
 
 from ..agents import run_error_event
+from ..services.timing_log import record_ag_ui_timing_event, record_ag_ui_timing_payload
 
 
 router = APIRouter()
@@ -17,6 +20,18 @@ SSE_BOUNDARY_LF = "\n\n"
 SSE_BOUNDARY_CRLF = "\r\n\r\n"
 
 
+@router.post("/api/ag-ui-timing-log")
+async def ag_ui_timing_log(request: Request) -> JSONResponse:
+    try:
+        payload = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "invalid_json"}, status_code=400)
+    if not isinstance(payload, dict):
+        return JSONResponse({"ok": False, "error": "expected_object"}, status_code=400)
+    record_ag_ui_timing_payload(payload)
+    return JSONResponse({"ok": True})
+
+
 @router.websocket("/api/ag-ui-ws")
 async def chat_ws_bridge(websocket: WebSocket) -> None:
     if not _verify_token(websocket):
@@ -24,6 +39,7 @@ async def chat_ws_bridge(websocket: WebSocket) -> None:
         return
 
     await websocket.accept()
+    accepted_at = time.perf_counter()
     try:
         try:
             raw_first = await websocket.receive_text()
@@ -39,8 +55,14 @@ async def chat_ws_bridge(websocket: WebSocket) -> None:
             await _send_run_error(websocket, "first frame must be a JSON object", "INVALID_REQUEST")
             return
 
+        _record_bridge_timing(
+            "bridge.ws_first_frame_received",
+            payload,
+            accepted_at,
+            metadata={"raw_len": len(raw_first or "")},
+        )
         try:
-            await _bridge_sse_to_ws(websocket, payload)
+            await _bridge_sse_to_ws(websocket, payload, accepted_at=accepted_at)
         except WebSocketDisconnect:
             return
         except Exception as exc:
@@ -73,7 +95,7 @@ def _verify_token(websocket: WebSocket) -> bool:
     return False
 
 
-async def _bridge_sse_to_ws(websocket: WebSocket, payload: dict[str, Any]) -> None:
+async def _bridge_sse_to_ws(websocket: WebSocket, payload: dict[str, Any], *, accepted_at: float) -> None:
     try:
         import httpx
     except ImportError as exc:
@@ -86,6 +108,12 @@ async def _bridge_sse_to_ws(websocket: WebSocket, payload: dict[str, Any]) -> No
 
     async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
         try:
+            _record_bridge_timing(
+                "bridge.upstream_request_start",
+                payload,
+                accepted_at,
+                metadata={"upstream_url": upstream_url},
+            )
             async with client.stream(
                 "POST",
                 upstream_url,
@@ -95,6 +123,12 @@ async def _bridge_sse_to_ws(websocket: WebSocket, payload: dict[str, Any]) -> No
                     "Content-Type": "application/json",
                 },
             ) as resp:
+                _record_bridge_timing(
+                    "bridge.upstream_response_headers",
+                    payload,
+                    accepted_at,
+                    metadata={"status_code": resp.status_code},
+                )
                 if resp.status_code != 200:
                     body_preview = ""
                     try:
@@ -110,9 +144,19 @@ async def _bridge_sse_to_ws(websocket: WebSocket, payload: dict[str, Any]) -> No
                     return
 
                 buffer = ""
+                first_chunk = True
+                first_event = True
                 async for chunk in resp.aiter_text():
                     if not chunk:
                         continue
+                    if first_chunk:
+                        first_chunk = False
+                        _record_bridge_timing(
+                            "bridge.upstream_first_chunk",
+                            payload,
+                            accepted_at,
+                            metadata={"chunk_len": len(chunk)},
+                        )
                     buffer += chunk
                     while True:
                         boundary_idx, boundary_len = _find_boundary(buffer)
@@ -120,11 +164,19 @@ async def _bridge_sse_to_ws(websocket: WebSocket, payload: dict[str, Any]) -> No
                             break
                         raw_event = buffer[:boundary_idx]
                         buffer = buffer[boundary_idx + boundary_len:]
-                        await _emit_event(websocket, raw_event)
+                        await _emit_event(websocket, raw_event, payload=payload, accepted_at=accepted_at, first_event=first_event)
+                        first_event = False
 
                 if buffer.strip():
-                    await _emit_event(websocket, buffer)
+                    await _emit_event(websocket, buffer, payload=payload, accepted_at=accepted_at, first_event=first_event)
+                _record_bridge_timing("bridge.upstream_stream_end", payload, accepted_at)
         except httpx.HTTPError as exc:
+            _record_bridge_timing(
+                "bridge.upstream_error",
+                payload,
+                accepted_at,
+                metadata={"error_type": type(exc).__name__},
+            )
             await _send_run_error(
                 websocket,
                 f"upstream connection failed: {exc}",
@@ -146,7 +198,14 @@ def _find_boundary(buffer: str) -> tuple[int, int]:
     return lf_idx, len(SSE_BOUNDARY_LF)
 
 
-async def _emit_event(websocket: WebSocket, raw_event: str) -> None:
+async def _emit_event(
+    websocket: WebSocket,
+    raw_event: str,
+    *,
+    payload: dict[str, Any],
+    accepted_at: float,
+    first_event: bool = False,
+) -> None:
     data_lines: list[str] = []
     for line in raw_event.splitlines():
         if line.startswith("data:"):
@@ -160,6 +219,13 @@ async def _emit_event(websocket: WebSocket, raw_event: str) -> None:
         obj = json.loads(data_str)
     except json.JSONDecodeError:
         return
+    if first_event:
+        _record_bridge_timing(
+            "bridge.first_event_to_ws",
+            payload,
+            accepted_at,
+            metadata={"event_type": obj.get("type") if isinstance(obj, dict) else "", "raw_len": len(data_str)},
+        )
     await websocket.send_text(json.dumps(obj, ensure_ascii=False))
 
 
@@ -176,3 +242,35 @@ async def _safe_close(websocket: WebSocket) -> None:
         await websocket.close()
     except Exception:
         pass
+
+
+def _record_bridge_timing(
+    stage: str,
+    payload: dict[str, Any],
+    accepted_at: float,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    record_ag_ui_timing_event(
+        stage=stage,
+        source="bridge",
+        run_id=str(payload.get("runId") or payload.get("run_id") or "").strip(),
+        thread_id=str(payload.get("threadId") or payload.get("thread_id") or "").strip(),
+        client_timing_id=_payload_context_value(payload, "client_timing_id", "clientTimingId"),
+        user_id=_payload_context_value(payload, "user_id", "userId"),
+        elapsed_ms=(time.perf_counter() - accepted_at) * 1000,
+        metadata=metadata or {},
+    )
+
+
+def _payload_context_value(payload: dict[str, Any], snake_case: str, camel_case: str) -> str:
+    state = payload.get("state") if isinstance(payload.get("state"), dict) else {}
+    forwarded = payload.get("forwardedProps") if isinstance(payload.get("forwardedProps"), dict) else {}
+    value = (
+        forwarded.get(snake_case)
+        or forwarded.get(camel_case)
+        or state.get(snake_case)
+        or state.get(camel_case)
+        or payload.get(snake_case)
+        or payload.get(camel_case)
+    )
+    return str(value or "").strip()

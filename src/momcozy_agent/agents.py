@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import base64
 import json
+import queue
 import re
+import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -111,6 +113,7 @@ MAX_TOOL_IMAGE_INPUTS = 2
 MAX_TOOL_IMAGE_METADATA = 8
 MAX_TOOL_IMAGE_BYTES = 2 * 1024 * 1024
 MAX_TOOL_IMAGE_TOTAL_BYTES = 2 * 1024 * 1024
+STREAM_CANCEL_POLL_SECONDS = 0.2
 TOOL_IMAGE_CONTENT_TYPES = {
     ".avif": "image/avif",
     ".gif": "image/gif",
@@ -4191,6 +4194,7 @@ def run_agent_loop(
             lambda status, metadata: _emit_web_search_status(on_ag_ui_event, status, metadata),
             remember_streamed_web_search_citations,
             on_response_stream_event,
+            cancel_requested=cancel_requested,
         )
         raise_if_cancelled()
     except AgentRunCancelled:
@@ -4468,6 +4472,7 @@ def run_agent_loop(
                 lambda status, metadata: _emit_web_search_status(on_ag_ui_event, status, metadata),
                 remember_streamed_web_search_citations,
                 on_response_stream_event,
+                cancel_requested=cancel_requested,
             )
             raise_if_cancelled()
         except AgentRunCancelled:
@@ -4498,9 +4503,22 @@ def _create_response(
     on_web_search_event: Any | None = None,
     on_web_search_citations: Any | None = None,
     on_stream_event: Any | None = None,
+    *,
+    cancel_requested: Callable[[], bool] | None = None,
 ) -> object:
+    if cancel_requested is not None and cancel_requested():
+        raise AgentRunCancelled("Run cancelled by user.")
     if on_text_delta is None:
-        return client.responses.create(**request)
+        _emit_stream_marker(on_stream_event, "client.responses.create.start", _response_request_timing_metadata(request, stream=False))
+        response = client.responses.create(**request)
+        _emit_stream_marker(
+            on_stream_event,
+            "client.responses.create.returned",
+            {"stream": False, "response_id": _get_response_id(response)},
+        )
+        if cancel_requested is not None and cancel_requested():
+            raise AgentRunCancelled("Run cancelled by user.")
+        return response
 
     final_response = None
     reasoning_active = False
@@ -4510,8 +4528,10 @@ def _create_response(
     pseudo_tool_call_stripper = _PseudoToolCallTextStripper()
     pseudo_tool_text_suppressor = _PseudoToolUseTextSuppressor()
     internal_tool_error_suppressor = _InternalToolErrorTextSuppressor()
+    _emit_stream_marker(on_stream_event, "client.responses.create.start", _response_request_timing_metadata(request, stream=True))
     stream = client.responses.create(**request, stream=True)
-    for event in stream:
+    _emit_stream_marker(on_stream_event, "client.responses.create.returned", {"stream": True})
+    for event in _iter_cancellable_response_stream(stream, cancel_requested):
         event_type = _get_item_value(event, "type")
         _emit_stream_event(on_stream_event, event_type, event)
         stream_citations = _web_search_citations_from_stream_event(event_type, event)
@@ -4582,6 +4602,50 @@ def _create_response(
     if final_response is None:
         raise RuntimeError("Response stream ended without a completed response.")
     return final_response
+
+
+def _iter_cancellable_response_stream(stream: Any, cancel_requested: Callable[[], bool] | None) -> Any:
+    if cancel_requested is None:
+        yield from stream
+        return
+
+    event_queue: queue.Queue[Any] = queue.Queue()
+    sentinel = object()
+
+    def read_stream() -> None:
+        try:
+            for event in stream:
+                event_queue.put(event)
+        except Exception as exc:
+            event_queue.put(exc)
+        finally:
+            event_queue.put(sentinel)
+
+    threading.Thread(target=read_stream, daemon=True, name="momcozy-response-stream-reader").start()
+
+    while True:
+        if cancel_requested():
+            _close_response_stream(stream)
+            raise AgentRunCancelled("Run cancelled by user.")
+        try:
+            item = event_queue.get(timeout=STREAM_CANCEL_POLL_SECONDS)
+        except queue.Empty:
+            continue
+        if item is sentinel:
+            break
+        if isinstance(item, Exception):
+            raise item
+        yield item
+
+
+def _close_response_stream(stream: Any) -> None:
+    close = getattr(stream, "close", None)
+    if not callable(close):
+        return
+    try:
+        close()
+    except Exception:
+        return
 
 
 class _WebSearchCitationMarkerCleaner:
@@ -4848,6 +4912,35 @@ def _emit_stream_event(handler: Any | None, event_type: Any, event: object) -> N
     if handler is None or not isinstance(event_type, str):
         return
     handler(event_type, _safe_stream_event_metadata(event_type, event))
+
+
+def _emit_stream_marker(handler: Any | None, event_type: str, metadata: dict[str, Any] | None = None) -> None:
+    if handler is None:
+        return
+    handler(event_type, metadata or {})
+
+
+def _response_request_timing_metadata(request: dict[str, Any], *, stream: bool) -> dict[str, Any]:
+    tools = request.get("tools")
+    input_items = request.get("input")
+    tool_choice = request.get("tool_choice")
+    metadata: dict[str, Any] = {
+        "stream": stream,
+        "model": str(request.get("model") or ""),
+        "has_previous_response_id": bool(request.get("previous_response_id")),
+        "tool_count": len(tools) if isinstance(tools, list) else 0,
+        "input_count": len(input_items) if isinstance(input_items, list) else 0,
+    }
+    if isinstance(tool_choice, dict):
+        tool_choice_type = tool_choice.get("type")
+        tool_choice_mode = tool_choice.get("mode")
+        if isinstance(tool_choice_type, str):
+            metadata["tool_choice_type"] = tool_choice_type
+        if isinstance(tool_choice_mode, str):
+            metadata["tool_choice_mode"] = tool_choice_mode
+    elif isinstance(tool_choice, str):
+        metadata["tool_choice_type"] = tool_choice
+    return metadata
 
 
 def _safe_stream_event_metadata(event_type: str, event: object) -> dict[str, Any]:
