@@ -1022,7 +1022,11 @@ def _format_birth_journey_next_7_todo_context(payload: dict[str, Any]) -> list[s
             continue
         item_id = _trim_context_value(item.get("id"), 20) or f"next7_{index + 1:02d}"
         state = "done" if _context_completed_bool(item.get("completed")) else "todo"
-        todo_lines.append(f"  {index + 1}. [{state}] {item_id} {title}")
+        label = _trim_context_value(item.get("priority_label"), 20)
+        label_prefix = f"{label} " if label else ""
+        followup = _trim_context_value(item.get("completion_followup") or item.get("after_done_value"), 54)
+        suffix = f"；next={followup}" if followup else ""
+        todo_lines.append(f"  {index + 1}. [{state}] {item_id} {label_prefix}{title}{suffix}")
     if not todo_lines:
         return []
     return [

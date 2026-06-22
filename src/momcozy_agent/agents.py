@@ -1181,6 +1181,10 @@ def safe_tool_result(result: dict[str, Any]) -> dict[str, Any]:
                 "entry_id": diary.get("entry_id"),
                 "entry_date": diary.get("entry_date"),
             }
+        if result.get("tool_name") == "birth_journey_plan_todo_update":
+            for key in ("updated_items", "todo_items", "completion_followups"):
+                if key in tool_result:
+                    safe[key] = tool_result[key]
         if result.get("tool_name") == QUICK_REPLIES_TOOL_NAME and isinstance(tool_result.get("quick_replies"), list):
             safe["quick_replies"] = tool_result["quick_replies"]
     if isinstance(result.get("error"), dict):
@@ -1263,8 +1267,13 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
     if tool_name == "birth_journey_plan_todo_update":
         status = str(safe.get("status") or "").strip()
         updated_items = safe.get("updated_items") if isinstance(safe.get("updated_items"), list) else []
+        completion_followups = safe.get("completion_followups") if isinstance(safe.get("completion_followups"), list) else []
+        followup_text = "；".join(str(item).strip() for item in completion_followups if str(item).strip())
         instructions = {
-            "todo_completion_updated": "孕期计划待办完成状态已经同步。最终回复只简短说明已同步，并点名已更新的事项；不要重新生成计划，不要复述完整计划。",
+            "todo_completion_updated": (
+                "孕期计划待办完成状态已经同步。最终回复只简短说明已同步，并点名已更新的事项；不要重新生成计划，不要复述完整计划。"
+                + (f"可以顺带给出 1 个完成后的下一步帮助：{followup_text}。" if followup_text else "")
+            ),
             "needs_todo_reference": "还不能确定要更新哪一项。最终回复只请用户提供接下来 7 天行动清单里的编号或事项名。",
             "todo_not_found": "没有匹配到对应事项。最终回复只请用户提供接下来 7 天行动清单里的编号或完整事项名，不要猜测。",
             "plan_not_found": "没有找到 active 孕期计划。最终回复只说明当前没有可更新的孕期计划。",
@@ -1279,6 +1288,7 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
             "plan_id": safe.get("plan_id"),
             "completed": safe.get("completed"),
             "updated_items": updated_items,
+            "completion_followups": completion_followups,
             "missing_refs": safe.get("missing_refs"),
             "ambiguous_refs": safe.get("ambiguous_refs"),
             "summary": safe.get("summary"),
@@ -1688,60 +1698,179 @@ def _compact_birth_journey_plan_card_output(safe: dict[str, Any]) -> dict[str, A
     card = safe.get("card")
     card_json = card.get("card_json") if isinstance(card, dict) else None
     card_json_dict = card_json if isinstance(card_json, dict) else {}
-    response = _birth_journey_plan_final_response(card_json_dict)
     reused_existing_plan = safe.get("status") == "existing_plan_found"
-    if reused_existing_plan:
-        response = "你之前已经有一份孕期计划，我先沿用这份，不重复生成。\n\n" + response
-
-    return _compact_card_tool_output(
+    response = _birth_journey_plan_final_response(card_json_dict, reused_existing_plan=reused_existing_plan)
+    compact = _compact_card_tool_output(
         safe,
         (
             ("已找到用户已有的孕期计划并展示完整路线图。" if reused_existing_plan else "孕期计划已经展示完整路线图。")
-            + "最终回复用 2-4 句中文自然组织语言，"
-            "需要覆盖下面的接下来 7 天行动清单和完成项追问，但不要机械照抄。"
+            + "最终回复请根据下面【结构化表达素材】重新组织自然语言，不要逐字照读。"
+            "保持先说重要事项、再说建议事项的顺序；可以合并同类表达，但不能新增素材之外的计划内容。"
             + (
                 "这是已有计划，最终回复说明已沿用这份计划，不要说新生成。"
                 if reused_existing_plan
-                else "这是新生成计划，最终回复必须自然表达：计划已生成，可以在宝宝和我页面查看，接下来我会按照计划主动提醒你哦。"
+                else "这是新生成计划，最终回复必须保留：计划已生成，可以在宝宝和我页面查看，接下来我会按照计划主动提醒你哦。"
             )
             + "不要提本周重点、当前优先级或当前阶段总结；不要补充外部资料、来源引用或引用编号。"
             "不要使用“卡片”这类界面形式词，不要再输出“我先帮你生成”或“我整理好了”这类重复交付句，"
-            "不要复述未来 2-4 周、后续大节点或完整计划。参考信息：\n\n"
+            "不要复述未来 2-4 周、后续大节点或完整计划。"
+            "聊天正文里不要出现“【重要】”“【建议】”“优先确认事项”“支持性建议”这些标签，"
+            "也不要使用“先做”“做完后”“完成标准”这类字段化说法；要用自然语言说明事项和意义。\n\n"
+            "【结构化表达素材】\n"
             f"{response}"
         ),
     )
+    compact["final_response_text"] = response
+    return compact
 
 
-def _birth_journey_plan_final_response(card_json: dict[str, Any]) -> str:
+def _birth_journey_plan_final_response(card_json: dict[str, Any], *, reused_existing_plan: bool = False) -> str:
     layers = card_json.get("planning_layers") if isinstance(card_json.get("planning_layers"), dict) else {}
+    plan_basis = layers.get("plan_basis") if isinstance(layers.get("plan_basis"), dict) else {}
+    basis_items = plan_basis.get("items") if isinstance(plan_basis.get("items"), list) else []
+    basis_summary = _birth_journey_plan_basis_summary(basis_items)
     next_7_days = layers.get("next_7_days") if isinstance(layers.get("next_7_days"), dict) else {}
     next_7_items = next_7_days.get("items") if isinstance(next_7_days.get("items"), list) else []
+    grouped_items = next_7_days.get("grouped_items") if isinstance(next_7_days.get("grouped_items"), dict) else {}
+    grouped_summary = _birth_journey_grouped_next_7_todo_summary(grouped_items, next_7_items)
     next_7_summary = _birth_journey_next_7_todo_summary(next_7_items)
-    if next_7_summary:
+    if grouped_summary or next_7_summary:
         context_reason = _clean_birth_journey_fragment(next_7_days.get("context_reason"))
         intro = f"{context_reason}，" if context_reason else ""
+        opening = (
+            "你之前已经有一份孕期计划，我先沿用这份，不重复生成。"
+            if reused_existing_plan
+            else "孕期计划已生成，可以在宝宝和我页面查看，接下来我会按照计划主动提醒你哦。"
+        )
         lines = [
-            intro + "接下来 7 天先做这几件：" + next_7_summary + "。",
-            "最终回复需要追问：这里面是否有已经完成的事项；如果有，可以让用户直接回复编号或事项名，你会同步更新完成状态。",
+            opening,
+            f"这份计划先按{basis_summary}来排。" if basis_summary else "",
+            grouped_summary or (intro + "接下来 7 天先做这几件：" + next_7_summary + "。"),
+            "这里面如果有已经完成的事项，可以直接回复编号或事项名，我会帮你同步更新完成状态。",
         ]
-        return "\n\n".join(lines)
+        return "\n\n".join(line for line in lines if line)
 
-    return (
-        "接下来 7 天行动清单暂时没有可复述的事项。"
-        "最终回复只说明计划已生成，可以在宝宝和我页面查看；不要提本周重点、当前优先级或当前阶段总结。"
+    opening = (
+        "你之前已经有一份孕期计划，我先沿用这份，不重复生成。"
+        if reused_existing_plan
+        else "孕期计划已生成，可以在宝宝和我页面查看，接下来我会按照计划主动提醒你哦。"
     )
+    return opening + "接下来 7 天行动清单暂时没有可复述的事项。"
 
 
-def _birth_journey_next_7_todo_summary(items: list[Any]) -> str:
+def _birth_journey_plan_basis_summary(items: list[Any]) -> str:
     titles: list[str] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        title = _clean_birth_journey_fragment(item.get("title"))
+        if title:
+            titles.append(title)
+        if len(titles) >= 3:
+            break
+    if not titles:
+        return ""
+    if len(titles) == 1:
+        return titles[0]
+    return "、".join(titles[:-1]) + "和" + titles[-1]
+
+
+def _birth_journey_grouped_next_7_todo_summary(grouped_items: dict[str, Any], all_items: list[Any]) -> str:
+    if not grouped_items:
+        return ""
+    index_by_id = _birth_journey_next_7_index_by_id(all_items)
+    paragraphs: list[str] = []
+    for group_key in ("essential", "supportive"):
+        group = grouped_items.get(group_key)
+        if not isinstance(group, dict):
+            continue
+        items = group.get("items") if isinstance(group.get("items"), list) else []
+        summary = _birth_journey_next_7_todo_summary(items, index_by_id)
+        if not summary:
+            continue
+        intro = _clean_birth_journey_fragment(group.get("intro"))
+        if intro:
+            paragraphs.append(f"{intro}{summary}。")
+        else:
+            title = _clean_birth_journey_fragment(group.get("title")) or "这一类事项"
+            paragraphs.append(f"{title}：{summary}。")
+    return "\n\n".join(paragraphs)
+
+
+def _birth_journey_next_7_index_by_id(items: list[Any]) -> dict[str, int]:
+    index_by_id: dict[str, int] = {}
+    for index, item in enumerate(items):
+        if not isinstance(item, dict):
+            continue
+        item_id = _clean_birth_journey_fragment(item.get("id"))
+        if item_id:
+            index_by_id[item_id] = index + 1
+    return index_by_id
+
+
+def _birth_journey_next_7_todo_summary(items: list[Any], index_by_id: dict[str, int] | None = None) -> str:
+    titles: list[str] = []
+    numbered_items: list[tuple[int, str]] = []
     for item in items:
         if isinstance(item, dict):
             title = _clean_birth_journey_fragment(item.get("title"))
+            item_id = _clean_birth_journey_fragment(item.get("id"))
+            number = index_by_id.get(item_id) if index_by_id and item_id else None
+            summary = _birth_journey_next_7_item_summary(title, item)
         else:
             title = _clean_birth_journey_fragment(item)
+            number = None
+            summary = title
         if title:
-            titles.append(title)
+            if number is None:
+                titles.append(summary)
+            else:
+                numbered_items.append((number, summary))
+    if numbered_items:
+        return "；".join(f"{number}. {title}" for number, title in numbered_items)
     return "；".join(f"{index + 1}. {title}" for index, title in enumerate(titles))
+
+
+def _birth_journey_next_7_item_summary(title: str, item: dict[str, Any]) -> str:
+    if not title:
+        return ""
+    clean_title = _birth_journey_chat_todo_title(title)
+    steps = item.get("steps") if isinstance(item.get("steps"), list) else []
+    first_step = ""
+    for step in steps:
+        first_step = _clean_birth_journey_fragment(step)
+        if first_step:
+            break
+    after_value = _birth_journey_chat_value_text(item.get("after_done_value"))
+    done_criteria = _clean_birth_journey_fragment(item.get("done_criteria"))
+
+    details: list[str] = []
+    if first_step:
+        details.append(first_step)
+    if after_value:
+        details.append(f"这样{after_value}")
+    elif done_criteria:
+        details.append(done_criteria)
+    if not details:
+        return clean_title
+    return f"{clean_title}：" + "；".join(details)
+
+
+def _birth_journey_chat_todo_title(title: str) -> str:
+    text = _clean_birth_journey_fragment(title)
+    for prefix in ("【重要】", "【建议】", "【优先确认事项】", "【支持性建议】"):
+        if text.startswith(prefix):
+            return text[len(prefix) :].strip()
+    return text
+
+
+def _birth_journey_chat_value_text(value: Any) -> str:
+    text = _clean_birth_journey_fragment(value)
+    for prefix in ("做完后，", "做完后、", "做完后", "完成后，", "完成后"):
+        if text.startswith(prefix):
+            text = text[len(prefix) :].strip()
+            break
+    return text.rstrip("。")
 
 
 def _birth_journey_phase_summary_sentence(phase_title: str, watchout: str, action: str, goal: str) -> str:

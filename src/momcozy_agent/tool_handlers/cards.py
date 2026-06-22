@@ -2266,6 +2266,7 @@ def update_birth_journey_plan_todo_completion_for_user(
         "completed": bool(completed),
         "updated_items": _compact_birth_journey_todo_items(updated_items),
         "todo_items": _compact_birth_journey_todo_items(_birth_journey_next_7_todo_items_from_payload(saved_plan.get("payload") or {})),
+        "completion_followups": _birth_journey_completion_followups(updated_items) if completed else [],
         "plan": saved_plan,
     }
 
@@ -2283,7 +2284,13 @@ def normalize_birth_journey_plan_payload(payload: dict[str, Any]) -> dict[str, A
     if not isinstance(next_7, dict):
         return normalized
     normalized_next_7 = dict(next_7)
-    normalized_next_7["items"] = _normalize_birth_journey_next_7_todo_items(normalized_next_7.get("items"))
+    normalized_items = _normalize_birth_journey_next_7_todo_items(normalized_next_7.get("items"))
+    normalized_next_7["items"] = normalized_items
+    normalized_next_7["grouped_items"] = _normalize_birth_journey_grouped_next_7_items(
+        normalized_next_7.get("grouped_items"),
+        normalized_items,
+        normalized_layers.get("current_week"),
+    )
     normalized_layers["next_7_days"] = normalized_next_7
     normalized["planning_layers"] = normalized_layers
     return normalized
@@ -2384,8 +2391,33 @@ def _normalize_birth_journey_next_7_todo_items(value: Any) -> list[dict[str, Any
         else:
             continue
         title = str(item.get("title") or "").strip()
-        if not title:
+        base_title = _birth_journey_title_without_priority_prefix(title)
+        if not base_title:
             continue
+        based_on = item.get("based_on") if isinstance(item.get("based_on"), list) else []
+        legacy_upgrade = _birth_journey_legacy_next_7_item_upgrade(base_title)
+        if legacy_upgrade:
+            base_title = str(legacy_upgrade.get("title") or base_title).strip()
+            for key in ("reason", "steps", "done_criteria", "after_done_value", "completion_followup"):
+                if key in legacy_upgrade:
+                    item[key] = legacy_upgrade[key]
+        priority_type = str(item.get("priority_type") or "").strip()
+        priority_label = str(item.get("priority_label") or "").strip()
+        if priority_type not in BIRTH_JOURNEY_PRIORITY_LABELS or not priority_label:
+            priority_type, priority_label = _birth_journey_plan_item_priority(base_title, based_on)
+            item["priority_type"] = priority_type
+            item["priority_label"] = priority_label
+        else:
+            item["priority_label"] = BIRTH_JOURNEY_PRIORITY_LABELS.get(priority_type, priority_label)
+        item["title"] = _birth_journey_visible_priority_title(base_title, priority_type)
+        if not isinstance(item.get("steps"), list) or not item.get("steps"):
+            item["steps"] = _birth_journey_plan_item_steps(base_title, based_on)
+        if not str(item.get("done_criteria") or "").strip():
+            item["done_criteria"] = _birth_journey_done_criteria(base_title)
+        if not str(item.get("after_done_value") or "").strip():
+            item["after_done_value"] = _birth_journey_after_done_value(base_title, based_on)
+        if not str(item.get("completion_followup") or "").strip():
+            item["completion_followup"] = _birth_journey_completion_followup(base_title, str(item.get("after_done_value") or ""))
         item["id"] = _birth_journey_todo_ref_to_id(item.get("id")) or _birth_journey_next_7_todo_id(len(normalized_items))
         completed = _birth_journey_completed_bool(item.get("completed"))
         item["completed"] = completed
@@ -2420,11 +2452,32 @@ def _compact_birth_journey_todo_items(items: list[dict[str, Any]]) -> list[dict[
             {
                 "id": str(item.get("id") or "").strip(),
                 "title": str(item.get("title") or "").strip(),
+                "priority_type": str(item.get("priority_type") or "").strip() or None,
+                "priority_label": str(item.get("priority_label") or "").strip() or None,
                 "completed": _birth_journey_completed_bool(item.get("completed")),
                 "completed_at": str(item.get("completed_at") or "").strip() or None,
+                "done_criteria": str(item.get("done_criteria") or "").strip() or None,
+                "after_done_value": str(item.get("after_done_value") or "").strip() or None,
+                "completion_followup": str(item.get("completion_followup") or "").strip() or None,
             }
         )
     return compact_items
+
+
+def _birth_journey_completion_followups(items: list[dict[str, Any]]) -> list[str]:
+    followups: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("completion_followup") or item.get("after_done_value") or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        followups.append(text)
+        if len(followups) >= 2:
+            break
+    return followups
 
 
 BIRTH_JOURNEY_BASIC_INFO_FIELDS: tuple[dict[str, Any], ...] = (
@@ -3277,11 +3330,16 @@ def _birth_journey_planning_layers(
     )
     next_7_items = _normalize_birth_journey_next_7_todo_items(_birth_journey_next_7_day_items(week, context))
     next_7_context_reason = _birth_journey_next_7_context_reason(week, context)
+    next_7_grouped_items = _birth_journey_grouped_next_7_items(next_7_items, week, context)
     next_2_4_weeks = _birth_journey_next_2_4_week_items(week, context)
     later_milestones = _birth_journey_later_milestones(week, context)
     return {
         "current_week": week,
         "current_phase_title": current_phase_title,
+        "plan_basis": {
+            "title": "为什么这样安排",
+            "items": _birth_journey_plan_basis_items(week, context, current_phase_title),
+        },
         "safety_gate": {
             "title": "需要先留意的情况",
             "items": safety_items,
@@ -3296,6 +3354,7 @@ def _birth_journey_planning_layers(
             "subtitle": "把当前优先级拆成这周能完成的几个小动作。",
             "context_reason": next_7_context_reason,
             "items": next_7_items,
+            "grouped_items": next_7_grouped_items,
         },
         "next_2_4_weeks": {
             "title": "未来 2-4 周",
@@ -3310,18 +3369,504 @@ def _birth_journey_planning_layers(
 
 BIRTH_JOURNEY_PLAN_ITEM_TITLE_MAX_CHARS = 22
 BIRTH_JOURNEY_PLAN_ITEM_REASON_MAX_CHARS = 84
+BIRTH_JOURNEY_PLAN_ITEM_STEP_MAX_CHARS = 36
+BIRTH_JOURNEY_PLAN_ITEM_VALUE_MAX_CHARS = 96
+BIRTH_JOURNEY_PLAN_BASIS_DETAIL_MAX_CHARS = 96
+BIRTH_JOURNEY_PRIORITY_ESSENTIAL = "essential"
+BIRTH_JOURNEY_PRIORITY_SUPPORTIVE = "supportive"
+BIRTH_JOURNEY_PRIORITY_LABELS = {
+    BIRTH_JOURNEY_PRIORITY_ESSENTIAL: "优先确认事项",
+    BIRTH_JOURNEY_PRIORITY_SUPPORTIVE: "支持性建议",
+}
+BIRTH_JOURNEY_PRIORITY_TITLE_PREFIXES = {
+    BIRTH_JOURNEY_PRIORITY_ESSENTIAL: "【重要】",
+    BIRTH_JOURNEY_PRIORITY_SUPPORTIVE: "【建议】",
+}
+BIRTH_JOURNEY_PRIORITY_KNOWN_TITLE_PREFIXES = tuple(BIRTH_JOURNEY_PRIORITY_TITLE_PREFIXES.values()) + tuple(
+    f"【{label}】" for label in BIRTH_JOURNEY_PRIORITY_LABELS.values()
+)
 
 
-def _birth_journey_plan_item(title: str, reason: str, timeframe: str, based_on: list[str] | None = None) -> dict[str, Any]:
+def _birth_journey_title_without_priority_prefix(title: Any) -> str:
+    text = str(title or "").strip()
+    for prefix in BIRTH_JOURNEY_PRIORITY_KNOWN_TITLE_PREFIXES:
+        if text.startswith(prefix):
+            return text[len(prefix) :].strip()
+    return text
+
+
+def _birth_journey_visible_priority_title(title: Any, priority_type: str) -> str:
+    base_title = _birth_journey_title_without_priority_prefix(title)
+    prefix = BIRTH_JOURNEY_PRIORITY_TITLE_PREFIXES.get(str(priority_type or "").strip())
+    if not prefix:
+        return _truncate_birth_journey_plan_text(base_title, BIRTH_JOURNEY_PLAN_ITEM_TITLE_MAX_CHARS)
+    max_base_chars = max(1, BIRTH_JOURNEY_PLAN_ITEM_TITLE_MAX_CHARS - len(prefix))
+    return prefix + _truncate_birth_journey_plan_text(base_title, max_base_chars)
+
+
+def _birth_journey_legacy_next_7_item_upgrade(title: str) -> dict[str, Any]:
+    upgrades: dict[str, dict[str, Any]] = {
+        "确认高龄孕期关注重点": {
+            "title": "问清高龄孕期 3 个检查重点",
+            "steps": ["问产检频率是否要调整", "问胎儿监测怎么安排", "问分娩方式是否需提前评估"],
+            "done_criteria": "已记录产检频率、胎儿监测安排和分娩方式评估口径。",
+            "after_done_value": "做完后，你会知道高龄因素具体影响哪些检查和后续安排。",
+        },
+        "确认高龄孕期监测安排": {
+            "title": "下次产检问清高龄监测 3 件事",
+            "steps": ["问血压血糖是否要在家记录", "问胎儿监测或复查频率", "问异常时当天联系谁"],
+            "done_criteria": "已记录监测频率、异常阈值和医院联系路径。",
+            "after_done_value": "做完后，你会知道哪些变化要观察、什么时候复查、异常时找谁。",
+        },
+        "确认血压血糖监测安排": {
+            "title": "问清血压血糖监测规则",
+            "steps": ["问在家记录的频率和时间", "问异常阈值和处理方式", "问下次复查或带记录的时间"],
+            "done_criteria": "已记录监测频率、异常阈值、复查时间和记录带给谁看。",
+            "after_done_value": "做完后，你会知道每天要不要测、测到什么数值要联系医院。",
+        },
+        "补齐下次产检时间": {
+            "title": "今天补齐下次产检日期和项目",
+            "steps": ["确认下次产检日期和地点", "记录要做的检查项目", "列出是否空腹和需带材料"],
+            "done_criteria": "已记录日期、地点、检查项目、是否空腹和需带材料。",
+            "after_done_value": "做完后，你会知道接下来一周围绕哪次产检准备，不会临近才发现漏预约。",
+        },
+        "整理产检报告里的待确认项": {
+            "title": "从产检报告圈出 3 个待确认点",
+            "steps": ["圈出报告里异常或没看懂的词", "写下未预约或未复查的项目", "整理成下次产检 3 个问题"],
+            "done_criteria": "已形成 3 个下次产检可直接问医生的问题。",
+            "after_done_value": "做完后，下次产检会更聚焦，不容易把报告里的疑问带回家。",
+        },
+        "给生活压力留缓冲": {
+            "title": "把最大生活压力拆成 1 个动作",
+            "steps": ["写下最影响执行的一件事", "拆出今天 15 分钟能完成的动作", "告诉支持人你需要的一个帮助"],
+            "done_criteria": "已选出一个压力点，并完成或安排了一个 15 分钟动作。",
+            "after_done_value": "做完后，计划不会停留在担心里，会变成今天能推进的一小步。",
+        },
+        "拆开最焦虑的三件事": {
+            "title": "把焦虑拆成 3 个可处理问题",
+            "steps": ["写下最担心的 3 件事", "标出需要问医生的一件", "标出今天能安排的一件"],
+            "done_criteria": "已把担心分成医生确认、自己安排、家人支持三类。",
+            "after_done_value": "做完后，焦虑会变成可提问、可安排、可求助的清单。",
+        },
+        "把宝宝情况问题列给医生": {
+            "title": "下次产检带上宝宝情况 3 个问题",
+            "steps": ["写下最担心的宝宝变化", "问胎儿生长或胎动是否正常", "问是否需要复查或额外观察"],
+            "done_criteria": "已得到医生对宝宝情况、复查需求和日常观察方式的答复。",
+            "after_done_value": "做完后，你会少靠猜测判断宝宝情况，知道接下来观察什么。",
+        },
+        "把最担心的问题列成三条": {
+            "title": "把担心点整理成 3 个医生问题",
+            "steps": ["把担心写成 3 个问句", "标出最想先解决的一条", "把问题保存到下次产检清单"],
+            "done_criteria": "已形成 3 个可以直接问医生或家人的具体问题。",
+            "after_done_value": "做完后，下一次沟通会更省力，也不容易漏掉真正担心的点。",
+        },
+    }
+    upgrade = upgrades.get(str(title or "").strip())
+    if not upgrade:
+        return {}
+    result = dict(upgrade)
+    result["completion_followup"] = str(result.get("after_done_value") or "").strip()
+    return result
+
+
+def _normalize_birth_journey_grouped_next_7_items(
+    value: Any,
+    all_items: list[dict[str, Any]],
+    week: Any,
+) -> dict[str, Any]:
+    fallback = _birth_journey_grouped_next_7_items(all_items, week, {})
+    if not isinstance(value, dict):
+        return fallback
+
+    item_by_id = {str(item.get("id") or "").strip(): item for item in all_items if isinstance(item, dict)}
+    normalized: dict[str, Any] = {}
+    for group_key in (BIRTH_JOURNEY_PRIORITY_ESSENTIAL, BIRTH_JOURNEY_PRIORITY_SUPPORTIVE):
+        raw_group = value.get(group_key) if isinstance(value.get(group_key), dict) else {}
+        fallback_group = fallback.get(group_key) if isinstance(fallback.get(group_key), dict) else {}
+        group_items: list[dict[str, Any]] = []
+        raw_items = raw_group.get("items") if isinstance(raw_group.get("items"), list) else []
+        if raw_items:
+            for raw_item in _normalize_birth_journey_next_7_todo_items(raw_items):
+                item_id = str(raw_item.get("id") or "").strip()
+                item = item_by_id.get(item_id, raw_item)
+                if item.get("priority_type") == group_key:
+                    group_items.append(item)
+        if not group_items:
+            fallback_items = fallback_group.get("items") if isinstance(fallback_group.get("items"), list) else []
+            group_items = [item for item in fallback_items if isinstance(item, dict)]
+        if not group_items:
+            continue
+        normalized_group = dict(raw_group or fallback_group)
+        normalized_group["title"] = str(raw_group.get("title") or fallback_group.get("title") or "").strip()
+        normalized_group["intro"] = str(raw_group.get("intro") or fallback_group.get("intro") or "").strip()
+        normalized_group["items"] = group_items
+        normalized[group_key] = normalized_group
+    return normalized or fallback
+
+
+def _birth_journey_grouped_next_7_items(items: list[dict[str, Any]], week: Any, context: dict[str, Any]) -> dict[str, Any]:
+    essential_items = [
+        item
+        for item in items
+        if isinstance(item, dict) and item.get("priority_type") == BIRTH_JOURNEY_PRIORITY_ESSENTIAL
+    ]
+    supportive_items = [
+        item
+        for item in items
+        if isinstance(item, dict) and item.get("priority_type") == BIRTH_JOURNEY_PRIORITY_SUPPORTIVE
+    ]
+    grouped: dict[str, Any] = {}
+    if essential_items:
+        grouped[BIRTH_JOURNEY_PRIORITY_ESSENTIAL] = {
+            "title": "按照你的孕周先确认",
+            "intro": _birth_journey_essential_group_intro(week, context),
+            "items": essential_items,
+        }
+    if supportive_items:
+        grouped[BIRTH_JOURNEY_PRIORITY_SUPPORTIVE] = {
+            "title": "帮助你更稳地推进",
+            "intro": _birth_journey_supportive_group_intro(week, context),
+            "items": supportive_items,
+        }
+    return grouped
+
+
+def _birth_journey_essential_group_intro(week: Any, context: dict[str, Any]) -> str:
+    anchors: list[str] = []
+    if isinstance(week, int):
+        anchors.append(f"你现在孕 {week} 周")
+    else:
+        anchors.append("你目前提供的信息")
+    essential_labels: list[str] = []
+    checkup_status = _birth_journey_substantive_text(context.get("checkup_status"))
+    if checkup_status:
+        essential_labels.append("产检/复查节奏")
+    age = _birth_journey_context_age(context)
+    if age is not None and age >= 35:
+        essential_labels.append("孕期监测安排")
+    if _birth_journey_substantive_text(context.get("risk_factors")) or _birth_journey_substantive_text(context.get("medical_notes")):
+        essential_labels.append("风险因素或医生提醒")
+    fetus_count = _birth_journey_substantive_text(context.get("fetus_count"))
+    if any(token in fetus_count for token in ("双", "多", "三")):
+        essential_labels.append("多胎产检节奏")
+    if _birth_journey_substantive_text(context.get("birth_path")) or _birth_journey_substantive_text(context.get("birth_setting")):
+        essential_labels.append("分娩/入院安排")
+    if essential_labels:
+        anchors.append("以及" + _birth_journey_join_concern_labels(_unique_text_list(essential_labels, 3)))
+    else:
+        anchors.append("当前阶段的关键准备窗口")
+    return "按照" + "，".join(anchors) + "，接下来 7 天优先把这些会影响后续安排的事先确认掉："
+
+
+def _birth_journey_supportive_group_intro(week: Any, context: dict[str, Any]) -> str:
+    labels = _birth_journey_context_concern_labels(context, 2)
+    if _birth_journey_substantive_text(context.get("lifestyle_context")):
+        labels.append("生活/工作执行压力")
+    if _birth_journey_support_text(context.get("support_person")):
+        labels.append("支持人分工")
+    if _birth_journey_substantive_text(context.get("feeding_intention")) or _birth_journey_substantive_text(context.get("feeding_ibclc_context")):
+        labels.append("喂养准备")
+    labels = _unique_text_list(labels, 3)
+    if labels:
+        return "另外，针对你提到的" + _birth_journey_join_concern_labels(labels) + "，建议这周也做几件能让推进更稳的事："
+    if isinstance(week, int):
+        return f"另外，为了让孕 {week} 周后的准备不堆到临近生产时才处理，建议这周顺手推进："
+    return "另外，为了让接下来的准备不堆到临近生产时才处理，建议这周顺手推进："
+
+
+def _birth_journey_plan_basis_items(week: Any, context: dict[str, Any], current_phase_title: str) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    if isinstance(week, int):
+        if week < 14:
+            detail = f"你现在孕 {week} 周，计划先围绕首次产检、建档和早孕筛查闭环来排。"
+        elif week < 24:
+            detail = f"你现在孕 {week} 周，计划先把常规产检、大排畸和生产支持准备接起来。"
+        elif week < 29:
+            detail = f"你现在孕 {week} 周，计划先围绕糖耐、产检复查和接下来几周的安排来排。"
+        elif week < 35:
+            detail = f"你现在孕 {week} 周，计划先把胎动观察、产检节奏和入院准备接起来。"
+        else:
+            detail = f"你现在孕 {week} 周，计划优先收口入院信号、证件材料和陪产分工。"
+        items.append(_birth_journey_basis_item("当前孕周", detail, ["current_week"]))
+    elif current_phase_title:
+        items.append(
+            _birth_journey_basis_item(
+                "当前阶段",
+                f"孕周还不够精确，先按{current_phase_title}常见准备顺序安排，再等你补充孕周后细化。",
+                ["current_phase"],
+            )
+        )
+
+    concern_label = _birth_journey_join_concern_labels(_birth_journey_context_concern_labels(context, 3))
+    if concern_label:
+        items.append(
+            _birth_journey_basis_item(
+                "你提到的担心",
+                f"你提到{concern_label}，所以计划会先把模糊压力拆成医生能确认、自己能安排、家人能支持的动作。",
+                ["entry_reason", "initial_concerns", "entry_concern_followup", "top_worries"],
+            )
+        )
+
+    checkup_status = _birth_journey_substantive_text(context.get("checkup_status"))
+    if checkup_status:
+        items.append(
+            _birth_journey_basis_item(
+                "产检状态",
+                "你已经提供产检状态，所以计划优先把报告、复查和下次要问医生的问题串起来。",
+                ["checkup_status"],
+            )
+        )
+
+    age = _birth_journey_context_age(context)
+    risk_text = _birth_journey_substantive_text(context.get("risk_factors"))
+    medical_notes = _birth_journey_substantive_text(context.get("medical_notes"))
+    fetus_count = _birth_journey_substantive_text(context.get("fetus_count"))
+    if age is not None and age >= 35:
+        items.append(_birth_journey_basis_item("年龄因素", f"你是 {age} 岁，计划会把产检频率、胎儿监测和分娩方式确认提前。", ["age"]))
+    if risk_text or medical_notes:
+        items.append(_birth_journey_basis_item("风险和医生提醒", "你提到风险因素或医生提醒，计划会优先确认监测频率、复查指标和何时联系医院。", ["risk_factors", "medical_notes"]))
+    if any(token in fetus_count for token in ("双", "多", "三")):
+        items.append(_birth_journey_basis_item("多胎情况", "你是多胎，计划会按更谨慎的产检和入院节奏来安排。", ["fetus_count"]))
+
+    birth_path = _birth_journey_substantive_text(context.get("birth_path"))
+    birth_setting = _birth_journey_substantive_text(context.get("birth_setting"))
+    support = _birth_journey_support_text(context.get("support_person"))
+    feeding = _birth_journey_substantive_text(context.get("feeding_intention")) or _birth_journey_substantive_text(context.get("feeding_ibclc_context"))
+    lifestyle = _birth_journey_substantive_text(context.get("lifestyle_context"))
+    if birth_path or birth_setting:
+        items.append(_birth_journey_basis_item("生产安排", "你提供了分娩方式或医院信息，计划会提前落到入院流程、陪产探视和分娩沟通。", ["birth_path", "birth_setting"]))
+    if support:
+        items.append(_birth_journey_basis_item("支持人分工", f"你提到{support}，计划会把临产和产后支持拆成可以分给支持人的事项。", ["support_person"]))
+    if feeding:
+        items.append(_birth_journey_basis_item("喂养准备", "你提供了喂养相关信息，计划会提前放入住院后 48 小时喂养支持和 IBCLC 问题。", ["feeding_intention", "feeding_ibclc_context"]))
+    if lifestyle:
+        items.append(_birth_journey_basis_item("生活执行压力", "你提到生活或工作场景，计划会把建议拆成这周能完成的小动作，减少执行负担。", ["lifestyle_context"]))
+    return _unique_birth_journey_basis_items(items)[:4]
+
+
+def _birth_journey_basis_item(title: str, detail: str, based_on: list[str]) -> dict[str, Any]:
     return {
         "title": _truncate_birth_journey_plan_text(title, BIRTH_JOURNEY_PLAN_ITEM_TITLE_MAX_CHARS),
-        "reason": _truncate_birth_journey_plan_text(
-            _birth_journey_plan_reason_text(reason),
-            BIRTH_JOURNEY_PLAN_ITEM_REASON_MAX_CHARS,
-        ),
-        "timeframe": timeframe,
-        "based_on": based_on or [],
+        "detail": _truncate_birth_journey_plan_text(detail, BIRTH_JOURNEY_PLAN_BASIS_DETAIL_MAX_CHARS),
+        "based_on": based_on,
     }
+
+
+def _unique_birth_journey_basis_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    unique_items: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in items:
+        title = str(item.get("title") or "").strip()
+        if not title or title in seen:
+            continue
+        seen.add(title)
+        unique_items.append(item)
+    return unique_items
+
+
+def _birth_journey_plan_item(
+    title: str,
+    reason: str,
+    timeframe: str,
+    based_on: list[str] | None = None,
+    *,
+    steps: list[str] | None = None,
+    done_criteria: str | None = None,
+    after_done_value: str | None = None,
+) -> dict[str, Any]:
+    clean_title = _truncate_birth_journey_plan_text(title, BIRTH_JOURNEY_PLAN_ITEM_TITLE_MAX_CHARS)
+    clean_reason = _truncate_birth_journey_plan_text(
+        _birth_journey_plan_reason_text(reason),
+        BIRTH_JOURNEY_PLAN_ITEM_REASON_MAX_CHARS,
+    )
+    basis = based_on or []
+    clean_steps = [
+        _truncate_birth_journey_plan_text(step, BIRTH_JOURNEY_PLAN_ITEM_STEP_MAX_CHARS)
+        for step in (steps or _birth_journey_plan_item_steps(title, basis))[:3]
+        if str(step or "").strip()
+    ]
+    clean_done_criteria = _truncate_birth_journey_plan_text(
+        done_criteria or _birth_journey_done_criteria(title),
+        BIRTH_JOURNEY_PLAN_ITEM_VALUE_MAX_CHARS,
+    )
+    clean_after_done_value = _truncate_birth_journey_plan_text(
+        after_done_value or _birth_journey_after_done_value(title, basis),
+        BIRTH_JOURNEY_PLAN_ITEM_VALUE_MAX_CHARS,
+    )
+    priority_type, priority_label = _birth_journey_plan_item_priority(title, basis)
+    return {
+        "title": clean_title,
+        "reason": clean_reason,
+        "timeframe": timeframe,
+        "based_on": basis,
+        "priority_type": priority_type,
+        "priority_label": priority_label,
+        "why_for_you": clean_reason,
+        "steps": clean_steps,
+        "done_criteria": clean_done_criteria,
+        "after_done_value": clean_after_done_value,
+        "completion_followup": _birth_journey_completion_followup(title, clean_after_done_value),
+    }
+
+
+def _birth_journey_plan_item_priority(title: str, based_on: list[str]) -> tuple[str, str]:
+    text = str(title or "")
+    essential_keys = {
+        "current_week",
+        "checkup_status",
+        "checkup_window",
+        "current_symptoms",
+        "risk_factors",
+        "medical_notes",
+        "age",
+        "fetus_count",
+        "birth_path",
+        "birth_setting",
+        "milestone",
+    }
+    supportive_keys = {
+        "entry_reason",
+        "initial_concerns",
+        "entry_concern_followup",
+        "top_worries",
+        "lifestyle_context",
+        "support_person",
+        "feeding_intention",
+        "feeding_ibclc_context",
+    }
+    essential_tokens = (
+        "产检",
+        "糖耐",
+        "NT",
+        "早筛",
+        "大排畸",
+        "复查",
+        "报告",
+        "医生",
+        "监测",
+        "高龄",
+        "血压",
+        "血糖",
+        "胎动",
+        "风险",
+        "医院",
+        "入院",
+        "证件",
+        "待产",
+        "胎位",
+        "生长",
+        "剖宫产",
+        "顺产",
+        "多胎",
+    )
+    supportive_tokens = (
+        "焦虑",
+        "担心",
+        "担忧",
+        "生活",
+        "睡眠",
+        "通勤",
+        "久坐",
+        "久站",
+        "压力",
+        "休息",
+        "支持",
+        "分工",
+        "家人",
+        "伴侣",
+        "喂养",
+        "母乳",
+        "混合",
+        "泵奶",
+        "背奶",
+        "IBCLC",
+    )
+    if any(key in essential_keys for key in based_on) or any(token in text for token in essential_tokens):
+        priority_type = BIRTH_JOURNEY_PRIORITY_ESSENTIAL
+    elif any(key in supportive_keys for key in based_on) or any(token in text for token in supportive_tokens):
+        priority_type = BIRTH_JOURNEY_PRIORITY_SUPPORTIVE
+    else:
+        priority_type = BIRTH_JOURNEY_PRIORITY_ESSENTIAL
+    return priority_type, BIRTH_JOURNEY_PRIORITY_LABELS[priority_type]
+
+
+def _birth_journey_plan_item_steps(title: str, based_on: list[str]) -> list[str]:
+    text = str(title or "")
+    steps: list[str]
+    if "糖耐" in text:
+        steps = ["确认糖耐预约日期和地点", "记下禁食开始时间和抽血流程", "约好报告回看或复查时间"]
+    elif any(token in text for token in ("产检", "报告", "复查", "医生", "风险", "监测", "高龄", "血压", "血糖")):
+        steps = ["把相关报告或医生备注放到一起", "列出最想确认的 3 个问题", "下次产检时逐条问清"]
+    elif any(token in text for token in ("胎动", "水肿", "观察")):
+        steps = ["选一个每天固定观察时段", "记录胎动和明显不适变化", "保存异常时联系医院的步骤"]
+    elif any(token in text for token in ("医院", "入院", "证件", "待产", "入口", "流程")) and not any(token in text for token in ("剖", "顺产", "分娩")):
+        steps = ["确认医院入口、证件和预登记要求", "把联系号码和路线存到手机", "和陪同人同步出发规则"]
+    elif any(token in text for token in ("支持", "分工", "家人", "伴侣")):
+        steps = ["写下需要别人负责的事项", "明确谁负责联系医院和拿材料", "把分工发给支持人确认"]
+    elif any(token in text for token in ("喂养", "母乳", "混合", "泵奶", "背奶", "IBCLC", "含乳", "涨奶")):
+        steps = ["写下喂养偏好和担心点", "确认医院是否有护士或 IBCLC 支持", "列出产后 48 小时要问的问题"]
+    elif any(token in text for token in ("剖宫产", "剖")):
+        steps = ["问清术前禁食和入院时间", "确认术后下床和伤口观察口径", "把住院照护分工写下来"]
+    elif any(token in text for token in ("顺产", "宫缩", "破水", "见红", "分娩")):
+        steps = ["问清宫缩、破水、见红后的联系口径", "确认镇痛和陪产规则", "把沟通偏好发给陪同人"]
+    elif any(token in text for token in ("生活", "睡眠", "通勤", "久坐", "久站", "压力", "休息")):
+        steps = ["选一个最影响执行的生活压力点", "拆成今天能调整的小动作", "告诉支持人你需要的具体帮助"]
+    elif any(token in text for token in ("焦虑", "担心", "担忧")) or any(key in based_on for key in ("entry_reason", "top_worries", "entry_concern_followup")):
+        steps = ["把担心写成 3 条", "标出哪些要问医生、哪些要安排", "把需要家人支持的事单独列出"]
+    else:
+        steps = ["写下这项要确认的具体问题", "确定要问谁或在哪里查", "把结果记录到计划里"]
+    return [_truncate_birth_journey_plan_text(step, BIRTH_JOURNEY_PLAN_ITEM_STEP_MAX_CHARS) for step in steps[:3]]
+
+
+def _birth_journey_done_criteria(title: str) -> str:
+    text = str(title or "")
+    if "糖耐" in text:
+        criteria = "已知道糖耐日期、禁食时间、抽血流程和报告回看方式。"
+    elif any(token in text for token in ("产检", "报告", "复查", "医生", "风险", "监测", "高龄", "血压", "血糖")):
+        criteria = "已形成下次产检可直接问医生的问题清单。"
+    elif any(token in text for token in ("胎动", "水肿", "观察")):
+        criteria = "已固定观察时段，并写清异常时联系医院的步骤。"
+    elif any(token in text for token in ("医院", "入院", "证件", "待产", "入口", "流程")) and not any(token in text for token in ("剖", "顺产", "分娩")):
+        criteria = "已确认入院入口、证件材料、陪产探视和联系路径。"
+    elif any(token in text for token in ("支持", "分工", "家人", "伴侣")):
+        criteria = "已写清谁负责联系医院、拿材料、出发和记录医嘱。"
+    elif any(token in text for token in ("喂养", "母乳", "混合", "泵奶", "背奶", "IBCLC", "含乳", "涨奶")):
+        criteria = "已列出住院前要确认的喂养支持问题。"
+    elif any(token in text for token in ("焦虑", "担心", "担忧")):
+        criteria = "已把担心拆成医生确认、自己安排和家人支持三类。"
+    else:
+        criteria = "已知道下一步要问谁、什么时候做、做到什么算完成。"
+    return _truncate_birth_journey_plan_text(criteria, BIRTH_JOURNEY_PLAN_ITEM_VALUE_MAX_CHARS)
+
+
+def _birth_journey_after_done_value(title: str, based_on: list[str]) -> str:
+    text = str(title or "")
+    if "糖耐" in text:
+        value = "做完后，我可以继续帮你整理糖耐当天流程和结果回看问题。"
+    elif any(token in text for token in ("产检", "报告", "复查", "医生", "风险", "监测", "高龄", "血压", "血糖")):
+        value = "做完后，我可以继续帮你整理下次产检要问医生的 3-5 个问题。"
+    elif any(token in text for token in ("胎动", "水肿", "观察")):
+        value = "做完后，我可以帮你整理一张异常情况联系卡。"
+    elif any(token in text for token in ("医院", "入院", "证件", "待产", "入口", "流程")) and not any(token in text for token in ("剖", "顺产", "分娩")):
+        value = "做完后，我可以继续帮你整理入院流程确认清单或待产包。"
+    elif any(token in text for token in ("支持", "分工", "家人", "伴侣")):
+        value = "做完后，我可以帮你整理临产支持人分工清单。"
+    elif any(token in text for token in ("喂养", "母乳", "混合", "泵奶", "背奶", "IBCLC", "含乳", "涨奶")):
+        value = "做完后，我可以帮你整理住院后 48 小时喂养和 IBCLC 求助问题。"
+    elif any(token in text for token in ("剖宫产", "剖", "顺产", "宫缩", "破水", "见红", "分娩")):
+        value = "做完后，我可以继续帮你整理分娩沟通单。"
+    elif any(token in text for token in ("焦虑", "担心", "担忧")) or any(key in based_on for key in ("entry_reason", "top_worries", "entry_concern_followup")):
+        value = "做完后，我可以把这些担心继续拆成医生问题、自己安排和家人分工。"
+    else:
+        value = "做完后，我可以继续帮你把这一项拆成更细的执行清单。"
+    return _truncate_birth_journey_plan_text(value, BIRTH_JOURNEY_PLAN_ITEM_VALUE_MAX_CHARS)
+
+
+def _birth_journey_completion_followup(title: str, after_done_value: str) -> str:
+    value = str(after_done_value or "").strip()
+    if value:
+        return value
+    return _truncate_birth_journey_plan_text(f"完成“{title}”后，我可以继续帮你细化下一步。", BIRTH_JOURNEY_PLAN_ITEM_VALUE_MAX_CHARS)
 
 
 def _birth_journey_plan_reason_text(reason: str) -> str:
@@ -3481,6 +4026,17 @@ def _birth_journey_personalized_next_7_items(week: Any, context: dict[str, Any])
     items: list[dict[str, Any]] = []
     age = _birth_journey_context_age(context)
     concern_text = _birth_journey_context_concern_text(context)
+    explicit_concern_text = "；".join(
+        _unique_text_list(
+            [
+                context.get("entry_concern_followup"),
+                context.get("top_worries"),
+                context.get("initial_concerns"),
+                context.get("entry_reason"),
+            ],
+            5,
+        )
+    )
     has_anxiety = _birth_journey_entry_message_has_signal(concern_text)
     has_monitoring_concern = any(token in concern_text for token in ("血压", "血糖", "监测", "糖耐", "高血压", "糖尿病"))
     has_baby_concern = any(token in concern_text for token in ("宝宝", "胎儿", "胎动", "发育", "生长"))
@@ -3488,55 +4044,73 @@ def _birth_journey_personalized_next_7_items(week: Any, context: dict[str, Any])
     if has_anxiety:
         items.append(
             _birth_journey_plan_item(
-                "拆开最焦虑的三件事",
+                "把焦虑拆成 3 个可处理问题",
                 "考虑到你提到焦虑，目的是把担心分成能问医生、能安排和需要家人支持的事项。",
                 "今天",
                 ["entry_reason", "top_worries", "entry_concern_followup"],
+                steps=["写下最担心的 3 件事", "标出需要问医生的一件", "标出今天能安排的一件"],
+                done_criteria="已把担心分成医生确认、自己安排、家人支持三类。",
+                after_done_value="做完后，焦虑会变成可提问、可安排、可求助的清单。",
             )
         )
     if age is not None and age >= 35 and has_monitoring_concern:
         items.append(
             _birth_journey_plan_item(
-                "确认高龄孕期监测安排",
+                "下次产检问清高龄监测 3 件事",
                 f"考虑到你 {age} 岁且提到监测，目的是问清血压血糖、复查频率和异常时联系谁。",
                 "下次产检前",
                 ["age", "entry_concern_followup"],
+                steps=["问血压血糖是否要在家记录", "问胎儿监测或复查频率", "问异常时当天联系谁"],
+                done_criteria="已记录监测频率、异常阈值和医院联系路径。",
+                after_done_value="做完后，你会知道哪些变化要观察、什么时候复查、异常时找谁。",
             )
         )
     elif age is not None and age >= 35:
         items.append(
             _birth_journey_plan_item(
-                "确认高龄孕期关注重点",
+                "问清高龄孕期 3 个检查重点",
                 f"考虑到你 {age} 岁，目的是问清产检频率、胎儿监测和分娩方式是否需要特别安排。",
                 "下次产检前",
                 ["age", "entry_reason"],
+                steps=["问产检频率是否要调整", "问胎儿监测怎么安排", "问分娩方式是否需提前评估"],
+                done_criteria="已记录产检频率、胎儿监测安排和分娩方式评估口径。",
+                after_done_value="做完后，你会知道高龄因素具体影响哪些检查和后续安排。",
             )
         )
     elif has_monitoring_concern:
         items.append(
             _birth_journey_plan_item(
-                "确认血压血糖监测安排",
+                "问清血压血糖监测规则",
                 "考虑到你提到监测，目的是问清记录频率、异常阈值和复查节点。",
                 "下次产检前",
                 ["entry_concern_followup"],
+                steps=["问在家记录的频率和时间", "问异常阈值和处理方式", "问下次复查或带记录的时间"],
+                done_criteria="已记录监测频率、异常阈值、复查时间和记录带给谁看。",
+                after_done_value="做完后，你会知道每天要不要测、测到什么数值要联系医院。",
             )
         )
     if has_baby_concern:
         items.append(
             _birth_journey_plan_item(
-                "把宝宝情况问题列给医生",
+                "下次产检带上宝宝情况 3 个问题",
                 "考虑到你担心宝宝情况，目的是把胎动、胎儿生长和需要复查的点一次问清楚。",
                 "下次产检前",
                 ["entry_concern_followup", "top_worries"],
+                steps=["写下最担心的宝宝变化", "问胎儿生长或胎动是否正常", "问是否需要复查或额外观察"],
+                done_criteria="已得到医生对宝宝情况、复查需求和日常观察方式的答复。",
+                after_done_value="做完后，你会少靠猜测判断宝宝情况，知道接下来观察什么。",
             )
         )
-    if not items and concern_text:
+    if not items and explicit_concern_text:
         items.append(
             _birth_journey_plan_item(
-                "把最担心的问题列成三条",
+                "把担心点整理成 3 个医生问题",
                 "考虑到你已经说出担心点，目的是把模糊压力变成医生能回答、自己能安排的具体问题。",
                 "今天",
                 ["entry_reason", "top_worries"],
+                steps=["把担心写成 3 个问句", "标出最想先解决的一条", "把问题保存到下次产检清单"],
+                done_criteria="已形成 3 个可以直接问医生或家人的具体问题。",
+                after_done_value="做完后，下一次沟通会更省力，也不容易漏掉真正担心的点。",
             )
         )
     return _unique_birth_journey_plan_items(items)[:3]
@@ -3612,6 +4186,58 @@ def _birth_journey_current_focus_items(week: Any, context: dict[str, Any], curre
     return items
 
 
+def _birth_journey_lifestyle_next_7_item(lifestyle_text: str) -> dict[str, Any]:
+    if any(token in lifestyle_text for token in ("通勤", "路上", "坐车", "开车")):
+        return _birth_journey_plan_item(
+            "固定通勤后的 20 分钟休息",
+            "考虑到你提到通勤压力，先给每天最容易透支的时段留出恢复窗口。",
+            "从今天开始",
+            ["lifestyle_context"],
+            steps=["选定到家或到办公室后的休息时段", "把这段时间加到日历或提醒", "告诉支持人这段不安排杂事"],
+            done_criteria="已设好本周至少 3 天的通勤后休息提醒。",
+            after_done_value="做完后，通勤不会直接挤掉休息和产检准备时间。",
+        )
+    if any(token in lifestyle_text for token in ("久坐", "坐着", "上班", "办公")):
+        return _birth_journey_plan_item(
+            "设置久坐后的起身提醒",
+            "考虑到你提到久坐或上班场景，先把身体不适风险拆成可执行的小提醒。",
+            "从今天开始",
+            ["lifestyle_context"],
+            steps=["选一个 45-60 分钟提醒间隔", "设置起身喝水或走动提醒", "记录腰酸腿抽筋是否减少"],
+            done_criteria="已设置提醒，并试运行至少 1 个工作日。",
+            after_done_value="做完后，你会更容易发现久坐和不适之间的关系，也更好和医生描述。",
+        )
+    if any(token in lifestyle_text for token in ("睡眠", "失眠", "熬夜", "夜醒", "睡不好")):
+        return _birth_journey_plan_item(
+            "今晚固定睡前 30 分钟降噪",
+            "考虑到你提到睡眠压力，先把今晚能执行的休息动作定下来。",
+            "今晚",
+            ["lifestyle_context"],
+            steps=["睡前 30 分钟停掉工作消息", "把明天要做的事写成 3 条", "记录今晚入睡和夜醒情况"],
+            done_criteria="已完成一次睡前降噪，并记录睡眠变化。",
+            after_done_value="做完后，你能判断哪些安排真的影响睡眠，后续计划会更好调。",
+        )
+    if any(token in lifestyle_text for token in ("久站", "站着", "站立")):
+        return _birth_journey_plan_item(
+            "安排久站后的坐下休息点",
+            "考虑到你提到久站压力，先把休息点和替换人提前安排好。",
+            "从今天开始",
+            ["lifestyle_context"],
+            steps=["找出今天最容易久站的时段", "安排一个坐下或垫脚休息点", "请支持人帮忙替换 1 次"],
+            done_criteria="已给本周最容易久站的时段安排休息点或替换人。",
+            after_done_value="做完后，你不用临时硬撑，也更容易判断身体不适是否需要问医生。",
+        )
+    return _birth_journey_plan_item(
+        "把最大生活压力拆成 1 个动作",
+        "考虑到你提到生活或工作压力，先把最影响执行的一件事拆到今天能做。",
+        "今天",
+        ["lifestyle_context"],
+        steps=["写下最影响执行的一件事", "拆出今天 15 分钟能完成的动作", "告诉支持人你需要的一个帮助"],
+        done_criteria="已选出一个压力点，并完成或安排了一个 15 分钟动作。",
+        after_done_value="做完后，计划不会停留在担心里，会变成今天能推进的一小步。",
+    )
+
+
 def _birth_journey_next_7_day_items(week: Any, context: dict[str, Any]) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     checkup_status = _birth_journey_substantive_text(context.get("checkup_status"))
@@ -3624,32 +4250,152 @@ def _birth_journey_next_7_day_items(week: Any, context: dict[str, Any]) -> list[
     birth_path = _birth_journey_substantive_text(context.get("birth_path"))
     items.extend(_birth_journey_personalized_next_7_items(week, context))
     if checkup_status:
-        items.append(_birth_journey_plan_item("整理产检报告里的待确认项", "分开记录已做检查、异常提示、未预约项和医生备注。", "未来 7 天", ["checkup_status"]))
+        items.append(
+            _birth_journey_plan_item(
+                "从产检报告圈出 3 个待确认点",
+                "分开记录已做检查、异常提示、未预约项和医生备注，避免下次产检漏问。",
+                "未来 7 天",
+                ["checkup_status"],
+                steps=["圈出报告里异常或没看懂的词", "写下未预约或未复查的项目", "整理成下次产检 3 个问题"],
+                done_criteria="已形成 3 个下次产检可直接问医生的问题。",
+                after_done_value="做完后，下次产检会更聚焦，不容易把报告里的疑问带回家。",
+            )
+        )
     else:
-        items.append(_birth_journey_plan_item("补齐下次产检时间", "确认预约日期、检查项目和需要带的材料。", "未来 7 天", ["checkup_status"]))
+        items.append(
+            _birth_journey_plan_item(
+                "今天补齐下次产检日期和项目",
+                "确认预约日期、检查项目和需要带的材料，先把最基础的时间锚点补上。",
+                "未来 7 天",
+                ["checkup_status"],
+                steps=["确认下次产检日期和地点", "记录要做的检查项目", "列出是否空腹和需带材料"],
+                done_criteria="已记录日期、地点、检查项目、是否空腹和需带材料。",
+                after_done_value="做完后，你会知道接下来一周围绕哪次产检准备，不会临近才发现漏预约。",
+            )
+        )
     if isinstance(week, int):
         if week < 12:
-            items.append(_birth_journey_plan_item("准备首次产检资料包", "整理末次月经、既往病史、用药补剂和早孕检查。", "本周内", ["current_week"]))
+            items.append(
+                _birth_journey_plan_item(
+                    "准备首次产检资料清单",
+                    "整理末次月经、既往病史、用药补剂和早孕检查，让首次产检少漏信息。",
+                    "本周内",
+                    ["current_week"],
+                    steps=["写下末次月经和既往病史", "整理用药补剂和早孕检查", "确认建档或首次产检材料"],
+                    done_criteria="已把首次产检要带的信息和材料整理在同一处。",
+                    after_done_value="做完后，首次产检时医生能更快了解你的基础情况。",
+                )
+            )
         elif 11 <= week <= 14:
-            items.append(_birth_journey_plan_item("核对 NT/早筛当天安排", "确认检查准备、报告领取和异常结果联系路径。", "本周内", ["current_week"]))
+            items.append(
+                _birth_journey_plan_item(
+                    "核对 NT/早筛时间和报告回看",
+                    "确认检查准备、报告领取和异常结果联系路径。",
+                    "本周内",
+                    ["current_week"],
+                    steps=["确认检查日期、地点和当天准备", "问清报告领取时间", "保存异常结果联系路径"],
+                    done_criteria="已记录检查安排、报告回看时间和异常联系路径。",
+                    after_done_value="做完后，NT/早筛不会只停在预约上，后续报告也能接得上。",
+                )
+            )
         elif 18 <= week <= 22:
-            items.append(_birth_journey_plan_item("确认大排畸当天流程", "问清地点、时长、陪同要求和复查方式。", "本周内", ["current_week"]))
+            items.append(
+                _birth_journey_plan_item(
+                    "确认大排畸地点流程和复查方式",
+                    "问清地点、时长、陪同要求和复查方式。",
+                    "本周内",
+                    ["current_week"],
+                    steps=["确认检查地点和预计时长", "问是否允许陪同", "问需要复查时怎么预约"],
+                    done_criteria="已记录地点、流程、陪同规则和复查方式。",
+                    after_done_value="做完后，大排畸当天安排会更可控，复查也知道怎么接上。",
+                )
+            )
         elif 23 <= week <= 28:
-            items.append(_birth_journey_plan_item("排好糖耐当天安排", "定好禁食时间、抽血流程、检查后第一餐和返程。", "本周内", ["current_week"]))
+            items.append(
+                _birth_journey_plan_item(
+                    "排好糖耐禁食抽血和返程",
+                    "定好禁食时间、抽血流程、检查后第一餐和返程。",
+                    "本周内",
+                    ["current_week"],
+                    steps=["确认禁食开始时间", "问清抽血流程和耗时", "安排检查后第一餐和返程"],
+                    done_criteria="已记录禁食时间、抽血流程、检查后进食和返程安排。",
+                    after_done_value="做完后，糖耐当天不容易因为空腹、等待或返程安排临时慌乱。",
+                )
+            )
         elif week >= 29:
-            items.append(_birth_journey_plan_item("固定胎动观察规则", "选固定时段记录，并写清异常时联系医院的步骤。", "每天", ["current_week", "current_symptoms"]))
+            items.append(
+                _birth_journey_plan_item(
+                    "固定胎动记录和异常联系规则",
+                    "选固定时段记录，并写清异常时联系医院的步骤。",
+                    "每天",
+                    ["current_week", "current_symptoms"],
+                    steps=["选一个每天固定观察时段", "记录胎动和明显不适变化", "保存异常时联系医院的步骤"],
+                    done_criteria="已固定观察时段，并写清异常时联系医院的步骤。",
+                    after_done_value="做完后，你会有连续记录，异常时也知道先联系哪里。",
+                )
+            )
     if risk_text or medical_notes:
-        items.append(_birth_journey_plan_item("列出风险因素追问", "聚焦复查指标、活动限制、就医时机和分娩方式影响。", "下次产检前", ["risk_factors", "medical_notes"]))
+        items.append(
+            _birth_journey_plan_item(
+                "下次产检问清风险指标处理口径",
+                "聚焦复查指标、活动限制、就医时机和分娩方式影响。",
+                "下次产检前",
+                ["risk_factors", "medical_notes"],
+                steps=["写下医生提过的风险或指标", "问复查频率和异常阈值", "问是否影响活动或分娩方式"],
+                done_criteria="已记录复查指标、异常阈值、活动限制和分娩方式影响。",
+                after_done_value="做完后，风险因素会变成明确观察规则，而不是一直悬着的担心。",
+            )
+        )
     if birth_setting:
-        items.append(_birth_journey_plan_item("确认生产医院入院细则", f"问清{birth_setting}的预登记、夜间入口、陪产探视和证件要求。", "未来 7 天", ["birth_setting"]))
+        items.append(
+            _birth_journey_plan_item(
+                "问清生产医院入院入口和证件",
+                f"问清{birth_setting}的预登记、夜间入口、陪产探视和证件要求。",
+                "未来 7 天",
+                ["birth_setting"],
+                steps=["确认预登记或建档入口", "记录夜间急诊或入院入口", "列出证件和陪产探视要求"],
+                done_criteria="已记录入院入口、预登记、证件材料和陪产探视规则。",
+                after_done_value="做完后，临产时不用临时查入口、材料和陪同规则。",
+            )
+        )
     if support:
-        items.append(_birth_journey_plan_item("和支持人写清分工", f"明确{support}负责联系医院、拿材料、出发和记录医嘱。", "未来 7 天", ["support_person"]))
+        items.append(
+            _birth_journey_plan_item(
+                "和支持人确认 4 项临产分工",
+                f"明确{support}负责联系医院、拿材料、出发和记录医嘱。",
+                "未来 7 天",
+                ["support_person"],
+                steps=["定谁负责联系医院", "定谁拿证件和住院材料", "定谁记录医生口径和出发安排"],
+                done_criteria="已和支持人确认联系医院、拿材料、出发、记录医嘱这 4 项分工。",
+                after_done_value="做完后，临产时每个人知道自己负责什么，减少现场混乱。",
+            )
+        )
     if feeding:
-        items.append(_birth_journey_plan_item("整理产后 48 小时喂养问题", "写清亲喂/混合/泵奶选择，以及何时找护士或 IBCLC。", "未来 7 天", ["feeding_intention", "feeding_ibclc_context"]))
+        items.append(
+            _birth_journey_plan_item(
+                "列出产后 48 小时喂养求助问题",
+                "写清亲喂/混合/泵奶选择，以及何时找护士或 IBCLC。",
+                "未来 7 天",
+                ["feeding_intention", "feeding_ibclc_context"],
+                steps=["写下喂养偏好和担心点", "问医院能否找护士或 IBCLC", "列出产后 48 小时要问的问题"],
+                done_criteria="已列出住院前要确认的喂养支持问题。",
+                after_done_value="做完后，产后最初 48 小时遇到含乳、涨奶或泵奶问题时更知道找谁。",
+            )
+        )
     if "剖" in birth_path:
-        items.append(_birth_journey_plan_item("补问剖宫产准备", "确认禁食禁水、入院时间、下床和伤口观察。", "下次产检", ["birth_path"]))
+        items.append(
+            _birth_journey_plan_item(
+                "补问剖宫产术前术后 4 件事",
+                "确认禁食禁水、入院时间、下床和伤口观察。",
+                "下次产检",
+                ["birth_path"],
+                steps=["问术前禁食禁水时间", "问入院和手术前流程", "问术后下床和伤口观察"],
+                done_criteria="已记录禁食禁水、入院时间、术后下床和伤口观察口径。",
+                after_done_value="做完后，剖宫产前后最容易慌的流程会提前变清楚。",
+            )
+        )
     if lifestyle_text:
-        items.append(_birth_journey_plan_item("给生活压力留缓冲", "把久坐、通勤、睡眠压力拆成可调整的小安排。", "从今天开始", ["lifestyle_context"]))
+        items.append(_birth_journey_lifestyle_next_7_item(lifestyle_text))
     return _unique_birth_journey_plan_items(items)
 
 

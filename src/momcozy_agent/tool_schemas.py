@@ -219,7 +219,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "birth_journey_plan_card_create": _function_tool(
         "birth_journey_plan_card_create",
-        "根据 birth_journey_intake_manage 已采集或已问过的信息，生成前端可渲染并保存为 active care plan 的孕期计划。生成前必须完成基础信息、产检记录上传状态、高风险因素、当前症状、生活方式与场景、喂养/IBCLC 信息这些采集组；用户回答不清楚、跳过、暂不提供也算已问到，并应在 plan_context 中显式传入对应字段。LLM 不需要生成 card_json；规则分层、日期换算、行动清单和安全声明由工具稳定生成。已有 active 孕期计划时工具会返回 existing_plan_found，不要重复生成。",
+        "根据 birth_journey_intake_manage 已采集或已问过的信息，生成前端可渲染并保存为 active care plan 的孕期计划。生成前必须完成基础信息、产检记录上传状态、高风险因素、当前症状、生活方式与场景、喂养/IBCLC 信息这些采集组；用户回答不清楚、跳过、暂不提供也算已问到，并应在 plan_context 中显式传入对应字段。LLM 不需要生成 card_json；规则分层、日期换算、行动清单、7 天待办分组和安全声明由工具稳定生成。已有 active 孕期计划时工具会返回 existing_plan_found，不要重复生成。",
         {
             "plan_context": JSON_OBJECT_STRING,
             "scope": {"type": "string", "enum": ["full", "prenatal_only", "short_range"]},
@@ -234,7 +234,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "birth_journey_plan_todo_update": _function_tool(
         "birth_journey_plan_todo_update",
-        "更新当前用户 active 孕期计划中“接下来 7 天行动清单”的完成状态。仅当 request_context 的 active_care_plan_context 给出了 next_7_days_todos，且用户明确表示其中某些事项已经完成或需要取消完成时调用。用户可以用编号、事项名或 item_id 表达；如果无法唯一定位事项，先追问，不要猜测。此工具只更新完成状态，不重新生成计划，不用于删除计划、待产包、奶量计划或普通日记。",
+        "更新当前用户 active 孕期计划中“接下来 7 天行动清单”的完成状态。仅当 request_context 的 active_care_plan_context 给出了 next_7_days_todos，且用户明确表示其中某些事项已经完成或需要取消完成时调用。用户可以用编号、事项名或 item_id 表达；如果无法唯一定位事项，先追问，不要猜测。此工具只更新完成状态，不重新生成计划，不用于删除计划、待产包、奶量计划或普通日记。工具返回 completion_followups 时，最终回复可顺带提供 1 个与已完成事项相关的下一步帮助。",
         {
             "item_ids": _nullable({"type": "array", "items": {"type": "string"}, "description": "要更新的稳定事项 id，例如 next7_01；不使用时传 null。"}),
             "item_numbers": _nullable({"type": "array", "items": {"type": "integer"}, "description": "用户按编号表达时传 1-based 编号；不使用时传 null。"}),
