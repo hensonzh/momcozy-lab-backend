@@ -196,7 +196,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "birth_journey_intake_manage": _function_tool(
         "birth_journey_intake_manage",
-        "推进孕期计划的信息采集状态机。模型只负责识别用户是否要制定计划、把用户本轮回答交给本工具，并根据 next_step 继续；不要自己维护字段清单。进入采集时，如果前文有用户最初表达的关键线索，例如年龄、孕周、焦虑、无助、不知道怎么办、怕漏事等，调用 action=start 时在 payload 中传 entry_reason、initial_concerns 和 known_values，工具会用于表单预填、plan_context 和最终计划个性化，不会作为单独追问节点阻塞主流程。submit_entry_concern 仅用于历史会话兼容，正常主流程不要主动使用。进入采集后，用户回答当前 next_step/confirmation_question 时，必须调用本工具提交对应 action/payload 推进状态；不要自行判断还缺哪个字段，也不要追加询问工具未返回的字段。已提供大致孕周即可继续，例如 30周/孕30周/30+几天 都是可接受表达，不要为精确到天而追问。工具会依次处理：基础信息表单、产检记录上传、孕期高风险因素、当前症状、生活方式与场景、喂养/IBCLC 信息。状态 ready_to_generate 时，使用工具返回的 plan_context 调用 birth_journey_plan_card_create。",
+        "推进孕期计划的信息采集状态机。模型只负责识别用户是否要制定计划、把用户本轮回答交给本工具，并根据 next_step 继续；不要自己维护字段清单。进入采集时，如果前文有用户最初表达的关键线索，例如年龄、孕周、焦虑、无助、不知道怎么办、怕漏事、IVF、胎数、既往剖宫产、基础疾病、医生提醒等，调用 action=start 时在 payload 中传 entry_reason、initial_concerns 和 known_values，工具会用于表单预填、plan_context 和最终计划个性化，不会作为单独追问节点阻塞主流程。submit_entry_concern 仅用于历史会话兼容，正常主流程不要主动使用。进入采集后，用户回答当前 next_step/confirmation_question 时，必须调用本工具提交对应 action/payload 推进状态；不要自行判断还缺哪个字段，也不要追加询问工具未返回的字段。已提供大致孕周即可继续，例如 30周/孕30周/30+几天 都是可接受表达，不要为精确到天而追问。工具会依次处理：基础信息表单、基于年龄/IVF/胎数/是否第一胎/既往孕产史/计划分娩方式/所在城市或国家/建档或生产医院/基础疾病或长期用药/医生特殊提醒等基础信息选出最多 5 个最核心的个性化追问；如果有多个明确因素，通常控制在 3-5 轮，不足 3 个时不要硬凑。随后按孕周决定是否先问产检、产检记录上传或跳过，然后进入计划生成。不要再追加旧版模板化追问，例如高风险因素、当前不适或异常、饮食/运动/睡眠/工作/家里支持、喂养和 IBCLC 信息；这些内容只有用户主动提到，或在基础表单/个性化追问里已经出现时才纳入计划。next_step=personalized_followup 时，围绕 personalized_followup 最多两小段：先用 observation 做自然提醒式承接，再用 meaning 简短解释为什么影响计划，然后只问 followup_question 这一个具体问题；可以把 reply_guidance 压缩到同一段末尾。个性化追问必须收集会改变计划安排的事实，例如潜在健康问题、既往孕产异常、产检异常、用药/复查、双胎类型、剖宫产医学原因或 IVF 孕周口径；不要问用户知不知道该做什么、最想先弄清什么或医生有没有交代什么，不要停在纯解读。涉及高龄时，不要说“不代表一定有问题”，要关切地指出这是需要认真纳入计划的产科管理因素，简短说明潜在关注点后再收集具体事实。不要把追问写成“目前最需要纳入计划的是哪类情况”，要直接问用户有没有正在复查、用药或被提醒的具体情况。用户回复具体选项、忘了、跳过或补充内容时，用 submit_personalized_followup 并带 followup_id/answer 推进。next_step=checkup_done_question 时，用户答做过产检用 confirm_checkup_done，答没做过用 confirm_no_checkup_yet，答不确定/先跳过可用 skip_checkup_records。状态 ready_to_generate 时，使用工具返回的 plan_context 调用 birth_journey_plan_card_create。",
         {
             "action": {
                 "type": "string",
@@ -207,10 +207,9 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
                     "submit_entry_concern",
                     "mark_checkup_records_uploaded",
                     "skip_checkup_records",
-                    "submit_risk_factors",
-                    "submit_current_symptoms",
-                    "submit_lifestyle_context",
-                    "submit_feeding_context",
+                    "confirm_checkup_done",
+                    "confirm_no_checkup_yet",
+                    "submit_personalized_followup",
                     "complete",
                 ],
             },
@@ -219,7 +218,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "birth_journey_plan_card_create": _function_tool(
         "birth_journey_plan_card_create",
-        "根据 birth_journey_intake_manage 已采集或已问过的信息，生成前端可渲染并保存为 active care plan 的孕期计划。生成前必须完成基础信息、产检记录上传状态、高风险因素、当前症状、生活方式与场景、喂养/IBCLC 信息这些采集组；用户回答不清楚、跳过、暂不提供也算已问到，并应在 plan_context 中显式传入对应字段。LLM 不需要生成 card_json；规则分层、日期换算、行动清单、7 天待办分组和安全声明由工具稳定生成。已有 active 孕期计划时工具会返回 existing_plan_found，不要重复生成。",
+        "根据 birth_journey_intake_manage 已采集或已问过的信息，生成前端可渲染并保存为 active care plan 的孕期计划。生成前必须完成基础信息、个性化追问，以及按孕周决定的产检记录上传/跳过状态；不要为了生成计划再补问旧版模板化的高风险因素、当前症状、生活方式或喂养/IBCLC 信息。用户回答不清楚、跳过、暂不提供也算已问到，并应在 plan_context 中显式传入对应字段。LLM 不需要生成 card_json；规则分层、日期换算、行动清单、7 天待办分组和安全声明由工具稳定生成。已有 active 孕期计划时工具会返回 existing_plan_found，不要重复生成。",
         {
             "plan_context": JSON_OBJECT_STRING,
             "scope": {"type": "string", "enum": ["full", "prenatal_only", "short_range"]},
@@ -340,7 +339,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "ibclc_consult_card_create": _function_tool(
         "ibclc_consult_card_create",
-        "创建前端可渲染的 IBCLC 在线咨询卡片，无后端副作用。仅在用户明确要求或确认需要 IBCLC/哺乳顾问/真人或人工哺乳咨询/在线咨询时使用。若是智能体自主判断问题已经进入含乳、排乳、泵奶节奏、反复堵奶、宝宝摄入细节或反复尝试无效，应先承接用户处境，完成至少一轮必要问诊，主动说明更适合让 IBCLC 顾问继续看，并询问是否现在打开咨询入口；用户同意后再调用本工具。不要因为用户首次提到疼痛、堵奶、奶量担忧或宝宝摄入风险就直接触发。前端会渲染顾问姓名、资质、经验、简介、结合用户问题生成的推荐理由和在线咨询入口。",
+        "创建前端可渲染的 IBCLC 在线咨询卡片，无后端副作用。仅在用户本轮明确要求 IBCLC/哺乳顾问/真人或人工哺乳咨询/打开在线咨询入口，或上一轮助手已经明确询问是否打开 IBCLC 咨询入口且用户本轮短确认时使用。若是智能体自主判断问题已经进入含乳、排乳、泵奶节奏、反复堵奶、宝宝摄入细节或反复尝试无效，应先承接用户处境，完成至少一轮必要问诊，主动说明更适合让 IBCLC 顾问继续看，并询问是否现在打开咨询入口；用户同意后再调用本工具。不要因为用户首次提到疼痛、堵奶、奶量担忧或宝宝摄入风险就直接触发。前端会渲染顾问姓名、资质、经验、简介、结合用户问题生成的推荐理由和在线咨询入口。",
         {
             "consultant_name": _nullable({"type": "string", "description": "前端名片展示的 IBCLC 顾问姓名；不确定时传 null，由工具使用默认 demo 顾问。"}),
             "consultant_bio": _nullable({"type": "string", "description": "前端名片展示的顾问简介；不确定时传 null，由工具使用默认简介。"}),

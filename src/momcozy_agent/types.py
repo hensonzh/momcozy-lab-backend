@@ -129,6 +129,8 @@ class RuntimeInputs(TypedDict):
     milk_context_mode: NotRequired[str]
     milk_record_context_policy: NotRequired[dict[str, Any]]
     images: NotRequired[list[InputImage]]
+    previous_assistant_message: NotRequired[str]
+    _last_assistant_message: NotRequired[str]
 
 
 class AgentEvent(TypedDict, total=False):

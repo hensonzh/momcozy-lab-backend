@@ -11,6 +11,7 @@ from momcozy_agent.services import data_store
 from momcozy_agent.tool_handlers.cards import (
     BIRTH_JOURNEY_PLAN_ITEM_REASON_MAX_CHARS,
     BIRTH_JOURNEY_PLAN_ITEM_TITLE_MAX_CHARS,
+    birth_journey_intake_quick_reply_guidance,
     create_birth_journey_plan_card,
     delete_birth_journey_plan,
     manage_birth_journey_intake,
@@ -97,6 +98,45 @@ def _assert_next_7_todo_items(testcase: unittest.TestCase, layers: dict[str, obj
         testcase.assertTrue(item.get("completion_followup"))
 
 
+def _assert_birth_journey_todo_plan(
+    testcase: unittest.TestCase,
+    card: dict[str, object],
+    *,
+    cadence: str,
+    first_period_title: str,
+) -> None:
+    todo_plan = card.get("todo_plan")
+    testcase.assertIsInstance(todo_plan, dict)
+    if not isinstance(todo_plan, dict):
+        return
+    testcase.assertEqual(todo_plan.get("cadence"), cadence)
+    periods = todo_plan.get("periods")
+    testcase.assertIsInstance(periods, list)
+    testcase.assertTrue(periods)
+    first_period = periods[0]
+    testcase.assertIsInstance(first_period, dict)
+    if not isinstance(first_period, dict):
+        return
+    testcase.assertEqual(first_period.get("title"), first_period_title)
+    testcase.assertEqual(first_period.get("granularity"), cadence)
+    items = first_period.get("items")
+    testcase.assertIsInstance(items, list)
+    testcase.assertTrue(items)
+    blocked_fragments = ("考虑到你", "你提到", "目的是")
+    for period in periods:
+        testcase.assertIsInstance(period, dict)
+        testcase.assertTrue(period.get("title"))
+        testcase.assertTrue(period.get("subtitle"))
+        for item in period.get("items") or []:
+            testcase.assertIsInstance(item, dict)
+            title = str(item.get("title") or "")
+            reason = str(item.get("reason") or "")
+            testcase.assertLessEqual(len(title), BIRTH_JOURNEY_PLAN_ITEM_TITLE_MAX_CHARS)
+            testcase.assertLessEqual(len(reason), BIRTH_JOURNEY_PLAN_ITEM_REASON_MAX_CHARS)
+            for fragment in blocked_fragments:
+                testcase.assertNotIn(fragment, reason)
+
+
 class BirthJourneyPlanCardTests(unittest.TestCase):
     def test_creates_early_pregnancy_phase_for_newly_pregnant_users(self) -> None:
         result = create_birth_journey_plan_card(
@@ -176,6 +216,10 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         self.assertTrue(layers["next_2_4_weeks"]["items"])
         self.assertTrue(layers["later_milestones"]["items"])
         _assert_birth_journey_item_text_lengths(self, layers)
+        _assert_birth_journey_todo_plan(self, card, cadence="monthly", first_period_title="孕 25-28 周")
+        todo_rendered = json.dumps(card["todo_plan"], ensure_ascii=False)
+        self.assertIn("按月计划", todo_rendered)
+        self.assertIn("完成糖耐", todo_rendered)
 
         phases = card["phases"]
         self.assertEqual([phase["title"] for phase in phases], ["孕中期", "孕晚期", "临产阶段", "住院分娩", "产后恢复"])
@@ -206,6 +250,45 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         self.assertNotIn("| --- |", rendered)
         self.assertNotIn("<br>", rendered)
         _assert_birth_journey_item_reasons_are_not_personalized(self, layers)
+
+    def test_birth_journey_todo_plan_uses_biweekly_cadence_in_late_pregnancy(self) -> None:
+        result = create_birth_journey_plan_card(
+            {
+                "plan_context": _plan_context(
+                    due_date_or_week="30周",
+                    fetus_count="单胎",
+                    checkup_status="已完成糖耐，等待下次产检",
+                ),
+                "scope": "full",
+            },
+            {"user_message": "", "message_sent_at": "2026-06-01T09:00:00+08:00"},
+        )
+
+        card = result["card"]["card_json"]
+        _assert_birth_journey_todo_plan(self, card, cadence="biweekly", first_period_title="孕 30-31 周")
+        titles = [period["title"] for period in card["todo_plan"]["periods"]]
+        self.assertEqual(titles[:3], ["孕 30-31 周", "孕 32-33 周", "孕 34-35 周"])
+        self.assertIn("双周计划", json.dumps(card["todo_plan"], ensure_ascii=False))
+
+    def test_birth_journey_todo_plan_uses_weekly_cadence_after_week_36(self) -> None:
+        result = create_birth_journey_plan_card(
+            {
+                "plan_context": _plan_context(
+                    due_date_or_week="36周",
+                    birth_setting="深圳妇幼",
+                    support_person="伴侣",
+                    checkup_status="已预约本周产检",
+                ),
+                "scope": "full",
+            },
+            {"user_message": "", "message_sent_at": "2026-06-01T09:00:00+08:00"},
+        )
+
+        card = result["card"]["card_json"]
+        _assert_birth_journey_todo_plan(self, card, cadence="weekly", first_period_title="孕 36 周")
+        titles = [period["title"] for period in card["todo_plan"]["periods"]]
+        self.assertEqual(titles[:3], ["孕 36 周", "孕 37 周", "孕 38 周"])
+        self.assertIn("每周计划", json.dumps(card["todo_plan"], ensure_ascii=False))
 
     def test_birth_journey_plan_merges_safety_gate_into_current_focus(self) -> None:
         result = create_birth_journey_plan_card(
@@ -752,7 +835,7 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         self.assertIn("birth_journey_intake_manage", tool_names)
         self.assertIn("birth_journey_plan_card_create", tool_names)
 
-    def test_birth_journey_plan_requires_every_survey_group_to_be_asked(self) -> None:
+    def test_birth_journey_plan_requires_core_intake_and_checkup_status(self) -> None:
         result = create_birth_journey_plan_card(
             {"plan_context": {"due_date_or_week": "26周"}, "scope": "full"},
             {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00"},
@@ -760,10 +843,10 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "needs_required_context")
         self.assertIn("checkup_records", result["missing_fields"])
-        self.assertIn("risk_factors", result["missing_fields"])
-        self.assertIn("current_symptoms", result["missing_fields"])
-        self.assertIn("lifestyle_context", result["missing_fields"])
-        self.assertIn("feeding_ibclc_context", result["missing_fields"])
+        self.assertNotIn("risk_factors", result["missing_fields"])
+        self.assertNotIn("current_symptoms", result["missing_fields"])
+        self.assertNotIn("lifestyle_context", result["missing_fields"])
+        self.assertNotIn("feeding_ibclc_context", result["missing_fields"])
         self.assertNotIn("card", result)
         self.assertIn("只答知道的", result["data"]["confirmation_question"])
         self.assertIn("不清楚", result["data"]["confirmation_question"])
@@ -780,18 +863,6 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
             {"action": "skip_checkup_records", "payload": {}},
             {**inputs, "_birth_journey_intake_state": basic["intake_state"]},
         )
-        risk = manage_birth_journey_intake(
-            {"action": "submit_risk_factors", "payload": {"risk_factors": "不清楚"}},
-            {**inputs, "_birth_journey_intake_state": skipped["intake_state"]},
-        )
-        symptoms = manage_birth_journey_intake(
-            {"action": "submit_current_symptoms", "payload": {"current_symptoms": "没有明显不舒服"}},
-            {**inputs, "_birth_journey_intake_state": risk["intake_state"]},
-        )
-        lifestyle = manage_birth_journey_intake(
-            {"action": "submit_lifestyle_context", "payload": {"lifestyle_context": "睡眠不太好"}},
-            {**inputs, "_birth_journey_intake_state": symptoms["intake_state"]},
-        )
 
         result = create_birth_journey_plan_card(
             {
@@ -801,7 +872,7 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
                 },
                 "scope": "full",
             },
-            {**inputs, "_birth_journey_intake_state": lifestyle["intake_state"]},
+            {**inputs, "_birth_journey_intake_state": skipped["intake_state"]},
         )
 
         self.assertEqual(result["status"], "card_created")
@@ -829,31 +900,241 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
             {**inputs, "_birth_journey_intake_state": state},
         )
         state = uploaded["intake_state"]
-        risk = manage_birth_journey_intake(
-            {"action": "submit_risk_factors", "payload": {"risk_factors": "不清楚"}},
-            {**inputs, "_birth_journey_intake_state": state},
-        )
-        state = risk["intake_state"]
-        symptoms = manage_birth_journey_intake(
-            {"action": "submit_current_symptoms", "payload": {"current_symptoms": "没有明显不舒服"}},
-            {**inputs, "_birth_journey_intake_state": state},
-        )
-        state = symptoms["intake_state"]
-        lifestyle = manage_birth_journey_intake(
-            {"action": "submit_lifestyle_context", "payload": {"lifestyle_context": "久坐上班，伴侣支持"}},
-            {**inputs, "_birth_journey_intake_state": state},
-        )
-        state = lifestyle["intake_state"]
-        feeding = manage_birth_journey_intake(
-            {"action": "submit_feeding_context", "payload": {"feeding_ibclc_context": "计划母乳，想了解吸奶和背奶"}},
-            {**inputs, "_birth_journey_intake_state": state},
+
+        self.assertEqual(uploaded["status"], "ready_to_generate")
+        self.assertEqual(uploaded["next_step"], "generate_plan")
+        self.assertEqual(uploaded["plan_context"]["due_date_or_week"], "28周")
+        self.assertEqual(uploaded["plan_context"]["checkup_records_uploaded"], "是")
+        self.assertNotIn("lifestyle_context", uploaded["plan_context"])
+
+    def test_birth_journey_confirmed_basic_form_defaults_to_submit_basic_info(self) -> None:
+        inputs = {
+            "user_message": (
+                "我已确认孕期计划基础信息。\n"
+                "form_id: birth_journey_basic_info_intake\n"
+                'confirmed_form_data:\n{"current_week":"20周","fetus_count":"单胎","age":"31"}'
+            ),
+            "message_sent_at": "2026-06-01T12:00:00+08:00",
+            "_birth_journey_intake_state": {},
+        }
+
+        result = manage_birth_journey_intake({}, inputs)
+
+        self.assertEqual(result["action"], "submit_basic_info")
+        self.assertEqual(result["intake_state"]["basic_info"]["current_week"], "20周")
+        self.assertEqual(result["next_step"], "checkup_records_upload")
+        self.assertNotIn("待产包", json.dumps(result, ensure_ascii=False))
+
+    def test_birth_journey_confirmed_basic_form_with_high_age_prompts_personalized_followup_first(self) -> None:
+        inputs = {
+            "user_message": (
+                "我已确认孕期计划基础信息。\n"
+                "form_id: birth_journey_basic_info_intake\n"
+                'confirmed_form_data:\n{"current_week":"20周","fetus_count":"单胎","age":"36"}'
+            ),
+            "message_sent_at": "2026-06-01T12:00:00+08:00",
+            "_birth_journey_intake_state": {},
+        }
+
+        result = manage_birth_journey_intake({}, inputs)
+
+        self.assertEqual(result["action"], "submit_basic_info")
+        self.assertEqual(result["next_step"], "personalized_followup")
+        self.assertEqual(result["data"]["personalized_followup"]["id"], "age_35_plus_checkup_detail")
+        self.assertIn("我注意到你36岁", result["data"]["personalized_followup"]["observation"])
+        self.assertIn("血压/血糖", result["data"]["personalized_followup"]["followup_question"])
+        self.assertIn("甲状腺/免疫或长期用药", result["data"]["personalized_followup"]["followup_question"])
+        self.assertIn("有没有已经被提醒过或正在复查", result["data"]["personalized_followup"]["followup_question"])
+        self.assertIn("暂无异常", result["data"]["personalized_followup"]["followup_question"])
+        self.assertNotIn("目前最需要纳入计划", result["data"]["personalized_followup"]["followup_question"])
+        self.assertNotIn("不代表一定有问题", result["data"]["personalized_followup"]["meaning"])
+        self.assertNotIn("知道", result["data"]["personalized_followup"]["followup_question"])
+        self.assertNotIn("最想先弄清", result["data"]["personalized_followup"]["followup_question"])
+        self.assertNotIn("医生有没有", result["data"]["personalized_followup"]["question"])
+
+    def test_birth_journey_prior_c_section_prompts_personalized_followup_and_satisfies_risk(self) -> None:
+        inputs = {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00", "_birth_journey_intake_state": {}}
+        started = manage_birth_journey_intake({"action": "start", "payload": {}}, inputs)
+
+        basic = manage_birth_journey_intake(
+            {
+                "action": "submit_basic_info",
+                "payload": {
+                    "current_week": "20周",
+                    "fetus_count": "单胎",
+                    "age": "31",
+                    "first_birth": "否",
+                    "prior_birth_history": "既往剖宫产1次",
+                },
+            },
+            {**inputs, "_birth_journey_intake_state": started["intake_state"]},
         )
 
-        self.assertEqual(feeding["status"], "ready_to_generate")
-        self.assertEqual(feeding["next_step"], "generate_plan")
-        self.assertEqual(feeding["plan_context"]["due_date_or_week"], "28周")
-        self.assertEqual(feeding["plan_context"]["checkup_records_uploaded"], "是")
-        self.assertIn("久坐上班", feeding["plan_context"]["lifestyle_context"])
+        self.assertEqual(basic["next_step"], "personalized_followup")
+        self.assertEqual(basic["data"]["personalized_followup"]["id"], "prior_c_section_birth_path_detail")
+        self.assertIn("上次剖宫产的主要原因", basic["data"]["personalized_followup"]["followup_question"])
+        self.assertNotIn("有没有", basic["data"]["personalized_followup"]["question"])
+
+        answered = manage_birth_journey_intake(
+            {
+                "action": "submit_personalized_followup",
+                "payload": {
+                    "followup_id": "prior_c_section_birth_path_detail",
+                    "answer": "上次因为臀位剖宫产，医生说这次下次产检再评估。",
+                },
+            },
+            {**inputs, "_birth_journey_intake_state": basic["intake_state"]},
+        )
+        skipped = manage_birth_journey_intake(
+            {"action": "skip_checkup_records", "payload": {}},
+            {**inputs, "_birth_journey_intake_state": answered["intake_state"]},
+        )
+
+        self.assertEqual(skipped["status"], "ready_to_generate")
+        self.assertEqual(skipped["next_step"], "generate_plan")
+        self.assertIn("risk_factors", skipped["intake_state"]["completed_groups"])
+        self.assertIn("既往剖宫产信息", skipped["plan_context"]["risk_factors"])
+        self.assertIn("臀位剖宫产", skipped["plan_context"]["prior_birth_history"])
+
+    def test_birth_journey_first_birth_does_not_trigger_knowledge_followup(self) -> None:
+        inputs = {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00", "_birth_journey_intake_state": {}}
+        started = manage_birth_journey_intake({"action": "start", "payload": {}}, inputs)
+
+        basic = manage_birth_journey_intake(
+            {
+                "action": "submit_basic_info",
+                "payload": {"current_week": "20周", "fetus_count": "单胎", "age": "31", "first_birth": "是"},
+            },
+            {**inputs, "_birth_journey_intake_state": started["intake_state"]},
+        )
+
+        self.assertEqual(basic["next_step"], "checkup_records_upload")
+        self.assertNotIn("personalized_followup", basic["data"])
+
+        skipped = manage_birth_journey_intake(
+            {"action": "skip_checkup_records", "payload": {}},
+            {**inputs, "_birth_journey_intake_state": basic["intake_state"]},
+        )
+
+        self.assertEqual(skipped["status"], "ready_to_generate")
+        self.assertEqual(skipped["next_step"], "generate_plan")
+        self.assertNotIn("risk_factors", skipped["intake_state"]["completed_groups"])
+
+    def test_birth_journey_multiple_pregnancy_followup_is_guidance_not_doctor_question(self) -> None:
+        inputs = {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00", "_birth_journey_intake_state": {}}
+        started = manage_birth_journey_intake({"action": "start", "payload": {}}, inputs)
+
+        basic = manage_birth_journey_intake(
+            {"action": "submit_basic_info", "payload": {"current_week": "20周", "fetus_count": "双胎", "age": "31"}},
+            {**inputs, "_birth_journey_intake_state": started["intake_state"]},
+        )
+
+        self.assertEqual(basic["next_step"], "personalized_followup")
+        followup = basic["data"]["personalized_followup"]
+        self.assertEqual(followup["id"], "multiple_pregnancy_monitoring")
+        self.assertIn("双胎/多胎", followup["observation"])
+        self.assertIn("目前产检记录里的双胎类型", followup["followup_question"])
+        self.assertIn("单绒双羊、双绒双羊", followup["followup_question"])
+        self.assertEqual(list(followup["reply_options"]), ["单绒双羊", "双绒双羊", "还没确认"])
+        self.assertNotIn("医生有没有", followup["question"])
+        self.assertNotIn("有没有", followup["question"])
+        self.assertNotIn("知道", followup["question"])
+
+    def test_birth_journey_personalized_followups_are_capped_at_five_core_items(self) -> None:
+        inputs = {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00", "_birth_journey_intake_state": {}}
+        started = manage_birth_journey_intake({"action": "start", "payload": {}}, inputs)
+
+        current = manage_birth_journey_intake(
+            {
+                "action": "submit_basic_info",
+                "payload": {
+                    "current_week": "20周",
+                    "age": "38",
+                    "ivf": "是",
+                    "fetus_count": "双胎",
+                    "first_birth": "否",
+                    "prior_birth_history": "上次剖宫产，早产，有流产和产后出血史",
+                    "medical_notes": "高血压，妊娠糖尿病，甲状腺用药",
+                    "doctor_notes": "胎盘低置，需要复查",
+                    "birth_path": "剖宫产",
+                },
+            },
+            {**inputs, "_birth_journey_intake_state": started["intake_state"]},
+        )
+
+        followup_ids: list[str] = []
+        while current["next_step"] == "personalized_followup":
+            followup = current["data"]["personalized_followup"]
+            followup_ids.append(followup["id"])
+            current = manage_birth_journey_intake(
+                {
+                    "action": "submit_personalized_followup",
+                    "payload": {"followup_id": followup["id"], "answer": "继续下一步"},
+                },
+                {**inputs, "_birth_journey_intake_state": current["intake_state"]},
+            )
+
+        self.assertEqual(
+            followup_ids,
+            [
+                "doctor_special_notes_followup",
+                "prior_c_section_birth_path_detail",
+                "prior_preterm_monitoring_detail",
+                "hypertension_or_preeclampsia_monitoring",
+                "diabetes_or_gdm_monitoring",
+            ],
+        )
+        self.assertEqual(len(followup_ids), 5)
+        self.assertEqual(current["next_step"], "checkup_records_upload")
+        self.assertNotIn("chronic_medical_condition_coordination", followup_ids)
+        self.assertNotIn("age_35_plus_checkup_detail", followup_ids)
+
+    def test_birth_journey_personalized_followups_include_non_age_plan_factors(self) -> None:
+        inputs = {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00", "_birth_journey_intake_state": {}}
+        started = manage_birth_journey_intake({"action": "start", "payload": {}}, inputs)
+
+        current = manage_birth_journey_intake(
+            {
+                "action": "submit_basic_info",
+                "payload": {
+                    "current_week": "20周",
+                    "age": "31",
+                    "ivf": "是",
+                    "fetus_count": "单胎",
+                    "medical_notes": "甲状腺长期用药，内分泌科定期复查",
+                    "birth_path": "剖宫产",
+                },
+            },
+            {**inputs, "_birth_journey_intake_state": started["intake_state"]},
+        )
+
+        followup_ids: list[str] = []
+        questions: list[str] = []
+        while current["next_step"] == "personalized_followup":
+            followup = current["data"]["personalized_followup"]
+            followup_ids.append(followup["id"])
+            questions.append(followup["followup_question"])
+            current = manage_birth_journey_intake(
+                {
+                    "action": "submit_personalized_followup",
+                    "payload": {"followup_id": followup["id"], "answer": "还不确定"},
+                },
+                {**inputs, "_birth_journey_intake_state": current["intake_state"]},
+            )
+
+        self.assertEqual(
+            followup_ids,
+            [
+                "chronic_medical_condition_coordination",
+                "ivf_week_confirmation",
+                "planned_c_section_detail",
+            ],
+        )
+        self.assertEqual(len(followup_ids), 3)
+        self.assertTrue(any("长期吃药" in question for question in questions))
+        self.assertTrue(any("移植日期/孕周口径" in question for question in questions))
+        self.assertTrue(any("计划剖宫产主要是因为" in question for question in questions))
+        self.assertFalse(any("最需要先纳入计划" in question or "目前最需要纳入计划" in question for question in questions))
 
     def test_birth_journey_entry_context_does_not_insert_extra_concern_step(self) -> None:
         inputs = {
@@ -882,40 +1163,39 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
             {**inputs, "_birth_journey_intake_state": started["intake_state"]},
         )
 
-        self.assertEqual(basic["next_step"], "checkup_records_upload")
+        self.assertEqual(basic["next_step"], "personalized_followup")
+        self.assertIn("我注意到你43岁", basic["data"]["personalized_followup"]["observation"])
         rendered_basic = json.dumps(basic, ensure_ascii=False)
         self.assertNotIn("entry_concern_question", rendered_basic)
         self.assertNotIn("你刚才提到有点焦虑", rendered_basic)
 
-        skipped = manage_birth_journey_intake(
-            {"action": "skip_checkup_records", "payload": {}},
+        personalized = manage_birth_journey_intake(
+            {
+                "action": "submit_personalized_followup",
+                "payload": {
+                    "followup_id": "age_35_plus_checkup_detail",
+                    "answer": "暂时没有明确异常",
+                },
+            },
             {**inputs, "_birth_journey_intake_state": basic["intake_state"]},
         )
-        risk = manage_birth_journey_intake(
-            {"action": "submit_risk_factors", "payload": {"risk_factors": "不清楚"}},
-            {**inputs, "_birth_journey_intake_state": skipped["intake_state"]},
-        )
-        symptoms = manage_birth_journey_intake(
-            {"action": "submit_current_symptoms", "payload": {"current_symptoms": "没有明显不舒服"}},
-            {**inputs, "_birth_journey_intake_state": risk["intake_state"]},
-        )
-        lifestyle = manage_birth_journey_intake(
-            {"action": "submit_lifestyle_context", "payload": {"lifestyle_context": "通勤比较久"}},
-            {**inputs, "_birth_journey_intake_state": symptoms["intake_state"]},
-        )
-        feeding = manage_birth_journey_intake(
-            {"action": "submit_feeding_context", "payload": {"feeding_ibclc_context": "计划母乳"}},
-            {**inputs, "_birth_journey_intake_state": lifestyle["intake_state"]},
+        self.assertEqual(personalized["next_step"], "checkup_records_upload")
+
+        skipped = manage_birth_journey_intake(
+            {"action": "skip_checkup_records", "payload": {}},
+            {**inputs, "_birth_journey_intake_state": personalized["intake_state"]},
         )
 
-        self.assertEqual(feeding["status"], "ready_to_generate")
-        self.assertEqual(feeding["plan_context"]["entry_reason"], "我不知道接下来要准备什么")
-        self.assertEqual(feeding["plan_context"]["initial_concerns"], ["怕漏事", "我不知道接下来要准备什么"])
-        self.assertEqual(feeding["plan_context"]["top_worries"], "怕漏事, 我不知道接下来要准备什么")
+        self.assertEqual(skipped["status"], "ready_to_generate")
+        self.assertEqual(skipped["plan_context"]["entry_reason"], "我不知道接下来要准备什么")
+        self.assertEqual(skipped["plan_context"]["initial_concerns"], ["怕漏事", "我不知道接下来要准备什么"])
+        self.assertEqual(skipped["plan_context"]["top_worries"], "怕漏事, 我不知道接下来要准备什么")
+        self.assertIn("age_35_plus", skipped["plan_context"]["personalization_tags"])
+        self.assertIn("暂时没有明确异常", skipped["plan_context"]["risk_factors"])
 
         plan = create_birth_journey_plan_card(
-            {"plan_context": feeding["plan_context"], "scope": "full"},
-            {**inputs, "_birth_journey_intake_state": feeding["intake_state"]},
+            {"plan_context": skipped["plan_context"], "scope": "full"},
+            {**inputs, "_birth_journey_intake_state": skipped["intake_state"]},
         )
 
         self.assertEqual(plan["status"], "card_created")
@@ -923,6 +1203,107 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         self.assertNotIn("把焦虑", rendered_plan)
         self.assertNotIn("你提到焦虑", rendered_plan)
         self.assertNotIn("考虑到你提到焦虑", rendered_plan)
+
+    def test_birth_journey_intake_early_stage_asks_checkup_done_before_upload(self) -> None:
+        inputs = {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00", "_birth_journey_intake_state": {}}
+        started = manage_birth_journey_intake({"action": "start", "payload": {}}, inputs)
+
+        basic = manage_birth_journey_intake(
+            {"action": "submit_basic_info", "payload": {"current_week": "8周", "fetus_count": "单胎", "age": "30"}},
+            {**inputs, "_birth_journey_intake_state": started["intake_state"]},
+        )
+
+        self.assertEqual(basic["next_step"], "checkup_done_question")
+        self.assertEqual(basic["data"]["initial_analysis"]["stage"], "early")
+        self.assertIn("有没有做过产检", basic["data"]["confirmation_question"])
+
+        done = manage_birth_journey_intake(
+            {"action": "confirm_checkup_done", "payload": {}},
+            {**inputs, "_birth_journey_intake_state": basic["intake_state"]},
+        )
+        self.assertEqual(done["next_step"], "checkup_records_upload")
+        self.assertIn("报告不在手边", done["data"]["upload_panel"]["description"])
+
+        not_done = manage_birth_journey_intake(
+            {"action": "confirm_no_checkup_yet", "payload": {}},
+            {**inputs, "_birth_journey_intake_state": basic["intake_state"]},
+        )
+        self.assertEqual(not_done["status"], "ready_to_generate")
+        self.assertEqual(not_done["next_step"], "generate_plan")
+        self.assertEqual(not_done["intake_state"]["checkup_status"], "还没做过产检")
+
+    def test_birth_journey_intake_mid_stage_suggests_report_upload_directly(self) -> None:
+        inputs = {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00", "_birth_journey_intake_state": {}}
+        started = manage_birth_journey_intake({"action": "start", "payload": {}}, inputs)
+
+        basic = manage_birth_journey_intake(
+            {"action": "submit_basic_info", "payload": {"current_week": "20周", "fetus_count": "单胎", "age": "31"}},
+            {**inputs, "_birth_journey_intake_state": started["intake_state"]},
+        )
+
+        self.assertEqual(basic["next_step"], "checkup_records_upload")
+        self.assertEqual(basic["data"]["initial_analysis"]["stage"], "mid")
+        self.assertEqual(basic["data"]["checkup_report_strategy"]["mode"], "suggest_upload_or_skip")
+
+    def test_birth_journey_high_age_followup_compacts_for_natural_reply(self) -> None:
+        inputs = {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00", "_birth_journey_intake_state": {}}
+        started = manage_birth_journey_intake({"action": "start", "payload": {}}, inputs)
+        basic = manage_birth_journey_intake(
+            {"action": "submit_basic_info", "payload": {"current_week": "16周", "fetus_count": "单胎", "age": "36"}},
+            {**inputs, "_birth_journey_intake_state": started["intake_state"]},
+        )
+
+        self.assertEqual(basic["next_step"], "personalized_followup")
+        self.assertEqual(basic["data"]["personalized_followup"]["id"], "age_35_plus_checkup_detail")
+        self.assertIn("我注意到你36岁", basic["data"]["personalized_followup"]["observation"])
+        self.assertIn("需要认真放进计划", basic["data"]["personalized_followup"]["observation"])
+        self.assertIn("胎盘情况", basic["data"]["personalized_followup"]["meaning"])
+        self.assertIn("血压/血糖", basic["data"]["personalized_followup"]["followup_question"])
+        self.assertIn("甲状腺/免疫或长期用药", basic["data"]["personalized_followup"]["followup_question"])
+        self.assertIn("有没有已经被提醒过或正在复查", basic["data"]["personalized_followup"]["followup_question"])
+        self.assertNotIn("目前最需要纳入计划", basic["data"]["personalized_followup"]["followup_question"])
+        self.assertNotIn("不代表一定有问题", basic["data"]["personalized_followup"]["meaning"])
+        self.assertNotIn("知道", basic["data"]["personalized_followup"]["followup_question"])
+        self.assertEqual(list(basic["data"]["personalized_followup"]["reply_options"]), ["血压/血糖", "甲状腺/用药", "暂无异常"])
+        self.assertIn("胎儿生长或胎盘羊水", basic["data"]["confirmation_question"])
+
+        compact = model_tool_output({"ok": True, "tool_name": "birth_journey_intake_manage", "result": basic})
+
+        self.assertEqual(compact["next_step"], "personalized_followup")
+        self.assertIn("personalized_followup", compact)
+        self.assertIn("observation", compact["personalized_followup"])
+        self.assertIn("followup_question", compact["personalized_followup"])
+        self.assertIn("reply_guidance", compact["personalized_followup"])
+        self.assertIn("最多两小段", compact["final_response_instruction"])
+        self.assertIn("只问 personalized_followup.followup_question", compact["final_response_instruction"])
+        self.assertIn("不要输出成长说明", compact["final_response_instruction"])
+        self.assertNotIn("再只问 personalized_followup.question", compact["final_response_instruction"])
+        self.assertIn("不要使用", compact["final_response_instruction"])
+
+        answered = manage_birth_journey_intake(
+            {
+                "action": "submit_personalized_followup",
+                "payload": {"followup_id": "age_35_plus_checkup_detail", "answer": "暂时没有明确异常"},
+            },
+            {**inputs, "_birth_journey_intake_state": basic["intake_state"]},
+        )
+
+        self.assertEqual(answered["next_step"], "checkup_records_upload")
+
+    def test_birth_journey_personalized_followup_uses_specific_quick_replies(self) -> None:
+        inputs = {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00", "_birth_journey_intake_state": {}}
+        started = manage_birth_journey_intake({"action": "start", "payload": {}}, inputs)
+        basic = manage_birth_journey_intake(
+            {"action": "submit_basic_info", "payload": {"current_week": "16周", "fetus_count": "单胎", "age": "36"}},
+            {**inputs, "_birth_journey_intake_state": started["intake_state"]},
+        )
+
+        replies = birth_journey_intake_quick_reply_guidance(
+            basic["next_step"],
+            personalized_followup=basic["data"]["personalized_followup"],
+        )
+
+        self.assertEqual(replies, [{"text": "血压/血糖"}, {"text": "甲状腺/用药"}, {"text": "暂无异常"}])
 
     def test_birth_journey_plan_still_acknowledges_explicit_anxiety(self) -> None:
         result = create_birth_journey_plan_card(
@@ -975,33 +1356,13 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
             {**inputs, "_birth_journey_intake_state": basic["intake_state"]},
         )
 
-        self.assertEqual(skipped["status"], "in_progress")
-        self.assertEqual(skipped["next_step"], "risk_question")
+        self.assertEqual(skipped["status"], "ready_to_generate")
+        self.assertEqual(skipped["next_step"], "generate_plan")
         self.assertFalse(skipped["intake_state"]["checkup_records_uploaded"])
-        state = skipped["intake_state"]
+        self.assertEqual(skipped["plan_context"]["checkup_status"], "未上传产检记录")
+        self.assertNotIn("checkup_records_uploaded", skipped["plan_context"])
 
-        risk = manage_birth_journey_intake(
-            {"action": "submit_risk_factors", "payload": {"risk_factors": "不清楚"}},
-            {**inputs, "_birth_journey_intake_state": state},
-        )
-        symptoms = manage_birth_journey_intake(
-            {"action": "submit_current_symptoms", "payload": {"current_symptoms": "没有明显不舒服"}},
-            {**inputs, "_birth_journey_intake_state": risk["intake_state"]},
-        )
-        lifestyle = manage_birth_journey_intake(
-            {"action": "submit_lifestyle_context", "payload": {"lifestyle_context": "跳过"}},
-            {**inputs, "_birth_journey_intake_state": symptoms["intake_state"]},
-        )
-        feeding = manage_birth_journey_intake(
-            {"action": "submit_feeding_context", "payload": {"feeding_ibclc_context": "跳过"}},
-            {**inputs, "_birth_journey_intake_state": lifestyle["intake_state"]},
-        )
-
-        self.assertEqual(feeding["status"], "ready_to_generate")
-        self.assertEqual(feeding["plan_context"]["checkup_status"], "未上传产检记录")
-        self.assertNotIn("checkup_records_uploaded", feeding["plan_context"])
-
-    def test_birth_journey_basic_info_form_omits_date_fields_and_prefills_city(self) -> None:
+    def test_birth_journey_basic_info_form_omits_deferred_fields_and_marks_core_required(self) -> None:
         inputs = {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00", "_birth_journey_intake_state": {}}
 
         started = manage_birth_journey_intake({"action": "start", "payload": {}}, inputs)
@@ -1014,22 +1375,39 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         self.assertNotIn("last_menstrual_period", ids)
         self.assertNotIn("due_date", ids)
         self.assertIn("是否 IVF（体外受精）", labels)
+        self.assertIn("是否第一胎", labels)
+        self.assertIn("既往孕产情况", labels)
+        self.assertIn("计划分娩方式", labels)
+        self.assertIn("所在城市/国家", labels)
+        self.assertIn("建档/生产医院", labels)
+        self.assertIn("基础疾病或长期用药", labels)
+        self.assertIn("医生特殊提醒", labels)
+        self.assertNotIn("双胎/多胎类型", labels)
+        self.assertNotIn("既往生产方式", labels)
+        self.assertNotIn("既往剖宫产次数", labels)
+        self.assertNotIn("喂养意向", labels)
+        self.assertNotIn("身高", labels)
+        self.assertNotIn("孕前体重", labels)
+        self.assertNotIn("当前体重", labels)
+        self.assertNotIn("主要支持人", labels)
         required_by_id = {field["id"]: field["required"] for field in fields}
         self.assertTrue(required_by_id["current_week"])
         self.assertTrue(required_by_id["fetus_count"])
         self.assertTrue(required_by_id["age"])
-        self.assertFalse(required_by_id["ivf"])
+        self.assertTrue(required_by_id["ivf"])
+        self.assertTrue(required_by_id["first_birth"])
+        self.assertTrue(required_by_id["birth_path"])
+        self.assertFalse(required_by_id["city_or_country"])
+        self.assertFalse(required_by_id["birth_hospital"])
+        self.assertFalse(required_by_id["medical_notes"])
+        options_by_id = {field["id"]: field.get("options") for field in fields}
+        self.assertEqual(options_by_id["birth_path"], ["顺产", "剖宫产", "还没确定"])
+        self.assertNotIn("不确定/暂不说", options_by_id["birth_path"])
         self.assertEqual(
             started["form"]["description"],
             "先填写几项基础信息，后面我会按你的孕周、身体情况和准备状态来整理更贴合你的孕期计划。",
         )
         self.assertEqual(started["form"]["default_values"]["city_or_country"], "深圳")
-
-        with_region = manage_birth_journey_intake(
-            {"action": "start", "payload": {}},
-            {**inputs, "user_profile": {"region": "广州"}},
-        )
-        self.assertEqual(with_region["form"]["default_values"]["city_or_country"], "广州")
 
         with_pregnancy_week = manage_birth_journey_intake(
             {"action": "start", "payload": {}},
@@ -1045,6 +1423,11 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
                     "age": 32,
                     "birth_prep_ivf": "是",
                     "birth_prep_fetus_count": "双胎",
+                    "birth_prep_multiple_pregnancy_type": "双绒双羊",
+                    "birth_prep_previous_birth_method": "顺产",
+                    "birth_prep_prior_birth_history": "上次产后出血",
+                    "birth_prep_medical_notes": "甲状腺用药",
+                    "birth_prep_doctor_notes": "胎盘低置复查",
                     "birth_prep_birth_hospital": "深圳市妇幼",
                 },
             },
@@ -1053,7 +1436,12 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         self.assertEqual(profile_defaults["age"], "32")
         self.assertEqual(profile_defaults["ivf"], "是")
         self.assertEqual(profile_defaults["fetus_count"], "双胎")
+        self.assertEqual(profile_defaults["prior_birth_history"], "上次产后出血")
+        self.assertEqual(profile_defaults["medical_notes"], "甲状腺用药")
+        self.assertEqual(profile_defaults["doctor_notes"], "胎盘低置复查")
         self.assertEqual(profile_defaults["birth_hospital"], "深圳市妇幼")
+        self.assertNotIn("multiple_pregnancy_type", profile_defaults)
+        self.assertNotIn("previous_birth_method", profile_defaults)
 
     def test_birth_journey_plan_accepts_unknown_birth_path_and_no_support_person(self) -> None:
         result = create_birth_journey_plan_card(
@@ -1072,6 +1460,37 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         card = result["card"]["card_json"]
         self.assertNotIn("birth_path", card["owner"])
         self.assertEqual(card["owner"]["support_person"], "暂时没有")
+
+    def test_birth_journey_plan_uses_high_impact_history_and_medical_fields(self) -> None:
+        result = create_birth_journey_plan_card(
+            {
+                "plan_context": _plan_context(
+                    due_date_or_week="20周",
+                    fetus_count="双胎",
+                    multiple_pregnancy_type="双绒双羊",
+                    first_birth="否",
+                    previous_birth_method="剖宫产",
+                    previous_c_section_count="1",
+                    prior_birth_history="上次因为臀位剖宫产",
+                    medical_notes="甲状腺用药",
+                    doctor_notes="胎盘低置需要复查",
+                ),
+                "scope": "full",
+            },
+            {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00"},
+        )
+
+        self.assertEqual(result["status"], "card_created")
+        card = result["card"]["card_json"]
+        rendered = json.dumps(card, ensure_ascii=False)
+        basis_titles = [item["title"] for item in card["planning_layers"]["plan_basis"]["items"]]
+        self.assertIn("既往剖宫产", basis_titles)
+        self.assertIn("医生特殊提醒", basis_titles)
+        self.assertIn("基础疾病/用药", basis_titles)
+        self.assertIn("多胎情况", basis_titles)
+        self.assertIn("把医生提醒拆成复查规则", rendered)
+        self.assertIn("整理既往剖宫产信息", rendered)
+        self.assertIn("确认基础疾病和用药复查", rendered)
 
     def test_birth_journey_late_pregnancy_wording_avoids_aiish_pile_up_phrase(self) -> None:
         result = create_birth_journey_plan_card(
