@@ -2479,6 +2479,31 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertEqual(inputs["user_message"], "孕32周")
         self.assertEqual(inputs["recent_user_messages"], ["我叫 Henson", "28 岁", "孕32周"])
 
+    def test_runtime_inputs_forward_background_milk_record_context_policy(self) -> None:
+        inputs = _runtime_inputs_from_ag_ui(
+            {
+                "messages": [{"role": "user", "content": "后台奶量分析"}],
+                "forwardedProps": {
+                    "user_id": "milk-background-inputs",
+                    "serviceDomain": "milk_management",
+                    "triggerSource": "background",
+                    "milkContextMode": "analysis",
+                    "milkRecordContextPolicy": {
+                        "include_raw_records": True,
+                        "raw_days": 7,
+                        "rollup_days": 7,
+                        "raw_limit": 160,
+                    },
+                },
+            }
+        )
+
+        self.assertEqual(inputs["service_domain"], "milk_management")
+        self.assertEqual(inputs["trigger_source"], "background")
+        self.assertEqual(inputs["milk_context_mode"], "analysis")
+        self.assertEqual(inputs["milk_record_context_policy"]["raw_days"], 7)
+        self.assertTrue(inputs["milk_record_context_policy"]["include_raw_records"])
+
     def test_chat_runtime_sessions_have_distinct_run_locks(self) -> None:
         runtime = ChatRuntime(object())
         first = runtime.get_session("thread-lock-a")

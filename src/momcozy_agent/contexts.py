@@ -143,6 +143,22 @@ _MILK_ANALYSIS_FACT_READ_TOOLS = {
     "milk_status_query",
     "milk_records_query",
 }
+_MILK_BACKGROUND_TRIGGER_SOURCES = {
+    "background",
+    "background_milk_analysis",
+    "backend",
+    "scheduled",
+    "system",
+}
+_MILK_ANALYSIS_CONTEXT_MODES = {
+    "",
+    "analysis",
+    "milk_analysis",
+    "background_analysis",
+    "active_milk_analysis",
+}
+_DEFAULT_MILK_RAW_CONTEXT_DAYS = 7
+_DEFAULT_MILK_RAW_CONTEXT_LIMIT = 160
 
 
 def build_request_context(
@@ -186,6 +202,7 @@ def build_request_context(
             lines.extend(_format_birth_prep_context(state))
         lines.extend(_format_profile_slot_context(state))
         if _should_inject_milk_management_context(service_domain):
+            _ensure_recent_milk_record_context(state, inputs, service_domain)
             lines.extend(_format_milk_management_context(state))
         lines.extend(_format_device_image_context(state))
     lines.extend(
@@ -493,6 +510,7 @@ def _invalidate_milk_management_state_after_write(state: ContextState) -> None:
     state.milk_management_state.pop("pending_plan_after_assessment", None)
     state.milk_management_state.pop("last_plan_preview", None)
     state.milk_management_state.pop("pending_calendar_adjustment", None)
+    state.milk_management_state.pop("recent_record_context", None)
 
 
 def _record_milk_analysis_fact_read_state(state: ContextState, tool_name: str, result: dict[str, Any]) -> None:
@@ -626,9 +644,95 @@ def _calendar_adjustment_idempotency_key(proposal: dict[str, Any]) -> str:
     return f"milk-calendar-adjustment-{digest}"
 
 
+def _ensure_recent_milk_record_context(state: ContextState, inputs: RuntimeInputs, service_domain: str) -> None:
+    user_id = _runtime_user_id(inputs)
+    cached = state.milk_management_state.get("recent_record_context")
+    if isinstance(cached, dict) and user_id and str(cached.get("user_id") or "").strip() not in {"", user_id}:
+        state.milk_management_state.pop("recent_record_context", None)
+
+    if not _background_milk_raw_context_requested(inputs, service_domain):
+        return
+    if not user_id:
+        return
+
+    policy = _milk_record_context_policy(inputs)
+    try:
+        from .services.milk_management.record_context import get_recent_raw_record_context
+
+        context = get_recent_raw_record_context(
+            user_id=user_id,
+            as_of_time=str(inputs.get("message_sent_at") or inputs.get("current_date") or ""),
+            raw_days=policy["raw_days"],
+            rollup_days=policy["rollup_days"],
+            raw_limit=policy["raw_limit"],
+            include_today=policy["include_today"],
+            purpose="background_milk_analysis",
+        )
+    except Exception as exc:
+        context = {
+            "purpose": "background_milk_analysis",
+            "ok": False,
+            "status": "recent_record_context_error",
+            "summary": str(exc),
+        }
+    if context:
+        state.milk_management_state["recent_record_context"] = {
+            **context,
+            "user_id": user_id,
+            "cached_for": "milk_management",
+        }
+        set_active_service_domain(state, _MILK_MANAGEMENT_DOMAIN)
+
+
+def _background_milk_raw_context_requested(inputs: RuntimeInputs, service_domain: str) -> bool:
+    if normalize_service_domain(service_domain) != _MILK_MANAGEMENT_DOMAIN:
+        return False
+    policy = inputs.get("milk_record_context_policy") if isinstance(inputs.get("milk_record_context_policy"), dict) else {}
+    if isinstance(policy, dict) and _explicit_false(policy.get("include_raw_records")):
+        return False
+    source = _context_token(inputs.get("trigger_source"))
+    mode = _context_token(inputs.get("milk_context_mode"))
+    return source in _MILK_BACKGROUND_TRIGGER_SOURCES and mode in _MILK_ANALYSIS_CONTEXT_MODES
+
+
+def _context_token(value: Any) -> str:
+    return str(value or "").strip().replace("-", "_").lower()
+
+
+def _explicit_false(value: Any) -> bool:
+    if value is False:
+        return True
+    if isinstance(value, (int, float)) and int(value) == 0:
+        return True
+    if isinstance(value, str):
+        return value.strip().lower() in {"0", "false", "no", "n", "off"}
+    return False
+
+
+def _milk_record_context_policy(inputs: RuntimeInputs) -> dict[str, Any]:
+    policy = inputs.get("milk_record_context_policy") if isinstance(inputs.get("milk_record_context_policy"), dict) else {}
+    return {
+        "raw_days": _clamp_context_int(policy.get("raw_days"), _DEFAULT_MILK_RAW_CONTEXT_DAYS, 1, 14),
+        "rollup_days": _clamp_context_int(policy.get("rollup_days"), _DEFAULT_MILK_RAW_CONTEXT_DAYS, 1, 14),
+        "raw_limit": _clamp_context_int(policy.get("raw_limit"), _DEFAULT_MILK_RAW_CONTEXT_LIMIT, 1, _DEFAULT_MILK_RAW_CONTEXT_LIMIT),
+        "include_today": bool(policy.get("include_today") is True),
+    }
+
+
+def _clamp_context_int(value: Any, default: int, minimum: int, maximum: int) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        number = default
+    return min(max(number, minimum), maximum)
+
+
 def _format_milk_management_context(state: ContextState) -> list[str]:
     analysis_intake = state.milk_management_state.get("analysis_intake")
     lines = ["milk_management_context:"]
+    recent_record_context = state.milk_management_state.get("recent_record_context")
+    if isinstance(recent_record_context, dict):
+        lines.extend(_format_recent_milk_record_context(recent_record_context))
     if isinstance(analysis_intake, dict):
         lines.extend(_format_milk_analysis_intake_context(analysis_intake))
     else:
@@ -639,6 +743,47 @@ def _format_milk_management_context(state: ContextState) -> list[str]:
     if isinstance(pending_calendar, dict):
         lines.extend(_format_pending_calendar_adjustment_context(pending_calendar))
     return lines if len(lines) > 1 else []
+
+
+def _format_recent_milk_record_context(context: dict[str, Any]) -> list[str]:
+    payload = _recent_milk_record_context_payload(context)
+    if not payload:
+        return []
+    status = str(payload.get("status") or "").strip()
+    lines = ["- milk_recent_record_context_available: true"]
+    if status:
+        lines.append(f"- milk_recent_record_context_status: {status}")
+    policy = payload.get("policy") if isinstance(payload.get("policy"), dict) else {}
+    if policy:
+        lines.append(
+            "- milk_recent_record_context_policy: "
+            f"raw_days={policy.get('raw_days')}; rollup_days={policy.get('rollup_days')}; "
+            f"raw_limit={policy.get('raw_limit')}; include_today={policy.get('include_today')}"
+        )
+    lines.append("- milk_recent_record_context_json: " + json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str))
+    lines.append("- milk_recent_record_context_contract: 这是后台奶量分析首轮注入并缓存的近期原始记录；回答记录明细、日期对比、最近哪天最多等问题时优先使用它，不要因为上下文里只有结论而说无法查看记录。")
+    return lines
+
+
+def _recent_milk_record_context_payload(context: dict[str, Any]) -> dict[str, Any]:
+    keys = (
+        "purpose",
+        "source",
+        "ok",
+        "status",
+        "summary",
+        "as_of_time",
+        "window",
+        "policy",
+        "record_counts",
+        "truncated",
+        "daily_rollups",
+        "raw_records",
+        "assessment_status",
+        "milk_normality_status",
+        "user_id",
+    )
+    return {key: context.get(key) for key in keys if context.get(key) not in (None, "", [], {})}
 
 
 def _format_pending_calendar_adjustment_context(pending: dict[str, Any]) -> list[str]:

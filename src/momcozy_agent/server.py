@@ -939,6 +939,27 @@ def _runtime_inputs_from_ag_ui(payload: dict[str, Any]) -> dict[str, Any]:
     )
     if service_domain:
         inputs["service_domain"] = service_domain
+    trigger_source = (
+        _field(forwarded_props, "trigger_source", "triggerSource")
+        or _field(state, "trigger_source", "triggerSource")
+        or _field(payload, "trigger_source", "triggerSource")
+    )
+    if trigger_source:
+        inputs["trigger_source"] = trigger_source
+    milk_context_mode = (
+        _field(forwarded_props, "milk_context_mode", "milkContextMode")
+        or _field(state, "milk_context_mode", "milkContextMode")
+        or _field(payload, "milk_context_mode", "milkContextMode")
+    )
+    if milk_context_mode:
+        inputs["milk_context_mode"] = milk_context_mode
+    milk_record_context_policy = (
+        _field(forwarded_props, "milk_record_context_policy", "milkRecordContextPolicy")
+        or _field(state, "milk_record_context_policy", "milkRecordContextPolicy")
+        or _field(payload, "milk_record_context_policy", "milkRecordContextPolicy")
+    )
+    if isinstance(milk_record_context_policy, dict):
+        inputs["milk_record_context_policy"] = milk_record_context_policy
     if user_id:
         inputs["user_id"] = user_id
     profile_onboarding_pending = _bool_context_value(state, forwarded_props, payload, "profile_onboarding_pending", "profileOnboardingPending")

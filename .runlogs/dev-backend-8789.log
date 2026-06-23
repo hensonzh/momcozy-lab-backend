@@ -73,3 +73,83 @@ INFO:     127.0.0.1:51599 - "GET /v1/realtime-voice-stream?user_id=demo_mama_inc
 INFO:     127.0.0.1:51622 - "GET /v1/user/profile/query?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
 INFO:     127.0.0.1:51623 - "GET /v1/user/profile/query?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
 INFO:     127.0.0.1:51624 - "GET /v1/realtime-voice-stream?user_id=demo_mama_increase_001&text=%E5%97%A8%EF%BC%8C%E6%88%91%E6%98%AF+CozyMate%EF%BC%8C%E6%9D%A5%E8%87%AA+Momcozy%E5%9B%A2%E9%98%9F%E3%80%82+%E4%BD%A0%E5%B8%8C%E6%9C%9B%E6%88%91%E6%80%8E%E4%B9%88%E7%A7%B0%E5%91%BC%E4%BD%A0%EF%BC%9F%E4%BB%8A%E5%B9%B4%E5%A4%9A%E5%A4%A7%E5%95%A6%EF%BC%9F HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57974 - "GET /v1/user/profile/query?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57975 - "GET /v1/user/profile/query?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57977 - "GET /v1/realtime-voice-stream?user_id=demo_mama_increase_001&text=%E5%97%A8%EF%BC%8C%E6%88%91%E6%98%AF+CozyMate%EF%BC%8C%E6%9D%A5%E8%87%AA+Momcozy%E5%9B%A2%E9%98%9F%E3%80%82+%E4%BD%A0%E5%B8%8C%E6%9C%9B%E6%88%91%E6%80%8E%E4%B9%88%E7%A7%B0%E5%91%BC%E4%BD%A0%EF%BC%9F%E4%BB%8A%E5%B9%B4%E5%A4%9A%E5%A4%A7%E5%95%A6%EF%BC%9F HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51894 - "GET /v1/user/profile/query?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51895 - "GET /v1/user/profile/query?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51896 - "GET /v1/realtime-voice-stream?user_id=demo_mama_increase_001&text=%E5%97%A8%EF%BC%8C%E6%88%91%E6%98%AF+CozyMate%EF%BC%8C%E6%9D%A5%E8%87%AA+Momcozy%E5%9B%A2%E9%98%9F%E3%80%82+%E4%BD%A0%E5%B8%8C%E6%9C%9B%E6%88%91%E6%80%8E%E4%B9%88%E7%A7%B0%E5%91%BC%E4%BD%A0%EF%BC%9F%E4%BB%8A%E5%B9%B4%E5%A4%9A%E5%A4%A7%E5%95%A6%EF%BC%9F HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55102 - "GET /v1/user/profile/query?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55103 - "GET /v1/user/profile/query?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55104 - "GET /v1/realtime-voice-stream?user_id=demo_mama_increase_001&text=%E5%97%A8%EF%BC%8C%E6%88%91%E6%98%AF+CozyMate%EF%BC%8C%E6%9D%A5%E8%87%AA+Momcozy%E5%9B%A2%E9%98%9F%E3%80%82+%E4%BD%A0%E5%B8%8C%E6%9C%9B%E6%88%91%E6%80%8E%E4%B9%88%E7%A7%B0%E5%91%BC%E4%BD%A0%EF%BC%9F%E4%BB%8A%E5%B9%B4%E5%A4%9A%E5%A4%A7%E5%95%A6%EF%BC%9F HTTP/1.1" 200 OK
+ERROR:    Exception in ASGI application
+Traceback (most recent call last):
+  File "/Users/lute/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/asyncio/selector_events.py", line 988, in _read_ready__get_buffer
+    nbytes = self._sock.recv_into(buf)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+ConnectionResetError: [Errno 54] Connection reset by peer
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/Users/lute/project/MomCozyWorktrees/worktree-1/MomCozyAgent/.venv/lib/python3.12/site-packages/uvicorn/protocols/http/h11_impl.py", line 415, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/lute/project/MomCozyWorktrees/worktree-1/MomCozyAgent/.venv/lib/python3.12/site-packages/uvicorn/middleware/proxy_headers.py", line 62, in __call__
+    return await self.app(scope, receive, send)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/lute/project/MomCozyWorktrees/worktree-1/MomCozyAgent/.venv/lib/python3.12/site-packages/fastapi/applications.py", line 1159, in __call__
+    await super().__call__(scope, receive, send)
+  File "/Users/lute/project/MomCozyWorktrees/worktree-1/MomCozyAgent/.venv/lib/python3.12/site-packages/starlette/applications.py", line 90, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/Users/lute/project/MomCozyWorktrees/worktree-1/MomCozyAgent/.venv/lib/python3.12/site-packages/starlette/middleware/errors.py", line 186, in __call__
+    raise exc
+  File "/Users/lute/project/MomCozyWorktrees/worktree-1/MomCozyAgent/.venv/lib/python3.12/site-packages/starlette/middleware/errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "/Users/lute/project/MomCozyWorktrees/worktree-1/MomCozyAgent/.venv/lib/python3.12/site-packages/starlette/middleware/exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "/Users/lute/project/MomCozyWorktrees/worktree-1/MomCozyAgent/.venv/lib/python3.12/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/Users/lute/project/MomCozyWorktrees/worktree-1/MomCozyAgent/.venv/lib/python3.12/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/Users/lute/project/MomCozyWorktrees/worktree-1/MomCozyAgent/.venv/lib/python3.12/site-packages/fastapi/middleware/asyncexitstack.py", line 18, in __call__
+    await self.app(scope, receive, send)
+  File "/Users/lute/project/MomCozyWorktrees/worktree-1/MomCozyAgent/.venv/lib/python3.12/site-packages/starlette/routing.py", line 660, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/Users/lute/project/MomCozyWorktrees/worktree-1/MomCozyAgent/.venv/lib/python3.12/site-packages/starlette/routing.py", line 680, in app
+    await route.handle(scope, receive, send)
+  File "/Users/lute/project/MomCozyWorktrees/worktree-1/MomCozyAgent/.venv/lib/python3.12/site-packages/starlette/routing.py", line 276, in handle
+    await self.app(scope, receive, send)
+  File "/Users/lute/project/MomCozyWorktrees/worktree-1/MomCozyAgent/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 134, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "/Users/lute/project/MomCozyWorktrees/worktree-1/MomCozyAgent/.venv/lib/python3.12/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/Users/lute/project/MomCozyWorktrees/worktree-1/MomCozyAgent/.venv/lib/python3.12/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/Users/lute/project/MomCozyWorktrees/worktree-1/MomCozyAgent/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 121, in app
+    await response(scope, receive, send)
+  File "/Users/lute/project/MomCozyWorktrees/worktree-1/MomCozyAgent/.venv/lib/python3.12/site-packages/starlette/responses.py", line 273, in __call__
+    with collapse_excgroups():
+         ^^^^^^^^^^^^^^^^^^^^
+  File "/Users/lute/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/contextlib.py", line 158, in __exit__
+    self.gen.throw(value)
+  File "/Users/lute/project/MomCozyWorktrees/worktree-1/MomCozyAgent/.venv/lib/python3.12/site-packages/starlette/_utils.py", line 87, in collapse_excgroups
+    raise exc
+  File "/Users/lute/project/MomCozyWorktrees/worktree-1/MomCozyAgent/.venv/lib/python3.12/site-packages/starlette/responses.py", line 277, in wrap
+    await func()
+  File "/Users/lute/project/MomCozyWorktrees/worktree-1/MomCozyAgent/.venv/lib/python3.12/site-packages/starlette/responses.py", line 250, in stream_response
+    async for chunk in self.body_iterator:
+  File "/Users/lute/project/MomCozyWorktrees/worktree-1/MomCozyAgent/src/momcozy_agent/api/routes.py", line 2562, in stream
+    async for chunk in audio_iter:
+  File "/Users/lute/project/MomCozyWorktrees/worktree-1/MomCozyAgent/src/momcozy_agent/api/routes.py", line 2750, in _iter_volc_realtime_voice_audio
+    async for raw in ws:
+  File "/Users/lute/project/MomCozyWorktrees/worktree-1/MomCozyAgent/.venv/lib/python3.12/site-packages/websockets/asyncio/connection.py", line 244, in __aiter__
+    yield await self.recv()
+          ^^^^^^^^^^^^^^^^^
+  File "/Users/lute/project/MomCozyWorktrees/worktree-1/MomCozyAgent/.venv/lib/python3.12/site-packages/websockets/asyncio/connection.py", line 324, in recv
+    raise self.protocol.close_exc from self.recv_exc
+websockets.exceptions.ConnectionClosedError: no close frame received or sent
+INFO:     127.0.0.1:58406 - "GET /v1/user/profile/query?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58408 - "GET /v1/user/profile/query?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58381 - "GET /v1/realtime-voice-stream?user_id=demo_mama_increase_001&text=%E5%97%A8%EF%BC%8C%E6%88%91%E6%98%AF+CozyMate%EF%BC%8C%E6%9D%A5%E8%87%AA+Momcozy%E5%9B%A2%E9%98%9F%E3%80%82+%E4%BD%A0%E5%B8%8C%E6%9C%9B%E6%88%91%E6%80%8E%E4%B9%88%E7%A7%B0%E5%91%BC%E4%BD%A0%EF%BC%9F%E4%BB%8A%E5%B9%B4%E5%A4%9A%E5%A4%A7%E5%95%A6%EF%BC%9F HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58412 - "GET /v1/realtime-voice-stream?user_id=demo_mama_increase_001&text=%E5%97%A8%EF%BC%8C%E6%88%91%E6%98%AF+CozyMate%EF%BC%8C%E6%9D%A5%E8%87%AA+Momcozy%E5%9B%A2%E9%98%9F%E3%80%82+%E4%BD%A0%E5%B8%8C%E6%9C%9B%E6%88%91%E6%80%8E%E4%B9%88%E7%A7%B0%E5%91%BC%E4%BD%A0%EF%BC%9F%E4%BB%8A%E5%B9%B4%E5%A4%9A%E5%A4%A7%E5%95%A6%EF%BC%9F HTTP/1.1" 200 OK

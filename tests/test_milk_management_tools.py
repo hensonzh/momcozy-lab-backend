@@ -674,6 +674,93 @@ class MilkManagementToolTests(unittest.TestCase):
         self.assertNotIn("任何用户追问都必须来自 milk_analysis_intake_manage", context)
         self.assertIn("不要询问工具已读取的 7 天记录或近期节奏", context)
 
+    def test_background_milk_analysis_context_injects_and_caches_raw_records(self) -> None:
+        uid, infant_id = _seed_user("background-raw-records")
+        _add_pumping_rows(uid, "2026-05-13", ["06:00", "12:00"])
+        _add_feeding_rows(uid, infant_id, "2026-05-12", ["08:00"])
+        state = ContextState()
+
+        context = build_request_context(
+            {
+                "user_message": "后台触发奶量分析",
+                "user_profile": {"user_id": uid},
+                "locale": "zh-CN",
+                "timezone": "Asia/Shanghai",
+                "message_sent_at": "2026-05-14 12:10:00",
+                "service_domain": "milk_management",
+                "trigger_source": "background",
+                "milk_context_mode": "analysis",
+                "milk_record_context_policy": {"include_raw_records": True, "raw_days": 7, "rollup_days": 7, "raw_limit": 160},
+            },
+            state,
+        )
+
+        self.assertIn("milk_recent_record_context_available: true", context)
+        self.assertIn("milk_recent_record_context_json:", context)
+        self.assertIn("background_milk_analysis", context)
+        self.assertIn("raw_records", context)
+        self.assertIn("2026-05-13 06:00:00", context)
+        self.assertIn("2026-05-12 08:00:00", context)
+        cached = state.milk_management_state.get("recent_record_context")
+        self.assertIsInstance(cached, dict)
+        raw_records = cached.get("raw_records") if isinstance(cached, dict) else {}
+        self.assertTrue(raw_records.get("pumping"))
+        self.assertTrue(raw_records.get("feeding"))
+
+    def test_cached_milk_record_context_reappears_next_turn_without_background_trigger(self) -> None:
+        uid, _ = _seed_user("cached-raw-records")
+        _add_pumping_rows(uid, "2026-05-13", ["06:00"])
+        state = ContextState()
+
+        build_request_context(
+            {
+                "user_message": "后台触发奶量分析",
+                "user_profile": {"user_id": uid},
+                "locale": "zh-CN",
+                "timezone": "Asia/Shanghai",
+                "message_sent_at": "2026-05-14 12:10:00",
+                "service_domain": "milk_management",
+                "trigger_source": "background",
+            },
+            state,
+        )
+
+        context = build_request_context(
+            {
+                "user_message": "昨天几点吸了多少？",
+                "user_profile": {"user_id": uid},
+                "locale": "zh-CN",
+                "timezone": "Asia/Shanghai",
+                "message_sent_at": "2026-05-14 12:20:00",
+            },
+            state,
+        )
+
+        self.assertEqual(state.active_service_domain, "milk_management")
+        self.assertIn("milk_recent_record_context_available: true", context)
+        self.assertIn("2026-05-13 06:00:00", context)
+        self.assertIn("后台奶量分析首轮注入并缓存的近期原始记录", context)
+
+    def test_non_background_milk_context_does_not_inject_raw_records(self) -> None:
+        uid, _ = _seed_user("no-background-raw-records")
+        _add_pumping_rows(uid, "2026-05-13", ["06:00"])
+        state = ContextState()
+
+        context = build_request_context(
+            {
+                "user_message": "帮我看看奶量",
+                "user_profile": {"user_id": uid},
+                "locale": "zh-CN",
+                "timezone": "Asia/Shanghai",
+                "message_sent_at": "2026-05-14 12:10:00",
+                "service_domain": "milk_management",
+            },
+            state,
+        )
+
+        self.assertNotIn("milk_recent_record_context_json:", context)
+        self.assertNotIn("recent_record_context", state.milk_management_state)
+
     def test_plan_preview_reuses_previous_assessment_context_without_reasking_records(self) -> None:
         uid, _ = _seed_user("assessment-state-plan-preview")
         for index, time in enumerate(["00:00", "03:00", "06:00", "09:00", "12:00", "15:00", "18:00", "21:00"], start=1):
