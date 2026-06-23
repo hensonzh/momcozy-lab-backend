@@ -447,7 +447,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
         "CREATE/UPDATE/DELETE 写入工具：新增、修改或删除真实发生过的吸奶/喂养记录。record_kind 支持 pumping、nursing、breastmilk_bottle、formula_bottle。有副作用；只有用户明确确认后才调用。不要用于完成/跳过计划任务；计划任务完成状态使用 milk_task_complete。不要用计划值代替用户提供的实际奶量或时长。",
         {
             "operation": {"type": "string", "enum": ["create", "update", "delete"]},
-            "confirmed": {"type": "boolean", "description": "本轮用户已明确确认执行这次写入时传 true；未确认时不要调用写入工具。"},
+            "confirmed": {"type": "boolean", "description": "兼容字段：用户已明确确认执行这次写入时可传 true；模型未决定写入时不要调用本工具。"},
             "record_kind": {"type": "string", "enum": ["pumping", "nursing", "breastmilk_bottle", "formula_bottle"]},
             "record_id": _nullable({"type": "integer", "description": "update/delete 必填；create 传 null。"}),
             "occurred_at": _nullable({"type": "string", "description": "create 时的记录发生时间，例如 2026-05-14 09:30。"}),
@@ -473,7 +473,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
         "CREATE/UPDATE/DELETE 写入工具：保存、更新或删除用户已确认的奶量计划。通常在 milk_plan_preview_create 生成计划草稿并获得用户确认后调用。保存计划会从明天开始展开写入 calendar，不覆盖今天；如明天起已有未来计划任务，必须先让用户确认追加还是替换，再传 calendar_write_strategy。有副作用；只有用户明确确认后才调用。不要用于单次日程调整或任务完成。",
         {
             "operation": {"type": "string", "enum": ["create", "update", "delete"]},
-            "confirmed": {"type": "boolean", "description": "本轮用户已明确确认保存、更新或删除计划时传 true；未确认时不要调用写入工具。"},
+            "confirmed": {"type": "boolean", "description": "兼容字段：用户已明确确认保存、更新或删除计划时可传 true；模型未决定写入时不要调用本工具。"},
             "plan_id": _nullable({"type": "integer"}),
             "confirmed_plan": JSON_OBJECT_STRING,
             "patch": JSON_OBJECT_STRING,
@@ -519,9 +519,15 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "milk_calendar_reschedule_preview": _function_tool(
         "milk_calendar_reschedule_preview",
-        "PREVIEW 日程重排工具：根据用户通过文字或图片提供的会议、通勤、外出等不可用时间段，读取目标日期当前 calendar，并预览如何重排当天吸奶/亲喂计划以避开这些时间段。不写数据库；写入前必须让用户确认。",
+        "PREVIEW 日程重排工具：根据用户通过文字或图片提供的会议、通勤、外出等不可用时间段，读取目标日期或日期范围内当前 calendar，并预览如何重排吸奶/亲喂计划以避开这些时间段。不写数据库；写入前必须让用户确认。单日传 target_date；多日传 target_dates 或 start_date/end_date。",
         {
-            "target_date": ISO_DATE,
+            "target_date": _nullable(ISO_DATE),
+            "target_dates": {
+                **JSON_ARRAY_STRING,
+                "description": '多日重排的 ISO 日期数组字符串，例如 ["2026-06-24","2026-06-25"]。单日时传 "[]"。',
+            },
+            "start_date": _nullable({**ISO_DATE, "description": "多日连续范围起始日期；不用范围时传 null。"}),
+            "end_date": _nullable({**ISO_DATE, "description": "多日连续范围结束日期，包含当天；不用范围时传 null。"}),
             "busy_windows": {
                 **JSON_ARRAY_STRING,
                 "description": 'JSON 数组字符串，每项包含 start_time、end_time 或 duration_minutes、content。例如 [{"start_time":"09:00","end_time":"10:30","content":"会议"}]。图片里的日程先由模型识别成这个结构；不确定日期或时间时不要调用。',
@@ -538,10 +544,10 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "milk_calendar_mutate": _function_tool(
         "milk_calendar_mutate",
-        "APPLY/UPDATE/DELETE 写入工具：应用 milk_calendar_change_preview 或 milk_calendar_reschedule_preview 返回的 proposal，或批量/单条修改、删除 calendar 条目。有副作用；只有用户明确确认后才调用。不要用于保存完整奶量计划；使用 milk_plan_mutate。任务完成/跳过优先使用 milk_task_complete。",
+        "APPLY/UPDATE/DELETE 写入工具：应用 milk_calendar_change_preview 或 milk_calendar_reschedule_preview 返回的 proposal，或批量/单条修改、删除 calendar 条目。有副作用；只有用户明确确认后才调用。若请求上下文提示已有上一轮日程预览，可直接应用该预览；看到工具成功结果后再说明已同步。不要用于保存完整奶量计划；使用 milk_plan_mutate。任务完成/跳过优先使用 milk_task_complete。",
         {
             "operation": {"type": "string", "enum": ["apply_adjustment", "apply_reschedule", "range_shift", "range_delete", "patch_items", "update_item", "delete_item"]},
-            "confirmed": {"type": "boolean", "description": "本轮用户已明确确认应用这次日程变更时传 true；未确认时不要调用写入工具。"},
+            "confirmed": {"type": "boolean", "description": "兼容字段：用户已明确确认应用这次日程变更时可传 true；模型未决定写入时不要调用本工具。"},
             "target_date": _nullable(ISO_DATE),
             "proposal": JSON_OBJECT_STRING,
             "start_at": _nullable({"type": "string"}),
@@ -558,7 +564,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
         "COMPLETE/CANCEL/SKIP 写入工具：确认后更新已有计划任务或 calendar 条目的完成状态，可按用户提供的真实奶量/时长同步创建或删除关联吸奶/喂养记录。用于“这个完成了”“取消完成”“跳过这次”。不要用于新增、修改或删除独立历史记录；那类记录编辑使用 milk_record_mutate。有副作用；只有用户明确确认后才调用。",
         {
             "operation": {"type": "string", "enum": ["complete", "cancel_complete", "skip"]},
-            "confirmed": {"type": "boolean", "description": "本轮用户已明确确认更新任务状态时传 true；未确认时不要调用写入工具。"},
+            "confirmed": {"type": "boolean", "description": "兼容字段：用户已明确确认更新任务状态时可传 true；模型未决定写入时不要调用本工具。"},
             "target_date": _nullable(ISO_DATE),
             "task_id": _nullable({"type": "integer", "description": "MaiMomcozy 计划任务 ID；若传 item_id 可为 null。"}),
             "item_id": _nullable({"type": "integer", "description": "calendar item_id；若已通过 milk_calendar_query 定位，优先传 item_id。"}),
@@ -658,7 +664,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
         "CREATE/UPDATE 写入工具：新增、修改或更新宝宝身高、体重、头围记录。只在用户明确提供测量值并确认保存/更新时调用；不要根据照片、描述或模型估算写入。有副作用；只有用户明确确认后才调用。",
         {
             "operation": {"type": "string", "enum": ["create", "update", "upsert_today"]},
-            "confirmed": {"type": "boolean", "description": "本轮用户已明确确认保存宝宝成长记录时传 true；未确认时不要调用写入工具。"},
+            "confirmed": {"type": "boolean", "description": "兼容字段：用户已明确确认保存宝宝成长记录时可传 true；模型未决定写入时不要调用本工具。"},
             "growth_id": _nullable({"type": "integer", "description": "update 必填；create/upsert_today 传 null。"}),
             "infant_id": _nullable({"type": "integer", "description": "宝宝 ID；不确定传 null 使用当前用户第一个宝宝。"}),
             "height_cm": _nullable({"type": "number", "description": "身高/身长 cm；不修改传 null。"}),

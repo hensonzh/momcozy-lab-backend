@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from ..services.milk_management.assessment import evaluate_milk_status
@@ -63,6 +63,7 @@ FLOW_REQUIRED_FIELDS = [
     "maternal_red_flags",
     "maternal_breast_comfort",
 ]
+FLOW_MATERNAL_RED_FLAG_FIELDS = ("fever", "chills", "breast_redness", "lump_or_hard_area", "worsening_pain")
 FLOW_FIELD_LABELS = {
     "records_7d": "过去 7 天可计算奶量记录",
     "infant_wet_diapers": "宝宝近 24 小时尿量/尿布情况",
@@ -157,12 +158,12 @@ def execute_milk_management_tool(args: dict[str, Any], inputs: RuntimeInputs) ->
         runtime_date = _runtime_target_date(inputs)
         if runtime_date:
             arguments["target_date"] = runtime_date
+    if name == "milk_plan_mutate":
+        arguments = _arguments_with_cached_milk_plan_preview(arguments, inputs)
     if name == "milk_calendar_mutate":
         arguments = _arguments_with_cached_calendar_adjustment(arguments, inputs)
-
-    confirmation_result = _milk_write_confirmation_result(name, arguments, inputs)
-    if confirmation_result is not None:
-        return confirmation_result
+    if name == "milk_calendar_reschedule_preview":
+        arguments = _arguments_with_calendar_reschedule_from_message(arguments, inputs)
 
     if name == "milk_snapshot_get":
         return dict(get_milk_context(**_pick(arguments, "user_id")))
@@ -179,7 +180,6 @@ def execute_milk_management_tool(args: dict[str, Any], inputs: RuntimeInputs) ->
     if name == "milk_plan_query":
         return _query_plan(arguments)
     if name == "milk_plan_mutate":
-        arguments = _arguments_with_cached_milk_plan_preview(arguments, inputs)
         return _mutate_plan(arguments)
     if name == "milk_calendar_query":
         return _query_calendar(arguments, inputs)
@@ -206,6 +206,9 @@ def execute_milk_management_tool(args: dict[str, Any], inputs: RuntimeInputs) ->
                     arguments,
                     "user_id",
                     "target_date",
+                    "target_dates",
+                    "start_date",
+                    "end_date",
                     "busy_windows",
                     "adjustable_item_types",
                     "plan_id",
@@ -266,79 +269,6 @@ def execute_milk_management_tool(args: dict[str, Any], inputs: RuntimeInputs) ->
     raise ValueError(f"Unknown milk-management tool: {name}")
 
 
-def _milk_write_confirmation_result(name: str, arguments: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any] | None:
-    if name not in MILK_WRITE_TOOL_NAMES:
-        return None
-    if arguments.get("confirmed") is True and _current_user_message_confirms_write(inputs):
-        return None
-    return {
-        "ok": False,
-        "status": "needs_write_confirmation",
-        "summary": "写入前需要用户明确确认。",
-        "data": {
-            "requires_confirmation": True,
-            "confirmation_question": _milk_write_confirmation_question(name, arguments),
-            "blocked_tool": name,
-            "operation": str(arguments.get("operation") or "").strip(),
-        },
-    }
-
-
-def _current_user_message_confirms_write(inputs: RuntimeInputs) -> bool:
-    text = norm_text(inputs.get("user_message"))
-    if not text:
-        return False
-    lowered = text.lower()
-    negative_tokens = ("不要", "别", "先不", "暂不", "不保存", "不写", "不删除", "不用", "算了", "等等", "等一下")
-    if any(token in text for token in negative_tokens):
-        return False
-    if any(token in lowered for token in ("don't", "do not", "not now", "no thanks")):
-        return False
-    if text in {"好", "好的", "可以", "行", "确认", "同意", "是的", "对"}:
-        return True
-    positive_tokens = (
-        "确认",
-        "同意",
-        "保存",
-        "同步",
-        "写入",
-        "记下",
-        "记录",
-        "完成",
-        "跳过",
-        "删除",
-        "更新",
-        "修改",
-        "按这版",
-        "就这样",
-        "执行",
-    )
-    if any(token in text for token in positive_tokens):
-        return True
-    return any(token in lowered for token in ("yes", "confirm", "confirmed", "save", "sync", "apply", "record", "complete", "delete", "update"))
-
-
-def _milk_write_confirmation_question(name: str, arguments: dict[str, Any]) -> str:
-    operation = str(arguments.get("operation") or "").strip()
-    if name == "milk_plan_mutate":
-        if operation == "delete":
-            return "确认删除这份奶量计划吗？"
-        if operation == "update":
-            return "确认更新这份奶量计划吗？"
-        return "确认把这版奶量计划保存并同步到计划页吗？"
-    if name == "milk_calendar_mutate":
-        return "确认应用这次日程调整吗？"
-    if name == "milk_task_complete":
-        if operation == "skip":
-            return "确认跳过这次计划任务吗？"
-        if operation == "cancel_complete":
-            return "确认取消这次任务的完成状态吗？"
-        return "确认把这次计划任务标记为完成吗？"
-    if name == "infant_growth_mutate":
-        return "确认保存这条宝宝成长记录吗？"
-    return "确认保存这条奶量或喂养记录吗？"
-
-
 def _milk_assessment_arguments(arguments: dict[str, Any], *, comprehensive_assessment: bool) -> dict[str, Any]:
     assessment_arguments = _pick(arguments, "user_id", "as_of_time", "window_days", "include_today")
     if comprehensive_assessment:
@@ -351,9 +281,9 @@ def _analysis_intake_manage(arguments: dict[str, Any], inputs: RuntimeInputs) ->
     state = inputs.get("_milk_management_state") if isinstance(inputs.get("_milk_management_state"), dict) else {}
     previous = _previous_analysis_intake_state(state)
     action = norm_text(arguments.get("action")) or "auto"
-    if action == "reset":
-        previous = {}
     user_update = norm_text(arguments.get("user_update")) or norm_text(inputs.get("user_message"))
+    if _should_reset_previous_intake_for_action(action, previous, user_update):
+        previous = {}
     flow = _flow_seed(previous)
     flow["goal"] = "milk_analysis"
     flow["user_update"] = user_update
@@ -433,9 +363,11 @@ def _analysis_evaluate(arguments: dict[str, Any], inputs: RuntimeInputs) -> dict
     flow = _flow_from_analysis_context(analysis_context)
     assessment_args = _flow_assessment_arguments(arguments, flow)
     assessment = _evaluate_milk_analysis_core(assessment_args, inputs)
-    assessment = _assessment_with_analysis_context_fingerprint(assessment, analysis_context)
     if not flow.get("plan_type"):
         flow["plan_type"] = _flow_plan_type_from_assessment(assessment)
+    if flow.get("plan_type"):
+        analysis_context = {**analysis_context, "plan_type": flow.get("plan_type")}
+    assessment = _assessment_with_analysis_context_fingerprint(assessment, analysis_context)
     flow["assessment_result"] = assessment
     flow["stage"] = "analysis_ready"
     flow["analysis_context"] = analysis_context
@@ -558,6 +490,40 @@ def _plan_preview_create(arguments: dict[str, Any], inputs: RuntimeInputs) -> di
 def _previous_analysis_intake_state(state: dict[str, Any]) -> dict[str, Any]:
     intake = state.get("analysis_intake") if isinstance(state.get("analysis_intake"), dict) else {}
     return intake
+
+
+def _should_reset_previous_intake_for_action(action: str, previous: dict[str, Any], user_update: str) -> bool:
+    if action == "reset":
+        return True
+    current_field = norm_text(previous.get("current_field"))
+    if action == "auto" and previous and _user_update_starts_new_milk_analysis(user_update):
+        if current_field and _flow_answer_matches_current_field(current_field, user_update):
+            return False
+        return True
+    if action != "start":
+        return False
+    if current_field and _flow_answer_matches_current_field(current_field, user_update):
+        return False
+    return True
+
+
+def _user_update_starts_new_milk_analysis(user_update: str) -> bool:
+    text = norm_text(user_update)
+    if not text:
+        return False
+    phrases = (
+        "重新分析",
+        "再分析",
+        "分析最近",
+        "后台奶量分析提醒",
+        "生成奶量计划",
+        "制定奶量计划",
+        "做奶量计划",
+        "追奶计划",
+        "稳奶计划",
+        "减奶计划",
+    )
+    return any(phrase in text for phrase in phrases)
 
 
 def _intake_collecting_result(flow: dict[str, Any], records_result: dict[str, Any]) -> dict[str, Any]:
@@ -694,8 +660,9 @@ def _analysis_context_from_flow(flow: dict[str, Any], *, records_result: dict[st
 
 def _analysis_intake_state_for_storage(flow: dict[str, Any]) -> dict[str, Any]:
     stored = _flow_state_for_storage(flow)
-    if isinstance(flow.get("analysis_context"), dict):
-        stored["analysis_context"] = flow["analysis_context"]
+    analysis_context = _analysis_context_from_intake_state({**flow, **stored})
+    if analysis_context:
+        stored["analysis_context"] = analysis_context
     return stored
 
 
@@ -718,7 +685,7 @@ def _analysis_context_from_state(inputs: RuntimeInputs) -> dict[str, Any]:
     if not isinstance(state, dict):
         return {}
     candidate = state.get("analysis_intake") if isinstance(state.get("analysis_intake"), dict) else {}
-    context = candidate.get("analysis_context") if isinstance(candidate.get("analysis_context"), dict) else {}
+    context = _analysis_context_from_intake_state(candidate)
     if context:
         return context
     if candidate and isinstance(candidate.get("records_snapshot"), dict):
@@ -727,6 +694,18 @@ def _analysis_context_from_state(inputs: RuntimeInputs) -> dict[str, Any]:
             return {}
         return _analysis_context_from_flow(candidate, records_result=None)
     return {}
+
+
+def _analysis_context_from_intake_state(intake: dict[str, Any]) -> dict[str, Any]:
+    if not intake:
+        return {}
+    existing = intake.get("analysis_context") if isinstance(intake.get("analysis_context"), dict) else {}
+    derived = _analysis_context_from_flow(intake, records_result=None)
+    if not existing:
+        return derived
+    if not derived:
+        return existing
+    return _drop_empty_context({**existing, **derived})
 
 
 def _analysis_context_is_complete(context: dict[str, Any]) -> bool:
@@ -845,10 +824,13 @@ def _needs_analysis_context_result() -> dict[str, Any]:
 
 def _analysis_context_missing_fields(analysis_context: dict[str, Any]) -> list[str]:
     checklist = analysis_context.get("checklist") if isinstance(analysis_context.get("checklist"), list) else []
+    flow = _flow_from_analysis_context(analysis_context)
+    derived_missing = _flow_missing_fields(_flow_checklist(flow))
+    if derived_missing:
+        return derived_missing
     if checklist:
         return _flow_missing_fields(checklist)
-    flow = _flow_from_analysis_context(analysis_context)
-    return _flow_missing_fields(_flow_checklist(flow))
+    return []
 
 
 def _needs_complete_analysis_intake_result(
@@ -862,7 +844,10 @@ def _needs_complete_analysis_intake_result(
     continuation_instruction: str | None = None,
 ) -> dict[str, Any]:
     flow = _flow_from_analysis_context(analysis_context)
-    checklist = analysis_context.get("checklist") if isinstance(analysis_context.get("checklist"), list) else _flow_checklist(flow)
+    checklist = _flow_checklist(flow)
+    derived_missing = _flow_missing_fields(checklist)
+    if derived_missing:
+        missing_fields = derived_missing
     current_field = missing_fields[0] if missing_fields else None
     next_question = _flow_question_for_field(current_field) if current_field else ""
     flow["stage"] = "intake_collecting"
@@ -972,12 +957,102 @@ def _flow_context_updates(arguments: dict[str, Any], flow: dict[str, Any], user_
     infant = dict(flow.get("infant_signals") if isinstance(flow.get("infant_signals"), dict) else {})
     maternal = dict(flow.get("maternal_symptoms") if isinstance(flow.get("maternal_symptoms"), dict) else {})
     inferred_infant, inferred_maternal = _workflow_infer_context_from_text(user_update)
-    infant.update(inferred_infant)
-    maternal.update(inferred_maternal)
-    infant.update(_normalized_options(arguments.get("infant_signals")))
-    maternal.update(_normalized_options(arguments.get("maternal_symptoms")))
+    infant.update(
+        _trusted_infant_signal_argument_updates(
+            inferred_infant,
+            current_field=flow.get("current_field"),
+            user_update=user_update,
+        )
+    )
+    maternal.update(
+        _trusted_maternal_symptom_argument_updates(
+            inferred_maternal,
+            current_field=flow.get("current_field"),
+            user_update=user_update,
+        )
+    )
+    infant.update(
+        _trusted_infant_signal_argument_updates(
+            _normalized_options(arguments.get("infant_signals")),
+            current_field=flow.get("current_field"),
+            user_update=user_update,
+        )
+    )
+    maternal.update(
+        _trusted_maternal_symptom_argument_updates(
+            _normalized_options(arguments.get("maternal_symptoms")),
+            current_field=flow.get("current_field"),
+            user_update=user_update,
+        )
+    )
     _flow_apply_current_field_answer(flow.get("current_field"), user_update, infant, maternal)
     return infant, maternal
+
+
+def _trusted_infant_signal_argument_updates(
+    updates: dict[str, Any],
+    *,
+    current_field: Any,
+    user_update: str,
+) -> dict[str, Any]:
+    if not updates:
+        return {}
+    trusted = dict(updates)
+    if not _can_accept_infant_signal_group(current_field=current_field, user_update=user_update, group="wet_diapers"):
+        trusted.pop("wet_diapers_24h", None)
+    if not _can_accept_infant_signal_group(current_field=current_field, user_update=user_update, group="state"):
+        for key in ("baby_state", "feeding_satisfaction", "poor_feeding", "poor_latch", "lethargy"):
+            trusted.pop(key, None)
+    if not _can_accept_infant_signal_group(current_field=current_field, user_update=user_update, group="growth"):
+        for key in ("recent_weight", "weight_trend", "growth_concern"):
+            trusted.pop(key, None)
+    return trusted
+
+
+def _can_accept_infant_signal_group(*, current_field: Any, user_update: str, group: str) -> bool:
+    field = norm_text(current_field)
+    text = norm_text(user_update)
+    if not text:
+        return False
+    if group == "wet_diapers":
+        if field == "infant_wet_diapers" and _flow_answer_matches_current_field(field, text):
+            return True
+        return _text_mentions_wet_diapers(text)
+    if group == "state":
+        if field == "infant_state_or_satisfaction" and _flow_answer_matches_current_field(field, text):
+            return True
+        return _text_mentions_infant_state(text)
+    if group == "growth":
+        if field == "infant_growth_signal" and _flow_answer_matches_current_field(field, text):
+            return True
+        return _text_answers_infant_growth(text)
+    return False
+
+
+def _trusted_maternal_symptom_argument_updates(
+    updates: dict[str, Any],
+    *,
+    current_field: Any,
+    user_update: str,
+) -> dict[str, Any]:
+    if not updates:
+        return {}
+    trusted = dict(updates)
+    if _can_accept_red_flag_argument_updates(current_field=current_field, user_update=user_update):
+        return trusted
+    for key in FLOW_MATERNAL_RED_FLAG_FIELDS:
+        trusted.pop(key, None)
+    return trusted
+
+
+def _can_accept_red_flag_argument_updates(*, current_field: Any, user_update: str) -> bool:
+    if norm_text(current_field) == "maternal_red_flags":
+        return True
+    text = norm_text(user_update)
+    if not text:
+        return False
+    red_flag_terms = ("发热", "发烧", "寒战", "发冷", "红肿", "红热", "发红", "硬块", "肿块", "结块", "疼痛加重", "越来越痛", "更痛")
+    return any(term in text for term in red_flag_terms)
 
 
 def _flow_user_update_invalidates_assessment(action: str, user_update: str) -> bool:
@@ -990,6 +1065,8 @@ def _flow_apply_current_field_answer(current_field: Any, user_update: str, infan
     field = norm_text(current_field)
     text = norm_text(user_update)
     if not field or not text:
+        return
+    if not _flow_answer_matches_current_field(field, text):
         return
     negative = any(token in text for token in ("没有", "没", "无", "否认", "不发", "不红", "不痛"))
     normal = any(token in text for token in ("正常", "还好", "可以", "稳定", "没问题", "不少"))
@@ -1014,6 +1091,122 @@ def _flow_apply_current_field_answer(current_field: Any, user_update: str, infan
             maternal.setdefault("symptom_text", text)
 
 
+def _flow_answer_matches_current_field(field: str, text: str) -> bool:
+    if field == "records_7d":
+        return _text_answers_record_completeness(text)
+    if field == "infant_wet_diapers":
+        return _text_answers_wet_diapers(text)
+    if field == "infant_state_or_satisfaction":
+        return _text_answers_infant_state(text)
+    if field == "infant_growth_signal":
+        return _text_answers_infant_growth(text, allow_short_answer=True)
+    if field == "maternal_red_flags":
+        return _text_answers_maternal_red_flags(text)
+    if field == "maternal_breast_comfort":
+        return _text_answers_maternal_breast_comfort(text)
+    return True
+
+
+def _text_answers_record_completeness(text: str) -> bool:
+    return any(
+        token in text
+        for token in (
+            "漏记",
+            "漏了",
+            "没漏",
+            "没有漏",
+            "记录完整",
+            "记录是完整",
+            "完整的",
+            "都记",
+            "都有记",
+            "全记",
+            "补记录",
+            "补充记录",
+        )
+    )
+
+
+def _text_answers_wet_diapers(text: str) -> bool:
+    if _text_mentions_wet_diapers(text):
+        return True
+    return any(token in text for token in ("挺多", "有点少", "偏少", "不少", "不太确定", "几片", "几次"))
+
+
+def _text_mentions_wet_diapers(text: str) -> bool:
+    if any(token in text for token in ("尿布", "尿量", "小便", "尿片", "纸尿裤", "尿湿", "尿")):
+        return True
+    return False
+
+
+def _text_answers_infant_state(text: str) -> bool:
+    if _text_mentions_infant_state(text):
+        return True
+    return any(
+        token in text
+        for token in (
+            "变化不明显",
+            "还不错",
+            "不安稳",
+            "正常",
+            "还好",
+            "可以",
+            "稳定",
+            "说不准",
+            "不确定",
+            "不太确定",
+            "没太注意",
+            "没注意",
+            "不清楚",
+            "不好说",
+        )
+    )
+
+
+def _text_mentions_infant_state(text: str) -> bool:
+    return any(token in text for token in ("精神", "状态", "吃奶", "吃完", "安稳", "哭闹", "满足", "烦躁", "嗜睡"))
+
+
+def _text_answers_infant_growth(text: str, *, allow_short_answer: bool = False) -> bool:
+    if any(token in text for token in ("体重", "增长", "称重", "称过", "没称", "长得", "长胖", "掉秤")):
+        return True
+    if not allow_short_answer:
+        return False
+    return any(
+        token in text
+        for token in (
+            "看起来正常",
+            "看着正常",
+            "正常",
+            "还好",
+            "可以",
+            "稳定",
+            "没问题",
+            "不太确定",
+            "不确定",
+            "说不准",
+            "不清楚",
+            "不知道",
+            "没注意",
+            "没太注意",
+            "有点慢",
+            "偏慢",
+        )
+    )
+
+
+def _text_answers_maternal_red_flags(text: str) -> bool:
+    if any(token in text for token in ("这些情况", "红旗", "异常")):
+        return True
+    return any(token in text for token in ("发热", "发烧", "寒战", "发冷", "红肿", "红热", "发红", "硬块", "肿块", "结块", "疼痛加重", "越来越痛", "更痛", "没有", "没", "无", "否认"))
+
+
+def _text_answers_maternal_breast_comfort(text: str) -> bool:
+    if any(token in text for token in ("乳房", "吸完", "亲喂后", "舒服", "胀", "涨", "排不空", "疼", "痛", "硬", "不舒服")):
+        return True
+    return any(token in text for token in ("还好", "正常", "可以", "稳定"))
+
+
 def _flow_checklist(flow: dict[str, Any]) -> list[dict[str, Any]]:
     records = flow.get("records_snapshot") if isinstance(flow.get("records_snapshot"), dict) else {}
     infant = flow.get("infant_signals") if isinstance(flow.get("infant_signals"), dict) else {}
@@ -1023,8 +1216,8 @@ def _flow_checklist(flow: dict[str, Any]) -> list[dict[str, Any]]:
         "infant_wet_diapers": _flow_has_value(infant.get("wet_diapers_24h")),
         "infant_state_or_satisfaction": any(_flow_has_value(infant.get(key)) for key in ("baby_state", "feeding_satisfaction", "poor_feeding", "poor_latch", "lethargy")),
         "infant_growth_signal": any(_flow_has_value(infant.get(key)) for key in ("recent_weight", "weight_trend", "growth_concern")),
-        "maternal_red_flags": any(key in maternal for key in ("fever", "chills", "breast_redness", "lump_or_hard_area", "worsening_pain")),
-        "maternal_breast_comfort": any(
+        "maternal_red_flags": _has_maternal_red_flag_answer(maternal),
+        "maternal_breast_comfort": _has_positive_maternal_red_flag(maternal) or any(
             key in maternal
             for key in ("breast_fullness", "engorgement", "post_pump_fullness", "incomplete_emptying", "pain_level", "symptom_text")
         ),
@@ -1041,6 +1234,16 @@ def _flow_checklist(flow: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _flow_has_value(value: Any) -> bool:
     return value not in (None, "", [], {})
+
+
+def _has_maternal_red_flag_answer(maternal: dict[str, Any]) -> bool:
+    if all(key in maternal for key in FLOW_MATERNAL_RED_FLAG_FIELDS):
+        return True
+    return _has_positive_maternal_red_flag(maternal)
+
+
+def _has_positive_maternal_red_flag(maternal: dict[str, Any]) -> bool:
+    return any(to_bool(maternal.get(key)) for key in FLOW_MATERNAL_RED_FLAG_FIELDS)
 
 
 def _flow_missing_fields(checklist: list[dict[str, Any]]) -> list[str]:
@@ -1210,9 +1413,11 @@ def _workflow_infer_context_from_text(text: str) -> tuple[dict[str, Any], dict[s
     maternal: dict[str, Any] = {}
     negative = any(token in normalized for token in ("没有", "没", "无", "否认", "不发", "不红", "不痛", "not"))
     if any(token in normalized for token in ("红旗", "异常")) and negative:
-        maternal.update({"fever": False, "breast_redness": False, "lump_or_hard_area": False, "worsening_pain": False})
+        maternal.update({"fever": False, "chills": False, "breast_redness": False, "lump_or_hard_area": False, "worsening_pain": False})
     if any(token in normalized for token in ("发热", "发烧", "fever")):
         maternal["fever"] = not negative
+    if any(token in normalized for token in ("寒战", "发冷", "chills")):
+        maternal["chills"] = not negative
     if any(token in normalized for token in ("红肿", "红热", "发红", "redness")):
         maternal["breast_redness"] = not negative
     if any(token in normalized for token in ("硬块", "肿块", "结块", "lump")):
@@ -2018,17 +2223,18 @@ def _missing_clinical_context_fields(clinical_data: dict[str, Any]) -> list[str]
     infant_fields = {str(item) for item in infant.get("provided_fields", [])} if isinstance(infant.get("provided_fields"), list) else set()
     maternal_fields = {str(item) for item in maternal.get("provided_fields", [])} if isinstance(maternal.get("provided_fields"), list) else set()
     missing: list[str] = []
+    red_flag_fields = set(FLOW_MATERNAL_RED_FLAG_FIELDS)
+    red_flag_positive = any(to_bool(maternal.get(key)) for key in red_flag_fields)
     if infant.get("wet_diapers_provided") is not True:
         missing.append("infant_wet_diapers")
     if not str(infant.get("baby_state") or "").strip() and not str(infant.get("feeding_satisfaction") or "").strip():
         missing.append("infant_state_or_feeding_satisfaction")
     if str(growth.get("status") or "").strip() == "unknown" and not ({"recent_weight", "weight_trend", "growth_concern"} & infant_fields):
         missing.append("infant_growth_signal")
-    red_flag_fields = {"fever", "chills", "breast_redness", "lump_or_hard_area", "worsening_pain"}
-    if not red_flag_fields.issubset(maternal_fields):
+    if not red_flag_fields.issubset(maternal_fields) and not red_flag_positive:
         missing.append("maternal_red_flags")
     comfort_fields = {"breast_fullness", "engorgement", "post_pump_fullness", "incomplete_emptying", "pain_level", "symptom_text"}
-    if not (comfort_fields & maternal_fields):
+    if not (comfort_fields & maternal_fields) and not red_flag_positive:
         missing.append("maternal_breast_comfort")
     return missing
 
@@ -2155,6 +2361,8 @@ def _arguments_with_cached_milk_plan_preview(arguments: dict[str, Any], inputs: 
             merged["idempotency_key"] = key
     if not norm_text(merged.get("calendar_write_strategy")):
         strategy = _calendar_write_strategy_from_preview(preview)
+        if not strategy:
+            strategy = _calendar_write_strategy_from_user_message(inputs.get("user_message"))
         if strategy:
             merged["calendar_write_strategy"] = strategy
     return merged
@@ -2165,6 +2373,163 @@ def _calendar_write_strategy_from_preview(preview: dict[str, Any]) -> str:
     if calendar_delta.get("calendar_write_strategy_required") or calendar_delta.get("requires_calendar_write_strategy"):
         return ""
     return norm_text(calendar_delta.get("recommended_calendar_write_strategy"))
+
+
+def _calendar_write_strategy_from_user_message(message: Any) -> str:
+    text = norm_text(message)
+    if not text:
+        return ""
+    if any(token in text for token in ("不要", "不用", "先不", "暂不", "取消", "不保存", "不同步")):
+        return ""
+    if any(token in text for token in ("替换", "覆盖", "取代", "换掉", "旧计划", "未来未完成")):
+        return "replace_future_plan_tasks"
+    if any(token in text for token in ("追加", "加到", "保留现有", "保留原有", "不覆盖", "现有日程")):
+        return "append"
+    return ""
+
+
+def _arguments_with_calendar_reschedule_from_message(arguments: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
+    text = norm_text(inputs.get("user_message"))
+    if not text:
+        return arguments
+    merged = dict(arguments)
+    if not _calendar_reschedule_has_dates(merged):
+        dates = _calendar_reschedule_dates_from_message(text, inputs)
+        if len(dates) == 1:
+            merged["target_date"] = dates[0]
+            merged.setdefault("target_dates", "[]")
+        elif len(dates) > 1:
+            merged["target_dates"] = json.dumps(dates, ensure_ascii=False)
+            if not norm_text(merged.get("target_date")):
+                merged["target_date"] = None
+    if not _parse_json_list(merged.get("busy_windows")):
+        window = _calendar_busy_window_from_message(text)
+        if window:
+            merged["busy_windows"] = json.dumps([window], ensure_ascii=False)
+    if not _parse_json_list(merged.get("adjustable_item_types")):
+        merged["adjustable_item_types"] = json.dumps(["吸奶", "亲喂"], ensure_ascii=False)
+    if not to_int(merged.get("default_duration_minutes"), 0):
+        merged["default_duration_minutes"] = 20
+    if not to_int(merged.get("min_gap_minutes"), 0):
+        merged["min_gap_minutes"] = 90
+    if "include_busy_events" not in merged:
+        merged["include_busy_events"] = True
+    return merged
+
+
+def _calendar_reschedule_has_dates(arguments: dict[str, Any]) -> bool:
+    if norm_text(arguments.get("target_date")):
+        return True
+    if _parse_json_list(arguments.get("target_dates")):
+        return True
+    return bool(norm_text(arguments.get("start_date")) and norm_text(arguments.get("end_date")))
+
+
+def _calendar_reschedule_dates_from_message(text: str, inputs: RuntimeInputs) -> list[str]:
+    base = _calendar_reschedule_base_date(inputs)
+    if "后天" in text:
+        return [(base + timedelta(days=2)).date().isoformat()]
+    if "明天" in text:
+        return [(base + timedelta(days=1)).date().isoformat()]
+    if "今天" in text:
+        return [base.date().isoformat()]
+
+    days = _calendar_reschedule_day_count_from_message(text)
+    if days <= 0:
+        return []
+    start = base + timedelta(days=1)
+    return [(start + timedelta(days=offset)).date().isoformat() for offset in range(days)]
+
+
+def _calendar_reschedule_base_date(inputs: RuntimeInputs) -> datetime:
+    for key in ("message_sent_at", "current_date"):
+        parsed = _parse_handler_datetime(inputs.get(key))
+        if parsed is not None:
+            return parsed
+    return datetime.now()
+
+
+def _parse_handler_datetime(value: Any) -> datetime | None:
+    text = norm_text(value)
+    if not text:
+        return None
+    for candidate in (text, text.replace("/", "-")):
+        try:
+            return datetime.fromisoformat(candidate)
+        except ValueError:
+            continue
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(text.replace("/", "-"), fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def _calendar_reschedule_day_count_from_message(text: str) -> int:
+    match = re.search(r"(?:接下来|未来|之后|后面)\s*([一二两三四五六七八九十\d]+)\s*天", text)
+    if match:
+        return max(min(_chinese_or_int(match.group(1)), 14), 0)
+    if any(term in text for term in ("接下来几天", "未来几天", "之后几天", "后面几天")):
+        return 3
+    if "每天" in text and any(term in text for term in ("接下来", "未来", "之后", "后面")):
+        return 3
+    return 0
+
+
+def _calendar_busy_window_from_message(text: str) -> dict[str, str] | None:
+    match = re.search(
+        r"(上午|早上|下午|晚上|中午)?\s*(\d{1,2})(?:[:：](\d{1,2}))?\s*(?:~|～|-|到|至)\s*(\d{1,2})(?:[:：](\d{1,2}))?\s*点?",
+        text,
+    )
+    if not match:
+        return None
+    period, start_hour, start_minute, end_hour, end_minute = match.groups()
+    start = _clock_text_from_parts(start_hour, start_minute, period)
+    end = _clock_text_from_parts(end_hour, end_minute, period)
+    if not start or not end:
+        return None
+    return {"start_time": start, "end_time": end, "content": _calendar_busy_content_from_message(text)}
+
+
+def _clock_text_from_parts(hour_text: str, minute_text: str | None, period: str | None) -> str:
+    hour = to_int(hour_text, -1)
+    minute = to_int(minute_text, 0) if minute_text else 0
+    if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+        return ""
+    if period in {"下午", "晚上"} and hour < 12:
+        hour += 12
+    if period == "中午" and hour < 11:
+        hour += 12
+    return f"{hour:02d}:{minute:02d}"
+
+
+def _calendar_busy_content_from_message(text: str) -> str:
+    if "会议" in text or "有会" in text or "开会" in text:
+        return "会议"
+    if "产检" in text:
+        return "产检"
+    if "外出" in text or "出门" in text:
+        return "外出"
+    if "通勤" in text:
+        return "通勤"
+    return "不可用时间"
+
+
+def _chinese_or_int(value: Any) -> int:
+    text = norm_text(value)
+    if text.isdigit():
+        return to_int(text, 0)
+    digits = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
+    if text in digits:
+        return digits[text]
+    if text.startswith("十") and len(text) == 2:
+        return 10 + digits.get(text[1], 0)
+    if text.endswith("十") and len(text) == 2:
+        return digits.get(text[0], 0) * 10
+    if len(text) == 3 and text[1] == "十":
+        return digits.get(text[0], 0) * 10 + digits.get(text[2], 0)
+    return 0
 
 
 def _arguments_with_cached_calendar_adjustment(arguments: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
@@ -2192,8 +2557,6 @@ def _arguments_with_cached_calendar_adjustment(arguments: dict[str, Any], inputs
         key = norm_text(pending.get("idempotency_key")) or _calendar_adjustment_idempotency_key(proposal)
         if key:
             merged["idempotency_key"] = key
-    if merged.get("confirmed") is not True and _current_user_message_confirms_write(inputs):
-        merged["confirmed"] = True
     return merged
 
 
@@ -3124,3 +3487,15 @@ def _parse_json_object(value: Any) -> dict[str, Any]:
             return {}
         return parsed if isinstance(parsed, dict) else {}
     return {}
+
+
+def _parse_json_list(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        return list(value)
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return []
+        return list(parsed) if isinstance(parsed, list) else []
+    return []

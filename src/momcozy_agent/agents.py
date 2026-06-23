@@ -56,15 +56,15 @@ PLAN_PREVIEW_QUICK_REPLY_GUIDANCE = [
     {"text": "调整计划"},
     {"text": "先不保存"},
 ]
+PLAN_WRITE_STRATEGY_QUICK_REPLY_GUIDANCE = [
+    {"text": "追加到现有日程"},
+    {"text": "替换旧计划任务"},
+    {"text": "先不保存"},
+]
 PLAN_SAVED_QUICK_REPLY_GUIDANCE = [
     {"text": "调整时间"},
     {"text": "看看计划安排"},
     {"text": "先这样执行"},
-]
-PLAN_SAVE_CONFIRM_QUICK_REPLY_GUIDANCE = [
-    {"text": "确认保存"},
-    {"text": "调整一下"},
-    {"text": "先不保存"},
 ]
 MILK_FLOW_QUICK_REPLY_GUIDANCE = [
     {"text": "继续调整"},
@@ -772,8 +772,6 @@ def _tool_end_label(tool_name: str) -> str:
 def _tool_result_label(tool_name: str, result: dict[str, Any]) -> str:
     status = str(result.get("status") or "").strip()
     if result.get("result_ok") is False:
-        if status == "needs_write_confirmation":
-            return "接下来需要你确认一下～"
         if status == "calendar_write_strategy_required":
             return "这版计划还需要确认写入方式"
         if tool_name == "milk_plan_mutate":
@@ -1242,10 +1240,10 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
         return _compact_milk_plan_no_card_output(safe, result)
     if tool_name == "milk_status_query" and isinstance(safe.get("card"), dict):
         return _compact_mom_baby_status_card_output(safe)
-    if tool_name in MILK_WRITE_TOOL_NAMES and safe.get("status") == "needs_write_confirmation":
-        return _compact_milk_write_confirmation_output(safe)
     if tool_name == "milk_plan_mutate":
         return _compact_milk_plan_mutate_output(safe)
+    if tool_name == "milk_calendar_mutate":
+        return _compact_milk_calendar_mutate_output(safe)
     if tool_name == "pregnancy_diary_manage":
         return _compact_pregnancy_diary_output(safe, result)
     if tool_name == "birth_journey_intake_manage":
@@ -2673,8 +2671,7 @@ def _milk_single_question_final_response_instruction(
         "但必须只追问下面这一项。"
         "不要说“最后一个”“最后再问”“只差一个”“再确认最后一个”；"
         "不要同时追问其它缺失项，不要输出奶量结论，不要给追奶、稳奶或减奶计划。"
-        "在输出最终回复前，必须先调用 ui_quick_replies_create 创建恰好 3 个快捷输入；"
-        "快捷输入优先使用工具结果里的 quick_replies，不要把快捷输入写进正文。"
+        "如果需要快捷输入，可以调用 ui_quick_replies_create；快捷输入优先使用工具结果里的 quick_replies，不要把快捷输入写进正文。"
         "不要输出 <tool_call>、</tool_call>、«tool_call» 或 «/tool_call»。"
         f"{progress_text}"
         f"{count_text}"
@@ -2866,6 +2863,13 @@ def _compact_milk_plan_card_output(safe: dict[str, Any], result: dict[str, Any])
     card_json_dict = card_json if isinstance(card_json, dict) else {}
     data = _tool_result_data(result)
     calendar_sync_prompt = _milk_plan_calendar_sync_prompt(data)
+    calendar_delta = data.get("calendar_delta") if isinstance(data.get("calendar_delta"), dict) else {}
+    strategy_required = _milk_plan_calendar_delta_requires_strategy(calendar_delta)
+    next_actions = (
+        ["追加到现有日程", "替换旧计划任务", "先不保存"]
+        if strategy_required
+        else ["同步到日历", "调整计划", "展开具体时间表"]
+    )
     plan_preview = _compact_milk_plan_preview_for_model(result)
     compact: dict[str, Any] = {
         "ok": safe.get("ok"),
@@ -2884,10 +2888,10 @@ def _compact_milk_plan_card_output(safe: dict[str, Any], result: dict[str, Any])
                 "confirmation_question": safe.get("confirmation_question"),
                 "calendar_sync_prompt": calendar_sync_prompt,
                 "milk_flow_decision": _plain_milk_flow_decision(safe.get("milk_flow_decision") if isinstance(safe.get("milk_flow_decision"), dict) else {}),
-                "next_actions": ["同步到日历", "调整计划", "展开具体时间表"],
+                "next_actions": next_actions,
             }
         ),
-        "next_actions": ["同步到日历", "调整计划", "展开具体时间表"],
+        "next_actions": next_actions,
         "milk_flow_decision": _plain_milk_flow_decision(safe.get("milk_flow_decision") if isinstance(safe.get("milk_flow_decision"), dict) else {}),
     }
     for key in ("requires_confirmation", "requires_medical_confirmation", "confirmation_question"):
@@ -2899,7 +2903,19 @@ def _compact_milk_plan_card_output(safe: dict[str, Any], result: dict[str, Any])
 
     if plan_preview:
         compact["plan_preview"] = plan_preview
+    if strategy_required:
+        compact["final_response_instruction"] = (
+            "奶量计划预览卡片已经展示，但因为明天起已经存在未来未完成计划任务，本轮还不能泛泛询问“是否同步”。"
+            "最终回复必须只请用户选择：追加到现有日程，或替换未来未完成计划任务；不要说已经保存或已经同步。"
+            "如果需要快捷输入，可以调用 ui_quick_replies_create 提供：追加到现有日程、替换旧计划任务、先不保存。"
+        )
     return compact
+
+
+def _milk_plan_calendar_delta_requires_strategy(calendar_delta: dict[str, Any]) -> bool:
+    if not isinstance(calendar_delta, dict):
+        return False
+    return bool(calendar_delta.get("calendar_write_strategy_required") or calendar_delta.get("requires_calendar_write_strategy"))
 
 
 def _milk_plan_facts_for_model(data: dict[str, Any]) -> dict[str, Any]:
@@ -2966,6 +2982,41 @@ def _compact_milk_plan_mutate_output(safe: dict[str, Any]) -> dict[str, Any]:
     return _compact_milk_plan_not_saved_output(safe)
 
 
+def _compact_milk_calendar_mutate_output(safe: dict[str, Any]) -> dict[str, Any]:
+    status = str(safe.get("status") or "").strip()
+    success_statuses = {
+        "calendar_adjustment_applied",
+        "calendar_adjustment_idempotent_replay",
+        "calendar_reschedule_applied",
+        "calendar_reschedule_idempotent_replay",
+        "calendar_range_shifted",
+        "calendar_range_deleted",
+        "calendar_range_patched",
+        "calendar_item_updated",
+        "calendar_item_deleted",
+    }
+    compact: dict[str, Any] = {
+        "ok": safe.get("result_ok", safe.get("ok")),
+        "tool_name": safe.get("tool_name"),
+        "status": status,
+        "summary": safe.get("summary"),
+        "plan_feedback": safe.get("plan_feedback"),
+        "calendar_dates": safe.get("calendar_dates"),
+        "error": safe.get("error"),
+    }
+    if status in success_statuses or safe.get("result_ok") is True:
+        compact["final_response_instruction"] = (
+            "日程调整已经成功同步。最终回复只简短说明已同步到计划页，可以提示用户到计划页查看；"
+            "不要再次确认，不要说同步失败。"
+        )
+    else:
+        compact["final_response_instruction"] = (
+            "这次日程调整没有成功写入。最终回复不要说已经同步；"
+            "简短说明未成功，并根据工具返回的原因提示用户重新调整或稍后再试。"
+        )
+    return _drop_empty(compact)
+
+
 def _compact_milk_plan_saved_output(safe: dict[str, Any]) -> dict[str, Any]:
     compact: dict[str, Any] = {
         "ok": safe.get("result_ok", safe.get("ok")),
@@ -3010,6 +3061,8 @@ def _compact_milk_plan_not_saved_output(safe: dict[str, Any]) -> dict[str, Any]:
     status = str(safe.get("status") or "").strip()
     summary = str(safe.get("summary") or "").strip()
     calendar_delta = safe.get("calendar_delta") if isinstance(safe.get("calendar_delta"), dict) else {}
+    next_actions: list[str] = []
+    final_response_instruction = ""
     if status == "calendar_write_strategy_required":
         strategy_options = calendar_delta.get("strategy_options") if isinstance(calendar_delta.get("strategy_options"), dict) else {}
         option_labels = [
@@ -3023,6 +3076,13 @@ def _compact_milk_plan_not_saved_output(safe: dict[str, Any]) -> dict[str, Any]:
             "可选方式": option_labels or ["追加到现有日程", "替换未来未完成计划任务"],
             "现有未来计划任务数": calendar_delta.get("existing_future_plan_task_count"),
         }
+        next_actions = ["追加到现有日程", "替换旧计划任务", "先不保存"]
+        final_response_instruction = (
+            "这版奶量计划还没有保存。最终回复不要再次泛泛询问是否同步；"
+            "必须只询问用户选择追加到现有日程还是替换未来未完成计划任务。"
+            "如果需要快捷输入，可以调用 ui_quick_replies_create 提供：追加到现有日程、替换旧计划任务、先不保存。"
+            "不要说已经保存或已经同步。"
+        )
     else:
         user_context = {
             "当前状态": "这次奶量计划没有保存成功。",
@@ -3036,19 +3096,10 @@ def _compact_milk_plan_not_saved_output(safe: dict[str, Any]) -> dict[str, Any]:
             "calendar_delta": calendar_delta,
             "allowed_strategies": safe.get("allowed_strategies"),
             "user_context": user_context,
+            "next_actions": next_actions,
+            "final_response_instruction": final_response_instruction,
         }
     )
-
-
-def _compact_milk_write_confirmation_output(safe: dict[str, Any]) -> dict[str, Any]:
-    question = str(safe.get("confirmation_question") or safe.get("summary") or "确认执行这次保存吗？").strip()
-    return {
-        "ok": safe.get("result_ok", safe.get("ok")),
-        "tool_name": safe.get("tool_name"),
-        "status": safe.get("status"),
-        "requires_confirmation": True,
-        "confirmation_question": question,
-    }
 
 
 def _compact_milk_plan_missing_context_output(safe: dict[str, Any]) -> dict[str, Any]:
@@ -3501,11 +3552,14 @@ def _build_response_request(
     if options.get("enable_tools", True):
         tools = select_runtime_tools(inputs)
         disabled_tool_names = _disabled_tool_names_from_options(options)
+        disabled_tool_names.update(_milk_management_disabled_tool_names_from_state(options))
         if disabled_tool_names:
             tools = _remove_function_tools(tools, disabled_tool_names)
         required_tool = _forced_required_tool_from_options(options)
         if required_tool is None and _is_initial_user_request(input_items):
             required_tool = _required_birth_prep_tool(inputs) or _required_milk_management_tool(inputs, options)
+        for tool_name in _milk_management_contextual_tools_from_state(options):
+            tools = _promote_deferred_function_tool(tools, tool_name)
         if required_tool:
             tools = _promote_deferred_function_tool(tools, required_tool)
         allowed_tool_names = _allowed_tool_names_from_options(options)
@@ -3594,7 +3648,8 @@ def _tool_result_requires_quick_replies_window(result: dict[str, Any]) -> bool:
     tool_result = result.get("result") if isinstance(result.get("result"), dict) else {}
     status = str(tool_result.get("status") or "").strip()
     if tool_name == "milk_plan_preview_create":
-        return status == "plan_preview_ready" or isinstance(tool_result.get("card"), dict)
+        workflow_control = _workflow_control_from_tool_result(result)
+        return bool(workflow_control and _workflow_control_requires_user_turn(workflow_control))
     if status not in {
         "milk_analysis_intake_collecting",
         "milk_analysis_intake_needs_records",
@@ -3779,21 +3834,26 @@ def _tool_choice_with_milk_plan_contract(
 def _required_milk_management_tool(inputs: RuntimeInputs, options: BuildAgentRequestOptions) -> str | None:
     user_message = inputs.get("user_message")
     state = _milk_management_state_from_options(options)
-    if _pending_calendar_adjustment_ready_for_save(state) and _user_message_confirms_calendar_adjustment_save(user_message):
-        return "milk_calendar_mutate"
+    if _user_message_mentions_busy_calendar_adjustment(str(user_message or "").strip()):
+        return None
     intake = state.get("analysis_intake") if isinstance(state.get("analysis_intake"), dict) else {}
     if intake:
-        if _milk_analysis_intake_ready_for_save(intake) and _user_message_confirms_milk_plan_save(user_message):
-            return "milk_plan_mutate"
         if _milk_analysis_intake_has_missing_fields(intake):
             if _user_message_pauses_milk_intake_for_side_question(user_message, intake):
                 return None
             return "milk_analysis_intake_manage"
         stage = str(intake.get("stage") or "").strip()
         if stage == "ready_to_evaluate":
+            if not _milk_analysis_intake_complete(intake):
+                return "milk_analysis_intake_manage"
             return "milk_analysis_evaluate"
-        if stage == "analysis_ready" and _user_message_accepts_milk_plan_preview(user_message):
-            return "milk_plan_preview_create"
+        if _user_message_accepts_milk_plan_preview(user_message):
+            if not _milk_analysis_intake_complete(intake):
+                return "milk_analysis_intake_manage"
+            if not _milk_analysis_assessment_ready_for_plan_preview(intake):
+                return "milk_analysis_evaluate"
+            if stage == "analysis_ready":
+                return "milk_plan_preview_create"
     if _user_message_requests_milk_calendar_plan(user_message):
         return "milk_calendar_query"
     if not intake and _user_message_starts_milk_analysis_flow(user_message):
@@ -3820,6 +3880,34 @@ def _milk_management_state_from_options(options: BuildAgentRequestOptions) -> di
     return {}
 
 
+def _milk_management_disabled_tool_names_from_state(options: BuildAgentRequestOptions) -> set[str]:
+    state = _milk_management_state_from_options(options)
+    disabled: set[str] = set()
+    intake = state.get("analysis_intake") if isinstance(state.get("analysis_intake"), dict) else {}
+    if not intake:
+        return disabled
+    if not _milk_analysis_intake_complete(intake):
+        disabled.update({"milk_analysis_evaluate", "milk_plan_preview_create"})
+    elif not _milk_analysis_assessment_ready_for_plan_preview(intake):
+        disabled.add("milk_plan_preview_create")
+    return disabled
+
+
+def _milk_management_contextual_tools_from_state(options: BuildAgentRequestOptions) -> list[str]:
+    state = _milk_management_state_from_options(options)
+    write_tool = _milk_management_contextual_write_tool_from_state(state)
+    return [write_tool] if write_tool else []
+
+
+def _milk_management_contextual_write_tool_from_state(state: dict[str, Any]) -> str:
+    if _pending_calendar_adjustment_ready_for_save(state):
+        return "milk_calendar_mutate"
+    intake = state.get("analysis_intake") if isinstance(state.get("analysis_intake"), dict) else {}
+    if intake and _milk_analysis_intake_ready_for_save(intake):
+        return "milk_plan_mutate"
+    return ""
+
+
 def _pending_calendar_adjustment_ready_for_save(state: dict[str, Any]) -> bool:
     pending = state.get("pending_calendar_adjustment") if isinstance(state.get("pending_calendar_adjustment"), dict) else {}
     if not pending:
@@ -3829,14 +3917,17 @@ def _pending_calendar_adjustment_ready_for_save(state: dict[str, Any]) -> bool:
     return operation in {"apply_adjustment", "apply_reschedule"} and bool(proposal)
 
 
-def _user_message_confirms_calendar_adjustment_save(message: Any) -> bool:
-    text = str(message or "").strip()
-    if not text:
-        return False
-    negative = ("不要", "不用", "先不", "暂不", "取消", "不保存", "不同步", "再改", "先别")
-    if any(token in text for token in negative):
-        return False
-    return any(token in text for token in ("保存", "确认", "同步", "应用", "执行", "好的", "可以", "行", "就这样", "按这个"))
+_MILK_CALENDAR_ADJUSTMENT_MILK_TERMS = ("奶量", "吸奶", "亲喂", "喂奶", "追奶", "稳奶", "减奶", "泌乳", "提醒", "日程", "计划")
+_MILK_CALENDAR_ADJUSTMENT_TERMS = ("调整", "改", "挪", "避开", "不方便", "冲突", "安排", "同步", "保存到日历")
+_MILK_CALENDAR_BUSY_TERMS = ("会议", "开会", "有会", "通勤", "外出", "上班", "出门", "产检", "旅行", "忙", "不方便")
+
+
+def _user_message_mentions_busy_calendar_adjustment(text: str) -> bool:
+    has_busy_term = any(term in text for term in _MILK_CALENDAR_BUSY_TERMS)
+    has_adjustment_intent = any(term in text for term in _MILK_CALENDAR_ADJUSTMENT_TERMS) or any(
+        term in text for term in _MILK_CALENDAR_ADJUSTMENT_MILK_TERMS
+    )
+    return has_busy_term and has_adjustment_intent
 
 
 def _user_message_should_resume_milk_analysis_intake(
@@ -3926,6 +4017,43 @@ def _milk_analysis_intake_has_missing_fields(intake: dict[str, Any]) -> bool:
     return str(intake.get("stage") or "").strip() == "intake_collecting"
 
 
+def _milk_analysis_intake_complete(intake: dict[str, Any]) -> bool:
+    if not intake:
+        return False
+    checklist = intake.get("checklist") if isinstance(intake.get("checklist"), list) else []
+    if checklist:
+        return not any(isinstance(item, dict) and item.get("status") != "collected" for item in checklist)
+    if str(intake.get("stage") or "").strip() == "intake_collecting":
+        return False
+    analysis_context = intake.get("analysis_context") if isinstance(intake.get("analysis_context"), dict) else {}
+    if _milk_analysis_context_has_missing_fields(analysis_context):
+        return False
+    return str(intake.get("stage") or "").strip() in {"ready_to_evaluate", "analysis_ready", "plan_preview"} or bool(analysis_context)
+
+
+def _milk_analysis_context_has_missing_fields(analysis_context: dict[str, Any]) -> bool:
+    if not analysis_context:
+        return False
+    explicit_missing = analysis_context.get("missing_fields")
+    if isinstance(explicit_missing, list) and any(str(item or "").strip() for item in explicit_missing):
+        return True
+    checklist = analysis_context.get("checklist") if isinstance(analysis_context.get("checklist"), list) else []
+    return any(isinstance(item, dict) and item.get("status") != "collected" for item in checklist)
+
+
+def _milk_analysis_assessment_ready_for_plan_preview(intake: dict[str, Any]) -> bool:
+    assessment = intake.get("assessment_result") if isinstance(intake.get("assessment_result"), dict) else {}
+    if not assessment:
+        return False
+    status = str(assessment.get("status") or "").strip()
+    if assessment.get("ok") is True and status == "milk_assessment_ready":
+        return True
+    data = assessment.get("data") if isinstance(assessment.get("data"), dict) else {}
+    if str(data.get("assessment_status") or "").strip():
+        return True
+    return isinstance(data.get("milk_flow_decision"), dict)
+
+
 def _user_message_pauses_milk_intake_for_side_question(message: Any, intake: dict[str, Any]) -> bool:
     text = str(message or "").strip()
     if not text:
@@ -3975,9 +4103,53 @@ def _user_message_directly_answers_milk_intake_field(text: str, current_field: s
             term in text for term in ("正常", "多", "少", "不少", "挺", "片", "次", "湿", "不确定")
         )
     if current_field == "infant_state_or_satisfaction":
-        return any(term in text for term in ("精神", "状态", "吃奶", "吃完", "安稳", "哭闹", "满足", "烦躁"))
+        return any(
+            term in text
+            for term in (
+                "精神",
+                "状态",
+                "吃奶",
+                "吃完",
+                "安稳",
+                "哭闹",
+                "满足",
+                "烦躁",
+                "说不准",
+                "不确定",
+                "不太确定",
+                "没太注意",
+                "没注意",
+                "不清楚",
+                "不好说",
+            )
+        )
     if current_field == "infant_growth_signal":
-        return any(term in text for term in ("体重", "增长", "称重", "长得", "没称"))
+        return any(
+            term in text
+            for term in (
+                "体重",
+                "增长",
+                "称重",
+                "长得",
+                "没称",
+                "看起来正常",
+                "看着正常",
+                "正常",
+                "还好",
+                "可以",
+                "稳定",
+                "没问题",
+                "不太确定",
+                "不确定",
+                "说不准",
+                "不清楚",
+                "不知道",
+                "没注意",
+                "没太注意",
+                "有点慢",
+                "偏慢",
+            )
+        )
     if current_field == "maternal_red_flags":
         return any(term in text for term in ("发热", "发烧", "寒战", "红肿", "硬块", "疼", "痛", "没有", "没", "无"))
     if current_field == "maternal_breast_comfort":
@@ -3991,6 +4163,8 @@ def _user_message_requests_milk_calendar_plan(message: Any) -> bool:
         return False
     normalized = text.lower()
     if _user_message_has_milk_plan_creation_intent(text):
+        return False
+    if _user_message_mentions_busy_calendar_adjustment(text):
         return False
     creation_terms = ("制定", "生成", "创建", "新建", "做一个", "做一版", "帮我做", "帮我安排")
     explicit_query_terms = ("当前", "现在", "正在", "采用", "执行", "已有", "原计划", "查看", "查", "看看", "什么", "哪个", "安排", "日程")
@@ -4100,16 +4274,6 @@ def _workflow_text_accepts_plan_for_request(text: str) -> bool:
     if normalized in {"好", "好的", "可以", "行", "继续", "确认", "ok", "okay", "yes"}:
         return True
     return any(token in normalized for token in ("生成计划", "制定计划", "做计划", "按这个", "先按", "milk plan"))
-
-
-def _user_message_confirms_milk_plan_save(message: Any) -> bool:
-    text = str(message or "").strip()
-    if not text:
-        return False
-    negative = ("不要", "不用", "先不", "暂不", "取消", "不保存", "不同步", "再改", "调整")
-    if any(token in text for token in negative):
-        return False
-    return any(token in text for token in ("保存", "同步", "确认", "按这版", "就这样", "执行", "写入", "好的", "可以"))
 
 
 def run_agent_turn(
@@ -5695,6 +5859,12 @@ def _sync_runtime_profile_from_tool_inputs(inputs: RuntimeInputs, tool_inputs: R
         inputs[_PROFILE_LOADED_FROM_DB_FLAG] = True
 
 
+def _tool_result_calendar_strategy_required(tool_result: dict[str, Any]) -> bool:
+    data = tool_result.get("data") if isinstance(tool_result.get("data"), dict) else {}
+    calendar_delta = data.get("calendar_delta") if isinstance(data.get("calendar_delta"), dict) else {}
+    return _milk_plan_calendar_delta_requires_strategy(calendar_delta)
+
+
 def _update_quick_reply_guidance(options: BuildAgentRequestOptions, result: dict[str, Any]) -> None:
     tool_name = str(result.get("tool_name") or "")
     if tool_name == "milk_plan_mutate":
@@ -5703,8 +5873,8 @@ def _update_quick_reply_guidance(options: BuildAgentRequestOptions, result: dict
         result_ok = tool_result.get("ok")
         if result_ok is True and status == "plan_applied":
             options["_quick_reply_guidance"] = PLAN_SAVED_QUICK_REPLY_GUIDANCE  # type: ignore[typeddict-unknown-key]
-        elif status == "needs_write_confirmation":
-            options["_quick_reply_guidance"] = PLAN_SAVE_CONFIRM_QUICK_REPLY_GUIDANCE  # type: ignore[typeddict-unknown-key]
+        elif status == "calendar_write_strategy_required":
+            options["_quick_reply_guidance"] = PLAN_WRITE_STRATEGY_QUICK_REPLY_GUIDANCE  # type: ignore[typeddict-unknown-key]
         else:
             options["_quick_reply_guidance"] = MILK_FLOW_QUICK_REPLY_GUIDANCE  # type: ignore[typeddict-unknown-key]
         return
@@ -5717,7 +5887,10 @@ def _update_quick_reply_guidance(options: BuildAgentRequestOptions, result: dict
         tool_result = result.get("result") if isinstance(result.get("result"), dict) else {}
         status = str(tool_result.get("status") or "").strip()
         if status == "plan_preview_ready" or isinstance(tool_result.get("card"), dict):
-            options["_quick_reply_guidance"] = PLAN_PREVIEW_QUICK_REPLY_GUIDANCE  # type: ignore[typeddict-unknown-key]
+            if _tool_result_calendar_strategy_required(tool_result):
+                options["_quick_reply_guidance"] = PLAN_WRITE_STRATEGY_QUICK_REPLY_GUIDANCE  # type: ignore[typeddict-unknown-key]
+            else:
+                options["_quick_reply_guidance"] = PLAN_PREVIEW_QUICK_REPLY_GUIDANCE  # type: ignore[typeddict-unknown-key]
         else:
             options.pop("_quick_reply_guidance", None)  # type: ignore[typeddict-item]
         return

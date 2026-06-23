@@ -493,6 +493,7 @@ def _invalidate_milk_management_state_after_write(state: ContextState) -> None:
     state.milk_management_state.pop("pending_plan_after_assessment", None)
     state.milk_management_state.pop("last_plan_preview", None)
     state.milk_management_state.pop("pending_calendar_adjustment", None)
+    state.milk_management_state.pop("pending_milk_plan_update", None)
 
 
 def _record_milk_analysis_fact_read_state(state: ContextState, tool_name: str, result: dict[str, Any]) -> None:
@@ -511,8 +512,8 @@ def _record_milk_analysis_intake_state(state: ContextState, result: dict[str, An
     intake_state = data.get("intake_state") if isinstance(data.get("intake_state"), dict) else {}
     if not intake_state:
         return
-    state.milk_management_state["analysis_intake"] = intake_state
-    for key in ("last_fact_read", "last_assessment", "pending_plan_after_assessment", "last_plan_preview"):
+    state.milk_management_state["analysis_intake"] = _normalize_milk_analysis_intake_state(intake_state)
+    for key in ("last_fact_read", "last_assessment", "pending_plan_after_assessment", "last_plan_preview", "pending_milk_plan_update"):
         state.milk_management_state.pop(key, None)
 
 
@@ -531,7 +532,7 @@ def _record_milk_analysis_evaluation_state(state: ContextState, result: dict[str
         merged["analysis_context"] = data["analysis_context"]
     if merged:
         merged["stage"] = "analysis_ready" if assessment else str(merged.get("stage") or "intake_collecting")
-        state.milk_management_state["analysis_intake"] = merged
+        state.milk_management_state["analysis_intake"] = _normalize_milk_analysis_intake_state(merged)
 
 
 def _record_milk_plan_preview_create_state(state: ContextState, result: dict[str, Any]) -> None:
@@ -561,7 +562,7 @@ def _record_milk_plan_preview_create_state(state: ContextState, result: dict[str
         merged["plan_preview"] = plan_preview
         merged["stage"] = "plan_preview"
     if merged:
-        state.milk_management_state["analysis_intake"] = merged
+        state.milk_management_state["analysis_intake"] = _normalize_milk_analysis_intake_state(merged)
     _record_milk_plan_preview_create_result_state(state, result)
 
 
@@ -591,6 +592,35 @@ def _record_milk_plan_preview_create_result_state(state: ContextState, result: d
         state.milk_management_state.pop("last_plan_preview", None)
 
 
+def _normalize_milk_analysis_intake_state(intake: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(intake, dict):
+        return {}
+    normalized = dict(intake)
+    context = dict(normalized.get("analysis_context") if isinstance(normalized.get("analysis_context"), dict) else {})
+    authoritative: dict[str, Any] = {}
+    for key in (
+        "records_snapshot",
+        "infant_signals",
+        "maternal_symptoms",
+        "checklist",
+        "plan_type",
+        "target_daily_ml",
+        "delta_ml",
+        "as_of_time",
+    ):
+        value = normalized.get(key)
+        if value not in (None, "", [], {}):
+            authoritative[key] = value
+    if authoritative:
+        context.update(authoritative)
+        normalized["analysis_context"] = {
+            key: value
+            for key, value in context.items()
+            if value not in (None, "", [], {})
+        }
+    return normalized
+
+
 def _record_milk_calendar_preview_state(state: ContextState, tool_name: str, result: dict[str, Any]) -> None:
     tool_result = result.get("result")
     if not isinstance(tool_result, dict) or tool_result.get("ok") is False:
@@ -604,11 +634,16 @@ def _record_milk_calendar_preview_state(state: ContextState, tool_name: str, res
         return
     operation = "apply_reschedule" if tool_name == "milk_calendar_reschedule_preview" else "apply_adjustment"
     target_date = str(data.get("target_date") or proposal.get("target_date") or "").strip()
+    target_dates = data.get("target_dates") if isinstance(data.get("target_dates"), list) else proposal.get("target_dates")
+    if not isinstance(target_dates, list):
+        target_dates = []
+    target_dates = [str(item).strip() for item in target_dates if str(item).strip()]
     pending = {
         "status": status,
         "preview_tool_name": tool_name,
         "operation": operation,
         "target_date": target_date,
+        "target_dates": target_dates,
         "proposal": proposal,
         "summary": data.get("summary") or tool_result.get("summary"),
         "idempotency_key": _calendar_adjustment_idempotency_key(proposal),
@@ -642,164 +677,184 @@ def _format_milk_management_context(state: ContextState) -> list[str]:
 
 
 def _format_pending_calendar_adjustment_context(pending: dict[str, Any]) -> list[str]:
-    lines: list[str] = ["- pending_calendar_adjustment_ready_for_save: true"]
-    operation = str(pending.get("operation") or "").strip()
-    if operation:
-        lines.append(f"- pending_calendar_adjustment_operation: {operation}")
-    target_date = str(pending.get("target_date") or "").strip()
-    if target_date:
-        lines.append(f"- pending_calendar_adjustment_target_date: {target_date}")
+    lines: list[str] = ["奶量日程调整正在进行中。"]
     summary = str(pending.get("summary") or "").strip()
     if summary:
-        lines.append(f"- pending_calendar_adjustment_summary: {summary}")
-    key = str(pending.get("idempotency_key") or "").strip()
-    if key:
-        lines.append(f"- pending_calendar_adjustment_idempotency_key: {key}")
+        lines.append(f"上一轮已经生成调整预览：{summary}")
+    target_text = _pending_calendar_target_text(pending)
+    if target_text:
+        lines.append(f"这份预览适用于：{target_text}。")
+    operation = str(pending.get("operation") or "").strip()
+    action_text = "应用上一轮日程重排预览" if operation == "apply_reschedule" else "应用上一轮日程变更预览"
     lines.append(
-        "- 如果用户本轮明确确认保存、同步、应用、执行或说好的/可以，调用 milk_calendar_mutate 应用上一轮日程调整；"
-        "不要只用文字说已经保存。工具参数缺 proposal 时后端会复用 pending_calendar_adjustment。"
+        "请根据用户这轮话决定下一步：如果用户只是想查看或理解调整结果，只解释这份预览，不要写入；"
+        f"如果用户明确表示好的、可以、确认、执行、同步或保存，就调用 milk_calendar_mutate {action_text}；"
+        "如果用户提出新的时间或修改要求，就重新生成预览或补问缺失信息。"
     )
+    lines.append(
+        "调用 milk_calendar_mutate 时不需要重新构造完整 proposal；如果参数里缺 proposal、target_date 或 idempotency_key，后端会复用上一轮缓存的预览。"
+    )
+    lines.append("在看到 milk_calendar_mutate 成功结果前，不要说已经同步或已经写入计划页。")
     return lines
 
 
+def _pending_calendar_target_text(pending: dict[str, Any]) -> str:
+    proposal = pending.get("proposal") if isinstance(pending.get("proposal"), dict) else {}
+    raw_dates = pending.get("target_dates")
+    if not isinstance(raw_dates, list):
+        raw_dates = proposal.get("target_dates")
+    dates = [str(item).strip() for item in raw_dates if str(item).strip()] if isinstance(raw_dates, list) else []
+    if dates:
+        return "、".join(dates[:5]) + (" 等日期" if len(dates) > 5 else "")
+    target_date = str(pending.get("target_date") or proposal.get("target_date") or "").strip()
+    if target_date:
+        return target_date
+    start_date = str(pending.get("start_date") or proposal.get("start_date") or "").strip()
+    end_date = str(pending.get("end_date") or proposal.get("end_date") or "").strip()
+    if start_date and end_date:
+        return f"{start_date} 到 {end_date}"
+    return ""
+
+
 def _format_milk_analysis_intake_context(intake: dict[str, Any]) -> list[str]:
-    lines: list[str] = []
+    lines: list[str] = ["milk_intake_turn:"]
     stage = str(intake.get("stage") or "").strip()
-    if stage:
-        lines.append(f"- milk_analysis_intake_stage: {stage}")
     checklist = intake.get("checklist") if isinstance(intake.get("checklist"), list) else []
     completed = [str(item.get("id")) for item in checklist if isinstance(item, dict) and item.get("status") == "collected"]
     missing = [str(item.get("id")) for item in checklist if isinstance(item, dict) and item.get("status") != "collected"]
-    if completed:
-        lines.append("- milk_analysis_intake_completed_fields: " + ", ".join(completed))
-    if missing:
-        lines.append("- milk_analysis_intake_missing_fields: " + ", ".join(missing))
     current_field = str(intake.get("current_field") or "").strip()
-    if current_field:
-        lines.append(f"- milk_analysis_intake_current_field: {current_field}")
     progress = intake.get("progress") if isinstance(intake.get("progress"), dict) else {}
+    next_question = str(intake.get("next_question") or "").strip()
+    plan_preview = intake.get("plan_preview") if isinstance(intake.get("plan_preview"), dict) else {}
+    mode = _milk_intake_turn_mode(stage=stage, missing=missing, plan_preview=plan_preview)
+
+    lines.append(f"- mode: {mode}")
+    if stage:
+        lines.append(f"- stage: {stage}")
     if progress:
         index = progress.get("index")
         total = progress.get("total")
         display = str(progress.get("display") or "").strip()
         if isinstance(index, int) and isinstance(total, int) and total > 0:
-            lines.append(f"- milk_analysis_intake_progress: {index}/{total}")
+            lines.append(f"- step: {index}/{total}")
         elif display:
-            lines.append(f"- milk_analysis_intake_progress: {display}")
-    next_question = str(intake.get("next_question") or "").strip()
+            lines.append(f"- step: {display}")
+    if completed:
+        lines.append("- collected_slots: " + ", ".join(completed))
+    if missing:
+        lines.append("- missing_slots: " + ", ".join(missing))
+    if current_field:
+        lines.append(f"- current_slot: {current_field}")
     if next_question:
-        lines.append(f"- milk_analysis_intake_next_question: {next_question}")
+        lines.append(f"- current_question: {next_question}")
     plan_type = str(intake.get("plan_type") or "").strip()
     if plan_type:
-        lines.append(f"- milk_analysis_intake_plan_type: {plan_type}")
+        lines.append(f"- plan_type: {plan_type}")
     if intake.get("target_daily_ml") is not None:
-        lines.append(f"- milk_analysis_intake_target_daily_ml: {intake.get('target_daily_ml')}")
+        lines.append(f"- target_daily_ml: {intake.get('target_daily_ml')}")
     if intake.get("delta_ml") is not None:
-        lines.append(f"- milk_analysis_intake_delta_ml: {intake.get('delta_ml')}")
-    analysis_context = intake.get("analysis_context") if isinstance(intake.get("analysis_context"), dict) else {}
-    lines.extend(_format_milk_analysis_context_records(analysis_context))
-    lines.extend(_format_milk_intake_guidance_context(intake))
+        lines.append(f"- delta_ml: {intake.get('delta_ml')}")
 
-    plan_preview = intake.get("plan_preview") if isinstance(intake.get("plan_preview"), dict) else {}
-    lines.extend(_format_milk_analysis_runtime_directive(intake, stage=stage, missing=missing, current_field=current_field, plan_preview=plan_preview))
+    analysis_context = intake.get("analysis_context") if isinstance(intake.get("analysis_context"), dict) else {}
+    lines.extend(_format_milk_intake_turn_facts(analysis_context))
+    lines.extend(_format_milk_intake_turn_guidance(intake))
+
     if str(plan_preview.get("status") or "").strip() == "plan_preview_ready":
-        lines.append("- milk_plan_preview_ready_for_save: true")
-        key = str(plan_preview.get("idempotency_key") or "").strip()
-        if key:
-            lines.append(f"- milk_plan_preview_idempotency_key: {key}")
         strategy = _last_plan_preview_calendar_strategy(plan_preview)
         if strategy:
-            lines.append(f"- milk_plan_preview_calendar_write_strategy: {strategy}")
-        lines.append("- 如果用户本轮明确确认保存、同步、写入或按这版执行，调用 milk_plan_mutate 创建计划；不要只用文字说已经保存。")
+            lines.append(f"奶量计划草稿已经准备好，用户已选择写入方式：{_milk_calendar_strategy_label(strategy)}。")
+            lines.append("如果用户确认保存、同步或按这版执行，就调用 milk_plan_mutate；成功前不要说已经同步。")
+        elif _last_plan_preview_requires_calendar_strategy(plan_preview):
+            lines.append(
+                "奶量计划草稿已经准备好，但保存前需要用户选择写入方式：追加到现有日程，或替换未来未完成计划任务。"
+                "用户选择后调用 milk_plan_mutate，并传对应的 calendar_write_strategy。"
+            )
+        else:
+            lines.append(
+                "奶量计划草稿已经准备好。用户只是查看或调整时继续解释/修改；"
+                "用户确认保存、同步或按这版执行时调用 milk_plan_mutate，成功前不要说已经同步。"
+            )
     elif missing:
-        lines.append("- milk_analysis_required_tool: milk_analysis_intake_manage")
-        lines.append("- 用户本轮若是在回答上一轮奶量分析追问，必须调用 milk_analysis_intake_manage 继续采集；不要直接分析或生成计划。")
-        if next_question:
-            lines.append("- milk_analysis_question_policy: 用户可见回复只追问 milk_analysis_intake_next_question 这一项；不要说最后一个、只差一个，也不要同时追问其它 missing_fields。")
-            lines.append("- milk_analysis_side_question_policy: 如果用户本轮不是在回答当前追问，而是在问奶量分析主流程外的问题，先基于已知记录和字段分析逻辑简短回答；回复结尾必须逐字询问：我们要继续刚才的奶量分析流程吗？")
+        lines.append("- required_next_tool: milk_analysis_intake_manage")
+        lines.append("- instruction: 如果用户在回答 current_question，先调用 milk_analysis_intake_manage 记录该字段；用户可见回复只追问 current_question 这一项。")
+        lines.append("- side_question_instruction: 如果用户问主流程外问题，先简短回答，回复结尾必须逐字询问：我们要继续刚才的奶量分析流程吗？")
     elif stage == "ready_to_evaluate":
-        lines.append("- milk_analysis_required_tool: milk_analysis_evaluate")
-        lines.append("- 信息采集已经完成；下一步必须直接调用 milk_analysis_evaluate，不要先向用户输出分析结论或计划建议。")
+        lines.append("- required_next_tool: milk_analysis_evaluate")
+        lines.append("- instruction: 信息采集完成；先调用 milk_analysis_evaluate，再输出分析结论或计划建议。")
     elif stage == "analysis_ready":
-        lines.append("- milk_analysis_result_available: true")
         assessment = intake.get("assessment_result") if isinstance(intake.get("assessment_result"), dict) else {}
         assessment_data = assessment.get("data") if isinstance(assessment.get("data"), dict) else {}
         current_daily_ml = _milk_context_current_daily_ml(assessment_data)
         if current_daily_ml is not None:
-            lines.append(f"- milk_analysis_current_daily_ml: {_milk_context_ml_text(current_daily_ml)}")
-        lines.append("- 奶量分析信息采集已结束；不要再调用 milk_analysis_intake_manage 追问已完成字段，也不要使用“重新追问/不重新追问”这类流程控制话术。")
-        lines.append("- 如果用户本轮用“好/好的/可以/继续/确认”等承接上一轮是否生成计划的问题，或明确要求生成/制定/做奶量计划，调用 milk_plan_preview_create；不要把普通“怎么调/怎么看”当作已经同意制定计划，也不要询问工具已读取的 7 天记录或近期节奏。")
+            lines.append(f"- current_daily_ml: {_milk_context_ml_text(current_daily_ml)}")
+        lines.append("- required_next_tool_when_user_accepts: milk_plan_preview_create")
+        lines.append("- instruction: 采集和评估已完成；用户确认生成/制定奶量计划时调用 milk_plan_preview_create，不要回头追问已完成字段。")
     elif stage == "plan_preview":
-        lines.append("- 奶量计划预览已生成但尚未保存；保存前必须等待用户明确确认。")
+        lines.append("已有计划草稿，正在等待用户决定是否保存、调整或暂不处理。")
+        lines.append("用户确认保存、同步或按这版执行时，调用 milk_plan_mutate；用户想调整时，先按用户新要求修改草稿或重新生成预览。")
     return lines
 
 
-def _format_milk_analysis_runtime_directive(
-    intake: dict[str, Any],
-    *,
-    stage: str,
-    missing: list[str],
-    current_field: str,
-    plan_preview: dict[str, Any],
-) -> list[str]:
+def _milk_intake_turn_mode(*, stage: str, missing: list[str], plan_preview: dict[str, Any]) -> str:
     if str(plan_preview.get("status") or "").strip() == "plan_preview_ready":
-        return [
-            "- milk_analysis_runtime_directive: wait_for_plan_save_confirmation",
-            "- milk_analysis_runtime_contract: 本轮只在用户明确确认保存、同步、写入或按这版执行时调用 milk_plan_mutate；否则围绕计划草稿回答或调整。",
-        ]
+        if _last_plan_preview_requires_calendar_strategy(plan_preview):
+            return "wait_for_plan_calendar_write_strategy"
+        return "wait_for_plan_save_confirmation"
     if missing:
-        field = current_field or missing[0]
-        return [
-            "- milk_analysis_runtime_directive: collect_current_field",
-            f"- milk_analysis_runtime_current_field: {field}",
-            "- milk_analysis_runtime_required_tool: milk_analysis_intake_manage",
-            "- milk_analysis_runtime_contract: 用户若在回答当前追问，先调用 milk_analysis_intake_manage 写入本轮答案；不要跳到评估或生成计划。",
-        ]
+        return "collect_slot"
     if stage == "ready_to_evaluate":
-        return [
-            "- milk_analysis_runtime_directive: evaluate_after_intake_complete",
-            "- milk_analysis_runtime_required_tool: milk_analysis_evaluate",
-            "- milk_analysis_runtime_contract: 信息采集已完成，本轮必须先评估；不要先输出计划草稿。",
-        ]
+        return "evaluate_after_intake_complete"
     if stage == "analysis_ready":
-        return [
-            "- milk_analysis_runtime_directive: offer_or_create_plan_preview",
-            "- milk_analysis_runtime_required_tool_when_user_accepts: milk_plan_preview_create",
-            "- milk_analysis_runtime_contract: 用户本轮确认生成/制定/做奶量计划时，调用 milk_plan_preview_create；不要回头追问已完成字段。",
-        ]
+        return "offer_or_create_plan_preview"
     if stage == "plan_preview":
-        return [
-            "- milk_analysis_runtime_directive: wait_for_plan_save_confirmation",
-            "- milk_analysis_runtime_contract: 已有计划草稿，保存前等待用户明确确认。",
-        ]
-    return []
+        return "wait_for_plan_save_confirmation"
+    return stage or "idle"
 
 
-def _format_milk_intake_guidance_context(intake: dict[str, Any]) -> list[str]:
+def _format_milk_intake_turn_facts(context: dict[str, Any]) -> list[str]:
+    records = context.get("records_snapshot") if isinstance(context.get("records_snapshot"), dict) else {}
+    source = context.get("source_records") if isinstance(context.get("source_records"), dict) else {}
+    counts = records.get("record_counts") if isinstance(records.get("record_counts"), dict) else {}
+    daily_rollups = source.get("daily_rollups") if isinstance(source.get("daily_rollups"), list) else records.get("daily_rollups")
+    raw_records = source.get("raw_records") if isinstance(source.get("raw_records"), dict) else records.get("raw_records")
+    parts: list[str] = []
+    status = str(records.get("status") or "").strip()
+    if status:
+        parts.append(f"status={status}")
+    if records.get("valid_days") is not None:
+        parts.append(f"valid_days={records.get('valid_days')}")
+    count_parts: list[str] = []
+    for key in ("pumping", "feeding", "calendar"):
+        value = counts.get(key) if isinstance(counts, dict) else None
+        if isinstance(value, (int, float)):
+            count_parts.append(f"{key}={int(value)}")
+    if count_parts:
+        parts.append("counts(" + "; ".join(count_parts) + ")")
+    if isinstance(daily_rollups, list) and daily_rollups:
+        parts.append(f"daily_rollups={len(daily_rollups)}d")
+    if isinstance(raw_records, dict) and raw_records:
+        parts.append("raw_records_available=true")
+    return ["- source_records: " + "; ".join(parts)] if parts else []
+
+
+def _format_milk_intake_turn_guidance(intake: dict[str, Any]) -> list[str]:
     lines: list[str] = []
-    workflow_control = intake.get("workflow_control") if isinstance(intake.get("workflow_control"), dict) else {}
-    if workflow_control:
-        action = str(workflow_control.get("allowed_next_action") or "").strip()
-        if action:
-            lines.append(f"- milk_analysis_allowed_next_action: {action}")
-        if workflow_control.get("awaiting_user_input") is True:
-            lines.append("- milk_analysis_awaiting_user_input: true")
     field_guidance = intake.get("field_guidance") if isinstance(intake.get("field_guidance"), dict) else {}
     if field_guidance:
         why = str(field_guidance.get("why_this_field_matters") or "").strip()
         if why:
-            lines.append(f"- milk_analysis_current_field_why: {why}")
+            lines.append(f"- current_slot_why: {why}")
         interpret = str(field_guidance.get("how_to_interpret_answers") or "").strip()
         if interpret:
-            lines.append(f"- milk_analysis_current_field_interpretation: {interpret}")
+            lines.append(f"- current_slot_answer_logic: {interpret}")
         do_not_infer = field_guidance.get("do_not_infer") if isinstance(field_guidance.get("do_not_infer"), list) else []
         cleaned = [str(item).strip() for item in do_not_infer if str(item).strip()]
         if cleaned:
-            lines.append("- milk_analysis_current_field_do_not_infer: " + "；".join(cleaned[:3]))
+            lines.append("- current_slot_do_not_infer: " + "；".join(cleaned[:2]))
     joint = intake.get("joint_reasoning_guidance") if isinstance(intake.get("joint_reasoning_guidance"), list) else []
     cleaned_joint = [str(item).strip() for item in joint if str(item).strip()]
     if cleaned_joint:
-        lines.append("- milk_analysis_joint_reasoning_guidance: " + "；".join(cleaned_joint[:4]))
+        lines.append("- answer_support: " + "；".join(cleaned_joint[:2]))
     return lines
 
 
@@ -932,16 +987,24 @@ def _format_last_milk_plan_preview_context(last_plan_preview: dict[str, Any]) ->
         )
     elif status == "plan_preview_ready" and draft:
         strategy = _last_plan_preview_calendar_strategy(last_plan_preview)
-        lines.append("- last_plan_preview_ready_for_save: true")
-        lines.append(
-            "- 如果用户本轮明确确认同步、保存、写入日历或按这版计划执行，调用 milk_plan_mutate 创建计划；"
-            "不要只用文字说已经同步。"
-        )
+        lines.append("已有一版奶量计划草稿等待用户决定是否保存到计划页。")
         if strategy:
-            lines.append(f"- last_plan_preview_calendar_write_strategy: {strategy}")
-        key = str(last_plan_preview.get("idempotency_key") or "").strip()
-        if key:
-            lines.append(f"- last_plan_preview_idempotency_key: {key}")
+            lines.append(f"用户已经选择写入方式：{_milk_calendar_strategy_label(strategy)}。")
+            lines.append(
+                "如果用户确认保存、同步、写入日历或按这版执行，就调用 milk_plan_mutate 创建计划；"
+                "在看到 milk_plan_mutate 成功结果前，不要说已经同步。"
+            )
+        elif _last_plan_preview_requires_calendar_strategy(last_plan_preview):
+            lines.append(
+                "保存前需要用户先选择写入方式：追加到现有日程，或替换未来未完成计划任务。"
+                "用户选择后调用 milk_plan_mutate，并传对应的 calendar_write_strategy；不要再次只问是否同步。"
+            )
+        else:
+            lines.append(
+                "如果用户只是询问计划内容或想调整，就回答或调整草稿，不要写入；"
+                "如果用户确认保存、同步、写入日历或按这版执行，就调用 milk_plan_mutate 创建计划。"
+            )
+            lines.append("在看到 milk_plan_mutate 成功结果前，不要说已经同步。")
     return lines
 
 
@@ -955,11 +1018,23 @@ def _milk_plan_preview_idempotency_key(draft: dict[str, Any]) -> str:
 
 def _last_plan_preview_calendar_strategy(last_plan_preview: dict[str, Any]) -> str:
     calendar_delta = last_plan_preview.get("calendar_delta") if isinstance(last_plan_preview.get("calendar_delta"), dict) else {}
-    required = bool(calendar_delta.get("calendar_write_strategy_required") or calendar_delta.get("requires_calendar_write_strategy"))
-    if required:
+    if _last_plan_preview_requires_calendar_strategy(last_plan_preview):
         return ""
     recommended = str(calendar_delta.get("recommended_calendar_write_strategy") or "").strip()
     return recommended
+
+
+def _milk_calendar_strategy_label(strategy: str) -> str:
+    if strategy == "append":
+        return "追加到现有日程"
+    if strategy == "replace_future_plan_tasks":
+        return "替换未来未完成计划任务"
+    return strategy
+
+
+def _last_plan_preview_requires_calendar_strategy(last_plan_preview: dict[str, Any]) -> bool:
+    calendar_delta = last_plan_preview.get("calendar_delta") if isinstance(last_plan_preview.get("calendar_delta"), dict) else {}
+    return bool(calendar_delta.get("calendar_write_strategy_required") or calendar_delta.get("requires_calendar_write_strategy"))
 
 
 def _bool_context_value(value: Any) -> str:
