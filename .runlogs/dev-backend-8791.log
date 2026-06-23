@@ -1,0 +1,273 @@
+Seeded status demo data for demo_mama_increase_001 in /Users/lute/project/MomCozyWorktrees/worktree-1/MomCozyAgent/data/milk_management.db
+Reset non-status demo data for local startup: profile=1, birth_prep=1, plans=1, milk_plans=0, pregnancy_diary=0, uploads=0, device_runtime=0.
+Momcozy agent SSE service: http://127.0.0.1:8790/api/ag-ui
+INFO:     Started server process [12213]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8183 (Press CTRL+C to quit)
+Momcozy unified API: http://127.0.0.1:8791
+Momcozy App WebSocket: ws://127.0.0.1:8791/api/ag-ui-ws
+Momcozy chat SSE upstream: http://127.0.0.1:8790/api/ag-ui
+Web data admin: http://127.0.0.1:8183
+INFO:     Started server process [12213]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8791 (Press CTRL+C to quit)
+[LogDrivenSessionManager] 初始化完成 | json_dir=/Users/lute/project/MomCozyWorktrees/worktree-1/MomCozyAgent/data/milk_process/configs | log_dir=/Users/lute/project/MomCozyWorktrees/worktree-1/MomCozyAgent/logs/milk_process
+INFO:     127.0.0.1:61773 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61807 - "GET /v1/user/profile/query?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61808 - "GET /v1/user/profile/query?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61812 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61813 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61814 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61815 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61816 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61816 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61815 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61814 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61813 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61817 - "WebSocket /api/ag-ui-ws?token=app-test" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:61813 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61814 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61815 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61816 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61812 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61819 - "POST /api/ag-ui HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61812 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61816 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61815 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61829 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61831 - "WebSocket /v1/realtime-voice-session?token=app-test&user_id=demo_mama_increase_001" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     127.0.0.1:61829 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61834 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61829 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     connection closed
+INFO:     127.0.0.1:61829 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61834 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61834 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61829 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61836 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61836 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61829 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61834 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61838 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61837 - "WebSocket /api/ag-ui-ws?token=app-test" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:61838 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61834 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61829 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61836 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61838 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61840 - "POST /api/ag-ui HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61838 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61836 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61829 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61839 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61846 - "WebSocket /v1/realtime-voice-session?token=app-test&user_id=demo_mama_increase_001" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     127.0.0.1:61839 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61848 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61839 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     connection closed
+INFO:     127.0.0.1:61849 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61859 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61849 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61860 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61861 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61861 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61860 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61849 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61861 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61862 - "WebSocket /api/ag-ui-ws?token=app-test" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:61861 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61849 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61860 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61863 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61861 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61865 - "POST /api/ag-ui HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61861 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61863 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61860 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61872 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61874 - "WebSocket /v1/realtime-voice-session?token=app-test&user_id=demo_mama_increase_001" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:61872 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61876 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     connection closed
+INFO:     127.0.0.1:61876 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     connection closed
+INFO:     127.0.0.1:61886 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61887 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61888 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61889 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61890 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61890 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61889 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61888 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61887 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61891 - "WebSocket /api/ag-ui-ws?token=app-test" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:61887 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61888 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61889 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61890 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61886 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61893 - "POST /api/ag-ui HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61886 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61890 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61888 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61897 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61900 - "WebSocket /v1/realtime-voice-session?token=app-test&user_id=demo_mama_increase_001" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     127.0.0.1:61897 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61902 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61902 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     connection closed
+INFO:     127.0.0.1:61921 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61922 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61922 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61921 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61923 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61923 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61921 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61922 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61925 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61924 - "WebSocket /api/ag-ui-ws?token=app-test" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:61925 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61922 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61921 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61923 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61925 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61927 - "POST /api/ag-ui HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61925 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61923 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61921 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61937 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61939 - "WebSocket /v1/realtime-voice-session?token=app-test&user_id=demo_mama_increase_001" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     127.0.0.1:61937 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61943 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61943 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     connection closed
+INFO:     127.0.0.1:61958 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61959 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61959 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61958 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61960 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61960 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61958 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61959 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61962 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61961 - "WebSocket /api/ag-ui-ws?token=app-test" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:61962 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61959 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61958 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61960 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61962 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61965 - "POST /api/ag-ui HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61962 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61960 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61958 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61964 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61976 - "WebSocket /v1/realtime-voice-session?token=app-test&user_id=demo_mama_increase_001" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     127.0.0.1:61964 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61978 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61978 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     connection closed
+INFO:     127.0.0.1:61982 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61983 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61983 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61982 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61984 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61984 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61982 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61983 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61982 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61985 - "WebSocket /api/ag-ui-ws?token=app-test" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:61982 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61983 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61984 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61986 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61987 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61988 - "POST /api/ag-ui HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61987 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61986 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61984 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61994 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61996 - "WebSocket /v1/realtime-voice-session?token=app-test&user_id=demo_mama_increase_001" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     127.0.0.1:61994 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61999 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61999 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     connection closed
+INFO:     127.0.0.1:62002 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:62003 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:62003 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:62002 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:62004 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:62004 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:62002 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:62003 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:62005 - "WebSocket /api/ag-ui-ws?token=app-test" [accepted]
+INFO:     127.0.0.1:62006 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     connection open
+INFO:     127.0.0.1:62006 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:62003 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:62002 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:62004 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:62006 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:62008 - "POST /api/ag-ui HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62006 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:62004 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:62002 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:62007 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:62014 - "WebSocket /v1/realtime-voice-session?token=app-test&user_id=demo_mama_increase_001" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     127.0.0.1:62007 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:62016 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:62016 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
+INFO:     connection closed
+INFO:     127.0.0.1:62051 - "GET /v1/mom-baby/info/query?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62052 - "GET /v1/mom-baby/today/query?user_id=demo_mama_increase_001&timestamp=2026-06-23 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62053 - "GET /v1/user/profile/query?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62054 - "GET /v1/growth/query?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62055 - "GET /v1/growth/history?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62056 - "GET /v1/pump/info/get?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62058 - "GET /v1/feeding/query?user_id=demo_mama_increase_001&timestamp=2026-06-23 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62061 - "GET /v1/plan/list?user_id=demo_mama_increase_001&status=active HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62062 - "GET /v1/pregnancy-diary/today?user_id=demo_mama_increase_001&timestamp=2026-06-23 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62064 - "GET /v1/pregnancy-diary/list?user_id=demo_mama_increase_001&limit=12 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62547 - "GET /v1/mom-baby/info/query?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62549 - "GET /v1/mom-baby/today/query?user_id=demo_mama_increase_001&timestamp=2026-06-23 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62550 - "GET /v1/user/profile/query?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62551 - "GET /v1/growth/query?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62552 - "GET /v1/growth/history?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62553 - "GET /v1/pump/info/get?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62555 - "GET /v1/feeding/query?user_id=demo_mama_increase_001&timestamp=2026-06-23 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62558 - "GET /v1/plan/list?user_id=demo_mama_increase_001&status=active HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62559 - "GET /v1/pregnancy-diary/today?user_id=demo_mama_increase_001&timestamp=2026-06-23 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62561 - "GET /v1/pregnancy-diary/list?user_id=demo_mama_increase_001&limit=12 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62724 - "GET /v1/mom-baby/info/query?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62726 - "GET /v1/mom-baby/today/query?user_id=demo_mama_increase_001&timestamp=2026-06-23 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62727 - "GET /v1/user/profile/query?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62729 - "GET /v1/growth/query?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62730 - "GET /v1/growth/history?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62731 - "GET /v1/pump/info/get?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62733 - "GET /v1/feeding/query?user_id=demo_mama_increase_001&timestamp=2026-06-23 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62736 - "GET /v1/plan/list?user_id=demo_mama_increase_001&status=active HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62737 - "GET /v1/pregnancy-diary/today?user_id=demo_mama_increase_001&timestamp=2026-06-23 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62739 - "GET /v1/pregnancy-diary/list?user_id=demo_mama_increase_001&limit=12 HTTP/1.1" 200 OK

@@ -124,7 +124,13 @@ class RuntimeInputs(TypedDict):
     retrieved_records: NotRequired[list[Any]]
     retrieved_knowledge: NotRequired[list[Any]]
     hospital_bag_cart: NotRequired[dict[str, Any]]
+    service_domain: NotRequired[str]
+    trigger_source: NotRequired[str]
+    milk_context_mode: NotRequired[str]
+    milk_record_context_policy: NotRequired[dict[str, Any]]
     images: NotRequired[list[InputImage]]
+    previous_assistant_message: NotRequired[str]
+    _last_assistant_message: NotRequired[str]
 
 
 class AgentEvent(TypedDict, total=False):

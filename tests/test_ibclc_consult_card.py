@@ -6,8 +6,52 @@ from momcozy_agent.tool_handlers.ibclc import create_ibclc_consult_card
 
 
 class IbclcConsultCardTests(unittest.TestCase):
-    def test_default_card_includes_professional_context(self) -> None:
+    def test_blocks_card_without_explicit_user_confirmation(self) -> None:
         result = create_ibclc_consult_card({}, {"user_message": "", "locale": "zh-CN"})
+
+        self.assertEqual(result["tool_name"], "ibclc_consult_card_create")
+        self.assertEqual(result["status"], "ibclc_consult_blocked")
+        self.assertEqual(result["reason"], "missing_explicit_ibclc_request")
+        self.assertTrue(result["requires_user_confirmation"])
+        self.assertIn("IBCLC 在线咨询入口", result["confirmation_question"])
+        self.assertNotIn("card", result)
+
+    def test_blocks_short_ok_without_previous_ibclc_offer(self) -> None:
+        result = create_ibclc_consult_card({}, {"user_message": "ok", "locale": "zh-CN"})
+
+        self.assertEqual(result["status"], "ibclc_consult_blocked")
+        self.assertEqual(result["reason"], "short_confirmation_without_ibclc_offer")
+        self.assertNotIn("card", result)
+
+    def test_blocks_negative_ibclc_intent_even_when_keyword_is_present(self) -> None:
+        result = create_ibclc_consult_card({}, {"user_message": "先不用找 IBCLC", "locale": "zh-CN"})
+
+        self.assertEqual(result["status"], "ibclc_consult_blocked")
+        self.assertEqual(result["reason"], "missing_explicit_ibclc_request")
+        self.assertNotIn("card", result)
+
+    def test_blocks_plain_ibclc_mention_without_request_action(self) -> None:
+        result = create_ibclc_consult_card({}, {"user_message": "IBCLC 是什么？", "locale": "zh-CN"})
+
+        self.assertEqual(result["status"], "ibclc_consult_blocked")
+        self.assertEqual(result["reason"], "missing_explicit_ibclc_request")
+        self.assertNotIn("card", result)
+
+    def test_allows_short_ok_after_previous_ibclc_offer(self) -> None:
+        result = create_ibclc_consult_card(
+            {},
+            {
+                "user_message": "好的",
+                "locale": "zh-CN",
+                "previous_assistant_message": "这个情况更适合让 IBCLC 顾问接着看。需要我帮你推荐一位哺乳顾问吗？",
+            },
+        )
+
+        self.assertEqual(result["status"], "ibclc_consult_card_created")
+        self.assertEqual(result["card"]["card_type"], "ibclc_consult_card")
+
+    def test_default_card_includes_professional_context(self) -> None:
+        result = create_ibclc_consult_card({}, {"user_message": "我想找 IBCLC", "locale": "zh-CN"})
 
         self.assertEqual(result["tool_name"], "ibclc_consult_card_create")
         self.assertEqual(result["status"], "ibclc_consult_card_created")
@@ -44,7 +88,7 @@ class IbclcConsultCardTests(unittest.TestCase):
     def test_custom_bio_removes_repeated_certification_prefix(self) -> None:
         result = create_ibclc_consult_card(
             {"consultant_bio": "国际认证泌乳顾问，专注亲喂和堵奶支持。"},
-            {"user_message": "", "locale": "zh-CN"},
+            {"user_message": "打开 IBCLC 咨询入口", "locale": "zh-CN"},
         )
 
         self.assertEqual(result["card"]["consultant"]["bio"], "专注亲喂和堵奶支持。")
@@ -67,7 +111,7 @@ class IbclcConsultCardTests(unittest.TestCase):
                 "issue_summary": "乳头疼，宝宝总是吸不住",
                 "recommendation_topic": "含乳评估和亲喂姿势",
             },
-            {"user_message": "", "locale": "zh-CN"},
+            {"user_message": "找哺乳顾问", "locale": "zh-CN"},
         )
 
         reason = result["card"]["recommendation_reason"]

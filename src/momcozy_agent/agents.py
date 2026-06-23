@@ -787,6 +787,8 @@ def _tool_result_label(tool_name: str, result: dict[str, Any]) -> str:
         return "这版方案我不建议继续用"
     if status == "plan_preview_needs_medical_confirmation":
         return "我需要先确认一下医疗边界～"
+    if tool_name == "ibclc_consult_card_create" and status == "ibclc_consult_blocked":
+        return "还需要你确认 IBCLC 咨询入口"
     if result.get("requires_confirmation") is True:
         return "我已经准备好预览～"
     if tool_name in {"tool_search", "tool_search_call"}:
@@ -1527,7 +1529,7 @@ def _form_artifact_final_response_instruction(tool_name: str) -> str:
             "孕期计划基础信息表已经展示。最终回复只输出下面两段中文，保留空行，"
             "不要改写、扩写，不要在聊天里重复表单字段，也不要说计划已经生成：\n\n"
             "好，我先把孕周与基本情况表打开了。\n\n"
-            "为了后面能更贴合你的情况，我想先和你一起把关键信息理一下；你简单填一下知道的部分，不确定的地方选“不确定/暂不说”就好。"
+            "为了后面能更贴合你的情况，我想先和你一起把关键信息理一下；你简单填一下知道的部分，不确定的地方选表单里的兜底选项就好。"
         )
     if tool_name == "birth_plan_form_create":
         return (
@@ -1566,6 +1568,18 @@ def _compact_birth_journey_intake_output(safe: dict[str, Any], raw_result: dict[
         "assistant_instruction": safe.get("assistant_instruction") or data.get("assistant_instruction"),
         "completed_groups": data.get("completed_groups"),
     }
+    for key in ("initial_analysis", "checkup_report_strategy", "personalization_tags", "personalized_followup"):
+        value = data.get(key)
+        if value not in (None, "", []):
+            compact[key] = value
+    upload_panel = data.get("upload_panel")
+    if isinstance(upload_panel, dict):
+        compact["upload_panel"] = {
+            "title": upload_panel.get("title"),
+            "description": upload_panel.get("description"),
+            "done_text": upload_panel.get("done_text"),
+            "skip_text": upload_panel.get("skip_text"),
+        }
     if auto_tool_result:
         auto_compact = model_tool_output(auto_tool_result)
         compact["auto_executed_tool"] = "birth_journey_plan_card_create"
@@ -1601,6 +1615,28 @@ def _compact_birth_journey_intake_output(safe: dict[str, Any], raw_result: dict[
         compact["final_response_instruction"] = (
             "用户报告了需要先处理的当前症状。最终回复先承接用户，再建议优先联系医生/医院确认；"
             "不要继续调用 birth_journey_plan_card_create。"
+        )
+    elif next_step in {"checkup_done_question", "checkup_records_upload"}:
+        compact["final_response_instruction"] = (
+            "最终回复先根据 initial_analysis.summary 和 initial_analysis.highlights 做 1-2 句基础信息承接，"
+            "然后只推进产检报告这一步；如果有 confirmation_question，就只问这个问题。"
+            "如果存在 upload_panel，说明产检报告在手边可以上传，报告不在手边也可以先跳过。"
+            "不要同时询问个性化风险、症状、生活方式或喂养信息，也不要生成孕期计划。"
+            "当前步骤的快捷回复已由应用侧准备好，不要再调用 ui_quick_replies_create。"
+        )
+    elif next_step == "personalized_followup":
+        compact["final_response_instruction"] = (
+            "最终回复最多两小段，先用 personalized_followup.observation 做一句自然提醒式承接，"
+            "再用 personalized_followup.meaning 简短解释为什么影响计划；然后只问 personalized_followup.followup_question 这一个具体问题。"
+            "可以把 personalized_followup.reply_guidance 压缩到同一段末尾，但不要逐字照读所有字段，不要输出成长说明。"
+            "这一轮只推进一个个性化追问，不要停在纯解读，必须落到这个具体追问。"
+            "个性化追问的目的不是确认用户知不知道怎么做，也不是问用户最想了解什么，而是收集会改变计划安排的事实。"
+            "不要改写成“医生有没有交代/安排/说明”这类问题，也不要要求用户必须回答医生说过什么。"
+            "不要使用“这个分类听起来可能会让人紧一下”或“年龄因素会让产检沟通更具体一点”这类突兀或抽象表达；"
+            "涉及高龄时，不要说“不代表一定有问题”，要关切地指出这是需要认真纳入计划的产科管理因素，简短说明潜在关注点后再收集具体事实。"
+            "不要把追问写成“目前最需要纳入计划的是哪类情况”，要直接问用户有没有正在复查、用药或被提醒的具体情况。"
+            "不要同时追问症状、生活方式或喂养信息，也不要生成孕期计划。"
+            "当前步骤的快捷回复已由应用侧准备好，不要再调用 ui_quick_replies_create。"
         )
     else:
         compact["final_response_instruction"] = (
@@ -3597,6 +3633,8 @@ def _required_birth_prep_tool(inputs: RuntimeInputs) -> str | None:
     message = str(inputs.get("user_message") or "")
     if "confirmed_form_data:" not in message:
         return None
+    if re.search(r"form_id\s*[:=]\s*[\"']?birth_journey_basic_info_intake[\"']?", message):
+        return "birth_journey_intake_manage"
     if not re.search(r"form_id\s*[:=]\s*[\"']?hospital_bag_intake[\"']?", message):
         return None
     return "hospital_bag_card_create"
@@ -4445,7 +4483,10 @@ def run_agent_loop(
                 ag_ui_status_message_id,
             )
             tool_inputs = _tool_inputs_for_call(inputs, options)
-            result = _execute_project_tool(tool_call["name"], tool_call["arguments"], tool_inputs)
+            if tool_name == QUICK_REPLIES_TOOL_NAME and _should_suppress_model_quick_replies_after_tool_results(executed_tool_results):
+                result = _suppressed_quick_replies_tool_result(tool_name)
+            else:
+                result = _execute_project_tool(tool_call["name"], tool_call["arguments"], tool_inputs)
             raise_if_cancelled()
             executed_tool_results.append(result)
             _sync_runtime_profile_from_tool_inputs(inputs, tool_inputs)
@@ -5846,6 +5887,8 @@ def _tool_inputs_for_call(inputs: RuntimeInputs, options: BuildAgentRequestOptio
         tool_inputs["_birth_prep_hospital_bag_slots"] = hospital_bag_slots(context_state)
         tool_inputs["_birth_journey_intake_state"] = birth_journey_intake_state(context_state)
         tool_inputs["_milk_management_state"] = dict(context_state.milk_management_state)
+        tool_inputs["previous_assistant_message"] = context_state.last_assistant_message
+        tool_inputs["_last_assistant_message"] = context_state.last_assistant_message
     return tool_inputs
 
 
@@ -5901,7 +5944,13 @@ def _update_quick_reply_guidance(options: BuildAgentRequestOptions, result: dict
     tool_result = result.get("result") if isinstance(result.get("result"), dict) else {}
     status = str(tool_result.get("status") or "").strip()
     next_step = str(tool_result.get("next_step") or "").strip()
-    guidance = birth_journey_intake_quick_reply_guidance(next_step) if status == "in_progress" else []
+    data = tool_result.get("data") if isinstance(tool_result.get("data"), dict) else {}
+    personalized_followup = data.get("personalized_followup") if isinstance(data.get("personalized_followup"), dict) else None
+    guidance = (
+        birth_journey_intake_quick_reply_guidance(next_step, personalized_followup=personalized_followup)
+        if status == "in_progress"
+        else []
+    )
     if guidance:
         options["_quick_reply_guidance"] = guidance  # type: ignore[typeddict-unknown-key]
     else:
@@ -5915,8 +5964,33 @@ def _birth_journey_intake_direct_quick_replies(result: dict[str, Any]) -> list[d
     if str(tool_result.get("status") or "").strip() != "in_progress":
         return None
     next_step = str(tool_result.get("next_step") or "").strip()
-    guidance = birth_journey_intake_quick_reply_guidance(next_step)
+    data = tool_result.get("data") if isinstance(tool_result.get("data"), dict) else {}
+    personalized_followup = data.get("personalized_followup") if isinstance(data.get("personalized_followup"), dict) else None
+    guidance = birth_journey_intake_quick_reply_guidance(next_step, personalized_followup=personalized_followup)
     return guidance or None
+
+
+def _should_suppress_model_quick_replies_after_tool_results(results: list[dict[str, Any]]) -> bool:
+    return any(_birth_journey_intake_suppresses_model_quick_replies(result) for result in results)
+
+
+def _birth_journey_intake_suppresses_model_quick_replies(result: dict[str, Any]) -> bool:
+    if str(result.get("tool_name") or "") != "birth_journey_intake_manage":
+        return False
+    if result.get("ok") is False:
+        return False
+    return _birth_journey_intake_direct_quick_replies(result) is None
+
+
+def _suppressed_quick_replies_tool_result(tool_name: str) -> dict[str, Any]:
+    return {
+        "ok": True,
+        "tool_name": tool_name,
+        "result": {
+            "status": "quick_replies_suppressed",
+            "side_effect_performed": False,
+        },
+    }
 
 
 def _birth_journey_auto_plan_arguments(result: dict[str, Any]) -> dict[str, Any] | None:

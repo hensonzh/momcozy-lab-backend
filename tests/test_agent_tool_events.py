@@ -190,7 +190,7 @@ class AgentToolEventTests(unittest.TestCase):
             {
                 "ok": True,
                 "tool_name": "birth_journey_intake_manage",
-                "result": {"status": "risk_question"},
+                "result": {"status": "personalized_followup"},
             },
         )
 
@@ -969,6 +969,32 @@ class AgentToolEventTests(unittest.TestCase):
         )
         top_level_functions = [tool["name"] for tool in request["tools"] if tool.get("type") == "function"]
         self.assertIn("hospital_bag_card_create", top_level_functions)
+
+    def test_birth_journey_basic_form_forces_intake_tool(self) -> None:
+        form_data = {"current_week": "20周", "fetus_count": "单胎", "age": "31"}
+        request = build_agent_request(
+            {
+                "user_message": (
+                    "我已确认孕期计划基础信息。\n"
+                    "form_id: birth_journey_basic_info_intake\n"
+                    "confirmed_form_data:\n"
+                    f"{json.dumps(form_data, ensure_ascii=False)}"
+                ),
+                "locale": "zh-CN",
+            },
+            {"context_state": ContextState(), "loaded_skill_ids": ["birth-prep"]},
+        )
+
+        self.assertEqual(
+            request["tool_choice"],
+            {
+                "type": "allowed_tools",
+                "mode": "required",
+                "tools": [{"type": "function", "name": "birth_journey_intake_manage"}],
+            },
+        )
+        top_level_functions = [tool["name"] for tool in request["tools"] if tool.get("type") == "function"]
+        self.assertIn("birth_journey_intake_manage", top_level_functions)
 
     def test_forced_milk_intake_does_not_repeat_after_tool_output(self) -> None:
         context_state = ContextState()
@@ -2801,6 +2827,31 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertEqual(inputs["user_message"], "孕32周")
         self.assertEqual(inputs["recent_user_messages"], ["我叫 Henson", "28 岁", "孕32周"])
 
+    def test_runtime_inputs_forward_background_milk_record_context_policy(self) -> None:
+        inputs = _runtime_inputs_from_ag_ui(
+            {
+                "messages": [{"role": "user", "content": "后台奶量分析"}],
+                "forwardedProps": {
+                    "user_id": "milk-background-inputs",
+                    "serviceDomain": "milk_management",
+                    "triggerSource": "background",
+                    "milkContextMode": "analysis",
+                    "milkRecordContextPolicy": {
+                        "include_raw_records": True,
+                        "raw_days": 7,
+                        "rollup_days": 7,
+                        "raw_limit": 160,
+                    },
+                },
+            }
+        )
+
+        self.assertEqual(inputs["service_domain"], "milk_management")
+        self.assertEqual(inputs["trigger_source"], "background")
+        self.assertEqual(inputs["milk_context_mode"], "analysis")
+        self.assertEqual(inputs["milk_record_context_policy"]["raw_days"], 7)
+        self.assertTrue(inputs["milk_record_context_policy"]["include_raw_records"])
+
     def test_chat_runtime_sessions_have_distinct_run_locks(self) -> None:
         runtime = ChatRuntime(object())
         first = runtime.get_session("thread-lock-a")
@@ -3656,8 +3707,18 @@ class AgentToolEventTests(unittest.TestCase):
                                 "name": "birth_journey_intake_manage",
                                 "arguments": json.dumps(
                                     {
-                                        "action": "submit_lifestyle_context",
-                                        "payload": json.dumps({"lifestyle_context": "最近睡眠不太好"}, ensure_ascii=False),
+                                        "action": "submit_basic_info",
+                                        "payload": json.dumps(
+                                            {
+                                                "nickname": "Henson",
+                                                "age": "36",
+                                                "current_week": "16周",
+                                                "fetus_count": "单胎",
+                                                "first_birth": "是",
+                                                "city_or_country": "深圳",
+                                            },
+                                            ensure_ascii=False,
+                                        ),
                                     },
                                     ensure_ascii=False,
                                 ),
@@ -3669,7 +3730,7 @@ class AgentToolEventTests(unittest.TestCase):
                         "output": [
                             {
                                 "type": "message",
-                                "content": [{"type": "output_text", "text": "最后再了解一下喂养准备。"}],
+                                "content": [{"type": "output_text", "text": "我先把会影响计划的健康和复查信息问清楚。"}],
                             }
                         ],
                     },
@@ -3678,10 +3739,9 @@ class AgentToolEventTests(unittest.TestCase):
             runtime = ChatRuntime(client, model="test-model")
             session = runtime.get_session("thread-birth-quick")
             session.loaded_skill_ids = ["birth-prep"]
-            session.context_state.birth_journey_intake = _birth_journey_lifestyle_state()
             stream = stream_ag_ui_events(
                 {"thread_id": "thread-birth-quick", "run_id": "run-birth-quick"},
-                {"user_message": "最近睡眠不太好", "locale": "zh-CN"},
+                {"user_message": "提交表单", "locale": "zh-CN"},
                 runtime,
             )
             events = [event async for event in stream]
@@ -3700,9 +3760,9 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertEqual(
             quick_event["replies"],
             [
-                {"text": "计划母乳喂养"},
-                {"text": "还不确定先跳过"},
-                {"text": "可能需要背奶"},
+                {"text": "血压/血糖"},
+                {"text": "甲状腺/用药"},
+                {"text": "暂无异常"},
             ],
         )
 
@@ -3771,14 +3831,8 @@ class AgentToolEventTests(unittest.TestCase):
                                 "name": "birth_journey_intake_manage",
                                 "arguments": json.dumps(
                                     {
-                                        "action": "submit_feeding_context",
-                                        "payload": json.dumps(
-                                            {
-                                                "feeding_ibclc_context": "计划母乳，可能需要背奶，产假 6 个月",
-                                                "feeding_intention": "母乳",
-                                            },
-                                            ensure_ascii=False,
-                                        ),
+                                        "action": "skip_checkup_records",
+                                        "payload": json.dumps({"checkup_status": "暂时没有产检记录"}, ensure_ascii=False),
                                     },
                                     ensure_ascii=False,
                                 ),
@@ -3799,10 +3853,10 @@ class AgentToolEventTests(unittest.TestCase):
             runtime = ChatRuntime(client, model="test-model")
             session = runtime.get_session("thread-birth-auto-plan")
             session.loaded_skill_ids = ["birth-prep"]
-            session.context_state.birth_journey_intake = _birth_journey_feeding_state()
+            session.context_state.birth_journey_intake = _birth_journey_ready_for_skip_checkup_state()
             stream = stream_ag_ui_events(
                 {"thread_id": "thread-birth-auto-plan", "run_id": "run-birth-auto-plan"},
-                {"user_message": "计划母乳，可能需要背奶，产假 6 个月", "locale": "zh-CN"},
+                {"user_message": "先跳过这步", "locale": "zh-CN"},
                 runtime,
             )
             events = [event async for event in stream]
@@ -3835,7 +3889,7 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertIn("不要再次调用 birth_journey_plan_card_create", model_output["final_response_instruction"])
         self.assertNotIn("下一步必须直接调用 birth_journey_plan_card_create", model_output["final_response_instruction"])
 
-    def test_birth_journey_intake_guides_quick_replies_when_model_emits_quick_first(self) -> None:
+    def test_birth_journey_ready_suppresses_model_emitted_quick_replies(self) -> None:
         async def collect_events() -> list[dict[str, object]]:
             client = _FakeStreamingClient(
                 [
@@ -3865,8 +3919,8 @@ class AgentToolEventTests(unittest.TestCase):
                                 "name": "birth_journey_intake_manage",
                                 "arguments": json.dumps(
                                     {
-                                        "action": "submit_lifestyle_context",
-                                        "payload": json.dumps({"lifestyle_context": "最近睡眠不太好"}, ensure_ascii=False),
+                                        "action": "skip_checkup_records",
+                                        "payload": json.dumps({"checkup_status": "暂时没有产检记录"}, ensure_ascii=False),
                                     },
                                     ensure_ascii=False,
                                 ),
@@ -3878,7 +3932,7 @@ class AgentToolEventTests(unittest.TestCase):
                         "output": [
                             {
                                 "type": "message",
-                                "content": [{"type": "output_text", "text": "最后再了解一下喂养准备。"}],
+                                "content": [{"type": "output_text", "text": "你的孕期计划已生成，可以在宝宝和我页面查看。"}],
                             }
                         ],
                     },
@@ -3887,25 +3941,20 @@ class AgentToolEventTests(unittest.TestCase):
             runtime = ChatRuntime(client, model="test-model")
             session = runtime.get_session("thread-birth-quick-parallel")
             session.loaded_skill_ids = ["birth-prep"]
-            session.context_state.birth_journey_intake = _birth_journey_lifestyle_state()
+            session.context_state.birth_journey_intake = _birth_journey_ready_for_skip_checkup_state()
             stream = stream_ag_ui_events(
                 {"thread_id": "thread-birth-quick-parallel", "run_id": "run-birth-quick-parallel"},
-                {"user_message": "最近睡眠不太好", "locale": "zh-CN"},
+                {"user_message": "先跳过这步", "locale": "zh-CN"},
                 runtime,
             )
             return [event async for event in stream]
 
         events = asyncio.run(collect_events())
-        quick_event = next(event for event in events if event.get("type") == "QUICK_REPLIES")
+        event_types = [str(event.get("type")) for event in events]
 
-        self.assertEqual(
-            quick_event["replies"],
-            [
-                {"text": "计划母乳喂养"},
-                {"text": "还不确定先跳过"},
-                {"text": "可能需要背奶"},
-            ],
-        )
+        self.assertIn("ARTIFACT_CREATED", event_types)
+        self.assertNotIn("QUICK_REPLIES", event_types)
+        self.assertNotIn("帮我准备待产包", json.dumps(events, ensure_ascii=False))
 
     def test_stream_forwards_text_deltas_during_tool_loop(self) -> None:
         async def collect_events() -> list[dict[str, object]]:
@@ -4354,35 +4403,20 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertNotIn("ui_quick_replies_create", text)
 
 
-def _birth_journey_lifestyle_state() -> dict[str, object]:
+def _birth_journey_ready_for_skip_checkup_state() -> dict[str, object]:
     return {
         "started": True,
         "basic_info": {
             "current_week": "30周",
             "age": "32",
             "fetus_count": "单胎",
+            "city_or_country": "深圳",
         },
         "checkup_records_uploaded": False,
         "checkup_status": "未上传产检记录",
-        "risk_factors": "没有",
-        "current_symptoms": "没有",
-        "next_step": "lifestyle_question",
-        "completed_groups": ["basic_info", "checkup_records", "risk_factors", "current_symptoms"],
+        "next_step": "checkup_records_upload",
+        "completed_groups": ["basic_info"],
     }
-
-
-def _birth_journey_feeding_state() -> dict[str, object]:
-    state = _birth_journey_lifestyle_state()
-    state["lifestyle_context"] = "睡眠一般，工作通勤有压力"
-    state["next_step"] = "feeding_question"
-    state["completed_groups"] = [
-        "basic_info",
-        "checkup_records",
-        "risk_factors",
-        "current_symptoms",
-        "lifestyle_context",
-    ]
-    return state
 
 
 class _FakeClient:

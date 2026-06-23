@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from ..types import RuntimeInputs
@@ -8,9 +9,20 @@ DEFAULT_CHAT_URL = "/ibclc-chat.html"
 DEFAULT_CONSULTANT_BIO = "拥有 8 年产后哺乳支持经验，核心擅长含乳评估、有效吸吮与母乳移出观察。可结合宝宝尿布、体重和吃奶表现判断摄入信号，并围绕亲喂姿势、乳头疼痛、堵奶/乳房不适、吸奶器使用和排乳计划给出个性化调整建议。"
 DEFAULT_RECOMMENDATION_TOPIC = "含乳、排乳、亲喂/吸奶效果和乳房不适"
 DEFAULT_SERVICE_LOCATION_NOTE = "她也恰好和你同城，后面有必要也可以上门服务。"
+_CONFIRMATION_QUESTION = "要我帮你打开 IBCLC 在线咨询入口吗？"
 
 
 def create_ibclc_consult_card(args: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
+    confirmation = _ibclc_consult_creation_confirmation(inputs)
+    if not confirmation["allowed"]:
+        return {
+            "tool_name": "ibclc_consult_card_create",
+            "status": "ibclc_consult_blocked",
+            "reason": confirmation["reason"],
+            "requires_user_confirmation": True,
+            "confirmation_question": _CONFIRMATION_QUESTION,
+        }
+
     consultant = {
         "name": _text(args.get("consultant_name"), "Emily Chen"),
         "credentials": _text(args.get("consultant_credentials"), "IBCLC 国际认证哺乳顾问"),
@@ -39,6 +51,144 @@ def create_ibclc_consult_card(args: dict[str, Any], inputs: RuntimeInputs) -> di
         "status": "ibclc_consult_card_created",
         "card": card,
     }
+
+
+def _ibclc_consult_creation_confirmation(inputs: RuntimeInputs) -> dict[str, Any]:
+    user_message = _normalize_confirmation_text(inputs.get("user_message"))
+    if _is_explicit_ibclc_request(user_message):
+        return {"allowed": True, "source": "explicit_user_request"}
+    if _is_short_affirmation(user_message):
+        previous_message = _normalize_confirmation_text(
+            inputs.get("previous_assistant_message") or inputs.get("_last_assistant_message")
+        )
+        if _previous_assistant_offered_ibclc(previous_message):
+            return {"allowed": True, "source": "confirmed_previous_offer"}
+        return {"allowed": False, "reason": "short_confirmation_without_ibclc_offer"}
+    return {"allowed": False, "reason": "missing_explicit_ibclc_request"}
+
+
+def _normalize_confirmation_text(value: Any) -> str:
+    text = _text(value).lower()
+    return re.sub(r"\s+", "", text)
+
+
+def _is_explicit_ibclc_request(text: str) -> bool:
+    if not text:
+        return False
+    if _has_negative_ibclc_intent(text):
+        return False
+    has_ibclc_subject = "ibclc" in text or "哺乳顾问" in text or "泌乳顾问" in text
+    has_request_action = any(
+        token in text
+        for token in (
+            "找",
+            "推荐",
+            "打开",
+            "接通",
+            "咨询",
+            "需要",
+            "想要",
+            "我要",
+            "帮我",
+            "给我",
+            "安排",
+            "入口",
+            "同意",
+        )
+    )
+    if has_ibclc_subject and has_request_action:
+        return True
+    if ("真人哺乳咨询" in text or "人工哺乳咨询" in text) and has_request_action:
+        return True
+    if "打开咨询入口" in text or "打开在线咨询" in text or "启动咨询" in text:
+        return True
+    if "同意推荐" in text or "同意你推荐" in text:
+        return True
+    if ("找" in text or "推荐" in text or "接通" in text or "打开" in text) and "咨询入口" in text:
+        return True
+    return False
+
+
+def _has_negative_ibclc_intent(text: str) -> bool:
+    return any(
+        token in text
+        for token in (
+            "不要ibclc",
+            "不用ibclc",
+            "不需要ibclc",
+            "不找ibclc",
+            "不用找ibclc",
+            "先不找ibclc",
+            "先不用找ibclc",
+            "暂时不找ibclc",
+            "暂时不用找ibclc",
+            "不要哺乳顾问",
+            "不用哺乳顾问",
+            "不需要哺乳顾问",
+            "不找哺乳顾问",
+            "不用找哺乳顾问",
+            "不要泌乳顾问",
+            "不用泌乳顾问",
+            "不需要泌乳顾问",
+            "不找泌乳顾问",
+            "不用找泌乳顾问",
+            "不要打开咨询入口",
+            "不用打开咨询入口",
+            "不打开咨询入口",
+            "别打开咨询入口",
+            "先不打开咨询入口",
+            "暂时不打开咨询入口",
+        )
+    )
+
+
+def _is_short_affirmation(text: str) -> bool:
+    if not text:
+        return False
+    normalized = re.sub(r"[。！？!?,，、~～….\-_\s]", "", text)
+    return normalized in {
+        "ok",
+        "okay",
+        "好",
+        "好的",
+        "好啊",
+        "可以",
+        "行",
+        "可以的",
+        "要",
+        "需要",
+        "同意",
+        "打开吧",
+        "帮我打开",
+        "推荐一下",
+        "开始吧",
+        "嗯",
+        "嗯嗯",
+    }
+
+
+def _previous_assistant_offered_ibclc(text: str) -> bool:
+    if not text:
+        return False
+    has_ibclc_subject = "ibclc" in text or "哺乳顾问" in text or "泌乳顾问" in text
+    if not has_ibclc_subject:
+        return False
+    has_offer = any(
+        token in text
+        for token in (
+            "需要我帮你推荐",
+            "帮你推荐",
+            "要我帮你",
+            "我可以帮你",
+            "是否需要",
+            "要不要",
+            "可以打开",
+            "打开咨询入口",
+            "在线咨询入口",
+            "咨询入口",
+        )
+    )
+    return has_offer
 
 
 def _text(value: Any, fallback: str = "") -> str:

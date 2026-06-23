@@ -44,6 +44,11 @@ class BirthPrepPromptRuleTests(unittest.TestCase):
         self.assertIn("不要生成“帮我准备待产包”“看看本周重点”“整理分娩沟通单”等跨服务入口", skill)
         self.assertIn("不要把它们变成主流程之外的额外追问节点", skill)
         self.assertIn("不要把模型基于年龄、IVF、双胎、产检信息或用户措辞做出的推断", skill)
+        self.assertIn("先用 `observation` 做自然提醒式承接", skill)
+        self.assertIn("只问 `followup_question` 这一个具体问题", skill)
+        self.assertIn("不要停在纯解读", skill)
+        self.assertIn("收集会改变计划安排的事实", skill)
+        self.assertIn("不是问用户知不知道该做什么", skill)
         self.assertNotIn("entry_concern_question", skill)
         self.assertNotIn("references/birth-journey-plan.md", skill)
         self.assertIn("当前孕周、是否 IVF（体外受精）", skill)
@@ -517,6 +522,11 @@ class BirthPrepPromptRuleTests(unittest.TestCase):
         self.assertIn("不要为精确到天而追问", description)
         self.assertIn("不会作为单独追问节点阻塞主流程", description)
         self.assertIn("submit_entry_concern 仅用于历史会话兼容", description)
+        self.assertIn("先用 observation 做自然提醒式承接", description)
+        self.assertIn("只问 followup_question 这一个具体问题", description)
+        self.assertIn("不要停在纯解读", description)
+        self.assertIn("收集会改变计划安排的事实", description)
+        self.assertIn("不要问用户知不知道该做什么", description)
         self.assertNotIn("首句关键线索追问", description)
 
     def test_birth_journey_intake_output_keeps_followup_to_tool_next_step_only(self) -> None:
@@ -527,23 +537,32 @@ class BirthPrepPromptRuleTests(unittest.TestCase):
                 "result": {
                     "tool_name": "birth_journey_intake_manage",
                     "status": "in_progress",
-                    "action": "submit_lifestyle_context",
-                    "next_step": "feeding_question",
-                    "summary": "生活场景已问到，下一步确认喂养和 IBCLC 相关信息。",
+                    "action": "submit_basic_info",
+                    "next_step": "personalized_followup",
+                    "summary": "基础信息已记录，下一步进行一个个性化追问。",
                     "data": {
-                        "assistant_instruction": "一次性问完喂养和 IBCLC 相关信息，允许用户跳过。",
-                        "confirmation_question": "最后再了解一下喂养计划。",
-                        "completed_groups": ["basic_info", "checkup_records", "risk_factors", "current_symptoms", "lifestyle_context"],
+                        "assistant_instruction": "围绕 personalized_followup 只问一个具体问题。",
+                        "confirmation_question": "目前最需要纳入计划的是哪类情况：血压/血糖，甲状腺/免疫或长期用药，还是暂时没有明确异常？",
+                        "completed_groups": ["basic_info"],
+                        "personalized_followup": {
+                            "id": "advanced_age_screening_choice",
+                            "observation": "我注意到你现在属于产科上会被归入“高龄孕产妇”的范围。",
+                            "meaning": "这更多是管理上的分类，不代表一定有风险，主要是计划里需要提前关注血压、血糖、用药复查和胎儿生长这类信息。",
+                            "followup_question": "目前最需要纳入计划的是哪类情况：血压/血糖，甲状腺/免疫或长期用药，还是暂时没有明确异常？",
+                            "reply_guidance": "如果有筛查异常、胎盘/羊水或胎儿生长复查，也可以直接补充，我会一起纳入计划。",
+                            "reply_options": ("血压/血糖", "甲状腺/用药", "暂时没有"),
+                        },
                     },
                 },
             }
         )
 
         instruction = compact["final_response_instruction"]
-        self.assertIn("confirmation_question 是本轮唯一要问的问题", instruction)
-        self.assertIn("不要自行追加字段完整性判断", instruction)
-        self.assertIn("不要追问已经填写过的孕周是否为整周或 30+几天", instruction)
-        self.assertIn("30周/孕30周", instruction)
+        self.assertIn("personalized_followup.observation", instruction)
+        self.assertIn("followup_question 这一个具体问题", instruction)
+        self.assertIn("不要停在纯解读", instruction)
+        self.assertIn("收集会改变计划安排的事实", instruction)
+        self.assertIn("不要同时追问症状、生活方式或喂养信息", instruction)
         self.assertIn("不要再调用 ui_quick_replies_create", instruction)
 
     def test_birth_prep_context_extracts_shared_fields_for_hospital_bag_form(self) -> None:
