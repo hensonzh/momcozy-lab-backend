@@ -532,6 +532,7 @@ class BirthPrepPromptRuleTests(unittest.TestCase):
         self.assertIn("不要停在纯解读", description)
         self.assertIn("收集会改变计划安排的事实", description)
         self.assertIn("不要问用户知不知道该做什么", description)
+        self.assertIn("active_personalized_followup_id", description)
         self.assertNotIn("首句关键线索追问", description)
 
     def test_birth_journey_intake_output_keeps_followup_to_tool_next_step_only(self) -> None:
@@ -549,6 +550,10 @@ class BirthPrepPromptRuleTests(unittest.TestCase):
                         "assistant_instruction": "围绕 personalized_followup 只问一个具体问题。",
                         "confirmation_question": "目前最需要纳入计划的是哪类情况：血压/血糖，甲状腺/免疫或长期用药，还是暂时没有明确异常？",
                         "completed_groups": ["basic_info"],
+                        "initial_analysis": {"summary": "用户36岁，孕20周。"},
+                        "checkup_report_strategy": {"mode": "suggest_upload_or_skip"},
+                        "personalization_tags": ["age_35_plus", "multiple_pregnancy"],
+                        "active_personalized_followup_id": "advanced_age_screening_choice",
                         "personalized_followup": {
                             "id": "advanced_age_screening_choice",
                             "observation": "我注意到你现在属于产科上会被归入“高龄孕产妇”的范围。",
@@ -563,8 +568,13 @@ class BirthPrepPromptRuleTests(unittest.TestCase):
         )
 
         instruction = compact["final_response_instruction"]
+        self.assertEqual(compact["active_personalized_followup_id"], "advanced_age_screening_choice")
+        self.assertNotIn("initial_analysis", compact)
+        self.assertNotIn("checkup_report_strategy", compact)
+        self.assertNotIn("personalization_tags", compact)
         self.assertIn("personalized_followup.observation", instruction)
         self.assertIn("followup_question 这一个具体问题", instruction)
+        self.assertIn("active_personalized_followup_id", instruction)
         self.assertIn("不要停在纯解读", instruction)
         self.assertIn("收集会改变计划安排的事实", instruction)
         self.assertIn("不要同时追问症状、生活方式或喂养信息", instruction)

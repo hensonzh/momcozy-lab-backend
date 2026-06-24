@@ -1303,11 +1303,7 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         self.assertNotIn("医生有没有", result["data"]["personalized_followup"]["question"])
         self.assertEqual(
             [item["id"] for item in result["intake_state"]["personalized_followup_queue"]],
-            [
-                "age_35_plus_checkup_detail",
-                "pregnancy_milestone_status_detail",
-                "care_site_status_detail",
-            ],
+            ["age_35_plus_checkup_detail"],
         )
 
     def test_birth_journey_prior_c_section_prompts_personalized_followup_and_satisfies_risk(self) -> None:
@@ -1386,6 +1382,87 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         self.assertIn("高龄孕产妇", next_followup["data"]["confirmation_question"])
         self.assertIn("血压/血糖", next_followup["data"]["confirmation_question"])
 
+    def test_birth_journey_personalized_followup_combines_age_and_multiple_context(self) -> None:
+        inputs = {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00", "_birth_journey_intake_state": {}}
+        started = manage_birth_journey_intake({"action": "start", "payload": {}}, inputs)
+
+        basic = manage_birth_journey_intake(
+            {
+                "action": "submit_basic_info",
+                "payload": _basic_info_payload(age="36", fetus_count="双胎", first_birth="否"),
+            },
+            {**inputs, "_birth_journey_intake_state": started["intake_state"]},
+        )
+        self.assertEqual(
+            [item["id"] for item in basic["intake_state"]["personalized_followup_queue"]],
+            ["age_35_plus_multiple_monitoring", "prior_birth_history_detail"],
+        )
+        self.assertEqual(basic["data"]["personalized_followup"]["id"], "age_35_plus_multiple_monitoring")
+        self.assertEqual(basic["data"]["active_personalized_followup_id"], "age_35_plus_multiple_monitoring")
+        self.assertIn("36岁", basic["data"]["personalized_followup"]["observation"])
+        self.assertIn("双胎", basic["data"]["personalized_followup"]["observation"])
+        self.assertIn("宫颈长度", basic["data"]["personalized_followup"]["followup_question"])
+
+        compact = model_tool_output({"ok": True, "tool_name": "birth_journey_intake_manage", "result": basic})
+
+        self.assertEqual(compact["active_personalized_followup_id"], "age_35_plus_multiple_monitoring")
+        self.assertEqual(compact["personalized_followup"]["id"], "age_35_plus_multiple_monitoring")
+        self.assertNotIn("initial_analysis", compact)
+        self.assertNotIn("checkup_report_strategy", compact)
+        self.assertNotIn("personalization_tags", compact)
+        self.assertNotIn("multiple_pregnancy_monitoring", json.dumps(compact, ensure_ascii=False))
+
+        next_followup = manage_birth_journey_intake(
+            {
+                "action": "submit_personalized_followup",
+                "payload": {"followup_id": "age_35_plus_multiple_monitoring", "answer": "暂无异常"},
+            },
+            {**inputs, "_birth_journey_intake_state": basic["intake_state"]},
+        )
+        self.assertEqual(next_followup["data"]["personalized_followup"]["id"], "prior_birth_history_detail")
+
+        combined_answered = manage_birth_journey_intake(
+            {
+                "action": "submit_personalized_followup",
+                "payload": {
+                    "followup_id": "prior_birth_history_detail",
+                    "answer": "上一胎是顺产，没有早产和产后出血问题",
+                },
+            },
+            {**inputs, "_birth_journey_intake_state": next_followup["intake_state"]},
+        )
+        self.assertEqual(combined_answered["next_step"], "checkup_records_upload")
+        self.assertNotIn("personalized_followup", combined_answered["data"])
+
+    def test_birth_journey_ignores_mismatched_personalized_followup_id(self) -> None:
+        inputs = {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00", "_birth_journey_intake_state": {}}
+        started = manage_birth_journey_intake({"action": "start", "payload": {}}, inputs)
+
+        basic = manage_birth_journey_intake(
+            {
+                "action": "submit_basic_info",
+                "payload": _basic_info_payload(age="36", fetus_count="双胎", first_birth="否"),
+            },
+            {**inputs, "_birth_journey_intake_state": started["intake_state"]},
+        )
+
+        mismatched = manage_birth_journey_intake(
+            {
+                "action": "submit_personalized_followup",
+                "payload": {"followup_id": "multiple_pregnancy_monitoring", "answer": "还没确认"},
+            },
+            {**inputs, "_birth_journey_intake_state": basic["intake_state"]},
+        )
+
+        self.assertEqual(mismatched["next_step"], "personalized_followup")
+        self.assertEqual(mismatched["data"]["personalized_followup"]["id"], "age_35_plus_multiple_monitoring")
+        self.assertEqual(mismatched["data"]["active_personalized_followup_id"], "age_35_plus_multiple_monitoring")
+        self.assertNotIn("multiple_pregnancy_monitoring", mismatched["intake_state"].get("personalized_followups", {}))
+        self.assertEqual(
+            mismatched["intake_state"]["last_personalized_followup_mismatch"],
+            {"expected": "age_35_plus_multiple_monitoring", "received": "multiple_pregnancy_monitoring"},
+        )
+
     def test_birth_journey_personalized_followups_share_source_reason_question_contract(self) -> None:
         inputs = {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00", "_birth_journey_intake_state": {}}
         started = manage_birth_journey_intake({"action": "start", "payload": {}}, inputs)
@@ -1425,7 +1502,6 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
             [
                 "prior_birth_history_detail",
                 "age_35_plus_checkup_detail",
-                "pregnancy_milestone_status_detail",
             ],
         )
 
@@ -1465,7 +1541,8 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         self.assertEqual(basic["next_step"], "personalized_followup")
         followup = basic["data"]["personalized_followup"]
         self.assertEqual(followup["id"], "multiple_pregnancy_monitoring")
-        self.assertIn("双胎/多胎", followup["observation"])
+        self.assertIn("双胎", followup["observation"])
+        self.assertNotIn("双胎/多胎", followup["observation"])
         self.assertIn("目前产检记录里的双胎类型", followup["followup_question"])
         self.assertIn("单绒双羊、双绒双羊", followup["followup_question"])
         self.assertEqual(list(followup["reply_options"]), ["单绒双羊", "双绒双羊", "还没确认"])
@@ -1610,10 +1687,8 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
             },
             {**inputs, "_birth_journey_intake_state": basic["intake_state"]},
         )
-        self.assertEqual(personalized["next_step"], "personalized_followup")
-        self.assertEqual(personalized["data"]["personalized_followup"]["id"], "pregnancy_milestone_status_detail")
-        personalized = _answer_birth_journey_personalized_followups(inputs, personalized)
         self.assertEqual(personalized["next_step"], "checkup_records_upload")
+        self.assertNotIn("personalized_followup", personalized["data"])
 
         skipped = manage_birth_journey_intake(
             {"action": "skip_checkup_records", "payload": {}},
@@ -1712,11 +1787,16 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
 
         self.assertEqual(compact["next_step"], "personalized_followup")
         self.assertIn("personalized_followup", compact)
+        self.assertEqual(compact["active_personalized_followup_id"], "age_35_plus_checkup_detail")
         self.assertIn("observation", compact["personalized_followup"])
         self.assertIn("followup_question", compact["personalized_followup"])
         self.assertIn("reply_guidance", compact["personalized_followup"])
+        self.assertNotIn("initial_analysis", compact)
+        self.assertNotIn("checkup_report_strategy", compact)
+        self.assertNotIn("personalization_tags", compact)
         self.assertIn("最多两小段", compact["final_response_instruction"])
         self.assertIn("只问 personalized_followup.followup_question", compact["final_response_instruction"])
+        self.assertIn("active_personalized_followup_id", compact["final_response_instruction"])
         self.assertIn("不要输出成长说明", compact["final_response_instruction"])
         self.assertNotIn("再只问 personalized_followup.question", compact["final_response_instruction"])
         self.assertIn("不要使用", compact["final_response_instruction"])
@@ -1729,10 +1809,8 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
             {**inputs, "_birth_journey_intake_state": basic["intake_state"]},
         )
 
-        self.assertEqual(answered["next_step"], "personalized_followup")
-        self.assertEqual(answered["data"]["personalized_followup"]["id"], "pregnancy_milestone_status_detail")
-        answered = _answer_birth_journey_personalized_followups(inputs, answered)
         self.assertEqual(answered["next_step"], "checkup_records_upload")
+        self.assertNotIn("personalized_followup", answered["data"])
 
     def test_birth_journey_personalized_followup_uses_specific_quick_replies(self) -> None:
         inputs = {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00", "_birth_journey_intake_state": {}}

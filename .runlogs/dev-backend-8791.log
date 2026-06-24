@@ -1,7 +1,7 @@
 Seeded status demo data for demo_mama_increase_001 in /Users/lute/project/MomCozyWorktrees/worktree-1/MomCozyAgent/data/milk_management.db
 Reset non-status demo data for local startup: profile=1, birth_prep=0, plans=0, milk_plans=0, pregnancy_diary=0, uploads=0, device_runtime=0.
 Momcozy agent SSE service: http://127.0.0.1:8790/api/ag-ui
-INFO:     Started server process [28754]
+INFO:     Started server process [72012]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://127.0.0.1:8183 (Press CTRL+C to quit)
@@ -9,9 +9,9 @@ Momcozy unified API: http://127.0.0.1:8791
 Momcozy App WebSocket: ws://127.0.0.1:8791/api/ag-ui-ws
 Momcozy chat SSE upstream: http://127.0.0.1:8790/api/ag-ui
 Web data admin: http://127.0.0.1:8183
-INFO:     Started server process [28754]
+INFO:     Started server process [72012]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://127.0.0.1:8791 (Press CTRL+C to quit)
 [LogDrivenSessionManager] 初始化完成 | json_dir=/Users/lute/project/MomCozyWorktrees/worktree-1/MomCozyAgent/data/milk_process/configs | log_dir=/Users/lute/project/MomCozyWorktrees/worktree-1/MomCozyAgent/logs/milk_process
-INFO:     127.0.0.1:51943 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58408 - "GET /health HTTP/1.1" 200 OK
