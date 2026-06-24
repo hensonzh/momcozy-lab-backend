@@ -76,3 +76,13 @@ INFO:     connection closed
 INFO:     127.0.0.1:51055 - "OPTIONS /api/ag-ui-timing-log?token=app-test HTTP/1.1" 405 Method Not Allowed
 INFO:     connection closed
 INFO:     127.0.0.1:51069 - "POST /api/client-event HTTP/1.1" 502 Bad Gateway
+INFO:     127.0.0.1:51100 - "GET /v1/mom-baby/info/query?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51102 - "GET /v1/mom-baby/today/query?user_id=demo_mama_increase_001&timestamp=2026-06-24 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51103 - "GET /v1/user/profile/query?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51104 - "GET /v1/growth/query?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51105 - "GET /v1/growth/history?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51106 - "GET /v1/pump/info/get?user_id=demo_mama_increase_001 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51108 - "GET /v1/feeding/query?user_id=demo_mama_increase_001&timestamp=2026-06-24 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51110 - "GET /v1/plan/list?user_id=demo_mama_increase_001&status=active HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51112 - "GET /v1/pregnancy-diary/today?user_id=demo_mama_increase_001&timestamp=2026-06-24 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51114 - "GET /v1/pregnancy-diary/list?user_id=demo_mama_increase_001&limit=12 HTTP/1.1" 200 OK
