@@ -1231,6 +1231,12 @@ def _format_active_care_plan_context(inputs: RuntimeInputs, *, include_birth_jou
 
 
 def _format_birth_journey_next_7_todo_context(payload: dict[str, Any]) -> list[str]:
+    try:
+        from .tool_handlers.cards import normalize_birth_journey_plan_payload
+
+        payload = normalize_birth_journey_plan_payload(payload)
+    except Exception:
+        payload = dict(payload)
     layers = payload.get("planning_layers") if isinstance(payload.get("planning_layers"), dict) else {}
     next_7 = layers.get("next_7_days") if isinstance(layers.get("next_7_days"), dict) else {}
     items = next_7.get("items") if isinstance(next_7.get("items"), list) else []

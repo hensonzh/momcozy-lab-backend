@@ -26,7 +26,7 @@ from .contexts import (
 )
 from .health_guidance import health_guidance_request_context_lines, health_guidance_required_web_search_tool_choice
 from .static_context import STATIC_AGENT_INSTRUCTIONS
-from .tool_handlers.cards import birth_journey_intake_quick_reply_guidance
+from .tool_handlers.cards import birth_journey_intake_quick_reply_guidance, normalize_birth_journey_plan_payload
 from .tool_schemas import FUNCTION_TOOLS
 from .tool_registry import DEFERRED_TOOL_NAMESPACES, execute_tool, select_runtime_tools
 from .types import AgUiEvent, AgUiEventHandler, AgentEvent, AgentEventHandler, AgentEventPhase, BuildAgentRequestOptions, ResponsesClientLike, ResponsesRequest, RuntimeInputs, TextDeltaHandler
@@ -1626,7 +1626,7 @@ def _compact_birth_journey_intake_output(safe: dict[str, Any], raw_result: dict[
         )
     elif next_step == "personalized_followup":
         compact["final_response_instruction"] = (
-            "最终回复最多两小段，先用 personalized_followup.observation 做一句自然提醒式承接，"
+            "最终回复最多两小段，第一句必须点明 personalized_followup.observation 里的用户已提供信息，"
             "再用 personalized_followup.meaning 简短解释为什么影响计划；然后只问 personalized_followup.followup_question 这一个具体问题。"
             "可以把 personalized_followup.reply_guidance 压缩到同一段末尾，但不要逐字照读所有字段，不要输出成长说明。"
             "这一轮只推进一个个性化追问，不要停在纯解读，必须落到这个具体追问。"
@@ -1781,10 +1781,16 @@ def _remove_hospital_bag_cart_link(message: str) -> str:
     return "\n\n".join(kept).strip()
 
 
+BIRTH_JOURNEY_PLAN_CREATED_OPENING = (
+    "孕期计划已生成，我同步把它做成了待办事项清单放在了“宝宝和我”页面里，"
+    "接下来你可以在“宝宝和我”页面管理你的孕期计划待办事项。"
+)
+
+
 def _compact_birth_journey_plan_card_output(safe: dict[str, Any]) -> dict[str, Any]:
     card = safe.get("card")
     card_json = card.get("card_json") if isinstance(card, dict) else None
-    card_json_dict = card_json if isinstance(card_json, dict) else {}
+    card_json_dict = normalize_birth_journey_plan_payload(card_json) if isinstance(card_json, dict) else {}
     reused_existing_plan = safe.get("status") == "existing_plan_found"
     response = _birth_journey_plan_final_response(card_json_dict, reused_existing_plan=reused_existing_plan)
     compact = _compact_card_tool_output(
@@ -1796,11 +1802,12 @@ def _compact_birth_journey_plan_card_output(safe: dict[str, Any]) -> dict[str, A
             + (
                 "这是已有计划，最终回复说明已沿用这份计划，不要说新生成。"
                 if reused_existing_plan
-                else "这是新生成计划，最终回复必须保留：计划已生成，可以在宝宝和我页面查看，接下来我会按照计划主动提醒你哦。"
+                else f"这是新生成计划，最终回复第一句话必须原样使用：{BIRTH_JOURNEY_PLAN_CREATED_OPENING}"
             )
             + "不要提本周重点、当前优先级或当前阶段总结；不要补充外部资料、来源引用或引用编号。"
             "不要使用“卡片”这类界面形式词，不要再输出“我先帮你生成”或“我整理好了”这类重复交付句，"
             "不要复述未来 2-4 周、后续大节点或完整计划。"
+            "工具输出里的 plan_brief 是后续对话要使用的低损计划上下文；本轮不要整段复述它。"
             "聊天正文里不要出现“【重要】”“【建议】”“优先确认事项”“支持性建议”这些标签，"
             "也不要使用“先做”“做完后”“完成标准”这类字段化说法；要用自然语言说明事项和意义。\n\n"
             "【结构化表达素材】\n"
@@ -1808,7 +1815,69 @@ def _compact_birth_journey_plan_card_output(safe: dict[str, Any]) -> dict[str, A
         ),
     )
     compact["final_response_text"] = response
+    compact["plan_brief"] = _birth_journey_plan_brief_for_model(card_json_dict)
     return compact
+
+
+def _birth_journey_plan_brief_for_model(card_json: dict[str, Any]) -> dict[str, Any]:
+    todo_plan = card_json.get("todo_plan") if isinstance(card_json.get("todo_plan"), dict) else {}
+    generation_context = (
+        card_json.get("generation_context") if isinstance(card_json.get("generation_context"), dict) else {}
+    )
+    periods_source = (
+        generation_context.get("periods")
+        if isinstance(generation_context.get("periods"), list)
+        else todo_plan.get("periods")
+        if isinstance(todo_plan.get("periods"), list)
+        else []
+    )
+    periods: list[dict[str, Any]] = []
+    for period in periods_source:
+        if not isinstance(period, dict):
+            continue
+        items = period.get("items") if isinstance(period.get("items"), list) else []
+        periods.append(
+            {
+                "id": _clean_birth_journey_fragment(period.get("id")),
+                "title": _clean_birth_journey_fragment(period.get("title")),
+                "week_start": period.get("week_start"),
+                "week_end": period.get("week_end"),
+                "granularity": _clean_birth_journey_fragment(period.get("granularity")),
+                "display_mode": _clean_birth_journey_fragment(period.get("display_mode")),
+                "status": _clean_birth_journey_fragment(period.get("status")),
+                "subtitle": _clean_birth_journey_fragment(period.get("subtitle")),
+                "items": [_birth_journey_plan_brief_item(item) for item in items if isinstance(item, dict)],
+            }
+        )
+    return {
+        "title": _clean_birth_journey_fragment(card_json.get("title")),
+        "subtitle": _clean_birth_journey_fragment(card_json.get("subtitle")),
+        "owner": card_json.get("owner") if isinstance(card_json.get("owner"), dict) else {},
+        "todo_engine_version": _clean_birth_journey_fragment(card_json.get("todo_engine_version")),
+        "current_week": generation_context.get("current_week") or todo_plan.get("current_week"),
+        "cadence": _clean_birth_journey_fragment(generation_context.get("cadence") or todo_plan.get("cadence")),
+        "cadence_label": _clean_birth_journey_fragment(generation_context.get("cadence_label") or todo_plan.get("cadence_label")),
+        "cadence_reason": _clean_birth_journey_fragment(generation_context.get("cadence_reason") or todo_plan.get("cadence_reason")),
+        "route_summary": _clean_birth_journey_fragment(generation_context.get("route_summary") or todo_plan.get("route_summary")),
+        "personalization_basis": generation_context.get("personalization_basis")
+        if isinstance(generation_context.get("personalization_basis"), list)
+        else [],
+        "periods": periods,
+    }
+
+
+def _birth_journey_plan_brief_item(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": _clean_birth_journey_fragment(item.get("id")),
+        "title": _birth_journey_chat_todo_title(_clean_birth_journey_fragment(item.get("title"))),
+        "priority_type": _clean_birth_journey_fragment(item.get("priority_type")),
+        "priority_label": _clean_birth_journey_fragment(item.get("priority_label")),
+        "timeframe": _clean_birth_journey_fragment(item.get("timeframe")),
+        "reason": _clean_birth_journey_fragment(item.get("reason") or item.get("why_for_you")),
+        "source_tags": [str(tag or "").strip() for tag in item.get("source_tags") or [] if str(tag or "").strip()],
+        "steps": [_clean_birth_journey_fragment(step) for step in item.get("steps") or [] if _clean_birth_journey_fragment(step)],
+        "after_done_value": _clean_birth_journey_fragment(item.get("after_done_value")),
+    }
 
 
 def _birth_journey_plan_final_response(card_json: dict[str, Any], *, reused_existing_plan: bool = False) -> str:
@@ -1827,7 +1896,7 @@ def _birth_journey_plan_final_response(card_json: dict[str, Any], *, reused_exis
         opening = (
             "你之前已经有一份孕期计划，我先沿用这份，不重复生成。"
             if reused_existing_plan
-            else "孕期计划已生成，可以在宝宝和我页面查看，接下来我会按照计划主动提醒你哦。"
+            else BIRTH_JOURNEY_PLAN_CREATED_OPENING
         )
         lines = [
             opening,
@@ -1840,7 +1909,7 @@ def _birth_journey_plan_final_response(card_json: dict[str, Any], *, reused_exis
     opening = (
         "你之前已经有一份孕期计划，我先沿用这份，不重复生成。"
         if reused_existing_plan
-        else "孕期计划已生成，可以在宝宝和我页面查看，接下来我会按照计划主动提醒你哦。"
+        else BIRTH_JOURNEY_PLAN_CREATED_OPENING
     )
     return opening + "接下来 7 天行动清单暂时没有可复述的事项。"
 
@@ -1929,15 +1998,12 @@ def _birth_journey_next_7_item_summary(title: str, item: dict[str, Any]) -> str:
         if first_step:
             break
     after_value = _birth_journey_chat_value_text(item.get("after_done_value"))
-    done_criteria = _clean_birth_journey_fragment(item.get("done_criteria"))
 
     details: list[str] = []
     if first_step:
         details.append(first_step)
     if after_value:
         details.append(f"这样{after_value}")
-    elif done_criteria:
-        details.append(done_criteria)
     if not details:
         return clean_title
     return f"{clean_title}：" + "；".join(details)
