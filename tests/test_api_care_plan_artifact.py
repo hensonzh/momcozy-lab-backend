@@ -95,21 +95,6 @@ class CarePlanArtifactApiTests(unittest.TestCase):
                         }
                     ]
                 },
-                "planning_layers": {
-                    "current_week": 30,
-                    "next_7_days": {
-                        "items": [
-                            {
-                                "id": "next7_01",
-                                "source_item_id": "old_01",
-                                "title": "建立胎动和异常联系机制",
-                                "completed": True,
-                                "completed_at": "2026-06-24T00:00:00Z",
-                                "completed_source": "app",
-                            }
-                        ]
-                    },
-                },
             },
             source_artifact_type="birth_journey_plan_card",
         )
@@ -129,14 +114,11 @@ class CarePlanArtifactApiTests(unittest.TestCase):
         detailed_plan = detail_response.json()["plan"]
         for plan in (listed_plan, detailed_plan):
             payload = plan["payload"]
-            self.assertEqual(payload["todo_engine_version"], "actionable_steps_v1")
+            self.assertEqual(payload["todo_engine_version"], "actionable_steps_v2")
+            self.assertNotIn("planning_layers", payload)
             todo_item = payload["todo_plan"]["periods"][0]["items"][0]
-            next7_item = payload["planning_layers"]["next_7_days"]["items"][0]
             self.assertEqual(todo_item["title"], "每天固定看胎动和不舒服")
-            self.assertTrue(todo_item["completed"])
-            self.assertEqual(todo_item["completed_source"], "app")
-            self.assertEqual(next7_item["source_item_id"], "old_01")
-            self.assertTrue(next7_item["completed"])
+            self.assertFalse(todo_item["completed"])
 
     def test_dev_startup_reset_only_deletes_active_birth_journey_plans(self) -> None:
         birth_plan = data_store.save_care_plan_artifact(

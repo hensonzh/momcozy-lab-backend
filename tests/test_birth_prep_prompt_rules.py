@@ -103,8 +103,8 @@ class BirthPrepPromptRuleTests(unittest.TestCase):
         self.assertIn("不要再次调用 `birth_journey_plan_card_create` 重新生成", skill)
         self.assertIn("birth_journey_plan_delete", skill)
         self.assertIn("birth_journey_plan_todo_update", skill)
-        self.assertIn("接下来 7 天行动清单", skill)
-        self.assertIn("不要复述本周重点、当前优先级", skill)
+        self.assertIn("当前展开阶段待办", skill)
+        self.assertIn("不要再按旧的“7 天行动清单 / 未来 2-4 周 / 后续大节点”结构复述", skill)
         self.assertNotIn("本周重点事项总结", skill)
         self.assertIn("confirmed=true", skill)
 

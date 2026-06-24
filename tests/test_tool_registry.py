@@ -181,7 +181,7 @@ class ToolRegistryTests(unittest.TestCase):
             "hospital_bag_cart_update": ("current_hospital_bag_cart", "不要用于首次生成待产包清单", "独立吸奶器型号选型"),
             "hospital_bag_pump_recommend": ("购买前选型工具", "不要用于已购设备故障", "milk_management"),
             "pregnancy_diary_manage": ("read", "write", "update", "delete", "不要写入模型建议", "写入不要求用户先说", "不需要额外确认", "删除必须 confirmed=true", "不要用于孕期计划"),
-            "birth_journey_plan_todo_update": ("接下来 7 天行动清单", "完成状态", "不要猜测", "不重新生成计划"),
+            "birth_journey_plan_todo_update": ("当前展开阶段待办", "完成状态", "不要猜测", "不重新生成计划"),
         }
 
         for tool_name, tokens in expected_tokens.items():

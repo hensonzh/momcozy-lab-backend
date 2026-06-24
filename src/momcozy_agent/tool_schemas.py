@@ -233,9 +233,9 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "birth_journey_plan_todo_update": _function_tool(
         "birth_journey_plan_todo_update",
-        "更新当前用户 active 孕期计划中“接下来 7 天行动清单”的完成状态。仅当 request_context 的 active_care_plan_context 给出了 next_7_days_todos，且用户明确表示其中某些事项已经完成或需要取消完成时调用。用户可以用编号、事项名或 item_id 表达；如果无法唯一定位事项，先追问，不要猜测。此工具只更新完成状态，不重新生成计划，不用于删除计划、待产包、奶量计划或普通日记。工具返回 completion_followups 时，最终回复可顺带提供 1 个与已完成事项相关的下一步帮助。",
+        "更新当前用户 active 孕期计划中当前展开阶段待办事项的完成状态。仅当 request_context 的 active_care_plan_context 给出了 current_birth_journey_todos，且用户明确表示其中某些事项已经完成或需要取消完成时调用。用户可以用编号、事项名或 item_id 表达；如果无法唯一定位事项，先追问，不要猜测。此工具只更新完成状态，不重新生成计划，不用于删除计划、待产包、奶量计划或普通日记。工具返回 completion_followups 时，最终回复可顺带提供 1 个与已完成事项相关的下一步帮助。",
         {
-            "item_ids": _nullable({"type": "array", "items": {"type": "string"}, "description": "要更新的稳定事项 id，例如 next7_01；不使用时传 null。"}),
+            "item_ids": _nullable({"type": "array", "items": {"type": "string"}, "description": "要更新的稳定事项 id，例如 todo_01；不使用时传 null。"}),
             "item_numbers": _nullable({"type": "array", "items": {"type": "integer"}, "description": "用户按编号表达时传 1-based 编号；不使用时传 null。"}),
             "item_refs": _nullable({"type": "array", "items": {"type": "string"}, "description": "用户说出的事项名、标题片段或原始引用；不使用时传 null。"}),
             "completed": {"type": "boolean", "description": "true 表示标记完成；false 表示取消完成。"},
