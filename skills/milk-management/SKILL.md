@@ -8,6 +8,8 @@ description: 奶量管理服务，用于分析妈妈奶量与宝宝摄入情况�
 - 奶量管理仅处理三类任务：奶量分析、追奶/稳奶/减奶计划制定、根据日程调整已有计划。
 - 使用奶量管理工具前，先加载 `milk_management` namespace。
 - 优先利用工具中的近期记录和历史数据，避免重复要求用户提供已记录的信息。
+- 用户问堵奶、涨奶、排不空、吸奶/亲喂后仍胀、最近奶量下降或普通奶量问题时，答复前优先读取近 7 天奶量事实；默认调用 `milk_status_query(section="trend", trend_days=7, include_tasks=false)`，只读取一次，不要同一轮重复查询。用户明确要看每天记录、原始记录或某天多少 ml 时，再调用 `milk_records_query`。
+- 轻量事实读取不等于完整奶量分析：如果用户只是问堵奶/涨奶如何处理或想了解近期事实，读取 7 天趋势后结合乳房状态简短回答；如果用户要判断奶量够不够、是否正常、趋势风险、是否适合追奶/稳奶/减奶或制定计划，进入 `milk_analysis_intake_manage` + `milk_analysis_evaluate` 的综合奶量分析流程。
 - 奶量分析到计划制定采用分段工具推进：`milk_analysis_intake_manage` 维护信息采集表，`milk_analysis_evaluate` 完成奶量分析，`milk_plan_preview_create` 生成计划草稿，`milk_plan_mutate` 在用户确认后保存。
 - `milk_analysis_intake_manage` 会自动读取/复用过去 7 天原始奶量记录和日级汇总；信息采集表完成前只追问缺失信息，完成后才进入 `milk_analysis_evaluate`。
 - 采用多轮对话收集信息；信息不足时，可以说明还缺哪些信息，但每轮只追问当前最影响判断的一个问题。

@@ -177,7 +177,7 @@ class ToolRegistryTests(unittest.TestCase):
             "device_manual_search": ("已购/正在使用", "不要用于购买前型号推荐", "milk_management"),
             "support_ticket_draft_create": ("创建前必须先向用户确认", "user_confirmed", "不要用于普通操作指导"),
             "milk_snapshot_get": ("不要用它替代 milk_status_query", "milk_analysis_intake_manage", "milk_plan_query"),
-            "milk_status_query": ("不要用它替代 milk_analysis_intake_manage", "milk_records_query"),
+            "milk_status_query": ("堵奶", "trend_days=7", "不要用它替代 milk_analysis_intake_manage", "milk_records_query"),
             "hospital_bag_cart_update": ("current_hospital_bag_cart", "不要用于首次生成待产包清单", "独立吸奶器型号选型"),
             "hospital_bag_pump_recommend": ("购买前选型工具", "不要用于已购设备故障", "milk_management"),
             "pregnancy_diary_manage": ("read", "write", "update", "delete", "不要写入模型建议", "写入不要求用户先说", "不需要额外确认", "删除必须 confirmed=true", "不要用于孕期计划"),

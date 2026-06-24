@@ -415,7 +415,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "milk_status_query": _function_tool(
         "milk_status_query",
-        "GET 只读工具：读取类似 MaiMomcozy 状态页的奶量聚合信息，包括妈妈宝宝资料、今日产奶/喂养、30 日趋势、宝宝生长记录和当天计划任务。适合用户问“现在状态怎么样”“今天数据”“状态页信息”或需要展示近期趋势事实。不要用它替代 milk_analysis_intake_manage + milk_analysis_evaluate 来回答奶量是否够、是否正常、趋势风险或适合什么计划；不要用它生成或暗示计划前追问，也不要把状态页建议改写成用户问题；不要用它替代 milk_records_query 查可修改的原始记录。",
+        "GET 只读工具：读取类似 MaiMomcozy 状态页的奶量聚合信息，包括妈妈宝宝资料、今日产奶/喂养、30 日趋势、宝宝生长记录和当天计划任务。适合用户问“现在状态怎么样”“今天数据”“状态页信息”，或在堵奶、涨奶、排不空、吸奶/亲喂后仍胀、奶量下降等轻量问答前读取近 7 天趋势事实；这类场景通常传 section=trend、trend_days=7、include_tasks=false。不要用它替代 milk_analysis_intake_manage + milk_analysis_evaluate 来回答奶量是否够、是否正常、趋势风险或适合什么计划；不要用它生成或暗示计划前追问，也不要把状态页建议改写成用户问题；不要用它替代 milk_records_query 查可修改的原始记录。",
         {
             "section": {
                 "type": "string",
