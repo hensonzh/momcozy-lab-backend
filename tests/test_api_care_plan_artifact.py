@@ -117,7 +117,7 @@ class CarePlanArtifactApiTests(unittest.TestCase):
             self.assertEqual(payload["todo_engine_version"], "actionable_steps_v2")
             self.assertNotIn("planning_layers", payload)
             todo_item = payload["todo_plan"]["periods"][0]["items"][0]
-            self.assertEqual(todo_item["title"], "每天固定看胎动和不舒服")
+            self.assertEqual(todo_item["title"], "做胎动与异常观察")
             self.assertFalse(todo_item["completed"])
 
     def test_dev_startup_reset_only_deletes_active_birth_journey_plans(self) -> None:

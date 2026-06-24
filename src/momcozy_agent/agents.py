@@ -1625,6 +1625,12 @@ def _compact_birth_journey_intake_output(safe: dict[str, Any], raw_result: dict[
             "不要同时询问个性化风险、症状、生活方式或喂养信息，也不要生成孕期计划。"
             "当前步骤的快捷回复已由应用侧准备好，不要再调用 ui_quick_replies_create。"
         )
+    elif next_step == "final_plan_confirmation":
+        compact["final_response_instruction"] = (
+            "最终回复只问这一句：还有其他需要补充的信息吗？如果没有，我就基于目前的信息开始为你制定孕期计划啦。"
+            "不要展开计划内容，不要总结已收集的信息，不要追加其它问题，也不要生成孕期计划。"
+            "当前步骤的快捷回复已由应用侧准备好，不要再调用 ui_quick_replies_create。"
+        )
     elif next_step == "personalized_followup":
         compact["final_response_instruction"] = (
             "最终回复最多两小段，第一句必须点明 personalized_followup.observation 里的用户已提供信息，"
@@ -1785,6 +1791,7 @@ def _remove_hospital_bag_cart_link(message: str) -> str:
 BIRTH_JOURNEY_PLAN_CREATED_OPENING = (
     "孕期计划已生成，我同步把它做成了待办事项清单放在了“宝宝和我”页面里，"
     "接下来你可以在“宝宝和我”页面管理你的孕期计划待办事项。"
+    "我也会在每项计划对应的阶段到来前，提前提醒你。"
 )
 
 
