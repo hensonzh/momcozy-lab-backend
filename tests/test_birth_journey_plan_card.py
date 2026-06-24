@@ -211,16 +211,40 @@ def _answer_birth_journey_personalized_followups(
     answers = answers or {}
     while current.get("next_step") == "personalized_followup":
         data = current.get("data") if isinstance(current.get("data"), dict) else {}
-        followup = data.get("personalized_followup") if isinstance(data.get("personalized_followup"), dict) else {}
+        followup = _birth_journey_suggested_topics(current)[0]
         followup_id = str(followup.get("id") or "").strip()
         current = manage_birth_journey_intake(
             {
                 "action": "submit_personalized_followup",
-                "payload": {"followup_id": followup_id, "answer": answers.get(followup_id, "还不确定")},
+                "payload": {
+                    "topic": followup_id,
+                    "question": followup.get("followup_question"),
+                    "answer": answers.get(followup_id, "还不确定"),
+                    "plan_impact": followup.get("meaning"),
+                },
             },
             {**inputs, "_birth_journey_intake_state": current["intake_state"]},
         )
     return current
+
+
+def _birth_journey_personalization_context(result: dict[str, object]) -> dict[str, object]:
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    context = data.get("personalization_context") if isinstance(data.get("personalization_context"), dict) else {}
+    return context
+
+
+def _birth_journey_suggested_topics(result: dict[str, object]) -> list[dict[str, object]]:
+    context = _birth_journey_personalization_context(result)
+    topics = context.get("suggested_topics") if isinstance(context.get("suggested_topics"), list) else []
+    return [topic for topic in topics if isinstance(topic, dict)]
+
+
+def _birth_journey_suggested_topic(result: dict[str, object], topic_id: str) -> dict[str, object]:
+    for topic in _birth_journey_suggested_topics(result):
+        if topic.get("id") == topic_id:
+            return topic
+    return {}
 
 
 def _confirm_birth_journey_ready_to_generate(
@@ -1290,21 +1314,21 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
 
         self.assertEqual(result["action"], "submit_basic_info")
         self.assertEqual(result["next_step"], "personalized_followup")
-        self.assertEqual(result["data"]["personalized_followup"]["id"], "age_35_plus_checkup_detail")
-        self.assertIn("我注意到你36岁", result["data"]["personalized_followup"]["observation"])
-        self.assertIn("血压/血糖", result["data"]["personalized_followup"]["followup_question"])
-        self.assertIn("甲状腺/免疫或长期用药", result["data"]["personalized_followup"]["followup_question"])
-        self.assertIn("有没有已经被提醒过或正在复查", result["data"]["personalized_followup"]["followup_question"])
-        self.assertIn("暂无异常", result["data"]["personalized_followup"]["followup_question"])
-        self.assertNotIn("目前最需要纳入计划", result["data"]["personalized_followup"]["followup_question"])
-        self.assertNotIn("不代表一定有问题", result["data"]["personalized_followup"]["meaning"])
-        self.assertNotIn("知道", result["data"]["personalized_followup"]["followup_question"])
-        self.assertNotIn("最想先弄清", result["data"]["personalized_followup"]["followup_question"])
-        self.assertNotIn("医生有没有", result["data"]["personalized_followup"]["question"])
-        self.assertEqual(
-            [item["id"] for item in result["intake_state"]["personalized_followup_queue"]],
-            ["age_35_plus_checkup_detail"],
-        )
+        topic = _birth_journey_suggested_topic(result, "age_35_plus_checkup_detail")
+        self.assertEqual(topic["id"], "age_35_plus_checkup_detail")
+        self.assertIn("我注意到你36岁", topic["observation"])
+        self.assertIn("血压/血糖", topic["followup_question"])
+        self.assertIn("甲状腺/免疫或长期用药", topic["followup_question"])
+        self.assertIn("有没有已经被提醒过或正在复查", topic["followup_question"])
+        self.assertIn("暂无异常", topic["followup_question"])
+        self.assertNotIn("目前最需要纳入计划", topic["followup_question"])
+        self.assertNotIn("不代表一定有问题", topic["meaning"])
+        self.assertNotIn("知道", topic["followup_question"])
+        self.assertNotIn("最想先弄清", topic["followup_question"])
+        self.assertNotIn("医生有没有", topic["question"])
+        self.assertNotIn("personalized_followup", result["data"])
+        self.assertNotIn("personalized_followup_queue", result["intake_state"])
+        self.assertEqual([item["id"] for item in _birth_journey_suggested_topics(result)], ["age_35_plus_checkup_detail"])
 
     def test_birth_journey_prior_c_section_prompts_personalized_followup_and_satisfies_risk(self) -> None:
         inputs = {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00", "_birth_journey_intake_state": {}}
@@ -1322,9 +1346,10 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         )
 
         self.assertEqual(basic["next_step"], "personalized_followup")
-        self.assertEqual(basic["data"]["personalized_followup"]["id"], "prior_c_section_birth_path_detail")
-        self.assertIn("上次剖宫产的主要原因", basic["data"]["personalized_followup"]["followup_question"])
-        self.assertNotIn("有没有", basic["data"]["personalized_followup"]["question"])
+        topic = _birth_journey_suggested_topic(basic, "prior_c_section_birth_path_detail")
+        self.assertEqual(topic["id"], "prior_c_section_birth_path_detail")
+        self.assertIn("上次剖宫产的主要原因", topic["followup_question"])
+        self.assertNotIn("有没有", topic["question"])
 
         answered = manage_birth_journey_intake(
             {
@@ -1350,6 +1375,8 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         self.assertNotIn("risk_factors", skipped["intake_state"]["completed_groups"])
         self.assertNotIn("risk_factors", ready["plan_context"])
         self.assertIn("臀位剖宫产", ready["plan_context"]["prior_birth_history"])
+        self.assertEqual(ready["plan_context"]["personalized_followup_records"][0]["topic"], "prior_c_section_birth_path_detail")
+        self.assertIn("臀位剖宫产", ready["plan_context"]["personalized_facts"])
 
     def test_birth_journey_followup_question_keeps_next_personalized_source_context(self) -> None:
         inputs = {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00", "_birth_journey_intake_state": {}}
@@ -1363,13 +1390,16 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
             {**inputs, "_birth_journey_intake_state": started["intake_state"]},
         )
 
-        self.assertEqual(basic["data"]["personalized_followup"]["id"], "prior_birth_history_detail")
+        self.assertEqual(
+            [item["id"] for item in _birth_journey_suggested_topics(basic)],
+            ["prior_birth_history_detail", "age_35_plus_checkup_detail"],
+        )
 
         next_followup = manage_birth_journey_intake(
             {
                 "action": "submit_personalized_followup",
                 "payload": {
-                    "followup_id": "prior_birth_history_detail",
+                    "topic": "prior_birth_history_detail",
                     "answer": "上一胎是顺产，没有早产和产后出血问题",
                 },
             },
@@ -1377,10 +1407,11 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         )
 
         self.assertEqual(next_followup["next_step"], "personalized_followup")
-        self.assertEqual(next_followup["data"]["personalized_followup"]["id"], "age_35_plus_checkup_detail")
-        self.assertIn("你36岁", next_followup["data"]["confirmation_question"])
-        self.assertIn("高龄孕产妇", next_followup["data"]["confirmation_question"])
-        self.assertIn("血压/血糖", next_followup["data"]["confirmation_question"])
+        topic = _birth_journey_suggested_topic(next_followup, "age_35_plus_checkup_detail")
+        self.assertIn("你36岁", topic["observation"])
+        self.assertIn("高龄孕产妇", topic["observation"])
+        self.assertIn("血压/血糖", topic["followup_question"])
+        self.assertEqual(next_followup["data"]["personalization_context"]["asked_followups"][0]["topic"], "prior_birth_history_detail")
 
     def test_birth_journey_personalized_followup_combines_age_and_multiple_context(self) -> None:
         inputs = {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00", "_birth_journey_intake_state": {}}
@@ -1394,19 +1425,18 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
             {**inputs, "_birth_journey_intake_state": started["intake_state"]},
         )
         self.assertEqual(
-            [item["id"] for item in basic["intake_state"]["personalized_followup_queue"]],
+            [item["id"] for item in _birth_journey_suggested_topics(basic)],
             ["age_35_plus_multiple_monitoring", "prior_birth_history_detail"],
         )
-        self.assertEqual(basic["data"]["personalized_followup"]["id"], "age_35_plus_multiple_monitoring")
-        self.assertEqual(basic["data"]["active_personalized_followup_id"], "age_35_plus_multiple_monitoring")
-        self.assertIn("36岁", basic["data"]["personalized_followup"]["observation"])
-        self.assertIn("双胎", basic["data"]["personalized_followup"]["observation"])
-        self.assertIn("宫颈长度", basic["data"]["personalized_followup"]["followup_question"])
+        topic = _birth_journey_suggested_topic(basic, "age_35_plus_multiple_monitoring")
+        self.assertIn("36岁", topic["observation"])
+        self.assertIn("双胎", topic["observation"])
+        self.assertIn("宫颈长度", topic["followup_question"])
 
         compact = model_tool_output({"ok": True, "tool_name": "birth_journey_intake_manage", "result": basic})
 
-        self.assertEqual(compact["active_personalized_followup_id"], "age_35_plus_multiple_monitoring")
-        self.assertEqual(compact["personalized_followup"]["id"], "age_35_plus_multiple_monitoring")
+        self.assertEqual(compact["personalization_context"]["mode"], "model_driven_followup")
+        self.assertEqual(compact["personalization_context"]["suggested_topics"][0]["id"], "age_35_plus_multiple_monitoring")
         self.assertNotIn("initial_analysis", compact)
         self.assertNotIn("checkup_report_strategy", compact)
         self.assertNotIn("personalization_tags", compact)
@@ -1415,17 +1445,17 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         next_followup = manage_birth_journey_intake(
             {
                 "action": "submit_personalized_followup",
-                "payload": {"followup_id": "age_35_plus_multiple_monitoring", "answer": "暂无异常"},
+                "payload": {"topic": "age_35_plus_multiple_monitoring", "answer": "暂无异常"},
             },
             {**inputs, "_birth_journey_intake_state": basic["intake_state"]},
         )
-        self.assertEqual(next_followup["data"]["personalized_followup"]["id"], "prior_birth_history_detail")
+        self.assertEqual(_birth_journey_suggested_topics(next_followup)[0]["id"], "prior_birth_history_detail")
 
         combined_answered = manage_birth_journey_intake(
             {
                 "action": "submit_personalized_followup",
                 "payload": {
-                    "followup_id": "prior_birth_history_detail",
+                    "topic": "prior_birth_history_detail",
                     "answer": "上一胎是顺产，没有早产和产后出血问题",
                 },
             },
@@ -1455,13 +1485,30 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         )
 
         self.assertEqual(mismatched["next_step"], "personalized_followup")
-        self.assertEqual(mismatched["data"]["personalized_followup"]["id"], "age_35_plus_multiple_monitoring")
-        self.assertEqual(mismatched["data"]["active_personalized_followup_id"], "age_35_plus_multiple_monitoring")
-        self.assertNotIn("multiple_pregnancy_monitoring", mismatched["intake_state"].get("personalized_followups", {}))
-        self.assertEqual(
-            mismatched["intake_state"]["last_personalized_followup_mismatch"],
-            {"expected": "age_35_plus_multiple_monitoring", "received": "multiple_pregnancy_monitoring"},
+        self.assertIn("multiple_pregnancy_monitoring", mismatched["intake_state"].get("personalized_followups", {}))
+        self.assertEqual(mismatched["intake_state"]["personalized_followup_records"][0]["topic"], "multiple_pregnancy_monitoring")
+        self.assertNotIn("last_personalized_followup_mismatch", mismatched["intake_state"])
+
+    def test_birth_journey_model_followup_can_finish_without_repeating_topics(self) -> None:
+        inputs = {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00", "_birth_journey_intake_state": {}}
+        started = manage_birth_journey_intake({"action": "start", "payload": {}}, inputs)
+        basic = manage_birth_journey_intake(
+            {"action": "submit_basic_info", "payload": _basic_info_payload(age="36", fetus_count="双胎", first_birth="否")},
+            {**inputs, "_birth_journey_intake_state": started["intake_state"]},
         )
+
+        self.assertEqual(basic["next_step"], "personalized_followup")
+        self.assertEqual(_birth_journey_suggested_topics(basic)[0]["id"], "age_35_plus_multiple_monitoring")
+
+        finished = manage_birth_journey_intake(
+            {"action": "finish_personalized_followups", "payload": {"summary": "用户表示暂无异常，先按已知信息制定计划。"}},
+            {**inputs, "_birth_journey_intake_state": basic["intake_state"]},
+        )
+
+        self.assertEqual(finished["next_step"], "checkup_records_upload")
+        self.assertTrue(finished["intake_state"]["personalized_followup_done"])
+        self.assertEqual(finished["intake_state"]["personalized_followup_summary"], "用户表示暂无异常，先按已知信息制定计划。")
+        self.assertNotIn("personalization_context", finished["data"])
 
     def test_birth_journey_personalized_followups_share_source_reason_question_contract(self) -> None:
         inputs = {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00", "_birth_journey_intake_state": {}}
@@ -1475,27 +1522,15 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
             {**inputs, "_birth_journey_intake_state": started["intake_state"]},
         )
 
-        seen_ids: list[str] = []
-        while current["next_step"] == "personalized_followup":
-            followup = current["data"]["personalized_followup"]
-            confirmation_question = current["data"]["confirmation_question"]
-            seen_ids.append(followup["id"])
+        topics = _birth_journey_suggested_topics(current)
+        seen_ids = [str(topic["id"]) for topic in topics]
+        for followup in topics:
             self.assertTrue(followup["observation"])
             self.assertTrue(followup["meaning"])
             self.assertTrue(followup["followup_question"])
-            self.assertTrue(confirmation_question.startswith(followup["observation"]))
-            self.assertIn(followup["meaning"], confirmation_question)
-            self.assertIn(followup["followup_question"], confirmation_question)
             if followup["id"] == "pregnancy_milestone_status_detail":
                 self.assertIn("你36岁", followup["observation"])
                 self.assertIn("这次不是第一胎", followup["observation"])
-            current = manage_birth_journey_intake(
-                {
-                    "action": "submit_personalized_followup",
-                    "payload": {"followup_id": followup["id"], "answer": "还不确定"},
-                },
-                {**inputs, "_birth_journey_intake_state": current["intake_state"]},
-            )
 
         self.assertEqual(
             seen_ids,
@@ -1539,7 +1574,7 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         )
 
         self.assertEqual(basic["next_step"], "personalized_followup")
-        followup = basic["data"]["personalized_followup"]
+        followup = _birth_journey_suggested_topic(basic, "multiple_pregnancy_monitoring")
         self.assertEqual(followup["id"], "multiple_pregnancy_monitoring")
         self.assertIn("双胎", followup["observation"])
         self.assertNotIn("双胎/多胎", followup["observation"])
@@ -1576,12 +1611,12 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
 
         followup_ids: list[str] = []
         while current["next_step"] == "personalized_followup":
-            followup = current["data"]["personalized_followup"]
+            followup = _birth_journey_suggested_topics(current)[0]
             followup_ids.append(followup["id"])
             current = manage_birth_journey_intake(
                 {
                     "action": "submit_personalized_followup",
-                    "payload": {"followup_id": followup["id"], "answer": "继续下一步"},
+                    "payload": {"topic": followup["id"], "answer": "继续下一步"},
                 },
                 {**inputs, "_birth_journey_intake_state": current["intake_state"]},
             )
@@ -1592,12 +1627,13 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
                 "doctor_special_notes_followup",
                 "prior_c_section_birth_path_detail",
                 "prior_preterm_monitoring_detail",
-                "hypertension_or_preeclampsia_monitoring",
-                "diabetes_or_gdm_monitoring",
             ],
         )
-        self.assertEqual(len(followup_ids), 5)
+        self.assertEqual(len(followup_ids), 3)
         self.assertEqual(current["next_step"], "checkup_records_upload")
+        self.assertEqual(len(current["intake_state"]["personalized_followup_records"]), 3)
+        self.assertNotIn("hypertension_or_preeclampsia_monitoring", followup_ids)
+        self.assertNotIn("diabetes_or_gdm_monitoring", followup_ids)
         self.assertNotIn("chronic_medical_condition_coordination", followup_ids)
         self.assertNotIn("age_35_plus_checkup_detail", followup_ids)
 
@@ -1619,13 +1655,13 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         followup_ids: list[str] = []
         questions: list[str] = []
         while current["next_step"] == "personalized_followup":
-            followup = current["data"]["personalized_followup"]
+            followup = _birth_journey_suggested_topics(current)[0]
             followup_ids.append(followup["id"])
             questions.append(followup["followup_question"])
             current = manage_birth_journey_intake(
                 {
                     "action": "submit_personalized_followup",
-                    "payload": {"followup_id": followup["id"], "answer": "还不确定"},
+                    "payload": {"topic": followup["id"], "answer": "还不确定"},
                 },
                 {**inputs, "_birth_journey_intake_state": current["intake_state"]},
             )
@@ -1672,7 +1708,7 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         )
 
         self.assertEqual(basic["next_step"], "personalized_followup")
-        self.assertIn("我注意到你43岁", basic["data"]["personalized_followup"]["observation"])
+        self.assertIn("我注意到你43岁", _birth_journey_suggested_topic(basic, "age_35_plus_checkup_detail")["observation"])
         rendered_basic = json.dumps(basic, ensure_ascii=False)
         self.assertNotIn("entry_concern_question", rendered_basic)
         self.assertNotIn("你刚才提到有点焦虑", rendered_basic)
@@ -1681,7 +1717,7 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
             {
                 "action": "submit_personalized_followup",
                 "payload": {
-                    "followup_id": "age_35_plus_checkup_detail",
+                    "topic": "age_35_plus_checkup_detail",
                     "answer": "暂时没有明确异常",
                 },
             },
@@ -1770,41 +1806,41 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         )
 
         self.assertEqual(basic["next_step"], "personalized_followup")
-        self.assertEqual(basic["data"]["personalized_followup"]["id"], "age_35_plus_checkup_detail")
-        self.assertIn("我注意到你36岁", basic["data"]["personalized_followup"]["observation"])
-        self.assertIn("需要认真放进计划", basic["data"]["personalized_followup"]["observation"])
-        self.assertIn("胎盘情况", basic["data"]["personalized_followup"]["meaning"])
-        self.assertIn("血压/血糖", basic["data"]["personalized_followup"]["followup_question"])
-        self.assertIn("甲状腺/免疫或长期用药", basic["data"]["personalized_followup"]["followup_question"])
-        self.assertIn("有没有已经被提醒过或正在复查", basic["data"]["personalized_followup"]["followup_question"])
-        self.assertNotIn("目前最需要纳入计划", basic["data"]["personalized_followup"]["followup_question"])
-        self.assertNotIn("不代表一定有问题", basic["data"]["personalized_followup"]["meaning"])
-        self.assertNotIn("知道", basic["data"]["personalized_followup"]["followup_question"])
-        self.assertEqual(list(basic["data"]["personalized_followup"]["reply_options"]), ["血压/血糖", "甲状腺/用药", "暂无异常"])
-        self.assertIn("胎儿生长或胎盘羊水", basic["data"]["confirmation_question"])
+        topic = _birth_journey_suggested_topic(basic, "age_35_plus_checkup_detail")
+        self.assertEqual(topic["id"], "age_35_plus_checkup_detail")
+        self.assertIn("我注意到你36岁", topic["observation"])
+        self.assertIn("需要认真放进计划", topic["observation"])
+        self.assertIn("胎盘情况", topic["meaning"])
+        self.assertIn("血压/血糖", topic["followup_question"])
+        self.assertIn("甲状腺/免疫或长期用药", topic["followup_question"])
+        self.assertIn("有没有已经被提醒过或正在复查", topic["followup_question"])
+        self.assertNotIn("目前最需要纳入计划", topic["followup_question"])
+        self.assertNotIn("不代表一定有问题", topic["meaning"])
+        self.assertNotIn("知道", topic["followup_question"])
+        self.assertEqual(list(topic["reply_options"]), ["血压/血糖", "甲状腺/用药", "暂无异常"])
 
         compact = model_tool_output({"ok": True, "tool_name": "birth_journey_intake_manage", "result": basic})
 
         self.assertEqual(compact["next_step"], "personalized_followup")
-        self.assertIn("personalized_followup", compact)
-        self.assertEqual(compact["active_personalized_followup_id"], "age_35_plus_checkup_detail")
-        self.assertIn("observation", compact["personalized_followup"])
-        self.assertIn("followup_question", compact["personalized_followup"])
-        self.assertIn("reply_guidance", compact["personalized_followup"])
+        self.assertIn("personalization_context", compact)
+        self.assertEqual(compact["personalization_context"]["suggested_topics"][0]["id"], "age_35_plus_checkup_detail")
+        self.assertIn("observation", compact["personalization_context"]["suggested_topics"][0])
+        self.assertIn("followup_question", compact["personalization_context"]["suggested_topics"][0])
+        self.assertIn("reply_guidance", compact["personalization_context"]["suggested_topics"][0])
         self.assertNotIn("initial_analysis", compact)
         self.assertNotIn("checkup_report_strategy", compact)
         self.assertNotIn("personalization_tags", compact)
         self.assertIn("最多两小段", compact["final_response_instruction"])
-        self.assertIn("只问 personalized_followup.followup_question", compact["final_response_instruction"])
-        self.assertIn("active_personalized_followup_id", compact["final_response_instruction"])
-        self.assertIn("不要输出成长说明", compact["final_response_instruction"])
+        self.assertIn("基于 personalization_context", compact["final_response_instruction"])
+        self.assertIn("submit_personalized_followup", compact["final_response_instruction"])
+        self.assertIn("finish_personalized_followups", compact["final_response_instruction"])
         self.assertNotIn("再只问 personalized_followup.question", compact["final_response_instruction"])
-        self.assertIn("不要使用", compact["final_response_instruction"])
+        self.assertNotIn("active_personalized_followup_id", compact["final_response_instruction"])
 
         answered = manage_birth_journey_intake(
             {
                 "action": "submit_personalized_followup",
-                "payload": {"followup_id": "age_35_plus_checkup_detail", "answer": "暂时没有明确异常"},
+                "payload": {"topic": "age_35_plus_checkup_detail", "answer": "暂时没有明确异常"},
             },
             {**inputs, "_birth_journey_intake_state": basic["intake_state"]},
         )
@@ -1820,12 +1856,9 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
             {**inputs, "_birth_journey_intake_state": started["intake_state"]},
         )
 
-        replies = birth_journey_intake_quick_reply_guidance(
-            basic["next_step"],
-            personalized_followup=basic["data"]["personalized_followup"],
-        )
+        replies = birth_journey_intake_quick_reply_guidance(basic["next_step"])
 
-        self.assertEqual(replies, [{"text": "血压/血糖"}, {"text": "甲状腺/用药"}, {"text": "暂无异常"}])
+        self.assertEqual(replies, [{"text": "暂无异常"}, {"text": "还不确定"}, {"text": "我补充一下"}])
 
     def test_birth_journey_plan_still_acknowledges_explicit_anxiety(self) -> None:
         result = create_birth_journey_plan_card(

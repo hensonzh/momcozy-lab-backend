@@ -48,9 +48,10 @@ class BirthPrepPromptRuleTests(unittest.TestCase):
         self.assertIn("不要生成“帮我准备待产包”“看看本周重点”“整理分娩沟通单”等跨服务入口", skill)
         self.assertIn("不要把它们变成主流程之外的额外追问节点", skill)
         self.assertIn("不要把模型基于年龄、IVF、双胎、产检信息或用户措辞做出的推断", skill)
-        self.assertIn("先用 `observation` 做自然提醒式承接", skill)
-        self.assertIn("只问 `followup_question` 这一个具体问题", skill)
-        self.assertIn("不要停在纯解读", skill)
+        self.assertIn("工具会返回 `personalization_context`", skill)
+        self.assertIn("`suggested_topics`", skill)
+        self.assertIn("不要重复 `asked_followups`", skill)
+        self.assertIn("调用 `finish_personalized_followups`", skill)
         self.assertIn("收集会改变计划安排的事实", skill)
         self.assertIn("不是问用户知不知道该做什么", skill)
         self.assertNotIn("entry_concern_question", skill)
@@ -521,18 +522,19 @@ class BirthPrepPromptRuleTests(unittest.TestCase):
         description = str(FUNCTION_TOOLS["birth_journey_intake_manage"]["description"])
 
         self.assertIn("用户回答当前 next_step/confirmation_question 时，必须调用本工具", description)
-        self.assertIn("不要自行判断还缺哪个字段", description)
-        self.assertIn("不要追加询问工具未返回的字段", description)
+        self.assertIn("不要自行判断还缺哪个表单字段", description)
+        self.assertIn("不要追加询问工具未返回的主流程步骤", description)
         self.assertIn("30周/孕30周/30+几天", description)
         self.assertIn("不要为精确到天而追问", description)
         self.assertIn("不会作为单独追问节点阻塞主流程", description)
         self.assertIn("submit_entry_concern 仅用于历史会话兼容", description)
-        self.assertIn("先用 observation 做自然提醒式承接", description)
-        self.assertIn("只问 followup_question 这一个具体问题", description)
-        self.assertIn("不要停在纯解读", description)
+        self.assertIn("返回 personalization_context", description)
+        self.assertIn("suggested_topics", description)
+        self.assertIn("asked_followups", description)
+        self.assertIn("finish_personalized_followups", description)
         self.assertIn("收集会改变计划安排的事实", description)
         self.assertIn("不要问用户知不知道该做什么", description)
-        self.assertIn("active_personalized_followup_id", description)
+        self.assertNotIn("active_personalized_followup_id", description)
         self.assertNotIn("首句关键线索追问", description)
 
     def test_birth_journey_intake_output_keeps_followup_to_tool_next_step_only(self) -> None:
@@ -545,22 +547,27 @@ class BirthPrepPromptRuleTests(unittest.TestCase):
                     "status": "in_progress",
                     "action": "submit_basic_info",
                     "next_step": "personalized_followup",
-                    "summary": "基础信息已记录，下一步进行一个个性化追问。",
+                    "summary": "基础信息已记录，下一步由模型基于个性化上下文判断是否还需要补充一个核心事实。",
                     "data": {
-                        "assistant_instruction": "围绕 personalized_followup 只问一个具体问题。",
-                        "confirmation_question": "目前最需要纳入计划的是哪类情况：血压/血糖，甲状腺/免疫或长期用药，还是暂时没有明确异常？",
+                        "assistant_instruction": "基于 personalization_context 自主判断本轮是否还需要追问。",
+                        "confirmation_question": "基于个性化上下文，只补充一个会影响孕期计划安排的核心事实。",
                         "completed_groups": ["basic_info"],
                         "initial_analysis": {"summary": "用户36岁，孕20周。"},
                         "checkup_report_strategy": {"mode": "suggest_upload_or_skip"},
                         "personalization_tags": ["age_35_plus", "multiple_pregnancy"],
-                        "active_personalized_followup_id": "advanced_age_screening_choice",
-                        "personalized_followup": {
-                            "id": "advanced_age_screening_choice",
-                            "observation": "我注意到你现在属于产科上会被归入“高龄孕产妇”的范围。",
-                            "meaning": "这更多是管理上的分类，不代表一定有风险，主要是计划里需要提前关注血压、血糖、用药复查和胎儿生长这类信息。",
-                            "followup_question": "目前最需要纳入计划的是哪类情况：血压/血糖，甲状腺/免疫或长期用药，还是暂时没有明确异常？",
-                            "reply_guidance": "如果有筛查异常、胎盘/羊水或胎儿生长复查，也可以直接补充，我会一起纳入计划。",
-                            "reply_options": ("血压/血糖", "甲状腺/用药", "暂时没有"),
+                        "personalization_context": {
+                            "mode": "model_driven_followup",
+                            "profile_facts": {"age": "36", "current_week": "20周"},
+                            "suggested_topics": [
+                                {
+                                    "id": "age_35_plus_checkup_detail",
+                                    "observation": "我注意到你36岁，按产科管理属于“高龄孕产妇”。",
+                                    "meaning": "高龄会让筛查选择、血压血糖、用药复查和胎儿生长更需要提前对齐。",
+                                    "followup_question": "你现在有没有正在复查或用药的情况？",
+                                }
+                            ],
+                            "asked_followups": [],
+                            "followup_policy": {"max_rounds": 3, "remaining_rounds": 3},
                         },
                     },
                 },
@@ -568,14 +575,16 @@ class BirthPrepPromptRuleTests(unittest.TestCase):
         )
 
         instruction = compact["final_response_instruction"]
-        self.assertEqual(compact["active_personalized_followup_id"], "advanced_age_screening_choice")
+        self.assertEqual(compact["personalization_context"]["mode"], "model_driven_followup")
+        self.assertEqual(compact["personalization_context"]["suggested_topics"][0]["id"], "age_35_plus_checkup_detail")
         self.assertNotIn("initial_analysis", compact)
         self.assertNotIn("checkup_report_strategy", compact)
         self.assertNotIn("personalization_tags", compact)
-        self.assertIn("personalized_followup.observation", instruction)
-        self.assertIn("followup_question 这一个具体问题", instruction)
-        self.assertIn("active_personalized_followup_id", instruction)
-        self.assertIn("不要停在纯解读", instruction)
+        self.assertIn("基于 personalization_context", instruction)
+        self.assertIn("suggested_topics", instruction)
+        self.assertIn("asked_followups", instruction)
+        self.assertIn("finish_personalized_followups", instruction)
+        self.assertNotIn("active_personalized_followup_id", instruction)
         self.assertIn("收集会改变计划安排的事实", instruction)
         self.assertIn("不要同时追问症状、生活方式或喂养信息", instruction)
         self.assertIn("不要再调用 ui_quick_replies_create", instruction)

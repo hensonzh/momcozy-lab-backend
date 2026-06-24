@@ -2091,7 +2091,8 @@ def manage_birth_journey_intake(args: dict[str, Any], inputs: RuntimeInputs) -> 
         basic_info = _birth_journey_basic_info_payload(payload)
         if basic_info:
             intake_state["basic_info"] = {**_dict_value(intake_state.get("basic_info")), **basic_info}
-            _refresh_birth_journey_personalized_followup_queue(intake_state)
+            intake_state.pop("personalized_followup_queue", None)
+            intake_state.pop("active_personalized_followup_id", None)
             _persist_birth_prep_profile_memory(inputs, basic_info)
     elif action == "submit_entry_concern":
         intake_state["entry_concern_followup"] = _birth_journey_text_or_skipped(payload, "entry_concern_followup")
@@ -2128,20 +2129,45 @@ def manage_birth_journey_intake(args: dict[str, Any], inputs: RuntimeInputs) -> 
     elif action == "submit_risk_factors":
         intake_state["risk_factors"] = _birth_journey_text_or_skipped(payload, "risk_factors")
     elif action == "submit_personalized_followup":
-        requested_followup_id = _first_text(payload.get("followup_id"), payload.get("id"), payload.get("current_followup_id"))
-        current_followup = _birth_journey_next_personalized_followup(intake_state)
-        active_followup_id = str(current_followup.get("id") or "").strip() if current_followup else ""
-        followup_id = requested_followup_id or active_followup_id
-        if requested_followup_id and requested_followup_id != active_followup_id:
-            intake_state["last_personalized_followup_mismatch"] = {
-                "expected": active_followup_id,
-                "received": requested_followup_id,
-            }
-        elif followup_id:
-            followups = _dict_value(intake_state.get("personalized_followups"))
-            followups[followup_id] = _birth_journey_text_or_skipped(payload, "answer")
-            intake_state["personalized_followups"] = followups
-            intake_state.pop("last_personalized_followup_mismatch", None)
+        topic = _first_text(
+            payload.get("topic_id"),
+            payload.get("topic"),
+            payload.get("followup_id"),
+            payload.get("id"),
+            payload.get("current_followup_id"),
+        )
+        answer = _birth_journey_text_or_skipped(payload, "answer")
+        question = _first_text(payload.get("question"), payload.get("followup_question"))
+        plan_impact = _first_text(payload.get("plan_impact"), payload.get("impact"), payload.get("summary"))
+        if not topic:
+            topic = f"model_followup_{len(_birth_journey_personalized_followup_records(intake_state)) + 1}"
+        candidates_by_id = _birth_journey_personalized_followup_candidates_by_id(intake_state)
+        if not plan_impact:
+            plan_impact = _first_text(candidates_by_id.get(topic, {}).get("meaning"))
+        followups = _dict_value(intake_state.get("personalized_followups"))
+        followups[topic] = answer
+        intake_state["personalized_followups"] = followups
+        records = _birth_journey_personalized_followup_records(intake_state)
+        record: dict[str, str] = {"topic": topic, "answer": answer}
+        if question:
+            record["question"] = question
+        if plan_impact:
+            record["plan_impact"] = plan_impact
+        records.append(record)
+        intake_state["personalized_followup_records"] = records[:BIRTH_JOURNEY_MODEL_FOLLOWUP_MAX_ROUNDS]
+        intake_state.pop("last_personalized_followup_mismatch", None)
+        intake_state.pop("active_personalized_followup_id", None)
+        if any(
+            _birth_journey_model_followup_done_value(payload.get(key))
+            for key in ("complete_personalization", "done", "finished", "ready_for_checkup_records")
+        ):
+            intake_state["personalized_followup_done"] = True
+    elif action == "finish_personalized_followups":
+        note = _first_text(payload.get("summary"), payload.get("answer"), payload.get("note"))
+        if note:
+            intake_state["personalized_followup_summary"] = note
+        intake_state["personalized_followup_done"] = True
+        intake_state.pop("active_personalized_followup_id", None)
     elif action == "submit_current_symptoms":
         intake_state["current_symptoms"] = _birth_journey_text_or_skipped(payload, "current_symptoms")
     elif action == "submit_lifestyle_context":
@@ -2161,16 +2187,8 @@ def manage_birth_journey_intake(args: dict[str, Any], inputs: RuntimeInputs) -> 
     initial_analysis = _birth_journey_initial_analysis(plan_context)
     checkup_report_strategy = _birth_journey_checkup_report_strategy(intake_state)
     personalization_tags = _birth_journey_personalization_tags(intake_state)
-    personalized_followup = _birth_journey_next_personalized_followup(intake_state)
-    active_followup_id = (
-        str(personalized_followup.get("id") or "").strip()
-        if personalized_followup and next_step == "personalized_followup"
-        else ""
-    )
-    if active_followup_id:
-        intake_state["active_personalized_followup_id"] = active_followup_id
-    else:
-        intake_state.pop("active_personalized_followup_id", None)
+    personalization_context = _birth_journey_personalization_context(intake_state)
+    intake_state.pop("active_personalized_followup_id", None)
     status = _birth_journey_intake_status(next_step, intake_state)
     result: dict[str, Any] = {
         "tool_name": "birth_journey_intake_manage",
@@ -2186,11 +2204,10 @@ def manage_birth_journey_intake(args: dict[str, Any], inputs: RuntimeInputs) -> 
             "initial_analysis": initial_analysis,
             "checkup_report_strategy": checkup_report_strategy,
             "personalization_tags": personalization_tags,
-            "active_personalized_followup_id": active_followup_id,
         },
     }
-    if personalized_followup and next_step == "personalized_followup":
-        result["data"]["personalized_followup"] = personalized_followup
+    if next_step == "personalized_followup":
+        result["data"]["personalization_context"] = personalization_context
     if next_step == "basic_info_form":
         result["form"] = _birth_journey_basic_info_form(plan_context, inputs)
     if next_step == "checkup_records_upload":
@@ -3029,7 +3046,7 @@ def _birth_journey_intake_completed_groups(state: dict[str, Any]) -> list[str]:
 def _birth_journey_intake_next_step(state: dict[str, Any]) -> str:
     if _birth_journey_missing_required_basic_info_fields(_birth_journey_intake_basic_context(state)):
         return "basic_info_form"
-    if _birth_journey_next_personalized_followup(state):
+    if _birth_journey_should_continue_model_personalized_followup(state):
         return "personalized_followup"
     if _birth_journey_should_ask_checkup_done(state):
         return "checkup_done_question"
@@ -3121,6 +3138,7 @@ BIRTH_JOURNEY_RISK_RELEVANT_PERSONALIZATION_TAGS = {
 }
 BIRTH_JOURNEY_PERSONALIZED_FOLLOWUP_LIMIT = 5
 BIRTH_JOURNEY_PERSONALIZED_FOLLOWUP_TARGET_WITH_SIGNAL = 1
+BIRTH_JOURNEY_MODEL_FOLLOWUP_MAX_ROUNDS = 3
 BIRTH_JOURNEY_PERSONALIZED_REPLY_GUIDANCE = (
     "不清楚也可以回“还不确定”，我会先放进下次产检待确认。"
 )
@@ -3627,6 +3645,156 @@ def _birth_journey_next_personalized_followup(state: dict[str, Any]) -> dict[str
     return None
 
 
+def _birth_journey_model_followup_done_value(value: Any) -> bool:
+    if value is True:
+        return True
+    if isinstance(value, str):
+        return value.strip().lower() in {
+            "true",
+            "1",
+            "yes",
+            "done",
+            "completed",
+            "finish",
+            "finished",
+            "完成",
+            "已完成",
+            "结束",
+            "够了",
+            "不用继续",
+        }
+    return False
+
+
+def _birth_journey_personalized_followup_records(state: dict[str, Any]) -> list[dict[str, str]]:
+    raw_records = state.get("personalized_followup_records")
+    if not isinstance(raw_records, list):
+        return []
+    records: list[dict[str, str]] = []
+    for raw_record in raw_records:
+        if not isinstance(raw_record, dict):
+            continue
+        topic = _first_text(raw_record.get("topic_id"), raw_record.get("topic"), raw_record.get("followup_id"), raw_record.get("id"))
+        answer = _first_answer_text(raw_record.get("answer"), raw_record.get("text"), raw_record.get("note"))
+        question = _first_text(raw_record.get("question"), raw_record.get("followup_question"))
+        plan_impact = _first_text(raw_record.get("plan_impact"), raw_record.get("impact"), raw_record.get("summary"))
+        if not topic and not answer and not question:
+            continue
+        record: dict[str, str] = {}
+        if topic:
+            record["topic"] = topic
+        if question:
+            record["question"] = question
+        if answer:
+            record["answer"] = answer
+        if plan_impact:
+            record["plan_impact"] = plan_impact
+        records.append(record)
+        if len(records) >= BIRTH_JOURNEY_MODEL_FOLLOWUP_MAX_ROUNDS:
+            break
+    return records
+
+
+def _birth_journey_model_answered_followup_topics(state: dict[str, Any]) -> set[str]:
+    topics = {
+        str(topic or "").strip()
+        for topic in _dict_value(state.get("personalized_followups")).keys()
+        if str(topic or "").strip()
+    }
+    for record in _birth_journey_personalized_followup_records(state):
+        topic = str(record.get("topic") or "").strip()
+        if topic:
+            topics.add(topic)
+    return topics
+
+
+def _birth_journey_model_suggested_followup_topics(state: dict[str, Any]) -> list[dict[str, Any]]:
+    answered_topics = _birth_journey_model_answered_followup_topics(state)
+    topics: list[dict[str, Any]] = []
+    for followup in _birth_journey_personalized_followup_candidates(state):
+        payload = _birth_journey_personalized_followup_payload(followup)
+        topic_id = str(payload.get("id") or "").strip()
+        if topic_id and topic_id in answered_topics:
+            continue
+        topics.append(payload)
+        if len(topics) >= BIRTH_JOURNEY_PERSONALIZED_FOLLOWUP_LIMIT:
+            break
+    return topics
+
+
+def _birth_journey_should_continue_model_personalized_followup(state: dict[str, Any]) -> bool:
+    if state.get("personalized_followup_done") is True:
+        return False
+    if len(_birth_journey_personalized_followup_records(state)) >= BIRTH_JOURNEY_MODEL_FOLLOWUP_MAX_ROUNDS:
+        return False
+    return bool(_birth_journey_model_suggested_followup_topics(state))
+
+
+def _birth_journey_model_followup_profile_facts(state: dict[str, Any]) -> dict[str, Any]:
+    context = _birth_journey_intake_basic_context(state)
+    facts: dict[str, Any] = {}
+    for key in (
+        "current_week",
+        "due_date_or_week",
+        "age",
+        "ivf",
+        "fetus_count",
+        "first_birth",
+        "birth_path",
+        "city_or_country",
+        "birth_hospital",
+        "prior_birth_history",
+        "medical_notes",
+        "doctor_notes",
+    ):
+        value = context.get(key)
+        if _has_meaningful_value(value):
+            facts[key] = value
+    week = _birth_journey_intake_week(state)
+    if week:
+        facts["stage"] = _birth_journey_stage_from_week(week)
+    return facts
+
+
+def _birth_journey_model_followup_implications(topics: list[dict[str, Any]]) -> list[dict[str, str]]:
+    implications: list[dict[str, str]] = []
+    for topic in topics:
+        topic_id = str(topic.get("id") or "").strip()
+        title = str(topic.get("title") or "").strip()
+        meaning = str(topic.get("meaning") or "").strip()
+        if not topic_id or not meaning:
+            continue
+        implications.append({"topic": topic_id, "title": title, "plan_impact": meaning})
+    return implications
+
+
+def _birth_journey_personalization_context(state: dict[str, Any]) -> dict[str, Any]:
+    suggested_topics = _birth_journey_model_suggested_followup_topics(state)
+    asked_followups = _birth_journey_personalized_followup_records(state)
+    asked_count = len(asked_followups)
+    return {
+        "mode": "model_driven_followup",
+        "profile_facts": _birth_journey_model_followup_profile_facts(state),
+        "planning_implications": _birth_journey_model_followup_implications(suggested_topics),
+        "suggested_topics": suggested_topics,
+        "asked_followups": asked_followups,
+        "followup_policy": {
+            "max_rounds": BIRTH_JOURNEY_MODEL_FOLLOWUP_MAX_ROUNDS,
+            "asked_count": asked_count,
+            "remaining_rounds": max(0, BIRTH_JOURNEY_MODEL_FOLLOWUP_MAX_ROUNDS - asked_count),
+            "ask_only_one_question": True,
+            "do_not_repeat_topics": True,
+            "skip_counts_as_answered": True,
+            "may_finish_when_enough": True,
+        },
+        "decision_instruction": (
+            "基于 profile_facts、planning_implications 和 suggested_topics 自主决定本轮是否还需要追问。"
+            "需要追问时，只选择一个最会影响计划安排的事实，用 topic/id 记录；"
+            "如果用户已经回答没有异常、跳过、或你判断信息已足够，调用 finish_personalized_followups。"
+        ),
+    }
+
+
 def _birth_journey_personalization_tags(state: dict[str, Any]) -> list[str]:
     tags: list[str] = []
     for item in _birth_journey_personalized_followup_queue(state):
@@ -3782,7 +3950,7 @@ def _birth_journey_symptoms_need_pause(text: str) -> bool:
 def _birth_journey_intake_summary(next_step: str) -> str:
     summaries = {
         "basic_info_form": "需要先填写孕周与基本情况表单。",
-        "personalized_followup": "基础信息已记录，下一步进行一个个性化追问。",
+        "personalized_followup": "基础信息已记录，下一步由模型基于个性化上下文判断是否还需要补充一个核心事实。",
         "checkup_done_question": "基础信息已记录，孕早期先确认是否已经做过产检。",
         "checkup_records_upload": "基础信息已记录，下一步建议上传产检记录；报告不在手边可以先跳过。",
         "final_plan_confirmation": "产检记录步骤已处理，生成计划前最后确认是否还有补充信息。",
@@ -3798,7 +3966,7 @@ def _birth_journey_intake_instruction(next_step: str) -> str:
         "checkup_done_question": "先用 initial_analysis 对基础信息做 1-2 句承接，然后只确认是否做过产检；如果做过，下一步再建议上传产检报告；如果没做过，可以先跳过报告上传。",
         "checkup_records_upload": "先用 initial_analysis 对基础信息做 1-2 句承接，然后建议用户上传最新一次或目前能找到的产检记录；如果报告不在手边也可以先跳过。",
         "final_plan_confirmation": "生成孕期计划前，只问一句：还有其他需要补充的信息吗？如果没有，我就基于目前的信息开始为你制定孕期计划啦。不要展开计划内容，也不要追加其它问题。",
-        "personalized_followup": "用 personalized_followup.observation 和 personalized_followup.meaning 简短承接，再只问 personalized_followup.followup_question 这一个具体问题；最多两小段，不要把所有字段逐字拼接。结尾可自然带上 personalized_followup.reply_guidance，但不要把它写成第三段长说明。不要改写成“医生有没有交代/安排/说明”的问句，也不要额外展开成多题问卷。",
+        "personalized_followup": "基于 personalization_context 自主判断本轮是否还需要追问；如果需要，只选一个最影响计划安排的事实，先承接用户已提供的信息，再问一个具体问题；如果信息已足够、用户表示没有异常或想跳过，调用 finish_personalized_followups。",
         "pause_for_symptoms": "先承接用户情况，建议优先联系医生/医院确认；不要继续生成孕期计划。",
         "generate_plan": "直接调用 birth_journey_plan_card_create，plan_context 使用本工具返回的 plan_context；工具调用前不要先输出路线图。",
     }
@@ -3815,8 +3983,7 @@ def _birth_journey_intake_question(next_step: str, plan_context: dict[str, Any],
     if next_step == "final_plan_confirmation":
         return "还有其他需要补充的信息吗？如果没有，我就基于目前的信息开始为你制定孕期计划啦。"
     if next_step == "personalized_followup":
-        followup = _birth_journey_next_personalized_followup(state)
-        return _birth_journey_personalized_followup_prompt_text(followup)
+        return "基于个性化上下文，只补充一个会影响孕期计划安排的核心事实；如果信息已经够了，可以直接结束个性化追问。"
     if next_step == "pause_for_symptoms":
         return "针对你挡下的这种情况。我建议可以先暂停制定计划，优先按医生或医院建议处理当前症状。"
     return ""
@@ -3906,7 +4073,7 @@ def birth_journey_intake_quick_reply_guidance(
         "checkup_done_question": ("做过产检", "还没做过", "不确定先跳过"),
         "checkup_records_upload": ("产检记录上传完毕", "先跳过这步", "我现在没有记录"),
         "final_plan_confirmation": ("没有了，开始制定", "我想补充一点", "稍等我再看看"),
-        "personalized_followup": ("继续下一步", "按待确认放进计划", "我想补充一点"),
+        "personalized_followup": ("暂无异常", "还不确定", "我补充一下"),
     }
     texts = replies_by_step.get(str(next_step or "").strip())
     if not texts:
@@ -3994,6 +4161,7 @@ def _birth_journey_plan_context_from_intake(state: dict[str, Any]) -> dict[str, 
     if state.get("checkup_records_uploaded") is True:
         context["checkup_records_uploaded"] = "是"
     personalized_followups = _dict_value(state.get("personalized_followups"))
+    personalized_records = _birth_journey_personalized_followup_records(state)
     personalization_tags = _birth_journey_personalization_tags(state)
     if personalization_tags:
         context["personalization_tags"] = personalization_tags
@@ -4040,6 +4208,23 @@ def _birth_journey_plan_context_from_intake(state: dict[str, Any]) -> dict[str, 
             "doctor_notes",
             _birth_journey_personalized_followup_text(personalized_followups, "gestational_week_basis_detail"),
         )
+    if personalized_records:
+        context["personalized_followup_records"] = personalized_records
+        personalized_facts = "；".join(
+            " / ".join(
+                part
+                for part in (
+                    record.get("topic"),
+                    record.get("answer"),
+                    record.get("plan_impact"),
+                )
+                if part
+            )
+            for record in personalized_records
+        )
+        if personalized_facts:
+            context["personalized_facts"] = personalized_facts
+            _append_birth_journey_context_text(context, "doctor_notes", personalized_facts)
     for key in (
         "risk_factors",
         "current_symptoms",
@@ -4220,6 +4405,12 @@ def _build_birth_journey_plan_card_json(form_data: dict[str, Any], scope: str, i
         8,
     )
     personalized_followups = _dict_value(form_data.get("personalized_followups"))
+    personalized_followup_records = (
+        [item for item in form_data.get("personalized_followup_records") if isinstance(item, dict)]
+        if isinstance(form_data.get("personalized_followup_records"), list)
+        else []
+    )
+    personalized_facts = _first_answer_text(form_data.get("personalized_facts"))
     prior_birth_history = _text_list(
         _first_answer_text(
             form_data.get("prior_birth_history"),
@@ -4254,6 +4445,8 @@ def _build_birth_journey_plan_card_json(form_data: dict[str, Any], scope: str, i
             _birth_journey_personalized_followup_text(personalized_followups, "doctor_special_notes_followup"),
         )
     )
+    if personalized_facts:
+        doctor_notes.extend(_text_list(personalized_facts))
     final_additional_info = _first_answer_text(form_data.get("final_additional_info"))
     risk_factors = _unique_text_list(
         form_data.get("risk_factors")
@@ -4326,6 +4519,8 @@ def _build_birth_journey_plan_card_json(form_data: dict[str, Any], scope: str, i
         "medical_notes": medical_notes,
         "doctor_notes": doctor_notes,
         "personalized_followups": personalized_followups,
+        "personalized_followup_records": personalized_followup_records,
+        "personalized_facts": personalized_facts,
         "current_week": timeline.get("current_week"),
     }
     phases = [_birth_journey_phase_payload(spec, context) for spec in timeline["phase_specs"]]

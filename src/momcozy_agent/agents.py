@@ -1570,16 +1570,11 @@ def _compact_birth_journey_intake_output(safe: dict[str, Any], raw_result: dict[
         "completed_groups": data.get("completed_groups"),
     }
     if next_step == "personalized_followup":
-        personalized_followup = data.get("personalized_followup")
-        if isinstance(personalized_followup, dict):
-            compact["personalized_followup"] = personalized_followup
-            active_followup_id = str(
-                data.get("active_personalized_followup_id") or personalized_followup.get("id") or ""
-            ).strip()
-            if active_followup_id:
-                compact["active_personalized_followup_id"] = active_followup_id
+        personalization_context = data.get("personalization_context")
+        if isinstance(personalization_context, dict):
+            compact["personalization_context"] = personalization_context
     else:
-        for key in ("initial_analysis", "checkup_report_strategy", "personalization_tags", "personalized_followup"):
+        for key in ("initial_analysis", "checkup_report_strategy", "personalization_tags"):
             value = data.get(key)
             if value not in (None, "", []):
                 compact[key] = value
@@ -1643,16 +1638,13 @@ def _compact_birth_journey_intake_output(safe: dict[str, Any], raw_result: dict[
         )
     elif next_step == "personalized_followup":
         compact["final_response_instruction"] = (
-            "最终回复最多两小段，第一句必须点明 personalized_followup.observation 里的用户已提供信息，"
-            "再用 personalized_followup.meaning 简短解释为什么影响计划；然后只问 personalized_followup.followup_question 这一个具体问题。"
-            "可以把 personalized_followup.reply_guidance 压缩到同一段末尾，但不要逐字照读所有字段，不要输出成长说明。"
-            "用户下一轮回答这个问题时，必须把 active_personalized_followup_id 作为 followup_id 原样传回 birth_journey_intake_manage。"
-            "这一轮只推进一个个性化追问，不要停在纯解读，必须落到这个具体追问。"
+            "最终回复基于 personalization_context 自主判断是否还需要追问。"
+            "如果需要追问，只选一个最会影响孕期计划安排的事实，最多两小段：先自然承接用户已提供的信息，再问一个具体问题。"
+            "可以参考 suggested_topics，但不要逐字照读，不要把多个 topic 合成问卷，也不要重复 asked_followups 里已经问过的内容。"
+            "下一轮用户回答时，用 submit_personalized_followup 记录 topic、question、answer 和可选 plan_impact；如果信息已足够、用户表示暂无异常/跳过，调用 finish_personalized_followups。"
             "个性化追问的目的不是确认用户知不知道怎么做，也不是问用户最想了解什么，而是收集会改变计划安排的事实。"
             "不要改写成“医生有没有交代/安排/说明”这类问题，也不要要求用户必须回答医生说过什么。"
-            "不要使用“这个分类听起来可能会让人紧一下”或“年龄因素会让产检沟通更具体一点”这类突兀或抽象表达；"
-            "涉及高龄时，不要说“不代表一定有问题”，要关切地指出这是需要认真纳入计划的产科管理因素，简短说明潜在关注点后再收集具体事实。"
-            "不要把追问写成“目前最需要纳入计划的是哪类情况”，要直接问用户有没有正在复查、用药或被提醒的具体情况。"
+            "涉及高龄时，要关切地指出这是需要认真纳入计划的产科管理因素，简短说明潜在关注点后再收集具体事实。"
             "不要同时追问症状、生活方式或喂养信息，也不要生成孕期计划。"
             "当前步骤的快捷回复已由应用侧准备好，不要再调用 ui_quick_replies_create。"
         )
