@@ -4640,7 +4640,13 @@ def _birth_journey_base_todo_catalog() -> tuple[dict[str, Any], ...]:
             "week_end": 5,
             "title": "准备第一次看医生要带的信息",
             "reason": "首次就诊前先把孕周口径、验孕结果、用药和补剂准备好，医生更容易判断下一步检查。",
-            "steps": ["把末次月经和验孕结果放进产检资料", "核对正在吃的药和补剂", "预约或确认首次就诊入口"],
+            "steps": [
+                "写下末次月经第一天、验孕日期和验孕结果",
+                "把验孕试纸照片、抽血结果或已有报告放进产检资料",
+                "列出正在吃的药、叶酸、维生素和其他补剂",
+                "预约或确认首次就诊入口，并记下科室、时间和地点",
+                "就诊当天带身份证件、医保材料和既往病史资料",
+            ],
             "done_criteria": "已准备好孕周口径、验孕结果、当前用药补剂和首次就诊安排。",
             "source_tags": ["week_1_5", "dating"],
         },
@@ -4650,7 +4656,13 @@ def _birth_journey_base_todo_catalog() -> tuple[dict[str, Any], ...]:
             "week_end": 8,
             "title": "约好B超，也记得看结果",
             "reason": "这个阶段不只是做 B 超，还要知道结果什么时候看、异常时按哪个入口联系医院。",
-            "steps": ["预约或确认 B 超日期和地点", "设置报告回看提醒", "保存异常时联系医院的入口"],
+            "steps": [
+                "预约或确认 B 超日期、地点和是否需要憋尿",
+                "检查当天带上验孕或抽血结果、身份证件和就诊卡",
+                "做完后当场问清报告什么时候出、在哪里看",
+                "拿到报告后看是否写明宫内妊娠、胎心胎芽或需复查",
+                "把异常时联系医院的电话或线上入口存到手机",
+            ],
             "done_criteria": "已安排 B 超、设置报告回看提醒，并保存异常联系入口。",
             "source_tags": ["week_6_8", "ultrasound"],
         },
@@ -4660,7 +4672,13 @@ def _birth_journey_base_todo_catalog() -> tuple[dict[str, Any], ...]:
             "week_end": 10,
             "title": "把建档材料放在一起",
             "reason": "建档前把证件、已有报告、病史和补剂信息集中好，能减少临时补材料和重复跑医院。",
-            "steps": ["把证件和医保材料放进同一处", "归拢已有检查报告", "把病史过敏史和补剂放进资料包"],
+            "steps": [
+                "把身份证件、医保材料、就诊卡和建档要求放进同一资料袋",
+                "按时间顺序整理已有 B 超、抽血、尿检和病史报告",
+                "单独写下过敏史、基础病、手术史和长期用药",
+                "把叶酸、钙铁、维生素等补剂名称和剂量记在手机里",
+                "建档前一天核对医院要求，缺材料就先放进下次补交提醒",
+            ],
             "done_criteria": "已形成一份建档材料包，下次产检能直接带走。",
             "source_tags": ["week_8_10", "booking"],
         },
@@ -4670,7 +4688,13 @@ def _birth_journey_base_todo_catalog() -> tuple[dict[str, Any], ...]:
             "week_end": 13,
             "title": "约好NT/早筛并设置提醒",
             "reason": "NT 和早孕筛查有时间窗口，要同时记下日期、地点和报告回看时间。",
-            "steps": ["预约或确认 NT 和抽血日期", "把地点和当天准备放进日历", "设置报告回看提醒"],
+            "steps": [
+                "确认 NT 检查日期在医院要求的孕周窗口内",
+                "同时确认早筛抽血是否同一天做、是否需要空腹",
+                "把检查地点、到院时间和当天要带的材料写进日历",
+                "检查后保存 NT 数值、报告结论和医生备注",
+                "设置报告回看提醒，标出需要复查或转诊的提示",
+            ],
             "done_criteria": "已安排 NT/早筛日期、地点、当天准备和报告回看提醒。",
             "source_tags": ["week_11_13", "nt_screening"],
         },
@@ -4680,7 +4704,13 @@ def _birth_journey_base_todo_catalog() -> tuple[dict[str, Any], ...]:
             "week_end": 20,
             "title": "定下唐筛或无创怎么做",
             "reason": "这几周要把唐筛、无创 DNA 或羊穿的选择落到具体检查和报告回看安排上。",
-            "steps": ["带上早筛或 NT 结果", "和医生确定做唐筛、无创还是羊穿", "设置报告回看或复查提醒"],
+            "steps": [
+                "把 NT、早筛、既往染色体筛查结果带到产检",
+                "和医生确认适合唐筛、无创 DNA 还是羊水穿刺",
+                "如果做抽血筛查，确认抽血时间、地点和出报告方式",
+                "如果需要羊穿，先记下预约窗口、术前检查和术后注意事项",
+                "设置报告回看提醒，并写下异常或临界结果的下一步入口",
+            ],
             "done_criteria": "已定下中期筛查怎么做，并安排好报告回看或复查提醒。",
             "source_tags": ["week_15_20", "mid_screening"],
         },
@@ -4690,7 +4720,13 @@ def _birth_journey_base_todo_catalog() -> tuple[dict[str, Any], ...]:
             "week_end": 22,
             "title": "约好大排畸当天安排",
             "reason": "大排畸通常要提前排队，检查前把时间、地点、陪同和复查入口都安排好。",
-            "steps": ["预约或确认检查日期和地点", "安排检查当天交通和陪同", "保存需要复查时的预约入口"],
+            "steps": [
+                "预约或确认大排畸日期、地点和预计检查时长",
+                "检查前一天准备产检本、既往 B 超和筛查报告",
+                "安排当天交通和陪同，给等待时间留出缓冲",
+                "检查时问清胎儿结构、胎盘、羊水和宫颈相关结论",
+                "保存需要补扫或复查时的预约入口和时间窗口",
+            ],
             "done_criteria": "已安排大排畸预约、当天陪同交通和复查入口。",
             "source_tags": ["week_18_22", "anomaly_scan"],
         },
@@ -4700,7 +4736,13 @@ def _birth_journey_base_todo_catalog() -> tuple[dict[str, Any], ...]:
             "week_end": 24,
             "title": "看完大排畸，定好是否复查",
             "reason": "报告出来后，要把胎盘、羊水、胎儿结构提示和是否复查变成明确的下一步安排。",
-            "steps": ["带报告给医生回看", "确认胎盘羊水和结构提示结论", "把复查日期或无需复查结论加进日历"],
+            "steps": [
+                "拿到报告后先拍照保存，再带给产检医生回看",
+                "逐项确认胎儿结构、胎盘位置、羊水和宫颈长度提示",
+                "把报告里写着建议复查、随访或观察的内容圈出来",
+                "和医生确定复查日期、复查项目，或确认无需复查",
+                "把复查日期和需要带的报告加进日历提醒",
+            ],
             "done_criteria": "已完成报告回看，并明确是否需要复查及复查时间。",
             "source_tags": ["week_20_24", "report_review"],
         },
@@ -4729,7 +4771,13 @@ def _birth_journey_base_todo_catalog() -> tuple[dict[str, Any], ...]:
             "week_end": 31,
             "title": "每天固定看胎动和不舒服",
             "reason": "进入晚孕期后，胎动、血压、体重和水肿需要固定观察，不对劲时也要知道联系谁。",
-            "steps": ["定一个每天看胎动的时间", "顺手留意明显不舒服", "保存不对劲时联系医院的方式"],
+            "steps": [
+                "选一个宝宝平时活跃、自己也方便安静观察的固定时段",
+                "每天在同一时段留意胎动变化，并记录明显变多或变少",
+                "顺手观察头痛、视物模糊、水肿、腹痛、出血或流水",
+                "把医院产科电话、急诊入口和线上问诊入口存到手机",
+                "出现胎动明显变化、破水样流水或持续腹痛时按医院口径联系",
+            ],
             "done_criteria": "已定好每天看胎动的时间，并保存不对劲时联系医院的方式。",
             "source_tags": ["week_28_31", "movement_monitoring"],
         },
@@ -4739,7 +4787,13 @@ def _birth_journey_base_todo_catalog() -> tuple[dict[str, Any], ...]:
             "week_end": 31,
             "title": "定好下一次晚孕产检提醒",
             "reason": "这几周要把下次产检、胎儿生长、血压体重和尿常规复查提前排上。",
-            "steps": ["确认下次产检日期和地点", "把复查项目加入提醒", "准备当天要带的报告和材料"],
+            "steps": [
+                "确认下一次产检日期、地点和挂号方式",
+                "把医生交代的 B 超、胎监、血压、尿常规等项目写进提醒",
+                "如果有抽血或特殊检查，提前确认是否需要空腹",
+                "产检前一天备好产检本、近期报告、血压血糖或胎动记录",
+                "产检后把新增复查项目和下次日期立即加进日历",
+            ],
             "done_criteria": "已安排下次产检、复查项目提醒和当天要带材料。",
             "source_tags": ["week_29_31", "next_checkup"],
         },
@@ -4749,7 +4803,13 @@ def _birth_journey_base_todo_catalog() -> tuple[dict[str, Any], ...]:
             "week_end": 35,
             "title": "定好胎位和宝宝生长复查",
             "reason": "这几周要把胎位、胎儿生长、羊水胎盘和是否需要复查变成明确安排。",
-            "steps": ["完成胎位和生长评估回看", "确认是否需要 B 超或胎监复查", "把下次产检间隔加入日历"],
+            "steps": [
+                "预约或确认胎位、胎儿生长、羊水和胎盘复查时间",
+                "检查后保存宝宝估重、胎位、羊水和胎盘位置结论",
+                "如果胎位不是头位，记录医生给的观察或复查时间",
+                "确认是否需要增加 B 超、胎监或更密集产检",
+                "把下次产检间隔和复查项目加进日历",
+            ],
             "done_criteria": "已明确胎位、生长评估、复查项目和下次产检间隔。",
             "source_tags": ["week_32_35", "growth_position"],
         },
@@ -4759,7 +4819,13 @@ def _birth_journey_base_todo_catalog() -> tuple[dict[str, Any], ...]:
             "week_end": 37,
             "title": "做好GBS检查和入院材料",
             "reason": "临近足月前，要把 GBS、产检报告、证件材料和入院入口一起准备好。",
-            "steps": ["安排或确认 GBS 筛查时间", "把证件和产检报告放进待产资料袋", "保存医院入院或夜间入口"],
+            "steps": [
+                "确认 GBS 筛查是否已安排，以及采样日期和地点",
+                "拿到 GBS 结果后拍照保存，并标记阳性或阴性结论",
+                "把身份证件、医保材料、产检本和关键报告放进待产资料袋",
+                "确认医院白天、夜间、急诊入院入口和联系电话",
+                "把陪产、探视、住院押金或预登记要求写进清单",
+            ],
             "done_criteria": "已安排 GBS，备好证件报告，并保存医院入口。",
             "source_tags": ["week_35_37", "gbs_admission"],
         },
@@ -4769,7 +4835,13 @@ def _birth_journey_base_todo_catalog() -> tuple[dict[str, Any], ...]:
             "week_end": 40,
             "title": "定好临产时怎么去医院",
             "reason": "足月后要把宫缩、破水、见红和胎动变化时的医院联系口径放在手机里。",
-            "steps": ["保存医院产科或急诊电话", "设置宫缩破水见红后的处理步骤", "和陪同人同步出发分工"],
+            "steps": [
+                "保存医院产科、急诊和夜间入院联系电话",
+                "写下规律宫缩、破水、见红和胎动异常时分别怎么处理",
+                "确认从家到医院的路线、停车点或打车定位",
+                "把待产资料袋、手机充电器和常用证件放在固定位置",
+                "和陪同人同步谁联系医院、谁拿材料、谁负责出发路线",
+            ],
             "done_criteria": "已保存医院联系方式，并和陪同人确认出发分工。",
             "source_tags": ["week_38_40", "labor_signal"],
         },
@@ -4836,7 +4908,13 @@ def _birth_journey_condition_todo_items(context: dict[str, Any], timeframe: str)
                 priority_type=BIRTH_JOURNEY_PRIORITY_ESSENTIAL,
                 source_tags=["age_35_plus"],
                 context=context,
-                steps=["确认产检次数要不要变多", "设置血压血糖或复查提醒", "安排宝宝生长和胎盘回看时间"],
+                steps=[
+                    "把唐筛、无创 DNA 或羊穿选择放进下一次产检沟通",
+                    "确认血压、血糖和尿蛋白是否需要更早或更频繁复查",
+                    "把胎儿生长、胎盘位置和羊水复查时间写进日历",
+                    "如果已有异常指标，记录医生给的复查频率和联系阈值",
+                    "产检后立即更新下一次要看哪些指标",
+                ],
                 done_criteria="已把产检次数、血压血糖提醒和宝宝/胎盘回看时间加进日历。",
             )
         )
@@ -4851,7 +4929,13 @@ def _birth_journey_condition_todo_items(context: dict[str, Any], timeframe: str)
                 priority_type=BIRTH_JOURNEY_PRIORITY_ESSENTIAL,
                 source_tags=["ivf"],
                 context=context,
-                steps=["用医生确认的方式更新孕周", "把当前用药和复查日期加进日历", "设置停药或调药前的确认提醒"],
+                steps=[
+                    "按移植日期或医生确认口径校准当前孕周和预产期",
+                    "列出黄体支持、抗凝或其他用药名称和剂量",
+                    "把停药、减量或复查日期加入日历提醒",
+                    "每次产检带上生殖科或保胎相关用药记录",
+                    "停药或调药前先按医生口径确认，不自行调整",
+                ],
                 done_criteria="已把孕周、当前用药、复查和调药提醒加进日历。",
             )
         )
@@ -4866,7 +4950,13 @@ def _birth_journey_condition_todo_items(context: dict[str, Any], timeframe: str)
                 priority_type=BIRTH_JOURNEY_PRIORITY_ESSENTIAL,
                 source_tags=["multiple_pregnancy"],
                 context=context,
-                steps=["确认多胎类型和复查频率", "把宝宝生长和宫颈检查加进日历", "保存早产信号和医院联系方式"],
+                steps=[
+                    "确认双胎或多胎类型，并把类型写进产检资料",
+                    "把每个宝宝的生长、羊水和胎盘复查时间加进日历",
+                    "确认是否需要宫颈长度、胎监或更密集产检",
+                    "写下早产信号，比如规律宫缩、破水样流水或出血",
+                    "保存医院产科、急诊和夜间入院联系方式",
+                ],
                 done_criteria="已确认多胎类型、复查频率、检查时间和早产时联系谁。",
             )
         )
@@ -4881,7 +4971,13 @@ def _birth_journey_condition_todo_items(context: dict[str, Any], timeframe: str)
                 priority_type=BIRTH_JOURNEY_PRIORITY_ESSENTIAL,
                 source_tags=["checkup_status"],
                 context=context,
-                steps=["找出还没预约或要复查的项目", "给每个项目定日期或放到下次产检", "准备下次产检要确认的重点"],
+                steps=[
+                    "把已完成、未预约、等结果和需复查项目分成四类",
+                    "给未预约项目补上日期、地点和是否需要空腹",
+                    "给需复查项目写下复查原因、时间窗口和报告携带要求",
+                    "把等结果的项目设置报告回看提醒",
+                    "下次产检带着这张清单逐项确认",
+                ],
                 done_criteria="已给没做完的项目定好日期或放到下次产检里。",
             )
         )
@@ -4898,7 +4994,13 @@ def _birth_journey_condition_todo_items(context: dict[str, Any], timeframe: str)
                 priority_type=BIRTH_JOURNEY_PRIORITY_ESSENTIAL,
                 source_tags=["risk_factors"],
                 context=context,
-                steps=["确认多久复查一次、看哪些指标", "设置日常活动提醒", "保存哪些情况要当天联系医院"],
+                steps=[
+                    "把风险因素对应到要复查的指标，比如血压、血糖、宫颈或胎盘",
+                    "确认每个指标多久复查一次、在哪里复查",
+                    "把活动限制、运动边界或卧床要求写成一句话",
+                    "保存需要当天联系医院的异常表现",
+                    "把复查日期和异常联系入口放进同一个提醒",
+                ],
                 done_criteria="已定好复查频率、日常注意事项和当天联系医院的情况。",
             )
         )
@@ -4914,7 +5016,13 @@ def _birth_journey_condition_todo_items(context: dict[str, Any], timeframe: str)
                 priority_type=BIRTH_JOURNEY_PRIORITY_SUPPORTIVE,
                 source_tags=["first_birth"],
                 context=context,
-                steps=["保存下次产检项目和频率", "保存入院或急诊入口", "设置宫缩破水见红后的联系步骤"],
+                steps=[
+                    "保存当前阶段的产检频率和下一次产检项目",
+                    "把医院建档、产检、急诊和入院入口分开记清楚",
+                    "写下规律宫缩、破水、见红分别先做什么",
+                    "把待产资料袋和重要证件固定放在同一位置",
+                    "把这套流程发给陪同人一起过一遍",
+                ],
                 done_criteria="已保存产检频率、医院入口和临产时的联系步骤。",
             )
         )
@@ -4929,7 +5037,13 @@ def _birth_journey_condition_todo_items(context: dict[str, Any], timeframe: str)
                 priority_type=BIRTH_JOURNEY_PRIORITY_ESSENTIAL,
                 source_tags=["prior_birth"],
                 context=context,
-                steps=["选出上一胎最影响这次的一件事", "加入下次产检沟通重点", "同步产后支持或恢复准备"],
+                steps=[
+                    "写下上一胎主要分娩方式和当时最影响体验的一件事",
+                    "如果有早产、出血、撕裂或感染，单独标出来",
+                    "把这些经历放进下次产检沟通清单",
+                    "根据上一胎恢复难点提前安排产后支持",
+                    "和陪同人同步这次想避开或重点准备的事项",
+                ],
                 done_criteria="已把上一胎经历转成这次产检沟通和产后支持准备。",
             )
         )
@@ -4944,7 +5058,13 @@ def _birth_journey_condition_todo_items(context: dict[str, Any], timeframe: str)
                 priority_type=BIRTH_JOURNEY_PRIORITY_ESSENTIAL,
                 source_tags=["prior_c_section"],
                 context=context,
-                steps=["准备上次剖宫产原因和手术资料", "确认两次怀孕间隔信息", "安排分娩方式评估沟通"],
+                steps=[
+                    "准备上次剖宫产原因、孕周、手术医院和出院小结",
+                    "写下两次怀孕间隔和这次胎盘位置等相关信息",
+                    "把手术记录或能找到的关键病历拍照保存",
+                    "下次产检主动讨论这次顺产或剖宫产评估",
+                    "把术前检查、入院时间和麻醉沟通先放进后续计划",
+                ],
                 done_criteria="已备好剖宫产史资料，并安排分娩方式评估沟通。",
             )
         )
@@ -4959,7 +5079,13 @@ def _birth_journey_condition_todo_items(context: dict[str, Any], timeframe: str)
                 priority_type=BIRTH_JOURNEY_PRIORITY_ESSENTIAL,
                 source_tags=["medical_notes"],
                 context=context,
-                steps=["核对当前用药是否需产科确认", "把专科复查日期放进日历", "保存异常指标联系方式"],
+                steps=[
+                    "列出基础病名称、当前用药、剂量和最近一次复查结果",
+                    "产检时确认这些药是否需要继续、调量或换药",
+                    "把产科复查和专科复查日期放到同一日历",
+                    "记录需要重点看的指标，比如血压、血糖、甲功或免疫指标",
+                    "保存指标异常时联系产科或专科的方式",
+                ],
                 done_criteria="已把用药确认、专科复查和异常联系办法加到产检安排里。",
             )
         )
@@ -4974,7 +5100,13 @@ def _birth_journey_condition_todo_items(context: dict[str, Any], timeframe: str)
                 priority_type=BIRTH_JOURNEY_PRIORITY_ESSENTIAL,
                 source_tags=["doctor_notes"],
                 context=context,
-                steps=["确认提醒对应的复查日期", "设置日常观察提醒", "保存异常时联系医院的方式"],
+                steps=[
+                    "把医生提醒原话写下来，并标出对应的检查或观察点",
+                    "确认每条提醒对应的复查日期、地点和报告要求",
+                    "把需要每天观察的变化设置成提醒",
+                    "写下哪些表现需要当天联系医院",
+                    "复查后把医生的新要求继续更新进计划",
+                ],
                 done_criteria="已把医生提醒设成复查日期、观察提醒和异常时联系医院的方式。",
             )
         )
@@ -4990,7 +5122,13 @@ def _birth_journey_condition_todo_items(context: dict[str, Any], timeframe: str)
                 priority_type=BIRTH_JOURNEY_PRIORITY_ESSENTIAL,
                 source_tags=["planned_c_section"],
                 context=context,
-                steps=["安排术前检查和禁食提醒", "确认入院时间和住院照护", "准备术后下床和伤口观察事项"],
+                steps=[
+                    "确认术前检查项目、麻醉评估和抽血心电图时间",
+                    "把入院日期、禁食禁水开始时间写进提醒",
+                    "准备住院证件、产检报告和既往手术资料",
+                    "和陪同人分好术后陪护、下床、取物和联系医生的事",
+                    "写下伤口观察、排气进食和下床活动的医院口径",
+                ],
                 done_criteria="已安排术前检查、禁食入院、住院照护和伤口观察事项。",
             )
         )
@@ -5005,7 +5143,13 @@ def _birth_journey_condition_todo_items(context: dict[str, Any], timeframe: str)
                 priority_type=BIRTH_JOURNEY_PRIORITY_ESSENTIAL,
                 source_tags=["planned_vaginal_birth"],
                 context=context,
-                steps=["保存宫缩破水见红后的联系步骤", "确认镇痛和陪产规则", "把沟通偏好同步给陪同人"],
+                steps=[
+                    "保存规律宫缩、破水、见红和胎动异常时的联系步骤",
+                    "确认无痛分娩、陪产、导乐或待产室规则",
+                    "把入院路线、急诊入口和联系电话存到手机",
+                    "写下分娩沟通偏好，比如镇痛、体位和陪同需求",
+                    "把临产出发分工发给陪同人确认",
+                ],
                 done_criteria="已备好临产联系步骤、镇痛陪产规则和陪同人沟通偏好。",
             )
         )
@@ -5020,7 +5164,13 @@ def _birth_journey_condition_todo_items(context: dict[str, Any], timeframe: str)
                 priority_type=BIRTH_JOURNEY_PRIORITY_ESSENTIAL,
                 source_tags=["birth_hospital"],
                 context=context,
-                steps=["确认预登记或建档入口", "保存夜间急诊或入院入口", "备好证件和陪产探视要求"],
+                steps=[
+                    "确认生产医院是否需要预登记、住院预约或押金准备",
+                    "保存白天产科、夜间急诊和入院办理入口",
+                    "整理医院要求的身份证件、医保材料和产检报告",
+                    "确认陪产、探视、待产包和病房用品规则",
+                    "把医院地址、停车点或打车定位发给陪同人",
+                ],
                 done_criteria="已确认预登记、入院入口、证件材料和陪产探视规则。",
             )
         )
@@ -5043,7 +5193,13 @@ def _birth_journey_condition_todo_items(context: dict[str, Any], timeframe: str)
                 priority_type=BIRTH_JOURNEY_PRIORITY_SUPPORTIVE,
                 source_tags=["support_person"],
                 context=context,
-                steps=["分配联系医院和拿材料的人", "分配出发路线和交通安排", "把分工发给支持人确认"],
+                steps=[
+                    "列出临产当天需要支持人负责的事项",
+                    "指定谁联系医院、谁拿证件报告和待产包",
+                    "指定谁负责交通路线、停车或打车定位",
+                    "把医院入口、联系电话和备用方案发给支持人",
+                    "和支持人约定出现宫缩、破水、见红时谁先行动",
+                ],
                 done_criteria="已把联系医院、拿材料、出发路线和同步医嘱分工发给支持人确认。",
             )
         )
@@ -5062,7 +5218,13 @@ def _birth_journey_condition_todo_items(context: dict[str, Any], timeframe: str)
                 priority_type=BIRTH_JOURNEY_PRIORITY_SUPPORTIVE,
                 source_tags=["feeding"],
                 context=context,
-                steps=["确定产后 48 小时喂养优先方案", "保存医院护士或 IBCLC 求助入口", "准备住院时要确认的喂养问题"],
+                steps=[
+                    "写下产后 48 小时优先亲喂、混合还是泵奶",
+                    "准备住院时要问的含乳、吸吮、补奶和泵奶问题",
+                    "保存医院护士、母乳门诊或 IBCLC 咨询入口",
+                    "把乳头疼痛、涨奶、宝宝尿布和体重变化列为观察点",
+                    "和家人同步不要随意加奶或用奶嘴的沟通口径",
+                ],
                 done_criteria="已准备产后 48 小时喂养方案和求助入口。",
             )
         )
@@ -5132,7 +5294,13 @@ def _birth_journey_terminal_todo_items(context: dict[str, Any]) -> list[dict[str
             priority_type=BIRTH_JOURNEY_PRIORITY_ESSENTIAL,
             source_tags=["terminal", "labor_signal", "hospital_entry"],
             context=context,
-            steps=["保存产科或急诊联系电话", "写下破水见红宫缩后的处理步骤", "和陪同人同步出发路线"],
+            steps=[
+                "保存产科门诊、急诊、夜间入院和护士站联系电话",
+                "写下规律宫缩、破水、见红和胎动异常分别怎么处理",
+                "把医院地址、急诊入口、停车点或打车定位发给陪同人",
+                "把待产资料袋、手机充电器和常用证件放在固定位置",
+                "约定临产时谁先联系医院、谁拿材料、谁负责出发路线",
+            ],
             after_done_value="临产时不用临时翻信息，能更快联系医院并出发。",
         ),
         _birth_journey_plan_item(
@@ -5144,7 +5312,13 @@ def _birth_journey_terminal_todo_items(context: dict[str, Any]) -> list[dict[str
             priority_type=BIRTH_JOURNEY_PRIORITY_ESSENTIAL,
             source_tags=["terminal", "admission_materials"],
             context=context,
-            steps=["整理身份证件和医保材料", "把关键产检报告放进资料袋", "写下分娩和用药沟通重点"],
+            steps=[
+                "把身份证件、医保材料、就诊卡和住院押金准备放进资料袋",
+                "按时间顺序放好关键产检报告、B 超、筛查和复查结果",
+                "单独写下过敏史、基础病、长期用药和特殊医嘱",
+                "把分娩方式、镇痛、陪产和喂养沟通重点写成一页纸",
+                "入院前一天再核对医院最新证件、陪护和探视要求",
+            ],
             after_done_value="入院办理和医生沟通会更省心，重要报告不容易漏带。",
         ),
     ]
@@ -5159,7 +5333,13 @@ def _birth_journey_terminal_todo_items(context: dict[str, Any]) -> list[dict[str
                 priority_type=BIRTH_JOURNEY_PRIORITY_SUPPORTIVE,
                 source_tags=["terminal", "support_person"],
                 context=context,
-                steps=["确认谁负责联系医院", "确认谁带证件和报告", "确认住院当天交通安排"],
+                steps=[
+                    "指定一个人负责联系医院并记录医生或护士回复",
+                    "指定一个人负责拿证件、产检报告和待产资料袋",
+                    "指定一个人负责打车、开车、停车或路线导航",
+                    "把医院电话、入口定位和备用方案发到同一个聊天里",
+                    "临产前和陪同人用 5 分钟过一遍分工",
+                ],
                 after_done_value="陪同人知道自己负责什么，临产当天更容易配合。",
             )
         )
@@ -5194,7 +5374,7 @@ BIRTH_JOURNEY_PLAN_ITEM_TITLE_MAX_CHARS = 22
 BIRTH_JOURNEY_PLAN_ITEM_REASON_MAX_CHARS = 140
 BIRTH_JOURNEY_PLAN_ITEM_STEP_MAX_CHARS = 88
 BIRTH_JOURNEY_PLAN_ITEM_VALUE_MAX_CHARS = 96
-BIRTH_JOURNEY_PLAN_ITEM_DEFAULT_STEP_LIMIT = 3
+BIRTH_JOURNEY_PLAN_ITEM_DEFAULT_STEP_LIMIT = 5
 BIRTH_JOURNEY_PLAN_ITEM_MAX_STEP_LIMIT = 6
 BIRTH_JOURNEY_TODO_ENGINE_VERSION = "actionable_steps_v2"
 BIRTH_JOURNEY_STALE_VISIBLE_TITLES = (
@@ -5370,6 +5550,8 @@ def _birth_journey_legacy_next_7_item_upgrade(title: str) -> dict[str, Any]:
     if not upgrade:
         return {}
     result = dict(upgrade)
+    result_title = str(result.get("title") or normalized_title).strip()
+    result["steps"] = _birth_journey_plan_item_steps(result_title, [])
     result["completion_followup"] = str(result.get("after_done_value") or "").strip()
     return result
 
@@ -5534,28 +5716,121 @@ def _birth_journey_plan_item_steps(title: str, based_on: list[str]) -> list[str]
     text = str(title or "")
     steps: list[str]
     if "糖耐" in text:
-        steps = ["确认糖耐预约日期和地点", "设置禁食开始和抽血流程提醒", "约好报告回看或复查时间"]
+        steps = [
+            "确认糖耐预约日期、地点和是否需要提前取号",
+            "按医院口径设置禁食禁水开始时间",
+            "到院后按空腹、喝糖水、1 小时、2 小时顺序完成抽血",
+            "检查期间静坐等待，不进食、不喝含糖饮料",
+            "检查结束后及时进食，并设置报告回看提醒",
+        ]
+    elif any(token in text for token in ("B超", "NT", "早筛")):
+        steps = [
+            "确认检查日期在医院要求的孕周或复查窗口内",
+            "提前问清检查地点、到院时间和是否需要空腹或憋尿",
+            "检查当天带上产检本、身份证件和既往报告",
+            "拿到报告后保存关键数值、结论和医生备注",
+            "把报告回看、复查或转诊提醒加进日历",
+        ]
+    elif "大排畸" in text:
+        steps = [
+            "确认大排畸预约日期、地点和预计检查时长",
+            "检查前准备产检本、既往 B 超和筛查报告",
+            "检查时重点问清胎儿结构、胎盘、羊水和宫颈结论",
+            "拿到报告后圈出建议复查、随访或观察的内容",
+            "把复查日期或无需复查结论加进日历",
+        ]
+    elif "GBS" in text:
+        steps = [
+            "确认 GBS 筛查日期、地点和采样方式",
+            "拿到结果后拍照保存，并标记阳性或阴性结论",
+            "把证件、产检本和关键报告放进待产资料袋",
+            "确认医院白天、夜间和急诊入院入口",
+            "把陪产、探视和住院材料要求写进清单",
+        ]
     elif any(token in text for token in ("产检", "报告", "复查", "医生", "风险", "监测", "高龄", "血压", "血糖")):
-        steps = ["把相关报告或医生备注放到一起", "给要复查的事定日期或放到下次产检", "准备下次产检要确认的重点"]
+        steps = [
+            "把相关报告、检查结果和医生备注放到同一份资料里",
+            "圈出还没预约、等结果或需要复查的项目",
+            "给每个项目补上日期、地点和是否需要空腹",
+            "把下次产检要确认的问题写成 3 条以内",
+            "产检后立刻把新增复查时间更新进日历",
+        ]
     elif any(token in text for token in ("胎动", "水肿", "观察")):
-        steps = ["定一个每天观察的时间", "留意胎动和明显不舒服", "保存不对劲时联系医院的方式"]
+        steps = [
+            "选一个每天固定观察胎动和身体变化的时间",
+            "记录胎动明显变多、变少或和平时不一样的情况",
+            "同时留意头痛、视物模糊、水肿、腹痛、出血或流水",
+            "保存医院产科、急诊或线上联系入口",
+            "出现明显异常时按医院口径当天联系",
+        ]
     elif any(token in text for token in ("医院", "入院", "证件", "待产", "入口", "流程")) and not any(token in text for token in ("剖", "顺产", "分娩")):
-        steps = ["确认医院入口、证件和预登记要求", "把联系号码和路线存到手机", "和陪同人同步出发规则"]
+        steps = [
+            "确认医院预登记、入院办理和夜间急诊入口",
+            "整理身份证件、医保材料、产检本和关键报告",
+            "把医院电话、地址、停车点或打车定位存到手机",
+            "确认陪产、探视、待产包和病房用品要求",
+            "把入口和出发规则发给陪同人确认",
+        ]
     elif any(token in text for token in ("支持", "分工", "家人", "伴侣")):
-        steps = ["分配需要别人负责的事项", "明确谁负责联系医院和拿材料", "把分工发给支持人确认"]
+        steps = [
+            "列出需要支持人负责的事项",
+            "指定谁负责联系医院、拿材料和带待产包",
+            "指定谁负责路线、停车、打车或照看家里事务",
+            "把医院入口、电话和备用方案发给支持人",
+            "约定临产或住院当天的第一步动作",
+        ]
     elif any(token in text for token in ("喂养", "母乳", "混合", "泵奶", "背奶", "IBCLC", "含乳", "涨奶")):
-        steps = ["定好产后 48 小时先怎么喂", "保存医院护士或 IBCLC 求助方式", "准备住院时要确认的喂养问题"]
+        steps = [
+            "写下产后 48 小时优先亲喂、混合还是泵奶",
+            "准备住院时要问的含乳、吸吮、补奶和泵奶问题",
+            "保存护士、母乳门诊或 IBCLC 求助入口",
+            "记录尿布、体重、乳头疼痛和涨奶这些观察点",
+            "把喂养偏好提前同步给家人",
+        ]
     elif any(token in text for token in ("剖宫产", "剖")):
-        steps = ["安排术前禁食和入院提醒", "确认术后下床和伤口观察口径", "分配住院照护事项"]
+        steps = [
+            "确认术前检查、麻醉评估和入院日期",
+            "按医院口径设置禁食禁水提醒",
+            "整理证件、报告和既往剖宫产或手术资料",
+            "和陪同人分好术后下床、取物和联系医生的事",
+            "写下伤口观察、排气进食和复查要求",
+        ]
     elif any(token in text for token in ("顺产", "宫缩", "破水", "见红", "分娩")):
-        steps = ["保存宫缩破水见红后的联系步骤", "确认镇痛和陪产规则", "把沟通偏好发给陪同人"]
+        steps = [
+            "写下宫缩、破水、见红和胎动异常时分别怎么处理",
+            "保存产科、急诊和夜间入院联系方式",
+            "确认无痛分娩、陪产和待产室规则",
+            "把分娩沟通偏好写成一页纸",
+            "把出发分工和医院定位发给陪同人",
+        ]
     elif any(token in text for token in ("生活", "睡眠", "通勤", "久坐", "久站", "压力", "休息")):
-        steps = ["选一个最影响执行的生活压力点", "拆成今天能调整的小动作", "告诉支持人你需要的具体帮助"]
+        steps = [
+            "选出今天最影响执行的一件生活压力点",
+            "把它拆成 15 分钟内能完成的小动作",
+            "给这个动作定一个具体开始时间",
+            "告诉支持人你需要的一个具体帮助",
+            "完成后把下一步放到明天，避免今天堆太多",
+        ]
     elif any(token in text for token in ("焦虑", "担心", "担忧")) or any(key in based_on for key in ("entry_reason", "top_worries", "entry_concern_followup")):
-        steps = ["选出最影响执行的 3 件担心", "标出医生确认和自己安排事项", "把需要家人支持的事发给支持人"]
+        steps = [
+            "写下最影响执行的 3 件担心",
+            "标出哪一件需要医生确认",
+            "标出哪一件今天自己能先安排",
+            "把需要家人支持的一件事说清楚",
+            "下次产检前把医生问题整理成 3 条以内",
+        ]
     else:
-        steps = ["明确这项下一步要做什么", "安排执行时间或确认对象", "把需要的材料或联系入口放好"]
-    return [_truncate_birth_journey_plan_text(step, BIRTH_JOURNEY_PLAN_ITEM_STEP_MAX_CHARS) for step in steps[:3]]
+        steps = [
+            "把这项拆成一个今天能开始的具体动作",
+            "写下要找谁确认、什么时候确认",
+            "准备执行时需要的报告、证件或联系入口",
+            "把执行时间加进日历或提醒",
+            "完成后记录结果，并把下一步放进计划",
+        ]
+    return [
+        _truncate_birth_journey_plan_text(step, BIRTH_JOURNEY_PLAN_ITEM_STEP_MAX_CHARS)
+        for step in steps[:BIRTH_JOURNEY_PLAN_ITEM_DEFAULT_STEP_LIMIT]
+    ]
 
 
 def _birth_journey_done_criteria(title: str) -> str:
@@ -5968,7 +6243,13 @@ def _birth_journey_safety_items(context: dict[str, Any]) -> list[dict[str, Any]]
                 priority_type=BIRTH_JOURNEY_PRIORITY_ESSENTIAL,
                 source_tags=["current_symptoms", "safety"],
                 context=context,
-                steps=["暂停把它当普通准备事项处理", "按医院或医生口径确认是否需当天联系", "保存联系结果和后续观察要求"],
+                steps=[
+                    "先暂停普通准备事项，优先处理当前不舒服或异常变化",
+                    "记录症状开始时间、持续多久、有没有加重和伴随表现",
+                    "按医院产科、急诊或医生口径确认是否需要当天就医",
+                    "如果医院要求观察，写下观察频率和再次联系的触发条件",
+                    "保存这次联系结果，并把后续复查或观察提醒加进日历",
+                ],
                 done_criteria="已按医院或医生口径确认是否需要当天处理，并保存后续观察要求。",
                 after_done_value="做完后，再继续排普通孕期准备，会更安心也更不容易误判。",
             )
@@ -5991,7 +6272,13 @@ def _birth_journey_lifestyle_next_7_item(
             priority_type=BIRTH_JOURNEY_PRIORITY_SUPPORTIVE,
             source_tags=["lifestyle_context", "commute"],
             context=context,
-            steps=["选定到家或到办公室后的休息时段", "把这段时间加到日历或提醒", "告诉支持人这段不安排杂事"],
+            steps=[
+                "选定到家或到办公室后的固定 20 分钟休息时段",
+                "把这段时间加入日历，并设置每天同一时间提醒",
+                "休息时先坐下或半躺，喝水，避免立刻处理家务或工作",
+                "告诉支持人这 20 分钟不安排杂事或临时任务",
+                "连续执行 3 天后记录腰酸、腿胀或疲惫有没有变化",
+            ],
             done_criteria="已设好本周至少 3 天的通勤后休息提醒。",
             after_done_value="做完后，通勤后的恢复时间会固定下来，不再挤掉休息和产检准备。",
         )
@@ -6005,7 +6292,13 @@ def _birth_journey_lifestyle_next_7_item(
             priority_type=BIRTH_JOURNEY_PRIORITY_SUPPORTIVE,
             source_tags=["lifestyle_context", "sitting"],
             context=context,
-            steps=["选一个 45-60 分钟提醒间隔", "设置起身喝水或走动提醒", "观察腰酸腿抽筋是否减少"],
+            steps=[
+                "选一个 45-60 分钟提醒间隔，放进手机或电脑提醒",
+                "提醒响了就起身 2-3 分钟，喝水、走几步或换坐姿",
+                "午后或下班前补一次小腿伸展，避免一直坐到腿胀",
+                "把腰酸、腿抽筋或脚肿出现的时间记下来",
+                "如果水肿明显、单侧腿痛或胸闷气短，按医院口径联系",
+            ],
             done_criteria="已设置提醒，并试运行至少 1 个工作日。",
             after_done_value="做完后，久坐中断会变成日常节奏，也更容易判断不适是否需要问医生。",
         )
@@ -6019,7 +6312,13 @@ def _birth_journey_lifestyle_next_7_item(
             priority_type=BIRTH_JOURNEY_PRIORITY_SUPPORTIVE,
             source_tags=["lifestyle_context", "sleep"],
             context=context,
-            steps=["睡前 30 分钟停掉工作消息", "把明天最重要的事放进提醒", "观察今晚入睡和夜醒变化"],
+            steps=[
+                "睡前 30 分钟停掉工作消息和复杂沟通",
+                "把明天必须做的一件事写进提醒，避免睡前反复想",
+                "准备水杯、夜灯和舒服的枕头位置",
+                "记录今晚入睡时间、夜醒次数和醒来原因",
+                "如果持续失眠、头痛或明显焦虑，放进下次产检沟通清单",
+            ],
             done_criteria="已完成一次睡前降噪，并观察睡眠变化。",
             after_done_value="做完后，你能判断哪些安排真的影响睡眠，后续计划会更好调。",
         )
@@ -6033,7 +6332,13 @@ def _birth_journey_lifestyle_next_7_item(
             priority_type=BIRTH_JOURNEY_PRIORITY_SUPPORTIVE,
             source_tags=["lifestyle_context", "standing"],
             context=context,
-            steps=["选出今天最容易久站的时段", "安排一个坐下或垫脚休息点", "请支持人帮忙替换 1 次"],
+            steps=[
+                "选出今天最容易久站的时段，比如排队、做饭或通勤",
+                "提前安排一个能坐下、抬脚或靠墙休息的位置",
+                "每站 20-30 分钟就坐下休息几分钟",
+                "请支持人帮忙替换一次需要久站的任务",
+                "如果出现明显腹痛、宫缩感、出血或流水，按医院口径联系",
+            ],
             done_criteria="已给本周最容易久站的时段安排休息点或替换人。",
             after_done_value="做完后，你不用临时硬撑，也更容易判断身体不适是否需要问医生。",
         )
@@ -6046,7 +6351,13 @@ def _birth_journey_lifestyle_next_7_item(
         priority_type=BIRTH_JOURNEY_PRIORITY_SUPPORTIVE,
         source_tags=["lifestyle_context"],
         context=context,
-        steps=["选出今天最影响执行的一件事", "安排一个 15 分钟内能完成的动作", "告诉支持人你需要的一个帮助"],
+        steps=[
+            "选出今天最影响执行的一件事，只保留一个优先项",
+            "把它拆成 15 分钟内能完成的动作，比如预约、整理或发消息",
+            "给这个动作定一个具体开始时间",
+            "告诉支持人你需要的一个帮助，越具体越好",
+            "完成后把下一个动作放到明天，不把所有事情堆到今天",
+        ],
         done_criteria="已安排并完成或预约一个 15 分钟减压动作。",
         after_done_value="做完后，计划不会停留在担心里，会变成今天能推进的一小步。",
     )

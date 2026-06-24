@@ -63,6 +63,13 @@ def _birth_journey_first_period_items(card: dict[str, object]) -> list[dict[str,
     return [item for item in items if isinstance(item, dict)]
 
 
+def _find_birth_journey_todo_item(card: dict[str, object], item_id: str) -> dict[str, object] | None:
+    for item in _birth_journey_todo_items(card):
+        if str(item.get("id") or "") == item_id:
+            return item
+    return None
+
+
 def _assert_birth_journey_item_text_lengths(testcase: unittest.TestCase, card: dict[str, object]) -> None:
     items = _birth_journey_todo_items(card)
     testcase.assertTrue(items)
@@ -282,7 +289,12 @@ def _assert_birth_journey_todo_plan(
             testcase.assertTrue(str(item.get("why_for_you") or "").startswith("考虑到"))
             testcase.assertIsInstance(item.get("steps"), list)
             testcase.assertTrue(item.get("steps"))
+            testcase.assertGreaterEqual(len(item.get("steps") or []), 4)
             testcase.assertTrue(item.get("source_tags"))
+            rendered_steps = json.dumps(item.get("steps") or [], ensure_ascii=False)
+            testcase.assertNotIn("明确这项下一步要做什么", rendered_steps)
+            testcase.assertNotIn("安排执行时间或确认对象", rendered_steps)
+            testcase.assertNotIn("把需要的材料或联系入口放好", rendered_steps)
             for fragment in blocked_fragments:
                 testcase.assertNotIn(fragment, reason)
     _assert_no_birth_journey_done_criteria(testcase, todo_plan)
@@ -368,6 +380,13 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         self.assertTrue(ogtt_items)
         self.assertEqual(len(ogtt_items[0].get("steps") or []), 6)
         self.assertIn("检查结束后及时吃第一餐", json.dumps(ogtt_items[0].get("steps"), ensure_ascii=False))
+        checkup_item = _find_birth_journey_todo_item(card, "condition_checkup_status")
+        self.assertIsNotNone(checkup_item)
+        self.assertIn("把已完成、未预约、等结果和需复查项目分成四类", json.dumps(checkup_item, ensure_ascii=False))
+        self.assertIn("给未预约项目补上日期、地点和是否需要空腹", json.dumps(checkup_item, ensure_ascii=False))
+        c_section_item = _find_birth_journey_todo_item(card, "condition_planned_c_section")
+        self.assertIsNotNone(c_section_item)
+        self.assertIn("把入院日期、禁食禁水开始时间写进提醒", json.dumps(c_section_item, ensure_ascii=False))
         _assert_no_legacy_birth_journey_fallback_items(self, card)
         _assert_birth_journey_item_titles_are_plain(self, card)
 
@@ -498,7 +517,9 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         rendered = json.dumps(card["todo_plan"], ensure_ascii=False)
         self.assertIn("约好NT/早筛并设置提醒", rendered)
         self.assertIn("定下唐筛或无创怎么做", rendered)
-        self.assertIn("设置报告回看提醒", rendered)
+        self.assertIn("确认 NT 检查日期在医院要求的孕周窗口内", rendered)
+        self.assertIn("检查后保存 NT 数值、报告结论和医生备注", rendered)
+        self.assertIn("如果需要羊穿，先记下预约窗口、术前检查和术后注意事项", rendered)
         self.assertNotIn("无花果", rendered)
 
     def test_birth_journey_next_7_ignores_generic_intent_and_remote_preparation(self) -> None:
@@ -542,8 +563,9 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         card = result["card"]["card_json"]
         rendered = json.dumps(card["todo_plan"], ensure_ascii=False)
         self.assertIn("看完大排畸，定好是否复查", rendered)
-        self.assertIn("确认胎盘羊水和结构提示结论", rendered)
-        self.assertIn("把复查日期或无需复查结论加进日历", rendered)
+        self.assertIn("拿到报告后先拍照保存，再带给产检医生回看", rendered)
+        self.assertIn("逐项确认胎儿结构、胎盘位置、羊水和宫颈长度提示", rendered)
+        self.assertIn("把报告里写着建议复查、随访或观察的内容圈出来", rendered)
         self.assertNotIn("小甜瓜", rendered)
 
     def test_birth_journey_plan_uses_weekly_guide_for_gbs_and_admission_window(self) -> None:
@@ -558,7 +580,8 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         card = result["card"]["card_json"]
         rendered = json.dumps(card["todo_plan"], ensure_ascii=False)
         self.assertIn("做好GBS检查和入院材料", rendered)
-        self.assertIn("保存医院入院或夜间入口", rendered)
+        self.assertIn("拿到 GBS 结果后拍照保存，并标记阳性或阴性结论", rendered)
+        self.assertIn("确认医院白天、夜间、急诊入院入口和联系电话", rendered)
         self.assertIn("定好临产时怎么去医院", rendered)
         self.assertNotIn("白兰瓜", rendered)
 
@@ -599,7 +622,7 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         card = result["card"]["card_json"]
         rendered = json.dumps(card["todo_plan"], ensure_ascii=False)
         self.assertIn("每天固定看胎动和不舒服", rendered)
-        self.assertIn("定一个每天看胎动的时间", rendered)
+        self.assertIn("每天在同一时段留意胎动变化，并记录明显变多或变少", rendered)
         self.assertNotIn("补齐下次产检时间", rendered)
         self.assertNotIn("你已经提供产检信息", rendered)
         self.assertNotIn("把已做产检和待复查项整理成问题清单", rendered)
@@ -627,7 +650,8 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         card = result["card"]["card_json"]
         rendered = json.dumps(_birth_journey_first_period_items(card), ensure_ascii=False)
         self.assertIn("把高龄要看的项目加进产检", rendered)
-        self.assertIn("产检次数要不要变多", rendered)
+        self.assertIn("确认血压、血糖和尿蛋白是否需要更早或更频繁复查", rendered)
+        self.assertIn("把胎儿生长、胎盘位置和羊水复查时间写进日历", rendered)
         self.assertIn("你 36 岁属于高龄孕产妇管理范围", rendered)
         self.assertNotIn("确认高龄孕期关注重点", rendered)
 
@@ -1823,6 +1847,9 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         self.assertIn("把医生提醒设成复查和观察提醒", rendered)
         self.assertIn("准备上次剖宫产资料给医生看", rendered)
         self.assertIn("把基础病复查放进产检日历", rendered)
+        self.assertIn("确认双胎或多胎类型，并把类型写进产检资料", rendered)
+        self.assertIn("把医生提醒原话写下来，并标出对应的检查或观察点", rendered)
+        self.assertIn("列出基础病名称、当前用药、剂量和最近一次复查结果", rendered)
         _assert_no_legacy_birth_journey_fallback_items(self, card)
         _assert_birth_journey_item_titles_are_plain(self, card)
 
