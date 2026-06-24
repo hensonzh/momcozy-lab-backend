@@ -85,6 +85,20 @@ class IbclcConsultCardTests(unittest.TestCase):
         self.assertEqual(card["chat"]["note"], "启动咨询后，会自动将你的问题同步给顾问")
         self.assertNotIn("hint", card["chat"])
 
+    def test_allows_demo_consult_button_text(self) -> None:
+        result = create_ibclc_consult_card({}, {"user_message": "打开顾问咨询", "locale": "zh-CN"})
+
+        self.assertEqual(result["tool_name"], "ibclc_consult_card_create")
+        self.assertEqual(result["status"], "ibclc_consult_card_created")
+        self.assertEqual(result["card"]["card_type"], "ibclc_consult_card")
+
+    def test_blocks_plain_consult_question_without_open_intent(self) -> None:
+        result = create_ibclc_consult_card({}, {"user_message": "顾问咨询是什么？", "locale": "zh-CN"})
+
+        self.assertEqual(result["status"], "ibclc_consult_blocked")
+        self.assertEqual(result["reason"], "missing_explicit_ibclc_request")
+        self.assertNotIn("card", result)
+
     def test_custom_bio_removes_repeated_certification_prefix(self) -> None:
         result = create_ibclc_consult_card(
             {"consultant_bio": "国际认证泌乳顾问，专注亲喂和堵奶支持。"},

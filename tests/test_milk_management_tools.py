@@ -3624,6 +3624,42 @@ class MilkManagementToolTests(unittest.TestCase):
         self.assertEqual(saved["status"], "calendar_reschedule_applied")
         self.assertEqual(_scalar("SELECT COUNT(*) FROM calendar WHERE user_id = ? AND type = '自定义'", (uid,)), 3)
 
+    def test_calendar_reschedule_preview_fills_minghoutian_dates_from_user_message(self) -> None:
+        uid, _ = _seed_user("calendar-reschedule-minghoutian-fill")
+        for target_date in ("2026-06-25", "2026-06-26"):
+            _add_task(uid, task_id=1, content="吸奶", item_type="吸奶", is_milk_pump=1, target_date=target_date, start_time="10:30")
+            _add_task(uid, task_id=2, content="吸奶", item_type="吸奶", is_milk_pump=1, target_date=target_date, start_time="12:45")
+
+        preview = execute_milk_management_tool(
+            {
+                "_tool_name": "milk_calendar_reschedule_preview",
+                "user_id": uid,
+                "target_date": None,
+                "target_dates": "[]",
+                "start_date": None,
+                "end_date": None,
+                "busy_windows": "[]",
+                "adjustable_item_types": "[]",
+                "plan_id": None,
+                "default_duration_minutes": 0,
+                "min_gap_minutes": 0,
+                "include_busy_events": True,
+            },
+            {
+                "user_id": uid,
+                "user_message": "我明后天上午10~12点都有会议，调整一下我的日程吧",
+                "locale": "zh-CN",
+                "timezone": "Asia/Shanghai",
+                "message_sent_at": "2026-06-24 09:00:00",
+            },
+        )
+
+        self.assertTrue(preview["ok"])
+        self.assertEqual(preview["data"]["target_dates"], ["2026-06-25", "2026-06-26"])
+        self.assertEqual(preview["data"]["busy_windows"][0]["start_time"], "2026-06-25 10:00:00")
+        self.assertEqual(preview["data"]["busy_windows"][0]["end_time"], "2026-06-25 12:00:00")
+        self.assertEqual(preview["data"]["updated_count"], 2)
+
     def test_calendar_reschedule_preview_and_apply_supports_date_range(self) -> None:
         uid, _ = _seed_user("calendar-reschedule-range")
         first_item_id = _add_task(
@@ -3735,7 +3771,9 @@ class MilkManagementToolTests(unittest.TestCase):
 
         self.assertIn("奶量日程调整正在进行中", context)
         self.assertIn("上一轮已经生成调整预览", context)
-        self.assertIn("就调用 milk_calendar_mutate", context)
+        self.assertIn("本轮进入日程写入处理", context)
+        self.assertIn("调用 milk_calendar_mutate", context)
+        self.assertIn("不要再次向用户确认", context)
         self.assertIn("后端会复用上一轮缓存的预览", context)
         self.assertNotIn("pending_calendar_adjustment_ready_for_save", context)
         self.assertNotIn("current_action_context", context)

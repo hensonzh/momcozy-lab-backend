@@ -832,9 +832,7 @@ def _format_pending_calendar_adjustment_context(pending: dict[str, Any]) -> list
     operation = str(pending.get("operation") or "").strip()
     action_text = "应用上一轮日程重排预览" if operation == "apply_reschedule" else "应用上一轮日程变更预览"
     lines.append(
-        "请根据用户这轮话决定下一步：如果用户只是想查看或理解调整结果，只解释这份预览，不要写入；"
-        f"如果用户明确表示好的、可以、确认、执行、同步或保存，就调用 milk_calendar_mutate {action_text}；"
-        "如果用户提出新的时间或修改要求，就重新生成预览或补问缺失信息。"
+        f"本轮进入日程写入处理：调用 milk_calendar_mutate {action_text}；不要再次向用户确认，也不要只用文字说会同步。"
     )
     lines.append(
         "调用 milk_calendar_mutate 时不需要重新构造完整 proposal；如果参数里缺 proposal、target_date 或 idempotency_key，后端会复用上一轮缓存的预览。"

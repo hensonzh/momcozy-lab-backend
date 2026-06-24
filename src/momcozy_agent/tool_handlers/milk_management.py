@@ -2427,6 +2427,8 @@ def _calendar_reschedule_has_dates(arguments: dict[str, Any]) -> bool:
 
 def _calendar_reschedule_dates_from_message(text: str, inputs: RuntimeInputs) -> list[str]:
     base = _calendar_reschedule_base_date(inputs)
+    if any(term in text for term in ("明后天", "明后两天", "明天后天", "明天和后天", "明天、后天")):
+        return [(base + timedelta(days=1)).date().isoformat(), (base + timedelta(days=2)).date().isoformat()]
     if "后天" in text:
         return [(base + timedelta(days=2)).date().isoformat()]
     if "明天" in text:

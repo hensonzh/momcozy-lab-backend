@@ -561,12 +561,13 @@ class AgentToolEventTests(unittest.TestCase):
             },
         )
 
-    def test_calendar_adjustment_intent_keeps_reschedule_preview_available(self) -> None:
+    def test_specific_calendar_adjustment_intent_forces_reschedule_preview(self) -> None:
         for message in (
             "明天10到12点有会议，帮我调整吸奶提醒",
             "明天10到12点有会议，帮我同步调整吸奶提醒",
             "我接下来每天10~12点都有会议安排",
-            "接下来三天每天上午10~12点都有会议",
+            "接下来三天每天上午10~12点都有会议，帮我调整吸奶提醒",
+            "我明后天上午10~12点都有会议，调整一下我的日程吧",
         ):
             with self.subTest(message=message):
                 request = build_agent_request(
@@ -574,14 +575,21 @@ class AgentToolEventTests(unittest.TestCase):
                     {"context_state": ContextState(), "loaded_skill_ids": ["milk-management"]},
                 )
 
-                self.assertEqual(request["tool_choice"], "auto")
+                self.assertEqual(
+                    request["tool_choice"],
+                    {
+                        "type": "allowed_tools",
+                        "mode": "required",
+                        "tools": [{"type": "function", "name": "milk_calendar_reschedule_preview"}],
+                    },
+                )
                 tool_names = _request_tool_names(request["tools"])
                 self.assertIn("milk_calendar_reschedule_preview", tool_names)
                 top_level_functions = [tool["name"] for tool in request["tools"] if tool.get("type") == "function"]
-                self.assertNotIn("milk_calendar_reschedule_preview", top_level_functions)
+                self.assertIn("milk_calendar_reschedule_preview", top_level_functions)
                 self.assertNotIn("milk_calendar_query", top_level_functions)
 
-    def test_calendar_adjustment_intent_does_not_force_intake_or_preview_tool(self) -> None:
+    def test_specific_calendar_adjustment_intent_pauses_milk_intake_required_tool(self) -> None:
         context_state = ContextState()
         context_state.milk_management_state = {
             "analysis_intake": {
@@ -596,12 +604,39 @@ class AgentToolEventTests(unittest.TestCase):
             {"context_state": context_state, "loaded_skill_ids": ["milk-management"]},
         )
 
-        self.assertEqual(request["tool_choice"], "auto")
+        self.assertEqual(
+            request["tool_choice"],
+            {
+                "type": "allowed_tools",
+                "mode": "required",
+                "tools": [{"type": "function", "name": "milk_calendar_reschedule_preview"}],
+            },
+        )
         tool_names = _request_tool_names(request["tools"])
         self.assertIn("milk_calendar_reschedule_preview", tool_names)
 
+    def test_ibclc_consult_request_pauses_milk_intake_required_tool(self) -> None:
+        context_state = ContextState()
+        context_state.milk_management_state = {
+            "analysis_intake": {
+                "stage": "intake_collecting",
+                "current_field": "infant_state_or_satisfaction",
+                "checklist": [{"field": "infant_state_or_satisfaction", "status": "missing"}],
+            },
+        }
+
+        request = build_agent_request(
+            {"user_message": "打开顾问咨询", "locale": "zh-CN", "message_sent_at": "2026-05-14 09:00:00"},
+            {"context_state": context_state, "loaded_skill_ids": ["milk-management"]},
+        )
+
+        self.assertEqual(request["tool_choice"], "auto")
+        tool_names = _request_tool_names(request["tools"])
+        self.assertIn("ibclc_consult_card_create", tool_names)
+        self.assertIn("milk_analysis_intake_manage", tool_names)
+
     def test_vague_calendar_adjustment_time_does_not_force_reschedule_preview(self) -> None:
-        for message in ("明天上午有会议，帮我调整吸奶提醒", "10到12有会议，帮我调整吸奶提醒"):
+        for message in ("明天上午有会议，帮我调整吸奶提醒", "10到12有会议，帮我调整吸奶提醒", "10-12有会议，帮我调整吸奶提醒"):
             with self.subTest(message=message):
                 request = build_agent_request(
                     {"user_message": message, "locale": "zh-CN", "message_sent_at": "2026-05-14 09:00:00"},
@@ -610,7 +645,7 @@ class AgentToolEventTests(unittest.TestCase):
 
                 self.assertEqual(request["tool_choice"], "auto")
 
-    def test_pending_calendar_adjustment_context_keeps_tool_choice_auto(self) -> None:
+    def test_pending_calendar_adjustment_context_forces_calendar_mutate(self) -> None:
         context_state = ContextState()
         context_state.milk_management_state = {
             "pending_calendar_adjustment": {
@@ -631,7 +666,14 @@ class AgentToolEventTests(unittest.TestCase):
             {"context_state": context_state, "loaded_skill_ids": ["milk-management"]},
         )
 
-        self.assertEqual(request["tool_choice"], "auto")
+        self.assertEqual(
+            request["tool_choice"],
+            {
+                "type": "allowed_tools",
+                "mode": "required",
+                "tools": [{"type": "function", "name": "milk_calendar_mutate"}],
+            },
+        )
         tool_names = _request_tool_names(request["tools"])
         self.assertIn("milk_calendar_mutate", tool_names)
         self.assertIn("milk_plan_mutate", tool_names)
@@ -644,8 +686,12 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertIn("milk_plan_mutate", [tool["name"] for tool in milk_namespace["tools"]])
         request_context = request["input"][0]["content"][0]["text"]
         self.assertIn("奶量日程调整正在进行中", request_context)
-        self.assertIn("就调用 milk_calendar_mutate", request_context)
+        self.assertIn("本轮进入日程写入处理", request_context)
+        self.assertIn("调用 milk_calendar_mutate", request_context)
+        self.assertIn("不要再次向用户确认", request_context)
         self.assertIn("后端会复用上一轮缓存的预览", request_context)
+        self.assertNotIn("如果用户只是想查看或理解调整结果", request_context)
+        self.assertNotIn("如果用户提出新的时间或修改要求", request_context)
         self.assertNotIn("pending_calendar_adjustment_ready_for_save", request_context)
         self.assertNotIn("current_action_context", request_context)
         self.assertNotIn("cached_action_payload", request_context)
@@ -653,7 +699,7 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertNotIn("pending_calendar_adjustment_target_dates", request_context)
         self.assertNotIn("不要调用 milk_plan_mutate", request_context)
 
-    def test_pending_calendar_adjustment_revision_keeps_calendar_mutate_auto(self) -> None:
+    def test_pending_calendar_adjustment_pending_turn_forces_calendar_mutate(self) -> None:
         context_state = ContextState()
         context_state.milk_management_state = {
             "pending_calendar_adjustment": {
@@ -674,7 +720,14 @@ class AgentToolEventTests(unittest.TestCase):
             {"context_state": context_state, "loaded_skill_ids": ["milk-management"]},
         )
 
-        self.assertEqual(request["tool_choice"], "auto")
+        self.assertEqual(
+            request["tool_choice"],
+            {
+                "type": "allowed_tools",
+                "mode": "required",
+                "tools": [{"type": "function", "name": "milk_calendar_mutate"}],
+            },
+        )
         tool_names = _request_tool_names(request["tools"])
         self.assertIn("milk_calendar_mutate", tool_names)
         self.assertIn("milk_plan_mutate", tool_names)

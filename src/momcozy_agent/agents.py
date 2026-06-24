@@ -27,6 +27,7 @@ from .contexts import (
 from .health_guidance import health_guidance_request_context_lines, health_guidance_required_web_search_tool_choice
 from .static_context import STATIC_AGENT_INSTRUCTIONS
 from .tool_handlers.cards import birth_journey_intake_quick_reply_guidance
+from .tool_handlers.ibclc import ibclc_consult_creation_allowed
 from .tool_schemas import FUNCTION_TOOLS
 from .tool_registry import DEFERRED_TOOL_NAMESPACES, execute_tool, select_runtime_tools
 from .types import AgUiEvent, AgUiEventHandler, AgentEvent, AgentEventHandler, AgentEventPhase, BuildAgentRequestOptions, ResponsesClientLike, ResponsesRequest, RuntimeInputs, TextDeltaHandler
@@ -3871,8 +3872,15 @@ def _tool_choice_with_milk_plan_contract(
 
 def _required_milk_management_tool(inputs: RuntimeInputs, options: BuildAgentRequestOptions) -> str | None:
     user_message = inputs.get("user_message")
+    user_message_text = str(user_message or "").strip()
     state = _milk_management_state_from_options(options)
-    if _user_message_mentions_busy_calendar_adjustment(str(user_message or "").strip()):
+    if ibclc_consult_creation_allowed(inputs):
+        return None
+    if _pending_calendar_adjustment_ready_for_save(state):
+        return "milk_calendar_mutate"
+    if _user_message_has_specific_busy_calendar_adjustment(user_message_text):
+        return "milk_calendar_reschedule_preview"
+    if _user_message_mentions_busy_calendar_adjustment(user_message_text):
         return None
     intake = state.get("analysis_intake") if isinstance(state.get("analysis_intake"), dict) else {}
     if intake:
@@ -3958,6 +3966,31 @@ def _pending_calendar_adjustment_ready_for_save(state: dict[str, Any]) -> bool:
 _MILK_CALENDAR_ADJUSTMENT_MILK_TERMS = ("奶量", "吸奶", "亲喂", "喂奶", "追奶", "稳奶", "减奶", "泌乳", "提醒", "日程", "计划")
 _MILK_CALENDAR_ADJUSTMENT_TERMS = ("调整", "改", "挪", "避开", "不方便", "冲突", "安排", "同步", "保存到日历")
 _MILK_CALENDAR_BUSY_TERMS = ("会议", "开会", "有会", "通勤", "外出", "上班", "出门", "产检", "旅行", "忙", "不方便")
+
+
+def _user_message_has_specific_busy_calendar_adjustment(text: str) -> bool:
+    if not _user_message_mentions_busy_calendar_adjustment(text):
+        return False
+    return _user_message_has_calendar_date_hint(text) and _user_message_has_calendar_time_range(text)
+
+
+def _user_message_has_calendar_date_hint(text: str) -> bool:
+    if any(term in text for term in ("今天", "明天", "后天", "明后天", "明后两天", "接下来", "未来", "之后", "后面")):
+        return True
+    if re.search(r"\d{1,2}\s*月\s*\d{1,2}\s*(?:日|号)?", text):
+        return True
+    if re.search(r"\d{4}\s*-\s*\d{1,2}\s*-\s*\d{1,2}", text):
+        return True
+    return bool(re.search(r"\d{1,2}\s*/\s*\d{1,2}", text))
+
+
+def _user_message_has_calendar_time_range(text: str) -> bool:
+    return bool(
+        re.search(
+            r"\d{1,2}\s*(?:[:：]\s*\d{1,2})?\s*(?:~|～|-|到|至)\s*\d{1,2}\s*(?:[:：]\s*\d{1,2})?\s*点?",
+            text,
+        )
+    )
 
 
 def _user_message_mentions_busy_calendar_adjustment(text: str) -> bool:

@@ -53,6 +53,10 @@ def create_ibclc_consult_card(args: dict[str, Any], inputs: RuntimeInputs) -> di
     }
 
 
+def ibclc_consult_creation_allowed(inputs: RuntimeInputs) -> bool:
+    return _ibclc_consult_creation_confirmation(inputs).get("allowed") is True
+
+
 def _ibclc_consult_creation_confirmation(inputs: RuntimeInputs) -> dict[str, Any]:
     user_message = _normalize_confirmation_text(inputs.get("user_message"))
     if _is_explicit_ibclc_request(user_message):
@@ -101,6 +105,8 @@ def _is_explicit_ibclc_request(text: str) -> bool:
     if ("真人哺乳咨询" in text or "人工哺乳咨询" in text) and has_request_action:
         return True
     if "打开咨询入口" in text or "打开在线咨询" in text or "启动咨询" in text:
+        return True
+    if "顾问咨询" in text and any(token in text for token in ("打开", "启动", "接通", "找", "推荐", "入口", "帮我", "需要", "想要", "我要")):
         return True
     if "同意推荐" in text or "同意你推荐" in text:
         return True
