@@ -587,7 +587,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "milk_analysis_intake_manage": _function_tool(
         "milk_analysis_intake_manage",
-        "FLOW 只读工具：推进奶量分析的信息采集状态机，不写数据库。工具会自动读取/复用过去 7 天原始奶量记录和日级汇总，维护记录、宝宝状态、宝宝生长信号、妈妈红旗症状、乳房舒适度的信息采集表；信息未齐时返回 workflow_control.allowed_next_action=ask_user、step 进度、field_guidance、joint_reasoning_guidance、quick_replies 和当前一项追问 next_question，最终回复只能问这一项，不要说最后一个/只差一个，也不要同时追问其它 missing_fields；信息齐后返回 workflow_control.allowed_next_action=call_tool 和 analysis_context。模型只传本轮用户原话和已知宝宝/妈妈状态，不要自己维护字段清单；analysis_context ready 后下一步调用 milk_analysis_evaluate。若用户在采集过程中问主流程外问题，先回答，结尾必须确认：我们要继续刚才的奶量分析流程吗？",
+        "FLOW 只读工具：推进奶量分析的信息采集状态机，不写数据库。工具会自动读取/复用过去 7 天原始奶量记录和日级汇总，维护记录、宝宝状态、宝宝生长信号、妈妈红旗症状、乳房舒适度的信息采集表；每轮只追问当前一项 next_question。当前项已经问过但用户没有给出明确结果时，工具会把该项记为 unknown_after_asked 并继续推进，不要反复追问同一项；信息齐或已问过后返回 workflow_control.allowed_next_action=call_tool 和 analysis_context。模型只传本轮用户原话和已知宝宝/妈妈状态，不要自己维护字段清单；analysis_context ready 后下一步调用 milk_analysis_evaluate。若用户在采集过程中问主流程外问题，先回答，结尾必须确认：我们要继续刚才的奶量分析流程吗？",
         {
             "action": {
                 "type": "string",
@@ -611,12 +611,18 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "milk_analysis_evaluate": _function_tool(
         "milk_analysis_evaluate",
-        "EVALUATE 只读工具：基于 milk_analysis_intake_manage 返回或会话状态中的 analysis_context 完成奶量分析，不写数据库，不生成计划草稿。工具会复用过去 7 天原始记录、日级汇总、宝宝状态和妈妈状态，返回奶量结论、风险边界和是否适合进入计划；如果缺 analysis_context，先回到 milk_analysis_intake_manage；如果工具返回缺宝宝/妈妈上下文，只能按 next_question 追问当前一项，不要自行拼多个问题。信息齐并完成分析后，最终回复只总结判断并询问是否生成奶量计划；不要把记录节奏、分析素材或计划排程参考改写成新问题。",
+        "EVALUATE 只读工具：基于 milk_analysis_intake_manage 返回或会话状态中的 analysis_context 完成奶量分析，不写数据库，不生成计划草稿。工具会复用过去 7 天原始记录、日级汇总、宝宝状态和妈妈状态，返回奶量结论、风险边界和是否适合进入计划；如果缺 analysis_context，先回到 milk_analysis_intake_manage。模型可通过 candidate_slots 传入从对话历史中整理出的字段候选值，工具会优先使用状态机已采集值，只用候选值补足状态机未采集项。没有采集到的字段只作为内部保守因素，最终回复不要提及、引用或追问未知字段。信息齐并完成分析后，最终回复只总结判断并询问是否生成奶量计划；不要把记录节奏、分析素材或计划排程参考改写成新问题。",
         {
             "analysis_context": _nullable(
                 {
                     **JSON_OBJECT_STRING,
                     "description": "字符串编码 JSON。优先传 milk_analysis_intake_manage 返回的 analysis_context；没有时传 null，工具会从会话状态读取。",
+                }
+            ),
+            "candidate_slots": _nullable(
+                {
+                    **JSON_OBJECT_STRING,
+                    "description": "字符串编码 JSON。可传模型从已发生对话中明确整理出的字段候选值，例如 {\"infant_wet_diapers\":{\"value\":\"尿布和平时差不多\",\"confidence\":\"explicit\"}}；不要填推断值。",
                 }
             ),
             "as_of_time": _nullable({"type": "string"}),

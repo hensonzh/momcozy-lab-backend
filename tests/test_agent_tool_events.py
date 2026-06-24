@@ -336,7 +336,17 @@ class AgentToolEventTests(unittest.TestCase):
             },
         }
 
-        for message in ("先按每天多50ml来做", "现在生成计划", "现在制定计划", "生成奶量计划", "帮我生成奶量计划"):
+        for message in (
+            "先按每天多50ml来做",
+            "现在生成计划",
+            "现在制定计划",
+            "生成奶量计划",
+            "帮我生成奶量计划",
+            "温和追奶",
+            "追奶",
+            "稳奶",
+            "减奶",
+        ):
             with self.subTest(message=message):
                 request = build_agent_request(
                     {"user_message": message, "locale": "zh-CN"},
@@ -798,12 +808,36 @@ class AgentToolEventTests(unittest.TestCase):
 
         tool_names = _request_tool_names(request["tools"])
         self.assertIn("milk_plan_mutate", tool_names)
+        self.assertIn("milk_calendar_reschedule_preview", tool_names)
         self.assertIn("milk_calendar_mutate", tool_names)
+        top_level_functions = [tool["name"] for tool in request["tools"] if tool.get("type") == "function"]
+        self.assertIn("milk_calendar_reschedule_preview", top_level_functions)
         request_context = request["input"][0]["content"][0]["text"]
         self.assertIn("mode: wait_for_plan_save_confirmation", request_context)
         self.assertIn("奶量计划草稿已经准备好", request_context)
         self.assertIn("用户确认保存、同步或按这版执行时调用 milk_plan_mutate", request_context)
+        self.assertIn("先调用 milk_calendar_reschedule_preview 生成可同步预览", request_context)
         self.assertNotIn("confirmed=true", request_context)
+
+    def test_saved_milk_plan_context_promotes_calendar_reschedule_preview(self) -> None:
+        context_state = ContextState()
+        context_state.milk_management_state = {
+            "last_plan_applied": {
+                "status": "plan_applied",
+                "summary": "已经同步到计划页。",
+            },
+        }
+
+        request = build_agent_request(
+            {"user_message": "明天上午 10 到 12 点有会议", "locale": "zh-CN", "message_sent_at": "2026-05-14 09:00:00"},
+            {"context_state": context_state, "loaded_skill_ids": ["milk-management"]},
+        )
+
+        tool_names = _request_tool_names(request["tools"])
+        self.assertIn("milk_calendar_reschedule_preview", tool_names)
+        request_context = request["input"][0]["content"][0]["text"]
+        self.assertIn("奶量计划已经同步到计划页", request_context)
+        self.assertIn("不要用纯文本模拟调整结果", request_context)
 
     def test_milk_plan_context_answer_forces_intake_tool(self) -> None:
         context_state = ContextState()

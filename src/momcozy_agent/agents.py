@@ -2347,7 +2347,10 @@ def _compact_milk_intake_flow(data: dict[str, Any]) -> dict[str, Any]:
             "progress": data.get("progress") if isinstance(data.get("progress"), dict) else flow_state.get("progress"),
             "completed_fields": [item.get("id") for item in checklist if isinstance(item, dict) and item.get("status") == "collected"],
             "missing_fields": data.get("missing_fields") if isinstance(data.get("missing_fields"), list) else [
-                item.get("id") for item in checklist if isinstance(item, dict) and item.get("status") != "collected"
+                item.get("id") for item in checklist if isinstance(item, dict) and item.get("status") == "missing"
+            ],
+            "unknown_after_asked_fields": [
+                item.get("id") for item in checklist if isinstance(item, dict) and item.get("status") == "unknown_after_asked"
             ],
             "current_field": data.get("current_field") or flow_state.get("current_field"),
             "next_question": data.get("next_question") or flow_state.get("next_question"),
@@ -3977,8 +3980,13 @@ def _milk_management_disabled_tool_names_from_state(options: BuildAgentRequestOp
 
 def _milk_management_contextual_tools_from_state(options: BuildAgentRequestOptions) -> list[str]:
     state = _milk_management_state_from_options(options)
+    tools: list[str] = []
     write_tool = _milk_management_contextual_write_tool_from_state(state)
-    return [write_tool] if write_tool else []
+    if write_tool:
+        tools.append(write_tool)
+    if _milk_calendar_reschedule_preview_useful_from_state(state):
+        tools.append("milk_calendar_reschedule_preview")
+    return list(dict.fromkeys(tools))
 
 
 def _milk_management_contextual_write_tool_from_state(state: dict[str, Any]) -> str:
@@ -3988,6 +3996,28 @@ def _milk_management_contextual_write_tool_from_state(state: dict[str, Any]) -> 
     if intake and _milk_analysis_intake_ready_for_save(intake):
         return "milk_plan_mutate"
     return ""
+
+
+def _milk_calendar_reschedule_preview_useful_from_state(state: dict[str, Any]) -> bool:
+    if _pending_calendar_adjustment_ready_for_save(state):
+        return False
+    intake = state.get("analysis_intake") if isinstance(state.get("analysis_intake"), dict) else {}
+    if _milk_plan_preview_ready_in_state(intake):
+        return True
+    last_preview = state.get("last_plan_preview") if isinstance(state.get("last_plan_preview"), dict) else {}
+    if _milk_plan_preview_ready_in_state(last_preview):
+        return True
+    last_applied = state.get("last_plan_applied") if isinstance(state.get("last_plan_applied"), dict) else {}
+    return bool(last_applied)
+
+
+def _milk_plan_preview_ready_in_state(value: dict[str, Any]) -> bool:
+    if not isinstance(value, dict):
+        return False
+    if str(value.get("status") or "").strip() == "plan_preview_ready":
+        return True
+    plan_preview = value.get("plan_preview") if isinstance(value.get("plan_preview"), dict) else {}
+    return str(plan_preview.get("status") or "").strip() == "plan_preview_ready"
 
 
 def _pending_calendar_adjustment_ready_for_save(state: dict[str, Any]) -> bool:
@@ -4119,7 +4149,7 @@ def _milk_analysis_intake_ready_for_save(intake: dict[str, Any]) -> bool:
 
 def _milk_analysis_intake_has_missing_fields(intake: dict[str, Any]) -> bool:
     checklist = intake.get("checklist") if isinstance(intake.get("checklist"), list) else []
-    if any(isinstance(item, dict) and item.get("status") != "collected" for item in checklist):
+    if any(isinstance(item, dict) and item.get("status") == "missing" for item in checklist):
         return True
     return str(intake.get("stage") or "").strip() == "intake_collecting"
 
@@ -4129,7 +4159,7 @@ def _milk_analysis_intake_complete(intake: dict[str, Any]) -> bool:
         return False
     checklist = intake.get("checklist") if isinstance(intake.get("checklist"), list) else []
     if checklist:
-        return not any(isinstance(item, dict) and item.get("status") != "collected" for item in checklist)
+        return not any(isinstance(item, dict) and item.get("status") == "missing" for item in checklist)
     if str(intake.get("stage") or "").strip() == "intake_collecting":
         return False
     analysis_context = intake.get("analysis_context") if isinstance(intake.get("analysis_context"), dict) else {}
@@ -4145,7 +4175,7 @@ def _milk_analysis_context_has_missing_fields(analysis_context: dict[str, Any]) 
     if isinstance(explicit_missing, list) and any(str(item or "").strip() for item in explicit_missing):
         return True
     checklist = analysis_context.get("checklist") if isinstance(analysis_context.get("checklist"), list) else []
-    return any(isinstance(item, dict) and item.get("status") != "collected" for item in checklist)
+    return any(isinstance(item, dict) and item.get("status") == "missing" for item in checklist)
 
 
 def _milk_analysis_assessment_ready_for_plan_preview(intake: dict[str, Any]) -> bool:
@@ -4373,7 +4403,18 @@ def _user_message_accepts_milk_plan_preview(message: Any) -> bool:
         return True
     if _workflow_text_accepts_plan_for_request(text):
         return True
+    if _user_message_selects_milk_plan_type(text):
+        return True
     return any(token in text for token in ("每天多", "每天少", "做到", "目标", "追奶计划", "稳奶计划", "减奶计划", "生成计划", "制定计划", "做计划"))
+
+
+def _user_message_selects_milk_plan_type(text: str) -> bool:
+    normalized = text.strip().lower()
+    if not normalized:
+        return False
+    if any(token in normalized for token in ("increase_milk", "maintain_milk", "decrease_milk")):
+        return True
+    return any(token in text for token in ("温和追奶", "追奶", "稳奶", "减奶", "按温和", "温和一点", "安全一点"))
 
 
 def _workflow_text_accepts_plan_for_request(text: str) -> bool:

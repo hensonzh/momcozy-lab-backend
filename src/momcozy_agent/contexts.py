@@ -490,6 +490,10 @@ def record_milk_management_tool_state(state: ContextState, tool_name: str, resul
     if tool_name in {"milk_calendar_change_preview", "milk_calendar_reschedule_preview"}:
         _record_milk_calendar_preview_state(state, tool_name, result)
         return
+    if tool_name == "milk_plan_mutate" and _milk_tool_succeeded(result):
+        _invalidate_milk_management_state_after_write(state)
+        _record_milk_plan_applied_state(state, result)
+        return
     if tool_name in _MILK_STATE_INVALIDATING_WRITE_TOOLS and _milk_tool_succeeded(result):
         _invalidate_milk_management_state_after_write(state)
 
@@ -610,6 +614,20 @@ def _record_milk_plan_preview_create_result_state(state: ContextState, result: d
         state.milk_management_state.pop("last_plan_preview", None)
 
 
+def _record_milk_plan_applied_state(state: ContextState, result: dict[str, Any]) -> None:
+    tool_result = result.get("result")
+    if not isinstance(tool_result, dict):
+        return
+    state.milk_management_state["last_plan_applied"] = {
+        key: value
+        for key, value in {
+            "status": tool_result.get("status"),
+            "summary": tool_result.get("summary"),
+        }.items()
+        if value not in (None, "", [], {})
+    }
+
+
 def _normalize_milk_analysis_intake_state(intake: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(intake, dict):
         return {}
@@ -621,6 +639,8 @@ def _normalize_milk_analysis_intake_state(intake: dict[str, Any]) -> dict[str, A
         "infant_signals",
         "maternal_symptoms",
         "checklist",
+        "unknown_after_asked_fields",
+        "slot_sources",
         "plan_type",
         "target_daily_ml",
         "delta_ml",
@@ -774,6 +794,10 @@ def _format_milk_management_context(state: ContextState) -> list[str]:
         last_plan_preview = state.milk_management_state.get("last_plan_preview")
         if isinstance(last_plan_preview, dict):
             lines.extend(_format_last_milk_plan_preview_context(last_plan_preview))
+        else:
+            last_plan_applied = state.milk_management_state.get("last_plan_applied")
+            if isinstance(last_plan_applied, dict):
+                lines.extend(_format_last_milk_plan_applied_context(last_plan_applied))
     pending_calendar = state.milk_management_state.get("pending_calendar_adjustment")
     if isinstance(pending_calendar, dict):
         lines.extend(_format_pending_calendar_adjustment_context(pending_calendar))
@@ -864,7 +888,8 @@ def _format_milk_analysis_intake_context(intake: dict[str, Any]) -> list[str]:
     stage = str(intake.get("stage") or "").strip()
     checklist = intake.get("checklist") if isinstance(intake.get("checklist"), list) else []
     completed = [str(item.get("id")) for item in checklist if isinstance(item, dict) and item.get("status") == "collected"]
-    missing = [str(item.get("id")) for item in checklist if isinstance(item, dict) and item.get("status") != "collected"]
+    missing = [str(item.get("id")) for item in checklist if isinstance(item, dict) and item.get("status") == "missing"]
+    unknown = [str(item.get("id")) for item in checklist if isinstance(item, dict) and item.get("status") == "unknown_after_asked"]
     current_field = str(intake.get("current_field") or "").strip()
     progress = intake.get("progress") if isinstance(intake.get("progress"), dict) else {}
     next_question = str(intake.get("next_question") or "").strip()
@@ -886,6 +911,9 @@ def _format_milk_analysis_intake_context(intake: dict[str, Any]) -> list[str]:
         lines.append("- collected_slots: " + ", ".join(completed))
     if missing:
         lines.append("- missing_slots: " + ", ".join(missing))
+    if unknown:
+        lines.append("- internal_unknown_after_asked_slots: " + ", ".join(unknown))
+        lines.append("- unknown_slot_output_policy: 不要在用户可见回复里提及、引用或追问 internal_unknown_after_asked_slots；这些只用于内部保守判断。")
     if current_field:
         lines.append(f"- current_slot: {current_field}")
     if next_question:
@@ -917,6 +945,7 @@ def _format_milk_analysis_intake_context(intake: dict[str, Any]) -> list[str]:
                 "奶量计划草稿已经准备好。用户只是查看或调整时继续解释/修改；"
                 "用户确认保存、同步或按这版执行时调用 milk_plan_mutate，成功前不要说已经同步。"
             )
+        lines.extend(_format_milk_calendar_reschedule_preview_hint())
     elif missing:
         lines.append("- required_next_tool: milk_analysis_intake_manage")
         lines.append("- instruction: 如果用户在回答 current_question，先调用 milk_analysis_intake_manage 记录该字段；用户可见回复只追问 current_question 这一项。")
@@ -931,10 +960,11 @@ def _format_milk_analysis_intake_context(intake: dict[str, Any]) -> list[str]:
         if current_daily_ml is not None:
             lines.append(f"- current_daily_ml: {_milk_context_ml_text(current_daily_ml)}")
         lines.append("- required_next_tool_when_user_accepts: milk_plan_preview_create")
-        lines.append("- instruction: 采集和评估已完成；用户确认生成/制定奶量计划时调用 milk_plan_preview_create，不要回头追问已完成字段。")
+        lines.append("- instruction: 采集和评估已完成；用户确认生成/制定奶量计划，或选择追奶/稳奶/减奶方向时，调用 milk_plan_preview_create，不要回头追问已完成字段。")
     elif stage == "plan_preview":
         lines.append("已有计划草稿，正在等待用户决定是否保存、调整或暂不处理。")
         lines.append("用户确认保存、同步或按这版执行时，调用 milk_plan_mutate；用户想调整时，先按用户新要求修改草稿或重新生成预览。")
+        lines.extend(_format_milk_calendar_reschedule_preview_hint())
     return lines
 
 
@@ -1148,7 +1178,23 @@ def _format_last_milk_plan_preview_context(last_plan_preview: dict[str, Any]) ->
                 "如果用户确认保存、同步、写入日历或按这版执行，就调用 milk_plan_mutate 创建计划。"
             )
             lines.append("在看到 milk_plan_mutate 成功结果前，不要说已经同步。")
+        lines.extend(_format_milk_calendar_reschedule_preview_hint())
     return lines
+
+
+def _format_last_milk_plan_applied_context(last_plan_applied: dict[str, Any]) -> list[str]:
+    lines = ["奶量计划已经同步到计划页。"]
+    summary = str(last_plan_applied.get("summary") or "").strip()
+    if summary:
+        lines.append(f"上一轮计划写入结果：{summary}")
+    lines.extend(_format_milk_calendar_reschedule_preview_hint())
+    return lines
+
+
+def _format_milk_calendar_reschedule_preview_hint() -> list[str]:
+    return [
+        "- 如果用户提出会议、外出、不方便、避开某段时间等奶量计划日程调整需求，先调用 milk_calendar_reschedule_preview 生成可同步预览；不要用纯文本模拟调整结果。"
+    ]
 
 
 def _milk_plan_preview_idempotency_key(draft: dict[str, Any]) -> str:

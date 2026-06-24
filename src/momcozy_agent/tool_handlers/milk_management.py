@@ -63,6 +63,9 @@ FLOW_REQUIRED_FIELDS = [
     "maternal_red_flags",
     "maternal_breast_comfort",
 ]
+FLOW_SLOT_COLLECTED = "collected"
+FLOW_SLOT_MISSING = "missing"
+FLOW_SLOT_UNKNOWN_AFTER_ASKED = "unknown_after_asked"
 FLOW_MATERNAL_RED_FLAG_FIELDS = ("fever", "chills", "breast_redness", "lump_or_hard_area", "worsening_pain")
 FLOW_FIELD_LABELS = {
     "records_7d": "过去 7 天可计算奶量记录",
@@ -296,6 +299,7 @@ def _analysis_intake_manage(arguments: dict[str, Any], inputs: RuntimeInputs) ->
     infant_signals, maternal_symptoms = _flow_context_updates(arguments, flow, user_update)
     flow["infant_signals"] = infant_signals
     flow["maternal_symptoms"] = maternal_symptoms
+    _flow_mark_current_field_unknown_if_needed(flow, action=action, user_update=user_update)
     arguments = {**arguments, "user_update": user_update}
     if _flow_user_update_invalidates_assessment(action, user_update):
         flow.pop("assessment_result", None)
@@ -389,6 +393,11 @@ def _analysis_evaluate(arguments: dict[str, Any], inputs: RuntimeInputs) -> dict
             "milk_flow_decision": flow_decision,
             "executed_step": "assessment",
             "next_tool": next_tool,
+            "assistant_instruction": (
+                "用户可见回复只能引用已确认或明确补全的字段；"
+                "不要提及、引用或追问 unknown_after_asked_fields / 未采集字段。"
+                "未知字段只作为内部保守因素处理。"
+            ),
         },
         "assistant_followup": assessment.get("assistant_followup")
         if isinstance(assessment.get("assistant_followup"), dict)
@@ -600,7 +609,7 @@ def _flow_progress(checklist: list[dict[str, Any]], current_field: str) -> dict[
     field_order = [str(item.get("id") or "") for item in checklist if isinstance(item, dict)] or FLOW_REQUIRED_FIELDS
     total = len(field_order) or len(FLOW_REQUIRED_FIELDS)
     index = field_order.index(current_field) + 1 if current_field in field_order else min(len(completed) + 1, total)
-    remaining_count = len([item for item in checklist if isinstance(item, dict) and item.get("status") != "collected"])
+    remaining_count = len([item for item in checklist if isinstance(item, dict) and item.get("status") == FLOW_SLOT_MISSING])
     return {
         "index": index,
         "total": total,
@@ -646,6 +655,8 @@ def _analysis_context_from_flow(flow: dict[str, Any], *, records_result: dict[st
         "infant_signals": flow.get("infant_signals") if isinstance(flow.get("infant_signals"), dict) else {},
         "maternal_symptoms": flow.get("maternal_symptoms") if isinstance(flow.get("maternal_symptoms"), dict) else {},
         "checklist": flow.get("checklist") if isinstance(flow.get("checklist"), list) else [],
+        "unknown_after_asked_fields": _flow_unknown_after_asked_fields(flow),
+        "slot_sources": flow.get("slot_sources") if isinstance(flow.get("slot_sources"), dict) else {},
         "plan_type": flow.get("plan_type"),
         "target_daily_ml": flow.get("target_daily_ml"),
         "delta_ml": flow.get("delta_ml"),
@@ -668,7 +679,8 @@ def _analysis_intake_state_for_storage(flow: dict[str, Any]) -> dict[str, Any]:
 
 def _analysis_context_from_args_or_state(arguments: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
     explicit = _parse_json_object(arguments.get("analysis_context"))
-    state_context = _analysis_context_from_state(inputs)
+    state_context = _analysis_context_with_candidate_slots(_analysis_context_from_state(inputs), arguments)
+    explicit = _analysis_context_with_candidate_slots(explicit, arguments)
     if _analysis_context_is_complete(state_context):
         return state_context
     if _analysis_context_is_complete(explicit):
@@ -678,6 +690,59 @@ def _analysis_context_from_args_or_state(arguments: dict[str, Any], inputs: Runt
     if explicit:
         return explicit
     return {}
+
+
+def _analysis_context_with_candidate_slots(context: dict[str, Any], arguments: dict[str, Any]) -> dict[str, Any]:
+    if not context:
+        return context
+    candidates = _parse_json_object(arguments.get("candidate_slots"))
+    if not candidates:
+        return context
+    flow = _flow_from_analysis_context(context)
+    infant = dict(flow.get("infant_signals") if isinstance(flow.get("infant_signals"), dict) else {})
+    maternal = dict(flow.get("maternal_symptoms") if isinstance(flow.get("maternal_symptoms"), dict) else {})
+    slot_sources = dict(flow.get("slot_sources") if isinstance(flow.get("slot_sources"), dict) else {})
+    changed = False
+    for field in FLOW_REQUIRED_FIELDS:
+        if _flow_field_is_collected(field, flow):
+            continue
+        candidate = _candidate_slot_payload(candidates.get(field))
+        if not candidate:
+            continue
+        value = norm_text(candidate.get("value"))
+        if not value:
+            continue
+        before_infant = dict(infant)
+        before_maternal = dict(maternal)
+        _flow_apply_current_field_answer(field, value, infant, maternal)
+        if infant != before_infant or maternal != before_maternal:
+            slot_sources[field] = {
+                "source": "model_recovered",
+                "confidence": norm_text(candidate.get("confidence")) or "explicit",
+            }
+            changed = True
+    if not changed:
+        return context
+    flow["infant_signals"] = infant
+    flow["maternal_symptoms"] = maternal
+    flow["slot_sources"] = slot_sources
+    flow["checklist"] = _flow_checklist(flow)
+    merged = _analysis_context_from_flow(flow, records_result=None)
+    return _drop_empty_context({**context, **merged})
+
+
+def _candidate_slot_payload(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        confidence = norm_text(value.get("confidence"))
+        if confidence and confidence not in {"explicit", "model_recovered", "high"}:
+            return {}
+        candidate_value = value.get("value")
+        if candidate_value in (None, "", [], {}):
+            return {}
+        return {"value": candidate_value, "confidence": confidence or "explicit"}
+    if value in (None, "", [], {}):
+        return {}
+    return {"value": value, "confidence": "explicit"}
 
 
 def _analysis_context_from_state(inputs: RuntimeInputs) -> dict[str, Any]:
@@ -785,6 +850,9 @@ def _analysis_context_fingerprint(analysis_context: dict[str, Any]) -> str:
         "infant_signals": analysis_context.get("infant_signals") if isinstance(analysis_context.get("infant_signals"), dict) else {},
         "maternal_symptoms": analysis_context.get("maternal_symptoms") if isinstance(analysis_context.get("maternal_symptoms"), dict) else {},
         "checklist": analysis_context.get("checklist") if isinstance(analysis_context.get("checklist"), list) else [],
+        "unknown_after_asked_fields": analysis_context.get("unknown_after_asked_fields")
+        if isinstance(analysis_context.get("unknown_after_asked_fields"), list)
+        else [],
         "plan_type": analysis_context.get("plan_type"),
         "target_daily_ml": analysis_context.get("target_daily_ml"),
         "delta_ml": analysis_context.get("delta_ml"),
@@ -802,6 +870,8 @@ def _flow_from_analysis_context(context: dict[str, Any]) -> dict[str, Any]:
         "infant_signals": context.get("infant_signals") if isinstance(context.get("infant_signals"), dict) else {},
         "maternal_symptoms": context.get("maternal_symptoms") if isinstance(context.get("maternal_symptoms"), dict) else {},
         "checklist": context.get("checklist") if isinstance(context.get("checklist"), list) else [],
+        "unknown_after_asked_fields": context.get("unknown_after_asked_fields") if isinstance(context.get("unknown_after_asked_fields"), list) else [],
+        "slot_sources": context.get("slot_sources") if isinstance(context.get("slot_sources"), dict) else {},
         "plan_type": norm_text(context.get("plan_type")),
         "target_daily_ml": context.get("target_daily_ml"),
         "delta_ml": context.get("delta_ml"),
@@ -908,6 +978,8 @@ def _flow_seed(previous: dict[str, Any]) -> dict[str, Any]:
         "stage": norm_text(previous.get("stage")) or "intake_collecting",
         "goal": norm_text(previous.get("goal")) or "milk_analysis",
         "current_field": norm_text(previous.get("current_field")),
+        "checklist": previous.get("checklist") if isinstance(previous.get("checklist"), list) else [],
+        "unknown_after_asked_fields": _flow_unknown_after_asked_fields(previous),
         "infant_signals": previous.get("infant_signals") if isinstance(previous.get("infant_signals"), dict) else {},
         "maternal_symptoms": previous.get("maternal_symptoms") if isinstance(previous.get("maternal_symptoms"), dict) else {},
         "plan_type": norm_text(previous.get("plan_type")),
@@ -987,6 +1059,49 @@ def _flow_context_updates(arguments: dict[str, Any], flow: dict[str, Any], user_
     )
     _flow_apply_current_field_answer(flow.get("current_field"), user_update, infant, maternal)
     return infant, maternal
+
+
+def _flow_mark_current_field_unknown_if_needed(flow: dict[str, Any], *, action: str, user_update: str) -> None:
+    field = norm_text(flow.get("current_field"))
+    text = norm_text(user_update)
+    if not field or field not in FLOW_REQUIRED_FIELDS:
+        return
+    if action in {"start", "reset", "get_state"}:
+        return
+    if not text or _user_update_starts_new_milk_analysis(text):
+        return
+    if _flow_field_is_collected(field, flow):
+        return
+    if _flow_answer_matches_current_field(field, text):
+        return
+    if field != "records_7d" and _text_answers_record_completeness(text):
+        return
+    unknown_fields = set(_flow_unknown_after_asked_fields(flow))
+    unknown_fields.add(field)
+    flow["unknown_after_asked_fields"] = sorted(unknown_fields)
+
+
+def _flow_field_is_collected(field: str, flow: dict[str, Any]) -> bool:
+    checklist = _flow_checklist(flow)
+    return any(
+        isinstance(item, dict)
+        and str(item.get("id") or "") == field
+        and str(item.get("status") or "") == FLOW_SLOT_COLLECTED
+        for item in checklist
+    )
+
+
+def _flow_unknown_after_asked_fields(flow: dict[str, Any]) -> list[str]:
+    values = flow.get("unknown_after_asked_fields")
+    fields = {str(item).strip() for item in values if str(item).strip()} if isinstance(values, list) else set()
+    checklist = flow.get("checklist") if isinstance(flow.get("checklist"), list) else []
+    for item in checklist:
+        if not isinstance(item, dict):
+            continue
+        field = str(item.get("id") or item.get("field") or "").strip()
+        if field and str(item.get("status") or "").strip() == FLOW_SLOT_UNKNOWN_AFTER_ASKED:
+            fields.add(field)
+    return [field for field in FLOW_REQUIRED_FIELDS if field in fields and not _flow_value_collected_for_field(field, flow)]
 
 
 def _trusted_infant_signal_argument_updates(
@@ -1208,28 +1323,41 @@ def _text_answers_maternal_breast_comfort(text: str) -> bool:
 
 
 def _flow_checklist(flow: dict[str, Any]) -> list[dict[str, Any]]:
-    records = flow.get("records_snapshot") if isinstance(flow.get("records_snapshot"), dict) else {}
-    infant = flow.get("infant_signals") if isinstance(flow.get("infant_signals"), dict) else {}
-    maternal = flow.get("maternal_symptoms") if isinstance(flow.get("maternal_symptoms"), dict) else {}
-    checks = {
-        "records_7d": records.get("status") == "collected",
-        "infant_wet_diapers": _flow_has_value(infant.get("wet_diapers_24h")),
-        "infant_state_or_satisfaction": any(_flow_has_value(infant.get(key)) for key in ("baby_state", "feeding_satisfaction", "poor_feeding", "poor_latch", "lethargy")),
-        "infant_growth_signal": any(_flow_has_value(infant.get(key)) for key in ("recent_weight", "weight_trend", "growth_concern")),
-        "maternal_red_flags": _has_maternal_red_flag_answer(maternal),
-        "maternal_breast_comfort": _has_positive_maternal_red_flag(maternal) or any(
-            key in maternal
-            for key in ("breast_fullness", "engorgement", "post_pump_fullness", "incomplete_emptying", "pain_level", "symptom_text")
-        ),
-    }
+    unknown_after_asked = set(_flow_unknown_after_asked_fields(flow))
     return [
         {
             "id": field,
             "label": FLOW_FIELD_LABELS[field],
-            "status": "collected" if checks.get(field) else "missing",
+            "status": FLOW_SLOT_COLLECTED
+            if _flow_value_collected_for_field(field, flow)
+            else FLOW_SLOT_UNKNOWN_AFTER_ASKED
+            if field in unknown_after_asked
+            else FLOW_SLOT_MISSING,
         }
         for field in FLOW_REQUIRED_FIELDS
     ]
+
+
+def _flow_value_collected_for_field(field: str, flow: dict[str, Any]) -> bool:
+    records = flow.get("records_snapshot") if isinstance(flow.get("records_snapshot"), dict) else {}
+    infant = flow.get("infant_signals") if isinstance(flow.get("infant_signals"), dict) else {}
+    maternal = flow.get("maternal_symptoms") if isinstance(flow.get("maternal_symptoms"), dict) else {}
+    if field == "records_7d":
+        return records.get("status") == FLOW_SLOT_COLLECTED
+    if field == "infant_wet_diapers":
+        return _flow_has_value(infant.get("wet_diapers_24h"))
+    if field == "infant_state_or_satisfaction":
+        return any(_flow_has_value(infant.get(key)) for key in ("baby_state", "feeding_satisfaction", "poor_feeding", "poor_latch", "lethargy"))
+    if field == "infant_growth_signal":
+        return any(_flow_has_value(infant.get(key)) for key in ("recent_weight", "weight_trend", "growth_concern"))
+    if field == "maternal_red_flags":
+        return _has_maternal_red_flag_answer(maternal)
+    if field == "maternal_breast_comfort":
+        return _has_positive_maternal_red_flag(maternal) or any(
+            key in maternal
+            for key in ("breast_fullness", "engorgement", "post_pump_fullness", "incomplete_emptying", "pain_level", "symptom_text")
+        )
+    return False
 
 
 def _flow_has_value(value: Any) -> bool:
@@ -1247,7 +1375,7 @@ def _has_positive_maternal_red_flag(maternal: dict[str, Any]) -> bool:
 
 
 def _flow_missing_fields(checklist: list[dict[str, Any]]) -> list[str]:
-    return [str(item.get("id")) for item in checklist if item.get("status") != "collected"]
+    return [str(item.get("id")) for item in checklist if item.get("status") == FLOW_SLOT_MISSING]
 
 
 def _flow_question_for_field(field: str) -> str:
@@ -1276,7 +1404,20 @@ def _flow_assessment_arguments(arguments: dict[str, Any], flow: dict[str, Any]) 
         "workflow_intent": "milk_analysis",
         "infant_signals": flow.get("infant_signals") if isinstance(flow.get("infant_signals"), dict) else {},
         "maternal_symptoms": flow.get("maternal_symptoms") if isinstance(flow.get("maternal_symptoms"), dict) else {},
+        "options": _flow_analysis_options(flow),
     }
+
+
+def _flow_analysis_options(flow: dict[str, Any]) -> dict[str, Any]:
+    checklist = flow.get("checklist") if isinstance(flow.get("checklist"), list) else []
+    options: dict[str, Any] = {}
+    if checklist and not _flow_missing_fields(checklist):
+        options["_analysis_intake_complete"] = True
+    unknown_fields = _flow_unknown_after_asked_fields(flow)
+    if unknown_fields:
+        options["_analysis_unknown_after_asked_fields"] = unknown_fields
+        options["_user_visible_unknown_policy"] = "do_not_mention_or_quote_unknown_fields"
+    return options
 
 
 def _flow_plan_type(arguments: dict[str, Any], flow: dict[str, Any]) -> str | None:
@@ -1379,6 +1520,7 @@ def _flow_state_for_storage(flow: dict[str, Any]) -> dict[str, Any]:
         "workflow_control": flow.get("workflow_control") if isinstance(flow.get("workflow_control"), dict) else {},
         "field_guidance": flow.get("field_guidance") if isinstance(flow.get("field_guidance"), dict) else {},
         "joint_reasoning_guidance": flow.get("joint_reasoning_guidance") if isinstance(flow.get("joint_reasoning_guidance"), list) else [],
+        "unknown_after_asked_fields": _flow_unknown_after_asked_fields(flow),
         "plan_type": flow.get("plan_type"),
         "target_daily_ml": flow.get("target_daily_ml"),
         "delta_ml": flow.get("delta_ml"),
@@ -1401,7 +1543,7 @@ def _evaluate_milk_analysis_core(arguments: dict[str, Any], inputs: RuntimeInput
     if clinical_gate is not None:
         return clinical_gate
     _attach_clinical_assessment(result, arguments)
-    _attach_milk_flow_decision(result)
+    _attach_milk_flow_decision(result, arguments)
     return result
 
 
@@ -1720,10 +1862,12 @@ def _clinical_data_from_plan_options(arguments: dict[str, Any], *, plan_type: An
 def _clinical_gate_for_analysis(arguments: dict[str, Any], *, result: dict[str, Any], comprehensive_assessment: bool) -> dict[str, Any] | None:
     if not comprehensive_assessment:
         return None
+    options = _normalized_options(arguments.get("options"))
+    intake_complete = bool(options.get("_analysis_intake_complete"))
     clinical = _clinical_assessment_for_result(arguments, result=result, requested_plan_type="")
     clinical_data = clinical.get("data") if isinstance(clinical.get("data"), dict) else {}
     missing_fields = _missing_clinical_context_fields(clinical_data)
-    if missing_fields:
+    if missing_fields and not intake_complete:
         current_field, next_question = _clinical_context_current_question(missing_fields)
         decision = _milk_flow_decision_for_missing_context(
             missing_fields,
@@ -2631,11 +2775,19 @@ def _provided_signal_value(value: Any) -> bool:
     return value not in (None, "", [])
 
 
-def _attach_milk_flow_decision(result: dict[str, Any]) -> None:
+def _attach_milk_flow_decision(result: dict[str, Any], arguments: dict[str, Any]) -> None:
     data = result.get("data")
     if not isinstance(data, dict):
         return
-    data["milk_flow_decision"] = _milk_flow_decision_for_assessment(data)
+    options = _normalized_options(arguments.get("options"))
+    data["milk_flow_decision"] = _milk_flow_decision_for_assessment(
+        data,
+        intake_complete=bool(options.get("_analysis_intake_complete")),
+    )
+    unknown_fields = options.get("_analysis_unknown_after_asked_fields")
+    if isinstance(unknown_fields, list) and unknown_fields:
+        data["unknown_after_asked_fields"] = [str(item) for item in unknown_fields if str(item)]
+        data["user_visible_unknown_policy"] = "do_not_mention_or_quote_unknown_fields"
 
 
 def _attach_milk_plan_flow_decision(result: dict[str, Any]) -> None:
@@ -2669,12 +2821,12 @@ def _attach_milk_plan_flow_decision(result: dict[str, Any]) -> None:
         }
 
 
-def _milk_flow_decision_for_assessment(data: dict[str, Any]) -> dict[str, Any]:
+def _milk_flow_decision_for_assessment(data: dict[str, Any], *, intake_complete: bool = False) -> dict[str, Any]:
     normality = data.get("milk_normality") if isinstance(data.get("milk_normality"), dict) else {}
     status = str(normality.get("overall_status") or data.get("assessment_status") or "").strip()
     clinical = data.get("clinical_assessment") if isinstance(data.get("clinical_assessment"), dict) else {}
     missing_fields = _missing_clinical_context_fields(clinical)
-    if missing_fields:
+    if missing_fields and not intake_complete:
         return _milk_flow_decision_for_missing_context(
             missing_fields,
             stage="need_more_user_context",

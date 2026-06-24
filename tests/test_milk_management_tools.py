@@ -1564,6 +1564,156 @@ class MilkManagementToolTests(unittest.TestCase):
         self.assertEqual(infant_signals["recent_weight"], "看起来正常")
         self.assertIn("发热", result["data"]["next_question"])
 
+    def test_analysis_intake_marks_asked_but_unanswered_slot_unknown_and_allows_evaluation(self) -> None:
+        uid, _ = _seed_user("analysis-intake-unknown-after-asked")
+        for day in ["2026-05-07", "2026-05-08", "2026-05-09", "2026-05-10", "2026-05-11", "2026-05-12", "2026-05-13"]:
+            _add_pumping_rows(uid, day, ["06:00", "09:00", "12:00", "18:00", "21:00"])
+        state = ContextState()
+        state.milk_management_state = {
+            "analysis_intake": {
+                "stage": "intake_collecting",
+                "goal": "milk_analysis",
+                "current_field": "maternal_red_flags",
+                "records_snapshot": {"status": "collected", "valid_days": 7, "positive_days": 7},
+                "infant_signals": {
+                    "wet_diapers_24h": "尿布和平时差不多",
+                    "baby_state": "精神挺好",
+                    "feeding_satisfaction": "吃完能安稳一会儿",
+                    "weight_trend": "体重增长正常",
+                    "recent_weight": "体重增长正常",
+                },
+                "maternal_symptoms": {},
+                "checklist": [
+                    {"id": "records_7d", "status": "collected"},
+                    {"id": "infant_wet_diapers", "status": "collected"},
+                    {"id": "infant_state_or_satisfaction", "status": "collected"},
+                    {"id": "infant_growth_signal", "status": "collected"},
+                    {"id": "maternal_red_flags", "status": "missing"},
+                    {"id": "maternal_breast_comfort", "status": "missing"},
+                ],
+            }
+        }
+
+        unclear = execute_milk_management_tool(
+            {
+                "_tool_name": "milk_analysis_intake_manage",
+                "user_id": uid,
+                "action": "update",
+                "user_update": "这个我不太确定",
+                "as_of_time": "2026-05-14 12:00:00",
+            },
+            {
+                "user_message": "这个我不太确定",
+                "locale": "zh-CN",
+                "timezone": "Asia/Shanghai",
+                "message_sent_at": "",
+                "_milk_management_state": state.milk_management_state,
+            },
+        )
+
+        self.assertEqual(unclear["status"], "milk_analysis_intake_collecting")
+        self.assertEqual(unclear["data"]["current_field"], "maternal_breast_comfort")
+        self.assertEqual(unclear["data"]["missing_fields"], ["maternal_breast_comfort"])
+        statuses = {item["id"]: item["status"] for item in unclear["data"]["checklist"]}
+        self.assertEqual(statuses["maternal_red_flags"], "unknown_after_asked")
+        record_milk_management_tool_state(
+            state,
+            "milk_analysis_intake_manage",
+            {"ok": True, "tool_name": "milk_analysis_intake_manage", "result": unclear},
+        )
+
+        comfort = execute_milk_management_tool(
+            {
+                "_tool_name": "milk_analysis_intake_manage",
+                "user_id": uid,
+                "action": "update",
+                "user_update": "吸完比较舒服",
+                "as_of_time": "2026-05-14 12:00:00",
+            },
+            {
+                "user_message": "吸完比较舒服",
+                "locale": "zh-CN",
+                "timezone": "Asia/Shanghai",
+                "message_sent_at": "",
+                "_milk_management_state": state.milk_management_state,
+            },
+        )
+
+        self.assertEqual(comfort["status"], "milk_analysis_ready_to_evaluate")
+        self.assertEqual(comfort["data"]["missing_fields"], [])
+        self.assertIn("analysis_context", comfort["data"])
+        self.assertIn("maternal_red_flags", comfort["data"]["analysis_context"]["unknown_after_asked_fields"])
+        record_milk_management_tool_state(
+            state,
+            "milk_analysis_intake_manage",
+            {"ok": True, "tool_name": "milk_analysis_intake_manage", "result": comfort},
+        )
+
+        assessment = execute_milk_management_tool(
+            {
+                "_tool_name": "milk_analysis_evaluate",
+                "user_id": uid,
+                "analysis_context": None,
+                "candidate_slots": "{}",
+                "as_of_time": "2026-05-14 12:00:00",
+            },
+            {
+                "user_message": "继续分析",
+                "locale": "zh-CN",
+                "timezone": "Asia/Shanghai",
+                "message_sent_at": "",
+                "_milk_management_state": state.milk_management_state,
+            },
+        )
+
+        self.assertNotEqual(assessment["status"], "milk_analysis_intake_collecting")
+        self.assertEqual(assessment["data"]["next_tool"], "milk_plan_preview_create")
+        self.assertIn("不要提及、引用或追问", assessment["data"]["assistant_instruction"])
+        self.assertIn("unknown_after_asked_fields", assessment["data"]["assessment_result"]["data"])
+
+    def test_analysis_evaluate_uses_candidate_slots_only_for_uncollected_fields(self) -> None:
+        uid, _ = _seed_user("analysis-evaluate-candidate-slots")
+        for day in ["2026-05-07", "2026-05-08", "2026-05-09", "2026-05-10", "2026-05-11", "2026-05-12", "2026-05-13"]:
+            _add_pumping_rows(uid, day, ["06:00", "09:00", "12:00", "18:00", "21:00"])
+        context = _complete_milk_analysis_context(
+            infant_signals={
+                "wet_diapers_24h": "尿布和平时差不多",
+                "recent_weight": "体重增长正常",
+                "weight_trend": "体重增长正常",
+            },
+            maternal_symptoms=_reassuring_maternal_symptoms(),
+        )
+        context["checklist"] = [
+            {"id": "records_7d", "status": "collected"},
+            {"id": "infant_wet_diapers", "status": "collected"},
+            {"id": "infant_state_or_satisfaction", "status": "unknown_after_asked"},
+            {"id": "infant_growth_signal", "status": "collected"},
+            {"id": "maternal_red_flags", "status": "collected"},
+            {"id": "maternal_breast_comfort", "status": "collected"},
+        ]
+        context["unknown_after_asked_fields"] = ["infant_state_or_satisfaction"]
+
+        result = execute_milk_management_tool(
+            {
+                "_tool_name": "milk_analysis_evaluate",
+                "user_id": uid,
+                "analysis_context": context,
+                "candidate_slots": {
+                    "infant_wet_diapers": {"value": "尿布偏少", "confidence": "explicit"},
+                    "infant_state_or_satisfaction": {"value": "精神挺好", "confidence": "explicit"},
+                },
+                "as_of_time": "2026-05-14 12:00:00",
+            },
+            {"user_message": "继续分析", "locale": "zh-CN", "timezone": "Asia/Shanghai", "message_sent_at": ""},
+        )
+
+        returned = result["data"]["analysis_context"]
+        self.assertEqual(returned["infant_signals"]["wet_diapers_24h"], "尿布和平时差不多")
+        self.assertEqual(returned["infant_signals"]["baby_state"], "精神挺好")
+        self.assertEqual(returned["slot_sources"]["infant_state_or_satisfaction"]["source"], "model_recovered")
+        statuses = {item["id"]: item["status"] for item in returned["checklist"]}
+        self.assertEqual(statuses["infant_state_or_satisfaction"], "collected")
+
     def test_analysis_intake_does_not_let_partial_model_red_flag_args_skip_current_field(self) -> None:
         uid, _ = _seed_user("analysis-intake-red-flag-args")
         for day in ["2026-05-07", "2026-05-08", "2026-05-09", "2026-05-10", "2026-05-11", "2026-05-12", "2026-05-13"]:
