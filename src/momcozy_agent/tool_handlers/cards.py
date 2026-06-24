@@ -2456,7 +2456,15 @@ def _normalize_birth_journey_todo_plan_items(value: Any) -> list[dict[str, Any]]
         else:
             item["priority_label"] = BIRTH_JOURNEY_PRIORITY_LABELS.get(priority_type, priority_label)
         item["title"] = _birth_journey_visible_priority_title(base_title, priority_type)
-        if not str(item.get("reason") or "").strip():
+        if not str(item.get("plan_reason") or "").strip():
+            item["plan_reason"] = _birth_journey_reason_without_priority_prefix(
+                item.get("why_for_you") or item.get("reason") or base_title
+            )
+        if _birth_journey_reason_hidden(item):
+            item["reason"] = ""
+            item["why_for_you"] = ""
+            item["hide_reason"] = True
+        elif not str(item.get("reason") or "").strip():
             item["reason"] = item.get("why_for_you") or base_title
         if not isinstance(item.get("steps"), list) or not item.get("steps"):
             item["steps"] = _birth_journey_plan_item_steps(base_title, based_on)
@@ -3275,8 +3283,12 @@ def _birth_journey_personalized_followup_candidates(state: dict[str, Any]) -> li
             "tag": "age_35_plus",
             "tags": ("age_35_plus", "multiple_pregnancy"),
             "title": "高龄和多胎监测信息",
-            "observation": f"我注意到你{age}岁，同时这次是{fetus_label}，这两点都需要认真放进计划里。",
+            "observation": f"我注意到你{age}岁，产科管理上会归入“高龄孕产妇”范围；同时这次是{fetus_label}，这两点都需要认真放进计划里。",
             "meaning": "高龄和多胎都会让产检更关注筛查选择、血压血糖、用药复查、胎儿生长、宫颈长度和早产信号。",
+            "key_points": (
+                f"{age}岁不是单纯年龄数字，产科管理上会按高龄孕产妇更早关注筛查选择、血压血糖和胎儿生长。",
+                f"{fetus_label}会让计划更关注两个宝宝的生长差异、宫颈长度、复查频率和早产信号。",
+            ),
             "followup_question": "你现在有没有已经被提醒过或正在复查/用药的情况？比如血压/血糖、甲状腺/免疫或长期用药、胎儿生长、宫颈长度或胎盘羊水；如果都没有，可以直接说暂无异常。",
             "reply_guidance": "不确定也可以回“还不确定”，我会把需要确认的监测项放进下次产检待确认。",
             "reply_options": ("有复查/用药", "胎儿/宫颈监测", "暂无异常"),
@@ -3290,6 +3302,7 @@ def _birth_journey_personalized_followup_candidates(state: dict[str, Any]) -> li
                 "title": "医生特殊提醒",
                 "observation": "我看到你填了医生或产检里的特殊提醒。",
                 "meaning": "这类信息最适合先拆成复查时间、日常观察和异常联系规则。",
+                "key_points": ("医生或产检里的特殊提醒，需要转成复查时间、日常观察指标和异常联系路径。",),
                 "followup_question": "这个提醒主要和胎盘/羊水、宫颈/胎儿生长，还是血压血糖/其他情况有关？",
                 "reply_guidance": "如果一时分不清，可以回“还不确定”，我会先按医生提醒待确认放进计划。",
                 "reply_options": ("胎盘/羊水", "宫颈/胎儿生长", "血压血糖/其他"),
@@ -3305,6 +3318,7 @@ def _birth_journey_personalized_followup_candidates(state: dict[str, Any]) -> li
                 "title": "既往剖宫产信息",
                 "observation": "我注意到你之前有过剖宫产。",
                 "meaning": "这会影响这次分娩方式评估，也会影响后面是否需要提前准备上次手术信息。",
+                "key_points": ("既往剖宫产会影响这次分娩方式评估、胎盘位置关注和上次手术资料准备。",),
                 "followup_question": "你还记得上次剖宫产的主要原因吗，比如胎位、产程原因，还是记不清了？",
                 "reply_guidance": "记不清也没关系，可以回“记不清”，我会先把上次手术原因列为待确认。",
                 "reply_options": ("胎位/臀位", "产程原因", "记不清"),
@@ -3320,6 +3334,7 @@ def _birth_journey_personalized_followup_candidates(state: dict[str, Any]) -> li
                 "title": "既往生产经历",
                 "observation": "我看到这次不是第一胎。",
                 "meaning": "之前的生产方式和恢复经历，会影响这次分娩沟通和产后准备。",
+                "key_points": ("不是第一胎时，上一胎的生产方式、早产或产后出血经历会影响这次分娩沟通和产后准备。",),
                 "followup_question": "上一胎主要是顺产、剖宫产，还是有早产/产后出血/严重撕裂这类经历？",
                 "reply_guidance": "如果记不清细节，可以先回一个大概类型，我会把细节放进待确认。",
                 "reply_options": ("顺产", "剖宫产", "有特殊经历/记不清"),
@@ -3333,6 +3348,7 @@ def _birth_journey_personalized_followup_candidates(state: dict[str, Any]) -> li
                 "title": "既往早产史",
                 "observation": "我看到你提到过早产相关经历。",
                 "meaning": "这次计划会更关注宫颈情况、复查频率和早产信号。",
+                "key_points": ("既往早产会让这次计划更早关注宫颈长度、复查频率和早产信号。",),
                 "followup_question": "你还记得上次早产大概发生在多少周吗，是 34 周前、34 周后，还是记不清？",
                 "reply_guidance": "记不清也可以直接说，我会先把早产周数放进下次产检待确认。",
                 "reply_options": ("34周前", "34周后", "记不清"),
@@ -3346,6 +3362,7 @@ def _birth_journey_personalized_followup_candidates(state: dict[str, Any]) -> li
                 "title": "血压和子痫前期风险管理",
                 "observation": "我看到你填到血压或子痫前期相关信息。",
                 "meaning": "这会影响在家观察、复查指标和异常时联系医院的规则。",
+                "key_points": ("血压或子痫前期相关信息，会影响家庭血压记录、尿蛋白等复查指标和异常联系规则。",),
                 "followup_question": "你现在手里有需要记录的血压范围、复查时间，还是还没有明确口径？",
                 "reply_guidance": "没有明确口径也可以回“还不确定”，我会把血压记录规则放进待确认。",
                 "reply_options": ("有血压范围", "有复查时间", "还不确定"),
@@ -3359,6 +3376,7 @@ def _birth_journey_personalized_followup_candidates(state: dict[str, Any]) -> li
                 "title": "血糖和糖耐相关管理",
                 "observation": "我看到你填到血糖、糖尿病或糖耐相关信息。",
                 "meaning": "这会影响饮食记录、血糖复查和胎儿生长监测的安排。",
+                "key_points": ("血糖、糖尿病或糖耐相关信息，会影响饮食记录、血糖复查节奏和胎儿生长监测。",),
                 "followup_question": "你现在是已经做过糖耐/血糖复查，还是还没到检查时间？",
                 "reply_guidance": "如果不确定检查进度，可以回“还不确定”，我会先按待确认推进。",
                 "reply_options": ("已做过", "还没到时间", "还不确定"),
@@ -3372,6 +3390,7 @@ def _birth_journey_personalized_followup_candidates(state: dict[str, Any]) -> li
                 "title": "基础疾病和用药确认",
                 "observation": "我看到你填了基础疾病或长期用药。",
                 "meaning": "这类信息会影响用药确认、专科复查和产科复查频率。",
+                "key_points": ("基础疾病或长期用药会影响用药安全确认、专科复查和产科复查频率。",),
                 "followup_question": "你现在有没有正在长期吃药、固定专科复查，或产科要求更密集复查的情况？",
                 "reply_guidance": "如果分不清，可以回“还不确定”，我会先放进产科和专科共同确认。",
                 "reply_options": ("长期用药", "专科复查", "还不确定"),
@@ -3385,6 +3404,7 @@ def _birth_journey_personalized_followup_candidates(state: dict[str, Any]) -> li
                 "title": "既往孕产异常经历",
                 "observation": "我看到你填到既往孕产异常经历。",
                 "meaning": "这次计划会更关注复查节点、胎儿生长和异常联系路径。",
+                "key_points": ("既往孕产异常经历会影响这次复查节点、胎儿生长观察和异常联系路径。",),
                 "followup_question": "这段经历更接近流产/胎停、胎儿生长受限，还是产后出血/其他情况？",
                 "reply_guidance": "暂时说不清也可以回“还不确定”，我会先作为产检沟通清单保留。",
                 "reply_options": ("流产/胎停", "胎儿生长受限", "其他/不确定"),
@@ -3400,6 +3420,10 @@ def _birth_journey_personalized_followup_candidates(state: dict[str, Any]) -> li
                 "title": "高龄孕产妇管理信息",
                 "observation": f"我注意到你{age}岁，按产科管理属于“高龄孕产妇”，这个信息需要认真放进计划里。",
                 "meaning": "高龄会让筛查选择、血压血糖、甲状腺或用药复查、胎儿生长和胎盘情况更需要提前对齐。",
+                "key_points": (
+                    f"{age}岁在产科管理上会归入高龄孕产妇范围，计划里要更早对齐筛查选择和复查节奏。",
+                    "高龄相关计划重点通常包括血压血糖、甲状腺或用药复查、胎儿生长和胎盘情况。",
+                ),
                 "followup_question": "你现在有没有已经被提醒过或正在复查的情况？比如血压/血糖、甲状腺/免疫或长期用药、胎儿生长或胎盘羊水；如果都没有，也可以直接说暂无异常。",
                 "reply_guidance": "不确定也可以回“还不确定”，我会把这些放进下次产检待确认。",
                 "reply_options": ("血压/血糖", "甲状腺/用药", "暂无异常"),
@@ -3413,6 +3437,7 @@ def _birth_journey_personalized_followup_candidates(state: dict[str, Any]) -> li
                 "title": "IVF 孕周和复查口径",
                 "observation": "我注意到你是 IVF/辅助生殖怀孕。",
                 "meaning": "这会影响孕周口径，也可能涉及黄体支持、甲状腺或凝血/免疫用药复查。",
+                "key_points": ("IVF/辅助生殖会影响孕周和预产期口径，也可能涉及黄体支持、甲状腺或凝血/免疫用药复查。",),
                 "followup_question": "IVF 这边需要纳入计划的是哪类信息：移植日期/孕周口径、黄体支持或其他用药，还是目前没有特殊复查？",
                 "reply_guidance": "如果暂时说不清，可以回“按待确认”，我会把孕周口径和用药复查都列进下次产检确认。",
                 "reply_options": ("孕周口径", "用药/复查", "目前没有"),
@@ -3432,6 +3457,7 @@ def _birth_journey_personalized_followup_candidates(state: dict[str, Any]) -> li
                 "title": "多胎监测重点",
                 "observation": type_suffix,
                 "meaning": "这会让产检更关注胎儿生长、宫颈长度和早产信号。",
+                "key_points": ("双胎/多胎会让计划更关注胎儿生长差异、宫颈长度、复查频率和早产信号。",),
                 "followup_question": "目前产检记录里的双胎类型是哪一类：单绒双羊、双绒双羊，还是暂时没确认？",
                 "reply_guidance": "暂时没确认也没关系，我会先把双胎类型放进下次产检待确认。",
                 "reply_options": ("单绒双羊", "双绒双羊", "还没确认"),
@@ -3445,6 +3471,7 @@ def _birth_journey_personalized_followup_candidates(state: dict[str, Any]) -> li
                 "title": "剖宫产沟通重点",
                 "observation": "我看到你计划剖宫产。",
                 "meaning": "剖宫产会影响术前检查、禁食入院、住院天数和伤口护理准备。",
+                "key_points": ("计划剖宫产会影响术前检查、禁食入院、住院天数和伤口护理准备。",),
                 "followup_question": "这次计划剖宫产主要是因为既往剖宫产、胎盘/胎位/双胎等医学原因，还是目前只是个人倾向或待定？",
                 "reply_guidance": "如果原因还没确定，可以回“待定”，我会先把剖宫产原因和时间都列为产检待确认。",
                 "reply_options": ("既往剖宫产", "胎盘/胎位/双胎", "待定"),
@@ -3611,6 +3638,23 @@ def _birth_journey_personalized_reply_option_texts(followup: dict[str, Any]) -> 
     return options
 
 
+def _birth_journey_personalized_key_points(value: Any) -> list[str]:
+    if value is None:
+        return []
+    raw_items = value if isinstance(value, (list, tuple)) else str(value).splitlines()
+    key_points: list[str] = []
+    seen: set[str] = set()
+    for raw_item in raw_items:
+        text = str(raw_item or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        key_points.append(text)
+        if len(key_points) >= 3:
+            break
+    return key_points
+
+
 def _birth_journey_personalized_followup_payload(followup: dict[str, Any]) -> dict[str, Any]:
     payload = dict(followup)
     observation = str(payload.get("observation") or "").strip()
@@ -3623,6 +3667,14 @@ def _birth_journey_personalized_followup_payload(followup: dict[str, Any]) -> di
     payload.setdefault("reply_guidance", BIRTH_JOURNEY_PERSONALIZED_REPLY_GUIDANCE)
     if not _birth_journey_personalized_reply_option_texts(payload):
         payload["reply_options"] = BIRTH_JOURNEY_PERSONALIZED_DEFAULT_OPTIONS
+    key_points = _birth_journey_personalized_key_points(payload.get("key_points"))
+    if key_points:
+        payload["key_points"] = key_points
+        payload.setdefault(
+            "must_mention",
+            "追问前按“用户信息 -> 孕期管理意义 -> 计划影响 -> 一个具体追问”表达；"
+            "必须点出 key_points 里的关键信息为什么会影响计划，不要只复述用户填写的字段。",
+        )
     return payload
 
 
@@ -3787,9 +3839,15 @@ def _birth_journey_personalization_context(state: dict[str, Any]) -> dict[str, A
             "skip_counts_as_answered": True,
             "may_finish_when_enough": True,
         },
+        "response_contract": (
+            "遵循 birth-prep skill 的个性化追问规则：用户信息 -> 孕期管理意义 -> 计划影响 -> 一个具体追问。"
+            "个人信息必须展开背后的管理意义，尤其年龄>=35时要说出高龄孕产妇/产科管理范围及计划影响。"
+        ),
         "decision_instruction": (
             "基于 profile_facts、planning_implications 和 suggested_topics 自主决定本轮是否还需要追问。"
-            "需要追问时，只选择一个最会影响计划安排的事实，用 topic/id 记录；"
+            "需要追问时，只选择一个最会影响计划安排的 topic，用 topic/id 记录；"
+            "如果多个相关因素已被合并在同一 topic，可以问一个合并后的明确问题，但不要拆成多题问卷。"
+            "追问前要按 response_contract 点出所选 topic 的 key_points 或 meaning 里的计划意义，不能只复述用户填写了什么；"
             "如果用户已经回答没有异常、跳过、或你判断信息已足够，调用 finish_personalized_followups。"
         ),
     }
@@ -4795,7 +4853,7 @@ def _birth_journey_generation_context_item(item: dict[str, Any]) -> dict[str, An
         "priority_type": str(item.get("priority_type") or "").strip(),
         "priority_label": str(item.get("priority_label") or "").strip(),
         "timeframe": str(item.get("timeframe") or "").strip(),
-        "reason": str(item.get("why_for_you") or item.get("reason") or "").strip(),
+        "reason": str(item.get("plan_reason") or item.get("why_for_you") or item.get("reason") or "").strip(),
         "source_tags": [str(tag or "").strip() for tag in item.get("source_tags") or [] if str(tag or "").strip()],
         "steps": [str(step or "").strip() for step in item.get("steps") or [] if str(step or "").strip()],
         "after_done_value": str(item.get("after_done_value") or "").strip(),
@@ -5749,6 +5807,15 @@ def _birth_journey_title_without_priority_prefix(title: Any) -> str:
     return text
 
 
+def _birth_journey_reason_without_priority_prefix(reason: Any) -> str:
+    text = str(reason or "").strip()
+    for label in BIRTH_JOURNEY_PRIORITY_LABELS.values():
+        prefix = f"{label}｜"
+        if text.startswith(prefix):
+            return text[len(prefix) :].strip()
+    return text
+
+
 def _birth_journey_visible_priority_title(title: Any, priority_type: str) -> str:
     base_title = _birth_journey_title_without_priority_prefix(title)
     return _truncate_birth_journey_plan_text(base_title, BIRTH_JOURNEY_PLAN_ITEM_TITLE_MAX_CHARS)
@@ -5964,13 +6031,29 @@ def _birth_journey_plan_item(
         priority_type, priority_label = _birth_journey_plan_item_priority(title, basis)
     else:
         priority_label = BIRTH_JOURNEY_PRIORITY_LABELS[priority_type]
-    clean_reason = _truncate_birth_journey_plan_text(
-        _birth_journey_personalized_plan_item_reason(clean_base_reason, context or {}, basis),
+    reason_payload = _birth_journey_plan_item_reason_payload(
+        clean_base_reason,
+        context or {},
+        basis,
+        timeframe=timeframe,
+        title=clean_title,
+        source_tags=source_tags or [],
+    )
+    clean_plan_reason = _truncate_birth_journey_plan_text(
+        str(reason_payload.get("plan_reason") or ""),
         BIRTH_JOURNEY_PLAN_ITEM_REASON_MAX_CHARS,
     )
-    display_reason = _truncate_birth_journey_plan_text(
-        f"{priority_label}｜{clean_reason}",
+    clean_display_reason = _truncate_birth_journey_plan_text(
+        str(reason_payload.get("display_reason") or ""),
         BIRTH_JOURNEY_PLAN_ITEM_REASON_MAX_CHARS,
+    )
+    display_reason = (
+        _truncate_birth_journey_plan_text(
+            f"{priority_label}｜{clean_display_reason}",
+            BIRTH_JOURNEY_PLAN_ITEM_REASON_MAX_CHARS,
+        )
+        if clean_display_reason
+        else ""
     )
     return {
         "id": str(item_id or "").strip() or None,
@@ -5981,7 +6064,10 @@ def _birth_journey_plan_item(
         "source_tags": _unique_text_list([*(source_tags or []), *basis], 8),
         "priority_type": priority_type,
         "priority_label": priority_label,
-        "why_for_you": clean_reason,
+        "why_for_you": clean_display_reason,
+        "plan_reason": clean_plan_reason,
+        "reason_type": str(reason_payload.get("reason_type") or "standard"),
+        "hide_reason": bool(reason_payload.get("hide_reason")),
         "steps": clean_steps,
         "after_done_value": clean_after_done_value,
         "completion_followup": _birth_journey_completion_followup(title, clean_after_done_value),
@@ -6274,14 +6360,154 @@ def _birth_journey_plan_reason_text(reason: str) -> str:
     return text.replace("，目的是", "，").replace("；目的是", "；").strip()
 
 
-def _birth_journey_personalized_plan_item_reason(reason: str, context: dict[str, Any], based_on: list[str]) -> str:
+def _birth_journey_personalized_plan_item_reason(
+    reason: str,
+    context: dict[str, Any],
+    based_on: list[str],
+    *,
+    timeframe: str = "",
+    title: str = "",
+    source_tags: list[str] | None = None,
+) -> str:
+    return str(
+        _birth_journey_plan_item_reason_payload(
+            reason,
+            context,
+            based_on,
+            timeframe=timeframe,
+            title=title,
+            source_tags=source_tags,
+        ).get("plan_reason")
+        or ""
+    )
+
+
+def _birth_journey_plan_item_reason_payload(
+    reason: str,
+    context: dict[str, Any],
+    based_on: list[str],
+    *,
+    timeframe: str = "",
+    title: str = "",
+    source_tags: list[str] | None = None,
+) -> dict[str, Any]:
     clean_reason = _birth_journey_plan_reason_text(reason)
     if clean_reason.startswith(("考虑到你", "结合你", "针对你")):
+        return {
+            "plan_reason": clean_reason,
+            "display_reason": clean_reason,
+            "reason_type": "personalized",
+            "hide_reason": False,
+        }
+    user_labels, period_label = _birth_journey_plan_item_reason_basis(
+        context,
+        based_on,
+        timeframe=timeframe,
+        title=title,
+        source_tags=source_tags,
+        max_labels=3,
+    )
+    if user_labels:
+        prefix = f"考虑到{_birth_journey_join_concern_labels(user_labels)}，"
+        if period_label:
+            plan_reason = f"{prefix}{_birth_journey_plan_item_period_reason(period_label, clean_reason)}"
+        else:
+            plan_reason = f"{prefix}{clean_reason}"
+        return {
+            "plan_reason": plan_reason,
+            "display_reason": plan_reason,
+            "reason_type": "personalized",
+            "hide_reason": False,
+        }
+    if period_label:
+        plan_reason = _birth_journey_plan_item_period_reason(period_label, clean_reason)
+    else:
+        plan_reason = clean_reason or "已按目前提供的信息生成这一项。"
+    return {
+        "plan_reason": plan_reason,
+        "display_reason": "",
+        "reason_type": "standard",
+        "hide_reason": True,
+    }
+
+
+def _birth_journey_reason_hidden(item: dict[str, Any]) -> bool:
+    if item.get("hide_reason") is True:
+        return True
+    return str(item.get("reason_type") or "").strip() == "standard"
+
+
+def _birth_journey_plan_item_reason_basis(
+    context: dict[str, Any],
+    based_on: list[str] | None = None,
+    *,
+    timeframe: str = "",
+    title: str = "",
+    source_tags: list[str] | None = None,
+    max_labels: int = 4,
+) -> tuple[list[str], str]:
+    period_label = _birth_journey_plan_item_period_label(timeframe, title, based_on, source_tags)
+    user_labels = _birth_journey_plan_condition_labels(context, based_on, max_labels=max_labels)
+    user_labels = [label for label in user_labels if not re.search(r"你现在孕\s*\d+\s*周", label)]
+    return _unique_text_list(user_labels, max_labels), period_label
+
+
+def _birth_journey_plan_item_period_reason(period_label: str, reason: str) -> str:
+    period = str(period_label or "").strip()
+    clean_reason = _birth_journey_plan_reason_text(reason)
+    if not period:
         return clean_reason
-    labels = _birth_journey_plan_condition_labels(context, based_on, max_labels=3)
-    if labels:
-        return f"考虑到{_birth_journey_join_concern_labels(labels)}，{clean_reason}"
-    return f"考虑到你目前提供的孕期信息，{clean_reason}"
+    if period.endswith("检查窗口"):
+        return f"{period}里，{clean_reason}"
+    if period.endswith("这个阶段"):
+        return f"{period}，{clean_reason}"
+    return f"{period}阶段，{clean_reason}"
+
+
+def _birth_journey_plan_item_period_label(
+    timeframe: str,
+    title: str,
+    based_on: list[str] | None = None,
+    source_tags: list[str] | None = None,
+) -> str:
+    period = str(timeframe or "").strip()
+    if not period:
+        return ""
+    if period in {"本周", "今天", "今天或明天", "未来 7 天", "未来 2-4 周", "补齐孕周后生成清单"}:
+        return ""
+    keys = set(str(item or "") for item in (based_on or []) if str(item or "").strip())
+    tags = set(str(item or "") for item in (source_tags or []) if str(item or "").strip())
+    text = f"{title} {' '.join(sorted(tags))}".lower()
+    checkup_tokens = (
+        "检查",
+        "产检",
+        "筛查",
+        "唐筛",
+        "无创",
+        "羊穿",
+        "nt",
+        "b超",
+        "大排畸",
+        "糖耐",
+        "ogtt",
+        "gbs",
+        "复查",
+        "胎监",
+        "报告",
+        "checkup",
+        "screen",
+        "scan",
+        "gtt",
+        "growth",
+        "position",
+    )
+    if "checkup_window" in keys or any(token in text for token in checkup_tokens):
+        suffix = "这个检查窗口" if re.search(r"孕\s*\d{1,2}(?:-\d{1,2})?\s*周", period) else "这个阶段"
+    else:
+        suffix = "这个阶段"
+    if period.endswith(("阶段", "生产")):
+        return period
+    return f"{period}{suffix}"
 
 
 def _birth_journey_plan_condition_labels(
@@ -6322,6 +6548,9 @@ def _birth_journey_plan_condition_labels(
         labels.append("你填了医生特殊提醒")
     if _birth_journey_substantive_text(context.get("risk_factors")) and (not keys or "risk_factors" in keys):
         labels.append("你提到风险因素")
+    symptoms = _birth_journey_substantive_text(context.get("current_symptoms"))
+    if symptoms and (not keys or "current_symptoms" in keys):
+        labels.append("你提到当前有不适或异常变化")
     birth_path = _birth_journey_substantive_text(context.get("birth_path"))
     if birth_path and (not keys or "birth_path" in keys):
         labels.append(f"你计划{birth_path}")
@@ -6390,7 +6619,9 @@ def _birth_journey_substantive_text(value: Any) -> str:
         "没有高危",
         "没有风险",
         "没有不舒服",
+        "没有明显不舒服",
         "没有异常",
+        "目前没有异常",
         "未上传产检记录",
         "没有上传产检记录",
         "没有产检记录",

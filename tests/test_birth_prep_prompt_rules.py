@@ -50,6 +50,14 @@ class BirthPrepPromptRuleTests(unittest.TestCase):
         self.assertIn("不要把模型基于年龄、IVF、双胎、产检信息或用户措辞做出的推断", skill)
         self.assertIn("工具会返回 `personalization_context`", skill)
         self.assertIn("`suggested_topics`", skill)
+        self.assertIn("相关因素可以合并成同一个问题", skill)
+        self.assertIn("`key_points` 或 `meaning`", skill)
+        self.assertIn("不能只复述“你几岁/几周/几胎”", skill)
+        self.assertIn("个性化追问不是复述表单字段", skill)
+        self.assertIn("用户信息 -> 孕期管理意义 -> 计划影响 -> 一个具体追问", skill)
+        self.assertIn("年龄 ≥ 35", skill)
+        self.assertIn("高龄孕产妇范围", skill)
+        self.assertIn("用“不代表一定有问题”来轻飘飘带过高龄", skill)
         self.assertIn("不要重复 `asked_followups`", skill)
         self.assertIn("调用 `finish_personalized_followups`", skill)
         self.assertIn("收集会改变计划安排的事实", skill)
@@ -531,7 +539,14 @@ class BirthPrepPromptRuleTests(unittest.TestCase):
         self.assertIn("返回 personalization_context", description)
         self.assertIn("suggested_topics", description)
         self.assertIn("asked_followups", description)
+        self.assertIn("response_contract", description)
         self.assertIn("finish_personalized_followups", description)
+        self.assertIn("相关因素可以合并成一个明确问题", description)
+        self.assertIn("用户信息 -> 孕期管理意义 -> 计划影响 -> 一个具体追问", description)
+        self.assertIn("key_points 或 meaning", description)
+        self.assertIn("不能只复述用户填写了什么", description)
+        self.assertIn("年龄>=35", description)
+        self.assertIn("高龄孕产妇/产科管理范围", description)
         self.assertIn("收集会改变计划安排的事实", description)
         self.assertIn("不要问用户知不知道该做什么", description)
         self.assertNotIn("active_personalized_followup_id", description)
@@ -563,11 +578,13 @@ class BirthPrepPromptRuleTests(unittest.TestCase):
                                     "id": "age_35_plus_checkup_detail",
                                     "observation": "我注意到你36岁，按产科管理属于“高龄孕产妇”。",
                                     "meaning": "高龄会让筛查选择、血压血糖、用药复查和胎儿生长更需要提前对齐。",
+                                    "key_points": ["36岁在产科管理上会归入高龄孕产妇范围。"],
                                     "followup_question": "你现在有没有正在复查或用药的情况？",
                                 }
                             ],
                             "asked_followups": [],
                             "followup_policy": {"max_rounds": 3, "remaining_rounds": 3},
+                            "response_contract": "用户信息 -> 孕期管理意义 -> 计划影响 -> 一个具体追问。",
                         },
                     },
                 },
@@ -582,6 +599,12 @@ class BirthPrepPromptRuleTests(unittest.TestCase):
         self.assertNotIn("personalization_tags", compact)
         self.assertIn("基于 personalization_context", instruction)
         self.assertIn("suggested_topics", instruction)
+        self.assertIn("个性化追问规则", instruction)
+        self.assertIn("用户信息 -> 孕期管理意义 -> 计划影响 -> 一个具体追问", instruction)
+        self.assertIn("key_points 或 meaning", instruction)
+        self.assertIn("年龄>=35", instruction)
+        self.assertIn("高龄孕产妇/产科管理范围", instruction)
+        self.assertIn("合并成同一个明确问题", instruction)
         self.assertIn("asked_followups", instruction)
         self.assertIn("finish_personalized_followups", instruction)
         self.assertNotIn("active_personalized_followup_id", instruction)

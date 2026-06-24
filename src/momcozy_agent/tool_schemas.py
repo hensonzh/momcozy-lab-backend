@@ -196,7 +196,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "birth_journey_intake_manage": _function_tool(
         "birth_journey_intake_manage",
-        "推进孕期计划的信息采集流程。用户回答当前 next_step/confirmation_question 时，必须调用本工具提交对应 action/payload；不要自行判断还缺哪个表单字段，也不要追加询问工具未返回的主流程步骤。已提供大致孕周即可继续，例如 30周/孕30周/30+几天 都可接受，不要为精确到天而追问。进入采集时，可把前文明确线索放入 entry_reason、initial_concerns、known_values 用于表单预填和计划个性化，不会作为单独追问节点阻塞主流程；submit_entry_concern 仅用于历史会话兼容。基础表单提交后，如果存在高龄、IVF、多胎、非第一胎、既往孕产异常、基础疾病/长期用药、血压血糖、医生特殊提醒、计划剖宫产等会改变计划安排的因素，工具会返回 personalization_context，而不是固定追问队列；模型要基于其中的 profile_facts、suggested_topics、asked_followups 和 followup_policy 自主决定本轮是否还需要追问。next_step=personalized_followup 时，最多追问一个会影响计划安排的具体事实，追问只收集会改变计划安排的事实；不要问用户知不知道该做什么、最想了解什么，或医生有没有交代什么；不要重复 asked_followups。用户回答后，用 submit_personalized_followup 记录 topic/question/answer/plan_impact；如果信息已足够、用户说暂无异常/跳过，或不需要继续追问，用 finish_personalized_followups。产检上传/跳过后，工具会进入 final_plan_confirmation；用户说没有补充或开始制定时，用 confirm_ready_to_generate，用户补充最后信息时，用 submit_final_additional_info。只有随后 ready_to_generate 时才会返回 plan_context 供 birth_journey_plan_card_create 使用。",
+        "推进孕期计划的信息采集流程。用户回答当前 next_step/confirmation_question 时，必须调用本工具提交对应 action/payload；不要自行判断还缺哪个表单字段，也不要追加询问工具未返回的主流程步骤。已提供大致孕周即可继续，例如 30周/孕30周/30+几天 都可接受，不要为精确到天而追问。进入采集时，可把前文明确线索放入 entry_reason、initial_concerns、known_values 用于表单预填和计划个性化，不会作为单独追问节点阻塞主流程；submit_entry_concern 仅用于历史会话兼容。基础表单提交后，如果存在高龄、IVF、多胎、非第一胎、既往孕产异常、基础疾病/长期用药、血压血糖、医生特殊提醒、计划剖宫产等会改变计划安排的因素，工具会返回 personalization_context，而不是固定追问队列；模型要基于其中的 profile_facts、suggested_topics、asked_followups、followup_policy 和 response_contract 自主决定本轮是否还需要追问。next_step=personalized_followup 时，最多追问一个会影响计划安排的 topic；相关因素可以合并成一个明确问题，但要按“用户信息 -> 孕期管理意义 -> 计划影响 -> 一个具体追问”表达，先点出所选 topic 的 key_points 或 meaning 里的计划意义，不能只复述用户填写了什么。涉及年龄>=35时，必须说出高龄孕产妇/产科管理范围及对筛查、血压血糖、胎儿生长或复查节奏的影响，不要只说年龄数字。追问只收集会改变计划安排的事实；不要问用户知不知道该做什么、最想了解什么，或医生有没有交代什么；不要重复 asked_followups。用户回答后，用 submit_personalized_followup 记录 topic/question/answer/plan_impact；如果信息已足够、用户说暂无异常/跳过，或不需要继续追问，用 finish_personalized_followups。产检上传/跳过后，工具会进入 final_plan_confirmation；用户说没有补充或开始制定时，用 confirm_ready_to_generate，用户补充最后信息时，用 submit_final_additional_info。只有随后 ready_to_generate 时才会返回 plan_context 供 birth_journey_plan_card_create 使用。",
         {
             "action": {
                 "type": "string",
@@ -342,7 +342,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "ibclc_consult_card_create": _function_tool(
         "ibclc_consult_card_create",
-        "创建前端可渲染的 IBCLC 在线咨询卡片，无后端副作用。仅在用户本轮明确要求 IBCLC/哺乳顾问/真人或人工哺乳咨询/打开在线咨询入口/打开顾问咨询入口，或上一轮助手已经明确询问是否打开 IBCLC 咨询入口且用户本轮短确认时使用。若是智能体自主判断问题已经进入含乳、排乳、泵奶节奏、反复堵奶、宝宝摄入细节或反复尝试无效，应先承接用户处境，完成至少一轮必要问诊，主动说明更适合让 IBCLC 顾问继续看，并询问是否现在打开咨询入口；用户同意后再调用本工具。不要因为用户首次提到疼痛、堵奶、奶量担忧或宝宝摄入风险就直接触发。前端会渲染顾问姓名、资质、经验、简介、结合用户问题生成的推荐理由和在线咨询入口。",
+        "创建前端可渲染的 IBCLC 在线咨询卡片，无后端副作用，但会在用户界面生成咨询入口。模型负责判断是否该主动推荐 IBCLC；本工具只在用户明确授权创建入口时调用。可调用场景：用户本轮明确要求找/推荐/安排/联系 IBCLC、哺乳顾问、泌乳顾问、真人或人工哺乳咨询；用户明确说打开/启动/接通在线咨询入口或顾问咨询入口；用户明确说同意推荐；或上一轮助手已经明确询问是否打开/推荐 IBCLC 咨询入口且用户本轮短确认。不可调用场景：用户只是问“需不需要/要不要/是不是该找 IBCLC 或哺乳顾问”、只是提到疼痛/堵奶/奶量担忧/宝宝摄入风险、或尚未完成必要问诊。若自主判断适合 IBCLC，应先承接用户处境，完成至少一轮必要问诊，说明更适合让 IBCLC 顾问继续看，并询问是否现在打开咨询入口；用户同意后再调用本工具。前端会渲染顾问姓名、资质、经验、简介、结合用户问题生成的推荐理由和在线咨询入口。",
         {
             "consultant_name": _nullable({"type": "string", "description": "前端名片展示的 IBCLC 顾问姓名；不确定时传 null，由工具使用默认 demo 顾问。"}),
             "consultant_bio": _nullable({"type": "string", "description": "前端名片展示的顾问简介；不确定时传 null，由工具使用默认简介。"}),
