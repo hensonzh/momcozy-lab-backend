@@ -5318,7 +5318,6 @@ def _birth_journey_condition_todo_items(context: dict[str, Any], timeframe: str)
                 source_tags=["multiple_pregnancy"],
                 context=context,
                 steps=[
-                    "确认双胎/多胎类型",
                     "设置更密集产检与胎监计划",
                     "记录宫颈长度与早产风险",
                     "设置早产预警信号",
@@ -5946,7 +5945,7 @@ def _birth_journey_legacy_next_7_item_upgrade(title: str) -> dict[str, Any]:
         "定好双胎每次怎么复查": {
             "title": "多胎管理",
             "reason": "重要｜多胎计划要提前把产检频率、宫颈长度和早产信号放进预案。",
-            "steps": ["确认双胎/多胎类型", "设置更密集产检与胎监计划", "保存急诊联系方式"],
+            "steps": ["设置更密集产检与胎监计划", "记录宫颈长度与早产风险", "保存急诊联系方式"],
             "after_done_value": "做完后，多胎复查和早产预警会更清楚。",
         },
         "确认基础疾病和用药复查": {
