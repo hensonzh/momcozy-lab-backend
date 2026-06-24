@@ -1569,10 +1569,20 @@ def _compact_birth_journey_intake_output(safe: dict[str, Any], raw_result: dict[
         "assistant_instruction": safe.get("assistant_instruction") or data.get("assistant_instruction"),
         "completed_groups": data.get("completed_groups"),
     }
-    for key in ("initial_analysis", "checkup_report_strategy", "personalization_tags", "personalized_followup"):
-        value = data.get(key)
-        if value not in (None, "", []):
-            compact[key] = value
+    if next_step == "personalized_followup":
+        personalized_followup = data.get("personalized_followup")
+        if isinstance(personalized_followup, dict):
+            compact["personalized_followup"] = personalized_followup
+            active_followup_id = str(
+                data.get("active_personalized_followup_id") or personalized_followup.get("id") or ""
+            ).strip()
+            if active_followup_id:
+                compact["active_personalized_followup_id"] = active_followup_id
+    else:
+        for key in ("initial_analysis", "checkup_report_strategy", "personalization_tags", "personalized_followup"):
+            value = data.get(key)
+            if value not in (None, "", []):
+                compact[key] = value
     upload_panel = data.get("upload_panel")
     if isinstance(upload_panel, dict):
         compact["upload_panel"] = {
@@ -1636,6 +1646,7 @@ def _compact_birth_journey_intake_output(safe: dict[str, Any], raw_result: dict[
             "最终回复最多两小段，第一句必须点明 personalized_followup.observation 里的用户已提供信息，"
             "再用 personalized_followup.meaning 简短解释为什么影响计划；然后只问 personalized_followup.followup_question 这一个具体问题。"
             "可以把 personalized_followup.reply_guidance 压缩到同一段末尾，但不要逐字照读所有字段，不要输出成长说明。"
+            "用户下一轮回答这个问题时，必须把 active_personalized_followup_id 作为 followup_id 原样传回 birth_journey_intake_manage。"
             "这一轮只推进一个个性化追问，不要停在纯解读，必须落到这个具体追问。"
             "个性化追问的目的不是确认用户知不知道怎么做，也不是问用户最想了解什么，而是收集会改变计划安排的事实。"
             "不要改写成“医生有没有交代/安排/说明”这类问题，也不要要求用户必须回答医生说过什么。"

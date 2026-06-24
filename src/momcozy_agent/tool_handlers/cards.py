@@ -2128,14 +2128,20 @@ def manage_birth_journey_intake(args: dict[str, Any], inputs: RuntimeInputs) -> 
     elif action == "submit_risk_factors":
         intake_state["risk_factors"] = _birth_journey_text_or_skipped(payload, "risk_factors")
     elif action == "submit_personalized_followup":
-        followup_id = _first_text(payload.get("followup_id"), payload.get("id"), payload.get("current_followup_id"))
-        if not followup_id:
-            current_followup = _birth_journey_next_personalized_followup(intake_state)
-            followup_id = str(current_followup.get("id") or "").strip() if current_followup else ""
-        if followup_id:
+        requested_followup_id = _first_text(payload.get("followup_id"), payload.get("id"), payload.get("current_followup_id"))
+        current_followup = _birth_journey_next_personalized_followup(intake_state)
+        active_followup_id = str(current_followup.get("id") or "").strip() if current_followup else ""
+        followup_id = requested_followup_id or active_followup_id
+        if requested_followup_id and requested_followup_id != active_followup_id:
+            intake_state["last_personalized_followup_mismatch"] = {
+                "expected": active_followup_id,
+                "received": requested_followup_id,
+            }
+        elif followup_id:
             followups = _dict_value(intake_state.get("personalized_followups"))
             followups[followup_id] = _birth_journey_text_or_skipped(payload, "answer")
             intake_state["personalized_followups"] = followups
+            intake_state.pop("last_personalized_followup_mismatch", None)
     elif action == "submit_current_symptoms":
         intake_state["current_symptoms"] = _birth_journey_text_or_skipped(payload, "current_symptoms")
     elif action == "submit_lifestyle_context":
@@ -2156,6 +2162,15 @@ def manage_birth_journey_intake(args: dict[str, Any], inputs: RuntimeInputs) -> 
     checkup_report_strategy = _birth_journey_checkup_report_strategy(intake_state)
     personalization_tags = _birth_journey_personalization_tags(intake_state)
     personalized_followup = _birth_journey_next_personalized_followup(intake_state)
+    active_followup_id = (
+        str(personalized_followup.get("id") or "").strip()
+        if personalized_followup and next_step == "personalized_followup"
+        else ""
+    )
+    if active_followup_id:
+        intake_state["active_personalized_followup_id"] = active_followup_id
+    else:
+        intake_state.pop("active_personalized_followup_id", None)
     status = _birth_journey_intake_status(next_step, intake_state)
     result: dict[str, Any] = {
         "tool_name": "birth_journey_intake_manage",
@@ -2171,6 +2186,7 @@ def manage_birth_journey_intake(args: dict[str, Any], inputs: RuntimeInputs) -> 
             "initial_analysis": initial_analysis,
             "checkup_report_strategy": checkup_report_strategy,
             "personalization_tags": personalization_tags,
+            "active_personalized_followup_id": active_followup_id,
         },
     }
     if personalized_followup and next_step == "personalized_followup":
@@ -3104,7 +3120,7 @@ BIRTH_JOURNEY_RISK_RELEVANT_PERSONALIZATION_TAGS = {
     "prior_adverse_pregnancy",
 }
 BIRTH_JOURNEY_PERSONALIZED_FOLLOWUP_LIMIT = 5
-BIRTH_JOURNEY_PERSONALIZED_FOLLOWUP_TARGET_WITH_SIGNAL = 3
+BIRTH_JOURNEY_PERSONALIZED_FOLLOWUP_TARGET_WITH_SIGNAL = 1
 BIRTH_JOURNEY_PERSONALIZED_REPLY_GUIDANCE = (
     "不清楚也可以回“还不确定”，我会先放进下次产检待确认。"
 )
@@ -3232,6 +3248,21 @@ def _birth_journey_personalized_followup_candidates(state: dict[str, Any]) -> li
     prior_history_text = _birth_journey_prior_history_text(context)
     medical_text = _birth_journey_medical_condition_text(context)
     doctor_note_text = _birth_journey_doctor_note_text(context)
+    is_multiple_pregnancy = _birth_journey_is_multiple_pregnancy(fetus_count)
+    age_multiple_followup: dict[str, Any] | None = None
+    if age is not None and age >= 35 and is_multiple_pregnancy:
+        fetus_label = fetus_count if _birth_journey_substantive_text(fetus_count) else "双胎/多胎"
+        age_multiple_followup = {
+            "id": "age_35_plus_multiple_monitoring",
+            "tag": "age_35_plus",
+            "tags": ("age_35_plus", "multiple_pregnancy"),
+            "title": "高龄和多胎监测信息",
+            "observation": f"我注意到你{age}岁，同时这次是{fetus_label}，这两点都需要认真放进计划里。",
+            "meaning": "高龄和多胎都会让产检更关注筛查选择、血压血糖、用药复查、胎儿生长、宫颈长度和早产信号。",
+            "followup_question": "你现在有没有已经被提醒过或正在复查/用药的情况？比如血压/血糖、甲状腺/免疫或长期用药、胎儿生长、宫颈长度或胎盘羊水；如果都没有，可以直接说暂无异常。",
+            "reply_guidance": "不确定也可以回“还不确定”，我会把需要确认的监测项放进下次产检待确认。",
+            "reply_options": ("有复查/用药", "胎儿/宫颈监测", "暂无异常"),
+        }
     candidates: list[dict[str, Any]] = []
     if doctor_note_text:
         candidates.append(
@@ -3246,7 +3277,9 @@ def _birth_journey_personalized_followup_candidates(state: dict[str, Any]) -> li
                 "reply_options": ("胎盘/羊水", "宫颈/胎儿生长", "血压血糖/其他"),
             }
         )
-    if _birth_journey_has_prior_c_section(context):
+    has_prior_c_section = _birth_journey_has_prior_c_section(context)
+    generic_prior_birth_needed = first_birth == "否" and not previous_birth_method and not prior_history_text
+    if has_prior_c_section:
         candidates.append(
             {
                 "id": "prior_c_section_birth_path_detail",
@@ -3259,7 +3292,9 @@ def _birth_journey_personalized_followup_candidates(state: dict[str, Any]) -> li
                 "reply_options": ("胎位/臀位", "产程原因", "记不清"),
             }
         )
-    elif first_birth == "否" and not previous_birth_method and not prior_history_text:
+    elif generic_prior_birth_needed:
+        if age_multiple_followup:
+            candidates.append(age_multiple_followup)
         candidates.append(
             {
                 "id": "prior_birth_history_detail",
@@ -3337,7 +3372,9 @@ def _birth_journey_personalized_followup_candidates(state: dict[str, Any]) -> li
                 "reply_options": ("流产/胎停", "胎儿生长受限", "其他/不确定"),
             }
         )
-    if age is not None and age >= 35:
+    if age_multiple_followup and not generic_prior_birth_needed:
+        candidates.append(age_multiple_followup)
+    if age is not None and age >= 35 and not is_multiple_pregnancy:
         candidates.append(
             {
                 "id": "age_35_plus_checkup_detail",
@@ -3363,8 +3400,13 @@ def _birth_journey_personalized_followup_candidates(state: dict[str, Any]) -> li
                 "reply_options": ("孕周口径", "用药/复查", "目前没有"),
             }
         )
-    if _birth_journey_is_multiple_pregnancy(fetus_count):
-        type_suffix = f"你填的是{multiple_type}。" if _birth_journey_substantive_text(multiple_type) and "不适用" not in str(multiple_type) else "我注意到你填的是双胎/多胎。"
+    if is_multiple_pregnancy and not (age is not None and age >= 35):
+        if _birth_journey_substantive_text(multiple_type) and "不适用" not in str(multiple_type):
+            type_suffix = f"你填的是{multiple_type}。"
+        elif _birth_journey_substantive_text(fetus_count):
+            type_suffix = f"我注意到你填的是{fetus_count}。"
+        else:
+            type_suffix = "我注意到你填的是多胎。"
         candidates.append(
             {
                 "id": "multiple_pregnancy_monitoring",
@@ -3586,7 +3628,13 @@ def _birth_journey_next_personalized_followup(state: dict[str, Any]) -> dict[str
 
 
 def _birth_journey_personalization_tags(state: dict[str, Any]) -> list[str]:
-    tags = [str(item.get("tag") or "").strip() for item in _birth_journey_personalized_followup_queue(state)]
+    tags: list[str] = []
+    for item in _birth_journey_personalized_followup_queue(state):
+        raw_tags = item.get("tags")
+        if isinstance(raw_tags, (list, tuple)):
+            tags.extend(str(tag or "").strip() for tag in raw_tags)
+        else:
+            tags.append(str(item.get("tag") or "").strip())
     context = _birth_journey_intake_basic_context(state)
     age = _birth_journey_context_age(context)
     if age is not None and age >= 40:
@@ -3614,8 +3662,12 @@ def _birth_journey_answered_personalized_followups(
     risk_answers: dict[str, Any] = {}
     for followup_id, answer in answers.items():
         followup = candidates_by_id.get(str(followup_id))
-        tag = str((followup or {}).get("tag") or "").strip()
-        if tag in BIRTH_JOURNEY_RISK_RELEVANT_PERSONALIZATION_TAGS:
+        raw_tags = (followup or {}).get("tags")
+        if isinstance(raw_tags, (list, tuple)):
+            tags = {str(tag or "").strip() for tag in raw_tags}
+        else:
+            tags = {str((followup or {}).get("tag") or "").strip()}
+        if tags & BIRTH_JOURNEY_RISK_RELEVANT_PERSONALIZATION_TAGS:
             risk_answers[str(followup_id)] = answer
     return risk_answers
 
