@@ -48,6 +48,7 @@ from ..services.pump_workstate import (
     validate_pump_workstate_payload,
 )
 from ..tool_handlers.cards import (
+    normalize_birth_journey_care_plan_artifact,
     update_birth_journey_plan_todo_completion_for_user,
     update_hospital_bag_cart as execute_hospital_bag_cart_update,
 )
@@ -941,7 +942,10 @@ async def query_plan_list_endpoint(request: Request, user_id: str = "", status: 
         return {"error": -1, "plan_list": []}
     return {
         "error": 0,
-        "plan_list": data_store.list_care_plan_artifacts(user_id=uid, status=status or "active"),
+        "plan_list": [
+            normalize_birth_journey_care_plan_artifact(plan) or plan
+            for plan in data_store.list_care_plan_artifacts(user_id=uid, status=status or "active")
+        ],
     }
 
 
@@ -952,7 +956,7 @@ async def query_plan_detail_endpoint(request: Request, user_id: str = "", plan_i
     plan = data_store.get_care_plan_artifact(user_id=uid, plan_id=plan_id)
     if not plan:
         return {"error": -1, "plan": None}
-    return {"error": 0, "plan": plan}
+    return {"error": 0, "plan": normalize_birth_journey_care_plan_artifact(plan) or plan}
 
 
 @router.post("/v1/plan/delete-artifact")

@@ -39,6 +39,7 @@ def _birth_journey_plan_context(**overrides: object) -> dict[str, object]:
         "due_date_or_week": "孕32周",
         "birth_path": "还没确定",
         "support_person": "暂时没有",
+        "ivf": "跳过",
         "first_birth": "跳过",
         "fetus_count": "跳过",
         "age": "跳过",

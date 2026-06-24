@@ -68,6 +68,76 @@ class CarePlanArtifactApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"error": -1})
 
+    def test_birth_journey_plan_list_and_detail_normalize_legacy_todo_plan(self) -> None:
+        saved = data_store.save_care_plan_artifact(
+            user_id="u-plan",
+            plan_type="birth_journey",
+            title="孕期计划",
+            summary="旧版孕期计划",
+            payload={
+                "title": "孕期计划",
+                "todo_engine_version": "actionable_v2",
+                "todo_plan": {
+                    "periods": [
+                        {
+                            "id": "period_01",
+                            "title": "孕 29-32 周",
+                            "items": [
+                                {
+                                    "id": "old_01",
+                                    "title": "建立胎动和异常联系机制",
+                                    "reason": "重要｜考虑到你进入孕晚期，固定观察节奏很重要。",
+                                    "priority_type": "essential",
+                                    "priority_label": "重要",
+                                    "steps": ["定观察时间"],
+                                }
+                            ],
+                        }
+                    ]
+                },
+                "planning_layers": {
+                    "current_week": 30,
+                    "next_7_days": {
+                        "items": [
+                            {
+                                "id": "next7_01",
+                                "source_item_id": "old_01",
+                                "title": "建立胎动和异常联系机制",
+                                "completed": True,
+                                "completed_at": "2026-06-24T00:00:00Z",
+                                "completed_source": "app",
+                            }
+                        ]
+                    },
+                },
+            },
+            source_artifact_type="birth_journey_plan_card",
+        )
+
+        list_response = self.client.get(
+            "/v1/plan/list",
+            params={"user_id": "u-plan", "status": "active"},
+            headers=self.headers,
+        )
+        detail_response = self.client.get(
+            "/v1/plan/detail",
+            params={"user_id": "u-plan", "plan_id": saved["plan_id"]},
+            headers=self.headers,
+        )
+
+        listed_plan = list_response.json()["plan_list"][0]
+        detailed_plan = detail_response.json()["plan"]
+        for plan in (listed_plan, detailed_plan):
+            payload = plan["payload"]
+            self.assertEqual(payload["todo_engine_version"], "actionable_steps_v1")
+            todo_item = payload["todo_plan"]["periods"][0]["items"][0]
+            next7_item = payload["planning_layers"]["next_7_days"]["items"][0]
+            self.assertEqual(todo_item["title"], "每天固定看胎动和不舒服")
+            self.assertTrue(todo_item["completed"])
+            self.assertEqual(todo_item["completed_source"], "app")
+            self.assertEqual(next7_item["source_item_id"], "old_01")
+            self.assertTrue(next7_item["completed"])
+
     def test_dev_startup_reset_only_deletes_active_birth_journey_plans(self) -> None:
         birth_plan = data_store.save_care_plan_artifact(
             user_id="u-plan",

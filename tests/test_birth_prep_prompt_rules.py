@@ -420,6 +420,7 @@ class BirthPrepPromptRuleTests(unittest.TestCase):
             "due_date_or_week": "孕30周",
             "birth_path": "顺产",
             "support_person": "伴侣",
+            "ivf": "跳过",
             "first_birth": "跳过",
             "fetus_count": "跳过",
             "age": "跳过",
