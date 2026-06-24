@@ -1235,9 +1235,10 @@ def _format_birth_journey_next_7_todo_context(payload: dict[str, Any]) -> list[s
         payload = normalize_birth_journey_plan_payload(payload)
     except Exception:
         payload = dict(payload)
-    layers = payload.get("planning_layers") if isinstance(payload.get("planning_layers"), dict) else {}
-    next_7 = layers.get("next_7_days") if isinstance(layers.get("next_7_days"), dict) else {}
-    items = next_7.get("items") if isinstance(next_7.get("items"), list) else []
+    todo_plan = payload.get("todo_plan") if isinstance(payload.get("todo_plan"), dict) else {}
+    periods = todo_plan.get("periods") if isinstance(todo_plan.get("periods"), list) else []
+    current_period = periods[0] if periods and isinstance(periods[0], dict) else {}
+    items = current_period.get("items") if isinstance(current_period.get("items"), list) else []
     todo_lines: list[str] = []
     for index, item in enumerate(items):
         if not isinstance(item, dict):
@@ -1245,7 +1246,7 @@ def _format_birth_journey_next_7_todo_context(payload: dict[str, Any]) -> list[s
         title = _trim_context_value(item.get("title"), 36)
         if not title:
             continue
-        item_id = _trim_context_value(item.get("id"), 20) or f"next7_{index + 1:02d}"
+        item_id = _trim_context_value(item.get("id"), 20) or f"todo_{index + 1:02d}"
         state = "done" if _context_completed_bool(item.get("completed")) else "todo"
         label = _trim_context_value(item.get("priority_label"), 20)
         label_prefix = f"{label} " if label else ""
@@ -1254,8 +1255,10 @@ def _format_birth_journey_next_7_todo_context(payload: dict[str, Any]) -> list[s
         todo_lines.append(f"  {index + 1}. [{state}] {item_id} {label_prefix}{title}{suffix}")
     if not todo_lines:
         return []
+    period_title = _trim_context_value(current_period.get("title"), 28)
+    period_prefix = f"（{period_title}）" if period_title else ""
     return [
-        "- next_7_days_todos: 用户说已完成/取消完成这些事项时，调用 birth_journey_plan_todo_update；优先传 item_id，也可传编号。",
+        f"- current_birth_journey_todos{period_prefix}: 用户说已完成/取消完成这些事项时，调用 birth_journey_plan_todo_update；优先传 item_id，也可传编号。",
         *todo_lines,
     ]
 

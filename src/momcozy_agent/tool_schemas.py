@@ -196,7 +196,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "birth_journey_intake_manage": _function_tool(
         "birth_journey_intake_manage",
-        "推进孕期计划的信息采集状态机。用户回答当前 next_step/confirmation_question 时，必须调用本工具提交对应 action/payload；不要自行判断还缺哪个字段，也不要追加询问工具未返回的字段。已提供大致孕周即可继续，例如 30周/孕30周/30+几天 都可接受，不要为精确到天而追问。进入采集时，可把前文明确线索放入 entry_reason、initial_concerns、known_values 用于表单预填和计划个性化，不会作为单独追问节点阻塞主流程；submit_entry_concern 仅用于历史会话兼容。基础表单提交后，工具会生成并持久化一个稳定的个性化追问队列，通常追问 3 轮、最多 5 轮；每轮只返回当前 personalized_followup。next_step=personalized_followup 时，最终回复最多两小段：第一句必须点明 observation 里的用户已提供信息，先用 observation 做自然提醒式承接，再用 meaning 简短解释，然后只问 followup_question 这一个具体问题；reply_guidance 可压缩到句末。追问只收集会改变计划安排的事实，例如产检异常、用药/复查、既往孕产异常、多胎/剖宫产/IVF 相关细节、产检节点或医院路径；不要停在纯解读，不要问用户知不知道该做什么、最想了解什么，或医生有没有交代什么。涉及高龄时，要关切地说明这是需要认真纳入计划的产科管理因素，再收集具体复查/用药/异常信息。用户回复选项、忘了、跳过或补充内容时，用 submit_personalized_followup 带 followup_id/answer 推进。随后工具会按孕周处理产检上传/跳过，并在 ready_to_generate 时返回 plan_context 供 birth_journey_plan_card_create 使用。",
+        "推进孕期计划的信息采集状态机。用户回答当前 next_step/confirmation_question 时，必须调用本工具提交对应 action/payload；不要自行判断还缺哪个字段，也不要追加询问工具未返回的字段。已提供大致孕周即可继续，例如 30周/孕30周/30+几天 都可接受，不要为精确到天而追问。进入采集时，可把前文明确线索放入 entry_reason、initial_concerns、known_values 用于表单预填和计划个性化，不会作为单独追问节点阻塞主流程；submit_entry_concern 仅用于历史会话兼容。基础表单提交后，工具会生成并持久化一个稳定的个性化追问队列，通常追问 3 轮、最多 5 轮；每轮只返回当前 personalized_followup。next_step=personalized_followup 时，最终回复最多两小段：第一句必须点明 observation 里的用户已提供信息，先用 observation 做自然提醒式承接，再用 meaning 简短解释，然后只问 followup_question 这一个具体问题；reply_guidance 可压缩到句末。追问只收集会改变计划安排的事实，例如产检异常、用药/复查、既往孕产异常、多胎/剖宫产/IVF 相关细节、产检节点或医院路径；不要停在纯解读，不要问用户知不知道该做什么、最想了解什么，或医生有没有交代什么。涉及高龄时，要关切地说明这是需要认真纳入计划的产科管理因素，再收集具体复查/用药/异常信息。用户回复选项、忘了、跳过或补充内容时，用 submit_personalized_followup 带 followup_id/answer 推进。产检上传/跳过后，工具会进入 final_plan_confirmation；用户说没有补充或开始制定时，用 confirm_ready_to_generate，用户补充最后信息时，用 submit_final_additional_info。只有随后 ready_to_generate 时才会返回 plan_context 供 birth_journey_plan_card_create 使用。",
         {
             "action": {
                 "type": "string",
@@ -210,6 +210,8 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
                     "confirm_checkup_done",
                     "confirm_no_checkup_yet",
                     "submit_personalized_followup",
+                    "confirm_ready_to_generate",
+                    "submit_final_additional_info",
                     "complete",
                 ],
             },
@@ -233,9 +235,9 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "birth_journey_plan_todo_update": _function_tool(
         "birth_journey_plan_todo_update",
-        "更新当前用户 active 孕期计划中“接下来 7 天行动清单”的完成状态。仅当 request_context 的 active_care_plan_context 给出了 next_7_days_todos，且用户明确表示其中某些事项已经完成或需要取消完成时调用。用户可以用编号、事项名或 item_id 表达；如果无法唯一定位事项，先追问，不要猜测。此工具只更新完成状态，不重新生成计划，不用于删除计划、待产包、奶量计划或普通日记。工具返回 completion_followups 时，最终回复可顺带提供 1 个与已完成事项相关的下一步帮助。",
+        "更新当前用户 active 孕期计划中当前展开阶段待办事项的完成状态。仅当 request_context 的 active_care_plan_context 给出了 current_birth_journey_todos，且用户明确表示其中某些事项已经完成或需要取消完成时调用。用户可以用编号、事项名或 item_id 表达；如果无法唯一定位事项，先追问，不要猜测。此工具只更新完成状态，不重新生成计划，不用于删除计划、待产包、奶量计划或普通日记。工具返回 completion_followups 时，最终回复可顺带提供 1 个与已完成事项相关的下一步帮助。",
         {
-            "item_ids": _nullable({"type": "array", "items": {"type": "string"}, "description": "要更新的稳定事项 id，例如 next7_01；不使用时传 null。"}),
+            "item_ids": _nullable({"type": "array", "items": {"type": "string"}, "description": "要更新的稳定事项 id，例如 todo_01；不使用时传 null。"}),
             "item_numbers": _nullable({"type": "array", "items": {"type": "integer"}, "description": "用户按编号表达时传 1-based 编号；不使用时传 null。"}),
             "item_refs": _nullable({"type": "array", "items": {"type": "string"}, "description": "用户说出的事项名、标题片段或原始引用；不使用时传 null。"}),
             "completed": {"type": "boolean", "description": "true 表示标记完成；false 表示取消完成。"},

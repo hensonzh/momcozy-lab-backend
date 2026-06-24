@@ -1308,8 +1308,8 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
                 "孕期计划待办完成状态已经同步。最终回复只简短说明已同步，并点名已更新的事项；不要重新生成计划，不要复述完整计划。"
                 + (f"可以顺带给出 1 个完成后的下一步帮助：{followup_text}。" if followup_text else "")
             ),
-            "needs_todo_reference": "还不能确定要更新哪一项。最终回复只请用户提供接下来 7 天行动清单里的编号或事项名。",
-            "todo_not_found": "没有匹配到对应事项。最终回复只请用户提供接下来 7 天行动清单里的编号或完整事项名，不要猜测。",
+            "needs_todo_reference": "还不能确定要更新哪一项。最终回复只请用户提供当前待办里的编号或事项名。",
+            "todo_not_found": "没有匹配到对应事项。最终回复只请用户提供当前待办里的编号或完整事项名，不要猜测。",
             "plan_not_found": "没有找到 active 孕期计划。最终回复只说明当前没有可更新的孕期计划。",
             "todo_update_failed": "更新孕期计划待办失败。最终回复简短说明暂时没同步成功，请稍后再试。",
         }
@@ -1625,6 +1625,12 @@ def _compact_birth_journey_intake_output(safe: dict[str, Any], raw_result: dict[
             "不要同时询问个性化风险、症状、生活方式或喂养信息，也不要生成孕期计划。"
             "当前步骤的快捷回复已由应用侧准备好，不要再调用 ui_quick_replies_create。"
         )
+    elif next_step == "final_plan_confirmation":
+        compact["final_response_instruction"] = (
+            "最终回复只问这一句：还有其他需要补充的信息吗？如果没有，我就基于目前的信息开始为你制定孕期计划啦。"
+            "不要展开计划内容，不要总结已收集的信息，不要追加其它问题，也不要生成孕期计划。"
+            "当前步骤的快捷回复已由应用侧准备好，不要再调用 ui_quick_replies_create。"
+        )
     elif next_step == "personalized_followup":
         compact["final_response_instruction"] = (
             "最终回复最多两小段，第一句必须点明 personalized_followup.observation 里的用户已提供信息，"
@@ -1785,6 +1791,7 @@ def _remove_hospital_bag_cart_link(message: str) -> str:
 BIRTH_JOURNEY_PLAN_CREATED_OPENING = (
     "孕期计划已生成，我同步把它做成了待办事项清单放在了“宝宝和我”页面里，"
     "接下来你可以在“宝宝和我”页面管理你的孕期计划待办事项。"
+    "我也会在每项计划对应的阶段到来前，提前提醒你。"
 )
 
 
@@ -1882,87 +1889,47 @@ def _birth_journey_plan_brief_item(item: dict[str, Any]) -> dict[str, Any]:
 
 
 def _birth_journey_plan_final_response(card_json: dict[str, Any], *, reused_existing_plan: bool = False) -> str:
-    layers = card_json.get("planning_layers") if isinstance(card_json.get("planning_layers"), dict) else {}
-    plan_basis = layers.get("plan_basis") if isinstance(layers.get("plan_basis"), dict) else {}
-    basis_items = plan_basis.get("items") if isinstance(plan_basis.get("items"), list) else []
-    basis_summary = _birth_journey_plan_basis_summary(basis_items)
-    next_7_days = layers.get("next_7_days") if isinstance(layers.get("next_7_days"), dict) else {}
-    next_7_items = next_7_days.get("items") if isinstance(next_7_days.get("items"), list) else []
-    grouped_items = next_7_days.get("grouped_items") if isinstance(next_7_days.get("grouped_items"), dict) else {}
-    grouped_summary = _birth_journey_grouped_next_7_todo_summary(grouped_items, next_7_items)
-    next_7_summary = _birth_journey_next_7_todo_summary(next_7_items)
-    if grouped_summary or next_7_summary:
-        context_reason = _clean_birth_journey_fragment(next_7_days.get("context_reason"))
-        intro = f"{context_reason}，" if context_reason else ""
-        opening = (
-            "你之前已经有一份孕期计划，我先沿用这份，不重复生成。"
-            if reused_existing_plan
-            else BIRTH_JOURNEY_PLAN_CREATED_OPENING
-        )
-        lines = [
-            opening,
-            f"这份计划先按{basis_summary}来排。" if basis_summary else "",
-            grouped_summary or (intro + "接下来 7 天先做这几件：" + next_7_summary + "。"),
-            "这里面如果有已经完成的事项，可以直接回复编号或事项名，我会帮你同步更新完成状态。",
-        ]
-        return "\n\n".join(line for line in lines if line)
-
     opening = (
         "你之前已经有一份孕期计划，我先沿用这份，不重复生成。"
         if reused_existing_plan
         else BIRTH_JOURNEY_PLAN_CREATED_OPENING
     )
-    return opening + "接下来 7 天行动清单暂时没有可复述的事项。"
+    todo_plan = card_json.get("todo_plan") if isinstance(card_json.get("todo_plan"), dict) else {}
+    generation_context = card_json.get("generation_context") if isinstance(card_json.get("generation_context"), dict) else {}
+    periods = todo_plan.get("periods") if isinstance(todo_plan.get("periods"), list) else []
+    current_period = next((period for period in periods if isinstance(period, dict)), {})
+    current_items = current_period.get("items") if isinstance(current_period.get("items"), list) else []
+    current_summary = _birth_journey_next_7_todo_summary(current_items)
+    if not current_summary:
+        return opening + "当前阶段待办暂时没有可复述的事项。"
+
+    basis_summary = _birth_journey_personalization_basis_summary(generation_context.get("personalization_basis"))
+    route_summary = _clean_birth_journey_fragment(generation_context.get("route_summary") or todo_plan.get("route_summary"))
+    period_title = _clean_birth_journey_fragment(current_period.get("title")) or "当前阶段"
+    lines = [
+        opening,
+        f"这份计划会按{basis_summary}来排。" if basis_summary else "",
+        route_summary,
+        f"当前先展开{period_title}，建议先处理：{current_summary}。",
+        "这里面如果有已经完成的事项，可以直接回复编号或事项名，我会帮你同步更新完成状态。",
+    ]
+    return "\n\n".join(line for line in lines if line)
 
 
-def _birth_journey_plan_basis_summary(items: list[Any]) -> str:
-    titles: list[str] = []
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        title = _clean_birth_journey_fragment(item.get("title"))
-        if title:
-            titles.append(title)
-        if len(titles) >= 3:
-            break
-    if not titles:
+def _birth_journey_personalization_basis_summary(value: Any) -> str:
+    labels: list[str] = []
+    if isinstance(value, list):
+        for item in value:
+            label = _clean_birth_journey_fragment(item)
+            if label and label not in labels:
+                labels.append(label)
+            if len(labels) >= 5:
+                break
+    if not labels:
         return ""
-    if len(titles) == 1:
-        return titles[0]
-    return "、".join(titles[:-1]) + "和" + titles[-1]
-
-
-def _birth_journey_grouped_next_7_todo_summary(grouped_items: dict[str, Any], all_items: list[Any]) -> str:
-    if not grouped_items:
-        return ""
-    index_by_id = _birth_journey_next_7_index_by_id(all_items)
-    paragraphs: list[str] = []
-    for group_key in ("essential", "supportive"):
-        group = grouped_items.get(group_key)
-        if not isinstance(group, dict):
-            continue
-        items = group.get("items") if isinstance(group.get("items"), list) else []
-        summary = _birth_journey_next_7_todo_summary(items, index_by_id)
-        if not summary:
-            continue
-        intro = _clean_birth_journey_fragment(group.get("intro"))
-        if intro:
-            paragraphs.append(f"{intro}{summary}。")
-        else:
-            title = _clean_birth_journey_fragment(group.get("title")) or "这一类事项"
-            paragraphs.append(f"{title}：{summary}。")
-    return "\n\n".join(paragraphs)
-
-
-def _birth_journey_next_7_index_by_id(items: list[Any]) -> dict[str, int]:
-    index_by_id: dict[str, int] = {}
-    for index, item in enumerate(items):
-        if not isinstance(item, dict):
-            continue
-        item_id = _clean_birth_journey_fragment(item.get("id"))
-        if item_id:
-            index_by_id[item_id] = index + 1
-    return index_by_id
+    if len(labels) == 1:
+        return labels[0]
+    return "、".join(labels[:-1]) + "和" + labels[-1]
 
 
 def _birth_journey_next_7_todo_summary(items: list[Any], index_by_id: dict[str, int] | None = None) -> str:

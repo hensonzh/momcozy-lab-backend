@@ -41,33 +41,56 @@ def _plan_context(**overrides: object) -> dict[str, object]:
     return context
 
 
-def _assert_birth_journey_item_text_lengths(testcase: unittest.TestCase, layers: dict[str, object]) -> None:
-    for section_id in ("current_week_focus", "next_7_days", "next_2_4_weeks", "later_milestones"):
-        section = layers.get(section_id)
-        items = section.get("items") if isinstance(section, dict) else []
-        testcase.assertIsInstance(items, list)
-        for item in items:
-            testcase.assertIsInstance(item, dict)
-            title = str(item.get("title") or "")
-            reason = str(item.get("reason") or "")
-            testcase.assertLessEqual(len(title), BIRTH_JOURNEY_PLAN_ITEM_TITLE_MAX_CHARS)
-            testcase.assertLessEqual(len(reason), BIRTH_JOURNEY_PLAN_ITEM_REASON_MAX_CHARS)
+def _birth_journey_todo_periods(card: dict[str, object]) -> list[dict[str, object]]:
+    todo_plan = card.get("todo_plan") if isinstance(card.get("todo_plan"), dict) else {}
+    periods = todo_plan.get("periods") if isinstance(todo_plan.get("periods"), list) else []
+    return [period for period in periods if isinstance(period, dict)]
 
 
-def _assert_birth_journey_item_reasons_use_current_contract(testcase: unittest.TestCase, layers: dict[str, object]) -> None:
+def _birth_journey_todo_items(card: dict[str, object]) -> list[dict[str, object]]:
+    items: list[dict[str, object]] = []
+    for period in _birth_journey_todo_periods(card):
+        period_items = period.get("items") if isinstance(period.get("items"), list) else []
+        items.extend(item for item in period_items if isinstance(item, dict))
+    return items
+
+
+def _birth_journey_first_period_items(card: dict[str, object]) -> list[dict[str, object]]:
+    periods = _birth_journey_todo_periods(card)
+    if not periods:
+        return []
+    items = periods[0].get("items") if isinstance(periods[0].get("items"), list) else []
+    return [item for item in items if isinstance(item, dict)]
+
+
+def _find_birth_journey_todo_item(card: dict[str, object], item_id: str) -> dict[str, object] | None:
+    for item in _birth_journey_todo_items(card):
+        if str(item.get("id") or "") == item_id:
+            return item
+    return None
+
+
+def _assert_birth_journey_item_text_lengths(testcase: unittest.TestCase, card: dict[str, object]) -> None:
+    items = _birth_journey_todo_items(card)
+    testcase.assertTrue(items)
+    for item in items:
+        title = str(item.get("title") or "")
+        reason = str(item.get("reason") or "")
+        testcase.assertLessEqual(len(title), BIRTH_JOURNEY_PLAN_ITEM_TITLE_MAX_CHARS)
+        testcase.assertLessEqual(len(reason), BIRTH_JOURNEY_PLAN_ITEM_REASON_MAX_CHARS)
+
+
+def _assert_birth_journey_item_reasons_use_current_contract(testcase: unittest.TestCase, card: dict[str, object]) -> None:
     blocked_fragments = ("目的是", "【重要】", "【建议】")
-    for section_id in ("current_week_focus", "next_7_days", "next_2_4_weeks", "later_milestones"):
-        section = layers.get(section_id)
-        items = section.get("items") if isinstance(section, dict) else []
-        testcase.assertIsInstance(items, list)
-        for item in items:
-            testcase.assertIsInstance(item, dict)
-            testcase.assertIn(item.get("priority_label"), {"重要", "建议"})
-            testcase.assertTrue(str(item.get("why_for_you") or "").startswith("考虑到"))
-            for key in ("reason", "why_for_you"):
-                text = str(item.get(key) or "")
-                for fragment in blocked_fragments:
-                    testcase.assertNotIn(fragment, text)
+    items = _birth_journey_todo_items(card)
+    testcase.assertTrue(items)
+    for item in items:
+        testcase.assertIn(item.get("priority_label"), {"重要", "建议"})
+        testcase.assertTrue(str(item.get("why_for_you") or "").startswith("考虑到"))
+        for key in ("reason", "why_for_you"):
+            text = str(item.get(key) or "")
+            for fragment in blocked_fragments:
+                testcase.assertNotIn(fragment, text)
 
 
 def _assert_birth_journey_item_titles_are_plain(testcase: unittest.TestCase, card: dict[str, object]) -> None:
@@ -88,10 +111,8 @@ def _assert_birth_journey_item_titles_are_plain(testcase: unittest.TestCase, car
         testcase.assertNotIn(fragment, rendered)
 
 
-def _assert_next_7_todo_items(testcase: unittest.TestCase, layers: dict[str, object]) -> None:
-    next_7 = layers.get("next_7_days")
-    items = next_7.get("items") if isinstance(next_7, dict) else []
-    testcase.assertIsInstance(items, list)
+def _assert_current_todo_items(testcase: unittest.TestCase, card: dict[str, object]) -> None:
+    items = _birth_journey_first_period_items(card)
     testcase.assertTrue(items)
     weak_title_fragments = (
         "确认高龄孕期关注重点",
@@ -110,9 +131,8 @@ def _assert_next_7_todo_items(testcase: unittest.TestCase, layers: dict[str, obj
         "观察日程",
         "评估资料",
     )
-    for index, item in enumerate(items):
-        testcase.assertIsInstance(item, dict)
-        testcase.assertEqual(item.get("id"), f"next7_{index + 1:02d}")
+    for item in items:
+        testcase.assertTrue(str(item.get("id") or "").strip())
         testcase.assertIs(item.get("completed"), False)
         testcase.assertIsNone(item.get("completed_at"))
         testcase.assertIsNone(item.get("completed_source"))
@@ -203,6 +223,24 @@ def _answer_birth_journey_personalized_followups(
     return current
 
 
+def _confirm_birth_journey_ready_to_generate(
+    inputs: dict[str, object],
+    current: dict[str, object],
+    *,
+    additional_info: str | None = None,
+) -> dict[str, object]:
+    if additional_info is None:
+        action = "confirm_ready_to_generate"
+        payload: dict[str, object] = {}
+    else:
+        action = "submit_final_additional_info"
+        payload = {"final_additional_info": additional_info}
+    return manage_birth_journey_intake(
+        {"action": action, "payload": payload},
+        {**inputs, "_birth_journey_intake_state": current["intake_state"]},
+    )
+
+
 def _basic_info_payload(**overrides: object) -> dict[str, object]:
     payload: dict[str, object] = {
         "current_week": "20周",
@@ -251,7 +289,7 @@ def _assert_birth_journey_todo_plan(
         testcase.assertEqual(terminal_period.get("display_mode"), "terminal")
         testcase.assertEqual(terminal_period.get("status"), "terminal")
         terminal_titles = {str(item.get("title") or "") for item in terminal_period.get("items") or [] if isinstance(item, dict)}
-        testcase.assertIn("定好临产后怎么联系医院", terminal_titles)
+        testcase.assertIn("做临产入院准备与联系流程", terminal_titles)
     blocked_fragments = ("目的是", "【重要】", "【建议】")
     for period in periods:
         testcase.assertIsInstance(period, dict)
@@ -269,7 +307,12 @@ def _assert_birth_journey_todo_plan(
             testcase.assertTrue(str(item.get("why_for_you") or "").startswith("考虑到"))
             testcase.assertIsInstance(item.get("steps"), list)
             testcase.assertTrue(item.get("steps"))
+            testcase.assertGreaterEqual(len(item.get("steps") or []), 4)
             testcase.assertTrue(item.get("source_tags"))
+            rendered_steps = json.dumps(item.get("steps") or [], ensure_ascii=False)
+            testcase.assertNotIn("明确这项下一步要做什么", rendered_steps)
+            testcase.assertNotIn("安排执行时间或确认对象", rendered_steps)
+            testcase.assertNotIn("把需要的材料或联系入口放好", rendered_steps)
             for fragment in blocked_fragments:
                 testcase.assertNotIn(fragment, reason)
     _assert_no_birth_journey_done_criteria(testcase, todo_plan)
@@ -326,37 +369,42 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         self.assertEqual(card["title"], "孕期计划")
         self.assertEqual(card["owner"]["current_week"], "孕25周")
         self.assertEqual(card["owner"]["estimated_due_date"], "2026/09/13")
-        layers = card["planning_layers"]
-        self.assertEqual(layers["current_week"], 25)
-        self.assertEqual(layers["plan_basis"]["title"], "为什么这样安排")
-        self.assertTrue(layers["plan_basis"]["items"])
-        self.assertIn("当前孕周", {item["title"] for item in layers["plan_basis"]["items"]})
-        self.assertEqual(layers["current_week_focus"]["title"], "当前优先级")
-        self.assertIn("最影响后续准备和安全感", layers["current_week_focus"]["subtitle"])
-        self.assertTrue(layers["current_week_focus"]["items"])
-        self.assertEqual(layers["next_7_days"]["title"], "接下来 7 天行动清单")
-        self.assertIn("这周能完成的几个小动作", layers["next_7_days"]["subtitle"])
-        self.assertTrue(layers["next_7_days"]["items"])
-        next_7_rendered = json.dumps(layers["next_7_days"]["items"], ensure_ascii=False)
-        self.assertIn("把没做完的产检安排上", next_7_rendered)
-        self.assertIn("安排好糖耐当天怎么做", next_7_rendered)
-        self.assertIn("定好剖宫产术前准备", next_7_rendered)
-        self.assertIn("做完后", next_7_rendered)
-        self.assertNotIn("给生活压力留缓冲", next_7_rendered)
-        self.assertNotIn("补齐下次产检时间", next_7_rendered)
-        self.assertNotIn("目的是", next_7_rendered)
-        grouped = layers["next_7_days"]["grouped_items"]
-        self.assertIn("essential", grouped)
-        self.assertIn("按照你现在孕 25 周", grouped["essential"]["intro"])
-        self.assertTrue(grouped["essential"]["items"])
-        _assert_next_7_todo_items(self, layers)
-        self.assertTrue(layers["next_2_4_weeks"]["items"])
-        self.assertTrue(layers["later_milestones"]["items"])
-        _assert_birth_journey_item_text_lengths(self, layers)
+        self.assertNotIn("planning_layers", card)
+        self.assertEqual(card["todo_plan"]["current_week"], 25)
+        self.assertIn("你现在孕 25 周", card["generation_context"]["personalization_basis"])
+        current_rendered = json.dumps(_birth_journey_first_period_items(card), ensure_ascii=False)
+        self.assertIn("把没做完的产检安排上", current_rendered)
+        self.assertIn("做糖耐检查（OGTT）", current_rendered)
+        self.assertIn("75g葡萄糖水", current_rendered)
+        self.assertIn("按1小时/2小时", current_rendered)
+        self.assertIn("剖宫产/分娩准备资料", current_rendered)
+        self.assertIn("做完后", current_rendered)
+        self.assertNotIn("给生活压力留缓冲", current_rendered)
+        self.assertNotIn("补齐下次产检时间", current_rendered)
+        self.assertNotIn("目的是", current_rendered)
+        _assert_current_todo_items(self, card)
+        self.assertGreaterEqual(len(card["todo_plan"]["periods"]), 2)
+        _assert_birth_journey_item_text_lengths(self, card)
         _assert_birth_journey_todo_plan(self, card, cadence="monthly", first_period_title="孕 25-27 周")
         todo_rendered = json.dumps(card["todo_plan"], ensure_ascii=False)
         self.assertIn("按月计划", todo_rendered)
-        self.assertIn("安排好糖耐当天怎么做", todo_rendered)
+        self.assertIn("做糖耐检查（OGTT）", todo_rendered)
+        ogtt_items = [
+            item
+            for period in card["todo_plan"]["periods"]
+            for item in period.get("items") or []
+            if isinstance(item, dict) and item.get("id") == "week_24_28_gtt"
+        ]
+        self.assertTrue(ogtt_items)
+        self.assertEqual(len(ogtt_items[0].get("steps") or []), 5)
+        self.assertIn("检查结束后进食并观察身体反应", json.dumps(ogtt_items[0].get("steps"), ensure_ascii=False))
+        checkup_item = _find_birth_journey_todo_item(card, "condition_checkup_status")
+        self.assertIsNotNone(checkup_item)
+        self.assertIn("把已完成、未预约、等结果和需复查项目分成四类", json.dumps(checkup_item, ensure_ascii=False))
+        self.assertIn("给未预约项目补上日期、地点和是否需要空腹", json.dumps(checkup_item, ensure_ascii=False))
+        c_section_item = _find_birth_journey_todo_item(card, "condition_planned_c_section")
+        self.assertIsNotNone(c_section_item)
+        self.assertIn("准备术前沟通要点", json.dumps(c_section_item, ensure_ascii=False))
         _assert_no_legacy_birth_journey_fallback_items(self, card)
         _assert_birth_journey_item_titles_are_plain(self, card)
 
@@ -381,14 +429,13 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         rendered = json.dumps(card, ensure_ascii=False)
         self.assertIn("剖宫产", rendered)
         self.assertIn("母乳", rendered)
-        self.assertNotIn("产检资料", rendered)
         self.assertNotIn("生成产检问题清单", rendered)
         self.assertNotIn("打开分娩沟通单", rendered)
         self.assertNotIn("生成夜间分工卡", rendered)
         self.assertNotIn("承接奶量管理计划", rendered)
         self.assertNotIn("| --- |", rendered)
         self.assertNotIn("<br>", rendered)
-        _assert_birth_journey_item_reasons_use_current_contract(self, layers)
+        _assert_birth_journey_item_reasons_use_current_contract(self, card)
 
     def test_birth_journey_todo_plan_uses_biweekly_cadence_in_late_pregnancy(self) -> None:
         result = create_birth_journey_plan_card(
@@ -446,15 +493,14 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         )
 
         self.assertEqual(result["status"], "card_created")
-        layers = result["card"]["card_json"]["planning_layers"]
-        safety_items = layers["safety_gate"]["items"]
-        focus_items = layers["current_week_focus"]["items"]
-        self.assertTrue(safety_items)
-        self.assertEqual(focus_items[0]["title"], "先确认是否需要联系医院或医生")
-        self.assertIn("医院口径", focus_items[0]["reason"])
-        _assert_birth_journey_item_text_lengths(self, layers)
+        card = result["card"]["card_json"]
+        current_items = _birth_journey_first_period_items(card)
+        self.assertTrue(current_items)
+        self.assertEqual(current_items[0]["title"], "做胎动与风险观察")
+        self.assertIn("风险触发条件", current_items[0]["reason"])
+        _assert_birth_journey_item_text_lengths(self, card)
 
-    def test_birth_journey_plan_filters_later_milestones_by_current_week(self) -> None:
+    def test_birth_journey_plan_filters_future_periods_by_current_week(self) -> None:
         result = create_birth_journey_plan_card(
             {
                 "plan_context": _plan_context(
@@ -468,10 +514,10 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         )
 
         self.assertEqual(result["status"], "card_created")
-        milestones = result["card"]["card_json"]["planning_layers"]["later_milestones"]["items"]
-        rendered = json.dumps(milestones, ensure_ascii=False)
+        card = result["card"]["card_json"]
+        rendered = json.dumps(card["todo_plan"], ensure_ascii=False)
         self.assertNotIn("28-32 周", rendered)
-        self.assertIn("定好临产时怎么去医院", rendered)
+        self.assertIn("做临产入院准备与联系流程", rendered)
         self.assertIn("宫缩、破水、见红", rendered)
         self.assertNotIn("产后 0-42 天", rendered)
 
@@ -484,11 +530,13 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
             {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00"},
         )
 
-        layers = result["card"]["card_json"]["planning_layers"]
-        rendered = json.dumps(layers, ensure_ascii=False)
-        self.assertIn("约好NT/早筛并设置提醒", rendered)
-        self.assertIn("定下唐筛或无创怎么做", rendered)
-        self.assertIn("设置报告回看提醒", rendered)
+        card = result["card"]["card_json"]
+        rendered = json.dumps(card["todo_plan"], ensure_ascii=False)
+        self.assertIn("做NT/早筛检查安排", rendered)
+        self.assertIn("做唐筛/无创/羊穿决策", rendered)
+        self.assertIn("确认NT检查时间在孕周窗口内", rendered)
+        self.assertIn("保存NT数值及筛查结果", rendered)
+        self.assertIn("如需羊穿，记录预约窗口及术前要求", rendered)
         self.assertNotIn("无花果", rendered)
 
     def test_birth_journey_next_7_ignores_generic_intent_and_remote_preparation(self) -> None:
@@ -509,17 +557,16 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
             {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00"},
         )
 
-        layers = result["card"]["card_json"]["planning_layers"]
-        next_7_rendered = json.dumps(layers["next_7_days"], ensure_ascii=False)
-        self.assertIn("约好NT/早筛并设置提醒", next_7_rendered)
-        self.assertIn("定下唐筛或无创怎么做", next_7_rendered)
-        self.assertNotIn("目的是", next_7_rendered)
-        self.assertNotIn("【重要】", next_7_rendered)
-        self.assertNotIn("【建议】", next_7_rendered)
-        self.assertNotIn("把担心点整理成", next_7_rendered)
-        self.assertNotIn("产后 48 小时喂养", next_7_rendered)
-        basis_rendered = json.dumps(layers["plan_basis"], ensure_ascii=False)
-        self.assertNotIn("你提到的担心", basis_rendered)
+        card = result["card"]["card_json"]
+        rendered = json.dumps(_birth_journey_first_period_items(card), ensure_ascii=False)
+        self.assertIn("做NT/早筛检查安排", rendered)
+        self.assertIn("做唐筛/无创/羊穿决策", rendered)
+        self.assertNotIn("目的是", rendered)
+        self.assertNotIn("【重要】", rendered)
+        self.assertNotIn("【建议】", rendered)
+        self.assertNotIn("把担心点整理成", rendered)
+        self.assertNotIn("产后 48 小时喂养", rendered)
+        self.assertNotIn("你提到的担心", card["generation_context"]["personalization_basis"])
 
     def test_birth_journey_plan_uses_weekly_guide_for_anomaly_scan_window(self) -> None:
         result = create_birth_journey_plan_card(
@@ -530,11 +577,12 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
             {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00"},
         )
 
-        layers = result["card"]["card_json"]["planning_layers"]
-        rendered = json.dumps(layers, ensure_ascii=False)
-        self.assertIn("看完大排畸，定好是否复查", rendered)
-        self.assertIn("确认胎盘羊水和结构提示结论", rendered)
-        self.assertIn("把复查日期或无需复查结论加进日历", rendered)
+        card = result["card"]["card_json"]
+        rendered = json.dumps(card["todo_plan"], ensure_ascii=False)
+        self.assertIn("做大排畸结果复查确认", rendered)
+        self.assertIn("拍照保存报告并带给医生复看", rendered)
+        self.assertIn("确认胎儿结构、胎盘、羊水及宫颈情况", rendered)
+        self.assertIn("标记需复查或随访的项目", rendered)
         self.assertNotIn("小甜瓜", rendered)
 
     def test_birth_journey_plan_uses_weekly_guide_for_gbs_and_admission_window(self) -> None:
@@ -546,11 +594,12 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
             {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00"},
         )
 
-        layers = result["card"]["card_json"]["planning_layers"]
-        rendered = json.dumps(layers, ensure_ascii=False)
-        self.assertIn("做好GBS检查和入院材料", rendered)
-        self.assertIn("保存医院入院或夜间入口", rendered)
-        self.assertIn("定好临产时怎么去医院", rendered)
+        card = result["card"]["card_json"]
+        rendered = json.dumps(card["todo_plan"], ensure_ascii=False)
+        self.assertIn("做GBS筛查与入院准备", rendered)
+        self.assertIn("保存GBS结果并标记阴性/阳性", rendered)
+        self.assertIn("确认入院入口及联系电话", rendered)
+        self.assertIn("做临产入院准备与联系流程", rendered)
         self.assertNotIn("白兰瓜", rendered)
 
     def test_birth_journey_plan_safety_gate_includes_unexplained_itching(self) -> None:
@@ -565,10 +614,10 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
             {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00"},
         )
 
-        layers = result["card"]["card_json"]["planning_layers"]
-        safety_items = layers["safety_gate"]["items"]
-        self.assertTrue(safety_items)
-        self.assertIn("先确认是否需要联系医院或医生", safety_items[0]["title"])
+        card = result["card"]["card_json"]
+        current_items = _birth_journey_first_period_items(card)
+        self.assertTrue(current_items)
+        self.assertIn("做胎动与风险观察", current_items[0]["title"])
 
     def test_birth_journey_plan_does_not_personalize_from_skipped_or_unknown_answers(self) -> None:
         result = create_birth_journey_plan_card(
@@ -587,16 +636,16 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         )
 
         self.assertEqual(result["status"], "card_created")
-        layers = result["card"]["card_json"]["planning_layers"]
-        rendered = json.dumps(layers, ensure_ascii=False)
-        self.assertIn("每天固定看胎动和不舒服", rendered)
-        self.assertIn("定一个每天看胎动的时间", rendered)
+        card = result["card"]["card_json"]
+        rendered = json.dumps(card["todo_plan"], ensure_ascii=False)
+        self.assertIn("做胎动与异常观察", rendered)
+        self.assertIn("记录胎动明显增减变化", rendered)
         self.assertNotIn("补齐下次产检时间", rendered)
         self.assertNotIn("你已经提供产检信息", rendered)
         self.assertNotIn("把已做产检和待复查项整理成问题清单", rendered)
         self.assertNotIn("风险因素", rendered)
         self.assertNotIn("特殊情况", rendered)
-        _assert_birth_journey_item_text_lengths(self, layers)
+        _assert_birth_journey_item_text_lengths(self, card)
 
     def test_birth_journey_plan_turns_advanced_maternal_age_into_specific_actions(self) -> None:
         result = create_birth_journey_plan_card(
@@ -615,12 +664,65 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         )
 
         self.assertEqual(result["status"], "card_created")
-        items = result["card"]["card_json"]["planning_layers"]["next_7_days"]["items"]
-        rendered = json.dumps(items, ensure_ascii=False)
-        self.assertIn("把高龄要看的项目加进产检", rendered)
-        self.assertIn("产检次数要不要变多", rendered)
+        card = result["card"]["card_json"]
+        rendered = json.dumps(_birth_journey_first_period_items(card), ensure_ascii=False)
+        self.assertIn("高龄风险产检补充", rendered)
+        self.assertIn("确认血压、血糖、尿蛋白复查频率", rendered)
+        self.assertIn("设置胎儿生长与羊水复查计划", rendered)
         self.assertIn("你 36 岁属于高龄孕产妇管理范围", rendered)
         self.assertNotIn("确认高龄孕期关注重点", rendered)
+
+    def test_birth_journey_plan_does_not_invent_generic_risk_item_from_age_or_twins(self) -> None:
+        result = create_birth_journey_plan_card(
+            {
+                "plan_context": _plan_context(
+                    due_date_or_week="20周",
+                    age="37",
+                    fetus_count="双胎",
+                    first_birth="是",
+                    risk_factors="跳过",
+                    checkup_status="跳过",
+                    current_symptoms="没有明显不舒服",
+                    lifestyle_context="跳过",
+                ),
+                "scope": "full",
+            },
+            {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00"},
+        )
+
+        self.assertEqual(result["status"], "card_created")
+        card = result["card"]["card_json"]
+        rendered = json.dumps(card["todo_plan"], ensure_ascii=False)
+        self.assertIsNotNone(_find_birth_journey_todo_item(card, "condition_age_35_plus"))
+        self.assertIsNotNone(_find_birth_journey_todo_item(card, "condition_multiple"))
+        self.assertIsNone(_find_birth_journey_todo_item(card, "condition_risk_factors"))
+        self.assertIn("高龄风险产检补充", rendered)
+        self.assertIn("多胎管理", rendered)
+        self.assertNotIn("做胎动与风险观察", rendered)
+
+    def test_birth_journey_plan_adds_risk_item_only_for_explicit_risk_context(self) -> None:
+        result = create_birth_journey_plan_card(
+            {
+                "plan_context": _plan_context(
+                    due_date_or_week="20周",
+                    age="37",
+                    fetus_count="双胎",
+                    risk_factors="胎盘低置需要复查",
+                    checkup_status="跳过",
+                    current_symptoms="没有明显不舒服",
+                ),
+                "scope": "full",
+            },
+            {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00"},
+        )
+
+        self.assertEqual(result["status"], "card_created")
+        card = result["card"]["card_json"]
+        risk_item = _find_birth_journey_todo_item(card, "condition_risk_factors")
+        self.assertIsNotNone(risk_item)
+        rendered = json.dumps(risk_item, ensure_ascii=False)
+        self.assertIn("做胎动与风险观察", rendered)
+        self.assertIn("设置风险触发条件", rendered)
 
     def test_birth_journey_plan_keeps_all_items_but_limits_each_item_length(self) -> None:
         result = create_birth_journey_plan_card(
@@ -644,11 +746,11 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         )
 
         self.assertEqual(result["status"], "card_created")
-        layers = result["card"]["card_json"]["planning_layers"]
-        self.assertGreater(len(layers["current_week_focus"]["items"]), 3)
-        self.assertGreaterEqual(len(layers["next_7_days"]["items"]), 4)
-        self.assertGreaterEqual(len(layers["next_2_4_weeks"]["items"]), 1)
-        _assert_birth_journey_item_text_lengths(self, layers)
+        card = result["card"]["card_json"]
+        periods = _birth_journey_todo_periods(card)
+        self.assertGreaterEqual(len(_birth_journey_first_period_items(card)), 4)
+        self.assertGreaterEqual(len(periods), 2)
+        _assert_birth_journey_item_text_lengths(self, card)
 
     def test_birth_journey_plan_is_saved_as_care_plan_artifact_when_user_id_exists(self) -> None:
         old_db_path = data_store.DB_PATH
@@ -698,14 +800,14 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
                 updated = update_birth_journey_plan_todo_completion_for_user(
                     user_id="app-user",
                     plan_id=plan_id,
-                    item_refs=["next7_01"],
+                    item_refs=["todo_01"],
                     completed=True,
                     source="app",
                 )
 
                 self.assertEqual(updated["status"], "todo_completion_updated")
                 self.assertTrue(updated["side_effect_performed"])
-                self.assertEqual(updated["updated_items"][0]["id"], "next7_01")
+                self.assertEqual(updated["updated_items"][0]["id"], "todo_01")
                 self.assertTrue(updated["updated_items"][0]["completed"])
                 self.assertIn(updated["updated_items"][0]["priority_type"], {"essential", "supportive"})
                 self.assertNotIn("done_criteria", updated["updated_items"][0])
@@ -716,12 +818,6 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
                 self.assertTrue(todo_items[0]["completed"])
                 self.assertEqual(todo_items[0]["completed_source"], "app")
                 self.assertNotIn("done_criteria", todo_items[0])
-                next_7_items = saved["payload"]["planning_layers"]["next_7_days"]["items"]
-                self.assertTrue(next_7_items[0]["completed"])
-                self.assertEqual(next_7_items[0]["completed_source"], "app")
-                self.assertEqual(next_7_items[0]["source_item_id"], todo_items[0]["id"])
-                self.assertNotIn("done_criteria", next_7_items[0])
-                self.assertTrue(next_7_items[0]["completion_followup"])
 
                 context = build_request_context(
                     {
@@ -731,8 +827,8 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
                         "message_sent_at": "2026-06-08T10:00:00+08:00",
                     }
                 )
-                self.assertIn("next_7_days_todos", context)
-                self.assertIn("1. [done] next7_01", context)
+                self.assertIn("current_birth_journey_todos", context)
+                self.assertIn("1. [done]", context)
                 self.assertIn("next=", context)
                 milk_context = build_request_context(
                     {
@@ -743,7 +839,7 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
                     }
                 )
                 self.assertIn("active_care_plan_context:", milk_context)
-                self.assertNotIn("next_7_days_todos", milk_context)
+                self.assertNotIn("current_birth_journey_todos", milk_context)
 
                 updated_by_source_id = update_birth_journey_plan_todo_completion_for_user(
                     user_id="app-user",
@@ -755,7 +851,6 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
                 self.assertEqual(updated_by_source_id["status"], "todo_completion_updated")
                 saved_by_source_id = data_store.get_care_plan_artifact(user_id="app-user", plan_id=plan_id)
                 self.assertFalse(saved_by_source_id["payload"]["todo_plan"]["periods"][0]["items"][0]["completed"])
-                self.assertFalse(saved_by_source_id["payload"]["planning_layers"]["next_7_days"]["items"][0]["completed"])
             finally:
                 data_store.DB_PATH = old_db_path  # type: ignore[assignment]
 
@@ -788,9 +883,6 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
                 todo_items = saved["payload"]["todo_plan"]["periods"][0]["items"]
                 self.assertFalse(todo_items[0]["completed"])
                 self.assertTrue(todo_items[1]["completed"])
-                next_7_items = saved["payload"]["planning_layers"]["next_7_days"]["items"]
-                self.assertFalse(next_7_items[0]["completed"])
-                self.assertTrue(next_7_items[1]["completed"])
                 compact = model_tool_output({"ok": True, "tool_name": "birth_journey_plan_todo_update", "result": result})
                 self.assertIn("最终回复只简短说明已同步", compact["final_response_instruction"])
                 self.assertIn("完成后的下一步帮助", compact["final_response_instruction"])
@@ -870,11 +962,13 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
 
                 self.assertEqual(result["status"], "card_created")
                 self.assertNotEqual(result["plan"]["plan_id"], stale["plan_id"])
-                rendered = json.dumps(result["card"]["card_json"]["planning_layers"]["next_7_days"], ensure_ascii=False)
+                card = result["card"]["card_json"]
+                self.assertNotIn("planning_layers", card)
+                rendered = json.dumps(card["todo_plan"], ensure_ascii=False)
                 self.assertNotIn("【重要】", rendered)
                 self.assertNotIn("目的是", rendered)
                 self.assertIn("考虑到你", rendered)
-                self.assertIn("约好NT/早筛并设置提醒", rendered)
+                self.assertIn("做NT/早筛检查安排", rendered)
                 self.assertEqual(len(data_store.list_care_plan_artifacts(user_id="app-user")), 2)
             finally:
                 data_store.DB_PATH = old_db_path  # type: ignore[assignment]
@@ -910,7 +1004,6 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
                                 }
                             ]
                         },
-                        "planning_layers": {"next_7_days": {"items": []}},
                     },
                     source_artifact_type="birth_journey_plan_card",
                 )
@@ -1110,13 +1203,22 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
             {"action": "mark_checkup_records_uploaded", "payload": {}},
             {**inputs, "_birth_journey_intake_state": state},
         )
-        state = uploaded["intake_state"]
 
-        self.assertEqual(uploaded["status"], "ready_to_generate")
-        self.assertEqual(uploaded["next_step"], "generate_plan")
-        self.assertEqual(uploaded["plan_context"]["due_date_or_week"], "28周")
-        self.assertEqual(uploaded["plan_context"]["checkup_records_uploaded"], "是")
-        self.assertNotIn("lifestyle_context", uploaded["plan_context"])
+        self.assertEqual(uploaded["status"], "in_progress")
+        self.assertEqual(uploaded["next_step"], "final_plan_confirmation")
+        self.assertIn("还有其他需要补充的信息吗", uploaded["data"]["confirmation_question"])
+
+        ready = _confirm_birth_journey_ready_to_generate(inputs, uploaded)
+        self.assertEqual(ready["status"], "ready_to_generate")
+        self.assertEqual(ready["next_step"], "generate_plan")
+        self.assertEqual(ready["plan_context"]["due_date_or_week"], "28周")
+        self.assertEqual(ready["plan_context"]["checkup_records_uploaded"], "是")
+        self.assertNotIn("lifestyle_context", ready["plan_context"])
+
+        with_extra = _confirm_birth_journey_ready_to_generate(inputs, uploaded, additional_info="胎盘低置需要复查")
+        self.assertEqual(with_extra["status"], "ready_to_generate")
+        self.assertEqual(with_extra["plan_context"]["final_additional_info"], "胎盘低置需要复查")
+        self.assertIn("胎盘低置需要复查", with_extra["plan_context"]["risk_factors"])
 
     def test_birth_journey_confirmed_basic_form_defaults_to_submit_basic_info(self) -> None:
         inputs = {
@@ -1244,11 +1346,14 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
             {**inputs, "_birth_journey_intake_state": answered["intake_state"]},
         )
 
-        self.assertEqual(skipped["status"], "ready_to_generate")
-        self.assertEqual(skipped["next_step"], "generate_plan")
-        self.assertIn("risk_factors", skipped["intake_state"]["completed_groups"])
-        self.assertIn("既往剖宫产信息", skipped["plan_context"]["risk_factors"])
-        self.assertIn("臀位剖宫产", skipped["plan_context"]["prior_birth_history"])
+        self.assertEqual(skipped["status"], "in_progress")
+        self.assertEqual(skipped["next_step"], "final_plan_confirmation")
+        ready = _confirm_birth_journey_ready_to_generate(inputs, skipped)
+        self.assertEqual(ready["status"], "ready_to_generate")
+        self.assertEqual(ready["next_step"], "generate_plan")
+        self.assertNotIn("risk_factors", skipped["intake_state"]["completed_groups"])
+        self.assertNotIn("risk_factors", ready["plan_context"])
+        self.assertIn("臀位剖宫产", ready["plan_context"]["prior_birth_history"])
 
     def test_birth_journey_followup_question_keeps_next_personalized_source_context(self) -> None:
         inputs = {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00", "_birth_journey_intake_state": {}}
@@ -1344,8 +1449,8 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
             {**inputs, "_birth_journey_intake_state": basic["intake_state"]},
         )
 
-        self.assertEqual(skipped["status"], "ready_to_generate")
-        self.assertEqual(skipped["next_step"], "generate_plan")
+        self.assertEqual(skipped["status"], "in_progress")
+        self.assertEqual(skipped["next_step"], "final_plan_confirmation")
         self.assertNotIn("risk_factors", skipped["intake_state"]["completed_groups"])
 
     def test_birth_journey_multiple_pregnancy_followup_is_guidance_not_doctor_question(self) -> None:
@@ -1515,16 +1620,19 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
             {**inputs, "_birth_journey_intake_state": personalized["intake_state"]},
         )
 
-        self.assertEqual(skipped["status"], "ready_to_generate")
-        self.assertEqual(skipped["plan_context"]["entry_reason"], "我不知道接下来要准备什么")
-        self.assertEqual(skipped["plan_context"]["initial_concerns"], ["怕漏事", "我不知道接下来要准备什么"])
-        self.assertEqual(skipped["plan_context"]["top_worries"], "怕漏事, 我不知道接下来要准备什么")
-        self.assertIn("age_35_plus", skipped["plan_context"]["personalization_tags"])
-        self.assertIn("暂时没有明确异常", skipped["plan_context"]["risk_factors"])
+        self.assertEqual(skipped["status"], "in_progress")
+        self.assertEqual(skipped["next_step"], "final_plan_confirmation")
+        ready = _confirm_birth_journey_ready_to_generate(inputs, skipped)
+        self.assertEqual(ready["status"], "ready_to_generate")
+        self.assertEqual(ready["plan_context"]["entry_reason"], "我不知道接下来要准备什么")
+        self.assertEqual(ready["plan_context"]["initial_concerns"], ["怕漏事", "我不知道接下来要准备什么"])
+        self.assertEqual(ready["plan_context"]["top_worries"], "怕漏事, 我不知道接下来要准备什么")
+        self.assertIn("age_35_plus", ready["plan_context"]["personalization_tags"])
+        self.assertNotIn("risk_factors", ready["plan_context"])
 
         plan = create_birth_journey_plan_card(
-            {"plan_context": skipped["plan_context"], "scope": "full"},
-            {**inputs, "_birth_journey_intake_state": skipped["intake_state"]},
+            {"plan_context": ready["plan_context"], "scope": "full"},
+            {**inputs, "_birth_journey_intake_state": ready["intake_state"]},
         )
 
         self.assertEqual(plan["status"], "card_created")
@@ -1557,9 +1665,13 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
             {"action": "confirm_no_checkup_yet", "payload": {}},
             {**inputs, "_birth_journey_intake_state": basic["intake_state"]},
         )
-        self.assertEqual(not_done["status"], "ready_to_generate")
-        self.assertEqual(not_done["next_step"], "generate_plan")
+        self.assertEqual(not_done["status"], "in_progress")
+        self.assertEqual(not_done["next_step"], "final_plan_confirmation")
         self.assertEqual(not_done["intake_state"]["checkup_status"], "还没做过产检")
+        ready = _confirm_birth_journey_ready_to_generate(inputs, not_done)
+        self.assertEqual(ready["status"], "ready_to_generate")
+        self.assertEqual(ready["next_step"], "generate_plan")
+        self.assertEqual(ready["plan_context"]["checkup_status"], "还没做过产检")
 
     def test_birth_journey_intake_mid_stage_suggests_report_upload_directly(self) -> None:
         inputs = {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00", "_birth_journey_intake_state": {}}
@@ -1688,11 +1800,13 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
             {**inputs, "_birth_journey_intake_state": basic["intake_state"]},
         )
 
-        self.assertEqual(skipped["status"], "ready_to_generate")
-        self.assertEqual(skipped["next_step"], "generate_plan")
+        self.assertEqual(skipped["status"], "in_progress")
+        self.assertEqual(skipped["next_step"], "final_plan_confirmation")
         self.assertFalse(skipped["intake_state"]["checkup_records_uploaded"])
-        self.assertEqual(skipped["plan_context"]["checkup_status"], "未上传产检记录")
-        self.assertNotIn("checkup_records_uploaded", skipped["plan_context"])
+        ready = _confirm_birth_journey_ready_to_generate(inputs, skipped)
+        self.assertEqual(ready["status"], "ready_to_generate")
+        self.assertEqual(ready["plan_context"]["checkup_status"], "未上传产检记录")
+        self.assertNotIn("checkup_records_uploaded", ready["plan_context"])
 
     def test_birth_journey_basic_info_form_omits_deferred_fields_and_marks_core_required(self) -> None:
         inputs = {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00", "_birth_journey_intake_state": {}}
@@ -1815,14 +1929,18 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         self.assertEqual(result["status"], "card_created")
         card = result["card"]["card_json"]
         rendered = json.dumps(card, ensure_ascii=False)
-        basis_titles = [item["title"] for item in card["planning_layers"]["plan_basis"]["items"]]
-        self.assertIn("既往剖宫产", basis_titles)
-        self.assertIn("医生特殊提醒", basis_titles)
-        self.assertIn("基础疾病/用药", basis_titles)
-        self.assertIn("多胎情况", basis_titles)
+        basis_titles = card["generation_context"]["personalization_basis"]
+        self.assertIn("你有既往剖宫产相关信息", basis_titles)
+        self.assertIn("你填了医生特殊提醒", basis_titles)
+        self.assertIn("你填了基础疾病或长期用药", basis_titles)
+        self.assertIn("你填的是双胎", basis_titles)
         self.assertIn("把医生提醒设成复查和观察提醒", rendered)
-        self.assertIn("准备上次剖宫产资料给医生看", rendered)
-        self.assertIn("把基础病复查放进产检日历", rendered)
+        self.assertIn("剖宫产/分娩准备资料", rendered)
+        self.assertIn("基础病管理", rendered)
+        self.assertIn("多胎管理", rendered)
+        self.assertIn("确认双胎/多胎类型", rendered)
+        self.assertIn("把医生提醒原话写下来，并标出对应的检查或观察点", rendered)
+        self.assertIn("记录基础病及用药情况", rendered)
         _assert_no_legacy_birth_journey_fallback_items(self, card)
         _assert_birth_journey_item_titles_are_plain(self, card)
 
@@ -1868,9 +1986,10 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
                 "result": created,
             }
         )
+        self.assertIn("我也会在每项计划对应的阶段到来前，提前提醒你。", compact.get("final_response_instruction") or "")
         plan_brief = compact.get("plan_brief")
         self.assertIsInstance(plan_brief, dict)
-        self.assertEqual(plan_brief.get("todo_engine_version"), "actionable_steps_v1")
+        self.assertEqual(plan_brief.get("todo_engine_version"), "actionable_steps_v2")
         self.assertEqual(plan_brief.get("cadence"), "monthly")
         self.assertIn("住院生产", plan_brief.get("route_summary") or "")
         self.assertIn("你 36 岁属于高龄孕产妇管理范围", plan_brief.get("personalization_basis") or [])
@@ -1911,71 +2030,46 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
                                 "comate_help": ["生成产检问题清单。"],
                             }
                         ],
-                        "planning_layers": {
-                            "plan_basis": {
-                                "items": [{"title": "当前孕周"}, {"title": "产检状态"}],
-                            },
-                            "current_week_focus": {
-                                "items": [
-                                    {"title": "整理产检问题", "reason": "把要问医生的问题先列出来。"},
-                                ],
-                            },
-                            "next_7_days": {
-                                "items": [
-                                    {
-                                        "id": "next7_01",
-                                        "title": "【重要】从产检报告圈出 3 个待确认点",
-                                        "completed": False,
-                                        "priority_type": "essential",
-                                        "priority_label": "优先确认事项",
-                                        "steps": ["圈出报告里异常或没看懂的词"],
-                                        "done_criteria": "已形成 3 个下次产检可直接问医生的问题。",
-                                        "after_done_value": "做完后，下次产检会更聚焦。",
-                                    },
-                                    {
-                                        "id": "next7_02",
-                                        "title": "【建议】设置久坐后的起身提醒",
-                                        "completed": False,
-                                        "priority_type": "supportive",
-                                        "priority_label": "支持性建议",
-                                        "steps": ["选一个 45-60 分钟提醒间隔"],
-                                        "done_criteria": "已设置提醒，并试运行至少 1 个工作日。",
-                                        "after_done_value": "做完后，你会更容易发现久坐和不适之间的关系。",
-                                    },
-                                ],
-                                "grouped_items": {
-                                    "essential": {
-                                        "intro": "按照你现在孕 25 周，以及产检/复查节奏，接下来 7 天优先把这些会影响后续安排的事先确认掉：",
-                                        "items": [
-                                            {
-                                                "id": "next7_01",
-                                                "title": "【重要】从产检报告圈出 3 个待确认点",
-                                                "completed": False,
-                                                "priority_type": "essential",
-                                                "priority_label": "优先确认事项",
-                                                "steps": ["圈出报告里异常或没看懂的词"],
-                                                "done_criteria": "已形成 3 个下次产检可直接问医生的问题。",
-                                                "after_done_value": "做完后，下次产检会更聚焦。",
-                                            },
-                                        ],
-                                    },
-                                    "supportive": {
-                                        "intro": "另外，针对你提到的生活/工作执行压力，建议这周也做几件能让推进更稳的事：",
-                                        "items": [
-                                            {
-                                                "id": "next7_02",
-                                                "title": "【建议】设置久坐后的起身提醒",
-                                                "completed": False,
-                                                "priority_type": "supportive",
-                                                "priority_label": "支持性建议",
-                                                "steps": ["选一个 45-60 分钟提醒间隔"],
-                                                "done_criteria": "已设置提醒，并试运行至少 1 个工作日。",
-                                                "after_done_value": "做完后，你会更容易发现久坐和不适之间的关系。",
-                                            },
-                                        ],
-                                    },
-                                },
-                            },
+                        "todo_plan": {
+                            "route_summary": "从孕 25 周开始，先按月推进，孕晚期改成双周，36 周后按周收口到住院生产。",
+                            "periods": [
+                                {
+                                    "id": "period_01",
+                                    "title": "孕 25-27 周",
+                                    "display_mode": "expanded",
+                                    "status": "current",
+                                    "items": [
+                                        {
+                                            "id": "week_checkup",
+                                            "title": "把报告里要复查的事安排上",
+                                            "reason": "重要｜考虑到你已经有产检状态，先把复查和未预约项目排清楚。",
+                                            "why_for_you": "考虑到你已经有产检状态，先把复查和未预约项目排清楚。",
+                                            "completed": False,
+                                            "priority_type": "essential",
+                                            "priority_label": "重要",
+                                            "steps": ["找出报告里要复查或未预约的项目"],
+                                            "done_criteria": "已形成 3 个下次产检可直接问医生的问题。",
+                                            "after_done_value": "做完后，下次产检会更聚焦。",
+                                        },
+                                        {
+                                            "id": "work_break",
+                                            "title": "设置久坐后的起身提醒",
+                                            "reason": "建议｜考虑到你久坐上班，先把起身提醒固定下来。",
+                                            "why_for_you": "考虑到你久坐上班，先把起身提醒固定下来。",
+                                            "completed": False,
+                                            "priority_type": "supportive",
+                                            "priority_label": "建议",
+                                            "steps": ["选一个 45-60 分钟提醒间隔"],
+                                            "done_criteria": "已设置提醒，并试运行至少 1 个工作日。",
+                                            "after_done_value": "做完后，你会更容易发现久坐和不适之间的关系。",
+                                        },
+                                    ],
+                                }
+                            ],
+                        },
+                        "generation_context": {
+                            "route_summary": "从孕 25 周开始，先按月推进，孕晚期改成双周，36 周后按周收口到住院生产。",
+                            "personalization_basis": ["当前孕周", "产检状态", "生活执行压力"],
                         },
                         "next_action": {"label": "整理产检问题", "send_text": "帮我整理下次产检要问的 3-5 个问题"},
                     },
@@ -2008,18 +2102,20 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         self.assertNotIn("孕期计划我整理好了", compact["final_response_instruction"])
         self.assertNotIn("当前优先级：整理产检问题", compact["final_response_instruction"])
         self.assertNotIn("因为把要问医生的问题先列出来", compact["final_response_instruction"])
-        self.assertIn("按照你现在孕 25 周", compact["final_response_instruction"])
-        self.assertIn("另外，针对你提到的生活/工作执行压力", compact["final_response_instruction"])
+        self.assertIn("当前孕周、产检状态和生活执行压力", compact["final_response_instruction"])
+        self.assertIn("从孕 25 周开始，先按月推进", compact["final_response_instruction"])
+        self.assertIn("当前先展开孕 25-27 周", compact["final_response_instruction"])
         self.assertIn("1. 把报告里要复查的事安排上", compact["final_response_instruction"])
         self.assertIn("找出报告里要复查或未预约的项目", compact["final_response_instruction"])
-        self.assertIn("2. 设置久坐后的起身提醒", compact["final_response_instruction"])
-        self.assertIn("这样你会更容易发现久坐和不适之间的关系", compact["final_response_instruction"])
+        self.assertIn("2. 做久坐/久站/疲劳管理", compact["final_response_instruction"])
+        self.assertIn("休息和活动会变成固定节奏", compact["final_response_instruction"])
         self.assertNotIn("done_criteria", json.dumps(compact, ensure_ascii=False))
         self.assertNotIn("已形成 3 个下次产检可直接问医生的问题", compact["final_response_instruction"])
         self.assertNotIn("已设置提醒，并试运行至少 1 个工作日", compact["final_response_instruction"])
         self.assertNotIn("1. 【重要】从产检报告圈出 3 个待确认点", compact["final_response_text"])
         self.assertNotIn("从产检报告圈出 3 个待确认点", compact["final_response_instruction"])
         self.assertNotIn("2. 【建议】设置久坐后的起身提醒", compact["final_response_text"])
+        self.assertNotIn("设置久坐后的起身提醒", compact["final_response_instruction"])
         self.assertNotIn("先做：", compact["final_response_text"])
         self.assertNotIn("做完后", compact["final_response_text"])
         self.assertNotIn("给生活压力留缓冲", compact["final_response_instruction"])
