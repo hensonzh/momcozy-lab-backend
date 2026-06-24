@@ -76,8 +76,10 @@ def _assert_birth_journey_item_text_lengths(testcase: unittest.TestCase, card: d
     for item in items:
         title = str(item.get("title") or "")
         reason = str(item.get("reason") or "")
+        plan_reason = str(item.get("plan_reason") or "")
         testcase.assertLessEqual(len(title), BIRTH_JOURNEY_PLAN_ITEM_TITLE_MAX_CHARS)
         testcase.assertLessEqual(len(reason), BIRTH_JOURNEY_PLAN_ITEM_REASON_MAX_CHARS)
+        testcase.assertLessEqual(len(plan_reason), BIRTH_JOURNEY_PLAN_ITEM_REASON_MAX_CHARS)
 
 
 def _assert_birth_journey_item_reasons_use_current_contract(testcase: unittest.TestCase, card: dict[str, object]) -> None:
@@ -86,9 +88,13 @@ def _assert_birth_journey_item_reasons_use_current_contract(testcase: unittest.T
     testcase.assertTrue(items)
     for item in items:
         testcase.assertIn(item.get("priority_label"), {"重要", "建议"})
-        testcase.assertTrue(str(item.get("why_for_you") or "").startswith("考虑到"))
-        for key in ("reason", "why_for_you"):
+        testcase.assertTrue(str(item.get("plan_reason") or ""))
+        if item.get("hide_reason"):
+            testcase.assertFalse(str(item.get("reason") or ""))
+            testcase.assertFalse(str(item.get("why_for_you") or ""))
+        for key in ("reason", "why_for_you", "plan_reason"):
             text = str(item.get(key) or "")
+            testcase.assertNotIn("考虑到孕", text)
             for fragment in blocked_fragments:
                 testcase.assertNotIn(fragment, text)
 
@@ -324,11 +330,19 @@ def _assert_birth_journey_todo_plan(
             testcase.assertNotIn("done_criteria", item)
             title = str(item.get("title") or "")
             reason = str(item.get("reason") or "")
+            plan_reason = str(item.get("plan_reason") or "")
             testcase.assertLessEqual(len(title), BIRTH_JOURNEY_PLAN_ITEM_TITLE_MAX_CHARS)
             testcase.assertLessEqual(len(reason), BIRTH_JOURNEY_PLAN_ITEM_REASON_MAX_CHARS)
+            testcase.assertLessEqual(len(plan_reason), BIRTH_JOURNEY_PLAN_ITEM_REASON_MAX_CHARS)
             testcase.assertIn(item.get("priority_label"), {"重要", "建议"})
-            testcase.assertTrue(str(item.get("reason") or "").startswith(("重要｜", "建议｜")))
-            testcase.assertTrue(str(item.get("why_for_you") or "").startswith("考虑到"))
+            if item.get("hide_reason"):
+                testcase.assertFalse(str(item.get("reason") or ""))
+                testcase.assertFalse(str(item.get("why_for_you") or ""))
+            else:
+                testcase.assertTrue(str(item.get("reason") or "").startswith(("重要｜", "建议｜")))
+                testcase.assertTrue(str(item.get("why_for_you") or ""))
+            testcase.assertTrue(plan_reason)
+            testcase.assertNotIn("考虑到孕", plan_reason)
             testcase.assertIsInstance(item.get("steps"), list)
             testcase.assertTrue(item.get("steps"))
             testcase.assertGreaterEqual(len(item.get("steps") or []), 4)
@@ -563,6 +577,40 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         self.assertIn("如需羊穿，记录预约窗口及术前要求", rendered)
         self.assertNotIn("无花果", rendered)
 
+    def test_birth_journey_future_period_reasons_use_period_not_current_week(self) -> None:
+        result = create_birth_journey_plan_card(
+            {
+                "plan_context": _plan_context(
+                    due_date_or_week="15周",
+                    age="36",
+                    fetus_count="双胎",
+                    first_birth="否",
+                    checkup_status="跳过",
+                    risk_factors="跳过",
+                    current_symptoms="没有明显不舒服",
+                ),
+                "scope": "full",
+            },
+            {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00"},
+        )
+
+        self.assertEqual(result["status"], "card_created")
+        card = result["card"]["card_json"]
+        target_period = next(
+            period for period in _birth_journey_todo_periods(card) if period.get("title") == "孕 19-22 周"
+        )
+        target_items = [item for item in target_period.get("items") or [] if isinstance(item, dict)]
+        rendered = json.dumps(target_items, ensure_ascii=False)
+        self.assertNotIn("你现在孕 15 周", rendered)
+        self.assertNotIn("考虑到孕", rendered)
+        self.assertIn("做大排畸检查", rendered)
+        self.assertIn("做大排畸结果复查确认", rendered)
+        for item in target_items:
+            self.assertTrue(item.get("hide_reason"))
+            self.assertEqual(item.get("reason"), "")
+            self.assertEqual(item.get("why_for_you"), "")
+            self.assertIn("孕 19-22 周这个检查窗口里", str(item.get("plan_reason") or ""))
+
     def test_birth_journey_next_7_ignores_generic_intent_and_remote_preparation(self) -> None:
         result = create_birth_journey_plan_card(
             {
@@ -694,6 +742,11 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         self.assertIn("确认血压、血糖、尿蛋白复查频率", rendered)
         self.assertIn("设置胎儿生长与羊水复查计划", rendered)
         self.assertIn("你 36 岁属于高龄孕产妇管理范围", rendered)
+        age_item = _find_birth_journey_todo_item(card, "condition_age_35_plus")
+        self.assertIsNotNone(age_item)
+        self.assertTrue(str(age_item.get("why_for_you") or "").startswith("考虑到你 36 岁属于高龄孕产妇管理范围"))
+        self.assertFalse(age_item.get("hide_reason"))
+        self.assertTrue(str(age_item.get("reason") or "").startswith("重要｜考虑到你 36 岁属于高龄孕产妇管理范围"))
         self.assertNotIn("确认高龄孕期关注重点", rendered)
 
     def test_birth_journey_plan_does_not_invent_generic_risk_item_from_age_or_twins(self) -> None:
@@ -991,7 +1044,8 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
                 rendered = json.dumps(card["todo_plan"], ensure_ascii=False)
                 self.assertNotIn("【重要】", rendered)
                 self.assertNotIn("目的是", rendered)
-                self.assertIn("考虑到你", rendered)
+                self.assertNotIn("考虑到孕", rendered)
+                self.assertIn("孕 12-15 周这个检查窗口里", rendered)
                 self.assertIn("做NT/早筛检查安排", rendered)
                 self.assertEqual(len(data_store.list_care_plan_artifacts(user_id="app-user")), 2)
             finally:
@@ -1317,6 +1371,9 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         topic = _birth_journey_suggested_topic(result, "age_35_plus_checkup_detail")
         self.assertEqual(topic["id"], "age_35_plus_checkup_detail")
         self.assertIn("我注意到你36岁", topic["observation"])
+        self.assertIn("高龄孕产妇", topic["observation"])
+        self.assertIn("产科管理", topic["key_points"][0])
+        self.assertIn("高龄孕产妇", topic["key_points"][0])
         self.assertIn("血压/血糖", topic["followup_question"])
         self.assertIn("甲状腺/免疫或长期用药", topic["followup_question"])
         self.assertIn("有没有已经被提醒过或正在复查", topic["followup_question"])
@@ -1430,13 +1487,21 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         )
         topic = _birth_journey_suggested_topic(basic, "age_35_plus_multiple_monitoring")
         self.assertIn("36岁", topic["observation"])
+        self.assertIn("高龄孕产妇", topic["observation"])
         self.assertIn("双胎", topic["observation"])
+        self.assertIn("高龄孕产妇", topic["key_points"][0])
+        self.assertIn("生长差异", topic["key_points"][1])
         self.assertIn("宫颈长度", topic["followup_question"])
 
         compact = model_tool_output({"ok": True, "tool_name": "birth_journey_intake_manage", "result": basic})
 
         self.assertEqual(compact["personalization_context"]["mode"], "model_driven_followup")
         self.assertEqual(compact["personalization_context"]["suggested_topics"][0]["id"], "age_35_plus_multiple_monitoring")
+        self.assertIn("key_points", compact["personalization_context"]["suggested_topics"][0])
+        self.assertIn("must_mention", compact["personalization_context"]["suggested_topics"][0])
+        self.assertIn("response_contract", compact["personalization_context"])
+        self.assertIn("用户信息 -> 孕期管理意义 -> 计划影响 -> 一个具体追问", compact["personalization_context"]["response_contract"])
+        self.assertIn("高龄孕产妇/产科管理范围", compact["personalization_context"]["response_contract"])
         self.assertNotIn("initial_analysis", compact)
         self.assertNotIn("checkup_report_strategy", compact)
         self.assertNotIn("personalization_tags", compact)
@@ -1578,6 +1643,7 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         self.assertEqual(followup["id"], "multiple_pregnancy_monitoring")
         self.assertIn("双胎", followup["observation"])
         self.assertNotIn("双胎/多胎", followup["observation"])
+        self.assertIn("生长差异", followup["key_points"][0])
         self.assertIn("目前产检记录里的双胎类型", followup["followup_question"])
         self.assertIn("单绒双羊、双绒双羊", followup["followup_question"])
         self.assertEqual(list(followup["reply_options"]), ["单绒双羊", "双绒双羊", "还没确认"])
@@ -1810,6 +1876,7 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         self.assertEqual(topic["id"], "age_35_plus_checkup_detail")
         self.assertIn("我注意到你36岁", topic["observation"])
         self.assertIn("需要认真放进计划", topic["observation"])
+        self.assertIn("高龄孕产妇", topic["key_points"][0])
         self.assertIn("胎盘情况", topic["meaning"])
         self.assertIn("血压/血糖", topic["followup_question"])
         self.assertIn("甲状腺/免疫或长期用药", topic["followup_question"])
@@ -1832,6 +1899,12 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         self.assertNotIn("personalization_tags", compact)
         self.assertIn("最多两小段", compact["final_response_instruction"])
         self.assertIn("基于 personalization_context", compact["final_response_instruction"])
+        self.assertIn("个性化追问规则", compact["final_response_instruction"])
+        self.assertIn("用户信息 -> 孕期管理意义 -> 计划影响 -> 一个具体追问", compact["final_response_instruction"])
+        self.assertIn("key_points 或 meaning", compact["final_response_instruction"])
+        self.assertIn("年龄>=35", compact["final_response_instruction"])
+        self.assertIn("高龄孕产妇/产科管理范围", compact["final_response_instruction"])
+        self.assertIn("合并成同一个明确问题", compact["final_response_instruction"])
         self.assertIn("submit_personalized_followup", compact["final_response_instruction"])
         self.assertIn("finish_personalized_followups", compact["final_response_instruction"])
         self.assertNotIn("再只问 personalized_followup.question", compact["final_response_instruction"])

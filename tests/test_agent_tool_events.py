@@ -3061,7 +3061,9 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertIn("不用一个人反复猜", ibclc_card["final_response_instruction"])
         self.assertIn("我推荐 Emily Chen", ibclc_card["final_response_instruction"])
         self.assertIn("不要补写位置、距离、排班", ibclc_card["final_response_instruction"])
-        self.assertIn("主动说明更适合让 IBCLC 顾问继续看", FUNCTION_TOOLS["ibclc_consult_card_create"]["description"])
+        self.assertIn("说明更适合让 IBCLC 顾问继续看", FUNCTION_TOOLS["ibclc_consult_card_create"]["description"])
+        self.assertIn("不可调用场景", FUNCTION_TOOLS["ibclc_consult_card_create"]["description"])
+        self.assertIn("用户只是问“需不需要/要不要/是不是该找", FUNCTION_TOOLS["ibclc_consult_card_create"]["description"])
         self.assertIn("售后工单信息表已经展示", support_ticket["final_response_instruction"])
         self.assertIn("不要提“草稿”“未提交”“确认后才提交”", support_ticket["final_response_instruction"])
         self.assertIn("结合当前问题场景做情绪承接", support_ticket["final_response_instruction"])
@@ -3070,6 +3072,28 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertIn("最多两段", support_ticket["final_response_instruction"])
         self.assertIn("交付信息只能出现一次", support_ticket["final_response_instruction"])
         self.assertIn("不要列举购买渠道、照片、视频、联系方式", support_ticket["final_response_instruction"])
+
+    def test_ibclc_blocked_tool_output_keeps_confirmation_contract(self) -> None:
+        blocked = model_tool_output(
+            {
+                "ok": True,
+                "tool_name": "ibclc_consult_card_create",
+                "result": {
+                    "tool_name": "ibclc_consult_card_create",
+                    "status": "ibclc_consult_blocked",
+                    "reason": "missing_explicit_ibclc_request",
+                    "requires_confirmation": True,
+                    "confirmation_question": "要我帮你打开 IBCLC 在线咨询入口吗？",
+                },
+            }
+        )
+
+        self.assertEqual(blocked["status"], "ibclc_consult_blocked")
+        self.assertTrue(blocked["requires_confirmation"])
+        self.assertIn("IBCLC 在线咨询入口", blocked["confirmation_question"])
+        self.assertIn("咨询卡片没有创建", blocked["final_response_instruction"])
+        self.assertIn("不要说已经打开", blocked["final_response_instruction"])
+        self.assertNotIn("card", blocked)
 
     def test_loop_emits_single_status_channel_and_explicit_artifact_events(self) -> None:
         client = _FakeClient(
@@ -4470,6 +4494,7 @@ def _birth_journey_ready_for_skip_checkup_state() -> dict[str, object]:
             "birth_path": "还没确定",
             "city_or_country": "深圳",
         },
+        "final_plan_confirmed": True,
         "checkup_records_uploaded": False,
         "checkup_status": "未上传产检记录",
         "next_step": "checkup_records_upload",

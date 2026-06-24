@@ -1108,7 +1108,26 @@ def safe_tool_result(result: dict[str, Any]) -> dict[str, Any]:
     if isinstance(tool_result, dict):
         if "ok" in tool_result:
             safe["result_ok"] = bool(tool_result.get("ok"))
-        for key in ("id", "skill_id", "status", "resource_id", "side_effect_performed", "summary", "missing_fields", "plan_id", "plan_type", "action", "next_step", "entry_id", "entry_date", "profile_onboarding_complete", "profile_onboarding_skipped"):
+        for key in (
+            "id",
+            "skill_id",
+            "status",
+            "resource_id",
+            "side_effect_performed",
+            "summary",
+            "missing_fields",
+            "reason",
+            "requires_confirmation",
+            "confirmation_question",
+            "plan_id",
+            "plan_type",
+            "action",
+            "next_step",
+            "entry_id",
+            "entry_date",
+            "profile_onboarding_complete",
+            "profile_onboarding_skipped",
+        ):
             if key in tool_result:
                 safe[key] = tool_result[key]
         tool_data = tool_result.get("data")
@@ -1259,6 +1278,20 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
             "status": safe.get("status"),
             "quick_replies_ready": bool(safe.get("quick_replies")),
             "final_response_instruction": "快捷输入已经作为前端 UI 元数据准备好。最终回复不要提到快捷输入，也不要把这些提示写进正文。",
+        }
+    if tool_name == "ibclc_consult_card_create" and safe.get("status") == "ibclc_consult_blocked":
+        return {
+            "ok": safe.get("ok"),
+            "tool_name": safe.get("tool_name"),
+            "status": safe.get("status"),
+            "reason": safe.get("reason"),
+            "requires_confirmation": safe.get("requires_confirmation"),
+            "confirmation_question": safe.get("confirmation_question"),
+            "final_response_instruction": (
+                "IBCLC 咨询卡片没有创建。最终回复不要说已经打开、已经推荐或已经生成咨询入口。"
+                "如果用户是在问是否需要 IBCLC，先简短回答判断依据，再询问是否要打开咨询入口；"
+                "如果用户只是没有明确同意，只问 confirmation_question。"
+            ),
         }
 
     if tool_name not in {
@@ -1638,13 +1671,15 @@ def _compact_birth_journey_intake_output(safe: dict[str, Any], raw_result: dict[
         )
     elif next_step == "personalized_followup":
         compact["final_response_instruction"] = (
-            "最终回复基于 personalization_context 自主判断是否还需要追问。"
-            "如果需要追问，只选一个最会影响孕期计划安排的事实，最多两小段：先自然承接用户已提供的信息，再问一个具体问题。"
-            "可以参考 suggested_topics，但不要逐字照读，不要把多个 topic 合成问卷，也不要重复 asked_followups 里已经问过的内容。"
+            "最终回复基于 personalization_context 和 birth-prep skill 的“个性化追问规则”自主判断是否还需要追问。"
+            "如果需要追问，从 suggested_topics 里只选一个最会影响孕期计划安排的 topic，最多两小段，按“用户信息 -> 孕期管理意义 -> 计划影响 -> 一个具体追问”的结构表达。"
+            "必须使用所选 topic 的 key_points 或 meaning 展开字段背后的管理意义；不能只复述“你几岁/几周/几胎”。"
+            "涉及年龄>=35时，必须明确说出高龄孕产妇/产科管理范围及对筛查、血压血糖、胎儿生长或复查节奏的影响，不要只说年龄数字。"
+            "多个相关因素可以合并成同一个明确问题，比如高龄和双胎一起问复查/用药/监测情况；但不要把多个 topic 拼成问卷，也不要重复 asked_followups 里已经问过的内容。"
             "下一轮用户回答时，用 submit_personalized_followup 记录 topic、question、answer 和可选 plan_impact；如果信息已足够、用户表示暂无异常/跳过，调用 finish_personalized_followups。"
             "个性化追问的目的不是确认用户知不知道怎么做，也不是问用户最想了解什么，而是收集会改变计划安排的事实。"
             "不要改写成“医生有没有交代/安排/说明”这类问题，也不要要求用户必须回答医生说过什么。"
-            "涉及高龄时，要关切地指出这是需要认真纳入计划的产科管理因素，简短说明潜在关注点后再收集具体事实。"
+            "不要用“不代表一定有问题”轻飘飘带过高龄等管理因素。"
             "不要同时追问症状、生活方式或喂养信息，也不要生成孕期计划。"
             "当前步骤的快捷回复已由应用侧准备好，不要再调用 ui_quick_replies_create。"
         )
@@ -1884,7 +1919,7 @@ def _birth_journey_plan_brief_item(item: dict[str, Any]) -> dict[str, Any]:
         "priority_type": _clean_birth_journey_fragment(item.get("priority_type")),
         "priority_label": _clean_birth_journey_fragment(item.get("priority_label")),
         "timeframe": _clean_birth_journey_fragment(item.get("timeframe")),
-        "reason": _clean_birth_journey_fragment(item.get("reason") or item.get("why_for_you")),
+        "reason": _clean_birth_journey_fragment(item.get("plan_reason") or item.get("why_for_you") or item.get("reason")),
         "source_tags": [str(tag or "").strip() for tag in item.get("source_tags") or [] if str(tag or "").strip()],
         "steps": [_clean_birth_journey_fragment(step) for step in item.get("steps") or [] if _clean_birth_journey_fragment(step)],
         "after_done_value": _clean_birth_journey_fragment(item.get("after_done_value")),
@@ -6014,7 +6049,7 @@ def _update_quick_reply_guidance(options: BuildAgentRequestOptions, result: dict
     status = str(tool_result.get("status") or "").strip()
     next_step = str(tool_result.get("next_step") or "").strip()
     data = tool_result.get("data") if isinstance(tool_result.get("data"), dict) else {}
-    personalized_followup = data.get("personalized_followup") if isinstance(data.get("personalized_followup"), dict) else None
+    personalized_followup = _birth_journey_personalized_followup_for_quick_replies(data)
     guidance = (
         birth_journey_intake_quick_reply_guidance(next_step, personalized_followup=personalized_followup)
         if status == "in_progress"
@@ -6034,9 +6069,25 @@ def _birth_journey_intake_direct_quick_replies(result: dict[str, Any]) -> list[d
         return None
     next_step = str(tool_result.get("next_step") or "").strip()
     data = tool_result.get("data") if isinstance(tool_result.get("data"), dict) else {}
-    personalized_followup = data.get("personalized_followup") if isinstance(data.get("personalized_followup"), dict) else None
+    personalized_followup = _birth_journey_personalized_followup_for_quick_replies(data)
     guidance = birth_journey_intake_quick_reply_guidance(next_step, personalized_followup=personalized_followup)
     return guidance or None
+
+
+def _birth_journey_personalized_followup_for_quick_replies(data: dict[str, Any]) -> dict[str, Any] | None:
+    personalized_followup = data.get("personalized_followup")
+    if isinstance(personalized_followup, dict):
+        return personalized_followup
+    personalization_context = data.get("personalization_context")
+    if not isinstance(personalization_context, dict):
+        return None
+    suggested_topics = personalization_context.get("suggested_topics")
+    if not isinstance(suggested_topics, list):
+        return None
+    for topic in suggested_topics:
+        if isinstance(topic, dict):
+            return topic
+    return None
 
 
 def _should_suppress_model_quick_replies_after_tool_results(results: list[dict[str, Any]]) -> bool:

@@ -120,6 +120,59 @@ class CarePlanArtifactApiTests(unittest.TestCase):
             self.assertEqual(todo_item["title"], "做胎动与异常观察")
             self.assertFalse(todo_item["completed"])
 
+    def test_birth_journey_plan_list_and_detail_keep_hidden_standard_reasons_hidden(self) -> None:
+        saved = data_store.save_care_plan_artifact(
+            user_id="u-plan-hidden",
+            plan_type="birth_journey",
+            title="孕期计划",
+            summary="新版孕期计划",
+            payload={
+                "title": "孕期计划",
+                "todo_engine_version": "actionable_steps_v2",
+                "todo_plan": {
+                    "periods": [
+                        {
+                            "id": "period_01",
+                            "title": "孕 19-22 周",
+                            "items": [
+                                {
+                                    "id": "week_18_22_anomaly_scan",
+                                    "title": "做大排畸检查",
+                                    "reason": "",
+                                    "why_for_you": "",
+                                    "plan_reason": "孕 19-22 周这个检查窗口里，大排畸通常要提前排队。",
+                                    "reason_type": "standard",
+                                    "hide_reason": True,
+                                    "priority_type": "essential",
+                                    "priority_label": "重要",
+                                    "steps": ["确认检查时间、地点及预计时长"],
+                                }
+                            ],
+                        }
+                    ]
+                },
+            },
+            source_artifact_type="birth_journey_plan_card",
+        )
+
+        list_response = self.client.get(
+            "/v1/plan/list",
+            params={"user_id": "u-plan-hidden", "status": "active"},
+            headers=self.headers,
+        )
+        detail_response = self.client.get(
+            "/v1/plan/detail",
+            params={"user_id": "u-plan-hidden", "plan_id": saved["plan_id"]},
+            headers=self.headers,
+        )
+
+        for plan in (list_response.json()["plan_list"][0], detail_response.json()["plan"]):
+            todo_item = plan["payload"]["todo_plan"]["periods"][0]["items"][0]
+            self.assertEqual(todo_item["reason"], "")
+            self.assertEqual(todo_item["why_for_you"], "")
+            self.assertTrue(todo_item["hide_reason"])
+            self.assertIn("孕 19-22 周这个检查窗口里", todo_item["plan_reason"])
+
     def test_dev_startup_reset_only_deletes_active_birth_journey_plans(self) -> None:
         birth_plan = data_store.save_care_plan_artifact(
             user_id="u-plan",

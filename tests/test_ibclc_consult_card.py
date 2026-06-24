@@ -12,7 +12,7 @@ class IbclcConsultCardTests(unittest.TestCase):
         self.assertEqual(result["tool_name"], "ibclc_consult_card_create")
         self.assertEqual(result["status"], "ibclc_consult_blocked")
         self.assertEqual(result["reason"], "missing_explicit_ibclc_request")
-        self.assertTrue(result["requires_user_confirmation"])
+        self.assertTrue(result["requires_confirmation"])
         self.assertIn("IBCLC 在线咨询入口", result["confirmation_question"])
         self.assertNotIn("card", result)
 
@@ -24,11 +24,23 @@ class IbclcConsultCardTests(unittest.TestCase):
         self.assertNotIn("card", result)
 
     def test_blocks_negative_ibclc_intent_even_when_keyword_is_present(self) -> None:
-        result = create_ibclc_consult_card({}, {"user_message": "先不用找 IBCLC", "locale": "zh-CN"})
+        for message in ("先不用找 IBCLC", "先别找哺乳顾问", "暂时不用打开顾问咨询", "不要推荐哺乳顾问"):
+            with self.subTest(message=message):
+                result = create_ibclc_consult_card({}, {"user_message": message, "locale": "zh-CN"})
 
-        self.assertEqual(result["status"], "ibclc_consult_blocked")
-        self.assertEqual(result["reason"], "missing_explicit_ibclc_request")
-        self.assertNotIn("card", result)
+                self.assertEqual(result["status"], "ibclc_consult_blocked")
+                self.assertEqual(result["reason"], "missing_explicit_ibclc_request")
+                self.assertNotIn("card", result)
+
+    def test_blocks_decision_questions_without_creating_consult_card(self) -> None:
+        for message in ("我需要找 IBCLC 吗？", "要不要找哺乳顾问？", "是不是该找哺乳顾问？"):
+            with self.subTest(message=message):
+                result = create_ibclc_consult_card({}, {"user_message": message, "locale": "zh-CN"})
+
+                self.assertEqual(result["status"], "ibclc_consult_blocked")
+                self.assertEqual(result["reason"], "missing_explicit_ibclc_request")
+                self.assertTrue(result["requires_confirmation"])
+                self.assertNotIn("card", result)
 
     def test_blocks_plain_ibclc_mention_without_request_action(self) -> None:
         result = create_ibclc_consult_card({}, {"user_message": "IBCLC 是什么？", "locale": "zh-CN"})
@@ -86,11 +98,13 @@ class IbclcConsultCardTests(unittest.TestCase):
         self.assertNotIn("hint", card["chat"])
 
     def test_allows_demo_consult_button_text(self) -> None:
-        result = create_ibclc_consult_card({}, {"user_message": "打开顾问咨询", "locale": "zh-CN"})
+        for message in ("打开顾问咨询", "打开咨询入口", "同意推荐", "可以帮我推荐哺乳顾问吗"):
+            with self.subTest(message=message):
+                result = create_ibclc_consult_card({}, {"user_message": message, "locale": "zh-CN"})
 
-        self.assertEqual(result["tool_name"], "ibclc_consult_card_create")
-        self.assertEqual(result["status"], "ibclc_consult_card_created")
-        self.assertEqual(result["card"]["card_type"], "ibclc_consult_card")
+                self.assertEqual(result["tool_name"], "ibclc_consult_card_create")
+                self.assertEqual(result["status"], "ibclc_consult_card_created")
+                self.assertEqual(result["card"]["card_type"], "ibclc_consult_card")
 
     def test_blocks_plain_consult_question_without_open_intent(self) -> None:
         result = create_ibclc_consult_card({}, {"user_message": "顾问咨询是什么？", "locale": "zh-CN"})

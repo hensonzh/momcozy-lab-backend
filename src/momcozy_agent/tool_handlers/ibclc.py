@@ -19,7 +19,7 @@ def create_ibclc_consult_card(args: dict[str, Any], inputs: RuntimeInputs) -> di
             "tool_name": "ibclc_consult_card_create",
             "status": "ibclc_consult_blocked",
             "reason": confirmation["reason"],
-            "requires_user_confirmation": True,
+            "requires_confirmation": True,
             "confirmation_question": _CONFIRMATION_QUESTION,
         }
 
@@ -81,41 +81,154 @@ def _is_explicit_ibclc_request(text: str) -> bool:
         return False
     if _has_negative_ibclc_intent(text):
         return False
-    has_ibclc_subject = "ibclc" in text or "哺乳顾问" in text or "泌乳顾问" in text
-    has_request_action = any(
-        token in text
-        for token in (
-            "找",
-            "推荐",
-            "打开",
-            "接通",
-            "咨询",
-            "需要",
-            "想要",
-            "我要",
-            "帮我",
-            "给我",
-            "安排",
-            "入口",
-            "同意",
-        )
-    )
-    if has_ibclc_subject and has_request_action:
-        return True
-    if ("真人哺乳咨询" in text or "人工哺乳咨询" in text) and has_request_action:
-        return True
-    if "打开咨询入口" in text or "打开在线咨询" in text or "启动咨询" in text:
-        return True
-    if "顾问咨询" in text and any(token in text for token in ("打开", "启动", "接通", "找", "推荐", "入口", "帮我", "需要", "想要", "我要")):
-        return True
     if "同意推荐" in text or "同意你推荐" in text:
         return True
-    if ("找" in text or "推荐" in text or "接通" in text or "打开" in text) and "咨询入口" in text:
+    if _is_ibclc_decision_question(text):
+        return False
+    has_ibclc_subject = _has_ibclc_subject(text)
+    if has_ibclc_subject and _has_direct_ibclc_action(text):
+        return True
+    if _has_consult_entry_subject(text) and _has_direct_consult_entry_action(text):
         return True
     return False
 
 
+def _has_ibclc_subject(text: str) -> bool:
+    return any(
+        token in text
+        for token in (
+            "ibclc",
+            "哺乳顾问",
+            "泌乳顾问",
+            "真人哺乳咨询",
+            "人工哺乳咨询",
+        )
+    )
+
+
+def _has_consult_entry_subject(text: str) -> bool:
+    return any(
+        token in text
+        for token in (
+            "咨询入口",
+            "在线咨询",
+            "顾问咨询",
+            "哺乳咨询",
+            "泌乳咨询",
+        )
+    )
+
+
+def _has_direct_ibclc_action(text: str) -> bool:
+    direct_phrases = (
+        "帮我找",
+        "给我找",
+        "帮我推荐",
+        "给我推荐",
+        "请推荐",
+        "麻烦推荐",
+        "推荐",
+        "推荐一个",
+        "推荐个",
+        "推荐一位",
+        "推荐一下",
+        "我想找",
+        "想找",
+        "我要找",
+        "需要找",
+        "找",
+        "找一个",
+        "找个",
+        "找一位",
+        "找位",
+        "安排",
+        "预约",
+        "联系",
+        "接通",
+        "转接",
+        "打开",
+        "启动",
+        "我想咨询",
+        "想咨询",
+        "我要咨询",
+        "需要咨询",
+        "咨询一下",
+        "帮我咨询",
+        "给我咨询",
+    )
+    return any(phrase in text for phrase in direct_phrases)
+
+
+def _has_direct_consult_entry_action(text: str) -> bool:
+    direct_phrases = (
+        "打开",
+        "启动",
+        "接通",
+        "进入",
+        "创建",
+        "生成",
+        "给我",
+        "帮我",
+        "安排",
+        "开始",
+        "打开吧",
+    )
+    return any(phrase in text for phrase in direct_phrases)
+
+
+def _is_ibclc_decision_question(text: str) -> bool:
+    if not (_has_ibclc_subject(text) or _has_consult_entry_subject(text)):
+        return False
+    if any(
+        phrase in text
+        for phrase in (
+            "需不需要",
+            "要不要",
+            "是否需要",
+            "是不是需要",
+            "是不是该",
+            "是不是应该",
+            "该不该",
+            "应不应该",
+            "有没有必要",
+            "有必要",
+            "需要不需要",
+        )
+    ):
+        return True
+    if not _contains_question_mark_or_particle(text):
+        return False
+    decision_tokens = ("需要", "应该", "该", "可以", "能不能", "要")
+    if not any(token in text for token in decision_tokens):
+        return False
+    polite_request_tokens = ("帮我", "给我", "请", "麻烦")
+    return not any(token in text for token in polite_request_tokens)
+
+
+def _contains_question_mark_or_particle(text: str) -> bool:
+    return any(token in text for token in ("?", "？", "吗", "么", "嘛"))
+
+
 def _has_negative_ibclc_intent(text: str) -> bool:
+    if (_has_ibclc_subject(text) or _has_consult_entry_subject(text)) and any(
+        token in text
+        for token in (
+            "不要",
+            "不用",
+            "不需要",
+            "不找",
+            "不想找",
+            "不推荐",
+            "别找",
+            "别推荐",
+            "先别",
+            "先不",
+            "暂时不",
+            "暂时别",
+            "没必要",
+        )
+    ):
+        return True
     return any(
         token in text
         for token in (
@@ -124,8 +237,11 @@ def _has_negative_ibclc_intent(text: str) -> bool:
             "不需要ibclc",
             "不找ibclc",
             "不用找ibclc",
+            "别找ibclc",
+            "先别找ibclc",
             "先不找ibclc",
             "先不用找ibclc",
+            "暂时别找ibclc",
             "暂时不找ibclc",
             "暂时不用找ibclc",
             "不要哺乳顾问",
@@ -133,17 +249,32 @@ def _has_negative_ibclc_intent(text: str) -> bool:
             "不需要哺乳顾问",
             "不找哺乳顾问",
             "不用找哺乳顾问",
+            "别找哺乳顾问",
+            "先别找哺乳顾问",
+            "暂时别找哺乳顾问",
             "不要泌乳顾问",
             "不用泌乳顾问",
             "不需要泌乳顾问",
             "不找泌乳顾问",
             "不用找泌乳顾问",
+            "别找泌乳顾问",
+            "先别找泌乳顾问",
+            "暂时别找泌乳顾问",
             "不要打开咨询入口",
             "不用打开咨询入口",
             "不打开咨询入口",
             "别打开咨询入口",
             "先不打开咨询入口",
+            "先别打开咨询入口",
             "暂时不打开咨询入口",
+            "暂时别打开咨询入口",
+            "不用打开顾问咨询",
+            "不打开顾问咨询",
+            "别打开顾问咨询",
+            "先不打开顾问咨询",
+            "先别打开顾问咨询",
+            "暂时不打开顾问咨询",
+            "暂时别打开顾问咨询",
         )
     )
 
