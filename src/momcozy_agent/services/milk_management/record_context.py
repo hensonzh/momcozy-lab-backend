@@ -79,6 +79,7 @@ def get_recent_raw_record_context(
             "truncated": bool(source.get("truncated")) or _raw_record_total(source_raw_records) > _raw_record_total(raw_records),
             "daily_rollups": source.get("daily_rollups") if isinstance(source.get("daily_rollups"), list) else [],
             "raw_records": raw_records,
+            "computed_snapshot": _computed_snapshot_from_assessment(data, source),
             "assessment_status": data.get("assessment_status"),
             "milk_normality_status": (
                 data.get("milk_normality", {}).get("overall_status")
@@ -125,6 +126,34 @@ def _filter_and_limit_raw_records(
         "pumping": [item for item in limited if item.get("record_table") == "pumping_log"],
         "feeding": [item for item in limited if item.get("record_table") == "feeding_log"],
     }
+
+
+def _computed_snapshot_from_assessment(data: dict[str, Any], source: dict[str, Any]) -> dict[str, Any]:
+    daily_rollups = source.get("daily_rollups") if isinstance(source.get("daily_rollups"), list) else []
+    valid_days = [day for day in daily_rollups if isinstance(day, dict) and day.get("ok") is True]
+    positive_days = [
+        day
+        for day in valid_days
+        if _to_float(day.get("estimated_daily_milk_ml"), 0.0) > 0
+    ]
+    normality = data.get("milk_normality") if isinstance(data.get("milk_normality"), dict) else {}
+    return _drop_empty(
+        {
+            "records_status": "collected" if valid_days and positive_days else "missing",
+            "valid_days": len(valid_days),
+            "positive_days": len(positive_days),
+            "record_counts": source.get("record_counts") if isinstance(source.get("record_counts"), dict) else {},
+            "milk_normality_status": normality.get("overall_status"),
+            "analysis_status": data.get("assessment_status"),
+        }
+    )
+
+
+def _to_float(value: Any, default: float) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def _raw_start_at(as_of_time: str, *, raw_days: int, include_today: bool):

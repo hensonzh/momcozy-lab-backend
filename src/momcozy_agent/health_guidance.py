@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from .types import RuntimeInputs
@@ -250,8 +249,6 @@ def should_include_health_guidance_context(
         return False
     if any(term in message for term in _URGENT_RED_FLAG_TERMS):
         return False
-    if _is_milk_management_fullness_followup(message, loaded_skill_ids):
-        return False
     if _is_milk_management_intake_field_question(message, loaded_skill_ids):
         return False
 
@@ -266,26 +263,6 @@ def _is_background_milk_analysis_reminder_followup(message: str) -> bool:
         "后台奶量分析提醒后的自动接续" in message
         and "奶量分析上下文" in message
     )
-
-
-def _is_milk_management_fullness_followup(message: str, loaded_skill_ids: list[str] | None) -> bool:
-    if not _has_loaded_skill(loaded_skill_ids, "milk-management"):
-        return False
-    has_fullness_signal = any(
-        term in message
-        for term in (
-            "胀",
-            "涨",
-            "排不空",
-            "没排空",
-            "没有排空",
-            "吸完还胀",
-            "吸完还涨",
-        )
-    )
-    if not has_fullness_signal:
-        return False
-    return not _has_unnegated_fullness_red_flag(message)
 
 
 def _is_milk_management_intake_field_question(message: str, loaded_skill_ids: list[str] | None) -> bool:
@@ -328,35 +305,6 @@ def _is_milk_management_intake_field_question(message: str, loaded_skill_ids: li
         )
     )
     return has_intake_field
-
-
-def _has_unnegated_fullness_red_flag(message: str) -> bool:
-    for term in (
-        "发热",
-        "发烧",
-        "寒战",
-        "红肿",
-        "发红",
-        "红热",
-        "硬块",
-        "越来越痛",
-        "疼痛加重",
-        "变大",
-        "扩大",
-        "破皮",
-        "出血",
-        "化脓",
-    ):
-        if _contains_unnegated_term(message, term):
-            return True
-    return False
-
-
-def _contains_unnegated_term(message: str, term: str) -> bool:
-    if term not in message:
-        return False
-    denied_pattern = rf"(没有|没|无|不|否认)[^，。；;、\n]{{0,8}}{re.escape(term)}"
-    return re.search(denied_pattern, message) is None
 
 
 def _has_loaded_skill(loaded_skill_ids: list[str] | None, skill_id: str) -> bool:

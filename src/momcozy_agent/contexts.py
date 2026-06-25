@@ -535,7 +535,14 @@ def _record_milk_analysis_intake_state(state: ContextState, result: dict[str, An
     if not intake_state:
         return
     state.milk_management_state["analysis_intake"] = _normalize_milk_analysis_intake_state(intake_state)
-    for key in ("last_fact_read", "last_assessment", "pending_plan_after_assessment", "last_plan_preview", "pending_milk_plan_update"):
+    for key in (
+        "last_fact_read",
+        "last_assessment",
+        "pending_plan_after_assessment",
+        "last_plan_preview",
+        "pending_milk_plan_update",
+        "pending_calendar_adjustment",
+    ):
         state.milk_management_state.pop(key, None)
 
 
@@ -683,6 +690,7 @@ def _record_milk_calendar_preview_state(state: ContextState, tool_name: str, res
         "target_date": target_date,
         "target_dates": target_dates,
         "proposal": proposal,
+        "preview_context": data.get("preview_context") if isinstance(data.get("preview_context"), dict) else {},
         "summary": data.get("summary") or tool_result.get("summary"),
         "idempotency_key": _calendar_adjustment_idempotency_key(proposal),
     }
@@ -838,6 +846,7 @@ def _recent_milk_record_context_payload(context: dict[str, Any]) -> dict[str, An
         "truncated",
         "daily_rollups",
         "raw_records",
+        "computed_snapshot",
         "assessment_status",
         "milk_normality_status",
         "user_id",
@@ -855,14 +864,34 @@ def _format_pending_calendar_adjustment_context(pending: dict[str, Any]) -> list
         lines.append(f"这份预览适用于：{target_text}。")
     operation = str(pending.get("operation") or "").strip()
     action_text = "应用上一轮日程重排预览" if operation == "apply_reschedule" else "应用上一轮日程变更预览"
+    preview_context = pending.get("preview_context") if isinstance(pending.get("preview_context"), dict) else {}
+    if preview_context:
+        lines.append(
+            "- calendar_adjustment_preview_context_json: "
+            + json.dumps(_compact_pending_calendar_preview_context(preview_context), ensure_ascii=False, sort_keys=True, default=str)
+        )
     lines.append(
-        f"本轮进入日程写入处理：调用 milk_calendar_mutate {action_text}；不要再次向用户确认，也不要只用文字说会同步。"
+        f"如果用户明确确认保存、同步、执行或按这版调整，调用 milk_calendar_mutate {action_text}；看到成功结果前不要说已经同步。"
     )
     lines.append(
-        "调用 milk_calendar_mutate 时不需要重新构造完整 proposal；如果参数里缺 proposal、target_date 或 idempotency_key，后端会复用上一轮缓存的预览。"
+        "确认执行时不需要重新构造完整 proposal；如果参数里缺 proposal、target_date 或 idempotency_key，后端会复用上一轮缓存的预览。"
     )
-    lines.append("在看到 milk_calendar_mutate 成功结果前，不要说已经同步或已经写入计划页。")
+    lines.append(
+        "如果用户提出新的时间、想再调整、问某项能不能改到几点，先调用日程调整预览工具重新生成预览；不要直接应用上一轮缓存。"
+    )
+    lines.append("如果用户取消、先不保存或切换到新的奶量分析/其它主题，不要调用 milk_calendar_mutate。")
     return lines
+
+
+def _compact_pending_calendar_preview_context(context: dict[str, Any]) -> dict[str, Any]:
+    keys = ("target_date", "target_dates", "busy_windows", "original_schedule", "adjusted_schedule", "changes", "insert_event", "why", "confirmation_contract", "days")
+    compact = {key: context.get(key) for key in keys if context.get(key) not in (None, "", [], {})}
+    for list_key in ("busy_windows", "original_schedule", "adjusted_schedule", "changes", "days"):
+        value = compact.get(list_key)
+        if isinstance(value, list) and len(value) > 12:
+            compact[list_key] = value[:12]
+            compact[f"{list_key}_truncated"] = True
+    return compact
 
 
 def _pending_calendar_target_text(pending: dict[str, Any]) -> str:

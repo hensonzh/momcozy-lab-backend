@@ -521,7 +521,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "milk_calendar_reschedule_preview": _function_tool(
         "milk_calendar_reschedule_preview",
-        "PREVIEW 日程重排工具：根据用户通过文字或图片提供的会议、通勤、外出等不可用时间段，读取目标日期或日期范围内当前 calendar，并预览如何重排吸奶/亲喂计划以避开这些时间段。不写数据库；写入前必须让用户确认。单日传 target_date；多日传 target_dates 或 start_date/end_date。",
+        "PREVIEW 日程重排工具：根据用户通过文字或图片提供的会议、通勤、外出等不可用时间段，读取目标日期或日期范围内当前 calendar，并预览如何重排吸奶/亲喂计划以避开这些时间段。不写数据库；写入前必须让用户确认。返回应作为后续上下文，说明原日程、调整后日程、调整原因和可执行 proposal。用户提出新的时间、新约束或想再调整时，重新调用本工具预览，不要直接写入。单日传 target_date；多日传 target_dates 或 start_date/end_date。",
         {
             "target_date": _nullable(ISO_DATE),
             "target_dates": {
@@ -546,7 +546,7 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
     ),
     "milk_calendar_mutate": _function_tool(
         "milk_calendar_mutate",
-        "APPLY/UPDATE/DELETE 写入工具：应用 milk_calendar_change_preview 或 milk_calendar_reschedule_preview 返回的 proposal，或批量/单条修改、删除 calendar 条目。有副作用；只有用户明确确认后才调用。若请求上下文提示已有上一轮日程预览，可直接应用该预览；看到工具成功结果后再说明已同步。不要用于保存完整奶量计划；使用 milk_plan_mutate。任务完成/跳过优先使用 milk_task_complete。",
+        "APPLY/UPDATE/DELETE 写入工具：应用用户已确认的 milk_calendar_change_preview 或 milk_calendar_reschedule_preview proposal，或批量/单条修改、删除 calendar 条目。有副作用；只有用户明确确认上一轮日程调整预览后才调用。涉及调整日程时先调用预览工具生成方案；用户提出新的时间、新约束或想再调整时，不要调用本工具，先重新预览。若请求上下文提示已有上一轮日程预览且用户本轮明确确认，可直接应用该预览；看到工具成功结果后再说明已同步。不要用于保存完整奶量计划；使用 milk_plan_mutate。任务完成/跳过优先使用 milk_task_complete。",
         {
             "operation": {"type": "string", "enum": ["apply_adjustment", "apply_reschedule", "range_shift", "range_delete", "patch_items", "update_item", "delete_item"]},
             "confirmed": {"type": "boolean", "description": "兼容字段：用户已明确确认应用这次日程变更时可传 true；模型未决定写入时不要调用本工具。"},

@@ -1308,7 +1308,7 @@ async def record_client_event(request: Request) -> dict[str, Any]:
     if not thread_id:
         raise HTTPException(status_code=400, detail="client event requires thread_id")
 
-    url = (os.getenv("MOMCOZY_AGENT_CLIENT_EVENT_URL") or "http://127.0.0.1:8768/api/client-event").strip()
+    url = _client_event_forward_url()
     if not url or url.lower() in {"none", "disabled", "off"}:
         return {
             "status": "local_completed",
@@ -1662,7 +1662,7 @@ async def _forward_client_event_context(
     user_id: str,
     ended_at: str,
 ) -> dict[str, Any]:
-    url = (os.getenv("MOMCOZY_AGENT_CLIENT_EVENT_URL") or "http://127.0.0.1:8768/api/client-event").strip()
+    url = _client_event_forward_url()
     if not url or url.lower() in {"none", "disabled", "off"}:
         return {"appended": False, "reason": "context_forwarding_disabled"}
     try:
@@ -1692,6 +1692,18 @@ async def _forward_client_event_context(
         return {"appended": False, "reason": "client_event_forward_failed", "status_code": response.status_code}
     except Exception as exc:
         return {"appended": False, "reason": "client_event_forward_error", "error": type(exc).__name__}
+
+
+def _client_event_forward_url() -> str:
+    explicit = (os.getenv("MOMCOZY_AGENT_CLIENT_EVENT_URL") or "").strip()
+    if explicit:
+        return explicit
+    chat_sse_url = (os.getenv("MOMCOZY_CHAT_SSE_URL") or "").strip()
+    if chat_sse_url:
+        if chat_sse_url.endswith("/api/ag-ui"):
+            return f"{chat_sse_url[:-len('/api/ag-ui')]}/api/client-event"
+        return chat_sse_url.rstrip("/") + "/api/client-event"
+    return "http://127.0.0.1:8768/api/client-event"
 
 
 def _build_notify_query_response(*, status: int, message: str, error: int, notify_list: Any = None) -> dict[str, Any]:

@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import patch
 
 from momcozy_agent.server import _format_client_event
+from momcozy_agent.api.routes import _client_event_forward_url
 from momcozy_agent.services.pump_session_summary import build_pump_session_summary
 
 
@@ -145,6 +146,27 @@ class PumpSessionSummaryTests(unittest.TestCase):
         )
 
         self.assertEqual(event, 'pump_session_ended {"total_milk_ml":100}')
+
+    def test_client_event_forward_url_follows_chat_sse_url_when_not_explicit(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "MOMCOZY_CHAT_SSE_URL": "http://127.0.0.1:8870/api/ag-ui",
+            },
+        ):
+            os.environ.pop("MOMCOZY_AGENT_CLIENT_EVENT_URL", None)
+
+            self.assertEqual(_client_event_forward_url(), "http://127.0.0.1:8870/api/client-event")
+
+    def test_client_event_forward_url_preserves_explicit_override(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "MOMCOZY_AGENT_CLIENT_EVENT_URL": "disabled",
+                "MOMCOZY_CHAT_SSE_URL": "http://127.0.0.1:8870/api/ag-ui",
+            },
+        ):
+            self.assertEqual(_client_event_forward_url(), "disabled")
 
 
 if __name__ == "__main__":
