@@ -3990,7 +3990,8 @@ def _required_milk_management_tool(inputs: RuntimeInputs, options: BuildAgentReq
     user_message = inputs.get("user_message")
     user_message_text = str(user_message or "").strip()
     state = _milk_management_state_from_options(options)
-    if ibclc_consult_creation_allowed(inputs):
+    previous_assistant_message = _previous_assistant_message_from_options(options)
+    if ibclc_consult_creation_allowed(_inputs_with_previous_assistant_message(inputs, previous_assistant_message)):
         return None
     if _pending_calendar_adjustment_ready_for_save(state):
         if _user_message_confirms_pending_calendar_adjustment(user_message_text):
@@ -4014,7 +4015,11 @@ def _required_milk_management_tool(inputs: RuntimeInputs, options: BuildAgentReq
             if not _milk_analysis_intake_complete(intake):
                 return "milk_analysis_intake_manage"
             return "milk_analysis_evaluate"
-        if _user_message_accepts_milk_plan_preview(user_message):
+        if _user_message_accepts_milk_plan_preview(
+            user_message,
+            intake=intake,
+            previous_assistant_message=previous_assistant_message,
+        ):
             if not _milk_analysis_intake_complete(intake):
                 return "milk_analysis_intake_manage"
             if not _milk_analysis_assessment_ready_for_plan_preview(intake):
@@ -4045,6 +4050,24 @@ def _milk_management_state_from_options(options: BuildAgentRequestOptions) -> di
     if isinstance(context_state, ContextState) and isinstance(context_state.milk_management_state, dict):
         return context_state.milk_management_state
     return {}
+
+
+def _previous_assistant_message_from_options(options: BuildAgentRequestOptions) -> str:
+    context_state = options.get("context_state")
+    if isinstance(context_state, ContextState):
+        return str(context_state.last_assistant_message or "").strip()
+    return ""
+
+
+def _inputs_with_previous_assistant_message(inputs: RuntimeInputs, previous_assistant_message: str) -> RuntimeInputs:
+    if not previous_assistant_message:
+        return inputs
+    if inputs.get("previous_assistant_message") or inputs.get("_last_assistant_message"):
+        return inputs
+    copied = dict(inputs)
+    copied["previous_assistant_message"] = previous_assistant_message
+    copied["_last_assistant_message"] = previous_assistant_message
+    return copied
 
 
 def _milk_management_disabled_tool_names_from_state(options: BuildAgentRequestOptions) -> set[str]:
@@ -4496,7 +4519,12 @@ def _user_message_starts_milk_analysis_flow(message: Any) -> bool:
     return any(term in text for term in analysis_terms)
 
 
-def _user_message_accepts_milk_plan_preview(message: Any) -> bool:
+def _user_message_accepts_milk_plan_preview(
+    message: Any,
+    *,
+    intake: dict[str, Any] | None = None,
+    previous_assistant_message: str = "",
+) -> bool:
     text = str(message or "").strip()
     if not text:
         return False
@@ -4505,10 +4533,10 @@ def _user_message_accepts_milk_plan_preview(message: Any) -> bool:
         return False
     if _user_message_has_milk_plan_creation_intent(text):
         return True
-    if _workflow_text_accepts_plan_for_request(text):
-        return True
     if _user_message_selects_milk_plan_type(text):
         return True
+    if _workflow_text_accepts_plan_for_request(text):
+        return _milk_plan_offer_context_present(intake or {}, previous_assistant_message)
     return any(token in text for token in ("每天多", "每天少", "做到", "目标", "追奶计划", "稳奶计划", "减奶计划", "生成计划", "制定计划", "做计划"))
 
 
@@ -4526,6 +4554,25 @@ def _workflow_text_accepts_plan_for_request(text: str) -> bool:
     if normalized in {"好", "好的", "可以", "行", "继续", "确认", "ok", "okay", "yes"}:
         return True
     return any(token in normalized for token in ("生成计划", "制定计划", "做计划", "按这个", "先按", "milk plan"))
+
+
+def _milk_plan_offer_context_present(intake: dict[str, Any], previous_assistant_message: str) -> bool:
+    for source in (
+        str(intake.get("next_question") or ""),
+        str(previous_assistant_message or ""),
+    ):
+        if _message_offers_milk_plan_preview(source):
+            return True
+    return False
+
+
+def _message_offers_milk_plan_preview(text: str) -> bool:
+    normalized = text.strip().lower()
+    if not normalized:
+        return False
+    has_plan = any(token in normalized for token in ("计划", "追奶", "稳奶", "减奶", "milk plan"))
+    has_offer = any(token in normalized for token in ("生成", "制定", "做一版", "做一个", "要我", "帮你", "是否", "要不要", "想不想", "吗", "?"))
+    return has_plan and has_offer
 
 
 def run_agent_turn(
