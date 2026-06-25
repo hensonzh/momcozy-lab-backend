@@ -1260,6 +1260,8 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
         return _compact_milk_plan_card_output(safe, result)
     if tool_name == "milk_plan_preview_create":
         return _compact_milk_plan_no_card_output(safe, result)
+    if tool_name in {"milk_calendar_change_preview", "milk_calendar_reschedule_preview"}:
+        return _compact_milk_calendar_preview_output(safe, result)
     if tool_name == "milk_status_query" and isinstance(safe.get("card"), dict):
         return _compact_mom_baby_status_card_output(safe)
     if tool_name == "milk_plan_mutate":
@@ -3128,6 +3130,46 @@ def _compact_milk_calendar_mutate_output(safe: dict[str, Any]) -> dict[str, Any]
     return _drop_empty(compact)
 
 
+def _compact_milk_calendar_preview_output(safe: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
+    data = _tool_result_data(result)
+    preview_context = data.get("preview_context") if isinstance(data.get("preview_context"), dict) else {}
+    return _drop_empty(
+        {
+            "ok": safe.get("ok"),
+            "tool_name": safe.get("tool_name"),
+            "status": safe.get("status"),
+            "summary": safe.get("summary") or data.get("summary"),
+            "calendar_adjustment_preview": _compact_calendar_preview_context_for_model(preview_context),
+            "workflow": {
+                "requires_user_confirmation": True,
+                "confirm_next_tool": "milk_calendar_mutate",
+                "revise_next_tool": "milk_calendar_reschedule_preview",
+                "contract": "用户确认时再应用这份预览；用户提出新时间、新约束或想再调整时，先重新调用日程调整预览工具。",
+            },
+            "final_response_instruction": (
+                "最终回复先简短说明这是一份日程调整预览，必须包含原日程如何、建议调整后如何、为什么这样调；"
+                "只询问用户是否按这版执行。不要说已经同步或已经写入。"
+            ),
+        }
+    )
+
+
+def _compact_calendar_preview_context_for_model(context: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(context, dict):
+        return {}
+    compact = {
+        key: context.get(key)
+        for key in ("target_date", "target_dates", "busy_windows", "original_schedule", "adjusted_schedule", "changes", "insert_event", "why", "days")
+        if context.get(key) not in (None, "", [], {})
+    }
+    for key in ("busy_windows", "original_schedule", "adjusted_schedule", "changes", "days"):
+        value = compact.get(key)
+        if isinstance(value, list) and len(value) > 12:
+            compact[key] = value[:12]
+            compact[f"{key}_truncated"] = True
+    return compact
+
+
 def _compact_milk_plan_saved_output(safe: dict[str, Any]) -> dict[str, Any]:
     compact: dict[str, Any] = {
         "ok": safe.get("result_ok", safe.get("ok")),
@@ -3669,7 +3711,7 @@ def _build_response_request(
         required_tool = _forced_required_tool_from_options(options)
         if required_tool is None and _is_initial_user_request(input_items):
             required_tool = _required_birth_prep_tool(inputs) or _required_milk_management_tool(inputs, options)
-        for tool_name in _milk_management_contextual_tools_from_state(options):
+        for tool_name in _milk_management_contextual_tools_from_state(inputs, options):
             tools = _promote_deferred_function_tool(tools, tool_name)
         if required_tool:
             tools = _promote_deferred_function_tool(tools, required_tool)
@@ -3951,7 +3993,12 @@ def _required_milk_management_tool(inputs: RuntimeInputs, options: BuildAgentReq
     if ibclc_consult_creation_allowed(inputs):
         return None
     if _pending_calendar_adjustment_ready_for_save(state):
-        return "milk_calendar_mutate"
+        if _user_message_confirms_pending_calendar_adjustment(user_message_text):
+            return "milk_calendar_mutate"
+        if _user_message_has_specific_busy_calendar_adjustment(user_message_text):
+            return "milk_calendar_reschedule_preview"
+        if _user_message_declines_pending_calendar_adjustment(user_message_text):
+            return None
     if _user_message_has_specific_busy_calendar_adjustment(user_message_text):
         return "milk_calendar_reschedule_preview"
     if _user_message_mentions_busy_calendar_adjustment(user_message_text):
@@ -4013,29 +4060,33 @@ def _milk_management_disabled_tool_names_from_state(options: BuildAgentRequestOp
     return disabled
 
 
-def _milk_management_contextual_tools_from_state(options: BuildAgentRequestOptions) -> list[str]:
+def _milk_management_contextual_tools_from_state(inputs: RuntimeInputs, options: BuildAgentRequestOptions) -> list[str]:
     state = _milk_management_state_from_options(options)
+    user_message = str(inputs.get("user_message") or "").strip()
     tools: list[str] = []
-    write_tool = _milk_management_contextual_write_tool_from_state(state)
+    write_tool = _milk_management_contextual_write_tool_from_state(state, user_message=user_message)
     if write_tool:
         tools.append(write_tool)
-    if _milk_calendar_reschedule_preview_useful_from_state(state):
+    if _milk_calendar_reschedule_preview_useful_from_state(state, user_message=user_message):
         tools.append("milk_calendar_reschedule_preview")
     return list(dict.fromkeys(tools))
 
 
-def _milk_management_contextual_write_tool_from_state(state: dict[str, Any]) -> str:
+def _milk_management_contextual_write_tool_from_state(state: dict[str, Any], *, user_message: str = "") -> str:
     if _pending_calendar_adjustment_ready_for_save(state):
-        return "milk_calendar_mutate"
+        return "milk_calendar_mutate" if _user_message_confirms_pending_calendar_adjustment(user_message) else ""
     intake = state.get("analysis_intake") if isinstance(state.get("analysis_intake"), dict) else {}
     if intake and _milk_analysis_intake_ready_for_save(intake):
         return "milk_plan_mutate"
     return ""
 
 
-def _milk_calendar_reschedule_preview_useful_from_state(state: dict[str, Any]) -> bool:
+def _milk_calendar_reschedule_preview_useful_from_state(state: dict[str, Any], *, user_message: str = "") -> bool:
     if _pending_calendar_adjustment_ready_for_save(state):
-        return False
+        return not (
+            _user_message_confirms_pending_calendar_adjustment(user_message)
+            or _user_message_declines_pending_calendar_adjustment(user_message)
+        )
     intake = state.get("analysis_intake") if isinstance(state.get("analysis_intake"), dict) else {}
     if _milk_plan_preview_ready_in_state(intake):
         return True
@@ -4062,6 +4113,24 @@ def _pending_calendar_adjustment_ready_for_save(state: dict[str, Any]) -> bool:
     operation = str(pending.get("operation") or "").strip()
     proposal = pending.get("proposal") if isinstance(pending.get("proposal"), dict) else {}
     return operation in {"apply_adjustment", "apply_reschedule"} and bool(proposal)
+
+
+def _user_message_confirms_pending_calendar_adjustment(message: Any) -> bool:
+    text = str(message or "").strip()
+    if not text or _user_message_declines_pending_calendar_adjustment(text):
+        return False
+    if any(token in text for token in ("吗", "能不能", "可不可以", "？", "?")) and not any(token in text for token in ("确认", "保存", "同步", "执行", "按这版", "按这个")):
+        return False
+    if text in {"好", "行", "可以", "确认"}:
+        return True
+    return any(token in text for token in ("好的", "可以的", "确认", "保存", "同步", "执行", "按这版", "按这个", "就这样", "没问题"))
+
+
+def _user_message_declines_pending_calendar_adjustment(message: Any) -> bool:
+    text = str(message or "").strip()
+    if not text:
+        return False
+    return any(token in text for token in ("取消", "先不", "暂不", "不保存", "不同步", "不用", "不要", "算了"))
 
 
 _MILK_CALENDAR_ADJUSTMENT_MILK_TERMS = ("奶量", "吸奶", "亲喂", "喂奶", "追奶", "稳奶", "减奶", "泌乳", "提醒", "日程", "计划")

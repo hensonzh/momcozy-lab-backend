@@ -55,8 +55,8 @@ RISK_MEDICAL_RECOMMENDED = "medical_recommended"
 RISK_URGENT = "urgent"
 
 ALL_PLAN_TYPES = [PLAN_TYPE_INCREASE, PLAN_TYPE_MAINTAIN, PLAN_TYPE_DECREASE]
+FLOW_RECORD_FIELD = "records_7d"
 FLOW_REQUIRED_FIELDS = [
-    "records_7d",
     "infant_wet_diapers",
     "infant_state_or_satisfaction",
     "infant_growth_signal",
@@ -66,6 +66,20 @@ FLOW_REQUIRED_FIELDS = [
 FLOW_SLOT_COLLECTED = "collected"
 FLOW_SLOT_MISSING = "missing"
 FLOW_SLOT_UNKNOWN_AFTER_ASKED = "unknown_after_asked"
+MILK_BACKGROUND_TRIGGER_SOURCES = {
+    "background",
+    "background_milk_analysis",
+    "backend",
+    "scheduled",
+    "system",
+}
+MILK_ANALYSIS_CONTEXT_MODES = {
+    "",
+    "analysis",
+    "milk_analysis",
+    "background_analysis",
+    "active_milk_analysis",
+}
 FLOW_MATERNAL_RED_FLAG_FIELDS = ("fever", "chills", "breast_redness", "lump_or_hard_area", "worsening_pain")
 FLOW_FIELD_LABELS = {
     "records_7d": "过去 7 天可计算奶量记录",
@@ -76,7 +90,6 @@ FLOW_FIELD_LABELS = {
     "maternal_breast_comfort": "吸奶或亲喂后乳房舒适度",
 }
 FLOW_FIELD_QUICK_REPLIES = {
-    "records_7d": ["记录是完整的", "有漏记吸奶", "有漏记瓶喂"],
     "infant_wet_diapers": ["尿布挺多的", "尿布有点少", "不太确定"],
     "infant_state_or_satisfaction": ["精神还不错", "吃奶后不安稳", "变化不明显"],
     "infant_growth_signal": ["体重增长正常", "增长有点慢", "还没称体重"],
@@ -84,11 +97,6 @@ FLOW_FIELD_QUICK_REPLIES = {
     "maternal_breast_comfort": ["吸完舒服", "还会胀", "会疼"],
 }
 FLOW_FIELD_GUIDANCE = {
-    "records_7d": {
-        "why_this_field_matters": "7 天记录完整度决定趋势判断是否可信，尤其会影响偏低是持续趋势还是漏记造成。",
-        "how_to_interpret_answers": "用户确认完整时继续看宝宝和妈妈状态；用户说有漏记时，要把结论降级为初步观察，并先补齐记录。",
-        "do_not_infer": ["不要把计划任务完成数当作实际奶量记录", "不要让用户重复描述工具已经读取到的完整 7 天节奏"],
-    },
     "infant_wet_diapers": {
         "why_this_field_matters": "尿布/尿量是判断宝宝短期摄入是否足够的重要信号。",
         "how_to_interpret_answers": "尿布正常会降低短期摄入风险；明显偏少或不确定时，分析和计划都要更保守。",
@@ -294,7 +302,18 @@ def _analysis_intake_manage(arguments: dict[str, Any], inputs: RuntimeInputs) ->
 
     records_result = _flow_records_result(arguments)
     records_data = records_result.get("data") if isinstance(records_result.get("data"), dict) else {}
-    flow["records_snapshot"] = _flow_records_snapshot(records_data)
+    records_snapshot = _flow_records_snapshot(records_data)
+    background_records_snapshot = _background_followup_records_snapshot(arguments, inputs)
+    if _records_snapshot_collected(background_records_snapshot):
+        records_snapshot = background_records_snapshot
+        slot_sources = dict(flow.get("slot_sources") if isinstance(flow.get("slot_sources"), dict) else {})
+        slot_sources["records_7d"] = {
+            "source": "background_notification",
+            "confidence": "computed_snapshot",
+            "context": "recent_record_context",
+        }
+        flow["slot_sources"] = slot_sources
+    flow["records_snapshot"] = records_snapshot
 
     infant_signals, maternal_symptoms = _flow_context_updates(arguments, flow, user_update)
     flow["infant_signals"] = infant_signals
@@ -537,7 +556,6 @@ def _user_update_starts_new_milk_analysis(user_update: str) -> bool:
 
 def _intake_collecting_result(flow: dict[str, Any], records_result: dict[str, Any]) -> dict[str, Any]:
     missing = _flow_missing_fields(flow.get("checklist") if isinstance(flow.get("checklist"), list) else [])
-    status = "milk_analysis_intake_needs_records" if missing and missing[0] == "records_7d" else "milk_analysis_intake_collecting"
     next_question = str(flow.get("next_question") or "").strip()
     workflow_control = _flow_workflow_control(flow, missing_fields=missing, allowed_next_action="ask_user")
     flow["workflow_control"] = workflow_control
@@ -549,7 +567,7 @@ def _intake_collecting_result(flow: dict[str, Any], records_result: dict[str, An
     flow["joint_reasoning_guidance"] = joint_reasoning_guidance
     return {
         "ok": True,
-        "status": status,
+        "status": "milk_analysis_intake_collecting",
         "summary": "奶量分析信息采集中。",
         "data": {
             "intake_state": _analysis_intake_state_for_storage(flow),
@@ -985,6 +1003,7 @@ def _flow_seed(previous: dict[str, Any]) -> dict[str, Any]:
         "plan_type": norm_text(previous.get("plan_type")),
         "target_daily_ml": previous.get("target_daily_ml"),
         "delta_ml": previous.get("delta_ml"),
+        "slot_sources": previous.get("slot_sources") if isinstance(previous.get("slot_sources"), dict) else {},
         "assessment_result": previous.get("assessment_result") if isinstance(previous.get("assessment_result"), dict) else {},
         "plan_preview": previous.get("plan_preview") if isinstance(previous.get("plan_preview"), dict) else {},
     }
@@ -1023,6 +1042,76 @@ def _flow_records_snapshot(records_data: dict[str, Any]) -> dict[str, Any]:
         "daily_rollups": source.get("daily_rollups") if isinstance(source.get("daily_rollups"), list) else [],
         "raw_records": source.get("raw_records") if isinstance(source.get("raw_records"), dict) else {},
     }
+
+
+def _background_followup_records_snapshot(arguments: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
+    if not _is_background_milk_analysis_followup(inputs):
+        return {}
+    state = inputs.get("_milk_management_state")
+    if not isinstance(state, dict):
+        return {}
+    context = state.get("recent_record_context")
+    if not isinstance(context, dict):
+        return {}
+    user_id = norm_text(arguments.get("user_id"))
+    context_user_id = norm_text(context.get("user_id"))
+    if user_id and context_user_id and user_id != context_user_id:
+        return {}
+    if norm_text(context.get("purpose")) not in {"", "background_milk_analysis"}:
+        return {}
+
+    snapshot = context.get("computed_snapshot") if isinstance(context.get("computed_snapshot"), dict) else {}
+    daily_rollups = context.get("daily_rollups") if isinstance(context.get("daily_rollups"), list) else []
+    raw_records = context.get("raw_records") if isinstance(context.get("raw_records"), dict) else {}
+    counts = context.get("record_counts") if isinstance(context.get("record_counts"), dict) else {}
+    valid_days = to_int(snapshot.get("valid_days"), _count_valid_milk_days(daily_rollups))
+    positive_days = to_int(snapshot.get("positive_days"), _count_positive_milk_days(daily_rollups))
+    collected = valid_days > 0 and positive_days > 0
+    return _drop_empty_context(
+        {
+            "status": FLOW_SLOT_COLLECTED if collected else FLOW_SLOT_MISSING,
+            "valid_days": valid_days,
+            "positive_days": positive_days,
+            "record_counts": counts,
+            "daily_rollups": daily_rollups,
+            "raw_records": raw_records,
+            "source": "background_notification",
+            "source_context": "recent_record_context",
+            "source_context_status": context.get("status"),
+            "as_of_time": context.get("as_of_time"),
+        }
+    )
+
+
+def _is_background_milk_analysis_followup(inputs: RuntimeInputs) -> bool:
+    service_domain = _context_token(inputs.get("service_domain"))
+    source = _context_token(inputs.get("trigger_source"))
+    mode = _context_token(inputs.get("milk_context_mode"))
+    return service_domain == "milk_management" and source in MILK_BACKGROUND_TRIGGER_SOURCES and mode in MILK_ANALYSIS_CONTEXT_MODES
+
+
+def _context_token(value: Any) -> str:
+    return str(value or "").strip().replace("-", "_").lower()
+
+
+def _records_snapshot_collected(snapshot: dict[str, Any]) -> bool:
+    return isinstance(snapshot, dict) and snapshot.get("status") == FLOW_SLOT_COLLECTED
+
+
+def _count_valid_milk_days(daily_rollups: list[Any]) -> int:
+    return len([day for day in daily_rollups if isinstance(day, dict) and day.get("ok") is True])
+
+
+def _count_positive_milk_days(daily_rollups: list[Any]) -> int:
+    return len(
+        [
+            day
+            for day in daily_rollups
+            if isinstance(day, dict)
+            and day.get("ok") is True
+            and _to_float(day.get("estimated_daily_milk_ml"), 0.0) > 0
+        ]
+    )
 
 
 def _flow_context_updates(arguments: dict[str, Any], flow: dict[str, Any], user_update: str) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -1375,12 +1464,16 @@ def _has_positive_maternal_red_flag(maternal: dict[str, Any]) -> bool:
 
 
 def _flow_missing_fields(checklist: list[dict[str, Any]]) -> list[str]:
-    return [str(item.get("id")) for item in checklist if item.get("status") == FLOW_SLOT_MISSING]
+    return [
+        str(item.get("id"))
+        for item in checklist
+        if item.get("status") == FLOW_SLOT_MISSING and str(item.get("id") or "") != FLOW_RECORD_FIELD
+    ]
 
 
 def _flow_question_for_field(field: str) -> str:
     if field == "records_7d":
-        return "过去 7 天好像还缺少可计算的奶量记录。需要先补充吸奶、瓶喂母乳或补奶记录吗？"
+        return "我会先读取近 7 天奶量记录，再继续判断。"
     if field == "infant_wet_diapers":
         return "宝宝近 24 小时尿量或尿布情况大概怎么样？"
     if field == "infant_state_or_satisfaction":
@@ -1521,6 +1614,7 @@ def _flow_state_for_storage(flow: dict[str, Any]) -> dict[str, Any]:
         "field_guidance": flow.get("field_guidance") if isinstance(flow.get("field_guidance"), dict) else {},
         "joint_reasoning_guidance": flow.get("joint_reasoning_guidance") if isinstance(flow.get("joint_reasoning_guidance"), list) else [],
         "unknown_after_asked_fields": _flow_unknown_after_asked_fields(flow),
+        "slot_sources": flow.get("slot_sources") if isinstance(flow.get("slot_sources"), dict) else {},
         "plan_type": flow.get("plan_type"),
         "target_daily_ml": flow.get("target_daily_ml"),
         "delta_ml": flow.get("delta_ml"),
@@ -2689,6 +2783,8 @@ def _arguments_with_cached_calendar_adjustment(arguments: dict[str, Any], inputs
     operation = norm_text(pending.get("operation"))
     if operation not in {"apply_adjustment", "apply_reschedule"} or not proposal:
         return arguments
+    if not (to_bool(arguments.get("confirmed")) or _user_message_confirms_pending_calendar_adjustment(inputs.get("user_message"))):
+        return arguments
 
     merged = dict(arguments)
     if norm_text(merged.get("operation")) not in {"apply_adjustment", "apply_reschedule"}:
@@ -2704,6 +2800,17 @@ def _arguments_with_cached_calendar_adjustment(arguments: dict[str, Any], inputs
         if key:
             merged["idempotency_key"] = key
     return merged
+
+
+def _user_message_confirms_pending_calendar_adjustment(message: Any) -> bool:
+    text = norm_text(message)
+    if not text or any(token in text for token in ("取消", "先不", "暂不", "不保存", "不同步", "不用", "不要", "算了")):
+        return False
+    if any(token in text for token in ("吗", "能不能", "可不可以", "？", "?")) and not any(token in text for token in ("确认", "保存", "同步", "执行", "按这版", "按这个")):
+        return False
+    if text in {"好", "行", "可以", "确认"}:
+        return True
+    return any(token in text for token in ("好的", "可以的", "确认", "保存", "同步", "执行", "按这版", "按这个", "就这样", "没问题"))
 
 
 def _calendar_mutate_proposal_is_empty(value: Any) -> bool:

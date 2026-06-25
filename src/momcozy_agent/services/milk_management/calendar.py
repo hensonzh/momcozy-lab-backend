@@ -271,6 +271,12 @@ def preview_calendar_adjustment(
             "conflicts": conflicts,
             "insert_event": proposal["insert_event"],
             "updates": adjustments,
+            "preview_context": _calendar_adjustment_preview_context(
+                target_date=date,
+                insert_event=proposal["insert_event"],
+                conflicts=conflicts,
+                updates=adjustments,
+            ),
         },
     )
 
@@ -507,6 +513,14 @@ def _preview_single_day_reschedule(
             "updated_count": len(updates),
             "unchanged_count": max(len(adjustable_items) - len(updates), 0),
             "summary": _reschedule_summary(windows=windows, conflicts=conflicts, updates=updates),
+            "preview_context": _calendar_reschedule_preview_context(
+                target_date=date,
+                original_items=items,
+                updates=updates,
+                insert_events=proposal["insert_events"],
+                busy_windows=windows,
+                min_gap_minutes=proposal["min_gap_minutes"],
+            ),
         },
     )
 
@@ -523,6 +537,7 @@ def _preview_batch_reschedule(
     include_busy_events: bool = True,
 ) -> ServiceResult:
     day_proposals: list[dict[str, Any]] = []
+    day_preview_contexts: list[dict[str, Any]] = []
     updates: list[dict[str, Any]] = []
     conflicts: list[dict[str, Any]] = []
     skipped_dates: list[dict[str, Any]] = []
@@ -544,6 +559,9 @@ def _preview_batch_reschedule(
             proposal = data.get("proposal") if isinstance(data.get("proposal"), dict) else {}
             if proposal:
                 day_proposals.append({"target_date": date, "proposal": proposal})
+            preview_context = data.get("preview_context") if isinstance(data.get("preview_context"), dict) else {}
+            if preview_context:
+                day_preview_contexts.append(preview_context)
             for update in data.get("updates") if isinstance(data.get("updates"), list) else []:
                 if isinstance(update, dict):
                     updates.append({"target_date": date, **update})
@@ -586,6 +604,13 @@ def _preview_batch_reschedule(
             "unchanged_count": unchanged_count,
             "skipped_dates": skipped_dates,
             "summary": _batch_reschedule_summary(target_dates=applied_dates, conflicts=conflicts, updates=updates, skipped_dates=skipped_dates),
+            "preview_context": {
+                "target_dates": applied_dates,
+                "days": day_preview_contexts,
+                "changes": updates,
+                "why": _batch_reschedule_summary(target_dates=applied_dates, conflicts=conflicts, updates=updates, skipped_dates=skipped_dates),
+                "confirmation_contract": "用户确认后才能应用这份预览；用户提出新时间或新约束时先重新预览。",
+            },
         },
     )
 
@@ -1600,6 +1625,121 @@ def _build_adjustments_for_event(*, conflicts: list[CalendarItem], event_end_tim
         )
         next_start = new_end
     return updates
+
+
+def _calendar_adjustment_preview_context(
+    *,
+    target_date: str,
+    insert_event: dict[str, Any],
+    conflicts: list[CalendarItem],
+    updates: list[dict[str, Any]],
+) -> dict[str, Any]:
+    reason = "新增事项与原日程有重叠，建议把冲突的吸奶/亲喂任务顺延到新事项后。"
+    return {
+        "target_date": target_date,
+        "original_schedule": [_calendar_preview_item(item) for item in conflicts],
+        "adjusted_schedule": _calendar_preview_items_after(conflicts, updates, insert_events=[insert_event]),
+        "changes": [_calendar_preview_change(update, reason=reason) for update in updates],
+        "insert_event": _calendar_preview_item(insert_event),
+        "why": reason if updates else "新增事项没有造成可调整的吸奶/亲喂任务冲突。",
+        "confirmation_contract": "用户确认后才能应用这份预览；用户提出新时间或新约束时先重新预览。",
+    }
+
+
+def _calendar_reschedule_preview_context(
+    *,
+    target_date: str,
+    original_items: list[CalendarItem],
+    updates: list[dict[str, Any]],
+    insert_events: list[dict[str, Any]],
+    busy_windows: list[dict[str, Any]],
+    min_gap_minutes: int,
+) -> dict[str, Any]:
+    reason = _calendar_reschedule_reason(busy_windows=busy_windows, min_gap_minutes=min_gap_minutes)
+    return {
+        "target_date": target_date,
+        "busy_windows": [_calendar_preview_item(item) for item in busy_windows],
+        "original_schedule": [_calendar_preview_item(item) for item in original_items],
+        "adjusted_schedule": _calendar_preview_items_after(original_items, updates, insert_events=insert_events),
+        "changes": [_calendar_preview_change(update, reason=reason) for update in updates],
+        "why": reason if updates else "没有发现需要移动的吸奶/亲喂任务。",
+        "confirmation_contract": "用户确认后才能应用这份预览；用户提出新时间或新约束时先重新预览。",
+    }
+
+
+def _calendar_preview_items_after(
+    items: list[dict[str, Any]],
+    updates: list[dict[str, Any]],
+    *,
+    insert_events: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    updates_by_id = {to_int(update.get("item_id"), 0): update for update in updates if isinstance(update, dict)}
+    adjusted: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        copied = dict(item)
+        update = updates_by_id.get(to_int(copied.get("item_id"), 0))
+        if update:
+            copied["start_time"] = update.get("new_start_time")
+            copied["end_time"] = update.get("new_end_time")
+        adjusted.append(_calendar_preview_item(copied))
+    for event in insert_events or []:
+        if isinstance(event, dict):
+            adjusted.append(_calendar_preview_item({**event, "preview_role": "new_event"}))
+    return sorted(adjusted, key=lambda item: (str(item.get("date") or ""), str(item.get("start_time") or ""), str(item.get("content") or "")))
+
+
+def _calendar_preview_item(item: dict[str, Any]) -> dict[str, Any]:
+    start_time = item.get("start_time")
+    date = norm_text(item.get("date")) or norm_text(start_time)[:10]
+    return {
+        key: value
+        for key, value in {
+            "item_id": item.get("item_id"),
+            "task_id": item.get("task_id"),
+            "date": date,
+            "start_time": start_time,
+            "end_time": item.get("end_time"),
+            "content": item.get("content"),
+            "type": item.get("type"),
+            "source": item.get("source"),
+            "finish": item.get("finish"),
+            "preview_role": item.get("preview_role"),
+        }.items()
+        if value not in (None, "", [], {})
+    }
+
+
+def _calendar_preview_change(update: dict[str, Any], *, reason: str) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in {
+            "item_id": update.get("item_id"),
+            "task_id": update.get("task_id"),
+            "content": update.get("content"),
+            "type": update.get("type"),
+            "from_start_time": update.get("old_start_time"),
+            "from_end_time": update.get("old_end_time"),
+            "to_start_time": update.get("new_start_time"),
+            "to_end_time": update.get("new_end_time"),
+            "reason": reason,
+        }.items()
+        if value not in (None, "", [], {})
+    }
+
+
+def _calendar_reschedule_reason(*, busy_windows: list[dict[str, Any]], min_gap_minutes: int) -> str:
+    if not busy_windows:
+        return f"按当前计划间隔重排，并尽量保留原来的吸奶/亲喂顺序和至少 {min_gap_minutes} 分钟间隔。"
+    windows_text = "、".join(
+        f"{hhmm(window.get('start_time')) or window.get('start_time')}到{hhmm(window.get('end_time')) or window.get('end_time')}"
+        for window in busy_windows[:3]
+        if isinstance(window, dict)
+    )
+    if windows_text:
+        return f"避开不可用时间段 {windows_text}，并尽量保留原来的吸奶/亲喂顺序和至少 {min_gap_minutes} 分钟间隔。"
+    return f"避开用户提供的不可用时间段，并尽量保留原来的吸奶/亲喂顺序和至少 {min_gap_minutes} 分钟间隔。"
 
 
 def _resolve_calendar_type(item_type: Any, content: Any) -> str:
