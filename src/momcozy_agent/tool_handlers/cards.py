@@ -4261,11 +4261,6 @@ def _birth_journey_plan_context_from_intake(state: dict[str, Any]) -> dict[str, 
             "birth_hospital",
             _birth_journey_personalized_followup_text(personalized_followups, "care_site_status_detail"),
         )
-        _append_birth_journey_context_text(
-            context,
-            "doctor_notes",
-            _birth_journey_personalized_followup_text(personalized_followups, "gestational_week_basis_detail"),
-        )
     if personalized_records:
         context["personalized_followup_records"] = personalized_records
         personalized_facts = "；".join(
@@ -4282,7 +4277,6 @@ def _birth_journey_plan_context_from_intake(state: dict[str, Any]) -> dict[str, 
         )
         if personalized_facts:
             context["personalized_facts"] = personalized_facts
-            _append_birth_journey_context_text(context, "doctor_notes", personalized_facts)
     for key in (
         "risk_factors",
         "current_symptoms",
@@ -4495,7 +4489,7 @@ def _build_birth_journey_plan_card_json(form_data: dict[str, Any], scope: str, i
             ),
         )
     )
-    doctor_notes = _text_list(
+    doctor_notes = _substantive_text_list(
         _first_answer_text(
             form_data.get("doctor_notes"),
             form_data.get("special_notes"),
@@ -4503,8 +4497,6 @@ def _build_birth_journey_plan_card_json(form_data: dict[str, Any], scope: str, i
             _birth_journey_personalized_followup_text(personalized_followups, "doctor_special_notes_followup"),
         )
     )
-    if personalized_facts:
-        doctor_notes.extend(_text_list(personalized_facts))
     final_additional_info = _first_answer_text(form_data.get("final_additional_info"))
     risk_factors = _unique_text_list(
         form_data.get("risk_factors")
@@ -6615,6 +6607,13 @@ def _birth_journey_substantive_text(value: Any) -> str:
         "正常",
         "没什么",
         "没有特殊情况",
+        "没有特殊提醒",
+        "没有医生特殊提醒",
+        "暂无特殊提醒",
+        "医生没有特殊提醒",
+        "医生没有说特殊",
+        "医生没说特殊",
+        "产检没有特殊提醒",
         "没有高危",
         "没有风险",
         "没有不舒服",
@@ -8987,6 +8986,14 @@ def _text_list(value: Any) -> list[str]:
         return []
     parts = re.split(r"[、,，;；\n]+", text)
     return [part.strip() for part in parts if _has_meaningful_value(part)]
+
+
+def _substantive_text_list(value: Any) -> list[str]:
+    return [
+        text
+        for text in _text_list(value)
+        if _birth_journey_substantive_text(text)
+    ]
 
 
 def _localized_disclaimer(value: str) -> str:

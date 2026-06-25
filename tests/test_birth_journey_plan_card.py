@@ -1431,9 +1431,17 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         self.assertEqual(ready["next_step"], "generate_plan")
         self.assertNotIn("risk_factors", skipped["intake_state"]["completed_groups"])
         self.assertNotIn("risk_factors", ready["plan_context"])
+        self.assertNotIn("doctor_notes", ready["plan_context"])
         self.assertIn("臀位剖宫产", ready["plan_context"]["prior_birth_history"])
         self.assertEqual(ready["plan_context"]["personalized_followup_records"][0]["topic"], "prior_c_section_birth_path_detail")
         self.assertIn("臀位剖宫产", ready["plan_context"]["personalized_facts"])
+
+        plan = create_birth_journey_plan_card(
+            {"plan_context": ready["plan_context"], "scope": "full"},
+            {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00"},
+        )
+        rendered = json.dumps(plan["card"]["card_json"], ensure_ascii=False)
+        self.assertNotIn("把医生提醒设成复查和观察提醒", rendered)
 
     def test_birth_journey_followup_question_keeps_next_personalized_source_context(self) -> None:
         inputs = {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00", "_birth_journey_intake_state": {}}
@@ -2090,6 +2098,46 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         card = result["card"]["card_json"]
         self.assertNotIn("birth_path", card["owner"])
         self.assertEqual(card["owner"]["support_person"], "暂时没有")
+
+    def test_birth_journey_plan_does_not_treat_personalized_facts_as_doctor_notes(self) -> None:
+        result = create_birth_journey_plan_card(
+            {
+                "plan_context": _plan_context(
+                    due_date_or_week="30周",
+                    age="36",
+                    personalized_facts="age_35_plus_checkup_detail / 暂无异常 / 高龄孕期要关注血压血糖和胎儿生长",
+                ),
+                "scope": "full",
+            },
+            {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00"},
+        )
+
+        self.assertEqual(result["status"], "card_created")
+        card = result["card"]["card_json"]
+        rendered = json.dumps(card, ensure_ascii=False)
+        self.assertIn("你 36 岁属于高龄孕产妇管理范围", card["generation_context"]["personalization_basis"])
+        self.assertNotIn("你填了医生特殊提醒", card["generation_context"]["personalization_basis"])
+        self.assertNotIn("把医生提醒设成复查和观察提醒", rendered)
+
+    def test_birth_journey_plan_ignores_negative_doctor_notes(self) -> None:
+        for doctor_notes in ("无", "没有特殊提醒", "医生没说特殊"):
+            with self.subTest(doctor_notes=doctor_notes):
+                result = create_birth_journey_plan_card(
+                    {
+                        "plan_context": _plan_context(
+                            due_date_or_week="30周",
+                            doctor_notes=doctor_notes,
+                        ),
+                        "scope": "full",
+                    },
+                    {"user_message": "", "message_sent_at": "2026-06-01T12:00:00+08:00"},
+                )
+
+                self.assertEqual(result["status"], "card_created")
+                card = result["card"]["card_json"]
+                rendered = json.dumps(card, ensure_ascii=False)
+                self.assertNotIn("你填了医生特殊提醒", card["generation_context"]["personalization_basis"])
+                self.assertNotIn("把医生提醒设成复查和观察提醒", rendered)
 
     def test_birth_journey_plan_uses_high_impact_history_and_medical_fields(self) -> None:
         result = create_birth_journey_plan_card(
