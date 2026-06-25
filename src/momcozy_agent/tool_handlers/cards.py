@@ -2080,7 +2080,11 @@ def update_birth_journey_plan_todo(args: dict[str, Any], inputs: RuntimeInputs) 
 def manage_birth_journey_intake(args: dict[str, Any], inputs: RuntimeInputs) -> dict[str, Any]:
     action = str(args.get("action") or "get_state").strip() or "get_state"
     payload = _dict_value(args.get("payload")) or _confirmed_form_data(inputs)
-    if _confirmed_form_id(inputs) == "birth_journey_basic_info_intake" and _confirmed_form_data(inputs):
+    confirmed_basic_info_form = (
+        _confirmed_form_id(inputs) == "birth_journey_basic_info_intake"
+        and bool(_confirmed_form_data(inputs))
+    )
+    if confirmed_basic_info_form:
         action = "submit_basic_info"
     intake_state = _normalize_birth_journey_intake_state(_dict_value(inputs.get("_birth_journey_intake_state")))
     if action in {"start", "get_state"} and not intake_state.get("started"):
@@ -2094,6 +2098,7 @@ def manage_birth_journey_intake(args: dict[str, Any], inputs: RuntimeInputs) -> 
             intake_state.pop("personalized_followup_queue", None)
             intake_state.pop("active_personalized_followup_id", None)
             _persist_birth_prep_profile_memory(inputs, basic_info)
+        _fill_birth_journey_missing_basic_info_defaults(intake_state, inputs)
     elif action == "submit_entry_concern":
         intake_state["entry_concern_followup"] = _birth_journey_text_or_skipped(payload, "entry_concern_followup")
     elif action == "mark_checkup_records_uploaded":
@@ -2180,7 +2185,11 @@ def manage_birth_journey_intake(args: dict[str, Any], inputs: RuntimeInputs) -> 
     elif action == "complete":
         intake_state["completed"] = True
 
-    next_step = _birth_journey_intake_next_step(intake_state)
+    missing_basic_info_fields = _birth_journey_missing_required_basic_info_fields(
+        _birth_journey_intake_basic_context(intake_state)
+    )
+    needs_current_week_question = action == "submit_basic_info" and "current_week" in missing_basic_info_fields
+    next_step = "current_week_question" if needs_current_week_question else _birth_journey_intake_next_step(intake_state)
     intake_state["next_step"] = next_step
     intake_state["completed_groups"] = _birth_journey_intake_completed_groups(intake_state)
     plan_context = {**_birth_prep_shared_default_values(inputs), **_birth_journey_plan_context_from_intake(intake_state)}
@@ -2190,7 +2199,9 @@ def manage_birth_journey_intake(args: dict[str, Any], inputs: RuntimeInputs) -> 
     personalization_context = _birth_journey_personalization_context(intake_state)
     intake_state.pop("active_personalized_followup_id", None)
     status = _birth_journey_intake_status(next_step, intake_state)
+    missing_basic_info_labels = _birth_journey_basic_info_field_labels(missing_basic_info_fields)
     result: dict[str, Any] = {
+        "ok": True,
         "tool_name": "birth_journey_intake_manage",
         "status": status,
         "action": action,
@@ -2206,6 +2217,9 @@ def manage_birth_journey_intake(args: dict[str, Any], inputs: RuntimeInputs) -> 
             "personalization_tags": personalization_tags,
         },
     }
+    if missing_basic_info_fields:
+        result["missing_fields"] = missing_basic_info_fields
+        result["missing_field_labels"] = missing_basic_info_labels
     if next_step == "personalized_followup":
         result["data"]["personalization_context"] = personalization_context
     if next_step == "basic_info_form":
@@ -2854,6 +2868,20 @@ BIRTH_JOURNEY_BASIC_INFO_REQUIRED_ALIASES = {
     "first_birth": ("first_birth", "birth_prep_first_birth"),
     "birth_path": ("birth_path", "delivery_method"),
 }
+BIRTH_JOURNEY_BASIC_INFO_FALLBACK_VALUES = {
+    "ivf": "不确定/暂不说",
+    "fetus_count": "不确定/暂不说",
+    "age": "不确定/暂不说",
+    "first_birth": "不确定/暂不说",
+    "birth_path": "还没确定",
+}
+BIRTH_JOURNEY_BASIC_INFO_FIELD_LABELS = {
+    str(field["id"]): str(field.get("label") or field["id"]) for field in BIRTH_JOURNEY_BASIC_INFO_FIELDS
+}
+
+
+def _birth_journey_basic_info_field_labels(field_ids: list[str]) -> list[str]:
+    return [BIRTH_JOURNEY_BASIC_INFO_FIELD_LABELS.get(field_id, field_id) for field_id in field_ids]
 
 
 BIRTH_JOURNEY_SURVEY_FIELDS: tuple[dict[str, Any], ...] = (
@@ -3078,6 +3106,37 @@ def _birth_journey_missing_required_basic_info_fields(context: dict[str, Any]) -
         if not any(_birth_journey_basic_info_field_was_provided(context, alias) for alias in aliases):
             missing.append(field_id)
     return missing
+
+
+def _fill_birth_journey_missing_basic_info_defaults(state: dict[str, Any], inputs: RuntimeInputs) -> None:
+    basic_info = dict(_dict_value(state.get("basic_info")))
+    entry_values = _dict_value(state.get("entry_known_values"))
+    shared_defaults = _birth_prep_shared_default_values(inputs)
+    context = {
+        **shared_defaults,
+        **entry_values,
+        **basic_info,
+    }
+    for field_id in BIRTH_JOURNEY_BASIC_INFO_REQUIRED_FIELD_IDS:
+        aliases = BIRTH_JOURNEY_BASIC_INFO_REQUIRED_ALIASES.get(field_id, (field_id,))
+        state_context = {**entry_values, **basic_info}
+        if any(_birth_journey_basic_info_field_was_provided(state_context, alias) for alias in aliases):
+            continue
+        value = ""
+        if field_id == "current_week":
+            value = _birth_journey_default_current_week(context)
+        else:
+            for alias in aliases:
+                alias_value = _first_text(context.get(alias))
+                if alias_value:
+                    value = alias_value
+                    break
+            if not value:
+                value = BIRTH_JOURNEY_BASIC_INFO_FALLBACK_VALUES.get(field_id, "")
+        if value:
+            basic_info[field_id] = value
+            context[field_id] = value
+    state["basic_info"] = basic_info
 
 
 def _birth_journey_basic_info_field_was_provided(context: dict[str, Any], field_id: str) -> bool:
@@ -4008,6 +4067,7 @@ def _birth_journey_symptoms_need_pause(text: str) -> bool:
 def _birth_journey_intake_summary(next_step: str) -> str:
     summaries = {
         "basic_info_form": "需要先填写孕周与基本情况表单。",
+        "current_week_question": "基础信息已收到，但还缺当前孕周；只需要自然追问一句孕周。",
         "personalized_followup": "基础信息已记录，下一步由模型基于个性化上下文判断是否还需要补充一个核心事实。",
         "checkup_done_question": "基础信息已记录，孕早期先确认是否已经做过产检。",
         "checkup_records_upload": "基础信息已记录，下一步建议上传产检记录；报告不在手边可以先跳过。",
@@ -4021,6 +4081,7 @@ def _birth_journey_intake_summary(next_step: str) -> str:
 def _birth_journey_intake_instruction(next_step: str) -> str:
     instructions = {
         "basic_info_form": "最终回复说明基础信息表已打开，并温和解释这是为了后面更贴合用户情况地整理孕期计划；请用户简单填写知道的部分，不确定的地方选择表单里的兜底选项。不要在聊天里逐项追问这些字段。",
+        "current_week_question": "最终回复不要创建新表单，也不要说提交失败；只自然追问一句当前大概孕几周。用户给出大致周数即可继续推进孕期计划。",
         "checkup_done_question": "先用 initial_analysis 对基础信息做 1-2 句承接，然后只确认是否做过产检；如果做过，下一步再建议上传产检报告；如果没做过，可以先跳过报告上传。",
         "checkup_records_upload": "先用 initial_analysis 对基础信息做 1-2 句承接，然后建议用户上传最新一次或目前能找到的产检记录；如果报告不在手边也可以先跳过。",
         "final_plan_confirmation": "生成孕期计划前，只问一句：还有其他需要补充的信息吗？如果没有，我就基于目前的信息开始为你制定孕期计划啦。不要展开计划内容，也不要追加其它问题。",
@@ -4032,6 +4093,8 @@ def _birth_journey_intake_instruction(next_step: str) -> str:
 
 
 def _birth_journey_intake_question(next_step: str, plan_context: dict[str, Any], state: dict[str, Any]) -> str:
+    if next_step == "current_week_question":
+        return "你现在大概孕几周？如果不确定，说一个大致周数也可以。"
     if next_step == "checkup_done_question":
         week_text = str(plan_context.get("due_date_or_week") or plan_context.get("current_week") or "").strip()
         prefix = f"你现在是{week_text}，" if week_text else ""

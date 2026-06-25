@@ -5,6 +5,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Any
 
+from .config import openai_service_tier_request_kwargs
 from .contexts import HOSPITAL_BAG_SLOT_FIELDS, PROFILE_SLOT_FIELDS
 
 DEFAULT_SLOT_EXTRACTOR_MODEL = "gpt-5.4-mini"
@@ -54,6 +55,7 @@ class BirthPrepSlotExtractor:
             ],
             store=False,
             text={"format": {"type": "text"}},
+            **openai_service_tier_request_kwargs(),
         )
         return parse_slot_extractor_response_text(_response_text(response))
 

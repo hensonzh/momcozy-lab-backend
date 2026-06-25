@@ -223,6 +223,7 @@ class ResponsesRequest(TypedDict, total=False):
     instructions: str
     input: list[dict[str, Any]]
     previous_response_id: str
+    service_tier: Literal["auto", "default", "flex", "scale", "priority"]
     tools: list[ToolDefinition]
     tool_choice: Literal["auto"] | dict[str, Any]
     include: list[str]

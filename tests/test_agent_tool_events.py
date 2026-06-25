@@ -112,6 +112,18 @@ class AgentToolEventTests(unittest.TestCase):
         self.assertIn("Agent loop 过程中的中间判断、准备动作和工具选择不要写进正文", request["instructions"])
         self.assertIn("使用 `ui_quick_replies_create` 创建", request["instructions"])
 
+    def test_agent_request_omits_service_tier_when_env_is_unset(self) -> None:
+        with patch.dict(os.environ, {"MOMCOZY_OPENAI_SERVICE_TIER": ""}, clear=False):
+            request = build_agent_request({"user_message": "奶量够不够", "locale": "zh-CN"})
+
+        self.assertNotIn("service_tier", request)
+
+    def test_agent_request_uses_priority_service_tier_from_env(self) -> None:
+        with patch.dict(os.environ, {"MOMCOZY_OPENAI_SERVICE_TIER": "priority"}, clear=False):
+            request = build_agent_request({"user_message": "奶量够不够", "locale": "zh-CN"})
+
+        self.assertEqual(request["service_tier"], "priority")
+
     def test_tool_output_model_request_status_is_user_visible(self) -> None:
         event = status_custom_event(
             {

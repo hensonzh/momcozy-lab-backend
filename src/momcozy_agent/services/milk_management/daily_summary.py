@@ -5,7 +5,7 @@ import os
 from datetime import datetime, timedelta
 from typing import Any
 
-from ...config import get_openai_client_options, load_project_env
+from ...config import get_openai_client_options, load_project_env, openai_service_tier_request_kwargs
 from .db import fetch_one
 from .records import get_records_range
 from .schemas import ServiceResult, error_result, norm_text, ok_result, parse_datetime, to_int
@@ -253,6 +253,7 @@ def _request_llm_daily_summary(payload: dict[str, Any]) -> list[str] | None:
             text={"format": {"type": "text"}, "verbosity": "low"},
             store=False,
             prompt_cache_key="momcozy-daily-summary-v1",
+            **openai_service_tier_request_kwargs(),
         )
     except Exception:
         return None

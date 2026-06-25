@@ -3,6 +3,9 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+OPENAI_SERVICE_TIER_ENV = "MOMCOZY_OPENAI_SERVICE_TIER"
+OPENAI_SERVICE_TIER_VALUES = {"auto", "default", "flex", "scale", "priority"}
+
 
 def load_project_env(path: str | Path | None = None, *, override: bool = False) -> Path | None:
     env_path = Path(path) if path is not None else _find_env_file(Path.cwd())
@@ -37,6 +40,17 @@ def get_openai_client_options() -> dict[str, float | int]:
         "timeout": _float_env("MOMCOZY_OPENAI_TIMEOUT_SECONDS", 90.0),
         "max_retries": _int_env("MOMCOZY_OPENAI_MAX_RETRIES", 2),
     }
+
+
+def get_openai_service_tier() -> str | None:
+    """Optional Responses API service tier override for this app only."""
+    raw = os.environ.get(OPENAI_SERVICE_TIER_ENV, "").strip().lower()
+    return raw if raw in OPENAI_SERVICE_TIER_VALUES else None
+
+
+def openai_service_tier_request_kwargs() -> dict[str, str]:
+    service_tier = get_openai_service_tier()
+    return {"service_tier": service_tier} if service_tier else {}
 
 
 def _find_env_file(start: Path) -> Path | None:

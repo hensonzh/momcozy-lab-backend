@@ -5,7 +5,7 @@ import os
 from datetime import datetime
 from typing import Any
 
-from ...config import get_openai_client_options, load_project_env
+from ...config import get_openai_client_options, load_project_env, openai_service_tier_request_kwargs
 from .. import data_store
 from .assessment import evaluate_milk_status
 from .feeding import estimate_breastfeeding_milk
@@ -607,6 +607,7 @@ def _request_llm_status_advice(payload: dict[str, Any]) -> dict[str, str] | None
             text={"format": {"type": "text"}, "verbosity": "low"},
             store=False,
             prompt_cache_key="momcozy-status-advice-v4",
+            **openai_service_tier_request_kwargs(),
         )
     except Exception:
         return None

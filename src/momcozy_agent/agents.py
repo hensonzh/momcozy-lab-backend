@@ -12,6 +12,7 @@ from typing import Any
 from urllib.parse import unquote, urlsplit
 from uuid import uuid4
 
+from .config import get_openai_service_tier
 from .contexts import (
     ContextState,
     active_service_domain,
@@ -1116,6 +1117,7 @@ def safe_tool_result(result: dict[str, Any]) -> dict[str, Any]:
             "side_effect_performed",
             "summary",
             "missing_fields",
+            "missing_field_labels",
             "reason",
             "requires_confirmation",
             "confirmation_question",
@@ -1643,6 +1645,15 @@ def _compact_birth_journey_intake_output(safe: dict[str, Any], raw_result: dict[
             "field_count": len(fields) if isinstance(fields, list) else 0,
         }
         compact["final_response_instruction"] = _form_artifact_final_response_instruction("birth_journey_intake_manage")
+    elif next_step == "current_week_question":
+        if isinstance(safe.get("missing_fields"), list):
+            compact["missing_fields"] = safe["missing_fields"]
+        if isinstance(safe.get("missing_field_labels"), list):
+            compact["missing_field_labels"] = safe["missing_field_labels"]
+        compact["final_response_instruction"] = (
+            "基础信息表已收到，但当前孕周仍缺失。最终回复不要创建新表单，也不要说提交失败；"
+            "只自然追问一句用户现在大概孕几周。不要生成孕期计划。"
+        )
     elif safe.get("status") == "ready_to_generate":
         plan_context = tool_result.get("plan_context")
         if isinstance(plan_context, dict):
@@ -3702,6 +3713,9 @@ def _build_response_request(
         "store": options.get("store", True),
         "prompt_cache_key": options.get("prompt_cache_key", "momcozy-agent-v2"),
     }
+    service_tier = get_openai_service_tier()
+    if service_tier:
+        request["service_tier"] = service_tier
     if options.get("enable_tools", True):
         tools = select_runtime_tools(inputs)
         disabled_tool_names = _disabled_tool_names_from_options(options)

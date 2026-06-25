@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from momcozy_agent.agents import model_tool_output
+from momcozy_agent.agents import model_tool_output, safe_tool_result
 from momcozy_agent.contexts import build_request_context
 from momcozy_agent.services import data_store
 from momcozy_agent.tool_handlers.cards import (
@@ -1316,7 +1316,7 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
         self.assertEqual(result["next_step"], "checkup_records_upload")
         self.assertNotIn("待产包", json.dumps(result, ensure_ascii=False))
 
-    def test_birth_journey_confirmed_basic_form_requires_all_core_fields(self) -> None:
+    def test_birth_journey_confirmed_basic_form_defaults_missing_non_week_fields(self) -> None:
         inputs = {
             "user_message": (
                 "我已确认孕期计划基础信息。\n"
@@ -1329,10 +1329,47 @@ class BirthJourneyPlanCardTests(unittest.TestCase):
 
         result = manage_birth_journey_intake({}, inputs)
 
+        safe = safe_tool_result({"ok": True, "tool_name": "birth_journey_intake_manage", "result": result})
+        self.assertIs(safe["result_ok"], True)
         self.assertEqual(result["action"], "submit_basic_info")
-        self.assertEqual(result["next_step"], "basic_info_form")
-        self.assertEqual(result["form"]["id"], "birth_journey_basic_info_intake")
-        self.assertNotIn("basic_info", result["data"]["completed_groups"])
+        self.assertEqual(result["status"], "in_progress")
+        self.assertEqual(result["next_step"], "checkup_records_upload")
+        self.assertNotIn("form", result)
+        self.assertNotIn("missing_fields", result)
+        self.assertEqual(result["intake_state"]["basic_info"]["ivf"], "不确定/暂不说")
+        self.assertEqual(result["intake_state"]["basic_info"]["first_birth"], "不确定/暂不说")
+        self.assertEqual(result["intake_state"]["basic_info"]["birth_path"], "还没确定")
+        self.assertIn("basic_info", result["data"]["completed_groups"])
+
+        compact = model_tool_output({"ok": True, "tool_name": "birth_journey_intake_manage", "result": result})
+        self.assertEqual(compact["status"], "in_progress")
+        self.assertNotIn("form", compact)
+        self.assertEqual(compact["next_step"], "checkup_records_upload")
+
+    def test_birth_journey_confirmed_basic_form_missing_week_asks_one_question_without_form(self) -> None:
+        inputs = {
+            "user_message": (
+                "我已确认孕期计划基础信息。\n"
+                "form_id: birth_journey_basic_info_intake\n"
+                'confirmed_form_data:\n{"ivf":"否","fetus_count":"单胎","age":"31","first_birth":"是","birth_path":"还没确定"}'
+            ),
+            "message_sent_at": "2026-06-01T12:00:00+08:00",
+            "_birth_journey_intake_state": {},
+        }
+
+        result = manage_birth_journey_intake({}, inputs)
+
+        self.assertEqual(result["action"], "submit_basic_info")
+        self.assertEqual(result["status"], "in_progress")
+        self.assertEqual(result["next_step"], "current_week_question")
+        self.assertNotIn("form", result)
+        self.assertEqual(result["missing_fields"], ["current_week"])
+        self.assertIn("大概孕几周", result["data"]["confirmation_question"])
+
+        compact = model_tool_output({"ok": True, "tool_name": "birth_journey_intake_manage", "result": result})
+        self.assertEqual(compact["next_step"], "current_week_question")
+        self.assertNotIn("form", compact)
+        self.assertIn("不要创建新表单", compact["final_response_instruction"])
 
     def test_birth_journey_confirmed_basic_form_ignores_trailing_payload_text(self) -> None:
         inputs = {
