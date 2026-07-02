@@ -18,11 +18,13 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() ->
     repository = FakeRuntimeRepository(messages=[prior_user, prior_assistant, current_user], current_message=current_user)
     backend = CapturingSdkBackend(result=SdkNodeResult(final_text="Here is the summary."))
     checkpoint_store = FakeCheckpointStore()
+    state_store = FakeStateStore()
 
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
             checkpoint_store=checkpoint_store,
+            state_store=state_store,
             sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
         ).execute(run=run)
     )
@@ -39,6 +41,15 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() ->
     assert request.model_input[-1] == {"role": "user", "content": "Summarize it."}
     assert [checkpoint["state_summary"]["node_name"] for checkpoint in checkpoint_store.checkpoints] == ["sdk_reasoning", "finish"]
     assert checkpoint_store.checkpoints[0]["state_summary"]["current_user_message_id"] == str(current_user.id)
+    assert state_store.projections[0]["selected_message_ids"] == [prior_user.id, prior_assistant.id, current_user.id]
+    assert state_store.projections[0]["projection_summary"]["history_message_count"] == 2
+    assert state_store.projections[0]["projection_summary"]["state_keys"] == [
+        "actor_user_id",
+        "graph_version",
+        "run_id",
+        "runtime_pattern",
+        "thread_id",
+    ]
 
 
 def test_agent_runtime_executor_requires_current_user_message() -> None:
@@ -206,6 +217,14 @@ class FakeCheckpointStore:
 
     async def save_run_checkpoint(self, **kwargs):
         self.checkpoints.append(kwargs)
+
+
+class FakeStateStore:
+    def __init__(self) -> None:
+        self.projections = []
+
+    async def record_context_projection(self, **kwargs):
+        self.projections.append(kwargs)
 
 
 class FakeToolExecutor:

@@ -1,6 +1,6 @@
 from production_backend.app.infrastructure.db.base import Base
 from production_backend.app.infrastructure.db import models as _models
-from production_backend.app.modules.agent_runtime.models import ACTION_STATUSES, RUN_STATUSES, TOOL_CALL_STATUSES
+from production_backend.app.modules.agent_runtime.models import ACTION_STATUSES, RUN_STATUSES, TOOL_CALL_STATUSES, WORKFLOW_STATE_STATUSES
 
 
 def test_agent_runtime_ledger_tables_are_registered() -> None:
@@ -14,6 +14,8 @@ def test_agent_runtime_ledger_tables_are_registered() -> None:
         "agent_artifacts",
         "agent_actions",
         "agent_context_checkpoints",
+        "agent_workflow_states",
+        "agent_context_projections",
     }
 
     assert expected_tables.issubset(Base.metadata.tables)
@@ -25,6 +27,8 @@ def test_agent_runtime_run_and_action_statuses_include_waiting_and_no_queued_act
     assert "queued" not in ACTION_STATUSES
     assert "confirmation_required" in ACTION_STATUSES
     assert "timed_out" in TOOL_CALL_STATUSES
+    assert "collecting" in WORKFLOW_STATE_STATUSES
+    assert "completed" in WORKFLOW_STATE_STATUSES
 
 
 def test_agent_events_have_replay_envelope_columns_and_sequence_constraint() -> None:
@@ -55,6 +59,8 @@ def test_agent_ledger_has_no_provider_state_dependency_columns() -> None:
         "agent_tool_calls",
         "agent_events",
         "agent_context_checkpoints",
+        "agent_workflow_states",
+        "agent_context_projections",
     ):
         columns = set(Base.metadata.tables[table_name].columns.keys())
         assert columns.isdisjoint(forbidden)
@@ -63,7 +69,11 @@ def test_agent_ledger_has_no_provider_state_dependency_columns() -> None:
 def test_agent_actions_and_checkpoints_have_runtime_indexes() -> None:
     actions = Base.metadata.tables["agent_actions"]
     checkpoints = Base.metadata.tables["agent_context_checkpoints"]
+    workflow_states = Base.metadata.tables["agent_workflow_states"]
+    context_projections = Base.metadata.tables["agent_context_projections"]
 
     assert "ix_agent_actions_run_status" in {index.name for index in actions.indexes}
     assert "ix_agent_actions_idempotency_key" in {index.name for index in actions.indexes}
     assert "uq_agent_context_checkpoints_namespace_id" in {constraint.name for constraint in checkpoints.constraints}
+    assert "ix_agent_workflow_states_owner_type_status" in {index.name for index in workflow_states.indexes}
+    assert "ix_agent_context_projections_run_created" in {index.name for index in context_projections.indexes}

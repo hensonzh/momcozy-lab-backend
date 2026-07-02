@@ -6,6 +6,7 @@ from .models import (
     AgentAction,
     AgentArtifact,
     AgentContextCheckpoint,
+    AgentContextProjection,
     AgentEvalCase,
     AgentEvent,
     AgentMessage,
@@ -14,10 +15,12 @@ from .models import (
     AgentThread,
     AgentToolCall,
     AgentToolOutput,
+    AgentWorkflowState,
 )
 from .runtime import AgentRuntimeExecutor, AgentRuntimeExecutorConfig
 from .replay import AgentReplayService
 from .service import AgentRuntimeService
+from .state_store import AgentRuntimeStateStore
 
 __all__ = [
     "AgentAction",
@@ -28,6 +31,7 @@ __all__ = [
     "AgentRunExecutionResult",
     "GraphCheckpointRef",
     "AgentContextCheckpoint",
+    "AgentContextProjection",
     "AgentEvalCase",
     "AgentEvent",
     "AgentMessage",
@@ -36,8 +40,10 @@ __all__ = [
     "AgentThread",
     "AgentToolCall",
     "AgentToolOutput",
+    "AgentWorkflowState",
     "AgentRuntimeExecutor",
     "AgentRuntimeExecutorConfig",
+    "AgentRuntimeStateStore",
     "AgentReplayService",
     "AgentRuntimeService",
 ]

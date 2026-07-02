@@ -15,6 +15,7 @@ from production_backend.app.modules.agent_runtime.runtime import AgentRuntimeExe
 from production_backend.app.modules.agent_runtime.safety import AgentSafetyService
 from production_backend.app.modules.agent_runtime.sdk import OpenAIAgentsSdkRunner
 from production_backend.app.modules.agent_runtime.service import AgentRuntimeService
+from production_backend.app.modules.agent_runtime.state_store import AgentRuntimeStateStore
 from production_backend.app.modules.agent_runtime.tools import ToolExecutor, build_default_tool_handlers, default_tool_registry
 from production_backend.app.modules.audit import AuditService, IdempotencyService, OutboxService
 from production_backend.app.modules.audit.repository import AuditRepository, OutboxRepository
@@ -68,6 +69,7 @@ async def run_agent_worker(
                 handler = AgentRuntimeExecutor(
                     repository=repository,
                     checkpoint_store=AgentGraphCheckpointStore(repository=repository),
+                    state_store=AgentRuntimeStateStore(repository=repository),
                     tool_registry=tool_registry,
                     tool_executor=tool_executor,
                     sdk_runner=OpenAIAgentsSdkRunner(model=resolved_settings.openai_model),

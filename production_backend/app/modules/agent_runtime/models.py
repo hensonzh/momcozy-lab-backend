@@ -15,6 +15,7 @@ from ...infrastructure.db.base import Base
 RUN_STATUSES = ("queued", "running", "waiting_for_confirmation", "completed", "failed", "cancelled", "expired")
 ACTION_STATUSES = ("proposed", "confirmation_required", "confirmed", "applying", "applied", "rejected", "failed", "expired")
 TOOL_CALL_STATUSES = ("started", "completed", "failed", "skipped", "blocked", "timed_out")
+WORKFLOW_STATE_STATUSES = ("collecting", "ready", "waiting", "paused", "completed", "expired", "failed")
 
 
 class AgentThread(Base):
@@ -266,6 +267,85 @@ class AgentContextCheckpoint(Base):
         server_default=text("'{}'::jsonb"),
         nullable=False,
     )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class AgentWorkflowState(Base):
+    __tablename__ = "agent_workflow_states"
+    __table_args__ = (
+        Index("ix_agent_workflow_states_thread_status", "thread_id", "status"),
+        Index("ix_agent_workflow_states_owner_type_status", "owner_user_id", "workflow_type", "status"),
+        Index("ix_agent_workflow_states_run_created", "run_id", "created_at"),
+        Index("ix_agent_workflow_states_expires_at", "expires_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    thread_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("agent_threads.id"), nullable=False)
+    owner_user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    run_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("agent_runs.id"), nullable=True)
+    workflow_type: Mapped[str] = mapped_column(String(120), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="collecting", server_default="collecting", nullable=False)
+    schema_version: Mapped[str] = mapped_column(String(80), default="v1", server_default="v1", nullable=False)
+    state: Mapped[dict[str, Any]] = mapped_column(
+        "state_json",
+        postgresql.JSONB,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
+        nullable=False,
+    )
+    active_step: Mapped[str] = mapped_column(String(120), default="", server_default="", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+
+class AgentContextProjection(Base):
+    __tablename__ = "agent_context_projections"
+    __table_args__ = (
+        Index("ix_agent_context_projections_run_created", "run_id", "created_at"),
+        Index("ix_agent_context_projections_thread_created", "thread_id", "created_at"),
+        Index("ix_agent_context_projections_workflow", "active_workflow_state_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    run_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("agent_runs.id"), nullable=False)
+    thread_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("agent_threads.id"), nullable=False)
+    context_schema_version: Mapped[str] = mapped_column(String(80), default="v1", server_default="v1", nullable=False)
+    prompt_version: Mapped[str] = mapped_column(String(80), default="", server_default="", nullable=False)
+    tool_schema_version: Mapped[str] = mapped_column(String(80), default="", server_default="", nullable=False)
+    selected_message_ids: Mapped[list[Any]] = mapped_column(
+        "selected_message_ids_json",
+        postgresql.JSONB,
+        default=list,
+        server_default=text("'[]'::jsonb"),
+        nullable=False,
+    )
+    active_workflow_state_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("agent_workflow_states.id"),
+        nullable=True,
+    )
+    source_refs: Mapped[dict[str, Any]] = mapped_column(
+        "source_refs_json",
+        postgresql.JSONB,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
+        nullable=False,
+    )
+    projection_summary: Mapped[dict[str, Any]] = mapped_column(
+        "projection_summary_json",
+        postgresql.JSONB,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
+        nullable=False,
+    )
+    token_estimate: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 

@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .models import (
     AgentAction,
     AgentContextCheckpoint,
+    AgentContextProjection,
     AgentEvent,
     AgentEvalCase,
     AgentMessage,
@@ -18,6 +19,7 @@ from .models import (
     AgentThread,
     AgentToolCall,
     AgentToolOutput,
+    AgentWorkflowState,
 )
 
 
@@ -417,6 +419,127 @@ class AgentRuntimeRepository:
             .limit(1)
         )
         return cast(AgentContextCheckpoint | None, await self.session.scalar(statement))
+
+    async def create_workflow_state(
+        self,
+        *,
+        thread_id: UUID,
+        owner_user_id: UUID,
+        run_id: UUID | None,
+        workflow_type: str,
+        status: str,
+        schema_version: str,
+        state: dict[str, Any],
+        active_step: str,
+        expires_at: datetime | None,
+    ) -> AgentWorkflowState:
+        workflow_state = AgentWorkflowState(
+            thread_id=thread_id,
+            owner_user_id=owner_user_id,
+            run_id=run_id,
+            workflow_type=workflow_type,
+            status=status,
+            schema_version=schema_version,
+            state=state,
+            active_step=active_step,
+            expires_at=expires_at,
+        )
+        self.session.add(workflow_state)
+        await self.session.flush()
+        return workflow_state
+
+    async def update_workflow_state(
+        self,
+        *,
+        workflow_state: AgentWorkflowState,
+        status: str | None = None,
+        state: dict[str, Any] | None = None,
+        active_step: str | None = None,
+        completed_at: datetime | None = None,
+        expires_at: datetime | None = None,
+    ) -> AgentWorkflowState:
+        if status is not None:
+            workflow_state.status = status
+        if state is not None:
+            workflow_state.state = state
+        if active_step is not None:
+            workflow_state.active_step = active_step
+        if completed_at is not None:
+            workflow_state.completed_at = completed_at
+        if expires_at is not None:
+            workflow_state.expires_at = expires_at
+        await self.session.flush()
+        return workflow_state
+
+    async def get_workflow_state_for_owner(
+        self,
+        *,
+        workflow_state_id: UUID,
+        owner_user_id: UUID,
+    ) -> AgentWorkflowState | None:
+        statement = select(AgentWorkflowState).where(
+            AgentWorkflowState.id == workflow_state_id,
+            AgentWorkflowState.owner_user_id == owner_user_id,
+        )
+        return cast(AgentWorkflowState | None, await self.session.scalar(statement))
+
+    async def get_latest_workflow_state_for_thread(
+        self,
+        *,
+        thread_id: UUID,
+        owner_user_id: UUID,
+        workflow_type: str,
+    ) -> AgentWorkflowState | None:
+        statement = (
+            select(AgentWorkflowState)
+            .where(
+                AgentWorkflowState.thread_id == thread_id,
+                AgentWorkflowState.owner_user_id == owner_user_id,
+                AgentWorkflowState.workflow_type == workflow_type,
+            )
+            .order_by(AgentWorkflowState.updated_at.desc(), AgentWorkflowState.id.desc())
+            .limit(1)
+        )
+        return cast(AgentWorkflowState | None, await self.session.scalar(statement))
+
+    async def create_context_projection(
+        self,
+        *,
+        run_id: UUID,
+        thread_id: UUID,
+        context_schema_version: str,
+        prompt_version: str,
+        tool_schema_version: str,
+        selected_message_ids: list[Any],
+        active_workflow_state_id: UUID | None,
+        source_refs: dict[str, Any],
+        projection_summary: dict[str, Any],
+        token_estimate: int,
+    ) -> AgentContextProjection:
+        projection = AgentContextProjection(
+            run_id=run_id,
+            thread_id=thread_id,
+            context_schema_version=context_schema_version,
+            prompt_version=prompt_version,
+            tool_schema_version=tool_schema_version,
+            selected_message_ids=selected_message_ids,
+            active_workflow_state_id=active_workflow_state_id,
+            source_refs=source_refs,
+            projection_summary=projection_summary,
+            token_estimate=token_estimate,
+        )
+        self.session.add(projection)
+        await self.session.flush()
+        return projection
+
+    async def get_latest_context_projection_for_run(self, *, run_id: UUID) -> AgentContextProjection | None:
+        statement = (
+            select(AgentContextProjection)
+            .where(AgentContextProjection.run_id == run_id)
+            .order_by(AgentContextProjection.created_at.desc(), AgentContextProjection.id.desc())
+            .limit(1)
+        )
+        return cast(AgentContextProjection | None, await self.session.scalar(statement))
 
     async def list_safety_events_for_run(self, *, run_id: UUID) -> list[AgentSafetyEvent]:
         statement = select(AgentSafetyEvent).where(AgentSafetyEvent.run_id == run_id).order_by(AgentSafetyEvent.created_at, AgentSafetyEvent.id)

@@ -13,6 +13,7 @@ from .models import AgentAction, AgentMessage, AgentRun
 from .prompts import ContextProjection, ModelInputBuilder
 from .repository import AgentRuntimeRepository
 from .sdk import OpenAIAgentsSdkRunner, SdkNodeRequest, SdkToolDefinition, sdk_tool_name
+from .state_store import AgentRuntimeStateStore
 from .tools import ToolContractRegistry, ToolExecutor, default_tool_registry
 
 
@@ -37,6 +38,7 @@ class AgentRuntimeExecutor:
         sdk_runner: OpenAIAgentsSdkRunner,
         graph_registry: AgentGraphRegistry | None = None,
         checkpoint_store: AgentGraphCheckpointStore | None = None,
+        state_store: AgentRuntimeStateStore | None = None,
         tool_registry: ToolContractRegistry | None = None,
         tool_executor: ToolExecutor | None = None,
         input_builder: ModelInputBuilder | None = None,
@@ -46,6 +48,7 @@ class AgentRuntimeExecutor:
         self.sdk_runner = sdk_runner
         self.graph_registry = graph_registry or default_graph_registry()
         self.checkpoint_store = checkpoint_store
+        self.state_store = state_store
         self.tool_registry = tool_registry or default_tool_registry()
         self.tool_executor = tool_executor
         self.input_builder = input_builder or ModelInputBuilder()
@@ -81,6 +84,7 @@ class AgentRuntimeExecutor:
             projection=projection,
             current_user_message=_to_model_message(current_message),
         )
+        await self._record_context_projection(run=run, messages=messages, current_message=current_message, projection=projection)
         await self._save_checkpoint(
             run=run,
             node_name="sdk_reasoning",
@@ -231,6 +235,33 @@ class AgentRuntimeExecutor:
                 "current_user_message_id": current_user_message_id,
                 **state_summary,
             },
+        )
+
+    async def _record_context_projection(
+        self,
+        *,
+        run: AgentRun,
+        messages: list[AgentMessage],
+        current_message: AgentMessage,
+        projection: ContextProjection,
+    ) -> None:
+        if self.state_store is None:
+            return
+        selected_history = [message for message in messages if message.sequence < current_message.sequence and message.role in {"user", "assistant"}]
+        await self.state_store.record_context_projection(
+            run=run,
+            selected_message_ids=[message.id for message in [*selected_history, current_message]],
+            source_refs={
+                "thread_id": str(run.thread_id),
+                "run_id": str(run.id),
+                "current_message_id": str(current_message.id),
+            },
+            projection_summary={
+                "history_message_count": len(selected_history),
+                "state_keys": sorted(projection.current_state_projection),
+                "fresh_business_fact_keys": sorted(projection.fresh_business_facts),
+            },
+            tool_schema_version="default",
         )
 
 
