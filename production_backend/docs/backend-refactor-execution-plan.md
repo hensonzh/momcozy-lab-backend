@@ -383,6 +383,9 @@ Completed:
   both the action and outbox job.
 - Agent action stream events now include user-visible `preview_payload` and
   merge metadata while keeping `apply_payload` server-side only.
+- Agent active-run guard: run creation now rejects a second non-terminal run on
+  the same thread at the service layer, with a PostgreSQL partial unique index
+  as the final concurrency guard.
 
 ### Phase 7: Safety, Observability, And Eval
 
@@ -517,6 +520,8 @@ Completed backend commits have established:
   outbox jobs
 - optional follow mode for agent SSE streams, preserving default replay
   semantics while allowing clients to wait for terminal run events
+- active-run guard for agent threads, backed by a PostgreSQL partial unique
+  index over queued/running/waiting runs
 - OpenAPI schema export script, generated schema snapshot, and API handoff
   document for Flutter integration
 - Auth/token API contract tests for token response shape, validation envelope,

@@ -13,6 +13,7 @@ from ...infrastructure.db.base import Base
 
 
 RUN_STATUSES = ("queued", "running", "waiting_for_confirmation", "completed", "failed", "cancelled", "expired")
+ACTIVE_RUN_STATUSES = ("queued", "running", "waiting_for_confirmation")
 ACTION_STATUSES = ("proposed", "confirmation_required", "confirmed", "applying", "applied", "rejected", "failed", "expired")
 TOOL_CALL_STATUSES = ("started", "completed", "failed", "skipped", "blocked", "timed_out")
 WORKFLOW_STATE_STATUSES = ("collecting", "ready", "waiting", "paused", "completed", "expired", "failed")
@@ -52,6 +53,12 @@ class AgentRun(Base):
         Index("ix_agent_runs_actor_status_started", "actor_user_id", "status", "started_at"),
         Index("ix_agent_runs_request_id", "request_id"),
         Index("ix_agent_runs_trace_id", "trace_id"),
+        Index(
+            "uq_agent_runs_thread_active",
+            "thread_id",
+            unique=True,
+            postgresql_where=text("status IN ('queued', 'running', 'waiting_for_confirmation')"),
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)

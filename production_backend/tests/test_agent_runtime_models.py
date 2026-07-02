@@ -1,6 +1,12 @@
 from production_backend.app.infrastructure.db.base import Base
 from production_backend.app.infrastructure.db import models as _models
-from production_backend.app.modules.agent_runtime.models import ACTION_STATUSES, RUN_STATUSES, TOOL_CALL_STATUSES, WORKFLOW_STATE_STATUSES
+from production_backend.app.modules.agent_runtime.models import (
+    ACTION_STATUSES,
+    ACTIVE_RUN_STATUSES,
+    RUN_STATUSES,
+    TOOL_CALL_STATUSES,
+    WORKFLOW_STATE_STATUSES,
+)
 
 
 def test_agent_runtime_ledger_tables_are_registered() -> None:
@@ -24,6 +30,7 @@ def test_agent_runtime_ledger_tables_are_registered() -> None:
 def test_agent_runtime_run_and_action_statuses_include_waiting_and_no_queued_action() -> None:
     assert "waiting_for_confirmation" in RUN_STATUSES
     assert "queued" in RUN_STATUSES
+    assert ACTIVE_RUN_STATUSES == ("queued", "running", "waiting_for_confirmation")
     assert "queued" not in ACTION_STATUSES
     assert "confirmation_required" in ACTION_STATUSES
     assert "timed_out" in TOOL_CALL_STATUSES
@@ -67,11 +74,13 @@ def test_agent_ledger_has_no_provider_state_dependency_columns() -> None:
 
 
 def test_agent_actions_and_checkpoints_have_runtime_indexes() -> None:
+    runs = Base.metadata.tables["agent_runs"]
     actions = Base.metadata.tables["agent_actions"]
     checkpoints = Base.metadata.tables["agent_context_checkpoints"]
     workflow_states = Base.metadata.tables["agent_workflow_states"]
     context_projections = Base.metadata.tables["agent_context_projections"]
 
+    assert "uq_agent_runs_thread_active" in {index.name for index in runs.indexes}
     assert "ix_agent_actions_run_status" in {index.name for index in actions.indexes}
     assert "ix_agent_actions_idempotency_key" in {index.name for index in actions.indexes}
     assert "uq_agent_context_checkpoints_namespace_id" in {constraint.name for constraint in checkpoints.constraints}

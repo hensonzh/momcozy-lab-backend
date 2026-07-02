@@ -8,6 +8,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import (
+    ACTIVE_RUN_STATUSES,
     AgentAction,
     AgentArtifact,
     AgentContextCheckpoint,
@@ -92,6 +93,21 @@ class AgentRuntimeRepository:
 
     async def get_run(self, *, run_id: UUID) -> AgentRun | None:
         statement = select(AgentRun).where(AgentRun.id == run_id).execution_options(populate_existing=True)
+        return cast(AgentRun | None, await self.session.scalar(statement))
+
+    async def get_active_run_for_thread(self, *, thread_id: UUID, owner_user_id: UUID) -> AgentRun | None:
+        statement = (
+            select(AgentRun)
+            .join(AgentThread, AgentThread.id == AgentRun.thread_id)
+            .where(
+                AgentRun.thread_id == thread_id,
+                AgentRun.status.in_(ACTIVE_RUN_STATUSES),
+                AgentThread.owner_user_id == owner_user_id,
+                AgentThread.deleted_at.is_(None),
+            )
+            .order_by(AgentRun.created_at.asc(), AgentRun.id.asc())
+            .limit(1)
+        )
         return cast(AgentRun | None, await self.session.scalar(statement))
 
     async def refresh_run(self, *, run: AgentRun) -> AgentRun:

@@ -96,6 +96,7 @@ class AgentRuntimeService:
             return await self._replay_run(owner_user_id=actor_user_id, response_ref=idempotency_record.response_ref)
 
         thread = await self._get_or_create_thread(actor_user_id=actor_user_id, thread_id=thread_id, title=_title_from_message(normalized_message))
+        await self._ensure_no_active_thread_run(owner_user_id=actor_user_id, thread_id=thread.id)
         run = await self.repository.create_run(
             thread_id=thread.id,
             actor_user_id=actor_user_id,
@@ -367,6 +368,17 @@ class AgentRuntimeService:
         if thread is None:
             raise ApiError(code="not_found", message="Agent thread not found.", status=404)
         return thread
+
+    async def _ensure_no_active_thread_run(self, *, owner_user_id: UUID, thread_id: UUID) -> None:
+        active_run = await self.repository.get_active_run_for_thread(thread_id=thread_id, owner_user_id=owner_user_id)
+        if active_run is None:
+            return
+        raise ApiError(
+            code="agent_run_in_progress",
+            message="An agent run is already active for this thread.",
+            status=409,
+            details={"run_id": str(active_run.id), "status": active_run.status},
+        )
 
     async def _append_event(self, *, thread_id: UUID, run_id: UUID, event_type: str, payload: dict[str, Any]) -> AgentEvent:
         event = await self.repository.append_event(thread_id=thread_id, run_id=run_id, event_type=event_type, payload=payload)

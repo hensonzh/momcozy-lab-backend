@@ -2,6 +2,9 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
+import pytest
+
+from production_backend.app.core.errors import ApiError
 from production_backend.app.modules.agent_runtime.models import AgentEvent, AgentMessage, AgentRun, AgentSafetyEvent, AgentThread
 from production_backend.app.modules.agent_runtime.safety import AgentSafetyService
 from production_backend.app.modules.agent_runtime.service import AgentRuntimeService
@@ -88,6 +91,35 @@ def test_agent_runtime_service_blocks_unsafe_run_before_queueing_model_work() ->
     assert [event.event_type for event in repository.events] == ["message.completed", "safety.blocked", "run.failed"]
 
 
+def test_agent_runtime_service_rejects_second_active_run_for_thread() -> None:
+    owner_user_id = uuid4()
+    repository = FakeAgentRuntimeRepository()
+    service = AgentRuntimeService(repository=repository)
+    first_run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="First"))
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=repository.thread.id, message="Second"))
+
+    assert exc_info.value.code == "agent_run_in_progress"
+    assert exc_info.value.status == 409
+    assert exc_info.value.details == {"run_id": str(first_run.id), "status": "queued"}
+    assert len(repository.runs) == 1
+
+
+def test_agent_runtime_service_allows_new_run_after_previous_terminal() -> None:
+    owner_user_id = uuid4()
+    repository = FakeAgentRuntimeRepository()
+    service = AgentRuntimeService(repository=repository)
+    first_run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="First"))
+    first_run.status = "completed"
+
+    second_run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=repository.thread.id, message="Second"))
+
+    assert second_run.id != first_run.id
+    assert second_run.thread_id == first_run.thread_id
+    assert len(repository.runs) == 2
+
+
 def _thread(*, owner_user_id: UUID) -> AgentThread:
     return AgentThread(id=uuid4(), owner_user_id=owner_user_id, title="Thread", status="active", metadata_json={})
 
@@ -112,6 +144,7 @@ class FakeAgentRuntimeRepository:
     def __init__(self) -> None:
         self.thread = None
         self.run = None
+        self.runs = []
         self.messages = []
         self.events = []
         self.safety_event = None
@@ -134,10 +167,23 @@ class FakeAgentRuntimeRepository:
         self.run.graph_version = kwargs["graph_version"]
         self.run.prompt_version = kwargs["prompt_version"]
         self.run.request_id = kwargs["request_id"]
+        self.runs.append(self.run)
         return self.run
 
     async def get_run_for_owner(self, **kwargs):
         return self.run
+
+    async def get_active_run_for_thread(self, **kwargs):
+        return next(
+            (
+                run
+                for run in self.runs
+                if run.thread_id == kwargs["thread_id"]
+                and run.actor_user_id == kwargs["owner_user_id"]
+                and run.status in {"queued", "running", "waiting_for_confirmation"}
+            ),
+            None,
+        )
 
     async def create_message(self, **kwargs):
         message = AgentMessage(
