@@ -142,12 +142,12 @@ Completed:
 - `audit_logs` model and migration.
 - `idempotency_keys` model and migration.
 - `outbox_jobs` model and migration.
+- Audit and idempotency services.
 
 Remaining:
 
 - File listing, deletion, and object-storage cleanup flows.
-- Audit repository/service.
-- Idempotency repository/service.
+- Route-level audit/idempotency integration for migrated writes.
 - Outbox repository/service, worker skeleton, retry policy, and DLQ fields.
 - API-level `Idempotency-Key` handling for retryable writes.
 
