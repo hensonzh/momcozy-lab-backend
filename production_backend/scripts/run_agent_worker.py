@@ -88,7 +88,7 @@ async def run_agent_worker(
                     idempotency_service=IdempotencyService(repository=audit_repository),
                 )
                 tool_registry = default_tool_registry()
-                event_sink = AgentEventSink(repository=repository, controls=controls)
+                event_sink = AgentEventSink(repository=repository, controls=controls, after_append=session.commit)
                 tool_executor = ToolExecutor(
                     registry=tool_registry,
                     repository=repository,
@@ -114,7 +114,12 @@ async def run_agent_worker(
                 )
                 worker = AgentRunQueueWorker(
                     repository=repository,
-                    run_worker=AgentRunWorker(repository=repository, controls=controls, handler=handler),
+                    run_worker=AgentRunWorker(
+                        repository=repository,
+                        controls=controls,
+                        handler=handler,
+                        after_event_append=session.commit,
+                    ),
                     batch_limit=resolved_settings.agent_runtime_worker_batch_limit,
                     recover_running_older_than_seconds=resolved_settings.agent_runtime_recover_running_older_than_seconds,
                 )

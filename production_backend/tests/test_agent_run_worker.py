@@ -9,12 +9,16 @@ from production_backend.app.workers.agent_run import AgentRunQueueWorker, AgentR
 def test_agent_run_worker_completes_run_with_assistant_message_events_and_lock() -> None:
     repository = FakeAgentRuntimeRepository()
     controls = FakeAgentRunControls()
+    commits = []
 
     async def handler(run: AgentRun) -> AgentRunWorkerResult:
         assert run.status == "running"
         return AgentRunWorkerResult(status="completed", final_text="Here is the summary.")
 
-    worker = AgentRunWorker(repository=repository, controls=controls, handler=handler)
+    async def after_event_append() -> None:
+        commits.append("commit")
+
+    worker = AgentRunWorker(repository=repository, controls=controls, handler=handler, after_event_append=after_event_append)
 
     run = asyncio.run(worker.run_once(run_id=repository.run.id))
 
@@ -22,6 +26,7 @@ def test_agent_run_worker_completes_run_with_assistant_message_events_and_lock()
     assert run.status == "completed"
     assert [event.event_type for event in repository.events] == ["run.started", "message.completed", "run.completed"]
     assert repository.messages[0].content == {"text": "Here is the summary."}
+    assert commits == ["commit", "commit", "commit"]
     assert controls.lock_released is True
     assert controls.cleared_active_run == (repository.run.thread_id, repository.run.id)
     assert controls.stream_cursor == (repository.run.id, 3)

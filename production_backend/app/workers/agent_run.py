@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
@@ -73,10 +74,12 @@ class AgentRunWorker:
         repository: AgentRuntimeRepository,
         controls: AgentRunControls | None = None,
         handler: AgentRunHandler | None = None,
+        after_event_append: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         self.repository = repository
         self.controls = controls
         self.handler = handler or missing_agent_run_handler
+        self.after_event_append = after_event_append
 
     async def run_once(self, *, run_id: UUID) -> AgentRun | None:
         run = await self.repository.get_run(run_id=run_id)
@@ -168,6 +171,8 @@ class AgentRunWorker:
         event = await self.repository.append_event(thread_id=run.thread_id, run_id=run.id, event_type=event_type, payload=payload)
         if self.controls is not None:
             await self.controls.set_stream_cursor(run_id=run.id, sequence=event.sequence)
+        if self.after_event_append is not None:
+            await self.after_event_append()
         return event
 
     async def _clear_controls(self, run: AgentRun) -> None:

@@ -8,10 +8,14 @@ from production_backend.app.modules.agent_runtime.models import AgentEvent
 def test_agent_event_sink_appends_event_and_updates_stream_cursor() -> None:
     repository = FakeEventRepository()
     controls = FakeControls()
+    commits = []
     run_id = uuid4()
 
+    async def after_append() -> None:
+        commits.append("commit")
+
     event = asyncio.run(
-        AgentEventSink(repository=repository, controls=controls).append_event(
+        AgentEventSink(repository=repository, controls=controls, after_append=after_append).append_event(
             thread_id=uuid4(),
             run_id=run_id,
             event_type="tool.completed",
@@ -22,6 +26,7 @@ def test_agent_event_sink_appends_event_and_updates_stream_cursor() -> None:
     assert event.sequence == 1
     assert repository.events == [event]
     assert controls.stream_cursor == (run_id, 1)
+    assert commits == ["commit"]
 
 
 class FakeEventRepository:
