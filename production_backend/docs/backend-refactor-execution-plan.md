@@ -190,11 +190,12 @@ Completed:
   audit on writes.
 - Devices data foundation: owner-scoped pump device metadata and pump telemetry
   events.
+- Devices API: owner-scoped pump upsert/list and telemetry ingest/list with
+  audit and idempotent telemetry ingest.
 
 Suggested order:
 
-1. Devices and pump telemetry APIs.
-2. Notifications and support tickets.
+1. Notifications and support tickets.
 
 Rules:
 

@@ -6,6 +6,7 @@ from fastapi import APIRouter, Request
 from sqlalchemy import text
 
 from ...core.errors import ApiError
+from ...modules.devices.router import router as devices_router
 from ...modules.diary.router import router as diary_router
 from ...modules.files.router import router as files_router
 from ...modules.plans.router import router as plans_router
@@ -13,6 +14,7 @@ from ...modules.profiles.router import router as profiles_router
 from ...modules.records.router import router as records_router
 
 router = APIRouter(prefix="/v1")
+router.include_router(devices_router)
 router.include_router(diary_router)
 router.include_router(files_router)
 router.include_router(plans_router)
