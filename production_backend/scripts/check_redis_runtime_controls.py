@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import json
 import sys
+from contextlib import suppress
 from pathlib import Path
 from uuid import uuid4
 
@@ -24,9 +25,11 @@ async def run_check() -> dict[str, object]:
     thread_id = uuid4()
     run_id = uuid4()
     owner_token = uuid4().hex
+    connected = False
 
     try:
         await client.ping()
+        connected = True
 
         await controls.set_active_run(thread_id=thread_id, run_id=run_id, ttl_seconds=60)
         await controls.request_cancel(run_id=run_id, ttl_seconds=60)
@@ -57,10 +60,12 @@ async def run_check() -> dict[str, object]:
             ],
         }
     finally:
-        await controls.clear_active_run(thread_id=thread_id, run_id=run_id)
-        await controls.clear_cancel(run_id=run_id)
-        await controls.clear_stream_cursor(run_id=run_id)
-        await controls.release_run_lock(run_id=run_id, owner_token=owner_token)
+        if connected:
+            with suppress(Exception):
+                await controls.clear_active_run(thread_id=thread_id, run_id=run_id)
+                await controls.clear_cancel(run_id=run_id)
+                await controls.clear_stream_cursor(run_id=run_id)
+                await controls.release_run_lock(run_id=run_id, owner_token=owner_token)
         await close_redis_client(client)
 
 
