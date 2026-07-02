@@ -1,0 +1,104 @@
+from datetime import date
+from uuid import UUID, uuid4
+
+from fastapi.testclient import TestClient
+
+from production_backend.app.core.settings import Settings
+from production_backend.app.factory import create_app
+from production_backend.app.modules.auth import CurrentUser
+from production_backend.app.modules.diary.models import PregnancyDiaryEntry
+from production_backend.app.modules.diary.router import get_diary_service
+
+
+def test_diary_entries_require_current_user() -> None:
+    response = TestClient(create_app(Settings(app_env="test"))).get("/v1/pregnancy-diary/entries")
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "authentication_required"
+
+
+def test_upsert_entry_uses_current_user_and_request_id() -> None:
+    user_id = uuid4()
+    fake_service = FakeDiaryService(user_id=user_id)
+    app = create_app(Settings(app_env="test"))
+    _override_current_user(app, user_id)
+    app.dependency_overrides[get_diary_service] = lambda: fake_service
+
+    response = TestClient(app).put(
+        "/v1/pregnancy-diary/entries/2026-07-02",
+        headers={"X-Request-ID": "req_diary"},
+        json={"mood": "calm"},
+    )
+
+    assert response.status_code == 200
+    assert fake_service.upsert_kwargs["owner_user_id"] == user_id
+    assert fake_service.upsert_kwargs["request_id"] == "req_diary"
+
+
+def test_list_and_delete_entries_use_current_user_scope() -> None:
+    user_id = uuid4()
+    fake_service = FakeDiaryService(user_id=user_id)
+    app = create_app(Settings(app_env="test"))
+    _override_current_user(app, user_id)
+    app.dependency_overrides[get_diary_service] = lambda: fake_service
+
+    list_response = TestClient(app).get("/v1/pregnancy-diary/entries?limit=10")
+    delete_response = TestClient(app).delete(
+        "/v1/pregnancy-diary/entries/2026-07-02",
+        headers={"X-Request-ID": "req_delete"},
+    )
+
+    assert list_response.status_code == 200
+    assert delete_response.status_code == 204
+    assert fake_service.list_kwargs["owner_user_id"] == user_id
+    assert fake_service.list_kwargs["limit"] == 10
+    assert fake_service.delete_kwargs["request_id"] == "req_delete"
+
+
+def _override_current_user(app, user_id: UUID) -> None:
+    from production_backend.app.api.dependencies import require_current_user
+
+    async def fake_current_user() -> CurrentUser:
+        return CurrentUser(
+            user_id=user_id,
+            subject=str(user_id),
+            session_id="session",
+            token_id="token",
+            roles=frozenset({"user"}),
+            permissions=frozenset(),
+        )
+
+    app.dependency_overrides[require_current_user] = fake_current_user
+
+
+class FakeDiaryService:
+    def __init__(self, *, user_id: UUID) -> None:
+        self.user_id = user_id
+        self.upsert_kwargs = {}
+        self.list_kwargs = {}
+        self.delete_kwargs = {}
+
+    async def get_entry(self, **kwargs):
+        return self._entry()
+
+    async def list_entries(self, **kwargs):
+        self.list_kwargs = kwargs
+        return [self._entry()]
+
+    async def upsert_entry(self, **kwargs):
+        self.upsert_kwargs = kwargs
+        return self._entry()
+
+    async def delete_entry(self, **kwargs):
+        self.delete_kwargs = kwargs
+
+    def _entry(self) -> PregnancyDiaryEntry:
+        return PregnancyDiaryEntry(
+            id=uuid4(),
+            owner_user_id=self.user_id,
+            entry_date=date(2026, 7, 2),
+            mood="calm",
+            status="active",
+            symptom_tags=[],
+            attachments=[],
+        )

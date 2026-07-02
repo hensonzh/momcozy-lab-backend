@@ -186,12 +186,13 @@ Completed:
   create/list/complete/delete for tasks, with audit and idempotent creates.
 - Pregnancy diary data foundation: owner/date-scoped diary entries and linked
   health notes.
+- Pregnancy diary API: owner-scoped list/get/upsert/delete by entry date with
+  audit on writes.
 
 Suggested order:
 
-1. Pregnancy diary APIs.
-2. Devices and pump telemetry.
-3. Notifications and support tickets.
+1. Devices and pump telemetry.
+2. Notifications and support tickets.
 
 Rules:
 
