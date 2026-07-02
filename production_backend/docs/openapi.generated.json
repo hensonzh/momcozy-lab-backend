@@ -54,11 +54,6 @@
             ],
             "title": "Applied At"
           },
-          "apply_payload": {
-            "additionalProperties": true,
-            "title": "Apply Payload",
-            "type": "object"
-          },
           "confirmed_at": {
             "anyOf": [
               {
@@ -145,7 +140,6 @@
           "status",
           "side_effect_level",
           "preview_payload",
-          "apply_payload",
           "idempotency_key",
           "error_code"
         ],

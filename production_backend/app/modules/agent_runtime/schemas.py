@@ -86,7 +86,6 @@ class AgentActionRead(BaseModel):
     status: str
     side_effect_level: str
     preview_payload: dict[str, Any]
-    apply_payload: dict[str, Any]
     idempotency_key: str
     expires_at: datetime | None = None
     confirmed_at: datetime | None = None
