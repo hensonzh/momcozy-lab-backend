@@ -7,7 +7,16 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import AgentAction, AgentEvent, AgentMessage, AgentRun, AgentThread, AgentToolCall, AgentToolOutput
+from .models import (
+    AgentAction,
+    AgentEvent,
+    AgentMessage,
+    AgentRun,
+    AgentSafetyEvent,
+    AgentThread,
+    AgentToolCall,
+    AgentToolOutput,
+)
 
 
 class AgentRuntimeRepository:
@@ -265,6 +274,30 @@ class AgentRuntimeRepository:
         self.session.add(output)
         await self.session.flush()
         return output
+
+    async def record_safety_event(
+        self,
+        *,
+        run_id: UUID | None,
+        owner_user_id: UUID,
+        category: str,
+        severity: str,
+        decision: str,
+        evidence: dict[str, Any],
+        evidence_ref: str = "",
+    ) -> AgentSafetyEvent:
+        event = AgentSafetyEvent(
+            run_id=run_id,
+            owner_user_id=owner_user_id,
+            category=category,
+            severity=severity,
+            decision=decision,
+            evidence=evidence,
+            evidence_ref=evidence_ref,
+        )
+        self.session.add(event)
+        await self.session.flush()
+        return event
 
     async def mark_run_cancelled(
         self,

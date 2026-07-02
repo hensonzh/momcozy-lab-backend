@@ -327,6 +327,9 @@ Completed:
 - Safety/eval data foundation: `agent_safety_events` and `agent_eval_cases`
   with owner/run linkage, evidence payloads, suite/status indexes, and source
   run references for incident-to-regression workflows.
+- Deterministic safety guard foundation: emotional crisis, maternal/baby health
+  red flags, and prompt injection rule gates with persisted non-allow safety
+  decisions.
 
 ### Phase 8: App Integration Contract
 
