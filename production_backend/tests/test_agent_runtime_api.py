@@ -59,6 +59,30 @@ def test_agent_thread_run_events_and_cancel_use_current_user_scope() -> None:
     assert fake_service.cancel_kwargs["reason"] == "stop"
 
 
+def test_agent_action_confirm_and_reject_use_current_user_scope() -> None:
+    user_id = uuid4()
+    action_id = uuid4()
+    fake_service = FakeAgentRuntimeService(user_id=user_id, action_id=action_id)
+    app = create_app(Settings(app_env="test"))
+    _override_current_user(app, user_id)
+    app.dependency_overrides[get_agent_runtime_service] = lambda: fake_service
+
+    get_response = TestClient(app).get(f"/v1/agent/actions/{action_id}")
+    confirm_response = TestClient(app).post(
+        f"/v1/agent/actions/{action_id}/confirm",
+        headers={"Idempotency-Key": " idem-action "},
+        json={"edited_apply_payload": {"issue_summary": "Updated"}},
+    )
+    reject_response = TestClient(app).post(f"/v1/agent/actions/{action_id}/reject", json={"reason": "not now"})
+
+    assert get_response.status_code == 200
+    assert confirm_response.status_code == 200
+    assert reject_response.status_code == 200
+    assert fake_service.get_action_kwargs["owner_user_id"] == user_id
+    assert fake_service.confirm_action_kwargs["idempotency_key"] == "idem-action"
+    assert fake_service.reject_action_kwargs["reason"] == "not now"
+
+
 def _override_current_user(app, user_id: UUID) -> None:
     from production_backend.app.api.dependencies import require_current_user
 
@@ -76,15 +100,19 @@ def _override_current_user(app, user_id: UUID) -> None:
 
 
 class FakeAgentRuntimeService:
-    def __init__(self, *, user_id: UUID) -> None:
+    def __init__(self, *, user_id: UUID, action_id: UUID | None = None) -> None:
         self.user_id = user_id
         self.thread_id = uuid4()
         self.run_id = uuid4()
+        self.action_id = action_id or uuid4()
         self.create_run_kwargs = {}
         self.list_threads_kwargs = {}
         self.get_run_kwargs = {}
         self.list_events_kwargs = {}
         self.cancel_kwargs = {}
+        self.get_action_kwargs = {}
+        self.confirm_action_kwargs = {}
+        self.reject_action_kwargs = {}
 
     async def create_thread(self, **kwargs):
         return self._thread()
@@ -123,6 +151,22 @@ class FakeAgentRuntimeService:
         run.status = "cancelled"
         return run
 
+    async def get_action(self, **kwargs):
+        self.get_action_kwargs = kwargs
+        return self._action()
+
+    async def confirm_action(self, **kwargs):
+        self.confirm_action_kwargs = kwargs
+        action = self._action()
+        action.status = "confirmed"
+        return action
+
+    async def reject_action(self, **kwargs):
+        self.reject_action_kwargs = kwargs
+        action = self._action()
+        action.status = "rejected"
+        return action
+
     def _thread(self) -> AgentThread:
         return AgentThread(id=self.thread_id, owner_user_id=self.user_id, title="Thread", status="active", metadata_json={})
 
@@ -139,4 +183,22 @@ class FakeAgentRuntimeService:
             trace_id="req_agent",
             error_code="",
             error_details={},
+        )
+
+    def _action(self):
+        from production_backend.app.modules.agent_runtime.models import AgentAction
+
+        return AgentAction(
+            id=self.action_id,
+            run_id=self.run_id,
+            actor_user_id=self.user_id,
+            action_type="support.ticket.create",
+            target_type="support_ticket",
+            target_id="",
+            status="confirmation_required",
+            side_effect_level="medium",
+            preview_payload={},
+            apply_payload={},
+            idempotency_key="",
+            error_code="",
         )

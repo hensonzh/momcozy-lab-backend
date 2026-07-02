@@ -13,6 +13,9 @@ from ..audit.repository import AuditRepository
 from ..auth import CurrentUser
 from .repository import AgentRuntimeRepository
 from .schemas import (
+    AgentActionConfirm,
+    AgentActionRead,
+    AgentActionReject,
     AgentEventPage,
     AgentEventRead,
     AgentRunCancel,
@@ -131,6 +134,44 @@ async def cancel_run(
 ) -> AgentRunRead:
     run = await service.cancel_run(owner_user_id=current_user.user_id, run_id=run_id, reason=payload.reason or "")
     return AgentRunRead.model_validate(run)
+
+
+@router.get("/actions/{action_id}", response_model=AgentActionRead)
+async def get_action(
+    action_id: UUID,
+    current_user: CurrentUser = Depends(require_current_user),
+    service: AgentRuntimeService = Depends(get_agent_runtime_service),
+) -> AgentActionRead:
+    action = await service.get_action(owner_user_id=current_user.user_id, action_id=action_id)
+    return AgentActionRead.model_validate(action)
+
+
+@router.post("/actions/{action_id}/confirm", response_model=AgentActionRead)
+async def confirm_action(
+    action_id: UUID,
+    payload: AgentActionConfirm,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    current_user: CurrentUser = Depends(require_current_user),
+    service: AgentRuntimeService = Depends(get_agent_runtime_service),
+) -> AgentActionRead:
+    action = await service.confirm_action(
+        owner_user_id=current_user.user_id,
+        action_id=action_id,
+        edited_apply_payload=payload.edited_apply_payload,
+        idempotency_key=_normalize_idempotency_key(idempotency_key) or _normalize_idempotency_key(payload.idempotency_key) or "",
+    )
+    return AgentActionRead.model_validate(action)
+
+
+@router.post("/actions/{action_id}/reject", response_model=AgentActionRead)
+async def reject_action(
+    action_id: UUID,
+    payload: AgentActionReject,
+    current_user: CurrentUser = Depends(require_current_user),
+    service: AgentRuntimeService = Depends(get_agent_runtime_service),
+) -> AgentActionRead:
+    action = await service.reject_action(owner_user_id=current_user.user_id, action_id=action_id, reason=payload.reason or "")
+    return AgentActionRead.model_validate(action)
 
 
 def _normalize_idempotency_key(value: str | None) -> str | None:

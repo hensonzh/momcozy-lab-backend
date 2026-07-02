@@ -293,6 +293,9 @@ Completed:
   dependency contract, graph version registry/state shape, SDK runner adapter
   boundary, tool contract registry, and context builder ordered for prompt cache
   stability.
+- Agent action manager foundation: owner-scoped action read/confirm/reject,
+  `confirmation_required -> confirmed` transition, `action.queued` event with
+  `outbox_status=queued`, and no `queued` action status.
 
 ### Phase 7: Safety, Observability, And Eval
 

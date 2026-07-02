@@ -7,7 +7,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import AgentEvent, AgentMessage, AgentRun, AgentThread
+from .models import AgentAction, AgentEvent, AgentMessage, AgentRun, AgentThread
 
 
 class AgentRuntimeRepository:
@@ -137,6 +137,76 @@ class AgentRuntimeRepository:
         )
         result = await self.session.scalars(statement)
         return list(result.all())
+
+    async def create_action(
+        self,
+        *,
+        run_id: UUID,
+        actor_user_id: UUID,
+        action_type: str,
+        target_type: str,
+        target_id: str,
+        status: str,
+        side_effect_level: str,
+        preview_payload: dict[str, Any],
+        apply_payload: dict[str, Any],
+        idempotency_key: str,
+        expires_at: datetime | None,
+    ) -> AgentAction:
+        action = AgentAction(
+            run_id=run_id,
+            actor_user_id=actor_user_id,
+            action_type=action_type,
+            target_type=target_type,
+            target_id=target_id,
+            status=status,
+            side_effect_level=side_effect_level,
+            preview_payload=preview_payload,
+            apply_payload=apply_payload,
+            idempotency_key=idempotency_key,
+            expires_at=expires_at,
+        )
+        self.session.add(action)
+        await self.session.flush()
+        return action
+
+    async def get_action_for_owner(self, *, action_id: UUID, owner_user_id: UUID) -> AgentAction | None:
+        statement = (
+            select(AgentAction)
+            .join(AgentRun, AgentRun.id == AgentAction.run_id)
+            .join(AgentThread, AgentThread.id == AgentRun.thread_id)
+            .where(
+                AgentAction.id == action_id,
+                AgentAction.actor_user_id == owner_user_id,
+                AgentThread.owner_user_id == owner_user_id,
+                AgentThread.deleted_at.is_(None),
+            )
+        )
+        return await self.session.scalar(statement)
+
+    async def mark_action_confirmed(
+        self,
+        *,
+        action: AgentAction,
+        confirmed_at: datetime,
+        apply_payload: dict[str, Any] | None,
+        idempotency_key: str,
+    ) -> AgentAction:
+        action.status = "confirmed"
+        action.confirmed_at = confirmed_at
+        if apply_payload is not None:
+            action.apply_payload = apply_payload
+        if idempotency_key:
+            action.idempotency_key = idempotency_key
+        await self.session.flush()
+        return action
+
+    async def mark_action_rejected(self, *, action: AgentAction, failed_at: datetime, error_code: str) -> AgentAction:
+        action.status = "rejected"
+        action.failed_at = failed_at
+        action.error_code = error_code
+        await self.session.flush()
+        return action
 
     async def mark_run_cancelled(
         self,

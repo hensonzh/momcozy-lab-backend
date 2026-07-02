@@ -74,3 +74,33 @@ class AgentEventRead(BaseModel):
 class AgentEventPage(BaseModel):
     items: list[AgentEventRead]
     next_sequence: int | None = None
+
+
+class AgentActionRead(BaseModel):
+    id: UUID
+    run_id: UUID
+    actor_user_id: UUID
+    action_type: str
+    target_type: str
+    target_id: str
+    status: str
+    side_effect_level: str
+    preview_payload: dict[str, Any]
+    apply_payload: dict[str, Any]
+    idempotency_key: str
+    expires_at: datetime | None = None
+    confirmed_at: datetime | None = None
+    applied_at: datetime | None = None
+    failed_at: datetime | None = None
+    error_code: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AgentActionConfirm(BaseModel):
+    edited_apply_payload: dict[str, Any] | None = None
+    idempotency_key: str | None = Field(default=None, max_length=255)
+
+
+class AgentActionReject(BaseModel):
+    reason: str | None = Field(default=None, max_length=500)

@@ -7,7 +7,7 @@ from uuid import UUID
 from ...core.errors import ApiError
 from ..audit import IdempotencyService, request_hash
 from .controls import AgentRunControls
-from .models import AgentEvent, AgentRun, AgentThread
+from .models import AgentAction, AgentEvent, AgentRun, AgentThread
 from .repository import AgentRuntimeRepository
 
 
@@ -166,6 +166,92 @@ class AgentRuntimeService:
             after_sequence=after_sequence,
             limit=limit,
         )
+
+    async def propose_action(
+        self,
+        *,
+        owner_user_id: UUID,
+        run_id: UUID,
+        action_type: str,
+        target_type: str = "",
+        target_id: str = "",
+        side_effect_level: str = "medium",
+        preview_payload: dict[str, Any] | None = None,
+        apply_payload: dict[str, Any] | None = None,
+        idempotency_key: str = "",
+        expires_at: datetime | None = None,
+    ) -> AgentAction:
+        run = await self.get_run(owner_user_id=owner_user_id, run_id=run_id)
+        action = await self.repository.create_action(
+            run_id=run.id,
+            actor_user_id=owner_user_id,
+            action_type=_normalize_text(action_type, max_length=120, required=True),
+            target_type=_normalize_text(target_type, max_length=120),
+            target_id=_normalize_text(target_id, max_length=120),
+            status="confirmation_required",
+            side_effect_level=_normalize_text(side_effect_level, max_length=32) or "medium",
+            preview_payload=preview_payload or {},
+            apply_payload=apply_payload or {},
+            idempotency_key=_normalize_text(idempotency_key, max_length=255),
+            expires_at=expires_at,
+        )
+        await self._append_event(
+            thread_id=run.thread_id,
+            run_id=run.id,
+            event_type="action.confirmation_required",
+            payload={"action_id": str(action.id), "action_type": action.action_type},
+        )
+        return action
+
+    async def get_action(self, *, owner_user_id: UUID, action_id: UUID) -> AgentAction:
+        action = await self.repository.get_action_for_owner(action_id=action_id, owner_user_id=owner_user_id)
+        if action is None:
+            raise ApiError(code="not_found", message="Agent action not found.", status=404)
+        return action
+
+    async def confirm_action(
+        self,
+        *,
+        owner_user_id: UUID,
+        action_id: UUID,
+        edited_apply_payload: dict[str, Any] | None = None,
+        idempotency_key: str = "",
+    ) -> AgentAction:
+        action = await self.get_action(owner_user_id=owner_user_id, action_id=action_id)
+        if action.status in {"confirmed", "applying", "applied"}:
+            return action
+        if action.status not in {"proposed", "confirmation_required"}:
+            raise ApiError(code="conflict", message="Agent action cannot be confirmed from its current status.", status=409)
+        confirmed = await self.repository.mark_action_confirmed(
+            action=action,
+            confirmed_at=_utcnow(),
+            apply_payload=edited_apply_payload,
+            idempotency_key=_normalize_text(idempotency_key, max_length=255),
+        )
+        run = await self.get_run(owner_user_id=owner_user_id, run_id=confirmed.run_id)
+        await self._append_event(
+            thread_id=run.thread_id,
+            run_id=run.id,
+            event_type="action.queued",
+            payload={"action_id": str(confirmed.id), "action_status": confirmed.status, "outbox_status": "queued"},
+        )
+        return confirmed
+
+    async def reject_action(self, *, owner_user_id: UUID, action_id: UUID, reason: str = "") -> AgentAction:
+        action = await self.get_action(owner_user_id=owner_user_id, action_id=action_id)
+        if action.status == "rejected":
+            return action
+        if action.status in {"applying", "applied"}:
+            raise ApiError(code="conflict", message="Agent action cannot be rejected from its current status.", status=409)
+        rejected = await self.repository.mark_action_rejected(action=action, failed_at=_utcnow(), error_code="rejected_by_user")
+        run = await self.get_run(owner_user_id=owner_user_id, run_id=rejected.run_id)
+        await self._append_event(
+            thread_id=run.thread_id,
+            run_id=run.id,
+            event_type="action.rejected",
+            payload={"action_id": str(rejected.id), "reason": _normalize_text(reason, max_length=500)},
+        )
+        return rejected
 
     async def _get_or_create_thread(self, *, actor_user_id: UUID, thread_id: UUID | None, title: str) -> AgentThread:
         if thread_id is None:
