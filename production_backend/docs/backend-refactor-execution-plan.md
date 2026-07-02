@@ -307,6 +307,9 @@ Completed:
   input from the internal message ledger and cache-stable context projection,
   invokes an injectable OpenAI Agents SDK runner, and returns typed run outcomes
   without provider session state.
+- Agent run queue worker: scans durable queued runs plus recoverable stale
+  running runs from Postgres and delegates each run to the lifecycle worker
+  behind Redis run locks.
 
 ### Phase 7: Safety, Observability, And Eval
 
@@ -391,6 +394,8 @@ Completed backend commits have established:
   semantics ready for LangGraph/SDK execution
 - Agent runtime executor that bridges durable run/message ledger, context
   projection, tool metadata, and OpenAI Agents SDK runner results
+- durable agent run queue scanner that can resume queued/stale running runs
+  without in-memory session state
 - OpenAPI schema export script, generated schema snapshot, and API handoff
   document for Flutter integration
 - Auth/token API contract tests for token response shape, validation envelope,

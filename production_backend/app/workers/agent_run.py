@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from ..core.errors import ApiError
@@ -14,8 +15,55 @@ TERMINAL_RUN_STATUSES = {"completed", "failed", "cancelled", "expired"}
 AgentRunWorkerResult = AgentRunExecutionResult
 
 
+@dataclass(frozen=True)
+class AgentRunQueueWorkerResult:
+    scanned: int
+    processed: int
+    terminal: int
+
+
 async def missing_agent_run_handler(_run: AgentRun) -> AgentRunExecutionResult:
     raise ApiError(code="runtime_handler_not_configured", message="Agent run handler is not configured.", status=503)
+
+
+class AgentRunQueueWorker:
+    def __init__(
+        self,
+        *,
+        repository: AgentRuntimeRepository,
+        run_worker: "AgentRunWorker",
+        batch_limit: int = 10,
+        recover_running_older_than_seconds: int | None = 900,
+    ) -> None:
+        if batch_limit < 1:
+            raise ValueError("batch_limit must be positive")
+        self.repository = repository
+        self.run_worker = run_worker
+        self.batch_limit = batch_limit
+        self.recover_running_older_than_seconds = recover_running_older_than_seconds
+
+    async def run_once(self) -> AgentRunQueueWorkerResult:
+        runs = await self.repository.list_runnable_runs(
+            limit=self.batch_limit,
+            recover_running_before=self._recover_running_before(),
+        )
+        processed = 0
+        terminal = 0
+        for run in runs:
+            before_status = run.status
+            after_run = await self.run_worker.run_once(run_id=run.id)
+            if after_run is None:
+                continue
+            if after_run.status != before_status:
+                processed += 1
+            if after_run.status in TERMINAL_RUN_STATUSES:
+                terminal += 1
+        return AgentRunQueueWorkerResult(scanned=len(runs), processed=processed, terminal=terminal)
+
+    def _recover_running_before(self) -> datetime | None:
+        if self.recover_running_older_than_seconds is None:
+            return None
+        return _utcnow() - timedelta(seconds=self.recover_running_older_than_seconds)
 
 
 class AgentRunWorker:

@@ -3,7 +3,7 @@ from uuid import uuid4
 
 from production_backend.app.core.errors import ApiError
 from production_backend.app.modules.agent_runtime.models import AgentEvent, AgentMessage, AgentRun
-from production_backend.app.workers.agent_run import AgentRunWorker, AgentRunWorkerResult
+from production_backend.app.workers.agent_run import AgentRunQueueWorker, AgentRunWorker, AgentRunWorkerResult
 
 
 def test_agent_run_worker_completes_run_with_assistant_message_events_and_lock() -> None:
@@ -81,6 +81,25 @@ def test_agent_run_worker_preserves_waiting_for_confirmation_state() -> None:
     assert repository.events[-1].payload["action_id"] == str(action_id)
 
 
+def test_agent_run_queue_worker_scans_queued_and_recoverable_running_runs() -> None:
+    repository = FakeAgentRuntimeRepository()
+    running = repository.add_run(status="running")
+
+    async def handler(_run: AgentRun) -> AgentRunWorkerResult:
+        return AgentRunWorkerResult(status="completed")
+
+    run_worker = AgentRunWorker(repository=repository, handler=handler)
+    queue_worker = AgentRunQueueWorker(repository=repository, run_worker=run_worker, batch_limit=5)
+
+    result = asyncio.run(queue_worker.run_once())
+
+    assert result.scanned == 2
+    assert result.processed == 2
+    assert result.terminal == 2
+    assert repository.run.status == "completed"
+    assert running.status == "completed"
+
+
 class FakeAgentRuntimeRepository:
     def __init__(self) -> None:
         self.run = AgentRun(
@@ -96,11 +115,33 @@ class FakeAgentRuntimeRepository:
             error_code="",
             error_details={},
         )
+        self.runs = [self.run]
         self.messages = []
         self.events = []
 
+    def add_run(self, *, status):
+        run = AgentRun(
+            id=uuid4(),
+            thread_id=uuid4(),
+            actor_user_id=uuid4(),
+            status=status,
+            runtime_pattern="langgraph_sdk",
+            graph_version="momcozy-agent-v1",
+            prompt_version="",
+            request_id="req",
+            trace_id="trace",
+            error_code="",
+            error_details={},
+        )
+        self.runs.append(run)
+        return run
+
     async def get_run(self, *, run_id):
-        return self.run if run_id == self.run.id else None
+        return next((run for run in self.runs if run.id == run_id), None)
+
+    async def list_runnable_runs(self, *, limit, recover_running_before=None):
+        runnable = [run for run in self.runs if run.status == "queued" or (run.status == "running" and recover_running_before is not None)]
+        return runnable[:limit]
 
     async def mark_run_running(self, *, run, started_at):
         run.status = "running"

@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any, cast
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import (
@@ -88,6 +88,24 @@ class AgentRuntimeRepository:
     async def get_run(self, *, run_id: UUID) -> AgentRun | None:
         statement = select(AgentRun).where(AgentRun.id == run_id)
         return cast(AgentRun | None, await self.session.scalar(statement))
+
+    async def list_runnable_runs(
+        self,
+        *,
+        limit: int,
+        recover_running_before: datetime | None = None,
+    ) -> list[AgentRun]:
+        conditions = [AgentRun.status == "queued"]
+        if recover_running_before is not None:
+            conditions.append(
+                and_(
+                    AgentRun.status == "running",
+                    or_(AgentRun.started_at.is_(None), AgentRun.started_at <= recover_running_before),
+                )
+            )
+        statement = select(AgentRun).where(or_(*conditions)).order_by(AgentRun.created_at.asc(), AgentRun.id.asc()).limit(limit)
+        result = await self.session.scalars(statement)
+        return list(result.all())
 
     async def mark_run_running(self, *, run: AgentRun, started_at: datetime) -> AgentRun:
         run.status = "running"
