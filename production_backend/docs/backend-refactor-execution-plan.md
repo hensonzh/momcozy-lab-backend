@@ -345,6 +345,9 @@ Completed:
 - SDK tool input schemas: tool contracts now resolve `input_schema_ref` to
   explicit JSON Schema before being exposed to the OpenAI Agents SDK, so models
   no longer receive unconstrained `additionalProperties: true` tool parameters.
+- Agent tool lifecycle events: guarded tool execution now persists
+  `tool.started`, `tool.completed`, and `tool.failed` application events
+  alongside tool call/output ledger rows for stream replay and debugging.
 
 ### Phase 7: Safety, Observability, And Eval
 
@@ -453,6 +456,8 @@ Completed backend commits have established:
 - explicit SDK tool parameter schemas for profile context reads and support
   ticket action proposals, keeping owner scope in backend auth rather than
   model-supplied user IDs
+- application-level tool lifecycle events emitted by the ToolExecutor, keeping
+  persisted SSE/replay streams aligned with the tool ledger
 - OpenAPI schema export script, generated schema snapshot, and API handoff
   document for Flutter integration
 - Auth/token API contract tests for token response shape, validation envelope,

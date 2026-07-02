@@ -68,6 +68,9 @@ class ToolExecutor:
             handler = self.handlers.get(tool_name)
             if handler is None:
                 raise ApiError(code="unsupported_operation", message="Tool handler is not configured.", status=501)
+            run = await self.repository.get_run(run_id=run_id)
+            if run is None:
+                raise ApiError(code="not_found", message="Agent run not found.", status=404)
 
             tool_call = await self.repository.start_tool_call(
                 run_id=run_id,
@@ -75,6 +78,12 @@ class ToolExecutor:
                 call_id=call_id,
                 safe_args=_safe_payload(args),
                 started_at=_utcnow(),
+            )
+            await self._append_tool_event(
+                thread_id=run.thread_id,
+                run_id=run.id,
+                event_type="tool.started",
+                payload={"tool_call_id": str(tool_call.id), "tool_name": tool_name, "call_id": call_id},
             )
             result = await asyncio.wait_for(
                 _maybe_await(
@@ -93,22 +102,36 @@ class ToolExecutor:
         except ApiError as exc:
             if tool_call is not None:
                 await self.repository.fail_tool_call(tool_call=tool_call, completed_at=_utcnow(), error_code=exc.code)
+                await self._append_tool_failed_event(tool_call=tool_call, error_code=exc.code)
             self._record(tool_name=tool_name, outcome="failed", error_code=exc.code, started_at=started_at)
             raise
         except TimeoutError as exc:
             if tool_call is not None:
                 await self.repository.fail_tool_call(tool_call=tool_call, completed_at=_utcnow(), error_code="timeout")
+                await self._append_tool_failed_event(tool_call=tool_call, error_code="timeout")
             self._record(tool_name=tool_name, outcome="failed", error_code="timeout", started_at=started_at)
             raise ApiError(code="timeout", message="Tool execution timed out.", status=504) from exc
         except Exception as exc:
             if tool_call is not None:
                 await self.repository.fail_tool_call(tool_call=tool_call, completed_at=_utcnow(), error_code="tool_failed")
+                await self._append_tool_failed_event(tool_call=tool_call, error_code="tool_failed")
             self._record(tool_name=tool_name, outcome="failed", error_code="tool_failed", started_at=started_at)
             raise ApiError(code="tool_failed", message="Tool execution failed.", status=500) from exc
 
         safe_output = _safe_payload(result)
         completed = await self.repository.complete_tool_call(tool_call=tool_call, completed_at=_utcnow())
-        await self.repository.create_tool_output(tool_call_id=completed.id, safe_output=safe_output)
+        output = await self.repository.create_tool_output(tool_call_id=completed.id, safe_output=safe_output)
+        await self._append_tool_event(
+            thread_id=run.thread_id,
+            run_id=run.id,
+            event_type="tool.completed",
+            payload={
+                "tool_call_id": str(completed.id),
+                "tool_output_id": str(output.id),
+                "tool_name": completed.tool_name,
+                "call_id": completed.call_id,
+            },
+        )
         self._record(tool_name=tool_name, outcome="completed", error_code="", started_at=started_at)
         return ToolExecutionResult(tool_call=completed, safe_output=safe_output)
 
@@ -125,6 +148,25 @@ class ToolExecutor:
                 error_code=error_code,
                 duration_ms=(perf_counter() - started_at) * 1000,
             )
+
+    async def _append_tool_failed_event(self, *, tool_call: AgentToolCall, error_code: str) -> None:
+        run = await self.repository.get_run(run_id=tool_call.run_id)
+        if run is None:
+            return
+        await self._append_tool_event(
+            thread_id=run.thread_id,
+            run_id=run.id,
+            event_type="tool.failed",
+            payload={
+                "tool_call_id": str(tool_call.id),
+                "tool_name": tool_call.tool_name,
+                "call_id": tool_call.call_id,
+                "error_code": error_code,
+            },
+        )
+
+    async def _append_tool_event(self, *, thread_id: UUID, run_id: UUID, event_type: str, payload: dict[str, Any]) -> None:
+        await self.repository.append_event(thread_id=thread_id, run_id=run_id, event_type=event_type, payload=payload)
 
 
 async def _maybe_await(value: Awaitable[dict[str, Any]] | dict[str, Any]) -> dict[str, Any]:

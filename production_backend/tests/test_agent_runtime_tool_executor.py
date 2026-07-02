@@ -5,7 +5,7 @@ import pytest
 
 from production_backend.app.core.errors import ApiError
 from production_backend.app.core.metrics import RequestMetrics
-from production_backend.app.modules.agent_runtime.models import AgentToolCall
+from production_backend.app.modules.agent_runtime.models import AgentEvent, AgentRun, AgentToolCall
 from production_backend.app.modules.agent_runtime.tools import ToolExecutor, ToolHandlerContext, default_tool_registry
 from production_backend.app.modules.auth import CurrentUser
 
@@ -33,6 +33,13 @@ def test_tool_executor_persists_safe_args_and_output() -> None:
     assert repository.tool_call.safe_args["api_token"] == "[redacted]"
     assert result.safe_output["profile"]["name"] == "Mai"
     assert repository.output.safe_output["session_token"] == "[redacted]"
+    assert [event.event_type for event in repository.events] == ["tool.started", "tool.completed"]
+    assert repository.events[0].payload == {
+        "tool_call_id": str(repository.tool_call.id),
+        "tool_name": "profile.read",
+        "call_id": "call-1",
+    }
+    assert repository.events[1].payload["tool_output_id"] == str(repository.output.id)
 
 
 def test_tool_executor_denies_missing_permission_before_persisting_call() -> None:
@@ -56,6 +63,7 @@ def test_tool_executor_denies_missing_permission_before_persisting_call() -> Non
 
     assert exc_info.value.code == "permission_denied"
     assert repository.tool_call is None
+    assert repository.events == []
 
 
 def test_tool_executor_blocks_cross_owner_actor_scoped_args() -> None:
@@ -105,6 +113,8 @@ def test_tool_executor_marks_tool_call_failed_on_handler_error() -> None:
     assert exc_info.value.code == "dependency_failed"
     assert repository.tool_call.status == "failed"
     assert repository.tool_call.error_code == "dependency_failed"
+    assert [event.event_type for event in repository.events] == ["tool.started", "tool.failed"]
+    assert repository.events[-1].payload["error_code"] == "dependency_failed"
 
 
 def test_tool_executor_records_success_and_authorization_failure_metrics() -> None:
@@ -168,6 +178,23 @@ class FakeToolRepository:
     def __init__(self) -> None:
         self.tool_call = None
         self.output = None
+        self.events = []
+        self.thread_id = uuid4()
+
+    async def get_run(self, *, run_id):
+        return AgentRun(
+            id=run_id,
+            thread_id=self.thread_id,
+            actor_user_id=uuid4(),
+            status="running",
+            runtime_pattern="langgraph_sdk",
+            graph_version="momcozy-agent-v1",
+            prompt_version="",
+            request_id="req",
+            trace_id="trace",
+            error_code="",
+            error_details={},
+        )
 
     async def start_tool_call(self, **kwargs):
         self.tool_call = AgentToolCall(
@@ -197,8 +224,21 @@ class FakeToolRepository:
         self.output = FakeToolOutput(tool_call_id=kwargs["tool_call_id"], safe_output=kwargs["safe_output"])
         return self.output
 
+    async def append_event(self, **kwargs):
+        event = AgentEvent(
+            event_id=uuid4(),
+            thread_id=kwargs["thread_id"],
+            run_id=kwargs["run_id"],
+            sequence=len(self.events) + 1,
+            event_type=kwargs["event_type"],
+            payload=kwargs["payload"],
+        )
+        self.events.append(event)
+        return event
+
 
 class FakeToolOutput:
     def __init__(self, *, tool_call_id, safe_output):
+        self.id = uuid4()
         self.tool_call_id = tool_call_id
         self.safe_output = safe_output
