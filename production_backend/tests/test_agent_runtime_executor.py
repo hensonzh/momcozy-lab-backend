@@ -149,6 +149,12 @@ def test_agent_runtime_executor_persists_sdk_action_proposal_and_waits_for_confi
     assert repository.actions[0].apply_payload == {"issue_summary": "Pump does not turn on"}
     assert repository.events[-1].event_type == "action.confirmation_required"
     assert repository.events[-1].payload["action_id"] == str(repository.actions[0].id)
+    assert repository.events[-1].payload["action_status"] == "confirmation_required"
+    assert repository.events[-1].payload["action_type"] == "support.ticket.create"
+    assert repository.events[-1].payload["target_type"] == "support_ticket"
+    assert repository.events[-1].payload["side_effect_level"] == "medium"
+    assert repository.events[-1].payload["preview_payload"] == {"summary": "Pump does not turn on"}
+    assert "apply_payload" not in repository.events[-1].payload
     assert [checkpoint["state_summary"]["node_name"] for checkpoint in checkpoint_store.checkpoints] == [
         "sdk_reasoning",
         "confirmation_interrupt",

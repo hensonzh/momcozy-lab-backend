@@ -127,7 +127,7 @@ class AgentRuntimeExecutor:
                 thread_id=run.thread_id,
                 run_id=run.id,
                 event_type="action.confirmation_required",
-                payload={"action_id": str(action.id), "action_type": action.action_type},
+                payload=_action_confirmation_event_payload(action),
             )
             await self._save_checkpoint(
                 run=run,
@@ -348,6 +348,18 @@ def _single_action_proposal(action_proposals: list[dict[str, Any]]) -> dict[str,
     if len(action_proposals) > 1:
         raise ApiError(code="too_many_agent_action_proposals", message="Only one agent action proposal is supported per run.", status=422)
     return action_proposals[0] if action_proposals else None
+
+
+def _action_confirmation_event_payload(action: AgentAction) -> dict[str, Any]:
+    return {
+        "action_id": str(action.id),
+        "action_type": action.action_type,
+        "action_status": action.status,
+        "target_type": action.target_type,
+        "target_id": action.target_id,
+        "side_effect_level": action.side_effect_level,
+        "preview_payload": action.preview_payload,
+    }
 
 
 def _json_object(raw: str) -> dict[str, Any]:
