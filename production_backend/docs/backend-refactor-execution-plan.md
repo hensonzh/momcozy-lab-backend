@@ -92,13 +92,12 @@ Completed:
 - Alembic migration shell.
 - Redis lifecycle registration.
 - Object storage abstraction with local development implementation.
+- S3-compatible managed object storage provider.
+- Production validation rejects implicit localhost DB/Redis.
+- `/v1/health/ready` can validate DB and Redis readiness.
 
 Remaining:
 
-- Production-capable managed object storage provider.
-- Production validation that rejects implicit localhost DB/Redis.
-- Readiness checks that actually validate DB and Redis when deployment routing
-  depends on `/ready`.
 - Structured logging and basic metrics.
 - Docker/compose local environment.
 

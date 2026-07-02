@@ -36,3 +36,32 @@ def test_production_managed_object_storage_requires_bucket_and_credentials() -> 
 
     with pytest.raises(ValueError, match="OBJECT_STORAGE_BUCKET"):
         settings.validate_for_startup()
+
+
+def test_production_rejects_implicit_local_database_and_redis_urls() -> None:
+    settings = Settings(
+        app_env="production",
+        object_storage_provider="s3",
+        object_storage_bucket="bucket",
+        object_storage_access_key_id="access",
+        object_storage_secret_access_key="secret",
+        auth_jwt_secret="test-secret-value-with-at-least-32-bytes",
+    )
+
+    with pytest.raises(ValueError, match="DATABASE_URL must be explicitly configured"):
+        settings.validate_for_startup()
+
+
+def test_production_accepts_explicit_managed_infrastructure_urls() -> None:
+    settings = Settings(
+        app_env="production",
+        database_url="postgresql+asyncpg://app:secret@postgres.internal:5432/momcozy",
+        redis_url="redis://redis.internal:6379/0",
+        object_storage_provider="s3",
+        object_storage_bucket="bucket",
+        object_storage_access_key_id="access",
+        object_storage_secret_access_key="secret",
+        auth_jwt_secret="test-secret-value-with-at-least-32-bytes",
+    )
+
+    settings.validate_for_startup()

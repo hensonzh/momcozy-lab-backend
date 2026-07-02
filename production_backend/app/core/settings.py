@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from functools import lru_cache
+from urllib.parse import urlparse
 
 
 LOCAL_DATABASE_URL = "postgresql+asyncpg://momcozy:momcozy@localhost:5432/momcozy"
@@ -31,6 +32,7 @@ class Settings:
     auth_jwt_issuer: str = ""
     auth_jwt_audience: str = ""
     auth_jwt_algorithm: str = "HS256"
+    readiness_check_infrastructure: bool = False
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -51,6 +53,10 @@ class Settings:
             auth_jwt_issuer=_env("AUTH_JWT_ISSUER", cls.auth_jwt_issuer),
             auth_jwt_audience=_env("AUTH_JWT_AUDIENCE", cls.auth_jwt_audience),
             auth_jwt_algorithm=_env("AUTH_JWT_ALGORITHM", cls.auth_jwt_algorithm),
+            readiness_check_infrastructure=_env_bool(
+                "READINESS_CHECK_INFRASTRUCTURE",
+                cls.readiness_check_infrastructure,
+            ),
         )
 
     @property
@@ -79,10 +85,16 @@ class Settings:
             errors.append("AUTH_JWT_SECRET must be at least 32 bytes")
 
         if self.is_production:
+            if _is_local_url(self.database_url, LOCAL_DATABASE_URL):
+                errors.append("DATABASE_URL must be explicitly configured for production")
+            if _is_local_url(self.redis_url, LOCAL_REDIS_URL):
+                errors.append("REDIS_URL must be explicitly configured for production")
             if provider == "local":
                 errors.append("OBJECT_STORAGE_PROVIDER cannot be local in production")
             if provider != "local" and not self.object_storage_bucket:
                 errors.append("OBJECT_STORAGE_BUCKET is required for managed object storage")
+            if provider in {"minio", "oss", "cos"} and not self.object_storage_endpoint_url:
+                errors.append("OBJECT_STORAGE_ENDPOINT_URL is required for this object storage provider")
             if provider != "local" and not self.object_storage_access_key_id:
                 errors.append("OBJECT_STORAGE_ACCESS_KEY_ID is required for managed object storage")
             if provider != "local" and not self.object_storage_secret_access_key:
@@ -101,3 +113,23 @@ def get_settings() -> Settings:
 
 def _env(name: str, default: str) -> str:
     return os.getenv(name, default).strip() or default
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    value = raw.strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def _is_local_url(value: str, local_default: str) -> bool:
+    if value == local_default:
+        return True
+    parsed = urlparse(value)
+    hostname = (parsed.hostname or "").lower()
+    return hostname in {"localhost", "127.0.0.1", "::1"}
