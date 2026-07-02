@@ -303,6 +303,10 @@ Completed:
   queued/running/completed/failed/waiting transitions, assistant message
   persistence, stream cursor updates, and terminal cleanup around an injectable
   LangGraph/SDK handler.
+- Agent runtime executor: validates graph/runtime pattern, reconstructs model
+  input from the internal message ledger and cache-stable context projection,
+  invokes an injectable OpenAI Agents SDK runner, and returns typed run outcomes
+  without provider session state.
 
 ### Phase 7: Safety, Observability, And Eval
 
@@ -385,6 +389,8 @@ Completed backend commits have established:
   deterministic safety gate
 - worker-owned Agent run lifecycle skeleton with lock/cancel/status/event
   semantics ready for LangGraph/SDK execution
+- Agent runtime executor that bridges durable run/message ledger, context
+  projection, tool metadata, and OpenAI Agents SDK runner results
 - OpenAPI schema export script, generated schema snapshot, and API handoff
   document for Flutter integration
 - Auth/token API contract tests for token response shape, validation envelope,

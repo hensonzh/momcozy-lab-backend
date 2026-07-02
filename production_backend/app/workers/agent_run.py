@@ -1,32 +1,20 @@
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Literal
 from uuid import UUID
 
 from ..core.errors import ApiError
 from ..modules.agent_runtime.controls import AgentRunControls
+from ..modules.agent_runtime.execution import AgentRunExecutionResult, AgentRunHandler
 from ..modules.agent_runtime.models import AgentEvent, AgentRun
 from ..modules.agent_runtime.repository import AgentRuntimeRepository
 
 
 TERMINAL_RUN_STATUSES = {"completed", "failed", "cancelled", "expired"}
-AgentRunWorkerStatus = Literal["completed", "waiting_for_confirmation"]
+AgentRunWorkerResult = AgentRunExecutionResult
 
 
-@dataclass(frozen=True)
-class AgentRunWorkerResult:
-    status: AgentRunWorkerStatus
-    final_text: str = ""
-    pending_action_id: UUID | None = None
-
-
-AgentRunHandler = Callable[[AgentRun], Awaitable[AgentRunWorkerResult]]
-
-
-async def missing_agent_run_handler(_run: AgentRun) -> AgentRunWorkerResult:
+async def missing_agent_run_handler(_run: AgentRun) -> AgentRunExecutionResult:
     raise ApiError(code="runtime_handler_not_configured", message="Agent run handler is not configured.", status=503)
 
 

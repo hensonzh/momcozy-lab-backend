@@ -135,6 +135,27 @@ class AgentRuntimeRepository:
         await self.session.flush()
         return message
 
+    async def list_messages_for_thread(self, *, thread_id: UUID, limit: int = 40) -> list[AgentMessage]:
+        statement = (
+            select(AgentMessage)
+            .where(AgentMessage.thread_id == thread_id)
+            .order_by(AgentMessage.sequence.desc())
+            .limit(limit)
+        )
+        result = await self.session.scalars(statement)
+        messages = list(result.all())
+        messages.reverse()
+        return messages
+
+    async def get_latest_user_message_for_run(self, *, run_id: UUID) -> AgentMessage | None:
+        statement = (
+            select(AgentMessage)
+            .where(AgentMessage.run_id == run_id, AgentMessage.role == "user")
+            .order_by(AgentMessage.sequence.desc())
+            .limit(1)
+        )
+        return cast(AgentMessage | None, await self.session.scalar(statement))
+
     async def append_event(
         self,
         *,
