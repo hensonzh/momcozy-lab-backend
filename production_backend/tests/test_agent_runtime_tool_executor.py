@@ -46,7 +46,7 @@ def test_tool_executor_denies_missing_permission_before_persisting_call() -> Non
     with pytest.raises(ApiError) as exc_info:
         asyncio.run(
             executor.execute(
-                actor=_user(),
+                actor=_user(roles={"limited"}),
                 run_id=uuid4(),
                 tool_name="profile.read",
                 call_id="call-1",
@@ -129,7 +129,7 @@ def test_tool_executor_records_success_and_authorization_failure_metrics() -> No
     with pytest.raises(ApiError):
         asyncio.run(
             executor.execute(
-                actor=_user(),
+                actor=_user(roles={"limited"}),
                 run_id=uuid4(),
                 tool_name="profile.read",
                 call_id="call-2",
@@ -152,14 +152,14 @@ async def failing_handler(context: ToolHandlerContext):
     raise ApiError(code="dependency_failed", message="Profile service unavailable.", status=503)
 
 
-def _user(*, permissions: set[str] | None = None) -> CurrentUser:
+def _user(*, roles: set[str] | None = None, permissions: set[str] | None = None) -> CurrentUser:
     user_id = uuid4()
     return CurrentUser(
         user_id=user_id,
         subject=str(user_id),
         session_id="session",
         token_id="token",
-        roles=frozenset({"user"}),
+        roles=frozenset(roles or {"user"}),
         permissions=frozenset(permissions or set()),
     )
 

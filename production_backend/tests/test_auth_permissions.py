@@ -18,6 +18,13 @@ def test_permission_policy_allows_admin_role() -> None:
     PermissionPolicy().require_permission(user, "any:permission")
 
 
+def test_permission_policy_allows_user_role_tool_permissions() -> None:
+    user = _user(roles={"user"})
+
+    PermissionPolicy().require_permission(user, "profile:read:self")
+    PermissionPolicy().require_permission(user, "support_ticket:create:self")
+
+
 def test_permission_policy_denies_missing_permission() -> None:
     user = _user()
 
