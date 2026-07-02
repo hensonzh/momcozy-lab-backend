@@ -174,10 +174,12 @@ Completed:
   idempotent infant creation.
 - Records data foundation: owner-scoped `feeding_records`, `pumping_records`,
   and `growth_records` models and migration.
+- Feeding record API: owner-scoped create/list/delete with infant ownership
+  validation, audit, and idempotent create.
 
 Suggested order:
 
-1. Records APIs: feeding, pumping, growth.
+1. Records APIs: pumping and growth.
 2. Plans and tasks.
 3. Pregnancy diary.
 4. Devices and pump telemetry.
