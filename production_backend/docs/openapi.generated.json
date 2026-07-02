@@ -3591,6 +3591,40 @@
               "title": "Limit",
               "type": "integer"
             }
+          },
+          {
+            "in": "query",
+            "name": "follow",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Follow",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "poll_interval_seconds",
+            "required": false,
+            "schema": {
+              "default": 1.0,
+              "maximum": 5.0,
+              "minimum": 0.1,
+              "title": "Poll Interval Seconds",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_wait_seconds",
+            "required": false,
+            "schema": {
+              "default": 30,
+              "maximum": 300,
+              "minimum": 1,
+              "title": "Max Wait Seconds",
+              "type": "integer"
+            }
           }
         ],
         "responses": {

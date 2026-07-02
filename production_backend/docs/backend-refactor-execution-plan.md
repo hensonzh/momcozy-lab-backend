@@ -299,6 +299,9 @@ Completed:
   structured failure mapping.
 - Streaming replay endpoint: `/v1/agent/runs/{run_id}/stream` emits persisted
   application event envelopes as SSE, never provider raw events.
+- Streaming follow mode: the same SSE endpoint keeps replay as the default and
+  supports explicit `follow=true` polling until terminal run events for app
+  reconnect and live-consumption flows.
 - Agent run worker skeleton: worker-owned run lock, cancel checks,
   queued/running/completed/failed/waiting transitions, assistant message
   persistence, stream cursor updates, and terminal cleanup around an injectable
@@ -488,6 +491,8 @@ Completed backend commits have established:
   before persistence
 - generated action idempotency keys stored consistently on confirmed actions and
   outbox jobs
+- optional follow mode for agent SSE streams, preserving default replay
+  semantics while allowing clients to wait for terminal run events
 - OpenAPI schema export script, generated schema snapshot, and API handoff
   document for Flutter integration
 - Auth/token API contract tests for token response shape, validation envelope,

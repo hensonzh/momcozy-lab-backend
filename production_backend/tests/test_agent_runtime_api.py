@@ -62,6 +62,29 @@ def test_agent_thread_run_events_and_cancel_use_current_user_scope() -> None:
     assert fake_service.cancel_kwargs["reason"] == "stop"
 
 
+def test_agent_stream_can_follow_until_terminal_event() -> None:
+    user_id = uuid4()
+    fake_service = FakeAgentRuntimeService(
+        user_id=user_id,
+        event_batches=[
+            [("run.progress", 2)],
+            [("run.completed", 3)],
+        ],
+    )
+    app = create_app(Settings(app_env="test"))
+    _override_current_user(app, user_id)
+    app.dependency_overrides[get_agent_runtime_service] = lambda: fake_service
+
+    response = TestClient(app).get(
+        f"/v1/agent/runs/{fake_service.run_id}/stream?after_sequence=1&follow=true&poll_interval_seconds=0.1&max_wait_seconds=1"
+    )
+
+    assert response.status_code == 200
+    assert "event: run.progress" in response.text
+    assert "event: run.completed" in response.text
+    assert fake_service.list_events_call_count == 2
+
+
 def test_agent_action_confirm_and_reject_use_current_user_scope() -> None:
     user_id = uuid4()
     action_id = uuid4()
@@ -133,11 +156,19 @@ def _override_current_user(app, user_id: UUID) -> None:
 
 
 class FakeAgentRuntimeService:
-    def __init__(self, *, user_id: UUID, action_id: UUID | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        user_id: UUID,
+        action_id: UUID | None = None,
+        event_batches: list[list[tuple[str, int]]] | None = None,
+    ) -> None:
         self.user_id = user_id
         self.thread_id = uuid4()
         self.run_id = uuid4()
         self.action_id = action_id or uuid4()
+        self.event_batches = event_batches
+        self.list_events_call_count = 0
         self.create_run_kwargs = {}
         self.list_threads_kwargs = {}
         self.get_run_kwargs = {}
@@ -167,16 +198,11 @@ class FakeAgentRuntimeService:
 
     async def list_events(self, **kwargs):
         self.list_events_kwargs = kwargs
-        return [
-            AgentEvent(
-                event_id=uuid4(),
-                thread_id=self.thread_id,
-                run_id=self.run_id,
-                sequence=2,
-                event_type="run.queued",
-                payload={},
-            )
-        ]
+        self.list_events_call_count += 1
+        if self.event_batches:
+            batch = self.event_batches[min(self.list_events_call_count - 1, len(self.event_batches) - 1)]
+            return [self._event(event_type=event_type, sequence=sequence) for event_type, sequence in batch]
+        return [self._event(event_type="run.queued", sequence=2)]
 
     async def cancel_run(self, **kwargs):
         self.cancel_kwargs = kwargs
@@ -216,6 +242,16 @@ class FakeAgentRuntimeService:
             trace_id="req_agent",
             error_code="",
             error_details={},
+        )
+
+    def _event(self, *, event_type: str, sequence: int) -> AgentEvent:
+        return AgentEvent(
+            event_id=uuid4(),
+            thread_id=self.thread_id,
+            run_id=self.run_id,
+            sequence=sequence,
+            event_type=event_type,
+            payload={},
         )
 
     def _action(self):

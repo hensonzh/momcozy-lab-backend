@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import asyncio
+from collections.abc import AsyncIterator
+from time import monotonic
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request, Response, status
@@ -37,6 +40,8 @@ from .streaming import encode_sse_events
 
 
 router = APIRouter(prefix="/agent", tags=["agent"])
+
+TERMINAL_STREAM_EVENT_TYPES = {"run.completed", "run.failed", "run.cancelled", "run.waiting_for_confirmation"}
 
 
 def get_agent_runtime_service(request: Request, session: AsyncSession = Depends(get_session)) -> AgentRuntimeService:
@@ -150,17 +155,23 @@ async def stream_run_events(
     run_id: UUID,
     after_sequence: int = Query(default=0, ge=0),
     limit: int = Query(default=200, ge=1, le=500),
+    follow: bool = Query(default=False),
+    poll_interval_seconds: float = Query(default=1.0, ge=0.1, le=5.0),
+    max_wait_seconds: int = Query(default=30, ge=1, le=300),
     current_user: CurrentUser = Depends(require_current_user),
     service: AgentRuntimeService = Depends(get_agent_runtime_service),
 ) -> Response:
-    events = await service.list_events(
-        owner_user_id=current_user.user_id,
-        run_id=run_id,
-        after_sequence=after_sequence,
-        limit=limit,
-    )
     return StreamingResponse(
-        iter([encode_sse_events(events)]),
+        _stream_run_event_chunks(
+            service=service,
+            owner_user_id=current_user.user_id,
+            run_id=run_id,
+            after_sequence=after_sequence,
+            limit=limit,
+            follow=follow,
+            poll_interval_seconds=poll_interval_seconds,
+            max_wait_seconds=max_wait_seconds,
+        ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache"},
     )
@@ -241,3 +252,28 @@ async def create_eval_case_from_run(
         owner_team=payload.owner_team,
     )
     return AgentEvalCaseRead.model_validate(eval_case)
+
+
+async def _stream_run_event_chunks(
+    *,
+    service: AgentRuntimeService,
+    owner_user_id: UUID,
+    run_id: UUID,
+    after_sequence: int,
+    limit: int,
+    follow: bool,
+    poll_interval_seconds: float,
+    max_wait_seconds: int,
+) -> AsyncIterator[str]:
+    cursor = after_sequence
+    deadline = monotonic() + max_wait_seconds
+    while True:
+        events = await service.list_events(owner_user_id=owner_user_id, run_id=run_id, after_sequence=cursor, limit=limit)
+        if events:
+            yield encode_sse_events(events)
+            cursor = events[-1].sequence
+            if any(event.event_type in TERMINAL_STREAM_EVENT_TYPES for event in events):
+                return
+        if not follow or monotonic() >= deadline:
+            return
+        await asyncio.sleep(poll_interval_seconds)
