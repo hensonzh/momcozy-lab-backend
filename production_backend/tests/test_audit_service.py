@@ -70,6 +70,54 @@ def test_idempotency_service_reserves_new_key() -> None:
     assert repository.created_idempotency.scope == "files.upload"
 
 
+def test_idempotency_service_normalizes_scope_and_key() -> None:
+    repository = FakeAuditRepository()
+    service = IdempotencyService(repository=repository)
+
+    decision = asyncio.run(
+        service.reserve(
+            actor_user_id=uuid4(),
+            scope=" files.upload ",
+            key=" idem-1 ",
+            request_hash="hash-1",
+            expires_at=_expires_at(),
+        )
+    )
+
+    assert decision.status == "reserved"
+    assert repository.lookup_kwargs["scope"] == "files.upload"
+    assert repository.lookup_kwargs["key"] == "idem-1"
+    assert repository.created_idempotency.scope == "files.upload"
+    assert repository.created_idempotency.key == "idem-1"
+
+
+@pytest.mark.parametrize(
+    ("scope", "key", "message"),
+    [
+        ("", "idem-1", "scope"),
+        ("files.upload", "", "key"),
+        ("x" * 121, "idem-1", "scope"),
+        ("files.upload", "x" * 256, "key"),
+    ],
+)
+def test_idempotency_service_rejects_invalid_scope_or_key(scope: str, key: str, message: str) -> None:
+    service = IdempotencyService(repository=FakeAuditRepository())
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            service.reserve(
+                actor_user_id=uuid4(),
+                scope=scope,
+                key=key,
+                request_hash="hash-1",
+                expires_at=_expires_at(),
+            )
+        )
+
+    assert exc_info.value.code == "validation_failed"
+    assert message in exc_info.value.message.lower()
+
+
 def test_idempotency_service_replays_same_request_hash() -> None:
     existing = _idempotency_key(request_hash_value="hash-1")
     service = IdempotencyService(repository=FakeAuditRepository(existing_idempotency=existing))
@@ -145,12 +193,14 @@ class FakeAuditRepository:
         self.existing_idempotency = existing_idempotency
         self.created_idempotency = None
         self.audit_kwargs = {}
+        self.lookup_kwargs = {}
 
     async def record_audit(self, **kwargs):
         self.audit_kwargs = kwargs
         return None
 
     async def get_idempotency_key(self, **kwargs):
+        self.lookup_kwargs = kwargs
         return self.existing_idempotency
 
     async def create_idempotency_key(self, **kwargs):

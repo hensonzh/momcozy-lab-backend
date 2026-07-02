@@ -61,16 +61,27 @@ class IdempotencyService:
         request_hash: str,
         expires_at: datetime,
     ) -> IdempotencyDecision:
+        normalized_scope = scope.strip()
+        normalized_key = key.strip()
+        if not normalized_scope:
+            raise ApiError(code="validation_failed", message="Idempotency scope is required.", status=422)
+        if len(normalized_scope) > 120:
+            raise ApiError(code="validation_failed", message="Idempotency scope is too long.", status=422)
+        if not normalized_key:
+            raise ApiError(code="validation_failed", message="Idempotency key is required.", status=422)
+        if len(normalized_key) > 255:
+            raise ApiError(code="validation_failed", message="Idempotency key is too long.", status=422)
+
         existing = await self.repository.get_idempotency_key(
             actor_user_id=actor_user_id,
-            scope=scope,
-            key=key,
+            scope=normalized_scope,
+            key=normalized_key,
         )
         if existing is None:
             created = await self.repository.create_idempotency_key(
                 actor_user_id=actor_user_id,
-                scope=scope,
-                key=key,
+                scope=normalized_scope,
+                key=normalized_key,
                 request_hash=request_hash,
                 expires_at=expires_at,
             )
