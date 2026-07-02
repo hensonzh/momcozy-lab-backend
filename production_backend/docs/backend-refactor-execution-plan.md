@@ -386,6 +386,16 @@ Completed:
 - Agent active-run guard: run creation now rejects a second non-terminal run on
   the same thread at the service layer, with a PostgreSQL partial unique index
   as the final concurrency guard.
+- Agent run idempotency hygiene: if a newly reserved run idempotency key is
+  blocked by an existing active run, the reservation is released so retries do
+  not get stuck behind an `idempotency_in_progress` record.
+- Agent thread activity ordering: persisted user messages touch
+  `agent_threads.updated_at`, keeping thread lists ordered by recent activity.
+- Tool input contract enforcement: registered JSON Schemas are validated before
+  tool calls are persisted or executed, so unknown model-supplied parameters do
+  not enter the tool ledger.
+- SDK context serialization: structured state and business-fact projections are
+  flattened as deterministic JSON for cache-stable SDK inputs.
 
 ### Phase 7: Safety, Observability, And Eval
 
@@ -522,6 +532,16 @@ Completed backend commits have established:
   semantics while allowing clients to wait for terminal run events
 - active-run guard for agent threads, backed by a PostgreSQL partial unique
   index over queued/running/waiting runs
+- idempotency reservations for blocked agent run creation are released instead
+  of becoming stale in-progress records
+- agent threads are touched when new user messages are persisted, keeping
+  conversation lists aligned with activity
+- agent tool inputs are validated against registered JSON Schemas before
+  tool-call persistence or execution
+- structured agent context is serialized deterministically when flattened for
+  the OpenAI Agents SDK boundary
+- public agent action responses expose preview/status metadata only; server-side
+  `apply_payload` and action idempotency keys remain internal
 - OpenAPI schema export script, generated schema snapshot, and API handoff
   document for Flutter integration
 - Auth/token API contract tests for token response shape, validation envelope,

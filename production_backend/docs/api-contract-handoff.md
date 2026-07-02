@@ -66,6 +66,9 @@ clients can merge replayed events into the same action card. `apply_payload` is
 never streamed; it is only persisted inside the server-side action/outbox apply
 path.
 
+Action API responses likewise expose preview/status metadata only. They do not
+return server-side `apply_payload` or action idempotency keys.
+
 ## Files
 
 File upload uses multipart form data at `POST /v1/files/upload`. File metadata
