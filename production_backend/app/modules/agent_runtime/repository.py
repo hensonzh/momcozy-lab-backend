@@ -85,6 +85,32 @@ class AgentRuntimeRepository:
         )
         return cast(AgentRun | None, await self.session.scalar(statement))
 
+    async def get_run(self, *, run_id: UUID) -> AgentRun | None:
+        statement = select(AgentRun).where(AgentRun.id == run_id)
+        return cast(AgentRun | None, await self.session.scalar(statement))
+
+    async def mark_run_running(self, *, run: AgentRun, started_at: datetime) -> AgentRun:
+        run.status = "running"
+        if run.started_at is None:
+            run.started_at = started_at
+        run.error_code = ""
+        run.error_details = {}
+        await self.session.flush()
+        return run
+
+    async def mark_run_completed(self, *, run: AgentRun, completed_at: datetime) -> AgentRun:
+        run.status = "completed"
+        run.completed_at = completed_at
+        run.error_code = ""
+        run.error_details = {}
+        await self.session.flush()
+        return run
+
+    async def mark_run_waiting_for_confirmation(self, *, run: AgentRun) -> AgentRun:
+        run.status = "waiting_for_confirmation"
+        await self.session.flush()
+        return run
+
     async def create_message(
         self,
         *,

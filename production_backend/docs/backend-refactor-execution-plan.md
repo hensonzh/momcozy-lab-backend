@@ -299,6 +299,10 @@ Completed:
   structured failure mapping.
 - Streaming replay endpoint: `/v1/agent/runs/{run_id}/stream` emits persisted
   application event envelopes as SSE, never provider raw events.
+- Agent run worker skeleton: worker-owned run lock, cancel checks,
+  queued/running/completed/failed/waiting transitions, assistant message
+  persistence, stream cursor updates, and terminal cleanup around an injectable
+  LangGraph/SDK handler.
 
 ### Phase 7: Safety, Observability, And Eval
 
@@ -379,6 +383,8 @@ Completed backend commits have established:
 - durable agent runtime ledger, Redis controls, LangGraph/OpenAI Agents SDK
   boundaries, guarded tool executor, SSE replay, action confirmation, and
   deterministic safety gate
+- worker-owned Agent run lifecycle skeleton with lock/cancel/status/event
+  semantics ready for LangGraph/SDK execution
 - OpenAPI schema export script, generated schema snapshot, and API handoff
   document for Flutter integration
 - Auth/token API contract tests for token response shape, validation envelope,
