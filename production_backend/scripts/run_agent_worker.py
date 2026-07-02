@@ -32,6 +32,7 @@ from production_backend.app.modules.profiles.service import ProfileService
 from production_backend.app.modules.records.repository import RecordsRepository
 from production_backend.app.modules.records.service import RecordsService
 from production_backend.app.workers.agent_run import AgentRunQueueWorker, AgentRunWorker
+from production_backend.scripts.worker_runtime import install_stop_signal_handlers, sleep_until_stop
 
 
 async def run_agent_worker(
@@ -39,6 +40,7 @@ async def run_agent_worker(
     settings: Settings | None = None,
     once: bool = False,
     max_cycles: int | None = None,
+    stop_event: asyncio.Event | None = None,
 ) -> dict[str, Any]:
     resolved_settings = settings or Settings.from_env()
     resolved_settings.validate_for_startup()
@@ -53,6 +55,9 @@ async def run_agent_worker(
     totals: dict[str, Any] = {"status": "ok", "cycles": 0, "scanned": 0, "processed": 0, "terminal": 0}
     try:
         while True:
+            if stop_event is not None and stop_event.is_set():
+                totals["status"] = "stopping"
+                return _with_metrics(totals, metrics)
             async with session_factory() as session:
                 repository = AgentRuntimeRepository(session)
                 audit_repository = AuditRepository(session)
@@ -137,7 +142,7 @@ async def run_agent_worker(
             if once or (max_cycles is not None and totals["cycles"] >= max_cycles):
                 return _with_metrics(totals, metrics)
             if result.scanned == 0:
-                await asyncio.sleep(resolved_settings.agent_runtime_worker_idle_seconds)
+                await sleep_until_stop(seconds=resolved_settings.agent_runtime_worker_idle_seconds, stop_event=stop_event)
     finally:
         await close_redis_client(redis_client)
         await db_engine.dispose()
@@ -153,7 +158,13 @@ def main() -> None:
     parser.add_argument("--max-cycles", type=int, default=None, help="Process at most this many cycles before exiting.")
     args = parser.parse_args()
 
-    result = asyncio.run(run_agent_worker(once=args.once, max_cycles=args.max_cycles))
+    asyncio.run(_run_from_cli(once=args.once, max_cycles=args.max_cycles))
+
+
+async def _run_from_cli(*, once: bool, max_cycles: int | None) -> None:
+    stop_event = asyncio.Event()
+    install_stop_signal_handlers(stop_event)
+    result = await run_agent_worker(once=once, max_cycles=max_cycles, stop_event=stop_event)
     print(json.dumps(result, sort_keys=True))
 
 

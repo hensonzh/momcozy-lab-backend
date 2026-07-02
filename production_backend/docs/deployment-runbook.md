@@ -55,11 +55,13 @@ Start incident and release debugging from these IDs when available:
 6. Run the release smoke checklist.
 7. Watch 5xx rate, latency, auth failures, worker failures, and agent run
    failures for at least one SLO window.
+8. During rolling restarts, let agent and outbox workers receive SIGTERM/SIGINT
+   and stop at the next idle point before force killing the process.
 
 ## Rollback
 
 1. Stop routing traffic to the new API version.
-2. Roll back the API/worker image.
+2. Let worker processes drain on SIGTERM/SIGINT, then roll back the API/worker image.
 3. Do not downgrade schema unless a tested downgrade exists.
 4. If an expand-contract migration was used, keep backward-compatible columns
    until both versions are safely drained.
