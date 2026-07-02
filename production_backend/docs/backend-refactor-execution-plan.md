@@ -117,11 +117,11 @@ Completed:
 - JWT access-token verification dependency.
 - `CurrentUser` object for backend-derived owner scope.
 - `device_sessions` and `refresh_tokens` models and migration.
+- Refresh token service with hash-only storage, rotation, reuse detection, and
+  session revocation.
 
 Remaining:
 
-- Refresh token rotation and reuse detection.
-- Logout/session revocation.
 - RBAC/permission policy helpers.
 - Service-to-service key separated from user auth.
 
