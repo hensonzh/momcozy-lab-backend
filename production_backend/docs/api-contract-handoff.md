@@ -60,10 +60,11 @@ includes user-visible `preview_payload` plus action metadata:
 `action_type`, `action_status`, `target_type`, `target_id`, and
 `side_effect_level`.
 
-`action.queued` and `action.rejected` include `action_status`, `action_type`,
-`target_type`, and `target_id` so clients can merge replayed events into the
-same action card. `apply_payload` is never streamed; it is only persisted inside
-the server-side action/outbox apply path.
+`action.queued`, `action.applied`, `action.failed`, and `action.rejected`
+include `action_status`, `action_type`, `target_type`, and `target_id` so
+clients can merge replayed events into the same action card. `apply_payload` is
+never streamed; it is only persisted inside the server-side action/outbox apply
+path.
 
 ## Files
 

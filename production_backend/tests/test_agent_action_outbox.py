@@ -26,6 +26,10 @@ def test_agent_action_outbox_handler_applies_action_and_emits_event() -> None:
     assert repository.action.status == "applied"
     assert [event.event_type for event in repository.events] == ["action.applied"]
     assert repository.events[0].thread_id == repository.run.thread_id
+    assert repository.events[0].payload["action_id"] == str(repository.action.id)
+    assert repository.events[0].payload["action_status"] == "applied"
+    assert repository.events[0].payload["action_type"] == "support.ticket.create"
+    assert repository.events[0].payload["target_type"] == "support_ticket"
     assert repository.events[0].payload["resource_id"] == "ticket_1"
 
 
@@ -40,6 +44,11 @@ def test_agent_action_outbox_handler_marks_failed_when_handler_missing() -> None
     assert repository.action.status == "failed"
     assert repository.action.error_code == "agent_action_handler_not_found"
     assert repository.events[-1].event_type == "action.failed"
+    assert repository.events[-1].payload["action_id"] == str(repository.action.id)
+    assert repository.events[-1].payload["action_status"] == "failed"
+    assert repository.events[-1].payload["action_type"] == "support.ticket.create"
+    assert repository.events[-1].payload["target_type"] == "support_ticket"
+    assert repository.events[-1].payload["code"] == "agent_action_handler_not_found"
 
 
 def test_agent_action_outbox_handler_is_idempotent_for_applied_action() -> None:

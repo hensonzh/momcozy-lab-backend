@@ -73,6 +73,7 @@ class AgentActionOutboxHandler:
             run_id=applied.run_id,
             event_type="action.applied",
             payload={
+                **_action_event_payload(applied),
                 "action_id": str(applied.id),
                 "resource_type": result.resource_type,
                 "resource_id": result.resource_id,
@@ -86,7 +87,7 @@ class AgentActionOutboxHandler:
             thread_id=thread_id,
             run_id=failed.run_id,
             event_type="action.failed",
-            payload={"action_id": str(failed.id), "code": error_code},
+            payload={**_action_event_payload(failed), "code": error_code},
         )
 
     async def _append_event(self, *, thread_id: UUID, run_id: UUID, event_type: str, payload: dict[str, Any]) -> None:
@@ -100,6 +101,16 @@ def _action_id_from_job(job: OutboxJob) -> UUID:
     if job.action_id is not None:
         return job.action_id
     return _require_uuid(job.payload.get("action_id"), "missing_action_id")
+
+
+def _action_event_payload(action: AgentAction) -> dict[str, Any]:
+    return {
+        "action_id": str(action.id),
+        "action_status": action.status,
+        "action_type": action.action_type,
+        "target_type": action.target_type,
+        "target_id": action.target_id,
+    }
 
 
 def _require_uuid(raw: object, code: str) -> UUID:
