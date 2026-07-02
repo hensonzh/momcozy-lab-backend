@@ -14,6 +14,8 @@ def test_deployment_runbook_covers_release_recovery_and_security() -> None:
         "Worker Backlog",
         "Agent Run Recovery",
         "Security Incident",
+        "Backup And Restore Drill",
+        "Credential Rotation Drill",
         "actor_service",
     ]:
         assert phrase in text

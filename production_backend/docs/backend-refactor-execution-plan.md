@@ -393,11 +393,14 @@ Completed backend commits have established:
   records/plans, idempotency, and agent event/SSE replay.
 - Empty database migration smoke test using Alembic offline `upgrade head --sql`
   and CI coverage for the generated DDL path.
+- Deployment runbook now includes backup/restore and credential rotation drills
+  that rely on environment-variable managed infrastructure and secret-manager
+  rotation.
 
 Next recommended backend PR slices:
 
-1. Add runbook entries for backup/restore and credential rotation drills.
-2. Add release compatibility notes for Flutter generated clients.
-3. Add lint/type gates once ruff/mypy configuration is introduced.
-4. Add first real Postgres integration test profile.
-5. Add migration compatibility test against a live Postgres service in CI.
+1. Add release compatibility notes for Flutter generated clients.
+2. Add lint/type gates once ruff/mypy configuration is introduced.
+3. Add first real Postgres integration test profile.
+4. Add migration compatibility test against a live Postgres service in CI.
+5. Add backup/restore automation hooks when managed infrastructure is selected.

@@ -79,3 +79,33 @@ Start incident and release debugging from these IDs when available:
 3. Search audit logs by `actor_user_id`, `actor_service`, and `request_id`.
 4. Preserve evidence with redaction; do not copy raw secrets into tickets.
 5. Add a contract or security regression test.
+
+## Backup And Restore Drill
+
+Run this drill before production launch and on a regular schedule:
+
+1. Confirm Postgres backup completion and retention window.
+2. Confirm object storage retention policy for uploads and artifacts.
+3. Restore the latest backup into an isolated environment.
+4. Run migrations to the current head against the restored database.
+5. Run `/v1/health/ready` against the restored environment.
+6. Run the release smoke checklist with a non-production test account.
+7. Record actual RPO/RTO and fix gaps before relying on the backup.
+
+Never treat a backup as valid until a restore has been tested.
+
+## Credential Rotation Drill
+
+Rotate credentials without code changes:
+
+1. Create new managed Postgres, Redis, object-storage, JWT, or service-key
+   credentials in the secret manager.
+2. Deploy the new environment variables to staging first.
+3. Run readiness and smoke tests.
+4. Deploy to production with a rolling restart.
+5. Revoke old credentials only after all API and worker instances have the new
+   values.
+6. Check auth failures, object-storage failures, worker failures, and 5xx rate.
+7. Record the rotated key IDs and incident/change ticket.
+
+Do not put old or new secrets in logs, tickets, commits, or OpenAPI examples.
