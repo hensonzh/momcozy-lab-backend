@@ -88,6 +88,24 @@ def test_idempotency_service_replays_same_request_hash() -> None:
     assert decision.record is existing
 
 
+def test_idempotency_service_rejects_expired_key_before_replay() -> None:
+    existing = _idempotency_key(request_hash_value="hash-1", expires_at=datetime.now(timezone.utc) - timedelta(seconds=1))
+    service = IdempotencyService(repository=FakeAuditRepository(existing_idempotency=existing))
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            service.reserve(
+                actor_user_id=existing.actor_user_id,
+                scope=existing.scope,
+                key=existing.key,
+                request_hash="hash-1",
+                expires_at=_expires_at(),
+            )
+        )
+
+    assert exc_info.value.code == "idempotency_key_expired"
+
+
 def test_idempotency_service_rejects_conflicting_request_hash() -> None:
     existing = _idempotency_key(request_hash_value="hash-1")
     service = IdempotencyService(repository=FakeAuditRepository(existing_idempotency=existing))
@@ -112,13 +130,13 @@ def _expires_at() -> datetime:
     return datetime.now(timezone.utc) + timedelta(hours=1)
 
 
-def _idempotency_key(*, request_hash_value: str) -> IdempotencyKey:
+def _idempotency_key(*, request_hash_value: str, expires_at: datetime | None = None) -> IdempotencyKey:
     return IdempotencyKey(
         actor_user_id=uuid4(),
         scope="files.upload",
         key="idem-1",
         request_hash=request_hash_value,
-        expires_at=_expires_at(),
+        expires_at=expires_at or _expires_at(),
     )
 
 

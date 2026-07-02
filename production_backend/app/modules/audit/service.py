@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
@@ -76,6 +76,9 @@ class IdempotencyService:
             )
             return IdempotencyDecision(status="reserved", record=created)
 
+        if _is_expired(existing.expires_at):
+            raise ApiError(code="idempotency_key_expired", message="Idempotency key has expired; retry with a new key.", status=409)
+
         if existing.request_hash != request_hash:
             raise ApiError(code="idempotency_conflict", message="Idempotency key was reused with a different request.", status=409)
 
@@ -88,3 +91,11 @@ class IdempotencyService:
 def request_hash(payload: Any) -> str:
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _is_expired(expires_at: datetime) -> bool:
+    now = datetime.now(timezone.utc)
+    comparable_expires_at = expires_at
+    if comparable_expires_at.tzinfo is None:
+        comparable_expires_at = comparable_expires_at.replace(tzinfo=timezone.utc)
+    return comparable_expires_at <= now
