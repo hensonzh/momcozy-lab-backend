@@ -48,6 +48,11 @@ Stream URLs do not accept access tokens as query parameters. Clients must send
 the bearer token in headers. Events are application-level runtime events, not
 provider raw events.
 
+The SSE stream replays persisted events by default. Clients that need live
+consumption can pass `follow=true` with bounded `poll_interval_seconds` and
+`max_wait_seconds`; the backend still emits only persisted application events
+and exits when a terminal run event is observed or the wait budget expires.
+
 ## Files
 
 File upload uses multipart form data at `POST /v1/files/upload`. File metadata

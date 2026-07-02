@@ -420,8 +420,9 @@ Deliverables:
 - Records/plans/diary/devices contracts. Done in OpenAPI snapshot.
 - Agent event/action/artifact contract. Done in OpenAPI snapshot and handoff
   document.
-- Contract tests and sample API flows. In progress; OpenAPI snapshot, core path,
-  stream-token, and idempotency header tests are in place.
+- Contract tests and sample API flows. Done; OpenAPI snapshot, core path,
+  stream-token, idempotency header, smoke-flow method/path, and auth-boundary
+  tests are in place.
 
 Acceptance:
 
@@ -504,7 +505,8 @@ Completed backend commits have established:
 - CI workflow for production backend tests, Alembic head check, OpenAPI snapshot
   drift, legacy runtime reference scan, compose validation, and container build.
 - Flutter integration smoke fixtures for auth/session, file upload,
-  records/plans, idempotency, and agent event/SSE replay.
+  records/plans, idempotency, agent event/SSE replay, and optional SSE follow
+  mode.
 - Empty database migration smoke test using Alembic offline `upgrade head --sql`
   and CI coverage for the generated DDL path.
 - Deployment runbook now includes backup/restore and credential rotation drills

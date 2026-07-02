@@ -123,6 +123,12 @@
           "path": "/v1/agent/runs/${run_id}/stream?after_sequence=0&limit=200",
           "headers": ["${auth_header}"],
           "assertions": ["no token query parameter"]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/agent/runs/${run_id}/stream?after_sequence=0&limit=200&follow=true&poll_interval_seconds=0.5&max_wait_seconds=1",
+          "headers": ["${auth_header}"],
+          "assertions": ["no token query parameter", "returns persisted application events only"]
         }
       ]
     }
