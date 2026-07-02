@@ -56,6 +56,12 @@ def test_compose_env_declares_disabled_outbox_worker_controls() -> None:
     assert "OUTBOX_WORKER_LEASE_SECONDS=60" in env
 
 
+def test_compose_env_declares_active_session_auth_gate() -> None:
+    env = (PRODUCTION_BACKEND / "compose.env.example").read_text()
+
+    assert "AUTH_REQUIRE_ACTIVE_SESSION=false" in env
+
+
 def test_compose_exposes_minio_as_optional_tools_profile() -> None:
     compose = (PRODUCTION_BACKEND / "docker-compose.yml").read_text()
 
