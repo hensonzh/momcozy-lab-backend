@@ -3,6 +3,7 @@ from __future__ import annotations
 from ...modules.audit import models as audit_models
 from ...modules.auth import models as auth_models
 from ...modules.diary import models as diary_models
+from ...modules.devices import models as devices_models
 from ...modules.files import models as files_models
 from ...modules.plans import models as plans_models
 from ...modules.profiles import models as profiles_models
@@ -13,6 +14,7 @@ __all__ = [
     "audit_models",
     "auth_models",
     "diary_models",
+    "devices_models",
     "files_models",
     "plans_models",
     "profiles_models",

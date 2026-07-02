@@ -188,10 +188,12 @@ Completed:
   health notes.
 - Pregnancy diary API: owner-scoped list/get/upsert/delete by entry date with
   audit on writes.
+- Devices data foundation: owner-scoped pump device metadata and pump telemetry
+  events.
 
 Suggested order:
 
-1. Devices and pump telemetry.
+1. Devices and pump telemetry APIs.
 2. Notifications and support tickets.
 
 Rules:
