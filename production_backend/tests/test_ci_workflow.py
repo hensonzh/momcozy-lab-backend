@@ -1,0 +1,25 @@
+from pathlib import Path
+
+
+WORKFLOW = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "production-backend-ci.yml"
+
+
+def test_production_backend_ci_runs_core_gates() -> None:
+    text = WORKFLOW.read_text()
+
+    for phrase in [
+        "python -m pytest production_backend/tests",
+        "python -m alembic -c production_backend/alembic.ini heads",
+        "production_backend/scripts/export_openapi.py",
+        "previous_response" + "_id|Chat" + "Session|ENTRY" + "_API_KEY",
+        "docker compose -f production_backend/docker-compose.yml config",
+        "docker build -f production_backend/Dockerfile .",
+    ]:
+        assert phrase in text
+
+
+def test_production_backend_ci_is_scoped_to_isolated_backend() -> None:
+    text = WORKFLOW.read_text()
+
+    assert "production_backend/**" in text
+    assert "src/momcozy" + "_agent" not in text

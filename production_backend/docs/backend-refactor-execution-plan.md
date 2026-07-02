@@ -387,11 +387,13 @@ Completed backend commits have established:
 - Deployment runbook and release smoke checklist covering infrastructure,
   migrations, auth, core APIs, agent runtime, observability, worker backlog,
   agent recovery, rollback, and security incidents.
+- CI workflow for production backend tests, Alembic head check, OpenAPI snapshot
+  drift, legacy runtime reference scan, compose validation, and container build.
 
 Next recommended backend PR slices:
 
-1. Add CI wiring for lint/type/test/migration/container checks.
-2. Add production smoke fixtures for Flutter integration flows.
-3. Add migration compatibility smoke tests for an empty database.
-4. Add runbook entries for backup/restore and credential rotation drills.
-5. Add release compatibility notes for Flutter generated clients.
+1. Add production smoke fixtures for Flutter integration flows.
+2. Add migration compatibility smoke tests for an empty database.
+3. Add runbook entries for backup/restore and credential rotation drills.
+4. Add release compatibility notes for Flutter generated clients.
+5. Add lint/type gates once ruff/mypy configuration is introduced.
