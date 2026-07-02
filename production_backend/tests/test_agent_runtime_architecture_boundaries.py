@@ -127,6 +127,29 @@ def test_sdk_runner_uses_real_agents_sdk_shape_when_package_is_available(monkeyp
     assert FakeAgentsSdkRunner.last_input == "user: hello"
 
 
+def test_sdk_runner_flattens_structured_context_as_stable_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_agents = types.ModuleType("agents")
+    fake_agents.__spec__ = ModuleSpec("agents", loader=None)
+    fake_agents.Agent = FakeAgentsSdkAgent
+    fake_agents.FunctionTool = FakeAgentsSdkFunctionTool
+    fake_agents.Runner = FakeAgentsSdkRunner
+    monkeypatch.setitem(sys.modules, "agents", fake_agents)
+    request = SdkNodeRequest(
+        run_id="run_1",
+        thread_id="thread_1",
+        actor_user_id="user_1",
+        instructions="Be concise.",
+        model_input=[
+            {"role": "developer", "content": {"state": {"z": 2, "a": 1}}},
+            {"role": "user", "content": "hello"},
+        ],
+    )
+
+    asyncio.run(OpenAIAgentsSdkRunner(model="gpt-test").run_reasoning(request))
+
+    assert FakeAgentsSdkRunner.last_input == 'developer: {"state":{"a":1,"z":2}}\nuser: hello'
+
+
 def test_sdk_runner_wraps_application_tool_executor_for_agents_sdk(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_agents = types.ModuleType("agents")
     fake_agents.__spec__ = ModuleSpec("agents", loader=None)

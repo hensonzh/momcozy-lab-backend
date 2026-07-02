@@ -118,6 +118,8 @@ def _flatten_model_input(model_input: list[dict[str, Any]]) -> str:
 def _stringify_content(content: object) -> str:
     if isinstance(content, str):
         return content
+    if isinstance(content, dict | list):
+        return json.dumps(content, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
     return str(content)
 
 
