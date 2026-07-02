@@ -59,13 +59,16 @@ class AgentActionOutboxHandler:
         await self.repository.mark_action_applying(action=action)
         try:
             result = await handler(action)
-        except RetryableJobError:
+        except RetryableJobError as exc:
+            await self._fail_if_final_attempt(job=job, action=action, thread_id=run.thread_id, error_code=exc.code)
             raise
         except PermanentJobError as exc:
             await self._fail(action=action, thread_id=run.thread_id, error_code=exc.code)
             raise
         except Exception as exc:
-            raise RetryableJobError("agent_action_handler_error") from exc
+            error_code = "agent_action_handler_error"
+            await self._fail_if_final_attempt(job=job, action=action, thread_id=run.thread_id, error_code=error_code)
+            raise RetryableJobError(error_code) from exc
 
         applied = await self.repository.mark_action_applied(action=action, applied_at=_utcnow())
         await self._append_event(
@@ -89,6 +92,10 @@ class AgentActionOutboxHandler:
             event_type="action.failed",
             payload={**_action_event_payload(failed), "code": error_code},
         )
+
+    async def _fail_if_final_attempt(self, *, job: OutboxJob, action: AgentAction, thread_id: UUID, error_code: str) -> None:
+        if job.attempts >= job.max_attempts:
+            await self._fail(action=action, thread_id=thread_id, error_code=error_code)
 
     async def _append_event(self, *, thread_id: UUID, run_id: UUID, event_type: str, payload: dict[str, Any]) -> None:
         if self.event_sink is not None:

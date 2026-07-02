@@ -7,7 +7,7 @@ from production_backend.app.modules.agent_runtime.action_outbox import AgentActi
 from production_backend.app.modules.agent_runtime.models import AgentAction, AgentEvent, AgentRun
 from production_backend.app.modules.agent_runtime.service import AGENT_ACTION_APPLY_JOB
 from production_backend.app.modules.audit.models import OutboxJob
-from production_backend.app.workers.errors import PermanentJobError
+from production_backend.app.workers.errors import PermanentJobError, RetryableJobError
 
 
 def test_agent_action_outbox_handler_applies_action_and_emits_event() -> None:
@@ -58,6 +58,59 @@ def test_agent_action_outbox_handler_is_idempotent_for_applied_action() -> None:
     asyncio.run(handler(_job(repository.action.id)))
 
     assert repository.events == []
+
+
+def test_agent_action_outbox_handler_keeps_retryable_action_applying_before_final_attempt() -> None:
+    repository = FakeAgentActionRepository()
+
+    async def apply(_action: AgentAction) -> AgentActionApplyResult:
+        raise RetryableJobError("provider_503")
+
+    handler = AgentActionOutboxHandler(repository=repository, handlers={"support.ticket.create": apply})
+
+    with pytest.raises(RetryableJobError) as exc_info:
+        asyncio.run(handler(_job(repository.action.id, attempts=1, max_attempts=3)))
+
+    assert exc_info.value.code == "provider_503"
+    assert repository.action.status == "applying"
+    assert repository.action.error_code == ""
+    assert repository.events == []
+
+
+def test_agent_action_outbox_handler_fails_retryable_action_on_final_attempt() -> None:
+    repository = FakeAgentActionRepository()
+
+    async def apply(_action: AgentAction) -> AgentActionApplyResult:
+        raise RetryableJobError("provider_503")
+
+    handler = AgentActionOutboxHandler(repository=repository, handlers={"support.ticket.create": apply})
+
+    with pytest.raises(RetryableJobError) as exc_info:
+        asyncio.run(handler(_job(repository.action.id, attempts=3, max_attempts=3)))
+
+    assert exc_info.value.code == "provider_503"
+    assert repository.action.status == "failed"
+    assert repository.action.error_code == "provider_503"
+    assert repository.events[-1].event_type == "action.failed"
+    assert repository.events[-1].payload["action_status"] == "failed"
+    assert repository.events[-1].payload["code"] == "provider_503"
+
+
+def test_agent_action_outbox_handler_fails_unexpected_error_on_final_attempt() -> None:
+    repository = FakeAgentActionRepository()
+
+    async def apply(_action: AgentAction) -> AgentActionApplyResult:
+        raise RuntimeError("provider exploded")
+
+    handler = AgentActionOutboxHandler(repository=repository, handlers={"support.ticket.create": apply})
+
+    with pytest.raises(RetryableJobError) as exc_info:
+        asyncio.run(handler(_job(repository.action.id, attempts=3, max_attempts=3)))
+
+    assert exc_info.value.code == "agent_action_handler_error"
+    assert repository.action.status == "failed"
+    assert repository.action.error_code == "agent_action_handler_error"
+    assert repository.events[-1].event_type == "action.failed"
 
 
 class FakeAgentActionRepository:
@@ -125,7 +178,7 @@ class FakeAgentActionRepository:
         return event
 
 
-def _job(action_id) -> OutboxJob:
+def _job(action_id, *, attempts: int = 0, max_attempts: int = 3) -> OutboxJob:
     return OutboxJob(
         id=uuid4(),
         action_id=action_id,
@@ -133,6 +186,8 @@ def _job(action_id) -> OutboxJob:
         status="locked",
         payload={"action_id": str(action_id)},
         idempotency_key=f"agent-action:{action_id}",
+        attempts=attempts,
+        max_attempts=max_attempts,
         request_id="req",
         trace_id="trace",
     )

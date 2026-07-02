@@ -90,13 +90,31 @@ def test_outbox_worker_records_job_metrics() -> None:
     assert worker_metrics["error_code_counts"]["provider_503"] == 1
 
 
+def test_outbox_worker_records_retry_exhaustion_as_dead_lettered() -> None:
+    job = _job()
+    service = FakeOutboxService(job=job, retry_exhausted=True)
+    metrics = RequestMetrics()
+
+    async def handler(_job):
+        raise RetryableJobError("provider_503")
+
+    worker = OutboxWorker(service=service, handlers={"files.cleanup": handler}, metrics=metrics)
+
+    assert asyncio.run(worker.run_once()) is True
+    worker_metrics = metrics.snapshot()["workers"][0]
+    assert service.retryable_error_code == "provider_503"
+    assert worker_metrics["outcome_counts"]["dead_lettered"] == 1
+    assert worker_metrics["error_code_counts"]["provider_503"] == 1
+
+
 def _job(*, job_type: str = "files.cleanup") -> OutboxJob:
     return OutboxJob(job_type=job_type, payload={}, idempotency_key="job-1")
 
 
 class FakeOutboxService:
-    def __init__(self, *, job) -> None:
+    def __init__(self, *, job, retry_exhausted: bool = False) -> None:
         self.job = job
+        self.retry_exhausted = retry_exhausted
         self.completed_job = None
         self.retryable_error_code = ""
         self.permanent_error_code = ""
@@ -109,6 +127,11 @@ class FakeOutboxService:
 
     async def mark_retryable_failure(self, *, job, error_code: str):
         self.retryable_error_code = error_code
+        if self.retry_exhausted:
+            job.status = "dead_lettered"
+        return job
 
     async def mark_permanent_failure(self, *, job, error_code: str):
         self.permanent_error_code = error_code
+        job.status = "dead_lettered"
+        return job

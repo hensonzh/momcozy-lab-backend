@@ -41,14 +41,16 @@ class OutboxWorker:
         try:
             await handler(job)
         except RetryableJobError as exc:
-            await self.service.mark_retryable_failure(job=job, error_code=exc.code)
-            self._record(job=job, outcome="retryable_failure", error_code=exc.code, started_at=started_at)
+            failed_job = await self.service.mark_retryable_failure(job=job, error_code=exc.code)
+            outcome = "dead_lettered" if failed_job.status == "dead_lettered" else "retryable_failure"
+            self._record(job=failed_job, outcome=outcome, error_code=exc.code, started_at=started_at)
         except PermanentJobError as exc:
             await self.service.mark_permanent_failure(job=job, error_code=exc.code)
             self._record(job=job, outcome="dead_lettered", error_code=exc.code, started_at=started_at)
         except Exception:
-            await self.service.mark_retryable_failure(job=job, error_code="handler_error")
-            self._record(job=job, outcome="retryable_failure", error_code="handler_error", started_at=started_at)
+            failed_job = await self.service.mark_retryable_failure(job=job, error_code="handler_error")
+            outcome = "dead_lettered" if failed_job.status == "dead_lettered" else "retryable_failure"
+            self._record(job=failed_job, outcome=outcome, error_code="handler_error", started_at=started_at)
         else:
             await self.service.mark_completed(job=job)
             self._record(job=job, outcome="completed", error_code="", started_at=started_at)
