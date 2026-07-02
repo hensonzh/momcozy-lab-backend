@@ -172,10 +172,12 @@ Completed:
 - Profile module foundation: `user_profiles` and `infant_profiles` models,
   migration, owner-scoped profile/infant APIs, audit on writes, and
   idempotent infant creation.
+- Records data foundation: owner-scoped `feeding_records`, `pumping_records`,
+  and `growth_records` models and migration.
 
 Suggested order:
 
-1. Records: feeding, pumping, growth.
+1. Records APIs: feeding, pumping, growth.
 2. Plans and tasks.
 3. Pregnancy diary.
 4. Devices and pump telemetry.
