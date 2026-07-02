@@ -138,13 +138,14 @@ Goal: build the cross-cutting machinery required before migrating write APIs.
 Completed:
 
 - Owner-scoped `files` metadata model and migration.
+- File upload and file detail API using `CurrentUser` owner scope.
 - `audit_logs` model and migration.
 - `idempotency_keys` model and migration.
 - `outbox_jobs` model and migration.
 
 Remaining:
 
-- File repository/service/router for upload and metadata reads.
+- File listing, deletion, and object-storage cleanup flows.
 - Audit repository/service.
 - Idempotency repository/service.
 - Outbox repository/service, worker skeleton, retry policy, and DLQ fields.

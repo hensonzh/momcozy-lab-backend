@@ -4,6 +4,7 @@ from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from ..core.errors import ApiError
+from ..infrastructure.object_storage import ObjectStorage
 from ..modules.auth import CurrentUser, authenticate_access_token
 
 
@@ -18,3 +19,7 @@ async def require_current_user(
         raise ApiError(code="authentication_required", message="Bearer access token is required.", status=401)
 
     return authenticate_access_token(credentials.credentials, request.app.state.settings)
+
+
+def get_object_storage(request: Request) -> ObjectStorage:
+    return request.app.state.object_storage

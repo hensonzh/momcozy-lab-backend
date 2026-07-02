@@ -6,8 +6,10 @@ from fastapi import APIRouter, Request
 from sqlalchemy import text
 
 from ...core.errors import ApiError
+from ...modules.files.router import router as files_router
 
 router = APIRouter(prefix="/v1")
+router.include_router(files_router)
 
 
 @router.get("/health/live")
