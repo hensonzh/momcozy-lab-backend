@@ -119,6 +119,14 @@ def test_settings_from_env_reads_voice_provider(monkeypatch: pytest.MonkeyPatch)
     assert settings.voice_provider == "local_stub"
 
 
+def test_settings_from_env_reads_active_session_auth_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AUTH_REQUIRE_ACTIVE_SESSION", "true")
+
+    settings = Settings.from_env()
+
+    assert settings.auth_require_active_session is True
+
+
 def test_settings_from_env_reads_outbox_worker_controls(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OUTBOX_WORKER_ENABLED", "true")
     monkeypatch.setenv("OUTBOX_WORKER_IDLE_SECONDS", "4")

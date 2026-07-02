@@ -10,6 +10,7 @@ from production_backend.app.api.dependencies import require_current_user
 from production_backend.app.core.settings import Settings
 from production_backend.app.factory import create_app
 from production_backend.app.modules.auth import CurrentUser, issue_access_token
+from production_backend.app.modules.auth.models import DeviceSession
 
 
 def test_production_settings_require_jwt_secret() -> None:
@@ -88,6 +89,36 @@ def test_issue_access_token_can_be_authenticated() -> None:
     assert response.json()["user_id"] == str(user_id)
 
 
+def test_require_current_user_accepts_active_device_session_when_enabled() -> None:
+    user_id = uuid4()
+    session_id = uuid4()
+    settings = _auth_settings(auth_require_active_session=True)
+    app = _app_with_me_endpoint(settings)
+    token = _encode_token(settings, user_id=user_id, session_id=session_id)
+
+    with TestClient(app) as client:
+        app.state.db_session_factory = _session_factory(DeviceSession(id=session_id, user_id=user_id, status="active"))
+        response = client.get("/test/me", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 200
+    assert response.json()["user_id"] == str(user_id)
+
+
+def test_require_current_user_rejects_revoked_device_session_when_enabled() -> None:
+    user_id = uuid4()
+    session_id = uuid4()
+    settings = _auth_settings(auth_require_active_session=True)
+    app = _app_with_me_endpoint(settings)
+    token = _encode_token(settings, user_id=user_id, session_id=session_id)
+
+    with TestClient(app) as client:
+        app.state.db_session_factory = _session_factory(DeviceSession(id=session_id, user_id=user_id, status="revoked"))
+        response = client.get("/test/me", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 401
+    assert response.json()["error"]["message"] == "Session is no longer active."
+
+
 def _app_with_me_endpoint(settings: Settings):
     app = create_app(settings)
 
@@ -102,16 +133,24 @@ def _app_with_me_endpoint(settings: Settings):
     return app
 
 
-def _auth_settings() -> Settings:
+def _auth_settings(*, auth_require_active_session: bool = False) -> Settings:
     return Settings(
         app_env="test",
         auth_jwt_secret="test-secret-value-with-at-least-32-bytes",
         auth_jwt_issuer="momcozy-test",
         auth_jwt_audience="momcozy-app",
+        auth_require_active_session=auth_require_active_session,
     )
 
 
-def _encode_token(settings: Settings, *, user_id: UUID | str, permissions: list[str] | None = None, scope: str = "") -> str:
+def _encode_token(
+    settings: Settings,
+    *,
+    user_id: UUID | str,
+    session_id: UUID | str = "session-1",
+    permissions: list[str] | None = None,
+    scope: str = "",
+) -> str:
     now = datetime.now(timezone.utc)
     payload = {
         "sub": str(user_id),
@@ -119,10 +158,26 @@ def _encode_token(settings: Settings, *, user_id: UUID | str, permissions: list[
         "aud": settings.auth_jwt_audience,
         "exp": now + timedelta(minutes=10),
         "iat": now,
-        "sid": "session-1",
+        "sid": str(session_id),
         "jti": "token-1",
         "roles": ["user"],
         "permissions": permissions or [],
         "scope": scope,
     }
     return jwt.encode(payload, settings.auth_jwt_secret, algorithm=settings.auth_jwt_algorithm)
+
+
+def _session_factory(device_session: DeviceSession):
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return None
+
+        async def get(self, model, session_id):
+            if model is DeviceSession and session_id == device_session.id:
+                return device_session
+            return None
+
+    return FakeSession

@@ -3,9 +3,9 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 
-from ...api.dependencies import require_current_user
+from ...api.dependencies import authenticate_request_user, require_current_user
 from ...core.errors import ApiError
-from ..auth import CurrentUser, authenticate_access_token
+from ..auth import CurrentUser
 from .schemas import SpeechTranscriptionResponse
 from .service import VoiceService
 
@@ -57,7 +57,11 @@ async def realtime_voice_session(websocket: WebSocket) -> None:
         await websocket.close(code=1008, reason="authentication_required")
         return
     try:
-        current_user = authenticate_access_token(token, settings)
+        current_user = await authenticate_request_user(
+            token=token,
+            settings=settings,
+            session_factory=getattr(websocket.app.state, "db_session_factory", None),
+        )
     except ApiError:
         await websocket.close(code=1008, reason="authentication_required")
         return
