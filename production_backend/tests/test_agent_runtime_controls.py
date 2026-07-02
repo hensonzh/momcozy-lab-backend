@@ -99,3 +99,18 @@ class FakeRedis:
     async def delete(self, key):
         self.values.pop(key, None)
         return 1
+
+    async def eval(self, script, numkeys, *keys_and_args):
+        key = keys_and_args[0]
+        owner_token = keys_and_args[1]
+        if "expire" in script:
+            if self.values.get(key) == owner_token:
+                self.set_count += 1
+                return 1
+            return 0
+        if "del" in script:
+            if self.values.get(key) == owner_token:
+                await self.delete(key)
+                return 1
+            return 0
+        return 0

@@ -1,11 +1,26 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
+from typing import Any, AsyncIterator, cast
 from uuid import UUID, uuid4
 
 from redis.asyncio import Redis
+
+
+_EXTEND_LOCK_SCRIPT = """
+if redis.call("get", KEYS[1]) == ARGV[1] then
+    return redis.call("expire", KEYS[1], tonumber(ARGV[2]))
+end
+return 0
+"""
+_RELEASE_LOCK_SCRIPT = """
+if redis.call("get", KEYS[1]) == ARGV[1] then
+    return redis.call("del", KEYS[1])
+end
+return 0
+"""
 
 
 class AgentRunControls:
@@ -51,17 +66,12 @@ class AgentRunControls:
 
     async def extend_run_lock(self, *, run_id: UUID, owner_token: str, ttl_seconds: int = 60) -> bool:
         key = _run_lock_key(run_id)
-        current = await self.redis.get(key)
-        if current and str(current) == owner_token:
-            await self.redis.set(key, owner_token, ex=ttl_seconds)
-            return True
-        return False
+        result = await cast(Awaitable[Any], self.redis.eval(_EXTEND_LOCK_SCRIPT, 1, key, owner_token, str(ttl_seconds)))
+        return bool(result)
 
     async def release_run_lock(self, *, run_id: UUID, owner_token: str) -> None:
         key = _run_lock_key(run_id)
-        current = await self.redis.get(key)
-        if current and str(current) == owner_token:
-            await self.redis.delete(key)
+        await cast(Awaitable[Any], self.redis.eval(_RELEASE_LOCK_SCRIPT, 1, key, owner_token))
 
     @asynccontextmanager
     async def run_lock(
