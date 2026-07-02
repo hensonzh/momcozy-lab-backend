@@ -56,6 +56,13 @@ def test_create_object_storage_uses_s3_compatible_provider() -> None:
     assert storage.bucket == "bucket"
 
 
+def test_create_object_storage_rejects_unsupported_provider() -> None:
+    settings = Settings(app_env="test", object_storage_provider="ftp")
+
+    with pytest.raises(ValueError, match="unsupported object storage provider"):
+        create_object_storage(settings)
+
+
 def test_lifespan_registers_object_storage(tmp_path) -> None:
     app = create_app(Settings(app_env="test", object_storage_local_root=str(tmp_path)))
 

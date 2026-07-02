@@ -21,4 +21,4 @@ def create_object_storage(settings: Settings) -> ObjectStorage:
             secret_access_key=settings.object_storage_secret_access_key,
         )
 
-    raise NotImplementedError(f"object storage provider is not implemented: {provider}")
+    raise ValueError(f"unsupported object storage provider: {provider}")
