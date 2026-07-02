@@ -64,6 +64,16 @@ should provide managed `DATABASE_URL`, `REDIS_URL`, and managed
 `OBJECT_STORAGE_*` values through environment variables; no code change is
 required to switch providers.
 
+Agent runs are processed by a separate worker process, not by the API lifespan.
+The compose `agent-worker` service is behind the `workers` profile and remains
+safe by default because `AGENT_RUNTIME_WORKER_ENABLED=false` in
+`compose.env.example`. Enable it only in an environment where the LangGraph /
+OpenAI Agents SDK runtime handler is configured:
+
+```bash
+AGENT_RUNTIME_WORKER_ENABLED=true docker compose --profile workers up agent-worker
+```
+
 ## Target Shape
 
 ```text

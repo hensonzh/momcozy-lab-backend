@@ -38,6 +38,10 @@ class Settings:
     postgres_restore_hook: str = ""
     object_storage_backup_hook: str = ""
     object_storage_restore_hook: str = ""
+    agent_runtime_worker_enabled: bool = False
+    agent_runtime_worker_batch_limit: int = 10
+    agent_runtime_worker_idle_seconds: int = 2
+    agent_runtime_recover_running_older_than_seconds: int = 900
     log_level: str = "INFO"
 
     @classmethod
@@ -68,6 +72,13 @@ class Settings:
             postgres_restore_hook=_env("POSTGRES_RESTORE_HOOK", cls.postgres_restore_hook),
             object_storage_backup_hook=_env("OBJECT_STORAGE_BACKUP_HOOK", cls.object_storage_backup_hook),
             object_storage_restore_hook=_env("OBJECT_STORAGE_RESTORE_HOOK", cls.object_storage_restore_hook),
+            agent_runtime_worker_enabled=_env_bool("AGENT_RUNTIME_WORKER_ENABLED", cls.agent_runtime_worker_enabled),
+            agent_runtime_worker_batch_limit=_env_int("AGENT_RUNTIME_WORKER_BATCH_LIMIT", cls.agent_runtime_worker_batch_limit),
+            agent_runtime_worker_idle_seconds=_env_int("AGENT_RUNTIME_WORKER_IDLE_SECONDS", cls.agent_runtime_worker_idle_seconds),
+            agent_runtime_recover_running_older_than_seconds=_env_int(
+                "AGENT_RUNTIME_RECOVER_RUNNING_OLDER_THAN_SECONDS",
+                cls.agent_runtime_recover_running_older_than_seconds,
+            ),
             log_level=_env("LOG_LEVEL", cls.log_level).upper(),
         )
 
@@ -99,6 +110,12 @@ class Settings:
             errors.append("SERVICE_API_KEY must be at least 32 bytes")
         if self.log_level.upper() not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
             errors.append("LOG_LEVEL must be one of DEBUG, INFO, WARNING, ERROR, CRITICAL")
+        if self.agent_runtime_worker_batch_limit < 1:
+            errors.append("AGENT_RUNTIME_WORKER_BATCH_LIMIT must be positive")
+        if self.agent_runtime_worker_idle_seconds < 0:
+            errors.append("AGENT_RUNTIME_WORKER_IDLE_SECONDS must be non-negative")
+        if self.agent_runtime_recover_running_older_than_seconds < 1:
+            errors.append("AGENT_RUNTIME_RECOVER_RUNNING_OLDER_THAN_SECONDS must be positive")
 
         if self.is_production:
             if _is_local_url(self.database_url, LOCAL_DATABASE_URL):
@@ -141,6 +158,16 @@ def _env_bool(name: str, default: bool) -> bool:
     if value in {"0", "false", "no", "off"}:
         return False
     return default
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw.strip())
+    except ValueError:
+        return default
 
 
 def _is_local_url(value: str, local_default: str) -> bool:

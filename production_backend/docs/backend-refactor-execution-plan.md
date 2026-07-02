@@ -310,6 +310,9 @@ Completed:
 - Agent run queue worker: scans durable queued runs plus recoverable stale
   running runs from Postgres and delegates each run to the lifecycle worker
   behind Redis run locks.
+- Agent worker process entry: environment-controlled worker script and optional
+  compose `workers` profile keep API and run execution as separate deployable
+  processes, disabled by default until a real runtime handler is configured.
 
 ### Phase 7: Safety, Observability, And Eval
 
@@ -396,6 +399,8 @@ Completed backend commits have established:
   projection, tool metadata, and OpenAI Agents SDK runner results
 - durable agent run queue scanner that can resume queued/stale running runs
   without in-memory session state
+- environment-controlled agent worker process entry and compose profile for
+  separate API/worker deployment
 - OpenAPI schema export script, generated schema snapshot, and API handoff
   document for Flutter integration
 - Auth/token API contract tests for token response shape, validation envelope,

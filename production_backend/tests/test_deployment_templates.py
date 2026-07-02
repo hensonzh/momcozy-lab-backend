@@ -37,6 +37,15 @@ def test_compose_env_keeps_object_storage_switchable_by_environment() -> None:
     assert "OBJECT_STORAGE_SECRET_ACCESS_KEY=" in env
 
 
+def test_compose_env_declares_disabled_agent_worker_controls() -> None:
+    env = (PRODUCTION_BACKEND / "compose.env.example").read_text()
+
+    assert "AGENT_RUNTIME_WORKER_ENABLED=false" in env
+    assert "AGENT_RUNTIME_WORKER_BATCH_LIMIT=10" in env
+    assert "AGENT_RUNTIME_WORKER_IDLE_SECONDS=2" in env
+    assert "AGENT_RUNTIME_RECOVER_RUNNING_OLDER_THAN_SECONDS=900" in env
+
+
 def test_compose_exposes_minio_as_optional_tools_profile() -> None:
     compose = (PRODUCTION_BACKEND / "docker-compose.yml").read_text()
 
@@ -44,3 +53,11 @@ def test_compose_exposes_minio_as_optional_tools_profile() -> None:
     assert "profiles:" in compose
     assert "server /data --address" in compose
     assert "9000:9000" in compose
+
+
+def test_compose_exposes_agent_worker_as_optional_worker_profile() -> None:
+    compose = (PRODUCTION_BACKEND / "docker-compose.yml").read_text()
+
+    assert "agent-worker:" in compose
+    assert "python -m production_backend.scripts.run_agent_worker" in compose
+    assert "workers" in compose

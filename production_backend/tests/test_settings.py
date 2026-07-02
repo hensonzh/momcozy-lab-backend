@@ -38,6 +38,27 @@ def test_settings_from_env_reads_operational_hook_references(monkeypatch: pytest
     assert settings.object_storage_restore_hook == "managed-objects-restore"
 
 
+def test_settings_from_env_reads_agent_worker_controls(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENT_RUNTIME_WORKER_ENABLED", "true")
+    monkeypatch.setenv("AGENT_RUNTIME_WORKER_BATCH_LIMIT", "25")
+    monkeypatch.setenv("AGENT_RUNTIME_WORKER_IDLE_SECONDS", "5")
+    monkeypatch.setenv("AGENT_RUNTIME_RECOVER_RUNNING_OLDER_THAN_SECONDS", "120")
+
+    settings = Settings.from_env()
+
+    assert settings.agent_runtime_worker_enabled is True
+    assert settings.agent_runtime_worker_batch_limit == 25
+    assert settings.agent_runtime_worker_idle_seconds == 5
+    assert settings.agent_runtime_recover_running_older_than_seconds == 120
+
+
+def test_settings_reject_invalid_agent_worker_controls() -> None:
+    settings = Settings(agent_runtime_worker_batch_limit=0)
+
+    with pytest.raises(ValueError, match="AGENT_RUNTIME_WORKER_BATCH_LIMIT"):
+        settings.validate_for_startup()
+
+
 def test_production_settings_reject_local_object_storage() -> None:
     settings = Settings(app_env="production", object_storage_provider="local")
 
