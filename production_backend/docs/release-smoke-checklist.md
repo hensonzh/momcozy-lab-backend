@@ -9,6 +9,8 @@ Run this checklist after migrations and before a release is declared healthy.
 - `GET /v1/health/metrics` returns request, worker, agent tool, and SDK metric
   buckets.
 - Alembic head matches the expected release revision.
+- When `RATE_LIMIT_ENABLED=true`, repeated non-exempt requests return a stable
+  `rate_limited` error envelope and health checks remain exempt.
 
 ## Auth
 

@@ -38,6 +38,9 @@ class Settings:
     postgres_restore_hook: str = ""
     object_storage_backup_hook: str = ""
     object_storage_restore_hook: str = ""
+    rate_limit_enabled: bool = False
+    rate_limit_requests: int = 120
+    rate_limit_window_seconds: int = 60
     agent_runtime_worker_enabled: bool = False
     agent_runtime_worker_batch_limit: int = 10
     agent_runtime_worker_idle_seconds: int = 2
@@ -77,6 +80,9 @@ class Settings:
             postgres_restore_hook=_env("POSTGRES_RESTORE_HOOK", cls.postgres_restore_hook),
             object_storage_backup_hook=_env("OBJECT_STORAGE_BACKUP_HOOK", cls.object_storage_backup_hook),
             object_storage_restore_hook=_env("OBJECT_STORAGE_RESTORE_HOOK", cls.object_storage_restore_hook),
+            rate_limit_enabled=_env_bool("RATE_LIMIT_ENABLED", cls.rate_limit_enabled),
+            rate_limit_requests=_env_int("RATE_LIMIT_REQUESTS", cls.rate_limit_requests),
+            rate_limit_window_seconds=_env_int("RATE_LIMIT_WINDOW_SECONDS", cls.rate_limit_window_seconds),
             agent_runtime_worker_enabled=_env_bool("AGENT_RUNTIME_WORKER_ENABLED", cls.agent_runtime_worker_enabled),
             agent_runtime_worker_batch_limit=_env_int("AGENT_RUNTIME_WORKER_BATCH_LIMIT", cls.agent_runtime_worker_batch_limit),
             agent_runtime_worker_idle_seconds=_env_int("AGENT_RUNTIME_WORKER_IDLE_SECONDS", cls.agent_runtime_worker_idle_seconds),
@@ -130,6 +136,10 @@ class Settings:
             errors.append("OUTBOX_WORKER_IDLE_SECONDS must be non-negative")
         if self.outbox_worker_lease_seconds < 1:
             errors.append("OUTBOX_WORKER_LEASE_SECONDS must be positive")
+        if self.rate_limit_requests < 1:
+            errors.append("RATE_LIMIT_REQUESTS must be positive")
+        if self.rate_limit_window_seconds < 1:
+            errors.append("RATE_LIMIT_WINDOW_SECONDS must be positive")
         if self.agent_runtime_worker_enabled and not self.openai_api_key:
             errors.append("OPENAI_API_KEY is required when AGENT_RUNTIME_WORKER_ENABLED is true")
         if not self.openai_model:

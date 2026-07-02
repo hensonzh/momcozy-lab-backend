@@ -38,6 +38,18 @@ def test_settings_from_env_reads_operational_hook_references(monkeypatch: pytest
     assert settings.object_storage_restore_hook == "managed-objects-restore"
 
 
+def test_settings_from_env_reads_rate_limit_controls(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "true")
+    monkeypatch.setenv("RATE_LIMIT_REQUESTS", "42")
+    monkeypatch.setenv("RATE_LIMIT_WINDOW_SECONDS", "15")
+
+    settings = Settings.from_env()
+
+    assert settings.rate_limit_enabled is True
+    assert settings.rate_limit_requests == 42
+    assert settings.rate_limit_window_seconds == 15
+
+
 def test_settings_from_env_reads_agent_worker_controls(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AGENT_RUNTIME_WORKER_ENABLED", "true")
     monkeypatch.setenv("AGENT_RUNTIME_WORKER_BATCH_LIMIT", "25")
@@ -86,6 +98,13 @@ def test_settings_reject_invalid_outbox_worker_controls() -> None:
     settings = Settings(outbox_worker_lease_seconds=0)
 
     with pytest.raises(ValueError, match="OUTBOX_WORKER_LEASE_SECONDS"):
+        settings.validate_for_startup()
+
+
+def test_settings_reject_invalid_rate_limit_controls() -> None:
+    settings = Settings(rate_limit_requests=0)
+
+    with pytest.raises(ValueError, match="RATE_LIMIT_REQUESTS"):
         settings.validate_for_startup()
 
 

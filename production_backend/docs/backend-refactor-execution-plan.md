@@ -97,6 +97,8 @@ Completed:
 - `/v1/health/ready` can validate DB and Redis readiness.
 - Structured request logs with `request_id`, route, status, and latency.
 - Basic in-process request metrics exposed through `/v1/health/metrics`.
+- Environment-controlled fixed-window rate limiting with Redis-first counting,
+  local fallback, health/docs exemptions, and stable `rate_limited` envelopes.
 - Docker/compose local environment for API, Postgres, Redis, migrations, and
   local object storage volume.
 
@@ -440,6 +442,7 @@ Completed backend commits have established:
 - environment contract
 - request/error contract
 - structured request logging and basic metrics
+- environment-controlled rate limiting for non-exempt API paths
 - Docker/compose local backend environment
 - DB/Alembic, Redis, and object storage foundation
 - user/auth identity schema, signup/login/refresh/logout API, JWT

@@ -25,12 +25,16 @@ Start incident and release debugging from these IDs when available:
    - `AUTH_JWT_SECRET`
    - `AUTH_JWT_ISSUER`
    - `AUTH_JWT_AUDIENCE`
+   - `RATE_LIMIT_ENABLED=true` with environment-appropriate
+     `RATE_LIMIT_REQUESTS` and `RATE_LIMIT_WINDOW_SECONDS`
 2. Confirm production does not use local object storage or localhost DB/Redis.
-3. Build the container image.
-4. Run tests and migration checks.
-5. Check backup/restore automation hooks:
+3. Confirm health and OpenAPI/docs paths are exempt but user/API paths return a
+   stable `rate_limited` envelope when the configured limit is exceeded.
+4. Build the container image.
+5. Run tests and migration checks.
+6. Check backup/restore automation hooks:
    `python production_backend/scripts/check_backup_restore_hooks.py --strict`
-6. Export OpenAPI and compare it with the committed snapshot.
+7. Export OpenAPI and compare it with the committed snapshot.
 
 ## Release
 
@@ -78,9 +82,11 @@ Start incident and release debugging from these IDs when available:
 
 1. Revoke affected device sessions or refresh-token families.
 2. Rotate service keys or object-storage credentials when implicated.
-3. Search audit logs by `actor_user_id`, `actor_service`, and `request_id`.
-4. Preserve evidence with redaction; do not copy raw secrets into tickets.
-5. Add a contract or security regression test.
+3. Tighten `RATE_LIMIT_REQUESTS` or `RATE_LIMIT_WINDOW_SECONDS` if the incident
+   involves abusive request volume.
+4. Search audit logs by `actor_user_id`, `actor_service`, and `request_id`.
+5. Preserve evidence with redaction; do not copy raw secrets into tickets.
+6. Add a contract or security regression test.
 
 ## Backup And Restore Drill
 
