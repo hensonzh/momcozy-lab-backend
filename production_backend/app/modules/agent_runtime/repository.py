@@ -313,6 +313,21 @@ class AgentRuntimeRepository:
         await self.session.flush()
         return run
 
+    async def mark_run_failed(
+        self,
+        *,
+        run: AgentRun,
+        completed_at: datetime,
+        error_code: str,
+        error_details: dict[str, Any],
+    ) -> AgentRun:
+        run.status = "failed"
+        run.completed_at = completed_at
+        run.error_code = error_code
+        run.error_details = error_details
+        await self.session.flush()
+        return run
+
     async def _next_thread_message_sequence(self, *, thread_id: UUID) -> int:
         statement = select(func.coalesce(func.max(AgentMessage.sequence), 0) + 1).where(AgentMessage.thread_id == thread_id)
         return int(await self.session.scalar(statement) or 1)

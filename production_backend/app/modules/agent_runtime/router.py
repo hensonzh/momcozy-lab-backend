@@ -28,6 +28,7 @@ from .schemas import (
 )
 from .service import AgentRuntimeService
 from .controls import AgentRunControls
+from .safety import AgentSafetyService
 from .streaming import encode_sse_events
 
 
@@ -35,10 +36,12 @@ router = APIRouter(prefix="/agent", tags=["agent"])
 
 
 def get_agent_runtime_service(request: Request, session: AsyncSession = Depends(get_session)) -> AgentRuntimeService:
+    repository = AgentRuntimeRepository(session)
     return AgentRuntimeService(
-        repository=AgentRuntimeRepository(session),
+        repository=repository,
         idempotency_service=IdempotencyService(repository=AuditRepository(session)),
         controls=AgentRunControls(request.app.state.redis_client),
+        safety_service=AgentSafetyService(repository=repository),
     )
 
 

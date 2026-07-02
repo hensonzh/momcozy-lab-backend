@@ -330,6 +330,9 @@ Completed:
 - Deterministic safety guard foundation: emotional crisis, maternal/baby health
   red flags, and prompt injection rule gates with persisted non-allow safety
   decisions.
+- Agent run safety gate integration: unsafe user messages persist the user
+  message and safety event, emit `safety.blocked` and `run.failed`, and do not
+  queue model work.
 
 ### Phase 8: App Integration Contract
 
