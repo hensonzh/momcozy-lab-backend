@@ -2,6 +2,7 @@ from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
+from production_backend.app.core.errors import ApiError
 from production_backend.app.api.dependencies import require_current_user
 from production_backend.app.core.settings import Settings
 from production_backend.app.factory import create_app
@@ -42,6 +43,44 @@ def test_login_and_refresh_return_same_token_contract() -> None:
     assert fake_service.refresh_kwargs["refresh_token"] == "old-refresh"
 
 
+def test_login_invalid_credentials_use_error_envelope() -> None:
+    fake_service = FakeAuthAccountService(login_error=ApiError(code="authentication_required", message="Email or password is invalid.", status=401))
+    client = TestClient(_app(fake_service=fake_service))
+
+    response = client.post("/v1/auth/login", json={"email": "test@example.com", "password": "wrong"})
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "authentication_required"
+    assert response.json()["error"]["request_id"] == response.headers["X-Request-ID"]
+
+
+def test_signup_validation_error_uses_error_envelope() -> None:
+    client = TestClient(_app(fake_service=FakeAuthAccountService()))
+
+    response = client.post("/v1/auth/signup", json={"email": "test@example.com", "password": "short"})
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "validation_failed"
+
+
+def test_logout_requires_bearer_access_token() -> None:
+    client = TestClient(_app(fake_service=FakeAuthAccountService()))
+
+    response = client.post("/v1/auth/logout")
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "authentication_required"
+
+
+def test_auth_openapi_keeps_refresh_token_in_body_not_query() -> None:
+    schema = _app(fake_service=FakeAuthAccountService()).openapi()
+    refresh_operation = schema["paths"]["/v1/auth/refresh"]["post"]
+    query_names = {parameter["name"] for parameter in refresh_operation.get("parameters", []) if parameter.get("in") == "query"}
+
+    assert "refresh_token" not in query_names
+    assert "requestBody" in refresh_operation
+
+
 def test_logout_revokes_current_access_token_session() -> None:
     session_id = uuid4()
     fake_service = FakeAuthAccountService()
@@ -77,8 +116,9 @@ def _app(*, fake_service: "FakeAuthAccountService"):
 
 
 class FakeAuthAccountService:
-    def __init__(self) -> None:
+    def __init__(self, *, login_error: ApiError | None = None) -> None:
         self.user = User(id=uuid4(), display_name="Test", status="active")
+        self.login_error = login_error
         self.signup_kwargs = None
         self.login_kwargs = None
         self.refresh_kwargs = None
@@ -89,6 +129,8 @@ class FakeAuthAccountService:
         return self._issued()
 
     async def login(self, **kwargs):
+        if self.login_error is not None:
+            raise self.login_error
         self.login_kwargs = kwargs
         return self._issued()
 

@@ -381,11 +381,14 @@ Completed backend commits have established:
   deterministic safety gate
 - OpenAPI schema export script, generated schema snapshot, and API handoff
   document for Flutter integration
+- Auth/token API contract tests for token response shape, validation envelope,
+  invalid credentials envelope, logout Bearer requirement, and refresh-token
+  body placement
 
 Next recommended backend PR slices:
 
-1. Add API-level contract tests for auth and token flows.
-2. Add deployment runbook and release smoke-test checklist.
-3. Add CI wiring for lint/type/test/migration/container checks.
-4. Add production smoke fixtures for Flutter integration flows.
-5. Add migration compatibility smoke tests for an empty database.
+1. Add deployment runbook and release smoke-test checklist.
+2. Add CI wiring for lint/type/test/migration/container checks.
+3. Add production smoke fixtures for Flutter integration flows.
+4. Add migration compatibility smoke tests for an empty database.
+5. Add runbook entries for worker backlog and agent run recovery.
