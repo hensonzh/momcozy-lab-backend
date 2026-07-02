@@ -13,6 +13,7 @@ DEFAULT_FILE_UPLOAD_MAX_BYTES = 10 * 1024 * 1024
 SUPPORTED_OBJECT_STORAGE_PROVIDERS = {"local", "s3", "oss", "cos", "minio"}
 PRODUCTION_ENVS = {"prod", "production"}
 SUPPORTED_AUTH_JWT_ALGORITHMS = {"HS256"}
+SUPPORTED_VOICE_PROVIDERS = {"disabled", "local_stub"}
 
 
 @dataclass(frozen=True)
@@ -54,6 +55,7 @@ class Settings:
     outbox_worker_lease_seconds: int = 60
     openai_api_key: str = ""
     openai_model: str = "gpt-5.5"
+    voice_provider: str = "disabled"
     log_level: str = "INFO"
 
     @classmethod
@@ -102,6 +104,7 @@ class Settings:
             outbox_worker_lease_seconds=_env_int("OUTBOX_WORKER_LEASE_SECONDS", cls.outbox_worker_lease_seconds),
             openai_api_key=_env("OPENAI_API_KEY", cls.openai_api_key),
             openai_model=_env("OPENAI_MODEL", cls.openai_model),
+            voice_provider=_env("VOICE_PROVIDER", cls.voice_provider).lower(),
             log_level=_env("LOG_LEVEL", cls.log_level).upper(),
         )
 
@@ -153,6 +156,11 @@ class Settings:
             errors.append("OPENAI_API_KEY is required when AGENT_RUNTIME_WORKER_ENABLED is true")
         if not self.openai_model:
             errors.append("OPENAI_MODEL is required")
+        if self.voice_provider not in SUPPORTED_VOICE_PROVIDERS:
+            errors.append(
+                "VOICE_PROVIDER must be one of "
+                f"{', '.join(sorted(SUPPORTED_VOICE_PROVIDERS))}"
+            )
 
         if self.is_production:
             if _is_local_url(self.database_url, LOCAL_DATABASE_URL):
@@ -177,6 +185,8 @@ class Settings:
                 errors.append("OBJECT_STORAGE_SECRET_ACCESS_KEY is required for managed object storage")
             if not self.auth_jwt_secret:
                 errors.append("AUTH_JWT_SECRET is required in production")
+            if self.voice_provider == "local_stub":
+                errors.append("VOICE_PROVIDER=local_stub cannot be used in production")
 
         if errors:
             raise ValueError("; ".join(errors))

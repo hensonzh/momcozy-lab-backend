@@ -21,6 +21,7 @@ Regenerate or validate Flutter API clients whenever a PR changes:
 - `Idempotency-Key` usage
 - agent event/action schemas
 - file upload multipart fields
+- voice/transcription endpoint contracts and `VOICE_PROVIDER` behavior
 
 CI must fail if the OpenAPI snapshot drifts from the current backend schema.
 
@@ -57,6 +58,8 @@ versioning plan.
 - Reconnect agent streams with `after_sequence`; do not replay by parsing text.
 - Merge action events by `action_id`; render `preview_payload` from
   `action.confirmation_required` and never expect `apply_payload` in streams.
+- Treat `voice_provider_disabled` as a stable unavailable-state response for
+  voice UI; do not fall back to legacy realtime voice endpoints.
 
 ## Release Checklist
 
@@ -67,4 +70,5 @@ versioning plan.
 5. Verify retryable writes preserve idempotency keys across app retries.
 6. Verify agent event reducers use stable IDs such as `run_id`, `event_id`,
    `message_id`, `tool_call_id`, and `action_id`.
-7. Record backend schema version and Flutter build version in the release note.
+7. Verify voice UI handles `voice_provider_disabled` without token URLs.
+8. Record backend schema version and Flutter build version in the release note.

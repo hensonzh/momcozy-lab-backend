@@ -1,0 +1,104 @@
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi.responses import StreamingResponse
+
+from ...api.dependencies import require_current_user
+from ...core.errors import ApiError
+from ..auth import CurrentUser, authenticate_access_token
+from .schemas import SpeechTranscriptionResponse
+from .service import VoiceService
+
+
+router = APIRouter(tags=["voice"])
+UPLOAD_READ_CHUNK_BYTES = 1024 * 1024
+
+
+def get_voice_service(request: Request) -> VoiceService:
+    return VoiceService(settings=request.app.state.settings)
+
+
+@router.post("/speech/transcribe-chunk", response_model=SpeechTranscriptionResponse)
+async def transcribe_speech_chunk(
+    request: Request,
+    file: UploadFile = File(...),
+    language: str | None = Form(default=None),
+    current_user: CurrentUser = Depends(require_current_user),
+    service: VoiceService = Depends(get_voice_service),
+) -> SpeechTranscriptionResponse:
+    body = await _read_upload_body(file=file, max_bytes=request.app.state.settings.file_upload_max_bytes)
+    result = await service.transcribe_chunk(
+        actor_user_id=current_user.user_id,
+        body=body,
+        filename=file.filename or "",
+        content_type=file.content_type or "application/octet-stream",
+        language=language.strip() if language and language.strip() else None,
+    )
+    return SpeechTranscriptionResponse(text=result.text)
+
+
+@router.get("/realtime-voice-stream")
+async def realtime_voice_stream(
+    request: Request,
+    text: str = Query(min_length=1, max_length=4000),
+    current_user: CurrentUser = Depends(require_current_user),
+    service: VoiceService = Depends(get_voice_service),
+) -> StreamingResponse:
+    stream = service.synthesize_pcm_stream(actor_user_id=current_user.user_id, text=text)
+    return StreamingResponse(stream, media_type="audio/pcm")
+
+
+@router.websocket("/realtime-voice-session")
+async def realtime_voice_session(websocket: WebSocket) -> None:
+    settings = websocket.app.state.settings
+    service = VoiceService(settings=settings)
+    token = _bearer_token(websocket)
+    if not token:
+        await websocket.close(code=1008, reason="authentication_required")
+        return
+    try:
+        current_user = authenticate_access_token(token, settings)
+    except ApiError:
+        await websocket.close(code=1008, reason="authentication_required")
+        return
+
+    await websocket.accept()
+    try:
+        async for event in service.realtime_session_events(actor_user_id=current_user.user_id):
+            await websocket.send_json(event)
+    except ApiError as exc:
+        if exc.code == "voice_provider_disabled":
+            await websocket.send_json(service.disabled_frame())
+        else:
+            await websocket.send_json({"type": "error", "code": exc.code, "message": exc.message})
+    except WebSocketDisconnect:
+        return
+    finally:
+        await websocket.close()
+
+
+async def _read_upload_body(*, file: UploadFile, max_bytes: int) -> bytes:
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(UPLOAD_READ_CHUNK_BYTES)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise ApiError(
+                code="payload_too_large",
+                message="Uploaded audio chunk is too large.",
+                status=413,
+                details={"max_bytes": max_bytes},
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _bearer_token(websocket: WebSocket) -> str:
+    authorization = websocket.headers.get("authorization", "")
+    scheme, _separator, token = authorization.partition(" ")
+    if scheme.lower() != "bearer":
+        return ""
+    return token.strip()

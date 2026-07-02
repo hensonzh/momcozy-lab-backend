@@ -71,12 +71,30 @@ File upload uses multipart form data at `POST /v1/files/upload`. File metadata
 is owner-scoped and object bytes are stored through the configured object
 storage provider.
 
+## Voice
+
+- Transcription: `POST /v1/speech/transcribe-chunk`
+- PCM playback: `GET /v1/realtime-voice-stream?text=...`
+- Realtime session: `WEBSOCKET /v1/realtime-voice-session`
+
+HTTP voice endpoints require `Authorization: Bearer <access_token>` and never
+accept tokens in URLs. The realtime WebSocket also authenticates through the
+`Authorization` header.
+
+`VOICE_PROVIDER=disabled` is the default stable production contract until a
+managed speech provider is configured. HTTP endpoints return the standard error
+envelope with `code=voice_provider_disabled` and status `503`. The WebSocket
+accepts authenticated clients, sends an `error` frame with the same code, and
+then closes. `VOICE_PROVIDER=local_stub` exists only for local/test contract
+checks and is rejected in production startup validation.
+
 ## Flutter Integration Rule
 
 Flutter repositories should be generated from or validated against the OpenAPI
 snapshot. Do not build new client code against legacy raw response shapes.
 
 Use `production_backend/docs/flutter-smoke-flows.json` as the initial integration
-smoke fixture for auth, core records/plans/files, and agent replay.
+smoke fixture for auth, core records/plans/files, agent replay, and voice
+contract checks.
 Use `production_backend/docs/flutter-client-compatibility.md` for generated
 client regeneration and breaking-change rules.

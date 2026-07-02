@@ -746,6 +746,31 @@
         "title": "AgentThreadRead",
         "type": "object"
       },
+      "Body_transcribe_speech_chunk_v1_speech_transcribe_chunk_post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_transcribe_speech_chunk_v1_speech_transcribe_chunk_post",
+        "type": "object"
+      },
       "Body_upload_file_v1_files_upload_post": {
         "properties": {
           "file": {
@@ -2433,6 +2458,17 @@
           "password"
         ],
         "title": "SignupRequest",
+        "type": "object"
+      },
+      "SpeechTranscriptionResponse": {
+        "properties": {
+          "text": {
+            "default": "",
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "title": "SpeechTranscriptionResponse",
         "type": "object"
       },
       "SupportTicketCreate": {
@@ -5549,6 +5585,53 @@
         ]
       }
     },
+    "/v1/realtime-voice-stream": {
+      "get": {
+        "operationId": "realtime_voice_stream_v1_realtime_voice_stream_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "text",
+            "required": true,
+            "schema": {
+              "maxLength": 4000,
+              "minLength": 1,
+              "title": "Text",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Realtime Voice Stream",
+        "tags": [
+          "voice"
+        ]
+      }
+    },
     "/v1/records/feeding": {
       "get": {
         "operationId": "list_feedings_v1_records_feeding_get",
@@ -6090,6 +6173,52 @@
         "summary": "Delete Pumping",
         "tags": [
           "records"
+        ]
+      }
+    },
+    "/v1/speech/transcribe-chunk": {
+      "post": {
+        "operationId": "transcribe_speech_chunk_v1_speech_transcribe_chunk_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_transcribe_speech_chunk_v1_speech_transcribe_chunk_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpeechTranscriptionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Transcribe Speech Chunk",
+        "tags": [
+          "voice"
         ]
       }
     },

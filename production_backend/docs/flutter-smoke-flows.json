@@ -131,6 +131,30 @@
           "assertions": ["no token query parameter", "returns persisted application events only"]
         }
       ]
+    },
+    {
+      "name": "voice_contract",
+      "steps": [
+        {
+          "method": "POST",
+          "path": "/v1/speech/transcribe-chunk",
+          "headers": ["${auth_header}"],
+          "multipart": {
+            "file": {
+              "filename": "speech.wav",
+              "content_type": "audio/wav",
+              "body": "voice smoke"
+            }
+          },
+          "assertions": ["returns text field or stable voice_provider_disabled error"]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/realtime-voice-stream?text=hello",
+          "headers": ["${auth_header}"],
+          "assertions": ["no token query parameter", "returns audio/pcm or stable voice_provider_disabled error"]
+        }
+      ]
     }
   ]
 }

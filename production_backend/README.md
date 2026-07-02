@@ -42,6 +42,7 @@ environment variables, not code changes:
 - `POSTGRES_RESTORE_HOOK`
 - `OBJECT_STORAGE_BACKUP_HOOK`
 - `OBJECT_STORAGE_RESTORE_HOOK`
+- `VOICE_PROVIDER`
 
 Use `production_backend/.env.example` as the local template. Secrets stay out of
 git, and production startup rejects local object storage. Backup/restore hook
@@ -74,6 +75,11 @@ when this worker is enabled, and `OPENAI_MODEL` controls the SDK agent model:
 ```bash
 AGENT_RUNTIME_WORKER_ENABLED=true docker compose --profile workers up agent-worker
 ```
+
+Voice endpoints are exposed in the production contract, but speech provider
+integration is disabled by default. Keep `VOICE_PROVIDER=disabled` until a
+managed provider adapter is configured; `VOICE_PROVIDER=local_stub` is only for
+local/test contract checks and is rejected in production.
 
 Durable side effects are processed by a separate outbox worker. It handles file
 cleanup jobs and confirmed agent actions, and is also disabled by default:

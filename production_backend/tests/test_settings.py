@@ -92,6 +92,14 @@ def test_settings_from_env_reads_agent_worker_controls(monkeypatch: pytest.Monke
     assert settings.openai_model == "gpt-test"
 
 
+def test_settings_from_env_reads_voice_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("VOICE_PROVIDER", "local_stub")
+
+    settings = Settings.from_env()
+
+    assert settings.voice_provider == "local_stub"
+
+
 def test_settings_from_env_reads_outbox_worker_controls(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OUTBOX_WORKER_ENABLED", "true")
     monkeypatch.setenv("OUTBOX_WORKER_IDLE_SECONDS", "4")
@@ -136,6 +144,13 @@ def test_settings_reject_invalid_file_upload_limit() -> None:
     settings = Settings(file_upload_max_bytes=0)
 
     with pytest.raises(ValueError, match="FILE_UPLOAD_MAX_BYTES"):
+        settings.validate_for_startup()
+
+
+def test_settings_reject_invalid_voice_provider() -> None:
+    settings = Settings(voice_provider="legacy")
+
+    with pytest.raises(ValueError, match="VOICE_PROVIDER"):
         settings.validate_for_startup()
 
 
@@ -232,3 +247,21 @@ def test_production_accepts_explicit_managed_infrastructure_urls() -> None:
     )
 
     settings.validate_for_startup()
+
+
+def test_production_rejects_local_stub_voice_provider() -> None:
+    settings = Settings(
+        app_env="production",
+        database_url="postgresql+asyncpg://app:secret@postgres.internal:5432/momcozy",
+        redis_url="redis://redis.internal:6379/0",
+        object_storage_provider="s3",
+        object_storage_bucket="bucket",
+        object_storage_access_key_id="access",
+        object_storage_secret_access_key="secret",
+        auth_jwt_secret="test-secret-value-with-at-least-32-bytes",
+        trusted_hosts=("api.example.test",),
+        voice_provider="local_stub",
+    )
+
+    with pytest.raises(ValueError, match="VOICE_PROVIDER=local_stub"):
+        settings.validate_for_startup()

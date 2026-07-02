@@ -27,6 +27,8 @@ def test_openapi_contains_core_flutter_handoff_paths() -> None:
         "/v1/records/feeding",
         "/v1/plans",
         "/v1/devices/pump-telemetry",
+        "/v1/speech/transcribe-chunk",
+        "/v1/realtime-voice-stream",
         "/v1/agent/runs",
         "/v1/agent/runs/{run_id}/stream",
     ]:
