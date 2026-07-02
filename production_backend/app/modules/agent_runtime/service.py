@@ -306,9 +306,9 @@ class AgentRuntimeService:
 
     async def reject_action(self, *, owner_user_id: UUID, action_id: UUID, reason: str = "") -> AgentAction:
         action = await self.get_action(owner_user_id=owner_user_id, action_id=action_id)
-        if action.status == "rejected":
+        if action.status in {"rejected", "expired", "failed"}:
             return action
-        if action.status in {"applying", "applied"}:
+        if action.status not in {"proposed", "confirmation_required"}:
             raise ApiError(code="conflict", message="Agent action cannot be rejected from its current status.", status=409)
         rejected = await self.repository.mark_action_rejected(action=action, failed_at=_utcnow(), error_code="rejected_by_user")
         run = await self.get_run(owner_user_id=owner_user_id, run_id=rejected.run_id)

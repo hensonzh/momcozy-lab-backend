@@ -90,6 +90,46 @@ def test_agent_runtime_actions_reject_confirmation_required_action() -> None:
     assert repository.events[-1].payload == {"reason": "action_rejected", "action_id": str(action.id)}
 
 
+def test_agent_runtime_actions_do_not_reject_confirmed_action() -> None:
+    owner_user_id = uuid4()
+    repository = FakeActionRepository()
+    outbox_service = FakeOutboxService()
+    service = AgentRuntimeService(repository=repository, outbox_service=outbox_service)
+    run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Create ticket"))
+    action = asyncio.run(
+        service.propose_action(owner_user_id=owner_user_id, run_id=run.id, action_type="support.ticket.create")
+    )
+    confirmed = asyncio.run(service.confirm_action(owner_user_id=owner_user_id, action_id=action.id))
+    event_count = len(repository.events)
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(service.reject_action(owner_user_id=owner_user_id, action_id=action.id, reason="too late"))
+
+    assert exc_info.value.code == "conflict"
+    assert confirmed.status == "confirmed"
+    assert repository.action.status == "confirmed"
+    assert len(repository.events) == event_count
+
+
+def test_agent_runtime_actions_do_not_overwrite_terminal_rejection_states() -> None:
+    owner_user_id = uuid4()
+    repository = FakeActionRepository()
+    service = AgentRuntimeService(repository=repository)
+    run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Create ticket"))
+    action = asyncio.run(
+        service.propose_action(owner_user_id=owner_user_id, run_id=run.id, action_type="support.ticket.create")
+    )
+    action.status = "expired"
+    action.error_code = "action_expired"
+    event_count = len(repository.events)
+
+    rejected = asyncio.run(service.reject_action(owner_user_id=owner_user_id, action_id=action.id, reason="too late"))
+
+    assert rejected.status == "expired"
+    assert rejected.error_code == "action_expired"
+    assert len(repository.events) == event_count
+
+
 def test_agent_runtime_actions_generate_action_idempotency_key_for_confirmation() -> None:
     owner_user_id = uuid4()
     repository = FakeActionRepository()
