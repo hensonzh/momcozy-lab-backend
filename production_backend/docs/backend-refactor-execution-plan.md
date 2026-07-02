@@ -322,6 +322,12 @@ Acceptance:
   business flow.
 - Production incidents can become regression tests.
 
+Completed:
+
+- Safety/eval data foundation: `agent_safety_events` and `agent_eval_cases`
+  with owner/run linkage, evidence payloads, suite/status indexes, and source
+  run references for incident-to-regression workflows.
+
 ### Phase 8: App Integration Contract
 
 Goal: hand the Flutter app a stable backend instead of legacy compatibility.
