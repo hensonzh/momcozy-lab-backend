@@ -3,13 +3,14 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from ...core.errors import ApiError
 from ..auth import CurrentUser
+from .events import AgentEventSink
 from .execution import AgentRunExecutionResult
 from .graphs import AgentGraphCheckpointStore, AgentGraphRegistry, default_graph_registry
-from .models import AgentAction, AgentMessage, AgentRun
+from .models import AgentAction, AgentEvent, AgentMessage, AgentRun
 from .prompts import ContextProjection, ModelInputBuilder
 from .repository import AgentRuntimeRepository
 from .sdk import OpenAIAgentsSdkRunner, SdkNodeRequest, SdkToolDefinition, sdk_tool_name
@@ -42,6 +43,7 @@ class AgentRuntimeExecutor:
         state_store: AgentRuntimeStateStore | None = None,
         tool_registry: ToolContractRegistry | None = None,
         tool_executor: ToolExecutor | None = None,
+        event_sink: AgentEventSink | None = None,
         input_builder: ModelInputBuilder | None = None,
         config: AgentRuntimeExecutorConfig | None = None,
     ) -> None:
@@ -52,6 +54,7 @@ class AgentRuntimeExecutor:
         self.state_store = state_store
         self.tool_registry = tool_registry or default_tool_registry()
         self.tool_executor = tool_executor
+        self.event_sink = event_sink
         self.input_builder = input_builder or ModelInputBuilder()
         self.config = config or AgentRuntimeExecutorConfig()
 
@@ -112,7 +115,7 @@ class AgentRuntimeExecutor:
 
         if result.action_proposals:
             action = await self._create_action_from_proposal(run=run, proposal=result.action_proposals[0])
-            await self.repository.append_event(
+            await self._append_event(
                 thread_id=run.thread_id,
                 run_id=run.id,
                 event_type="action.confirmation_required",
@@ -215,6 +218,11 @@ class AgentRuntimeExecutor:
             },
         )
         return pending_action
+
+    async def _append_event(self, *, thread_id: UUID, run_id: UUID, event_type: str, payload: dict[str, Any]) -> AgentEvent:
+        if self.event_sink is not None:
+            return await self.event_sink.append_event(thread_id=thread_id, run_id=run_id, event_type=event_type, payload=payload)
+        return await self.repository.append_event(thread_id=thread_id, run_id=run_id, event_type=event_type, payload=payload)
 
     async def _save_checkpoint(
         self,

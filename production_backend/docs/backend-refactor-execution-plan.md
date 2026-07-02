@@ -348,6 +348,10 @@ Completed:
 - Agent tool lifecycle events: guarded tool execution now persists
   `tool.started`, `tool.completed`, and `tool.failed` application events
   alongside tool call/output ledger rows for stream replay and debugging.
+- Agent event sink: runtime components can write application events through a
+  shared sink that also advances the Redis stream cursor, keeping DB replay and
+  transient reconnect state aligned across API, agent worker, and outbox worker
+  processes.
 
 ### Phase 7: Safety, Observability, And Eval
 
@@ -458,6 +462,8 @@ Completed backend commits have established:
   model-supplied user IDs
 - application-level tool lifecycle events emitted by the ToolExecutor, keeping
   persisted SSE/replay streams aligned with the tool ledger
+- shared AgentEventSink wiring in runtime/tool/action workers so Redis stream
+  cursor updates follow persisted application events across processes
 - OpenAPI schema export script, generated schema snapshot, and API handoff
   document for Flutter integration
 - Auth/token API contract tests for token response shape, validation envelope,

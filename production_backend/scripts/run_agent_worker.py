@@ -9,6 +9,7 @@ from production_backend.app.core.settings import Settings
 from production_backend.app.infrastructure.db.session import create_db_engine, create_session_factory
 from production_backend.app.infrastructure.redis.client import close_redis_client, create_redis_client
 from production_backend.app.modules.agent_runtime.controls import AgentRunControls
+from production_backend.app.modules.agent_runtime.events import AgentEventSink
 from production_backend.app.modules.agent_runtime.graphs import AgentGraphCheckpointStore
 from production_backend.app.modules.agent_runtime.repository import AgentRuntimeRepository
 from production_backend.app.modules.agent_runtime.runtime import AgentRuntimeExecutor
@@ -58,9 +59,11 @@ async def run_agent_worker(
                     idempotency_service=IdempotencyService(repository=audit_repository),
                 )
                 tool_registry = default_tool_registry()
+                event_sink = AgentEventSink(repository=repository, controls=controls)
                 tool_executor = ToolExecutor(
                     registry=tool_registry,
                     repository=repository,
+                    event_sink=event_sink,
                     handlers=build_default_tool_handlers(
                         profile_service=profile_service,
                         agent_runtime_service=agent_runtime_service,
@@ -72,6 +75,7 @@ async def run_agent_worker(
                     state_store=AgentRuntimeStateStore(repository=repository),
                     tool_registry=tool_registry,
                     tool_executor=tool_executor,
+                    event_sink=event_sink,
                     sdk_runner=OpenAIAgentsSdkRunner(model=resolved_settings.openai_model),
                 )
                 worker = AgentRunQueueWorker(

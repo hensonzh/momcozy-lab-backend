@@ -8,6 +8,7 @@ from uuid import UUID
 
 from ...workers.errors import PermanentJobError, RetryableJobError
 from ..audit.models import OutboxJob
+from .events import AgentEventSink
 from .models import AgentAction
 from .repository import AgentRuntimeRepository
 from .service import AGENT_ACTION_APPLY_JOB
@@ -24,9 +25,16 @@ AgentActionApplyHandler = Callable[[AgentAction], Awaitable[AgentActionApplyResu
 
 
 class AgentActionOutboxHandler:
-    def __init__(self, *, repository: AgentRuntimeRepository, handlers: Mapping[str, AgentActionApplyHandler]) -> None:
+    def __init__(
+        self,
+        *,
+        repository: AgentRuntimeRepository,
+        handlers: Mapping[str, AgentActionApplyHandler],
+        event_sink: AgentEventSink | None = None,
+    ) -> None:
         self.repository = repository
         self.handlers = handlers
+        self.event_sink = event_sink
 
     async def __call__(self, job: OutboxJob) -> None:
         if job.job_type != AGENT_ACTION_APPLY_JOB:
@@ -60,7 +68,7 @@ class AgentActionOutboxHandler:
             raise RetryableJobError("agent_action_handler_error") from exc
 
         applied = await self.repository.mark_action_applied(action=action, applied_at=_utcnow())
-        await self.repository.append_event(
+        await self._append_event(
             thread_id=run.thread_id,
             run_id=applied.run_id,
             event_type="action.applied",
@@ -74,12 +82,18 @@ class AgentActionOutboxHandler:
 
     async def _fail(self, *, action: AgentAction, thread_id: UUID, error_code: str) -> None:
         failed = await self.repository.mark_action_failed(action=action, failed_at=_utcnow(), error_code=error_code)
-        await self.repository.append_event(
+        await self._append_event(
             thread_id=thread_id,
             run_id=failed.run_id,
             event_type="action.failed",
             payload={"action_id": str(failed.id), "code": error_code},
         )
+
+    async def _append_event(self, *, thread_id: UUID, run_id: UUID, event_type: str, payload: dict[str, Any]) -> None:
+        if self.event_sink is not None:
+            await self.event_sink.append_event(thread_id=thread_id, run_id=run_id, event_type=event_type, payload=payload)
+            return
+        await self.repository.append_event(thread_id=thread_id, run_id=run_id, event_type=event_type, payload=payload)
 
 
 def _action_id_from_job(job: OutboxJob) -> UUID:

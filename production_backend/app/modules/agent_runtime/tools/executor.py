@@ -11,6 +11,7 @@ from uuid import UUID
 from ....core.metrics import RequestMetrics
 from ....core.errors import ApiError
 from ...auth import CurrentUser, PermissionPolicy
+from ..events import AgentEventSink
 from ..models import AgentToolCall
 from ..repository import AgentRuntimeRepository
 from .contracts import ToolContract
@@ -43,12 +44,14 @@ class ToolExecutor:
         repository: AgentRuntimeRepository,
         permission_policy: PermissionPolicy | None = None,
         handlers: dict[str, ToolHandler] | None = None,
+        event_sink: AgentEventSink | None = None,
         metrics: RequestMetrics | None = None,
     ) -> None:
         self.registry = registry
         self.repository = repository
         self.permission_policy = permission_policy or PermissionPolicy()
         self.handlers = handlers or {}
+        self.event_sink = event_sink
         self.metrics = metrics
 
     async def execute(
@@ -166,6 +169,9 @@ class ToolExecutor:
         )
 
     async def _append_tool_event(self, *, thread_id: UUID, run_id: UUID, event_type: str, payload: dict[str, Any]) -> None:
+        if self.event_sink is not None:
+            await self.event_sink.append_event(thread_id=thread_id, run_id=run_id, event_type=event_type, payload=payload)
+            return
         await self.repository.append_event(thread_id=thread_id, run_id=run_id, event_type=event_type, payload=payload)
 
 

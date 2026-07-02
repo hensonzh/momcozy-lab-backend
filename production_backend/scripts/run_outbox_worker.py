@@ -8,6 +8,9 @@ from typing import Any
 from production_backend.app.core.settings import Settings
 from production_backend.app.infrastructure.db.session import create_db_engine, create_session_factory
 from production_backend.app.infrastructure.object_storage.factory import create_object_storage
+from production_backend.app.infrastructure.redis.client import close_redis_client, create_redis_client
+from production_backend.app.modules.agent_runtime.controls import AgentRunControls
+from production_backend.app.modules.agent_runtime.events import AgentEventSink
 from production_backend.app.modules.agent_runtime.repository import AgentRuntimeRepository
 from production_backend.app.modules.audit import AuditService, IdempotencyService, OutboxService
 from production_backend.app.modules.audit.repository import AuditRepository, OutboxRepository
@@ -31,6 +34,8 @@ async def run_outbox_worker(
     db_engine = create_db_engine(resolved_settings)
     session_factory = create_session_factory(db_engine)
     object_storage = create_object_storage(resolved_settings)
+    redis_client = create_redis_client(resolved_settings)
+    controls = AgentRunControls(redis_client)
     totals = {"status": "ok", "cycles": 0, "processed": 0}
     try:
         while True:
@@ -41,11 +46,13 @@ async def run_outbox_worker(
                     audit_service=AuditService(repository=audit_repository),
                     idempotency_service=IdempotencyService(repository=audit_repository),
                 )
+                agent_runtime_repository = AgentRuntimeRepository(session)
                 worker = OutboxWorker(
                     service=OutboxService(repository=OutboxRepository(session)),
                     handlers=build_outbox_handlers(
                         object_storage=object_storage,
-                        agent_runtime_repository=AgentRuntimeRepository(session),
+                        agent_runtime_repository=agent_runtime_repository,
+                        agent_event_sink=AgentEventSink(repository=agent_runtime_repository, controls=controls),
                         agent_action_handlers={
                             SUPPORT_TICKET_CREATE_ACTION: SupportTicketCreateActionHandler(service=support_service),
                         },
@@ -67,6 +74,7 @@ async def run_outbox_worker(
             if not processed:
                 await asyncio.sleep(resolved_settings.outbox_worker_idle_seconds)
     finally:
+        await close_redis_client(redis_client)
         await db_engine.dispose()
 
 
