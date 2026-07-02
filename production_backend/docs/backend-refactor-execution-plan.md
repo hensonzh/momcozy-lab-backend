@@ -391,11 +391,13 @@ Completed backend commits have established:
   drift, legacy runtime reference scan, compose validation, and container build.
 - Flutter integration smoke fixtures for auth/session, file upload,
   records/plans, idempotency, and agent event/SSE replay.
+- Empty database migration smoke test using Alembic offline `upgrade head --sql`
+  and CI coverage for the generated DDL path.
 
 Next recommended backend PR slices:
 
-1. Add migration compatibility smoke tests for an empty database.
-2. Add runbook entries for backup/restore and credential rotation drills.
-3. Add release compatibility notes for Flutter generated clients.
-4. Add lint/type gates once ruff/mypy configuration is introduced.
-5. Add first real Postgres integration test profile.
+1. Add runbook entries for backup/restore and credential rotation drills.
+2. Add release compatibility notes for Flutter generated clients.
+3. Add lint/type gates once ruff/mypy configuration is introduced.
+4. Add first real Postgres integration test profile.
+5. Add migration compatibility test against a live Postgres service in CI.

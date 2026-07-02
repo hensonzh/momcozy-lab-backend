@@ -10,6 +10,7 @@ def test_production_backend_ci_runs_core_gates() -> None:
     for phrase in [
         "python -m pytest production_backend/tests",
         "python -m alembic -c production_backend/alembic.ini heads",
+        "python -m alembic -c production_backend/alembic.ini upgrade head --sql",
         "production_backend/scripts/export_openapi.py",
         "previous_response" + "_id|Chat" + "Session|ENTRY" + "_API_KEY",
         "docker compose -f production_backend/docker-compose.yml config",

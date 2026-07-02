@@ -32,6 +32,9 @@ jobs:
       - name: Check Alembic head
         run: python -m alembic -c production_backend/alembic.ini heads
 
+      - name: Check empty database migration SQL
+        run: python -m alembic -c production_backend/alembic.ini upgrade head --sql > /tmp/upgrade-head.sql
+
       - name: Check OpenAPI snapshot
         run: |
           python production_backend/scripts/export_openapi.py --output /tmp/openapi.generated.json
