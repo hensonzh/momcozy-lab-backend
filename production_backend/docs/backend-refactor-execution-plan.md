@@ -116,10 +116,10 @@ Completed:
 - `users` and `auth_identities` models and migration.
 - JWT access-token verification dependency.
 - `CurrentUser` object for backend-derived owner scope.
+- `device_sessions` and `refresh_tokens` models and migration.
 
 Remaining:
 
-- Device sessions.
 - Refresh token rotation and reuse detection.
 - Logout/session revocation.
 - RBAC/permission policy helpers.
