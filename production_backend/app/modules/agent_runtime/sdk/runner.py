@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import importlib.util
 from dataclasses import dataclass, field
+from time import perf_counter
 from typing import Any, Protocol
 
+from ....core.metrics import RequestMetrics
 from ....core.errors import ApiError
 
 
@@ -33,12 +35,29 @@ class SdkRunnerBackend(Protocol):
 
 
 class OpenAIAgentsSdkRunner:
-    def __init__(self, *, backend: SdkRunnerBackend | None = None) -> None:
+    def __init__(self, *, backend: SdkRunnerBackend | None = None, metrics: RequestMetrics | None = None) -> None:
         self.backend = backend
+        self.metrics = metrics
 
     async def run_reasoning(self, request: SdkNodeRequest) -> SdkNodeResult:
-        if self.backend is not None:
-            return await self.backend.run(request)
-        if importlib.util.find_spec("agents") is None:
-            raise ApiError(code="dependency_not_configured", message="OpenAI Agents SDK is not installed.", status=503)
-        raise ApiError(code="dependency_not_configured", message="OpenAI Agents SDK backend is not configured.", status=503)
+        started_at = perf_counter()
+        try:
+            if self.backend is not None:
+                result = await self.backend.run(request)
+                self._record(outcome="completed", error_code="", started_at=started_at)
+                return result
+            if importlib.util.find_spec("agents") is None:
+                raise ApiError(code="dependency_not_configured", message="OpenAI Agents SDK is not installed.", status=503)
+            raise ApiError(code="dependency_not_configured", message="OpenAI Agents SDK backend is not configured.", status=503)
+        except ApiError as exc:
+            self._record(outcome="failed", error_code=exc.code, started_at=started_at)
+            raise
+
+    def _record(self, *, outcome: str, error_code: str, started_at: float) -> None:
+        if self.metrics is not None:
+            self.metrics.record_agent_sdk(
+                node_name="openai_agents_sdk",
+                outcome=outcome,
+                error_code=error_code,
+                duration_ms=(perf_counter() - started_at) * 1000,
+            )

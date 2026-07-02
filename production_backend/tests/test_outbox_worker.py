@@ -1,6 +1,7 @@
 import asyncio
 
 from production_backend.app.modules.audit.models import OutboxJob
+from production_backend.app.core.metrics import RequestMetrics
 from production_backend.app.workers.outbox import OutboxWorker, PermanentJobError, RetryableJobError
 
 
@@ -70,6 +71,23 @@ def test_outbox_worker_treats_unexpected_error_as_retryable() -> None:
 
     assert asyncio.run(worker.run_once()) is True
     assert service.retryable_error_code == "handler_error"
+
+
+def test_outbox_worker_records_job_metrics() -> None:
+    job = _job()
+    service = FakeOutboxService(job=job)
+    metrics = RequestMetrics()
+
+    async def handler(_job):
+        raise RetryableJobError("provider_503")
+
+    worker = OutboxWorker(service=service, handlers={"files.cleanup": handler}, metrics=metrics)
+
+    assert asyncio.run(worker.run_once()) is True
+    worker_metrics = metrics.snapshot()["workers"][0]
+    assert worker_metrics["job_type"] == "files.cleanup"
+    assert worker_metrics["outcome_counts"]["retryable_failure"] == 1
+    assert worker_metrics["error_code_counts"]["provider_503"] == 1
 
 
 def _job(*, job_type: str = "files.cleanup") -> OutboxJob:

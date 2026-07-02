@@ -331,6 +331,9 @@ Completed:
 - Agent run safety gate integration: unsafe user messages persist the user
   message and safety event, emit `safety.blocked` and `run.failed`, and do not
   queue model work.
+- Worker/runtime observability foundation: request metrics now include outbox
+  job outcomes, agent tool outcomes, and OpenAI Agents SDK node outcomes without
+  recording prompt text, tool args, job payloads, or secrets.
 
 ### Phase 8: App Integration Contract
 
@@ -381,8 +384,8 @@ Completed backend commits have established:
 
 Next recommended backend PR slices:
 
-1. Add worker/runtime observability for outbox and agent tool/model operations.
-2. Add API-level contract tests for auth and token flows.
-3. Add deployment runbook and release smoke-test checklist.
-4. Add CI wiring for lint/type/test/migration/container checks.
-5. Add production smoke fixtures for Flutter integration flows.
+1. Add API-level contract tests for auth and token flows.
+2. Add deployment runbook and release smoke-test checklist.
+3. Add CI wiring for lint/type/test/migration/container checks.
+4. Add production smoke fixtures for Flutter integration flows.
+5. Add migration compatibility smoke tests for an empty database.

@@ -4,6 +4,7 @@ from uuid import uuid4
 import pytest
 
 from production_backend.app.core.errors import ApiError
+from production_backend.app.core.metrics import RequestMetrics
 from production_backend.app.modules.agent_runtime.models import AgentToolCall
 from production_backend.app.modules.agent_runtime.tools import ToolExecutor, default_tool_registry
 from production_backend.app.modules.auth import CurrentUser
@@ -104,6 +105,43 @@ def test_tool_executor_marks_tool_call_failed_on_handler_error() -> None:
     assert exc_info.value.code == "dependency_failed"
     assert repository.tool_call.status == "failed"
     assert repository.tool_call.error_code == "dependency_failed"
+
+
+def test_tool_executor_records_success_and_authorization_failure_metrics() -> None:
+    actor = _user(permissions={"profile:read:self"})
+    metrics = RequestMetrics()
+    executor = ToolExecutor(
+        registry=default_tool_registry(),
+        repository=FakeToolRepository(),
+        handlers={"profile.read": profile_read_handler},
+        metrics=metrics,
+    )
+
+    asyncio.run(
+        executor.execute(
+            actor=actor,
+            run_id=uuid4(),
+            tool_name="profile.read",
+            call_id="call-1",
+            args={"owner_user_id": str(actor.user_id)},
+        )
+    )
+    with pytest.raises(ApiError):
+        asyncio.run(
+            executor.execute(
+                actor=_user(),
+                run_id=uuid4(),
+                tool_name="profile.read",
+                call_id="call-2",
+                args={},
+            )
+        )
+
+    tool_metrics = metrics.snapshot()["agent_tools"][0]
+    assert tool_metrics["tool_name"] == "profile.read"
+    assert tool_metrics["outcome_counts"]["completed"] == 1
+    assert tool_metrics["outcome_counts"]["failed"] == 1
+    assert tool_metrics["error_code_counts"]["permission_denied"] == 1
 
 
 async def profile_read_handler(actor: CurrentUser, args: dict):

@@ -3,6 +3,7 @@ import asyncio
 import pytest
 
 from production_backend.app.core.errors import ApiError
+from production_backend.app.core.metrics import RequestMetrics
 from production_backend.app.modules.agent_runtime.graphs import default_graph_registry
 from production_backend.app.modules.agent_runtime.prompts import ContextProjection, ModelInputBuilder
 from production_backend.app.modules.agent_runtime.sdk import OpenAIAgentsSdkRunner, SdkNodeRequest, SdkNodeResult
@@ -74,6 +75,28 @@ def test_sdk_runner_reports_missing_backend_as_dependency_error() -> None:
         asyncio.run(OpenAIAgentsSdkRunner().run_reasoning(request))
 
     assert exc_info.value.code == "dependency_not_configured"
+
+
+def test_sdk_runner_records_backend_metrics() -> None:
+    metrics = RequestMetrics()
+    request = SdkNodeRequest(
+        run_id="run_1",
+        thread_id="thread_1",
+        actor_user_id="user_1",
+        instructions="Be concise.",
+        model_input=[{"role": "user", "content": "hello"}],
+        tool_names=("profile.read",),
+    )
+
+    asyncio.run(OpenAIAgentsSdkRunner(backend=FakeSdkBackend(), metrics=metrics).run_reasoning(request))
+    with pytest.raises(ApiError):
+        asyncio.run(OpenAIAgentsSdkRunner(metrics=metrics).run_reasoning(request))
+
+    sdk_metrics = metrics.snapshot()["agent_sdk"][0]
+    assert sdk_metrics["node_name"] == "openai_agents_sdk"
+    assert sdk_metrics["outcome_counts"]["completed"] == 1
+    assert sdk_metrics["outcome_counts"]["failed"] == 1
+    assert sdk_metrics["error_code_counts"]["dependency_not_configured"] == 1
 
 
 class FakeSdkBackend:
