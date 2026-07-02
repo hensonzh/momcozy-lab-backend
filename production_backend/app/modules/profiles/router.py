@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Header, Request, status
+from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...api.dependencies import require_current_user
-from ...core.errors import ApiError
+from ...api.dependencies import optional_idempotency_key, require_current_user
 from ...infrastructure.db import get_session
 from ..audit import AuditService, IdempotencyService
 from ..audit.repository import AuditRepository
@@ -70,7 +69,7 @@ async def list_my_infants(
 async def create_my_infant(
     payload: InfantProfileCreate,
     request: Request,
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    idempotency_key: str | None = Depends(optional_idempotency_key),
     current_user: CurrentUser = Depends(require_current_user),
     service: ProfileService = Depends(get_profile_service),
 ) -> InfantProfileRead:
@@ -80,7 +79,7 @@ async def create_my_infant(
         sex=payload.sex or "",
         birth_date=payload.birth_date,
         request_id=str(getattr(request.state, "request_id", "") or ""),
-        idempotency_key=_normalize_idempotency_key(idempotency_key),
+        idempotency_key=idempotency_key,
     )
     return InfantProfileRead.model_validate(infant)
 
@@ -99,12 +98,3 @@ def _profile_read(profile, user_id) -> UserProfileRead:
         profile_onboarding_complete=bool(profile.profile_onboarding_completed_at or (profile.display_name and profile.age)),
         profile_onboarding_skipped=bool(profile.profile_onboarding_skipped_at),
     )
-
-
-def _normalize_idempotency_key(value: str | None) -> str | None:
-    key = str(value or "").strip()
-    if not key:
-        return None
-    if len(key) > 255:
-        raise ApiError(code="validation_failed", message="Idempotency-Key is too long.", status=422)
-    return key

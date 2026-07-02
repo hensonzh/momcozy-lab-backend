@@ -151,11 +151,9 @@ Completed:
   through outbox.
 - File object cleanup has an outbox handler registered through the worker handler
   registry.
-
-Remaining:
-
-- Route-level audit/idempotency integration for additional migrated writes.
-- API-level `Idempotency-Key` handling for retryable writes.
+- Shared API dependency normalizes `Idempotency-Key` for retryable writes across
+  files, profiles, records, plans, devices, notifications, support, and agent
+  runtime routes.
 
 Acceptance:
 
@@ -378,8 +376,8 @@ Completed backend commits have established:
 
 Next recommended backend PR slices:
 
-1. Add shared route-level idempotency helpers for retryable writes.
-2. Add OpenAPI/contract handoff artifacts for the Flutter rewrite.
-3. Add worker/runtime observability for outbox and agent tool/model operations.
-4. Add API-level contract tests for auth and token flows.
-5. Add deployment runbook and release smoke-test checklist.
+1. Add OpenAPI/contract handoff artifacts for the Flutter rewrite.
+2. Add worker/runtime observability for outbox and agent tool/model operations.
+3. Add API-level contract tests for auth and token flows.
+4. Add deployment runbook and release smoke-test checklist.
+5. Add CI wiring for lint/type/test/migration/container checks.

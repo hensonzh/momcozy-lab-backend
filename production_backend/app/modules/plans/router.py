@@ -3,11 +3,10 @@ from __future__ import annotations
 from datetime import date
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
+from fastapi import APIRouter, Depends, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...api.dependencies import require_current_user
-from ...core.errors import ApiError
+from ...api.dependencies import optional_idempotency_key, require_current_user
 from ...infrastructure.db import get_session
 from ..audit import AuditService, IdempotencyService
 from ..audit.repository import AuditRepository
@@ -41,7 +40,7 @@ def get_plans_service(session: AsyncSession = Depends(get_session)) -> PlansServ
 async def create_plan(
     payload: PlanCreate,
     request: Request,
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    idempotency_key: str | None = Depends(optional_idempotency_key),
     current_user: CurrentUser = Depends(require_current_user),
     service: PlansService = Depends(get_plans_service),
 ) -> PlanRead:
@@ -53,7 +52,7 @@ async def create_plan(
         source=payload.source or "manual",
         payload=payload.payload,
         request_id=str(getattr(request.state, "request_id", "") or ""),
-        idempotency_key=_normalize_idempotency_key(idempotency_key),
+        idempotency_key=idempotency_key,
     )
     return PlanRead.model_validate(plan)
 
@@ -98,7 +97,7 @@ async def delete_plan(
 async def create_task(
     payload: PlanTaskCreate,
     request: Request,
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    idempotency_key: str | None = Depends(optional_idempotency_key),
     current_user: CurrentUser = Depends(require_current_user),
     service: PlansService = Depends(get_plans_service),
 ) -> PlanTaskRead:
@@ -111,7 +110,7 @@ async def create_task(
         description=payload.description or "",
         payload=payload.payload,
         request_id=str(getattr(request.state, "request_id", "") or ""),
-        idempotency_key=_normalize_idempotency_key(idempotency_key),
+        idempotency_key=idempotency_key,
     )
     return PlanTaskRead.model_validate(task)
 
@@ -163,12 +162,3 @@ async def delete_task(
         request_id=str(getattr(request.state, "request_id", "") or ""),
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
-
-
-def _normalize_idempotency_key(value: str | None) -> str | None:
-    key = str(value or "").strip()
-    if not key:
-        return None
-    if len(key) > 255:
-        raise ApiError(code="validation_failed", message="Idempotency-Key is too long.", status=422)
-    return key

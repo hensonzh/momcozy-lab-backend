@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from fastapi import Depends, Request
-from fastapi import Header
+from fastapi import Depends, Header, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from ..core.errors import ApiError
@@ -24,6 +23,21 @@ async def require_current_user(
 
 def get_object_storage(request: Request) -> ObjectStorage:
     return request.app.state.object_storage
+
+
+def normalize_idempotency_key(value: str | None) -> str | None:
+    key = str(value or "").strip()
+    if not key:
+        return None
+    if len(key) > 255:
+        raise ApiError(code="validation_failed", message="Idempotency-Key is too long.", status=422)
+    return key
+
+
+async def optional_idempotency_key(
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> str | None:
+    return normalize_idempotency_key(idempotency_key)
 
 
 async def require_service_client(

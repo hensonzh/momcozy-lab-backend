@@ -2,12 +2,11 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
+from fastapi import APIRouter, Depends, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...api.dependencies import require_current_user
-from ...core.errors import ApiError
+from ...api.dependencies import normalize_idempotency_key, optional_idempotency_key, require_current_user
 from ...infrastructure.db import get_session
 from ..audit import IdempotencyService
 from ..audit.repository import AuditRepository
@@ -83,7 +82,7 @@ async def get_thread(
 async def create_run(
     payload: AgentRunCreate,
     request: Request,
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    idempotency_key: str | None = Depends(optional_idempotency_key),
     current_user: CurrentUser = Depends(require_current_user),
     service: AgentRuntimeService = Depends(get_agent_runtime_service),
 ) -> AgentRunRead:
@@ -97,7 +96,7 @@ async def create_run(
         prompt_version=payload.prompt_version,
         request_id=str(getattr(request.state, "request_id", "") or ""),
         trace_id=str(getattr(request.state, "request_id", "") or ""),
-        idempotency_key=_normalize_idempotency_key(idempotency_key) or _normalize_idempotency_key(payload.idempotency_key),
+        idempotency_key=idempotency_key or normalize_idempotency_key(payload.idempotency_key),
     )
     return AgentRunRead.model_validate(run)
 
@@ -176,7 +175,7 @@ async def get_action(
 async def confirm_action(
     action_id: UUID,
     payload: AgentActionConfirm,
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    idempotency_key: str | None = Depends(optional_idempotency_key),
     current_user: CurrentUser = Depends(require_current_user),
     service: AgentRuntimeService = Depends(get_agent_runtime_service),
 ) -> AgentActionRead:
@@ -184,7 +183,7 @@ async def confirm_action(
         owner_user_id=current_user.user_id,
         action_id=action_id,
         edited_apply_payload=payload.edited_apply_payload,
-        idempotency_key=_normalize_idempotency_key(idempotency_key) or _normalize_idempotency_key(payload.idempotency_key) or "",
+        idempotency_key=idempotency_key or normalize_idempotency_key(payload.idempotency_key) or "",
     )
     return AgentActionRead.model_validate(action)
 
@@ -198,12 +197,3 @@ async def reject_action(
 ) -> AgentActionRead:
     action = await service.reject_action(owner_user_id=current_user.user_id, action_id=action_id, reason=payload.reason or "")
     return AgentActionRead.model_validate(action)
-
-
-def _normalize_idempotency_key(value: str | None) -> str | None:
-    key = str(value or "").strip()
-    if not key:
-        return None
-    if len(key) > 255:
-        raise ApiError(code="validation_failed", message="Idempotency-Key is too long.", status=422)
-    return key

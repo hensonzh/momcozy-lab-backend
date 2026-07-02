@@ -2,11 +2,10 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
+from fastapi import APIRouter, Depends, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...api.dependencies import require_current_user, require_service_client
-from ...core.errors import ApiError
+from ...api.dependencies import optional_idempotency_key, require_current_user, require_service_client
 from ...infrastructure.db import get_session
 from ..audit import AuditService, IdempotencyService
 from ..audit.repository import AuditRepository
@@ -32,7 +31,7 @@ def get_notifications_service(session: AsyncSession = Depends(get_session)) -> N
 async def create_notification(
     payload: NotificationServiceCreate,
     request: Request,
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    idempotency_key: str | None = Depends(optional_idempotency_key),
     service_client: ServiceClient = Depends(require_service_client),
     service: NotificationsService = Depends(get_notifications_service),
 ) -> NotificationRead:
@@ -45,7 +44,7 @@ async def create_notification(
         payload=payload.payload,
         delivered_at=payload.delivered_at,
         request_id=str(getattr(request.state, "request_id", "") or ""),
-        idempotency_key=_normalize_idempotency_key(idempotency_key),
+        idempotency_key=idempotency_key,
         actor_service=service_client.name,
     )
     return NotificationRead.model_validate(notification)
@@ -98,12 +97,3 @@ async def archive_notification(
         request_id=str(getattr(request.state, "request_id", "") or ""),
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
-
-
-def _normalize_idempotency_key(value: str | None) -> str | None:
-    key = str(value or "").strip()
-    if not key:
-        return None
-    if len(key) > 255:
-        raise ApiError(code="validation_failed", message="Idempotency-Key is too long.", status=422)
-    return key

@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Header, Query, Request, status
+from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...api.dependencies import require_current_user
-from ...core.errors import ApiError
+from ...api.dependencies import optional_idempotency_key, require_current_user
 from ...infrastructure.db import get_session
 from ..audit import AuditService, IdempotencyService
 from ..audit.repository import AuditRepository
@@ -65,7 +64,7 @@ async def list_pump_devices(
 async def create_pump_telemetry(
     payload: PumpTelemetryEventCreate,
     request: Request,
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    idempotency_key: str | None = Depends(optional_idempotency_key),
     current_user: CurrentUser = Depends(require_current_user),
     service: DevicesService = Depends(get_devices_service),
 ) -> PumpTelemetryEventRead:
@@ -76,7 +75,7 @@ async def create_pump_telemetry(
         occurred_at=payload.occurred_at,
         payload=payload.payload,
         request_id=str(getattr(request.state, "request_id", "") or ""),
-        idempotency_key=_normalize_idempotency_key(idempotency_key),
+        idempotency_key=idempotency_key,
     )
     return PumpTelemetryEventRead.model_validate(event)
 
@@ -96,12 +95,3 @@ async def list_pump_telemetry(
         limit=limit,
     )
     return PumpTelemetryEventListResponse(items=[PumpTelemetryEventRead.model_validate(event) for event in events])
-
-
-def _normalize_idempotency_key(value: str | None) -> str | None:
-    key = str(value or "").strip()
-    if not key:
-        return None
-    if len(key) > 255:
-        raise ApiError(code="validation_failed", message="Idempotency-Key is too long.", status=422)
-    return key

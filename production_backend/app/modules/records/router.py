@@ -3,11 +3,10 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
+from fastapi import APIRouter, Depends, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...api.dependencies import require_current_user
-from ...core.errors import ApiError
+from ...api.dependencies import optional_idempotency_key, require_current_user
 from ...infrastructure.db import get_session
 from ..audit import AuditService, IdempotencyService
 from ..audit.repository import AuditRepository
@@ -43,7 +42,7 @@ def get_records_service(session: AsyncSession = Depends(get_session)) -> Records
 async def create_feeding(
     payload: FeedingRecordCreate,
     request: Request,
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    idempotency_key: str | None = Depends(optional_idempotency_key),
     current_user: CurrentUser = Depends(require_current_user),
     service: RecordsService = Depends(get_records_service),
 ) -> FeedingRecordRead:
@@ -57,7 +56,7 @@ async def create_feeding(
         duration_seconds=payload.duration_seconds,
         title=payload.title or "",
         request_id=str(getattr(request.state, "request_id", "") or ""),
-        idempotency_key=_normalize_idempotency_key(idempotency_key),
+        idempotency_key=idempotency_key,
     )
     return FeedingRecordRead.model_validate(record)
 
@@ -98,7 +97,7 @@ async def delete_feeding(
 async def create_pumping(
     payload: PumpingRecordCreate,
     request: Request,
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    idempotency_key: str | None = Depends(optional_idempotency_key),
     current_user: CurrentUser = Depends(require_current_user),
     service: RecordsService = Depends(get_records_service),
 ) -> PumpingRecordRead:
@@ -112,7 +111,7 @@ async def create_pumping(
         source=payload.source or "manual",
         title=payload.title or "",
         request_id=str(getattr(request.state, "request_id", "") or ""),
-        idempotency_key=_normalize_idempotency_key(idempotency_key),
+        idempotency_key=idempotency_key,
     )
     return PumpingRecordRead.model_validate(record)
 
@@ -153,7 +152,7 @@ async def delete_pumping(
 async def create_growth(
     payload: GrowthRecordCreate,
     request: Request,
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    idempotency_key: str | None = Depends(optional_idempotency_key),
     current_user: CurrentUser = Depends(require_current_user),
     service: RecordsService = Depends(get_records_service),
 ) -> GrowthRecordRead:
@@ -165,7 +164,7 @@ async def create_growth(
         weight_kg=payload.weight_kg,
         head_cm=payload.head_cm,
         request_id=str(getattr(request.state, "request_id", "") or ""),
-        idempotency_key=_normalize_idempotency_key(idempotency_key),
+        idempotency_key=idempotency_key,
     )
     return GrowthRecordRead.model_validate(record)
 
@@ -194,12 +193,3 @@ async def delete_growth(
         request_id=str(getattr(request.state, "request_id", "") or ""),
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
-
-
-def _normalize_idempotency_key(value: str | None) -> str | None:
-    key = str(value or "").strip()
-    if not key:
-        return None
-    if len(key) > 255:
-        raise ApiError(code="validation_failed", message="Idempotency-Key is too long.", status=422)
-    return key
