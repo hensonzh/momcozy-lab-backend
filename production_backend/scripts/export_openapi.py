@@ -10,14 +10,13 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from production_backend.app.core.settings import Settings
-from production_backend.app.factory import create_app
-
-
 DEFAULT_OUTPUT = Path("production_backend/docs/openapi.generated.json")
 
 
 def build_openapi_schema(*, app_env: str = "test") -> dict[str, Any]:
+    from production_backend.app.core.settings import Settings
+    from production_backend.app.factory import create_app
+
     app = create_app(Settings(app_env=app_env))
     return app.openapi()
 

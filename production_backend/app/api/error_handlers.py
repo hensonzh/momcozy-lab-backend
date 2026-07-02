@@ -1,19 +1,23 @@
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Awaitable, Callable
+from typing import Any, cast
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 
 from ..core.errors import ApiError, ErrorEnvelope
 
 
+ExceptionHandler = Callable[[Request, Exception], Response | Awaitable[Response]]
+
+
 def install_error_handlers(app: FastAPI) -> None:
-    app.add_exception_handler(ApiError, api_error_handler)
-    app.add_exception_handler(StarletteHTTPException, http_error_handler)
-    app.add_exception_handler(RequestValidationError, validation_error_handler)
+    app.add_exception_handler(ApiError, cast(ExceptionHandler, api_error_handler))
+    app.add_exception_handler(StarletteHTTPException, cast(ExceptionHandler, http_error_handler))
+    app.add_exception_handler(RequestValidationError, cast(ExceptionHandler, validation_error_handler))
     app.add_exception_handler(Exception, unhandled_error_handler)
 
 

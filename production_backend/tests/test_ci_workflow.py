@@ -9,6 +9,8 @@ def test_production_backend_ci_runs_core_gates() -> None:
 
     for phrase in [
         "python -m pytest production_backend/tests",
+        "python -m ruff check app tests scripts",
+        "python -m mypy app",
         "python -m alembic -c production_backend/alembic.ini heads",
         "python -m alembic -c production_backend/alembic.ini upgrade head --sql",
         "production_backend/scripts/export_openapi.py",

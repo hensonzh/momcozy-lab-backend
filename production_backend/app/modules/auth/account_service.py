@@ -6,7 +6,7 @@ from uuid import UUID
 
 from ...core.errors import ApiError
 from ...core.settings import Settings
-from ..users.models import AuthIdentity, User
+from ..users.models import User
 from .jwt import issue_access_token
 from .passwords import hash_password, verify_password
 from .repository import AuthAccountRepository

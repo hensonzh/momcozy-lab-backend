@@ -399,11 +399,13 @@ Completed backend commits have established:
 - Flutter generated-client compatibility notes document source-of-truth
   contracts, regeneration rules, breaking-change policy, mobile token handling,
   idempotency, and agent stream reducer requirements.
+- Production backend ruff/mypy configuration and CI lint/type gates scoped to
+  `production_backend/`.
 
 Next recommended backend PR slices:
 
-1. Add lint/type gates once ruff/mypy configuration is introduced.
-2. Add first real Postgres integration test profile.
-3. Add migration compatibility test against a live Postgres service in CI.
-4. Add backup/restore automation hooks when managed infrastructure is selected.
-5. Add generated Flutter client CI job once the app refactor owns codegen.
+1. Add first real Postgres integration test profile.
+2. Add migration compatibility test against a live Postgres service in CI.
+3. Add backup/restore automation hooks when managed infrastructure is selected.
+4. Add generated Flutter client CI job once the app refactor owns codegen.
+5. Tighten mypy settings after repository/service annotations mature.
