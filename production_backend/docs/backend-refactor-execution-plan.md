@@ -1,6 +1,7 @@
 # Production Backend Refactor Execution Plan
 
-Status: active
+Status: backend-independent refactor complete; app codegen and integration
+checks remain dependent on the Flutter refactor.
 
 This document is the execution plan for the isolated production backend under
 `production_backend/`. It complements the project-level
@@ -9,11 +10,12 @@ defects, target architecture, and full product migration.
 
 ## Current Answer
 
-There is a complete project-level production refactor plan, but the backend also
-needs this backend-specific execution plan so work can proceed without waiting
-for the Flutter app rewrite.
+There is a complete project-level production refactor plan. The isolated
+production backend has reached a stable independently testable boundary, so
+remaining backend work is limited to generated Flutter client checks once the
+App refactor owns codegen.
 
-Backend refactor can continue independently as long as each phase produces:
+Backend refactor proceeded independently under these rules:
 
 - A stable API/schema contract.
 - Focused tests for the new backend module.
@@ -551,7 +553,7 @@ Completed backend commits have established:
 - Remaining helper annotations completed so `disallow_untyped_defs` is now a
   backend CI gate.
 
-Next recommended backend PR slices:
+Remaining App-dependent backend PR slices:
 
 1. Add generated Flutter client CI job once the app refactor owns codegen.
 2. Add generated client contract checks after Flutter codegen exists.
