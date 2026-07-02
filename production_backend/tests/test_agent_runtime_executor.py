@@ -4,7 +4,7 @@ from uuid import uuid4
 import pytest
 
 from production_backend.app.core.errors import ApiError
-from production_backend.app.modules.agent_runtime.models import AgentMessage, AgentRun
+from production_backend.app.modules.agent_runtime.models import AgentAction, AgentEvent, AgentMessage, AgentRun
 from production_backend.app.modules.agent_runtime.runtime import AgentRuntimeExecutor
 from production_backend.app.modules.agent_runtime.sdk import OpenAIAgentsSdkRunner, SdkNodeRequest, SdkNodeResult
 
@@ -69,6 +69,41 @@ def test_agent_runtime_executor_rejects_empty_sdk_response() -> None:
     assert exc_info.value.code == "empty_agent_response"
 
 
+def test_agent_runtime_executor_persists_sdk_action_proposal_and_waits_for_confirmation() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="Create a support ticket", sequence=1)
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    backend = CapturingSdkBackend(
+        result=SdkNodeResult(
+            action_proposals=[
+                {
+                    "action_type": "support.ticket.create",
+                    "target_type": "support_ticket",
+                    "side_effect_level": "medium",
+                    "preview_payload": {"summary": "Pump does not turn on"},
+                    "apply_payload": {"issue_summary": "Pump does not turn on"},
+                    "idempotency_key": "idem-action",
+                }
+            ]
+        )
+    )
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+        ).execute(run=run)
+    )
+
+    assert result.status == "waiting_for_confirmation"
+    assert result.pending_action_id == repository.actions[0].id
+    assert repository.actions[0].status == "confirmation_required"
+    assert repository.actions[0].apply_payload == {"issue_summary": "Pump does not turn on"}
+    assert repository.events[-1].event_type == "action.confirmation_required"
+    assert repository.events[-1].payload["action_id"] == str(repository.actions[0].id)
+
+
 class CapturingSdkBackend:
     def __init__(self, *, result: SdkNodeResult) -> None:
         self.result = result
@@ -83,6 +118,8 @@ class FakeRuntimeRepository:
     def __init__(self, *, messages: list[AgentMessage], current_message: AgentMessage | None) -> None:
         self.messages = messages
         self.current_message = current_message
+        self.actions = []
+        self.events = []
 
     async def get_latest_user_message_for_run(self, *, run_id):
         if self.current_message is not None and self.current_message.run_id == run_id:
@@ -91,6 +128,37 @@ class FakeRuntimeRepository:
 
     async def list_messages_for_thread(self, *, thread_id, limit=40):
         return [message for message in self.messages if message.thread_id == thread_id][:limit]
+
+    async def create_action(self, **kwargs):
+        action = AgentAction(
+            id=uuid4(),
+            run_id=kwargs["run_id"],
+            actor_user_id=kwargs["actor_user_id"],
+            action_type=kwargs["action_type"],
+            target_type=kwargs["target_type"],
+            target_id=kwargs["target_id"],
+            status=kwargs["status"],
+            side_effect_level=kwargs["side_effect_level"],
+            preview_payload=kwargs["preview_payload"],
+            apply_payload=kwargs["apply_payload"],
+            idempotency_key=kwargs["idempotency_key"],
+            expires_at=kwargs["expires_at"],
+            error_code="",
+        )
+        self.actions.append(action)
+        return action
+
+    async def append_event(self, **kwargs):
+        event = AgentEvent(
+            event_id=uuid4(),
+            thread_id=kwargs["thread_id"],
+            run_id=kwargs["run_id"],
+            sequence=len(self.events) + 1,
+            event_type=kwargs["event_type"],
+            payload=kwargs["payload"],
+        )
+        self.events.append(event)
+        return event
 
 
 def _run(*, thread_id) -> AgentRun:

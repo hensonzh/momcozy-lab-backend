@@ -6,7 +6,7 @@ from typing import Any
 from ...core.errors import ApiError
 from .execution import AgentRunExecutionResult
 from .graphs import AgentGraphRegistry, default_graph_registry
-from .models import AgentMessage, AgentRun
+from .models import AgentAction, AgentMessage, AgentRun
 from .prompts import ContextProjection, ModelInputBuilder
 from .repository import AgentRuntimeRepository
 from .sdk import OpenAIAgentsSdkRunner, SdkNodeRequest
@@ -87,11 +87,34 @@ class AgentRuntimeExecutor:
         )
 
         if result.action_proposals:
-            raise ApiError(code="action_proposal_not_wired", message="SDK action proposal handling is not wired yet.", status=503)
+            action = await self._create_action_from_proposal(run=run, proposal=result.action_proposals[0])
+            await self.repository.append_event(
+                thread_id=run.thread_id,
+                run_id=run.id,
+                event_type="action.confirmation_required",
+                payload={"action_id": str(action.id), "action_type": action.action_type},
+            )
+            return AgentRunExecutionResult(status="waiting_for_confirmation", pending_action_id=action.id)
         final_text = result.final_text.strip()
         if not final_text:
             raise ApiError(code="empty_agent_response", message="Agent runtime returned an empty response.", status=502)
         return AgentRunExecutionResult(status="completed", final_text=final_text)
+
+    async def _create_action_from_proposal(self, *, run: AgentRun, proposal: dict[str, Any]) -> AgentAction:
+        action_type = _required_text(proposal, "action_type")
+        return await self.repository.create_action(
+            run_id=run.id,
+            actor_user_id=run.actor_user_id,
+            action_type=action_type,
+            target_type=_text(proposal, "target_type"),
+            target_id=_text(proposal, "target_id"),
+            status="confirmation_required",
+            side_effect_level=_text(proposal, "side_effect_level") or "medium",
+            preview_payload=_dict(proposal, "preview_payload"),
+            apply_payload=_dict(proposal, "apply_payload"),
+            idempotency_key=_text(proposal, "idempotency_key"),
+            expires_at=None,
+        )
 
 
 def _history_before(*, messages: list[AgentMessage], before_sequence: int) -> list[dict[str, Any]]:
@@ -108,3 +131,19 @@ def _message_text(message: AgentMessage) -> str:
     if isinstance(text, str):
         return text
     return ""
+
+
+def _required_text(payload: dict[str, Any], key: str) -> str:
+    value = _text(payload, key)
+    if not value:
+        raise ApiError(code="invalid_action_proposal", message=f"{key} is required.", status=422)
+    return value
+
+
+def _text(payload: dict[str, Any], key: str) -> str:
+    return str(payload.get(key) or "").strip()
+
+
+def _dict(payload: dict[str, Any], key: str) -> dict[str, Any]:
+    value = payload.get(key)
+    return dict(value) if isinstance(value, dict) else {}
