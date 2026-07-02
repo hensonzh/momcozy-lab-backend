@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Any, cast
 
 from fastapi import FastAPI, Request
@@ -43,7 +43,7 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
         status=422,
         code="validation_failed",
         message="Request validation failed.",
-        details={"errors": exc.errors()},
+        details={"errors": _safe_validation_errors(exc.errors())},
     )
 
 
@@ -101,3 +101,16 @@ def _safe_http_message(exc: StarletteHTTPException) -> str:
     if isinstance(exc.detail, str) and exc.detail:
         return exc.detail
     return "Request failed."
+
+
+def _safe_validation_errors(errors: Sequence[Any]) -> list[dict[str, Any]]:
+    safe_errors: list[dict[str, Any]] = []
+    for error in errors:
+        if not isinstance(error, dict):
+            continue
+        safe_error: dict[str, Any] = {}
+        for key in ("type", "loc", "msg"):
+            if key in error:
+                safe_error[key] = error[key]
+        safe_errors.append(safe_error)
+    return safe_errors

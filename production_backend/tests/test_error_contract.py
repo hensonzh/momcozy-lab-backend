@@ -59,6 +59,17 @@ def test_validation_error_uses_error_envelope() -> None:
     assert response.json()["error"]["code"] == "validation_failed"
 
 
+def test_validation_error_does_not_echo_sensitive_input_values() -> None:
+    with TestClient(create_app(Settings(app_env="test"))) as client:
+        response = client.post("/v1/auth/signup", json={"email": "mai@example.test", "password": "sekrit"})
+
+    assert response.status_code == 422
+    error = response.json()["error"]
+    assert error["code"] == "validation_failed"
+    assert "sekrit" not in response.text
+    assert all("input" not in item for item in error["details"]["errors"])
+
+
 def test_unhandled_error_hides_exception_text() -> None:
     app = create_app(Settings(app_env="test"))
 
