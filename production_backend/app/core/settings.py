@@ -32,6 +32,7 @@ class Settings:
     auth_jwt_issuer: str = ""
     auth_jwt_audience: str = ""
     auth_jwt_algorithm: str = "HS256"
+    service_api_key: str = ""
     readiness_check_infrastructure: bool = False
 
     @classmethod
@@ -53,6 +54,7 @@ class Settings:
             auth_jwt_issuer=_env("AUTH_JWT_ISSUER", cls.auth_jwt_issuer),
             auth_jwt_audience=_env("AUTH_JWT_AUDIENCE", cls.auth_jwt_audience),
             auth_jwt_algorithm=_env("AUTH_JWT_ALGORITHM", cls.auth_jwt_algorithm),
+            service_api_key=_env("SERVICE_API_KEY", cls.service_api_key),
             readiness_check_infrastructure=_env_bool(
                 "READINESS_CHECK_INFRASTRUCTURE",
                 cls.readiness_check_infrastructure,
@@ -83,6 +85,8 @@ class Settings:
             )
         if self.auth_jwt_secret and len(self.auth_jwt_secret.encode("utf-8")) < 32:
             errors.append("AUTH_JWT_SECRET must be at least 32 bytes")
+        if self.service_api_key and len(self.service_api_key.encode("utf-8")) < 32:
+            errors.append("SERVICE_API_KEY must be at least 32 bytes")
 
         if self.is_production:
             if _is_local_url(self.database_url, LOCAL_DATABASE_URL):

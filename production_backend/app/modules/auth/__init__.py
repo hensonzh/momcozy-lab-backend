@@ -4,6 +4,7 @@ from .models import DeviceSession, RefreshToken
 from .permissions import ADMIN_ROLE, PermissionPolicy
 from .repository import AuthSessionRepository
 from .service import AuthSessionService, CreatedAuthSession, IssuedRefreshToken, refresh_token_hash
+from .service_key import ServiceClient, authenticate_service_key
 
 __all__ = [
     "ADMIN_ROLE",
@@ -15,6 +16,8 @@ __all__ = [
     "IssuedRefreshToken",
     "PermissionPolicy",
     "RefreshToken",
+    "ServiceClient",
     "authenticate_access_token",
+    "authenticate_service_key",
     "refresh_token_hash",
 ]

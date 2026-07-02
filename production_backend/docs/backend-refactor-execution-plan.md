@@ -121,10 +121,11 @@ Completed:
   session revocation.
 - Permission policy helper for explicit permissions, admin role bypass, and
   owner-scope checks.
+- Internal service key dependency is separate from `CurrentUser` user auth.
 
 Remaining:
 
-- Service-to-service key separated from user auth.
+- Login/signup API surface and service identity audit attribution.
 
 Acceptance:
 
