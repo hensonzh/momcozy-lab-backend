@@ -23,6 +23,8 @@ def test_production_backend_ci_runs_core_gates() -> None:
         "agent_eval_cases",
         "redis-runtime-controls",
         "production_backend/scripts/check_redis_runtime_controls.py",
+        "object-storage-integration",
+        "production_backend/scripts/check_object_storage_profile.py",
     ]:
         assert phrase in text
 

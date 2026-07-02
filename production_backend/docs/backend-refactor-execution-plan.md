@@ -407,9 +407,10 @@ Completed backend commits have established:
   managed Postgres/object-storage restore drills.
 - Redis runtime profile and CI `redis-runtime-controls` job that verifies live
   Redis active-run, cancel, stream cursor, and exclusive lock semantics.
+- Object storage integration profile and CI `object-storage-integration` job
+  that verifies S3-compatible put/get/delete semantics against MinIO.
 
 Next recommended backend PR slices:
 
 1. Add generated Flutter client CI job once the app refactor owns codegen.
 2. Tighten mypy settings after repository/service annotations mature.
-3. Add object-storage integration profile for MinIO/S3-compatible providers.

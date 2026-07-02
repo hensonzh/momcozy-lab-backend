@@ -20,6 +20,7 @@ def test_compose_uses_local_infra_service_names_not_localhost() -> None:
 
     assert "postgres:16" in compose
     assert "redis:7" in compose
+    assert "minio/minio:latest" in compose
     assert "postgresql+asyncpg://momcozy:momcozy@postgres:5432/momcozy" in env
     assert "redis://redis:6379/0" in env
     assert "localhost" not in env
@@ -34,3 +35,12 @@ def test_compose_env_keeps_object_storage_switchable_by_environment() -> None:
     assert "OBJECT_STORAGE_ENDPOINT_URL=" in env
     assert "OBJECT_STORAGE_ACCESS_KEY_ID=" in env
     assert "OBJECT_STORAGE_SECRET_ACCESS_KEY=" in env
+
+
+def test_compose_exposes_minio_as_optional_tools_profile() -> None:
+    compose = (PRODUCTION_BACKEND / "docker-compose.yml").read_text()
+
+    assert "minio:" in compose
+    assert "profiles:" in compose
+    assert "server /data --address" in compose
+    assert "9000:9000" in compose
