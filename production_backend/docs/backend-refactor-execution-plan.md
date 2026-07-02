@@ -194,10 +194,12 @@ Completed:
   audit and idempotent telemetry ingest.
 - Notifications/support data foundation: owner-scoped notifications and support
   tickets.
+- Notifications API: service-key protected notification creation plus
+  owner-scoped inbox/list/read/archive APIs.
 
 Suggested order:
 
-1. Notifications and support ticket APIs.
+1. Support ticket API.
 
 Rules:
 
