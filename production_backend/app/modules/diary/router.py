@@ -10,6 +10,7 @@ from ...infrastructure.db import get_session
 from ..audit import AuditService
 from ..audit.repository import AuditRepository
 from ..auth import CurrentUser
+from .models import PregnancyDiaryEntry
 from .repository import DiaryRepository
 from .schemas import PregnancyDiaryEntryListResponse, PregnancyDiaryEntryRead, PregnancyDiaryEntryUpdate
 from .service import DiaryService
@@ -84,7 +85,7 @@ async def delete_entry(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-def _entry_read(entry) -> PregnancyDiaryEntryRead:
+def _entry_read(entry: PregnancyDiaryEntry) -> PregnancyDiaryEntryRead:
     return PregnancyDiaryEntryRead(
         id=entry.id,
         owner_user_id=entry.owner_user_id,

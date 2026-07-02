@@ -4,9 +4,11 @@ from contextlib import asynccontextmanager
 from typing import AsyncIterator
 from uuid import UUID, uuid4
 
+from redis.asyncio import Redis
+
 
 class AgentRunControls:
-    def __init__(self, redis_client) -> None:
+    def __init__(self, redis_client: Redis) -> None:
         self.redis = redis_client
 
     async def set_active_run(self, *, thread_id: UUID, run_id: UUID, ttl_seconds: int = 3600) -> None:

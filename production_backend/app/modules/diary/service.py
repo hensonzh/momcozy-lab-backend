@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+from typing import Any
 from uuid import UUID
 
 from ...core.errors import ApiError
@@ -42,7 +43,7 @@ class DiaryService:
         *,
         owner_user_id: UUID,
         entry_date: date,
-        values: dict,
+        values: dict[str, Any],
         request_id: str = "",
     ) -> PregnancyDiaryEntry:
         entry = await self.repository.upsert_entry(owner_user_id=owner_user_id, entry_date=entry_date, values=values)

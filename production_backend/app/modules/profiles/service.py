@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date, datetime, timedelta, timezone
+from typing import Any
 from uuid import UUID
 
 from ...core.errors import ApiError
@@ -26,7 +28,7 @@ class ProfileService:
     async def get_user_profile(self, *, user_id: UUID) -> UserProfile | None:
         return await self.repository.get_user_profile(user_id=user_id)
 
-    async def update_user_profile(self, *, user_id: UUID, values: dict, request_id: str = "") -> UserProfile:
+    async def update_user_profile(self, *, user_id: UUID, values: dict[str, Any], request_id: str = "") -> UserProfile:
         profile = await self.repository.upsert_user_profile(user_id=user_id, values=values)
         if self.audit_service is not None:
             await self.audit_service.record(
@@ -48,7 +50,7 @@ class ProfileService:
         owner_user_id: UUID,
         infant_name: str,
         sex: str = "",
-        birth_date=None,
+        birth_date: date | None = None,
         request_id: str = "",
         idempotency_key: str | None = None,
     ) -> InfantProfile:
@@ -112,7 +114,5 @@ class ProfileService:
         return infant
 
 
-def _idempotency_expires_at():
-    from datetime import datetime, timedelta, timezone
-
+def _idempotency_expires_at() -> datetime:
     return datetime.now(timezone.utc) + timedelta(hours=24)

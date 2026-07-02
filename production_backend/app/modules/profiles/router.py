@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -8,6 +10,7 @@ from ...infrastructure.db import get_session
 from ..audit import AuditService, IdempotencyService
 from ..audit.repository import AuditRepository
 from ..auth import CurrentUser
+from .models import UserProfile
 from .repository import ProfileRepository
 from .schemas import (
     InfantProfileCreate,
@@ -84,7 +87,7 @@ async def create_my_infant(
     return InfantProfileRead.model_validate(infant)
 
 
-def _profile_read(profile, user_id) -> UserProfileRead:
+def _profile_read(profile: UserProfile | None, user_id: UUID) -> UserProfileRead:
     if profile is None:
         return UserProfileRead(user_id=user_id)
     return UserProfileRead(

@@ -409,8 +409,13 @@ Completed backend commits have established:
   Redis active-run, cancel, stream cursor, and exclusive lock semantics.
 - Object storage integration profile and CI `object-storage-integration` job
   that verifies S3-compatible put/get/delete semantics against MinIO.
+- Tighter mypy gates for incomplete definitions, untyped calls, implicit
+  optionals, generic parameters, redundant casts, unused ignores, and equality
+  checks.
 
 Next recommended backend PR slices:
 
 1. Add generated Flutter client CI job once the app refactor owns codegen.
-2. Tighten mypy settings after repository/service annotations mature.
+2. Remove repository `Any` returns so `warn_return_any` can become a CI gate.
+3. Finish remaining helper annotations so `disallow_untyped_defs` can become a
+   CI gate.

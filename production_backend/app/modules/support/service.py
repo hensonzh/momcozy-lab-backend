@@ -6,7 +6,7 @@ from typing import Any
 from uuid import UUID
 
 from ...core.errors import ApiError
-from ..audit import AuditService, IdempotencyService, request_hash
+from ..audit import AuditService, IdempotencyKey, IdempotencyService, request_hash
 from .models import SupportTicket
 from .repository import SupportTicketsRepository
 
@@ -103,7 +103,7 @@ class SupportTicketsService:
             raise ApiError(code="not_found", message="Support ticket not found.", status=404)
         return ticket
 
-    async def _reserve_idempotency(self, *, owner_user_id: UUID, key: str | None, payload: dict[str, Any]):
+    async def _reserve_idempotency(self, *, owner_user_id: UUID, key: str | None, payload: dict[str, Any]) -> IdempotencyKey | None:
         if not key:
             return None
         if self.idempotency_service is None:
@@ -119,7 +119,7 @@ class SupportTicketsService:
             raise ApiError(code="idempotency_in_progress", message="Request is still in progress.", status=409)
         return decision.record
 
-    async def _complete_idempotency(self, *, idempotency_record, response_ref: str) -> None:
+    async def _complete_idempotency(self, *, idempotency_record: IdempotencyKey | None, response_ref: str) -> None:
         if idempotency_record is not None and self.idempotency_service is not None:
             await self.idempotency_service.mark_completed(record=idempotency_record, response_ref=response_ref)
 

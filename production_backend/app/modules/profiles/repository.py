@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 from uuid import UUID
 
@@ -55,7 +56,7 @@ class ProfileRepository:
         owner_user_id: UUID,
         infant_name: str,
         sex: str,
-        birth_date,
+        birth_date: date | None,
     ) -> InfantProfile:
         infant = InfantProfile(
             owner_user_id=owner_user_id,

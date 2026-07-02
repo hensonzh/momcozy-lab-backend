@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from typing import AsyncContextManager
 
 from fastapi import FastAPI
 
@@ -11,7 +12,7 @@ from ..infrastructure.object_storage.factory import create_object_storage
 from ..infrastructure.redis.client import close_redis_client, create_redis_client
 
 
-def build_lifespan(settings: Settings):
+def build_lifespan(settings: Settings) -> Callable[[FastAPI], AsyncContextManager[None]]:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         db_engine = create_db_engine(settings)
