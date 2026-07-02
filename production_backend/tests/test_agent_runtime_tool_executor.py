@@ -11,32 +11,32 @@ from production_backend.app.modules.auth import CurrentUser
 
 
 def test_tool_executor_persists_safe_args_and_output() -> None:
-    actor = _user(permissions={"profile:read:self"})
+    actor = _user(permissions={"support_ticket:create:self"})
     repository = FakeToolRepository()
     executor = ToolExecutor(
         registry=default_tool_registry(),
         repository=repository,
-        handlers={"profile.read": profile_read_handler},
+        handlers={"support.ticket.propose": profile_read_handler},
     )
 
     result = asyncio.run(
         executor.execute(
             actor=actor,
             run_id=uuid4(),
-            tool_name="profile.read",
+            tool_name="support.ticket.propose",
             call_id="call-1",
-            args={"owner_user_id": str(actor.user_id), "api_token": "secret-token"},
+            args={"issue_summary": "Pump does not start", "payload": {"api_token": "secret-token"}},
         )
     )
 
     assert result.tool_call.status == "completed"
-    assert repository.tool_call.safe_args["api_token"] == "[redacted]"
+    assert repository.tool_call.safe_args["payload"]["api_token"] == "[redacted]"
     assert result.safe_output["profile"]["name"] == "Mai"
     assert repository.output.safe_output["session_token"] == "[redacted]"
     assert [event.event_type for event in repository.events] == ["tool.started", "tool.completed"]
     assert repository.events[0].payload == {
         "tool_call_id": str(repository.tool_call.id),
-        "tool_name": "profile.read",
+        "tool_name": "support.ticket.propose",
         "call_id": "call-1",
     }
     assert repository.events[1].payload["tool_output_id"] == str(repository.output.id)
@@ -90,6 +90,58 @@ def test_tool_executor_blocks_cross_owner_actor_scoped_args() -> None:
     assert repository.tool_call is None
 
 
+def test_tool_executor_rejects_args_outside_registered_schema_before_persisting_call() -> None:
+    actor = _user(permissions={"profile:read:self"})
+    repository = FakeToolRepository()
+    executor = ToolExecutor(
+        registry=default_tool_registry(),
+        repository=repository,
+        handlers={"profile.read": profile_read_handler},
+    )
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            executor.execute(
+                actor=actor,
+                run_id=uuid4(),
+                tool_name="profile.read",
+                call_id="call-1",
+                args={"unknown": "value"},
+            )
+        )
+
+    assert exc_info.value.code == "tool_input_invalid"
+    assert exc_info.value.details == {"path": "$.unknown", "reason": "field is not allowed"}
+    assert repository.tool_call is None
+    assert repository.events == []
+
+
+def test_tool_executor_rejects_missing_required_tool_args_before_persisting_call() -> None:
+    actor = _user(permissions={"support_ticket:create:self"})
+    repository = FakeToolRepository()
+    executor = ToolExecutor(
+        registry=default_tool_registry(),
+        repository=repository,
+        handlers={"support.ticket.propose": profile_read_handler},
+    )
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            executor.execute(
+                actor=actor,
+                run_id=uuid4(),
+                tool_name="support.ticket.propose",
+                call_id="call-1",
+                args={},
+            )
+        )
+
+    assert exc_info.value.code == "tool_input_invalid"
+    assert exc_info.value.details == {"path": "$", "reason": "missing required field: issue_summary"}
+    assert repository.tool_call is None
+    assert repository.events == []
+
+
 def test_tool_executor_marks_tool_call_failed_on_handler_error() -> None:
     actor = _user(permissions={"profile:read:self"})
     repository = FakeToolRepository()
@@ -133,7 +185,7 @@ def test_tool_executor_records_success_and_authorization_failure_metrics() -> No
             run_id=uuid4(),
             tool_name="profile.read",
             call_id="call-1",
-            args={"owner_user_id": str(actor.user_id)},
+            args={},
         )
     )
     with pytest.raises(ApiError):

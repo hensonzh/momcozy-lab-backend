@@ -73,3 +73,76 @@ def tool_input_schema(schema_ref: str) -> JsonSchema:
     if schema is None:
         raise ApiError(code="tool_schema_not_found", message="Tool input schema is not registered.", status=500)
     return deepcopy(schema)
+
+
+def validate_tool_input(*, schema_ref: str, value: dict[str, Any]) -> None:
+    schema = tool_input_schema(schema_ref)
+    _validate_value(schema=schema, value=value, path="$")
+
+
+def _validate_value(*, schema: JsonSchema, value: Any, path: str) -> None:
+    schema_type = schema.get("type")
+    if schema_type == "object":
+        if not isinstance(value, dict):
+            _raise_invalid(path=path, reason="must be an object")
+        _validate_object(schema=schema, value=value, path=path)
+        return
+    if schema_type == "string":
+        _validate_string(schema=schema, value=value, path=path)
+        return
+    if schema_type == "integer":
+        _validate_integer(schema=schema, value=value, path=path)
+
+
+def _validate_object(*, schema: JsonSchema, value: dict[str, Any], path: str) -> None:
+    properties = schema.get("properties") or {}
+    if not isinstance(properties, dict):
+        properties = {}
+    required = schema.get("required") or []
+    if not isinstance(required, list):
+        required = []
+    missing = [key for key in required if key not in value]
+    if missing:
+        _raise_invalid(path=path, reason=f"missing required field: {missing[0]}")
+    if schema.get("additionalProperties") is False:
+        extra = sorted(set(value) - set(properties))
+        if extra:
+            _raise_invalid(path=f"{path}.{extra[0]}", reason="field is not allowed")
+    for key, item in value.items():
+        child_schema = properties.get(key)
+        if isinstance(child_schema, dict):
+            _validate_value(schema=child_schema, value=item, path=f"{path}.{key}")
+
+
+def _validate_string(*, schema: JsonSchema, value: Any, path: str) -> None:
+    if not isinstance(value, str):
+        _raise_invalid(path=path, reason="must be a string")
+    min_length = schema.get("minLength")
+    if isinstance(min_length, int) and len(value) < min_length:
+        _raise_invalid(path=path, reason=f"must be at least {min_length} characters")
+    max_length = schema.get("maxLength")
+    if isinstance(max_length, int) and len(value) > max_length:
+        _raise_invalid(path=path, reason=f"must be at most {max_length} characters")
+    allowed = schema.get("enum")
+    if isinstance(allowed, list) and value not in allowed:
+        _raise_invalid(path=path, reason="has an unsupported value")
+
+
+def _validate_integer(*, schema: JsonSchema, value: Any, path: str) -> None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        _raise_invalid(path=path, reason="must be an integer")
+    minimum = schema.get("minimum")
+    if isinstance(minimum, int) and value < minimum:
+        _raise_invalid(path=path, reason=f"must be greater than or equal to {minimum}")
+    maximum = schema.get("maximum")
+    if isinstance(maximum, int) and value > maximum:
+        _raise_invalid(path=path, reason=f"must be less than or equal to {maximum}")
+
+
+def _raise_invalid(*, path: str, reason: str) -> None:
+    raise ApiError(
+        code="tool_input_invalid",
+        message="Tool input does not match the registered contract.",
+        status=422,
+        details={"path": path, "reason": reason},
+    )

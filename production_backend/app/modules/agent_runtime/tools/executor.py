@@ -16,6 +16,7 @@ from ..models import AgentToolCall
 from ..repository import AgentRuntimeRepository
 from .contracts import ToolContract
 from .registry import ToolContractRegistry
+from .schemas import validate_tool_input
 
 
 @dataclass(frozen=True)
@@ -68,6 +69,7 @@ class ToolExecutor:
         try:
             contract = self.registry.get(tool_name)
             self._authorize(actor=actor, contract=contract, args=args)
+            validate_tool_input(schema_ref=contract.input_schema_ref, value=args)
             handler = self.handlers.get(tool_name)
             if handler is None:
                 raise ApiError(code="unsupported_operation", message="Tool handler is not configured.", status=501)
