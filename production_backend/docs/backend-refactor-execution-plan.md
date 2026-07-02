@@ -184,10 +184,12 @@ Completed:
   migration.
 - Plans/tasks API: owner-scoped create/list/detail/delete for plans and
   create/list/complete/delete for tasks, with audit and idempotent creates.
+- Pregnancy diary data foundation: owner/date-scoped diary entries and linked
+  health notes.
 
 Suggested order:
 
-1. Pregnancy diary.
+1. Pregnancy diary APIs.
 2. Devices and pump telemetry.
 3. Notifications and support tickets.
 
