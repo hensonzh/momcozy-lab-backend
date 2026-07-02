@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .models import (
     AgentAction,
     AgentEvent,
+    AgentEvalCase,
     AgentMessage,
     AgentRun,
     AgentSafetyEvent,
@@ -407,6 +408,36 @@ class AgentRuntimeRepository:
         self.session.add(event)
         await self.session.flush()
         return event
+
+    async def create_eval_case(
+        self,
+        *,
+        suite: str,
+        name: str,
+        domain: str,
+        input_payload: dict[str, Any],
+        expected_behavior: dict[str, Any],
+        expected_tool_calls: list[Any],
+        expected_safety_decision: str,
+        source_run_id: UUID | None,
+        status: str,
+        owner_team: str,
+    ) -> AgentEvalCase:
+        eval_case = AgentEvalCase(
+            suite=suite,
+            name=name,
+            domain=domain,
+            input_payload=input_payload,
+            expected_behavior=expected_behavior,
+            expected_tool_calls=expected_tool_calls,
+            expected_safety_decision=expected_safety_decision,
+            source_run_id=source_run_id,
+            status=status,
+            owner_team=owner_team,
+        )
+        self.session.add(eval_case)
+        await self.session.flush()
+        return eval_case
 
     async def mark_run_cancelled(
         self,

@@ -318,6 +318,9 @@ Completed:
 - Replay bundle service: exports run, message, event, tool, action, and safety
   ledger snapshots for incident debugging and eval seed material, with message
   content redacted by default.
+- Eval seed service: creates draft `agent_eval_cases` from redacted replay
+  bundles, preserving source run ID, event sequence expectations, tool call
+  summaries, action statuses, and safety decision.
 - Agent run queue worker: scans durable queued runs plus recoverable stale
   running runs from Postgres and delegates each run to the lifecycle worker
   behind Redis run locks.
@@ -426,6 +429,8 @@ Completed backend commits have established:
   configuration for the agent worker
 - replay bundle export service for debugging and eval seed generation, default
   redacted to avoid accidental PII exposure
+- eval seed service that turns replay bundles into draft regression cases linked
+  back to the source run
 - durable agent run queue scanner that can resume queued/stale running runs
   without in-memory session state
 - environment-controlled agent worker process entry and compose profile for

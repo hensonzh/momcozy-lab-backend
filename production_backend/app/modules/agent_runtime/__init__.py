@@ -1,4 +1,5 @@
 from .controls import AgentRunControls
+from .evals import AgentEvalService
 from .execution import AgentRunExecutionResult
 from .models import (
     AgentAction,
@@ -20,6 +21,7 @@ from .service import AgentRuntimeService
 __all__ = [
     "AgentAction",
     "AgentArtifact",
+    "AgentEvalService",
     "AgentRunControls",
     "AgentRunExecutionResult",
     "AgentContextCheckpoint",
