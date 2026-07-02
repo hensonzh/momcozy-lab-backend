@@ -140,13 +140,14 @@ Completed:
 - Owner-scoped `files` metadata model and migration.
 - `audit_logs` model and migration.
 - `idempotency_keys` model and migration.
+- `outbox_jobs` model and migration.
 
 Remaining:
 
 - File repository/service/router for upload and metadata reads.
 - Audit repository/service.
 - Idempotency repository/service.
-- Outbox table, worker skeleton, retry policy, and DLQ fields.
+- Outbox repository/service, worker skeleton, retry policy, and DLQ fields.
 - API-level `Idempotency-Key` handling for retryable writes.
 
 Acceptance:
