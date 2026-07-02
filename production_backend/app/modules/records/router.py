@@ -13,7 +13,14 @@ from ..audit import AuditService, IdempotencyService
 from ..audit.repository import AuditRepository
 from ..auth import CurrentUser
 from .repository import RecordsRepository
-from .schemas import FeedingRecordCreate, FeedingRecordListResponse, FeedingRecordRead
+from .schemas import (
+    FeedingRecordCreate,
+    FeedingRecordListResponse,
+    FeedingRecordRead,
+    PumpingRecordCreate,
+    PumpingRecordListResponse,
+    PumpingRecordRead,
+)
 from .service import RecordsService
 
 
@@ -77,6 +84,61 @@ async def delete_feeding(
     service: RecordsService = Depends(get_records_service),
 ) -> Response:
     await service.delete_feeding(
+        owner_user_id=current_user.user_id,
+        record_id=record_id,
+        request_id=str(getattr(request.state, "request_id", "") or ""),
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/pumping", response_model=PumpingRecordRead, status_code=status.HTTP_201_CREATED)
+async def create_pumping(
+    payload: PumpingRecordCreate,
+    request: Request,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    current_user: CurrentUser = Depends(require_current_user),
+    service: RecordsService = Depends(get_records_service),
+) -> PumpingRecordRead:
+    record = await service.create_pumping(
+        owner_user_id=current_user.user_id,
+        pump_start_time=payload.pump_start_time,
+        pump_end_time=payload.pump_end_time,
+        milk_volume_ml=payload.milk_volume_ml,
+        pump_type=payload.pump_type or "",
+        duration_seconds=payload.duration_seconds,
+        source=payload.source or "manual",
+        title=payload.title or "",
+        request_id=str(getattr(request.state, "request_id", "") or ""),
+        idempotency_key=_normalize_idempotency_key(idempotency_key),
+    )
+    return PumpingRecordRead.model_validate(record)
+
+
+@router.get("/pumping", response_model=PumpingRecordListResponse)
+async def list_pumpings(
+    start_at: datetime | None = None,
+    end_at: datetime | None = None,
+    limit: int = Query(default=50, ge=1, le=100),
+    current_user: CurrentUser = Depends(require_current_user),
+    service: RecordsService = Depends(get_records_service),
+) -> PumpingRecordListResponse:
+    records = await service.list_pumpings(
+        owner_user_id=current_user.user_id,
+        start_at=start_at,
+        end_at=end_at,
+        limit=limit,
+    )
+    return PumpingRecordListResponse(items=[PumpingRecordRead.model_validate(record) for record in records])
+
+
+@router.delete("/pumping/{record_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_pumping(
+    record_id: UUID,
+    request: Request,
+    current_user: CurrentUser = Depends(require_current_user),
+    service: RecordsService = Depends(get_records_service),
+) -> Response:
+    await service.delete_pumping(
         owner_user_id=current_user.user_id,
         record_id=record_id,
         request_id=str(getattr(request.state, "request_id", "") or ""),

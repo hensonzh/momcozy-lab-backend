@@ -176,10 +176,12 @@ Completed:
   and `growth_records` models and migration.
 - Feeding record API: owner-scoped create/list/delete with infant ownership
   validation, audit, and idempotent create.
+- Pumping record API: owner-scoped create/list/delete with audit and idempotent
+  create.
 
 Suggested order:
 
-1. Records APIs: pumping and growth.
+1. Records APIs: growth.
 2. Plans and tasks.
 3. Pregnancy diary.
 4. Devices and pump telemetry.

@@ -5,11 +5,12 @@ from uuid import UUID
 
 from ...core.errors import ApiError
 from ..audit import AuditService, IdempotencyService, request_hash
-from .models import FeedingRecord
+from .models import FeedingRecord, PumpingRecord
 from .repository import RecordsRepository
 
 
 FEEDING_CREATE_IDEMPOTENCY_SCOPE = "records.feeding.create"
+PUMPING_CREATE_IDEMPOTENCY_SCOPE = "records.pumping.create"
 
 
 class RecordsService:
@@ -128,6 +129,105 @@ class RecordsService:
                 request_id=request_id,
             )
 
+    async def create_pumping(
+        self,
+        *,
+        owner_user_id: UUID,
+        pump_start_time: datetime,
+        pump_end_time: datetime | None = None,
+        milk_volume_ml: float | None = None,
+        pump_type: str = "",
+        duration_seconds: int | None = None,
+        source: str = "manual",
+        title: str = "",
+        request_id: str = "",
+        idempotency_key: str | None = None,
+    ) -> PumpingRecord:
+        if milk_volume_ml is None and duration_seconds is None:
+            raise ApiError(code="validation_failed", message="milk_volume_ml or duration_seconds is required.", status=422)
+
+        idempotency_record = None
+        if idempotency_key:
+            if self.idempotency_service is None:
+                raise ApiError(code="internal_error", message="Idempotency service is not configured.", status=500)
+            decision = await self.idempotency_service.reserve(
+                actor_user_id=owner_user_id,
+                scope=PUMPING_CREATE_IDEMPOTENCY_SCOPE,
+                key=idempotency_key,
+                request_hash=request_hash(
+                    {
+                        "pump_start_time": pump_start_time.isoformat(),
+                        "pump_end_time": pump_end_time.isoformat() if pump_end_time else "",
+                        "milk_volume_ml": milk_volume_ml,
+                        "pump_type": pump_type,
+                        "duration_seconds": duration_seconds,
+                        "source": source,
+                        "title": title,
+                    }
+                ),
+                expires_at=_utcnow() + timedelta(hours=24),
+            )
+            idempotency_record = decision.record
+            if decision.status == "replay":
+                return await self._replay_pumping(owner_user_id=owner_user_id, response_ref=idempotency_record.response_ref)
+
+        record = await self.repository.create_pumping(
+            owner_user_id=owner_user_id,
+            pump_start_time=pump_start_time,
+            pump_end_time=pump_end_time,
+            milk_volume_ml=milk_volume_ml,
+            pump_type=pump_type,
+            duration_seconds=duration_seconds,
+            source=source,
+            title=title,
+        )
+        if idempotency_record is not None and self.idempotency_service is not None:
+            await self.idempotency_service.mark_completed(record=idempotency_record, response_ref=str(record.id))
+        if self.audit_service is not None:
+            await self.audit_service.record(
+                actor_user_id=owner_user_id,
+                action="records.pumping.create",
+                resource_type="pumping_record",
+                resource_id=str(record.id),
+                request_id=request_id,
+                details={"source": source},
+            )
+        return record
+
+    async def list_pumpings(
+        self,
+        *,
+        owner_user_id: UUID,
+        start_at: datetime | None = None,
+        end_at: datetime | None = None,
+        limit: int = 50,
+    ) -> list[PumpingRecord]:
+        if limit < 1 or limit > 100:
+            raise ApiError(code="validation_failed", message="limit must be between 1 and 100.", status=422)
+        return await self.repository.list_pumpings(
+            owner_user_id=owner_user_id,
+            start_at=start_at,
+            end_at=end_at,
+            limit=limit,
+        )
+
+    async def delete_pumping(self, *, owner_user_id: UUID, record_id: UUID, request_id: str = "") -> None:
+        deleted = await self.repository.soft_delete_pumping(
+            owner_user_id=owner_user_id,
+            record_id=record_id,
+            deleted_at=_utcnow(),
+        )
+        if deleted is None:
+            raise ApiError(code="not_found", message="Pumping record not found.", status=404)
+        if self.audit_service is not None:
+            await self.audit_service.record(
+                actor_user_id=owner_user_id,
+                action="records.pumping.delete",
+                resource_type="pumping_record",
+                resource_id=str(record_id),
+                request_id=request_id,
+            )
+
     async def _replay_feeding(self, *, owner_user_id: UUID, response_ref: str) -> FeedingRecord:
         if not response_ref:
             raise ApiError(code="idempotency_in_progress", message="Request is still in progress.", status=409)
@@ -136,6 +236,18 @@ class RecordsService:
         except ValueError as exc:
             raise ApiError(code="conflict", message="Idempotency response reference is invalid.", status=409) from exc
         record = await self.repository.get_feeding_for_owner(record_id=record_id, owner_user_id=owner_user_id)
+        if record is None:
+            raise ApiError(code="conflict", message="Idempotency response resource is unavailable.", status=409)
+        return record
+
+    async def _replay_pumping(self, *, owner_user_id: UUID, response_ref: str) -> PumpingRecord:
+        if not response_ref:
+            raise ApiError(code="idempotency_in_progress", message="Request is still in progress.", status=409)
+        try:
+            record_id = UUID(response_ref)
+        except ValueError as exc:
+            raise ApiError(code="conflict", message="Idempotency response reference is invalid.", status=409) from exc
+        record = await self.repository.get_pumping_for_owner(record_id=record_id, owner_user_id=owner_user_id)
         if record is None:
             raise ApiError(code="conflict", message="Idempotency response resource is unavailable.", status=409)
         return record

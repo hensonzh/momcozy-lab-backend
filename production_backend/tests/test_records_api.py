@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from production_backend.app.core.settings import Settings
 from production_backend.app.factory import create_app
 from production_backend.app.modules.auth import CurrentUser
-from production_backend.app.modules.records.models import FeedingRecord
+from production_backend.app.modules.records.models import FeedingRecord, PumpingRecord
 from production_backend.app.modules.records.router import get_records_service
 
 
@@ -71,6 +71,45 @@ def test_delete_feeding_uses_current_user_and_request_id() -> None:
     assert fake_service.delete_feeding_kwargs["request_id"] == "req_delete"
 
 
+def test_create_pumping_uses_current_user_request_id_and_idempotency() -> None:
+    user_id = uuid4()
+    fake_service = FakeRecordsService(user_id=user_id)
+    app = create_app(Settings(app_env="test"))
+    _override_current_user(app, user_id)
+    app.dependency_overrides[get_records_service] = lambda: fake_service
+
+    response = TestClient(app).post(
+        "/v1/records/pumping",
+        headers={"X-Request-ID": "req_pump", "Idempotency-Key": " idem-pump "},
+        json={"pump_start_time": _now_iso(), "milk_volume_ml": 120},
+    )
+
+    assert response.status_code == 201
+    assert fake_service.create_pumping_kwargs["owner_user_id"] == user_id
+    assert fake_service.create_pumping_kwargs["request_id"] == "req_pump"
+    assert fake_service.create_pumping_kwargs["idempotency_key"] == "idem-pump"
+
+
+def test_list_and_delete_pumping_use_current_user_scope() -> None:
+    user_id = uuid4()
+    fake_service = FakeRecordsService(user_id=user_id)
+    app = create_app(Settings(app_env="test"))
+    _override_current_user(app, user_id)
+    app.dependency_overrides[get_records_service] = lambda: fake_service
+
+    list_response = TestClient(app).get("/v1/records/pumping?limit=10")
+    delete_response = TestClient(app).delete(
+        f"/v1/records/pumping/{fake_service.record_id}",
+        headers={"X-Request-ID": "req_delete"},
+    )
+
+    assert list_response.status_code == 200
+    assert delete_response.status_code == 204
+    assert fake_service.list_pumpings_kwargs["owner_user_id"] == user_id
+    assert fake_service.list_pumpings_kwargs["limit"] == 10
+    assert fake_service.delete_pumping_kwargs["request_id"] == "req_delete"
+
+
 def _override_current_user(app, user_id: UUID) -> None:
     from production_backend.app.api.dependencies import require_current_user
 
@@ -100,8 +139,11 @@ class FakeRecordsService:
         self.user_id = user_id
         self.record_id = uuid4()
         self.create_feeding_kwargs = {}
+        self.create_pumping_kwargs = {}
         self.list_feedings_kwargs = {}
+        self.list_pumpings_kwargs = {}
         self.delete_feeding_kwargs = {}
+        self.delete_pumping_kwargs = {}
 
     async def create_feeding(self, **kwargs):
         self.create_feeding_kwargs = kwargs
@@ -114,6 +156,17 @@ class FakeRecordsService:
     async def delete_feeding(self, **kwargs):
         self.delete_feeding_kwargs = kwargs
 
+    async def create_pumping(self, **kwargs):
+        self.create_pumping_kwargs = kwargs
+        return self._pumping()
+
+    async def list_pumpings(self, **kwargs):
+        self.list_pumpings_kwargs = kwargs
+        return [self._pumping()]
+
+    async def delete_pumping(self, **kwargs):
+        self.delete_pumping_kwargs = kwargs
+
     def _feeding(self) -> FeedingRecord:
         return FeedingRecord(
             id=self.record_id,
@@ -124,6 +177,20 @@ class FakeRecordsService:
             feed_action="",
             volume_ml=90,
             duration_seconds=None,
+            title="",
+            status="active",
+        )
+
+    def _pumping(self) -> PumpingRecord:
+        return PumpingRecord(
+            id=self.record_id,
+            owner_user_id=self.user_id,
+            pump_start_time=_now(),
+            pump_end_time=None,
+            milk_volume_ml=120,
+            pump_type="",
+            duration_seconds=None,
+            source="manual",
             title="",
             status="active",
         )
