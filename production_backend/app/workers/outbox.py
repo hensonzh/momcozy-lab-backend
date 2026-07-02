@@ -4,18 +4,7 @@ from collections.abc import Awaitable, Callable, Mapping
 
 from ..modules.audit.models import OutboxJob
 from ..modules.audit.outbox import OutboxService
-
-
-class RetryableJobError(Exception):
-    def __init__(self, code: str = "retryable_error") -> None:
-        super().__init__(code)
-        self.code = code
-
-
-class PermanentJobError(Exception):
-    def __init__(self, code: str = "permanent_error") -> None:
-        super().__init__(code)
-        self.code = code
+from .errors import PermanentJobError, RetryableJobError
 
 
 OutboxHandler = Callable[[OutboxJob], Awaitable[None]]

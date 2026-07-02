@@ -147,10 +147,11 @@ Completed:
 - File upload uses optional `Idempotency-Key`, request ID, and audit recording.
 - File listing and soft deletion are owner-scoped; deletion queues object cleanup
   through outbox.
+- File object cleanup has an outbox handler registered through the worker handler
+  registry.
 
 Remaining:
 
-- Object-storage cleanup worker handler.
 - Route-level audit/idempotency integration for additional migrated writes.
 - API-level `Idempotency-Key` handling for retryable writes.
 
