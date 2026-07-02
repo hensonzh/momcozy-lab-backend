@@ -11,6 +11,7 @@ def test_deployment_runbook_covers_release_recovery_and_security() -> None:
         "DATABASE_URL",
         "alembic",
         "/v1/health/ready",
+        "check_backup_restore_hooks.py",
         "Worker Backlog",
         "Agent Run Recovery",
         "Security Incident",

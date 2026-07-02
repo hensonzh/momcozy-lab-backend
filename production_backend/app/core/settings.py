@@ -34,6 +34,10 @@ class Settings:
     auth_jwt_algorithm: str = "HS256"
     service_api_key: str = ""
     readiness_check_infrastructure: bool = False
+    postgres_backup_hook: str = ""
+    postgres_restore_hook: str = ""
+    object_storage_backup_hook: str = ""
+    object_storage_restore_hook: str = ""
     log_level: str = "INFO"
 
     @classmethod
@@ -60,6 +64,10 @@ class Settings:
                 "READINESS_CHECK_INFRASTRUCTURE",
                 cls.readiness_check_infrastructure,
             ),
+            postgres_backup_hook=_env("POSTGRES_BACKUP_HOOK", cls.postgres_backup_hook),
+            postgres_restore_hook=_env("POSTGRES_RESTORE_HOOK", cls.postgres_restore_hook),
+            object_storage_backup_hook=_env("OBJECT_STORAGE_BACKUP_HOOK", cls.object_storage_backup_hook),
+            object_storage_restore_hook=_env("OBJECT_STORAGE_RESTORE_HOOK", cls.object_storage_restore_hook),
             log_level=_env("LOG_LEVEL", cls.log_level).upper(),
         )
 

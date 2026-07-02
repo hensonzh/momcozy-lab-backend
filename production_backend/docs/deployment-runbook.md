@@ -28,7 +28,9 @@ Start incident and release debugging from these IDs when available:
 2. Confirm production does not use local object storage or localhost DB/Redis.
 3. Build the container image.
 4. Run tests and migration checks.
-5. Export OpenAPI and compare it with the committed snapshot.
+5. Check backup/restore automation hooks:
+   `python production_backend/scripts/check_backup_restore_hooks.py --strict`
+6. Export OpenAPI and compare it with the committed snapshot.
 
 ## Release
 
@@ -86,11 +88,13 @@ Run this drill before production launch and on a regular schedule:
 
 1. Confirm Postgres backup completion and retention window.
 2. Confirm object storage retention policy for uploads and artifacts.
-3. Restore the latest backup into an isolated environment.
-4. Run migrations to the current head against the restored database.
-5. Run `/v1/health/ready` against the restored environment.
-6. Run the release smoke checklist with a non-production test account.
-7. Record actual RPO/RTO and fix gaps before relying on the backup.
+3. Confirm automation hook references are configured:
+   `python production_backend/scripts/check_backup_restore_hooks.py --strict`
+4. Restore the latest backup into an isolated environment.
+5. Run migrations to the current head against the restored database.
+6. Run `/v1/health/ready` against the restored environment.
+7. Run the release smoke checklist with a non-production test account.
+8. Record actual RPO/RTO and fix gaps before relying on the backup.
 
 Never treat a backup as valid until a restore has been tested.
 

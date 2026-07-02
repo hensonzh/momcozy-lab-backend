@@ -41,6 +41,9 @@ jobs:
       - name: Check empty database migration SQL
         run: python -m alembic -c production_backend/alembic.ini upgrade head --sql > /tmp/upgrade-head.sql
 
+      - name: Check backup restore hook manifest
+        run: python production_backend/scripts/check_backup_restore_hooks.py
+
       - name: Check OpenAPI snapshot
         run: |
           python production_backend/scripts/export_openapi.py --output /tmp/openapi.generated.json

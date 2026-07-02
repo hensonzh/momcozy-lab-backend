@@ -24,6 +24,20 @@ def test_settings_from_env_reads_infrastructure_configuration(monkeypatch: pytes
     assert settings.object_storage_endpoint_url == "https://s3.example.test"
 
 
+def test_settings_from_env_reads_operational_hook_references(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("POSTGRES_BACKUP_HOOK", "managed-postgres-backup")
+    monkeypatch.setenv("POSTGRES_RESTORE_HOOK", "managed-postgres-restore")
+    monkeypatch.setenv("OBJECT_STORAGE_BACKUP_HOOK", "managed-objects-backup")
+    monkeypatch.setenv("OBJECT_STORAGE_RESTORE_HOOK", "managed-objects-restore")
+
+    settings = Settings.from_env()
+
+    assert settings.postgres_backup_hook == "managed-postgres-backup"
+    assert settings.postgres_restore_hook == "managed-postgres-restore"
+    assert settings.object_storage_backup_hook == "managed-objects-backup"
+    assert settings.object_storage_restore_hook == "managed-objects-restore"
+
+
 def test_production_settings_reject_local_object_storage() -> None:
     settings = Settings(app_env="production", object_storage_provider="local")
 

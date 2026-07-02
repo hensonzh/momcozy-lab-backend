@@ -38,9 +38,14 @@ environment variables, not code changes:
 - `AUTH_JWT_SECRET`
 - `AUTH_JWT_ISSUER`
 - `AUTH_JWT_AUDIENCE`
+- `POSTGRES_BACKUP_HOOK`
+- `POSTGRES_RESTORE_HOOK`
+- `OBJECT_STORAGE_BACKUP_HOOK`
+- `OBJECT_STORAGE_RESTORE_HOOK`
 
 Use `production_backend/.env.example` as the local template. Secrets stay out of
-git, and production startup rejects local object storage.
+git, and production startup rejects local object storage. Backup/restore hook
+values should be references to external automation, not raw credentials.
 
 ## Local Docker Compose
 
