@@ -1,0 +1,99 @@
+from __future__ import annotations
+
+from typing import Any
+
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.responses import JSONResponse
+
+from ..core.errors import ApiError, ErrorEnvelope
+
+
+def install_error_handlers(app: FastAPI) -> None:
+    app.add_exception_handler(ApiError, api_error_handler)
+    app.add_exception_handler(StarletteHTTPException, http_error_handler)
+    app.add_exception_handler(RequestValidationError, validation_error_handler)
+    app.add_exception_handler(Exception, unhandled_error_handler)
+
+
+async def api_error_handler(request: Request, exc: ApiError) -> JSONResponse:
+    return _error_response(
+        request,
+        status=exc.status,
+        code=exc.code,
+        message=exc.message,
+        details=exc.details,
+    )
+
+
+async def http_error_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+    code = _http_error_code(exc.status_code)
+    message = _safe_http_message(exc)
+    return _error_response(request, status=exc.status_code, code=code, message=message)
+
+
+async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    return _error_response(
+        request,
+        status=422,
+        code="validation_failed",
+        message="Request validation failed.",
+        details={"errors": exc.errors()},
+    )
+
+
+async def unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    return _error_response(
+        request,
+        status=500,
+        code="internal_error",
+        message="Internal server error.",
+    )
+
+
+def _error_response(
+    request: Request,
+    *,
+    status: int,
+    code: str,
+    message: str,
+    details: dict[str, Any] | None = None,
+) -> JSONResponse:
+    request_id = str(getattr(request.state, "request_id", "") or "")
+    envelope = ErrorEnvelope(
+        code=code,
+        message=message,
+        status=status,
+        request_id=request_id,
+        details=details,
+    )
+    return JSONResponse(status_code=status, content=envelope.to_response_body(), headers={"X-Request-ID": request_id})
+
+
+def _http_error_code(status_code: int) -> str:
+    if status_code == 401:
+        return "authentication_required"
+    if status_code == 403:
+        return "permission_denied"
+    if status_code == 404:
+        return "not_found"
+    if status_code == 409:
+        return "conflict"
+    if status_code == 429:
+        return "rate_limited"
+    if status_code >= 500:
+        return "internal_error"
+    return "http_error"
+
+
+def _safe_http_message(exc: StarletteHTTPException) -> str:
+    if exc.status_code >= 500:
+        return "Internal server error."
+    if isinstance(exc.detail, dict):
+        value = exc.detail.get("message") or exc.detail.get("detail")
+        if value:
+            return str(value)
+    if isinstance(exc.detail, str) and exc.detail:
+        return exc.detail
+    return "Request failed."
