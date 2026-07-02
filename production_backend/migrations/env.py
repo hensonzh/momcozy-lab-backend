@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from production_backend.app.core.settings import Settings
 from production_backend.app.infrastructure.db.base import Base
+from production_backend.app.infrastructure.db import models as _models
 
 
 config = context.config
