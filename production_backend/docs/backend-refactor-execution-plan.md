@@ -380,6 +380,8 @@ Completed:
 - Agent action idempotency alignment: confirmation without an explicit
   idempotency key now persists the generated `agent-action:{action_id}` key on
   both the action and outbox job.
+- Agent action stream events now include user-visible `preview_payload` and
+  merge metadata while keeping `apply_payload` server-side only.
 
 ### Phase 7: Safety, Observability, And Eval
 

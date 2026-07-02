@@ -53,6 +53,18 @@ consumption can pass `follow=true` with bounded `poll_interval_seconds` and
 `max_wait_seconds`; the backend still emits only persisted application events
 and exits when a terminal run event is observed or the wait budget expires.
 
+## Agent Action Events
+
+Action events use `action_id` as the reducer key. `action.confirmation_required`
+includes user-visible `preview_payload` plus action metadata:
+`action_type`, `action_status`, `target_type`, `target_id`, and
+`side_effect_level`.
+
+`action.queued` and `action.rejected` include `action_status`, `action_type`,
+`target_type`, and `target_id` so clients can merge replayed events into the
+same action card. `apply_payload` is never streamed; it is only persisted inside
+the server-side action/outbox apply path.
+
 ## Files
 
 File upload uses multipart form data at `POST /v1/files/upload`. File metadata
