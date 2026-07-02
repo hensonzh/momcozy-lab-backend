@@ -34,6 +34,7 @@ class Settings:
     auth_jwt_algorithm: str = "HS256"
     service_api_key: str = ""
     readiness_check_infrastructure: bool = False
+    log_level: str = "INFO"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -59,6 +60,7 @@ class Settings:
                 "READINESS_CHECK_INFRASTRUCTURE",
                 cls.readiness_check_infrastructure,
             ),
+            log_level=_env("LOG_LEVEL", cls.log_level).upper(),
         )
 
     @property
@@ -87,6 +89,8 @@ class Settings:
             errors.append("AUTH_JWT_SECRET must be at least 32 bytes")
         if self.service_api_key and len(self.service_api_key.encode("utf-8")) < 32:
             errors.append("SERVICE_API_KEY must be at least 32 bytes")
+        if self.log_level.upper() not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
+            errors.append("LOG_LEVEL must be one of DEBUG, INFO, WARNING, ERROR, CRITICAL")
 
         if self.is_production:
             if _is_local_url(self.database_url, LOCAL_DATABASE_URL):

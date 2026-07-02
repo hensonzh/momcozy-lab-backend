@@ -46,6 +46,11 @@ async def ready(request: Request) -> dict[str, Any]:
     return {"status": "ok", "checks": checks}
 
 
+@router.get("/health/metrics")
+async def metrics(request: Request) -> dict[str, Any]:
+    return request.app.state.request_metrics.snapshot()
+
+
 async def _check_database(request: Request) -> str:
     try:
         async with request.app.state.db_engine.connect() as connection:

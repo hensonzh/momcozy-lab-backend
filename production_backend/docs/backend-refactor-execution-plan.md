@@ -95,10 +95,11 @@ Completed:
 - S3-compatible managed object storage provider.
 - Production validation rejects implicit localhost DB/Redis.
 - `/v1/health/ready` can validate DB and Redis readiness.
+- Structured request logs with `request_id`, route, status, and latency.
+- Basic in-process request metrics exposed through `/v1/health/metrics`.
 
 Remaining:
 
-- Structured logging and basic metrics.
 - Docker/compose local environment.
 
 Acceptance:
@@ -363,19 +364,21 @@ Completed backend commits have established:
 - inventory tooling
 - environment contract
 - request/error contract
-- DB/Alembic foundation
-- Redis foundation
-- object storage abstraction
-- user/auth identity schema
-- JWT `CurrentUser` dependency
-- owner-scoped file metadata
-- audit/idempotency schema
+- structured request logging and basic metrics
+- DB/Alembic, Redis, and object storage foundation
+- user/auth identity schema, JWT `CurrentUser`, service key boundary, refresh
+  token/session schema
+- owner-scoped files, profiles, records, plans, diary, devices, notifications,
+  and support modules
+- audit/idempotency/outbox foundations
+- durable agent runtime ledger, Redis controls, LangGraph/OpenAI Agents SDK
+  boundaries, guarded tool executor, SSE replay, action confirmation, and
+  deterministic safety gate
 
 Next recommended backend PR slices:
 
-1. Fix production startup blockers: managed object storage, explicit production
-   DB/Redis URLs, and real readiness checks.
-2. Add device sessions and refresh token rotation tables.
-3. Add repository/service/router for owner-scoped file upload.
-4. Add audit/idempotency services and outbox model.
-5. Migrate the first deterministic business module.
+1. Add Docker/compose local development environment.
+2. Add login/signup API surface and service identity audit attribution.
+3. Add shared route-level idempotency helpers for retryable writes.
+4. Add OpenAPI/contract handoff artifacts for the Flutter rewrite.
+5. Add worker/runtime observability for outbox and agent tool/model operations.
