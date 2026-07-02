@@ -1,6 +1,9 @@
 import asyncio
 from uuid import UUID, uuid4
 
+import pytest
+
+from production_backend.app.core.errors import ApiError
 from production_backend.app.modules.audit.models import OutboxJob
 from production_backend.app.modules.agent_runtime.models import AgentAction
 from production_backend.app.modules.agent_runtime.service import AGENT_ACTION_APPLY_JOB, AgentRuntimeService
@@ -60,6 +63,19 @@ def test_agent_runtime_actions_reject_confirmation_required_action() -> None:
     assert rejected.status == "rejected"
     assert rejected.error_code == "rejected_by_user"
     assert repository.events[-1].event_type == "action.rejected"
+
+
+def test_agent_runtime_actions_reject_unsupported_action_type_before_persisting() -> None:
+    owner_user_id = uuid4()
+    repository = FakeActionRepository()
+    service = AgentRuntimeService(repository=repository)
+    run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Delete my device"))
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(service.propose_action(owner_user_id=owner_user_id, run_id=run.id, action_type="device.delete"))
+
+    assert exc_info.value.code == "unsupported_agent_action"
+    assert repository.action is None
 
 
 class FakeActionRepository(FakeAgentRuntimeRepository):

@@ -155,6 +155,38 @@ def test_agent_runtime_executor_persists_sdk_action_proposal_and_waits_for_confi
     assert checkpoint_store.checkpoints[-1]["state_summary"]["pending_action_id"] == str(repository.actions[0].id)
 
 
+def test_agent_runtime_executor_rejects_unsupported_sdk_action_proposal_before_persisting() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="Delete my device", sequence=1)
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    backend = CapturingSdkBackend(
+        result=SdkNodeResult(
+            action_proposals=[
+                {
+                    "action_type": "device.delete",
+                    "target_type": "device",
+                    "side_effect_level": "high",
+                    "preview_payload": {"summary": "Delete device"},
+                    "apply_payload": {"device_id": "device_1"},
+                }
+            ]
+        )
+    )
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            AgentRuntimeExecutor(
+                repository=repository,
+                sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            ).execute(run=run)
+        )
+
+    assert exc_info.value.code == "unsupported_agent_action"
+    assert repository.actions == []
+    assert repository.events == []
+
+
 class CapturingSdkBackend:
     def __init__(self, *, result: SdkNodeResult) -> None:
         self.result = result

@@ -352,6 +352,9 @@ Completed:
   shared sink that also advances the Redis stream cursor, keeping DB replay and
   transient reconnect state aligned across API, agent worker, and outbox worker
   processes.
+- Agent action policy: SDK and tool action proposals are validated against an
+  explicit allowlist before any `agent_actions` row is created, so unsupported
+  action types cannot drift into the outbox as late failures.
 
 ### Phase 7: Safety, Observability, And Eval
 
@@ -464,6 +467,8 @@ Completed backend commits have established:
   persisted SSE/replay streams aligned with the tool ledger
 - shared AgentEventSink wiring in runtime/tool/action workers so Redis stream
   cursor updates follow persisted application events across processes
+- action proposal allowlist for `support.ticket.create`, rejecting unsupported
+  SDK/tool proposals before persistence
 - OpenAPI schema export script, generated schema snapshot, and API handoff
   document for Flutter integration
 - Auth/token API contract tests for token response shape, validation envelope,

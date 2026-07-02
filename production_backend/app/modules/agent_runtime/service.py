@@ -6,6 +6,7 @@ from uuid import UUID
 
 from ...core.errors import ApiError
 from ..audit import IdempotencyKey, IdempotencyService, OutboxService, request_hash
+from .action_policy import AgentActionPolicy
 from .controls import AgentRunControls
 from .models import AgentAction, AgentEvent, AgentRun, AgentThread
 from .repository import AgentRuntimeRepository
@@ -28,12 +29,14 @@ class AgentRuntimeService:
         outbox_service: OutboxService | None = None,
         controls: AgentRunControls | None = None,
         safety_service: AgentSafetyService | None = None,
+        action_policy: AgentActionPolicy | None = None,
     ) -> None:
         self.repository = repository
         self.idempotency_service = idempotency_service
         self.outbox_service = outbox_service
         self.controls = controls
         self.safety_service = safety_service
+        self.action_policy = action_policy or AgentActionPolicy()
 
     async def create_thread(
         self,
@@ -198,14 +201,19 @@ class AgentRuntimeService:
         expires_at: datetime | None = None,
     ) -> AgentAction:
         run = await self.get_run(owner_user_id=owner_user_id, run_id=run_id)
+        decision = self.action_policy.validate(
+            action_type=_normalize_text(action_type, max_length=120, required=True),
+            target_type=_normalize_text(target_type, max_length=120),
+            side_effect_level=_normalize_text(side_effect_level, max_length=32),
+        )
         action = await self.repository.create_action(
             run_id=run.id,
             actor_user_id=owner_user_id,
-            action_type=_normalize_text(action_type, max_length=120, required=True),
-            target_type=_normalize_text(target_type, max_length=120),
+            action_type=decision.action_type,
+            target_type=decision.target_type,
             target_id=_normalize_text(target_id, max_length=120),
             status="confirmation_required",
-            side_effect_level=_normalize_text(side_effect_level, max_length=32) or "medium",
+            side_effect_level=decision.side_effect_level,
             preview_payload=preview_payload or {},
             apply_payload=apply_payload or {},
             idempotency_key=_normalize_text(idempotency_key, max_length=255),

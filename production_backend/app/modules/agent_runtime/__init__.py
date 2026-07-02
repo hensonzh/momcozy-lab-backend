@@ -2,6 +2,7 @@ from .controls import AgentRunControls
 from .evals import AgentEvalService
 from .execution import AgentRunExecutionResult
 from .graphs import AgentGraphCheckpointStore, GraphCheckpointRef
+from .action_policy import AgentActionPolicy, AgentActionPolicyDecision, AgentActionPolicyRule
 from .models import (
     AgentAction,
     AgentArtifact,
@@ -24,6 +25,9 @@ from .state_store import AgentRuntimeStateStore
 
 __all__ = [
     "AgentAction",
+    "AgentActionPolicy",
+    "AgentActionPolicyDecision",
+    "AgentActionPolicyRule",
     "AgentArtifact",
     "AgentEvalService",
     "AgentGraphCheckpointStore",

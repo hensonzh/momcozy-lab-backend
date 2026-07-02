@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 
 from ...core.errors import ApiError
 from ..auth import CurrentUser
+from .action_policy import AgentActionPolicy
 from .events import AgentEventSink
 from .execution import AgentRunExecutionResult
 from .graphs import AgentGraphCheckpointStore, AgentGraphRegistry, default_graph_registry
@@ -44,6 +45,7 @@ class AgentRuntimeExecutor:
         tool_registry: ToolContractRegistry | None = None,
         tool_executor: ToolExecutor | None = None,
         event_sink: AgentEventSink | None = None,
+        action_policy: AgentActionPolicy | None = None,
         input_builder: ModelInputBuilder | None = None,
         config: AgentRuntimeExecutorConfig | None = None,
     ) -> None:
@@ -55,6 +57,7 @@ class AgentRuntimeExecutor:
         self.tool_registry = tool_registry or default_tool_registry()
         self.tool_executor = tool_executor
         self.event_sink = event_sink
+        self.action_policy = action_policy or AgentActionPolicy()
         self.input_builder = input_builder or ModelInputBuilder()
         self.config = config or AgentRuntimeExecutorConfig()
 
@@ -152,15 +155,19 @@ class AgentRuntimeExecutor:
         return AgentRunExecutionResult(status="completed", final_text=final_text)
 
     async def _create_action_from_proposal(self, *, run: AgentRun, proposal: dict[str, Any]) -> AgentAction:
-        action_type = _required_text(proposal, "action_type")
+        decision = self.action_policy.validate(
+            action_type=_required_text(proposal, "action_type"),
+            target_type=_text(proposal, "target_type"),
+            side_effect_level=_text(proposal, "side_effect_level"),
+        )
         return await self.repository.create_action(
             run_id=run.id,
             actor_user_id=run.actor_user_id,
-            action_type=action_type,
-            target_type=_text(proposal, "target_type"),
+            action_type=decision.action_type,
+            target_type=decision.target_type,
             target_id=_text(proposal, "target_id"),
             status="confirmation_required",
-            side_effect_level=_text(proposal, "side_effect_level") or "medium",
+            side_effect_level=decision.side_effect_level,
             preview_payload=_dict(proposal, "preview_payload"),
             apply_payload=_dict(proposal, "apply_payload"),
             idempotency_key=_text(proposal, "idempotency_key"),
