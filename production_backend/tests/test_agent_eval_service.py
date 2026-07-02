@@ -58,5 +58,8 @@ class FakeReplayService:
             "events": [{"type": "run.started"}, {"type": "action.confirmation_required"}],
             "tool_calls": [{"tool_name": "profile.read", "status": "completed"}],
             "actions": [{"status": "confirmation_required"}],
+            "checkpoints": [],
+            "workflow_states": [],
+            "context_projections": [],
             "safety_events": [{"decision": "allow"}],
         }

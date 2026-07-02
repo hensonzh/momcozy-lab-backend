@@ -369,6 +369,22 @@
             "title": "Actions",
             "type": "array"
           },
+          "checkpoints": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Checkpoints",
+            "type": "array"
+          },
+          "context_projections": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Context Projections",
+            "type": "array"
+          },
           "events": {
             "items": {
               "additionalProperties": true,
@@ -405,6 +421,14 @@
             },
             "title": "Tool Calls",
             "type": "array"
+          },
+          "workflow_states": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Workflow States",
+            "type": "array"
           }
         },
         "required": [
@@ -413,6 +437,9 @@
           "events",
           "tool_calls",
           "actions",
+          "checkpoints",
+          "workflow_states",
+          "context_projections",
           "safety_events"
         ],
         "title": "AgentReplayBundle",

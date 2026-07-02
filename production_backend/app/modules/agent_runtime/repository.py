@@ -420,6 +420,14 @@ class AgentRuntimeRepository:
         )
         return cast(AgentContextCheckpoint | None, await self.session.scalar(statement))
 
+    async def list_context_checkpoints_for_run(self, *, run_id: UUID) -> list[AgentContextCheckpoint]:
+        statement = select(AgentContextCheckpoint).where(AgentContextCheckpoint.run_id == run_id).order_by(
+            AgentContextCheckpoint.created_at,
+            AgentContextCheckpoint.id,
+        )
+        result = await self.session.scalars(statement)
+        return list(result.all())
+
     async def create_workflow_state(
         self,
         *,
@@ -502,6 +510,14 @@ class AgentRuntimeRepository:
         )
         return cast(AgentWorkflowState | None, await self.session.scalar(statement))
 
+    async def list_workflow_states_for_run(self, *, run_id: UUID) -> list[AgentWorkflowState]:
+        statement = select(AgentWorkflowState).where(AgentWorkflowState.run_id == run_id).order_by(
+            AgentWorkflowState.updated_at,
+            AgentWorkflowState.id,
+        )
+        result = await self.session.scalars(statement)
+        return list(result.all())
+
     async def create_context_projection(
         self,
         *,
@@ -540,6 +556,14 @@ class AgentRuntimeRepository:
             .limit(1)
         )
         return cast(AgentContextProjection | None, await self.session.scalar(statement))
+
+    async def list_context_projections_for_run(self, *, run_id: UUID) -> list[AgentContextProjection]:
+        statement = select(AgentContextProjection).where(AgentContextProjection.run_id == run_id).order_by(
+            AgentContextProjection.created_at,
+            AgentContextProjection.id,
+        )
+        result = await self.session.scalars(statement)
+        return list(result.all())
 
     async def list_safety_events_for_run(self, *, run_id: UUID) -> list[AgentSafetyEvent]:
         statement = select(AgentSafetyEvent).where(AgentSafetyEvent.run_id == run_id).order_by(AgentSafetyEvent.created_at, AgentSafetyEvent.id)
