@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from ...modules.agent_runtime import models as agent_runtime_models
 from ...modules.audit import models as audit_models
 from ...modules.auth import models as auth_models
 from ...modules.diary import models as diary_models
@@ -14,6 +15,7 @@ from ...modules.users import models as users_models
 
 __all__ = [
     "audit_models",
+    "agent_runtime_models",
     "auth_models",
     "diary_models",
     "devices_models",

@@ -245,6 +245,12 @@ Acceptance:
 - A run can be created, cancelled, resumed, and replayed without model calls.
 - Event contract is typed and tested.
 
+Completed:
+
+- Agent runtime ledger data foundation: owner-scoped threads, runs, messages,
+  tool calls/outputs, events, artifacts, actions, and context checkpoints with
+  replay indexes and no provider session state columns.
+
 ### Phase 6: Agent Runtime Implementation
 
 Goal: implement production agent using LangGraph + OpenAI Agents SDK.
