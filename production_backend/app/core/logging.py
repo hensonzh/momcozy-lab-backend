@@ -8,6 +8,7 @@ from .settings import Settings
 
 
 HTTP_LOGGER_NAME = "production_backend.http"
+ERROR_LOGGER_NAME = "production_backend.errors"
 
 
 def configure_logging(settings: Settings) -> None:
@@ -37,6 +38,28 @@ def log_http_request(
                 "route": route,
                 "status_code": status_code,
                 "duration_ms": round(duration_ms, 3),
+            }
+        )
+    )
+
+
+def log_unhandled_exception(
+    *,
+    request_id: str,
+    method: str,
+    path: str,
+    route: str,
+    exception_type: str,
+) -> None:
+    logging.getLogger(ERROR_LOGGER_NAME).error(
+        _json_line(
+            {
+                "event": "http.unhandled_exception",
+                "request_id": request_id,
+                "method": method,
+                "path": path,
+                "route": route,
+                "exception_type": exception_type,
             }
         )
     )

@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import Query
 from fastapi.testclient import TestClient
 
@@ -70,7 +72,7 @@ def test_validation_error_does_not_echo_sensitive_input_values() -> None:
     assert all("input" not in item for item in error["details"]["errors"])
 
 
-def test_unhandled_error_hides_exception_text() -> None:
+def test_unhandled_error_hides_exception_text(caplog) -> None:
     app = create_app(Settings(app_env="test"))
 
     @app.get("/test/unhandled")
@@ -78,9 +80,14 @@ def test_unhandled_error_hides_exception_text() -> None:
         raise RuntimeError("database password leaked")
 
     client = TestClient(app, raise_server_exceptions=False)
-    response = client.get("/test/unhandled")
+    with caplog.at_level(logging.ERROR, logger="production_backend.errors"):
+        response = client.get("/test/unhandled", headers={"X-Request-ID": "req_unhandled"})
 
     assert response.status_code == 500
     assert response.json()["error"]["code"] == "internal_error"
     assert response.json()["error"]["message"] == "Internal server error."
     assert "database password leaked" not in response.text
+    assert "http.unhandled_exception" in caplog.text
+    assert "RuntimeError" in caplog.text
+    assert "req_unhandled" in caplog.text
+    assert "database password leaked" not in caplog.text

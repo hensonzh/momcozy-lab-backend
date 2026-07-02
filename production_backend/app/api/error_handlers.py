@@ -9,6 +9,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse, Response
 
 from ..core.errors import ApiError, ErrorEnvelope
+from ..core.logging import log_unhandled_exception
 
 
 ExceptionHandler = Callable[[Request, Exception], Response | Awaitable[Response]]
@@ -48,6 +49,13 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
 
 
 async def unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    log_unhandled_exception(
+        request_id=str(getattr(request.state, "request_id", "") or ""),
+        method=request.method,
+        path=request.url.path,
+        route=_route_path(request),
+        exception_type=type(exc).__name__,
+    )
     return _error_response(
         request,
         status=500,
@@ -73,6 +81,12 @@ def _error_response(
         details=details,
     )
     return JSONResponse(status_code=status, content=envelope.to_response_body(), headers={"X-Request-ID": request_id})
+
+
+def _route_path(request: Request) -> str:
+    route = request.scope.get("route")
+    path = getattr(route, "path", "")
+    return str(path or request.url.path)
 
 
 def _http_error_code(status_code: int) -> str:
