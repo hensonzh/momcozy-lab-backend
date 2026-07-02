@@ -6,7 +6,7 @@ import pytest
 
 from production_backend.app.core.errors import ApiError
 from production_backend.app.modules.audit.models import IdempotencyKey
-from production_backend.app.modules.audit.service import AuditService, IdempotencyService, request_hash
+from production_backend.app.modules.audit.service import AuditService, IdempotencyService, parse_idempotency_response_ref, request_hash
 
 
 def test_audit_service_records_actor_resource_and_request() -> None:
@@ -172,6 +172,26 @@ def test_idempotency_service_rejects_conflicting_request_hash() -> None:
 
 def test_request_hash_is_stable_for_equivalent_dicts() -> None:
     assert request_hash({"b": 2, "a": 1}) == request_hash({"a": 1, "b": 2})
+
+
+def test_parse_idempotency_response_ref_returns_uuid() -> None:
+    value = uuid4()
+
+    assert parse_idempotency_response_ref(str(value)) == value
+
+
+@pytest.mark.parametrize(
+    ("response_ref", "code"),
+    [
+        ("", "idempotency_in_progress"),
+        ("not-a-uuid", "conflict"),
+    ],
+)
+def test_parse_idempotency_response_ref_rejects_invalid_values(response_ref: str, code: str) -> None:
+    with pytest.raises(ApiError) as exc_info:
+        parse_idempotency_response_ref(response_ref)
+
+    assert exc_info.value.code == code
 
 
 def _expires_at() -> datetime:

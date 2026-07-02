@@ -5,7 +5,7 @@ from typing import Any
 from uuid import UUID
 
 from ...core.errors import ApiError
-from ..audit import IdempotencyKey, IdempotencyService, OutboxService, request_hash
+from ..audit import IdempotencyKey, IdempotencyService, OutboxService, parse_idempotency_response_ref, request_hash
 from .action_policy import AgentActionPolicy
 from .controls import AgentRunControls
 from .models import AgentAction, AgentEvent, AgentRun, AgentThread
@@ -439,7 +439,8 @@ class AgentRuntimeService:
             await self.idempotency_service.mark_completed(record=idempotency_record, response_ref=response_ref)
 
     async def _replay_run(self, *, owner_user_id: UUID, response_ref: str) -> AgentRun:
-        run = await self.repository.get_run_for_owner(run_id=UUID(response_ref), owner_user_id=owner_user_id)
+        run_id = parse_idempotency_response_ref(response_ref)
+        run = await self.repository.get_run_for_owner(run_id=run_id, owner_user_id=owner_user_id)
         if run is None:
             raise ApiError(code="conflict", message="Idempotency response resource is unavailable.", status=409)
         return run

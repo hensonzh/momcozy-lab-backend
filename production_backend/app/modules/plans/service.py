@@ -5,7 +5,7 @@ from typing import Any
 from uuid import UUID
 
 from ...core.errors import ApiError
-from ..audit import AuditService, IdempotencyKey, IdempotencyService, request_hash
+from ..audit import AuditService, IdempotencyKey, IdempotencyService, parse_idempotency_response_ref, request_hash
 from .models import Plan, PlanTask
 from .repository import PlansRepository
 
@@ -162,13 +162,15 @@ class PlansService:
             await self.idempotency_service.mark_completed(record=idempotency_record, response_ref=response_ref)
 
     async def _replay_plan(self, *, owner_user_id: UUID, response_ref: str) -> Plan:
-        plan = await self.repository.get_plan_for_owner(plan_id=UUID(response_ref), owner_user_id=owner_user_id)
+        plan_id = parse_idempotency_response_ref(response_ref)
+        plan = await self.repository.get_plan_for_owner(plan_id=plan_id, owner_user_id=owner_user_id)
         if plan is None:
             raise ApiError(code="conflict", message="Idempotency response resource is unavailable.", status=409)
         return plan
 
     async def _replay_task(self, *, owner_user_id: UUID, response_ref: str) -> PlanTask:
-        task = await self.repository.get_task_for_owner(task_id=UUID(response_ref), owner_user_id=owner_user_id)
+        task_id = parse_idempotency_response_ref(response_ref)
+        task = await self.repository.get_task_for_owner(task_id=task_id, owner_user_id=owner_user_id)
         if task is None:
             raise ApiError(code="conflict", message="Idempotency response resource is unavailable.", status=409)
         return task

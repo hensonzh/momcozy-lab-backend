@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 
 from ...core.errors import ApiError
 from ...infrastructure.object_storage import ObjectStorage
-from ..audit import AuditService, IdempotencyService, OutboxService, request_hash
+from ..audit import AuditService, IdempotencyService, OutboxService, parse_idempotency_response_ref, request_hash
 from .models import FileObject
 from .repository import FileRepository
 
@@ -174,13 +174,7 @@ class FileService:
             await self.idempotency_service.mark_completed(record=idempotency_record, response_ref=str(deleted.id))
 
     async def _replay_upload(self, *, owner_user_id: UUID, response_ref: str) -> FileObject:
-        if not response_ref:
-            raise ApiError(code="idempotency_in_progress", message="Request is still in progress.", status=409)
-        try:
-            file_id = UUID(response_ref)
-        except ValueError as exc:
-            raise ApiError(code="conflict", message="Idempotency response reference is invalid.", status=409) from exc
-
+        file_id = parse_idempotency_response_ref(response_ref)
         file_object = await self.repository.get_for_owner(file_id=file_id, owner_user_id=owner_user_id)
         if file_object is None:
             raise ApiError(code="conflict", message="Idempotency response resource is unavailable.", status=409)

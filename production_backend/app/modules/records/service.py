@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from ...core.errors import ApiError
-from ..audit import AuditService, IdempotencyService, request_hash
+from ..audit import AuditService, IdempotencyService, parse_idempotency_response_ref, request_hash
 from .models import FeedingRecord, GrowthRecord, PumpingRecord
 from .repository import RecordsRepository
 
@@ -326,36 +326,21 @@ class RecordsService:
             )
 
     async def _replay_feeding(self, *, owner_user_id: UUID, response_ref: str) -> FeedingRecord:
-        if not response_ref:
-            raise ApiError(code="idempotency_in_progress", message="Request is still in progress.", status=409)
-        try:
-            record_id = UUID(response_ref)
-        except ValueError as exc:
-            raise ApiError(code="conflict", message="Idempotency response reference is invalid.", status=409) from exc
+        record_id = parse_idempotency_response_ref(response_ref)
         record = await self.repository.get_feeding_for_owner(record_id=record_id, owner_user_id=owner_user_id)
         if record is None:
             raise ApiError(code="conflict", message="Idempotency response resource is unavailable.", status=409)
         return record
 
     async def _replay_pumping(self, *, owner_user_id: UUID, response_ref: str) -> PumpingRecord:
-        if not response_ref:
-            raise ApiError(code="idempotency_in_progress", message="Request is still in progress.", status=409)
-        try:
-            record_id = UUID(response_ref)
-        except ValueError as exc:
-            raise ApiError(code="conflict", message="Idempotency response reference is invalid.", status=409) from exc
+        record_id = parse_idempotency_response_ref(response_ref)
         record = await self.repository.get_pumping_for_owner(record_id=record_id, owner_user_id=owner_user_id)
         if record is None:
             raise ApiError(code="conflict", message="Idempotency response resource is unavailable.", status=409)
         return record
 
     async def _replay_growth(self, *, owner_user_id: UUID, response_ref: str) -> GrowthRecord:
-        if not response_ref:
-            raise ApiError(code="idempotency_in_progress", message="Request is still in progress.", status=409)
-        try:
-            record_id = UUID(response_ref)
-        except ValueError as exc:
-            raise ApiError(code="conflict", message="Idempotency response reference is invalid.", status=409) from exc
+        record_id = parse_idempotency_response_ref(response_ref)
         record = await self.repository.get_growth_for_owner(record_id=record_id, owner_user_id=owner_user_id)
         if record is None:
             raise ApiError(code="conflict", message="Idempotency response resource is unavailable.", status=409)

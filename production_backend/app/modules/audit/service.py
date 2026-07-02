@@ -104,6 +104,15 @@ def request_hash(payload: Any) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def parse_idempotency_response_ref(response_ref: str) -> UUID:
+    if not response_ref:
+        raise ApiError(code="idempotency_in_progress", message="Request is still in progress.", status=409)
+    try:
+        return UUID(response_ref)
+    except ValueError as exc:
+        raise ApiError(code="conflict", message="Idempotency response reference is invalid.", status=409) from exc
+
+
 def _is_expired(expires_at: datetime) -> bool:
     now = datetime.now(timezone.utc)
     comparable_expires_at = expires_at

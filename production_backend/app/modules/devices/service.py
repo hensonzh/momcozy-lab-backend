@@ -5,7 +5,7 @@ from typing import Any
 from uuid import UUID
 
 from ...core.errors import ApiError
-from ..audit import AuditService, IdempotencyService, request_hash
+from ..audit import AuditService, IdempotencyService, parse_idempotency_response_ref, request_hash
 from .models import PumpDevice, PumpTelemetryEvent
 from .repository import DevicesRepository
 
@@ -134,9 +134,8 @@ class DevicesService:
         )
 
     async def _replay_event(self, *, owner_user_id: UUID, response_ref: str) -> PumpTelemetryEvent:
-        if not response_ref:
-            raise ApiError(code="idempotency_in_progress", message="Request is still in progress.", status=409)
-        event = await self.repository.get_telemetry_event_for_owner(owner_user_id=owner_user_id, event_id=UUID(response_ref))
+        event_id = parse_idempotency_response_ref(response_ref)
+        event = await self.repository.get_telemetry_event_for_owner(owner_user_id=owner_user_id, event_id=event_id)
         if event is None:
             raise ApiError(code="conflict", message="Idempotency response resource is unavailable.", status=409)
         return event

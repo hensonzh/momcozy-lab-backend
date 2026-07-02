@@ -5,7 +5,7 @@ from typing import Any
 from uuid import UUID
 
 from ...core.errors import ApiError
-from ..audit import AuditService, IdempotencyService, request_hash
+from ..audit import AuditService, IdempotencyService, parse_idempotency_response_ref, request_hash
 from .models import InfantProfile, UserProfile
 from .repository import ProfileRepository
 
@@ -102,12 +102,7 @@ class ProfileService:
         return infant
 
     async def _replay_create_infant(self, *, owner_user_id: UUID, response_ref: str) -> InfantProfile:
-        if not response_ref:
-            raise ApiError(code="idempotency_in_progress", message="Request is still in progress.", status=409)
-        try:
-            infant_id = UUID(response_ref)
-        except ValueError as exc:
-            raise ApiError(code="conflict", message="Idempotency response reference is invalid.", status=409) from exc
+        infant_id = parse_idempotency_response_ref(response_ref)
         infant = await self.repository.get_infant_for_owner(infant_id=infant_id, owner_user_id=owner_user_id)
         if infant is None:
             raise ApiError(code="conflict", message="Idempotency response resource is unavailable.", status=409)

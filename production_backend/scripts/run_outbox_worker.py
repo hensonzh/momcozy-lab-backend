@@ -15,7 +15,8 @@ from production_backend.app.modules.agent_runtime.events import AgentEventSink
 from production_backend.app.modules.agent_runtime.repository import AgentRuntimeRepository
 from production_backend.app.modules.audit import AuditService, IdempotencyService, OutboxService
 from production_backend.app.modules.audit.repository import AuditRepository, OutboxRepository
-from production_backend.app.modules.support import SUPPORT_TICKET_CREATE_ACTION, SupportTicketCreateActionHandler, SupportTicketsService
+from production_backend.app.modules.support import SupportTicketsService
+from production_backend.app.modules.support.agent_actions import SUPPORT_TICKET_CREATE_ACTION, SupportTicketCreateActionHandler
 from production_backend.app.modules.support.repository import SupportTicketsRepository
 from production_backend.app.workers.outbox import OutboxWorker
 from production_backend.app.workers.registry import build_outbox_handlers

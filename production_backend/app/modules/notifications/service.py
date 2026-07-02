@@ -5,7 +5,7 @@ from typing import Any
 from uuid import UUID
 
 from ...core.errors import ApiError
-from ..audit import AuditService, IdempotencyKey, IdempotencyService, request_hash
+from ..audit import AuditService, IdempotencyKey, IdempotencyService, parse_idempotency_response_ref, request_hash
 from .models import Notification
 from .repository import NotificationsRepository
 
@@ -153,7 +153,8 @@ class NotificationsService:
             await self.idempotency_service.mark_completed(record=idempotency_record, response_ref=response_ref)
 
     async def _replay_notification(self, *, owner_user_id: UUID, response_ref: str) -> Notification:
-        notification = await self.repository.get_for_owner(notification_id=UUID(response_ref), owner_user_id=owner_user_id)
+        notification_id = parse_idempotency_response_ref(response_ref)
+        notification = await self.repository.get_for_owner(notification_id=notification_id, owner_user_id=owner_user_id)
         if notification is None:
             raise ApiError(code="conflict", message="Idempotency response resource is unavailable.", status=409)
         return notification

@@ -6,7 +6,7 @@ from typing import Any
 from uuid import UUID
 
 from ...core.errors import ApiError
-from ..audit import AuditService, IdempotencyKey, IdempotencyService, request_hash
+from ..audit import AuditService, IdempotencyKey, IdempotencyService, parse_idempotency_response_ref, request_hash
 from .models import SupportTicket
 from .repository import SupportTicketsRepository
 
@@ -124,7 +124,8 @@ class SupportTicketsService:
             await self.idempotency_service.mark_completed(record=idempotency_record, response_ref=response_ref)
 
     async def _replay_ticket(self, *, owner_user_id: UUID, response_ref: str) -> SupportTicket:
-        ticket = await self.repository.get_for_owner(ticket_id=UUID(response_ref), owner_user_id=owner_user_id)
+        ticket_id = parse_idempotency_response_ref(response_ref)
+        ticket = await self.repository.get_for_owner(ticket_id=ticket_id, owner_user_id=owner_user_id)
         if ticket is None:
             raise ApiError(code="conflict", message="Idempotency response resource is unavailable.", status=409)
         return ticket
