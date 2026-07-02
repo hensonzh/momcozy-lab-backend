@@ -85,3 +85,11 @@ def test_compose_exposes_outbox_worker_as_optional_worker_profile() -> None:
     assert "outbox-worker:" in compose
     assert "python -m production_backend.scripts.run_outbox_worker" in compose
     assert "workers" in compose
+
+
+def test_outbox_worker_waits_for_redis_because_agent_events_use_stream_cursor() -> None:
+    compose = (PRODUCTION_BACKEND / "docker-compose.yml").read_text()
+    outbox_worker_section = compose.split("outbox-worker:", maxsplit=1)[1].split("\n  postgres:", maxsplit=1)[0]
+
+    assert "redis:" in outbox_worker_section
+    assert "condition: service_healthy" in outbox_worker_section
