@@ -17,7 +17,16 @@ from .contracts import ToolContract
 from .registry import ToolContractRegistry
 
 
-ToolHandler = Callable[[CurrentUser, dict[str, Any]], Awaitable[dict[str, Any]] | dict[str, Any]]
+@dataclass(frozen=True)
+class ToolHandlerContext:
+    actor: CurrentUser
+    run_id: UUID
+    tool_name: str
+    call_id: str
+    args: dict[str, Any]
+
+
+ToolHandler = Callable[[ToolHandlerContext], Awaitable[dict[str, Any]] | dict[str, Any]]
 
 
 @dataclass(frozen=True)
@@ -67,7 +76,20 @@ class ToolExecutor:
                 safe_args=_safe_payload(args),
                 started_at=_utcnow(),
             )
-            result = await asyncio.wait_for(_maybe_await(handler(actor, args)), timeout=contract.timeout_seconds)
+            result = await asyncio.wait_for(
+                _maybe_await(
+                    handler(
+                        ToolHandlerContext(
+                            actor=actor,
+                            run_id=run_id,
+                            tool_name=tool_name,
+                            call_id=call_id,
+                            args=args,
+                        )
+                    )
+                ),
+                timeout=contract.timeout_seconds,
+            )
         except ApiError as exc:
             if tool_call is not None:
                 await self.repository.fail_tool_call(tool_call=tool_call, completed_at=_utcnow(), error_code=exc.code)

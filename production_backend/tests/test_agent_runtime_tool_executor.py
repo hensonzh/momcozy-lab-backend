@@ -6,7 +6,7 @@ import pytest
 from production_backend.app.core.errors import ApiError
 from production_backend.app.core.metrics import RequestMetrics
 from production_backend.app.modules.agent_runtime.models import AgentToolCall
-from production_backend.app.modules.agent_runtime.tools import ToolExecutor, default_tool_registry
+from production_backend.app.modules.agent_runtime.tools import ToolExecutor, ToolHandlerContext, default_tool_registry
 from production_backend.app.modules.auth import CurrentUser
 
 
@@ -144,11 +144,11 @@ def test_tool_executor_records_success_and_authorization_failure_metrics() -> No
     assert tool_metrics["error_code_counts"]["permission_denied"] == 1
 
 
-async def profile_read_handler(actor: CurrentUser, args: dict):
+async def profile_read_handler(context: ToolHandlerContext):
     return {"profile": {"name": "Mai"}, "session_token": "secret-token"}
 
 
-async def failing_handler(actor: CurrentUser, args: dict):
+async def failing_handler(context: ToolHandlerContext):
     raise ApiError(code="dependency_failed", message="Profile service unavailable.", status=503)
 
 
