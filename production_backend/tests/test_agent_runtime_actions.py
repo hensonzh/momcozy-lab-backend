@@ -65,6 +65,23 @@ def test_agent_runtime_actions_reject_confirmation_required_action() -> None:
     assert repository.events[-1].event_type == "action.rejected"
 
 
+def test_agent_runtime_actions_generate_action_idempotency_key_for_confirmation() -> None:
+    owner_user_id = uuid4()
+    repository = FakeActionRepository()
+    outbox_service = FakeOutboxService()
+    service = AgentRuntimeService(repository=repository, outbox_service=outbox_service)
+    run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Create ticket"))
+    action = asyncio.run(
+        service.propose_action(owner_user_id=owner_user_id, run_id=run.id, action_type="support.ticket.create")
+    )
+
+    confirmed = asyncio.run(service.confirm_action(owner_user_id=owner_user_id, action_id=action.id))
+
+    generated_key = f"agent-action:{action.id}"
+    assert confirmed.idempotency_key == generated_key
+    assert outbox_service.enqueue_kwargs["idempotency_key"] == generated_key
+
+
 def test_agent_runtime_actions_reject_unsupported_action_type_before_persisting() -> None:
     owner_user_id = uuid4()
     repository = FakeActionRepository()

@@ -248,11 +248,12 @@ class AgentRuntimeService:
             raise ApiError(code="conflict", message="Agent action cannot be confirmed from its current status.", status=409)
         if self.outbox_service is None:
             raise ApiError(code="outbox_not_configured", message="Agent action outbox is not configured.", status=500)
+        action_idempotency_key = _normalize_text(idempotency_key, max_length=255) or f"agent-action:{action.id}"
         confirmed = await self.repository.mark_action_confirmed(
             action=action,
             confirmed_at=_utcnow(),
             apply_payload=edited_apply_payload,
-            idempotency_key=_normalize_text(idempotency_key, max_length=255),
+            idempotency_key=action_idempotency_key,
         )
         run = await self.get_run(owner_user_id=owner_user_id, run_id=confirmed.run_id)
         outbox_job = await self.outbox_service.enqueue(
@@ -266,7 +267,7 @@ class AgentRuntimeService:
                 "target_id": confirmed.target_id,
                 "apply_payload": confirmed.apply_payload,
             },
-            idempotency_key=confirmed.idempotency_key or f"agent-action:{confirmed.id}",
+            idempotency_key=confirmed.idempotency_key,
             action_id=confirmed.id,
             request_id=run.request_id,
             trace_id=run.trace_id,

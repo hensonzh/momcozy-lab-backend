@@ -361,6 +361,9 @@ Completed:
 - SDK action proposal cardinality guard: each run accepts at most one action
   proposal, validated before artifacts or actions are persisted, so the runtime
   never silently drops extra model-proposed side effects.
+- Agent action idempotency alignment: confirmation without an explicit
+  idempotency key now persists the generated `agent-action:{action_id}` key on
+  both the action and outbox job.
 
 ### Phase 7: Safety, Observability, And Eval
 
@@ -483,6 +486,8 @@ Completed backend commits have established:
 - SDK artifact persistence with replayable `artifact.created` events
 - single-action proposal guard that rejects ambiguous multi-action SDK results
   before persistence
+- generated action idempotency keys stored consistently on confirmed actions and
+  outbox jobs
 - OpenAPI schema export script, generated schema snapshot, and API handoff
   document for Flutter integration
 - Auth/token API contract tests for token response shape, validation envelope,
