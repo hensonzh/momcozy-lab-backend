@@ -1,12 +1,27 @@
 from __future__ import annotations
 
 import importlib
+import json
+import re
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from time import perf_counter
 from typing import Any, Protocol
 
 from ....core.metrics import RequestMetrics
 from ....core.errors import ApiError
+
+
+SdkToolInvoker = Callable[[str], Awaitable[str]]
+
+
+@dataclass(frozen=True)
+class SdkToolDefinition:
+    contract_name: str
+    sdk_name: str
+    description: str
+    params_json_schema: dict[str, Any]
+    invoke_json: SdkToolInvoker
 
 
 @dataclass(frozen=True)
@@ -17,6 +32,7 @@ class SdkNodeRequest:
     instructions: str
     model_input: list[dict[str, Any]]
     tool_names: tuple[str, ...] = ()
+    tools: tuple[SdkToolDefinition, ...] = ()
     trace_id: str = ""
 
 
@@ -49,7 +65,12 @@ class OpenAIAgentsSdkBackend:
         if agent_cls is None or runner_cls is None:
             raise ApiError(code="dependency_not_configured", message="OpenAI Agents SDK Agent/Runner is unavailable.", status=503)
 
-        agent = agent_cls(name="MomCozy assistant", instructions=request.instructions, model=self.model)
+        agent = agent_cls(
+            name="MomCozy assistant",
+            instructions=request.instructions,
+            model=self.model,
+            tools=tuple(_build_function_tool(agents_module=agents_module, definition=definition) for definition in request.tools),
+        )
         result = await runner_cls.run(agent, _flatten_model_input(request.model_input))
         final_output = getattr(result, "final_output", "")
         return SdkNodeResult(final_text=str(final_output or ""))
@@ -98,3 +119,30 @@ def _stringify_content(content: object) -> str:
     if isinstance(content, str):
         return content
     return str(content)
+
+
+def sdk_tool_name(contract_name: str) -> str:
+    normalized = re.sub(r"[^a-zA-Z0-9_-]+", "_", contract_name).strip("_")
+    return normalized or "tool"
+
+
+def _build_function_tool(*, agents_module: Any, definition: SdkToolDefinition) -> Any:
+    function_tool_cls = getattr(agents_module, "FunctionTool", None)
+    if function_tool_cls is None:
+        raise ApiError(code="dependency_not_configured", message="OpenAI Agents SDK FunctionTool is unavailable.", status=503)
+
+    async def invoke_tool(_ctx: Any, args: str) -> str:
+        try:
+            return await definition.invoke_json(args)
+        except ApiError as exc:
+            return json.dumps(
+                {"error": {"code": exc.code, "message": "Tool call was rejected by application policy."}},
+                sort_keys=True,
+            )
+
+    return function_tool_cls(
+        name=definition.sdk_name,
+        description=definition.description,
+        params_json_schema=definition.params_json_schema,
+        on_invoke_tool=invoke_tool,
+    )

@@ -1,16 +1,19 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any
+from uuid import uuid4
 
 from ...core.errors import ApiError
+from ..auth import CurrentUser
 from .execution import AgentRunExecutionResult
 from .graphs import AgentGraphCheckpointStore, AgentGraphRegistry, default_graph_registry
 from .models import AgentAction, AgentMessage, AgentRun
 from .prompts import ContextProjection, ModelInputBuilder
 from .repository import AgentRuntimeRepository
-from .sdk import OpenAIAgentsSdkRunner, SdkNodeRequest
-from .tools import ToolContractRegistry, default_tool_registry
+from .sdk import OpenAIAgentsSdkRunner, SdkNodeRequest, SdkToolDefinition, sdk_tool_name
+from .tools import ToolContractRegistry, ToolExecutor, default_tool_registry
 
 
 @dataclass(frozen=True)
@@ -35,6 +38,7 @@ class AgentRuntimeExecutor:
         graph_registry: AgentGraphRegistry | None = None,
         checkpoint_store: AgentGraphCheckpointStore | None = None,
         tool_registry: ToolContractRegistry | None = None,
+        tool_executor: ToolExecutor | None = None,
         input_builder: ModelInputBuilder | None = None,
         config: AgentRuntimeExecutorConfig | None = None,
     ) -> None:
@@ -43,6 +47,7 @@ class AgentRuntimeExecutor:
         self.graph_registry = graph_registry or default_graph_registry()
         self.checkpoint_store = checkpoint_store
         self.tool_registry = tool_registry or default_tool_registry()
+        self.tool_executor = tool_executor
         self.input_builder = input_builder or ModelInputBuilder()
         self.config = config or AgentRuntimeExecutorConfig()
 
@@ -95,6 +100,7 @@ class AgentRuntimeExecutor:
                 instructions=projection.stable_developer_prompt,
                 model_input=model_input,
                 tool_names=self.tool_registry.names_for_sdk(),
+                tools=self._sdk_tools(run=run),
                 trace_id=run.trace_id,
             )
         )
@@ -118,6 +124,9 @@ class AgentRuntimeExecutor:
                 },
             )
             return AgentRunExecutionResult(status="waiting_for_confirmation", pending_action_id=action.id)
+        pending_action = await self._pending_confirmation_action_from_tool(run=run, current_user_message_id=str(current_message.id))
+        if pending_action is not None:
+            return AgentRunExecutionResult(status="waiting_for_confirmation", pending_action_id=pending_action.id)
         final_text = result.final_text.strip()
         if not final_text:
             raise ApiError(code="empty_agent_response", message="Agent runtime returned an empty response.", status=502)
@@ -149,6 +158,58 @@ class AgentRuntimeExecutor:
             idempotency_key=_text(proposal, "idempotency_key"),
             expires_at=None,
         )
+
+    def _sdk_tools(self, *, run: AgentRun) -> tuple[SdkToolDefinition, ...]:
+        if self.tool_executor is None:
+            return ()
+        return tuple(self._sdk_tool_definition(run=run, tool_name=tool_name) for tool_name in self.tool_registry.names_for_sdk())
+
+    def _sdk_tool_definition(self, *, run: AgentRun, tool_name: str) -> SdkToolDefinition:
+        contract = self.tool_registry.get(tool_name)
+        sdk_name = sdk_tool_name(contract.name)
+
+        async def invoke_json(args_json: str) -> str:
+            return await self._invoke_sdk_tool(run=run, contract_name=contract.name, sdk_name=sdk_name, args_json=args_json)
+
+        return SdkToolDefinition(
+            contract_name=contract.name,
+            sdk_name=sdk_name,
+            description=contract.description,
+            params_json_schema=_tool_params_schema(contract.input_schema_ref),
+            invoke_json=invoke_json,
+        )
+
+    async def _invoke_sdk_tool(self, *, run: AgentRun, contract_name: str, sdk_name: str, args_json: str) -> str:
+        if self.tool_executor is None:
+            raise ApiError(code="unsupported_operation", message="Tool executor is not configured.", status=501)
+        args = _json_object(args_json)
+        result = await self.tool_executor.execute(
+            actor=_run_actor(run),
+            run_id=run.id,
+            tool_name=contract_name,
+            call_id=f"sdk-{sdk_name}-{uuid4().hex}",
+            args=args,
+        )
+        return json.dumps(result.safe_output, sort_keys=True)
+
+    async def _pending_confirmation_action_from_tool(self, *, run: AgentRun, current_user_message_id: str) -> AgentAction | None:
+        if self.tool_executor is None:
+            return None
+        actions = await self.repository.list_actions_for_run(run_id=run.id)
+        pending_action = next((action for action in reversed(actions) if action.status == "confirmation_required"), None)
+        if pending_action is None:
+            return None
+        await self._save_checkpoint(
+            run=run,
+            node_name="confirmation_interrupt",
+            current_user_message_id=current_user_message_id,
+            state_summary={
+                "context_refs": [],
+                "pending_action_id": str(pending_action.id),
+                "final_message_id": None,
+            },
+        )
+        return pending_action
 
     async def _save_checkpoint(
         self,
@@ -203,3 +264,33 @@ def _text(payload: dict[str, Any], key: str) -> str:
 def _dict(payload: dict[str, Any], key: str) -> dict[str, Any]:
     value = payload.get(key)
     return dict(value) if isinstance(value, dict) else {}
+
+
+def _tool_params_schema(title: str) -> dict[str, Any]:
+    return {
+        "title": title,
+        "type": "object",
+        "additionalProperties": True,
+        "properties": {},
+    }
+
+
+def _json_object(raw: str) -> dict[str, Any]:
+    try:
+        parsed = json.loads(raw or "{}")
+    except json.JSONDecodeError as exc:
+        raise ApiError(code="validation_failed", message="Tool arguments must be valid JSON.", status=422) from exc
+    if not isinstance(parsed, dict):
+        raise ApiError(code="validation_failed", message="Tool arguments must be a JSON object.", status=422)
+    return parsed
+
+
+def _run_actor(run: AgentRun) -> CurrentUser:
+    return CurrentUser(
+        user_id=run.actor_user_id,
+        subject=str(run.actor_user_id),
+        session_id="",
+        token_id="",
+        roles=frozenset({"user"}),
+        permissions=frozenset(),
+    )

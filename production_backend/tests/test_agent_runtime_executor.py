@@ -73,6 +73,31 @@ def test_agent_runtime_executor_rejects_empty_sdk_response() -> None:
     assert exc_info.value.code == "empty_agent_response"
 
 
+def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="Read my profile", sequence=1)
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    tool_executor = FakeToolExecutor(safe_output={"profile": {"display_name": "Mai"}})
+    backend = InvokingSdkBackend()
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            tool_executor=tool_executor,
+        ).execute(run=run)
+    )
+
+    assert result.status == "completed"
+    assert result.final_text == '{"profile": {"display_name": "Mai"}}'
+    assert backend.tool_names == ("profile_read", "support_ticket_propose")
+    assert tool_executor.calls[0]["actor"].user_id == run.actor_user_id
+    assert tool_executor.calls[0]["run_id"] == run.id
+    assert tool_executor.calls[0]["tool_name"] == "profile.read"
+    assert tool_executor.calls[0]["args"] == {"owner_user_id": str(run.actor_user_id)}
+
+
 def test_agent_runtime_executor_persists_sdk_action_proposal_and_waits_for_confirmation() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)
@@ -171,6 +196,9 @@ class FakeRuntimeRepository:
         self.events.append(event)
         return event
 
+    async def list_actions_for_run(self, *, run_id):
+        return [action for action in self.actions if action.run_id == run_id]
+
 
 class FakeCheckpointStore:
     def __init__(self) -> None:
@@ -178,6 +206,31 @@ class FakeCheckpointStore:
 
     async def save_run_checkpoint(self, **kwargs):
         self.checkpoints.append(kwargs)
+
+
+class FakeToolExecutor:
+    def __init__(self, *, safe_output):
+        self.safe_output = safe_output
+        self.calls = []
+
+    async def execute(self, **kwargs):
+        self.calls.append(kwargs)
+        return FakeToolExecutionResult(safe_output=self.safe_output)
+
+
+class FakeToolExecutionResult:
+    def __init__(self, *, safe_output):
+        self.safe_output = safe_output
+
+
+class InvokingSdkBackend:
+    def __init__(self) -> None:
+        self.tool_names = ()
+
+    async def run(self, request: SdkNodeRequest) -> SdkNodeResult:
+        self.tool_names = tuple(tool.sdk_name for tool in request.tools)
+        output = await request.tools[0].invoke_json(f'{{"owner_user_id": "{request.actor_user_id}"}}')
+        return SdkNodeResult(final_text=output)
 
 
 def _run(*, thread_id) -> AgentRun:

@@ -12,7 +12,14 @@ from production_backend.app.modules.agent_runtime.controls import AgentRunContro
 from production_backend.app.modules.agent_runtime.graphs import AgentGraphCheckpointStore
 from production_backend.app.modules.agent_runtime.repository import AgentRuntimeRepository
 from production_backend.app.modules.agent_runtime.runtime import AgentRuntimeExecutor
+from production_backend.app.modules.agent_runtime.safety import AgentSafetyService
 from production_backend.app.modules.agent_runtime.sdk import OpenAIAgentsSdkRunner
+from production_backend.app.modules.agent_runtime.service import AgentRuntimeService
+from production_backend.app.modules.agent_runtime.tools import ToolExecutor, build_default_tool_handlers, default_tool_registry
+from production_backend.app.modules.audit import AuditService, IdempotencyService, OutboxService
+from production_backend.app.modules.audit.repository import AuditRepository, OutboxRepository
+from production_backend.app.modules.profiles.repository import ProfileRepository
+from production_backend.app.modules.profiles.service import ProfileService
 from production_backend.app.workers.agent_run import AgentRunQueueWorker, AgentRunWorker
 
 
@@ -36,9 +43,33 @@ async def run_agent_worker(
         while True:
             async with session_factory() as session:
                 repository = AgentRuntimeRepository(session)
+                audit_repository = AuditRepository(session)
+                agent_runtime_service = AgentRuntimeService(
+                    repository=repository,
+                    idempotency_service=IdempotencyService(repository=audit_repository),
+                    outbox_service=OutboxService(repository=OutboxRepository(session)),
+                    controls=controls,
+                    safety_service=AgentSafetyService(repository=repository),
+                )
+                profile_service = ProfileService(
+                    repository=ProfileRepository(session),
+                    audit_service=AuditService(repository=audit_repository),
+                    idempotency_service=IdempotencyService(repository=audit_repository),
+                )
+                tool_registry = default_tool_registry()
+                tool_executor = ToolExecutor(
+                    registry=tool_registry,
+                    repository=repository,
+                    handlers=build_default_tool_handlers(
+                        profile_service=profile_service,
+                        agent_runtime_service=agent_runtime_service,
+                    ),
+                )
                 handler = AgentRuntimeExecutor(
                     repository=repository,
                     checkpoint_store=AgentGraphCheckpointStore(repository=repository),
+                    tool_registry=tool_registry,
+                    tool_executor=tool_executor,
                     sdk_runner=OpenAIAgentsSdkRunner(model=resolved_settings.openai_model),
                 )
                 worker = AgentRunQueueWorker(

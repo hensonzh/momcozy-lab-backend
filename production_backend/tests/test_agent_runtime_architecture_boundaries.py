@@ -9,7 +9,7 @@ from production_backend.app.core.errors import ApiError
 from production_backend.app.core.metrics import RequestMetrics
 from production_backend.app.modules.agent_runtime.graphs import default_graph_registry
 from production_backend.app.modules.agent_runtime.prompts import ContextProjection, ModelInputBuilder
-from production_backend.app.modules.agent_runtime.sdk import OpenAIAgentsSdkRunner, SdkNodeRequest, SdkNodeResult
+from production_backend.app.modules.agent_runtime.sdk import OpenAIAgentsSdkRunner, SdkNodeRequest, SdkNodeResult, SdkToolDefinition, sdk_tool_name
 from production_backend.app.modules.agent_runtime.tools import default_tool_registry
 
 
@@ -84,6 +84,7 @@ def test_sdk_runner_uses_real_agents_sdk_shape_when_package_is_available(monkeyp
     fake_agents = types.ModuleType("agents")
     fake_agents.__spec__ = ModuleSpec("agents", loader=None)
     fake_agents.Agent = FakeAgentsSdkAgent
+    fake_agents.FunctionTool = FakeAgentsSdkFunctionTool
     fake_agents.Runner = FakeAgentsSdkRunner
     monkeypatch.setitem(sys.modules, "agents", fake_agents)
     request = SdkNodeRequest(
@@ -100,6 +101,41 @@ def test_sdk_runner_uses_real_agents_sdk_shape_when_package_is_available(monkeyp
     assert FakeAgentsSdkAgent.created["model"] == "gpt-test"
     assert FakeAgentsSdkAgent.created["instructions"] == "Be concise."
     assert FakeAgentsSdkRunner.last_input == "user: hello"
+
+
+def test_sdk_runner_wraps_application_tool_executor_for_agents_sdk(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_agents = types.ModuleType("agents")
+    fake_agents.__spec__ = ModuleSpec("agents", loader=None)
+    fake_agents.Agent = FakeAgentsSdkAgent
+    fake_agents.FunctionTool = FakeAgentsSdkFunctionTool
+    fake_agents.Runner = ToolCallingAgentsSdkRunner
+    monkeypatch.setitem(sys.modules, "agents", fake_agents)
+
+    async def invoke_json(args_json: str) -> str:
+        return f"tool-output:{args_json}"
+
+    request = SdkNodeRequest(
+        run_id="run_1",
+        thread_id="thread_1",
+        actor_user_id="user_1",
+        instructions="Use tools.",
+        model_input=[{"role": "user", "content": "read profile"}],
+        tools=(
+            SdkToolDefinition(
+                contract_name="profile.read",
+                sdk_name=sdk_tool_name("profile.read"),
+                description="Read profile.",
+                params_json_schema={"type": "object", "properties": {}},
+                invoke_json=invoke_json,
+            ),
+        ),
+    )
+
+    result = asyncio.run(OpenAIAgentsSdkRunner(model="gpt-test").run_reasoning(request))
+
+    assert result.final_text == 'tool-output:{"owner_user_id": "user_1"}'
+    assert FakeAgentsSdkAgent.created["tools"][0].name == "profile_read"
+    assert FakeAgentsSdkAgent.created["tools"][0].params_json_schema == {"type": "object", "properties": {}}
 
 
 def test_sdk_runner_records_backend_metrics() -> None:
@@ -132,11 +168,20 @@ class FakeSdkBackend:
 class FakeAgentsSdkAgent:
     created = {}
 
-    def __init__(self, *, name: str, instructions: str, model: str) -> None:
+    def __init__(self, *, name: str, instructions: str, model: str, tools=()) -> None:
         self.name = name
         self.instructions = instructions
         self.model = model
-        FakeAgentsSdkAgent.created = {"name": name, "instructions": instructions, "model": model}
+        self.tools = tools
+        FakeAgentsSdkAgent.created = {"name": name, "instructions": instructions, "model": model, "tools": tools}
+
+
+class FakeAgentsSdkFunctionTool:
+    def __init__(self, *, name: str, description: str, params_json_schema: dict, on_invoke_tool) -> None:
+        self.name = name
+        self.description = description
+        self.params_json_schema = params_json_schema
+        self.on_invoke_tool = on_invoke_tool
 
 
 class FakeAgentsSdkRunner:
@@ -146,6 +191,13 @@ class FakeAgentsSdkRunner:
     async def run(agent: FakeAgentsSdkAgent, input: str):
         FakeAgentsSdkRunner.last_input = input
         return FakeAgentsSdkResult(final_output="sdk final")
+
+
+class ToolCallingAgentsSdkRunner:
+    @staticmethod
+    async def run(agent: FakeAgentsSdkAgent, input: str):
+        output = await agent.tools[0].on_invoke_tool(None, '{"owner_user_id": "user_1"}')
+        return FakeAgentsSdkResult(final_output=output)
 
 
 class FakeAgentsSdkResult:
