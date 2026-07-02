@@ -7,7 +7,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import AgentAction, AgentEvent, AgentMessage, AgentRun, AgentThread
+from .models import AgentAction, AgentEvent, AgentMessage, AgentRun, AgentThread, AgentToolCall, AgentToolOutput
 
 
 class AgentRuntimeRepository:
@@ -207,6 +207,64 @@ class AgentRuntimeRepository:
         action.error_code = error_code
         await self.session.flush()
         return action
+
+    async def start_tool_call(
+        self,
+        *,
+        run_id: UUID,
+        tool_name: str,
+        call_id: str,
+        safe_args: dict[str, Any],
+        started_at: datetime,
+    ) -> AgentToolCall:
+        tool_call = AgentToolCall(
+            run_id=run_id,
+            tool_name=tool_name,
+            call_id=call_id,
+            status="started",
+            safe_args=safe_args,
+            started_at=started_at,
+        )
+        self.session.add(tool_call)
+        await self.session.flush()
+        return tool_call
+
+    async def complete_tool_call(
+        self,
+        *,
+        tool_call: AgentToolCall,
+        completed_at: datetime,
+    ) -> AgentToolCall:
+        tool_call.status = "completed"
+        tool_call.completed_at = completed_at
+        tool_call.error_code = ""
+        await self.session.flush()
+        return tool_call
+
+    async def fail_tool_call(
+        self,
+        *,
+        tool_call: AgentToolCall,
+        completed_at: datetime,
+        error_code: str,
+    ) -> AgentToolCall:
+        tool_call.status = "failed"
+        tool_call.completed_at = completed_at
+        tool_call.error_code = error_code
+        await self.session.flush()
+        return tool_call
+
+    async def create_tool_output(
+        self,
+        *,
+        tool_call_id: UUID,
+        safe_output: dict[str, Any],
+        raw_output_ref: str = "",
+    ) -> AgentToolOutput:
+        output = AgentToolOutput(tool_call_id=tool_call_id, safe_output=safe_output, raw_output_ref=raw_output_ref)
+        self.session.add(output)
+        await self.session.flush()
+        return output
 
     async def mark_run_cancelled(
         self,

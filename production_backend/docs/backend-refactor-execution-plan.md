@@ -296,6 +296,9 @@ Completed:
 - Agent action manager foundation: owner-scoped action read/confirm/reject,
   `confirmation_required -> confirmed` transition, `action.queued` event with
   `outbox_status=queued`, and no `queued` action status.
+- Tool executor foundation: contract lookup, permission and actor owner-scope
+  enforcement, safe args/result redaction, persisted tool call/output, and
+  structured failure mapping.
 
 ### Phase 7: Safety, Observability, And Eval
 
