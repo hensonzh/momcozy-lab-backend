@@ -42,6 +42,23 @@ environment variables, not code changes:
 Use `production_backend/.env.example` as the local template. Secrets stay out of
 git, and production startup rejects local object storage.
 
+## Local Docker Compose
+
+The isolated backend can run with local Postgres, Redis, and filesystem-backed
+object storage:
+
+```bash
+cd production_backend
+docker compose --profile tools run --rm migrate
+docker compose up api
+```
+
+`docker-compose.yml` reads `compose.env.example`, which intentionally points to
+compose service hostnames such as `postgres` and `redis`. Production deployments
+should provide managed `DATABASE_URL`, `REDIS_URL`, and managed
+`OBJECT_STORAGE_*` values through environment variables; no code change is
+required to switch providers.
+
 ## Target Shape
 
 ```text

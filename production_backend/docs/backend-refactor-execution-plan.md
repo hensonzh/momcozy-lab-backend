@@ -97,10 +97,8 @@ Completed:
 - `/v1/health/ready` can validate DB and Redis readiness.
 - Structured request logs with `request_id`, route, status, and latency.
 - Basic in-process request metrics exposed through `/v1/health/metrics`.
-
-Remaining:
-
-- Docker/compose local environment.
+- Docker/compose local environment for API, Postgres, Redis, migrations, and
+  local object storage volume.
 
 Acceptance:
 
