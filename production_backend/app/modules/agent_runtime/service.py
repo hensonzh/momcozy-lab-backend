@@ -6,6 +6,7 @@ from uuid import UUID
 
 from ...core.errors import ApiError
 from ..audit import IdempotencyService, request_hash
+from .controls import AgentRunControls
 from .models import AgentEvent, AgentRun, AgentThread
 from .repository import AgentRuntimeRepository
 
@@ -22,9 +23,11 @@ class AgentRuntimeService:
         *,
         repository: AgentRuntimeRepository,
         idempotency_service: IdempotencyService | None = None,
+        controls: AgentRunControls | None = None,
     ) -> None:
         self.repository = repository
         self.idempotency_service = idempotency_service
+        self.controls = controls
 
     async def create_thread(
         self,
@@ -101,18 +104,20 @@ class AgentRuntimeService:
             content={"text": normalized_message, "attachments": safe_attachments},
             status="completed",
         )
-        await self.repository.append_event(
+        await self._append_event(
             thread_id=thread.id,
             run_id=run.id,
             event_type="run.queued",
             payload={"thread_id": str(thread.id), "message_id": str(message_record.id)},
         )
-        await self.repository.append_event(
+        await self._append_event(
             thread_id=thread.id,
             run_id=run.id,
             event_type="message.completed",
             payload={"message_id": str(message_record.id), "role": "user"},
         )
+        if self.controls is not None:
+            await self.controls.set_active_run(thread_id=thread.id, run_id=run.id)
         await self._complete_idempotency(idempotency_record=idempotency_record, response_ref=str(run.id))
         return run
 
@@ -126,17 +131,21 @@ class AgentRuntimeService:
         run = await self.get_run(owner_user_id=owner_user_id, run_id=run_id)
         if run.status in TERMINAL_RUN_STATUSES:
             return run
+        if self.controls is not None:
+            await self.controls.request_cancel(run_id=run.id)
         cancelled = await self.repository.mark_run_cancelled(
             run=run,
             cancelled_at=_utcnow(),
             error_code="cancelled_by_user",
         )
-        await self.repository.append_event(
+        await self._append_event(
             thread_id=cancelled.thread_id,
             run_id=cancelled.id,
             event_type="run.cancelled",
             payload={"reason": _normalize_text(reason, max_length=500)},
         )
+        if self.controls is not None:
+            await self.controls.clear_active_run(thread_id=cancelled.thread_id, run_id=cancelled.id)
         return cancelled
 
     async def list_events(
@@ -165,6 +174,12 @@ class AgentRuntimeService:
         if thread is None:
             raise ApiError(code="not_found", message="Agent thread not found.", status=404)
         return thread
+
+    async def _append_event(self, *, thread_id: UUID, run_id: UUID, event_type: str, payload: dict[str, Any]) -> AgentEvent:
+        event = await self.repository.append_event(thread_id=thread_id, run_id=run_id, event_type=event_type, payload=payload)
+        if self.controls is not None:
+            await self.controls.set_stream_cursor(run_id=run_id, sequence=event.sequence)
+        return event
 
     async def _reserve_run_idempotency(self, *, actor_user_id: UUID, key: str | None, payload: dict[str, Any]):
         if not key:

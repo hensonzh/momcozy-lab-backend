@@ -11,7 +11,8 @@ def test_agent_runtime_service_creates_run_with_thread_message_events_and_idempo
     owner_user_id = uuid4()
     repository = FakeAgentRuntimeRepository()
     idempotency_service = FakeIdempotencyService(status="reserved")
-    service = AgentRuntimeService(repository=repository, idempotency_service=idempotency_service)
+    controls = FakeAgentRunControls()
+    service = AgentRuntimeService(repository=repository, idempotency_service=idempotency_service, controls=controls)
 
     run = asyncio.run(
         service.create_run(
@@ -27,6 +28,8 @@ def test_agent_runtime_service_creates_run_with_thread_message_events_and_idempo
     assert run.runtime_pattern == "langgraph_sdk"
     assert repository.messages[0].content["text"] == "Review my pumping pattern"
     assert [event.event_type for event in repository.events] == ["run.queued", "message.completed"]
+    assert controls.active_run == (repository.thread.id, run.id)
+    assert controls.stream_cursor == (run.id, 2)
     assert idempotency_service.reserve_kwargs["scope"] == "agent.runs.create"
     assert idempotency_service.completed_response_ref == str(run.id)
 
@@ -34,7 +37,8 @@ def test_agent_runtime_service_creates_run_with_thread_message_events_and_idempo
 def test_agent_runtime_service_cancels_run_idempotently_and_replays_events() -> None:
     owner_user_id = uuid4()
     repository = FakeAgentRuntimeRepository()
-    service = AgentRuntimeService(repository=repository)
+    controls = FakeAgentRunControls()
+    service = AgentRuntimeService(repository=repository, controls=controls)
     run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Hello"))
 
     cancelled = asyncio.run(service.cancel_run(owner_user_id=owner_user_id, run_id=run.id, reason="user tapped stop"))
@@ -43,6 +47,8 @@ def test_agent_runtime_service_cancels_run_idempotently_and_replays_events() -> 
 
     assert cancelled.status == "cancelled"
     assert second_cancel.status == "cancelled"
+    assert controls.cancelled_run_id == run.id
+    assert controls.cleared_active_run == (repository.thread.id, run.id)
     assert [event.event_type for event in replayed] == ["message.completed", "run.cancelled"]
 
 
@@ -161,3 +167,23 @@ class FakeIdempotencyDecision:
     def __init__(self, *, status: str, record) -> None:
         self.status = status
         self.record = record
+
+
+class FakeAgentRunControls:
+    def __init__(self) -> None:
+        self.active_run = None
+        self.cleared_active_run = None
+        self.cancelled_run_id = None
+        self.stream_cursor = None
+
+    async def set_active_run(self, *, thread_id, run_id):
+        self.active_run = (thread_id, run_id)
+
+    async def clear_active_run(self, *, thread_id, run_id=None):
+        self.cleared_active_run = (thread_id, run_id)
+
+    async def request_cancel(self, *, run_id):
+        self.cancelled_run_id = run_id
+
+    async def set_stream_cursor(self, *, run_id, sequence):
+        self.stream_cursor = (run_id, sequence)

@@ -23,15 +23,17 @@ from .schemas import (
     AgentThreadRead,
 )
 from .service import AgentRuntimeService
+from .controls import AgentRunControls
 
 
 router = APIRouter(prefix="/agent", tags=["agent"])
 
 
-def get_agent_runtime_service(session: AsyncSession = Depends(get_session)) -> AgentRuntimeService:
+def get_agent_runtime_service(request: Request, session: AsyncSession = Depends(get_session)) -> AgentRuntimeService:
     return AgentRuntimeService(
         repository=AgentRuntimeRepository(session),
         idempotency_service=IdempotencyService(repository=AuditRepository(session)),
+        controls=AgentRunControls(request.app.state.redis_client),
     )
 
 

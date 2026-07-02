@@ -254,6 +254,8 @@ Completed:
   creation with persisted user message and replayable events, idempotent run
   creation, run detail, event replay, and idempotent cancellation without model
   calls.
+- Agent runtime Redis controls: active run, cancel flag, stream cursor, and
+  cooperative run lock helpers kept as reconstructable transient state.
 
 ### Phase 6: Agent Runtime Implementation
 

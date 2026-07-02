@@ -1,3 +1,4 @@
+from .controls import AgentRunControls
 from .models import (
     AgentAction,
     AgentArtifact,
@@ -14,6 +15,7 @@ from .service import AgentRuntimeService
 __all__ = [
     "AgentAction",
     "AgentArtifact",
+    "AgentRunControls",
     "AgentContextCheckpoint",
     "AgentEvent",
     "AgentMessage",
