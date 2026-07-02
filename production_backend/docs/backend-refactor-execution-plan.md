@@ -338,13 +338,16 @@ Goal: hand the Flutter app a stable backend instead of legacy compatibility.
 
 Deliverables:
 
-- OpenAPI schema.
-- Auth/session contract.
-- Error envelope contract.
-- File upload contract.
-- Records/plans/diary/devices contracts.
-- Agent event/action/artifact contract.
-- Contract tests and sample API flows.
+- OpenAPI schema. Done: `production_backend/docs/openapi.generated.json`.
+- Auth/session contract. Done in OpenAPI and
+  `production_backend/docs/api-contract-handoff.md`.
+- Error envelope contract. Done in handoff document and error contract tests.
+- File upload contract. Done in OpenAPI and handoff document.
+- Records/plans/diary/devices contracts. Done in OpenAPI snapshot.
+- Agent event/action/artifact contract. Done in OpenAPI snapshot and handoff
+  document.
+- Contract tests and sample API flows. In progress; OpenAPI snapshot, core path,
+  stream-token, and idempotency header tests are in place.
 
 Acceptance:
 
@@ -373,11 +376,13 @@ Completed backend commits have established:
 - durable agent runtime ledger, Redis controls, LangGraph/OpenAI Agents SDK
   boundaries, guarded tool executor, SSE replay, action confirmation, and
   deterministic safety gate
+- OpenAPI schema export script, generated schema snapshot, and API handoff
+  document for Flutter integration
 
 Next recommended backend PR slices:
 
-1. Add OpenAPI/contract handoff artifacts for the Flutter rewrite.
-2. Add worker/runtime observability for outbox and agent tool/model operations.
-3. Add API-level contract tests for auth and token flows.
-4. Add deployment runbook and release smoke-test checklist.
-5. Add CI wiring for lint/type/test/migration/container checks.
+1. Add worker/runtime observability for outbox and agent tool/model operations.
+2. Add API-level contract tests for auth and token flows.
+3. Add deployment runbook and release smoke-test checklist.
+4. Add CI wiring for lint/type/test/migration/container checks.
+5. Add production smoke fixtures for Flutter integration flows.
