@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 
 from ...core.errors import ApiError
 from ..auth import CurrentUser
-from .action_policy import AgentActionPolicy
+from .action_policy import AgentActionPolicy, AgentActionPolicyDecision
 from .events import AgentEventSink
 from .execution import AgentRunExecutionResult
 from .graphs import AgentGraphCheckpointStore, AgentGraphRegistry, default_graph_registry
@@ -116,10 +116,13 @@ class AgentRuntimeExecutor:
             )
         )
 
+        action_proposal = _single_action_proposal(result.action_proposals)
+        action_decision = self._action_decision_from_proposal(action_proposal) if action_proposal is not None else None
+
         await self._persist_artifacts_from_result(run=run, artifacts=result.artifacts)
 
-        if result.action_proposals:
-            action = await self._create_action_from_proposal(run=run, proposal=result.action_proposals[0])
+        if action_proposal is not None and action_decision is not None:
+            action = await self._create_action_from_proposal(run=run, proposal=action_proposal, decision=action_decision)
             await self._append_event(
                 thread_id=run.thread_id,
                 run_id=run.id,
@@ -156,12 +159,20 @@ class AgentRuntimeExecutor:
         )
         return AgentRunExecutionResult(status="completed", final_text=final_text)
 
-    async def _create_action_from_proposal(self, *, run: AgentRun, proposal: dict[str, Any]) -> AgentAction:
-        decision = self.action_policy.validate(
+    def _action_decision_from_proposal(self, proposal: dict[str, Any]) -> AgentActionPolicyDecision:
+        return self.action_policy.validate(
             action_type=_required_text(proposal, "action_type"),
             target_type=_text(proposal, "target_type"),
             side_effect_level=_text(proposal, "side_effect_level"),
         )
+
+    async def _create_action_from_proposal(
+        self,
+        *,
+        run: AgentRun,
+        proposal: dict[str, Any],
+        decision: AgentActionPolicyDecision,
+    ) -> AgentAction:
         return await self.repository.create_action(
             run_id=run.id,
             actor_user_id=run.actor_user_id,
@@ -331,6 +342,12 @@ def _text(payload: dict[str, Any], key: str) -> str:
 def _dict(payload: dict[str, Any], key: str) -> dict[str, Any]:
     value = payload.get(key)
     return dict(value) if isinstance(value, dict) else {}
+
+
+def _single_action_proposal(action_proposals: list[dict[str, Any]]) -> dict[str, Any] | None:
+    if len(action_proposals) > 1:
+        raise ApiError(code="too_many_agent_action_proposals", message="Only one agent action proposal is supported per run.", status=422)
+    return action_proposals[0] if action_proposals else None
 
 
 def _json_object(raw: str) -> dict[str, Any]:

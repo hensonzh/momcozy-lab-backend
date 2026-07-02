@@ -187,6 +187,36 @@ def test_agent_runtime_executor_rejects_unsupported_sdk_action_proposal_before_p
     assert repository.events == []
 
 
+def test_agent_runtime_executor_rejects_multiple_sdk_action_proposals_before_side_effects() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="Create two tickets", sequence=1)
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    backend = CapturingSdkBackend(
+        result=SdkNodeResult(
+            final_text="I drafted a plan.",
+            artifacts=[{"artifact_type": "care_plan", "payload": {"title": "Plan"}}],
+            action_proposals=[
+                {"action_type": "support.ticket.create", "apply_payload": {"issue_summary": "First"}},
+                {"action_type": "support.ticket.create", "apply_payload": {"issue_summary": "Second"}},
+            ],
+        )
+    )
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            AgentRuntimeExecutor(
+                repository=repository,
+                sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            ).execute(run=run)
+        )
+
+    assert exc_info.value.code == "too_many_agent_action_proposals"
+    assert repository.actions == []
+    assert repository.artifacts == []
+    assert repository.events == []
+
+
 def test_agent_runtime_executor_persists_sdk_artifacts_and_emits_events() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)

@@ -358,6 +358,9 @@ Completed:
 - SDK artifact persistence: artifacts returned by the SDK node are persisted in
   `agent_artifacts` and emit `artifact.created` application events before the
   run reaches its terminal or waiting state.
+- SDK action proposal cardinality guard: each run accepts at most one action
+  proposal, validated before artifacts or actions are persisted, so the runtime
+  never silently drops extra model-proposed side effects.
 
 ### Phase 7: Safety, Observability, And Eval
 
@@ -478,6 +481,8 @@ Completed backend commits have established:
 - action proposal allowlist for `support.ticket.create`, rejecting unsupported
   SDK/tool proposals before persistence
 - SDK artifact persistence with replayable `artifact.created` events
+- single-action proposal guard that rejects ambiguous multi-action SDK results
+  before persistence
 - OpenAPI schema export script, generated schema snapshot, and API handoff
   document for Flutter integration
 - Auth/token API contract tests for token response shape, validation envelope,
