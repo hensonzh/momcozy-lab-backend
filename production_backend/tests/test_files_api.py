@@ -37,6 +37,24 @@ def test_file_upload_uses_current_user_owner_scope() -> None:
     assert fake_service.upload_kwargs["body"] == b"hello"
 
 
+def test_file_upload_passes_request_id_and_idempotency_key() -> None:
+    user_id = uuid4()
+    fake_service = FakeFileService()
+    app = create_app(Settings(app_env="test"))
+    _override_current_user(app, user_id)
+    app.dependency_overrides[get_file_service] = lambda: fake_service
+
+    response = TestClient(app).post(
+        "/v1/files/upload",
+        files={"file": ("hello.txt", b"hello", "text/plain")},
+        headers={"X-Request-ID": "req_test", "Idempotency-Key": " idem-1 "},
+    )
+
+    assert response.status_code == 201
+    assert fake_service.upload_kwargs["request_id"] == "req_test"
+    assert fake_service.upload_kwargs["idempotency_key"] == "idem-1"
+
+
 def test_file_detail_uses_current_user_owner_scope() -> None:
     user_id = uuid4()
     fake_service = FakeFileService()

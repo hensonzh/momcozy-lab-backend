@@ -144,11 +144,12 @@ Completed:
 - `outbox_jobs` model and migration.
 - Audit and idempotency services.
 - Outbox repository/service and worker skeleton with retry/dead-letter semantics.
+- File upload uses optional `Idempotency-Key`, request ID, and audit recording.
 
 Remaining:
 
 - File listing, deletion, and object-storage cleanup flows.
-- Route-level audit/idempotency integration for migrated writes.
+- Route-level audit/idempotency integration for additional migrated writes.
 - API-level `Idempotency-Key` handling for retryable writes.
 
 Acceptance:
