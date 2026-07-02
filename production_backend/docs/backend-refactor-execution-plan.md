@@ -384,11 +384,14 @@ Completed backend commits have established:
 - Auth/token API contract tests for token response shape, validation envelope,
   invalid credentials envelope, logout Bearer requirement, and refresh-token
   body placement
+- Deployment runbook and release smoke checklist covering infrastructure,
+  migrations, auth, core APIs, agent runtime, observability, worker backlog,
+  agent recovery, rollback, and security incidents.
 
 Next recommended backend PR slices:
 
-1. Add deployment runbook and release smoke-test checklist.
-2. Add CI wiring for lint/type/test/migration/container checks.
-3. Add production smoke fixtures for Flutter integration flows.
-4. Add migration compatibility smoke tests for an empty database.
-5. Add runbook entries for worker backlog and agent run recovery.
+1. Add CI wiring for lint/type/test/migration/container checks.
+2. Add production smoke fixtures for Flutter integration flows.
+3. Add migration compatibility smoke tests for an empty database.
+4. Add runbook entries for backup/restore and credential rotation drills.
+5. Add release compatibility notes for Flutter generated clients.
