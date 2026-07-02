@@ -4,6 +4,7 @@ from fastapi import FastAPI
 
 from .api.error_handlers import install_error_handlers
 from .api.v1.router import router as v1_router
+from .core.cors import install_cors_middleware
 from .core.lifespan import build_lifespan
 from .core.logging import configure_logging
 from .core.metrics import RequestMetrics
@@ -22,6 +23,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = resolved_settings
     app.state.request_metrics = RequestMetrics()
+    install_cors_middleware(app, resolved_settings)
     install_http_middleware(app)
     install_error_handlers(app)
     app.include_router(v1_router)

@@ -95,6 +95,8 @@ Completed:
 - S3-compatible managed object storage provider.
 - Production validation rejects implicit localhost DB/Redis.
 - `/v1/health/ready` can validate DB and Redis readiness.
+- Environment-controlled CORS middleware with explicit origins and production
+  wildcard rejection.
 - Structured request logs with `request_id`, route, status, and latency.
 - Basic in-process request metrics exposed through `/v1/health/metrics`.
 - Environment-controlled fixed-window rate limiting with Redis-first counting,
@@ -440,6 +442,7 @@ Completed backend commits have established:
 - isolated backend workspace
 - inventory tooling
 - environment contract
+- explicit CORS configuration for browser/admin clients
 - request/error contract
 - structured request logging and basic metrics
 - environment-controlled rate limiting for non-exempt API paths

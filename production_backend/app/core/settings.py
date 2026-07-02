@@ -34,6 +34,7 @@ class Settings:
     auth_jwt_algorithm: str = "HS256"
     service_api_key: str = ""
     readiness_check_infrastructure: bool = False
+    cors_allowed_origins: tuple[str, ...] = ()
     postgres_backup_hook: str = ""
     postgres_restore_hook: str = ""
     object_storage_backup_hook: str = ""
@@ -76,6 +77,7 @@ class Settings:
                 "READINESS_CHECK_INFRASTRUCTURE",
                 cls.readiness_check_infrastructure,
             ),
+            cors_allowed_origins=_env_csv("CORS_ALLOWED_ORIGINS", cls.cors_allowed_origins),
             postgres_backup_hook=_env("POSTGRES_BACKUP_HOOK", cls.postgres_backup_hook),
             postgres_restore_hook=_env("POSTGRES_RESTORE_HOOK", cls.postgres_restore_hook),
             object_storage_backup_hook=_env("OBJECT_STORAGE_BACKUP_HOOK", cls.object_storage_backup_hook),
@@ -152,6 +154,8 @@ class Settings:
                 errors.append("REDIS_URL must be explicitly configured for production")
             if provider == "local":
                 errors.append("OBJECT_STORAGE_PROVIDER cannot be local in production")
+            if "*" in self.cors_allowed_origins:
+                errors.append("CORS_ALLOWED_ORIGINS cannot include * in production")
             if provider != "local" and not self.object_storage_bucket:
                 errors.append("OBJECT_STORAGE_BUCKET is required for managed object storage")
             if provider in {"minio", "oss", "cos"} and not self.object_storage_endpoint_url:
@@ -196,6 +200,14 @@ def _env_int(name: str, default: int) -> int:
         return int(raw.strip())
     except ValueError:
         return default
+
+
+def _env_csv(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    values = tuple(value.strip() for value in raw.split(",") if value.strip())
+    return values
 
 
 def _is_local_url(value: str, local_default: str) -> bool:

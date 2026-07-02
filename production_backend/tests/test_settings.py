@@ -50,6 +50,14 @@ def test_settings_from_env_reads_rate_limit_controls(monkeypatch: pytest.MonkeyP
     assert settings.rate_limit_window_seconds == 15
 
 
+def test_settings_from_env_reads_cors_allowed_origins(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "https://app.example.test, https://admin.example.test")
+
+    settings = Settings.from_env()
+
+    assert settings.cors_allowed_origins == ("https://app.example.test", "https://admin.example.test")
+
+
 def test_settings_from_env_reads_agent_worker_controls(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AGENT_RUNTIME_WORKER_ENABLED", "true")
     monkeypatch.setenv("AGENT_RUNTIME_WORKER_BATCH_LIMIT", "25")
@@ -112,6 +120,23 @@ def test_production_settings_reject_local_object_storage() -> None:
     settings = Settings(app_env="production", object_storage_provider="local")
 
     with pytest.raises(ValueError, match="OBJECT_STORAGE_PROVIDER cannot be local"):
+        settings.validate_for_startup()
+
+
+def test_production_settings_reject_wildcard_cors_origin() -> None:
+    settings = Settings(
+        app_env="production",
+        database_url="postgresql+asyncpg://app:secret@postgres.internal:5432/momcozy",
+        redis_url="redis://redis.internal:6379/0",
+        object_storage_provider="s3",
+        object_storage_bucket="bucket",
+        object_storage_access_key_id="access",
+        object_storage_secret_access_key="secret",
+        auth_jwt_secret="test-secret-value-with-at-least-32-bytes",
+        cors_allowed_origins=("*",),
+    )
+
+    with pytest.raises(ValueError, match="CORS_ALLOWED_ORIGINS"):
         settings.validate_for_startup()
 
 
