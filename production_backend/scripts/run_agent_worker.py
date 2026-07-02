@@ -9,6 +9,7 @@ from production_backend.app.core.settings import Settings
 from production_backend.app.infrastructure.db.session import create_db_engine, create_session_factory
 from production_backend.app.infrastructure.redis.client import close_redis_client, create_redis_client
 from production_backend.app.modules.agent_runtime.controls import AgentRunControls
+from production_backend.app.modules.agent_runtime.graphs import AgentGraphCheckpointStore
 from production_backend.app.modules.agent_runtime.repository import AgentRuntimeRepository
 from production_backend.app.modules.agent_runtime.runtime import AgentRuntimeExecutor
 from production_backend.app.modules.agent_runtime.sdk import OpenAIAgentsSdkRunner
@@ -30,13 +31,14 @@ async def run_agent_worker(
     session_factory = create_session_factory(db_engine)
     redis_client = create_redis_client(resolved_settings)
     controls = AgentRunControls(redis_client)
-    totals = {"status": "ok", "cycles": 0, "scanned": 0, "processed": 0, "terminal": 0}
+    totals: dict[str, Any] = {"status": "ok", "cycles": 0, "scanned": 0, "processed": 0, "terminal": 0}
     try:
         while True:
             async with session_factory() as session:
                 repository = AgentRuntimeRepository(session)
                 handler = AgentRuntimeExecutor(
                     repository=repository,
+                    checkpoint_store=AgentGraphCheckpointStore(repository=repository),
                     sdk_runner=OpenAIAgentsSdkRunner(model=resolved_settings.openai_model),
                 )
                 worker = AgentRunQueueWorker(

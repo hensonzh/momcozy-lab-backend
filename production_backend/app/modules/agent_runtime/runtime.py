@@ -5,7 +5,7 @@ from typing import Any
 
 from ...core.errors import ApiError
 from .execution import AgentRunExecutionResult
-from .graphs import AgentGraphRegistry, default_graph_registry
+from .graphs import AgentGraphCheckpointStore, AgentGraphRegistry, default_graph_registry
 from .models import AgentAction, AgentMessage, AgentRun
 from .prompts import ContextProjection, ModelInputBuilder
 from .repository import AgentRuntimeRepository
@@ -33,6 +33,7 @@ class AgentRuntimeExecutor:
         repository: AgentRuntimeRepository,
         sdk_runner: OpenAIAgentsSdkRunner,
         graph_registry: AgentGraphRegistry | None = None,
+        checkpoint_store: AgentGraphCheckpointStore | None = None,
         tool_registry: ToolContractRegistry | None = None,
         input_builder: ModelInputBuilder | None = None,
         config: AgentRuntimeExecutorConfig | None = None,
@@ -40,6 +41,7 @@ class AgentRuntimeExecutor:
         self.repository = repository
         self.sdk_runner = sdk_runner
         self.graph_registry = graph_registry or default_graph_registry()
+        self.checkpoint_store = checkpoint_store
         self.tool_registry = tool_registry or default_tool_registry()
         self.input_builder = input_builder or ModelInputBuilder()
         self.config = config or AgentRuntimeExecutorConfig()
@@ -74,6 +76,17 @@ class AgentRuntimeExecutor:
             projection=projection,
             current_user_message=_to_model_message(current_message),
         )
+        await self._save_checkpoint(
+            run=run,
+            node_name="sdk_reasoning",
+            current_user_message_id=str(current_message.id),
+            state_summary={
+                "context_refs": [],
+                "pending_action_id": None,
+                "final_message_id": None,
+                "tool_names": list(self.tool_registry.names_for_sdk()),
+            },
+        )
         result = await self.sdk_runner.run_reasoning(
             SdkNodeRequest(
                 run_id=str(run.id),
@@ -94,10 +107,31 @@ class AgentRuntimeExecutor:
                 event_type="action.confirmation_required",
                 payload={"action_id": str(action.id), "action_type": action.action_type},
             )
+            await self._save_checkpoint(
+                run=run,
+                node_name="confirmation_interrupt",
+                current_user_message_id=str(current_message.id),
+                state_summary={
+                    "context_refs": [],
+                    "pending_action_id": str(action.id),
+                    "final_message_id": None,
+                },
+            )
             return AgentRunExecutionResult(status="waiting_for_confirmation", pending_action_id=action.id)
         final_text = result.final_text.strip()
         if not final_text:
             raise ApiError(code="empty_agent_response", message="Agent runtime returned an empty response.", status=502)
+        await self._save_checkpoint(
+            run=run,
+            node_name="finish",
+            current_user_message_id=str(current_message.id),
+            state_summary={
+                "context_refs": [],
+                "pending_action_id": None,
+                "final_message_id": None,
+                "final_response_ready": True,
+            },
+        )
         return AgentRunExecutionResult(status="completed", final_text=final_text)
 
     async def _create_action_from_proposal(self, *, run: AgentRun, proposal: dict[str, Any]) -> AgentAction:
@@ -114,6 +148,28 @@ class AgentRuntimeExecutor:
             apply_payload=_dict(proposal, "apply_payload"),
             idempotency_key=_text(proposal, "idempotency_key"),
             expires_at=None,
+        )
+
+    async def _save_checkpoint(
+        self,
+        *,
+        run: AgentRun,
+        node_name: str,
+        current_user_message_id: str,
+        state_summary: dict[str, Any],
+    ) -> None:
+        if self.checkpoint_store is None:
+            return
+        await self.checkpoint_store.save_run_checkpoint(
+            run=run,
+            state_summary={
+                "node_name": node_name,
+                "run_id": str(run.id),
+                "thread_id": str(run.thread_id),
+                "actor_user_id": str(run.actor_user_id),
+                "current_user_message_id": current_user_message_id,
+                **state_summary,
+            },
         )
 
 

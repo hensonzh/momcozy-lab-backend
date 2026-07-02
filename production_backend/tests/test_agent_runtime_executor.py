@@ -17,10 +17,12 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() ->
     current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="Summarize it.", sequence=3)
     repository = FakeRuntimeRepository(messages=[prior_user, prior_assistant, current_user], current_message=current_user)
     backend = CapturingSdkBackend(result=SdkNodeResult(final_text="Here is the summary."))
+    checkpoint_store = FakeCheckpointStore()
 
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
+            checkpoint_store=checkpoint_store,
             sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
         ).execute(run=run)
     )
@@ -35,6 +37,8 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() ->
     assert request.model_input[0]["content"].startswith("You are the MomCozy product assistant.")
     assert request.model_input[4]["content"]["state"]["run_id"] == str(run.id)
     assert request.model_input[-1] == {"role": "user", "content": "Summarize it."}
+    assert [checkpoint["state_summary"]["node_name"] for checkpoint in checkpoint_store.checkpoints] == ["sdk_reasoning", "finish"]
+    assert checkpoint_store.checkpoints[0]["state_summary"]["current_user_message_id"] == str(current_user.id)
 
 
 def test_agent_runtime_executor_requires_current_user_message() -> None:
@@ -74,6 +78,7 @@ def test_agent_runtime_executor_persists_sdk_action_proposal_and_waits_for_confi
     run = _run(thread_id=thread_id)
     current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="Create a support ticket", sequence=1)
     repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    checkpoint_store = FakeCheckpointStore()
     backend = CapturingSdkBackend(
         result=SdkNodeResult(
             action_proposals=[
@@ -92,6 +97,7 @@ def test_agent_runtime_executor_persists_sdk_action_proposal_and_waits_for_confi
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
+            checkpoint_store=checkpoint_store,
             sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
         ).execute(run=run)
     )
@@ -102,6 +108,11 @@ def test_agent_runtime_executor_persists_sdk_action_proposal_and_waits_for_confi
     assert repository.actions[0].apply_payload == {"issue_summary": "Pump does not turn on"}
     assert repository.events[-1].event_type == "action.confirmation_required"
     assert repository.events[-1].payload["action_id"] == str(repository.actions[0].id)
+    assert [checkpoint["state_summary"]["node_name"] for checkpoint in checkpoint_store.checkpoints] == [
+        "sdk_reasoning",
+        "confirmation_interrupt",
+    ]
+    assert checkpoint_store.checkpoints[-1]["state_summary"]["pending_action_id"] == str(repository.actions[0].id)
 
 
 class CapturingSdkBackend:
@@ -159,6 +170,14 @@ class FakeRuntimeRepository:
         )
         self.events.append(event)
         return event
+
+
+class FakeCheckpointStore:
+    def __init__(self) -> None:
+        self.checkpoints = []
+
+    async def save_run_checkpoint(self, **kwargs):
+        self.checkpoints.append(kwargs)
 
 
 def _run(*, thread_id) -> AgentRun:
