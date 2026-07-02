@@ -103,10 +103,14 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert result.status == "completed"
     assert result.final_text == '{"profile": {"display_name": "Mai"}}'
     assert backend.tool_names == ("profile_read", "support_ticket_propose")
+    assert backend.tool_schemas["profile_read"]["additionalProperties"] is False
+    assert backend.tool_schemas["profile_read"]["properties"] == {}
+    assert backend.tool_schemas["support_ticket_propose"]["required"] == ["issue_summary"]
+    assert backend.tool_schemas["support_ticket_propose"]["additionalProperties"] is False
     assert tool_executor.calls[0]["actor"].user_id == run.actor_user_id
     assert tool_executor.calls[0]["run_id"] == run.id
     assert tool_executor.calls[0]["tool_name"] == "profile.read"
-    assert tool_executor.calls[0]["args"] == {"owner_user_id": str(run.actor_user_id)}
+    assert tool_executor.calls[0]["args"] == {}
 
 
 def test_agent_runtime_executor_persists_sdk_action_proposal_and_waits_for_confirmation() -> None:
@@ -245,10 +249,12 @@ class FakeToolExecutionResult:
 class InvokingSdkBackend:
     def __init__(self) -> None:
         self.tool_names = ()
+        self.tool_schemas = {}
 
     async def run(self, request: SdkNodeRequest) -> SdkNodeResult:
         self.tool_names = tuple(tool.sdk_name for tool in request.tools)
-        output = await request.tools[0].invoke_json(f'{{"owner_user_id": "{request.actor_user_id}"}}')
+        self.tool_schemas = {tool.sdk_name: tool.params_json_schema for tool in request.tools}
+        output = await request.tools[0].invoke_json("{}")
         return SdkNodeResult(final_text=output)
 
 

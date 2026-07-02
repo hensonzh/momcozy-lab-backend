@@ -342,6 +342,9 @@ Completed:
 - Outbox worker process entry: environment-controlled worker script and optional
   compose `workers` profile process file cleanup and confirmed agent action
   jobs separately from API and agent run workers.
+- SDK tool input schemas: tool contracts now resolve `input_schema_ref` to
+  explicit JSON Schema before being exposed to the OpenAI Agents SDK, so models
+  no longer receive unconstrained `additionalProperties: true` tool parameters.
 
 ### Phase 7: Safety, Observability, And Eval
 
@@ -447,6 +450,9 @@ Completed backend commits have established:
   through the support service layer
 - environment-controlled outbox worker process entry wired to file cleanup and
   support-ticket agent action apply handlers
+- explicit SDK tool parameter schemas for profile context reads and support
+  ticket action proposals, keeping owner scope in backend auth rather than
+  model-supplied user IDs
 - OpenAPI schema export script, generated schema snapshot, and API handoff
   document for Flutter integration
 - Auth/token API contract tests for token response shape, validation envelope,

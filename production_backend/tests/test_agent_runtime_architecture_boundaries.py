@@ -10,7 +10,7 @@ from production_backend.app.core.metrics import RequestMetrics
 from production_backend.app.modules.agent_runtime.graphs import default_graph_registry
 from production_backend.app.modules.agent_runtime.prompts import ContextProjection, ModelInputBuilder
 from production_backend.app.modules.agent_runtime.sdk import OpenAIAgentsSdkRunner, SdkNodeRequest, SdkNodeResult, SdkToolDefinition, sdk_tool_name
-from production_backend.app.modules.agent_runtime.tools import default_tool_registry
+from production_backend.app.modules.agent_runtime.tools import default_tool_registry, tool_input_schema
 
 
 def test_default_graph_registry_uses_langgraph_sdk_pattern() -> None:
@@ -30,6 +30,22 @@ def test_tool_contract_registry_declares_permission_confirmation_and_blocking_po
     assert support_ticket.requires_confirmation is True
     assert support_ticket.blocking_policy == "wait_for_confirmation"
     assert "profile.read" in registry.names_for_sdk()
+
+
+def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> None:
+    registry = default_tool_registry()
+    profile_schema = tool_input_schema(registry.get("profile.read").input_schema_ref)
+    support_schema = tool_input_schema(registry.get("support.ticket.propose").input_schema_ref)
+
+    assert profile_schema == {
+        "title": "ProfileContextQuery",
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {},
+    }
+    assert support_schema["required"] == ["issue_summary"]
+    assert support_schema["additionalProperties"] is False
+    assert "issue_summary" in support_schema["properties"]
 
 
 def test_context_builder_keeps_stable_prompts_before_dynamic_projection() -> None:

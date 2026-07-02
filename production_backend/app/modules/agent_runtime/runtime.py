@@ -15,6 +15,7 @@ from .repository import AgentRuntimeRepository
 from .sdk import OpenAIAgentsSdkRunner, SdkNodeRequest, SdkToolDefinition, sdk_tool_name
 from .state_store import AgentRuntimeStateStore
 from .tools import ToolContractRegistry, ToolExecutor, default_tool_registry
+from .tools.schemas import tool_input_schema
 
 
 @dataclass(frozen=True)
@@ -179,7 +180,7 @@ class AgentRuntimeExecutor:
             contract_name=contract.name,
             sdk_name=sdk_name,
             description=contract.description,
-            params_json_schema=_tool_params_schema(contract.input_schema_ref),
+            params_json_schema=tool_input_schema(contract.input_schema_ref),
             invoke_json=invoke_json,
         )
 
@@ -295,15 +296,6 @@ def _text(payload: dict[str, Any], key: str) -> str:
 def _dict(payload: dict[str, Any], key: str) -> dict[str, Any]:
     value = payload.get(key)
     return dict(value) if isinstance(value, dict) else {}
-
-
-def _tool_params_schema(title: str) -> dict[str, Any]:
-    return {
-        "title": title,
-        "type": "object",
-        "additionalProperties": True,
-        "properties": {},
-    }
 
 
 def _json_object(raw: str) -> dict[str, Any]:
