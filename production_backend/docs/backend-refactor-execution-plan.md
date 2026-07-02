@@ -322,6 +322,9 @@ Completed:
 - Support ticket agent action handler: confirmed `support.ticket.create` actions
   apply through `SupportTicketsService`, preserving owner scope, idempotency, and
   audit instead of writing support tables from agent code.
+- Outbox worker process entry: environment-controlled worker script and optional
+  compose `workers` profile process file cleanup and confirmed agent action
+  jobs separately from API and agent run workers.
 
 ### Phase 7: Safety, Observability, And Eval
 
@@ -416,6 +419,8 @@ Completed backend commits have established:
   explicit missing-handler failure, and persisted action events
 - first business action apply handler for `support.ticket.create`, routed
   through the support service layer
+- environment-controlled outbox worker process entry wired to file cleanup and
+  support-ticket agent action apply handlers
 - OpenAPI schema export script, generated schema snapshot, and API handoff
   document for Flutter integration
 - Auth/token API contract tests for token response shape, validation envelope,

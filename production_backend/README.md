@@ -74,6 +74,13 @@ OpenAI Agents SDK runtime handler is configured:
 AGENT_RUNTIME_WORKER_ENABLED=true docker compose --profile workers up agent-worker
 ```
 
+Durable side effects are processed by a separate outbox worker. It handles file
+cleanup jobs and confirmed agent actions, and is also disabled by default:
+
+```bash
+OUTBOX_WORKER_ENABLED=true docker compose --profile workers up outbox-worker
+```
+
 ## Target Shape
 
 ```text

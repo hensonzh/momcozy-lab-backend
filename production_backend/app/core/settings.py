@@ -42,6 +42,9 @@ class Settings:
     agent_runtime_worker_batch_limit: int = 10
     agent_runtime_worker_idle_seconds: int = 2
     agent_runtime_recover_running_older_than_seconds: int = 900
+    outbox_worker_enabled: bool = False
+    outbox_worker_idle_seconds: int = 2
+    outbox_worker_lease_seconds: int = 60
     log_level: str = "INFO"
 
     @classmethod
@@ -79,6 +82,9 @@ class Settings:
                 "AGENT_RUNTIME_RECOVER_RUNNING_OLDER_THAN_SECONDS",
                 cls.agent_runtime_recover_running_older_than_seconds,
             ),
+            outbox_worker_enabled=_env_bool("OUTBOX_WORKER_ENABLED", cls.outbox_worker_enabled),
+            outbox_worker_idle_seconds=_env_int("OUTBOX_WORKER_IDLE_SECONDS", cls.outbox_worker_idle_seconds),
+            outbox_worker_lease_seconds=_env_int("OUTBOX_WORKER_LEASE_SECONDS", cls.outbox_worker_lease_seconds),
             log_level=_env("LOG_LEVEL", cls.log_level).upper(),
         )
 
@@ -116,6 +122,10 @@ class Settings:
             errors.append("AGENT_RUNTIME_WORKER_IDLE_SECONDS must be non-negative")
         if self.agent_runtime_recover_running_older_than_seconds < 1:
             errors.append("AGENT_RUNTIME_RECOVER_RUNNING_OLDER_THAN_SECONDS must be positive")
+        if self.outbox_worker_idle_seconds < 0:
+            errors.append("OUTBOX_WORKER_IDLE_SECONDS must be non-negative")
+        if self.outbox_worker_lease_seconds < 1:
+            errors.append("OUTBOX_WORKER_LEASE_SECONDS must be positive")
 
         if self.is_production:
             if _is_local_url(self.database_url, LOCAL_DATABASE_URL):

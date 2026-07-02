@@ -52,10 +52,29 @@ def test_settings_from_env_reads_agent_worker_controls(monkeypatch: pytest.Monke
     assert settings.agent_runtime_recover_running_older_than_seconds == 120
 
 
+def test_settings_from_env_reads_outbox_worker_controls(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OUTBOX_WORKER_ENABLED", "true")
+    monkeypatch.setenv("OUTBOX_WORKER_IDLE_SECONDS", "4")
+    monkeypatch.setenv("OUTBOX_WORKER_LEASE_SECONDS", "90")
+
+    settings = Settings.from_env()
+
+    assert settings.outbox_worker_enabled is True
+    assert settings.outbox_worker_idle_seconds == 4
+    assert settings.outbox_worker_lease_seconds == 90
+
+
 def test_settings_reject_invalid_agent_worker_controls() -> None:
     settings = Settings(agent_runtime_worker_batch_limit=0)
 
     with pytest.raises(ValueError, match="AGENT_RUNTIME_WORKER_BATCH_LIMIT"):
+        settings.validate_for_startup()
+
+
+def test_settings_reject_invalid_outbox_worker_controls() -> None:
+    settings = Settings(outbox_worker_lease_seconds=0)
+
+    with pytest.raises(ValueError, match="OUTBOX_WORKER_LEASE_SECONDS"):
         settings.validate_for_startup()
 
 
