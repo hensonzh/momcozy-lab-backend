@@ -4,6 +4,7 @@ from fastapi import FastAPI
 
 from .api.error_handlers import install_error_handlers
 from .api.v1.router import router as v1_router
+from .core.lifespan import build_lifespan
 from .core.middleware import install_request_id_middleware
 from .core.settings import Settings, get_settings
 
@@ -14,6 +15,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(
         title=resolved_settings.app_name,
         version=resolved_settings.app_version,
+        lifespan=build_lifespan(resolved_settings),
     )
     app.state.settings = resolved_settings
     install_request_id_middleware(app)

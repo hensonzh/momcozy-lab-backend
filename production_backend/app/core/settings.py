@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 
 
-LOCAL_DATABASE_URL = "postgresql+psycopg://momcozy:momcozy@localhost:5432/momcozy"
+LOCAL_DATABASE_URL = "postgresql+asyncpg://momcozy:momcozy@localhost:5432/momcozy"
 LOCAL_REDIS_URL = "redis://localhost:6379/0"
 LOCAL_OBJECT_STORAGE_ROOT = "production_backend/.local/object_storage"
 SUPPORTED_OBJECT_STORAGE_PROVIDERS = {"local", "s3", "oss", "cos", "minio"}
