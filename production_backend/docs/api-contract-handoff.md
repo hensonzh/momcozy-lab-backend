@@ -61,3 +61,5 @@ snapshot. Do not build new client code against legacy raw response shapes.
 
 Use `production_backend/docs/flutter-smoke-flows.json` as the initial integration
 smoke fixture for auth, core records/plans/files, and agent replay.
+Use `production_backend/docs/flutter-client-compatibility.md` for generated
+client regeneration and breaking-change rules.

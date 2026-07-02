@@ -396,11 +396,14 @@ Completed backend commits have established:
 - Deployment runbook now includes backup/restore and credential rotation drills
   that rely on environment-variable managed infrastructure and secret-manager
   rotation.
+- Flutter generated-client compatibility notes document source-of-truth
+  contracts, regeneration rules, breaking-change policy, mobile token handling,
+  idempotency, and agent stream reducer requirements.
 
 Next recommended backend PR slices:
 
-1. Add release compatibility notes for Flutter generated clients.
-2. Add lint/type gates once ruff/mypy configuration is introduced.
-3. Add first real Postgres integration test profile.
-4. Add migration compatibility test against a live Postgres service in CI.
-5. Add backup/restore automation hooks when managed infrastructure is selected.
+1. Add lint/type gates once ruff/mypy configuration is introduced.
+2. Add first real Postgres integration test profile.
+3. Add migration compatibility test against a live Postgres service in CI.
+4. Add backup/restore automation hooks when managed infrastructure is selected.
+5. Add generated Flutter client CI job once the app refactor owns codegen.
