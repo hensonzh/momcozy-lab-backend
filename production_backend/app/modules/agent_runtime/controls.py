@@ -40,6 +40,9 @@ class AgentRunControls:
         value = await self.redis.get(_stream_cursor_key(run_id))
         return int(value) if value is not None else None
 
+    async def clear_stream_cursor(self, *, run_id: UUID) -> None:
+        await self.redis.delete(_stream_cursor_key(run_id))
+
     async def acquire_run_lock(self, *, run_id: UUID, owner_token: str, ttl_seconds: int = 60) -> bool:
         return bool(await self.redis.set(_run_lock_key(run_id), owner_token, ex=ttl_seconds, nx=True))
 

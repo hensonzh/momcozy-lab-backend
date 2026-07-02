@@ -405,10 +405,11 @@ Completed backend commits have established:
   live Postgres service to Alembic head and verifies critical tables.
 - Backup/restore automation hook manifest and CI check for environment-driven
   managed Postgres/object-storage restore drills.
+- Redis runtime profile and CI `redis-runtime-controls` job that verifies live
+  Redis active-run, cancel, stream cursor, and exclusive lock semantics.
 
 Next recommended backend PR slices:
 
 1. Add generated Flutter client CI job once the app refactor owns codegen.
 2. Tighten mypy settings after repository/service annotations mature.
-3. Add live Redis profile for run controls and worker leases.
-4. Add object-storage integration profile for MinIO/S3-compatible providers.
+3. Add object-storage integration profile for MinIO/S3-compatible providers.

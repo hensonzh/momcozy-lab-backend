@@ -23,9 +23,11 @@ def test_agent_run_controls_manage_active_run_cancel_and_cursor() -> None:
 
     asyncio.run(controls.clear_active_run(thread_id=thread_id, run_id=run_id))
     asyncio.run(controls.clear_cancel(run_id=run_id))
+    asyncio.run(controls.clear_stream_cursor(run_id=run_id))
 
     assert asyncio.run(controls.get_active_run(thread_id=thread_id)) is None
     assert asyncio.run(controls.is_cancel_requested(run_id=run_id)) is False
+    assert asyncio.run(controls.get_stream_cursor(run_id=run_id)) is None
 
 
 def test_agent_run_controls_lock_context_releases_owned_lock() -> None:

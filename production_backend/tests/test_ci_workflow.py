@@ -21,6 +21,8 @@ def test_production_backend_ci_runs_core_gates() -> None:
         "postgres-migration",
         "python -m alembic -c production_backend/alembic.ini upgrade head",
         "agent_eval_cases",
+        "redis-runtime-controls",
+        "production_backend/scripts/check_redis_runtime_controls.py",
     ]:
         assert phrase in text
 
