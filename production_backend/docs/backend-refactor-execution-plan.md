@@ -180,10 +180,12 @@ Completed:
   create.
 - Growth record API: owner-scoped create/list/delete with infant ownership
   validation, audit, and idempotent create.
+- Plans data foundation: owner-scoped `plans` and `plan_tasks` models and
+  migration.
 
 Suggested order:
 
-1. Plans and tasks.
+1. Plans and tasks APIs.
 2. Pregnancy diary.
 3. Devices and pump telemetry.
 4. Notifications and support tickets.
