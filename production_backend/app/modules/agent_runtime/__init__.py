@@ -9,6 +9,7 @@ from .models import (
     AgentToolCall,
     AgentToolOutput,
 )
+from .service import AgentRuntimeService
 
 __all__ = [
     "AgentAction",
@@ -20,4 +21,5 @@ __all__ = [
     "AgentThread",
     "AgentToolCall",
     "AgentToolOutput",
+    "AgentRuntimeService",
 ]

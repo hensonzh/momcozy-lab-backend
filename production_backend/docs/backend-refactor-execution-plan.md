@@ -250,6 +250,10 @@ Completed:
 - Agent runtime ledger data foundation: owner-scoped threads, runs, messages,
   tool calls/outputs, events, artifacts, actions, and context checkpoints with
   replay indexes and no provider session state columns.
+- Agent runtime ledger API: owner-scoped thread creation/list/detail, run
+  creation with persisted user message and replayable events, idempotent run
+  creation, run detail, event replay, and idempotent cancellation without model
+  calls.
 
 ### Phase 6: Agent Runtime Implementation
 
