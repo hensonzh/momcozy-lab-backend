@@ -106,6 +106,30 @@ def test_agent_runtime_service_rejects_second_active_run_for_thread() -> None:
     assert len(repository.runs) == 1
 
 
+def test_agent_runtime_service_releases_run_idempotency_when_active_run_blocks_creation() -> None:
+    owner_user_id = uuid4()
+    repository = FakeAgentRuntimeRepository()
+    idempotency_service = FakeIdempotencyService(status="reserved")
+    service = AgentRuntimeService(repository=repository, idempotency_service=idempotency_service)
+    first_run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="First"))
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            service.create_run(
+                actor_user_id=owner_user_id,
+                thread_id=repository.thread.id,
+                message="Second",
+                idempotency_key="idem-run-2",
+            )
+        )
+
+    assert exc_info.value.code == "agent_run_in_progress"
+    assert idempotency_service.released_record is idempotency_service.record
+    assert idempotency_service.completed_response_ref == ""
+    assert len(repository.runs) == 1
+    assert repository.runs[0].id == first_run.id
+
+
 def test_agent_runtime_service_allows_new_run_after_previous_terminal() -> None:
     owner_user_id = uuid4()
     repository = FakeAgentRuntimeRepository()
@@ -252,6 +276,7 @@ class FakeIdempotencyService:
         self.status = status
         self.reserve_kwargs = {}
         self.completed_response_ref = ""
+        self.released_record = None
         self.record = IdempotencyKey(
             actor_user_id=uuid4(),
             scope="agent.runs.create",
@@ -269,6 +294,9 @@ class FakeIdempotencyService:
         self.completed_response_ref = response_ref
         record.response_ref = response_ref
         return record
+
+    async def release(self, *, record):
+        self.released_record = record
 
 
 class FakeIdempotencyDecision:

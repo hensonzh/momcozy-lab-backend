@@ -98,6 +98,9 @@ class IdempotencyService:
     async def mark_completed(self, *, record: IdempotencyKey, response_ref: str) -> IdempotencyKey:
         return await self.repository.mark_idempotency_completed(idempotency_key=record, response_ref=response_ref)
 
+    async def release(self, *, record: IdempotencyKey) -> None:
+        await self.repository.delete_idempotency_key(idempotency_key=record)
+
 
 def request_hash(payload: Any) -> str:
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")

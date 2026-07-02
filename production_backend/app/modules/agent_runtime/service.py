@@ -96,7 +96,11 @@ class AgentRuntimeService:
             return await self._replay_run(owner_user_id=actor_user_id, response_ref=idempotency_record.response_ref)
 
         thread = await self._get_or_create_thread(actor_user_id=actor_user_id, thread_id=thread_id, title=_title_from_message(normalized_message))
-        await self._ensure_no_active_thread_run(owner_user_id=actor_user_id, thread_id=thread.id)
+        try:
+            await self._ensure_no_active_thread_run(owner_user_id=actor_user_id, thread_id=thread.id)
+        except ApiError:
+            await self._release_idempotency(idempotency_record=idempotency_record)
+            raise
         run = await self.repository.create_run(
             thread_id=thread.id,
             actor_user_id=actor_user_id,
@@ -449,6 +453,10 @@ class AgentRuntimeService:
     async def _complete_idempotency(self, *, idempotency_record: IdempotencyKey | None, response_ref: str) -> None:
         if idempotency_record is not None and self.idempotency_service is not None:
             await self.idempotency_service.mark_completed(record=idempotency_record, response_ref=response_ref)
+
+    async def _release_idempotency(self, *, idempotency_record: IdempotencyKey | None) -> None:
+        if idempotency_record is not None and self.idempotency_service is not None:
+            await self.idempotency_service.release(record=idempotency_record)
 
     async def _replay_run(self, *, owner_user_id: UUID, response_ref: str) -> AgentRun:
         run_id = parse_idempotency_response_ref(response_ref)

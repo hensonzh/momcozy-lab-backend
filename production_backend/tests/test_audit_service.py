@@ -91,6 +91,16 @@ def test_idempotency_service_normalizes_scope_and_key() -> None:
     assert repository.created_idempotency.key == "idem-1"
 
 
+def test_idempotency_service_releases_reserved_key() -> None:
+    repository = FakeAuditRepository()
+    service = IdempotencyService(repository=repository)
+    record = _idempotency_key(request_hash_value="hash-1")
+
+    asyncio.run(service.release(record=record))
+
+    assert repository.deleted_idempotency is record
+
+
 @pytest.mark.parametrize(
     ("scope", "key", "message"),
     [
@@ -212,6 +222,7 @@ class FakeAuditRepository:
     def __init__(self, *, existing_idempotency=None) -> None:
         self.existing_idempotency = existing_idempotency
         self.created_idempotency = None
+        self.deleted_idempotency = None
         self.audit_kwargs = {}
         self.lookup_kwargs = {}
 
@@ -231,3 +242,6 @@ class FakeAuditRepository:
         idempotency_key.status = "completed"
         idempotency_key.response_ref = response_ref
         return idempotency_key
+
+    async def delete_idempotency_key(self, *, idempotency_key):
+        self.deleted_idempotency = idempotency_key

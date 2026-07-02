@@ -87,6 +87,10 @@ class AuditRepository:
         await self.session.flush()
         return idempotency_key
 
+    async def delete_idempotency_key(self, *, idempotency_key: IdempotencyKey) -> None:
+        await self.session.delete(idempotency_key)
+        await self.session.flush()
+
 
 class OutboxRepository:
     def __init__(self, session: AsyncSession) -> None:
