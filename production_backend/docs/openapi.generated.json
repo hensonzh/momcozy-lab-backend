@@ -99,10 +99,6 @@
             "title": "Id",
             "type": "string"
           },
-          "idempotency_key": {
-            "title": "Idempotency Key",
-            "type": "string"
-          },
           "preview_payload": {
             "additionalProperties": true,
             "title": "Preview Payload",
@@ -140,7 +136,6 @@
           "status",
           "side_effect_level",
           "preview_payload",
-          "idempotency_key",
           "error_code"
         ],
         "title": "AgentActionRead",

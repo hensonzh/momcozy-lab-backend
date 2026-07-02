@@ -140,6 +140,9 @@ def test_agent_action_confirm_and_reject_use_current_user_scope() -> None:
     assert "apply_payload" not in get_response.json()
     assert "apply_payload" not in confirm_response.json()
     assert "apply_payload" not in reject_response.json()
+    assert "idempotency_key" not in get_response.json()
+    assert "idempotency_key" not in confirm_response.json()
+    assert "idempotency_key" not in reject_response.json()
     assert fake_service.get_action_kwargs["owner_user_id"] == user_id
     assert fake_service.confirm_action_kwargs["idempotency_key"] == "idem-action"
     assert fake_service.reject_action_kwargs["reason"] == "not now"
