@@ -48,14 +48,49 @@ def test_agent_run_controls_lock_context_releases_owned_lock() -> None:
     assert released is None
 
 
+def test_agent_run_controls_extend_lock_requires_owner_token() -> None:
+    redis = FakeRedis()
+    controls = AgentRunControls(redis)
+    run_id = uuid4()
+
+    async def exercise() -> tuple[bool, bool]:
+        acquired = await controls.acquire_run_lock(run_id=run_id, owner_token="owner")
+        other_extended = await controls.extend_run_lock(run_id=run_id, owner_token="other", ttl_seconds=30)
+        owner_extended = await controls.extend_run_lock(run_id=run_id, owner_token="owner", ttl_seconds=30)
+        return acquired and other_extended, owner_extended
+
+    other_extended, owner_extended = asyncio.run(exercise())
+
+    assert other_extended is False
+    assert owner_extended is True
+
+
+def test_agent_run_controls_lock_context_refreshes_owned_lock() -> None:
+    redis = FakeRedis()
+    controls = AgentRunControls(redis)
+    run_id = uuid4()
+
+    async def exercise() -> int:
+        async with controls.run_lock(run_id=run_id, ttl_seconds=30, refresh_interval_seconds=0.01) as acquired:
+            assert acquired is True
+            await asyncio.sleep(0.03)
+        return redis.set_count
+
+    set_count = asyncio.run(exercise())
+
+    assert set_count >= 2
+
+
 class FakeRedis:
     def __init__(self) -> None:
         self.values = {}
+        self.set_count = 0
 
     async def set(self, key, value, *, ex=None, nx=False):
         if nx and key in self.values:
             return False
         self.values[key] = str(value)
+        self.set_count += 1
         return True
 
     async def get(self, key):

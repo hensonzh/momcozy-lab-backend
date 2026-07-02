@@ -49,8 +49,24 @@ def test_agent_runtime_service_cancels_run_idempotently_and_replays_events() -> 
     assert cancelled.status == "cancelled"
     assert second_cancel.status == "cancelled"
     assert controls.cancelled_run_id == run.id
+    assert controls.cleared_cancel_run_id == run.id
     assert controls.cleared_active_run == (repository.thread.id, run.id)
     assert [event.event_type for event in replayed] == ["message.completed", "run.cancelled"]
+
+
+def test_agent_runtime_service_preserves_cancel_flag_for_running_run() -> None:
+    owner_user_id = uuid4()
+    repository = FakeAgentRuntimeRepository()
+    controls = FakeAgentRunControls()
+    service = AgentRuntimeService(repository=repository, controls=controls)
+    run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Hello"))
+    run.status = "running"
+
+    cancelled = asyncio.run(service.cancel_run(owner_user_id=owner_user_id, run_id=run.id, reason="stop generation"))
+
+    assert cancelled.status == "cancelled"
+    assert controls.cancelled_run_id == run.id
+    assert controls.cleared_cancel_run_id is None
 
 
 def test_agent_runtime_service_blocks_unsafe_run_before_queueing_model_work() -> None:
@@ -220,6 +236,7 @@ class FakeAgentRunControls:
         self.active_run = None
         self.cleared_active_run = None
         self.cancelled_run_id = None
+        self.cleared_cancel_run_id = None
         self.stream_cursor = None
 
     async def set_active_run(self, *, thread_id, run_id):
@@ -230,6 +247,9 @@ class FakeAgentRunControls:
 
     async def request_cancel(self, *, run_id):
         self.cancelled_run_id = run_id
+
+    async def clear_cancel(self, *, run_id):
+        self.cleared_cancel_run_id = run_id
 
     async def set_stream_cursor(self, *, run_id, sequence):
         self.stream_cursor = (run_id, sequence)

@@ -150,6 +150,7 @@ class AgentRuntimeService:
         run = await self.get_run(owner_user_id=owner_user_id, run_id=run_id)
         if run.status in TERMINAL_RUN_STATUSES:
             return run
+        previous_status = run.status
         if self.controls is not None:
             await self.controls.request_cancel(run_id=run.id)
         cancelled = await self.repository.mark_run_cancelled(
@@ -165,6 +166,8 @@ class AgentRuntimeService:
         )
         if self.controls is not None:
             await self.controls.clear_active_run(thread_id=cancelled.thread_id, run_id=cancelled.id)
+            if previous_status != "running":
+                await self.controls.clear_cancel(run_id=cancelled.id)
         return cancelled
 
     async def list_events(

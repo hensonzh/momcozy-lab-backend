@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 from uuid import UUID, uuid4
@@ -48,6 +49,14 @@ class AgentRunControls:
     async def acquire_run_lock(self, *, run_id: UUID, owner_token: str, ttl_seconds: int = 60) -> bool:
         return bool(await self.redis.set(_run_lock_key(run_id), owner_token, ex=ttl_seconds, nx=True))
 
+    async def extend_run_lock(self, *, run_id: UUID, owner_token: str, ttl_seconds: int = 60) -> bool:
+        key = _run_lock_key(run_id)
+        current = await self.redis.get(key)
+        if current and str(current) == owner_token:
+            await self.redis.set(key, owner_token, ex=ttl_seconds)
+            return True
+        return False
+
     async def release_run_lock(self, *, run_id: UUID, owner_token: str) -> None:
         key = _run_lock_key(run_id)
         current = await self.redis.get(key)
@@ -55,14 +64,50 @@ class AgentRunControls:
             await self.redis.delete(key)
 
     @asynccontextmanager
-    async def run_lock(self, *, run_id: UUID, ttl_seconds: int = 60) -> AsyncIterator[bool]:
+    async def run_lock(
+        self,
+        *,
+        run_id: UUID,
+        ttl_seconds: int = 60,
+        refresh_interval_seconds: float | None = None,
+    ) -> AsyncIterator[bool]:
         owner_token = uuid4().hex
         acquired = await self.acquire_run_lock(run_id=run_id, owner_token=owner_token, ttl_seconds=ttl_seconds)
+        refresh_task: asyncio.Task[None] | None = None
+        if acquired:
+            refresh_task = asyncio.create_task(
+                self._refresh_run_lock(
+                    run_id=run_id,
+                    owner_token=owner_token,
+                    ttl_seconds=ttl_seconds,
+                    refresh_interval_seconds=refresh_interval_seconds or _default_refresh_interval(ttl_seconds),
+                )
+            )
         try:
             yield acquired
         finally:
+            if refresh_task is not None:
+                refresh_task.cancel()
+                try:
+                    await refresh_task
+                except asyncio.CancelledError:
+                    pass
             if acquired:
                 await self.release_run_lock(run_id=run_id, owner_token=owner_token)
+
+    async def _refresh_run_lock(
+        self,
+        *,
+        run_id: UUID,
+        owner_token: str,
+        ttl_seconds: int,
+        refresh_interval_seconds: float,
+    ) -> None:
+        while True:
+            await asyncio.sleep(refresh_interval_seconds)
+            renewed = await self.extend_run_lock(run_id=run_id, owner_token=owner_token, ttl_seconds=ttl_seconds)
+            if not renewed:
+                return
 
 
 def _run_lock_key(run_id: UUID) -> str:
@@ -79,3 +124,7 @@ def _stream_cursor_key(run_id: UUID) -> str:
 
 def _active_run_key(thread_id: UUID) -> str:
     return f"agent:thread:{thread_id}:active_run"
+
+
+def _default_refresh_interval(ttl_seconds: int) -> float:
+    return max(min(ttl_seconds / 3, 30), 1)
