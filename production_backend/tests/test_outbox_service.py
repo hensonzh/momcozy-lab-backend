@@ -1,6 +1,9 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
+from production_backend.app.core.errors import ApiError
 from production_backend.app.modules.audit.models import OutboxJob
 from production_backend.app.modules.audit.outbox import OutboxRetryPolicy, OutboxService
 
@@ -35,6 +38,25 @@ def test_outbox_service_enqueue_creates_due_job() -> None:
     assert job.payload == {"file_id": "file-1"}
     assert job.next_attempt_at == run_at
     assert job.request_id == "req_123"
+
+
+def test_outbox_service_enqueue_rejects_blank_idempotency_key() -> None:
+    service = OutboxService(repository=FakeOutboxRepository())
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(service.enqueue(job_type="files.cleanup", payload={}, idempotency_key="  "))
+
+    assert exc_info.value.code == "validation_failed"
+
+
+def test_outbox_service_enqueue_normalizes_idempotency_key() -> None:
+    repository = FakeOutboxRepository()
+    service = OutboxService(repository=repository)
+
+    job = asyncio.run(service.enqueue(job_type="files.cleanup", payload={}, idempotency_key=" job-1 "))
+
+    assert job.idempotency_key == "job-1"
+    assert repository.lookup_key == "job-1"
 
 
 def test_outbox_service_lock_next_due_sets_lease() -> None:
@@ -103,8 +125,10 @@ class FakeOutboxRepository:
         self.lock_job = lock_job
         self.created_job = None
         self.lock_kwargs = {}
+        self.lookup_key = ""
 
     async def get_by_idempotency_key(self, *, idempotency_key: str):
+        self.lookup_key = idempotency_key
         return self.existing_by_key
 
     async def create_job(self, **kwargs):

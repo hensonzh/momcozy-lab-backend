@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
+from ...core.errors import ApiError
 from .models import OutboxJob
 from .repository import OutboxRepository
 
@@ -33,14 +34,18 @@ class OutboxService:
         request_id: str = "",
         trace_id: str = "",
     ) -> OutboxJob:
-        existing = await self.repository.get_by_idempotency_key(idempotency_key=idempotency_key)
+        normalized_key = idempotency_key.strip()
+        if not normalized_key:
+            raise ApiError(code="validation_failed", message="Outbox idempotency key is required.", status=422)
+
+        existing = await self.repository.get_by_idempotency_key(idempotency_key=normalized_key)
         if existing is not None:
             return existing
 
         return await self.repository.create_job(
             job_type=job_type,
             payload=payload,
-            idempotency_key=idempotency_key,
+            idempotency_key=normalized_key,
             action_id=action_id,
             max_attempts=max_attempts or self.retry_policy.max_attempts,
             next_attempt_at=run_at or _utcnow(),
