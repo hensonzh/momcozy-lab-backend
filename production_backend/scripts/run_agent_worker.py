@@ -20,8 +20,16 @@ from production_backend.app.modules.agent_runtime.state_store import AgentRuntim
 from production_backend.app.modules.agent_runtime.tools import ToolExecutor, build_default_tool_handlers, default_tool_registry
 from production_backend.app.modules.audit import AuditService, IdempotencyService, OutboxService
 from production_backend.app.modules.audit.repository import AuditRepository, OutboxRepository
+from production_backend.app.modules.devices.repository import DevicesRepository
+from production_backend.app.modules.devices.service import DevicesService
+from production_backend.app.modules.diary.repository import DiaryRepository
+from production_backend.app.modules.diary.service import DiaryService
+from production_backend.app.modules.plans.repository import PlansRepository
+from production_backend.app.modules.plans.service import PlansService
 from production_backend.app.modules.profiles.repository import ProfileRepository
 from production_backend.app.modules.profiles.service import ProfileService
+from production_backend.app.modules.records.repository import RecordsRepository
+from production_backend.app.modules.records.service import RecordsService
 from production_backend.app.workers.agent_run import AgentRunQueueWorker, AgentRunWorker
 
 
@@ -58,6 +66,25 @@ async def run_agent_worker(
                     audit_service=AuditService(repository=audit_repository),
                     idempotency_service=IdempotencyService(repository=audit_repository),
                 )
+                records_service = RecordsService(
+                    repository=RecordsRepository(session),
+                    audit_service=AuditService(repository=audit_repository),
+                    idempotency_service=IdempotencyService(repository=audit_repository),
+                )
+                plans_service = PlansService(
+                    repository=PlansRepository(session),
+                    audit_service=AuditService(repository=audit_repository),
+                    idempotency_service=IdempotencyService(repository=audit_repository),
+                )
+                diary_service = DiaryService(
+                    repository=DiaryRepository(session),
+                    audit_service=AuditService(repository=audit_repository),
+                )
+                devices_service = DevicesService(
+                    repository=DevicesRepository(session),
+                    audit_service=AuditService(repository=audit_repository),
+                    idempotency_service=IdempotencyService(repository=audit_repository),
+                )
                 tool_registry = default_tool_registry()
                 event_sink = AgentEventSink(repository=repository, controls=controls)
                 tool_executor = ToolExecutor(
@@ -66,6 +93,10 @@ async def run_agent_worker(
                     event_sink=event_sink,
                     handlers=build_default_tool_handlers(
                         profile_service=profile_service,
+                        records_service=records_service,
+                        plans_service=plans_service,
+                        diary_service=diary_service,
+                        devices_service=devices_service,
                         agent_runtime_service=agent_runtime_service,
                     ),
                 )

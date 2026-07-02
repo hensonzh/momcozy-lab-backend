@@ -24,17 +24,23 @@ def test_default_graph_registry_uses_langgraph_sdk_pattern() -> None:
 def test_tool_contract_registry_declares_permission_confirmation_and_blocking_policy() -> None:
     registry = default_tool_registry()
     support_ticket = registry.get("support.ticket.propose")
+    business_context = registry.get("business.context.read")
 
     assert support_ticket.read_or_write == "write"
     assert support_ticket.owner_scope == "actor"
     assert support_ticket.requires_confirmation is True
     assert support_ticket.blocking_policy == "wait_for_confirmation"
+    assert business_context.read_or_write == "read"
+    assert business_context.requires_confirmation is False
+    assert business_context.audit_required is False
     assert "profile.read" in registry.names_for_sdk()
+    assert "business.context.read" in registry.names_for_sdk()
 
 
 def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> None:
     registry = default_tool_registry()
     profile_schema = tool_input_schema(registry.get("profile.read").input_schema_ref)
+    business_schema = tool_input_schema(registry.get("business.context.read").input_schema_ref)
     support_schema = tool_input_schema(registry.get("support.ticket.propose").input_schema_ref)
 
     assert profile_schema == {
@@ -43,6 +49,8 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
         "additionalProperties": False,
         "properties": {},
     }
+    assert business_schema["additionalProperties"] is False
+    assert business_schema["properties"]["limit"]["maximum"] == 20
     assert support_schema["required"] == ["issue_summary"]
     assert support_schema["additionalProperties"] is False
     assert "issue_summary" in support_schema["properties"]

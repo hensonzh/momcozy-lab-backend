@@ -1,12 +1,20 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 from uuid import UUID
 
 from ....core.errors import ApiError
+from ...devices.models import PumpDevice, PumpTelemetryEvent
+from ...devices.service import DevicesService
+from ...diary.models import PregnancyDiaryEntry
+from ...diary.service import DiaryService
+from ...plans.models import Plan, PlanTask
+from ...plans.service import PlansService
 from ...profiles.models import InfantProfile, UserProfile
 from ...profiles.service import ProfileService
+from ...records.models import FeedingRecord, GrowthRecord, PumpingRecord
+from ...records.service import RecordsService
 from ...support.agent_actions import SUPPORT_TICKET_CREATE_ACTION
 from ..service import AgentRuntimeService
 from .executor import ToolHandler, ToolHandlerContext
@@ -55,13 +63,68 @@ class SupportTicketProposeToolHandler:
         }
 
 
+class BusinessContextReadToolHandler:
+    def __init__(
+        self,
+        *,
+        records_service: RecordsService,
+        plans_service: PlansService,
+        diary_service: DiaryService,
+        devices_service: DevicesService,
+    ) -> None:
+        self.records_service = records_service
+        self.plans_service = plans_service
+        self.diary_service = diary_service
+        self.devices_service = devices_service
+
+    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
+        limit = _limit(context.args.get("limit"), default=5, max_limit=20)
+        owner_user_id = context.actor.user_id
+        feedings = await self.records_service.list_feedings(owner_user_id=owner_user_id, limit=limit)
+        pumpings = await self.records_service.list_pumpings(owner_user_id=owner_user_id, limit=limit)
+        growth = await self.records_service.list_growth(owner_user_id=owner_user_id, limit=limit)
+        plans = await self.plans_service.list_plans(owner_user_id=owner_user_id, limit=limit)
+        tasks = await self.plans_service.list_tasks(owner_user_id=owner_user_id, limit=limit)
+        diary_entries = await self.diary_service.list_entries(owner_user_id=owner_user_id, limit=limit)
+        devices = await self.devices_service.list_devices(owner_user_id=owner_user_id)
+        telemetry = await self.devices_service.list_telemetry_events(owner_user_id=owner_user_id, limit=limit)
+        return {
+            "records": {
+                "feedings": [_feeding_payload(record) for record in feedings],
+                "pumpings": [_pumping_payload(record) for record in pumpings],
+                "growth": [_growth_payload(record) for record in growth],
+            },
+            "plans": {
+                "plans": [_plan_payload(plan) for plan in plans],
+                "tasks": [_task_payload(task) for task in tasks],
+            },
+            "diary": {
+                "entries": [_diary_payload(entry) for entry in diary_entries],
+            },
+            "devices": {
+                "pumps": [_device_payload(device) for device in devices[:limit]],
+                "telemetry": [_telemetry_payload(event) for event in telemetry],
+            },
+        }
+
+
 def build_default_tool_handlers(
     *,
     profile_service: ProfileService,
+    records_service: RecordsService,
+    plans_service: PlansService,
+    diary_service: DiaryService,
+    devices_service: DevicesService,
     agent_runtime_service: AgentRuntimeService,
 ) -> dict[str, ToolHandler]:
     return {
         "profile.read": ProfileReadToolHandler(service=profile_service),
+        "business.context.read": BusinessContextReadToolHandler(
+            records_service=records_service,
+            plans_service=plans_service,
+            diary_service=diary_service,
+            devices_service=devices_service,
+        ),
         "support.ticket.propose": SupportTicketProposeToolHandler(runtime_service=agent_runtime_service),
     }
 
@@ -161,3 +224,116 @@ def _text(payload: dict[str, Any], key: str) -> str:
 
 def _date_iso(value: date | None) -> str | None:
     return value.isoformat() if value is not None else None
+
+
+def _datetime_iso(value: datetime | None) -> str | None:
+    return value.isoformat() if value is not None else None
+
+
+def _feeding_payload(record: FeedingRecord) -> dict[str, Any]:
+    return {
+        "id": str(record.id),
+        "infant_id": str(record.infant_id) if record.infant_id else None,
+        "feed_time": _datetime_iso(record.feed_time),
+        "feed_type": record.feed_type,
+        "feed_action": record.feed_action,
+        "volume_ml": record.volume_ml,
+        "duration_seconds": record.duration_seconds,
+        "title": record.title,
+    }
+
+
+def _pumping_payload(record: PumpingRecord) -> dict[str, Any]:
+    return {
+        "id": str(record.id),
+        "pump_start_time": _datetime_iso(record.pump_start_time),
+        "pump_end_time": _datetime_iso(record.pump_end_time),
+        "milk_volume_ml": record.milk_volume_ml,
+        "duration_seconds": record.duration_seconds,
+        "pump_type": record.pump_type,
+        "source": record.source,
+        "title": record.title,
+    }
+
+
+def _growth_payload(record: GrowthRecord) -> dict[str, Any]:
+    return {
+        "id": str(record.id),
+        "infant_id": str(record.infant_id) if record.infant_id else None,
+        "measured_at": _datetime_iso(record.measured_at),
+        "height_cm": record.height_cm,
+        "weight_kg": record.weight_kg,
+        "head_cm": record.head_cm,
+    }
+
+
+def _plan_payload(plan: Plan) -> dict[str, Any]:
+    return {
+        "id": str(plan.id),
+        "plan_type": plan.plan_type,
+        "title": plan.title,
+        "summary": _truncate(plan.summary),
+        "status": plan.status,
+        "source": plan.source,
+        "updated_at": _datetime_iso(plan.updated_at),
+    }
+
+
+def _task_payload(task: PlanTask) -> dict[str, Any]:
+    return {
+        "id": str(task.id),
+        "plan_id": str(task.plan_id) if task.plan_id else None,
+        "task_date": _date_iso(task.task_date),
+        "task_time": task.task_time,
+        "title": task.title,
+        "status": task.status,
+        "completed_at": _datetime_iso(task.completed_at),
+    }
+
+
+def _diary_payload(entry: PregnancyDiaryEntry) -> dict[str, Any]:
+    return {
+        "id": str(entry.id),
+        "entry_date": _date_iso(entry.entry_date),
+        "gestational_week": entry.gestational_week,
+        "mood": entry.mood,
+        "energy_level": entry.energy_level,
+        "symptom_tags": entry.symptom_tags,
+        "content_summary": _truncate(entry.content),
+    }
+
+
+def _device_payload(device: PumpDevice) -> dict[str, Any]:
+    return {
+        "id": str(device.id),
+        "device_id": device.device_id,
+        "model": device.model,
+        "firmware_version": device.firmware_version,
+        "status": device.status,
+        "last_seen_at": _datetime_iso(device.last_seen_at),
+    }
+
+
+def _telemetry_payload(event: PumpTelemetryEvent) -> dict[str, Any]:
+    return {
+        "id": str(event.id),
+        "device_id": event.device_id,
+        "event_type": event.event_type,
+        "occurred_at": _datetime_iso(event.occurred_at),
+        "payload": event.payload,
+    }
+
+
+def _limit(value: Any, *, default: int, max_limit: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(1, min(parsed, max_limit))
+
+
+def _truncate(value: str, *, max_length: int = 500) -> str:
+    text = str(value or "").strip()
+    if len(text) <= max_length:
+        return text
+    return text[:max_length].rstrip() + "..."

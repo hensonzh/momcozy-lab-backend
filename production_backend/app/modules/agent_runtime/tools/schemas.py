@@ -16,6 +16,20 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
         "additionalProperties": False,
         "properties": {},
     },
+    "BusinessContextQuery": {
+        "title": "BusinessContextQuery",
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 20,
+                "default": 5,
+                "description": "Maximum items per business context section.",
+            }
+        },
+    },
     "SupportTicketProposalCreate": {
         "title": "SupportTicketProposalCreate",
         "type": "object",

@@ -356,6 +356,9 @@ Completed:
 - SDK tool input schemas: tool contracts now resolve `input_schema_ref` to
   explicit JSON Schema before being exposed to the OpenAI Agents SDK, so models
   no longer receive unconstrained `additionalProperties: true` tool parameters.
+- Agent business context tool: `business.context.read` exposes bounded,
+  owner-scoped read summaries for records, plans, diary, and devices through
+  service-layer permissions instead of session-state snapshots.
 - Agent tool lifecycle events: guarded tool execution now persists
   `tool.started`, `tool.completed`, and `tool.failed` application events
   alongside tool call/output ledger rows for stream replay and debugging.
@@ -494,6 +497,8 @@ Completed backend commits have established:
 - explicit SDK tool parameter schemas for profile context reads and support
   ticket action proposals, keeping owner scope in backend auth rather than
   model-supplied user IDs
+- bounded read-only business context tool for migrated records, plans, diary,
+  and device facts
 - application-level tool lifecycle events emitted by the ToolExecutor, keeping
   persisted SSE/replay streams aligned with the tool ledger
 - shared AgentEventSink wiring in runtime/tool/action workers so Redis stream

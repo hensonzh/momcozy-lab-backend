@@ -12,6 +12,7 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
     "user": frozenset(
         {
             "profile:read:self",
+            "business_context:read:self",
             "support_ticket:create:self",
         }
     )

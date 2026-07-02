@@ -49,6 +49,25 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         ToolContract(
+            name="business.context.read",
+            domain="business_context",
+            description="Read current user's recent records, plans, diary, and device context as a bounded summary.",
+            input_schema_ref="BusinessContextQuery",
+            output_schema_ref="BusinessContextRead",
+            read_or_write="read",
+            required_permission="business_context:read:self",
+            owner_scope="actor",
+            side_effect_level="none",
+            blocking_policy="must_wait",
+            result_dependency="next_tool_call",
+            requires_confirmation=False,
+            idempotency_required=False,
+            audit_required=False,
+            timeout_seconds=10,
+        )
+    )
+    registry.register(
+        ToolContract(
             name="support.ticket.propose",
             domain="support",
             description="Create a support ticket action proposal after user confirmation intent is clear.",
