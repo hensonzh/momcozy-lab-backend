@@ -1,6 +1,7 @@
 from .controls import AgentRunControls
 from .evals import AgentEvalService
 from .execution import AgentRunExecutionResult
+from .graphs import AgentGraphCheckpointStore, GraphCheckpointRef
 from .models import (
     AgentAction,
     AgentArtifact,
@@ -22,8 +23,10 @@ __all__ = [
     "AgentAction",
     "AgentArtifact",
     "AgentEvalService",
+    "AgentGraphCheckpointStore",
     "AgentRunControls",
     "AgentRunExecutionResult",
+    "GraphCheckpointRef",
     "AgentContextCheckpoint",
     "AgentEvalCase",
     "AgentEvent",
