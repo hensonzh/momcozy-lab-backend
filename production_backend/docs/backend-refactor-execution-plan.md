@@ -178,14 +178,15 @@ Completed:
   validation, audit, and idempotent create.
 - Pumping record API: owner-scoped create/list/delete with audit and idempotent
   create.
+- Growth record API: owner-scoped create/list/delete with infant ownership
+  validation, audit, and idempotent create.
 
 Suggested order:
 
-1. Records APIs: growth.
-2. Plans and tasks.
-3. Pregnancy diary.
-4. Devices and pump telemetry.
-5. Notifications and support tickets.
+1. Plans and tasks.
+2. Pregnancy diary.
+3. Devices and pump telemetry.
+4. Notifications and support tickets.
 
 Rules:
 

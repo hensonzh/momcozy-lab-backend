@@ -74,3 +74,34 @@ class PumpingRecordCreate(BaseModel):
 
 class PumpingRecordListResponse(BaseModel):
     items: list[PumpingRecordRead]
+
+
+class GrowthRecordRead(BaseModel):
+    id: UUID
+    owner_user_id: UUID
+    infant_id: UUID | None = None
+    measured_at: datetime
+    height_cm: float | None = None
+    weight_kg: float | None = None
+    head_cm: float | None = None
+    status: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class GrowthRecordCreate(BaseModel):
+    infant_id: UUID | None = None
+    measured_at: datetime
+    height_cm: float | None = Field(default=None, gt=0)
+    weight_kg: float | None = Field(default=None, gt=0)
+    head_cm: float | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def require_measurement(self) -> "GrowthRecordCreate":
+        if self.height_cm is None and self.weight_kg is None and self.head_cm is None:
+            raise ValueError("height_cm, weight_kg, or head_cm is required")
+        return self
+
+
+class GrowthRecordListResponse(BaseModel):
+    items: list[GrowthRecordRead]

@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from production_backend.app.core.settings import Settings
 from production_backend.app.factory import create_app
 from production_backend.app.modules.auth import CurrentUser
-from production_backend.app.modules.records.models import FeedingRecord, PumpingRecord
+from production_backend.app.modules.records.models import FeedingRecord, GrowthRecord, PumpingRecord
 from production_backend.app.modules.records.router import get_records_service
 
 
@@ -110,6 +110,45 @@ def test_list_and_delete_pumping_use_current_user_scope() -> None:
     assert fake_service.delete_pumping_kwargs["request_id"] == "req_delete"
 
 
+def test_create_growth_uses_current_user_request_id_and_idempotency() -> None:
+    user_id = uuid4()
+    fake_service = FakeRecordsService(user_id=user_id)
+    app = create_app(Settings(app_env="test"))
+    _override_current_user(app, user_id)
+    app.dependency_overrides[get_records_service] = lambda: fake_service
+
+    response = TestClient(app).post(
+        "/v1/records/growth",
+        headers={"X-Request-ID": "req_growth", "Idempotency-Key": " idem-growth "},
+        json={"measured_at": _now_iso(), "weight_kg": 4.2},
+    )
+
+    assert response.status_code == 201
+    assert fake_service.create_growth_kwargs["owner_user_id"] == user_id
+    assert fake_service.create_growth_kwargs["request_id"] == "req_growth"
+    assert fake_service.create_growth_kwargs["idempotency_key"] == "idem-growth"
+
+
+def test_list_and_delete_growth_use_current_user_scope() -> None:
+    user_id = uuid4()
+    fake_service = FakeRecordsService(user_id=user_id)
+    app = create_app(Settings(app_env="test"))
+    _override_current_user(app, user_id)
+    app.dependency_overrides[get_records_service] = lambda: fake_service
+
+    list_response = TestClient(app).get("/v1/records/growth?limit=10")
+    delete_response = TestClient(app).delete(
+        f"/v1/records/growth/{fake_service.record_id}",
+        headers={"X-Request-ID": "req_delete"},
+    )
+
+    assert list_response.status_code == 200
+    assert delete_response.status_code == 204
+    assert fake_service.list_growth_kwargs["owner_user_id"] == user_id
+    assert fake_service.list_growth_kwargs["limit"] == 10
+    assert fake_service.delete_growth_kwargs["request_id"] == "req_delete"
+
+
 def _override_current_user(app, user_id: UUID) -> None:
     from production_backend.app.api.dependencies import require_current_user
 
@@ -140,10 +179,13 @@ class FakeRecordsService:
         self.record_id = uuid4()
         self.create_feeding_kwargs = {}
         self.create_pumping_kwargs = {}
+        self.create_growth_kwargs = {}
         self.list_feedings_kwargs = {}
         self.list_pumpings_kwargs = {}
+        self.list_growth_kwargs = {}
         self.delete_feeding_kwargs = {}
         self.delete_pumping_kwargs = {}
+        self.delete_growth_kwargs = {}
 
     async def create_feeding(self, **kwargs):
         self.create_feeding_kwargs = kwargs
@@ -167,6 +209,17 @@ class FakeRecordsService:
     async def delete_pumping(self, **kwargs):
         self.delete_pumping_kwargs = kwargs
 
+    async def create_growth(self, **kwargs):
+        self.create_growth_kwargs = kwargs
+        return self._growth()
+
+    async def list_growth(self, **kwargs):
+        self.list_growth_kwargs = kwargs
+        return [self._growth()]
+
+    async def delete_growth(self, **kwargs):
+        self.delete_growth_kwargs = kwargs
+
     def _feeding(self) -> FeedingRecord:
         return FeedingRecord(
             id=self.record_id,
@@ -178,6 +231,18 @@ class FakeRecordsService:
             volume_ml=90,
             duration_seconds=None,
             title="",
+            status="active",
+        )
+
+    def _growth(self) -> GrowthRecord:
+        return GrowthRecord(
+            id=self.record_id,
+            owner_user_id=self.user_id,
+            infant_id=None,
+            measured_at=_now(),
+            height_cm=None,
+            weight_kg=4.2,
+            head_cm=None,
             status="active",
         )
 

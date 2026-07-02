@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..profiles.models import InfantProfile
-from .models import FeedingRecord, PumpingRecord
+from .models import FeedingRecord, GrowthRecord, PumpingRecord
 
 
 class RecordsRepository:
@@ -155,6 +155,69 @@ class RecordsRepository:
         deleted_at: datetime,
     ) -> PumpingRecord | None:
         record = await self.get_pumping_for_owner(record_id=record_id, owner_user_id=owner_user_id)
+        if record is None:
+            return None
+        record.status = "deleted"
+        record.deleted_at = deleted_at
+        await self.session.flush()
+        return record
+
+    async def create_growth(
+        self,
+        *,
+        owner_user_id: UUID,
+        infant_id: UUID | None,
+        measured_at: datetime,
+        height_cm: float | None,
+        weight_kg: float | None,
+        head_cm: float | None,
+    ) -> GrowthRecord:
+        record = GrowthRecord(
+            owner_user_id=owner_user_id,
+            infant_id=infant_id,
+            measured_at=measured_at,
+            height_cm=height_cm,
+            weight_kg=weight_kg,
+            head_cm=head_cm,
+        )
+        self.session.add(record)
+        await self.session.flush()
+        return record
+
+    async def get_growth_for_owner(self, *, record_id: UUID, owner_user_id: UUID) -> GrowthRecord | None:
+        statement = select(GrowthRecord).where(
+            GrowthRecord.id == record_id,
+            GrowthRecord.owner_user_id == owner_user_id,
+            GrowthRecord.deleted_at.is_(None),
+        )
+        return await self.session.scalar(statement)
+
+    async def list_growth(
+        self,
+        *,
+        owner_user_id: UUID,
+        infant_id: UUID | None,
+        limit: int,
+    ) -> list[GrowthRecord]:
+        conditions = [
+            GrowthRecord.owner_user_id == owner_user_id,
+            GrowthRecord.status == "active",
+            GrowthRecord.deleted_at.is_(None),
+        ]
+        if infant_id is not None:
+            conditions.append(GrowthRecord.infant_id == infant_id)
+        statement = select(GrowthRecord).where(*conditions).order_by(GrowthRecord.measured_at.desc()).limit(limit)
+        result = await self.session.scalars(statement)
+        return list(result.all())
+
+    async def soft_delete_growth(
+        self,
+        *,
+        record_id: UUID,
+        owner_user_id: UUID,
+        deleted_at: datetime,
+    ) -> GrowthRecord | None:
+        record = await self.get_growth_for_owner(record_id=record_id, owner_user_id=owner_user_id)
         if record is None:
             return None
         record.status = "deleted"

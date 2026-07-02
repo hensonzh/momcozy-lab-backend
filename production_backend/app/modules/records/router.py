@@ -17,6 +17,9 @@ from .schemas import (
     FeedingRecordCreate,
     FeedingRecordListResponse,
     FeedingRecordRead,
+    GrowthRecordCreate,
+    GrowthRecordListResponse,
+    GrowthRecordRead,
     PumpingRecordCreate,
     PumpingRecordListResponse,
     PumpingRecordRead,
@@ -139,6 +142,53 @@ async def delete_pumping(
     service: RecordsService = Depends(get_records_service),
 ) -> Response:
     await service.delete_pumping(
+        owner_user_id=current_user.user_id,
+        record_id=record_id,
+        request_id=str(getattr(request.state, "request_id", "") or ""),
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/growth", response_model=GrowthRecordRead, status_code=status.HTTP_201_CREATED)
+async def create_growth(
+    payload: GrowthRecordCreate,
+    request: Request,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    current_user: CurrentUser = Depends(require_current_user),
+    service: RecordsService = Depends(get_records_service),
+) -> GrowthRecordRead:
+    record = await service.create_growth(
+        owner_user_id=current_user.user_id,
+        infant_id=payload.infant_id,
+        measured_at=payload.measured_at,
+        height_cm=payload.height_cm,
+        weight_kg=payload.weight_kg,
+        head_cm=payload.head_cm,
+        request_id=str(getattr(request.state, "request_id", "") or ""),
+        idempotency_key=_normalize_idempotency_key(idempotency_key),
+    )
+    return GrowthRecordRead.model_validate(record)
+
+
+@router.get("/growth", response_model=GrowthRecordListResponse)
+async def list_growth(
+    infant_id: UUID | None = None,
+    limit: int = Query(default=50, ge=1, le=100),
+    current_user: CurrentUser = Depends(require_current_user),
+    service: RecordsService = Depends(get_records_service),
+) -> GrowthRecordListResponse:
+    records = await service.list_growth(owner_user_id=current_user.user_id, infant_id=infant_id, limit=limit)
+    return GrowthRecordListResponse(items=[GrowthRecordRead.model_validate(record) for record in records])
+
+
+@router.delete("/growth/{record_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_growth(
+    record_id: UUID,
+    request: Request,
+    current_user: CurrentUser = Depends(require_current_user),
+    service: RecordsService = Depends(get_records_service),
+) -> Response:
+    await service.delete_growth(
         owner_user_id=current_user.user_id,
         record_id=record_id,
         request_id=str(getattr(request.state, "request_id", "") or ""),

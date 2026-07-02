@@ -6,7 +6,7 @@ import pytest
 
 from production_backend.app.core.errors import ApiError
 from production_backend.app.modules.audit.models import IdempotencyKey
-from production_backend.app.modules.records.models import FeedingRecord, PumpingRecord
+from production_backend.app.modules.records.models import FeedingRecord, GrowthRecord, PumpingRecord
 from production_backend.app.modules.records.service import RecordsService
 
 
@@ -144,6 +144,48 @@ def test_records_service_lists_and_deletes_pumpings() -> None:
     assert audit_service.record_kwargs["action"] == "records.pumping.delete"
 
 
+def test_records_service_creates_growth_with_infant_scope_idempotency_and_audit() -> None:
+    owner_user_id = uuid4()
+    infant_id = uuid4()
+    repository = FakeRecordsRepository(infant_owner_ok=True)
+    idempotency_service = FakeIdempotencyService(status="reserved")
+    audit_service = FakeAuditService()
+    service = RecordsService(repository=repository, audit_service=audit_service, idempotency_service=idempotency_service)
+
+    record = asyncio.run(
+        service.create_growth(
+            owner_user_id=owner_user_id,
+            infant_id=infant_id,
+            measured_at=_now(),
+            weight_kg=4.2,
+            request_id="req_growth",
+            idempotency_key="idem-growth",
+        )
+    )
+
+    assert record.owner_user_id == owner_user_id
+    assert repository.create_growth_kwargs["infant_id"] == infant_id
+    assert idempotency_service.reserve_kwargs["scope"] == "records.growth.create"
+    assert idempotency_service.completed_response_ref == str(record.id)
+    assert audit_service.record_kwargs["action"] == "records.growth.create"
+
+
+def test_records_service_lists_and_deletes_growth() -> None:
+    owner_user_id = uuid4()
+    growth = _growth(owner_user_id=owner_user_id)
+    repository = FakeRecordsRepository(growths=[growth], growth=growth)
+    audit_service = FakeAuditService()
+    service = RecordsService(repository=repository, audit_service=audit_service)
+
+    records = asyncio.run(service.list_growth(owner_user_id=owner_user_id, limit=10))
+    asyncio.run(service.delete_growth(owner_user_id=owner_user_id, record_id=growth.id, request_id="req_delete"))
+
+    assert records == [growth]
+    assert repository.list_growth_kwargs["limit"] == 10
+    assert repository.deleted_growth.status == "deleted"
+    assert audit_service.record_kwargs["action"] == "records.growth.delete"
+
+
 def _now() -> datetime:
     return datetime(2026, 7, 2, 8, 0, tzinfo=timezone.utc)
 
@@ -178,19 +220,47 @@ def _pumping(*, owner_user_id: UUID, record_id: UUID | None = None) -> PumpingRe
     )
 
 
+def _growth(*, owner_user_id: UUID, record_id: UUID | None = None) -> GrowthRecord:
+    return GrowthRecord(
+        id=record_id or uuid4(),
+        owner_user_id=owner_user_id,
+        infant_id=None,
+        measured_at=_now(),
+        height_cm=None,
+        weight_kg=4.2,
+        head_cm=None,
+        status="active",
+    )
+
+
 class FakeRecordsRepository:
-    def __init__(self, *, infant_owner_ok=True, feeding=None, feedings=None, pumping=None, pumpings=None) -> None:
+    def __init__(
+        self,
+        *,
+        infant_owner_ok=True,
+        feeding=None,
+        feedings=None,
+        pumping=None,
+        pumpings=None,
+        growth=None,
+        growths=None,
+    ) -> None:
         self.infant_owner_ok = infant_owner_ok
         self.feeding = feeding
         self.feedings = feedings or []
         self.pumping = pumping
         self.pumpings = pumpings or []
+        self.growth = growth
+        self.growths = growths or []
         self.create_feeding_kwargs = {}
         self.create_pumping_kwargs = {}
+        self.create_growth_kwargs = {}
         self.list_feedings_kwargs = {}
         self.list_pumpings_kwargs = {}
+        self.list_growth_kwargs = {}
         self.deleted_feeding = None
         self.deleted_pumping = None
+        self.deleted_growth = None
 
     async def infant_belongs_to_owner(self, *, infant_id: UUID, owner_user_id: UUID):
         return self.infant_owner_ok
@@ -235,6 +305,27 @@ class FakeRecordsRepository:
         self.pumping.deleted_at = kwargs["deleted_at"]
         self.deleted_pumping = self.pumping
         return self.pumping
+
+    async def create_growth(self, **kwargs):
+        self.create_growth_kwargs = kwargs
+        self.growth = _growth(owner_user_id=kwargs["owner_user_id"])
+        self.growth.infant_id = kwargs["infant_id"]
+        return self.growth
+
+    async def get_growth_for_owner(self, *, record_id: UUID, owner_user_id: UUID):
+        return self.growth
+
+    async def list_growth(self, **kwargs):
+        self.list_growth_kwargs = kwargs
+        return self.growths
+
+    async def soft_delete_growth(self, **kwargs):
+        if self.growth is None:
+            return None
+        self.growth.status = "deleted"
+        self.growth.deleted_at = kwargs["deleted_at"]
+        self.deleted_growth = self.growth
+        return self.growth
 
 
 class FakeIdempotencyService:
