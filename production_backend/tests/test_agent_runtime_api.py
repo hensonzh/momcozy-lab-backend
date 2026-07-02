@@ -1,3 +1,4 @@
+import asyncio
 from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
@@ -5,7 +6,12 @@ from fastapi.testclient import TestClient
 from production_backend.app.core.settings import Settings
 from production_backend.app.factory import create_app
 from production_backend.app.modules.agent_runtime.models import AgentEvalCase, AgentEvent, AgentRun, AgentThread
-from production_backend.app.modules.agent_runtime.router import get_agent_eval_service, get_agent_replay_service, get_agent_runtime_service
+from production_backend.app.modules.agent_runtime.router import (
+    _stream_run_event_chunks,
+    get_agent_eval_service,
+    get_agent_replay_service,
+    get_agent_runtime_service,
+)
 from production_backend.app.modules.auth import CurrentUser
 
 
@@ -83,6 +89,33 @@ def test_agent_stream_can_follow_until_terminal_event() -> None:
     assert "event: run.progress" in response.text
     assert "event: run.completed" in response.text
     assert fake_service.list_events_call_count == 2
+
+
+def test_agent_stream_stops_before_polling_when_client_disconnected() -> None:
+    user_id = uuid4()
+    fake_service = FakeAgentRuntimeService(user_id=user_id)
+
+    async def disconnected() -> bool:
+        return True
+
+    async def collect() -> list[str]:
+        return [
+            chunk
+            async for chunk in _stream_run_event_chunks(
+                service=fake_service,
+                owner_user_id=user_id,
+                run_id=fake_service.run_id,
+                after_sequence=0,
+                limit=20,
+                follow=True,
+                poll_interval_seconds=0.1,
+                max_wait_seconds=1,
+                is_disconnected=disconnected,
+            )
+        ]
+
+    assert asyncio.run(collect()) == []
+    assert fake_service.list_events_call_count == 0
 
 
 def test_agent_action_confirm_and_reject_use_current_user_scope() -> None:

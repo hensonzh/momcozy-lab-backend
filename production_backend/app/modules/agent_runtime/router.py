@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from time import monotonic
 from uuid import UUID
 
@@ -153,6 +153,7 @@ async def list_run_events(
 @router.get("/runs/{run_id}/stream")
 async def stream_run_events(
     run_id: UUID,
+    request: Request,
     after_sequence: int = Query(default=0, ge=0),
     limit: int = Query(default=200, ge=1, le=500),
     follow: bool = Query(default=False),
@@ -171,6 +172,7 @@ async def stream_run_events(
             follow=follow,
             poll_interval_seconds=poll_interval_seconds,
             max_wait_seconds=max_wait_seconds,
+            is_disconnected=request.is_disconnected,
         ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache"},
@@ -264,10 +266,13 @@ async def _stream_run_event_chunks(
     follow: bool,
     poll_interval_seconds: float,
     max_wait_seconds: int,
+    is_disconnected: Callable[[], Awaitable[bool]] | None = None,
 ) -> AsyncIterator[str]:
     cursor = after_sequence
     deadline = monotonic() + max_wait_seconds
     while True:
+        if is_disconnected is not None and await is_disconnected():
+            return
         events = await service.list_events(owner_user_id=owner_user_id, run_id=run_id, after_sequence=cursor, limit=limit)
         if events:
             yield encode_sse_events(events)
@@ -275,5 +280,7 @@ async def _stream_run_event_chunks(
             if any(event.event_type in TERMINAL_STREAM_EVENT_TYPES for event in events):
                 return
         if not follow or monotonic() >= deadline:
+            return
+        if is_disconnected is not None and await is_disconnected():
             return
         await asyncio.sleep(poll_interval_seconds)
