@@ -319,6 +319,9 @@ Completed:
 - Agent action outbox apply skeleton: registered apply handlers can move actions
   through `applying -> applied` and emit `action.applied`; missing or permanent
   handler failures mark actions failed and emit `action.failed`.
+- Support ticket agent action handler: confirmed `support.ticket.create` actions
+  apply through `SupportTicketsService`, preserving owner scope, idempotency, and
+  audit instead of writing support tables from agent code.
 
 ### Phase 7: Safety, Observability, And Eval
 
@@ -411,6 +414,8 @@ Completed backend commits have established:
   and outbox status as separate contracts
 - agent action outbox apply handler skeleton with idempotent applied handling,
   explicit missing-handler failure, and persisted action events
+- first business action apply handler for `support.ticket.create`, routed
+  through the support service layer
 - OpenAPI schema export script, generated schema snapshot, and API handoff
   document for Flutter integration
 - Auth/token API contract tests for token response shape, validation envelope,
