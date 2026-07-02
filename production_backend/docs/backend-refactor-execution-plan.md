@@ -389,11 +389,13 @@ Completed backend commits have established:
   agent recovery, rollback, and security incidents.
 - CI workflow for production backend tests, Alembic head check, OpenAPI snapshot
   drift, legacy runtime reference scan, compose validation, and container build.
+- Flutter integration smoke fixtures for auth/session, file upload,
+  records/plans, idempotency, and agent event/SSE replay.
 
 Next recommended backend PR slices:
 
-1. Add production smoke fixtures for Flutter integration flows.
-2. Add migration compatibility smoke tests for an empty database.
-3. Add runbook entries for backup/restore and credential rotation drills.
-4. Add release compatibility notes for Flutter generated clients.
-5. Add lint/type gates once ruff/mypy configuration is introduced.
+1. Add migration compatibility smoke tests for an empty database.
+2. Add runbook entries for backup/restore and credential rotation drills.
+3. Add release compatibility notes for Flutter generated clients.
+4. Add lint/type gates once ruff/mypy configuration is introduced.
+5. Add first real Postgres integration test profile.

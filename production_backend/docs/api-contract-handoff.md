@@ -58,3 +58,6 @@ storage provider.
 
 Flutter repositories should be generated from or validated against the OpenAPI
 snapshot. Do not build new client code against legacy raw response shapes.
+
+Use `production_backend/docs/flutter-smoke-flows.json` as the initial integration
+smoke fixture for auth, core records/plans/files, and agent replay.
