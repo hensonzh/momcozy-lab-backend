@@ -26,8 +26,28 @@ def test_audit_service_records_actor_resource_and_request() -> None:
     )
 
     assert repository.audit_kwargs["actor_user_id"] == actor_user_id
+    assert repository.audit_kwargs["actor_type"] == "user"
     assert repository.audit_kwargs["action"] == "files.upload"
     assert repository.audit_kwargs["request_id"] == "req_123"
+
+
+def test_audit_service_can_attribute_service_actor() -> None:
+    repository = FakeAuditRepository()
+    service = AuditService(repository=repository)
+
+    asyncio.run(
+        service.record(
+            actor_user_id=None,
+            actor_type="service",
+            actor_service="notification-service",
+            action="notifications.create",
+            resource_type="notification",
+            resource_id="notify-1",
+        )
+    )
+
+    assert repository.audit_kwargs["actor_type"] == "service"
+    assert repository.audit_kwargs["actor_service"] == "notification-service"
 
 
 def test_idempotency_service_reserves_new_key() -> None:

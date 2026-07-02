@@ -12,3 +12,9 @@ def test_auth_identity_has_provider_subject_uniqueness() -> None:
     constraint_names = {constraint.name for constraint in table.constraints}
 
     assert "uq_auth_identities_provider_subject" in constraint_names
+
+
+def test_auth_identity_has_password_hash_column() -> None:
+    table = Base.metadata.tables["auth_identities"]
+
+    assert "password_hash" in table.columns

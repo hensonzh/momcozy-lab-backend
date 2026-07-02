@@ -121,10 +121,11 @@ Completed:
 - Permission policy helper for explicit permissions, admin role bypass, and
   owner-scope checks.
 - Internal service key dependency is separate from `CurrentUser` user auth.
-
-Remaining:
-
-- Login/signup API surface and service identity audit attribution.
+- Email/password signup and login API surface.
+- Access token issuing, refresh token rotation API, and logout session
+  revocation API.
+- Service-key initiated writes can be attributed in audit logs through
+  `actor_type=service` and `actor_service`.
 
 Acceptance:
 
@@ -363,9 +364,11 @@ Completed backend commits have established:
 - environment contract
 - request/error contract
 - structured request logging and basic metrics
+- Docker/compose local backend environment
 - DB/Alembic, Redis, and object storage foundation
-- user/auth identity schema, JWT `CurrentUser`, service key boundary, refresh
-  token/session schema
+- user/auth identity schema, signup/login/refresh/logout API, JWT
+  `CurrentUser`, service key boundary, refresh token/session schema, and service
+  actor audit attribution
 - owner-scoped files, profiles, records, plans, diary, devices, notifications,
   and support modules
 - audit/idempotency/outbox foundations
@@ -375,8 +378,8 @@ Completed backend commits have established:
 
 Next recommended backend PR slices:
 
-1. Add Docker/compose local development environment.
-2. Add login/signup API surface and service identity audit attribution.
-3. Add shared route-level idempotency helpers for retryable writes.
-4. Add OpenAPI/contract handoff artifacts for the Flutter rewrite.
-5. Add worker/runtime observability for outbox and agent tool/model operations.
+1. Add shared route-level idempotency helpers for retryable writes.
+2. Add OpenAPI/contract handoff artifacts for the Flutter rewrite.
+3. Add worker/runtime observability for outbox and agent tool/model operations.
+4. Add API-level contract tests for auth and token flows.
+5. Add deployment runbook and release smoke-test checklist.

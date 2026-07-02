@@ -5,8 +5,40 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
+from ..users.models import AuthIdentity, User
 from .models import DeviceSession, RefreshToken
+
+
+class AuthAccountRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def get_identity(self, *, provider: str, subject: str) -> AuthIdentity | None:
+        statement = (
+            select(AuthIdentity)
+            .options(selectinload(AuthIdentity.user))
+            .where(AuthIdentity.provider == provider, AuthIdentity.subject == subject)
+        )
+        return await self.session.scalar(statement)
+
+    async def get_user(self, *, user_id: UUID) -> User | None:
+        return await self.session.get(User, user_id)
+
+    async def create_email_user(self, *, email: str, password_hash: str, display_name: str) -> tuple[User, AuthIdentity]:
+        user = User(display_name=display_name)
+        identity = AuthIdentity(
+            user=user,
+            provider="email",
+            subject=email,
+            email=email,
+            password_hash=password_hash,
+        )
+        self.session.add(user)
+        self.session.add(identity)
+        await self.session.flush()
+        return user, identity
 
 
 class AuthSessionRepository:
@@ -52,6 +84,9 @@ class AuthSessionRepository:
     async def get_refresh_token_by_hash(self, *, token_hash: str) -> RefreshToken | None:
         statement = select(RefreshToken).where(RefreshToken.token_hash == token_hash)
         return await self.session.scalar(statement)
+
+    async def get_device_session(self, *, session_id: UUID) -> DeviceSession | None:
+        return await self.session.get(DeviceSession, session_id)
 
     async def rotate_refresh_token(
         self,

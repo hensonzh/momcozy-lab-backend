@@ -26,6 +26,8 @@ class AuditService:
         self,
         *,
         actor_user_id: UUID | None,
+        actor_type: str | None = None,
+        actor_service: str = "",
         action: str,
         resource_type: str,
         resource_id: str = "",
@@ -35,6 +37,8 @@ class AuditService:
     ) -> AuditLog:
         return await self.repository.record_audit(
             actor_user_id=actor_user_id,
+            actor_type=actor_type or ("user" if actor_user_id is not None else "system"),
+            actor_service=actor_service.strip(),
             action=action,
             resource_type=resource_type,
             resource_id=resource_id,

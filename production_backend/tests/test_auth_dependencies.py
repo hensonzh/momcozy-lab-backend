@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from production_backend.app.api.dependencies import require_current_user
 from production_backend.app.core.settings import Settings
 from production_backend.app.factory import create_app
-from production_backend.app.modules.auth import CurrentUser
+from production_backend.app.modules.auth import CurrentUser, issue_access_token
 
 
 def test_production_settings_require_jwt_secret() -> None:
@@ -73,6 +73,19 @@ def test_require_current_user_rejects_non_uuid_subject() -> None:
 
     assert response.status_code == 401
     assert response.json()["error"]["message"] == "Access token subject is invalid."
+
+
+def test_issue_access_token_can_be_authenticated() -> None:
+    user_id = uuid4()
+    session_id = uuid4()
+    settings = _auth_settings()
+    token, expires_in = issue_access_token(user_id=user_id, session_id=session_id, settings=settings)
+
+    response = TestClient(_app_with_me_endpoint(settings)).get("/test/me", headers={"Authorization": f"Bearer {token}"})
+
+    assert expires_in == 900
+    assert response.status_code == 200
+    assert response.json()["user_id"] == str(user_id)
 
 
 def _app_with_me_endpoint(settings: Settings):

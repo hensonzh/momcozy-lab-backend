@@ -33,7 +33,7 @@ async def create_notification(
     payload: NotificationServiceCreate,
     request: Request,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
-    _service_client: ServiceClient = Depends(require_service_client),
+    service_client: ServiceClient = Depends(require_service_client),
     service: NotificationsService = Depends(get_notifications_service),
 ) -> NotificationRead:
     notification = await service.create_notification(
@@ -46,6 +46,7 @@ async def create_notification(
         delivered_at=payload.delivered_at,
         request_id=str(getattr(request.state, "request_id", "") or ""),
         idempotency_key=_normalize_idempotency_key(idempotency_key),
+        actor_service=service_client.name,
     )
     return NotificationRead.model_validate(notification)
 

@@ -37,6 +37,7 @@ class NotificationsService:
         delivered_at: datetime | None = None,
         request_id: str = "",
         idempotency_key: str | None = None,
+        actor_service: str = "",
     ) -> Notification:
         normalized_type = _normalize_text(notification_type, field_name="notification_type", max_length=64, required=True)
         normalized_title = _normalize_text(title, field_name="title", max_length=255)
@@ -71,6 +72,8 @@ class NotificationsService:
         await self._complete_idempotency(idempotency_record=idempotency_record, response_ref=str(notification.id))
         await self._audit(
             actor_user_id=None,
+            actor_type="service",
+            actor_service=actor_service,
             action="notifications.create",
             resource_id=str(notification.id),
             request_id=request_id,
@@ -159,6 +162,8 @@ class NotificationsService:
         self,
         *,
         actor_user_id: UUID | None,
+        actor_type: str | None = None,
+        actor_service: str = "",
         action: str,
         resource_id: str,
         request_id: str,
@@ -167,6 +172,8 @@ class NotificationsService:
         if self.audit_service is not None:
             await self.audit_service.record(
                 actor_user_id=actor_user_id,
+                actor_type=actor_type,
+                actor_service=actor_service,
                 action=action,
                 resource_type="notification",
                 resource_id=resource_id,

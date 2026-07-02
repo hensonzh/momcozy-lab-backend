@@ -16,12 +16,15 @@ class AuditLog(Base):
     __tablename__ = "audit_logs"
     __table_args__ = (
         Index("ix_audit_logs_actor_created", "actor_user_id", "created_at"),
+        Index("ix_audit_logs_actor_service", "actor_service", "created_at"),
         Index("ix_audit_logs_request_id", "request_id"),
         Index("ix_audit_logs_resource", "resource_type", "resource_id"),
     )
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
     actor_user_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    actor_type: Mapped[str] = mapped_column(String(32), default="user", server_default="user", nullable=False)
+    actor_service: Mapped[str] = mapped_column(String(120), default="", server_default="", nullable=False)
     action: Mapped[str] = mapped_column(String(120), nullable=False)
     resource_type: Mapped[str] = mapped_column(String(120), nullable=False)
     resource_id: Mapped[str] = mapped_column(String(120), default="", server_default="", nullable=False)

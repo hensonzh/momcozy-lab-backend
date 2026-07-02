@@ -18,6 +18,8 @@ class AuditRepository:
         self,
         *,
         actor_user_id: UUID | None,
+        actor_type: str,
+        actor_service: str,
         action: str,
         resource_type: str,
         resource_id: str,
@@ -27,6 +29,8 @@ class AuditRepository:
     ) -> AuditLog:
         audit_log = AuditLog(
             actor_user_id=actor_user_id,
+            actor_type=actor_type,
+            actor_service=actor_service,
             action=action,
             resource_type=resource_type,
             resource_id=resource_id,

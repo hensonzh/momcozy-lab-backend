@@ -23,6 +23,7 @@ def test_notifications_service_creates_notification_with_idempotency_and_audit()
             payload={"infant_id": "baby-1"},
             request_id="req_notify",
             idempotency_key="idem-notify",
+            actor_service="notification-service",
         )
     )
 
@@ -30,6 +31,8 @@ def test_notifications_service_creates_notification_with_idempotency_and_audit()
     assert idempotency_service.reserve_kwargs["scope"] == "notifications.create"
     assert idempotency_service.completed_response_ref == str(notification.id)
     assert audit_service.record_kwargs["actor_user_id"] is None
+    assert audit_service.record_kwargs["actor_type"] == "service"
+    assert audit_service.record_kwargs["actor_service"] == "notification-service"
     assert audit_service.record_kwargs["details"]["owner_user_id"] == str(owner_user_id)
 
 

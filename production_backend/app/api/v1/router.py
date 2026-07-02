@@ -7,6 +7,7 @@ from sqlalchemy import text
 
 from ...core.errors import ApiError
 from ...modules.agent_runtime.router import router as agent_runtime_router
+from ...modules.auth.router import router as auth_router
 from ...modules.devices.router import router as devices_router
 from ...modules.diary.router import router as diary_router
 from ...modules.files.router import router as files_router
@@ -18,6 +19,7 @@ from ...modules.support.router import router as support_router
 
 router = APIRouter(prefix="/v1")
 router.include_router(agent_runtime_router)
+router.include_router(auth_router)
 router.include_router(devices_router)
 router.include_router(diary_router)
 router.include_router(files_router)

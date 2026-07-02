@@ -42,6 +42,7 @@ def test_service_client_creates_notification_for_target_owner() -> None:
     assert fake_service.create_kwargs["owner_user_id"] == user_id
     assert fake_service.create_kwargs["idempotency_key"] == "idem-notify"
     assert fake_service.create_kwargs["request_id"] == "req_notify"
+    assert fake_service.create_kwargs["actor_service"] == "internal-service"
 
 
 def test_notification_inbox_and_state_changes_use_current_user_scope() -> None:
