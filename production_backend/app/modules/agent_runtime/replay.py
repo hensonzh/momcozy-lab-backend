@@ -6,6 +6,7 @@ from uuid import UUID
 from ...core.errors import ApiError
 from .models import (
     AgentAction,
+    AgentArtifact,
     AgentContextCheckpoint,
     AgentContextProjection,
     AgentEvent,
@@ -30,6 +31,7 @@ class AgentReplayService:
         events = await self.repository.list_events_for_run(run_id=run.id)
         tool_calls = await self.repository.list_tool_calls_for_run(run_id=run.id)
         actions = await self.repository.list_actions_for_run(run_id=run.id)
+        artifacts = await self.repository.list_artifacts_for_run(run_id=run.id)
         checkpoints = await self.repository.list_context_checkpoints_for_run(run_id=run.id)
         workflow_states = await self.repository.list_workflow_states_for_run(run_id=run.id)
         context_projections = await self.repository.list_context_projections_for_run(run_id=run.id)
@@ -40,6 +42,7 @@ class AgentReplayService:
             "events": [_event(event) for event in events],
             "tool_calls": [_tool_call(tool_call) for tool_call in tool_calls],
             "actions": [_action(action) for action in actions],
+            "artifacts": [_artifact(artifact) for artifact in artifacts],
             "checkpoints": [_checkpoint(checkpoint) for checkpoint in checkpoints],
             "workflow_states": [_workflow_state(workflow_state) for workflow_state in workflow_states],
             "context_projections": [_context_projection(context_projection) for context_projection in context_projections],
@@ -109,6 +112,21 @@ def _action(action: AgentAction) -> dict[str, Any]:
         "side_effect_level": action.side_effect_level,
         "preview_payload": action.preview_payload,
         "error_code": action.error_code,
+    }
+
+
+def _artifact(artifact: AgentArtifact) -> dict[str, Any]:
+    return {
+        "id": str(artifact.id),
+        "run_id": str(artifact.run_id),
+        "owner_user_id": str(artifact.owner_user_id),
+        "artifact_type": artifact.artifact_type,
+        "schema_version": artifact.schema_version,
+        "status": artifact.status,
+        "payload": artifact.payload,
+        "raw_payload_ref": artifact.raw_payload_ref,
+        "created_at": artifact.created_at.isoformat() if artifact.created_at else None,
+        "updated_at": artifact.updated_at.isoformat() if artifact.updated_at else None,
     }
 
 

@@ -112,6 +112,7 @@ class AgentReplayBundle(BaseModel):
     events: list[dict[str, Any]]
     tool_calls: list[dict[str, Any]]
     actions: list[dict[str, Any]]
+    artifacts: list[dict[str, Any]]
     checkpoints: list[dict[str, Any]]
     workflow_states: list[dict[str, Any]]
     context_projections: list[dict[str, Any]]

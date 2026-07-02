@@ -369,6 +369,14 @@
             "title": "Actions",
             "type": "array"
           },
+          "artifacts": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Artifacts",
+            "type": "array"
+          },
           "checkpoints": {
             "items": {
               "additionalProperties": true,
@@ -437,6 +445,7 @@
           "events",
           "tool_calls",
           "actions",
+          "artifacts",
           "checkpoints",
           "workflow_states",
           "context_projections",

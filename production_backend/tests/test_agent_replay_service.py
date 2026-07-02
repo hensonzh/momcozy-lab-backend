@@ -3,6 +3,7 @@ from uuid import uuid4
 
 from production_backend.app.modules.agent_runtime.models import (
     AgentAction,
+    AgentArtifact,
     AgentContextCheckpoint,
     AgentContextProjection,
     AgentEvent,
@@ -27,6 +28,8 @@ def test_agent_replay_service_exports_redacted_bundle_by_default() -> None:
     assert bundle["events"][0]["run_id"] == str(repository.run.id)
     assert bundle["tool_calls"][0]["safe_args"] == {"limit": 1}
     assert bundle["actions"][0]["status"] == "confirmation_required"
+    assert bundle["artifacts"][0]["artifact_type"] == "care_plan"
+    assert bundle["artifacts"][0]["payload"] == {"title": "Birth plan"}
     assert bundle["checkpoints"][0]["state_summary"]["node_name"] == "sdk_reasoning"
     assert bundle["checkpoints"][0]["thread_id"] == str(repository.run.thread_id)
     assert bundle["workflow_states"][0]["workflow_type"] == "milk_analysis_intake"
@@ -100,6 +103,16 @@ class FakeReplayRepository:
             idempotency_key="idem-action",
             error_code="",
         )
+        self.artifact = AgentArtifact(
+            id=uuid4(),
+            run_id=self.run.id,
+            owner_user_id=self.run.actor_user_id,
+            artifact_type="care_plan",
+            schema_version="v1",
+            status="created",
+            payload={"title": "Birth plan"},
+            raw_payload_ref="",
+        )
         self.safety_event = AgentSafetyEvent(
             id=uuid4(),
             run_id=self.run.id,
@@ -159,6 +172,9 @@ class FakeReplayRepository:
 
     async def list_actions_for_run(self, *, run_id):
         return [self.action] if run_id == self.run.id else []
+
+    async def list_artifacts_for_run(self, *, run_id):
+        return [self.artifact] if run_id == self.run.id else []
 
     async def list_context_checkpoints_for_run(self, *, run_id):
         return [self.checkpoint] if run_id == self.run.id else []

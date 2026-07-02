@@ -250,6 +250,7 @@ class FakeReplayService:
             "events": [],
             "tool_calls": [],
             "actions": [],
+            "artifacts": [],
             "checkpoints": [],
             "workflow_states": [],
             "context_projections": [],

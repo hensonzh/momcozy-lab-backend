@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import (
     AgentAction,
+    AgentArtifact,
     AgentContextCheckpoint,
     AgentContextProjection,
     AgentEvent,
@@ -355,6 +356,11 @@ class AgentRuntimeRepository:
 
     async def list_actions_for_run(self, *, run_id: UUID) -> list[AgentAction]:
         statement = select(AgentAction).where(AgentAction.run_id == run_id).order_by(AgentAction.created_at, AgentAction.id)
+        result = await self.session.scalars(statement)
+        return list(result.all())
+
+    async def list_artifacts_for_run(self, *, run_id: UUID) -> list[AgentArtifact]:
+        statement = select(AgentArtifact).where(AgentArtifact.run_id == run_id).order_by(AgentArtifact.created_at, AgentArtifact.id)
         result = await self.session.scalars(statement)
         return list(result.all())
 

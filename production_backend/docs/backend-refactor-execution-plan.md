@@ -315,9 +315,9 @@ Completed:
   `agents.Agent` / `agents.Runner.run` shape, maps `final_output` into typed
   runtime results, and validates `OPENAI_API_KEY` / `OPENAI_MODEL` through
   environment-managed settings when the agent worker is enabled.
-- Replay bundle service: exports run, message, event, tool, action, and safety
-  ledger snapshots for incident debugging and eval seed material, with message
-  content redacted by default.
+- Replay bundle service: exports run, message, event, tool, action, artifact,
+  runtime state, and safety ledger snapshots for incident debugging and eval
+  seed material, with message content redacted by default.
 - Eval seed service: creates draft `agent_eval_cases` from redacted replay
   bundles, preserving source run ID, event sequence expectations, tool call
   summaries, action statuses, and safety decision.
@@ -448,7 +448,8 @@ Completed backend commits have established:
 - OpenAI Agents SDK backend wiring with environment-managed API key and model
   configuration for the agent worker
 - replay bundle export service for debugging and eval seed generation, default
-  redacted to avoid accidental PII exposure
+  redacted to avoid accidental PII exposure, including artifact and runtime
+  state snapshots
 - eval seed service that turns replay bundles into draft regression cases linked
   back to the source run
 - service-key protected replay/eval admin API and updated OpenAPI snapshot
