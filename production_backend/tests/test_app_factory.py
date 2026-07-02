@@ -33,6 +33,24 @@ def test_hsts_header_is_added_in_production() -> None:
     assert response.headers["Strict-Transport-Security"] == "max-age=31536000; includeSubDomains"
 
 
+def test_trusted_host_middleware_rejects_untrusted_hosts() -> None:
+    client = TestClient(create_app(Settings(app_env="test", trusted_hosts=("api.example.test",))))
+
+    response = client.get("/v1/health/live", headers={"Host": "evil.example.test"})
+
+    assert response.status_code == 400
+    assert response.text == "Invalid host header"
+    assert response.headers["X-Request-ID"]
+
+
+def test_trusted_host_middleware_allows_configured_hosts() -> None:
+    client = TestClient(create_app(Settings(app_env="test", trusted_hosts=("api.example.test",))))
+
+    response = client.get("/v1/health/live", headers={"Host": "api.example.test"})
+
+    assert response.status_code == 200
+
+
 def test_cors_is_disabled_when_no_allowed_origins_are_configured() -> None:
     client = TestClient(create_app(Settings(app_env="test")))
 
@@ -71,4 +89,5 @@ def _production_settings() -> Settings:
         object_storage_access_key_id="access",
         object_storage_secret_access_key="secret",
         auth_jwt_secret="test-secret-value-with-at-least-32-bytes",
+        trusted_hosts=("testserver",),
     )

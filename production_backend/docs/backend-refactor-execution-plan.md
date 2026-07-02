@@ -97,6 +97,7 @@ Completed:
 - `/v1/health/ready` can validate DB and Redis readiness.
 - Environment-controlled CORS middleware with explicit origins and production
   wildcard rejection.
+- Environment-controlled trusted host middleware, required in production.
 - Baseline security headers on API responses, with production-only HSTS.
 - Structured request logs with `request_id`, route, status, and latency.
 - Basic in-process request metrics exposed through `/v1/health/metrics`.
@@ -446,6 +447,7 @@ Completed backend commits have established:
 - inventory tooling
 - environment contract
 - explicit CORS configuration for browser/admin clients
+- trusted host validation for production deployments
 - baseline security response headers
 - request/error contract
 - structured request logging and basic metrics

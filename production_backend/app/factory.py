@@ -10,6 +10,7 @@ from .core.logging import configure_logging
 from .core.metrics import RequestMetrics
 from .core.middleware import install_http_middleware
 from .core.settings import Settings, get_settings
+from .core.trusted_hosts import install_trusted_host_middleware
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -23,6 +24,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = resolved_settings
     app.state.request_metrics = RequestMetrics()
+    install_trusted_host_middleware(app, resolved_settings)
     install_cors_middleware(app, resolved_settings)
     install_http_middleware(app)
     install_error_handlers(app)

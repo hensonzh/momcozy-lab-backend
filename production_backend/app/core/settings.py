@@ -37,6 +37,7 @@ class Settings:
     service_api_key: str = ""
     readiness_check_infrastructure: bool = False
     cors_allowed_origins: tuple[str, ...] = ()
+    trusted_hosts: tuple[str, ...] = ()
     postgres_backup_hook: str = ""
     postgres_restore_hook: str = ""
     object_storage_backup_hook: str = ""
@@ -81,6 +82,7 @@ class Settings:
                 cls.readiness_check_infrastructure,
             ),
             cors_allowed_origins=_env_csv("CORS_ALLOWED_ORIGINS", cls.cors_allowed_origins),
+            trusted_hosts=_env_csv("TRUSTED_HOSTS", cls.trusted_hosts),
             postgres_backup_hook=_env("POSTGRES_BACKUP_HOOK", cls.postgres_backup_hook),
             postgres_restore_hook=_env("POSTGRES_RESTORE_HOOK", cls.postgres_restore_hook),
             object_storage_backup_hook=_env("OBJECT_STORAGE_BACKUP_HOOK", cls.object_storage_backup_hook),
@@ -159,6 +161,10 @@ class Settings:
                 errors.append("REDIS_URL must be explicitly configured for production")
             if provider == "local":
                 errors.append("OBJECT_STORAGE_PROVIDER cannot be local in production")
+            if not self.trusted_hosts:
+                errors.append("TRUSTED_HOSTS is required in production")
+            if "*" in self.trusted_hosts:
+                errors.append("TRUSTED_HOSTS cannot include * in production")
             if "*" in self.cors_allowed_origins:
                 errors.append("CORS_ALLOWED_ORIGINS cannot include * in production")
             if provider != "local" and not self.object_storage_bucket:

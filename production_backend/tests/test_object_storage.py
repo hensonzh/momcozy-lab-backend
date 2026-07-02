@@ -71,6 +71,7 @@ def test_lifespan_starts_with_production_s3_compatible_storage() -> None:
             object_storage_access_key_id="access",
             object_storage_secret_access_key="secret",
             auth_jwt_secret="test-secret-value-with-at-least-32-bytes",
+            trusted_hosts=("testserver",),
         )
     )
 

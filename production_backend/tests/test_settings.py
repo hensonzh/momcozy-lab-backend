@@ -66,6 +66,14 @@ def test_settings_from_env_reads_cors_allowed_origins(monkeypatch: pytest.Monkey
     assert settings.cors_allowed_origins == ("https://app.example.test", "https://admin.example.test")
 
 
+def test_settings_from_env_reads_trusted_hosts(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TRUSTED_HOSTS", "api.example.test,admin.example.test")
+
+    settings = Settings.from_env()
+
+    assert settings.trusted_hosts == ("api.example.test", "admin.example.test")
+
+
 def test_settings_from_env_reads_agent_worker_controls(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AGENT_RUNTIME_WORKER_ENABLED", "true")
     monkeypatch.setenv("AGENT_RUNTIME_WORKER_BATCH_LIMIT", "25")
@@ -149,9 +157,43 @@ def test_production_settings_reject_wildcard_cors_origin() -> None:
         object_storage_secret_access_key="secret",
         auth_jwt_secret="test-secret-value-with-at-least-32-bytes",
         cors_allowed_origins=("*",),
+        trusted_hosts=("api.example.test",),
     )
 
     with pytest.raises(ValueError, match="CORS_ALLOWED_ORIGINS"):
+        settings.validate_for_startup()
+
+
+def test_production_settings_require_trusted_hosts() -> None:
+    settings = Settings(
+        app_env="production",
+        database_url="postgresql+asyncpg://app:secret@postgres.internal:5432/momcozy",
+        redis_url="redis://redis.internal:6379/0",
+        object_storage_provider="s3",
+        object_storage_bucket="bucket",
+        object_storage_access_key_id="access",
+        object_storage_secret_access_key="secret",
+        auth_jwt_secret="test-secret-value-with-at-least-32-bytes",
+    )
+
+    with pytest.raises(ValueError, match="TRUSTED_HOSTS"):
+        settings.validate_for_startup()
+
+
+def test_production_settings_reject_wildcard_trusted_hosts() -> None:
+    settings = Settings(
+        app_env="production",
+        database_url="postgresql+asyncpg://app:secret@postgres.internal:5432/momcozy",
+        redis_url="redis://redis.internal:6379/0",
+        object_storage_provider="s3",
+        object_storage_bucket="bucket",
+        object_storage_access_key_id="access",
+        object_storage_secret_access_key="secret",
+        auth_jwt_secret="test-secret-value-with-at-least-32-bytes",
+        trusted_hosts=("*",),
+    )
+
+    with pytest.raises(ValueError, match="TRUSTED_HOSTS cannot include"):
         settings.validate_for_startup()
 
 
@@ -186,6 +228,7 @@ def test_production_accepts_explicit_managed_infrastructure_urls() -> None:
         object_storage_access_key_id="access",
         object_storage_secret_access_key="secret",
         auth_jwt_secret="test-secret-value-with-at-least-32-bytes",
+        trusted_hosts=("api.example.test",),
     )
 
     settings.validate_for_startup()
