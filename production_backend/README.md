@@ -21,6 +21,24 @@ boundary.
 - Do not use `previous_response_id`, provider session, in-memory `ChatSession`,
   or the legacy Responses API loop as a production fallback.
 
+## Environment Contract
+
+Local development uses local Postgres, Redis, and filesystem-backed object
+storage by default. Staging and production must switch infrastructure through
+environment variables, not code changes:
+
+- `DATABASE_URL`
+- `REDIS_URL`
+- `OBJECT_STORAGE_PROVIDER`
+- `OBJECT_STORAGE_BUCKET`
+- `OBJECT_STORAGE_REGION`
+- `OBJECT_STORAGE_ENDPOINT_URL`
+- `OBJECT_STORAGE_ACCESS_KEY_ID`
+- `OBJECT_STORAGE_SECRET_ACCESS_KEY`
+
+Use `production_backend/.env.example` as the local template. Secrets stay out of
+git, and production startup rejects local object storage.
+
 ## Target Shape
 
 ```text
