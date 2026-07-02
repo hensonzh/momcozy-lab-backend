@@ -216,7 +216,7 @@ def _env_bool(name: str, default: bool) -> bool:
         return True
     if value in {"0", "false", "no", "off"}:
         return False
-    return default
+    raise ValueError(f"{name} must be a boolean value: true/false")
 
 
 def _env_int(name: str, default: int) -> int:
@@ -226,7 +226,7 @@ def _env_int(name: str, default: int) -> int:
     try:
         return int(raw.strip())
     except ValueError:
-        return default
+        raise ValueError(f"{name} must be an integer") from None
 
 
 def _env_csv(name: str, default: tuple[str, ...]) -> tuple[str, ...]:

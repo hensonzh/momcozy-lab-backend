@@ -35,6 +35,13 @@ def test_settings_from_env_reads_file_upload_limit(monkeypatch: pytest.MonkeyPat
     assert settings.file_upload_max_bytes == 12345
 
 
+def test_settings_from_env_rejects_invalid_integer(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FILE_UPLOAD_MAX_BYTES", "ten")
+
+    with pytest.raises(ValueError, match="FILE_UPLOAD_MAX_BYTES must be an integer"):
+        Settings.from_env()
+
+
 def test_settings_from_env_reads_operational_hook_references(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("POSTGRES_BACKUP_HOOK", "managed-postgres-backup")
     monkeypatch.setenv("POSTGRES_RESTORE_HOOK", "managed-postgres-restore")
@@ -61,6 +68,13 @@ def test_settings_from_env_reads_rate_limit_controls(monkeypatch: pytest.MonkeyP
     assert settings.rate_limit_requests == 42
     assert settings.rate_limit_window_seconds == 15
     assert settings.metrics_require_service_key is True
+
+
+def test_settings_from_env_rejects_invalid_boolean(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "maybe")
+
+    with pytest.raises(ValueError, match="RATE_LIMIT_ENABLED must be a boolean"):
+        Settings.from_env()
 
 
 def test_settings_from_env_reads_cors_allowed_origins(monkeypatch: pytest.MonkeyPatch) -> None:
