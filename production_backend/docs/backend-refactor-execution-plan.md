@@ -119,10 +119,11 @@ Completed:
 - `device_sessions` and `refresh_tokens` models and migration.
 - Refresh token service with hash-only storage, rotation, reuse detection, and
   session revocation.
+- Permission policy helper for explicit permissions, admin role bypass, and
+  owner-scope checks.
 
 Remaining:
 
-- RBAC/permission policy helpers.
 - Service-to-service key separated from user auth.
 
 Acceptance:
