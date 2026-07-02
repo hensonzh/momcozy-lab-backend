@@ -167,15 +167,19 @@ Acceptance:
 
 Goal: migrate deterministic product APIs before agent runtime.
 
+Completed:
+
+- Profile module foundation: `user_profiles` and `infant_profiles` models,
+  migration, owner-scoped profile/infant APIs, audit on writes, and
+  idempotent infant creation.
+
 Suggested order:
 
-1. Profile and infant profile.
-2. Files and media.
-3. Records: feeding, pumping, growth.
-4. Plans and tasks.
-5. Pregnancy diary.
-6. Devices and pump telemetry.
-7. Notifications and support tickets.
+1. Records: feeding, pumping, growth.
+2. Plans and tasks.
+3. Pregnancy diary.
+4. Devices and pump telemetry.
+5. Notifications and support tickets.
 
 Rules:
 
