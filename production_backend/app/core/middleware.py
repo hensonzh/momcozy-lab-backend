@@ -46,6 +46,7 @@ def install_http_middleware(app: FastAPI) -> None:
             duration_ms=duration_ms,
         )
         response.headers[REQUEST_ID_HEADER] = request_id
+        _apply_security_headers(response=response, settings=settings)
         if settings.rate_limit_enabled and request.url.path not in RATE_LIMIT_EXEMPT_PATHS:
             response.headers["X-RateLimit-Limit"] = str(rate_limit_decision.limit)
             response.headers["X-RateLimit-Remaining"] = str(rate_limit_decision.remaining)
@@ -73,6 +74,14 @@ def _rate_limited_response(*, request_id: str, decision: RateLimitDecision) -> J
             "Retry-After": str(decision.retry_after_seconds),
         },
     )
+
+
+def _apply_security_headers(*, response: Response, settings: Settings) -> None:
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    if settings.is_production:
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 
 
 install_request_id_middleware = install_http_middleware

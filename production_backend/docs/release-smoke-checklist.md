@@ -11,6 +11,8 @@ Run this checklist after migrations and before a release is declared healthy.
 - Alembic head matches the expected release revision.
 - Browser/admin origins configured through `CORS_ALLOWED_ORIGINS` receive CORS
   headers; unexpected origins do not.
+- Responses include `X-Content-Type-Options`, `Referrer-Policy`, and
+  `X-Frame-Options`; production responses include HSTS.
 - When `RATE_LIMIT_ENABLED=true`, repeated non-exempt requests return a stable
   `rate_limited` error envelope and health checks remain exempt.
 
