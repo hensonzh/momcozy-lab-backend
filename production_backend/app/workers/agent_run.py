@@ -116,6 +116,11 @@ class AgentRunWorker:
         except Exception:
             return await self._fail(run=run, error_code="runtime_error", error_details={})
 
+        run = await self.repository.refresh_run(run=run)
+        if run.status in TERMINAL_RUN_STATUSES:
+            await self._clear_controls(run)
+            return run
+
         if await self._cancel_requested(run):
             return await self._cancel(run=run, error_code="cancelled_during_run")
 

@@ -69,6 +69,25 @@ def test_agent_run_worker_marks_failed_for_handler_error() -> None:
     assert [event.event_type for event in repository.events] == ["run.started", "run.failed"]
 
 
+def test_agent_run_worker_does_not_duplicate_terminal_event_when_cancelled_externally() -> None:
+    repository = FakeAgentRuntimeRepository()
+    repository.external_status_on_refresh = "cancelled"
+    controls = FakeAgentRunControls(cancel_sequence=[False, False, True])
+
+    async def handler(_run: AgentRun) -> AgentRunWorkerResult:
+        return AgentRunWorkerResult(status="completed", final_text="Finished too late.")
+
+    worker = AgentRunWorker(repository=repository, controls=controls, handler=handler)
+
+    run = asyncio.run(worker.run_once(run_id=repository.run.id))
+
+    assert run is not None
+    assert run.status == "cancelled"
+    assert [event.event_type for event in repository.events] == ["run.started"]
+    assert controls.cleared_active_run == (repository.run.thread_id, repository.run.id)
+    assert controls.cancel_requested is False
+
+
 def test_agent_run_worker_preserves_waiting_for_confirmation_state() -> None:
     repository = FakeAgentRuntimeRepository()
     action_id = uuid4()
@@ -123,6 +142,7 @@ class FakeAgentRuntimeRepository:
         self.runs = [self.run]
         self.messages = []
         self.events = []
+        self.external_status_on_refresh = ""
 
     def add_run(self, *, status):
         run = AgentRun(
@@ -143,6 +163,11 @@ class FakeAgentRuntimeRepository:
 
     async def get_run(self, *, run_id):
         return next((run for run in self.runs if run.id == run_id), None)
+
+    async def refresh_run(self, *, run):
+        if self.external_status_on_refresh:
+            run.status = self.external_status_on_refresh
+        return run
 
     async def list_runnable_runs(self, *, limit, recover_running_before=None):
         runnable = [run for run in self.runs if run.status == "queued" or (run.status == "running" and recover_running_before is not None)]
@@ -204,8 +229,9 @@ class FakeAgentRuntimeRepository:
 
 
 class FakeAgentRunControls:
-    def __init__(self, *, cancel_requested: bool = False) -> None:
+    def __init__(self, *, cancel_requested: bool = False, cancel_sequence: list[bool] | None = None) -> None:
         self.cancel_requested = cancel_requested
+        self.cancel_sequence = cancel_sequence or []
         self.lock_released = False
         self.cleared_active_run = None
         self.stream_cursor = None
@@ -214,6 +240,8 @@ class FakeAgentRunControls:
         return FakeRunLock(self, acquired=True)
 
     async def is_cancel_requested(self, *, run_id):
+        if self.cancel_sequence:
+            return self.cancel_sequence.pop(0)
         return self.cancel_requested
 
     async def set_stream_cursor(self, *, run_id, sequence):

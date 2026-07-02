@@ -91,8 +91,12 @@ class AgentRuntimeRepository:
         return cast(AgentRun | None, await self.session.scalar(statement))
 
     async def get_run(self, *, run_id: UUID) -> AgentRun | None:
-        statement = select(AgentRun).where(AgentRun.id == run_id)
+        statement = select(AgentRun).where(AgentRun.id == run_id).execution_options(populate_existing=True)
         return cast(AgentRun | None, await self.session.scalar(statement))
+
+    async def refresh_run(self, *, run: AgentRun) -> AgentRun:
+        await self.session.refresh(run)
+        return run
 
     async def list_runnable_runs(
         self,
