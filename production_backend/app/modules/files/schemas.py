@@ -14,3 +14,8 @@ class FileRead(BaseModel):
     status: str
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class FileListResponse(BaseModel):
+    items: list[FileRead]
+    next_cursor: str | None = None

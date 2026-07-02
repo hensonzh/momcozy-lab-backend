@@ -69,6 +69,39 @@ def test_file_detail_uses_current_user_owner_scope() -> None:
     assert fake_service.get_kwargs["owner_user_id"] == user_id
 
 
+def test_file_list_uses_current_user_owner_scope_and_limit() -> None:
+    user_id = uuid4()
+    fake_service = FakeFileService()
+    app = create_app(Settings(app_env="test"))
+    _override_current_user(app, user_id)
+    app.dependency_overrides[get_file_service] = lambda: fake_service
+
+    response = TestClient(app).get("/v1/files?limit=10")
+
+    assert response.status_code == 200
+    assert response.json()["items"][0]["id"] == str(fake_service.file_id)
+    assert fake_service.list_kwargs["owner_user_id"] == user_id
+    assert fake_service.list_kwargs["limit"] == 10
+
+
+def test_file_delete_uses_current_user_request_id_and_idempotency_key() -> None:
+    user_id = uuid4()
+    fake_service = FakeFileService()
+    app = create_app(Settings(app_env="test"))
+    _override_current_user(app, user_id)
+    app.dependency_overrides[get_file_service] = lambda: fake_service
+
+    response = TestClient(app).delete(
+        f"/v1/files/{fake_service.file_id}",
+        headers={"X-Request-ID": "req_delete", "Idempotency-Key": " idem-delete "},
+    )
+
+    assert response.status_code == 204
+    assert fake_service.delete_kwargs["owner_user_id"] == user_id
+    assert fake_service.delete_kwargs["request_id"] == "req_delete"
+    assert fake_service.delete_kwargs["idempotency_key"] == "idem-delete"
+
+
 def _override_current_user(app, user_id: UUID) -> None:
     from production_backend.app.api.dependencies import require_current_user
 
@@ -90,6 +123,8 @@ class FakeFileService:
         self.file_id = uuid4()
         self.upload_kwargs = {}
         self.get_kwargs = {}
+        self.list_kwargs = {}
+        self.delete_kwargs = {}
 
     async def upload(self, **kwargs):
         self.upload_kwargs = kwargs
@@ -98,6 +133,13 @@ class FakeFileService:
     async def get_for_owner(self, **kwargs):
         self.get_kwargs = kwargs
         return self._file(owner_user_id=kwargs["owner_user_id"])
+
+    async def list_for_owner(self, **kwargs):
+        self.list_kwargs = kwargs
+        return [self._file(owner_user_id=kwargs["owner_user_id"])]
+
+    async def delete_for_owner(self, **kwargs):
+        self.delete_kwargs = kwargs
 
     def _file(self, *, owner_user_id: UUID) -> FileObject:
         return FileObject(

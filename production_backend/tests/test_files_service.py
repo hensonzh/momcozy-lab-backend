@@ -54,6 +54,26 @@ def test_file_service_get_for_owner_raises_not_found() -> None:
         asyncio.run(service.get_for_owner(file_id=uuid4(), owner_user_id=uuid4()))
 
 
+def test_file_service_lists_files_for_owner() -> None:
+    owner_user_id = uuid4()
+    file_object = _file(owner_user_id=owner_user_id)
+    repository = FakeFileRepository(files_to_return=[file_object])
+    service = FileService(repository=repository, object_storage=FakeObjectStorage())
+
+    files = asyncio.run(service.list_for_owner(owner_user_id=owner_user_id, limit=10))
+
+    assert files == [file_object]
+    assert repository.list_kwargs["owner_user_id"] == owner_user_id
+    assert repository.list_kwargs["limit"] == 10
+
+
+def test_file_service_rejects_invalid_list_limit() -> None:
+    service = FileService(repository=FakeFileRepository(), object_storage=FakeObjectStorage())
+
+    with pytest.raises(ApiError, match="limit"):
+        asyncio.run(service.list_for_owner(owner_user_id=uuid4(), limit=101))
+
+
 def test_file_service_upload_records_audit_and_completes_idempotency() -> None:
     owner_user_id = uuid4()
     repository = FakeFileRepository()
@@ -129,10 +149,67 @@ def test_file_service_upload_conflicts_when_replay_is_in_progress() -> None:
         )
 
 
+def test_file_service_delete_soft_deletes_audits_and_queues_cleanup() -> None:
+    owner_user_id = uuid4()
+    file_id = uuid4()
+    file_object = _file(owner_user_id=owner_user_id, file_id=file_id, object_key="users/u/files/f/photo.png")
+    repository = FakeFileRepository(file_to_delete=file_object)
+    idempotency_service = FakeIdempotencyService(status="reserved")
+    audit_service = FakeAuditService()
+    outbox_service = FakeOutboxService()
+    service = FileService(
+        repository=repository,
+        object_storage=FakeObjectStorage(),
+        audit_service=audit_service,
+        idempotency_service=idempotency_service,
+        outbox_service=outbox_service,
+    )
+
+    asyncio.run(
+        service.delete_for_owner(
+            file_id=file_id,
+            owner_user_id=owner_user_id,
+            request_id="req_delete",
+            idempotency_key="idem-delete",
+        )
+    )
+
+    assert file_object.status == "deleted"
+    assert repository.delete_kwargs["file_id"] == file_id
+    assert outbox_service.enqueue_kwargs["job_type"] == "files.object_delete"
+    assert outbox_service.enqueue_kwargs["payload"]["object_key"] == "users/u/files/f/photo.png"
+    assert audit_service.record_kwargs["action"] == "files.delete"
+    assert idempotency_service.completed_response_ref == str(file_id)
+
+
+def test_file_service_delete_replays_completed_idempotency_without_deleting_again() -> None:
+    repository = FakeFileRepository()
+    service = FileService(
+        repository=repository,
+        object_storage=FakeObjectStorage(),
+        idempotency_service=FakeIdempotencyService(status="replay", response_ref=str(uuid4())),
+    )
+
+    asyncio.run(service.delete_for_owner(file_id=uuid4(), owner_user_id=uuid4(), idempotency_key="idem-delete"))
+
+    assert repository.delete_kwargs == {}
+
+
+def test_file_service_delete_raises_not_found() -> None:
+    service = FileService(repository=FakeFileRepository(), object_storage=FakeObjectStorage())
+
+    with pytest.raises(ApiError, match="File not found"):
+        asyncio.run(service.delete_for_owner(file_id=uuid4(), owner_user_id=uuid4()))
+
+
 class FakeFileRepository:
-    def __init__(self, *, file_to_return=None) -> None:
+    def __init__(self, *, file_to_return=None, files_to_return=None, file_to_delete=None) -> None:
         self.created_kwargs = {}
         self.file_to_return = file_to_return
+        self.files_to_return = files_to_return or []
+        self.file_to_delete = file_to_delete
+        self.list_kwargs = {}
+        self.delete_kwargs = {}
 
     async def create(self, **kwargs):
         self.created_kwargs = kwargs
@@ -146,6 +223,17 @@ class FakeFileRepository:
 
     async def get_for_owner(self, *, file_id: UUID, owner_user_id: UUID):
         return self.file_to_return
+
+    async def list_for_owner(self, **kwargs):
+        self.list_kwargs = kwargs
+        return self.files_to_return
+
+    async def soft_delete_for_owner(self, **kwargs):
+        self.delete_kwargs = kwargs
+        if self.file_to_delete is not None:
+            self.file_to_delete.status = "deleted"
+            self.file_to_delete.deleted_at = kwargs["deleted_at"]
+        return self.file_to_delete
 
 
 class FakeObjectStorage:
@@ -202,6 +290,15 @@ class FakeAuditService:
 
     async def record(self, **kwargs):
         self.record_kwargs = kwargs
+        return None
+
+
+class FakeOutboxService:
+    def __init__(self) -> None:
+        self.enqueue_kwargs = {}
+
+    async def enqueue(self, **kwargs):
+        self.enqueue_kwargs = kwargs
         return None
 
 

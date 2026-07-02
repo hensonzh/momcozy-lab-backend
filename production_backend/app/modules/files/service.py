@@ -7,12 +7,14 @@ from uuid import UUID, uuid4
 
 from ...core.errors import ApiError
 from ...infrastructure.object_storage import ObjectStorage
-from ..audit import AuditService, IdempotencyService, request_hash
+from ..audit import AuditService, IdempotencyService, OutboxService, request_hash
 from .models import FileObject
 from .repository import FileRepository
 
 
 FILE_UPLOAD_IDEMPOTENCY_SCOPE = "files.upload"
+FILE_DELETE_IDEMPOTENCY_SCOPE = "files.delete"
+FILE_OBJECT_DELETE_JOB = "files.object_delete"
 IDEMPOTENCY_TTL = timedelta(hours=24)
 
 
@@ -24,11 +26,13 @@ class FileService:
         object_storage: ObjectStorage,
         audit_service: AuditService | None = None,
         idempotency_service: IdempotencyService | None = None,
+        outbox_service: OutboxService | None = None,
     ) -> None:
         self.repository = repository
         self.object_storage = object_storage
         self.audit_service = audit_service
         self.idempotency_service = idempotency_service
+        self.outbox_service = outbox_service
 
     async def upload(
         self,
@@ -97,6 +101,67 @@ class FileService:
         if file_object is None:
             raise ApiError(code="not_found", message="File not found.", status=404)
         return file_object
+
+    async def list_for_owner(self, *, owner_user_id: UUID, limit: int = 50) -> list[FileObject]:
+        if limit < 1 or limit > 100:
+            raise ApiError(code="validation_failed", message="limit must be between 1 and 100.", status=422)
+        return await self.repository.list_for_owner(owner_user_id=owner_user_id, limit=limit)
+
+    async def delete_for_owner(
+        self,
+        *,
+        file_id: UUID,
+        owner_user_id: UUID,
+        request_id: str = "",
+        idempotency_key: str | None = None,
+    ) -> None:
+        idempotency_record = None
+        if idempotency_key:
+            if self.idempotency_service is None:
+                raise ApiError(code="internal_error", message="Idempotency service is not configured.", status=500)
+            decision = await self.idempotency_service.reserve(
+                actor_user_id=owner_user_id,
+                scope=FILE_DELETE_IDEMPOTENCY_SCOPE,
+                key=idempotency_key,
+                request_hash=request_hash({"file_id": str(file_id)}),
+                expires_at=_utcnow() + IDEMPOTENCY_TTL,
+            )
+            idempotency_record = decision.record
+            if decision.status == "replay":
+                if idempotency_record.response_ref:
+                    return
+                raise ApiError(code="idempotency_in_progress", message="Request is still in progress.", status=409)
+
+        deleted = await self.repository.soft_delete_for_owner(
+            file_id=file_id,
+            owner_user_id=owner_user_id,
+            deleted_at=_utcnow(),
+        )
+        if deleted is None:
+            raise ApiError(code="not_found", message="File not found.", status=404)
+
+        if self.outbox_service is not None:
+            await self.outbox_service.enqueue(
+                job_type=FILE_OBJECT_DELETE_JOB,
+                payload={
+                    "file_id": str(deleted.id),
+                    "owner_user_id": str(owner_user_id),
+                    "object_key": deleted.object_key,
+                },
+                idempotency_key=f"{FILE_OBJECT_DELETE_JOB}:{deleted.id}",
+                request_id=request_id,
+            )
+        if self.audit_service is not None:
+            await self.audit_service.record(
+                actor_user_id=owner_user_id,
+                action="files.delete",
+                resource_type="file",
+                resource_id=str(deleted.id),
+                request_id=request_id,
+                details={"object_cleanup": "queued" if self.outbox_service is not None else "not_configured"},
+            )
+        if idempotency_record is not None and self.idempotency_service is not None:
+            await self.idempotency_service.mark_completed(record=idempotency_record, response_ref=str(deleted.id))
 
     async def _replay_upload(self, *, owner_user_id: UUID, response_ref: str) -> FileObject:
         if not response_ref:

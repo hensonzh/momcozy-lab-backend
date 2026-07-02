@@ -145,10 +145,12 @@ Completed:
 - Audit and idempotency services.
 - Outbox repository/service and worker skeleton with retry/dead-letter semantics.
 - File upload uses optional `Idempotency-Key`, request ID, and audit recording.
+- File listing and soft deletion are owner-scoped; deletion queues object cleanup
+  through outbox.
 
 Remaining:
 
-- File listing, deletion, and object-storage cleanup flows.
+- Object-storage cleanup worker handler.
 - Route-level audit/idempotency integration for additional migrated writes.
 - API-level `Idempotency-Key` handling for retryable writes.
 
