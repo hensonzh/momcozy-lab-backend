@@ -204,8 +204,8 @@ Completed:
   tickets.
 - Notifications API: service-key protected notification creation plus
   owner-scoped inbox/list/read/archive APIs.
-- Support tickets API: owner-scoped create/list/detail with legacy ticket-object
-  input compatibility, audit, and idempotent create.
+- Support tickets API: owner-scoped create/list/detail with explicit production
+  DTOs, audit, and idempotent create.
 
 Suggested order:
 

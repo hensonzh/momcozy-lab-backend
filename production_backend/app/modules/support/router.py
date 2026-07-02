@@ -39,7 +39,7 @@ async def create_support_ticket(
     ticket = await service.create_ticket(
         owner_user_id=current_user.user_id,
         issue_type=payload.issue_type or "other",
-        issue_summary=payload.issue_summary or "",
+        issue_summary=payload.issue_summary,
         product_model=payload.product_model or "",
         order_number=payload.order_number or "",
         purchase_channel=payload.purchase_channel or "",
@@ -89,7 +89,4 @@ def _metadata_from_payload(payload: SupportTicketCreate) -> dict[str, Any]:
 
 
 def _support_payload(payload: SupportTicketCreate) -> dict[str, Any]:
-    data = dict(payload.payload or {})
-    if isinstance(payload.ticket, dict):
-        data["ticket"] = payload.ticket
-    return data
+    return dict(payload.payload or {})

@@ -16,7 +16,7 @@ def test_support_tickets_require_current_user() -> None:
     assert response.json()["error"]["code"] == "authentication_required"
 
 
-def test_create_support_ticket_uses_current_user_and_legacy_ticket_object() -> None:
+def test_create_support_ticket_uses_current_user_and_production_contract() -> None:
     user_id = uuid4()
     fake_service = FakeSupportTicketsService(user_id=user_id)
     app = create_app(Settings(app_env="test"))
@@ -27,13 +27,12 @@ def test_create_support_ticket_uses_current_user_and_legacy_ticket_object() -> N
         "/v1/support/tickets",
         headers={"Idempotency-Key": " idem-ticket ", "X-Request-ID": "req_ticket"},
         json={
-            "ticket": {
-                "issue_type": "device_fault",
-                "issue_summary": "Pump does not turn on",
-                "product_model": "Air1",
-                "urgency": "high",
-            },
+            "issue_type": "device_fault",
+            "issue_summary": "Pump does not turn on",
+            "product_model": "Air1",
+            "urgency": "high",
             "thread_id": "thread-1",
+            "payload": {"origin": "agent_action"},
         },
     )
 
@@ -43,7 +42,29 @@ def test_create_support_ticket_uses_current_user_and_legacy_ticket_object() -> N
     assert fake_service.create_kwargs["idempotency_key"] == "idem-ticket"
     assert fake_service.create_kwargs["request_id"] == "req_ticket"
     assert fake_service.create_kwargs["metadata"]["thread_id"] == "thread-1"
-    assert fake_service.create_kwargs["payload"]["ticket"]["product_model"] == "Air1"
+    assert fake_service.create_kwargs["payload"] == {"origin": "agent_action"}
+
+
+def test_create_support_ticket_rejects_legacy_ticket_object_shape() -> None:
+    user_id = uuid4()
+    fake_service = FakeSupportTicketsService(user_id=user_id)
+    app = create_app(Settings(app_env="test"))
+    _override_current_user(app, user_id)
+    app.dependency_overrides[get_support_tickets_service] = lambda: fake_service
+
+    response = TestClient(app).post(
+        "/v1/support/tickets",
+        json={
+            "ticket": {
+                "issue_type": "device_fault",
+                "issue_summary": "Pump does not turn on",
+            }
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "validation_failed"
+    assert fake_service.create_kwargs == {}
 
 
 def test_list_and_get_support_tickets_use_current_user_scope() -> None:

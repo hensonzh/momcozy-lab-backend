@@ -2474,16 +2474,10 @@
       "SupportTicketCreate": {
         "properties": {
           "issue_summary": {
-            "anyOf": [
-              {
-                "maxLength": 2000,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Issue Summary"
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Issue Summary",
+            "type": "string"
           },
           "issue_type": {
             "anyOf": [
@@ -2593,18 +2587,6 @@
             ],
             "title": "Thread Id"
           },
-          "ticket": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ticket"
-          },
           "timezone": {
             "anyOf": [
               {
@@ -2642,6 +2624,9 @@
             "title": "User Contact"
           }
         },
+        "required": [
+          "issue_summary"
+        ],
         "title": "SupportTicketCreate",
         "type": "object"
       },
