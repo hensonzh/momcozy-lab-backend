@@ -255,8 +255,12 @@ class AgentRuntimeService:
         action = await self.get_action(owner_user_id=owner_user_id, action_id=action_id)
         if action.status in {"confirmed", "applying", "applied"}:
             return action
+        if action.status == "expired":
+            return action
         if action.status not in {"proposed", "confirmation_required"}:
             raise ApiError(code="conflict", message="Agent action cannot be confirmed from its current status.", status=409)
+        if _is_expired(action.expires_at):
+            return await self._expire_action(owner_user_id=owner_user_id, action=action)
         if self.outbox_service is None:
             raise ApiError(code="outbox_not_configured", message="Agent action outbox is not configured.", status=500)
         action_idempotency_key = _normalize_text(idempotency_key, max_length=255) or f"agent-action:{action.id}"
@@ -323,6 +327,25 @@ class AgentRuntimeService:
         )
         await self._complete_waiting_run_after_action_decision(run=run, action_id=rejected.id, decision="rejected")
         return rejected
+
+    async def _expire_action(self, *, owner_user_id: UUID, action: AgentAction) -> AgentAction:
+        expired = await self.repository.mark_action_expired(action=action, failed_at=_utcnow(), error_code="action_expired")
+        run = await self.get_run(owner_user_id=owner_user_id, run_id=expired.run_id)
+        await self._append_event(
+            thread_id=run.thread_id,
+            run_id=run.id,
+            event_type="action.expired",
+            payload={
+                "action_id": str(expired.id),
+                "action_status": expired.status,
+                "action_type": expired.action_type,
+                "target_type": expired.target_type,
+                "target_id": expired.target_id,
+                "code": expired.error_code,
+            },
+        )
+        await self._complete_waiting_run_after_action_decision(run=run, action_id=expired.id, decision="expired")
+        return expired
 
     async def _complete_waiting_run_after_action_decision(self, *, run: AgentRun, action_id: UUID, decision: str) -> None:
         if run.status != "waiting_for_confirmation":
@@ -442,3 +465,12 @@ def _validate_limit(limit: int, *, max_limit: int = 100) -> None:
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _is_expired(expires_at: datetime | None) -> bool:
+    if expires_at is None:
+        return False
+    comparable_expires_at = expires_at
+    if comparable_expires_at.tzinfo is None:
+        comparable_expires_at = comparable_expires_at.replace(tzinfo=timezone.utc)
+    return comparable_expires_at <= _utcnow()

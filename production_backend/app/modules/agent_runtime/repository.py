@@ -313,6 +313,13 @@ class AgentRuntimeRepository:
         await self.session.flush()
         return action
 
+    async def mark_action_expired(self, *, action: AgentAction, failed_at: datetime, error_code: str) -> AgentAction:
+        action.status = "expired"
+        action.failed_at = failed_at
+        action.error_code = error_code
+        await self.session.flush()
+        return action
+
     async def mark_action_rejected(self, *, action: AgentAction, failed_at: datetime, error_code: str) -> AgentAction:
         action.status = "rejected"
         action.failed_at = failed_at

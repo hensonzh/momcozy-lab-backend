@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
 import pytest
@@ -106,6 +107,33 @@ def test_agent_runtime_actions_generate_action_idempotency_key_for_confirmation(
     assert outbox_service.enqueue_kwargs["idempotency_key"] == generated_key
 
 
+def test_agent_runtime_actions_expire_past_confirmation_without_enqueueing() -> None:
+    owner_user_id = uuid4()
+    repository = FakeActionRepository()
+    outbox_service = FakeOutboxService()
+    service = AgentRuntimeService(repository=repository, outbox_service=outbox_service)
+    run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Create ticket"))
+    action = asyncio.run(
+        service.propose_action(
+            owner_user_id=owner_user_id,
+            run_id=run.id,
+            action_type="support.ticket.create",
+            expires_at=datetime.now(timezone.utc) - timedelta(seconds=1),
+        )
+    )
+    run.status = "waiting_for_confirmation"
+
+    expired = asyncio.run(service.confirm_action(owner_user_id=owner_user_id, action_id=action.id))
+
+    assert expired.status == "expired"
+    assert expired.error_code == "action_expired"
+    assert outbox_service.enqueue_kwargs == {}
+    assert repository.events[-2].event_type == "action.expired"
+    assert repository.events[-2].payload["action_status"] == "expired"
+    assert repository.events[-1].event_type == "run.completed"
+    assert repository.events[-1].payload == {"reason": "action_expired", "action_id": str(action.id)}
+
+
 def test_agent_runtime_actions_reject_unsupported_action_type_before_persisting() -> None:
     owner_user_id = uuid4()
     repository = FakeActionRepository()
@@ -157,6 +185,13 @@ class FakeActionRepository(FakeAgentRuntimeRepository):
     async def mark_action_rejected(self, **kwargs):
         action = kwargs["action"]
         action.status = "rejected"
+        action.failed_at = kwargs["failed_at"]
+        action.error_code = kwargs["error_code"]
+        return action
+
+    async def mark_action_expired(self, **kwargs):
+        action = kwargs["action"]
+        action.status = "expired"
         action.failed_at = kwargs["failed_at"]
         action.error_code = kwargs["error_code"]
         return action
