@@ -182,13 +182,14 @@ Completed:
   validation, audit, and idempotent create.
 - Plans data foundation: owner-scoped `plans` and `plan_tasks` models and
   migration.
+- Plans/tasks API: owner-scoped create/list/detail/delete for plans and
+  create/list/complete/delete for tasks, with audit and idempotent creates.
 
 Suggested order:
 
-1. Plans and tasks APIs.
-2. Pregnancy diary.
-3. Devices and pump telemetry.
-4. Notifications and support tickets.
+1. Pregnancy diary.
+2. Devices and pump telemetry.
+3. Notifications and support tickets.
 
 Rules:
 
