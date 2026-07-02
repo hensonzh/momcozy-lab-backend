@@ -14,6 +14,7 @@ from .models import (
     AgentToolOutput,
 )
 from .runtime import AgentRuntimeExecutor, AgentRuntimeExecutorConfig
+from .replay import AgentReplayService
 from .service import AgentRuntimeService
 
 __all__ = [
@@ -32,5 +33,6 @@ __all__ = [
     "AgentToolOutput",
     "AgentRuntimeExecutor",
     "AgentRuntimeExecutorConfig",
+    "AgentReplayService",
     "AgentRuntimeService",
 ]

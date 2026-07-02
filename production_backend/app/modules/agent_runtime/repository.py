@@ -212,6 +212,11 @@ class AgentRuntimeRepository:
         result = await self.session.scalars(statement)
         return list(result.all())
 
+    async def list_events_for_run(self, *, run_id: UUID) -> list[AgentEvent]:
+        statement = select(AgentEvent).where(AgentEvent.run_id == run_id).order_by(AgentEvent.sequence)
+        result = await self.session.scalars(statement)
+        return list(result.all())
+
     async def create_action(
         self,
         *,
@@ -338,6 +343,21 @@ class AgentRuntimeRepository:
         tool_call.error_code = ""
         await self.session.flush()
         return tool_call
+
+    async def list_tool_calls_for_run(self, *, run_id: UUID) -> list[AgentToolCall]:
+        statement = select(AgentToolCall).where(AgentToolCall.run_id == run_id).order_by(AgentToolCall.created_at, AgentToolCall.id)
+        result = await self.session.scalars(statement)
+        return list(result.all())
+
+    async def list_actions_for_run(self, *, run_id: UUID) -> list[AgentAction]:
+        statement = select(AgentAction).where(AgentAction.run_id == run_id).order_by(AgentAction.created_at, AgentAction.id)
+        result = await self.session.scalars(statement)
+        return list(result.all())
+
+    async def list_safety_events_for_run(self, *, run_id: UUID) -> list[AgentSafetyEvent]:
+        statement = select(AgentSafetyEvent).where(AgentSafetyEvent.run_id == run_id).order_by(AgentSafetyEvent.created_at, AgentSafetyEvent.id)
+        result = await self.session.scalars(statement)
+        return list(result.all())
 
     async def fail_tool_call(
         self,

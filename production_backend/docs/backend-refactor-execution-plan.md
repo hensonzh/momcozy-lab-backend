@@ -315,6 +315,9 @@ Completed:
   `agents.Agent` / `agents.Runner.run` shape, maps `final_output` into typed
   runtime results, and validates `OPENAI_API_KEY` / `OPENAI_MODEL` through
   environment-managed settings when the agent worker is enabled.
+- Replay bundle service: exports run, message, event, tool, action, and safety
+  ledger snapshots for incident debugging and eval seed material, with message
+  content redacted by default.
 - Agent run queue worker: scans durable queued runs plus recoverable stale
   running runs from Postgres and delegates each run to the lifecycle worker
   behind Redis run locks.
@@ -421,6 +424,8 @@ Completed backend commits have established:
   waiting run outcomes
 - OpenAI Agents SDK backend wiring with environment-managed API key and model
   configuration for the agent worker
+- replay bundle export service for debugging and eval seed generation, default
+  redacted to avoid accidental PII exposure
 - durable agent run queue scanner that can resume queued/stale running runs
   without in-memory session state
 - environment-controlled agent worker process entry and compose profile for
