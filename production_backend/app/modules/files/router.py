@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, File, Query, Request, Response, UploadFi
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...api.dependencies import get_object_storage, optional_idempotency_key, require_current_user
+from ...core.errors import ApiError
 from ...infrastructure.db import get_session
 from ...infrastructure.object_storage import ObjectStorage
 from ..audit import AuditService, IdempotencyService, OutboxService
@@ -17,9 +18,11 @@ from .service import FileService
 
 
 router = APIRouter(prefix="/files", tags=["files"])
+UPLOAD_READ_CHUNK_BYTES = 1024 * 1024
 
 
 def get_file_service(
+    request: Request,
     session: AsyncSession = Depends(get_session),
     object_storage: ObjectStorage = Depends(get_object_storage),
 ) -> FileService:
@@ -30,6 +33,7 @@ def get_file_service(
         audit_service=AuditService(repository=audit_repository),
         idempotency_service=IdempotencyService(repository=audit_repository),
         outbox_service=OutboxService(repository=OutboxRepository(session)),
+        max_upload_bytes=request.app.state.settings.file_upload_max_bytes,
     )
 
 
@@ -41,7 +45,7 @@ async def upload_file(
     current_user: CurrentUser = Depends(require_current_user),
     service: FileService = Depends(get_file_service),
 ) -> FileRead:
-    body = await file.read()
+    body = await _read_upload_body(file=file, max_bytes=request.app.state.settings.file_upload_max_bytes)
     created = await service.upload(
         owner_user_id=current_user.user_id,
         filename=file.filename or "",
@@ -88,3 +92,22 @@ async def delete_file(
         idempotency_key=idempotency_key,
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+async def _read_upload_body(*, file: UploadFile, max_bytes: int) -> bytes:
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(UPLOAD_READ_CHUNK_BYTES)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise ApiError(
+                code="payload_too_large",
+                message="Uploaded file is too large.",
+                status=413,
+                details={"max_bytes": max_bytes},
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)

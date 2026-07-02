@@ -16,6 +16,7 @@ FILE_UPLOAD_IDEMPOTENCY_SCOPE = "files.upload"
 FILE_DELETE_IDEMPOTENCY_SCOPE = "files.delete"
 FILE_OBJECT_DELETE_JOB = "files.object_delete"
 IDEMPOTENCY_TTL = timedelta(hours=24)
+DEFAULT_MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 
 
 class FileService:
@@ -27,12 +28,14 @@ class FileService:
         audit_service: AuditService | None = None,
         idempotency_service: IdempotencyService | None = None,
         outbox_service: OutboxService | None = None,
+        max_upload_bytes: int = DEFAULT_MAX_UPLOAD_BYTES,
     ) -> None:
         self.repository = repository
         self.object_storage = object_storage
         self.audit_service = audit_service
         self.idempotency_service = idempotency_service
         self.outbox_service = outbox_service
+        self.max_upload_bytes = max_upload_bytes
 
     async def upload(
         self,
@@ -46,6 +49,13 @@ class FileService:
     ) -> FileObject:
         if not body:
             raise ApiError(code="validation_failed", message="Uploaded file is empty.", status=422)
+        if len(body) > self.max_upload_bytes:
+            raise ApiError(
+                code="payload_too_large",
+                message="Uploaded file is too large.",
+                status=413,
+                details={"max_bytes": self.max_upload_bytes},
+            )
 
         normalized_filename = _safe_filename(filename)
         normalized_content_type = content_type or "application/octet-stream"

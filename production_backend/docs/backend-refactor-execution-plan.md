@@ -145,6 +145,8 @@ Completed:
 
 - Owner-scoped `files` metadata model and migration.
 - File upload and file detail API using `CurrentUser` owner scope.
+- Environment-controlled upload size limit with chunked route reads and service
+  validation before object storage writes.
 - `audit_logs` model and migration.
 - `idempotency_keys` model and migration.
 - `outbox_jobs` model and migration.
@@ -453,6 +455,7 @@ Completed backend commits have established:
   actor audit attribution
 - owner-scoped files, profiles, records, plans, diary, devices, notifications,
   and support modules
+- file upload size limits controlled by environment variables
 - audit/idempotency/outbox foundations
 - durable agent runtime ledger, Redis controls, LangGraph/OpenAI Agents SDK
   boundaries, guarded tool executor, SSE replay, action confirmation, and

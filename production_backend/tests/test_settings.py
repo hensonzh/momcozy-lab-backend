@@ -24,6 +24,14 @@ def test_settings_from_env_reads_infrastructure_configuration(monkeypatch: pytes
     assert settings.object_storage_endpoint_url == "https://s3.example.test"
 
 
+def test_settings_from_env_reads_file_upload_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FILE_UPLOAD_MAX_BYTES", "12345")
+
+    settings = Settings.from_env()
+
+    assert settings.file_upload_max_bytes == 12345
+
+
 def test_settings_from_env_reads_operational_hook_references(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("POSTGRES_BACKUP_HOOK", "managed-postgres-backup")
     monkeypatch.setenv("POSTGRES_RESTORE_HOOK", "managed-postgres-restore")
@@ -113,6 +121,13 @@ def test_settings_reject_invalid_rate_limit_controls() -> None:
     settings = Settings(rate_limit_requests=0)
 
     with pytest.raises(ValueError, match="RATE_LIMIT_REQUESTS"):
+        settings.validate_for_startup()
+
+
+def test_settings_reject_invalid_file_upload_limit() -> None:
+    settings = Settings(file_upload_max_bytes=0)
+
+    with pytest.raises(ValueError, match="FILE_UPLOAD_MAX_BYTES"):
         settings.validate_for_startup()
 
 

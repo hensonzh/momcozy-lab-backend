@@ -47,6 +47,24 @@ def test_file_service_rejects_empty_upload() -> None:
         )
 
 
+def test_file_service_rejects_oversized_upload() -> None:
+    service = FileService(repository=FakeFileRepository(), object_storage=FakeObjectStorage(), max_upload_bytes=4)
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            service.upload(
+                owner_user_id=uuid4(),
+                filename="large.txt",
+                body=b"large",
+                content_type="text/plain",
+            )
+        )
+
+    assert exc_info.value.code == "payload_too_large"
+    assert exc_info.value.status == 413
+    assert exc_info.value.details == {"max_bytes": 4}
+
+
 def test_file_service_get_for_owner_raises_not_found() -> None:
     service = FileService(repository=FakeFileRepository(), object_storage=FakeObjectStorage())
 

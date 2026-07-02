@@ -28,15 +28,18 @@ Start incident and release debugging from these IDs when available:
    - `CORS_ALLOWED_ORIGINS` for any browser/admin client origins
    - `RATE_LIMIT_ENABLED=true` with environment-appropriate
      `RATE_LIMIT_REQUESTS` and `RATE_LIMIT_WINDOW_SECONDS`
+   - `FILE_UPLOAD_MAX_BYTES` tuned for the largest supported user upload
 2. Confirm production does not use local object storage or localhost DB/Redis.
 3. Confirm production CORS origins are explicit and do not use `*`.
 4. Confirm health and OpenAPI/docs paths are exempt but user/API paths return a
    stable `rate_limited` envelope when the configured limit is exceeded.
-5. Build the container image.
-6. Run tests and migration checks.
-7. Check backup/restore automation hooks:
+5. Confirm oversized uploads return `payload_too_large` before object storage
+   writes.
+6. Build the container image.
+7. Run tests and migration checks.
+8. Check backup/restore automation hooks:
    `python production_backend/scripts/check_backup_restore_hooks.py --strict`
-8. Export OpenAPI and compare it with the committed snapshot.
+9. Export OpenAPI and compare it with the committed snapshot.
 
 ## Release
 

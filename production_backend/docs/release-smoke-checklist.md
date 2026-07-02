@@ -25,6 +25,8 @@ Run this checklist after migrations and before a release is declared healthy.
 ## Core APIs
 
 - Upload a small file through `POST /v1/files/upload`.
+- Oversized file upload returns `payload_too_large` and does not create file
+  metadata.
 - Create and list a feeding record.
 - Create and list a plan.
 - Create and read a diary entry.

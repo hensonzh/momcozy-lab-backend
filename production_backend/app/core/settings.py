@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 LOCAL_DATABASE_URL = "postgresql+asyncpg://momcozy:momcozy@localhost:5432/momcozy"
 LOCAL_REDIS_URL = "redis://localhost:6379/0"
 LOCAL_OBJECT_STORAGE_ROOT = "production_backend/.local/object_storage"
+DEFAULT_FILE_UPLOAD_MAX_BYTES = 10 * 1024 * 1024
 SUPPORTED_OBJECT_STORAGE_PROVIDERS = {"local", "s3", "oss", "cos", "minio"}
 PRODUCTION_ENVS = {"prod", "production"}
 SUPPORTED_AUTH_JWT_ALGORITHMS = {"HS256"}
@@ -28,6 +29,7 @@ class Settings:
     object_storage_access_key_id: str = ""
     object_storage_secret_access_key: str = ""
     object_storage_local_root: str = LOCAL_OBJECT_STORAGE_ROOT
+    file_upload_max_bytes: int = DEFAULT_FILE_UPLOAD_MAX_BYTES
     auth_jwt_secret: str = ""
     auth_jwt_issuer: str = ""
     auth_jwt_audience: str = ""
@@ -68,6 +70,7 @@ class Settings:
             object_storage_access_key_id=_env("OBJECT_STORAGE_ACCESS_KEY_ID", cls.object_storage_access_key_id),
             object_storage_secret_access_key=_env("OBJECT_STORAGE_SECRET_ACCESS_KEY", cls.object_storage_secret_access_key),
             object_storage_local_root=_env("OBJECT_STORAGE_LOCAL_ROOT", cls.object_storage_local_root),
+            file_upload_max_bytes=_env_int("FILE_UPLOAD_MAX_BYTES", cls.file_upload_max_bytes),
             auth_jwt_secret=_env("AUTH_JWT_SECRET", cls.auth_jwt_secret),
             auth_jwt_issuer=_env("AUTH_JWT_ISSUER", cls.auth_jwt_issuer),
             auth_jwt_audience=_env("AUTH_JWT_AUDIENCE", cls.auth_jwt_audience),
@@ -126,6 +129,8 @@ class Settings:
             errors.append("AUTH_JWT_SECRET must be at least 32 bytes")
         if self.service_api_key and len(self.service_api_key.encode("utf-8")) < 32:
             errors.append("SERVICE_API_KEY must be at least 32 bytes")
+        if self.file_upload_max_bytes < 1:
+            errors.append("FILE_UPLOAD_MAX_BYTES must be positive")
         if self.log_level.upper() not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
             errors.append("LOG_LEVEL must be one of DEBUG, INFO, WARNING, ERROR, CRITICAL")
         if self.agent_runtime_worker_batch_limit < 1:
