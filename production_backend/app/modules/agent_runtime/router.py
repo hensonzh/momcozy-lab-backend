@@ -47,7 +47,7 @@ def get_agent_runtime_service(request: Request, session: AsyncSession = Depends(
         idempotency_service=IdempotencyService(repository=audit_repository),
         outbox_service=OutboxService(repository=OutboxRepository(session)),
         controls=AgentRunControls(request.app.state.redis_client),
-        safety_service=AgentSafetyService(repository=repository),
+        safety_service=AgentSafetyService(repository=repository, metrics=request.app.state.request_metrics),
     )
 
 

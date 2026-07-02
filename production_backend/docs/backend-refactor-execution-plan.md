@@ -390,6 +390,9 @@ Completed:
 - Worker/runtime observability foundation: request metrics now include outbox
   job outcomes, agent tool outcomes, and OpenAI Agents SDK node outcomes without
   recording prompt text, tool args, job payloads, or secrets.
+- Safety observability foundation: deterministic safety guard decisions are
+  counted by category, decision, and severity without storing user text or
+  evidence payloads in the metrics surface.
 
 ### Phase 8: App Integration Contract
 
@@ -435,6 +438,7 @@ Completed backend commits have established:
 - durable agent runtime ledger, Redis controls, LangGraph/OpenAI Agents SDK
   boundaries, guarded tool executor, SSE replay, action confirmation, and
   deterministic safety gate
+- non-PII agent safety metrics for allow/block/escalate decisions
 - worker-owned Agent run lifecycle skeleton with lock/cancel/status/event
   semantics ready for LangGraph/SDK execution
 - Agent runtime executor that bridges durable run/message ledger, context

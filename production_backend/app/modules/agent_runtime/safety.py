@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from uuid import UUID
 
+from ...core.metrics import RequestMetrics
 from .models import AgentSafetyEvent
 from .repository import AgentRuntimeRepository
 
@@ -53,9 +54,16 @@ class DeterministicSafetyGuard:
 
 
 class AgentSafetyService:
-    def __init__(self, *, repository: AgentRuntimeRepository, guard: DeterministicSafetyGuard | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        repository: AgentRuntimeRepository,
+        guard: DeterministicSafetyGuard | None = None,
+        metrics: RequestMetrics | None = None,
+    ) -> None:
         self.repository = repository
         self.guard = guard or DeterministicSafetyGuard()
+        self.metrics = metrics
 
     async def evaluate_and_record(
         self,
@@ -65,6 +73,7 @@ class AgentSafetyService:
         run_id: UUID | None = None,
     ) -> tuple[SafetyDecision, AgentSafetyEvent | None]:
         decision = self.guard.evaluate(text)
+        self._record(decision)
         if decision.decision == "allow":
             return decision, None
         event = await self.repository.record_safety_event(
@@ -76,6 +85,14 @@ class AgentSafetyService:
             evidence=decision.evidence,
         )
         return decision, event
+
+    def _record(self, decision: SafetyDecision) -> None:
+        if self.metrics is not None:
+            self.metrics.record_agent_safety(
+                category=decision.category,
+                decision=decision.decision,
+                severity=decision.severity,
+            )
 
 
 EMOTIONAL_CRISIS_TERMS = (

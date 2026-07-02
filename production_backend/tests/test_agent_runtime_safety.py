@@ -1,6 +1,7 @@
 import asyncio
 from uuid import uuid4
 
+from production_backend.app.core.metrics import RequestMetrics
 from production_backend.app.modules.agent_runtime.models import AgentSafetyEvent
 from production_backend.app.modules.agent_runtime.safety import AgentSafetyService, DeterministicSafetyGuard
 
@@ -31,16 +32,21 @@ def test_deterministic_safety_guard_blocks_prompt_injection() -> None:
 def test_agent_safety_service_records_non_allow_decisions_only() -> None:
     owner_user_id = uuid4()
     repository = FakeSafetyRepository()
-    service = AgentSafetyService(repository=repository)
+    metrics = RequestMetrics()
+    service = AgentSafetyService(repository=repository, metrics=metrics)
 
     allow, allow_event = asyncio.run(service.evaluate_and_record(owner_user_id=owner_user_id, text="hello"))
     decision, event = asyncio.run(service.evaluate_and_record(owner_user_id=owner_user_id, text="没有胎动", run_id=uuid4()))
+    snapshot = metrics.snapshot()
 
     assert allow.decision == "allow"
     assert allow_event is None
     assert decision.category == "health_red_flag"
     assert event.category == "health_red_flag"
     assert repository.record_kwargs["owner_user_id"] == owner_user_id
+    assert {item["category"] for item in snapshot["agent_safety"]} == {"health_red_flag", "none"}
+    health = next(item for item in snapshot["agent_safety"] if item["category"] == "health_red_flag")
+    assert health["decision_counts"]["escalate"] == 1
 
 
 class FakeSafetyRepository:

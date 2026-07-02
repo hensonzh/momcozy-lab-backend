@@ -46,6 +46,7 @@ def test_backend_metrics_record_worker_tool_and_sdk_operations() -> None:
     metrics.record_worker_job(job_type="files.cleanup", outcome="completed", duration_ms=2.0)
     metrics.record_agent_tool(tool_name="profile.read", outcome="failed", error_code="permission_denied", duration_ms=3.0)
     metrics.record_agent_sdk(node_name="openai_agents_sdk", outcome="failed", error_code="dependency_not_configured", duration_ms=4.0)
+    metrics.record_agent_safety(category="health_red_flag", decision="escalate", severity="high")
 
     snapshot = metrics.snapshot()
 
@@ -53,3 +54,6 @@ def test_backend_metrics_record_worker_tool_and_sdk_operations() -> None:
     assert snapshot["workers"][0]["outcome_counts"]["completed"] == 1
     assert snapshot["agent_tools"][0]["error_code_counts"]["permission_denied"] == 1
     assert snapshot["agent_sdk"][0]["error_code_counts"]["dependency_not_configured"] == 1
+    assert snapshot["agent_safety"][0]["category"] == "health_red_flag"
+    assert snapshot["agent_safety"][0]["decision_counts"]["escalate"] == 1
+    assert snapshot["agent_safety"][0]["severity_counts"]["high"] == 1
