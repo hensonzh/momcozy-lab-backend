@@ -116,6 +116,8 @@ class AgentRuntimeExecutor:
             )
         )
 
+        await self._persist_artifacts_from_result(run=run, artifacts=result.artifacts)
+
         if result.action_proposals:
             action = await self._create_action_from_proposal(run=run, proposal=result.action_proposals[0])
             await self._append_event(
@@ -173,6 +175,24 @@ class AgentRuntimeExecutor:
             idempotency_key=_text(proposal, "idempotency_key"),
             expires_at=None,
         )
+
+    async def _persist_artifacts_from_result(self, *, run: AgentRun, artifacts: list[dict[str, Any]]) -> None:
+        for artifact_payload in artifacts:
+            artifact = await self.repository.create_artifact(
+                run_id=run.id,
+                owner_user_id=run.actor_user_id,
+                artifact_type=_required_text(artifact_payload, "artifact_type"),
+                schema_version=_text(artifact_payload, "schema_version") or "v1",
+                status=_text(artifact_payload, "status") or "created",
+                payload=_dict(artifact_payload, "payload"),
+                raw_payload_ref=_text(artifact_payload, "raw_payload_ref"),
+            )
+            await self._append_event(
+                thread_id=run.thread_id,
+                run_id=run.id,
+                event_type="artifact.created",
+                payload={"artifact_id": str(artifact.id), "artifact_type": artifact.artifact_type},
+            )
 
     def _sdk_tools(self, *, run: AgentRun) -> tuple[SdkToolDefinition, ...]:
         if self.tool_executor is None:

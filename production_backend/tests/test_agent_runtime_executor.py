@@ -4,7 +4,7 @@ from uuid import uuid4
 import pytest
 
 from production_backend.app.core.errors import ApiError
-from production_backend.app.modules.agent_runtime.models import AgentAction, AgentEvent, AgentMessage, AgentRun
+from production_backend.app.modules.agent_runtime.models import AgentAction, AgentArtifact, AgentEvent, AgentMessage, AgentRun
 from production_backend.app.modules.agent_runtime.runtime import AgentRuntimeExecutor
 from production_backend.app.modules.agent_runtime.sdk import OpenAIAgentsSdkRunner, SdkNodeRequest, SdkNodeResult
 
@@ -187,6 +187,38 @@ def test_agent_runtime_executor_rejects_unsupported_sdk_action_proposal_before_p
     assert repository.events == []
 
 
+def test_agent_runtime_executor_persists_sdk_artifacts_and_emits_events() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="Create a plan", sequence=1)
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    backend = CapturingSdkBackend(
+        result=SdkNodeResult(
+            final_text="I drafted a plan.",
+            artifacts=[
+                {
+                    "artifact_type": "care_plan",
+                    "schema_version": "v1",
+                    "payload": {"title": "Birth plan"},
+                }
+            ],
+        )
+    )
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+        ).execute(run=run)
+    )
+
+    assert result.status == "completed"
+    assert repository.artifacts[0].artifact_type == "care_plan"
+    assert repository.artifacts[0].payload == {"title": "Birth plan"}
+    assert repository.events[0].event_type == "artifact.created"
+    assert repository.events[0].payload["artifact_id"] == str(repository.artifacts[0].id)
+
+
 class CapturingSdkBackend:
     def __init__(self, *, result: SdkNodeResult) -> None:
         self.result = result
@@ -202,6 +234,7 @@ class FakeRuntimeRepository:
         self.messages = messages
         self.current_message = current_message
         self.actions = []
+        self.artifacts = []
         self.events = []
 
     async def get_latest_user_message_for_run(self, *, run_id):
@@ -230,6 +263,20 @@ class FakeRuntimeRepository:
         )
         self.actions.append(action)
         return action
+
+    async def create_artifact(self, **kwargs):
+        artifact = AgentArtifact(
+            id=uuid4(),
+            run_id=kwargs["run_id"],
+            owner_user_id=kwargs["owner_user_id"],
+            artifact_type=kwargs["artifact_type"],
+            schema_version=kwargs["schema_version"],
+            status=kwargs["status"],
+            payload=kwargs["payload"],
+            raw_payload_ref=kwargs["raw_payload_ref"],
+        )
+        self.artifacts.append(artifact)
+        return artifact
 
     async def append_event(self, **kwargs):
         event = AgentEvent(

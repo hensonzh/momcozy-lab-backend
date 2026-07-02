@@ -355,6 +355,9 @@ Completed:
 - Agent action policy: SDK and tool action proposals are validated against an
   explicit allowlist before any `agent_actions` row is created, so unsupported
   action types cannot drift into the outbox as late failures.
+- SDK artifact persistence: artifacts returned by the SDK node are persisted in
+  `agent_artifacts` and emit `artifact.created` application events before the
+  run reaches its terminal or waiting state.
 
 ### Phase 7: Safety, Observability, And Eval
 
@@ -474,6 +477,7 @@ Completed backend commits have established:
   cursor updates follow persisted application events across processes
 - action proposal allowlist for `support.ticket.create`, rejecting unsupported
   SDK/tool proposals before persistence
+- SDK artifact persistence with replayable `artifact.created` events
 - OpenAPI schema export script, generated schema snapshot, and API handoff
   document for Flutter integration
 - Auth/token API contract tests for token response shape, validation envelope,

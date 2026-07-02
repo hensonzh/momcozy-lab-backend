@@ -364,6 +364,30 @@ class AgentRuntimeRepository:
         result = await self.session.scalars(statement)
         return list(result.all())
 
+    async def create_artifact(
+        self,
+        *,
+        run_id: UUID,
+        owner_user_id: UUID,
+        artifact_type: str,
+        schema_version: str,
+        status: str,
+        payload: dict[str, Any],
+        raw_payload_ref: str = "",
+    ) -> AgentArtifact:
+        artifact = AgentArtifact(
+            run_id=run_id,
+            owner_user_id=owner_user_id,
+            artifact_type=artifact_type,
+            schema_version=schema_version,
+            status=status,
+            payload=payload,
+            raw_payload_ref=raw_payload_ref,
+        )
+        self.session.add(artifact)
+        await self.session.flush()
+        return artifact
+
     async def create_context_checkpoint(
         self,
         *,
