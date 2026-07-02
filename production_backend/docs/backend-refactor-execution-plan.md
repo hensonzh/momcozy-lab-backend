@@ -321,6 +321,9 @@ Completed:
 - Eval seed service: creates draft `agent_eval_cases` from redacted replay
   bundles, preserving source run ID, event sequence expectations, tool call
   summaries, action statuses, and safety decision.
+- Service-key protected admin endpoints: `/v1/agent/admin/runs/{run_id}/replay`
+  exports replay bundles and `/v1/agent/admin/runs/{run_id}/eval-cases` creates
+  draft eval cases from production-like runs.
 - Agent run queue worker: scans durable queued runs plus recoverable stale
   running runs from Postgres and delegates each run to the lifecycle worker
   behind Redis run locks.
@@ -431,6 +434,7 @@ Completed backend commits have established:
   redacted to avoid accidental PII exposure
 - eval seed service that turns replay bundles into draft regression cases linked
   back to the source run
+- service-key protected replay/eval admin API and updated OpenAPI snapshot
 - durable agent run queue scanner that can resume queued/stale running runs
   without in-memory session state
 - environment-controlled agent worker process entry and compose profile for

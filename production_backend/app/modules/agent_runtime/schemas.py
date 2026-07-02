@@ -104,3 +104,35 @@ class AgentActionConfirm(BaseModel):
 
 class AgentActionReject(BaseModel):
     reason: str | None = Field(default=None, max_length=500)
+
+
+class AgentReplayBundle(BaseModel):
+    run: dict[str, Any]
+    messages: list[dict[str, Any]]
+    events: list[dict[str, Any]]
+    tool_calls: list[dict[str, Any]]
+    actions: list[dict[str, Any]]
+    safety_events: list[dict[str, Any]]
+
+
+class AgentEvalCaseCreate(BaseModel):
+    suite: str = Field(min_length=1, max_length=120)
+    name: str = Field(min_length=1, max_length=255)
+    domain: str = Field(default="", max_length=120)
+    owner_team: str = Field(default="", max_length=120)
+
+
+class AgentEvalCaseRead(BaseModel):
+    id: UUID
+    suite: str
+    name: str
+    domain: str
+    input_payload: dict[str, Any]
+    expected_behavior: dict[str, Any]
+    expected_tool_calls: list[Any]
+    expected_safety_decision: str
+    source_run_id: UUID | None = None
+    status: str
+    owner_team: str
+
+    model_config = ConfigDict(from_attributes=True)

@@ -170,6 +170,114 @@
         "title": "AgentActionReject",
         "type": "object"
       },
+      "AgentEvalCaseCreate": {
+        "properties": {
+          "domain": {
+            "default": "",
+            "maxLength": 120,
+            "title": "Domain",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "owner_team": {
+            "default": "",
+            "maxLength": 120,
+            "title": "Owner Team",
+            "type": "string"
+          },
+          "suite": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Suite",
+            "type": "string"
+          }
+        },
+        "required": [
+          "suite",
+          "name"
+        ],
+        "title": "AgentEvalCaseCreate",
+        "type": "object"
+      },
+      "AgentEvalCaseRead": {
+        "properties": {
+          "domain": {
+            "title": "Domain",
+            "type": "string"
+          },
+          "expected_behavior": {
+            "additionalProperties": true,
+            "title": "Expected Behavior",
+            "type": "object"
+          },
+          "expected_safety_decision": {
+            "title": "Expected Safety Decision",
+            "type": "string"
+          },
+          "expected_tool_calls": {
+            "items": {},
+            "title": "Expected Tool Calls",
+            "type": "array"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "input_payload": {
+            "additionalProperties": true,
+            "title": "Input Payload",
+            "type": "object"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "owner_team": {
+            "title": "Owner Team",
+            "type": "string"
+          },
+          "source_run_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Run Id"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "suite": {
+            "title": "Suite",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "suite",
+          "name",
+          "domain",
+          "input_payload",
+          "expected_behavior",
+          "expected_tool_calls",
+          "expected_safety_decision",
+          "status",
+          "owner_team"
+        ],
+        "title": "AgentEvalCaseRead",
+        "type": "object"
+      },
       "AgentEventPage": {
         "properties": {
           "items": {
@@ -249,6 +357,65 @@
           "payload"
         ],
         "title": "AgentEventRead",
+        "type": "object"
+      },
+      "AgentReplayBundle": {
+        "properties": {
+          "actions": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Actions",
+            "type": "array"
+          },
+          "events": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "messages": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Messages",
+            "type": "array"
+          },
+          "run": {
+            "additionalProperties": true,
+            "title": "Run",
+            "type": "object"
+          },
+          "safety_events": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Safety Events",
+            "type": "array"
+          },
+          "tool_calls": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Tool Calls",
+            "type": "array"
+          }
+        },
+        "required": [
+          "run",
+          "messages",
+          "events",
+          "tool_calls",
+          "actions",
+          "safety_events"
+        ],
+        "title": "AgentReplayBundle",
         "type": "object"
       },
       "AgentRunCancel": {
@@ -2968,6 +3135,144 @@
           }
         ],
         "summary": "Reject Action",
+        "tags": [
+          "agent"
+        ]
+      }
+    },
+    "/v1/agent/admin/runs/{run_id}/eval-cases": {
+      "post": {
+        "operationId": "create_eval_case_from_run_v1_agent_admin_runs__run_id__eval_cases_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Service-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Service-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentEvalCaseCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentEvalCaseRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Eval Case From Run",
+        "tags": [
+          "agent"
+        ]
+      }
+    },
+    "/v1/agent/admin/runs/{run_id}/replay": {
+      "get": {
+        "operationId": "export_run_replay_bundle_v1_agent_admin_runs__run_id__replay_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_message_content",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Message Content",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Service-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Service-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentReplayBundle"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Run Replay Bundle",
         "tags": [
           "agent"
         ]

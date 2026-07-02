@@ -6,18 +6,23 @@ from fastapi import APIRouter, Depends, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...api.dependencies import normalize_idempotency_key, optional_idempotency_key, require_current_user
+from ...api.dependencies import normalize_idempotency_key, optional_idempotency_key, require_current_user, require_service_client
 from ...infrastructure.db import get_session
 from ..audit import IdempotencyService, OutboxService
 from ..audit.repository import AuditRepository, OutboxRepository
-from ..auth import CurrentUser
+from ..auth import CurrentUser, ServiceClient
+from .evals import AgentEvalService
 from .repository import AgentRuntimeRepository
+from .replay import AgentReplayService
 from .schemas import (
     AgentActionConfirm,
+    AgentEvalCaseCreate,
+    AgentEvalCaseRead,
     AgentActionRead,
     AgentActionReject,
     AgentEventPage,
     AgentEventRead,
+    AgentReplayBundle,
     AgentRunCancel,
     AgentRunCreate,
     AgentRunRead,
@@ -44,6 +49,15 @@ def get_agent_runtime_service(request: Request, session: AsyncSession = Depends(
         controls=AgentRunControls(request.app.state.redis_client),
         safety_service=AgentSafetyService(repository=repository),
     )
+
+
+def get_agent_replay_service(session: AsyncSession = Depends(get_session)) -> AgentReplayService:
+    return AgentReplayService(repository=AgentRuntimeRepository(session))
+
+
+def get_agent_eval_service(session: AsyncSession = Depends(get_session)) -> AgentEvalService:
+    repository = AgentRuntimeRepository(session)
+    return AgentEvalService(repository=repository)
 
 
 @router.post("/threads", response_model=AgentThreadRead, status_code=status.HTTP_201_CREATED)
@@ -199,3 +213,31 @@ async def reject_action(
 ) -> AgentActionRead:
     action = await service.reject_action(owner_user_id=current_user.user_id, action_id=action_id, reason=payload.reason or "")
     return AgentActionRead.model_validate(action)
+
+
+@router.get("/admin/runs/{run_id}/replay", response_model=AgentReplayBundle)
+async def export_run_replay_bundle(
+    run_id: UUID,
+    include_message_content: bool = Query(default=False),
+    _service_client: ServiceClient = Depends(require_service_client),
+    replay_service: AgentReplayService = Depends(get_agent_replay_service),
+) -> AgentReplayBundle:
+    bundle = await replay_service.export_run_bundle(run_id=run_id, include_message_content=include_message_content)
+    return AgentReplayBundle.model_validate(bundle)
+
+
+@router.post("/admin/runs/{run_id}/eval-cases", response_model=AgentEvalCaseRead, status_code=status.HTTP_201_CREATED)
+async def create_eval_case_from_run(
+    run_id: UUID,
+    payload: AgentEvalCaseCreate,
+    _service_client: ServiceClient = Depends(require_service_client),
+    eval_service: AgentEvalService = Depends(get_agent_eval_service),
+) -> AgentEvalCaseRead:
+    eval_case = await eval_service.create_case_from_run(
+        run_id=run_id,
+        suite=payload.suite,
+        name=payload.name,
+        domain=payload.domain,
+        owner_team=payload.owner_team,
+    )
+    return AgentEvalCaseRead.model_validate(eval_case)

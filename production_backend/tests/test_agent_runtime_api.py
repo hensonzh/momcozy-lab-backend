@@ -4,8 +4,8 @@ from fastapi.testclient import TestClient
 
 from production_backend.app.core.settings import Settings
 from production_backend.app.factory import create_app
-from production_backend.app.modules.agent_runtime.models import AgentEvent, AgentRun, AgentThread
-from production_backend.app.modules.agent_runtime.router import get_agent_runtime_service
+from production_backend.app.modules.agent_runtime.models import AgentEvalCase, AgentEvent, AgentRun, AgentThread
+from production_backend.app.modules.agent_runtime.router import get_agent_eval_service, get_agent_replay_service, get_agent_runtime_service
 from production_backend.app.modules.auth import CurrentUser
 
 
@@ -84,6 +84,36 @@ def test_agent_action_confirm_and_reject_use_current_user_scope() -> None:
     assert fake_service.get_action_kwargs["owner_user_id"] == user_id
     assert fake_service.confirm_action_kwargs["idempotency_key"] == "idem-action"
     assert fake_service.reject_action_kwargs["reason"] == "not now"
+
+
+def test_agent_admin_replay_and_eval_endpoints_require_service_key() -> None:
+    run_id = uuid4()
+    settings = Settings(app_env="test", service_api_key="test-service-key-with-at-least-32-bytes")
+    app = create_app(settings)
+    replay_service = FakeReplayService(run_id=run_id)
+    eval_service = FakeEvalService(run_id=run_id)
+    app.dependency_overrides[get_agent_replay_service] = lambda: replay_service
+    app.dependency_overrides[get_agent_eval_service] = lambda: eval_service
+    client = TestClient(app)
+
+    unauthorized = client.get(f"/v1/agent/admin/runs/{run_id}/replay")
+    replay = client.get(
+        f"/v1/agent/admin/runs/{run_id}/replay?include_message_content=true",
+        headers={"X-Service-Key": settings.service_api_key},
+    )
+    eval_response = client.post(
+        f"/v1/agent/admin/runs/{run_id}/eval-cases",
+        headers={"X-Service-Key": settings.service_api_key},
+        json={"suite": "regression", "name": "case 1", "domain": "support", "owner_team": "backend"},
+    )
+
+    assert unauthorized.status_code == 401
+    assert replay.status_code == 200
+    assert replay.json()["run"]["id"] == str(run_id)
+    assert replay_service.include_message_content is True
+    assert eval_response.status_code == 201
+    assert eval_response.json()["suite"] == "regression"
+    assert eval_service.create_kwargs["owner_team"] == "backend"
 
 
 def _override_current_user(app, user_id: UUID) -> None:
@@ -204,4 +234,43 @@ class FakeAgentRuntimeService:
             apply_payload={},
             idempotency_key="",
             error_code="",
+        )
+
+
+class FakeReplayService:
+    def __init__(self, *, run_id: UUID) -> None:
+        self.run_id = run_id
+        self.include_message_content = False
+
+    async def export_run_bundle(self, *, run_id: UUID, include_message_content: bool = False):
+        self.include_message_content = include_message_content
+        return {
+            "run": {"id": str(run_id), "status": "completed"},
+            "messages": [{"content": {"text": "hello"} if include_message_content else {"redacted": True}}],
+            "events": [],
+            "tool_calls": [],
+            "actions": [],
+            "safety_events": [],
+        }
+
+
+class FakeEvalService:
+    def __init__(self, *, run_id: UUID) -> None:
+        self.run_id = run_id
+        self.create_kwargs = {}
+
+    async def create_case_from_run(self, **kwargs):
+        self.create_kwargs = kwargs
+        return AgentEvalCase(
+            id=uuid4(),
+            suite=kwargs["suite"],
+            name=kwargs["name"],
+            domain=kwargs["domain"],
+            input_payload={},
+            expected_behavior={},
+            expected_tool_calls=[],
+            expected_safety_decision="",
+            source_run_id=kwargs["run_id"],
+            status="draft",
+            owner_team=kwargs["owner_team"],
         )
