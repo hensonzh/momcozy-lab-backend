@@ -3,6 +3,9 @@ import pytest
 from production_backend.app.core.settings import Settings
 
 
+SERVICE_KEY = "service-key-value-with-at-least-32-bytes"
+
+
 def test_settings_from_env_reads_infrastructure_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("APP_ENV", "staging")
     monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://example")
@@ -50,12 +53,14 @@ def test_settings_from_env_reads_rate_limit_controls(monkeypatch: pytest.MonkeyP
     monkeypatch.setenv("RATE_LIMIT_ENABLED", "true")
     monkeypatch.setenv("RATE_LIMIT_REQUESTS", "42")
     monkeypatch.setenv("RATE_LIMIT_WINDOW_SECONDS", "15")
+    monkeypatch.setenv("METRICS_REQUIRE_SERVICE_KEY", "true")
 
     settings = Settings.from_env()
 
     assert settings.rate_limit_enabled is True
     assert settings.rate_limit_requests == 42
     assert settings.rate_limit_window_seconds == 15
+    assert settings.metrics_require_service_key is True
 
 
 def test_settings_from_env_reads_cors_allowed_origins(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -140,6 +145,13 @@ def test_settings_reject_invalid_rate_limit_controls() -> None:
         settings.validate_for_startup()
 
 
+def test_metrics_service_key_gate_requires_configured_service_key() -> None:
+    settings = Settings(metrics_require_service_key=True, service_api_key="")
+
+    with pytest.raises(ValueError, match="METRICS_REQUIRE_SERVICE_KEY"):
+        settings.validate_for_startup()
+
+
 def test_settings_reject_invalid_file_upload_limit() -> None:
     settings = Settings(file_upload_max_bytes=0)
 
@@ -195,6 +207,23 @@ def test_production_settings_require_trusted_hosts() -> None:
         settings.validate_for_startup()
 
 
+def test_production_settings_require_service_key_for_operational_endpoints() -> None:
+    settings = Settings(
+        app_env="production",
+        database_url="postgresql+asyncpg://app:secret@postgres.internal:5432/momcozy",
+        redis_url="redis://redis.internal:6379/0",
+        object_storage_provider="s3",
+        object_storage_bucket="bucket",
+        object_storage_access_key_id="access",
+        object_storage_secret_access_key="secret",
+        auth_jwt_secret="test-secret-value-with-at-least-32-bytes",
+        trusted_hosts=("api.example.test",),
+    )
+
+    with pytest.raises(ValueError, match="SERVICE_API_KEY"):
+        settings.validate_for_startup()
+
+
 def test_production_settings_reject_wildcard_trusted_hosts() -> None:
     settings = Settings(
         app_env="production",
@@ -243,6 +272,7 @@ def test_production_accepts_explicit_managed_infrastructure_urls() -> None:
         object_storage_access_key_id="access",
         object_storage_secret_access_key="secret",
         auth_jwt_secret="test-secret-value-with-at-least-32-bytes",
+        service_api_key=SERVICE_KEY,
         trusted_hosts=("api.example.test",),
     )
 

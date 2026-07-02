@@ -67,7 +67,8 @@ Start incident and release debugging from these IDs when available:
 
 ## Worker Backlog
 
-1. Check `/v1/health/metrics` for worker outcomes and error codes.
+1. Check `/v1/health/metrics` with `X-Service-Key` in production for worker
+   outcomes and error codes.
 2. Inspect queued and locked `outbox_jobs`.
 3. Confirm Redis and external providers are reachable.
 4. If jobs are locked by a dead worker, wait for lease expiry or release them

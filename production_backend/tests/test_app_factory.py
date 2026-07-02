@@ -4,6 +4,9 @@ from production_backend.app.core.settings import Settings
 from production_backend.app.factory import create_app
 
 
+SERVICE_KEY = "service-key-value-with-at-least-32-bytes"
+
+
 def test_create_app_uses_injected_settings() -> None:
     app = create_app(Settings(app_name="Test Backend", app_version="9.9.9", app_env="test"))
 
@@ -89,5 +92,6 @@ def _production_settings() -> Settings:
         object_storage_access_key_id="access",
         object_storage_secret_access_key="secret",
         auth_jwt_secret="test-secret-value-with-at-least-32-bytes",
+        service_api_key=SERVICE_KEY,
         trusted_hosts=("testserver",),
     )

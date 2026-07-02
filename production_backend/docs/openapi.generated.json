@@ -4439,6 +4439,24 @@
     "/v1/health/metrics": {
       "get": {
         "operationId": "metrics_v1_health_metrics_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Service-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Service-Key"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -4451,6 +4469,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "Metrics"

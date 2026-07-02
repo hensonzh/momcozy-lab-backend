@@ -8,6 +8,9 @@ from production_backend.app.factory import create_app
 from production_backend.app.infrastructure.object_storage import LocalObjectStorage, S3ObjectStorage, create_object_storage
 
 
+SERVICE_KEY = "service-key-value-with-at-least-32-bytes"
+
+
 def test_local_object_storage_put_get_delete(tmp_path) -> None:
     storage = LocalObjectStorage(tmp_path)
 
@@ -71,6 +74,7 @@ def test_lifespan_starts_with_production_s3_compatible_storage() -> None:
             object_storage_access_key_id="access",
             object_storage_secret_access_key="secret",
             auth_jwt_secret="test-secret-value-with-at-least-32-bytes",
+            service_api_key=SERVICE_KEY,
             trusted_hosts=("testserver",),
         )
     )

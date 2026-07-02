@@ -8,6 +8,9 @@ from production_backend.app.factory import create_app
 from production_backend.app.core.metrics import RequestMetrics
 
 
+SERVICE_KEY = "service-key-value-with-at-least-32-bytes"
+
+
 def test_request_metrics_record_route_status_and_latency() -> None:
     client = TestClient(create_app(Settings(app_env="test")))
 
@@ -20,6 +23,27 @@ def test_request_metrics_record_route_status_and_latency() -> None:
     assert route["count"] == 1
     assert route["status_counts"]["200"] == 1
     assert route["latency_ms_avg"] >= 0
+
+
+def test_metrics_endpoint_can_require_service_key() -> None:
+    client = TestClient(
+        create_app(
+            Settings(
+                app_env="test",
+                metrics_require_service_key=True,
+                service_api_key=SERVICE_KEY,
+            )
+        )
+    )
+
+    missing = client.get("/v1/health/metrics")
+    invalid = client.get("/v1/health/metrics", headers={"X-Service-Key": "wrong"})
+    valid = client.get("/v1/health/metrics", headers={"X-Service-Key": SERVICE_KEY})
+
+    assert missing.status_code == 401
+    assert invalid.status_code == 401
+    assert valid.status_code == 200
+    assert valid.json()["status"] == "ok"
 
 
 def test_request_log_is_structured_and_uses_request_id(caplog) -> None:

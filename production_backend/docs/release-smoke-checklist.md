@@ -7,7 +7,7 @@ Run this checklist after migrations and before a release is declared healthy.
 - `GET /v1/health/live` returns `200`.
 - `GET /v1/health/ready` returns `200` and checks DB/Redis in production.
 - `GET /v1/health/metrics` returns request, worker, agent tool, and SDK metric
-  buckets.
+  buckets; production calls include `X-Service-Key`.
 - Alembic head matches the expected release revision.
 - Browser/admin origins configured through `CORS_ALLOWED_ORIGINS` receive CORS
   headers; unexpected origins do not.
@@ -51,7 +51,8 @@ Run this checklist after migrations and before a release is declared healthy.
 ## Observability
 
 - Confirm logs include `request_id`, route, status code, and latency.
-- Confirm `/v1/health/metrics` changes after smoke traffic.
+- Confirm `/v1/health/metrics` changes after smoke traffic using `X-Service-Key`
+  in production.
 - Confirm no raw password, refresh token, service key, prompt, tool args, or file
   body appears in logs.
 

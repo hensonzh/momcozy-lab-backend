@@ -46,6 +46,7 @@ class Settings:
     rate_limit_enabled: bool = False
     rate_limit_requests: int = 120
     rate_limit_window_seconds: int = 60
+    metrics_require_service_key: bool = False
     agent_runtime_worker_enabled: bool = False
     agent_runtime_worker_batch_limit: int = 10
     agent_runtime_worker_idle_seconds: int = 2
@@ -92,6 +93,7 @@ class Settings:
             rate_limit_enabled=_env_bool("RATE_LIMIT_ENABLED", cls.rate_limit_enabled),
             rate_limit_requests=_env_int("RATE_LIMIT_REQUESTS", cls.rate_limit_requests),
             rate_limit_window_seconds=_env_int("RATE_LIMIT_WINDOW_SECONDS", cls.rate_limit_window_seconds),
+            metrics_require_service_key=_env_bool("METRICS_REQUIRE_SERVICE_KEY", cls.metrics_require_service_key),
             agent_runtime_worker_enabled=_env_bool("AGENT_RUNTIME_WORKER_ENABLED", cls.agent_runtime_worker_enabled),
             agent_runtime_worker_batch_limit=_env_int("AGENT_RUNTIME_WORKER_BATCH_LIMIT", cls.agent_runtime_worker_batch_limit),
             agent_runtime_worker_idle_seconds=_env_int("AGENT_RUNTIME_WORKER_IDLE_SECONDS", cls.agent_runtime_worker_idle_seconds),
@@ -152,6 +154,8 @@ class Settings:
             errors.append("RATE_LIMIT_REQUESTS must be positive")
         if self.rate_limit_window_seconds < 1:
             errors.append("RATE_LIMIT_WINDOW_SECONDS must be positive")
+        if self.metrics_require_service_key and not self.service_api_key:
+            errors.append("SERVICE_API_KEY is required when METRICS_REQUIRE_SERVICE_KEY is true")
         if self.agent_runtime_worker_enabled and not self.openai_api_key:
             errors.append("OPENAI_API_KEY is required when AGENT_RUNTIME_WORKER_ENABLED is true")
         if not self.openai_model:
@@ -185,6 +189,8 @@ class Settings:
                 errors.append("OBJECT_STORAGE_SECRET_ACCESS_KEY is required for managed object storage")
             if not self.auth_jwt_secret:
                 errors.append("AUTH_JWT_SECRET is required in production")
+            if not self.service_api_key:
+                errors.append("SERVICE_API_KEY is required in production for protected operational endpoints")
             if self.voice_provider == "local_stub":
                 errors.append("VOICE_PROVIDER=local_stub cannot be used in production")
 

@@ -102,7 +102,8 @@ Completed:
 - Environment-controlled trusted host middleware, required in production.
 - Baseline security headers on API responses, with production-only HSTS.
 - Structured request logs with `request_id`, route, status, and latency.
-- Basic in-process request metrics exposed through `/v1/health/metrics`.
+- Basic in-process request metrics exposed through `/v1/health/metrics`, with
+  service-key protection in production.
 - Environment-controlled fixed-window rate limiting with Redis-first counting,
   local fallback, health/docs exemptions, and stable `rate_limited` envelopes.
 - Docker/compose local environment for API, Postgres, Redis, migrations, and

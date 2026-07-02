@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Header, Request
 from sqlalchemy import text
 
 from ...core.errors import ApiError
+from ...core.settings import Settings
 from ...modules.agent_runtime.router import router as agent_runtime_router
+from ...modules.auth import authenticate_service_key
 from ...modules.auth.router import router as auth_router
 from ...modules.devices.router import router as devices_router
 from ...modules.diary.router import router as diary_router
@@ -51,8 +53,18 @@ async def ready(request: Request) -> dict[str, Any]:
 
 
 @router.get("/health/metrics")
-async def metrics(request: Request) -> dict[str, Any]:
+async def metrics(request: Request, service_key: str | None = Header(default=None, alias="X-Service-Key")) -> dict[str, Any]:
+    _authorize_metrics(request=request, service_key=service_key)
     return cast(dict[str, Any], request.app.state.request_metrics.snapshot())
+
+
+def _authorize_metrics(*, request: Request, service_key: str | None) -> None:
+    settings = cast(Settings, request.app.state.settings)
+    if not (settings.is_production or settings.metrics_require_service_key):
+        return
+    if not service_key:
+        raise ApiError(code="authentication_required", message="X-Service-Key is required.", status=401)
+    authenticate_service_key(service_key, settings)
 
 
 async def _check_database(request: Request) -> str:
