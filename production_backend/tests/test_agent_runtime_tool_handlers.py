@@ -66,12 +66,10 @@ def test_support_ticket_propose_tool_handler_creates_confirmation_action() -> No
     context = _context(
         actor=actor,
         args={
-            "ticket": {
-                "issue_type": "pump",
-                "issue_summary": "Pump does not start",
-                "product_model": "M9",
-                "user_contact": "mai@example.com",
-            },
+            "issue_type": "pump",
+            "issue_summary": "Pump does not start",
+            "product_model": "M9",
+            "user_contact": "mai@example.com",
             "locale": "en-US",
         },
     )
@@ -119,6 +117,17 @@ def test_business_context_read_tool_handler_returns_bounded_owner_scoped_summary
 def test_support_ticket_propose_tool_handler_requires_summary() -> None:
     with pytest.raises(ApiError) as exc_info:
         asyncio.run(SupportTicketProposeToolHandler(runtime_service=FakeAgentRuntimeService())(_context(args={})))
+
+    assert exc_info.value.code == "validation_failed"
+
+
+def test_support_ticket_propose_tool_handler_rejects_legacy_nested_ticket_shape() -> None:
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            SupportTicketProposeToolHandler(runtime_service=FakeAgentRuntimeService())(
+                _context(args={"ticket": {"issue_summary": "Pump does not start"}})
+            )
+        )
 
     assert exc_info.value.code == "validation_failed"
 

@@ -167,20 +167,19 @@ def _infant_payload(infant: InfantProfile) -> dict[str, Any]:
 
 
 def _support_ticket_apply_payload(args: dict[str, Any]) -> dict[str, Any]:
-    merged = _merge_nested_ticket(args)
     payload: dict[str, Any] = {
-        "issue_type": _text(merged, "issue_type") or "other",
-        "issue_summary": _text(merged, "issue_summary") or _text(merged, "summary") or _text(merged, "description"),
-        "product_model": _text(merged, "product_model"),
-        "order_number": _text(merged, "order_number"),
-        "purchase_channel": _text(merged, "purchase_channel"),
-        "user_contact": _text(merged, "user_contact"),
-        "urgency": _text(merged, "urgency") or "normal",
+        "issue_type": _text(args, "issue_type") or "other",
+        "issue_summary": _text(args, "issue_summary"),
+        "product_model": _text(args, "product_model"),
+        "order_number": _text(args, "order_number"),
+        "purchase_channel": _text(args, "purchase_channel"),
+        "user_contact": _text(args, "user_contact"),
+        "urgency": _text(args, "urgency") or "normal",
     }
-    extra_payload = merged.get("payload")
+    extra_payload = args.get("payload")
     if isinstance(extra_payload, dict):
         payload["payload"] = extra_payload
-    metadata = _metadata_payload(merged)
+    metadata = _metadata_payload(args)
     if metadata:
         payload["metadata"] = metadata
     return {key: value for key, value in payload.items() if value not in ("", None, {})}
@@ -197,16 +196,6 @@ def _support_ticket_preview_payload(apply_payload: dict[str, Any]) -> dict[str, 
         "has_user_contact": bool(_text(apply_payload, "user_contact")),
     }
     return {key: value for key, value in preview.items() if value not in ("", None)}
-
-
-def _merge_nested_ticket(args: dict[str, Any]) -> dict[str, Any]:
-    merged = dict(args)
-    ticket = args.get("ticket")
-    if isinstance(ticket, dict):
-        for key, value in ticket.items():
-            if merged.get(key) in (None, ""):
-                merged[key] = value
-    return merged
 
 
 def _metadata_payload(payload: dict[str, Any]) -> dict[str, str]:
