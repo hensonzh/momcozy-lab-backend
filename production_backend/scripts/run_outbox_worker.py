@@ -36,7 +36,7 @@ async def run_outbox_worker(
     object_storage = create_object_storage(resolved_settings)
     redis_client = create_redis_client(resolved_settings)
     controls = AgentRunControls(redis_client)
-    totals = {"status": "ok", "cycles": 0, "processed": 0}
+    totals: dict[str, Any] = {"status": "ok", "cycles": 0, "processed": 0}
     try:
         while True:
             async with session_factory() as session:

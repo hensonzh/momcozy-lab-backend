@@ -11,7 +11,7 @@ ignore = ["E501", "B008"]
 
 [tool.mypy]
 python_version = "3.13"
-files = ["app"]
+files = ["app", "scripts"]
 ignore_missing_imports = true
 check_untyped_defs = true
 disallow_any_generics = true

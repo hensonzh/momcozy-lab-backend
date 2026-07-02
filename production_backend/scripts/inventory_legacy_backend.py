@@ -323,8 +323,9 @@ def _table_notes(table_name: str, columns: tuple[str, ...]) -> list[str]:
 
 
 def _source_for_node(lines: list[str], node: ast.AST) -> str:
-    end_lineno = getattr(node, "end_lineno", node.lineno)
-    return "\n".join(lines[node.lineno - 1 : end_lineno])
+    lineno = int(getattr(node, "lineno", 1))
+    end_lineno = int(getattr(node, "end_lineno", lineno))
+    return "\n".join(lines[lineno - 1 : end_lineno])
 
 
 def _dotted_name(node: ast.AST) -> str:

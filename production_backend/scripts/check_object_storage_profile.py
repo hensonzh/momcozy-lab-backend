@@ -5,6 +5,7 @@ import asyncio
 import json
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from botocore.exceptions import ClientError
@@ -13,6 +14,9 @@ from botocore.exceptions import ClientError
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+if TYPE_CHECKING:
+    from production_backend.app.infrastructure.object_storage import S3ObjectStorage
 
 
 async def run_check() -> dict[str, object]:
@@ -52,7 +56,7 @@ def main() -> None:
     print(json.dumps(asyncio.run(run_check()), indent=2, sort_keys=True))
 
 
-def _ensure_s3_bucket(storage) -> None:
+def _ensure_s3_bucket(storage: S3ObjectStorage) -> None:
     try:
         storage.client.head_bucket(Bucket=storage.bucket)
     except ClientError as exc:

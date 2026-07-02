@@ -30,7 +30,7 @@ jobs:
         run: cd production_backend && python -m ruff check app tests scripts
 
       - name: Type-check production backend
-        run: cd production_backend && python -m mypy app
+        run: cd production_backend && python -m mypy app scripts
 
       - name: Run backend tests
         run: python -m pytest production_backend/tests
