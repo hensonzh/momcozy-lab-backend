@@ -10,6 +10,7 @@ LOCAL_REDIS_URL = "redis://localhost:6379/0"
 LOCAL_OBJECT_STORAGE_ROOT = "production_backend/.local/object_storage"
 SUPPORTED_OBJECT_STORAGE_PROVIDERS = {"local", "s3", "oss", "cos", "minio"}
 PRODUCTION_ENVS = {"prod", "production"}
+SUPPORTED_AUTH_JWT_ALGORITHMS = {"HS256"}
 
 
 @dataclass(frozen=True)
@@ -26,6 +27,10 @@ class Settings:
     object_storage_access_key_id: str = ""
     object_storage_secret_access_key: str = ""
     object_storage_local_root: str = LOCAL_OBJECT_STORAGE_ROOT
+    auth_jwt_secret: str = ""
+    auth_jwt_issuer: str = ""
+    auth_jwt_audience: str = ""
+    auth_jwt_algorithm: str = "HS256"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -42,6 +47,10 @@ class Settings:
             object_storage_access_key_id=_env("OBJECT_STORAGE_ACCESS_KEY_ID", cls.object_storage_access_key_id),
             object_storage_secret_access_key=_env("OBJECT_STORAGE_SECRET_ACCESS_KEY", cls.object_storage_secret_access_key),
             object_storage_local_root=_env("OBJECT_STORAGE_LOCAL_ROOT", cls.object_storage_local_root),
+            auth_jwt_secret=_env("AUTH_JWT_SECRET", cls.auth_jwt_secret),
+            auth_jwt_issuer=_env("AUTH_JWT_ISSUER", cls.auth_jwt_issuer),
+            auth_jwt_audience=_env("AUTH_JWT_AUDIENCE", cls.auth_jwt_audience),
+            auth_jwt_algorithm=_env("AUTH_JWT_ALGORITHM", cls.auth_jwt_algorithm),
         )
 
     @property
@@ -61,6 +70,13 @@ class Settings:
                 "OBJECT_STORAGE_PROVIDER must be one of "
                 f"{', '.join(sorted(SUPPORTED_OBJECT_STORAGE_PROVIDERS))}"
             )
+        if self.auth_jwt_algorithm not in SUPPORTED_AUTH_JWT_ALGORITHMS:
+            errors.append(
+                "AUTH_JWT_ALGORITHM must be one of "
+                f"{', '.join(sorted(SUPPORTED_AUTH_JWT_ALGORITHMS))}"
+            )
+        if self.auth_jwt_secret and len(self.auth_jwt_secret.encode("utf-8")) < 32:
+            errors.append("AUTH_JWT_SECRET must be at least 32 bytes")
 
         if self.is_production:
             if provider == "local":
@@ -71,6 +87,8 @@ class Settings:
                 errors.append("OBJECT_STORAGE_ACCESS_KEY_ID is required for managed object storage")
             if provider != "local" and not self.object_storage_secret_access_key:
                 errors.append("OBJECT_STORAGE_SECRET_ACCESS_KEY is required for managed object storage")
+            if not self.auth_jwt_secret:
+                errors.append("AUTH_JWT_SECRET is required in production")
 
         if errors:
             raise ValueError("; ".join(errors))

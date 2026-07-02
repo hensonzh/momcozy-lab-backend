@@ -35,6 +35,9 @@ environment variables, not code changes:
 - `OBJECT_STORAGE_ENDPOINT_URL`
 - `OBJECT_STORAGE_ACCESS_KEY_ID`
 - `OBJECT_STORAGE_SECRET_ACCESS_KEY`
+- `AUTH_JWT_SECRET`
+- `AUTH_JWT_ISSUER`
+- `AUTH_JWT_AUDIENCE`
 
 Use `production_backend/.env.example` as the local template. Secrets stay out of
 git, and production startup rejects local object storage.
