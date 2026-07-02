@@ -8,8 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...api.dependencies import normalize_idempotency_key, optional_idempotency_key, require_current_user
 from ...infrastructure.db import get_session
-from ..audit import IdempotencyService
-from ..audit.repository import AuditRepository
+from ..audit import IdempotencyService, OutboxService
+from ..audit.repository import AuditRepository, OutboxRepository
 from ..auth import CurrentUser
 from .repository import AgentRuntimeRepository
 from .schemas import (
@@ -36,9 +36,11 @@ router = APIRouter(prefix="/agent", tags=["agent"])
 
 def get_agent_runtime_service(request: Request, session: AsyncSession = Depends(get_session)) -> AgentRuntimeService:
     repository = AgentRuntimeRepository(session)
+    audit_repository = AuditRepository(session)
     return AgentRuntimeService(
         repository=repository,
-        idempotency_service=IdempotencyService(repository=AuditRepository(session)),
+        idempotency_service=IdempotencyService(repository=audit_repository),
+        outbox_service=OutboxService(repository=OutboxRepository(session)),
         controls=AgentRunControls(request.app.state.redis_client),
         safety_service=AgentSafetyService(repository=repository),
     )

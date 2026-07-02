@@ -1,15 +1,17 @@
 import asyncio
 from uuid import UUID, uuid4
 
+from production_backend.app.modules.audit.models import OutboxJob
 from production_backend.app.modules.agent_runtime.models import AgentAction
-from production_backend.app.modules.agent_runtime.service import AgentRuntimeService
+from production_backend.app.modules.agent_runtime.service import AGENT_ACTION_APPLY_JOB, AgentRuntimeService
 from production_backend.tests.test_agent_runtime_service import FakeAgentRuntimeRepository
 
 
 def test_agent_runtime_actions_confirm_to_action_queued_without_queued_status() -> None:
     owner_user_id = uuid4()
     repository = FakeActionRepository()
-    service = AgentRuntimeService(repository=repository)
+    outbox_service = FakeOutboxService()
+    service = AgentRuntimeService(repository=repository, outbox_service=outbox_service)
     run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Create ticket"))
 
     action = asyncio.run(
@@ -38,6 +40,10 @@ def test_agent_runtime_actions_confirm_to_action_queued_without_queued_status() 
     assert repository.events[-1].event_type == "action.queued"
     assert repository.events[-1].payload["action_status"] == "confirmed"
     assert repository.events[-1].payload["outbox_status"] == "queued"
+    assert repository.events[-1].payload["outbox_job_id"] == str(outbox_service.job.id)
+    assert outbox_service.enqueue_kwargs["job_type"] == AGENT_ACTION_APPLY_JOB
+    assert outbox_service.enqueue_kwargs["payload"]["action_id"] == str(action.id)
+    assert outbox_service.enqueue_kwargs["action_id"] == action.id
 
 
 def test_agent_runtime_actions_reject_confirmation_required_action() -> None:
@@ -97,3 +103,24 @@ class FakeActionRepository(FakeAgentRuntimeRepository):
         action.failed_at = kwargs["failed_at"]
         action.error_code = kwargs["error_code"]
         return action
+
+
+class FakeOutboxService:
+    def __init__(self) -> None:
+        self.job = OutboxJob(
+            id=uuid4(),
+            job_type=AGENT_ACTION_APPLY_JOB,
+            status="queued",
+            payload={},
+            idempotency_key="",
+            request_id="",
+            trace_id="",
+        )
+        self.enqueue_kwargs = {}
+
+    async def enqueue(self, **kwargs):
+        self.enqueue_kwargs = kwargs
+        self.job.action_id = kwargs["action_id"]
+        self.job.payload = kwargs["payload"]
+        self.job.idempotency_key = kwargs["idempotency_key"]
+        return self.job

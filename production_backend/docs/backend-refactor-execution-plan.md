@@ -313,6 +313,9 @@ Completed:
 - Agent worker process entry: environment-controlled worker script and optional
   compose `workers` profile keep API and run execution as separate deployable
   processes, disabled by default until a real runtime handler is configured.
+- Agent action confirmation now enqueues a durable `agent.action.apply` outbox
+  job and emits `action.queued` with the persisted outbox job ID instead of an
+  event-only queued marker.
 
 ### Phase 7: Safety, Observability, And Eval
 
@@ -401,6 +404,8 @@ Completed backend commits have established:
   without in-memory session state
 - environment-controlled agent worker process entry and compose profile for
   separate API/worker deployment
+- durable outbox enqueue for confirmed agent actions, preserving action status
+  and outbox status as separate contracts
 - OpenAPI schema export script, generated schema snapshot, and API handoff
   document for Flutter integration
 - Auth/token API contract tests for token response shape, validation envelope,

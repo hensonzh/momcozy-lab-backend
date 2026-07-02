@@ -5,7 +5,7 @@ from typing import Any
 from uuid import UUID
 
 from ...core.errors import ApiError
-from ..audit import IdempotencyKey, IdempotencyService, request_hash
+from ..audit import IdempotencyKey, IdempotencyService, OutboxService, request_hash
 from .controls import AgentRunControls
 from .models import AgentAction, AgentEvent, AgentRun, AgentThread
 from .repository import AgentRuntimeRepository
@@ -13,6 +13,7 @@ from .safety import AgentSafetyService
 
 
 AGENT_RUN_CREATE_IDEMPOTENCY_SCOPE = "agent.runs.create"
+AGENT_ACTION_APPLY_JOB = "agent.action.apply"
 DEFAULT_RUNTIME_PATTERN = "langgraph_sdk"
 DEFAULT_GRAPH_VERSION = "momcozy-agent-v1"
 TERMINAL_RUN_STATUSES = {"completed", "failed", "cancelled", "expired"}
@@ -24,11 +25,13 @@ class AgentRuntimeService:
         *,
         repository: AgentRuntimeRepository,
         idempotency_service: IdempotencyService | None = None,
+        outbox_service: OutboxService | None = None,
         controls: AgentRunControls | None = None,
         safety_service: AgentSafetyService | None = None,
     ) -> None:
         self.repository = repository
         self.idempotency_service = idempotency_service
+        self.outbox_service = outbox_service
         self.controls = controls
         self.safety_service = safety_service
 
@@ -235,6 +238,8 @@ class AgentRuntimeService:
             return action
         if action.status not in {"proposed", "confirmation_required"}:
             raise ApiError(code="conflict", message="Agent action cannot be confirmed from its current status.", status=409)
+        if self.outbox_service is None:
+            raise ApiError(code="outbox_not_configured", message="Agent action outbox is not configured.", status=500)
         confirmed = await self.repository.mark_action_confirmed(
             action=action,
             confirmed_at=_utcnow(),
@@ -242,11 +247,32 @@ class AgentRuntimeService:
             idempotency_key=_normalize_text(idempotency_key, max_length=255),
         )
         run = await self.get_run(owner_user_id=owner_user_id, run_id=confirmed.run_id)
+        outbox_job = await self.outbox_service.enqueue(
+            job_type=AGENT_ACTION_APPLY_JOB,
+            payload={
+                "action_id": str(confirmed.id),
+                "run_id": str(run.id),
+                "actor_user_id": str(owner_user_id),
+                "action_type": confirmed.action_type,
+                "target_type": confirmed.target_type,
+                "target_id": confirmed.target_id,
+                "apply_payload": confirmed.apply_payload,
+            },
+            idempotency_key=confirmed.idempotency_key or f"agent-action:{confirmed.id}",
+            action_id=confirmed.id,
+            request_id=run.request_id,
+            trace_id=run.trace_id,
+        )
         await self._append_event(
             thread_id=run.thread_id,
             run_id=run.id,
             event_type="action.queued",
-            payload={"action_id": str(confirmed.id), "action_status": confirmed.status, "outbox_status": "queued"},
+            payload={
+                "action_id": str(confirmed.id),
+                "action_status": confirmed.status,
+                "outbox_status": outbox_job.status,
+                "outbox_job_id": str(outbox_job.id),
+            },
         )
         return confirmed
 
