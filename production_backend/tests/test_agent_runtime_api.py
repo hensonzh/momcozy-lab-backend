@@ -46,12 +46,15 @@ def test_agent_thread_run_events_and_cancel_use_current_user_scope() -> None:
     list_threads = TestClient(app).get("/v1/agent/threads?limit=10")
     get_run = TestClient(app).get(f"/v1/agent/runs/{fake_service.run_id}")
     events = TestClient(app).get(f"/v1/agent/runs/{fake_service.run_id}/events?after_sequence=1&limit=20")
+    stream = TestClient(app).get(f"/v1/agent/runs/{fake_service.run_id}/stream?after_sequence=1&limit=20")
     cancel = TestClient(app).post(f"/v1/agent/runs/{fake_service.run_id}/cancel", json={"reason": "stop"})
 
     assert list_threads.status_code == 200
     assert get_run.status_code == 200
     assert events.status_code == 200
     assert events.json()["items"][0]["type"] == "run.queued"
+    assert stream.status_code == 200
+    assert "event: run.queued" in stream.text
     assert cancel.status_code == 200
     assert fake_service.list_threads_kwargs["owner_user_id"] == user_id
     assert fake_service.get_run_kwargs["owner_user_id"] == user_id

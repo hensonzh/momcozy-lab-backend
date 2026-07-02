@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, Query, Request, status
+from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...api.dependencies import require_current_user
@@ -27,6 +28,7 @@ from .schemas import (
 )
 from .service import AgentRuntimeService
 from .controls import AgentRunControls
+from .streaming import encode_sse_events
 
 
 router = APIRouter(prefix="/agent", tags=["agent"])
@@ -123,6 +125,27 @@ async def list_run_events(
     )
     next_sequence = events[-1].sequence if events else None
     return AgentEventPage(items=[AgentEventRead.model_validate(event) for event in events], next_sequence=next_sequence)
+
+
+@router.get("/runs/{run_id}/stream")
+async def stream_run_events(
+    run_id: UUID,
+    after_sequence: int = Query(default=0, ge=0),
+    limit: int = Query(default=200, ge=1, le=500),
+    current_user: CurrentUser = Depends(require_current_user),
+    service: AgentRuntimeService = Depends(get_agent_runtime_service),
+) -> Response:
+    events = await service.list_events(
+        owner_user_id=current_user.user_id,
+        run_id=run_id,
+        after_sequence=after_sequence,
+        limit=limit,
+    )
+    return StreamingResponse(
+        iter([encode_sse_events(events)]),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache"},
+    )
 
 
 @router.post("/runs/{run_id}/cancel", response_model=AgentRunRead)

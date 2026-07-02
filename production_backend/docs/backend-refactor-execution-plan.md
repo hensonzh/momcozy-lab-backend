@@ -299,6 +299,8 @@ Completed:
 - Tool executor foundation: contract lookup, permission and actor owner-scope
   enforcement, safe args/result redaction, persisted tool call/output, and
   structured failure mapping.
+- Streaming replay endpoint: `/v1/agent/runs/{run_id}/stream` emits persisted
+  application event envelopes as SSE, never provider raw events.
 
 ### Phase 7: Safety, Observability, And Eval
 
