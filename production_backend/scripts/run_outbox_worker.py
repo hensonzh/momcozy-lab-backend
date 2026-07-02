@@ -5,6 +5,7 @@ import asyncio
 import json
 from typing import Any
 
+from production_backend.app.core.metrics import RequestMetrics
 from production_backend.app.core.settings import Settings
 from production_backend.app.infrastructure.db.session import create_db_engine, create_session_factory
 from production_backend.app.infrastructure.object_storage.factory import create_object_storage
@@ -36,6 +37,7 @@ async def run_outbox_worker(
     object_storage = create_object_storage(resolved_settings)
     redis_client = create_redis_client(resolved_settings)
     controls = AgentRunControls(redis_client)
+    metrics = RequestMetrics()
     totals: dict[str, Any] = {"status": "ok", "cycles": 0, "processed": 0}
     try:
         while True:
@@ -58,6 +60,7 @@ async def run_outbox_worker(
                         },
                     ),
                     lease_seconds=resolved_settings.outbox_worker_lease_seconds,
+                    metrics=metrics,
                 )
                 try:
                     processed = await worker.run_once()
@@ -70,12 +73,16 @@ async def run_outbox_worker(
             if processed:
                 totals["processed"] += 1
             if once or (max_cycles is not None and totals["cycles"] >= max_cycles):
-                return totals
+                return _with_metrics(totals, metrics)
             if not processed:
                 await asyncio.sleep(resolved_settings.outbox_worker_idle_seconds)
     finally:
         await close_redis_client(redis_client)
         await db_engine.dispose()
+
+
+def _with_metrics(totals: dict[str, Any], metrics: RequestMetrics) -> dict[str, Any]:
+    return {**totals, "metrics": metrics.snapshot()}
 
 
 def main() -> None:

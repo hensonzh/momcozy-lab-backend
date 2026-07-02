@@ -5,6 +5,7 @@ import asyncio
 import json
 from typing import Any
 
+from production_backend.app.core.metrics import RequestMetrics
 from production_backend.app.core.settings import Settings
 from production_backend.app.infrastructure.db.session import create_db_engine, create_session_factory
 from production_backend.app.infrastructure.redis.client import close_redis_client, create_redis_client
@@ -48,6 +49,7 @@ async def run_agent_worker(
     session_factory = create_session_factory(db_engine)
     redis_client = create_redis_client(resolved_settings)
     controls = AgentRunControls(redis_client)
+    metrics = RequestMetrics()
     totals: dict[str, Any] = {"status": "ok", "cycles": 0, "scanned": 0, "processed": 0, "terminal": 0}
     try:
         while True:
@@ -59,7 +61,7 @@ async def run_agent_worker(
                     idempotency_service=IdempotencyService(repository=audit_repository),
                     outbox_service=OutboxService(repository=OutboxRepository(session)),
                     controls=controls,
-                    safety_service=AgentSafetyService(repository=repository),
+                    safety_service=AgentSafetyService(repository=repository, metrics=metrics),
                 )
                 profile_service = ProfileService(
                     repository=ProfileRepository(session),
@@ -91,6 +93,7 @@ async def run_agent_worker(
                     registry=tool_registry,
                     repository=repository,
                     event_sink=event_sink,
+                    metrics=metrics,
                     handlers=build_default_tool_handlers(
                         profile_service=profile_service,
                         records_service=records_service,
@@ -107,7 +110,7 @@ async def run_agent_worker(
                     tool_registry=tool_registry,
                     tool_executor=tool_executor,
                     event_sink=event_sink,
-                    sdk_runner=OpenAIAgentsSdkRunner(model=resolved_settings.openai_model),
+                    sdk_runner=OpenAIAgentsSdkRunner(model=resolved_settings.openai_model, metrics=metrics),
                 )
                 worker = AgentRunQueueWorker(
                     repository=repository,
@@ -127,12 +130,16 @@ async def run_agent_worker(
             totals["processed"] += result.processed
             totals["terminal"] += result.terminal
             if once or (max_cycles is not None and totals["cycles"] >= max_cycles):
-                return totals
+                return _with_metrics(totals, metrics)
             if result.scanned == 0:
                 await asyncio.sleep(resolved_settings.agent_runtime_worker_idle_seconds)
     finally:
         await close_redis_client(redis_client)
         await db_engine.dispose()
+
+
+def _with_metrics(totals: dict[str, Any], metrics: RequestMetrics) -> dict[str, Any]:
+    return {**totals, "metrics": metrics.snapshot()}
 
 
 def main() -> None:
