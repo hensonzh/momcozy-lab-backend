@@ -311,6 +311,10 @@ Completed:
   persisted as `confirmation_required` actions, emit
   `action.confirmation_required`, and move the run into
   `waiting_for_confirmation` instead of failing with a placeholder error.
+- OpenAI Agents SDK backend: default SDK runner now lazily imports the official
+  `agents.Agent` / `agents.Runner.run` shape, maps `final_output` into typed
+  runtime results, and validates `OPENAI_API_KEY` / `OPENAI_MODEL` through
+  environment-managed settings when the agent worker is enabled.
 - Agent run queue worker: scans durable queued runs plus recoverable stale
   running runs from Postgres and delegates each run to the lifecycle worker
   behind Redis run locks.
@@ -415,6 +419,8 @@ Completed backend commits have established:
   projection, tool metadata, and OpenAI Agents SDK runner results
 - SDK action proposals now become durable confirmation-required actions and
   waiting run outcomes
+- OpenAI Agents SDK backend wiring with environment-managed API key and model
+  configuration for the agent worker
 - durable agent run queue scanner that can resume queued/stale running runs
   without in-memory session state
 - environment-controlled agent worker process entry and compose profile for

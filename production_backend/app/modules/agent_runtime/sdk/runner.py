@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import importlib.util
+import importlib
 from dataclasses import dataclass, field
 from time import perf_counter
 from typing import Any, Protocol
@@ -34,24 +34,46 @@ class SdkRunnerBackend(Protocol):
         ...
 
 
+class OpenAIAgentsSdkBackend:
+    def __init__(self, *, model: str) -> None:
+        self.model = model
+
+    async def run(self, request: SdkNodeRequest) -> SdkNodeResult:
+        try:
+            agents_module = importlib.import_module("agents")
+        except ImportError as exc:
+            raise ApiError(code="dependency_not_configured", message="OpenAI Agents SDK is not installed.", status=503) from exc
+
+        agent_cls = getattr(agents_module, "Agent", None)
+        runner_cls = getattr(agents_module, "Runner", None)
+        if agent_cls is None or runner_cls is None:
+            raise ApiError(code="dependency_not_configured", message="OpenAI Agents SDK Agent/Runner is unavailable.", status=503)
+
+        agent = agent_cls(name="MomCozy assistant", instructions=request.instructions, model=self.model)
+        result = await runner_cls.run(agent, _flatten_model_input(request.model_input))
+        final_output = getattr(result, "final_output", "")
+        return SdkNodeResult(final_text=str(final_output or ""))
+
+
 class OpenAIAgentsSdkRunner:
-    def __init__(self, *, backend: SdkRunnerBackend | None = None, metrics: RequestMetrics | None = None) -> None:
+    def __init__(self, *, backend: SdkRunnerBackend | None = None, metrics: RequestMetrics | None = None, model: str = "gpt-5.5") -> None:
         self.backend = backend
         self.metrics = metrics
+        self.model = model
 
     async def run_reasoning(self, request: SdkNodeRequest) -> SdkNodeResult:
         started_at = perf_counter()
         try:
-            if self.backend is not None:
-                result = await self.backend.run(request)
-                self._record(outcome="completed", error_code="", started_at=started_at)
-                return result
-            if importlib.util.find_spec("agents") is None:
-                raise ApiError(code="dependency_not_configured", message="OpenAI Agents SDK is not installed.", status=503)
-            raise ApiError(code="dependency_not_configured", message="OpenAI Agents SDK backend is not configured.", status=503)
+            backend = self.backend or OpenAIAgentsSdkBackend(model=self.model)
+            result = await backend.run(request)
+            self._record(outcome="completed", error_code="", started_at=started_at)
+            return result
         except ApiError as exc:
             self._record(outcome="failed", error_code=exc.code, started_at=started_at)
             raise
+        except Exception as exc:
+            self._record(outcome="failed", error_code="sdk_run_failed", started_at=started_at)
+            raise ApiError(code="sdk_run_failed", message="OpenAI Agents SDK run failed.", status=502) from exc
 
     def _record(self, *, outcome: str, error_code: str, started_at: float) -> None:
         if self.metrics is not None:
@@ -61,3 +83,18 @@ class OpenAIAgentsSdkRunner:
                 error_code=error_code,
                 duration_ms=(perf_counter() - started_at) * 1000,
             )
+
+
+def _flatten_model_input(model_input: list[dict[str, Any]]) -> str:
+    lines: list[str] = []
+    for item in model_input:
+        role = str(item.get("role") or "user")
+        content = item.get("content")
+        lines.append(f"{role}: {_stringify_content(content)}")
+    return "\n".join(lines)
+
+
+def _stringify_content(content: object) -> str:
+    if isinstance(content, str):
+        return content
+    return str(content)

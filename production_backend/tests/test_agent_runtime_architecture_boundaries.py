@@ -1,4 +1,7 @@
 import asyncio
+import sys
+import types
+from importlib.machinery import ModuleSpec
 
 import pytest
 
@@ -77,6 +80,28 @@ def test_sdk_runner_reports_missing_backend_as_dependency_error() -> None:
     assert exc_info.value.code == "dependency_not_configured"
 
 
+def test_sdk_runner_uses_real_agents_sdk_shape_when_package_is_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_agents = types.ModuleType("agents")
+    fake_agents.__spec__ = ModuleSpec("agents", loader=None)
+    fake_agents.Agent = FakeAgentsSdkAgent
+    fake_agents.Runner = FakeAgentsSdkRunner
+    monkeypatch.setitem(sys.modules, "agents", fake_agents)
+    request = SdkNodeRequest(
+        run_id="run_1",
+        thread_id="thread_1",
+        actor_user_id="user_1",
+        instructions="Be concise.",
+        model_input=[{"role": "user", "content": "hello"}],
+    )
+
+    result = asyncio.run(OpenAIAgentsSdkRunner(model="gpt-test").run_reasoning(request))
+
+    assert result.final_text == "sdk final"
+    assert FakeAgentsSdkAgent.created["model"] == "gpt-test"
+    assert FakeAgentsSdkAgent.created["instructions"] == "Be concise."
+    assert FakeAgentsSdkRunner.last_input == "user: hello"
+
+
 def test_sdk_runner_records_backend_metrics() -> None:
     metrics = RequestMetrics()
     request = SdkNodeRequest(
@@ -102,3 +127,27 @@ def test_sdk_runner_records_backend_metrics() -> None:
 class FakeSdkBackend:
     async def run(self, request: SdkNodeRequest) -> SdkNodeResult:
         return SdkNodeResult(final_text="hello", tool_calls=[{"tool_name": request.tool_names[0]}])
+
+
+class FakeAgentsSdkAgent:
+    created = {}
+
+    def __init__(self, *, name: str, instructions: str, model: str) -> None:
+        self.name = name
+        self.instructions = instructions
+        self.model = model
+        FakeAgentsSdkAgent.created = {"name": name, "instructions": instructions, "model": model}
+
+
+class FakeAgentsSdkRunner:
+    last_input = ""
+
+    @staticmethod
+    async def run(agent: FakeAgentsSdkAgent, input: str):
+        FakeAgentsSdkRunner.last_input = input
+        return FakeAgentsSdkResult(final_output="sdk final")
+
+
+class FakeAgentsSdkResult:
+    def __init__(self, *, final_output: str) -> None:
+        self.final_output = final_output

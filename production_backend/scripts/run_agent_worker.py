@@ -37,7 +37,7 @@ async def run_agent_worker(
                 repository = AgentRuntimeRepository(session)
                 handler = AgentRuntimeExecutor(
                     repository=repository,
-                    sdk_runner=OpenAIAgentsSdkRunner(),
+                    sdk_runner=OpenAIAgentsSdkRunner(model=resolved_settings.openai_model),
                 )
                 worker = AgentRunQueueWorker(
                     repository=repository,

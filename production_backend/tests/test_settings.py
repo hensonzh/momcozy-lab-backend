@@ -43,6 +43,8 @@ def test_settings_from_env_reads_agent_worker_controls(monkeypatch: pytest.Monke
     monkeypatch.setenv("AGENT_RUNTIME_WORKER_BATCH_LIMIT", "25")
     monkeypatch.setenv("AGENT_RUNTIME_WORKER_IDLE_SECONDS", "5")
     monkeypatch.setenv("AGENT_RUNTIME_RECOVER_RUNNING_OLDER_THAN_SECONDS", "120")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("OPENAI_MODEL", "gpt-test")
 
     settings = Settings.from_env()
 
@@ -50,6 +52,8 @@ def test_settings_from_env_reads_agent_worker_controls(monkeypatch: pytest.Monke
     assert settings.agent_runtime_worker_batch_limit == 25
     assert settings.agent_runtime_worker_idle_seconds == 5
     assert settings.agent_runtime_recover_running_older_than_seconds == 120
+    assert settings.openai_api_key == "sk-test"
+    assert settings.openai_model == "gpt-test"
 
 
 def test_settings_from_env_reads_outbox_worker_controls(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -68,6 +72,13 @@ def test_settings_reject_invalid_agent_worker_controls() -> None:
     settings = Settings(agent_runtime_worker_batch_limit=0)
 
     with pytest.raises(ValueError, match="AGENT_RUNTIME_WORKER_BATCH_LIMIT"):
+        settings.validate_for_startup()
+
+
+def test_settings_requires_openai_key_when_agent_worker_is_enabled() -> None:
+    settings = Settings(agent_runtime_worker_enabled=True, openai_api_key="")
+
+    with pytest.raises(ValueError, match="OPENAI_API_KEY"):
         settings.validate_for_startup()
 
 

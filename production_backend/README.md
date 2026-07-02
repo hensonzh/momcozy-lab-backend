@@ -68,7 +68,8 @@ Agent runs are processed by a separate worker process, not by the API lifespan.
 The compose `agent-worker` service is behind the `workers` profile and remains
 safe by default because `AGENT_RUNTIME_WORKER_ENABLED=false` in
 `compose.env.example`. Enable it only in an environment where the LangGraph /
-OpenAI Agents SDK runtime handler is configured:
+OpenAI Agents SDK runtime handler is configured. `OPENAI_API_KEY` must be set
+when this worker is enabled, and `OPENAI_MODEL` controls the SDK agent model:
 
 ```bash
 AGENT_RUNTIME_WORKER_ENABLED=true docker compose --profile workers up agent-worker

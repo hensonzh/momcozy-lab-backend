@@ -45,6 +45,8 @@ class Settings:
     outbox_worker_enabled: bool = False
     outbox_worker_idle_seconds: int = 2
     outbox_worker_lease_seconds: int = 60
+    openai_api_key: str = ""
+    openai_model: str = "gpt-5.5"
     log_level: str = "INFO"
 
     @classmethod
@@ -85,6 +87,8 @@ class Settings:
             outbox_worker_enabled=_env_bool("OUTBOX_WORKER_ENABLED", cls.outbox_worker_enabled),
             outbox_worker_idle_seconds=_env_int("OUTBOX_WORKER_IDLE_SECONDS", cls.outbox_worker_idle_seconds),
             outbox_worker_lease_seconds=_env_int("OUTBOX_WORKER_LEASE_SECONDS", cls.outbox_worker_lease_seconds),
+            openai_api_key=_env("OPENAI_API_KEY", cls.openai_api_key),
+            openai_model=_env("OPENAI_MODEL", cls.openai_model),
             log_level=_env("LOG_LEVEL", cls.log_level).upper(),
         )
 
@@ -126,6 +130,10 @@ class Settings:
             errors.append("OUTBOX_WORKER_IDLE_SECONDS must be non-negative")
         if self.outbox_worker_lease_seconds < 1:
             errors.append("OUTBOX_WORKER_LEASE_SECONDS must be positive")
+        if self.agent_runtime_worker_enabled and not self.openai_api_key:
+            errors.append("OPENAI_API_KEY is required when AGENT_RUNTIME_WORKER_ENABLED is true")
+        if not self.openai_model:
+            errors.append("OPENAI_MODEL is required")
 
         if self.is_production:
             if _is_local_url(self.database_url, LOCAL_DATABASE_URL):
