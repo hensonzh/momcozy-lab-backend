@@ -223,7 +223,15 @@ class AgentRuntimeService:
             thread_id=run.thread_id,
             run_id=run.id,
             event_type="action.confirmation_required",
-            payload={"action_id": str(action.id), "action_type": action.action_type},
+            payload={
+                "action_id": str(action.id),
+                "action_type": action.action_type,
+                "action_status": action.status,
+                "target_type": action.target_type,
+                "target_id": action.target_id,
+                "side_effect_level": action.side_effect_level,
+                "preview_payload": action.preview_payload,
+            },
         )
         return action
 
@@ -279,6 +287,9 @@ class AgentRuntimeService:
             payload={
                 "action_id": str(confirmed.id),
                 "action_status": confirmed.status,
+                "action_type": confirmed.action_type,
+                "target_type": confirmed.target_type,
+                "target_id": confirmed.target_id,
                 "outbox_status": outbox_job.status,
                 "outbox_job_id": str(outbox_job.id),
             },
@@ -297,7 +308,14 @@ class AgentRuntimeService:
             thread_id=run.thread_id,
             run_id=run.id,
             event_type="action.rejected",
-            payload={"action_id": str(rejected.id), "reason": _normalize_text(reason, max_length=500)},
+            payload={
+                "action_id": str(rejected.id),
+                "action_status": rejected.status,
+                "action_type": rejected.action_type,
+                "target_type": rejected.target_type,
+                "target_id": rejected.target_id,
+                "reason": _normalize_text(reason, max_length=500),
+            },
         )
         return rejected
 
