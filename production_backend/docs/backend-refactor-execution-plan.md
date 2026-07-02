@@ -192,10 +192,12 @@ Completed:
   events.
 - Devices API: owner-scoped pump upsert/list and telemetry ingest/list with
   audit and idempotent telemetry ingest.
+- Notifications/support data foundation: owner-scoped notifications and support
+  tickets.
 
 Suggested order:
 
-1. Notifications and support tickets.
+1. Notifications and support ticket APIs.
 
 Rules:
 
