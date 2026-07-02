@@ -258,6 +258,10 @@ class AgentRuntimeRepository:
         )
         return cast(AgentAction | None, await self.session.scalar(statement))
 
+    async def get_action(self, *, action_id: UUID) -> AgentAction | None:
+        statement = select(AgentAction).where(AgentAction.id == action_id)
+        return cast(AgentAction | None, await self.session.scalar(statement))
+
     async def mark_action_confirmed(
         self,
         *,
@@ -272,6 +276,26 @@ class AgentRuntimeRepository:
             action.apply_payload = apply_payload
         if idempotency_key:
             action.idempotency_key = idempotency_key
+        await self.session.flush()
+        return action
+
+    async def mark_action_applying(self, *, action: AgentAction) -> AgentAction:
+        action.status = "applying"
+        action.error_code = ""
+        await self.session.flush()
+        return action
+
+    async def mark_action_applied(self, *, action: AgentAction, applied_at: datetime) -> AgentAction:
+        action.status = "applied"
+        action.applied_at = applied_at
+        action.error_code = ""
+        await self.session.flush()
+        return action
+
+    async def mark_action_failed(self, *, action: AgentAction, failed_at: datetime, error_code: str) -> AgentAction:
+        action.status = "failed"
+        action.failed_at = failed_at
+        action.error_code = error_code
         await self.session.flush()
         return action
 

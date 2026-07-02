@@ -316,6 +316,9 @@ Completed:
 - Agent action confirmation now enqueues a durable `agent.action.apply` outbox
   job and emits `action.queued` with the persisted outbox job ID instead of an
   event-only queued marker.
+- Agent action outbox apply skeleton: registered apply handlers can move actions
+  through `applying -> applied` and emit `action.applied`; missing or permanent
+  handler failures mark actions failed and emit `action.failed`.
 
 ### Phase 7: Safety, Observability, And Eval
 
@@ -406,6 +409,8 @@ Completed backend commits have established:
   separate API/worker deployment
 - durable outbox enqueue for confirmed agent actions, preserving action status
   and outbox status as separate contracts
+- agent action outbox apply handler skeleton with idempotent applied handling,
+  explicit missing-handler failure, and persisted action events
 - OpenAPI schema export script, generated schema snapshot, and API handoff
   document for Flutter integration
 - Auth/token API contract tests for token response shape, validation envelope,

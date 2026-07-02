@@ -1,0 +1,99 @@
+from __future__ import annotations
+
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Any
+from uuid import UUID
+
+from ...workers.errors import PermanentJobError, RetryableJobError
+from ..audit.models import OutboxJob
+from .models import AgentAction
+from .repository import AgentRuntimeRepository
+from .service import AGENT_ACTION_APPLY_JOB
+
+
+@dataclass(frozen=True)
+class AgentActionApplyResult:
+    resource_type: str = ""
+    resource_id: str = ""
+    details: dict[str, Any] | None = None
+
+
+AgentActionApplyHandler = Callable[[AgentAction], Awaitable[AgentActionApplyResult]]
+
+
+class AgentActionOutboxHandler:
+    def __init__(self, *, repository: AgentRuntimeRepository, handlers: Mapping[str, AgentActionApplyHandler]) -> None:
+        self.repository = repository
+        self.handlers = handlers
+
+    async def __call__(self, job: OutboxJob) -> None:
+        if job.job_type != AGENT_ACTION_APPLY_JOB:
+            raise PermanentJobError("unsupported_agent_action_job")
+        action_id = _action_id_from_job(job)
+        action = await self.repository.get_action(action_id=action_id)
+        if action is None:
+            raise PermanentJobError("agent_action_not_found")
+        run = await self.repository.get_run(run_id=action.run_id)
+        if run is None:
+            raise PermanentJobError("agent_run_not_found")
+        if action.status == "applied":
+            return
+        if action.status not in {"confirmed", "applying"}:
+            raise PermanentJobError("agent_action_not_confirmed")
+
+        handler = self.handlers.get(action.action_type)
+        if handler is None:
+            await self._fail(action=action, thread_id=run.thread_id, error_code="agent_action_handler_not_found")
+            raise PermanentJobError("agent_action_handler_not_found")
+
+        await self.repository.mark_action_applying(action=action)
+        try:
+            result = await handler(action)
+        except RetryableJobError:
+            raise
+        except PermanentJobError as exc:
+            await self._fail(action=action, thread_id=run.thread_id, error_code=exc.code)
+            raise
+        except Exception as exc:
+            raise RetryableJobError("agent_action_handler_error") from exc
+
+        applied = await self.repository.mark_action_applied(action=action, applied_at=_utcnow())
+        await self.repository.append_event(
+            thread_id=run.thread_id,
+            run_id=applied.run_id,
+            event_type="action.applied",
+            payload={
+                "action_id": str(applied.id),
+                "resource_type": result.resource_type,
+                "resource_id": result.resource_id,
+                "details": result.details or {},
+            },
+        )
+
+    async def _fail(self, *, action: AgentAction, thread_id: UUID, error_code: str) -> None:
+        failed = await self.repository.mark_action_failed(action=action, failed_at=_utcnow(), error_code=error_code)
+        await self.repository.append_event(
+            thread_id=thread_id,
+            run_id=failed.run_id,
+            event_type="action.failed",
+            payload={"action_id": str(failed.id), "code": error_code},
+        )
+
+
+def _action_id_from_job(job: OutboxJob) -> UUID:
+    if job.action_id is not None:
+        return job.action_id
+    return _require_uuid(job.payload.get("action_id"), "missing_action_id")
+
+
+def _require_uuid(raw: object, code: str) -> UUID:
+    try:
+        return UUID(str(raw))
+    except (TypeError, ValueError) as exc:
+        raise PermanentJobError(code) from exc
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
