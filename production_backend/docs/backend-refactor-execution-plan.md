@@ -412,10 +412,11 @@ Completed backend commits have established:
 - Tighter mypy gates for incomplete definitions, untyped calls, implicit
   optionals, generic parameters, redundant casts, unused ignores, and equality
   checks.
+- Repository and app-state return typing cleanup so `warn_return_any` is now a
+  backend CI gate.
 
 Next recommended backend PR slices:
 
 1. Add generated Flutter client CI job once the app refactor owns codegen.
-2. Remove repository `Any` returns so `warn_return_any` can become a CI gate.
-3. Finish remaining helper annotations so `disallow_untyped_defs` can become a
+2. Finish remaining helper annotations so `disallow_untyped_defs` can become a
    CI gate.

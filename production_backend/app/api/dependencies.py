@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import cast
+
 from fastapi import Depends, Header, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
@@ -22,7 +24,7 @@ async def require_current_user(
 
 
 def get_object_storage(request: Request) -> ObjectStorage:
-    return request.app.state.object_storage
+    return cast(ObjectStorage, request.app.state.object_storage)
 
 
 def normalize_idempotency_key(value: str | None) -> str | None:

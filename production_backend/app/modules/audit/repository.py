@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from sqlalchemy import and_, or_, select
@@ -54,7 +54,7 @@ class AuditRepository:
             IdempotencyKey.scope == scope,
             IdempotencyKey.key == key,
         )
-        return await self.session.scalar(statement)
+        return cast(IdempotencyKey | None, await self.session.scalar(statement))
 
     async def create_idempotency_key(
         self,
@@ -94,7 +94,7 @@ class OutboxRepository:
 
     async def get_by_idempotency_key(self, *, idempotency_key: str) -> OutboxJob | None:
         statement = select(OutboxJob).where(OutboxJob.idempotency_key == idempotency_key)
-        return await self.session.scalar(statement)
+        return cast(OutboxJob | None, await self.session.scalar(statement))
 
     async def create_job(
         self,
@@ -140,7 +140,7 @@ class OutboxRepository:
             .with_for_update(skip_locked=True)
             .limit(1)
         )
-        job = await self.session.scalar(statement)
+        job = cast(OutboxJob | None, await self.session.scalar(statement))
         if job is None:
             return None
 

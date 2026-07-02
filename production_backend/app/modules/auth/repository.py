@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import cast
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
@@ -21,7 +22,7 @@ class AuthAccountRepository:
             .options(selectinload(AuthIdentity.user))
             .where(AuthIdentity.provider == provider, AuthIdentity.subject == subject)
         )
-        return await self.session.scalar(statement)
+        return cast(AuthIdentity | None, await self.session.scalar(statement))
 
     async def get_user(self, *, user_id: UUID) -> User | None:
         return await self.session.get(User, user_id)
@@ -83,7 +84,7 @@ class AuthSessionRepository:
 
     async def get_refresh_token_by_hash(self, *, token_hash: str) -> RefreshToken | None:
         statement = select(RefreshToken).where(RefreshToken.token_hash == token_hash)
-        return await self.session.scalar(statement)
+        return cast(RefreshToken | None, await self.session.scalar(statement))
 
     async def get_device_session(self, *, session_id: UUID) -> DeviceSession | None:
         return await self.session.get(DeviceSession, session_id)

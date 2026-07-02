@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -41,7 +41,7 @@ class AgentRuntimeRepository:
             AgentThread.owner_user_id == owner_user_id,
             AgentThread.deleted_at.is_(None),
         )
-        return await self.session.scalar(statement)
+        return cast(AgentThread | None, await self.session.scalar(statement))
 
     async def list_threads_for_owner(self, *, owner_user_id: UUID, limit: int) -> list[AgentThread]:
         statement = (
@@ -83,7 +83,7 @@ class AgentRuntimeRepository:
             .join(AgentThread, AgentThread.id == AgentRun.thread_id)
             .where(AgentRun.id == run_id, AgentThread.owner_user_id == owner_user_id, AgentThread.deleted_at.is_(None))
         )
-        return await self.session.scalar(statement)
+        return cast(AgentRun | None, await self.session.scalar(statement))
 
     async def create_message(
         self,
@@ -191,7 +191,7 @@ class AgentRuntimeRepository:
                 AgentThread.deleted_at.is_(None),
             )
         )
-        return await self.session.scalar(statement)
+        return cast(AgentAction | None, await self.session.scalar(statement))
 
     async def mark_action_confirmed(
         self,

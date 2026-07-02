@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from fastapi import APIRouter, Request
 from sqlalchemy import text
@@ -50,7 +50,7 @@ async def ready(request: Request) -> dict[str, Any]:
 
 @router.get("/health/metrics")
 async def metrics(request: Request) -> dict[str, Any]:
-    return request.app.state.request_metrics.snapshot()
+    return cast(dict[str, Any], request.app.state.request_metrics.snapshot())
 
 
 async def _check_database(request: Request) -> str:

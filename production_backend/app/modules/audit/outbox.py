@@ -82,7 +82,8 @@ class OutboxService:
     def _retry_delay_seconds(self, attempts: int) -> int:
         exponent = max(attempts - 1, 0)
         delay = self.retry_policy.base_delay_seconds * (2**exponent)
-        return min(delay, self.retry_policy.max_delay_seconds)
+        capped_delay: int = min(delay, self.retry_policy.max_delay_seconds)
+        return capped_delay
 
 
 def _utcnow() -> datetime:

@@ -15,6 +15,7 @@ def test_mypy_config_uses_progressively_tighter_backend_gates() -> None:
         "no_implicit_optional = true",
         "strict_equality = true",
         "warn_redundant_casts = true",
+        "warn_return_any = true",
         "warn_unused_ignores = true",
     ]:
         assert phrase in text

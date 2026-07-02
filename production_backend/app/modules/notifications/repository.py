@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from sqlalchemy import select
@@ -44,7 +44,7 @@ class NotificationsRepository:
             Notification.owner_user_id == owner_user_id,
             Notification.status != "archived",
         )
-        return await self.session.scalar(statement)
+        return cast(Notification | None, await self.session.scalar(statement))
 
     async def list_for_owner(
         self,

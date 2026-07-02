@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from sqlalchemy import select
@@ -16,7 +16,7 @@ class ProfileRepository:
 
     async def get_user_profile(self, *, user_id: UUID) -> UserProfile | None:
         statement = select(UserProfile).where(UserProfile.user_id == user_id)
-        return await self.session.scalar(statement)
+        return cast(UserProfile | None, await self.session.scalar(statement))
 
     async def upsert_user_profile(self, *, user_id: UUID, values: dict[str, Any]) -> UserProfile:
         profile = await self.get_user_profile(user_id=user_id)
@@ -48,7 +48,7 @@ class ProfileRepository:
             InfantProfile.owner_user_id == owner_user_id,
             InfantProfile.deleted_at.is_(None),
         )
-        return await self.session.scalar(statement)
+        return cast(InfantProfile | None, await self.session.scalar(statement))
 
     async def create_infant(
         self,

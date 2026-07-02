@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from sqlalchemy import select
@@ -20,7 +20,7 @@ class DiaryRepository:
             PregnancyDiaryEntry.entry_date == entry_date,
             PregnancyDiaryEntry.deleted_at.is_(None),
         )
-        return await self.session.scalar(statement)
+        return cast(PregnancyDiaryEntry | None, await self.session.scalar(statement))
 
     async def list_entries(
         self,

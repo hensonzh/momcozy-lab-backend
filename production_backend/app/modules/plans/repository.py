@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from sqlalchemy import select
@@ -38,7 +38,7 @@ class PlansRepository:
 
     async def get_plan_for_owner(self, *, plan_id: UUID, owner_user_id: UUID) -> Plan | None:
         statement = select(Plan).where(Plan.id == plan_id, Plan.owner_user_id == owner_user_id, Plan.deleted_at.is_(None))
-        return await self.session.scalar(statement)
+        return cast(Plan | None, await self.session.scalar(statement))
 
     async def list_plans(self, *, owner_user_id: UUID, status: str, limit: int) -> list[Plan]:
         statement = (
@@ -89,7 +89,7 @@ class PlansRepository:
             PlanTask.owner_user_id == owner_user_id,
             PlanTask.deleted_at.is_(None),
         )
-        return await self.session.scalar(statement)
+        return cast(PlanTask | None, await self.session.scalar(statement))
 
     async def list_tasks(
         self,

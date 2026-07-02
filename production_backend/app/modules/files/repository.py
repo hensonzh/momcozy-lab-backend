@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import cast
 from uuid import UUID
 
 from sqlalchemy import select
@@ -39,7 +40,7 @@ class FileRepository:
             FileObject.owner_user_id == owner_user_id,
             FileObject.deleted_at.is_(None),
         )
-        return await self.session.scalar(statement)
+        return cast(FileObject | None, await self.session.scalar(statement))
 
     async def list_for_owner(self, *, owner_user_id: UUID, limit: int) -> list[FileObject]:
         statement = (

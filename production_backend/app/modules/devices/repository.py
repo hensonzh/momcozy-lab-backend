@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from sqlalchemy import select
@@ -54,7 +54,7 @@ class DevicesRepository:
             PumpDevice.device_id == device_id,
             PumpDevice.deleted_at.is_(None),
         )
-        return await self.session.scalar(statement)
+        return cast(PumpDevice | None, await self.session.scalar(statement))
 
     async def create_telemetry_event(
         self,
@@ -81,7 +81,7 @@ class DevicesRepository:
             PumpTelemetryEvent.owner_user_id == owner_user_id,
             PumpTelemetryEvent.id == event_id,
         )
-        return await self.session.scalar(statement)
+        return cast(PumpTelemetryEvent | None, await self.session.scalar(statement))
 
     async def list_telemetry_events(
         self,

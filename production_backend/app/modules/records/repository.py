@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import cast
 from uuid import UUID
 
 from sqlalchemy import select
@@ -54,7 +55,7 @@ class RecordsRepository:
             FeedingRecord.owner_user_id == owner_user_id,
             FeedingRecord.deleted_at.is_(None),
         )
-        return await self.session.scalar(statement)
+        return cast(FeedingRecord | None, await self.session.scalar(statement))
 
     async def list_feedings(
         self,
@@ -124,7 +125,7 @@ class RecordsRepository:
             PumpingRecord.owner_user_id == owner_user_id,
             PumpingRecord.deleted_at.is_(None),
         )
-        return await self.session.scalar(statement)
+        return cast(PumpingRecord | None, await self.session.scalar(statement))
 
     async def list_pumpings(
         self,
@@ -190,7 +191,7 @@ class RecordsRepository:
             GrowthRecord.owner_user_id == owner_user_id,
             GrowthRecord.deleted_at.is_(None),
         )
-        return await self.session.scalar(statement)
+        return cast(GrowthRecord | None, await self.session.scalar(statement))
 
     async def list_growth(
         self,

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from sqlalchemy import select
@@ -50,7 +50,7 @@ class SupportTicketsRepository:
 
     async def get_for_owner(self, *, ticket_id: UUID, owner_user_id: UUID) -> SupportTicket | None:
         statement = select(SupportTicket).where(SupportTicket.id == ticket_id, SupportTicket.owner_user_id == owner_user_id)
-        return await self.session.scalar(statement)
+        return cast(SupportTicket | None, await self.session.scalar(statement))
 
     async def list_for_owner(
         self,
