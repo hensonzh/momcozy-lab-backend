@@ -12,6 +12,7 @@ def test_mypy_config_uses_progressively_tighter_backend_gates() -> None:
         "disallow_any_generics = true",
         "disallow_incomplete_defs = true",
         "disallow_untyped_calls = true",
+        "disallow_untyped_defs = true",
         "no_implicit_optional = true",
         "strict_equality = true",
         "warn_redundant_casts = true",

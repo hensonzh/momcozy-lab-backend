@@ -45,7 +45,7 @@ class SupportTicketCreate(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def merge_legacy_ticket_object(cls, value):
+    def merge_legacy_ticket_object(cls, value: Any) -> Any:
         if not isinstance(value, dict):
             return value
         ticket = value.get("ticket")
