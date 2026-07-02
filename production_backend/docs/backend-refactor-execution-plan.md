@@ -287,6 +287,13 @@ Acceptance:
 - Tool calls, tool results, actions, artifacts, and events are persisted.
 - Non-blocking side effects use action/outbox effect lane.
 
+Completed:
+
+- Agent runtime implementation boundary: LangGraph + OpenAI Agents SDK
+  dependency contract, graph version registry/state shape, SDK runner adapter
+  boundary, tool contract registry, and context builder ordered for prompt cache
+  stability.
+
 ### Phase 7: Safety, Observability, And Eval
 
 Goal: make the backend support real-user operations.
