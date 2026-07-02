@@ -2,6 +2,9 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
+import pytest
+
+from production_backend.app.core.errors import ApiError
 from production_backend.app.modules.audit.models import IdempotencyKey
 from production_backend.app.modules.devices.models import PumpDevice, PumpTelemetryEvent
 from production_backend.app.modules.devices.service import DevicesService
@@ -44,6 +47,31 @@ def test_devices_service_creates_telemetry_with_idempotency() -> None:
     assert idempotency_service.completed_response_ref == str(event.id)
 
 
+def test_devices_service_reserves_idempotency_before_auto_upserting_device() -> None:
+    owner_user_id = uuid4()
+    repository = FakeDevicesRepository()
+    service = DevicesService(
+        repository=repository,
+        idempotency_service=ConflictIdempotencyService(),
+    )
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            service.create_telemetry_event(
+                owner_user_id=owner_user_id,
+                device_id="pump-new",
+                event_type="workstate",
+                occurred_at=_now(),
+                payload={"speed": 3},
+                idempotency_key="idem-event",
+            )
+        )
+
+    assert exc_info.value.code == "idempotency_conflict"
+    assert repository.upsert_count == 0
+    assert repository.event is None
+
+
 def _now() -> datetime:
     return datetime(2026, 7, 2, tzinfo=timezone.utc)
 
@@ -60,8 +88,10 @@ class FakeDevicesRepository:
     def __init__(self, *, device=None, event=None) -> None:
         self.device = device
         self.event = event
+        self.upsert_count = 0
 
     async def upsert_device(self, **kwargs):
+        self.upsert_count += 1
         self.device = _device(owner_user_id=kwargs["owner_user_id"])
         return self.device
 
@@ -110,6 +140,11 @@ class FakeIdempotencyDecision:
     def __init__(self, *, status: str, record) -> None:
         self.status = status
         self.record = record
+
+
+class ConflictIdempotencyService:
+    async def reserve(self, **kwargs):
+        raise ApiError(code="idempotency_conflict", message="Idempotency key was reused with a different request.", status=409)
 
 
 class FakeAuditService:

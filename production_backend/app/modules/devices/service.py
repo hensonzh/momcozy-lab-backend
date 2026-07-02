@@ -68,14 +68,6 @@ class DevicesService:
     ) -> PumpTelemetryEvent:
         normalized_device_id = _normalize_identifier(device_id, field_name="device_id", max_length=120)
         normalized_event_type = _normalize_identifier(event_type, field_name="event_type", max_length=64)
-        if await self.repository.get_device_for_owner(owner_user_id=owner_user_id, device_id=normalized_device_id) is None:
-            await self.repository.upsert_device(
-                owner_user_id=owner_user_id,
-                device_id=normalized_device_id,
-                model="",
-                firmware_version="",
-                last_seen_at=occurred_at,
-            )
         idempotency_record = None
         if idempotency_key:
             if self.idempotency_service is None:
@@ -97,6 +89,15 @@ class DevicesService:
             idempotency_record = decision.record
             if decision.status == "replay":
                 return await self._replay_event(owner_user_id=owner_user_id, response_ref=idempotency_record.response_ref)
+
+        if await self.repository.get_device_for_owner(owner_user_id=owner_user_id, device_id=normalized_device_id) is None:
+            await self.repository.upsert_device(
+                owner_user_id=owner_user_id,
+                device_id=normalized_device_id,
+                model="",
+                firmware_version="",
+                last_seen_at=occurred_at,
+            )
 
         event = await self.repository.create_telemetry_event(
             owner_user_id=owner_user_id,
