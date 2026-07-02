@@ -27,6 +27,7 @@ def test_agent_runtime_actions_confirm_to_action_queued_without_queued_status() 
             apply_payload={"issue_summary": "Pump does not turn on"},
         )
     )
+    run.status = "waiting_for_confirmation"
     confirmed = asyncio.run(
         service.confirm_action(
             owner_user_id=owner_user_id,
@@ -40,7 +41,7 @@ def test_agent_runtime_actions_confirm_to_action_queued_without_queued_status() 
     assert confirmed.status != "queued"
     assert confirmed.idempotency_key == "idem-action"
     assert confirmed.apply_payload["issue_summary"] == "Pump does not turn on after charging"
-    proposal_event = repository.events[-2]
+    proposal_event = repository.events[-3]
     assert proposal_event.event_type == "action.confirmation_required"
     assert proposal_event.payload["action_id"] == str(action.id)
     assert proposal_event.payload["action_status"] == "confirmation_required"
@@ -49,12 +50,16 @@ def test_agent_runtime_actions_confirm_to_action_queued_without_queued_status() 
     assert proposal_event.payload["side_effect_level"] == "medium"
     assert proposal_event.payload["preview_payload"] == {"summary": "Pump does not turn on"}
     assert "apply_payload" not in proposal_event.payload
-    assert repository.events[-1].event_type == "action.queued"
-    assert repository.events[-1].payload["action_status"] == "confirmed"
-    assert repository.events[-1].payload["action_type"] == "support.ticket.create"
-    assert repository.events[-1].payload["target_type"] == "support_ticket"
-    assert repository.events[-1].payload["outbox_status"] == "queued"
-    assert repository.events[-1].payload["outbox_job_id"] == str(outbox_service.job.id)
+    queued_event = repository.events[-2]
+    assert queued_event.event_type == "action.queued"
+    assert queued_event.payload["action_status"] == "confirmed"
+    assert queued_event.payload["action_type"] == "support.ticket.create"
+    assert queued_event.payload["target_type"] == "support_ticket"
+    assert queued_event.payload["outbox_status"] == "queued"
+    assert queued_event.payload["outbox_job_id"] == str(outbox_service.job.id)
+    assert repository.run.status == "completed"
+    assert repository.events[-1].event_type == "run.completed"
+    assert repository.events[-1].payload == {"reason": "action_confirmed", "action_id": str(action.id)}
     assert outbox_service.enqueue_kwargs["job_type"] == AGENT_ACTION_APPLY_JOB
     assert outbox_service.enqueue_kwargs["payload"]["action_id"] == str(action.id)
     assert outbox_service.enqueue_kwargs["action_id"] == action.id
@@ -68,15 +73,20 @@ def test_agent_runtime_actions_reject_confirmation_required_action() -> None:
     action = asyncio.run(
         service.propose_action(owner_user_id=owner_user_id, run_id=run.id, action_type="support.ticket.create")
     )
+    run.status = "waiting_for_confirmation"
 
     rejected = asyncio.run(service.reject_action(owner_user_id=owner_user_id, action_id=action.id, reason="not now"))
 
     assert rejected.status == "rejected"
     assert rejected.error_code == "rejected_by_user"
-    assert repository.events[-1].event_type == "action.rejected"
-    assert repository.events[-1].payload["action_status"] == "rejected"
-    assert repository.events[-1].payload["action_type"] == "support.ticket.create"
-    assert repository.events[-1].payload["reason"] == "not now"
+    rejected_event = repository.events[-2]
+    assert rejected_event.event_type == "action.rejected"
+    assert rejected_event.payload["action_status"] == "rejected"
+    assert rejected_event.payload["action_type"] == "support.ticket.create"
+    assert rejected_event.payload["reason"] == "not now"
+    assert repository.run.status == "completed"
+    assert repository.events[-1].event_type == "run.completed"
+    assert repository.events[-1].payload == {"reason": "action_rejected", "action_id": str(action.id)}
 
 
 def test_agent_runtime_actions_generate_action_idempotency_key_for_confirmation() -> None:

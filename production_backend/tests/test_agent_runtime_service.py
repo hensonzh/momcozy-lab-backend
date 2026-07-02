@@ -159,6 +159,11 @@ class FakeAgentRuntimeRepository:
         self.run.error_code = kwargs["error_code"]
         return self.run
 
+    async def mark_run_completed(self, **kwargs):
+        self.run.status = "completed"
+        self.run.completed_at = kwargs["completed_at"]
+        return self.run
+
     async def mark_run_failed(self, **kwargs):
         self.run.status = "failed"
         self.run.completed_at = kwargs["completed_at"]

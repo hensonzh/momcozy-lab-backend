@@ -294,6 +294,7 @@ class AgentRuntimeService:
                 "outbox_job_id": str(outbox_job.id),
             },
         )
+        await self._complete_waiting_run_after_action_decision(run=run, action_id=confirmed.id, decision="confirmed")
         return confirmed
 
     async def reject_action(self, *, owner_user_id: UUID, action_id: UUID, reason: str = "") -> AgentAction:
@@ -317,7 +318,21 @@ class AgentRuntimeService:
                 "reason": _normalize_text(reason, max_length=500),
             },
         )
+        await self._complete_waiting_run_after_action_decision(run=run, action_id=rejected.id, decision="rejected")
         return rejected
+
+    async def _complete_waiting_run_after_action_decision(self, *, run: AgentRun, action_id: UUID, decision: str) -> None:
+        if run.status != "waiting_for_confirmation":
+            return
+        completed = await self.repository.mark_run_completed(run=run, completed_at=_utcnow())
+        await self._append_event(
+            thread_id=completed.thread_id,
+            run_id=completed.id,
+            event_type="run.completed",
+            payload={"reason": f"action_{decision}", "action_id": str(action_id)},
+        )
+        if self.controls is not None:
+            await self.controls.clear_active_run(thread_id=completed.thread_id, run_id=completed.id)
 
     async def _get_or_create_thread(self, *, actor_user_id: UUID, thread_id: UUID | None, title: str) -> AgentThread:
         if thread_id is None:
