@@ -59,6 +59,11 @@ class AgentRuntimeRepository:
         result = await self.session.scalars(statement)
         return list(result.all())
 
+    async def touch_thread(self, *, thread: AgentThread, updated_at: datetime) -> AgentThread:
+        thread.updated_at = updated_at
+        await self.session.flush()
+        return thread
+
     async def create_run(
         self,
         *,

@@ -32,6 +32,8 @@ def test_agent_runtime_service_creates_run_with_thread_message_events_and_idempo
     assert run.runtime_pattern == "langgraph_sdk"
     assert repository.messages[0].content["text"] == "Review my pumping pattern"
     assert [event.event_type for event in repository.events] == ["run.queued", "message.completed"]
+    assert repository.touched_thread == repository.thread
+    assert repository.touched_updated_at is not None
     assert controls.active_run == (repository.thread.id, run.id)
     assert controls.stream_cursor == (run.id, 2)
     assert idempotency_service.reserve_kwargs["scope"] == "agent.runs.create"
@@ -172,6 +174,8 @@ class FakeAgentRuntimeRepository:
         self.messages = []
         self.events = []
         self.safety_event = None
+        self.touched_thread = None
+        self.touched_updated_at = None
 
     async def create_thread(self, **kwargs):
         self.thread = _thread(owner_user_id=kwargs["owner_user_id"])
@@ -184,6 +188,12 @@ class FakeAgentRuntimeRepository:
 
     async def list_threads_for_owner(self, **kwargs):
         return [self.thread] if self.thread else []
+
+    async def touch_thread(self, **kwargs):
+        self.touched_thread = kwargs["thread"]
+        self.touched_updated_at = kwargs["updated_at"]
+        self.touched_thread.updated_at = self.touched_updated_at
+        return self.touched_thread
 
     async def create_run(self, **kwargs):
         self.run = _run(thread_id=kwargs["thread_id"], actor_user_id=kwargs["actor_user_id"])

@@ -118,6 +118,7 @@ class AgentRuntimeService:
             content={"text": normalized_message, "attachments": safe_attachments},
             status="completed",
         )
+        await self.repository.touch_thread(thread=thread, updated_at=_utcnow())
         safety_blocked = await self._apply_input_safety_gate(
             owner_user_id=actor_user_id,
             run=run,
