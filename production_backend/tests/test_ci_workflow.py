@@ -17,6 +17,9 @@ def test_production_backend_ci_runs_core_gates() -> None:
         "previous_response" + "_id|Chat" + "Session|ENTRY" + "_API_KEY",
         "docker compose -f production_backend/docker-compose.yml config",
         "docker build -f production_backend/Dockerfile .",
+        "postgres-migration",
+        "python -m alembic -c production_backend/alembic.ini upgrade head",
+        "agent_eval_cases",
     ]:
         assert phrase in text
 

@@ -401,11 +401,13 @@ Completed backend commits have established:
   idempotency, and agent stream reducer requirements.
 - Production backend ruff/mypy configuration and CI lint/type gates scoped to
   `production_backend/`.
+- Postgres integration profile and CI `postgres-migration` job that upgrades a
+  live Postgres service to Alembic head and verifies critical tables.
 
 Next recommended backend PR slices:
 
-1. Add first real Postgres integration test profile.
-2. Add migration compatibility test against a live Postgres service in CI.
-3. Add backup/restore automation hooks when managed infrastructure is selected.
-4. Add generated Flutter client CI job once the app refactor owns codegen.
-5. Tighten mypy settings after repository/service annotations mature.
+1. Add backup/restore automation hooks when managed infrastructure is selected.
+2. Add generated Flutter client CI job once the app refactor owns codegen.
+3. Tighten mypy settings after repository/service annotations mature.
+4. Add live Redis profile for run controls and worker leases.
+5. Add object-storage integration profile for MinIO/S3-compatible providers.
