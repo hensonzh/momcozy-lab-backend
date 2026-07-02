@@ -4,9 +4,10 @@ from uuid import uuid4
 import pytest
 
 from production_backend.app.core.errors import ApiError
-from production_backend.app.modules.agent_runtime.models import AgentAction, AgentArtifact, AgentEvent, AgentMessage, AgentRun
+from production_backend.app.modules.agent_runtime.models import AgentAction, AgentArtifact, AgentEvent, AgentMessage, AgentRun, AgentToolCall
 from production_backend.app.modules.agent_runtime.runtime import AgentRuntimeExecutor
 from production_backend.app.modules.agent_runtime.sdk import OpenAIAgentsSdkRunner, SdkNodeRequest, SdkNodeResult
+from production_backend.app.modules.agent_runtime.tools import ToolExecutor, ToolHandlerContext, default_tool_registry
 
 
 def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() -> None:
@@ -112,6 +113,34 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert tool_executor.calls[0]["run_id"] == run.id
     assert tool_executor.calls[0]["tool_name"] == "profile.read"
     assert tool_executor.calls[0]["args"] == {}
+
+
+def test_agent_runtime_executor_real_tool_executor_uses_run_actor_role_permissions() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="Read my profile", sequence=1)
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user, run=run)
+    tool_executor = ToolExecutor(
+        registry=default_tool_registry(),
+        repository=repository,
+        handlers={"profile.read": profile_read_handler},
+    )
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=InvokingSdkBackend()),
+            tool_executor=tool_executor,
+        ).execute(run=run)
+    )
+
+    assert result.status == "completed"
+    assert repository.tool_call is not None
+    assert repository.tool_call.status == "completed"
+    assert repository.tool_call.safe_args == {}
+    assert repository.events[0].event_type == "tool.started"
+    assert repository.events[1].event_type == "tool.completed"
+    assert result.final_text == '{"profile": {"actor_user_id": "' + str(run.actor_user_id) + '"}}'
 
 
 def test_agent_runtime_executor_persists_sdk_action_proposal_and_waits_for_confirmation() -> None:
@@ -267,12 +296,15 @@ class CapturingSdkBackend:
 
 
 class FakeRuntimeRepository:
-    def __init__(self, *, messages: list[AgentMessage], current_message: AgentMessage | None) -> None:
+    def __init__(self, *, messages: list[AgentMessage], current_message: AgentMessage | None, run: AgentRun | None = None) -> None:
         self.messages = messages
         self.current_message = current_message
+        self.run = run
         self.actions = []
         self.artifacts = []
         self.events = []
+        self.tool_call = None
+        self.tool_output = None
 
     async def get_latest_user_message_for_run(self, *, run_id):
         if self.current_message is not None and self.current_message.run_id == run_id:
@@ -281,6 +313,41 @@ class FakeRuntimeRepository:
 
     async def list_messages_for_thread(self, *, thread_id, limit=40):
         return [message for message in self.messages if message.thread_id == thread_id][:limit]
+
+    async def get_run(self, *, run_id):
+        if self.run is not None and self.run.id == run_id:
+            return self.run
+        if self.current_message is not None and self.current_message.run_id == run_id:
+            return _run(thread_id=self.current_message.thread_id, run_id=run_id)
+        return None
+
+    async def start_tool_call(self, **kwargs):
+        self.tool_call = AgentToolCall(
+            id=uuid4(),
+            run_id=kwargs["run_id"],
+            tool_name=kwargs["tool_name"],
+            call_id=kwargs["call_id"],
+            status="started",
+            safe_args=kwargs["safe_args"],
+            started_at=kwargs["started_at"],
+            error_code="",
+        )
+        return self.tool_call
+
+    async def complete_tool_call(self, **kwargs):
+        self.tool_call.status = "completed"
+        self.tool_call.completed_at = kwargs["completed_at"]
+        return self.tool_call
+
+    async def fail_tool_call(self, **kwargs):
+        self.tool_call.status = "failed"
+        self.tool_call.completed_at = kwargs["completed_at"]
+        self.tool_call.error_code = kwargs["error_code"]
+        return self.tool_call
+
+    async def create_tool_output(self, **kwargs):
+        self.tool_output = FakeToolOutput(tool_call_id=kwargs["tool_call_id"], safe_output=kwargs["safe_output"])
+        return self.tool_output
 
     async def create_action(self, **kwargs):
         action = AgentAction(
@@ -362,6 +429,13 @@ class FakeToolExecutionResult:
         self.safe_output = safe_output
 
 
+class FakeToolOutput:
+    def __init__(self, *, tool_call_id, safe_output):
+        self.id = uuid4()
+        self.tool_call_id = tool_call_id
+        self.safe_output = safe_output
+
+
 class InvokingSdkBackend:
     def __init__(self) -> None:
         self.tool_names = ()
@@ -375,9 +449,13 @@ class InvokingSdkBackend:
         return SdkNodeResult(final_text=output)
 
 
-def _run(*, thread_id) -> AgentRun:
+async def profile_read_handler(context: ToolHandlerContext):
+    return {"profile": {"actor_user_id": str(context.actor.user_id)}}
+
+
+def _run(*, thread_id, run_id=None) -> AgentRun:
     return AgentRun(
-        id=uuid4(),
+        id=run_id or uuid4(),
         thread_id=thread_id,
         actor_user_id=uuid4(),
         status="running",
