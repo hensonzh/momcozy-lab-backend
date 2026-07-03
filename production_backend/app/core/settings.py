@@ -14,6 +14,7 @@ SUPPORTED_OBJECT_STORAGE_PROVIDERS = {"local", "s3", "oss", "cos", "minio"}
 PRODUCTION_ENVS = {"prod", "production"}
 SUPPORTED_AUTH_JWT_ALGORITHMS = {"HS256"}
 SUPPORTED_VOICE_PROVIDERS = {"disabled", "local_stub"}
+SUPPORTED_VISION_PROVIDERS = {"disabled", "local_stub"}
 
 
 @dataclass(frozen=True)
@@ -58,6 +59,7 @@ class Settings:
     openai_api_key: str = ""
     openai_model: str = "gpt-5.5"
     voice_provider: str = "disabled"
+    vision_provider: str = "disabled"
     log_level: str = "INFO"
 
     @classmethod
@@ -109,6 +111,7 @@ class Settings:
             openai_api_key=_env("OPENAI_API_KEY", cls.openai_api_key),
             openai_model=_env("OPENAI_MODEL", cls.openai_model),
             voice_provider=_env("VOICE_PROVIDER", cls.voice_provider).lower(),
+            vision_provider=_env("VISION_PROVIDER", cls.vision_provider).lower(),
             log_level=_env("LOG_LEVEL", cls.log_level).upper(),
         )
 
@@ -167,6 +170,11 @@ class Settings:
                 "VOICE_PROVIDER must be one of "
                 f"{', '.join(sorted(SUPPORTED_VOICE_PROVIDERS))}"
             )
+        if self.vision_provider not in SUPPORTED_VISION_PROVIDERS:
+            errors.append(
+                "VISION_PROVIDER must be one of "
+                f"{', '.join(sorted(SUPPORTED_VISION_PROVIDERS))}"
+            )
 
         if self.is_production:
             if _is_local_url(self.database_url, LOCAL_DATABASE_URL):
@@ -195,6 +203,8 @@ class Settings:
                 errors.append("SERVICE_API_KEY is required in production for protected operational endpoints")
             if self.voice_provider == "local_stub":
                 errors.append("VOICE_PROVIDER=local_stub cannot be used in production")
+            if self.vision_provider == "local_stub":
+                errors.append("VISION_PROVIDER=local_stub cannot be used in production")
 
         if errors:
             raise ValueError("; ".join(errors))

@@ -5384,6 +5384,52 @@
         ]
       }
     },
+    "/v1/files/{file_id}/vision/events/stream": {
+      "get": {
+        "operationId": "stream_file_vision_events_v1_files__file_id__vision_events_stream_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "File Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Stream File Vision Events",
+        "tags": [
+          "files"
+        ]
+      }
+    },
     "/v1/health/live": {
       "get": {
         "operationId": "live_v1_health_live_get",

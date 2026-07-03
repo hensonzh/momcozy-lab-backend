@@ -2,11 +2,13 @@ from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
 
+from production_backend.app.core.errors import ApiError
 from production_backend.app.core.settings import Settings
 from production_backend.app.factory import create_app
 from production_backend.app.modules.auth import CurrentUser
 from production_backend.app.modules.files.models import FileObject
-from production_backend.app.modules.files.router import get_file_service
+from production_backend.app.modules.files.router import get_file_service, get_file_vision_service
+from production_backend.app.modules.files.vision_service import FileVisionEvent
 
 
 def test_file_upload_requires_current_user() -> None:
@@ -120,6 +122,46 @@ def test_file_delete_uses_current_user_request_id_and_idempotency_key() -> None:
     assert fake_service.delete_kwargs["idempotency_key"] == "idem-delete"
 
 
+def test_file_vision_stream_requires_current_user() -> None:
+    response = TestClient(create_app(Settings(app_env="test", vision_provider="local_stub"))).get(
+        f"/v1/files/{uuid4()}/vision/events/stream"
+    )
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "authentication_required"
+
+
+def test_file_vision_stream_uses_current_user_owner_scope_and_sse_contract() -> None:
+    user_id = uuid4()
+    fake_service = FakeFileVisionService()
+    app = create_app(Settings(app_env="test", vision_provider="local_stub"))
+    _override_current_user(app, user_id)
+    app.dependency_overrides[get_file_vision_service] = lambda: fake_service
+
+    response = TestClient(app).get(f"/v1/files/{fake_service.file_id}/vision/events/stream")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert "event: vision.started" in response.text
+    assert "event: vision.completed" in response.text
+    assert f'"file_id":"{fake_service.file_id}"' in response.text
+    assert "token" not in response.request.url.query.decode()
+    assert fake_service.events_kwargs["owner_user_id"] == user_id
+    assert fake_service.events_kwargs["file_id"] == fake_service.file_id
+
+
+def test_file_vision_stream_returns_provider_disabled_error() -> None:
+    user_id = uuid4()
+    app = create_app(Settings(app_env="test", vision_provider="disabled"))
+    _override_current_user(app, user_id)
+    app.dependency_overrides[get_file_vision_service] = lambda: DisabledFileVisionService()
+
+    response = TestClient(app).get(f"/v1/files/{uuid4()}/vision/events/stream")
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "vision_provider_disabled"
+
+
 def _override_current_user(app, user_id: UUID) -> None:
     from production_backend.app.api.dependencies import require_current_user
 
@@ -169,3 +211,31 @@ class FakeFileService:
             size_bytes=5,
             status="active",
         )
+
+
+class FakeFileVisionService:
+    def __init__(self) -> None:
+        self.file_id = uuid4()
+        self.events_kwargs = {}
+
+    async def events_for_owner(self, **kwargs):
+        self.events_kwargs = kwargs
+        return [
+            FileVisionEvent(
+                type="vision.started",
+                sequence=1,
+                file_id=kwargs["file_id"],
+                payload={"provider": "local_stub"},
+            ),
+            FileVisionEvent(
+                type="vision.completed",
+                sequence=2,
+                file_id=kwargs["file_id"],
+                payload={"event_count": 0},
+            ),
+        ]
+
+
+class DisabledFileVisionService:
+    async def events_for_owner(self, **kwargs):
+        raise ApiError(code="vision_provider_disabled", message="Vision provider is not configured.", status=503)

@@ -119,6 +119,14 @@ def test_settings_from_env_reads_voice_provider(monkeypatch: pytest.MonkeyPatch)
     assert settings.voice_provider == "local_stub"
 
 
+def test_settings_from_env_reads_vision_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("VISION_PROVIDER", "local_stub")
+
+    settings = Settings.from_env()
+
+    assert settings.vision_provider == "local_stub"
+
+
 def test_settings_from_env_reads_active_session_auth_gate(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AUTH_REQUIRE_ACTIVE_SESSION", "true")
 
@@ -185,6 +193,13 @@ def test_settings_reject_invalid_voice_provider() -> None:
     settings = Settings(voice_provider="legacy")
 
     with pytest.raises(ValueError, match="VOICE_PROVIDER"):
+        settings.validate_for_startup()
+
+
+def test_settings_reject_invalid_vision_provider() -> None:
+    settings = Settings(vision_provider="legacy")
+
+    with pytest.raises(ValueError, match="VISION_PROVIDER"):
         settings.validate_for_startup()
 
 
@@ -316,4 +331,22 @@ def test_production_rejects_local_stub_voice_provider() -> None:
     )
 
     with pytest.raises(ValueError, match="VOICE_PROVIDER=local_stub"):
+        settings.validate_for_startup()
+
+
+def test_production_rejects_local_stub_vision_provider() -> None:
+    settings = Settings(
+        app_env="production",
+        database_url="postgresql+asyncpg://app:secret@postgres.internal:5432/momcozy",
+        redis_url="redis://redis.internal:6379/0",
+        object_storage_provider="s3",
+        object_storage_bucket="bucket",
+        object_storage_access_key_id="access",
+        object_storage_secret_access_key="secret",
+        auth_jwt_secret="test-secret-value-with-at-least-32-bytes",
+        trusted_hosts=("api.example.test",),
+        vision_provider="local_stub",
+    )
+
+    with pytest.raises(ValueError, match="VISION_PROVIDER=local_stub"):
         settings.validate_for_startup()

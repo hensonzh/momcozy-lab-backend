@@ -92,6 +92,13 @@ accepts authenticated clients, sends an `error` frame with the same code, and
 then closes. `VOICE_PROVIDER=local_stub` exists only for local/test contract
 checks and is rejected in production startup validation.
 
+`VISION_PROVIDER=disabled` is the default stable production contract until a
+managed image analysis provider is configured. The production replacement for
+the legacy vision WebSocket is `GET /v1/files/{file_id}/vision/events/stream`;
+it requires bearer auth, verifies file ownership through current user scope, and
+never accepts tokens in URLs. Disabled provider responses use the standard error
+envelope with `code=vision_provider_disabled` and status `503`.
+
 ## Flutter Integration Rule
 
 Flutter repositories should be generated from or validated against the OpenAPI

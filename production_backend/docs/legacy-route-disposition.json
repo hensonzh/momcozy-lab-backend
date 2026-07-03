@@ -31,7 +31,7 @@
     {"legacy_path": "/v1/growth/query", "status": "mapped", "target_paths": ["/v1/records/growth"], "target_domain": "records", "notes": "Latest growth is a filtered records query."},
     {"legacy_path": "/v1/growth/history", "status": "mapped", "target_paths": ["/v1/records/growth"], "target_domain": "records", "notes": "Growth history is represented by list filters."},
     {"legacy_path": "/v1/files/upload", "status": "mapped", "target_paths": ["/v1/files/upload"], "target_domain": "files", "notes": "Upload now stores owner-scoped metadata and object storage refs."},
-    {"legacy_path": "/v1/vision/events/stream", "status": "pending", "target_paths": [], "target_domain": "files_vision", "notes": "Vision stream needs file ownership check and typed application events."},
+    {"legacy_path": "/v1/vision/events/stream", "status": "mapped", "target_paths": ["/v1/files/{file_id}/vision/events/stream"], "target_domain": "files_vision", "notes": "Legacy vision WebSocket is replaced by owner-scoped typed SSE events under uploaded files; token query auth and request-supplied user_id are removed."},
     {"legacy_path": "/v1/speech/transcribe-chunk", "status": "mapped", "target_paths": ["/v1/speech/transcribe-chunk"], "target_domain": "voice", "notes": "Speech endpoint uses production auth and stable provider-disabled errors."},
     {"legacy_path": "/v1/realtime-voice-stream", "status": "mapped", "target_paths": ["/v1/realtime-voice-stream"], "target_domain": "voice", "notes": "Realtime stream uses bearer auth and no token query parameter."},
     {"legacy_path": "/v1/realtime-voice-session", "status": "retired", "target_paths": [], "target_domain": "voice", "notes": "Legacy WebSocket session with static/query auth is retired."},

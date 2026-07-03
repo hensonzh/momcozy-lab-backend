@@ -3,6 +3,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Query, Request, Response, UploadFile, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...api.dependencies import get_object_storage, optional_idempotency_key, require_current_user
@@ -15,6 +16,8 @@ from ..auth import CurrentUser
 from .repository import FileRepository
 from .schemas import FileListResponse, FileRead
 from .service import FileService
+from .vision_service import FileVisionService
+from .vision_streaming import encode_file_vision_sse_events
 
 
 router = APIRouter(prefix="/files", tags=["files"])
@@ -34,6 +37,18 @@ def get_file_service(
         idempotency_service=IdempotencyService(repository=audit_repository),
         outbox_service=OutboxService(repository=OutboxRepository(session)),
         max_upload_bytes=request.app.state.settings.file_upload_max_bytes,
+    )
+
+
+def get_file_vision_service(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    object_storage: ObjectStorage = Depends(get_object_storage),
+) -> FileVisionService:
+    return FileVisionService(
+        repository=FileRepository(session),
+        object_storage=object_storage,
+        settings=request.app.state.settings,
     )
 
 
@@ -75,6 +90,19 @@ async def get_file(
 ) -> FileRead:
     file_object = await service.get_for_owner(file_id=file_id, owner_user_id=current_user.user_id)
     return FileRead.model_validate(file_object)
+
+
+@router.get("/{file_id}/vision/events/stream")
+async def stream_file_vision_events(
+    file_id: UUID,
+    current_user: CurrentUser = Depends(require_current_user),
+    service: FileVisionService = Depends(get_file_vision_service),
+) -> StreamingResponse:
+    events = await service.events_for_owner(file_id=file_id, owner_user_id=current_user.user_id)
+    return StreamingResponse(
+        iter([encode_file_vision_sse_events(events)]),
+        media_type="text/event-stream",
+    )
 
 
 @router.delete("/{file_id}", status_code=status.HTTP_204_NO_CONTENT)

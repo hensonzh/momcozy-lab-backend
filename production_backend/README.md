@@ -43,6 +43,7 @@ environment variables, not code changes:
 - `OBJECT_STORAGE_BACKUP_HOOK`
 - `OBJECT_STORAGE_RESTORE_HOOK`
 - `VOICE_PROVIDER`
+- `VISION_PROVIDER`
 
 Use `production_backend/.env.example` as the local template. Secrets stay out of
 git, and production startup rejects local object storage. Backup/restore hook
@@ -80,6 +81,12 @@ Voice endpoints are exposed in the production contract, but speech provider
 integration is disabled by default. Keep `VOICE_PROVIDER=disabled` until a
 managed provider adapter is configured; `VOICE_PROVIDER=local_stub` is only for
 local/test contract checks and is rejected in production.
+
+Vision event endpoints are exposed in the production contract, but image
+analysis provider integration is disabled by default. Keep
+`VISION_PROVIDER=disabled` until a managed provider adapter is configured;
+`VISION_PROVIDER=local_stub` is only for local/test contract checks and is
+rejected in production.
 
 Durable side effects are processed by a separate outbox worker. It handles file
 cleanup jobs and confirmed agent actions, and is also disabled by default:
