@@ -42,6 +42,25 @@ def test_openapi_contains_core_flutter_handoff_paths() -> None:
         assert path in paths
 
 
+def test_openapi_excludes_retired_legacy_pump_fallback_paths() -> None:
+    paths = build_openapi_schema()["paths"]
+
+    for retired_path in [
+        "/v1/pump/workstate",
+        "/v1/pump/workstate/pending-replies",
+        "/v1/pump/process",
+        "/v1/pump/process/data",
+        "/v1/pump/session-summary",
+        "/v1/pump/threshold/upload",
+        "/v1/pump/threshold/get",
+        "/v1/pump/energy/get",
+        "/v1/pump/health/upload",
+        "/v1/pump/health/get",
+        "/v1/pump/info/get",
+    ]:
+        assert retired_path not in paths
+
+
 def test_agent_stream_contract_keeps_tokens_out_of_query_parameters() -> None:
     operation = build_openapi_schema()["paths"]["/v1/agent/runs/{run_id}/stream"]["get"]
     parameters = operation.get("parameters", [])
