@@ -23,6 +23,7 @@ from .schemas import (
     AgentEvalCaseRead,
     AgentActionRead,
     AgentActionReject,
+    AgentClientEventCreate,
     AgentEventPage,
     AgentEventRead,
     AgentReplayBundle,
@@ -148,6 +149,23 @@ async def list_run_events(
     )
     next_sequence = events[-1].sequence if events else None
     return AgentEventPage(items=[AgentEventRead.model_validate(event) for event in events], next_sequence=next_sequence)
+
+
+@router.post("/runs/{run_id}/client-events", response_model=AgentEventRead, status_code=status.HTTP_201_CREATED)
+async def record_client_event(
+    run_id: UUID,
+    payload: AgentClientEventCreate,
+    current_user: CurrentUser = Depends(require_current_user),
+    service: AgentRuntimeService = Depends(get_agent_runtime_service),
+) -> AgentEventRead:
+    event = await service.record_client_event(
+        owner_user_id=current_user.user_id,
+        run_id=run_id,
+        client_event_type=payload.type,
+        payload=payload.payload,
+        client_sequence=payload.client_sequence,
+    )
+    return AgentEventRead.model_validate(event)
 
 
 @router.get("/runs/{run_id}/stream")

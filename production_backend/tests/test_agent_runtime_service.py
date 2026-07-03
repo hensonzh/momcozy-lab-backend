@@ -168,6 +168,32 @@ def test_agent_runtime_service_allows_new_run_after_previous_terminal() -> None:
     assert len(repository.runs) == 2
 
 
+def test_agent_runtime_service_records_client_event_on_run_ledger() -> None:
+    owner_user_id = uuid4()
+    repository = FakeAgentRuntimeRepository()
+    service = AgentRuntimeService(repository=repository)
+    run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Hello"))
+
+    event = asyncio.run(
+        service.record_client_event(
+            owner_user_id=owner_user_id,
+            run_id=run.id,
+            client_event_type="ui.quick_reply.clicked",
+            payload={"reply_id": "next_step"},
+            client_sequence=7,
+        )
+    )
+
+    assert event.event_type == "client.event"
+    assert event.thread_id == run.thread_id
+    assert event.run_id == run.id
+    assert event.payload == {
+        "client_event_type": "ui.quick_reply.clicked",
+        "client_sequence": 7,
+        "payload": {"reply_id": "next_step"},
+    }
+
+
 def _thread(*, owner_user_id: UUID) -> AgentThread:
     return AgentThread(id=uuid4(), owner_user_id=owner_user_id, title="Thread", status="active", metadata_json={})
 

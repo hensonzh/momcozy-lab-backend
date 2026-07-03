@@ -195,6 +195,32 @@ class AgentRuntimeService:
             limit=limit,
         )
 
+    async def record_client_event(
+        self,
+        *,
+        owner_user_id: UUID,
+        run_id: UUID,
+        client_event_type: str,
+        payload: dict[str, Any] | None = None,
+        client_sequence: int | None = None,
+    ) -> AgentEvent:
+        run = await self.get_run(owner_user_id=owner_user_id, run_id=run_id)
+        normalized_client_event_type = _normalize_text(client_event_type, max_length=120, required=True)
+        if client_sequence is not None and client_sequence < 0:
+            raise ApiError(code="validation_failed", message="client_sequence must be non-negative.", status=422)
+        event_payload: dict[str, Any] = {
+            "client_event_type": normalized_client_event_type,
+            "payload": payload or {},
+        }
+        if client_sequence is not None:
+            event_payload["client_sequence"] = client_sequence
+        return await self._append_event(
+            thread_id=run.thread_id,
+            run_id=run.id,
+            event_type="client.event",
+            payload=event_payload,
+        )
+
     async def propose_action(
         self,
         *,

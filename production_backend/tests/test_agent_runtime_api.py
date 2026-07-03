@@ -68,6 +68,34 @@ def test_agent_thread_run_events_and_cancel_use_current_user_scope() -> None:
     assert fake_service.cancel_kwargs["reason"] == "stop"
 
 
+def test_agent_client_event_ingest_uses_current_user_and_run_scope() -> None:
+    user_id = uuid4()
+    fake_service = FakeAgentRuntimeService(user_id=user_id)
+    app = create_app(Settings(app_env="test"))
+    _override_current_user(app, user_id)
+    app.dependency_overrides[get_agent_runtime_service] = lambda: fake_service
+
+    response = TestClient(app).post(
+        f"/v1/agent/runs/{fake_service.run_id}/client-events",
+        json={
+            "type": "ui.quick_reply.clicked",
+            "payload": {"reply_id": "next_step"},
+            "client_sequence": 7,
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["type"] == "client.event"
+    assert response.json()["payload"]["client_event_type"] == "ui.quick_reply.clicked"
+    assert fake_service.record_client_event_kwargs == {
+        "owner_user_id": user_id,
+        "run_id": fake_service.run_id,
+        "client_event_type": "ui.quick_reply.clicked",
+        "payload": {"reply_id": "next_step"},
+        "client_sequence": 7,
+    }
+
+
 def test_agent_stream_can_follow_until_terminal_event() -> None:
     user_id = uuid4()
     fake_service = FakeAgentRuntimeService(
@@ -216,6 +244,7 @@ class FakeAgentRuntimeService:
         self.get_action_kwargs = {}
         self.confirm_action_kwargs = {}
         self.reject_action_kwargs = {}
+        self.record_client_event_kwargs = {}
 
     async def create_thread(self, **kwargs):
         return self._thread()
@@ -248,6 +277,16 @@ class FakeAgentRuntimeService:
         run = self._run()
         run.status = "cancelled"
         return run
+
+    async def record_client_event(self, **kwargs):
+        self.record_client_event_kwargs = kwargs
+        event = self._event(event_type="client.event", sequence=3)
+        event.payload = {
+            "client_event_type": kwargs["client_event_type"],
+            "client_sequence": kwargs["client_sequence"],
+            "payload": kwargs["payload"],
+        }
+        return event
 
     async def get_action(self, **kwargs):
         self.get_action_kwargs = kwargs

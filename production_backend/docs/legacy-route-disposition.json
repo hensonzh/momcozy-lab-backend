@@ -10,7 +10,7 @@
     {"legacy_path": "/api/ag-ui-prewarm", "status": "retired", "target_paths": [], "target_domain": "agent_runtime", "notes": "Prewarm fallback is retired; production uses explicit threads and runs."},
     {"legacy_path": "/api/ag-ui-timing-log", "status": "mapped", "target_paths": ["/v1/health/metrics"], "target_domain": "observability", "notes": "Local JSONL timing log is replaced by structured metrics."},
     {"legacy_path": "/api/ag-ui-ws", "status": "mapped", "target_paths": ["/v1/agent/runs/{run_id}/stream"], "target_domain": "agent_runtime", "notes": "WebSocket bridge is replaced by resumable application events."},
-    {"legacy_path": "/api/client-event", "status": "pending", "target_paths": [], "target_domain": "agent_runtime", "notes": "Client event ingest needs typed event contract and replay policy."},
+    {"legacy_path": "/api/client-event", "status": "mapped", "target_paths": ["/v1/agent/runs/{run_id}/client-events"], "target_domain": "agent_runtime", "notes": "Client event ingest is run-scoped and persisted as a replayable application event."},
     {"legacy_path": "/api/hospital-bag/cart-update", "status": "pending", "target_paths": [], "target_domain": "agent_actions", "notes": "Cart mutation should become a typed product action or explicit direct write policy."},
     {"legacy_path": "/api/support-ticket-submit", "status": "mapped", "target_paths": ["/v1/support/tickets"], "target_domain": "support", "notes": "Support ticket creation is typed, owner-scoped, idempotent, and audited."},
     {"legacy_path": "/v1/analysis/create", "status": "pending", "target_paths": [], "target_domain": "profiles", "notes": "Hidden profile advice mutation must become deterministic service write or Agent action."},

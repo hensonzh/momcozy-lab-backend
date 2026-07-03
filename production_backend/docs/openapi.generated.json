@@ -159,6 +159,38 @@
         "title": "AgentActionReject",
         "type": "object"
       },
+      "AgentClientEventCreate": {
+        "properties": {
+          "client_sequence": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Sequence"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "type": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "title": "AgentClientEventCreate",
+        "type": "object"
+      },
       "AgentEvalCaseCreate": {
         "properties": {
           "domain": {
@@ -3796,6 +3828,64 @@
           }
         ],
         "summary": "Cancel Run",
+        "tags": [
+          "agent"
+        ]
+      }
+    },
+    "/v1/agent/runs/{run_id}/client-events": {
+      "post": {
+        "operationId": "record_client_event_v1_agent_runs__run_id__client_events_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentClientEventCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentEventRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Record Client Event",
         "tags": [
           "agent"
         ]
