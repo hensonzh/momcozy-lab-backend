@@ -23,6 +23,8 @@ def test_openapi_contains_core_flutter_handoff_paths() -> None:
     for path in [
         "/v1/auth/signup",
         "/v1/auth/login",
+        "/v1/assets",
+        "/v1/assets/{asset_id}",
         "/v1/files/upload",
         "/v1/files/{file_id}/vision/events/stream",
         "/v1/profile/status-summary",
@@ -52,6 +54,8 @@ def test_openapi_excludes_retired_legacy_pump_fallback_paths() -> None:
     paths = build_openapi_schema()["paths"]
 
     for retired_path in [
+        "/images/Air_img/{asset_path}",
+        "/skill-assets/{skill_id}/{asset_path}",
         "/v1/pump/workstate",
         "/v1/pump/workstate/pending-replies",
         "/v1/pump/process",

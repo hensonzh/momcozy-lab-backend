@@ -75,6 +75,13 @@ File upload uses multipart form data at `POST /v1/files/upload`. File metadata
 is owner-scoped and object bytes are stored through the configured object
 storage provider.
 
+## Product Assets
+
+Legacy `/skill-assets/...` and `/images/Air_img/...` paths are retired. Product
+assets are served through `GET /v1/assets` and `GET /v1/assets/{asset_id}` using
+allowlisted packaged asset ids; clients never construct URLs from local skill
+directory names or filesystem paths.
+
 ## Voice
 
 - Transcription: `POST /v1/speech/transcribe-chunk`
