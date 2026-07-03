@@ -73,7 +73,7 @@ class RecordsRepository:
         if start_at is not None:
             conditions.append(FeedingRecord.feed_time >= start_at)
         if end_at is not None:
-            conditions.append(FeedingRecord.feed_time <= end_at)
+            conditions.append(FeedingRecord.feed_time < end_at)
         statement = select(FeedingRecord).where(*conditions).order_by(FeedingRecord.feed_time.desc()).limit(limit)
         result = await self.session.scalars(statement)
         return list(result.all())
@@ -143,7 +143,7 @@ class RecordsRepository:
         if start_at is not None:
             conditions.append(PumpingRecord.pump_start_time >= start_at)
         if end_at is not None:
-            conditions.append(PumpingRecord.pump_start_time <= end_at)
+            conditions.append(PumpingRecord.pump_start_time < end_at)
         statement = select(PumpingRecord).where(*conditions).order_by(PumpingRecord.pump_start_time.desc()).limit(limit)
         result = await self.session.scalars(statement)
         return list(result.all())
