@@ -99,3 +99,22 @@ class DevicesRepository:
         statement = select(PumpTelemetryEvent).where(*conditions).order_by(PumpTelemetryEvent.occurred_at.desc()).limit(limit)
         result = await self.session.scalars(statement)
         return list(result.all())
+
+    async def get_latest_telemetry_event(
+        self,
+        *,
+        owner_user_id: UUID,
+        device_id: str,
+        event_type: str,
+    ) -> PumpTelemetryEvent | None:
+        statement = (
+            select(PumpTelemetryEvent)
+            .where(
+                PumpTelemetryEvent.owner_user_id == owner_user_id,
+                PumpTelemetryEvent.device_id == device_id,
+                PumpTelemetryEvent.event_type == event_type,
+            )
+            .order_by(PumpTelemetryEvent.occurred_at.desc(), PumpTelemetryEvent.id.desc())
+            .limit(1)
+        )
+        return cast(PumpTelemetryEvent | None, await self.session.scalar(statement))

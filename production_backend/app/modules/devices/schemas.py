@@ -49,3 +49,32 @@ class PumpTelemetryEventCreate(BaseModel):
 
 class PumpTelemetryEventListResponse(BaseModel):
     items: list[PumpTelemetryEventRead]
+
+
+class PumpWorkstateCreate(BaseModel):
+    device_id: str = Field(min_length=1, max_length=120)
+    occurred_at: datetime
+    state: dict[str, Any] = Field(default_factory=dict)
+    source: str | None = Field(default="device", max_length=64)
+
+
+class PumpWorkstateRead(BaseModel):
+    id: UUID
+    owner_user_id: UUID
+    device_id: str
+    occurred_at: datetime
+    source: str
+    state: dict[str, Any]
+
+    @classmethod
+    def from_event(cls, event: PumpTelemetryEventRead) -> "PumpWorkstateRead":
+        source = event.payload.get("source")
+        state = event.payload.get("state")
+        return cls(
+            id=event.id,
+            owner_user_id=event.owner_user_id,
+            device_id=event.device_id,
+            occurred_at=event.occurred_at,
+            source=source if isinstance(source, str) and source else "device",
+            state=state if isinstance(state, dict) else {},
+        )

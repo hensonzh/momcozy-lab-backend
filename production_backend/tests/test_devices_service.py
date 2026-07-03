@@ -5,6 +5,7 @@ from uuid import uuid4
 import pytest
 
 from production_backend.app.core.errors import ApiError
+from production_backend.app.modules.audit.service import request_hash
 from production_backend.app.modules.audit.models import IdempotencyKey
 from production_backend.app.modules.devices.models import PumpDevice, PumpTelemetryEvent
 from production_backend.app.modules.devices.service import DevicesService
@@ -72,6 +73,63 @@ def test_devices_service_reserves_idempotency_before_auto_upserting_device() -> 
     assert repository.event is None
 
 
+def test_devices_service_creates_pump_workstate_as_typed_experience_flow() -> None:
+    owner_user_id = uuid4()
+    repository = FakeDevicesRepository(device=_device(owner_user_id=owner_user_id))
+    idempotency_service = FakeIdempotencyService(status="reserved")
+    audit_service = FakeAuditService()
+    service = DevicesService(repository=repository, audit_service=audit_service, idempotency_service=idempotency_service)
+
+    event = asyncio.run(
+        service.create_pump_workstate(
+            owner_user_id=owner_user_id,
+            device_id="pump-1",
+            occurred_at=_now(),
+            state={"mode": "stimulation", "speed": 3, "side": "left"},
+            source="device",
+            idempotency_key="idem-workstate",
+            request_id="req_workstate",
+        )
+    )
+
+    assert event.event_type == "workstate"
+    assert event.payload == {"source": "device", "state": {"mode": "stimulation", "side": "left", "speed": 3}}
+    assert repository.upsert_count == 0
+    assert idempotency_service.reserve_kwargs["scope"] == "devices.pump_workstate.create"
+    assert idempotency_service.reserve_kwargs["request_hash"] == request_hash(
+        {
+            "device_id": "pump-1",
+            "occurred_at": _now().isoformat(),
+            "source": "device",
+            "state": {"mode": "stimulation", "side": "left", "speed": 3},
+        }
+    )
+    assert idempotency_service.completed_response_ref == str(event.id)
+    assert audit_service.record_kwargs["action"] == "devices.pump_workstate.create"
+
+
+def test_devices_service_gets_latest_pump_workstate_or_404() -> None:
+    owner_user_id = uuid4()
+    event = _event(owner_user_id=owner_user_id)
+    event.payload = {"source": "device", "state": {"mode": "expression"}}
+    repository = FakeDevicesRepository(event=event)
+    service = DevicesService(repository=repository)
+
+    latest = asyncio.run(service.get_latest_pump_workstate(owner_user_id=owner_user_id, device_id="pump-1"))
+
+    assert latest is event
+    assert repository.latest_event_kwargs == {"owner_user_id": owner_user_id, "device_id": "pump-1", "event_type": "workstate"}
+
+
+def test_devices_service_latest_pump_workstate_requires_existing_event() -> None:
+    service = DevicesService(repository=FakeDevicesRepository())
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(service.get_latest_pump_workstate(owner_user_id=uuid4(), device_id="pump-1"))
+
+    assert exc_info.value.code == "not_found"
+
+
 def _now() -> datetime:
     return datetime(2026, 7, 2, tzinfo=timezone.utc)
 
@@ -89,6 +147,7 @@ class FakeDevicesRepository:
         self.device = device
         self.event = event
         self.upsert_count = 0
+        self.latest_event_kwargs = {}
 
     async def upsert_device(self, **kwargs):
         self.upsert_count += 1
@@ -103,6 +162,10 @@ class FakeDevicesRepository:
 
     async def create_telemetry_event(self, **kwargs):
         self.event = _event(owner_user_id=kwargs["owner_user_id"])
+        self.event.device_id = kwargs["device_id"]
+        self.event.event_type = kwargs["event_type"]
+        self.event.occurred_at = kwargs["occurred_at"]
+        self.event.payload = kwargs["payload"]
         return self.event
 
     async def get_telemetry_event_for_owner(self, **kwargs):
@@ -110,6 +173,10 @@ class FakeDevicesRepository:
 
     async def list_telemetry_events(self, **kwargs):
         return [self.event] if self.event else []
+
+    async def get_latest_telemetry_event(self, **kwargs):
+        self.latest_event_kwargs = kwargs
+        return self.event
 
 
 class FakeIdempotencyService:

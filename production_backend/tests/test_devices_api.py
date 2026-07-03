@@ -56,6 +56,36 @@ def test_telemetry_create_and_list_use_current_user_scope() -> None:
     assert fake_service.list_events_kwargs["limit"] == 10
 
 
+def test_pump_workstate_flow_uses_current_user_idempotency_and_latest_state() -> None:
+    user_id = uuid4()
+    fake_service = FakeDevicesService(user_id=user_id)
+    app = create_app(Settings(app_env="test"))
+    _override_current_user(app, user_id)
+    app.dependency_overrides[get_devices_service] = lambda: fake_service
+    client = TestClient(app)
+
+    create_response = client.post(
+        "/v1/devices/pump-workstate",
+        headers={"Idempotency-Key": " idem-workstate ", "X-Request-ID": "req_workstate"},
+        json={
+            "device_id": "pump-1",
+            "occurred_at": _now_iso(),
+            "source": "device",
+            "state": {"mode": "stimulation", "speed": 3},
+        },
+    )
+    latest_response = client.get("/v1/devices/pump-workstate/latest?device_id=pump-1")
+
+    assert create_response.status_code == 201
+    assert create_response.json()["state"] == {"mode": "stimulation", "speed": 3}
+    assert latest_response.status_code == 200
+    assert latest_response.json()["state"] == {"mode": "stimulation", "speed": 3}
+    assert fake_service.create_workstate_kwargs["owner_user_id"] == user_id
+    assert fake_service.create_workstate_kwargs["idempotency_key"] == "idem-workstate"
+    assert fake_service.create_workstate_kwargs["request_id"] == "req_workstate"
+    assert fake_service.latest_workstate_kwargs == {"owner_user_id": user_id, "device_id": "pump-1"}
+
+
 def _override_current_user(app, user_id: UUID) -> None:
     from production_backend.app.api.dependencies import require_current_user
 
@@ -86,6 +116,8 @@ class FakeDevicesService:
         self.upsert_kwargs = {}
         self.create_event_kwargs = {}
         self.list_events_kwargs = {}
+        self.create_workstate_kwargs = {}
+        self.latest_workstate_kwargs = {}
 
     async def upsert_device(self, **kwargs):
         self.upsert_kwargs = kwargs
@@ -101,6 +133,18 @@ class FakeDevicesService:
     async def list_telemetry_events(self, **kwargs):
         self.list_events_kwargs = kwargs
         return [self._event()]
+
+    async def create_pump_workstate(self, **kwargs):
+        self.create_workstate_kwargs = kwargs
+        event = self._event()
+        event.payload = {"source": kwargs["source"], "state": kwargs["state"]}
+        return event
+
+    async def get_latest_pump_workstate(self, **kwargs):
+        self.latest_workstate_kwargs = kwargs
+        event = self._event()
+        event.payload = {"source": "device", "state": {"mode": "stimulation", "speed": 3}}
+        return event
 
     def _device(self) -> PumpDevice:
         return PumpDevice(id=uuid4(), owner_user_id=self.user_id, device_id="pump-1", model="M1", firmware_version="", status="active")

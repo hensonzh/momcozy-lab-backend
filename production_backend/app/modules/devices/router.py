@@ -16,6 +16,8 @@ from .schemas import (
     PumpTelemetryEventCreate,
     PumpTelemetryEventListResponse,
     PumpTelemetryEventRead,
+    PumpWorkstateCreate,
+    PumpWorkstateRead,
 )
 from .service import DevicesService
 
@@ -95,3 +97,33 @@ async def list_pump_telemetry(
         limit=limit,
     )
     return PumpTelemetryEventListResponse(items=[PumpTelemetryEventRead.model_validate(event) for event in events])
+
+
+@router.post("/pump-workstate", response_model=PumpWorkstateRead, status_code=status.HTTP_201_CREATED)
+async def create_pump_workstate(
+    payload: PumpWorkstateCreate,
+    request: Request,
+    idempotency_key: str | None = Depends(optional_idempotency_key),
+    current_user: CurrentUser = Depends(require_current_user),
+    service: DevicesService = Depends(get_devices_service),
+) -> PumpWorkstateRead:
+    event = await service.create_pump_workstate(
+        owner_user_id=current_user.user_id,
+        device_id=payload.device_id,
+        occurred_at=payload.occurred_at,
+        state=payload.state,
+        source=payload.source or "device",
+        request_id=str(getattr(request.state, "request_id", "") or ""),
+        idempotency_key=idempotency_key,
+    )
+    return PumpWorkstateRead.from_event(PumpTelemetryEventRead.model_validate(event))
+
+
+@router.get("/pump-workstate/latest", response_model=PumpWorkstateRead)
+async def get_latest_pump_workstate(
+    device_id: str = Query(min_length=1, max_length=120),
+    current_user: CurrentUser = Depends(require_current_user),
+    service: DevicesService = Depends(get_devices_service),
+) -> PumpWorkstateRead:
+    event = await service.get_latest_pump_workstate(owner_user_id=current_user.user_id, device_id=device_id)
+    return PumpWorkstateRead.from_event(PumpTelemetryEventRead.model_validate(event))

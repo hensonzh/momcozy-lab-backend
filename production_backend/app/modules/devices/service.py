@@ -11,6 +11,8 @@ from .repository import DevicesRepository
 
 
 TELEMETRY_CREATE_IDEMPOTENCY_SCOPE = "devices.telemetry.create"
+PUMP_WORKSTATE_CREATE_IDEMPOTENCY_SCOPE = "devices.pump_workstate.create"
+PUMP_WORKSTATE_EVENT_TYPE = "workstate"
 
 
 class DevicesService:
@@ -133,6 +135,80 @@ class DevicesService:
             event_type=event_type,
             limit=limit,
         )
+
+    async def create_pump_workstate(
+        self,
+        *,
+        owner_user_id: UUID,
+        device_id: str,
+        occurred_at: datetime,
+        state: dict[str, Any],
+        source: str = "device",
+        request_id: str = "",
+        idempotency_key: str | None = None,
+    ) -> PumpTelemetryEvent:
+        normalized_device_id = _normalize_identifier(device_id, field_name="device_id", max_length=120)
+        normalized_source = _normalize_identifier(source or "device", field_name="source", max_length=64)
+        safe_state = dict(state or {})
+        idempotency_record = None
+        if idempotency_key:
+            if self.idempotency_service is None:
+                raise ApiError(code="internal_error", message="Idempotency service is not configured.", status=500)
+            decision = await self.idempotency_service.reserve(
+                actor_user_id=owner_user_id,
+                scope=PUMP_WORKSTATE_CREATE_IDEMPOTENCY_SCOPE,
+                key=idempotency_key,
+                request_hash=request_hash(
+                    {
+                        "device_id": normalized_device_id,
+                        "occurred_at": occurred_at.isoformat(),
+                        "source": normalized_source,
+                        "state": safe_state,
+                    }
+                ),
+                expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
+            )
+            idempotency_record = decision.record
+            if decision.status == "replay":
+                return await self._replay_event(owner_user_id=owner_user_id, response_ref=idempotency_record.response_ref)
+
+        if await self.repository.get_device_for_owner(owner_user_id=owner_user_id, device_id=normalized_device_id) is None:
+            await self.repository.upsert_device(
+                owner_user_id=owner_user_id,
+                device_id=normalized_device_id,
+                model="",
+                firmware_version="",
+                last_seen_at=occurred_at,
+            )
+
+        event = await self.repository.create_telemetry_event(
+            owner_user_id=owner_user_id,
+            device_id=normalized_device_id,
+            event_type=PUMP_WORKSTATE_EVENT_TYPE,
+            occurred_at=occurred_at,
+            payload={"source": normalized_source, "state": safe_state},
+        )
+        if idempotency_record is not None and self.idempotency_service is not None:
+            await self.idempotency_service.mark_completed(record=idempotency_record, response_ref=str(event.id))
+        await self._audit(
+            owner_user_id=owner_user_id,
+            action="devices.pump_workstate.create",
+            resource_type="pump_telemetry_event",
+            resource_id=str(event.id),
+            request_id=request_id,
+        )
+        return event
+
+    async def get_latest_pump_workstate(self, *, owner_user_id: UUID, device_id: str) -> PumpTelemetryEvent:
+        normalized_device_id = _normalize_identifier(device_id, field_name="device_id", max_length=120)
+        event = await self.repository.get_latest_telemetry_event(
+            owner_user_id=owner_user_id,
+            device_id=normalized_device_id,
+            event_type=PUMP_WORKSTATE_EVENT_TYPE,
+        )
+        if event is None:
+            raise ApiError(code="not_found", message="Pump workstate not found.", status=404)
+        return event
 
     async def _replay_event(self, *, owner_user_id: UUID, response_ref: str) -> PumpTelemetryEvent:
         event_id = parse_idempotency_response_ref(response_ref)
