@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
@@ -8,6 +8,7 @@ from production_backend.app.factory import create_app
 from production_backend.app.modules.auth import CurrentUser
 from production_backend.app.modules.records.models import FeedingRecord, GrowthRecord, PumpingRecord
 from production_backend.app.modules.records.router import get_records_service
+from production_backend.app.modules.records.schemas import MilkTrendDayRead, MilkTrendListResponse
 
 
 def test_create_feeding_requires_current_user() -> None:
@@ -110,6 +111,26 @@ def test_list_and_delete_pumping_use_current_user_scope() -> None:
     assert fake_service.delete_pumping_kwargs["request_id"] == "req_delete"
 
 
+def test_milk_trends_use_current_user_and_measured_records_only() -> None:
+    user_id = uuid4()
+    fake_service = FakeRecordsService(user_id=user_id)
+    app = create_app(Settings(app_env="test"))
+    _override_current_user(app, user_id)
+    app.dependency_overrides[get_records_service] = lambda: fake_service
+
+    response = TestClient(app).get("/v1/records/milk-trends?start_date=2026-07-01&days=2&include_today=true")
+
+    assert response.status_code == 200
+    assert response.json()["items"][0]["pumped_milk_volume_ml"] == 125.5
+    assert response.json()["items"][0]["measured_only"] is True
+    assert fake_service.milk_trends_kwargs == {
+        "owner_user_id": user_id,
+        "start_date": date(2026, 7, 1),
+        "days": 2,
+        "include_today": True,
+    }
+
+
 def test_create_growth_uses_current_user_request_id_and_idempotency() -> None:
     user_id = uuid4()
     fake_service = FakeRecordsService(user_id=user_id)
@@ -182,6 +203,7 @@ class FakeRecordsService:
         self.create_growth_kwargs = {}
         self.list_feedings_kwargs = {}
         self.list_pumpings_kwargs = {}
+        self.milk_trends_kwargs = {}
         self.list_growth_kwargs = {}
         self.delete_feeding_kwargs = {}
         self.delete_pumping_kwargs = {}
@@ -205,6 +227,21 @@ class FakeRecordsService:
     async def list_pumpings(self, **kwargs):
         self.list_pumpings_kwargs = kwargs
         return [self._pumping()]
+
+    async def get_milk_trends(self, **kwargs):
+        self.milk_trends_kwargs = kwargs
+        return MilkTrendListResponse(
+            items=[
+                MilkTrendDayRead(
+                    date=date(2026, 7, 1),
+                    pumped_milk_volume_ml=125.5,
+                    pumping_count=2,
+                    measured_only=True,
+                )
+            ],
+            days=kwargs["days"],
+            include_today=kwargs["include_today"],
+        )
 
     async def delete_pumping(self, **kwargs):
         self.delete_pumping_kwargs = kwargs

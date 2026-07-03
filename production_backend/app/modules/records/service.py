@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from uuid import UUID
 
 from ...core.errors import ApiError
 from ..audit import AuditService, IdempotencyService, parse_idempotency_response_ref, request_hash
 from .models import FeedingRecord, GrowthRecord, PumpingRecord
 from .repository import RecordsRepository
+from .schemas import MilkTrendDayRead, MilkTrendListResponse
 
 
 FEEDING_CREATE_IDEMPOTENCY_SCOPE = "records.feeding.create"
@@ -212,6 +213,44 @@ class RecordsService:
             limit=limit,
         )
 
+    async def get_milk_trends(
+        self,
+        *,
+        owner_user_id: UUID,
+        start_date: date | None = None,
+        days: int = 30,
+        include_today: bool = True,
+    ) -> MilkTrendListResponse:
+        if days < 1 or days > 90:
+            raise ApiError(code="validation_failed", message="days must be between 1 and 90.", status=422)
+        first_day = start_date or _default_trend_start_date(days=days, include_today=include_today)
+        start_at = datetime.combine(first_day, time.min, tzinfo=timezone.utc)
+        end_at = start_at + timedelta(days=days)
+        pumpings = await self.repository.list_pumpings(
+            owner_user_id=owner_user_id,
+            start_at=start_at,
+            end_at=end_at,
+            limit=1000,
+        )
+        totals_by_day: dict[date, float] = {}
+        counts_by_day: dict[date, int] = {}
+        for pumping in pumpings:
+            pump_day = _as_utc_date(pumping.pump_start_time)
+            if pump_day < first_day or pump_day >= first_day + timedelta(days=days):
+                continue
+            totals_by_day[pump_day] = totals_by_day.get(pump_day, 0.0) + float(pumping.milk_volume_ml or 0)
+            counts_by_day[pump_day] = counts_by_day.get(pump_day, 0) + 1
+        items = [
+            MilkTrendDayRead(
+                date=first_day + timedelta(days=offset),
+                pumped_milk_volume_ml=round(totals_by_day.get(first_day + timedelta(days=offset), 0.0), 2),
+                pumping_count=counts_by_day.get(first_day + timedelta(days=offset), 0),
+                measured_only=True,
+            )
+            for offset in range(days)
+        ]
+        return MilkTrendListResponse(items=items, days=days, include_today=include_today)
+
     async def delete_pumping(self, *, owner_user_id: UUID, record_id: UUID, request_id: str = "") -> None:
         deleted = await self.repository.soft_delete_pumping(
             owner_user_id=owner_user_id,
@@ -349,3 +388,14 @@ class RecordsService:
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _default_trend_start_date(*, days: int, include_today: bool) -> date:
+    end_day = _utcnow().date() if include_today else _utcnow().date() - timedelta(days=1)
+    return end_day - timedelta(days=days - 1)
+
+
+def _as_utc_date(value: datetime) -> date:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).date()

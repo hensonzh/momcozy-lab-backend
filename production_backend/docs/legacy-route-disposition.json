@@ -59,6 +59,6 @@
     {"legacy_path": "/v1/pump/energy/get", "status": "mapped", "target_paths": ["/v1/devices/pump-energy-target"], "target_domain": "devices", "notes": "Energy target is a typed read endpoint."},
     {"legacy_path": "/v1/pump/health/upload", "status": "mapped", "target_paths": ["/v1/devices/pump-health"], "target_domain": "devices", "notes": "Health is a typed device fact."},
     {"legacy_path": "/v1/pump/health/get", "status": "mapped", "target_paths": ["/v1/devices/pump-health/latest"], "target_domain": "devices", "notes": "Health latest is owner-scoped."},
-    {"legacy_path": "/v1/pump/info/get", "status": "pending", "target_paths": [], "target_domain": "records_analytics", "notes": "Legacy pump_info is a milk trend summary and should be rebuilt under records or analytics."}
+    {"legacy_path": "/v1/pump/info/get", "status": "mapped", "target_paths": ["/v1/records/milk-trends"], "target_domain": "records_analytics", "notes": "Legacy pump_info trend is rebuilt as measured-only pumping trends under records."}
   ]
 }

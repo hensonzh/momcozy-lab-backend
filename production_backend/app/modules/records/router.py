@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request, Response, status
@@ -19,6 +19,7 @@ from .schemas import (
     GrowthRecordCreate,
     GrowthRecordListResponse,
     GrowthRecordRead,
+    MilkTrendListResponse,
     PumpingRecordCreate,
     PumpingRecordListResponse,
     PumpingRecordRead,
@@ -131,6 +132,22 @@ async def list_pumpings(
         limit=limit,
     )
     return PumpingRecordListResponse(items=[PumpingRecordRead.model_validate(record) for record in records])
+
+
+@router.get("/milk-trends", response_model=MilkTrendListResponse)
+async def get_milk_trends(
+    start_date: date | None = None,
+    days: int = Query(default=30, ge=1, le=90),
+    include_today: bool = Query(default=True),
+    current_user: CurrentUser = Depends(require_current_user),
+    service: RecordsService = Depends(get_records_service),
+) -> MilkTrendListResponse:
+    return await service.get_milk_trends(
+        owner_user_id=current_user.user_id,
+        start_date=start_date,
+        days=days,
+        include_today=include_today,
+    )
 
 
 @router.delete("/pumping/{record_id}", status_code=status.HTTP_204_NO_CONTENT)

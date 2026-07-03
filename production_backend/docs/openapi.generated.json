@@ -1358,6 +1358,61 @@
         "title": "LogoutResponse",
         "type": "object"
       },
+      "MilkTrendDayRead": {
+        "properties": {
+          "date": {
+            "format": "date",
+            "title": "Date",
+            "type": "string"
+          },
+          "measured_only": {
+            "default": true,
+            "title": "Measured Only",
+            "type": "boolean"
+          },
+          "pumped_milk_volume_ml": {
+            "title": "Pumped Milk Volume Ml",
+            "type": "number"
+          },
+          "pumping_count": {
+            "title": "Pumping Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "date",
+          "pumped_milk_volume_ml",
+          "pumping_count"
+        ],
+        "title": "MilkTrendDayRead",
+        "type": "object"
+      },
+      "MilkTrendListResponse": {
+        "properties": {
+          "days": {
+            "title": "Days",
+            "type": "integer"
+          },
+          "include_today": {
+            "title": "Include Today",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MilkTrendDayRead"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "days",
+          "include_today"
+        ],
+        "title": "MilkTrendListResponse",
+        "type": "object"
+      },
       "NotificationListResponse": {
         "properties": {
           "items": {
@@ -6917,6 +6972,83 @@
           }
         ],
         "summary": "Delete Growth",
+        "tags": [
+          "records"
+        ]
+      }
+    },
+    "/v1/records/milk-trends": {
+      "get": {
+        "operationId": "get_milk_trends_v1_records_milk_trends_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "start_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start Date"
+            }
+          },
+          {
+            "in": "query",
+            "name": "days",
+            "required": false,
+            "schema": {
+              "default": 30,
+              "maximum": 90,
+              "minimum": 1,
+              "title": "Days",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_today",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Include Today",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MilkTrendListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Milk Trends",
         "tags": [
           "records"
         ]

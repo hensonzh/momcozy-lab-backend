@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -74,6 +74,19 @@ class PumpingRecordCreate(BaseModel):
 
 class PumpingRecordListResponse(BaseModel):
     items: list[PumpingRecordRead]
+
+
+class MilkTrendDayRead(BaseModel):
+    date: date
+    pumped_milk_volume_ml: float
+    pumping_count: int
+    measured_only: bool = True
+
+
+class MilkTrendListResponse(BaseModel):
+    items: list[MilkTrendDayRead]
+    days: int
+    include_today: bool
 
 
 class GrowthRecordRead(BaseModel):

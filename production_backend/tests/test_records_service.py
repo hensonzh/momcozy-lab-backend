@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
 import pytest
@@ -142,6 +142,36 @@ def test_records_service_lists_and_deletes_pumpings() -> None:
     assert repository.list_pumpings_kwargs["limit"] == 10
     assert repository.deleted_pumping.status == "deleted"
     assert audit_service.record_kwargs["action"] == "records.pumping.delete"
+
+
+def test_records_service_builds_measured_milk_trends_from_pumping_records() -> None:
+    owner_user_id = uuid4()
+    first = _pumping(owner_user_id=owner_user_id)
+    first.pump_start_time = datetime(2026, 7, 1, 8, 0, tzinfo=timezone.utc)
+    first.milk_volume_ml = 90
+    second = _pumping(owner_user_id=owner_user_id)
+    second.pump_start_time = datetime(2026, 7, 1, 18, 0, tzinfo=timezone.utc)
+    second.milk_volume_ml = 35.5
+    repository = FakeRecordsRepository(pumpings=[first, second])
+    service = RecordsService(repository=repository)
+
+    trends = asyncio.run(
+        service.get_milk_trends(
+            owner_user_id=owner_user_id,
+            start_date=date(2026, 7, 1),
+            days=2,
+            include_today=True,
+        )
+    )
+
+    assert trends.items[0].date == date(2026, 7, 1)
+    assert trends.items[0].pumped_milk_volume_ml == 125.5
+    assert trends.items[0].pumping_count == 2
+    assert trends.items[0].measured_only is True
+    assert trends.items[1].date == date(2026, 7, 2)
+    assert trends.items[1].pumped_milk_volume_ml == 0
+    assert repository.list_pumpings_kwargs["owner_user_id"] == owner_user_id
+    assert repository.list_pumpings_kwargs["limit"] == 1000
 
 
 def test_records_service_creates_growth_with_infant_scope_idempotency_and_audit() -> None:
