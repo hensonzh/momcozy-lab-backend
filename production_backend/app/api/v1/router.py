@@ -17,6 +17,7 @@ from ...modules.notifications.router import router as notifications_router
 from ...modules.plans.router import router as plans_router
 from ...modules.profiles.router import router as profiles_router
 from ...modules.records.router import router as records_router
+from ...modules.status_page.router import router as status_page_router
 from ...modules.support.router import router as support_router
 from ...modules.voice.router import router as voice_router
 
@@ -30,6 +31,7 @@ router.include_router(notifications_router)
 router.include_router(plans_router)
 router.include_router(profiles_router)
 router.include_router(records_router)
+router.include_router(status_page_router)
 router.include_router(support_router)
 router.include_router(voice_router)
 
