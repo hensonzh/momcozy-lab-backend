@@ -5,7 +5,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from production_backend.app.core.errors import ApiError
-from production_backend.app.modules.agent_runtime.models import AgentEvent, AgentMessage, AgentRun, AgentSafetyEvent, AgentThread
+from production_backend.app.modules.agent_runtime.models import AgentArtifact, AgentEvent, AgentMessage, AgentRun, AgentSafetyEvent, AgentThread
 from production_backend.app.modules.agent_runtime.safety import AgentSafetyService
 from production_backend.app.modules.agent_runtime.service import AgentRuntimeService
 from production_backend.app.modules.audit.models import IdempotencyKey
@@ -194,6 +194,31 @@ def test_agent_runtime_service_records_client_event_on_run_ledger() -> None:
     }
 
 
+def test_agent_runtime_service_deletes_artifact_with_replay_event() -> None:
+    owner_user_id = uuid4()
+    repository = FakeAgentRuntimeRepository()
+    service = AgentRuntimeService(repository=repository)
+    run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Hello"))
+    artifact = AgentArtifact(
+        id=uuid4(),
+        run_id=run.id,
+        owner_user_id=owner_user_id,
+        artifact_type="care_plan",
+        schema_version="v1",
+        status="created",
+        payload={"title": "Birth plan"},
+        raw_payload_ref="",
+    )
+    repository.artifact = artifact
+
+    deleted = asyncio.run(service.delete_artifact(owner_user_id=owner_user_id, artifact_id=artifact.id))
+
+    assert deleted.status == "deleted"
+    assert repository.deleted_artifact is artifact
+    assert repository.events[-1].event_type == "artifact.deleted"
+    assert repository.events[-1].payload == {"artifact_id": str(artifact.id), "artifact_type": "care_plan"}
+
+
 def _thread(*, owner_user_id: UUID) -> AgentThread:
     return AgentThread(id=uuid4(), owner_user_id=owner_user_id, title="Thread", status="active", metadata_json={})
 
@@ -221,6 +246,8 @@ class FakeAgentRuntimeRepository:
         self.runs = []
         self.messages = []
         self.events = []
+        self.artifact = None
+        self.deleted_artifact = None
         self.safety_event = None
         self.touched_thread = None
         self.touched_updated_at = None
@@ -295,6 +322,15 @@ class FakeAgentRuntimeRepository:
 
     async def list_events_for_owner(self, **kwargs):
         return [event for event in self.events if event.sequence > kwargs["after_sequence"]]
+
+    async def get_artifact_for_owner(self, **kwargs):
+        return self.artifact
+
+    async def mark_artifact_deleted(self, **kwargs):
+        artifact = kwargs["artifact"]
+        artifact.status = "deleted"
+        self.deleted_artifact = artifact
+        return artifact
 
     async def mark_run_cancelled(self, **kwargs):
         self.run.status = "cancelled"

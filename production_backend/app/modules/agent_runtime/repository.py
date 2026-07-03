@@ -396,6 +396,20 @@ class AgentRuntimeRepository:
         result = await self.session.scalars(statement)
         return list(result.all())
 
+    async def get_artifact_for_owner(self, *, artifact_id: UUID, owner_user_id: UUID) -> AgentArtifact | None:
+        statement = (
+            select(AgentArtifact)
+            .join(AgentRun, AgentRun.id == AgentArtifact.run_id)
+            .join(AgentThread, AgentThread.id == AgentRun.thread_id)
+            .where(
+                AgentArtifact.id == artifact_id,
+                AgentArtifact.owner_user_id == owner_user_id,
+                AgentThread.owner_user_id == owner_user_id,
+                AgentThread.deleted_at.is_(None),
+            )
+        )
+        return cast(AgentArtifact | None, await self.session.scalar(statement))
+
     async def create_artifact(
         self,
         *,
@@ -417,6 +431,11 @@ class AgentRuntimeRepository:
             raw_payload_ref=raw_payload_ref,
         )
         self.session.add(artifact)
+        await self.session.flush()
+        return artifact
+
+    async def mark_artifact_deleted(self, *, artifact: AgentArtifact) -> AgentArtifact:
+        artifact.status = "deleted"
         await self.session.flush()
         return artifact
 

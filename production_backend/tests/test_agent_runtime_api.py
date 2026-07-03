@@ -176,6 +176,20 @@ def test_agent_action_confirm_and_reject_use_current_user_scope() -> None:
     assert fake_service.reject_action_kwargs["reason"] == "not now"
 
 
+def test_agent_artifact_delete_uses_current_user_scope() -> None:
+    user_id = uuid4()
+    artifact_id = uuid4()
+    fake_service = FakeAgentRuntimeService(user_id=user_id)
+    app = create_app(Settings(app_env="test"))
+    _override_current_user(app, user_id)
+    app.dependency_overrides[get_agent_runtime_service] = lambda: fake_service
+
+    response = TestClient(app).delete(f"/v1/agent/artifacts/{artifact_id}")
+
+    assert response.status_code == 204
+    assert fake_service.delete_artifact_kwargs == {"owner_user_id": user_id, "artifact_id": artifact_id}
+
+
 def test_agent_admin_replay_and_eval_endpoints_require_service_key() -> None:
     run_id = uuid4()
     settings = Settings(app_env="test", service_api_key="test-service-key-with-at-least-32-bytes")
@@ -245,6 +259,7 @@ class FakeAgentRuntimeService:
         self.confirm_action_kwargs = {}
         self.reject_action_kwargs = {}
         self.record_client_event_kwargs = {}
+        self.delete_artifact_kwargs = {}
 
     async def create_thread(self, **kwargs):
         return self._thread()
@@ -303,6 +318,9 @@ class FakeAgentRuntimeService:
         action = self._action()
         action.status = "rejected"
         return action
+
+    async def delete_artifact(self, **kwargs):
+        self.delete_artifact_kwargs = kwargs
 
     def _thread(self) -> AgentThread:
         return AgentThread(id=self.thread_id, owner_user_id=self.user_id, title="Thread", status="active", metadata_json={})

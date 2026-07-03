@@ -43,7 +43,7 @@
     {"legacy_path": "/v1/plan/birth-journey/todo-completion", "status": "mapped", "target_paths": ["/v1/plans/tasks/{task_id}/completion"], "target_domain": "plans", "notes": "Todo completion is a low-risk owner-scoped write."},
     {"legacy_path": "/v1/plan/list", "status": "mapped", "target_paths": ["/v1/plans"], "target_domain": "plans", "notes": "Plans list replaces legacy care plan list."},
     {"legacy_path": "/v1/plan/detail", "status": "mapped", "target_paths": ["/v1/plans/{plan_id}"], "target_domain": "plans", "notes": "Plan detail replaces legacy care plan artifact detail."},
-    {"legacy_path": "/v1/plan/delete-artifact", "status": "pending", "target_paths": [], "target_domain": "agent_artifacts", "notes": "Agent artifacts need explicit artifact resource or action lifecycle policy."},
+    {"legacy_path": "/v1/plan/delete-artifact", "status": "mapped", "target_paths": ["/v1/agent/artifacts/{artifact_id}"], "target_domain": "agent_artifacts", "notes": "Generated artifacts are deleted through owner-scoped Agent artifact lifecycle endpoint."},
     {"legacy_path": "/v1/pregnancy-diary/list", "status": "mapped", "target_paths": ["/v1/pregnancy-diary/entries"], "target_domain": "diary", "notes": "Diary list hides soft-deleted rows."},
     {"legacy_path": "/v1/pregnancy-diary/today", "status": "mapped", "target_paths": ["/v1/pregnancy-diary/entries/{entry_date}"], "target_domain": "diary", "notes": "Today is a date-specific diary lookup."},
     {"legacy_path": "/v1/pregnancy-diary/create", "status": "mapped", "target_paths": ["/v1/pregnancy-diary/entries/{entry_date}"], "target_domain": "diary", "notes": "Create/update is a typed date upsert."},

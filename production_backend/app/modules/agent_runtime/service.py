@@ -8,7 +8,7 @@ from ...core.errors import ApiError
 from ..audit import IdempotencyKey, IdempotencyService, OutboxService, parse_idempotency_response_ref, request_hash
 from .action_policy import AgentActionPolicy
 from .controls import AgentRunControls
-from .models import AgentAction, AgentEvent, AgentRun, AgentThread
+from .models import AgentAction, AgentArtifact, AgentEvent, AgentRun, AgentThread
 from .repository import AgentRuntimeRepository
 from .safety import AgentSafetyService
 
@@ -275,6 +275,22 @@ class AgentRuntimeService:
         if action is None:
             raise ApiError(code="not_found", message="Agent action not found.", status=404)
         return action
+
+    async def delete_artifact(self, *, owner_user_id: UUID, artifact_id: UUID) -> AgentArtifact:
+        artifact = await self.repository.get_artifact_for_owner(artifact_id=artifact_id, owner_user_id=owner_user_id)
+        if artifact is None:
+            raise ApiError(code="not_found", message="Agent artifact not found.", status=404)
+        if artifact.status == "deleted":
+            return artifact
+        run = await self.get_run(owner_user_id=owner_user_id, run_id=artifact.run_id)
+        deleted = await self.repository.mark_artifact_deleted(artifact=artifact)
+        await self._append_event(
+            thread_id=run.thread_id,
+            run_id=run.id,
+            event_type="artifact.deleted",
+            payload={"artifact_id": str(deleted.id), "artifact_type": deleted.artifact_type},
+        )
+        return deleted
 
     async def confirm_action(
         self,

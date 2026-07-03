@@ -218,6 +218,16 @@ async def get_action(
     return AgentActionRead.model_validate(action)
 
 
+@router.delete("/artifacts/{artifact_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_artifact(
+    artifact_id: UUID,
+    current_user: CurrentUser = Depends(require_current_user),
+    service: AgentRuntimeService = Depends(get_agent_runtime_service),
+) -> Response:
+    await service.delete_artifact(owner_user_id=current_user.user_id, artifact_id=artifact_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.post("/actions/{action_id}/confirm", response_model=AgentActionRead)
 async def confirm_action(
     action_id: UUID,
