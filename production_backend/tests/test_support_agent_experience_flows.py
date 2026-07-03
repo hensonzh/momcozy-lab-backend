@@ -6,6 +6,7 @@ from production_backend.app.modules.agent_runtime.action_outbox import AgentActi
 from production_backend.app.modules.agent_runtime.models import AgentAction, AgentEvent, AgentMessage, AgentRun, AgentThread
 from production_backend.app.modules.agent_runtime.service import AGENT_ACTION_APPLY_JOB, AgentRuntimeService
 from production_backend.app.modules.audit.models import IdempotencyKey, OutboxJob
+from production_backend.app.modules.hospital_bag import HOSPITAL_BAG_CART_UPDATE_ACTION, HospitalBagCartUpdateActionHandler
 from production_backend.app.modules.support.agent_actions import SUPPORT_TICKET_CREATE_ACTION, SupportTicketCreateActionHandler
 from production_backend.app.modules.support.models import SupportTicket
 from production_backend.app.modules.support.service import SupportTicketsService
@@ -84,6 +85,73 @@ def test_agent_support_ticket_main_flow_confirms_queues_applies_and_replays_even
     assert runtime_repository.events[-1].payload["resource_type"] == "support_ticket"
     assert runtime_repository.events[-1].payload["resource_id"] == str(ticket.id)
     assert support_audit.entries[-1]["action"] == "support.tickets.create"
+
+
+def test_agent_hospital_bag_cart_main_flow_confirms_queues_applies_and_replays_events() -> None:
+    owner_user_id = uuid4()
+    runtime_repository = InMemoryAgentRuntimeRepository()
+    outbox_service = CapturingOutboxService()
+    runtime_service = AgentRuntimeService(repository=runtime_repository, outbox_service=outbox_service)
+
+    run = asyncio.run(
+        runtime_service.create_run(
+            actor_user_id=owner_user_id,
+            thread_id=None,
+            message="Mark the nursing bra as packed in my hospital bag.",
+            request_id="req_agent_cart",
+            trace_id="trace_agent_cart",
+        )
+    )
+    action = asyncio.run(
+        runtime_service.propose_action(
+            owner_user_id=owner_user_id,
+            run_id=run.id,
+            action_type=HOSPITAL_BAG_CART_UPDATE_ACTION,
+            target_type="hospital_bag_cart",
+            side_effect_level="low",
+            preview_payload={
+                "summary": "Mark nursing bra as packed",
+                "cart_update": {"set_checked": [{"item_id": "nursing-bra", "checked": True}]},
+            },
+            apply_payload={
+                "cart_update": {"set_checked": [{"item_id": "nursing-bra", "checked": True}]},
+            },
+        )
+    )
+    run.status = "waiting_for_confirmation"
+
+    confirmed = asyncio.run(
+        runtime_service.confirm_action(
+            owner_user_id=owner_user_id,
+            action_id=action.id,
+            idempotency_key="idem-cart-action",
+        )
+    )
+    handler = AgentActionOutboxHandler(
+        repository=runtime_repository,
+        handlers={HOSPITAL_BAG_CART_UPDATE_ACTION: HospitalBagCartUpdateActionHandler()},
+    )
+    asyncio.run(handler(outbox_service.job))
+
+    applied_event = runtime_repository.events[-1]
+
+    assert confirmed.status == "applied"
+    assert outbox_service.enqueue_kwargs["idempotency_key"] == f"agent-action:{action.id}:apply"
+    assert [event.event_type for event in runtime_repository.events] == [
+        "run.queued",
+        "message.completed",
+        "action.confirmation_required",
+        "action.queued",
+        "run.completed",
+        "action.applied",
+    ]
+    assert applied_event.payload["resource_type"] == "hospital_bag_cart"
+    assert applied_event.payload["resource_id"] == str(action.id)
+    assert applied_event.payload["details"]["cart_update"] == {
+        "set_checked": [{"item_id": "nursing-bra", "checked": True}]
+    }
+    assert applied_event.payload["details"]["agent_action_id"] == str(action.id)
+    assert applied_event.payload["details"]["agent_run_id"] == str(run.id)
 
 
 class InMemoryAgentRuntimeRepository:
