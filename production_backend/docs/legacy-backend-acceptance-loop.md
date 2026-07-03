@@ -86,9 +86,58 @@ voice session
 Do not mix unrelated domains in the same loop unless the shared dependency is
 the actual goal, such as idempotency or audit.
 
-### 2. Freeze The Target Contract
+### 2. Freeze The Experience Main Flow
 
-For every endpoint or internal operation in the slice, write:
+Start from the user's main path through the feature, not from the endpoint.
+The experience flow defines what a successful product moment looks like before
+it is decomposed into APIs, state changes, events, tools, or workers.
+
+For each feature, write the happy path and the important detours:
+
+```text
+entry point
+user intent
+preconditions and required data
+first screen or first assistant response
+clarification points
+confirmation points
+backend operations
+stream/action/UI events
+visible success state
+empty/offline/error states
+undo/cancel/retry behavior
+postconditions in persisted data
+support or safety escalation, if relevant
+```
+
+Examples:
+
+```text
+upload pump session record
+  user opens Records -> adds pumping amount/time -> sees saved record
+  -> today summary and trend queries include it
+  -> retry with same idempotency key does not duplicate it
+
+create support ticket from Agent
+  user reports device fault -> Agent asks only needed details
+  -> shows confirmation card -> user confirms
+  -> action.queued appears -> ticket is created by outbox
+  -> action.applied and ticket detail are replayable
+
+pregnancy diary today entry
+  user opens today diary -> sees empty or existing entry
+  -> edits mood/content -> save succeeds
+  -> deleting hides the entry
+  -> saving same date again restores the soft-deleted row
+```
+
+Experience-flow acceptance must verify what the user can observe and what the
+system persists. A flow is not accepted just because individual endpoints return 200.
+
+### 3. Freeze The Target Contract
+
+After the experience flow is clear, define the endpoint or internal operation
+contracts needed to support it:
 
 ```text
 route / operation
@@ -108,10 +157,22 @@ worker/outbox behavior, if any
 The target contract wins over the legacy response shape. Legacy raw responses
 such as `{error: -1}` are reference material only.
 
-### 3. Write Acceptance Before Implementation
+### 4. Write Acceptance Before Implementation
 
 Every slice should start with tests or eval cases that fail for the missing
 target behavior.
+
+Minimum experience-flow test layers:
+
+```text
+main happy path smoke test
+empty state test
+permission or owner-scope failure from the user's path
+retry/idempotency behavior from the user's path
+visible event/UI state sequence for Agent or streaming flows
+persisted postcondition check
+safety or support escalation detour where relevant
+```
 
 Minimum backend test layers:
 
@@ -137,7 +198,7 @@ safety guard tests
 golden eval or replay case for model behavior
 ```
 
-### 4. Implement Only Until The Gate Passes
+### 5. Implement Only Until The Gate Passes
 
 Codex should work until the slice acceptance passes. The implementation should
 stay inside the target production backend and must not import legacy runtime
@@ -159,10 +220,12 @@ PATH="$HOME/.local/bin:$PATH" docker compose -f production_backend/docker-compos
 .venv/bin/python production_backend/scripts/check_backup_restore_hooks.py
 ```
 
-### 5. Self-Review Before Commit
+### 6. Self-Review Before Commit
 
 The self-review checklist is:
 
+- every migrated endpoint is justified by an experience main flow;
+- the main flow covers empty, error, retry, and completion states;
 - no request body/query `user_id` is an authority;
 - no legacy `data_store`, `ChatSession`, or `previous_response_id` dependency;
 - error responses use stable envelopes;
@@ -172,7 +235,7 @@ The self-review checklist is:
 - unsafe health/emotion/prompt-injection paths cannot continue normal flow;
 - tests prove the edge case, not just the happy path.
 
-### 6. Commit The Passing Slice
+### 7. Commit The Passing Slice
 
 Commit only after tests and self-review pass. The commit message should name the
 behavior, not the implementation detail.
@@ -671,6 +734,7 @@ Use this template when starting a new Codex loop.
 
 ```text
 Slice:
+Experience main flow:
 Legacy source:
 Target module:
 Target endpoint/action/tool:
@@ -682,6 +746,7 @@ Audit:
 Outbox/worker:
 Safety/eval:
 Tests to add before implementation:
+Experience-flow acceptance:
 Verification command:
 Definition of done:
 ```
@@ -691,6 +756,7 @@ Definition of done:
 A domain is accepted only when all of these are true:
 
 - target APIs are typed and represented in OpenAPI;
+- each public API or Agent action is covered by an experience main flow;
 - migrated routes derive owner scope from `CurrentUser`;
 - old response shapes are not required by new clients;
 - business writes have audit and idempotency where appropriate;
@@ -713,7 +779,8 @@ to a production contract:
 2. Convert the 14 product Agent service suites into machine-readable eval
    cases with mock business fixtures.
 3. Add per-domain PR slice records for any legacy route not yet represented by
-   the new OpenAPI surface or intentionally retired.
+   the new OpenAPI surface or intentionally retired; each record should start
+   from the feature's experience main flow.
 4. Add Flutter generated-client gates once the Flutter refactor owns codegen.
 5. Promote production incidents or manual QA failures into replay/eval
    regression cases.
