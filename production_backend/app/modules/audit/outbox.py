@@ -40,6 +40,12 @@ class OutboxService:
 
         existing = await self.repository.get_by_idempotency_key(idempotency_key=normalized_key)
         if existing is not None:
+            if action_id is not None and existing.action_id != action_id:
+                raise ApiError(
+                    code="idempotency_conflict",
+                    message="Outbox idempotency key is already associated with a different action.",
+                    status=409,
+                )
             return existing
 
         return await self.repository.create_job(

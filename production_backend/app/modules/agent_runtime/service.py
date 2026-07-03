@@ -95,8 +95,8 @@ class AgentRuntimeService:
         if idempotency_record is not None and idempotency_record.response_ref:
             return await self._replay_run(owner_user_id=actor_user_id, response_ref=idempotency_record.response_ref)
 
-        thread = await self._get_or_create_thread(actor_user_id=actor_user_id, thread_id=thread_id, title=_title_from_message(normalized_message))
         try:
+            thread = await self._get_or_create_thread(actor_user_id=actor_user_id, thread_id=thread_id, title=_title_from_message(normalized_message))
             await self._ensure_no_active_thread_run(owner_user_id=actor_user_id, thread_id=thread.id)
         except ApiError:
             await self._release_idempotency(idempotency_record=idempotency_record)
@@ -288,7 +288,7 @@ class AgentRuntimeService:
                 "target_id": confirmed.target_id,
                 "apply_payload": confirmed.apply_payload,
             },
-            idempotency_key=confirmed.idempotency_key,
+            idempotency_key=_action_outbox_idempotency_key(action_id=confirmed.id),
             action_id=confirmed.id,
             request_id=run.request_id,
             trace_id=run.trace_id,
@@ -474,6 +474,10 @@ def _normalize_text(value: str | None, *, max_length: int, required: bool = Fals
     if len(normalized) > max_length:
         raise ApiError(code="validation_failed", message="value is too long.", status=422)
     return normalized
+
+
+def _action_outbox_idempotency_key(*, action_id: UUID) -> str:
+    return f"agent-action:{action_id}:apply"
 
 
 def _title_from_message(message: str) -> str:

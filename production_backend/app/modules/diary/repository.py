@@ -14,12 +14,20 @@ class DiaryRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def get_entry_by_date(self, *, owner_user_id: UUID, entry_date: date) -> PregnancyDiaryEntry | None:
-        statement = select(PregnancyDiaryEntry).where(
+    async def get_entry_by_date(
+        self,
+        *,
+        owner_user_id: UUID,
+        entry_date: date,
+        include_deleted: bool = False,
+    ) -> PregnancyDiaryEntry | None:
+        conditions = [
             PregnancyDiaryEntry.owner_user_id == owner_user_id,
             PregnancyDiaryEntry.entry_date == entry_date,
-            PregnancyDiaryEntry.deleted_at.is_(None),
-        )
+        ]
+        if not include_deleted:
+            conditions.append(PregnancyDiaryEntry.deleted_at.is_(None))
+        statement = select(PregnancyDiaryEntry).where(*conditions)
         return cast(PregnancyDiaryEntry | None, await self.session.scalar(statement))
 
     async def list_entries(
@@ -50,7 +58,7 @@ class DiaryRepository:
         entry_date: date,
         values: dict[str, Any],
     ) -> PregnancyDiaryEntry:
-        entry = await self.get_entry_by_date(owner_user_id=owner_user_id, entry_date=entry_date)
+        entry = await self.get_entry_by_date(owner_user_id=owner_user_id, entry_date=entry_date, include_deleted=True)
         if entry is None:
             entry = PregnancyDiaryEntry(owner_user_id=owner_user_id, entry_date=entry_date)
             self.session.add(entry)

@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
 from production_backend.app.modules.audit.models import IdempotencyKey
+from production_backend.app.modules.audit.service import request_hash
 from production_backend.app.modules.support.models import SupportTicket
 from production_backend.app.modules.support.service import SupportTicketsService
 
@@ -45,6 +46,51 @@ def test_support_tickets_service_lists_and_gets_owner_ticket() -> None:
 
     assert tickets == [ticket]
     assert fetched == ticket
+
+
+def test_support_ticket_idempotency_hash_includes_user_contact() -> None:
+    owner_user_id = uuid4()
+    idempotency_service = FakeIdempotencyService(status="reserved")
+    service = SupportTicketsService(repository=FakeSupportTicketsRepository(), idempotency_service=idempotency_service)
+
+    asyncio.run(
+        service.create_ticket(
+            owner_user_id=owner_user_id,
+            issue_type="device_fault",
+            issue_summary="Pump does not turn on",
+            product_model="Air1",
+            user_contact="user@example.com",
+            idempotency_key="idem-ticket",
+        )
+    )
+
+    expected_hash = request_hash(
+        {
+            "issue_type": "device_fault",
+            "issue_summary": "Pump does not turn on",
+            "product_model": "Air1",
+            "order_number": "",
+            "purchase_channel": "",
+            "user_contact": "user@example.com",
+            "urgency": "normal",
+            "source": "agent",
+            "payload": {},
+        }
+    )
+    legacy_hash = request_hash(
+        {
+            "issue_type": "device_fault",
+            "issue_summary": "Pump does not turn on",
+            "product_model": "Air1",
+            "order_number": "",
+            "purchase_channel": "",
+            "urgency": "normal",
+            "source": "agent",
+            "payload": {},
+        }
+    )
+    assert idempotency_service.reserve_kwargs["request_hash"] == expected_hash
+    assert idempotency_service.reserve_kwargs["request_hash"] != legacy_hash
 
 
 def _ticket(*, owner_user_id: UUID) -> SupportTicket:

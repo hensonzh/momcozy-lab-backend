@@ -67,6 +67,7 @@ class SupportTicketsService:
                 "product_model": normalized_product_model,
                 "order_number": normalized_order_number,
                 "purchase_channel": normalized_purchase_channel,
+                "user_contact": normalized_user_contact,
                 "urgency": normalized_urgency,
                 "source": normalized_source,
                 "payload": safe_payload,

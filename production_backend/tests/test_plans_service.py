@@ -3,6 +3,7 @@ from datetime import date, datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
 from production_backend.app.modules.audit.models import IdempotencyKey
+from production_backend.app.modules.audit.service import request_hash
 from production_backend.app.modules.plans.models import Plan, PlanTask
 from production_backend.app.modules.plans.service import PlansService
 
@@ -42,6 +43,38 @@ def test_plans_service_creates_and_completes_task() -> None:
     assert task.plan_id == plan.id
     assert completed.status == "completed"
     assert audit_service.record_kwargs["action"] == "plans.tasks.complete"
+
+
+def test_plans_service_task_idempotency_hash_includes_persisted_body() -> None:
+    owner_user_id = uuid4()
+    idempotency_service = FakeIdempotencyService(status="reserved")
+    service = PlansService(repository=FakePlansRepository(), idempotency_service=idempotency_service)
+
+    asyncio.run(
+        service.create_task(
+            owner_user_id=owner_user_id,
+            task_date=date(2026, 7, 4),
+            task_time="09:00",
+            title="Pack bag",
+            description="Bring charger and snacks",
+            payload={"category": "birth_prep"},
+            idempotency_key="idem-task",
+        )
+    )
+
+    expected_hash = request_hash(
+        {
+            "plan_id": "",
+            "task_date": "2026-07-04",
+            "task_time": "09:00",
+            "title": "Pack bag",
+            "description": "Bring charger and snacks",
+            "payload": {"category": "birth_prep"},
+        }
+    )
+    legacy_hash = request_hash({"plan_id": "", "task_date": "2026-07-04", "task_time": "09:00", "title": "Pack bag"})
+    assert idempotency_service.reserve_kwargs["request_hash"] == expected_hash
+    assert idempotency_service.reserve_kwargs["request_hash"] != legacy_hash
 
 
 def test_plans_service_lists_and_deletes_owner_scoped_resources() -> None:

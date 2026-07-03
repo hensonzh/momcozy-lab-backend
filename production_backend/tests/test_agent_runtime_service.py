@@ -132,6 +132,28 @@ def test_agent_runtime_service_releases_run_idempotency_when_active_run_blocks_c
     assert repository.runs[0].id == first_run.id
 
 
+def test_agent_runtime_service_releases_run_idempotency_when_thread_lookup_fails() -> None:
+    owner_user_id = uuid4()
+    repository = FakeAgentRuntimeRepository()
+    idempotency_service = FakeIdempotencyService(status="reserved")
+    service = AgentRuntimeService(repository=repository, idempotency_service=idempotency_service)
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            service.create_run(
+                actor_user_id=owner_user_id,
+                thread_id=uuid4(),
+                message="Second",
+                idempotency_key="idem-run-2",
+            )
+        )
+
+    assert exc_info.value.code == "not_found"
+    assert idempotency_service.released_record is idempotency_service.record
+    assert idempotency_service.completed_response_ref == ""
+    assert repository.runs == []
+
+
 def test_agent_runtime_service_allows_new_run_after_previous_terminal() -> None:
     owner_user_id = uuid4()
     repository = FakeAgentRuntimeRepository()

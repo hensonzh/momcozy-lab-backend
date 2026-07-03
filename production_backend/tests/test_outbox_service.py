@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
+from uuid import uuid4
 
 import pytest
 
@@ -16,6 +17,19 @@ def test_outbox_service_enqueue_is_idempotent_by_key() -> None:
     job = asyncio.run(service.enqueue(job_type="files.cleanup", payload={}, idempotency_key="job-1"))
 
     assert job is existing
+    assert repository.created_job is None
+
+
+def test_outbox_service_rejects_same_key_for_different_action() -> None:
+    existing = _job(idempotency_key="job-1")
+    existing.action_id = uuid4()
+    repository = FakeOutboxRepository(existing_by_key=existing)
+    service = OutboxService(repository=repository)
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(service.enqueue(job_type="agent.action.apply", payload={}, idempotency_key="job-1", action_id=uuid4()))
+
+    assert exc_info.value.code == "idempotency_conflict"
     assert repository.created_job is None
 
 

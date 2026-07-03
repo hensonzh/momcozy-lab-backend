@@ -94,7 +94,14 @@ class PlansService:
             owner_user_id=owner_user_id,
             scope=PLAN_TASK_CREATE_IDEMPOTENCY_SCOPE,
             key=idempotency_key,
-            payload={"plan_id": str(plan_id or ""), "task_date": str(task_date or ""), "task_time": task_time, "title": title},
+            payload={
+                "plan_id": str(plan_id or ""),
+                "task_date": str(task_date or ""),
+                "task_time": task_time,
+                "title": title,
+                "description": description,
+                "payload": payload or {},
+            },
         )
         if idempotency_record is not None and idempotency_record.response_ref:
             return await self._replay_task(owner_user_id=owner_user_id, response_ref=idempotency_record.response_ref)

@@ -63,6 +63,7 @@ def test_agent_runtime_actions_confirm_to_action_queued_without_queued_status() 
     assert repository.events[-1].payload == {"reason": "action_confirmed", "action_id": str(action.id)}
     assert outbox_service.enqueue_kwargs["job_type"] == AGENT_ACTION_APPLY_JOB
     assert outbox_service.enqueue_kwargs["payload"]["action_id"] == str(action.id)
+    assert outbox_service.enqueue_kwargs["idempotency_key"] == f"agent-action:{action.id}:apply"
     assert outbox_service.enqueue_kwargs["action_id"] == action.id
 
 
@@ -143,8 +144,36 @@ def test_agent_runtime_actions_generate_action_idempotency_key_for_confirmation(
     confirmed = asyncio.run(service.confirm_action(owner_user_id=owner_user_id, action_id=action.id))
 
     generated_key = f"agent-action:{action.id}"
+    outbox_key = f"agent-action:{action.id}:apply"
     assert confirmed.idempotency_key == generated_key
-    assert outbox_service.enqueue_kwargs["idempotency_key"] == generated_key
+    assert outbox_service.enqueue_kwargs["idempotency_key"] == outbox_key
+
+
+def test_agent_runtime_actions_scope_outbox_idempotency_key_to_each_action() -> None:
+    owner_user_id = uuid4()
+    repository = FakeActionRepository()
+    outbox_service = FakeOutboxService()
+    service = AgentRuntimeService(repository=repository, outbox_service=outbox_service)
+    first_run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Create first ticket"))
+    first_action = asyncio.run(
+        service.propose_action(owner_user_id=owner_user_id, run_id=first_run.id, action_type="support.ticket.create")
+    )
+    first_run.status = "waiting_for_confirmation"
+    asyncio.run(service.confirm_action(owner_user_id=owner_user_id, action_id=first_action.id, idempotency_key="shared-key"))
+    second_run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=repository.thread.id, message="Create second ticket"))
+    second_action = asyncio.run(
+        service.propose_action(owner_user_id=owner_user_id, run_id=second_run.id, action_type="support.ticket.create")
+    )
+    second_run.status = "waiting_for_confirmation"
+
+    asyncio.run(service.confirm_action(owner_user_id=owner_user_id, action_id=second_action.id, idempotency_key="shared-key"))
+
+    assert first_action.idempotency_key == "shared-key"
+    assert second_action.idempotency_key == "shared-key"
+    assert [call["idempotency_key"] for call in outbox_service.enqueue_calls] == [
+        f"agent-action:{first_action.id}:apply",
+        f"agent-action:{second_action.id}:apply",
+    ]
 
 
 def test_agent_runtime_actions_expire_past_confirmation_without_enqueueing() -> None:
@@ -191,6 +220,7 @@ class FakeActionRepository(FakeAgentRuntimeRepository):
     def __init__(self) -> None:
         super().__init__()
         self.action = None
+        self.actions = []
 
     async def create_action(self, **kwargs):
         self.action = AgentAction(
@@ -208,10 +238,11 @@ class FakeActionRepository(FakeAgentRuntimeRepository):
             expires_at=kwargs["expires_at"],
             error_code="",
         )
+        self.actions.append(self.action)
         return self.action
 
     async def get_action_for_owner(self, *, action_id: UUID, owner_user_id: UUID):
-        return self.action if self.action and self.action.actor_user_id == owner_user_id else None
+        return next((action for action in self.actions if action.id == action_id and action.actor_user_id == owner_user_id), None)
 
     async def mark_action_confirmed(self, **kwargs):
         action = kwargs["action"]
@@ -249,9 +280,20 @@ class FakeOutboxService:
             trace_id="",
         )
         self.enqueue_kwargs = {}
+        self.enqueue_calls = []
 
     async def enqueue(self, **kwargs):
+        self.job = OutboxJob(
+            id=uuid4(),
+            job_type=AGENT_ACTION_APPLY_JOB,
+            status="queued",
+            payload={},
+            idempotency_key="",
+            request_id="",
+            trace_id="",
+        )
         self.enqueue_kwargs = kwargs
+        self.enqueue_calls.append(kwargs)
         self.job.action_id = kwargs["action_id"]
         self.job.payload = kwargs["payload"]
         self.job.idempotency_key = kwargs["idempotency_key"]
