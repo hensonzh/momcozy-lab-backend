@@ -15,6 +15,7 @@ from ...profiles.models import InfantProfile, UserProfile
 from ...profiles.service import ProfileService
 from ...records.models import FeedingRecord, GrowthRecord, PumpingRecord
 from ...records.service import RecordsService
+from ...hospital_bag import HOSPITAL_BAG_CART_UPDATE_ACTION
 from ...support.agent_actions import SUPPORT_TICKET_CREATE_ACTION
 from ..service import AgentRuntimeService
 from .executor import ToolHandler, ToolHandlerContext
@@ -53,6 +54,36 @@ class SupportTicketProposeToolHandler:
             preview_payload=preview_payload,
             apply_payload=apply_payload,
             idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:support-ticket",
+        )
+        return {
+            "action_id": str(action.id),
+            "action_type": action.action_type,
+            "action_status": action.status,
+            "requires_confirmation": True,
+            "preview_payload": preview_payload,
+        }
+
+
+class HospitalBagCartUpdateProposeToolHandler:
+    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
+        self.runtime_service = runtime_service
+
+    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
+        apply_payload = _hospital_bag_cart_apply_payload(context.args)
+        cart_update = apply_payload.get("cart_update")
+        if not isinstance(cart_update, dict) or not cart_update:
+            raise ApiError(code="validation_failed", message="cart_update is required.", status=422)
+
+        preview_payload = _hospital_bag_cart_preview_payload(apply_payload)
+        action = await self.runtime_service.propose_action(
+            owner_user_id=context.actor.user_id,
+            run_id=context.run_id,
+            action_type=HOSPITAL_BAG_CART_UPDATE_ACTION,
+            target_type="hospital_bag_cart",
+            side_effect_level="low",
+            preview_payload=preview_payload,
+            apply_payload=apply_payload,
+            idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:hospital-bag-cart",
         )
         return {
             "action_id": str(action.id),
@@ -125,6 +156,7 @@ def build_default_tool_handlers(
             diary_service=diary_service,
             devices_service=devices_service,
         ),
+        "hospital_bag.cart_update.propose": HospitalBagCartUpdateProposeToolHandler(runtime_service=agent_runtime_service),
         "support.ticket.propose": SupportTicketProposeToolHandler(runtime_service=agent_runtime_service),
     }
 
@@ -196,6 +228,27 @@ def _support_ticket_preview_payload(apply_payload: dict[str, Any]) -> dict[str, 
         "has_user_contact": bool(_text(apply_payload, "user_contact")),
     }
     return {key: value for key, value in preview.items() if value not in ("", None)}
+
+
+def _hospital_bag_cart_apply_payload(args: dict[str, Any]) -> dict[str, Any]:
+    cart_update = args.get("cart_update")
+    payload: dict[str, Any] = {"cart_update": cart_update if isinstance(cart_update, dict) else {}}
+    summary = _text(args, "summary")
+    if summary:
+        payload["summary"] = summary
+    metadata = _metadata_payload(args)
+    if metadata:
+        payload["metadata"] = metadata
+    return payload
+
+
+def _hospital_bag_cart_preview_payload(apply_payload: dict[str, Any]) -> dict[str, Any]:
+    cart_update = apply_payload.get("cart_update")
+    preview = {
+        "summary": _text(apply_payload, "summary") or "Update hospital bag cart",
+        "cart_update": cart_update if isinstance(cart_update, dict) else {},
+    }
+    return {key: value for key, value in preview.items() if value not in ("", None, {})}
 
 
 def _metadata_payload(payload: dict[str, Any]) -> dict[str, str]:

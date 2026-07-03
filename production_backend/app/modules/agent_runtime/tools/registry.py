@@ -68,6 +68,25 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         ToolContract(
+            name="hospital_bag.cart_update.propose",
+            domain="hospital_bag",
+            description="Propose a hospital-bag cart update for user confirmation.",
+            input_schema_ref="HospitalBagCartUpdateProposalCreate",
+            output_schema_ref="AgentActionRead",
+            read_or_write="write",
+            required_permission="hospital_bag_cart:update:self",
+            owner_scope="actor",
+            side_effect_level="low",
+            blocking_policy="wait_for_confirmation",
+            result_dependency="none",
+            requires_confirmation=True,
+            idempotency_required=True,
+            audit_required=True,
+            timeout_seconds=15,
+        )
+    )
+    registry.register(
+        ToolContract(
             name="support.ticket.propose",
             domain="support",
             description="Create a support ticket action proposal after user confirmation intent is clear.",

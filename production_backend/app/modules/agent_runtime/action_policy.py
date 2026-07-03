@@ -23,6 +23,12 @@ class AgentActionPolicyRule:
 
 
 DEFAULT_AGENT_ACTION_RULES: Mapping[str, AgentActionPolicyRule] = {
+    "hospital_bag.cart.update": AgentActionPolicyRule(
+        action_type="hospital_bag.cart.update",
+        target_type="hospital_bag_cart",
+        side_effect_level="low",
+        requires_confirmation=True,
+    ),
     "support.ticket.create": AgentActionPolicyRule(
         action_type="support.ticket.create",
         target_type="support_ticket",

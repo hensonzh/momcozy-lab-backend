@@ -8,6 +8,7 @@ from production_backend.app.core.errors import ApiError
 from production_backend.app.modules.agent_runtime.models import AgentAction
 from production_backend.app.modules.agent_runtime.tools import (
     BusinessContextReadToolHandler,
+    HospitalBagCartUpdateProposeToolHandler,
     ProfileReadToolHandler,
     SupportTicketProposeToolHandler,
     ToolHandlerContext,
@@ -88,6 +89,37 @@ def test_support_ticket_propose_tool_handler_creates_confirmation_action() -> No
     assert runtime_service.calls[0]["apply_payload"]["metadata"] == {"locale": "en-US"}
 
 
+def test_hospital_bag_cart_update_propose_tool_handler_creates_confirmation_action() -> None:
+    actor = _user()
+    runtime_service = FakeAgentRuntimeService()
+    handler = HospitalBagCartUpdateProposeToolHandler(runtime_service=runtime_service)
+    context = _context(
+        actor=actor,
+        args={
+            "cart_update": {
+                "set_checked": [{"item_id": "nursing-bra", "checked": True}],
+                "add_items": [{"item_id": "charger", "label": "Phone charger"}],
+            },
+            "summary": "Mark nursing bra packed and add a phone charger",
+            "timezone": "Asia/Shanghai",
+        },
+    )
+
+    result = asyncio.run(handler(context))
+
+    assert result["action_id"] == str(runtime_service.action.id)
+    assert result["action_type"] == "hospital_bag.cart.update"
+    assert result["action_status"] == "confirmation_required"
+    assert result["requires_confirmation"] is True
+    assert result["preview_payload"]["summary"] == "Mark nursing bra packed and add a phone charger"
+    assert result["preview_payload"]["cart_update"]["set_checked"][0]["item_id"] == "nursing-bra"
+    assert runtime_service.calls[0]["owner_user_id"] == actor.user_id
+    assert runtime_service.calls[0]["run_id"] == context.run_id
+    assert runtime_service.calls[0]["target_type"] == "hospital_bag_cart"
+    assert runtime_service.calls[0]["side_effect_level"] == "low"
+    assert runtime_service.calls[0]["apply_payload"]["metadata"] == {"timezone": "Asia/Shanghai"}
+
+
 def test_business_context_read_tool_handler_returns_bounded_owner_scoped_summary() -> None:
     actor = _user()
     records_service = FakeRecordsService(owner_user_id=actor.user_id)
@@ -121,6 +153,13 @@ def test_support_ticket_propose_tool_handler_requires_summary() -> None:
     assert exc_info.value.code == "validation_failed"
 
 
+def test_hospital_bag_cart_update_propose_tool_handler_requires_cart_update() -> None:
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(HospitalBagCartUpdateProposeToolHandler(runtime_service=FakeAgentRuntimeService())(_context(args={})))
+
+    assert exc_info.value.code == "validation_failed"
+
+
 def test_support_ticket_propose_tool_handler_rejects_legacy_nested_ticket_shape() -> None:
     with pytest.raises(ApiError) as exc_info:
         asyncio.run(
@@ -143,7 +182,12 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
         agent_runtime_service=FakeAgentRuntimeService(),
     )
 
-    assert set(handlers) == {"profile.read", "business.context.read", "support.ticket.propose"}
+    assert set(handlers) == {
+        "profile.read",
+        "business.context.read",
+        "hospital_bag.cart_update.propose",
+        "support.ticket.propose",
+    }
 
 
 def _context(*, actor: CurrentUser | None = None, args: dict | None = None) -> ToolHandlerContext:
@@ -164,7 +208,14 @@ def _user() -> CurrentUser:
         session_id="session",
         token_id="token",
         roles=frozenset({"user"}),
-        permissions=frozenset({"profile:read:self", "business_context:read:self", "support_ticket:create:self"}),
+        permissions=frozenset(
+            {
+                "profile:read:self",
+                "business_context:read:self",
+                "hospital_bag_cart:update:self",
+                "support_ticket:create:self",
+            }
+        ),
     )
 
 
@@ -333,6 +384,9 @@ class FakeAgentRuntimeService:
         self.calls.append(kwargs)
         self.action.run_id = kwargs["run_id"]
         self.action.actor_user_id = kwargs["owner_user_id"]
+        self.action.action_type = kwargs["action_type"]
+        self.action.target_type = kwargs["target_type"]
+        self.action.side_effect_level = kwargs["side_effect_level"]
         self.action.preview_payload = kwargs["preview_payload"]
         self.action.apply_payload = kwargs["apply_payload"]
         self.action.idempotency_key = kwargs["idempotency_key"]

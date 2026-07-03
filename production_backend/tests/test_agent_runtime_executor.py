@@ -35,7 +35,12 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() ->
     request = backend.requests[0]
     assert request.run_id == str(run.id)
     assert request.thread_id == str(thread_id)
-    assert request.tool_names == ("business.context.read", "profile.read", "support.ticket.propose")
+    assert request.tool_names == (
+        "business.context.read",
+        "hospital_bag.cart_update.propose",
+        "profile.read",
+        "support.ticket.propose",
+    )
     assert [item["role"] for item in request.model_input] == ["system", "developer", "user", "assistant", "developer", "developer", "user"]
     assert request.model_input[0]["content"].startswith("You are the MomCozy product assistant.")
     assert request.model_input[4]["content"]["state"]["run_id"] == str(run.id)
@@ -103,8 +108,15 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
 
     assert result.status == "completed"
     assert result.final_text == '{"profile": {"display_name": "Mai"}}'
-    assert backend.tool_names == ("business_context_read", "profile_read", "support_ticket_propose")
+    assert backend.tool_names == (
+        "business_context_read",
+        "hospital_bag_cart_update_propose",
+        "profile_read",
+        "support_ticket_propose",
+    )
     assert backend.tool_schemas["business_context_read"]["properties"]["limit"]["maximum"] == 20
+    assert backend.tool_schemas["hospital_bag_cart_update_propose"]["required"] == ["cart_update"]
+    assert backend.tool_schemas["hospital_bag_cart_update_propose"]["additionalProperties"] is False
     assert backend.tool_schemas["profile_read"]["additionalProperties"] is False
     assert backend.tool_schemas["profile_read"]["properties"] == {}
     assert backend.tool_schemas["support_ticket_propose"]["required"] == ["issue_summary"]

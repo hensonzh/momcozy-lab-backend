@@ -30,6 +30,27 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             }
         },
     },
+    "HospitalBagCartUpdateProposalCreate": {
+        "title": "HospitalBagCartUpdateProposalCreate",
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["cart_update"],
+        "properties": {
+            "cart_update": {
+                "type": "object",
+                "description": "Minimal cart delta to preview and apply after user confirmation.",
+                "additionalProperties": True,
+            },
+            "summary": {
+                "type": "string",
+                "description": "Concise user-visible description of the cart change.",
+                "maxLength": 500,
+            },
+            "locale": {"type": "string", "maxLength": 35},
+            "timezone": {"type": "string", "maxLength": 80},
+            "idempotency_key": {"type": "string", "maxLength": 255},
+        },
+    },
     "SupportTicketProposalCreate": {
         "title": "SupportTicketProposalCreate",
         "type": "object",
