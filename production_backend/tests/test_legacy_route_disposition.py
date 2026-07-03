@@ -33,6 +33,28 @@ def test_legacy_route_disposition_targets_match_openapi() -> None:
             assert route["legacy_path"] not in openapi_paths
 
 
+def test_pump_fsm_retirement_and_workstate_contract_are_explicit() -> None:
+    routes = _disposition_routes()
+
+    assert routes["/v1/pump/workstate"]["status"] == "mapped"
+    assert routes["/v1/pump/workstate"]["target_paths"] == ["/v1/devices/pump-workstate"]
+    for retired_path in [
+        "/v1/pump/workstate/pending-replies",
+        "/v1/pump/process",
+        "/v1/pump/process/data",
+        "/v1/pump/session-summary",
+    ]:
+        route = routes[retired_path]
+        assert route["status"] == "retired"
+        assert route["target_paths"] == []
+        assert "retired" in route["notes"].lower()
+
+    pump_contract = (ROOT / "production_backend" / "docs" / "pr-slices" / "pump-device-contract.md").read_text()
+    assert "Status: accepted production contract" in pump_contract
+    assert "latest projections for workstate, threshold, and health" in pump_contract
+    assert "old pump process/FSM and pending-reply behavior is retired" in pump_contract
+
+
 def _inventory_paths() -> set[str]:
     paths: set[str] = set()
     for line in INVENTORY.read_text().splitlines():
