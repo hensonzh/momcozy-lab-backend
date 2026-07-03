@@ -59,6 +59,64 @@ def test_agent_runtime_service_cancels_run_idempotently_and_replays_events() -> 
     assert [event.event_type for event in replayed] == ["message.completed", "run.cancelled"]
 
 
+def test_agent_runtime_conversation_main_flow_replays_client_events_cancels_and_continues_thread() -> None:
+    owner_user_id = uuid4()
+    repository = FakeAgentRuntimeRepository()
+    controls = FakeAgentRunControls()
+    service = AgentRuntimeService(repository=repository, controls=controls)
+
+    first_run = asyncio.run(
+        service.create_run(
+            actor_user_id=owner_user_id,
+            thread_id=None,
+            message="Help me prepare my hospital bag.",
+            request_id="req_first_run",
+            trace_id="trace_first_run",
+        )
+    )
+    initial_events = asyncio.run(service.list_events(owner_user_id=owner_user_id, run_id=first_run.id, after_sequence=0, limit=10))
+    client_event = asyncio.run(
+        service.record_client_event(
+            owner_user_id=owner_user_id,
+            run_id=first_run.id,
+            client_event_type="ui.quick_reply.clicked",
+            payload={"reply_id": "pack_bag"},
+            client_sequence=1,
+        )
+    )
+    after_initial_cursor = asyncio.run(
+        service.list_events(owner_user_id=owner_user_id, run_id=first_run.id, after_sequence=2, limit=10)
+    )
+    cancelled = asyncio.run(service.cancel_run(owner_user_id=owner_user_id, run_id=first_run.id, reason="user changed topic"))
+    replay_after_message = asyncio.run(
+        service.list_events(owner_user_id=owner_user_id, run_id=first_run.id, after_sequence=2, limit=10)
+    )
+    second_run = asyncio.run(
+        service.create_run(
+            actor_user_id=owner_user_id,
+            thread_id=first_run.thread_id,
+            message="Now help me with feeding reminders.",
+            request_id="req_second_run",
+            trace_id="trace_second_run",
+        )
+    )
+
+    assert first_run.runtime_pattern == "langgraph_sdk"
+    assert [event.event_type for event in initial_events] == ["run.queued", "message.completed"]
+    assert client_event.sequence == 3
+    assert [event.event_type for event in after_initial_cursor] == ["client.event"]
+    assert cancelled.status == "cancelled"
+    assert [event.event_type for event in replay_after_message] == ["client.event", "run.cancelled"]
+    assert second_run.id != first_run.id
+    assert second_run.thread_id == first_run.thread_id
+    assert [message.content["text"] for message in repository.messages] == [
+        "Help me prepare my hospital bag.",
+        "Now help me with feeding reminders.",
+    ]
+    assert controls.cleared_active_run == (first_run.thread_id, first_run.id)
+    assert controls.active_run == (second_run.thread_id, second_run.id)
+
+
 def test_agent_runtime_service_preserves_cancel_flag_for_running_run() -> None:
     owner_user_id = uuid4()
     repository = FakeAgentRuntimeRepository()
