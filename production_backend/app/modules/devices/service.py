@@ -98,14 +98,11 @@ class DevicesService:
             if decision.status == "replay":
                 return await self._replay_event(owner_user_id=owner_user_id, response_ref=idempotency_record.response_ref)
 
-        if await self.repository.get_device_for_owner(owner_user_id=owner_user_id, device_id=normalized_device_id) is None:
-            await self.repository.upsert_device(
-                owner_user_id=owner_user_id,
-                device_id=normalized_device_id,
-                model="",
-                firmware_version="",
-                last_seen_at=occurred_at,
-            )
+        await self._touch_device_last_seen(
+            owner_user_id=owner_user_id,
+            device_id=normalized_device_id,
+            occurred_at=occurred_at,
+        )
 
         event = await self.repository.create_telemetry_event(
             owner_user_id=owner_user_id,
@@ -178,14 +175,11 @@ class DevicesService:
             if decision.status == "replay":
                 return await self._replay_event(owner_user_id=owner_user_id, response_ref=idempotency_record.response_ref)
 
-        if await self.repository.get_device_for_owner(owner_user_id=owner_user_id, device_id=normalized_device_id) is None:
-            await self.repository.upsert_device(
-                owner_user_id=owner_user_id,
-                device_id=normalized_device_id,
-                model="",
-                firmware_version="",
-                last_seen_at=occurred_at,
-            )
+        await self._touch_device_last_seen(
+            owner_user_id=owner_user_id,
+            device_id=normalized_device_id,
+            occurred_at=occurred_at,
+        )
 
         event = await self.repository.create_telemetry_event(
             owner_user_id=owner_user_id,
@@ -339,14 +333,11 @@ class DevicesService:
             if decision.status == "replay":
                 return await self._replay_event(owner_user_id=owner_user_id, response_ref=idempotency_record.response_ref)
 
-        if await self.repository.get_device_for_owner(owner_user_id=owner_user_id, device_id=normalized_device_id) is None:
-            await self.repository.upsert_device(
-                owner_user_id=owner_user_id,
-                device_id=normalized_device_id,
-                model="",
-                firmware_version="",
-                last_seen_at=occurred_at,
-            )
+        await self._touch_device_last_seen(
+            owner_user_id=owner_user_id,
+            device_id=normalized_device_id,
+            occurred_at=occurred_at,
+        )
 
         event = await self.repository.create_telemetry_event(
             owner_user_id=owner_user_id,
@@ -383,6 +374,13 @@ class DevicesService:
         if event is None:
             raise ApiError(code="not_found", message=not_found_message, status=404)
         return event
+
+    async def _touch_device_last_seen(self, *, owner_user_id: UUID, device_id: str, occurred_at: datetime) -> None:
+        await self.repository.touch_device_last_seen(
+            owner_user_id=owner_user_id,
+            device_id=device_id,
+            last_seen_at=occurred_at,
+        )
 
     async def _audit(
         self,

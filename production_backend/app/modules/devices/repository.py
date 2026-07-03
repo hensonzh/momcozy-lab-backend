@@ -56,6 +56,23 @@ class DevicesRepository:
         )
         return cast(PumpDevice | None, await self.session.scalar(statement))
 
+    async def touch_device_last_seen(
+        self,
+        *,
+        owner_user_id: UUID,
+        device_id: str,
+        last_seen_at: datetime,
+    ) -> PumpDevice:
+        device = await self.get_device_for_owner(owner_user_id=owner_user_id, device_id=device_id)
+        if device is None:
+            device = PumpDevice(owner_user_id=owner_user_id, device_id=device_id)
+            self.session.add(device)
+        if device.last_seen_at is None or last_seen_at > device.last_seen_at:
+            device.last_seen_at = last_seen_at
+        device.status = "active"
+        await self.session.flush()
+        return device
+
     async def create_telemetry_event(
         self,
         *,

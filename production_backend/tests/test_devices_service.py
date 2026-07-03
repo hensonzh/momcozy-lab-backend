@@ -253,6 +253,15 @@ class FakeDevicesRepository:
     async def get_device_for_owner(self, **kwargs):
         return self.device
 
+    async def touch_device_last_seen(self, **kwargs):
+        if self.device is None:
+            self.device = _device(owner_user_id=kwargs["owner_user_id"])
+            self.device.device_id = kwargs["device_id"]
+        if self.device.last_seen_at is None or kwargs["last_seen_at"] > self.device.last_seen_at:
+            self.device.last_seen_at = kwargs["last_seen_at"]
+        self.device.status = "active"
+        return self.device
+
     async def create_telemetry_event(self, **kwargs):
         self.event = _event(owner_user_id=kwargs["owner_user_id"])
         self.event.device_id = kwargs["device_id"]
