@@ -13,9 +13,14 @@ from .schemas import (
     PumpDeviceListResponse,
     PumpDeviceRead,
     PumpDeviceUpsert,
+    PumpEnergyTargetRead,
+    PumpHealthCreate,
+    PumpHealthRead,
     PumpTelemetryEventCreate,
     PumpTelemetryEventListResponse,
     PumpTelemetryEventRead,
+    PumpThresholdCreate,
+    PumpThresholdRead,
     PumpWorkstateCreate,
     PumpWorkstateRead,
 )
@@ -127,3 +132,76 @@ async def get_latest_pump_workstate(
 ) -> PumpWorkstateRead:
     event = await service.get_latest_pump_workstate(owner_user_id=current_user.user_id, device_id=device_id)
     return PumpWorkstateRead.from_event(PumpTelemetryEventRead.model_validate(event))
+
+
+@router.post("/pump-threshold", response_model=PumpThresholdRead, status_code=status.HTTP_201_CREATED)
+async def create_pump_threshold(
+    payload: PumpThresholdCreate,
+    request: Request,
+    idempotency_key: str | None = Depends(optional_idempotency_key),
+    current_user: CurrentUser = Depends(require_current_user),
+    service: DevicesService = Depends(get_devices_service),
+) -> PumpThresholdRead:
+    event = await service.create_pump_threshold(
+        owner_user_id=current_user.user_id,
+        device_id=payload.device_id,
+        occurred_at=payload.occurred_at,
+        stimulate_level_l=payload.stimulate_level_l,
+        deep_level_l=payload.deep_level_l,
+        stimulate_level_r=payload.stimulate_level_r,
+        deep_level_r=payload.deep_level_r,
+        source=payload.source or "device",
+        request_id=str(getattr(request.state, "request_id", "") or ""),
+        idempotency_key=idempotency_key,
+    )
+    return PumpThresholdRead.from_event(PumpTelemetryEventRead.model_validate(event))
+
+
+@router.get("/pump-threshold/latest", response_model=PumpThresholdRead)
+async def get_latest_pump_threshold(
+    device_id: str = Query(min_length=1, max_length=120),
+    current_user: CurrentUser = Depends(require_current_user),
+    service: DevicesService = Depends(get_devices_service),
+) -> PumpThresholdRead:
+    event = await service.get_latest_pump_threshold(owner_user_id=current_user.user_id, device_id=device_id)
+    return PumpThresholdRead.from_event(PumpTelemetryEventRead.model_validate(event))
+
+
+@router.post("/pump-health", response_model=PumpHealthRead, status_code=status.HTTP_201_CREATED)
+async def create_pump_health(
+    payload: PumpHealthCreate,
+    request: Request,
+    idempotency_key: str | None = Depends(optional_idempotency_key),
+    current_user: CurrentUser = Depends(require_current_user),
+    service: DevicesService = Depends(get_devices_service),
+) -> PumpHealthRead:
+    event = await service.create_pump_health(
+        owner_user_id=current_user.user_id,
+        device_id=payload.device_id,
+        occurred_at=payload.occurred_at,
+        health_l=payload.health_l,
+        health_r=payload.health_r,
+        source=payload.source or "device",
+        request_id=str(getattr(request.state, "request_id", "") or ""),
+        idempotency_key=idempotency_key,
+    )
+    return PumpHealthRead.from_event(PumpTelemetryEventRead.model_validate(event))
+
+
+@router.get("/pump-health/latest", response_model=PumpHealthRead)
+async def get_latest_pump_health(
+    device_id: str = Query(min_length=1, max_length=120),
+    current_user: CurrentUser = Depends(require_current_user),
+    service: DevicesService = Depends(get_devices_service),
+) -> PumpHealthRead:
+    event = await service.get_latest_pump_health(owner_user_id=current_user.user_id, device_id=device_id)
+    return PumpHealthRead.from_event(PumpTelemetryEventRead.model_validate(event))
+
+
+@router.get("/pump-energy-target", response_model=PumpEnergyTargetRead)
+async def get_pump_energy_target(
+    current_user: CurrentUser = Depends(require_current_user),
+    service: DevicesService = Depends(get_devices_service),
+) -> PumpEnergyTargetRead:
+    _ = current_user
+    return PumpEnergyTargetRead(**service.get_pump_energy_target())

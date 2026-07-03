@@ -2126,6 +2126,118 @@
         "title": "PumpDeviceUpsert",
         "type": "object"
       },
+      "PumpEnergyTargetRead": {
+        "properties": {
+          "lower_value": {
+            "title": "Lower Value",
+            "type": "integer"
+          },
+          "upper_value": {
+            "title": "Upper Value",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "lower_value",
+          "upper_value"
+        ],
+        "title": "PumpEnergyTargetRead",
+        "type": "object"
+      },
+      "PumpHealthCreate": {
+        "properties": {
+          "device_id": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Device Id",
+            "type": "string"
+          },
+          "health_l": {
+            "maximum": 2.0,
+            "minimum": 0.0,
+            "title": "Health L",
+            "type": "integer"
+          },
+          "health_r": {
+            "maximum": 2.0,
+            "minimum": 0.0,
+            "title": "Health R",
+            "type": "integer"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "device",
+            "title": "Source"
+          }
+        },
+        "required": [
+          "device_id",
+          "occurred_at",
+          "health_l",
+          "health_r"
+        ],
+        "title": "PumpHealthCreate",
+        "type": "object"
+      },
+      "PumpHealthRead": {
+        "properties": {
+          "device_id": {
+            "title": "Device Id",
+            "type": "string"
+          },
+          "health_l": {
+            "title": "Health L",
+            "type": "integer"
+          },
+          "health_r": {
+            "title": "Health R",
+            "type": "integer"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "owner_user_id": {
+            "format": "uuid",
+            "title": "Owner User Id",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "owner_user_id",
+          "device_id",
+          "occurred_at",
+          "health_l",
+          "health_r",
+          "source"
+        ],
+        "title": "PumpHealthRead",
+        "type": "object"
+      },
       "PumpTelemetryEventCreate": {
         "properties": {
           "device_id": {
@@ -2215,6 +2327,120 @@
           "payload"
         ],
         "title": "PumpTelemetryEventRead",
+        "type": "object"
+      },
+      "PumpThresholdCreate": {
+        "properties": {
+          "deep_level_l": {
+            "exclusiveMinimum": 0.0,
+            "title": "Deep Level L",
+            "type": "integer"
+          },
+          "deep_level_r": {
+            "exclusiveMinimum": 0.0,
+            "title": "Deep Level R",
+            "type": "integer"
+          },
+          "device_id": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Device Id",
+            "type": "string"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "device",
+            "title": "Source"
+          },
+          "stimulate_level_l": {
+            "exclusiveMinimum": 0.0,
+            "title": "Stimulate Level L",
+            "type": "integer"
+          },
+          "stimulate_level_r": {
+            "exclusiveMinimum": 0.0,
+            "title": "Stimulate Level R",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "device_id",
+          "occurred_at",
+          "stimulate_level_l",
+          "deep_level_l",
+          "stimulate_level_r",
+          "deep_level_r"
+        ],
+        "title": "PumpThresholdCreate",
+        "type": "object"
+      },
+      "PumpThresholdRead": {
+        "properties": {
+          "deep_level_l": {
+            "title": "Deep Level L",
+            "type": "integer"
+          },
+          "deep_level_r": {
+            "title": "Deep Level R",
+            "type": "integer"
+          },
+          "device_id": {
+            "title": "Device Id",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "owner_user_id": {
+            "format": "uuid",
+            "title": "Owner User Id",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "stimulate_level_l": {
+            "title": "Stimulate Level L",
+            "type": "integer"
+          },
+          "stimulate_level_r": {
+            "title": "Stimulate Level R",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "owner_user_id",
+          "device_id",
+          "occurred_at",
+          "stimulate_level_l",
+          "deep_level_l",
+          "stimulate_level_r",
+          "deep_level_r",
+          "source"
+        ],
+        "title": "PumpThresholdRead",
         "type": "object"
       },
       "PumpWorkstateCreate": {
@@ -4040,6 +4266,145 @@
         ]
       }
     },
+    "/v1/devices/pump-energy-target": {
+      "get": {
+        "operationId": "get_pump_energy_target_v1_devices_pump_energy_target_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PumpEnergyTargetRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Pump Energy Target",
+        "tags": [
+          "devices"
+        ]
+      }
+    },
+    "/v1/devices/pump-health": {
+      "post": {
+        "operationId": "create_pump_health_v1_devices_pump_health_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PumpHealthCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PumpHealthRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Pump Health",
+        "tags": [
+          "devices"
+        ]
+      }
+    },
+    "/v1/devices/pump-health/latest": {
+      "get": {
+        "operationId": "get_latest_pump_health_v1_devices_pump_health_latest_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "device_id",
+            "required": true,
+            "schema": {
+              "maxLength": 120,
+              "minLength": 1,
+              "title": "Device Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PumpHealthRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Latest Pump Health",
+        "tags": [
+          "devices"
+        ]
+      }
+    },
     "/v1/devices/pump-telemetry": {
       "get": {
         "operationId": "list_pump_telemetry_v1_devices_pump_telemetry_get",
@@ -4179,6 +4544,119 @@
           }
         ],
         "summary": "Create Pump Telemetry",
+        "tags": [
+          "devices"
+        ]
+      }
+    },
+    "/v1/devices/pump-threshold": {
+      "post": {
+        "operationId": "create_pump_threshold_v1_devices_pump_threshold_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PumpThresholdCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PumpThresholdRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Pump Threshold",
+        "tags": [
+          "devices"
+        ]
+      }
+    },
+    "/v1/devices/pump-threshold/latest": {
+      "get": {
+        "operationId": "get_latest_pump_threshold_v1_devices_pump_threshold_latest_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "device_id",
+            "required": true,
+            "schema": {
+              "maxLength": 120,
+              "minLength": 1,
+              "title": "Device Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PumpThresholdRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Latest Pump Threshold",
         "tags": [
           "devices"
         ]

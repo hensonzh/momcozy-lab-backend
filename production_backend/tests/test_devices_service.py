@@ -130,6 +130,99 @@ def test_devices_service_latest_pump_workstate_requires_existing_event() -> None
     assert exc_info.value.code == "not_found"
 
 
+def test_devices_service_creates_pump_threshold_as_owner_scoped_fact() -> None:
+    owner_user_id = uuid4()
+    repository = FakeDevicesRepository(device=_device(owner_user_id=owner_user_id))
+    idempotency_service = FakeIdempotencyService(status="reserved")
+    audit_service = FakeAuditService()
+    service = DevicesService(repository=repository, audit_service=audit_service, idempotency_service=idempotency_service)
+
+    event = asyncio.run(
+        service.create_pump_threshold(
+            owner_user_id=owner_user_id,
+            device_id="pump-1",
+            occurred_at=_now(),
+            stimulate_level_l=1,
+            deep_level_l=2,
+            stimulate_level_r=3,
+            deep_level_r=4,
+            source="device",
+            idempotency_key="idem-threshold",
+            request_id="req_threshold",
+        )
+    )
+
+    expected_payload = {
+        "source": "device",
+        "stimulate_level_l": 1,
+        "deep_level_l": 2,
+        "stimulate_level_r": 3,
+        "deep_level_r": 4,
+    }
+    assert event.event_type == "threshold"
+    assert event.payload == expected_payload
+    assert idempotency_service.reserve_kwargs["scope"] == "devices.pump_threshold.create"
+    assert idempotency_service.reserve_kwargs["request_hash"] == request_hash(
+        {"device_id": "pump-1", "occurred_at": _now().isoformat(), "payload": expected_payload}
+    )
+    assert idempotency_service.completed_response_ref == str(event.id)
+    assert audit_service.record_kwargs["action"] == "devices.pump_threshold.create"
+
+
+def test_devices_service_creates_and_reads_pump_health_fact() -> None:
+    owner_user_id = uuid4()
+    repository = FakeDevicesRepository(device=_device(owner_user_id=owner_user_id))
+    service = DevicesService(repository=repository, audit_service=FakeAuditService(), idempotency_service=FakeIdempotencyService(status="reserved"))
+
+    event = asyncio.run(
+        service.create_pump_health(
+            owner_user_id=owner_user_id,
+            device_id="pump-1",
+            occurred_at=_now(),
+            health_l=1,
+            health_r=2,
+            source="device",
+            idempotency_key="idem-health",
+        )
+    )
+    latest = asyncio.run(service.get_latest_pump_health(owner_user_id=owner_user_id, device_id="pump-1"))
+
+    assert event.event_type == "health"
+    assert latest is event
+    assert repository.latest_event_kwargs == {"owner_user_id": owner_user_id, "device_id": "pump-1", "event_type": "health"}
+
+
+def test_devices_service_rejects_invalid_pump_fact_values() -> None:
+    service = DevicesService(repository=FakeDevicesRepository())
+
+    with pytest.raises(ApiError) as threshold_exc:
+        asyncio.run(
+            service.create_pump_threshold(
+                owner_user_id=uuid4(),
+                device_id="pump-1",
+                occurred_at=_now(),
+                stimulate_level_l=0,
+                deep_level_l=2,
+                stimulate_level_r=3,
+                deep_level_r=4,
+            )
+        )
+
+    with pytest.raises(ApiError) as health_exc:
+        asyncio.run(
+            service.create_pump_health(
+                owner_user_id=uuid4(),
+                device_id="pump-1",
+                occurred_at=_now(),
+                health_l=3,
+                health_r=1,
+            )
+        )
+
+    assert threshold_exc.value.code == "validation_failed"
+    assert health_exc.value.code == "validation_failed"
+
+
 def _now() -> datetime:
     return datetime(2026, 7, 2, tzinfo=timezone.utc)
 

@@ -86,6 +86,54 @@ def test_pump_workstate_flow_uses_current_user_idempotency_and_latest_state() ->
     assert fake_service.latest_workstate_kwargs == {"owner_user_id": user_id, "device_id": "pump-1"}
 
 
+def test_pump_device_fact_flow_uses_current_user_and_typed_contracts() -> None:
+    user_id = uuid4()
+    fake_service = FakeDevicesService(user_id=user_id)
+    app = create_app(Settings(app_env="test"))
+    _override_current_user(app, user_id)
+    app.dependency_overrides[get_devices_service] = lambda: fake_service
+    client = TestClient(app)
+
+    threshold_response = client.post(
+        "/v1/devices/pump-threshold",
+        headers={"Idempotency-Key": " idem-threshold "},
+        json={
+            "device_id": "pump-1",
+            "occurred_at": _now_iso(),
+            "source": "device",
+            "stimulate_level_l": 1,
+            "deep_level_l": 2,
+            "stimulate_level_r": 3,
+            "deep_level_r": 4,
+        },
+    )
+    health_response = client.post(
+        "/v1/devices/pump-health",
+        headers={"Idempotency-Key": " idem-health "},
+        json={"device_id": "pump-1", "occurred_at": _now_iso(), "source": "device", "health_l": 1, "health_r": 2},
+    )
+    latest_threshold_response = client.get("/v1/devices/pump-threshold/latest?device_id=pump-1")
+    latest_health_response = client.get("/v1/devices/pump-health/latest?device_id=pump-1")
+    energy_response = client.get("/v1/devices/pump-energy-target")
+
+    assert threshold_response.status_code == 201
+    assert threshold_response.json()["deep_level_r"] == 4
+    assert health_response.status_code == 201
+    assert health_response.json()["health_r"] == 2
+    assert latest_threshold_response.status_code == 200
+    assert latest_threshold_response.json()["stimulate_level_l"] == 1
+    assert latest_health_response.status_code == 200
+    assert latest_health_response.json()["health_l"] == 1
+    assert energy_response.status_code == 200
+    assert energy_response.json() == {"lower_value": 80, "upper_value": 100}
+    assert fake_service.create_threshold_kwargs["owner_user_id"] == user_id
+    assert fake_service.create_threshold_kwargs["idempotency_key"] == "idem-threshold"
+    assert fake_service.create_health_kwargs["owner_user_id"] == user_id
+    assert fake_service.create_health_kwargs["idempotency_key"] == "idem-health"
+    assert fake_service.latest_threshold_kwargs == {"owner_user_id": user_id, "device_id": "pump-1"}
+    assert fake_service.latest_health_kwargs == {"owner_user_id": user_id, "device_id": "pump-1"}
+
+
 def _override_current_user(app, user_id: UUID) -> None:
     from production_backend.app.api.dependencies import require_current_user
 
@@ -118,6 +166,10 @@ class FakeDevicesService:
         self.list_events_kwargs = {}
         self.create_workstate_kwargs = {}
         self.latest_workstate_kwargs = {}
+        self.create_threshold_kwargs = {}
+        self.latest_threshold_kwargs = {}
+        self.create_health_kwargs = {}
+        self.latest_health_kwargs = {}
 
     async def upsert_device(self, **kwargs):
         self.upsert_kwargs = kwargs
@@ -145,6 +197,43 @@ class FakeDevicesService:
         event = self._event()
         event.payload = {"source": "device", "state": {"mode": "stimulation", "speed": 3}}
         return event
+
+    async def create_pump_threshold(self, **kwargs):
+        self.create_threshold_kwargs = kwargs
+        event = self._event()
+        event.event_type = "threshold"
+        event.payload = {
+            "source": kwargs["source"],
+            "stimulate_level_l": kwargs["stimulate_level_l"],
+            "deep_level_l": kwargs["deep_level_l"],
+            "stimulate_level_r": kwargs["stimulate_level_r"],
+            "deep_level_r": kwargs["deep_level_r"],
+        }
+        return event
+
+    async def get_latest_pump_threshold(self, **kwargs):
+        self.latest_threshold_kwargs = kwargs
+        event = self._event()
+        event.event_type = "threshold"
+        event.payload = {"source": "device", "stimulate_level_l": 1, "deep_level_l": 2, "stimulate_level_r": 3, "deep_level_r": 4}
+        return event
+
+    async def create_pump_health(self, **kwargs):
+        self.create_health_kwargs = kwargs
+        event = self._event()
+        event.event_type = "health"
+        event.payload = {"source": kwargs["source"], "health_l": kwargs["health_l"], "health_r": kwargs["health_r"]}
+        return event
+
+    async def get_latest_pump_health(self, **kwargs):
+        self.latest_health_kwargs = kwargs
+        event = self._event()
+        event.event_type = "health"
+        event.payload = {"source": "device", "health_l": 1, "health_r": 2}
+        return event
+
+    def get_pump_energy_target(self):
+        return {"lower_value": 80, "upper_value": 100}
 
     def _device(self) -> PumpDevice:
         return PumpDevice(id=uuid4(), owner_user_id=self.user_id, device_id="pump-1", model="M1", firmware_version="", status="active")
