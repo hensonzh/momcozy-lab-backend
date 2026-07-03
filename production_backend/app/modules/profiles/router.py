@@ -17,6 +17,7 @@ from .schemas import (
     InfantProfileListResponse,
     InfantProfileRead,
     UserProfileRead,
+    UserProfileStatusSummaryUpdate,
     UserProfileUpdate,
 )
 from .service import ProfileService
@@ -54,6 +55,23 @@ async def update_my_profile(
     profile = await service.update_user_profile(
         user_id=current_user.user_id,
         values=values,
+        request_id=str(getattr(request.state, "request_id", "") or ""),
+    )
+    return _profile_read(profile, current_user.user_id)
+
+
+@router.put("/status-summary", response_model=UserProfileRead)
+async def update_my_status_summary(
+    payload: UserProfileStatusSummaryUpdate,
+    request: Request,
+    current_user: CurrentUser = Depends(require_current_user),
+    service: ProfileService = Depends(get_profile_service),
+) -> UserProfileRead:
+    profile = await service.update_status_summary(
+        user_id=current_user.user_id,
+        lactation_advice=payload.lactation_advice,
+        feeding_advice=payload.feeding_advice,
+        daily_summary=payload.daily_summary,
         request_id=str(getattr(request.state, "request_id", "") or ""),
     )
     return _profile_read(profile, current_user.user_id)

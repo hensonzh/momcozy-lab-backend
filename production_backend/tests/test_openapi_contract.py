@@ -24,6 +24,7 @@ def test_openapi_contains_core_flutter_handoff_paths() -> None:
         "/v1/auth/signup",
         "/v1/auth/login",
         "/v1/files/upload",
+        "/v1/profile/status-summary",
         "/v1/records/feeding",
         "/v1/plans",
         "/v1/devices/pump-telemetry",

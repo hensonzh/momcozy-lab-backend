@@ -50,6 +50,31 @@ def test_update_my_profile_passes_request_id_and_values() -> None:
     assert fake_service.update_profile_kwargs["request_id"] == "req_profile"
 
 
+def test_update_status_summary_uses_current_user_and_explicit_fields() -> None:
+    user_id = uuid4()
+    fake_service = FakeProfileService(user_id=user_id)
+    app = create_app(Settings(app_env="test"))
+    _override_current_user(app, user_id)
+    app.dependency_overrides[get_profile_service] = lambda: fake_service
+
+    response = TestClient(app).put(
+        "/v1/profile/status-summary",
+        headers={"X-Request-ID": "req_status"},
+        json={"lactation_advice": "Keep it gentle", "daily_summary": "Steady day"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["lactation_advice"] == "Keep it gentle"
+    assert response.json()["daily_summary"] == "Steady day"
+    assert fake_service.update_status_summary_kwargs == {
+        "user_id": user_id,
+        "lactation_advice": "Keep it gentle",
+        "feeding_advice": None,
+        "daily_summary": "Steady day",
+        "request_id": "req_status",
+    }
+
+
 def test_create_my_infant_uses_current_user_and_idempotency_key() -> None:
     user_id = uuid4()
     fake_service = FakeProfileService(user_id=user_id)
@@ -105,6 +130,7 @@ class FakeProfileService:
         self.infant_id = uuid4()
         self.get_profile_kwargs = {}
         self.update_profile_kwargs = {}
+        self.update_status_summary_kwargs = {}
         self.create_infant_kwargs = {}
         self.list_infants_kwargs = {}
 
@@ -115,6 +141,14 @@ class FakeProfileService:
     async def update_user_profile(self, **kwargs):
         self.update_profile_kwargs = kwargs
         return self._profile(display_name=kwargs["values"].get("display_name", ""))
+
+    async def update_status_summary(self, **kwargs):
+        self.update_status_summary_kwargs = kwargs
+        return self._profile(
+            lactation_advice=kwargs["lactation_advice"] or "",
+            feeding_advice=kwargs["feeding_advice"] or "",
+            daily_summary=kwargs["daily_summary"] or "",
+        )
 
     async def list_infants(self, **kwargs):
         self.list_infants_kwargs = kwargs
@@ -128,8 +162,23 @@ class FakeProfileService:
             birth_date=kwargs["birth_date"],
         )
 
-    def _profile(self, *, display_name: str = "Mia") -> UserProfile:
-        return UserProfile(id=uuid4(), user_id=self.user_id, display_name=display_name, age=32)
+    def _profile(
+        self,
+        *,
+        display_name: str = "Mia",
+        lactation_advice: str = "",
+        feeding_advice: str = "",
+        daily_summary: str = "",
+    ) -> UserProfile:
+        return UserProfile(
+            id=uuid4(),
+            user_id=self.user_id,
+            display_name=display_name,
+            age=32,
+            lactation_advice=lactation_advice,
+            feeding_advice=feeding_advice,
+            daily_summary=daily_summary,
+        )
 
     def _infant(
         self,

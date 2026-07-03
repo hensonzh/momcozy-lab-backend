@@ -41,6 +41,38 @@ class ProfileService:
             )
         return profile
 
+    async def update_status_summary(
+        self,
+        *,
+        user_id: UUID,
+        lactation_advice: str | None = None,
+        feeding_advice: str | None = None,
+        daily_summary: str | None = None,
+        request_id: str = "",
+    ) -> UserProfile:
+        values = {
+            key: value
+            for key, value in {
+                "lactation_advice": lactation_advice,
+                "feeding_advice": feeding_advice,
+                "daily_summary": daily_summary,
+            }.items()
+            if value is not None
+        }
+        if not values:
+            raise ApiError(code="validation_failed", message="At least one status summary field is required.", status=422)
+        profile = await self.repository.upsert_user_profile(user_id=user_id, values=values)
+        if self.audit_service is not None:
+            await self.audit_service.record(
+                actor_user_id=user_id,
+                action="profiles.status_summary.update",
+                resource_type="user_profile",
+                resource_id=str(profile.id),
+                request_id=request_id,
+                details={"fields": sorted(values.keys())},
+            )
+        return profile
+
     async def list_infants(self, *, owner_user_id: UUID) -> list[InfantProfile]:
         return await self.repository.list_infants(owner_user_id=owner_user_id)
 

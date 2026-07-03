@@ -31,6 +31,12 @@ class UserProfileUpdate(BaseModel):
     profile_onboarding_completed_at: datetime | None = None
 
 
+class UserProfileStatusSummaryUpdate(BaseModel):
+    lactation_advice: str | None = None
+    feeding_advice: str | None = None
+    daily_summary: str | None = None
+
+
 class InfantProfileRead(BaseModel):
     id: UUID
     owner_user_id: UUID

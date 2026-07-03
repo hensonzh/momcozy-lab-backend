@@ -3275,6 +3275,45 @@
         "title": "UserProfileRead",
         "type": "object"
       },
+      "UserProfileStatusSummaryUpdate": {
+        "properties": {
+          "daily_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daily Summary"
+          },
+          "feeding_advice": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feeding Advice"
+          },
+          "lactation_advice": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lactation Advice"
+          }
+        },
+        "title": "UserProfileStatusSummaryUpdate",
+        "type": "object"
+      },
       "UserProfileUpdate": {
         "properties": {
           "age": {
@@ -6428,6 +6467,52 @@
           }
         ],
         "summary": "Update My Profile",
+        "tags": [
+          "profile"
+        ]
+      }
+    },
+    "/v1/profile/status-summary": {
+      "put": {
+        "operationId": "update_my_status_summary_v1_profile_status_summary_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserProfileStatusSummaryUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserProfileRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update My Status Summary",
         "tags": [
           "profile"
         ]
