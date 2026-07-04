@@ -40,6 +40,7 @@ def test_tool_contract_registry_declares_permission_confirmation_and_blocking_po
     feeding_proposal = registry.get("records.feeding_record.propose")
     pumping_proposal = registry.get("records.pumping_record.propose")
     milk_plan_proposal = registry.get("plans.milk_plan.propose")
+    milk_reminder_proposal = registry.get("notifications.milk_reminder.propose")
     assert feeding_proposal.read_or_write == "write"
     assert feeding_proposal.requires_confirmation is True
     assert feeding_proposal.side_effect_level == "low"
@@ -51,6 +52,10 @@ def test_tool_contract_registry_declares_permission_confirmation_and_blocking_po
     assert milk_plan_proposal.requires_confirmation is True
     assert milk_plan_proposal.side_effect_level == "medium"
     assert milk_plan_proposal.required_permission == "plans:write:self"
+    assert milk_reminder_proposal.read_or_write == "write"
+    assert milk_reminder_proposal.requires_confirmation is True
+    assert milk_reminder_proposal.side_effect_level == "medium"
+    assert milk_reminder_proposal.required_permission == "notifications:create:self"
     assert "profile.read" in registry.names_for_sdk()
     assert "business.context.read" in registry.names_for_sdk()
     plans_current = registry.get("plans.current.read")
@@ -88,6 +93,7 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
     devices_schema = tool_input_schema(registry.get("devices.pump_status.read").input_schema_ref)
     file_vision_schema = tool_input_schema(registry.get("files.vision_summary.read").input_schema_ref)
     milk_plan_schema = tool_input_schema(registry.get("plans.milk_plan.propose").input_schema_ref)
+    milk_reminder_schema = tool_input_schema(registry.get("notifications.milk_reminder.propose").input_schema_ref)
     feeding_schema = tool_input_schema(registry.get("records.feeding_record.propose").input_schema_ref)
     pumping_schema = tool_input_schema(registry.get("records.pumping_record.propose").input_schema_ref)
 
@@ -117,6 +123,9 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
     assert milk_plan_schema["additionalProperties"] is False
     assert milk_plan_schema["required"] == ["title"]
     assert milk_plan_schema["properties"]["payload"]["type"] == "object"
+    assert milk_reminder_schema["additionalProperties"] is False
+    assert milk_reminder_schema["required"] == ["title"]
+    assert milk_reminder_schema["properties"]["remind_at"]["type"] == "string"
     assert feeding_schema["required"] == ["feed_time", "feed_type"]
     assert feeding_schema["properties"]["volume_ml"]["type"] == "number"
     assert pumping_schema["required"] == ["pump_start_time"]

@@ -53,6 +53,12 @@ DEFAULT_AGENT_ACTION_RULES: Mapping[str, AgentActionPolicyRule] = {
         side_effect_level="medium",
         requires_confirmation=True,
     ),
+    "notifications.milk_reminder.create": AgentActionPolicyRule(
+        action_type="notifications.milk_reminder.create",
+        target_type="notification",
+        side_effect_level="medium",
+        requires_confirmation=True,
+    ),
 }
 
 

@@ -124,6 +124,24 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "idempotency_key": {"type": "string", "maxLength": 255},
         },
     },
+    "MilkReminderProposalCreate": {
+        "title": "MilkReminderProposalCreate",
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["title"],
+        "properties": {
+            "title": {"type": "string", "minLength": 1, "maxLength": 255},
+            "body": {"type": "string", "maxLength": 2000},
+            "remind_at": {"type": "string", "maxLength": 80},
+            "payload": {
+                "type": "object",
+                "additionalProperties": True,
+            },
+            "locale": {"type": "string", "maxLength": 35},
+            "timezone": {"type": "string", "maxLength": 80},
+            "idempotency_key": {"type": "string", "maxLength": 255},
+        },
+    },
     "FeedingRecordProposalCreate": {
         "title": "FeedingRecordProposalCreate",
         "type": "object",

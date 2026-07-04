@@ -285,6 +285,36 @@ def test_agent_runtime_actions_accept_milk_plan_policy() -> None:
     assert outbox_service.enqueue_kwargs["payload"]["apply_payload"] == {"title": "Increase pumping consistency"}
 
 
+def test_agent_runtime_actions_accept_milk_reminder_policy() -> None:
+    owner_user_id = uuid4()
+    repository = FakeActionRepository()
+    outbox_service = FakeOutboxService()
+    service = AgentRuntimeService(repository=repository, outbox_service=outbox_service)
+    run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Create a milk reminder"))
+
+    action = asyncio.run(
+        service.propose_action(
+            owner_user_id=owner_user_id,
+            run_id=run.id,
+            action_type="notifications.milk_reminder.create",
+            target_type="notification",
+            side_effect_level="medium",
+            preview_payload={"title": "Time to pump"},
+            apply_payload={"title": "Time to pump"},
+        )
+    )
+    run.status = "waiting_for_confirmation"
+    confirmed = asyncio.run(service.confirm_action(owner_user_id=owner_user_id, action_id=action.id))
+
+    assert confirmed.status == "confirmed"
+    assert confirmed.action_type == "notifications.milk_reminder.create"
+    assert confirmed.target_type == "notification"
+    assert confirmed.side_effect_level == "medium"
+    assert repository.events[-3].payload["action_type"] == "notifications.milk_reminder.create"
+    assert repository.events[-2].event_type == "action.queued"
+    assert outbox_service.enqueue_kwargs["payload"]["apply_payload"] == {"title": "Time to pump"}
+
+
 def test_agent_milk_feeding_main_flow_confirms_applies_and_replays_events() -> None:
     owner_user_id = uuid4()
     repository = FakeActionRepository()

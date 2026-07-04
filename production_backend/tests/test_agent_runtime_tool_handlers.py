@@ -14,6 +14,7 @@ from production_backend.app.modules.agent_runtime.tools import (
     FileVisionSummaryReadToolHandler,
     HospitalBagCartUpdateProposeToolHandler,
     MilkPlanProposeToolHandler,
+    MilkReminderProposeToolHandler,
     MilkSummaryReadToolHandler,
     PlansCurrentReadToolHandler,
     ProfileReadToolHandler,
@@ -26,6 +27,7 @@ from production_backend.app.modules.auth import CurrentUser
 from production_backend.app.modules.devices.models import PumpDevice, PumpTelemetryEvent
 from production_backend.app.modules.diary.models import PregnancyDiaryEntry
 from production_backend.app.modules.files.vision_service import FileVisionEvent
+from production_backend.app.modules.notifications.agent_actions import MILK_REMINDER_CREATE_ACTION
 from production_backend.app.modules.plans.agent_actions import MILK_PLAN_CREATE_ACTION
 from production_backend.app.modules.plans.models import Plan, PlanTask
 from production_backend.app.modules.profiles.models import InfantProfile, UserProfile
@@ -352,6 +354,37 @@ def test_milk_plan_propose_tool_handler_creates_confirmation_action() -> None:
     assert runtime_service.calls[0]["apply_payload"]["metadata"] == {"timezone": "Asia/Shanghai"}
 
 
+def test_milk_reminder_propose_tool_handler_creates_confirmation_action() -> None:
+    actor = _user()
+    runtime_service = FakeAgentRuntimeService()
+    context = _context(
+        actor=actor,
+        args={
+            "title": "Time to pump",
+            "body": "A short evening pumping session is due.",
+            "remind_at": "2026-07-04T20:00:00+08:00",
+            "payload": {"routine": "evening"},
+            "timezone": "Asia/Shanghai",
+        },
+    )
+
+    result = asyncio.run(MilkReminderProposeToolHandler(runtime_service=runtime_service)(context))
+
+    assert result["action_type"] == MILK_REMINDER_CREATE_ACTION
+    assert result["action_status"] == "confirmation_required"
+    assert result["preview_payload"] == {
+        "notification_type": "milk_reminder",
+        "title": "Time to pump",
+        "body": "A short evening pumping session is due.",
+        "remind_at": "2026-07-04T20:00:00+08:00",
+        "has_payload": True,
+    }
+    assert runtime_service.calls[0]["target_type"] == "notification"
+    assert runtime_service.calls[0]["side_effect_level"] == "medium"
+    assert runtime_service.calls[0]["apply_payload"]["payload"] == {"routine": "evening"}
+    assert runtime_service.calls[0]["apply_payload"]["metadata"] == {"timezone": "Asia/Shanghai"}
+
+
 def test_support_ticket_propose_tool_handler_requires_summary() -> None:
     with pytest.raises(ApiError) as exc_info:
         asyncio.run(SupportTicketProposeToolHandler(runtime_service=FakeAgentRuntimeService())(_context(args={})))
@@ -391,6 +424,13 @@ def test_milk_plan_propose_tool_handler_requires_title() -> None:
     assert exc_info.value.code == "validation_failed"
 
 
+def test_milk_reminder_propose_tool_handler_requires_title() -> None:
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(MilkReminderProposeToolHandler(runtime_service=FakeAgentRuntimeService())(_context(args={})))
+
+    assert exc_info.value.code == "validation_failed"
+
+
 def test_support_ticket_propose_tool_handler_rejects_legacy_nested_ticket_shape() -> None:
     with pytest.raises(ApiError) as exc_info:
         asyncio.run(
@@ -422,6 +462,7 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
         "diary.recent.read",
         "devices.pump_status.read",
         "files.vision_summary.read",
+        "notifications.milk_reminder.propose",
         "plans.milk_plan.propose",
         "records.feeding_record.propose",
         "records.pumping_record.propose",
@@ -454,6 +495,7 @@ def _user() -> CurrentUser:
                 "business_context:read:self",
                 "files:read:self",
                 "plans:write:self",
+                "notifications:create:self",
                 "hospital_bag_cart:update:self",
                 "support_ticket:create:self",
             }

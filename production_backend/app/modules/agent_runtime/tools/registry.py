@@ -182,6 +182,25 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         ToolContract(
+            name="notifications.milk_reminder.propose",
+            domain="notifications",
+            description="Propose a milk-management reminder notification for user confirmation.",
+            input_schema_ref="MilkReminderProposalCreate",
+            output_schema_ref="AgentActionRead",
+            read_or_write="write",
+            required_permission="notifications:create:self",
+            owner_scope="actor",
+            side_effect_level="medium",
+            blocking_policy="wait_for_confirmation",
+            result_dependency="none",
+            requires_confirmation=True,
+            idempotency_required=True,
+            audit_required=True,
+            timeout_seconds=15,
+        )
+    )
+    registry.register(
+        ToolContract(
             name="records.feeding_record.propose",
             domain="records",
             description="Propose a feeding record create action for user confirmation.",

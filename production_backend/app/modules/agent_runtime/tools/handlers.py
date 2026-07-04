@@ -10,6 +10,7 @@ from ...devices.service import DevicesService
 from ...diary.models import PregnancyDiaryEntry
 from ...diary.service import DiaryService
 from ...files.vision_service import FileVisionService
+from ...notifications.agent_actions import MILK_REMINDER_CREATE_ACTION
 from ...plans.agent_actions import MILK_PLAN_CREATE_ACTION
 from ...plans.models import Plan, PlanTask
 from ...plans.service import PlansService
@@ -320,6 +321,29 @@ class MilkPlanProposeToolHandler:
         return _proposal_result(action=action, preview_payload=preview_payload)
 
 
+class MilkReminderProposeToolHandler:
+    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
+        self.runtime_service = runtime_service
+
+    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
+        apply_payload = _milk_reminder_apply_payload(context.args)
+        title = _text(apply_payload, "title")
+        if not title:
+            raise ApiError(code="validation_failed", message="title is required.", status=422)
+        preview_payload = _milk_reminder_preview_payload(apply_payload)
+        action = await self.runtime_service.propose_action(
+            owner_user_id=context.actor.user_id,
+            run_id=context.run_id,
+            action_type=MILK_REMINDER_CREATE_ACTION,
+            target_type="notification",
+            side_effect_level="medium",
+            preview_payload=preview_payload,
+            apply_payload=apply_payload,
+            idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:milk-reminder",
+        )
+        return _proposal_result(action=action, preview_payload=preview_payload)
+
+
 def build_default_tool_handlers(
     *,
     profile_service: ProfileService,
@@ -344,6 +368,7 @@ def build_default_tool_handlers(
         "devices.pump_status.read": DevicesPumpStatusReadToolHandler(devices_service=devices_service),
         "files.vision_summary.read": FileVisionSummaryReadToolHandler(vision_service=file_vision_service),
         "plans.milk_plan.propose": MilkPlanProposeToolHandler(runtime_service=agent_runtime_service),
+        "notifications.milk_reminder.propose": MilkReminderProposeToolHandler(runtime_service=agent_runtime_service),
         "records.feeding_record.propose": FeedingRecordProposeToolHandler(runtime_service=agent_runtime_service),
         "records.pumping_record.propose": PumpingRecordProposeToolHandler(runtime_service=agent_runtime_service),
         "hospital_bag.cart_update.propose": HospitalBagCartUpdateProposeToolHandler(runtime_service=agent_runtime_service),
@@ -518,6 +543,32 @@ def _milk_plan_preview_payload(apply_payload: dict[str, Any]) -> dict[str, Any]:
         "plan_type": "milk_management",
         "title": _text(apply_payload, "title"),
         "summary": _text(apply_payload, "summary"),
+        "has_payload": isinstance(apply_payload.get("payload"), dict) and bool(apply_payload.get("payload")),
+    }
+    return {key: value for key, value in preview.items() if value not in ("", None)}
+
+
+def _milk_reminder_apply_payload(args: dict[str, Any]) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "title": _text(args, "title"),
+        "body": _text(args, "body"),
+        "remind_at": _text(args, "remind_at"),
+    }
+    reminder_payload = args.get("payload")
+    if isinstance(reminder_payload, dict):
+        payload["payload"] = reminder_payload
+    metadata = _metadata_payload(args)
+    if metadata:
+        payload["metadata"] = metadata
+    return {key: value for key, value in payload.items() if value not in ("", None, {})}
+
+
+def _milk_reminder_preview_payload(apply_payload: dict[str, Any]) -> dict[str, Any]:
+    preview = {
+        "notification_type": "milk_reminder",
+        "title": _text(apply_payload, "title"),
+        "body": _text(apply_payload, "body"),
+        "remind_at": _text(apply_payload, "remind_at"),
         "has_payload": isinstance(apply_payload.get("payload"), dict) and bool(apply_payload.get("payload")),
     }
     return {key: value for key, value in preview.items() if value not in ("", None)}

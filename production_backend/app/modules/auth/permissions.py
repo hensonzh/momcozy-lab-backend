@@ -15,6 +15,7 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
             "business_context:read:self",
             "files:read:self",
             "plans:write:self",
+            "notifications:create:self",
             "records:write:self",
             "hospital_bag_cart:update:self",
             "support_ticket:create:self",
