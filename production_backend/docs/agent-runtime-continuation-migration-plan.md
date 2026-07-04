@@ -480,7 +480,8 @@ eval regression。
 - backend 已支持用户查看和删除/归档 active memory。
 - backend 已拒绝 health、child、crisis、regulated 等敏感 memory 写入，并通过 `memory_sensitive_rejection` eval 固化。
 - backend 已支持 `expires_in_days`，active memory projection 不会返回过期记忆。
-- 仍需补齐用户禁用 memory 的产品 API/UX。
+- backend 已支持 `GET/PUT /v1/agent/memories/settings` 禁用 memory；禁用后不再写入或投射 memory，仍可查看/删除已有 memory。
+- 仍需补齐 Flutter 端用户可见 memory 管理 UX。
 - prompt cache 稳定片段不因 memory 大量变化而失效。
 
 ## Phase 9: Eval Harness And Acceptance Loop
