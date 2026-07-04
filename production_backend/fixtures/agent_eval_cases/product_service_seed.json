@@ -140,7 +140,7 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "support_ticket_proposal",
+          "contract": "support.ticket.propose",
           "timing": "after_minimum_required_details"
         }
       ],

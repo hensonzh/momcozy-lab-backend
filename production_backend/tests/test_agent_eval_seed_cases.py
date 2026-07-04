@@ -79,6 +79,16 @@ def test_product_agent_eval_seed_uses_current_pregnancy_action_contracts() -> No
     assert "diary_entry_upsert_proposal" not in diary_contracts
 
 
+def test_product_agent_eval_seed_uses_current_support_action_contract() -> None:
+    cases = load_product_agent_eval_seed_cases(PRODUCT_AGENT_EVAL_SEED)
+    by_suite = {case["suite"]: case for case in cases}
+
+    support_contracts = {tool_call["contract"] for tool_call in by_suite["device_support_handoff"]["expected_tool_calls"]}
+
+    assert "support.ticket.propose" in support_contracts
+    assert "support_ticket_proposal" not in support_contracts
+
+
 def test_product_agent_eval_seed_loader_rejects_missing_required_suite() -> None:
     payload = {
         "schema_version": "agent_eval_seed.v1",
