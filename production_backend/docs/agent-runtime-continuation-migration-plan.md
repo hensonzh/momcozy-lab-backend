@@ -383,15 +383,21 @@ event、eval 的全链路。
 
 建议 PR：
 
-1. `agent: complete hospital bag action lifecycle`
-2. `agent: add device guidance read tools and evals` - partial
-3. `agent: harden support ticket handoff flow`
+1. `agent: complete hospital bag action lifecycle` - done
+2. `agent: add device guidance read tools and evals` - done
+3. `agent: harden support ticket handoff flow` - done
+
+当前进展：
+
+- 待产包 cart update 已具备 action proposal、confirmation、outbox apply、event replay 测试，并在 eval seed 中新增 `hospital_bag_cart_update`。
+- 设备指导保持 read-only：`devices.pump_status.read` 读取 owner-scoped 设备状态，`devices.guidance_assets.read` 读取受控资料元数据；eval seed 覆盖未知型号先澄清和已知设备先读状态/资料两类体验。
+- 支持工单已通过 `support.ticket.propose` 进入确认流，由 outbox apply handler 调用 support service 创建工单；高风险设备售后 handoff 和 IBCLC handoff 均使用当前 action contract。
 
 验收：
 
-- 设备指导不会直接修改设备状态，除非有明确 action contract。
-- 支持工单 action 不泄漏 `apply_payload` 给前端。
-- 待产包和支持流均有 replay/eval case。
+- 设备指导不会直接修改设备状态，除非有明确 action contract。已覆盖。
+- 支持工单 action 不泄漏 `apply_payload` 给前端。已覆盖。
+- 待产包和支持流均有 replay/eval case。已覆盖。
 
 ## Phase 7: Health, Emotion, And Safety Hardening
 
