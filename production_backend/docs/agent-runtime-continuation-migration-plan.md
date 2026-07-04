@@ -253,9 +253,14 @@ LangGraph workflow。
 
 建议 PR：
 
-1. `agent: add milk summary read tool`
+1. `agent: add milk summary read tool` - done
 2. `agent: add plan and diary context read tools`
 3. `agent: add device and file context read tools`
+
+已完成能力：
+
+- `records.milk_summary.read` 已返回 owner-scoped feeding、pumping、trend 和
+  bounded infant projection，支持“回答前先读真实奶量事实和宝宝资料”。
 
 验收：
 
