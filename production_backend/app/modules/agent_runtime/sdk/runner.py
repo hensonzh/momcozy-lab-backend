@@ -111,8 +111,9 @@ class OpenAIAgentsSdkRunner:
             self._record(outcome="failed", error_code=exc.code, started_at=started_at)
             raise
         except Exception as exc:
-            self._record(outcome="failed", error_code="sdk_run_failed", started_at=started_at)
-            raise ApiError(code="sdk_run_failed", message="OpenAI Agents SDK run failed.", status=502) from exc
+            mapped = _provider_error_mapping(exc)
+            self._record(outcome="failed", error_code=mapped.code, started_at=started_at)
+            raise ApiError(code=mapped.code, message=mapped.message, status=mapped.status) from exc
 
     def _record(self, *, outcome: str, error_code: str, started_at: float) -> None:
         if self.metrics is not None:
@@ -174,3 +175,54 @@ def _is_real_agents_module(agents_module: Any) -> bool:
 
 def _has_openai_credentials() -> bool:
     return bool(os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_ADMIN_KEY"))
+
+
+@dataclass(frozen=True)
+class _ProviderErrorMapping:
+    code: str
+    message: str
+    status: int
+
+
+def _provider_error_mapping(exc: Exception) -> _ProviderErrorMapping:
+    status_code = _provider_status_code(exc)
+    name = exc.__class__.__name__.lower()
+    text = str(exc).lower()
+    if status_code == 429 or "rate" in name and "limit" in name or "rate limit" in text:
+        return _ProviderErrorMapping(
+            code="sdk_rate_limited",
+            message="OpenAI Agents SDK provider rate limit was reached.",
+            status=429,
+        )
+    if status_code in {401, 403} or "auth" in name or "permission" in name:
+        return _ProviderErrorMapping(
+            code="sdk_auth_failed",
+            message="OpenAI Agents SDK provider authentication failed.",
+            status=503,
+        )
+    if status_code is not None and status_code >= 500:
+        return _ProviderErrorMapping(
+            code="sdk_provider_unavailable",
+            message="OpenAI Agents SDK provider is unavailable.",
+            status=503,
+        )
+    if status_code in {400, 422}:
+        return _ProviderErrorMapping(
+            code="sdk_bad_request",
+            message="OpenAI Agents SDK provider rejected the request.",
+            status=502,
+        )
+    return _ProviderErrorMapping(
+        code="sdk_run_failed",
+        message="OpenAI Agents SDK run failed.",
+        status=502,
+    )
+
+
+def _provider_status_code(exc: Exception) -> int | None:
+    status_code = getattr(exc, "status_code", None)
+    if isinstance(status_code, int):
+        return status_code
+    response = getattr(exc, "response", None)
+    response_status = getattr(response, "status_code", None)
+    return response_status if isinstance(response_status, int) else None

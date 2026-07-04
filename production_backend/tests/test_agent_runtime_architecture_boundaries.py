@@ -339,9 +339,52 @@ def test_sdk_runner_times_out_slow_backend() -> None:
     assert sdk_metrics["error_code_counts"]["sdk_run_timed_out"] == 1
 
 
+@pytest.mark.parametrize(
+    ("status_code", "expected_code"),
+    [
+        (429, "sdk_rate_limited"),
+        (401, "sdk_auth_failed"),
+        (503, "sdk_provider_unavailable"),
+        (400, "sdk_bad_request"),
+        (None, "sdk_run_failed"),
+    ],
+)
+def test_sdk_runner_maps_provider_errors_to_stable_codes(status_code: int | None, expected_code: str) -> None:
+    metrics = RequestMetrics()
+    exc = FakeProviderError(status_code=status_code) if status_code is not None else RuntimeError("provider exploded")
+    request = SdkNodeRequest(
+        run_id="run_1",
+        thread_id="thread_1",
+        actor_user_id="user_1",
+        instructions="Be concise.",
+        model_input=[{"role": "user", "content": "hello"}],
+    )
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(OpenAIAgentsSdkRunner(backend=FailingSdkBackend(exc), metrics=metrics).run_reasoning(request))
+
+    assert exc_info.value.code == expected_code
+    sdk_metrics = metrics.snapshot()["agent_sdk"][0]
+    assert sdk_metrics["error_code_counts"][expected_code] == 1
+
+
 class FakeSdkBackend:
     async def run(self, request: SdkNodeRequest) -> SdkNodeResult:
         return SdkNodeResult(final_text="hello", tool_calls=[{"tool_name": request.tool_names[0]}])
+
+
+class FailingSdkBackend:
+    def __init__(self, exc: Exception) -> None:
+        self.exc = exc
+
+    async def run(self, request: SdkNodeRequest) -> SdkNodeResult:
+        raise self.exc
+
+
+class FakeProviderError(Exception):
+    def __init__(self, *, status_code: int) -> None:
+        super().__init__(f"provider status {status_code}")
+        self.status_code = status_code
 
 
 class SlowSdkBackend:
