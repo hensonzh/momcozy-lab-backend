@@ -15,6 +15,14 @@ from production_backend.app.modules.agent_runtime.events import AgentEventSink
 from production_backend.app.modules.agent_runtime.repository import AgentRuntimeRepository
 from production_backend.app.modules.audit import AuditService, IdempotencyService, OutboxService
 from production_backend.app.modules.audit.repository import AuditRepository, OutboxRepository
+from production_backend.app.modules.records import (
+    FEEDING_RECORD_CREATE_ACTION,
+    PUMPING_RECORD_CREATE_ACTION,
+    FeedingRecordCreateActionHandler,
+    PumpingRecordCreateActionHandler,
+    RecordsService,
+)
+from production_backend.app.modules.records.repository import RecordsRepository
 from production_backend.app.modules.support import SupportTicketsService
 from production_backend.app.modules.support.agent_actions import SUPPORT_TICKET_CREATE_ACTION, SupportTicketCreateActionHandler
 from production_backend.app.modules.support.repository import SupportTicketsRepository
@@ -54,6 +62,11 @@ async def run_outbox_worker(
                     audit_service=AuditService(repository=audit_repository),
                     idempotency_service=IdempotencyService(repository=audit_repository),
                 )
+                records_service = RecordsService(
+                    repository=RecordsRepository(session),
+                    audit_service=AuditService(repository=audit_repository),
+                    idempotency_service=IdempotencyService(repository=audit_repository),
+                )
                 agent_runtime_repository = AgentRuntimeRepository(session)
                 worker = OutboxWorker(
                     service=OutboxService(repository=OutboxRepository(session)),
@@ -62,6 +75,8 @@ async def run_outbox_worker(
                         agent_runtime_repository=agent_runtime_repository,
                         agent_event_sink=AgentEventSink(repository=agent_runtime_repository, controls=controls),
                         agent_action_handlers={
+                            FEEDING_RECORD_CREATE_ACTION: FeedingRecordCreateActionHandler(service=records_service),
+                            PUMPING_RECORD_CREATE_ACTION: PumpingRecordCreateActionHandler(service=records_service),
                             SUPPORT_TICKET_CREATE_ACTION: SupportTicketCreateActionHandler(service=support_service),
                         },
                     ),
