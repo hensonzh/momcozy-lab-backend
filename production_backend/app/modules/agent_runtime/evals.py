@@ -50,6 +50,24 @@ class AgentEvalSeedAssertionEngine:
         )
 
 
+class AgentEvalReplayAssertionRunner:
+    def __init__(self, *, assertion_engine: AgentEvalSeedAssertionEngine | None = None) -> None:
+        self.assertion_engine = assertion_engine or AgentEvalSeedAssertionEngine()
+
+    def evaluate_bundle(self, *, case: dict[str, Any], replay_bundle: dict[str, Any]) -> AgentEvalRunResult:
+        return self.assertion_engine.evaluate(case=case, trace=agent_eval_trace_from_replay_bundle(replay_bundle))
+
+
+def agent_eval_trace_from_replay_bundle(bundle: dict[str, Any]) -> AgentEvalTrace:
+    return AgentEvalTrace(
+        tool_calls=_list_of_dicts(bundle.get("tool_calls")),
+        events=_list_of_dicts(bundle.get("events")),
+        actions=_list_of_dicts(bundle.get("actions")),
+        safety_decision=_last_safety_decision(bundle),
+        final_text=_last_assistant_text(bundle),
+    )
+
+
 class AgentEvalService:
     def __init__(self, *, repository: AgentRuntimeRepository, replay_service: AgentReplayService | None = None) -> None:
         self.repository = repository
@@ -244,3 +262,24 @@ def _observed_tool_contract(tool_call: Any) -> str:
     if not isinstance(tool_call, dict):
         return ""
     return str(tool_call.get("contract") or tool_call.get("tool_name") or tool_call.get("name") or "").strip()
+
+
+def _list_of_dicts(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
+
+
+def _last_assistant_text(bundle: dict[str, Any]) -> str:
+    messages = bundle.get("messages")
+    if not isinstance(messages, list):
+        return ""
+    for message in reversed(messages):
+        if not isinstance(message, dict) or message.get("role") != "assistant":
+            continue
+        content = message.get("content")
+        if isinstance(content, dict):
+            return str(content.get("text") or "").strip()
+        if isinstance(content, str):
+            return content.strip()
+    return ""

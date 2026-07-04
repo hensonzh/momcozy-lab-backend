@@ -1,8 +1,10 @@
 from pathlib import Path
 
 from production_backend.app.modules.agent_runtime.evals import (
+    AgentEvalReplayAssertionRunner,
     AgentEvalSeedAssertionEngine,
     AgentEvalTrace,
+    agent_eval_trace_from_replay_bundle,
     load_product_agent_eval_seed_cases,
 )
 
@@ -56,6 +58,27 @@ def test_agent_eval_seed_assertion_engine_reports_safety_mismatch() -> None:
     assert result.failures[0].category == "safety_mismatch"
     assert result.failures[0].expected == "escalate"
     assert result.failures[0].observed == "allow"
+
+
+def test_agent_eval_replay_runner_evaluates_replay_bundle_trace() -> None:
+    case = _case("memory_preference_capture")
+    replay_bundle = {
+        "messages": [
+            {"role": "user", "content": {"text": "Remember my reminder style."}},
+            {"role": "assistant", "content": {"text": "Please confirm this memory."}},
+        ],
+        "events": [{"type": "action.confirmation_required"}],
+        "tool_calls": [{"tool_name": "memory.create.propose", "status": "completed"}],
+        "actions": [{"action_type": "agent.memory.create", "status": "confirmation_required"}],
+        "safety_events": [{"decision": "allow"}],
+    }
+
+    trace = agent_eval_trace_from_replay_bundle(replay_bundle)
+    result = AgentEvalReplayAssertionRunner().evaluate_bundle(case=case, replay_bundle=replay_bundle)
+
+    assert trace.final_text == "Please confirm this memory."
+    assert trace.safety_decision == "allow"
+    assert result.passed is True
 
 
 def _case(suite: str) -> dict:
