@@ -199,8 +199,9 @@ def test_context_builder_keeps_stable_prompts_before_dynamic_projection() -> Non
         current_user_message={"role": "user", "content": "hello"},
     )
 
-    assert [item["role"] for item in model_input] == ["system", "developer", "user", "developer", "developer", "user"]
+    assert [item["role"] for item in model_input] == ["system", "developer", "user", "developer", "developer", "developer", "user"]
     assert model_input[0]["content"] == "system-v1"
+    assert model_input[-3]["content"] == {"memory": []}
     assert model_input[-1]["content"] == "hello"
 
 

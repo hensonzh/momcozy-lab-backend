@@ -13,6 +13,7 @@ from production_backend.app.infrastructure.redis.client import close_redis_clien
 from production_backend.app.modules.agent_runtime.controls import AgentRunControls
 from production_backend.app.modules.agent_runtime.events import AgentEventSink
 from production_backend.app.modules.agent_runtime.graphs import AgentGraphCheckpointStore, AgentRuntimeGraphRunner
+from production_backend.app.modules.agent_runtime.memory import AgentMemoryRepository, AgentMemoryService
 from production_backend.app.modules.agent_runtime.repository import AgentRuntimeRepository
 from production_backend.app.modules.agent_runtime.runtime import AgentRuntimeExecutor
 from production_backend.app.modules.agent_runtime.safety import AgentSafetyService
@@ -102,6 +103,7 @@ async def run_agent_worker(
                     settings=resolved_settings,
                 )
                 tool_registry = default_tool_registry()
+                memory_service = AgentMemoryService(repository=AgentMemoryRepository(session))
                 event_sink = AgentEventSink(repository=repository, controls=controls, after_append=session.commit)
                 tool_executor = ToolExecutor(
                     registry=tool_registry,
@@ -126,6 +128,7 @@ async def run_agent_worker(
                     tool_registry=tool_registry,
                     tool_executor=tool_executor,
                     event_sink=event_sink,
+                    memory_service=memory_service,
                     sdk_runner=OpenAIAgentsSdkRunner(
                         model=resolved_settings.openai_model,
                         max_turns=resolved_settings.openai_agent_max_turns,

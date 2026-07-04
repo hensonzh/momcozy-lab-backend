@@ -1,10 +1,11 @@
 import asyncio
+from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
 
 from production_backend.app.core.errors import ApiError
-from production_backend.app.modules.agent_runtime.models import AgentAction, AgentArtifact, AgentEvent, AgentMessage, AgentRun, AgentToolCall
+from production_backend.app.modules.agent_runtime.models import AgentAction, AgentArtifact, AgentEvent, AgentMemory, AgentMessage, AgentRun, AgentToolCall
 from production_backend.app.modules.agent_runtime.runtime import AgentRuntimeExecutor
 from production_backend.app.modules.agent_runtime.sdk import OpenAIAgentsSdkRunner, SdkNodeRequest, SdkNodeResult
 from production_backend.app.modules.agent_runtime.tools import ToolExecutor, ToolHandlerContext, default_tool_registry
@@ -55,7 +56,16 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() ->
         "records.pumping_record.propose",
         "support.ticket.propose",
     )
-    assert [item["role"] for item in request.model_input] == ["system", "developer", "user", "assistant", "developer", "developer", "user"]
+    assert [item["role"] for item in request.model_input] == [
+        "system",
+        "developer",
+        "user",
+        "assistant",
+        "developer",
+        "developer",
+        "developer",
+        "user",
+    ]
     assert request.model_input[0]["content"].startswith("You are the MomCozy product assistant.")
     assert request.model_input[4]["content"]["state"]["run_id"] == str(run.id)
     assert request.model_input[-1] == {"role": "user", "content": "Summarize it."}
@@ -70,6 +80,53 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() ->
         "runtime_pattern",
         "thread_id",
     ]
+
+
+def test_agent_runtime_executor_projects_active_memory_into_dynamic_context() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="How should you remind me?", sequence=1)
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    backend = CapturingSdkBackend(result=SdkNodeResult(final_text="I will keep reminders concise."))
+    state_store = FakeStateStore()
+    memory_service = FakeMemoryService(
+        memories=[
+            AgentMemory(
+                id=uuid4(),
+                owner_user_id=run.actor_user_id,
+                memory_type="communication_preference",
+                content={"summary": "Prefers concise reminders", "raw_evidence": "do not project this"},
+                confidence_score=90,
+                status="active",
+                updated_at=datetime(2026, 7, 4, 8, 30, tzinfo=timezone.utc),
+            )
+        ]
+    )
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            state_store=state_store,
+            memory_service=memory_service,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+        ).execute(run=run)
+    )
+
+    memory_facts = backend.requests[0].model_input[-3]["content"]["memory"]
+    assert result.status == "completed"
+    assert memory_service.calls == [{"owner_user_id": run.actor_user_id, "memory_type": None, "limit": 5}]
+    assert memory_facts == [
+        {
+            "memory_id": str(memory_service.memories[0].id),
+            "memory_type": "communication_preference",
+            "summary": "Prefers concise reminders",
+            "confidence_score": 90,
+            "updated_at": "2026-07-04T08:30:00+00:00",
+        }
+    ]
+    assert "raw_evidence" not in memory_facts[0]
+    assert state_store.projections[0]["projection_summary"]["memory_count"] == 1
+    assert state_store.projections[0]["projection_summary"]["fresh_business_fact_keys"] == []
 
 
 def test_agent_runtime_executor_requires_current_user_message() -> None:
@@ -469,6 +526,16 @@ class FakeStateStore:
 
     async def record_context_projection(self, **kwargs):
         self.projections.append(kwargs)
+
+
+class FakeMemoryService:
+    def __init__(self, *, memories: list[AgentMemory]) -> None:
+        self.memories = memories
+        self.calls = []
+
+    async def list_active_memories(self, *, owner_user_id, memory_type=None, limit=20):
+        self.calls.append({"owner_user_id": owner_user_id, "memory_type": memory_type, "limit": limit})
+        return [memory for memory in self.memories if memory.owner_user_id == owner_user_id and memory.status == "active"][:limit]
 
 
 class FakeToolExecutor:

@@ -10,6 +10,7 @@ class ContextProjection:
     stable_developer_prompt: str
     selected_conversation_history: list[dict[str, Any]] = field(default_factory=list)
     current_state_projection: dict[str, Any] = field(default_factory=dict)
+    memory_projection: list[dict[str, Any]] = field(default_factory=list)
     fresh_business_facts: dict[str, Any] = field(default_factory=dict)
 
 
@@ -20,6 +21,7 @@ class ModelInputBuilder:
             {"role": "developer", "content": projection.stable_developer_prompt},
             *projection.selected_conversation_history,
             {"role": "developer", "content": {"state": projection.current_state_projection}},
+            {"role": "developer", "content": {"memory": projection.memory_projection}},
             {"role": "developer", "content": {"business_facts": projection.fresh_business_facts}},
             current_user_message,
         ]

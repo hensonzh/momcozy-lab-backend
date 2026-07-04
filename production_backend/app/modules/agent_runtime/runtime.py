@@ -11,6 +11,7 @@ from .action_policy import AgentActionPolicy, AgentActionPolicyDecision
 from .events import AgentEventSink
 from .execution import AgentRunExecutionResult
 from .graphs import AgentGraphCheckpointStore, AgentGraphRegistry, default_graph_registry
+from .memory import AgentMemoryService
 from .models import AgentAction, AgentEvent, AgentMessage, AgentRun
 from .prompts import ContextProjection, ModelInputBuilder
 from .repository import AgentRuntimeRepository
@@ -31,6 +32,7 @@ class AgentRuntimeExecutorConfig:
         "provider session state. Propose confirmable actions instead of directly applying medium or high risk changes."
     )
     history_limit: int = 40
+    memory_limit: int = 5
 
 
 class AgentRuntimeExecutor:
@@ -46,6 +48,7 @@ class AgentRuntimeExecutor:
         tool_executor: ToolExecutor | None = None,
         event_sink: AgentEventSink | None = None,
         action_policy: AgentActionPolicy | None = None,
+        memory_service: AgentMemoryService | None = None,
         input_builder: ModelInputBuilder | None = None,
         config: AgentRuntimeExecutorConfig | None = None,
     ) -> None:
@@ -58,6 +61,7 @@ class AgentRuntimeExecutor:
         self.tool_executor = tool_executor
         self.event_sink = event_sink
         self.action_policy = action_policy or AgentActionPolicy()
+        self.memory_service = memory_service
         self.input_builder = input_builder or ModelInputBuilder()
         self.config = config or AgentRuntimeExecutorConfig()
 
@@ -74,6 +78,7 @@ class AgentRuntimeExecutor:
             raise ApiError(code="missing_user_message", message="Agent run has no user message.", status=409)
 
         messages = await self.repository.list_messages_for_thread(thread_id=run.thread_id, limit=self.config.history_limit)
+        memory_projection = await self._memory_projection(run=run)
         projection = ContextProjection(
             stable_system_prompt=self.config.stable_system_prompt,
             stable_developer_prompt=self.config.stable_developer_prompt,
@@ -85,6 +90,7 @@ class AgentRuntimeExecutor:
                 "graph_version": run.graph_version,
                 "runtime_pattern": run.runtime_pattern,
             },
+            memory_projection=memory_projection,
             fresh_business_facts={},
         )
         model_input = self.input_builder.build(
@@ -306,10 +312,20 @@ class AgentRuntimeExecutor:
             projection_summary={
                 "history_message_count": len(selected_history),
                 "state_keys": sorted(projection.current_state_projection),
+                "memory_count": len(projection.memory_projection),
                 "fresh_business_fact_keys": sorted(projection.fresh_business_facts),
             },
             tool_schema_version="default",
         )
+
+    async def _memory_projection(self, *, run: AgentRun) -> list[dict[str, Any]]:
+        if self.memory_service is None:
+            return []
+        memories = await self.memory_service.list_active_memories(
+            owner_user_id=run.actor_user_id,
+            limit=self.config.memory_limit,
+        )
+        return [_memory_projection_item(memory) for memory in memories]
 
 
 def _history_before(*, messages: list[AgentMessage], before_sequence: int) -> list[dict[str, Any]]:
@@ -319,6 +335,21 @@ def _history_before(*, messages: list[AgentMessage], before_sequence: int) -> li
 def _to_model_message(message: AgentMessage) -> dict[str, Any]:
     role = message.role if message.role in {"user", "assistant"} else "user"
     return {"role": role, "content": _message_text(message)}
+
+
+def _memory_projection_item(memory: Any) -> dict[str, Any]:
+    content = memory.content if isinstance(memory.content, dict) else {}
+    return {
+        "memory_id": str(memory.id),
+        "memory_type": memory.memory_type,
+        "summary": _text(content, "summary"),
+        "confidence_score": int(memory.confidence_score or 0),
+        "updated_at": _iso_or_empty(getattr(memory, "updated_at", None)),
+    }
+
+
+def _iso_or_empty(value: Any) -> str:
+    return value.isoformat() if hasattr(value, "isoformat") else ""
 
 
 def _message_text(message: AgentMessage) -> str:
