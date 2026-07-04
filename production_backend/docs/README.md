@@ -16,5 +16,7 @@ Key documents:
 
 - `backend-refactor-inventory.generated.md`: generated legacy route/table risk
   inventory.
+- `agent-runtime-continuation-migration-plan.md`: continuation plan for taking
+  the agent runtime foundation to complete product-level agent behavior.
 - `legacy-backend-acceptance-loop.md`: maps legacy domains to production
   acceptance tests, evals, and Codex loop gates.
