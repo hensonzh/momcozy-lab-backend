@@ -201,8 +201,8 @@ LangGraph workflow。
 建议 PR：
 
 1. `agent: harden OpenAI Agents SDK runner settings` - done
-2. `agent: add SDK tool and tracing contract tests`
-3. `agent: add deterministic SDK mock harness for evals`
+2. `agent: add SDK tool and tracing contract tests` - done
+3. `agent: add deterministic SDK mock harness for evals` - done
 
 已完成能力：
 
@@ -215,6 +215,10 @@ LangGraph workflow。
   prompt version / trace metadata。
 - 默认关闭 provider tracing；开启 tracing 时仍不使用 `previous_response_id`、
   conversation id 或 SDK session 作为续聊状态。
+- SDK tool 调用 contract tests 覆盖 tool schema 映射、safe output、应用侧
+  `ToolExecutor` 路径，以及 provider tracing metadata。
+- `ScriptedSdkBackend` 可在 CI/eval 中按脚本触发 SDK tool invocation，
+  不依赖真实模型也能验证完整 run lifecycle。
 
 验收：
 
