@@ -347,9 +347,9 @@ event、eval 的全链路。
 建议 PR：
 
 1. `agent: add pregnancy plan context tools` - done
-2. `agent: add pregnancy plan action proposals`
-3. `agent: add diary action proposals`
-4. `agent: add pregnancy plan and diary evals`
+2. `agent: add pregnancy plan action proposals` - done
+3. `agent: add diary action proposals` - done
+4. `agent: add pregnancy plan and diary evals` - partial
 
 已完成能力：
 
@@ -357,6 +357,11 @@ event、eval 的全链路。
   tasks 和 recent diary entries。
 - 孕期计划生成和任务完成 eval seed 已要求先读
   `pregnancy.plan_context.read`，再进入 action proposal。
+- `pregnancy.plan_create.propose`、`plans.task_create.propose`、
+  `plans.task_complete.propose`、`diary.entry_upsert.propose` 均为
+  confirmation-first action proposal。
+- 孕期计划 confirmed action 已有 outbox apply 主流程测试；diary upsert
+  已有 action handler 和 soft-delete restore 体验测试。
 
 验收：
 
