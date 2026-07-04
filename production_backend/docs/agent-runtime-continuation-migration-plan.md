@@ -414,16 +414,28 @@ eval regression。
 
 建议 PR：
 
-1. `agent: expand maternal and infant health red flags`
-2. `agent: add emotional crisis escalation flow`
-3. `agent: add safety eval regression suite`
+1. `agent: expand maternal and infant health red flags` - done
+2. `agent: add emotional crisis escalation flow` - done
+3. `agent: add safety eval regression suite` - done
+
+当前进展：
+
+- Deterministic safety guard 已覆盖母婴健康红旗、婴儿高风险症状、情绪/自伤/可能伤害宝宝、prompt injection，并输出 `allow`、`escalate`、`block`。
+- 高风险输入会在 run 创建阶段写入 `agent_safety_events`，发送 `safety.blocked`，并阻断普通 agent run，不会进入工具/action 流程。
+- `safety.blocked` event 已带 `response_template_key`、`response_template_version`、`handoff_type`，便于 App 端展示版本化安全引导。
+- Eval seed 已包含 health、infant health、emotion、harm-baby、mixed intent、permission bypass、prompt injection regression；runner 使用 deterministic assertions 验证 safety decision 和 forbidden side effect。
 
 验收：
 
-- critical safety suite 100% pass。
-- permission bypass suite 100% pass。
-- 高风险输入不会创建普通业务 action。
-- safety events 可被 replay bundle 导出，且不在 metrics 中暴露 PII。
+- critical safety suite 100% pass。已覆盖本地 seed runner。
+- permission bypass suite 100% pass。已覆盖 seed case。
+- 高风险输入不会创建普通业务 action。已覆盖。
+- safety events 可被 replay bundle 导出，且不在 metrics 中暴露 PII。已覆盖。
+
+后续产品化：
+
+- 安全回复模板的具体文案仍需由产品/合规确认后在 App 端或配置层落地。
+- 人工/专业支持 handoff 的真实运营闭环仍需结合客服/IBCLC 流程接入。
 
 ## Phase 8: Long-Term Memory
 
