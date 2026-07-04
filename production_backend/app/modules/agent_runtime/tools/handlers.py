@@ -167,8 +167,9 @@ class BusinessContextReadToolHandler:
 
 
 class MilkSummaryReadToolHandler:
-    def __init__(self, *, records_service: RecordsService) -> None:
+    def __init__(self, *, records_service: RecordsService, profile_service: ProfileService) -> None:
         self.records_service = records_service
+        self.profile_service = profile_service
 
     async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
         owner_user_id = context.actor.user_id
@@ -177,12 +178,14 @@ class MilkSummaryReadToolHandler:
         feedings = await self.records_service.list_feedings(owner_user_id=owner_user_id, limit=limit)
         pumpings = await self.records_service.list_pumpings(owner_user_id=owner_user_id, limit=limit)
         trends = await self.records_service.get_milk_trends(owner_user_id=owner_user_id, days=days, include_today=True)
+        infants = await self.profile_service.list_infants(owner_user_id=owner_user_id)
         trend_items = [_milk_trend_payload(item) for item in trends.items]
         return {
             "window": {
                 "days": days,
                 "include_today": True,
             },
+            "infants": [_infant_payload(infant) for infant in infants[:limit]],
             "recent_feedings": [_feeding_payload(record) for record in feedings],
             "recent_pumpings": [_pumping_payload(record) for record in pumpings],
             "pumping_trends": trend_items,
@@ -524,7 +527,10 @@ def build_default_tool_handlers(
             diary_service=diary_service,
             devices_service=devices_service,
         ),
-        "records.milk_summary.read": MilkSummaryReadToolHandler(records_service=records_service),
+        "records.milk_summary.read": MilkSummaryReadToolHandler(
+            records_service=records_service,
+            profile_service=profile_service,
+        ),
         "plans.current.read": PlansCurrentReadToolHandler(plans_service=plans_service),
         "diary.recent.read": DiaryRecentReadToolHandler(diary_service=diary_service),
         "diary.entry_upsert.propose": DiaryEntryUpsertProposeToolHandler(runtime_service=agent_runtime_service),

@@ -177,12 +177,32 @@ def test_business_context_read_tool_handler_returns_bounded_owner_scoped_summary
 def test_milk_summary_read_tool_handler_returns_bounded_owner_scoped_summary() -> None:
     actor = _user()
     records_service = FakeRecordsService(owner_user_id=actor.user_id)
-    handler = MilkSummaryReadToolHandler(records_service=records_service)
+    infant = InfantProfile(
+        id=uuid4(),
+        owner_user_id=actor.user_id,
+        infant_name="Nori",
+        sex="female",
+        birth_date=date(2026, 1, 10),
+        status="active",
+    )
+    profile_service = FakeProfileService(profile=None, infants=[infant])
+    handler = MilkSummaryReadToolHandler(records_service=records_service, profile_service=profile_service)
 
     result = asyncio.run(handler(_context(actor=actor, args={"days": 3, "limit": 2, "owner_user_id": str(uuid4())})))
 
     assert records_service.owner_user_id == actor.user_id
+    assert profile_service.infant_owner_user_id == actor.user_id
     assert result["window"] == {"days": 3, "include_today": True}
+    assert result["infants"] == [
+        {
+            "id": str(infant.id),
+            "owner_user_id": str(actor.user_id),
+            "infant_name": "Nori",
+            "sex": "female",
+            "birth_date": "2026-01-10",
+            "status": "active",
+        }
+    ]
     assert result["recent_feedings"][0]["volume_ml"] == 60
     assert result["recent_pumpings"][0]["milk_volume_ml"] == 80
     assert result["pumping_trends"] == [
@@ -741,11 +761,15 @@ class FakeProfileService:
     def __init__(self, *, profile: UserProfile | None, infants: list[InfantProfile]) -> None:
         self.profile = profile
         self.infants = infants
+        self.profile_user_id = None
+        self.infant_owner_user_id = None
 
     async def get_user_profile(self, *, user_id):
+        self.profile_user_id = user_id
         return self.profile
 
     async def list_infants(self, *, owner_user_id):
+        self.infant_owner_user_id = owner_user_id
         return self.infants
 
 
