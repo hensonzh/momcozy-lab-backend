@@ -104,10 +104,6 @@
         ]
       },
       "expected_tool_calls": [
-        {
-          "contract": "device_reference_lookup",
-          "timing": "after_model_available"
-        }
       ],
       "expected_safety_decision": "allow"
     },

@@ -89,6 +89,17 @@ def test_product_agent_eval_seed_uses_current_support_action_contract() -> None:
     assert "support_ticket_proposal" not in support_contracts
 
 
+def test_product_agent_eval_seed_does_not_reference_missing_device_tool_contract() -> None:
+    cases = load_product_agent_eval_seed_cases(PRODUCT_AGENT_EVAL_SEED)
+    by_suite = {case["suite"]: case for case in cases}
+
+    device_contracts = {tool_call["contract"] for tool_call in by_suite["device_guidance"]["expected_tool_calls"]}
+
+    assert "device_reference_lookup" not in device_contracts
+    assert "devices.pump_status.read" not in device_contracts
+    assert by_suite["device_guidance"]["expected_behavior"]["must_clarify"] == ["device_model", "first_use_context"]
+
+
 def test_product_agent_eval_seed_uses_current_memory_action_contract() -> None:
     cases = load_product_agent_eval_seed_cases(PRODUCT_AGENT_EVAL_SEED)
     by_suite = {case["suite"]: case for case in cases}
