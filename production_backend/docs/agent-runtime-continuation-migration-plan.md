@@ -71,10 +71,10 @@
   model-specific 问答策略仍属于产品内容/资料治理工作。
 - IBCLC/professional support 已使用 `support.ticket.propose` handoff；独立
   专业支持模块和真实客服/IBCLC 运营闭环仍需后续接入。
-- 长期记忆已具备敏感写入拒绝、TTL 和 eval；用户级禁用 memory 的 API/UX
+- 长期记忆已具备敏感写入拒绝、TTL、禁用 API 和 eval；用户可见管理 UX
   仍需和 Flutter 端一起设计。
-- eval 已有 seed runner、replay runner、CI smoke 和 JUnit report；仍缺真实
-  runtime client、provider-backed nightly eval 和报告 artifact upload。
+- eval 已有 seed runner、replay runner、isolated runtime client、CI smoke、
+  JUnit report 和报告 artifact upload；仍缺 provider-backed nightly eval。
 - Flutter 新端尚未和新 agent event/action contract 做端到端联调。
 
 ## 目标状态
