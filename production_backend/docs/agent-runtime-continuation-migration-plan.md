@@ -59,18 +59,22 @@
 - IBCLC/professional support eval 已对齐到真实 `support.ticket.propose`
   handoff contract，不再要求不存在的 `ibclc_consult_proposal`。
 
-仍未完成：
+仍未完成或后续产品化：
 
-- OpenAI Agents SDK 已有 adapter 边界，但业务 specialist agents、handoff、
-  guardrail、tracing 策略还没有完整产品化。
-- 旧智能体中的主要业务能力还没有完整迁移成新 tool/action contract。
-- 待产包、设备指导、IBCLC、健康/情绪安全、图片/语音
-  等主流程尚未达到新架构下的完整 parity；设备指导仍缺完整问答策略和
-  更多 eval，IBCLC 仍缺独立专业支持模块和更细的 handoff policy。
-- 长期记忆还缺禁用路径、敏感记忆策略深化、Flutter 端可视化体验和
-  eval 回归。
-- eval 样例和自动化行为评估已有基础，但还缺真实 runtime client、
-  CI gate、报告归档和更多业务主流程覆盖。
+- OpenAI Agents SDK 已有 adapter 边界和 settings/tracing metadata，但
+  provider-backed nightly eval、specialist agent 细分和真实运营 handoff 仍需
+  后续产品化。
+- 待产包、奶量、孕期计划、日记、设备指导、支持工单、健康/情绪安全和长期
+  记忆均已有新 tool/action/eval contract 的后端基础闭环；图片/语音等体验可
+  在 Flutter integration 或后续产品需求中继续补齐。
+- 设备指导已有 owner-scoped 状态读取和 guidance assets 读取；更细的
+  model-specific 问答策略仍属于产品内容/资料治理工作。
+- IBCLC/professional support 已使用 `support.ticket.propose` handoff；独立
+  专业支持模块和真实客服/IBCLC 运营闭环仍需后续接入。
+- 长期记忆已具备敏感写入拒绝、TTL 和 eval；用户级禁用 memory 的 API/UX
+  仍需和 Flutter 端一起设计。
+- eval 已有 seed runner、replay runner、CI smoke 和 JUnit report；仍缺真实
+  runtime client、provider-backed nightly eval 和报告 artifact upload。
 - Flutter 新端尚未和新 agent event/action contract 做端到端联调。
 
 ## 目标状态
@@ -349,7 +353,7 @@ event、eval 的全链路。
 1. `agent: add pregnancy plan context tools` - done
 2. `agent: add pregnancy plan action proposals` - done
 3. `agent: add diary action proposals` - done
-4. `agent: add pregnancy plan and diary evals` - partial
+4. `agent: add pregnancy plan and diary evals` - done
 
 已完成能力：
 
@@ -583,18 +587,18 @@ eval regression。
 
 ## Recommended Immediate Next PR
 
-下一步建议从 Phase 1 开始：
+后端-only 的下一步建议：
 
 ```text
-PR: agent: introduce executable LangGraph graph
+PR: eval: add isolated runtime client for agent seed cases
 ```
 
 包含：
 
-- 新增真实 LangGraph graph factory。
-- 将当前 `AgentRuntimeExecutor` 包装为 `sdk_reasoning` node 或拆成节点函数。
-- 接入 checkpoint store。
-- 保留现有 API/event/action contract 不变。
-- 增加 graph completed / waiting / resume / cancel 测试。
+- 使用本地 mocked SDK backend 和 test actor 创建真实 thread/run。
+- 收集 persisted messages、events、tool calls、actions、safety events。
+- 将 trace 输入 `AgentEvalSeedAssertionEngine`。
+- 保留现有 seed self-check，不依赖真实模型。
+- 只把 provider-backed eval 放到 nightly 或手动 release gate。
 
-完成后，再进入 Phase 4 的第一个完整垂直业务流程：奶量管理。
+Flutter integration 暂按当前决策后置，等 Flutter app 重构分支完成后再打通。
