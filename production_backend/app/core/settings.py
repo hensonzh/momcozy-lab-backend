@@ -58,6 +58,8 @@ class Settings:
     outbox_worker_lease_seconds: int = 60
     openai_api_key: str = ""
     openai_model: str = "gpt-5.5"
+    openai_agent_max_turns: int = 10
+    openai_agent_timeout_seconds: int = 60
     voice_provider: str = "disabled"
     vision_provider: str = "disabled"
     log_level: str = "INFO"
@@ -110,6 +112,8 @@ class Settings:
             outbox_worker_lease_seconds=_env_int("OUTBOX_WORKER_LEASE_SECONDS", cls.outbox_worker_lease_seconds),
             openai_api_key=_env("OPENAI_API_KEY", cls.openai_api_key),
             openai_model=_env("OPENAI_MODEL", cls.openai_model),
+            openai_agent_max_turns=_env_int("OPENAI_AGENT_MAX_TURNS", cls.openai_agent_max_turns),
+            openai_agent_timeout_seconds=_env_int("OPENAI_AGENT_TIMEOUT_SECONDS", cls.openai_agent_timeout_seconds),
             voice_provider=_env("VOICE_PROVIDER", cls.voice_provider).lower(),
             vision_provider=_env("VISION_PROVIDER", cls.vision_provider).lower(),
             log_level=_env("LOG_LEVEL", cls.log_level).upper(),
@@ -165,6 +169,10 @@ class Settings:
             errors.append("OPENAI_API_KEY is required when AGENT_RUNTIME_WORKER_ENABLED is true")
         if not self.openai_model:
             errors.append("OPENAI_MODEL is required")
+        if self.openai_agent_max_turns < 1:
+            errors.append("OPENAI_AGENT_MAX_TURNS must be positive")
+        if self.openai_agent_timeout_seconds < 1:
+            errors.append("OPENAI_AGENT_TIMEOUT_SECONDS must be positive")
         if self.voice_provider not in SUPPORTED_VOICE_PROVIDERS:
             errors.append(
                 "VOICE_PROVIDER must be one of "

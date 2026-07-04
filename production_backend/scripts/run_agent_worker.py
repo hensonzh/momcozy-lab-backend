@@ -116,7 +116,12 @@ async def run_agent_worker(
                     tool_registry=tool_registry,
                     tool_executor=tool_executor,
                     event_sink=event_sink,
-                    sdk_runner=OpenAIAgentsSdkRunner(model=resolved_settings.openai_model, metrics=metrics),
+                    sdk_runner=OpenAIAgentsSdkRunner(
+                        model=resolved_settings.openai_model,
+                        max_turns=resolved_settings.openai_agent_max_turns,
+                        timeout_seconds=resolved_settings.openai_agent_timeout_seconds,
+                        metrics=metrics,
+                    ),
                 )
                 handler = AgentRuntimeGraphRunner(
                     repository=repository,

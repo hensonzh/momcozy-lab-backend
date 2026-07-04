@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import importlib
 import json
 import os
@@ -52,8 +53,9 @@ class SdkRunnerBackend(Protocol):
 
 
 class OpenAIAgentsSdkBackend:
-    def __init__(self, *, model: str) -> None:
+    def __init__(self, *, model: str, max_turns: int = 10) -> None:
         self.model = model
+        self.max_turns = max_turns
 
     async def run(self, request: SdkNodeRequest) -> SdkNodeResult:
         try:
@@ -74,24 +76,37 @@ class OpenAIAgentsSdkBackend:
             model=self.model,
             tools=[_build_function_tool(agents_module=agents_module, definition=definition) for definition in request.tools],
         )
-        result = await runner_cls.run(agent, _flatten_model_input(request.model_input))
+        result = await runner_cls.run(agent, _flatten_model_input(request.model_input), max_turns=self.max_turns)
         final_output = getattr(result, "final_output", "")
         return SdkNodeResult(final_text=str(final_output or ""))
 
 
 class OpenAIAgentsSdkRunner:
-    def __init__(self, *, backend: SdkRunnerBackend | None = None, metrics: RequestMetrics | None = None, model: str = "gpt-5.5") -> None:
+    def __init__(
+        self,
+        *,
+        backend: SdkRunnerBackend | None = None,
+        metrics: RequestMetrics | None = None,
+        model: str = "gpt-5.5",
+        max_turns: int = 10,
+        timeout_seconds: float = 60,
+    ) -> None:
         self.backend = backend
         self.metrics = metrics
         self.model = model
+        self.max_turns = max_turns
+        self.timeout_seconds = timeout_seconds
 
     async def run_reasoning(self, request: SdkNodeRequest) -> SdkNodeResult:
         started_at = perf_counter()
         try:
-            backend = self.backend or OpenAIAgentsSdkBackend(model=self.model)
-            result = await backend.run(request)
+            backend = self.backend or OpenAIAgentsSdkBackend(model=self.model, max_turns=self.max_turns)
+            result = await asyncio.wait_for(backend.run(request), timeout=self.timeout_seconds)
             self._record(outcome="completed", error_code="", started_at=started_at)
             return result
+        except TimeoutError as exc:
+            self._record(outcome="failed", error_code="sdk_run_timed_out", started_at=started_at)
+            raise ApiError(code="sdk_run_timed_out", message="OpenAI Agents SDK run timed out.", status=504) from exc
         except ApiError as exc:
             self._record(outcome="failed", error_code=exc.code, started_at=started_at)
             raise

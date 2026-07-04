@@ -100,6 +100,8 @@ def test_settings_from_env_reads_agent_worker_controls(monkeypatch: pytest.Monke
     monkeypatch.setenv("AGENT_RUNTIME_RECOVER_RUNNING_OLDER_THAN_SECONDS", "120")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setenv("OPENAI_MODEL", "gpt-test")
+    monkeypatch.setenv("OPENAI_AGENT_MAX_TURNS", "7")
+    monkeypatch.setenv("OPENAI_AGENT_TIMEOUT_SECONDS", "45")
 
     settings = Settings.from_env()
 
@@ -109,6 +111,8 @@ def test_settings_from_env_reads_agent_worker_controls(monkeypatch: pytest.Monke
     assert settings.agent_runtime_recover_running_older_than_seconds == 120
     assert settings.openai_api_key == "sk-test"
     assert settings.openai_model == "gpt-test"
+    assert settings.openai_agent_max_turns == 7
+    assert settings.openai_agent_timeout_seconds == 45
 
 
 def test_settings_from_env_reads_voice_provider(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -159,6 +163,13 @@ def test_settings_requires_openai_key_when_agent_worker_is_enabled() -> None:
 
     with pytest.raises(ValueError, match="OPENAI_API_KEY"):
         settings.validate_for_startup()
+
+
+def test_settings_reject_invalid_openai_agent_controls() -> None:
+    with pytest.raises(ValueError, match="OPENAI_AGENT_MAX_TURNS"):
+        Settings(openai_agent_max_turns=0).validate_for_startup()
+    with pytest.raises(ValueError, match="OPENAI_AGENT_TIMEOUT_SECONDS"):
+        Settings(openai_agent_timeout_seconds=0).validate_for_startup()
 
 
 def test_settings_reject_invalid_outbox_worker_controls() -> None:

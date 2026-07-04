@@ -119,12 +119,13 @@ def test_sdk_runner_uses_real_agents_sdk_shape_when_package_is_available(monkeyp
         model_input=[{"role": "user", "content": "hello"}],
     )
 
-    result = asyncio.run(OpenAIAgentsSdkRunner(model="gpt-test").run_reasoning(request))
+    result = asyncio.run(OpenAIAgentsSdkRunner(model="gpt-test", max_turns=3).run_reasoning(request))
 
     assert result.final_text == "sdk final"
     assert FakeAgentsSdkAgent.created["model"] == "gpt-test"
     assert FakeAgentsSdkAgent.created["instructions"] == "Be concise."
     assert FakeAgentsSdkRunner.last_input == "user: hello"
+    assert FakeAgentsSdkRunner.last_max_turns == 3
 
 
 def test_sdk_runner_flattens_structured_context_as_stable_json(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -207,9 +208,33 @@ def test_sdk_runner_records_backend_metrics() -> None:
     assert sdk_metrics["error_code_counts"]["dependency_not_configured"] == 1
 
 
+def test_sdk_runner_times_out_slow_backend() -> None:
+    metrics = RequestMetrics()
+    request = SdkNodeRequest(
+        run_id="run_1",
+        thread_id="thread_1",
+        actor_user_id="user_1",
+        instructions="Be concise.",
+        model_input=[{"role": "user", "content": "hello"}],
+    )
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(OpenAIAgentsSdkRunner(backend=SlowSdkBackend(), metrics=metrics, timeout_seconds=0.001).run_reasoning(request))
+
+    assert exc_info.value.code == "sdk_run_timed_out"
+    sdk_metrics = metrics.snapshot()["agent_sdk"][0]
+    assert sdk_metrics["error_code_counts"]["sdk_run_timed_out"] == 1
+
+
 class FakeSdkBackend:
     async def run(self, request: SdkNodeRequest) -> SdkNodeResult:
         return SdkNodeResult(final_text="hello", tool_calls=[{"tool_name": request.tool_names[0]}])
+
+
+class SlowSdkBackend:
+    async def run(self, request: SdkNodeRequest) -> SdkNodeResult:
+        await asyncio.sleep(1)
+        return SdkNodeResult(final_text="too late")
 
 
 class FakeAgentsSdkAgent:
@@ -233,16 +258,18 @@ class FakeAgentsSdkFunctionTool:
 
 class FakeAgentsSdkRunner:
     last_input = ""
+    last_max_turns = None
 
     @staticmethod
-    async def run(agent: FakeAgentsSdkAgent, input: str):
+    async def run(agent: FakeAgentsSdkAgent, input: str, *, max_turns=None):
         FakeAgentsSdkRunner.last_input = input
+        FakeAgentsSdkRunner.last_max_turns = max_turns
         return FakeAgentsSdkResult(final_output="sdk final")
 
 
 class ToolCallingAgentsSdkRunner:
     @staticmethod
-    async def run(agent: FakeAgentsSdkAgent, input: str):
+    async def run(agent: FakeAgentsSdkAgent, input: str, *, max_turns=None):
         output = await agent.tools[0].on_invoke_tool(None, '{"owner_user_id": "user_1"}')
         return FakeAgentsSdkResult(final_output=output)
 
