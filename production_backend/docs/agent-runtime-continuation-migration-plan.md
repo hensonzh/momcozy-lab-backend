@@ -48,6 +48,9 @@
   `memory.create.propose` tool、`agent.memory.create` action/outbox handler，
   每轮 bounded `memory_projection` 上下文投射，以及用户可见的
   `GET/DELETE /v1/agent/memories` 管理 API。
+- eval harness 已具备 seed schema 校验、memory preference seed case、
+  deterministic assertion engine、replay bundle -> eval trace 转换，以及
+  `scripts/run_agent_replay_eval.py` 最小 CLI。
 
 仍未完成：
 
@@ -58,7 +61,8 @@
   等主流程尚未达到新架构下的完整 parity。
 - 长期记忆还缺禁用路径、敏感记忆策略深化、Flutter 端可视化体验和
   eval 回归。
-- eval 样例和自动化行为评估还不够支撑持续重构。
+- eval 样例和自动化行为评估已有基础，但还缺真实 runtime client、
+  CI gate、报告归档和更多业务主流程覆盖。
 - Flutter 新端尚未和新 agent event/action contract 做端到端联调。
 
 ## 目标状态
@@ -429,9 +433,24 @@ eval regression。
 
 建议 PR：
 
-1. `eval: expand product agent seed suites`
-2. `eval: add agent eval runner`
+1. `eval: expand product agent seed suites` - partial
+2. `eval: add agent eval runner` - partial
 3. `ci: add critical agent eval gates`
+
+已完成能力：
+
+- product seed schema 和 required suite 校验。
+- memory preference capture seed case。
+- deterministic assertion engine：required tool、safety decision、
+  confirmation-required。
+- replay bundle eval runner 和 CLI，可对 redacted replay JSON 输出 pass/fail
+  报告。
+
+后续 PR：
+
+1. `eval: add isolated runtime client for agent seed cases`
+2. `eval: expand device support and health safety regression cases`
+3. `ci: add critical agent eval smoke gate`
 
 验收：
 
