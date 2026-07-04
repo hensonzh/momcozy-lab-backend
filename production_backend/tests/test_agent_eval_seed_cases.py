@@ -35,6 +35,18 @@ def test_product_agent_eval_seed_cases_have_action_and_safety_contracts() -> Non
         assert isinstance(case["expected_tool_calls"], list)
 
 
+def test_product_agent_eval_seed_uses_current_milk_summary_tool_contract() -> None:
+    cases = load_product_agent_eval_seed_cases(PRODUCT_AGENT_EVAL_SEED)
+    milk_cases = {case["suite"]: case for case in cases if case["suite"] in {"milk_daily_summary", "milk_trend_analysis"}}
+
+    assert set(milk_cases) == {"milk_daily_summary", "milk_trend_analysis"}
+    for case in milk_cases.values():
+        contracts = {tool_call["contract"] for tool_call in case["expected_tool_calls"]}
+        assert "records.milk_summary.read" in contracts
+        assert "milk_summary_read" not in contracts
+        assert "milk_records_read" not in contracts
+
+
 def test_product_agent_eval_seed_loader_rejects_missing_required_suite() -> None:
     payload = {
         "schema_version": "agent_eval_seed.v1",

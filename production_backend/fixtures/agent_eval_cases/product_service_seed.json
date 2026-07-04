@@ -181,7 +181,7 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "milk_summary_read",
+          "contract": "records.milk_summary.read",
           "timing": "before_final_response"
         }
       ],
@@ -326,7 +326,7 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "milk_records_read",
+          "contract": "records.milk_summary.read",
           "timing": "before_final_response"
         }
       ],
