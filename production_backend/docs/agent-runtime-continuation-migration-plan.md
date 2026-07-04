@@ -519,6 +519,7 @@ eval regression。
 - deterministic assertion engine：required tool、safety decision、
   forbidden tool、confirmation-required、forbidden side effect。
 - seed eval runner 和 CLI，可对 product seed 做 deterministic smoke，并可接收 observed trace fixtures。
+- seed eval runner 可输出 JSON summary 和 JUnit XML report，便于 CI/发布门禁归档。
 - replay bundle eval runner 和 CLI，可对 redacted replay JSON 输出 pass/fail
   报告。
 - CI 已接入 `run_agent_seed_eval.py` smoke gate。
@@ -527,7 +528,7 @@ eval regression。
 
 1. `eval: add isolated runtime client for agent seed cases`
 2. `eval: add provider-backed nightly evals`
-3. `eval: add JUnit/report artifact export`
+3. `eval: add report artifact upload in CI`
 
 验收：
 
