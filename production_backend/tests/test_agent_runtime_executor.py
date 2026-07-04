@@ -7,7 +7,14 @@ import pytest
 from production_backend.app.core.errors import ApiError
 from production_backend.app.modules.agent_runtime.models import AgentAction, AgentArtifact, AgentEvent, AgentMemory, AgentMessage, AgentRun, AgentToolCall
 from production_backend.app.modules.agent_runtime.runtime import AgentRuntimeExecutor
-from production_backend.app.modules.agent_runtime.sdk import OpenAIAgentsSdkRunner, SdkNodeRequest, SdkNodeResult
+from production_backend.app.modules.agent_runtime.sdk import (
+    OpenAIAgentsSdkRunner,
+    SdkNodeRequest,
+    SdkNodeResult,
+    ScriptedSdkBackend,
+    scripted_sdk_response,
+    scripted_tool_invocation,
+)
 from production_backend.app.modules.agent_runtime.tools import ToolExecutor, ToolHandlerContext, default_tool_registry
 
 
@@ -245,22 +252,32 @@ def test_agent_runtime_executor_real_tool_executor_uses_run_actor_role_permissio
         repository=repository,
         handlers={"profile.read": profile_read_handler},
     )
+    backend = ScriptedSdkBackend(
+        [
+            scripted_sdk_response(
+                final_text="Profile context loaded.",
+                tool_invocations=(scripted_tool_invocation("profile.read"),),
+                expected_available_tools=("profile.read",),
+            )
+        ]
+    )
 
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=InvokingSdkBackend()),
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
             tool_executor=tool_executor,
         ).execute(run=run)
     )
 
     assert result.status == "completed"
+    assert backend.requests[0].run_id == str(run.id)
     assert repository.tool_call is not None
     assert repository.tool_call.status == "completed"
     assert repository.tool_call.safe_args == {}
     assert repository.events[0].event_type == "tool.started"
     assert repository.events[1].event_type == "tool.completed"
-    assert result.final_text == '{"profile": {"actor_user_id": "' + str(run.actor_user_id) + '"}}'
+    assert result.final_text == "Profile context loaded."
 
 
 def test_agent_runtime_executor_persists_sdk_action_proposal_and_waits_for_confirmation() -> None:
