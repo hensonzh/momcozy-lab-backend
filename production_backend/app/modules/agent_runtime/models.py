@@ -17,6 +17,8 @@ ACTIVE_RUN_STATUSES = ("queued", "running", "waiting_for_confirmation")
 ACTION_STATUSES = ("proposed", "confirmation_required", "confirmed", "applying", "applied", "rejected", "failed", "expired")
 TOOL_CALL_STATUSES = ("started", "completed", "failed", "skipped", "blocked", "timed_out")
 WORKFLOW_STATE_STATUSES = ("collecting", "ready", "waiting", "paused", "completed", "expired", "failed")
+MEMORY_TYPES = ("user_preference", "stable_care_preference", "communication_preference", "recurring_constraint")
+MEMORY_STATUSES = ("active", "archived", "deleted", "expired")
 
 
 class AgentThread(Base):
@@ -354,6 +356,41 @@ class AgentContextProjection(Base):
     )
     token_estimate: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class AgentMemory(Base):
+    __tablename__ = "agent_memories"
+    __table_args__ = (
+        Index("ix_agent_memories_owner_type_status", "owner_user_id", "memory_type", "status"),
+        Index("ix_agent_memories_owner_updated", "owner_user_id", "updated_at"),
+        Index("ix_agent_memories_source_run", "source_run_id"),
+        Index("ix_agent_memories_expires_at", "expires_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    owner_user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    source_run_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("agent_runs.id"), nullable=True)
+    source_message_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("agent_messages.id"), nullable=True)
+    memory_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="active", server_default="active", nullable=False)
+    schema_version: Mapped[str] = mapped_column(String(80), default="v1", server_default="v1", nullable=False)
+    content: Mapped[dict[str, Any]] = mapped_column(
+        "content_json",
+        postgresql.JSONB,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
+        nullable=False,
+    )
+    confidence_score: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
 
 
 class AgentSafetyEvent(Base):

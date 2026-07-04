@@ -32,9 +32,10 @@ def test_alembic_offline_upgrade_head_generates_empty_database_sql() -> None:
         "CREATE TABLE agent_eval_cases",
         "CREATE TABLE agent_workflow_states",
         "CREATE TABLE agent_context_projections",
+        "CREATE TABLE agent_memories",
         "CREATE UNIQUE INDEX uq_agent_runs_thread_active",
         "ADD COLUMN password_hash",
         "ADD COLUMN actor_service",
-        "UPDATE alembic_version SET version_num='20260702_0017'",
+        "UPDATE alembic_version SET version_num='20260702_0018'",
     ]:
         assert phrase in sql

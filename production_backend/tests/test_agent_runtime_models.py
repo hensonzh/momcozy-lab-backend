@@ -3,6 +3,8 @@ from production_backend.app.infrastructure.db import models as _models
 from production_backend.app.modules.agent_runtime.models import (
     ACTION_STATUSES,
     ACTIVE_RUN_STATUSES,
+    MEMORY_STATUSES,
+    MEMORY_TYPES,
     RUN_STATUSES,
     TOOL_CALL_STATUSES,
     WORKFLOW_STATE_STATUSES,
@@ -22,6 +24,7 @@ def test_agent_runtime_ledger_tables_are_registered() -> None:
         "agent_context_checkpoints",
         "agent_workflow_states",
         "agent_context_projections",
+        "agent_memories",
     }
 
     assert expected_tables.issubset(Base.metadata.tables)
@@ -36,6 +39,9 @@ def test_agent_runtime_run_and_action_statuses_include_waiting_and_no_queued_act
     assert "timed_out" in TOOL_CALL_STATUSES
     assert "collecting" in WORKFLOW_STATE_STATUSES
     assert "completed" in WORKFLOW_STATE_STATUSES
+    assert "user_preference" in MEMORY_TYPES
+    assert "communication_preference" in MEMORY_TYPES
+    assert MEMORY_STATUSES == ("active", "archived", "deleted", "expired")
 
 
 def test_agent_events_have_replay_envelope_columns_and_sequence_constraint() -> None:
@@ -68,6 +74,7 @@ def test_agent_ledger_has_no_provider_state_dependency_columns() -> None:
         "agent_context_checkpoints",
         "agent_workflow_states",
         "agent_context_projections",
+        "agent_memories",
     ):
         columns = set(Base.metadata.tables[table_name].columns.keys())
         assert columns.isdisjoint(forbidden)
@@ -79,6 +86,7 @@ def test_agent_actions_and_checkpoints_have_runtime_indexes() -> None:
     checkpoints = Base.metadata.tables["agent_context_checkpoints"]
     workflow_states = Base.metadata.tables["agent_workflow_states"]
     context_projections = Base.metadata.tables["agent_context_projections"]
+    memories = Base.metadata.tables["agent_memories"]
 
     assert "uq_agent_runs_thread_active" in {index.name for index in runs.indexes}
     assert "ix_agent_actions_run_status" in {index.name for index in actions.indexes}
@@ -86,3 +94,5 @@ def test_agent_actions_and_checkpoints_have_runtime_indexes() -> None:
     assert "uq_agent_context_checkpoints_namespace_id" in {constraint.name for constraint in checkpoints.constraints}
     assert "ix_agent_workflow_states_owner_type_status" in {index.name for index in workflow_states.indexes}
     assert "ix_agent_context_projections_run_created" in {index.name for index in context_projections.indexes}
+    assert "ix_agent_memories_owner_type_status" in {index.name for index in memories.indexes}
+    assert "ix_agent_memories_expires_at" in {index.name for index in memories.indexes}
