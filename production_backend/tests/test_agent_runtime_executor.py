@@ -283,6 +283,38 @@ def test_agent_runtime_executor_selects_specialist_and_scopes_tools() -> None:
     )
 
 
+def test_agent_runtime_executor_routes_named_pump_issue_to_device_specialist() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(
+        thread_id=thread_id,
+        run_id=run.id,
+        role="user",
+        text="My Air1 pump suction feels weak today. What should I check?",
+        sequence=1,
+    )
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    backend = CapturingSdkBackend(result=SdkNodeResult(final_text="I will check device status."))
+
+    asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+        ).execute(run=run)
+    )
+
+    request = backend.requests[0]
+    assert request.specialist_id == "device_support"
+    assert request.tool_names == (
+        "business.context.read",
+        "devices.guidance_assets.read",
+        "devices.pump_status.read",
+        "files.vision_summary.read",
+        "profile.read",
+        "support.ticket.propose",
+    )
+
+
 def test_agent_runtime_executor_real_tool_executor_uses_run_actor_role_permissions() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)

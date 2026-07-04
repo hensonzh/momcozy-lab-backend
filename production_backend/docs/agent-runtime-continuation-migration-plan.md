@@ -67,8 +67,8 @@
 
 仍未完成或后续产品化：
 
-- OpenAI Agents SDK 已有 adapter 边界和 settings/tracing metadata，但
-  provider-backed nightly eval 和真实运营 handoff 仍需后续产品化。
+- OpenAI Agents SDK 已有 adapter 边界、settings/tracing metadata 和
+  provider-backed eval harness；真实运营 handoff 仍需后续产品化。
 - 待产包、奶量、孕期计划、日记、设备指导、支持工单、健康/情绪安全和长期
   记忆均已有新 tool/action/eval contract 的后端基础闭环；图片/语音等体验可
   在 Flutter integration 或后续产品需求中继续补齐。
@@ -79,7 +79,8 @@
 - 长期记忆已具备敏感写入拒绝、TTL、禁用 API 和 eval；用户可见管理 UX
   仍需和 Flutter 端一起设计。
 - eval 已有 seed runner、replay runner、isolated runtime client、CI smoke、
-  JUnit report 和报告 artifact upload；仍缺 provider-backed nightly eval。
+  JUnit report、报告 artifact upload，以及 provider-backed nightly/manual
+  workflow 入口；真实 provider eval 仍需配置凭证、成本预算和环境后运行。
 - Flutter 新端尚未和新 agent event/action contract 做端到端联调。
 
 ## 目标状态
@@ -540,11 +541,16 @@ eval regression。
   报告。
 - CI 已接入 `run_agent_seed_eval.py` smoke gate。
 - CI 已上传 seed eval JSON/JUnit 报告 artifact，便于失败排查。
+- `run_agent_provider_eval.py` 已提供 provider-backed eval harness：无凭证时可
+  明确 skipped，有凭证时复用 OpenAI Agents SDK runner、当前 specialist
+  routing、tool schema 和 seed assertion engine 生成 JSON 报告。
+- `.github/workflows/agent-provider-eval.yml` 已支持手动/定时运行，并上传
+  `agent-provider-eval` 报告 artifact。
 
 后续 PR：
 
 1. `eval: add isolated runtime client for agent seed cases` - done
-2. `eval: add provider-backed nightly evals`
+2. `eval: add provider-backed nightly evals` - done
 3. `eval: add report artifact upload in CI` - done
 
 验收：
@@ -603,19 +609,18 @@ eval regression。
 后端-only 的下一步建议：
 
 ```text
-PR: eval: add provider-backed nightly evals
+PR: ops: configure provider-backed eval credentials and budget
 ```
 
 包含：
 
-- 使用真实 OpenAI provider credentials 跑小规模 nightly/manual gate。
-- 复用现有 seed cases 和 runtime trace collector。
-- 记录 token、latency、tool-call adherence、safety decision 和 final-response
-  rubric 结果。
-- 设置成本预算、超时、失败阈值和 flake quarantine 策略。
-- 继续保留本地 mocked SDK / seed self-check 作为 PR 必跑门禁。
+- 配置 GitHub secret `OPENAI_API_KEY` 和可选 repo var `OPENAI_MODEL`。
+- 确定 nightly/manual eval 的 suite 范围、`max_cases`、成本预算和失败阈值。
+- 第一次真实运行后，把 provider report 中的 flaky case 标记为 quarantine
+  或转成更具体的 deterministic regression。
+- 根据真实 token/latency 数据补充 SLO 和告警阈值。
 
-该 PR 依赖真实 provider credential、成本策略和运行环境，不属于当前本地
-backend-only 分支可以完全闭环的工作。
+该 PR 依赖真实 provider credential、成本策略和运行环境，不属于当前本地代码
+分支可以完全闭环的工作。
 
 Flutter integration 暂按当前决策后置，等 Flutter app 重构分支完成后再打通。

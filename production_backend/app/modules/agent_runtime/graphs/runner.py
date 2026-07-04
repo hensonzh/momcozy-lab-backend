@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from langgraph.graph import END, START, StateGraph
@@ -54,16 +54,16 @@ class AgentRuntimeGraphRunner:
             return AgentRunExecutionResult(status="waiting_for_confirmation", pending_action_id=pending_action_id)
         raise ApiError(code="missing_runtime_outcome", message="Agent graph did not produce a terminal or waiting outcome.", status=502)
 
-    def _build_graph(self, *, run: AgentRun):
+    def _build_graph(self, *, run: AgentRun) -> Any:
         graph = StateGraph(AgentGraphState)
-        graph.add_node("load_context", self._load_context_node(run=run))
-        graph.add_node("safety_gate", self._checkpointing_node(run=run, node_name="safety_gate"))
-        graph.add_node("sdk_reasoning", self._sdk_reasoning_node(run=run))
-        graph.add_node("tool_result_review", self._checkpointing_node(run=run, node_name="tool_result_review"))
-        graph.add_node("action_policy", self._checkpointing_node(run=run, node_name="action_policy"))
-        graph.add_node("confirmation_interrupt", self._checkpointing_node(run=run, node_name="confirmation_interrupt"))
-        graph.add_node("final_response", self._checkpointing_node(run=run, node_name="final_response"))
-        graph.add_node("finish", self._checkpointing_node(run=run, node_name="finish"))
+        graph.add_node("load_context", cast(Any, self._load_context_node(run=run)))
+        graph.add_node("safety_gate", cast(Any, self._checkpointing_node(run=run, node_name="safety_gate")))
+        graph.add_node("sdk_reasoning", cast(Any, self._sdk_reasoning_node(run=run)))
+        graph.add_node("tool_result_review", cast(Any, self._checkpointing_node(run=run, node_name="tool_result_review")))
+        graph.add_node("action_policy", cast(Any, self._checkpointing_node(run=run, node_name="action_policy")))
+        graph.add_node("confirmation_interrupt", cast(Any, self._checkpointing_node(run=run, node_name="confirmation_interrupt")))
+        graph.add_node("final_response", cast(Any, self._checkpointing_node(run=run, node_name="final_response")))
+        graph.add_node("finish", cast(Any, self._checkpointing_node(run=run, node_name="finish")))
         graph.add_edge(START, "load_context")
         graph.add_edge("load_context", "safety_gate")
         graph.add_edge("safety_gate", "sdk_reasoning")
@@ -92,7 +92,7 @@ class AgentRuntimeGraphRunner:
                 node_name="load_context",
                 current_user_message_id=str(current_message.id),
             )
-            await self._save_checkpoint(run=run, node_name="load_context", state=state | next_state)
+            await self._save_checkpoint(run=run, node_name="load_context", state=cast(AgentGraphState, state | next_state))
             return next_state
 
         return load_context
@@ -107,7 +107,7 @@ class AgentRuntimeGraphRunner:
                 final_text=result.final_text,
                 pending_action_id=str(result.pending_action_id) if result.pending_action_id else None,
             )
-            await self._save_checkpoint(run=run, node_name="sdk_reasoning", state=state | update)
+            await self._save_checkpoint(run=run, node_name="sdk_reasoning", state=cast(AgentGraphState, state | update))
             return update
 
         return sdk_reasoning
@@ -115,7 +115,7 @@ class AgentRuntimeGraphRunner:
     def _checkpointing_node(self, *, run: AgentRun, node_name: str) -> GraphNode:
         async def checkpointing_node(state: AgentGraphState) -> dict[str, Any]:
             update = _node_update(state, node_name=node_name)
-            await self._save_checkpoint(run=run, node_name=node_name, state=state | update)
+            await self._save_checkpoint(run=run, node_name=node_name, state=cast(AgentGraphState, state | update))
             return update
 
         return checkpointing_node

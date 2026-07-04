@@ -2,6 +2,7 @@ from pathlib import Path
 
 
 WORKFLOW = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "production-backend-ci.yml"
+PROVIDER_EVAL_WORKFLOW = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "agent-provider-eval.yml"
 
 
 def test_production_backend_ci_runs_core_gates() -> None:
@@ -38,3 +39,18 @@ def test_production_backend_ci_is_scoped_to_isolated_backend() -> None:
 
     assert "production_backend/**" in text
     assert "src/momcozy" + "_agent" not in text
+
+
+def test_agent_provider_eval_workflow_is_manual_or_scheduled() -> None:
+    text = PROVIDER_EVAL_WORKFLOW.read_text()
+
+    for phrase in [
+        "workflow_dispatch",
+        "schedule:",
+        "production_backend/scripts/run_agent_provider_eval.py",
+        "--allow-skip-without-credentials",
+        "OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}",
+        "actions/upload-artifact@v4",
+        "agent-provider-eval",
+    ]:
+        assert phrase in text

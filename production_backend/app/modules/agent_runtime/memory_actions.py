@@ -58,7 +58,7 @@ def _text(payload: dict[str, Any], key: str) -> str:
 def _confidence_score(value: Any) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         raise PermanentJobError("invalid_confidence_score")
-    return value
+    return int(value)
 
 
 def _expires_at(value: Any) -> datetime | None:

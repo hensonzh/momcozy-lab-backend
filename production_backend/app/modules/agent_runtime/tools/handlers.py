@@ -371,7 +371,8 @@ class FileVisionSummaryReadToolHandler:
         ]
         summary = ""
         for event in safe_events:
-            event_summary = _text(event["payload"], "summary")
+            event_payload = event.get("payload")
+            event_summary = _text(event_payload if isinstance(event_payload, dict) else {}, "summary")
             if event_summary:
                 summary = event_summary
                 break
@@ -895,7 +896,8 @@ def _diary_entry_preview_payload(apply_payload: dict[str, Any]) -> dict[str, Any
 
 
 def _memory_create_apply_payload(args: dict[str, Any]) -> dict[str, Any]:
-    content = args.get("content") if isinstance(args.get("content"), dict) else {}
+    raw_content = args.get("content")
+    content: dict[str, Any] = dict(raw_content) if isinstance(raw_content, dict) else {}
     sensitivity = _text(args, "sensitivity")
     if sensitivity:
         content = dict(content)

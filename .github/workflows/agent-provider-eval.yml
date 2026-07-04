@@ -1,0 +1,53 @@
+name: agent-provider-eval
+
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: "Optional eval suite to run"
+        required: false
+        default: ""
+      max_cases:
+        description: "Optional maximum number of cases"
+        required: false
+        default: ""
+  schedule:
+    - cron: "23 8 * * *"
+
+jobs:
+  provider-eval:
+    runs-on: ubuntu-latest
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-5.5' }}
+      APP_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install backend dependencies
+        run: python -m pip install -r production_backend/requirements-dev.txt
+
+      - name: Run provider-backed agent eval
+        run: |
+          args=(
+            --output /tmp/agent-provider-eval.json
+            --allow-skip-without-credentials
+          )
+          if [ -n "${{ github.event.inputs.suite }}" ]; then
+            args+=(--suite "${{ github.event.inputs.suite }}")
+          fi
+          if [ -n "${{ github.event.inputs.max_cases }}" ]; then
+            args+=(--max-cases "${{ github.event.inputs.max_cases }}")
+          fi
+          python production_backend/scripts/run_agent_provider_eval.py "${args[@]}"
+
+      - name: Upload provider eval report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-provider-eval
+          path: /tmp/agent-provider-eval.json

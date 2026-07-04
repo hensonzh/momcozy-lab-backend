@@ -115,7 +115,8 @@ def _trace_from_payload(payload: dict[str, Any]) -> AgentEvalTrace:
 
 def _synthetic_expected_trace(case: dict[str, Any]) -> AgentEvalTrace:
     expected_tools = [{"tool_name": _contract(tool_call), "status": "completed"} for tool_call in case.get("expected_tool_calls", [])]
-    behavior = case.get("expected_behavior") if isinstance(case.get("expected_behavior"), dict) else {}
+    raw_behavior = case.get("expected_behavior")
+    behavior = raw_behavior if isinstance(raw_behavior, dict) else {}
     requires_confirmation = bool(behavior.get("requires_confirmation_before_write"))
     events = [{"type": "action.confirmation_required"}] if requires_confirmation and expected_tools else []
     actions = [{"status": "confirmation_required"}] if events else []

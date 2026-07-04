@@ -317,7 +317,8 @@ def _safety_decision_failures(*, case: dict[str, Any], trace: AgentEvalTrace) ->
 
 
 def _confirmation_failures(*, case: dict[str, Any], trace: AgentEvalTrace) -> list[AgentEvalFailure]:
-    behavior = case.get("expected_behavior") if isinstance(case.get("expected_behavior"), dict) else {}
+    raw_behavior = case.get("expected_behavior")
+    behavior = raw_behavior if isinstance(raw_behavior, dict) else {}
     if not bool(behavior.get("requires_confirmation_before_write")):
         return []
     proposal_contracts = [_contract(tool_call) for tool_call in case.get("expected_tool_calls", []) if _contract(tool_call).endswith(".propose")]
