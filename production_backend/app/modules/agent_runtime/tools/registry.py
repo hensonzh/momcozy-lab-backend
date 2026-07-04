@@ -125,6 +125,25 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         ToolContract(
+            name="diary.entry_upsert.propose",
+            domain="diary",
+            description="Propose a pregnancy diary entry upsert action for user confirmation.",
+            input_schema_ref="DiaryEntryUpsertProposalCreate",
+            output_schema_ref="AgentActionRead",
+            read_or_write="write",
+            required_permission="diary:write:self",
+            owner_scope="actor",
+            side_effect_level="medium",
+            blocking_policy="wait_for_confirmation",
+            result_dependency="none",
+            requires_confirmation=True,
+            idempotency_required=True,
+            audit_required=True,
+            timeout_seconds=15,
+        )
+    )
+    registry.register(
+        ToolContract(
             name="devices.pump_status.read",
             domain="devices",
             description="Read current user's pump devices and recent telemetry as a bounded status summary.",

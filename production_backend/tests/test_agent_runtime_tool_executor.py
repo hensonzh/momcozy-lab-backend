@@ -142,6 +142,32 @@ def test_tool_executor_rejects_missing_required_tool_args_before_persisting_call
     assert repository.events == []
 
 
+def test_tool_executor_rejects_invalid_array_tool_args_before_persisting_call() -> None:
+    actor = _user(permissions={"diary:write:self"})
+    repository = FakeToolRepository()
+    executor = ToolExecutor(
+        registry=default_tool_registry(),
+        repository=repository,
+        handlers={"diary.entry_upsert.propose": profile_read_handler},
+    )
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            executor.execute(
+                actor=actor,
+                run_id=uuid4(),
+                tool_name="diary.entry_upsert.propose",
+                call_id="call-1",
+                args={"entry_date": "2026-07-04", "symptom_tags": "backache"},
+            )
+        )
+
+    assert exc_info.value.code == "tool_input_invalid"
+    assert exc_info.value.details == {"path": "$.symptom_tags", "reason": "must be an array"}
+    assert repository.tool_call is None
+    assert repository.events == []
+
+
 def test_tool_executor_marks_tool_call_failed_on_handler_error() -> None:
     actor = _user(permissions={"profile:read:self"})
     repository = FakeToolRepository()

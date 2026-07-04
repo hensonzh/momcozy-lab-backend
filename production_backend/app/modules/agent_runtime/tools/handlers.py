@@ -7,6 +7,7 @@ from uuid import UUID
 from ....core.errors import ApiError
 from ...devices.models import PumpDevice, PumpTelemetryEvent
 from ...devices.service import DevicesService
+from ...diary.agent_actions import DIARY_ENTRY_UPSERT_ACTION
 from ...diary.models import PregnancyDiaryEntry
 from ...diary.service import DiaryService
 from ...files.vision_service import FileVisionService
@@ -23,6 +24,20 @@ from ...hospital_bag import HOSPITAL_BAG_CART_UPDATE_ACTION
 from ...support.agent_actions import SUPPORT_TICKET_CREATE_ACTION
 from ..service import AgentRuntimeService
 from .executor import ToolHandler, ToolHandlerContext
+
+
+_DIARY_ENTRY_VALUE_FIELDS = (
+    "gestational_week",
+    "mood",
+    "energy_level",
+    "sleep_summary",
+    "fetal_movement",
+    "symptom_tags",
+    "appointment_note",
+    "nutrition_note",
+    "content",
+    "attachments",
+)
 
 
 class ProfileReadToolHandler:
@@ -205,6 +220,32 @@ class DiaryRecentReadToolHandler:
         }
 
 
+class DiaryEntryUpsertProposeToolHandler:
+    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
+        self.runtime_service = runtime_service
+
+    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
+        apply_payload = _diary_entry_apply_payload(context.args)
+        entry_date = _text(apply_payload, "entry_date")
+        if not entry_date:
+            raise ApiError(code="validation_failed", message="entry_date is required.", status=422)
+        values = apply_payload.get("values")
+        if not isinstance(values, dict) or not values:
+            raise ApiError(code="validation_failed", message="At least one diary field is required.", status=422)
+        preview_payload = _diary_entry_preview_payload(apply_payload)
+        action = await self.runtime_service.propose_action(
+            owner_user_id=context.actor.user_id,
+            run_id=context.run_id,
+            action_type=DIARY_ENTRY_UPSERT_ACTION,
+            target_type="pregnancy_diary_entry",
+            side_effect_level="medium",
+            preview_payload=preview_payload,
+            apply_payload=apply_payload,
+            idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:diary-entry",
+        )
+        return _proposal_result(action=action, preview_payload=preview_payload)
+
+
 class DevicesPumpStatusReadToolHandler:
     def __init__(self, *, devices_service: DevicesService) -> None:
         self.devices_service = devices_service
@@ -365,6 +406,7 @@ def build_default_tool_handlers(
         "records.milk_summary.read": MilkSummaryReadToolHandler(records_service=records_service),
         "plans.current.read": PlansCurrentReadToolHandler(plans_service=plans_service),
         "diary.recent.read": DiaryRecentReadToolHandler(diary_service=diary_service),
+        "diary.entry_upsert.propose": DiaryEntryUpsertProposeToolHandler(runtime_service=agent_runtime_service),
         "devices.pump_status.read": DevicesPumpStatusReadToolHandler(devices_service=devices_service),
         "files.vision_summary.read": FileVisionSummaryReadToolHandler(vision_service=file_vision_service),
         "plans.milk_plan.propose": MilkPlanProposeToolHandler(runtime_service=agent_runtime_service),
@@ -572,6 +614,42 @@ def _milk_reminder_preview_payload(apply_payload: dict[str, Any]) -> dict[str, A
         "has_payload": isinstance(apply_payload.get("payload"), dict) and bool(apply_payload.get("payload")),
     }
     return {key: value for key, value in preview.items() if value not in ("", None)}
+
+
+def _diary_entry_apply_payload(args: dict[str, Any]) -> dict[str, Any]:
+    values = {key: args[key] for key in _DIARY_ENTRY_VALUE_FIELDS if key in args and args[key] is not None}
+    payload: dict[str, Any] = {
+        "entry_date": _text(args, "entry_date"),
+    }
+    if values:
+        payload["values"] = values
+    metadata = _metadata_payload(args)
+    if metadata:
+        payload["metadata"] = metadata
+    return {key: value for key, value in payload.items() if value not in ("", None, {})}
+
+
+def _diary_entry_preview_payload(apply_payload: dict[str, Any]) -> dict[str, Any]:
+    values = apply_payload.get("values")
+    if not isinstance(values, dict):
+        values = {}
+    preview: dict[str, Any] = {
+        "entry_date": _text(apply_payload, "entry_date"),
+        "fields": sorted(values),
+        "gestational_week": _text(values, "gestational_week"),
+        "mood": _text(values, "mood"),
+        "energy_level": _text(values, "energy_level"),
+    }
+    symptom_tags = values.get("symptom_tags")
+    if isinstance(symptom_tags, list):
+        preview["symptom_tags"] = symptom_tags
+    content = _text(values, "content")
+    if content:
+        preview["content_summary"] = _truncate(content, max_length=240)
+    attachments = values.get("attachments")
+    if isinstance(attachments, list):
+        preview["attachment_count"] = len(attachments)
+    return {key: value for key, value in preview.items() if value not in ("", None, [], {})}
 
 
 def _proposal_result(*, action: Any, preview_payload: dict[str, Any]) -> dict[str, Any]:

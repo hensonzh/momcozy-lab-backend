@@ -15,6 +15,8 @@ from production_backend.app.modules.agent_runtime.events import AgentEventSink
 from production_backend.app.modules.agent_runtime.repository import AgentRuntimeRepository
 from production_backend.app.modules.audit import AuditService, IdempotencyService, OutboxService
 from production_backend.app.modules.audit.repository import AuditRepository, OutboxRepository
+from production_backend.app.modules.diary import DIARY_ENTRY_UPSERT_ACTION, DiaryEntryUpsertActionHandler, DiaryService
+from production_backend.app.modules.diary.repository import DiaryRepository
 from production_backend.app.modules.notifications import (
     MILK_REMINDER_CREATE_ACTION,
     MilkReminderCreateActionHandler,
@@ -85,6 +87,10 @@ async def run_outbox_worker(
                     audit_service=AuditService(repository=audit_repository),
                     idempotency_service=IdempotencyService(repository=audit_repository),
                 )
+                diary_service = DiaryService(
+                    repository=DiaryRepository(session),
+                    audit_service=AuditService(repository=audit_repository),
+                )
                 agent_runtime_repository = AgentRuntimeRepository(session)
                 worker = OutboxWorker(
                     service=OutboxService(repository=OutboxRepository(session)),
@@ -95,6 +101,7 @@ async def run_outbox_worker(
                         agent_action_handlers={
                             MILK_REMINDER_CREATE_ACTION: MilkReminderCreateActionHandler(service=notifications_service),
                             MILK_PLAN_CREATE_ACTION: MilkPlanCreateActionHandler(service=plans_service),
+                            DIARY_ENTRY_UPSERT_ACTION: DiaryEntryUpsertActionHandler(service=diary_service),
                             FEEDING_RECORD_CREATE_ACTION: FeedingRecordCreateActionHandler(service=records_service),
                             PUMPING_RECORD_CREATE_ACTION: PumpingRecordCreateActionHandler(service=records_service),
                             SUPPORT_TICKET_CREATE_ACTION: SupportTicketCreateActionHandler(service=support_service),

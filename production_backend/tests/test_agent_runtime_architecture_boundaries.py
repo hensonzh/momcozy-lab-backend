@@ -41,6 +41,7 @@ def test_tool_contract_registry_declares_permission_confirmation_and_blocking_po
     pumping_proposal = registry.get("records.pumping_record.propose")
     milk_plan_proposal = registry.get("plans.milk_plan.propose")
     milk_reminder_proposal = registry.get("notifications.milk_reminder.propose")
+    diary_entry_proposal = registry.get("diary.entry_upsert.propose")
     assert feeding_proposal.read_or_write == "write"
     assert feeding_proposal.requires_confirmation is True
     assert feeding_proposal.side_effect_level == "low"
@@ -56,6 +57,10 @@ def test_tool_contract_registry_declares_permission_confirmation_and_blocking_po
     assert milk_reminder_proposal.requires_confirmation is True
     assert milk_reminder_proposal.side_effect_level == "medium"
     assert milk_reminder_proposal.required_permission == "notifications:create:self"
+    assert diary_entry_proposal.read_or_write == "write"
+    assert diary_entry_proposal.requires_confirmation is True
+    assert diary_entry_proposal.side_effect_level == "medium"
+    assert diary_entry_proposal.required_permission == "diary:write:self"
     assert "profile.read" in registry.names_for_sdk()
     assert "business.context.read" in registry.names_for_sdk()
     plans_current = registry.get("plans.current.read")
@@ -78,6 +83,7 @@ def test_tool_contract_registry_declares_permission_confirmation_and_blocking_po
     assert "records.milk_summary.read" in registry.names_for_sdk()
     assert "plans.current.read" in registry.names_for_sdk()
     assert "diary.recent.read" in registry.names_for_sdk()
+    assert "diary.entry_upsert.propose" in registry.names_for_sdk()
     assert "devices.pump_status.read" in registry.names_for_sdk()
     assert "files.vision_summary.read" in registry.names_for_sdk()
 
@@ -90,6 +96,7 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
     milk_schema = tool_input_schema(registry.get("records.milk_summary.read").input_schema_ref)
     plans_schema = tool_input_schema(registry.get("plans.current.read").input_schema_ref)
     diary_schema = tool_input_schema(registry.get("diary.recent.read").input_schema_ref)
+    diary_entry_schema = tool_input_schema(registry.get("diary.entry_upsert.propose").input_schema_ref)
     devices_schema = tool_input_schema(registry.get("devices.pump_status.read").input_schema_ref)
     file_vision_schema = tool_input_schema(registry.get("files.vision_summary.read").input_schema_ref)
     milk_plan_schema = tool_input_schema(registry.get("plans.milk_plan.propose").input_schema_ref)
@@ -115,6 +122,10 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
     assert plans_schema["properties"]["limit"]["maximum"] == 20
     assert diary_schema["additionalProperties"] is False
     assert diary_schema["properties"]["limit"]["maximum"] == 20
+    assert diary_entry_schema["additionalProperties"] is False
+    assert diary_entry_schema["required"] == ["entry_date"]
+    assert diary_entry_schema["properties"]["content"]["maxLength"] == 5000
+    assert diary_entry_schema["properties"]["symptom_tags"]["type"] == "array"
     assert devices_schema["additionalProperties"] is False
     assert devices_schema["properties"]["limit"]["maximum"] == 20
     assert file_vision_schema["additionalProperties"] is False

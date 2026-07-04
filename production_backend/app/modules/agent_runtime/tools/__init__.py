@@ -3,6 +3,7 @@ from .executor import ToolExecutionResult, ToolExecutor, ToolHandlerContext
 from .handlers import (
     BusinessContextReadToolHandler,
     DevicesPumpStatusReadToolHandler,
+    DiaryEntryUpsertProposeToolHandler,
     DiaryRecentReadToolHandler,
     FileVisionSummaryReadToolHandler,
     FeedingRecordProposeToolHandler,
@@ -22,6 +23,7 @@ from .schemas import tool_input_schema
 __all__ = [
     "BusinessContextReadToolHandler",
     "DevicesPumpStatusReadToolHandler",
+    "DiaryEntryUpsertProposeToolHandler",
     "DiaryRecentReadToolHandler",
     "FileVisionSummaryReadToolHandler",
     "FeedingRecordProposeToolHandler",

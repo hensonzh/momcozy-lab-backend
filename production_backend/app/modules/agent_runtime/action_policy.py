@@ -59,6 +59,12 @@ DEFAULT_AGENT_ACTION_RULES: Mapping[str, AgentActionPolicyRule] = {
         side_effect_level="medium",
         requires_confirmation=True,
     ),
+    "diary.entry.upsert": AgentActionPolicyRule(
+        action_type="diary.entry.upsert",
+        target_type="pregnancy_diary_entry",
+        side_effect_level="medium",
+        requires_confirmation=True,
+    ),
 }
 
 

@@ -9,6 +9,7 @@ from production_backend.app.modules.agent_runtime.models import AgentAction
 from production_backend.app.modules.agent_runtime.tools import (
     BusinessContextReadToolHandler,
     DevicesPumpStatusReadToolHandler,
+    DiaryEntryUpsertProposeToolHandler,
     DiaryRecentReadToolHandler,
     FeedingRecordProposeToolHandler,
     FileVisionSummaryReadToolHandler,
@@ -25,6 +26,7 @@ from production_backend.app.modules.agent_runtime.tools import (
 )
 from production_backend.app.modules.auth import CurrentUser
 from production_backend.app.modules.devices.models import PumpDevice, PumpTelemetryEvent
+from production_backend.app.modules.diary.agent_actions import DIARY_ENTRY_UPSERT_ACTION
 from production_backend.app.modules.diary.models import PregnancyDiaryEntry
 from production_backend.app.modules.files.vision_service import FileVisionEvent
 from production_backend.app.modules.notifications.agent_actions import MILK_REMINDER_CREATE_ACTION
@@ -385,6 +387,41 @@ def test_milk_reminder_propose_tool_handler_creates_confirmation_action() -> Non
     assert runtime_service.calls[0]["apply_payload"]["metadata"] == {"timezone": "Asia/Shanghai"}
 
 
+def test_diary_entry_upsert_propose_tool_handler_creates_confirmation_action() -> None:
+    actor = _user()
+    runtime_service = FakeAgentRuntimeService()
+    context = _context(
+        actor=actor,
+        args={
+            "entry_date": "2026-07-04",
+            "gestational_week": "32w",
+            "mood": "calm",
+            "energy_level": "medium",
+            "symptom_tags": ["backache"],
+            "content": "x" * 300,
+            "timezone": "Asia/Shanghai",
+        },
+    )
+
+    result = asyncio.run(DiaryEntryUpsertProposeToolHandler(runtime_service=runtime_service)(context))
+
+    assert result["action_type"] == DIARY_ENTRY_UPSERT_ACTION
+    assert result["action_status"] == "confirmation_required"
+    assert result["preview_payload"]["entry_date"] == "2026-07-04"
+    assert result["preview_payload"]["fields"] == [
+        "content",
+        "energy_level",
+        "gestational_week",
+        "mood",
+        "symptom_tags",
+    ]
+    assert result["preview_payload"]["content_summary"].endswith("...")
+    assert runtime_service.calls[0]["target_type"] == "pregnancy_diary_entry"
+    assert runtime_service.calls[0]["side_effect_level"] == "medium"
+    assert runtime_service.calls[0]["apply_payload"]["values"]["content"] == "x" * 300
+    assert runtime_service.calls[0]["apply_payload"]["metadata"] == {"timezone": "Asia/Shanghai"}
+
+
 def test_support_ticket_propose_tool_handler_requires_summary() -> None:
     with pytest.raises(ApiError) as exc_info:
         asyncio.run(SupportTicketProposeToolHandler(runtime_service=FakeAgentRuntimeService())(_context(args={})))
@@ -431,6 +468,17 @@ def test_milk_reminder_propose_tool_handler_requires_title() -> None:
     assert exc_info.value.code == "validation_failed"
 
 
+def test_diary_entry_upsert_propose_tool_handler_requires_values() -> None:
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            DiaryEntryUpsertProposeToolHandler(runtime_service=FakeAgentRuntimeService())(
+                _context(args={"entry_date": "2026-07-04"})
+            )
+        )
+
+    assert exc_info.value.code == "validation_failed"
+
+
 def test_support_ticket_propose_tool_handler_rejects_legacy_nested_ticket_shape() -> None:
     with pytest.raises(ApiError) as exc_info:
         asyncio.run(
@@ -459,6 +507,7 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
         "business.context.read",
         "records.milk_summary.read",
         "plans.current.read",
+        "diary.entry_upsert.propose",
         "diary.recent.read",
         "devices.pump_status.read",
         "files.vision_summary.read",
@@ -494,6 +543,7 @@ def _user() -> CurrentUser:
                 "profile:read:self",
                 "business_context:read:self",
                 "files:read:self",
+                "diary:write:self",
                 "plans:write:self",
                 "notifications:create:self",
                 "hospital_bag_cart:update:self",

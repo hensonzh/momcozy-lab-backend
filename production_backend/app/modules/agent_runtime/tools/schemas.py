@@ -79,6 +79,28 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             }
         },
     },
+    "DiaryEntryUpsertProposalCreate": {
+        "title": "DiaryEntryUpsertProposalCreate",
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["entry_date"],
+        "properties": {
+            "entry_date": {"type": "string", "minLength": 1, "maxLength": 20},
+            "gestational_week": {"type": "string", "maxLength": 32},
+            "mood": {"type": "string", "maxLength": 64},
+            "energy_level": {"type": "string", "maxLength": 64},
+            "sleep_summary": {"type": "string", "maxLength": 2000},
+            "fetal_movement": {"type": "string", "maxLength": 2000},
+            "symptom_tags": {"type": "array", "items": {}},
+            "appointment_note": {"type": "string", "maxLength": 2000},
+            "nutrition_note": {"type": "string", "maxLength": 2000},
+            "content": {"type": "string", "maxLength": 5000},
+            "attachments": {"type": "array", "items": {}},
+            "locale": {"type": "string", "maxLength": 35},
+            "timezone": {"type": "string", "maxLength": 80},
+            "idempotency_key": {"type": "string", "maxLength": 255},
+        },
+    },
     "DevicesPumpStatusQuery": {
         "title": "DevicesPumpStatusQuery",
         "type": "object",
@@ -264,6 +286,9 @@ def _validate_value(*, schema: JsonSchema, value: Any, path: str) -> None:
         return
     if schema_type == "number":
         _validate_number(schema=schema, value=value, path=path)
+        return
+    if schema_type == "array":
+        _validate_array(schema=schema, value=value, path=path)
 
 
 def _validate_object(*, schema: JsonSchema, value: dict[str, Any], path: str) -> None:
@@ -320,6 +345,21 @@ def _validate_number(*, schema: JsonSchema, value: Any, path: str) -> None:
     maximum = schema.get("maximum")
     if isinstance(maximum, int | float) and value > maximum:
         _raise_invalid(path=path, reason=f"must be less than or equal to {maximum}")
+
+
+def _validate_array(*, schema: JsonSchema, value: Any, path: str) -> None:
+    if not isinstance(value, list):
+        _raise_invalid(path=path, reason="must be an array")
+    min_items = schema.get("minItems")
+    if isinstance(min_items, int) and len(value) < min_items:
+        _raise_invalid(path=path, reason=f"must include at least {min_items} items")
+    max_items = schema.get("maxItems")
+    if isinstance(max_items, int) and len(value) > max_items:
+        _raise_invalid(path=path, reason=f"must include at most {max_items} items")
+    item_schema = schema.get("items")
+    if isinstance(item_schema, dict) and item_schema:
+        for index, item in enumerate(value):
+            _validate_value(schema=item_schema, value=item, path=f"{path}[{index}]")
 
 
 def _raise_invalid(*, path: str, reason: str) -> None:
