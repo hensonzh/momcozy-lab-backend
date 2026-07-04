@@ -508,24 +508,26 @@ eval regression。
 
 建议 PR：
 
-1. `eval: expand product agent seed suites` - partial
-2. `eval: add agent eval runner` - partial
-3. `ci: add critical agent eval gates`
+1. `eval: expand product agent seed suites` - done
+2. `eval: add agent eval runner` - done
+3. `ci: add critical agent eval gates` - done
 
 已完成能力：
 
 - product seed schema 和 required suite 校验。
-- memory preference capture seed case。
+- seed suites 已覆盖奶量、孕期计划、日记、设备、支持、健康、情绪、安全、越权、prompt injection、memory preference、sensitive memory rejection。
 - deterministic assertion engine：required tool、safety decision、
-  confirmation-required。
+  forbidden tool、confirmation-required、forbidden side effect。
+- seed eval runner 和 CLI，可对 product seed 做 deterministic smoke，并可接收 observed trace fixtures。
 - replay bundle eval runner 和 CLI，可对 redacted replay JSON 输出 pass/fail
   报告。
+- CI 已接入 `run_agent_seed_eval.py` smoke gate。
 
 后续 PR：
 
 1. `eval: add isolated runtime client for agent seed cases`
-2. `eval: expand device support and health safety regression cases`
-3. `ci: add critical agent eval smoke gate`
+2. `eval: add provider-backed nightly evals`
+3. `eval: add JUnit/report artifact export`
 
 验收：
 
