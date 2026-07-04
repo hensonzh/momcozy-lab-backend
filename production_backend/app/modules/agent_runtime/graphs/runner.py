@@ -40,6 +40,10 @@ class AgentRuntimeGraphRunner:
         if definition.runtime_pattern != run.runtime_pattern:
             raise ApiError(code="runtime_graph_mismatch", message="Run runtime pattern does not match graph version.", status=409)
 
+        resumed = await self._resume_waiting_from_checkpoint(run=run)
+        if resumed is not None:
+            return resumed
+
         graph = self._build_graph(run=run)
         final_state = await graph.ainvoke(_initial_state(run))
         status = final_state.get("outcome_status")
@@ -128,6 +132,20 @@ class AgentRuntimeGraphRunner:
                 "outcome_status": state.get("outcome_status", ""),
             },
         )
+
+    async def _resume_waiting_from_checkpoint(self, *, run: AgentRun) -> AgentRunExecutionResult | None:
+        if self.checkpoint_store is None:
+            return None
+        latest = await self.checkpoint_store.latest_for_run(run_id=run.id)
+        if latest is None:
+            return None
+        summary = latest.state_summary if isinstance(latest.state_summary, dict) else {}
+        pending_action_id = _uuid_or_none(summary.get("pending_action_id"))
+        if pending_action_id is None:
+            return None
+        if summary.get("outcome_status") == "waiting_for_confirmation" or summary.get("node_name") == "confirmation_interrupt":
+            return AgentRunExecutionResult(status="waiting_for_confirmation", pending_action_id=pending_action_id)
+        return None
 
 
 def _initial_state(run: AgentRun) -> AgentGraphState:

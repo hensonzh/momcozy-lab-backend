@@ -88,6 +88,42 @@ def test_agent_runtime_graph_runner_fails_before_handler_without_user_message() 
     assert handler.runs == []
 
 
+def test_agent_runtime_graph_runner_resumes_waiting_checkpoint_without_reinvoking_handler() -> None:
+    run = _run()
+    action_id = uuid4()
+    checkpoint_store = FakeCheckpointStore()
+    checkpoint_store.checkpoints.append(
+        AgentContextCheckpoint(
+            id=uuid4(),
+            thread_id=run.thread_id,
+            run_id=run.id,
+            checkpoint_namespace="test",
+            checkpoint_id="checkpoint-existing",
+            graph_version=run.graph_version,
+            state_ref="",
+            state_summary={
+                "node_name": "confirmation_interrupt",
+                "outcome_status": "waiting_for_confirmation",
+                "pending_action_id": str(action_id),
+            },
+        )
+    )
+    handler = FakeNodeHandler(result=AgentRunExecutionResult(status="completed", final_text="Should not run"))
+
+    result = asyncio.run(
+        AgentRuntimeGraphRunner(
+            repository=FakeGraphRepository(current_message=_message(run=run)),
+            checkpoint_store=checkpoint_store,
+            node_handler=handler,
+        ).execute(run=run)
+    )
+
+    assert result.status == "waiting_for_confirmation"
+    assert result.pending_action_id == action_id
+    assert handler.runs == []
+    assert _checkpoint_nodes(checkpoint_store) == ["confirmation_interrupt"]
+
+
 def _checkpoint_nodes(store: "FakeCheckpointStore") -> list[str]:
     return [checkpoint.state_summary["node_name"] for checkpoint in store.checkpoints]
 
@@ -158,3 +194,7 @@ class FakeCheckpointStore:
         )
         self.checkpoints.append(checkpoint)
         return checkpoint
+
+    async def latest_for_run(self, *, run_id):
+        matching = [checkpoint for checkpoint in self.checkpoints if checkpoint.run_id == run_id]
+        return matching[-1] if matching else None
