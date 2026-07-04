@@ -26,15 +26,31 @@
 - tool contract / tool executor / action policy 的基础实现。
 - action confirmation -> outbox apply 的 effect lane。
 - deterministic safety gate、replay bundle、eval seed 基础。
+- `AgentRuntimeGraphRunner` 已通过 LangGraph `StateGraph` 执行
+  `load_context -> safety_gate -> sdk_reasoning -> tool_result_review ->
+  action_policy -> confirmation_interrupt/final_response -> finish`。
+
+截至 2026-07-04 的最新增量：
+
+- 奶量管理已具备 read/action/outbox/eval 的首个完整垂直闭环：
+  `records.milk_summary.read`、feeding/pumping record proposal、
+  milk plan proposal、milk reminder proposal。
+- 孕期计划和日记已具备核心 action proposal：
+  `pregnancy.plan_create.propose`、`plans.task_create.propose`、
+  `plans.task_complete.propose`、`diary.entry_upsert.propose`。
+- 计划、任务、日记、提醒、奶量记录的 action apply handler 已接入 outbox
+  worker。
+- SDK runner 已有 provider error -> stable error code 的映射。
+- deterministic safety gate 已覆盖更多母婴健康和情绪危机红旗表达。
+- product eval seed 已覆盖孕期计划、任务完成、日记写入和当前 support ticket
+  tool contract。
 
 仍未完成：
 
-- Graph 目前主要是 graph definition / registry，还不是完整 LangGraph
-  `StateGraph` 编排。
 - OpenAI Agents SDK 已有 adapter 边界，但业务 specialist agents、handoff、
   guardrail、tracing 策略还没有完整产品化。
 - 旧智能体中的主要业务能力还没有完整迁移成新 tool/action contract。
-- 奶量管理、孕期计划、待产包、设备指导、IBCLC、健康/情绪安全、图片/语音
+- 待产包、设备指导、IBCLC、健康/情绪安全、图片/语音
   等主流程尚未达到新架构下的完整 parity。
 - eval 样例和自动化行为评估还不够支撑持续重构。
 - Flutter 新端尚未和新 agent event/action contract 做端到端联调。
