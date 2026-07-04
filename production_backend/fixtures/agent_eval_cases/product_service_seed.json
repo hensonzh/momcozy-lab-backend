@@ -220,20 +220,18 @@
     },
     {
       "suite": "milk_schedule_management",
-      "name": "schedule change requires confirmation",
+      "name": "pumping reminder create requires confirmation",
       "domain": "milk_management",
       "owner_team": "agent",
       "input": {
         "messages": [
           {
             "role": "user",
-            "content": "Move my next pumping reminder from 3 pm to 4 pm."
+            "content": "Please remind me to pump at 8 pm tonight."
           }
         ],
         "fixtures": {
-          "next_task": {
-            "time": "15:00"
-          }
+          "timezone": "Asia/Shanghai"
         }
       },
       "expected_behavior": {
@@ -241,8 +239,8 @@
         "route": "action_proposal",
         "requires_confirmation_before_write": true,
         "must_include": [
-          "preview_old_time",
-          "preview_new_time"
+          "preview_reminder_time",
+          "confirmation_card"
         ],
         "must_not": [
           "apply_without_confirmation"
@@ -250,7 +248,7 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "plan_task_update_proposal",
+          "contract": "notifications.milk_reminder.propose",
           "timing": "before_action_confirmation"
         }
       ],
@@ -288,7 +286,11 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "milk_plan_proposal",
+          "contract": "records.milk_summary.read",
+          "timing": "before_plan_proposal"
+        },
+        {
+          "contract": "plans.milk_plan.propose",
           "timing": "after_needed_context"
         }
       ],

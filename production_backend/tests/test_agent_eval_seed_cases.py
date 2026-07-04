@@ -47,6 +47,20 @@ def test_product_agent_eval_seed_uses_current_milk_summary_tool_contract() -> No
         assert "milk_records_read" not in contracts
 
 
+def test_product_agent_eval_seed_uses_current_milk_action_contracts() -> None:
+    cases = load_product_agent_eval_seed_cases(PRODUCT_AGENT_EVAL_SEED)
+    by_suite = {case["suite"]: case for case in cases}
+
+    schedule_contracts = {tool_call["contract"] for tool_call in by_suite["milk_schedule_management"]["expected_tool_calls"]}
+    plan_contracts = {tool_call["contract"] for tool_call in by_suite["milk_plan_creation"]["expected_tool_calls"]}
+
+    assert "notifications.milk_reminder.propose" in schedule_contracts
+    assert "plan_task_update_proposal" not in schedule_contracts
+    assert "records.milk_summary.read" in plan_contracts
+    assert "plans.milk_plan.propose" in plan_contracts
+    assert "milk_plan_proposal" not in plan_contracts
+
+
 def test_product_agent_eval_seed_loader_rejects_missing_required_suite() -> None:
     payload = {
         "schema_version": "agent_eval_seed.v1",
