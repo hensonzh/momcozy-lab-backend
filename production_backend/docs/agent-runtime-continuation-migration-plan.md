@@ -529,12 +529,13 @@ eval regression。
 - replay bundle eval runner 和 CLI，可对 redacted replay JSON 输出 pass/fail
   报告。
 - CI 已接入 `run_agent_seed_eval.py` smoke gate。
+- CI 已上传 seed eval JSON/JUnit 报告 artifact，便于失败排查。
 
 后续 PR：
 
 1. `eval: add isolated runtime client for agent seed cases` - done
 2. `eval: add provider-backed nightly evals`
-3. `eval: add report artifact upload in CI`
+3. `eval: add report artifact upload in CI` - done
 
 验收：
 
