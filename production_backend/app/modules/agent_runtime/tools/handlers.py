@@ -9,6 +9,7 @@ from ...devices.models import PumpDevice, PumpTelemetryEvent
 from ...devices.service import DevicesService
 from ...diary.models import PregnancyDiaryEntry
 from ...diary.service import DiaryService
+from ...files.vision_service import FileVisionService
 from ...plans.models import Plan, PlanTask
 from ...plans.service import PlansService
 from ...profiles.models import InfantProfile, UserProfile
@@ -222,6 +223,35 @@ class DevicesPumpStatusReadToolHandler:
         }
 
 
+class FileVisionSummaryReadToolHandler:
+    def __init__(self, *, vision_service: FileVisionService) -> None:
+        self.vision_service = vision_service
+
+    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
+        file_id = _uuid(_text(context.args, "file_id"), code="validation_failed", field_name="file_id")
+        events = await self.vision_service.events_for_owner(file_id=file_id, owner_user_id=context.actor.user_id)
+        safe_events = [
+            {
+                "type": event.type,
+                "sequence": event.sequence,
+                "payload": _safe_vision_payload(event.payload),
+            }
+            for event in events
+        ]
+        summary = ""
+        for event in safe_events:
+            event_summary = _text(event["payload"], "summary")
+            if event_summary:
+                summary = event_summary
+                break
+        return {
+            "file_id": str(file_id),
+            "summary": summary,
+            "events": safe_events,
+            "event_count": len(safe_events),
+        }
+
+
 class FeedingRecordProposeToolHandler:
     def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
         self.runtime_service = runtime_service
@@ -273,6 +303,7 @@ def build_default_tool_handlers(
     plans_service: PlansService,
     diary_service: DiaryService,
     devices_service: DevicesService,
+    file_vision_service: FileVisionService,
     agent_runtime_service: AgentRuntimeService,
 ) -> dict[str, ToolHandler]:
     return {
@@ -287,6 +318,7 @@ def build_default_tool_handlers(
         "plans.current.read": PlansCurrentReadToolHandler(plans_service=plans_service),
         "diary.recent.read": DiaryRecentReadToolHandler(diary_service=diary_service),
         "devices.pump_status.read": DevicesPumpStatusReadToolHandler(devices_service=devices_service),
+        "files.vision_summary.read": FileVisionSummaryReadToolHandler(vision_service=file_vision_service),
         "records.feeding_record.propose": FeedingRecordProposeToolHandler(runtime_service=agent_runtime_service),
         "records.pumping_record.propose": PumpingRecordProposeToolHandler(runtime_service=agent_runtime_service),
         "hospital_bag.cart_update.propose": HospitalBagCartUpdateProposeToolHandler(runtime_service=agent_runtime_service),
@@ -463,6 +495,27 @@ def _metadata_payload(payload: dict[str, Any]) -> dict[str, str]:
 
 def _text(payload: dict[str, Any], key: str) -> str:
     return str(payload.get(key) or "").strip()
+
+
+def _uuid(value: str, *, code: str, field_name: str) -> UUID:
+    try:
+        return UUID(value)
+    except ValueError as exc:
+        raise ApiError(
+            code=code,
+            message=f"{field_name} must be a valid UUID.",
+            status=422,
+            details={"field": field_name},
+        ) from exc
+
+
+def _safe_vision_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    safe: dict[str, Any] = {}
+    for key in ("content_type", "original_filename", "size_bytes", "provider", "summary", "event_count"):
+        value = payload.get(key)
+        if value not in ("", None):
+            safe[key] = value
+    return safe
 
 
 def _optional_number(payload: dict[str, Any], key: str) -> float | None:

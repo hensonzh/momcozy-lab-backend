@@ -8,6 +8,7 @@ from typing import Any
 from production_backend.app.core.metrics import RequestMetrics
 from production_backend.app.core.settings import Settings
 from production_backend.app.infrastructure.db.session import create_db_engine, create_session_factory
+from production_backend.app.infrastructure.object_storage.factory import create_object_storage
 from production_backend.app.infrastructure.redis.client import close_redis_client, create_redis_client
 from production_backend.app.modules.agent_runtime.controls import AgentRunControls
 from production_backend.app.modules.agent_runtime.events import AgentEventSink
@@ -25,6 +26,8 @@ from production_backend.app.modules.devices.repository import DevicesRepository
 from production_backend.app.modules.devices.service import DevicesService
 from production_backend.app.modules.diary.repository import DiaryRepository
 from production_backend.app.modules.diary.service import DiaryService
+from production_backend.app.modules.files.repository import FileRepository
+from production_backend.app.modules.files.vision_service import FileVisionService
 from production_backend.app.modules.plans.repository import PlansRepository
 from production_backend.app.modules.plans.service import PlansService
 from production_backend.app.modules.profiles.repository import ProfileRepository
@@ -49,6 +52,7 @@ async def run_agent_worker(
 
     db_engine = create_db_engine(resolved_settings)
     session_factory = create_session_factory(db_engine)
+    object_storage = create_object_storage(resolved_settings)
     redis_client = create_redis_client(resolved_settings)
     controls = AgentRunControls(redis_client)
     metrics = RequestMetrics()
@@ -92,6 +96,11 @@ async def run_agent_worker(
                     audit_service=AuditService(repository=audit_repository),
                     idempotency_service=IdempotencyService(repository=audit_repository),
                 )
+                file_vision_service = FileVisionService(
+                    repository=FileRepository(session),
+                    object_storage=object_storage,
+                    settings=resolved_settings,
+                )
                 tool_registry = default_tool_registry()
                 event_sink = AgentEventSink(repository=repository, controls=controls, after_append=session.commit)
                 tool_executor = ToolExecutor(
@@ -105,6 +114,7 @@ async def run_agent_worker(
                         plans_service=plans_service,
                         diary_service=diary_service,
                         devices_service=devices_service,
+                        file_vision_service=file_vision_service,
                         agent_runtime_service=agent_runtime_service,
                     ),
                 )

@@ -144,6 +144,25 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         ToolContract(
+            name="files.vision_summary.read",
+            domain="files",
+            description="Read an owner-scoped uploaded image and return a bounded vision summary.",
+            input_schema_ref="FileVisionSummaryQuery",
+            output_schema_ref="FileVisionSummaryRead",
+            read_or_write="read",
+            required_permission="files:read:self",
+            owner_scope="actor",
+            side_effect_level="none",
+            blocking_policy="must_wait",
+            result_dependency="next_tool_call",
+            requires_confirmation=False,
+            idempotency_required=False,
+            audit_required=False,
+            timeout_seconds=20,
+        )
+    )
+    registry.register(
+        ToolContract(
             name="records.feeding_record.propose",
             domain="records",
             description="Propose a feeding record create action for user confirmation.",

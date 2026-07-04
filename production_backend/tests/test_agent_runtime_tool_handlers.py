@@ -11,6 +11,7 @@ from production_backend.app.modules.agent_runtime.tools import (
     DevicesPumpStatusReadToolHandler,
     DiaryRecentReadToolHandler,
     FeedingRecordProposeToolHandler,
+    FileVisionSummaryReadToolHandler,
     HospitalBagCartUpdateProposeToolHandler,
     MilkSummaryReadToolHandler,
     PlansCurrentReadToolHandler,
@@ -23,6 +24,7 @@ from production_backend.app.modules.agent_runtime.tools import (
 from production_backend.app.modules.auth import CurrentUser
 from production_backend.app.modules.devices.models import PumpDevice, PumpTelemetryEvent
 from production_backend.app.modules.diary.models import PregnancyDiaryEntry
+from production_backend.app.modules.files.vision_service import FileVisionEvent
 from production_backend.app.modules.plans.models import Plan, PlanTask
 from production_backend.app.modules.profiles.models import InfantProfile, UserProfile
 from production_backend.app.modules.records.models import FeedingRecord, GrowthRecord, PumpingRecord
@@ -230,6 +232,38 @@ def test_devices_pump_status_read_tool_handler_returns_bounded_owner_scoped_summ
     assert result["counts"] == {"pumps": 1, "telemetry": 1}
 
 
+def test_file_vision_summary_read_tool_handler_returns_owner_scoped_safe_summary() -> None:
+    actor = _user()
+    file_id = uuid4()
+    vision_service = FakeFileVisionService()
+    handler = FileVisionSummaryReadToolHandler(vision_service=vision_service)
+
+    result = asyncio.run(handler(_context(actor=actor, args={"file_id": str(file_id), "owner_user_id": str(uuid4())})))
+
+    assert vision_service.calls == [{"file_id": file_id, "owner_user_id": actor.user_id}]
+    assert result["file_id"] == str(file_id)
+    assert result["summary"] == "The image shows a packed pump bag."
+    assert result["event_count"] == 3
+    assert result["events"][0]["payload"] == {
+        "content_type": "image/png",
+        "original_filename": "bag.png",
+        "size_bytes": 42,
+    }
+    assert result["events"][1]["payload"] == {
+        "provider": "local_stub",
+        "summary": "The image shows a packed pump bag.",
+    }
+    assert "bytes_read" not in result["events"][1]["payload"]
+
+
+def test_file_vision_summary_read_tool_handler_rejects_invalid_file_id() -> None:
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(FileVisionSummaryReadToolHandler(vision_service=FakeFileVisionService())(_context(args={"file_id": "x"})))
+
+    assert exc_info.value.code == "validation_failed"
+    assert exc_info.value.details == {"field": "file_id"}
+
+
 def test_feeding_record_propose_tool_handler_creates_confirmation_action() -> None:
     actor = _user()
     runtime_service = FakeAgentRuntimeService()
@@ -338,6 +372,7 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
         plans_service=FakePlansService(owner_user_id=actor_id),
         diary_service=FakeDiaryService(owner_user_id=actor_id),
         devices_service=FakeDevicesService(owner_user_id=actor_id),
+        file_vision_service=FakeFileVisionService(),
         agent_runtime_service=FakeAgentRuntimeService(),
     )
 
@@ -348,6 +383,7 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
         "plans.current.read",
         "diary.recent.read",
         "devices.pump_status.read",
+        "files.vision_summary.read",
         "records.feeding_record.propose",
         "records.pumping_record.propose",
         "hospital_bag.cart_update.propose",
@@ -377,6 +413,7 @@ def _user() -> CurrentUser:
             {
                 "profile:read:self",
                 "business_context:read:self",
+                "files:read:self",
                 "hospital_bag_cart:update:self",
                 "support_ticket:create:self",
             }
@@ -551,6 +588,38 @@ class FakeDevicesService:
                 occurred_at=_now(),
                 payload={"mode": "stimulation"},
             )
+        ]
+
+
+class FakeFileVisionService:
+    def __init__(self) -> None:
+        self.calls = []
+
+    async def events_for_owner(self, *, file_id, owner_user_id):
+        self.calls.append({"file_id": file_id, "owner_user_id": owner_user_id})
+        return [
+            FileVisionEvent(
+                type="vision.started",
+                sequence=1,
+                file_id=file_id,
+                payload={"content_type": "image/png", "original_filename": "bag.png", "size_bytes": 42},
+            ),
+            FileVisionEvent(
+                type="vision.event",
+                sequence=2,
+                file_id=file_id,
+                payload={
+                    "provider": "local_stub",
+                    "summary": "The image shows a packed pump bag.",
+                    "bytes_read": 42,
+                },
+            ),
+            FileVisionEvent(
+                type="vision.completed",
+                sequence=3,
+                file_id=file_id,
+                payload={"event_count": 1},
+            ),
         ]
 
 

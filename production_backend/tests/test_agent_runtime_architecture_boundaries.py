@@ -51,6 +51,7 @@ def test_tool_contract_registry_declares_permission_confirmation_and_blocking_po
     plans_current = registry.get("plans.current.read")
     diary_recent = registry.get("diary.recent.read")
     device_status = registry.get("devices.pump_status.read")
+    file_vision = registry.get("files.vision_summary.read")
     assert plans_current.read_or_write == "read"
     assert plans_current.owner_scope == "actor"
     assert plans_current.requires_confirmation is False
@@ -60,10 +61,15 @@ def test_tool_contract_registry_declares_permission_confirmation_and_blocking_po
     assert device_status.read_or_write == "read"
     assert device_status.owner_scope == "actor"
     assert device_status.requires_confirmation is False
+    assert file_vision.read_or_write == "read"
+    assert file_vision.owner_scope == "actor"
+    assert file_vision.required_permission == "files:read:self"
+    assert file_vision.requires_confirmation is False
     assert "records.milk_summary.read" in registry.names_for_sdk()
     assert "plans.current.read" in registry.names_for_sdk()
     assert "diary.recent.read" in registry.names_for_sdk()
     assert "devices.pump_status.read" in registry.names_for_sdk()
+    assert "files.vision_summary.read" in registry.names_for_sdk()
 
 
 def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> None:
@@ -75,6 +81,7 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
     plans_schema = tool_input_schema(registry.get("plans.current.read").input_schema_ref)
     diary_schema = tool_input_schema(registry.get("diary.recent.read").input_schema_ref)
     devices_schema = tool_input_schema(registry.get("devices.pump_status.read").input_schema_ref)
+    file_vision_schema = tool_input_schema(registry.get("files.vision_summary.read").input_schema_ref)
     feeding_schema = tool_input_schema(registry.get("records.feeding_record.propose").input_schema_ref)
     pumping_schema = tool_input_schema(registry.get("records.pumping_record.propose").input_schema_ref)
 
@@ -98,6 +105,9 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
     assert diary_schema["properties"]["limit"]["maximum"] == 20
     assert devices_schema["additionalProperties"] is False
     assert devices_schema["properties"]["limit"]["maximum"] == 20
+    assert file_vision_schema["additionalProperties"] is False
+    assert file_vision_schema["required"] == ["file_id"]
+    assert file_vision_schema["properties"]["file_id"]["type"] == "string"
     assert feeding_schema["required"] == ["feed_time", "feed_type"]
     assert feeding_schema["properties"]["volume_ml"]["type"] == "number"
     assert pumping_schema["required"] == ["pump_start_time"]

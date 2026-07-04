@@ -93,6 +93,20 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             }
         },
     },
+    "FileVisionSummaryQuery": {
+        "title": "FileVisionSummaryQuery",
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["file_id"],
+        "properties": {
+            "file_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80,
+                "description": "Owner-scoped uploaded image file id to summarize.",
+            }
+        },
+    },
     "FeedingRecordProposalCreate": {
         "title": "FeedingRecordProposalCreate",
         "type": "object",
