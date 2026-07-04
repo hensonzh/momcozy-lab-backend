@@ -35,6 +35,9 @@ jobs:
       - name: Run backend tests
         run: python -m pytest production_backend/tests
 
+      - name: Run agent seed eval smoke
+        run: python production_backend/scripts/run_agent_seed_eval.py --output /tmp/agent-seed-eval.json
+
       - name: Check Alembic head
         run: python -m alembic -c production_backend/alembic.ini heads
 
