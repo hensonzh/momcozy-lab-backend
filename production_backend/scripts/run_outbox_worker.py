@@ -23,7 +23,17 @@ from production_backend.app.modules.notifications import (
     NotificationsService,
 )
 from production_backend.app.modules.notifications.repository import NotificationsRepository
-from production_backend.app.modules.plans import MILK_PLAN_CREATE_ACTION, MilkPlanCreateActionHandler, PlansService
+from production_backend.app.modules.plans import (
+    MILK_PLAN_CREATE_ACTION,
+    PLAN_TASK_COMPLETE_ACTION,
+    PLAN_TASK_CREATE_ACTION,
+    PREGNANCY_PLAN_CREATE_ACTION,
+    MilkPlanCreateActionHandler,
+    PlanTaskCompleteActionHandler,
+    PlanTaskCreateActionHandler,
+    PlansService,
+    PregnancyPlanCreateActionHandler,
+)
 from production_backend.app.modules.plans.repository import PlansRepository
 from production_backend.app.modules.records import (
     FEEDING_RECORD_CREATE_ACTION,
@@ -101,6 +111,9 @@ async def run_outbox_worker(
                         agent_action_handlers={
                             MILK_REMINDER_CREATE_ACTION: MilkReminderCreateActionHandler(service=notifications_service),
                             MILK_PLAN_CREATE_ACTION: MilkPlanCreateActionHandler(service=plans_service),
+                            PREGNANCY_PLAN_CREATE_ACTION: PregnancyPlanCreateActionHandler(service=plans_service),
+                            PLAN_TASK_CREATE_ACTION: PlanTaskCreateActionHandler(service=plans_service),
+                            PLAN_TASK_COMPLETE_ACTION: PlanTaskCompleteActionHandler(service=plans_service),
                             DIARY_ENTRY_UPSERT_ACTION: DiaryEntryUpsertActionHandler(service=diary_service),
                             FEEDING_RECORD_CREATE_ACTION: FeedingRecordCreateActionHandler(service=records_service),
                             PUMPING_RECORD_CREATE_ACTION: PumpingRecordCreateActionHandler(service=records_service),

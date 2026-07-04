@@ -45,6 +45,9 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() ->
         "notifications.milk_reminder.propose",
         "plans.current.read",
         "plans.milk_plan.propose",
+        "plans.task_complete.propose",
+        "plans.task_create.propose",
+        "pregnancy.plan_create.propose",
         "profile.read",
         "records.feeding_record.propose",
         "records.milk_summary.read",
@@ -128,6 +131,9 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
         "notifications_milk_reminder_propose",
         "plans_current_read",
         "plans_milk_plan_propose",
+        "plans_task_complete_propose",
+        "plans_task_create_propose",
+        "pregnancy_plan_create_propose",
         "profile_read",
         "records_feeding_record_propose",
         "records_milk_summary_read",
@@ -145,6 +151,10 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert backend.tool_schemas["notifications_milk_reminder_propose"]["required"] == ["title"]
     assert backend.tool_schemas["plans_current_read"]["properties"]["limit"]["maximum"] == 20
     assert backend.tool_schemas["plans_milk_plan_propose"]["required"] == ["title"]
+    assert backend.tool_schemas["plans_task_complete_propose"]["required"] == ["task_id"]
+    assert backend.tool_schemas["plans_task_complete_propose"]["properties"]["completed"]["type"] == "boolean"
+    assert backend.tool_schemas["plans_task_create_propose"]["required"] == ["title"]
+    assert backend.tool_schemas["pregnancy_plan_create_propose"]["required"] == ["title"]
     assert backend.tool_schemas["profile_read"]["additionalProperties"] is False
     assert backend.tool_schemas["profile_read"]["properties"] == {}
     assert backend.tool_schemas["records_feeding_record_propose"]["required"] == ["feed_time", "feed_type"]

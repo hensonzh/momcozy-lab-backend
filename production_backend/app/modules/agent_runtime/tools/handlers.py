@@ -12,7 +12,12 @@ from ...diary.models import PregnancyDiaryEntry
 from ...diary.service import DiaryService
 from ...files.vision_service import FileVisionService
 from ...notifications.agent_actions import MILK_REMINDER_CREATE_ACTION
-from ...plans.agent_actions import MILK_PLAN_CREATE_ACTION
+from ...plans.agent_actions import (
+    MILK_PLAN_CREATE_ACTION,
+    PLAN_TASK_COMPLETE_ACTION,
+    PLAN_TASK_CREATE_ACTION,
+    PREGNANCY_PLAN_CREATE_ACTION,
+)
 from ...plans.models import Plan, PlanTask
 from ...plans.service import PlansService
 from ...profiles.models import InfantProfile, UserProfile
@@ -362,6 +367,75 @@ class MilkPlanProposeToolHandler:
         return _proposal_result(action=action, preview_payload=preview_payload)
 
 
+class PregnancyPlanProposeToolHandler:
+    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
+        self.runtime_service = runtime_service
+
+    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
+        apply_payload = _pregnancy_plan_apply_payload(context.args)
+        title = _text(apply_payload, "title")
+        if not title:
+            raise ApiError(code="validation_failed", message="title is required.", status=422)
+        preview_payload = _pregnancy_plan_preview_payload(apply_payload)
+        action = await self.runtime_service.propose_action(
+            owner_user_id=context.actor.user_id,
+            run_id=context.run_id,
+            action_type=PREGNANCY_PLAN_CREATE_ACTION,
+            target_type="plan",
+            side_effect_level="medium",
+            preview_payload=preview_payload,
+            apply_payload=apply_payload,
+            idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:pregnancy-plan",
+        )
+        return _proposal_result(action=action, preview_payload=preview_payload)
+
+
+class PlanTaskCreateProposeToolHandler:
+    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
+        self.runtime_service = runtime_service
+
+    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
+        apply_payload = _plan_task_create_apply_payload(context.args)
+        title = _text(apply_payload, "title")
+        if not title:
+            raise ApiError(code="validation_failed", message="title is required.", status=422)
+        preview_payload = _plan_task_create_preview_payload(apply_payload)
+        action = await self.runtime_service.propose_action(
+            owner_user_id=context.actor.user_id,
+            run_id=context.run_id,
+            action_type=PLAN_TASK_CREATE_ACTION,
+            target_type="plan_task",
+            side_effect_level="medium",
+            preview_payload=preview_payload,
+            apply_payload=apply_payload,
+            idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:plan-task-create",
+        )
+        return _proposal_result(action=action, preview_payload=preview_payload)
+
+
+class PlanTaskCompleteProposeToolHandler:
+    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
+        self.runtime_service = runtime_service
+
+    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
+        apply_payload = _plan_task_complete_apply_payload(context.args)
+        task_id = _text(apply_payload, "task_id")
+        if not task_id:
+            raise ApiError(code="validation_failed", message="task_id is required.", status=422)
+        preview_payload = _plan_task_complete_preview_payload(apply_payload)
+        action = await self.runtime_service.propose_action(
+            owner_user_id=context.actor.user_id,
+            run_id=context.run_id,
+            action_type=PLAN_TASK_COMPLETE_ACTION,
+            target_type="plan_task",
+            side_effect_level="medium",
+            preview_payload=preview_payload,
+            apply_payload=apply_payload,
+            idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:plan-task-complete",
+        )
+        return _proposal_result(action=action, preview_payload=preview_payload)
+
+
 class MilkReminderProposeToolHandler:
     def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
         self.runtime_service = runtime_service
@@ -410,6 +484,9 @@ def build_default_tool_handlers(
         "devices.pump_status.read": DevicesPumpStatusReadToolHandler(devices_service=devices_service),
         "files.vision_summary.read": FileVisionSummaryReadToolHandler(vision_service=file_vision_service),
         "plans.milk_plan.propose": MilkPlanProposeToolHandler(runtime_service=agent_runtime_service),
+        "pregnancy.plan_create.propose": PregnancyPlanProposeToolHandler(runtime_service=agent_runtime_service),
+        "plans.task_create.propose": PlanTaskCreateProposeToolHandler(runtime_service=agent_runtime_service),
+        "plans.task_complete.propose": PlanTaskCompleteProposeToolHandler(runtime_service=agent_runtime_service),
         "notifications.milk_reminder.propose": MilkReminderProposeToolHandler(runtime_service=agent_runtime_service),
         "records.feeding_record.propose": FeedingRecordProposeToolHandler(runtime_service=agent_runtime_service),
         "records.pumping_record.propose": PumpingRecordProposeToolHandler(runtime_service=agent_runtime_service),
@@ -588,6 +665,77 @@ def _milk_plan_preview_payload(apply_payload: dict[str, Any]) -> dict[str, Any]:
         "has_payload": isinstance(apply_payload.get("payload"), dict) and bool(apply_payload.get("payload")),
     }
     return {key: value for key, value in preview.items() if value not in ("", None)}
+
+
+def _pregnancy_plan_apply_payload(args: dict[str, Any]) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "title": _text(args, "title"),
+        "summary": _text(args, "summary"),
+    }
+    plan_payload = args.get("payload")
+    if isinstance(plan_payload, dict):
+        payload["payload"] = plan_payload
+    metadata = _metadata_payload(args)
+    if metadata:
+        payload["metadata"] = metadata
+    return {key: value for key, value in payload.items() if value not in ("", None, {})}
+
+
+def _pregnancy_plan_preview_payload(apply_payload: dict[str, Any]) -> dict[str, Any]:
+    preview = {
+        "plan_type": "pregnancy",
+        "title": _text(apply_payload, "title"),
+        "summary": _text(apply_payload, "summary"),
+        "has_payload": isinstance(apply_payload.get("payload"), dict) and bool(apply_payload.get("payload")),
+    }
+    return {key: value for key, value in preview.items() if value not in ("", None)}
+
+
+def _plan_task_create_apply_payload(args: dict[str, Any]) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "plan_id": _text(args, "plan_id"),
+        "task_date": _text(args, "task_date"),
+        "task_time": _text(args, "task_time"),
+        "title": _text(args, "title"),
+        "description": _text(args, "description"),
+    }
+    task_payload = args.get("payload")
+    if isinstance(task_payload, dict):
+        payload["payload"] = task_payload
+    metadata = _metadata_payload(args)
+    if metadata:
+        payload["metadata"] = metadata
+    return {key: value for key, value in payload.items() if value not in ("", None, {})}
+
+
+def _plan_task_create_preview_payload(apply_payload: dict[str, Any]) -> dict[str, Any]:
+    preview = {
+        "task_date": _text(apply_payload, "task_date"),
+        "task_time": _text(apply_payload, "task_time"),
+        "title": _text(apply_payload, "title"),
+        "description": _truncate(_text(apply_payload, "description"), max_length=240),
+        "has_plan_id": bool(_text(apply_payload, "plan_id")),
+        "has_payload": isinstance(apply_payload.get("payload"), dict) and bool(apply_payload.get("payload")),
+    }
+    return {key: value for key, value in preview.items() if value not in ("", None)}
+
+
+def _plan_task_complete_apply_payload(args: dict[str, Any]) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "task_id": _text(args, "task_id"),
+        "completed": args.get("completed", True),
+    }
+    metadata = _metadata_payload(args)
+    if metadata:
+        payload["metadata"] = metadata
+    return {key: value for key, value in payload.items() if value not in ("", None, {})}
+
+
+def _plan_task_complete_preview_payload(apply_payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "task_id": _text(apply_payload, "task_id"),
+        "completed": bool(apply_payload.get("completed", True)),
+    }
 
 
 def _milk_reminder_apply_payload(args: dict[str, Any]) -> dict[str, Any]:

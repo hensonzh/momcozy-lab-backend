@@ -168,6 +168,32 @@ def test_tool_executor_rejects_invalid_array_tool_args_before_persisting_call() 
     assert repository.events == []
 
 
+def test_tool_executor_rejects_invalid_boolean_tool_args_before_persisting_call() -> None:
+    actor = _user(permissions={"plans:write:self"})
+    repository = FakeToolRepository()
+    executor = ToolExecutor(
+        registry=default_tool_registry(),
+        repository=repository,
+        handlers={"plans.task_complete.propose": profile_read_handler},
+    )
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            executor.execute(
+                actor=actor,
+                run_id=uuid4(),
+                tool_name="plans.task_complete.propose",
+                call_id="call-1",
+                args={"task_id": str(uuid4()), "completed": "false"},
+            )
+        )
+
+    assert exc_info.value.code == "tool_input_invalid"
+    assert exc_info.value.details == {"path": "$.completed", "reason": "must be a boolean"}
+    assert repository.tool_call is None
+    assert repository.events == []
+
+
 def test_tool_executor_marks_tool_call_failed_on_handler_error() -> None:
     actor = _user(permissions={"profile:read:self"})
     repository = FakeToolRepository()

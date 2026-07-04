@@ -146,6 +146,56 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "idempotency_key": {"type": "string", "maxLength": 255},
         },
     },
+    "PregnancyPlanProposalCreate": {
+        "title": "PregnancyPlanProposalCreate",
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["title"],
+        "properties": {
+            "title": {"type": "string", "minLength": 1, "maxLength": 255},
+            "summary": {"type": "string", "maxLength": 2000},
+            "payload": {
+                "type": "object",
+                "additionalProperties": True,
+            },
+            "locale": {"type": "string", "maxLength": 35},
+            "timezone": {"type": "string", "maxLength": 80},
+            "idempotency_key": {"type": "string", "maxLength": 255},
+        },
+    },
+    "PlanTaskCreateProposalCreate": {
+        "title": "PlanTaskCreateProposalCreate",
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["title"],
+        "properties": {
+            "plan_id": {"type": "string", "maxLength": 80},
+            "task_date": {"type": "string", "maxLength": 20},
+            "task_time": {"type": "string", "maxLength": 16},
+            "title": {"type": "string", "minLength": 1, "maxLength": 255},
+            "description": {"type": "string", "maxLength": 2000},
+            "payload": {
+                "type": "object",
+                "additionalProperties": True,
+            },
+            "locale": {"type": "string", "maxLength": 35},
+            "timezone": {"type": "string", "maxLength": 80},
+            "idempotency_key": {"type": "string", "maxLength": 255},
+        },
+    },
+    "PlanTaskCompleteProposalCreate": {
+        "title": "PlanTaskCompleteProposalCreate",
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["task_id"],
+        "properties": {
+            "task_id": {"type": "string", "minLength": 1, "maxLength": 80},
+            "completed": {"type": "boolean", "default": True},
+            "locale": {"type": "string", "maxLength": 35},
+            "timezone": {"type": "string", "maxLength": 80},
+            "idempotency_key": {"type": "string", "maxLength": 255},
+        },
+    },
     "MilkReminderProposalCreate": {
         "title": "MilkReminderProposalCreate",
         "type": "object",
@@ -289,6 +339,9 @@ def _validate_value(*, schema: JsonSchema, value: Any, path: str) -> None:
         return
     if schema_type == "array":
         _validate_array(schema=schema, value=value, path=path)
+        return
+    if schema_type == "boolean":
+        _validate_boolean(value=value, path=path)
 
 
 def _validate_object(*, schema: JsonSchema, value: dict[str, Any], path: str) -> None:
@@ -360,6 +413,11 @@ def _validate_array(*, schema: JsonSchema, value: Any, path: str) -> None:
     if isinstance(item_schema, dict) and item_schema:
         for index, item in enumerate(value):
             _validate_value(schema=item_schema, value=item, path=f"{path}[{index}]")
+
+
+def _validate_boolean(*, value: Any, path: str) -> None:
+    if not isinstance(value, bool):
+        _raise_invalid(path=path, reason="must be a boolean")
 
 
 def _raise_invalid(*, path: str, reason: str) -> None:

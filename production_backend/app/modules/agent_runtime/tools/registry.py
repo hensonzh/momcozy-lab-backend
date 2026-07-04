@@ -201,6 +201,63 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         ToolContract(
+            name="pregnancy.plan_create.propose",
+            domain="plans",
+            description="Propose a pregnancy plan create action for user confirmation.",
+            input_schema_ref="PregnancyPlanProposalCreate",
+            output_schema_ref="AgentActionRead",
+            read_or_write="write",
+            required_permission="plans:write:self",
+            owner_scope="actor",
+            side_effect_level="medium",
+            blocking_policy="wait_for_confirmation",
+            result_dependency="none",
+            requires_confirmation=True,
+            idempotency_required=True,
+            audit_required=True,
+            timeout_seconds=15,
+        )
+    )
+    registry.register(
+        ToolContract(
+            name="plans.task_create.propose",
+            domain="plans",
+            description="Propose a plan task create action for user confirmation.",
+            input_schema_ref="PlanTaskCreateProposalCreate",
+            output_schema_ref="AgentActionRead",
+            read_or_write="write",
+            required_permission="plans:write:self",
+            owner_scope="actor",
+            side_effect_level="medium",
+            blocking_policy="wait_for_confirmation",
+            result_dependency="none",
+            requires_confirmation=True,
+            idempotency_required=True,
+            audit_required=True,
+            timeout_seconds=15,
+        )
+    )
+    registry.register(
+        ToolContract(
+            name="plans.task_complete.propose",
+            domain="plans",
+            description="Propose a plan task completion action for user confirmation.",
+            input_schema_ref="PlanTaskCompleteProposalCreate",
+            output_schema_ref="AgentActionRead",
+            read_or_write="write",
+            required_permission="plans:write:self",
+            owner_scope="actor",
+            side_effect_level="medium",
+            blocking_policy="wait_for_confirmation",
+            result_dependency="none",
+            requires_confirmation=True,
+            idempotency_required=True,
+            audit_required=True,
+            timeout_seconds=15,
+        )
+    )
+    registry.register(
+        ToolContract(
             name="notifications.milk_reminder.propose",
             domain="notifications",
             description="Propose a milk-management reminder notification for user confirmation.",

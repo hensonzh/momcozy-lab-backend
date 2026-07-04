@@ -285,6 +285,57 @@ def test_agent_runtime_actions_accept_milk_plan_policy() -> None:
     assert outbox_service.enqueue_kwargs["payload"]["apply_payload"] == {"title": "Increase pumping consistency"}
 
 
+def test_agent_runtime_actions_accept_pregnancy_plan_and_task_policies() -> None:
+    owner_user_id = uuid4()
+    repository = FakeActionRepository()
+    outbox_service = FakeOutboxService()
+    service = AgentRuntimeService(repository=repository, outbox_service=outbox_service)
+    run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Create pregnancy plan tasks"))
+    cases = [
+        (
+            "pregnancy.plan.create",
+            "plan",
+            {"title": "Third trimester plan"},
+            {"title": "Third trimester plan"},
+        ),
+        (
+            "plans.task.create",
+            "plan_task",
+            {"title": "Book prenatal appointment"},
+            {"title": "Book prenatal appointment"},
+        ),
+        (
+            "plans.task.complete",
+            "plan_task",
+            {"task_id": "task_1", "completed": True},
+            {"task_id": "task_1", "completed": True},
+        ),
+    ]
+
+    for action_type, target_type, preview_payload, apply_payload in cases:
+        action = asyncio.run(
+            service.propose_action(
+                owner_user_id=owner_user_id,
+                run_id=run.id,
+                action_type=action_type,
+                target_type=target_type,
+                side_effect_level="medium",
+                preview_payload=preview_payload,
+                apply_payload=apply_payload,
+            )
+        )
+        run.status = "waiting_for_confirmation"
+        confirmed = asyncio.run(service.confirm_action(owner_user_id=owner_user_id, action_id=action.id))
+
+        assert confirmed.status == "confirmed"
+        assert confirmed.action_type == action_type
+        assert confirmed.target_type == target_type
+        assert confirmed.side_effect_level == "medium"
+        assert repository.events[-3].payload["action_type"] == action_type
+        assert repository.events[-2].event_type == "action.queued"
+        assert outbox_service.enqueue_kwargs["payload"]["apply_payload"] == apply_payload
+
+
 def test_agent_runtime_actions_accept_milk_reminder_policy() -> None:
     owner_user_id = uuid4()
     repository = FakeActionRepository()

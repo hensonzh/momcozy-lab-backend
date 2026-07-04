@@ -17,9 +17,12 @@ from production_backend.app.modules.agent_runtime.tools import (
     MilkPlanProposeToolHandler,
     MilkReminderProposeToolHandler,
     MilkSummaryReadToolHandler,
+    PlanTaskCompleteProposeToolHandler,
+    PlanTaskCreateProposeToolHandler,
     PlansCurrentReadToolHandler,
     ProfileReadToolHandler,
     PumpingRecordProposeToolHandler,
+    PregnancyPlanProposeToolHandler,
     SupportTicketProposeToolHandler,
     ToolHandlerContext,
     build_default_tool_handlers,
@@ -30,7 +33,12 @@ from production_backend.app.modules.diary.agent_actions import DIARY_ENTRY_UPSER
 from production_backend.app.modules.diary.models import PregnancyDiaryEntry
 from production_backend.app.modules.files.vision_service import FileVisionEvent
 from production_backend.app.modules.notifications.agent_actions import MILK_REMINDER_CREATE_ACTION
-from production_backend.app.modules.plans.agent_actions import MILK_PLAN_CREATE_ACTION
+from production_backend.app.modules.plans.agent_actions import (
+    MILK_PLAN_CREATE_ACTION,
+    PLAN_TASK_COMPLETE_ACTION,
+    PLAN_TASK_CREATE_ACTION,
+    PREGNANCY_PLAN_CREATE_ACTION,
+)
 from production_backend.app.modules.plans.models import Plan, PlanTask
 from production_backend.app.modules.profiles.models import InfantProfile, UserProfile
 from production_backend.app.modules.records.models import FeedingRecord, GrowthRecord, PumpingRecord
@@ -356,6 +364,99 @@ def test_milk_plan_propose_tool_handler_creates_confirmation_action() -> None:
     assert runtime_service.calls[0]["apply_payload"]["metadata"] == {"timezone": "Asia/Shanghai"}
 
 
+def test_pregnancy_plan_propose_tool_handler_creates_confirmation_action() -> None:
+    actor = _user()
+    runtime_service = FakeAgentRuntimeService()
+    context = _context(
+        actor=actor,
+        args={
+            "title": "Third trimester plan",
+            "summary": "Prepare appointments and bag tasks.",
+            "payload": {"gestational_week": 32},
+            "timezone": "Asia/Shanghai",
+        },
+    )
+
+    result = asyncio.run(PregnancyPlanProposeToolHandler(runtime_service=runtime_service)(context))
+
+    assert result["action_type"] == PREGNANCY_PLAN_CREATE_ACTION
+    assert result["action_status"] == "confirmation_required"
+    assert result["preview_payload"] == {
+        "plan_type": "pregnancy",
+        "title": "Third trimester plan",
+        "summary": "Prepare appointments and bag tasks.",
+        "has_payload": True,
+    }
+    assert runtime_service.calls[0]["target_type"] == "plan"
+    assert runtime_service.calls[0]["side_effect_level"] == "medium"
+    assert runtime_service.calls[0]["apply_payload"]["payload"] == {"gestational_week": 32}
+    assert runtime_service.calls[0]["apply_payload"]["metadata"] == {"timezone": "Asia/Shanghai"}
+
+
+def test_plan_task_create_propose_tool_handler_creates_confirmation_action() -> None:
+    actor = _user()
+    runtime_service = FakeAgentRuntimeService()
+    plan_id = uuid4()
+    context = _context(
+        actor=actor,
+        args={
+            "plan_id": str(plan_id),
+            "task_date": "2026-07-04",
+            "task_time": "09:00",
+            "title": "Book prenatal appointment",
+            "description": "Ask about birth plan questions.",
+            "payload": {"category": "appointments"},
+            "locale": "en-US",
+        },
+    )
+
+    result = asyncio.run(PlanTaskCreateProposeToolHandler(runtime_service=runtime_service)(context))
+
+    assert result["action_type"] == PLAN_TASK_CREATE_ACTION
+    assert result["action_status"] == "confirmation_required"
+    assert result["preview_payload"] == {
+        "task_date": "2026-07-04",
+        "task_time": "09:00",
+        "title": "Book prenatal appointment",
+        "description": "Ask about birth plan questions.",
+        "has_plan_id": True,
+        "has_payload": True,
+    }
+    assert runtime_service.calls[0]["target_type"] == "plan_task"
+    assert runtime_service.calls[0]["side_effect_level"] == "medium"
+    assert runtime_service.calls[0]["apply_payload"]["plan_id"] == str(plan_id)
+    assert runtime_service.calls[0]["apply_payload"]["payload"] == {"category": "appointments"}
+    assert runtime_service.calls[0]["apply_payload"]["metadata"] == {"locale": "en-US"}
+
+
+def test_plan_task_complete_propose_tool_handler_creates_confirmation_action() -> None:
+    actor = _user()
+    runtime_service = FakeAgentRuntimeService()
+    task_id = uuid4()
+    context = _context(
+        actor=actor,
+        args={
+            "task_id": str(task_id),
+            "completed": False,
+            "timezone": "Asia/Shanghai",
+        },
+    )
+
+    result = asyncio.run(PlanTaskCompleteProposeToolHandler(runtime_service=runtime_service)(context))
+
+    assert result["action_type"] == PLAN_TASK_COMPLETE_ACTION
+    assert result["action_status"] == "confirmation_required"
+    assert result["preview_payload"] == {
+        "task_id": str(task_id),
+        "completed": False,
+    }
+    assert runtime_service.calls[0]["target_type"] == "plan_task"
+    assert runtime_service.calls[0]["side_effect_level"] == "medium"
+    assert runtime_service.calls[0]["apply_payload"]["task_id"] == str(task_id)
+    assert runtime_service.calls[0]["apply_payload"]["completed"] is False
+    assert runtime_service.calls[0]["apply_payload"]["metadata"] == {"timezone": "Asia/Shanghai"}
+
+
 def test_milk_reminder_propose_tool_handler_creates_confirmation_action() -> None:
     actor = _user()
     runtime_service = FakeAgentRuntimeService()
@@ -461,6 +562,19 @@ def test_milk_plan_propose_tool_handler_requires_title() -> None:
     assert exc_info.value.code == "validation_failed"
 
 
+def test_pregnancy_plan_and_task_propose_tool_handlers_require_required_fields() -> None:
+    with pytest.raises(ApiError) as plan_exc:
+        asyncio.run(PregnancyPlanProposeToolHandler(runtime_service=FakeAgentRuntimeService())(_context(args={})))
+    with pytest.raises(ApiError) as task_create_exc:
+        asyncio.run(PlanTaskCreateProposeToolHandler(runtime_service=FakeAgentRuntimeService())(_context(args={})))
+    with pytest.raises(ApiError) as task_complete_exc:
+        asyncio.run(PlanTaskCompleteProposeToolHandler(runtime_service=FakeAgentRuntimeService())(_context(args={})))
+
+    assert plan_exc.value.code == "validation_failed"
+    assert task_create_exc.value.code == "validation_failed"
+    assert task_complete_exc.value.code == "validation_failed"
+
+
 def test_milk_reminder_propose_tool_handler_requires_title() -> None:
     with pytest.raises(ApiError) as exc_info:
         asyncio.run(MilkReminderProposeToolHandler(runtime_service=FakeAgentRuntimeService())(_context(args={})))
@@ -513,6 +627,9 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
         "files.vision_summary.read",
         "notifications.milk_reminder.propose",
         "plans.milk_plan.propose",
+        "plans.task_complete.propose",
+        "plans.task_create.propose",
+        "pregnancy.plan_create.propose",
         "records.feeding_record.propose",
         "records.pumping_record.propose",
         "hospital_bag.cart_update.propose",

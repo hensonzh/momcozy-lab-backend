@@ -40,6 +40,9 @@ def test_tool_contract_registry_declares_permission_confirmation_and_blocking_po
     feeding_proposal = registry.get("records.feeding_record.propose")
     pumping_proposal = registry.get("records.pumping_record.propose")
     milk_plan_proposal = registry.get("plans.milk_plan.propose")
+    pregnancy_plan_proposal = registry.get("pregnancy.plan_create.propose")
+    task_create_proposal = registry.get("plans.task_create.propose")
+    task_complete_proposal = registry.get("plans.task_complete.propose")
     milk_reminder_proposal = registry.get("notifications.milk_reminder.propose")
     diary_entry_proposal = registry.get("diary.entry_upsert.propose")
     assert feeding_proposal.read_or_write == "write"
@@ -53,6 +56,15 @@ def test_tool_contract_registry_declares_permission_confirmation_and_blocking_po
     assert milk_plan_proposal.requires_confirmation is True
     assert milk_plan_proposal.side_effect_level == "medium"
     assert milk_plan_proposal.required_permission == "plans:write:self"
+    assert pregnancy_plan_proposal.read_or_write == "write"
+    assert pregnancy_plan_proposal.requires_confirmation is True
+    assert pregnancy_plan_proposal.required_permission == "plans:write:self"
+    assert task_create_proposal.read_or_write == "write"
+    assert task_create_proposal.requires_confirmation is True
+    assert task_create_proposal.required_permission == "plans:write:self"
+    assert task_complete_proposal.read_or_write == "write"
+    assert task_complete_proposal.requires_confirmation is True
+    assert task_complete_proposal.required_permission == "plans:write:self"
     assert milk_reminder_proposal.read_or_write == "write"
     assert milk_reminder_proposal.requires_confirmation is True
     assert milk_reminder_proposal.side_effect_level == "medium"
@@ -84,6 +96,9 @@ def test_tool_contract_registry_declares_permission_confirmation_and_blocking_po
     assert "plans.current.read" in registry.names_for_sdk()
     assert "diary.recent.read" in registry.names_for_sdk()
     assert "diary.entry_upsert.propose" in registry.names_for_sdk()
+    assert "pregnancy.plan_create.propose" in registry.names_for_sdk()
+    assert "plans.task_create.propose" in registry.names_for_sdk()
+    assert "plans.task_complete.propose" in registry.names_for_sdk()
     assert "devices.pump_status.read" in registry.names_for_sdk()
     assert "files.vision_summary.read" in registry.names_for_sdk()
 
@@ -100,6 +115,9 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
     devices_schema = tool_input_schema(registry.get("devices.pump_status.read").input_schema_ref)
     file_vision_schema = tool_input_schema(registry.get("files.vision_summary.read").input_schema_ref)
     milk_plan_schema = tool_input_schema(registry.get("plans.milk_plan.propose").input_schema_ref)
+    pregnancy_plan_schema = tool_input_schema(registry.get("pregnancy.plan_create.propose").input_schema_ref)
+    task_create_schema = tool_input_schema(registry.get("plans.task_create.propose").input_schema_ref)
+    task_complete_schema = tool_input_schema(registry.get("plans.task_complete.propose").input_schema_ref)
     milk_reminder_schema = tool_input_schema(registry.get("notifications.milk_reminder.propose").input_schema_ref)
     feeding_schema = tool_input_schema(registry.get("records.feeding_record.propose").input_schema_ref)
     pumping_schema = tool_input_schema(registry.get("records.pumping_record.propose").input_schema_ref)
@@ -134,6 +152,14 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
     assert milk_plan_schema["additionalProperties"] is False
     assert milk_plan_schema["required"] == ["title"]
     assert milk_plan_schema["properties"]["payload"]["type"] == "object"
+    assert pregnancy_plan_schema["additionalProperties"] is False
+    assert pregnancy_plan_schema["required"] == ["title"]
+    assert task_create_schema["additionalProperties"] is False
+    assert task_create_schema["required"] == ["title"]
+    assert task_create_schema["properties"]["task_date"]["type"] == "string"
+    assert task_complete_schema["additionalProperties"] is False
+    assert task_complete_schema["required"] == ["task_id"]
+    assert task_complete_schema["properties"]["completed"]["type"] == "boolean"
     assert milk_reminder_schema["additionalProperties"] is False
     assert milk_reminder_schema["required"] == ["title"]
     assert milk_reminder_schema["properties"]["remind_at"]["type"] == "string"
