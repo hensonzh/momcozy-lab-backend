@@ -254,13 +254,16 @@ LangGraph workflow。
 建议 PR：
 
 1. `agent: add milk summary read tool` - done
-2. `agent: add plan and diary context read tools`
-3. `agent: add device and file context read tools`
+2. `agent: add plan and diary context read tools` - done
+3. `agent: add device and file context read tools` - done
 
 已完成能力：
 
 - `records.milk_summary.read` 已返回 owner-scoped feeding、pumping、trend 和
   bounded infant projection，支持“回答前先读真实奶量事实和宝宝资料”。
+- `plans.current.read`、`diary.recent.read`、`devices.pump_status.read`、
+  `devices.guidance_assets.read`、`files.vision_summary.read` 已纳入 tool
+  registry、schema、default handler wiring 和 handler tests。
 
 验收：
 
@@ -293,11 +296,23 @@ event、eval 的全链路。
 
 建议 PR：
 
-1. `agent: add milk management eval fixtures`
-2. `agent: add milk read tools`
-3. `agent: add feeding and pumping action proposals`
-4. `agent: add milk action outbox apply handlers`
-5. `agent: add milk management end-to-end tests`
+1. `agent: add milk management eval fixtures` - done
+2. `agent: add milk read tools` - done
+3. `agent: add feeding and pumping action proposals` - done
+4. `agent: add milk action outbox apply handlers` - done
+5. `agent: add milk management end-to-end tests` - done
+
+已完成能力：
+
+- 奶量日报、奶量趋势、奶量计划、提醒创建 eval seed 已对齐当前 tool
+  contracts。
+- `records.feeding_record.propose`、`records.pumping_record.propose`、
+  `plans.milk_plan.propose`、`notifications.milk_reminder.propose` 均为
+  confirmation-first action proposal。
+- feeding / pumping / milk plan / milk reminder confirmed actions 均通过
+  outbox apply handler 落到业务 service。
+- 奶量 feeding 主流程测试覆盖 run 创建、action confirmation、outbox apply、
+  重复确认幂等和 replayable application events。
 
 验收：
 
