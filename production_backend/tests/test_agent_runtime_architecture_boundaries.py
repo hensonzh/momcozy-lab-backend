@@ -37,6 +37,15 @@ def test_tool_contract_registry_declares_permission_confirmation_and_blocking_po
     assert milk_summary.read_or_write == "read"
     assert milk_summary.owner_scope == "actor"
     assert milk_summary.requires_confirmation is False
+    feeding_proposal = registry.get("records.feeding_record.propose")
+    pumping_proposal = registry.get("records.pumping_record.propose")
+    assert feeding_proposal.read_or_write == "write"
+    assert feeding_proposal.requires_confirmation is True
+    assert feeding_proposal.side_effect_level == "low"
+    assert feeding_proposal.required_permission == "records:write:self"
+    assert pumping_proposal.read_or_write == "write"
+    assert pumping_proposal.requires_confirmation is True
+    assert pumping_proposal.required_permission == "records:write:self"
     assert "profile.read" in registry.names_for_sdk()
     assert "business.context.read" in registry.names_for_sdk()
     assert "records.milk_summary.read" in registry.names_for_sdk()
@@ -48,6 +57,8 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
     business_schema = tool_input_schema(registry.get("business.context.read").input_schema_ref)
     support_schema = tool_input_schema(registry.get("support.ticket.propose").input_schema_ref)
     milk_schema = tool_input_schema(registry.get("records.milk_summary.read").input_schema_ref)
+    feeding_schema = tool_input_schema(registry.get("records.feeding_record.propose").input_schema_ref)
+    pumping_schema = tool_input_schema(registry.get("records.pumping_record.propose").input_schema_ref)
 
     assert profile_schema == {
         "title": "ProfileContextQuery",
@@ -63,6 +74,10 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
     assert milk_schema["additionalProperties"] is False
     assert milk_schema["properties"]["days"]["maximum"] == 30
     assert milk_schema["properties"]["limit"]["maximum"] == 20
+    assert feeding_schema["required"] == ["feed_time", "feed_type"]
+    assert feeding_schema["properties"]["volume_ml"]["type"] == "number"
+    assert pumping_schema["required"] == ["pump_start_time"]
+    assert pumping_schema["properties"]["milk_volume_ml"]["type"] == "number"
 
 
 def test_context_builder_keeps_stable_prompts_before_dynamic_projection() -> None:

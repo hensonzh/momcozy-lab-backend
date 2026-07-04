@@ -39,7 +39,9 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() ->
         "business.context.read",
         "hospital_bag.cart_update.propose",
         "profile.read",
+        "records.feeding_record.propose",
         "records.milk_summary.read",
+        "records.pumping_record.propose",
         "support.ticket.propose",
     )
     assert [item["role"] for item in request.model_input] == ["system", "developer", "user", "assistant", "developer", "developer", "user"]
@@ -113,7 +115,9 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
         "business_context_read",
         "hospital_bag_cart_update_propose",
         "profile_read",
+        "records_feeding_record_propose",
         "records_milk_summary_read",
+        "records_pumping_record_propose",
         "support_ticket_propose",
     )
     assert backend.tool_schemas["business_context_read"]["properties"]["limit"]["maximum"] == 20
@@ -121,7 +125,9 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert backend.tool_schemas["hospital_bag_cart_update_propose"]["additionalProperties"] is False
     assert backend.tool_schemas["profile_read"]["additionalProperties"] is False
     assert backend.tool_schemas["profile_read"]["properties"] == {}
+    assert backend.tool_schemas["records_feeding_record_propose"]["required"] == ["feed_time", "feed_type"]
     assert backend.tool_schemas["records_milk_summary_read"]["properties"]["days"]["maximum"] == 30
+    assert backend.tool_schemas["records_pumping_record_propose"]["required"] == ["pump_start_time"]
     assert backend.tool_schemas["support_ticket_propose"]["required"] == ["issue_summary"]
     assert backend.tool_schemas["support_ticket_propose"]["additionalProperties"] is False
     assert tool_executor.calls[0]["actor"].user_id == run.actor_user_id

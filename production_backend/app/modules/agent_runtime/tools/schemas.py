@@ -51,6 +51,42 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             },
         },
     },
+    "FeedingRecordProposalCreate": {
+        "title": "FeedingRecordProposalCreate",
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["feed_time", "feed_type"],
+        "properties": {
+            "infant_id": {"type": "string", "maxLength": 80},
+            "feed_time": {"type": "string", "minLength": 1, "maxLength": 80},
+            "feed_type": {"type": "string", "minLength": 1, "maxLength": 32},
+            "feed_action": {"type": "string", "maxLength": 32},
+            "volume_ml": {"type": "number", "minimum": 0},
+            "duration_seconds": {"type": "integer", "minimum": 0},
+            "title": {"type": "string", "maxLength": 255},
+            "locale": {"type": "string", "maxLength": 35},
+            "timezone": {"type": "string", "maxLength": 80},
+            "idempotency_key": {"type": "string", "maxLength": 255},
+        },
+    },
+    "PumpingRecordProposalCreate": {
+        "title": "PumpingRecordProposalCreate",
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["pump_start_time"],
+        "properties": {
+            "pump_start_time": {"type": "string", "minLength": 1, "maxLength": 80},
+            "pump_end_time": {"type": "string", "maxLength": 80},
+            "milk_volume_ml": {"type": "number", "minimum": 0},
+            "pump_type": {"type": "string", "maxLength": 32},
+            "duration_seconds": {"type": "integer", "minimum": 0},
+            "source": {"type": "string", "maxLength": 32},
+            "title": {"type": "string", "maxLength": 255},
+            "locale": {"type": "string", "maxLength": 35},
+            "timezone": {"type": "string", "maxLength": 80},
+            "idempotency_key": {"type": "string", "maxLength": 255},
+        },
+    },
     "HospitalBagCartUpdateProposalCreate": {
         "title": "HospitalBagCartUpdateProposalCreate",
         "type": "object",
@@ -134,6 +170,9 @@ def _validate_value(*, schema: JsonSchema, value: Any, path: str) -> None:
         return
     if schema_type == "integer":
         _validate_integer(schema=schema, value=value, path=path)
+        return
+    if schema_type == "number":
+        _validate_number(schema=schema, value=value, path=path)
 
 
 def _validate_object(*, schema: JsonSchema, value: dict[str, Any], path: str) -> None:
@@ -178,6 +217,17 @@ def _validate_integer(*, schema: JsonSchema, value: Any, path: str) -> None:
         _raise_invalid(path=path, reason=f"must be greater than or equal to {minimum}")
     maximum = schema.get("maximum")
     if isinstance(maximum, int) and value > maximum:
+        _raise_invalid(path=path, reason=f"must be less than or equal to {maximum}")
+
+
+def _validate_number(*, schema: JsonSchema, value: Any, path: str) -> None:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        _raise_invalid(path=path, reason="must be a number")
+    minimum = schema.get("minimum")
+    if isinstance(minimum, int | float) and value < minimum:
+        _raise_invalid(path=path, reason=f"must be greater than or equal to {minimum}")
+    maximum = schema.get("maximum")
+    if isinstance(maximum, int | float) and value > maximum:
         _raise_invalid(path=path, reason=f"must be less than or equal to {maximum}")
 
 

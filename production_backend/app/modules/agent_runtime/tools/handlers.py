@@ -14,6 +14,7 @@ from ...plans.service import PlansService
 from ...profiles.models import InfantProfile, UserProfile
 from ...profiles.service import ProfileService
 from ...records.models import FeedingRecord, GrowthRecord, PumpingRecord
+from ...records.agent_actions import FEEDING_RECORD_CREATE_ACTION, PUMPING_RECORD_CREATE_ACTION
 from ...records.service import RecordsService
 from ...hospital_bag import HOSPITAL_BAG_CART_UPDATE_ACTION
 from ...support.agent_actions import SUPPORT_TICKET_CREATE_ACTION
@@ -168,6 +169,50 @@ class MilkSummaryReadToolHandler:
         }
 
 
+class FeedingRecordProposeToolHandler:
+    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
+        self.runtime_service = runtime_service
+
+    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
+        apply_payload = _feeding_record_apply_payload(context.args)
+        if apply_payload.get("volume_ml") is None and apply_payload.get("duration_seconds") is None:
+            raise ApiError(code="validation_failed", message="volume_ml or duration_seconds is required.", status=422)
+        preview_payload = _feeding_record_preview_payload(apply_payload)
+        action = await self.runtime_service.propose_action(
+            owner_user_id=context.actor.user_id,
+            run_id=context.run_id,
+            action_type=FEEDING_RECORD_CREATE_ACTION,
+            target_type="feeding_record",
+            side_effect_level="low",
+            preview_payload=preview_payload,
+            apply_payload=apply_payload,
+            idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:feeding-record",
+        )
+        return _proposal_result(action=action, preview_payload=preview_payload)
+
+
+class PumpingRecordProposeToolHandler:
+    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
+        self.runtime_service = runtime_service
+
+    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
+        apply_payload = _pumping_record_apply_payload(context.args)
+        if apply_payload.get("milk_volume_ml") is None and apply_payload.get("duration_seconds") is None:
+            raise ApiError(code="validation_failed", message="milk_volume_ml or duration_seconds is required.", status=422)
+        preview_payload = _pumping_record_preview_payload(apply_payload)
+        action = await self.runtime_service.propose_action(
+            owner_user_id=context.actor.user_id,
+            run_id=context.run_id,
+            action_type=PUMPING_RECORD_CREATE_ACTION,
+            target_type="pumping_record",
+            side_effect_level="low",
+            preview_payload=preview_payload,
+            apply_payload=apply_payload,
+            idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:pumping-record",
+        )
+        return _proposal_result(action=action, preview_payload=preview_payload)
+
+
 def build_default_tool_handlers(
     *,
     profile_service: ProfileService,
@@ -186,6 +231,8 @@ def build_default_tool_handlers(
             devices_service=devices_service,
         ),
         "records.milk_summary.read": MilkSummaryReadToolHandler(records_service=records_service),
+        "records.feeding_record.propose": FeedingRecordProposeToolHandler(runtime_service=agent_runtime_service),
+        "records.pumping_record.propose": PumpingRecordProposeToolHandler(runtime_service=agent_runtime_service),
         "hospital_bag.cart_update.propose": HospitalBagCartUpdateProposeToolHandler(runtime_service=agent_runtime_service),
         "support.ticket.propose": SupportTicketProposeToolHandler(runtime_service=agent_runtime_service),
     }
@@ -281,6 +328,74 @@ def _hospital_bag_cart_preview_payload(apply_payload: dict[str, Any]) -> dict[st
     return {key: value for key, value in preview.items() if value not in ("", None, {})}
 
 
+def _feeding_record_apply_payload(args: dict[str, Any]) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "infant_id": _text(args, "infant_id"),
+        "feed_time": _text(args, "feed_time"),
+        "feed_type": _text(args, "feed_type"),
+        "feed_action": _text(args, "feed_action"),
+        "volume_ml": _optional_number(args, "volume_ml"),
+        "duration_seconds": _optional_int(args, "duration_seconds"),
+        "title": _text(args, "title"),
+    }
+    metadata = _metadata_payload(args)
+    if metadata:
+        payload["metadata"] = metadata
+    return {key: value for key, value in payload.items() if value not in ("", None, {})}
+
+
+def _feeding_record_preview_payload(apply_payload: dict[str, Any]) -> dict[str, Any]:
+    preview = {
+        "feed_time": _text(apply_payload, "feed_time"),
+        "feed_type": _text(apply_payload, "feed_type"),
+        "feed_action": _text(apply_payload, "feed_action"),
+        "volume_ml": apply_payload.get("volume_ml"),
+        "duration_seconds": apply_payload.get("duration_seconds"),
+        "title": _text(apply_payload, "title"),
+        "has_infant_id": bool(_text(apply_payload, "infant_id")),
+    }
+    return {key: value for key, value in preview.items() if value not in ("", None)}
+
+
+def _pumping_record_apply_payload(args: dict[str, Any]) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "pump_start_time": _text(args, "pump_start_time"),
+        "pump_end_time": _text(args, "pump_end_time"),
+        "milk_volume_ml": _optional_number(args, "milk_volume_ml"),
+        "pump_type": _text(args, "pump_type"),
+        "duration_seconds": _optional_int(args, "duration_seconds"),
+        "source": _text(args, "source") or "agent",
+        "title": _text(args, "title"),
+    }
+    metadata = _metadata_payload(args)
+    if metadata:
+        payload["metadata"] = metadata
+    return {key: value for key, value in payload.items() if value not in ("", None, {})}
+
+
+def _pumping_record_preview_payload(apply_payload: dict[str, Any]) -> dict[str, Any]:
+    preview = {
+        "pump_start_time": _text(apply_payload, "pump_start_time"),
+        "pump_end_time": _text(apply_payload, "pump_end_time"),
+        "milk_volume_ml": apply_payload.get("milk_volume_ml"),
+        "pump_type": _text(apply_payload, "pump_type"),
+        "duration_seconds": apply_payload.get("duration_seconds"),
+        "source": _text(apply_payload, "source"),
+        "title": _text(apply_payload, "title"),
+    }
+    return {key: value for key, value in preview.items() if value not in ("", None)}
+
+
+def _proposal_result(*, action: Any, preview_payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "action_id": str(action.id),
+        "action_type": action.action_type,
+        "action_status": action.status,
+        "requires_confirmation": True,
+        "preview_payload": preview_payload,
+    }
+
+
 def _metadata_payload(payload: dict[str, Any]) -> dict[str, str]:
     metadata: dict[str, str] = {}
     for key in ("thread_id", "locale", "timezone"):
@@ -292,6 +407,24 @@ def _metadata_payload(payload: dict[str, Any]) -> dict[str, str]:
 
 def _text(payload: dict[str, Any], key: str) -> str:
     return str(payload.get(key) or "").strip()
+
+
+def _optional_number(payload: dict[str, Any], key: str) -> float | None:
+    value = payload.get(key)
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int | float):
+        return float(value)
+    return None
+
+
+def _optional_int(payload: dict[str, Any], key: str) -> int | None:
+    value = payload.get(key)
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    return None
 
 
 def _date_iso(value: date | None) -> str | None:

@@ -2,9 +2,11 @@ from .contracts import ToolContract
 from .executor import ToolExecutionResult, ToolExecutor, ToolHandlerContext
 from .handlers import (
     BusinessContextReadToolHandler,
+    FeedingRecordProposeToolHandler,
     HospitalBagCartUpdateProposeToolHandler,
     MilkSummaryReadToolHandler,
     ProfileReadToolHandler,
+    PumpingRecordProposeToolHandler,
     SupportTicketProposeToolHandler,
     build_default_tool_handlers,
 )
@@ -13,9 +15,11 @@ from .schemas import tool_input_schema
 
 __all__ = [
     "BusinessContextReadToolHandler",
+    "FeedingRecordProposeToolHandler",
     "HospitalBagCartUpdateProposeToolHandler",
     "MilkSummaryReadToolHandler",
     "ProfileReadToolHandler",
+    "PumpingRecordProposeToolHandler",
     "SupportTicketProposeToolHandler",
     "ToolContract",
     "ToolContractRegistry",

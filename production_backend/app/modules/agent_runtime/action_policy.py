@@ -34,7 +34,19 @@ DEFAULT_AGENT_ACTION_RULES: Mapping[str, AgentActionPolicyRule] = {
         target_type="support_ticket",
         side_effect_level="medium",
         requires_confirmation=True,
-    )
+    ),
+    "records.feeding_record.create": AgentActionPolicyRule(
+        action_type="records.feeding_record.create",
+        target_type="feeding_record",
+        side_effect_level="low",
+        requires_confirmation=True,
+    ),
+    "records.pumping_record.create": AgentActionPolicyRule(
+        action_type="records.pumping_record.create",
+        target_type="pumping_record",
+        side_effect_level="low",
+        requires_confirmation=True,
+    ),
 }
 
 

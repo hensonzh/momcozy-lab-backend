@@ -8,9 +8,11 @@ from production_backend.app.core.errors import ApiError
 from production_backend.app.modules.agent_runtime.models import AgentAction
 from production_backend.app.modules.agent_runtime.tools import (
     BusinessContextReadToolHandler,
+    FeedingRecordProposeToolHandler,
     HospitalBagCartUpdateProposeToolHandler,
     MilkSummaryReadToolHandler,
     ProfileReadToolHandler,
+    PumpingRecordProposeToolHandler,
     SupportTicketProposeToolHandler,
     ToolHandlerContext,
     build_default_tool_handlers,
@@ -21,6 +23,7 @@ from production_backend.app.modules.diary.models import PregnancyDiaryEntry
 from production_backend.app.modules.plans.models import Plan, PlanTask
 from production_backend.app.modules.profiles.models import InfantProfile, UserProfile
 from production_backend.app.modules.records.models import FeedingRecord, GrowthRecord, PumpingRecord
+from production_backend.app.modules.records.agent_actions import FEEDING_RECORD_CREATE_ACTION, PUMPING_RECORD_CREATE_ACTION
 from production_backend.app.modules.records.schemas import MilkTrendDayRead, MilkTrendListResponse
 
 
@@ -181,6 +184,63 @@ def test_milk_summary_read_tool_handler_returns_bounded_owner_scoped_summary() -
     }
 
 
+def test_feeding_record_propose_tool_handler_creates_confirmation_action() -> None:
+    actor = _user()
+    runtime_service = FakeAgentRuntimeService()
+    context = _context(
+        actor=actor,
+        args={
+            "infant_id": str(uuid4()),
+            "feed_time": "2026-07-02T09:15:00+00:00",
+            "feed_type": "bottle",
+            "feed_action": "fed",
+            "volume_ml": 75,
+            "title": "Morning bottle",
+            "locale": "en-US",
+        },
+    )
+
+    result = asyncio.run(FeedingRecordProposeToolHandler(runtime_service=runtime_service)(context))
+
+    assert result["action_id"] == str(runtime_service.action.id)
+    assert result["action_type"] == FEEDING_RECORD_CREATE_ACTION
+    assert result["action_status"] == "confirmation_required"
+    assert result["preview_payload"]["volume_ml"] == 75.0
+    assert result["preview_payload"]["has_infant_id"] is True
+    assert "infant_id" not in result["preview_payload"]
+    assert runtime_service.calls[0]["owner_user_id"] == actor.user_id
+    assert runtime_service.calls[0]["target_type"] == "feeding_record"
+    assert runtime_service.calls[0]["side_effect_level"] == "low"
+    assert runtime_service.calls[0]["apply_payload"]["infant_id"] == context.args["infant_id"]
+    assert runtime_service.calls[0]["apply_payload"]["metadata"] == {"locale": "en-US"}
+
+
+def test_pumping_record_propose_tool_handler_creates_confirmation_action() -> None:
+    actor = _user()
+    runtime_service = FakeAgentRuntimeService()
+    context = _context(
+        actor=actor,
+        args={
+            "pump_start_time": "2026-07-02T09:00:00+00:00",
+            "pump_end_time": "2026-07-02T09:18:00+00:00",
+            "milk_volume_ml": 90,
+            "duration_seconds": 1080,
+            "pump_type": "electric",
+            "timezone": "Asia/Shanghai",
+        },
+    )
+
+    result = asyncio.run(PumpingRecordProposeToolHandler(runtime_service=runtime_service)(context))
+
+    assert result["action_type"] == PUMPING_RECORD_CREATE_ACTION
+    assert result["action_status"] == "confirmation_required"
+    assert result["preview_payload"]["milk_volume_ml"] == 90.0
+    assert result["preview_payload"]["duration_seconds"] == 1080
+    assert runtime_service.calls[0]["target_type"] == "pumping_record"
+    assert runtime_service.calls[0]["apply_payload"]["source"] == "agent"
+    assert runtime_service.calls[0]["apply_payload"]["metadata"] == {"timezone": "Asia/Shanghai"}
+
+
 def test_support_ticket_propose_tool_handler_requires_summary() -> None:
     with pytest.raises(ApiError) as exc_info:
         asyncio.run(SupportTicketProposeToolHandler(runtime_service=FakeAgentRuntimeService())(_context(args={})))
@@ -193,6 +253,24 @@ def test_hospital_bag_cart_update_propose_tool_handler_requires_cart_update() ->
         asyncio.run(HospitalBagCartUpdateProposeToolHandler(runtime_service=FakeAgentRuntimeService())(_context(args={})))
 
     assert exc_info.value.code == "validation_failed"
+
+
+def test_feeding_and_pumping_record_propose_tool_handlers_require_quantity() -> None:
+    with pytest.raises(ApiError) as feeding_exc:
+        asyncio.run(
+            FeedingRecordProposeToolHandler(runtime_service=FakeAgentRuntimeService())(
+                _context(args={"feed_time": "2026-07-02T09:15:00+00:00", "feed_type": "bottle"})
+            )
+        )
+    with pytest.raises(ApiError) as pumping_exc:
+        asyncio.run(
+            PumpingRecordProposeToolHandler(runtime_service=FakeAgentRuntimeService())(
+                _context(args={"pump_start_time": "2026-07-02T09:00:00+00:00"})
+            )
+        )
+
+    assert feeding_exc.value.code == "validation_failed"
+    assert pumping_exc.value.code == "validation_failed"
 
 
 def test_support_ticket_propose_tool_handler_rejects_legacy_nested_ticket_shape() -> None:
@@ -221,6 +299,8 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
         "profile.read",
         "business.context.read",
         "records.milk_summary.read",
+        "records.feeding_record.propose",
+        "records.pumping_record.propose",
         "hospital_bag.cart_update.propose",
         "support.ticket.propose",
     }
