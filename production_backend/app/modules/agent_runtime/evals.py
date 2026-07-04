@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -8,6 +9,45 @@ from uuid import UUID
 from .models import AgentEvalCase
 from .repository import AgentRuntimeRepository
 from .replay import AgentReplayService
+
+
+@dataclass(frozen=True)
+class AgentEvalTrace:
+    tool_calls: list[dict[str, Any]] = field(default_factory=list)
+    events: list[dict[str, Any]] = field(default_factory=list)
+    actions: list[dict[str, Any]] = field(default_factory=list)
+    safety_decision: str = ""
+    final_text: str = ""
+
+
+@dataclass(frozen=True)
+class AgentEvalFailure:
+    category: str
+    assertion: str
+    expected: str
+    observed: str
+
+
+@dataclass(frozen=True)
+class AgentEvalRunResult:
+    suite: str
+    name: str
+    passed: bool
+    failures: list[AgentEvalFailure]
+
+
+class AgentEvalSeedAssertionEngine:
+    def evaluate(self, *, case: dict[str, Any], trace: AgentEvalTrace) -> AgentEvalRunResult:
+        failures: list[AgentEvalFailure] = []
+        failures.extend(_tool_contract_failures(case=case, trace=trace))
+        failures.extend(_safety_decision_failures(case=case, trace=trace))
+        failures.extend(_confirmation_failures(case=case, trace=trace))
+        return AgentEvalRunResult(
+            suite=str(case.get("suite") or ""),
+            name=str(case.get("name") or ""),
+            passed=not failures,
+            failures=failures,
+        )
 
 
 class AgentEvalService:
@@ -132,3 +172,75 @@ def _require_non_empty_string(value: Any, *, field_name: str) -> str:
     if not normalized:
         raise ValueError(f"{field_name} must be a non-empty string.")
     return normalized
+
+
+def _tool_contract_failures(*, case: dict[str, Any], trace: AgentEvalTrace) -> list[AgentEvalFailure]:
+    expected_contracts = [_contract(tool_call) for tool_call in case.get("expected_tool_calls", []) if _contract(tool_call)]
+    observed_contracts = {_observed_tool_contract(tool_call) for tool_call in trace.tool_calls}
+    observed_contracts.discard("")
+    return [
+        AgentEvalFailure(
+            category="missing_tool",
+            assertion="tool.required",
+            expected=contract,
+            observed=", ".join(sorted(observed_contracts)) or "<none>",
+        )
+        for contract in expected_contracts
+        if contract not in observed_contracts
+    ]
+
+
+def _safety_decision_failures(*, case: dict[str, Any], trace: AgentEvalTrace) -> list[AgentEvalFailure]:
+    expected = str(case.get("expected_safety_decision") or "")
+    if not expected or trace.safety_decision == expected:
+        return []
+    return [
+        AgentEvalFailure(
+            category="safety_mismatch",
+            assertion="safety.decision",
+            expected=expected,
+            observed=trace.safety_decision or "<none>",
+        )
+    ]
+
+
+def _confirmation_failures(*, case: dict[str, Any], trace: AgentEvalTrace) -> list[AgentEvalFailure]:
+    behavior = case.get("expected_behavior") if isinstance(case.get("expected_behavior"), dict) else {}
+    if not bool(behavior.get("requires_confirmation_before_write")):
+        return []
+    proposal_contracts = [_contract(tool_call) for tool_call in case.get("expected_tool_calls", []) if _contract(tool_call).endswith(".propose")]
+    if not proposal_contracts:
+        return []
+    if _has_confirmation(trace):
+        return []
+    return [
+        AgentEvalFailure(
+            category="missing_confirmation",
+            assertion="action.confirmation_required",
+            expected="confirmation_required before write",
+            observed=_observed_action_statuses(trace),
+        )
+    ]
+
+
+def _has_confirmation(trace: AgentEvalTrace) -> bool:
+    if any(str(event.get("type") or event.get("event_type") or "") == "action.confirmation_required" for event in trace.events):
+        return True
+    return any(str(action.get("status") or "") == "confirmation_required" for action in trace.actions)
+
+
+def _observed_action_statuses(trace: AgentEvalTrace) -> str:
+    statuses = sorted({str(action.get("status") or "") for action in trace.actions if str(action.get("status") or "")})
+    return ", ".join(statuses) or "<none>"
+
+
+def _contract(tool_call: Any) -> str:
+    if not isinstance(tool_call, dict):
+        return ""
+    return str(tool_call.get("contract") or tool_call.get("tool_name") or "").strip()
+
+
+def _observed_tool_contract(tool_call: Any) -> str:
+    if not isinstance(tool_call, dict):
+        return ""
+    return str(tool_call.get("contract") or tool_call.get("tool_name") or tool_call.get("name") or "").strip()
