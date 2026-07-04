@@ -36,6 +36,13 @@ class AgentEvalRunResult:
     failures: list[AgentEvalFailure]
 
 
+@dataclass(frozen=True)
+class AgentEvalRuntimeCaseResult:
+    execution_result: Any
+    trace: AgentEvalTrace
+    eval_result: AgentEvalRunResult
+
+
 class AgentEvalSeedAssertionEngine:
     def evaluate(self, *, case: dict[str, Any], trace: AgentEvalTrace) -> AgentEvalRunResult:
         failures: list[AgentEvalFailure] = []
@@ -58,6 +65,44 @@ class AgentEvalReplayAssertionRunner:
 
     def evaluate_bundle(self, *, case: dict[str, Any], replay_bundle: dict[str, Any]) -> AgentEvalRunResult:
         return self.assertion_engine.evaluate(case=case, trace=agent_eval_trace_from_replay_bundle(replay_bundle))
+
+
+class AgentEvalRuntimeTraceCollector:
+    def __init__(self, *, repository: AgentRuntimeRepository) -> None:
+        self.repository = repository
+
+    async def collect(self, *, run_id: UUID, final_text: str = "") -> AgentEvalTrace:
+        tool_calls = await self.repository.list_tool_calls_for_run(run_id=run_id)
+        events = await self.repository.list_events_for_run(run_id=run_id)
+        actions = await self.repository.list_actions_for_run(run_id=run_id)
+        safety_events = await self.repository.list_safety_events_for_run(run_id=run_id)
+        safety_decision = safety_events[-1].decision if safety_events else "allow"
+        return AgentEvalTrace(
+            tool_calls=[_tool_call_trace(tool_call) for tool_call in tool_calls],
+            events=[_event_trace(event) for event in events],
+            actions=[_action_trace(action) for action in actions],
+            safety_decision=safety_decision,
+            final_text=final_text,
+        )
+
+
+class AgentEvalRuntimeClient:
+    def __init__(
+        self,
+        *,
+        executor: Any,
+        repository: AgentRuntimeRepository,
+        assertion_engine: AgentEvalSeedAssertionEngine | None = None,
+    ) -> None:
+        self.executor = executor
+        self.collector = AgentEvalRuntimeTraceCollector(repository=repository)
+        self.assertion_engine = assertion_engine or AgentEvalSeedAssertionEngine()
+
+    async def execute_case(self, *, run: Any, case: dict[str, Any]) -> AgentEvalRuntimeCaseResult:
+        execution_result = await self.executor.execute(run=run)
+        trace = await self.collector.collect(run_id=run.id, final_text=str(getattr(execution_result, "final_text", "") or ""))
+        eval_result = self.assertion_engine.evaluate(case=case, trace=trace)
+        return AgentEvalRuntimeCaseResult(execution_result=execution_result, trace=trace, eval_result=eval_result)
 
 
 def agent_eval_trace_from_replay_bundle(bundle: dict[str, Any]) -> AgentEvalTrace:
@@ -190,6 +235,30 @@ def _last_safety_decision(bundle: dict[str, Any]) -> str:
     if not isinstance(last, dict):
         return ""
     return str(last.get("decision") or "")
+
+
+def _tool_call_trace(tool_call: Any) -> dict[str, Any]:
+    return {
+        "tool_name": str(getattr(tool_call, "tool_name", "") or ""),
+        "status": str(getattr(tool_call, "status", "") or ""),
+        "error_code": str(getattr(tool_call, "error_code", "") or ""),
+    }
+
+
+def _event_trace(event: Any) -> dict[str, Any]:
+    return {
+        "type": str(getattr(event, "event_type", "") or ""),
+        "sequence": int(getattr(event, "sequence", 0) or 0),
+        "payload": getattr(event, "payload", {}) if isinstance(getattr(event, "payload", {}), dict) else {},
+    }
+
+
+def _action_trace(action: Any) -> dict[str, Any]:
+    return {
+        "action_type": str(getattr(action, "action_type", "") or ""),
+        "status": str(getattr(action, "status", "") or ""),
+        "target_type": str(getattr(action, "target_type", "") or ""),
+    }
 
 
 def _require_non_empty_string(value: Any, *, field_name: str) -> str:
