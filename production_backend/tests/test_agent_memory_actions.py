@@ -15,6 +15,7 @@ def test_agent_memory_create_action_handler_creates_memory_through_service() -> 
             "memory_type": "communication_preference",
             "content": {"summary": "Prefers concise reminders"},
             "confidence_score": 80,
+            "expires_in_days": 30,
         }
     )
 
@@ -31,6 +32,7 @@ def test_agent_memory_create_action_handler_creates_memory_through_service() -> 
     assert service.create_kwargs["source_run_id"] == action.run_id
     assert service.create_kwargs["content"] == {"summary": "Prefers concise reminders"}
     assert service.create_kwargs["confidence_score"] == 80
+    assert service.create_kwargs["expires_at"] is not None
 
 
 def test_agent_memory_create_action_handler_rejects_missing_payload() -> None:

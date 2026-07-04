@@ -139,6 +139,18 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
                 },
             },
             "confidence_score": {"type": "integer", "minimum": 0, "maximum": 100, "default": 0},
+            "sensitivity": {
+                "type": "string",
+                "enum": ["normal", "personal", "health", "child", "crisis", "regulated", "financial", "legal"],
+                "default": "normal",
+                "description": "Sensitivity classification for the proposed memory; high-sensitivity classes are policy-gated.",
+            },
+            "expires_in_days": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 365,
+                "description": "Optional TTL for short-lived memory records.",
+            },
             "locale": {"type": "string", "maxLength": 35},
             "timezone": {"type": "string", "maxLength": 80},
             "idempotency_key": {"type": "string", "maxLength": 255},

@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 import pytest
@@ -24,7 +25,7 @@ def test_agent_memory_service_creates_owner_scoped_memory() -> None:
 
     assert memory.owner_user_id == owner_user_id
     assert memory.memory_type == "communication_preference"
-    assert memory.content == {"summary": "Prefers concise reminders"}
+    assert memory.content == {"summary": "Prefers concise reminders", "sensitivity": "normal"}
     assert memory.confidence_score == 80
     assert repository.create_kwargs["schema_version"] == "v1"
 
@@ -71,6 +72,60 @@ def test_agent_memory_service_rejects_unsupported_type_and_empty_content() -> No
     assert confidence_exc.value.code == "validation_failed"
 
 
+def test_agent_memory_service_rejects_sensitive_memory_policy() -> None:
+    service = AgentMemoryService(repository=FakeMemoryRepository())
+
+    with pytest.raises(ApiError) as explicit_exc:
+        asyncio.run(
+            service.create_memory(
+                owner_user_id=uuid4(),
+                memory_type="user_preference",
+                content={"summary": "User wants health facts remembered", "sensitivity": "health"},
+            )
+        )
+    with pytest.raises(ApiError) as inferred_exc:
+        asyncio.run(
+            service.create_memory(
+                owner_user_id=uuid4(),
+                memory_type="user_preference",
+                content={"summary": "Newborn fever should be remembered"},
+            )
+        )
+
+    assert explicit_exc.value.code == "sensitive_memory_not_allowed"
+    assert inferred_exc.value.code == "sensitive_memory_not_allowed"
+
+
+def test_agent_memory_service_applies_retention_policy_and_excludes_expired_memories() -> None:
+    owner_user_id = uuid4()
+    repository = FakeMemoryRepository()
+    service = AgentMemoryService(repository=repository)
+
+    active = asyncio.run(
+        service.create_memory(
+            owner_user_id=owner_user_id,
+            memory_type="user_preference",
+            content={"summary": "Likes quiet reminders"},
+            expires_at=datetime.now(timezone.utc) + timedelta(days=7),
+        )
+    )
+    expired = AgentMemory(
+        id=uuid4(),
+        owner_user_id=owner_user_id,
+        memory_type="user_preference",
+        content={"summary": "Expired", "sensitivity": "normal"},
+        schema_version="v1",
+        expires_at=datetime.now(timezone.utc) - timedelta(days=1),
+        status="active",
+    )
+    repository.memories.append(expired)
+
+    memories = asyncio.run(service.list_active_memories(owner_user_id=owner_user_id))
+
+    assert active.expires_at is not None
+    assert memories == [active]
+
+
 def test_agent_memory_service_archive_missing_memory_returns_not_found() -> None:
     with pytest.raises(ApiError) as exc_info:
         asyncio.run(AgentMemoryService(repository=FakeMemoryRepository()).archive_memory(owner_user_id=uuid4(), memory_id=uuid4()))
@@ -101,10 +156,14 @@ class FakeMemoryRepository:
         return memory
 
     async def list_active_memories(self, *, owner_user_id, memory_type, limit):
+        now = datetime.now(timezone.utc)
         return [
             memory
             for memory in self.memories
-            if memory.owner_user_id == owner_user_id and memory.status == "active" and (memory_type is None or memory.memory_type == memory_type)
+            if memory.owner_user_id == owner_user_id
+            and memory.status == "active"
+            and (memory.expires_at is None or memory.expires_at > now)
+            and (memory_type is None or memory.memory_type == memory_type)
         ][:limit]
 
     async def archive_memory(self, *, owner_user_id, memory_id, archived_at):

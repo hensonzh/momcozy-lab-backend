@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from ...core.errors import ApiError
@@ -25,6 +26,7 @@ class AgentMemoryCreateActionHandler:
         if not isinstance(content, dict) or not content:
             raise PermanentJobError("missing_memory_content")
         confidence_score = _confidence_score(payload.get("confidence_score", 0))
+        expires_at = _expires_at(payload.get("expires_in_days"))
 
         try:
             memory = await self.service.create_memory(
@@ -33,6 +35,7 @@ class AgentMemoryCreateActionHandler:
                 content=content,
                 source_run_id=action.run_id,
                 confidence_score=confidence_score,
+                expires_at=expires_at,
             )
         except ApiError as exc:
             raise PermanentJobError(exc.code) from exc
@@ -56,3 +59,11 @@ def _confidence_score(value: Any) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         raise PermanentJobError("invalid_confidence_score")
     return value
+
+
+def _expires_at(value: Any) -> datetime | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1 or value > 365:
+        raise PermanentJobError("invalid_memory_ttl")
+    return datetime.now(timezone.utc) + timedelta(days=value)

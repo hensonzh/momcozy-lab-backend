@@ -123,10 +123,16 @@ def test_product_agent_eval_seed_uses_current_memory_action_contract() -> None:
     by_suite = {case["suite"]: case for case in cases}
 
     memory_contracts = {tool_call["contract"] for tool_call in by_suite["memory_preference_capture"]["expected_tool_calls"]}
+    forbidden_sensitive_contracts = {
+        tool_call["contract"] for tool_call in by_suite["memory_sensitive_rejection"]["forbidden_tool_calls"]
+    }
 
     assert "memory.create.propose" in memory_contracts
     assert "agent.memory.create" not in memory_contracts
     assert "memory_write" not in memory_contracts
+    assert by_suite["memory_sensitive_rejection"]["expected_tool_calls"] == []
+    assert "memory.create.propose" in forbidden_sensitive_contracts
+    assert by_suite["memory_sensitive_rejection"]["expected_behavior"]["requires_confirmation_before_write"] is False
 
 
 def test_product_agent_eval_seed_covers_critical_health_and_emotion_regressions() -> None:

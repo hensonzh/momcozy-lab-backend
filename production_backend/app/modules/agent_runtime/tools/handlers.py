@@ -14,6 +14,7 @@ from ...diary.models import PregnancyDiaryEntry
 from ...diary.service import DiaryService
 from ...files.vision_service import FileVisionService
 from ...notifications.agent_actions import MILK_REMINDER_CREATE_ACTION
+from ..memory import validate_memory_write_policy
 from ..memory_actions import AGENT_MEMORY_CREATE_ACTION
 from ...plans.agent_actions import (
     MILK_PLAN_CREATE_ACTION,
@@ -300,6 +301,7 @@ class MemoryCreateProposeToolHandler:
             raise ApiError(code="validation_failed", message="memory_type is required.", status=422)
         if not isinstance(content, dict) or not _text(content, "summary"):
             raise ApiError(code="validation_failed", message="content.summary is required.", status=422)
+        apply_payload["content"] = validate_memory_write_policy(content)
         preview_payload = _memory_create_preview_payload(apply_payload)
         action = await self.runtime_service.propose_action(
             owner_user_id=context.actor.user_id,
@@ -893,11 +895,19 @@ def _diary_entry_preview_payload(apply_payload: dict[str, Any]) -> dict[str, Any
 
 
 def _memory_create_apply_payload(args: dict[str, Any]) -> dict[str, Any]:
+    content = args.get("content") if isinstance(args.get("content"), dict) else {}
+    sensitivity = _text(args, "sensitivity")
+    if sensitivity:
+        content = dict(content)
+        content["sensitivity"] = sensitivity
     payload: dict[str, Any] = {
         "memory_type": _text(args, "memory_type"),
-        "content": args.get("content") if isinstance(args.get("content"), dict) else {},
+        "content": content,
         "confidence_score": _optional_int(args, "confidence_score") or 0,
     }
+    expires_in_days = _optional_int(args, "expires_in_days")
+    if expires_in_days is not None:
+        payload["expires_in_days"] = expires_in_days
     metadata = _metadata_payload(args)
     if metadata:
         payload["metadata"] = metadata
@@ -908,11 +918,14 @@ def _memory_create_preview_payload(apply_payload: dict[str, Any]) -> dict[str, A
     content = apply_payload.get("content")
     if not isinstance(content, dict):
         content = {}
-    return {
+    preview = {
         "memory_type": _text(apply_payload, "memory_type"),
         "summary": _truncate(_text(content, "summary"), max_length=240),
+        "sensitivity": _text(content, "sensitivity") or "normal",
         "confidence_score": apply_payload.get("confidence_score", 0),
+        "expires_in_days": apply_payload.get("expires_in_days"),
     }
+    return {key: value for key, value in preview.items() if value not in ("", None)}
 
 
 def _proposal_result(*, action: Any, preview_payload: dict[str, Any]) -> dict[str, Any]:

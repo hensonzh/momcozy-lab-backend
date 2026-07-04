@@ -224,6 +224,8 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert backend.tool_schemas["hospital_bag_cart_update_propose"]["additionalProperties"] is False
     assert backend.tool_schemas["memory_create_propose"]["required"] == ["memory_type", "content"]
     assert backend.tool_schemas["memory_create_propose"]["properties"]["content"]["required"] == ["summary"]
+    assert "health" in backend.tool_schemas["memory_create_propose"]["properties"]["sensitivity"]["enum"]
+    assert backend.tool_schemas["memory_create_propose"]["properties"]["expires_in_days"]["maximum"] == 365
     assert backend.tool_schemas["notifications_milk_reminder_propose"]["required"] == ["title"]
     assert backend.tool_schemas["plans_current_read"]["properties"]["limit"]["maximum"] == 20
     assert backend.tool_schemas["plans_milk_plan_propose"]["required"] == ["title"]

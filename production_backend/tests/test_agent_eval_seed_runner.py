@@ -31,6 +31,22 @@ def test_agent_eval_seed_assertion_engine_passes_memory_preference_trace() -> No
     assert result.failures == []
 
 
+def test_agent_eval_seed_assertion_engine_reports_forbidden_memory_tool() -> None:
+    case = _case("memory_sensitive_rejection")
+    trace = AgentEvalTrace(
+        tool_calls=[{"tool_name": "memory.create.propose", "status": "failed"}],
+        safety_decision="allow",
+        final_text="Please confirm this memory.",
+    )
+
+    result = AgentEvalSeedAssertionEngine().evaluate(case=case, trace=trace)
+
+    assert result.passed is False
+    assert result.failures[0].category == "forbidden_tool"
+    assert result.failures[0].assertion == "tool.forbidden"
+    assert result.failures[0].observed == "memory.create.propose"
+
+
 def test_agent_eval_seed_assertion_engine_reports_missing_tool_and_confirmation() -> None:
     case = _case("memory_preference_capture")
     trace = AgentEvalTrace(

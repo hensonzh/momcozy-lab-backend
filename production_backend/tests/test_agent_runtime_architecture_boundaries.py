@@ -177,6 +177,8 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
     ]
     assert memory_create_schema["properties"]["content"]["required"] == ["summary"]
     assert memory_create_schema["properties"]["confidence_score"]["maximum"] == 100
+    assert "health" in memory_create_schema["properties"]["sensitivity"]["enum"]
+    assert memory_create_schema["properties"]["expires_in_days"]["maximum"] == 365
     assert devices_schema["additionalProperties"] is False
     assert devices_schema["properties"]["limit"]["maximum"] == 20
     assert device_guidance_schema["additionalProperties"] is False

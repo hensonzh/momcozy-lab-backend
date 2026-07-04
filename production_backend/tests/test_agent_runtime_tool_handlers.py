@@ -607,6 +607,8 @@ def test_memory_create_propose_tool_handler_creates_confirmation_action() -> Non
             "memory_type": "communication_preference",
             "content": {"summary": "Prefers concise reminders", "source": "user said so"},
             "confidence_score": 80,
+            "sensitivity": "personal",
+            "expires_in_days": 90,
             "locale": "en-US",
         },
     )
@@ -618,11 +620,15 @@ def test_memory_create_propose_tool_handler_creates_confirmation_action() -> Non
     assert result["preview_payload"] == {
         "memory_type": "communication_preference",
         "summary": "Prefers concise reminders",
+        "sensitivity": "personal",
         "confidence_score": 80,
+        "expires_in_days": 90,
     }
     assert runtime_service.calls[0]["target_type"] == "agent_memory"
     assert runtime_service.calls[0]["side_effect_level"] == "medium"
     assert runtime_service.calls[0]["apply_payload"]["content"]["summary"] == "Prefers concise reminders"
+    assert runtime_service.calls[0]["apply_payload"]["content"]["sensitivity"] == "personal"
+    assert runtime_service.calls[0]["apply_payload"]["expires_in_days"] == 90
     assert runtime_service.calls[0]["apply_payload"]["metadata"] == {"locale": "en-US"}
 
 
@@ -705,6 +711,22 @@ def test_memory_create_propose_tool_handler_requires_summary() -> None:
         )
 
     assert exc_info.value.code == "validation_failed"
+
+
+def test_memory_create_propose_tool_handler_rejects_sensitive_memory() -> None:
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            MemoryCreateProposeToolHandler(runtime_service=FakeAgentRuntimeService())(
+                _context(
+                    args={
+                        "memory_type": "user_preference",
+                        "content": {"summary": "Remember that my newborn has a fever"},
+                    }
+                )
+            )
+        )
+
+    assert exc_info.value.code == "sensitive_memory_not_allowed"
 
 
 def test_support_ticket_propose_tool_handler_rejects_legacy_nested_ticket_shape() -> None:
