@@ -200,9 +200,21 @@ LangGraph workflow。
 
 建议 PR：
 
-1. `agent: harden OpenAI Agents SDK runner settings`
+1. `agent: harden OpenAI Agents SDK runner settings` - done
 2. `agent: add SDK tool and tracing contract tests`
 3. `agent: add deterministic SDK mock harness for evals`
+
+已完成能力：
+
+- `OPENAI_MODEL`、`OPENAI_AGENT_MAX_TURNS`、`OPENAI_AGENT_TIMEOUT_SECONDS`、
+  `OPENAI_AGENT_TRACE_ENABLED`、`OPENAI_AGENT_PROMPT_VERSION` 均由 typed
+  settings 和 `.env.example` 管控。
+- `/v1/agent/runs` 在客户端未显式传入 `prompt_version` 时使用环境默认
+  prompt version。
+- SDK request、context projection 和 OpenAI Agents SDK `RunConfig` 均带
+  prompt version / trace metadata。
+- 默认关闭 provider tracing；开启 tracing 时仍不使用 `previous_response_id`、
+  conversation id 或 SDK session 作为续聊状态。
 
 验收：
 
