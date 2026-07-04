@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID, uuid4
@@ -19,6 +20,7 @@ from .sdk import AgentSpecialistProfile, AgentSpecialistRegistry, OpenAIAgentsSd
 from .state_store import AgentRuntimeStateStore
 from .tools import ToolContractRegistry, ToolExecutor, default_tool_registry
 from .tools.schemas import tool_input_schema
+from .transient_stream import AgentTransientStream
 
 
 @dataclass(frozen=True)
@@ -50,6 +52,7 @@ class AgentRuntimeExecutor:
         action_policy: AgentActionPolicy | None = None,
         memory_service: AgentMemoryService | None = None,
         specialist_registry: AgentSpecialistRegistry | None = None,
+        transient_stream: AgentTransientStream | None = None,
         input_builder: ModelInputBuilder | None = None,
         config: AgentRuntimeExecutorConfig | None = None,
     ) -> None:
@@ -64,6 +67,7 @@ class AgentRuntimeExecutor:
         self.action_policy = action_policy or AgentActionPolicy()
         self.memory_service = memory_service
         self.specialist_registry = specialist_registry or default_specialist_registry()
+        self.transient_stream = transient_stream
         self.input_builder = input_builder or ModelInputBuilder()
         self.config = config or AgentRuntimeExecutorConfig()
 
@@ -129,6 +133,7 @@ class AgentRuntimeExecutor:
                 prompt_version=run.prompt_version,
                 trace_id=run.trace_id,
                 specialist_id=specialist.id,
+                on_text_delta=self._text_delta_handler(run=run),
             )
         )
 
@@ -223,6 +228,16 @@ class AgentRuntimeExecutor:
 
     def _tool_names_for_specialist(self, specialist: AgentSpecialistProfile) -> tuple[str, ...]:
         return tuple(sorted(contract.name for contract in self.tool_registry.list() if specialist.allows_tool(contract)))
+
+    def _text_delta_handler(self, *, run: AgentRun) -> Callable[[str], Awaitable[None]] | None:
+        transient_stream = self.transient_stream
+        if transient_stream is None:
+            return None
+
+        async def publish(delta: str) -> None:
+            await transient_stream.publish_message_delta(thread_id=run.thread_id, run_id=run.id, delta=delta)
+
+        return publish
 
     def _sdk_tools(self, *, run: AgentRun, tool_names: tuple[str, ...]) -> tuple[SdkToolDefinition, ...]:
         if self.tool_executor is None:

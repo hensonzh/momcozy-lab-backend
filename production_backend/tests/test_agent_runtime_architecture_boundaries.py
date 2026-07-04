@@ -320,6 +320,37 @@ def test_sdk_runner_disables_provider_tracing_by_default(monkeypatch: pytest.Mon
     assert FakeAgentsSdkRunner.last_run_config.tracing_disabled is True
 
 
+def test_sdk_runner_maps_streamed_text_deltas_to_callback(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_agents = types.ModuleType("agents")
+    fake_agents.__spec__ = ModuleSpec("agents", loader=None)
+    fake_agents.Agent = FakeAgentsSdkAgent
+    fake_agents.FunctionTool = FakeAgentsSdkFunctionTool
+    fake_agents.RunConfig = FakeAgentsSdkRunConfig
+    fake_agents.Runner = StreamingAgentsSdkRunner
+    monkeypatch.setitem(sys.modules, "agents", fake_agents)
+    deltas = []
+
+    async def on_text_delta(delta: str) -> None:
+        deltas.append(delta)
+
+    result = asyncio.run(
+        OpenAIAgentsSdkRunner(model="gpt-test").run_reasoning(
+            SdkNodeRequest(
+                run_id="run_1",
+                thread_id="thread_1",
+                actor_user_id="user_1",
+                instructions="Be concise.",
+                model_input=[{"role": "user", "content": "hello"}],
+                on_text_delta=on_text_delta,
+            )
+        )
+    )
+
+    assert deltas == ["hel", "lo"]
+    assert result.final_text == "hello"
+    assert StreamingAgentsSdkRunner.last_input == "user: hello"
+
+
 def test_sdk_runner_flattens_structured_context_as_stable_json(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_agents = types.ModuleType("agents")
     fake_agents.__spec__ = ModuleSpec("agents", loader=None)
@@ -537,6 +568,34 @@ class FakeAgentsSdkRunner:
         FakeAgentsSdkRunner.last_conversation_id = conversation_id
         FakeAgentsSdkRunner.last_session = session
         return FakeAgentsSdkResult(final_output="sdk final")
+
+
+class StreamingAgentsSdkRunner:
+    last_input = ""
+
+    @staticmethod
+    def run_streamed(agent: FakeAgentsSdkAgent, input: str, *, max_turns=None, run_config=None):
+        StreamingAgentsSdkRunner.last_input = input
+        return FakeAgentsSdkStreamingResult(final_output="hello")
+
+
+class FakeAgentsSdkStreamingResult:
+    def __init__(self, *, final_output: str) -> None:
+        self.final_output = final_output
+
+    async def stream_events(self):
+        yield types.SimpleNamespace(
+            type="raw_response_event",
+            data=types.SimpleNamespace(type="response.output_text.delta", delta="hel"),
+        )
+        yield types.SimpleNamespace(
+            type="raw_response_event",
+            data=types.SimpleNamespace(type="response.output_text.delta", delta="lo"),
+        )
+        yield types.SimpleNamespace(
+            type="run_item_stream_event",
+            data=types.SimpleNamespace(type="not_a_text_delta", delta="ignored"),
+        )
 
 
 class ToolCallingAgentsSdkRunner:

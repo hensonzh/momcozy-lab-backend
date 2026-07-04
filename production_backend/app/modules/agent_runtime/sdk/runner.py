@@ -15,6 +15,7 @@ from ....core.errors import ApiError
 
 
 SdkToolInvoker = Callable[[str], Awaitable[str]]
+SdkTextDeltaHandler = Callable[[str], Awaitable[None]]
 
 
 @dataclass(frozen=True)
@@ -38,6 +39,7 @@ class SdkNodeRequest:
     prompt_version: str = ""
     trace_id: str = ""
     specialist_id: str = "general_product"
+    on_text_delta: SdkTextDeltaHandler | None = None
 
 
 @dataclass(frozen=True)
@@ -83,6 +85,16 @@ class OpenAIAgentsSdkBackend:
         run_config = _build_run_config(agents_module=agents_module, request=request, trace_enabled=self.trace_enabled)
         if run_config is not None:
             run_kwargs["run_config"] = run_config
+        if request.on_text_delta is not None and hasattr(runner_cls, "run_streamed"):
+            result = await _run_streamed(
+                runner_cls=runner_cls,
+                agent=agent,
+                model_input=_flatten_model_input(request.model_input),
+                run_kwargs=run_kwargs,
+                on_text_delta=request.on_text_delta,
+            )
+            return result
+
         result = await runner_cls.run(agent, _flatten_model_input(request.model_input), **run_kwargs)
         final_output = getattr(result, "final_output", "")
         return SdkNodeResult(final_text=str(final_output or ""))
@@ -145,6 +157,37 @@ def _flatten_model_input(model_input: list[dict[str, Any]]) -> str:
         content = item.get("content")
         lines.append(f"{role}: {_stringify_content(content)}")
     return "\n".join(lines)
+
+
+async def _run_streamed(
+    *,
+    runner_cls: Any,
+    agent: Any,
+    model_input: str,
+    run_kwargs: dict[str, Any],
+    on_text_delta: SdkTextDeltaHandler,
+) -> SdkNodeResult:
+    streamed = runner_cls.run_streamed(agent, model_input, **run_kwargs)
+    async for event in streamed.stream_events():
+        delta = _text_delta_from_stream_event(event)
+        if delta:
+            await on_text_delta(delta)
+    final_output = getattr(streamed, "final_output", "")
+    return SdkNodeResult(final_text=str(final_output or ""))
+
+
+def _text_delta_from_stream_event(event: Any) -> str:
+    if str(getattr(event, "type", "") or "") != "raw_response_event":
+        return ""
+    data = getattr(event, "data", None)
+    event_type = str(getattr(data, "type", "") or "")
+    if event_type and "delta" not in event_type:
+        return ""
+    for attr in ("delta", "text", "content"):
+        value = getattr(data, attr, None)
+        if isinstance(value, str) and value:
+            return value
+    return ""
 
 
 def _stringify_content(content: object) -> str:

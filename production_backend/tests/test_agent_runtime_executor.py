@@ -146,6 +146,31 @@ def test_agent_runtime_executor_projects_active_memory_into_dynamic_context() ->
     assert state_store.projections[0]["projection_summary"]["fresh_business_fact_keys"] == []
 
 
+def test_agent_runtime_executor_publishes_text_deltas_to_transient_stream() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="Stream please", sequence=1)
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    transient_stream = FakeTransientStream()
+    backend = ScriptedSdkBackend([scripted_sdk_response(final_text="hello", text_deltas=("hel", "lo"))])
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            transient_stream=transient_stream,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+        ).execute(run=run)
+    )
+
+    assert result.status == "completed"
+    assert result.final_text == "hello"
+    assert transient_stream.deltas == [
+        {"thread_id": thread_id, "run_id": run.id, "delta": "hel"},
+        {"thread_id": thread_id, "run_id": run.id, "delta": "lo"},
+    ]
+    assert all(event.event_type != "message.delta" for event in repository.events)
+
+
 def test_agent_runtime_executor_requires_current_user_message() -> None:
     run = _run(thread_id=uuid4())
     repository = FakeRuntimeRepository(messages=[], current_message=None)
@@ -632,6 +657,15 @@ class FakeMemoryService:
     async def list_active_memories(self, *, owner_user_id, memory_type=None, limit=20):
         self.calls.append({"owner_user_id": owner_user_id, "memory_type": memory_type, "limit": limit})
         return [memory for memory in self.memories if memory.owner_user_id == owner_user_id and memory.status == "active"][:limit]
+
+
+class FakeTransientStream:
+    def __init__(self) -> None:
+        self.deltas = []
+
+    async def publish_message_delta(self, *, thread_id, run_id, delta, message_stream_id="assistant", ttl_seconds=600):
+        self.deltas.append({"thread_id": thread_id, "run_id": run_id, "delta": delta})
+        return None
 
 
 class FakeToolExecutor:

@@ -17,6 +17,7 @@ class ScriptedToolInvocation:
 @dataclass(frozen=True)
 class ScriptedSdkResponse:
     final_text: str = ""
+    text_deltas: tuple[str, ...] = ()
     tool_invocations: tuple[ScriptedToolInvocation, ...] = ()
     tool_calls: tuple[dict[str, Any], ...] = ()
     action_proposals: tuple[dict[str, Any], ...] = ()
@@ -36,6 +37,9 @@ class ScriptedSdkBackend(SdkRunnerBackend):
             raise ApiError(code="sdk_mock_exhausted", message="Scripted SDK backend has no response left.", status=500)
         response = self._responses.pop(0)
         _assert_expected_tools(response=response, request=request)
+        if request.on_text_delta is not None:
+            for delta in response.text_deltas:
+                await request.on_text_delta(delta)
         invoked_tool_calls = await _invoke_scripted_tools(response=response, request=request)
         return SdkNodeResult(
             final_text=response.final_text,
@@ -53,6 +57,7 @@ def scripted_tool_invocation(contract_name: str, args: dict[str, Any] | None = N
 def scripted_sdk_response(
     *,
     final_text: str = "",
+    text_deltas: tuple[str, ...] = (),
     tool_invocations: tuple[ScriptedToolInvocation, ...] = (),
     tool_calls: tuple[dict[str, Any], ...] = (),
     action_proposals: tuple[dict[str, Any], ...] = (),
@@ -62,6 +67,7 @@ def scripted_sdk_response(
 ) -> ScriptedSdkResponse:
     return ScriptedSdkResponse(
         final_text=final_text,
+        text_deltas=text_deltas,
         tool_invocations=tool_invocations,
         tool_calls=tool_calls,
         action_proposals=action_proposals,

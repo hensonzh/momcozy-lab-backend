@@ -42,7 +42,8 @@ from .schemas import (
 from .service import AgentRuntimeService
 from .controls import AgentRunControls
 from .safety import AgentSafetyService
-from .streaming import encode_sse_events
+from .streaming import encode_sse_events, encode_transient_sse_events
+from .transient_stream import AgentTransientStream
 
 
 router = APIRouter(prefix="/agent", tags=["agent"])
@@ -190,6 +191,8 @@ async def stream_run_events(
     current_user: CurrentUser = Depends(require_current_user),
     service: AgentRuntimeService = Depends(get_agent_runtime_service),
 ) -> Response:
+    redis_client = getattr(request.app.state, "redis_client", None)
+    transient_stream = AgentTransientStream(redis_client) if redis_client is not None else None
     return StreamingResponse(
         _stream_run_event_chunks(
             service=service,
@@ -201,6 +204,7 @@ async def stream_run_events(
             poll_interval_seconds=poll_interval_seconds,
             max_wait_seconds=max_wait_seconds,
             is_disconnected=request.is_disconnected,
+            transient_stream=transient_stream,
         ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache"},
@@ -350,8 +354,10 @@ async def _stream_run_event_chunks(
     poll_interval_seconds: float,
     max_wait_seconds: int,
     is_disconnected: Callable[[], Awaitable[bool]] | None = None,
+    transient_stream: AgentTransientStream | None = None,
 ) -> AsyncIterator[str]:
     cursor = after_sequence
+    transient_cursor = "0-0"
     deadline = monotonic() + max_wait_seconds
     while True:
         if is_disconnected is not None and await is_disconnected():
@@ -364,6 +370,18 @@ async def _stream_run_event_chunks(
                 return
         if not follow or monotonic() >= deadline:
             return
+        if transient_stream is not None:
+            transient_events = await transient_stream.read(
+                run_id=run_id,
+                after_cursor=transient_cursor,
+                count=100,
+                block_ms=int(poll_interval_seconds * 1000),
+            )
+            if transient_events:
+                transient_cursor = transient_events[-1].cursor
+                yield encode_transient_sse_events(transient_events)
+                continue
+        else:
+            await asyncio.sleep(poll_interval_seconds)
         if is_disconnected is not None and await is_disconnected():
             return
-        await asyncio.sleep(poll_interval_seconds)

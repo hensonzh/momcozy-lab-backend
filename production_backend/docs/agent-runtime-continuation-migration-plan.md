@@ -102,7 +102,8 @@
 - Business state 存在业务表。
 - Runtime ledger 存在 agent runtime 表。
 - Graph checkpoint 只保存 workflow progress，不保存不可丢业务事实。
-- Redis 只保存 active run lock、cancel flag、stream cursor、短期 cache。
+- Redis 只保存 active run lock、cancel flag、stream cursor、短期 stream delta
+  和短期 cache。
 - Context projection 每轮由 message ledger、business facts、memory 和当前
   run state 派生，不作为权威状态持久化。
 
@@ -118,8 +119,13 @@
 ### Streaming
 
 - 前端只消费 application event，不消费 provider raw event。
-- SSE replay 和 follow mode 均基于 persisted event + sequence cursor。
-- reconnect 后客户端用 `after_sequence` 继续拉取，不依赖内存 stream。
+- Postgres persisted event 是权威账本；`sequence` cursor 只用于持久化事件
+  replay。
+- live follow mode 可额外发送 Redis 短期 `message.delta` transient event，
+  用于 token 级打字体验；这些 delta 不写入 Postgres，不参与 `sequence`，
+  只带 `event_id=delta:<redis-stream-id>` 和 Redis `cursor`。
+- reconnect 后客户端用 `after_sequence` 继续拉取权威事件；短期 delta 允许
+  在 TTL 内重放或丢失，最终 UI 以 persisted `message.completed` 为准。
 
 ### Eval
 
@@ -336,6 +342,9 @@ event、eval 的全链路。
 - 重复确认不会重复写记录。
 - SSE replay 能完整重放 run.started、tool events、action events、
   message.completed/run.completed 或 run.waiting_for_confirmation。
+- follow mode 可发送 Redis transient `message.delta`，但断线恢复不能依赖
+  delta 完整存在；最终内容以 persisted `message.completed` 和 message
+  ledger 为准。
 - eval 覆盖：只读总结、创建记录、修改记录、重复确认、越权、红旗安全。
 
 ## Phase 5: Pregnancy Plan And Diary Flow
@@ -572,7 +581,8 @@ eval regression。
 - 用 `/v1/agent/runs/{run_id}/stream?after_sequence=...&follow=true`
   消费 SSE。
 - reducer 按 `event_id`、`thread_id`、`run_id`、`sequence`、`type`、
-  `action_id`、`message_id` 合并状态。
+  `action_id`、`message_id` 合并状态；`message.delta` 是 provisional UI
+  事件，可能没有 `sequence`，最终由 `message.completed` 覆盖。
 - action card 支持 confirm/reject。
 - 网络断开后用 `after_sequence` replay。
 

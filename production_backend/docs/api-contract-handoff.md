@@ -55,8 +55,17 @@ application-event reducer instead of an AG-UI adapter.
 
 The SSE stream replays persisted events by default. Clients that need live
 consumption can pass `follow=true` with bounded `poll_interval_seconds` and
-`max_wait_seconds`; the backend still emits only persisted application events
-and exits when a terminal run event is observed or the wait budget expires.
+`max_wait_seconds`. Persisted events are the source of truth and carry a
+monotonic `sequence` for replay.
+
+In live follow mode, the backend may also emit transient `message.delta`
+application events from Redis for token-level typing UI. These events are not
+provider raw events, are not persisted to Postgres, and do not carry a
+`sequence`; their SSE id is `delta:<redis-stream-id>` and their payload includes
+`transient: true` plus a Redis `cursor`. Clients must treat them as provisional:
+they can be replayed within the short Redis TTL or lost after disconnect, and
+the final assistant content is authoritative only after the persisted
+`message.completed` event and message ledger are available.
 
 A client reducer is the deterministic function that folds an ordered event
 stream into visible UI state:
@@ -67,8 +76,10 @@ previous AgentChatState + AgentEvent -> next AgentChatState
 
 It deduplicates by `event_id` or `sequence`, merges message updates by
 `message_id`, tool updates by `tool_call_id`, artifacts by `artifact_id`, and
-action cards by `action_id`. It must not infer state from natural-language
-assistant text, provider raw events, or legacy AG-UI event names.
+action cards by `action_id`. Transient `message.delta` events should update only
+the provisional streaming buffer and must be replaced by the persisted final
+message state. The reducer must not infer state from natural-language assistant
+text, provider raw events, or legacy AG-UI event names.
 
 ## Agent Action Events
 
