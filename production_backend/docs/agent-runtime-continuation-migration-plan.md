@@ -524,13 +524,15 @@ eval regression。
   forbidden tool、confirmation-required、forbidden side effect。
 - seed eval runner 和 CLI，可对 product seed 做 deterministic smoke，并可接收 observed trace fixtures。
 - seed eval runner 可输出 JSON summary 和 JUnit XML report，便于 CI/发布门禁归档。
+- isolated runtime client 已可执行 mocked SDK run、从 runtime ledger 收集
+  messages/events/tool calls/actions/safety trace，并直接运行 seed assertions。
 - replay bundle eval runner 和 CLI，可对 redacted replay JSON 输出 pass/fail
   报告。
 - CI 已接入 `run_agent_seed_eval.py` smoke gate。
 
 后续 PR：
 
-1. `eval: add isolated runtime client for agent seed cases`
+1. `eval: add isolated runtime client for agent seed cases` - done
 2. `eval: add provider-backed nightly evals`
 3. `eval: add report artifact upload in CI`
 
