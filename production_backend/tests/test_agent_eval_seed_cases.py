@@ -69,9 +69,9 @@ def test_product_agent_eval_seed_uses_current_pregnancy_action_contracts() -> No
     task_contracts = {tool_call["contract"] for tool_call in by_suite["pregnancy_task_completion"]["expected_tool_calls"]}
     diary_contracts = {tool_call["contract"] for tool_call in by_suite["pregnancy_diary_entry"]["expected_tool_calls"]}
 
-    assert "plans.current.read" in plan_contracts
+    assert "pregnancy.plan_context.read" in plan_contracts
     assert "pregnancy.plan_create.propose" in plan_contracts
-    assert "plans.current.read" in task_contracts
+    assert "pregnancy.plan_context.read" in task_contracts
     assert "plans.task_complete.propose" in task_contracts
     assert "diary.entry_upsert.propose" in diary_contracts
     assert "pregnancy_plan_proposal" not in plan_contracts

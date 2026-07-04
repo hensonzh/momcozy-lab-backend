@@ -367,7 +367,7 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "plans.current.read",
+          "contract": "pregnancy.plan_context.read",
           "timing": "before_plan_proposal"
         },
         {
@@ -408,7 +408,7 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "plans.current.read",
+          "contract": "pregnancy.plan_context.read",
           "timing": "before_task_match"
         },
         {

@@ -144,6 +144,25 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         ToolContract(
+            name="pregnancy.plan_context.read",
+            domain="plans",
+            description="Read current pregnancy profile, active plans, tasks, and recent diary context as a bounded summary.",
+            input_schema_ref="PregnancyPlanContextQuery",
+            output_schema_ref="PregnancyPlanContextRead",
+            read_or_write="read",
+            required_permission="business_context:read:self",
+            owner_scope="actor",
+            side_effect_level="none",
+            blocking_policy="must_wait",
+            result_dependency="next_tool_call",
+            requires_confirmation=False,
+            idempotency_required=False,
+            audit_required=False,
+            timeout_seconds=10,
+        )
+    )
+    registry.register(
+        ToolContract(
             name="memory.create.propose",
             domain="memory",
             description="Propose a long-term memory write for user confirmation.",

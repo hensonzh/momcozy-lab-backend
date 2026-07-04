@@ -24,6 +24,7 @@ from production_backend.app.modules.agent_runtime.tools import (
     PlansCurrentReadToolHandler,
     ProfileReadToolHandler,
     PumpingRecordProposeToolHandler,
+    PregnancyPlanContextReadToolHandler,
     PregnancyPlanProposeToolHandler,
     SupportTicketProposeToolHandler,
     ToolHandlerContext,
@@ -254,6 +255,36 @@ def test_diary_recent_read_tool_handler_returns_bounded_owner_scoped_summary() -
     assert result["entries"][0]["entry_date"] == "2026-07-02"
     assert result["entries"][0]["content_summary"].endswith("...")
     assert result["count"] == 1
+
+
+def test_pregnancy_plan_context_read_tool_handler_returns_bounded_owner_scoped_summary() -> None:
+    actor = _user()
+    profile = UserProfile(
+        user_id=actor.user_id,
+        display_name="Mai",
+        age=31,
+        delivery_date=date(2026, 9, 20),
+    )
+    profile_service = FakeProfileService(profile=profile, infants=[])
+    plans_service = FakePlansService(owner_user_id=actor.user_id)
+    diary_service = FakeDiaryService(owner_user_id=actor.user_id)
+    handler = PregnancyPlanContextReadToolHandler(
+        profile_service=profile_service,
+        plans_service=plans_service,
+        diary_service=diary_service,
+    )
+
+    result = asyncio.run(handler(_context(actor=actor, args={"limit": 2, "owner_user_id": str(uuid4())})))
+
+    assert profile_service.profile_user_id == actor.user_id
+    assert plans_service.owner_user_id == actor.user_id
+    assert plans_service.plan_status == "active"
+    assert diary_service.owner_user_id == actor.user_id
+    assert result["profile"]["delivery_date"] == "2026-09-20"
+    assert result["plans"][0]["title"] == "Birth plan"
+    assert result["tasks"][0]["title"] == "Call clinic"
+    assert result["recent_diary_entries"][0]["gestational_week"] == "32w"
+    assert result["counts"] == {"plans": 1, "tasks": 1, "recent_diary_entries": 1}
 
 
 def test_devices_pump_status_read_tool_handler_returns_bounded_owner_scoped_summary() -> None:
@@ -715,6 +746,7 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
         "plans.milk_plan.propose",
         "plans.task_complete.propose",
         "plans.task_create.propose",
+        "pregnancy.plan_context.read",
         "pregnancy.plan_create.propose",
         "records.feeding_record.propose",
         "records.pumping_record.propose",

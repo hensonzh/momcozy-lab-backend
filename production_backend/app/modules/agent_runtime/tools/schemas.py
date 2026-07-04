@@ -79,6 +79,20 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             }
         },
     },
+    "PregnancyPlanContextQuery": {
+        "title": "PregnancyPlanContextQuery",
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 20,
+                "default": 5,
+                "description": "Maximum current plans, tasks, and diary entries to include.",
+            }
+        },
+    },
     "DiaryEntryUpsertProposalCreate": {
         "title": "DiaryEntryUpsertProposalCreate",
         "type": "object",

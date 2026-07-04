@@ -58,6 +58,7 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() ->
         "plans.milk_plan.propose",
         "plans.task_complete.propose",
         "plans.task_create.propose",
+        "pregnancy.plan_context.read",
         "pregnancy.plan_create.propose",
         "profile.read",
         "records.feeding_record.propose",
@@ -203,6 +204,7 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
         "plans_milk_plan_propose",
         "plans_task_complete_propose",
         "plans_task_create_propose",
+        "pregnancy_plan_context_read",
         "pregnancy_plan_create_propose",
         "profile_read",
         "records_feeding_record_propose",
@@ -228,6 +230,7 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert backend.tool_schemas["plans_task_complete_propose"]["required"] == ["task_id"]
     assert backend.tool_schemas["plans_task_complete_propose"]["properties"]["completed"]["type"] == "boolean"
     assert backend.tool_schemas["plans_task_create_propose"]["required"] == ["title"]
+    assert backend.tool_schemas["pregnancy_plan_context_read"]["properties"]["limit"]["maximum"] == 20
     assert backend.tool_schemas["pregnancy_plan_create_propose"]["required"] == ["title"]
     assert backend.tool_schemas["profile_read"]["additionalProperties"] is False
     assert backend.tool_schemas["profile_read"]["properties"] == {}

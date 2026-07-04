@@ -231,6 +231,38 @@ class DiaryRecentReadToolHandler:
         }
 
 
+class PregnancyPlanContextReadToolHandler:
+    def __init__(
+        self,
+        *,
+        profile_service: ProfileService,
+        plans_service: PlansService,
+        diary_service: DiaryService,
+    ) -> None:
+        self.profile_service = profile_service
+        self.plans_service = plans_service
+        self.diary_service = diary_service
+
+    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
+        owner_user_id = context.actor.user_id
+        limit = _limit(context.args.get("limit"), default=5, max_limit=20)
+        profile = await self.profile_service.get_user_profile(user_id=owner_user_id)
+        plans = await self.plans_service.list_plans(owner_user_id=owner_user_id, status="active", limit=limit)
+        tasks = await self.plans_service.list_tasks(owner_user_id=owner_user_id, limit=limit)
+        diary_entries = await self.diary_service.list_entries(owner_user_id=owner_user_id, limit=limit)
+        return {
+            "profile": _profile_payload(profile=profile, actor_user_id=owner_user_id),
+            "plans": [_plan_payload(plan) for plan in plans],
+            "tasks": [_task_payload(task) for task in tasks],
+            "recent_diary_entries": [_diary_payload(entry) for entry in diary_entries],
+            "counts": {
+                "plans": len(plans),
+                "tasks": len(tasks),
+                "recent_diary_entries": len(diary_entries),
+            },
+        }
+
+
 class DiaryEntryUpsertProposeToolHandler:
     def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
         self.runtime_service = runtime_service
@@ -533,6 +565,11 @@ def build_default_tool_handlers(
         ),
         "plans.current.read": PlansCurrentReadToolHandler(plans_service=plans_service),
         "diary.recent.read": DiaryRecentReadToolHandler(diary_service=diary_service),
+        "pregnancy.plan_context.read": PregnancyPlanContextReadToolHandler(
+            profile_service=profile_service,
+            plans_service=plans_service,
+            diary_service=diary_service,
+        ),
         "diary.entry_upsert.propose": DiaryEntryUpsertProposeToolHandler(runtime_service=agent_runtime_service),
         "memory.create.propose": MemoryCreateProposeToolHandler(runtime_service=agent_runtime_service),
         "devices.pump_status.read": DevicesPumpStatusReadToolHandler(devices_service=devices_service),

@@ -83,6 +83,7 @@ def test_tool_contract_registry_declares_permission_confirmation_and_blocking_po
     assert "business.context.read" in registry.names_for_sdk()
     plans_current = registry.get("plans.current.read")
     diary_recent = registry.get("diary.recent.read")
+    pregnancy_context = registry.get("pregnancy.plan_context.read")
     device_status = registry.get("devices.pump_status.read")
     device_guidance_assets = registry.get("devices.guidance_assets.read")
     file_vision = registry.get("files.vision_summary.read")
@@ -92,6 +93,10 @@ def test_tool_contract_registry_declares_permission_confirmation_and_blocking_po
     assert diary_recent.read_or_write == "read"
     assert diary_recent.owner_scope == "actor"
     assert diary_recent.requires_confirmation is False
+    assert pregnancy_context.read_or_write == "read"
+    assert pregnancy_context.owner_scope == "actor"
+    assert pregnancy_context.required_permission == "business_context:read:self"
+    assert pregnancy_context.requires_confirmation is False
     assert device_status.read_or_write == "read"
     assert device_status.owner_scope == "actor"
     assert device_status.requires_confirmation is False
@@ -108,6 +113,7 @@ def test_tool_contract_registry_declares_permission_confirmation_and_blocking_po
     assert "diary.entry_upsert.propose" in registry.names_for_sdk()
     assert "memory.create.propose" in registry.names_for_sdk()
     assert "devices.guidance_assets.read" in registry.names_for_sdk()
+    assert "pregnancy.plan_context.read" in registry.names_for_sdk()
     assert "pregnancy.plan_create.propose" in registry.names_for_sdk()
     assert "plans.task_create.propose" in registry.names_for_sdk()
     assert "plans.task_complete.propose" in registry.names_for_sdk()
@@ -123,6 +129,7 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
     milk_schema = tool_input_schema(registry.get("records.milk_summary.read").input_schema_ref)
     plans_schema = tool_input_schema(registry.get("plans.current.read").input_schema_ref)
     diary_schema = tool_input_schema(registry.get("diary.recent.read").input_schema_ref)
+    pregnancy_context_schema = tool_input_schema(registry.get("pregnancy.plan_context.read").input_schema_ref)
     diary_entry_schema = tool_input_schema(registry.get("diary.entry_upsert.propose").input_schema_ref)
     devices_schema = tool_input_schema(registry.get("devices.pump_status.read").input_schema_ref)
     device_guidance_schema = tool_input_schema(registry.get("devices.guidance_assets.read").input_schema_ref)
@@ -154,6 +161,8 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
     assert plans_schema["properties"]["limit"]["maximum"] == 20
     assert diary_schema["additionalProperties"] is False
     assert diary_schema["properties"]["limit"]["maximum"] == 20
+    assert pregnancy_context_schema["additionalProperties"] is False
+    assert pregnancy_context_schema["properties"]["limit"]["maximum"] == 20
     assert diary_entry_schema["additionalProperties"] is False
     assert diary_entry_schema["required"] == ["entry_date"]
     assert diary_entry_schema["properties"]["content"]["maxLength"] == 5000
