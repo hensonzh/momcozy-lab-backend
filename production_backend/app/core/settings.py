@@ -51,6 +51,7 @@ class Settings:
     metrics_require_service_key: bool = False
     agent_runtime_worker_enabled: bool = False
     agent_runtime_worker_batch_limit: int = 10
+    agent_runtime_worker_concurrency: int = 1
     agent_runtime_worker_idle_seconds: int = 2
     agent_runtime_recover_running_older_than_seconds: int = 900
     outbox_worker_enabled: bool = False
@@ -104,6 +105,7 @@ class Settings:
             metrics_require_service_key=_env_bool("METRICS_REQUIRE_SERVICE_KEY", cls.metrics_require_service_key),
             agent_runtime_worker_enabled=_env_bool("AGENT_RUNTIME_WORKER_ENABLED", cls.agent_runtime_worker_enabled),
             agent_runtime_worker_batch_limit=_env_int("AGENT_RUNTIME_WORKER_BATCH_LIMIT", cls.agent_runtime_worker_batch_limit),
+            agent_runtime_worker_concurrency=_env_int("AGENT_RUNTIME_WORKER_CONCURRENCY", cls.agent_runtime_worker_concurrency),
             agent_runtime_worker_idle_seconds=_env_int("AGENT_RUNTIME_WORKER_IDLE_SECONDS", cls.agent_runtime_worker_idle_seconds),
             agent_runtime_recover_running_older_than_seconds=_env_int(
                 "AGENT_RUNTIME_RECOVER_RUNNING_OLDER_THAN_SECONDS",
@@ -155,6 +157,8 @@ class Settings:
             errors.append("LOG_LEVEL must be one of DEBUG, INFO, WARNING, ERROR, CRITICAL")
         if self.agent_runtime_worker_batch_limit < 1:
             errors.append("AGENT_RUNTIME_WORKER_BATCH_LIMIT must be positive")
+        if self.agent_runtime_worker_concurrency < 1:
+            errors.append("AGENT_RUNTIME_WORKER_CONCURRENCY must be positive")
         if self.agent_runtime_worker_idle_seconds < 0:
             errors.append("AGENT_RUNTIME_WORKER_IDLE_SECONDS must be non-negative")
         if self.agent_runtime_recover_running_older_than_seconds < 1:

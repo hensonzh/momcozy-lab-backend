@@ -3,7 +3,11 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Any
+from uuid import UUID
 
 from production_backend.app.core.metrics import RequestMetrics
 from production_backend.app.core.settings import Settings
@@ -37,8 +41,14 @@ from production_backend.app.modules.profiles.repository import ProfileRepository
 from production_backend.app.modules.profiles.service import ProfileService
 from production_backend.app.modules.records.repository import RecordsRepository
 from production_backend.app.modules.records.service import RecordsService
-from production_backend.app.workers.agent_run import AgentRunQueueWorker, AgentRunWorker
+from production_backend.app.workers.agent_run import AgentRunQueueWorkerResult, AgentRunWorker, TERMINAL_RUN_STATUSES
 from production_backend.scripts.worker_runtime import install_stop_signal_handlers, sleep_until_stop
+
+
+@dataclass(frozen=True)
+class AgentRunProcessResult:
+    status_changed: bool
+    terminal: bool
 
 
 async def run_agent_worker(
@@ -65,104 +75,29 @@ async def run_agent_worker(
             if stop_event is not None and stop_event.is_set():
                 totals["status"] = "stopping"
                 return _with_metrics(totals, metrics)
-            async with session_factory() as session:
-                repository = AgentRuntimeRepository(session)
-                audit_repository = AuditRepository(session)
-                agent_runtime_service = AgentRuntimeService(
-                    repository=repository,
-                    idempotency_service=IdempotencyService(repository=audit_repository),
-                    outbox_service=OutboxService(repository=OutboxRepository(session)),
-                    controls=controls,
-                    safety_service=AgentSafetyService(repository=repository, metrics=metrics),
-                )
-                profile_service = ProfileService(
-                    repository=ProfileRepository(session),
-                    audit_service=AuditService(repository=audit_repository),
-                    idempotency_service=IdempotencyService(repository=audit_repository),
-                )
-                records_service = RecordsService(
-                    repository=RecordsRepository(session),
-                    audit_service=AuditService(repository=audit_repository),
-                    idempotency_service=IdempotencyService(repository=audit_repository),
-                )
-                plans_service = PlansService(
-                    repository=PlansRepository(session),
-                    audit_service=AuditService(repository=audit_repository),
-                    idempotency_service=IdempotencyService(repository=audit_repository),
-                )
-                diary_service = DiaryService(
-                    repository=DiaryRepository(session),
-                    audit_service=AuditService(repository=audit_repository),
-                )
-                devices_service = DevicesService(
-                    repository=DevicesRepository(session),
-                    audit_service=AuditService(repository=audit_repository),
-                    idempotency_service=IdempotencyService(repository=audit_repository),
-                )
-                file_vision_service = FileVisionService(
-                    repository=FileRepository(session),
-                    object_storage=object_storage,
+            run_ids = await _list_runnable_run_ids(
+                session_factory=session_factory,
+                batch_limit=resolved_settings.agent_runtime_worker_batch_limit,
+                recover_running_older_than_seconds=resolved_settings.agent_runtime_recover_running_older_than_seconds,
+            )
+            run_results = await _process_with_concurrency(
+                items=run_ids,
+                concurrency=resolved_settings.agent_runtime_worker_concurrency,
+                processor=lambda run_id: _process_agent_run(
+                    run_id=run_id,
+                    session_factory=session_factory,
                     settings=resolved_settings,
-                )
-                tool_registry = default_tool_registry()
-                memory_service = AgentMemoryService(repository=AgentMemoryRepository(session))
-                event_sink = AgentEventSink(repository=repository, controls=controls, after_append=session.commit)
-                tool_executor = ToolExecutor(
-                    registry=tool_registry,
-                    repository=repository,
-                    event_sink=event_sink,
+                    object_storage=object_storage,
+                    redis_client=redis_client,
+                    controls=controls,
                     metrics=metrics,
-                    handlers=build_default_tool_handlers(
-                        profile_service=profile_service,
-                        records_service=records_service,
-                        plans_service=plans_service,
-                        diary_service=diary_service,
-                        devices_service=devices_service,
-                        asset_service=ProductAssetService(),
-                        file_vision_service=file_vision_service,
-                        agent_runtime_service=agent_runtime_service,
-                    ),
-                )
-                checkpoint_store = AgentGraphCheckpointStore(repository=repository)
-                runtime_executor = AgentRuntimeExecutor(
-                    repository=repository,
-                    checkpoint_store=checkpoint_store,
-                    state_store=AgentRuntimeStateStore(repository=repository),
-                    tool_registry=tool_registry,
-                    tool_executor=tool_executor,
-                    event_sink=event_sink,
-                    memory_service=memory_service,
-                    transient_stream=AgentTransientStream(redis_client),
-                    sdk_runner=OpenAIAgentsSdkRunner(
-                        model=resolved_settings.openai_model,
-                        max_turns=resolved_settings.openai_agent_max_turns,
-                        timeout_seconds=resolved_settings.openai_agent_timeout_seconds,
-                        trace_enabled=resolved_settings.openai_agent_trace_enabled,
-                        metrics=metrics,
-                    ),
-                )
-                handler = AgentRuntimeGraphRunner(
-                    repository=repository,
-                    checkpoint_store=checkpoint_store,
-                    node_handler=runtime_executor,
-                )
-                worker = AgentRunQueueWorker(
-                    repository=repository,
-                    run_worker=AgentRunWorker(
-                        repository=repository,
-                        controls=controls,
-                        handler=handler,
-                        after_event_append=session.commit,
-                    ),
-                    batch_limit=resolved_settings.agent_runtime_worker_batch_limit,
-                    recover_running_older_than_seconds=resolved_settings.agent_runtime_recover_running_older_than_seconds,
-                )
-                try:
-                    result = await worker.run_once()
-                    await session.commit()
-                except Exception:
-                    await session.rollback()
-                    raise
+                ),
+            )
+            result = AgentRunQueueWorkerResult(
+                scanned=len(run_ids),
+                processed=sum(1 for item in run_results if item.status_changed),
+                terminal=sum(1 for item in run_results if item.terminal),
+            )
 
             totals["cycles"] += 1
             totals["scanned"] += result.scanned
@@ -179,6 +114,156 @@ async def run_agent_worker(
 
 def _with_metrics(totals: dict[str, Any], metrics: RequestMetrics) -> dict[str, Any]:
     return {**totals, "metrics": metrics.snapshot()}
+
+
+async def _list_runnable_run_ids(
+    *,
+    session_factory: Any,
+    batch_limit: int,
+    recover_running_older_than_seconds: int | None,
+) -> list[UUID]:
+    async with session_factory() as session:
+        repository = AgentRuntimeRepository(session)
+        runs = await repository.list_runnable_runs(
+            limit=batch_limit,
+            recover_running_before=_recover_running_before(recover_running_older_than_seconds),
+        )
+        return [run.id for run in runs]
+
+
+async def _process_with_concurrency(
+    *,
+    items: Sequence[UUID],
+    concurrency: int,
+    processor: Callable[[UUID], Awaitable[AgentRunProcessResult]],
+) -> list[AgentRunProcessResult]:
+    if not items:
+        return []
+    semaphore = asyncio.Semaphore(concurrency)
+
+    async def guarded(item: UUID) -> AgentRunProcessResult:
+        async with semaphore:
+            return await processor(item)
+
+    return list(await asyncio.gather(*(guarded(item) for item in items)))
+
+
+async def _process_agent_run(
+    *,
+    run_id: UUID,
+    session_factory: Any,
+    settings: Settings,
+    object_storage: Any,
+    redis_client: Any,
+    controls: AgentRunControls,
+    metrics: RequestMetrics,
+) -> AgentRunProcessResult:
+    async with session_factory() as session:
+        repository = AgentRuntimeRepository(session)
+        before_run = await repository.get_run(run_id=run_id)
+        before_status = before_run.status if before_run is not None else ""
+        audit_repository = AuditRepository(session)
+        agent_runtime_service = AgentRuntimeService(
+            repository=repository,
+            idempotency_service=IdempotencyService(repository=audit_repository),
+            outbox_service=OutboxService(repository=OutboxRepository(session)),
+            controls=controls,
+            safety_service=AgentSafetyService(repository=repository, metrics=metrics),
+        )
+        profile_service = ProfileService(
+            repository=ProfileRepository(session),
+            audit_service=AuditService(repository=audit_repository),
+            idempotency_service=IdempotencyService(repository=audit_repository),
+        )
+        records_service = RecordsService(
+            repository=RecordsRepository(session),
+            audit_service=AuditService(repository=audit_repository),
+            idempotency_service=IdempotencyService(repository=audit_repository),
+        )
+        plans_service = PlansService(
+            repository=PlansRepository(session),
+            audit_service=AuditService(repository=audit_repository),
+            idempotency_service=IdempotencyService(repository=audit_repository),
+        )
+        diary_service = DiaryService(
+            repository=DiaryRepository(session),
+            audit_service=AuditService(repository=audit_repository),
+        )
+        devices_service = DevicesService(
+            repository=DevicesRepository(session),
+            audit_service=AuditService(repository=audit_repository),
+            idempotency_service=IdempotencyService(repository=audit_repository),
+        )
+        file_vision_service = FileVisionService(
+            repository=FileRepository(session),
+            object_storage=object_storage,
+            settings=settings,
+        )
+        tool_registry = default_tool_registry()
+        memory_service = AgentMemoryService(repository=AgentMemoryRepository(session))
+        event_sink = AgentEventSink(repository=repository, controls=controls, after_append=session.commit)
+        tool_executor = ToolExecutor(
+            registry=tool_registry,
+            repository=repository,
+            event_sink=event_sink,
+            metrics=metrics,
+            handlers=build_default_tool_handlers(
+                profile_service=profile_service,
+                records_service=records_service,
+                plans_service=plans_service,
+                diary_service=diary_service,
+                devices_service=devices_service,
+                asset_service=ProductAssetService(),
+                file_vision_service=file_vision_service,
+                agent_runtime_service=agent_runtime_service,
+            ),
+        )
+        checkpoint_store = AgentGraphCheckpointStore(repository=repository)
+        runtime_executor = AgentRuntimeExecutor(
+            repository=repository,
+            checkpoint_store=checkpoint_store,
+            state_store=AgentRuntimeStateStore(repository=repository),
+            tool_registry=tool_registry,
+            tool_executor=tool_executor,
+            event_sink=event_sink,
+            memory_service=memory_service,
+            transient_stream=AgentTransientStream(redis_client),
+            sdk_runner=OpenAIAgentsSdkRunner(
+                model=settings.openai_model,
+                max_turns=settings.openai_agent_max_turns,
+                timeout_seconds=settings.openai_agent_timeout_seconds,
+                trace_enabled=settings.openai_agent_trace_enabled,
+                metrics=metrics,
+            ),
+        )
+        handler = AgentRuntimeGraphRunner(
+            repository=repository,
+            checkpoint_store=checkpoint_store,
+            node_handler=runtime_executor,
+        )
+        worker = AgentRunWorker(
+            repository=repository,
+            controls=controls,
+            handler=handler,
+            after_event_append=session.commit,
+        )
+        try:
+            after_run = await worker.run_once(run_id=run_id)
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        after_status = after_run.status if after_run is not None else before_status
+        return AgentRunProcessResult(
+            status_changed=bool(after_run is not None and after_status != before_status),
+            terminal=after_status in TERMINAL_RUN_STATUSES,
+        )
+
+
+def _recover_running_before(recover_running_older_than_seconds: int | None) -> datetime | None:
+    if recover_running_older_than_seconds is None:
+        return None
+    return datetime.now(timezone.utc) - timedelta(seconds=recover_running_older_than_seconds)
 
 
 def main() -> None:

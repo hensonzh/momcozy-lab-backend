@@ -1,8 +1,9 @@
 import asyncio
+from uuid import uuid4
 
 from production_backend.app.core.metrics import RequestMetrics
 from production_backend.app.core.settings import Settings
-from production_backend.scripts.run_agent_worker import _with_metrics, run_agent_worker
+from production_backend.scripts.run_agent_worker import AgentRunProcessResult, _process_with_concurrency, _with_metrics, run_agent_worker
 from production_backend.scripts.worker_runtime import sleep_until_stop
 
 
@@ -20,6 +21,30 @@ def test_agent_worker_process_can_return_metrics_snapshot_for_finite_runs() -> N
 
     assert result["metrics"]["agent_sdk"][0]["node_name"] == "openai_agents_sdk"
     assert result["metrics"]["agent_sdk"][0]["error_code_counts"]["dependency_not_configured"] == 1
+
+
+def test_agent_worker_process_bounds_in_process_run_concurrency() -> None:
+    active = 0
+    max_active = 0
+    processed = []
+
+    async def processor(run_id):
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0.01)
+        processed.append(run_id)
+        active -= 1
+        return AgentRunProcessResult(status_changed=True, terminal=True)
+
+    run_ids = [uuid4() for _ in range(5)]
+
+    results = asyncio.run(_process_with_concurrency(items=run_ids, concurrency=2, processor=processor))
+
+    assert max_active == 2
+    assert set(processed) == set(run_ids)
+    assert len(results) == 5
+    assert all(result.status_changed and result.terminal for result in results)
 
 
 def test_worker_runtime_sleep_returns_when_stop_event_is_set() -> None:

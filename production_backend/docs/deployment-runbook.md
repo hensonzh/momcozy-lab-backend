@@ -58,6 +58,23 @@ Start incident and release debugging from these IDs when available:
 8. During rolling restarts, let agent and outbox workers receive SIGTERM/SIGINT
    and stop at the next idle point before force killing the process.
 
+## Agent Worker Capacity
+
+Agent run capacity is controlled by both worker replicas and per-process async
+slots:
+
+```text
+total agent run slots ~= agent-worker replicas * AGENT_RUNTIME_WORKER_CONCURRENCY
+```
+
+Each concurrent run uses its own database session and still acquires the Redis
+run lock before execution. Increase `AGENT_RUNTIME_WORKER_CONCURRENCY` together
+with `AGENT_RUNTIME_WORKER_BATCH_LIMIT`, database pool capacity, OpenAI
+RPM/TPM limits, tool latency budgets, and cost controls. For I/O-heavy agent
+runs, 100 concurrent run slots do not imply 100 CPU cores; measure CPU,
+provider wait time, DB pool saturation, Redis latency, and token/cost usage
+before increasing limits.
+
 ## Rollback
 
 1. Stop routing traffic to the new API version.

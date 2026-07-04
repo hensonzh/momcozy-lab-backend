@@ -344,6 +344,10 @@ Completed:
 - Agent worker process entry: environment-controlled worker script and optional
   compose `workers` profile keep API and run execution as separate deployable
   processes, disabled by default until a real runtime handler is configured.
+- Agent worker capacity: `AGENT_RUNTIME_WORKER_CONCURRENCY` controls bounded
+  async run slots inside one worker process; each run uses an independent DB
+  session and still acquires the Redis run lock, so capacity can scale by both
+  worker replicas and per-process slots.
 - Agent action confirmation now enqueues a durable `agent.action.apply` outbox
   job and emits `action.queued` with the persisted outbox job ID instead of an
   event-only queued marker.
