@@ -59,14 +59,18 @@ class AgentRuntimeGraphRunner:
         graph.add_node("load_context", self._load_context_node(run=run))
         graph.add_node("safety_gate", self._checkpointing_node(run=run, node_name="safety_gate"))
         graph.add_node("sdk_reasoning", self._sdk_reasoning_node(run=run))
+        graph.add_node("tool_result_review", self._checkpointing_node(run=run, node_name="tool_result_review"))
+        graph.add_node("action_policy", self._checkpointing_node(run=run, node_name="action_policy"))
         graph.add_node("confirmation_interrupt", self._checkpointing_node(run=run, node_name="confirmation_interrupt"))
         graph.add_node("final_response", self._checkpointing_node(run=run, node_name="final_response"))
         graph.add_node("finish", self._checkpointing_node(run=run, node_name="finish"))
         graph.add_edge(START, "load_context")
         graph.add_edge("load_context", "safety_gate")
         graph.add_edge("safety_gate", "sdk_reasoning")
+        graph.add_edge("sdk_reasoning", "tool_result_review")
+        graph.add_edge("tool_result_review", "action_policy")
         graph.add_conditional_edges(
-            "sdk_reasoning",
+            "action_policy",
             _route_after_reasoning,
             {
                 "confirmation_interrupt": "confirmation_interrupt",

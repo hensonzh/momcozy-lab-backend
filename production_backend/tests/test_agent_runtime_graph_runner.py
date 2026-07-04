@@ -31,6 +31,8 @@ def test_agent_runtime_graph_runner_executes_completed_path_with_checkpoints() -
         "load_context",
         "safety_gate",
         "sdk_reasoning",
+        "tool_result_review",
+        "action_policy",
         "final_response",
         "finish",
     ]
@@ -38,6 +40,8 @@ def test_agent_runtime_graph_runner_executes_completed_path_with_checkpoints() -
         "load_context",
         "safety_gate",
         "sdk_reasoning",
+        "tool_result_review",
+        "action_policy",
         "final_response",
         "finish",
     ]
@@ -64,6 +68,8 @@ def test_agent_runtime_graph_runner_executes_confirmation_interrupt_path() -> No
         "load_context",
         "safety_gate",
         "sdk_reasoning",
+        "tool_result_review",
+        "action_policy",
         "confirmation_interrupt",
         "finish",
     ]
