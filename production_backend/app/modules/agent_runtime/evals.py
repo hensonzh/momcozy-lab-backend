@@ -57,6 +57,7 @@ REQUIRED_PRODUCT_AGENT_EVAL_SUITES = (
     "pregnancy_plan_creation",
     "pregnancy_task_completion",
     "pregnancy_diary_entry",
+    "memory_preference_capture",
     "ibclc_consult",
     "health_consultation",
     "emotion_support",

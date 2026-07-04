@@ -89,6 +89,17 @@ def test_product_agent_eval_seed_uses_current_support_action_contract() -> None:
     assert "support_ticket_proposal" not in support_contracts
 
 
+def test_product_agent_eval_seed_uses_current_memory_action_contract() -> None:
+    cases = load_product_agent_eval_seed_cases(PRODUCT_AGENT_EVAL_SEED)
+    by_suite = {case["suite"]: case for case in cases}
+
+    memory_contracts = {tool_call["contract"] for tool_call in by_suite["memory_preference_capture"]["expected_tool_calls"]}
+
+    assert "memory.create.propose" in memory_contracts
+    assert "agent.memory.create" not in memory_contracts
+    assert "memory_write" not in memory_contracts
+
+
 def test_product_agent_eval_seed_loader_rejects_missing_required_suite() -> None:
     payload = {
         "schema_version": "agent_eval_seed.v1",
