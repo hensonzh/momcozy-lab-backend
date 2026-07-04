@@ -1,6 +1,8 @@
 import asyncio
 from uuid import uuid4
 
+import pytest
+
 from production_backend.app.core.metrics import RequestMetrics
 from production_backend.app.modules.agent_runtime.models import AgentSafetyEvent
 from production_backend.app.modules.agent_runtime.safety import AgentSafetyService, DeterministicSafetyGuard
@@ -15,11 +17,44 @@ def test_deterministic_safety_guard_escalates_emotional_crisis() -> None:
     assert decision.should_block_normal_flow is True
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "I cannot do this anymore and I might hurt myself.",
+        "I can't go on tonight.",
+        "我真的撑不下去了。",
+    ],
+)
+def test_deterministic_safety_guard_escalates_crisis_variants(text: str) -> None:
+    decision = DeterministicSafetyGuard().evaluate(text)
+
+    assert decision.category == "emotional_crisis"
+    assert decision.decision == "escalate"
+    assert decision.should_block_normal_flow is True
+
+
 def test_deterministic_safety_guard_escalates_health_red_flag() -> None:
     decision = DeterministicSafetyGuard().evaluate("今天胎动明显减少怎么办")
 
     assert decision.category == "health_red_flag"
     assert decision.decision == "escalate"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "I have a fever and worsening breast redness.",
+        "Can you make my hospital bag list? Also I am bleeding a lot right now.",
+        "I have severe headache and vision changes.",
+        "I have shortness of breath.",
+    ],
+)
+def test_deterministic_safety_guard_escalates_health_variants(text: str) -> None:
+    decision = DeterministicSafetyGuard().evaluate(text)
+
+    assert decision.category == "health_red_flag"
+    assert decision.decision == "escalate"
+    assert decision.should_block_normal_flow is True
 
 
 def test_deterministic_safety_guard_blocks_prompt_injection() -> None:
