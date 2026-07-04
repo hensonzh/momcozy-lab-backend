@@ -10,6 +10,7 @@ def test_production_backend_ci_runs_core_gates() -> None:
     for phrase in [
         "python -m pytest production_backend/tests",
         "production_backend/scripts/run_agent_seed_eval.py",
+        "--junit-output /tmp/agent-seed-eval.junit.xml",
         "python -m ruff check app tests scripts",
         "python -m mypy app",
         "python -m alembic -c production_backend/alembic.ini heads",

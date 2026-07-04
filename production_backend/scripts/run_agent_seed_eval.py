@@ -6,6 +6,7 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
+from xml.etree.ElementTree import Element, SubElement, tostring
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
@@ -28,6 +29,7 @@ def run_seed_eval(
     trace_fixtures_path: Path | None = None,
     suite: str | None = None,
     output_path: Path | None = None,
+    junit_output_path: Path | None = None,
     fail_on_missing_trace: bool = False,
 ) -> dict[str, Any]:
     cases = load_product_agent_eval_seed_cases(cases_path)
@@ -53,6 +55,8 @@ def run_seed_eval(
     if output_path is not None:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    if junit_output_path is not None:
+        _write_junit_report(report=report, output_path=junit_output_path)
     return report
 
 
@@ -62,6 +66,7 @@ def main() -> None:
     parser.add_argument("--trace-fixtures", type=Path, default=None)
     parser.add_argument("--suite", default=None)
     parser.add_argument("--output", type=Path, default=None)
+    parser.add_argument("--junit-output", type=Path, default=None)
     parser.add_argument("--fail-on-missing-trace", action="store_true")
     args = parser.parse_args()
 
@@ -70,6 +75,7 @@ def main() -> None:
         trace_fixtures_path=args.trace_fixtures,
         suite=args.suite,
         output_path=args.output,
+        junit_output_path=args.junit_output,
         fail_on_missing_trace=args.fail_on_missing_trace,
     )
     if args.output is None:
@@ -145,6 +151,38 @@ def _result_payload(result: AgentEvalRunResult) -> dict[str, Any]:
         "passed": result.passed,
         "failures": [asdict(failure) for failure in result.failures],
     }
+
+
+def _write_junit_report(*, report: dict[str, Any], output_path: Path) -> None:
+    suite = Element(
+        "testsuite",
+        {
+            "name": "agent-seed-eval",
+            "tests": str(report["total"]),
+            "failures": str(report["failed"]),
+        },
+    )
+    for result in report["results"]:
+        testcase = SubElement(
+            suite,
+            "testcase",
+            {
+                "classname": str(result["suite"]),
+                "name": str(result["name"]),
+            },
+        )
+        for failure in result["failures"]:
+            failure_node = SubElement(
+                testcase,
+                "failure",
+                {
+                    "type": str(failure["category"]),
+                    "message": str(failure["assertion"]),
+                },
+            )
+            failure_node.text = json.dumps(failure, sort_keys=True)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_bytes(tostring(suite, encoding="utf-8", xml_declaration=True))
 
 
 def _case_key(case: dict[str, Any]) -> tuple[str, str]:
