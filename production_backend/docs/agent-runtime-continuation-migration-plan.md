@@ -346,10 +346,17 @@ event、eval 的全链路。
 
 建议 PR：
 
-1. `agent: add pregnancy plan context tools`
+1. `agent: add pregnancy plan context tools` - done
 2. `agent: add pregnancy plan action proposals`
 3. `agent: add diary action proposals`
 4. `agent: add pregnancy plan and diary evals`
+
+已完成能力：
+
+- `pregnancy.plan_context.read` 已聚合 owner-scoped profile、active plans、
+  tasks 和 recent diary entries。
+- 孕期计划生成和任务完成 eval seed 已要求先读
+  `pregnancy.plan_context.read`，再进入 action proposal。
 
 验收：
 
