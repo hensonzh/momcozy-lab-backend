@@ -33,8 +33,13 @@ def test_tool_contract_registry_declares_permission_confirmation_and_blocking_po
     assert business_context.read_or_write == "read"
     assert business_context.requires_confirmation is False
     assert business_context.audit_required is False
+    milk_summary = registry.get("records.milk_summary.read")
+    assert milk_summary.read_or_write == "read"
+    assert milk_summary.owner_scope == "actor"
+    assert milk_summary.requires_confirmation is False
     assert "profile.read" in registry.names_for_sdk()
     assert "business.context.read" in registry.names_for_sdk()
+    assert "records.milk_summary.read" in registry.names_for_sdk()
 
 
 def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> None:
@@ -42,6 +47,7 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
     profile_schema = tool_input_schema(registry.get("profile.read").input_schema_ref)
     business_schema = tool_input_schema(registry.get("business.context.read").input_schema_ref)
     support_schema = tool_input_schema(registry.get("support.ticket.propose").input_schema_ref)
+    milk_schema = tool_input_schema(registry.get("records.milk_summary.read").input_schema_ref)
 
     assert profile_schema == {
         "title": "ProfileContextQuery",
@@ -54,6 +60,9 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
     assert support_schema["required"] == ["issue_summary"]
     assert support_schema["additionalProperties"] is False
     assert "issue_summary" in support_schema["properties"]
+    assert milk_schema["additionalProperties"] is False
+    assert milk_schema["properties"]["days"]["maximum"] == 30
+    assert milk_schema["properties"]["limit"]["maximum"] == 20
 
 
 def test_context_builder_keeps_stable_prompts_before_dynamic_projection() -> None:

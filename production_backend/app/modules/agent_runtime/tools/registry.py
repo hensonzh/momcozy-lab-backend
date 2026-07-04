@@ -68,6 +68,25 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         ToolContract(
+            name="records.milk_summary.read",
+            domain="records",
+            description="Read a bounded milk-management summary from recent feeding, pumping, and trend records.",
+            input_schema_ref="MilkSummaryQuery",
+            output_schema_ref="MilkSummaryRead",
+            read_or_write="read",
+            required_permission="business_context:read:self",
+            owner_scope="actor",
+            side_effect_level="none",
+            blocking_policy="must_wait",
+            result_dependency="next_tool_call",
+            requires_confirmation=False,
+            idempotency_required=False,
+            audit_required=False,
+            timeout_seconds=10,
+        )
+    )
+    registry.register(
+        ToolContract(
             name="hospital_bag.cart_update.propose",
             domain="hospital_bag",
             description="Propose a hospital-bag cart update for user confirmation.",

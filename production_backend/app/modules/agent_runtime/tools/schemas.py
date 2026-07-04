@@ -30,6 +30,27 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             }
         },
     },
+    "MilkSummaryQuery": {
+        "title": "MilkSummaryQuery",
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "days": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 30,
+                "default": 7,
+                "description": "Number of recent trend days to summarize.",
+            },
+            "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 20,
+                "default": 5,
+                "description": "Maximum recent feeding and pumping records to include.",
+            },
+        },
+    },
     "HospitalBagCartUpdateProposalCreate": {
         "title": "HospitalBagCartUpdateProposalCreate",
         "type": "object",

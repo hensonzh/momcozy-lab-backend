@@ -9,6 +9,7 @@ from production_backend.app.modules.agent_runtime.models import AgentAction
 from production_backend.app.modules.agent_runtime.tools import (
     BusinessContextReadToolHandler,
     HospitalBagCartUpdateProposeToolHandler,
+    MilkSummaryReadToolHandler,
     ProfileReadToolHandler,
     SupportTicketProposeToolHandler,
     ToolHandlerContext,
@@ -20,6 +21,7 @@ from production_backend.app.modules.diary.models import PregnancyDiaryEntry
 from production_backend.app.modules.plans.models import Plan, PlanTask
 from production_backend.app.modules.profiles.models import InfantProfile, UserProfile
 from production_backend.app.modules.records.models import FeedingRecord, GrowthRecord, PumpingRecord
+from production_backend.app.modules.records.schemas import MilkTrendDayRead, MilkTrendListResponse
 
 
 def test_profile_read_tool_handler_returns_safe_context_projection() -> None:
@@ -146,6 +148,39 @@ def test_business_context_read_tool_handler_returns_bounded_owner_scoped_summary
     assert result["devices"]["telemetry"][0]["payload"] == {"mode": "stimulation"}
 
 
+def test_milk_summary_read_tool_handler_returns_bounded_owner_scoped_summary() -> None:
+    actor = _user()
+    records_service = FakeRecordsService(owner_user_id=actor.user_id)
+    handler = MilkSummaryReadToolHandler(records_service=records_service)
+
+    result = asyncio.run(handler(_context(actor=actor, args={"days": 3, "limit": 2, "owner_user_id": str(uuid4())})))
+
+    assert records_service.owner_user_id == actor.user_id
+    assert result["window"] == {"days": 3, "include_today": True}
+    assert result["recent_feedings"][0]["volume_ml"] == 60
+    assert result["recent_pumpings"][0]["milk_volume_ml"] == 80
+    assert result["pumping_trends"] == [
+        {
+            "date": "2026-07-01",
+            "pumped_milk_volume_ml": 80,
+            "pumping_count": 1,
+            "measured_only": True,
+        },
+        {
+            "date": "2026-07-02",
+            "pumped_milk_volume_ml": 90,
+            "pumping_count": 2,
+            "measured_only": True,
+        },
+    ]
+    assert result["totals"] == {
+        "recent_feeding_volume_ml": 60.0,
+        "recent_pumped_volume_ml": 80.0,
+        "trend_pumped_volume_ml": 170.0,
+        "trend_pumping_count": 3,
+    }
+
+
 def test_support_ticket_propose_tool_handler_requires_summary() -> None:
     with pytest.raises(ApiError) as exc_info:
         asyncio.run(SupportTicketProposeToolHandler(runtime_service=FakeAgentRuntimeService())(_context(args={})))
@@ -185,6 +220,7 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
     assert set(handlers) == {
         "profile.read",
         "business.context.read",
+        "records.milk_summary.read",
         "hospital_bag.cart_update.propose",
         "support.ticket.propose",
     }
@@ -279,6 +315,16 @@ class FakeRecordsService:
                 head_cm=None,
             )
         ]
+
+    async def get_milk_trends(self, *, owner_user_id, days, include_today):
+        return MilkTrendListResponse(
+            days=days,
+            include_today=include_today,
+            items=[
+                MilkTrendDayRead(date=date(2026, 7, 1), pumped_milk_volume_ml=80, pumping_count=1),
+                MilkTrendDayRead(date=date(2026, 7, 2), pumped_milk_volume_ml=90, pumping_count=2),
+            ],
+        )
 
 
 class FakePlansService:

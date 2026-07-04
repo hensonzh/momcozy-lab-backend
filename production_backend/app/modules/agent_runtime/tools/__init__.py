@@ -3,6 +3,7 @@ from .executor import ToolExecutionResult, ToolExecutor, ToolHandlerContext
 from .handlers import (
     BusinessContextReadToolHandler,
     HospitalBagCartUpdateProposeToolHandler,
+    MilkSummaryReadToolHandler,
     ProfileReadToolHandler,
     SupportTicketProposeToolHandler,
     build_default_tool_handlers,
@@ -13,6 +14,7 @@ from .schemas import tool_input_schema
 __all__ = [
     "BusinessContextReadToolHandler",
     "HospitalBagCartUpdateProposeToolHandler",
+    "MilkSummaryReadToolHandler",
     "ProfileReadToolHandler",
     "SupportTicketProposeToolHandler",
     "ToolContract",

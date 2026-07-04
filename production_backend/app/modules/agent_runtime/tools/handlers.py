@@ -139,6 +139,35 @@ class BusinessContextReadToolHandler:
         }
 
 
+class MilkSummaryReadToolHandler:
+    def __init__(self, *, records_service: RecordsService) -> None:
+        self.records_service = records_service
+
+    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
+        owner_user_id = context.actor.user_id
+        days = _limit(context.args.get("days"), default=7, max_limit=30)
+        limit = _limit(context.args.get("limit"), default=5, max_limit=20)
+        feedings = await self.records_service.list_feedings(owner_user_id=owner_user_id, limit=limit)
+        pumpings = await self.records_service.list_pumpings(owner_user_id=owner_user_id, limit=limit)
+        trends = await self.records_service.get_milk_trends(owner_user_id=owner_user_id, days=days, include_today=True)
+        trend_items = [_milk_trend_payload(item) for item in trends.items]
+        return {
+            "window": {
+                "days": days,
+                "include_today": True,
+            },
+            "recent_feedings": [_feeding_payload(record) for record in feedings],
+            "recent_pumpings": [_pumping_payload(record) for record in pumpings],
+            "pumping_trends": trend_items,
+            "totals": {
+                "recent_feeding_volume_ml": _record_volume_sum(feedings, "volume_ml"),
+                "recent_pumped_volume_ml": _record_volume_sum(pumpings, "milk_volume_ml"),
+                "trend_pumped_volume_ml": round(sum(float(item["pumped_milk_volume_ml"] or 0) for item in trend_items), 2),
+                "trend_pumping_count": sum(int(item["pumping_count"] or 0) for item in trend_items),
+            },
+        }
+
+
 def build_default_tool_handlers(
     *,
     profile_service: ProfileService,
@@ -156,6 +185,7 @@ def build_default_tool_handlers(
             diary_service=diary_service,
             devices_service=devices_service,
         ),
+        "records.milk_summary.read": MilkSummaryReadToolHandler(records_service=records_service),
         "hospital_bag.cart_update.propose": HospitalBagCartUpdateProposeToolHandler(runtime_service=agent_runtime_service),
         "support.ticket.propose": SupportTicketProposeToolHandler(runtime_service=agent_runtime_service),
     }
@@ -296,6 +326,19 @@ def _pumping_payload(record: PumpingRecord) -> dict[str, Any]:
         "source": record.source,
         "title": record.title,
     }
+
+
+def _milk_trend_payload(item: Any) -> dict[str, Any]:
+    return {
+        "date": _date_iso(item.date),
+        "pumped_milk_volume_ml": item.pumped_milk_volume_ml,
+        "pumping_count": item.pumping_count,
+        "measured_only": item.measured_only,
+    }
+
+
+def _record_volume_sum(records: list[Any], attr_name: str) -> float:
+    return round(sum(float(getattr(record, attr_name, 0) or 0) for record in records), 2)
 
 
 def _growth_payload(record: GrowthRecord) -> dict[str, Any]:
