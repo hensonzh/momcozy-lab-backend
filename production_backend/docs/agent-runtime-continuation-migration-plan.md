@@ -51,9 +51,13 @@
 - eval harness 已具备 seed schema 校验、memory preference seed case、
   deterministic assertion engine、replay bundle -> eval trace 转换，以及
   `scripts/run_agent_replay_eval.py` 最小 CLI。
+- eval assertion engine 已覆盖 safety-only 流程的 side-effect 禁止断言，
+  可拦截红旗/注入场景中的写 proposal 或 action 泄漏。
 - 设备指导已有 `devices.guidance_assets.read` 只读工具，可读取打包的
   device-guidance asset metadata，避免继续依赖旧的 `device_reference_lookup`
   占位 contract。
+- IBCLC/professional support eval 已对齐到真实 `support.ticket.propose`
+  handoff contract，不再要求不存在的 `ibclc_consult_proposal`。
 
 仍未完成：
 
@@ -62,7 +66,7 @@
 - 旧智能体中的主要业务能力还没有完整迁移成新 tool/action contract。
 - 待产包、设备指导、IBCLC、健康/情绪安全、图片/语音
   等主流程尚未达到新架构下的完整 parity；设备指导仍缺完整问答策略和
-  更多 eval。
+  更多 eval，IBCLC 仍缺独立专业支持模块和更细的 handoff policy。
 - 长期记忆还缺禁用路径、敏感记忆策略深化、Flutter 端可视化体验和
   eval 回归。
 - eval 样例和自动化行为评估已有基础，但还缺真实 runtime client、
