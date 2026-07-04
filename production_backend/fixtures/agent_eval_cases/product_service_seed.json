@@ -495,7 +495,7 @@
     },
     {
       "suite": "ibclc_consult",
-      "name": "ibclc request creates consult proposal",
+      "name": "ibclc request creates support handoff proposal",
       "domain": "lactation_support",
       "owner_team": "agent",
       "input": {
@@ -522,7 +522,7 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "ibclc_consult_proposal",
+          "contract": "support.ticket.propose",
           "timing": "after_minimum_required_details"
         }
       ],

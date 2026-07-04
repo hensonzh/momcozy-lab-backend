@@ -84,9 +84,12 @@ def test_product_agent_eval_seed_uses_current_support_action_contract() -> None:
     by_suite = {case["suite"]: case for case in cases}
 
     support_contracts = {tool_call["contract"] for tool_call in by_suite["device_support_handoff"]["expected_tool_calls"]}
+    ibclc_contracts = {tool_call["contract"] for tool_call in by_suite["ibclc_consult"]["expected_tool_calls"]}
 
     assert "support.ticket.propose" in support_contracts
+    assert "support.ticket.propose" in ibclc_contracts
     assert "support_ticket_proposal" not in support_contracts
+    assert "ibclc_consult_proposal" not in ibclc_contracts
 
 
 def test_product_agent_eval_seed_does_not_reference_missing_device_tool_contract() -> None:
