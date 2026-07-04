@@ -14,6 +14,7 @@ from production_backend.app.modules.agent_runtime.tools import (
     FeedingRecordProposeToolHandler,
     FileVisionSummaryReadToolHandler,
     HospitalBagCartUpdateProposeToolHandler,
+    MemoryCreateProposeToolHandler,
     MilkPlanProposeToolHandler,
     MilkReminderProposeToolHandler,
     MilkSummaryReadToolHandler,
@@ -32,6 +33,7 @@ from production_backend.app.modules.devices.models import PumpDevice, PumpTeleme
 from production_backend.app.modules.diary.agent_actions import DIARY_ENTRY_UPSERT_ACTION
 from production_backend.app.modules.diary.models import PregnancyDiaryEntry
 from production_backend.app.modules.files.vision_service import FileVisionEvent
+from production_backend.app.modules.agent_runtime.memory_actions import AGENT_MEMORY_CREATE_ACTION
 from production_backend.app.modules.notifications.agent_actions import MILK_REMINDER_CREATE_ACTION
 from production_backend.app.modules.plans.agent_actions import (
     MILK_PLAN_CREATE_ACTION,
@@ -523,6 +525,34 @@ def test_diary_entry_upsert_propose_tool_handler_creates_confirmation_action() -
     assert runtime_service.calls[0]["apply_payload"]["metadata"] == {"timezone": "Asia/Shanghai"}
 
 
+def test_memory_create_propose_tool_handler_creates_confirmation_action() -> None:
+    actor = _user()
+    runtime_service = FakeAgentRuntimeService()
+    context = _context(
+        actor=actor,
+        args={
+            "memory_type": "communication_preference",
+            "content": {"summary": "Prefers concise reminders", "source": "user said so"},
+            "confidence_score": 80,
+            "locale": "en-US",
+        },
+    )
+
+    result = asyncio.run(MemoryCreateProposeToolHandler(runtime_service=runtime_service)(context))
+
+    assert result["action_type"] == AGENT_MEMORY_CREATE_ACTION
+    assert result["action_status"] == "confirmation_required"
+    assert result["preview_payload"] == {
+        "memory_type": "communication_preference",
+        "summary": "Prefers concise reminders",
+        "confidence_score": 80,
+    }
+    assert runtime_service.calls[0]["target_type"] == "agent_memory"
+    assert runtime_service.calls[0]["side_effect_level"] == "medium"
+    assert runtime_service.calls[0]["apply_payload"]["content"]["summary"] == "Prefers concise reminders"
+    assert runtime_service.calls[0]["apply_payload"]["metadata"] == {"locale": "en-US"}
+
+
 def test_support_ticket_propose_tool_handler_requires_summary() -> None:
     with pytest.raises(ApiError) as exc_info:
         asyncio.run(SupportTicketProposeToolHandler(runtime_service=FakeAgentRuntimeService())(_context(args={})))
@@ -593,6 +623,17 @@ def test_diary_entry_upsert_propose_tool_handler_requires_values() -> None:
     assert exc_info.value.code == "validation_failed"
 
 
+def test_memory_create_propose_tool_handler_requires_summary() -> None:
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            MemoryCreateProposeToolHandler(runtime_service=FakeAgentRuntimeService())(
+                _context(args={"memory_type": "user_preference", "content": {}})
+            )
+        )
+
+    assert exc_info.value.code == "validation_failed"
+
+
 def test_support_ticket_propose_tool_handler_rejects_legacy_nested_ticket_shape() -> None:
     with pytest.raises(ApiError) as exc_info:
         asyncio.run(
@@ -623,6 +664,7 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
         "plans.current.read",
         "diary.entry_upsert.propose",
         "diary.recent.read",
+        "memory.create.propose",
         "devices.pump_status.read",
         "files.vision_summary.read",
         "notifications.milk_reminder.propose",
@@ -661,6 +703,7 @@ def _user() -> CurrentUser:
                 "business_context:read:self",
                 "files:read:self",
                 "diary:write:self",
+                "memory:write:self",
                 "plans:write:self",
                 "notifications:create:self",
                 "hospital_bag_cart:update:self",

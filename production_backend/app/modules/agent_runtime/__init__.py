@@ -3,6 +3,7 @@ from .evals import AgentEvalService
 from .execution import AgentRunExecutionResult
 from .graphs import AgentGraphCheckpointStore, AgentRuntimeGraphRunner, GraphCheckpointRef
 from .action_policy import AgentActionPolicy, AgentActionPolicyDecision, AgentActionPolicyRule
+from .memory_actions import AGENT_MEMORY_CREATE_ACTION, AgentMemoryCreateActionHandler
 from .memory import AgentMemoryRepository, AgentMemoryService
 from .models import (
     AgentAction,
@@ -27,6 +28,7 @@ from .state_store import AgentRuntimeStateStore
 
 __all__ = [
     "AgentAction",
+    "AGENT_MEMORY_CREATE_ACTION",
     "AgentActionPolicy",
     "AgentActionPolicyDecision",
     "AgentActionPolicyRule",
@@ -34,6 +36,7 @@ __all__ = [
     "AgentEvalService",
     "AgentGraphCheckpointStore",
     "AgentMemory",
+    "AgentMemoryCreateActionHandler",
     "AgentMemoryRepository",
     "AgentMemoryService",
     "AgentRuntimeGraphRunner",

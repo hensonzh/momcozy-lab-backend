@@ -42,6 +42,7 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() ->
         "diary.recent.read",
         "files.vision_summary.read",
         "hospital_bag.cart_update.propose",
+        "memory.create.propose",
         "notifications.milk_reminder.propose",
         "plans.current.read",
         "plans.milk_plan.propose",
@@ -128,6 +129,7 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
         "diary_recent_read",
         "files_vision_summary_read",
         "hospital_bag_cart_update_propose",
+        "memory_create_propose",
         "notifications_milk_reminder_propose",
         "plans_current_read",
         "plans_milk_plan_propose",
@@ -148,6 +150,8 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert backend.tool_schemas["files_vision_summary_read"]["required"] == ["file_id"]
     assert backend.tool_schemas["hospital_bag_cart_update_propose"]["required"] == ["cart_update"]
     assert backend.tool_schemas["hospital_bag_cart_update_propose"]["additionalProperties"] is False
+    assert backend.tool_schemas["memory_create_propose"]["required"] == ["memory_type", "content"]
+    assert backend.tool_schemas["memory_create_propose"]["properties"]["content"]["required"] == ["summary"]
     assert backend.tool_schemas["notifications_milk_reminder_propose"]["required"] == ["title"]
     assert backend.tool_schemas["plans_current_read"]["properties"]["limit"]["maximum"] == 20
     assert backend.tool_schemas["plans_milk_plan_propose"]["required"] == ["title"]

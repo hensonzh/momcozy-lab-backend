@@ -12,6 +12,7 @@ from ...diary.models import PregnancyDiaryEntry
 from ...diary.service import DiaryService
 from ...files.vision_service import FileVisionService
 from ...notifications.agent_actions import MILK_REMINDER_CREATE_ACTION
+from ..memory_actions import AGENT_MEMORY_CREATE_ACTION
 from ...plans.agent_actions import (
     MILK_PLAN_CREATE_ACTION,
     PLAN_TASK_COMPLETE_ACTION,
@@ -251,6 +252,31 @@ class DiaryEntryUpsertProposeToolHandler:
         return _proposal_result(action=action, preview_payload=preview_payload)
 
 
+class MemoryCreateProposeToolHandler:
+    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
+        self.runtime_service = runtime_service
+
+    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
+        apply_payload = _memory_create_apply_payload(context.args)
+        content = apply_payload.get("content")
+        if not _text(apply_payload, "memory_type"):
+            raise ApiError(code="validation_failed", message="memory_type is required.", status=422)
+        if not isinstance(content, dict) or not _text(content, "summary"):
+            raise ApiError(code="validation_failed", message="content.summary is required.", status=422)
+        preview_payload = _memory_create_preview_payload(apply_payload)
+        action = await self.runtime_service.propose_action(
+            owner_user_id=context.actor.user_id,
+            run_id=context.run_id,
+            action_type=AGENT_MEMORY_CREATE_ACTION,
+            target_type="agent_memory",
+            side_effect_level="medium",
+            preview_payload=preview_payload,
+            apply_payload=apply_payload,
+            idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:memory-create",
+        )
+        return _proposal_result(action=action, preview_payload=preview_payload)
+
+
 class DevicesPumpStatusReadToolHandler:
     def __init__(self, *, devices_service: DevicesService) -> None:
         self.devices_service = devices_service
@@ -481,6 +507,7 @@ def build_default_tool_handlers(
         "plans.current.read": PlansCurrentReadToolHandler(plans_service=plans_service),
         "diary.recent.read": DiaryRecentReadToolHandler(diary_service=diary_service),
         "diary.entry_upsert.propose": DiaryEntryUpsertProposeToolHandler(runtime_service=agent_runtime_service),
+        "memory.create.propose": MemoryCreateProposeToolHandler(runtime_service=agent_runtime_service),
         "devices.pump_status.read": DevicesPumpStatusReadToolHandler(devices_service=devices_service),
         "files.vision_summary.read": FileVisionSummaryReadToolHandler(vision_service=file_vision_service),
         "plans.milk_plan.propose": MilkPlanProposeToolHandler(runtime_service=agent_runtime_service),
@@ -798,6 +825,29 @@ def _diary_entry_preview_payload(apply_payload: dict[str, Any]) -> dict[str, Any
     if isinstance(attachments, list):
         preview["attachment_count"] = len(attachments)
     return {key: value for key, value in preview.items() if value not in ("", None, [], {})}
+
+
+def _memory_create_apply_payload(args: dict[str, Any]) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "memory_type": _text(args, "memory_type"),
+        "content": args.get("content") if isinstance(args.get("content"), dict) else {},
+        "confidence_score": _optional_int(args, "confidence_score") or 0,
+    }
+    metadata = _metadata_payload(args)
+    if metadata:
+        payload["metadata"] = metadata
+    return {key: value for key, value in payload.items() if value not in ("", None, {})}
+
+
+def _memory_create_preview_payload(apply_payload: dict[str, Any]) -> dict[str, Any]:
+    content = apply_payload.get("content")
+    if not isinstance(content, dict):
+        content = {}
+    return {
+        "memory_type": _text(apply_payload, "memory_type"),
+        "summary": _truncate(_text(content, "summary"), max_length=240),
+        "confidence_score": apply_payload.get("confidence_score", 0),
+    }
 
 
 def _proposal_result(*, action: Any, preview_payload: dict[str, Any]) -> dict[str, Any]:

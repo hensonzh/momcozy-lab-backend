@@ -101,6 +101,35 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "idempotency_key": {"type": "string", "maxLength": 255},
         },
     },
+    "MemoryCreateProposalCreate": {
+        "title": "MemoryCreateProposalCreate",
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["memory_type", "content"],
+        "properties": {
+            "memory_type": {
+                "type": "string",
+                "enum": [
+                    "user_preference",
+                    "stable_care_preference",
+                    "communication_preference",
+                    "recurring_constraint",
+                ],
+            },
+            "content": {
+                "type": "object",
+                "additionalProperties": True,
+                "required": ["summary"],
+                "properties": {
+                    "summary": {"type": "string", "minLength": 1, "maxLength": 500},
+                },
+            },
+            "confidence_score": {"type": "integer", "minimum": 0, "maximum": 100, "default": 0},
+            "locale": {"type": "string", "maxLength": 35},
+            "timezone": {"type": "string", "maxLength": 80},
+            "idempotency_key": {"type": "string", "maxLength": 255},
+        },
+    },
     "DevicesPumpStatusQuery": {
         "title": "DevicesPumpStatusQuery",
         "type": "object",

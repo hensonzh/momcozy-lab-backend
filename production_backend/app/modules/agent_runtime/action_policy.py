@@ -83,6 +83,12 @@ DEFAULT_AGENT_ACTION_RULES: Mapping[str, AgentActionPolicyRule] = {
         side_effect_level="medium",
         requires_confirmation=True,
     ),
+    "agent.memory.create": AgentActionPolicyRule(
+        action_type="agent.memory.create",
+        target_type="agent_memory",
+        side_effect_level="medium",
+        requires_confirmation=True,
+    ),
 }
 
 

@@ -45,6 +45,7 @@ def test_tool_contract_registry_declares_permission_confirmation_and_blocking_po
     task_complete_proposal = registry.get("plans.task_complete.propose")
     milk_reminder_proposal = registry.get("notifications.milk_reminder.propose")
     diary_entry_proposal = registry.get("diary.entry_upsert.propose")
+    memory_create_proposal = registry.get("memory.create.propose")
     assert feeding_proposal.read_or_write == "write"
     assert feeding_proposal.requires_confirmation is True
     assert feeding_proposal.side_effect_level == "low"
@@ -73,6 +74,11 @@ def test_tool_contract_registry_declares_permission_confirmation_and_blocking_po
     assert diary_entry_proposal.requires_confirmation is True
     assert diary_entry_proposal.side_effect_level == "medium"
     assert diary_entry_proposal.required_permission == "diary:write:self"
+    assert memory_create_proposal.read_or_write == "write"
+    assert memory_create_proposal.owner_scope == "actor"
+    assert memory_create_proposal.requires_confirmation is True
+    assert memory_create_proposal.side_effect_level == "medium"
+    assert memory_create_proposal.required_permission == "memory:write:self"
     assert "profile.read" in registry.names_for_sdk()
     assert "business.context.read" in registry.names_for_sdk()
     plans_current = registry.get("plans.current.read")
@@ -96,6 +102,7 @@ def test_tool_contract_registry_declares_permission_confirmation_and_blocking_po
     assert "plans.current.read" in registry.names_for_sdk()
     assert "diary.recent.read" in registry.names_for_sdk()
     assert "diary.entry_upsert.propose" in registry.names_for_sdk()
+    assert "memory.create.propose" in registry.names_for_sdk()
     assert "pregnancy.plan_create.propose" in registry.names_for_sdk()
     assert "plans.task_create.propose" in registry.names_for_sdk()
     assert "plans.task_complete.propose" in registry.names_for_sdk()
@@ -121,6 +128,7 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
     milk_reminder_schema = tool_input_schema(registry.get("notifications.milk_reminder.propose").input_schema_ref)
     feeding_schema = tool_input_schema(registry.get("records.feeding_record.propose").input_schema_ref)
     pumping_schema = tool_input_schema(registry.get("records.pumping_record.propose").input_schema_ref)
+    memory_create_schema = tool_input_schema(registry.get("memory.create.propose").input_schema_ref)
 
     assert profile_schema == {
         "title": "ProfileContextQuery",
@@ -144,6 +152,16 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
     assert diary_entry_schema["required"] == ["entry_date"]
     assert diary_entry_schema["properties"]["content"]["maxLength"] == 5000
     assert diary_entry_schema["properties"]["symptom_tags"]["type"] == "array"
+    assert memory_create_schema["additionalProperties"] is False
+    assert memory_create_schema["required"] == ["memory_type", "content"]
+    assert memory_create_schema["properties"]["memory_type"]["enum"] == [
+        "user_preference",
+        "stable_care_preference",
+        "communication_preference",
+        "recurring_constraint",
+    ]
+    assert memory_create_schema["properties"]["content"]["required"] == ["summary"]
+    assert memory_create_schema["properties"]["confidence_score"]["maximum"] == 100
     assert devices_schema["additionalProperties"] is False
     assert devices_schema["properties"]["limit"]["maximum"] == 20
     assert file_vision_schema["additionalProperties"] is False
