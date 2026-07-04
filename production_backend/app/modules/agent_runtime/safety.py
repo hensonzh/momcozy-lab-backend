@@ -14,6 +14,9 @@ class SafetyDecision:
     severity: str
     decision: str
     evidence: dict[str, object]
+    response_template_key: str
+    response_template_version: str
+    handoff_type: str
 
     @property
     def should_block_normal_flow(self) -> bool:
@@ -29,7 +32,10 @@ class DeterministicSafetyGuard:
                 category="emotional_crisis",
                 severity="critical",
                 decision="escalate",
-                evidence={"matched_term": crisis_match},
+                evidence=_evidence(crisis_match),
+                response_template_key="emotional_crisis_escalation",
+                response_template_version=SAFETY_RESPONSE_TEMPLATE_VERSION,
+                handoff_type="crisis_support",
             )
 
         health_match = _first_match(normalized, HEALTH_RED_FLAG_TERMS)
@@ -38,7 +44,10 @@ class DeterministicSafetyGuard:
                 category="health_red_flag",
                 severity="high",
                 decision="escalate",
-                evidence={"matched_term": health_match},
+                evidence=_evidence(health_match),
+                response_template_key="maternal_infant_health_escalation",
+                response_template_version=SAFETY_RESPONSE_TEMPLATE_VERSION,
+                handoff_type="medical_or_emergency_support",
             )
 
         injection_match = _first_match(normalized, PROMPT_INJECTION_TERMS)
@@ -47,10 +56,21 @@ class DeterministicSafetyGuard:
                 category="prompt_injection",
                 severity="medium",
                 decision="block",
-                evidence={"matched_term": injection_match},
+                evidence=_evidence(injection_match),
+                response_template_key="security_refusal",
+                response_template_version=SAFETY_RESPONSE_TEMPLATE_VERSION,
+                handoff_type="none",
             )
 
-        return SafetyDecision(category="none", severity="none", decision="allow", evidence={})
+        return SafetyDecision(
+            category="none",
+            severity="none",
+            decision="allow",
+            evidence={},
+            response_template_key="none",
+            response_template_version=SAFETY_RESPONSE_TEMPLATE_VERSION,
+            handoff_type="none",
+        )
 
 
 class AgentSafetyService:
@@ -95,37 +115,82 @@ class AgentSafetyService:
             )
 
 
+SAFETY_RULE_VERSION = "safety-rules.v1"
+SAFETY_RESPONSE_TEMPLATE_VERSION = "safety-response.v1"
+
+
 EMOTIONAL_CRISIS_TERMS = (
     "suicide",
     "kill myself",
     "harm myself",
     "hurt myself",
+    "hurt my baby",
+    "harm my baby",
+    "shake my baby",
     "end my life",
     "cannot go on",
     "can't go on",
+    "want to die",
+    "plan to die",
+    "overdose",
     "自杀",
     "轻生",
     "不想活",
+    "想死",
     "伤害自己",
+    "伤害宝宝",
+    "伤害孩子",
+    "摇晃宝宝",
     "撑不下去",
 )
 
 HEALTH_RED_FLAG_TERMS = (
     "heavy bleeding",
     "bleeding a lot",
+    "soaking a pad",
     "severe pain",
     "severe headache",
     "vision changes",
     "shortness of breath",
+    "trouble breathing",
+    "chest pain",
+    "seizure",
+    "fainting",
+    "passed out",
+    "face swelling",
+    "hands swelling",
+    "right upper belly pain",
+    "water broke before 37 weeks",
     "baby not moving",
     "no fetal movement",
     "fever",
+    "infant fever",
+    "newborn fever",
+    "baby fever",
+    "blue lips",
+    "baby has blue lips",
+    "baby struggling to breathe",
+    "no wet diapers",
     "breast redness",
     "worsening breast redness",
     "胎动明显减少",
     "没有胎动",
     "大出血",
     "剧烈腹痛",
+    "胸痛",
+    "抽搐",
+    "晕倒",
+    "脸肿",
+    "手肿",
+    "破水",
+    "早破水",
+    "恶露很多",
+    "宝宝嘴唇发紫",
+    "宝宝呼吸困难",
+    "呼吸困难",
+    "宝宝发烧",
+    "新生儿发烧",
+    "没有尿湿尿布",
     "高烧",
     "乳房红肿发热",
 )
@@ -134,6 +199,8 @@ PROMPT_INJECTION_TERMS = (
     "ignore previous instructions",
     "reveal system prompt",
     "show hidden prompt",
+    "bypass safety",
+    "disable safety",
     "忽略之前的指令",
     "泄露系统提示词",
     "显示隐藏提示词",
@@ -149,3 +216,7 @@ def _first_match(text: str, terms: tuple[str, ...]) -> str:
         if term.lower() in text:
             return term
     return ""
+
+
+def _evidence(matched_term: str) -> dict[str, object]:
+    return {"matched_term": matched_term, "rule_version": SAFETY_RULE_VERSION}

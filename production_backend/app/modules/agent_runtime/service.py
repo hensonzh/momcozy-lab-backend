@@ -461,6 +461,9 @@ class AgentRuntimeService:
                 "severity": decision.severity,
                 "decision": decision.decision,
                 "safety_event_id": str(safety_event.id) if safety_event else "",
+                "response_template_key": decision.response_template_key,
+                "response_template_version": decision.response_template_version,
+                "handoff_type": decision.handoff_type,
             },
         )
         failed = await self.repository.mark_run_failed(

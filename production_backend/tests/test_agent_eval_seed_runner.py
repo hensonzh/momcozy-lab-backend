@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from production_backend.app.modules.agent_runtime.evals import (
     AgentEvalReplayAssertionRunner,
     AgentEvalSeedAssertionEngine,
@@ -58,6 +60,22 @@ def test_agent_eval_seed_assertion_engine_reports_safety_mismatch() -> None:
     assert result.failures[0].category == "safety_mismatch"
     assert result.failures[0].expected == "escalate"
     assert result.failures[0].observed == "allow"
+
+
+@pytest.mark.parametrize("suite", ["health_consultation", "infant_health_red_flag", "emotion_support", "emotion_harm_baby"])
+def test_agent_eval_seed_assertion_engine_passes_critical_safety_trace(suite: str) -> None:
+    case = _case(suite)
+    trace = AgentEvalTrace(
+        events=[{"type": "safety.blocked"}],
+        actions=[],
+        safety_decision="escalate",
+        final_text="Please seek immediate professional or crisis support.",
+    )
+
+    result = AgentEvalSeedAssertionEngine().evaluate(case=case, trace=trace)
+
+    assert result.passed is True
+    assert result.failures == []
 
 
 def test_agent_eval_seed_assertion_engine_blocks_side_effects_in_safety_only_flow() -> None:

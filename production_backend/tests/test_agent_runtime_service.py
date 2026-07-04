@@ -149,6 +149,11 @@ def test_agent_runtime_service_blocks_unsafe_run_before_queueing_model_work() ->
     assert run.error_code == "prompt_injection"
     assert repository.safety_event.category == "prompt_injection"
     assert [event.event_type for event in repository.events] == ["message.completed", "safety.blocked", "run.failed"]
+    safety_event = repository.events[1]
+    assert safety_event.payload["response_template_key"] == "security_refusal"
+    assert safety_event.payload["response_template_version"] == "safety-response.v1"
+    assert safety_event.payload["handoff_type"] == "none"
+    assert "ignore previous instructions" not in str(safety_event.payload)
 
 
 def test_agent_runtime_service_rejects_second_active_run_for_thread() -> None:

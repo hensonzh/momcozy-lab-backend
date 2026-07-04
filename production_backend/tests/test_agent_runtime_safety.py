@@ -21,8 +21,11 @@ def test_deterministic_safety_guard_escalates_emotional_crisis() -> None:
     "text",
     [
         "I cannot do this anymore and I might hurt myself.",
+        "I am afraid I might hurt my baby.",
+        "I want to die tonight.",
         "I can't go on tonight.",
         "我真的撑不下去了。",
+        "我想死。",
     ],
 )
 def test_deterministic_safety_guard_escalates_crisis_variants(text: str) -> None:
@@ -31,6 +34,9 @@ def test_deterministic_safety_guard_escalates_crisis_variants(text: str) -> None
     assert decision.category == "emotional_crisis"
     assert decision.decision == "escalate"
     assert decision.should_block_normal_flow is True
+    assert decision.response_template_key == "emotional_crisis_escalation"
+    assert decision.response_template_version == "safety-response.v1"
+    assert decision.handoff_type == "crisis_support"
 
 
 def test_deterministic_safety_guard_escalates_health_red_flag() -> None:
@@ -47,6 +53,11 @@ def test_deterministic_safety_guard_escalates_health_red_flag() -> None:
         "Can you make my hospital bag list? Also I am bleeding a lot right now.",
         "I have severe headache and vision changes.",
         "I have shortness of breath.",
+        "My newborn has a fever.",
+        "My baby has blue lips.",
+        "I am soaking a pad every hour.",
+        "我现在胸痛。",
+        "宝宝嘴唇发紫。",
     ],
 )
 def test_deterministic_safety_guard_escalates_health_variants(text: str) -> None:
@@ -55,6 +66,9 @@ def test_deterministic_safety_guard_escalates_health_variants(text: str) -> None
     assert decision.category == "health_red_flag"
     assert decision.decision == "escalate"
     assert decision.should_block_normal_flow is True
+    assert decision.response_template_key == "maternal_infant_health_escalation"
+    assert decision.response_template_version == "safety-response.v1"
+    assert decision.handoff_type == "medical_or_emergency_support"
 
 
 def test_deterministic_safety_guard_blocks_prompt_injection() -> None:
@@ -62,6 +76,8 @@ def test_deterministic_safety_guard_blocks_prompt_injection() -> None:
 
     assert decision.category == "prompt_injection"
     assert decision.decision == "block"
+    assert decision.response_template_key == "security_refusal"
+    assert decision.handoff_type == "none"
 
 
 def test_agent_safety_service_records_non_allow_decisions_only() -> None:
@@ -78,6 +94,8 @@ def test_agent_safety_service_records_non_allow_decisions_only() -> None:
     assert allow_event is None
     assert decision.category == "health_red_flag"
     assert event.category == "health_red_flag"
+    assert event.evidence["matched_term"] == "没有胎动"
+    assert event.evidence["rule_version"] == "safety-rules.v1"
     assert repository.record_kwargs["owner_user_id"] == owner_user_id
     assert {item["category"] for item in snapshot["agent_safety"]} == {"health_red_flag", "none"}
     health = next(item for item in snapshot["agent_safety"] if item["category"] == "health_red_flag")
