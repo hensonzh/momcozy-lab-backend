@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -64,12 +65,14 @@ class OpenAIAgentsSdkBackend:
         runner_cls = getattr(agents_module, "Runner", None)
         if agent_cls is None or runner_cls is None:
             raise ApiError(code="dependency_not_configured", message="OpenAI Agents SDK Agent/Runner is unavailable.", status=503)
+        if _is_real_agents_module(agents_module) and not _has_openai_credentials():
+            raise ApiError(code="dependency_not_configured", message="OpenAI Agents SDK credentials are not configured.", status=503)
 
         agent = agent_cls(
             name="MomCozy assistant",
             instructions=request.instructions,
             model=self.model,
-            tools=tuple(_build_function_tool(agents_module=agents_module, definition=definition) for definition in request.tools),
+            tools=[_build_function_tool(agents_module=agents_module, definition=definition) for definition in request.tools],
         )
         result = await runner_cls.run(agent, _flatten_model_input(request.model_input))
         final_output = getattr(result, "final_output", "")
@@ -148,3 +151,11 @@ def _build_function_tool(*, agents_module: Any, definition: SdkToolDefinition) -
         params_json_schema=definition.params_json_schema,
         on_invoke_tool=invoke_tool,
     )
+
+
+def _is_real_agents_module(agents_module: Any) -> bool:
+    return bool(getattr(agents_module, "__file__", ""))
+
+
+def _has_openai_credentials() -> bool:
+    return bool(os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_ADMIN_KEY"))

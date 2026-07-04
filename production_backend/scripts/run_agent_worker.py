@@ -11,7 +11,7 @@ from production_backend.app.infrastructure.db.session import create_db_engine, c
 from production_backend.app.infrastructure.redis.client import close_redis_client, create_redis_client
 from production_backend.app.modules.agent_runtime.controls import AgentRunControls
 from production_backend.app.modules.agent_runtime.events import AgentEventSink
-from production_backend.app.modules.agent_runtime.graphs import AgentGraphCheckpointStore
+from production_backend.app.modules.agent_runtime.graphs import AgentGraphCheckpointStore, AgentRuntimeGraphRunner
 from production_backend.app.modules.agent_runtime.repository import AgentRuntimeRepository
 from production_backend.app.modules.agent_runtime.runtime import AgentRuntimeExecutor
 from production_backend.app.modules.agent_runtime.safety import AgentSafetyService
@@ -108,14 +108,20 @@ async def run_agent_worker(
                         agent_runtime_service=agent_runtime_service,
                     ),
                 )
-                handler = AgentRuntimeExecutor(
+                checkpoint_store = AgentGraphCheckpointStore(repository=repository)
+                runtime_executor = AgentRuntimeExecutor(
                     repository=repository,
-                    checkpoint_store=AgentGraphCheckpointStore(repository=repository),
+                    checkpoint_store=checkpoint_store,
                     state_store=AgentRuntimeStateStore(repository=repository),
                     tool_registry=tool_registry,
                     tool_executor=tool_executor,
                     event_sink=event_sink,
                     sdk_runner=OpenAIAgentsSdkRunner(model=resolved_settings.openai_model, metrics=metrics),
+                )
+                handler = AgentRuntimeGraphRunner(
+                    repository=repository,
+                    checkpoint_store=checkpoint_store,
+                    node_handler=runtime_executor,
                 )
                 worker = AgentRunQueueWorker(
                     repository=repository,
