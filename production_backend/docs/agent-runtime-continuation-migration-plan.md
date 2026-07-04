@@ -464,9 +464,9 @@ eval regression。
 
 后续产品化 PR：
 
-1. `agent: add memory sensitivity and retention policy`
-2. `eval: add memory write and retrieval regression suite`
-3. `app: add user-visible memory management UX`
+1. `agent: add memory sensitivity and retention policy` - done
+2. `eval: add memory write and retrieval regression suite` - done
+3. `app: add user-visible memory management UX` - deferred until Flutter integration
 
 验收：
 
@@ -474,8 +474,9 @@ eval regression。
 - backend 已保证模型只能 propose memory，确认后通过 outbox 写入。
 - 每轮只投射少量 active memory，且 memory projection 独立于 business facts。
 - backend 已支持用户查看和删除/归档 active memory。
+- backend 已拒绝 health、child、crisis、regulated 等敏感 memory 写入，并通过 `memory_sensitive_rejection` eval 固化。
+- backend 已支持 `expires_in_days`，active memory projection 不会返回过期记忆。
 - 仍需补齐用户禁用 memory 的产品 API/UX。
-- 仍需补齐敏感健康事实不被静默写入长期记忆的 eval 和产品策略。
 - prompt cache 稳定片段不因 memory 大量变化而失效。
 
 ## Phase 9: Eval Harness And Acceptance Loop
