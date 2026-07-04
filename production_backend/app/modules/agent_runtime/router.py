@@ -15,6 +15,7 @@ from ..audit import IdempotencyService, OutboxService
 from ..audit.repository import AuditRepository, OutboxRepository
 from ..auth import CurrentUser, ServiceClient
 from .evals import AgentEvalService
+from .memory import AgentMemoryRepository, AgentMemoryService
 from .repository import AgentRuntimeRepository
 from .replay import AgentReplayService
 from .schemas import (
@@ -27,6 +28,8 @@ from .schemas import (
     AgentEventPage,
     AgentEventRead,
     AgentReplayBundle,
+    AgentMemoryListResponse,
+    AgentMemoryRead,
     AgentRunCancel,
     AgentRunCreate,
     AgentRunRead,
@@ -64,6 +67,10 @@ def get_agent_replay_service(session: AsyncSession = Depends(get_session)) -> Ag
 def get_agent_eval_service(session: AsyncSession = Depends(get_session)) -> AgentEvalService:
     repository = AgentRuntimeRepository(session)
     return AgentEvalService(repository=repository)
+
+
+def get_agent_memory_service(session: AsyncSession = Depends(get_session)) -> AgentMemoryService:
+    return AgentMemoryService(repository=AgentMemoryRepository(session))
 
 
 @router.post("/threads", response_model=AgentThreadRead, status_code=status.HTTP_201_CREATED)
@@ -254,6 +261,31 @@ async def reject_action(
 ) -> AgentActionRead:
     action = await service.reject_action(owner_user_id=current_user.user_id, action_id=action_id, reason=payload.reason or "")
     return AgentActionRead.model_validate(action)
+
+
+@router.get("/memories", response_model=AgentMemoryListResponse)
+async def list_memories(
+    memory_type: str | None = Query(default=None, max_length=80),
+    limit: int = Query(default=50, ge=1, le=100),
+    current_user: CurrentUser = Depends(require_current_user),
+    service: AgentMemoryService = Depends(get_agent_memory_service),
+) -> AgentMemoryListResponse:
+    memories = await service.list_active_memories(
+        owner_user_id=current_user.user_id,
+        memory_type=memory_type,
+        limit=limit,
+    )
+    return AgentMemoryListResponse(items=[AgentMemoryRead.model_validate(memory) for memory in memories])
+
+
+@router.delete("/memories/{memory_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_memory(
+    memory_id: UUID,
+    current_user: CurrentUser = Depends(require_current_user),
+    service: AgentMemoryService = Depends(get_agent_memory_service),
+) -> Response:
+    await service.archive_memory(owner_user_id=current_user.user_id, memory_id=memory_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/admin/runs/{run_id}/replay", response_model=AgentReplayBundle)

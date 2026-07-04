@@ -110,6 +110,28 @@ class AgentActionReject(BaseModel):
     reason: str | None = Field(default=None, max_length=500)
 
 
+class AgentMemoryRead(BaseModel):
+    id: UUID
+    owner_user_id: UUID
+    source_run_id: UUID | None = None
+    source_message_id: UUID | None = None
+    memory_type: str
+    status: str
+    schema_version: str
+    content: dict[str, Any]
+    confidence_score: int
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    archived_at: datetime | None = None
+    expires_at: datetime | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AgentMemoryListResponse(BaseModel):
+    items: list[AgentMemoryRead]
+
+
 class AgentReplayBundle(BaseModel):
     run: dict[str, Any]
     messages: list[dict[str, Any]]

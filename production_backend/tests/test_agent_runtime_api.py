@@ -5,10 +5,11 @@ from fastapi.testclient import TestClient
 
 from production_backend.app.core.settings import Settings
 from production_backend.app.factory import create_app
-from production_backend.app.modules.agent_runtime.models import AgentEvalCase, AgentEvent, AgentRun, AgentThread
+from production_backend.app.modules.agent_runtime.models import AgentEvalCase, AgentEvent, AgentMemory, AgentRun, AgentThread
 from production_backend.app.modules.agent_runtime.router import (
     _stream_run_event_chunks,
     get_agent_eval_service,
+    get_agent_memory_service,
     get_agent_replay_service,
     get_agent_runtime_service,
 )
@@ -190,6 +191,30 @@ def test_agent_artifact_delete_uses_current_user_scope() -> None:
     assert fake_service.delete_artifact_kwargs == {"owner_user_id": user_id, "artifact_id": artifact_id}
 
 
+def test_agent_memory_management_uses_current_user_scope() -> None:
+    user_id = uuid4()
+    memory_id = uuid4()
+    fake_service = FakeMemoryService(user_id=user_id, memory_id=memory_id)
+    app = create_app(Settings(app_env="test"))
+    _override_current_user(app, user_id)
+    app.dependency_overrides[get_agent_memory_service] = lambda: fake_service
+    client = TestClient(app)
+
+    list_response = client.get("/v1/agent/memories?memory_type=communication_preference&limit=10")
+    delete_response = client.delete(f"/v1/agent/memories/{memory_id}")
+
+    assert list_response.status_code == 200
+    assert list_response.json()["items"][0]["id"] == str(memory_id)
+    assert list_response.json()["items"][0]["content"] == {"summary": "Prefers concise reminders"}
+    assert delete_response.status_code == 204
+    assert fake_service.list_kwargs == {
+        "owner_user_id": user_id,
+        "memory_type": "communication_preference",
+        "limit": 10,
+    }
+    assert fake_service.archive_kwargs == {"owner_user_id": user_id, "memory_id": memory_id}
+
+
 def test_agent_admin_replay_and_eval_endpoints_require_service_key() -> None:
     run_id = uuid4()
     settings = Settings(app_env="test", service_api_key="test-service-key-with-at-least-32-bytes")
@@ -366,6 +391,40 @@ class FakeAgentRuntimeService:
             apply_payload={},
             idempotency_key="",
             error_code="",
+        )
+
+
+class FakeMemoryService:
+    def __init__(self, *, user_id: UUID, memory_id: UUID) -> None:
+        self.user_id = user_id
+        self.memory_id = memory_id
+        self.list_kwargs = {}
+        self.archive_kwargs = {}
+
+    async def list_active_memories(self, **kwargs):
+        self.list_kwargs = kwargs
+        return [
+            AgentMemory(
+                id=self.memory_id,
+                owner_user_id=self.user_id,
+                memory_type="communication_preference",
+                content={"summary": "Prefers concise reminders"},
+                schema_version="v1",
+                confidence_score=90,
+                status="active",
+            )
+        ]
+
+    async def archive_memory(self, **kwargs):
+        self.archive_kwargs = kwargs
+        return AgentMemory(
+            id=self.memory_id,
+            owner_user_id=self.user_id,
+            memory_type="communication_preference",
+            content={"summary": "Prefers concise reminders"},
+            schema_version="v1",
+            confidence_score=90,
+            status="archived",
         )
 
 
