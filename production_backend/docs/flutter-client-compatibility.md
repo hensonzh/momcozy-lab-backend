@@ -55,6 +55,8 @@ versioning plan.
 - Use `Idempotency-Key` for retryable writes.
 - Treat `request_id` from error envelopes as the support/debug ID.
 - Consume agent stream events as application events, not provider raw events.
+- Do not add an AG-UI compatibility adapter; legacy AG-UI event names are not
+  part of the production backend contract.
 - Reconnect agent streams with `after_sequence`; do not replay by parsing text.
 - Merge action events by `action_id`; render `preview_payload` from
   `action.confirmation_required` and never expect `apply_payload` in streams.

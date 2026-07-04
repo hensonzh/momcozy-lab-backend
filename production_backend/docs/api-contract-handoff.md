@@ -48,10 +48,27 @@ Stream URLs do not accept access tokens as query parameters. Clients must send
 the bearer token in headers. Events are application-level runtime events, not
 provider raw events.
 
+AG-UI is not a production compatibility target. The legacy `/api/ag-ui`,
+`/api/ag-ui-ws`, prewarm, and WebSocket bridge contracts are replaced by the
+typed run/event APIs above. Flutter/Web clients should implement a MomCozy
+application-event reducer instead of an AG-UI adapter.
+
 The SSE stream replays persisted events by default. Clients that need live
 consumption can pass `follow=true` with bounded `poll_interval_seconds` and
 `max_wait_seconds`; the backend still emits only persisted application events
 and exits when a terminal run event is observed or the wait budget expires.
+
+A client reducer is the deterministic function that folds an ordered event
+stream into visible UI state:
+
+```text
+previous AgentChatState + AgentEvent -> next AgentChatState
+```
+
+It deduplicates by `event_id` or `sequence`, merges message updates by
+`message_id`, tool updates by `tool_call_id`, artifacts by `artifact_id`, and
+action cards by `action_id`. It must not infer state from natural-language
+assistant text, provider raw events, or legacy AG-UI event names.
 
 ## Agent Action Events
 

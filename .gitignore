@@ -14,6 +14,7 @@ __pycache__/
 data/*.db
 .worktree-runtime/*.db
 logs/
+.runlogs/
 
 dist/
 build/

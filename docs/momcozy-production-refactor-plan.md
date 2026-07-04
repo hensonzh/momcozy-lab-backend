@@ -514,7 +514,7 @@ agent_messages + selected tool/artifact/action context + business facts
 - backpressure 和慢客户端处理不清晰。
 - 前端 replay 依赖实时流，而不是持久 application events。
 
-生产级应把 AG-UI run 作为一等资源：
+生产级应把 Agent run 和 application event 作为一等资源，而不是把 AG-UI 作为内部协议：
 
 ```text
 agent_runs
@@ -527,7 +527,7 @@ resume stream API
 cancel API
 ```
 
-Flutter / Web 客户端只消费稳定 application events，并通过 `event_id` 或 `sequence` 去重；不要直接绑定 provider raw events、线程状态或本地 SSE upstream。
+Flutter / Web 客户端只消费稳定 MomCozy application events，并通过 `event_id` 或 `sequence` 去重；不要直接绑定 AG-UI event、provider raw events、线程状态或本地 SSE upstream。
 
 ### P2：部署、配置、CI/CD 基础薄弱
 
@@ -860,7 +860,7 @@ MomCozy 新 runtime 采用 **LangGraph + OpenAI Agents SDK**，不再保留自�
 
 - service skill manifest 的按需加载思想，但要版本化、持久化，并纳入 context projector。
 - `tool_search` + deferred namespace 的渐进加载思想，但要提升为正式 tool contract。
-- AG-UI / WebSocket 事件体验，但要改为持久 `agent_events` + replay/resume contract。
+- 旧流式 UI 的用户体验意图，例如过程反馈、文本增量、artifact 和 action card，但要用持久 `agent_events` + replay/resume contract 重新定义。
 - `safe_tool_arguments()` / `safe_tool_result()` 的脱敏原则，但要升级为统一 safe payload policy。
 
 明确移除：
@@ -870,6 +870,7 @@ MomCozy 新 runtime 采用 **LangGraph + OpenAI Agents SDK**，不再保留自�
 - provider session 作为上下文来源的路径。
 - 自研 Responses API agent loop / adapter 作为 runtime 路径。
 - 本地 SSE upstream bridge 作为生产流式兜底的路径。
+- AG-UI 作为后端内部协议、Flutter 协议或兼容 adapter 的路径。
 - tool handler 直接写 SQLite 或绕过 service/action/audit 的路径。
 
 目标方案：
@@ -1004,7 +1005,7 @@ Prompt cache 优化原则：
 - 共同稳定前缀尽量不包含 PII；用户资料、健康记录、宝宝信息、workflow state 和业务事实放在动态后缀。
 - 监控 `usage.prompt_tokens_details.cached_tokens`，按 prompt version、tool schema version、service domain 统计命中率。
 
-事件契约对 Flutter 稳定输出 application events，例如：
+事件契约对 Flutter 稳定输出 MomCozy application events。AG-UI 只作为旧系统历史事实出现，不进入新后端 API、Flutter reducer 或兼容层。推荐事件类型例如：
 
 ```text
 run.queued
@@ -1026,17 +1027,38 @@ run.failed
 run.cancelled
 ```
 
-每个事件包含：
+每个事件使用统一 envelope：
 
 ```text
 event_id
-type
-sequence
 thread_id
 run_id
-created_at
+sequence
+type
 payload
+created_at
 ```
+
+`sequence` 是同一 run 内单调递增的游标，用于 SSE 断线重连、replay 和客户端去重。客户端 reducer 以事件作为输入，把流式事件合并成页面状态：
+
+```text
+AgentEvent stream
+  -> reducer
+  -> transcript messages
+  -> work panel tool states
+  -> artifact cards
+  -> action confirmation cards
+  -> run status
+```
+
+reducer 规则：
+
+- 用 `event_id` 或 `sequence` 做幂等去重。
+- 用 `message_id` 合并 `message.delta` 和 `message.completed`。
+- 用 `tool_call_id` 合并 tool 状态。
+- 用 `artifact_id` 合并 artifact 状态。
+- 用 `action_id` 合并 `action.confirmation_required`、`action.queued`、`action.applied`、`action.failed`。
+- 不解析 provider raw event、AG-UI event 或自然语言文本来推断状态。
 
 ### API 契约目标
 
@@ -1246,7 +1268,7 @@ Flutter 负责展示明确升级、禁用无关 action、避免显示 raw tool a
 
 - 建 Flutter app/router/theme/config/network/secure storage。
 - 接 auth 流程和 typed API client。
-- 建 agent_chat feature，优先迁移 AG-UI/WebSocket 消费。
+- 建 agent_chat feature，消费 `/v1/agent/runs`、`/v1/agent/runs/{run_id}/events` 和 `/v1/agent/runs/{run_id}/stream` 的 MomCozy application events。
 - 用 feature-first 迁移页面。
 
 推荐迁移顺序：
@@ -1374,7 +1396,7 @@ Flutter 负责展示明确升级、禁用无关 action、避免显示 raw tool a
 - Agent 多轮状态可跨服务重启恢复。
 - Agent run、message、tool、artifact、action、event 可审计和 replay。
 - Agent runtime 固定为 LangGraph + OpenAI Agents SDK，生产路径中不存在 `previous_response_id` 续聊、自研 Responses adapter、provider session 或内存 `ChatSession` 兜底。
-- 现有 AG-UI/WebSocket 事件契约在 Flutter 中有等价 UI 表现。
+- 旧 AG-UI/WebSocket 体验在 Flutter 中有等价 UI 表现，但实现只依赖新的 MomCozy application event contract，不保留 AG-UI adapter。
 - 高风险写操作都有 preview、confirmation、apply、audit。
 - 医疗/母婴/情绪高风险场景有 deterministic guard 和 eval。
 - local/staging/prod 只靠配置切换，不改代码。
