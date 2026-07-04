@@ -41,6 +41,15 @@ jobs:
           --output /tmp/agent-seed-eval.json
           --junit-output /tmp/agent-seed-eval.junit.xml
 
+      - name: Upload agent seed eval reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-seed-eval
+          path: |
+            /tmp/agent-seed-eval.json
+            /tmp/agent-seed-eval.junit.xml
+
       - name: Check Alembic head
         run: python -m alembic -c production_backend/alembic.ini heads
 
