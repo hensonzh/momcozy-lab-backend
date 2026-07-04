@@ -202,6 +202,26 @@ class DiaryRecentReadToolHandler:
         }
 
 
+class DevicesPumpStatusReadToolHandler:
+    def __init__(self, *, devices_service: DevicesService) -> None:
+        self.devices_service = devices_service
+
+    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
+        owner_user_id = context.actor.user_id
+        limit = _limit(context.args.get("limit"), default=5, max_limit=20)
+        devices = await self.devices_service.list_devices(owner_user_id=owner_user_id)
+        telemetry = await self.devices_service.list_telemetry_events(owner_user_id=owner_user_id, limit=limit)
+        bounded_devices = devices[:limit]
+        return {
+            "pumps": [_device_payload(device) for device in bounded_devices],
+            "telemetry": [_telemetry_payload(event) for event in telemetry],
+            "counts": {
+                "pumps": len(bounded_devices),
+                "telemetry": len(telemetry),
+            },
+        }
+
+
 class FeedingRecordProposeToolHandler:
     def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
         self.runtime_service = runtime_service
@@ -266,6 +286,7 @@ def build_default_tool_handlers(
         "records.milk_summary.read": MilkSummaryReadToolHandler(records_service=records_service),
         "plans.current.read": PlansCurrentReadToolHandler(plans_service=plans_service),
         "diary.recent.read": DiaryRecentReadToolHandler(diary_service=diary_service),
+        "devices.pump_status.read": DevicesPumpStatusReadToolHandler(devices_service=devices_service),
         "records.feeding_record.propose": FeedingRecordProposeToolHandler(runtime_service=agent_runtime_service),
         "records.pumping_record.propose": PumpingRecordProposeToolHandler(runtime_service=agent_runtime_service),
         "hospital_bag.cart_update.propose": HospitalBagCartUpdateProposeToolHandler(runtime_service=agent_runtime_service),

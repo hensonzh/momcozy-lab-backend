@@ -50,15 +50,20 @@ def test_tool_contract_registry_declares_permission_confirmation_and_blocking_po
     assert "business.context.read" in registry.names_for_sdk()
     plans_current = registry.get("plans.current.read")
     diary_recent = registry.get("diary.recent.read")
+    device_status = registry.get("devices.pump_status.read")
     assert plans_current.read_or_write == "read"
     assert plans_current.owner_scope == "actor"
     assert plans_current.requires_confirmation is False
     assert diary_recent.read_or_write == "read"
     assert diary_recent.owner_scope == "actor"
     assert diary_recent.requires_confirmation is False
+    assert device_status.read_or_write == "read"
+    assert device_status.owner_scope == "actor"
+    assert device_status.requires_confirmation is False
     assert "records.milk_summary.read" in registry.names_for_sdk()
     assert "plans.current.read" in registry.names_for_sdk()
     assert "diary.recent.read" in registry.names_for_sdk()
+    assert "devices.pump_status.read" in registry.names_for_sdk()
 
 
 def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> None:
@@ -69,6 +74,7 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
     milk_schema = tool_input_schema(registry.get("records.milk_summary.read").input_schema_ref)
     plans_schema = tool_input_schema(registry.get("plans.current.read").input_schema_ref)
     diary_schema = tool_input_schema(registry.get("diary.recent.read").input_schema_ref)
+    devices_schema = tool_input_schema(registry.get("devices.pump_status.read").input_schema_ref)
     feeding_schema = tool_input_schema(registry.get("records.feeding_record.propose").input_schema_ref)
     pumping_schema = tool_input_schema(registry.get("records.pumping_record.propose").input_schema_ref)
 
@@ -90,6 +96,8 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
     assert plans_schema["properties"]["limit"]["maximum"] == 20
     assert diary_schema["additionalProperties"] is False
     assert diary_schema["properties"]["limit"]["maximum"] == 20
+    assert devices_schema["additionalProperties"] is False
+    assert devices_schema["properties"]["limit"]["maximum"] == 20
     assert feeding_schema["required"] == ["feed_time", "feed_type"]
     assert feeding_schema["properties"]["volume_ml"]["type"] == "number"
     assert pumping_schema["required"] == ["pump_start_time"]

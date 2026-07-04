@@ -79,6 +79,20 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             }
         },
     },
+    "DevicesPumpStatusQuery": {
+        "title": "DevicesPumpStatusQuery",
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 20,
+                "default": 5,
+                "description": "Maximum pump devices and telemetry events to include.",
+            }
+        },
+    },
     "FeedingRecordProposalCreate": {
         "title": "FeedingRecordProposalCreate",
         "type": "object",

@@ -8,6 +8,7 @@ from production_backend.app.core.errors import ApiError
 from production_backend.app.modules.agent_runtime.models import AgentAction
 from production_backend.app.modules.agent_runtime.tools import (
     BusinessContextReadToolHandler,
+    DevicesPumpStatusReadToolHandler,
     DiaryRecentReadToolHandler,
     FeedingRecordProposeToolHandler,
     HospitalBagCartUpdateProposeToolHandler,
@@ -215,6 +216,20 @@ def test_diary_recent_read_tool_handler_returns_bounded_owner_scoped_summary() -
     assert result["count"] == 1
 
 
+def test_devices_pump_status_read_tool_handler_returns_bounded_owner_scoped_summary() -> None:
+    actor = _user()
+    devices_service = FakeDevicesService(owner_user_id=actor.user_id)
+    handler = DevicesPumpStatusReadToolHandler(devices_service=devices_service)
+
+    result = asyncio.run(handler(_context(actor=actor, args={"limit": 2, "owner_user_id": str(uuid4())})))
+
+    assert devices_service.owner_user_id == actor.user_id
+    assert devices_service.limit == 2
+    assert result["pumps"][0]["device_id"] == "pump-1"
+    assert result["telemetry"][0]["payload"] == {"mode": "stimulation"}
+    assert result["counts"] == {"pumps": 1, "telemetry": 1}
+
+
 def test_feeding_record_propose_tool_handler_creates_confirmation_action() -> None:
     actor = _user()
     runtime_service = FakeAgentRuntimeService()
@@ -332,6 +347,7 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
         "records.milk_summary.read",
         "plans.current.read",
         "diary.recent.read",
+        "devices.pump_status.read",
         "records.feeding_record.propose",
         "records.pumping_record.propose",
         "hospital_bag.cart_update.propose",
@@ -506,8 +522,11 @@ class FakeDiaryService:
 class FakeDevicesService:
     def __init__(self, *, owner_user_id) -> None:
         self._owner_user_id = owner_user_id
+        self.owner_user_id = None
+        self.limit = None
 
     async def list_devices(self, *, owner_user_id):
+        self.owner_user_id = owner_user_id
         return [
             PumpDevice(
                 id=uuid4(),
@@ -521,6 +540,8 @@ class FakeDevicesService:
         ]
 
     async def list_telemetry_events(self, *, owner_user_id, limit):
+        self.owner_user_id = owner_user_id
+        self.limit = limit
         return [
             PumpTelemetryEvent(
                 id=uuid4(),

@@ -125,6 +125,25 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         ToolContract(
+            name="devices.pump_status.read",
+            domain="devices",
+            description="Read current user's pump devices and recent telemetry as a bounded status summary.",
+            input_schema_ref="DevicesPumpStatusQuery",
+            output_schema_ref="DevicesPumpStatusRead",
+            read_or_write="read",
+            required_permission="business_context:read:self",
+            owner_scope="actor",
+            side_effect_level="none",
+            blocking_policy="must_wait",
+            result_dependency="next_tool_call",
+            requires_confirmation=False,
+            idempotency_required=False,
+            audit_required=False,
+            timeout_seconds=10,
+        )
+    )
+    registry.register(
+        ToolContract(
             name="records.feeding_record.propose",
             domain="records",
             description="Propose a feeding record create action for user confirmation.",
