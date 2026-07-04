@@ -39,6 +39,7 @@ def test_tool_contract_registry_declares_permission_confirmation_and_blocking_po
     assert milk_summary.requires_confirmation is False
     feeding_proposal = registry.get("records.feeding_record.propose")
     pumping_proposal = registry.get("records.pumping_record.propose")
+    milk_plan_proposal = registry.get("plans.milk_plan.propose")
     assert feeding_proposal.read_or_write == "write"
     assert feeding_proposal.requires_confirmation is True
     assert feeding_proposal.side_effect_level == "low"
@@ -46,6 +47,10 @@ def test_tool_contract_registry_declares_permission_confirmation_and_blocking_po
     assert pumping_proposal.read_or_write == "write"
     assert pumping_proposal.requires_confirmation is True
     assert pumping_proposal.required_permission == "records:write:self"
+    assert milk_plan_proposal.read_or_write == "write"
+    assert milk_plan_proposal.requires_confirmation is True
+    assert milk_plan_proposal.side_effect_level == "medium"
+    assert milk_plan_proposal.required_permission == "plans:write:self"
     assert "profile.read" in registry.names_for_sdk()
     assert "business.context.read" in registry.names_for_sdk()
     plans_current = registry.get("plans.current.read")
@@ -82,6 +87,7 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
     diary_schema = tool_input_schema(registry.get("diary.recent.read").input_schema_ref)
     devices_schema = tool_input_schema(registry.get("devices.pump_status.read").input_schema_ref)
     file_vision_schema = tool_input_schema(registry.get("files.vision_summary.read").input_schema_ref)
+    milk_plan_schema = tool_input_schema(registry.get("plans.milk_plan.propose").input_schema_ref)
     feeding_schema = tool_input_schema(registry.get("records.feeding_record.propose").input_schema_ref)
     pumping_schema = tool_input_schema(registry.get("records.pumping_record.propose").input_schema_ref)
 
@@ -108,6 +114,9 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
     assert file_vision_schema["additionalProperties"] is False
     assert file_vision_schema["required"] == ["file_id"]
     assert file_vision_schema["properties"]["file_id"]["type"] == "string"
+    assert milk_plan_schema["additionalProperties"] is False
+    assert milk_plan_schema["required"] == ["title"]
+    assert milk_plan_schema["properties"]["payload"]["type"] == "object"
     assert feeding_schema["required"] == ["feed_time", "feed_type"]
     assert feeding_schema["properties"]["volume_ml"]["type"] == "number"
     assert pumping_schema["required"] == ["pump_start_time"]

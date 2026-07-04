@@ -107,6 +107,23 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             }
         },
     },
+    "MilkPlanProposalCreate": {
+        "title": "MilkPlanProposalCreate",
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["title"],
+        "properties": {
+            "title": {"type": "string", "minLength": 1, "maxLength": 255},
+            "summary": {"type": "string", "maxLength": 2000},
+            "payload": {
+                "type": "object",
+                "additionalProperties": True,
+            },
+            "locale": {"type": "string", "maxLength": 35},
+            "timezone": {"type": "string", "maxLength": 80},
+            "idempotency_key": {"type": "string", "maxLength": 255},
+        },
+    },
     "FeedingRecordProposalCreate": {
         "title": "FeedingRecordProposalCreate",
         "type": "object",

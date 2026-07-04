@@ -42,6 +42,7 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() ->
         "files.vision_summary.read",
         "hospital_bag.cart_update.propose",
         "plans.current.read",
+        "plans.milk_plan.propose",
         "profile.read",
         "records.feeding_record.propose",
         "records.milk_summary.read",
@@ -122,6 +123,7 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
         "files_vision_summary_read",
         "hospital_bag_cart_update_propose",
         "plans_current_read",
+        "plans_milk_plan_propose",
         "profile_read",
         "records_feeding_record_propose",
         "records_milk_summary_read",
@@ -135,6 +137,7 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert backend.tool_schemas["hospital_bag_cart_update_propose"]["required"] == ["cart_update"]
     assert backend.tool_schemas["hospital_bag_cart_update_propose"]["additionalProperties"] is False
     assert backend.tool_schemas["plans_current_read"]["properties"]["limit"]["maximum"] == 20
+    assert backend.tool_schemas["plans_milk_plan_propose"]["required"] == ["title"]
     assert backend.tool_schemas["profile_read"]["additionalProperties"] is False
     assert backend.tool_schemas["profile_read"]["properties"] == {}
     assert backend.tool_schemas["records_feeding_record_propose"]["required"] == ["feed_time", "feed_type"]

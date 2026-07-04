@@ -255,6 +255,36 @@ def test_agent_runtime_actions_accept_hospital_bag_cart_update_policy() -> None:
     }
 
 
+def test_agent_runtime_actions_accept_milk_plan_policy() -> None:
+    owner_user_id = uuid4()
+    repository = FakeActionRepository()
+    outbox_service = FakeOutboxService()
+    service = AgentRuntimeService(repository=repository, outbox_service=outbox_service)
+    run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Create a milk plan"))
+
+    action = asyncio.run(
+        service.propose_action(
+            owner_user_id=owner_user_id,
+            run_id=run.id,
+            action_type="plans.milk_plan.create",
+            target_type="plan",
+            side_effect_level="medium",
+            preview_payload={"title": "Increase pumping consistency"},
+            apply_payload={"title": "Increase pumping consistency"},
+        )
+    )
+    run.status = "waiting_for_confirmation"
+    confirmed = asyncio.run(service.confirm_action(owner_user_id=owner_user_id, action_id=action.id))
+
+    assert confirmed.status == "confirmed"
+    assert confirmed.action_type == "plans.milk_plan.create"
+    assert confirmed.target_type == "plan"
+    assert confirmed.side_effect_level == "medium"
+    assert repository.events[-3].payload["action_type"] == "plans.milk_plan.create"
+    assert repository.events[-2].event_type == "action.queued"
+    assert outbox_service.enqueue_kwargs["payload"]["apply_payload"] == {"title": "Increase pumping consistency"}
+
+
 def test_agent_milk_feeding_main_flow_confirms_applies_and_replays_events() -> None:
     owner_user_id = uuid4()
     repository = FakeActionRepository()

@@ -10,6 +10,7 @@ from ...devices.service import DevicesService
 from ...diary.models import PregnancyDiaryEntry
 from ...diary.service import DiaryService
 from ...files.vision_service import FileVisionService
+from ...plans.agent_actions import MILK_PLAN_CREATE_ACTION
 from ...plans.models import Plan, PlanTask
 from ...plans.service import PlansService
 from ...profiles.models import InfantProfile, UserProfile
@@ -296,6 +297,29 @@ class PumpingRecordProposeToolHandler:
         return _proposal_result(action=action, preview_payload=preview_payload)
 
 
+class MilkPlanProposeToolHandler:
+    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
+        self.runtime_service = runtime_service
+
+    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
+        apply_payload = _milk_plan_apply_payload(context.args)
+        title = _text(apply_payload, "title")
+        if not title:
+            raise ApiError(code="validation_failed", message="title is required.", status=422)
+        preview_payload = _milk_plan_preview_payload(apply_payload)
+        action = await self.runtime_service.propose_action(
+            owner_user_id=context.actor.user_id,
+            run_id=context.run_id,
+            action_type=MILK_PLAN_CREATE_ACTION,
+            target_type="plan",
+            side_effect_level="medium",
+            preview_payload=preview_payload,
+            apply_payload=apply_payload,
+            idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:milk-plan",
+        )
+        return _proposal_result(action=action, preview_payload=preview_payload)
+
+
 def build_default_tool_handlers(
     *,
     profile_service: ProfileService,
@@ -319,6 +343,7 @@ def build_default_tool_handlers(
         "diary.recent.read": DiaryRecentReadToolHandler(diary_service=diary_service),
         "devices.pump_status.read": DevicesPumpStatusReadToolHandler(devices_service=devices_service),
         "files.vision_summary.read": FileVisionSummaryReadToolHandler(vision_service=file_vision_service),
+        "plans.milk_plan.propose": MilkPlanProposeToolHandler(runtime_service=agent_runtime_service),
         "records.feeding_record.propose": FeedingRecordProposeToolHandler(runtime_service=agent_runtime_service),
         "records.pumping_record.propose": PumpingRecordProposeToolHandler(runtime_service=agent_runtime_service),
         "hospital_bag.cart_update.propose": HospitalBagCartUpdateProposeToolHandler(runtime_service=agent_runtime_service),
@@ -470,6 +495,30 @@ def _pumping_record_preview_payload(apply_payload: dict[str, Any]) -> dict[str, 
         "duration_seconds": apply_payload.get("duration_seconds"),
         "source": _text(apply_payload, "source"),
         "title": _text(apply_payload, "title"),
+    }
+    return {key: value for key, value in preview.items() if value not in ("", None)}
+
+
+def _milk_plan_apply_payload(args: dict[str, Any]) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "title": _text(args, "title"),
+        "summary": _text(args, "summary"),
+    }
+    plan_payload = args.get("payload")
+    if isinstance(plan_payload, dict):
+        payload["payload"] = plan_payload
+    metadata = _metadata_payload(args)
+    if metadata:
+        payload["metadata"] = metadata
+    return {key: value for key, value in payload.items() if value not in ("", None, {})}
+
+
+def _milk_plan_preview_payload(apply_payload: dict[str, Any]) -> dict[str, Any]:
+    preview = {
+        "plan_type": "milk_management",
+        "title": _text(apply_payload, "title"),
+        "summary": _text(apply_payload, "summary"),
+        "has_payload": isinstance(apply_payload.get("payload"), dict) and bool(apply_payload.get("payload")),
     }
     return {key: value for key, value in preview.items() if value not in ("", None)}
 
