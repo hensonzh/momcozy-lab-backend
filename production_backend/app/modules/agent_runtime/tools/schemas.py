@@ -51,6 +51,34 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             },
         },
     },
+    "PlansCurrentQuery": {
+        "title": "PlansCurrentQuery",
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 20,
+                "default": 5,
+                "description": "Maximum current plans and tasks to include.",
+            }
+        },
+    },
+    "DiaryRecentQuery": {
+        "title": "DiaryRecentQuery",
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 20,
+                "default": 5,
+                "description": "Maximum recent diary entries to include.",
+            }
+        },
+    },
     "FeedingRecordProposalCreate": {
         "title": "FeedingRecordProposalCreate",
         "type": "object",

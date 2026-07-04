@@ -8,9 +8,11 @@ from production_backend.app.core.errors import ApiError
 from production_backend.app.modules.agent_runtime.models import AgentAction
 from production_backend.app.modules.agent_runtime.tools import (
     BusinessContextReadToolHandler,
+    DiaryRecentReadToolHandler,
     FeedingRecordProposeToolHandler,
     HospitalBagCartUpdateProposeToolHandler,
     MilkSummaryReadToolHandler,
+    PlansCurrentReadToolHandler,
     ProfileReadToolHandler,
     PumpingRecordProposeToolHandler,
     SupportTicketProposeToolHandler,
@@ -184,6 +186,35 @@ def test_milk_summary_read_tool_handler_returns_bounded_owner_scoped_summary() -
     }
 
 
+def test_plans_current_read_tool_handler_returns_bounded_owner_scoped_summary() -> None:
+    actor = _user()
+    plans_service = FakePlansService(owner_user_id=actor.user_id)
+    handler = PlansCurrentReadToolHandler(plans_service=plans_service)
+
+    result = asyncio.run(handler(_context(actor=actor, args={"limit": 2, "owner_user_id": str(uuid4())})))
+
+    assert plans_service.owner_user_id == actor.user_id
+    assert plans_service.plan_status == "active"
+    assert plans_service.limit == 2
+    assert result["plans"][0]["title"] == "Birth plan"
+    assert result["tasks"][0]["task_date"] == "2026-07-03"
+    assert result["counts"] == {"plans": 1, "tasks": 1}
+
+
+def test_diary_recent_read_tool_handler_returns_bounded_owner_scoped_summary() -> None:
+    actor = _user()
+    diary_service = FakeDiaryService(owner_user_id=actor.user_id)
+    handler = DiaryRecentReadToolHandler(diary_service=diary_service)
+
+    result = asyncio.run(handler(_context(actor=actor, args={"limit": 2, "owner_user_id": str(uuid4())})))
+
+    assert diary_service.owner_user_id == actor.user_id
+    assert diary_service.limit == 2
+    assert result["entries"][0]["entry_date"] == "2026-07-02"
+    assert result["entries"][0]["content_summary"].endswith("...")
+    assert result["count"] == 1
+
+
 def test_feeding_record_propose_tool_handler_creates_confirmation_action() -> None:
     actor = _user()
     runtime_service = FakeAgentRuntimeService()
@@ -299,6 +330,8 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
         "profile.read",
         "business.context.read",
         "records.milk_summary.read",
+        "plans.current.read",
+        "diary.recent.read",
         "records.feeding_record.propose",
         "records.pumping_record.propose",
         "hospital_bag.cart_update.propose",
@@ -410,8 +443,14 @@ class FakeRecordsService:
 class FakePlansService:
     def __init__(self, *, owner_user_id) -> None:
         self._owner_user_id = owner_user_id
+        self.owner_user_id = None
+        self.plan_status = None
+        self.limit = None
 
-    async def list_plans(self, *, owner_user_id, limit):
+    async def list_plans(self, *, owner_user_id, limit, status="active"):
+        self.owner_user_id = owner_user_id
+        self.plan_status = status
+        self.limit = limit
         return [
             Plan(
                 id=uuid4(),
@@ -426,6 +465,8 @@ class FakePlansService:
         ]
 
     async def list_tasks(self, *, owner_user_id, limit):
+        self.owner_user_id = owner_user_id
+        self.limit = limit
         return [
             PlanTask(
                 id=uuid4(),
@@ -442,8 +483,12 @@ class FakePlansService:
 class FakeDiaryService:
     def __init__(self, *, owner_user_id) -> None:
         self._owner_user_id = owner_user_id
+        self.owner_user_id = None
+        self.limit = None
 
     async def list_entries(self, *, owner_user_id, limit):
+        self.owner_user_id = owner_user_id
+        self.limit = limit
         return [
             PregnancyDiaryEntry(
                 id=uuid4(),

@@ -169,6 +169,39 @@ class MilkSummaryReadToolHandler:
         }
 
 
+class PlansCurrentReadToolHandler:
+    def __init__(self, *, plans_service: PlansService) -> None:
+        self.plans_service = plans_service
+
+    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
+        owner_user_id = context.actor.user_id
+        limit = _limit(context.args.get("limit"), default=5, max_limit=20)
+        plans = await self.plans_service.list_plans(owner_user_id=owner_user_id, status="active", limit=limit)
+        tasks = await self.plans_service.list_tasks(owner_user_id=owner_user_id, limit=limit)
+        return {
+            "plans": [_plan_payload(plan) for plan in plans],
+            "tasks": [_task_payload(task) for task in tasks],
+            "counts": {
+                "plans": len(plans),
+                "tasks": len(tasks),
+            },
+        }
+
+
+class DiaryRecentReadToolHandler:
+    def __init__(self, *, diary_service: DiaryService) -> None:
+        self.diary_service = diary_service
+
+    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
+        owner_user_id = context.actor.user_id
+        limit = _limit(context.args.get("limit"), default=5, max_limit=20)
+        entries = await self.diary_service.list_entries(owner_user_id=owner_user_id, limit=limit)
+        return {
+            "entries": [_diary_payload(entry) for entry in entries],
+            "count": len(entries),
+        }
+
+
 class FeedingRecordProposeToolHandler:
     def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
         self.runtime_service = runtime_service
@@ -231,6 +264,8 @@ def build_default_tool_handlers(
             devices_service=devices_service,
         ),
         "records.milk_summary.read": MilkSummaryReadToolHandler(records_service=records_service),
+        "plans.current.read": PlansCurrentReadToolHandler(plans_service=plans_service),
+        "diary.recent.read": DiaryRecentReadToolHandler(diary_service=diary_service),
         "records.feeding_record.propose": FeedingRecordProposeToolHandler(runtime_service=agent_runtime_service),
         "records.pumping_record.propose": PumpingRecordProposeToolHandler(runtime_service=agent_runtime_service),
         "hospital_bag.cart_update.propose": HospitalBagCartUpdateProposeToolHandler(runtime_service=agent_runtime_service),

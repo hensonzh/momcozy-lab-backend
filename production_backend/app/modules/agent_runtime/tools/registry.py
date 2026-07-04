@@ -87,6 +87,44 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         ToolContract(
+            name="plans.current.read",
+            domain="plans",
+            description="Read current user's active plans and recent tasks as a bounded summary.",
+            input_schema_ref="PlansCurrentQuery",
+            output_schema_ref="PlansCurrentRead",
+            read_or_write="read",
+            required_permission="business_context:read:self",
+            owner_scope="actor",
+            side_effect_level="none",
+            blocking_policy="must_wait",
+            result_dependency="next_tool_call",
+            requires_confirmation=False,
+            idempotency_required=False,
+            audit_required=False,
+            timeout_seconds=10,
+        )
+    )
+    registry.register(
+        ToolContract(
+            name="diary.recent.read",
+            domain="diary",
+            description="Read current user's recent pregnancy diary entries as a bounded summary.",
+            input_schema_ref="DiaryRecentQuery",
+            output_schema_ref="DiaryRecentRead",
+            read_or_write="read",
+            required_permission="business_context:read:self",
+            owner_scope="actor",
+            side_effect_level="none",
+            blocking_policy="must_wait",
+            result_dependency="next_tool_call",
+            requires_confirmation=False,
+            idempotency_required=False,
+            audit_required=False,
+            timeout_seconds=10,
+        )
+    )
+    registry.register(
+        ToolContract(
             name="records.feeding_record.propose",
             domain="records",
             description="Propose a feeding record create action for user confirmation.",
