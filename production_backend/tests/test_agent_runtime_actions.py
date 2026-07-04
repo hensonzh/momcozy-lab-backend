@@ -6,8 +6,11 @@ import pytest
 
 from production_backend.app.core.errors import ApiError
 from production_backend.app.modules.audit.models import OutboxJob
+from production_backend.app.modules.agent_runtime.action_outbox import AgentActionOutboxHandler
 from production_backend.app.modules.agent_runtime.models import AgentAction
 from production_backend.app.modules.agent_runtime.service import AGENT_ACTION_APPLY_JOB, AgentRuntimeService
+from production_backend.app.modules.records.agent_actions import FEEDING_RECORD_CREATE_ACTION, FeedingRecordCreateActionHandler
+from production_backend.app.modules.records.models import FeedingRecord
 from production_backend.tests.test_agent_runtime_service import FakeAgentRuntimeRepository
 
 
@@ -252,6 +255,84 @@ def test_agent_runtime_actions_accept_hospital_bag_cart_update_policy() -> None:
     }
 
 
+def test_agent_milk_feeding_main_flow_confirms_applies_and_replays_events() -> None:
+    owner_user_id = uuid4()
+    repository = FakeActionRepository()
+    outbox_service = FakeOutboxService()
+    records_service = FakeAgentRecordsService()
+    runtime_service = AgentRuntimeService(repository=repository, outbox_service=outbox_service)
+
+    run = asyncio.run(
+        runtime_service.create_run(
+            actor_user_id=owner_user_id,
+            thread_id=None,
+            message="Add a 90 ml bottle feeding for 8:30.",
+            request_id="req_milk_agent",
+            trace_id="trace_milk_agent",
+        )
+    )
+    action = asyncio.run(
+        runtime_service.propose_action(
+            owner_user_id=owner_user_id,
+            run_id=run.id,
+            action_type=FEEDING_RECORD_CREATE_ACTION,
+            target_type="feeding_record",
+            side_effect_level="low",
+            preview_payload={
+                "feed_time": "2026-07-04T08:30:00Z",
+                "feed_type": "bottle",
+                "volume_ml": 90,
+            },
+            apply_payload={
+                "feed_time": "2026-07-04T08:30:00Z",
+                "feed_type": "bottle",
+                "volume_ml": 90,
+                "title": "Morning bottle",
+            },
+        )
+    )
+    run.status = "waiting_for_confirmation"
+
+    confirmed = asyncio.run(
+        runtime_service.confirm_action(
+            owner_user_id=owner_user_id,
+            action_id=action.id,
+            idempotency_key="idem-milk-action",
+        )
+    )
+    handler = AgentActionOutboxHandler(
+        repository=repository,
+        handlers={FEEDING_RECORD_CREATE_ACTION: FeedingRecordCreateActionHandler(service=records_service)},
+    )
+    asyncio.run(handler(outbox_service.job))
+    asyncio.run(runtime_service.confirm_action(owner_user_id=owner_user_id, action_id=action.id, idempotency_key="retry-key"))
+    asyncio.run(handler(outbox_service.job))
+
+    applied_event = repository.events[-1]
+
+    assert confirmed.status == "applied"
+    assert outbox_service.enqueue_calls[-1]["idempotency_key"] == f"agent-action:{action.id}:apply"
+    assert len(outbox_service.enqueue_calls) == 1
+    assert len(records_service.feedings) == 1
+    assert records_service.feedings[0].owner_user_id == owner_user_id
+    assert records_service.feedings[0].feed_time == datetime(2026, 7, 4, 8, 30, tzinfo=timezone.utc)
+    assert records_service.create_feeding_kwargs["idempotency_key"] == "idem-milk-action"
+    assert [event.event_type for event in repository.events] == [
+        "run.queued",
+        "message.completed",
+        "action.confirmation_required",
+        "action.queued",
+        "run.completed",
+        "action.applied",
+    ]
+    assert applied_event.payload["action_id"] == str(action.id)
+    assert applied_event.payload["action_status"] == "applied"
+    assert applied_event.payload["resource_type"] == "feeding_record"
+    assert applied_event.payload["resource_id"] == str(records_service.feedings[0].id)
+    assert applied_event.payload["details"]["agent_action_id"] == str(action.id)
+    assert "apply_payload" not in repository.events[2].payload
+
+
 class FakeActionRepository(FakeAgentRuntimeRepository):
     def __init__(self) -> None:
         super().__init__()
@@ -280,6 +361,12 @@ class FakeActionRepository(FakeAgentRuntimeRepository):
     async def get_action_for_owner(self, *, action_id: UUID, owner_user_id: UUID):
         return next((action for action in self.actions if action.id == action_id and action.actor_user_id == owner_user_id), None)
 
+    async def get_action(self, *, action_id: UUID):
+        return next((action for action in self.actions if action.id == action_id), None)
+
+    async def get_run(self, *, run_id: UUID):
+        return next((run for run in self.runs if run.id == run_id), None)
+
     async def mark_action_confirmed(self, **kwargs):
         action = kwargs["action"]
         action.status = "confirmed"
@@ -301,6 +388,21 @@ class FakeActionRepository(FakeAgentRuntimeRepository):
         action.status = "expired"
         action.failed_at = kwargs["failed_at"]
         action.error_code = kwargs["error_code"]
+        return action
+
+    async def mark_action_applying(self, *, action):
+        action.status = "applying"
+        return action
+
+    async def mark_action_applied(self, *, action, applied_at):
+        action.status = "applied"
+        action.applied_at = applied_at
+        return action
+
+    async def mark_action_failed(self, *, action, failed_at, error_code):
+        action.status = "failed"
+        action.failed_at = failed_at
+        action.error_code = error_code
         return action
 
 
@@ -334,3 +436,26 @@ class FakeOutboxService:
         self.job.payload = kwargs["payload"]
         self.job.idempotency_key = kwargs["idempotency_key"]
         return self.job
+
+
+class FakeAgentRecordsService:
+    def __init__(self) -> None:
+        self.feedings = []
+        self.create_feeding_kwargs = {}
+
+    async def create_feeding(self, **kwargs):
+        self.create_feeding_kwargs = kwargs
+        record = FeedingRecord(
+            id=uuid4(),
+            owner_user_id=kwargs["owner_user_id"],
+            infant_id=kwargs["infant_id"],
+            feed_time=kwargs["feed_time"],
+            feed_type=kwargs["feed_type"],
+            feed_action=kwargs["feed_action"],
+            volume_ml=kwargs["volume_ml"],
+            duration_seconds=kwargs["duration_seconds"],
+            title=kwargs["title"],
+            status="active",
+        )
+        self.feedings.append(record)
+        return record
