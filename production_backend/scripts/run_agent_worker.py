@@ -21,6 +21,7 @@ from production_backend.app.modules.agent_runtime.sdk import OpenAIAgentsSdkRunn
 from production_backend.app.modules.agent_runtime.service import AgentRuntimeService
 from production_backend.app.modules.agent_runtime.state_store import AgentRuntimeStateStore
 from production_backend.app.modules.agent_runtime.tools import ToolExecutor, build_default_tool_handlers, default_tool_registry
+from production_backend.app.modules.assets.service import ProductAssetService
 from production_backend.app.modules.audit import AuditService, IdempotencyService, OutboxService
 from production_backend.app.modules.audit.repository import AuditRepository, OutboxRepository
 from production_backend.app.modules.devices.repository import DevicesRepository
@@ -116,6 +117,7 @@ async def run_agent_worker(
                         plans_service=plans_service,
                         diary_service=diary_service,
                         devices_service=devices_service,
+                        asset_service=ProductAssetService(),
                         file_vision_service=file_vision_service,
                         agent_runtime_service=agent_runtime_service,
                     ),

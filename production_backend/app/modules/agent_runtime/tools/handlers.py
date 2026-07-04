@@ -5,6 +5,8 @@ from typing import Any
 from uuid import UUID
 
 from ....core.errors import ApiError
+from ...assets.models import ProductAsset
+from ...assets.service import ProductAssetService
 from ...devices.models import PumpDevice, PumpTelemetryEvent
 from ...devices.service import DevicesService
 from ...diary.agent_actions import DIARY_ENTRY_UPSERT_ACTION
@@ -297,6 +299,24 @@ class DevicesPumpStatusReadToolHandler:
         }
 
 
+class DeviceGuidanceAssetsReadToolHandler:
+    def __init__(self, *, asset_service: ProductAssetService) -> None:
+        self.asset_service = asset_service
+
+    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
+        limit = _limit(context.args.get("limit"), default=10, max_limit=20)
+        content_type = _text(context.args, "content_type")
+        assets = self.asset_service.list_assets(limit=200)
+        if content_type:
+            assets = [asset for asset in assets if asset.content_type == content_type]
+        bounded_assets = assets[:limit]
+        return {
+            "assets": [_asset_payload(asset) for asset in bounded_assets],
+            "count": len(bounded_assets),
+            "available_count": len(assets),
+        }
+
+
 class FileVisionSummaryReadToolHandler:
     def __init__(self, *, vision_service: FileVisionService) -> None:
         self.vision_service = vision_service
@@ -492,6 +512,7 @@ def build_default_tool_handlers(
     plans_service: PlansService,
     diary_service: DiaryService,
     devices_service: DevicesService,
+    asset_service: ProductAssetService,
     file_vision_service: FileVisionService,
     agent_runtime_service: AgentRuntimeService,
 ) -> dict[str, ToolHandler]:
@@ -509,6 +530,7 @@ def build_default_tool_handlers(
         "diary.entry_upsert.propose": DiaryEntryUpsertProposeToolHandler(runtime_service=agent_runtime_service),
         "memory.create.propose": MemoryCreateProposeToolHandler(runtime_service=agent_runtime_service),
         "devices.pump_status.read": DevicesPumpStatusReadToolHandler(devices_service=devices_service),
+        "devices.guidance_assets.read": DeviceGuidanceAssetsReadToolHandler(asset_service=asset_service),
         "files.vision_summary.read": FileVisionSummaryReadToolHandler(vision_service=file_vision_service),
         "plans.milk_plan.propose": MilkPlanProposeToolHandler(runtime_service=agent_runtime_service),
         "pregnancy.plan_create.propose": PregnancyPlanProposeToolHandler(runtime_service=agent_runtime_service),
@@ -1014,6 +1036,16 @@ def _device_payload(device: PumpDevice) -> dict[str, Any]:
         "firmware_version": device.firmware_version,
         "status": device.status,
         "last_seen_at": _datetime_iso(device.last_seen_at),
+    }
+
+
+def _asset_payload(asset: ProductAsset) -> dict[str, Any]:
+    return {
+        "id": asset.id,
+        "label": asset.label,
+        "domain": asset.domain,
+        "content_type": asset.content_type,
+        "size_bytes": asset.size_bytes,
     }
 
 

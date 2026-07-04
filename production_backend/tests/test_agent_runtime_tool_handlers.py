@@ -8,6 +8,7 @@ from production_backend.app.core.errors import ApiError
 from production_backend.app.modules.agent_runtime.models import AgentAction
 from production_backend.app.modules.agent_runtime.tools import (
     BusinessContextReadToolHandler,
+    DeviceGuidanceAssetsReadToolHandler,
     DevicesPumpStatusReadToolHandler,
     DiaryEntryUpsertProposeToolHandler,
     DiaryRecentReadToolHandler,
@@ -29,6 +30,7 @@ from production_backend.app.modules.agent_runtime.tools import (
     build_default_tool_handlers,
 )
 from production_backend.app.modules.auth import CurrentUser
+from production_backend.app.modules.assets.models import ProductAsset
 from production_backend.app.modules.devices.models import PumpDevice, PumpTelemetryEvent
 from production_backend.app.modules.diary.agent_actions import DIARY_ENTRY_UPSERT_ACTION
 from production_backend.app.modules.diary.models import PregnancyDiaryEntry
@@ -246,6 +248,26 @@ def test_devices_pump_status_read_tool_handler_returns_bounded_owner_scoped_summ
     assert result["pumps"][0]["device_id"] == "pump-1"
     assert result["telemetry"][0]["payload"] == {"mode": "stimulation"}
     assert result["counts"] == {"pumps": 1, "telemetry": 1}
+
+
+def test_device_guidance_assets_read_tool_handler_returns_bounded_metadata() -> None:
+    handler = DeviceGuidanceAssetsReadToolHandler(asset_service=FakeAssetService())
+
+    result = asyncio.run(handler(_context(args={"limit": 1, "content_type": "application/pdf"})))
+
+    assert result == {
+        "assets": [
+            {
+                "id": "asset-guide",
+                "label": "Pump guide",
+                "domain": "device_guidance",
+                "content_type": "application/pdf",
+                "size_bytes": 1200,
+            }
+        ],
+        "count": 1,
+        "available_count": 1,
+    }
 
 
 def test_file_vision_summary_read_tool_handler_returns_owner_scoped_safe_summary() -> None:
@@ -653,6 +675,7 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
         plans_service=FakePlansService(owner_user_id=actor_id),
         diary_service=FakeDiaryService(owner_user_id=actor_id),
         devices_service=FakeDevicesService(owner_user_id=actor_id),
+        asset_service=FakeAssetService(),
         file_vision_service=FakeFileVisionService(),
         agent_runtime_service=FakeAgentRuntimeService(),
     )
@@ -664,6 +687,7 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
         "plans.current.read",
         "diary.entry_upsert.propose",
         "diary.recent.read",
+        "devices.guidance_assets.read",
         "memory.create.propose",
         "devices.pump_status.read",
         "files.vision_summary.read",
@@ -881,6 +905,28 @@ class FakeDevicesService:
                 payload={"mode": "stimulation"},
             )
         ]
+
+
+class FakeAssetService:
+    def list_assets(self, *, limit):
+        return [
+            ProductAsset(
+                id="asset-guide",
+                label="Pump guide",
+                domain="device_guidance",
+                content_type="application/pdf",
+                size_bytes=1200,
+                path=None,
+            ),
+            ProductAsset(
+                id="asset-video",
+                label="Pump setup video",
+                domain="device_guidance",
+                content_type="video/mp4",
+                size_bytes=2400,
+                path=None,
+            ),
+        ][:limit]
 
 
 class FakeFileVisionService:

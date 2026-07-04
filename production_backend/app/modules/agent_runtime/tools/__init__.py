@@ -2,6 +2,7 @@ from .contracts import ToolContract
 from .executor import ToolExecutionResult, ToolExecutor, ToolHandlerContext
 from .handlers import (
     BusinessContextReadToolHandler,
+    DeviceGuidanceAssetsReadToolHandler,
     DevicesPumpStatusReadToolHandler,
     DiaryEntryUpsertProposeToolHandler,
     DiaryRecentReadToolHandler,
@@ -26,6 +27,7 @@ from .schemas import tool_input_schema
 
 __all__ = [
     "BusinessContextReadToolHandler",
+    "DeviceGuidanceAssetsReadToolHandler",
     "DevicesPumpStatusReadToolHandler",
     "DiaryEntryUpsertProposeToolHandler",
     "DiaryRecentReadToolHandler",

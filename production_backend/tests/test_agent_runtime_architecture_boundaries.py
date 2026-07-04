@@ -84,6 +84,7 @@ def test_tool_contract_registry_declares_permission_confirmation_and_blocking_po
     plans_current = registry.get("plans.current.read")
     diary_recent = registry.get("diary.recent.read")
     device_status = registry.get("devices.pump_status.read")
+    device_guidance_assets = registry.get("devices.guidance_assets.read")
     file_vision = registry.get("files.vision_summary.read")
     assert plans_current.read_or_write == "read"
     assert plans_current.owner_scope == "actor"
@@ -94,6 +95,9 @@ def test_tool_contract_registry_declares_permission_confirmation_and_blocking_po
     assert device_status.read_or_write == "read"
     assert device_status.owner_scope == "actor"
     assert device_status.requires_confirmation is False
+    assert device_guidance_assets.read_or_write == "read"
+    assert device_guidance_assets.owner_scope == "actor"
+    assert device_guidance_assets.requires_confirmation is False
     assert file_vision.read_or_write == "read"
     assert file_vision.owner_scope == "actor"
     assert file_vision.required_permission == "files:read:self"
@@ -103,6 +107,7 @@ def test_tool_contract_registry_declares_permission_confirmation_and_blocking_po
     assert "diary.recent.read" in registry.names_for_sdk()
     assert "diary.entry_upsert.propose" in registry.names_for_sdk()
     assert "memory.create.propose" in registry.names_for_sdk()
+    assert "devices.guidance_assets.read" in registry.names_for_sdk()
     assert "pregnancy.plan_create.propose" in registry.names_for_sdk()
     assert "plans.task_create.propose" in registry.names_for_sdk()
     assert "plans.task_complete.propose" in registry.names_for_sdk()
@@ -120,6 +125,7 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
     diary_schema = tool_input_schema(registry.get("diary.recent.read").input_schema_ref)
     diary_entry_schema = tool_input_schema(registry.get("diary.entry_upsert.propose").input_schema_ref)
     devices_schema = tool_input_schema(registry.get("devices.pump_status.read").input_schema_ref)
+    device_guidance_schema = tool_input_schema(registry.get("devices.guidance_assets.read").input_schema_ref)
     file_vision_schema = tool_input_schema(registry.get("files.vision_summary.read").input_schema_ref)
     milk_plan_schema = tool_input_schema(registry.get("plans.milk_plan.propose").input_schema_ref)
     pregnancy_plan_schema = tool_input_schema(registry.get("pregnancy.plan_create.propose").input_schema_ref)
@@ -164,6 +170,9 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
     assert memory_create_schema["properties"]["confidence_score"]["maximum"] == 100
     assert devices_schema["additionalProperties"] is False
     assert devices_schema["properties"]["limit"]["maximum"] == 20
+    assert device_guidance_schema["additionalProperties"] is False
+    assert device_guidance_schema["properties"]["limit"]["maximum"] == 20
+    assert device_guidance_schema["properties"]["content_type"]["type"] == "string"
     assert file_vision_schema["additionalProperties"] is False
     assert file_vision_schema["required"] == ["file_id"]
     assert file_vision_schema["properties"]["file_id"]["type"] == "string"

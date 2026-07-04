@@ -144,6 +144,25 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             }
         },
     },
+    "DeviceGuidanceAssetsQuery": {
+        "title": "DeviceGuidanceAssetsQuery",
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 20,
+                "default": 10,
+                "description": "Maximum packaged device-guidance assets to include.",
+            },
+            "content_type": {
+                "type": "string",
+                "maxLength": 80,
+                "description": "Optional content type filter such as application/pdf or video/mp4.",
+            },
+        },
+    },
     "FileVisionSummaryQuery": {
         "title": "FileVisionSummaryQuery",
         "type": "object",

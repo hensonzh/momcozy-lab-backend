@@ -38,6 +38,7 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() ->
     assert request.thread_id == str(thread_id)
     assert request.tool_names == (
         "business.context.read",
+        "devices.guidance_assets.read",
         "devices.pump_status.read",
         "diary.entry_upsert.propose",
         "diary.recent.read",
@@ -181,6 +182,7 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert result.final_text == '{"profile": {"display_name": "Mai"}}'
     assert backend.tool_names == (
         "business_context_read",
+        "devices_guidance_assets_read",
         "devices_pump_status_read",
         "diary_entry_upsert_propose",
         "diary_recent_read",
@@ -200,6 +202,8 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
         "support_ticket_propose",
     )
     assert backend.tool_schemas["business_context_read"]["properties"]["limit"]["maximum"] == 20
+    assert backend.tool_schemas["devices_guidance_assets_read"]["properties"]["limit"]["maximum"] == 20
+    assert backend.tool_schemas["devices_guidance_assets_read"]["properties"]["content_type"]["type"] == "string"
     assert backend.tool_schemas["devices_pump_status_read"]["properties"]["limit"]["maximum"] == 20
     assert backend.tool_schemas["diary_entry_upsert_propose"]["required"] == ["entry_date"]
     assert backend.tool_schemas["diary_entry_upsert_propose"]["properties"]["content"]["maxLength"] == 5000
