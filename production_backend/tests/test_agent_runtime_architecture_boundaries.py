@@ -273,6 +273,7 @@ def test_sdk_runner_uses_real_agents_sdk_shape_when_package_is_available(monkeyp
         tool_names=("profile.read",),
         prompt_version="prompt-v2",
         trace_id="trace_1",
+        specialist_id="memory_preferences",
     )
 
     result = asyncio.run(OpenAIAgentsSdkRunner(model="gpt-test", max_turns=3, trace_enabled=True).run_reasoning(request))
@@ -287,6 +288,7 @@ def test_sdk_runner_uses_real_agents_sdk_shape_when_package_is_available(monkeyp
     assert FakeAgentsSdkRunner.last_run_config.group_id == "thread_1"
     assert FakeAgentsSdkRunner.last_run_config.trace_metadata["run_id"] == "run_1"
     assert FakeAgentsSdkRunner.last_run_config.trace_metadata["prompt_version"] == "prompt-v2"
+    assert FakeAgentsSdkRunner.last_run_config.trace_metadata["specialist_id"] == "memory_preferences"
     assert FakeAgentsSdkRunner.last_run_config.trace_metadata["tool_names"] == ["profile.read"]
     assert FakeAgentsSdkRunner.last_previous_response_id is None
     assert FakeAgentsSdkRunner.last_auto_previous_response_id is False

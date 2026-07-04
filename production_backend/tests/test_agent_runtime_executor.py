@@ -44,6 +44,9 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() ->
     assert request.run_id == str(run.id)
     assert request.thread_id == str(thread_id)
     assert request.prompt_version == "prompt-v2"
+    assert request.specialist_id == "general_product"
+    assert "You are the MomCozy product assistant." in request.instructions
+    assert "Specialist profile: general_product" in request.instructions
     assert request.tool_names == (
         "business.context.read",
         "devices.guidance_assets.read",
@@ -78,6 +81,7 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() ->
     ]
     assert request.model_input[0]["content"].startswith("You are the MomCozy product assistant.")
     assert request.model_input[4]["content"]["state"]["run_id"] == str(run.id)
+    assert request.model_input[4]["content"]["state"]["specialist_id"] == "general_product"
     assert request.model_input[-1] == {"role": "user", "content": "Summarize it."}
     assert [checkpoint["state_summary"]["node_name"] for checkpoint in checkpoint_store.checkpoints] == ["sdk_reasoning", "finish"]
     assert checkpoint_store.checkpoints[0]["state_summary"]["current_user_message_id"] == str(current_user.id)
@@ -89,6 +93,8 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() ->
         "prompt_version",
         "run_id",
         "runtime_pattern",
+        "specialist_display_name",
+        "specialist_id",
         "thread_id",
     ]
 
@@ -245,6 +251,36 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert tool_executor.calls[0]["run_id"] == run.id
     assert tool_executor.calls[0]["tool_name"] == "profile.read"
     assert tool_executor.calls[0]["args"] == {}
+
+
+def test_agent_runtime_executor_selects_specialist_and_scopes_tools() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="今天奶量怎么样？", sequence=1)
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    backend = CapturingSdkBackend(result=SdkNodeResult(final_text="I will review milk records."))
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+        ).execute(run=run)
+    )
+
+    request = backend.requests[0]
+    assert result.status == "completed"
+    assert request.specialist_id == "milk_management"
+    assert "Specialist profile: milk_management" in request.instructions
+    assert request.model_input[-4]["content"]["state"]["specialist_id"] == "milk_management"
+    assert request.tool_names == (
+        "business.context.read",
+        "notifications.milk_reminder.propose",
+        "plans.milk_plan.propose",
+        "profile.read",
+        "records.feeding_record.propose",
+        "records.milk_summary.read",
+        "records.pumping_record.propose",
+    )
 
 
 def test_agent_runtime_executor_real_tool_executor_uses_run_actor_role_permissions() -> None:

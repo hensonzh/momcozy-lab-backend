@@ -58,12 +58,17 @@
   占位 contract。
 - IBCLC/professional support eval 已对齐到真实 `support.ticket.propose`
   handoff contract，不再要求不存在的 `ibclc_consult_proposal`。
+- SDK specialist routing 已有后端基础：runtime 会按当前用户消息选择
+  `general_product`、`milk_management`、`pregnancy_planning`、
+  `device_support`、`support_handoff` 或 `memory_preferences` profile，并把
+  `specialist_id` 写入 context projection、checkpoint 和 SDK trace metadata；
+  specialist profile 使用显式 tool contract allowlist，避免把无关工具暴露给
+  当前 run。
 
 仍未完成或后续产品化：
 
 - OpenAI Agents SDK 已有 adapter 边界和 settings/tracing metadata，但
-  provider-backed nightly eval、specialist agent 细分和真实运营 handoff 仍需
-  后续产品化。
+  provider-backed nightly eval 和真实运营 handoff 仍需后续产品化。
 - 待产包、奶量、孕期计划、日记、设备指导、支持工单、健康/情绪安全和长期
   记忆均已有新 tool/action/eval contract 的后端基础闭环；图片/语音等体验可
   在 Flutter integration 或后续产品需求中继续补齐。
@@ -207,6 +212,7 @@ LangGraph workflow。
 1. `agent: harden OpenAI Agents SDK runner settings` - done
 2. `agent: add SDK tool and tracing contract tests` - done
 3. `agent: add deterministic SDK mock harness for evals` - done
+4. `agent: add deterministic specialist routing` - done
 
 已完成能力：
 
@@ -223,6 +229,9 @@ LangGraph workflow。
   `ToolExecutor` 路径，以及 provider tracing metadata。
 - `ScriptedSdkBackend` 可在 CI/eval 中按脚本触发 SDK tool invocation，
   不依赖真实模型也能验证完整 run lifecycle。
+- 每个 run 都会选择一个 deterministic specialist profile；profile 只影响
+  SDK instructions、context/trace metadata 和可见 tool allowlist，不创建旧
+  adapter、不依赖 provider session state，也不绕过应用侧 tool executor。
 
 验收：
 
@@ -594,15 +603,19 @@ eval regression。
 后端-only 的下一步建议：
 
 ```text
-PR: eval: add isolated runtime client for agent seed cases
+PR: eval: add provider-backed nightly evals
 ```
 
 包含：
 
-- 使用本地 mocked SDK backend 和 test actor 创建真实 thread/run。
-- 收集 persisted messages、events、tool calls、actions、safety events。
-- 将 trace 输入 `AgentEvalSeedAssertionEngine`。
-- 保留现有 seed self-check，不依赖真实模型。
-- 只把 provider-backed eval 放到 nightly 或手动 release gate。
+- 使用真实 OpenAI provider credentials 跑小规模 nightly/manual gate。
+- 复用现有 seed cases 和 runtime trace collector。
+- 记录 token、latency、tool-call adherence、safety decision 和 final-response
+  rubric 结果。
+- 设置成本预算、超时、失败阈值和 flake quarantine 策略。
+- 继续保留本地 mocked SDK / seed self-check 作为 PR 必跑门禁。
+
+该 PR 依赖真实 provider credential、成本策略和运行环境，不属于当前本地
+backend-only 分支可以完全闭环的工作。
 
 Flutter integration 暂按当前决策后置，等 Flutter app 重构分支完成后再打通。

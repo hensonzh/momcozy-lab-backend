@@ -15,7 +15,7 @@ from .memory import AgentMemoryService
 from .models import AgentAction, AgentEvent, AgentMessage, AgentRun
 from .prompts import ContextProjection, ModelInputBuilder
 from .repository import AgentRuntimeRepository
-from .sdk import OpenAIAgentsSdkRunner, SdkNodeRequest, SdkToolDefinition, sdk_tool_name
+from .sdk import AgentSpecialistProfile, AgentSpecialistRegistry, OpenAIAgentsSdkRunner, SdkNodeRequest, SdkToolDefinition, default_specialist_registry, sdk_tool_name
 from .state_store import AgentRuntimeStateStore
 from .tools import ToolContractRegistry, ToolExecutor, default_tool_registry
 from .tools.schemas import tool_input_schema
@@ -49,6 +49,7 @@ class AgentRuntimeExecutor:
         event_sink: AgentEventSink | None = None,
         action_policy: AgentActionPolicy | None = None,
         memory_service: AgentMemoryService | None = None,
+        specialist_registry: AgentSpecialistRegistry | None = None,
         input_builder: ModelInputBuilder | None = None,
         config: AgentRuntimeExecutorConfig | None = None,
     ) -> None:
@@ -62,6 +63,7 @@ class AgentRuntimeExecutor:
         self.event_sink = event_sink
         self.action_policy = action_policy or AgentActionPolicy()
         self.memory_service = memory_service
+        self.specialist_registry = specialist_registry or default_specialist_registry()
         self.input_builder = input_builder or ModelInputBuilder()
         self.config = config or AgentRuntimeExecutorConfig()
 
@@ -79,6 +81,8 @@ class AgentRuntimeExecutor:
 
         messages = await self.repository.list_messages_for_thread(thread_id=run.thread_id, limit=self.config.history_limit)
         memory_projection = await self._memory_projection(run=run)
+        specialist = self.specialist_registry.select(user_message=_message_text(current_message))
+        tool_names = self._tool_names_for_specialist(specialist)
         projection = ContextProjection(
             stable_system_prompt=self.config.stable_system_prompt,
             stable_developer_prompt=self.config.stable_developer_prompt,
@@ -90,6 +94,8 @@ class AgentRuntimeExecutor:
                 "graph_version": run.graph_version,
                 "runtime_pattern": run.runtime_pattern,
                 "prompt_version": run.prompt_version,
+                "specialist_id": specialist.id,
+                "specialist_display_name": specialist.display_name,
             },
             memory_projection=memory_projection,
             fresh_business_facts={},
@@ -107,7 +113,8 @@ class AgentRuntimeExecutor:
                 "context_refs": [],
                 "pending_action_id": None,
                 "final_message_id": None,
-                "tool_names": list(self.tool_registry.names_for_sdk()),
+                "specialist_id": specialist.id,
+                "tool_names": list(tool_names),
             },
         )
         result = await self.sdk_runner.run_reasoning(
@@ -115,12 +122,13 @@ class AgentRuntimeExecutor:
                 run_id=str(run.id),
                 thread_id=str(run.thread_id),
                 actor_user_id=str(run.actor_user_id),
-                instructions=projection.stable_developer_prompt,
+                instructions=_sdk_instructions(projection=projection, specialist=specialist),
                 model_input=model_input,
-                tool_names=self.tool_registry.names_for_sdk(),
-                tools=self._sdk_tools(run=run),
+                tool_names=tool_names,
+                tools=self._sdk_tools(run=run, tool_names=tool_names),
                 prompt_version=run.prompt_version,
                 trace_id=run.trace_id,
+                specialist_id=specialist.id,
             )
         )
 
@@ -213,10 +221,13 @@ class AgentRuntimeExecutor:
                 payload={"artifact_id": str(artifact.id), "artifact_type": artifact.artifact_type},
             )
 
-    def _sdk_tools(self, *, run: AgentRun) -> tuple[SdkToolDefinition, ...]:
+    def _tool_names_for_specialist(self, specialist: AgentSpecialistProfile) -> tuple[str, ...]:
+        return tuple(sorted(contract.name for contract in self.tool_registry.list() if specialist.allows_tool(contract)))
+
+    def _sdk_tools(self, *, run: AgentRun, tool_names: tuple[str, ...]) -> tuple[SdkToolDefinition, ...]:
         if self.tool_executor is None:
             return ()
-        return tuple(self._sdk_tool_definition(run=run, tool_name=tool_name) for tool_name in self.tool_registry.names_for_sdk())
+        return tuple(self._sdk_tool_definition(run=run, tool_name=tool_name) for tool_name in tool_names)
 
     def _sdk_tool_definition(self, *, run: AgentRun, tool_name: str) -> SdkToolDefinition:
         contract = self.tool_registry.get(tool_name)
@@ -332,6 +343,17 @@ class AgentRuntimeExecutor:
 
 def _history_before(*, messages: list[AgentMessage], before_sequence: int) -> list[dict[str, Any]]:
     return [_to_model_message(message) for message in messages if message.sequence < before_sequence and message.role in {"user", "assistant"}]
+
+
+def _sdk_instructions(*, projection: ContextProjection, specialist: AgentSpecialistProfile) -> str:
+    return "\n\n".join(
+        [
+            projection.stable_system_prompt,
+            projection.stable_developer_prompt,
+            f"Specialist profile: {specialist.id} ({specialist.display_name}).",
+            specialist.instructions,
+        ]
+    )
 
 
 def _to_model_message(message: AgentMessage) -> dict[str, Any]:
