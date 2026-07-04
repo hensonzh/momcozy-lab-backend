@@ -46,7 +46,8 @@
   tool contract。
 - 长期记忆已有后端底座：`agent_memories` schema/repository/service、
   `memory.create.propose` tool、`agent.memory.create` action/outbox handler，
-  以及每轮 bounded `memory_projection` 上下文投射。
+  每轮 bounded `memory_projection` 上下文投射，以及用户可见的
+  `GET/DELETE /v1/agent/memories` 管理 API。
 
 仍未完成：
 
@@ -55,8 +56,8 @@
 - 旧智能体中的主要业务能力还没有完整迁移成新 tool/action contract。
 - 待产包、设备指导、IBCLC、健康/情绪安全、图片/语音
   等主流程尚未达到新架构下的完整 parity。
-- 长期记忆还缺用户可视化管理 API/UX、敏感记忆策略深化、删除/禁用路径
-  的端到端体验和 eval 回归。
+- 长期记忆还缺禁用路径、敏感记忆策略深化、Flutter 端可视化体验和
+  eval 回归。
 - eval 样例和自动化行为评估还不够支撑持续重构。
 - Flutter 新端尚未和新 agent event/action contract 做端到端联调。
 
@@ -385,16 +386,17 @@ eval regression。
 
 后续产品化 PR：
 
-1. `agent: add user-visible memory management API`
-2. `agent: add memory sensitivity and retention policy`
-3. `eval: add memory write and retrieval regression suite`
+1. `agent: add memory sensitivity and retention policy`
+2. `eval: add memory write and retrieval regression suite`
+3. `app: add user-visible memory management UX`
 
 验收：
 
 - memory 不替代 profile、records、plans、diary 等业务表。
 - backend 已保证模型只能 propose memory，确认后通过 outbox 写入。
 - 每轮只投射少量 active memory，且 memory projection 独立于 business facts。
-- 仍需补齐用户可查看、删除或禁用 memory 的产品 API/UX。
+- backend 已支持用户查看和删除/归档 active memory。
+- 仍需补齐用户禁用 memory 的产品 API/UX。
 - 仍需补齐敏感健康事实不被静默写入长期记忆的 eval 和产品策略。
 - prompt cache 稳定片段不因 memory 大量变化而失效。
 
