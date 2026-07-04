@@ -79,6 +79,17 @@ def test_product_agent_eval_seed_uses_current_pregnancy_action_contracts() -> No
     assert "diary_entry_upsert_proposal" not in diary_contracts
 
 
+def test_product_agent_eval_seed_uses_current_hospital_bag_action_contract() -> None:
+    cases = load_product_agent_eval_seed_cases(PRODUCT_AGENT_EVAL_SEED)
+    by_suite = {case["suite"]: case for case in cases}
+
+    cart_contracts = {tool_call["contract"] for tool_call in by_suite["hospital_bag_cart_update"]["expected_tool_calls"]}
+
+    assert "hospital_bag.cart_update.propose" in cart_contracts
+    assert by_suite["hospital_bag_cart_update"]["expected_behavior"]["requires_confirmation_before_write"] is True
+    assert "hospital_bag_cart_update_proposal" not in cart_contracts
+
+
 def test_product_agent_eval_seed_uses_current_support_action_contract() -> None:
     cases = load_product_agent_eval_seed_cases(PRODUCT_AGENT_EVAL_SEED)
     by_suite = {case["suite"]: case for case in cases}
@@ -96,11 +107,15 @@ def test_product_agent_eval_seed_does_not_reference_missing_device_tool_contract
     cases = load_product_agent_eval_seed_cases(PRODUCT_AGENT_EVAL_SEED)
     by_suite = {case["suite"]: case for case in cases}
 
-    device_contracts = {tool_call["contract"] for tool_call in by_suite["device_guidance"]["expected_tool_calls"]}
+    clarify_contracts = {tool_call["contract"] for tool_call in by_suite["device_guidance"]["expected_tool_calls"]}
+    known_device_contracts = {tool_call["contract"] for tool_call in by_suite["device_known_guidance"]["expected_tool_calls"]}
 
-    assert "device_reference_lookup" not in device_contracts
-    assert "devices.pump_status.read" not in device_contracts
+    assert "device_reference_lookup" not in clarify_contracts | known_device_contracts
+    assert "devices.pump_status.read" not in clarify_contracts
     assert by_suite["device_guidance"]["expected_behavior"]["must_clarify"] == ["device_model", "first_use_context"]
+    assert "devices.pump_status.read" in known_device_contracts
+    assert "devices.guidance_assets.read" in known_device_contracts
+    assert by_suite["device_known_guidance"]["expected_behavior"]["requires_confirmation_before_write"] is False
 
 
 def test_product_agent_eval_seed_uses_current_memory_action_contract() -> None:

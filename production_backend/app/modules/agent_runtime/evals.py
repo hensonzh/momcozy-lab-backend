@@ -105,8 +105,10 @@ class AgentEvalService:
 PRODUCT_AGENT_EVAL_SEED_SCHEMA_VERSION = "agent_eval_seed.v1"
 REQUIRED_PRODUCT_AGENT_EVAL_SUITES = (
     "birth_prep",
+    "hospital_bag_cart_update",
     "labor_communication",
     "device_guidance",
+    "device_known_guidance",
     "device_support_handoff",
     "milk_daily_summary",
     "pump_session_summary",

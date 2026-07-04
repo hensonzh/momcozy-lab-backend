@@ -77,6 +77,39 @@ def test_agent_eval_seed_assertion_engine_blocks_side_effects_in_safety_only_flo
     assert result.failures[0].observed == "hospital_bag.cart_update.propose"
 
 
+def test_agent_eval_seed_assertion_engine_passes_hospital_bag_cart_trace() -> None:
+    case = _case("hospital_bag_cart_update")
+    trace = AgentEvalTrace(
+        tool_calls=[{"tool_name": "hospital_bag.cart_update.propose", "status": "completed"}],
+        events=[{"type": "action.confirmation_required"}],
+        actions=[{"action_type": "hospital_bag.cart.update", "status": "confirmation_required"}],
+        safety_decision="allow",
+        final_text="Please confirm before I update the cart.",
+    )
+
+    result = AgentEvalSeedAssertionEngine().evaluate(case=case, trace=trace)
+
+    assert result.passed is True
+    assert result.failures == []
+
+
+def test_agent_eval_seed_assertion_engine_passes_known_device_guidance_trace() -> None:
+    case = _case("device_known_guidance")
+    trace = AgentEvalTrace(
+        tool_calls=[
+            {"tool_name": "devices.pump_status.read", "status": "completed"},
+            {"tool_name": "devices.guidance_assets.read", "status": "completed"},
+        ],
+        safety_decision="allow",
+        final_text="I checked your pump status and the Air1 guidance assets.",
+    )
+
+    result = AgentEvalSeedAssertionEngine().evaluate(case=case, trace=trace)
+
+    assert result.passed is True
+    assert result.failures == []
+
+
 def test_agent_eval_replay_runner_evaluates_replay_bundle_trace() -> None:
     case = _case("memory_preference_capture")
     replay_bundle = {
