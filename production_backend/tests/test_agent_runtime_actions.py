@@ -10,6 +10,8 @@ from production_backend.app.modules.agent_runtime.action_outbox import AgentActi
 from production_backend.app.modules.agent_runtime.memory_actions import AGENT_MEMORY_CREATE_ACTION
 from production_backend.app.modules.agent_runtime.models import AgentAction
 from production_backend.app.modules.agent_runtime.service import AGENT_ACTION_APPLY_JOB, AgentRuntimeService
+from production_backend.app.modules.plans.agent_actions import PREGNANCY_PLAN_CREATE_ACTION, PregnancyPlanCreateActionHandler
+from production_backend.app.modules.plans.models import Plan
 from production_backend.app.modules.records.agent_actions import FEEDING_RECORD_CREATE_ACTION, FeedingRecordCreateActionHandler
 from production_backend.app.modules.records.models import FeedingRecord
 from production_backend.tests.test_agent_runtime_service import FakeAgentRuntimeRepository
@@ -522,6 +524,75 @@ def test_agent_milk_feeding_main_flow_confirms_applies_and_replays_events() -> N
     assert "apply_payload" not in repository.events[2].payload
 
 
+def test_agent_pregnancy_plan_main_flow_confirms_applies_and_replays_events() -> None:
+    owner_user_id = uuid4()
+    repository = FakeActionRepository()
+    outbox_service = FakeOutboxService()
+    plans_service = FakeAgentPlansService()
+    runtime_service = AgentRuntimeService(repository=repository, outbox_service=outbox_service)
+
+    run = asyncio.run(
+        runtime_service.create_run(
+            actor_user_id=owner_user_id,
+            thread_id=None,
+            message="Create a third trimester plan.",
+            request_id="req_pregnancy_agent",
+            trace_id="trace_pregnancy_agent",
+        )
+    )
+    action = asyncio.run(
+        runtime_service.propose_action(
+            owner_user_id=owner_user_id,
+            run_id=run.id,
+            action_type=PREGNANCY_PLAN_CREATE_ACTION,
+            target_type="plan",
+            side_effect_level="medium",
+            preview_payload={
+                "title": "Third trimester plan",
+                "summary": "Prepare appointments and bag tasks.",
+            },
+            apply_payload={
+                "title": "Third trimester plan",
+                "summary": "Prepare appointments and bag tasks.",
+                "payload": {"gestational_week": 32},
+            },
+        )
+    )
+    run.status = "waiting_for_confirmation"
+
+    confirmed = asyncio.run(runtime_service.confirm_action(owner_user_id=owner_user_id, action_id=action.id))
+    handler = AgentActionOutboxHandler(
+        repository=repository,
+        handlers={PREGNANCY_PLAN_CREATE_ACTION: PregnancyPlanCreateActionHandler(service=plans_service)},
+    )
+    asyncio.run(handler(outbox_service.job))
+    asyncio.run(runtime_service.confirm_action(owner_user_id=owner_user_id, action_id=action.id))
+    asyncio.run(handler(outbox_service.job))
+
+    applied_event = repository.events[-1]
+
+    assert confirmed.status == "applied"
+    assert len(outbox_service.enqueue_calls) == 1
+    assert len(plans_service.plans) == 1
+    assert plans_service.plans[0].owner_user_id == owner_user_id
+    assert plans_service.plans[0].plan_type == "pregnancy"
+    assert plans_service.create_plan_kwargs["idempotency_key"] == f"agent-action:{action.id}"
+    assert [event.event_type for event in repository.events] == [
+        "run.queued",
+        "message.completed",
+        "action.confirmation_required",
+        "action.queued",
+        "run.completed",
+        "action.applied",
+    ]
+    assert applied_event.payload["action_id"] == str(action.id)
+    assert applied_event.payload["action_status"] == "applied"
+    assert applied_event.payload["resource_type"] == "plan"
+    assert applied_event.payload["resource_id"] == str(plans_service.plans[0].id)
+    assert applied_event.payload["details"]["plan_type"] == "pregnancy"
+    assert "apply_payload" not in repository.events[2].payload
+
+
 class FakeActionRepository(FakeAgentRuntimeRepository):
     def __init__(self) -> None:
         super().__init__()
@@ -648,3 +719,24 @@ class FakeAgentRecordsService:
         )
         self.feedings.append(record)
         return record
+
+
+class FakeAgentPlansService:
+    def __init__(self) -> None:
+        self.plans = []
+        self.create_plan_kwargs = {}
+
+    async def create_plan(self, **kwargs):
+        self.create_plan_kwargs = kwargs
+        plan = Plan(
+            id=uuid4(),
+            owner_user_id=kwargs["owner_user_id"],
+            plan_type=kwargs["plan_type"],
+            title=kwargs["title"],
+            summary=kwargs["summary"],
+            source=kwargs["source"],
+            payload=kwargs["payload"],
+            status="active",
+        )
+        self.plans.append(plan)
+        return plan
