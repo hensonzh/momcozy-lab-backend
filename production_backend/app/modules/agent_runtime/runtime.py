@@ -89,6 +89,7 @@ class AgentRuntimeExecutor:
                 "actor_user_id": str(run.actor_user_id),
                 "graph_version": run.graph_version,
                 "runtime_pattern": run.runtime_pattern,
+                "prompt_version": run.prompt_version,
             },
             memory_projection=memory_projection,
             fresh_business_facts={},
@@ -118,6 +119,7 @@ class AgentRuntimeExecutor:
                 model_input=model_input,
                 tool_names=self.tool_registry.names_for_sdk(),
                 tools=self._sdk_tools(run=run),
+                prompt_version=run.prompt_version,
                 trace_id=run.trace_id,
             )
         )

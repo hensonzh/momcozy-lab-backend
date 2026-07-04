@@ -35,6 +35,7 @@ class SdkNodeRequest:
     model_input: list[dict[str, Any]]
     tool_names: tuple[str, ...] = ()
     tools: tuple[SdkToolDefinition, ...] = ()
+    prompt_version: str = ""
     trace_id: str = ""
 
 
@@ -53,9 +54,10 @@ class SdkRunnerBackend(Protocol):
 
 
 class OpenAIAgentsSdkBackend:
-    def __init__(self, *, model: str, max_turns: int = 10) -> None:
+    def __init__(self, *, model: str, max_turns: int = 10, trace_enabled: bool = False) -> None:
         self.model = model
         self.max_turns = max_turns
+        self.trace_enabled = trace_enabled
 
     async def run(self, request: SdkNodeRequest) -> SdkNodeResult:
         try:
@@ -76,7 +78,11 @@ class OpenAIAgentsSdkBackend:
             model=self.model,
             tools=[_build_function_tool(agents_module=agents_module, definition=definition) for definition in request.tools],
         )
-        result = await runner_cls.run(agent, _flatten_model_input(request.model_input), max_turns=self.max_turns)
+        run_kwargs: dict[str, Any] = {"max_turns": self.max_turns}
+        run_config = _build_run_config(agents_module=agents_module, request=request, trace_enabled=self.trace_enabled)
+        if run_config is not None:
+            run_kwargs["run_config"] = run_config
+        result = await runner_cls.run(agent, _flatten_model_input(request.model_input), **run_kwargs)
         final_output = getattr(result, "final_output", "")
         return SdkNodeResult(final_text=str(final_output or ""))
 
@@ -90,17 +96,23 @@ class OpenAIAgentsSdkRunner:
         model: str = "gpt-5.5",
         max_turns: int = 10,
         timeout_seconds: float = 60,
+        trace_enabled: bool = False,
     ) -> None:
         self.backend = backend
         self.metrics = metrics
         self.model = model
         self.max_turns = max_turns
         self.timeout_seconds = timeout_seconds
+        self.trace_enabled = trace_enabled
 
     async def run_reasoning(self, request: SdkNodeRequest) -> SdkNodeResult:
         started_at = perf_counter()
         try:
-            backend = self.backend or OpenAIAgentsSdkBackend(model=self.model, max_turns=self.max_turns)
+            backend = self.backend or OpenAIAgentsSdkBackend(
+                model=self.model,
+                max_turns=self.max_turns,
+                trace_enabled=self.trace_enabled,
+            )
             result = await asyncio.wait_for(backend.run(request), timeout=self.timeout_seconds)
             self._record(outcome="completed", error_code="", started_at=started_at)
             return result
@@ -167,6 +179,28 @@ def _build_function_tool(*, agents_module: Any, definition: SdkToolDefinition) -
         params_json_schema=definition.params_json_schema,
         on_invoke_tool=invoke_tool,
     )
+
+
+def _build_run_config(*, agents_module: Any, request: SdkNodeRequest, trace_enabled: bool) -> Any | None:
+    run_config_cls = getattr(agents_module, "RunConfig", None)
+    if run_config_cls is None:
+        return None
+    try:
+        return run_config_cls(
+            tracing_disabled=not trace_enabled,
+            trace_id=request.trace_id or None,
+            group_id=request.thread_id or None,
+            workflow_name="MomCozy agent runtime",
+            trace_metadata={
+                "run_id": request.run_id,
+                "thread_id": request.thread_id,
+                "actor_user_id": request.actor_user_id,
+                "prompt_version": request.prompt_version,
+                "tool_names": list(request.tool_names),
+            },
+        )
+    except TypeError:
+        return None
 
 
 def _is_real_agents_module(agents_module: Any) -> bool:

@@ -102,6 +102,8 @@ def test_settings_from_env_reads_agent_worker_controls(monkeypatch: pytest.Monke
     monkeypatch.setenv("OPENAI_MODEL", "gpt-test")
     monkeypatch.setenv("OPENAI_AGENT_MAX_TURNS", "7")
     monkeypatch.setenv("OPENAI_AGENT_TIMEOUT_SECONDS", "45")
+    monkeypatch.setenv("OPENAI_AGENT_TRACE_ENABLED", "true")
+    monkeypatch.setenv("OPENAI_AGENT_PROMPT_VERSION", "prompt-v2")
 
     settings = Settings.from_env()
 
@@ -113,6 +115,8 @@ def test_settings_from_env_reads_agent_worker_controls(monkeypatch: pytest.Monke
     assert settings.openai_model == "gpt-test"
     assert settings.openai_agent_max_turns == 7
     assert settings.openai_agent_timeout_seconds == 45
+    assert settings.openai_agent_trace_enabled is True
+    assert settings.openai_agent_prompt_version == "prompt-v2"
 
 
 def test_settings_from_env_reads_voice_provider(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -170,6 +174,8 @@ def test_settings_reject_invalid_openai_agent_controls() -> None:
         Settings(openai_agent_max_turns=0).validate_for_startup()
     with pytest.raises(ValueError, match="OPENAI_AGENT_TIMEOUT_SECONDS"):
         Settings(openai_agent_timeout_seconds=0).validate_for_startup()
+    with pytest.raises(ValueError, match="OPENAI_AGENT_PROMPT_VERSION"):
+        Settings(openai_agent_prompt_version="x" * 81).validate_for_startup()
 
 
 def test_settings_reject_invalid_outbox_worker_controls() -> None:

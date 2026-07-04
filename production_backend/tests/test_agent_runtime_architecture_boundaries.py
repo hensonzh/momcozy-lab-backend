@@ -250,6 +250,7 @@ def test_sdk_runner_uses_real_agents_sdk_shape_when_package_is_available(monkeyp
     fake_agents.__spec__ = ModuleSpec("agents", loader=None)
     fake_agents.Agent = FakeAgentsSdkAgent
     fake_agents.FunctionTool = FakeAgentsSdkFunctionTool
+    fake_agents.RunConfig = FakeAgentsSdkRunConfig
     fake_agents.Runner = FakeAgentsSdkRunner
     monkeypatch.setitem(sys.modules, "agents", fake_agents)
     request = SdkNodeRequest(
@@ -258,15 +259,52 @@ def test_sdk_runner_uses_real_agents_sdk_shape_when_package_is_available(monkeyp
         actor_user_id="user_1",
         instructions="Be concise.",
         model_input=[{"role": "user", "content": "hello"}],
+        tool_names=("profile.read",),
+        prompt_version="prompt-v2",
+        trace_id="trace_1",
     )
 
-    result = asyncio.run(OpenAIAgentsSdkRunner(model="gpt-test", max_turns=3).run_reasoning(request))
+    result = asyncio.run(OpenAIAgentsSdkRunner(model="gpt-test", max_turns=3, trace_enabled=True).run_reasoning(request))
 
     assert result.final_text == "sdk final"
     assert FakeAgentsSdkAgent.created["model"] == "gpt-test"
     assert FakeAgentsSdkAgent.created["instructions"] == "Be concise."
     assert FakeAgentsSdkRunner.last_input == "user: hello"
     assert FakeAgentsSdkRunner.last_max_turns == 3
+    assert FakeAgentsSdkRunner.last_run_config.tracing_disabled is False
+    assert FakeAgentsSdkRunner.last_run_config.trace_id == "trace_1"
+    assert FakeAgentsSdkRunner.last_run_config.group_id == "thread_1"
+    assert FakeAgentsSdkRunner.last_run_config.trace_metadata["run_id"] == "run_1"
+    assert FakeAgentsSdkRunner.last_run_config.trace_metadata["prompt_version"] == "prompt-v2"
+    assert FakeAgentsSdkRunner.last_run_config.trace_metadata["tool_names"] == ["profile.read"]
+    assert FakeAgentsSdkRunner.last_previous_response_id is None
+    assert FakeAgentsSdkRunner.last_auto_previous_response_id is False
+    assert FakeAgentsSdkRunner.last_conversation_id is None
+    assert FakeAgentsSdkRunner.last_session is None
+
+
+def test_sdk_runner_disables_provider_tracing_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_agents = types.ModuleType("agents")
+    fake_agents.__spec__ = ModuleSpec("agents", loader=None)
+    fake_agents.Agent = FakeAgentsSdkAgent
+    fake_agents.FunctionTool = FakeAgentsSdkFunctionTool
+    fake_agents.RunConfig = FakeAgentsSdkRunConfig
+    fake_agents.Runner = FakeAgentsSdkRunner
+    monkeypatch.setitem(sys.modules, "agents", fake_agents)
+
+    asyncio.run(
+        OpenAIAgentsSdkRunner(model="gpt-test").run_reasoning(
+            SdkNodeRequest(
+                run_id="run_1",
+                thread_id="thread_1",
+                actor_user_id="user_1",
+                instructions="Be concise.",
+                model_input=[{"role": "user", "content": "hello"}],
+            )
+        )
+    )
+
+    assert FakeAgentsSdkRunner.last_run_config.tracing_disabled is True
 
 
 def test_sdk_runner_flattens_structured_context_as_stable_json(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -440,20 +478,57 @@ class FakeAgentsSdkFunctionTool:
         self.on_invoke_tool = on_invoke_tool
 
 
+class FakeAgentsSdkRunConfig:
+    def __init__(
+        self,
+        *,
+        tracing_disabled: bool,
+        trace_id: str | None,
+        group_id: str | None,
+        workflow_name: str,
+        trace_metadata: dict,
+    ) -> None:
+        self.tracing_disabled = tracing_disabled
+        self.trace_id = trace_id
+        self.group_id = group_id
+        self.workflow_name = workflow_name
+        self.trace_metadata = trace_metadata
+
+
 class FakeAgentsSdkRunner:
     last_input = ""
     last_max_turns = None
+    last_run_config = None
+    last_previous_response_id = None
+    last_auto_previous_response_id = None
+    last_conversation_id = None
+    last_session = None
 
     @staticmethod
-    async def run(agent: FakeAgentsSdkAgent, input: str, *, max_turns=None):
+    async def run(
+        agent: FakeAgentsSdkAgent,
+        input: str,
+        *,
+        max_turns=None,
+        run_config=None,
+        previous_response_id=None,
+        auto_previous_response_id=False,
+        conversation_id=None,
+        session=None,
+    ):
         FakeAgentsSdkRunner.last_input = input
         FakeAgentsSdkRunner.last_max_turns = max_turns
+        FakeAgentsSdkRunner.last_run_config = run_config
+        FakeAgentsSdkRunner.last_previous_response_id = previous_response_id
+        FakeAgentsSdkRunner.last_auto_previous_response_id = auto_previous_response_id
+        FakeAgentsSdkRunner.last_conversation_id = conversation_id
+        FakeAgentsSdkRunner.last_session = session
         return FakeAgentsSdkResult(final_output="sdk final")
 
 
 class ToolCallingAgentsSdkRunner:
     @staticmethod
-    async def run(agent: FakeAgentsSdkAgent, input: str, *, max_turns=None):
+    async def run(agent: FakeAgentsSdkAgent, input: str, *, max_turns=None, run_config=None):
         output = await agent.tools[0].on_invoke_tool(None, '{"owner_user_id": "user_1"}')
         return FakeAgentsSdkResult(final_output=output)
 

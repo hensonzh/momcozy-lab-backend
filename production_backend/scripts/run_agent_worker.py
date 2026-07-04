@@ -135,6 +135,7 @@ async def run_agent_worker(
                         model=resolved_settings.openai_model,
                         max_turns=resolved_settings.openai_agent_max_turns,
                         timeout_seconds=resolved_settings.openai_agent_timeout_seconds,
+                        trace_enabled=resolved_settings.openai_agent_trace_enabled,
                         metrics=metrics,
                     ),
                 )

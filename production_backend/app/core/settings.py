@@ -60,6 +60,8 @@ class Settings:
     openai_model: str = "gpt-5.5"
     openai_agent_max_turns: int = 10
     openai_agent_timeout_seconds: int = 60
+    openai_agent_trace_enabled: bool = False
+    openai_agent_prompt_version: str = "momcozy-agent-prompt-v1"
     voice_provider: str = "disabled"
     vision_provider: str = "disabled"
     log_level: str = "INFO"
@@ -114,6 +116,8 @@ class Settings:
             openai_model=_env("OPENAI_MODEL", cls.openai_model),
             openai_agent_max_turns=_env_int("OPENAI_AGENT_MAX_TURNS", cls.openai_agent_max_turns),
             openai_agent_timeout_seconds=_env_int("OPENAI_AGENT_TIMEOUT_SECONDS", cls.openai_agent_timeout_seconds),
+            openai_agent_trace_enabled=_env_bool("OPENAI_AGENT_TRACE_ENABLED", cls.openai_agent_trace_enabled),
+            openai_agent_prompt_version=_env("OPENAI_AGENT_PROMPT_VERSION", cls.openai_agent_prompt_version),
             voice_provider=_env("VOICE_PROVIDER", cls.voice_provider).lower(),
             vision_provider=_env("VISION_PROVIDER", cls.vision_provider).lower(),
             log_level=_env("LOG_LEVEL", cls.log_level).upper(),
@@ -173,6 +177,10 @@ class Settings:
             errors.append("OPENAI_AGENT_MAX_TURNS must be positive")
         if self.openai_agent_timeout_seconds < 1:
             errors.append("OPENAI_AGENT_TIMEOUT_SECONDS must be positive")
+        if not self.openai_agent_prompt_version:
+            errors.append("OPENAI_AGENT_PROMPT_VERSION is required")
+        if len(self.openai_agent_prompt_version) > 80:
+            errors.append("OPENAI_AGENT_PROMPT_VERSION must be at most 80 characters")
         if self.voice_provider not in SUPPORTED_VOICE_PROVIDERS:
             errors.append(
                 "VOICE_PROVIDER must be one of "

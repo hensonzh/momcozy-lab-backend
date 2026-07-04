@@ -115,6 +115,7 @@ async def create_run(
     current_user: CurrentUser = Depends(require_current_user),
     service: AgentRuntimeService = Depends(get_agent_runtime_service),
 ) -> AgentRunRead:
+    settings = request.app.state.settings
     run = await service.create_run(
         actor_user_id=current_user.user_id,
         thread_id=payload.thread_id,
@@ -122,7 +123,7 @@ async def create_run(
         attachments=payload.attachments,
         runtime_pattern=payload.runtime_pattern,
         graph_version=payload.graph_version,
-        prompt_version=payload.prompt_version,
+        prompt_version=payload.prompt_version or settings.openai_agent_prompt_version,
         request_id=str(getattr(request.state, "request_id", "") or ""),
         trace_id=str(getattr(request.state, "request_id", "") or ""),
         idempotency_key=idempotency_key or normalize_idempotency_key(payload.idempotency_key),

@@ -13,7 +13,7 @@ from production_backend.app.modules.agent_runtime.tools import ToolExecutor, Too
 
 def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() -> None:
     thread_id = uuid4()
-    run = _run(thread_id=thread_id)
+    run = _run(thread_id=thread_id, prompt_version="prompt-v2")
     prior_user = _message(thread_id=thread_id, run_id=uuid4(), role="user", text="What did we discuss?", sequence=1)
     prior_assistant = _message(thread_id=thread_id, run_id=uuid4(), role="assistant", text="Your care plan.", sequence=2)
     current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="Summarize it.", sequence=3)
@@ -36,6 +36,7 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() ->
     request = backend.requests[0]
     assert request.run_id == str(run.id)
     assert request.thread_id == str(thread_id)
+    assert request.prompt_version == "prompt-v2"
     assert request.tool_names == (
         "business.context.read",
         "devices.guidance_assets.read",
@@ -77,6 +78,7 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() ->
     assert state_store.projections[0]["projection_summary"]["state_keys"] == [
         "actor_user_id",
         "graph_version",
+        "prompt_version",
         "run_id",
         "runtime_pattern",
         "thread_id",
@@ -581,7 +583,7 @@ async def profile_read_handler(context: ToolHandlerContext):
     return {"profile": {"actor_user_id": str(context.actor.user_id)}}
 
 
-def _run(*, thread_id, run_id=None) -> AgentRun:
+def _run(*, thread_id, run_id=None, prompt_version: str = "") -> AgentRun:
     return AgentRun(
         id=run_id or uuid4(),
         thread_id=thread_id,
@@ -589,7 +591,7 @@ def _run(*, thread_id, run_id=None) -> AgentRun:
         status="running",
         runtime_pattern="langgraph_sdk",
         graph_version="momcozy-agent-v1",
-        prompt_version="",
+        prompt_version=prompt_version,
         request_id="req",
         trace_id="trace",
         error_code="",
