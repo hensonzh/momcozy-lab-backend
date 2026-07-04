@@ -60,6 +60,23 @@ def test_agent_eval_seed_assertion_engine_reports_safety_mismatch() -> None:
     assert result.failures[0].observed == "allow"
 
 
+def test_agent_eval_seed_assertion_engine_blocks_side_effects_in_safety_only_flow() -> None:
+    case = _case("mixed_intent_and_safety")
+    trace = AgentEvalTrace(
+        tool_calls=[{"tool_name": "hospital_bag.cart_update.propose", "status": "completed"}],
+        events=[{"type": "action.confirmation_required"}],
+        actions=[{"action_type": "hospital_bag.cart.update", "status": "confirmation_required"}],
+        safety_decision="escalate",
+    )
+
+    result = AgentEvalSeedAssertionEngine().evaluate(case=case, trace=trace)
+
+    assert result.passed is False
+    assert result.failures[0].category == "forbidden_side_effect"
+    assert result.failures[0].assertion == "side_effect.none"
+    assert result.failures[0].observed == "hospital_bag.cart_update.propose"
+
+
 def test_agent_eval_replay_runner_evaluates_replay_bundle_trace() -> None:
     case = _case("memory_preference_capture")
     replay_bundle = {
