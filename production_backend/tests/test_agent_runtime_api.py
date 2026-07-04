@@ -5,7 +5,14 @@ from fastapi.testclient import TestClient
 
 from production_backend.app.core.settings import Settings
 from production_backend.app.factory import create_app
-from production_backend.app.modules.agent_runtime.models import AgentEvalCase, AgentEvent, AgentMemory, AgentRun, AgentThread
+from production_backend.app.modules.agent_runtime.models import (
+    AgentEvalCase,
+    AgentEvent,
+    AgentMemory,
+    AgentMemorySettings,
+    AgentRun,
+    AgentThread,
+)
 from production_backend.app.modules.agent_runtime.router import (
     _stream_run_event_chunks,
     get_agent_eval_service,
@@ -202,17 +209,27 @@ def test_agent_memory_management_uses_current_user_scope() -> None:
     client = TestClient(app)
 
     list_response = client.get("/v1/agent/memories?memory_type=communication_preference&limit=10")
+    settings_response = client.get("/v1/agent/memories/settings")
+    update_settings_response = client.put("/v1/agent/memories/settings", json={"memory_enabled": False})
     delete_response = client.delete(f"/v1/agent/memories/{memory_id}")
 
     assert list_response.status_code == 200
     assert list_response.json()["items"][0]["id"] == str(memory_id)
     assert list_response.json()["items"][0]["content"] == {"summary": "Prefers concise reminders"}
+    assert settings_response.status_code == 200
+    assert settings_response.json()["owner_user_id"] == str(user_id)
+    assert settings_response.json()["memory_enabled"] is True
+    assert update_settings_response.status_code == 200
+    assert update_settings_response.json()["memory_enabled"] is False
     assert delete_response.status_code == 204
     assert fake_service.list_kwargs == {
         "owner_user_id": user_id,
         "memory_type": "communication_preference",
         "limit": 10,
+        "include_when_disabled": True,
     }
+    assert fake_service.get_settings_kwargs == {"owner_user_id": user_id}
+    assert fake_service.update_settings_kwargs == {"owner_user_id": user_id, "memory_enabled": False}
     assert fake_service.archive_kwargs == {"owner_user_id": user_id, "memory_id": memory_id}
 
 
@@ -401,6 +418,8 @@ class FakeMemoryService:
         self.memory_id = memory_id
         self.list_kwargs = {}
         self.archive_kwargs = {}
+        self.get_settings_kwargs = {}
+        self.update_settings_kwargs = {}
 
     async def list_active_memories(self, **kwargs):
         self.list_kwargs = kwargs
@@ -427,6 +446,14 @@ class FakeMemoryService:
             confidence_score=90,
             status="archived",
         )
+
+    async def get_settings(self, **kwargs):
+        self.get_settings_kwargs = kwargs
+        return AgentMemorySettings(owner_user_id=kwargs["owner_user_id"], memory_enabled=True)
+
+    async def update_settings(self, **kwargs):
+        self.update_settings_kwargs = kwargs
+        return AgentMemorySettings(owner_user_id=kwargs["owner_user_id"], memory_enabled=kwargs["memory_enabled"])
 
 
 class FakeReplayService:

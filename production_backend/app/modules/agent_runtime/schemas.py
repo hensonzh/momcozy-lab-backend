@@ -128,6 +128,18 @@ class AgentMemoryRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class AgentMemorySettingsRead(BaseModel):
+    owner_user_id: UUID
+    memory_enabled: bool
+    updated_at: datetime | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AgentMemorySettingsUpdate(BaseModel):
+    memory_enabled: bool
+
+
 class AgentMemoryListResponse(BaseModel):
     items: list[AgentMemoryRead]
 

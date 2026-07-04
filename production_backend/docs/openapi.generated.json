@@ -514,6 +514,50 @@
         "title": "AgentMemoryRead",
         "type": "object"
       },
+      "AgentMemorySettingsRead": {
+        "properties": {
+          "memory_enabled": {
+            "title": "Memory Enabled",
+            "type": "boolean"
+          },
+          "owner_user_id": {
+            "format": "uuid",
+            "title": "Owner User Id",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "owner_user_id",
+          "memory_enabled"
+        ],
+        "title": "AgentMemorySettingsRead",
+        "type": "object"
+      },
+      "AgentMemorySettingsUpdate": {
+        "properties": {
+          "memory_enabled": {
+            "title": "Memory Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "memory_enabled"
+        ],
+        "title": "AgentMemorySettingsUpdate",
+        "type": "object"
+      },
       "AgentReplayBundle": {
         "properties": {
           "actions": {
@@ -4138,6 +4182,76 @@
           }
         ],
         "summary": "List Memories",
+        "tags": [
+          "agent"
+        ]
+      }
+    },
+    "/v1/agent/memories/settings": {
+      "get": {
+        "operationId": "get_memory_settings_v1_agent_memories_settings_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentMemorySettingsRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Memory Settings",
+        "tags": [
+          "agent"
+        ]
+      },
+      "put": {
+        "operationId": "update_memory_settings_v1_agent_memories_settings_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentMemorySettingsUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentMemorySettingsRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Memory Settings",
         "tags": [
           "agent"
         ]

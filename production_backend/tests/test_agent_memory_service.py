@@ -1,12 +1,12 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
 from production_backend.app.core.errors import ApiError
 from production_backend.app.modules.agent_runtime.memory import AgentMemoryService
-from production_backend.app.modules.agent_runtime.models import AgentMemory
+from production_backend.app.modules.agent_runtime.models import AgentMemory, AgentMemorySettings
 
 
 def test_agent_memory_service_creates_owner_scoped_memory() -> None:
@@ -126,6 +126,42 @@ def test_agent_memory_service_applies_retention_policy_and_excludes_expired_memo
     assert memories == [active]
 
 
+def test_agent_memory_service_settings_disable_writes_and_runtime_projection() -> None:
+    owner_user_id = uuid4()
+    repository = FakeMemoryRepository()
+    service = AgentMemoryService(repository=repository)
+
+    default_settings = asyncio.run(service.get_settings(owner_user_id=owner_user_id))
+    disabled_settings = asyncio.run(service.update_settings(owner_user_id=owner_user_id, memory_enabled=False))
+    repository.memories.append(
+        AgentMemory(
+            id=uuid4(),
+            owner_user_id=owner_user_id,
+            memory_type="communication_preference",
+            content={"summary": "Existing memory", "sensitivity": "normal"},
+            schema_version="v1",
+            status="active",
+        )
+    )
+    projected = asyncio.run(service.list_active_memories(owner_user_id=owner_user_id))
+    management_list = asyncio.run(service.list_active_memories(owner_user_id=owner_user_id, include_when_disabled=True))
+
+    with pytest.raises(ApiError) as create_exc:
+        asyncio.run(
+            service.create_memory(
+                owner_user_id=owner_user_id,
+                memory_type="communication_preference",
+                content={"summary": "New memory"},
+            )
+        )
+
+    assert default_settings.memory_enabled is True
+    assert disabled_settings.memory_enabled is False
+    assert projected == []
+    assert len(management_list) == 1
+    assert create_exc.value.code == "memory_disabled"
+
+
 def test_agent_memory_service_archive_missing_memory_returns_not_found() -> None:
     with pytest.raises(ApiError) as exc_info:
         asyncio.run(AgentMemoryService(repository=FakeMemoryRepository()).archive_memory(owner_user_id=uuid4(), memory_id=uuid4()))
@@ -137,6 +173,19 @@ class FakeMemoryRepository:
     def __init__(self) -> None:
         self.memories: list[AgentMemory] = []
         self.create_kwargs = {}
+        self.settings_by_owner: dict[UUID, AgentMemorySettings] = {}
+
+    async def get_memory_settings(self, *, owner_user_id):
+        return self.settings_by_owner.get(owner_user_id)
+
+    async def upsert_memory_settings(self, *, owner_user_id, memory_enabled):
+        settings = self.settings_by_owner.get(owner_user_id)
+        if settings is None:
+            settings = AgentMemorySettings(owner_user_id=owner_user_id)
+            self.settings_by_owner[owner_user_id] = settings
+        settings.memory_enabled = memory_enabled
+        settings.updated_at = datetime.now(timezone.utc)
+        return settings
 
     async def create_memory(self, **kwargs):
         self.create_kwargs = kwargs

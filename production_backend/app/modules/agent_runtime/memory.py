@@ -8,7 +8,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...core.errors import ApiError
-from .models import MEMORY_TYPES, AgentMemory
+from .models import MEMORY_TYPES, AgentMemory, AgentMemorySettings
 
 
 ALLOWED_MEMORY_SENSITIVITIES = frozenset({"normal", "personal"})
@@ -67,6 +67,24 @@ class AgentMemoryRepository:
         await self.session.flush()
         return memory
 
+    async def get_memory_settings(self, *, owner_user_id: UUID) -> AgentMemorySettings | None:
+        return await self.session.get(AgentMemorySettings, owner_user_id)
+
+    async def upsert_memory_settings(
+        self,
+        *,
+        owner_user_id: UUID,
+        memory_enabled: bool,
+    ) -> AgentMemorySettings:
+        settings = await self.get_memory_settings(owner_user_id=owner_user_id)
+        if settings is None:
+            settings = AgentMemorySettings(owner_user_id=owner_user_id)
+            self.session.add(settings)
+        settings.memory_enabled = memory_enabled
+        settings.updated_at = datetime.now(timezone.utc)
+        await self.session.flush()
+        return settings
+
     async def list_active_memories(
         self,
         *,
@@ -116,6 +134,8 @@ class AgentMemoryService:
         confidence_score: int = 0,
         expires_at: datetime | None = None,
     ) -> AgentMemory:
+        if not await self.is_memory_enabled(owner_user_id=owner_user_id):
+            raise ApiError(code="memory_disabled", message="Agent memory is disabled for this user.", status=403)
         normalized_type = _normalize_memory_type(memory_type)
         normalized_content = _normalize_content(content)
         normalized_expires_at = _normalize_expires_at(expires_at)
@@ -136,12 +156,29 @@ class AgentMemoryService:
         owner_user_id: UUID,
         memory_type: str | None = None,
         limit: int = 20,
+        include_when_disabled: bool = False,
     ) -> list[AgentMemory]:
+        if not include_when_disabled and not await self.is_memory_enabled(owner_user_id=owner_user_id):
+            return []
         if memory_type is not None:
             memory_type = _normalize_memory_type(memory_type)
         if limit < 1 or limit > 100:
             raise ApiError(code="validation_failed", message="limit must be between 1 and 100.", status=422)
         return await self.repository.list_active_memories(owner_user_id=owner_user_id, memory_type=memory_type, limit=limit)
+
+    async def get_settings(self, *, owner_user_id: UUID) -> AgentMemorySettings:
+        settings = await self.repository.get_memory_settings(owner_user_id=owner_user_id)
+        if settings is not None:
+            return settings
+        return AgentMemorySettings(owner_user_id=owner_user_id, memory_enabled=True)
+
+    async def update_settings(self, *, owner_user_id: UUID, memory_enabled: bool) -> AgentMemorySettings:
+        if not isinstance(memory_enabled, bool):
+            raise ApiError(code="validation_failed", message="memory_enabled must be a boolean.", status=422)
+        return await self.repository.upsert_memory_settings(owner_user_id=owner_user_id, memory_enabled=memory_enabled)
+
+    async def is_memory_enabled(self, *, owner_user_id: UUID) -> bool:
+        return (await self.get_settings(owner_user_id=owner_user_id)).memory_enabled
 
     async def archive_memory(self, *, owner_user_id: UUID, memory_id: UUID) -> AgentMemory:
         memory = await self.repository.archive_memory(

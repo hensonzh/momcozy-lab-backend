@@ -30,6 +30,8 @@ from .schemas import (
     AgentReplayBundle,
     AgentMemoryListResponse,
     AgentMemoryRead,
+    AgentMemorySettingsRead,
+    AgentMemorySettingsUpdate,
     AgentRunCancel,
     AgentRunCreate,
     AgentRunRead,
@@ -275,8 +277,28 @@ async def list_memories(
         owner_user_id=current_user.user_id,
         memory_type=memory_type,
         limit=limit,
+        include_when_disabled=True,
     )
     return AgentMemoryListResponse(items=[AgentMemoryRead.model_validate(memory) for memory in memories])
+
+
+@router.get("/memories/settings", response_model=AgentMemorySettingsRead)
+async def get_memory_settings(
+    current_user: CurrentUser = Depends(require_current_user),
+    service: AgentMemoryService = Depends(get_agent_memory_service),
+) -> AgentMemorySettingsRead:
+    settings = await service.get_settings(owner_user_id=current_user.user_id)
+    return AgentMemorySettingsRead.model_validate(settings)
+
+
+@router.put("/memories/settings", response_model=AgentMemorySettingsRead)
+async def update_memory_settings(
+    payload: AgentMemorySettingsUpdate,
+    current_user: CurrentUser = Depends(require_current_user),
+    service: AgentMemoryService = Depends(get_agent_memory_service),
+) -> AgentMemorySettingsRead:
+    settings = await service.update_settings(owner_user_id=current_user.user_id, memory_enabled=payload.memory_enabled)
+    return AgentMemorySettingsRead.model_validate(settings)
 
 
 @router.delete("/memories/{memory_id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -44,6 +44,7 @@ def test_openapi_contains_core_flutter_handoff_paths() -> None:
         "/v1/status-page/today",
         "/v1/agent/artifacts/{artifact_id}",
         "/v1/agent/memories",
+        "/v1/agent/memories/settings",
         "/v1/agent/memories/{memory_id}",
         "/v1/agent/runs",
         "/v1/agent/runs/{run_id}/client-events",
