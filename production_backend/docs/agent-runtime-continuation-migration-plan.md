@@ -596,12 +596,17 @@ eval regression。
   事件，可能没有 `sequence`，最终由 `message.completed` 覆盖。
 - action card 支持 confirm/reject。
 - 网络断开后用 `after_sequence` replay。
+- App 侧保存按用户隔离的最小 Agent Hub 快照，用于
+  `waiting_for_confirmation`、断流和 app 冷启动恢复；快照不是业务事实
+  来源，后端 run/message/action ledger 仍是权威。
+- action confirm/reject 后继续 follow 原 run stream，让后端终态事件覆盖
+  本地 pending/queued 状态。
 
 建议 PR：
 
-1. `docs: add Flutter agent integration smoke flows`
-2. `test: add backend contract tests for Flutter reducer events`
-3. `app: integrate agent stream and action confirmation`
+1. `docs: add Flutter agent integration smoke flows` - done
+2. `test: add backend contract tests for Flutter reducer events` - done
+3. `app: integrate agent stream and action confirmation` - in progress
 
 验收：
 
@@ -644,4 +649,5 @@ PR: ops: configure provider-backed eval credentials and budget
 该 PR 依赖真实 provider credential、成本策略和运行环境，不属于当前本地代码
 分支可以完全闭环的工作。
 
-Flutter integration 暂按当前决策后置，等 Flutter app 重构分支完成后再打通。
+Flutter integration 已在当前分支启动。剩余收口重点是 typed client/OpenAPI
+校验、真实 Flutter SDK 环境下的 widget/integration test、以及 staging smoke。

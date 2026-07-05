@@ -60,8 +60,16 @@ versioning plan.
 - Treat transient `message.delta` events as provisional typing UI and replace
   them with assistant `message.completed.payload.text`.
 - Reconnect agent streams with `after_sequence`; do not replay by parsing text.
+- Persist a minimal, user-scoped Agent Hub snapshot for app restart recovery:
+  `thread_id`, `run_id`, `last_sequence`, rendered event/action state, draft
+  composer state, and the active request. This snapshot is only a UI recovery
+  aid; backend run/message/action ledgers remain authoritative.
 - Merge action events by `action_id`; render `preview_payload` from
   `action.confirmation_required` and never expect `apply_payload` in streams.
+- After confirming or rejecting an action, continue following the same run with
+  `/v1/agent/runs/{run_id}/stream?after_sequence=<last_sequence>&follow=true`
+  so `action.applied`, `action.failed`, `action.rejected`, and final message
+  events replace local pending states.
 - Treat `voice_provider_disabled` as a stable unavailable-state response for
   voice UI; do not fall back to legacy realtime voice endpoints.
 
@@ -75,4 +83,6 @@ versioning plan.
 6. Verify agent event reducers use stable IDs such as `run_id`, `event_id`,
    `message_id`, `tool_call_id`, and `action_id`.
 7. Verify voice UI handles `voice_provider_disabled` without token URLs.
-8. Record backend schema version and Flutter build version in the release note.
+8. Verify `waiting_for_confirmation` can recover after app restart and action
+   confirmation resumes the original run stream.
+9. Record backend schema version and Flutter build version in the release note.
