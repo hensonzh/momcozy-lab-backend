@@ -63,9 +63,10 @@ application events from Redis for token-level typing UI. These events are not
 provider raw events, are not persisted to Postgres, and do not carry a
 `sequence`; their SSE id is `delta:<redis-stream-id>` and their payload includes
 `transient: true` plus a Redis `cursor`. Clients must treat them as provisional:
-they can be replayed within the short Redis TTL or lost after disconnect, and
-the final assistant content is authoritative only after the persisted
-`message.completed` event and message ledger are available.
+they can be replayed within the short Redis TTL or lost after disconnect.
+The final assistant content is authoritative only after the persisted assistant
+`message.completed` event is available; that event includes
+`payload.message_id`, `payload.role=assistant`, and `payload.text`.
 
 A client reducer is the deterministic function that folds an ordered event
 stream into visible UI state:
@@ -77,9 +78,10 @@ previous AgentChatState + AgentEvent -> next AgentChatState
 It deduplicates by `event_id` or `sequence`, merges message updates by
 `message_id`, tool updates by `tool_call_id`, artifacts by `artifact_id`, and
 action cards by `action_id`. Transient `message.delta` events should update only
-the provisional streaming buffer and must be replaced by the persisted final
-message state. The reducer must not infer state from natural-language assistant
-text, provider raw events, or legacy AG-UI event names.
+the provisional streaming buffer and must be replaced by the persisted assistant
+`message.completed` payload. The reducer must not infer state from
+natural-language assistant text, provider raw events, or legacy AG-UI event
+names.
 
 ## Agent Action Events
 

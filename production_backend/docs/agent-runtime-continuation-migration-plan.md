@@ -135,7 +135,8 @@
   用于 token 级打字体验；这些 delta 不写入 Postgres，不参与 `sequence`，
   只带 `event_id=delta:<redis-stream-id>` 和 Redis `cursor`。
 - reconnect 后客户端用 `after_sequence` 继续拉取权威事件；短期 delta 允许
-  在 TTL 内重放或丢失，最终 UI 以 persisted `message.completed` 为准。
+  在 TTL 内重放或丢失，最终 UI 以 persisted assistant
+  `message.completed.payload.text` 为准。
 
 ### Eval
 

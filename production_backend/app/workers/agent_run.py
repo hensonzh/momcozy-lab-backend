@@ -146,7 +146,11 @@ class AgentRunWorker:
                 await self._append_event(
                     run=run,
                     event_type="message.completed",
-                    payload={"message_id": str(message.id), "role": "assistant"},
+                    payload={
+                        "message_id": str(message.id),
+                        "role": "assistant",
+                        "text": result.final_text,
+                    },
                 )
             completed = await self.repository.mark_run_completed(run=run, completed_at=_utcnow())
             await self._append_event(run=completed, event_type="run.completed", payload={})

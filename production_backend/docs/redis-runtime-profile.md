@@ -21,7 +21,8 @@ ledger and the service can recover or fail runs explicitly.
 `message.delta` typing events. It is an experience layer only: deltas are not
 persisted to Postgres, do not carry the database `sequence`, and can be replayed
 or dropped without changing the durable run result. The persisted
-`message.completed` event and message ledger remain authoritative.
+assistant `message.completed` event, including `payload.text`, and message
+ledger remain authoritative.
 
 ## CI Profile
 

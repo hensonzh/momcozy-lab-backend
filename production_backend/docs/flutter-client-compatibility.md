@@ -57,6 +57,8 @@ versioning plan.
 - Consume agent stream events as application events, not provider raw events.
 - Do not add an AG-UI compatibility adapter; legacy AG-UI event names are not
   part of the production backend contract.
+- Treat transient `message.delta` events as provisional typing UI and replace
+  them with assistant `message.completed.payload.text`.
 - Reconnect agent streams with `after_sequence`; do not replay by parsing text.
 - Merge action events by `action_id`; render `preview_payload` from
   `action.confirmation_required` and never expect `apply_payload` in streams.

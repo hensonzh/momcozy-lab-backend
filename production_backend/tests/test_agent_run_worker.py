@@ -26,6 +26,11 @@ def test_agent_run_worker_completes_run_with_assistant_message_events_and_lock()
     assert run.status == "completed"
     assert [event.event_type for event in repository.events] == ["run.started", "message.completed", "run.completed"]
     assert repository.messages[0].content == {"text": "Here is the summary."}
+    assert repository.events[1].payload == {
+        "message_id": str(repository.messages[0].id),
+        "role": "assistant",
+        "text": "Here is the summary.",
+    }
     assert commits == ["commit", "commit", "commit"]
     assert controls.lock_released is True
     assert controls.cleared_active_run == (repository.run.thread_id, repository.run.id)
