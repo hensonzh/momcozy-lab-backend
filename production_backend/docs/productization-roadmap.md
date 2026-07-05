@@ -263,7 +263,8 @@ Acceptance:
 - provider-backed evals have explicit cost budget and skip behavior when
   credentials are absent.
 
-Current status: `yellow`.
+Current status: `green` for code-local acceptance. Product-approved safety copy
+and real provider budget approval remain external.
 
 Already covered:
 
@@ -273,7 +274,7 @@ Already covered:
 - action preview/apply payload separation;
 - service-key boundary and owner-scope tests.
 
-Remaining backend-only PR slices:
+Completed backend-only PR slices:
 
 - `security: add PII redaction regression fixtures for replay exports`;
 - `security: add provider cost budget env contract`;

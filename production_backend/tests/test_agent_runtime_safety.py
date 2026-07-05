@@ -6,6 +6,7 @@ import pytest
 from production_backend.app.core.metrics import RequestMetrics
 from production_backend.app.modules.agent_runtime.models import AgentSafetyEvent
 from production_backend.app.modules.agent_runtime.safety.service import AgentSafetyService, DeterministicSafetyGuard
+from production_backend.app.modules.agent_runtime.safety.templates import SAFETY_RESPONSE_TEMPLATES
 
 
 def test_deterministic_safety_guard_escalates_emotional_crisis() -> None:
@@ -78,6 +79,16 @@ def test_deterministic_safety_guard_blocks_prompt_injection() -> None:
     assert decision.decision == "block"
     assert decision.response_template_key == "security_refusal"
     assert decision.handoff_type == "none"
+
+
+def test_safety_response_template_registry_defines_keys_versions_and_handoffs() -> None:
+    assert {"emotional_crisis_escalation", "maternal_infant_health_escalation", "security_refusal", "none"} <= set(
+        SAFETY_RESPONSE_TEMPLATES
+    )
+    for key, template in SAFETY_RESPONSE_TEMPLATES.items():
+        assert template.key == key
+        assert template.version == "safety-response.v1"
+        assert template.display_intent
 
 
 def test_agent_safety_service_records_non_allow_decisions_only() -> None:

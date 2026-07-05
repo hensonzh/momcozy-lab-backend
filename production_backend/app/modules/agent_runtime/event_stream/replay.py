@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 from uuid import UUID
 
@@ -62,7 +63,7 @@ def _run(run: AgentRun) -> dict[str, Any]:
         "request_id": run.request_id,
         "trace_id": run.trace_id,
         "error_code": run.error_code,
-        "error_details": run.error_details,
+        "error_details": _redact_replay_value(run.error_details),
     }
 
 
@@ -75,7 +76,7 @@ def _message(message: AgentMessage, *, include_content: bool) -> dict[str, Any]:
         "status": message.status,
         "sequence": message.sequence,
     }
-    body["content"] = message.content if include_content else {"redacted": True}
+    body["content"] = _redact_replay_value(message.content) if include_content else {"redacted": True}
     return body
 
 
@@ -86,7 +87,7 @@ def _event(event: AgentEvent) -> dict[str, Any]:
         "run_id": str(event.run_id),
         "sequence": event.sequence,
         "type": event.event_type,
-        "payload": event.payload,
+        "payload": _redact_replay_value(event.payload),
         "created_at": event.created_at.isoformat() if event.created_at else None,
     }
 
@@ -97,7 +98,7 @@ def _tool_call(tool_call: AgentToolCall) -> dict[str, Any]:
         "tool_name": tool_call.tool_name,
         "call_id": tool_call.call_id,
         "status": tool_call.status,
-        "safe_args": tool_call.safe_args,
+        "safe_args": _redact_replay_value(tool_call.safe_args),
         "error_code": tool_call.error_code,
     }
 
@@ -110,7 +111,7 @@ def _action(action: AgentAction) -> dict[str, Any]:
         "target_id": action.target_id,
         "status": action.status,
         "side_effect_level": action.side_effect_level,
-        "preview_payload": action.preview_payload,
+        "preview_payload": _redact_replay_value(action.preview_payload),
         "error_code": action.error_code,
     }
 
@@ -123,7 +124,7 @@ def _artifact(artifact: AgentArtifact) -> dict[str, Any]:
         "artifact_type": artifact.artifact_type,
         "schema_version": artifact.schema_version,
         "status": artifact.status,
-        "payload": artifact.payload,
+        "payload": _redact_replay_value(artifact.payload),
         "raw_payload_ref": artifact.raw_payload_ref,
         "created_at": artifact.created_at.isoformat() if artifact.created_at else None,
         "updated_at": artifact.updated_at.isoformat() if artifact.updated_at else None,
@@ -139,7 +140,7 @@ def _checkpoint(checkpoint: AgentContextCheckpoint) -> dict[str, Any]:
         "checkpoint_id": checkpoint.checkpoint_id,
         "graph_version": checkpoint.graph_version,
         "state_ref": checkpoint.state_ref,
-        "state_summary": checkpoint.state_summary,
+        "state_summary": _redact_replay_value(checkpoint.state_summary),
         "created_at": checkpoint.created_at.isoformat() if checkpoint.created_at else None,
     }
 
@@ -154,7 +155,7 @@ def _workflow_state(workflow_state: AgentWorkflowState) -> dict[str, Any]:
         "status": workflow_state.status,
         "schema_version": workflow_state.schema_version,
         "active_step": workflow_state.active_step,
-        "state": workflow_state.state,
+        "state": _redact_replay_value(workflow_state.state),
         "created_at": workflow_state.created_at.isoformat() if workflow_state.created_at else None,
         "updated_at": workflow_state.updated_at.isoformat() if workflow_state.updated_at else None,
     }
@@ -170,8 +171,8 @@ def _context_projection(context_projection: AgentContextProjection) -> dict[str,
         "tool_schema_version": context_projection.tool_schema_version,
         "selected_message_ids": context_projection.selected_message_ids,
         "active_workflow_state_id": str(context_projection.active_workflow_state_id) if context_projection.active_workflow_state_id else None,
-        "source_refs": context_projection.source_refs,
-        "projection_summary": context_projection.projection_summary,
+        "source_refs": _redact_replay_value(context_projection.source_refs),
+        "projection_summary": _redact_replay_value(context_projection.projection_summary),
         "token_estimate": context_projection.token_estimate,
         "created_at": context_projection.created_at.isoformat() if context_projection.created_at else None,
     }
@@ -183,6 +184,43 @@ def _safety_event(safety_event: AgentSafetyEvent) -> dict[str, Any]:
         "category": safety_event.category,
         "severity": safety_event.severity,
         "decision": safety_event.decision,
-        "evidence": safety_event.evidence,
+        "evidence": _redact_replay_value(safety_event.evidence),
         "evidence_ref": safety_event.evidence_ref,
     }
+
+
+SENSITIVE_REPLAY_KEYS = (
+    "authorization",
+    "token",
+    "secret",
+    "password",
+    "api_key",
+    "access_key",
+    "refresh",
+    "email",
+    "phone",
+    "contact",
+    "address",
+)
+EMAIL_RE = re.compile(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}")
+PHONE_RE = re.compile(r"\+?\d[\d\s().-]{6,}\d")
+
+
+def _redact_replay_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            str(key): "[redacted]" if _is_sensitive_replay_key(str(key)) else _redact_replay_value(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_replay_value(item) for item in value]
+    if isinstance(value, tuple):
+        return [_redact_replay_value(item) for item in value]
+    if isinstance(value, str):
+        return "[redacted]" if EMAIL_RE.search(value) or PHONE_RE.search(value) else value
+    return value
+
+
+def _is_sensitive_replay_key(key: str) -> bool:
+    normalized = key.lower()
+    return any(term in normalized for term in SENSITIVE_REPLAY_KEYS)

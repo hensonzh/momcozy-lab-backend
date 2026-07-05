@@ -6,6 +6,7 @@ from uuid import UUID
 from ....core.metrics import RequestMetrics
 from ..models import AgentSafetyEvent
 from ..repository import AgentRuntimeRepository
+from .templates import get_safety_response_template
 
 
 @dataclass(frozen=True)
@@ -28,48 +29,52 @@ class DeterministicSafetyGuard:
         normalized = _normalize(text)
         crisis_match = _first_match(normalized, EMOTIONAL_CRISIS_TERMS)
         if crisis_match:
+            template = get_safety_response_template("emotional_crisis_escalation")
             return SafetyDecision(
                 category="emotional_crisis",
                 severity="critical",
                 decision="escalate",
                 evidence=_evidence(crisis_match),
-                response_template_key="emotional_crisis_escalation",
-                response_template_version=SAFETY_RESPONSE_TEMPLATE_VERSION,
-                handoff_type="crisis_support",
+                response_template_key=template.key,
+                response_template_version=template.version,
+                handoff_type=template.handoff_type,
             )
 
         health_match = _first_match(normalized, HEALTH_RED_FLAG_TERMS)
         if health_match:
+            template = get_safety_response_template("maternal_infant_health_escalation")
             return SafetyDecision(
                 category="health_red_flag",
                 severity="high",
                 decision="escalate",
                 evidence=_evidence(health_match),
-                response_template_key="maternal_infant_health_escalation",
-                response_template_version=SAFETY_RESPONSE_TEMPLATE_VERSION,
-                handoff_type="medical_or_emergency_support",
+                response_template_key=template.key,
+                response_template_version=template.version,
+                handoff_type=template.handoff_type,
             )
 
         injection_match = _first_match(normalized, PROMPT_INJECTION_TERMS)
         if injection_match:
+            template = get_safety_response_template("security_refusal")
             return SafetyDecision(
                 category="prompt_injection",
                 severity="medium",
                 decision="block",
                 evidence=_evidence(injection_match),
-                response_template_key="security_refusal",
-                response_template_version=SAFETY_RESPONSE_TEMPLATE_VERSION,
-                handoff_type="none",
+                response_template_key=template.key,
+                response_template_version=template.version,
+                handoff_type=template.handoff_type,
             )
 
+        template = get_safety_response_template("none")
         return SafetyDecision(
             category="none",
             severity="none",
             decision="allow",
             evidence={},
-            response_template_key="none",
-            response_template_version=SAFETY_RESPONSE_TEMPLATE_VERSION,
-            handoff_type="none",
+            response_template_key=template.key,
+            response_template_version=template.version,
+            handoff_type=template.handoff_type,
         )
 
 
@@ -116,9 +121,6 @@ class AgentSafetyService:
 
 
 SAFETY_RULE_VERSION = "safety-rules.v1"
-SAFETY_RESPONSE_TEMPLATE_VERSION = "safety-response.v1"
-
-
 EMOTIONAL_CRISIS_TERMS = (
     "suicide",
     "kill myself",

@@ -47,6 +47,33 @@ def test_agent_replay_service_can_include_message_content_when_explicitly_reques
     assert bundle["messages"][0]["content"] == {"text": "hello"}
 
 
+def test_agent_replay_service_redacts_pii_from_export_payloads() -> None:
+    repository = FakeReplayRepository()
+    repository.run.error_details = {"contact_email": "parent@example.com"}
+    repository.message.content = {"text": "Email me at parent@example.com"}
+    repository.event.payload = {"phone": "+1 415 555 1212", "visible": "ok"}
+    repository.tool_call.safe_args = {"api_token": "secret-token", "limit": 1}
+    repository.action.preview_payload = {"user_contact": "parent@example.com", "summary": "Pump issue"}
+    repository.artifact.payload = {"shipping_address": "1 Main Street", "title": "Birth plan"}
+    repository.workflow_state.state = {"phone_number": "4155551212", "step": "collect"}
+    repository.context_projection.projection_summary = {"email": "parent@example.com", "state_keys": ["run_id"]}
+    repository.safety_event.evidence = {"matched_term": "fever", "patient_phone": "+1 415 555 1212"}
+
+    bundle = asyncio.run(
+        AgentReplayService(repository=repository).export_run_bundle(run_id=repository.run.id, include_message_content=True)
+    )
+
+    assert bundle["run"]["error_details"] == {"contact_email": "[redacted]"}
+    assert bundle["messages"][0]["content"] == {"text": "[redacted]"}
+    assert bundle["events"][0]["payload"] == {"phone": "[redacted]", "visible": "ok"}
+    assert bundle["tool_calls"][0]["safe_args"] == {"api_token": "[redacted]", "limit": 1}
+    assert bundle["actions"][0]["preview_payload"] == {"user_contact": "[redacted]", "summary": "Pump issue"}
+    assert bundle["artifacts"][0]["payload"] == {"shipping_address": "[redacted]", "title": "Birth plan"}
+    assert bundle["workflow_states"][0]["state"] == {"phone_number": "[redacted]", "step": "collect"}
+    assert bundle["context_projections"][0]["projection_summary"] == {"email": "[redacted]", "state_keys": ["run_id"]}
+    assert bundle["safety_events"][0]["evidence"] == {"matched_term": "fever", "patient_phone": "[redacted]"}
+
+
 class FakeReplayRepository:
     def __init__(self) -> None:
         self.run = AgentRun(
