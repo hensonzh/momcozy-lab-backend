@@ -20,3 +20,7 @@ Key documents:
   the agent runtime foundation to complete product-level agent behavior.
 - `legacy-backend-acceptance-loop.md`: maps legacy domains to production
   acceptance tests, evals, and Codex loop gates.
+- `environment-profiles.md`: local, staging, and production environment
+  switching rules.
+- `product-asset-storage.md`: manifest + object storage policy for large
+  product assets.

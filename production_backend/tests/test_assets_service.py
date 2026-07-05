@@ -7,11 +7,11 @@ from production_backend.app.modules.assets import service as assets_service
 from production_backend.app.modules.assets.service import ProductAssetService
 
 
-def test_packaged_asset_root_is_owned_by_production_backend() -> None:
-    asset_root = assets_service.PACKAGED_ASSET_ROOT.as_posix()
+def test_default_product_asset_manifest_is_owned_by_production_backend() -> None:
+    manifest_path = assets_service.DEFAULT_PRODUCT_ASSET_MANIFEST_PATH.as_posix()
 
-    assert "/production_backend/fixtures/product_assets/" in asset_root
-    assert "/skills/" not in asset_root
+    assert "/production_backend/assets/product-assets.manifest.json" in manifest_path
+    assert "/skills/" not in manifest_path
 
 
 def test_product_asset_service_builds_allowlisted_manifest(tmp_path: Path) -> None:
@@ -27,6 +27,36 @@ def test_product_asset_service_builds_allowlisted_manifest(tmp_path: Path) -> No
     assert assets[0].content_type == "image/png"
     assert assets[0].domain == "device_guidance"
     assert assets[0].path == asset_root / "air1" / "images" / "guide.png"
+    assert assets[0].object_key is None
+
+
+def test_product_asset_service_loads_manifest_without_local_asset_path(tmp_path: Path) -> None:
+    manifest_path = tmp_path / "product-assets.manifest.json"
+    manifest_path.write_text(
+        """
+        {
+          "schema_version": "product_assets.v1",
+          "assets": [
+            {
+              "id": "asset_manifest",
+              "label": "Air1 guide",
+              "domain": "device_guidance",
+              "content_type": "application/pdf",
+              "size_bytes": 1200,
+              "object_key": "product-assets/device-guidance/assets/air1/guide.pdf"
+            }
+          ]
+        }
+        """,
+        encoding="utf-8",
+    )
+
+    assets = ProductAssetService(manifest_path=manifest_path).list_assets(limit=10)
+
+    assert len(assets) == 1
+    assert assets[0].id == "asset_manifest"
+    assert assets[0].path is None
+    assert assets[0].object_key == "product-assets/device-guidance/assets/air1/guide.pdf"
 
 
 def test_product_asset_service_rejects_unknown_asset_id(tmp_path: Path) -> None:

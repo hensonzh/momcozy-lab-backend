@@ -21,6 +21,7 @@ def test_compose_uses_local_infra_service_names_not_localhost() -> None:
     assert "postgres:16" in compose
     assert "redis:7" in compose
     assert "minio/minio:latest" in compose
+    assert "${MOMCOZY_BACKEND_ENV_FILE:-compose.env.example}" in compose
     assert "postgresql+asyncpg://momcozy:momcozy@postgres:5432/momcozy" in env
     assert "redis://redis:6379/0" in env
     assert "localhost" not in env
@@ -35,6 +36,34 @@ def test_compose_env_keeps_object_storage_switchable_by_environment() -> None:
     assert "OBJECT_STORAGE_ENDPOINT_URL=" in env
     assert "OBJECT_STORAGE_ACCESS_KEY_ID=" in env
     assert "OBJECT_STORAGE_SECRET_ACCESS_KEY=" in env
+    assert "PRODUCT_ASSET_MANIFEST_PATH=/workspace/production_backend/assets/product-assets.manifest.json" in env
+    assert "PRODUCT_ASSET_LOCAL_ROOT=" in env
+
+
+def test_environment_profile_examples_exist_for_local_staging_and_production() -> None:
+    env_dir = PRODUCTION_BACKEND / "env"
+
+    assert (env_dir / "local.env.example").exists()
+    assert (env_dir / "compose.local.env.example").exists()
+    assert (env_dir / "staging.env.example").exists()
+    assert (env_dir / "production.env.example").exists()
+    assert "APP_ENV=production" in (env_dir / "production.env.example").read_text()
+    assert "OBJECT_STORAGE_PROVIDER=oss" in (env_dir / "production.env.example").read_text()
+
+
+def test_makefile_infra_checks_use_project_python_environment() -> None:
+    makefile = (ROOT / "Makefile").read_text()
+
+    assert "PYTHON ?= .venv/bin/python" in makefile
+    assert "$(PYTHON) production_backend/scripts/check_database_profile.py" in makefile
+    assert "$(PYTHON) production_backend/scripts/check_redis_runtime_controls.py" in makefile
+    assert "$(PYTHON) production_backend/scripts/check_object_storage_profile.py" in makefile
+
+
+def test_docker_context_excludes_product_asset_blobs_from_worker_images() -> None:
+    dockerignore = (ROOT / ".dockerignore").read_text()
+
+    assert "production_backend/fixtures/product_assets" in dockerignore
 
 
 def test_compose_env_declares_disabled_agent_worker_controls() -> None:

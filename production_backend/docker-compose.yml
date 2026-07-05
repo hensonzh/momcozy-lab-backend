@@ -6,7 +6,7 @@ services:
       context: ..
       dockerfile: production_backend/Dockerfile
     env_file:
-      - compose.env.example
+      - ${MOMCOZY_BACKEND_ENV_FILE:-compose.env.example}
     ports:
       - "8000:8000"
     depends_on:
@@ -33,7 +33,7 @@ services:
       dockerfile: production_backend/Dockerfile
     command: python -m alembic -c production_backend/alembic.ini upgrade head
     env_file:
-      - compose.env.example
+      - ${MOMCOZY_BACKEND_ENV_FILE:-compose.env.example}
     profiles:
       - tools
     depends_on:
@@ -46,7 +46,7 @@ services:
       dockerfile: production_backend/Dockerfile
     command: python -m production_backend.scripts.run_agent_worker
     env_file:
-      - compose.env.example
+      - ${MOMCOZY_BACKEND_ENV_FILE:-compose.env.example}
     profiles:
       - workers
     depends_on:
@@ -61,7 +61,7 @@ services:
       dockerfile: production_backend/Dockerfile
     command: python -m production_backend.scripts.run_outbox_worker
     env_file:
-      - compose.env.example
+      - ${MOMCOZY_BACKEND_ENV_FILE:-compose.env.example}
     profiles:
       - workers
     depends_on:

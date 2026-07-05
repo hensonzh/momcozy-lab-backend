@@ -15,6 +15,7 @@ tmp
 upload_files
 web_data
 legacy_backend
+production_backend/fixtures/product_assets
 
 dist
 build

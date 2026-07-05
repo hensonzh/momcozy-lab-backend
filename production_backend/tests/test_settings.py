@@ -16,6 +16,8 @@ def test_settings_from_env_reads_infrastructure_configuration(monkeypatch: pytes
     monkeypatch.setenv("OBJECT_STORAGE_ENDPOINT_URL", "https://s3.example.test")
     monkeypatch.setenv("OBJECT_STORAGE_ACCESS_KEY_ID", "access-key")
     monkeypatch.setenv("OBJECT_STORAGE_SECRET_ACCESS_KEY", "secret-key")
+    monkeypatch.setenv("PRODUCT_ASSET_MANIFEST_PATH", "/etc/momcozy/product-assets.manifest.json")
+    monkeypatch.setenv("PRODUCT_ASSET_LOCAL_ROOT", "/tmp/momcozy-assets")
 
     settings = Settings.from_env()
 
@@ -25,6 +27,8 @@ def test_settings_from_env_reads_infrastructure_configuration(monkeypatch: pytes
     assert settings.object_storage_provider == "s3"
     assert settings.object_storage_bucket == "momcozy-staging"
     assert settings.object_storage_endpoint_url == "https://s3.example.test"
+    assert settings.product_asset_manifest_path == "/etc/momcozy/product-assets.manifest.json"
+    assert settings.product_asset_local_root == "/tmp/momcozy-assets"
 
 
 def test_settings_from_env_reads_file_upload_limit(monkeypatch: pytest.MonkeyPatch) -> None:

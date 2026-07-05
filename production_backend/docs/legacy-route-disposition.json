@@ -3,8 +3,8 @@
   "routes": [
     {"legacy_path": "/", "status": "mapped", "target_paths": ["/v1/health/live"], "target_domain": "foundation", "notes": "Service index is replaced by explicit health endpoints."},
     {"legacy_path": "/health", "status": "mapped", "target_paths": ["/v1/health/live", "/v1/health/ready"], "target_domain": "foundation", "notes": "Live and readiness semantics are split."},
-    {"legacy_path": "/images/Air_img/{asset_path:path}", "status": "mapped", "target_paths": ["/v1/assets/{asset_id}"], "target_domain": "assets", "notes": "Legacy device image paths are replaced by packaged product asset ids from /v1/assets."},
-    {"legacy_path": "/skill-assets/{skill_id}/{asset_path:path}", "status": "mapped", "target_paths": ["/v1/assets/{asset_id}"], "target_domain": "assets", "notes": "Global skill asset filesystem paths are replaced by allowlisted packaged product asset ids from /v1/assets."},
+    {"legacy_path": "/images/Air_img/{asset_path:path}", "status": "mapped", "target_paths": ["/v1/assets/{asset_id}"], "target_domain": "assets", "notes": "Legacy device image paths are replaced by manifest product asset ids backed by object storage."},
+    {"legacy_path": "/skill-assets/{skill_id}/{asset_path:path}", "status": "mapped", "target_paths": ["/v1/assets/{asset_id}"], "target_domain": "assets", "notes": "Global skill asset filesystem paths are replaced by allowlisted manifest asset ids from /v1/assets."},
     {"legacy_path": "/api/ag-ui", "status": "mapped", "target_paths": ["/v1/agent/runs", "/v1/agent/runs/{run_id}/stream"], "target_domain": "agent_runtime", "notes": "Legacy raw AG-UI stream is replaced by persisted run and application event stream."},
     {"legacy_path": "/api/ag-ui-cancel", "status": "mapped", "target_paths": ["/v1/agent/runs/{run_id}/cancel"], "target_domain": "agent_runtime", "notes": "Cancel is run-scoped and owner-scoped."},
     {"legacy_path": "/api/ag-ui-prewarm", "status": "retired", "target_paths": [], "target_domain": "agent_runtime", "notes": "Prewarm fallback is retired; production uses explicit threads and runs."},

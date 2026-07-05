@@ -8,7 +8,7 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
-from uuid import NAMESPACE_URL, uuid5
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
@@ -246,7 +246,9 @@ def _instructions(*, specialist_id: str, specialist_instructions: str) -> str:
 
 
 def _synthetic_action_events(tool_calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [{"type": "action.confirmation_required"} for tool_call in tool_calls if str(tool_call.get("tool_name") or "").endswith(".propose")]
+    return [
+        {"type": "action.confirmation_required"} for tool_call in tool_calls if str(tool_call.get("tool_name") or "").endswith(".propose")
+    ]
 
 
 def _synthetic_actions(tool_calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -256,7 +258,7 @@ def _synthetic_actions(tool_calls: list[dict[str, Any]]) -> list[dict[str, Any]]
 def _select_cases(cases: list[dict[str, Any]], *, suite: str | None, name: str | None, max_cases: int | None) -> list[dict[str, Any]]:
     selected = [case for case in cases if (suite is None or case.get("suite") == suite) and (name is None or case.get("name") == name)]
     if max_cases is not None:
-        selected = selected[:max(0, max_cases)]
+        selected = selected[: max(0, max_cases)]
     if not selected:
         raise SystemExit("No provider eval cases selected.")
     return selected
@@ -343,7 +345,7 @@ def _eval_id(case: dict[str, Any], prefix: str) -> str:
     return f"{prefix}-{suite}-{name}"[:120]
 
 
-def _eval_uuid(case: dict[str, Any], prefix: str):
+def _eval_uuid(case: dict[str, Any], prefix: str) -> UUID:
     return uuid5(NAMESPACE_URL, _eval_id(case, prefix))
 
 

@@ -107,8 +107,9 @@ storage provider.
 
 Legacy `/skill-assets/...` and `/images/Air_img/...` paths are retired. Product
 assets are served through `GET /v1/assets` and `GET /v1/assets/{asset_id}` using
-allowlisted packaged asset ids; clients never construct URLs from local skill
-directory names or filesystem paths.
+allowlisted manifest asset ids. Asset bytes live in the configured object
+storage provider; clients never construct URLs from local skill directory names,
+filesystem paths, or object-storage keys.
 
 ## Voice
 

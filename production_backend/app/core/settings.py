@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 LOCAL_DATABASE_URL = "postgresql+asyncpg://momcozy:momcozy@localhost:5432/momcozy"
 LOCAL_REDIS_URL = "redis://localhost:6379/0"
 LOCAL_OBJECT_STORAGE_ROOT = "production_backend/.local/object_storage"
+LOCAL_PRODUCT_ASSET_MANIFEST_PATH = "production_backend/assets/product-assets.manifest.json"
 DEFAULT_FILE_UPLOAD_MAX_BYTES = 10 * 1024 * 1024
 SUPPORTED_OBJECT_STORAGE_PROVIDERS = {"local", "s3", "oss", "cos", "minio"}
 PRODUCTION_ENVS = {"prod", "production"}
@@ -31,6 +32,8 @@ class Settings:
     object_storage_access_key_id: str = ""
     object_storage_secret_access_key: str = ""
     object_storage_local_root: str = LOCAL_OBJECT_STORAGE_ROOT
+    product_asset_manifest_path: str = LOCAL_PRODUCT_ASSET_MANIFEST_PATH
+    product_asset_local_root: str = ""
     file_upload_max_bytes: int = DEFAULT_FILE_UPLOAD_MAX_BYTES
     auth_jwt_secret: str = ""
     auth_jwt_issuer: str = ""
@@ -82,6 +85,8 @@ class Settings:
             object_storage_access_key_id=_env("OBJECT_STORAGE_ACCESS_KEY_ID", cls.object_storage_access_key_id),
             object_storage_secret_access_key=_env("OBJECT_STORAGE_SECRET_ACCESS_KEY", cls.object_storage_secret_access_key),
             object_storage_local_root=_env("OBJECT_STORAGE_LOCAL_ROOT", cls.object_storage_local_root),
+            product_asset_manifest_path=_env("PRODUCT_ASSET_MANIFEST_PATH", cls.product_asset_manifest_path),
+            product_asset_local_root=_env("PRODUCT_ASSET_LOCAL_ROOT", cls.product_asset_local_root),
             file_upload_max_bytes=_env_int("FILE_UPLOAD_MAX_BYTES", cls.file_upload_max_bytes),
             auth_jwt_secret=_env("AUTH_JWT_SECRET", cls.auth_jwt_secret),
             auth_jwt_issuer=_env("AUTH_JWT_ISSUER", cls.auth_jwt_issuer),
@@ -138,15 +143,9 @@ class Settings:
         if not self.redis_url:
             errors.append("REDIS_URL is required")
         if provider not in SUPPORTED_OBJECT_STORAGE_PROVIDERS:
-            errors.append(
-                "OBJECT_STORAGE_PROVIDER must be one of "
-                f"{', '.join(sorted(SUPPORTED_OBJECT_STORAGE_PROVIDERS))}"
-            )
+            errors.append(f"OBJECT_STORAGE_PROVIDER must be one of {', '.join(sorted(SUPPORTED_OBJECT_STORAGE_PROVIDERS))}")
         if self.auth_jwt_algorithm not in SUPPORTED_AUTH_JWT_ALGORITHMS:
-            errors.append(
-                "AUTH_JWT_ALGORITHM must be one of "
-                f"{', '.join(sorted(SUPPORTED_AUTH_JWT_ALGORITHMS))}"
-            )
+            errors.append(f"AUTH_JWT_ALGORITHM must be one of {', '.join(sorted(SUPPORTED_AUTH_JWT_ALGORITHMS))}")
         if self.auth_jwt_secret and len(self.auth_jwt_secret.encode("utf-8")) < 32:
             errors.append("AUTH_JWT_SECRET must be at least 32 bytes")
         if self.service_api_key and len(self.service_api_key.encode("utf-8")) < 32:
@@ -186,15 +185,9 @@ class Settings:
         if len(self.openai_agent_prompt_version) > 80:
             errors.append("OPENAI_AGENT_PROMPT_VERSION must be at most 80 characters")
         if self.voice_provider not in SUPPORTED_VOICE_PROVIDERS:
-            errors.append(
-                "VOICE_PROVIDER must be one of "
-                f"{', '.join(sorted(SUPPORTED_VOICE_PROVIDERS))}"
-            )
+            errors.append(f"VOICE_PROVIDER must be one of {', '.join(sorted(SUPPORTED_VOICE_PROVIDERS))}")
         if self.vision_provider not in SUPPORTED_VISION_PROVIDERS:
-            errors.append(
-                "VISION_PROVIDER must be one of "
-                f"{', '.join(sorted(SUPPORTED_VISION_PROVIDERS))}"
-            )
+            errors.append(f"VISION_PROVIDER must be one of {', '.join(sorted(SUPPORTED_VISION_PROVIDERS))}")
 
         if self.is_production:
             if _is_local_url(self.database_url, LOCAL_DATABASE_URL):

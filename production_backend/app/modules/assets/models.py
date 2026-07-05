@@ -11,4 +11,5 @@ class ProductAsset:
     domain: str
     content_type: str
     size_bytes: int
-    path: Path
+    path: Path | None = None
+    object_key: str | None = None

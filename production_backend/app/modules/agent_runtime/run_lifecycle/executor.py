@@ -16,8 +16,16 @@ from ..memory.service import AgentMemoryService
 from ..models import AgentAction, AgentEvent, AgentMessage, AgentRun
 from ..prompts import ContextProjection, ModelInputBuilder
 from ..repository import AgentRuntimeRepository
-from ..routing import RoutingContext, RoutingPlan, SpecialistRoutingService
-from ..sdk import AgentSpecialistProfile, AgentSpecialistRegistry, OpenAIAgentsSdkRunner, SdkNodeRequest, SdkToolDefinition, default_specialist_registry, sdk_tool_name
+from ..routing import RoutingContext, RoutingPlan, SpecialistId, SpecialistRoutingService
+from ..sdk import (
+    AgentSpecialistProfile,
+    AgentSpecialistRegistry,
+    OpenAIAgentsSdkRunner,
+    SdkNodeRequest,
+    SdkToolDefinition,
+    default_specialist_registry,
+    sdk_tool_name,
+)
 from ..tools import ToolContractRegistry, ToolExecutor, default_tool_registry
 from ..tools.schemas import tool_input_schema
 from .execution import AgentRunExecutionResult
@@ -366,7 +374,9 @@ class AgentRuntimeExecutor:
     ) -> None:
         if self.state_store is None:
             return
-        selected_history = [message for message in messages if message.sequence < current_message.sequence and message.role in {"user", "assistant"}]
+        selected_history = [
+            message for message in messages if message.sequence < current_message.sequence and message.role in {"user", "assistant"}
+        ]
         await self.state_store.record_context_projection(
             run=run,
             selected_message_ids=[message.id for message in [*selected_history, current_message]],
@@ -395,7 +405,9 @@ class AgentRuntimeExecutor:
 
 
 def _history_before(*, messages: list[AgentMessage], before_sequence: int) -> list[dict[str, Any]]:
-    return [_to_model_message(message) for message in messages if message.sequence < before_sequence and message.role in {"user", "assistant"}]
+    return [
+        _to_model_message(message) for message in messages if message.sequence < before_sequence and message.role in {"user", "assistant"}
+    ]
 
 
 def _routing_context(*, run: AgentRun, current_message: AgentMessage) -> RoutingContext:
@@ -411,11 +423,29 @@ def _routing_context(*, run: AgentRun, current_message: AgentMessage) -> Routing
         actor_user_id=run.actor_user_id,
         message=_message_text(current_message),
         app_surface=app_surface or None,
-        active_specialist_id=active_specialist_id or None,
+        active_specialist_id=_specialist_id(active_specialist_id),
         active_workflow=active_workflow or None,
-        pending_action_id=pending_action_id or None,
-        attachment_types=tuple(item for item in attachment_types if isinstance(item, str)) if isinstance(attachment_types, list) else (),
+        pending_action_id=_uuid(pending_action_id),
+        attachment_types=[item for item in attachment_types if isinstance(item, str)] if isinstance(attachment_types, list) else [],
     )
+
+
+def _specialist_id(value: str) -> SpecialistId | None:
+    if not value:
+        return None
+    try:
+        return SpecialistId(value)
+    except ValueError:
+        return None
+
+
+def _uuid(value: str) -> UUID | None:
+    if not value:
+        return None
+    try:
+        return UUID(value)
+    except ValueError:
+        return None
 
 
 def _sdk_instructions(*, projection: ContextProjection, specialist: AgentSpecialistProfile) -> str:
