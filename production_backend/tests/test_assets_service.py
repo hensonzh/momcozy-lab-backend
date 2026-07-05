@@ -3,7 +3,15 @@ from pathlib import Path
 import pytest
 
 from production_backend.app.core.errors import ApiError
+from production_backend.app.modules.assets import service as assets_service
 from production_backend.app.modules.assets.service import ProductAssetService
+
+
+def test_packaged_asset_root_is_owned_by_production_backend() -> None:
+    asset_root = assets_service.PACKAGED_ASSET_ROOT.as_posix()
+
+    assert "/production_backend/fixtures/product_assets/" in asset_root
+    assert "/skills/" not in asset_root
 
 
 def test_product_asset_service_builds_allowlisted_manifest(tmp_path: Path) -> None:

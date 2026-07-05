@@ -15,6 +15,12 @@ data/*.db
 .worktree-runtime/*.db
 logs/
 .runlogs/
+tmp/
+legacy_backend/data/*.db
+legacy_backend/logs/
+legacy_backend/runlogs/
+legacy_backend/upload_files/*
+legacy_backend/tmp/
 
 dist/
 build/

@@ -12,13 +12,13 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_OUTPUT = REPO_ROOT / "production_backend" / "docs" / "backend-refactor-inventory.generated.md"
 
 ROUTE_FILES = (
-    "src/momcozy_agent/server.py",
-    "src/momcozy_agent/api_app.py",
-    "src/momcozy_agent/api/routes.py",
-    "src/momcozy_agent/api/chat_ws_bridge.py",
-    "src/momcozy_agent/api/vision_stream.py",
+    "legacy_backend/src/momcozy_agent/server.py",
+    "legacy_backend/src/momcozy_agent/api_app.py",
+    "legacy_backend/src/momcozy_agent/api/routes.py",
+    "legacy_backend/src/momcozy_agent/api/chat_ws_bridge.py",
+    "legacy_backend/src/momcozy_agent/api/vision_stream.py",
 )
-DATA_STORE_FILE = "src/momcozy_agent/services/data_store.py"
+DATA_STORE_FILE = "legacy_backend/src/momcozy_agent/services/data_store.py"
 
 HTTP_METHOD_BY_DECORATOR = {
     "get": "GET",

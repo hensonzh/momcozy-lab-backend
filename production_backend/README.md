@@ -2,10 +2,10 @@
 
 This directory is the isolated workspace for the production backend refactor.
 
-The legacy backend remains under `src/momcozy_agent/`. New production code should
-be built here first so the target architecture can evolve without inheriting the
-legacy agent loop, in-memory session, SQLite data store, or static API-key user
-boundary.
+The legacy backend has been moved under the repository-level `legacy_backend/`
+directory. New production code should be built here first so the target
+architecture can evolve without inheriting the legacy agent loop, in-memory
+session, SQLite data store, or static API-key user boundary.
 
 ## Boundary Rules
 
@@ -14,8 +14,11 @@ boundary.
 - New backend tests live under `production_backend/tests/`.
 - Refactor inventories, ADRs, and runbooks live under `production_backend/docs/`.
 - Development and migration scripts live under `production_backend/scripts/`.
-- Do not import legacy runtime modules from `src/momcozy_agent/` in production
-  code. If a temporary bridge is unavoidable, put it under
+- The old demo backend, old tests, old scripts, old skill prompts, and local
+  legacy runtime artifacts live under repository-level `legacy_backend/`.
+- Do not import legacy runtime modules from
+  `legacy_backend/src/momcozy_agent/` in production code. If a temporary bridge
+  is unavoidable, put it under
   `production_backend/legacy_bridge/` with an owner, removal condition, and
   deletion PR.
 - Do not use `previous_response_id`, provider session, in-memory `ChatSession`,
@@ -112,6 +115,13 @@ production_backend/
   docs/
   scripts/
   legacy_bridge/
+
+legacy_backend/
+  src/
+  skills/
+  tests/
+  scripts/
+  web_data/
 ```
 
 ## First Milestone

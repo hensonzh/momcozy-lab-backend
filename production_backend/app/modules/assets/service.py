@@ -7,8 +7,10 @@ from ...core.errors import ApiError
 from .models import ProductAsset
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[4]
-PACKAGED_ASSET_ROOT = (PROJECT_ROOT / "skills" / "device-guidance" / "assets").resolve()
+PRODUCTION_BACKEND_ROOT = Path(__file__).resolve().parents[3]
+PACKAGED_ASSET_ROOT = (
+    PRODUCTION_BACKEND_ROOT / "fixtures" / "product_assets" / "device-guidance" / "assets"
+).resolve()
 SUPPORTED_CONTENT_TYPES = {
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",

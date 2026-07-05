@@ -130,14 +130,14 @@ Web / App
 
 关键文件：
 
-- `src/momcozy_agent/agents.py`：Responses API 请求构造、tool loop、流式事件、工具结果压缩。
-- `src/momcozy_agent/server.py`：HTTP/SSE 服务、AG-UI payload 转换、内存会话。
-- `src/momcozy_agent/api/chat_ws_bridge.py`：App WebSocket 到内部 SSE agent stream 的桥接。
-- `src/momcozy_agent/static_context.py`：稳定 agent 指令、安全策略、service skill manifest。
-- `src/momcozy_agent/contexts.py`：`request_context` 与 `ContextState`。
-- `src/momcozy_agent/skills.py`：service skill registry、manifest 解析、`load_skill`。
-- `src/momcozy_agent/tool_registry.py`：工具暴露和 handler dispatch。
-- `src/momcozy_agent/tool_schemas.py`：Responses API function schemas。
+- `legacy_backend/src/momcozy_agent/agents.py`：Responses API 请求构造、tool loop、流式事件、工具结果压缩。
+- `legacy_backend/src/momcozy_agent/server.py`：HTTP/SSE 服务、AG-UI payload 转换、内存会话。
+- `legacy_backend/src/momcozy_agent/api/chat_ws_bridge.py`：App WebSocket 到内部 SSE agent stream 的桥接。
+- `legacy_backend/src/momcozy_agent/static_context.py`：稳定 agent 指令、安全策略、service skill manifest。
+- `legacy_backend/src/momcozy_agent/contexts.py`：`request_context` 与 `ContextState`。
+- `legacy_backend/src/momcozy_agent/skills.py`：service skill registry、manifest 解析、`load_skill`。
+- `legacy_backend/src/momcozy_agent/tool_registry.py`：工具暴露和 handler dispatch。
+- `legacy_backend/src/momcozy_agent/tool_schemas.py`：Responses API function schemas。
 
 ### 当前 service skill
 

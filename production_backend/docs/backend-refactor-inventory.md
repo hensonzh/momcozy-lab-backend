@@ -9,10 +9,10 @@ the production backend.
 
 To be filled from:
 
-- `src/momcozy_agent/api/routes.py`
-- `src/momcozy_agent/api/chat_ws_bridge.py`
-- `src/momcozy_agent/api/vision_stream.py`
-- `src/momcozy_agent/server.py`
+- `legacy_backend/src/momcozy_agent/api/routes.py`
+- `legacy_backend/src/momcozy_agent/api/chat_ws_bridge.py`
+- `legacy_backend/src/momcozy_agent/api/vision_stream.py`
+- `legacy_backend/src/momcozy_agent/server.py`
 
 For each endpoint, record:
 
@@ -31,7 +31,7 @@ test coverage
 
 ## SQLite Schema
 
-To be filled from `src/momcozy_agent/services/data_store.py`.
+To be filled from `legacy_backend/src/momcozy_agent/services/data_store.py`.
 
 Record:
 
@@ -48,11 +48,11 @@ future PostgreSQL module
 
 To be filled from:
 
-- `src/momcozy_agent/agents.py`
-- `src/momcozy_agent/server.py`
-- `src/momcozy_agent/contexts.py`
-- `src/momcozy_agent/tool_registry.py`
-- `src/momcozy_agent/tool_schemas.py`
+- `legacy_backend/src/momcozy_agent/agents.py`
+- `legacy_backend/src/momcozy_agent/server.py`
+- `legacy_backend/src/momcozy_agent/contexts.py`
+- `legacy_backend/src/momcozy_agent/tool_registry.py`
+- `legacy_backend/src/momcozy_agent/tool_schemas.py`
 
 Record:
 
@@ -72,4 +72,3 @@ frontend reducer dependency
 - New production code must not use `previous_response_id`.
 - New production code must not treat SQLite as authority.
 - Temporary bridges must be isolated under `production_backend/legacy_bridge/`.
-
