@@ -419,6 +419,7 @@ def test_sdk_runner_wraps_application_tool_executor_for_agents_sdk(monkeypatch: 
     assert result.final_text == 'tool-output:{"owner_user_id": "user_1"}'
     assert FakeAgentsSdkAgent.created["tools"][0].name == "profile_read"
     assert FakeAgentsSdkAgent.created["tools"][0].params_json_schema == {"type": "object", "properties": {}}
+    assert FakeAgentsSdkAgent.created["tools"][0].strict_json_schema is False
 
 
 def test_sdk_runner_records_backend_metrics() -> None:
@@ -527,11 +528,20 @@ class FakeAgentsSdkAgent:
 
 
 class FakeAgentsSdkFunctionTool:
-    def __init__(self, *, name: str, description: str, params_json_schema: dict, on_invoke_tool) -> None:
+    def __init__(
+        self,
+        *,
+        name: str,
+        description: str,
+        params_json_schema: dict,
+        on_invoke_tool,
+        strict_json_schema: bool = True,
+    ) -> None:
         self.name = name
         self.description = description
         self.params_json_schema = params_json_schema
         self.on_invoke_tool = on_invoke_tool
+        self.strict_json_schema = strict_json_schema
 
 
 class FakeAgentsSdkRunConfig:

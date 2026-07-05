@@ -222,6 +222,7 @@ def _build_function_tool(*, agents_module: Any, definition: SdkToolDefinition) -
         description=definition.description,
         params_json_schema=definition.params_json_schema,
         on_invoke_tool=invoke_tool,
+        strict_json_schema=False,
     )
 
 
