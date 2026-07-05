@@ -4,7 +4,7 @@ COMPOSE_ENV_FILE ?= env/compose.local.env.example
 PYTHON ?= .venv/bin/python
 COMPOSE = MOMCOZY_BACKEND_ENV_FILE=$(COMPOSE_ENV_FILE) docker compose -f production_backend/docker-compose.yml
 
-.PHONY: backend-local-up backend-up backend-down backend-local-migrate backend-migrate backend-local-workers backend-workers backend-local-minio backend-check-infra backend-env-print
+.PHONY: backend-local-up backend-up backend-down backend-local-migrate backend-migrate backend-local-workers backend-workers backend-local-minio backend-check-infra backend-productization-status backend-smoke backend-staging-smoke backend-production-readiness backend-env-print
 
 backend-local-up:
 	$(MAKE) backend-up BACKEND_ENV=local
@@ -35,6 +35,21 @@ backend-check-infra:
 	$(PYTHON) production_backend/scripts/check_database_profile.py; \
 	$(PYTHON) production_backend/scripts/check_redis_runtime_controls.py; \
 	$(PYTHON) production_backend/scripts/check_object_storage_profile.py
+
+backend-productization-status:
+	$(PYTHON) production_backend/scripts/check_productization_status.py
+
+backend-smoke:
+	$(PYTHON) production_backend/scripts/check_productization_status.py
+	$(PYTHON) production_backend/scripts/run_agent_seed_eval.py
+
+backend-staging-smoke:
+	$(MAKE) backend-productization-status
+	$(MAKE) backend-check-infra BACKEND_ENV=staging
+
+backend-production-readiness:
+	$(MAKE) backend-productization-status
+	$(MAKE) backend-check-infra BACKEND_ENV=production
 
 backend-env-print:
 	@echo "BACKEND_ENV=$(BACKEND_ENV)"

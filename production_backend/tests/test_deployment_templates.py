@@ -58,6 +58,13 @@ def test_makefile_infra_checks_use_project_python_environment() -> None:
     assert "$(PYTHON) production_backend/scripts/check_database_profile.py" in makefile
     assert "$(PYTHON) production_backend/scripts/check_redis_runtime_controls.py" in makefile
     assert "$(PYTHON) production_backend/scripts/check_object_storage_profile.py" in makefile
+    assert "backend-productization-status:" in makefile
+    assert "$(PYTHON) production_backend/scripts/check_productization_status.py" in makefile
+    assert "backend-smoke:" in makefile
+    assert "backend-staging-smoke:" in makefile
+    assert "$(MAKE) backend-check-infra BACKEND_ENV=staging" in makefile
+    assert "backend-production-readiness:" in makefile
+    assert "$(MAKE) backend-check-infra BACKEND_ENV=production" in makefile
 
 
 def test_docker_context_excludes_product_asset_blobs_from_worker_images() -> None:

@@ -1,0 +1,31 @@
+import subprocess
+from pathlib import Path
+
+from production_backend.scripts.check_productization_status import run_checks
+
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_productization_status_checks_pass_for_current_backend() -> None:
+    results = run_checks(ROOT)
+
+    assert results
+    assert all(result.status == "pass" for result in results)
+
+
+def test_productization_status_script_prints_json_summary() -> None:
+    completed = subprocess.run(
+        [
+            ".venv/bin/python",
+            "production_backend/scripts/check_productization_status.py",
+            "--json",
+        ],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert '"status": "pass"' in completed.stdout
+    assert '"failed": 0' in completed.stdout

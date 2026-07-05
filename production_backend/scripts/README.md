@@ -11,3 +11,6 @@ where possible.
   JSON summary and `--junit-output` for CI test reports.
 - `run_agent_replay_eval.py`: evaluates a redacted replay bundle against one
   product seed eval case.
+- `check_productization_status.py`: checks backend-local productization
+  guardrails such as required docs, env profiles, CI gates, worker scripts,
+  OpenAPI snapshot, Makefile smoke targets, and legacy-runtime scan coverage.

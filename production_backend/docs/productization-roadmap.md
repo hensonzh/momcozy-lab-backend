@@ -94,7 +94,8 @@ Acceptance:
 - deployment runbook covers backup/restore, credential rotation, worker backlog,
   agent recovery, rollback, and security incident response.
 
-Current status: `yellow`.
+Current status: `green` for code-local acceptance. Real staging/production
+credential checks remain external.
 
 Already covered:
 
@@ -104,7 +105,7 @@ Already covered:
 - local and managed object storage abstraction;
 - readiness checks and deployment docs.
 
-Remaining backend-only PR slices:
+Completed backend-only PR slices:
 
 - `ops: add staging smoke command bundle`
 - `ops: add production readiness checklist status command`
