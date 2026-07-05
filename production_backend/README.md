@@ -47,9 +47,10 @@ environment variables, not code changes:
 - `VOICE_PROVIDER`
 - `VISION_PROVIDER`
 
-Use `production_backend/.env.example` as the local template. Secrets stay out of
-git, and production startup rejects local object storage. Backup/restore hook
-values should be references to external automation, not raw credentials.
+Use `production_backend/env/local.env.example` as the host-local template and
+copy it to ignored `production_backend/env/local.env` for secrets. Secrets stay
+out of git, and production startup rejects local object storage. Backup/restore
+hook values should be references to external automation, not raw credentials.
 
 ## Local Docker Compose
 
@@ -62,18 +63,19 @@ docker compose --profile tools run --rm migrate
 docker compose up api
 ```
 
-`docker-compose.yml` reads `compose.env.example`, which intentionally points to
-compose service hostnames such as `postgres` and `redis`. Production deployments
-should provide managed `DATABASE_URL`, `REDIS_URL`, and managed
-`OBJECT_STORAGE_*` values through environment variables; no code change is
-required to switch providers.
+`docker-compose.yml` reads `env/compose.local.env.example` by default, which
+intentionally points to compose service hostnames such as `postgres` and
+`redis`. Production deployments should provide managed `DATABASE_URL`,
+`REDIS_URL`, and managed `OBJECT_STORAGE_*` values through environment
+variables; no code change is required to switch providers.
 
 Agent runs are processed by a separate worker process, not by the API lifespan.
 The compose `agent-worker` service is behind the `workers` profile and remains
 safe by default because `AGENT_RUNTIME_WORKER_ENABLED=false` in
-`compose.env.example`. Enable it only in an environment where the LangGraph /
-OpenAI Agents SDK runtime handler is configured. `OPENAI_API_KEY` must be set
-when this worker is enabled, and `OPENAI_MODEL` controls the SDK agent model:
+`env/compose.local.env.example`. Enable it only in an environment where the
+LangGraph / OpenAI Agents SDK runtime handler is configured. `OPENAI_API_KEY`
+must be set when this worker is enabled, and `OPENAI_MODEL` controls the SDK
+agent model:
 
 ```bash
 AGENT_RUNTIME_WORKER_ENABLED=true docker compose --profile workers up agent-worker

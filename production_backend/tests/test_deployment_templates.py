@@ -3,6 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 PRODUCTION_BACKEND = ROOT / "production_backend"
+COMPOSE_LOCAL_ENV = PRODUCTION_BACKEND / "env" / "compose.local.env.example"
 
 
 def test_dockerfile_runs_isolated_production_backend() -> None:
@@ -16,12 +17,12 @@ def test_dockerfile_runs_isolated_production_backend() -> None:
 
 def test_compose_uses_local_infra_service_names_not_localhost() -> None:
     compose = (PRODUCTION_BACKEND / "docker-compose.yml").read_text()
-    env = (PRODUCTION_BACKEND / "compose.env.example").read_text()
+    env = COMPOSE_LOCAL_ENV.read_text()
 
     assert "postgres:16" in compose
     assert "redis:7" in compose
     assert "minio/minio:latest" in compose
-    assert "${MOMCOZY_BACKEND_ENV_FILE:-compose.env.example}" in compose
+    assert "${MOMCOZY_BACKEND_ENV_FILE:-env/compose.local.env.example}" in compose
     assert "postgresql+asyncpg://momcozy:momcozy@postgres:5432/momcozy" in env
     assert "redis://redis:6379/0" in env
     assert "localhost" not in env
@@ -29,7 +30,7 @@ def test_compose_uses_local_infra_service_names_not_localhost() -> None:
 
 
 def test_compose_env_keeps_object_storage_switchable_by_environment() -> None:
-    env = (PRODUCTION_BACKEND / "compose.env.example").read_text()
+    env = COMPOSE_LOCAL_ENV.read_text()
 
     assert "OBJECT_STORAGE_PROVIDER=local" in env
     assert "OBJECT_STORAGE_LOCAL_ROOT=/workspace/production_backend/.local/object_storage" in env
@@ -54,6 +55,8 @@ def test_environment_profile_examples_exist_for_local_staging_and_production() -
 def test_makefile_infra_checks_use_project_python_environment() -> None:
     makefile = (ROOT / "Makefile").read_text()
 
+    assert "COMPOSE_ENV_FILE ?= production_backend/env/compose.local.env.example" in makefile
+    assert "COMPOSE_ENV_FILE_FOR_COMPOSE = $(patsubst production_backend/%,%,$(COMPOSE_ENV_FILE))" in makefile
     assert "PYTHON ?= production_backend/.venv/bin/python" in makefile
     assert "$(PYTHON) production_backend/scripts/check_database_profile.py" in makefile
     assert "$(PYTHON) production_backend/scripts/check_redis_runtime_controls.py" in makefile
@@ -78,7 +81,7 @@ def test_docker_context_excludes_product_asset_blobs_from_worker_images() -> Non
 
 
 def test_compose_env_declares_disabled_agent_worker_controls() -> None:
-    env = (PRODUCTION_BACKEND / "compose.env.example").read_text()
+    env = COMPOSE_LOCAL_ENV.read_text()
 
     assert "AGENT_RUNTIME_WORKER_ENABLED=false" in env
     assert "AGENT_RUNTIME_WORKER_BATCH_LIMIT=10" in env
@@ -91,7 +94,7 @@ def test_compose_env_declares_disabled_agent_worker_controls() -> None:
 
 
 def test_compose_env_declares_disabled_outbox_worker_controls() -> None:
-    env = (PRODUCTION_BACKEND / "compose.env.example").read_text()
+    env = COMPOSE_LOCAL_ENV.read_text()
 
     assert "OUTBOX_WORKER_ENABLED=false" in env
     assert "OUTBOX_WORKER_IDLE_SECONDS=2" in env
@@ -99,7 +102,7 @@ def test_compose_env_declares_disabled_outbox_worker_controls() -> None:
 
 
 def test_compose_env_declares_active_session_auth_gate() -> None:
-    env = (PRODUCTION_BACKEND / "compose.env.example").read_text()
+    env = COMPOSE_LOCAL_ENV.read_text()
 
     assert "AUTH_REQUIRE_ACTIVE_SESSION=false" in env
 
