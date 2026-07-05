@@ -30,6 +30,7 @@ def test_agent_runtime_graph_runner_executes_completed_path_with_checkpoints() -
     assert _checkpoint_nodes(checkpoint_store) == [
         "load_context",
         "safety_gate",
+        "route_specialist",
         "sdk_reasoning",
         "tool_result_review",
         "action_policy",
@@ -39,6 +40,7 @@ def test_agent_runtime_graph_runner_executes_completed_path_with_checkpoints() -
     assert checkpoint_store.checkpoints[-1].state_summary["visited_nodes"] == [
         "load_context",
         "safety_gate",
+        "route_specialist",
         "sdk_reasoning",
         "tool_result_review",
         "action_policy",
@@ -67,6 +69,7 @@ def test_agent_runtime_graph_runner_executes_confirmation_interrupt_path() -> No
     assert _checkpoint_nodes(checkpoint_store) == [
         "load_context",
         "safety_gate",
+        "route_specialist",
         "sdk_reasoning",
         "tool_result_review",
         "action_policy",

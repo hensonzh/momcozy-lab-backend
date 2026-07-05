@@ -115,16 +115,33 @@ def test_agent_eval_seed_assertion_engine_passes_hospital_bag_cart_trace() -> No
     case = _case("hospital_bag_cart_update")
     trace = AgentEvalTrace(
         tool_calls=[{"tool_name": "hospital_bag.cart_update.propose", "status": "completed"}],
-        events=[{"type": "action.confirmation_required"}],
-        actions=[{"action_type": "hospital_bag.cart.update", "status": "confirmation_required"}],
+        events=[{"type": "action.queued"}],
+        actions=[{"action_type": "hospital_bag.cart.update", "status": "confirmed"}],
         safety_decision="allow",
-        final_text="Please confirm before I update the cart.",
+        final_text="I queued that cart update.",
     )
 
     result = AgentEvalSeedAssertionEngine().evaluate(case=case, trace=trace)
 
     assert result.passed is True
     assert result.failures == []
+
+
+def test_agent_eval_seed_assertion_engine_reports_specialist_mismatch_when_trace_has_route() -> None:
+    case = _case("milk_daily_summary")
+    trace = AgentEvalTrace(
+        tool_calls=[{"tool_name": "records.milk_summary.read", "status": "completed"}],
+        safety_decision="allow",
+        specialist_id="general_assistant",
+        final_text="Here is your milk summary.",
+    )
+
+    result = AgentEvalSeedAssertionEngine().evaluate(case=case, trace=trace)
+
+    assert result.passed is False
+    assert result.failures[0].category == "routing_mismatch"
+    assert result.failures[0].expected == "lactation"
+    assert result.failures[0].observed == "general_assistant"
 
 
 def test_agent_eval_seed_assertion_engine_passes_known_device_guidance_trace() -> None:

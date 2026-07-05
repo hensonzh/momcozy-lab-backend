@@ -27,7 +27,7 @@ DEFAULT_AGENT_ACTION_RULES: Mapping[str, AgentActionPolicyRule] = {
         action_type="hospital_bag.cart.update",
         target_type="hospital_bag_cart",
         side_effect_level="low",
-        requires_confirmation=True,
+        requires_confirmation=False,
     ),
     "support.ticket.create": AgentActionPolicyRule(
         action_type="support.ticket.create",
@@ -39,13 +39,13 @@ DEFAULT_AGENT_ACTION_RULES: Mapping[str, AgentActionPolicyRule] = {
         action_type="records.feeding_record.create",
         target_type="feeding_record",
         side_effect_level="low",
-        requires_confirmation=True,
+        requires_confirmation=False,
     ),
     "records.pumping_record.create": AgentActionPolicyRule(
         action_type="records.pumping_record.create",
         target_type="pumping_record",
         side_effect_level="low",
-        requires_confirmation=True,
+        requires_confirmation=False,
     ),
     "plans.milk_plan.create": AgentActionPolicyRule(
         action_type="plans.milk_plan.create",

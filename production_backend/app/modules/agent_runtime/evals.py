@@ -18,6 +18,7 @@ class AgentEvalTrace:
     actions: list[dict[str, Any]] = field(default_factory=list)
     safety_decision: str = ""
     final_text: str = ""
+    specialist_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,7 @@ class AgentEvalSeedAssertionEngine:
         failures.extend(_tool_contract_failures(case=case, trace=trace))
         failures.extend(_forbidden_tool_failures(case=case, trace=trace))
         failures.extend(_safety_decision_failures(case=case, trace=trace))
+        failures.extend(_specialist_routing_failures(case=case, trace=trace))
         failures.extend(_confirmation_failures(case=case, trace=trace))
         failures.extend(_forbidden_side_effect_failures(case=case, trace=trace))
         return AgentEvalRunResult(
@@ -76,6 +78,8 @@ class AgentEvalRuntimeTraceCollector:
         events = await self.repository.list_events_for_run(run_id=run_id)
         actions = await self.repository.list_actions_for_run(run_id=run_id)
         safety_events = await self.repository.list_safety_events_for_run(run_id=run_id)
+        run_getter = getattr(self.repository, "get_run", None)
+        run = await run_getter(run_id=run_id) if run_getter is not None else None
         safety_decision = safety_events[-1].decision if safety_events else "allow"
         return AgentEvalTrace(
             tool_calls=[_tool_call_trace(tool_call) for tool_call in tool_calls],
@@ -83,6 +87,7 @@ class AgentEvalRuntimeTraceCollector:
             actions=[_action_trace(action) for action in actions],
             safety_decision=safety_decision,
             final_text=final_text,
+            specialist_id=str(getattr(run, "specialist_id", "") or ""),
         )
 
 
@@ -112,6 +117,7 @@ def agent_eval_trace_from_replay_bundle(bundle: dict[str, Any]) -> AgentEvalTrac
         actions=_list_of_dicts(bundle.get("actions")),
         safety_decision=_last_safety_decision(bundle),
         final_text=_last_assistant_text(bundle),
+        specialist_id=_run_specialist_id(bundle),
     )
 
 
@@ -316,6 +322,22 @@ def _safety_decision_failures(*, case: dict[str, Any], trace: AgentEvalTrace) ->
     ]
 
 
+def _specialist_routing_failures(*, case: dict[str, Any], trace: AgentEvalTrace) -> list[AgentEvalFailure]:
+    raw_behavior = case.get("expected_behavior")
+    behavior = raw_behavior if isinstance(raw_behavior, dict) else {}
+    expected = str(behavior.get("specialist_id") or "").strip()
+    if not expected or not trace.specialist_id or trace.specialist_id == expected:
+        return []
+    return [
+        AgentEvalFailure(
+            category="routing_mismatch",
+            assertion="routing.specialist",
+            expected=expected,
+            observed=trace.specialist_id or "<none>",
+        )
+    ]
+
+
 def _confirmation_failures(*, case: dict[str, Any], trace: AgentEvalTrace) -> list[AgentEvalFailure]:
     raw_behavior = case.get("expected_behavior")
     behavior = raw_behavior if isinstance(raw_behavior, dict) else {}
@@ -403,3 +425,10 @@ def _last_assistant_text(bundle: dict[str, Any]) -> str:
         if isinstance(content, str):
             return content.strip()
     return ""
+
+
+def _run_specialist_id(bundle: dict[str, Any]) -> str:
+    run = bundle.get("run")
+    if not isinstance(run, dict):
+        return ""
+    return str(run.get("specialist_id") or "").strip()

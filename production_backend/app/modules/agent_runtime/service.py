@@ -241,19 +241,32 @@ class AgentRuntimeService:
             target_type=_normalize_text(target_type, max_length=120),
             side_effect_level=_normalize_text(side_effect_level, max_length=32),
         )
+        if not decision.requires_confirmation and self.outbox_service is None:
+            raise ApiError(code="outbox_not_configured", message="Agent action outbox is not configured.", status=500)
+        initial_status = "confirmation_required" if decision.requires_confirmation else "proposed"
         action = await self.repository.create_action(
             run_id=run.id,
             actor_user_id=owner_user_id,
             action_type=decision.action_type,
             target_type=decision.target_type,
             target_id=_normalize_text(target_id, max_length=120),
-            status="confirmation_required",
+            status=initial_status,
             side_effect_level=decision.side_effect_level,
             preview_payload=preview_payload or {},
             apply_payload=apply_payload or {},
             idempotency_key=_normalize_text(idempotency_key, max_length=255),
             expires_at=expires_at,
         )
+        if not decision.requires_confirmation:
+            action_idempotency_key = action.idempotency_key or f"agent-action:{action.id}"
+            confirmed = await self.repository.mark_action_confirmed(
+                action=action,
+                confirmed_at=_utcnow(),
+                apply_payload=None,
+                idempotency_key=action_idempotency_key,
+            )
+            await self._queue_action_apply(owner_user_id=owner_user_id, run=run, action=confirmed)
+            return confirmed
         await self._append_event(
             thread_id=run.thread_id,
             run_id=run.id,
@@ -319,19 +332,26 @@ class AgentRuntimeService:
             idempotency_key=action_idempotency_key,
         )
         run = await self.get_run(owner_user_id=owner_user_id, run_id=confirmed.run_id)
+        await self._queue_action_apply(owner_user_id=owner_user_id, run=run, action=confirmed)
+        await self._complete_waiting_run_after_action_decision(run=run, action_id=confirmed.id, decision="confirmed")
+        return confirmed
+
+    async def _queue_action_apply(self, *, owner_user_id: UUID, run: AgentRun, action: AgentAction) -> None:
+        if self.outbox_service is None:
+            raise ApiError(code="outbox_not_configured", message="Agent action outbox is not configured.", status=500)
         outbox_job = await self.outbox_service.enqueue(
             job_type=AGENT_ACTION_APPLY_JOB,
             payload={
-                "action_id": str(confirmed.id),
+                "action_id": str(action.id),
                 "run_id": str(run.id),
                 "actor_user_id": str(owner_user_id),
-                "action_type": confirmed.action_type,
-                "target_type": confirmed.target_type,
-                "target_id": confirmed.target_id,
-                "apply_payload": confirmed.apply_payload,
+                "action_type": action.action_type,
+                "target_type": action.target_type,
+                "target_id": action.target_id,
+                "apply_payload": action.apply_payload,
             },
-            idempotency_key=_action_outbox_idempotency_key(action_id=confirmed.id),
-            action_id=confirmed.id,
+            idempotency_key=_action_outbox_idempotency_key(action_id=action.id),
+            action_id=action.id,
             request_id=run.request_id,
             trace_id=run.trace_id,
         )
@@ -340,17 +360,15 @@ class AgentRuntimeService:
             run_id=run.id,
             event_type="action.queued",
             payload={
-                "action_id": str(confirmed.id),
-                "action_status": confirmed.status,
-                "action_type": confirmed.action_type,
-                "target_type": confirmed.target_type,
-                "target_id": confirmed.target_id,
+                "action_id": str(action.id),
+                "action_status": action.status,
+                "action_type": action.action_type,
+                "target_type": action.target_type,
+                "target_id": action.target_id,
                 "outbox_status": outbox_job.status,
                 "outbox_job_id": str(outbox_job.id),
             },
         )
-        await self._complete_waiting_run_after_action_decision(run=run, action_id=confirmed.id, decision="confirmed")
-        return confirmed
 
     async def reject_action(self, *, owner_user_id: UUID, action_id: UUID, reason: str = "") -> AgentAction:
         action = await self.get_action(owner_user_id=owner_user_id, action_id=action_id)

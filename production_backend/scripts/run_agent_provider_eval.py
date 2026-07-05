@@ -8,6 +8,7 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
+from uuid import NAMESPACE_URL, uuid5
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
@@ -23,6 +24,7 @@ from production_backend.app.modules.agent_runtime.evals import (  # noqa: E402
 )
 from production_backend.app.modules.agent_runtime.prompts import ContextProjection, ModelInputBuilder  # noqa: E402
 from production_backend.app.modules.agent_runtime.runtime import AgentRuntimeExecutorConfig  # noqa: E402
+from production_backend.app.modules.agent_runtime.routing import RoutingContext, SpecialistRoutingService  # noqa: E402
 from production_backend.app.modules.agent_runtime.safety import DeterministicSafetyGuard  # noqa: E402
 from production_backend.app.modules.agent_runtime.sdk import (  # noqa: E402
     OpenAIAgentsSdkRunner,
@@ -109,7 +111,15 @@ async def _run_case(*, case: dict[str, Any], sdk_runner: OpenAIAgentsSdkRunner) 
             )
         )
 
-    specialist = default_specialist_registry().select(user_message=user_message)
+    routing_plan = await SpecialistRoutingService().route(
+        RoutingContext(
+            run_id=_eval_uuid(case, "run"),
+            thread_id=_eval_uuid(case, "thread"),
+            actor_user_id=_eval_uuid(case, "actor"),
+            message=user_message,
+        )
+    )
+    specialist = default_specialist_registry().get(routing_plan.primary_specialist_id.value)
     tool_names = tuple(sorted(contract.name for contract in tool_registry.list() if specialist.allows_tool(contract)))
     unavailable_for_specialist = sorted(contract for contract in expected_contracts if contract not in tool_names)
     if unavailable_for_specialist:
@@ -171,9 +181,11 @@ async def _run_case(*, case: dict[str, Any], sdk_runner: OpenAIAgentsSdkRunner) 
         actions=_synthetic_actions(observed_tool_calls),
         safety_decision=safety_decision,
         final_text=result.final_text,
+        specialist_id=specialist.id,
     )
     payload = _result_payload(AgentEvalSeedAssertionEngine().evaluate(case=case, trace=trace))
     payload["specialist_id"] = specialist.id
+    payload["routing_source"] = routing_plan.source.value
     payload["observed_tool_calls"] = observed_tool_calls
     payload["final_text"] = result.final_text
     return payload
@@ -329,6 +341,10 @@ def _eval_id(case: dict[str, Any], prefix: str) -> str:
     suite = str(case.get("suite") or "suite").replace(" ", "_")
     name = str(case.get("name") or "case").replace(" ", "_")
     return f"{prefix}-{suite}-{name}"[:120]
+
+
+def _eval_uuid(case: dict[str, Any], prefix: str):
+    return uuid5(NAMESPACE_URL, _eval_id(case, prefix))
 
 
 def _has_openai_credentials() -> bool:

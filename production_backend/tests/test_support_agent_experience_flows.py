@@ -87,7 +87,7 @@ def test_agent_support_ticket_main_flow_confirms_queues_applies_and_replays_even
     assert support_audit.entries[-1]["action"] == "support.tickets.create"
 
 
-def test_agent_hospital_bag_cart_main_flow_confirms_queues_applies_and_replays_events() -> None:
+def test_agent_hospital_bag_cart_main_flow_direct_queues_applies_and_replays_events() -> None:
     owner_user_id = uuid4()
     runtime_repository = InMemoryAgentRuntimeRepository()
     outbox_service = CapturingOutboxService()
@@ -118,15 +118,7 @@ def test_agent_hospital_bag_cart_main_flow_confirms_queues_applies_and_replays_e
             },
         )
     )
-    run.status = "waiting_for_confirmation"
-
-    confirmed = asyncio.run(
-        runtime_service.confirm_action(
-            owner_user_id=owner_user_id,
-            action_id=action.id,
-            idempotency_key="idem-cart-action",
-        )
-    )
+    confirmed = asyncio.run(runtime_service.confirm_action(owner_user_id=owner_user_id, action_id=action.id))
     handler = AgentActionOutboxHandler(
         repository=runtime_repository,
         handlers={HOSPITAL_BAG_CART_UPDATE_ACTION: HospitalBagCartUpdateActionHandler()},
@@ -140,9 +132,7 @@ def test_agent_hospital_bag_cart_main_flow_confirms_queues_applies_and_replays_e
     assert [event.event_type for event in runtime_repository.events] == [
         "run.queued",
         "message.completed",
-        "action.confirmation_required",
         "action.queued",
-        "run.completed",
         "action.applied",
     ]
     assert applied_event.payload["resource_type"] == "hospital_bag_cart"

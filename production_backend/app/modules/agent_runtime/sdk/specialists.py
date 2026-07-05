@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ..routing.schemas import SpecialistId
 from ..tools.contracts import ToolContract
 
 
@@ -13,6 +14,11 @@ class AgentSpecialistProfile:
     tool_contracts: tuple[str, ...] = ()
     tool_domains: tuple[str, ...] = ()
     trigger_terms: tuple[str, ...] = ()
+    prompt_version: str = "v1"
+    memory_scopes: tuple[str, ...] = ()
+    direct_apply_actions: tuple[str, ...] = ()
+    confirmation_required_actions: tuple[str, ...] = ()
+    handoff_targets: tuple[str, ...] = ()
 
     def allows_tool(self, contract: ToolContract) -> bool:
         if self.tool_contracts:
@@ -45,11 +51,12 @@ def default_specialist_registry() -> AgentSpecialistRegistry:
     return AgentSpecialistRegistry(
         profiles=(
             AgentSpecialistProfile(
-                id="milk_management",
-                display_name="Milk management specialist",
+                id=SpecialistId.LACTATION.value,
+                display_name="Lactation specialist",
                 instructions=(
-                    "Focus on feeding, pumping, milk trends, reminders, and milk-management plans. "
-                    "Read owner-scoped records before interpreting supply or proposing changes."
+                    "Focus on lactation, feeding, pumping, milk trends, reminders, and milk-management plans. "
+                    "Read owner-scoped records before interpreting supply or proposing changes. Keep health-sensitive "
+                    "answers within product guidance and escalate red flags instead of diagnosing."
                 ),
                 tool_contracts=(
                     "profile.read",
@@ -72,14 +79,26 @@ def default_specialist_registry() -> AgentSpecialistRegistry:
                     "喂",
                     "吸奶",
                     "泵奶",
+                    "乳",
+                    "泌乳",
+                ),
+                memory_scopes=("communication_preference", "lactation_preference"),
+                direct_apply_actions=(
+                    "records.feeding_record.create",
+                    "records.pumping_record.create",
+                ),
+                confirmation_required_actions=(
+                    "plans.milk_plan.create",
+                    "notifications.milk_reminder.create",
                 ),
             ),
             AgentSpecialistProfile(
-                id="pregnancy_planning",
-                display_name="Pregnancy planning specialist",
+                id=SpecialistId.PREGNANCY.value,
+                display_name="Pregnancy service specialist",
                 instructions=(
-                    "Focus on pregnancy plans, tasks, diary entries, due-date context, and birth preparation. "
-                    "Use confirmation-first actions for plan, task, diary, and hospital-bag changes."
+                    "Focus on pregnancy services: pregnancy plans, tasks, diary entries, due-date context, and "
+                    "birth preparation such as hospital-bag planning. Use owner-scoped facts and keep the workflow "
+                    "scene coherent instead of splitting plan and hospital-bag support into separate agents."
                 ),
                 tool_contracts=(
                     "profile.read",
@@ -106,13 +125,56 @@ def default_specialist_registry() -> AgentSpecialistRegistry:
                     "日记",
                     "分娩",
                 ),
+                memory_scopes=("communication_preference", "pregnancy_preference"),
+                direct_apply_actions=("hospital_bag.cart_update",),
+                confirmation_required_actions=(
+                    "pregnancy.plan.create",
+                    "plans.task.create",
+                    "plans.task.complete",
+                    "diary.entry.upsert",
+                ),
             ),
             AgentSpecialistProfile(
-                id="device_support",
-                display_name="Device support specialist",
+                id=SpecialistId.POSTPARTUM.value,
+                display_name="Postpartum recovery specialist",
                 instructions=(
-                    "Focus on pump device status, packaged guidance assets, troubleshooting, and support-ticket handoff. "
-                    "Keep device guidance read-only unless an explicit confirmable action contract exists."
+                    "Focus on postpartum recovery, recovery plans, daily check-ins, rest, pumping-related recovery "
+                    "context, and gentle task planning. Avoid diagnosis and route urgent physical or emotional red "
+                    "flags to the safety guardrail."
+                ),
+                tool_contracts=(
+                    "profile.read",
+                    "business.context.read",
+                    "plans.current.read",
+                    "plans.task_create.propose",
+                    "diary.recent.read",
+                    "diary.entry_upsert.propose",
+                    "records.milk_summary.read",
+                ),
+                trigger_terms=(
+                    "postpartum",
+                    "recovery",
+                    "recover",
+                    "pelvic",
+                    "c-section",
+                    "cesarean",
+                    "产后",
+                    "康复",
+                    "恢复",
+                    "剖腹产",
+                    "盆底",
+                    "恶露",
+                ),
+                memory_scopes=("communication_preference", "postpartum_preference"),
+                confirmation_required_actions=("plans.task.create", "diary.entry.upsert"),
+            ),
+            AgentSpecialistProfile(
+                id=SpecialistId.AFTER_SALES.value,
+                display_name="After-sales service specialist",
+                instructions=(
+                    "Focus on after-sales service: device status, packaged guidance assets, troubleshooting, warranty "
+                    "or support handoff, and support-ticket creation. Keep device guidance read-only unless an "
+                    "explicit action contract is available."
                 ),
                 tool_contracts=(
                     "profile.read",
@@ -120,6 +182,7 @@ def default_specialist_registry() -> AgentSpecialistRegistry:
                     "devices.pump_status.read",
                     "devices.guidance_assets.read",
                     "files.vision_summary.read",
+                    "records.milk_summary.read",
                     "support.ticket.propose",
                 ),
                 trigger_terms=(
@@ -136,23 +199,6 @@ def default_specialist_registry() -> AgentSpecialistRegistry:
                     "故障",
                     "充电",
                     "吸奶器",
-                ),
-            ),
-            AgentSpecialistProfile(
-                id="support_handoff",
-                display_name="Support handoff specialist",
-                instructions=(
-                    "Focus on support-ticket creation and professional handoff. "
-                    "Do not claim that a human has been contacted until a confirmed action is applied."
-                ),
-                tool_contracts=(
-                    "profile.read",
-                    "business.context.read",
-                    "devices.pump_status.read",
-                    "records.milk_summary.read",
-                    "support.ticket.propose",
-                ),
-                trigger_terms=(
                     "support",
                     "ticket",
                     "customer service",
@@ -164,37 +210,56 @@ def default_specialist_registry() -> AgentSpecialistRegistry:
                     "顾问",
                     "人工",
                 ),
+                memory_scopes=("communication_preference", "support_preference"),
+                confirmation_required_actions=("support.ticket.create",),
+                handoff_targets=("customer_service", "ibclc"),
             ),
             AgentSpecialistProfile(
-                id="memory_preferences",
-                display_name="Memory preferences specialist",
+                id=SpecialistId.SAFETY.value,
+                display_name="Safety guardrail",
                 instructions=(
-                    "Focus on stable user preferences and recurring constraints. "
-                    "Sensitive health, child, crisis, or regulated facts must not be stored as memory."
+                    "Handle high-risk health, emergency, emotional-crisis, and child-safety messages. Do not continue "
+                    "ordinary business workflows while safety handling is active. Provide concise escalation guidance "
+                    "and avoid diagnosis or unsupported medical advice."
                 ),
-                tool_contracts=("profile.read", "business.context.read", "memory.create.propose"),
+                tool_contracts=("profile.read", "business.context.read", "support.ticket.propose"),
                 trigger_terms=(
-                    "remember",
-                    "preference",
-                    "prefer",
-                    "always remind",
-                    "don't remind",
-                    "记住",
-                    "偏好",
-                    "以后",
-                    "不要提醒",
+                    "emergency",
+                    "suicide",
+                    "self harm",
+                    "bleeding",
+                    "fever",
+                    "chest pain",
+                    "呼吸困难",
+                    "出血",
+                    "发烧",
+                    "自杀",
+                    "伤害自己",
                 ),
+                handoff_targets=("emergency_service", "professional_support"),
             ),
             AgentSpecialistProfile(
-                id="general_product",
+                id=SpecialistId.GENERAL.value,
                 display_name="General product assistant",
                 instructions=(
-                    "Handle general MomCozy product assistance. Select read tools before answering factual "
-                    "questions and propose confirmable actions for user-visible writes."
+                    "Handle general MomCozy product assistance and lightweight navigation. If a request clearly "
+                    "belongs to pregnancy, lactation, postpartum recovery, or after-sales service, the routing layer "
+                    "should select that scene specialist before model reasoning."
                 ),
-                tool_domains=(),
+                tool_contracts=(
+                    "profile.read",
+                    "business.context.read",
+                    "plans.current.read",
+                    "diary.recent.read",
+                    "records.milk_summary.read",
+                    "devices.guidance_assets.read",
+                    "memory.create.propose",
+                    "support.ticket.propose",
+                ),
                 trigger_terms=(),
+                memory_scopes=("communication_preference",),
+                confirmation_required_actions=("support.ticket.create",),
             ),
         ),
-        default_profile_id="general_product",
+        default_profile_id=SpecialistId.GENERAL.value,
     )

@@ -38,7 +38,7 @@ class SdkNodeRequest:
     tools: tuple[SdkToolDefinition, ...] = ()
     prompt_version: str = ""
     trace_id: str = ""
-    specialist_id: str = "general_product"
+    specialist_id: str = "general_assistant"
     on_text_delta: SdkTextDeltaHandler | None = None
 
 

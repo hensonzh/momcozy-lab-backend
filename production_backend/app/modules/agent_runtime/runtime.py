@@ -16,6 +16,7 @@ from .memory import AgentMemoryService
 from .models import AgentAction, AgentEvent, AgentMessage, AgentRun
 from .prompts import ContextProjection, ModelInputBuilder
 from .repository import AgentRuntimeRepository
+from .routing import RoutingContext, RoutingPlan, SpecialistRoutingService
 from .sdk import AgentSpecialistProfile, AgentSpecialistRegistry, OpenAIAgentsSdkRunner, SdkNodeRequest, SdkToolDefinition, default_specialist_registry, sdk_tool_name
 from .state_store import AgentRuntimeStateStore
 from .tools import ToolContractRegistry, ToolExecutor, default_tool_registry
@@ -52,6 +53,7 @@ class AgentRuntimeExecutor:
         action_policy: AgentActionPolicy | None = None,
         memory_service: AgentMemoryService | None = None,
         specialist_registry: AgentSpecialistRegistry | None = None,
+        routing_service: SpecialistRoutingService | None = None,
         transient_stream: AgentTransientStream | None = None,
         input_builder: ModelInputBuilder | None = None,
         config: AgentRuntimeExecutorConfig | None = None,
@@ -67,6 +69,7 @@ class AgentRuntimeExecutor:
         self.action_policy = action_policy or AgentActionPolicy()
         self.memory_service = memory_service
         self.specialist_registry = specialist_registry or default_specialist_registry()
+        self.routing_service = routing_service or SpecialistRoutingService()
         self.transient_stream = transient_stream
         self.input_builder = input_builder or ModelInputBuilder()
         self.config = config or AgentRuntimeExecutorConfig()
@@ -85,7 +88,9 @@ class AgentRuntimeExecutor:
 
         messages = await self.repository.list_messages_for_thread(thread_id=run.thread_id, limit=self.config.history_limit)
         memory_projection = await self._memory_projection(run=run)
-        specialist = self.specialist_registry.select(user_message=_message_text(current_message))
+        routing_plan = await self.routing_service.route(_routing_context(run=run, current_message=current_message))
+        specialist = self.specialist_registry.get(routing_plan.primary_specialist_id.value)
+        await self._record_routing_decision(run=run, current_message=current_message, routing_plan=routing_plan)
         tool_names = self._tool_names_for_specialist(specialist)
         projection = ContextProjection(
             stable_system_prompt=self.config.stable_system_prompt,
@@ -100,6 +105,11 @@ class AgentRuntimeExecutor:
                 "prompt_version": run.prompt_version,
                 "specialist_id": specialist.id,
                 "specialist_display_name": specialist.display_name,
+                "routing_source": routing_plan.source.value,
+                "routing_confidence": routing_plan.confidence,
+                "routing_reason_codes": routing_plan.reason_codes,
+                "routing_execution_mode": routing_plan.execution_mode,
+                "routing_safety_flags": routing_plan.safety_flags,
             },
             memory_projection=memory_projection,
             fresh_business_facts={},
@@ -118,6 +128,9 @@ class AgentRuntimeExecutor:
                 "pending_action_id": None,
                 "final_message_id": None,
                 "specialist_id": specialist.id,
+                "routing_source": routing_plan.source.value,
+                "routing_confidence": routing_plan.confidence,
+                "routing_reason_codes": routing_plan.reason_codes,
                 "tool_names": list(tool_names),
             },
         )
@@ -143,6 +156,12 @@ class AgentRuntimeExecutor:
         await self._persist_artifacts_from_result(run=run, artifacts=result.artifacts)
 
         if action_proposal is not None and action_decision is not None:
+            if not action_decision.requires_confirmation:
+                raise ApiError(
+                    code="direct_agent_action_requires_tool",
+                    message="Direct-apply agent actions must be executed through a tool contract.",
+                    status=422,
+                )
             action = await self._create_action_from_proposal(run=run, proposal=action_proposal, decision=action_decision)
             await self._append_event(
                 thread_id=run.thread_id,
@@ -296,6 +315,25 @@ class AgentRuntimeExecutor:
             return await self.event_sink.append_event(thread_id=thread_id, run_id=run_id, event_type=event_type, payload=payload)
         return await self.repository.append_event(thread_id=thread_id, run_id=run_id, event_type=event_type, payload=payload)
 
+    async def _record_routing_decision(self, *, run: AgentRun, current_message: AgentMessage, routing_plan: RoutingPlan) -> None:
+        recorder = getattr(self.repository, "record_routing_decision", None)
+        if recorder is None:
+            return
+        await recorder(
+            run_id=run.id,
+            thread_id=run.thread_id,
+            actor_user_id=run.actor_user_id,
+            message_id=current_message.id,
+            primary_specialist_id=routing_plan.primary_specialist_id.value,
+            routing_source=routing_plan.source.value,
+            confidence=routing_plan.confidence,
+            execution_mode=routing_plan.execution_mode,
+            intents=[intent.model_dump(mode="json") for intent in routing_plan.intents],
+            reason_codes=list(routing_plan.reason_codes),
+            safety_flags=list(routing_plan.safety_flags),
+            needs_clarification=routing_plan.needs_clarification,
+        )
+
     async def _save_checkpoint(
         self,
         *,
@@ -358,6 +396,26 @@ class AgentRuntimeExecutor:
 
 def _history_before(*, messages: list[AgentMessage], before_sequence: int) -> list[dict[str, Any]]:
     return [_to_model_message(message) for message in messages if message.sequence < before_sequence and message.role in {"user", "assistant"}]
+
+
+def _routing_context(*, run: AgentRun, current_message: AgentMessage) -> RoutingContext:
+    content = current_message.content if isinstance(current_message.content, dict) else {}
+    app_surface = _text(content, "app_surface") or _text(content, "surface")
+    pending_action_id = _text(content, "pending_action_id")
+    active_workflow = _text(content, "active_workflow")
+    active_specialist_id = _text(content, "active_specialist_id")
+    attachment_types = content.get("attachment_types")
+    return RoutingContext(
+        run_id=run.id,
+        thread_id=run.thread_id,
+        actor_user_id=run.actor_user_id,
+        message=_message_text(current_message),
+        app_surface=app_surface or None,
+        active_specialist_id=active_specialist_id or None,
+        active_workflow=active_workflow or None,
+        pending_action_id=pending_action_id or None,
+        attachment_types=tuple(item for item in attachment_types if isinstance(item, str)) if isinstance(attachment_types, list) else (),
+    )
 
 
 def _sdk_instructions(*, projection: ContextProjection, specialist: AgentSpecialistProfile) -> str:

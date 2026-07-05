@@ -16,6 +16,7 @@ from .models import (
     AgentEvent,
     AgentEvalCase,
     AgentMessage,
+    AgentRoutingDecision,
     AgentRun,
     AgentSafetyEvent,
     AgentThread,
@@ -87,6 +88,72 @@ class AgentRuntimeRepository:
         self.session.add(run)
         await self.session.flush()
         return run
+
+    async def record_routing_decision(
+        self,
+        *,
+        run_id: UUID,
+        thread_id: UUID,
+        actor_user_id: UUID,
+        message_id: UUID,
+        primary_specialist_id: str,
+        routing_source: str,
+        confidence: float,
+        execution_mode: str,
+        intents: list[Any],
+        reason_codes: list[str],
+        safety_flags: list[str],
+        needs_clarification: bool,
+        tool_scope_version: str = "default",
+    ) -> AgentRoutingDecision:
+        confidence_score = max(0, min(100, round(confidence * 100)))
+        run = await self.get_run(run_id=run_id)
+        if run is not None:
+            run.specialist_id = primary_specialist_id
+            run.routing_source = routing_source
+            run.routing_confidence_score = confidence_score
+            run.routing_summary = {
+                "execution_mode": execution_mode,
+                "reason_codes": reason_codes,
+                "safety_flags": safety_flags,
+                "needs_clarification": needs_clarification,
+                "tool_scope_version": tool_scope_version,
+            }
+
+        statement = select(AgentRoutingDecision).where(
+            AgentRoutingDecision.run_id == run_id,
+            AgentRoutingDecision.message_id == message_id,
+        )
+        decision = cast(AgentRoutingDecision | None, await self.session.scalar(statement))
+        if decision is None:
+            decision = AgentRoutingDecision(
+                run_id=run_id,
+                thread_id=thread_id,
+                actor_user_id=actor_user_id,
+                message_id=message_id,
+                primary_specialist_id=primary_specialist_id,
+                routing_source=routing_source,
+                confidence_score=confidence_score,
+                execution_mode=execution_mode,
+                intents=intents,
+                reason_codes=reason_codes,
+                safety_flags=safety_flags,
+                needs_clarification=needs_clarification,
+                tool_scope_version=tool_scope_version,
+            )
+            self.session.add(decision)
+        else:
+            decision.primary_specialist_id = primary_specialist_id
+            decision.routing_source = routing_source
+            decision.confidence_score = confidence_score
+            decision.execution_mode = execution_mode
+            decision.intents = intents
+            decision.reason_codes = reason_codes
+            decision.safety_flags = safety_flags
+            decision.needs_clarification = needs_clarification
+            decision.tool_scope_version = tool_scope_version
+        await self.session.flush()
+        return decision
 
     async def get_run_for_owner(self, *, run_id: UUID, owner_user_id: UUID) -> AgentRun | None:
         statement = (

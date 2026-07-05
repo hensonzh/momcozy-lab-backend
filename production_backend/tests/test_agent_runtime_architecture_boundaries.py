@@ -47,11 +47,13 @@ def test_tool_contract_registry_declares_permission_confirmation_and_blocking_po
     diary_entry_proposal = registry.get("diary.entry_upsert.propose")
     memory_create_proposal = registry.get("memory.create.propose")
     assert feeding_proposal.read_or_write == "write"
-    assert feeding_proposal.requires_confirmation is True
+    assert feeding_proposal.requires_confirmation is False
+    assert feeding_proposal.blocking_policy == "enqueue_and_continue"
     assert feeding_proposal.side_effect_level == "low"
     assert feeding_proposal.required_permission == "records:write:self"
     assert pumping_proposal.read_or_write == "write"
-    assert pumping_proposal.requires_confirmation is True
+    assert pumping_proposal.requires_confirmation is False
+    assert pumping_proposal.blocking_policy == "enqueue_and_continue"
     assert pumping_proposal.required_permission == "records:write:self"
     assert milk_plan_proposal.read_or_write == "write"
     assert milk_plan_proposal.requires_confirmation is True
@@ -273,7 +275,7 @@ def test_sdk_runner_uses_real_agents_sdk_shape_when_package_is_available(monkeyp
         tool_names=("profile.read",),
         prompt_version="prompt-v2",
         trace_id="trace_1",
-        specialist_id="memory_preferences",
+        specialist_id="general_assistant",
     )
 
     result = asyncio.run(OpenAIAgentsSdkRunner(model="gpt-test", max_turns=3, trace_enabled=True).run_reasoning(request))
@@ -288,7 +290,7 @@ def test_sdk_runner_uses_real_agents_sdk_shape_when_package_is_available(monkeyp
     assert FakeAgentsSdkRunner.last_run_config.group_id == "thread_1"
     assert FakeAgentsSdkRunner.last_run_config.trace_metadata["run_id"] == "run_1"
     assert FakeAgentsSdkRunner.last_run_config.trace_metadata["prompt_version"] == "prompt-v2"
-    assert FakeAgentsSdkRunner.last_run_config.trace_metadata["specialist_id"] == "memory_preferences"
+    assert FakeAgentsSdkRunner.last_run_config.trace_metadata["specialist_id"] == "general_assistant"
     assert FakeAgentsSdkRunner.last_run_config.trace_metadata["tool_names"] == ["profile.read"]
     assert FakeAgentsSdkRunner.last_previous_response_id is None
     assert FakeAgentsSdkRunner.last_auto_previous_response_id is False

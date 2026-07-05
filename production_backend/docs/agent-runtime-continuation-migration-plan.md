@@ -27,8 +27,9 @@
 - action confirmation -> outbox apply 的 effect lane。
 - deterministic safety gate、replay bundle、eval seed 基础。
 - `AgentRuntimeGraphRunner` 已通过 LangGraph `StateGraph` 执行
-  `load_context -> safety_gate -> sdk_reasoning -> tool_result_review ->
-  action_policy -> confirmation_interrupt/final_response -> finish`。
+  `load_context -> safety_gate -> route_specialist -> sdk_reasoning ->
+  tool_result_review -> action_policy -> confirmation_interrupt/final_response ->
+  finish`。
 
 截至 2026-07-04 的最新增量：
 
@@ -58,12 +59,17 @@
   占位 contract。
 - IBCLC/professional support eval 已对齐到真实 `support.ticket.propose`
   handoff contract，不再要求不存在的 `ibclc_consult_proposal`。
-- SDK specialist routing 已有后端基础：runtime 会按当前用户消息选择
-  `general_product`、`milk_management`、`pregnancy_planning`、
-  `device_support`、`support_handoff` 或 `memory_preferences` profile，并把
-  `specialist_id` 写入 context projection、checkpoint 和 SDK trace metadata；
-  specialist profile 使用显式 tool contract allowlist，避免把无关工具暴露给
-  当前 run。
+- 场景专家 routing 已有后端基础：runtime 先通过
+  `SpecialistRoutingService` 生成 routing plan，再选择
+  `general_assistant`、`pregnancy_service`、`lactation`、
+  `postpartum_recovery`、`after_sales` 或 `safety_guardrail` profile。routing
+  decision 会写入 `agent_routing_decisions`，并把摘要写入 `agent_runs`、
+  context projection、checkpoint 和 SDK trace metadata；specialist profile
+  使用显式 tool contract allowlist，避免把无关工具暴露给当前 run。
+- 低风险、不影响下一步推理的写操作已支持 `enqueue_and_continue`：
+  feeding record、pumping record、hospital-bag cart update 会创建 action、
+  立即确认并进入 outbox effect lane，不再让 run 进入
+  `waiting_for_confirmation`。中高风险 action 仍走 confirmation。
 
 仍未完成或后续产品化：
 
@@ -112,8 +118,12 @@
 - 每个 tool 都有正式 contract：name、schema、permission、owner scope、
   side effect level、blocking policy、timeout、safe args/result、audit。
 - read tool 可直接返回安全摘要。
-- write tool 默认只生成 action proposal。
+- write tool 必须声明 blocking policy：read 工具 `must_wait`，低风险且不影响
+  下一步推理的写工具 `enqueue_and_continue`，中高风险写工具
+  `wait_for_confirmation`。
 - 中高风险 action 必须走 `preview -> confirmation -> apply -> audit`。
+- 低风险 direct action 仍必须创建 action、audit/outbox 记录和 application
+  event，只是跳过用户确认等待态。
 - 不影响下一步推理的副作用进入 outbox effect lane。
 
 ### Streaming

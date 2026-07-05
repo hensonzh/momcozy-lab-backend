@@ -47,5 +47,6 @@ def test_run_agent_provider_eval_uses_sdk_runner_and_seed_assertions() -> None:
     assert report["failed"] == 0
     assert report["passed"] == 1
     assert report["results"][0]["status"] == "passed"
-    assert report["results"][0]["specialist_id"] == "milk_management"
+    assert report["results"][0]["specialist_id"] == "lactation"
+    assert report["results"][0]["routing_source"] == "keyword_fast_path"
     assert report["results"][0]["observed_tool_calls"][0]["tool_name"] == "records.milk_summary.read"

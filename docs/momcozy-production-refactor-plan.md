@@ -858,8 +858,11 @@ MomCozy 新 runtime 采用 **LangGraph + OpenAI Agents SDK**，不再保留自�
 
 保留的是产品能力和协议意图，不是旧实现：
 
-- service skill manifest 的按需加载思想，但要版本化、持久化，并纳入 context projector。
-- `tool_search` + deferred namespace 的渐进加载思想，但要提升为正式 tool contract。
+- service skill 的“按需暴露上下文和工具”思想，但不保留旧 `load_skill`
+  runtime。新方案由场景专家 routing、context projector 和显式 tool allowlist
+  共同控制每轮模型可见内容。
+- `tool_search` + deferred namespace 的渐进加载思想，但要提升为正式 tool
+  contract 和 specialist allowlist。
 - 旧流式 UI 的用户体验意图，例如过程反馈、文本增量、artifact 和 action card，但要用持久 `agent_events` + replay/resume contract 重新定义。
 - `safe_tool_arguments()` / `safe_tool_result()` 的脱敏原则，但要升级为统一 safe payload policy。
 
@@ -869,6 +872,7 @@ MomCozy 新 runtime 采用 **LangGraph + OpenAI Agents SDK**，不再保留自�
 - 进程内 `ChatSession` 作为会话权威的路径。
 - provider session 作为上下文来源的路径。
 - 自研 Responses API agent loop / adapter 作为 runtime 路径。
+- 旧 service skill / `load_skill` 作为 runtime 路由路径。
 - 本地 SSE upstream bridge 作为生产流式兜底的路径。
 - AG-UI 作为后端内部协议、Flutter 协议或兼容 adapter 的路径。
 - tool handler 直接写 SQLite 或绕过 service/action/audit 的路径。
@@ -880,15 +884,27 @@ MomCozy 新 runtime 采用 **LangGraph + OpenAI Agents SDK**，不再保留自�
 - Postgres 可记录每轮输入投影的摘要或引用：`agent_context_projections` 或 `agent_runs.input_context_ref`，用于 replay、debug 和 eval；它不是新的权威状态源。
 - `agent_messages` 维护会话历史数组；history selector 只选择用户消息、助手消息、必要 tool summary 和 resource ref，不选择旧 context projection。
 - `ContextProjector` 从 ledger、workflow state、业务表、memory、tool/action refs 派生本轮 OpenAI Agents SDK 节点输入。
+- `SpecialistRoutingService` 每轮生成 routing plan，在
+  `general_assistant`、`pregnancy_service`、`lactation`、
+  `postpartum_recovery`、`after_sales` 和 `safety_guardrail` 之间选择主专家；
+  每个专家只暴露自己的显式 tool allowlist。
+- `agent_routing_decisions` 保存每轮为什么选择该专家；`agent_runs` 只保存
+  specialist/routing 摘要用于列表、排查和 eval。
 - Redis 只保存 transient controls：active run、cancel flag、stream progress、临时锁。
 - 删除 `ContextState` 大字典；业务事实回到业务表，workflow state 进入 `agent_workflow_states`，模型输入上下文只由 per-run projection 生成或记录。
-- 所有 agent 写操作进入 action proposal：
+- agent 写操作按风险和依赖关系进入 action/effect lane：
 
 ```text
-preview
--> confirmation
--> apply
--> audit log
+low risk and not needed for next reasoning step
+  -> action confirmed
+  -> outbox queued
+  -> action applied / failed event
+
+medium / high risk
+  -> preview
+  -> confirmation
+  -> apply
+  -> audit log
 ```
 
 ### Session / Workflow State 目标模型
@@ -1222,13 +1238,13 @@ Flutter 负责展示明确升级、禁用无关 action、避免显示 raw tool a
 - 删除 `previous_response_id` 续聊路径及其兼容/兜底代码；模型输入只允许从 `agent_messages`、tool outputs、artifacts、actions 和业务事实构造。
 - 移除以进程内 `ChatSession` 或 provider session 作为会话权威的代码路径。
 - 实现 `ContextBuilder / ContextProjector` 与 `history selector`，过滤旧 state projection、debug note 和 provider raw event。
-- loaded skills、必要 checkpoint 入 Postgres。
+- routing decision、必要 checkpoint 入 Postgres。
 - active run、cancel、stream progress 入 Redis。
 - 固定采用 LangGraph + OpenAI Agents SDK：LangGraph 管 graph/checkpoint/interrupt/resume，OpenAI Agents SDK 管节点内 reasoning、tool loop、specialist agents、guardrails 和 tracing。
 - 不新增或保留自研 Responses adapter；旧 loop 只用于 Phase 0 现状盘点和迁移前对照，进入新 runtime 后必须删除。
 - 支持 `prompt_cache_key`、`prompt_cache_retention` 环境变量，并记录 `cached_tokens` 指标。
 - tool contract 元数据化：permission、owner scope、side effect、confirmation、idempotency、audit、timeout。
-- 所有写操作 action proposal 化。
+- 写操作 action 化：低风险可 direct queue，中高风险必须 proposal/confirmation。
 - tool handler 通过领域 service/repository，不直接写 SQLite。
 - 保持 Flutter 所需 application event contract。
 
@@ -1241,7 +1257,7 @@ Flutter 负责展示明确升级、禁用无关 action、避免显示 raw tool a
 - prompt cache 前缀稳定，动态 state / business facts / current user message 后置，`cached_tokens` 可观测。
 - LangGraph graph version、prompt version、context schema version、SDK agent version 都记录到 run ledger。
 - 工具参数和结果不会把敏感数据流给前端。
-- 写操作必须 confirmation 后 apply。
+- 低风险写操作可 direct queue；中高风险写操作必须 confirmation 后 apply。
 - action apply 有 audit log。
 - run replay 可支持 QA / support / eval。
 

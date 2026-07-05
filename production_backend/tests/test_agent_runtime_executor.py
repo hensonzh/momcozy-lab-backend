@@ -8,6 +8,8 @@ from production_backend.app.core.errors import ApiError
 from production_backend.app.modules.agent_runtime.models import AgentAction, AgentArtifact, AgentEvent, AgentMemory, AgentMessage, AgentRun, AgentToolCall
 from production_backend.app.modules.agent_runtime.runtime import AgentRuntimeExecutor
 from production_backend.app.modules.agent_runtime.sdk import (
+    AgentSpecialistProfile,
+    AgentSpecialistRegistry,
     OpenAIAgentsSdkRunner,
     SdkNodeRequest,
     SdkNodeResult,
@@ -44,29 +46,17 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() ->
     assert request.run_id == str(run.id)
     assert request.thread_id == str(thread_id)
     assert request.prompt_version == "prompt-v2"
-    assert request.specialist_id == "general_product"
+    assert request.specialist_id == "general_assistant"
     assert "You are the MomCozy product assistant." in request.instructions
-    assert "Specialist profile: general_product" in request.instructions
+    assert "Specialist profile: general_assistant" in request.instructions
     assert request.tool_names == (
         "business.context.read",
         "devices.guidance_assets.read",
-        "devices.pump_status.read",
-        "diary.entry_upsert.propose",
         "diary.recent.read",
-        "files.vision_summary.read",
-        "hospital_bag.cart_update.propose",
         "memory.create.propose",
-        "notifications.milk_reminder.propose",
         "plans.current.read",
-        "plans.milk_plan.propose",
-        "plans.task_complete.propose",
-        "plans.task_create.propose",
-        "pregnancy.plan_context.read",
-        "pregnancy.plan_create.propose",
         "profile.read",
-        "records.feeding_record.propose",
         "records.milk_summary.read",
-        "records.pumping_record.propose",
         "support.ticket.propose",
     )
     assert [item["role"] for item in request.model_input] == [
@@ -81,7 +71,10 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() ->
     ]
     assert request.model_input[0]["content"].startswith("You are the MomCozy product assistant.")
     assert request.model_input[4]["content"]["state"]["run_id"] == str(run.id)
-    assert request.model_input[4]["content"]["state"]["specialist_id"] == "general_product"
+    assert request.model_input[4]["content"]["state"]["specialist_id"] == "general_assistant"
+    assert repository.routing_decisions[0]["primary_specialist_id"] == "general_assistant"
+    assert repository.routing_decisions[0]["routing_source"] == "fallback"
+    assert repository.routing_decisions[0]["confidence"] == 0.55
     assert request.model_input[-1] == {"role": "user", "content": "Summarize it."}
     assert [checkpoint["state_summary"]["node_name"] for checkpoint in checkpoint_store.checkpoints] == ["sdk_reasoning", "finish"]
     assert checkpoint_store.checkpoints[0]["state_summary"]["current_user_message_id"] == str(current_user.id)
@@ -91,6 +84,11 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() ->
         "actor_user_id",
         "graph_version",
         "prompt_version",
+        "routing_confidence",
+        "routing_execution_mode",
+        "routing_reason_codes",
+        "routing_safety_flags",
+        "routing_source",
         "run_id",
         "runtime_pattern",
         "specialist_display_name",
@@ -216,6 +214,17 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
             repository=repository,
             sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
             tool_executor=tool_executor,
+            specialist_registry=AgentSpecialistRegistry(
+                profiles=(
+                    AgentSpecialistProfile(
+                        id="general_assistant",
+                        display_name="All tools test profile",
+                        instructions="Expose all registered tools for schema coverage tests.",
+                        tool_domains=(),
+                    ),
+                ),
+                default_profile_id="general_assistant",
+            ),
         ).execute(run=run)
     )
 
@@ -294,9 +303,9 @@ def test_agent_runtime_executor_selects_specialist_and_scopes_tools() -> None:
 
     request = backend.requests[0]
     assert result.status == "completed"
-    assert request.specialist_id == "milk_management"
-    assert "Specialist profile: milk_management" in request.instructions
-    assert request.model_input[-4]["content"]["state"]["specialist_id"] == "milk_management"
+    assert request.specialist_id == "lactation"
+    assert "Specialist profile: lactation" in request.instructions
+    assert request.model_input[-4]["content"]["state"]["specialist_id"] == "lactation"
     assert request.tool_names == (
         "business.context.read",
         "notifications.milk_reminder.propose",
@@ -329,13 +338,14 @@ def test_agent_runtime_executor_routes_named_pump_issue_to_device_specialist() -
     )
 
     request = backend.requests[0]
-    assert request.specialist_id == "device_support"
+    assert request.specialist_id == "after_sales"
     assert request.tool_names == (
         "business.context.read",
         "devices.guidance_assets.read",
         "devices.pump_status.read",
         "files.vision_summary.read",
         "profile.read",
+        "records.milk_summary.read",
         "support.ticket.propose",
     )
 
@@ -458,6 +468,38 @@ def test_agent_runtime_executor_rejects_unsupported_sdk_action_proposal_before_p
     assert repository.events == []
 
 
+def test_agent_runtime_executor_rejects_direct_apply_sdk_action_proposal_before_persisting() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="Add a feeding record", sequence=1)
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    backend = CapturingSdkBackend(
+        result=SdkNodeResult(
+            action_proposals=[
+                {
+                    "action_type": "records.feeding_record.create",
+                    "target_type": "feeding_record",
+                    "side_effect_level": "low",
+                    "preview_payload": {"feed_type": "bottle"},
+                    "apply_payload": {"feed_time": "2026-07-04T08:30:00Z", "feed_type": "bottle"},
+                }
+            ]
+        )
+    )
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            AgentRuntimeExecutor(
+                repository=repository,
+                sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            ).execute(run=run)
+        )
+
+    assert exc_info.value.code == "direct_agent_action_requires_tool"
+    assert repository.actions == []
+    assert repository.events == []
+
+
 def test_agent_runtime_executor_rejects_multiple_sdk_action_proposals_before_side_effects() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)
@@ -538,6 +580,7 @@ class FakeRuntimeRepository:
         self.actions = []
         self.artifacts = []
         self.events = []
+        self.routing_decisions = []
         self.tool_call = None
         self.tool_output = None
 
@@ -555,6 +598,10 @@ class FakeRuntimeRepository:
         if self.current_message is not None and self.current_message.run_id == run_id:
             return _run(thread_id=self.current_message.thread_id, run_id=run_id)
         return None
+
+    async def record_routing_decision(self, **kwargs):
+        self.routing_decisions.append(kwargs)
+        return kwargs
 
     async def start_tool_call(self, **kwargs):
         self.tool_call = AgentToolCall(

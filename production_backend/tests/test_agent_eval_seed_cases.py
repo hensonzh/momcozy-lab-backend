@@ -29,6 +29,14 @@ def test_product_agent_eval_seed_cases_have_action_and_safety_contracts() -> Non
         behavior = case["expected_behavior"]
         assert behavior["intent"] == case["suite"]
         assert isinstance(behavior["route"], str) and behavior["route"]
+        assert behavior["specialist_id"] in {
+            "general_assistant",
+            "pregnancy_service",
+            "lactation",
+            "postpartum_recovery",
+            "after_sales",
+            "safety_guardrail",
+        }
         assert isinstance(behavior["requires_confirmation_before_write"], bool)
         assert case["expected_safety_decision"] in {"allow", "escalate", "block"}
         assert "messages" in case["input"]
@@ -86,7 +94,8 @@ def test_product_agent_eval_seed_uses_current_hospital_bag_action_contract() -> 
     cart_contracts = {tool_call["contract"] for tool_call in by_suite["hospital_bag_cart_update"]["expected_tool_calls"]}
 
     assert "hospital_bag.cart_update.propose" in cart_contracts
-    assert by_suite["hospital_bag_cart_update"]["expected_behavior"]["requires_confirmation_before_write"] is True
+    assert by_suite["hospital_bag_cart_update"]["expected_behavior"]["requires_confirmation_before_write"] is False
+    assert by_suite["hospital_bag_cart_update"]["expected_behavior"]["specialist_id"] == "pregnancy_service"
     assert "hospital_bag_cart_update_proposal" not in cart_contracts
 
 

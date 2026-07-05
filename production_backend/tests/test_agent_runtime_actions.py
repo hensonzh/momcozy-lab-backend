@@ -222,6 +222,28 @@ def test_agent_runtime_actions_reject_unsupported_action_type_before_persisting(
     assert repository.action is None
 
 
+def test_agent_runtime_actions_require_outbox_for_direct_apply_before_persisting() -> None:
+    owner_user_id = uuid4()
+    repository = FakeActionRepository()
+    service = AgentRuntimeService(repository=repository)
+    run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Track feeding"))
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            service.propose_action(
+                owner_user_id=owner_user_id,
+                run_id=run.id,
+                action_type=FEEDING_RECORD_CREATE_ACTION,
+                target_type="feeding_record",
+                side_effect_level="low",
+                apply_payload={"feed_time": "2026-07-04T08:30:00Z", "feed_type": "bottle"},
+            )
+        )
+
+    assert exc_info.value.code == "outbox_not_configured"
+    assert repository.action is None
+
+
 def test_agent_runtime_actions_accept_hospital_bag_cart_update_policy() -> None:
     owner_user_id = uuid4()
     repository = FakeActionRepository()
@@ -240,19 +262,17 @@ def test_agent_runtime_actions_accept_hospital_bag_cart_update_policy() -> None:
             apply_payload={"cart_update": {"set_checked": [{"item_id": "nursing-bra", "checked": True}]}},
         )
     )
-    run.status = "waiting_for_confirmation"
     confirmed = asyncio.run(service.confirm_action(owner_user_id=owner_user_id, action_id=action.id))
 
     assert confirmed.status == "confirmed"
     assert confirmed.action_type == "hospital_bag.cart.update"
     assert confirmed.target_type == "hospital_bag_cart"
     assert confirmed.side_effect_level == "low"
-    assert repository.events[-3].event_type == "action.confirmation_required"
-    assert repository.events[-3].payload["action_type"] == "hospital_bag.cart.update"
-    assert repository.events[-3].payload["target_type"] == "hospital_bag_cart"
-    assert repository.events[-3].payload["side_effect_level"] == "low"
-    assert repository.events[-2].event_type == "action.queued"
-    assert repository.events[-2].payload["action_status"] == "confirmed"
+    assert "action.confirmation_required" not in [event.event_type for event in repository.events]
+    assert repository.events[-1].event_type == "action.queued"
+    assert repository.events[-1].payload["action_status"] == "confirmed"
+    assert repository.events[-1].payload["action_type"] == "hospital_bag.cart.update"
+    assert repository.events[-1].payload["target_type"] == "hospital_bag_cart"
     assert outbox_service.enqueue_kwargs["payload"]["apply_payload"] == {
         "cart_update": {"set_checked": [{"item_id": "nursing-bra", "checked": True}]}
     }
@@ -480,9 +500,9 @@ def test_agent_milk_feeding_main_flow_confirms_applies_and_replays_events() -> N
                 "volume_ml": 90,
                 "title": "Morning bottle",
             },
+            idempotency_key="idem-milk-action",
         )
     )
-    run.status = "waiting_for_confirmation"
 
     confirmed = asyncio.run(
         runtime_service.confirm_action(
@@ -511,9 +531,7 @@ def test_agent_milk_feeding_main_flow_confirms_applies_and_replays_events() -> N
     assert [event.event_type for event in repository.events] == [
         "run.queued",
         "message.completed",
-        "action.confirmation_required",
         "action.queued",
-        "run.completed",
         "action.applied",
     ]
     assert applied_event.payload["action_id"] == str(action.id)

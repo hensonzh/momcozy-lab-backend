@@ -16,6 +16,7 @@ def test_agent_runtime_ledger_tables_are_registered() -> None:
         "agent_threads",
         "agent_runs",
         "agent_messages",
+        "agent_routing_decisions",
         "agent_tool_calls",
         "agent_tool_outputs",
         "agent_events",
@@ -82,6 +83,7 @@ def test_agent_ledger_has_no_provider_state_dependency_columns() -> None:
 
 def test_agent_actions_and_checkpoints_have_runtime_indexes() -> None:
     runs = Base.metadata.tables["agent_runs"]
+    routing_decisions = Base.metadata.tables["agent_routing_decisions"]
     actions = Base.metadata.tables["agent_actions"]
     checkpoints = Base.metadata.tables["agent_context_checkpoints"]
     workflow_states = Base.metadata.tables["agent_workflow_states"]
@@ -89,6 +91,13 @@ def test_agent_actions_and_checkpoints_have_runtime_indexes() -> None:
     memories = Base.metadata.tables["agent_memories"]
 
     assert "uq_agent_runs_thread_active" in {index.name for index in runs.indexes}
+    assert "specialist_id" in runs.columns
+    assert "routing_source" in runs.columns
+    assert "routing_confidence_score" in runs.columns
+    assert "routing_summary_json" in runs.columns
+    assert "ix_agent_runs_specialist_started" in {index.name for index in runs.indexes}
+    assert "uq_agent_routing_decisions_run_message" in {constraint.name for constraint in routing_decisions.constraints}
+    assert "ix_agent_routing_decisions_specialist_created" in {index.name for index in routing_decisions.indexes}
     assert "ix_agent_actions_run_status" in {index.name for index in actions.indexes}
     assert "ix_agent_actions_idempotency_key" in {index.name for index in actions.indexes}
     assert "uq_agent_context_checkpoints_namespace_id" in {constraint.name for constraint in checkpoints.constraints}

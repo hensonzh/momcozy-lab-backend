@@ -58,6 +58,7 @@ class AgentRuntimeGraphRunner:
         graph = StateGraph(AgentGraphState)
         graph.add_node("load_context", cast(Any, self._load_context_node(run=run)))
         graph.add_node("safety_gate", cast(Any, self._checkpointing_node(run=run, node_name="safety_gate")))
+        graph.add_node("route_specialist", cast(Any, self._checkpointing_node(run=run, node_name="route_specialist")))
         graph.add_node("sdk_reasoning", cast(Any, self._sdk_reasoning_node(run=run)))
         graph.add_node("tool_result_review", cast(Any, self._checkpointing_node(run=run, node_name="tool_result_review")))
         graph.add_node("action_policy", cast(Any, self._checkpointing_node(run=run, node_name="action_policy")))
@@ -66,7 +67,8 @@ class AgentRuntimeGraphRunner:
         graph.add_node("finish", cast(Any, self._checkpointing_node(run=run, node_name="finish")))
         graph.add_edge(START, "load_context")
         graph.add_edge("load_context", "safety_gate")
-        graph.add_edge("safety_gate", "sdk_reasoning")
+        graph.add_edge("safety_gate", "route_specialist")
+        graph.add_edge("route_specialist", "sdk_reasoning")
         graph.add_edge("sdk_reasoning", "tool_result_review")
         graph.add_edge("tool_result_review", "action_policy")
         graph.add_conditional_edges(
