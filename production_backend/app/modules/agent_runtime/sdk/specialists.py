@@ -62,6 +62,7 @@ def default_specialist_registry() -> AgentSpecialistRegistry:
                     "profile.read",
                     "business.context.read",
                     "records.milk_summary.read",
+                    "records.milk_status.read",
                     "records.feeding_record.propose",
                     "records.pumping_record.propose",
                     "plans.milk_plan.propose",

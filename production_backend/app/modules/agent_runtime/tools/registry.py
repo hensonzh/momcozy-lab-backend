@@ -87,6 +87,25 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         ToolContract(
+            name="records.milk_status.read",
+            domain="records",
+            description="Read a deterministic milk-management status snapshot from recent feeding, pumping, and trend records.",
+            input_schema_ref="MilkStatusQuery",
+            output_schema_ref="MilkStatusRead",
+            read_or_write="read",
+            required_permission="business_context:read:self",
+            owner_scope="actor",
+            side_effect_level="none",
+            blocking_policy="must_wait",
+            result_dependency="next_tool_call",
+            requires_confirmation=False,
+            idempotency_required=False,
+            audit_required=False,
+            timeout_seconds=10,
+        )
+    )
+    registry.register(
+        ToolContract(
             name="plans.current.read",
             domain="plans",
             description="Read current user's active plans and recent tasks as a bounded summary.",

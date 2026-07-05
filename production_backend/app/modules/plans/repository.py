@@ -124,6 +124,21 @@ class PlansRepository:
         await self.session.flush()
         return task
 
+    async def update_task(
+        self,
+        *,
+        task_id: UUID,
+        owner_user_id: UUID,
+        updates: dict[str, Any],
+    ) -> PlanTask | None:
+        task = await self.get_task_for_owner(task_id=task_id, owner_user_id=owner_user_id)
+        if task is None:
+            return None
+        for field, value in updates.items():
+            setattr(task, field, value)
+        await self.session.flush()
+        return task
+
     async def soft_delete_task(self, *, task_id: UUID, owner_user_id: UUID, deleted_at: datetime) -> PlanTask | None:
         task = await self.get_task_for_owner(task_id=task_id, owner_user_id=owner_user_id)
         if task is None:

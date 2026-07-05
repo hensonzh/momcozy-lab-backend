@@ -170,6 +170,26 @@ def test_list_and_delete_growth_use_current_user_scope() -> None:
     assert fake_service.delete_growth_kwargs["request_id"] == "req_delete"
 
 
+def test_update_growth_uses_current_user_request_id_and_partial_payload() -> None:
+    user_id = uuid4()
+    fake_service = FakeRecordsService(user_id=user_id)
+    app = create_app(Settings(app_env="test"))
+    _override_current_user(app, user_id)
+    app.dependency_overrides[get_records_service] = lambda: fake_service
+
+    response = TestClient(app).patch(
+        f"/v1/records/growth/{fake_service.record_id}",
+        headers={"X-Request-ID": "req_growth_update"},
+        json={"weight_kg": 4.8},
+    )
+
+    assert response.status_code == 200
+    assert fake_service.update_growth_kwargs["owner_user_id"] == user_id
+    assert fake_service.update_growth_kwargs["record_id"] == fake_service.record_id
+    assert fake_service.update_growth_kwargs["updates"] == {"weight_kg": 4.8}
+    assert fake_service.update_growth_kwargs["request_id"] == "req_growth_update"
+
+
 def _override_current_user(app, user_id: UUID) -> None:
     from production_backend.app.api.dependencies import require_current_user
 
@@ -201,6 +221,7 @@ class FakeRecordsService:
         self.create_feeding_kwargs = {}
         self.create_pumping_kwargs = {}
         self.create_growth_kwargs = {}
+        self.update_growth_kwargs = {}
         self.list_feedings_kwargs = {}
         self.list_pumpings_kwargs = {}
         self.milk_trends_kwargs = {}
@@ -253,6 +274,13 @@ class FakeRecordsService:
     async def list_growth(self, **kwargs):
         self.list_growth_kwargs = kwargs
         return [self._growth()]
+
+    async def update_growth(self, **kwargs):
+        self.update_growth_kwargs = kwargs
+        growth = self._growth()
+        for field, value in kwargs["updates"].items():
+            setattr(growth, field, value)
+        return growth
 
     async def delete_growth(self, **kwargs):
         self.delete_growth_kwargs = kwargs

@@ -216,6 +216,51 @@ def test_records_service_lists_and_deletes_growth() -> None:
     assert audit_service.record_kwargs["action"] == "records.growth.delete"
 
 
+def test_records_service_updates_growth_preserving_omitted_fields_and_audit() -> None:
+    owner_user_id = uuid4()
+    infant_id = uuid4()
+    growth = _growth(owner_user_id=owner_user_id)
+    growth.infant_id = infant_id
+    growth.height_cm = 52.0
+    repository = FakeRecordsRepository(growth=growth, infant_owner_ok=True)
+    audit_service = FakeAuditService()
+    service = RecordsService(repository=repository, audit_service=audit_service)
+
+    updated = asyncio.run(
+        service.update_growth(
+            owner_user_id=owner_user_id,
+            record_id=growth.id,
+            updates={"weight_kg": 4.8},
+            request_id="req_growth_update",
+        )
+    )
+
+    assert updated.weight_kg == 4.8
+    assert updated.height_cm == 52.0
+    assert repository.update_growth_kwargs["updates"] == {"weight_kg": 4.8}
+    assert audit_service.record_kwargs["action"] == "records.growth.update"
+    assert audit_service.record_kwargs["details"] == {"fields": ["weight_kg"]}
+
+
+def test_records_service_rejects_growth_update_that_clears_all_measurements() -> None:
+    owner_user_id = uuid4()
+    growth = _growth(owner_user_id=owner_user_id)
+    repository = FakeRecordsRepository(growth=growth)
+    service = RecordsService(repository=repository)
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            service.update_growth(
+                owner_user_id=owner_user_id,
+                record_id=growth.id,
+                updates={"weight_kg": None},
+            )
+        )
+
+    assert exc_info.value.code == "validation_failed"
+    assert repository.update_growth_kwargs == {}
+
+
 def _now() -> datetime:
     return datetime(2026, 7, 2, 8, 0, tzinfo=timezone.utc)
 
@@ -285,6 +330,7 @@ class FakeRecordsRepository:
         self.create_feeding_kwargs = {}
         self.create_pumping_kwargs = {}
         self.create_growth_kwargs = {}
+        self.update_growth_kwargs = {}
         self.list_feedings_kwargs = {}
         self.list_pumpings_kwargs = {}
         self.list_growth_kwargs = {}
@@ -343,6 +389,14 @@ class FakeRecordsRepository:
         return self.growth
 
     async def get_growth_for_owner(self, *, record_id: UUID, owner_user_id: UUID):
+        return self.growth
+
+    async def update_growth(self, **kwargs):
+        self.update_growth_kwargs = kwargs
+        if self.growth is None:
+            return None
+        for field, value in kwargs["updates"].items():
+            setattr(self.growth, field, value)
         return self.growth
 
     async def list_growth(self, **kwargs):

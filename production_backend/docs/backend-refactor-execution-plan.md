@@ -498,6 +498,8 @@ Completed backend commits have established:
   waiting run outcomes
 - OpenAI Agents SDK backend wiring with environment-managed API key and model
   configuration for the agent worker
+- growth record partial update and plan task partial update endpoints, closing
+  the legacy growth revise and plan revise-task route mappings
 - replay bundle export service for debugging and eval seed generation, default
   redacted to avoid accidental PII exposure, including artifact and runtime
   state snapshots
@@ -521,6 +523,8 @@ Completed backend commits have established:
   model-supplied user IDs
 - bounded read-only business context tool for migrated records, plans, diary,
   and device facts
+- read-only lactation status tool contract `records.milk_status.read` for
+  deterministic milk-management coverage, trend, and observation flags
 - application-level tool lifecycle events emitted by the ToolExecutor, keeping
   persisted SSE/replay streams aligned with the tool ledger
 - shared AgentEventSink wiring in runtime/tool/action workers so Redis stream

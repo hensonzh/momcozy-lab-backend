@@ -2,6 +2,9 @@ import asyncio
 from datetime import date, datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
+import pytest
+
+from production_backend.app.core.errors import ApiError
 from production_backend.app.modules.audit.models import IdempotencyKey
 from production_backend.app.modules.audit.service import request_hash
 from production_backend.app.modules.plans.models import Plan, PlanTask
@@ -43,6 +46,48 @@ def test_plans_service_creates_and_completes_task() -> None:
     assert task.plan_id == plan.id
     assert completed.status == "completed"
     assert audit_service.record_kwargs["action"] == "plans.tasks.complete"
+
+
+def test_plans_service_updates_task_with_audit() -> None:
+    owner_user_id = uuid4()
+    task = _task(owner_user_id=owner_user_id)
+    repository = FakePlansRepository(task=task)
+    audit_service = FakeAuditService()
+    service = PlansService(repository=repository, audit_service=audit_service)
+
+    updated = asyncio.run(
+        service.update_task(
+            owner_user_id=owner_user_id,
+            task_id=task.id,
+            updates={"title": "Pack hospital bag", "description": None, "payload": {"category": "birth_prep"}},
+            request_id="req_task_update",
+        )
+    )
+
+    assert updated.title == "Pack hospital bag"
+    assert updated.description == ""
+    assert updated.payload == {"category": "birth_prep"}
+    assert repository.update_task_kwargs["updates"]["description"] == ""
+    assert audit_service.record_kwargs["action"] == "plans.tasks.update"
+
+
+def test_plans_service_rejects_blank_task_update_title() -> None:
+    owner_user_id = uuid4()
+    task = _task(owner_user_id=owner_user_id)
+    repository = FakePlansRepository(task=task)
+    service = PlansService(repository=repository)
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            service.update_task(
+                owner_user_id=owner_user_id,
+                task_id=task.id,
+                updates={"title": "   "},
+            )
+        )
+
+    assert exc_info.value.code == "validation_failed"
+    assert repository.update_task_kwargs == {}
 
 
 def test_plans_service_task_idempotency_hash_includes_persisted_body() -> None:
@@ -113,6 +158,7 @@ class FakePlansRepository:
         self.task = task
         self.plans = plans or []
         self.tasks = tasks or []
+        self.update_task_kwargs = {}
 
     async def create_plan(self, **kwargs):
         self.plan = _plan(owner_user_id=kwargs["owner_user_id"])
@@ -142,6 +188,14 @@ class FakePlansRepository:
     async def set_task_completed(self, **kwargs):
         self.task.status = "completed" if kwargs["completed"] else "pending"
         self.task.completed_at = kwargs["completed_at"]
+        return self.task
+
+    async def update_task(self, **kwargs):
+        self.update_task_kwargs = kwargs
+        if self.task is None:
+            return None
+        for field, value in kwargs["updates"].items():
+            setattr(self.task, field, value)
         return self.task
 
     async def soft_delete_task(self, **kwargs):

@@ -116,5 +116,13 @@ class GrowthRecordCreate(BaseModel):
         return self
 
 
+class GrowthRecordUpdate(BaseModel):
+    infant_id: UUID | None = None
+    measured_at: datetime | None = None
+    height_cm: float | None = Field(default=None, gt=0)
+    weight_kg: float | None = Field(default=None, gt=0)
+    head_cm: float | None = Field(default=None, gt=0)
+
+
 class GrowthRecordListResponse(BaseModel):
     items: list[GrowthRecordRead]

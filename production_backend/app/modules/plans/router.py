@@ -20,6 +20,7 @@ from .schemas import (
     PlanTaskCreate,
     PlanTaskListResponse,
     PlanTaskRead,
+    PlanTaskUpdate,
 )
 from .service import PlansService
 
@@ -130,6 +131,23 @@ async def list_tasks(
         limit=limit,
     )
     return PlanTaskListResponse(items=[PlanTaskRead.model_validate(task) for task in tasks])
+
+
+@router.patch("/tasks/{task_id}", response_model=PlanTaskRead)
+async def update_task(
+    task_id: UUID,
+    payload: PlanTaskUpdate,
+    request: Request,
+    current_user: CurrentUser = Depends(require_current_user),
+    service: PlansService = Depends(get_plans_service),
+) -> PlanTaskRead:
+    task = await service.update_task(
+        owner_user_id=current_user.user_id,
+        task_id=task_id,
+        updates=payload.model_dump(exclude_unset=True),
+        request_id=str(getattr(request.state, "request_id", "") or ""),
+    )
+    return PlanTaskRead.model_validate(task)
 
 
 @router.patch("/tasks/{task_id}/completion", response_model=PlanTaskRead)

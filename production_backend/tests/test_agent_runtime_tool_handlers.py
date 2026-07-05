@@ -16,6 +16,7 @@ from production_backend.app.modules.agent_runtime.tools import (
     FileVisionSummaryReadToolHandler,
     HospitalBagCartUpdateProposeToolHandler,
     MemoryCreateProposeToolHandler,
+    MilkStatusReadToolHandler,
     MilkPlanProposeToolHandler,
     MilkReminderProposeToolHandler,
     MilkSummaryReadToolHandler,
@@ -225,6 +226,54 @@ def test_milk_summary_read_tool_handler_returns_bounded_owner_scoped_summary() -
         "recent_pumped_volume_ml": 80.0,
         "trend_pumped_volume_ml": 170.0,
         "trend_pumping_count": 3,
+    }
+
+
+def test_milk_status_read_tool_handler_returns_deterministic_status_snapshot() -> None:
+    actor = _user()
+    records_service = FakeRecordsService(owner_user_id=actor.user_id)
+    infant = InfantProfile(
+        id=uuid4(),
+        owner_user_id=actor.user_id,
+        infant_name="Nori",
+        sex="female",
+        birth_date=date(2026, 1, 10),
+        status="active",
+    )
+    profile_service = FakeProfileService(profile=None, infants=[infant])
+    handler = MilkStatusReadToolHandler(records_service=records_service, profile_service=profile_service)
+
+    result = asyncio.run(handler(_context(actor=actor, args={"days": 3, "limit": 2, "owner_user_id": str(uuid4())})))
+
+    assert records_service.owner_user_id == actor.user_id
+    assert profile_service.infant_owner_user_id == actor.user_id
+    assert result == {
+        "window": {"days": 3, "limit": 2, "include_today": True},
+        "status": {
+            "data_coverage": "ready",
+            "pumping_trend": "stable",
+            "measured_only": True,
+        },
+        "counts": {
+            "infants": 1,
+            "recent_feedings": 1,
+            "recent_pumpings": 1,
+            "trend_days": 2,
+            "days_with_pumping": 2,
+            "trend_pumping_count": 3,
+        },
+        "volumes": {
+            "recent_feeding_volume_ml": 60.0,
+            "recent_pumped_volume_ml": 80.0,
+            "trend_pumped_volume_ml": 170.0,
+            "average_daily_pumped_volume_ml": 56.67,
+        },
+        "latest": {
+            "feeding_at": "2026-07-02T08:00:00+00:00",
+            "pumping_at": "2026-07-02T08:00:00+00:00",
+        },
+        "observation_flags": [],
+        "next_step_hint": "summarize_current_status",
     }
 
 
@@ -757,6 +806,7 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
         "profile.read",
         "business.context.read",
         "records.milk_summary.read",
+        "records.milk_status.read",
         "plans.current.read",
         "diary.entry_upsert.propose",
         "diary.recent.read",

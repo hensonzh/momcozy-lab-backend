@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta, timezone
+from typing import Any
 from uuid import UUID
 
 from ...core.errors import ApiError
@@ -346,6 +347,55 @@ class RecordsService:
         ):
             raise ApiError(code="owner_scope_violation", message="Infant profile is outside the current user scope.", status=403)
         return await self.repository.list_growth(owner_user_id=owner_user_id, infant_id=infant_id, limit=limit)
+
+    async def update_growth(
+        self,
+        *,
+        owner_user_id: UUID,
+        record_id: UUID,
+        updates: dict[str, Any],
+        request_id: str = "",
+    ) -> GrowthRecord:
+        allowed_fields = {"infant_id", "measured_at", "height_cm", "weight_kg", "head_cm"}
+        unknown_fields = set(updates) - allowed_fields
+        if unknown_fields:
+            raise ApiError(code="validation_failed", message="Unsupported growth update fields.", status=422)
+        if not updates:
+            raise ApiError(code="validation_failed", message="At least one growth field is required.", status=422)
+
+        record = await self.repository.get_growth_for_owner(record_id=record_id, owner_user_id=owner_user_id)
+        if record is None:
+            raise ApiError(code="not_found", message="Growth record not found.", status=404)
+        infant_id = updates.get("infant_id", record.infant_id)
+        if infant_id is not None and not await self.repository.infant_belongs_to_owner(
+            infant_id=infant_id,
+            owner_user_id=owner_user_id,
+        ):
+            raise ApiError(code="owner_scope_violation", message="Infant profile is outside the current user scope.", status=403)
+
+        next_height_cm = updates.get("height_cm", record.height_cm)
+        next_weight_kg = updates.get("weight_kg", record.weight_kg)
+        next_head_cm = updates.get("head_cm", record.head_cm)
+        if next_height_cm is None and next_weight_kg is None and next_head_cm is None:
+            raise ApiError(code="validation_failed", message="height_cm, weight_kg, or head_cm is required.", status=422)
+
+        updated = await self.repository.update_growth(
+            owner_user_id=owner_user_id,
+            record_id=record_id,
+            updates=updates,
+        )
+        if updated is None:
+            raise ApiError(code="not_found", message="Growth record not found.", status=404)
+        if self.audit_service is not None:
+            await self.audit_service.record(
+                actor_user_id=owner_user_id,
+                action="records.growth.update",
+                resource_type="growth_record",
+                resource_id=str(record_id),
+                request_id=request_id,
+                details={"fields": sorted(updates)},
+            )
+        return updated
 
     async def delete_growth(self, *, owner_user_id: UUID, record_id: UUID, request_id: str = "") -> None:
         deleted = await self.repository.soft_delete_growth(

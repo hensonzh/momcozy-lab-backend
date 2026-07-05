@@ -248,6 +248,7 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
         "pregnancy_plan_create_propose",
         "profile_read",
         "records_feeding_record_propose",
+        "records_milk_status_read",
         "records_milk_summary_read",
         "records_pumping_record_propose",
         "support_ticket_propose",
@@ -277,6 +278,7 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert backend.tool_schemas["profile_read"]["additionalProperties"] is False
     assert backend.tool_schemas["profile_read"]["properties"] == {}
     assert backend.tool_schemas["records_feeding_record_propose"]["required"] == ["feed_time", "feed_type"]
+    assert backend.tool_schemas["records_milk_status_read"]["properties"]["days"]["maximum"] == 30
     assert backend.tool_schemas["records_milk_summary_read"]["properties"]["days"]["maximum"] == 30
     assert backend.tool_schemas["records_pumping_record_propose"]["required"] == ["pump_start_time"]
     assert backend.tool_schemas["support_ticket_propose"]["required"] == ["issue_summary"]
@@ -312,6 +314,7 @@ def test_agent_runtime_executor_selects_specialist_and_scopes_tools() -> None:
         "plans.milk_plan.propose",
         "profile.read",
         "records.feeding_record.propose",
+        "records.milk_status.read",
         "records.milk_summary.read",
         "records.pumping_record.propose",
     )

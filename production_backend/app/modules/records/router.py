@@ -19,6 +19,7 @@ from .schemas import (
     GrowthRecordCreate,
     GrowthRecordListResponse,
     GrowthRecordRead,
+    GrowthRecordUpdate,
     MilkTrendListResponse,
     PumpingRecordCreate,
     PumpingRecordListResponse,
@@ -195,6 +196,23 @@ async def list_growth(
 ) -> GrowthRecordListResponse:
     records = await service.list_growth(owner_user_id=current_user.user_id, infant_id=infant_id, limit=limit)
     return GrowthRecordListResponse(items=[GrowthRecordRead.model_validate(record) for record in records])
+
+
+@router.patch("/growth/{record_id}", response_model=GrowthRecordRead)
+async def update_growth(
+    record_id: UUID,
+    payload: GrowthRecordUpdate,
+    request: Request,
+    current_user: CurrentUser = Depends(require_current_user),
+    service: RecordsService = Depends(get_records_service),
+) -> GrowthRecordRead:
+    record = await service.update_growth(
+        owner_user_id=current_user.user_id,
+        record_id=record_id,
+        updates=payload.model_dump(exclude_unset=True),
+        request_id=str(getattr(request.state, "request_id", "") or ""),
+    )
+    return GrowthRecordRead.model_validate(record)
 
 
 @router.delete("/growth/{record_id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -53,6 +53,8 @@ def test_product_agent_eval_seed_uses_current_milk_summary_tool_contract() -> No
         assert "records.milk_summary.read" in contracts
         assert "milk_summary_read" not in contracts
         assert "milk_records_read" not in contracts
+    daily_contracts = {tool_call["contract"] for tool_call in milk_cases["milk_daily_summary"]["expected_tool_calls"]}
+    assert "records.milk_status.read" in daily_contracts
 
 
 def test_product_agent_eval_seed_uses_current_milk_action_contracts() -> None:

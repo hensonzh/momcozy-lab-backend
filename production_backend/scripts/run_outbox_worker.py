@@ -17,15 +17,16 @@ from production_backend.app.modules.agent_runtime.memory.actions import AGENT_ME
 from production_backend.app.modules.agent_runtime.repository import AgentRuntimeRepository
 from production_backend.app.modules.audit import AuditService, IdempotencyService, OutboxService
 from production_backend.app.modules.audit.repository import AuditRepository, OutboxRepository
-from production_backend.app.modules.diary import DIARY_ENTRY_UPSERT_ACTION, DiaryEntryUpsertActionHandler, DiaryService
+from production_backend.app.modules.diary.agent_actions import DIARY_ENTRY_UPSERT_ACTION, DiaryEntryUpsertActionHandler
 from production_backend.app.modules.diary.repository import DiaryRepository
+from production_backend.app.modules.diary.service import DiaryService
 from production_backend.app.modules.notifications import (
     MILK_REMINDER_CREATE_ACTION,
     MilkReminderCreateActionHandler,
     NotificationsService,
 )
 from production_backend.app.modules.notifications.repository import NotificationsRepository
-from production_backend.app.modules.plans import (
+from production_backend.app.modules.plans.agent_actions import (
     MILK_PLAN_CREATE_ACTION,
     PLAN_TASK_COMPLETE_ACTION,
     PLAN_TASK_CREATE_ACTION,
@@ -33,18 +34,18 @@ from production_backend.app.modules.plans import (
     MilkPlanCreateActionHandler,
     PlanTaskCompleteActionHandler,
     PlanTaskCreateActionHandler,
-    PlansService,
     PregnancyPlanCreateActionHandler,
 )
 from production_backend.app.modules.plans.repository import PlansRepository
-from production_backend.app.modules.records import (
+from production_backend.app.modules.plans.service import PlansService
+from production_backend.app.modules.records.agent_actions import (
     FEEDING_RECORD_CREATE_ACTION,
     PUMPING_RECORD_CREATE_ACTION,
     FeedingRecordCreateActionHandler,
     PumpingRecordCreateActionHandler,
-    RecordsService,
 )
 from production_backend.app.modules.records.repository import RecordsRepository
+from production_backend.app.modules.records.service import RecordsService
 from production_backend.app.modules.support import SupportTicketsService
 from production_backend.app.modules.support.agent_actions import SUPPORT_TICKET_CREATE_ACTION, SupportTicketCreateActionHandler
 from production_backend.app.modules.support.repository import SupportTicketsRepository

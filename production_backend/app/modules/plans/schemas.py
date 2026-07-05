@@ -55,6 +55,15 @@ class PlanTaskCreate(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
+class PlanTaskUpdate(BaseModel):
+    plan_id: UUID | None = None
+    task_date: date | None = None
+    task_time: str | None = Field(default=None, max_length=16)
+    title: str | None = Field(default=None, min_length=1, max_length=255)
+    description: str | None = None
+    payload: dict[str, Any] | None = None
+
+
 class PlanTaskCompletionUpdate(BaseModel):
     completed: bool = True
 

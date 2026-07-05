@@ -37,6 +37,11 @@ def test_tool_contract_registry_declares_permission_confirmation_and_blocking_po
     assert milk_summary.read_or_write == "read"
     assert milk_summary.owner_scope == "actor"
     assert milk_summary.requires_confirmation is False
+    milk_status = registry.get("records.milk_status.read")
+    assert milk_status.read_or_write == "read"
+    assert milk_status.owner_scope == "actor"
+    assert milk_status.requires_confirmation is False
+    assert milk_status.blocking_policy == "must_wait"
     feeding_proposal = registry.get("records.feeding_record.propose")
     pumping_proposal = registry.get("records.pumping_record.propose")
     milk_plan_proposal = registry.get("plans.milk_plan.propose")
@@ -110,6 +115,7 @@ def test_tool_contract_registry_declares_permission_confirmation_and_blocking_po
     assert file_vision.required_permission == "files:read:self"
     assert file_vision.requires_confirmation is False
     assert "records.milk_summary.read" in registry.names_for_sdk()
+    assert "records.milk_status.read" in registry.names_for_sdk()
     assert "plans.current.read" in registry.names_for_sdk()
     assert "diary.recent.read" in registry.names_for_sdk()
     assert "diary.entry_upsert.propose" in registry.names_for_sdk()
@@ -129,6 +135,7 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
     business_schema = tool_input_schema(registry.get("business.context.read").input_schema_ref)
     support_schema = tool_input_schema(registry.get("support.ticket.propose").input_schema_ref)
     milk_schema = tool_input_schema(registry.get("records.milk_summary.read").input_schema_ref)
+    milk_status_schema = tool_input_schema(registry.get("records.milk_status.read").input_schema_ref)
     plans_schema = tool_input_schema(registry.get("plans.current.read").input_schema_ref)
     diary_schema = tool_input_schema(registry.get("diary.recent.read").input_schema_ref)
     pregnancy_context_schema = tool_input_schema(registry.get("pregnancy.plan_context.read").input_schema_ref)
@@ -159,6 +166,9 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
     assert milk_schema["additionalProperties"] is False
     assert milk_schema["properties"]["days"]["maximum"] == 30
     assert milk_schema["properties"]["limit"]["maximum"] == 20
+    assert milk_status_schema["additionalProperties"] is False
+    assert milk_status_schema["properties"]["days"]["maximum"] == 30
+    assert milk_status_schema["properties"]["limit"]["maximum"] == 20
     assert plans_schema["additionalProperties"] is False
     assert plans_schema["properties"]["limit"]["maximum"] == 20
     assert diary_schema["additionalProperties"] is False

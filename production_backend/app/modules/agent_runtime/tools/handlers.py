@@ -199,6 +199,30 @@ class MilkSummaryReadToolHandler:
         }
 
 
+class MilkStatusReadToolHandler:
+    def __init__(self, *, records_service: RecordsService, profile_service: ProfileService) -> None:
+        self.records_service = records_service
+        self.profile_service = profile_service
+
+    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
+        owner_user_id = context.actor.user_id
+        days = _limit(context.args.get("days"), default=7, max_limit=30)
+        limit = _limit(context.args.get("limit"), default=5, max_limit=20)
+        feedings = await self.records_service.list_feedings(owner_user_id=owner_user_id, limit=limit)
+        pumpings = await self.records_service.list_pumpings(owner_user_id=owner_user_id, limit=limit)
+        trends = await self.records_service.get_milk_trends(owner_user_id=owner_user_id, days=days, include_today=True)
+        infants = await self.profile_service.list_infants(owner_user_id=owner_user_id)
+        trend_items = [_milk_trend_payload(item) for item in trends.items]
+        return _milk_status_payload(
+            days=days,
+            limit=limit,
+            feedings=feedings,
+            pumpings=pumpings,
+            trend_items=trend_items,
+            infant_count=len(infants),
+        )
+
+
 class PlansCurrentReadToolHandler:
     def __init__(self, *, plans_service: PlansService) -> None:
         self.plans_service = plans_service
@@ -563,6 +587,10 @@ def build_default_tool_handlers(
             devices_service=devices_service,
         ),
         "records.milk_summary.read": MilkSummaryReadToolHandler(
+            records_service=records_service,
+            profile_service=profile_service,
+        ),
+        "records.milk_status.read": MilkStatusReadToolHandler(
             records_service=records_service,
             profile_service=profile_service,
         ),
@@ -1037,6 +1065,112 @@ def _milk_trend_payload(item: Any) -> dict[str, Any]:
 
 def _record_volume_sum(records: list[Any], attr_name: str) -> float:
     return round(sum(float(getattr(record, attr_name, 0) or 0) for record in records), 2)
+
+
+def _milk_status_payload(
+    *,
+    days: int,
+    limit: int,
+    feedings: list[FeedingRecord],
+    pumpings: list[PumpingRecord],
+    trend_items: list[dict[str, Any]],
+    infant_count: int,
+) -> dict[str, Any]:
+    trend_pumped_volume = round(sum(float(item.get("pumped_milk_volume_ml") or 0) for item in trend_items), 2)
+    trend_pumping_count = sum(int(item.get("pumping_count") or 0) for item in trend_items)
+    days_with_pumping = sum(1 for item in trend_items if int(item.get("pumping_count") or 0) > 0)
+    latest_feeding = feedings[0] if feedings else None
+    latest_pumping = pumpings[0] if pumpings else None
+    flags = _milk_observation_flags(
+        feedings=feedings,
+        pumpings=pumpings,
+        trend_pumping_count=trend_pumping_count,
+        infant_count=infant_count,
+    )
+    return {
+        "window": {
+            "days": days,
+            "limit": limit,
+            "include_today": True,
+        },
+        "status": {
+            "data_coverage": _milk_data_coverage(
+                has_feedings=bool(feedings),
+                has_pumpings=bool(pumpings),
+                days=days,
+                days_with_pumping=days_with_pumping,
+            ),
+            "pumping_trend": _milk_trend_direction(trend_items),
+            "measured_only": True,
+        },
+        "counts": {
+            "infants": infant_count,
+            "recent_feedings": len(feedings),
+            "recent_pumpings": len(pumpings),
+            "trend_days": len(trend_items),
+            "days_with_pumping": days_with_pumping,
+            "trend_pumping_count": trend_pumping_count,
+        },
+        "volumes": {
+            "recent_feeding_volume_ml": _record_volume_sum(feedings, "volume_ml"),
+            "recent_pumped_volume_ml": _record_volume_sum(pumpings, "milk_volume_ml"),
+            "trend_pumped_volume_ml": trend_pumped_volume,
+            "average_daily_pumped_volume_ml": round(trend_pumped_volume / days, 2) if days else 0.0,
+        },
+        "latest": {
+            "feeding_at": _datetime_iso(latest_feeding.feed_time) if latest_feeding is not None else None,
+            "pumping_at": _datetime_iso(latest_pumping.pump_start_time) if latest_pumping is not None else None,
+        },
+        "observation_flags": flags,
+        "next_step_hint": _milk_next_step_hint(flags),
+    }
+
+
+def _milk_data_coverage(*, has_feedings: bool, has_pumpings: bool, days: int, days_with_pumping: int) -> str:
+    if not has_feedings and not has_pumpings and days_with_pumping == 0:
+        return "no_recent_data"
+    if has_feedings and has_pumpings and days_with_pumping >= min(days, 2):
+        return "ready"
+    return "limited"
+
+
+def _milk_trend_direction(trend_items: list[dict[str, Any]]) -> str:
+    volumes = [float(item.get("pumped_milk_volume_ml") or 0) for item in trend_items if int(item.get("pumping_count") or 0) > 0]
+    if len(volumes) < 2:
+        return "insufficient_data"
+    delta = volumes[-1] - volumes[0]
+    if abs(delta) < 30:
+        return "stable"
+    return "increasing" if delta > 0 else "decreasing"
+
+
+def _milk_observation_flags(
+    *,
+    feedings: list[FeedingRecord],
+    pumpings: list[PumpingRecord],
+    trend_pumping_count: int,
+    infant_count: int,
+) -> list[str]:
+    flags: list[str] = []
+    if infant_count == 0:
+        flags.append("no_infant_profile")
+    if not feedings:
+        flags.append("no_recent_feeding_records")
+    if not pumpings:
+        flags.append("no_recent_pumping_records")
+    if trend_pumping_count == 0:
+        flags.append("no_pumping_trend_data")
+    return flags
+
+
+def _milk_next_step_hint(flags: list[str]) -> str:
+    if not flags:
+        return "summarize_current_status"
+    if "no_recent_feeding_records" in flags or "no_recent_pumping_records" in flags:
+        return "ask_for_missing_recent_records"
+    if "no_infant_profile" in flags:
+        return "ask_for_infant_context"
+    return "ask_follow_up_before_recommending_plan"
 
 
 def _growth_payload(record: GrowthRecord) -> dict[str, Any]:

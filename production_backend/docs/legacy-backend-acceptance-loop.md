@@ -395,12 +395,23 @@ Target acceptance:
 
 - records live under owner-scoped `records` module;
 - feeding/pumping/growth create/list/delete use typed schemas;
+- growth revise is represented by `PATCH /v1/records/growth/{record_id}`
+  with partial update semantics;
 - infant-linked writes validate infant ownership;
 - create endpoints accept `Idempotency-Key`;
 - same key plus same request replays, same key plus different body conflicts;
 - list endpoints enforce date filters, limits, and stable ordering;
 - delete is owner-scoped and idempotency semantics are explicit;
 - no plan/summary endpoint uses planned milk as real measured milk.
+
+Current migration status:
+
+- Implemented and tested: feeding/pumping/growth create, list, delete;
+  measured-only milk trends; growth partial update; OpenAPI route disposition
+  for legacy growth revise.
+- Still product-backlog unless re-specified: direct feeding/pumping record
+  revise endpoints. Agent-created feeding/pumping writes are represented as
+  queued direct-apply actions through explicit tool contracts.
 
 Test gates:
 
@@ -455,6 +466,18 @@ Target acceptance:
   scope pass;
 - birth journey and labor communication flows have golden evals for intent,
   form collection, confirmation, and safety red flags.
+
+Current migration status:
+
+- Implemented and tested: plan/task create, list, detail, delete; task
+  completion; `PATCH /v1/plans/tasks/{task_id}` for legacy task revise;
+  Agent plan/task proposal contracts for pregnancy and milk scenes.
+- Implemented foundation: durable `agent_artifacts` lifecycle and replay
+  contract.
+- Still missing as product-level flows: birth journey intake/card generation,
+  labor communication card generation, hospital bag form/card generation, and
+  domain-specific artifact promotion rules. These should be implemented as new
+  production flows, not by importing legacy skill/tool code.
 
 Test gates:
 
@@ -679,6 +702,20 @@ Target acceptance:
 - non-blocking side effects use outbox and return queued/applied/failed events;
 - context projection is rebuilt per turn from message ledger, business facts,
   memory, and current state projection.
+
+Current migration status:
+
+- Implemented and tested: scene specialist routing, durable run/message/tool
+  ledger, context projection, SDK tool execution, action proposal/outbox
+  skeleton, replayable application events, deterministic safety guard, and
+  product eval seed runner.
+- Implemented lactation foundation: `records.milk_summary.read`,
+  `records.milk_status.read`, feeding/pumping record direct-apply proposals,
+  milk plan proposal, and milk reminder proposal.
+- Still missing as product-level flows: full milk analysis card, calendar
+  reschedule previews, day-by-day milk plan calendar mutation, IBCLC consult
+  workflow, and richer birth-prep artifacts. Add eval cases and tool/action
+  contracts before implementation.
 
 Test gates:
 

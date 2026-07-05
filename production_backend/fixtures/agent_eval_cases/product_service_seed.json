@@ -277,6 +277,10 @@
       },
       "expected_tool_calls": [
         {
+          "contract": "records.milk_status.read",
+          "timing": "before_final_response"
+        },
+        {
           "contract": "records.milk_summary.read",
           "timing": "before_final_response"
         }

@@ -51,6 +51,27 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             },
         },
     },
+    "MilkStatusQuery": {
+        "title": "MilkStatusQuery",
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "days": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 30,
+                "default": 7,
+                "description": "Number of recent trend days to inspect for status classification.",
+            },
+            "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 20,
+                "default": 5,
+                "description": "Maximum recent feeding and pumping records to inspect.",
+            },
+        },
+    },
     "PlansCurrentQuery": {
         "title": "PlansCurrentQuery",
         "type": "object",

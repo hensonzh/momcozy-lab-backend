@@ -45,13 +45,22 @@ def test_task_apis_use_current_user_scope() -> None:
 
     create_response = TestClient(app).post("/v1/plans/tasks", json={"title": "Pack bag"})
     list_response = TestClient(app).get("/v1/plans/tasks/list?limit=10")
+    update_response = TestClient(app).patch(
+        f"/v1/plans/tasks/{fake_service.task_id}",
+        headers={"X-Request-ID": "req_task_update"},
+        json={"title": "Pack hospital bag"},
+    )
     complete_response = TestClient(app).patch(f"/v1/plans/tasks/{fake_service.task_id}/completion", json={"completed": True})
 
     assert create_response.status_code == 201
     assert list_response.status_code == 200
+    assert update_response.status_code == 200
     assert complete_response.status_code == 200
     assert fake_service.create_task_kwargs["owner_user_id"] == user_id
     assert fake_service.list_tasks_kwargs["limit"] == 10
+    assert fake_service.update_task_kwargs["owner_user_id"] == user_id
+    assert fake_service.update_task_kwargs["updates"] == {"title": "Pack hospital bag"}
+    assert fake_service.update_task_kwargs["request_id"] == "req_task_update"
     assert fake_service.set_task_completed_kwargs["owner_user_id"] == user_id
 
 
@@ -79,6 +88,7 @@ class FakePlansService:
         self.create_plan_kwargs = {}
         self.create_task_kwargs = {}
         self.list_tasks_kwargs = {}
+        self.update_task_kwargs = {}
         self.set_task_completed_kwargs = {}
 
     async def create_plan(self, **kwargs):
@@ -106,6 +116,13 @@ class FakePlansService:
         self.set_task_completed_kwargs = kwargs
         task = self._task()
         task.status = "completed"
+        return task
+
+    async def update_task(self, **kwargs):
+        self.update_task_kwargs = kwargs
+        task = self._task()
+        for field, value in kwargs["updates"].items():
+            setattr(task, field, value)
         return task
 
     async def delete_task(self, **kwargs):

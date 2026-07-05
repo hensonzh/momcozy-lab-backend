@@ -142,6 +142,53 @@ class PlansService:
         await self._audit(owner_user_id=owner_user_id, action="plans.tasks.complete", resource_type="plan_task", resource_id=str(task_id), request_id=request_id)
         return task
 
+    async def update_task(
+        self,
+        *,
+        owner_user_id: UUID,
+        task_id: UUID,
+        updates: dict[str, Any],
+        request_id: str = "",
+    ) -> PlanTask:
+        allowed_fields = {"plan_id", "task_date", "task_time", "title", "description", "payload"}
+        unknown_fields = set(updates) - allowed_fields
+        if unknown_fields:
+            raise ApiError(code="validation_failed", message="Unsupported plan task update fields.", status=422)
+        if not updates:
+            raise ApiError(code="validation_failed", message="At least one task field is required.", status=422)
+        if "plan_id" in updates and updates["plan_id"] is not None:
+            plan = await self.repository.get_plan_for_owner(plan_id=updates["plan_id"], owner_user_id=owner_user_id)
+            if plan is None:
+                raise ApiError(code="owner_scope_violation", message="Plan is outside the current user scope.", status=403)
+
+        normalized_updates = dict(updates)
+        if "task_time" in normalized_updates:
+            normalized_updates["task_time"] = normalized_updates["task_time"] or ""
+        if "description" in normalized_updates:
+            normalized_updates["description"] = normalized_updates["description"] or ""
+        if "payload" in normalized_updates:
+            normalized_updates["payload"] = normalized_updates["payload"] or {}
+        if "title" in normalized_updates:
+            normalized_updates["title"] = normalized_updates["title"].strip()
+            if not normalized_updates["title"]:
+                raise ApiError(code="validation_failed", message="title is required.", status=422)
+
+        task = await self.repository.update_task(
+            task_id=task_id,
+            owner_user_id=owner_user_id,
+            updates=normalized_updates,
+        )
+        if task is None:
+            raise ApiError(code="not_found", message="Plan task not found.", status=404)
+        await self._audit(
+            owner_user_id=owner_user_id,
+            action="plans.tasks.update",
+            resource_type="plan_task",
+            resource_id=str(task_id),
+            request_id=request_id,
+        )
+        return task
+
     async def delete_task(self, *, owner_user_id: UUID, task_id: UUID, request_id: str = "") -> None:
         deleted = await self.repository.soft_delete_task(task_id=task_id, owner_user_id=owner_user_id, deleted_at=_utcnow())
         if deleted is None:

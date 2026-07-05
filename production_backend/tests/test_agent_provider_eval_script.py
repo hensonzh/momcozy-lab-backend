@@ -32,8 +32,11 @@ def test_run_agent_provider_eval_uses_sdk_runner_and_seed_assertions() -> None:
         [
             scripted_sdk_response(
                 final_text="You completed 3 of 5 milk tasks today.",
-                tool_invocations=(scripted_tool_invocation("records.milk_summary.read", {"days": 1}),),
-                expected_available_tools=("records.milk_summary.read",),
+                tool_invocations=(
+                    scripted_tool_invocation("records.milk_status.read", {"days": 1}),
+                    scripted_tool_invocation("records.milk_summary.read", {"days": 1}),
+                ),
+                expected_available_tools=("records.milk_status.read", "records.milk_summary.read"),
             )
         ]
     )
@@ -49,4 +52,7 @@ def test_run_agent_provider_eval_uses_sdk_runner_and_seed_assertions() -> None:
     assert report["results"][0]["status"] == "passed"
     assert report["results"][0]["specialist_id"] == "lactation"
     assert report["results"][0]["routing_source"] == "keyword_fast_path"
-    assert report["results"][0]["observed_tool_calls"][0]["tool_name"] == "records.milk_summary.read"
+    assert [tool_call["tool_name"] for tool_call in report["results"][0]["observed_tool_calls"]] == [
+        "records.milk_status.read",
+        "records.milk_summary.read",
+    ]

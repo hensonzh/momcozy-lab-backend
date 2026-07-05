@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import cast
+from typing import Any, cast
 from uuid import UUID
 
 from sqlalchemy import select
@@ -192,6 +192,21 @@ class RecordsRepository:
             GrowthRecord.deleted_at.is_(None),
         )
         return cast(GrowthRecord | None, await self.session.scalar(statement))
+
+    async def update_growth(
+        self,
+        *,
+        record_id: UUID,
+        owner_user_id: UUID,
+        updates: dict[str, Any],
+    ) -> GrowthRecord | None:
+        record = await self.get_growth_for_owner(record_id=record_id, owner_user_id=owner_user_id)
+        if record is None:
+            return None
+        for field, value in updates.items():
+            setattr(record, field, value)
+        await self.session.flush()
+        return record
 
     async def list_growth(
         self,
