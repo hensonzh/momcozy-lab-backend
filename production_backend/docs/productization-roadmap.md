@@ -136,6 +136,9 @@ Retained domains:
 | Voice | provider-neutral disabled/local_stub contract | standard disabled-provider envelope | green |
 | Vision | provider-neutral disabled/local_stub contract and file-owner stream contract | standard disabled-provider envelope | green |
 
+Current status: `green` for code-local acceptance. Managed speech and vision
+providers remain external launch-scope choices.
+
 Acceptance:
 
 - no migrated route trusts request body/query `user_id` as an authority;
