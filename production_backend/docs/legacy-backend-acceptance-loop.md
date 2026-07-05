@@ -17,9 +17,9 @@ It complements:
 
 - `backend-refactor-inventory.generated.md`: generated list of legacy routes,
   SQLite tables, direct `data_store` calls, and risk flags.
-- `docs/momcozy-production-refactor-plan.md`: system diagnosis, target
+- `production_backend/docs/product/momcozy-production-refactor-plan.md`: system diagnosis, target
   architecture, state model, and migration plan.
-- `docs/momcozy-agent-service-test-plan.md`: product-level Agent service
+- `production_backend/docs/product/momcozy-agent-service-test-plan.md`: product-level Agent service
   behavior and safety acceptance.
 - `api-contract-handoff.md` and `openapi.generated.json`: target backend API
   contracts for the Flutter app.
@@ -730,7 +730,7 @@ Test gates:
 
 ## Product-Level Agent Acceptance Suites
 
-Use `docs/momcozy-agent-service-test-plan.md` as the product behavior source.
+Use `production_backend/docs/product/momcozy-agent-service-test-plan.md` as the product behavior source.
 Each suite should become a deterministic eval set with mock tools and safe
 fixtures.
 

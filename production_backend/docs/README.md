@@ -9,6 +9,7 @@ Use this directory for documents that guide or verify the new production backend
 - Migration decisions and ADRs.
 - Operational runbooks.
 - Engineering-loop acceptance gates.
+- Product-level PRD, refactor plan, and agent service test plan under `product/`.
 
 The first document to add should be `backend-refactor-inventory.md`.
 

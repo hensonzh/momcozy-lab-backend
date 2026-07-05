@@ -5,7 +5,7 @@ checks remain dependent on the Flutter refactor.
 
 This document is the execution plan for the isolated production backend under
 `production_backend/`. It complements the project-level
-`docs/momcozy-production-refactor-plan.md`, which explains the legacy system,
+`production_backend/docs/product/momcozy-production-refactor-plan.md`, which explains the legacy system,
 defects, target architecture, and full product migration.
 
 ## Current Answer
@@ -25,7 +25,7 @@ Backend refactor proceeded independently under these rules:
 
 ## Source Documents
 
-- `docs/momcozy-production-refactor-plan.md`: system-level diagnosis and target
+- `production_backend/docs/product/momcozy-production-refactor-plan.md`: system-level diagnosis and target
   architecture.
 - `production_backend/docs/backend-refactor-inventory.generated.md`: generated
   legacy route/table risk inventory.
