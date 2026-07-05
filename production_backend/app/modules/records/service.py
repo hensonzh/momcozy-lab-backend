@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
 from ...core.errors import ApiError
 from ..audit import AuditService, IdempotencyService, parse_idempotency_response_ref, request_hash
+from . import domain
 from .models import FeedingRecord, GrowthRecord, PumpingRecord
 from .repository import RecordsRepository
 from .schemas import MilkTrendDayRead, MilkTrendListResponse
@@ -47,7 +48,7 @@ class RecordsService:
             owner_user_id=owner_user_id,
         ):
             raise ApiError(code="owner_scope_violation", message="Infant profile is outside the current user scope.", status=403)
-        if volume_ml is None and duration_seconds is None:
+        if not domain.has_feeding_measurement(volume_ml=volume_ml, duration_seconds=duration_seconds):
             raise ApiError(code="validation_failed", message="volume_ml or duration_seconds is required.", status=422)
 
         idempotency_record = None
@@ -106,7 +107,7 @@ class RecordsService:
         end_at: datetime | None = None,
         limit: int = 50,
     ) -> list[FeedingRecord]:
-        if limit < 1 or limit > 100:
+        if not domain.is_valid_list_limit(limit):
             raise ApiError(code="validation_failed", message="limit must be between 1 and 100.", status=422)
         return await self.repository.list_feedings(
             owner_user_id=owner_user_id,
@@ -146,7 +147,7 @@ class RecordsService:
         request_id: str = "",
         idempotency_key: str | None = None,
     ) -> PumpingRecord:
-        if milk_volume_ml is None and duration_seconds is None:
+        if not domain.has_pumping_measurement(milk_volume_ml=milk_volume_ml, duration_seconds=duration_seconds):
             raise ApiError(code="validation_failed", message="milk_volume_ml or duration_seconds is required.", status=422)
 
         idempotency_record = None
@@ -205,7 +206,7 @@ class RecordsService:
         end_at: datetime | None = None,
         limit: int = 50,
     ) -> list[PumpingRecord]:
-        if limit < 1 or limit > 100:
+        if not domain.is_valid_list_limit(limit):
             raise ApiError(code="validation_failed", message="limit must be between 1 and 100.", status=422)
         return await self.repository.list_pumpings(
             owner_user_id=owner_user_id,
@@ -222,33 +223,25 @@ class RecordsService:
         days: int = 30,
         include_today: bool = True,
     ) -> MilkTrendListResponse:
-        if days < 1 or days > 90:
+        if not domain.is_valid_trend_days(days):
             raise ApiError(code="validation_failed", message="days must be between 1 and 90.", status=422)
-        first_day = start_date or _default_trend_start_date(days=days, include_today=include_today)
-        start_at = datetime.combine(first_day, time.min, tzinfo=timezone.utc)
-        end_at = start_at + timedelta(days=days)
+        first_day = start_date or domain.default_trend_start_date(now=_utcnow(), days=days, include_today=include_today)
+        start_at, end_at = domain.trend_datetime_window(first_day=first_day, days=days)
         pumpings = await self.repository.list_pumpings(
             owner_user_id=owner_user_id,
             start_at=start_at,
             end_at=end_at,
             limit=1000,
         )
-        totals_by_day: dict[date, float] = {}
-        counts_by_day: dict[date, int] = {}
-        for pumping in pumpings:
-            pump_day = _as_utc_date(pumping.pump_start_time)
-            if pump_day < first_day or pump_day >= first_day + timedelta(days=days):
-                continue
-            totals_by_day[pump_day] = totals_by_day.get(pump_day, 0.0) + float(pumping.milk_volume_ml or 0)
-            counts_by_day[pump_day] = counts_by_day.get(pump_day, 0) + 1
+        trend_days = domain.build_measured_milk_trend_days(pumpings=pumpings, first_day=first_day, days=days)
         items = [
             MilkTrendDayRead(
-                date=first_day + timedelta(days=offset),
-                pumped_milk_volume_ml=round(totals_by_day.get(first_day + timedelta(days=offset), 0.0), 2),
-                pumping_count=counts_by_day.get(first_day + timedelta(days=offset), 0),
+                date=trend_day.date,
+                pumped_milk_volume_ml=trend_day.pumped_milk_volume_ml,
+                pumping_count=trend_day.pumping_count,
                 measured_only=True,
             )
-            for offset in range(days)
+            for trend_day in trend_days
         ]
         return MilkTrendListResponse(items=items, days=days, include_today=include_today)
 
@@ -286,7 +279,7 @@ class RecordsService:
             owner_user_id=owner_user_id,
         ):
             raise ApiError(code="owner_scope_violation", message="Infant profile is outside the current user scope.", status=403)
-        if height_cm is None and weight_kg is None and head_cm is None:
+        if not domain.has_growth_measurement(height_cm=height_cm, weight_kg=weight_kg, head_cm=head_cm):
             raise ApiError(code="validation_failed", message="height_cm, weight_kg, or head_cm is required.", status=422)
 
         idempotency_record = None
@@ -339,7 +332,7 @@ class RecordsService:
         infant_id: UUID | None = None,
         limit: int = 50,
     ) -> list[GrowthRecord]:
-        if limit < 1 or limit > 100:
+        if not domain.is_valid_list_limit(limit):
             raise ApiError(code="validation_failed", message="limit must be between 1 and 100.", status=422)
         if infant_id is not None and not await self.repository.infant_belongs_to_owner(
             infant_id=infant_id,
@@ -356,8 +349,7 @@ class RecordsService:
         updates: dict[str, Any],
         request_id: str = "",
     ) -> GrowthRecord:
-        allowed_fields = {"infant_id", "measured_at", "height_cm", "weight_kg", "head_cm"}
-        unknown_fields = set(updates) - allowed_fields
+        unknown_fields = domain.unsupported_growth_update_fields(updates)
         if unknown_fields:
             raise ApiError(code="validation_failed", message="Unsupported growth update fields.", status=422)
         if not updates:
@@ -373,10 +365,13 @@ class RecordsService:
         ):
             raise ApiError(code="owner_scope_violation", message="Infant profile is outside the current user scope.", status=403)
 
-        next_height_cm = updates.get("height_cm", record.height_cm)
-        next_weight_kg = updates.get("weight_kg", record.weight_kg)
-        next_head_cm = updates.get("head_cm", record.head_cm)
-        if next_height_cm is None and next_weight_kg is None and next_head_cm is None:
+        next_height_cm, next_weight_kg, next_head_cm = domain.growth_measurements_after_update(
+            current_height_cm=record.height_cm,
+            current_weight_kg=record.weight_kg,
+            current_head_cm=record.head_cm,
+            updates=updates,
+        )
+        if not domain.has_growth_measurement(height_cm=next_height_cm, weight_kg=next_weight_kg, head_cm=next_head_cm):
             raise ApiError(code="validation_failed", message="height_cm, weight_kg, or head_cm is required.", status=422)
 
         updated = await self.repository.update_growth(
@@ -438,14 +433,3 @@ class RecordsService:
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
-
-
-def _default_trend_start_date(*, days: int, include_today: bool) -> date:
-    end_day = _utcnow().date() if include_today else _utcnow().date() - timedelta(days=1)
-    return end_day - timedelta(days=days - 1)
-
-
-def _as_utc_date(value: datetime) -> date:
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc).date()

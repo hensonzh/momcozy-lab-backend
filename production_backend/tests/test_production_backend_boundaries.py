@@ -82,3 +82,28 @@ def test_agent_runtime_uses_explicit_internal_subdomains() -> None:
 
     assert missing_subdomains == []
     assert leaked_files == []
+
+
+def test_records_module_keeps_domain_rules_out_of_service_or_infrastructure() -> None:
+    records_root = APP_ROOT / "modules" / "records"
+    domain = records_root / "domain.py"
+    service = records_root / "service.py"
+    layering_doc = ROOT / "production_backend" / "docs" / "module-layering.md"
+
+    assert domain.exists()
+    assert "from . import domain" in service.read_text()
+
+    domain_text = domain.read_text()
+    for forbidden in [
+        "fastapi",
+        "ApiError",
+        "AuditService",
+        "IdempotencyService",
+        "RecordsRepository",
+        "sqlalchemy",
+    ]:
+        assert forbidden not in domain_text
+
+    doc_text = layering_doc.read_text()
+    assert "domain.py" in doc_text
+    assert "records/domain.py" in doc_text

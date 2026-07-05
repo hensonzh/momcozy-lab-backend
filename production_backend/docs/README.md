@@ -24,3 +24,5 @@ Key documents:
   switching rules.
 - `product-asset-storage.md`: manifest + object storage policy for large
   product assets.
+- `module-layering.md`: router/service/domain/repository boundary convention
+  for production modules.
