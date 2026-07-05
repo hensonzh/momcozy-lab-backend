@@ -4,7 +4,7 @@ COMPOSE_ENV_FILE ?= env/compose.local.env.example
 PYTHON ?= .venv/bin/python
 COMPOSE = MOMCOZY_BACKEND_ENV_FILE=$(COMPOSE_ENV_FILE) docker compose -f production_backend/docker-compose.yml
 
-.PHONY: backend-local-up backend-up backend-down backend-local-migrate backend-migrate backend-local-workers backend-workers backend-local-minio backend-check-infra backend-productization-status backend-smoke backend-staging-smoke backend-production-readiness backend-env-print
+.PHONY: backend-local-up backend-up backend-down backend-local-migrate backend-migrate backend-local-workers backend-workers backend-local-minio backend-check-infra backend-productization-status backend-smoke backend-staging-smoke backend-production-readiness backend-worker-backlog backend-agent-recover-stuck-runs backend-env-print
 
 backend-local-up:
 	$(MAKE) backend-up BACKEND_ENV=local
@@ -50,6 +50,14 @@ backend-staging-smoke:
 backend-production-readiness:
 	$(MAKE) backend-productization-status
 	$(MAKE) backend-check-infra BACKEND_ENV=production
+
+backend-worker-backlog:
+	set -a; . $(BACKEND_ENV_FILE); set +a; \
+	$(PYTHON) production_backend/scripts/inspect_worker_backlog.py
+
+backend-agent-recover-stuck-runs:
+	set -a; . $(BACKEND_ENV_FILE); set +a; \
+	$(PYTHON) production_backend/scripts/recover_stuck_agent_runs.py
 
 backend-env-print:
 	@echo "BACKEND_ENV=$(BACKEND_ENV)"

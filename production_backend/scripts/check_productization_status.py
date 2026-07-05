@@ -59,6 +59,8 @@ def _check_required_files(root: Path) -> list[CheckResult]:
         "production_backend/docs/release-smoke-checklist.md",
         "production_backend/scripts/run_agent_worker.py",
         "production_backend/scripts/run_outbox_worker.py",
+        "production_backend/scripts/inspect_worker_backlog.py",
+        "production_backend/scripts/recover_stuck_agent_runs.py",
         "production_backend/scripts/run_agent_seed_eval.py",
     ]
     return [_file_exists(root, relative_path) for relative_path in required]
@@ -130,6 +132,8 @@ def _check_makefile_targets(root: Path) -> list[CheckResult]:
         (makefile, "backend-smoke:"),
         (makefile, "backend-staging-smoke:"),
         (makefile, "backend-production-readiness:"),
+        (makefile, "backend-worker-backlog:"),
+        (makefile, "backend-agent-recover-stuck-runs:"),
         (makefile, "production_backend/scripts/check_productization_status.py"),
     ]
     return _contains_by_file(checks)

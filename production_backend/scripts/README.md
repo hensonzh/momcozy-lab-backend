@@ -14,3 +14,7 @@ where possible.
 - `check_productization_status.py`: checks backend-local productization
   guardrails such as required docs, env profiles, CI gates, worker scripts,
   OpenAPI snapshot, Makefile smoke targets, and legacy-runtime scan coverage.
+- `inspect_worker_backlog.py`: prints durable outbox and agent-run backlog
+  counts without mutating state.
+- `recover_stuck_agent_runs.py`: dry-runs stuck `running` agent run recovery by
+  default; pass `--apply` to mark matched runs failed and clear Redis controls.

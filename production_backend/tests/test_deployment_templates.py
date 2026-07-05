@@ -65,6 +65,10 @@ def test_makefile_infra_checks_use_project_python_environment() -> None:
     assert "$(MAKE) backend-check-infra BACKEND_ENV=staging" in makefile
     assert "backend-production-readiness:" in makefile
     assert "$(MAKE) backend-check-infra BACKEND_ENV=production" in makefile
+    assert "backend-worker-backlog:" in makefile
+    assert "$(PYTHON) production_backend/scripts/inspect_worker_backlog.py" in makefile
+    assert "backend-agent-recover-stuck-runs:" in makefile
+    assert "$(PYTHON) production_backend/scripts/recover_stuck_agent_runs.py" in makefile
 
 
 def test_docker_context_excludes_product_asset_blobs_from_worker_images() -> None:

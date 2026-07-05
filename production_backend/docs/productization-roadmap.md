@@ -169,7 +169,8 @@ Acceptance:
 - retries, dead-letter status, lease timeout, and graceful shutdown are tested;
 - non-blocking agent effects use action/outbox and emit replayable events.
 
-Current status: `yellow`.
+Current status: `green` for code-local acceptance. Staging alert thresholds
+remain external.
 
 Already covered:
 
@@ -178,11 +179,11 @@ Already covered:
 - file cleanup and agent action outbox handlers;
 - worker lifecycle, retry, DLQ, and process tests.
 
-Remaining backend-only PR slices:
+Completed backend-only PR slices:
 
 - `ops: add worker backlog inspection CLI`
 - `ops: add stuck-run recovery CLI`
-- `test: add compose worker smoke fixture`
+- `test: add worker operations smoke fixtures`
 
 External dependencies:
 

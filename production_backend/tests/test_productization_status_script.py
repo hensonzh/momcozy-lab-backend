@@ -29,3 +29,13 @@ def test_productization_status_script_prints_json_summary() -> None:
 
     assert '"status": "pass"' in completed.stdout
     assert '"failed": 0' in completed.stdout
+
+
+def test_productization_status_checks_worker_operations_scripts() -> None:
+    results = run_checks(ROOT)
+    names = {result.name for result in results}
+
+    assert "production_backend/scripts/inspect_worker_backlog.py" in names
+    assert "production_backend/scripts/recover_stuck_agent_runs.py" in names
+    assert "Makefile:backend-worker-backlog:" in names
+    assert "Makefile:backend-agent-recover-stuck-runs:" in names
