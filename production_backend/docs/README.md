@@ -16,6 +16,8 @@ Key documents:
 
 - `backend-refactor-inventory.generated.md`: generated legacy route/table risk
   inventory.
+- `productization-roadmap.md`: Phase 0-6 backend-only productization roadmap,
+  status matrix, Flutter boundary, and remaining PR slices.
 - `agent-runtime-continuation-migration-plan.md`: continuation plan for taking
   the agent runtime foundation to complete product-level agent behavior.
 - `legacy-backend-acceptance-loop.md`: maps legacy domains to production
