@@ -301,7 +301,8 @@ Acceptance:
   cases;
 - every Phase 0-6 yellow item has either a backend PR or an external dependency.
 
-Current status: `yellow`.
+Current status: `green` for code-local acceptance. Staging dashboard and alert
+destinations remain external.
 
 Already covered:
 
@@ -311,7 +312,7 @@ Already covered:
 - deployment runbook and smoke checklist;
 - replay bundle and eval seed services.
 
-Remaining backend-only PR slices:
+Completed backend-only PR slices:
 
 - `ops: add productization status checker`;
 - `eval: add provider budget and max-case defaults to nightly workflow`;

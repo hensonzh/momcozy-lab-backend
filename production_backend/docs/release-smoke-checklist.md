@@ -4,6 +4,8 @@ Run this checklist after migrations and before a release is declared healthy.
 
 ## Infrastructure
 
+- `make backend-productization-status` returns all pass.
+- `make backend-smoke` passes in the release candidate checkout.
 - `GET /v1/health/live` returns `200`.
 - `GET /v1/health/ready` returns `200` and checks DB/Redis in production.
 - `GET /v1/health/metrics` returns request, worker, agent tool, and SDK metric
@@ -47,12 +49,18 @@ Run this checklist after migrations and before a release is declared healthy.
 - Open SSE replay through `GET /v1/agent/runs/{run_id}/stream` using bearer
   auth headers, not query tokens.
 - Confirm/reject a test action if one is available.
+- Run deterministic agent seed eval:
+  `python production_backend/scripts/run_agent_seed_eval.py`.
+- Run provider eval with bounded budget or confirm explicit skip:
+  `python production_backend/scripts/run_agent_provider_eval.py --allow-skip-without-credentials --max-cases 8 --cost-budget-usd 5.00`.
 
 ## Observability
 
 - Confirm logs include `request_id`, route, status code, and latency.
 - Confirm `/v1/health/metrics` changes after smoke traffic using `X-Service-Key`
   in production.
+- Run `make backend-worker-backlog BACKEND_ENV_FILE=<env file>` and confirm no
+  unexpected queued, locked, stale running, or dead-letter growth.
 - Confirm no raw password, refresh token, service key, prompt, tool args, or file
   body appears in logs.
 
@@ -61,5 +69,6 @@ Run this checklist after migrations and before a release is declared healthy.
 - No 5xx spike.
 - No readiness failure.
 - No new dead-letter worker jobs.
+- No unrecovered stale agent runs.
 - No cross-user data access finding.
 - OpenAPI snapshot matches the deployed schema.

@@ -43,6 +43,10 @@ Start incident and release debugging from these IDs when available:
 9. Check backup/restore automation hooks:
    `python production_backend/scripts/check_backup_restore_hooks.py --strict`
 10. Export OpenAPI and compare it with the committed snapshot.
+11. Run backend-local productization guardrails:
+    `make backend-productization-status`.
+12. In staging, run the environment-backed smoke bundle:
+    `make backend-staging-smoke BACKEND_ENV_FILE=<staging env file>`.
 
 ## Release
 
@@ -88,7 +92,8 @@ before increasing limits.
 
 1. Check `/v1/health/metrics` with `X-Service-Key` in production for worker
    outcomes and error codes.
-2. Inspect queued and locked `outbox_jobs`.
+2. Inspect queued and locked `outbox_jobs` with
+   `make backend-worker-backlog BACKEND_ENV_FILE=<env file>`.
 3. Confirm Redis and external providers are reachable.
 4. If jobs are locked by a dead worker, wait for lease expiry or release them
    with an audited maintenance script.
@@ -104,7 +109,28 @@ before increasing limits.
 4. Replay persisted events before attempting any new model call.
 5. If the run is waiting for confirmation, keep it waiting and ask the client to
    resume from persisted action state.
-6. If the run failed, create an eval or replay regression case when safe.
+6. Dry-run stuck running recovery with
+   `make backend-agent-recover-stuck-runs BACKEND_ENV_FILE=<env file>`.
+7. Only after support/incident approval, run
+   `python production_backend/scripts/recover_stuck_agent_runs.py --apply`.
+8. If the run failed, create an eval or replay regression case when safe.
+
+## Provider Eval Budget
+
+Provider-backed evals run through `agent-provider-eval.yml` and
+`production_backend/scripts/run_agent_provider_eval.py`.
+
+Required controls:
+
+- `OPENAI_API_KEY` is provided through GitHub secrets or the runtime secret
+  manager.
+- `OPENAI_MODEL` is an environment variable, not hard-coded in eval cases.
+- `AGENT_PROVIDER_EVAL_MAX_CASES` bounds nightly case count.
+- `AGENT_PROVIDER_EVAL_COST_BUDGET_USD` records the approved budget for the
+  eval run.
+
+If credentials are absent, the provider eval workflow must skip explicitly with
+`missing_provider_credentials`, not fail with an ambiguous provider error.
 
 ## Security Incident
 
