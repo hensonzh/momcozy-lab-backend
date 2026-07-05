@@ -55,7 +55,7 @@ Before each migration wave, regenerate it:
 
 ```bash
 cd MomCozyAgent
-.venv/bin/python production_backend/scripts/inventory_legacy_backend.py --write
+production_backend/.venv/bin/python production_backend/scripts/inventory_legacy_backend.py --write
 ```
 
 Acceptance for the inventory step:
@@ -208,16 +208,16 @@ For backend slices, the default verification gate is:
 
 ```bash
 cd MomCozyAgent
-.venv/bin/python -m ruff check production_backend/app production_backend/tests
-.venv/bin/python -m pytest production_backend/tests -q
+production_backend/.venv/bin/python -m ruff check production_backend/app production_backend/tests
+production_backend/.venv/bin/python -m pytest production_backend/tests -q
 ```
 
 For infrastructure slices, add the relevant live profile check:
 
 ```bash
 PATH="$HOME/.local/bin:$PATH" docker compose -f production_backend/docker-compose.yml config
-.venv/bin/python production_backend/scripts/check_redis_runtime_controls.py
-.venv/bin/python production_backend/scripts/check_backup_restore_hooks.py
+production_backend/.venv/bin/python production_backend/scripts/check_redis_runtime_controls.py
+production_backend/.venv/bin/python production_backend/scripts/check_backup_restore_hooks.py
 ```
 
 ### 6. Self-Review Before Commit

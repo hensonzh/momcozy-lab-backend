@@ -17,7 +17,7 @@ def test_productization_status_checks_pass_for_current_backend() -> None:
 def test_productization_status_script_prints_json_summary() -> None:
     completed = subprocess.run(
         [
-            ".venv/bin/python",
+            "production_backend/.venv/bin/python",
             "production_backend/scripts/check_productization_status.py",
             "--json",
         ],

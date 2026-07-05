@@ -31,7 +31,7 @@ def test_worker_ops_scripts_expose_safe_cli_help() -> None:
         "production_backend/scripts/recover_stuck_agent_runs.py",
     ]:
         completed = subprocess.run(
-            [".venv/bin/python", script, "--help"],
+            ["production_backend/.venv/bin/python", script, "--help"],
             cwd=ROOT,
             check=True,
             capture_output=True,

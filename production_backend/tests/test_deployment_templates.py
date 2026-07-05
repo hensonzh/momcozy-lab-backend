@@ -54,7 +54,7 @@ def test_environment_profile_examples_exist_for_local_staging_and_production() -
 def test_makefile_infra_checks_use_project_python_environment() -> None:
     makefile = (ROOT / "Makefile").read_text()
 
-    assert "PYTHON ?= .venv/bin/python" in makefile
+    assert "PYTHON ?= production_backend/.venv/bin/python" in makefile
     assert "$(PYTHON) production_backend/scripts/check_database_profile.py" in makefile
     assert "$(PYTHON) production_backend/scripts/check_redis_runtime_controls.py" in makefile
     assert "$(PYTHON) production_backend/scripts/check_object_storage_profile.py" in makefile

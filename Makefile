@@ -1,7 +1,7 @@
 BACKEND_ENV ?= local
 BACKEND_ENV_FILE ?= production_backend/env/$(BACKEND_ENV).env.example
 COMPOSE_ENV_FILE ?= env/compose.local.env.example
-PYTHON ?= .venv/bin/python
+PYTHON ?= production_backend/.venv/bin/python
 COMPOSE = MOMCOZY_BACKEND_ENV_FILE=$(COMPOSE_ENV_FILE) docker compose -f production_backend/docker-compose.yml
 
 .PHONY: backend-local-up backend-up backend-down backend-local-migrate backend-migrate backend-local-workers backend-workers backend-local-minio backend-check-infra backend-productization-status backend-smoke backend-staging-smoke backend-production-readiness backend-worker-backlog backend-agent-recover-stuck-runs backend-env-print
