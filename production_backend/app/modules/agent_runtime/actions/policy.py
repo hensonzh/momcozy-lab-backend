@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping
 
-from ...core.errors import ApiError
+from ....core.errors import ApiError
 
 
 @dataclass(frozen=True)

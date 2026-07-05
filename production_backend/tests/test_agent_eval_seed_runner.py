@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from production_backend.app.modules.agent_runtime.evals import (
+from production_backend.app.modules.agent_runtime.evals.service import (
     AgentEvalReplayAssertionRunner,
     AgentEvalSeedAssertionEngine,
     AgentEvalTrace,

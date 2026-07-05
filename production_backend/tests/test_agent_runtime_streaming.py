@@ -4,8 +4,8 @@ from uuid import uuid4
 
 from production_backend.app.modules.agent_runtime.models import AgentEvent
 from production_backend.app.modules.agent_runtime.router import _stream_run_event_chunks
-from production_backend.app.modules.agent_runtime.streaming import encode_sse_events, encode_transient_sse_events
-from production_backend.app.modules.agent_runtime.transient_stream import AgentTransientStream, AgentTransientStreamEvent
+from production_backend.app.modules.agent_runtime.event_stream.sse import encode_sse_events, encode_transient_sse_events
+from production_backend.app.modules.agent_runtime.event_stream.transient import AgentTransientStream, AgentTransientStreamEvent
 
 
 def test_encode_sse_events_uses_application_event_envelope() -> None:

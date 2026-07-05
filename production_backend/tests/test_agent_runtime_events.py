@@ -1,7 +1,7 @@
 import asyncio
 from uuid import uuid4
 
-from production_backend.app.modules.agent_runtime.events import AgentEventSink
+from production_backend.app.modules.agent_runtime.event_stream.sink import AgentEventSink
 from production_backend.app.modules.agent_runtime.models import AgentEvent
 
 

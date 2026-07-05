@@ -6,8 +6,8 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from ..core.errors import ApiError
-from ..modules.agent_runtime.controls import AgentRunControls
-from ..modules.agent_runtime.execution import AgentRunExecutionResult, AgentRunHandler
+from ..modules.agent_runtime.run_lifecycle.controls import AgentRunControls
+from ..modules.agent_runtime.run_lifecycle.execution import AgentRunExecutionResult, AgentRunHandler
 from ..modules.agent_runtime.models import AgentEvent, AgentRun
 from ..modules.agent_runtime.repository import AgentRuntimeRepository
 

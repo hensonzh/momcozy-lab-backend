@@ -1,7 +1,7 @@
 import asyncio
 from uuid import uuid4
 
-from production_backend.app.modules.agent_runtime.evals import AgentEvalService
+from production_backend.app.modules.agent_runtime.evals.service import AgentEvalService
 from production_backend.app.modules.agent_runtime.models import AgentEvalCase
 
 

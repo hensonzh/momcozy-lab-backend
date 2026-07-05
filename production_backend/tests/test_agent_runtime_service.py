@@ -6,7 +6,7 @@ import pytest
 
 from production_backend.app.core.errors import ApiError
 from production_backend.app.modules.agent_runtime.models import AgentArtifact, AgentEvent, AgentMessage, AgentRun, AgentSafetyEvent, AgentThread
-from production_backend.app.modules.agent_runtime.safety import AgentSafetyService
+from production_backend.app.modules.agent_runtime.safety.service import AgentSafetyService
 from production_backend.app.modules.agent_runtime.service import AgentRuntimeService
 from production_backend.app.modules.audit.models import IdempotencyKey
 

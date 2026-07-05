@@ -5,7 +5,7 @@ import pytest
 
 from production_backend.app.core.metrics import RequestMetrics
 from production_backend.app.modules.agent_runtime.models import AgentSafetyEvent
-from production_backend.app.modules.agent_runtime.safety import AgentSafetyService, DeterministicSafetyGuard
+from production_backend.app.modules.agent_runtime.safety.service import AgentSafetyService, DeterministicSafetyGuard
 
 
 def test_deterministic_safety_guard_escalates_emotional_crisis() -> None:

@@ -3,6 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 APP_ROOT = ROOT / "production_backend" / "app"
+AGENT_RUNTIME_ROOT = APP_ROOT / "modules" / "agent_runtime"
 
 
 def test_production_backend_app_does_not_depend_on_legacy_runtime_or_sqlite() -> None:
@@ -39,3 +40,45 @@ def test_legacy_backend_is_isolated_from_project_root() -> None:
     leaked_dirs = sorted(name for name in legacy_root_dirs if (ROOT / name).exists())
 
     assert leaked_dirs == []
+
+
+def test_production_backend_has_no_legacy_bridge_fallback() -> None:
+    assert not (ROOT / "production_backend" / "legacy_bridge").exists()
+
+
+def test_agent_runtime_uses_explicit_internal_subdomains() -> None:
+    expected_subdomains = {
+        "actions",
+        "evals",
+        "event_stream",
+        "graphs",
+        "memory",
+        "prompts",
+        "routing",
+        "run_lifecycle",
+        "safety",
+        "sdk",
+        "tools",
+    }
+    missing_subdomains = sorted(name for name in expected_subdomains if not (AGENT_RUNTIME_ROOT / name).is_dir())
+
+    flattened_runtime_files = {
+        "action_outbox.py",
+        "action_policy.py",
+        "controls.py",
+        "evals.py",
+        "events.py",
+        "execution.py",
+        "memory.py",
+        "memory_actions.py",
+        "replay.py",
+        "runtime.py",
+        "safety.py",
+        "state_store.py",
+        "streaming.py",
+        "transient_stream.py",
+    }
+    leaked_files = sorted(name for name in flattened_runtime_files if (AGENT_RUNTIME_ROOT / name).exists())
+
+    assert missing_subdomains == []
+    assert leaked_files == []

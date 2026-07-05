@@ -7,8 +7,8 @@ from uuid import UUID
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...core.errors import ApiError
-from .models import MEMORY_TYPES, AgentMemory, AgentMemorySettings
+from ....core.errors import ApiError
+from ..models import MEMORY_TYPES, AgentMemory, AgentMemorySettings
 
 
 ALLOWED_MEMORY_SENSITIVITIES = frozenset({"normal", "personal"})

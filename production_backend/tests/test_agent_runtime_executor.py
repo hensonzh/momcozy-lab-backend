@@ -6,7 +6,7 @@ import pytest
 
 from production_backend.app.core.errors import ApiError
 from production_backend.app.modules.agent_runtime.models import AgentAction, AgentArtifact, AgentEvent, AgentMemory, AgentMessage, AgentRun, AgentToolCall
-from production_backend.app.modules.agent_runtime.runtime import AgentRuntimeExecutor
+from production_backend.app.modules.agent_runtime.run_lifecycle.executor import AgentRuntimeExecutor
 from production_backend.app.modules.agent_runtime.sdk import (
     AgentSpecialistProfile,
     AgentSpecialistRegistry,

@@ -13,7 +13,7 @@ from production_backend.app.modules.agent_runtime.models import (
     AgentToolCall,
     AgentWorkflowState,
 )
-from production_backend.app.modules.agent_runtime.replay import AgentReplayService
+from production_backend.app.modules.agent_runtime.event_stream.replay import AgentReplayService
 
 
 def test_agent_replay_service_exports_redacted_bundle_by_default() -> None:

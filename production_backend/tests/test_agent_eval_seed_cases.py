@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from production_backend.app.modules.agent_runtime.evals import (
+from production_backend.app.modules.agent_runtime.evals.service import (
     REQUIRED_PRODUCT_AGENT_EVAL_SUITES,
     load_product_agent_eval_seed_cases,
     validate_product_agent_eval_seed_payload,

@@ -15,7 +15,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from production_backend.app.core.errors import ApiError  # noqa: E402
-from production_backend.app.modules.agent_runtime.evals import (  # noqa: E402
+from production_backend.app.modules.agent_runtime.evals.service import (  # noqa: E402
     AgentEvalFailure,
     AgentEvalRunResult,
     AgentEvalSeedAssertionEngine,
@@ -23,9 +23,9 @@ from production_backend.app.modules.agent_runtime.evals import (  # noqa: E402
     load_product_agent_eval_seed_cases,
 )
 from production_backend.app.modules.agent_runtime.prompts import ContextProjection, ModelInputBuilder  # noqa: E402
-from production_backend.app.modules.agent_runtime.runtime import AgentRuntimeExecutorConfig  # noqa: E402
+from production_backend.app.modules.agent_runtime.run_lifecycle.executor import AgentRuntimeExecutorConfig  # noqa: E402
 from production_backend.app.modules.agent_runtime.routing import RoutingContext, SpecialistRoutingService  # noqa: E402
-from production_backend.app.modules.agent_runtime.safety import DeterministicSafetyGuard  # noqa: E402
+from production_backend.app.modules.agent_runtime.safety.service import DeterministicSafetyGuard  # noqa: E402
 from production_backend.app.modules.agent_runtime.sdk import (  # noqa: E402
     OpenAIAgentsSdkRunner,
     SdkNodeRequest,

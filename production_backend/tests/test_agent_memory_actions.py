@@ -3,7 +3,7 @@ from uuid import uuid4
 
 import pytest
 
-from production_backend.app.modules.agent_runtime.memory_actions import AGENT_MEMORY_CREATE_ACTION, AgentMemoryCreateActionHandler
+from production_backend.app.modules.agent_runtime.memory.actions import AGENT_MEMORY_CREATE_ACTION, AgentMemoryCreateActionHandler
 from production_backend.app.modules.agent_runtime.models import AgentAction, AgentMemory
 from production_backend.app.workers.errors import PermanentJobError
 

@@ -1,7 +1,7 @@
 import asyncio
 from uuid import uuid4
 
-from production_backend.app.modules.agent_runtime.controls import AgentRunControls
+from production_backend.app.modules.agent_runtime.run_lifecycle.controls import AgentRunControls
 
 
 def test_agent_run_controls_manage_active_run_cancel_and_cursor() -> None:

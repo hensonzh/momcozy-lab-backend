@@ -8,10 +8,10 @@ from time import perf_counter
 from typing import Any
 from uuid import UUID
 
-from ....core.metrics import RequestMetrics
 from ....core.errors import ApiError
+from ....core.metrics import RequestMetrics
 from ...auth import CurrentUser, PermissionPolicy
-from ..events import AgentEventSink
+from ..event_stream.sink import AgentEventSink
 from ..models import AgentToolCall
 from ..repository import AgentRuntimeRepository
 from .contracts import ToolContract

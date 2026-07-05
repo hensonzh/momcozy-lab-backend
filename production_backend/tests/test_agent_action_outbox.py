@@ -3,7 +3,7 @@ from uuid import uuid4
 
 import pytest
 
-from production_backend.app.modules.agent_runtime.action_outbox import AgentActionApplyResult, AgentActionOutboxHandler
+from production_backend.app.modules.agent_runtime.actions.outbox import AgentActionApplyResult, AgentActionOutboxHandler
 from production_backend.app.modules.agent_runtime.models import AgentAction, AgentEvent, AgentRun
 from production_backend.app.modules.agent_runtime.service import AGENT_ACTION_APPLY_JOB
 from production_backend.app.modules.audit.models import OutboxJob

@@ -4,8 +4,8 @@ from collections.abc import Mapping
 
 from .outbox import OutboxHandler
 from ..infrastructure.object_storage import ObjectStorage
-from ..modules.agent_runtime.action_outbox import AgentActionApplyHandler, AgentActionOutboxHandler
-from ..modules.agent_runtime.events import AgentEventSink
+from ..modules.agent_runtime.actions.outbox import AgentActionApplyHandler, AgentActionOutboxHandler
+from ..modules.agent_runtime.event_stream.sink import AgentEventSink
 from ..modules.agent_runtime.repository import AgentRuntimeRepository
 from ..modules.agent_runtime.service import AGENT_ACTION_APPLY_JOB
 from ..modules.files.outbox_handlers import FileObjectDeleteHandler

@@ -3,11 +3,11 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from ...core.errors import ApiError
-from ...workers.errors import PermanentJobError
-from .action_outbox import AgentActionApplyResult
-from .memory import AgentMemoryService
-from .models import AgentAction
+from ....core.errors import ApiError
+from ....workers.errors import PermanentJobError
+from ..actions.outbox import AgentActionApplyResult
+from ..models import AgentAction
+from .service import AgentMemoryService
 
 
 AGENT_MEMORY_CREATE_ACTION = "agent.memory.create"

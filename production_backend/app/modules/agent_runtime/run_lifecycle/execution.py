@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Literal
 from uuid import UUID
 
-from .models import AgentRun
+from ..models import AgentRun
 
 
 AgentRunExecutionStatus = Literal["completed", "waiting_for_confirmation"]

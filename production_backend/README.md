@@ -17,10 +17,9 @@ session, SQLite data store, or static API-key user boundary.
 - The old demo backend, old tests, old scripts, old skill prompts, and local
   legacy runtime artifacts live under repository-level `legacy_backend/`.
 - Do not import legacy runtime modules from
-  `legacy_backend/src/momcozy_agent/` in production code. If a temporary bridge
-  is unavoidable, put it under
-  `production_backend/legacy_bridge/` with an owner, removal condition, and
-  deletion PR.
+  `legacy_backend/src/momcozy_agent/` in production code. The production backend
+  has no legacy bridge fallback; migrate behavior into explicit modules,
+  services, repositories, tools, and tests instead.
 - Do not use `previous_response_id`, provider session, in-memory `ChatSession`,
   or the legacy Responses API loop as a production fallback.
 
@@ -114,7 +113,6 @@ production_backend/
   tests/
   docs/
   scripts/
-  legacy_bridge/
 
 legacy_backend/
   src/
@@ -122,6 +120,28 @@ legacy_backend/
   tests/
   scripts/
   web_data/
+```
+
+Agent runtime is a domain module with explicit internal subdomains:
+
+```text
+app/modules/agent_runtime/
+  router.py
+  service.py
+  repository.py
+  models.py
+  schemas.py
+  actions/
+  event_stream/
+  run_lifecycle/
+  memory/
+  evals/
+  safety/
+  graphs/
+  prompts/
+  routing/
+  sdk/
+  tools/
 ```
 
 ## First Milestone

@@ -36,7 +36,7 @@ from production_backend.app.modules.devices.models import PumpDevice, PumpTeleme
 from production_backend.app.modules.diary.agent_actions import DIARY_ENTRY_UPSERT_ACTION
 from production_backend.app.modules.diary.models import PregnancyDiaryEntry
 from production_backend.app.modules.files.vision_service import FileVisionEvent
-from production_backend.app.modules.agent_runtime.memory_actions import AGENT_MEMORY_CREATE_ACTION
+from production_backend.app.modules.agent_runtime.memory.actions import AGENT_MEMORY_CREATE_ACTION
 from production_backend.app.modules.notifications.agent_actions import MILK_REMINDER_CREATE_ACTION
 from production_backend.app.modules.plans.agent_actions import (
     MILK_PLAN_CREATE_ACTION,

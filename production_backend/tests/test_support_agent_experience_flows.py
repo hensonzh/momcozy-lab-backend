@@ -2,7 +2,7 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
-from production_backend.app.modules.agent_runtime.action_outbox import AgentActionOutboxHandler
+from production_backend.app.modules.agent_runtime.actions.outbox import AgentActionOutboxHandler
 from production_backend.app.modules.agent_runtime.models import AgentAction, AgentEvent, AgentMessage, AgentRun, AgentThread
 from production_backend.app.modules.agent_runtime.service import AGENT_ACTION_APPLY_JOB, AgentRuntimeService
 from production_backend.app.modules.audit.models import IdempotencyKey, OutboxJob

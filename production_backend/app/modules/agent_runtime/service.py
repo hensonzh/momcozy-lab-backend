@@ -6,11 +6,11 @@ from uuid import UUID
 
 from ...core.errors import ApiError
 from ..audit import IdempotencyKey, IdempotencyService, OutboxService, parse_idempotency_response_ref, request_hash
-from .action_policy import AgentActionPolicy
-from .controls import AgentRunControls
+from .actions.policy import AgentActionPolicy
+from .run_lifecycle.controls import AgentRunControls
 from .models import AgentAction, AgentArtifact, AgentEvent, AgentRun, AgentThread
 from .repository import AgentRuntimeRepository
-from .safety import AgentSafetyService
+from .safety.service import AgentSafetyService
 
 
 AGENT_RUN_CREATE_IDEMPOTENCY_SCOPE = "agent.runs.create"

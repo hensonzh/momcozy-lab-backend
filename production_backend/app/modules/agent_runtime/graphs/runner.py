@@ -7,9 +7,9 @@ from uuid import UUID
 from langgraph.graph import END, START, StateGraph
 
 from ....core.errors import ApiError
-from ..execution import AgentRunExecutionResult, AgentRunHandler
 from ..models import AgentRun
 from ..repository import AgentRuntimeRepository
+from ..run_lifecycle.execution import AgentRunExecutionResult, AgentRunHandler
 from .checkpoints import AgentGraphCheckpointStore
 from .factory import AgentGraphRegistry, default_graph_registry
 from .state import AgentGraphState

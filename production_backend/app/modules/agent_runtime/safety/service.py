@@ -3,9 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from uuid import UUID
 
-from ...core.metrics import RequestMetrics
-from .models import AgentSafetyEvent
-from .repository import AgentRuntimeRepository
+from ....core.metrics import RequestMetrics
+from ..models import AgentSafetyEvent
+from ..repository import AgentRuntimeRepository
 
 
 @dataclass(frozen=True)

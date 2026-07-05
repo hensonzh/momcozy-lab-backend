@@ -4,7 +4,7 @@ from uuid import uuid4
 import pytest
 
 from production_backend.app.core.errors import ApiError
-from production_backend.app.modules.agent_runtime.execution import AgentRunExecutionResult
+from production_backend.app.modules.agent_runtime.run_lifecycle.execution import AgentRunExecutionResult
 from production_backend.app.modules.agent_runtime.graphs import AgentRuntimeGraphRunner
 from production_backend.app.modules.agent_runtime.models import AgentContextCheckpoint, AgentMessage, AgentRun
 

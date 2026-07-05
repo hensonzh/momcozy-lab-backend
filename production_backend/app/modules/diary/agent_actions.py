@@ -5,7 +5,7 @@ from typing import Any
 
 from ...core.errors import ApiError
 from ...workers.errors import PermanentJobError
-from ..agent_runtime.action_outbox import AgentActionApplyResult
+from ..agent_runtime.actions.outbox import AgentActionApplyResult
 from ..agent_runtime.models import AgentAction
 from .service import DiaryService
 

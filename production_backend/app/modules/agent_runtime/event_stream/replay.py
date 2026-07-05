@@ -3,8 +3,8 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from ...core.errors import ApiError
-from .models import (
+from ....core.errors import ApiError
+from ..models import (
     AgentAction,
     AgentArtifact,
     AgentContextCheckpoint,
@@ -16,7 +16,7 @@ from .models import (
     AgentToolCall,
     AgentWorkflowState,
 )
-from .repository import AgentRuntimeRepository
+from ..repository import AgentRuntimeRepository
 
 
 class AgentReplayService:

@@ -5,7 +5,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from production_backend.app.core.errors import ApiError
-from production_backend.app.modules.agent_runtime.memory import AgentMemoryService
+from production_backend.app.modules.agent_runtime.memory.service import AgentMemoryService
 from production_backend.app.modules.agent_runtime.models import AgentMemory, AgentMemorySettings
 
 

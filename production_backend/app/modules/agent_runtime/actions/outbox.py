@@ -6,12 +6,12 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
-from ...workers.errors import PermanentJobError, RetryableJobError
-from ..audit.models import OutboxJob
-from .events import AgentEventSink
-from .models import AgentAction
-from .repository import AgentRuntimeRepository
-from .service import AGENT_ACTION_APPLY_JOB
+from ....workers.errors import PermanentJobError, RetryableJobError
+from ...audit.models import OutboxJob
+from ..event_stream.sink import AgentEventSink
+from ..models import AgentAction
+from ..repository import AgentRuntimeRepository
+from ..service import AGENT_ACTION_APPLY_JOB
 
 
 @dataclass(frozen=True)

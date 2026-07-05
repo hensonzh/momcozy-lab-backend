@@ -3,7 +3,7 @@ from datetime import date
 from uuid import uuid4
 
 from production_backend.app.modules.agent_runtime.models import AgentContextProjection, AgentRun, AgentWorkflowState
-from production_backend.app.modules.agent_runtime.state_store import AgentRuntimeStateStore
+from production_backend.app.modules.agent_runtime.run_lifecycle.state_store import AgentRuntimeStateStore
 
 
 def test_state_store_creates_workflow_state_as_json_safe_process_state() -> None:

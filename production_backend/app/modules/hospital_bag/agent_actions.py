@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from ...workers.errors import PermanentJobError
-from ..agent_runtime.action_outbox import AgentActionApplyResult
+from ..agent_runtime.actions.outbox import AgentActionApplyResult
 from ..agent_runtime.models import AgentAction
 
 

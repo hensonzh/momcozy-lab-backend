@@ -10,10 +10,10 @@ from production_backend.app.core.settings import Settings
 from production_backend.app.infrastructure.db.session import create_db_engine, create_session_factory
 from production_backend.app.infrastructure.object_storage.factory import create_object_storage
 from production_backend.app.infrastructure.redis.client import close_redis_client, create_redis_client
-from production_backend.app.modules.agent_runtime.controls import AgentRunControls
-from production_backend.app.modules.agent_runtime.events import AgentEventSink
-from production_backend.app.modules.agent_runtime.memory import AgentMemoryRepository, AgentMemoryService
-from production_backend.app.modules.agent_runtime.memory_actions import AGENT_MEMORY_CREATE_ACTION, AgentMemoryCreateActionHandler
+from production_backend.app.modules.agent_runtime.run_lifecycle.controls import AgentRunControls
+from production_backend.app.modules.agent_runtime.event_stream.sink import AgentEventSink
+from production_backend.app.modules.agent_runtime.memory.service import AgentMemoryRepository, AgentMemoryService
+from production_backend.app.modules.agent_runtime.memory.actions import AGENT_MEMORY_CREATE_ACTION, AgentMemoryCreateActionHandler
 from production_backend.app.modules.agent_runtime.repository import AgentRuntimeRepository
 from production_backend.app.modules.audit import AuditService, IdempotencyService, OutboxService
 from production_backend.app.modules.audit.repository import AuditRepository, OutboxRepository

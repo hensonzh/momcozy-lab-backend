@@ -14,10 +14,10 @@ from ...infrastructure.db import get_session
 from ..audit import IdempotencyService, OutboxService
 from ..audit.repository import AuditRepository, OutboxRepository
 from ..auth import CurrentUser, ServiceClient
-from .evals import AgentEvalService
-from .memory import AgentMemoryRepository, AgentMemoryService
+from .evals.service import AgentEvalService
+from .memory.service import AgentMemoryRepository, AgentMemoryService
 from .repository import AgentRuntimeRepository
-from .replay import AgentReplayService
+from .event_stream.replay import AgentReplayService
 from .schemas import (
     AgentActionConfirm,
     AgentEvalCaseCreate,
@@ -40,10 +40,10 @@ from .schemas import (
     AgentThreadRead,
 )
 from .service import AgentRuntimeService
-from .controls import AgentRunControls
-from .safety import AgentSafetyService
-from .streaming import encode_sse_events, encode_transient_sse_events
-from .transient_stream import AgentTransientStream
+from .run_lifecycle.controls import AgentRunControls
+from .safety.service import AgentSafetyService
+from .event_stream.sse import encode_sse_events, encode_transient_sse_events
+from .event_stream.transient import AgentTransientStream
 
 
 router = APIRouter(prefix="/agent", tags=["agent"])

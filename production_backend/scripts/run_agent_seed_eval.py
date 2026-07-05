@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from production_backend.app.modules.agent_runtime.evals import (  # noqa: E402
+from production_backend.app.modules.agent_runtime.evals.service import (  # noqa: E402
     AgentEvalFailure,
     AgentEvalRunResult,
     AgentEvalSeedAssertionEngine,

@@ -6,8 +6,8 @@ import pytest
 
 from production_backend.app.core.errors import ApiError
 from production_backend.app.modules.audit.models import OutboxJob
-from production_backend.app.modules.agent_runtime.action_outbox import AgentActionOutboxHandler
-from production_backend.app.modules.agent_runtime.memory_actions import AGENT_MEMORY_CREATE_ACTION
+from production_backend.app.modules.agent_runtime.actions.outbox import AgentActionOutboxHandler
+from production_backend.app.modules.agent_runtime.memory.actions import AGENT_MEMORY_CREATE_ACTION
 from production_backend.app.modules.agent_runtime.models import AgentAction
 from production_backend.app.modules.agent_runtime.service import AGENT_ACTION_APPLY_JOB, AgentRuntimeService
 from production_backend.app.modules.plans.agent_actions import PREGNANCY_PLAN_CREATE_ACTION, PregnancyPlanCreateActionHandler

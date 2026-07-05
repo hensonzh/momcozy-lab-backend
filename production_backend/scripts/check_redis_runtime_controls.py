@@ -17,8 +17,8 @@ if str(ROOT) not in sys.path:
 async def run_check() -> dict[str, object]:
     from production_backend.app.core.settings import Settings
     from production_backend.app.infrastructure.redis.client import close_redis_client, create_redis_client
-    from production_backend.app.modules.agent_runtime.controls import AgentRunControls
-    from production_backend.app.modules.agent_runtime.transient_stream import AgentTransientStream
+    from production_backend.app.modules.agent_runtime.run_lifecycle.controls import AgentRunControls
+    from production_backend.app.modules.agent_runtime.event_stream.transient import AgentTransientStream
 
     settings = Settings.from_env()
     client = create_redis_client(settings)

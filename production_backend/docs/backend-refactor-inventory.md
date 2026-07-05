@@ -71,4 +71,5 @@ frontend reducer dependency
 - New production code must not depend on legacy `ChatSession`.
 - New production code must not use `previous_response_id`.
 - New production code must not treat SQLite as authority.
-- Temporary bridges must be isolated under `production_backend/legacy_bridge/`.
+- New production code must not bridge to `legacy_backend`; migrate behavior into
+  explicit modules, services, repositories, tools, and tests.
