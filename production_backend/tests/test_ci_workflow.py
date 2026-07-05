@@ -50,6 +50,9 @@ def test_agent_provider_eval_workflow_is_manual_or_scheduled() -> None:
         "production_backend/scripts/run_agent_provider_eval.py",
         "--allow-skip-without-credentials",
         "OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}",
+        "AGENT_PROVIDER_EVAL_MAX_CASES",
+        "AGENT_PROVIDER_EVAL_COST_BUDGET_USD",
+        "--cost-budget-usd",
         "actions/upload-artifact@v4",
         "agent-provider-eval",
     ]:

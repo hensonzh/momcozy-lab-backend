@@ -63,6 +63,14 @@ def test_deterministic_router_downgrades_cross_scene_multi_intent_to_single_with
     assert [intent.specialist_id for intent in plan.intents] == [SpecialistId.LACTATION, SpecialistId.AFTER_SALES]
 
 
+def test_deterministic_router_routes_postpartum_recovery_text() -> None:
+    plan = DeterministicSpecialistRouter().route(_ctx(message="我想做一个温和的产后康复提醒"))
+
+    assert plan is not None
+    assert plan.primary_specialist_id == SpecialistId.POSTPARTUM
+    assert plan.source == RoutingSource.KEYWORD_FAST_PATH
+
+
 def test_routing_service_uses_classifier_for_ambiguous_text() -> None:
     service = SpecialistRoutingService(classifier=FakeClassifier(SpecialistId.POSTPARTUM, confidence=0.87))
 

@@ -20,6 +20,8 @@ jobs:
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-5.5' }}
+      AGENT_PROVIDER_EVAL_MAX_CASES: ${{ vars.AGENT_PROVIDER_EVAL_MAX_CASES || '8' }}
+      AGENT_PROVIDER_EVAL_COST_BUDGET_USD: ${{ vars.AGENT_PROVIDER_EVAL_COST_BUDGET_USD || '5.00' }}
       APP_ENV: test
     steps:
       - uses: actions/checkout@v4
@@ -42,7 +44,10 @@ jobs:
           fi
           if [ -n "${{ github.event.inputs.max_cases }}" ]; then
             args+=(--max-cases "${{ github.event.inputs.max_cases }}")
+          elif [ -n "$AGENT_PROVIDER_EVAL_MAX_CASES" ]; then
+            args+=(--max-cases "$AGENT_PROVIDER_EVAL_MAX_CASES")
           fi
+          args+=(--cost-budget-usd "$AGENT_PROVIDER_EVAL_COST_BUDGET_USD")
           python production_backend/scripts/run_agent_provider_eval.py "${args[@]}"
 
       - name: Upload provider eval report

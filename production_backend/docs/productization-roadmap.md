@@ -217,7 +217,8 @@ Acceptance:
 - model/provider state never replaces the internal ledger;
 - product eval covers retained agent scenarios.
 
-Current status: `yellow`.
+Current status: `green` for code-local acceptance. Real provider credentials,
+budget owner approval, and content review remain external.
 
 Already covered:
 
@@ -229,11 +230,16 @@ Already covered:
 - product seed eval suites for milk, pregnancy, diary, device, support, safety,
   prompt injection, permission, and memory.
 
-Remaining backend-only PR slices:
+Completed backend-only PR slices:
 
 - `agent: add postpartum recovery specialist fixtures and eval cases`;
 - `agent: add provider-backed eval budget policy docs`;
-- `agent: expand real-provider failure telemetry once credentials exist`.
+- `agent: add provider-backed eval max-case and cost-budget controls`.
+
+External dependencies:
+
+- real-provider failure telemetry tuning after credentials and staging runs
+  exist.
 
 External dependencies:
 

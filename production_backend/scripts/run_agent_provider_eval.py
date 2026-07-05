@@ -47,6 +47,7 @@ def run_provider_eval(
     name: str | None = None,
     output_path: Path | None = None,
     max_cases: int | None = None,
+    cost_budget_usd: str = "",
     allow_skip_without_credentials: bool = False,
     sdk_runner: OpenAIAgentsSdkRunner | None = None,
 ) -> dict[str, Any]:
@@ -54,12 +55,16 @@ def run_provider_eval(
     if sdk_runner is None and not _has_openai_credentials():
         if not allow_skip_without_credentials:
             raise SystemExit("OPENAI_API_KEY or OPENAI_ADMIN_KEY is required for provider-backed eval.")
-        report = _report([_skipped_case_result(case, reason="missing_provider_credentials") for case in cases])
+        report = _report(
+            [_skipped_case_result(case, reason="missing_provider_credentials") for case in cases],
+            max_cases=max_cases,
+            cost_budget_usd=cost_budget_usd,
+        )
         _write_report(report=report, output_path=output_path)
         return report
 
     runner = sdk_runner or OpenAIAgentsSdkRunner(trace_enabled=False)
-    report = _report(asyncio.run(_run_cases(cases=cases, sdk_runner=runner)))
+    report = _report(asyncio.run(_run_cases(cases=cases, sdk_runner=runner)), max_cases=max_cases, cost_budget_usd=cost_budget_usd)
     _write_report(report=report, output_path=output_path)
     return report
 
@@ -70,6 +75,7 @@ def main() -> None:
     parser.add_argument("--suite", default=None)
     parser.add_argument("--name", default=None)
     parser.add_argument("--max-cases", type=int, default=None)
+    parser.add_argument("--cost-budget-usd", default=None)
     parser.add_argument("--output", type=Path, default=None)
     parser.add_argument("--allow-skip-without-credentials", action="store_true")
     args = parser.parse_args()
@@ -79,7 +85,8 @@ def main() -> None:
         suite=args.suite,
         name=args.name,
         output_path=args.output,
-        max_cases=args.max_cases,
+        max_cases=args.max_cases if args.max_cases is not None else _env_int("AGENT_PROVIDER_EVAL_MAX_CASES"),
+        cost_budget_usd=args.cost_budget_usd or os.getenv("AGENT_PROVIDER_EVAL_COST_BUDGET_USD", ""),
         allow_skip_without_credentials=args.allow_skip_without_credentials,
     )
     if args.output is None:
@@ -285,12 +292,16 @@ def _result_payload(result: AgentEvalRunResult) -> dict[str, Any]:
     }
 
 
-def _report(results: list[dict[str, Any]]) -> dict[str, Any]:
+def _report(results: list[dict[str, Any]], *, max_cases: int | None, cost_budget_usd: str) -> dict[str, Any]:
     return {
         "total": len(results),
         "passed": sum(1 for result in results if result["status"] == "passed"),
         "failed": sum(1 for result in results if result["status"] == "failed"),
         "skipped": sum(1 for result in results if result["status"] == "skipped"),
+        "budget": {
+            "max_cases": max_cases,
+            "cost_budget_usd": cost_budget_usd,
+        },
         "results": results,
     }
 
@@ -351,6 +362,13 @@ def _eval_uuid(case: dict[str, Any], prefix: str) -> UUID:
 
 def _has_openai_credentials() -> bool:
     return bool(os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_ADMIN_KEY"))
+
+
+def _env_int(name: str) -> int | None:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return None
+    return int(raw)
 
 
 if __name__ == "__main__":

@@ -17,6 +17,7 @@ def test_run_agent_provider_eval_skips_without_credentials(monkeypatch, tmp_path
         cases_path=PRODUCT_AGENT_EVAL_SEED,
         suite="milk_daily_summary",
         output_path=output_path,
+        cost_budget_usd="3.50",
         allow_skip_without_credentials=True,
     )
 
@@ -24,6 +25,7 @@ def test_run_agent_provider_eval_skips_without_credentials(monkeypatch, tmp_path
     assert report["failed"] == 0
     assert report["skipped"] == 1
     assert report["results"][0]["skip_reason"] == "missing_provider_credentials"
+    assert report["budget"]["cost_budget_usd"] == "3.50"
     assert "missing_provider_credentials" in output_path.read_text()
 
 
@@ -56,3 +58,30 @@ def test_run_agent_provider_eval_uses_sdk_runner_and_seed_assertions() -> None:
         "records.milk_status.read",
         "records.milk_summary.read",
     ]
+
+
+def test_run_agent_provider_eval_uses_budget_metadata_with_sdk_runner() -> None:
+    backend = ScriptedSdkBackend(
+        [
+            scripted_sdk_response(
+                final_text="Recovery check-in complete.",
+                tool_invocations=(
+                    scripted_tool_invocation("profile.read", {}),
+                    scripted_tool_invocation("plans.current.read", {}),
+                    scripted_tool_invocation("diary.recent.read", {}),
+                ),
+                expected_available_tools=("profile.read", "plans.current.read", "diary.recent.read"),
+            )
+        ]
+    )
+
+    report = run_provider_eval(
+        cases_path=PRODUCT_AGENT_EVAL_SEED,
+        suite="postpartum_recovery_checkin",
+        max_cases=1,
+        cost_budget_usd="1.25",
+        sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+    )
+
+    assert report["budget"] == {"max_cases": 1, "cost_budget_usd": "1.25"}
+    assert report["total"] == 1

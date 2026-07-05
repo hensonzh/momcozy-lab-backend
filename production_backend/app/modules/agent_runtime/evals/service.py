@@ -170,6 +170,8 @@ REQUIRED_PRODUCT_AGENT_EVAL_SUITES = (
     "pregnancy_plan_creation",
     "pregnancy_task_completion",
     "pregnancy_diary_entry",
+    "postpartum_recovery_checkin",
+    "postpartum_recovery_task",
     "memory_preference_capture",
     "memory_sensitive_rejection",
     "ibclc_consult",
