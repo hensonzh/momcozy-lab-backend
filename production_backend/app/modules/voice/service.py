@@ -1,21 +1,17 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from ...core.errors import ApiError
 from ...core.settings import Settings
-
-
-@dataclass(frozen=True)
-class SpeechTranscription:
-    text: str
+from .providers import SpeechTranscription, VoiceProvider, create_voice_provider
 
 
 class VoiceService:
-    def __init__(self, *, settings: Settings) -> None:
+    def __init__(self, *, settings: Settings, provider: VoiceProvider | None = None) -> None:
         self.settings = settings
+        self.provider = provider or create_voice_provider(settings)
 
     async def transcribe_chunk(
         self,
@@ -26,20 +22,25 @@ class VoiceService:
         content_type: str,
         language: str | None,
     ) -> SpeechTranscription:
-        self._ensure_provider_enabled()
+        self.provider.ensure_available()
         self._validate_chunk(body=body, filename=filename, content_type=content_type, language=language)
-        return SpeechTranscription(text="")
+        return await self.provider.transcribe_chunk(
+            actor_user_id=actor_user_id,
+            body=body,
+            filename=filename,
+            content_type=content_type,
+            language=language,
+        )
 
     def synthesize_pcm_stream(self, *, actor_user_id: UUID, text: str) -> AsyncIterator[bytes]:
-        self._ensure_provider_enabled()
+        self.provider.ensure_available()
         self._validate_text(text)
-        return _empty_pcm_stream()
+        return self.provider.synthesize_pcm_stream(actor_user_id=actor_user_id, text=text)
 
     async def realtime_session_events(self, *, actor_user_id: UUID) -> AsyncIterator[dict[str, object]]:
-        self._ensure_provider_enabled()
-        session_id = f"voice_session_{uuid4().hex}"
-        yield {"type": "session.open", "session_id": session_id, "sequence": 0}
-        yield {"type": "audio.done", "session_id": session_id, "sequence": 1}
+        self.provider.ensure_available()
+        async for event in self.provider.realtime_session_events(actor_user_id=actor_user_id):
+            yield event
 
     def disabled_frame(self) -> dict[str, object]:
         return {
@@ -47,14 +48,6 @@ class VoiceService:
             "code": "voice_provider_disabled",
             "message": "Voice provider is not configured.",
         }
-
-    def _ensure_provider_enabled(self) -> None:
-        if self.settings.voice_provider == "disabled":
-            raise ApiError(
-                code="voice_provider_disabled",
-                message="Voice provider is not configured.",
-                status=503,
-            )
 
     def _validate_chunk(
         self,
@@ -85,8 +78,3 @@ class VoiceService:
             raise ApiError(code="validation_failed", message="Text is required.", status=422)
         if len(text) > 4000:
             raise ApiError(code="validation_failed", message="Text is too long.", status=422)
-
-
-async def _empty_pcm_stream() -> AsyncIterator[bytes]:
-    if False:
-        yield b""

@@ -133,8 +133,8 @@ Retained domains:
 | Notifications | task reminder and milk-analysis related flows | service-key create, inbox/read/archive | green |
 | Support | support tickets and agent handoff target | owner scope, idempotency, audit | green |
 | Status page | operational status | public/service surface tests | green |
-| Voice | stable disabled/local_stub contract | standard disabled-provider envelope | yellow |
-| Vision | stable disabled provider and file-owner stream contract | standard disabled-provider envelope | yellow |
+| Voice | provider-neutral disabled/local_stub contract | standard disabled-provider envelope | green |
+| Vision | provider-neutral disabled/local_stub contract and file-owner stream contract | standard disabled-provider envelope | green |
 
 Acceptance:
 
@@ -145,7 +145,7 @@ Acceptance:
 - each retained experience main flow has tests for success, empty/error, owner
   scope, retry/idempotency, and persisted postconditions.
 
-Remaining backend-only PR slices:
+Completed backend-only PR slices:
 
 - `feat: add provider-neutral speech client boundary` if voice becomes a launch
   requirement;
