@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from datetime import date
 
-from fastapi import APIRouter, Depends, Query, Request, Response, status
+from fastapi import Depends, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...api.dependencies import require_current_user
+from ...api.surface import SurfaceAPIRouter, api_surface
 from ...infrastructure.db import get_session
 from ..audit import AuditService
 from ..audit.repository import AuditRepository
@@ -16,7 +17,11 @@ from .schemas import PregnancyDiaryEntryListResponse, PregnancyDiaryEntryRead, P
 from .service import DiaryService
 
 
-router = APIRouter(prefix="/pregnancy-diary", tags=["pregnancy-diary"])
+router = SurfaceAPIRouter(
+    prefix="/pregnancy-diary",
+    tags=["pregnancy-diary"],
+    api_surface_metadata=api_surface("public_app_api", owner="pregnancy-diary", clients=["flutter"]),
+)
 
 
 def get_diary_service(session: AsyncSession = Depends(get_session)) -> DiaryService:

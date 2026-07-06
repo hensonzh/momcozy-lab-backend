@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from fastapi import APIRouter, Header, Request
+from fastapi import Header, Request
 from sqlalchemy import text
 
 from ...core.errors import ApiError
 from ...core.settings import Settings
+from ..surface import SurfaceAPIRouter, api_surface
 from ...modules.agent_runtime.router import router as agent_runtime_router
 from ...modules.assets.router import router as assets_router
 from ...modules.auth import authenticate_service_key
@@ -21,7 +22,10 @@ from ...modules.records.router import router as records_router
 from ...modules.support.router import router as support_router
 from ...modules.voice.router import router as voice_router
 
-router = APIRouter(prefix="/v1")
+router = SurfaceAPIRouter(
+    prefix="/v1",
+    api_surface_metadata=api_surface("infra_probe_api", owner="platform", clients=["load-balancer", "monitoring"]),
+)
 router.include_router(agent_runtime_router)
 router.include_router(assets_router)
 router.include_router(auth_router)

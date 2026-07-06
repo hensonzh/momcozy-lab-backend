@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi import Depends, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...api.dependencies import optional_idempotency_key, require_current_user
+from ...api.surface import SurfaceAPIRouter, api_surface
 from ...infrastructure.db import get_session
 from ..audit import AuditService, IdempotencyService
 from ..audit.repository import AuditRepository
@@ -27,7 +28,11 @@ from .schemas import (
 from .service import DevicesService
 
 
-router = APIRouter(prefix="/devices", tags=["devices"])
+router = SurfaceAPIRouter(
+    prefix="/devices",
+    tags=["devices"],
+    api_surface_metadata=api_surface("public_app_api", owner="devices", clients=["flutter"]),
+)
 
 
 def get_devices_service(session: AsyncSession = Depends(get_session)) -> DevicesService:

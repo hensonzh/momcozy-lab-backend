@@ -1,16 +1,20 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import Depends, File, Form, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 
 from ...api.dependencies import authenticate_request_user, require_current_user
+from ...api.surface import SurfaceAPIRouter, api_surface
 from ...core.errors import ApiError
 from ..auth import CurrentUser
 from .schemas import SpeechTranscriptionResponse
 from .service import VoiceService
 
 
-router = APIRouter(tags=["voice"])
+router = SurfaceAPIRouter(
+    tags=["voice"],
+    api_surface_metadata=api_surface("public_app_api", owner="voice", clients=["flutter"]),
+)
 UPLOAD_READ_CHUNK_BYTES = 1024 * 1024
 
 
@@ -37,7 +41,10 @@ async def transcribe_speech_chunk(
     return SpeechTranscriptionResponse(text=result.text)
 
 
-@router.get("/realtime-voice-stream")
+@router.get(
+    "/realtime-voice-stream",
+    openapi_extra=api_surface("runtime_stream_api", owner="voice", clients=["flutter"]),
+)
 async def realtime_voice_stream(
     request: Request,
     text: str = Query(min_length=1, max_length=4000),

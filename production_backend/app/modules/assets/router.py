@@ -3,9 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import cast
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import Depends, Query, Request
 from fastapi.responses import FileResponse, Response
 
+from ...api.surface import SurfaceAPIRouter, api_surface
 from ...core.errors import ApiError
 from ...infrastructure.object_storage import ObjectStorage
 from .models import ProductAsset
@@ -13,7 +14,11 @@ from .schemas import ProductAssetListResponse, ProductAssetRead
 from .service import ProductAssetService
 
 
-router = APIRouter(prefix="/assets", tags=["assets"])
+router = SurfaceAPIRouter(
+    prefix="/assets",
+    tags=["assets"],
+    api_surface_metadata=api_surface("public_app_api", owner="product-assets", clients=["flutter"]),
+)
 
 
 def get_product_asset_service(request: Request) -> ProductAssetService:

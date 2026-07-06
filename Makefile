@@ -5,7 +5,7 @@ PYTHON ?= production_backend/.venv/bin/python
 COMPOSE_ENV_FILE_FOR_COMPOSE = $(patsubst production_backend/%,%,$(COMPOSE_ENV_FILE))
 COMPOSE = MOMCOZY_BACKEND_ENV_FILE=$(COMPOSE_ENV_FILE_FOR_COMPOSE) docker compose -f production_backend/docker-compose.yml
 
-.PHONY: backend-local-up backend-up backend-down backend-local-migrate backend-migrate backend-local-workers backend-workers backend-local-minio backend-check-infra backend-productization-status backend-smoke backend-staging-smoke backend-production-readiness backend-worker-backlog backend-agent-recover-stuck-runs backend-env-print
+.PHONY: backend-local-up backend-up backend-down backend-local-migrate backend-migrate backend-local-workers backend-workers backend-local-minio backend-export-contracts backend-check-infra backend-productization-status backend-smoke backend-staging-smoke backend-production-readiness backend-worker-backlog backend-agent-recover-stuck-runs backend-env-print
 
 backend-local-up:
 	$(MAKE) backend-up BACKEND_ENV=local
@@ -30,6 +30,10 @@ backend-workers:
 
 backend-local-minio:
 	$(COMPOSE) --profile tools up -d minio
+
+backend-export-contracts:
+	$(PYTHON) production_backend/scripts/export_openapi.py --output production_backend/docs/openapi.generated.json
+	$(PYTHON) production_backend/scripts/export_api_surface_catalog.py --openapi-input production_backend/docs/openapi.generated.json --output production_backend/docs/api-surface-catalog.md
 
 backend-check-infra:
 	set -a; . $(BACKEND_ENV_FILE); set +a; \

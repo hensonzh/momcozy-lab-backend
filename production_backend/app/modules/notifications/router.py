@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request, Response, status
+from fastapi import Depends, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...api.dependencies import optional_idempotency_key, require_current_user, require_service_client
+from ...api.surface import SurfaceAPIRouter, api_surface
 from ...infrastructure.db import get_session
 from ..audit import AuditService, IdempotencyService
 from ..audit.repository import AuditRepository
@@ -15,7 +16,11 @@ from .schemas import NotificationListResponse, NotificationRead, NotificationRea
 from .service import NotificationsService
 
 
-router = APIRouter(prefix="/notifications", tags=["notifications"])
+router = SurfaceAPIRouter(
+    prefix="/notifications",
+    tags=["notifications"],
+    api_surface_metadata=api_surface("public_app_api", owner="notifications", clients=["flutter"]),
+)
 
 
 def get_notifications_service(session: AsyncSession = Depends(get_session)) -> NotificationsService:
@@ -27,7 +32,12 @@ def get_notifications_service(session: AsyncSession = Depends(get_session)) -> N
     )
 
 
-@router.post("", response_model=NotificationRead, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=NotificationRead,
+    status_code=status.HTTP_201_CREATED,
+    openapi_extra=api_surface("internal_service_api", owner="notifications", clients=["agent-worker", "outbox-worker"]),
+)
 async def create_notification(
     payload: NotificationServiceCreate,
     request: Request,

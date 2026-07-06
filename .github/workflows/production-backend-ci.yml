@@ -63,6 +63,8 @@ jobs:
         run: |
           python production_backend/scripts/export_openapi.py --output /tmp/openapi.generated.json
           diff -u production_backend/docs/openapi.generated.json /tmp/openapi.generated.json
+          python production_backend/scripts/export_api_surface_catalog.py --openapi-input /tmp/openapi.generated.json --output /tmp/api-surface-catalog.md
+          diff -u production_backend/docs/api-surface-catalog.md /tmp/api-surface-catalog.md
 
       - name: Scan production backend for legacy runtime references
         run: |

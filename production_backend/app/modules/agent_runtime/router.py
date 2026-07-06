@@ -5,11 +5,12 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from time import monotonic
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request, Response, status
+from fastapi import Depends, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...api.dependencies import normalize_idempotency_key, optional_idempotency_key, require_current_user, require_service_client
+from ...api.surface import SurfaceAPIRouter, api_surface
 from ...infrastructure.db import get_session
 from ..audit import IdempotencyService, OutboxService
 from ..audit.repository import AuditRepository, OutboxRepository
@@ -46,7 +47,11 @@ from .event_stream.sse import encode_sse_events, encode_transient_sse_events
 from .event_stream.transient import AgentTransientStream
 
 
-router = APIRouter(prefix="/agent", tags=["agent"])
+router = SurfaceAPIRouter(
+    prefix="/agent",
+    tags=["agent"],
+    api_surface_metadata=api_surface("public_app_api", owner="agent-runtime", clients=["flutter"]),
+)
 
 TERMINAL_STREAM_EVENT_TYPES = {"run.completed", "run.failed", "run.cancelled", "run.waiting_for_confirmation"}
 
@@ -179,7 +184,10 @@ async def record_client_event(
     return AgentEventRead.model_validate(event)
 
 
-@router.get("/runs/{run_id}/stream")
+@router.get(
+    "/runs/{run_id}/stream",
+    openapi_extra=api_surface("runtime_stream_api", owner="agent-runtime", clients=["flutter"]),
+)
 async def stream_run_events(
     run_id: UUID,
     request: Request,
@@ -315,7 +323,11 @@ async def delete_memory(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.get("/admin/runs/{run_id}/replay", response_model=AgentReplayBundle)
+@router.get(
+    "/admin/runs/{run_id}/replay",
+    response_model=AgentReplayBundle,
+    openapi_extra=api_surface("admin_ops_api", owner="agent-runtime", clients=["ops-console", "eval-runner"]),
+)
 async def export_run_replay_bundle(
     run_id: UUID,
     include_message_content: bool = Query(default=False),
@@ -326,7 +338,12 @@ async def export_run_replay_bundle(
     return AgentReplayBundle.model_validate(bundle)
 
 
-@router.post("/admin/runs/{run_id}/eval-cases", response_model=AgentEvalCaseRead, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/admin/runs/{run_id}/eval-cases",
+    response_model=AgentEvalCaseRead,
+    status_code=status.HTTP_201_CREATED,
+    openapi_extra=api_surface("admin_ops_api", owner="agent-runtime", clients=["ops-console", "eval-runner"]),
+)
 async def create_eval_case_from_run(
     run_id: UUID,
     payload: AgentEvalCaseCreate,

@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import Depends, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...api.dependencies import optional_idempotency_key, require_current_user
+from ...api.surface import SurfaceAPIRouter, api_surface
 from ...infrastructure.db import get_session
 from ..audit import AuditService, IdempotencyService
 from ..audit.repository import AuditRepository
@@ -22,7 +23,11 @@ from .schemas import (
 from .service import ProfileService
 
 
-router = APIRouter(prefix="/profile", tags=["profile"])
+router = SurfaceAPIRouter(
+    prefix="/profile",
+    tags=["profile"],
+    api_surface_metadata=api_surface("public_app_api", owner="profiles", clients=["flutter"]),
+)
 
 
 def get_profile_service(session: AsyncSession = Depends(get_session)) -> ProfileService:

@@ -3,10 +3,11 @@ from __future__ import annotations
 from datetime import date, datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request, Response, status
+from fastapi import Depends, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...api.dependencies import optional_idempotency_key, require_current_user
+from ...api.surface import SurfaceAPIRouter, api_surface
 from ...infrastructure.db import get_session
 from ..audit import AuditService, IdempotencyService
 from ..audit.repository import AuditRepository
@@ -28,7 +29,11 @@ from .schemas import (
 from .service import RecordsService
 
 
-router = APIRouter(prefix="/records", tags=["records"])
+router = SurfaceAPIRouter(
+    prefix="/records",
+    tags=["records"],
+    api_surface_metadata=api_surface("public_app_api", owner="records", clients=["flutter"]),
+)
 
 
 def get_records_service(session: AsyncSession = Depends(get_session)) -> RecordsService:

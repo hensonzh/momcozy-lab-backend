@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Query, Request, Response, UploadFile, status
+from fastapi import Depends, File, Query, Request, Response, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...api.dependencies import get_object_storage, optional_idempotency_key, require_current_user
+from ...api.surface import SurfaceAPIRouter, api_surface
 from ...core.errors import ApiError
 from ...infrastructure.db import get_session
 from ...infrastructure.object_storage import ObjectStorage
@@ -20,7 +21,11 @@ from .vision_service import FileVisionService
 from .vision_streaming import encode_file_vision_sse_events
 
 
-router = APIRouter(prefix="/files", tags=["files"])
+router = SurfaceAPIRouter(
+    prefix="/files",
+    tags=["files"],
+    api_surface_metadata=api_surface("public_app_api", owner="files", clients=["flutter"]),
+)
 UPLOAD_READ_CHUNK_BYTES = 1024 * 1024
 
 
@@ -92,7 +97,10 @@ async def get_file(
     return FileRead.model_validate(file_object)
 
 
-@router.get("/{file_id}/vision/events/stream")
+@router.get(
+    "/{file_id}/vision/events/stream",
+    openapi_extra=api_surface("runtime_stream_api", owner="files", clients=["flutter"]),
+)
 async def stream_file_vision_events(
     file_id: UUID,
     current_user: CurrentUser = Depends(require_current_user),

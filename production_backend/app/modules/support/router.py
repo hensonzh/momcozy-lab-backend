@@ -3,10 +3,11 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi import Depends, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...api.dependencies import optional_idempotency_key, require_current_user
+from ...api.surface import SurfaceAPIRouter, api_surface
 from ...infrastructure.db import get_session
 from ..audit import AuditService, IdempotencyService
 from ..audit.repository import AuditRepository
@@ -16,7 +17,11 @@ from .schemas import SupportTicketCreate, SupportTicketListResponse, SupportTick
 from .service import SupportTicketsService
 
 
-router = APIRouter(prefix="/support", tags=["support"])
+router = SurfaceAPIRouter(
+    prefix="/support",
+    tags=["support"],
+    api_surface_metadata=api_surface("public_app_api", owner="support", clients=["flutter"]),
+)
 
 
 def get_support_tickets_service(session: AsyncSession = Depends(get_session)) -> SupportTicketsService:

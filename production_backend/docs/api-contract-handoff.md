@@ -6,9 +6,31 @@ This handoff is the human-readable companion to
 ## Contract Sources
 
 - OpenAPI snapshot: `production_backend/docs/openapi.generated.json`
-- Export command: `python production_backend/scripts/export_openapi.py`
+- API surface catalog: `production_backend/docs/api-surface-catalog.md`
+- Export command: `make backend-export-contracts`
 - Runtime base path: `/v1`
 - Error model: stable `{ "error": { "code", "message", "request_id", "details?" } }`
+
+## API Surface Rules
+
+Every OpenAPI operation carries MomCozy extension metadata:
+
+- `x-momcozy-api-surface`: whether the route is app-facing, streaming,
+  internal-service, admin/ops, infra-probe, or deprecated.
+- `x-momcozy-owner`: owning backend module or team boundary.
+- `x-momcozy-client`: intended callers.
+- `x-momcozy-stability`: stability level for client coordination.
+
+Flutter should only integrate routes marked `public_app_api` and the specific
+`runtime_stream_api` routes needed for streaming UX. It must not depend on
+`internal_service_api`, `admin_ops_api`, or `infra_probe_api` routes.
+
+Update flow for API changes:
+
+1. Add or update route metadata in the FastAPI router.
+2. Export OpenAPI.
+3. Regenerate `api-surface-catalog.md`.
+4. Run contract tests.
 
 ## Auth
 

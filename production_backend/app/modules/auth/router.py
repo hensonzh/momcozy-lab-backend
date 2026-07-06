@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...api.dependencies import require_current_user
+from ...api.surface import SurfaceAPIRouter, api_surface
 from ...core.errors import ApiError
 from ...infrastructure.db.session import get_session
 from .account_service import AuthAccountService, DeviceContext, IssuedTokenPair
@@ -15,7 +16,11 @@ from .schemas import LoginRequest, LogoutResponse, RefreshRequest, SignupRequest
 from .service import AuthSessionService
 
 
-router = APIRouter(prefix="/auth", tags=["auth"])
+router = SurfaceAPIRouter(
+    prefix="/auth",
+    tags=["auth"],
+    api_surface_metadata=api_surface("public_app_api", owner="auth", clients=["flutter"]),
+)
 
 
 def get_auth_account_service(request: Request, session: AsyncSession = Depends(get_session)) -> AuthAccountService:
