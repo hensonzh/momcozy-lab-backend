@@ -61,7 +61,6 @@ def test_profile_read_tool_handler_returns_safe_context_projection() -> None:
         delivery_date=date(2026, 9, 20),
         lactation_advice="Hydrate",
         feeding_advice="Track feeds",
-        daily_summary="Doing well",
     )
     infant = InfantProfile(
         id=uuid4(),

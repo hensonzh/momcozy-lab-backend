@@ -134,7 +134,6 @@ class FakeProfileService:
         display_name: str = "Mia",
         lactation_advice: str = "",
         feeding_advice: str = "",
-        daily_summary: str = "",
     ) -> UserProfile:
         return UserProfile(
             id=uuid4(),
@@ -143,7 +142,6 @@ class FakeProfileService:
             age=32,
             lactation_advice=lactation_advice,
             feeding_advice=feeding_advice,
-            daily_summary=daily_summary,
         )
 
     def _infant(

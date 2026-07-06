@@ -3574,11 +3574,6 @@
             ],
             "title": "Age"
           },
-          "daily_summary": {
-            "default": "",
-            "title": "Daily Summary",
-            "type": "string"
-          },
           "delivery_date": {
             "anyOf": [
               {
@@ -3642,17 +3637,6 @@
               }
             ],
             "title": "Age"
-          },
-          "daily_summary": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Daily Summary"
           },
           "delivery_date": {
             "anyOf": [

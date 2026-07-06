@@ -24,7 +24,6 @@ class UserProfile(Base):
     delivery_date: Mapped[date | None] = mapped_column(Date, default=None)
     lactation_advice: Mapped[str] = mapped_column(Text, default="", server_default="", nullable=False)
     feeding_advice: Mapped[str] = mapped_column(Text, default="", server_default="", nullable=False)
-    daily_summary: Mapped[str] = mapped_column(Text, default="", server_default="", nullable=False)
     profile_onboarding_skipped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     profile_onboarding_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

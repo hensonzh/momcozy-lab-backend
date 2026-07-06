@@ -13,7 +13,6 @@ class UserProfileRead(BaseModel):
     delivery_date: date | None = None
     lactation_advice: str = ""
     feeding_advice: str = ""
-    daily_summary: str = ""
     profile_onboarding_complete: bool = False
     profile_onboarding_skipped: bool = False
 
@@ -26,7 +25,6 @@ class UserProfileUpdate(BaseModel):
     delivery_date: date | None = None
     lactation_advice: str | None = None
     feeding_advice: str | None = None
-    daily_summary: str | None = None
     profile_onboarding_skipped_at: datetime | None = None
     profile_onboarding_completed_at: datetime | None = None
 

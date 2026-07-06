@@ -627,7 +627,6 @@ def _profile_payload(*, profile: UserProfile | None, actor_user_id: UUID) -> dic
             "delivery_date": None,
             "lactation_advice": "",
             "feeding_advice": "",
-            "daily_summary": "",
             "profile_onboarding_complete": False,
             "profile_onboarding_skipped": False,
         }
@@ -638,7 +637,6 @@ def _profile_payload(*, profile: UserProfile | None, actor_user_id: UUID) -> dic
         "delivery_date": _date_iso(profile.delivery_date),
         "lactation_advice": profile.lactation_advice or "",
         "feeding_advice": profile.feeding_advice or "",
-        "daily_summary": profile.daily_summary or "",
         "profile_onboarding_complete": bool(profile.profile_onboarding_completed_at or (profile.display_name and profile.age)),
         "profile_onboarding_skipped": bool(profile.profile_onboarding_skipped_at),
     }

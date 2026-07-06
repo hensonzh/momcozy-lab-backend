@@ -97,7 +97,6 @@ def _profile_read(profile: UserProfile | None, user_id: UUID) -> UserProfileRead
         delivery_date=profile.delivery_date,
         lactation_advice=profile.lactation_advice or "",
         feeding_advice=profile.feeding_advice or "",
-        daily_summary=profile.daily_summary or "",
         profile_onboarding_complete=bool(profile.profile_onboarding_completed_at or (profile.display_name and profile.age)),
         profile_onboarding_skipped=bool(profile.profile_onboarding_skipped_at),
     )

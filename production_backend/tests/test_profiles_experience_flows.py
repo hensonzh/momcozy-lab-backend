@@ -36,7 +36,6 @@ async def _run_profile_onboarding_main_flow() -> None:
             "display_name": "Mia",
             "age": 31,
             "delivery_date": date(2026, 8, 1),
-            "daily_summary": "Profile setup complete.",
         },
         request_id="req_profile",
     )
@@ -75,7 +74,6 @@ async def _run_profile_onboarding_main_flow() -> None:
 
     assert profile.display_name == "Mia"
     assert profile.age == 31
-    assert profile.daily_summary == "Profile setup complete."
     assert infant.infant_name == "Baby"
     assert replayed_infant.id == infant.id
     assert [item.id for item in infants] == [infant.id]
