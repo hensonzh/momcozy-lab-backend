@@ -3236,90 +3236,6 @@
         "title": "SpeechTranscriptionResponse",
         "type": "object"
       },
-      "StatusPageTodayRead": {
-        "properties": {
-          "completed_task_count": {
-            "title": "Completed Task Count",
-            "type": "integer"
-          },
-          "date": {
-            "format": "date",
-            "title": "Date",
-            "type": "string"
-          },
-          "feeding_count": {
-            "title": "Feeding Count",
-            "type": "integer"
-          },
-          "infant_count": {
-            "title": "Infant Count",
-            "type": "integer"
-          },
-          "pending_task_count": {
-            "title": "Pending Task Count",
-            "type": "integer"
-          },
-          "profile": {
-            "$ref": "#/components/schemas/StatusProfileSummary"
-          },
-          "pumped_milk_volume_ml": {
-            "title": "Pumped Milk Volume Ml",
-            "type": "number"
-          },
-          "pumping_count": {
-            "title": "Pumping Count",
-            "type": "integer"
-          },
-          "task_count": {
-            "title": "Task Count",
-            "type": "integer"
-          },
-          "unread_notification_count": {
-            "title": "Unread Notification Count",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "date",
-          "profile",
-          "infant_count",
-          "feeding_count",
-          "pumping_count",
-          "pumped_milk_volume_ml",
-          "task_count",
-          "completed_task_count",
-          "pending_task_count",
-          "unread_notification_count"
-        ],
-        "title": "StatusPageTodayRead",
-        "type": "object"
-      },
-      "StatusProfileSummary": {
-        "properties": {
-          "daily_summary": {
-            "default": "",
-            "title": "Daily Summary",
-            "type": "string"
-          },
-          "display_name": {
-            "default": "",
-            "title": "Display Name",
-            "type": "string"
-          },
-          "feeding_advice": {
-            "default": "",
-            "title": "Feeding Advice",
-            "type": "string"
-          },
-          "lactation_advice": {
-            "default": "",
-            "title": "Lactation Advice",
-            "type": "string"
-          }
-        },
-        "title": "StatusProfileSummary",
-        "type": "object"
-      },
       "SupportTicketCreate": {
         "properties": {
           "issue_summary": {
@@ -3710,45 +3626,6 @@
           "user_id"
         ],
         "title": "UserProfileRead",
-        "type": "object"
-      },
-      "UserProfileStatusSummaryUpdate": {
-        "properties": {
-          "daily_summary": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Daily Summary"
-          },
-          "feeding_advice": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Feeding Advice"
-          },
-          "lactation_advice": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Lactation Advice"
-          }
-        },
-        "title": "UserProfileStatusSummaryUpdate",
         "type": "object"
       },
       "UserProfileUpdate": {
@@ -7315,52 +7192,6 @@
         ]
       }
     },
-    "/v1/profile/status-summary": {
-      "put": {
-        "operationId": "update_my_status_summary_v1_profile_status_summary_put",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UserProfileStatusSummaryUpdate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UserProfileRead"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Update My Status Summary",
-        "tags": [
-          "profile"
-        ]
-      }
-    },
     "/v1/realtime-voice-stream": {
       "get": {
         "operationId": "realtime_voice_stream_v1_realtime_voice_stream_get",
@@ -8128,61 +7959,6 @@
         "summary": "Transcribe Speech Chunk",
         "tags": [
           "voice"
-        ]
-      }
-    },
-    "/v1/status-page/today": {
-      "get": {
-        "operationId": "get_today_status_page_v1_status_page_today_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "day",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "format": "date",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Day"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/StatusPageTodayRead"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get Today Status Page",
-        "tags": [
-          "status-page"
         ]
       }
     },

@@ -32,15 +32,13 @@ async def _run_profile_onboarding_main_flow() -> None:
 
     profile = await service.update_user_profile(
         user_id=owner_user_id,
-        values={"display_name": "Mia", "age": 31, "delivery_date": date(2026, 8, 1)},
+        values={
+            "display_name": "Mia",
+            "age": 31,
+            "delivery_date": date(2026, 8, 1),
+            "daily_summary": "Profile setup complete.",
+        },
         request_id="req_profile",
-    )
-    summary = await service.update_status_summary(
-        user_id=owner_user_id,
-        lactation_advice="Keep pumping comfortable.",
-        feeding_advice="Follow hunger cues.",
-        daily_summary="Profile setup complete.",
-        request_id="req_summary",
     )
     infant = await service.create_infant(
         owner_user_id=owner_user_id,
@@ -73,11 +71,11 @@ async def _run_profile_onboarding_main_flow() -> None:
         )
 
     infants = await service.list_infants(owner_user_id=owner_user_id)
-    profile_response = _profile_read(summary, owner_user_id)
+    profile_response = _profile_read(profile, owner_user_id)
 
     assert profile.display_name == "Mia"
     assert profile.age == 31
-    assert summary.daily_summary == "Profile setup complete."
+    assert profile.daily_summary == "Profile setup complete."
     assert infant.infant_name == "Baby"
     assert replayed_infant.id == infant.id
     assert [item.id for item in infants] == [infant.id]
@@ -86,7 +84,6 @@ async def _run_profile_onboarding_main_flow() -> None:
     assert idempotency_conflict.value.code == "idempotency_conflict"
     assert [entry["action"] for entry in audit_service.entries] == [
         "profiles.user.update",
-        "profiles.status_summary.update",
         "profiles.infant.create",
         "profiles.infant.create",
     ]

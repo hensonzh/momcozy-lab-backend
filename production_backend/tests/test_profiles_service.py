@@ -57,29 +57,6 @@ def test_profile_service_creates_infant_with_idempotency_and_audit() -> None:
     assert audit_service.record_kwargs["action"] == "profiles.infant.create"
 
 
-def test_profile_service_updates_status_summary_with_explicit_audit_action() -> None:
-    user_id = uuid4()
-    profile = UserProfile(id=uuid4(), user_id=user_id)
-    repository = FakeProfileRepository(profile=profile)
-    audit_service = FakeAuditService()
-    service = ProfileService(repository=repository, audit_service=audit_service)
-
-    updated = asyncio.run(
-        service.update_status_summary(
-            user_id=user_id,
-            lactation_advice="Keep pumping comfortable",
-            feeding_advice=None,
-            daily_summary="Two pumping sessions today",
-            request_id="req_status_summary",
-        )
-    )
-
-    assert updated.lactation_advice == "Keep pumping comfortable"
-    assert updated.daily_summary == "Two pumping sessions today"
-    assert audit_service.record_kwargs["action"] == "profiles.status_summary.update"
-    assert audit_service.record_kwargs["details"]["fields"] == ["daily_summary", "lactation_advice"]
-
-
 def test_profile_service_replays_completed_infant_create() -> None:
     owner_user_id = uuid4()
     infant_id = uuid4()

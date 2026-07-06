@@ -27,7 +27,8 @@ def test_openapi_contains_core_flutter_handoff_paths() -> None:
         "/v1/assets/{asset_id}",
         "/v1/files/upload",
         "/v1/files/{file_id}/vision/events/stream",
-        "/v1/profile/status-summary",
+        "/v1/profile/me",
+        "/v1/profile/infants",
         "/v1/records/feeding",
         "/v1/records/milk-trends",
         "/v1/plans",
@@ -41,7 +42,6 @@ def test_openapi_contains_core_flutter_handoff_paths() -> None:
         "/v1/devices/pump-energy-target",
         "/v1/speech/transcribe-chunk",
         "/v1/realtime-voice-stream",
-        "/v1/status-page/today",
         "/v1/agent/artifacts/{artifact_id}",
         "/v1/agent/memories",
         "/v1/agent/memories/settings",
@@ -70,6 +70,8 @@ def test_openapi_excludes_retired_legacy_pump_fallback_paths() -> None:
         "/v1/pump/health/upload",
         "/v1/pump/health/get",
         "/v1/pump/info/get",
+        "/v1/profile/status-summary",
+        "/v1/status-page/today",
     ]:
         assert retired_path not in paths
 
