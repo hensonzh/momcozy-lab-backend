@@ -61,6 +61,7 @@ def test_makefile_infra_checks_use_project_python_environment() -> None:
     assert "$(PYTHON) production_backend/scripts/check_database_profile.py" in makefile
     assert "$(PYTHON) production_backend/scripts/check_redis_runtime_controls.py" in makefile
     assert "$(PYTHON) production_backend/scripts/check_object_storage_profile.py" in makefile
+    assert "$(PYTHON) production_backend/scripts/check_product_asset_storage.py" in makefile
     assert "backend-productization-status:" in makefile
     assert "$(PYTHON) production_backend/scripts/check_productization_status.py" in makefile
     assert "backend-smoke:" in makefile

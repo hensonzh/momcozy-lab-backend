@@ -62,6 +62,7 @@ def _check_required_files(root: Path) -> list[CheckResult]:
         "production_backend/scripts/inspect_worker_backlog.py",
         "production_backend/scripts/recover_stuck_agent_runs.py",
         "production_backend/scripts/run_agent_seed_eval.py",
+        "production_backend/scripts/check_product_asset_storage.py",
     ]
     return [_file_exists(root, relative_path) for relative_path in required]
 
@@ -135,6 +136,7 @@ def _check_makefile_targets(root: Path) -> list[CheckResult]:
         (makefile, "backend-worker-backlog:"),
         (makefile, "backend-agent-recover-stuck-runs:"),
         (makefile, "production_backend/scripts/check_productization_status.py"),
+        (makefile, "production_backend/scripts/check_product_asset_storage.py"),
     ]
     return _contains_by_file(checks)
 

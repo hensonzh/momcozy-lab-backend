@@ -31,6 +31,15 @@ python production_backend/scripts/build_product_asset_manifest.py \
 Upload the same directory to the configured object storage prefix. The generated
 `object_key` values must match the upload destination.
 
+Verify the manifest and storage contents after upload:
+
+```bash
+python production_backend/scripts/check_product_asset_storage.py
+```
+
+The check validates that every manifest `object_key` exists in the configured
+object storage provider and that the stored byte size matches `size_bytes`.
+
 ## Local Development
 
 The default local profile uses filesystem object storage:
@@ -40,6 +49,16 @@ OBJECT_STORAGE_PROVIDER=local
 OBJECT_STORAGE_LOCAL_ROOT=production_backend/.local/object_storage
 PRODUCT_ASSET_MANIFEST_PATH=production_backend/assets/product-assets.manifest.json
 ```
+
+For local development, copy the product asset files into the matching object
+storage prefix under `.local/object_storage`:
+
+```text
+production_backend/.local/object_storage/product-assets/...
+```
+
+The `.local/` directory is ignored by git, so large product asset blobs stay out
+of the repository and worker images.
 
 To exercise the full object-storage path locally, start MinIO:
 

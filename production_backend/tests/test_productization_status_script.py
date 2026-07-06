@@ -37,5 +37,7 @@ def test_productization_status_checks_worker_operations_scripts() -> None:
 
     assert "production_backend/scripts/inspect_worker_backlog.py" in names
     assert "production_backend/scripts/recover_stuck_agent_runs.py" in names
+    assert "production_backend/scripts/check_product_asset_storage.py" in names
     assert "Makefile:backend-worker-backlog:" in names
     assert "Makefile:backend-agent-recover-stuck-runs:" in names
+    assert "Makefile:production_backend/scripts/check_product_asset_storage.py" in names

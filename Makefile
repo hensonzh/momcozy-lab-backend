@@ -35,7 +35,8 @@ backend-check-infra:
 	set -a; . $(BACKEND_ENV_FILE); set +a; \
 	$(PYTHON) production_backend/scripts/check_database_profile.py; \
 	$(PYTHON) production_backend/scripts/check_redis_runtime_controls.py; \
-	$(PYTHON) production_backend/scripts/check_object_storage_profile.py
+	$(PYTHON) production_backend/scripts/check_object_storage_profile.py; \
+	$(PYTHON) production_backend/scripts/check_product_asset_storage.py
 
 backend-productization-status:
 	$(PYTHON) production_backend/scripts/check_productization_status.py
