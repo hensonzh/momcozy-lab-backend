@@ -70,14 +70,6 @@ def _check_required_files(root: Path) -> list[CheckResult]:
 
 def _check_environment_profiles(backend: Path) -> list[CheckResult]:
     required_by_file = {
-        "env/local.env.example": [
-            "APP_ENV=local",
-            "DATABASE_URL=postgresql+asyncpg://momcozy:momcozy@localhost",
-            "REDIS_URL=redis://localhost",
-            "OBJECT_STORAGE_PROVIDER=minio",
-            "OBJECT_STORAGE_ENDPOINT_URL=http://localhost:9000",
-            "READINESS_CHECK_INFRASTRUCTURE=true",
-        ],
         "env/compose.local.env.example": [
             "APP_ENV=local",
             "DATABASE_URL=postgresql+asyncpg://momcozy:momcozy@postgres",
@@ -93,19 +85,6 @@ def _check_environment_profiles(backend: Path) -> list[CheckResult]:
             "OBJECT_STORAGE_ENDPOINT_URL=http://minio:9000",
         ],
         "env/compose.prod.env.example": [
-            "APP_ENV=production",
-            "OBJECT_STORAGE_PROVIDER=oss",
-            "AUTH_REQUIRE_ACTIVE_SESSION=true",
-            "METRICS_REQUIRE_SERVICE_KEY=true",
-            "OUTBOX_WORKER_ENABLED=true",
-        ],
-        "env/staging.env.example": [
-            "APP_ENV=staging",
-            "OBJECT_STORAGE_PROVIDER=oss",
-            "AUTH_REQUIRE_ACTIVE_SESSION=true",
-            "OUTBOX_WORKER_ENABLED=true",
-        ],
-        "env/production.env.example": [
             "APP_ENV=production",
             "OBJECT_STORAGE_PROVIDER=oss",
             "AUTH_REQUIRE_ACTIVE_SESSION=true",
@@ -148,8 +127,8 @@ def _check_makefile_targets(root: Path) -> list[CheckResult]:
         (makefile, "backend-check-infra:"),
         (makefile, "backend-productization-status:"),
         (makefile, "backend-smoke:"),
-        (makefile, "backend-staging-smoke:"),
-        (makefile, "backend-production-readiness:"),
+        (makefile, "backend-test-smoke:"),
+        (makefile, "backend-prod-readiness:"),
         (makefile, "backend-worker-backlog:"),
         (makefile, "backend-agent-recover-stuck-runs:"),
         (makefile, "production_backend/scripts/check_productization_status.py"),

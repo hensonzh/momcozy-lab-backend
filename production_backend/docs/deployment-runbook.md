@@ -45,8 +45,8 @@ Start incident and release debugging from these IDs when available:
 10. Export OpenAPI and compare it with the committed snapshot.
 11. Run backend-local productization guardrails:
     `make backend-productization-status`.
-12. In staging, run the environment-backed smoke bundle:
-    `make backend-staging-smoke BACKEND_ENV_FILE=<staging env file>`.
+12. In the server test environment, run the compose-backed smoke bundle:
+    `make backend-test-smoke`.
 
 ## Release
 

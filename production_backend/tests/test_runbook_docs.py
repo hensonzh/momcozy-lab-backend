@@ -19,7 +19,7 @@ def test_deployment_runbook_covers_release_recovery_and_security() -> None:
         "Credential Rotation Drill",
         "Provider Eval Budget",
         "make backend-productization-status",
-        "make backend-staging-smoke",
+        "make backend-test-smoke",
         "make backend-worker-backlog",
         "make backend-agent-recover-stuck-runs",
         "recover_stuck_agent_runs.py --apply",

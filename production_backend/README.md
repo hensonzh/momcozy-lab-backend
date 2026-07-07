@@ -47,10 +47,12 @@ environment variables, not code changes:
 - `VOICE_PROVIDER`
 - `VISION_PROVIDER`
 
-Use `production_backend/env/local.env.example` as the host-local template and
-copy it to ignored `production_backend/env/local.env` for secrets. Secrets stay
-out of git, and production startup rejects local object storage. Backup/restore
-hook values should be references to external automation, not raw credentials.
+Use the `production_backend/env/compose.*.env.example` files as the only
+committed environment templates. Copy them to ignored private files such as
+`env/compose.local.env`, `env/compose.test.env`, or `env/compose.prod.env` for
+real secrets. Secrets stay out of git, and production startup rejects local
+object storage. Backup/restore hook values should be references to external
+automation, not raw credentials.
 
 ## Local Docker Compose
 

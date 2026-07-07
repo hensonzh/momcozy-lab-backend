@@ -64,7 +64,7 @@ Start MinIO through Compose before running storage checks:
 
 ```bash
 make backend-local-minio
-set -a; . production_backend/env/local.env.example; set +a
+set -a; . production_backend/env/compose.local.env.example; set +a
 python production_backend/scripts/check_object_storage_profile.py
 ```
 

@@ -48,6 +48,6 @@ OBJECT_STORAGE_SECRET_ACCESS_KEY=minioadmin
 Host-side scripts use the same bucket through the exposed localhost port:
 
 ```bash
-set -a; . production_backend/env/local.env.example; set +a
+set -a; . production_backend/env/compose.local.env.example; set +a
 python production_backend/scripts/check_object_storage_profile.py
 ```

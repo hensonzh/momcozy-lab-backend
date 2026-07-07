@@ -47,18 +47,17 @@ def test_compose_env_keeps_object_storage_switchable_by_environment() -> None:
     assert "PRODUCT_ASSET_LOCAL_ROOT=" in env
 
 
-def test_environment_profile_examples_exist_for_local_staging_and_production() -> None:
+def test_compose_environment_profile_examples_exist() -> None:
     env_dir = PRODUCTION_BACKEND / "env"
 
-    assert (env_dir / "local.env.example").exists()
     assert (env_dir / "compose.local.env.example").exists()
     assert (env_dir / "compose.test.env.example").exists()
     assert (env_dir / "compose.prod.env.example").exists()
-    assert (env_dir / "staging.env.example").exists()
-    assert (env_dir / "production.env.example").exists()
+    assert not (env_dir / "local.env.example").exists()
+    assert not (env_dir / "staging.env.example").exists()
+    assert not (env_dir / "production.env.example").exists()
     assert "APP_ENV=production" in (env_dir / "compose.prod.env.example").read_text()
-    assert "APP_ENV=production" in (env_dir / "production.env.example").read_text()
-    assert "OBJECT_STORAGE_PROVIDER=oss" in (env_dir / "production.env.example").read_text()
+    assert "OBJECT_STORAGE_PROVIDER=oss" in (env_dir / "compose.prod.env.example").read_text()
 
 
 def test_makefile_infra_checks_use_project_python_environment() -> None:
@@ -78,10 +77,10 @@ def test_makefile_infra_checks_use_project_python_environment() -> None:
     assert "backend-productization-status:" in makefile
     assert "$(PYTHON) production_backend/scripts/check_productization_status.py" in makefile
     assert "backend-smoke:" in makefile
-    assert "backend-staging-smoke:" in makefile
-    assert "$(MAKE) backend-check-infra BACKEND_ENV=staging" in makefile
-    assert "backend-production-readiness:" in makefile
-    assert "$(MAKE) backend-check-infra BACKEND_ENV=production" in makefile
+    assert "backend-test-smoke:" in makefile
+    assert "$(MAKE) backend-check-infra BACKEND_ENV_FILE=$(TEST_COMPOSE_ENV_FILE)" in makefile
+    assert "backend-prod-readiness:" in makefile
+    assert "$(MAKE) backend-check-infra BACKEND_ENV_FILE=$(PROD_COMPOSE_ENV_FILE)" in makefile
     assert "backend-worker-backlog:" in makefile
     assert "$(PYTHON) production_backend/scripts/inspect_worker_backlog.py" in makefile
     assert "backend-agent-recover-stuck-runs:" in makefile
