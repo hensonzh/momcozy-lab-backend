@@ -108,6 +108,10 @@ The source of truth is each FastAPI route's OpenAPI extension metadata.
 
 | Method | Path | Owner | Clients | Stability | Summary |
 |---|---|---|---|---|---|
+| GET | `/v1/admin/invite-codes` | auth | admin-console | stable | List Invite Codes |
+| POST | `/v1/admin/invite-codes` | auth | admin-console | stable | Create Invite Code |
+| GET | `/v1/admin/invite-codes/ui` | auth | admin-console | stable | Invite Codes Admin Ui |
+| POST | `/v1/admin/invite-codes/{code}/disable` | auth | admin-console | stable | Disable Invite Code |
 | POST | `/v1/agent/admin/runs/{run_id}/eval-cases` | agent-runtime | ops-console, eval-runner | stable | Create Eval Case From Run |
 | GET | `/v1/agent/admin/runs/{run_id}/replay` | agent-runtime | ops-console, eval-runner | stable | Export Run Replay Bundle |
 

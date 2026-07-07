@@ -9,6 +9,7 @@ from ...api.dependencies import require_current_user
 from ...api.surface import SurfaceAPIRouter, api_surface
 from ...core.errors import ApiError
 from ...infrastructure.db.session import get_session
+from ..invites.repository import InviteCodeRepository
 from .account_service import AuthAccountService, DeviceContext, IssuedTokenPair
 from .current_user import CurrentUser
 from .repository import AuthAccountRepository, AuthSessionRepository
@@ -28,6 +29,7 @@ def get_auth_account_service(request: Request, session: AsyncSession = Depends(g
         account_repository=AuthAccountRepository(session),
         session_service=AuthSessionService(repository=AuthSessionRepository(session)),
         settings=request.app.state.settings,
+        invite_code_repository=InviteCodeRepository(session),
     )
 
 

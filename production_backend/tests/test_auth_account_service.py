@@ -10,6 +10,7 @@ from production_backend.app.modules.auth.account_service import AuthAccountServi
 from production_backend.app.modules.auth.models import DeviceSession, RefreshToken
 from production_backend.app.modules.auth.passwords import hash_password, verify_password
 from production_backend.app.modules.auth.service import CreatedAuthSession, IssuedRefreshToken, refresh_token_hash
+from production_backend.app.modules.invites.models import InviteCode
 from production_backend.app.modules.users.models import AuthIdentity, User
 
 
@@ -161,6 +162,57 @@ def test_invite_login_rejects_invalid_code_without_creating_session() -> None:
     assert session_service.created_user_id is None
 
 
+def test_invite_login_binds_managed_invite_code_and_issues_tokens() -> None:
+    account_repository = FakeAccountRepository()
+    session_service = FakeSessionService()
+    invite_code = InviteCode(code="MCZ-ABCD-2345", status="active")
+    invite_repository = FakeInviteCodeRepository(invite_code=invite_code)
+    service = AuthAccountService(
+        account_repository=account_repository,
+        session_service=session_service,
+        settings=_settings(auth_invite_codes=()),
+        invite_code_repository=invite_repository,
+    )
+
+    issued = asyncio.run(
+        service.invite_login(
+            invite_code="mcz-abcd-2345",
+            device_context=DeviceContext(device_id="flutter-device-001"),
+        )
+    )
+
+    assert invite_repository.for_update is True
+    assert invite_code.bound_device_id == "flutter-device-001"
+    assert invite_code.bound_user_id == account_repository.created_user.id
+    assert invite_code.used_count == 1
+    assert issued.user.id == account_repository.created_user.id
+    assert session_service.created_user_id == account_repository.created_user.id
+
+
+def test_invite_login_rejects_disabled_managed_invite_code() -> None:
+    account_repository = FakeAccountRepository()
+    session_service = FakeSessionService()
+    invite_repository = FakeInviteCodeRepository(invite_code=InviteCode(code="MCZ-ABCD-2345", status="disabled"))
+    service = AuthAccountService(
+        account_repository=account_repository,
+        session_service=session_service,
+        settings=_settings(auth_invite_codes=()),
+        invite_code_repository=invite_repository,
+    )
+
+    with pytest.raises(ApiError) as denied:
+        asyncio.run(
+            service.invite_login(
+                invite_code="MCZ-ABCD-2345",
+                device_context=DeviceContext(device_id="flutter-device-001"),
+            )
+        )
+
+    assert denied.value.code == "permission_denied"
+    assert account_repository.created_identity is None
+    assert session_service.created_user_id is None
+
+
 def test_login_rejects_invalid_password_without_creating_session() -> None:
     user = User(id=uuid4(), display_name="Test", status="active")
     identity = AuthIdentity(
@@ -261,6 +313,24 @@ class FakeAccountRepository:
     async def bind_invite_identity_device(self, *, identity, device_id: str):
         identity.device_id = device_id
         return identity
+
+
+class FakeInviteCodeRepository:
+    def __init__(self, *, invite_code=None) -> None:
+        self.invite_code = invite_code
+        self.for_update = False
+
+    async def get_by_code(self, *, code: str, for_update: bool = False):
+        self.for_update = for_update
+        if self.invite_code and self.invite_code.code == code:
+            return self.invite_code
+        return None
+
+    async def bind(self, *, invite_code, device_id: str, user_id):
+        invite_code.bound_device_id = device_id
+        invite_code.bound_user_id = user_id
+        invite_code.used_count = max(invite_code.used_count or 0, 1)
+        return invite_code
 
 
 class FakeSessionService:

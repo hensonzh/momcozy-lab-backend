@@ -1563,6 +1563,164 @@
         "title": "InfantProfileRead",
         "type": "object"
       },
+      "InviteCodeCreate": {
+        "properties": {
+          "assigned_to": {
+            "default": "",
+            "maxLength": 320,
+            "title": "Assigned To",
+            "type": "string"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "label": {
+            "default": "",
+            "maxLength": 120,
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "title": "InviteCodeCreate",
+        "type": "object"
+      },
+      "InviteCodeListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/InviteCodeRead"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "InviteCodeListResponse",
+        "type": "object"
+      },
+      "InviteCodeRead": {
+        "properties": {
+          "assigned_to": {
+            "title": "Assigned To",
+            "type": "string"
+          },
+          "bound_device_id": {
+            "title": "Bound Device Id",
+            "type": "string"
+          },
+          "bound_user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bound User Id"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by_service": {
+            "title": "Created By Service",
+            "type": "string"
+          },
+          "disabled_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disabled At"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "used_count": {
+            "title": "Used Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "status",
+          "label",
+          "assigned_to",
+          "bound_device_id",
+          "bound_user_id",
+          "created_by_service",
+          "used_count",
+          "expires_at",
+          "disabled_at",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "InviteCodeRead",
+        "type": "object"
+      },
       "InviteLoginRequest": {
         "properties": {
           "device_id": {
@@ -3788,6 +3946,227 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/v1/admin/invite-codes": {
+      "get": {
+        "operationId": "list_invite_codes_v1_admin_invite_codes_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Service-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Service-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InviteCodeListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Invite Codes",
+        "tags": [
+          "admin-invite-codes"
+        ],
+        "x-momcozy-api-surface": "admin_ops_api",
+        "x-momcozy-client": [
+          "admin-console"
+        ],
+        "x-momcozy-owner": "auth",
+        "x-momcozy-stability": "stable"
+      },
+      "post": {
+        "operationId": "create_invite_code_v1_admin_invite_codes_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Service-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Service-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InviteCodeCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InviteCodeRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Invite Code",
+        "tags": [
+          "admin-invite-codes"
+        ],
+        "x-momcozy-api-surface": "admin_ops_api",
+        "x-momcozy-client": [
+          "admin-console"
+        ],
+        "x-momcozy-owner": "auth",
+        "x-momcozy-stability": "stable"
+      }
+    },
+    "/v1/admin/invite-codes/ui": {
+      "get": {
+        "operationId": "invite_codes_admin_ui_v1_admin_invite_codes_ui_get",
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Invite Codes Admin Ui",
+        "tags": [
+          "admin-invite-codes"
+        ],
+        "x-momcozy-api-surface": "admin_ops_api",
+        "x-momcozy-client": [
+          "admin-console"
+        ],
+        "x-momcozy-owner": "auth",
+        "x-momcozy-stability": "stable"
+      }
+    },
+    "/v1/admin/invite-codes/{code}/disable": {
+      "post": {
+        "operationId": "disable_invite_code_v1_admin_invite_codes__code__disable_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "title": "Code",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Service-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Service-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InviteCodeRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Disable Invite Code",
+        "tags": [
+          "admin-invite-codes"
+        ],
+        "x-momcozy-api-surface": "admin_ops_api",
+        "x-momcozy-client": [
+          "admin-console"
+        ],
+        "x-momcozy-owner": "auth",
+        "x-momcozy-stability": "stable"
+      }
+    },
     "/v1/agent/actions/{action_id}": {
       "get": {
         "operationId": "get_action_v1_agent_actions__action_id__get",

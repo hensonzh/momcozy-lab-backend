@@ -50,6 +50,23 @@ using an already-bound invite code is rejected with `permission_denied`.
 Service-to-service callers use `X-Service-Key`; this is not a user token and
 must not be used by mobile clients.
 
+## Admin Invite Codes
+
+- Admin page: `GET /v1/admin/invite-codes/ui`
+- Create: `POST /v1/admin/invite-codes`
+- List: `GET /v1/admin/invite-codes`
+- Disable: `POST /v1/admin/invite-codes/{code}/disable`
+
+The lightweight admin page is for operators who need to create and disable beta
+invite codes quickly. The page itself is a static HTML shell; all state-changing
+and listing calls require `X-Service-Key` and are marked `admin_ops_api`.
+
+Managed invite codes live in Postgres and take precedence over legacy
+environment-configured invite codes. The first successful mobile invite login
+binds the code to the app's stable `device_id` and backend user. Disabling the
+code prevents future invite-login attempts, including attempts from the
+previously bound device.
+
 ## Idempotency
 
 Retryable writes accept `Idempotency-Key` as a header. The backend normalizes

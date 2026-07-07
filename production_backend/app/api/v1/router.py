@@ -15,6 +15,7 @@ from ...modules.auth.router import router as auth_router
 from ...modules.devices.router import router as devices_router
 from ...modules.diary.router import router as diary_router
 from ...modules.files.router import router as files_router
+from ...modules.invites.router import router as invites_router
 from ...modules.notifications.router import router as notifications_router
 from ...modules.plans.router import router as plans_router
 from ...modules.profiles.router import router as profiles_router
@@ -32,6 +33,7 @@ router.include_router(auth_router)
 router.include_router(devices_router)
 router.include_router(diary_router)
 router.include_router(files_router)
+router.include_router(invites_router)
 router.include_router(notifications_router)
 router.include_router(plans_router)
 router.include_router(profiles_router)
