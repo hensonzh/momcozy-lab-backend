@@ -7,6 +7,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from ....core.errors import ApiError
+from ....infrastructure.object_storage.base import ObjectStorage
 from ...auth import CurrentUser
 from ..actions.policy import AgentActionPolicy, AgentActionPolicyDecision
 from ..event_stream.sink import AgentEventSink
@@ -14,6 +15,7 @@ from ..event_stream.transient import AgentTransientStream
 from ..graphs import AgentGraphCheckpointStore, AgentGraphRegistry, default_graph_registry
 from ..memory.service import AgentMemoryService
 from ..models import AgentAction, AgentEvent, AgentMessage, AgentRun
+from ..payloads import DEFAULT_MAX_INLINE_PAYLOAD_BYTES, maybe_externalize_json_payload
 from ..prompts import ContextProjection, ModelInputBuilder
 from ..repository import AgentRuntimeRepository
 from ..routing import RoutingContext, RoutingPlan, SpecialistId, SpecialistRoutingService
@@ -65,6 +67,8 @@ class AgentRuntimeExecutor:
         transient_stream: AgentTransientStream | None = None,
         input_builder: ModelInputBuilder | None = None,
         config: AgentRuntimeExecutorConfig | None = None,
+        object_storage: ObjectStorage | None = None,
+        max_inline_artifact_payload_bytes: int = DEFAULT_MAX_INLINE_PAYLOAD_BYTES,
     ) -> None:
         self.repository = repository
         self.sdk_runner = sdk_runner
@@ -81,6 +85,8 @@ class AgentRuntimeExecutor:
         self.transient_stream = transient_stream
         self.input_builder = input_builder or ModelInputBuilder()
         self.config = config or AgentRuntimeExecutorConfig()
+        self.object_storage = object_storage
+        self.max_inline_artifact_payload_bytes = max_inline_artifact_payload_bytes
 
     async def __call__(self, run: AgentRun) -> AgentRunExecutionResult:
         return await self.execute(run=run)
@@ -237,14 +243,22 @@ class AgentRuntimeExecutor:
 
     async def _persist_artifacts_from_result(self, *, run: AgentRun, artifacts: list[dict[str, Any]]) -> None:
         for artifact_payload in artifacts:
+            raw_payload_ref = _text(artifact_payload, "raw_payload_ref")
+            externalized_payload = await maybe_externalize_json_payload(
+                payload=_dict(artifact_payload, "payload"),
+                object_storage=None if raw_payload_ref else self.object_storage,
+                run_id=run.id,
+                payload_kind="artifacts",
+                max_inline_bytes=self.max_inline_artifact_payload_bytes,
+            )
             artifact = await self.repository.create_artifact(
                 run_id=run.id,
                 owner_user_id=run.actor_user_id,
                 artifact_type=_required_text(artifact_payload, "artifact_type"),
                 schema_version=_text(artifact_payload, "schema_version") or "v1",
                 status=_text(artifact_payload, "status") or "created",
-                payload=_dict(artifact_payload, "payload"),
-                raw_payload_ref=_text(artifact_payload, "raw_payload_ref"),
+                payload=externalized_payload.inline_payload,
+                raw_payload_ref=raw_payload_ref or externalized_payload.raw_payload_ref,
             )
             await self._append_event(
                 thread_id=run.thread_id,

@@ -207,6 +207,8 @@ async def _process_agent_run(
             repository=repository,
             event_sink=event_sink,
             metrics=metrics,
+            object_storage=object_storage,
+            max_inline_output_bytes=settings.agent_runtime_max_inline_payload_bytes,
             handlers=build_default_tool_handlers(
                 profile_service=profile_service,
                 records_service=records_service,
@@ -229,6 +231,8 @@ async def _process_agent_run(
             memory_service=memory_service,
             transient_stream=AgentTransientStream(redis_client),
             sdk_runner=create_agent_sdk_runner(settings=settings, metrics=metrics),
+            object_storage=object_storage,
+            max_inline_artifact_payload_bytes=settings.agent_runtime_max_inline_payload_bytes,
         )
         handler = AgentRuntimeGraphRunner(
             repository=repository,

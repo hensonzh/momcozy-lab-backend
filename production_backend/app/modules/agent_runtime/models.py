@@ -53,6 +53,13 @@ class AgentRun(Base):
     __table_args__ = (
         Index("ix_agent_runs_thread_started", "thread_id", "started_at"),
         Index("ix_agent_runs_actor_status_started", "actor_user_id", "status", "started_at"),
+        Index(
+            "ix_agent_runs_runnable_created",
+            "status",
+            "created_at",
+            "id",
+            postgresql_where=text("status IN ('queued', 'running')"),
+        ),
         Index("ix_agent_runs_request_id", "request_id"),
         Index("ix_agent_runs_trace_id", "trace_id"),
         Index("ix_agent_runs_specialist_started", "specialist_id", "started_at"),

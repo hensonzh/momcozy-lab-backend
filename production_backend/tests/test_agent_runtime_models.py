@@ -96,6 +96,7 @@ def test_agent_actions_and_checkpoints_have_runtime_indexes() -> None:
     assert "routing_confidence_score" in runs.columns
     assert "routing_summary_json" in runs.columns
     assert "ix_agent_runs_specialist_started" in {index.name for index in runs.indexes}
+    assert "ix_agent_runs_runnable_created" in {index.name for index in runs.indexes}
     assert "uq_agent_routing_decisions_run_message" in {constraint.name for constraint in routing_decisions.constraints}
     assert "ix_agent_routing_decisions_specialist_created" in {index.name for index in routing_decisions.indexes}
     assert "ix_agent_actions_run_status" in {index.name for index in actions.indexes}

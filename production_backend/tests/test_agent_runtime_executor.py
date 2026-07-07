@@ -1,4 +1,5 @@
 import asyncio
+import json
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -565,6 +566,44 @@ def test_agent_runtime_executor_persists_sdk_artifacts_and_emits_events() -> Non
     assert repository.events[0].payload["artifact_id"] == str(repository.artifacts[0].id)
 
 
+def test_agent_runtime_executor_externalizes_large_sdk_artifacts() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="Create a plan", sequence=1)
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    storage = FakeObjectStorage()
+    payload = {"title": "Birth plan", "sections": [{"text": "x" * 200}]}
+    backend = CapturingSdkBackend(
+        result=SdkNodeResult(
+            final_text="I drafted a plan.",
+            artifacts=[
+                {
+                    "artifact_type": "care_plan",
+                    "schema_version": "v1",
+                    "payload": payload,
+                }
+            ],
+        )
+    )
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            object_storage=storage,
+            max_inline_artifact_payload_bytes=80,
+        ).execute(run=run)
+    )
+
+    assert result.status == "completed"
+    assert repository.artifacts[0].raw_payload_ref == "memory://agent-runtime/artifacts"
+    assert repository.artifacts[0].payload["_externalized_payload"]["stored"] is True
+    assert "uri" not in repository.artifacts[0].payload["_externalized_payload"]
+    assert "key" not in repository.artifacts[0].payload["_externalized_payload"]
+    assert repository.artifacts[0].payload["payload_summary"] == payload
+    assert json.loads(storage.body.decode("utf-8")) == payload
+
+
 class CapturingSdkBackend:
     def __init__(self, *, result: SdkNodeResult) -> None:
         self.result = result
@@ -631,7 +670,11 @@ class FakeRuntimeRepository:
         return self.tool_call
 
     async def create_tool_output(self, **kwargs):
-        self.tool_output = FakeToolOutput(tool_call_id=kwargs["tool_call_id"], safe_output=kwargs["safe_output"])
+        self.tool_output = FakeToolOutput(
+            tool_call_id=kwargs["tool_call_id"],
+            safe_output=kwargs["safe_output"],
+            raw_output_ref=kwargs.get("raw_output_ref", ""),
+        )
         return self.tool_output
 
     async def create_action(self, **kwargs):
@@ -734,10 +777,43 @@ class FakeToolExecutionResult:
 
 
 class FakeToolOutput:
-    def __init__(self, *, tool_call_id, safe_output):
+    def __init__(self, *, tool_call_id, safe_output, raw_output_ref=""):
         self.id = uuid4()
         self.tool_call_id = tool_call_id
         self.safe_output = safe_output
+        self.raw_output_ref = raw_output_ref
+
+
+class FakeObjectStorage:
+    def __init__(self) -> None:
+        self.key = ""
+        self.body = b""
+        self.content_type = ""
+
+    async def put_bytes(self, *, key, body, content_type):
+        self.key = key
+        self.body = body
+        self.content_type = content_type
+        return FakeStoredObject(
+            key=key,
+            uri="memory://agent-runtime/artifacts",
+            size_bytes=len(body),
+            content_type=content_type,
+        )
+
+    async def get_bytes(self, *, key):
+        return self.body
+
+    async def delete(self, *, key):
+        return None
+
+
+class FakeStoredObject:
+    def __init__(self, *, key, uri, size_bytes, content_type):
+        self.key = key
+        self.uri = uri
+        self.size_bytes = size_bytes
+        self.content_type = content_type
 
 
 class InvokingSdkBackend:

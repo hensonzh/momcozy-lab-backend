@@ -1,4 +1,5 @@
 import asyncio
+import json
 from uuid import uuid4
 
 import pytest
@@ -40,6 +41,40 @@ def test_tool_executor_persists_safe_args_and_output() -> None:
         "call_id": "call-1",
     }
     assert repository.events[1].payload["tool_output_id"] == str(repository.output.id)
+
+
+def test_tool_executor_externalizes_large_safe_output_after_redaction() -> None:
+    actor = _user(permissions={"profile:read:self"})
+    repository = FakeToolRepository()
+    storage = FakeObjectStorage()
+    executor = ToolExecutor(
+        registry=default_tool_registry(),
+        repository=repository,
+        handlers={"profile.read": large_profile_read_handler},
+        object_storage=storage,
+        max_inline_output_bytes=80,
+    )
+
+    result = asyncio.run(
+        executor.execute(
+            actor=actor,
+            run_id=uuid4(),
+            tool_name="profile.read",
+            call_id="call-large",
+            args={},
+        )
+    )
+
+    assert repository.output.raw_output_ref == "memory://agent-runtime/runs"
+    assert result.safe_output["_externalized_payload"]["stored"] is True
+    assert "uri" not in result.safe_output["_externalized_payload"]
+    assert "key" not in result.safe_output["_externalized_payload"]
+    assert repository.output.safe_output == result.safe_output
+    assert "raw_output_ref" not in repository.events[-1].payload
+    stored_payload = json.loads(storage.body.decode("utf-8"))
+    assert stored_payload["session_token"] == "[redacted]"
+    assert stored_payload["profile"]["notes"] == "x" * 200
+    assert result.safe_output["payload_summary"]["profile"]["notes"] == "x" * 200
 
 
 def test_tool_executor_denies_missing_permission_before_persisting_call() -> None:
@@ -262,6 +297,10 @@ async def profile_read_handler(context: ToolHandlerContext):
     return {"profile": {"name": "Mai"}, "session_token": "secret-token"}
 
 
+async def large_profile_read_handler(context: ToolHandlerContext):
+    return {"profile": {"name": "Mai", "notes": "x" * 200}, "session_token": "secret-token"}
+
+
 async def failing_handler(context: ToolHandlerContext):
     raise ApiError(code="dependency_failed", message="Profile service unavailable.", status=503)
 
@@ -325,7 +364,11 @@ class FakeToolRepository:
         return self.tool_call
 
     async def create_tool_output(self, **kwargs):
-        self.output = FakeToolOutput(tool_call_id=kwargs["tool_call_id"], safe_output=kwargs["safe_output"])
+        self.output = FakeToolOutput(
+            tool_call_id=kwargs["tool_call_id"],
+            safe_output=kwargs["safe_output"],
+            raw_output_ref=kwargs.get("raw_output_ref", ""),
+        )
         return self.output
 
     async def append_event(self, **kwargs):
@@ -342,7 +385,40 @@ class FakeToolRepository:
 
 
 class FakeToolOutput:
-    def __init__(self, *, tool_call_id, safe_output):
+    def __init__(self, *, tool_call_id, safe_output, raw_output_ref=""):
         self.id = uuid4()
         self.tool_call_id = tool_call_id
         self.safe_output = safe_output
+        self.raw_output_ref = raw_output_ref
+
+
+class FakeObjectStorage:
+    def __init__(self) -> None:
+        self.key = ""
+        self.body = b""
+        self.content_type = ""
+
+    async def put_bytes(self, *, key, body, content_type):
+        self.key = key
+        self.body = body
+        self.content_type = content_type
+        return FakeStoredObject(
+            key=key,
+            uri="memory://agent-runtime/runs",
+            size_bytes=len(body),
+            content_type=content_type,
+        )
+
+    async def get_bytes(self, *, key):
+        return self.body
+
+    async def delete(self, *, key):
+        return None
+
+
+class FakeStoredObject:
+    def __init__(self, *, key, uri, size_bytes, content_type):
+        self.key = key
+        self.uri = uri
+        self.size_bytes = size_bytes
+        self.content_type = content_type

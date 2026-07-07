@@ -10,9 +10,11 @@ from uuid import UUID
 
 from ....core.errors import ApiError
 from ....core.metrics import RequestMetrics
+from ....infrastructure.object_storage.base import ObjectStorage
 from ...auth import CurrentUser, PermissionPolicy
 from ..event_stream.sink import AgentEventSink
 from ..models import AgentToolCall
+from ..payloads import DEFAULT_MAX_INLINE_PAYLOAD_BYTES, maybe_externalize_json_payload
 from ..repository import AgentRuntimeRepository
 from .contracts import ToolContract
 from .registry import ToolContractRegistry
@@ -47,6 +49,8 @@ class ToolExecutor:
         handlers: dict[str, ToolHandler] | None = None,
         event_sink: AgentEventSink | None = None,
         metrics: RequestMetrics | None = None,
+        object_storage: ObjectStorage | None = None,
+        max_inline_output_bytes: int = DEFAULT_MAX_INLINE_PAYLOAD_BYTES,
     ) -> None:
         self.registry = registry
         self.repository = repository
@@ -54,6 +58,8 @@ class ToolExecutor:
         self.handlers = handlers or {}
         self.event_sink = event_sink
         self.metrics = metrics
+        self.object_storage = object_storage
+        self.max_inline_output_bytes = max_inline_output_bytes
 
     async def execute(
         self,
@@ -124,21 +130,34 @@ class ToolExecutor:
             raise ApiError(code="tool_failed", message="Tool execution failed.", status=500) from exc
 
         safe_output = _safe_payload(result)
+        externalized_output = await maybe_externalize_json_payload(
+            payload=safe_output,
+            object_storage=self.object_storage,
+            run_id=run.id,
+            payload_kind="tool-outputs",
+            key_suffix=str(tool_call.id),
+            max_inline_bytes=self.max_inline_output_bytes,
+        )
         completed = await self.repository.complete_tool_call(tool_call=tool_call, completed_at=_utcnow())
-        output = await self.repository.create_tool_output(tool_call_id=completed.id, safe_output=safe_output)
+        output = await self.repository.create_tool_output(
+            tool_call_id=completed.id,
+            safe_output=externalized_output.inline_payload,
+            raw_output_ref=externalized_output.raw_payload_ref,
+        )
+        completed_payload = {
+            "tool_call_id": str(completed.id),
+            "tool_output_id": str(output.id),
+            "tool_name": completed.tool_name,
+            "call_id": completed.call_id,
+        }
         await self._append_tool_event(
             thread_id=run.thread_id,
             run_id=run.id,
             event_type="tool.completed",
-            payload={
-                "tool_call_id": str(completed.id),
-                "tool_output_id": str(output.id),
-                "tool_name": completed.tool_name,
-                "call_id": completed.call_id,
-            },
+            payload=completed_payload,
         )
         self._record(tool_name=tool_name, outcome="completed", error_code="", started_at=started_at)
-        return ToolExecutionResult(tool_call=completed, safe_output=safe_output)
+        return ToolExecutionResult(tool_call=completed, safe_output=externalized_output.inline_payload)
 
     def _authorize(self, *, actor: CurrentUser, contract: ToolContract, args: dict[str, Any]) -> None:
         self.permission_policy.require_permission(actor, contract.required_permission)

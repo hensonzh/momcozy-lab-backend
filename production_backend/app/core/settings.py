@@ -11,6 +11,7 @@ LOCAL_REDIS_URL = "redis://localhost:6379/0"
 LOCAL_OBJECT_STORAGE_ROOT = "production_backend/.local/object_storage"
 LOCAL_PRODUCT_ASSET_MANIFEST_PATH = "production_backend/assets/product-assets.manifest.json"
 DEFAULT_FILE_UPLOAD_MAX_BYTES = 10 * 1024 * 1024
+DEFAULT_AGENT_RUNTIME_MAX_INLINE_PAYLOAD_BYTES = 32 * 1024
 SUPPORTED_OBJECT_STORAGE_PROVIDERS = {"local", "s3", "oss", "cos", "minio"}
 PRODUCTION_ENVS = {"prod", "production"}
 SUPPORTED_AUTH_JWT_ALGORITHMS = {"HS256"}
@@ -59,6 +60,7 @@ class Settings:
     agent_runtime_worker_concurrency: int = 1
     agent_runtime_worker_idle_seconds: int = 2
     agent_runtime_recover_running_older_than_seconds: int = 900
+    agent_runtime_max_inline_payload_bytes: int = DEFAULT_AGENT_RUNTIME_MAX_INLINE_PAYLOAD_BYTES
     outbox_worker_enabled: bool = False
     outbox_worker_idle_seconds: int = 2
     outbox_worker_lease_seconds: int = 60
@@ -123,6 +125,10 @@ class Settings:
                 "AGENT_RUNTIME_RECOVER_RUNNING_OLDER_THAN_SECONDS",
                 cls.agent_runtime_recover_running_older_than_seconds,
             ),
+            agent_runtime_max_inline_payload_bytes=_env_int(
+                "AGENT_RUNTIME_MAX_INLINE_PAYLOAD_BYTES",
+                cls.agent_runtime_max_inline_payload_bytes,
+            ),
             outbox_worker_enabled=_env_bool("OUTBOX_WORKER_ENABLED", cls.outbox_worker_enabled),
             outbox_worker_idle_seconds=_env_int("OUTBOX_WORKER_IDLE_SECONDS", cls.outbox_worker_idle_seconds),
             outbox_worker_lease_seconds=_env_int("OUTBOX_WORKER_LEASE_SECONDS", cls.outbox_worker_lease_seconds),
@@ -173,6 +179,8 @@ class Settings:
             errors.append("AGENT_RUNTIME_WORKER_IDLE_SECONDS must be non-negative")
         if self.agent_runtime_recover_running_older_than_seconds < 1:
             errors.append("AGENT_RUNTIME_RECOVER_RUNNING_OLDER_THAN_SECONDS must be positive")
+        if self.agent_runtime_max_inline_payload_bytes < 1:
+            errors.append("AGENT_RUNTIME_MAX_INLINE_PAYLOAD_BYTES must be positive")
         if self.outbox_worker_idle_seconds < 0:
             errors.append("OUTBOX_WORKER_IDLE_SECONDS must be non-negative")
         if self.outbox_worker_lease_seconds < 1:
