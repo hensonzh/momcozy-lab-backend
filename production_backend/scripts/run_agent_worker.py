@@ -21,7 +21,7 @@ from production_backend.app.modules.agent_runtime.memory.service import AgentMem
 from production_backend.app.modules.agent_runtime.repository import AgentRuntimeRepository
 from production_backend.app.modules.agent_runtime.run_lifecycle.executor import AgentRuntimeExecutor
 from production_backend.app.modules.agent_runtime.safety.service import AgentSafetyService
-from production_backend.app.modules.agent_runtime.sdk import OpenAIAgentsSdkRunner
+from production_backend.app.modules.agent_runtime.sdk import create_agent_sdk_runner
 from production_backend.app.modules.agent_runtime.service import AgentRuntimeService
 from production_backend.app.modules.agent_runtime.run_lifecycle.state_store import AgentRuntimeStateStore
 from production_backend.app.modules.agent_runtime.tools import ToolExecutor, build_default_tool_handlers, default_tool_registry
@@ -228,13 +228,7 @@ async def _process_agent_run(
             event_sink=event_sink,
             memory_service=memory_service,
             transient_stream=AgentTransientStream(redis_client),
-            sdk_runner=OpenAIAgentsSdkRunner(
-                model=settings.openai_model,
-                max_turns=settings.openai_agent_max_turns,
-                timeout_seconds=settings.openai_agent_timeout_seconds,
-                trace_enabled=settings.openai_agent_trace_enabled,
-                metrics=metrics,
-            ),
+            sdk_runner=create_agent_sdk_runner(settings=settings, metrics=metrics),
         )
         handler = AgentRuntimeGraphRunner(
             repository=repository,

@@ -141,11 +141,23 @@ Prepare a private test env file:
 cp production_backend/env/compose.test.env.example production_backend/env/compose.test.env
 ```
 
-Enable the agent worker only after adding a test OpenAI key:
+Enable the agent worker only after adding a test provider key:
 
 ```env
 AGENT_RUNTIME_WORKER_ENABLED=true
+AGENT_MODEL_PROVIDER=openai
 OPENAI_API_KEY=...
+```
+
+For an experimental Minimax smoke test, switch only the provider block in the
+private env file:
+
+```env
+AGENT_RUNTIME_WORKER_ENABLED=true
+AGENT_MODEL_PROVIDER=minimax
+MINIMAX_API_KEY=...
+MINIMAX_BASE_URL=https://api.minimax.io/v1
+MINIMAX_MODEL=MiniMax-M3
 ```
 
 Start the full test stack:
@@ -237,9 +249,12 @@ Provider-backed evals run through `agent-provider-eval.yml` and
 
 Required controls:
 
-- `OPENAI_API_KEY` is provided through GitHub secrets or the runtime secret
-  manager.
-- `OPENAI_MODEL` is an environment variable, not hard-coded in eval cases.
+- `AGENT_MODEL_PROVIDER` selects the provider under test. Default is `openai`;
+  experimental Minimax runs use `minimax`.
+- The selected provider key is provided through GitHub secrets or the runtime
+  secret manager: `OPENAI_API_KEY` for OpenAI, `MINIMAX_API_KEY` for Minimax.
+- The selected model is an environment variable, not hard-coded in eval cases:
+  `OPENAI_MODEL` for OpenAI, `MINIMAX_MODEL` for Minimax.
 - `AGENT_PROVIDER_EVAL_MAX_CASES` bounds nightly case count.
 - `AGENT_PROVIDER_EVAL_COST_BUDGET_USD` records the approved budget for the
   eval run.

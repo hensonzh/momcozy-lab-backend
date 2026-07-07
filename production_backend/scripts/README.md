@@ -99,4 +99,7 @@ PR 级别通常需要：
   `.local/object_storage/diagnostics/` 目录；该目录可以删除。
 - `check_product_asset_storage.py` 不写入对象存储，只读取 metadata 或对象大小。
 - `run_agent_provider_eval.py` 会使用真实模型 provider，运行前需要设置
-  `OPENAI_API_KEY`、`OPENAI_MODEL` 和成本预算。
+  `AGENT_MODEL_PROVIDER`、对应 provider key/model 和成本预算。默认
+  `AGENT_MODEL_PROVIDER=openai`，需要 `OPENAI_API_KEY`、`OPENAI_MODEL`；
+  实验性 Minimax 验证使用 `AGENT_MODEL_PROVIDER=minimax`、
+  `MINIMAX_API_KEY`、`MINIMAX_BASE_URL`、`MINIMAX_MODEL`。

@@ -1,13 +1,18 @@
 import asyncio
+import sys
+import types
 
 import pytest
 
 from production_backend.app.core.errors import ApiError
+from production_backend.app.core.settings import Settings
 from production_backend.app.modules.agent_runtime.sdk import (
+    OpenAIAgentsSdkBackend,
     OpenAIAgentsSdkRunner,
     SdkNodeRequest,
     SdkToolDefinition,
     ScriptedSdkBackend,
+    create_agent_sdk_runner,
     scripted_sdk_response,
     scripted_tool_invocation,
     sdk_tool_name,
@@ -87,3 +92,92 @@ def test_scripted_sdk_backend_fails_on_missing_tool_contract() -> None:
 
     assert exc_info.value.code == "sdk_mock_contract_mismatch"
     assert exc_info.value.details == {"tool_name": "profile.read"}
+
+
+def test_agent_sdk_runner_factory_selects_minimax_provider_config() -> None:
+    runner = create_agent_sdk_runner(
+        settings=Settings(
+            app_env="test",
+            agent_model_provider="minimax",
+            minimax_api_key="minimax-key",
+            minimax_base_url="https://api.minimax.io/v1",
+            minimax_model="MiniMax-M3",
+            openai_agent_max_turns=6,
+            openai_agent_timeout_seconds=30,
+        )
+    )
+
+    assert runner.provider == "minimax"
+    assert runner.model == "MiniMax-M3"
+    assert runner.api_key == "minimax-key"
+    assert runner.base_url == "https://api.minimax.io/v1"
+    assert runner.use_responses is False
+    assert runner.buffer_streamed_tool_calls is True
+    assert runner.max_turns == 6
+    assert runner.timeout_seconds == 30
+
+
+def test_minimax_backend_uses_openai_compatible_model_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeOpenAIProvider:
+        def __init__(self, **kwargs: object) -> None:
+            self.kwargs = kwargs
+
+    class FakeRunConfig:
+        instances: list["FakeRunConfig"] = []
+
+        def __init__(self, **kwargs: object) -> None:
+            self.kwargs = kwargs
+            self.instances.append(self)
+
+    class FakeAgent:
+        def __init__(self, **kwargs: object) -> None:
+            self.kwargs = kwargs
+
+    class FakeRunner:
+        calls: list[dict[str, object]] = []
+
+        @staticmethod
+        async def run(agent: FakeAgent, model_input: str, **kwargs: object) -> object:
+            FakeRunner.calls.append({"agent": agent, "model_input": model_input, "kwargs": kwargs})
+            return types.SimpleNamespace(final_output="minimax ok")
+
+    fake_agents = types.SimpleNamespace(
+        Agent=FakeAgent,
+        Runner=FakeRunner,
+        RunConfig=FakeRunConfig,
+        OpenAIProvider=FakeOpenAIProvider,
+    )
+    monkeypatch.setitem(sys.modules, "agents", fake_agents)
+
+    backend = OpenAIAgentsSdkBackend(
+        model="MiniMax-M3",
+        provider="minimax",
+        api_key="minimax-key",
+        base_url="https://api.minimax.io/v1",
+        use_responses=False,
+        buffer_streamed_tool_calls=True,
+    )
+    result = asyncio.run(
+        backend.run(
+            SdkNodeRequest(
+                run_id="run_1",
+                thread_id="thread_1",
+                actor_user_id="user_1",
+                instructions="Use tools.",
+                model_input=[{"role": "user", "content": "hello"}],
+                trace_id="trace_1",
+            )
+        )
+    )
+
+    assert result.final_text == "minimax ok"
+    assert FakeRunner.calls
+    run_config = FakeRunner.calls[0]["kwargs"]["run_config"]
+    assert isinstance(run_config, FakeRunConfig)
+    model_provider = run_config.kwargs["model_provider"]
+    assert isinstance(model_provider, FakeOpenAIProvider)
+    assert model_provider.kwargs["api_key"] == "minimax-key"
+    assert model_provider.kwargs["base_url"] == "https://api.minimax.io/v1"
+    assert model_provider.kwargs["use_responses"] is False
+    assert model_provider.kwargs["buffer_streamed_tool_calls"] is True
+    assert run_config.kwargs["trace_metadata"]["model_provider"] == "minimax"

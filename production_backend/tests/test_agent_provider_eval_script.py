@@ -9,6 +9,7 @@ PRODUCT_AGENT_EVAL_SEED = ROOT / "production_backend" / "fixtures" / "agent_eval
 
 
 def test_run_agent_provider_eval_skips_without_credentials(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.delenv("AGENT_MODEL_PROVIDER", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_ADMIN_KEY", raising=False)
     output_path = tmp_path / "provider-eval.json"
@@ -22,11 +23,32 @@ def test_run_agent_provider_eval_skips_without_credentials(monkeypatch, tmp_path
     )
 
     assert report["total"] == 1
+    assert report["provider"] == "openai"
+    assert report["model"] == "gpt-5.5"
     assert report["failed"] == 0
     assert report["skipped"] == 1
     assert report["results"][0]["skip_reason"] == "missing_provider_credentials"
     assert report["budget"]["cost_budget_usd"] == "3.50"
     assert "missing_provider_credentials" in output_path.read_text()
+
+
+def test_run_agent_provider_eval_skips_without_minimax_credentials(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("AGENT_MODEL_PROVIDER", "minimax")
+    monkeypatch.delenv("MINIMAX_API_KEY", raising=False)
+    output_path = tmp_path / "provider-eval-minimax.json"
+
+    report = run_provider_eval(
+        cases_path=PRODUCT_AGENT_EVAL_SEED,
+        suite="milk_daily_summary",
+        output_path=output_path,
+        allow_skip_without_credentials=True,
+    )
+
+    assert report["provider"] == "minimax"
+    assert report["model"] == "MiniMax-M3"
+    assert report["skipped"] == 1
+    assert report["results"][0]["skip_reason"] == "missing_provider_credentials"
+    assert "minimax" in output_path.read_text()
 
 
 def test_run_agent_provider_eval_uses_sdk_runner_and_seed_assertions() -> None:
@@ -50,6 +72,8 @@ def test_run_agent_provider_eval_uses_sdk_runner_and_seed_assertions() -> None:
     )
 
     assert report["failed"] == 0
+    assert report["provider"] == "openai"
+    assert report["model"] == "gpt-5.5"
     assert report["passed"] == 1
     assert report["results"][0]["status"] == "passed"
     assert report["results"][0]["specialist_id"] == "lactation"
@@ -84,4 +108,5 @@ def test_run_agent_provider_eval_uses_budget_metadata_with_sdk_runner() -> None:
     )
 
     assert report["budget"] == {"max_cases": 1, "cost_budget_usd": "1.25"}
+    assert report["provider"] == "openai"
     assert report["total"] == 1

@@ -103,6 +103,7 @@ def test_settings_from_env_reads_agent_worker_controls(monkeypatch: pytest.Monke
     monkeypatch.setenv("AGENT_RUNTIME_WORKER_CONCURRENCY", "4")
     monkeypatch.setenv("AGENT_RUNTIME_WORKER_IDLE_SECONDS", "5")
     monkeypatch.setenv("AGENT_RUNTIME_RECOVER_RUNNING_OLDER_THAN_SECONDS", "120")
+    monkeypatch.setenv("AGENT_MODEL_PROVIDER", "openai")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setenv("OPENAI_MODEL", "gpt-test")
     monkeypatch.setenv("OPENAI_AGENT_MAX_TURNS", "7")
@@ -117,12 +118,27 @@ def test_settings_from_env_reads_agent_worker_controls(monkeypatch: pytest.Monke
     assert settings.agent_runtime_worker_concurrency == 4
     assert settings.agent_runtime_worker_idle_seconds == 5
     assert settings.agent_runtime_recover_running_older_than_seconds == 120
+    assert settings.agent_model_provider == "openai"
     assert settings.openai_api_key == "sk-test"
     assert settings.openai_model == "gpt-test"
     assert settings.openai_agent_max_turns == 7
     assert settings.openai_agent_timeout_seconds == 45
     assert settings.openai_agent_trace_enabled is True
     assert settings.openai_agent_prompt_version == "prompt-v2"
+
+
+def test_settings_from_env_reads_minimax_agent_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENT_MODEL_PROVIDER", "minimax")
+    monkeypatch.setenv("MINIMAX_API_KEY", "minimax-test")
+    monkeypatch.setenv("MINIMAX_BASE_URL", "https://api.minimax.io/v1")
+    monkeypatch.setenv("MINIMAX_MODEL", "MiniMax-M3")
+
+    settings = Settings.from_env()
+
+    assert settings.agent_model_provider == "minimax"
+    assert settings.minimax_api_key == "minimax-test"
+    assert settings.minimax_base_url == "https://api.minimax.io/v1"
+    assert settings.minimax_model == "MiniMax-M3"
 
 
 def test_settings_from_env_reads_voice_provider(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -174,10 +190,31 @@ def test_settings_reject_invalid_agent_worker_controls() -> None:
 
 
 def test_settings_requires_openai_key_when_agent_worker_is_enabled() -> None:
-    settings = Settings(agent_runtime_worker_enabled=True, openai_api_key="")
+    settings = Settings(agent_runtime_worker_enabled=True, agent_model_provider="openai", openai_api_key="")
 
     with pytest.raises(ValueError, match="OPENAI_API_KEY"):
         settings.validate_for_startup()
+
+
+def test_settings_requires_minimax_key_when_minimax_agent_worker_is_enabled() -> None:
+    settings = Settings(agent_runtime_worker_enabled=True, agent_model_provider="minimax", minimax_api_key="")
+
+    with pytest.raises(ValueError, match="MINIMAX_API_KEY"):
+        settings.validate_for_startup()
+
+
+def test_settings_reject_invalid_agent_model_provider() -> None:
+    settings = Settings(agent_model_provider="legacy")
+
+    with pytest.raises(ValueError, match="AGENT_MODEL_PROVIDER"):
+        settings.validate_for_startup()
+
+
+def test_settings_reject_invalid_minimax_agent_model_config() -> None:
+    with pytest.raises(ValueError, match="MINIMAX_BASE_URL"):
+        Settings(agent_model_provider="minimax", minimax_base_url="").validate_for_startup()
+    with pytest.raises(ValueError, match="MINIMAX_MODEL"):
+        Settings(agent_model_provider="minimax", minimax_model="").validate_for_startup()
 
 
 def test_settings_reject_invalid_openai_agent_controls() -> None:

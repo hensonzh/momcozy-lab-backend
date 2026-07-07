@@ -76,6 +76,7 @@ def _check_environment_profiles(backend: Path) -> list[CheckResult]:
             "REDIS_URL=redis://redis",
             "OBJECT_STORAGE_PROVIDER=minio",
             "OBJECT_STORAGE_ENDPOINT_URL=http://minio:9000",
+            "AGENT_MODEL_PROVIDER=openai",
         ],
         "env/compose.test.env.example": [
             "APP_ENV=test",
@@ -83,6 +84,7 @@ def _check_environment_profiles(backend: Path) -> list[CheckResult]:
             "REDIS_URL=redis://redis",
             "OBJECT_STORAGE_PROVIDER=minio",
             "OBJECT_STORAGE_ENDPOINT_URL=http://minio:9000",
+            "AGENT_MODEL_PROVIDER=openai",
         ],
         "env/compose.prod.env.example": [
             "APP_ENV=production",
@@ -90,6 +92,7 @@ def _check_environment_profiles(backend: Path) -> list[CheckResult]:
             "AUTH_REQUIRE_ACTIVE_SESSION=true",
             "METRICS_REQUIRE_SERVICE_KEY=true",
             "OUTBOX_WORKER_ENABLED=true",
+            "AGENT_MODEL_PROVIDER=openai",
         ],
     }
     results: list[CheckResult] = []

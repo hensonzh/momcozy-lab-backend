@@ -57,10 +57,26 @@ class SdkRunnerBackend(Protocol):
 
 
 class OpenAIAgentsSdkBackend:
-    def __init__(self, *, model: str, max_turns: int = 10, trace_enabled: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        model: str,
+        max_turns: int = 10,
+        trace_enabled: bool = False,
+        provider: str = "openai",
+        api_key: str = "",
+        base_url: str = "",
+        use_responses: bool | None = None,
+        buffer_streamed_tool_calls: bool = False,
+    ) -> None:
         self.model = model
         self.max_turns = max_turns
         self.trace_enabled = trace_enabled
+        self.provider = provider
+        self.api_key = api_key
+        self.base_url = base_url
+        self.use_responses = use_responses
+        self.buffer_streamed_tool_calls = buffer_streamed_tool_calls
 
     async def run(self, request: SdkNodeRequest) -> SdkNodeResult:
         try:
@@ -72,8 +88,12 @@ class OpenAIAgentsSdkBackend:
         runner_cls = getattr(agents_module, "Runner", None)
         if agent_cls is None or runner_cls is None:
             raise ApiError(code="dependency_not_configured", message="OpenAI Agents SDK Agent/Runner is unavailable.", status=503)
-        if _is_real_agents_module(agents_module) and not _has_openai_credentials():
-            raise ApiError(code="dependency_not_configured", message="OpenAI Agents SDK credentials are not configured.", status=503)
+        if _is_real_agents_module(agents_module) and not _has_provider_credentials(provider=self.provider, api_key=self.api_key):
+            raise ApiError(
+                code="dependency_not_configured",
+                message=f"OpenAI Agents SDK credentials are not configured for provider '{self.provider}'.",
+                status=503,
+            )
 
         agent = agent_cls(
             name="MomCozy assistant",
@@ -82,7 +102,16 @@ class OpenAIAgentsSdkBackend:
             tools=[_build_function_tool(agents_module=agents_module, definition=definition) for definition in request.tools],
         )
         run_kwargs: dict[str, Any] = {"max_turns": self.max_turns}
-        run_config = _build_run_config(agents_module=agents_module, request=request, trace_enabled=self.trace_enabled)
+        run_config = _build_run_config(
+            agents_module=agents_module,
+            request=request,
+            trace_enabled=self.trace_enabled,
+            provider=self.provider,
+            api_key=self.api_key,
+            base_url=self.base_url,
+            use_responses=self.use_responses,
+            buffer_streamed_tool_calls=self.buffer_streamed_tool_calls,
+        )
         if run_config is not None:
             run_kwargs["run_config"] = run_config
         if request.on_text_delta is not None and hasattr(runner_cls, "run_streamed"):
@@ -110,6 +139,11 @@ class OpenAIAgentsSdkRunner:
         max_turns: int = 10,
         timeout_seconds: float = 60,
         trace_enabled: bool = False,
+        provider: str = "openai",
+        api_key: str = "",
+        base_url: str = "",
+        use_responses: bool | None = None,
+        buffer_streamed_tool_calls: bool = False,
     ) -> None:
         self.backend = backend
         self.metrics = metrics
@@ -117,6 +151,11 @@ class OpenAIAgentsSdkRunner:
         self.max_turns = max_turns
         self.timeout_seconds = timeout_seconds
         self.trace_enabled = trace_enabled
+        self.provider = provider
+        self.api_key = api_key
+        self.base_url = base_url
+        self.use_responses = use_responses
+        self.buffer_streamed_tool_calls = buffer_streamed_tool_calls
 
     async def run_reasoning(self, request: SdkNodeRequest) -> SdkNodeResult:
         started_at = perf_counter()
@@ -125,6 +164,11 @@ class OpenAIAgentsSdkRunner:
                 model=self.model,
                 max_turns=self.max_turns,
                 trace_enabled=self.trace_enabled,
+                provider=self.provider,
+                api_key=self.api_key,
+                base_url=self.base_url,
+                use_responses=self.use_responses,
+                buffer_streamed_tool_calls=self.buffer_streamed_tool_calls,
             )
             result = await asyncio.wait_for(backend.run(request), timeout=self.timeout_seconds)
             self._record(outcome="completed", error_code="", started_at=started_at)
@@ -226,34 +270,119 @@ def _build_function_tool(*, agents_module: Any, definition: SdkToolDefinition) -
     )
 
 
-def _build_run_config(*, agents_module: Any, request: SdkNodeRequest, trace_enabled: bool) -> Any | None:
+def _build_run_config(
+    *,
+    agents_module: Any,
+    request: SdkNodeRequest,
+    trace_enabled: bool,
+    provider: str,
+    api_key: str,
+    base_url: str,
+    use_responses: bool | None,
+    buffer_streamed_tool_calls: bool,
+) -> Any | None:
     run_config_cls = getattr(agents_module, "RunConfig", None)
     if run_config_cls is None:
         return None
+    model_provider = _build_model_provider(
+        agents_module=agents_module,
+        provider=provider,
+        api_key=api_key,
+        base_url=base_url,
+        use_responses=use_responses,
+        buffer_streamed_tool_calls=buffer_streamed_tool_calls,
+    )
+    if provider != "openai" and model_provider is None:
+        raise ApiError(
+            code="sdk_provider_not_supported",
+            message=f"OpenAI Agents SDK provider '{provider}' is not supported by the installed SDK.",
+            status=503,
+        )
     try:
-        return run_config_cls(
-            tracing_disabled=not trace_enabled,
-            trace_id=request.trace_id or None,
-            group_id=request.thread_id or None,
-            workflow_name="MomCozy agent runtime",
-            trace_metadata={
+        kwargs: dict[str, Any] = {
+            "tracing_disabled": not trace_enabled,
+            "trace_id": request.trace_id or None,
+            "group_id": request.thread_id or None,
+            "workflow_name": "MomCozy agent runtime",
+            "trace_metadata": {
                 "run_id": request.run_id,
                 "thread_id": request.thread_id,
                 "actor_user_id": request.actor_user_id,
                 "prompt_version": request.prompt_version,
                 "specialist_id": request.specialist_id,
                 "tool_names": list(request.tool_names),
+                "model_provider": provider,
+            },
+        }
+        if model_provider is not None:
+            kwargs["model_provider"] = model_provider
+        return run_config_cls(**kwargs)
+    except TypeError as exc:
+        if provider != "openai":
+            raise ApiError(
+                code="sdk_provider_not_supported",
+                message=f"OpenAI Agents SDK RunConfig does not support provider '{provider}'.",
+                status=503,
+            ) from exc
+        return None
+
+
+def _build_model_provider(
+    *,
+    agents_module: Any,
+    provider: str,
+    api_key: str,
+    base_url: str,
+    use_responses: bool | None,
+    buffer_streamed_tool_calls: bool,
+) -> Any | None:
+    openai_provider_cls = getattr(agents_module, "OpenAIProvider", None)
+    if openai_provider_cls is None:
+        return None
+    if provider == "openai":
+        return _instantiate_openai_provider(
+            openai_provider_cls,
+            {
+                "api_key": api_key or None,
+                "base_url": base_url or None,
+                "use_responses": use_responses,
+                "buffer_streamed_tool_calls": buffer_streamed_tool_calls,
             },
         )
+    if provider == "minimax":
+        return _instantiate_openai_provider(
+            openai_provider_cls,
+            {
+                "api_key": api_key or None,
+                "base_url": base_url or None,
+                "use_responses": False if use_responses is None else use_responses,
+                "strict_feature_validation": False,
+                "buffer_streamed_tool_calls": True if not buffer_streamed_tool_calls else buffer_streamed_tool_calls,
+            },
+        )
+    return None
+
+
+def _instantiate_openai_provider(openai_provider_cls: Any, kwargs: dict[str, Any]) -> Any | None:
+    try:
+        return openai_provider_cls(**kwargs)
     except TypeError:
-        return None
+        compatible_kwargs = {key: value for key, value in kwargs.items() if key in {"api_key", "base_url", "use_responses"}}
+        try:
+            return openai_provider_cls(**compatible_kwargs)
+        except TypeError:
+            return None
 
 
 def _is_real_agents_module(agents_module: Any) -> bool:
     return bool(getattr(agents_module, "__file__", ""))
 
 
-def _has_openai_credentials() -> bool:
+def _has_provider_credentials(*, provider: str, api_key: str) -> bool:
+    if api_key:
+        return True
+    if provider == "minimax":
+        return bool(os.getenv("MINIMAX_API_KEY"))
     return bool(os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_ADMIN_KEY"))
 
 

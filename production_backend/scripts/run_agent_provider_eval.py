@@ -15,6 +15,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from production_backend.app.core.errors import ApiError  # noqa: E402
+from production_backend.app.core.settings import SUPPORTED_AGENT_MODEL_PROVIDERS, Settings  # noqa: E402
 from production_backend.app.modules.agent_runtime.evals.service import (  # noqa: E402
     AgentEvalFailure,
     AgentEvalRunResult,
@@ -30,6 +31,7 @@ from production_backend.app.modules.agent_runtime.sdk import (  # noqa: E402
     OpenAIAgentsSdkRunner,
     SdkNodeRequest,
     SdkToolDefinition,
+    create_agent_sdk_runner,
     default_specialist_registry,
     sdk_tool_name,
 )
@@ -52,19 +54,32 @@ def run_provider_eval(
     sdk_runner: OpenAIAgentsSdkRunner | None = None,
 ) -> dict[str, Any]:
     cases = _select_cases(load_product_agent_eval_seed_cases(cases_path), suite=suite, name=name, max_cases=max_cases)
-    if sdk_runner is None and not _has_openai_credentials():
+    settings = Settings.from_env()
+    provider = sdk_runner.provider if sdk_runner is not None else settings.agent_model_provider
+    model = sdk_runner.model if sdk_runner is not None else _provider_model(settings)
+    if provider not in SUPPORTED_AGENT_MODEL_PROVIDERS:
+        raise SystemExit(f"Unsupported AGENT_MODEL_PROVIDER: {provider}.")
+    if sdk_runner is None and not _has_provider_credentials(settings):
         if not allow_skip_without_credentials:
-            raise SystemExit("OPENAI_API_KEY or OPENAI_ADMIN_KEY is required for provider-backed eval.")
+            raise SystemExit(f"Credentials are required for provider-backed eval: {provider}.")
         report = _report(
             [_skipped_case_result(case, reason="missing_provider_credentials") for case in cases],
             max_cases=max_cases,
             cost_budget_usd=cost_budget_usd,
+            provider=provider,
+            model=model,
         )
         _write_report(report=report, output_path=output_path)
         return report
 
-    runner = sdk_runner or OpenAIAgentsSdkRunner(trace_enabled=False)
-    report = _report(asyncio.run(_run_cases(cases=cases, sdk_runner=runner)), max_cases=max_cases, cost_budget_usd=cost_budget_usd)
+    runner = sdk_runner or create_agent_sdk_runner(settings=settings, trace_enabled=False)
+    report = _report(
+        asyncio.run(_run_cases(cases=cases, sdk_runner=runner)),
+        max_cases=max_cases,
+        cost_budget_usd=cost_budget_usd,
+        provider=provider,
+        model=model,
+    )
     _write_report(report=report, output_path=output_path)
     return report
 
@@ -292,12 +307,21 @@ def _result_payload(result: AgentEvalRunResult) -> dict[str, Any]:
     }
 
 
-def _report(results: list[dict[str, Any]], *, max_cases: int | None, cost_budget_usd: str) -> dict[str, Any]:
+def _report(
+    results: list[dict[str, Any]],
+    *,
+    max_cases: int | None,
+    cost_budget_usd: str,
+    provider: str,
+    model: str,
+) -> dict[str, Any]:
     return {
         "total": len(results),
         "passed": sum(1 for result in results if result["status"] == "passed"),
         "failed": sum(1 for result in results if result["status"] == "failed"),
         "skipped": sum(1 for result in results if result["status"] == "skipped"),
+        "provider": provider,
+        "model": model,
         "budget": {
             "max_cases": max_cases,
             "cost_budget_usd": cost_budget_usd,
@@ -360,8 +384,16 @@ def _eval_uuid(case: dict[str, Any], prefix: str) -> UUID:
     return uuid5(NAMESPACE_URL, _eval_id(case, prefix))
 
 
-def _has_openai_credentials() -> bool:
-    return bool(os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_ADMIN_KEY"))
+def _has_provider_credentials(settings: Settings) -> bool:
+    if settings.agent_model_provider == "minimax":
+        return bool(settings.minimax_api_key)
+    return bool(settings.openai_api_key or os.getenv("OPENAI_ADMIN_KEY"))
+
+
+def _provider_model(settings: Settings) -> str:
+    if settings.agent_model_provider == "minimax":
+        return str(settings.minimax_model)
+    return str(settings.openai_model)
 
 
 def _env_int(name: str) -> int | None:

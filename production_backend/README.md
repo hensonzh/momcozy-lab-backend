@@ -79,8 +79,24 @@ restarted or scaled independently.
 `agent-worker` remains safe by default because `AGENT_RUNTIME_WORKER_ENABLED=false`
 in `env/compose.local.env.example`. Enable it in your private
 `env/compose.local.env` when the LangGraph / OpenAI Agents SDK runtime handler is
-configured. `OPENAI_API_KEY` must be set when this worker is enabled, and
+configured. `AGENT_MODEL_PROVIDER=openai` is the default. When the worker is
+enabled with the default provider, `OPENAI_API_KEY` must be set and
 `OPENAI_MODEL` controls the SDK agent model.
+
+Minimax is available as an experimental OpenAI-compatible provider. To test it,
+set these values in a private env file and run the provider eval before using it
+for production traffic:
+
+```env
+AGENT_MODEL_PROVIDER=minimax
+MINIMAX_API_KEY=...
+MINIMAX_BASE_URL=https://api.minimax.io/v1
+MINIMAX_MODEL=MiniMax-M3
+```
+
+The Minimax path uses the OpenAI Agents SDK with an OpenAI-compatible provider
+base URL and currently pins the SDK model path to Chat Completions compatibility
+for tool calling and streaming validation.
 
 Voice endpoints are exposed in the production contract, but speech provider
 integration is disabled by default. Keep `VOICE_PROVIDER=disabled` until a
@@ -101,6 +117,7 @@ agent behavior:
 ```env
 AGENT_RUNTIME_WORKER_ENABLED=true
 OUTBOX_WORKER_ENABLED=true
+AGENT_MODEL_PROVIDER=openai
 OPENAI_API_KEY=...
 OPENAI_MODEL=...
 ```

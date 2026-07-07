@@ -100,8 +100,12 @@ def test_compose_env_declares_disabled_agent_worker_controls() -> None:
     assert "AGENT_RUNTIME_WORKER_BATCH_LIMIT=10" in env
     assert "AGENT_RUNTIME_WORKER_IDLE_SECONDS=2" in env
     assert "AGENT_RUNTIME_RECOVER_RUNNING_OLDER_THAN_SECONDS=900" in env
+    assert "AGENT_MODEL_PROVIDER=openai" in env
     assert "OPENAI_API_KEY=" in env
     assert "OPENAI_MODEL=gpt-5.5" in env
+    assert "MINIMAX_API_KEY=" in env
+    assert "MINIMAX_BASE_URL=https://api.minimax.io/v1" in env
+    assert "MINIMAX_MODEL=MiniMax-M3" in env
     assert "VOICE_PROVIDER=disabled" in env
     assert "VISION_PROVIDER=disabled" in env
 

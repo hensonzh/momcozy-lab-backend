@@ -16,6 +16,7 @@ PRODUCTION_ENVS = {"prod", "production"}
 SUPPORTED_AUTH_JWT_ALGORITHMS = {"HS256"}
 SUPPORTED_VOICE_PROVIDERS = {"disabled", "local_stub"}
 SUPPORTED_VISION_PROVIDERS = {"disabled", "local_stub"}
+SUPPORTED_AGENT_MODEL_PROVIDERS = {"openai", "minimax"}
 
 
 @dataclass(frozen=True)
@@ -60,8 +61,12 @@ class Settings:
     outbox_worker_enabled: bool = False
     outbox_worker_idle_seconds: int = 2
     outbox_worker_lease_seconds: int = 60
+    agent_model_provider: str = "openai"
     openai_api_key: str = ""
     openai_model: str = "gpt-5.5"
+    minimax_api_key: str = ""
+    minimax_base_url: str = "https://api.minimax.io/v1"
+    minimax_model: str = "MiniMax-M3"
     openai_agent_max_turns: int = 10
     openai_agent_timeout_seconds: int = 60
     openai_agent_trace_enabled: bool = False
@@ -119,8 +124,12 @@ class Settings:
             outbox_worker_enabled=_env_bool("OUTBOX_WORKER_ENABLED", cls.outbox_worker_enabled),
             outbox_worker_idle_seconds=_env_int("OUTBOX_WORKER_IDLE_SECONDS", cls.outbox_worker_idle_seconds),
             outbox_worker_lease_seconds=_env_int("OUTBOX_WORKER_LEASE_SECONDS", cls.outbox_worker_lease_seconds),
+            agent_model_provider=_env("AGENT_MODEL_PROVIDER", cls.agent_model_provider).lower(),
             openai_api_key=_env("OPENAI_API_KEY", cls.openai_api_key),
             openai_model=_env("OPENAI_MODEL", cls.openai_model),
+            minimax_api_key=_env("MINIMAX_API_KEY", cls.minimax_api_key),
+            minimax_base_url=_env("MINIMAX_BASE_URL", cls.minimax_base_url),
+            minimax_model=_env("MINIMAX_MODEL", cls.minimax_model),
             openai_agent_max_turns=_env_int("OPENAI_AGENT_MAX_TURNS", cls.openai_agent_max_turns),
             openai_agent_timeout_seconds=_env_int("OPENAI_AGENT_TIMEOUT_SECONDS", cls.openai_agent_timeout_seconds),
             openai_agent_trace_enabled=_env_bool("OPENAI_AGENT_TRACE_ENABLED", cls.openai_agent_trace_enabled),
@@ -172,10 +181,20 @@ class Settings:
             errors.append("RATE_LIMIT_WINDOW_SECONDS must be positive")
         if self.metrics_require_service_key and not self.service_api_key:
             errors.append("SERVICE_API_KEY is required when METRICS_REQUIRE_SERVICE_KEY is true")
-        if self.agent_runtime_worker_enabled and not self.openai_api_key:
-            errors.append("OPENAI_API_KEY is required when AGENT_RUNTIME_WORKER_ENABLED is true")
-        if not self.openai_model:
-            errors.append("OPENAI_MODEL is required")
+        if self.agent_model_provider not in SUPPORTED_AGENT_MODEL_PROVIDERS:
+            errors.append(f"AGENT_MODEL_PROVIDER must be one of {', '.join(sorted(SUPPORTED_AGENT_MODEL_PROVIDERS))}")
+        if self.agent_model_provider == "openai":
+            if self.agent_runtime_worker_enabled and not self.openai_api_key:
+                errors.append("OPENAI_API_KEY is required when AGENT_RUNTIME_WORKER_ENABLED is true and AGENT_MODEL_PROVIDER=openai")
+            if not self.openai_model:
+                errors.append("OPENAI_MODEL is required when AGENT_MODEL_PROVIDER=openai")
+        if self.agent_model_provider == "minimax":
+            if self.agent_runtime_worker_enabled and not self.minimax_api_key:
+                errors.append("MINIMAX_API_KEY is required when AGENT_RUNTIME_WORKER_ENABLED is true and AGENT_MODEL_PROVIDER=minimax")
+            if not self.minimax_base_url:
+                errors.append("MINIMAX_BASE_URL is required when AGENT_MODEL_PROVIDER=minimax")
+            if not self.minimax_model:
+                errors.append("MINIMAX_MODEL is required when AGENT_MODEL_PROVIDER=minimax")
         if self.openai_agent_max_turns < 1:
             errors.append("OPENAI_AGENT_MAX_TURNS must be positive")
         if self.openai_agent_timeout_seconds < 1:

@@ -18,8 +18,12 @@ jobs:
   provider-eval:
     runs-on: ubuntu-latest
     env:
+      AGENT_MODEL_PROVIDER: ${{ vars.AGENT_MODEL_PROVIDER || 'openai' }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-5.5' }}
+      MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+      MINIMAX_BASE_URL: ${{ vars.MINIMAX_BASE_URL || 'https://api.minimax.io/v1' }}
+      MINIMAX_MODEL: ${{ vars.MINIMAX_MODEL || 'MiniMax-M3' }}
       AGENT_PROVIDER_EVAL_MAX_CASES: ${{ vars.AGENT_PROVIDER_EVAL_MAX_CASES || '8' }}
       AGENT_PROVIDER_EVAL_COST_BUDGET_USD: ${{ vars.AGENT_PROVIDER_EVAL_COST_BUDGET_USD || '5.00' }}
       APP_ENV: test
