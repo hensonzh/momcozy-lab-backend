@@ -53,6 +53,81 @@ def test_signup_rejects_duplicate_email() -> None:
         asyncio.run(service.signup(email="test@example.com", password="secret123"))
 
 
+def test_invite_login_creates_invite_identity_and_issues_tokens() -> None:
+    account_repository = FakeAccountRepository()
+    session_service = FakeSessionService()
+    service = AuthAccountService(
+        account_repository=account_repository,
+        session_service=session_service,
+        settings=_settings(auth_invite_codes=("MOMCOZY-BETA",)),
+    )
+
+    issued = asyncio.run(
+        service.invite_login(
+            invite_code=" momcozy-beta ",
+            device_context=DeviceContext(device_id=" flutter-device-001 ", user_agent="agent", ip_address="127.0.0.1"),
+        )
+    )
+
+    assert account_repository.created_identity.provider == "invite"
+    assert account_repository.created_identity.subject == "MOMCOZY-BETA:flutter-device-001"
+    assert account_repository.created_identity.email == ""
+    assert account_repository.created_identity.password_hash == ""
+    assert session_service.created_user_id == account_repository.created_user.id
+    assert issued.user.display_name == "Momcozy 体验用户"
+    assert issued.access_token
+    assert issued.refresh_token == "refresh-token"
+
+
+def test_invite_login_reuses_existing_invite_identity() -> None:
+    user = User(id=uuid4(), display_name="Invite User", status="active")
+    identity = AuthIdentity(
+        user_id=user.id,
+        user=user,
+        provider="invite",
+        subject="MOMCOZY-BETA:flutter-device-001",
+    )
+    account_repository = FakeAccountRepository(existing_identity=identity)
+    session_service = FakeSessionService()
+    service = AuthAccountService(
+        account_repository=account_repository,
+        session_service=session_service,
+        settings=_settings(auth_invite_codes=("MOMCOZY-BETA",)),
+    )
+
+    issued = asyncio.run(
+        service.invite_login(
+            invite_code="MOMCOZY-BETA",
+            device_context=DeviceContext(device_id="flutter-device-001"),
+        )
+    )
+
+    assert account_repository.created_identity is None
+    assert issued.user.id == user.id
+    assert session_service.created_user_id == user.id
+
+
+def test_invite_login_rejects_invalid_code_without_creating_session() -> None:
+    account_repository = FakeAccountRepository()
+    session_service = FakeSessionService()
+    service = AuthAccountService(
+        account_repository=account_repository,
+        session_service=session_service,
+        settings=_settings(auth_invite_codes=("MOMCOZY-BETA",)),
+    )
+
+    with pytest.raises(ApiError, match="Invite code is invalid"):
+        asyncio.run(
+            service.invite_login(
+                invite_code="WRONG-CODE",
+                device_context=DeviceContext(device_id="flutter-device-001"),
+            )
+        )
+
+    assert account_repository.created_identity is None
+    assert session_service.created_user_id is None
+
+
 def test_login_rejects_invalid_password_without_creating_session() -> None:
     user = User(id=uuid4(), display_name="Test", status="active")
     identity = AuthIdentity(
@@ -92,12 +167,13 @@ def test_refresh_rotates_token_and_issues_access_for_session_user() -> None:
     assert issued.refresh_token == "rotated-refresh-token"
 
 
-def _settings() -> Settings:
+def _settings(*, auth_invite_codes: tuple[str, ...] = ("MOMCOZY-BETA",)) -> Settings:
     return Settings(
         app_env="test",
         auth_jwt_secret="test-secret-value-with-at-least-32-bytes",
         auth_jwt_issuer="momcozy-test",
         auth_jwt_audience="momcozy-app",
+        auth_invite_codes=auth_invite_codes,
     )
 
 
@@ -127,6 +203,18 @@ class FakeAccountRepository:
             subject=email,
             email=email,
             password_hash=password_hash,
+        )
+        return self.created_user, self.created_identity
+
+    async def create_invite_user(self, *, invite_code: str, device_id: str, display_name: str):
+        self.created_user = User(id=uuid4(), display_name=display_name, status="active")
+        self.created_identity = AuthIdentity(
+            user_id=self.created_user.id,
+            user=self.created_user,
+            provider="invite",
+            subject=f"{invite_code}:{device_id}",
+            email="",
+            password_hash="",
         )
         return self.created_user, self.created_identity
 

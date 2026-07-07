@@ -41,6 +41,20 @@ class AuthAccountRepository:
         await self.session.flush()
         return user, identity
 
+    async def create_invite_user(self, *, invite_code: str, device_id: str, display_name: str) -> tuple[User, AuthIdentity]:
+        user = User(display_name=display_name)
+        identity = AuthIdentity(
+            user=user,
+            provider="invite",
+            subject=f"{invite_code}:{device_id}",
+            email="",
+            password_hash="",
+        )
+        self.session.add(user)
+        self.session.add(identity)
+        await self.session.flush()
+        return user, identity
+
 
 class AuthSessionRepository:
     def __init__(self, session: AsyncSession) -> None:

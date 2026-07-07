@@ -12,7 +12,7 @@ from ...infrastructure.db.session import get_session
 from .account_service import AuthAccountService, DeviceContext, IssuedTokenPair
 from .current_user import CurrentUser
 from .repository import AuthAccountRepository, AuthSessionRepository
-from .schemas import LoginRequest, LogoutResponse, RefreshRequest, SignupRequest, TokenResponse, TokenUser
+from .schemas import InviteLoginRequest, LoginRequest, LogoutResponse, RefreshRequest, SignupRequest, TokenResponse, TokenUser
 from .service import AuthSessionService
 
 
@@ -55,6 +55,19 @@ async def login(
     issued = await service.login(
         email=body.email,
         password=body.password,
+        device_context=_device_context(request=request, device_id=body.device_id),
+    )
+    return _token_response(issued)
+
+
+@router.post("/invite-login", response_model=TokenResponse)
+async def invite_login(
+    body: InviteLoginRequest,
+    request: Request,
+    service: AuthAccountService = Depends(get_auth_account_service),
+) -> TokenResponse:
+    issued = await service.invite_login(
+        invite_code=body.invite_code,
         device_context=_device_context(request=request, device_id=body.device_id),
     )
     return _token_response(issued)

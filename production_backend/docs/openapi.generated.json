@@ -1563,6 +1563,28 @@
         "title": "InfantProfileRead",
         "type": "object"
       },
+      "InviteLoginRequest": {
+        "properties": {
+          "device_id": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Device Id",
+            "type": "string"
+          },
+          "invite_code": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Invite Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "invite_code",
+          "device_id"
+        ],
+        "title": "InviteLoginRequest",
+        "type": "object"
+      },
       "LoginRequest": {
         "properties": {
           "device_id": {
@@ -5057,6 +5079,53 @@
           "flutter"
         ],
         "x-momcozy-owner": "product-assets",
+        "x-momcozy-stability": "stable"
+      }
+    },
+    "/v1/auth/invite-login": {
+      "post": {
+        "operationId": "invite_login_v1_auth_invite_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InviteLoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Invite Login",
+        "tags": [
+          "auth"
+        ],
+        "x-momcozy-api-surface": "public_app_api",
+        "x-momcozy-client": [
+          "flutter"
+        ],
+        "x-momcozy-owner": "auth",
         "x-momcozy-stability": "stable"
       }
     },

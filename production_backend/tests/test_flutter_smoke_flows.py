@@ -11,6 +11,7 @@ TEMPLATE_VARIABLE_RE = re.compile(r"\$\{([A-Za-z0-9_]+)\}")
 PUBLIC_STEPS = {
     ("POST", "/v1/auth/signup"),
     ("POST", "/v1/auth/login"),
+    ("POST", "/v1/auth/invite-login"),
     ("POST", "/v1/auth/refresh"),
 }
 SENSITIVE_QUERY_NAMES = {"token", "access_token", "refresh_token", "service_key", "api_key"}
@@ -79,11 +80,7 @@ def _openapi_operations_with_header(header_name: str) -> set[tuple[str, str]]:
         for method, operation in path_item.items():
             if method not in {"get", "post", "put", "patch", "delete"}:
                 continue
-            headers = {
-                parameter["name"]
-                for parameter in operation.get("parameters", [])
-                if parameter.get("in") == "header"
-            }
+            headers = {parameter["name"] for parameter in operation.get("parameters", []) if parameter.get("in") == "header"}
             if header_name in headers:
                 operations.add((method.upper(), path))
     return operations

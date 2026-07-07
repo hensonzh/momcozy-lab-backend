@@ -18,6 +18,10 @@ def test_email_auth_main_flow_rotates_refresh_tokens_and_revokes_reuse() -> None
     asyncio.run(_run_email_auth_main_flow())
 
 
+def test_invite_auth_main_flow_reuses_device_identity_and_rotates_refresh() -> None:
+    asyncio.run(_run_invite_auth_main_flow())
+
+
 async def _run_email_auth_main_flow() -> None:
     settings = Settings(
         app_env="test",
@@ -84,6 +88,59 @@ async def _run_email_auth_main_flow() -> None:
     assert login.refresh_token == "refresh-3"
 
 
+async def _run_invite_auth_main_flow() -> None:
+    settings = Settings(
+        app_env="test",
+        auth_jwt_secret="test-secret-value-with-at-least-32-bytes",
+        auth_jwt_issuer="momcozy-test",
+        auth_jwt_audience="momcozy-app",
+        auth_invite_codes=("MOMCOZY-BETA",),
+    )
+    account_repository = InMemoryAuthAccountRepository()
+    session_repository = InMemoryAuthSessionRepository()
+    session_service = AuthSessionService(
+        repository=session_repository,
+        token_factory=TokenFactory(["invite-refresh-1", "invite-refresh-2", "invite-refresh-3"]),
+        clock=_clock,
+    )
+    service = AuthAccountService(
+        account_repository=account_repository,
+        session_service=session_service,
+        settings=settings,
+    )
+
+    first = await service.invite_login(
+        invite_code="momcozy-beta",
+        device_context=DeviceContext(device_id="flutter-device-001", user_agent="MomCozy Android", ip_address="127.0.0.1"),
+    )
+    second = await service.invite_login(
+        invite_code="MOMCOZY-BETA",
+        device_context=DeviceContext(device_id="flutter-device-001", user_agent="MomCozy Android", ip_address="127.0.0.1"),
+    )
+    refreshed = await service.refresh(refresh_token=first.refresh_token)
+    first_access = authenticate_access_token(first.access_token, settings)
+    refreshed_access = authenticate_access_token(refreshed.access_token, settings)
+
+    with pytest.raises(ApiError) as invalid_code:
+        await service.invite_login(
+            invite_code="WRONG-CODE",
+            device_context=DeviceContext(device_id="flutter-device-001"),
+        )
+
+    identity = account_repository.identities[0]
+
+    assert first.user.id == second.user.id
+    assert first.refresh_token == "invite-refresh-1"
+    assert second.refresh_token == "invite-refresh-2"
+    assert refreshed.refresh_token == "invite-refresh-3"
+    assert first_access.user_id == first.user.id
+    assert refreshed_access.user_id == first.user.id
+    assert identity.provider == "invite"
+    assert identity.subject == "MOMCOZY-BETA:flutter-device-001"
+    assert identity.password_hash == ""
+    assert invalid_code.value.code == "authentication_required"
+
+
 def _clock() -> datetime:
     return datetime(2026, 7, 3, tzinfo=timezone.utc)
 
@@ -103,11 +160,7 @@ class InMemoryAuthAccountRepository:
 
     async def get_identity(self, *, provider: str, subject: str):
         return next(
-            (
-                identity
-                for identity in self.identities
-                if identity.provider == provider and identity.subject == subject
-            ),
+            (identity for identity in self.identities if identity.provider == provider and identity.subject == subject),
             None,
         )
 
@@ -124,6 +177,21 @@ class InMemoryAuthAccountRepository:
             subject=email,
             email=email,
             password_hash=password_hash,
+        )
+        self.users[user.id] = user
+        self.identities.append(identity)
+        return user, identity
+
+    async def create_invite_user(self, *, invite_code: str, device_id: str, display_name: str):
+        user = User(id=uuid4(), display_name=display_name, status="active")
+        identity = AuthIdentity(
+            id=uuid4(),
+            user_id=user.id,
+            user=user,
+            provider="invite",
+            subject=f"{invite_code}:{device_id}",
+            email="",
+            password_hash="",
         )
         self.users[user.id] = user
         self.identities.append(identity)

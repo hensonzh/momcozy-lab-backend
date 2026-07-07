@@ -14,6 +14,8 @@ from .service import AuthSessionService, IssuedRefreshToken
 
 
 EMAIL_PROVIDER = "email"
+INVITE_PROVIDER = "invite"
+DEFAULT_INVITE_DISPLAY_NAME = "Momcozy 体验用户"
 
 
 @dataclass(frozen=True)
@@ -81,11 +83,36 @@ class AuthAccountService:
 
         return await self._issue_pair(user=user, device_context=device_context)
 
+    async def invite_login(
+        self,
+        *,
+        invite_code: str,
+        device_context: DeviceContext,
+    ) -> IssuedTokenPair:
+        normalized_code = normalize_invite_code(invite_code)
+        allowed_codes = {_normalize_invite_code_value(code) for code in self.settings.auth_invite_codes}
+        if normalized_code not in allowed_codes:
+            raise ApiError(code="authentication_required", message="Invite code is invalid.", status=401)
+
+        device_id = normalize_invite_device_id(device_context.device_id)
+        subject = invite_subject(invite_code=normalized_code, device_id=device_id)
+        identity = await self.account_repository.get_identity(provider=INVITE_PROVIDER, subject=subject)
+        if identity is None:
+            user, _identity = await self.account_repository.create_invite_user(
+                invite_code=normalized_code,
+                device_id=device_id,
+                display_name=DEFAULT_INVITE_DISPLAY_NAME,
+            )
+        else:
+            user = identity.user or await self.account_repository.get_user(user_id=identity.user_id)
+            if user is None or user.status != "active":
+                raise ApiError(code="permission_denied", message="User account is not active.", status=403)
+
+        return await self._issue_pair(user=user, device_context=device_context)
+
     async def refresh(self, *, refresh_token: str) -> IssuedTokenPair:
         issued_refresh = await self.session_service.rotate_refresh_token(raw_token=refresh_token)
-        device_session = await self.session_service.repository.get_device_session(
-            session_id=issued_refresh.record.session_id
-        )
+        device_session = await self.session_service.repository.get_device_session(session_id=issued_refresh.record.session_id)
         if device_session is None or device_session.status != "active":
             raise ApiError(code="authentication_required", message="Session is no longer active.", status=401)
         user = await self.account_repository.get_user(user_id=device_session.user_id)
@@ -130,6 +157,28 @@ def normalize_email(email: str) -> str:
     if "@" not in normalized or normalized.startswith("@") or normalized.endswith("@"):
         raise ApiError(code="validation_failed", message="Email is invalid.", status=422)
     return normalized
+
+
+def normalize_invite_code(invite_code: str) -> str:
+    normalized = _normalize_invite_code_value(invite_code)
+    if not normalized:
+        raise ApiError(code="validation_failed", message="Invite code is required.", status=422)
+    return normalized
+
+
+def normalize_invite_device_id(device_id: str) -> str:
+    normalized = str(device_id or "").strip()
+    if not normalized:
+        raise ApiError(code="validation_failed", message="Device id is required.", status=422)
+    return normalized
+
+
+def invite_subject(*, invite_code: str, device_id: str) -> str:
+    return f"{invite_code}:{device_id}"
+
+
+def _normalize_invite_code_value(invite_code: str) -> str:
+    return str(invite_code or "").strip().upper()
 
 
 def _sha256(value: str) -> str:

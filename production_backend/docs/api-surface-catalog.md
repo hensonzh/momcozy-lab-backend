@@ -34,6 +34,7 @@ The source of truth is each FastAPI route's OpenAPI extension metadata.
 | GET | `/v1/agent/threads/{thread_id}` | agent-runtime | flutter | stable | Get Thread |
 | GET | `/v1/assets` | product-assets | flutter | stable | List Product Assets |
 | GET | `/v1/assets/{asset_id}` | product-assets | flutter | stable | Get Product Asset |
+| POST | `/v1/auth/invite-login` | auth | flutter | stable | Invite Login |
 | POST | `/v1/auth/login` | auth | flutter | stable | Login |
 | POST | `/v1/auth/logout` | auth | flutter | stable | Logout |
 | POST | `/v1/auth/refresh` | auth | flutter | stable | Refresh |

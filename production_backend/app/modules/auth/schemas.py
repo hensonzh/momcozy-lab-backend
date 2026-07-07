@@ -16,6 +16,11 @@ class LoginRequest(BaseModel):
     device_id: str = Field(default="", max_length=120)
 
 
+class InviteLoginRequest(BaseModel):
+    invite_code: str = Field(min_length=1, max_length=120)
+    device_id: str = Field(min_length=1, max_length=120)
+
+
 class RefreshRequest(BaseModel):
     refresh_token: str = Field(min_length=1, max_length=512)
 

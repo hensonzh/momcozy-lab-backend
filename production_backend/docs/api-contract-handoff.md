@@ -34,6 +34,7 @@ Update flow for API changes:
 
 ## Auth
 
+- `POST /v1/auth/invite-login`
 - `POST /v1/auth/signup`
 - `POST /v1/auth/login`
 - `POST /v1/auth/refresh`
@@ -41,6 +42,9 @@ Update flow for API changes:
 
 Clients use `Authorization: Bearer <access_token>` for user-facing APIs.
 Refresh tokens are opaque and only sent in request bodies to `/auth/refresh`.
+Invite-login is a beta-access path: the mobile app sends a configured invite
+code plus its stable device id, and the backend issues the same access/refresh
+token pair contract as signup/login.
 Service-to-service callers use `X-Service-Key`; this is not a user token and
 must not be used by mobile clients.
 
