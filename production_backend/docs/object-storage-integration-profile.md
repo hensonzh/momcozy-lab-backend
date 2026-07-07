@@ -35,6 +35,10 @@ the API and workers start:
 make backend-local-up
 ```
 
+The command builds the current local backend images before creating or
+recreating runtime containers, so object-storage and migration code changes are
+picked up on each startup.
+
 Containerized API and worker processes use the Compose service hostname:
 
 ```env

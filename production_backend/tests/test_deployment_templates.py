@@ -67,9 +67,13 @@ def test_makefile_infra_checks_use_project_python_environment() -> None:
     assert "COMPOSE_ENV_FILE_FOR_COMPOSE = $(patsubst production_backend/%,%,$(COMPOSE_ENV_FILE))" in makefile
     assert "docker-compose.local.yml" in makefile
     assert "PYTHON ?= production_backend/.venv/bin/python" in makefile
+    assert "BACKEND_BUILD_FLAGS ?=" in makefile
+    assert "backend-build:" in makefile
+    assert "$(COMPOSE) --profile tools --profile workers build $(BACKEND_BUILD_FLAGS) migrate api agent-worker outbox-worker" in makefile
+    assert "$(MAKE) backend-build COMPOSE_ENV_FILE=$(COMPOSE_ENV_FILE)" in makefile
     assert "$(COMPOSE) up -d postgres redis minio minio-init" in makefile
     assert "$(COMPOSE) --profile tools run --rm migrate" in makefile
-    assert "$(COMPOSE) --profile workers up -d api agent-worker outbox-worker" in makefile
+    assert "$(COMPOSE) --profile workers up -d --force-recreate api agent-worker outbox-worker" in makefile
     assert "$(PYTHON) production_backend/scripts/check_database_profile.py" in makefile
     assert "$(PYTHON) production_backend/scripts/check_redis_runtime_controls.py" in makefile
     assert "$(PYTHON) production_backend/scripts/check_object_storage_profile.py" in makefile
@@ -233,11 +237,12 @@ def test_makefile_exposes_production_compose_release_targets() -> None:
     assert "PROD_COMPOSE_ENV_FILE ?= production_backend/env/compose.prod.env" in makefile
     assert "docker-compose.prod.yml" in makefile
     assert "backend-prod-build:" in makefile
-    assert "$(PROD_COMPOSE) build api agent-worker outbox-worker" in makefile
+    assert "$(PROD_COMPOSE) --profile tools --profile workers build $(BACKEND_BUILD_FLAGS) migrate api agent-worker outbox-worker" in makefile
     assert "backend-prod-migrate:" in makefile
+    assert "$(PROD_COMPOSE) --profile tools build $(BACKEND_BUILD_FLAGS) migrate" in makefile
     assert "$(PROD_COMPOSE) --profile tools run --rm migrate" in makefile
     assert "backend-prod-up:" in makefile
-    assert "$(PROD_COMPOSE) up -d api agent-worker outbox-worker" in makefile
+    assert "$(PROD_COMPOSE) up -d --force-recreate api agent-worker outbox-worker" in makefile
     assert "backend-prod-services:" in makefile
     assert "backend-prod-logs:" in makefile
 
@@ -248,11 +253,13 @@ def test_makefile_exposes_server_test_compose_targets() -> None:
     assert "TEST_COMPOSE_ENV_FILE ?= production_backend/env/compose.test.env" in makefile
     assert "docker-compose.test.yml" in makefile
     assert "backend-test-build:" in makefile
-    assert "$(TEST_COMPOSE) build api agent-worker outbox-worker" in makefile
+    assert "$(TEST_COMPOSE) --profile tools --profile workers build $(BACKEND_BUILD_FLAGS) migrate api agent-worker outbox-worker" in makefile
     assert "backend-test-migrate:" in makefile
+    assert "$(TEST_COMPOSE) --profile tools build $(BACKEND_BUILD_FLAGS) migrate" in makefile
     assert "$(TEST_COMPOSE) --profile tools run --rm migrate" in makefile
     assert "backend-test-up:" in makefile
+    assert "$(MAKE) backend-test-build TEST_COMPOSE_ENV_FILE=$(TEST_COMPOSE_ENV_FILE)" in makefile
     assert "$(TEST_COMPOSE) up -d postgres redis minio minio-init" in makefile
-    assert "$(TEST_COMPOSE) up -d api agent-worker outbox-worker" in makefile
+    assert "$(TEST_COMPOSE) up -d --force-recreate api agent-worker outbox-worker" in makefile
     assert "backend-test-services:" in makefile
     assert "backend-test-logs:" in makefile

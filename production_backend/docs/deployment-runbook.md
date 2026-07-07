@@ -89,6 +89,11 @@ services:
 make backend-prod-up
 ```
 
+`backend-prod-up` builds the local `migrate`, `api`, `agent-worker`, and
+`outbox-worker` images before running migrations and recreating runtime
+containers. Add `BACKEND_BUILD_FLAGS=--no-cache` when the server should ignore
+Docker cache completely.
+
 For restarts that should not run migrations again:
 
 ```bash
@@ -165,6 +170,9 @@ Start the full test stack:
 ```bash
 make backend-test-up
 ```
+
+`backend-test-up` follows the same build-before-run rule, but includes
+containerized Postgres, Redis, and MinIO for server-side testing.
 
 Inspect and tail logs:
 

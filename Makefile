@@ -3,6 +3,7 @@ TEST_COMPOSE_ENV_FILE ?= production_backend/env/compose.test.env
 PROD_COMPOSE_ENV_FILE ?= production_backend/env/compose.prod.env
 BACKEND_ENV_FILE ?= $(COMPOSE_ENV_FILE)
 PYTHON ?= production_backend/.venv/bin/python
+BACKEND_BUILD_FLAGS ?=
 COMPOSE_ENV_FILE_FOR_COMPOSE = $(patsubst production_backend/%,%,$(COMPOSE_ENV_FILE))
 COMPOSE = MOMCOZY_BACKEND_ENV_FILE=$(COMPOSE_ENV_FILE_FOR_COMPOSE) docker compose -f production_backend/docker-compose.local.yml
 TEST_COMPOSE_ENV_FILE_FOR_COMPOSE = $(patsubst production_backend/%,%,$(TEST_COMPOSE_ENV_FILE))
@@ -10,15 +11,22 @@ TEST_COMPOSE = MOMCOZY_BACKEND_ENV_FILE=$(TEST_COMPOSE_ENV_FILE_FOR_COMPOSE) doc
 PROD_COMPOSE_ENV_FILE_FOR_COMPOSE = $(patsubst production_backend/%,%,$(PROD_COMPOSE_ENV_FILE))
 PROD_COMPOSE = MOMCOZY_BACKEND_ENV_FILE=$(PROD_COMPOSE_ENV_FILE_FOR_COMPOSE) docker compose -f production_backend/docker-compose.prod.yml
 
-.PHONY: backend-local-up backend-up backend-down backend-local-migrate backend-migrate backend-local-workers backend-workers backend-local-minio backend-test-build backend-test-migrate backend-test-up backend-test-services backend-test-down backend-test-ps backend-test-logs backend-prod-build backend-prod-migrate backend-prod-up backend-prod-services backend-prod-down backend-prod-ps backend-prod-logs backend-export-contracts backend-check-infra backend-productization-status backend-smoke backend-test-smoke backend-prod-readiness backend-worker-backlog backend-agent-recover-stuck-runs backend-env-print
+.PHONY: backend-local-build backend-build backend-local-up backend-up backend-down backend-local-migrate backend-migrate backend-local-workers backend-workers backend-local-minio backend-test-build backend-test-migrate backend-test-up backend-test-services backend-test-down backend-test-ps backend-test-logs backend-prod-build backend-prod-migrate backend-prod-up backend-prod-services backend-prod-down backend-prod-ps backend-prod-logs backend-export-contracts backend-check-infra backend-productization-status backend-smoke backend-test-smoke backend-prod-readiness backend-worker-backlog backend-agent-recover-stuck-runs backend-env-print
+
+backend-local-build:
+	$(MAKE) backend-build
+
+backend-build:
+	$(COMPOSE) --profile tools --profile workers build $(BACKEND_BUILD_FLAGS) migrate api agent-worker outbox-worker
 
 backend-local-up:
 	$(MAKE) backend-up
 
 backend-up:
+	$(MAKE) backend-build COMPOSE_ENV_FILE=$(COMPOSE_ENV_FILE) BACKEND_BUILD_FLAGS="$(BACKEND_BUILD_FLAGS)"
 	$(COMPOSE) up -d postgres redis minio minio-init
 	$(COMPOSE) --profile tools run --rm migrate
-	$(COMPOSE) --profile workers up -d api agent-worker outbox-worker
+	$(COMPOSE) --profile workers up -d --force-recreate api agent-worker outbox-worker
 
 backend-down:
 	$(COMPOSE) down
@@ -27,30 +35,35 @@ backend-local-migrate:
 	$(MAKE) backend-migrate
 
 backend-migrate:
+	$(COMPOSE) --profile tools build $(BACKEND_BUILD_FLAGS) migrate
 	$(COMPOSE) --profile tools run --rm migrate
 
 backend-local-workers:
 	$(MAKE) backend-workers
 
 backend-workers:
-	$(COMPOSE) --profile workers up -d agent-worker outbox-worker
+	$(COMPOSE) --profile workers build $(BACKEND_BUILD_FLAGS) agent-worker outbox-worker
+	$(COMPOSE) --profile workers up -d --force-recreate agent-worker outbox-worker
 
 backend-local-minio:
 	$(COMPOSE) up -d minio minio-init
 
 backend-test-build:
-	$(TEST_COMPOSE) build api agent-worker outbox-worker
+	$(TEST_COMPOSE) --profile tools --profile workers build $(BACKEND_BUILD_FLAGS) migrate api agent-worker outbox-worker
 
 backend-test-migrate:
+	$(TEST_COMPOSE) --profile tools build $(BACKEND_BUILD_FLAGS) migrate
 	$(TEST_COMPOSE) --profile tools run --rm migrate
 
 backend-test-up:
+	$(MAKE) backend-test-build TEST_COMPOSE_ENV_FILE=$(TEST_COMPOSE_ENV_FILE) BACKEND_BUILD_FLAGS="$(BACKEND_BUILD_FLAGS)"
 	$(TEST_COMPOSE) up -d postgres redis minio minio-init
 	$(MAKE) backend-test-migrate TEST_COMPOSE_ENV_FILE=$(TEST_COMPOSE_ENV_FILE)
-	$(TEST_COMPOSE) up -d api agent-worker outbox-worker
+	$(TEST_COMPOSE) up -d --force-recreate api agent-worker outbox-worker
 
 backend-test-services:
-	$(TEST_COMPOSE) up -d api agent-worker outbox-worker
+	$(TEST_COMPOSE) --profile workers build $(BACKEND_BUILD_FLAGS) api agent-worker outbox-worker
+	$(TEST_COMPOSE) up -d --force-recreate api agent-worker outbox-worker
 
 backend-test-down:
 	$(TEST_COMPOSE) down
@@ -62,17 +75,20 @@ backend-test-logs:
 	$(TEST_COMPOSE) logs -f api agent-worker outbox-worker
 
 backend-prod-build:
-	$(PROD_COMPOSE) build api agent-worker outbox-worker
+	$(PROD_COMPOSE) --profile tools --profile workers build $(BACKEND_BUILD_FLAGS) migrate api agent-worker outbox-worker
 
 backend-prod-migrate:
+	$(PROD_COMPOSE) --profile tools build $(BACKEND_BUILD_FLAGS) migrate
 	$(PROD_COMPOSE) --profile tools run --rm migrate
 
 backend-prod-up:
+	$(MAKE) backend-prod-build PROD_COMPOSE_ENV_FILE=$(PROD_COMPOSE_ENV_FILE) BACKEND_BUILD_FLAGS="$(BACKEND_BUILD_FLAGS)"
 	$(MAKE) backend-prod-migrate PROD_COMPOSE_ENV_FILE=$(PROD_COMPOSE_ENV_FILE)
-	$(PROD_COMPOSE) up -d api agent-worker outbox-worker
+	$(PROD_COMPOSE) up -d --force-recreate api agent-worker outbox-worker
 
 backend-prod-services:
-	$(PROD_COMPOSE) up -d api agent-worker outbox-worker
+	$(PROD_COMPOSE) --profile workers build $(BACKEND_BUILD_FLAGS) api agent-worker outbox-worker
+	$(PROD_COMPOSE) up -d --force-recreate api agent-worker outbox-worker
 
 backend-prod-down:
 	$(PROD_COMPOSE) down
@@ -123,3 +139,4 @@ backend-env-print:
 	@echo "TEST_COMPOSE_ENV_FILE=$(TEST_COMPOSE_ENV_FILE)"
 	@echo "PROD_COMPOSE_ENV_FILE=$(PROD_COMPOSE_ENV_FILE)"
 	@echo "PYTHON=$(PYTHON)"
+	@echo "BACKEND_BUILD_FLAGS=$(BACKEND_BUILD_FLAGS)"

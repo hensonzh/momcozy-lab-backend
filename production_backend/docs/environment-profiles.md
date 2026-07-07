@@ -19,10 +19,13 @@ make backend-local-up
 make backend-check-infra
 ```
 
-`backend-local-up` starts local infrastructure, runs migrations, and starts the
-API plus agent/outbox workers. `backend-local-migrate` and
-`backend-local-workers` remain available for explicit maintenance, retries, and
-debugging.
+`backend-local-up` first builds `migrate`, `api`, `agent-worker`, and
+`outbox-worker` from the current source tree, then starts local infrastructure,
+runs migrations, and starts the API plus agent/outbox workers with recreated
+containers. `backend-local-migrate` and `backend-local-workers` remain available
+for explicit maintenance, retries, and debugging; they also build the relevant
+runtime image before running. Use `BACKEND_BUILD_FLAGS=--no-cache` when you want
+to bypass the Docker build cache completely.
 
 `backend-check-infra` loads `BACKEND_ENV_FILE`, then runs database, Redis, and
 object storage diagnostics against the configured services.

@@ -71,10 +71,12 @@ deployments should provide managed `DATABASE_URL`, `REDIS_URL`, and managed
 variables; no code change is required to switch providers.
 
 Agent runs are processed by a separate worker process, not by the API lifespan.
-`make backend-local-up` starts `api`, `agent-worker`, and `outbox-worker`
-together after the local infrastructure is healthy and Alembic migrations have
-run. The worker processes still run as separate Compose services, so they can be
-restarted or scaled independently.
+`make backend-local-up` first builds the local `migrate`, `api`,
+`agent-worker`, and `outbox-worker` images from the current source tree, then
+starts infrastructure, runs Alembic migrations, and starts the three runtime
+services with recreated containers. The worker processes still run as separate
+Compose services, so they can be restarted or scaled independently. For a fully
+uncached rebuild, run `BACKEND_BUILD_FLAGS=--no-cache make backend-local-up`.
 
 `agent-worker` remains safe by default because `AGENT_RUNTIME_WORKER_ENABLED=false`
 in `env/compose.local.env.example`. Enable it in your private
@@ -134,10 +136,12 @@ cp production_backend/env/compose.prod.env.example production_backend/env/compos
 make backend-prod-up
 ```
 
-`backend-prod-up` runs Alembic migrations and then starts the three runtime
-services. Use `backend-prod-services` for restarts that should not run
-migrations again. See `production_backend/docs/deployment-runbook.md` for
-reverse proxy, scaling, and release details.
+`backend-prod-up` builds local runtime images, runs Alembic migrations, and then
+starts the three runtime services with recreated containers. Use
+`backend-prod-services` for restarts that should not run migrations again; it
+still builds runtime images before restart. See
+`production_backend/docs/deployment-runbook.md` for reverse proxy, scaling, and
+release details.
 
 ## Server Test Docker Compose
 
@@ -151,10 +155,11 @@ cp production_backend/env/compose.test.env.example production_backend/env/compos
 make backend-test-up
 ```
 
-`backend-test-up` starts `postgres`, `redis`, `minio`, initializes the test
-bucket, runs Alembic migrations, and then starts `api`, `agent-worker`, and
-`outbox-worker`. The API binds to `127.0.0.1:8001` by default so a reverse proxy
-can expose a test domain without exposing DB/Redis/MinIO ports.
+`backend-test-up` builds local runtime images, starts `postgres`, `redis`,
+`minio`, initializes the test bucket, runs Alembic migrations, and then starts
+`api`, `agent-worker`, and `outbox-worker` with recreated containers. The API
+binds to `127.0.0.1:8001` by default so a reverse proxy can expose a test domain
+without exposing DB/Redis/MinIO ports.
 
 ## Target Shape
 
