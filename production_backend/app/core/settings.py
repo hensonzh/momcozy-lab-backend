@@ -41,6 +41,7 @@ class Settings:
     auth_jwt_audience: str = ""
     auth_jwt_algorithm: str = "HS256"
     auth_require_active_session: bool = False
+    auth_invite_codes: tuple[str, ...] = ("MOMCOZY-BETA",)
     service_api_key: str = ""
     readiness_check_infrastructure: bool = False
     cors_allowed_origins: tuple[str, ...] = ()
@@ -98,6 +99,7 @@ class Settings:
             auth_jwt_audience=_env("AUTH_JWT_AUDIENCE", cls.auth_jwt_audience),
             auth_jwt_algorithm=_env("AUTH_JWT_ALGORITHM", cls.auth_jwt_algorithm),
             auth_require_active_session=_env_bool("AUTH_REQUIRE_ACTIVE_SESSION", cls.auth_require_active_session),
+            auth_invite_codes=_env_csv("AUTH_INVITE_CODES", cls.auth_invite_codes),
             service_api_key=_env("SERVICE_API_KEY", cls.service_api_key),
             readiness_check_infrastructure=_env_bool(
                 "READINESS_CHECK_INFRASTRUCTURE",

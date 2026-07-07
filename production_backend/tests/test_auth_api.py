@@ -43,8 +43,27 @@ def test_login_and_refresh_return_same_token_contract() -> None:
     assert fake_service.refresh_kwargs["refresh_token"] == "old-refresh"
 
 
+def test_invite_login_returns_token_pair_and_device_contract() -> None:
+    fake_service = FakeAuthAccountService()
+    client = TestClient(_app(fake_service=fake_service))
+
+    response = client.post(
+        "/v1/auth/invite-login",
+        json={"invite_code": "MOMCOZY-BETA", "device_id": "flutter-device-001"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["token_type"] == "bearer"
+    assert response.json()["access_token"] == "access-token"
+    assert response.json()["refresh_token"] == "refresh-token"
+    assert fake_service.invite_login_kwargs["invite_code"] == "MOMCOZY-BETA"
+    assert fake_service.invite_login_kwargs["device_context"].device_id == "flutter-device-001"
+
+
 def test_login_invalid_credentials_use_error_envelope() -> None:
-    fake_service = FakeAuthAccountService(login_error=ApiError(code="authentication_required", message="Email or password is invalid.", status=401))
+    fake_service = FakeAuthAccountService(
+        login_error=ApiError(code="authentication_required", message="Email or password is invalid.", status=401)
+    )
     client = TestClient(_app(fake_service=fake_service))
 
     response = client.post("/v1/auth/login", json={"email": "test@example.com", "password": "wrong"})
@@ -120,6 +139,7 @@ class FakeAuthAccountService:
         self.user = User(id=uuid4(), display_name="Test", status="active")
         self.login_error = login_error
         self.signup_kwargs = None
+        self.invite_login_kwargs = None
         self.login_kwargs = None
         self.refresh_kwargs = None
         self.logout_session_id = None
@@ -132,6 +152,10 @@ class FakeAuthAccountService:
         if self.login_error is not None:
             raise self.login_error
         self.login_kwargs = kwargs
+        return self._issued()
+
+    async def invite_login(self, **kwargs):
+        self.invite_login_kwargs = kwargs
         return self._issued()
 
     async def refresh(self, **kwargs):

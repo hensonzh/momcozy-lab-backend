@@ -35,6 +35,9 @@ def test_release_smoke_checklist_covers_auth_core_agent_and_observability() -> N
 
     for phrase in [
         "/v1/auth/signup",
+        "/v1/auth/invite-login",
+        "/v1/admin/invite-codes",
+        "/v1/admin/invite-codes/{code}/disable",
         "/v1/files/upload",
         "Idempotency-Key",
         "/v1/agent/runs/{run_id}/stream",

@@ -24,6 +24,15 @@ Run this checklist after migrations and before a release is declared healthy.
 
 - `POST /v1/auth/signup` returns an access token and refresh token.
 - `POST /v1/auth/login` returns the same token contract.
+- `POST /v1/auth/invite-login` accepts a configured invite code and returns the
+  same token contract without requiring email registration.
+- Reusing the same invite code from a different `device_id` returns
+  `permission_denied`.
+- Create an invite code through `POST /v1/admin/invite-codes` using
+  `X-Service-Key`.
+- Disable the invite code through
+  `POST /v1/admin/invite-codes/{code}/disable`; subsequent invite-login attempts
+  with that code return `permission_denied`.
 - `POST /v1/auth/refresh` rotates the refresh token.
 - `POST /v1/auth/logout` revokes the current device session.
 - Missing or invalid bearer token returns the stable error envelope.

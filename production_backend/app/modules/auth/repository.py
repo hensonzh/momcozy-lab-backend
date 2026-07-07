@@ -24,6 +24,25 @@ class AuthAccountRepository:
         )
         return cast(AuthIdentity | None, await self.session.scalar(statement))
 
+    async def get_invite_identity(self, *, invite_code: str) -> AuthIdentity | None:
+        statement = (
+            select(AuthIdentity)
+            .options(selectinload(AuthIdentity.user))
+            .where(AuthIdentity.provider == "invite", AuthIdentity.subject == invite_code)
+        )
+        identity = cast(AuthIdentity | None, await self.session.scalar(statement))
+        if identity is not None:
+            return identity
+
+        legacy_statement = (
+            select(AuthIdentity)
+            .options(selectinload(AuthIdentity.user))
+            .where(AuthIdentity.provider == "invite", AuthIdentity.subject.startswith(f"{invite_code}:", autoescape=True))
+            .order_by(AuthIdentity.created_at.asc(), AuthIdentity.id.asc())
+            .limit(1)
+        )
+        return cast(AuthIdentity | None, await self.session.scalar(legacy_statement))
+
     async def get_user(self, *, user_id: UUID) -> User | None:
         return await self.session.get(User, user_id)
 
@@ -40,6 +59,26 @@ class AuthAccountRepository:
         self.session.add(identity)
         await self.session.flush()
         return user, identity
+
+    async def create_invite_user(self, *, invite_code: str, device_id: str, display_name: str) -> tuple[User, AuthIdentity]:
+        user = User(display_name=display_name)
+        identity = AuthIdentity(
+            user=user,
+            provider="invite",
+            subject=invite_code,
+            device_id=device_id,
+            email="",
+            password_hash="",
+        )
+        self.session.add(user)
+        self.session.add(identity)
+        await self.session.flush()
+        return user, identity
+
+    async def bind_invite_identity_device(self, *, identity: AuthIdentity, device_id: str) -> AuthIdentity:
+        identity.device_id = device_id
+        await self.session.flush()
+        return identity
 
 
 class AuthSessionRepository:

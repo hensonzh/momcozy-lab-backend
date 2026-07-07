@@ -10,6 +10,7 @@ from production_backend.app.modules.auth.account_service import AuthAccountServi
 from production_backend.app.modules.auth.models import DeviceSession, RefreshToken
 from production_backend.app.modules.auth.passwords import hash_password, verify_password
 from production_backend.app.modules.auth.service import CreatedAuthSession, IssuedRefreshToken, refresh_token_hash
+from production_backend.app.modules.invites.models import InviteCode
 from production_backend.app.modules.users.models import AuthIdentity, User
 
 
@@ -53,6 +54,165 @@ def test_signup_rejects_duplicate_email() -> None:
         asyncio.run(service.signup(email="test@example.com", password="secret123"))
 
 
+def test_invite_login_creates_invite_identity_and_issues_tokens() -> None:
+    account_repository = FakeAccountRepository()
+    session_service = FakeSessionService()
+    service = AuthAccountService(
+        account_repository=account_repository,
+        session_service=session_service,
+        settings=_settings(auth_invite_codes=("MOMCOZY-BETA",)),
+    )
+
+    issued = asyncio.run(
+        service.invite_login(
+            invite_code=" momcozy-beta ",
+            device_context=DeviceContext(device_id=" flutter-device-001 ", user_agent="agent", ip_address="127.0.0.1"),
+        )
+    )
+
+    assert account_repository.created_identity.provider == "invite"
+    assert account_repository.created_identity.subject == "MOMCOZY-BETA"
+    assert account_repository.created_identity.device_id == "flutter-device-001"
+    assert account_repository.created_identity.email == ""
+    assert account_repository.created_identity.password_hash == ""
+    assert session_service.created_user_id == account_repository.created_user.id
+    assert issued.user.display_name == "Momcozy 体验用户"
+    assert issued.access_token
+    assert issued.refresh_token == "refresh-token"
+
+
+def test_invite_login_reuses_existing_invite_identity() -> None:
+    user = User(id=uuid4(), display_name="Invite User", status="active")
+    identity = AuthIdentity(
+        user_id=user.id,
+        user=user,
+        provider="invite",
+        subject="MOMCOZY-BETA",
+        device_id="flutter-device-001",
+    )
+    account_repository = FakeAccountRepository(existing_identity=identity)
+    session_service = FakeSessionService()
+    service = AuthAccountService(
+        account_repository=account_repository,
+        session_service=session_service,
+        settings=_settings(auth_invite_codes=("MOMCOZY-BETA",)),
+    )
+
+    issued = asyncio.run(
+        service.invite_login(
+            invite_code="MOMCOZY-BETA",
+            device_context=DeviceContext(device_id="flutter-device-001"),
+        )
+    )
+
+    assert account_repository.created_identity is None
+    assert issued.user.id == user.id
+    assert session_service.created_user_id == user.id
+
+
+def test_invite_login_rejects_bound_code_from_different_device() -> None:
+    user = User(id=uuid4(), display_name="Invite User", status="active")
+    identity = AuthIdentity(
+        user_id=user.id,
+        user=user,
+        provider="invite",
+        subject="MOMCOZY-BETA",
+        device_id="flutter-device-001",
+    )
+    account_repository = FakeAccountRepository(existing_identity=identity)
+    session_service = FakeSessionService()
+    service = AuthAccountService(
+        account_repository=account_repository,
+        session_service=session_service,
+        settings=_settings(auth_invite_codes=("MOMCOZY-BETA",)),
+    )
+
+    with pytest.raises(ApiError) as denied:
+        asyncio.run(
+            service.invite_login(
+                invite_code="MOMCOZY-BETA",
+                device_context=DeviceContext(device_id="flutter-device-002"),
+            )
+        )
+
+    assert denied.value.code == "permission_denied"
+    assert "already bound" in denied.value.message
+    assert account_repository.created_identity is None
+    assert session_service.created_user_id is None
+
+
+def test_invite_login_rejects_invalid_code_without_creating_session() -> None:
+    account_repository = FakeAccountRepository()
+    session_service = FakeSessionService()
+    service = AuthAccountService(
+        account_repository=account_repository,
+        session_service=session_service,
+        settings=_settings(auth_invite_codes=("MOMCOZY-BETA",)),
+    )
+
+    with pytest.raises(ApiError, match="Invite code is invalid"):
+        asyncio.run(
+            service.invite_login(
+                invite_code="WRONG-CODE",
+                device_context=DeviceContext(device_id="flutter-device-001"),
+            )
+        )
+
+    assert account_repository.created_identity is None
+    assert session_service.created_user_id is None
+
+
+def test_invite_login_binds_managed_invite_code_and_issues_tokens() -> None:
+    account_repository = FakeAccountRepository()
+    session_service = FakeSessionService()
+    invite_code = InviteCode(code="MCZ-ABCD-2345", status="active")
+    invite_repository = FakeInviteCodeRepository(invite_code=invite_code)
+    service = AuthAccountService(
+        account_repository=account_repository,
+        session_service=session_service,
+        settings=_settings(auth_invite_codes=()),
+        invite_code_repository=invite_repository,
+    )
+
+    issued = asyncio.run(
+        service.invite_login(
+            invite_code="mcz-abcd-2345",
+            device_context=DeviceContext(device_id="flutter-device-001"),
+        )
+    )
+
+    assert invite_repository.for_update is True
+    assert invite_code.bound_device_id == "flutter-device-001"
+    assert invite_code.bound_user_id == account_repository.created_user.id
+    assert invite_code.used_count == 1
+    assert issued.user.id == account_repository.created_user.id
+    assert session_service.created_user_id == account_repository.created_user.id
+
+
+def test_invite_login_rejects_disabled_managed_invite_code() -> None:
+    account_repository = FakeAccountRepository()
+    session_service = FakeSessionService()
+    invite_repository = FakeInviteCodeRepository(invite_code=InviteCode(code="MCZ-ABCD-2345", status="disabled"))
+    service = AuthAccountService(
+        account_repository=account_repository,
+        session_service=session_service,
+        settings=_settings(auth_invite_codes=()),
+        invite_code_repository=invite_repository,
+    )
+
+    with pytest.raises(ApiError) as denied:
+        asyncio.run(
+            service.invite_login(
+                invite_code="MCZ-ABCD-2345",
+                device_context=DeviceContext(device_id="flutter-device-001"),
+            )
+        )
+
+    assert denied.value.code == "permission_denied"
+    assert account_repository.created_identity is None
+    assert session_service.created_user_id is None
+
+
 def test_login_rejects_invalid_password_without_creating_session() -> None:
     user = User(id=uuid4(), display_name="Test", status="active")
     identity = AuthIdentity(
@@ -92,12 +252,13 @@ def test_refresh_rotates_token_and_issues_access_for_session_user() -> None:
     assert issued.refresh_token == "rotated-refresh-token"
 
 
-def _settings() -> Settings:
+def _settings(*, auth_invite_codes: tuple[str, ...] = ("MOMCOZY-BETA",)) -> Settings:
     return Settings(
         app_env="test",
         auth_jwt_secret="test-secret-value-with-at-least-32-bytes",
         auth_jwt_issuer="momcozy-test",
         auth_jwt_audience="momcozy-app",
+        auth_invite_codes=auth_invite_codes,
     )
 
 
@@ -111,6 +272,12 @@ class FakeAccountRepository:
     async def get_identity(self, *, provider: str, subject: str):
         if self.existing_identity and self.existing_identity.provider == provider and self.existing_identity.subject == subject:
             return self.existing_identity
+        return None
+
+    async def get_invite_identity(self, *, invite_code: str):
+        if self.existing_identity and self.existing_identity.provider == "invite":
+            if self.existing_identity.subject == invite_code or self.existing_identity.subject.startswith(f"{invite_code}:"):
+                return self.existing_identity
         return None
 
     async def get_user(self, *, user_id):
@@ -129,6 +296,41 @@ class FakeAccountRepository:
             password_hash=password_hash,
         )
         return self.created_user, self.created_identity
+
+    async def create_invite_user(self, *, invite_code: str, device_id: str, display_name: str):
+        self.created_user = User(id=uuid4(), display_name=display_name, status="active")
+        self.created_identity = AuthIdentity(
+            user_id=self.created_user.id,
+            user=self.created_user,
+            provider="invite",
+            subject=invite_code,
+            device_id=device_id,
+            email="",
+            password_hash="",
+        )
+        return self.created_user, self.created_identity
+
+    async def bind_invite_identity_device(self, *, identity, device_id: str):
+        identity.device_id = device_id
+        return identity
+
+
+class FakeInviteCodeRepository:
+    def __init__(self, *, invite_code=None) -> None:
+        self.invite_code = invite_code
+        self.for_update = False
+
+    async def get_by_code(self, *, code: str, for_update: bool = False):
+        self.for_update = for_update
+        if self.invite_code and self.invite_code.code == code:
+            return self.invite_code
+        return None
+
+    async def bind(self, *, invite_code, device_id: str, user_id):
+        invite_code.bound_device_id = device_id
+        invite_code.bound_user_id = user_id
+        invite_code.used_count = max(invite_code.used_count or 0, 1)
+        return invite_code
 
 
 class FakeSessionService:

@@ -13,6 +13,18 @@
       "steps": [
         {
           "method": "POST",
+          "path": "/v1/auth/invite-login",
+          "body": {
+            "invite_code": "${invite_code}",
+            "device_id": "flutter-smoke-invite-device"
+          },
+          "captures": {
+            "access_token": "$.access_token",
+            "refresh_token": "$.refresh_token"
+          }
+        },
+        {
+          "method": "POST",
           "path": "/v1/auth/signup",
           "body": {
             "email": "smoke+${run_id}@example.test",

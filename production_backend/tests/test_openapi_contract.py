@@ -66,6 +66,7 @@ def test_openapi_contains_core_flutter_handoff_paths() -> None:
     for path in [
         "/v1/auth/signup",
         "/v1/auth/login",
+        "/v1/auth/invite-login",
         "/v1/assets",
         "/v1/assets/{asset_id}",
         "/v1/files/upload",
