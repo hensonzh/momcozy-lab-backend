@@ -305,6 +305,35 @@ class AgentRuntimeService:
         )
         return deleted
 
+    async def create_artifact(
+        self,
+        *,
+        owner_user_id: UUID,
+        run_id: UUID,
+        artifact_type: str,
+        payload: dict[str, Any],
+        schema_version: str = "v1",
+        status: str = "created",
+        raw_payload_ref: str = "",
+    ) -> AgentArtifact:
+        run = await self.get_run(owner_user_id=owner_user_id, run_id=run_id)
+        artifact = await self.repository.create_artifact(
+            run_id=run.id,
+            owner_user_id=owner_user_id,
+            artifact_type=_normalize_text(artifact_type, max_length=120, required=True),
+            schema_version=_normalize_text(schema_version, max_length=80) or "v1",
+            status=_normalize_text(status, max_length=32) or "created",
+            payload=payload,
+            raw_payload_ref=_normalize_text(raw_payload_ref, max_length=512),
+        )
+        await self._append_event(
+            thread_id=run.thread_id,
+            run_id=run.id,
+            event_type="artifact.created",
+            payload={"artifact_id": str(artifact.id), "artifact_type": artifact.artifact_type},
+        )
+        return artifact
+
     async def confirm_action(
         self,
         *,

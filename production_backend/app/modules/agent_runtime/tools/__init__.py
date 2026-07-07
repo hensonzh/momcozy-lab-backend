@@ -1,6 +1,7 @@
 from .contracts import ToolContract
 from .executor import ToolExecutionResult, ToolExecutor, ToolHandlerContext
 from .handlers import (
+    AgentArtifactCreateToolHandler,
     BusinessContextReadToolHandler,
     DeviceGuidanceAssetsReadToolHandler,
     DevicesPumpStatusReadToolHandler,
@@ -28,6 +29,7 @@ from .registry import ToolContractRegistry, default_tool_registry
 from .schemas import tool_input_schema
 
 __all__ = [
+    "AgentArtifactCreateToolHandler",
     "BusinessContextReadToolHandler",
     "DeviceGuidanceAssetsReadToolHandler",
     "DevicesPumpStatusReadToolHandler",

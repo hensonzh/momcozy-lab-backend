@@ -89,6 +89,20 @@ def test_product_agent_eval_seed_uses_current_pregnancy_action_contracts() -> No
     assert "diary_entry_upsert_proposal" not in diary_contracts
 
 
+def test_product_agent_eval_seed_uses_current_pregnancy_artifact_contracts() -> None:
+    cases = load_product_agent_eval_seed_cases(PRODUCT_AGENT_EVAL_SEED)
+    by_suite = {case["suite"]: case for case in cases}
+
+    birth_prep_contracts = {tool_call["contract"] for tool_call in by_suite["birth_prep"]["expected_tool_calls"]}
+    communication_contracts = {tool_call["contract"] for tool_call in by_suite["labor_communication"]["expected_tool_calls"]}
+
+    assert "pregnancy.plan_context.read" in birth_prep_contracts
+    assert "artifacts.hospital_bag_card.create" in birth_prep_contracts
+    assert "artifacts.labor_communication_card.create" in communication_contracts
+    assert "birth_prep_intake" not in birth_prep_contracts
+    assert "labor_communication_draft" not in communication_contracts
+
+
 def test_product_agent_eval_seed_uses_current_hospital_bag_action_contract() -> None:
     cases = load_product_agent_eval_seed_cases(PRODUCT_AGENT_EVAL_SEED)
     by_suite = {case["suite"]: case for case in cases}

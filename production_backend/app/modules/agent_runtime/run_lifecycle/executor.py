@@ -37,12 +37,14 @@ from .state_store import AgentRuntimeStateStore
 @dataclass(frozen=True)
 class AgentRuntimeExecutorConfig:
     stable_system_prompt: str = (
-        "You are the MomCozy product assistant. Follow product safety policy, use tools only through the application "
-        "runtime, and return concise, helpful responses."
+        "You are CozyMate, the MomCozy product assistant. You are a warm, steady companion for moms across pregnancy, "
+        "postpartum recovery, breastfeeding, pumping, device use, and support. Follow the selected service playbook. "
+        "When the user writes Chinese, reply in Simplified Chinese. Use tools only through the application runtime."
     )
     stable_developer_prompt: str = (
         "Use the provided conversation ledger, current state projection, and fresh business facts. Do not rely on "
-        "provider session state. Propose confirmable actions instead of directly applying medium or high risk changes."
+        "provider session state. Do not call load_skill, read_skill_file, legacy namespaces, or any tool outside the "
+        "provided allowlist. Propose confirmable actions instead of directly applying medium or high risk changes."
     )
     history_limit: int = 40
     memory_limit: int = 5
@@ -104,6 +106,7 @@ class AgentRuntimeExecutor:
         memory_projection = await self._memory_projection(run=run)
         routing_plan = await self.routing_service.route(_routing_context(run=run, current_message=current_message))
         specialist = self.specialist_registry.get(routing_plan.primary_specialist_id.value)
+        playbook_summary = specialist.service_playbook.state_summary() if specialist.service_playbook is not None else {}
         await self._record_routing_decision(run=run, current_message=current_message, routing_plan=routing_plan)
         tool_names = self._tool_names_for_specialist(specialist)
         projection = ContextProjection(
@@ -119,6 +122,10 @@ class AgentRuntimeExecutor:
                 "prompt_version": run.prompt_version,
                 "specialist_id": specialist.id,
                 "specialist_display_name": specialist.display_name,
+                "service_playbook_id": str(playbook_summary.get("id") or ""),
+                "service_playbook_version": str(playbook_summary.get("version") or ""),
+                "service_playbook_scope": playbook_summary.get("scope") or [],
+                "service_playbook_deliverables": playbook_summary.get("deliverables") or [],
                 "routing_source": routing_plan.source.value,
                 "routing_confidence": routing_plan.confidence,
                 "routing_reason_codes": routing_plan.reason_codes,
@@ -142,6 +149,7 @@ class AgentRuntimeExecutor:
                 "pending_action_id": None,
                 "final_message_id": None,
                 "specialist_id": specialist.id,
+                "service_playbook_id": str(playbook_summary.get("id") or ""),
                 "routing_source": routing_plan.source.value,
                 "routing_confidence": routing_plan.confidence,
                 "routing_reason_codes": routing_plan.reason_codes,
@@ -402,6 +410,7 @@ class AgentRuntimeExecutor:
             projection_summary={
                 "history_message_count": len(selected_history),
                 "state_keys": sorted(projection.current_state_projection),
+                "service_playbook_id": _text(projection.current_state_projection, "service_playbook_id"),
                 "memory_count": len(projection.memory_projection),
                 "fresh_business_fact_keys": sorted(projection.fresh_business_facts),
             },
@@ -463,14 +472,15 @@ def _uuid(value: str) -> UUID | None:
 
 
 def _sdk_instructions(*, projection: ContextProjection, specialist: AgentSpecialistProfile) -> str:
-    return "\n\n".join(
-        [
-            projection.stable_system_prompt,
-            projection.stable_developer_prompt,
-            f"Specialist profile: {specialist.id} ({specialist.display_name}).",
-            specialist.instructions,
-        ]
-    )
+    blocks = [
+        projection.stable_system_prompt,
+        projection.stable_developer_prompt,
+        f"Specialist profile: {specialist.id} ({specialist.display_name}).",
+        specialist.instructions,
+    ]
+    if specialist.service_playbook is not None:
+        blocks.append(specialist.service_playbook.prompt_block())
+    return "\n\n".join(blocks)
 
 
 def _to_model_message(message: AgentMessage) -> dict[str, Any]:

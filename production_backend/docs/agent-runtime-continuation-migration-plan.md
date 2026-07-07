@@ -70,6 +70,24 @@
   feeding record、pumping record、hospital-bag cart update 会创建 action、
   立即确认并进入 outbox effect lane，不再让 run 进入
   `waiting_for_confirmation`。中高风险 action 仍走 confirmation。
+- 场景专家不再只是 tool allowlist。`sdk/playbooks.py` 已把旧版 service skill
+  的核心体验语义沉淀为版本化 service playbook，并在每轮 SDK instructions 和
+  context projection 中注入 `service_playbook_id/version/scope/deliverables`。
+  当前 playbook 覆盖 `pregnancy_service`、`lactation`、
+  `postpartum_recovery`、`after_sales`、`safety_guardrail` 和
+  `general_assistant`。
+- 全局智能体角色已恢复为 CozyMate：温柔、稳定、简短、中文用户使用简体中文，
+  但不恢复旧版动态 `load_skill`，也不保留 Responses API loop 兜底。
+- 孕期服务、泌乳和产后恢复已具备第一批服务交付物 artifact tool：
+  `artifacts.hospital_bag_card.create`、
+  `artifacts.labor_communication_card.create`、
+  `artifacts.lactation_summary.create`、
+  `artifacts.postpartum_checkin.create`。这些工具创建 owner-scoped
+  `agent_artifacts` 并发出 `artifact.created` event；它们用于本轮服务产物，
+  不替代保存计划、任务、日记、购物车或工单等业务 action。
+- 自然语言路由已补强旧 skill 关键触发语义：IBCLC/含乳/乳头疼归泌乳服务，
+  待产包/入院包/分娩沟通单归孕期服务，缺件/保修/烧焦/冒烟归设备售后；
+  母婴安全红旗的中文表达同步到 routing 和 deterministic safety gate。
 
 仍未完成或后续产品化：
 
@@ -78,6 +96,10 @@
 - 待产包、奶量、孕期计划、日记、设备指导、支持工单、健康/情绪安全和长期
   记忆均已有新 tool/action/eval contract 的后端基础闭环；图片/语音等体验可
   在 Flutter integration 或后续产品需求中继续补齐。
+- 旧 skill 语义已迁成 service playbook，但旧版部分高度定制算法仍未逐项复制，
+  例如待产包商品推荐细则、Air1 分步图片指导细节、完整奶量计划算法和运营侧
+  IBCLC 接通流程。后续应按产品主流程逐项迁入对应 service/tool，而不是恢复
+  旧 `load_skill` 机制。
 - 设备指导已有 owner-scoped 状态读取和 guidance assets 读取；更细的
   model-specific 问答策略仍属于产品内容/资料治理工作。
 - IBCLC/professional support 已使用 `support.ticket.propose` handoff；独立

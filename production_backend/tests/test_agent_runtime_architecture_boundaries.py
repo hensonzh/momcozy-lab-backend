@@ -51,6 +51,8 @@ def test_tool_contract_registry_declares_permission_confirmation_and_blocking_po
     milk_reminder_proposal = registry.get("notifications.milk_reminder.propose")
     diary_entry_proposal = registry.get("diary.entry_upsert.propose")
     memory_create_proposal = registry.get("memory.create.propose")
+    hospital_bag_artifact = registry.get("artifacts.hospital_bag_card.create")
+    labor_communication_artifact = registry.get("artifacts.labor_communication_card.create")
     assert feeding_proposal.read_or_write == "write"
     assert feeding_proposal.requires_confirmation is False
     assert feeding_proposal.blocking_policy == "enqueue_and_continue"
@@ -86,6 +88,13 @@ def test_tool_contract_registry_declares_permission_confirmation_and_blocking_po
     assert memory_create_proposal.requires_confirmation is True
     assert memory_create_proposal.side_effect_level == "medium"
     assert memory_create_proposal.required_permission == "memory:write:self"
+    assert hospital_bag_artifact.read_or_write == "write"
+    assert hospital_bag_artifact.owner_scope == "actor"
+    assert hospital_bag_artifact.requires_confirmation is False
+    assert hospital_bag_artifact.side_effect_level == "low"
+    assert hospital_bag_artifact.result_dependency == "final_response"
+    assert hospital_bag_artifact.required_permission == "agent_artifact:create:self"
+    assert labor_communication_artifact.required_permission == "agent_artifact:create:self"
     assert "profile.read" in registry.names_for_sdk()
     assert "business.context.read" in registry.names_for_sdk()
     plans_current = registry.get("plans.current.read")
@@ -127,6 +136,8 @@ def test_tool_contract_registry_declares_permission_confirmation_and_blocking_po
     assert "plans.task_complete.propose" in registry.names_for_sdk()
     assert "devices.pump_status.read" in registry.names_for_sdk()
     assert "files.vision_summary.read" in registry.names_for_sdk()
+    assert "artifacts.hospital_bag_card.create" in registry.names_for_sdk()
+    assert "artifacts.labor_communication_card.create" in registry.names_for_sdk()
 
 
 def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> None:
@@ -150,6 +161,7 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
     milk_reminder_schema = tool_input_schema(registry.get("notifications.milk_reminder.propose").input_schema_ref)
     feeding_schema = tool_input_schema(registry.get("records.feeding_record.propose").input_schema_ref)
     pumping_schema = tool_input_schema(registry.get("records.pumping_record.propose").input_schema_ref)
+    artifact_schema = tool_input_schema(registry.get("artifacts.hospital_bag_card.create").input_schema_ref)
     memory_create_schema = tool_input_schema(registry.get("memory.create.propose").input_schema_ref)
 
     assert profile_schema == {
@@ -217,6 +229,10 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
     assert feeding_schema["properties"]["volume_ml"]["type"] == "number"
     assert pumping_schema["required"] == ["pump_start_time"]
     assert pumping_schema["properties"]["milk_volume_ml"]["type"] == "number"
+    assert artifact_schema["additionalProperties"] is False
+    assert artifact_schema["required"] == ["title"]
+    assert artifact_schema["properties"]["sections"]["maxItems"] == 20
+    assert artifact_schema["properties"]["source_context"]["type"] == "object"
 
 
 def test_context_builder_keeps_stable_prompts_before_dynamic_projection() -> None:

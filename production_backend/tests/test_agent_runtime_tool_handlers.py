@@ -5,8 +5,9 @@ from uuid import uuid4
 import pytest
 
 from production_backend.app.core.errors import ApiError
-from production_backend.app.modules.agent_runtime.models import AgentAction
+from production_backend.app.modules.agent_runtime.models import AgentAction, AgentArtifact
 from production_backend.app.modules.agent_runtime.tools import (
+    AgentArtifactCreateToolHandler,
     BusinessContextReadToolHandler,
     DeviceGuidanceAssetsReadToolHandler,
     DevicesPumpStatusReadToolHandler,
@@ -138,8 +139,8 @@ def test_hospital_bag_cart_update_propose_tool_handler_creates_confirmation_acti
 
     assert result["action_id"] == str(runtime_service.action.id)
     assert result["action_type"] == "hospital_bag.cart.update"
-    assert result["action_status"] == "confirmation_required"
-    assert result["requires_confirmation"] is True
+    assert result["action_status"] == "confirmed"
+    assert result["requires_confirmation"] is False
     assert result["preview_payload"]["summary"] == "Mark nursing bra packed and add a phone charger"
     assert result["preview_payload"]["cart_update"]["set_checked"][0]["item_id"] == "nursing-bra"
     assert runtime_service.calls[0]["owner_user_id"] == actor.user_id
@@ -147,6 +148,39 @@ def test_hospital_bag_cart_update_propose_tool_handler_creates_confirmation_acti
     assert runtime_service.calls[0]["target_type"] == "hospital_bag_cart"
     assert runtime_service.calls[0]["side_effect_level"] == "low"
     assert runtime_service.calls[0]["apply_payload"]["metadata"] == {"timezone": "Asia/Shanghai"}
+
+
+def test_agent_artifact_create_tool_handler_creates_service_artifact() -> None:
+    actor = _user()
+    runtime_service = FakeAgentRuntimeService()
+    handler = AgentArtifactCreateToolHandler(
+        runtime_service=runtime_service,
+        artifact_type="hospital_bag_card",
+        default_title="待产包清单",
+    )
+    context = _context(
+        actor=actor,
+        args={
+            "title": "36 周待产包清单",
+            "summary": "按顺产和母乳喂养意向整理。",
+            "sections": [
+                {"title": "妈妈住院", "items": ["证件", "护理垫"]},
+                {"title": "宝宝用品", "items": ["纸尿裤", "包被"]},
+            ],
+            "source_context": {"gestational_week": "36w"},
+        },
+    )
+
+    result = asyncio.run(handler(context))
+
+    assert result["artifact_id"] == str(runtime_service.artifact.id)
+    assert result["artifact_type"] == "hospital_bag_card"
+    assert result["status"] == "created"
+    assert result["title"] == "36 周待产包清单"
+    assert runtime_service.artifact.owner_user_id == actor.user_id
+    assert runtime_service.artifact.run_id == context.run_id
+    assert runtime_service.artifact.payload["sections"][0]["title"] == "妈妈住院"
+    assert runtime_service.artifact.payload["source_context"] == {"gestational_week": "36w"}
 
 
 def test_business_context_read_tool_handler_returns_bounded_owner_scoped_summary() -> None:
@@ -802,6 +836,10 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
     )
 
     assert set(handlers) == {
+        "artifacts.hospital_bag_card.create",
+        "artifacts.labor_communication_card.create",
+        "artifacts.lactation_summary.create",
+        "artifacts.postpartum_checkin.create",
         "profile.read",
         "business.context.read",
         "records.milk_summary.read",
@@ -853,6 +891,7 @@ def _user() -> CurrentUser:
                 "memory:write:self",
                 "plans:write:self",
                 "notifications:create:self",
+                "agent_artifact:create:self",
                 "hospital_bag_cart:update:self",
                 "support_ticket:create:self",
             }
@@ -1105,6 +1144,16 @@ class FakeAgentRuntimeService:
             idempotency_key="",
             error_code="",
         )
+        self.artifact = AgentArtifact(
+            id=uuid4(),
+            run_id=uuid4(),
+            owner_user_id=uuid4(),
+            artifact_type="hospital_bag_card",
+            schema_version="v1",
+            status="created",
+            payload={},
+            raw_payload_ref="",
+        )
 
     async def propose_action(self, **kwargs):
         self.calls.append(kwargs)
@@ -1113,10 +1162,21 @@ class FakeAgentRuntimeService:
         self.action.action_type = kwargs["action_type"]
         self.action.target_type = kwargs["target_type"]
         self.action.side_effect_level = kwargs["side_effect_level"]
+        self.action.status = "confirmed" if kwargs["action_type"] == "hospital_bag.cart.update" else "confirmation_required"
         self.action.preview_payload = kwargs["preview_payload"]
         self.action.apply_payload = kwargs["apply_payload"]
         self.action.idempotency_key = kwargs["idempotency_key"]
         return self.action
+
+    async def create_artifact(self, **kwargs):
+        self.calls.append(kwargs)
+        self.artifact.run_id = kwargs["run_id"]
+        self.artifact.owner_user_id = kwargs["owner_user_id"]
+        self.artifact.artifact_type = kwargs["artifact_type"]
+        self.artifact.schema_version = kwargs["schema_version"]
+        self.artifact.status = kwargs["status"]
+        self.artifact.payload = kwargs["payload"]
+        return self.artifact
 
 
 def _now() -> datetime:

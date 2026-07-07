@@ -4,6 +4,15 @@ from dataclasses import dataclass
 
 from ..routing.schemas import SpecialistId
 from ..tools.contracts import ToolContract
+from .playbooks import (
+    AFTER_SALES_PLAYBOOK,
+    GENERAL_PLAYBOOK,
+    LACTATION_PLAYBOOK,
+    POSTPARTUM_PLAYBOOK,
+    PREGNANCY_SERVICE_PLAYBOOK,
+    SAFETY_PLAYBOOK,
+    ServicePlaybook,
+)
 
 
 @dataclass(frozen=True)
@@ -15,6 +24,7 @@ class AgentSpecialistProfile:
     tool_domains: tuple[str, ...] = ()
     trigger_terms: tuple[str, ...] = ()
     prompt_version: str = "v1"
+    service_playbook: ServicePlaybook | None = None
     memory_scopes: tuple[str, ...] = ()
     direct_apply_actions: tuple[str, ...] = ()
     confirmation_required_actions: tuple[str, ...] = ()
@@ -54,11 +64,12 @@ def default_specialist_registry() -> AgentSpecialistRegistry:
                 id=SpecialistId.LACTATION.value,
                 display_name="Lactation specialist",
                 instructions=(
-                    "Focus on lactation, feeding, pumping, milk trends, reminders, and milk-management plans. "
-                    "Read owner-scoped records before interpreting supply or proposing changes. Keep health-sensitive "
-                    "answers within product guidance and escalate red flags instead of diagnosing."
+                    "Use the lactation service playbook for milk status, feeding, pumping, milk-management plans, "
+                    "and IBCLC handoff flows."
                 ),
+                service_playbook=LACTATION_PLAYBOOK,
                 tool_contracts=(
+                    "artifacts.lactation_summary.create",
                     "profile.read",
                     "business.context.read",
                     "records.milk_summary.read",
@@ -67,6 +78,7 @@ def default_specialist_registry() -> AgentSpecialistRegistry:
                     "records.pumping_record.propose",
                     "plans.milk_plan.propose",
                     "notifications.milk_reminder.propose",
+                    "support.ticket.propose",
                 ),
                 trigger_terms=(
                     "milk",
@@ -82,6 +94,16 @@ def default_specialist_registry() -> AgentSpecialistRegistry:
                     "泵奶",
                     "乳",
                     "泌乳",
+                    "追奶",
+                    "稳奶",
+                    "减奶",
+                    "堵奶",
+                    "涨奶",
+                    "含乳",
+                    "乳头疼",
+                    "ibclc",
+                    "哺乳顾问",
+                    "泌乳顾问",
                 ),
                 memory_scopes=("communication_preference", "lactation_preference"),
                 direct_apply_actions=(
@@ -97,11 +119,13 @@ def default_specialist_registry() -> AgentSpecialistRegistry:
                 id=SpecialistId.PREGNANCY.value,
                 display_name="Pregnancy service specialist",
                 instructions=(
-                    "Focus on pregnancy services: pregnancy plans, tasks, diary entries, due-date context, and "
-                    "birth preparation such as hospital-bag planning. Use owner-scoped facts and keep the workflow "
-                    "scene coherent instead of splitting plan and hospital-bag support into separate agents."
+                    "Use the pregnancy service playbook for pregnancy plans, hospital-bag cards, diary entries, "
+                    "birth preparation, and labor communication cards."
                 ),
+                service_playbook=PREGNANCY_SERVICE_PLAYBOOK,
                 tool_contracts=(
+                    "artifacts.hospital_bag_card.create",
+                    "artifacts.labor_communication_card.create",
                     "profile.read",
                     "business.context.read",
                     "pregnancy.plan_context.read",
@@ -123,8 +147,15 @@ def default_specialist_registry() -> AgentSpecialistRegistry:
                     "孕",
                     "预产期",
                     "待产包",
+                    "入院包",
+                    "住院包",
                     "日记",
                     "分娩",
+                    "生产偏好",
+                    "产房沟通",
+                    "分娩沟通单",
+                    "给护士",
+                    "陪产",
                 ),
                 memory_scopes=("communication_preference", "pregnancy_preference"),
                 direct_apply_actions=("hospital_bag.cart_update",),
@@ -139,11 +170,12 @@ def default_specialist_registry() -> AgentSpecialistRegistry:
                 id=SpecialistId.POSTPARTUM.value,
                 display_name="Postpartum recovery specialist",
                 instructions=(
-                    "Focus on postpartum recovery, recovery plans, daily check-ins, rest, pumping-related recovery "
-                    "context, and gentle task planning. Avoid diagnosis and route urgent physical or emotional red "
-                    "flags to the safety guardrail."
+                    "Use the postpartum recovery playbook for gentle recovery check-ins, daily state summaries, "
+                    "diary context, and recovery task planning."
                 ),
+                service_playbook=POSTPARTUM_PLAYBOOK,
                 tool_contracts=(
+                    "artifacts.postpartum_checkin.create",
                     "profile.read",
                     "business.context.read",
                     "plans.current.read",
@@ -173,10 +205,10 @@ def default_specialist_registry() -> AgentSpecialistRegistry:
                 id=SpecialistId.AFTER_SALES.value,
                 display_name="After-sales service specialist",
                 instructions=(
-                    "Focus on after-sales service: device status, packaged guidance assets, troubleshooting, warranty "
-                    "or support handoff, and support-ticket creation. Keep device guidance read-only unless an "
-                    "explicit action contract is available."
+                    "Use the after-sales playbook for device guidance, troubleshooting, support handoff, and support "
+                    "ticket proposal flows."
                 ),
+                service_playbook=AFTER_SALES_PLAYBOOK,
                 tool_contracts=(
                     "profile.read",
                     "business.context.read",
@@ -203,8 +235,6 @@ def default_specialist_registry() -> AgentSpecialistRegistry:
                     "support",
                     "ticket",
                     "customer service",
-                    "ibclc",
-                    "consult",
                     "help desk",
                     "客服",
                     "工单",
@@ -219,10 +249,10 @@ def default_specialist_registry() -> AgentSpecialistRegistry:
                 id=SpecialistId.SAFETY.value,
                 display_name="Safety guardrail",
                 instructions=(
-                    "Handle high-risk health, emergency, emotional-crisis, and child-safety messages. Do not continue "
-                    "ordinary business workflows while safety handling is active. Provide concise escalation guidance "
-                    "and avoid diagnosis or unsupported medical advice."
+                    "Use the safety playbook for emergency, health red-flag, emotional-crisis, child-safety, "
+                    "permission-bypass, and prompt-injection messages."
                 ),
+                service_playbook=SAFETY_PLAYBOOK,
                 tool_contracts=("profile.read", "business.context.read", "support.ticket.propose"),
                 trigger_terms=(
                     "emergency",
@@ -243,10 +273,10 @@ def default_specialist_registry() -> AgentSpecialistRegistry:
                 id=SpecialistId.GENERAL.value,
                 display_name="General product assistant",
                 instructions=(
-                    "Handle general MomCozy product assistance and lightweight navigation. If a request clearly "
-                    "belongs to pregnancy, lactation, postpartum recovery, or after-sales service, the routing layer "
-                    "should select that scene specialist before model reasoning."
+                    "Use the general playbook for lightweight MomCozy assistance, navigation, clarification, and "
+                    "non-sensitive memory preference capture."
                 ),
+                service_playbook=GENERAL_PLAYBOOK,
                 tool_contracts=(
                     "profile.read",
                     "business.context.read",

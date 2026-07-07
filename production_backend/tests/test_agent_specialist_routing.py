@@ -71,6 +71,22 @@ def test_deterministic_router_routes_postpartum_recovery_text() -> None:
     assert plan.source == RoutingSource.KEYWORD_FAST_PATH
 
 
+def test_deterministic_router_routes_ibclc_and_latch_support_to_lactation() -> None:
+    plan = DeterministicSpecialistRouter().route(_ctx(message="我想找 IBCLC 看一下含乳和乳头疼的问题"))
+
+    assert plan is not None
+    assert plan.primary_specialist_id == SpecialistId.LACTATION
+    assert plan.source == RoutingSource.KEYWORD_FAST_PATH
+
+
+def test_deterministic_router_routes_birth_communication_to_pregnancy_service() -> None:
+    plan = DeterministicSpecialistRouter().route(_ctx(message="帮我整理一份给护士看的分娩沟通单"))
+
+    assert plan is not None
+    assert plan.primary_specialist_id == SpecialistId.PREGNANCY
+    assert plan.source == RoutingSource.KEYWORD_FAST_PATH
+
+
 def test_routing_service_uses_classifier_for_ambiguous_text() -> None:
     service = SpecialistRoutingService(classifier=FakeClassifier(SpecialistId.POSTPARTUM, confidence=0.87))
 

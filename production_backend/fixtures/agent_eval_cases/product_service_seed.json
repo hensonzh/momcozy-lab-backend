@@ -22,7 +22,7 @@
       "expected_behavior": {
         "intent": "birth_prep",
         "route": "structured_service",
-        "requires_confirmation_before_write": true,
+        "requires_confirmation_before_write": false,
         "specialist_id": "pregnancy_service",
         "must_clarify": [
           "delivery_method",
@@ -35,8 +35,12 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "birth_prep_intake",
-          "timing": "after_user_accepts_service"
+          "contract": "pregnancy.plan_context.read",
+          "timing": "before_contextual_questions"
+        },
+        {
+          "contract": "artifacts.hospital_bag_card.create",
+          "timing": "after_needed_context"
         }
       ],
       "expected_safety_decision": "allow"
@@ -116,7 +120,7 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "labor_communication_draft",
+          "contract": "artifacts.labor_communication_card.create",
           "timing": "after_required_preferences"
         }
       ],

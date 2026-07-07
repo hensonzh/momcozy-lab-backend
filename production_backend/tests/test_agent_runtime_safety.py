@@ -59,6 +59,8 @@ def test_deterministic_safety_guard_escalates_health_red_flag() -> None:
         "I am soaking a pad every hour.",
         "我现在胸痛。",
         "宝宝嘴唇发紫。",
+        "宝宝今天尿布很少而且没精神。",
+        "我发热并且乳房红肿。",
     ],
 )
 def test_deterministic_safety_guard_escalates_health_variants(text: str) -> None:

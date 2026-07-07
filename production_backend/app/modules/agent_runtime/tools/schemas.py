@@ -366,6 +366,36 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "idempotency_key": {"type": "string", "maxLength": 255},
         },
     },
+    "AgentArtifactCreate": {
+        "title": "AgentArtifactCreate",
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["title"],
+        "properties": {
+            "title": {"type": "string", "minLength": 1, "maxLength": 255},
+            "summary": {"type": "string", "maxLength": 2000},
+            "sections": {
+                "type": "array",
+                "maxItems": 20,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": True,
+                },
+            },
+            "payload": {
+                "type": "object",
+                "additionalProperties": True,
+                "description": "Optional structured payload for fields that do not fit title, summary, or sections.",
+            },
+            "source_context": {
+                "type": "object",
+                "additionalProperties": True,
+                "description": "Brief, non-sensitive facts used to produce the artifact.",
+            },
+            "locale": {"type": "string", "maxLength": 35},
+            "timezone": {"type": "string", "maxLength": 80},
+        },
+    },
     "SupportTicketProposalCreate": {
         "title": "SupportTicketProposalCreate",
         "type": "object",

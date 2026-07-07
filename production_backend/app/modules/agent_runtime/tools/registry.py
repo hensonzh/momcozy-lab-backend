@@ -410,6 +410,82 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         ToolContract(
+            name="artifacts.hospital_bag_card.create",
+            domain="artifacts",
+            description="Create an owner-scoped hospital bag card artifact for the current agent run.",
+            input_schema_ref="AgentArtifactCreate",
+            output_schema_ref="AgentArtifactRead",
+            read_or_write="write",
+            required_permission="agent_artifact:create:self",
+            owner_scope="actor",
+            side_effect_level="low",
+            blocking_policy="must_wait",
+            result_dependency="final_response",
+            requires_confirmation=False,
+            idempotency_required=False,
+            audit_required=True,
+            timeout_seconds=15,
+        )
+    )
+    registry.register(
+        ToolContract(
+            name="artifacts.labor_communication_card.create",
+            domain="artifacts",
+            description="Create an owner-scoped labor communication card artifact for the current agent run.",
+            input_schema_ref="AgentArtifactCreate",
+            output_schema_ref="AgentArtifactRead",
+            read_or_write="write",
+            required_permission="agent_artifact:create:self",
+            owner_scope="actor",
+            side_effect_level="low",
+            blocking_policy="must_wait",
+            result_dependency="final_response",
+            requires_confirmation=False,
+            idempotency_required=False,
+            audit_required=True,
+            timeout_seconds=15,
+        )
+    )
+    registry.register(
+        ToolContract(
+            name="artifacts.lactation_summary.create",
+            domain="artifacts",
+            description="Create an owner-scoped lactation summary artifact for the current agent run.",
+            input_schema_ref="AgentArtifactCreate",
+            output_schema_ref="AgentArtifactRead",
+            read_or_write="write",
+            required_permission="agent_artifact:create:self",
+            owner_scope="actor",
+            side_effect_level="low",
+            blocking_policy="must_wait",
+            result_dependency="final_response",
+            requires_confirmation=False,
+            idempotency_required=False,
+            audit_required=True,
+            timeout_seconds=15,
+        )
+    )
+    registry.register(
+        ToolContract(
+            name="artifacts.postpartum_checkin.create",
+            domain="artifacts",
+            description="Create an owner-scoped postpartum check-in artifact for the current agent run.",
+            input_schema_ref="AgentArtifactCreate",
+            output_schema_ref="AgentArtifactRead",
+            read_or_write="write",
+            required_permission="agent_artifact:create:self",
+            owner_scope="actor",
+            side_effect_level="low",
+            blocking_policy="must_wait",
+            result_dependency="final_response",
+            requires_confirmation=False,
+            idempotency_required=False,
+            audit_required=True,
+            timeout_seconds=15,
+        )
+    )
+    registry.register(
+        ToolContract(
             name="support.ticket.propose",
             domain="support",
             description="Create a support ticket action proposal after user confirmation intent is clear.",

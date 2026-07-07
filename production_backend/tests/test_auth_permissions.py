@@ -29,6 +29,7 @@ def test_permission_policy_allows_user_role_tool_permissions() -> None:
     PermissionPolicy().require_permission(user, "plans:write:self")
     PermissionPolicy().require_permission(user, "notifications:create:self")
     PermissionPolicy().require_permission(user, "records:write:self")
+    PermissionPolicy().require_permission(user, "agent_artifact:create:self")
     PermissionPolicy().require_permission(user, "hospital_bag_cart:update:self")
     PermissionPolicy().require_permission(user, "support_ticket:create:self")
 

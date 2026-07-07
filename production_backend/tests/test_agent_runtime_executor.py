@@ -18,6 +18,7 @@ from production_backend.app.modules.agent_runtime.sdk import (
     scripted_sdk_response,
     scripted_tool_invocation,
 )
+from production_backend.app.modules.agent_runtime.sdk.specialists import default_specialist_registry
 from production_backend.app.modules.agent_runtime.tools import ToolExecutor, ToolHandlerContext, default_tool_registry
 
 
@@ -48,7 +49,7 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() ->
     assert request.thread_id == str(thread_id)
     assert request.prompt_version == "prompt-v2"
     assert request.specialist_id == "general_assistant"
-    assert "You are the MomCozy product assistant." in request.instructions
+    assert "You are CozyMate" in request.instructions
     assert "Specialist profile: general_assistant" in request.instructions
     assert request.tool_names == (
         "business.context.read",
@@ -70,7 +71,7 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() ->
         "developer",
         "user",
     ]
-    assert request.model_input[0]["content"].startswith("You are the MomCozy product assistant.")
+    assert request.model_input[0]["content"].startswith("You are CozyMate")
     assert request.model_input[4]["content"]["state"]["run_id"] == str(run.id)
     assert request.model_input[4]["content"]["state"]["specialist_id"] == "general_assistant"
     assert repository.routing_decisions[0]["primary_specialist_id"] == "general_assistant"
@@ -92,6 +93,10 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() ->
         "routing_source",
         "run_id",
         "runtime_pattern",
+        "service_playbook_deliverables",
+        "service_playbook_id",
+        "service_playbook_scope",
+        "service_playbook_version",
         "specialist_display_name",
         "specialist_id",
         "thread_id",
@@ -143,6 +148,23 @@ def test_agent_runtime_executor_projects_active_memory_into_dynamic_context() ->
     assert "raw_evidence" not in memory_facts[0]
     assert state_store.projections[0]["projection_summary"]["memory_count"] == 1
     assert state_store.projections[0]["projection_summary"]["fresh_business_fact_keys"] == []
+
+
+def test_default_specialists_are_bound_to_service_playbooks() -> None:
+    registry = default_specialist_registry()
+
+    for specialist_id in (
+        "general_assistant",
+        "pregnancy_service",
+        "lactation",
+        "postpartum_recovery",
+        "after_sales",
+        "safety_guardrail",
+    ):
+        profile = registry.get(specialist_id)
+        assert profile.service_playbook is not None
+        assert profile.service_playbook.specialist_id == specialist_id
+        assert "服务剧本" in profile.service_playbook.prompt_block()
 
 
 def test_agent_runtime_executor_publishes_text_deltas_to_transient_stream() -> None:
@@ -232,6 +254,10 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert result.status == "completed"
     assert result.final_text == '{"profile": {"display_name": "Mai"}}'
     assert backend.tool_names == (
+        "artifacts_hospital_bag_card_create",
+        "artifacts_labor_communication_card_create",
+        "artifacts_lactation_summary_create",
+        "artifacts_postpartum_checkin_create",
         "business_context_read",
         "devices_guidance_assets_read",
         "devices_pump_status_read",
@@ -254,6 +280,9 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
         "records_pumping_record_propose",
         "support_ticket_propose",
     )
+    assert backend.tool_schemas["artifacts_hospital_bag_card_create"]["required"] == ["title"]
+    assert backend.tool_schemas["artifacts_hospital_bag_card_create"]["properties"]["sections"]["maxItems"] == 20
+    assert backend.tool_schemas["artifacts_labor_communication_card_create"]["properties"]["source_context"]["type"] == "object"
     assert backend.tool_schemas["business_context_read"]["properties"]["limit"]["maximum"] == 20
     assert backend.tool_schemas["devices_guidance_assets_read"]["properties"]["limit"]["maximum"] == 20
     assert backend.tool_schemas["devices_guidance_assets_read"]["properties"]["content_type"]["type"] == "string"
@@ -310,6 +339,7 @@ def test_agent_runtime_executor_selects_specialist_and_scopes_tools() -> None:
     assert "Specialist profile: lactation" in request.instructions
     assert request.model_input[-4]["content"]["state"]["specialist_id"] == "lactation"
     assert request.tool_names == (
+        "artifacts.lactation_summary.create",
         "business.context.read",
         "notifications.milk_reminder.propose",
         "plans.milk_plan.propose",
@@ -318,7 +348,41 @@ def test_agent_runtime_executor_selects_specialist_and_scopes_tools() -> None:
         "records.milk_status.read",
         "records.milk_summary.read",
         "records.pumping_record.propose",
+        "support.ticket.propose",
     )
+
+
+def test_agent_runtime_executor_injects_pregnancy_service_playbook() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="帮我准备待产包和分娩沟通单", sequence=1)
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    backend = CapturingSdkBackend(result=SdkNodeResult(final_text="我先帮你确认关键信息。"))
+    state_store = FakeStateStore()
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            state_store=state_store,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+        ).execute(run=run)
+    )
+
+    request = backend.requests[0]
+    state = request.model_input[-4]["content"]["state"]
+    assert result.status == "completed"
+    assert request.specialist_id == "pregnancy_service"
+    assert state["service_playbook_id"] == "pregnancy_service_v1"
+    assert state["service_playbook_version"] == "v1"
+    assert "CozyMate" in request.instructions
+    assert "服务剧本" in request.instructions
+    assert "待产包清单" in request.instructions
+    assert "分娩沟通单" in request.instructions
+    assert "每轮只推进一个重点" in request.instructions
+    assert "不要调用 load_skill" in request.instructions
+    assert "artifacts.hospital_bag_card.create" in request.tool_names
+    assert "artifacts.labor_communication_card.create" in request.tool_names
+    assert state_store.projections[0]["projection_summary"]["service_playbook_id"] == "pregnancy_service_v1"
 
 
 def test_agent_runtime_executor_routes_named_pump_issue_to_device_specialist() -> None:

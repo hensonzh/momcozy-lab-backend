@@ -87,7 +87,7 @@ class SupportTicketProposeToolHandler:
             "action_id": str(action.id),
             "action_type": action.action_type,
             "action_status": action.status,
-            "requires_confirmation": True,
+            "requires_confirmation": _action_requires_confirmation(action),
             "preview_payload": preview_payload,
         }
 
@@ -117,8 +117,33 @@ class HospitalBagCartUpdateProposeToolHandler:
             "action_id": str(action.id),
             "action_type": action.action_type,
             "action_status": action.status,
-            "requires_confirmation": True,
+            "requires_confirmation": _action_requires_confirmation(action),
             "preview_payload": preview_payload,
+        }
+
+
+class AgentArtifactCreateToolHandler:
+    def __init__(self, *, runtime_service: AgentRuntimeService, artifact_type: str, default_title: str) -> None:
+        self.runtime_service = runtime_service
+        self.artifact_type = artifact_type
+        self.default_title = default_title
+
+    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
+        payload = _artifact_payload(args=context.args, default_title=self.default_title)
+        artifact = await self.runtime_service.create_artifact(
+            owner_user_id=context.actor.user_id,
+            run_id=context.run_id,
+            artifact_type=self.artifact_type,
+            schema_version="v1",
+            status="created",
+            payload=payload,
+        )
+        return {
+            "artifact_id": str(artifact.id),
+            "artifact_type": artifact.artifact_type,
+            "status": artifact.status,
+            "title": _text(payload, "title"),
+            "summary": _text(payload, "summary"),
         }
 
 
@@ -614,6 +639,26 @@ def build_default_tool_handlers(
         "records.feeding_record.propose": FeedingRecordProposeToolHandler(runtime_service=agent_runtime_service),
         "records.pumping_record.propose": PumpingRecordProposeToolHandler(runtime_service=agent_runtime_service),
         "hospital_bag.cart_update.propose": HospitalBagCartUpdateProposeToolHandler(runtime_service=agent_runtime_service),
+        "artifacts.hospital_bag_card.create": AgentArtifactCreateToolHandler(
+            runtime_service=agent_runtime_service,
+            artifact_type="hospital_bag_card",
+            default_title="待产包清单",
+        ),
+        "artifacts.labor_communication_card.create": AgentArtifactCreateToolHandler(
+            runtime_service=agent_runtime_service,
+            artifact_type="labor_communication_card",
+            default_title="分娩沟通单",
+        ),
+        "artifacts.lactation_summary.create": AgentArtifactCreateToolHandler(
+            runtime_service=agent_runtime_service,
+            artifact_type="lactation_summary_card",
+            default_title="泌乳分析总结",
+        ),
+        "artifacts.postpartum_checkin.create": AgentArtifactCreateToolHandler(
+            runtime_service=agent_runtime_service,
+            artifact_type="postpartum_checkin_card",
+            default_title="产后康复 Check-in",
+        ),
         "support.ticket.propose": SupportTicketProposeToolHandler(runtime_service=agent_runtime_service),
     }
 
@@ -704,6 +749,25 @@ def _hospital_bag_cart_preview_payload(apply_payload: dict[str, Any]) -> dict[st
         "cart_update": cart_update if isinstance(cart_update, dict) else {},
     }
     return {key: value for key, value in preview.items() if value not in ("", None, {})}
+
+
+def _artifact_payload(*, args: dict[str, Any], default_title: str) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    extra_payload = args.get("payload")
+    if isinstance(extra_payload, dict):
+        payload.update(extra_payload)
+    payload["title"] = _text(args, "title") or default_title
+    payload["summary"] = _text(args, "summary")
+    sections = args.get("sections")
+    if isinstance(sections, list):
+        payload["sections"] = sections
+    source_context = args.get("source_context")
+    if isinstance(source_context, dict):
+        payload["source_context"] = source_context
+    metadata = _metadata_payload(args)
+    if metadata:
+        payload["metadata"] = metadata
+    return {key: value for key, value in payload.items() if value not in ("", None, [], {})}
 
 
 def _feeding_record_apply_payload(args: dict[str, Any]) -> dict[str, Any]:
@@ -961,9 +1025,13 @@ def _proposal_result(*, action: Any, preview_payload: dict[str, Any]) -> dict[st
         "action_id": str(action.id),
         "action_type": action.action_type,
         "action_status": action.status,
-        "requires_confirmation": True,
+        "requires_confirmation": _action_requires_confirmation(action),
         "preview_payload": preview_payload,
     }
+
+
+def _action_requires_confirmation(action: Any) -> bool:
+    return str(getattr(action, "status", "") or "") == "confirmation_required"
 
 
 def _metadata_payload(payload: dict[str, Any]) -> dict[str, str]:
