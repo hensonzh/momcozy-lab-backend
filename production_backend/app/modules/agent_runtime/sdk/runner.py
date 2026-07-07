@@ -16,6 +16,7 @@ from ....core.errors import ApiError
 
 SdkToolInvoker = Callable[[str], Awaitable[str]]
 SdkTextDeltaHandler = Callable[[str], Awaitable[None]]
+THINK_TAG = "<think>"
 
 
 @dataclass(frozen=True)
@@ -126,7 +127,7 @@ class OpenAIAgentsSdkBackend:
 
         result = await runner_cls.run(agent, _flatten_model_input(request.model_input), **run_kwargs)
         final_output = getattr(result, "final_output", "")
-        return SdkNodeResult(final_text=str(final_output or ""))
+        return SdkNodeResult(final_text=_sanitize_model_text(str(final_output or "")))
 
 
 class OpenAIAgentsSdkRunner:
@@ -212,12 +213,22 @@ async def _run_streamed(
     on_text_delta: SdkTextDeltaHandler,
 ) -> SdkNodeResult:
     streamed = runner_cls.run_streamed(agent, model_input, **run_kwargs)
+    raw_text = ""
+    emitted_text = ""
     async for event in streamed.stream_events():
         delta = _text_delta_from_stream_event(event)
         if delta:
-            await on_text_delta(delta)
+            raw_text += delta
+            sanitized_text = _sanitize_model_text(raw_text)
+            if sanitized_text.startswith(emitted_text):
+                sanitized_delta = sanitized_text[len(emitted_text) :]
+            else:
+                sanitized_delta = sanitized_text
+            if sanitized_delta:
+                await on_text_delta(sanitized_delta)
+                emitted_text = sanitized_text
     final_output = getattr(streamed, "final_output", "")
-    return SdkNodeResult(final_text=str(final_output or ""))
+    return SdkNodeResult(final_text=_sanitize_model_text(str(final_output or "")))
 
 
 def _text_delta_from_stream_event(event: Any) -> str:
@@ -240,6 +251,17 @@ def _stringify_content(content: object) -> str:
     if isinstance(content, dict | list):
         return json.dumps(content, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
     return str(content)
+
+
+def _sanitize_model_text(text: str) -> str:
+    without_closed_blocks = re.sub(r"(?is)<think>.*?</think>\s*", "", text)
+    without_open_block = re.sub(r"(?is)<think>.*$", "", without_closed_blocks)
+    lower_text = without_open_block.lower()
+    max_partial_len = min(len(THINK_TAG) - 1, len(lower_text))
+    for size in range(max_partial_len, 0, -1):
+        if THINK_TAG.startswith(lower_text[-size:]):
+            return without_open_block[:-size].strip()
+    return without_open_block.strip()
 
 
 def sdk_tool_name(contract_name: str) -> str:

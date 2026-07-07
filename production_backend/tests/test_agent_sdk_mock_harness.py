@@ -181,3 +181,113 @@ def test_minimax_backend_uses_openai_compatible_model_provider(monkeypatch: pyte
     assert model_provider.kwargs["use_responses"] is False
     assert model_provider.kwargs["buffer_streamed_tool_calls"] is True
     assert run_config.kwargs["trace_metadata"]["model_provider"] == "minimax"
+
+
+def test_minimax_backend_strips_thinking_blocks_from_final_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeOpenAIProvider:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+    class FakeRunConfig:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+    class FakeAgent:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+    class FakeRunner:
+        @staticmethod
+        async def run(_agent: FakeAgent, _model_input: str, **_kwargs: object) -> object:
+            return types.SimpleNamespace(final_output="<think>private reasoning</think>\n\n用户可见回复")
+
+    fake_agents = types.SimpleNamespace(
+        Agent=FakeAgent,
+        Runner=FakeRunner,
+        RunConfig=FakeRunConfig,
+        OpenAIProvider=FakeOpenAIProvider,
+    )
+    monkeypatch.setitem(sys.modules, "agents", fake_agents)
+
+    result = asyncio.run(
+        OpenAIAgentsSdkBackend(
+            model="MiniMax-M3",
+            provider="minimax",
+            api_key="minimax-key",
+            base_url="https://api.minimaxi.com/v1",
+            use_responses=False,
+        ).run(
+            SdkNodeRequest(
+                run_id="run_1",
+                thread_id="thread_1",
+                actor_user_id="user_1",
+                instructions="Use tools.",
+                model_input=[{"role": "user", "content": "hello"}],
+            )
+        )
+    )
+
+    assert result.final_text == "用户可见回复"
+
+
+def test_minimax_backend_strips_thinking_blocks_from_streamed_deltas(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeOpenAIProvider:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+    class FakeRunConfig:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+    class FakeAgent:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+    class FakeStreamedResult:
+        final_output = "<think>hidden</think>\n\n可见回复"
+
+        async def stream_events(self) -> object:
+            for delta in ("<thi", "nk>hidden", "</think>\n\n可", "见回复"):
+                yield types.SimpleNamespace(
+                    type="raw_response_event",
+                    data=types.SimpleNamespace(type="response.output_text.delta", delta=delta),
+                )
+
+    class FakeRunner:
+        @staticmethod
+        def run_streamed(_agent: FakeAgent, _model_input: str, **_kwargs: object) -> FakeStreamedResult:
+            return FakeStreamedResult()
+
+    fake_agents = types.SimpleNamespace(
+        Agent=FakeAgent,
+        Runner=FakeRunner,
+        RunConfig=FakeRunConfig,
+        OpenAIProvider=FakeOpenAIProvider,
+    )
+    monkeypatch.setitem(sys.modules, "agents", fake_agents)
+    deltas: list[str] = []
+
+    async def on_text_delta(delta: str) -> None:
+        deltas.append(delta)
+
+    result = asyncio.run(
+        OpenAIAgentsSdkBackend(
+            model="MiniMax-M3",
+            provider="minimax",
+            api_key="minimax-key",
+            base_url="https://api.minimaxi.com/v1",
+            use_responses=False,
+        ).run(
+            SdkNodeRequest(
+                run_id="run_1",
+                thread_id="thread_1",
+                actor_user_id="user_1",
+                instructions="Use tools.",
+                model_input=[{"role": "user", "content": "hello"}],
+                on_text_delta=on_text_delta,
+            )
+        )
+    )
+
+    assert result.final_text == "可见回复"
+    assert "".join(deltas) == "可见回复"
