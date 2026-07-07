@@ -120,6 +120,23 @@ services. Use `backend-prod-services` for restarts that should not run
 migrations again. See `production_backend/docs/deployment-runbook.md` for
 reverse proxy, scaling, and release details.
 
+## Server Test Docker Compose
+
+Use `production_backend/docker-compose.test.yml` when deploying a test
+environment on a server and you want DB, Redis, and MinIO to run as Docker
+containers. This is separate from production because it starts containerized
+infrastructure and stores data in compose volumes.
+
+```bash
+cp production_backend/env/compose.test.env.example production_backend/env/compose.test.env
+make backend-test-up
+```
+
+`backend-test-up` starts `postgres`, `redis`, `minio`, initializes the test
+bucket, runs Alembic migrations, and then starts `api`, `agent-worker`, and
+`outbox-worker`. The API binds to `127.0.0.1:8001` by default so a reverse proxy
+can expose a test domain without exposing DB/Redis/MinIO ports.
+
 ## Target Shape
 
 ```text

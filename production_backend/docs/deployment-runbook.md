@@ -128,6 +128,55 @@ docker compose -f production_backend/docker-compose.prod.yml up -d --scale agent
 External traffic routers should probe `/v1/health/ready`, not only container
 liveness, because readiness verifies configured infrastructure.
 
+## Server Test Docker Compose
+
+`production_backend/docker-compose.test.yml` is for a test server where the app
+and its infrastructure run in Docker. Unlike the production compose, it starts
+containerized `postgres`, `redis`, `minio`, and `minio-init`. Unlike local
+compose, it does not publish DB/Redis/MinIO host ports by default.
+
+Prepare a private test env file:
+
+```bash
+cp production_backend/env/compose.test.env.example production_backend/env/compose.test.env
+```
+
+Enable the agent worker only after adding a test OpenAI key:
+
+```env
+AGENT_RUNTIME_WORKER_ENABLED=true
+OPENAI_API_KEY=...
+```
+
+Start the full test stack:
+
+```bash
+make backend-test-up
+```
+
+Inspect and tail logs:
+
+```bash
+make backend-test-ps
+make backend-test-logs
+```
+
+Stop the test stack while keeping data volumes:
+
+```bash
+make backend-test-down
+```
+
+The test API binds to `127.0.0.1:8001` by default:
+
+```text
+host 127.0.0.1:8001 -> container api:8000
+```
+
+Put Nginx or Caddy in front of it for `https://api-test.example.com`. Keep
+Postgres, Redis, and MinIO internal to the compose network unless a temporary
+operations task explicitly requires a port forward.
+
 ## Agent Worker Capacity
 
 Agent run capacity is controlled by both worker replicas and per-process async

@@ -4,6 +4,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 PRODUCTION_BACKEND = ROOT / "production_backend"
 COMPOSE_LOCAL_ENV = PRODUCTION_BACKEND / "env" / "compose.local.env.example"
+COMPOSE_TEST_ENV = PRODUCTION_BACKEND / "env" / "compose.test.env.example"
+TEST_COMPOSE = PRODUCTION_BACKEND / "docker-compose.test.yml"
 PROD_COMPOSE = PRODUCTION_BACKEND / "docker-compose.prod.yml"
 
 
@@ -48,6 +50,7 @@ def test_environment_profile_examples_exist_for_local_staging_and_production() -
 
     assert (env_dir / "local.env.example").exists()
     assert (env_dir / "compose.local.env.example").exists()
+    assert (env_dir / "compose.test.env.example").exists()
     assert (env_dir / "staging.env.example").exists()
     assert (env_dir / "production.env.example").exists()
     assert "APP_ENV=production" in (env_dir / "production.env.example").read_text()
@@ -178,6 +181,40 @@ def test_production_compose_uses_production_env_and_safe_api_bind() -> None:
     assert "stop_grace_period: 60s" in compose
 
 
+def test_server_test_compose_starts_containerized_infrastructure_without_publishing_it() -> None:
+    compose = TEST_COMPOSE.read_text()
+
+    assert "postgres:" in compose
+    assert "redis:" in compose
+    assert "minio:" in compose
+    assert "minio-init:" in compose
+    assert "postgres:16" in compose
+    assert "redis:7" in compose
+    assert "minio/minio:latest" in compose
+    assert "postgres_test_data:" in compose
+    assert "redis_test_data:" in compose
+    assert "minio_test_data:" in compose
+    assert "5432:5432" not in compose
+    assert "6379:6379" not in compose
+    assert "9000:9000" not in compose
+
+
+def test_server_test_compose_uses_test_env_and_safe_api_bind() -> None:
+    compose = TEST_COMPOSE.read_text()
+    env = COMPOSE_TEST_ENV.read_text()
+
+    assert "${MOMCOZY_BACKEND_ENV_FILE:-env/compose.test.env}" in compose
+    assert "${MOMCOZY_TEST_API_BIND:-127.0.0.1:8001}:8000" in compose
+    assert "mc mb --ignore-existing test/momcozy-test" in compose
+    assert "APP_ENV=test" in env
+    assert "postgresql+asyncpg://momcozy_test:momcozy_test@postgres:5432/momcozy_test" in env
+    assert "REDIS_URL=redis://redis:6379/0" in env
+    assert "OBJECT_STORAGE_PROVIDER=minio" in env
+    assert "OBJECT_STORAGE_BUCKET=momcozy-test" in env
+    assert "OBJECT_STORAGE_ENDPOINT_URL=http://minio:9000" in env
+    assert "OUTBOX_WORKER_ENABLED=true" in env
+
+
 def test_makefile_exposes_production_compose_release_targets() -> None:
     makefile = (ROOT / "Makefile").read_text()
 
@@ -191,3 +228,19 @@ def test_makefile_exposes_production_compose_release_targets() -> None:
     assert "$(PROD_COMPOSE) up -d api agent-worker outbox-worker" in makefile
     assert "backend-prod-services:" in makefile
     assert "backend-prod-logs:" in makefile
+
+
+def test_makefile_exposes_server_test_compose_targets() -> None:
+    makefile = (ROOT / "Makefile").read_text()
+
+    assert "TEST_COMPOSE_ENV_FILE ?= production_backend/env/compose.test.env" in makefile
+    assert "docker-compose.test.yml" in makefile
+    assert "backend-test-build:" in makefile
+    assert "$(TEST_COMPOSE) build api agent-worker outbox-worker" in makefile
+    assert "backend-test-migrate:" in makefile
+    assert "$(TEST_COMPOSE) --profile tools run --rm migrate" in makefile
+    assert "backend-test-up:" in makefile
+    assert "$(TEST_COMPOSE) up -d postgres redis minio minio-init" in makefile
+    assert "$(TEST_COMPOSE) up -d api agent-worker outbox-worker" in makefile
+    assert "backend-test-services:" in makefile
+    assert "backend-test-logs:" in makefile
