@@ -70,7 +70,8 @@ def test_invite_login_creates_invite_identity_and_issues_tokens() -> None:
     )
 
     assert account_repository.created_identity.provider == "invite"
-    assert account_repository.created_identity.subject == "MOMCOZY-BETA:flutter-device-001"
+    assert account_repository.created_identity.subject == "MOMCOZY-BETA"
+    assert account_repository.created_identity.device_id == "flutter-device-001"
     assert account_repository.created_identity.email == ""
     assert account_repository.created_identity.password_hash == ""
     assert session_service.created_user_id == account_repository.created_user.id
@@ -85,7 +86,8 @@ def test_invite_login_reuses_existing_invite_identity() -> None:
         user_id=user.id,
         user=user,
         provider="invite",
-        subject="MOMCOZY-BETA:flutter-device-001",
+        subject="MOMCOZY-BETA",
+        device_id="flutter-device-001",
     )
     account_repository = FakeAccountRepository(existing_identity=identity)
     session_service = FakeSessionService()
@@ -105,6 +107,37 @@ def test_invite_login_reuses_existing_invite_identity() -> None:
     assert account_repository.created_identity is None
     assert issued.user.id == user.id
     assert session_service.created_user_id == user.id
+
+
+def test_invite_login_rejects_bound_code_from_different_device() -> None:
+    user = User(id=uuid4(), display_name="Invite User", status="active")
+    identity = AuthIdentity(
+        user_id=user.id,
+        user=user,
+        provider="invite",
+        subject="MOMCOZY-BETA",
+        device_id="flutter-device-001",
+    )
+    account_repository = FakeAccountRepository(existing_identity=identity)
+    session_service = FakeSessionService()
+    service = AuthAccountService(
+        account_repository=account_repository,
+        session_service=session_service,
+        settings=_settings(auth_invite_codes=("MOMCOZY-BETA",)),
+    )
+
+    with pytest.raises(ApiError) as denied:
+        asyncio.run(
+            service.invite_login(
+                invite_code="MOMCOZY-BETA",
+                device_context=DeviceContext(device_id="flutter-device-002"),
+            )
+        )
+
+    assert denied.value.code == "permission_denied"
+    assert "already bound" in denied.value.message
+    assert account_repository.created_identity is None
+    assert session_service.created_user_id is None
 
 
 def test_invite_login_rejects_invalid_code_without_creating_session() -> None:
@@ -189,6 +222,12 @@ class FakeAccountRepository:
             return self.existing_identity
         return None
 
+    async def get_invite_identity(self, *, invite_code: str):
+        if self.existing_identity and self.existing_identity.provider == "invite":
+            if self.existing_identity.subject == invite_code or self.existing_identity.subject.startswith(f"{invite_code}:"):
+                return self.existing_identity
+        return None
+
     async def get_user(self, *, user_id):
         if self.existing_user and self.existing_user.id == user_id:
             return self.existing_user
@@ -212,11 +251,16 @@ class FakeAccountRepository:
             user_id=self.created_user.id,
             user=self.created_user,
             provider="invite",
-            subject=f"{invite_code}:{device_id}",
+            subject=invite_code,
+            device_id=device_id,
             email="",
             password_hash="",
         )
         return self.created_user, self.created_identity
+
+    async def bind_invite_identity_device(self, *, identity, device_id: str):
+        identity.device_id = device_id
+        return identity
 
 
 class FakeSessionService:

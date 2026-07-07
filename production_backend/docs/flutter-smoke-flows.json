@@ -16,7 +16,7 @@
           "path": "/v1/auth/invite-login",
           "body": {
             "invite_code": "${invite_code}",
-            "device_id": "flutter-smoke-${run_id}"
+            "device_id": "flutter-smoke-invite-device"
           },
           "captures": {
             "access_token": "$.access_token",

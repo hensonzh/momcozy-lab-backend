@@ -18,3 +18,9 @@ def test_auth_identity_has_password_hash_column() -> None:
     table = Base.metadata.tables["auth_identities"]
 
     assert "password_hash" in table.columns
+
+
+def test_auth_identity_has_device_id_column_for_invite_binding() -> None:
+    table = Base.metadata.tables["auth_identities"]
+
+    assert "device_id" in table.columns

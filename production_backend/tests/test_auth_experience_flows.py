@@ -117,6 +117,11 @@ async def _run_invite_auth_main_flow() -> None:
         invite_code="MOMCOZY-BETA",
         device_context=DeviceContext(device_id="flutter-device-001", user_agent="MomCozy Android", ip_address="127.0.0.1"),
     )
+    with pytest.raises(ApiError) as bound_to_other_device:
+        await service.invite_login(
+            invite_code="MOMCOZY-BETA",
+            device_context=DeviceContext(device_id="flutter-device-002", user_agent="MomCozy Android", ip_address="127.0.0.2"),
+        )
     refreshed = await service.refresh(refresh_token=first.refresh_token)
     first_access = authenticate_access_token(first.access_token, settings)
     refreshed_access = authenticate_access_token(refreshed.access_token, settings)
@@ -136,8 +141,10 @@ async def _run_invite_auth_main_flow() -> None:
     assert first_access.user_id == first.user.id
     assert refreshed_access.user_id == first.user.id
     assert identity.provider == "invite"
-    assert identity.subject == "MOMCOZY-BETA:flutter-device-001"
+    assert identity.subject == "MOMCOZY-BETA"
+    assert identity.device_id == "flutter-device-001"
     assert identity.password_hash == ""
+    assert bound_to_other_device.value.code == "permission_denied"
     assert invalid_code.value.code == "authentication_required"
 
 
@@ -164,6 +171,16 @@ class InMemoryAuthAccountRepository:
             None,
         )
 
+    async def get_invite_identity(self, *, invite_code: str):
+        return next(
+            (
+                identity
+                for identity in self.identities
+                if identity.provider == "invite" and (identity.subject == invite_code or identity.subject.startswith(f"{invite_code}:"))
+            ),
+            None,
+        )
+
     async def get_user(self, *, user_id: UUID):
         return self.users.get(user_id)
 
@@ -182,6 +199,10 @@ class InMemoryAuthAccountRepository:
         self.identities.append(identity)
         return user, identity
 
+    async def bind_invite_identity_device(self, *, identity, device_id: str):
+        identity.device_id = device_id
+        return identity
+
     async def create_invite_user(self, *, invite_code: str, device_id: str, display_name: str):
         user = User(id=uuid4(), display_name=display_name, status="active")
         identity = AuthIdentity(
@@ -189,7 +210,8 @@ class InMemoryAuthAccountRepository:
             user_id=user.id,
             user=user,
             provider="invite",
-            subject=f"{invite_code}:{device_id}",
+            subject=invite_code,
+            device_id=device_id,
             email="",
             password_hash="",
         )

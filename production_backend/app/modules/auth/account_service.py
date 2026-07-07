@@ -6,7 +6,7 @@ from uuid import UUID
 
 from ...core.errors import ApiError
 from ...core.settings import Settings
-from ..users.models import User
+from ..users.models import AuthIdentity, User
 from .jwt import issue_access_token
 from .passwords import hash_password, verify_password
 from .repository import AuthAccountRepository
@@ -95,8 +95,7 @@ class AuthAccountService:
             raise ApiError(code="authentication_required", message="Invite code is invalid.", status=401)
 
         device_id = normalize_invite_device_id(device_context.device_id)
-        subject = invite_subject(invite_code=normalized_code, device_id=device_id)
-        identity = await self.account_repository.get_identity(provider=INVITE_PROVIDER, subject=subject)
+        identity = await self.account_repository.get_invite_identity(invite_code=normalized_code)
         if identity is None:
             user, _identity = await self.account_repository.create_invite_user(
                 invite_code=normalized_code,
@@ -104,6 +103,15 @@ class AuthAccountService:
                 display_name=DEFAULT_INVITE_DISPLAY_NAME,
             )
         else:
+            bound_device_id = invite_identity_device_id(identity=identity, invite_code=normalized_code)
+            if bound_device_id and bound_device_id != device_id:
+                raise ApiError(
+                    code="permission_denied",
+                    message="Invite code is already bound to another device.",
+                    status=403,
+                )
+            if not bound_device_id:
+                identity = await self.account_repository.bind_invite_identity_device(identity=identity, device_id=device_id)
             user = identity.user or await self.account_repository.get_user(user_id=identity.user_id)
             if user is None or user.status != "active":
                 raise ApiError(code="permission_denied", message="User account is not active.", status=403)
@@ -173,8 +181,15 @@ def normalize_invite_device_id(device_id: str) -> str:
     return normalized
 
 
-def invite_subject(*, invite_code: str, device_id: str) -> str:
-    return f"{invite_code}:{device_id}"
+def invite_identity_device_id(*, identity: AuthIdentity, invite_code: str) -> str:
+    device_id = str(identity.device_id or "").strip()
+    if device_id:
+        return device_id
+    legacy_prefix = f"{invite_code}:"
+    subject = str(getattr(identity, "subject", "") or "")
+    if subject.startswith(legacy_prefix):
+        return subject[len(legacy_prefix) :].strip()
+    return ""
 
 
 def _normalize_invite_code_value(invite_code: str) -> str:

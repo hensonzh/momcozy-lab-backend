@@ -41,6 +41,7 @@ class AuthIdentity(Base):
     subject: Mapped[str] = mapped_column(String(255), nullable=False)
     email: Mapped[str] = mapped_column(String(320), default="", server_default="", nullable=False)
     phone: Mapped[str] = mapped_column(String(32), default="", server_default="", nullable=False)
+    device_id: Mapped[str] = mapped_column(String(120), default="", server_default="", nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), default="", server_default="", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
