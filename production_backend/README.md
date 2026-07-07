@@ -103,6 +103,23 @@ OPENAI_API_KEY=...
 OPENAI_MODEL=...
 ```
 
+## Production Docker Compose
+
+Use `production_backend/docker-compose.prod.yml` on a server when Postgres,
+Redis, and object storage are managed outside the compose project. The production
+compose starts only `api`, `agent-worker`, and `outbox-worker`; the one-time
+`migrate` service is available through the `tools` profile.
+
+```bash
+cp production_backend/env/production.env.example production_backend/env/production.env
+make backend-prod-up
+```
+
+`backend-prod-up` runs Alembic migrations and then starts the three runtime
+services. Use `backend-prod-services` for restarts that should not run
+migrations again. See `production_backend/docs/deployment-runbook.md` for
+reverse proxy, scaling, and release details.
+
 ## Target Shape
 
 ```text

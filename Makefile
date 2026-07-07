@@ -1,11 +1,14 @@
 BACKEND_ENV ?= local
 BACKEND_ENV_FILE ?= production_backend/env/$(BACKEND_ENV).env.example
 COMPOSE_ENV_FILE ?= production_backend/env/compose.local.env.example
+PROD_COMPOSE_ENV_FILE ?= production_backend/env/production.env
 PYTHON ?= production_backend/.venv/bin/python
 COMPOSE_ENV_FILE_FOR_COMPOSE = $(patsubst production_backend/%,%,$(COMPOSE_ENV_FILE))
 COMPOSE = MOMCOZY_BACKEND_ENV_FILE=$(COMPOSE_ENV_FILE_FOR_COMPOSE) docker compose -f production_backend/docker-compose.yml
+PROD_COMPOSE_ENV_FILE_FOR_COMPOSE = $(patsubst production_backend/%,%,$(PROD_COMPOSE_ENV_FILE))
+PROD_COMPOSE = MOMCOZY_BACKEND_ENV_FILE=$(PROD_COMPOSE_ENV_FILE_FOR_COMPOSE) docker compose -f production_backend/docker-compose.prod.yml
 
-.PHONY: backend-local-up backend-up backend-down backend-local-migrate backend-migrate backend-local-workers backend-workers backend-local-minio backend-export-contracts backend-check-infra backend-productization-status backend-smoke backend-staging-smoke backend-production-readiness backend-worker-backlog backend-agent-recover-stuck-runs backend-env-print
+.PHONY: backend-local-up backend-up backend-down backend-local-migrate backend-migrate backend-local-workers backend-workers backend-local-minio backend-prod-build backend-prod-migrate backend-prod-up backend-prod-services backend-prod-down backend-prod-ps backend-prod-logs backend-export-contracts backend-check-infra backend-productization-status backend-smoke backend-staging-smoke backend-production-readiness backend-worker-backlog backend-agent-recover-stuck-runs backend-env-print
 
 backend-local-up:
 	$(MAKE) backend-up BACKEND_ENV=local
@@ -32,6 +35,28 @@ backend-workers:
 
 backend-local-minio:
 	$(COMPOSE) up -d minio minio-init
+
+backend-prod-build:
+	$(PROD_COMPOSE) build api agent-worker outbox-worker
+
+backend-prod-migrate:
+	$(PROD_COMPOSE) --profile tools run --rm migrate
+
+backend-prod-up:
+	$(MAKE) backend-prod-migrate PROD_COMPOSE_ENV_FILE=$(PROD_COMPOSE_ENV_FILE)
+	$(PROD_COMPOSE) up -d api agent-worker outbox-worker
+
+backend-prod-services:
+	$(PROD_COMPOSE) up -d api agent-worker outbox-worker
+
+backend-prod-down:
+	$(PROD_COMPOSE) down
+
+backend-prod-ps:
+	$(PROD_COMPOSE) ps
+
+backend-prod-logs:
+	$(PROD_COMPOSE) logs -f api agent-worker outbox-worker
 
 backend-export-contracts:
 	$(PYTHON) production_backend/scripts/export_openapi.py --output production_backend/docs/openapi.generated.json
@@ -71,4 +96,5 @@ backend-env-print:
 	@echo "BACKEND_ENV=$(BACKEND_ENV)"
 	@echo "BACKEND_ENV_FILE=$(BACKEND_ENV_FILE)"
 	@echo "COMPOSE_ENV_FILE=$(COMPOSE_ENV_FILE)"
+	@echo "PROD_COMPOSE_ENV_FILE=$(PROD_COMPOSE_ENV_FILE)"
 	@echo "PYTHON=$(PYTHON)"

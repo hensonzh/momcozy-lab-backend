@@ -62,6 +62,72 @@ Start incident and release debugging from these IDs when available:
 8. During rolling restarts, let agent and outbox workers receive SIGTERM/SIGINT
    and stop at the next idle point before force killing the process.
 
+## Production Docker Compose
+
+`production_backend/docker-compose.prod.yml` is the server deployment template.
+It starts only application processes and assumes Postgres, Redis, and object
+storage are provided through environment variables. It intentionally does not
+start local `postgres`, `redis`, `minio`, or `minio-init` services.
+
+Prepare a private env file on the server:
+
+```bash
+cp production_backend/env/production.env.example production_backend/env/production.env
+```
+
+Fill the real managed infrastructure URLs, object-storage credentials, JWT
+secret, service key, and OpenAI settings. Then build or pull the image:
+
+```bash
+make backend-prod-build
+```
+
+Run the release path with an explicit migration followed by the API and worker
+services:
+
+```bash
+make backend-prod-up
+```
+
+For restarts that should not run migrations again:
+
+```bash
+make backend-prod-services
+```
+
+Inspect the deployment:
+
+```bash
+make backend-prod-ps
+make backend-prod-logs
+```
+
+The production compose binds the API to `127.0.0.1:8000` by default. Put Nginx,
+Caddy, or a cloud load balancer in front of it and route HTTPS traffic to that
+local port. Override the bind only when the server network boundary is already
+protected:
+
+```bash
+MOMCOZY_API_BIND=0.0.0.0:8000 make backend-prod-services
+```
+
+To deploy a registry image instead of building locally:
+
+```bash
+MOMCOZY_BACKEND_IMAGE=registry.example.com/momcozy/backend:2026-07-07 make backend-prod-up
+```
+
+Scale agent run capacity by increasing worker replicas and, separately,
+`AGENT_RUNTIME_WORKER_CONCURRENCY`:
+
+```bash
+MOMCOZY_BACKEND_ENV_FILE=env/production.env \
+docker compose -f production_backend/docker-compose.prod.yml up -d --scale agent-worker=3 agent-worker
+```
+
+External traffic routers should probe `/v1/health/ready`, not only container
+liveness, because readiness verifies configured infrastructure.
+
 ## Agent Worker Capacity
 
 Agent run capacity is controlled by both worker replicas and per-process async

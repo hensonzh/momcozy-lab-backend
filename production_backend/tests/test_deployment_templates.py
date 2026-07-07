@@ -4,6 +4,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 PRODUCTION_BACKEND = ROOT / "production_backend"
 COMPOSE_LOCAL_ENV = PRODUCTION_BACKEND / "env" / "compose.local.env.example"
+PROD_COMPOSE = PRODUCTION_BACKEND / "docker-compose.prod.yml"
 
 
 def test_dockerfile_runs_isolated_production_backend() -> None:
@@ -146,3 +147,47 @@ def test_outbox_worker_waits_for_redis_because_agent_events_use_stream_cursor() 
 
     assert "redis:" in outbox_worker_section
     assert "condition: service_healthy" in outbox_worker_section
+
+
+def test_production_compose_only_starts_application_processes() -> None:
+    compose = PROD_COMPOSE.read_text()
+
+    assert "api:" in compose
+    assert "migrate:" in compose
+    assert "agent-worker:" in compose
+    assert "outbox-worker:" in compose
+    assert "\n  postgres:" not in compose
+    assert "\n  redis:" not in compose
+    assert "\n  minio:" not in compose
+    assert "\n  minio-init:" not in compose
+    assert "postgres:16" not in compose
+    assert "redis:7" not in compose
+    assert "minio/minio" not in compose
+
+
+def test_production_compose_uses_production_env_and_safe_api_bind() -> None:
+    compose = PROD_COMPOSE.read_text()
+
+    assert "${MOMCOZY_BACKEND_ENV_FILE:-env/production.env}" in compose
+    assert "${MOMCOZY_BACKEND_IMAGE:-momcozy-production-backend:latest}" in compose
+    assert "${MOMCOZY_API_BIND:-127.0.0.1:8000}:8000" in compose
+    assert "python -m alembic -c production_backend/alembic.ini upgrade head" in compose
+    assert "python -m production_backend.scripts.run_agent_worker" in compose
+    assert "python -m production_backend.scripts.run_outbox_worker" in compose
+    assert "restart: unless-stopped" in compose
+    assert "stop_grace_period: 60s" in compose
+
+
+def test_makefile_exposes_production_compose_release_targets() -> None:
+    makefile = (ROOT / "Makefile").read_text()
+
+    assert "PROD_COMPOSE_ENV_FILE ?= production_backend/env/production.env" in makefile
+    assert "docker-compose.prod.yml" in makefile
+    assert "backend-prod-build:" in makefile
+    assert "$(PROD_COMPOSE) build api agent-worker outbox-worker" in makefile
+    assert "backend-prod-migrate:" in makefile
+    assert "$(PROD_COMPOSE) --profile tools run --rm migrate" in makefile
+    assert "backend-prod-up:" in makefile
+    assert "$(PROD_COMPOSE) up -d api agent-worker outbox-worker" in makefile
+    assert "backend-prod-services:" in makefile
+    assert "backend-prod-logs:" in makefile
