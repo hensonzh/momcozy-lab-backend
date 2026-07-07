@@ -8,8 +8,8 @@ local `.env` files.
 
 | Profile | File | Purpose |
 |---|---|---|
-| Local host | `production_backend/env/local.env.example` | Run the app from the host while Postgres, Redis, and local object storage are local services. |
-| Local compose | `production_backend/env/compose.local.env.example` | Run API and workers in Docker Compose; service hosts are `postgres` and `redis`. |
+| Local host | `production_backend/env/local.env.example` | Run the app from the host while Docker Compose exposes Postgres, Redis, and MinIO on localhost ports. |
+| Local compose | `production_backend/env/compose.local.env.example` | Run API and workers in Docker Compose; service hosts are `postgres`, `redis`, and `minio`. |
 | Staging | `production_backend/env/staging.env.example` | Managed Postgres, managed Redis, and managed OSS-compatible object storage. |
 | Production | `production_backend/env/production.env.example` | Managed production services with production startup validation. |
 
@@ -19,7 +19,6 @@ local `.env` files.
 make backend-local-up
 make backend-local-migrate
 make backend-local-workers
-make backend-local-minio
 make backend-check-infra BACKEND_ENV=local
 ```
 
@@ -49,14 +48,13 @@ All environment-specific infrastructure is selected through variables:
 ```env
 DATABASE_URL=...
 REDIS_URL=...
-OBJECT_STORAGE_PROVIDER=local|s3|minio|oss|cos
+OBJECT_STORAGE_PROVIDER=minio|s3|oss|cos
 OBJECT_STORAGE_BUCKET=...
 OBJECT_STORAGE_ENDPOINT_URL=...
 OBJECT_STORAGE_ACCESS_KEY_ID=...
 OBJECT_STORAGE_SECRET_ACCESS_KEY=...
 ```
 
-Local development can use Docker Compose managed Postgres and Redis plus
-filesystem object storage. Production should point the same variables at
-managed Postgres, managed Redis, and OSS-compatible object storage without code
-changes.
+Local development uses Docker Compose managed Postgres, Redis, and MinIO.
+Production should point the same variables at managed Postgres, managed Redis,
+and OSS-compatible object storage without code changes.

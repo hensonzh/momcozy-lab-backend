@@ -42,35 +42,34 @@ object storage provider and that the stored byte size matches `size_bytes`.
 
 ## Local Development
 
-The default local profile uses filesystem object storage:
+The default local profile uses MinIO object storage:
 
 ```env
-OBJECT_STORAGE_PROVIDER=local
-OBJECT_STORAGE_LOCAL_ROOT=production_backend/.local/object_storage
+OBJECT_STORAGE_PROVIDER=minio
+OBJECT_STORAGE_BUCKET=momcozy-local
+OBJECT_STORAGE_ENDPOINT_URL=http://localhost:9000
+OBJECT_STORAGE_ACCESS_KEY_ID=minioadmin
+OBJECT_STORAGE_SECRET_ACCESS_KEY=minioadmin
 PRODUCT_ASSET_MANIFEST_PATH=production_backend/assets/product-assets.manifest.json
 ```
 
-For local development, copy the product asset files into the matching object
-storage prefix under `.local/object_storage`:
+For local development, upload the product asset files into the matching object
+storage prefix in the `momcozy-local` MinIO bucket:
 
 ```text
-production_backend/.local/object_storage/product-assets/...
+momcozy-local/product-assets/...
 ```
 
-The `.local/` directory is ignored by git, so large product asset blobs stay out
-of the repository and worker images.
-
-To exercise the full object-storage path locally, start MinIO:
+Start MinIO through Compose before running storage checks:
 
 ```bash
 make backend-local-minio
-OBJECT_STORAGE_PROVIDER=minio \
-OBJECT_STORAGE_BUCKET=momcozy-test \
-OBJECT_STORAGE_ENDPOINT_URL=http://localhost:9000 \
-OBJECT_STORAGE_ACCESS_KEY_ID=minioadmin \
-OBJECT_STORAGE_SECRET_ACCESS_KEY=minioadmin \
+set -a; . production_backend/env/local.env.example; set +a
 python production_backend/scripts/check_object_storage_profile.py
 ```
+
+Large product asset blobs still stay out of the repository and worker images;
+the manifest is committed, while bytes are published to object storage.
 
 ## Worker Boundary
 

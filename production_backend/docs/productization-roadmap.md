@@ -82,7 +82,7 @@ and expose health in local/test/staging/production profiles.
 
 Acceptance:
 
-- local development can use local Postgres, Redis, and object storage;
+- local development can use Docker Compose Postgres, Redis, and MinIO;
 - staging/production can switch to managed Postgres, Redis, and OSS/S3-compatible
   storage through environment variables;
 - production startup rejects implicit localhost DB/Redis and unsupported local
@@ -102,7 +102,7 @@ Already covered:
 - typed settings and profile examples;
 - Docker/compose services and optional worker profile;
 - live Postgres, Redis, and object storage CI jobs;
-- local and managed object storage abstraction;
+- MinIO-backed local and managed object storage abstraction;
 - readiness checks and deployment docs.
 
 Completed backend-only PR slices:

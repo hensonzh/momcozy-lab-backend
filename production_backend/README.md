@@ -25,7 +25,7 @@ session, SQLite data store, or static API-key user boundary.
 
 ## Environment Contract
 
-Local development uses local Postgres, Redis, and filesystem-backed object
+Local development uses Docker Compose Postgres, Redis, and MinIO-backed object
 storage by default. Staging and production must switch infrastructure through
 environment variables, not code changes:
 
@@ -54,8 +54,7 @@ hook values should be references to external automation, not raw credentials.
 
 ## Local Docker Compose
 
-The isolated backend can run with local Postgres, Redis, and filesystem-backed
-object storage:
+The isolated backend can run with Docker Compose Postgres, Redis, and MinIO:
 
 ```bash
 cd production_backend
@@ -65,8 +64,9 @@ docker compose up api
 
 `docker-compose.yml` reads `env/compose.local.env.example` by default, which
 intentionally points to compose service hostnames such as `postgres` and
-`redis`. Production deployments should provide managed `DATABASE_URL`,
-`REDIS_URL`, and managed `OBJECT_STORAGE_*` values through environment
+`redis`, plus `http://minio:9000` for S3-compatible object storage. Production
+deployments should provide managed `DATABASE_URL`, `REDIS_URL`, and managed
+`OBJECT_STORAGE_*` values through environment
 variables; no code change is required to switch providers.
 
 Agent runs are processed by a separate worker process, not by the API lifespan.

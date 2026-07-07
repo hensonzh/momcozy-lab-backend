@@ -11,7 +11,7 @@ backend-local-up:
 	$(MAKE) backend-up BACKEND_ENV=local
 
 backend-up:
-	$(COMPOSE) up -d postgres redis api
+	$(COMPOSE) up -d postgres redis minio minio-init api
 
 backend-down:
 	$(COMPOSE) down
@@ -29,7 +29,7 @@ backend-workers:
 	$(COMPOSE) --profile workers up -d agent-worker outbox-worker
 
 backend-local-minio:
-	$(COMPOSE) --profile tools up -d minio
+	$(COMPOSE) up -d minio minio-init
 
 backend-export-contracts:
 	$(PYTHON) production_backend/scripts/export_openapi.py --output production_backend/docs/openapi.generated.json

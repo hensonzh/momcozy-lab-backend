@@ -93,7 +93,7 @@ Completed:
 - SQLAlchemy async engine/session factory.
 - Alembic migration shell.
 - Redis lifecycle registration.
-- Object storage abstraction with local development implementation.
+- Object storage abstraction with MinIO-backed local development profile.
 - S3-compatible managed object storage provider.
 - Production validation rejects implicit localhost DB/Redis.
 - `/v1/health/ready` can validate DB and Redis readiness.
@@ -106,12 +106,12 @@ Completed:
   service-key protection in production.
 - Environment-controlled fixed-window rate limiting with Redis-first counting,
   local fallback, health/docs exemptions, and stable `rate_limited` envelopes.
-- Docker/compose local environment for API, Postgres, Redis, migrations, and
-  local object storage volume.
+- Docker/compose local environment for API, Postgres, Redis, MinIO, migrations,
+  and worker processes.
 
 Acceptance:
 
-- Local development can start with local Postgres/Redis/object storage.
+- Local development can start with Docker Compose Postgres/Redis/MinIO.
 - Production cannot start with implicit local infrastructure.
 - `/v1/health/ready` fails when required infrastructure is unavailable.
 

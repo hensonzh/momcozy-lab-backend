@@ -32,11 +32,12 @@ def test_compose_uses_local_infra_service_names_not_localhost() -> None:
 def test_compose_env_keeps_object_storage_switchable_by_environment() -> None:
     env = COMPOSE_LOCAL_ENV.read_text()
 
-    assert "OBJECT_STORAGE_PROVIDER=local" in env
-    assert "OBJECT_STORAGE_LOCAL_ROOT=/workspace/production_backend/.local/object_storage" in env
-    assert "OBJECT_STORAGE_ENDPOINT_URL=" in env
-    assert "OBJECT_STORAGE_ACCESS_KEY_ID=" in env
-    assert "OBJECT_STORAGE_SECRET_ACCESS_KEY=" in env
+    assert "OBJECT_STORAGE_PROVIDER=minio" in env
+    assert "OBJECT_STORAGE_LOCAL_ROOT=" in env
+    assert "OBJECT_STORAGE_BUCKET=momcozy-local" in env
+    assert "OBJECT_STORAGE_ENDPOINT_URL=http://minio:9000" in env
+    assert "OBJECT_STORAGE_ACCESS_KEY_ID=minioadmin" in env
+    assert "OBJECT_STORAGE_SECRET_ACCESS_KEY=minioadmin" in env
     assert "PRODUCT_ASSET_MANIFEST_PATH=/workspace/production_backend/assets/product-assets.manifest.json" in env
     assert "PRODUCT_ASSET_LOCAL_ROOT=" in env
 
@@ -108,13 +109,16 @@ def test_compose_env_declares_active_session_auth_gate() -> None:
     assert "AUTH_REQUIRE_ACTIVE_SESSION=false" in env
 
 
-def test_compose_exposes_minio_as_optional_tools_profile() -> None:
+def test_compose_exposes_minio_as_default_local_object_storage() -> None:
     compose = (PRODUCTION_BACKEND / "docker-compose.yml").read_text()
 
     assert "minio:" in compose
-    assert "profiles:" in compose
+    minio_section = compose.split("  minio:", maxsplit=1)[1].split("\n  minio-init:", maxsplit=1)[0]
+    assert "profiles:" not in minio_section
     assert "server /data --address" in compose
     assert "9000:9000" in compose
+    assert "minio-init:" in compose
+    assert "mc mb --ignore-existing local/momcozy-local" in compose
 
 
 def test_compose_exposes_agent_worker_as_optional_worker_profile() -> None:

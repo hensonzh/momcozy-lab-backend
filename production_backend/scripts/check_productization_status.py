@@ -74,14 +74,16 @@ def _check_environment_profiles(backend: Path) -> list[CheckResult]:
             "APP_ENV=local",
             "DATABASE_URL=postgresql+asyncpg://momcozy:momcozy@localhost",
             "REDIS_URL=redis://localhost",
-            "OBJECT_STORAGE_PROVIDER=local",
+            "OBJECT_STORAGE_PROVIDER=minio",
+            "OBJECT_STORAGE_ENDPOINT_URL=http://localhost:9000",
             "READINESS_CHECK_INFRASTRUCTURE=true",
         ],
         "env/compose.local.env.example": [
             "APP_ENV=local",
             "DATABASE_URL=postgresql+asyncpg://momcozy:momcozy@postgres",
             "REDIS_URL=redis://redis",
-            "OBJECT_STORAGE_PROVIDER=local",
+            "OBJECT_STORAGE_PROVIDER=minio",
+            "OBJECT_STORAGE_ENDPOINT_URL=http://minio:9000",
         ],
         "env/staging.env.example": [
             "APP_ENV=staging",

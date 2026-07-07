@@ -11,7 +11,8 @@ __pycache__/
 .venv/
 .runtime-venv/
 production_backend/.venv/
-production_backend/env/local.env
+production_backend/env/*.env
+!production_backend/env/*.env.example
 
 data/*.db
 .worktree-runtime/*.db
