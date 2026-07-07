@@ -29,9 +29,9 @@ production_backend/.venv/bin/python
 
 | 场景 | 推荐命令 | 会运行的脚本 |
 |---|---|---|
-| 本地启动 API | `make backend-local-up` | 不直接运行 `scripts/*.py`，Compose 启动 API 服务 |
-| 本地迁移数据库 | `make backend-local-migrate` | Alembic migration，不走本目录脚本 |
-| 本地启动 worker | `make backend-local-workers` | `run_agent_worker.py`, `run_outbox_worker.py` |
+| 本地启动完整后端 | `make backend-local-up` | Compose 启动基础设施，运行 Alembic migration，然后启动 API、agent-worker、outbox-worker |
+| 本地单独迁移数据库 | `make backend-local-migrate` | Alembic migration，不走本目录脚本 |
+| 本地单独启动/重启 worker | `make backend-local-workers` | `run_agent_worker.py`, `run_outbox_worker.py` |
 | 基础设施验收 | `make backend-check-infra` | database / Redis / object storage / product asset checks |
 | 后端产品化门禁 | `make backend-productization-status` | `check_productization_status.py` |
 | 后端 smoke | `make backend-smoke` | productization status + seed eval |
@@ -57,8 +57,8 @@ production_backend/.venv/bin/python
 | `run_agent_provider_eval.py` | 使用真实 OpenAI provider 运行 agent eval，验证模型、工具、路由、最终回复质量。 | nightly、手动触发、发布前抽样；不适合每个 PR 必跑。 | `python production_backend/scripts/run_agent_provider_eval.py --allow-skip-without-credentials --max-cases 8 --cost-budget-usd 5.00` |
 | `run_agent_replay_eval.py` | 用已保存的 replay bundle 对单个 seed case 做回放断言。 | 线上问题复盘、事故回归、专题修复验证。 | `python production_backend/scripts/run_agent_replay_eval.py --replay <bundle.json> --suite <suite> --name <case-name>` |
 | `run_agent_seed_eval.py` | 运行确定性的产品 agent seed eval，可输出 JSON/JUnit。 | 每次 PR CI、本地 smoke、改动 agent runtime/工具/路由时。 | `python production_backend/scripts/run_agent_seed_eval.py --output /tmp/agent-seed-eval.json --junit-output /tmp/agent-seed-eval.junit.xml` |
-| `run_agent_worker.py` | 独立 agent run worker 进程入口，扫描可运行 run 并执行 LangGraph + OpenAI Agents SDK runtime。 | worker 服务启动时运行；本地可通过 Compose workers profile 启动。 | `python -m production_backend.scripts.run_agent_worker`; 本地推荐 `make backend-local-workers` |
-| `run_outbox_worker.py` | 独立 outbox worker 进程入口，处理持久副作用任务、重试和 action apply。 | worker 服务启动时运行；本地可通过 Compose workers profile 启动。 | `python -m production_backend.scripts.run_outbox_worker`; 本地推荐 `make backend-local-workers` |
+| `run_agent_worker.py` | 独立 agent run worker 进程入口，扫描可运行 run 并执行 LangGraph + OpenAI Agents SDK runtime。 | `make backend-local-up` 或单独 worker 服务启动时运行。 | `python -m production_backend.scripts.run_agent_worker`; 本地完整启动推荐 `make backend-local-up`，单独重启推荐 `make backend-local-workers` |
+| `run_outbox_worker.py` | 独立 outbox worker 进程入口，处理持久副作用任务、重试和 action apply。 | `make backend-local-up` 或单独 worker 服务启动时运行。 | `python -m production_backend.scripts.run_outbox_worker`; 本地完整启动推荐 `make backend-local-up`，单独重启推荐 `make backend-local-workers` |
 | `worker_runtime.py` | worker 共享运行时工具，负责 stop signal 和 sleep 控制。 | 不单独启动；被 `run_agent_worker.py` 和 `run_outbox_worker.py` import。 | 不直接执行 |
 
 ## 回归测试分层

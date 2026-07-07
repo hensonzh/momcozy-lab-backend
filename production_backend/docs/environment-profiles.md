@@ -17,10 +17,13 @@ local `.env` files.
 
 ```bash
 make backend-local-up
-make backend-local-migrate
-make backend-local-workers
 make backend-check-infra BACKEND_ENV=local
 ```
+
+`backend-local-up` starts local infrastructure, runs migrations, and starts the
+API plus agent/outbox workers. `backend-local-migrate` and
+`backend-local-workers` remain available for explicit maintenance, retries, and
+debugging.
 
 `backend-check-infra` loads `BACKEND_ENV_FILE`, then runs database, Redis, and
 object storage diagnostics against the configured services.

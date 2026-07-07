@@ -59,6 +59,9 @@ def test_makefile_infra_checks_use_project_python_environment() -> None:
     assert "COMPOSE_ENV_FILE ?= production_backend/env/compose.local.env.example" in makefile
     assert "COMPOSE_ENV_FILE_FOR_COMPOSE = $(patsubst production_backend/%,%,$(COMPOSE_ENV_FILE))" in makefile
     assert "PYTHON ?= production_backend/.venv/bin/python" in makefile
+    assert "$(COMPOSE) up -d postgres redis minio minio-init" in makefile
+    assert "$(COMPOSE) --profile tools run --rm migrate" in makefile
+    assert "$(COMPOSE) --profile workers up -d api agent-worker outbox-worker" in makefile
     assert "$(PYTHON) production_backend/scripts/check_database_profile.py" in makefile
     assert "$(PYTHON) production_backend/scripts/check_redis_runtime_controls.py" in makefile
     assert "$(PYTHON) production_backend/scripts/check_object_storage_profile.py" in makefile

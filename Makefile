@@ -11,7 +11,9 @@ backend-local-up:
 	$(MAKE) backend-up BACKEND_ENV=local
 
 backend-up:
-	$(COMPOSE) up -d postgres redis minio minio-init api
+	$(COMPOSE) up -d postgres redis minio minio-init
+	$(COMPOSE) --profile tools run --rm migrate
+	$(COMPOSE) --profile workers up -d api agent-worker outbox-worker
 
 backend-down:
 	$(COMPOSE) down

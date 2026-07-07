@@ -57,9 +57,8 @@ hook values should be references to external automation, not raw credentials.
 The isolated backend can run with Docker Compose Postgres, Redis, and MinIO:
 
 ```bash
-cd production_backend
-docker compose --profile tools run --rm migrate
-docker compose up api
+cd /path/to/MomCozyAgent
+COMPOSE_ENV_FILE=production_backend/env/compose.local.env make backend-local-up
 ```
 
 `docker-compose.yml` reads `env/compose.local.env.example` by default, which
@@ -70,16 +69,16 @@ deployments should provide managed `DATABASE_URL`, `REDIS_URL`, and managed
 variables; no code change is required to switch providers.
 
 Agent runs are processed by a separate worker process, not by the API lifespan.
-The compose `agent-worker` service is behind the `workers` profile and remains
-safe by default because `AGENT_RUNTIME_WORKER_ENABLED=false` in
-`env/compose.local.env.example`. Enable it only in an environment where the
-LangGraph / OpenAI Agents SDK runtime handler is configured. `OPENAI_API_KEY`
-must be set when this worker is enabled, and `OPENAI_MODEL` controls the SDK
-agent model:
+`make backend-local-up` starts `api`, `agent-worker`, and `outbox-worker`
+together after the local infrastructure is healthy and Alembic migrations have
+run. The worker processes still run as separate Compose services, so they can be
+restarted or scaled independently.
 
-```bash
-AGENT_RUNTIME_WORKER_ENABLED=true docker compose --profile workers up agent-worker
-```
+`agent-worker` remains safe by default because `AGENT_RUNTIME_WORKER_ENABLED=false`
+in `env/compose.local.env.example`. Enable it in your private
+`env/compose.local.env` when the LangGraph / OpenAI Agents SDK runtime handler is
+configured. `OPENAI_API_KEY` must be set when this worker is enabled, and
+`OPENAI_MODEL` controls the SDK agent model.
 
 Voice endpoints are exposed in the production contract, but speech provider
 integration is disabled by default. Keep `VOICE_PROVIDER=disabled` until a
@@ -93,10 +92,15 @@ analysis provider integration is disabled by default. Keep
 rejected in production.
 
 Durable side effects are processed by a separate outbox worker. It handles file
-cleanup jobs and confirmed agent actions, and is also disabled by default:
+cleanup jobs and confirmed agent actions, and is also disabled by default in the
+example env. Enable it in your private `env/compose.local.env` for full local
+agent behavior:
 
-```bash
-OUTBOX_WORKER_ENABLED=true docker compose --profile workers up outbox-worker
+```env
+AGENT_RUNTIME_WORKER_ENABLED=true
+OUTBOX_WORKER_ENABLED=true
+OPENAI_API_KEY=...
+OPENAI_MODEL=...
 ```
 
 ## Target Shape
