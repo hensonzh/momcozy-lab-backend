@@ -41,7 +41,7 @@ stream, and exclusive-lock semantics, and cleans up the generated keys.
 When Docker is available:
 
 ```bash
-docker compose -f production_backend/docker-compose.yml up -d redis
+docker compose -f production_backend/docker-compose.local.yml up -d redis
 REDIS_URL=redis://localhost:6379/0 \
   python production_backend/scripts/check_redis_runtime_controls.py
 ```

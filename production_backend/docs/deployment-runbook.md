@@ -72,7 +72,7 @@ start local `postgres`, `redis`, `minio`, or `minio-init` services.
 Prepare a private env file on the server:
 
 ```bash
-cp production_backend/env/production.env.example production_backend/env/production.env
+cp production_backend/env/compose.prod.env.example production_backend/env/compose.prod.env
 ```
 
 Fill the real managed infrastructure URLs, object-storage credentials, JWT
@@ -121,7 +121,7 @@ Scale agent run capacity by increasing worker replicas and, separately,
 `AGENT_RUNTIME_WORKER_CONCURRENCY`:
 
 ```bash
-MOMCOZY_BACKEND_ENV_FILE=env/production.env \
+MOMCOZY_BACKEND_ENV_FILE=env/compose.prod.env \
 docker compose -f production_backend/docker-compose.prod.yml up -d --scale agent-worker=3 agent-worker
 ```
 

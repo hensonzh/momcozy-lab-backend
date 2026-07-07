@@ -9,9 +9,11 @@ local `.env` files.
 | Profile | File | Purpose |
 |---|---|---|
 | Local host | `production_backend/env/local.env.example` | Run the app from the host while Docker Compose exposes Postgres, Redis, and MinIO on localhost ports. |
-| Local compose | `production_backend/env/compose.local.env.example` | Run API and workers in Docker Compose; service hosts are `postgres`, `redis`, and `minio`. |
-| Staging | `production_backend/env/staging.env.example` | Managed Postgres, managed Redis, and managed OSS-compatible object storage. |
-| Production | `production_backend/env/production.env.example` | Managed production services with production startup validation. |
+| Local compose | `production_backend/env/compose.local.env.example` | Run API and workers with `docker-compose.local.yml`; service hosts are `postgres`, `redis`, and `minio`. |
+| Server test compose | `production_backend/env/compose.test.env.example` | Run API, workers, Postgres, Redis, and MinIO with `docker-compose.test.yml` on a test server. |
+| Production compose | `production_backend/env/compose.prod.env.example` | Run API and workers with `docker-compose.prod.yml`; managed Postgres, Redis, and OSS/S3 are supplied through env. |
+| Staging host/platform | `production_backend/env/staging.env.example` | Non-Compose staging deployment or platform-injected settings with managed services. |
+| Production host/platform | `production_backend/env/production.env.example` | Non-Compose production deployment or platform-injected settings with production startup validation. |
 
 ## Common Commands
 

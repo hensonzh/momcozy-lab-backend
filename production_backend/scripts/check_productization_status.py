@@ -85,6 +85,20 @@ def _check_environment_profiles(backend: Path) -> list[CheckResult]:
             "OBJECT_STORAGE_PROVIDER=minio",
             "OBJECT_STORAGE_ENDPOINT_URL=http://minio:9000",
         ],
+        "env/compose.test.env.example": [
+            "APP_ENV=test",
+            "DATABASE_URL=postgresql+asyncpg://momcozy_test:momcozy_test@postgres",
+            "REDIS_URL=redis://redis",
+            "OBJECT_STORAGE_PROVIDER=minio",
+            "OBJECT_STORAGE_ENDPOINT_URL=http://minio:9000",
+        ],
+        "env/compose.prod.env.example": [
+            "APP_ENV=production",
+            "OBJECT_STORAGE_PROVIDER=oss",
+            "AUTH_REQUIRE_ACTIVE_SESSION=true",
+            "METRICS_REQUIRE_SERVICE_KEY=true",
+            "OUTBOX_WORKER_ENABLED=true",
+        ],
         "env/staging.env.example": [
             "APP_ENV=staging",
             "OBJECT_STORAGE_PROVIDER=oss",

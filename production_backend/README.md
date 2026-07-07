@@ -61,7 +61,7 @@ cd /path/to/MomCozyAgent
 COMPOSE_ENV_FILE=production_backend/env/compose.local.env make backend-local-up
 ```
 
-`docker-compose.yml` reads `env/compose.local.env.example` by default, which
+`docker-compose.local.yml` reads `env/compose.local.env.example` by default, which
 intentionally points to compose service hostnames such as `postgres` and
 `redis`, plus `http://minio:9000` for S3-compatible object storage. Production
 deployments should provide managed `DATABASE_URL`, `REDIS_URL`, and managed
@@ -111,7 +111,7 @@ compose starts only `api`, `agent-worker`, and `outbox-worker`; the one-time
 `migrate` service is available through the `tools` profile.
 
 ```bash
-cp production_backend/env/production.env.example production_backend/env/production.env
+cp production_backend/env/compose.prod.env.example production_backend/env/compose.prod.env
 make backend-prod-up
 ```
 

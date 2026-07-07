@@ -2,10 +2,10 @@ BACKEND_ENV ?= local
 BACKEND_ENV_FILE ?= production_backend/env/$(BACKEND_ENV).env.example
 COMPOSE_ENV_FILE ?= production_backend/env/compose.local.env.example
 TEST_COMPOSE_ENV_FILE ?= production_backend/env/compose.test.env
-PROD_COMPOSE_ENV_FILE ?= production_backend/env/production.env
+PROD_COMPOSE_ENV_FILE ?= production_backend/env/compose.prod.env
 PYTHON ?= production_backend/.venv/bin/python
 COMPOSE_ENV_FILE_FOR_COMPOSE = $(patsubst production_backend/%,%,$(COMPOSE_ENV_FILE))
-COMPOSE = MOMCOZY_BACKEND_ENV_FILE=$(COMPOSE_ENV_FILE_FOR_COMPOSE) docker compose -f production_backend/docker-compose.yml
+COMPOSE = MOMCOZY_BACKEND_ENV_FILE=$(COMPOSE_ENV_FILE_FOR_COMPOSE) docker compose -f production_backend/docker-compose.local.yml
 TEST_COMPOSE_ENV_FILE_FOR_COMPOSE = $(patsubst production_backend/%,%,$(TEST_COMPOSE_ENV_FILE))
 TEST_COMPOSE = MOMCOZY_BACKEND_ENV_FILE=$(TEST_COMPOSE_ENV_FILE_FOR_COMPOSE) docker compose -f production_backend/docker-compose.test.yml
 PROD_COMPOSE_ENV_FILE_FOR_COMPOSE = $(patsubst production_backend/%,%,$(PROD_COMPOSE_ENV_FILE))

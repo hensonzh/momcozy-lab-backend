@@ -5,6 +5,8 @@ ROOT = Path(__file__).resolve().parents[2]
 PRODUCTION_BACKEND = ROOT / "production_backend"
 COMPOSE_LOCAL_ENV = PRODUCTION_BACKEND / "env" / "compose.local.env.example"
 COMPOSE_TEST_ENV = PRODUCTION_BACKEND / "env" / "compose.test.env.example"
+COMPOSE_PROD_ENV = PRODUCTION_BACKEND / "env" / "compose.prod.env.example"
+LOCAL_COMPOSE = PRODUCTION_BACKEND / "docker-compose.local.yml"
 TEST_COMPOSE = PRODUCTION_BACKEND / "docker-compose.test.yml"
 PROD_COMPOSE = PRODUCTION_BACKEND / "docker-compose.prod.yml"
 
@@ -19,7 +21,7 @@ def test_dockerfile_runs_isolated_production_backend() -> None:
 
 
 def test_compose_uses_local_infra_service_names_not_localhost() -> None:
-    compose = (PRODUCTION_BACKEND / "docker-compose.yml").read_text()
+    compose = LOCAL_COMPOSE.read_text()
     env = COMPOSE_LOCAL_ENV.read_text()
 
     assert "postgres:16" in compose
@@ -51,8 +53,10 @@ def test_environment_profile_examples_exist_for_local_staging_and_production() -
     assert (env_dir / "local.env.example").exists()
     assert (env_dir / "compose.local.env.example").exists()
     assert (env_dir / "compose.test.env.example").exists()
+    assert (env_dir / "compose.prod.env.example").exists()
     assert (env_dir / "staging.env.example").exists()
     assert (env_dir / "production.env.example").exists()
+    assert "APP_ENV=production" in (env_dir / "compose.prod.env.example").read_text()
     assert "APP_ENV=production" in (env_dir / "production.env.example").read_text()
     assert "OBJECT_STORAGE_PROVIDER=oss" in (env_dir / "production.env.example").read_text()
 
@@ -62,6 +66,7 @@ def test_makefile_infra_checks_use_project_python_environment() -> None:
 
     assert "COMPOSE_ENV_FILE ?= production_backend/env/compose.local.env.example" in makefile
     assert "COMPOSE_ENV_FILE_FOR_COMPOSE = $(patsubst production_backend/%,%,$(COMPOSE_ENV_FILE))" in makefile
+    assert "docker-compose.local.yml" in makefile
     assert "PYTHON ?= production_backend/.venv/bin/python" in makefile
     assert "$(COMPOSE) up -d postgres redis minio minio-init" in makefile
     assert "$(COMPOSE) --profile tools run --rm migrate" in makefile
@@ -117,7 +122,7 @@ def test_compose_env_declares_active_session_auth_gate() -> None:
 
 
 def test_compose_exposes_minio_as_default_local_object_storage() -> None:
-    compose = (PRODUCTION_BACKEND / "docker-compose.yml").read_text()
+    compose = LOCAL_COMPOSE.read_text()
 
     assert "minio:" in compose
     minio_section = compose.split("  minio:", maxsplit=1)[1].split("\n  minio-init:", maxsplit=1)[0]
@@ -129,7 +134,7 @@ def test_compose_exposes_minio_as_default_local_object_storage() -> None:
 
 
 def test_compose_exposes_agent_worker_as_optional_worker_profile() -> None:
-    compose = (PRODUCTION_BACKEND / "docker-compose.yml").read_text()
+    compose = LOCAL_COMPOSE.read_text()
 
     assert "agent-worker:" in compose
     assert "python -m production_backend.scripts.run_agent_worker" in compose
@@ -137,7 +142,7 @@ def test_compose_exposes_agent_worker_as_optional_worker_profile() -> None:
 
 
 def test_compose_exposes_outbox_worker_as_optional_worker_profile() -> None:
-    compose = (PRODUCTION_BACKEND / "docker-compose.yml").read_text()
+    compose = LOCAL_COMPOSE.read_text()
 
     assert "outbox-worker:" in compose
     assert "python -m production_backend.scripts.run_outbox_worker" in compose
@@ -145,7 +150,7 @@ def test_compose_exposes_outbox_worker_as_optional_worker_profile() -> None:
 
 
 def test_outbox_worker_waits_for_redis_because_agent_events_use_stream_cursor() -> None:
-    compose = (PRODUCTION_BACKEND / "docker-compose.yml").read_text()
+    compose = LOCAL_COMPOSE.read_text()
     outbox_worker_section = compose.split("outbox-worker:", maxsplit=1)[1].split("\n  postgres:", maxsplit=1)[0]
 
     assert "redis:" in outbox_worker_section
@@ -170,8 +175,9 @@ def test_production_compose_only_starts_application_processes() -> None:
 
 def test_production_compose_uses_production_env_and_safe_api_bind() -> None:
     compose = PROD_COMPOSE.read_text()
+    env = COMPOSE_PROD_ENV.read_text()
 
-    assert "${MOMCOZY_BACKEND_ENV_FILE:-env/production.env}" in compose
+    assert "${MOMCOZY_BACKEND_ENV_FILE:-env/compose.prod.env}" in compose
     assert "${MOMCOZY_BACKEND_IMAGE:-momcozy-production-backend:latest}" in compose
     assert "${MOMCOZY_API_BIND:-127.0.0.1:8000}:8000" in compose
     assert "python -m alembic -c production_backend/alembic.ini upgrade head" in compose
@@ -179,6 +185,9 @@ def test_production_compose_uses_production_env_and_safe_api_bind() -> None:
     assert "python -m production_backend.scripts.run_outbox_worker" in compose
     assert "restart: unless-stopped" in compose
     assert "stop_grace_period: 60s" in compose
+    assert "APP_ENV=production" in env
+    assert "OBJECT_STORAGE_PROVIDER=oss" in env
+    assert "OUTBOX_WORKER_ENABLED=true" in env
 
 
 def test_server_test_compose_starts_containerized_infrastructure_without_publishing_it() -> None:
@@ -218,7 +227,7 @@ def test_server_test_compose_uses_test_env_and_safe_api_bind() -> None:
 def test_makefile_exposes_production_compose_release_targets() -> None:
     makefile = (ROOT / "Makefile").read_text()
 
-    assert "PROD_COMPOSE_ENV_FILE ?= production_backend/env/production.env" in makefile
+    assert "PROD_COMPOSE_ENV_FILE ?= production_backend/env/compose.prod.env" in makefile
     assert "docker-compose.prod.yml" in makefile
     assert "backend-prod-build:" in makefile
     assert "$(PROD_COMPOSE) build api agent-worker outbox-worker" in makefile

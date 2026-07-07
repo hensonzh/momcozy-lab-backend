@@ -11,7 +11,7 @@ def test_postgres_integration_profile_documents_ci_and_local_paths() -> None:
         "postgres-migration",
         "DATABASE_URL=postgresql+asyncpg://momcozy:momcozy@localhost:5432/momcozy_test",
         "alembic",
-        "docker compose -f production_backend/docker-compose.yml up -d postgres redis",
+        "docker compose -f production_backend/docker-compose.local.yml up -d postgres redis",
         "does not require local infrastructure",
     ]:
         assert phrase in text

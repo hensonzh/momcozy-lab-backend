@@ -20,7 +20,7 @@ It then verifies key production tables exist through SQLAlchemy.
 When Docker is available:
 
 ```bash
-docker compose -f production_backend/docker-compose.yml up -d postgres redis
+docker compose -f production_backend/docker-compose.local.yml up -d postgres redis
 DATABASE_URL=postgresql+asyncpg://momcozy:momcozy@localhost:5432/momcozy \
   python -m alembic -c production_backend/alembic.ini upgrade head
 ```

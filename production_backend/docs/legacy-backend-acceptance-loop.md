@@ -215,7 +215,7 @@ production_backend/.venv/bin/python -m pytest production_backend/tests -q
 For infrastructure slices, add the relevant live profile check:
 
 ```bash
-PATH="$HOME/.local/bin:$PATH" docker compose -f production_backend/docker-compose.yml config
+PATH="$HOME/.local/bin:$PATH" docker compose -f production_backend/docker-compose.local.yml config
 production_backend/.venv/bin/python production_backend/scripts/check_redis_runtime_controls.py
 production_backend/.venv/bin/python production_backend/scripts/check_backup_restore_hooks.py
 ```

@@ -6,7 +6,7 @@ x-backend-image: &backend-image
     context: ..
     dockerfile: production_backend/Dockerfile
   env_file:
-    - ${MOMCOZY_BACKEND_ENV_FILE:-env/production.env}
+    - ${MOMCOZY_BACKEND_ENV_FILE:-env/compose.prod.env}
 
 services:
   api:

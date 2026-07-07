@@ -77,7 +77,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Validate docker compose
-        run: docker compose -f production_backend/docker-compose.yml config
+        run: docker compose -f production_backend/docker-compose.local.yml config
 
       - name: Build backend image
         run: docker build -f production_backend/Dockerfile .
