@@ -171,7 +171,7 @@ def test_agent_runtime_executor_projects_active_memory_into_dynamic_context() ->
     assert state_store.projections[0]["projection_summary"]["fresh_business_fact_keys"] == []
 
 
-def test_default_service_skills_are_file_backed() -> None:
+def test_default_service_skills_are_catalog_backed() -> None:
     registry = default_service_skill_registry()
 
     for service_skill_id in (
@@ -184,6 +184,7 @@ def test_default_service_skills_are_file_backed() -> None:
     ):
         service_skill = registry.get(service_skill_id)
         assert service_skill.service_skill_id == service_skill_id
+        assert service_skill.source == f"prompts.catalog.SERVICE_SKILL_PROMPTS[{service_skill_id}]"
         assert "服务技能" in service_skill.prompt_block()
 
 

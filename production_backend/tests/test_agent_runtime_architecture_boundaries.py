@@ -2,6 +2,7 @@ import asyncio
 import sys
 import types
 from importlib.machinery import ModuleSpec
+from pathlib import Path
 
 import pytest
 
@@ -14,14 +15,13 @@ from production_backend.app.modules.agent_runtime.prompts import (
     DEFAULT_STABLE_SYSTEM_PROMPT,
     ModelInputBuilder,
     PROMPT_OWNERSHIP_POLICY,
+    SDK_REASONING_RUNTIME_RULES,
+    SERVICE_SKILL_PLANNER_PROMPT_TEMPLATE,
+    SERVICE_SKILL_PROMPT_ORDER,
+    SERVICE_SKILL_PROMPTS,
 )
 from production_backend.app.modules.agent_runtime.sdk import OpenAIAgentsSdkRunner, SdkNodeRequest, SdkNodeResult, SdkToolDefinition, sdk_tool_name
-from production_backend.app.modules.agent_runtime.skill_registry import (
-    SERVICE_SKILL_FILE_NAME,
-    SERVICE_SKILLS_ROOT,
-    default_service_skill_registry,
-    load_service_skill,
-)
+from production_backend.app.modules.agent_runtime.skill_registry import default_service_skill_registry
 from production_backend.app.modules.agent_runtime.tools import default_tool_group_registry, default_tool_registry, tool_input_schema
 from production_backend.app.modules.agent_runtime.tools.output_policy import INSTRUCTIONAL_TOOL_OUTPUT_KEYS
 
@@ -53,29 +53,21 @@ def test_service_skill_registry_is_the_model_facing_entrypoint() -> None:
     assert "待产包清单" in pregnancy_skill.prompt_block()
 
 
-def test_service_skills_are_file_backed_skill_directories() -> None:
+def test_service_skills_are_prompt_catalog_backed() -> None:
     skill_registry = default_service_skill_registry()
 
+    assert tuple(skill.service_skill_id for skill in skill_registry.list()) == SERVICE_SKILL_PROMPT_ORDER
     for skill in skill_registry.list():
-        assert skill.source_path.name == SERVICE_SKILL_FILE_NAME
-        assert skill.source_path.parent.parent == SERVICE_SKILLS_ROOT
-        assert (SERVICE_SKILLS_ROOT.parent / "skill_registry.py").exists()
-        assert skill.source_path.exists()
-        assert skill.source_path.read_text(encoding="utf-8").startswith("---\n")
-        reloaded = load_service_skill(skill.source_path)
-        assert reloaded.id == skill.id
-        assert reloaded.service_skill_id == skill.service_skill_id
-        assert reloaded.prompt_block() == skill.prompt_block()
+        assert skill.source == f"prompts.catalog.SERVICE_SKILL_PROMPTS[{skill.service_skill_id}]"
+        assert SERVICE_SKILL_PROMPTS[skill.service_skill_id].startswith("---\n")
+        assert skill.id in SERVICE_SKILL_PROMPTS[skill.service_skill_id]
+        assert skill.prompt_block() in SERVICE_SKILL_PROMPTS[skill.service_skill_id]
 
 
-def test_skills_directory_contains_only_skill_directories() -> None:
-    paths = [path for path in SERVICE_SKILLS_ROOT.iterdir() if not path.name.startswith(".")]
-    entries = {path.name for path in paths}
+def test_runtime_has_no_service_skill_prompt_files() -> None:
+    skills_root = Path(__file__).resolve().parents[1] / "app" / "modules" / "agent_runtime" / "skills"
 
-    assert "__init__.py" not in entries
-    assert "definitions.py" not in entries
-    assert "service_skills" not in entries
-    assert all(path.is_dir() and (path / SERVICE_SKILL_FILE_NAME).exists() for path in paths)
+    assert list(skills_root.rglob("SKILL.md")) == []
 
 
 def test_prompt_ownership_policy_keeps_workflow_in_service_skills() -> None:
@@ -101,6 +93,9 @@ def test_model_facing_prompt_text_is_chinese() -> None:
         *PROMPT_OWNERSHIP_POLICY,
         DEFAULT_STABLE_SYSTEM_PROMPT,
         DEFAULT_STABLE_DEVELOPER_PROMPT,
+        *SDK_REASONING_RUNTIME_RULES,
+        SERVICE_SKILL_PLANNER_PROMPT_TEMPLATE,
+        *SERVICE_SKILL_PROMPTS.values(),
         *(contract.description for contract in registry.list()),
     ]
     for contract in registry.list():

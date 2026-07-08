@@ -1,23 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 
+from .prompts import SERVICE_SKILL_PROMPT_ORDER, SERVICE_SKILL_PROMPTS
 from .routing.schemas import ServiceSkillId
 
 
-SERVICE_SKILLS_ROOT = Path(__file__).resolve().parent / "skills"
-SERVICE_SKILL_FILE_NAME = "SKILL.md"
 REQUIRED_METADATA_KEYS = frozenset({"name", "description", "id", "version", "service_skill_id"})
 REQUIRED_SECTION_TITLES = ("服务范围", "回复风格", "服务流程", "交付物", "工具策略", "边界")
-SERVICE_SKILL_ORDER = (
-    ServiceSkillId.PREGNANCY.value,
-    ServiceSkillId.LACTATION.value,
-    ServiceSkillId.POSTPARTUM.value,
-    ServiceSkillId.AFTER_SALES.value,
-    ServiceSkillId.SAFETY.value,
-    ServiceSkillId.GENERAL.value,
-)
+SERVICE_SKILL_ORDER = SERVICE_SKILL_PROMPT_ORDER
 
 
 @dataclass(frozen=True)
@@ -35,7 +26,7 @@ class AgentServiceSkill:
     tool_rules: tuple[str, ...]
     boundaries: tuple[str, ...]
     body: str
-    source_path: Path
+    source: str
 
     def prompt_block(self) -> str:
         return self.body
@@ -76,10 +67,9 @@ def default_service_skill_registry() -> AgentServiceSkillRegistry:
 
 
 def _load_default_service_skills() -> tuple[AgentServiceSkill, ...]:
-    skill_paths = tuple(sorted(SERVICE_SKILLS_ROOT.glob(f"*/{SERVICE_SKILL_FILE_NAME}")))
-    if not skill_paths:
-        raise ValueError(f"no agent service skills found under {SERVICE_SKILLS_ROOT}")
-    skills = tuple(load_service_skill(path) for path in skill_paths)
+    if not SERVICE_SKILL_PROMPTS:
+        raise ValueError("no agent service skill prompts found in prompts.catalog.SERVICE_SKILL_PROMPTS")
+    skills = tuple(load_service_skill_prompt(skill_id=skill_id, raw=SERVICE_SKILL_PROMPTS[skill_id]) for skill_id in SERVICE_SKILL_ORDER)
     by_service_skill_id = {skill.service_skill_id: skill for skill in skills}
     expected_ids = set(SERVICE_SKILL_ORDER)
     actual_ids = set(by_service_skill_id)
@@ -90,11 +80,12 @@ def _load_default_service_skills() -> tuple[AgentServiceSkill, ...]:
     return tuple(by_service_skill_id[skill_id] for skill_id in SERVICE_SKILL_ORDER)
 
 
-def load_service_skill(path: Path) -> AgentServiceSkill:
-    metadata, body = _split_frontmatter(path.read_text(encoding="utf-8"), path=path)
-    _validate_metadata(metadata=metadata, path=path)
-    role = _parse_role(body=body, path=path)
-    sections = {title: _parse_section_items(body=body, title=title, path=path) for title in REQUIRED_SECTION_TITLES}
+def load_service_skill_prompt(*, skill_id: str, raw: str) -> AgentServiceSkill:
+    source = f"prompts.catalog.SERVICE_SKILL_PROMPTS[{skill_id}]"
+    metadata, body = _split_frontmatter(raw, source=source)
+    _validate_metadata(metadata=metadata, expected_skill_id=skill_id, source=source)
+    role = _parse_role(body=body, source=source)
+    sections = {title: _parse_section_items(body=body, title=title, source=source) for title in REQUIRED_SECTION_TITLES}
     return AgentServiceSkill(
         name=metadata["name"],
         description=metadata["description"],
@@ -109,16 +100,16 @@ def load_service_skill(path: Path) -> AgentServiceSkill:
         tool_rules=sections["工具策略"],
         boundaries=sections["边界"],
         body=body,
-        source_path=path,
+        source=source,
     )
 
 
-def _split_frontmatter(raw: str, *, path: Path) -> tuple[dict[str, str], str]:
+def _split_frontmatter(raw: str, *, source: str) -> tuple[dict[str, str], str]:
     if not raw.startswith("---\n"):
-        raise ValueError(f"{path} must start with YAML-style frontmatter")
+        raise ValueError(f"{source} must start with YAML-style frontmatter")
     marker_index = raw.find("\n---", 4)
     if marker_index == -1:
-        raise ValueError(f"{path} frontmatter is not closed")
+        raise ValueError(f"{source} frontmatter is not closed")
     header = raw[4:marker_index].strip()
     body = raw[marker_index + 4 :].strip()
     metadata: dict[str, str] = {}
@@ -128,33 +119,35 @@ def _split_frontmatter(raw: str, *, path: Path) -> tuple[dict[str, str], str]:
             continue
         key, separator, value = normalized.partition(":")
         if not separator:
-            raise ValueError(f"{path} frontmatter line is missing ':'")
+            raise ValueError(f"{source} frontmatter line is missing ':'")
         metadata[key.strip()] = value.strip().strip('"')
     if not body:
-        raise ValueError(f"{path} body is empty")
+        raise ValueError(f"{source} body is empty")
     return metadata, body
 
 
-def _validate_metadata(*, metadata: dict[str, str], path: Path) -> None:
+def _validate_metadata(*, metadata: dict[str, str], expected_skill_id: str, source: str) -> None:
     missing = sorted(key for key in REQUIRED_METADATA_KEYS if not metadata.get(key))
     if missing:
-        raise ValueError(f"{path} is missing required frontmatter keys: {missing}")
+        raise ValueError(f"{source} is missing required frontmatter keys: {missing}")
     try:
         ServiceSkillId(metadata["service_skill_id"])
     except ValueError as exc:
-        raise ValueError(f"{path} has unsupported service_skill_id: {metadata['service_skill_id']}") from exc
+        raise ValueError(f"{source} has unsupported service_skill_id: {metadata['service_skill_id']}") from exc
+    if metadata["service_skill_id"] != expected_skill_id:
+        raise ValueError(f"{source} service_skill_id must be {expected_skill_id}")
 
 
-def _parse_role(*, body: str, path: Path) -> str:
+def _parse_role(*, body: str, source: str) -> str:
     for line in body.splitlines():
         if line.startswith("角色定位："):
             role = line.removeprefix("角色定位：").strip()
             if role:
                 return role
-    raise ValueError(f"{path} must include a non-empty 角色定位 line")
+    raise ValueError(f"{source} must include a non-empty 角色定位 line")
 
 
-def _parse_section_items(*, body: str, title: str, path: Path) -> tuple[str, ...]:
+def _parse_section_items(*, body: str, title: str, source: str) -> tuple[str, ...]:
     lines = body.splitlines()
     header = f"## {title}"
     items: list[str] = []
@@ -169,5 +162,5 @@ def _parse_section_items(*, body: str, title: str, path: Path) -> tuple[str, ...
         if in_section and stripped.startswith("- "):
             items.append(stripped[2:].strip())
     if not items:
-        raise ValueError(f"{path} must include at least one bullet under {header}")
+        raise ValueError(f"{source} must include at least one bullet under {header}")
     return tuple(items)
