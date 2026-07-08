@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from ..routing.schemas import SpecialistId
 from ..tools.contracts import ToolContract
-from .playbooks import (
+from ..skills.playbooks import (
     AFTER_SALES_PLAYBOOK,
     GENERAL_PLAYBOOK,
     LACTATION_PLAYBOOK,
@@ -46,6 +46,9 @@ class AgentSpecialistRegistry:
 
     def get(self, profile_id: str) -> AgentSpecialistProfile:
         return self._profiles[profile_id]
+
+    def list(self) -> tuple[AgentSpecialistProfile, ...]:
+        return self._ordered_profiles
 
     def select(self, *, user_message: str) -> AgentSpecialistProfile:
         normalized = user_message.lower()

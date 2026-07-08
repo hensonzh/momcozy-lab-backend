@@ -16,7 +16,12 @@ from ..graphs import AgentGraphCheckpointStore, AgentGraphRegistry, default_grap
 from ..memory.service import AgentMemoryService
 from ..models import AgentAction, AgentEvent, AgentMessage, AgentRun
 from ..payloads import DEFAULT_MAX_INLINE_PAYLOAD_BYTES, maybe_externalize_json_payload
-from ..prompts import ContextProjection, ModelInputBuilder
+from ..prompts import (
+    ContextProjection,
+    DEFAULT_STABLE_DEVELOPER_PROMPT,
+    DEFAULT_STABLE_SYSTEM_PROMPT,
+    ModelInputBuilder,
+)
 from ..repository import AgentRuntimeRepository
 from ..routing import RoutingContext, RoutingPlan, SpecialistId, SpecialistRoutingService
 from ..sdk import (
@@ -36,16 +41,8 @@ from .state_store import AgentRuntimeStateStore
 
 @dataclass(frozen=True)
 class AgentRuntimeExecutorConfig:
-    stable_system_prompt: str = (
-        "You are CozyMate, the MomCozy product assistant. You are a warm, steady companion for moms across pregnancy, "
-        "postpartum recovery, breastfeeding, pumping, device use, and support. Follow the selected service playbook. "
-        "When the user writes Chinese, reply in Simplified Chinese. Use tools only through the application runtime."
-    )
-    stable_developer_prompt: str = (
-        "Use the provided conversation ledger, current state projection, and fresh business facts. Do not rely on "
-        "provider session state. Do not call load_skill, read_skill_file, legacy namespaces, or any tool outside the "
-        "provided allowlist. Propose confirmable actions instead of directly applying medium or high risk changes."
-    )
+    stable_system_prompt: str = DEFAULT_STABLE_SYSTEM_PROMPT
+    stable_developer_prompt: str = DEFAULT_STABLE_DEVELOPER_PROMPT
     history_limit: int = 40
     memory_limit: int = 5
 

@@ -70,7 +70,8 @@
   feeding record、pumping record、hospital-bag cart update 会创建 action、
   立即确认并进入 outbox effect lane，不再让 run 进入
   `waiting_for_confirmation`。中高风险 action 仍走 confirmation。
-- 场景专家不再只是 tool allowlist。`sdk/playbooks.py` 已把旧版 service skill
+- 场景专家不再只是 tool allowlist。`app/modules/agent_runtime/skills/`
+  已把旧版 service skill
   的核心体验语义沉淀为版本化 service playbook，并在每轮 SDK instructions 和
   context projection 中注入 `service_playbook_id/version/scope/deliverables`。
   当前 playbook 覆盖 `pregnancy_service`、`lactation`、

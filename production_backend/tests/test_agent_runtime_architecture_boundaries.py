@@ -8,8 +8,14 @@ import pytest
 from production_backend.app.core.errors import ApiError
 from production_backend.app.core.metrics import RequestMetrics
 from production_backend.app.modules.agent_runtime.graphs import default_graph_registry
-from production_backend.app.modules.agent_runtime.prompts import ContextProjection, ModelInputBuilder
+from production_backend.app.modules.agent_runtime.prompts import (
+    ContextProjection,
+    DEFAULT_STABLE_DEVELOPER_PROMPT,
+    DEFAULT_STABLE_SYSTEM_PROMPT,
+    ModelInputBuilder,
+)
 from production_backend.app.modules.agent_runtime.sdk import OpenAIAgentsSdkRunner, SdkNodeRequest, SdkNodeResult, SdkToolDefinition, sdk_tool_name
+from production_backend.app.modules.agent_runtime.skills import default_service_skill_registry
 from production_backend.app.modules.agent_runtime.tools import default_tool_registry, tool_input_schema
 
 
@@ -19,6 +25,25 @@ def test_default_graph_registry_uses_langgraph_sdk_pattern() -> None:
     assert graph.runtime_pattern == "langgraph_sdk"
     assert "sdk_reasoning" in graph.node_names
     assert "confirmation_interrupt" in graph.node_names
+
+
+def test_service_skill_catalog_is_the_model_facing_entrypoint() -> None:
+    skill_registry = default_service_skill_registry()
+    skill_ids = {skill.id for skill in skill_registry.list()}
+
+    assert skill_ids == {
+        "after_sales",
+        "general_assistant",
+        "lactation",
+        "postpartum_recovery",
+        "pregnancy_service",
+        "safety_guardrail",
+    }
+    pregnancy_skill = skill_registry.get("pregnancy_service")
+    assert pregnancy_skill.service_playbook.specialist_id == "pregnancy_service"
+    assert "服务 Skill pregnancy_service" in pregnancy_skill.prompt_block()
+    assert "artifacts.hospital_bag_card.create" in pregnancy_skill.tool_contracts
+    assert "pregnancy.plan.create" in pregnancy_skill.confirmation_required_actions
 
 
 def test_tool_contract_registry_declares_permission_confirmation_and_blocking_policy() -> None:
@@ -236,6 +261,9 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
 
 
 def test_context_builder_keeps_stable_prompts_before_dynamic_projection() -> None:
+    assert "CozyMate" in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert "provider session state" in DEFAULT_STABLE_DEVELOPER_PROMPT
+
     model_input = ModelInputBuilder().build(
         projection=ContextProjection(
             stable_system_prompt="system-v1",
