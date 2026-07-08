@@ -32,7 +32,7 @@ def default_tool_registry() -> ToolContractRegistry:
         ToolContract(
             name="profile.read",
             domain="profiles",
-            description="Read current user's profile projection for context.",
+            description="读取当前用户的用户资料上下文投影。",
             input_schema_ref="ProfileContextQuery",
             output_schema_ref="ProfileContextRead",
             read_or_write="read",
@@ -51,7 +51,7 @@ def default_tool_registry() -> ToolContractRegistry:
         ToolContract(
             name="business.context.read",
             domain="business_context",
-            description="Read current user's recent records, plans, diary, and device context as a bounded summary.",
+            description="读取当前用户近期记录、计划、日记和设备上下文的有限摘要。",
             input_schema_ref="BusinessContextQuery",
             output_schema_ref="BusinessContextRead",
             read_or_write="read",
@@ -70,7 +70,7 @@ def default_tool_registry() -> ToolContractRegistry:
         ToolContract(
             name="records.milk_summary.read",
             domain="records",
-            description="Read a bounded milk-management summary from recent feeding, pumping, and trend records.",
+            description="从近期喂养、吸奶和趋势记录中读取有限奶量管理摘要。",
             input_schema_ref="MilkSummaryQuery",
             output_schema_ref="MilkSummaryRead",
             read_or_write="read",
@@ -89,7 +89,7 @@ def default_tool_registry() -> ToolContractRegistry:
         ToolContract(
             name="records.milk_status.read",
             domain="records",
-            description="Read a deterministic milk-management status snapshot from recent feeding, pumping, and trend records.",
+            description="从近期喂养、吸奶和趋势记录中读取确定性奶量状态快照。",
             input_schema_ref="MilkStatusQuery",
             output_schema_ref="MilkStatusRead",
             read_or_write="read",
@@ -108,7 +108,7 @@ def default_tool_registry() -> ToolContractRegistry:
         ToolContract(
             name="plans.current.read",
             domain="plans",
-            description="Read current user's active plans and recent tasks as a bounded summary.",
+            description="读取当前用户生效中计划和近期任务的有限摘要。",
             input_schema_ref="PlansCurrentQuery",
             output_schema_ref="PlansCurrentRead",
             read_or_write="read",
@@ -127,7 +127,7 @@ def default_tool_registry() -> ToolContractRegistry:
         ToolContract(
             name="diary.recent.read",
             domain="diary",
-            description="Read current user's recent pregnancy diary entries as a bounded summary.",
+            description="读取当前用户近期孕期日记条目的有限摘要。",
             input_schema_ref="DiaryRecentQuery",
             output_schema_ref="DiaryRecentRead",
             read_or_write="read",
@@ -146,7 +146,7 @@ def default_tool_registry() -> ToolContractRegistry:
         ToolContract(
             name="diary.entry_upsert.propose",
             domain="diary",
-            description="Propose a pregnancy diary entry upsert action for user confirmation.",
+            description="提出孕期日记写入或更新动作，等待用户确认。",
             input_schema_ref="DiaryEntryUpsertProposalCreate",
             output_schema_ref="AgentActionRead",
             read_or_write="write",
@@ -165,7 +165,7 @@ def default_tool_registry() -> ToolContractRegistry:
         ToolContract(
             name="pregnancy.plan_context.read",
             domain="plans",
-            description="Read current pregnancy profile, active plans, tasks, and recent diary context as a bounded summary.",
+            description="读取当前孕期用户资料、生效中计划、任务和近期日记上下文的有限摘要。",
             input_schema_ref="PregnancyPlanContextQuery",
             output_schema_ref="PregnancyPlanContextRead",
             read_or_write="read",
@@ -184,7 +184,7 @@ def default_tool_registry() -> ToolContractRegistry:
         ToolContract(
             name="memory.create.propose",
             domain="memory",
-            description="Propose a long-term memory write for user confirmation.",
+            description="提出长期记忆写入动作，等待用户确认。",
             input_schema_ref="MemoryCreateProposalCreate",
             output_schema_ref="AgentActionRead",
             read_or_write="write",
@@ -203,7 +203,7 @@ def default_tool_registry() -> ToolContractRegistry:
         ToolContract(
             name="devices.pump_status.read",
             domain="devices",
-            description="Read current user's pump devices and recent telemetry as a bounded status summary.",
+            description="读取当前用户吸奶器设备和近期遥测状态的有限摘要。",
             input_schema_ref="DevicesPumpStatusQuery",
             output_schema_ref="DevicesPumpStatusRead",
             read_or_write="read",
@@ -222,7 +222,7 @@ def default_tool_registry() -> ToolContractRegistry:
         ToolContract(
             name="devices.guidance_assets.read",
             domain="devices",
-            description="Read a bounded list of packaged device-guidance assets by metadata.",
+            description="按元数据读取已打包设备指导素材的有限列表。",
             input_schema_ref="DeviceGuidanceAssetsQuery",
             output_schema_ref="DeviceGuidanceAssetsRead",
             read_or_write="read",
@@ -241,7 +241,7 @@ def default_tool_registry() -> ToolContractRegistry:
         ToolContract(
             name="files.vision_summary.read",
             domain="files",
-            description="Read an owner-scoped uploaded image and return a bounded vision summary.",
+            description="读取当前用户拥有的上传图片，并返回有限视觉摘要。",
             input_schema_ref="FileVisionSummaryQuery",
             output_schema_ref="FileVisionSummaryRead",
             read_or_write="read",
@@ -260,7 +260,7 @@ def default_tool_registry() -> ToolContractRegistry:
         ToolContract(
             name="plans.milk_plan.propose",
             domain="plans",
-            description="Propose a milk-management plan create action for user confirmation.",
+            description="提出奶量管理计划创建动作，等待用户确认。",
             input_schema_ref="MilkPlanProposalCreate",
             output_schema_ref="AgentActionRead",
             read_or_write="write",
@@ -279,7 +279,7 @@ def default_tool_registry() -> ToolContractRegistry:
         ToolContract(
             name="pregnancy.plan_create.propose",
             domain="plans",
-            description="Propose a pregnancy plan create action for user confirmation.",
+            description="提出孕期计划创建动作，等待用户确认。",
             input_schema_ref="PregnancyPlanProposalCreate",
             output_schema_ref="AgentActionRead",
             read_or_write="write",
@@ -298,7 +298,7 @@ def default_tool_registry() -> ToolContractRegistry:
         ToolContract(
             name="plans.task_create.propose",
             domain="plans",
-            description="Propose a plan task create action for user confirmation.",
+            description="提出计划任务创建动作，等待用户确认。",
             input_schema_ref="PlanTaskCreateProposalCreate",
             output_schema_ref="AgentActionRead",
             read_or_write="write",
@@ -317,7 +317,7 @@ def default_tool_registry() -> ToolContractRegistry:
         ToolContract(
             name="plans.task_complete.propose",
             domain="plans",
-            description="Propose a plan task completion action for user confirmation.",
+            description="提出计划任务完成状态更新动作，等待用户确认。",
             input_schema_ref="PlanTaskCompleteProposalCreate",
             output_schema_ref="AgentActionRead",
             read_or_write="write",
@@ -336,7 +336,7 @@ def default_tool_registry() -> ToolContractRegistry:
         ToolContract(
             name="notifications.milk_reminder.propose",
             domain="notifications",
-            description="Propose a milk-management reminder notification for user confirmation.",
+            description="提出奶量管理提醒通知动作，等待用户确认。",
             input_schema_ref="MilkReminderProposalCreate",
             output_schema_ref="AgentActionRead",
             read_or_write="write",
@@ -355,7 +355,7 @@ def default_tool_registry() -> ToolContractRegistry:
         ToolContract(
             name="records.feeding_record.propose",
             domain="records",
-            description="Propose a feeding record create action for user confirmation.",
+            description="提出喂养记录创建动作。",
             input_schema_ref="FeedingRecordProposalCreate",
             output_schema_ref="AgentActionRead",
             read_or_write="write",
@@ -374,7 +374,7 @@ def default_tool_registry() -> ToolContractRegistry:
         ToolContract(
             name="records.pumping_record.propose",
             domain="records",
-            description="Propose a pumping record create action for user confirmation.",
+            description="提出吸奶记录创建动作。",
             input_schema_ref="PumpingRecordProposalCreate",
             output_schema_ref="AgentActionRead",
             read_or_write="write",
@@ -393,7 +393,7 @@ def default_tool_registry() -> ToolContractRegistry:
         ToolContract(
             name="hospital_bag.cart_update.propose",
             domain="hospital_bag",
-            description="Propose a hospital-bag cart update for user confirmation.",
+            description="提出待产包购物车更新动作。",
             input_schema_ref="HospitalBagCartUpdateProposalCreate",
             output_schema_ref="AgentActionRead",
             read_or_write="write",
@@ -412,7 +412,7 @@ def default_tool_registry() -> ToolContractRegistry:
         ToolContract(
             name="artifacts.hospital_bag_card.create",
             domain="artifacts",
-            description="Create an owner-scoped hospital bag card artifact for the current agent run.",
+            description="为当前智能体运行创建当前用户范围内的待产包卡片产物。",
             input_schema_ref="AgentArtifactCreate",
             output_schema_ref="AgentArtifactRead",
             read_or_write="write",
@@ -431,7 +431,7 @@ def default_tool_registry() -> ToolContractRegistry:
         ToolContract(
             name="artifacts.labor_communication_card.create",
             domain="artifacts",
-            description="Create an owner-scoped labor communication card artifact for the current agent run.",
+            description="为当前智能体运行创建当前用户范围内的分娩沟通单产物。",
             input_schema_ref="AgentArtifactCreate",
             output_schema_ref="AgentArtifactRead",
             read_or_write="write",
@@ -450,7 +450,7 @@ def default_tool_registry() -> ToolContractRegistry:
         ToolContract(
             name="artifacts.lactation_summary.create",
             domain="artifacts",
-            description="Create an owner-scoped lactation summary artifact for the current agent run.",
+            description="为当前智能体运行创建当前用户范围内的泌乳分析摘要产物。",
             input_schema_ref="AgentArtifactCreate",
             output_schema_ref="AgentArtifactRead",
             read_or_write="write",
@@ -469,7 +469,7 @@ def default_tool_registry() -> ToolContractRegistry:
         ToolContract(
             name="artifacts.postpartum_checkin.create",
             domain="artifacts",
-            description="Create an owner-scoped postpartum check-in artifact for the current agent run.",
+            description="为当前智能体运行创建当前用户范围内的产后恢复状态打卡产物。",
             input_schema_ref="AgentArtifactCreate",
             output_schema_ref="AgentArtifactRead",
             read_or_write="write",
@@ -488,7 +488,7 @@ def default_tool_registry() -> ToolContractRegistry:
         ToolContract(
             name="support.ticket.propose",
             domain="support",
-            description="Create a support ticket action proposal after user confirmation intent is clear.",
+            description="在用户确认意图明确后，创建售后工单动作提案。",
             input_schema_ref="SupportTicketProposalCreate",
             output_schema_ref="AgentActionRead",
             read_or_write="write",

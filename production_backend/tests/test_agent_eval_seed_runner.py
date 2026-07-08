@@ -127,7 +127,7 @@ def test_agent_eval_seed_assertion_engine_passes_hospital_bag_cart_trace() -> No
     assert result.failures == []
 
 
-def test_agent_eval_seed_assertion_engine_reports_specialist_mismatch_when_trace_has_route() -> None:
+def test_agent_eval_seed_assertion_engine_reports_service_skill_mismatch_when_trace_has_route() -> None:
     case = _case("milk_daily_summary")
     trace = AgentEvalTrace(
         tool_calls=[
@@ -135,7 +135,7 @@ def test_agent_eval_seed_assertion_engine_reports_specialist_mismatch_when_trace
             {"tool_name": "records.milk_summary.read", "status": "completed"},
         ],
         safety_decision="allow",
-        specialist_id="general_assistant",
+        service_skill_id="general_assistant",
         final_text="Here is your milk summary.",
     )
 

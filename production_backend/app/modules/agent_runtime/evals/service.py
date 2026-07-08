@@ -18,7 +18,7 @@ class AgentEvalTrace:
     actions: list[dict[str, Any]] = field(default_factory=list)
     safety_decision: str = ""
     final_text: str = ""
-    specialist_id: str = ""
+    service_skill_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -50,7 +50,7 @@ class AgentEvalSeedAssertionEngine:
         failures.extend(_tool_contract_failures(case=case, trace=trace))
         failures.extend(_forbidden_tool_failures(case=case, trace=trace))
         failures.extend(_safety_decision_failures(case=case, trace=trace))
-        failures.extend(_specialist_routing_failures(case=case, trace=trace))
+        failures.extend(_service_skill_routing_failures(case=case, trace=trace))
         failures.extend(_confirmation_failures(case=case, trace=trace))
         failures.extend(_forbidden_side_effect_failures(case=case, trace=trace))
         return AgentEvalRunResult(
@@ -87,7 +87,7 @@ class AgentEvalRuntimeTraceCollector:
             actions=[_action_trace(action) for action in actions],
             safety_decision=safety_decision,
             final_text=final_text,
-            specialist_id=str(getattr(run, "specialist_id", "") or ""),
+            service_skill_id=str(getattr(run, "service_skill_id", "") or ""),
         )
 
 
@@ -117,7 +117,7 @@ def agent_eval_trace_from_replay_bundle(bundle: dict[str, Any]) -> AgentEvalTrac
         actions=_list_of_dicts(bundle.get("actions")),
         safety_decision=_last_safety_decision(bundle),
         final_text=_last_assistant_text(bundle),
-        specialist_id=_run_specialist_id(bundle),
+        service_skill_id=_run_service_skill_id(bundle),
     )
 
 
@@ -324,18 +324,18 @@ def _safety_decision_failures(*, case: dict[str, Any], trace: AgentEvalTrace) ->
     ]
 
 
-def _specialist_routing_failures(*, case: dict[str, Any], trace: AgentEvalTrace) -> list[AgentEvalFailure]:
+def _service_skill_routing_failures(*, case: dict[str, Any], trace: AgentEvalTrace) -> list[AgentEvalFailure]:
     raw_behavior = case.get("expected_behavior")
     behavior = raw_behavior if isinstance(raw_behavior, dict) else {}
-    expected = str(behavior.get("specialist_id") or "").strip()
-    if not expected or not trace.specialist_id or trace.specialist_id == expected:
+    expected = str(behavior.get("service_skill_id") or "").strip()
+    if not expected or not trace.service_skill_id or trace.service_skill_id == expected:
         return []
     return [
         AgentEvalFailure(
             category="routing_mismatch",
-            assertion="routing.specialist",
+            assertion="routing.service_skill",
             expected=expected,
-            observed=trace.specialist_id or "<none>",
+            observed=trace.service_skill_id or "<none>",
         )
     ]
 
@@ -429,8 +429,8 @@ def _last_assistant_text(bundle: dict[str, Any]) -> str:
     return ""
 
 
-def _run_specialist_id(bundle: dict[str, Any]) -> str:
+def _run_service_skill_id(bundle: dict[str, Any]) -> str:
     run = bundle.get("run")
     if not isinstance(run, dict):
         return ""
-    return str(run.get("specialist_id") or "").strip()
+    return str(run.get("service_skill_id") or "").strip()

@@ -25,17 +25,17 @@ from production_backend.app.modules.agent_runtime.evals.service import (  # noqa
 )
 from production_backend.app.modules.agent_runtime.prompts import ContextProjection, ModelInputBuilder  # noqa: E402
 from production_backend.app.modules.agent_runtime.run_lifecycle.executor import AgentRuntimeExecutorConfig  # noqa: E402
-from production_backend.app.modules.agent_runtime.routing import RoutingContext, SpecialistRoutingService  # noqa: E402
+from production_backend.app.modules.agent_runtime.routing import ModelSkillIntentPlanner, RoutingContext, SkillRoutingService  # noqa: E402
 from production_backend.app.modules.agent_runtime.safety.service import DeterministicSafetyGuard  # noqa: E402
 from production_backend.app.modules.agent_runtime.sdk import (  # noqa: E402
     OpenAIAgentsSdkRunner,
     SdkNodeRequest,
     SdkToolDefinition,
     create_agent_sdk_runner,
-    default_specialist_registry,
     sdk_tool_name,
 )
-from production_backend.app.modules.agent_runtime.tools import default_tool_registry  # noqa: E402
+from production_backend.app.modules.agent_runtime.skills import default_service_skill_registry  # noqa: E402
+from production_backend.app.modules.agent_runtime.tools import default_tool_group_registry, default_tool_registry  # noqa: E402
 from production_backend.app.modules.agent_runtime.tools.schemas import tool_input_schema  # noqa: E402
 
 
@@ -133,7 +133,7 @@ async def _run_case(*, case: dict[str, Any], sdk_runner: OpenAIAgentsSdkRunner) 
             )
         )
 
-    routing_plan = await SpecialistRoutingService().route(
+    routing_plan = await SkillRoutingService(planner=ModelSkillIntentPlanner(sdk_runner=sdk_runner)).route(
         RoutingContext(
             run_id=_eval_uuid(case, "run"),
             thread_id=_eval_uuid(case, "thread"),
@@ -141,10 +141,10 @@ async def _run_case(*, case: dict[str, Any], sdk_runner: OpenAIAgentsSdkRunner) 
             message=user_message,
         )
     )
-    specialist = default_specialist_registry().get(routing_plan.primary_specialist_id.value)
-    tool_names = tuple(sorted(contract.name for contract in tool_registry.list() if specialist.allows_tool(contract)))
-    unavailable_for_specialist = sorted(contract for contract in expected_contracts if contract not in tool_names)
-    if unavailable_for_specialist:
+    service_skill = default_service_skill_registry().get(routing_plan.selected_skill_id.value)
+    tool_names = default_tool_group_registry().tool_names_for_plan(routing_plan)
+    unavailable_for_skill = sorted(contract for contract in expected_contracts if contract not in tool_names)
+    if unavailable_for_skill:
         return _result_payload(
             AgentEvalRunResult(
                 suite=str(case.get("suite") or ""),
@@ -153,9 +153,9 @@ async def _run_case(*, case: dict[str, Any], sdk_runner: OpenAIAgentsSdkRunner) 
                 failures=[
                     AgentEvalFailure(
                         category="tool_not_available",
-                        assertion="specialist.tool_allowlist",
-                        expected=", ".join(unavailable_for_specialist),
-                        observed=specialist.id,
+                        assertion="service_skill.tool_groups",
+                        expected=", ".join(unavailable_for_skill),
+                        observed=service_skill.service_skill_id,
                     )
                 ],
             )
@@ -168,8 +168,8 @@ async def _run_case(*, case: dict[str, Any], sdk_runner: OpenAIAgentsSdkRunner) 
                 run_id=_eval_id(case, "run"),
                 thread_id=_eval_id(case, "thread"),
                 actor_user_id="provider-eval-user",
-                instructions=_instructions(specialist_id=specialist.id, specialist_instructions=specialist.instructions),
-                model_input=_model_input(case=case, specialist_id=specialist.id),
+                instructions=_instructions(service_skill_id=service_skill.service_skill_id, service_skill_body=service_skill.prompt_block()),
+                model_input=_model_input(case=case, service_skill_id=service_skill.service_skill_id),
                 tool_names=tool_names,
                 tools=tuple(
                     _tool_definition(tool_name=tool_name, observed_tool_calls=observed_tool_calls, fixtures=_fixtures(case))
@@ -177,7 +177,7 @@ async def _run_case(*, case: dict[str, Any], sdk_runner: OpenAIAgentsSdkRunner) 
                 ),
                 prompt_version="provider-eval",
                 trace_id=_eval_id(case, "trace"),
-                specialist_id=specialist.id,
+                service_skill_id=service_skill.service_skill_id,
             )
         )
     except ApiError as exc:
@@ -203,11 +203,12 @@ async def _run_case(*, case: dict[str, Any], sdk_runner: OpenAIAgentsSdkRunner) 
         actions=_synthetic_actions(observed_tool_calls),
         safety_decision=safety_decision,
         final_text=result.final_text,
-        specialist_id=specialist.id,
+        service_skill_id=service_skill.service_skill_id,
     )
     payload = _result_payload(AgentEvalSeedAssertionEngine().evaluate(case=case, trace=trace))
-    payload["specialist_id"] = specialist.id
+    payload["service_skill_id"] = service_skill.service_skill_id
     payload["routing_source"] = routing_plan.source.value
+    payload["tool_group_ids"] = routing_plan.tool_group_ids
     payload["observed_tool_calls"] = observed_tool_calls
     payload["final_text"] = result.final_text
     return payload
@@ -236,7 +237,7 @@ def _tool_definition(*, tool_name: str, observed_tool_calls: list[dict[str, Any]
     )
 
 
-def _model_input(*, case: dict[str, Any], specialist_id: str) -> list[dict[str, Any]]:
+def _model_input(*, case: dict[str, Any], service_skill_id: str) -> list[dict[str, Any]]:
     messages = _messages(case)
     current_message = messages[-1] if messages else {"role": "user", "content": ""}
     history = messages[:-1]
@@ -246,7 +247,7 @@ def _model_input(*, case: dict[str, Any], specialist_id: str) -> list[dict[str, 
             stable_system_prompt=config.stable_system_prompt,
             stable_developer_prompt=config.stable_developer_prompt,
             selected_conversation_history=history,
-            current_state_projection={"eval_suite": str(case.get("suite") or ""), "specialist_id": specialist_id},
+            current_state_projection={"eval_suite": str(case.get("suite") or ""), "service_skill_id": service_skill_id},
             memory_projection=[],
             fresh_business_facts=_fixtures(case),
         ),
@@ -255,14 +256,14 @@ def _model_input(*, case: dict[str, Any], specialist_id: str) -> list[dict[str, 
     return model_input
 
 
-def _instructions(*, specialist_id: str, specialist_instructions: str) -> str:
+def _instructions(*, service_skill_id: str, service_skill_body: str) -> str:
     config = AgentRuntimeExecutorConfig()
     return "\n\n".join(
         [
             config.stable_system_prompt,
             config.stable_developer_prompt,
-            f"Specialist profile: {specialist_id}.",
-            specialist_instructions,
+            f"已选择服务技能：{service_skill_id}。",
+            service_skill_body,
         ]
     )
 

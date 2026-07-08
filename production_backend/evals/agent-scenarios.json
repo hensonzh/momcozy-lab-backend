@@ -4,7 +4,7 @@
     {
       "id": "birth_prep_normal",
       "prompt": "I am 37 weeks pregnant and want a practical Hospital Bag Card and a simple Birth Plan Card.",
-      "expected_output": "The routing layer selects pregnancy_service. The model sees only the pregnancy specialist instructions and allowlisted tools, asks for missing birth-prep context, and uses pregnancy/hospital-bag tool contracts instead of dynamic skill loading.",
+      "expected_output": "The routing layer selects pregnancy_service. The model sees only the pregnancy service skill instructions and allowlisted tools, asks for missing birth-prep context, and uses pregnancy/hospital-bag tool contracts instead of dynamic skill loading.",
       "files": []
     },
     {
@@ -34,7 +34,7 @@
     {
       "id": "unknown_intent_clarification",
       "prompt": "Can you help me?",
-      "expected_output": "Falls back to general_assistant and asks one or two focused questions instead of selecting a random scene specialist.",
+      "expected_output": "Falls back to general_assistant and asks one or two focused questions instead of selecting a random scene service skill.",
       "files": []
     },
     {

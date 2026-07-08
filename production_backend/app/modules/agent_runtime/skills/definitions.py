@@ -3,20 +3,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..routing.schemas import SpecialistId
+from ..routing.schemas import ServiceSkillId
 
 
 SERVICE_SKILLS_ROOT = Path(__file__).resolve().parent / "service_skills"
 SERVICE_SKILL_FILE_NAME = "SKILL.md"
-REQUIRED_METADATA_KEYS = frozenset({"name", "description", "id", "version", "specialist_id"})
+REQUIRED_METADATA_KEYS = frozenset({"name", "description", "id", "version", "service_skill_id"})
 REQUIRED_SECTION_TITLES = ("服务范围", "回复风格", "服务流程", "交付物", "工具策略", "边界")
 SERVICE_SKILL_ORDER = (
-    SpecialistId.PREGNANCY.value,
-    SpecialistId.LACTATION.value,
-    SpecialistId.POSTPARTUM.value,
-    SpecialistId.AFTER_SALES.value,
-    SpecialistId.SAFETY.value,
-    SpecialistId.GENERAL.value,
+    ServiceSkillId.PREGNANCY.value,
+    ServiceSkillId.LACTATION.value,
+    ServiceSkillId.POSTPARTUM.value,
+    ServiceSkillId.AFTER_SALES.value,
+    ServiceSkillId.SAFETY.value,
+    ServiceSkillId.GENERAL.value,
 )
 
 
@@ -26,7 +26,7 @@ class AgentServiceSkill:
     description: str
     id: str
     version: str
-    specialist_id: str
+    service_skill_id: str
     role: str
     scope: tuple[str, ...]
     style_rules: tuple[str, ...]
@@ -44,7 +44,7 @@ class AgentServiceSkill:
         return {
             "id": self.id,
             "version": self.version,
-            "specialist_id": self.specialist_id,
+            "service_skill_id": self.service_skill_id,
             "scope": list(self.scope),
             "deliverables": list(self.deliverables),
         }
@@ -52,11 +52,11 @@ class AgentServiceSkill:
 
 class AgentServiceSkillRegistry:
     def __init__(self, skills: tuple[AgentServiceSkill, ...], default_skill_id: str) -> None:
-        self._skills = {skill.specialist_id: skill for skill in skills}
+        self._skills = {skill.service_skill_id: skill for skill in skills}
         self._ordered_skills = skills
         self._default_skill_id = default_skill_id
         if len(self._skills) != len(skills):
-            raise ValueError("duplicate agent service skill specialist_id")
+            raise ValueError("duplicate agent service skill service_skill_id")
         if default_skill_id not in self._skills:
             raise ValueError("default agent service skill is not registered")
 
@@ -72,7 +72,7 @@ class AgentServiceSkillRegistry:
 
 def default_service_skill_registry() -> AgentServiceSkillRegistry:
     skills = _load_default_service_skills()
-    return AgentServiceSkillRegistry(skills=skills, default_skill_id=SpecialistId.GENERAL.value)
+    return AgentServiceSkillRegistry(skills=skills, default_skill_id=ServiceSkillId.GENERAL.value)
 
 
 def _load_default_service_skills() -> tuple[AgentServiceSkill, ...]:
@@ -80,14 +80,14 @@ def _load_default_service_skills() -> tuple[AgentServiceSkill, ...]:
     if not skill_paths:
         raise ValueError(f"no agent service skills found under {SERVICE_SKILLS_ROOT}")
     skills = tuple(load_service_skill(path) for path in skill_paths)
-    by_specialist_id = {skill.specialist_id: skill for skill in skills}
+    by_service_skill_id = {skill.service_skill_id: skill for skill in skills}
     expected_ids = set(SERVICE_SKILL_ORDER)
-    actual_ids = set(by_specialist_id)
+    actual_ids = set(by_service_skill_id)
     if actual_ids != expected_ids:
         missing = sorted(expected_ids - actual_ids)
         extra = sorted(actual_ids - expected_ids)
         raise ValueError(f"agent service skill set mismatch; missing={missing}, extra={extra}")
-    return tuple(by_specialist_id[specialist_id] for specialist_id in SERVICE_SKILL_ORDER)
+    return tuple(by_service_skill_id[skill_id] for skill_id in SERVICE_SKILL_ORDER)
 
 
 def load_service_skill(path: Path) -> AgentServiceSkill:
@@ -100,7 +100,7 @@ def load_service_skill(path: Path) -> AgentServiceSkill:
         description=metadata["description"],
         id=metadata["id"],
         version=metadata["version"],
-        specialist_id=metadata["specialist_id"],
+        service_skill_id=metadata["service_skill_id"],
         role=role,
         scope=sections["服务范围"],
         style_rules=sections["回复风格"],
@@ -140,9 +140,9 @@ def _validate_metadata(*, metadata: dict[str, str], path: Path) -> None:
     if missing:
         raise ValueError(f"{path} is missing required frontmatter keys: {missing}")
     try:
-        SpecialistId(metadata["specialist_id"])
+        ServiceSkillId(metadata["service_skill_id"])
     except ValueError as exc:
-        raise ValueError(f"{path} has unsupported specialist_id: {metadata['specialist_id']}") from exc
+        raise ValueError(f"{path} has unsupported service_skill_id: {metadata['service_skill_id']}") from exc
 
 
 def _parse_role(*, body: str, path: Path) -> str:

@@ -26,6 +26,7 @@ from .handlers import (
     build_default_tool_handlers,
 )
 from .registry import ToolContractRegistry, default_tool_registry
+from .groups import ToolGroup, ToolGroupRegistry, default_tool_group_registry
 from .schemas import tool_input_schema
 
 __all__ = [
@@ -55,8 +56,11 @@ __all__ = [
     "ToolContractRegistry",
     "ToolExecutionResult",
     "ToolExecutor",
+    "ToolGroup",
+    "ToolGroupRegistry",
     "ToolHandlerContext",
     "build_default_tool_handlers",
+    "default_tool_group_registry",
     "default_tool_registry",
     "tool_input_schema",
 ]

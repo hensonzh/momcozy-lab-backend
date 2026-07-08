@@ -91,14 +91,15 @@ def test_agent_actions_and_checkpoints_have_runtime_indexes() -> None:
     memories = Base.metadata.tables["agent_memories"]
 
     assert "uq_agent_runs_thread_active" in {index.name for index in runs.indexes}
-    assert "specialist_id" in runs.columns
+    assert "service_skill_id" in runs.columns
     assert "routing_source" in runs.columns
     assert "routing_confidence_score" in runs.columns
     assert "routing_summary_json" in runs.columns
-    assert "ix_agent_runs_specialist_started" in {index.name for index in runs.indexes}
+    assert "ix_agent_runs_service_skill_started" in {index.name for index in runs.indexes}
     assert "ix_agent_runs_runnable_created" in {index.name for index in runs.indexes}
     assert "uq_agent_routing_decisions_run_message" in {constraint.name for constraint in routing_decisions.constraints}
-    assert "ix_agent_routing_decisions_specialist_created" in {index.name for index in routing_decisions.indexes}
+    assert "selected_skill_id" in routing_decisions.columns
+    assert "ix_agent_routing_decisions_service_skill_created" in {index.name for index in routing_decisions.indexes}
     assert "ix_agent_actions_run_status" in {index.name for index in actions.indexes}
     assert "ix_agent_actions_idempotency_key" in {index.name for index in actions.indexes}
     assert "uq_agent_context_checkpoints_namespace_id" in {constraint.name for constraint in checkpoints.constraints}

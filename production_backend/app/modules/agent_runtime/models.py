@@ -62,7 +62,7 @@ class AgentRun(Base):
         ),
         Index("ix_agent_runs_request_id", "request_id"),
         Index("ix_agent_runs_trace_id", "trace_id"),
-        Index("ix_agent_runs_specialist_started", "specialist_id", "started_at"),
+        Index("ix_agent_runs_service_skill_started", "service_skill_id", "started_at"),
         Index(
             "uq_agent_runs_thread_active",
             "thread_id",
@@ -78,7 +78,7 @@ class AgentRun(Base):
     runtime_pattern: Mapped[str] = mapped_column(String(64), default="langgraph_sdk", server_default="langgraph_sdk", nullable=False)
     graph_version: Mapped[str] = mapped_column(String(80), default="", server_default="", nullable=False)
     prompt_version: Mapped[str] = mapped_column(String(80), default="", server_default="", nullable=False)
-    specialist_id: Mapped[str] = mapped_column(String(80), default="", server_default="", nullable=False)
+    service_skill_id: Mapped[str] = mapped_column(String(80), default="", server_default="", nullable=False)
     routing_source: Mapped[str] = mapped_column(String(80), default="", server_default="", nullable=False)
     routing_confidence_score: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     routing_summary: Mapped[dict[str, Any]] = mapped_column(
@@ -111,7 +111,7 @@ class AgentRoutingDecision(Base):
         UniqueConstraint("run_id", "message_id", name="uq_agent_routing_decisions_run_message"),
         Index("ix_agent_routing_decisions_run_created", "run_id", "created_at"),
         Index("ix_agent_routing_decisions_thread_created", "thread_id", "created_at"),
-        Index("ix_agent_routing_decisions_specialist_created", "primary_specialist_id", "created_at"),
+        Index("ix_agent_routing_decisions_service_skill_created", "selected_skill_id", "created_at"),
     )
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
@@ -119,7 +119,7 @@ class AgentRoutingDecision(Base):
     thread_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("agent_threads.id"), nullable=False)
     actor_user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     message_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("agent_messages.id"), nullable=False)
-    primary_specialist_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    selected_skill_id: Mapped[str] = mapped_column(String(80), nullable=False)
     routing_source: Mapped[str] = mapped_column(String(80), nullable=False)
     confidence_score: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     execution_mode: Mapped[str] = mapped_column(String(40), default="single", server_default="single", nullable=False)

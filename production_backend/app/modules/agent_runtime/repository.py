@@ -96,7 +96,7 @@ class AgentRuntimeRepository:
         thread_id: UUID,
         actor_user_id: UUID,
         message_id: UUID,
-        primary_specialist_id: str,
+        selected_skill_id: str,
         routing_source: str,
         confidence: float,
         execution_mode: str,
@@ -109,7 +109,7 @@ class AgentRuntimeRepository:
         confidence_score = max(0, min(100, round(confidence * 100)))
         run = await self.get_run(run_id=run_id)
         if run is not None:
-            run.specialist_id = primary_specialist_id
+            run.service_skill_id = selected_skill_id
             run.routing_source = routing_source
             run.routing_confidence_score = confidence_score
             run.routing_summary = {
@@ -131,7 +131,7 @@ class AgentRuntimeRepository:
                 thread_id=thread_id,
                 actor_user_id=actor_user_id,
                 message_id=message_id,
-                primary_specialist_id=primary_specialist_id,
+                selected_skill_id=selected_skill_id,
                 routing_source=routing_source,
                 confidence_score=confidence_score,
                 execution_mode=execution_mode,
@@ -143,7 +143,7 @@ class AgentRuntimeRepository:
             )
             self.session.add(decision)
         else:
-            decision.primary_specialist_id = primary_specialist_id
+            decision.selected_skill_id = selected_skill_id
             decision.routing_source = routing_source
             decision.confidence_score = confidence_score
             decision.execution_mode = execution_mode

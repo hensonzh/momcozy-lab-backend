@@ -2,33 +2,35 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .deterministic import DeterministicSpecialistRouter
-from .schemas import IntentItem, RoutingContext, RoutingPlan, RoutingSource, SpecialistId
+from .deterministic import DeterministicSkillSignalRouter
+from .schemas import IntentItem, RoutingContext, RoutingPlan, RoutingSource, ServiceSkillId
 
 
-class IntentClassifier:
+class SkillIntentPlanner:
     async def classify(self, ctx: RoutingContext) -> RoutingPlan:
         return RoutingPlan(
-            primary_specialist_id=SpecialistId.GENERAL,
-            intents=[IntentItem(intent_type="general_request", specialist_id=SpecialistId.GENERAL)],
+            selected_skill_id=ServiceSkillId.GENERAL,
+            intents=[IntentItem(intent_type="general_request", service_skill_id=ServiceSkillId.GENERAL)],
+            tool_group_ids=["general.base"],
             execution_mode="single",
             confidence=0.55,
             source=RoutingSource.FALLBACK,
-            reason_codes=["classifier_not_configured"],
+            reason_codes=["model_planner_not_configured"],
         )
 
 
 @dataclass(frozen=True)
 class RoutingPolicy:
-    min_classifier_confidence: float = 0.62
+    min_model_confidence: float = 0.62
 
     def normalize(self, plan: RoutingPlan) -> RoutingPlan:
-        if plan.primary_specialist_id == SpecialistId.SAFETY:
+        if plan.selected_skill_id == ServiceSkillId.SAFETY:
             return plan
-        if plan.confidence < self.min_classifier_confidence:
+        if plan.confidence < self.min_model_confidence:
             return RoutingPlan(
-                primary_specialist_id=SpecialistId.GENERAL,
-                intents=[IntentItem(intent_type="general_request", specialist_id=SpecialistId.GENERAL)],
+                selected_skill_id=ServiceSkillId.GENERAL,
+                intents=[IntentItem(intent_type="general_request", service_skill_id=ServiceSkillId.GENERAL)],
+                tool_group_ids=["general.base"],
                 execution_mode="single",
                 confidence=plan.confidence,
                 source=plan.source,
@@ -39,20 +41,20 @@ class RoutingPolicy:
         return plan
 
 
-class SpecialistRoutingService:
+class SkillRoutingService:
     def __init__(
         self,
         *,
-        deterministic_router: DeterministicSpecialistRouter | None = None,
-        classifier: IntentClassifier | None = None,
+        deterministic_router: DeterministicSkillSignalRouter | None = None,
+        planner: SkillIntentPlanner | None = None,
         policy: RoutingPolicy | None = None,
     ) -> None:
-        self.deterministic_router = deterministic_router or DeterministicSpecialistRouter()
-        self.classifier = classifier or IntentClassifier()
+        self.deterministic_router = deterministic_router or DeterministicSkillSignalRouter()
+        self.planner = planner or SkillIntentPlanner()
         self.policy = policy or RoutingPolicy()
 
     async def route(self, ctx: RoutingContext) -> RoutingPlan:
         plan = self.deterministic_router.route(ctx)
         if plan is None:
-            plan = await self.classifier.classify(ctx)
+            plan = await self.planner.classify(ctx)
         return self.policy.normalize(plan)

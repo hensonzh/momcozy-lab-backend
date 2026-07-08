@@ -7,10 +7,9 @@ import pytest
 
 from production_backend.app.core.errors import ApiError
 from production_backend.app.modules.agent_runtime.models import AgentAction, AgentArtifact, AgentEvent, AgentMemory, AgentMessage, AgentRun, AgentToolCall
+from production_backend.app.modules.agent_runtime.routing import IntentItem, RoutingPlan, RoutingSource, ServiceSkillId
 from production_backend.app.modules.agent_runtime.run_lifecycle.executor import AgentRuntimeExecutor
 from production_backend.app.modules.agent_runtime.sdk import (
-    AgentSpecialistProfile,
-    AgentSpecialistRegistry,
     OpenAIAgentsSdkRunner,
     SdkNodeRequest,
     SdkNodeResult,
@@ -18,8 +17,8 @@ from production_backend.app.modules.agent_runtime.sdk import (
     scripted_sdk_response,
     scripted_tool_invocation,
 )
-from production_backend.app.modules.agent_runtime.sdk.specialists import default_specialist_registry
-from production_backend.app.modules.agent_runtime.tools import ToolExecutor, ToolHandlerContext, default_tool_registry
+from production_backend.app.modules.agent_runtime.skills import default_service_skill_registry
+from production_backend.app.modules.agent_runtime.tools import ToolExecutor, ToolGroup, ToolGroupRegistry, ToolHandlerContext, default_tool_registry
 
 
 def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() -> None:
@@ -48,19 +47,10 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() ->
     assert request.run_id == str(run.id)
     assert request.thread_id == str(thread_id)
     assert request.prompt_version == "prompt-v2"
-    assert request.specialist_id == "general_assistant"
-    assert "You are CozyMate" in request.instructions
-    assert "Specialist profile: general_assistant" in request.instructions
-    assert request.tool_names == (
-        "business.context.read",
-        "devices.guidance_assets.read",
-        "diary.recent.read",
-        "memory.create.propose",
-        "plans.current.read",
-        "profile.read",
-        "records.milk_summary.read",
-        "support.ticket.propose",
-    )
+    assert request.service_skill_id == "general_assistant"
+    assert "你是 CozyMate" in request.instructions
+    assert "已选择服务技能：general_assistant" in request.instructions
+    assert request.tool_names == ("business.context.read", "profile.read")
     assert [item["role"] for item in request.model_input] == [
         "system",
         "developer",
@@ -71,10 +61,10 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() ->
         "developer",
         "user",
     ]
-    assert request.model_input[0]["content"].startswith("You are CozyMate")
+    assert request.model_input[0]["content"].startswith("你是 CozyMate")
     assert request.model_input[4]["content"]["state"]["run_id"] == str(run.id)
-    assert request.model_input[4]["content"]["state"]["specialist_id"] == "general_assistant"
-    assert repository.routing_decisions[0]["primary_specialist_id"] == "general_assistant"
+    assert request.model_input[4]["content"]["state"]["service_skill_key"] == "general_assistant"
+    assert repository.routing_decisions[0]["selected_skill_id"] == "general_assistant"
     assert repository.routing_decisions[0]["routing_source"] == "fallback"
     assert repository.routing_decisions[0]["confidence"] == 0.55
     assert request.model_input[-1] == {"role": "user", "content": "Summarize it."}
@@ -93,12 +83,12 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() ->
         "routing_source",
         "run_id",
         "runtime_pattern",
+        "selected_tool_group_ids",
         "service_skill_deliverables",
         "service_skill_id",
+        "service_skill_key",
         "service_skill_scope",
         "service_skill_version",
-        "specialist_display_name",
-        "specialist_id",
         "thread_id",
     ]
 
@@ -150,10 +140,10 @@ def test_agent_runtime_executor_projects_active_memory_into_dynamic_context() ->
     assert state_store.projections[0]["projection_summary"]["fresh_business_fact_keys"] == []
 
 
-def test_default_specialists_are_bound_to_service_skills() -> None:
-    registry = default_specialist_registry()
+def test_default_service_skills_are_file_backed() -> None:
+    registry = default_service_skill_registry()
 
-    for specialist_id in (
+    for service_skill_id in (
         "general_assistant",
         "pregnancy_service",
         "lactation",
@@ -161,10 +151,9 @@ def test_default_specialists_are_bound_to_service_skills() -> None:
         "after_sales",
         "safety_guardrail",
     ):
-        profile = registry.get(specialist_id)
-        assert profile.service_skill is not None
-        assert profile.service_skill.specialist_id == specialist_id
-        assert "服务 Skill" in profile.service_skill.prompt_block()
+        service_skill = registry.get(service_skill_id)
+        assert service_skill.service_skill_id == service_skill_id
+        assert "服务技能" in service_skill.prompt_block()
 
 
 def test_agent_runtime_executor_publishes_text_deltas_to_transient_stream() -> None:
@@ -237,16 +226,19 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
             repository=repository,
             sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
             tool_executor=tool_executor,
-            specialist_registry=AgentSpecialistRegistry(
-                profiles=(
-                    AgentSpecialistProfile(
-                        id="general_assistant",
-                        display_name="All tools test profile",
-                        instructions="Expose all registered tools for schema coverage tests.",
-                        tool_domains=(),
+            routing_service=StaticRoutingService(
+                service_skill_id=ServiceSkillId.GENERAL,
+                tool_group_ids=("general.all",),
+            ),
+            tool_group_registry=ToolGroupRegistry(
+                groups=(
+                    ToolGroup(
+                        id="general.all",
+                        service_skill_id=ServiceSkillId.GENERAL,
+                        description="测试用全量工具组。",
+                        tool_contracts=tuple(default_tool_registry().names_for_sdk()),
                     ),
-                ),
-                default_profile_id="general_assistant",
+                )
             ),
         ).execute(run=run)
     )
@@ -319,7 +311,7 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert tool_executor.calls[0]["args"] == {}
 
 
-def test_agent_runtime_executor_selects_specialist_and_scopes_tools() -> None:
+def test_agent_runtime_executor_selects_service_skill_and_scopes_tools_by_group() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)
     current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="今天奶量怎么样？", sequence=1)
@@ -335,20 +327,15 @@ def test_agent_runtime_executor_selects_specialist_and_scopes_tools() -> None:
 
     request = backend.requests[0]
     assert result.status == "completed"
-    assert request.specialist_id == "lactation"
-    assert "Specialist profile: lactation" in request.instructions
-    assert request.model_input[-4]["content"]["state"]["specialist_id"] == "lactation"
+    assert request.service_skill_id == "lactation"
+    assert "已选择服务技能：lactation" in request.instructions
+    assert request.model_input[-4]["content"]["state"]["service_skill_key"] == "lactation"
+    assert request.model_input[-4]["content"]["state"]["selected_tool_group_ids"] == ["general.base", "lactation.milk_read"]
     assert request.tool_names == (
-        "artifacts.lactation_summary.create",
         "business.context.read",
-        "notifications.milk_reminder.propose",
-        "plans.milk_plan.propose",
         "profile.read",
-        "records.feeding_record.propose",
         "records.milk_status.read",
         "records.milk_summary.read",
-        "records.pumping_record.propose",
-        "support.ticket.propose",
     )
 
 
@@ -371,11 +358,11 @@ def test_agent_runtime_executor_injects_pregnancy_service_skill() -> None:
     request = backend.requests[0]
     state = request.model_input[-4]["content"]["state"]
     assert result.status == "completed"
-    assert request.specialist_id == "pregnancy_service"
+    assert request.service_skill_id == "pregnancy_service"
     assert state["service_skill_id"] == "pregnancy_service_v1"
     assert state["service_skill_version"] == "v1"
     assert "CozyMate" in request.instructions
-    assert "服务 Skill" in request.instructions
+    assert "服务技能" in request.instructions
     assert "待产包清单" in request.instructions
     assert "分娩沟通单" in request.instructions
     assert "每轮只推进一个重点" in request.instructions
@@ -385,7 +372,7 @@ def test_agent_runtime_executor_injects_pregnancy_service_skill() -> None:
     assert state_store.projections[0]["projection_summary"]["service_skill_id"] == "pregnancy_service_v1"
 
 
-def test_agent_runtime_executor_routes_named_pump_issue_to_device_specialist() -> None:
+def test_agent_runtime_executor_routes_named_pump_issue_to_device_service_skill() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)
     current_user = _message(
@@ -406,15 +393,13 @@ def test_agent_runtime_executor_routes_named_pump_issue_to_device_specialist() -
     )
 
     request = backend.requests[0]
-    assert request.specialist_id == "after_sales"
+    assert request.service_skill_id == "after_sales"
     assert request.tool_names == (
         "business.context.read",
         "devices.guidance_assets.read",
         "devices.pump_status.read",
         "files.vision_summary.read",
         "profile.read",
-        "records.milk_summary.read",
-        "support.ticket.propose",
     )
 
 
@@ -676,6 +661,23 @@ class CapturingSdkBackend:
     async def run(self, request: SdkNodeRequest) -> SdkNodeResult:
         self.requests.append(request)
         return self.result
+
+
+class StaticRoutingService:
+    def __init__(self, *, service_skill_id: ServiceSkillId, tool_group_ids: tuple[str, ...]) -> None:
+        self.service_skill_id = service_skill_id
+        self.tool_group_ids = tool_group_ids
+
+    async def route(self, ctx):
+        return RoutingPlan(
+            selected_skill_id=self.service_skill_id,
+            intents=[IntentItem(intent_type=f"{self.service_skill_id.value}_request", service_skill_id=self.service_skill_id)],
+            tool_group_ids=list(self.tool_group_ids),
+            execution_mode="single",
+            confidence=1,
+            source=RoutingSource.MODEL_PLANNER,
+            reason_codes=["test_static_plan"],
+        )
 
 
 class FakeRuntimeRepository:

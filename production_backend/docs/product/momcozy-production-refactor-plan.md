@@ -842,14 +842,14 @@ MomCozy 新 runtime 采用 **LangGraph + OpenAI Agents SDK**，不再保留自�
 选择理由：
 
 - LangGraph 负责 durable orchestration、workflow state、checkpoint、interrupt、resume、cancel、retry 和 graph version。
-- OpenAI Agents SDK 负责 graph 节点内的模型推理、tool loop、specialist agents、guardrails、handoff 和 tracing。
+- OpenAI Agents SDK 负责 graph 节点内的模型推理、tool loop、service skill agents、guardrails、handoff 和 tracing。
 - FastAPI `AgentRuntimeService` 负责 run lifecycle、权限、action/audit/outbox、event persistence、stream/replay 和业务 service 调用。
 - OpenAI provider session、SDK session、LangGraph checkpoint 都不能替代内部 `agent_*` runtime ledger。
 
 明确拒绝：
 
 - **SDK-only**：不足以承载奶量分析、孕期计划、确认中断、断线恢复和多实例恢复等长流程。
-- **LangGraph-only**：会把模型/tool loop、specialist agent、guardrail 和 tracing 细节重新压回自研代码。
+- **LangGraph-only**：会把模型/tool loop、service skill agent、guardrail 和 tracing 细节重新压回自研代码。
 - **legacy adapter / 自研 Responses adapter**：只代表旧系统现状，不进入目标架构，也不作为灰度、回滚或生产兜底选项。
 
 ### Agent runtime 目标架构
@@ -862,7 +862,7 @@ MomCozy 新 runtime 采用 **LangGraph + OpenAI Agents SDK**，不再保留自�
   runtime。新方案由场景专家 routing、context projector 和显式 tool allowlist
   共同控制每轮模型可见内容。
 - `tool_search` + deferred namespace 的渐进加载思想，但要提升为正式 tool
-  contract 和 specialist allowlist。
+  contract 和 service skill tool groups。
 - 旧流式 UI 的用户体验意图，例如过程反馈、文本增量、artifact 和 action card，但要用持久 `agent_events` + replay/resume contract 重新定义。
 - `safe_tool_arguments()` / `safe_tool_result()` 的脱敏原则，但要升级为统一 safe payload policy。
 
@@ -884,12 +884,12 @@ MomCozy 新 runtime 采用 **LangGraph + OpenAI Agents SDK**，不再保留自�
 - Postgres 可记录每轮输入投影的摘要或引用：`agent_context_projections` 或 `agent_runs.input_context_ref`，用于 replay、debug 和 eval；它不是新的权威状态源。
 - `agent_messages` 维护会话历史数组；history selector 只选择用户消息、助手消息、必要 tool summary 和 resource ref，不选择旧 context projection。
 - `ContextProjector` 从 ledger、workflow state、业务表、memory、tool/action refs 派生本轮 OpenAI Agents SDK 节点输入。
-- `SpecialistRoutingService` 每轮生成 routing plan，在
+- `SkillRoutingService` 每轮生成 routing plan，在
   `general_assistant`、`pregnancy_service`、`lactation`、
   `postpartum_recovery`、`after_sales` 和 `safety_guardrail` 之间选择主专家；
   每个专家只暴露自己的显式 tool allowlist。
 - `agent_routing_decisions` 保存每轮为什么选择该专家；`agent_runs` 只保存
-  specialist/routing 摘要用于列表、排查和 eval。
+  service_skill/routing 摘要用于列表、排查和 eval。
 - Redis 只保存 transient controls：active run、cancel flag、stream progress、临时锁。
 - 删除 `ContextState` 大字典；业务事实回到业务表，workflow state 进入 `agent_workflow_states`，模型输入上下文只由 per-run projection 生成或记录。
 - agent 写操作按风险和依赖关系进入 action/effect lane：
@@ -1240,7 +1240,7 @@ Flutter 负责展示明确升级、禁用无关 action、避免显示 raw tool a
 - 实现 `ContextBuilder / ContextProjector` 与 `history selector`，过滤旧 state projection、debug note 和 provider raw event。
 - routing decision、必要 checkpoint 入 Postgres。
 - active run、cancel、stream progress 入 Redis。
-- 固定采用 LangGraph + OpenAI Agents SDK：LangGraph 管 graph/checkpoint/interrupt/resume，OpenAI Agents SDK 管节点内 reasoning、tool loop、specialist agents、guardrails 和 tracing。
+- 固定采用 LangGraph + OpenAI Agents SDK：LangGraph 管 graph/checkpoint/interrupt/resume，OpenAI Agents SDK 管节点内 reasoning、tool loop、service skill agents、guardrails 和 tracing。
 - 不新增或保留自研 Responses adapter；旧 loop 只用于 Phase 0 现状盘点和迁移前对照，进入新 runtime 后必须删除。
 - 支持 `prompt_cache_key`、`prompt_cache_retention` 环境变量，并记录 `cached_tokens` 指标。
 - tool contract 元数据化：permission、owner scope、side effect、confirmation、idempotency、audit、timeout。
@@ -1343,7 +1343,7 @@ Flutter 负责展示明确升级、禁用无关 action、避免显示 raw tool a
 | Phase 2：用户管理与认证 | `$production-fastapi-backend-architecture/references/auth-permissions.md`；`$production-fastapi-backend-architecture/references/api-schema-contracts.md`；`$production-fastapi-backend-architecture/references/security-hardening.md` | PR-05：users/auth/device-session schema + migrations；PR-06：register/login/refresh/logout/me + token rotation；PR-07：`current_user` dependency + owner scope tests；PR-08：WebSocket 短期 token 或 header 鉴权 |
 | Phase 3：PostgreSQL 数据迁移与业务模块切分 | `$production-fastapi-backend-architecture/references/data-layer-migrations.md`；`$production-fastapi-backend-architecture/references/project-organization.md`；`$production-fastapi-backend-architecture/references/implementation-blueprint-fastapi.md` | PR-09：Alembic baseline + SQLite schema mapping；PR-10：profile/baby repository + service + tests；PR-11：feeding/pumping/growth repository + service + tests；PR-12：plan/diary/device 模块切分；PR-13：旧 SQLite 样本导入和比对脚本 |
 | Phase 4：文件与 OSS | `$production-fastapi-backend-architecture/references/project-organization.md`；`$production-fastapi-backend-architecture/references/security-hardening.md`；`$production-fastapi-backend-architecture/references/deployment-operations.md` | PR-14：files module + owner-scoped metadata schema；PR-15：OSS client + upload/download/delete flow；PR-16：本地 `upload_files` 迁移脚本 + signed URL / 受控转发；PR-17：文件越权和删除账号生命周期测试 |
-| Phase 5：Agent runtime 生产化 | `$production-agent-architecture/references/implementation-blueprint-fastapi.md`；`$production-agent-architecture/references/state-and-persistence.md`；`$production-agent-architecture/references/api-and-schema-contracts.md`；`$production-agent-architecture/references/tool-action-contracts.md`；`$production-agent-architecture/references/streaming-resume.md`；`$production-agent-architecture/references/prompt-context-management.md`；`$production-agent-architecture/references/migration-playbook.md` | PR-18：agent thread/run/message/tool/event ledger schema + stores；PR-19：event store + replay/stream/cancel contract；PR-20：tool metadata registry + `ToolExecutor`；PR-21：action/audit/outbox + first protected write；PR-22：LangGraph graph factory + first workflow checkpoint；PR-23：OpenAI Agents SDK reasoning node + specialist boundary；PR-24：`ContextProjector` + prompt cache metrics；PR-25：删除 `previous_response_id`、自研 Responses adapter、`ChatSession` runtime path |
+| Phase 5：Agent runtime 生产化 | `$production-agent-architecture/references/implementation-blueprint-fastapi.md`；`$production-agent-architecture/references/state-and-persistence.md`；`$production-agent-architecture/references/api-and-schema-contracts.md`；`$production-agent-architecture/references/tool-action-contracts.md`；`$production-agent-architecture/references/streaming-resume.md`；`$production-agent-architecture/references/prompt-context-management.md`；`$production-agent-architecture/references/migration-playbook.md` | PR-18：agent thread/run/message/tool/event ledger schema + stores；PR-19：event store + replay/stream/cancel contract；PR-20：tool metadata registry + `ToolExecutor`；PR-21：action/audit/outbox + first protected write；PR-22：LangGraph graph factory + first workflow checkpoint；PR-23：OpenAI Agents SDK reasoning node + service skill boundary；PR-24：`ContextProjector` + prompt cache metrics；PR-25：删除 `previous_response_id`、自研 Responses adapter、`ChatSession` runtime path |
 | Phase 6：安全 guardrails 与 eval | `$production-agent-architecture/references/security-and-permissions.md`；`$production-agent-architecture/references/testing-eval-harness.md`；`$production-agent-architecture/references/eval-observability.md`；`$production-agent-architecture/references/memory-system.md` | PR-26：deterministic red-flag / emotion crisis guard；PR-27：safety events + handoff record；PR-28：eval runner + CI critical suites；PR-29：prompt / skill / graph version rollout gates；PR-30：长期记忆最小闭环和删除/同意策略 |
 | Phase 7：Flutter App 骨架与功能迁移 | `$flutter-product-app-architecture/references/complete-flutter-build.md`；`$flutter-product-app-architecture/references/migration-playbook.md`；`$flutter-product-app-architecture/references/api-state-auth.md`；`$flutter-product-app-architecture/references/agent-streaming-ui.md`；`$flutter-product-app-architecture/references/testing-release.md` | PR-31：Flutter bootstrap / flavor / router / theme / network；PR-32：auth/session + secure storage + token refresh；PR-33：typed API client + error mapper；PR-34：agent_chat reducer + stream replay UI；PR-35：profile/baby/milk/care_plan/diary/device vertical slices；PR-36：release/test gates |
 | Phase 8：灰度、切换与清理 | `$production-fastapi-backend-architecture/references/release-zero-downtime-migrations.md`；`$production-fastapi-backend-architecture/references/deployment-operations.md`；`$production-agent-architecture/references/deployment-operations.md`；`$production-agent-architecture/references/testing-eval-harness.md` | PR-37：staging/canary release plan + rollback runbook；PR-38：双写/临时兼容层关闭；PR-39：下线 SQLite、本地文件、静态客户端 token；PR-40：删除 legacy user id/debug 身份/临时兼容 API；PR-41：生产 SLO dashboard + incident replay runbook |

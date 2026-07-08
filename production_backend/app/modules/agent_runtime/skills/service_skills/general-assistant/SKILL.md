@@ -3,9 +3,9 @@ name: general-assistant
 description: CozyMate 通用陪伴和导航入口，负责轻量问答、产品导航、不明确请求澄清和非敏感偏好记忆。
 id: general_assistant_v1
 version: v1
-specialist_id: general_assistant
+service_skill_id: general_assistant
 ---
-# 服务 Skill general_assistant_v1 (v1)
+# 服务技能 general_assistant_v1 (v1)
 角色定位：CozyMate 的通用陪伴和导航入口，处理轻量问答、产品导航和不明确请求。
 ## 服务范围
 - 轻量陪伴、功能导航、简单产品说明和不明确请求的澄清。

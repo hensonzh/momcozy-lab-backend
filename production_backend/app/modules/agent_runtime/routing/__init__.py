@@ -1,13 +1,16 @@
-from .deterministic import DeterministicSpecialistRouter
-from .schemas import IntentItem, RoutingContext, RoutingPlan, RoutingSource, SpecialistId
-from .service import SpecialistRoutingService
+from .deterministic import DeterministicSkillSignalRouter
+from .schemas import IntentItem, RoutingContext, RoutingPlan, RoutingSource, ServiceSkillId
+from .service import SkillIntentPlanner, SkillRoutingService
+from .model_planner import ModelSkillIntentPlanner
 
 __all__ = [
-    "DeterministicSpecialistRouter",
+    "DeterministicSkillSignalRouter",
     "IntentItem",
     "RoutingContext",
     "RoutingPlan",
     "RoutingSource",
-    "SpecialistId",
-    "SpecialistRoutingService",
+    "ServiceSkillId",
+    "SkillIntentPlanner",
+    "SkillRoutingService",
+    "ModelSkillIntentPlanner",
 ]

@@ -29,7 +29,7 @@ def test_product_agent_eval_seed_cases_have_action_and_safety_contracts() -> Non
         behavior = case["expected_behavior"]
         assert behavior["intent"] == case["suite"]
         assert isinstance(behavior["route"], str) and behavior["route"]
-        assert behavior["specialist_id"] in {
+        assert behavior["service_skill_id"] in {
             "general_assistant",
             "pregnancy_service",
             "lactation",
@@ -111,7 +111,7 @@ def test_product_agent_eval_seed_uses_current_hospital_bag_action_contract() -> 
 
     assert "hospital_bag.cart_update.propose" in cart_contracts
     assert by_suite["hospital_bag_cart_update"]["expected_behavior"]["requires_confirmation_before_write"] is False
-    assert by_suite["hospital_bag_cart_update"]["expected_behavior"]["specialist_id"] == "pregnancy_service"
+    assert by_suite["hospital_bag_cart_update"]["expected_behavior"]["service_skill_id"] == "pregnancy_service"
     assert "hospital_bag_cart_update_proposal" not in cart_contracts
 
 
@@ -160,17 +160,17 @@ def test_product_agent_eval_seed_uses_current_memory_action_contract() -> None:
     assert by_suite["memory_sensitive_rejection"]["expected_behavior"]["requires_confirmation_before_write"] is False
 
 
-def test_product_agent_eval_seed_covers_postpartum_recovery_specialist() -> None:
+def test_product_agent_eval_seed_covers_postpartum_recovery_service_skill() -> None:
     cases = load_product_agent_eval_seed_cases(PRODUCT_AGENT_EVAL_SEED)
     by_suite = {case["suite"]: case for case in cases}
 
     checkin_contracts = {tool_call["contract"] for tool_call in by_suite["postpartum_recovery_checkin"]["expected_tool_calls"]}
     task_contracts = {tool_call["contract"] for tool_call in by_suite["postpartum_recovery_task"]["expected_tool_calls"]}
 
-    assert by_suite["postpartum_recovery_checkin"]["expected_behavior"]["specialist_id"] == "postpartum_recovery"
+    assert by_suite["postpartum_recovery_checkin"]["expected_behavior"]["service_skill_id"] == "postpartum_recovery"
     assert by_suite["postpartum_recovery_checkin"]["expected_behavior"]["requires_confirmation_before_write"] is False
     assert {"profile.read", "plans.current.read", "diary.recent.read"} <= checkin_contracts
-    assert by_suite["postpartum_recovery_task"]["expected_behavior"]["specialist_id"] == "postpartum_recovery"
+    assert by_suite["postpartum_recovery_task"]["expected_behavior"]["service_skill_id"] == "postpartum_recovery"
     assert by_suite["postpartum_recovery_task"]["expected_behavior"]["requires_confirmation_before_write"] is True
     assert "plans.task_create.propose" in task_contracts
 

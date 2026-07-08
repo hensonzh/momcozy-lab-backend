@@ -18,7 +18,7 @@ from production_backend.app.modules.agent_runtime.prompts import (
 from production_backend.app.modules.agent_runtime.sdk import OpenAIAgentsSdkRunner, SdkNodeRequest, SdkNodeResult, SdkToolDefinition, sdk_tool_name
 from production_backend.app.modules.agent_runtime.skills import default_service_skill_registry
 from production_backend.app.modules.agent_runtime.skills.definitions import SERVICE_SKILL_FILE_NAME, SERVICE_SKILLS_ROOT, load_service_skill
-from production_backend.app.modules.agent_runtime.tools import default_tool_registry, tool_input_schema
+from production_backend.app.modules.agent_runtime.tools import default_tool_group_registry, default_tool_registry, tool_input_schema
 from production_backend.app.modules.agent_runtime.tools.output_policy import INSTRUCTIONAL_TOOL_OUTPUT_KEYS
 
 
@@ -26,13 +26,14 @@ def test_default_graph_registry_uses_langgraph_sdk_pattern() -> None:
     graph = default_graph_registry().get("momcozy-agent-v1")
 
     assert graph.runtime_pattern == "langgraph_sdk"
+    assert "select_service_skill" in graph.node_names
     assert "sdk_reasoning" in graph.node_names
     assert "confirmation_interrupt" in graph.node_names
 
 
 def test_service_skill_registry_is_the_model_facing_entrypoint() -> None:
     skill_registry = default_service_skill_registry()
-    skill_ids = {skill.specialist_id for skill in skill_registry.list()}
+    skill_ids = {skill.service_skill_id for skill in skill_registry.list()}
 
     assert skill_ids == {
         "after_sales",
@@ -43,8 +44,8 @@ def test_service_skill_registry_is_the_model_facing_entrypoint() -> None:
         "safety_guardrail",
     }
     pregnancy_skill = skill_registry.get("pregnancy_service")
-    assert pregnancy_skill.specialist_id == "pregnancy_service"
-    assert "服务 Skill pregnancy_service_v1" in pregnancy_skill.prompt_block()
+    assert pregnancy_skill.service_skill_id == "pregnancy_service"
+    assert "服务技能 pregnancy_service_v1" in pregnancy_skill.prompt_block()
     assert "待产包清单" in pregnancy_skill.prompt_block()
 
 
@@ -58,16 +59,17 @@ def test_service_skills_are_file_backed_skill_directories() -> None:
         assert skill.source_path.read_text(encoding="utf-8").startswith("---\n")
         reloaded = load_service_skill(skill.source_path)
         assert reloaded.id == skill.id
-        assert reloaded.specialist_id == skill.specialist_id
+        assert reloaded.service_skill_id == skill.service_skill_id
         assert reloaded.prompt_block() == skill.prompt_block()
 
 
 def test_prompt_ownership_policy_keeps_workflow_in_service_skills() -> None:
-    assert "service_skill owns domain workflow" in "\n".join(PROMPT_OWNERSHIP_POLICY)
-    assert "tool_schema owns input validation only" in "\n".join(PROMPT_OWNERSHIP_POLICY)
-    assert "tool_result owns facts" in "\n".join(PROMPT_OWNERSHIP_POLICY)
-    assert "service skill owns domain workflow" in DEFAULT_STABLE_DEVELOPER_PROMPT.lower()
-    assert "tool results are facts/resources/status" in DEFAULT_STABLE_DEVELOPER_PROMPT
+    assert "服务技能负责领域流程" in "\n".join(PROMPT_OWNERSHIP_POLICY)
+    assert "工具输入结构契约只负责输入校验" in "\n".join(PROMPT_OWNERSHIP_POLICY)
+    assert "工具结果只返回事实" in "\n".join(PROMPT_OWNERSHIP_POLICY)
+    assert "服务技能选择只负责确定本轮主要服务场景和可见工具组" in "\n".join(PROMPT_OWNERSHIP_POLICY)
+    assert "服务技能负责领域流程" in DEFAULT_STABLE_DEVELOPER_PROMPT
+    assert "工具结果只代表事实、资源和状态" in DEFAULT_STABLE_DEVELOPER_PROMPT
 
     global_prompt = f"{DEFAULT_STABLE_SYSTEM_PROMPT}\n{DEFAULT_STABLE_DEVELOPER_PROMPT}"
     assert "records.milk_status.read" not in global_prompt
@@ -76,6 +78,42 @@ def test_prompt_ownership_policy_keeps_workflow_in_service_skills() -> None:
     assert "milk_analysis_intake_manage" not in global_prompt
     assert "device_manual_search" not in global_prompt
     assert "ui_quick_replies_create" not in global_prompt
+
+
+def test_model_facing_prompt_text_is_chinese() -> None:
+    registry = default_tool_registry()
+    prompt_texts = [
+        *PROMPT_OWNERSHIP_POLICY,
+        DEFAULT_STABLE_SYSTEM_PROMPT,
+        DEFAULT_STABLE_DEVELOPER_PROMPT,
+        *(contract.description for contract in registry.list()),
+    ]
+    for contract in registry.list():
+        prompt_texts.extend(_schema_descriptions(tool_input_schema(contract.input_schema_ref)))
+
+    forbidden_fragments = (
+        "You are",
+        "Use the",
+        "Read current",
+        "Create an",
+        "Propose a",
+        "Maximum ",
+        "Optional ",
+        "Owner-scoped",
+        "Concise ",
+        "Specialist profile",
+        "specialist",
+        "service skill owns",
+        "tool results are",
+    )
+    offenders = [
+        fragment
+        for text in prompt_texts
+        for fragment in forbidden_fragments
+        if fragment in text
+    ]
+
+    assert offenders == []
 
 
 def test_service_skills_capture_domain_flow_semantics_without_legacy_tool_protocols() -> None:
@@ -87,7 +125,7 @@ def test_service_skills_capture_domain_flow_semantics_without_legacy_tool_protoc
 
     assert "高龄孕产妇" in pregnancy
     assert "医院确认项" in pregnancy
-    assert "工具或 artifact 已展示" in pregnancy
+    assert "工具或产物已展示" in pregnancy
     assert "next_step" not in pregnancy
     assert "final_response_instruction" not in pregnancy
 
@@ -225,6 +263,24 @@ def test_tool_contract_registry_declares_permission_confirmation_and_blocking_po
     assert "artifacts.labor_communication_card.create" in registry.names_for_sdk()
 
 
+def test_tool_group_registry_exposes_narrow_dynamic_tool_sets() -> None:
+    registry = default_tool_group_registry()
+
+    groups = {group.id: group for group in registry.list()}
+    assert groups["general.base"].tool_contracts == ("profile.read", "business.context.read")
+    assert groups["lactation.milk_read"].tool_contracts == ("records.milk_status.read", "records.milk_summary.read")
+    assert "plans.milk_plan.propose" not in groups["lactation.milk_read"].tool_contracts
+    assert groups["pregnancy.hospital_bag"].tool_contracts == (
+        "artifacts.hospital_bag_card.create",
+        "hospital_bag.cart_update.propose",
+    )
+    assert groups["after_sales.device_guidance"].tool_contracts == (
+        "devices.pump_status.read",
+        "devices.guidance_assets.read",
+        "files.vision_summary.read",
+    )
+
+
 def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> None:
     registry = default_tool_registry()
     profile_schema = tool_input_schema(registry.get("profile.read").input_schema_ref)
@@ -358,9 +414,26 @@ def _normalized_key(value: object) -> str:
     return str(value).strip().lower().replace("-", "_")
 
 
+def _schema_descriptions(value: object) -> list[str]:
+    if isinstance(value, dict):
+        descriptions = []
+        description = value.get("description")
+        if isinstance(description, str):
+            descriptions.append(description)
+        for item in value.values():
+            descriptions.extend(_schema_descriptions(item))
+        return descriptions
+    if isinstance(value, list):
+        descriptions = []
+        for item in value:
+            descriptions.extend(_schema_descriptions(item))
+        return descriptions
+    return []
+
+
 def test_context_builder_keeps_stable_prompts_before_dynamic_projection() -> None:
     assert "CozyMate" in DEFAULT_STABLE_SYSTEM_PROMPT
-    assert "provider session state" in DEFAULT_STABLE_DEVELOPER_PROMPT
+    assert "供应商会话状态" in DEFAULT_STABLE_DEVELOPER_PROMPT
 
     model_input = ModelInputBuilder().build(
         projection=ContextProjection(
@@ -427,7 +500,7 @@ def test_sdk_runner_uses_real_agents_sdk_shape_when_package_is_available(monkeyp
         tool_names=("profile.read",),
         prompt_version="prompt-v2",
         trace_id="trace_1",
-        specialist_id="general_assistant",
+        service_skill_id="general_assistant",
     )
 
     result = asyncio.run(OpenAIAgentsSdkRunner(model="gpt-test", max_turns=3, trace_enabled=True).run_reasoning(request))
@@ -442,7 +515,7 @@ def test_sdk_runner_uses_real_agents_sdk_shape_when_package_is_available(monkeyp
     assert FakeAgentsSdkRunner.last_run_config.group_id == "thread_1"
     assert FakeAgentsSdkRunner.last_run_config.trace_metadata["run_id"] == "run_1"
     assert FakeAgentsSdkRunner.last_run_config.trace_metadata["prompt_version"] == "prompt-v2"
-    assert FakeAgentsSdkRunner.last_run_config.trace_metadata["specialist_id"] == "general_assistant"
+    assert FakeAgentsSdkRunner.last_run_config.trace_metadata["service_skill_id"] == "general_assistant"
     assert FakeAgentsSdkRunner.last_run_config.trace_metadata["tool_names"] == ["profile.read"]
     assert FakeAgentsSdkRunner.last_previous_response_id is None
     assert FakeAgentsSdkRunner.last_auto_previous_response_id is False

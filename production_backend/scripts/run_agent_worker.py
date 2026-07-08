@@ -19,6 +19,7 @@ from production_backend.app.modules.agent_runtime.event_stream.sink import Agent
 from production_backend.app.modules.agent_runtime.graphs import AgentGraphCheckpointStore, AgentRuntimeGraphRunner
 from production_backend.app.modules.agent_runtime.memory.service import AgentMemoryRepository, AgentMemoryService
 from production_backend.app.modules.agent_runtime.repository import AgentRuntimeRepository
+from production_backend.app.modules.agent_runtime.routing import ModelSkillIntentPlanner, SkillRoutingService
 from production_backend.app.modules.agent_runtime.run_lifecycle.executor import AgentRuntimeExecutor
 from production_backend.app.modules.agent_runtime.safety.service import AgentSafetyService
 from production_backend.app.modules.agent_runtime.sdk import create_agent_sdk_runner
@@ -221,6 +222,7 @@ async def _process_agent_run(
             ),
         )
         checkpoint_store = AgentGraphCheckpointStore(repository=repository)
+        sdk_runner = create_agent_sdk_runner(settings=settings, metrics=metrics)
         runtime_executor = AgentRuntimeExecutor(
             repository=repository,
             checkpoint_store=checkpoint_store,
@@ -230,7 +232,8 @@ async def _process_agent_run(
             event_sink=event_sink,
             memory_service=memory_service,
             transient_stream=AgentTransientStream(redis_client),
-            sdk_runner=create_agent_sdk_runner(settings=settings, metrics=metrics),
+            routing_service=SkillRoutingService(planner=ModelSkillIntentPlanner(sdk_runner=sdk_runner)),
+            sdk_runner=sdk_runner,
             object_storage=object_storage,
             max_inline_artifact_payload_bytes=settings.agent_runtime_max_inline_payload_bytes,
         )

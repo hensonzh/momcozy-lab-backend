@@ -27,7 +27,7 @@
 - action confirmation -> outbox apply 的 effect lane。
 - deterministic safety gate、replay bundle、eval seed 基础。
 - `AgentRuntimeGraphRunner` 已通过 LangGraph `StateGraph` 执行
-  `load_context -> safety_gate -> route_specialist -> sdk_reasoning ->
+  `load_context -> safety_gate -> select_service_skill -> sdk_reasoning ->
   tool_result_review -> action_policy -> confirmation_interrupt/final_response ->
   finish`。
 
@@ -60,11 +60,11 @@
 - IBCLC/professional support eval 已对齐到真实 `support.ticket.propose`
   handoff contract，不再要求不存在的 `ibclc_consult_proposal`。
 - 场景专家 routing 已有后端基础：runtime 先通过
-  `SpecialistRoutingService` 生成 routing plan，再选择
+  `SkillRoutingService` 生成 routing plan，再选择
   `general_assistant`、`pregnancy_service`、`lactation`、
   `postpartum_recovery`、`after_sales` 或 `safety_guardrail` profile。routing
   decision 会写入 `agent_routing_decisions`，并把摘要写入 `agent_runs`、
-  context projection、checkpoint 和 SDK trace metadata；specialist profile
+  context projection、checkpoint 和 SDK trace metadata；service skill plan
   使用显式 tool contract allowlist，避免把无关工具暴露给当前 run。
 - 低风险、不影响下一步推理的写操作已支持 `enqueue_and_continue`：
   feeding record、pumping record、hospital-bag cart update 会创建 action、
@@ -121,7 +121,7 @@
 - 仅使用 `langgraph_sdk` runtime pattern。
 - LangGraph 负责 durable orchestration、checkpoint、interrupt、resume、
   timeout、retry、cancel。
-- OpenAI Agents SDK 在 graph node 内负责模型/tool loop、specialist agent、
+- OpenAI Agents SDK 在 graph node 内负责模型/tool loop、service skill agent、
   guardrail 和 tracing。
 - 不保留旧 Responses API loop、`previous_response_id`、旧 `ChatSession`
   adapter 或兼容兜底路径。
@@ -241,7 +241,7 @@ LangGraph workflow。
 范围：
 
 - 用环境变量控制 model、timeout、max turns、trace flag、prompt version。
-- 定义 MomCozy base agent instructions 和 specialist agent 选择规则。
+- 定义 MomCozy base agent instructions 和 service skill agent 选择规则。
 - 将 tool contracts 映射为 SDK tools。
 - 捕获 SDK tool calls、guardrail decisions、token/cost/latency metrics。
 - 明确 SDK failure mapping：dependency missing、rate limit、model error、
@@ -253,7 +253,7 @@ LangGraph workflow。
 1. `agent: harden OpenAI Agents SDK runner settings` - done
 2. `agent: add SDK tool and tracing contract tests` - done
 3. `agent: add deterministic SDK mock harness for evals` - done
-4. `agent: add deterministic specialist routing` - done
+4. `agent: add deterministic service skill routing` - done
 
 已完成能力：
 
@@ -270,7 +270,7 @@ LangGraph workflow。
   `ToolExecutor` 路径，以及 provider tracing metadata。
 - `ScriptedSdkBackend` 可在 CI/eval 中按脚本触发 SDK tool invocation，
   不依赖真实模型也能验证完整 run lifecycle。
-- 每个 run 都会选择一个 deterministic specialist profile；profile 只影响
+- 每个 run 都会选择一个 deterministic service skill plan；profile 只影响
   SDK instructions、context/trace metadata 和可见 tool allowlist，不创建旧
   adapter、不依赖 provider session state，也不绕过应用侧 tool executor。
 
@@ -585,7 +585,7 @@ eval regression。
 - CI 已接入 `run_agent_seed_eval.py` smoke gate。
 - CI 已上传 seed eval JSON/JUnit 报告 artifact，便于失败排查。
 - `run_agent_provider_eval.py` 已提供 provider-backed eval harness：无凭证时可
-  明确 skipped，有凭证时复用 OpenAI Agents SDK runner、当前 specialist
+  明确 skipped，有凭证时复用 OpenAI Agents SDK runner、当前 service skill
   routing、tool schema 和 seed assertion engine 生成 JSON 报告。
 - `.github/workflows/agent-provider-eval.yml` 已支持手动/定时运行，并上传
   `agent-provider-eval` 报告 artifact。

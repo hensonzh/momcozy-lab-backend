@@ -274,7 +274,7 @@ Pattern decision:
 
 - Use LangGraph for durable orchestration, checkpoint, interrupt, resume, and
   workflow edges.
-- Use OpenAI Agents SDK inside graph nodes for specialist agent/tool loops,
+- Use OpenAI Agents SDK inside graph nodes for service skill agent/tool loops,
   guardrails, and tracing.
 - Do not keep the legacy Responses API loop or old adapter fallback.
 

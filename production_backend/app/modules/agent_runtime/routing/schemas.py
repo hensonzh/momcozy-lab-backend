@@ -7,7 +7,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 
-class SpecialistId(StrEnum):
+class ServiceSkillId(StrEnum):
     GENERAL = "general_assistant"
     PREGNANCY = "pregnancy_service"
     LACTATION = "lactation"
@@ -21,9 +21,9 @@ class RoutingSource(StrEnum):
     SAFETY_RULE = "safety_rule"
     APP_SURFACE = "app_surface"
     ACTIVE_WORKFLOW = "active_workflow"
-    KEYWORD_FAST_PATH = "keyword_fast_path"
+    LOCAL_HINT = "local_hint"
     COMPLEXITY_RULE = "complexity_rule"
-    LLM_CLASSIFIER = "llm_classifier"
+    MODEL_PLANNER = "model_planner"
     FALLBACK = "fallback"
 
 
@@ -33,7 +33,7 @@ class RoutingContext(BaseModel):
     actor_user_id: UUID
     message: str = ""
     app_surface: str | None = None
-    active_specialist_id: SpecialistId | None = None
+    active_service_skill_id: ServiceSkillId | None = None
     active_workflow: str | None = None
     pending_action_id: UUID | None = None
     attachment_types: list[str] = Field(default_factory=list)
@@ -41,7 +41,7 @@ class RoutingContext(BaseModel):
 
 class IntentItem(BaseModel):
     intent_type: str
-    specialist_id: SpecialistId
+    service_skill_id: ServiceSkillId
     priority: int = 50
     requires_write: bool = False
     safety_sensitive: bool = False
@@ -49,8 +49,9 @@ class IntentItem(BaseModel):
 
 
 class RoutingPlan(BaseModel):
-    primary_specialist_id: SpecialistId
+    selected_skill_id: ServiceSkillId
     intents: list[IntentItem]
+    tool_group_ids: list[str] = Field(default_factory=list)
     execution_mode: Literal["single", "single_with_note", "blocked_for_safety"] = "single"
     confidence: float = Field(ge=0, le=1)
     source: RoutingSource

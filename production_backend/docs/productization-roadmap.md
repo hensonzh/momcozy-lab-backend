@@ -21,7 +21,7 @@ In scope before Flutter integration:
 - PostgreSQL, Redis, object storage, migrations, settings, CI, and runbooks;
 - owner-scoped product modules and their experience-flow tests;
 - outbox worker and agent worker runtime controls;
-- production agent runtime, specialist routing, tools, actions, streaming, replay,
+- production agent runtime, service skill routing, tools, actions, streaming, replay,
   and eval;
 - safety, privacy, observability, and release gates.
 
@@ -195,7 +195,7 @@ External dependencies:
 ## Phase 4: Production Agent Runtime
 
 Goal: replace the legacy Responses API loop with durable LangGraph + OpenAI
-Agents SDK runtime and product-scenario specialists.
+Agents SDK runtime and product-scenario service skills.
 
 Fixed decisions:
 
@@ -204,7 +204,7 @@ Fixed decisions:
   AG-UI bridge, or legacy adapter fallback;
 - backend owns message history arrays, runtime ledger, tool/action contracts, and
   application events;
-- specialist routing is scenario-based: pregnancy service, lactation,
+- service skill routing is scenario-based: pregnancy service, lactation,
   postpartum recovery, after-sales, safety guardrail, and general assistant.
 
 Acceptance:
@@ -213,7 +213,7 @@ Acceptance:
   memory, and eval ledger rows are durable;
 - every exposed tool has contract metadata, input schema, permission, owner scope,
   side-effect level, blocking policy, timeout, and safe result behavior;
-- natural-language requests route through deterministic checks and specialist
+- natural-language requests route through deterministic checks and service skill
   routing without overbuilding a separate platform;
 - streaming uses application events with sequence replay and optional transient
   `message.delta`;
@@ -227,7 +227,7 @@ Already covered:
 
 - durable runtime ledger and Redis controls;
 - executable graph runner boundary and SDK runner boundary;
-- specialist profiles and tool allowlists;
+- service skill plans and tool allowlists;
 - action policy, outbox application, replay bundles, memory, safety, and eval
   harness;
 - product seed eval suites for milk, pregnancy, diary, device, support, safety,
@@ -235,7 +235,7 @@ Already covered:
 
 Completed backend-only PR slices:
 
-- `agent: add postpartum recovery specialist fixtures and eval cases`;
+- `agent: add postpartum recovery service skill fixtures and eval cases`;
 - `agent: add provider-backed eval budget policy docs`;
 - `agent: add provider-backed eval max-case and cost-budget controls`.
 

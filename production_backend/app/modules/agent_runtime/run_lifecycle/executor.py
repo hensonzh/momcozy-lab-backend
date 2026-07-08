@@ -23,17 +23,15 @@ from ..prompts import (
     ModelInputBuilder,
 )
 from ..repository import AgentRuntimeRepository
-from ..routing import RoutingContext, RoutingPlan, SpecialistId, SpecialistRoutingService
+from ..routing import RoutingContext, RoutingPlan, ServiceSkillId, SkillRoutingService
 from ..sdk import (
-    AgentSpecialistProfile,
-    AgentSpecialistRegistry,
     OpenAIAgentsSdkRunner,
     SdkNodeRequest,
     SdkToolDefinition,
-    default_specialist_registry,
     sdk_tool_name,
 )
-from ..tools import ToolContractRegistry, ToolExecutor, default_tool_registry
+from ..skills import AgentServiceSkill, AgentServiceSkillRegistry, default_service_skill_registry
+from ..tools import ToolContractRegistry, ToolExecutor, ToolGroupRegistry, default_tool_group_registry, default_tool_registry
 from ..tools.schemas import tool_input_schema
 from .execution import AgentRunExecutionResult
 from .state_store import AgentRuntimeStateStore
@@ -61,8 +59,9 @@ class AgentRuntimeExecutor:
         event_sink: AgentEventSink | None = None,
         action_policy: AgentActionPolicy | None = None,
         memory_service: AgentMemoryService | None = None,
-        specialist_registry: AgentSpecialistRegistry | None = None,
-        routing_service: SpecialistRoutingService | None = None,
+        service_skill_registry: AgentServiceSkillRegistry | None = None,
+        routing_service: SkillRoutingService | None = None,
+        tool_group_registry: ToolGroupRegistry | None = None,
         transient_stream: AgentTransientStream | None = None,
         input_builder: ModelInputBuilder | None = None,
         config: AgentRuntimeExecutorConfig | None = None,
@@ -75,12 +74,13 @@ class AgentRuntimeExecutor:
         self.checkpoint_store = checkpoint_store
         self.state_store = state_store
         self.tool_registry = tool_registry or default_tool_registry()
+        self.tool_group_registry = tool_group_registry or default_tool_group_registry()
         self.tool_executor = tool_executor
         self.event_sink = event_sink
         self.action_policy = action_policy or AgentActionPolicy()
         self.memory_service = memory_service
-        self.specialist_registry = specialist_registry or default_specialist_registry()
-        self.routing_service = routing_service or SpecialistRoutingService()
+        self.service_skill_registry = service_skill_registry or default_service_skill_registry()
+        self.routing_service = routing_service or SkillRoutingService()
         self.transient_stream = transient_stream
         self.input_builder = input_builder or ModelInputBuilder()
         self.config = config or AgentRuntimeExecutorConfig()
@@ -102,10 +102,10 @@ class AgentRuntimeExecutor:
         messages = await self.repository.list_messages_for_thread(thread_id=run.thread_id, limit=self.config.history_limit)
         memory_projection = await self._memory_projection(run=run)
         routing_plan = await self.routing_service.route(_routing_context(run=run, current_message=current_message))
-        specialist = self.specialist_registry.get(routing_plan.primary_specialist_id.value)
-        skill_summary = specialist.service_skill.state_summary() if specialist.service_skill is not None else {}
+        service_skill = self.service_skill_registry.get(routing_plan.selected_skill_id.value)
+        skill_summary = service_skill.state_summary()
         await self._record_routing_decision(run=run, current_message=current_message, routing_plan=routing_plan)
-        tool_names = self._tool_names_for_specialist(specialist)
+        tool_names = self.tool_group_registry.tool_names_for_plan(routing_plan)
         projection = ContextProjection(
             stable_system_prompt=self.config.stable_system_prompt,
             stable_developer_prompt=self.config.stable_developer_prompt,
@@ -117,12 +117,12 @@ class AgentRuntimeExecutor:
                 "graph_version": run.graph_version,
                 "runtime_pattern": run.runtime_pattern,
                 "prompt_version": run.prompt_version,
-                "specialist_id": specialist.id,
-                "specialist_display_name": specialist.display_name,
+                "service_skill_key": service_skill.service_skill_id,
                 "service_skill_id": str(skill_summary.get("id") or ""),
                 "service_skill_version": str(skill_summary.get("version") or ""),
                 "service_skill_scope": skill_summary.get("scope") or [],
                 "service_skill_deliverables": skill_summary.get("deliverables") or [],
+                "selected_tool_group_ids": list(routing_plan.tool_group_ids),
                 "routing_source": routing_plan.source.value,
                 "routing_confidence": routing_plan.confidence,
                 "routing_reason_codes": routing_plan.reason_codes,
@@ -145,7 +145,7 @@ class AgentRuntimeExecutor:
                 "context_refs": [],
                 "pending_action_id": None,
                 "final_message_id": None,
-                "specialist_id": specialist.id,
+                "service_skill_key": service_skill.service_skill_id,
                 "service_skill_id": str(skill_summary.get("id") or ""),
                 "routing_source": routing_plan.source.value,
                 "routing_confidence": routing_plan.confidence,
@@ -158,13 +158,13 @@ class AgentRuntimeExecutor:
                 run_id=str(run.id),
                 thread_id=str(run.thread_id),
                 actor_user_id=str(run.actor_user_id),
-                instructions=_sdk_instructions(projection=projection, specialist=specialist),
+                instructions=_sdk_instructions(projection=projection, service_skill=service_skill),
                 model_input=model_input,
                 tool_names=tool_names,
                 tools=self._sdk_tools(run=run, tool_names=tool_names),
                 prompt_version=run.prompt_version,
                 trace_id=run.trace_id,
-                specialist_id=specialist.id,
+                service_skill_id=service_skill.service_skill_id,
                 on_text_delta=self._text_delta_handler(run=run),
             )
         )
@@ -272,9 +272,6 @@ class AgentRuntimeExecutor:
                 payload={"artifact_id": str(artifact.id), "artifact_type": artifact.artifact_type},
             )
 
-    def _tool_names_for_specialist(self, specialist: AgentSpecialistProfile) -> tuple[str, ...]:
-        return tuple(sorted(contract.name for contract in self.tool_registry.list() if specialist.allows_tool(contract)))
-
     def _text_delta_handler(self, *, run: AgentRun) -> Callable[[str], Awaitable[None]] | None:
         transient_stream = self.transient_stream
         if transient_stream is None:
@@ -351,7 +348,7 @@ class AgentRuntimeExecutor:
             thread_id=run.thread_id,
             actor_user_id=run.actor_user_id,
             message_id=current_message.id,
-            primary_specialist_id=routing_plan.primary_specialist_id.value,
+            selected_skill_id=routing_plan.selected_skill_id.value,
             routing_source=routing_plan.source.value,
             confidence=routing_plan.confidence,
             execution_mode=routing_plan.execution_mode,
@@ -359,6 +356,7 @@ class AgentRuntimeExecutor:
             reason_codes=list(routing_plan.reason_codes),
             safety_flags=list(routing_plan.safety_flags),
             needs_clarification=routing_plan.needs_clarification,
+            tool_scope_version=",".join(routing_plan.tool_group_ids) or "none",
         )
 
     async def _save_checkpoint(
@@ -435,7 +433,7 @@ def _routing_context(*, run: AgentRun, current_message: AgentMessage) -> Routing
     app_surface = _text(content, "app_surface") or _text(content, "surface")
     pending_action_id = _text(content, "pending_action_id")
     active_workflow = _text(content, "active_workflow")
-    active_specialist_id = _text(content, "active_specialist_id")
+    active_service_skill_id = _text(content, "active_service_skill_id")
     attachment_types = content.get("attachment_types")
     return RoutingContext(
         run_id=run.id,
@@ -443,18 +441,18 @@ def _routing_context(*, run: AgentRun, current_message: AgentMessage) -> Routing
         actor_user_id=run.actor_user_id,
         message=_message_text(current_message),
         app_surface=app_surface or None,
-        active_specialist_id=_specialist_id(active_specialist_id),
+        active_service_skill_id=_service_skill_id(active_service_skill_id),
         active_workflow=active_workflow or None,
         pending_action_id=_uuid(pending_action_id),
         attachment_types=[item for item in attachment_types if isinstance(item, str)] if isinstance(attachment_types, list) else [],
     )
 
 
-def _specialist_id(value: str) -> SpecialistId | None:
+def _service_skill_id(value: str) -> ServiceSkillId | None:
     if not value:
         return None
     try:
-        return SpecialistId(value)
+        return ServiceSkillId(value)
     except ValueError:
         return None
 
@@ -468,15 +466,15 @@ def _uuid(value: str) -> UUID | None:
         return None
 
 
-def _sdk_instructions(*, projection: ContextProjection, specialist: AgentSpecialistProfile) -> str:
+def _sdk_instructions(*, projection: ContextProjection, service_skill: AgentServiceSkill) -> str:
     blocks = [
         projection.stable_system_prompt,
         projection.stable_developer_prompt,
-        f"Specialist profile: {specialist.id} ({specialist.display_name}).",
-        specialist.instructions,
+        f"已选择服务技能：{service_skill.service_skill_id}（{service_skill.name}）。",
+        "你始终是同一个 CozyMate，不要表现成多个专家或把内部服务技能名称暴露给用户。",
+        "本轮只使用运行时提供的工具；如果当前工具不足以完成写入或产物创建，先自然澄清或说明下一步，不要编造已执行。",
+        service_skill.prompt_block(),
     ]
-    if specialist.service_skill is not None:
-        blocks.append(specialist.service_skill.prompt_block())
     return "\n\n".join(blocks)
 
 

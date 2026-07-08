@@ -39,7 +39,7 @@ class SdkNodeRequest:
     tools: tuple[SdkToolDefinition, ...] = ()
     prompt_version: str = ""
     trace_id: str = ""
-    specialist_id: str = "general_assistant"
+    service_skill_id: str = "general_assistant"
     on_text_delta: SdkTextDeltaHandler | None = None
 
 
@@ -331,7 +331,7 @@ def _build_run_config(
                 "thread_id": request.thread_id,
                 "actor_user_id": request.actor_user_id,
                 "prompt_version": request.prompt_version,
-                "specialist_id": request.specialist_id,
+                "service_skill_id": request.service_skill_id,
                 "tool_names": list(request.tool_names),
                 "model_provider": provider,
             },

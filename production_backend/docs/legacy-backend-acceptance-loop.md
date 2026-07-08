@@ -705,7 +705,7 @@ Target acceptance:
 
 Current migration status:
 
-- Implemented and tested: scene specialist routing, durable run/message/tool
+- Implemented and tested: scene service skill routing, durable run/message/tool
   ledger, context projection, SDK tool execution, action proposal/outbox
   skeleton, replayable application events, deterministic safety guard, and
   product eval seed runner.

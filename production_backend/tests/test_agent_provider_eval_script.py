@@ -76,8 +76,8 @@ def test_run_agent_provider_eval_uses_sdk_runner_and_seed_assertions() -> None:
     assert report["model"] == "gpt-5.5"
     assert report["passed"] == 1
     assert report["results"][0]["status"] == "passed"
-    assert report["results"][0]["specialist_id"] == "lactation"
-    assert report["results"][0]["routing_source"] == "keyword_fast_path"
+    assert report["results"][0]["service_skill_id"] == "lactation"
+    assert report["results"][0]["routing_source"] == "local_hint"
     assert [tool_call["tool_name"] for tool_call in report["results"][0]["observed_tool_calls"]] == [
         "records.milk_status.read",
         "records.milk_summary.read",
