@@ -8,6 +8,7 @@ from .evals.service import (
 from .run_lifecycle.execution import AgentRunExecutionResult
 from .graphs import AgentGraphCheckpointStore, AgentRuntimeGraphRunner, GraphCheckpointRef
 from .actions.policy import AgentActionPolicy, AgentActionPolicyDecision, AgentActionPolicyRule
+from .context import BusinessFactsProjector, BusinessFactsProjectorConfig
 from .memory.actions import AGENT_MEMORY_CREATE_ACTION, AgentMemoryCreateActionHandler
 from .memory.service import AgentMemoryRepository, AgentMemoryService
 from .models import (
@@ -40,6 +41,8 @@ __all__ = [
     "AgentActionPolicyDecision",
     "AgentActionPolicyRule",
     "AgentArtifact",
+    "BusinessFactsProjector",
+    "BusinessFactsProjectorConfig",
     "AgentEvalService",
     "AgentEvalRuntimeCaseResult",
     "AgentEvalRuntimeClient",

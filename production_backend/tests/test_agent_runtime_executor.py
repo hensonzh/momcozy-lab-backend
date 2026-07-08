@@ -170,6 +170,44 @@ def test_agent_runtime_executor_projects_active_memory_into_dynamic_context() ->
     assert state_store.projections[0]["projection_summary"]["fresh_business_fact_keys"] == []
 
 
+def test_agent_runtime_executor_projects_fresh_business_facts_into_dynamic_context() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="今天奶量怎么样？", sequence=1)
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    backend = CapturingSdkBackend(result=SdkNodeResult(final_text="我先看今天和最近趋势。"))
+    state_store = FakeStateStore()
+    business_facts_projector = FakeBusinessFactsProjector(
+        facts={"schema_version": "v1", "milk_status": {"totals": {"trend_pumped_volume_ml": 420}}}
+    )
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            state_store=state_store,
+            business_facts_projector=business_facts_projector,
+            routing_service=StaticRoutingService(
+                service_skill_id=ServiceSkillId.LACTATION,
+                tool_group_ids=("general.base", "lactation.milk_read"),
+            ),
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+        ).execute(run=run)
+    )
+
+    business_facts = _runtime_context(backend.requests[0])["business_facts"]
+    assert result.status == "completed"
+    assert business_facts == {"schema_version": "v1", "milk_status": {"totals": {"trend_pumped_volume_ml": 420}}}
+    assert business_facts_projector.calls == [
+        {
+            "actor_user_id": run.actor_user_id,
+            "run_id": run.id,
+            "selected_skill_id": ServiceSkillId.LACTATION,
+            "tool_group_ids": ["general.base", "lactation.milk_read"],
+        }
+    ]
+    assert state_store.projections[0]["projection_summary"]["fresh_business_fact_keys"] == ["milk_status", "schema_version"]
+
+
 def test_default_service_skills_are_file_backed() -> None:
     registry = default_service_skill_registry()
 
@@ -997,6 +1035,23 @@ class FakeMemoryService:
     async def list_active_memories(self, *, owner_user_id, memory_type=None, limit=20):
         self.calls.append({"owner_user_id": owner_user_id, "memory_type": memory_type, "limit": limit})
         return [memory for memory in self.memories if memory.owner_user_id == owner_user_id and memory.status == "active"][:limit]
+
+
+class FakeBusinessFactsProjector:
+    def __init__(self, *, facts: dict[str, Any]) -> None:
+        self.facts = facts
+        self.calls = []
+
+    async def project(self, *, actor, run_id, routing_plan):
+        self.calls.append(
+            {
+                "actor_user_id": actor.user_id,
+                "run_id": run_id,
+                "selected_skill_id": routing_plan.selected_skill_id,
+                "tool_group_ids": list(routing_plan.tool_group_ids),
+            }
+        )
+        return self.facts
 
 
 class FakeTransientStream:

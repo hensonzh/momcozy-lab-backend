@@ -12,6 +12,7 @@ from ....core.errors import ApiError
 from ....infrastructure.object_storage.base import ObjectStorage
 from ...auth import CurrentUser
 from ..actions.policy import AgentActionPolicy, AgentActionPolicyDecision
+from ..context import BusinessFactsProjector
 from ..event_stream.sink import AgentEventSink
 from ..event_stream.transient import AgentTransientStream
 from ..graphs import AgentGraphCheckpointStore, AgentGraphRegistry, default_graph_registry
@@ -63,6 +64,7 @@ class AgentRuntimeExecutor:
         service_skill_registry: AgentServiceSkillRegistry | None = None,
         routing_service: SkillRoutingService | None = None,
         tool_group_registry: ToolGroupRegistry | None = None,
+        business_facts_projector: BusinessFactsProjector | None = None,
         transient_stream: AgentTransientStream | None = None,
         input_builder: ModelInputBuilder | None = None,
         config: AgentRuntimeExecutorConfig | None = None,
@@ -83,6 +85,7 @@ class AgentRuntimeExecutor:
         self.memory_service = memory_service
         self.service_skill_registry = service_skill_registry or default_service_skill_registry()
         self.routing_service = routing_service or SkillRoutingService()
+        self.business_facts_projector = business_facts_projector
         self.transient_stream = transient_stream
         self.input_builder = input_builder or ModelInputBuilder()
         self.config = config or AgentRuntimeExecutorConfig()
@@ -110,6 +113,7 @@ class AgentRuntimeExecutor:
         skill_summary = service_skill.state_summary()
         await self._record_routing_decision(run=run, current_message=current_message, routing_plan=routing_plan)
         tool_names = self.tool_group_registry.tool_names_for_plan(routing_plan)
+        fresh_business_facts = await self._fresh_business_facts(run=run, routing_plan=routing_plan)
         projection = ContextProjection(
             stable_system_prompt=self.config.stable_system_prompt,
             selected_conversation_history=_history_before(messages=messages, before_sequence=current_message.sequence),
@@ -124,7 +128,7 @@ class AgentRuntimeExecutor:
             user_context=_user_context(current_message=current_message, now=self.clock()),
             recent_run_facts=recent_run_facts,
             memory_projection=memory_projection,
-            fresh_business_facts={},
+            fresh_business_facts=fresh_business_facts,
         )
         model_input = self.input_builder.build(
             projection=projection,
@@ -431,6 +435,15 @@ class AgentRuntimeExecutor:
             exclude_run_id=run.id,
         )
         return [_run_fact_projection_item(summary) for summary in summaries]
+
+    async def _fresh_business_facts(self, *, run: AgentRun, routing_plan: RoutingPlan) -> dict[str, Any]:
+        if self.business_facts_projector is None:
+            return {}
+        return await self.business_facts_projector.project(
+            actor=_run_actor(run),
+            run_id=run.id,
+            routing_plan=routing_plan,
+        )
 
     async def _upsert_run_summary(
         self,
