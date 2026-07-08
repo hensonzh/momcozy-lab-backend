@@ -84,6 +84,10 @@ class AuthSessionService:
         now = self.clock()
         await self.repository.revoke_device_session(session_id=session_id, revoked_at=now)
 
+    async def revoke_user_sessions(self, *, user_id: UUID) -> int:
+        now = self.clock()
+        return await self.repository.revoke_user_sessions(user_id=user_id, revoked_at=now)
+
     async def _create_refresh_token(self, *, session_id: UUID, family_id: UUID | None) -> IssuedRefreshToken:
         raw_token = self.token_factory()
         record = await self.repository.create_refresh_token(
