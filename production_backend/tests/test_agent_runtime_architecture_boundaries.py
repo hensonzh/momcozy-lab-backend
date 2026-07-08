@@ -9,9 +9,11 @@ from production_backend.app.core.errors import ApiError
 from production_backend.app.core.metrics import RequestMetrics
 from production_backend.app.modules.agent_runtime.graphs import default_graph_registry
 from production_backend.app.modules.agent_runtime.prompts import (
+    BASE_AGENT_INSTRUCTIONS,
     ContextProjection,
     DEFAULT_STABLE_SYSTEM_PROMPT,
     ModelInputBuilder,
+    build_static_agent_context,
 )
 from production_backend.app.modules.agent_runtime.sdk import OpenAIAgentsSdkRunner, SdkNodeRequest, SdkNodeResult, SdkToolDefinition, sdk_tool_name
 from production_backend.app.modules.agent_runtime.skill_registry import (
@@ -78,6 +80,8 @@ def test_skills_directory_contains_only_skill_directories() -> None:
 
 def test_static_prompts_keep_runtime_boundaries_and_legacy_style() -> None:
     global_prompt = DEFAULT_STABLE_SYSTEM_PROMPT
+    static_context = build_static_agent_context()
+    assert DEFAULT_STABLE_SYSTEM_PROMPT == f"{BASE_AGENT_INSTRUCTIONS}\n\n{static_context}"
     assert "# 全局规则" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "## 全局人设" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "你叫 CozyMate，来自 Momcozy 团队。" in DEFAULT_STABLE_SYSTEM_PROMPT
@@ -94,6 +98,13 @@ def test_static_prompts_keep_runtime_boundaries_and_legacy_style() -> None:
     assert "不要编造已执行" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "工具结果只代表事实、资源、产物、动作和状态" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "不能声称已直接应用" in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert "## 可用 Skill" in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert "skill_manifests:" in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert '"id": "pregnancy_service"' in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert '"id": "lactation"' in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert "CozyMate 孕期服务专家，负责孕期计划、待产包、分娩沟通单和相关任务推进。" in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert "角色定位：CozyMate 的孕期服务专家" not in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert "## 服务范围" not in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "records.milk_status.read" not in global_prompt
     assert "artifacts.hospital_bag_card.create" not in global_prompt
     assert "birth_journey_intake_manage" not in global_prompt

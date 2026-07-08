@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+from typing import Any
 
-DEFAULT_STABLE_SYSTEM_PROMPT = """
+
+BASE_AGENT_INSTRUCTIONS = """
 # 全局规则
 
 ## 全局人设
@@ -53,3 +57,63 @@ DEFAULT_STABLE_SYSTEM_PROMPT = """
 ## 图片处理方式
 只描述图片中可见且和用户问题相关的内容。不要从图片推断身份、敏感特征或隐藏医学事实。
 """.strip()
+
+_SERVICE_SKILLS_ROOT = Path(__file__).resolve().parents[1] / "skills"
+_SERVICE_SKILL_FILE_NAME = "SKILL.md"
+_SERVICE_SKILL_ORDER = (
+    "pregnancy_service",
+    "lactation",
+    "postpartum_recovery",
+    "after_sales",
+    "safety_guardrail",
+    "general_assistant",
+)
+
+
+def build_static_agent_context() -> str:
+    lines = [
+        "## 可用 Skill",
+        "",
+        _section("skill_manifests", _service_skill_manifests()),
+    ]
+    return "\n".join(lines)
+
+
+def _service_skill_manifests() -> list[dict[str, str]]:
+    manifests = [_read_service_skill_manifest(path) for path in sorted(_SERVICE_SKILLS_ROOT.glob(f"*/{_SERVICE_SKILL_FILE_NAME}"))]
+    by_id = {manifest["id"]: manifest for manifest in manifests}
+    ordered = [by_id[skill_id] for skill_id in _SERVICE_SKILL_ORDER if skill_id in by_id]
+    extras = [manifest for manifest in manifests if manifest["id"] not in _SERVICE_SKILL_ORDER]
+    return ordered + extras
+
+
+def _read_service_skill_manifest(path: Path) -> dict[str, str]:
+    metadata = _read_frontmatter(path)
+    return {
+        "id": metadata.get("service_skill_id") or metadata.get("id") or path.parent.name,
+        "name": metadata.get("name") or path.parent.name,
+        "description": metadata.get("description", ""),
+    }
+
+
+def _read_frontmatter(path: Path) -> dict[str, str]:
+    raw = path.read_text(encoding="utf-8")
+    if not raw.startswith("---\n"):
+        return {}
+    marker_index = raw.find("\n---", 4)
+    if marker_index == -1:
+        return {}
+    metadata: dict[str, str] = {}
+    for line in raw[4:marker_index].strip().splitlines():
+        key, separator, value = line.strip().partition(":")
+        if separator and key.strip():
+            metadata[key.strip()] = value.strip().strip('"')
+    return metadata
+
+
+def _section(name: str, value: Any) -> str:
+    rendered = json.dumps(value, ensure_ascii=False, indent=2)
+    return f"{name}:\n{rendered}"
+
+
+DEFAULT_STABLE_SYSTEM_PROMPT = f"{BASE_AGENT_INSTRUCTIONS}\n\n{build_static_agent_context()}"
