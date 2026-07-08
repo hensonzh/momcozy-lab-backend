@@ -491,7 +491,6 @@ def test_context_builder_projects_dynamic_context_after_selected_history() -> No
             selected_conversation_history=[{"role": "user", "content": "history"}],
             current_state_projection={"service_skill_id": "general_assistant_v1"},
             user_context={"current_time": "2026-07-08T12:00:00+08:00", "timezone": "Asia/Shanghai"},
-            thread_summary={"headline": "用户正在准备待产包"},
             recent_run_facts=[{"run_id": "run_1", "facts": {"assistant_conclusion": "已整理过喂养目标"}}],
             fresh_business_facts={"profile": {"name": "Mai"}},
         ),
@@ -504,7 +503,6 @@ def test_context_builder_projects_dynamic_context_after_selected_history() -> No
         "runtime_context": {
             "state": {"service_skill_id": "general_assistant_v1"},
             "user_context": {"current_time": "2026-07-08T12:00:00+08:00", "timezone": "Asia/Shanghai"},
-            "thread_summary": {"headline": "用户正在准备待产包"},
             "recent_run_facts": [{"run_id": "run_1", "facts": {"assistant_conclusion": "已整理过喂养目标"}}],
             "memory": [],
             "business_facts": {"profile": {"name": "Mai"}},

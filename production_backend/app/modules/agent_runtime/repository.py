@@ -781,19 +781,6 @@ class AgentRuntimeRepository:
         summaries.reverse()
         return summaries
 
-    async def get_latest_thread_summary(self, *, thread_id: UUID, owner_user_id: UUID) -> AgentRunSummary | None:
-        statement = (
-            select(AgentRunSummary)
-            .where(
-                AgentRunSummary.thread_id == thread_id,
-                AgentRunSummary.owner_user_id == owner_user_id,
-                AgentRunSummary.summary_type == "thread_summary",
-            )
-            .order_by(AgentRunSummary.created_at.desc(), AgentRunSummary.id.desc())
-            .limit(1)
-        )
-        return cast(AgentRunSummary | None, await self.session.scalar(statement))
-
     async def list_safety_events_for_run(self, *, run_id: UUID) -> list[AgentSafetyEvent]:
         statement = select(AgentSafetyEvent).where(AgentSafetyEvent.run_id == run_id).order_by(AgentSafetyEvent.created_at, AgentSafetyEvent.id)
         result = await self.session.scalars(statement)

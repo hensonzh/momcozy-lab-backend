@@ -105,7 +105,6 @@ class AgentRuntimeExecutor:
         messages = await self.repository.list_messages_for_thread(thread_id=run.thread_id, limit=self.config.history_limit)
         memory_projection = await self._memory_projection(run=run)
         recent_run_facts = await self._recent_run_facts(run=run)
-        thread_summary = await self._thread_summary(run=run)
         routing_plan = await self.routing_service.route(_routing_context(run=run, current_message=current_message))
         service_skill = self.service_skill_registry.get(routing_plan.selected_skill_id.value)
         skill_summary = service_skill.state_summary()
@@ -123,7 +122,6 @@ class AgentRuntimeExecutor:
                 "safety_flags": routing_plan.safety_flags,
             },
             user_context=_user_context(current_message=current_message, now=self.clock()),
-            thread_summary=thread_summary,
             recent_run_facts=recent_run_facts,
             memory_projection=memory_projection,
             fresh_business_facts={},
@@ -408,7 +406,6 @@ class AgentRuntimeExecutor:
                 "history_message_count": len(selected_history),
                 "state_keys": sorted(projection.current_state_projection),
                 "service_skill_id": _text(projection.current_state_projection, "service_skill_id"),
-                "thread_summary_included": bool(projection.thread_summary),
                 "recent_run_fact_count": len(projection.recent_run_facts),
                 "memory_count": len(projection.memory_projection),
                 "fresh_business_fact_keys": sorted(projection.fresh_business_facts),
@@ -434,18 +431,6 @@ class AgentRuntimeExecutor:
             exclude_run_id=run.id,
         )
         return [_run_fact_projection_item(summary) for summary in summaries]
-
-    async def _thread_summary(self, *, run: AgentRun) -> dict[str, Any]:
-        summary = await self.repository.get_latest_thread_summary(thread_id=run.thread_id, owner_user_id=run.actor_user_id)
-        if summary is None:
-            return {}
-        payload = summary.payload if isinstance(summary.payload, dict) else {}
-        return {
-            "summary_id": str(summary.id),
-            "schema_version": summary.schema_version,
-            "updated_at": _iso_or_empty(getattr(summary, "updated_at", None)),
-            "payload": _compact_mapping(payload, max_items=8, max_chars=2000),
-        }
 
     async def _upsert_run_summary(
         self,

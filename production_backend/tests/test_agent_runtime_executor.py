@@ -101,7 +101,6 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() ->
         "locale": "zh-CN",
         "location": {"country": "CN", "region": "Shanghai", "city": "Shanghai"},
     }
-    assert runtime_context["thread_summary"] == {}
     assert runtime_context["recent_run_facts"] == []
     assert repository.routing_decisions[0]["selected_skill_id"] == "general_assistant"
     assert repository.routing_decisions[0]["routing_source"] == "fallback"
@@ -946,12 +945,6 @@ class FakeRuntimeRepository:
             and summary.run_id != exclude_run_id
         ]
         return summaries[-limit:]
-
-    async def get_latest_thread_summary(self, *, thread_id, owner_user_id):
-        for summary in reversed(self.run_summaries):
-            if summary.thread_id == thread_id and summary.owner_user_id == owner_user_id and summary.summary_type == "thread_summary":
-                return summary
-        return None
 
     async def upsert_run_summary(self, **kwargs):
         for summary in self.run_summaries:
