@@ -52,7 +52,15 @@ async def realtime_voice_stream(
     service: VoiceService = Depends(get_voice_service),
 ) -> StreamingResponse:
     stream = service.synthesize_pcm_stream(actor_user_id=current_user.user_id, text=text)
-    return StreamingResponse(stream, media_type="audio/pcm")
+    return StreamingResponse(
+        stream,
+        media_type="audio/pcm; rate=24000; channels=1",
+        headers={
+            "X-Mai-Audio-Format": "pcm16",
+            "X-Mai-Audio-Sample-Rate": "24000",
+            "X-Mai-Audio-Channels": "1",
+        },
+    )
 
 
 @router.websocket("/realtime-voice-session")

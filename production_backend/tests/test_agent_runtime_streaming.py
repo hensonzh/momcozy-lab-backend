@@ -105,6 +105,69 @@ def test_stream_run_event_chunks_yields_transient_delta_while_following() -> Non
     assert '"delta":"hello"' in chunk
 
 
+def test_stream_run_event_chunks_flushes_transient_delta_before_final_events() -> None:
+    thread_id = uuid4()
+    run_id = uuid4()
+    progress = AgentEvent(
+        event_id=uuid4(),
+        thread_id=thread_id,
+        run_id=run_id,
+        sequence=1,
+        event_type="run.progress",
+        payload={"label": "正在整理回复"},
+    )
+    final_message = AgentEvent(
+        event_id=uuid4(),
+        thread_id=thread_id,
+        run_id=run_id,
+        sequence=2,
+        event_type="message.completed",
+        payload={"text": "完整回复"},
+    )
+    completed = AgentEvent(
+        event_id=uuid4(),
+        thread_id=thread_id,
+        run_id=run_id,
+        sequence=3,
+        event_type="run.completed",
+        payload={},
+    )
+    transient_event = AgentTransientStreamEvent(
+        event_id="delta:1-0",
+        type="message.delta",
+        thread_id=thread_id,
+        run_id=run_id,
+        cursor="1-0",
+        payload={"delta": "流式片段", "message_stream_id": "assistant"},
+        created_at="2026-07-04T00:00:00+00:00",
+    )
+
+    async def exercise() -> list[str]:
+        chunks = []
+        async for chunk in _stream_run_event_chunks(
+            service=FakeAgentRuntimeService([[progress, final_message, completed]]),
+            owner_user_id=uuid4(),
+            run_id=run_id,
+            after_sequence=0,
+            limit=20,
+            follow=True,
+            poll_interval_seconds=0.1,
+            max_wait_seconds=1,
+            transient_stream=FakeTransientStream([transient_event]),
+        ):
+            chunks.append(chunk)
+        return chunks
+
+    chunks = asyncio.run(exercise())
+
+    assert len(chunks) == 3
+    assert "event: run.progress" in chunks[0]
+    assert "event: message.delta" in chunks[1]
+    assert "流式片段" in chunks[1]
+    assert "event: message.completed" in chunks[2]
+    assert "event: run.completed" in chunks[2]
+
+
 class FakeStreamRedis:
     def __init__(self) -> None:
         self.streams = {}
@@ -137,7 +200,12 @@ class FakeStreamRedis:
 
 
 class FakeAgentRuntimeService:
+    def __init__(self, batches=None) -> None:
+        self.batches = list(batches or [])
+
     async def list_events(self, **_kwargs):
+        if self.batches:
+            return self.batches.pop(0)
         return []
 
 

@@ -58,6 +58,9 @@ def test_realtime_voice_stream_keeps_token_out_of_url_and_returns_pcm_contract()
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("audio/pcm")
+    assert response.headers["x-mai-audio-format"] == "pcm16"
+    assert response.headers["x-mai-audio-sample-rate"] == "24000"
+    assert response.headers["x-mai-audio-channels"] == "1"
     assert response.content == b""
 
 

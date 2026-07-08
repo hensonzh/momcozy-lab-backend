@@ -44,7 +44,7 @@ from .service import AgentRuntimeService
 from .run_lifecycle.controls import AgentRunControls
 from .safety.service import AgentSafetyService
 from .event_stream.sse import encode_sse_events, encode_transient_sse_events
-from .event_stream.transient import AgentTransientStream
+from .event_stream.transient import AgentTransientStream, AgentTransientStreamEvent
 
 
 router = SurfaceAPIRouter(
@@ -381,17 +381,36 @@ async def _stream_run_event_chunks(
             return
         events = await service.list_events(owner_user_id=owner_user_id, run_id=run_id, after_sequence=cursor, limit=limit)
         if events:
-            yield encode_sse_events(events)
-            cursor = events[-1].sequence
+            final_event_index = _first_final_event_index(events)
+            if final_event_index > 0:
+                pre_final_events = events[:final_event_index]
+                yield encode_sse_events(pre_final_events)
+                cursor = pre_final_events[-1].sequence
+            if final_event_index != -1:
+                transient_events = await _read_transient_events(
+                    transient_stream=transient_stream,
+                    run_id=run_id,
+                    after_cursor=transient_cursor,
+                    block_ms=0,
+                )
+                if transient_events:
+                    transient_cursor = transient_events[-1].cursor
+                    yield encode_transient_sse_events(transient_events)
+                final_events = events[final_event_index:]
+                yield encode_sse_events(final_events)
+                cursor = final_events[-1].sequence
+            elif final_event_index == -1:
+                yield encode_sse_events(events)
+                cursor = events[-1].sequence
             if any(event.event_type in TERMINAL_STREAM_EVENT_TYPES for event in events):
                 return
         if not follow or monotonic() >= deadline:
             return
         if transient_stream is not None:
-            transient_events = await transient_stream.read(
+            transient_events = await _read_transient_events(
+                transient_stream=transient_stream,
                 run_id=run_id,
                 after_cursor=transient_cursor,
-                count=100,
                 block_ms=int(poll_interval_seconds * 1000),
             )
             if transient_events:
@@ -402,3 +421,28 @@ async def _stream_run_event_chunks(
             await asyncio.sleep(poll_interval_seconds)
         if is_disconnected is not None and await is_disconnected():
             return
+
+
+def _first_final_event_index(events: list[object]) -> int:
+    for index, event in enumerate(events):
+        event_type = str(getattr(event, "event_type", "") or "")
+        if event_type == "message.completed" or event_type in TERMINAL_STREAM_EVENT_TYPES:
+            return index
+    return -1
+
+
+async def _read_transient_events(
+    *,
+    transient_stream: AgentTransientStream | None,
+    run_id: UUID,
+    after_cursor: str,
+    block_ms: int,
+) -> list[AgentTransientStreamEvent]:
+    if transient_stream is None:
+        return []
+    return await transient_stream.read(
+        run_id=run_id,
+        after_cursor=after_cursor,
+        count=100,
+        block_ms=block_ms,
+    )
