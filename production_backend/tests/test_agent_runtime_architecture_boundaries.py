@@ -1,4 +1,5 @@
 import asyncio
+import json
 import sys
 import types
 from importlib.machinery import ModuleSpec
@@ -110,6 +111,24 @@ def test_static_prompts_keep_runtime_boundaries_and_legacy_style() -> None:
     assert "birth_journey_intake_manage" not in global_prompt
     assert "milk_analysis_intake_manage" not in global_prompt
     assert "device_manual_search" not in global_prompt
+
+
+def test_static_skill_manifests_are_derived_from_skill_directories() -> None:
+    static_context = build_static_agent_context()
+    manifest_json = static_context.split("skill_manifests:\n", 1)[1]
+    manifests = json.loads(manifest_json)
+    skill_paths = sorted(path for path in SERVICE_SKILLS_ROOT.glob(f"*/{SERVICE_SKILL_FILE_NAME}"))
+
+    assert len(manifests) == len(skill_paths)
+    assert [manifest["name"] for manifest in manifests] == [path.parent.name for path in skill_paths]
+    assert {manifest["id"] for manifest in manifests} == {
+        "after_sales",
+        "general_assistant",
+        "lactation",
+        "postpartum_recovery",
+        "pregnancy_service",
+        "safety_guardrail",
+    }
 
 
 def test_model_facing_prompt_text_is_chinese() -> None:

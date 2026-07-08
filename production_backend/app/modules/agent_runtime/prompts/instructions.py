@@ -60,14 +60,6 @@ BASE_AGENT_INSTRUCTIONS = """
 
 _SERVICE_SKILLS_ROOT = Path(__file__).resolve().parents[1] / "skills"
 _SERVICE_SKILL_FILE_NAME = "SKILL.md"
-_SERVICE_SKILL_ORDER = (
-    "pregnancy_service",
-    "lactation",
-    "postpartum_recovery",
-    "after_sales",
-    "safety_guardrail",
-    "general_assistant",
-)
 
 
 def build_static_agent_context() -> str:
@@ -80,11 +72,7 @@ def build_static_agent_context() -> str:
 
 
 def _service_skill_manifests() -> list[dict[str, str]]:
-    manifests = [_read_service_skill_manifest(path) for path in sorted(_SERVICE_SKILLS_ROOT.glob(f"*/{_SERVICE_SKILL_FILE_NAME}"))]
-    by_id = {manifest["id"]: manifest for manifest in manifests}
-    ordered = [by_id[skill_id] for skill_id in _SERVICE_SKILL_ORDER if skill_id in by_id]
-    extras = [manifest for manifest in manifests if manifest["id"] not in _SERVICE_SKILL_ORDER]
-    return ordered + extras
+    return [_read_service_skill_manifest(path) for path in sorted(_SERVICE_SKILLS_ROOT.glob(f"*/{_SERVICE_SKILL_FILE_NAME}"))]
 
 
 def _read_service_skill_manifest(path: Path) -> dict[str, str]:
