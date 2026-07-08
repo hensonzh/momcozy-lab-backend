@@ -7,7 +7,6 @@ from typing import Any
 @dataclass(frozen=True)
 class ContextProjection:
     stable_system_prompt: str
-    stable_developer_prompt: str
     selected_conversation_history: list[dict[str, Any]] = field(default_factory=list)
     current_state_projection: dict[str, Any] = field(default_factory=dict)
     user_context: dict[str, Any] = field(default_factory=dict)

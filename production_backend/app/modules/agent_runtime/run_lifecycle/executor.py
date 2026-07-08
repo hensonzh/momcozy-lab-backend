@@ -20,7 +20,6 @@ from ..models import AgentAction, AgentEvent, AgentMessage, AgentRun
 from ..payloads import DEFAULT_MAX_INLINE_PAYLOAD_BYTES, maybe_externalize_json_payload
 from ..prompts import (
     ContextProjection,
-    DEFAULT_STABLE_DEVELOPER_PROMPT,
     DEFAULT_STABLE_SYSTEM_PROMPT,
     ModelInputBuilder,
 )
@@ -42,7 +41,6 @@ from .state_store import AgentRuntimeStateStore
 @dataclass(frozen=True)
 class AgentRuntimeExecutorConfig:
     stable_system_prompt: str = DEFAULT_STABLE_SYSTEM_PROMPT
-    stable_developer_prompt: str = DEFAULT_STABLE_DEVELOPER_PROMPT
     history_limit: int = 40
     memory_limit: int = 5
     recent_run_fact_limit: int = 5
@@ -115,7 +113,6 @@ class AgentRuntimeExecutor:
         tool_names = self.tool_group_registry.tool_names_for_plan(routing_plan)
         projection = ContextProjection(
             stable_system_prompt=self.config.stable_system_prompt,
-            stable_developer_prompt=self.config.stable_developer_prompt,
             selected_conversation_history=_history_before(messages=messages, before_sequence=current_message.sequence),
             current_state_projection={
                 "service_skill_id": str(skill_summary.get("id") or ""),
@@ -544,7 +541,6 @@ def _uuid(value: str) -> UUID | None:
 def _sdk_instructions(*, projection: ContextProjection, service_skill: AgentServiceSkill) -> str:
     blocks = [
         projection.stable_system_prompt,
-        projection.stable_developer_prompt,
         f"已选择服务技能：{service_skill.service_skill_id}（{service_skill.name}）。",
         "你始终是同一个 CozyMate，不要表现成多个专家或把内部服务技能名称暴露给用户。",
         "本轮只使用运行时提供的工具；如果当前工具不足以完成写入或产物创建，先自然澄清或说明下一步，不要编造已执行。",

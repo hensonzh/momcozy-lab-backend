@@ -245,7 +245,6 @@ def _model_input(*, case: dict[str, Any], service_skill_id: str) -> list[dict[st
     model_input: list[dict[str, Any]] = ModelInputBuilder().build(
         projection=ContextProjection(
             stable_system_prompt=config.stable_system_prompt,
-            stable_developer_prompt=config.stable_developer_prompt,
             selected_conversation_history=history,
             current_state_projection={"eval_suite": str(case.get("suite") or ""), "service_skill_id": service_skill_id},
             memory_projection=[],
@@ -261,7 +260,6 @@ def _instructions(*, service_skill_id: str, service_skill_body: str) -> str:
     return "\n\n".join(
         [
             config.stable_system_prompt,
-            config.stable_developer_prompt,
             f"已选择服务技能：{service_skill_id}。",
             service_skill_body,
         ]

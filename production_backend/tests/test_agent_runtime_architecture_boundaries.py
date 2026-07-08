@@ -10,7 +10,6 @@ from production_backend.app.core.metrics import RequestMetrics
 from production_backend.app.modules.agent_runtime.graphs import default_graph_registry
 from production_backend.app.modules.agent_runtime.prompts import (
     ContextProjection,
-    DEFAULT_STABLE_DEVELOPER_PROMPT,
     DEFAULT_STABLE_SYSTEM_PROMPT,
     ModelInputBuilder,
 )
@@ -78,7 +77,7 @@ def test_skills_directory_contains_only_skill_directories() -> None:
 
 
 def test_static_prompts_keep_runtime_boundaries_and_legacy_style() -> None:
-    global_prompt = f"{DEFAULT_STABLE_SYSTEM_PROMPT}\n{DEFAULT_STABLE_DEVELOPER_PROMPT}"
+    global_prompt = DEFAULT_STABLE_SYSTEM_PROMPT
     assert "# 全局规则" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "## 全局人设" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "你叫 CozyMate，来自 Momcozy 团队。" in DEFAULT_STABLE_SYSTEM_PROMPT
@@ -87,12 +86,12 @@ def test_static_prompts_keep_runtime_boundaries_and_legacy_style() -> None:
     assert "不要先输出用户可见的过渡说明或中间解释" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "每轮最终回复后都要展示快捷输入" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "使用 `ui_quick_replies_create` 创建" in DEFAULT_STABLE_SYSTEM_PROMPT
-    assert "runtime_context" in DEFAULT_STABLE_DEVELOPER_PROMPT
-    assert "当前白名单工具" in DEFAULT_STABLE_DEVELOPER_PROMPT
-    assert "不要依赖供应商会话状态" in DEFAULT_STABLE_DEVELOPER_PROMPT
-    assert "不要调用 load_skill、read_skill_file、旧版 namespace" in DEFAULT_STABLE_DEVELOPER_PROMPT
-    assert "工具结果只代表事实、资源、产物、动作和状态" in DEFAULT_STABLE_DEVELOPER_PROMPT
-    assert "不能声称已直接应用" in DEFAULT_STABLE_DEVELOPER_PROMPT
+    assert "runtime_context" in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert "当前可见工具" in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert "不要依赖供应商会话状态" in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert "不要调用 load_skill、read_skill_file、旧版 namespace" in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert "工具结果只代表事实、资源、产物、动作和状态" in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert "不能声称已直接应用" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "records.milk_status.read" not in global_prompt
     assert "artifacts.hospital_bag_card.create" not in global_prompt
     assert "birth_journey_intake_manage" not in global_prompt
@@ -104,7 +103,6 @@ def test_model_facing_prompt_text_is_chinese() -> None:
     registry = default_tool_registry()
     prompt_texts = [
         DEFAULT_STABLE_SYSTEM_PROMPT,
-        DEFAULT_STABLE_DEVELOPER_PROMPT,
         *(contract.description for contract in registry.list()),
     ]
     for contract in registry.list():
@@ -453,12 +451,11 @@ def _schema_descriptions(value: object) -> list[str]:
 def test_context_builder_projects_dynamic_context_after_selected_history() -> None:
     assert "CozyMate" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "你叫 CozyMate，来自 Momcozy 团队。" in DEFAULT_STABLE_SYSTEM_PROMPT
-    assert "供应商会话状态" in DEFAULT_STABLE_DEVELOPER_PROMPT
+    assert "供应商会话状态" in DEFAULT_STABLE_SYSTEM_PROMPT
 
     model_input = ModelInputBuilder().build(
         projection=ContextProjection(
             stable_system_prompt="system-v1",
-            stable_developer_prompt="developer-v1",
             selected_conversation_history=[{"role": "user", "content": "history"}],
             current_state_projection={"service_skill_id": "general_assistant_v1"},
             user_context={"current_time": "2026-07-08T12:00:00+08:00", "timezone": "Asia/Shanghai"},

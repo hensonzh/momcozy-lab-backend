@@ -974,7 +974,6 @@ state_json = basic_info, next_step, completed_groups, personalization_summary, g
 
 ```text
 stable_system_prompt
-stable_developer_prompt
 stable_tool_schemas
 stable_skill_or_workflow_rules
 selected_conversation_history
@@ -1013,7 +1012,7 @@ agent_context_projections
 
 Prompt cache 优化原则：
 
-- 稳定内容放前缀：system / developer prompt、通用安全规则、稳定 tool schema、skill / workflow rules。
+- 稳定内容放前缀：system prompt、通用安全规则、稳定 tool schema、skill / workflow rules。
 - 动态内容放后缀：selected history、current state projection、fresh business facts、memory projection、当前用户消息。
 - tool schema、skill rules 和上下文字段顺序必须稳定；避免每轮随机排序或重写同义摘要。
 - `prompt_cache_key` 按 agent / service domain / prompt version 设计，不按 user_id 或 thread_id 设计，例如 `momcozy:agent:v3:zh-CN`、`momcozy:milk-management:v2:zh-CN`。
