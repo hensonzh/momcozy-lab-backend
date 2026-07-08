@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import secrets
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 
 from ...core.errors import ApiError
 from .models import InviteCode
@@ -11,6 +12,19 @@ from .repository import InviteCodeRepository
 INVITE_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 INVITE_CODE_STATUS_ACTIVE = "active"
 INVITE_CODE_STATUS_DISABLED = "disabled"
+INVITE_CODE_DEFAULT_TTL = timedelta(days=365)
+
+
+@dataclass(frozen=True)
+class InviteCodePage:
+    items: list[InviteCode]
+    total: int
+    limit: int
+    offset: int
+
+    @property
+    def has_more(self) -> bool:
+        return self.offset + self.limit < self.total
 
 
 class InviteCodeService:
@@ -28,6 +42,7 @@ class InviteCodeService:
     ) -> InviteCode:
         normalized_label = _normalize_optional_text(label, field_name="label", max_length=120)
         normalized_assigned_to = _normalize_optional_text(assigned_to, field_name="assigned_to", max_length=320)
+        effective_expires_at = expires_at or _utcnow() + INVITE_CODE_DEFAULT_TTL
         if code is not None and str(code).strip():
             normalized_code = normalize_invite_code(code)
             if await self.repository.get_by_code(code=normalized_code) is not None:
@@ -36,7 +51,7 @@ class InviteCodeService:
                 code=normalized_code,
                 label=normalized_label,
                 assigned_to=normalized_assigned_to,
-                expires_at=expires_at,
+                expires_at=effective_expires_at,
                 created_by_service=actor_service,
             )
 
@@ -47,15 +62,19 @@ class InviteCodeService:
                     code=generated,
                     label=normalized_label,
                     assigned_to=normalized_assigned_to,
-                    expires_at=expires_at,
+                    expires_at=effective_expires_at,
                     created_by_service=actor_service,
                 )
         raise ApiError(code="conflict", message="Could not generate a unique invite code.", status=409)
 
-    async def list_invite_codes(self, *, limit: int = 50) -> list[InviteCode]:
+    async def list_invite_codes(self, *, limit: int = 50, offset: int = 0) -> InviteCodePage:
         if limit < 1 or limit > 100:
             raise ApiError(code="validation_failed", message="limit must be between 1 and 100.", status=422)
-        return await self.repository.list_recent(limit=limit)
+        if offset < 0:
+            raise ApiError(code="validation_failed", message="offset must be greater than or equal to 0.", status=422)
+        items = await self.repository.list_recent(limit=limit, offset=offset)
+        total = await self.repository.count_all()
+        return InviteCodePage(items=items, total=total, limit=limit, offset=offset)
 
     async def disable_invite_code(self, *, code: str) -> InviteCode:
         normalized_code = normalize_invite_code(code)

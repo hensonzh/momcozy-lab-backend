@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import cast
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import InviteCode
@@ -20,9 +20,12 @@ class InviteCodeRepository:
             statement = statement.with_for_update()
         return cast(InviteCode | None, await self.session.scalar(statement))
 
-    async def list_recent(self, *, limit: int = 50) -> list[InviteCode]:
-        statement = select(InviteCode).order_by(InviteCode.created_at.desc(), InviteCode.id.desc()).limit(limit)
+    async def list_recent(self, *, limit: int = 50, offset: int = 0) -> list[InviteCode]:
+        statement = select(InviteCode).order_by(InviteCode.created_at.desc(), InviteCode.id.desc()).offset(offset).limit(limit)
         return list((await self.session.scalars(statement)).all())
+
+    async def count_all(self) -> int:
+        return int(await self.session.scalar(select(func.count(InviteCode.id))) or 0)
 
     async def create(
         self,

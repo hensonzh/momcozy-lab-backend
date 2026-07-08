@@ -52,11 +52,18 @@ async def create_invite_code(
 @router.get("", response_model=InviteCodeListResponse)
 async def list_invite_codes(
     limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
     _service_client: ServiceClient = Depends(require_service_client),
     service: InviteCodeService = Depends(get_invite_code_service),
 ) -> InviteCodeListResponse:
-    invite_codes = await service.list_invite_codes(limit=limit)
-    return InviteCodeListResponse(items=[InviteCodeRead.model_validate(item) for item in invite_codes])
+    page = await service.list_invite_codes(limit=limit, offset=offset)
+    return InviteCodeListResponse(
+        items=[InviteCodeRead.model_validate(item) for item in page.items],
+        total=page.total,
+        limit=page.limit,
+        offset=page.offset,
+        has_more=page.has_more,
+    )
 
 
 @router.post("/{code}/disable", response_model=InviteCodeRead)
@@ -170,7 +177,7 @@ def _admin_page_html(settings: Settings) -> str:
       border-bottom: 1px solid var(--border);
     }
     .table-wrap { width: 100%; overflow-x: auto; }
-    table { width: 100%; min-width: 980px; border-collapse: collapse; }
+    table { width: 100%; min-width: 1180px; border-collapse: collapse; }
     th, td { padding: 13px 14px; border-bottom: 1px solid #f0e6ea; text-align: left; vertical-align: top; }
     th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .02em; }
     td { font-size: 14px; }
@@ -194,10 +201,19 @@ def _admin_page_html(settings: Settings) -> str:
       background: var(--soft);
       color: var(--muted);
     }
-    .badge.active { background: var(--ok-bg); color: var(--ok); }
-    .badge.disabled { background: var(--danger-bg); color: var(--danger); }
-    .badge.bound { background: var(--warn-bg); color: var(--warn); }
+    .badge.available, .badge.bound { background: var(--ok-bg); color: var(--ok); }
+    .badge.unavailable { background: var(--danger-bg); color: var(--danger); }
+    .badge.unbound { background: var(--warn-bg); color: var(--warn); }
     .empty { text-align: center; color: var(--muted); padding: 24px !important; }
+    .pagination {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 10px;
+      padding: 16px 22px;
+      border-top: 1px solid var(--border);
+    }
+    .page-summary { color: var(--muted); font-size: 13px; font-weight: 700; margin-right: auto; }
     @media (max-width: 760px) {
       main { margin-top: 24px; padding: 0 14px 32px; }
       header, .table-header { align-items: flex-start; flex-direction: column; }
@@ -242,27 +258,34 @@ def _admin_page_html(settings: Settings) -> str:
           <thead>
             <tr>
               <th>邀请码</th>
-              <th>状态</th>
+              <th>是否绑定</th>
+              <th>是否可用</th>
               <th>备注</th>
               <th>分发对象</th>
               <th>绑定设备</th>
               <th>绑定用户</th>
               <th>使用次数</th>
+              <th>有效期至</th>
               <th>创建时间</th>
               <th>禁用时间</th>
               <th>操作</th>
             </tr>
           </thead>
           <tbody id="inviteRows">
-            <tr><td class="empty" colspan="10">正在加载...</td></tr>
+            <tr><td class="empty" colspan="12">正在加载...</td></tr>
           </tbody>
         </table>
+      </div>
+      <div class="pagination">
+        <span id="pageSummary" class="page-summary">-</span>
+        <button id="prevPageButton" class="ghost" onclick="previousPage()">上一页</button>
+        <button id="nextPageButton" class="ghost" onclick="nextPage()">下一页</button>
       </div>
     </section>
   </main>
   <script>
     const SERVICE_KEY = __SERVICE_KEY__;
-    const state = { items: [] };
+    const state = { items: [], total: 0, limit: 20, offset: 0, hasMore: false };
 
     function setStatus(message, kind = '') {
       const node = document.getElementById('status');
@@ -309,11 +332,24 @@ def _admin_page_html(settings: Settings) -> str:
       return date.toLocaleString('zh-CN', { hour12: false });
     }
 
-    function statusLabel(item) {
-      if (item.status === 'active' && item.bound_device_id) return ['bound', '已绑定'];
-      if (item.status === 'active') return ['active', '可用'];
-      if (item.status === 'disabled') return ['disabled', '已禁用'];
-      return ['unknown', item.status || '未知'];
+    function isBound(item) {
+      if (typeof item.is_bound === 'boolean') return item.is_bound;
+      return Boolean(text(item.bound_device_id, '') || text(item.bound_user_id, ''));
+    }
+
+    function isAvailable(item) {
+      if (typeof item.is_available === 'boolean') return item.is_available;
+      if (item.status !== 'active') return false;
+      if (!item.expires_at) return true;
+      return new Date(item.expires_at).getTime() > Date.now();
+    }
+
+    function renderPagination() {
+      const start = state.total === 0 ? 0 : state.offset + 1;
+      const end = Math.min(state.offset + state.items.length, state.total);
+      document.getElementById('pageSummary').textContent = `显示 ${start}-${end} / 共 ${state.total} 条`;
+      document.getElementById('prevPageButton').disabled = state.offset <= 0;
+      document.getElementById('nextPageButton').disabled = !state.hasMore;
     }
 
     function renderInviteCodes() {
@@ -321,31 +357,38 @@ def _admin_page_html(settings: Settings) -> str:
       body.innerHTML = '';
       if (!state.items.length) {
         const row = document.createElement('tr');
-        row.innerHTML = '<td class="empty" colspan="10">暂无邀请码</td>';
+        row.innerHTML = '<td class="empty" colspan="12">暂无邀请码</td>';
         body.appendChild(row);
+        renderPagination();
         return;
       }
 
       for (const item of state.items) {
-        const [statusClass, statusText] = statusLabel(item);
+        const bound = isBound(item);
+        const available = isAvailable(item);
         const row = document.createElement('tr');
         row.dataset.code = item.code;
         row.innerHTML = `
           <td><code></code></td>
-          <td><span class="badge"></span></td>
+          <td><span class="badge binding"></span></td>
+          <td><span class="badge availability"></span></td>
           <td><span class="truncate label"></span></td>
           <td><span class="truncate assigned"></span></td>
           <td><span class="truncate device"></span></td>
           <td><span class="truncate user"></span></td>
           <td class="used"></td>
+          <td class="expires"></td>
           <td class="created"></td>
           <td class="disabled"></td>
           <td class="action"></td>
         `;
         row.querySelector('code').textContent = item.code;
-        const badge = row.querySelector('.badge');
-        badge.textContent = statusText;
-        badge.classList.add(statusClass);
+        const bindingBadge = row.querySelector('.binding');
+        bindingBadge.textContent = bound ? '已绑定' : '未绑定';
+        bindingBadge.classList.add(bound ? 'bound' : 'unbound');
+        const availabilityBadge = row.querySelector('.availability');
+        availabilityBadge.textContent = available ? '可用' : '禁用';
+        availabilityBadge.classList.add(available ? 'available' : 'unavailable');
         row.querySelector('.label').textContent = text(item.label);
         row.querySelector('.label').title = text(item.label);
         row.querySelector('.assigned').textContent = text(item.assigned_to);
@@ -355,6 +398,7 @@ def _admin_page_html(settings: Settings) -> str:
         row.querySelector('.user').textContent = shortText(item.bound_user_id);
         row.querySelector('.user').title = text(item.bound_user_id);
         row.querySelector('.used').textContent = String(item.used_count || 0);
+        row.querySelector('.expires').textContent = formatTime(item.expires_at);
         row.querySelector('.created').textContent = formatTime(item.created_at);
         row.querySelector('.disabled').textContent = formatTime(item.disabled_at);
 
@@ -370,6 +414,7 @@ def _admin_page_html(settings: Settings) -> str:
         }
         body.appendChild(row);
       }
+      renderPagination();
     }
 
     function upsertInviteCode(item, { prepend = false } = {}) {
@@ -380,20 +425,36 @@ def _admin_page_html(settings: Settings) -> str:
         if (prepend) state.items.unshift(item);
         else state.items.push(item);
       }
+      if (prepend && state.items.length > state.limit) state.items.pop();
       renderInviteCodes();
     }
 
-    async function loadInviteCodes() {
+    async function loadInviteCodes(offset = state.offset) {
       try {
         setStatus('正在加载邀请码列表...');
-        const payload = await request('/v1/admin/invite-codes');
+        const nextOffset = Math.max(0, offset);
+        const payload = await request('/v1/admin/invite-codes?limit=' + state.limit + '&offset=' + nextOffset);
         state.items = payload.items || [];
+        state.total = payload.total || 0;
+        state.limit = payload.limit || state.limit;
+        state.offset = payload.offset || 0;
+        state.hasMore = Boolean(payload.has_more);
         renderInviteCodes();
         setStatus('邀请码列表已更新。', 'ok');
       } catch (error) {
         setStatus('加载失败：' + error.message, 'error');
         renderInviteCodes();
       }
+    }
+
+    function previousPage() {
+      if (state.offset <= 0) return;
+      loadInviteCodes(Math.max(0, state.offset - state.limit));
+    }
+
+    function nextPage() {
+      if (!state.hasMore) return;
+      loadInviteCodes(state.offset + state.limit);
     }
 
     async function createInviteCode() {
@@ -408,10 +469,17 @@ def _admin_page_html(settings: Settings) -> str:
             assigned_to: document.getElementById('assignedTo').value
           })
         });
-        upsertInviteCode(payload, { prepend: true });
         document.getElementById('label').value = '';
         document.getElementById('assignedTo').value = '';
-        setStatus('创建成功：' + payload.code, 'ok');
+        if (state.offset === 0) {
+          state.total += 1;
+          upsertInviteCode(payload, { prepend: true });
+          state.hasMore = state.offset + state.items.length < state.total;
+          setStatus('创建成功：' + payload.code, 'ok');
+        } else {
+          await loadInviteCodes(0);
+          setStatus('创建成功：' + payload.code + '，已返回第一页。', 'ok');
+        }
       } catch (error) {
         setStatus('创建失败：' + error.message, 'error');
       } finally {

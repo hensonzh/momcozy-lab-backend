@@ -42,6 +42,39 @@ def test_invite_code_service_rejects_duplicate_requested_code() -> None:
     assert conflict.value.code == "conflict"
 
 
+def test_invite_code_service_defaults_expiration_to_one_year() -> None:
+    repository = FakeInviteCodeRepository()
+    service = InviteCodeService(repository=repository)
+    before = datetime.now(timezone.utc)
+
+    created = _run(service.create_invite_code(code="MCZ-YEAR-0001"))
+
+    after = datetime.now(timezone.utc)
+    assert created.expires_at is not None
+    assert before + timedelta(days=365) <= created.expires_at <= after + timedelta(days=365)
+
+
+def test_invite_code_service_lists_with_pagination_metadata() -> None:
+    repository = FakeInviteCodeRepository()
+    service = InviteCodeService(repository=repository)
+
+    page = _run(service.list_invite_codes(limit=20, offset=40))
+
+    assert page.items == []
+    assert page.total == 123
+    assert page.limit == 20
+    assert page.offset == 40
+    assert page.has_more is True
+    assert repository.list_kwargs == {"limit": 20, "offset": 40}
+
+
+def test_invite_code_service_rejects_invalid_pagination() -> None:
+    service = InviteCodeService(repository=FakeInviteCodeRepository())
+
+    with pytest.raises(ApiError, match="offset"):
+        _run(service.list_invite_codes(limit=20, offset=-1))
+
+
 def test_validate_invite_code_for_login_rejects_disabled_expired_and_other_device() -> None:
     now = datetime(2026, 7, 7, tzinfo=timezone.utc)
 
@@ -72,6 +105,7 @@ def _run(awaitable):
 class FakeInviteCodeRepository:
     def __init__(self, *, existing: InviteCode | None = None) -> None:
         self.items: dict[str, InviteCode] = {}
+        self.list_kwargs = {}
         if existing is not None:
             self.items[existing.code] = existing
 
@@ -83,8 +117,12 @@ class FakeInviteCodeRepository:
         self.items[invite_code.code] = invite_code
         return invite_code
 
-    async def list_recent(self, *, limit: int = 50):
+    async def list_recent(self, *, limit: int = 50, offset: int = 0):
+        self.list_kwargs = {"limit": limit, "offset": offset}
         return list(self.items.values())[:limit]
+
+    async def count_all(self):
+        return 123
 
     async def disable(self, *, invite_code, disabled_at):
         invite_code.status = "disabled"

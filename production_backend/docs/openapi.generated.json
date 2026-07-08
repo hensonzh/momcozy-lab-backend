@@ -1607,16 +1607,36 @@
       },
       "InviteCodeListResponse": {
         "properties": {
+          "has_more": {
+            "title": "Has More",
+            "type": "boolean"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/InviteCodeRead"
             },
             "title": "Items",
             "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
           }
         },
         "required": [
-          "items"
+          "items",
+          "total",
+          "limit",
+          "offset",
+          "has_more"
         ],
         "title": "InviteCodeListResponse",
         "type": "object"
@@ -1685,6 +1705,16 @@
             "title": "Id",
             "type": "string"
           },
+          "is_available": {
+            "readOnly": true,
+            "title": "Is Available",
+            "type": "boolean"
+          },
+          "is_bound": {
+            "readOnly": true,
+            "title": "Is Bound",
+            "type": "boolean"
+          },
           "label": {
             "title": "Label",
             "type": "string"
@@ -1716,7 +1746,9 @@
           "expires_at",
           "disabled_at",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "is_bound",
+          "is_available"
         ],
         "title": "InviteCodeRead",
         "type": "object"
@@ -3959,6 +3991,17 @@
               "maximum": 100,
               "minimum": 1,
               "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
               "type": "integer"
             }
           },
