@@ -4,7 +4,6 @@ import json
 from typing import Any
 
 from ....core.errors import ApiError
-from ..prompts import build_service_skill_planner_prompt
 from ..sdk import OpenAIAgentsSdkRunner, SdkNodeRequest
 from ..skill_registry import AgentServiceSkillRegistry, default_service_skill_registry
 from ..tools.groups import ToolGroupRegistry, default_tool_group_registry
@@ -89,7 +88,17 @@ def _planner_instructions(
         for group in tool_group_registry.list()
     ]
     manifest = json.dumps({"skills": skills, "tool_groups": tool_groups}, ensure_ascii=False, sort_keys=True)
-    return build_service_skill_planner_prompt(candidate_manifest=manifest)
+    return (
+        "你是 MomCozy 智能体运行时的服务技能规划器，只做路由决策，不回答用户问题。\n"
+        "根据用户本轮输入、页面入口、活跃流程和附件类型，从候选服务技能中选择一个主服务技能，并选择本轮需要暴露的最小工具组。\n"
+        "确定性安全、待确认动作和页面入口已在应用侧优先处理；你主要处理纯自然语言和轻微多意图场景。\n"
+        "如果用户同时提出多个场景，选择当前最需要推进的主场景，并在 reason_codes 中标记 multi_intent；不要返回多个主技能。\n"
+        "只返回 JSON，不要输出解释、Markdown 或代码块。JSON 字段固定为："
+        "service_skill_id、intent_type、tool_group_ids、confidence、needs_clarification、reason_codes。\n"
+        "service_skill_id 必须来自候选服务技能；tool_group_ids 必须来自候选工具组，并且只选择属于该服务技能或通用的工具组。\n"
+        "候选清单：\n"
+        f"{manifest}"
+    )
 
 
 def _planner_user_payload(ctx: RoutingContext) -> dict[str, Any]:
