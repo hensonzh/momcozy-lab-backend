@@ -5,7 +5,7 @@ from typing import Any
 
 from ....core.errors import ApiError
 from ..sdk import OpenAIAgentsSdkRunner, SdkNodeRequest
-from ..skills import AgentServiceSkillRegistry, default_service_skill_registry
+from ..skill_registry import AgentServiceSkillRegistry, default_service_skill_registry
 from ..tools.groups import ToolGroupRegistry, default_tool_group_registry
 from .schemas import IntentItem, RoutingContext, RoutingPlan, RoutingSource, ServiceSkillId
 from .service import SkillIntentPlanner

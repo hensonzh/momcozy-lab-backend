@@ -17,7 +17,7 @@ from production_backend.app.modules.agent_runtime.sdk import (
     scripted_sdk_response,
     scripted_tool_invocation,
 )
-from production_backend.app.modules.agent_runtime.skills import default_service_skill_registry
+from production_backend.app.modules.agent_runtime.skill_registry import default_service_skill_registry
 from production_backend.app.modules.agent_runtime.tools import ToolExecutor, ToolGroup, ToolGroupRegistry, ToolHandlerContext, default_tool_registry
 
 

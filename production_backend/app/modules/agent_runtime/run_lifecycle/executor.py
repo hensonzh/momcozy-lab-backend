@@ -30,7 +30,7 @@ from ..sdk import (
     SdkToolDefinition,
     sdk_tool_name,
 )
-from ..skills import AgentServiceSkill, AgentServiceSkillRegistry, default_service_skill_registry
+from ..skill_registry import AgentServiceSkill, AgentServiceSkillRegistry, default_service_skill_registry
 from ..tools import ToolContractRegistry, ToolExecutor, ToolGroupRegistry, default_tool_group_registry, default_tool_registry
 from ..tools.schemas import tool_input_schema
 from .execution import AgentRunExecutionResult

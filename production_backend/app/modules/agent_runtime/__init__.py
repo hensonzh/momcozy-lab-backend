@@ -31,7 +31,7 @@ from .run_lifecycle.executor import AgentRuntimeExecutor, AgentRuntimeExecutorCo
 from .event_stream.replay import AgentReplayService
 from .service import AgentRuntimeService
 from .run_lifecycle.state_store import AgentRuntimeStateStore
-from .skills import AgentServiceSkill, AgentServiceSkillRegistry, default_service_skill_registry
+from .skill_registry import AgentServiceSkill, AgentServiceSkillRegistry, default_service_skill_registry
 
 __all__ = [
     "AgentAction",

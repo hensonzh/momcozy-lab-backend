@@ -34,7 +34,7 @@ from production_backend.app.modules.agent_runtime.sdk import (  # noqa: E402
     create_agent_sdk_runner,
     sdk_tool_name,
 )
-from production_backend.app.modules.agent_runtime.skills import default_service_skill_registry  # noqa: E402
+from production_backend.app.modules.agent_runtime.skill_registry import default_service_skill_registry  # noqa: E402
 from production_backend.app.modules.agent_runtime.tools import default_tool_group_registry, default_tool_registry  # noqa: E402
 from production_backend.app.modules.agent_runtime.tools.schemas import tool_input_schema  # noqa: E402
 

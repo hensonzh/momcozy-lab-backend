@@ -16,8 +16,12 @@ from production_backend.app.modules.agent_runtime.prompts import (
     PROMPT_OWNERSHIP_POLICY,
 )
 from production_backend.app.modules.agent_runtime.sdk import OpenAIAgentsSdkRunner, SdkNodeRequest, SdkNodeResult, SdkToolDefinition, sdk_tool_name
-from production_backend.app.modules.agent_runtime.skills import default_service_skill_registry
-from production_backend.app.modules.agent_runtime.skills.definitions import SERVICE_SKILL_FILE_NAME, SERVICE_SKILLS_ROOT, load_service_skill
+from production_backend.app.modules.agent_runtime.skill_registry import (
+    SERVICE_SKILL_FILE_NAME,
+    SERVICE_SKILLS_ROOT,
+    default_service_skill_registry,
+    load_service_skill,
+)
 from production_backend.app.modules.agent_runtime.tools import default_tool_group_registry, default_tool_registry, tool_input_schema
 from production_backend.app.modules.agent_runtime.tools.output_policy import INSTRUCTIONAL_TOOL_OUTPUT_KEYS
 
@@ -55,12 +59,23 @@ def test_service_skills_are_file_backed_skill_directories() -> None:
     for skill in skill_registry.list():
         assert skill.source_path.name == SERVICE_SKILL_FILE_NAME
         assert skill.source_path.parent.parent == SERVICE_SKILLS_ROOT
+        assert (SERVICE_SKILLS_ROOT.parent / "skill_registry.py").exists()
         assert skill.source_path.exists()
         assert skill.source_path.read_text(encoding="utf-8").startswith("---\n")
         reloaded = load_service_skill(skill.source_path)
         assert reloaded.id == skill.id
         assert reloaded.service_skill_id == skill.service_skill_id
         assert reloaded.prompt_block() == skill.prompt_block()
+
+
+def test_skills_directory_contains_only_skill_directories() -> None:
+    paths = [path for path in SERVICE_SKILLS_ROOT.iterdir() if not path.name.startswith(".")]
+    entries = {path.name for path in paths}
+
+    assert "__init__.py" not in entries
+    assert "definitions.py" not in entries
+    assert "service_skills" not in entries
+    assert all(path.is_dir() and (path / SERVICE_SKILL_FILE_NAME).exists() for path in paths)
 
 
 def test_prompt_ownership_policy_keeps_workflow_in_service_skills() -> None:

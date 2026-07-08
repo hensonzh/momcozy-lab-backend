@@ -3,10 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..routing.schemas import ServiceSkillId
+from .routing.schemas import ServiceSkillId
 
 
-SERVICE_SKILLS_ROOT = Path(__file__).resolve().parent / "service_skills"
+SERVICE_SKILLS_ROOT = Path(__file__).resolve().parent / "skills"
 SERVICE_SKILL_FILE_NAME = "SKILL.md"
 REQUIRED_METADATA_KEYS = frozenset({"name", "description", "id", "version", "service_skill_id"})
 REQUIRED_SECTION_TITLES = ("服务范围", "回复风格", "服务流程", "交付物", "工具策略", "边界")
