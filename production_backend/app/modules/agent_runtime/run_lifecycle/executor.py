@@ -101,7 +101,7 @@ class AgentRuntimeExecutor:
         if graph.runtime_pattern != run.runtime_pattern:
             raise ApiError(code="runtime_graph_mismatch", message="Run runtime pattern does not match graph version.", status=409)
 
-        await self._append_progress(run=run, phase="context_loading", label="正在整理对话上下文")
+        await self._append_progress(run=run, phase="context_loading", label="我已经收到你的消息啦～")
         current_message = await self.repository.get_latest_user_message_for_run(run_id=run.id)
         if current_message is None:
             raise ApiError(code="missing_user_message", message="Agent run has no user message.", status=409)
@@ -114,7 +114,7 @@ class AgentRuntimeExecutor:
         await self._record_routing_decision(run=run, current_message=current_message, routing_plan=routing_plan)
         tool_names = self.tool_registry.names_for_sdk() if self.tool_executor is not None else ()
         fresh_business_facts = await self._fresh_business_facts(run=run, routing_plan=routing_plan)
-        await self._append_progress(run=run, phase="context_ready", label="已整理好相关信息")
+        await self._append_progress(run=run, phase="context_ready", label="我看一下你的信息")
         projection = ContextProjection(
             stable_system_prompt=self.config.stable_system_prompt,
             selected_conversation_history=_history_before(messages=messages, before_sequence=current_message.sequence),
@@ -152,7 +152,7 @@ class AgentRuntimeExecutor:
                 "tool_names": list(tool_names),
             },
         )
-        await self._append_progress(run=run, phase="model_reasoning", label="CozyMate 正在思考怎么帮你")
+        await self._append_progress(run=run, phase="model_reasoning", label="我想一下")
         result = await self.sdk_runner.run_reasoning(
             SdkNodeRequest(
                 run_id=str(run.id),
@@ -168,7 +168,7 @@ class AgentRuntimeExecutor:
                 on_text_delta=self._text_delta_handler(run=run),
             )
         )
-        await self._append_progress(run=run, phase="response_finalizing", label="正在整理回复")
+        await self._append_progress(run=run, phase="response_finalizing", label="我在组织回复～")
 
         action_proposal = _single_action_proposal(result.action_proposals)
         action_decision = self._action_decision_from_proposal(action_proposal) if action_proposal is not None else None
