@@ -173,7 +173,11 @@ managed speech provider is configured. HTTP endpoints return the standard error
 envelope with `code=voice_provider_disabled` and status `503`. The WebSocket
 accepts authenticated clients, sends an `error` frame with the same code, and
 then closes. `VOICE_PROVIDER=local_stub` exists only for local/test contract
-checks and is rejected in production startup validation.
+checks and is rejected in production startup validation. `VOICE_API_KEY`,
+`VOICE_BASE_URL`, `VOICE_TRANSCRIBE_MODEL`, `VOICE_TTS_MODEL`,
+`VOICE_REALTIME_MODEL`, and `VOICE_REQUEST_TIMEOUT_SECONDS` are environment
+settings for the future managed provider adapter; they do not change runtime
+behavior while `VOICE_PROVIDER` remains `disabled` or `local_stub`.
 
 `VISION_PROVIDER=disabled` is the default stable production contract until a
 managed image analysis provider is configured. The production replacement for

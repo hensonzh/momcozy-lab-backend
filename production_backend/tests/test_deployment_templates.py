@@ -111,6 +111,12 @@ def test_compose_env_declares_disabled_agent_worker_controls() -> None:
     assert "MINIMAX_BASE_URL=https://api.minimax.io/v1" in env
     assert "MINIMAX_MODEL=MiniMax-M3" in env
     assert "VOICE_PROVIDER=disabled" in env
+    assert "VOICE_API_KEY=" in env
+    assert "VOICE_BASE_URL=" in env
+    assert "VOICE_TRANSCRIBE_MODEL=" in env
+    assert "VOICE_TTS_MODEL=" in env
+    assert "VOICE_REALTIME_MODEL=" in env
+    assert "VOICE_REQUEST_TIMEOUT_SECONDS=30" in env
     assert "VISION_PROVIDER=disabled" in env
 
 

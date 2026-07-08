@@ -45,6 +45,12 @@ environment variables, not code changes:
 - `OBJECT_STORAGE_BACKUP_HOOK`
 - `OBJECT_STORAGE_RESTORE_HOOK`
 - `VOICE_PROVIDER`
+- `VOICE_API_KEY`
+- `VOICE_BASE_URL`
+- `VOICE_TRANSCRIBE_MODEL`
+- `VOICE_TTS_MODEL`
+- `VOICE_REALTIME_MODEL`
+- `VOICE_REQUEST_TIMEOUT_SECONDS`
 - `VISION_PROVIDER`
 
 Use the `production_backend/env/compose.*.env.example` files as the only
@@ -103,7 +109,10 @@ for tool calling and streaming validation.
 Voice endpoints are exposed in the production contract, but speech provider
 integration is disabled by default. Keep `VOICE_PROVIDER=disabled` until a
 managed provider adapter is configured; `VOICE_PROVIDER=local_stub` is only for
-local/test contract checks and is rejected in production.
+local/test contract checks and is rejected in production. The provider-neutral
+`VOICE_*` connection/model settings are read by startup settings so each
+environment can be prepared without code changes, but they do not enable a
+managed speech provider until the corresponding adapter is implemented.
 
 Vision event endpoints are exposed in the production contract, but image
 analysis provider integration is disabled by default. Keep

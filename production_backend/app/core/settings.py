@@ -75,6 +75,12 @@ class Settings:
     openai_agent_trace_enabled: bool = False
     openai_agent_prompt_version: str = "momcozy-agent-prompt-v1"
     voice_provider: str = "disabled"
+    voice_api_key: str = ""
+    voice_base_url: str = ""
+    voice_transcribe_model: str = ""
+    voice_tts_model: str = ""
+    voice_realtime_model: str = ""
+    voice_request_timeout_seconds: int = 30
     vision_provider: str = "disabled"
     log_level: str = "INFO"
 
@@ -143,6 +149,15 @@ class Settings:
             openai_agent_trace_enabled=_env_bool("OPENAI_AGENT_TRACE_ENABLED", cls.openai_agent_trace_enabled),
             openai_agent_prompt_version=_env("OPENAI_AGENT_PROMPT_VERSION", cls.openai_agent_prompt_version),
             voice_provider=_env("VOICE_PROVIDER", cls.voice_provider).lower(),
+            voice_api_key=_env("VOICE_API_KEY", cls.voice_api_key),
+            voice_base_url=_env("VOICE_BASE_URL", cls.voice_base_url),
+            voice_transcribe_model=_env("VOICE_TRANSCRIBE_MODEL", cls.voice_transcribe_model),
+            voice_tts_model=_env("VOICE_TTS_MODEL", cls.voice_tts_model),
+            voice_realtime_model=_env("VOICE_REALTIME_MODEL", cls.voice_realtime_model),
+            voice_request_timeout_seconds=_env_int(
+                "VOICE_REQUEST_TIMEOUT_SECONDS",
+                cls.voice_request_timeout_seconds,
+            ),
             vision_provider=_env("VISION_PROVIDER", cls.vision_provider).lower(),
             log_level=_env("LOG_LEVEL", cls.log_level).upper(),
         )
@@ -215,6 +230,8 @@ class Settings:
             errors.append("OPENAI_AGENT_PROMPT_VERSION must be at most 80 characters")
         if self.voice_provider not in SUPPORTED_VOICE_PROVIDERS:
             errors.append(f"VOICE_PROVIDER must be one of {', '.join(sorted(SUPPORTED_VOICE_PROVIDERS))}")
+        if self.voice_request_timeout_seconds < 1:
+            errors.append("VOICE_REQUEST_TIMEOUT_SECONDS must be positive")
         if self.vision_provider not in SUPPORTED_VISION_PROVIDERS:
             errors.append(f"VISION_PROVIDER must be one of {', '.join(sorted(SUPPORTED_VISION_PROVIDERS))}")
 

@@ -143,10 +143,22 @@ def test_settings_from_env_reads_minimax_agent_provider(monkeypatch: pytest.Monk
 
 def test_settings_from_env_reads_voice_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("VOICE_PROVIDER", "local_stub")
+    monkeypatch.setenv("VOICE_API_KEY", "voice-test-key")
+    monkeypatch.setenv("VOICE_BASE_URL", "https://voice.example.test")
+    monkeypatch.setenv("VOICE_TRANSCRIBE_MODEL", "voice-transcribe-test")
+    monkeypatch.setenv("VOICE_TTS_MODEL", "voice-tts-test")
+    monkeypatch.setenv("VOICE_REALTIME_MODEL", "voice-realtime-test")
+    monkeypatch.setenv("VOICE_REQUEST_TIMEOUT_SECONDS", "45")
 
     settings = Settings.from_env()
 
     assert settings.voice_provider == "local_stub"
+    assert settings.voice_api_key == "voice-test-key"
+    assert settings.voice_base_url == "https://voice.example.test"
+    assert settings.voice_transcribe_model == "voice-transcribe-test"
+    assert settings.voice_tts_model == "voice-tts-test"
+    assert settings.voice_realtime_model == "voice-realtime-test"
+    assert settings.voice_request_timeout_seconds == 45
 
 
 def test_settings_from_env_reads_vision_provider(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -258,6 +270,13 @@ def test_settings_reject_invalid_voice_provider() -> None:
     settings = Settings(voice_provider="legacy")
 
     with pytest.raises(ValueError, match="VOICE_PROVIDER"):
+        settings.validate_for_startup()
+
+
+def test_settings_reject_invalid_voice_timeout() -> None:
+    settings = Settings(voice_request_timeout_seconds=0)
+
+    with pytest.raises(ValueError, match="VOICE_REQUEST_TIMEOUT_SECONDS"):
         settings.validate_for_startup()
 
 
