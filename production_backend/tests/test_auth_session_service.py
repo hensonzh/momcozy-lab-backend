@@ -70,6 +70,16 @@ def test_revoke_session_delegates_to_repository() -> None:
     assert repository.revoked_session_id == session_id
 
 
+def test_revoke_user_sessions_delegates_to_repository() -> None:
+    repository = FakeAuthSessionRepository()
+    service = AuthSessionService(repository=repository, clock=_clock)
+    user_id = uuid4()
+
+    asyncio.run(service.revoke_user_sessions(user_id=user_id))
+
+    assert repository.revoked_user_id == user_id
+
+
 def _clock() -> datetime:
     return datetime(2026, 7, 2, tzinfo=timezone.utc)
 
@@ -97,6 +107,7 @@ class FakeAuthSessionRepository:
         self.existing_refresh_token = existing_refresh_token
         self.revoked_family_id = None
         self.revoked_session_id = None
+        self.revoked_user_id = None
 
     async def create_device_session(self, **kwargs):
         return DeviceSession(id=uuid4(), **kwargs)
@@ -130,3 +141,7 @@ class FakeAuthSessionRepository:
     async def revoke_device_session(self, *, session_id, revoked_at: datetime):
         self.revoked_session_id = session_id
         return None
+
+    async def revoke_user_sessions(self, *, user_id, revoked_at: datetime):
+        self.revoked_user_id = user_id
+        return 1

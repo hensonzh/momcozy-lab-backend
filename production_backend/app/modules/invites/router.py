@@ -11,7 +11,7 @@ from ...api.dependencies import require_service_client
 from ...api.surface import SurfaceAPIRouter, api_surface
 from ...core.settings import Settings
 from ...infrastructure.db import get_session
-from ..auth import ServiceClient
+from ..auth import AuthSessionRepository, AuthSessionService, ServiceClient
 from .repository import InviteCodeRepository
 from .schemas import InviteCodeCreate, InviteCodeListResponse, InviteCodeRead
 from .service import InviteCodeService, normalize_invite_code
@@ -25,7 +25,10 @@ router = SurfaceAPIRouter(
 
 
 def get_invite_code_service(session: AsyncSession = Depends(get_session)) -> InviteCodeService:
-    return InviteCodeService(repository=InviteCodeRepository(session))
+    return InviteCodeService(
+        repository=InviteCodeRepository(session),
+        session_revoker=AuthSessionService(repository=AuthSessionRepository(session)),
+    )
 
 
 @router.get("/ui", response_class=HTMLResponse)
@@ -249,7 +252,7 @@ def _admin_page_html(settings: Settings) -> str:
       <div class="table-header">
         <div>
           <h2>邀请码列表</h2>
-          <p class="hint">可以直接在表格里禁用指定邀请码。</p>
+          <p class="hint">已绑定的邀请码会在禁用后同步踢出用户。</p>
         </div>
         <button class="secondary" onclick="loadInviteCodes()">刷新列表</button>
       </div>
@@ -406,7 +409,7 @@ def _admin_page_html(settings: Settings) -> str:
         if (item.status === 'active') {
           const button = document.createElement('button');
           button.className = 'danger';
-          button.textContent = '禁用';
+          button.textContent = isBound(item) ? '踢出用户' : '禁用';
           button.onclick = () => disableInviteCode(item.code);
           action.appendChild(button);
         } else {
@@ -488,12 +491,16 @@ def _admin_page_html(settings: Settings) -> str:
     }
 
     async function disableInviteCode(code) {
-      if (!confirm('确认禁用 ' + code + '？')) return;
+      const existing = state.items.find((item) => item.code === code);
+      const willKickUser = existing ? isBound(existing) : false;
+      const prompt = willKickUser ? '确认禁用 ' + code + '？已绑定用户会被踢出登录。' : '确认禁用 ' + code + '？';
+      if (!confirm(prompt)) return;
       try {
         setStatus('正在禁用：' + code);
         const payload = await request('/v1/admin/invite-codes/' + encodeURIComponent(code) + '/disable', { method: 'POST', body: '{}' });
         upsertInviteCode(payload);
-        setStatus('禁用成功：' + payload.code, 'ok');
+        const message = isBound(payload) ? '已禁用邀请码，绑定用户已被踢出：' : '已禁用邀请码：';
+        setStatus(message + payload.code, 'ok');
       } catch (error) {
         setStatus('禁用失败：' + error.message, 'error');
       }

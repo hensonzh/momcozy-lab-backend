@@ -32,6 +32,37 @@ def test_invite_code_service_creates_generated_code_and_disables_it() -> None:
     assert disabled.disabled_at is not None
 
 
+def test_disable_bound_invite_code_revokes_bound_user_sessions() -> None:
+    bound_user_id = uuid4()
+    repository = FakeInviteCodeRepository(
+        existing=InviteCode(
+            id=uuid4(),
+            code="MCZ-BOUND-0001",
+            status="active",
+            bound_device_id="device-1",
+            bound_user_id=bound_user_id,
+        )
+    )
+    session_revoker = FakeInviteUserSessionRevoker()
+    service = InviteCodeService(repository=repository, session_revoker=session_revoker)
+
+    disabled = _run(service.disable_invite_code(code="MCZ-BOUND-0001"))
+
+    assert disabled.status == "disabled"
+    assert session_revoker.revoked_user_id == bound_user_id
+
+
+def test_disable_unbound_invite_code_does_not_revoke_sessions() -> None:
+    repository = FakeInviteCodeRepository(existing=InviteCode(id=uuid4(), code="MCZ-OPEN-0001", status="active"))
+    session_revoker = FakeInviteUserSessionRevoker()
+    service = InviteCodeService(repository=repository, session_revoker=session_revoker)
+
+    disabled = _run(service.disable_invite_code(code="MCZ-OPEN-0001"))
+
+    assert disabled.status == "disabled"
+    assert session_revoker.revoked_user_id is None
+
+
 def test_invite_code_service_rejects_duplicate_requested_code() -> None:
     repository = FakeInviteCodeRepository(existing=InviteCode(id=uuid4(), code="MCZ-DUPE-0001", status="active"))
     service = InviteCodeService(repository=repository)
@@ -128,3 +159,12 @@ class FakeInviteCodeRepository:
         invite_code.status = "disabled"
         invite_code.disabled_at = disabled_at
         return invite_code
+
+
+class FakeInviteUserSessionRevoker:
+    def __init__(self) -> None:
+        self.revoked_user_id = None
+
+    async def revoke_user_sessions(self, *, user_id):
+        self.revoked_user_id = user_id
+        return 1

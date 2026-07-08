@@ -32,6 +32,8 @@ def test_invite_codes_admin_ui_returns_lightweight_page() -> None:
     assert "disableInviteCode(item.code)" in response.text
     assert "上一页" in response.text
     assert "下一页" in response.text
+    assert "已绑定的邀请码会在禁用后同步踢出用户" in response.text
+    assert "踢出用户" in response.text
     assert "创建成功后会直接新增到下方表格第一行" in response.text
 
 

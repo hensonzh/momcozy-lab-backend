@@ -3,6 +3,8 @@ from __future__ import annotations
 import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from typing import Protocol
+from uuid import UUID
 
 from ...core.errors import ApiError
 from .models import InviteCode
@@ -27,9 +29,14 @@ class InviteCodePage:
         return self.offset + self.limit < self.total
 
 
+class InviteUserSessionRevoker(Protocol):
+    async def revoke_user_sessions(self, *, user_id: UUID) -> int: ...
+
+
 class InviteCodeService:
-    def __init__(self, *, repository: InviteCodeRepository) -> None:
+    def __init__(self, *, repository: InviteCodeRepository, session_revoker: InviteUserSessionRevoker | None = None) -> None:
         self.repository = repository
+        self.session_revoker = session_revoker
 
     async def create_invite_code(
         self,
@@ -83,7 +90,10 @@ class InviteCodeService:
             raise ApiError(code="not_found", message="Invite code not found.", status=404)
         if invite_code.status == INVITE_CODE_STATUS_DISABLED:
             return invite_code
-        return await self.repository.disable(invite_code=invite_code, disabled_at=_utcnow())
+        disabled = await self.repository.disable(invite_code=invite_code, disabled_at=_utcnow())
+        if disabled.bound_user_id is not None and self.session_revoker is not None:
+            await self.session_revoker.revoke_user_sessions(user_id=disabled.bound_user_id)
+        return disabled
 
 
 def generate_invite_code() -> str:

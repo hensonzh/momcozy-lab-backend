@@ -170,3 +170,29 @@ class AuthSessionRepository:
         device_session.revoked_at = revoked_at
         await self.session.flush()
         return device_session
+
+    async def revoke_user_sessions(self, *, user_id: UUID, revoked_at: datetime) -> int:
+        sessions = list(
+            (
+                await self.session.scalars(
+                    select(DeviceSession).where(DeviceSession.user_id == user_id, DeviceSession.status == "active")
+                )
+            ).all()
+        )
+        if not sessions:
+            return 0
+
+        session_ids = [session.id for session in sessions]
+        for device_session in sessions:
+            device_session.status = "revoked"
+            device_session.revoked_at = revoked_at
+
+        refresh_tokens = await self.session.scalars(
+            select(RefreshToken).where(RefreshToken.session_id.in_(session_ids), RefreshToken.status == "active")
+        )
+        for refresh_token in refresh_tokens:
+            refresh_token.status = "revoked"
+            refresh_token.revoked_at = revoked_at
+
+        await self.session.flush()
+        return len(sessions)
