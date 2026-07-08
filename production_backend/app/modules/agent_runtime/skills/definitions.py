@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ..routing.schemas import SpecialistId
+
 
 @dataclass(frozen=True)
-class ServicePlaybook:
+class AgentServiceSkill:
     id: str
     version: str
     specialist_id: str
@@ -19,7 +21,7 @@ class ServicePlaybook:
     def prompt_block(self) -> str:
         return "\n".join(
             [
-                f"# 服务剧本 {self.id} ({self.version})",
+                f"# 服务 Skill {self.id} ({self.version})",
                 f"角色定位：{self.role}",
                 _section("服务范围", self.scope),
                 _section("回复风格", self.style_rules),
@@ -46,7 +48,7 @@ def _section(title: str, items: tuple[str, ...]) -> str:
     return "\n".join(lines)
 
 
-PREGNANCY_SERVICE_PLAYBOOK = ServicePlaybook(
+PREGNANCY_SERVICE_SKILL = AgentServiceSkill(
     id="pregnancy_service_v1",
     version="v1",
     specialist_id="pregnancy_service",
@@ -60,7 +62,7 @@ PREGNANCY_SERVICE_PLAYBOOK = ServicePlaybook(
         "默认跟随用户语言；中文用户必须使用简体中文，不要使用繁体字。",
         "像一个稳定、温柔但不啰嗦的朋友；每轮只推进一个重点。",
         "信息不足时最多追问一个最影响下一步的问题，不要一次性抛问卷。",
-        "不要暴露字段名、schema、tool、run、playbook、内部状态或开发术语。",
+        "不要暴露字段名、schema、tool、run、内部服务 skill、内部状态或开发术语。",
     ),
     service_flows=(
         "孕期焦虑但原因不清时，先接住情绪并问焦虑主要来自哪里；只有焦虑来自事项不清、怕漏事或心里没底时，再邀请做孕期计划。",
@@ -89,7 +91,7 @@ PREGNANCY_SERVICE_PLAYBOOK = ServicePlaybook(
 )
 
 
-LACTATION_PLAYBOOK = ServicePlaybook(
+LACTATION_SERVICE_SKILL = AgentServiceSkill(
     id="lactation_v1",
     version="v1",
     specialist_id="lactation",
@@ -133,7 +135,7 @@ LACTATION_PLAYBOOK = ServicePlaybook(
 )
 
 
-POSTPARTUM_PLAYBOOK = ServicePlaybook(
+POSTPARTUM_SERVICE_SKILL = AgentServiceSkill(
     id="postpartum_recovery_v1",
     version="v1",
     specialist_id="postpartum_recovery",
@@ -167,7 +169,7 @@ POSTPARTUM_PLAYBOOK = ServicePlaybook(
 )
 
 
-AFTER_SALES_PLAYBOOK = ServicePlaybook(
+AFTER_SALES_SERVICE_SKILL = AgentServiceSkill(
     id="after_sales_v1",
     version="v1",
     specialist_id="after_sales",
@@ -204,7 +206,7 @@ AFTER_SALES_PLAYBOOK = ServicePlaybook(
 )
 
 
-SAFETY_PLAYBOOK = ServicePlaybook(
+SAFETY_SERVICE_SKILL = AgentServiceSkill(
     id="safety_guardrail_v1",
     version="v1",
     specialist_id="safety_guardrail",
@@ -237,7 +239,7 @@ SAFETY_PLAYBOOK = ServicePlaybook(
 )
 
 
-GENERAL_PLAYBOOK = ServicePlaybook(
+GENERAL_SERVICE_SKILL = AgentServiceSkill(
     id="general_assistant_v1",
     version="v1",
     specialist_id="general_assistant",
@@ -267,14 +269,39 @@ GENERAL_PLAYBOOK = ServicePlaybook(
 )
 
 
-PLAYBOOKS_BY_SPECIALIST_ID: dict[str, ServicePlaybook] = {
-    playbook.specialist_id: playbook
-    for playbook in (
-        PREGNANCY_SERVICE_PLAYBOOK,
-        LACTATION_PLAYBOOK,
-        POSTPARTUM_PLAYBOOK,
-        AFTER_SALES_PLAYBOOK,
-        SAFETY_PLAYBOOK,
-        GENERAL_PLAYBOOK,
+SERVICE_SKILLS_BY_SPECIALIST_ID: dict[str, AgentServiceSkill] = {
+    skill.specialist_id: skill
+    for skill in (
+        PREGNANCY_SERVICE_SKILL,
+        LACTATION_SERVICE_SKILL,
+        POSTPARTUM_SERVICE_SKILL,
+        AFTER_SALES_SERVICE_SKILL,
+        SAFETY_SERVICE_SKILL,
+        GENERAL_SERVICE_SKILL,
     )
 }
+
+
+class AgentServiceSkillRegistry:
+    def __init__(self, skills: tuple[AgentServiceSkill, ...], default_skill_id: str) -> None:
+        self._skills = {skill.specialist_id: skill for skill in skills}
+        self._ordered_skills = skills
+        self._default_skill_id = default_skill_id
+        if default_skill_id not in self._skills:
+            raise ValueError("default agent service skill is not registered")
+
+    def get(self, skill_id: str) -> AgentServiceSkill:
+        return self._skills[skill_id]
+
+    def list(self) -> tuple[AgentServiceSkill, ...]:
+        return self._ordered_skills
+
+    def default(self) -> AgentServiceSkill:
+        return self.get(self._default_skill_id)
+
+
+def default_service_skill_registry() -> AgentServiceSkillRegistry:
+    return AgentServiceSkillRegistry(
+        skills=tuple(SERVICE_SKILLS_BY_SPECIALIST_ID.values()),
+        default_skill_id=SpecialistId.GENERAL.value,
+    )

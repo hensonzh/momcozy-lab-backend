@@ -3,16 +3,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..routing.schemas import SpecialistId
-from ..tools.contracts import ToolContract
-from ..skills.playbooks import (
-    AFTER_SALES_PLAYBOOK,
-    GENERAL_PLAYBOOK,
-    LACTATION_PLAYBOOK,
-    POSTPARTUM_PLAYBOOK,
-    PREGNANCY_SERVICE_PLAYBOOK,
-    SAFETY_PLAYBOOK,
-    ServicePlaybook,
+from ..skills.definitions import (
+    AFTER_SALES_SERVICE_SKILL,
+    GENERAL_SERVICE_SKILL,
+    LACTATION_SERVICE_SKILL,
+    POSTPARTUM_SERVICE_SKILL,
+    PREGNANCY_SERVICE_SKILL,
+    SAFETY_SERVICE_SKILL,
+    AgentServiceSkill,
 )
+from ..tools.contracts import ToolContract
 
 
 @dataclass(frozen=True)
@@ -24,7 +24,7 @@ class AgentSpecialistProfile:
     tool_domains: tuple[str, ...] = ()
     trigger_terms: tuple[str, ...] = ()
     prompt_version: str = "v1"
-    service_playbook: ServicePlaybook | None = None
+    service_skill: AgentServiceSkill | None = None
     memory_scopes: tuple[str, ...] = ()
     direct_apply_actions: tuple[str, ...] = ()
     confirmation_required_actions: tuple[str, ...] = ()
@@ -67,10 +67,10 @@ def default_specialist_registry() -> AgentSpecialistRegistry:
                 id=SpecialistId.LACTATION.value,
                 display_name="Lactation specialist",
                 instructions=(
-                    "Use the lactation service playbook for milk status, feeding, pumping, milk-management plans, "
+                    "Use the lactation service skill for milk status, feeding, pumping, milk-management plans, "
                     "and IBCLC handoff flows."
                 ),
-                service_playbook=LACTATION_PLAYBOOK,
+                service_skill=LACTATION_SERVICE_SKILL,
                 tool_contracts=(
                     "artifacts.lactation_summary.create",
                     "profile.read",
@@ -122,10 +122,10 @@ def default_specialist_registry() -> AgentSpecialistRegistry:
                 id=SpecialistId.PREGNANCY.value,
                 display_name="Pregnancy service specialist",
                 instructions=(
-                    "Use the pregnancy service playbook for pregnancy plans, hospital-bag cards, diary entries, "
+                    "Use the pregnancy service skill for pregnancy plans, hospital-bag cards, diary entries, "
                     "birth preparation, and labor communication cards."
                 ),
-                service_playbook=PREGNANCY_SERVICE_PLAYBOOK,
+                service_skill=PREGNANCY_SERVICE_SKILL,
                 tool_contracts=(
                     "artifacts.hospital_bag_card.create",
                     "artifacts.labor_communication_card.create",
@@ -173,10 +173,10 @@ def default_specialist_registry() -> AgentSpecialistRegistry:
                 id=SpecialistId.POSTPARTUM.value,
                 display_name="Postpartum recovery specialist",
                 instructions=(
-                    "Use the postpartum recovery playbook for gentle recovery check-ins, daily state summaries, "
+                    "Use the postpartum recovery service skill for gentle recovery check-ins, daily state summaries, "
                     "diary context, and recovery task planning."
                 ),
-                service_playbook=POSTPARTUM_PLAYBOOK,
+                service_skill=POSTPARTUM_SERVICE_SKILL,
                 tool_contracts=(
                     "artifacts.postpartum_checkin.create",
                     "profile.read",
@@ -208,10 +208,10 @@ def default_specialist_registry() -> AgentSpecialistRegistry:
                 id=SpecialistId.AFTER_SALES.value,
                 display_name="After-sales service specialist",
                 instructions=(
-                    "Use the after-sales playbook for device guidance, troubleshooting, support handoff, and support "
+                    "Use the after-sales service skill for device guidance, troubleshooting, support handoff, and support "
                     "ticket proposal flows."
                 ),
-                service_playbook=AFTER_SALES_PLAYBOOK,
+                service_skill=AFTER_SALES_SERVICE_SKILL,
                 tool_contracts=(
                     "profile.read",
                     "business.context.read",
@@ -252,10 +252,10 @@ def default_specialist_registry() -> AgentSpecialistRegistry:
                 id=SpecialistId.SAFETY.value,
                 display_name="Safety guardrail",
                 instructions=(
-                    "Use the safety playbook for emergency, health red-flag, emotional-crisis, child-safety, "
+                    "Use the safety service skill for emergency, health red-flag, emotional-crisis, child-safety, "
                     "permission-bypass, and prompt-injection messages."
                 ),
-                service_playbook=SAFETY_PLAYBOOK,
+                service_skill=SAFETY_SERVICE_SKILL,
                 tool_contracts=("profile.read", "business.context.read", "support.ticket.propose"),
                 trigger_terms=(
                     "emergency",
@@ -276,10 +276,10 @@ def default_specialist_registry() -> AgentSpecialistRegistry:
                 id=SpecialistId.GENERAL.value,
                 display_name="General product assistant",
                 instructions=(
-                    "Use the general playbook for lightweight MomCozy assistance, navigation, clarification, and "
+                    "Use the general service skill for lightweight MomCozy assistance, navigation, clarification, and "
                     "non-sensitive memory preference capture."
                 ),
-                service_playbook=GENERAL_PLAYBOOK,
+                service_skill=GENERAL_SERVICE_SKILL,
                 tool_contracts=(
                     "profile.read",
                     "business.context.read",

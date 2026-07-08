@@ -93,10 +93,10 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() ->
         "routing_source",
         "run_id",
         "runtime_pattern",
-        "service_playbook_deliverables",
-        "service_playbook_id",
-        "service_playbook_scope",
-        "service_playbook_version",
+        "service_skill_deliverables",
+        "service_skill_id",
+        "service_skill_scope",
+        "service_skill_version",
         "specialist_display_name",
         "specialist_id",
         "thread_id",
@@ -150,7 +150,7 @@ def test_agent_runtime_executor_projects_active_memory_into_dynamic_context() ->
     assert state_store.projections[0]["projection_summary"]["fresh_business_fact_keys"] == []
 
 
-def test_default_specialists_are_bound_to_service_playbooks() -> None:
+def test_default_specialists_are_bound_to_service_skills() -> None:
     registry = default_specialist_registry()
 
     for specialist_id in (
@@ -162,9 +162,9 @@ def test_default_specialists_are_bound_to_service_playbooks() -> None:
         "safety_guardrail",
     ):
         profile = registry.get(specialist_id)
-        assert profile.service_playbook is not None
-        assert profile.service_playbook.specialist_id == specialist_id
-        assert "服务剧本" in profile.service_playbook.prompt_block()
+        assert profile.service_skill is not None
+        assert profile.service_skill.specialist_id == specialist_id
+        assert "服务 Skill" in profile.service_skill.prompt_block()
 
 
 def test_agent_runtime_executor_publishes_text_deltas_to_transient_stream() -> None:
@@ -352,7 +352,7 @@ def test_agent_runtime_executor_selects_specialist_and_scopes_tools() -> None:
     )
 
 
-def test_agent_runtime_executor_injects_pregnancy_service_playbook() -> None:
+def test_agent_runtime_executor_injects_pregnancy_service_skill() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)
     current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="帮我准备待产包和分娩沟通单", sequence=1)
@@ -372,17 +372,17 @@ def test_agent_runtime_executor_injects_pregnancy_service_playbook() -> None:
     state = request.model_input[-4]["content"]["state"]
     assert result.status == "completed"
     assert request.specialist_id == "pregnancy_service"
-    assert state["service_playbook_id"] == "pregnancy_service_v1"
-    assert state["service_playbook_version"] == "v1"
+    assert state["service_skill_id"] == "pregnancy_service_v1"
+    assert state["service_skill_version"] == "v1"
     assert "CozyMate" in request.instructions
-    assert "服务剧本" in request.instructions
+    assert "服务 Skill" in request.instructions
     assert "待产包清单" in request.instructions
     assert "分娩沟通单" in request.instructions
     assert "每轮只推进一个重点" in request.instructions
     assert "不要调用 load_skill" in request.instructions
     assert "artifacts.hospital_bag_card.create" in request.tool_names
     assert "artifacts.labor_communication_card.create" in request.tool_names
-    assert state_store.projections[0]["projection_summary"]["service_playbook_id"] == "pregnancy_service_v1"
+    assert state_store.projections[0]["projection_summary"]["service_skill_id"] == "pregnancy_service_v1"
 
 
 def test_agent_runtime_executor_routes_named_pump_issue_to_device_specialist() -> None:

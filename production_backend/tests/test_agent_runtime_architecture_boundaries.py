@@ -27,9 +27,9 @@ def test_default_graph_registry_uses_langgraph_sdk_pattern() -> None:
     assert "confirmation_interrupt" in graph.node_names
 
 
-def test_service_skill_catalog_is_the_model_facing_entrypoint() -> None:
+def test_service_skill_registry_is_the_model_facing_entrypoint() -> None:
     skill_registry = default_service_skill_registry()
-    skill_ids = {skill.id for skill in skill_registry.list()}
+    skill_ids = {skill.specialist_id for skill in skill_registry.list()}
 
     assert skill_ids == {
         "after_sales",
@@ -40,10 +40,9 @@ def test_service_skill_catalog_is_the_model_facing_entrypoint() -> None:
         "safety_guardrail",
     }
     pregnancy_skill = skill_registry.get("pregnancy_service")
-    assert pregnancy_skill.service_playbook.specialist_id == "pregnancy_service"
-    assert "服务 Skill pregnancy_service" in pregnancy_skill.prompt_block()
-    assert "artifacts.hospital_bag_card.create" in pregnancy_skill.tool_contracts
-    assert "pregnancy.plan.create" in pregnancy_skill.confirmation_required_actions
+    assert pregnancy_skill.specialist_id == "pregnancy_service"
+    assert "服务 Skill pregnancy_service_v1" in pregnancy_skill.prompt_block()
+    assert "待产包清单" in pregnancy_skill.prompt_block()
 
 
 def test_tool_contract_registry_declares_permission_confirmation_and_blocking_policy() -> None:
