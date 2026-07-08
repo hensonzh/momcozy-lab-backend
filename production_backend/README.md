@@ -48,7 +48,12 @@ environment variables, not code changes:
 - `VOICE_API_KEY`
 - `VOICE_BASE_URL`
 - `VOICE_TRANSCRIBE_MODEL`
-- `VOICE_TTS_MODEL`
+- `VOICE_TTS_RESOURCE_ID`
+- `VOICE_TTS_VOICE_TYPE`
+- `VOICE_TTS_AUDIO_FORMAT`
+- `VOICE_TTS_SAMPLE_RATE`
+- `VOICE_TTS_SPEED_RATIO`
+- `VOICE_TTS_FIRST_CHUNK_TIMEOUT_SECONDS`
 - `VOICE_REALTIME_MODEL`
 - `VOICE_REQUEST_TIMEOUT_SECONDS`
 - `VISION_PROVIDER`
@@ -106,13 +111,11 @@ The Minimax path uses the OpenAI Agents SDK with an OpenAI-compatible provider
 base URL and currently pins the SDK model path to Chat Completions compatibility
 for tool calling and streaming validation.
 
-Voice endpoints are exposed in the production contract, but speech provider
-integration is disabled by default. Keep `VOICE_PROVIDER=disabled` until a
-managed provider adapter is configured; `VOICE_PROVIDER=local_stub` is only for
-local/test contract checks and is rejected in production. The provider-neutral
-`VOICE_*` connection/model settings are read by startup settings so each
-environment can be prepared without code changes, but they do not enable a
-managed speech provider until the corresponding adapter is implemented.
+Voice playback follows the legacy Doubao/Volcengine realtime TTS path. Use
+`VOICE_PROVIDER=doubao`, set `VOICE_API_KEY`, and keep the default bidirectional
+TTS endpoint/resource/voice values unless the provider account changes. The App
+requests `/v1/realtime-voice-stream` and plays PCM chunks locally. `local_stub`
+is only for local/test contract checks and is rejected in production.
 
 Vision event endpoints are exposed in the production contract, but image
 analysis provider integration is disabled by default. Keep

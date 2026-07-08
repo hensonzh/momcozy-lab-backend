@@ -133,11 +133,13 @@ Retained domains:
 | Notifications | task reminder and milk-analysis related flows | service-key create, inbox/read/archive | green |
 | Support | support tickets and agent handoff target | owner scope, idempotency, audit | green |
 | Status page | operational status | public/service surface tests | green |
-| Voice | provider-neutral disabled/local_stub contract | standard disabled-provider envelope | green |
+| Voice playback | Doubao/Volcengine realtime TTS PCM stream | legacy bidirectional TTS contract and fake websocket tests | green |
+| Voice transcription | provider-neutral disabled/local_stub contract | standard disabled-provider envelope | green |
 | Vision | provider-neutral disabled/local_stub contract and file-owner stream contract | standard disabled-provider envelope | green |
 
-Current status: `green` for code-local acceptance. Managed speech and vision
-providers remain external launch-scope choices.
+Current status: `green` for code-local acceptance. Voice playback uses the
+legacy Doubao realtime TTS provider; managed transcription and vision providers
+remain external launch-scope choices.
 
 Acceptance:
 

@@ -12,10 +12,17 @@ LOCAL_OBJECT_STORAGE_ROOT = "production_backend/.local/object_storage"
 LOCAL_PRODUCT_ASSET_MANIFEST_PATH = "production_backend/assets/product-assets.manifest.json"
 DEFAULT_FILE_UPLOAD_MAX_BYTES = 10 * 1024 * 1024
 DEFAULT_AGENT_RUNTIME_MAX_INLINE_PAYLOAD_BYTES = 32 * 1024
+DEFAULT_DOUBAO_TTS_WS_URL = "wss://openspeech.bytedance.com/api/v3/tts/bidirection"
+DEFAULT_DOUBAO_TTS_RESOURCE_ID = "seed-tts-2.0"
+DEFAULT_DOUBAO_TTS_VOICE_TYPE = "saturn_zh_female_qingyingduoduo_cs_tob"
+DEFAULT_DOUBAO_TTS_AUDIO_FORMAT = "pcm"
+DEFAULT_DOUBAO_TTS_SAMPLE_RATE = 24000
+DEFAULT_DOUBAO_TTS_SPEED_RATIO = 1.1
+DEFAULT_DOUBAO_TTS_FIRST_CHUNK_TIMEOUT_SECONDS = 20
 SUPPORTED_OBJECT_STORAGE_PROVIDERS = {"local", "s3", "oss", "cos", "minio"}
 PRODUCTION_ENVS = {"prod", "production"}
 SUPPORTED_AUTH_JWT_ALGORITHMS = {"HS256"}
-SUPPORTED_VOICE_PROVIDERS = {"disabled", "local_stub"}
+SUPPORTED_VOICE_PROVIDERS = {"disabled", "local_stub", "doubao", "volcengine"}
 SUPPORTED_VISION_PROVIDERS = {"disabled", "local_stub"}
 SUPPORTED_AGENT_MODEL_PROVIDERS = {"openai", "minimax"}
 
@@ -76,9 +83,14 @@ class Settings:
     openai_agent_prompt_version: str = "momcozy-agent-prompt-v1"
     voice_provider: str = "disabled"
     voice_api_key: str = ""
-    voice_base_url: str = ""
+    voice_base_url: str = DEFAULT_DOUBAO_TTS_WS_URL
     voice_transcribe_model: str = ""
-    voice_tts_model: str = ""
+    voice_tts_resource_id: str = DEFAULT_DOUBAO_TTS_RESOURCE_ID
+    voice_tts_voice_type: str = DEFAULT_DOUBAO_TTS_VOICE_TYPE
+    voice_tts_audio_format: str = DEFAULT_DOUBAO_TTS_AUDIO_FORMAT
+    voice_tts_sample_rate: int = DEFAULT_DOUBAO_TTS_SAMPLE_RATE
+    voice_tts_speed_ratio: float = DEFAULT_DOUBAO_TTS_SPEED_RATIO
+    voice_tts_first_chunk_timeout_seconds: int = DEFAULT_DOUBAO_TTS_FIRST_CHUNK_TIMEOUT_SECONDS
     voice_realtime_model: str = ""
     voice_request_timeout_seconds: int = 30
     vision_provider: str = "disabled"
@@ -149,10 +161,24 @@ class Settings:
             openai_agent_trace_enabled=_env_bool("OPENAI_AGENT_TRACE_ENABLED", cls.openai_agent_trace_enabled),
             openai_agent_prompt_version=_env("OPENAI_AGENT_PROMPT_VERSION", cls.openai_agent_prompt_version),
             voice_provider=_env("VOICE_PROVIDER", cls.voice_provider).lower(),
-            voice_api_key=_env("VOICE_API_KEY", cls.voice_api_key),
-            voice_base_url=_env("VOICE_BASE_URL", cls.voice_base_url),
+            voice_api_key=_env_first(
+                ("VOICE_API_KEY", "VOLC_TTS_API_KEY", "VOLC_REALTIME_VOICE_API_KEY", "VOLCENGINE_TTS_API_KEY"),
+                cls.voice_api_key,
+            ),
+            voice_base_url=_env_first(("VOICE_BASE_URL", "VOLC_TTS_WS_URL"), cls.voice_base_url),
             voice_transcribe_model=_env("VOICE_TRANSCRIBE_MODEL", cls.voice_transcribe_model),
-            voice_tts_model=_env("VOICE_TTS_MODEL", cls.voice_tts_model),
+            voice_tts_resource_id=_env_first(
+                ("VOICE_TTS_RESOURCE_ID", "VOICE_TTS_MODEL", "VOLC_TTS_RESOURCE_ID"),
+                cls.voice_tts_resource_id,
+            ),
+            voice_tts_voice_type=_env_first(("VOICE_TTS_VOICE_TYPE", "VOLC_TTS_VOICE_TYPE"), cls.voice_tts_voice_type),
+            voice_tts_audio_format=_env_first(("VOICE_TTS_AUDIO_FORMAT", "VOLC_TTS_AUDIO_FORMAT"), cls.voice_tts_audio_format).lower(),
+            voice_tts_sample_rate=_env_int_first(("VOICE_TTS_SAMPLE_RATE", "VOLC_TTS_SAMPLE_RATE"), cls.voice_tts_sample_rate),
+            voice_tts_speed_ratio=_env_float_first(("VOICE_TTS_SPEED_RATIO", "VOLC_TTS_SPEED_RATIO"), cls.voice_tts_speed_ratio),
+            voice_tts_first_chunk_timeout_seconds=_env_int(
+                "VOICE_TTS_FIRST_CHUNK_TIMEOUT_SECONDS",
+                cls.voice_tts_first_chunk_timeout_seconds,
+            ),
             voice_realtime_model=_env("VOICE_REALTIME_MODEL", cls.voice_realtime_model),
             voice_request_timeout_seconds=_env_int(
                 "VOICE_REQUEST_TIMEOUT_SECONDS",
@@ -230,6 +256,24 @@ class Settings:
             errors.append("OPENAI_AGENT_PROMPT_VERSION must be at most 80 characters")
         if self.voice_provider not in SUPPORTED_VOICE_PROVIDERS:
             errors.append(f"VOICE_PROVIDER must be one of {', '.join(sorted(SUPPORTED_VOICE_PROVIDERS))}")
+        if self.voice_provider in {"doubao", "volcengine"} and not self.voice_api_key:
+            errors.append("VOICE_API_KEY is required when VOICE_PROVIDER=doubao")
+        if not self.voice_base_url:
+            errors.append("VOICE_BASE_URL is required")
+        if not self.voice_tts_resource_id:
+            errors.append("VOICE_TTS_RESOURCE_ID is required")
+        if not self.voice_tts_voice_type:
+            errors.append("VOICE_TTS_VOICE_TYPE is required")
+        if not self.voice_tts_audio_format:
+            errors.append("VOICE_TTS_AUDIO_FORMAT is required")
+        if self.voice_tts_audio_format != "pcm":
+            errors.append("VOICE_TTS_AUDIO_FORMAT must be pcm")
+        if self.voice_tts_sample_rate < 1:
+            errors.append("VOICE_TTS_SAMPLE_RATE must be positive")
+        if self.voice_tts_speed_ratio < 0.5 or self.voice_tts_speed_ratio > 2.0:
+            errors.append("VOICE_TTS_SPEED_RATIO must be between 0.5 and 2.0")
+        if self.voice_tts_first_chunk_timeout_seconds < 1:
+            errors.append("VOICE_TTS_FIRST_CHUNK_TIMEOUT_SECONDS must be positive")
         if self.voice_request_timeout_seconds < 1:
             errors.append("VOICE_REQUEST_TIMEOUT_SECONDS must be positive")
         if self.vision_provider not in SUPPORTED_VISION_PROVIDERS:
@@ -278,6 +322,14 @@ def _env(name: str, default: str) -> str:
     return os.getenv(name, default).strip() or default
 
 
+def _env_first(names: tuple[str, ...], default: str) -> str:
+    for name in names:
+        raw = os.getenv(name)
+        if raw is not None and raw.strip():
+            return raw.strip()
+    return default
+
+
 def _env_bool(name: str, default: bool) -> bool:
     raw = os.getenv(name)
     if raw is None:
@@ -298,6 +350,28 @@ def _env_int(name: str, default: int) -> int:
         return int(raw.strip())
     except ValueError:
         raise ValueError(f"{name} must be an integer") from None
+
+
+def _env_int_first(names: tuple[str, ...], default: int) -> int:
+    for name in names:
+        raw = os.getenv(name)
+        if raw is not None:
+            try:
+                return int(raw.strip())
+            except ValueError:
+                raise ValueError(f"{name} must be an integer") from None
+    return default
+
+
+def _env_float_first(names: tuple[str, ...], default: float) -> float:
+    for name in names:
+        raw = os.getenv(name)
+        if raw is not None:
+            try:
+                return float(raw.strip())
+            except ValueError:
+                raise ValueError(f"{name} must be a number") from None
+    return default
 
 
 def _env_csv(name: str, default: tuple[str, ...]) -> tuple[str, ...]:

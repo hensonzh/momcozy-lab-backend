@@ -142,23 +142,54 @@ def test_settings_from_env_reads_minimax_agent_provider(monkeypatch: pytest.Monk
 
 
 def test_settings_from_env_reads_voice_provider(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("VOICE_PROVIDER", "local_stub")
+    monkeypatch.setenv("VOICE_PROVIDER", "doubao")
     monkeypatch.setenv("VOICE_API_KEY", "voice-test-key")
     monkeypatch.setenv("VOICE_BASE_URL", "https://voice.example.test")
     monkeypatch.setenv("VOICE_TRANSCRIBE_MODEL", "voice-transcribe-test")
-    monkeypatch.setenv("VOICE_TTS_MODEL", "voice-tts-test")
+    monkeypatch.setenv("VOICE_TTS_RESOURCE_ID", "voice-resource-test")
+    monkeypatch.setenv("VOICE_TTS_VOICE_TYPE", "voice-speaker-test")
+    monkeypatch.setenv("VOICE_TTS_AUDIO_FORMAT", "pcm")
+    monkeypatch.setenv("VOICE_TTS_SAMPLE_RATE", "16000")
+    monkeypatch.setenv("VOICE_TTS_SPEED_RATIO", "1.2")
+    monkeypatch.setenv("VOICE_TTS_FIRST_CHUNK_TIMEOUT_SECONDS", "12")
     monkeypatch.setenv("VOICE_REALTIME_MODEL", "voice-realtime-test")
     monkeypatch.setenv("VOICE_REQUEST_TIMEOUT_SECONDS", "45")
 
     settings = Settings.from_env()
 
-    assert settings.voice_provider == "local_stub"
+    assert settings.voice_provider == "doubao"
     assert settings.voice_api_key == "voice-test-key"
     assert settings.voice_base_url == "https://voice.example.test"
     assert settings.voice_transcribe_model == "voice-transcribe-test"
-    assert settings.voice_tts_model == "voice-tts-test"
+    assert settings.voice_tts_resource_id == "voice-resource-test"
+    assert settings.voice_tts_voice_type == "voice-speaker-test"
+    assert settings.voice_tts_audio_format == "pcm"
+    assert settings.voice_tts_sample_rate == 16000
+    assert settings.voice_tts_speed_ratio == 1.2
+    assert settings.voice_tts_first_chunk_timeout_seconds == 12
     assert settings.voice_realtime_model == "voice-realtime-test"
     assert settings.voice_request_timeout_seconds == 45
+
+
+def test_settings_from_env_keeps_legacy_volc_tts_aliases(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("VOICE_PROVIDER", "doubao")
+    monkeypatch.setenv("VOLC_TTS_API_KEY", "legacy-volc-key")
+    monkeypatch.setenv("VOLC_TTS_WS_URL", "wss://legacy.example.test/tts")
+    monkeypatch.setenv("VOLC_TTS_RESOURCE_ID", "legacy-resource")
+    monkeypatch.setenv("VOLC_TTS_VOICE_TYPE", "legacy-speaker")
+    monkeypatch.setenv("VOLC_TTS_AUDIO_FORMAT", "pcm")
+    monkeypatch.setenv("VOLC_TTS_SAMPLE_RATE", "24000")
+    monkeypatch.setenv("VOLC_TTS_SPEED_RATIO", "1.1")
+
+    settings = Settings.from_env()
+
+    assert settings.voice_api_key == "legacy-volc-key"
+    assert settings.voice_base_url == "wss://legacy.example.test/tts"
+    assert settings.voice_tts_resource_id == "legacy-resource"
+    assert settings.voice_tts_voice_type == "legacy-speaker"
+    assert settings.voice_tts_audio_format == "pcm"
+    assert settings.voice_tts_sample_rate == 24000
+    assert settings.voice_tts_speed_ratio == 1.1
 
 
 def test_settings_from_env_reads_vision_provider(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -273,10 +304,24 @@ def test_settings_reject_invalid_voice_provider() -> None:
         settings.validate_for_startup()
 
 
+def test_settings_require_doubao_voice_key_when_provider_enabled() -> None:
+    settings = Settings(voice_provider="doubao", voice_api_key="")
+
+    with pytest.raises(ValueError, match="VOICE_API_KEY"):
+        settings.validate_for_startup()
+
+
 def test_settings_reject_invalid_voice_timeout() -> None:
     settings = Settings(voice_request_timeout_seconds=0)
 
     with pytest.raises(ValueError, match="VOICE_REQUEST_TIMEOUT_SECONDS"):
+        settings.validate_for_startup()
+
+
+def test_settings_reject_invalid_voice_speed_ratio() -> None:
+    settings = Settings(voice_tts_speed_ratio=2.5)
+
+    with pytest.raises(ValueError, match="VOICE_TTS_SPEED_RATIO"):
         settings.validate_for_startup()
 
 

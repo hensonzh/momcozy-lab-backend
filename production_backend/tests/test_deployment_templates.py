@@ -112,12 +112,25 @@ def test_compose_env_declares_disabled_agent_worker_controls() -> None:
     assert "MINIMAX_MODEL=MiniMax-M3" in env
     assert "VOICE_PROVIDER=disabled" in env
     assert "VOICE_API_KEY=" in env
-    assert "VOICE_BASE_URL=" in env
+    assert "VOICE_BASE_URL=wss://openspeech.bytedance.com/api/v3/tts/bidirection" in env
     assert "VOICE_TRANSCRIBE_MODEL=" in env
-    assert "VOICE_TTS_MODEL=" in env
+    assert "VOICE_TTS_RESOURCE_ID=seed-tts-2.0" in env
+    assert "VOICE_TTS_VOICE_TYPE=saturn_zh_female_qingyingduoduo_cs_tob" in env
+    assert "VOICE_TTS_AUDIO_FORMAT=pcm" in env
+    assert "VOICE_TTS_SAMPLE_RATE=24000" in env
+    assert "VOICE_TTS_SPEED_RATIO=1.1" in env
+    assert "VOICE_TTS_FIRST_CHUNK_TIMEOUT_SECONDS=20" in env
     assert "VOICE_REALTIME_MODEL=" in env
     assert "VOICE_REQUEST_TIMEOUT_SECONDS=30" in env
     assert "VISION_PROVIDER=disabled" in env
+
+
+def test_production_compose_env_declares_doubao_voice_provider() -> None:
+    env = COMPOSE_PROD_ENV.read_text()
+
+    assert "VOICE_PROVIDER=doubao" in env
+    assert "VOICE_API_KEY=${VOICE_API_KEY}" in env
+    assert "VOICE_BASE_URL=wss://openspeech.bytedance.com/api/v3/tts/bidirection" in env
 
 
 def test_compose_env_declares_disabled_outbox_worker_controls() -> None:
