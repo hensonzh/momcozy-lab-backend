@@ -17,6 +17,7 @@ from production_backend.app.modules.agent_runtime.prompts import (
 from production_backend.app.modules.agent_runtime.sdk import OpenAIAgentsSdkRunner, SdkNodeRequest, SdkNodeResult, SdkToolDefinition, sdk_tool_name
 from production_backend.app.modules.agent_runtime.skills import default_service_skill_registry
 from production_backend.app.modules.agent_runtime.tools import default_tool_registry, tool_input_schema
+from production_backend.app.modules.agent_runtime.tools.output_policy import INSTRUCTIONAL_TOOL_OUTPUT_KEYS
 
 
 def test_default_graph_registry_uses_langgraph_sdk_pattern() -> None:
@@ -257,6 +258,44 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
     assert artifact_schema["required"] == ["title"]
     assert artifact_schema["properties"]["sections"]["maxItems"] == 20
     assert artifact_schema["properties"]["source_context"]["type"] == "object"
+
+
+def test_tool_input_schema_properties_do_not_define_instruction_channels() -> None:
+    registry = default_tool_registry()
+    forbidden_schema_paths: list[str] = []
+    for contract in registry.list():
+        schema = tool_input_schema(contract.input_schema_ref)
+        forbidden_schema_paths.extend(
+            _instructional_schema_property_paths(
+                value=schema,
+                path=contract.input_schema_ref,
+            )
+        )
+
+    assert forbidden_schema_paths == []
+
+
+def _instructional_schema_property_paths(*, value: object, path: str) -> list[str]:
+    if isinstance(value, dict):
+        matches: list[str] = []
+        properties = value.get("properties")
+        if isinstance(properties, dict):
+            matches.extend(
+                f"{path}.{key}" for key in properties if _normalized_key(key) in INSTRUCTIONAL_TOOL_OUTPUT_KEYS
+            )
+        for key, item in value.items():
+            matches.extend(_instructional_schema_property_paths(value=item, path=f"{path}.{key}"))
+        return matches
+    if isinstance(value, list):
+        matches = []
+        for index, item in enumerate(value):
+            matches.extend(_instructional_schema_property_paths(value=item, path=f"{path}[{index}]"))
+        return matches
+    return []
+
+
+def _normalized_key(value: object) -> str:
+    return str(value).strip().lower().replace("-", "_")
 
 
 def test_context_builder_keeps_stable_prompts_before_dynamic_projection() -> None:

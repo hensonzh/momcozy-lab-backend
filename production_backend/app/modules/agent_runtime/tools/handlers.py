@@ -1188,7 +1188,6 @@ def _milk_status_payload(
             "pumping_at": _datetime_iso(latest_pumping.pump_start_time) if latest_pumping is not None else None,
         },
         "observation_flags": flags,
-        "next_step_hint": _milk_next_step_hint(flags),
     }
 
 
@@ -1227,16 +1226,6 @@ def _milk_observation_flags(
     if trend_pumping_count == 0:
         flags.append("no_pumping_trend_data")
     return flags
-
-
-def _milk_next_step_hint(flags: list[str]) -> str:
-    if not flags:
-        return "summarize_current_status"
-    if "no_recent_feeding_records" in flags or "no_recent_pumping_records" in flags:
-        return "ask_for_missing_recent_records"
-    if "no_infant_profile" in flags:
-        return "ask_for_infant_context"
-    return "ask_follow_up_before_recommending_plan"
 
 
 def _growth_payload(record: GrowthRecord) -> dict[str, Any]:

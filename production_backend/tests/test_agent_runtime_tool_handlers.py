@@ -306,7 +306,6 @@ def test_milk_status_read_tool_handler_returns_deterministic_status_snapshot() -
             "pumping_at": "2026-07-02T08:00:00+00:00",
         },
         "observation_flags": [],
-        "next_step_hint": "summarize_current_status",
     }
 
 

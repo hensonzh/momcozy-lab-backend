@@ -17,6 +17,7 @@ from ..models import AgentToolCall
 from ..payloads import DEFAULT_MAX_INLINE_PAYLOAD_BYTES, maybe_externalize_json_payload
 from ..repository import AgentRuntimeRepository
 from .contracts import ToolContract
+from .output_policy import strip_instructional_tool_output_keys
 from .registry import ToolContractRegistry
 from .schemas import validate_tool_input
 
@@ -129,7 +130,7 @@ class ToolExecutor:
             self._record(tool_name=tool_name, outcome="failed", error_code="tool_failed", started_at=started_at)
             raise ApiError(code="tool_failed", message="Tool execution failed.", status=500) from exc
 
-        safe_output = _safe_payload(result)
+        safe_output = strip_instructional_tool_output_keys(_safe_payload(result))
         externalized_output = await maybe_externalize_json_payload(
             payload=safe_output,
             object_storage=self.object_storage,
