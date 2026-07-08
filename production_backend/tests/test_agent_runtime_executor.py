@@ -72,7 +72,8 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() ->
     assert request.prompt_version == "prompt-v2"
     assert request.service_skill_id == "general_assistant"
     assert "你叫 CozyMate，来自 Momcozy 团队。" in request.instructions
-    assert "已选择服务技能：general_assistant" in request.instructions
+    assert "服务技能 general_assistant_v1" in request.instructions
+    assert "已选择服务技能" not in request.instructions
     assert request.tool_names == ("business.context.read", "profile.read")
     assert [item["role"] for item in request.model_input] == [
         "user",
@@ -358,7 +359,8 @@ def test_agent_runtime_executor_selects_service_skill_and_scopes_tools_by_group(
     request = backend.requests[0]
     assert result.status == "completed"
     assert request.service_skill_id == "lactation"
-    assert "已选择服务技能：lactation" in request.instructions
+    assert "服务技能 lactation_v1" in request.instructions
+    assert "已选择服务技能" not in request.instructions
     state = _runtime_context(request)["state"]
     assert state["service_skill_id"] == "lactation_v1"
     assert state["selected_tool_group_ids"] == ["general.base", "lactation.milk_read"]

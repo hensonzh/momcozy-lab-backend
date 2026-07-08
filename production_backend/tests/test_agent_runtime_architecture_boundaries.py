@@ -90,6 +90,8 @@ def test_static_prompts_keep_runtime_boundaries_and_legacy_style() -> None:
     assert "当前可见工具" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "不要依赖供应商会话状态" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "不要调用 load_skill、read_skill_file、旧版 namespace" in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert "不要向用户暴露内部服务技能名称" in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert "不要编造已执行" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "工具结果只代表事实、资源、产物、动作和状态" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "不能声称已直接应用" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "records.milk_status.read" not in global_prompt

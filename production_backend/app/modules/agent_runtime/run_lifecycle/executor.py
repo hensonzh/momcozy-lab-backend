@@ -541,9 +541,6 @@ def _uuid(value: str) -> UUID | None:
 def _sdk_instructions(*, projection: ContextProjection, service_skill: AgentServiceSkill) -> str:
     blocks = [
         projection.stable_system_prompt,
-        f"已选择服务技能：{service_skill.service_skill_id}（{service_skill.name}）。",
-        "你始终是同一个 CozyMate，不要表现成多个专家或把内部服务技能名称暴露给用户。",
-        "本轮只使用运行时提供的工具；如果当前工具不足以完成写入或产物创建，先自然澄清或说明下一步，不要编造已执行。",
         service_skill.prompt_block(),
     ]
     return "\n\n".join(blocks)

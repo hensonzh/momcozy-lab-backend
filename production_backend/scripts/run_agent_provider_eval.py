@@ -260,7 +260,6 @@ def _instructions(*, service_skill_id: str, service_skill_body: str) -> str:
     return "\n\n".join(
         [
             config.stable_system_prompt,
-            f"已选择服务技能：{service_skill_id}。",
             service_skill_body,
         ]
     )
