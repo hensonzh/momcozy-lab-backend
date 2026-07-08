@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import json
 from html import escape
 
-from fastapi import Depends, Query, status
+from fastapi import Depends, Query, Request, status
 from fastapi.responses import HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...api.dependencies import require_service_client
 from ...api.surface import SurfaceAPIRouter, api_surface
+from ...core.settings import Settings
 from ...infrastructure.db import get_session
 from ..auth import ServiceClient
 from .repository import InviteCodeRepository
@@ -27,8 +29,8 @@ def get_invite_code_service(session: AsyncSession = Depends(get_session)) -> Inv
 
 
 @router.get("/ui", response_class=HTMLResponse)
-async def invite_codes_admin_ui() -> HTMLResponse:
-    return HTMLResponse(_admin_page_html())
+async def invite_codes_admin_ui(request: Request) -> HTMLResponse:
+    return HTMLResponse(_admin_page_html(request.app.state.settings))
 
 
 @router.post("", response_model=InviteCodeRead, status_code=status.HTTP_201_CREATED)
@@ -67,102 +69,372 @@ async def disable_invite_code(
     return InviteCodeRead.model_validate(invite_code)
 
 
-def _admin_page_html() -> str:
+def _admin_page_html(settings: Settings) -> str:
     title = escape("MomCozy 邀请码管理")
-    return f"""<!doctype html>
+    service_key_json = json.dumps(settings.service_api_key).replace("</", "<\\/")
+    return (
+        """<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>{title}</title>
+  <title>__TITLE__</title>
   <style>
-    body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; background: #fbf7f5; color: #332530; }}
-    main {{ max-width: 760px; margin: 40px auto; padding: 0 20px; }}
-    section {{ background: white; border: 1px solid #eadde2; border-radius: 14px; padding: 20px; margin-bottom: 18px; box-shadow: 0 12px 32px rgba(77, 45, 60, .08); }}
-    h1 {{ font-size: 28px; margin: 0 0 20px; }}
-    h2 {{ font-size: 18px; margin: 0 0 14px; }}
-    label {{ display: block; font-weight: 700; margin: 12px 0 6px; }}
-    input {{ width: 100%; box-sizing: border-box; border: 1px solid #d9c8cf; border-radius: 10px; padding: 12px; font-size: 15px; }}
-    button {{ border: 0; border-radius: 999px; background: #aa6579; color: white; padding: 11px 18px; font-size: 15px; font-weight: 700; margin-top: 14px; cursor: pointer; }}
-    button.secondary {{ background: #6f5964; }}
-    pre {{ white-space: pre-wrap; word-break: break-word; background: #f7eef2; border-radius: 10px; padding: 12px; min-height: 42px; }}
-    .hint {{ color: #7d6a75; font-size: 13px; }}
+    :root {
+      color-scheme: light;
+      --bg: #fbf7f5;
+      --card: #fff;
+      --text: #332530;
+      --muted: #7d6a75;
+      --border: #eadde2;
+      --primary: #aa6579;
+      --primary-dark: #765f6b;
+      --soft: #f7eef2;
+      --ok-bg: #f1faf5;
+      --ok: #2f7a55;
+      --warn-bg: #fff7e8;
+      --warn: #9a641c;
+      --danger-bg: #fff0f1;
+      --danger: #b04151;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+    }
+    main { max-width: 1120px; margin: 38px auto; padding: 0 20px 48px; }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+    h1 { font-size: 28px; margin: 0; }
+    h2 { font-size: 20px; margin: 0 0 16px; }
+    section {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 22px;
+      margin-bottom: 18px;
+      box-shadow: 0 12px 32px rgba(77, 45, 60, .08);
+    }
+    label { display: block; font-weight: 800; margin: 12px 0 7px; }
+    input {
+      width: 100%;
+      border: 1px solid #d9c8cf;
+      border-radius: 12px;
+      padding: 13px 14px;
+      font-size: 15px;
+      outline: none;
+      background: #fff;
+    }
+    input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(170, 101, 121, .12); }
+    button {
+      border: 0;
+      border-radius: 999px;
+      background: var(--primary);
+      color: white;
+      padding: 11px 18px;
+      font-size: 14px;
+      font-weight: 800;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    button.secondary { background: var(--primary-dark); }
+    button.ghost { color: var(--primary-dark); background: var(--soft); }
+    button.danger { background: var(--danger); }
+    button:disabled { cursor: not-allowed; opacity: .55; }
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 16px; }
+    .hint { color: var(--muted); font-size: 13px; margin: 10px 0 0; }
+    .status {
+      min-height: 42px;
+      display: flex;
+      align-items: center;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: var(--soft);
+      padding: 10px 13px;
+      color: var(--muted);
+      font-size: 14px;
+      font-weight: 700;
+      margin-bottom: 18px;
+    }
+    .status.ok { background: var(--ok-bg); color: var(--ok); border-color: #cfeadd; }
+    .status.error { background: var(--danger-bg); color: var(--danger); border-color: #f1cbd2; }
+    .table-card { padding: 0; overflow: hidden; }
+    .table-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      padding: 20px 22px;
+      border-bottom: 1px solid var(--border);
+    }
+    .table-wrap { width: 100%; overflow-x: auto; }
+    table { width: 100%; min-width: 980px; border-collapse: collapse; }
+    th, td { padding: 13px 14px; border-bottom: 1px solid #f0e6ea; text-align: left; vertical-align: top; }
+    th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .02em; }
+    td { font-size: 14px; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-weight: 800; }
+    .muted { color: var(--muted); }
+    .truncate {
+      display: inline-block;
+      max-width: 150px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      vertical-align: bottom;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 5px 9px;
+      font-size: 12px;
+      font-weight: 800;
+      background: var(--soft);
+      color: var(--muted);
+    }
+    .badge.active { background: var(--ok-bg); color: var(--ok); }
+    .badge.disabled { background: var(--danger-bg); color: var(--danger); }
+    .badge.bound { background: var(--warn-bg); color: var(--warn); }
+    .empty { text-align: center; color: var(--muted); padding: 24px !important; }
+    @media (max-width: 760px) {
+      main { margin-top: 24px; padding: 0 14px 32px; }
+      header, .table-header { align-items: flex-start; flex-direction: column; }
+      .form-grid { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
   <main>
-    <h1>{title}</h1>
-    <section>
-      <h2>管理员凭证</h2>
-      <label for="serviceKey">X-Service-Key</label>
-      <input id="serviceKey" type="password" autocomplete="off" placeholder="输入 SERVICE_API_KEY" />
-      <p class="hint">凭证只保存在当前浏览器页面内，用于调用受保护的管理 API。</p>
-    </section>
+    <header>
+      <h1>__TITLE__</h1>
+      <button class="ghost" onclick="loadInviteCodes()">刷新列表</button>
+    </header>
+    <div id="status" class="status">管理凭证由后端配置注入，页面加载后会自动读取邀请码列表。</div>
     <section>
       <h2>创建邀请码</h2>
-      <label for="label">备注</label>
-      <input id="label" placeholder="例如 Alice 内测" />
-      <label for="assignedTo">分发对象</label>
-      <input id="assignedTo" placeholder="邮箱、姓名或备注，可留空" />
-      <button onclick="createInviteCode()">创建邀请码</button>
+      <div class="form-grid">
+        <div>
+          <label for="label">备注</label>
+          <input id="label" placeholder="例如 Alice 内测" />
+        </div>
+        <div>
+          <label for="assignedTo">分发对象</label>
+          <input id="assignedTo" placeholder="邮箱、姓名或备注，可留空" />
+        </div>
+      </div>
+      <div class="actions">
+        <button id="createButton" onclick="createInviteCode()">创建邀请码</button>
+      </div>
+      <p class="hint">创建成功后会直接新增到下方表格第一行。</p>
     </section>
-    <section>
-      <h2>禁用邀请码</h2>
-      <label for="disableCode">邀请码</label>
-      <input id="disableCode" placeholder="例如 MCZ-ABCD-2345" />
-      <button class="secondary" onclick="disableInviteCode()">禁用指定邀请码</button>
-    </section>
-    <section>
-      <h2>结果</h2>
-      <pre id="result">等待操作...</pre>
+    <section class="table-card">
+      <div class="table-header">
+        <div>
+          <h2>邀请码列表</h2>
+          <p class="hint">可以直接在表格里禁用指定邀请码。</p>
+        </div>
+        <button class="secondary" onclick="loadInviteCodes()">刷新列表</button>
+      </div>
+      <div class="table-wrap">
+        <table aria-label="邀请码列表">
+          <thead>
+            <tr>
+              <th>邀请码</th>
+              <th>状态</th>
+              <th>备注</th>
+              <th>分发对象</th>
+              <th>绑定设备</th>
+              <th>绑定用户</th>
+              <th>使用次数</th>
+              <th>创建时间</th>
+              <th>禁用时间</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="inviteRows">
+            <tr><td class="empty" colspan="10">正在加载...</td></tr>
+          </tbody>
+        </table>
+      </div>
     </section>
   </main>
   <script>
-    function serviceKey() {{
-      return document.getElementById('serviceKey').value.trim();
-    }}
-    function show(value) {{
-      document.getElementById('result').textContent = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
-    }}
-    async function request(path, options) {{
-      const key = serviceKey();
-      if (!key) throw new Error('请先输入 X-Service-Key');
-      const response = await fetch(path, {{
+    const SERVICE_KEY = __SERVICE_KEY__;
+    const state = { items: [] };
+
+    function setStatus(message, kind = '') {
+      const node = document.getElementById('status');
+      node.textContent = message;
+      node.className = 'status' + (kind ? ' ' + kind : '');
+    }
+
+    function apiHeaders() {
+      if (!SERVICE_KEY) throw new Error('后端未配置 SERVICE_API_KEY，无法调用管理 API。');
+      return { 'Content-Type': 'application/json', 'X-Service-Key': SERVICE_KEY };
+    }
+
+    async function request(path, options = {}) {
+      const response = await fetch(path, {
         ...options,
-        headers: {{
-          'Content-Type': 'application/json',
-          'X-Service-Key': key,
-          ...(options.headers || {{}})
-        }}
-      }});
+        headers: { ...apiHeaders(), ...(options.headers || {}) }
+      });
       const text = await response.text();
-      const payload = text ? JSON.parse(text) : {{}};
+      let payload = {};
+      try {
+        payload = text ? JSON.parse(text) : {};
+      } catch (_) {
+        payload = { error: { message: text || '接口返回无法解析' } };
+      }
       if (!response.ok) throw new Error(payload.error ? payload.error.message : text);
       return payload;
-    }}
-    async function createInviteCode() {{
-      try {{
-        const payload = await request('/v1/admin/invite-codes', {{
+    }
+
+    function text(value, fallback = '-') {
+      const normalized = String(value || '').trim();
+      return normalized || fallback;
+    }
+
+    function shortText(value) {
+      const normalized = text(value);
+      if (normalized === '-') return normalized;
+      return normalized.length > 18 ? normalized.slice(0, 8) + '...' + normalized.slice(-6) : normalized;
+    }
+
+    function formatTime(value) {
+      if (!value) return '-';
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return value;
+      return date.toLocaleString('zh-CN', { hour12: false });
+    }
+
+    function statusLabel(item) {
+      if (item.status === 'active' && item.bound_device_id) return ['bound', '已绑定'];
+      if (item.status === 'active') return ['active', '可用'];
+      if (item.status === 'disabled') return ['disabled', '已禁用'];
+      return ['unknown', item.status || '未知'];
+    }
+
+    function renderInviteCodes() {
+      const body = document.getElementById('inviteRows');
+      body.innerHTML = '';
+      if (!state.items.length) {
+        const row = document.createElement('tr');
+        row.innerHTML = '<td class="empty" colspan="10">暂无邀请码</td>';
+        body.appendChild(row);
+        return;
+      }
+
+      for (const item of state.items) {
+        const [statusClass, statusText] = statusLabel(item);
+        const row = document.createElement('tr');
+        row.dataset.code = item.code;
+        row.innerHTML = `
+          <td><code></code></td>
+          <td><span class="badge"></span></td>
+          <td><span class="truncate label"></span></td>
+          <td><span class="truncate assigned"></span></td>
+          <td><span class="truncate device"></span></td>
+          <td><span class="truncate user"></span></td>
+          <td class="used"></td>
+          <td class="created"></td>
+          <td class="disabled"></td>
+          <td class="action"></td>
+        `;
+        row.querySelector('code').textContent = item.code;
+        const badge = row.querySelector('.badge');
+        badge.textContent = statusText;
+        badge.classList.add(statusClass);
+        row.querySelector('.label').textContent = text(item.label);
+        row.querySelector('.label').title = text(item.label);
+        row.querySelector('.assigned').textContent = text(item.assigned_to);
+        row.querySelector('.assigned').title = text(item.assigned_to);
+        row.querySelector('.device').textContent = shortText(item.bound_device_id);
+        row.querySelector('.device').title = text(item.bound_device_id);
+        row.querySelector('.user').textContent = shortText(item.bound_user_id);
+        row.querySelector('.user').title = text(item.bound_user_id);
+        row.querySelector('.used').textContent = String(item.used_count || 0);
+        row.querySelector('.created').textContent = formatTime(item.created_at);
+        row.querySelector('.disabled').textContent = formatTime(item.disabled_at);
+
+        const action = row.querySelector('.action');
+        if (item.status === 'active') {
+          const button = document.createElement('button');
+          button.className = 'danger';
+          button.textContent = '禁用';
+          button.onclick = () => disableInviteCode(item.code);
+          action.appendChild(button);
+        } else {
+          action.innerHTML = '<span class="muted">不可操作</span>';
+        }
+        body.appendChild(row);
+      }
+    }
+
+    function upsertInviteCode(item, { prepend = false } = {}) {
+      const existingIndex = state.items.findIndex((current) => current.code === item.code);
+      if (existingIndex >= 0 && !prepend) state.items[existingIndex] = item;
+      else {
+        if (existingIndex >= 0) state.items.splice(existingIndex, 1);
+        if (prepend) state.items.unshift(item);
+        else state.items.push(item);
+      }
+      renderInviteCodes();
+    }
+
+    async function loadInviteCodes() {
+      try {
+        setStatus('正在加载邀请码列表...');
+        const payload = await request('/v1/admin/invite-codes');
+        state.items = payload.items || [];
+        renderInviteCodes();
+        setStatus('邀请码列表已更新。', 'ok');
+      } catch (error) {
+        setStatus('加载失败：' + error.message, 'error');
+        renderInviteCodes();
+      }
+    }
+
+    async function createInviteCode() {
+      const button = document.getElementById('createButton');
+      try {
+        button.disabled = true;
+        setStatus('正在创建邀请码...');
+        const payload = await request('/v1/admin/invite-codes', {
           method: 'POST',
-          body: JSON.stringify({{
+          body: JSON.stringify({
             label: document.getElementById('label').value,
             assigned_to: document.getElementById('assignedTo').value
-          }})
-        }});
-        show('创建成功：' + payload.code + '\\n\\n' + JSON.stringify(payload, null, 2));
-      }} catch (error) {{
-        show('创建失败：' + error.message);
-      }}
-    }}
-    async function disableInviteCode() {{
-      try {{
-        const code = encodeURIComponent(document.getElementById('disableCode').value.trim());
-        const payload = await request('/v1/admin/invite-codes/' + code + '/disable', {{ method: 'POST', body: '{{}}' }});
-        show('禁用成功：' + payload.code + '\\n\\n' + JSON.stringify(payload, null, 2));
-      }} catch (error) {{
-        show('禁用失败：' + error.message);
-      }}
-    }}
+          })
+        });
+        upsertInviteCode(payload, { prepend: true });
+        document.getElementById('label').value = '';
+        document.getElementById('assignedTo').value = '';
+        setStatus('创建成功：' + payload.code, 'ok');
+      } catch (error) {
+        setStatus('创建失败：' + error.message, 'error');
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    async function disableInviteCode(code) {
+      if (!confirm('确认禁用 ' + code + '？')) return;
+      try {
+        setStatus('正在禁用：' + code);
+        const payload = await request('/v1/admin/invite-codes/' + encodeURIComponent(code) + '/disable', { method: 'POST', body: '{}' });
+        upsertInviteCode(payload);
+        setStatus('禁用成功：' + payload.code, 'ok');
+      } catch (error) {
+        setStatus('禁用失败：' + error.message, 'error');
+      }
+    }
+
+    loadInviteCodes();
   </script>
 </body>
 </html>"""
+        .replace("__TITLE__", title)
+        .replace("__SERVICE_KEY__", service_key_json)
+    )
