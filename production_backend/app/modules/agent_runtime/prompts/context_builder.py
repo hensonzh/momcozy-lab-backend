@@ -20,8 +20,6 @@ class ContextProjection:
 class ModelInputBuilder:
     def build(self, *, projection: ContextProjection, current_user_message: dict[str, Any]) -> list[dict[str, Any]]:
         return [
-            {"role": "system", "content": projection.stable_system_prompt},
-            {"role": "developer", "content": projection.stable_developer_prompt},
             *projection.selected_conversation_history,
             {
                 "role": "developer",

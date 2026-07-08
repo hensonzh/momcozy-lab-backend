@@ -13,7 +13,6 @@ from production_backend.app.modules.agent_runtime.prompts import (
     DEFAULT_STABLE_DEVELOPER_PROMPT,
     DEFAULT_STABLE_SYSTEM_PROMPT,
     ModelInputBuilder,
-    PROMPT_OWNERSHIP_POLICY,
 )
 from production_backend.app.modules.agent_runtime.sdk import OpenAIAgentsSdkRunner, SdkNodeRequest, SdkNodeResult, SdkToolDefinition, sdk_tool_name
 from production_backend.app.modules.agent_runtime.skill_registry import (
@@ -78,14 +77,7 @@ def test_skills_directory_contains_only_skill_directories() -> None:
     assert all(path.is_dir() and (path / SERVICE_SKILL_FILE_NAME).exists() for path in paths)
 
 
-def test_prompt_ownership_policy_keeps_workflow_in_service_skills() -> None:
-    assert "服务技能负责领域流程" in "\n".join(PROMPT_OWNERSHIP_POLICY)
-    assert "工具输入结构契约只负责输入校验" in "\n".join(PROMPT_OWNERSHIP_POLICY)
-    assert "工具结果只返回事实" in "\n".join(PROMPT_OWNERSHIP_POLICY)
-    assert "服务技能选择只负责确定本轮主要服务场景和可见工具组" in "\n".join(PROMPT_OWNERSHIP_POLICY)
-    assert "服务技能负责领域流程" in DEFAULT_STABLE_DEVELOPER_PROMPT
-    assert "工具结果只代表事实、资源和状态" in DEFAULT_STABLE_DEVELOPER_PROMPT
-
+def test_static_prompts_keep_runtime_boundaries_and_legacy_style() -> None:
     global_prompt = f"{DEFAULT_STABLE_SYSTEM_PROMPT}\n{DEFAULT_STABLE_DEVELOPER_PROMPT}"
     assert "# 全局规则" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "## 全局人设" in DEFAULT_STABLE_SYSTEM_PROMPT
@@ -95,7 +87,12 @@ def test_prompt_ownership_policy_keeps_workflow_in_service_skills() -> None:
     assert "不要先输出用户可见的过渡说明或中间解释" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "每轮最终回复后都要展示快捷输入" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "使用 `ui_quick_replies_create` 创建" in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert "runtime_context" in DEFAULT_STABLE_DEVELOPER_PROMPT
+    assert "当前白名单工具" in DEFAULT_STABLE_DEVELOPER_PROMPT
+    assert "不要依赖供应商会话状态" in DEFAULT_STABLE_DEVELOPER_PROMPT
     assert "不要调用 load_skill、read_skill_file、旧版 namespace" in DEFAULT_STABLE_DEVELOPER_PROMPT
+    assert "工具结果只代表事实、资源、产物、动作和状态" in DEFAULT_STABLE_DEVELOPER_PROMPT
+    assert "不能声称已直接应用" in DEFAULT_STABLE_DEVELOPER_PROMPT
     assert "records.milk_status.read" not in global_prompt
     assert "artifacts.hospital_bag_card.create" not in global_prompt
     assert "birth_journey_intake_manage" not in global_prompt
@@ -106,7 +103,6 @@ def test_prompt_ownership_policy_keeps_workflow_in_service_skills() -> None:
 def test_model_facing_prompt_text_is_chinese() -> None:
     registry = default_tool_registry()
     prompt_texts = [
-        *PROMPT_OWNERSHIP_POLICY,
         DEFAULT_STABLE_SYSTEM_PROMPT,
         DEFAULT_STABLE_DEVELOPER_PROMPT,
         *(contract.description for contract in registry.list()),
@@ -454,7 +450,7 @@ def _schema_descriptions(value: object) -> list[str]:
     return []
 
 
-def test_context_builder_keeps_stable_prompts_before_dynamic_projection() -> None:
+def test_context_builder_projects_dynamic_context_after_selected_history() -> None:
     assert "CozyMate" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "你叫 CozyMate，来自 Momcozy 团队。" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "供应商会话状态" in DEFAULT_STABLE_DEVELOPER_PROMPT
@@ -473,8 +469,8 @@ def test_context_builder_keeps_stable_prompts_before_dynamic_projection() -> Non
         current_user_message={"role": "user", "content": "hello"},
     )
 
-    assert [item["role"] for item in model_input] == ["system", "developer", "user", "developer", "user"]
-    assert model_input[0]["content"] == "system-v1"
+    assert [item["role"] for item in model_input] == ["user", "developer", "user"]
+    assert model_input[0] == {"role": "user", "content": "history"}
     assert model_input[-2]["content"] == {
         "runtime_context": {
             "state": {"service_skill_id": "general_assistant_v1"},

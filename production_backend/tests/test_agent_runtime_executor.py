@@ -75,14 +75,13 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() ->
     assert "已选择服务技能：general_assistant" in request.instructions
     assert request.tool_names == ("business.context.read", "profile.read")
     assert [item["role"] for item in request.model_input] == [
-        "system",
-        "developer",
         "user",
         "assistant",
         "developer",
         "user",
     ]
-    assert request.model_input[0]["content"].startswith("# 全局规则")
+    assert request.instructions.startswith("# 全局规则")
+    assert request.model_input[0] == {"role": "user", "content": "What did we discuss?"}
     runtime_context = _runtime_context(request)
     assert runtime_context["state"] == {
         "service_skill_id": "general_assistant_v1",
@@ -511,7 +510,7 @@ def test_agent_runtime_executor_excludes_tool_messages_from_conversation_history
         ).execute(run=run)
     )
 
-    history = backend.requests[0].model_input[2:-2]
+    history = backend.requests[0].model_input[:-2]
     assert history == [
         {"role": "user", "content": "Read my milk summary."},
         {"role": "assistant", "content": "I checked your summary."},
