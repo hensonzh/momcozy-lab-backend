@@ -12,12 +12,12 @@ from .service import SkillIntentPlanner
 
 
 DEFAULT_TOOL_GROUPS: dict[ServiceSkillId, tuple[str, ...]] = {
-    ServiceSkillId.GENERAL: ("general.base",),
-    ServiceSkillId.PREGNANCY: ("general.base", "pregnancy.context"),
-    ServiceSkillId.LACTATION: ("general.base", "lactation.milk_read"),
-    ServiceSkillId.POSTPARTUM: ("general.base", "postpartum.context"),
-    ServiceSkillId.AFTER_SALES: ("general.base", "after_sales.device_guidance"),
-    ServiceSkillId.SAFETY: ("general.base", "safety.support"),
+    ServiceSkillId.MAIN_AGENT: ("general.base",),
+    ServiceSkillId.BIRTH_PREP: ("general.base", "pregnancy.context"),
+    ServiceSkillId.MILK_MANAGEMENT: ("general.base", "lactation.milk_read"),
+    ServiceSkillId.HEALTH_CONSULTATION: ("general.base", "postpartum.context"),
+    ServiceSkillId.EMOTION_SUPPORT: ("general.base", "safety.support"),
+    ServiceSkillId.DEVICE_GUIDANCE: ("general.base", "after_sales.device_guidance"),
 }
 
 
@@ -142,24 +142,24 @@ def _plan_from_model_text(
             IntentItem(
                 intent_type=_text(raw.get("intent_type")) or f"{skill_id.value}_request",
                 service_skill_id=skill_id,
-                priority=10 if skill_id == ServiceSkillId.SAFETY else 50,
-                safety_sensitive=skill_id == ServiceSkillId.SAFETY,
+                priority=50,
+                safety_sensitive=False,
             )
         ],
         tool_group_ids=list(tool_group_ids),
-        execution_mode="blocked_for_safety" if skill_id == ServiceSkillId.SAFETY else "single",
+        execution_mode="single",
         confidence=_confidence(raw),
         source=RoutingSource.MODEL_PLANNER,
         reason_codes=reason_codes,
-        safety_flags=["model_planner_safety"] if skill_id == ServiceSkillId.SAFETY else [],
+        safety_flags=[],
         needs_clarification=bool(raw.get("needs_clarification") or False),
     )
 
 
 def _fallback_plan(*, reason_codes: list[str], confidence: float) -> RoutingPlan:
     return RoutingPlan(
-        selected_skill_id=ServiceSkillId.GENERAL,
-        intents=[IntentItem(intent_type="general_request", service_skill_id=ServiceSkillId.GENERAL)],
+        selected_skill_id=ServiceSkillId.MAIN_AGENT,
+        intents=[IntentItem(intent_type="general_request", service_skill_id=ServiceSkillId.MAIN_AGENT)],
         tool_group_ids=["general.base"],
         execution_mode="single",
         confidence=confidence,

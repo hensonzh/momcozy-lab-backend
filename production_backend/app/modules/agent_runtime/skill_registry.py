@@ -8,15 +8,14 @@ from .routing.schemas import ServiceSkillId
 
 SERVICE_SKILLS_ROOT = Path(__file__).resolve().parent / "skills"
 SERVICE_SKILL_FILE_NAME = "SKILL.md"
-REQUIRED_METADATA_KEYS = frozenset({"name", "description", "id", "version", "service_skill_id"})
+REQUIRED_METADATA_KEYS = frozenset({"name", "description"})
 REQUIRED_SECTION_TITLES = ("服务范围", "回复风格", "服务流程", "交付物", "工具策略", "边界")
 SERVICE_SKILL_ORDER = (
-    ServiceSkillId.PREGNANCY.value,
-    ServiceSkillId.LACTATION.value,
-    ServiceSkillId.POSTPARTUM.value,
-    ServiceSkillId.AFTER_SALES.value,
-    ServiceSkillId.SAFETY.value,
-    ServiceSkillId.GENERAL.value,
+    ServiceSkillId.BIRTH_PREP.value,
+    ServiceSkillId.MILK_MANAGEMENT.value,
+    ServiceSkillId.HEALTH_CONSULTATION.value,
+    ServiceSkillId.EMOTION_SUPPORT.value,
+    ServiceSkillId.DEVICE_GUIDANCE.value,
 )
 
 
@@ -72,7 +71,7 @@ class AgentServiceSkillRegistry:
 
 def default_service_skill_registry() -> AgentServiceSkillRegistry:
     skills = _load_default_service_skills()
-    return AgentServiceSkillRegistry(skills=skills, default_skill_id=ServiceSkillId.GENERAL.value)
+    return AgentServiceSkillRegistry(skills=skills, default_skill_id=ServiceSkillId.BIRTH_PREP.value)
 
 
 def _load_default_service_skills() -> tuple[AgentServiceSkill, ...]:
@@ -93,14 +92,15 @@ def _load_default_service_skills() -> tuple[AgentServiceSkill, ...]:
 def load_service_skill(path: Path) -> AgentServiceSkill:
     metadata, body = _split_frontmatter(path.read_text(encoding="utf-8"), path=path)
     _validate_metadata(metadata=metadata, path=path)
-    role = _parse_role(body=body, path=path)
+    service_skill_id = metadata.get("service_skill_id") or metadata.get("name") or path.parent.name
+    role = _parse_role(body=body, path=path, fallback=metadata["description"])
     sections = {title: _parse_section_items(body=body, title=title, path=path) for title in REQUIRED_SECTION_TITLES}
     return AgentServiceSkill(
         name=metadata["name"],
         description=metadata["description"],
-        id=metadata["id"],
-        version=metadata["version"],
-        service_skill_id=metadata["service_skill_id"],
+        id=metadata.get("id") or service_skill_id,
+        version=metadata.get("version") or "legacy",
+        service_skill_id=service_skill_id,
         role=role,
         scope=sections["服务范围"],
         style_rules=sections["回复风格"],
@@ -139,19 +139,20 @@ def _validate_metadata(*, metadata: dict[str, str], path: Path) -> None:
     missing = sorted(key for key in REQUIRED_METADATA_KEYS if not metadata.get(key))
     if missing:
         raise ValueError(f"{path} is missing required frontmatter keys: {missing}")
+    service_skill_id = metadata.get("service_skill_id") or metadata.get("name") or path.parent.name
     try:
-        ServiceSkillId(metadata["service_skill_id"])
+        ServiceSkillId(service_skill_id)
     except ValueError as exc:
-        raise ValueError(f"{path} has unsupported service_skill_id: {metadata['service_skill_id']}") from exc
+        raise ValueError(f"{path} has unsupported service_skill_id: {service_skill_id}") from exc
 
 
-def _parse_role(*, body: str, path: Path) -> str:
+def _parse_role(*, body: str, path: Path, fallback: str) -> str:
     for line in body.splitlines():
         if line.startswith("角色定位："):
             role = line.removeprefix("角色定位：").strip()
             if role:
                 return role
-    raise ValueError(f"{path} must include a non-empty 角色定位 line")
+    return fallback
 
 
 def _parse_section_items(*, body: str, title: str, path: Path) -> tuple[str, ...]:
@@ -168,6 +169,4 @@ def _parse_section_items(*, body: str, title: str, path: Path) -> tuple[str, ...
             break
         if in_section and stripped.startswith("- "):
             items.append(stripped[2:].strip())
-    if not items:
-        raise ValueError(f"{path} must include at least one bullet under {header}")
     return tuple(items)

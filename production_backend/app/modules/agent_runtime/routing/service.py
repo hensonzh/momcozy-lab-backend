@@ -9,8 +9,8 @@ from .schemas import IntentItem, RoutingContext, RoutingPlan, RoutingSource, Ser
 class SkillIntentPlanner:
     async def classify(self, ctx: RoutingContext) -> RoutingPlan:
         return RoutingPlan(
-            selected_skill_id=ServiceSkillId.GENERAL,
-            intents=[IntentItem(intent_type="general_request", service_skill_id=ServiceSkillId.GENERAL)],
+            selected_skill_id=ServiceSkillId.MAIN_AGENT,
+            intents=[IntentItem(intent_type="general_request", service_skill_id=ServiceSkillId.MAIN_AGENT)],
             tool_group_ids=["general.base"],
             execution_mode="single",
             confidence=0.55,
@@ -24,12 +24,12 @@ class RoutingPolicy:
     min_model_confidence: float = 0.62
 
     def normalize(self, plan: RoutingPlan) -> RoutingPlan:
-        if plan.selected_skill_id == ServiceSkillId.SAFETY:
+        if plan.safety_flags:
             return plan
         if plan.confidence < self.min_model_confidence:
             return RoutingPlan(
-                selected_skill_id=ServiceSkillId.GENERAL,
-                intents=[IntentItem(intent_type="general_request", service_skill_id=ServiceSkillId.GENERAL)],
+                selected_skill_id=ServiceSkillId.MAIN_AGENT,
+                intents=[IntentItem(intent_type="general_request", service_skill_id=ServiceSkillId.MAIN_AGENT)],
                 tool_group_ids=["general.base"],
                 execution_mode="single",
                 confidence=plan.confidence,

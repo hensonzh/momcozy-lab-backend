@@ -39,6 +39,7 @@ def test_tool_executor_persists_safe_args_and_output() -> None:
         "tool_call_id": str(repository.tool_call.id),
         "tool_name": "support.ticket.propose",
         "call_id": "call-1",
+        "label": "售后工单草稿",
     }
     assert repository.events[1].payload["tool_output_id"] == str(repository.output.id)
 

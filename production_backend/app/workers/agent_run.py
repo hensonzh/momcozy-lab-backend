@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from typing import Any
 from uuid import UUID
 
 from ..core.errors import ApiError
@@ -14,6 +17,7 @@ from ..modules.agent_runtime.repository import AgentRuntimeRepository
 
 TERMINAL_RUN_STATUSES = {"completed", "failed", "cancelled", "expired"}
 AgentRunWorkerResult = AgentRunExecutionResult
+LOGGER = logging.getLogger("production_backend.agent_worker")
 
 
 @dataclass(frozen=True)
@@ -112,9 +116,13 @@ class AgentRunWorker:
         try:
             result = await self.handler(run)
         except ApiError as exc:
-            return await self._fail(run=run, error_code=exc.code, error_details={"code": exc.code})
-        except Exception:
-            return await self._fail(run=run, error_code="runtime_error", error_details={})
+            error_details = _api_error_details(exc)
+            _log_run_failure(run=run, error_code=exc.code, error_details=error_details)
+            return await self._fail(run=run, error_code=exc.code, error_details=error_details)
+        except Exception as exc:
+            error_details = {"exception_type": exc.__class__.__name__}
+            _log_run_failure(run=run, error_code="runtime_error", error_details=error_details)
+            return await self._fail(run=run, error_code="runtime_error", error_details=error_details)
 
         run = await self.repository.refresh_run(run=run)
         if run.status in TERMINAL_RUN_STATUSES:
@@ -170,7 +178,7 @@ class AgentRunWorker:
         await self._clear_controls(cancelled)
         return cancelled
 
-    async def _fail(self, *, run: AgentRun, error_code: str, error_details: dict[str, str]) -> AgentRun:
+    async def _fail(self, *, run: AgentRun, error_code: str, error_details: dict[str, Any]) -> AgentRun:
         failed = await self.repository.mark_run_failed(run=run, completed_at=_utcnow(), error_code=error_code, error_details=error_details)
         await self._append_event(run=failed, event_type="run.failed", payload={"code": error_code})
         await self._clear_controls(failed)
@@ -193,3 +201,33 @@ class AgentRunWorker:
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _api_error_details(exc: ApiError) -> dict[str, Any]:
+    details: dict[str, Any] = {"code": exc.code, "status": exc.status}
+    for key, value in exc.details.items():
+        if isinstance(value, str):
+            details[key] = value[:500]
+        elif isinstance(value, int | float | bool) or value is None:
+            details[key] = value
+        else:
+            details[key] = str(value)[:500]
+    return details
+
+
+def _log_run_failure(*, run: AgentRun, error_code: str, error_details: dict[str, Any]) -> None:
+    LOGGER.error(
+        json.dumps(
+            {
+                "event": "agent_run.failed",
+                "run_id": str(run.id),
+                "thread_id": str(run.thread_id),
+                "actor_user_id": str(run.actor_user_id),
+                "error_code": error_code,
+                "error_details": error_details,
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+    )

@@ -8,12 +8,12 @@ from pydantic import BaseModel, Field
 
 
 class ServiceSkillId(StrEnum):
-    GENERAL = "general_assistant"
-    PREGNANCY = "pregnancy_service"
-    LACTATION = "lactation"
-    POSTPARTUM = "postpartum_recovery"
-    AFTER_SALES = "after_sales"
-    SAFETY = "safety_guardrail"
+    MAIN_AGENT = "main_agent"
+    BIRTH_PREP = "birth-prep"
+    MILK_MANAGEMENT = "milk-management"
+    HEALTH_CONSULTATION = "health-consultation"
+    EMOTION_SUPPORT = "emotion-support"
+    DEVICE_GUIDANCE = "device-guidance"
 
 
 class RoutingSource(StrEnum):

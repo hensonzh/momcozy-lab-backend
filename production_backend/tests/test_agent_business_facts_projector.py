@@ -29,7 +29,7 @@ def test_business_facts_projector_projects_lactation_sources() -> None:
         ).project(
             actor=_actor(),
             run_id=run_id,
-            routing_plan=_plan(ServiceSkillId.LACTATION),
+            routing_plan=_plan(ServiceSkillId.MILK_MANAGEMENT),
         )
     )
 
@@ -40,7 +40,7 @@ def test_business_facts_projector_projects_lactation_sources() -> None:
     assert facts == {
         "schema_version": "v1",
         "loaded_at": "2026-07-08T08:00:00+00:00",
-        "service_skill_id": "lactation",
+        "service_skill_id": "milk-management",
         "sources": [
             {"key": "profile", "tool_name": "profile.read"},
             {"key": "milk_status", "tool_name": "records.milk_status.read"},
@@ -70,7 +70,7 @@ def test_business_facts_projector_uses_compact_postpartum_limits() -> None:
         ).project(
             actor=_actor(),
             run_id=uuid4(),
-            routing_plan=_plan(ServiceSkillId.POSTPARTUM),
+            routing_plan=_plan(ServiceSkillId.HEALTH_CONSULTATION),
         )
     )
 
@@ -82,15 +82,12 @@ def test_business_facts_projector_uses_compact_postpartum_limits() -> None:
     ]
 
 
-def test_business_facts_projector_skips_safety_skill() -> None:
-    async def handler(context):
-        raise AssertionError("safety projection should not read business facts")
-
+def test_business_facts_projector_returns_empty_when_no_handlers_are_available() -> None:
     facts = asyncio.run(
-        BusinessFactsProjector(handlers={"profile.read": handler}).project(
+        BusinessFactsProjector(handlers={}).project(
             actor=_actor(),
             run_id=uuid4(),
-            routing_plan=_plan(ServiceSkillId.SAFETY),
+            routing_plan=_plan(ServiceSkillId.EMOTION_SUPPORT),
         )
     )
 

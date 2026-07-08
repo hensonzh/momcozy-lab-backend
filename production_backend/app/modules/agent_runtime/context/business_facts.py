@@ -86,29 +86,32 @@ async def _maybe_await(value: Awaitable[dict[str, Any]] | dict[str, Any]) -> dic
 def _sources_for_skill(*, skill_id: ServiceSkillId, config: BusinessFactsProjectorConfig) -> tuple[BusinessFactSource, ...]:
     default_limit = config.default_limit
     recent_limit = config.recent_limit
-    if skill_id == ServiceSkillId.SAFETY:
-        return ()
-    if skill_id == ServiceSkillId.GENERAL:
+    if skill_id == ServiceSkillId.MAIN_AGENT:
         return (
             BusinessFactSource("profile.read", "profile"),
         )
-    if skill_id == ServiceSkillId.PREGNANCY:
+    if skill_id == ServiceSkillId.BIRTH_PREP:
         return (
             BusinessFactSource("pregnancy.plan_context.read", "pregnancy", {"limit": default_limit}),
         )
-    if skill_id == ServiceSkillId.LACTATION:
+    if skill_id == ServiceSkillId.MILK_MANAGEMENT:
         return (
             BusinessFactSource("profile.read", "profile"),
             BusinessFactSource("records.milk_status.read", "milk_status", {"days": config.milk_days, "limit": default_limit}),
         )
-    if skill_id == ServiceSkillId.POSTPARTUM:
+    if skill_id == ServiceSkillId.HEALTH_CONSULTATION:
         return (
             BusinessFactSource("profile.read", "profile"),
             BusinessFactSource("plans.current.read", "plans", {"limit": default_limit}),
             BusinessFactSource("diary.recent.read", "diary", {"limit": recent_limit}),
             BusinessFactSource("records.milk_summary.read", "milk_summary", {"days": config.milk_days, "limit": recent_limit}),
         )
-    if skill_id == ServiceSkillId.AFTER_SALES:
+    if skill_id == ServiceSkillId.EMOTION_SUPPORT:
+        return (
+            BusinessFactSource("profile.read", "profile"),
+            BusinessFactSource("diary.recent.read", "diary", {"limit": recent_limit}),
+        )
+    if skill_id == ServiceSkillId.DEVICE_GUIDANCE:
         return (
             BusinessFactSource("profile.read", "profile"),
             BusinessFactSource("devices.pump_status.read", "devices", {"limit": default_limit}),

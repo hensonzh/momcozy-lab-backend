@@ -16,6 +16,7 @@ from production_backend.app.modules.agent_runtime.tools import (
     FeedingRecordProposeToolHandler,
     FileVisionSummaryReadToolHandler,
     HospitalBagCartUpdateProposeToolHandler,
+    LegacyArtifactToolHandler,
     MemoryCreateProposeToolHandler,
     MilkStatusReadToolHandler,
     MilkPlanProposeToolHandler,
@@ -181,6 +182,120 @@ def test_agent_artifact_create_tool_handler_creates_service_artifact() -> None:
     assert runtime_service.artifact.run_id == context.run_id
     assert runtime_service.artifact.payload["sections"][0]["title"] == "妈妈住院"
     assert runtime_service.artifact.payload["source_context"] == {"gestational_week": "36w"}
+
+
+def test_legacy_artifact_tool_handler_returns_old_form_card_and_cart_envelopes() -> None:
+    actor = _user()
+    runtime_service = FakeAgentRuntimeService()
+
+    form_result = asyncio.run(
+        LegacyArtifactToolHandler(runtime_service=runtime_service, tool_name="hospital_bag_form_create")(
+            _context(actor=actor, args={"default_values": {"due_date_or_week": "36 周"}})
+        )
+    )
+    assert form_result["tool_name"] == "ui_form_create"
+    assert form_result["status"] == "form_created"
+    assert form_result["form"]["id"] == "hospital_bag_intake"
+    assert form_result["form"]["submit_label"] == "提交"
+
+    card_result = asyncio.run(
+        LegacyArtifactToolHandler(runtime_service=runtime_service, tool_name="hospital_bag_card_create")(
+            _context(
+                actor=actor,
+                args={
+                    "confirmed_form_data": {
+                        "due_date_or_week": "36 周",
+                        "first_birth": "是",
+                        "fetus_count": "单胎",
+                        "pregnancy_history_or_notes": ["没有"],
+                        "birth_path": "顺产",
+                        "feeding_intention": "亲喂母乳",
+                        "return_to_work_timing": "3 个月后",
+                        "support_person": "有人全天帮忙",
+                        "top_worries": ["怕漏买"],
+                    }
+                },
+            )
+        )
+    )
+    assert card_result["tool_name"] == "hospital_bag_card_create"
+    assert card_result["status"] == "card_created"
+    assert card_result["card"]["card_type"] == "hospital_bag_card"
+    assert card_result["card"]["card_json"]["packing_groups"][0]["title"] == "证件文件包"
+    assert card_result["assistant_followup"]["kind"] == "hospital_bag_cart"
+    assert runtime_service.artifact.artifact_type == "hospital_bag_card"
+    assert runtime_service.artifact.payload["card"]["card_json"]["title"] == "待产包"
+
+    cart_result = asyncio.run(
+        LegacyArtifactToolHandler(runtime_service=runtime_service, tool_name="hospital_bag_cart_update")(
+            _context(actor=actor, args={"action": "reset_cart"})
+        )
+    )
+    assert cart_result["tool_name"] == "hospital_bag_cart_update"
+    assert cart_result["status"] == "cart_updated"
+    assert cart_result["cart_update"]["groups"][0]["items"][0]["name"] == "产褥垫组合装"
+    assert cart_result["cart_update"]["groups"][0]["items"][0]["image_url"].startswith("https://")
+    assert cart_result["cart_update"]["totals"]["itemCount"] == 18
+    assert cart_result["cart_update"]["totals"]["exchange_rate_usd_cny"] == 6.8
+    assert cart_result["cart_update"]["totals"]["total"] > 0
+
+
+def test_legacy_artifact_tool_handler_matches_old_cart_and_pump_actions() -> None:
+    actor = _user()
+    runtime_service = FakeAgentRuntimeService()
+
+    pump_result = asyncio.run(
+        LegacyArtifactToolHandler(runtime_service=runtime_service, tool_name="hospital_bag_pump_recommend")(
+            _context(
+                actor=actor,
+                args={
+                    "requested_model": "Air1",
+                    "use_case": "work_pumping",
+                    "preference": "portable",
+                    "feeding_intention": "breastfeeding",
+                },
+            )
+        )
+    )
+    assert pump_result["tool_name"] == "hospital_bag_pump_recommend"
+    assert pump_result["status"] == "pump_recommended"
+    assert pump_result["recommendation_mode"] == "requested_model_review"
+    assert pump_result["recommended_product"]["sku_id"] == "pump-air-1"
+    assert pump_result["recommended_product"]["price_position"] == "premium_highest"
+    assert pump_result["cart_sync_suggestion"] == {
+        "tool_name": "hospital_bag_cart_update",
+        "action": "replace_pump_model",
+        "product_sku_id": "pump-air-1",
+        "item_ids": ["milk-pump"],
+    }
+    assert "不能把 Air 1 描述为降低预算" in pump_result["price_guidance"]
+
+    replace_result = asyncio.run(
+        LegacyArtifactToolHandler(runtime_service=runtime_service, tool_name="hospital_bag_cart_update")(
+            _context(actor=actor, args={"action": "replace_pump_model", "product_sku_id": "pump-m9"})
+        )
+    )
+    pump_items = [
+        item
+        for group in replace_result["cart_update"]["groups"]
+        for item in group["items"]
+        if item["id"] == "pump-m9"
+    ]
+    assert pump_items
+    assert pump_items[0]["official_price_usd"] == 159.99
+    assert pump_items[0]["price_label"].startswith("¥")
+    assert replace_result["cart_update"]["replaced_items"][0]["from_item_id"] == "milk-pump"
+
+    budget_result = asyncio.run(
+        LegacyArtifactToolHandler(runtime_service=runtime_service, tool_name="hospital_bag_cart_update")(
+            _context(actor=actor, args={"action": "optimize_budget", "target_budget": 1000, "budget_mode": "under"})
+        )
+    )
+    assert budget_result["cart_update"]["action"] == "optimize_budget"
+    assert budget_result["cart_update"]["target_budget"] == 1000
+    assert "before_totals" in budget_result["cart_update"]
+    assert budget_result["cart_update"]["removed_item_ids"]
+    assert budget_result["cart_update"]["totals"]["itemCount"] < budget_result["cart_update"]["before_totals"]["itemCount"]
 
 
 def test_business_context_read_tool_handler_returns_bounded_owner_scoped_summary() -> None:
@@ -835,10 +950,13 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
     )
 
     assert set(handlers) == {
-        "artifacts.hospital_bag_card.create",
-        "artifacts.labor_communication_card.create",
-        "artifacts.lactation_summary.create",
-        "artifacts.postpartum_checkin.create",
+        "birth_plan_form_create",
+        "labor_communication_card_create",
+        "birth_journey_plan_card_create",
+        "hospital_bag_form_create",
+        "hospital_bag_card_create",
+        "hospital_bag_cart_update",
+        "hospital_bag_pump_recommend",
         "profile.read",
         "business.context.read",
         "records.milk_summary.read",
@@ -858,7 +976,6 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
         "pregnancy.plan_create.propose",
         "records.feeding_record.propose",
         "records.pumping_record.propose",
-        "hospital_bag.cart_update.propose",
         "support.ticket.propose",
     }
 

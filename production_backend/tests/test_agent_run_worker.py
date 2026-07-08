@@ -62,7 +62,12 @@ def test_agent_run_worker_marks_failed_for_handler_error() -> None:
     repository = FakeAgentRuntimeRepository()
 
     async def handler(_run: AgentRun) -> AgentRunWorkerResult:
-        raise ApiError(code="dependency_not_configured", message="missing sdk", status=503)
+        raise ApiError(
+            code="dependency_not_configured",
+            message="missing sdk",
+            status=503,
+            details={"exception_type": "MissingDependency", "message_excerpt": "sdk missing"},
+        )
 
     worker = AgentRunWorker(repository=repository, handler=handler)
 
@@ -71,6 +76,12 @@ def test_agent_run_worker_marks_failed_for_handler_error() -> None:
     assert run is not None
     assert run.status == "failed"
     assert run.error_code == "dependency_not_configured"
+    assert run.error_details == {
+        "code": "dependency_not_configured",
+        "status": 503,
+        "exception_type": "MissingDependency",
+        "message_excerpt": "sdk missing",
+    }
     assert [event.event_type for event in repository.events] == ["run.started", "run.failed"]
 
 

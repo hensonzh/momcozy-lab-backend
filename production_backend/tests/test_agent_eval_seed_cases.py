@@ -30,12 +30,12 @@ def test_product_agent_eval_seed_cases_have_action_and_safety_contracts() -> Non
         assert behavior["intent"] == case["suite"]
         assert isinstance(behavior["route"], str) and behavior["route"]
         assert behavior["service_skill_id"] in {
-            "general_assistant",
-            "pregnancy_service",
-            "lactation",
-            "postpartum_recovery",
-            "after_sales",
-            "safety_guardrail",
+            "main_agent",
+            "birth-prep",
+            "milk-management",
+            "health-consultation",
+            "device-guidance",
+            "emotion-support",
         }
         assert isinstance(behavior["requires_confirmation_before_write"], bool)
         assert case["expected_safety_decision"] in {"allow", "escalate", "block"}
@@ -97,8 +97,8 @@ def test_product_agent_eval_seed_uses_current_pregnancy_artifact_contracts() -> 
     communication_contracts = {tool_call["contract"] for tool_call in by_suite["labor_communication"]["expected_tool_calls"]}
 
     assert "pregnancy.plan_context.read" in birth_prep_contracts
-    assert "artifacts.hospital_bag_card.create" in birth_prep_contracts
-    assert "artifacts.labor_communication_card.create" in communication_contracts
+    assert "hospital_bag_card_create" in birth_prep_contracts
+    assert "labor_communication_card_create" in communication_contracts
     assert "birth_prep_intake" not in birth_prep_contracts
     assert "labor_communication_draft" not in communication_contracts
 
@@ -109,9 +109,9 @@ def test_product_agent_eval_seed_uses_current_hospital_bag_action_contract() -> 
 
     cart_contracts = {tool_call["contract"] for tool_call in by_suite["hospital_bag_cart_update"]["expected_tool_calls"]}
 
-    assert "hospital_bag.cart_update.propose" in cart_contracts
+    assert "hospital_bag_cart_update" in cart_contracts
     assert by_suite["hospital_bag_cart_update"]["expected_behavior"]["requires_confirmation_before_write"] is False
-    assert by_suite["hospital_bag_cart_update"]["expected_behavior"]["service_skill_id"] == "pregnancy_service"
+    assert by_suite["hospital_bag_cart_update"]["expected_behavior"]["service_skill_id"] == "birth-prep"
     assert "hospital_bag_cart_update_proposal" not in cart_contracts
 
 
@@ -167,10 +167,10 @@ def test_product_agent_eval_seed_covers_postpartum_recovery_service_skill() -> N
     checkin_contracts = {tool_call["contract"] for tool_call in by_suite["postpartum_recovery_checkin"]["expected_tool_calls"]}
     task_contracts = {tool_call["contract"] for tool_call in by_suite["postpartum_recovery_task"]["expected_tool_calls"]}
 
-    assert by_suite["postpartum_recovery_checkin"]["expected_behavior"]["service_skill_id"] == "postpartum_recovery"
+    assert by_suite["postpartum_recovery_checkin"]["expected_behavior"]["service_skill_id"] == "health-consultation"
     assert by_suite["postpartum_recovery_checkin"]["expected_behavior"]["requires_confirmation_before_write"] is False
     assert {"profile.read", "plans.current.read", "diary.recent.read"} <= checkin_contracts
-    assert by_suite["postpartum_recovery_task"]["expected_behavior"]["service_skill_id"] == "postpartum_recovery"
+    assert by_suite["postpartum_recovery_task"]["expected_behavior"]["service_skill_id"] == "health-consultation"
     assert by_suite["postpartum_recovery_task"]["expected_behavior"]["requires_confirmation_before_write"] is True
     assert "plans.task_create.propose" in task_contracts
 

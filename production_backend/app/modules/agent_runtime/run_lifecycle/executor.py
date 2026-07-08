@@ -17,7 +17,7 @@ from ..event_stream.sink import AgentEventSink
 from ..event_stream.transient import AgentTransientStream
 from ..graphs import AgentGraphCheckpointStore, AgentGraphRegistry, default_graph_registry
 from ..memory.service import AgentMemoryService
-from ..models import AgentAction, AgentEvent, AgentMessage, AgentRun
+from ..models import AgentAction, AgentArtifact, AgentEvent, AgentMessage, AgentRun
 from ..payloads import DEFAULT_MAX_INLINE_PAYLOAD_BYTES, maybe_externalize_json_payload
 from ..prompts import (
     ContextProjection,
@@ -25,7 +25,7 @@ from ..prompts import (
     ModelInputBuilder,
 )
 from ..repository import AgentRuntimeRepository
-from ..routing import RoutingContext, RoutingPlan, ServiceSkillId, SkillRoutingService
+from ..routing import IntentItem, RoutingPlan, RoutingSource, ServiceSkillId, SkillRoutingService
 from ..sdk import (
     OpenAIAgentsSdkRunner,
     SdkNodeRequest,
@@ -101,6 +101,7 @@ class AgentRuntimeExecutor:
         if graph.runtime_pattern != run.runtime_pattern:
             raise ApiError(code="runtime_graph_mismatch", message="Run runtime pattern does not match graph version.", status=409)
 
+        await self._append_progress(run=run, phase="context_loading", label="正在整理对话上下文")
         current_message = await self.repository.get_latest_user_message_for_run(run_id=run.id)
         if current_message is None:
             raise ApiError(code="missing_user_message", message="Agent run has no user message.", status=409)
@@ -108,19 +109,19 @@ class AgentRuntimeExecutor:
         messages = await self.repository.list_messages_for_thread(thread_id=run.thread_id, limit=self.config.history_limit)
         memory_projection = await self._memory_projection(run=run)
         recent_run_facts = await self._recent_run_facts(run=run)
-        routing_plan = await self.routing_service.route(_routing_context(run=run, current_message=current_message))
-        service_skill = self.service_skill_registry.get(routing_plan.selected_skill_id.value)
-        skill_summary = service_skill.state_summary()
+        routing_plan = _main_agent_plan()
+        service_skills = self.service_skill_registry.list()
         await self._record_routing_decision(run=run, current_message=current_message, routing_plan=routing_plan)
-        tool_names = self.tool_group_registry.tool_names_for_plan(routing_plan)
+        tool_names = self.tool_registry.names_for_sdk() if self.tool_executor is not None else ()
         fresh_business_facts = await self._fresh_business_facts(run=run, routing_plan=routing_plan)
+        await self._append_progress(run=run, phase="context_ready", label="已整理好相关信息")
         projection = ContextProjection(
             stable_system_prompt=self.config.stable_system_prompt,
             selected_conversation_history=_history_before(messages=messages, before_sequence=current_message.sequence),
             current_state_projection={
-                "service_skill_id": str(skill_summary.get("id") or ""),
-                "service_skill_version": str(skill_summary.get("version") or ""),
-                "selected_tool_group_ids": list(routing_plan.tool_group_ids),
+                "agent_mode": "single_main_agent",
+                "available_service_skill_ids": [skill.service_skill_id for skill in service_skills],
+                "visible_tool_count": len(tool_names),
                 "execution_mode": routing_plan.execution_mode,
                 "needs_clarification": routing_plan.needs_clarification,
                 "safety_flags": routing_plan.safety_flags,
@@ -143,29 +144,31 @@ class AgentRuntimeExecutor:
                 "context_refs": [],
                 "pending_action_id": None,
                 "final_message_id": None,
-                "service_skill_key": service_skill.service_skill_id,
-                "service_skill_id": str(skill_summary.get("id") or ""),
+                "agent_mode": "single_main_agent",
+                "available_service_skill_ids": [skill.service_skill_id for skill in service_skills],
                 "routing_source": routing_plan.source.value,
                 "routing_confidence": routing_plan.confidence,
                 "routing_reason_codes": routing_plan.reason_codes,
                 "tool_names": list(tool_names),
             },
         )
+        await self._append_progress(run=run, phase="model_reasoning", label="CozyMate 正在思考怎么帮你")
         result = await self.sdk_runner.run_reasoning(
             SdkNodeRequest(
                 run_id=str(run.id),
                 thread_id=str(run.thread_id),
                 actor_user_id=str(run.actor_user_id),
-                instructions=_sdk_instructions(projection=projection, service_skill=service_skill),
+                instructions=_sdk_instructions(projection=projection, service_skills=service_skills),
                 model_input=model_input,
                 tool_names=tool_names,
                 tools=self._sdk_tools(run=run, tool_names=tool_names),
                 prompt_version=run.prompt_version,
                 trace_id=run.trace_id,
-                service_skill_id=service_skill.service_skill_id,
+                service_skill_id="main_agent",
                 on_text_delta=self._text_delta_handler(run=run),
             )
         )
+        await self._append_progress(run=run, phase="response_finalizing", label="正在整理回复")
 
         action_proposal = _single_action_proposal(result.action_proposals)
         action_decision = self._action_decision_from_proposal(action_proposal) if action_proposal is not None else None
@@ -217,7 +220,7 @@ class AgentRuntimeExecutor:
         await self._upsert_run_summary(
             run=run,
             current_message=current_message,
-            service_skill_id=service_skill.service_skill_id,
+            service_skill_id="main_agent",
             result=result,
         )
         return AgentRunExecutionResult(status="completed", final_text=final_text)
@@ -273,7 +276,7 @@ class AgentRuntimeExecutor:
                 thread_id=run.thread_id,
                 run_id=run.id,
                 event_type="artifact.created",
-                payload={"artifact_id": str(artifact.id), "artifact_type": artifact.artifact_type},
+                payload=_artifact_event_payload(artifact),
             )
 
     def _text_delta_handler(self, *, run: AgentRun) -> Callable[[str], Awaitable[None]] | None:
@@ -343,24 +346,37 @@ class AgentRuntimeExecutor:
             return await self.event_sink.append_event(thread_id=thread_id, run_id=run_id, event_type=event_type, payload=payload)
         return await self.repository.append_event(thread_id=thread_id, run_id=run_id, event_type=event_type, payload=payload)
 
+    async def _append_progress(self, *, run: AgentRun, phase: str, label: str) -> AgentEvent:
+        return await self._append_event(
+            thread_id=run.thread_id,
+            run_id=run.id,
+            event_type="run.progress",
+            payload={"phase": phase, "label": label},
+        )
+
     async def _record_routing_decision(self, *, run: AgentRun, current_message: AgentMessage, routing_plan: RoutingPlan) -> None:
         recorder = getattr(self.repository, "record_routing_decision", None)
         if recorder is None:
             return
+        direct_main_agent = "direct_main_agent" in routing_plan.reason_codes
         await recorder(
             run_id=run.id,
             thread_id=run.thread_id,
             actor_user_id=run.actor_user_id,
             message_id=current_message.id,
-            selected_skill_id=routing_plan.selected_skill_id.value,
-            routing_source=routing_plan.source.value,
+            selected_skill_id="main_agent" if direct_main_agent else routing_plan.selected_skill_id.value,
+            routing_source="direct_main_agent" if direct_main_agent else routing_plan.source.value,
             confidence=routing_plan.confidence,
             execution_mode=routing_plan.execution_mode,
             intents=[intent.model_dump(mode="json") for intent in routing_plan.intents],
             reason_codes=list(routing_plan.reason_codes),
             safety_flags=list(routing_plan.safety_flags),
             needs_clarification=routing_plan.needs_clarification,
-            tool_scope_version=",".join(routing_plan.tool_group_ids) or "none",
+            tool_scope_version=_tool_scope_version_for_ledger(
+                routing_plan=routing_plan,
+                direct_main_agent=direct_main_agent,
+                tool_executor_configured=self.tool_executor is not None,
+            ),
         )
 
     async def _save_checkpoint(
@@ -498,48 +514,54 @@ def _history_before(*, messages: list[AgentMessage], before_sequence: int) -> li
     ]
 
 
-def _routing_context(*, run: AgentRun, current_message: AgentMessage) -> RoutingContext:
-    content = current_message.content if isinstance(current_message.content, dict) else {}
-    app_surface = _text(content, "app_surface") or _text(content, "surface")
-    pending_action_id = _text(content, "pending_action_id")
-    active_workflow = _text(content, "active_workflow")
-    active_service_skill_id = _text(content, "active_service_skill_id")
-    attachment_types = content.get("attachment_types")
-    return RoutingContext(
-        run_id=run.id,
-        thread_id=run.thread_id,
-        actor_user_id=run.actor_user_id,
-        message=_message_text(current_message),
-        app_surface=app_surface or None,
-        active_service_skill_id=_service_skill_id(active_service_skill_id),
-        active_workflow=active_workflow or None,
-        pending_action_id=_uuid(pending_action_id),
-        attachment_types=[item for item in attachment_types if isinstance(item, str)] if isinstance(attachment_types, list) else [],
+def _main_agent_plan() -> RoutingPlan:
+    return RoutingPlan(
+        selected_skill_id=ServiceSkillId.MAIN_AGENT,
+        intents=[IntentItem(intent_type="main_agent_request", service_skill_id=ServiceSkillId.MAIN_AGENT)],
+        tool_group_ids=[],
+        execution_mode="single",
+        confidence=1,
+        source=RoutingSource.FALLBACK,
+        reason_codes=["direct_main_agent"],
     )
 
 
-def _service_skill_id(value: str) -> ServiceSkillId | None:
-    if not value:
-        return None
-    try:
-        return ServiceSkillId(value)
-    except ValueError:
-        return None
+def _artifact_event_payload(artifact: AgentArtifact) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "artifact_id": str(artifact.id),
+        "artifact_type": artifact.artifact_type,
+        "schema_version": artifact.schema_version,
+        "status": artifact.status,
+        "artifact": {
+            "id": str(artifact.id),
+            "artifact_type": artifact.artifact_type,
+            "schema_version": artifact.schema_version,
+            "status": artifact.status,
+            "payload": artifact.payload,
+            "raw_payload_ref": artifact.raw_payload_ref,
+        },
+    }
+    if isinstance(artifact.payload, dict):
+        payload.update({key: value for key, value in artifact.payload.items() if key in {"form", "card", "card_json", "cart_update", "summary"}})
+    return payload
 
 
-def _uuid(value: str) -> UUID | None:
-    if not value:
-        return None
-    try:
-        return UUID(value)
-    except ValueError:
-        return None
+def _tool_scope_version_for_ledger(
+    *,
+    routing_plan: RoutingPlan,
+    direct_main_agent: bool,
+    tool_executor_configured: bool,
+) -> str:
+    if direct_main_agent and tool_executor_configured:
+        return "all_registered_tools"
+    return ",".join(routing_plan.tool_group_ids) or "none"
 
 
-def _sdk_instructions(*, projection: ContextProjection, service_skill: AgentServiceSkill) -> str:
+def _sdk_instructions(*, projection: ContextProjection, service_skills: tuple[AgentServiceSkill, ...]) -> str:
     blocks = [
         projection.stable_system_prompt,
-        service_skill.prompt_block(),
+        "## 服务技能说明\n\n以下服务技能都属于同一个 CozyMate 主智能体。根据用户当前目标自行选择适用流程、回复风格、交付物和工具策略；不要向用户暴露内部技能名称。",
+        *[service_skill.prompt_block() for service_skill in service_skills],
     ]
     return "\n\n".join(blocks)
 

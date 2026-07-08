@@ -133,7 +133,19 @@ class AgentRuntimeService:
             thread_id=thread.id,
             run_id=run.id,
             event_type="run.queued",
-            payload={"thread_id": str(thread.id), "message_id": str(message_record.id)},
+            payload={
+                "thread_id": str(thread.id),
+                "message_id": str(message_record.id),
+                "phase": "queued",
+                "label": "我已经收到你的消息啦～",
+                "semantic": {
+                    "phase": "thinking",
+                    "label": "我已经收到你的消息啦～",
+                    "visibility": "status",
+                    "merge_key": f"run:{run.id}",
+                    "priority": 10,
+                },
+            },
         )
         await self._append_event(
             thread_id=thread.id,
@@ -330,7 +342,7 @@ class AgentRuntimeService:
             thread_id=run.thread_id,
             run_id=run.id,
             event_type="artifact.created",
-            payload={"artifact_id": str(artifact.id), "artifact_type": artifact.artifact_type},
+            payload=_artifact_event_payload(artifact),
         )
         return artifact
 
@@ -592,3 +604,23 @@ def _is_expired(expires_at: datetime | None) -> bool:
     if comparable_expires_at.tzinfo is None:
         comparable_expires_at = comparable_expires_at.replace(tzinfo=timezone.utc)
     return comparable_expires_at <= _utcnow()
+
+
+def _artifact_event_payload(artifact: AgentArtifact) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "artifact_id": str(artifact.id),
+        "artifact_type": artifact.artifact_type,
+        "schema_version": artifact.schema_version,
+        "status": artifact.status,
+        "artifact": {
+            "id": str(artifact.id),
+            "artifact_type": artifact.artifact_type,
+            "schema_version": artifact.schema_version,
+            "status": artifact.status,
+            "payload": artifact.payload,
+            "raw_payload_ref": artifact.raw_payload_ref,
+        },
+    }
+    if isinstance(artifact.payload, dict):
+        payload.update({key: value for key, value in artifact.payload.items() if key in {"form", "card", "card_json", "cart_update", "summary"}})
+    return payload

@@ -95,7 +95,12 @@ class ToolExecutor:
                 thread_id=run.thread_id,
                 run_id=run.id,
                 event_type="tool.started",
-                payload={"tool_call_id": str(tool_call.id), "tool_name": tool_name, "call_id": call_id},
+                payload={
+                    "tool_call_id": str(tool_call.id),
+                    "tool_name": tool_name,
+                    "call_id": call_id,
+                    "label": _tool_event_label(tool_name),
+                },
             )
             result = await asyncio.wait_for(
                 _maybe_await(
@@ -150,6 +155,7 @@ class ToolExecutor:
             "tool_output_id": str(output.id),
             "tool_name": completed.tool_name,
             "call_id": completed.call_id,
+            "label": _tool_event_label(completed.tool_name),
         }
         await self._append_tool_event(
             thread_id=run.thread_id,
@@ -187,6 +193,7 @@ class ToolExecutor:
                 "tool_name": tool_call.tool_name,
                 "call_id": tool_call.call_id,
                 "error_code": error_code,
+                "label": _tool_event_label(tool_call.tool_name),
             },
         )
 
@@ -220,3 +227,35 @@ def _redacted_value(key: str, value: Any) -> Any:
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _tool_event_label(tool_name: str) -> str:
+    return {
+        "profile.read": "个人资料",
+        "business.context.read": "业务上下文",
+        "records.milk_summary.read": "奶量摘要",
+        "records.milk_status.read": "奶量状态",
+        "records.feeding_record.propose": "喂养记录草稿",
+        "records.pumping_record.propose": "吸奶记录草稿",
+        "plans.current.read": "计划信息",
+        "plans.milk_plan.propose": "泌乳计划草稿",
+        "plans.task_create.propose": "任务草稿",
+        "plans.task_complete.propose": "任务状态",
+        "pregnancy.plan_context.read": "孕期计划上下文",
+        "pregnancy.plan_create.propose": "孕期计划草稿",
+        "diary.recent.read": "近期日记",
+        "diary.entry_upsert.propose": "日记草稿",
+        "devices.pump_status.read": "设备状态",
+        "devices.guidance_assets.read": "设备指导资料",
+        "files.vision_summary.read": "图片内容",
+        "birth_plan_form_create": "我先帮你准备确认内容～",
+        "labor_communication_card_create": "我先帮你整理分娩沟通单～",
+        "birth_journey_plan_card_create": "我先帮你整理孕期计划～",
+        "hospital_bag_form_create": "我先帮你准备确认内容～",
+        "hospital_bag_card_create": "我先帮你整理待产包清单～",
+        "hospital_bag_cart_update": "我先帮你调整待产包购物车～",
+        "hospital_bag_pump_recommend": "我先帮你看看吸奶器型号～",
+        "notifications.milk_reminder.propose": "奶量提醒草稿",
+        "memory.create.propose": "长期记忆草稿",
+        "support.ticket.propose": "售后工单草稿",
+    }.get(tool_name, "相关信息")

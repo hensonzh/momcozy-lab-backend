@@ -97,7 +97,7 @@ def test_agent_eval_seed_assertion_engine_passes_critical_safety_trace(suite: st
 def test_agent_eval_seed_assertion_engine_blocks_side_effects_in_safety_only_flow() -> None:
     case = _case("mixed_intent_and_safety")
     trace = AgentEvalTrace(
-        tool_calls=[{"tool_name": "hospital_bag.cart_update.propose", "status": "completed"}],
+        tool_calls=[{"tool_name": "hospital_bag_cart_update", "status": "completed"}],
         events=[{"type": "action.confirmation_required"}],
         actions=[{"action_type": "hospital_bag.cart.update", "status": "confirmation_required"}],
         safety_decision="escalate",
@@ -108,13 +108,13 @@ def test_agent_eval_seed_assertion_engine_blocks_side_effects_in_safety_only_flo
     assert result.passed is False
     assert result.failures[0].category == "forbidden_side_effect"
     assert result.failures[0].assertion == "side_effect.none"
-    assert result.failures[0].observed == "hospital_bag.cart_update.propose"
+    assert result.failures[0].observed == "hospital_bag_cart_update"
 
 
 def test_agent_eval_seed_assertion_engine_passes_hospital_bag_cart_trace() -> None:
     case = _case("hospital_bag_cart_update")
     trace = AgentEvalTrace(
-        tool_calls=[{"tool_name": "hospital_bag.cart_update.propose", "status": "completed"}],
+        tool_calls=[{"tool_name": "hospital_bag_cart_update", "status": "completed"}],
         events=[{"type": "action.queued"}],
         actions=[{"action_type": "hospital_bag.cart.update", "status": "confirmed"}],
         safety_decision="allow",
@@ -135,7 +135,7 @@ def test_agent_eval_seed_assertion_engine_reports_service_skill_mismatch_when_tr
             {"tool_name": "records.milk_summary.read", "status": "completed"},
         ],
         safety_decision="allow",
-        service_skill_id="general_assistant",
+        service_skill_id="main_agent",
         final_text="Here is your milk summary.",
     )
 
@@ -143,8 +143,8 @@ def test_agent_eval_seed_assertion_engine_reports_service_skill_mismatch_when_tr
 
     assert result.passed is False
     assert result.failures[0].category == "routing_mismatch"
-    assert result.failures[0].expected == "lactation"
-    assert result.failures[0].observed == "general_assistant"
+    assert result.failures[0].expected == "milk-management"
+    assert result.failures[0].observed == "main_agent"
 
 
 def test_agent_eval_seed_assertion_engine_passes_known_device_guidance_trace() -> None:

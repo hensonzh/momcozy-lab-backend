@@ -70,11 +70,12 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() ->
     assert request.run_id == str(run.id)
     assert request.thread_id == str(thread_id)
     assert request.prompt_version == "prompt-v2"
-    assert request.service_skill_id == "general_assistant"
+    assert request.service_skill_id == "main_agent"
     assert "你叫 CozyMate，来自 Momcozy 团队。" in request.instructions
-    assert "服务技能 general_assistant_v1" in request.instructions
+    assert "制定孕期计划" in request.instructions
+    assert "奶量管理仅处理三类任务" in request.instructions
     assert "已选择服务技能" not in request.instructions
-    assert request.tool_names == ("business.context.read", "profile.read")
+    assert request.tool_names == ()
     assert [item["role"] for item in request.model_input] == [
         "user",
         "assistant",
@@ -85,9 +86,15 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() ->
     assert request.model_input[0] == {"role": "user", "content": "What did we discuss?"}
     runtime_context = _runtime_context(request)
     assert runtime_context["state"] == {
-        "service_skill_id": "general_assistant_v1",
-        "service_skill_version": "v1",
-        "selected_tool_group_ids": ["general.base"],
+        "agent_mode": "single_main_agent",
+        "available_service_skill_ids": [
+            "birth-prep",
+            "milk-management",
+            "health-consultation",
+            "emotion-support",
+            "device-guidance",
+        ],
+        "visible_tool_count": 0,
         "execution_mode": "single",
         "needs_clarification": False,
         "safety_flags": [],
@@ -102,25 +109,31 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() ->
         "location": {"country": "CN", "region": "Shanghai", "city": "Shanghai"},
     }
     assert runtime_context["recent_run_facts"] == []
-    assert repository.routing_decisions[0]["selected_skill_id"] == "general_assistant"
-    assert repository.routing_decisions[0]["routing_source"] == "fallback"
-    assert repository.routing_decisions[0]["confidence"] == 0.55
+    assert repository.routing_decisions[0]["selected_skill_id"] == "main_agent"
+    assert repository.routing_decisions[0]["routing_source"] == "direct_main_agent"
+    assert repository.routing_decisions[0]["confidence"] == 1
     assert request.model_input[-1] == {"role": "user", "content": "Summarize it."}
     assert [checkpoint["state_summary"]["node_name"] for checkpoint in checkpoint_store.checkpoints] == ["sdk_reasoning", "finish"]
     assert checkpoint_store.checkpoints[0]["state_summary"]["current_user_message_id"] == str(current_user.id)
     assert state_store.projections[0]["selected_message_ids"] == [prior_user.id, prior_assistant.id, current_user.id]
     assert state_store.projections[0]["projection_summary"]["history_message_count"] == 2
     assert state_store.projections[0]["projection_summary"]["state_keys"] == [
+        "agent_mode",
+        "available_service_skill_ids",
         "execution_mode",
         "needs_clarification",
         "safety_flags",
-        "selected_tool_group_ids",
-        "service_skill_id",
-        "service_skill_version",
+        "visible_tool_count",
     ]
     assert state_store.projections[0]["projection_summary"]["recent_run_fact_count"] == 0
     assert repository.run_summaries[0].payload["user_goal"] == "Summarize it."
     assert repository.run_summaries[0].payload["assistant_conclusion"] == "Here is the summary."
+    assert _progress_phases(repository) == [
+        "context_loading",
+        "context_ready",
+        "model_reasoning",
+        "response_finalizing",
+    ]
 
 
 def test_agent_runtime_executor_projects_active_memory_into_dynamic_context() -> None:
@@ -187,7 +200,7 @@ def test_agent_runtime_executor_projects_fresh_business_facts_into_dynamic_conte
             state_store=state_store,
             business_facts_projector=business_facts_projector,
             routing_service=StaticRoutingService(
-                service_skill_id=ServiceSkillId.LACTATION,
+                service_skill_id=ServiceSkillId.MILK_MANAGEMENT,
                 tool_group_ids=("general.base", "lactation.milk_read"),
             ),
             sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
@@ -201,8 +214,8 @@ def test_agent_runtime_executor_projects_fresh_business_facts_into_dynamic_conte
         {
             "actor_user_id": run.actor_user_id,
             "run_id": run.id,
-            "selected_skill_id": ServiceSkillId.LACTATION,
-            "tool_group_ids": ["general.base", "lactation.milk_read"],
+            "selected_skill_id": ServiceSkillId.MAIN_AGENT,
+            "tool_group_ids": [],
         }
     ]
     assert state_store.projections[0]["projection_summary"]["fresh_business_fact_keys"] == ["milk_status", "schema_version"]
@@ -212,16 +225,15 @@ def test_default_service_skills_are_file_backed() -> None:
     registry = default_service_skill_registry()
 
     for service_skill_id in (
-        "general_assistant",
-        "pregnancy_service",
-        "lactation",
-        "postpartum_recovery",
-        "after_sales",
-        "safety_guardrail",
+        "birth-prep",
+        "milk-management",
+        "health-consultation",
+        "emotion-support",
+        "device-guidance",
     ):
         service_skill = registry.get(service_skill_id)
         assert service_skill.service_skill_id == service_skill_id
-        assert "服务技能" in service_skill.prompt_block()
+        assert service_skill.prompt_block().strip()
 
 
 def test_agent_runtime_executor_publishes_text_deltas_to_transient_stream() -> None:
@@ -295,14 +307,14 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
             sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
             tool_executor=tool_executor,
             routing_service=StaticRoutingService(
-                service_skill_id=ServiceSkillId.GENERAL,
+                service_skill_id=ServiceSkillId.MAIN_AGENT,
                 tool_group_ids=("general.all",),
             ),
             tool_group_registry=ToolGroupRegistry(
                 groups=(
                     ToolGroup(
                         id="general.all",
-                        service_skill_id=ServiceSkillId.GENERAL,
+                        service_skill_id=ServiceSkillId.MAIN_AGENT,
                         description="测试用全量工具组。",
                         tool_contracts=tuple(default_tool_registry().names_for_sdk()),
                     ),
@@ -314,17 +326,19 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert result.status == "completed"
     assert result.final_text == '{"profile": {"display_name": "Mai"}}'
     assert backend.tool_names == (
-        "artifacts_hospital_bag_card_create",
-        "artifacts_labor_communication_card_create",
-        "artifacts_lactation_summary_create",
-        "artifacts_postpartum_checkin_create",
+        "birth_journey_plan_card_create",
+        "birth_plan_form_create",
         "business_context_read",
         "devices_guidance_assets_read",
         "devices_pump_status_read",
         "diary_entry_upsert_propose",
         "diary_recent_read",
         "files_vision_summary_read",
-        "hospital_bag_cart_update_propose",
+        "hospital_bag_card_create",
+        "hospital_bag_cart_update",
+        "hospital_bag_form_create",
+        "hospital_bag_pump_recommend",
+        "labor_communication_card_create",
         "memory_create_propose",
         "notifications_milk_reminder_propose",
         "plans_current_read",
@@ -340,9 +354,9 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
         "records_pumping_record_propose",
         "support_ticket_propose",
     )
-    assert backend.tool_schemas["artifacts_hospital_bag_card_create"]["required"] == ["title"]
-    assert backend.tool_schemas["artifacts_hospital_bag_card_create"]["properties"]["sections"]["maxItems"] == 20
-    assert backend.tool_schemas["artifacts_labor_communication_card_create"]["properties"]["source_context"]["type"] == "object"
+    assert backend.tool_schemas["hospital_bag_card_create"]["additionalProperties"] is True
+    assert backend.tool_schemas["hospital_bag_card_create"]["properties"]["confirmed_form_data"]["type"] == "object"
+    assert backend.tool_schemas["hospital_bag_cart_update"]["properties"]["groups"]["type"] == "array"
     assert backend.tool_schemas["business_context_read"]["properties"]["limit"]["maximum"] == 20
     assert backend.tool_schemas["devices_guidance_assets_read"]["properties"]["limit"]["maximum"] == 20
     assert backend.tool_schemas["devices_guidance_assets_read"]["properties"]["content_type"]["type"] == "string"
@@ -351,8 +365,8 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert backend.tool_schemas["diary_entry_upsert_propose"]["properties"]["content"]["maxLength"] == 5000
     assert backend.tool_schemas["diary_recent_read"]["properties"]["limit"]["maximum"] == 20
     assert backend.tool_schemas["files_vision_summary_read"]["required"] == ["file_id"]
-    assert backend.tool_schemas["hospital_bag_cart_update_propose"]["required"] == ["cart_update"]
-    assert backend.tool_schemas["hospital_bag_cart_update_propose"]["additionalProperties"] is False
+    assert backend.tool_schemas["hospital_bag_cart_update"]["additionalProperties"] is True
+    assert backend.tool_schemas["hospital_bag_cart_update"]["properties"]["groups"]["type"] == "array"
     assert backend.tool_schemas["memory_create_propose"]["required"] == ["memory_type", "content"]
     assert backend.tool_schemas["memory_create_propose"]["properties"]["content"]["required"] == ["summary"]
     assert "health" in backend.tool_schemas["memory_create_propose"]["properties"]["sensitivity"]["enum"]
@@ -379,7 +393,7 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert tool_executor.calls[0]["args"] == {}
 
 
-def test_agent_runtime_executor_selects_service_skill_and_scopes_tools_by_group() -> None:
+def test_agent_runtime_executor_uses_single_main_agent_for_lactation_text() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)
     current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="今天奶量怎么样？", sequence=1)
@@ -395,21 +409,15 @@ def test_agent_runtime_executor_selects_service_skill_and_scopes_tools_by_group(
 
     request = backend.requests[0]
     assert result.status == "completed"
-    assert request.service_skill_id == "lactation"
-    assert "服务技能 lactation_v1" in request.instructions
-    assert "已选择服务技能" not in request.instructions
+    assert request.service_skill_id == "main_agent"
+    assert "奶量管理仅处理三类任务" in request.instructions
     state = _runtime_context(request)["state"]
-    assert state["service_skill_id"] == "lactation_v1"
-    assert state["selected_tool_group_ids"] == ["general.base", "lactation.milk_read"]
-    assert request.tool_names == (
-        "business.context.read",
-        "profile.read",
-        "records.milk_status.read",
-        "records.milk_summary.read",
-    )
+    assert state["agent_mode"] == "single_main_agent"
+    assert "milk-management" in state["available_service_skill_ids"]
+    assert request.tool_names == ()
 
 
-def test_agent_runtime_executor_injects_pregnancy_service_skill() -> None:
+def test_agent_runtime_executor_injects_all_service_skills_for_pregnancy_text() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)
     current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="帮我准备待产包和分娩沟通单", sequence=1)
@@ -428,18 +436,16 @@ def test_agent_runtime_executor_injects_pregnancy_service_skill() -> None:
     request = backend.requests[0]
     state = _runtime_context(request)["state"]
     assert result.status == "completed"
-    assert request.service_skill_id == "pregnancy_service"
-    assert state["service_skill_id"] == "pregnancy_service_v1"
-    assert state["service_skill_version"] == "v1"
+    assert request.service_skill_id == "main_agent"
+    assert state["agent_mode"] == "single_main_agent"
+    assert "birth-prep" in state["available_service_skill_ids"]
     assert "CozyMate" in request.instructions
-    assert "服务技能" in request.instructions
     assert "待产包清单" in request.instructions
     assert "分娩沟通单" in request.instructions
-    assert "每轮只推进一个重点" in request.instructions
+    assert "每轮最多问一个缺失字段" in request.instructions
     assert "不要调用 load_skill" in request.instructions
-    assert "artifacts.hospital_bag_card.create" in request.tool_names
-    assert "artifacts.labor_communication_card.create" in request.tool_names
-    assert state_store.projections[0]["projection_summary"]["service_skill_id"] == "pregnancy_service_v1"
+    assert request.tool_names == ()
+    assert state_store.projections[0]["projection_summary"]["service_skill_id"] == ""
 
 
 def test_agent_runtime_executor_projects_recent_run_facts_into_dynamic_context() -> None:
@@ -451,7 +457,7 @@ def test_agent_runtime_executor_projects_recent_run_facts_into_dynamic_context()
         run_id=previous_run_id,
         thread_id=thread_id,
         owner_user_id=run.actor_user_id,
-        service_skill_id="lactation",
+        service_skill_id="milk-management",
         summary_type="run_fact",
         schema_version="v1",
         payload={
@@ -482,7 +488,7 @@ def test_agent_runtime_executor_projects_recent_run_facts_into_dynamic_context()
     assert recent_run_facts == [
         {
             "run_id": str(previous_run_id),
-            "service_skill_id": "lactation",
+            "service_skill_id": "milk-management",
             "schema_version": "v1",
             "created_at": "2026-07-07T10:00:00+00:00",
             "facts": {
@@ -498,7 +504,7 @@ def test_agent_runtime_executor_projects_recent_run_facts_into_dynamic_context()
     assert repository.run_summaries[-1].payload["assistant_conclusion"] == "今天先看最近一次记录。"
 
 
-def test_agent_runtime_executor_routes_named_pump_issue_to_device_service_skill() -> None:
+def test_agent_runtime_executor_uses_single_main_agent_for_device_text() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)
     current_user = _message(
@@ -519,14 +525,9 @@ def test_agent_runtime_executor_routes_named_pump_issue_to_device_service_skill(
     )
 
     request = backend.requests[0]
-    assert request.service_skill_id == "after_sales"
-    assert request.tool_names == (
-        "business.context.read",
-        "devices.guidance_assets.read",
-        "devices.pump_status.read",
-        "files.vision_summary.read",
-        "profile.read",
-    )
+    assert request.service_skill_id == "main_agent"
+    assert "Air1 (BP334)" in request.instructions
+    assert request.tool_names == ()
 
 
 def test_agent_runtime_executor_excludes_tool_messages_from_conversation_history() -> None:
@@ -589,8 +590,10 @@ def test_agent_runtime_executor_real_tool_executor_uses_run_actor_role_permissio
     assert repository.tool_call is not None
     assert repository.tool_call.status == "completed"
     assert repository.tool_call.safe_args == {}
-    assert repository.events[0].event_type == "tool.started"
-    assert repository.events[1].event_type == "tool.completed"
+    tool_events = [event for event in repository.events if event.event_type.startswith("tool.")]
+    assert [event.event_type for event in tool_events] == ["tool.started", "tool.completed"]
+    assert tool_events[0].payload["label"] == "个人资料"
+    assert tool_events[1].payload["label"] == "个人资料"
     assert result.final_text == "Profile context loaded."
     assert repository.run_summaries[0].payload["tools_used"] == ["profile.read"]
     assert repository.run_summaries[0].payload["tool_facts"] == [
@@ -680,7 +683,7 @@ def test_agent_runtime_executor_rejects_unsupported_sdk_action_proposal_before_p
 
     assert exc_info.value.code == "unsupported_agent_action"
     assert repository.actions == []
-    assert repository.events == []
+    assert _non_progress_event_types(repository) == []
 
 
 def test_agent_runtime_executor_rejects_direct_apply_sdk_action_proposal_before_persisting() -> None:
@@ -712,7 +715,7 @@ def test_agent_runtime_executor_rejects_direct_apply_sdk_action_proposal_before_
 
     assert exc_info.value.code == "direct_agent_action_requires_tool"
     assert repository.actions == []
-    assert repository.events == []
+    assert _non_progress_event_types(repository) == []
 
 
 def test_agent_runtime_executor_rejects_multiple_sdk_action_proposals_before_side_effects() -> None:
@@ -742,7 +745,7 @@ def test_agent_runtime_executor_rejects_multiple_sdk_action_proposals_before_sid
     assert exc_info.value.code == "too_many_agent_action_proposals"
     assert repository.actions == []
     assert repository.artifacts == []
-    assert repository.events == []
+    assert _non_progress_event_types(repository) == []
 
 
 def test_agent_runtime_executor_persists_sdk_artifacts_and_emits_events() -> None:
@@ -773,8 +776,9 @@ def test_agent_runtime_executor_persists_sdk_artifacts_and_emits_events() -> Non
     assert result.status == "completed"
     assert repository.artifacts[0].artifact_type == "care_plan"
     assert repository.artifacts[0].payload == {"title": "Birth plan"}
-    assert repository.events[0].event_type == "artifact.created"
-    assert repository.events[0].payload["artifact_id"] == str(repository.artifacts[0].id)
+    artifact_events = [event for event in repository.events if event.event_type == "artifact.created"]
+    assert len(artifact_events) == 1
+    assert artifact_events[0].payload["artifact_id"] == str(repository.artifacts[0].id)
 
 
 def test_agent_runtime_executor_externalizes_large_sdk_artifacts() -> None:
@@ -844,6 +848,14 @@ class StaticRoutingService:
 
 def _runtime_context(request: SdkNodeRequest) -> dict:
     return request.model_input[-2]["content"]["runtime_context"]
+
+
+def _progress_phases(repository: "FakeRuntimeRepository") -> list[str]:
+    return [event.payload["phase"] for event in repository.events if event.event_type == "run.progress"]
+
+
+def _non_progress_event_types(repository: "FakeRuntimeRepository") -> list[str]:
+    return [event.event_type for event in repository.events if event.event_type != "run.progress"]
 
 
 class FakeRuntimeRepository:

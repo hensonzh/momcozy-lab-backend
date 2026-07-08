@@ -65,7 +65,7 @@ def test_agent_eval_runtime_client_executes_run_and_evaluates_seed_case() -> Non
     assert result.execution_result.status == "waiting_for_confirmation"
     assert result.eval_result.passed is True
     assert result.trace.tool_calls[0]["tool_name"] == "memory.create.propose"
-    assert result.trace.events[0]["type"] == "action.confirmation_required"
+    assert any(event["type"] == "action.confirmation_required" for event in result.trace.events)
     assert result.trace.actions[0]["action_type"] == "agent.memory.create"
 
 

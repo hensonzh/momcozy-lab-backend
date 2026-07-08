@@ -32,6 +32,8 @@ def test_agent_runtime_service_creates_run_with_thread_message_events_and_idempo
     assert run.runtime_pattern == "langgraph_sdk"
     assert repository.messages[0].content["text"] == "Review my pumping pattern"
     assert [event.event_type for event in repository.events] == ["run.queued", "message.completed"]
+    assert repository.events[0].payload["phase"] == "queued"
+    assert repository.events[0].payload["label"] == "我已经收到你的消息啦～"
     assert repository.touched_thread == repository.thread
     assert repository.touched_updated_at is not None
     assert controls.active_run == (repository.thread.id, run.id)

@@ -33,6 +33,7 @@ from ..memory.actions import AGENT_MEMORY_CREATE_ACTION
 from ..memory.service import validate_memory_write_policy
 from ..service import AgentRuntimeService
 from .executor import ToolHandler, ToolHandlerContext
+from .legacy_artifacts import artifact_record_from_legacy_result, create_legacy_artifact_result
 
 
 _DIARY_ENTRY_VALUE_FIELDS = (
@@ -144,6 +145,33 @@ class AgentArtifactCreateToolHandler:
             "status": artifact.status,
             "title": _text(payload, "title"),
             "summary": _text(payload, "summary"),
+        }
+
+
+class LegacyArtifactToolHandler:
+    def __init__(self, *, runtime_service: AgentRuntimeService, tool_name: str) -> None:
+        self.runtime_service = runtime_service
+        self.tool_name = tool_name
+
+    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
+        result = create_legacy_artifact_result(self.tool_name, context.args)
+        artifact_record = artifact_record_from_legacy_result(result)
+        if artifact_record is None:
+            return result
+
+        artifact = await self.runtime_service.create_artifact(
+            owner_user_id=context.actor.user_id,
+            run_id=context.run_id,
+            artifact_type=str(artifact_record["artifact_type"]),
+            schema_version=str(artifact_record["schema_version"]),
+            status="created",
+            payload=artifact_record["payload"],
+        )
+        return {
+            **result,
+            "artifact_id": str(artifact.id),
+            "artifact_type": artifact.artifact_type,
+            "schema_version": artifact.schema_version,
         }
 
 
@@ -638,27 +666,13 @@ def build_default_tool_handlers(
         "notifications.milk_reminder.propose": MilkReminderProposeToolHandler(runtime_service=agent_runtime_service),
         "records.feeding_record.propose": FeedingRecordProposeToolHandler(runtime_service=agent_runtime_service),
         "records.pumping_record.propose": PumpingRecordProposeToolHandler(runtime_service=agent_runtime_service),
-        "hospital_bag.cart_update.propose": HospitalBagCartUpdateProposeToolHandler(runtime_service=agent_runtime_service),
-        "artifacts.hospital_bag_card.create": AgentArtifactCreateToolHandler(
-            runtime_service=agent_runtime_service,
-            artifact_type="hospital_bag_card",
-            default_title="待产包清单",
-        ),
-        "artifacts.labor_communication_card.create": AgentArtifactCreateToolHandler(
-            runtime_service=agent_runtime_service,
-            artifact_type="labor_communication_card",
-            default_title="分娩沟通单",
-        ),
-        "artifacts.lactation_summary.create": AgentArtifactCreateToolHandler(
-            runtime_service=agent_runtime_service,
-            artifact_type="lactation_summary_card",
-            default_title="泌乳分析总结",
-        ),
-        "artifacts.postpartum_checkin.create": AgentArtifactCreateToolHandler(
-            runtime_service=agent_runtime_service,
-            artifact_type="postpartum_checkin_card",
-            default_title="产后康复 Check-in",
-        ),
+        "birth_plan_form_create": LegacyArtifactToolHandler(runtime_service=agent_runtime_service, tool_name="birth_plan_form_create"),
+        "labor_communication_card_create": LegacyArtifactToolHandler(runtime_service=agent_runtime_service, tool_name="labor_communication_card_create"),
+        "birth_journey_plan_card_create": LegacyArtifactToolHandler(runtime_service=agent_runtime_service, tool_name="birth_journey_plan_card_create"),
+        "hospital_bag_form_create": LegacyArtifactToolHandler(runtime_service=agent_runtime_service, tool_name="hospital_bag_form_create"),
+        "hospital_bag_card_create": LegacyArtifactToolHandler(runtime_service=agent_runtime_service, tool_name="hospital_bag_card_create"),
+        "hospital_bag_cart_update": LegacyArtifactToolHandler(runtime_service=agent_runtime_service, tool_name="hospital_bag_cart_update"),
+        "hospital_bag_pump_recommend": LegacyArtifactToolHandler(runtime_service=agent_runtime_service, tool_name="hospital_bag_pump_recommend"),
         "support.ticket.propose": SupportTicketProposeToolHandler(runtime_service=agent_runtime_service),
     }
 

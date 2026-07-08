@@ -39,7 +39,7 @@ class SdkNodeRequest:
     tools: tuple[SdkToolDefinition, ...] = ()
     prompt_version: str = ""
     trace_id: str = ""
-    service_skill_id: str = "general_assistant"
+    service_skill_id: str = "main_agent"
     on_text_delta: SdkTextDeltaHandler | None = None
 
 
@@ -183,7 +183,12 @@ class OpenAIAgentsSdkRunner:
         except Exception as exc:
             mapped = _provider_error_mapping(exc)
             self._record(outcome="failed", error_code=mapped.code, started_at=started_at)
-            raise ApiError(code=mapped.code, message=mapped.message, status=mapped.status) from exc
+            raise ApiError(
+                code=mapped.code,
+                message=mapped.message,
+                status=mapped.status,
+                details=_provider_error_details(exc),
+            ) from exc
 
     def _record(self, *, outcome: str, error_code: str, started_at: float) -> None:
         if self.metrics is not None:
@@ -457,3 +462,25 @@ def _provider_status_code(exc: Exception) -> int | None:
     response = getattr(exc, "response", None)
     response_status = getattr(response, "status_code", None)
     return response_status if isinstance(response_status, int) else None
+
+
+def _provider_error_details(exc: Exception) -> dict[str, Any]:
+    details: dict[str, Any] = {
+        "exception_type": exc.__class__.__name__,
+    }
+    status_code = _provider_status_code(exc)
+    if status_code is not None:
+        details["provider_status_code"] = status_code
+    provider_error = getattr(exc, "body", None) or getattr(exc, "error", None)
+    if provider_error is not None:
+        details["provider_error_type"] = provider_error.__class__.__name__
+    message = _redact_exception_text(str(exc))
+    if message:
+        details["message_excerpt"] = message[:500]
+    return details
+
+
+def _redact_exception_text(text: str) -> str:
+    redacted = re.sub(r"(?i)(api[_-]?key|authorization|bearer|token)(['\"\\s:=]+)[^\\s,'\"]+", r"\1\2[redacted]", text)
+    redacted = re.sub(r"sk-[A-Za-z0-9_-]{12,}", "[redacted]", redacted)
+    return redacted.strip()

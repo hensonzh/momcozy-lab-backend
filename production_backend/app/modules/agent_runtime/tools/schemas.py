@@ -366,6 +366,127 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "idempotency_key": {"type": "string", "maxLength": 255},
         },
     },
+    "LegacyArtifactToolInput": {
+        "title": "LegacyArtifactToolInput",
+        "type": "object",
+        "additionalProperties": True,
+        "properties": {
+            "default_values": {
+                "type": "object",
+                "additionalProperties": True,
+                "description": "旧表单工具用于预填字段的默认值。",
+            },
+            "confirmed_form_data": {
+                "type": "object",
+                "additionalProperties": True,
+                "description": "用户已经确认并提交的旧表单数据。",
+            },
+            "form_data": {
+                "type": "object",
+                "additionalProperties": True,
+                "description": "confirmed_form_data 的兼容别名。",
+            },
+            "plan_context": {
+                "type": "object",
+                "additionalProperties": True,
+                "description": "生成孕期计划卡时使用的结构化上下文。",
+            },
+            "payload": {
+                "type": "object",
+                "additionalProperties": True,
+                "description": "旧工具的补充结构化载荷。",
+            },
+            "groups": {
+                "type": "array",
+                "items": {"type": "object", "additionalProperties": True},
+                "description": "旧待产包购物车分组。",
+            },
+            "action": {
+                "type": "string",
+                "enum": [
+                    "replace_pump_model",
+                    "add_pump_model",
+                    "optimize_budget",
+                    "apply_budget_plan",
+                    "remove_items",
+                    "restore_items",
+                    "replace_items",
+                    "mark_provided",
+                    "mark_owned",
+                    "update_quantity",
+                    "reset_cart",
+                    "clarify",
+                ],
+                "description": "旧待产包购物车动作；表单/卡片工具可忽略。",
+            },
+            "item_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "要操作的当前购物车 item_id；预算优化或不需要指定物品时传空数组。",
+            },
+            "product_sku_id": {
+                "type": ["string", "null"],
+                "description": "action=replace_pump_model 或 add_pump_model 时使用；可取 pump-s9-pro、pump-s12-pro-quick、pump-m5-smart、pump-m6、pump-v1-pro、pump-v2-pro、pump-m9、pump-w1、pump-air-1。",
+            },
+            "quantity_updates": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": True,
+                    "properties": {
+                        "item_id": {"type": "string"},
+                        "qty": {"type": "integer", "minimum": 0},
+                    },
+                },
+                "description": "action=update_quantity 时使用；qty=0 表示移除。",
+            },
+            "target_budget": {
+                "type": ["number", "null"],
+                "description": "用户明确预算上限，例如 1000；没有明确预算时传 null。",
+            },
+            "budget_mode": {
+                "type": "string",
+                "enum": ["under", "around", "cheaper", "minimal", "none"],
+                "description": "预算意图；没有预算相关意图时传 none。",
+            },
+            "preference": {
+                "type": "string",
+                "enum": ["balanced", "cheapest", "comfort", "breastfeeding", "minimal", "budget", "portable", "performance", "app", "simple", "premium"],
+                "description": "用户偏好；不确定时传 balanced。",
+            },
+            "preserve_item_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "用户明确想保留的 item_id；不确定传空数组。",
+            },
+            "allow_remove_pump": {
+                "type": "boolean",
+                "description": "只有用户明确同意吸奶器后买/删除吸奶器，或预算低到必须移除且用户确认时才传 true。",
+            },
+            "message": {"type": "string", "maxLength": 1000},
+            "summary": {"type": "string", "maxLength": 1000},
+            "generation_mode": {"type": "string", "maxLength": 80},
+            "requested_model": {
+                "type": ["string", "null"],
+                "maxLength": 120,
+                "description": "用户点名询问或追问的型号，例如 Air 1、Air1、M9、S12 Pro Quick；没有点名型号传 null。",
+            },
+            "use_case": {
+                "type": "string",
+                "enum": ["unknown", "hospital_backup", "daily_home", "work_pumping", "portable", "comfort", "performance", "high_output", "budget"],
+            },
+            "feeding_intention": {
+                "type": "string",
+                "enum": ["unknown", "breastfeeding", "mixed", "formula"],
+            },
+            "target_budget_usd": {"type": ["number", "null"]},
+            "must_have_app": {"type": ["boolean", "null"]},
+            "need_single_unit": {"type": ["boolean", "null"]},
+            "scope": {"type": "string", "enum": ["full", "prenatal_only", "short_range"]},
+            "locale": {"type": "string", "maxLength": 35},
+            "timezone": {"type": "string", "maxLength": 80},
+        },
+    },
     "AgentArtifactCreate": {
         "title": "AgentArtifactCreate",
         "type": "object",

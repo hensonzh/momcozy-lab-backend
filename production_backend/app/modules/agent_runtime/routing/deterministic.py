@@ -6,22 +6,22 @@ from .schemas import IntentItem, RoutingContext, RoutingPlan, RoutingSource, Ser
 
 
 SURFACE_TO_SKILL: dict[str, tuple[ServiceSkillId, tuple[str, ...]]] = {
-    "pregnancy_page": (ServiceSkillId.PREGNANCY, ("general.base", "pregnancy.context", "pregnancy.plan")),
-    "pregnancy_plan_page": (ServiceSkillId.PREGNANCY, ("general.base", "pregnancy.context", "pregnancy.plan")),
-    "hospital_bag_page": (ServiceSkillId.PREGNANCY, ("general.base", "pregnancy.context", "pregnancy.hospital_bag")),
-    "diary_page": (ServiceSkillId.PREGNANCY, ("general.base", "pregnancy.context", "pregnancy.diary")),
-    "milk_dashboard": (ServiceSkillId.LACTATION, ("general.base", "lactation.milk_read")),
-    "records_page": (ServiceSkillId.LACTATION, ("general.base", "lactation.milk_read", "lactation.record_write")),
-    "pump_page": (ServiceSkillId.LACTATION, ("general.base", "lactation.milk_read")),
-    "postpartum_page": (ServiceSkillId.POSTPARTUM, ("general.base", "postpartum.context")),
-    "status_page": (ServiceSkillId.POSTPARTUM, ("general.base", "postpartum.context", "postpartum.checkin")),
-    "device_page": (ServiceSkillId.AFTER_SALES, ("general.base", "after_sales.device_guidance")),
-    "device_manage_page": (ServiceSkillId.AFTER_SALES, ("general.base", "after_sales.device_guidance")),
-    "support_page": (ServiceSkillId.AFTER_SALES, ("general.base", "after_sales.support")),
+    "pregnancy_page": (ServiceSkillId.BIRTH_PREP, ("general.base", "pregnancy.context", "pregnancy.plan")),
+    "pregnancy_plan_page": (ServiceSkillId.BIRTH_PREP, ("general.base", "pregnancy.context", "pregnancy.plan")),
+    "hospital_bag_page": (ServiceSkillId.BIRTH_PREP, ("general.base", "pregnancy.context", "pregnancy.hospital_bag")),
+    "diary_page": (ServiceSkillId.BIRTH_PREP, ("general.base", "pregnancy.context", "pregnancy.diary")),
+    "milk_dashboard": (ServiceSkillId.MILK_MANAGEMENT, ("general.base", "lactation.milk_read")),
+    "records_page": (ServiceSkillId.MILK_MANAGEMENT, ("general.base", "lactation.milk_read", "lactation.record_write")),
+    "pump_page": (ServiceSkillId.MILK_MANAGEMENT, ("general.base", "lactation.milk_read")),
+    "postpartum_page": (ServiceSkillId.HEALTH_CONSULTATION, ("general.base", "postpartum.context")),
+    "status_page": (ServiceSkillId.HEALTH_CONSULTATION, ("general.base", "postpartum.context", "postpartum.checkin")),
+    "device_page": (ServiceSkillId.DEVICE_GUIDANCE, ("general.base", "after_sales.device_guidance")),
+    "device_manage_page": (ServiceSkillId.DEVICE_GUIDANCE, ("general.base", "after_sales.device_guidance")),
+    "support_page": (ServiceSkillId.DEVICE_GUIDANCE, ("general.base", "after_sales.support")),
 }
 
 SKILL_HINT_TERMS: dict[ServiceSkillId, tuple[str, ...]] = {
-    ServiceSkillId.PREGNANCY: (
+    ServiceSkillId.BIRTH_PREP: (
         "pregnancy",
         "pregnant",
         "due date",
@@ -41,7 +41,7 @@ SKILL_HINT_TERMS: dict[ServiceSkillId, tuple[str, ...]] = {
         "给护士",
         "陪产",
     ),
-    ServiceSkillId.LACTATION: (
+    ServiceSkillId.MILK_MANAGEMENT: (
         "milk",
         "feeding",
         "feed",
@@ -65,7 +65,20 @@ SKILL_HINT_TERMS: dict[ServiceSkillId, tuple[str, ...]] = {
         "哺乳顾问",
         "泌乳顾问",
     ),
-    ServiceSkillId.POSTPARTUM: (
+    ServiceSkillId.HEALTH_CONSULTATION: (
+        "health",
+        "doctor",
+        "symptom",
+        "medicine",
+        "pain",
+        "fever",
+        "健康",
+        "医生",
+        "症状",
+        "用药",
+        "疼",
+        "发烧",
+        "发热",
         "postpartum",
         "recovery",
         "pelvic",
@@ -76,7 +89,22 @@ SKILL_HINT_TERMS: dict[ServiceSkillId, tuple[str, ...]] = {
         "恶露",
         "盆底",
     ),
-    ServiceSkillId.AFTER_SALES: (
+    ServiceSkillId.EMOTION_SUPPORT: (
+        "anxious",
+        "anxiety",
+        "sad",
+        "cry",
+        "stress",
+        "焦虑",
+        "崩溃",
+        "难过",
+        "想哭",
+        "压力",
+        "情绪",
+        "害怕",
+        "无助",
+    ),
+    ServiceSkillId.DEVICE_GUIDANCE: (
         "device",
         "air1",
         "suction",
@@ -156,7 +184,7 @@ class DeterministicSkillSignalRouter:
         normalized = _normalize(ctx.message)
         if ctx.pending_action_id is not None:
             return _plan(
-                ServiceSkillId.GENERAL,
+                ServiceSkillId.MAIN_AGENT,
                 source=RoutingSource.PENDING_ACTION,
                 intent_type="pending_action_response",
                 confidence=1,
@@ -166,8 +194,9 @@ class DeterministicSkillSignalRouter:
 
         safety_flags = _matched_terms(normalized, SAFETY_RED_FLAGS)
         if safety_flags:
+            skill_id = _safety_skill_for_flags(safety_flags)
             return _plan(
-                ServiceSkillId.SAFETY,
+                skill_id,
                 source=RoutingSource.SAFETY_RULE,
                 intent_type="safety_escalation",
                 confidence=1,
@@ -253,8 +282,8 @@ def _plan(
             IntentItem(
                 intent_type=intent_type,
                 service_skill_id=skill_id,
-                priority=10 if skill_id == ServiceSkillId.SAFETY else 50,
-                safety_sensitive=skill_id == ServiceSkillId.SAFETY,
+                priority=10 if safety_flags else 50,
+                safety_sensitive=bool(safety_flags),
             )
         ],
         tool_group_ids=list(tool_group_ids),
@@ -267,7 +296,7 @@ def _plan(
 
 
 def _tool_groups_for_message(*, skill_id: ServiceSkillId, normalized: str) -> tuple[str, ...]:
-    if skill_id == ServiceSkillId.PREGNANCY:
+    if skill_id == ServiceSkillId.BIRTH_PREP:
         groups = ["general.base", "pregnancy.context"]
         if _matched_terms(normalized, ("待产包", "入院包", "住院包", "hospital bag")):
             groups.append("pregnancy.hospital_bag")
@@ -278,7 +307,7 @@ def _tool_groups_for_message(*, skill_id: ServiceSkillId, normalized: str) -> tu
         if _matched_terms(normalized, ("日记", "记录今天", "diary")):
             groups.append("pregnancy.diary")
         return tuple(groups)
-    if skill_id == ServiceSkillId.LACTATION:
+    if skill_id == ServiceSkillId.MILK_MANAGEMENT:
         groups = ["general.base", "lactation.milk_read"]
         if _matched_terms(normalized, ("补录", "记录", "保存", "add record", "log")):
             groups.append("lactation.record_write")
@@ -287,20 +316,20 @@ def _tool_groups_for_message(*, skill_id: ServiceSkillId, normalized: str) -> tu
         if _matched_terms(normalized, ("ibclc", "哺乳顾问", "泌乳顾问", "顾问")):
             groups.append("lactation.handoff")
         return tuple(groups)
-    if skill_id == ServiceSkillId.POSTPARTUM:
+    if skill_id == ServiceSkillId.HEALTH_CONSULTATION:
         groups = ["general.base", "postpartum.context"]
         if _matched_terms(normalized, ("打卡", "状态", "check in", "check-in")):
             groups.append("postpartum.checkin")
         if _matched_terms(normalized, ("任务", "提醒", "计划", "日记")):
             groups.append("postpartum.task")
         return tuple(groups)
-    if skill_id == ServiceSkillId.AFTER_SALES:
+    if skill_id == ServiceSkillId.EMOTION_SUPPORT:
+        return ("general.base", "safety.support")
+    if skill_id == ServiceSkillId.DEVICE_GUIDANCE:
         groups = ["general.base", "after_sales.device_guidance"]
         if _matched_terms(normalized, ("客服", "工单", "售后", "缺件", "破损", "保修", "退货", "换货", "support", "ticket")):
             groups.append("after_sales.support")
         return tuple(groups)
-    if skill_id == ServiceSkillId.SAFETY:
-        return ("general.base", "safety.support")
     return ("general.base",)
 
 
@@ -327,3 +356,19 @@ def _looks_multi_intent(normalized: str) -> bool:
 def _looks_like_topic_switch(normalized: str, active_skill_id: ServiceSkillId) -> bool:
     matched = _matched_skills(normalized)
     return bool(matched and active_skill_id not in matched)
+
+
+def _safety_skill_for_flags(flags: list[str]) -> ServiceSkillId:
+    emotion_flags = {
+        "suicide",
+        "kill myself",
+        "hurt myself",
+        "hurt my baby",
+        "自杀",
+        "不想活",
+        "伤害自己",
+        "伤害宝宝",
+    }
+    if any(flag in emotion_flags for flag in flags):
+        return ServiceSkillId.EMOTION_SUPPORT
+    return ServiceSkillId.HEALTH_CONSULTATION

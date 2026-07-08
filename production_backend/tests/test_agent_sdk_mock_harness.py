@@ -94,6 +94,32 @@ def test_scripted_sdk_backend_fails_on_missing_tool_contract() -> None:
     assert exc_info.value.details == {"tool_name": "profile.read"}
 
 
+def test_agent_sdk_runner_preserves_sanitized_provider_error_details() -> None:
+    class ProviderBadRequest(Exception):
+        status_code = 400
+
+    class FailingBackend:
+        async def run(self, _request: SdkNodeRequest) -> object:
+            raise ProviderBadRequest("provider rejected request with api_key=secret-token")
+
+    request = SdkNodeRequest(
+        run_id="run_1",
+        thread_id="thread_1",
+        actor_user_id="user_1",
+        instructions="Use tools.",
+        model_input=[{"role": "user", "content": "hello"}],
+    )
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(OpenAIAgentsSdkRunner(backend=FailingBackend()).run_reasoning(request))
+
+    assert exc_info.value.code == "sdk_bad_request"
+    assert exc_info.value.details["exception_type"] == "ProviderBadRequest"
+    assert exc_info.value.details["provider_status_code"] == 400
+    assert "secret-token" not in exc_info.value.details["message_excerpt"]
+    assert "[redacted]" in exc_info.value.details["message_excerpt"]
+
+
 def test_agent_sdk_runner_factory_selects_minimax_provider_config() -> None:
     runner = create_agent_sdk_runner(
         settings=Settings(

@@ -41,16 +41,15 @@ def test_service_skill_registry_is_the_model_facing_entrypoint() -> None:
     skill_ids = {skill.service_skill_id for skill in skill_registry.list()}
 
     assert skill_ids == {
-        "after_sales",
-        "general_assistant",
-        "lactation",
-        "postpartum_recovery",
-        "pregnancy_service",
-        "safety_guardrail",
+        "birth-prep",
+        "device-guidance",
+        "emotion-support",
+        "health-consultation",
+        "milk-management",
     }
-    pregnancy_skill = skill_registry.get("pregnancy_service")
-    assert pregnancy_skill.service_skill_id == "pregnancy_service"
-    assert "服务技能 pregnancy_service_v1" in pregnancy_skill.prompt_block()
+    pregnancy_skill = skill_registry.get("birth-prep")
+    assert pregnancy_skill.service_skill_id == "birth-prep"
+    assert "制定孕期计划" in pregnancy_skill.prompt_block()
     assert "待产包清单" in pregnancy_skill.prompt_block()
 
 
@@ -101,9 +100,9 @@ def test_static_prompts_keep_runtime_boundaries_and_legacy_style() -> None:
     assert "不能声称已直接应用" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "## 可用 Skill" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "skill_manifests:" in DEFAULT_STABLE_SYSTEM_PROMPT
-    assert '"id": "pregnancy_service"' in DEFAULT_STABLE_SYSTEM_PROMPT
-    assert '"id": "lactation"' in DEFAULT_STABLE_SYSTEM_PROMPT
-    assert "CozyMate 孕期服务专家，负责孕期计划、待产包、分娩沟通单和相关任务推进。" in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert '"id": "birth-prep"' in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert '"id": "milk-management"' in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert "产前准备服务" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "角色定位：CozyMate 的孕期服务专家" not in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "## 服务范围" not in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "records.milk_status.read" not in global_prompt
@@ -122,12 +121,11 @@ def test_static_skill_manifests_are_derived_from_skill_directories() -> None:
     assert len(manifests) == len(skill_paths)
     assert [manifest["name"] for manifest in manifests] == [path.parent.name for path in skill_paths]
     assert {manifest["id"] for manifest in manifests} == {
-        "after_sales",
-        "general_assistant",
-        "lactation",
-        "postpartum_recovery",
-        "pregnancy_service",
-        "safety_guardrail",
+        "birth-prep",
+        "device-guidance",
+        "emotion-support",
+        "health-consultation",
+        "milk-management",
     }
 
 
@@ -165,32 +163,28 @@ def test_model_facing_prompt_text_is_chinese() -> None:
     assert offenders == []
 
 
-def test_service_skills_capture_domain_flow_semantics_without_legacy_tool_protocols() -> None:
+def test_service_skills_capture_legacy_domain_flow_semantics() -> None:
     registry = default_service_skill_registry()
-    pregnancy = registry.get("pregnancy_service").prompt_block()
-    lactation = registry.get("lactation").prompt_block()
-    after_sales = registry.get("after_sales").prompt_block()
-    safety = registry.get("safety_guardrail").prompt_block()
+    pregnancy = registry.get("birth-prep").prompt_block()
+    lactation = registry.get("milk-management").prompt_block()
+    after_sales = registry.get("device-guidance").prompt_block()
+    safety = registry.get("emotion-support").prompt_block()
 
-    assert "高龄孕产妇" in pregnancy
-    assert "医院确认项" in pregnancy
-    assert "工具或产物已展示" in pregnancy
-    assert "next_step" not in pregnancy
-    assert "final_response_instruction" not in pregnancy
+    assert "birth_journey_intake_manage" in pregnancy
+    assert "hospital_bag_form_create" in pregnancy
+    assert "hospital_bag_card_create" in pregnancy
+    assert "labor_communication_card_create" in pregnancy
 
     assert "追奶、稳奶还是减奶" in lactation
-    assert "亲喂估算" in lactation
-    assert "不要把计划任务当成真实吸奶或喂养记录" in lactation
-    assert "workflow_control" not in lactation
-    assert "assistant_followup" not in lactation
+    assert "milk_status_query" in lactation
+    assert "milk_analysis_intake_manage" in lactation
 
-    assert "Air1/BP334" in after_sales
+    assert "Air1 (BP334)" in after_sales
     assert "每轮给 1 个主步骤" in after_sales
-    assert "对象存储路径" in after_sales
-    assert "device_manual_search" not in after_sales
+    assert "device_manual_search" in after_sales
 
     assert "宝宝交给身边可信成年人" in safety
-    assert "安全已确认" in safety
+    assert "当前没有情绪支持专用工具" in safety
 
 
 def test_tool_contract_registry_declares_permission_confirmation_and_blocking_policy() -> None:
@@ -223,8 +217,8 @@ def test_tool_contract_registry_declares_permission_confirmation_and_blocking_po
     milk_reminder_proposal = registry.get("notifications.milk_reminder.propose")
     diary_entry_proposal = registry.get("diary.entry_upsert.propose")
     memory_create_proposal = registry.get("memory.create.propose")
-    hospital_bag_artifact = registry.get("artifacts.hospital_bag_card.create")
-    labor_communication_artifact = registry.get("artifacts.labor_communication_card.create")
+    hospital_bag_artifact = registry.get("hospital_bag_card_create")
+    labor_communication_artifact = registry.get("labor_communication_card_create")
     assert feeding_proposal.read_or_write == "write"
     assert feeding_proposal.requires_confirmation is False
     assert feeding_proposal.blocking_policy == "enqueue_and_continue"
@@ -308,8 +302,11 @@ def test_tool_contract_registry_declares_permission_confirmation_and_blocking_po
     assert "plans.task_complete.propose" in registry.names_for_sdk()
     assert "devices.pump_status.read" in registry.names_for_sdk()
     assert "files.vision_summary.read" in registry.names_for_sdk()
-    assert "artifacts.hospital_bag_card.create" in registry.names_for_sdk()
-    assert "artifacts.labor_communication_card.create" in registry.names_for_sdk()
+    assert "hospital_bag_form_create" in registry.names_for_sdk()
+    assert "hospital_bag_card_create" in registry.names_for_sdk()
+    assert "hospital_bag_cart_update" in registry.names_for_sdk()
+    assert "birth_plan_form_create" in registry.names_for_sdk()
+    assert "labor_communication_card_create" in registry.names_for_sdk()
 
 
 def test_tool_group_registry_exposes_narrow_dynamic_tool_sets() -> None:
@@ -320,8 +317,10 @@ def test_tool_group_registry_exposes_narrow_dynamic_tool_sets() -> None:
     assert groups["lactation.milk_read"].tool_contracts == ("records.milk_status.read", "records.milk_summary.read")
     assert "plans.milk_plan.propose" not in groups["lactation.milk_read"].tool_contracts
     assert groups["pregnancy.hospital_bag"].tool_contracts == (
-        "artifacts.hospital_bag_card.create",
-        "hospital_bag.cart_update.propose",
+        "hospital_bag_form_create",
+        "hospital_bag_card_create",
+        "hospital_bag_cart_update",
+        "hospital_bag_pump_recommend",
     )
     assert groups["after_sales.device_guidance"].tool_contracts == (
         "devices.pump_status.read",
@@ -351,7 +350,7 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
     milk_reminder_schema = tool_input_schema(registry.get("notifications.milk_reminder.propose").input_schema_ref)
     feeding_schema = tool_input_schema(registry.get("records.feeding_record.propose").input_schema_ref)
     pumping_schema = tool_input_schema(registry.get("records.pumping_record.propose").input_schema_ref)
-    artifact_schema = tool_input_schema(registry.get("artifacts.hospital_bag_card.create").input_schema_ref)
+    artifact_schema = tool_input_schema(registry.get("hospital_bag_card_create").input_schema_ref)
     memory_create_schema = tool_input_schema(registry.get("memory.create.propose").input_schema_ref)
 
     assert profile_schema == {
@@ -419,10 +418,10 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
     assert feeding_schema["properties"]["volume_ml"]["type"] == "number"
     assert pumping_schema["required"] == ["pump_start_time"]
     assert pumping_schema["properties"]["milk_volume_ml"]["type"] == "number"
-    assert artifact_schema["additionalProperties"] is False
-    assert artifact_schema["required"] == ["title"]
-    assert artifact_schema["properties"]["sections"]["maxItems"] == 20
-    assert artifact_schema["properties"]["source_context"]["type"] == "object"
+    assert artifact_schema["additionalProperties"] is True
+    assert artifact_schema["properties"]["confirmed_form_data"]["type"] == "object"
+    assert artifact_schema["properties"]["plan_context"]["type"] == "object"
+    assert artifact_schema["properties"]["groups"]["type"] == "array"
 
 
 def test_tool_input_schema_properties_do_not_define_instruction_channels() -> None:
@@ -489,7 +488,7 @@ def test_context_builder_projects_dynamic_context_after_selected_history() -> No
         projection=ContextProjection(
             stable_system_prompt="system-v1",
             selected_conversation_history=[{"role": "user", "content": "history"}],
-            current_state_projection={"service_skill_id": "general_assistant_v1"},
+            current_state_projection={"service_skill_id": "main_agent"},
             user_context={"current_time": "2026-07-08T12:00:00+08:00", "timezone": "Asia/Shanghai"},
             recent_run_facts=[{"run_id": "run_1", "facts": {"assistant_conclusion": "已整理过喂养目标"}}],
             fresh_business_facts={"profile": {"name": "Mai"}},
@@ -501,7 +500,7 @@ def test_context_builder_projects_dynamic_context_after_selected_history() -> No
     assert model_input[0] == {"role": "user", "content": "history"}
     assert model_input[-2]["content"] == {
         "runtime_context": {
-            "state": {"service_skill_id": "general_assistant_v1"},
+            "state": {"service_skill_id": "main_agent"},
             "user_context": {"current_time": "2026-07-08T12:00:00+08:00", "timezone": "Asia/Shanghai"},
             "recent_run_facts": [{"run_id": "run_1", "facts": {"assistant_conclusion": "已整理过喂养目标"}}],
             "memory": [],
@@ -559,7 +558,7 @@ def test_sdk_runner_uses_real_agents_sdk_shape_when_package_is_available(monkeyp
         tool_names=("profile.read",),
         prompt_version="prompt-v2",
         trace_id="trace_1",
-        service_skill_id="general_assistant",
+        service_skill_id="main_agent",
     )
 
     result = asyncio.run(OpenAIAgentsSdkRunner(model="gpt-test", max_turns=3, trace_enabled=True).run_reasoning(request))
@@ -574,7 +573,7 @@ def test_sdk_runner_uses_real_agents_sdk_shape_when_package_is_available(monkeyp
     assert FakeAgentsSdkRunner.last_run_config.group_id == "thread_1"
     assert FakeAgentsSdkRunner.last_run_config.trace_metadata["run_id"] == "run_1"
     assert FakeAgentsSdkRunner.last_run_config.trace_metadata["prompt_version"] == "prompt-v2"
-    assert FakeAgentsSdkRunner.last_run_config.trace_metadata["service_skill_id"] == "general_assistant"
+    assert FakeAgentsSdkRunner.last_run_config.trace_metadata["service_skill_id"] == "main_agent"
     assert FakeAgentsSdkRunner.last_run_config.trace_metadata["tool_names"] == ["profile.read"]
     assert FakeAgentsSdkRunner.last_previous_response_id is None
     assert FakeAgentsSdkRunner.last_auto_previous_response_id is False

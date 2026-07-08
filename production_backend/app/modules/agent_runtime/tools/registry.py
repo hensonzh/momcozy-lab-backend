@@ -391,34 +391,110 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         ToolContract(
-            name="hospital_bag.cart_update.propose",
+            name="birth_plan_form_create",
+            domain="birth_prep",
+            description="创建分娩沟通单信息采集表单。LLM 只传已知字段 default_values；表单字段、顺序、分类、选项和排他选项过滤由工具稳定生成。无后端副作用。",
+            input_schema_ref="LegacyArtifactToolInput",
+            output_schema_ref="LegacyArtifactToolOutput",
+            read_or_write="write",
+            required_permission="agent_artifact:create:self",
+            owner_scope="actor",
+            side_effect_level="low",
+            blocking_policy="must_wait",
+            result_dependency="final_response",
+            requires_confirmation=False,
+            idempotency_required=False,
+            audit_required=True,
+            timeout_seconds=15,
+        )
+    )
+    registry.register(
+        ToolContract(
+            name="labor_communication_card_create",
+            domain="birth_prep",
+            description="根据应用侧注入的 birth_plan_card_intake 表单提交数据生成前端可渲染的分娩沟通单。LLM 不需要生成 card_json，也不能用参数伪造表单提交；字段映射、强诉求降级、分区整理、医院问题和安全声明由工具稳定生成。无后端副作用。",
+            input_schema_ref="LegacyArtifactToolInput",
+            output_schema_ref="LegacyArtifactToolOutput",
+            read_or_write="write",
+            required_permission="agent_artifact:create:self",
+            owner_scope="actor",
+            side_effect_level="low",
+            blocking_policy="must_wait",
+            result_dependency="final_response",
+            requires_confirmation=False,
+            idempotency_required=False,
+            audit_required=True,
+            timeout_seconds=15,
+        )
+    )
+    registry.register(
+        ToolContract(
+            name="birth_journey_plan_card_create",
+            domain="birth_prep",
+            description="根据 birth_journey_intake_manage 已采集或已问过的信息，生成前端可渲染并保存为 active care plan 的孕期计划。生成前必须完成基础信息、个性化追问，以及按孕周决定的产检记录上传/跳过状态；不要为了生成计划再补问旧版模板化的高风险因素、当前症状、生活方式或喂养/IBCLC 信息。用户回答不清楚、跳过、暂不提供也算已问到，并应在 plan_context 中显式传入对应字段。LLM 不需要生成 card_json；规则分层、日期换算、行动清单、7 天待办分组和安全声明由工具稳定生成。已有 active 孕期计划时工具会返回 existing_plan_found，不要重复生成。",
+            input_schema_ref="LegacyArtifactToolInput",
+            output_schema_ref="LegacyArtifactToolOutput",
+            read_or_write="write",
+            required_permission="agent_artifact:create:self",
+            owner_scope="actor",
+            side_effect_level="low",
+            blocking_policy="must_wait",
+            result_dependency="final_response",
+            requires_confirmation=False,
+            idempotency_required=False,
+            audit_required=True,
+            timeout_seconds=15,
+        )
+    )
+    registry.register(
+        ToolContract(
+            name="hospital_bag_form_create",
             domain="hospital_bag",
-            description="提出待产包购物车更新动作。",
-            input_schema_ref="HospitalBagCartUpdateProposalCreate",
-            output_schema_ref="AgentActionRead",
+            description="创建待产包信息采集表单。用户确认开始待产包整理后可直接调用；工具会自动合并当前会话、用户 profile 和已有 active 孕期计划里的产前准备共享信息。LLM 只在 default_values 里传当前对话中新确认的可靠字段，不需要重复搬运已保存字段。表单字段、顺序、分类、选项和样式约束由工具稳定生成。无后端副作用。",
+            input_schema_ref="LegacyArtifactToolInput",
+            output_schema_ref="LegacyArtifactToolOutput",
+            read_or_write="write",
+            required_permission="agent_artifact:create:self",
+            owner_scope="actor",
+            side_effect_level="low",
+            blocking_policy="must_wait",
+            result_dependency="final_response",
+            requires_confirmation=False,
+            idempotency_required=False,
+            audit_required=True,
+            timeout_seconds=15,
+        )
+    )
+    registry.register(
+        ToolContract(
+            name="hospital_bag_card_create",
+            domain="hospital_bag",
+            description="根据应用侧注入的 hospital_bag_intake 表单提交数据生成前端可渲染的待产包清单。LLM 不需要生成 card_json，也不能用参数伪造表单提交；分包、物品、数量、医院确认项、购物车入口和兼容字段由工具稳定生成。无后端副作用。调用本工具后的最终回复遵循工具返回结果，不要再复述已确认字段、设计思路、住院天数或医院确认逻辑。",
+            input_schema_ref="LegacyArtifactToolInput",
+            output_schema_ref="LegacyArtifactToolOutput",
+            read_or_write="write",
+            required_permission="agent_artifact:create:self",
+            owner_scope="actor",
+            side_effect_level="low",
+            blocking_policy="must_wait",
+            result_dependency="final_response",
+            requires_confirmation=False,
+            idempotency_required=False,
+            audit_required=True,
+            timeout_seconds=15,
+        )
+    )
+    registry.register(
+        ToolContract(
+            name="hospital_bag_cart_update",
+            domain="hospital_bag",
+            description="根据用户自然语言修改当前待产包购物车。只在上下文已有当前待产包购物车，或当前对话明确处于待产包购物车页面/购物车调整流程时使用；不要用于首次生成待产包清单、独立吸奶器型号选型、设备故障排查或真实下单。用于用户说预算上限、太贵、便宜一点、删掉/加回某个商品、医院会提供、家里已有、调整数量、恢复默认购物车、把已推荐的 Momcozy 吸奶器型号同步到购物车等。用户给出明确金额时必须使用 action=optimize_budget 并设置 target_budget。工具只返回前端可应用的购物车更新，不真正下单。预算优化默认尽量保留吸奶器；只有用户明确要求删除吸奶器，或 allow_remove_pump=true 时才可移除。",
+            input_schema_ref="LegacyArtifactToolInput",
+            output_schema_ref="LegacyArtifactToolOutput",
             read_or_write="write",
             required_permission="hospital_bag_cart:update:self",
             owner_scope="actor",
             side_effect_level="low",
-            blocking_policy="enqueue_and_continue",
-            result_dependency="none",
-            requires_confirmation=False,
-            idempotency_required=True,
-            audit_required=True,
-            timeout_seconds=15,
-        )
-    )
-    registry.register(
-        ToolContract(
-            name="artifacts.hospital_bag_card.create",
-            domain="artifacts",
-            description="为当前智能体运行创建当前用户范围内的待产包卡片产物。",
-            input_schema_ref="AgentArtifactCreate",
-            output_schema_ref="AgentArtifactRead",
-            read_or_write="write",
-            required_permission="agent_artifact:create:self",
-            owner_scope="actor",
-            side_effect_level="low",
             blocking_policy="must_wait",
             result_dependency="final_response",
             requires_confirmation=False,
@@ -429,49 +505,11 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         ToolContract(
-            name="artifacts.labor_communication_card.create",
-            domain="artifacts",
-            description="为当前智能体运行创建当前用户范围内的分娩沟通单产物。",
-            input_schema_ref="AgentArtifactCreate",
-            output_schema_ref="AgentArtifactRead",
-            read_or_write="write",
-            required_permission="agent_artifact:create:self",
-            owner_scope="actor",
-            side_effect_level="low",
-            blocking_policy="must_wait",
-            result_dependency="final_response",
-            requires_confirmation=False,
-            idempotency_required=False,
-            audit_required=True,
-            timeout_seconds=15,
-        )
-    )
-    registry.register(
-        ToolContract(
-            name="artifacts.lactation_summary.create",
-            domain="artifacts",
-            description="为当前智能体运行创建当前用户范围内的泌乳分析摘要产物。",
-            input_schema_ref="AgentArtifactCreate",
-            output_schema_ref="AgentArtifactRead",
-            read_or_write="write",
-            required_permission="agent_artifact:create:self",
-            owner_scope="actor",
-            side_effect_level="low",
-            blocking_policy="must_wait",
-            result_dependency="final_response",
-            requires_confirmation=False,
-            idempotency_required=False,
-            audit_required=True,
-            timeout_seconds=15,
-        )
-    )
-    registry.register(
-        ToolContract(
-            name="artifacts.postpartum_checkin.create",
-            domain="artifacts",
-            description="为当前智能体运行创建当前用户范围内的产后恢复状态打卡产物。",
-            input_schema_ref="AgentArtifactCreate",
-            output_schema_ref="AgentArtifactRead",
+            name="hospital_bag_pump_recommend",
+            domain="hospital_bag",
+            description="购买前选型工具：根据用户预算、使用场景和偏好，从 Momcozy 官方吸奶器型号目录里推荐 1 款主推型号和 1-2 款备选。适用于用户问哪款吸奶器适合自己、型号差异、预算内怎么选、某型号多少钱或“Air1 呢”等点名型号追问，也适用于待产包场景中先确定吸奶器型号。不要用于已购设备故障、说明书/FAQ、配件问题或奶量是否正常。无购物车副作用；如果用户要同步购物车，拿返回的 cart_sync_suggestion 再调用 hospital_bag_cart_update。价格口径使用 Momcozy 官方对外价格，保留官方 USD 标价和活动价字段。Air 1 是高价轻薄款，不能描述为降低预算、省钱或更便宜选择。",
+            input_schema_ref="LegacyArtifactToolInput",
+            output_schema_ref="LegacyArtifactToolOutput",
             read_or_write="write",
             required_permission="agent_artifact:create:self",
             owner_scope="actor",
