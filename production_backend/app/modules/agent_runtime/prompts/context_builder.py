@@ -20,8 +20,15 @@ class ModelInputBuilder:
             {"role": "system", "content": projection.stable_system_prompt},
             {"role": "developer", "content": projection.stable_developer_prompt},
             *projection.selected_conversation_history,
-            {"role": "developer", "content": {"state": projection.current_state_projection}},
-            {"role": "developer", "content": {"memory": projection.memory_projection}},
-            {"role": "developer", "content": {"business_facts": projection.fresh_business_facts}},
+            {
+                "role": "developer",
+                "content": {
+                    "runtime_context": {
+                        "state": projection.current_state_projection,
+                        "memory": projection.memory_projection,
+                        "business_facts": projection.fresh_business_facts,
+                    }
+                },
+            },
             current_user_message,
         ]

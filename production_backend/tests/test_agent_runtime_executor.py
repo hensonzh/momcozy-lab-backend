@@ -57,13 +57,12 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() ->
         "user",
         "assistant",
         "developer",
-        "developer",
-        "developer",
         "user",
     ]
     assert request.model_input[0]["content"].startswith("你是 CozyMate")
-    assert request.model_input[4]["content"]["state"]["run_id"] == str(run.id)
-    assert request.model_input[4]["content"]["state"]["service_skill_key"] == "general_assistant"
+    runtime_context = _runtime_context(request)
+    assert runtime_context["state"]["run_id"] == str(run.id)
+    assert runtime_context["state"]["service_skill_key"] == "general_assistant"
     assert repository.routing_decisions[0]["selected_skill_id"] == "general_assistant"
     assert repository.routing_decisions[0]["routing_source"] == "fallback"
     assert repository.routing_decisions[0]["confidence"] == 0.55
@@ -123,7 +122,7 @@ def test_agent_runtime_executor_projects_active_memory_into_dynamic_context() ->
         ).execute(run=run)
     )
 
-    memory_facts = backend.requests[0].model_input[-3]["content"]["memory"]
+    memory_facts = _runtime_context(backend.requests[0])["memory"]
     assert result.status == "completed"
     assert memory_service.calls == [{"owner_user_id": run.actor_user_id, "memory_type": None, "limit": 5}]
     assert memory_facts == [
@@ -329,8 +328,9 @@ def test_agent_runtime_executor_selects_service_skill_and_scopes_tools_by_group(
     assert result.status == "completed"
     assert request.service_skill_id == "lactation"
     assert "已选择服务技能：lactation" in request.instructions
-    assert request.model_input[-4]["content"]["state"]["service_skill_key"] == "lactation"
-    assert request.model_input[-4]["content"]["state"]["selected_tool_group_ids"] == ["general.base", "lactation.milk_read"]
+    state = _runtime_context(request)["state"]
+    assert state["service_skill_key"] == "lactation"
+    assert state["selected_tool_group_ids"] == ["general.base", "lactation.milk_read"]
     assert request.tool_names == (
         "business.context.read",
         "profile.read",
@@ -356,7 +356,7 @@ def test_agent_runtime_executor_injects_pregnancy_service_skill() -> None:
     )
 
     request = backend.requests[0]
-    state = request.model_input[-4]["content"]["state"]
+    state = _runtime_context(request)["state"]
     assert result.status == "completed"
     assert request.service_skill_id == "pregnancy_service"
     assert state["service_skill_id"] == "pregnancy_service_v1"
@@ -401,6 +401,33 @@ def test_agent_runtime_executor_routes_named_pump_issue_to_device_service_skill(
         "files.vision_summary.read",
         "profile.read",
     )
+
+
+def test_agent_runtime_executor_excludes_tool_messages_from_conversation_history() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    prior_user = _message(thread_id=thread_id, run_id=uuid4(), role="user", text="Read my milk summary.", sequence=1)
+    prior_tool = _message(thread_id=thread_id, run_id=uuid4(), role="tool", text='{"records": []}', sequence=2)
+    prior_assistant = _message(thread_id=thread_id, run_id=uuid4(), role="assistant", text="I checked your summary.", sequence=3)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="What next?", sequence=4)
+    repository = FakeRuntimeRepository(
+        messages=[prior_user, prior_tool, prior_assistant, current_user],
+        current_message=current_user,
+    )
+    backend = CapturingSdkBackend(result=SdkNodeResult(final_text="Next step."))
+
+    asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+        ).execute(run=run)
+    )
+
+    history = backend.requests[0].model_input[2:-2]
+    assert history == [
+        {"role": "user", "content": "Read my milk summary."},
+        {"role": "assistant", "content": "I checked your summary."},
+    ]
 
 
 def test_agent_runtime_executor_real_tool_executor_uses_run_actor_role_permissions() -> None:
@@ -678,6 +705,10 @@ class StaticRoutingService:
             source=RoutingSource.MODEL_PLANNER,
             reason_codes=["test_static_plan"],
         )
+
+
+def _runtime_context(request: SdkNodeRequest) -> dict:
+    return request.model_input[-2]["content"]["runtime_context"]
 
 
 class FakeRuntimeRepository:
