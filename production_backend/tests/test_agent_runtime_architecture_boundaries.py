@@ -13,6 +13,7 @@ from production_backend.app.modules.agent_runtime.prompts import (
     DEFAULT_STABLE_DEVELOPER_PROMPT,
     DEFAULT_STABLE_SYSTEM_PROMPT,
     ModelInputBuilder,
+    PROMPT_OWNERSHIP_POLICY,
 )
 from production_backend.app.modules.agent_runtime.sdk import OpenAIAgentsSdkRunner, SdkNodeRequest, SdkNodeResult, SdkToolDefinition, sdk_tool_name
 from production_backend.app.modules.agent_runtime.skills import default_service_skill_registry
@@ -44,6 +45,50 @@ def test_service_skill_registry_is_the_model_facing_entrypoint() -> None:
     assert pregnancy_skill.specialist_id == "pregnancy_service"
     assert "服务 Skill pregnancy_service_v1" in pregnancy_skill.prompt_block()
     assert "待产包清单" in pregnancy_skill.prompt_block()
+
+
+def test_prompt_ownership_policy_keeps_workflow_in_service_skills() -> None:
+    assert "service_skill owns domain workflow" in "\n".join(PROMPT_OWNERSHIP_POLICY)
+    assert "tool_schema owns input validation only" in "\n".join(PROMPT_OWNERSHIP_POLICY)
+    assert "tool_result owns facts" in "\n".join(PROMPT_OWNERSHIP_POLICY)
+    assert "service skill owns domain workflow" in DEFAULT_STABLE_DEVELOPER_PROMPT.lower()
+    assert "tool results are facts/resources/status" in DEFAULT_STABLE_DEVELOPER_PROMPT
+
+    global_prompt = f"{DEFAULT_STABLE_SYSTEM_PROMPT}\n{DEFAULT_STABLE_DEVELOPER_PROMPT}"
+    assert "records.milk_status.read" not in global_prompt
+    assert "artifacts.hospital_bag_card.create" not in global_prompt
+    assert "birth_journey_intake_manage" not in global_prompt
+    assert "milk_analysis_intake_manage" not in global_prompt
+    assert "device_manual_search" not in global_prompt
+    assert "ui_quick_replies_create" not in global_prompt
+
+
+def test_service_skills_capture_domain_flow_semantics_without_legacy_tool_protocols() -> None:
+    registry = default_service_skill_registry()
+    pregnancy = registry.get("pregnancy_service").prompt_block()
+    lactation = registry.get("lactation").prompt_block()
+    after_sales = registry.get("after_sales").prompt_block()
+    safety = registry.get("safety_guardrail").prompt_block()
+
+    assert "高龄孕产妇" in pregnancy
+    assert "医院确认项" in pregnancy
+    assert "工具或 artifact 已展示" in pregnancy
+    assert "next_step" not in pregnancy
+    assert "final_response_instruction" not in pregnancy
+
+    assert "追奶、稳奶还是减奶" in lactation
+    assert "亲喂估算" in lactation
+    assert "不要把计划任务当成真实吸奶或喂养记录" in lactation
+    assert "workflow_control" not in lactation
+    assert "assistant_followup" not in lactation
+
+    assert "Air1/BP334" in after_sales
+    assert "每轮给 1 个主步骤" in after_sales
+    assert "对象存储路径" in after_sales
+    assert "device_manual_search" not in after_sales
+
+    assert "宝宝交给身边可信成年人" in safety
+    assert "安全已确认" in safety
 
 
 def test_tool_contract_registry_declares_permission_confirmation_and_blocking_policy() -> None:
