@@ -455,7 +455,10 @@ def test_context_builder_keeps_stable_prompts_before_dynamic_projection() -> Non
             stable_system_prompt="system-v1",
             stable_developer_prompt="developer-v1",
             selected_conversation_history=[{"role": "user", "content": "history"}],
-            current_state_projection={"run_id": "run_1"},
+            current_state_projection={"service_skill_id": "general_assistant_v1"},
+            user_context={"current_time": "2026-07-08T12:00:00+08:00", "timezone": "Asia/Shanghai"},
+            thread_summary={"headline": "用户正在准备待产包"},
+            recent_run_facts=[{"run_id": "run_1", "facts": {"assistant_conclusion": "已整理过喂养目标"}}],
             fresh_business_facts={"profile": {"name": "Mai"}},
         ),
         current_user_message={"role": "user", "content": "hello"},
@@ -465,7 +468,10 @@ def test_context_builder_keeps_stable_prompts_before_dynamic_projection() -> Non
     assert model_input[0]["content"] == "system-v1"
     assert model_input[-2]["content"] == {
         "runtime_context": {
-            "state": {"run_id": "run_1"},
+            "state": {"service_skill_id": "general_assistant_v1"},
+            "user_context": {"current_time": "2026-07-08T12:00:00+08:00", "timezone": "Asia/Shanghai"},
+            "thread_summary": {"headline": "用户正在准备待产包"},
+            "recent_run_facts": [{"run_id": "run_1", "facts": {"assistant_conclusion": "已整理过喂养目标"}}],
             "memory": [],
             "business_facts": {"profile": {"name": "Mai"}},
         }

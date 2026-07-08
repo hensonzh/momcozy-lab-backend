@@ -25,6 +25,7 @@ def test_agent_runtime_ledger_tables_are_registered() -> None:
         "agent_context_checkpoints",
         "agent_workflow_states",
         "agent_context_projections",
+        "agent_run_summaries",
         "agent_memories",
     }
 
@@ -75,6 +76,7 @@ def test_agent_ledger_has_no_provider_state_dependency_columns() -> None:
         "agent_context_checkpoints",
         "agent_workflow_states",
         "agent_context_projections",
+        "agent_run_summaries",
         "agent_memories",
     ):
         columns = set(Base.metadata.tables[table_name].columns.keys())
@@ -88,6 +90,7 @@ def test_agent_actions_and_checkpoints_have_runtime_indexes() -> None:
     checkpoints = Base.metadata.tables["agent_context_checkpoints"]
     workflow_states = Base.metadata.tables["agent_workflow_states"]
     context_projections = Base.metadata.tables["agent_context_projections"]
+    run_summaries = Base.metadata.tables["agent_run_summaries"]
     memories = Base.metadata.tables["agent_memories"]
 
     assert "uq_agent_runs_thread_active" in {index.name for index in runs.indexes}
@@ -105,5 +108,8 @@ def test_agent_actions_and_checkpoints_have_runtime_indexes() -> None:
     assert "uq_agent_context_checkpoints_namespace_id" in {constraint.name for constraint in checkpoints.constraints}
     assert "ix_agent_workflow_states_owner_type_status" in {index.name for index in workflow_states.indexes}
     assert "ix_agent_context_projections_run_created" in {index.name for index in context_projections.indexes}
+    assert "uq_agent_run_summaries_run_type" in {constraint.name for constraint in run_summaries.constraints}
+    assert "ix_agent_run_summaries_thread_created" in {index.name for index in run_summaries.indexes}
+    assert "ix_agent_run_summaries_owner_skill_created" in {index.name for index in run_summaries.indexes}
     assert "ix_agent_memories_owner_type_status" in {index.name for index in memories.indexes}
     assert "ix_agent_memories_expires_at" in {index.name for index in memories.indexes}

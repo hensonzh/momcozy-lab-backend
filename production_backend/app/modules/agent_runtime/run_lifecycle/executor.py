@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID, uuid4
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from ....core.errors import ApiError
 from ....infrastructure.object_storage.base import ObjectStorage
@@ -43,6 +45,7 @@ class AgentRuntimeExecutorConfig:
     stable_developer_prompt: str = DEFAULT_STABLE_DEVELOPER_PROMPT
     history_limit: int = 40
     memory_limit: int = 5
+    recent_run_fact_limit: int = 5
 
 
 class AgentRuntimeExecutor:
@@ -67,6 +70,7 @@ class AgentRuntimeExecutor:
         config: AgentRuntimeExecutorConfig | None = None,
         object_storage: ObjectStorage | None = None,
         max_inline_artifact_payload_bytes: int = DEFAULT_MAX_INLINE_PAYLOAD_BYTES,
+        clock: Callable[[], datetime] | None = None,
     ) -> None:
         self.repository = repository
         self.sdk_runner = sdk_runner
@@ -86,6 +90,7 @@ class AgentRuntimeExecutor:
         self.config = config or AgentRuntimeExecutorConfig()
         self.object_storage = object_storage
         self.max_inline_artifact_payload_bytes = max_inline_artifact_payload_bytes
+        self.clock = clock or _utcnow
 
     async def __call__(self, run: AgentRun) -> AgentRunExecutionResult:
         return await self.execute(run=run)
@@ -101,6 +106,8 @@ class AgentRuntimeExecutor:
 
         messages = await self.repository.list_messages_for_thread(thread_id=run.thread_id, limit=self.config.history_limit)
         memory_projection = await self._memory_projection(run=run)
+        recent_run_facts = await self._recent_run_facts(run=run)
+        thread_summary = await self._thread_summary(run=run)
         routing_plan = await self.routing_service.route(_routing_context(run=run, current_message=current_message))
         service_skill = self.service_skill_registry.get(routing_plan.selected_skill_id.value)
         skill_summary = service_skill.state_summary()
@@ -111,24 +118,16 @@ class AgentRuntimeExecutor:
             stable_developer_prompt=self.config.stable_developer_prompt,
             selected_conversation_history=_history_before(messages=messages, before_sequence=current_message.sequence),
             current_state_projection={
-                "run_id": str(run.id),
-                "thread_id": str(run.thread_id),
-                "actor_user_id": str(run.actor_user_id),
-                "graph_version": run.graph_version,
-                "runtime_pattern": run.runtime_pattern,
-                "prompt_version": run.prompt_version,
-                "service_skill_key": service_skill.service_skill_id,
                 "service_skill_id": str(skill_summary.get("id") or ""),
                 "service_skill_version": str(skill_summary.get("version") or ""),
-                "service_skill_scope": skill_summary.get("scope") or [],
-                "service_skill_deliverables": skill_summary.get("deliverables") or [],
                 "selected_tool_group_ids": list(routing_plan.tool_group_ids),
-                "routing_source": routing_plan.source.value,
-                "routing_confidence": routing_plan.confidence,
-                "routing_reason_codes": routing_plan.reason_codes,
-                "routing_execution_mode": routing_plan.execution_mode,
-                "routing_safety_flags": routing_plan.safety_flags,
+                "execution_mode": routing_plan.execution_mode,
+                "needs_clarification": routing_plan.needs_clarification,
+                "safety_flags": routing_plan.safety_flags,
             },
+            user_context=_user_context(current_message=current_message, now=self.clock()),
+            thread_summary=thread_summary,
+            recent_run_facts=recent_run_facts,
             memory_projection=memory_projection,
             fresh_business_facts={},
         )
@@ -215,6 +214,12 @@ class AgentRuntimeExecutor:
                 "final_message_id": None,
                 "final_response_ready": True,
             },
+        )
+        await self._upsert_run_summary(
+            run=run,
+            current_message=current_message,
+            service_skill_id=service_skill.service_skill_id,
+            result=result,
         )
         return AgentRunExecutionResult(status="completed", final_text=final_text)
 
@@ -406,6 +411,8 @@ class AgentRuntimeExecutor:
                 "history_message_count": len(selected_history),
                 "state_keys": sorted(projection.current_state_projection),
                 "service_skill_id": _text(projection.current_state_projection, "service_skill_id"),
+                "thread_summary_included": bool(projection.thread_summary),
+                "recent_run_fact_count": len(projection.recent_run_facts),
                 "memory_count": len(projection.memory_projection),
                 "fresh_business_fact_keys": sorted(projection.fresh_business_facts),
             },
@@ -420,6 +427,74 @@ class AgentRuntimeExecutor:
             limit=self.config.memory_limit,
         )
         return [_memory_projection_item(memory) for memory in memories]
+
+    async def _recent_run_facts(self, *, run: AgentRun) -> list[dict[str, Any]]:
+        summaries = await self.repository.list_recent_run_summaries(
+            thread_id=run.thread_id,
+            owner_user_id=run.actor_user_id,
+            limit=self.config.recent_run_fact_limit,
+            summary_type="run_fact",
+            exclude_run_id=run.id,
+        )
+        return [_run_fact_projection_item(summary) for summary in summaries]
+
+    async def _thread_summary(self, *, run: AgentRun) -> dict[str, Any]:
+        summary = await self.repository.get_latest_thread_summary(thread_id=run.thread_id, owner_user_id=run.actor_user_id)
+        if summary is None:
+            return {}
+        payload = summary.payload if isinstance(summary.payload, dict) else {}
+        return {
+            "summary_id": str(summary.id),
+            "schema_version": summary.schema_version,
+            "updated_at": _iso_or_empty(getattr(summary, "updated_at", None)),
+            "payload": _compact_mapping(payload, max_items=8, max_chars=2000),
+        }
+
+    async def _upsert_run_summary(
+        self,
+        *,
+        run: AgentRun,
+        current_message: AgentMessage,
+        service_skill_id: str,
+        result: Any,
+    ) -> None:
+        tool_outputs = await self.repository.list_tool_outputs_for_run(run_id=run.id)
+        actions = await self.repository.list_actions_for_run(run_id=run.id)
+        artifacts = await self.repository.list_artifacts_for_run(run_id=run.id)
+        payload = {
+            "user_goal": _compact_text(_message_text(current_message), max_chars=500),
+            "assistant_conclusion": _compact_text(str(getattr(result, "final_text", "") or ""), max_chars=1000),
+            "tools_used": _tool_names_from_summary_sources(tool_outputs=tool_outputs, result_tool_calls=getattr(result, "tool_calls", [])),
+            "tool_facts": _tool_fact_projection(tool_outputs),
+            "actions": [
+                {
+                    "action_id": str(action.id),
+                    "action_type": action.action_type,
+                    "status": action.status,
+                    "target_type": action.target_type,
+                }
+                for action in actions[:8]
+            ],
+            "artifacts": [
+                {
+                    "artifact_id": str(artifact.id),
+                    "artifact_type": artifact.artifact_type,
+                    "status": artifact.status,
+                }
+                for artifact in artifacts[:8]
+            ],
+        }
+        await self.repository.upsert_run_summary(
+            run_id=run.id,
+            thread_id=run.thread_id,
+            owner_user_id=run.actor_user_id,
+            service_skill_id=service_skill_id,
+            summary_type="run_fact",
+            schema_version="v1",
+            payload=payload,
+            source_message_ids=[str(current_message.id)],
+            source_tool_call_ids=[str(tool_call.id) for tool_call, _output in tool_outputs],
+        )
 
 
 def _history_before(*, messages: list[AgentMessage], before_sequence: int) -> list[dict[str, Any]]:
@@ -492,6 +567,117 @@ def _memory_projection_item(memory: Any) -> dict[str, Any]:
         "confidence_score": int(memory.confidence_score or 0),
         "updated_at": _iso_or_empty(getattr(memory, "updated_at", None)),
     }
+
+
+def _run_fact_projection_item(summary: Any) -> dict[str, Any]:
+    payload = summary.payload if isinstance(summary.payload, dict) else {}
+    return {
+        "run_id": str(summary.run_id),
+        "service_skill_id": summary.service_skill_id,
+        "schema_version": summary.schema_version,
+        "created_at": _iso_or_empty(getattr(summary, "created_at", None)),
+        "facts": _compact_mapping(payload, max_items=8, max_chars=2400),
+    }
+
+
+def _tool_names_from_summary_sources(
+    *,
+    tool_outputs: list[tuple[Any, Any]],
+    result_tool_calls: Any,
+) -> list[str]:
+    names = {str(tool_call.tool_name) for tool_call, _output in tool_outputs if str(getattr(tool_call, "tool_name", "") or "")}
+    if isinstance(result_tool_calls, list):
+        for item in result_tool_calls:
+            if isinstance(item, dict):
+                tool_name = _text(item, "tool_name")
+                if tool_name:
+                    names.add(tool_name)
+    return sorted(names)
+
+
+def _tool_fact_projection(tool_outputs: list[tuple[Any, Any]]) -> list[dict[str, Any]]:
+    facts: list[dict[str, Any]] = []
+    for tool_call, output in tool_outputs[:6]:
+        safe_output = output.safe_output if isinstance(output.safe_output, dict) else {}
+        facts.append(
+            {
+                "tool_call_id": str(tool_call.id),
+                "tool_name": str(tool_call.tool_name),
+                "status": str(tool_call.status),
+                "safe_output": _compact_mapping(safe_output, max_items=8, max_chars=1200),
+            }
+        )
+    return facts
+
+
+def _compact_mapping(payload: dict[str, Any], *, max_items: int, max_chars: int) -> dict[str, Any]:
+    compacted: dict[str, Any] = {}
+    for key, value in list(payload.items())[:max_items]:
+        compacted[str(key)] = _compact_value(value=value, max_chars=max_chars)
+    return compacted
+
+
+def _compact_value(*, value: Any, max_chars: int) -> Any:
+    if isinstance(value, str):
+        return _compact_text(value, max_chars=max_chars)
+    if isinstance(value, int | float | bool) or value is None:
+        return value
+    if isinstance(value, dict):
+        return _compact_mapping(value, max_items=8, max_chars=max_chars)
+    if isinstance(value, list):
+        return [_compact_value(value=item, max_chars=max_chars) for item in value[:8]]
+    return _compact_text(str(value), max_chars=max_chars)
+
+
+def _compact_text(value: str, *, max_chars: int) -> str:
+    stripped = value.strip()
+    return stripped if len(stripped) <= max_chars else f"{stripped[:max_chars]}..."
+
+
+def _user_context(*, current_message: AgentMessage, now: datetime) -> dict[str, Any]:
+    content = current_message.content if isinstance(current_message.content, dict) else {}
+    location = _location_context(content.get("location"))
+    timezone_name = _text(content, "timezone") or _text(location, "timezone") or "UTC"
+    timezone_info, normalized_timezone = _timezone_info(timezone_name)
+    current_time = _aware_datetime(now).astimezone(timezone_info).isoformat()
+    user_context: dict[str, Any] = {
+        "current_time": current_time,
+        "timezone": normalized_timezone,
+        "locale": _text(content, "locale") or "zh-CN",
+    }
+    if location:
+        user_context["location"] = location
+    return user_context
+
+
+def _location_context(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    location: dict[str, Any] = {}
+    for key in ("country", "region", "city", "timezone"):
+        text_value = _text(value, key)
+        if text_value:
+            location[key] = text_value
+    for key in ("latitude", "longitude"):
+        number = value.get(key)
+        if isinstance(number, int | float):
+            location[key] = number
+    return location
+
+
+def _timezone_info(value: str) -> tuple[ZoneInfo, str]:
+    try:
+        return ZoneInfo(value), value
+    except ZoneInfoNotFoundError:
+        return ZoneInfo("UTC"), "UTC"
+
+
+def _aware_datetime(value: datetime) -> datetime:
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def _iso_or_empty(value: Any) -> str:

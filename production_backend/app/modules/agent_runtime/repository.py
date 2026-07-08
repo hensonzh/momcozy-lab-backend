@@ -16,6 +16,7 @@ from .models import (
     AgentEvent,
     AgentEvalCase,
     AgentMessage,
+    AgentRunSummary,
     AgentRoutingDecision,
     AgentRun,
     AgentSafetyEvent,
@@ -713,6 +714,86 @@ class AgentRuntimeRepository:
         result = await self.session.scalars(statement)
         return list(result.all())
 
+    async def upsert_run_summary(
+        self,
+        *,
+        run_id: UUID,
+        thread_id: UUID,
+        owner_user_id: UUID,
+        service_skill_id: str,
+        summary_type: str,
+        schema_version: str,
+        payload: dict[str, Any],
+        source_message_ids: list[Any],
+        source_tool_call_ids: list[Any],
+    ) -> AgentRunSummary:
+        statement = select(AgentRunSummary).where(
+            AgentRunSummary.run_id == run_id,
+            AgentRunSummary.summary_type == summary_type,
+        )
+        summary = cast(AgentRunSummary | None, await self.session.scalar(statement))
+        if summary is None:
+            summary = AgentRunSummary(
+                run_id=run_id,
+                thread_id=thread_id,
+                owner_user_id=owner_user_id,
+                service_skill_id=service_skill_id,
+                summary_type=summary_type,
+                schema_version=schema_version,
+                payload=payload,
+                source_message_ids=source_message_ids,
+                source_tool_call_ids=source_tool_call_ids,
+            )
+            self.session.add(summary)
+        else:
+            summary.service_skill_id = service_skill_id
+            summary.schema_version = schema_version
+            summary.payload = payload
+            summary.source_message_ids = source_message_ids
+            summary.source_tool_call_ids = source_tool_call_ids
+        await self.session.flush()
+        return summary
+
+    async def list_recent_run_summaries(
+        self,
+        *,
+        thread_id: UUID,
+        owner_user_id: UUID,
+        limit: int,
+        summary_type: str = "run_fact",
+        exclude_run_id: UUID | None = None,
+    ) -> list[AgentRunSummary]:
+        conditions = [
+            AgentRunSummary.thread_id == thread_id,
+            AgentRunSummary.owner_user_id == owner_user_id,
+            AgentRunSummary.summary_type == summary_type,
+        ]
+        if exclude_run_id is not None:
+            conditions.append(AgentRunSummary.run_id != exclude_run_id)
+        statement = (
+            select(AgentRunSummary)
+            .where(*conditions)
+            .order_by(AgentRunSummary.created_at.desc(), AgentRunSummary.id.desc())
+            .limit(limit)
+        )
+        result = await self.session.scalars(statement)
+        summaries = list(result.all())
+        summaries.reverse()
+        return summaries
+
+    async def get_latest_thread_summary(self, *, thread_id: UUID, owner_user_id: UUID) -> AgentRunSummary | None:
+        statement = (
+            select(AgentRunSummary)
+            .where(
+                AgentRunSummary.thread_id == thread_id,
+                AgentRunSummary.owner_user_id == owner_user_id,
+                AgentRunSummary.summary_type == "thread_summary",
+            )
+            .order_by(AgentRunSummary.created_at.desc(), AgentRunSummary.id.desc())
+            .limit(1)
+        )
+        return cast(AgentRunSummary | None, await self.session.scalar(statement))
+
     async def list_safety_events_for_run(self, *, run_id: UUID) -> list[AgentSafetyEvent]:
         statement = select(AgentSafetyEvent).where(AgentSafetyEvent.run_id == run_id).order_by(AgentSafetyEvent.created_at, AgentSafetyEvent.id)
         result = await self.session.scalars(statement)
@@ -742,6 +823,16 @@ class AgentRuntimeRepository:
         self.session.add(output)
         await self.session.flush()
         return output
+
+    async def list_tool_outputs_for_run(self, *, run_id: UUID) -> list[tuple[AgentToolCall, AgentToolOutput]]:
+        statement = (
+            select(AgentToolCall, AgentToolOutput)
+            .join(AgentToolOutput, AgentToolOutput.tool_call_id == AgentToolCall.id)
+            .where(AgentToolCall.run_id == run_id)
+            .order_by(AgentToolCall.created_at, AgentToolCall.id, AgentToolOutput.created_at, AgentToolOutput.id)
+        )
+        result = await self.session.execute(statement)
+        return [(cast(AgentToolCall, call), cast(AgentToolOutput, output)) for call, output in result.all()]
 
     async def record_safety_event(
         self,

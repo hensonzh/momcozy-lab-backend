@@ -1,12 +1,22 @@
 import asyncio
 import json
 from datetime import datetime, timezone
+from typing import Any
 from uuid import uuid4
 
 import pytest
 
 from production_backend.app.core.errors import ApiError
-from production_backend.app.modules.agent_runtime.models import AgentAction, AgentArtifact, AgentEvent, AgentMemory, AgentMessage, AgentRun, AgentToolCall
+from production_backend.app.modules.agent_runtime.models import (
+    AgentAction,
+    AgentArtifact,
+    AgentEvent,
+    AgentMemory,
+    AgentMessage,
+    AgentRun,
+    AgentRunSummary,
+    AgentToolCall,
+)
 from production_backend.app.modules.agent_runtime.routing import IntentItem, RoutingPlan, RoutingSource, ServiceSkillId
 from production_backend.app.modules.agent_runtime.run_lifecycle.executor import AgentRuntimeExecutor
 from production_backend.app.modules.agent_runtime.sdk import (
@@ -26,11 +36,23 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() ->
     run = _run(thread_id=thread_id, prompt_version="prompt-v2")
     prior_user = _message(thread_id=thread_id, run_id=uuid4(), role="user", text="What did we discuss?", sequence=1)
     prior_assistant = _message(thread_id=thread_id, run_id=uuid4(), role="assistant", text="Your care plan.", sequence=2)
-    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="Summarize it.", sequence=3)
+    current_user = _message(
+        thread_id=thread_id,
+        run_id=run.id,
+        role="user",
+        text="Summarize it.",
+        sequence=3,
+        content_overrides={
+            "timezone": "Asia/Shanghai",
+            "locale": "zh-CN",
+            "location": {"country": "CN", "region": "Shanghai", "city": "Shanghai"},
+        },
+    )
     repository = FakeRuntimeRepository(messages=[prior_user, prior_assistant, current_user], current_message=current_user)
     backend = CapturingSdkBackend(result=SdkNodeResult(final_text="Here is the summary."))
     checkpoint_store = FakeCheckpointStore()
     state_store = FakeStateStore()
+    fixed_now = datetime(2026, 7, 8, 6, 30, tzinfo=timezone.utc)
 
     result = asyncio.run(
         AgentRuntimeExecutor(
@@ -38,6 +60,7 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() ->
             checkpoint_store=checkpoint_store,
             state_store=state_store,
             sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            clock=lambda: fixed_now,
         ).execute(run=run)
     )
 
@@ -61,8 +84,25 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() ->
     ]
     assert request.model_input[0]["content"].startswith("你是 CozyMate")
     runtime_context = _runtime_context(request)
-    assert runtime_context["state"]["run_id"] == str(run.id)
-    assert runtime_context["state"]["service_skill_key"] == "general_assistant"
+    assert runtime_context["state"] == {
+        "service_skill_id": "general_assistant_v1",
+        "service_skill_version": "v1",
+        "selected_tool_group_ids": ["general.base"],
+        "execution_mode": "single",
+        "needs_clarification": False,
+        "safety_flags": [],
+    }
+    assert "run_id" not in runtime_context["state"]
+    assert "thread_id" not in runtime_context["state"]
+    assert "actor_user_id" not in runtime_context["state"]
+    assert runtime_context["user_context"] == {
+        "current_time": "2026-07-08T14:30:00+08:00",
+        "timezone": "Asia/Shanghai",
+        "locale": "zh-CN",
+        "location": {"country": "CN", "region": "Shanghai", "city": "Shanghai"},
+    }
+    assert runtime_context["thread_summary"] == {}
+    assert runtime_context["recent_run_facts"] == []
     assert repository.routing_decisions[0]["selected_skill_id"] == "general_assistant"
     assert repository.routing_decisions[0]["routing_source"] == "fallback"
     assert repository.routing_decisions[0]["confidence"] == 0.55
@@ -72,24 +112,16 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() ->
     assert state_store.projections[0]["selected_message_ids"] == [prior_user.id, prior_assistant.id, current_user.id]
     assert state_store.projections[0]["projection_summary"]["history_message_count"] == 2
     assert state_store.projections[0]["projection_summary"]["state_keys"] == [
-        "actor_user_id",
-        "graph_version",
-        "prompt_version",
-        "routing_confidence",
-        "routing_execution_mode",
-        "routing_reason_codes",
-        "routing_safety_flags",
-        "routing_source",
-        "run_id",
-        "runtime_pattern",
+        "execution_mode",
+        "needs_clarification",
+        "safety_flags",
         "selected_tool_group_ids",
-        "service_skill_deliverables",
         "service_skill_id",
-        "service_skill_key",
-        "service_skill_scope",
         "service_skill_version",
-        "thread_id",
     ]
+    assert state_store.projections[0]["projection_summary"]["recent_run_fact_count"] == 0
+    assert repository.run_summaries[0].payload["user_goal"] == "Summarize it."
+    assert repository.run_summaries[0].payload["assistant_conclusion"] == "Here is the summary."
 
 
 def test_agent_runtime_executor_projects_active_memory_into_dynamic_context() -> None:
@@ -329,7 +361,7 @@ def test_agent_runtime_executor_selects_service_skill_and_scopes_tools_by_group(
     assert request.service_skill_id == "lactation"
     assert "已选择服务技能：lactation" in request.instructions
     state = _runtime_context(request)["state"]
-    assert state["service_skill_key"] == "lactation"
+    assert state["service_skill_id"] == "lactation_v1"
     assert state["selected_tool_group_ids"] == ["general.base", "lactation.milk_read"]
     assert request.tool_names == (
         "business.context.read",
@@ -370,6 +402,62 @@ def test_agent_runtime_executor_injects_pregnancy_service_skill() -> None:
     assert "artifacts.hospital_bag_card.create" in request.tool_names
     assert "artifacts.labor_communication_card.create" in request.tool_names
     assert state_store.projections[0]["projection_summary"]["service_skill_id"] == "pregnancy_service_v1"
+
+
+def test_agent_runtime_executor_projects_recent_run_facts_into_dynamic_context() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    previous_run_id = uuid4()
+    previous_summary = AgentRunSummary(
+        id=uuid4(),
+        run_id=previous_run_id,
+        thread_id=thread_id,
+        owner_user_id=run.actor_user_id,
+        service_skill_id="lactation",
+        summary_type="run_fact",
+        schema_version="v1",
+        payload={
+            "user_goal": "昨天奶量怎么样？",
+            "assistant_conclusion": "昨天总奶量偏低，建议今天观察补水和吸奶频率。",
+            "tools_used": ["records.milk_summary.read"],
+            "tool_facts": [{"tool_name": "records.milk_summary.read", "safe_output": {"total_ml": 420}}],
+            "verbose_unused": "x" * 3000,
+        },
+        source_message_ids=[],
+        source_tool_call_ids=[],
+        created_at=datetime(2026, 7, 7, 10, 0, tzinfo=timezone.utc),
+        updated_at=datetime(2026, 7, 7, 10, 0, tzinfo=timezone.utc),
+    )
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="那今天怎么安排？", sequence=1)
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user, run_summaries=[previous_summary])
+    backend = CapturingSdkBackend(result=SdkNodeResult(final_text="今天先看最近一次记录。"))
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+        ).execute(run=run)
+    )
+
+    recent_run_facts = _runtime_context(backend.requests[0])["recent_run_facts"]
+    assert result.status == "completed"
+    assert recent_run_facts == [
+        {
+            "run_id": str(previous_run_id),
+            "service_skill_id": "lactation",
+            "schema_version": "v1",
+            "created_at": "2026-07-07T10:00:00+00:00",
+            "facts": {
+                "user_goal": "昨天奶量怎么样？",
+                "assistant_conclusion": "昨天总奶量偏低，建议今天观察补水和吸奶频率。",
+                "tools_used": ["records.milk_summary.read"],
+                "tool_facts": [{"tool_name": "records.milk_summary.read", "safe_output": {"total_ml": 420}}],
+                "verbose_unused": ("x" * 2400) + "...",
+            },
+        }
+    ]
+    assert repository.run_summaries[-1].run_id == run.id
+    assert repository.run_summaries[-1].payload["assistant_conclusion"] == "今天先看最近一次记录。"
 
 
 def test_agent_runtime_executor_routes_named_pump_issue_to_device_service_skill() -> None:
@@ -466,6 +554,15 @@ def test_agent_runtime_executor_real_tool_executor_uses_run_actor_role_permissio
     assert repository.events[0].event_type == "tool.started"
     assert repository.events[1].event_type == "tool.completed"
     assert result.final_text == "Profile context loaded."
+    assert repository.run_summaries[0].payload["tools_used"] == ["profile.read"]
+    assert repository.run_summaries[0].payload["tool_facts"] == [
+        {
+            "tool_call_id": str(repository.tool_call.id),
+            "tool_name": "profile.read",
+            "status": "completed",
+            "safe_output": {"profile": {"actor_user_id": str(run.actor_user_id)}},
+        }
+    ]
 
 
 def test_agent_runtime_executor_persists_sdk_action_proposal_and_waits_for_confirmation() -> None:
@@ -712,7 +809,14 @@ def _runtime_context(request: SdkNodeRequest) -> dict:
 
 
 class FakeRuntimeRepository:
-    def __init__(self, *, messages: list[AgentMessage], current_message: AgentMessage | None, run: AgentRun | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        messages: list[AgentMessage],
+        current_message: AgentMessage | None,
+        run: AgentRun | None = None,
+        run_summaries: list[AgentRunSummary] | None = None,
+    ) -> None:
         self.messages = messages
         self.current_message = current_message
         self.run = run
@@ -722,6 +826,7 @@ class FakeRuntimeRepository:
         self.routing_decisions = []
         self.tool_call = None
         self.tool_output = None
+        self.run_summaries = list(run_summaries or [])
 
     async def get_latest_user_message_for_run(self, *, run_id):
         if self.current_message is not None and self.current_message.run_id == run_id:
@@ -821,6 +926,57 @@ class FakeRuntimeRepository:
 
     async def list_actions_for_run(self, *, run_id):
         return [action for action in self.actions if action.run_id == run_id]
+
+    async def list_artifacts_for_run(self, *, run_id):
+        return [artifact for artifact in self.artifacts if artifact.run_id == run_id]
+
+    async def list_tool_outputs_for_run(self, *, run_id):
+        if self.tool_call is None or self.tool_output is None or self.tool_call.run_id != run_id:
+            return []
+        return [(self.tool_call, self.tool_output)]
+
+    async def list_recent_run_summaries(self, *, thread_id, owner_user_id, limit, summary_type="run_fact", exclude_run_id=None):
+        summaries = [
+            summary
+            for summary in self.run_summaries
+            if summary.thread_id == thread_id
+            and summary.owner_user_id == owner_user_id
+            and summary.summary_type == summary_type
+            and summary.run_id != exclude_run_id
+        ]
+        return summaries[-limit:]
+
+    async def get_latest_thread_summary(self, *, thread_id, owner_user_id):
+        for summary in reversed(self.run_summaries):
+            if summary.thread_id == thread_id and summary.owner_user_id == owner_user_id and summary.summary_type == "thread_summary":
+                return summary
+        return None
+
+    async def upsert_run_summary(self, **kwargs):
+        for summary in self.run_summaries:
+            if summary.run_id == kwargs["run_id"] and summary.summary_type == kwargs["summary_type"]:
+                summary.service_skill_id = kwargs["service_skill_id"]
+                summary.schema_version = kwargs["schema_version"]
+                summary.payload = kwargs["payload"]
+                summary.source_message_ids = kwargs["source_message_ids"]
+                summary.source_tool_call_ids = kwargs["source_tool_call_ids"]
+                return summary
+        summary = AgentRunSummary(
+            id=uuid4(),
+            run_id=kwargs["run_id"],
+            thread_id=kwargs["thread_id"],
+            owner_user_id=kwargs["owner_user_id"],
+            service_skill_id=kwargs["service_skill_id"],
+            summary_type=kwargs["summary_type"],
+            schema_version=kwargs["schema_version"],
+            payload=kwargs["payload"],
+            source_message_ids=kwargs["source_message_ids"],
+            source_tool_call_ids=kwargs["source_tool_call_ids"],
+            created_at=datetime(2026, 7, 8, 8, 0, tzinfo=timezone.utc),
+            updated_at=datetime(2026, 7, 8, 8, 0, tzinfo=timezone.utc),
+        )
+        self.run_summaries.append(summary)
+        return summary
 
 
 class FakeCheckpointStore:
@@ -946,14 +1102,17 @@ def _run(*, thread_id, run_id=None, prompt_version: str = "") -> AgentRun:
     )
 
 
-def _message(*, thread_id, run_id, role: str, text: str, sequence: int) -> AgentMessage:
+def _message(*, thread_id, run_id, role: str, text: str, sequence: int, content_overrides: dict[str, Any] | None = None) -> AgentMessage:
+    content = {"text": text}
+    if content_overrides:
+        content.update(content_overrides)
     return AgentMessage(
         id=uuid4(),
         thread_id=thread_id,
         run_id=run_id,
         role=role,
         message_type="text",
-        content={"text": text},
+        content=content,
         status="completed",
         sequence=sequence,
     )

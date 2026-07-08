@@ -135,6 +135,12 @@ class FakeEvalRuntimeRepository:
     async def list_safety_events_for_run(self, *, run_id: UUID):
         return [event for event in self.safety_events if event.run_id == run_id]
 
+    async def list_recent_run_summaries(self, **kwargs):
+        return []
+
+    async def get_latest_thread_summary(self, **kwargs):
+        return None
+
 
 def _case(suite: str) -> dict:
     return next(case for case in load_product_agent_eval_seed_cases(PRODUCT_AGENT_EVAL_SEED) if case["suite"] == suite)

@@ -420,6 +420,51 @@ class AgentContextProjection(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
+class AgentRunSummary(Base):
+    __tablename__ = "agent_run_summaries"
+    __table_args__ = (
+        UniqueConstraint("run_id", "summary_type", name="uq_agent_run_summaries_run_type"),
+        Index("ix_agent_run_summaries_thread_created", "thread_id", "created_at"),
+        Index("ix_agent_run_summaries_owner_skill_created", "owner_user_id", "service_skill_id", "created_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    run_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("agent_runs.id"), nullable=False)
+    thread_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("agent_threads.id"), nullable=False)
+    owner_user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    service_skill_id: Mapped[str] = mapped_column(String(80), default="", server_default="", nullable=False)
+    summary_type: Mapped[str] = mapped_column(String(40), default="run_fact", server_default="run_fact", nullable=False)
+    schema_version: Mapped[str] = mapped_column(String(80), default="v1", server_default="v1", nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(
+        "payload_json",
+        postgresql.JSONB,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
+        nullable=False,
+    )
+    source_message_ids: Mapped[list[Any]] = mapped_column(
+        "source_message_ids_json",
+        postgresql.JSONB,
+        default=list,
+        server_default=text("'[]'::jsonb"),
+        nullable=False,
+    )
+    source_tool_call_ids: Mapped[list[Any]] = mapped_column(
+        "source_tool_call_ids_json",
+        postgresql.JSONB,
+        default=list,
+        server_default=text("'[]'::jsonb"),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+
 class AgentMemory(Base):
     __tablename__ = "agent_memories"
     __table_args__ = (
