@@ -3,15 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..routing.schemas import SpecialistId
-from ..skills.definitions import (
-    AFTER_SALES_SERVICE_SKILL,
-    GENERAL_SERVICE_SKILL,
-    LACTATION_SERVICE_SKILL,
-    POSTPARTUM_SERVICE_SKILL,
-    PREGNANCY_SERVICE_SKILL,
-    SAFETY_SERVICE_SKILL,
-    AgentServiceSkill,
-)
+from ..skills.definitions import AgentServiceSkill, default_service_skill_registry
 from ..tools.contracts import ToolContract
 
 
@@ -61,6 +53,7 @@ class AgentSpecialistRegistry:
 
 
 def default_specialist_registry() -> AgentSpecialistRegistry:
+    service_skills = default_service_skill_registry()
     return AgentSpecialistRegistry(
         profiles=(
             AgentSpecialistProfile(
@@ -70,7 +63,7 @@ def default_specialist_registry() -> AgentSpecialistRegistry:
                     "Use the lactation service skill for milk status, feeding, pumping, milk-management plans, "
                     "and IBCLC handoff flows."
                 ),
-                service_skill=LACTATION_SERVICE_SKILL,
+                service_skill=service_skills.get(SpecialistId.LACTATION.value),
                 tool_contracts=(
                     "artifacts.lactation_summary.create",
                     "profile.read",
@@ -125,7 +118,7 @@ def default_specialist_registry() -> AgentSpecialistRegistry:
                     "Use the pregnancy service skill for pregnancy plans, hospital-bag cards, diary entries, "
                     "birth preparation, and labor communication cards."
                 ),
-                service_skill=PREGNANCY_SERVICE_SKILL,
+                service_skill=service_skills.get(SpecialistId.PREGNANCY.value),
                 tool_contracts=(
                     "artifacts.hospital_bag_card.create",
                     "artifacts.labor_communication_card.create",
@@ -176,7 +169,7 @@ def default_specialist_registry() -> AgentSpecialistRegistry:
                     "Use the postpartum recovery service skill for gentle recovery check-ins, daily state summaries, "
                     "diary context, and recovery task planning."
                 ),
-                service_skill=POSTPARTUM_SERVICE_SKILL,
+                service_skill=service_skills.get(SpecialistId.POSTPARTUM.value),
                 tool_contracts=(
                     "artifacts.postpartum_checkin.create",
                     "profile.read",
@@ -211,7 +204,7 @@ def default_specialist_registry() -> AgentSpecialistRegistry:
                     "Use the after-sales service skill for device guidance, troubleshooting, support handoff, and support "
                     "ticket proposal flows."
                 ),
-                service_skill=AFTER_SALES_SERVICE_SKILL,
+                service_skill=service_skills.get(SpecialistId.AFTER_SALES.value),
                 tool_contracts=(
                     "profile.read",
                     "business.context.read",
@@ -255,7 +248,7 @@ def default_specialist_registry() -> AgentSpecialistRegistry:
                     "Use the safety service skill for emergency, health red-flag, emotional-crisis, child-safety, "
                     "permission-bypass, and prompt-injection messages."
                 ),
-                service_skill=SAFETY_SERVICE_SKILL,
+                service_skill=service_skills.get(SpecialistId.SAFETY.value),
                 tool_contracts=("profile.read", "business.context.read", "support.ticket.propose"),
                 trigger_terms=(
                     "emergency",
@@ -279,7 +272,7 @@ def default_specialist_registry() -> AgentSpecialistRegistry:
                     "Use the general service skill for lightweight MomCozy assistance, navigation, clarification, and "
                     "non-sensitive memory preference capture."
                 ),
-                service_skill=GENERAL_SERVICE_SKILL,
+                service_skill=service_skills.get(SpecialistId.GENERAL.value),
                 tool_contracts=(
                     "profile.read",
                     "business.context.read",

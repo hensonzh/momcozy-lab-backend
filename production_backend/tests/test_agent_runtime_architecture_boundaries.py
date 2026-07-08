@@ -17,6 +17,7 @@ from production_backend.app.modules.agent_runtime.prompts import (
 )
 from production_backend.app.modules.agent_runtime.sdk import OpenAIAgentsSdkRunner, SdkNodeRequest, SdkNodeResult, SdkToolDefinition, sdk_tool_name
 from production_backend.app.modules.agent_runtime.skills import default_service_skill_registry
+from production_backend.app.modules.agent_runtime.skills.definitions import SERVICE_SKILL_FILE_NAME, SERVICE_SKILLS_ROOT, load_service_skill
 from production_backend.app.modules.agent_runtime.tools import default_tool_registry, tool_input_schema
 from production_backend.app.modules.agent_runtime.tools.output_policy import INSTRUCTIONAL_TOOL_OUTPUT_KEYS
 
@@ -45,6 +46,20 @@ def test_service_skill_registry_is_the_model_facing_entrypoint() -> None:
     assert pregnancy_skill.specialist_id == "pregnancy_service"
     assert "服务 Skill pregnancy_service_v1" in pregnancy_skill.prompt_block()
     assert "待产包清单" in pregnancy_skill.prompt_block()
+
+
+def test_service_skills_are_file_backed_skill_directories() -> None:
+    skill_registry = default_service_skill_registry()
+
+    for skill in skill_registry.list():
+        assert skill.source_path.name == SERVICE_SKILL_FILE_NAME
+        assert skill.source_path.parent.parent == SERVICE_SKILLS_ROOT
+        assert skill.source_path.exists()
+        assert skill.source_path.read_text(encoding="utf-8").startswith("---\n")
+        reloaded = load_service_skill(skill.source_path)
+        assert reloaded.id == skill.id
+        assert reloaded.specialist_id == skill.specialist_id
+        assert reloaded.prompt_block() == skill.prompt_block()
 
 
 def test_prompt_ownership_policy_keeps_workflow_in_service_skills() -> None:
