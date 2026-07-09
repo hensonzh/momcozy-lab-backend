@@ -70,7 +70,7 @@ def test_agent_thread_run_events_and_cancel_use_current_user_scope() -> None:
     assert events.status_code == 200
     assert events.json()["items"][0]["type"] == "run.queued"
     assert stream.status_code == 200
-    assert _sse_payloads(stream.text)[0]["type"] == "RUN_STARTED"
+    assert _sse_payloads(stream.text)[0]["type"] == "run.queued"
     assert cancel.status_code == 200
     assert fake_service.list_threads_kwargs["owner_user_id"] == user_id
     assert fake_service.get_run_kwargs["owner_user_id"] == user_id
@@ -125,8 +125,7 @@ def test_agent_stream_can_follow_until_terminal_event() -> None:
 
     assert response.status_code == 200
     payloads = _sse_payloads(response.text)
-    assert [payload["type"] for payload in payloads] == ["CUSTOM", "RUN_FINISHED"]
-    assert payloads[0]["name"] == "momcozy.agent.status"
+    assert [payload["type"] for payload in payloads] == ["run.progress", "run.completed"]
     assert fake_service.list_events_call_count == 2
 
 

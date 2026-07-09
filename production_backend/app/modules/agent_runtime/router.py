@@ -42,7 +42,7 @@ from .schemas import (
 )
 from .service import AgentRuntimeService
 from .run_lifecycle.controls import AgentRunControls
-from .event_stream.ag_ui import AgUiSseEncoder
+from .event_stream.sse import encode_sse_events, encode_transient_sse_events
 from .event_stream.transient import AgentTransientStream, AgentTransientStreamEvent
 
 
@@ -373,8 +373,8 @@ async def _stream_run_event_chunks(
 ) -> AsyncIterator[str]:
     cursor = after_sequence
     transient_cursor = "0-0"
+    streamed_dedupe_keys: set[str] = set()
     deadline = monotonic() + max_wait_seconds
-    encoder = AgUiSseEncoder()
     while True:
         if is_disconnected is not None and await is_disconnected():
             return
@@ -382,11 +382,19 @@ async def _stream_run_event_chunks(
         if events:
             final_event_index = _first_final_event_index(events)
             if final_event_index > 0:
-                pre_final_events = events[:final_event_index]
-                encoded = encoder.encode_persisted(pre_final_events)
+                pre_final_candidates = events[:final_event_index]
+                pre_final_events = _filter_events_seen_in_transient_stream(
+                    pre_final_candidates,
+                    run_id=run_id,
+                    dedupe_keys=streamed_dedupe_keys,
+                )
+                streamed_dedupe_keys.update(
+                    key for event in pre_final_events if (key := _persisted_event_dedupe_key(event, run_id=run_id))
+                )
+                encoded = encode_sse_events(pre_final_events)
                 if encoded:
                     yield encoded
-                cursor = pre_final_events[-1].sequence
+                cursor = pre_final_candidates[-1].sequence
             if final_event_index != -1:
                 transient_events = await _read_transient_events(
                     transient_stream=transient_stream,
@@ -396,16 +404,34 @@ async def _stream_run_event_chunks(
                 )
                 if transient_events:
                     transient_cursor = transient_events[-1].cursor
-                    encoded = encoder.encode_transient(transient_events)
+                    transient_events = _filter_transient_events_seen_in_stream(
+                        transient_events,
+                        dedupe_keys=streamed_dedupe_keys,
+                    )
+                    streamed_dedupe_keys.update(
+                        key for event in transient_events if (key := _transient_event_dedupe_key(event))
+                    )
+                    encoded = encode_transient_sse_events(transient_events)
                     if encoded:
                         yield encoded
                 final_events = events[final_event_index:]
-                encoded = encoder.encode_persisted(final_events)
+                streamed_dedupe_keys.update(
+                    key for event in final_events if (key := _persisted_event_dedupe_key(event, run_id=run_id))
+                )
+                encoded = encode_sse_events(final_events)
                 if encoded:
                     yield encoded
                 cursor = final_events[-1].sequence
             elif final_event_index == -1:
-                encoded = encoder.encode_persisted(events)
+                visible_events = _filter_events_seen_in_transient_stream(
+                    events,
+                    run_id=run_id,
+                    dedupe_keys=streamed_dedupe_keys,
+                )
+                streamed_dedupe_keys.update(
+                    key for event in visible_events if (key := _persisted_event_dedupe_key(event, run_id=run_id))
+                )
+                encoded = encode_sse_events(visible_events)
                 if encoded:
                     yield encoded
                 cursor = events[-1].sequence
@@ -422,7 +448,14 @@ async def _stream_run_event_chunks(
             )
             if transient_events:
                 transient_cursor = transient_events[-1].cursor
-                encoded = encoder.encode_transient(transient_events)
+                transient_events = _filter_transient_events_seen_in_stream(
+                    transient_events,
+                    dedupe_keys=streamed_dedupe_keys,
+                )
+                streamed_dedupe_keys.update(
+                    key for event in transient_events if (key := _transient_event_dedupe_key(event))
+                )
+                encoded = encode_transient_sse_events(transient_events)
                 if encoded:
                     yield encoded
                 continue
@@ -455,3 +488,44 @@ async def _read_transient_events(
         count=100,
         block_ms=block_ms,
     )
+
+
+def _filter_events_seen_in_transient_stream(
+    events: list[object],
+    *,
+    run_id: UUID,
+    dedupe_keys: set[str],
+) -> list[object]:
+    if not dedupe_keys:
+        return events
+    return [event for event in events if _persisted_event_dedupe_key(event, run_id=run_id) not in dedupe_keys]
+
+
+def _filter_transient_events_seen_in_stream(
+    events: list[AgentTransientStreamEvent],
+    *,
+    dedupe_keys: set[str],
+) -> list[AgentTransientStreamEvent]:
+    if not dedupe_keys:
+        return events
+    return [event for event in events if _transient_event_dedupe_key(event) not in dedupe_keys]
+
+
+def _transient_event_dedupe_key(event: AgentTransientStreamEvent) -> str | None:
+    live_semantic = event.payload.get("_live_semantic")
+    if isinstance(live_semantic, dict):
+        dedupe_key = live_semantic.get("dedupe_key")
+        if isinstance(dedupe_key, str) and dedupe_key.strip():
+            return dedupe_key
+    return None
+
+
+def _persisted_event_dedupe_key(event: object, *, run_id: UUID) -> str | None:
+    event_type = str(getattr(event, "event_type", "") or "")
+    payload = getattr(event, "payload", None)
+    if not isinstance(payload, dict):
+        return None
+    unique_id = payload.get("tool_call_id") or payload.get("action_id")
+    if not isinstance(unique_id, str) or not unique_id.strip():
+        return None
+    return f"{run_id}:{event_type}:{unique_id}"
