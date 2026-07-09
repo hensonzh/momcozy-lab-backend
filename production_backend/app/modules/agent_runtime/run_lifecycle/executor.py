@@ -56,6 +56,7 @@ from ..memory.service import AgentMemoryService
 from ..models import AgentAction, AgentArtifact, AgentEvent, AgentMessage, AgentRun
 from ..payloads import DEFAULT_MAX_INLINE_PAYLOAD_BYTES, maybe_externalize_json_payload
 from ..repository import AgentRuntimeRepository
+from ..response_text import sanitize_agent_response_text
 from ..sdk import (
     OpenAIAgentsSdkRunner,
     SdkNodeRequest,
@@ -182,6 +183,8 @@ class AgentRuntimeExecutor:
         self._run_assistant_message_ids: dict[UUID, UUID] = {}
         self._run_quick_replies: dict[UUID, list[dict[str, Any]]] = {}
         self._run_suppress_quick_replies: set[UUID] = set()
+        self._run_text_stream_buffers: dict[UUID, str] = {}
+        self._run_text_stream_emitted: dict[UUID, str] = {}
 
     async def __call__(self, run: AgentRun) -> AgentRunExecutionResult:
         return await self.execute(run=run)
@@ -195,6 +198,8 @@ class AgentRuntimeExecutor:
         self._run_loaded_service_skill_ids[run.id] = set()
         self._run_quick_replies[run.id] = []
         self._run_suppress_quick_replies.discard(run.id)
+        self._run_text_stream_buffers[run.id] = ""
+        self._run_text_stream_emitted[run.id] = ""
         try:
             turn_context = await self._load_turn_context(run=run)
             if turn_context.resident_loaded_service_skill is not None:
@@ -214,6 +219,8 @@ class AgentRuntimeExecutor:
             self._run_loaded_service_skill_ids.pop(run.id, None)
             self._run_quick_replies.pop(run.id, None)
             self._run_suppress_quick_replies.discard(run.id)
+            self._run_text_stream_buffers.pop(run.id, None)
+            self._run_text_stream_emitted.pop(run.id, None)
 
     async def _load_turn_context(self, *, run: AgentRun) -> _AgentTurnContext:
         timings_ms: dict[str, float] = {}
@@ -390,7 +397,10 @@ class AgentRuntimeExecutor:
         )
         if pending_action is not None:
             return AgentRunExecutionResult(status="waiting_for_confirmation", pending_action_id=pending_action.id)
-        final_text = result.final_text.strip()
+        sanitized_response = sanitize_agent_response_text(str(result.final_text or ""))
+        final_text = sanitized_response.text.strip()
+        if not final_text and str(result.final_text or "").strip():
+            final_text = "我已经整理好了。"
         if not final_text:
             raise ApiError(code="empty_agent_response", message="Agent runtime returned an empty response.", status=502)
         await self._save_checkpoint(
@@ -410,8 +420,11 @@ class AgentRuntimeExecutor:
             current_message=turn_context.current_message,
             result=result,
             turn_context=turn_context,
+            final_text=final_text,
         )
         quick_replies = [] if run.id in self._run_suppress_quick_replies else list(self._run_quick_replies.get(run.id, []))
+        if not quick_replies and run.id not in self._run_suppress_quick_replies:
+            quick_replies = list(sanitized_response.quick_replies)
         if not quick_replies and run.id not in self._run_suppress_quick_replies:
             quick_replies = _fallback_quick_replies(final_text)
         return AgentRunExecutionResult(
@@ -483,10 +496,21 @@ class AgentRuntimeExecutor:
             return None
 
         async def publish(delta: str) -> None:
+            raw_text = f"{self._run_text_stream_buffers.get(run.id, '')}{delta or ''}"
+            self._run_text_stream_buffers[run.id] = raw_text
+            sanitized_text = sanitize_agent_response_text(raw_text).text
+            emitted_text = self._run_text_stream_emitted.get(run.id, "")
+            if sanitized_text.startswith(emitted_text):
+                sanitized_delta = sanitized_text[len(emitted_text) :]
+            else:
+                sanitized_delta = sanitized_text
+            if not sanitized_delta:
+                return
+            self._run_text_stream_emitted[run.id] = sanitized_text
             await transient_stream.publish_message_delta(
                 thread_id=run.thread_id,
                 run_id=run.id,
-                delta=delta,
+                delta=sanitized_delta,
                 message_stream_id=str(self._run_assistant_message_ids.get(run.id) or "assistant"),
             )
 
@@ -860,6 +884,7 @@ class AgentRuntimeExecutor:
         current_message: AgentMessage,
         result: Any,
         turn_context: _AgentTurnContext,
+        final_text: str,
     ) -> None:
         tool_outputs = await self.repository.list_tool_outputs_for_run(run_id=run.id)
         actions = await self.repository.list_actions_for_run(run_id=run.id)
@@ -868,7 +893,7 @@ class AgentRuntimeExecutor:
         service_skill_id = loaded_service_skills[-1]["service_skill_id"] if loaded_service_skills else AgentId.COZYMATE_SERVICE_AGENT.value
         payload = {
             "user_goal": _compact_text(_message_text(current_message), max_chars=500),
-            "assistant_conclusion": _compact_text(str(getattr(result, "final_text", "") or ""), max_chars=1000),
+            "assistant_conclusion": _compact_text(final_text, max_chars=1000),
             "tools_used": _tool_names_from_summary_sources(tool_outputs=tool_outputs, result_tool_calls=getattr(result, "tool_calls", [])),
             "tool_facts": _tool_fact_projection(tool_outputs),
             "loaded_service_skills": loaded_service_skills,

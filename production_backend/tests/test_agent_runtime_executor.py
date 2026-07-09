@@ -405,7 +405,7 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     )
 
     assert result.status == "completed"
-    assert result.final_text == '{"profile": {"display_name": "Mai"}}'
+    assert result.final_text == "我已经整理好了。"
     assert backend.tool_names == (
         "load_service_skill",
         "birth_journey_plan_card_create",
@@ -631,6 +631,62 @@ def test_agent_runtime_executor_collects_quick_replies_for_final_message() -> No
     assert result.quick_replies == replies
     assert tool_executor.calls[0]["tool_name"] == "ui_quick_replies_create"
     assert {delta["message_stream_id"] for delta in transient_stream.deltas} == {str(result.assistant_message_id)}
+
+
+def test_agent_runtime_executor_extracts_quick_replies_from_final_text_json() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="给我三个下一步选项", sequence=1)
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    backend = ScriptedSdkBackend(
+        [
+            scripted_sdk_response(
+                final_text=(
+                    '已经整理好了。\n'
+                    '{"quick_replies":[{"text":"继续聊这个"},{"text":"给我更多细节"},{"text":"换个方向"}]}'
+                ),
+            )
+        ]
+    )
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+        ).execute(run=run)
+    )
+
+    assert result.status == "completed"
+    assert result.final_text == "已经整理好了。"
+    assert result.quick_replies == [{"text": "继续聊这个"}, {"text": "给我更多细节"}, {"text": "换个方向"}]
+
+
+def test_agent_runtime_executor_suppresses_streamed_structured_json_deltas() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="Read my profile", sequence=1)
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    transient_stream = FakeTransientStream()
+    backend = ScriptedSdkBackend(
+        [
+            scripted_sdk_response(
+                final_text='{"profile":{"display_name":"Mai"}}',
+                text_deltas=('{"profile":', '{"display_name":"Mai"}}'),
+            )
+        ]
+    )
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            transient_stream=transient_stream,
+        ).execute(run=run)
+    )
+
+    assert result.status == "completed"
+    assert result.final_text == "我已经整理好了。"
+    assert transient_stream.deltas == []
 
 
 def test_agent_runtime_executor_adds_fallback_quick_replies_when_model_skips_tool() -> None:

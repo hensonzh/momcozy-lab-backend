@@ -12,6 +12,7 @@ from typing import Any, Protocol
 
 from ....core.metrics import RequestMetrics
 from ....core.errors import ApiError
+from ..response_text import sanitize_agent_response_text
 
 
 SdkToolInvoker = Callable[[str], Awaitable[str]]
@@ -661,14 +662,7 @@ def _stringify_content(content: object) -> str:
 
 
 def _sanitize_model_text(text: str) -> str:
-    without_closed_blocks = re.sub(r"(?is)<think>.*?</think>\s*", "", text)
-    without_open_block = re.sub(r"(?is)<think>.*$", "", without_closed_blocks)
-    lower_text = without_open_block.lower()
-    max_partial_len = min(len(THINK_TAG) - 1, len(lower_text))
-    for size in range(max_partial_len, 0, -1):
-        if THINK_TAG.startswith(lower_text[-size:]):
-            return without_open_block[:-size].strip()
-    return without_open_block.strip()
+    return sanitize_agent_response_text(text).text
 
 
 def sdk_tool_name(contract_name: str) -> str:
