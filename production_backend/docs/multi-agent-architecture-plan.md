@@ -102,6 +102,33 @@ general_support_agent
   产品介绍、非业务闲聊、无法归类但安全的基础问答。
 ```
 
+### 当前单智能体的迁移定位
+
+当前 production backend 的 agent 实现是一个单智能体承载多个 service skill 和多组工具。
+它不应被直接替换掉，而应先作为目标多智能体架构中的一个子智能体迁入：
+
+```text
+main_coordinator_agent
+  -> cozymate_service_agent
+       当前单智能体能力：多个 service skill + 多组工具 + artifact/action contract。
+  -> future lactation_agent
+  -> future birth_prep_agent
+  -> future device_guidance_agent
+  -> future safety_support_agent
+```
+
+`cozymate_service_agent` 的定位是迁移期的综合服务子智能体：
+
+- 保留现有 CozyMate 统一语气、已验证 tool/action 闭环和 eval seed。
+- 承接尚未拆出的孕期、泌乳、设备、产后恢复、支持和通用问答流程。
+- 作为 Main Agent 的一个 target agent，而不是继续承担全局路由、缺失信息汇总和多智能体编排。
+- 后续按产品主流程逐步拆出更细的场景子智能体；拆出后，从 `cozymate_service_agent`
+  中移除对应 skill、工具组和 eval ownership。
+
+注意：不能长期把所有能力都放在 `cozymate_service_agent` 下，否则架构会退化为
+`Main Agent -> Giant Old Agent -> all skills/tools`。迁移期可以保守复用，目标状态仍然是
+场景子智能体各自拥有清晰服务范围、工具包、交付物和 eval。
+
 每个子智能体必须拥有：
 
 - 独立 `SKILL.md`。
@@ -253,6 +280,114 @@ skills/
 
 不要在 `SKILL.md` 中重复全局人设、全局医疗安全免责声明、全局工具契约或后端权限规则。
 这些由全局 prompt 和后端 runtime contract 统一负责。
+
+## 代码组织
+
+当前 `agent_runtime` 目录偏按技术层横向分类：`prompts/`、`skills/`、`tools/`、
+`routing/`、`graphs/` 等分别存放。这种结构方便搭 runtime 底座，但当能力变多时，
+理解一个智能体需要跨目录追 prompt、skill、tool schema、tool handler、artifact 和 eval，
+维护成本会越来越高。
+
+目标代码组织采用 **智能体体验资产纵向聚合，runtime 基础设施横向共享**：
+
+```text
+app/modules/agent_runtime/
+  runtime/
+    service.py
+    repository.py
+    models.py
+    router.py
+    run_lifecycle/
+    graphs/
+    sdk/
+    event_stream/
+
+  shared/
+    actions/
+    context/
+    memory/
+    safety/
+    tool_contract_base.py
+    tool_executor.py
+
+  agents/
+    main_coordinator/
+      spec.py
+      schemas.py
+      prompts/
+        system.md
+      runner.py
+      evals/
+
+    cozymate_service/
+      spec.py
+      prompts/
+        system.md
+      skills/
+        birth-prep/SKILL.md
+        milk-management/SKILL.md
+        health-consultation/SKILL.md
+        emotion-support/SKILL.md
+        device-guidance/SKILL.md
+      tools/
+        contracts.py
+        schemas.py
+        handlers.py
+        groups.py
+      artifacts.py
+      evals/
+
+    lactation/
+      spec.py
+      prompts/
+      skills/
+      tools/
+      evals/
+
+    birth_prep/
+      spec.py
+      prompts/
+      skills/
+      tools/
+      evals/
+```
+
+每个 agent 目录对 runtime 暴露一个稳定 `AgentSpec`，至少包含：
+
+- `agent_id`、`name`、`description` 和服务范围。
+- system prompt 或 prompt version。
+- skill manifest 或完整 skill 资源。
+- tool contracts、tool groups 和 tool handlers。
+- artifact/action ownership。
+- result schema，例如 `SceneAgentResult`。
+- eval suites 和 replay fixtures。
+
+runtime 层只消费 agent registry，不直接了解某个 agent 的内部文件布局：
+
+```text
+AgentRegistry
+  -> Main Agent 选择 target agent
+  -> Runtime 根据 AgentSpec 构造 SDK node / graph node
+  -> ToolExecutor 统一执行权限、owner scope、audit、safe output 和 outbox policy
+```
+
+需要保留横向共享的内容：
+
+- `agent_threads`、`agent_runs`、`agent_messages`、`agent_events`、checkpoint 和 routing
+  decision 等 runtime ledger。
+- safety gate、permission、owner scope、prompt injection 防护、rate/cost limit。
+- action policy、confirmation、audit、outbox、idempotency。
+- event stream、SSE replay、Redis transient delta、cancel/resume。
+- memory projection 和用户可见 memory 管理。
+
+不应搬进 agent 目录的内容：
+
+- 业务 service 和 repository，例如 records、plans、diary、devices、support。
+- 数据库模型和 migration。
+- 通用 ToolExecutor、ActionPolicy、EventSink、GraphCheckpointStore。
+
+agent 目录中的 tool handler 只是模型工具到业务 service 的 adapter，负责 schema 校验、
+权限、safe payload、错误映射和审计上下文；业务事实和业务写入仍归业务模块所有。
 
 ## 工具包设计
 
@@ -450,8 +585,19 @@ Context projection:
 - 定义 `MainAgentPlan` schema。
 - 定义 `SceneAgentResult` schema。
 - 定义子智能体 registry。
+- 定义 `AgentSpec`，让每个智能体显式声明 prompt、skill、tool package、artifact/action ownership 和 eval suites。
 - 定义 agent -> tool package 映射。
 - 定义 progress event 文案集合。
+- 将当前单智能体登记为 `cozymate_service_agent`，作为迁移期综合服务子智能体。
+
+### Phase 1.5: 调整代码目录边界
+
+- 新增 `agents/main_coordinator/` 和 `agents/cozymate_service/` 目录。
+- 先只移动智能体体验资产：system prompt、service skill、tool group 映射、agent-specific
+  tool schema/handler adapter、artifact contract 和 eval seed ownership。
+- 保留 runtime ledger、graph、SDK runner、ToolExecutor、action/outbox、event stream、
+  safety、memory 在共享 runtime/shared 层。
+- 用兼容 import 或 registry adapter 保证迁移期现有测试和 API contract 不被一次性打断。
 
 ### Phase 2: 重构当前 routing
 
@@ -459,12 +605,14 @@ Context projection:
 - 保留 deterministic safety、permission、runtime guard。
 - 将路由决策改为主智能体结构化输出。
 - routing decision 继续写入 runtime ledger，便于调试和 eval。
+- 单意图时 Main Agent 可以先路由到 `cozymate_service_agent`，保持现有服务闭环不变。
 
 ### Phase 3: 子智能体 skill 化
 
-- 为每个场景建立标准 `SKILL.md`。
-- 从旧版 skill 中迁移体验语义、服务流程和交付物要求。
-- 删除迁移后不再使用的 playbook 或重复 prompt。
+- 为 `cozymate_service_agent` 建立标准智能体目录，承接当前已有 service skills。
+- 为后续独立场景智能体建立标准 `SKILL.md` 和 `AgentSpec`。
+- 从 `cozymate_service_agent` 中逐步迁移体验语义、服务流程、工具组和交付物 ownership。
+- 删除迁移后不再使用的 playbook、重复 prompt 或旧 tool group ownership。
 
 ### Phase 4: 子智能体工具包
 
