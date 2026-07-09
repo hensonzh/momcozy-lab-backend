@@ -39,15 +39,19 @@ def test_tool_executor_persists_safe_args_and_output() -> None:
     assert result.safe_output["profile"]["name"] == "Mai"
     assert repository.output.safe_output["session_token"] == "[redacted]"
     assert [event.event_type for event in repository.events] == ["tool.started", "tool.completed"]
-    assert repository.events[0].payload == {
-        "tool_call_id": str(repository.tool_call.id),
-        "tool_name": "support.ticket.propose",
-        "call_id": "call-1",
-        "label": "售后工单草稿",
-        "safe_args": {"issue_summary": "Pump does not start", "payload": {"api_token": "[redacted]"}},
+    assert repository.events[0].payload["tool_call_id"] == str(repository.tool_call.id)
+    assert repository.events[0].payload["tool_name"] == "support.ticket.propose"
+    assert repository.events[0].payload["call_id"] == "call-1"
+    assert repository.events[0].payload["label"] == "售后工单草稿"
+    assert repository.events[0].payload["safe_args"] == {
+        "issue_summary": "Pump does not start",
+        "payload": {"api_token": "[redacted]"},
     }
+    assert repository.events[0].payload["semantic"]["surface"] == "status_bar"
+    assert repository.events[0].payload["semantic"]["label"] == "我先准备售后工单草稿～"
     assert repository.events[1].payload["tool_output_id"] == str(repository.output.id)
     assert repository.events[1].payload["safe_output"] == repository.output.safe_output
+    assert repository.events[1].payload["semantic"]["label"] == "我已经准备好预览，等你确认～"
 
 
 def test_tool_executor_publishes_optimistic_live_events_before_persisted_events() -> None:
@@ -381,6 +385,8 @@ def test_tool_executor_marks_tool_call_failed_on_handler_error() -> None:
     assert repository.tool_call.error_code == "dependency_failed"
     assert [event.event_type for event in repository.events] == ["tool.started", "tool.failed"]
     assert repository.events[-1].payload["error_code"] == "dependency_failed"
+    assert repository.events[-1].payload["semantic"]["phase"] == "error"
+    assert repository.events[-1].payload["semantic"]["label"] == "个人资料暂时没处理好"
 
 
 def test_tool_executor_records_success_and_authorization_failure_metrics() -> None:

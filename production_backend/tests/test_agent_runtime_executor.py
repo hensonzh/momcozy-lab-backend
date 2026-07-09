@@ -139,7 +139,12 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() ->
     assert state_store.projections == []
     assert repository.run_summaries[0].payload["user_goal"] == "Summarize it."
     assert repository.run_summaries[0].payload["assistant_conclusion"] == "Here is the summary."
-    assert _progress_phases(repository) == []
+    assert _progress_phases(repository) == [
+        "context_loading",
+        "context_ready",
+        "model_reasoning",
+        "response_finalizing",
+    ]
 
 
 def test_agent_runtime_executor_projects_active_memory_into_dynamic_context() -> None:
@@ -307,13 +312,48 @@ def test_agent_runtime_executor_publishes_text_deltas_to_transient_stream() -> N
         {"thread_id": thread_id, "run_id": run.id, "delta": "lo", "message_stream_id": str(result.assistant_message_id)},
     ]
     assert transient_stream.progresses == [
-        {"thread_id": thread_id, "run_id": run.id, "phase": "context_loading", "label": "我已经收到你的消息啦～"},
-        {"thread_id": thread_id, "run_id": run.id, "phase": "context_ready", "label": "我看一下你的信息"},
-        {"thread_id": thread_id, "run_id": run.id, "phase": "model_reasoning", "label": "我想一下"},
-        {"thread_id": thread_id, "run_id": run.id, "phase": "response_finalizing", "label": "我在组织回复～"},
+        {
+            "thread_id": thread_id,
+            "run_id": run.id,
+            "phase": "context_loading",
+            "label": "我已经收到你的消息啦～",
+            "semantic": repository.events[0].payload["semantic"],
+            "dedupe_key": f"{run.id}:run.progress:progress:context_loading",
+        },
+        {
+            "thread_id": thread_id,
+            "run_id": run.id,
+            "phase": "context_ready",
+            "label": "我看一下你的信息",
+            "semantic": repository.events[1].payload["semantic"],
+            "dedupe_key": f"{run.id}:run.progress:progress:context_ready",
+        },
+        {
+            "thread_id": thread_id,
+            "run_id": run.id,
+            "phase": "model_reasoning",
+            "label": "我想一下",
+            "semantic": repository.events[2].payload["semantic"],
+            "dedupe_key": f"{run.id}:run.progress:progress:model_reasoning",
+        },
+        {
+            "thread_id": thread_id,
+            "run_id": run.id,
+            "phase": "response_finalizing",
+            "label": "我在组织回复～",
+            "semantic": repository.events[3].payload["semantic"],
+            "dedupe_key": f"{run.id}:run.progress:progress:response_finalizing",
+        },
     ]
     assert all(event.event_type != "message.delta" for event in repository.events)
-    assert all(event.event_type != "run.progress" for event in repository.events)
+    assert _progress_phases(repository) == [
+        "context_loading",
+        "context_ready",
+        "model_reasoning",
+        "response_finalizing",
+    ]
+    assert repository.events[0].payload["semantic"]["surface"] == "status_bar"
+    assert repository.events[2].payload["semantic"]["surface"] == "thinking_note"
 
 
 def test_agent_runtime_executor_requires_current_user_message() -> None:
@@ -1300,6 +1340,9 @@ def test_agent_runtime_executor_real_tool_executor_uses_run_actor_role_permissio
     assert [event.event_type for event in tool_events] == ["tool.started", "tool.completed"]
     assert tool_events[0].payload["label"] == "个人资料"
     assert tool_events[1].payload["label"] == "个人资料"
+    assert tool_events[0].payload["semantic"]["label"] == "我先看看你的基础信息～"
+    assert tool_events[1].payload["semantic"]["label"] == "我把基础信息看好啦"
+    assert "model_reasoning_after_tool" in _progress_phases(repository)
     assert result.final_text == "Profile context loaded."
     assert repository.run_summaries[0].payload["tools_used"] == ["profile.read"]
     assert repository.run_summaries[0].payload["tool_facts"] == [
@@ -1484,6 +1527,7 @@ def test_agent_runtime_executor_persists_sdk_artifacts_and_emits_events() -> Non
     artifact_events = [event for event in repository.events if event.event_type == "artifact.created"]
     assert len(artifact_events) == 1
     assert artifact_events[0].payload["artifact_id"] == str(repository.artifacts[0].id)
+    assert artifact_events[0].payload["semantic"]["surface"] == "artifact"
 
 
 def test_agent_runtime_executor_externalizes_large_sdk_artifacts() -> None:
@@ -1889,8 +1933,29 @@ class FakeTransientStream:
         self.deltas.append({"thread_id": thread_id, "run_id": run_id, "delta": delta, "message_stream_id": message_stream_id})
         return None
 
-    async def publish_progress(self, *, thread_id, run_id, phase, label, ttl_seconds=600):
-        self.progresses.append({"thread_id": thread_id, "run_id": run_id, "phase": phase, "label": label})
+    async def publish_progress(
+        self,
+        *,
+        thread_id,
+        run_id,
+        phase,
+        label,
+        semantic=None,
+        dedupe_key="",
+        optimistic=True,
+        durable=False,
+        ttl_seconds=600,
+    ):
+        self.progresses.append(
+            {
+                "thread_id": thread_id,
+                "run_id": run_id,
+                "phase": phase,
+                "label": label,
+                "semantic": semantic,
+                "dedupe_key": dedupe_key,
+            }
+        )
         return None
 
 

@@ -517,7 +517,11 @@ def _transient_event_dedupe_key(event: AgentTransientStreamEvent) -> str | None:
         dedupe_key = live_semantic.get("dedupe_key")
         if isinstance(dedupe_key, str) and dedupe_key.strip():
             return dedupe_key
-    return None
+    return _payload_semantic_dedupe_key(
+        run_id=event.run_id,
+        event_type=event.type,
+        payload=event.payload,
+    )
 
 
 def _persisted_event_dedupe_key(event: object, *, run_id: UUID) -> str | None:
@@ -525,7 +529,17 @@ def _persisted_event_dedupe_key(event: object, *, run_id: UUID) -> str | None:
     payload = getattr(event, "payload", None)
     if not isinstance(payload, dict):
         return None
-    unique_id = payload.get("tool_call_id") or payload.get("action_id")
+    unique_id = payload.get("tool_call_id") or payload.get("action_id") or payload.get("artifact_id")
     if not isinstance(unique_id, str) or not unique_id.strip():
-        return None
+        return _payload_semantic_dedupe_key(run_id=run_id, event_type=event_type, payload=payload)
     return f"{run_id}:{event_type}:{unique_id}"
+
+
+def _payload_semantic_dedupe_key(*, run_id: UUID, event_type: str, payload: dict[str, object]) -> str | None:
+    semantic = payload.get("semantic")
+    if not isinstance(semantic, dict):
+        return None
+    merge_key = semantic.get("merge_key")
+    if not isinstance(merge_key, str) or not merge_key.strip():
+        return None
+    return f"{run_id}:{event_type}:{merge_key}"

@@ -14,6 +14,7 @@ from production_backend.app.core.metrics import RequestMetrics
 from production_backend.app.infrastructure.object_storage.base import ObjectStorage
 from production_backend.app.modules.agent_runtime.event_stream.sink import AgentEventSink
 from production_backend.app.modules.agent_runtime.event_stream.transient import AgentTransientStream
+from production_backend.app.modules.agent_runtime.event_semantics import with_tool_event_semantic
 from production_backend.app.modules.agent_runtime.models import AgentToolCall
 from production_backend.app.modules.agent_runtime.payloads import DEFAULT_MAX_INLINE_PAYLOAD_BYTES, maybe_externalize_json_payload
 from production_backend.app.modules.agent_runtime.repository import AgentRuntimeRepository
@@ -105,6 +106,13 @@ class ToolExecutor:
                 "label": _tool_event_label(tool_name),
                 "safe_args": _safe_payload(args),
             }
+            started_payload = with_tool_event_semantic(
+                started_payload,
+                event_type="tool.started",
+                tool_name=tool_name,
+                read_or_write=contract.read_or_write,
+                requires_confirmation=contract.requires_confirmation,
+            )
             await self._publish_optimistic_tool_event(
                 thread_id=run.thread_id,
                 run_id=run.id,
@@ -174,6 +182,14 @@ class ToolExecutor:
             "label": _tool_event_label(completed.tool_name),
             "safe_output": externalized_output.inline_payload,
         }
+        completed_payload = with_tool_event_semantic(
+            completed_payload,
+            event_type="tool.completed",
+            tool_name=completed.tool_name,
+            safe_output=externalized_output.inline_payload,
+            read_or_write=contract.read_or_write,
+            requires_confirmation=contract.requires_confirmation,
+        )
         await self._publish_optimistic_tool_event(
             thread_id=run.thread_id,
             run_id=run.id,
@@ -223,6 +239,21 @@ class ToolExecutor:
             "error_code": error_code,
             "label": _tool_event_label(tool_call.tool_name),
         }
+        try:
+            contract = self.registry.get(tool_call.tool_name)
+            payload = with_tool_event_semantic(
+                payload,
+                event_type="tool.failed",
+                tool_name=tool_call.tool_name,
+                read_or_write=contract.read_or_write,
+                requires_confirmation=contract.requires_confirmation,
+            )
+        except ApiError:
+            payload = with_tool_event_semantic(
+                payload,
+                event_type="tool.failed",
+                tool_name=tool_call.tool_name,
+            )
         await self._publish_optimistic_tool_event(
             thread_id=run.thread_id,
             run_id=run.id,

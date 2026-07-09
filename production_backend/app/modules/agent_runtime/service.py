@@ -129,9 +129,11 @@ class AgentRuntimeService:
                 "semantic": {
                     "phase": "thinking",
                     "label": "我已经收到你的消息啦～",
+                    "surface": "status_bar",
                     "visibility": "status",
                     "merge_key": f"run:{run.id}",
                     "priority": 10,
+                    "lifecycle": "running",
                 },
             },
         )

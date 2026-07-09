@@ -75,6 +75,10 @@ class AgentTransientStream:
         run_id: UUID,
         phase: str,
         label: str,
+        semantic: dict[str, Any] | None = None,
+        dedupe_key: str = "",
+        optimistic: bool = True,
+        durable: bool = False,
         ttl_seconds: int = TRANSIENT_STREAM_TTL_SECONDS,
     ) -> AgentTransientStreamEvent | None:
         normalized_phase = str(phase or "")
@@ -82,15 +86,25 @@ class AgentTransientStream:
         if not normalized_phase and not normalized_label:
             return None
         key = _run_transient_stream_key(run_id)
+        payload: dict[str, Any] = {
+            "phase": normalized_phase,
+            "label": normalized_label,
+        }
+        if semantic:
+            payload["semantic"] = dict(semantic)
+        normalized_dedupe_key = str(dedupe_key or "").strip()
+        if normalized_dedupe_key:
+            payload["_live_semantic"] = {
+                "dedupe_key": normalized_dedupe_key,
+                "optimistic": bool(optimistic),
+                "durable": bool(durable),
+            }
         fields = {
             "type": "run.progress",
             "thread_id": str(thread_id),
             "run_id": str(run_id),
             "payload": json.dumps(
-                {
-                    "phase": normalized_phase,
-                    "label": normalized_label,
-                },
+                payload,
                 ensure_ascii=False,
                 separators=(",", ":"),
                 sort_keys=True,

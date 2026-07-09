@@ -44,6 +44,13 @@ from ..agents.main_coordinator_agent import (
 )
 from ..event_stream.sink import AgentEventSink
 from ..event_stream.transient import AgentTransientStream
+from ..event_semantics import (
+    action_event_payload_semantic,
+    artifact_event_payload_semantic,
+    progress_live_dedupe_key,
+    run_progress_payload,
+    with_tool_event_semantic,
+)
 from ..graphs import AgentGraphCheckpointStore, AgentGraphRegistry, default_graph_registry
 from ..memory.service import AgentMemoryService
 from ..models import AgentAction, AgentArtifact, AgentEvent, AgentMessage, AgentRun
@@ -510,6 +517,7 @@ class AgentRuntimeExecutor:
         async def invoke_json(args_json: str) -> str:
             args = _json_object(args_json)
             output = await self._invoke_load_service_skill_tool(run=run, args=args)
+            await self._append_progress(run=run, phase="model_reasoning_after_tool", label="我接着处理下一步")
             return json.dumps(output, ensure_ascii=False, sort_keys=True)
 
         return SdkToolDefinition(
@@ -553,6 +561,7 @@ class AgentRuntimeExecutor:
             args=args,
         )
         self._capture_tool_output_side_effects(run=run, tool_name=contract_name, safe_output=result.safe_output)
+        await self._append_progress(run=run, phase="model_reasoning_after_tool", label="我接着处理下一步")
         return json.dumps(result.safe_output, sort_keys=True)
 
     def _capture_tool_output_side_effects(self, *, run: AgentRun, tool_name: str, safe_output: dict[str, Any]) -> None:
@@ -586,6 +595,11 @@ class AgentRuntimeExecutor:
             "label": "加载服务技能",
             "safe_args": {"service_skill_id": skill.service_skill_id},
         }
+        started_payload = with_tool_event_semantic(
+            started_payload,
+            event_type="tool.started",
+            tool_name=LOAD_SERVICE_SKILL_TOOL_NAME,
+        )
         await self._publish_optimistic_tool_event(
             thread_id=run.thread_id,
             run_id=run.id,
@@ -624,6 +638,12 @@ class AgentRuntimeExecutor:
                     "skill_version": skill.version,
                 },
             }
+            completed_payload = with_tool_event_semantic(
+                completed_payload,
+                event_type="tool.completed",
+                tool_name=LOAD_SERVICE_SKILL_TOOL_NAME,
+                safe_output=completed_payload["safe_output"],
+            )
             await self._publish_optimistic_tool_event(
                 thread_id=run.thread_id,
                 run_id=run.id,
@@ -659,6 +679,11 @@ class AgentRuntimeExecutor:
                 "error_code": exc.code,
                 "label": "加载服务技能",
             }
+            failed_payload = with_tool_event_semantic(
+                failed_payload,
+                event_type="tool.failed",
+                tool_name=LOAD_SERVICE_SKILL_TOOL_NAME,
+            )
             await self._publish_optimistic_tool_event(
                 thread_id=run.thread_id,
                 run_id=run.id,
@@ -731,13 +756,28 @@ class AgentRuntimeExecutor:
             LOGGER.warning("Failed to publish optimistic load_service_skill event.", exc_info=True)
 
     async def _append_progress(self, *, run: AgentRun, phase: str, label: str) -> None:
-        if self.transient_stream is None:
-            return
-        await self.transient_stream.publish_progress(
+        payload = run_progress_payload(phase=phase, label=label)
+        semantic = payload.get("semantic")
+        dedupe_key = progress_live_dedupe_key(run_id=run.id, semantic=semantic) if isinstance(semantic, dict) else ""
+        if self.transient_stream is not None:
+            try:
+                await self.transient_stream.publish_progress(
+                    thread_id=run.thread_id,
+                    run_id=run.id,
+                    phase=phase,
+                    label=label,
+                    semantic=semantic if isinstance(semantic, dict) else None,
+                    dedupe_key=dedupe_key,
+                    optimistic=True,
+                    durable=False,
+                )
+            except Exception:
+                LOGGER.warning("Failed to publish live run.progress event.", exc_info=True)
+        await self._append_event(
             thread_id=run.thread_id,
             run_id=run.id,
-            phase=phase,
-            label=label,
+            event_type="run.progress",
+            payload=payload,
         )
 
     async def _record_routing_decision(self, *, run: AgentRun, current_message: AgentMessage, routing_plan: RoutingPlan) -> None:
@@ -975,6 +1015,7 @@ def _artifact_event_payload(artifact: AgentArtifact) -> dict[str, Any]:
     }
     if isinstance(artifact.payload, dict):
         payload.update({key: value for key, value in artifact.payload.items() if key in {"form", "card", "card_json", "cart_update", "summary"}})
+    payload["semantic"] = artifact_event_payload_semantic(artifact_type=artifact.artifact_type)
     return payload
 
 
@@ -1482,6 +1523,7 @@ def _action_confirmation_event_payload(action: AgentAction) -> dict[str, Any]:
         "target_id": action.target_id,
         "side_effect_level": action.side_effect_level,
         "preview_payload": action.preview_payload,
+        "semantic": action_event_payload_semantic(action_status=action.status),
     }
 
 

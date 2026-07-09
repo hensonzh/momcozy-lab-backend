@@ -97,6 +97,45 @@ def test_agent_transient_stream_round_trips_run_progress() -> None:
     assert '"phase":"model_reasoning"' in encoded
 
 
+def test_agent_transient_stream_round_trips_semantic_run_progress() -> None:
+    redis = FakeStreamRedis()
+    thread_id = uuid4()
+    run_id = uuid4()
+    semantic = {
+        "phase": "replying",
+        "label": "我在组织回复～",
+        "surface": "status_bar",
+        "visibility": "status",
+        "merge_key": "progress:response_finalizing",
+        "priority": 80,
+        "lifecycle": "running",
+    }
+
+    async def exercise():
+        stream = AgentTransientStream(redis)
+        published = await stream.publish_progress(
+            thread_id=thread_id,
+            run_id=run_id,
+            phase="response_finalizing",
+            label="我在组织回复～",
+            semantic=semantic,
+            dedupe_key=f"{run_id}:run.progress:progress:response_finalizing",
+        )
+        events = await stream.read(run_id=run_id, after_cursor="0-0")
+        return published, events
+
+    published, events = asyncio.run(exercise())
+
+    assert published is not None
+    assert published.payload["semantic"] == semantic
+    assert published.payload["_live_semantic"] == {
+        "dedupe_key": f"{run_id}:run.progress:progress:response_finalizing",
+        "durable": False,
+        "optimistic": True,
+    }
+    assert events == [published]
+
+
 def test_agent_transient_stream_round_trips_optimistic_application_event() -> None:
     redis = FakeStreamRedis()
     thread_id = uuid4()
@@ -345,6 +384,80 @@ def test_stream_run_event_chunks_dedupes_stale_transient_tool_event_after_persis
 
     assert len(chunks) == 2
     assert _sse_payloads(chunks[0])[0]["type"] == "tool.started"
+    assert _sse_payloads(chunks[1])[0]["type"] == "run.completed"
+
+
+def test_stream_run_event_chunks_dedupes_semantic_progress_before_persisted_event() -> None:
+    thread_id = uuid4()
+    run_id = uuid4()
+    semantic = {
+        "phase": "replying",
+        "label": "我在组织回复～",
+        "surface": "status_bar",
+        "visibility": "status",
+        "merge_key": "progress:response_finalizing",
+        "priority": 80,
+        "lifecycle": "running",
+    }
+    transient_progress = AgentTransientStreamEvent(
+        event_id="progress:1-0",
+        type="run.progress",
+        thread_id=thread_id,
+        run_id=run_id,
+        cursor="1-0",
+        payload={
+            "phase": "response_finalizing",
+            "label": "我在组织回复～",
+            "semantic": semantic,
+            "_live_semantic": {
+                "dedupe_key": f"{run_id}:run.progress:progress:response_finalizing",
+                "optimistic": True,
+                "durable": False,
+            },
+        },
+        created_at="2026-07-04T00:00:00+00:00",
+    )
+    persisted_progress = AgentEvent(
+        event_id=uuid4(),
+        thread_id=thread_id,
+        run_id=run_id,
+        sequence=1,
+        event_type="run.progress",
+        payload={
+            "phase": "response_finalizing",
+            "label": "我在组织回复～",
+            "semantic": semantic,
+        },
+    )
+    completed = AgentEvent(
+        event_id=uuid4(),
+        thread_id=thread_id,
+        run_id=run_id,
+        sequence=2,
+        event_type="run.completed",
+        payload={},
+    )
+
+    async def exercise() -> list[str]:
+        chunks = []
+        async for chunk in _stream_run_event_chunks(
+            service=FakeAgentRuntimeService([[], [persisted_progress, completed]]),
+            owner_user_id=uuid4(),
+            run_id=run_id,
+            after_sequence=0,
+            limit=20,
+            follow=True,
+            poll_interval_seconds=0.1,
+            max_wait_seconds=1,
+            transient_stream=FakeTransientStream([transient_progress]),
+        ):
+            chunks.append(chunk)
+        return chunks
+
+    chunks = asyncio.run(exercise())
+
+    assert len(chunks) == 2
+    assert _sse_payloads(chunks[0])[0]["type"] == "run.progress"
     assert _sse_payloads(chunks[1])[0]["type"] == "run.completed"
 
 
