@@ -192,7 +192,7 @@ async def stream_run_events(
     after_sequence: int = Query(default=0, ge=0),
     limit: int = Query(default=200, ge=1, le=500),
     follow: bool = Query(default=False),
-    poll_interval_seconds: float = Query(default=1.0, ge=0.1, le=5.0),
+    poll_interval_seconds: float = Query(default=0.01, ge=0.01, le=5.0),
     max_wait_seconds: int = Query(default=30, ge=1, le=300),
     current_user: CurrentUser = Depends(require_current_user),
     service: AgentRuntimeService = Depends(get_agent_runtime_service),

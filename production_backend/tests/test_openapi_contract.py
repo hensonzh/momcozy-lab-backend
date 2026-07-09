@@ -124,9 +124,17 @@ def test_agent_stream_contract_keeps_tokens_out_of_query_parameters() -> None:
     operation = build_openapi_schema()["paths"]["/v1/agent/runs/{run_id}/stream"]["get"]
     parameters = operation.get("parameters", [])
     query_names = {parameter["name"] for parameter in parameters if parameter.get("in") == "query"}
+    poll_interval = next(
+        parameter
+        for parameter in parameters
+        if parameter.get("in") == "query"
+        and parameter["name"] == "poll_interval_seconds"
+    )
 
     assert "token" not in query_names
     assert {"after_sequence", "limit"} <= query_names
+    assert poll_interval["schema"]["default"] == 0.01
+    assert poll_interval["schema"]["minimum"] == 0.01
 
 
 def test_file_vision_stream_contract_keeps_tokens_out_of_query_parameters() -> None:
