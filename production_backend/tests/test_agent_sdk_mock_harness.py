@@ -155,6 +155,10 @@ def test_minimax_backend_uses_openai_compatible_model_provider(monkeypatch: pyte
             self.kwargs = kwargs
             self.instances.append(self)
 
+    class FakeModelSettings:
+        def __init__(self, **kwargs: object) -> None:
+            self.kwargs = kwargs
+
     class FakeAgent:
         def __init__(self, **kwargs: object) -> None:
             self.kwargs = kwargs
@@ -172,6 +176,7 @@ def test_minimax_backend_uses_openai_compatible_model_provider(monkeypatch: pyte
         Runner=FakeRunner,
         RunConfig=FakeRunConfig,
         OpenAIProvider=FakeOpenAIProvider,
+        ModelSettings=FakeModelSettings,
     )
     monkeypatch.setitem(sys.modules, "agents", fake_agents)
 
@@ -206,6 +211,14 @@ def test_minimax_backend_uses_openai_compatible_model_provider(monkeypatch: pyte
     assert model_provider.kwargs["base_url"] == "https://api.minimax.io/v1"
     assert model_provider.kwargs["use_responses"] is False
     assert model_provider.kwargs["buffer_streamed_tool_calls"] is True
+    agent = FakeRunner.calls[0]["agent"]
+    assert isinstance(agent, FakeAgent)
+    model_settings = agent.kwargs["model_settings"]
+    assert isinstance(model_settings, FakeModelSettings)
+    assert model_settings.kwargs["extra_body"] == {
+        "thinking": {"type": "disabled"},
+        "service_tier": "priority",
+    }
     assert run_config.kwargs["trace_metadata"]["model_provider"] == "minimax"
 
 
