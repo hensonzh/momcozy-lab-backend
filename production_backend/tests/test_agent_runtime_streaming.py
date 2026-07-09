@@ -263,6 +263,146 @@ def test_stream_run_event_chunks_flushes_transient_delta_before_final_events() -
     assert [payload["type"] for payload in _sse_payloads(chunks[2])] == ["message.completed", "run.completed"]
 
 
+def test_stream_run_event_chunks_can_finish_from_transient_terminal_events() -> None:
+    thread_id = uuid4()
+    run_id = uuid4()
+    message_id = str(uuid4())
+    transient_message = AgentTransientStreamEvent(
+        event_id="transient:1-0",
+        type="message.completed",
+        thread_id=thread_id,
+        run_id=run_id,
+        cursor="1-0",
+        payload={
+            "message_id": message_id,
+            "role": "assistant",
+            "text": "完整回复",
+            "_live_semantic": {
+                "dedupe_key": f"{run_id}:message.completed:{message_id}",
+                "optimistic": False,
+                "durable": True,
+            },
+        },
+        created_at="2026-07-04T00:00:00+00:00",
+    )
+    transient_completed = AgentTransientStreamEvent(
+        event_id="transient:2-0",
+        type="run.completed",
+        thread_id=thread_id,
+        run_id=run_id,
+        cursor="2-0",
+        payload={
+            "_live_semantic": {
+                "dedupe_key": f"{run_id}:run.completed",
+                "optimistic": False,
+                "durable": True,
+            },
+        },
+        created_at="2026-07-04T00:00:01+00:00",
+    )
+
+    async def exercise() -> list[str]:
+        chunks = []
+        async for chunk in _stream_run_event_chunks(
+            service=FakeAgentRuntimeService([[]]),
+            owner_user_id=uuid4(),
+            run_id=run_id,
+            after_sequence=0,
+            limit=20,
+            follow=True,
+            poll_interval_seconds=0.1,
+            max_wait_seconds=1,
+            transient_stream=FakeTransientStream([[transient_message, transient_completed]]),
+        ):
+            chunks.append(chunk)
+        return chunks
+
+    chunks = asyncio.run(exercise())
+
+    assert len(chunks) == 1
+    payloads = _sse_payloads(chunks[0])
+    assert [payload["type"] for payload in payloads] == ["message.completed", "run.completed"]
+    assert payloads[0]["payload"]["text"] == "完整回复"
+
+
+def test_stream_run_event_chunks_dedupes_transient_and_persisted_final_events() -> None:
+    thread_id = uuid4()
+    run_id = uuid4()
+    message_id = str(uuid4())
+    transient_message = AgentTransientStreamEvent(
+        event_id="transient:1-0",
+        type="message.completed",
+        thread_id=thread_id,
+        run_id=run_id,
+        cursor="1-0",
+        payload={
+            "message_id": message_id,
+            "role": "assistant",
+            "text": "完整回复",
+            "_live_semantic": {
+                "dedupe_key": f"{run_id}:message.completed:{message_id}",
+                "optimistic": False,
+                "durable": True,
+            },
+        },
+        created_at="2026-07-04T00:00:00+00:00",
+    )
+    transient_completed = AgentTransientStreamEvent(
+        event_id="transient:2-0",
+        type="run.completed",
+        thread_id=thread_id,
+        run_id=run_id,
+        cursor="2-0",
+        payload={
+            "_live_semantic": {
+                "dedupe_key": f"{run_id}:run.completed",
+                "optimistic": False,
+                "durable": True,
+            },
+        },
+        created_at="2026-07-04T00:00:01+00:00",
+    )
+    persisted_message = AgentEvent(
+        event_id=uuid4(),
+        thread_id=thread_id,
+        run_id=run_id,
+        sequence=1,
+        event_type="message.completed",
+        payload={"message_id": message_id, "role": "assistant", "text": "完整回复"},
+    )
+    persisted_completed = AgentEvent(
+        event_id=uuid4(),
+        thread_id=thread_id,
+        run_id=run_id,
+        sequence=2,
+        event_type="run.completed",
+        payload={},
+    )
+
+    async def exercise() -> list[str]:
+        chunks = []
+        async for chunk in _stream_run_event_chunks(
+            service=FakeAgentRuntimeService([[persisted_message, persisted_completed]]),
+            owner_user_id=uuid4(),
+            run_id=run_id,
+            after_sequence=0,
+            limit=20,
+            follow=True,
+            poll_interval_seconds=0.1,
+            max_wait_seconds=1,
+            transient_stream=FakeTransientStream([[transient_message, transient_completed]]),
+        ):
+            chunks.append(chunk)
+        return chunks
+
+    chunks = asyncio.run(exercise())
+
+    assert len(chunks) == 1
+    payloads = _sse_payloads(chunks[0])
+    assert [payload["type"] for payload in payloads] == ["message.completed", "run.completed"]
+    assert payloads[0]["transient"] is True
+
+
 def test_stream_run_event_chunks_dedupes_optimistic_tool_event_before_persisted_event() -> None:
     thread_id = uuid4()
     run_id = uuid4()

@@ -9,6 +9,7 @@ from production_backend.app.workers.agent_run import AgentRunQueueWorker, AgentR
 def test_agent_run_worker_completes_run_with_assistant_message_events_and_lock() -> None:
     repository = FakeAgentRuntimeRepository()
     controls = FakeAgentRunControls()
+    transient_stream = FakeTransientStream()
     commits = []
 
     async def handler(run: AgentRun) -> AgentRunWorkerResult:
@@ -18,7 +19,13 @@ def test_agent_run_worker_completes_run_with_assistant_message_events_and_lock()
     async def after_event_append() -> None:
         commits.append("commit")
 
-    worker = AgentRunWorker(repository=repository, controls=controls, handler=handler, after_event_append=after_event_append)
+    worker = AgentRunWorker(
+        repository=repository,
+        controls=controls,
+        handler=handler,
+        after_event_append=after_event_append,
+        transient_stream=transient_stream,
+    )
 
     run = asyncio.run(worker.run_once(run_id=repository.run.id))
 
@@ -35,6 +42,12 @@ def test_agent_run_worker_completes_run_with_assistant_message_events_and_lock()
     assert controls.lock_released is True
     assert controls.cleared_active_run == (repository.run.thread_id, repository.run.id)
     assert controls.stream_cursor == (repository.run.id, 3)
+    assert [event["event_type"] for event in transient_stream.events] == ["message.completed", "run.completed"]
+    assert transient_stream.events[0]["payload"]["text"] == "Here is the summary."
+    assert transient_stream.events[0]["dedupe_key"] == f"{repository.run.id}:message.completed:{repository.messages[0].id}"
+    assert transient_stream.events[1]["dedupe_key"] == f"{repository.run.id}:run.completed"
+    assert {event["durable"] for event in transient_stream.events} == {True}
+    assert {event["optimistic"] for event in transient_stream.events} == {False}
 
 
 def test_agent_run_worker_attaches_quick_replies_to_final_assistant_message() -> None:
@@ -272,6 +285,22 @@ class FakeAgentRuntimeRepository:
         )
         self.events.append(event)
         return event
+
+
+class FakeTransientStream:
+    def __init__(self) -> None:
+        self.events = []
+
+    async def publish_application_event(self, **kwargs):
+        self.events.append(
+            {
+                "event_type": kwargs["event_type"],
+                "payload": kwargs["payload"],
+                "dedupe_key": kwargs["dedupe_key"],
+                "optimistic": kwargs["optimistic"],
+                "durable": kwargs["durable"],
+            }
+        )
 
 
 class FakeAgentRunControls:

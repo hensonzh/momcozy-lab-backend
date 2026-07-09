@@ -9,6 +9,7 @@ from typing import Any
 from uuid import UUID
 
 from ..core.errors import ApiError
+from ..modules.agent_runtime.event_stream.transient import AgentTransientStream
 from ..modules.agent_runtime.run_lifecycle.controls import AgentRunControls
 from ..modules.agent_runtime.run_lifecycle.execution import AgentRunExecutionResult, AgentRunHandler
 from ..modules.agent_runtime.models import AgentEvent, AgentRun
@@ -79,11 +80,13 @@ class AgentRunWorker:
         controls: AgentRunControls | None = None,
         handler: AgentRunHandler | None = None,
         after_event_append: Callable[[], Awaitable[None]] | None = None,
+        transient_stream: AgentTransientStream | None = None,
     ) -> None:
         self.repository = repository
         self.controls = controls
         self.handler = handler or missing_agent_run_handler
         self.after_event_append = after_event_append
+        self.transient_stream = transient_stream
 
     async def run_once(self, *, run_id: UUID) -> AgentRun | None:
         run = await self.repository.get_run(run_id=run_id)
@@ -197,7 +200,27 @@ class AgentRunWorker:
             await self.controls.set_stream_cursor(run_id=run.id, sequence=event.sequence)
         if self.after_event_append is not None:
             await self.after_event_append()
+        await self._publish_live_event(run=run, event_type=event_type, payload=payload)
         return event
+
+    async def _publish_live_event(self, *, run: AgentRun, event_type: str, payload: dict[str, Any]) -> None:
+        if self.transient_stream is None or event_type not in LIVE_DURABLE_EVENT_TYPES:
+            return
+        dedupe_key = _live_event_dedupe_key(run_id=run.id, event_type=event_type, payload=payload)
+        if not dedupe_key:
+            return
+        try:
+            await self.transient_stream.publish_application_event(
+                thread_id=run.thread_id,
+                run_id=run.id,
+                event_type=event_type,
+                payload=payload,
+                dedupe_key=dedupe_key,
+                optimistic=False,
+                durable=True,
+            )
+        except Exception:
+            LOGGER.warning("Failed to publish durable live agent event.", exc_info=True)
 
     async def _clear_controls(self, run: AgentRun) -> None:
         if self.controls is None:
@@ -238,3 +261,19 @@ def _log_run_failure(*, run: AgentRun, error_code: str, error_details: dict[str,
             sort_keys=True,
         )
     )
+
+
+LIVE_DURABLE_EVENT_TYPES = {
+    "message.completed",
+    "run.completed",
+    "run.failed",
+    "run.cancelled",
+    "run.waiting_for_confirmation",
+}
+
+
+def _live_event_dedupe_key(*, run_id: UUID, event_type: str, payload: dict[str, Any]) -> str:
+    unique_id = payload.get("message_id") or payload.get("action_id")
+    if isinstance(unique_id, str) and unique_id.strip():
+        return f"{run_id}:{event_type}:{unique_id.strip()}"
+    return f"{run_id}:{event_type}"

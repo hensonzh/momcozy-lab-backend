@@ -415,10 +415,15 @@ async def _stream_run_event_chunks(
                     if encoded:
                         yield encoded
                 final_events = events[final_event_index:]
-                streamed_dedupe_keys.update(
-                    key for event in final_events if (key := _persisted_event_dedupe_key(event, run_id=run_id))
+                visible_final_events = _filter_events_seen_in_transient_stream(
+                    final_events,
+                    run_id=run_id,
+                    dedupe_keys=streamed_dedupe_keys,
                 )
-                encoded = encode_sse_events(final_events)
+                streamed_dedupe_keys.update(
+                    key for event in visible_final_events if (key := _persisted_event_dedupe_key(event, run_id=run_id))
+                )
+                encoded = encode_sse_events(visible_final_events)
                 if encoded:
                     yield encoded
                 cursor = final_events[-1].sequence
@@ -458,6 +463,8 @@ async def _stream_run_event_chunks(
                 encoded = encode_transient_sse_events(transient_events)
                 if encoded:
                     yield encoded
+                if _has_terminal_transient_event(transient_events):
+                    return
                 continue
         else:
             await asyncio.sleep(poll_interval_seconds)
@@ -511,6 +518,10 @@ def _filter_transient_events_seen_in_stream(
     return [event for event in events if _transient_event_dedupe_key(event) not in dedupe_keys]
 
 
+def _has_terminal_transient_event(events: list[AgentTransientStreamEvent]) -> bool:
+    return any(event.type in TERMINAL_STREAM_EVENT_TYPES for event in events)
+
+
 def _transient_event_dedupe_key(event: AgentTransientStreamEvent) -> str | None:
     live_semantic = event.payload.get("_live_semantic")
     if isinstance(live_semantic, dict):
@@ -529,8 +540,10 @@ def _persisted_event_dedupe_key(event: object, *, run_id: UUID) -> str | None:
     payload = getattr(event, "payload", None)
     if not isinstance(payload, dict):
         return None
-    unique_id = payload.get("tool_call_id") or payload.get("action_id") or payload.get("artifact_id")
+    unique_id = payload.get("tool_call_id") or payload.get("action_id") or payload.get("artifact_id") or payload.get("message_id")
     if not isinstance(unique_id, str) or not unique_id.strip():
+        if event_type in TERMINAL_STREAM_EVENT_TYPES:
+            return f"{run_id}:{event_type}"
         return _payload_semantic_dedupe_key(run_id=run_id, event_type=event_type, payload=payload)
     return f"{run_id}:{event_type}:{unique_id}"
 

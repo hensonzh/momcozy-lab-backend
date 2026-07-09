@@ -252,6 +252,7 @@ async def _process_agent_run(
             controls=controls,
             handler=handler,
             after_event_append=session.commit,
+            transient_stream=transient_stream,
         )
         try:
             after_run = await worker.run_once(run_id=run_id)
