@@ -6,7 +6,7 @@ services:
       context: ..
       dockerfile: production_backend/Dockerfile
     env_file:
-      - ${MOMCOZY_BACKEND_ENV_FILE:-env/compose.local.env.example}
+      - ${MOMCOZY_BACKEND_ENV_FILE:-env/compose.local.env}
     ports:
       - "8000:8000"
     depends_on:
@@ -33,7 +33,7 @@ services:
       dockerfile: production_backend/Dockerfile
     command: python -m alembic -c production_backend/alembic.ini upgrade head
     env_file:
-      - ${MOMCOZY_BACKEND_ENV_FILE:-env/compose.local.env.example}
+      - ${MOMCOZY_BACKEND_ENV_FILE:-env/compose.local.env}
     profiles:
       - tools
     depends_on:
@@ -46,7 +46,9 @@ services:
       dockerfile: production_backend/Dockerfile
     command: python -m production_backend.scripts.run_agent_worker
     env_file:
-      - ${MOMCOZY_BACKEND_ENV_FILE:-env/compose.local.env.example}
+      - ${MOMCOZY_BACKEND_ENV_FILE:-env/compose.local.env}
+    environment:
+      AGENT_RUNTIME_WORKER_ENABLED: "true"
     profiles:
       - workers
     depends_on:
@@ -63,7 +65,9 @@ services:
       dockerfile: production_backend/Dockerfile
     command: python -m production_backend.scripts.run_outbox_worker
     env_file:
-      - ${MOMCOZY_BACKEND_ENV_FILE:-env/compose.local.env.example}
+      - ${MOMCOZY_BACKEND_ENV_FILE:-env/compose.local.env}
+    environment:
+      OUTBOX_WORKER_ENABLED: "true"
     profiles:
       - workers
     depends_on:

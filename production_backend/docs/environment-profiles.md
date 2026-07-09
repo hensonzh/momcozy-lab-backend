@@ -8,7 +8,7 @@ local `.env` files.
 
 | Profile | File | Purpose |
 |---|---|---|
-| Local compose | `production_backend/env/compose.local.env.example` | Run API and workers with `docker-compose.local.yml`; service hosts are `postgres`, `redis`, and `minio`. |
+| Local compose | `production_backend/env/compose.local.env` | Run API and workers with `docker-compose.local.yml`; service hosts are `postgres`, `redis`, and `minio`. Copy it from `production_backend/env/compose.local.env.example`. |
 | Server test compose | `production_backend/env/compose.test.env.example` | Run API, workers, Postgres, Redis, and MinIO with `docker-compose.test.yml` on a test server. |
 | Production compose | `production_backend/env/compose.prod.env.example` | Run API and workers with `docker-compose.prod.yml`; managed Postgres, Redis, and OSS/S3 are supplied through env. |
 

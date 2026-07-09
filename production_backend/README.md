@@ -71,15 +71,16 @@ The isolated backend can run with Docker Compose Postgres, Redis, and MinIO:
 
 ```bash
 cd /path/to/MomCozyAgent
-COMPOSE_ENV_FILE=production_backend/env/compose.local.env make backend-local-up
+cp production_backend/env/compose.local.env.example production_backend/env/compose.local.env
+make backend-local-up
 ```
 
-`docker-compose.local.yml` reads `env/compose.local.env.example` by default, which
-intentionally points to compose service hostnames such as `postgres` and
-`redis`, plus `http://minio:9000` for S3-compatible object storage. Production
-deployments should provide managed `DATABASE_URL`, `REDIS_URL`, and managed
-`OBJECT_STORAGE_*` values through environment
-variables; no code change is required to switch providers.
+`docker-compose.local.yml` reads `env/compose.local.env` by default. The local
+env should keep compose service hostnames such as `postgres` and `redis`, plus
+`http://minio:9000` for S3-compatible object storage. Production deployments
+should provide managed `DATABASE_URL`, `REDIS_URL`, and managed
+`OBJECT_STORAGE_*` values through environment variables; no code change is
+required to switch providers.
 
 Agent runs are processed by a separate worker process, not by the API lifespan.
 `make backend-local-up` first builds the local `migrate`, `api`,
@@ -89,13 +90,15 @@ services with recreated containers. The worker processes still run as separate
 Compose services, so they can be restarted or scaled independently. For a fully
 uncached rebuild, run `BACKEND_BUILD_FLAGS=--no-cache make backend-local-up`.
 
-`agent-worker` remains safe by default because `AGENT_RUNTIME_WORKER_ENABLED=false`
-in `env/compose.local.env.example`. Enable it in your private
-`env/compose.local.env` when the LangGraph / OpenAI Agents SDK runtime handler is
-configured. `AGENT_MODEL_PROVIDER=openai` is the default. When the worker is
-enabled with the default provider, `OPENAI_API_KEY` must be set and
-`OPENAI_MODEL` controls the agent model. OpenAI runs namespace/deferred tool
-loading through the Responses API adapter when `tool_search` is enabled.
+`agent-worker` remains safe in the committed template because
+`AGENT_RUNTIME_WORKER_ENABLED=false` in `env/compose.local.env.example`. The
+local `agent-worker` Compose service enables the worker when the `workers`
+profile is started, so your private `env/compose.local.env` must include the
+configured model provider credentials. `AGENT_MODEL_PROVIDER=openai` is the
+default. When the worker is enabled with the default provider, `OPENAI_API_KEY`
+must be set and `OPENAI_MODEL` controls the agent model. OpenAI runs
+namespace/deferred tool loading through the Responses API adapter when
+`tool_search` is enabled.
 
 Minimax is available as an experimental OpenAI-compatible provider. To test it,
 set these values in a private env file and run the provider eval before using it

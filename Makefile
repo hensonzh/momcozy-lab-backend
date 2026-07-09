@@ -1,4 +1,4 @@
-COMPOSE_ENV_FILE ?= production_backend/env/compose.local.env.example
+COMPOSE_ENV_FILE ?= production_backend/env/compose.local.env
 TEST_COMPOSE_ENV_FILE ?= production_backend/env/compose.test.env
 PROD_COMPOSE_ENV_FILE ?= production_backend/env/compose.prod.env
 BACKEND_ENV_FILE ?= $(COMPOSE_ENV_FILE)
