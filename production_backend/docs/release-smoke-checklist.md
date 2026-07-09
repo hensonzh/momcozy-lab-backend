@@ -60,8 +60,8 @@ Run this checklist after migrations and before a release is declared healthy.
 - Confirm/reject a test action if one is available.
 - Run deterministic agent seed eval:
   `python production_backend/scripts/run_agent_seed_eval.py`.
-- Run provider eval with bounded budget or confirm explicit skip:
-  `python production_backend/scripts/run_agent_provider_eval.py --allow-skip-without-credentials --max-cases 8 --cost-budget-usd 5.00`.
+- Run replay eval for any incident-derived bundle that is part of the release:
+  `python production_backend/scripts/run_agent_replay_eval.py --replay <bundle.json> --suite <suite> --name <case-name>`.
 
 ## Observability
 

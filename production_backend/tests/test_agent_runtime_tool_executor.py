@@ -7,7 +7,11 @@ import pytest
 from production_backend.app.core.errors import ApiError
 from production_backend.app.core.metrics import RequestMetrics
 from production_backend.app.modules.agent_runtime.models import AgentEvent, AgentRun, AgentToolCall
-from production_backend.app.modules.agent_runtime.tools import ToolExecutor, ToolHandlerContext, default_tool_registry
+from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.tools import (
+    ToolExecutor,
+    ToolHandlerContext,
+    default_tool_registry,
+)
 from production_backend.app.modules.auth import CurrentUser
 
 

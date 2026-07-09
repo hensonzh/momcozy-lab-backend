@@ -30,21 +30,13 @@ def test_agent_runtime_graph_runner_executes_completed_path_with_checkpoints() -
     assert _checkpoint_nodes(checkpoint_store) == [
         "load_context",
         "safety_gate",
-        "select_service_skill",
         "sdk_reasoning",
-        "tool_result_review",
-        "action_policy",
-        "final_response",
         "finish",
     ]
     assert checkpoint_store.checkpoints[-1].state_summary["visited_nodes"] == [
         "load_context",
         "safety_gate",
-        "select_service_skill",
         "sdk_reasoning",
-        "tool_result_review",
-        "action_policy",
-        "final_response",
         "finish",
     ]
     assert checkpoint_store.checkpoints[-1].state_summary["outcome_status"] == "completed"
@@ -69,11 +61,7 @@ def test_agent_runtime_graph_runner_executes_confirmation_interrupt_path() -> No
     assert _checkpoint_nodes(checkpoint_store) == [
         "load_context",
         "safety_gate",
-        "select_service_skill",
         "sdk_reasoning",
-        "tool_result_review",
-        "action_policy",
-        "confirmation_interrupt",
         "finish",
     ]
     assert checkpoint_store.checkpoints[-1].state_summary["pending_action_id"] == str(action_id)
@@ -111,7 +99,7 @@ def test_agent_runtime_graph_runner_resumes_waiting_checkpoint_without_reinvokin
             graph_version=run.graph_version,
             state_ref="",
             state_summary={
-                "node_name": "confirmation_interrupt",
+                "node_name": "sdk_reasoning",
                 "outcome_status": "waiting_for_confirmation",
                 "pending_action_id": str(action_id),
             },
@@ -130,7 +118,7 @@ def test_agent_runtime_graph_runner_resumes_waiting_checkpoint_without_reinvokin
     assert result.status == "waiting_for_confirmation"
     assert result.pending_action_id == action_id
     assert handler.runs == []
-    assert _checkpoint_nodes(checkpoint_store) == ["confirmation_interrupt"]
+    assert _checkpoint_nodes(checkpoint_store) == ["sdk_reasoning"]
 
 
 def _checkpoint_nodes(store: "FakeCheckpointStore") -> list[str]:

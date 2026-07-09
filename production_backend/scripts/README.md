@@ -54,7 +54,6 @@ production_backend/.venv/bin/python
 | `inspect_worker_backlog.py` | 只读查看 durable outbox 和 agent run backlog 数量，不修改状态。 | 本地/线上排查 worker 堆积、发布后观察。 | `set -a; . <env-file>; set +a; python production_backend/scripts/inspect_worker_backlog.py` |
 | `inventory_legacy_backend.py` | 盘点旧后端路由、SQLite 表和迁移风险，生成迁移分析文档。 | 旧后端迁移分析时运行；新后端日常回归不需要。 | `python production_backend/scripts/inventory_legacy_backend.py --write` |
 | `recover_stuck_agent_runs.py` | 查找长时间停留在 `running` 的 agent run；默认 dry run，`--apply` 后标记失败并清理 Redis 控制状态。 | 运维恢复卡住的 run 时手动执行。 | `python production_backend/scripts/recover_stuck_agent_runs.py --limit 20`; 真正修改用 `--apply` |
-| `run_agent_provider_eval.py` | 使用真实 OpenAI provider 运行 agent eval，验证模型、工具、路由、最终回复质量。 | nightly、手动触发、发布前抽样；不适合每个 PR 必跑。 | `python production_backend/scripts/run_agent_provider_eval.py --allow-skip-without-credentials --max-cases 8 --cost-budget-usd 5.00` |
 | `run_agent_replay_eval.py` | 用已保存的 replay bundle 对单个 seed case 做回放断言。 | 线上问题复盘、事故回归、专题修复验证。 | `python production_backend/scripts/run_agent_replay_eval.py --replay <bundle.json> --suite <suite> --name <case-name>` |
 | `run_agent_seed_eval.py` | 运行确定性的产品 agent seed eval，可输出 JSON/JUnit。 | 每次 PR CI、本地 smoke、改动 agent runtime/工具/路由时。 | `python production_backend/scripts/run_agent_seed_eval.py --output /tmp/agent-seed-eval.json --junit-output /tmp/agent-seed-eval.junit.xml` |
 | `run_agent_worker.py` | 独立 agent run worker 进程入口，扫描可运行 run 并执行 LangGraph + OpenAI Agents SDK runtime。 | `make backend-local-up` 或单独 worker 服务启动时运行。 | `python -m production_backend.scripts.run_agent_worker`; 本地完整启动推荐 `make backend-local-up`，单独重启推荐 `make backend-local-workers` |
@@ -81,7 +80,6 @@ PR 级别通常需要：
 
 定时或发布前需要：
 
-- `run_agent_provider_eval.py`
 - `run_agent_replay_eval.py`
 - `backend-test-smoke`
 - `backend-prod-readiness`
@@ -98,8 +96,3 @@ PR 级别通常需要：
 - `check_object_storage_profile.py` 会创建并删除一个临时诊断对象，可能留下空的
   `.local/object_storage/diagnostics/` 目录；该目录可以删除。
 - `check_product_asset_storage.py` 不写入对象存储，只读取 metadata 或对象大小。
-- `run_agent_provider_eval.py` 会使用真实模型 provider，运行前需要设置
-  `AGENT_MODEL_PROVIDER`、对应 provider key/model 和成本预算。默认
-  `AGENT_MODEL_PROVIDER=openai`，需要 `OPENAI_API_KEY`、`OPENAI_MODEL`；
-  实验性 Minimax 验证使用 `AGENT_MODEL_PROVIDER=minimax`、
-  `MINIMAX_API_KEY`、`MINIMAX_BASE_URL`、`MINIMAX_MODEL`。

@@ -83,7 +83,8 @@ in `env/compose.local.env.example`. Enable it in your private
 `env/compose.local.env` when the LangGraph / OpenAI Agents SDK runtime handler is
 configured. `AGENT_MODEL_PROVIDER=openai` is the default. When the worker is
 enabled with the default provider, `OPENAI_API_KEY` must be set and
-`OPENAI_MODEL` controls the SDK agent model.
+`OPENAI_MODEL` controls the agent model. OpenAI runs namespace/deferred tool
+loading through the Responses API adapter when `tool_search` is enabled.
 
 Minimax is available as an experimental OpenAI-compatible provider. To test it,
 set these values in a private env file and run the provider eval before using it
@@ -98,7 +99,8 @@ MINIMAX_MODEL=MiniMax-M3
 
 The Minimax path uses the OpenAI Agents SDK with an OpenAI-compatible provider
 base URL and currently pins the SDK model path to Chat Completions compatibility
-for tool calling and streaming validation.
+for flat tool calling and streaming validation; it does not advertise deferred
+tool loading in runtime metadata.
 
 Voice endpoints are exposed in the production contract, but speech provider
 integration is disabled by default. Keep `VOICE_PROVIDER=disabled` until a

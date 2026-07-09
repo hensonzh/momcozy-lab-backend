@@ -8,10 +8,16 @@ from production_backend.app.modules.plans.agent_actions import (
     MILK_PLAN_CREATE_ACTION,
     PLAN_TASK_COMPLETE_ACTION,
     PLAN_TASK_CREATE_ACTION,
+    PLAN_TASK_DELETE_ACTION,
+    PLAN_TASK_UPDATE_ACTION,
+    PLAN_DELETE_ACTION,
     PREGNANCY_PLAN_CREATE_ACTION,
     MilkPlanCreateActionHandler,
+    PlanDeleteActionHandler,
     PlanTaskCompleteActionHandler,
     PlanTaskCreateActionHandler,
+    PlanTaskDeleteActionHandler,
+    PlanTaskUpdateActionHandler,
     PregnancyPlanCreateActionHandler,
 )
 from production_backend.app.modules.plans.models import Plan, PlanTask
@@ -126,6 +132,69 @@ def test_plan_task_complete_action_handler_sets_completion_through_service() -> 
     assert service.set_task_completed_kwargs["completed"] is False
 
 
+def test_plan_task_update_action_handler_updates_task_through_service() -> None:
+    service = FakePlansService()
+    task_id = uuid4()
+    plan_id = uuid4()
+    action = _action(
+        action_type=PLAN_TASK_UPDATE_ACTION,
+        target_type="plan_task",
+        apply_payload={
+            "task_id": str(task_id),
+            "plan_id": str(plan_id),
+            "task_date": "2026-07-05",
+            "task_time": "10:30",
+            "title": "Move pumping session",
+            "payload": {"reason": "meeting"},
+        },
+    )
+
+    result = asyncio.run(PlanTaskUpdateActionHandler(service=service)(action))
+
+    assert result.resource_type == "plan_task"
+    assert result.resource_id == str(service.task.id)
+    assert result.details["fields"] == ["payload", "plan_id", "task_date", "task_time", "title"]
+    assert service.update_task_kwargs["owner_user_id"] == action.actor_user_id
+    assert service.update_task_kwargs["task_id"] == task_id
+    assert service.update_task_kwargs["updates"]["plan_id"] == plan_id
+    assert service.update_task_kwargs["updates"]["task_date"].isoformat() == "2026-07-05"
+    assert service.update_task_kwargs["updates"]["title"] == "Move pumping session"
+
+
+def test_plan_task_delete_action_handler_deletes_task_through_service() -> None:
+    service = FakePlansService()
+    task_id = uuid4()
+    action = _action(
+        action_type=PLAN_TASK_DELETE_ACTION,
+        target_type="plan_task",
+        apply_payload={"task_id": str(task_id)},
+    )
+
+    result = asyncio.run(PlanTaskDeleteActionHandler(service=service)(action))
+
+    assert result.resource_type == "plan_task"
+    assert result.resource_id == str(task_id)
+    assert service.delete_task_kwargs["owner_user_id"] == action.actor_user_id
+    assert service.delete_task_kwargs["task_id"] == task_id
+
+
+def test_plan_delete_action_handler_deletes_plan_through_service() -> None:
+    service = FakePlansService()
+    plan_id = uuid4()
+    action = _action(
+        action_type=PLAN_DELETE_ACTION,
+        target_type="plan",
+        apply_payload={"plan_id": str(plan_id)},
+    )
+
+    result = asyncio.run(PlanDeleteActionHandler(service=service)(action))
+
+    assert result.resource_type == "plan"
+    assert result.resource_id == str(plan_id)
+    assert service.delete_plan_kwargs["owner_user_id"] == action.actor_user_id
+    assert service.delete_plan_kwargs["plan_id"] == plan_id
+
+
 def test_plan_task_create_action_handler_rejects_missing_title() -> None:
     with pytest.raises(PermanentJobError) as exc_info:
         asyncio.run(
@@ -170,6 +239,9 @@ class FakePlansService:
         self.create_plan_kwargs = {}
         self.create_task_kwargs = {}
         self.set_task_completed_kwargs = {}
+        self.update_task_kwargs = {}
+        self.delete_task_kwargs = {}
+        self.delete_plan_kwargs = {}
 
     async def create_plan(self, **kwargs):
         self.create_plan_kwargs = kwargs
@@ -198,6 +270,18 @@ class FakePlansService:
         self.task.id = kwargs["task_id"]
         self.task.status = "completed" if kwargs["completed"] else "pending"
         return self.task
+
+    async def update_task(self, **kwargs):
+        self.update_task_kwargs = kwargs
+        for key, value in kwargs["updates"].items():
+            setattr(self.task, key, value)
+        return self.task
+
+    async def delete_task(self, **kwargs):
+        self.delete_task_kwargs = kwargs
+
+    async def delete_plan(self, **kwargs):
+        self.delete_plan_kwargs = kwargs
 
 
 def _action(*, apply_payload: dict, action_type: str = MILK_PLAN_CREATE_ACTION, target_type: str = "plan") -> AgentAction:

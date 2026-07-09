@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from ....core.errors import ApiError
+from production_backend.app.core.errors import ApiError
+
 from .contracts import ToolContract
 
 
@@ -106,11 +107,68 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         ToolContract(
+            name="records.milk_analysis.read",
+            domain="records",
+            description="读取近期奶量、生长和趋势事实，并返回确定性奶量分析快照。",
+            input_schema_ref="MilkAnalysisReadQuery",
+            output_schema_ref="MilkAnalysisRead",
+            read_or_write="read",
+            required_permission="business_context:read:self",
+            owner_scope="actor",
+            side_effect_level="none",
+            blocking_policy="must_wait",
+            result_dependency="next_tool_call",
+            requires_confirmation=False,
+            idempotency_required=False,
+            audit_required=False,
+            timeout_seconds=10,
+        )
+    )
+    registry.register(
+        ToolContract(
+            name="records.growth.read",
+            domain="records",
+            description="按当前用户范围读取宝宝身高、体重、头围等生长记录。",
+            input_schema_ref="GrowthRecordsQuery",
+            output_schema_ref="GrowthRecordsRead",
+            read_or_write="read",
+            required_permission="business_context:read:self",
+            owner_scope="actor",
+            side_effect_level="none",
+            blocking_policy="must_wait",
+            result_dependency="next_tool_call",
+            requires_confirmation=False,
+            idempotency_required=False,
+            audit_required=False,
+            timeout_seconds=10,
+        )
+    )
+    registry.register(
+        ToolContract(
             name="plans.current.read",
             domain="plans",
             description="读取当前用户生效中计划和近期任务的有限摘要。",
             input_schema_ref="PlansCurrentQuery",
             output_schema_ref="PlansCurrentRead",
+            read_or_write="read",
+            required_permission="business_context:read:self",
+            owner_scope="actor",
+            side_effect_level="none",
+            blocking_policy="must_wait",
+            result_dependency="next_tool_call",
+            requires_confirmation=False,
+            idempotency_required=False,
+            audit_required=False,
+            timeout_seconds=10,
+        )
+    )
+    registry.register(
+        ToolContract(
+            name="plans.calendar.read",
+            domain="plans",
+            description="按日期、状态读取当前用户计划任务日程。",
+            input_schema_ref="PlansCalendarQuery",
+            output_schema_ref="PlansCalendarRead",
             read_or_write="read",
             required_permission="business_context:read:self",
             owner_scope="actor",
@@ -277,6 +335,25 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         ToolContract(
+            name="plans.milk_plan_preview.create",
+            domain="plans",
+            description="创建奶量计划预览产物，不直接保存为计划或日程。",
+            input_schema_ref="MilkPlanPreviewCreate",
+            output_schema_ref="AgentArtifactRead",
+            read_or_write="write",
+            required_permission="agent_artifact:create:self",
+            owner_scope="actor",
+            side_effect_level="low",
+            blocking_policy="must_wait",
+            result_dependency="final_response",
+            requires_confirmation=False,
+            idempotency_required=False,
+            audit_required=True,
+            timeout_seconds=15,
+        )
+    )
+    registry.register(
+        ToolContract(
             name="pregnancy.plan_create.propose",
             domain="plans",
             description="提出孕期计划创建动作，等待用户确认。",
@@ -319,6 +396,63 @@ def default_tool_registry() -> ToolContractRegistry:
             domain="plans",
             description="提出计划任务完成状态更新动作，等待用户确认。",
             input_schema_ref="PlanTaskCompleteProposalCreate",
+            output_schema_ref="AgentActionRead",
+            read_or_write="write",
+            required_permission="plans:write:self",
+            owner_scope="actor",
+            side_effect_level="medium",
+            blocking_policy="wait_for_confirmation",
+            result_dependency="none",
+            requires_confirmation=True,
+            idempotency_required=True,
+            audit_required=True,
+            timeout_seconds=15,
+        )
+    )
+    registry.register(
+        ToolContract(
+            name="plans.task_update.propose",
+            domain="plans",
+            description="提出计划任务日期、时间、标题、描述或载荷更新动作，等待用户确认。",
+            input_schema_ref="PlanTaskUpdateProposalCreate",
+            output_schema_ref="AgentActionRead",
+            read_or_write="write",
+            required_permission="plans:write:self",
+            owner_scope="actor",
+            side_effect_level="medium",
+            blocking_policy="wait_for_confirmation",
+            result_dependency="none",
+            requires_confirmation=True,
+            idempotency_required=True,
+            audit_required=True,
+            timeout_seconds=15,
+        )
+    )
+    registry.register(
+        ToolContract(
+            name="plans.task_delete.propose",
+            domain="plans",
+            description="提出计划任务删除动作，等待用户确认。",
+            input_schema_ref="PlanTaskDeleteProposalCreate",
+            output_schema_ref="AgentActionRead",
+            read_or_write="write",
+            required_permission="plans:write:self",
+            owner_scope="actor",
+            side_effect_level="medium",
+            blocking_policy="wait_for_confirmation",
+            result_dependency="none",
+            requires_confirmation=True,
+            idempotency_required=True,
+            audit_required=True,
+            timeout_seconds=15,
+        )
+    )
+    registry.register(
+        ToolContract(
+            name="plans.plan_delete.propose",
+            domain="plans",
+            description="提出计划删除动作，等待用户确认。",
+            input_schema_ref="PlanDeleteProposalCreate",
             output_schema_ref="AgentActionRead",
             read_or_write="write",
             required_permission="plans:write:self",
@@ -391,6 +525,101 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         ToolContract(
+            name="records.feeding_record_delete.propose",
+            domain="records",
+            description="提出删除喂养记录动作，等待用户确认。",
+            input_schema_ref="RecordDeleteProposalCreate",
+            output_schema_ref="AgentActionRead",
+            read_or_write="write",
+            required_permission="records:write:self",
+            owner_scope="actor",
+            side_effect_level="medium",
+            blocking_policy="wait_for_confirmation",
+            result_dependency="none",
+            requires_confirmation=True,
+            idempotency_required=True,
+            audit_required=True,
+            timeout_seconds=15,
+        )
+    )
+    registry.register(
+        ToolContract(
+            name="records.pumping_record_delete.propose",
+            domain="records",
+            description="提出删除吸奶记录动作，等待用户确认。",
+            input_schema_ref="RecordDeleteProposalCreate",
+            output_schema_ref="AgentActionRead",
+            read_or_write="write",
+            required_permission="records:write:self",
+            owner_scope="actor",
+            side_effect_level="medium",
+            blocking_policy="wait_for_confirmation",
+            result_dependency="none",
+            requires_confirmation=True,
+            idempotency_required=True,
+            audit_required=True,
+            timeout_seconds=15,
+        )
+    )
+    registry.register(
+        ToolContract(
+            name="records.growth_record.propose",
+            domain="records",
+            description="提出宝宝生长记录创建动作。",
+            input_schema_ref="GrowthRecordProposalCreate",
+            output_schema_ref="AgentActionRead",
+            read_or_write="write",
+            required_permission="records:write:self",
+            owner_scope="actor",
+            side_effect_level="low",
+            blocking_policy="enqueue_and_continue",
+            result_dependency="none",
+            requires_confirmation=False,
+            idempotency_required=True,
+            audit_required=True,
+            timeout_seconds=15,
+        )
+    )
+    registry.register(
+        ToolContract(
+            name="records.growth_record_update.propose",
+            domain="records",
+            description="提出宝宝生长记录更新动作，等待用户确认。",
+            input_schema_ref="GrowthRecordUpdateProposalCreate",
+            output_schema_ref="AgentActionRead",
+            read_or_write="write",
+            required_permission="records:write:self",
+            owner_scope="actor",
+            side_effect_level="medium",
+            blocking_policy="wait_for_confirmation",
+            result_dependency="none",
+            requires_confirmation=True,
+            idempotency_required=True,
+            audit_required=True,
+            timeout_seconds=15,
+        )
+    )
+    registry.register(
+        ToolContract(
+            name="records.growth_record_delete.propose",
+            domain="records",
+            description="提出宝宝生长记录删除动作，等待用户确认。",
+            input_schema_ref="RecordDeleteProposalCreate",
+            output_schema_ref="AgentActionRead",
+            read_or_write="write",
+            required_permission="records:write:self",
+            owner_scope="actor",
+            side_effect_level="medium",
+            blocking_policy="wait_for_confirmation",
+            result_dependency="none",
+            requires_confirmation=True,
+            idempotency_required=True,
+            audit_required=True,
+            timeout_seconds=15,
+        )
+    )
+    registry.register(
+        ToolContract(
             name="birth_plan_form_create",
             domain="birth_prep",
             description="创建分娩沟通单信息采集表单。LLM 只传已知字段 default_values；表单字段、顺序、分类、选项和排他选项过滤由工具稳定生成。无后端副作用。",
@@ -431,7 +660,7 @@ def default_tool_registry() -> ToolContractRegistry:
         ToolContract(
             name="birth_journey_plan_card_create",
             domain="birth_prep",
-            description="根据 birth_journey_intake_manage 已采集或已问过的信息，生成前端可渲染并保存为 active care plan 的孕期计划。生成前必须完成基础信息、个性化追问，以及按孕周决定的产检记录上传/跳过状态；不要为了生成计划再补问旧版模板化的高风险因素、当前症状、生活方式或喂养/IBCLC 信息。用户回答不清楚、跳过、暂不提供也算已问到，并应在 plan_context 中显式传入对应字段。LLM 不需要生成 card_json；规则分层、日期换算、行动清单、7 天待办分组和安全声明由工具稳定生成。已有 active 孕期计划时工具会返回 existing_plan_found，不要重复生成。",
+            description="根据已采集或已问过的信息，生成前端可渲染并保存为 active care plan 的孕期计划。生成前必须完成基础信息、个性化追问，以及按孕周决定的产检记录上传或跳过状态；不要为了生成计划再补问旧版模板化的高风险因素、当前症状、生活方式或喂养/IBCLC 信息。用户回答不清楚、跳过、暂不提供也算已问到，并应在 plan_context 中显式传入对应字段。LLM 不需要生成 card_json；规则分层、日期换算、行动清单、7 天待办分组和安全声明由工具稳定生成。已有 active 孕期计划时工具会返回 existing_plan_found，不要重复生成。",
             input_schema_ref="LegacyArtifactToolInput",
             output_schema_ref="LegacyArtifactToolOutput",
             read_or_write="write",
@@ -537,6 +766,25 @@ def default_tool_registry() -> ToolContractRegistry:
             result_dependency="none",
             requires_confirmation=True,
             idempotency_required=True,
+            audit_required=True,
+            timeout_seconds=15,
+        )
+    )
+    registry.register(
+        ToolContract(
+            name="ibclc_consult_card_create",
+            domain="support",
+            description="创建 IBCLC 哺乳顾问咨询入口卡片。无外部预约副作用。",
+            input_schema_ref="IbclcConsultCardCreate",
+            output_schema_ref="AgentArtifactRead",
+            read_or_write="write",
+            required_permission="agent_artifact:create:self",
+            owner_scope="actor",
+            side_effect_level="low",
+            blocking_policy="must_wait",
+            result_dependency="final_response",
+            requires_confirmation=False,
+            idempotency_required=False,
             audit_required=True,
             timeout_seconds=15,
         )

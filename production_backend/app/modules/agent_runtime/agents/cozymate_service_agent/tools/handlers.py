@@ -1,37 +1,50 @@
 from __future__ import annotations
 
+import re
 from datetime import date, datetime
 from typing import Any
 from uuid import UUID
 
-from ....core.errors import ApiError
-from ...assets.models import ProductAsset
-from ...assets.service import ProductAssetService
-from ...devices.models import PumpDevice, PumpTelemetryEvent
-from ...devices.service import DevicesService
-from ...diary.agent_actions import DIARY_ENTRY_UPSERT_ACTION
-from ...diary.models import PregnancyDiaryEntry
-from ...diary.service import DiaryService
-from ...files.vision_service import FileVisionService
-from ...hospital_bag import HOSPITAL_BAG_CART_UPDATE_ACTION
-from ...notifications.agent_actions import MILK_REMINDER_CREATE_ACTION
-from ...plans.agent_actions import (
+from production_backend.app.core.errors import ApiError
+from production_backend.app.modules.agent_runtime.memory.actions import AGENT_MEMORY_CREATE_ACTION
+from production_backend.app.modules.agent_runtime.memory.service import validate_memory_write_policy
+from production_backend.app.modules.agent_runtime.service import AgentRuntimeService
+from production_backend.app.modules.assets.models import ProductAsset
+from production_backend.app.modules.assets.service import ProductAssetService
+from production_backend.app.modules.devices.models import PumpDevice, PumpTelemetryEvent
+from production_backend.app.modules.devices.service import DevicesService
+from production_backend.app.modules.diary.agent_actions import DIARY_ENTRY_UPSERT_ACTION
+from production_backend.app.modules.diary.models import PregnancyDiaryEntry
+from production_backend.app.modules.diary.service import DiaryService
+from production_backend.app.modules.files.vision_service import FileVisionService
+from production_backend.app.modules.hospital_bag import HOSPITAL_BAG_CART_UPDATE_ACTION
+from production_backend.app.modules.notifications.agent_actions import MILK_REMINDER_CREATE_ACTION
+from production_backend.app.modules.plans.agent_actions import (
     MILK_PLAN_CREATE_ACTION,
     PLAN_TASK_COMPLETE_ACTION,
     PLAN_TASK_CREATE_ACTION,
+    PLAN_TASK_DELETE_ACTION,
+    PLAN_TASK_UPDATE_ACTION,
+    PLAN_DELETE_ACTION,
     PREGNANCY_PLAN_CREATE_ACTION,
 )
-from ...plans.models import Plan, PlanTask
-from ...plans.service import PlansService
-from ...profiles.models import InfantProfile, UserProfile
-from ...profiles.service import ProfileService
-from ...records.agent_actions import FEEDING_RECORD_CREATE_ACTION, PUMPING_RECORD_CREATE_ACTION
-from ...records.models import FeedingRecord, GrowthRecord, PumpingRecord
-from ...records.service import RecordsService
-from ...support.agent_actions import SUPPORT_TICKET_CREATE_ACTION
-from ..memory.actions import AGENT_MEMORY_CREATE_ACTION
-from ..memory.service import validate_memory_write_policy
-from ..service import AgentRuntimeService
+from production_backend.app.modules.plans.models import Plan, PlanTask
+from production_backend.app.modules.plans.service import PlansService
+from production_backend.app.modules.profiles.models import InfantProfile, UserProfile
+from production_backend.app.modules.profiles.service import ProfileService
+from production_backend.app.modules.records.agent_actions import (
+    FEEDING_RECORD_CREATE_ACTION,
+    FEEDING_RECORD_DELETE_ACTION,
+    GROWTH_RECORD_CREATE_ACTION,
+    GROWTH_RECORD_DELETE_ACTION,
+    GROWTH_RECORD_UPDATE_ACTION,
+    PUMPING_RECORD_CREATE_ACTION,
+    PUMPING_RECORD_DELETE_ACTION,
+)
+from production_backend.app.modules.records.models import FeedingRecord, GrowthRecord, PumpingRecord
+from production_backend.app.modules.records.service import RecordsService
+from production_backend.app.modules.support.agent_actions import SUPPORT_TICKET_CREATE_ACTION
+
 from .executor import ToolHandler, ToolHandlerContext
 from .legacy_artifacts import artifact_record_from_legacy_result, create_legacy_artifact_result
 
@@ -145,6 +158,32 @@ class AgentArtifactCreateToolHandler:
             "status": artifact.status,
             "title": _text(payload, "title"),
             "summary": _text(payload, "summary"),
+        }
+
+
+class IbclcConsultCardCreateToolHandler:
+    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
+        self.runtime_service = runtime_service
+
+    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
+        payload = _ibclc_consult_card_payload(context.args)
+        if not _text(payload, "reason"):
+            raise ApiError(code="validation_failed", message="reason is required.", status=422)
+        artifact = await self.runtime_service.create_artifact(
+            owner_user_id=context.actor.user_id,
+            run_id=context.run_id,
+            artifact_type="ibclc_consult_card",
+            schema_version="v1",
+            status="created",
+            payload=payload,
+        )
+        return {
+            "artifact_id": str(artifact.id),
+            "artifact_type": artifact.artifact_type,
+            "status": artifact.status,
+            "title": _text(payload, "title"),
+            "reason": _text(payload, "reason"),
+            "urgency": _text(payload, "urgency") or "routine",
         }
 
 
@@ -276,6 +315,63 @@ class MilkStatusReadToolHandler:
         )
 
 
+class MilkAnalysisReadToolHandler:
+    def __init__(self, *, records_service: RecordsService, profile_service: ProfileService) -> None:
+        self.records_service = records_service
+        self.profile_service = profile_service
+
+    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
+        owner_user_id = context.actor.user_id
+        days = _limit(context.args.get("days"), default=7, max_limit=30)
+        limit = _limit(context.args.get("limit"), default=8, max_limit=20)
+        feedings = await self.records_service.list_feedings(owner_user_id=owner_user_id, limit=limit)
+        pumpings = await self.records_service.list_pumpings(owner_user_id=owner_user_id, limit=limit)
+        growth = await self.records_service.list_growth(owner_user_id=owner_user_id, limit=limit)
+        trends = await self.records_service.get_milk_trends(owner_user_id=owner_user_id, days=days, include_today=True)
+        infants = await self.profile_service.list_infants(owner_user_id=owner_user_id)
+        trend_items = [_milk_trend_payload(item) for item in trends.items]
+        status = _milk_status_payload(
+            days=days,
+            limit=limit,
+            feedings=feedings,
+            pumpings=pumpings,
+            trend_items=trend_items,
+            infant_count=len(infants),
+        )
+        return {
+            "window": status["window"],
+            "status": status["status"],
+            "counts": status["counts"] | {"recent_growth": len(growth)},
+            "volumes": status["volumes"],
+            "latest": status["latest"],
+            "observation_flags": status["observation_flags"],
+            "recent_feedings": [_feeding_payload(record) for record in feedings],
+            "recent_pumpings": [_pumping_payload(record) for record in pumpings],
+            "recent_growth": [_growth_payload(record) for record in growth],
+            "pumping_trends": trend_items,
+            "analysis": _milk_analysis_payload(status=status, growth=growth),
+        }
+
+
+class GrowthRecordsReadToolHandler:
+    def __init__(self, *, records_service: RecordsService) -> None:
+        self.records_service = records_service
+
+    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
+        infant_id = _optional_uuid_arg(context.args, "infant_id")
+        limit = _limit(context.args.get("limit"), default=5, max_limit=20)
+        growth = await self.records_service.list_growth(
+            owner_user_id=context.actor.user_id,
+            infant_id=infant_id,
+            limit=limit,
+        )
+        return {
+            "growth": [_growth_payload(record) for record in growth],
+            "count": len(growth),
+            "infant_id": str(infant_id) if infant_id is not None else "",
+        }
+
+
 class PlansCurrentReadToolHandler:
     def __init__(self, *, plans_service: PlansService) -> None:
         self.plans_service = plans_service
@@ -291,6 +387,31 @@ class PlansCurrentReadToolHandler:
             "counts": {
                 "plans": len(plans),
                 "tasks": len(tasks),
+            },
+        }
+
+
+class PlansCalendarReadToolHandler:
+    def __init__(self, *, plans_service: PlansService) -> None:
+        self.plans_service = plans_service
+
+    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
+        limit = _limit(context.args.get("limit"), default=10, max_limit=50)
+        task_date = _optional_date_arg(context.args, "task_date")
+        status = _text(context.args, "status") or None
+        tasks = await self.plans_service.list_tasks(
+            owner_user_id=context.actor.user_id,
+            task_date=task_date,
+            status=status,
+            limit=limit,
+        )
+        return {
+            "tasks": [_task_payload(task) for task in tasks],
+            "count": len(tasks),
+            "filters": {
+                "task_date": _date_iso(task_date),
+                "status": status or "",
+                "limit": limit,
             },
         }
 
@@ -420,14 +541,24 @@ class DeviceGuidanceAssetsReadToolHandler:
     async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
         limit = _limit(context.args.get("limit"), default=10, max_limit=20)
         content_type = _text(context.args, "content_type")
+        model = _text(context.args, "model")
+        topic = _text(context.args, "topic")
+        query = _text(context.args, "query")
         assets = self.asset_service.list_assets(limit=200)
         if content_type:
             assets = [asset for asset in assets if asset.content_type == content_type]
+        assets = _filter_guidance_assets(assets=assets, model=model, topic=topic, query=query)
         bounded_assets = assets[:limit]
         return {
             "assets": [_asset_payload(asset) for asset in bounded_assets],
             "count": len(bounded_assets),
             "available_count": len(assets),
+            "query_context": {
+                "model": model,
+                "topic": topic,
+                "query": query,
+                "measured_nipple_mm": context.args.get("measured_nipple_mm"),
+            },
         }
 
 
@@ -505,6 +636,128 @@ class PumpingRecordProposeToolHandler:
         return _proposal_result(action=action, preview_payload=preview_payload)
 
 
+class FeedingRecordDeleteProposeToolHandler:
+    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
+        self.runtime_service = runtime_service
+
+    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
+        apply_payload = _record_delete_apply_payload(context.args)
+        record_id = _text(apply_payload, "record_id")
+        if not record_id:
+            raise ApiError(code="validation_failed", message="record_id is required.", status=422)
+        preview_payload = _record_delete_preview_payload(apply_payload, record_type="feeding_record")
+        action = await self.runtime_service.propose_action(
+            owner_user_id=context.actor.user_id,
+            run_id=context.run_id,
+            action_type=FEEDING_RECORD_DELETE_ACTION,
+            target_type="feeding_record",
+            target_id=record_id,
+            side_effect_level="medium",
+            preview_payload=preview_payload,
+            apply_payload=apply_payload,
+            idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:feeding-record-delete",
+        )
+        return _proposal_result(action=action, preview_payload=preview_payload)
+
+
+class PumpingRecordDeleteProposeToolHandler:
+    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
+        self.runtime_service = runtime_service
+
+    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
+        apply_payload = _record_delete_apply_payload(context.args)
+        record_id = _text(apply_payload, "record_id")
+        if not record_id:
+            raise ApiError(code="validation_failed", message="record_id is required.", status=422)
+        preview_payload = _record_delete_preview_payload(apply_payload, record_type="pumping_record")
+        action = await self.runtime_service.propose_action(
+            owner_user_id=context.actor.user_id,
+            run_id=context.run_id,
+            action_type=PUMPING_RECORD_DELETE_ACTION,
+            target_type="pumping_record",
+            target_id=record_id,
+            side_effect_level="medium",
+            preview_payload=preview_payload,
+            apply_payload=apply_payload,
+            idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:pumping-record-delete",
+        )
+        return _proposal_result(action=action, preview_payload=preview_payload)
+
+
+class GrowthRecordProposeToolHandler:
+    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
+        self.runtime_service = runtime_service
+
+    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
+        apply_payload = _growth_record_apply_payload(context.args)
+        if not _text(apply_payload, "measured_at"):
+            raise ApiError(code="validation_failed", message="measured_at is required.", status=422)
+        if not _has_any_growth_measurement(apply_payload):
+            raise ApiError(code="validation_failed", message="height_cm, weight_kg, or head_cm is required.", status=422)
+        preview_payload = _growth_record_preview_payload(apply_payload)
+        action = await self.runtime_service.propose_action(
+            owner_user_id=context.actor.user_id,
+            run_id=context.run_id,
+            action_type=GROWTH_RECORD_CREATE_ACTION,
+            target_type="growth_record",
+            side_effect_level="low",
+            preview_payload=preview_payload,
+            apply_payload=apply_payload,
+            idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:growth-record",
+        )
+        return _proposal_result(action=action, preview_payload=preview_payload)
+
+
+class GrowthRecordUpdateProposeToolHandler:
+    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
+        self.runtime_service = runtime_service
+
+    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
+        apply_payload = _growth_record_update_apply_payload(context.args)
+        record_id = _text(apply_payload, "record_id")
+        if not record_id:
+            raise ApiError(code="validation_failed", message="record_id is required.", status=422)
+        if not _growth_update_fields(apply_payload):
+            raise ApiError(code="validation_failed", message="At least one growth update field is required.", status=422)
+        preview_payload = _growth_record_update_preview_payload(apply_payload)
+        action = await self.runtime_service.propose_action(
+            owner_user_id=context.actor.user_id,
+            run_id=context.run_id,
+            action_type=GROWTH_RECORD_UPDATE_ACTION,
+            target_type="growth_record",
+            target_id=record_id,
+            side_effect_level="medium",
+            preview_payload=preview_payload,
+            apply_payload=apply_payload,
+            idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:growth-record-update",
+        )
+        return _proposal_result(action=action, preview_payload=preview_payload)
+
+
+class GrowthRecordDeleteProposeToolHandler:
+    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
+        self.runtime_service = runtime_service
+
+    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
+        apply_payload = _record_delete_apply_payload(context.args)
+        record_id = _text(apply_payload, "record_id")
+        if not record_id:
+            raise ApiError(code="validation_failed", message="record_id is required.", status=422)
+        preview_payload = _record_delete_preview_payload(apply_payload, record_type="growth_record")
+        action = await self.runtime_service.propose_action(
+            owner_user_id=context.actor.user_id,
+            run_id=context.run_id,
+            action_type=GROWTH_RECORD_DELETE_ACTION,
+            target_type="growth_record",
+            target_id=record_id,
+            side_effect_level="medium",
+            preview_payload=preview_payload,
+            apply_payload=apply_payload,
+            idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:growth-record-delete",
+        )
+        return _proposal_result(action=action, preview_payload=preview_payload)
+
+
 class MilkPlanProposeToolHandler:
     def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
         self.runtime_service = runtime_service
@@ -526,6 +779,33 @@ class MilkPlanProposeToolHandler:
             idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:milk-plan",
         )
         return _proposal_result(action=action, preview_payload=preview_payload)
+
+
+class MilkPlanPreviewCreateToolHandler:
+    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
+        self.runtime_service = runtime_service
+
+    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
+        payload = _milk_plan_preview_artifact_payload(context.args)
+        if not _text(payload, "title"):
+            raise ApiError(code="validation_failed", message="title is required.", status=422)
+        artifact = await self.runtime_service.create_artifact(
+            owner_user_id=context.actor.user_id,
+            run_id=context.run_id,
+            artifact_type="milk_plan_preview",
+            schema_version="v1",
+            status="created",
+            payload=payload,
+        )
+        return {
+            "artifact_id": str(artifact.id),
+            "artifact_type": artifact.artifact_type,
+            "status": artifact.status,
+            "title": _text(payload, "title"),
+            "summary": _text(payload, "summary"),
+            "task_count": len(payload.get("tasks") if isinstance(payload.get("tasks"), list) else []),
+            "reminder_count": len(payload.get("reminders") if isinstance(payload.get("reminders"), list) else []),
+        }
 
 
 class PregnancyPlanProposeToolHandler:
@@ -597,6 +877,80 @@ class PlanTaskCompleteProposeToolHandler:
         return _proposal_result(action=action, preview_payload=preview_payload)
 
 
+class PlanTaskUpdateProposeToolHandler:
+    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
+        self.runtime_service = runtime_service
+
+    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
+        apply_payload = _plan_task_update_apply_payload(context.args)
+        task_id = _text(apply_payload, "task_id")
+        if not task_id:
+            raise ApiError(code="validation_failed", message="task_id is required.", status=422)
+        if not _plan_task_update_fields(apply_payload):
+            raise ApiError(code="validation_failed", message="At least one task update field is required.", status=422)
+        preview_payload = _plan_task_update_preview_payload(apply_payload)
+        action = await self.runtime_service.propose_action(
+            owner_user_id=context.actor.user_id,
+            run_id=context.run_id,
+            action_type=PLAN_TASK_UPDATE_ACTION,
+            target_type="plan_task",
+            target_id=task_id,
+            side_effect_level="medium",
+            preview_payload=preview_payload,
+            apply_payload=apply_payload,
+            idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:plan-task-update",
+        )
+        return _proposal_result(action=action, preview_payload=preview_payload)
+
+
+class PlanTaskDeleteProposeToolHandler:
+    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
+        self.runtime_service = runtime_service
+
+    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
+        apply_payload = _plan_task_delete_apply_payload(context.args)
+        task_id = _text(apply_payload, "task_id")
+        if not task_id:
+            raise ApiError(code="validation_failed", message="task_id is required.", status=422)
+        preview_payload = _plan_task_delete_preview_payload(apply_payload)
+        action = await self.runtime_service.propose_action(
+            owner_user_id=context.actor.user_id,
+            run_id=context.run_id,
+            action_type=PLAN_TASK_DELETE_ACTION,
+            target_type="plan_task",
+            target_id=task_id,
+            side_effect_level="medium",
+            preview_payload=preview_payload,
+            apply_payload=apply_payload,
+            idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:plan-task-delete",
+        )
+        return _proposal_result(action=action, preview_payload=preview_payload)
+
+
+class PlanDeleteProposeToolHandler:
+    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
+        self.runtime_service = runtime_service
+
+    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
+        apply_payload = _plan_delete_apply_payload(context.args)
+        plan_id = _text(apply_payload, "plan_id")
+        if not plan_id:
+            raise ApiError(code="validation_failed", message="plan_id is required.", status=422)
+        preview_payload = _plan_delete_preview_payload(apply_payload)
+        action = await self.runtime_service.propose_action(
+            owner_user_id=context.actor.user_id,
+            run_id=context.run_id,
+            action_type=PLAN_DELETE_ACTION,
+            target_type="plan",
+            target_id=plan_id,
+            side_effect_level="medium",
+            preview_payload=preview_payload,
+            apply_payload=apply_payload,
+            idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:plan-delete",
+        )
+        return _proposal_result(action=action, preview_payload=preview_payload)
+
+
 class MilkReminderProposeToolHandler:
     def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
         self.runtime_service = runtime_service
@@ -647,7 +1001,13 @@ def build_default_tool_handlers(
             records_service=records_service,
             profile_service=profile_service,
         ),
+        "records.milk_analysis.read": MilkAnalysisReadToolHandler(
+            records_service=records_service,
+            profile_service=profile_service,
+        ),
+        "records.growth.read": GrowthRecordsReadToolHandler(records_service=records_service),
         "plans.current.read": PlansCurrentReadToolHandler(plans_service=plans_service),
+        "plans.calendar.read": PlansCalendarReadToolHandler(plans_service=plans_service),
         "diary.recent.read": DiaryRecentReadToolHandler(diary_service=diary_service),
         "pregnancy.plan_context.read": PregnancyPlanContextReadToolHandler(
             profile_service=profile_service,
@@ -660,12 +1020,21 @@ def build_default_tool_handlers(
         "devices.guidance_assets.read": DeviceGuidanceAssetsReadToolHandler(asset_service=asset_service),
         "files.vision_summary.read": FileVisionSummaryReadToolHandler(vision_service=file_vision_service),
         "plans.milk_plan.propose": MilkPlanProposeToolHandler(runtime_service=agent_runtime_service),
+        "plans.milk_plan_preview.create": MilkPlanPreviewCreateToolHandler(runtime_service=agent_runtime_service),
         "pregnancy.plan_create.propose": PregnancyPlanProposeToolHandler(runtime_service=agent_runtime_service),
         "plans.task_create.propose": PlanTaskCreateProposeToolHandler(runtime_service=agent_runtime_service),
         "plans.task_complete.propose": PlanTaskCompleteProposeToolHandler(runtime_service=agent_runtime_service),
+        "plans.task_update.propose": PlanTaskUpdateProposeToolHandler(runtime_service=agent_runtime_service),
+        "plans.task_delete.propose": PlanTaskDeleteProposeToolHandler(runtime_service=agent_runtime_service),
+        "plans.plan_delete.propose": PlanDeleteProposeToolHandler(runtime_service=agent_runtime_service),
         "notifications.milk_reminder.propose": MilkReminderProposeToolHandler(runtime_service=agent_runtime_service),
         "records.feeding_record.propose": FeedingRecordProposeToolHandler(runtime_service=agent_runtime_service),
         "records.pumping_record.propose": PumpingRecordProposeToolHandler(runtime_service=agent_runtime_service),
+        "records.feeding_record_delete.propose": FeedingRecordDeleteProposeToolHandler(runtime_service=agent_runtime_service),
+        "records.pumping_record_delete.propose": PumpingRecordDeleteProposeToolHandler(runtime_service=agent_runtime_service),
+        "records.growth_record.propose": GrowthRecordProposeToolHandler(runtime_service=agent_runtime_service),
+        "records.growth_record_update.propose": GrowthRecordUpdateProposeToolHandler(runtime_service=agent_runtime_service),
+        "records.growth_record_delete.propose": GrowthRecordDeleteProposeToolHandler(runtime_service=agent_runtime_service),
         "birth_plan_form_create": LegacyArtifactToolHandler(runtime_service=agent_runtime_service, tool_name="birth_plan_form_create"),
         "labor_communication_card_create": LegacyArtifactToolHandler(runtime_service=agent_runtime_service, tool_name="labor_communication_card_create"),
         "birth_journey_plan_card_create": LegacyArtifactToolHandler(runtime_service=agent_runtime_service, tool_name="birth_journey_plan_card_create"),
@@ -673,6 +1042,7 @@ def build_default_tool_handlers(
         "hospital_bag_card_create": LegacyArtifactToolHandler(runtime_service=agent_runtime_service, tool_name="hospital_bag_card_create"),
         "hospital_bag_cart_update": LegacyArtifactToolHandler(runtime_service=agent_runtime_service, tool_name="hospital_bag_cart_update"),
         "hospital_bag_pump_recommend": LegacyArtifactToolHandler(runtime_service=agent_runtime_service, tool_name="hospital_bag_pump_recommend"),
+        "ibclc_consult_card_create": IbclcConsultCardCreateToolHandler(runtime_service=agent_runtime_service),
         "support.ticket.propose": SupportTicketProposeToolHandler(runtime_service=agent_runtime_service),
     }
 
@@ -784,6 +1154,23 @@ def _artifact_payload(*, args: dict[str, Any], default_title: str) -> dict[str, 
     return {key: value for key, value in payload.items() if value not in ("", None, [], {})}
 
 
+def _ibclc_consult_card_payload(args: dict[str, Any]) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "title": "IBCLC 咨询入口",
+        "reason": _text(args, "reason"),
+        "feeding_context": _text(args, "feeding_context"),
+        "urgency": _text(args, "urgency") or "routine",
+        "preferred_language": _text(args, "preferred_language"),
+    }
+    extra_payload = args.get("payload")
+    if isinstance(extra_payload, dict):
+        payload["payload"] = extra_payload
+    metadata = _metadata_payload(args)
+    if metadata:
+        payload["metadata"] = metadata
+    return {key: value for key, value in payload.items() if value not in ("", None, {})}
+
+
 def _feeding_record_apply_payload(args: dict[str, Any]) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "infant_id": _text(args, "infant_id"),
@@ -842,6 +1229,72 @@ def _pumping_record_preview_payload(apply_payload: dict[str, Any]) -> dict[str, 
     return {key: value for key, value in preview.items() if value not in ("", None)}
 
 
+def _record_delete_apply_payload(args: dict[str, Any]) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "record_id": _text(args, "record_id"),
+        "reason": _text(args, "reason"),
+    }
+    metadata = _metadata_payload(args)
+    if metadata:
+        payload["metadata"] = metadata
+    return {key: value for key, value in payload.items() if value not in ("", None, {})}
+
+
+def _record_delete_preview_payload(apply_payload: dict[str, Any], *, record_type: str) -> dict[str, Any]:
+    preview = {
+        "record_type": record_type,
+        "record_id": _text(apply_payload, "record_id"),
+        "reason": _text(apply_payload, "reason"),
+    }
+    return {key: value for key, value in preview.items() if value not in ("", None)}
+
+
+def _growth_record_apply_payload(args: dict[str, Any]) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "infant_id": _text(args, "infant_id"),
+        "measured_at": _text(args, "measured_at"),
+        "height_cm": _optional_number(args, "height_cm"),
+        "weight_kg": _optional_number(args, "weight_kg"),
+        "head_cm": _optional_number(args, "head_cm"),
+    }
+    metadata = _metadata_payload(args)
+    if metadata:
+        payload["metadata"] = metadata
+    return {key: value for key, value in payload.items() if value not in ("", None, {})}
+
+
+def _growth_record_update_apply_payload(args: dict[str, Any]) -> dict[str, Any]:
+    payload = _growth_record_apply_payload(args)
+    payload["record_id"] = _text(args, "record_id")
+    return {key: value for key, value in payload.items() if value not in ("", None, {})}
+
+
+def _growth_record_preview_payload(apply_payload: dict[str, Any]) -> dict[str, Any]:
+    preview = {
+        "measured_at": _text(apply_payload, "measured_at"),
+        "height_cm": apply_payload.get("height_cm"),
+        "weight_kg": apply_payload.get("weight_kg"),
+        "head_cm": apply_payload.get("head_cm"),
+        "has_infant_id": bool(_text(apply_payload, "infant_id")),
+    }
+    return {key: value for key, value in preview.items() if value not in ("", None)}
+
+
+def _growth_record_update_preview_payload(apply_payload: dict[str, Any]) -> dict[str, Any]:
+    preview = _growth_record_preview_payload(apply_payload)
+    preview["record_id"] = _text(apply_payload, "record_id")
+    preview["fields"] = _growth_update_fields(apply_payload)
+    return {key: value for key, value in preview.items() if value not in ("", None, [])}
+
+
+def _has_any_growth_measurement(payload: dict[str, Any]) -> bool:
+    return any(payload.get(key) is not None for key in ("height_cm", "weight_kg", "head_cm"))
+
+
+def _growth_update_fields(payload: dict[str, Any]) -> list[str]:
+    return sorted(key for key in ("infant_id", "measured_at", "height_cm", "weight_kg", "head_cm") if key in payload)
+
+
 def _milk_plan_apply_payload(args: dict[str, Any]) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "title": _text(args, "title"),
@@ -864,6 +1317,27 @@ def _milk_plan_preview_payload(apply_payload: dict[str, Any]) -> dict[str, Any]:
         "has_payload": isinstance(apply_payload.get("payload"), dict) and bool(apply_payload.get("payload")),
     }
     return {key: value for key, value in preview.items() if value not in ("", None)}
+
+
+def _milk_plan_preview_artifact_payload(args: dict[str, Any]) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "title": _text(args, "title"),
+        "summary": _text(args, "summary"),
+        "direction": _text(args, "direction") or "unknown",
+        "start_date": _text(args, "start_date"),
+        "days": _optional_int(args, "days"),
+    }
+    for key in ("tasks", "reminders"):
+        value = args.get(key)
+        if isinstance(value, list):
+            payload[key] = value
+    extra_payload = args.get("payload")
+    if isinstance(extra_payload, dict):
+        payload["payload"] = extra_payload
+    metadata = _metadata_payload(args)
+    if metadata:
+        payload["metadata"] = metadata
+    return {key: value for key, value in payload.items() if value not in ("", None, [], {})}
 
 
 def _pregnancy_plan_apply_payload(args: dict[str, Any]) -> dict[str, Any]:
@@ -935,6 +1409,80 @@ def _plan_task_complete_preview_payload(apply_payload: dict[str, Any]) -> dict[s
         "task_id": _text(apply_payload, "task_id"),
         "completed": bool(apply_payload.get("completed", True)),
     }
+
+
+def _plan_task_update_apply_payload(args: dict[str, Any]) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "task_id": _text(args, "task_id"),
+        "plan_id": _text(args, "plan_id"),
+        "task_date": _text(args, "task_date"),
+        "task_time": _text(args, "task_time"),
+        "title": _text(args, "title"),
+        "description": _text(args, "description"),
+    }
+    task_payload = args.get("payload")
+    if isinstance(task_payload, dict):
+        payload["payload"] = task_payload
+    metadata = _metadata_payload(args)
+    if metadata:
+        payload["metadata"] = metadata
+    return {key: value for key, value in payload.items() if value not in ("", None, {})}
+
+
+def _plan_task_update_preview_payload(apply_payload: dict[str, Any]) -> dict[str, Any]:
+    preview = {
+        "task_id": _text(apply_payload, "task_id"),
+        "task_date": _text(apply_payload, "task_date"),
+        "task_time": _text(apply_payload, "task_time"),
+        "title": _text(apply_payload, "title"),
+        "description": _truncate(_text(apply_payload, "description"), max_length=240),
+        "has_plan_id": bool(_text(apply_payload, "plan_id")),
+        "has_payload": isinstance(apply_payload.get("payload"), dict) and bool(apply_payload.get("payload")),
+        "fields": _plan_task_update_fields(apply_payload),
+    }
+    return {key: value for key, value in preview.items() if value not in ("", None, [])}
+
+
+def _plan_task_update_fields(payload: dict[str, Any]) -> list[str]:
+    return sorted(key for key in ("plan_id", "task_date", "task_time", "title", "description", "payload") if key in payload)
+
+
+def _plan_task_delete_apply_payload(args: dict[str, Any]) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "task_id": _text(args, "task_id"),
+        "reason": _text(args, "reason"),
+    }
+    metadata = _metadata_payload(args)
+    if metadata:
+        payload["metadata"] = metadata
+    return {key: value for key, value in payload.items() if value not in ("", None, {})}
+
+
+def _plan_task_delete_preview_payload(apply_payload: dict[str, Any]) -> dict[str, Any]:
+    preview = {
+        "task_id": _text(apply_payload, "task_id"),
+        "reason": _text(apply_payload, "reason"),
+    }
+    return {key: value for key, value in preview.items() if value not in ("", None)}
+
+
+def _plan_delete_apply_payload(args: dict[str, Any]) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "plan_id": _text(args, "plan_id"),
+        "reason": _text(args, "reason"),
+    }
+    metadata = _metadata_payload(args)
+    if metadata:
+        payload["metadata"] = metadata
+    return {key: value for key, value in payload.items() if value not in ("", None, {})}
+
+
+def _plan_delete_preview_payload(apply_payload: dict[str, Any]) -> dict[str, Any]:
+    preview = {
+        "plan_id": _text(apply_payload, "plan_id"),
+        "reason": _text(apply_payload, "reason"),
+    }
+    return {key: value for key, value in preview.items() if value not in ("", None)}
 
 
 def _milk_reminder_apply_payload(args: dict[str, Any]) -> dict[str, Any]:
@@ -1070,6 +1618,28 @@ def _uuid(value: str, *, code: str, field_name: str) -> UUID:
             message=f"{field_name} must be a valid UUID.",
             status=422,
             details={"field": field_name},
+        ) from exc
+
+
+def _optional_uuid_arg(payload: dict[str, Any], key: str) -> UUID | None:
+    value = _text(payload, key)
+    if not value:
+        return None
+    return _uuid(value, code="validation_failed", field_name=key)
+
+
+def _optional_date_arg(payload: dict[str, Any], key: str) -> date | None:
+    value = _text(payload, key)
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError as exc:
+        raise ApiError(
+            code="validation_failed",
+            message=f"{key} must be a valid date.",
+            status=422,
+            details={"field": key},
         ) from exc
 
 
@@ -1242,6 +1812,45 @@ def _milk_observation_flags(
     return flags
 
 
+def _milk_analysis_payload(*, status: dict[str, Any], growth: list[GrowthRecord]) -> dict[str, Any]:
+    status_payload = status.get("status") if isinstance(status.get("status"), dict) else {}
+    flags = status.get("observation_flags") if isinstance(status.get("observation_flags"), list) else []
+    data_coverage = _text(status_payload, "data_coverage")
+    trend = _text(status_payload, "pumping_trend")
+    if "no_infant_profile" in flags:
+        pathway = "补充宝宝资料后再判断供需"
+    elif data_coverage == "no_recent_data":
+        pathway = "先补近期记录"
+    elif trend == "decreasing":
+        pathway = "评估是否需要追奶或排乳节奏调整"
+    elif trend == "increasing":
+        pathway = "观察是否需要稳奶或减奶"
+    elif data_coverage == "ready":
+        pathway = "可以进入追奶/稳奶/减奶方向判断"
+    else:
+        pathway = "继续补齐关键记录后再判断"
+    return {
+        "pathway": pathway,
+        "data_coverage": data_coverage,
+        "pumping_trend": trend,
+        "has_recent_growth": bool(growth),
+        "missing_inputs": list(flags),
+        "recommended_next_step": _milk_analysis_next_step(data_coverage=data_coverage, trend=trend, flags=flags),
+    }
+
+
+def _milk_analysis_next_step(*, data_coverage: str, trend: str, flags: list[Any]) -> str:
+    if "no_infant_profile" in flags:
+        return "先确认宝宝资料或体重/尿布等摄入信号。"
+    if data_coverage == "no_recent_data":
+        return "先补一条近期喂养或吸奶记录。"
+    if data_coverage == "limited":
+        return "只追问当前最影响判断的一项缺失信息。"
+    if trend in {"decreasing", "increasing"}:
+        return "结合宝宝状态和妈妈乳房/全身状态判断是否进入计划。"
+    return "给出简短结论，并询问是否开始制定计划。"
+
+
 def _growth_payload(record: GrowthRecord) -> dict[str, Any]:
     return {
         "id": str(record.id),
@@ -1308,6 +1917,70 @@ def _asset_payload(asset: ProductAsset) -> dict[str, Any]:
         "content_type": asset.content_type,
         "size_bytes": asset.size_bytes,
     }
+
+
+def _filter_guidance_assets(*, assets: list[ProductAsset], model: str, topic: str, query: str) -> list[ProductAsset]:
+    term_groups = _guidance_search_term_groups(model=model, topic=topic, query=query)
+    if not term_groups:
+        return assets
+    matched: list[ProductAsset] = []
+    for asset in assets:
+        haystack = _normalized_search_term(" ".join([asset.id, asset.label, asset.domain, asset.object_key or ""]))
+        if all(any(term in haystack for term in group) for group in term_groups):
+            matched.append(asset)
+    return matched
+
+
+def _normalized_search_term(value: object) -> str:
+    return str(value or "").strip().lower().replace(" ", "").replace("-", "")
+
+
+def _normalized_search_terms(value: object) -> list[str]:
+    raw_value = str(value or "").strip().lower()
+    if not raw_value:
+        return []
+    raw_terms = re.findall(r"[\w\u4e00-\u9fff]+", raw_value)
+    return [
+        term
+        for term in (_normalized_search_term(raw_term) for raw_term in raw_terms)
+        if term
+    ]
+
+
+def _guidance_search_term_groups(*, model: str, topic: str, query: str) -> list[list[str]]:
+    groups: list[list[str]] = []
+    model_terms = _normalized_search_terms(model)
+    if model_terms:
+        groups.append(_expand_guidance_terms(model_terms, aliases=_GUIDANCE_MODEL_ALIASES))
+    topic_terms = _normalized_search_terms(topic)
+    if topic_terms:
+        groups.append(_expand_guidance_terms(topic_terms, aliases=_GUIDANCE_TOPIC_ALIASES))
+    groups.extend([term] for term in _normalized_search_terms(query))
+    return groups
+
+
+def _expand_guidance_terms(terms: list[str], *, aliases: dict[str, tuple[str, ...]]) -> list[str]:
+    expanded: list[str] = []
+    for term in terms:
+        expanded.append(term)
+        expanded.extend(aliases.get(term, ()))
+    return sorted(set(expanded))
+
+
+_GUIDANCE_MODEL_ALIASES: dict[str, tuple[str, ...]] = {
+    "bp334": ("air1",),
+}
+_GUIDANCE_TOPIC_ALIASES: dict[str, tuple[str, ...]] = {
+    "setup": ("unboxing", "assembly", "quickstart", "quick", "start", "components"),
+    "firstuse": ("unboxing", "assembly", "quickstart", "quick", "start", "components"),
+    "gettingstarted": ("unboxing", "assembly", "quickstart", "quick", "start", "components"),
+    "cleaning": ("clean", "cleanable", "washable", "disinfection", "disinfect"),
+    "clean": ("cleaning", "cleanable", "washable", "disinfection", "disinfect"),
+    "flange": ("nipple", "measurement", "size"),
+    "sizing": ("flange", "nipple", "measurement", "size"),
+    "bluetooth": ("pairing", "connection", "appcontrol"),
+    "pairing": ("bluetooth", "connection", "appcontrol"),
+}
 
 
 def _telemetry_payload(event: PumpTelemetryEvent) -> dict[str, Any]:

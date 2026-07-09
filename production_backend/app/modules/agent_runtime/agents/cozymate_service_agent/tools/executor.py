@@ -8,14 +8,15 @@ from time import perf_counter
 from typing import Any
 from uuid import UUID
 
-from ....core.errors import ApiError
-from ....core.metrics import RequestMetrics
-from ....infrastructure.object_storage.base import ObjectStorage
-from ...auth import CurrentUser, PermissionPolicy
-from ..event_stream.sink import AgentEventSink
-from ..models import AgentToolCall
-from ..payloads import DEFAULT_MAX_INLINE_PAYLOAD_BYTES, maybe_externalize_json_payload
-from ..repository import AgentRuntimeRepository
+from production_backend.app.core.errors import ApiError
+from production_backend.app.core.metrics import RequestMetrics
+from production_backend.app.infrastructure.object_storage.base import ObjectStorage
+from production_backend.app.modules.agent_runtime.event_stream.sink import AgentEventSink
+from production_backend.app.modules.agent_runtime.models import AgentToolCall
+from production_backend.app.modules.agent_runtime.payloads import DEFAULT_MAX_INLINE_PAYLOAD_BYTES, maybe_externalize_json_payload
+from production_backend.app.modules.agent_runtime.repository import AgentRuntimeRepository
+from production_backend.app.modules.auth import CurrentUser, PermissionPolicy
+
 from .contracts import ToolContract
 from .output_policy import strip_instructional_tool_output_keys
 from .registry import ToolContractRegistry

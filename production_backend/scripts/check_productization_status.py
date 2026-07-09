@@ -108,7 +108,6 @@ def _check_environment_profiles(backend: Path) -> list[CheckResult]:
 
 def _check_ci_workflows(root: Path) -> list[CheckResult]:
     workflow = root / ".github" / "workflows" / "production-backend-ci.yml"
-    provider_eval = root / ".github" / "workflows" / "agent-provider-eval.yml"
     checks = [
         (workflow, "python -m ruff check app tests scripts"),
         (workflow, "python -m mypy app scripts"),
@@ -117,9 +116,6 @@ def _check_ci_workflows(root: Path) -> list[CheckResult]:
         (workflow, "python -m alembic -c production_backend/alembic.ini upgrade head --sql"),
         (workflow, "production_backend/scripts/check_redis_runtime_controls.py"),
         (workflow, "production_backend/scripts/check_object_storage_profile.py"),
-        (provider_eval, "workflow_dispatch"),
-        (provider_eval, "schedule:"),
-        (provider_eval, "production_backend/scripts/run_agent_provider_eval.py"),
     ]
     return _contains_by_file(checks)
 

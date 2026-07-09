@@ -14,20 +14,23 @@ from production_backend.app.core.settings import Settings
 from production_backend.app.infrastructure.db.session import create_db_engine, create_session_factory
 from production_backend.app.infrastructure.object_storage.factory import create_object_storage
 from production_backend.app.infrastructure.redis.client import close_redis_client, create_redis_client
-from production_backend.app.modules.agent_runtime.context import BusinessFactsProjector
+from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.context import BusinessFactsProjector
+from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.tools import (
+    ToolExecutor,
+    build_default_tool_handlers,
+    default_tool_registry,
+)
 from production_backend.app.modules.agent_runtime.event_stream.sink import AgentEventSink
 from production_backend.app.modules.agent_runtime.event_stream.transient import AgentTransientStream
 from production_backend.app.modules.agent_runtime.graphs import AgentGraphCheckpointStore, AgentRuntimeGraphRunner
 from production_backend.app.modules.agent_runtime.memory.service import AgentMemoryRepository, AgentMemoryService
 from production_backend.app.modules.agent_runtime.repository import AgentRuntimeRepository
-from production_backend.app.modules.agent_runtime.routing import ModelSkillIntentPlanner, SkillRoutingService
 from production_backend.app.modules.agent_runtime.run_lifecycle.controls import AgentRunControls
 from production_backend.app.modules.agent_runtime.run_lifecycle.executor import AgentRuntimeExecutor
 from production_backend.app.modules.agent_runtime.run_lifecycle.state_store import AgentRuntimeStateStore
 from production_backend.app.modules.agent_runtime.safety.service import AgentSafetyService
 from production_backend.app.modules.agent_runtime.sdk import create_agent_sdk_runner
 from production_backend.app.modules.agent_runtime.service import AgentRuntimeService
-from production_backend.app.modules.agent_runtime.tools import ToolExecutor, build_default_tool_handlers, default_tool_registry
 from production_backend.app.modules.assets.service import ProductAssetService
 from production_backend.app.modules.audit import AuditService, IdempotencyService, OutboxService
 from production_backend.app.modules.audit.repository import AuditRepository, OutboxRepository
@@ -235,7 +238,6 @@ async def _process_agent_run(
             memory_service=memory_service,
             business_facts_projector=BusinessFactsProjector(handlers=tool_handlers),
             transient_stream=AgentTransientStream(redis_client),
-            routing_service=SkillRoutingService(planner=ModelSkillIntentPlanner(sdk_runner=sdk_runner)),
             sdk_runner=sdk_runner,
             object_storage=object_storage,
             max_inline_artifact_payload_bytes=settings.agent_runtime_max_inline_payload_bytes,

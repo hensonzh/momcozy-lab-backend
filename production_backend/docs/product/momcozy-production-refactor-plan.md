@@ -837,12 +837,14 @@ users
 
 ### Agent Runtime Pattern Decision
 
-MomCozy 新 runtime 采用 **LangGraph + OpenAI Agents SDK**，不再保留自研 Responses API adapter 或旧 agent loop 作为生产兜底。
+MomCozy 新 runtime 采用 **LangGraph + OpenAI Agents SDK** 为默认编排形态，不再保留旧自研 Responses API
+loop 或旧 agent loop 作为生产兜底。OpenAI provider 可在 namespace/deferred tool loading 场景使用一个受限的
+Responses API adapter，仅负责原生 `tool_search` 请求和应用侧 tool output 回传。
 
 选择理由：
 
 - LangGraph 负责 durable orchestration、workflow state、checkpoint、interrupt、resume、cancel、retry 和 graph version。
-- OpenAI Agents SDK 负责 graph 节点内的模型推理、tool loop、service skill agents、guardrails、handoff 和 tracing。
+- OpenAI Agents SDK 负责 graph 节点内的常规模型推理、tool loop、service skill agents、guardrails、handoff 和 tracing。
 - FastAPI `AgentRuntimeService` 负责 run lifecycle、权限、action/audit/outbox、event persistence、stream/replay 和业务 service 调用。
 - OpenAI provider session、SDK session、LangGraph checkpoint 都不能替代内部 `agent_*` runtime ledger。
 
@@ -884,12 +886,9 @@ MomCozy 新 runtime 采用 **LangGraph + OpenAI Agents SDK**，不再保留自�
 - Postgres 可记录每轮输入投影的摘要或引用：`agent_context_projections` 或 `agent_runs.input_context_ref`，用于 replay、debug 和 eval；它不是新的权威状态源。
 - `agent_messages` 维护会话历史数组；history selector 只选择用户消息、助手消息、必要 tool summary 和 resource ref，不选择旧 context projection。
 - `ContextProjector` 从 ledger、workflow state、业务表、memory、tool/action refs 派生本轮 OpenAI Agents SDK 节点输入。
-- `SkillRoutingService` 每轮生成 routing plan，在
-  `general_assistant`、`pregnancy_service`、`lactation`、
-  `postpartum_recovery`、`after_sales` 和 `safety_guardrail` 之间选择主专家；
-  每个专家只暴露自己的显式 tool allowlist。
-- `agent_routing_decisions` 保存每轮为什么选择该专家；`agent_runs` 只保存
-  service_skill/routing 摘要用于列表、排查和 eval。
+- 下一阶段先建立 `main_coordinator_agent -> cozymate_service_agent` 的最小委派边界；
+  当前单智能体作为 `cozymate_service_agent` 继续沿用现有 service skills 和工具集合。
+- 细分专家 routing、独立 tool allowlist 和多 scene agent 汇总后续再拆。
 - Redis 只保存 transient controls：active run、cancel flag、stream progress、临时锁。
 - 删除 `ContextState` 大字典；业务事实回到业务表，workflow state 进入 `agent_workflow_states`，模型输入上下文只由 per-run projection 生成或记录。
 - agent 写操作按风险和依赖关系进入 action/effect lane：

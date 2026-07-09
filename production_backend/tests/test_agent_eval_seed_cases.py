@@ -30,7 +30,7 @@ def test_product_agent_eval_seed_cases_have_action_and_safety_contracts() -> Non
         assert behavior["intent"] == case["suite"]
         assert isinstance(behavior["route"], str) and behavior["route"]
         assert behavior["service_skill_id"] in {
-            "main_agent",
+            "cozymate_service_agent",
             "birth-prep",
             "milk-management",
             "health-consultation",

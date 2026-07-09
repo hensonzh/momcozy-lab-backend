@@ -154,6 +154,9 @@ AGENT_MODEL_PROVIDER=openai
 OPENAI_API_KEY=...
 ```
 
+With `AGENT_MODEL_PROVIDER=openai`, runtime requests that include namespace /
+deferred tool loading use the Responses API adapter and hosted `tool_search`.
+
 For an experimental Minimax smoke test, switch only the provider block in the
 private env file:
 
@@ -164,6 +167,9 @@ MINIMAX_API_KEY=...
 MINIMAX_BASE_URL=https://api.minimax.io/v1
 MINIMAX_MODEL=MiniMax-M3
 ```
+
+The Minimax path remains the flat OpenAI-compatible Agents SDK tool path; runtime
+metadata keeps `tool_search_enabled=false` there.
 
 Start the full test stack:
 
@@ -250,25 +256,11 @@ before increasing limits.
    `python production_backend/scripts/recover_stuck_agent_runs.py --apply`.
 8. If the run failed, create an eval or replay regression case when safe.
 
-## Provider Eval Budget
+## Agent Eval Budget
 
-Provider-backed evals run through `agent-provider-eval.yml` and
-`production_backend/scripts/run_agent_provider_eval.py`.
-
-Required controls:
-
-- `AGENT_MODEL_PROVIDER` selects the provider under test. Default is `openai`;
-  experimental Minimax runs use `minimax`.
-- The selected provider key is provided through GitHub secrets or the runtime
-  secret manager: `OPENAI_API_KEY` for OpenAI, `MINIMAX_API_KEY` for Minimax.
-- The selected model is an environment variable, not hard-coded in eval cases:
-  `OPENAI_MODEL` for OpenAI, `MINIMAX_MODEL` for Minimax.
-- `AGENT_PROVIDER_EVAL_MAX_CASES` bounds nightly case count.
-- `AGENT_PROVIDER_EVAL_COST_BUDGET_USD` records the approved budget for the
-  eval run.
-
-If credentials are absent, the provider eval workflow must skip explicitly with
-`missing_provider_credentials`, not fail with an ambiguous provider error.
+Provider-backed eval is deferred for the current simplified multi-agent phase.
+Release readiness uses deterministic seed and replay evals until the provider
+eval path is reintroduced with a concrete product need.
 
 ## Security Incident
 

@@ -2,8 +2,16 @@ import asyncio
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from production_backend.app.modules.agent_runtime.context import BusinessFactsProjector, BusinessFactsProjectorConfig
-from production_backend.app.modules.agent_runtime.routing import IntentItem, RoutingPlan, RoutingSource, ServiceSkillId
+from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.context import (
+    BusinessFactsProjector,
+    BusinessFactsProjectorConfig,
+)
+from production_backend.app.modules.agent_runtime.agents.main_coordinator_agent import (
+    IntentItem,
+    RoutingPlan,
+    RoutingSource,
+    ServiceSkillId,
+)
 from production_backend.app.modules.auth import CurrentUser
 
 
@@ -98,9 +106,8 @@ def _plan(skill_id: ServiceSkillId) -> RoutingPlan:
     return RoutingPlan(
         selected_skill_id=skill_id,
         intents=[IntentItem(intent_type=f"{skill_id.value}_request", service_skill_id=skill_id)],
-        tool_group_ids=[],
         confidence=1,
-        source=RoutingSource.MODEL_PLANNER,
+        source=RoutingSource.PASSTHROUGH,
     )
 
 

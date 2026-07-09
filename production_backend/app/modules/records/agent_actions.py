@@ -13,6 +13,11 @@ from .service import RecordsService
 
 FEEDING_RECORD_CREATE_ACTION = "records.feeding_record.create"
 PUMPING_RECORD_CREATE_ACTION = "records.pumping_record.create"
+FEEDING_RECORD_DELETE_ACTION = "records.feeding_record.delete"
+PUMPING_RECORD_DELETE_ACTION = "records.pumping_record.delete"
+GROWTH_RECORD_CREATE_ACTION = "records.growth_record.create"
+GROWTH_RECORD_UPDATE_ACTION = "records.growth_record.update"
+GROWTH_RECORD_DELETE_ACTION = "records.growth_record.delete"
 
 
 class FeedingRecordCreateActionHandler:
@@ -97,6 +102,132 @@ class PumpingRecordCreateActionHandler:
         )
 
 
+class FeedingRecordDeleteActionHandler:
+    def __init__(self, *, service: RecordsService) -> None:
+        self.service = service
+
+    async def __call__(self, action: AgentAction) -> AgentActionApplyResult:
+        payload = dict(action.apply_payload or {})
+        record_id = _required_uuid(payload, "record_id", "missing_record_id", "invalid_record_id")
+        try:
+            await self.service.delete_feeding(
+                owner_user_id=action.actor_user_id,
+                record_id=record_id,
+                request_id=f"agent-action:{action.id}",
+            )
+        except ApiError as exc:
+            raise PermanentJobError(exc.code) from exc
+        return AgentActionApplyResult(
+            resource_type="feeding_record",
+            resource_id=str(record_id),
+            details={"agent_action_id": str(action.id), "agent_run_id": str(action.run_id)},
+        )
+
+
+class PumpingRecordDeleteActionHandler:
+    def __init__(self, *, service: RecordsService) -> None:
+        self.service = service
+
+    async def __call__(self, action: AgentAction) -> AgentActionApplyResult:
+        payload = dict(action.apply_payload or {})
+        record_id = _required_uuid(payload, "record_id", "missing_record_id", "invalid_record_id")
+        try:
+            await self.service.delete_pumping(
+                owner_user_id=action.actor_user_id,
+                record_id=record_id,
+                request_id=f"agent-action:{action.id}",
+            )
+        except ApiError as exc:
+            raise PermanentJobError(exc.code) from exc
+        return AgentActionApplyResult(
+            resource_type="pumping_record",
+            resource_id=str(record_id),
+            details={"agent_action_id": str(action.id), "agent_run_id": str(action.run_id)},
+        )
+
+
+class GrowthRecordCreateActionHandler:
+    def __init__(self, *, service: RecordsService) -> None:
+        self.service = service
+
+    async def __call__(self, action: AgentAction) -> AgentActionApplyResult:
+        payload = dict(action.apply_payload or {})
+        measured_at = _required_datetime(payload, "measured_at", "missing_measured_at", "invalid_measured_at")
+        height_cm = _optional_number(payload, "height_cm", "invalid_height_cm")
+        weight_kg = _optional_number(payload, "weight_kg", "invalid_weight_kg")
+        head_cm = _optional_number(payload, "head_cm", "invalid_head_cm")
+        if height_cm is None and weight_kg is None and head_cm is None:
+            raise PermanentJobError("missing_growth_measurement")
+
+        try:
+            record = await self.service.create_growth(
+                owner_user_id=action.actor_user_id,
+                infant_id=_optional_uuid(payload, "infant_id", "invalid_infant_id"),
+                measured_at=measured_at,
+                height_cm=height_cm,
+                weight_kg=weight_kg,
+                head_cm=head_cm,
+                request_id=f"agent-action:{action.id}",
+                idempotency_key=action.idempotency_key or f"agent-action:{action.id}",
+            )
+        except ApiError as exc:
+            raise PermanentJobError(exc.code) from exc
+
+        return AgentActionApplyResult(
+            resource_type="growth_record",
+            resource_id=str(record.id),
+            details={"agent_action_id": str(action.id), "agent_run_id": str(action.run_id)},
+        )
+
+
+class GrowthRecordUpdateActionHandler:
+    def __init__(self, *, service: RecordsService) -> None:
+        self.service = service
+
+    async def __call__(self, action: AgentAction) -> AgentActionApplyResult:
+        payload = dict(action.apply_payload or {})
+        record_id = _required_uuid(payload, "record_id", "missing_record_id", "invalid_record_id")
+        updates = _growth_updates(payload)
+        if not updates:
+            raise PermanentJobError("missing_growth_update")
+        try:
+            record = await self.service.update_growth(
+                owner_user_id=action.actor_user_id,
+                record_id=record_id,
+                updates=updates,
+                request_id=f"agent-action:{action.id}",
+            )
+        except ApiError as exc:
+            raise PermanentJobError(exc.code) from exc
+        return AgentActionApplyResult(
+            resource_type="growth_record",
+            resource_id=str(record.id),
+            details={"agent_action_id": str(action.id), "agent_run_id": str(action.run_id), "fields": sorted(updates)},
+        )
+
+
+class GrowthRecordDeleteActionHandler:
+    def __init__(self, *, service: RecordsService) -> None:
+        self.service = service
+
+    async def __call__(self, action: AgentAction) -> AgentActionApplyResult:
+        payload = dict(action.apply_payload or {})
+        record_id = _required_uuid(payload, "record_id", "missing_record_id", "invalid_record_id")
+        try:
+            await self.service.delete_growth(
+                owner_user_id=action.actor_user_id,
+                record_id=record_id,
+                request_id=f"agent-action:{action.id}",
+            )
+        except ApiError as exc:
+            raise PermanentJobError(exc.code) from exc
+        return AgentActionApplyResult(
+            resource_type="growth_record",
+            resource_id=str(record_id),
+            details={"agent_action_id": str(action.id), "agent_run_id": str(action.run_id)},
+        )
+
+
 def _required_text(payload: dict[str, Any], key: str, code: str) -> str:
     value = _text(payload, key)
     if not value:
@@ -116,6 +247,16 @@ def _optional_uuid(payload: dict[str, Any], key: str, code: str) -> UUID | None:
         return UUID(value)
     except ValueError as exc:
         raise PermanentJobError(code) from exc
+
+
+def _required_uuid(payload: dict[str, Any], key: str, missing_code: str, invalid_code: str) -> UUID:
+    value = _text(payload, key)
+    if not value:
+        raise PermanentJobError(missing_code)
+    try:
+        return UUID(value)
+    except ValueError as exc:
+        raise PermanentJobError(invalid_code) from exc
 
 
 def _required_datetime(payload: dict[str, Any], key: str, missing_code: str, invalid_code: str) -> datetime:
@@ -160,3 +301,17 @@ def _optional_int(payload: dict[str, Any], key: str, code: str) -> int | None:
             raise PermanentJobError(code)
         return value
     raise PermanentJobError(code)
+
+
+def _growth_updates(payload: dict[str, Any]) -> dict[str, Any]:
+    updates: dict[str, Any] = {}
+    infant_id = _text(payload, "infant_id")
+    if infant_id:
+        updates["infant_id"] = _optional_uuid(payload, "infant_id", "invalid_infant_id")
+    measured_at = _optional_datetime(payload, "measured_at", "invalid_measured_at")
+    if measured_at is not None:
+        updates["measured_at"] = measured_at
+    for key, code in (("height_cm", "invalid_height_cm"), ("weight_kg", "invalid_weight_kg"), ("head_cm", "invalid_head_cm")):
+        if key in payload:
+            updates[key] = _optional_number(payload, key, code)
+    return updates

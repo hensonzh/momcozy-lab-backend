@@ -11,25 +11,29 @@
 
 ## 目标判断
 
-推荐采用 **主从多智能体架构**：
+推荐采用 **主从多智能体架构**，但按阶段推进。第一阶段只引入多智能体外壳，
+不拆散当前已经跑通的单智能体能力：
 
 ```text
 User / App
-  -> Main Agent
-      -> direct answer for general QA
-      -> one Scene Agent for single-intent service
-      -> multiple Scene Agents in parallel for multi-intent service
-           -> Main Agent or Summary Agent merges outputs
+  -> main_coordinator_agent
+      -> passthrough delegate_to_cozymate
+      -> cozymate_service_agent
+           -> current single-agent implementation
+           -> existing service skills
+           -> existing tool/action/artifact contracts
   -> application events / assistant reply / artifacts / actions
 ```
 
 核心原则：
 
 - 每轮请求都先进入主智能体。
-- 主智能体负责意图理解、路由、通用问答、缺失信息追问和多结果汇总。
-- 子智能体按产品服务场景划分，负责具体服务流程、工具调用、交付物和回复风格。
+- 当前阶段主智能体是纯透传节点，不做意图判断、通用问答、边界说明或缺失信息追问。
+- 第一阶段只有一个真实子智能体：`cozymate_service_agent`，它直接沿用当前单智能体。
+- `cozymate_service_agent` 继续负责具体服务流程、工具调用、交付物和回复风格。
 - 应用侧只提供状态、上下文、权限和 runtime 硬边界，不在智能体之前做复杂意图分支。
-- 子智能体拥有自己的 skill 和工具包；工具暴露由后端契约控制，不由前端或自然语言回复推断。
+- 未来再按产品场景从 `cozymate_service_agent` 中逐步拆出更细的子智能体。
+- 工具暴露由后端契约控制，不由前端或自然语言回复推断。
 
 ## 为什么不是纯单智能体
 
@@ -46,8 +50,9 @@ User / App
 - 所有能力最终汇聚到一个智能体上下文，后续多人维护和测试成本高。
 - 当服务场景变多时，工具暴露和上下文预算难以控制。
 
-目标多智能体架构保留旧版的“skill + tool”智能体验，同时把业务能力拆到场景子智能体，
-让每个子智能体更容易维护、测试和演进。
+目标多智能体架构保留旧版的“skill + tool”智能体验，但不要一开始就把所有业务能力拆成多个
+scene agents。迁移期先把当前单智能体包装为 `cozymate_service_agent`，由主智能体委派；
+当某个产品场景的 prompt、工具、artifact、eval 已经足够稳定，再从中剥离为独立子智能体。
 
 ## 为什么不是应用侧 specialist routing
 
@@ -64,26 +69,46 @@ action/audit、run ledger、stream contract 等硬边界，但不在模型工作
 
 ### Main Agent
 
-主智能体使用轻量模型，但不能弱到无法稳定路由。它的职责是：
+当前阶段主智能体不是 LLM agent，而是纯透传节点。它的职责是：
 
-- 识别用户本轮意图。
-- 判断是否属于通用问答。
-- 判断是否需要一个或多个子智能体。
-- 对缺失信息进行追问。
-- 将用户请求拆成一个或多个子任务。
-- 调用子智能体。
-- 对多个子智能体结果进行汇总。
-- 统一最终回复的人设、语气、简体中文表达和安全边界。
+- 接收 runtime 传入的当前请求。
+- 固定产出 `delegate_to_cozymate` / `passthrough` plan。
+- 把请求交给 `cozymate_service_agent`。
+- 在 runtime ledger 中记录主从边界。
 
-主智能体不应该直接承担复杂业务工具调用。例外只包括：
+当前阶段主智能体不做：
 
-- 通用只读资料查询。
-- 轻量上下文读取。
-- 明确不属于任何子智能体的普通问答。
+- 意图识别。
+- 通用问答。
+- 缺失信息追问。
+- 安全判断。
+- 最终回复改写。
+
+将用户请求拆成多个子任务、调用多个子智能体、对多个子智能体结果进行汇总，属于后续阶段能力。
+
+主智能体不直接承担任何业务工具调用。安全、权限、owner scope 和 tool contract 仍由
+runtime guard 与工具执行层负责。
 
 ### Scene Agents
 
-第一批子智能体按服务场景划分：
+第一阶段只启用一个子智能体：
+
+```text
+cozymate_service_agent
+  当前单智能体原样迁入。
+  继续加载现有 service skills。
+  继续使用现有 tool registry / tool executor。
+  继续生成现有 actions / artifacts / replies。
+```
+
+它的职责是：
+
+- 承接大多数产品服务请求。
+- 保留当前 CozyMate 统一语气和服务体验。
+- 复用当前已验证的 service skill、工具、action、artifact、stream event 和 eval。
+- 作为 Main Agent 的委派目标，而不是继续承担全局多智能体编排。
+
+后续阶段再按服务场景逐步拆出独立子智能体：
 
 ```text
 pregnancy_service_agent
@@ -102,7 +127,10 @@ general_support_agent
   产品介绍、非业务闲聊、无法归类但安全的基础问答。
 ```
 
-每个子智能体必须拥有：
+这些细分子智能体不是第一阶段交付物。拆分条件是：对应场景已有稳定 prompt、工具包、
+artifact/action contract、主流程 eval 和 App 展示方式。
+
+每个最终独立子智能体必须拥有：
 
 - 独立 `SKILL.md`。
 - 明确服务范围。
@@ -140,19 +168,26 @@ FastAPI 接收 App 请求，创建：
 
 注意：业务事实来自业务表，context projection 只是本轮给模型看的投影，不是权威状态。
 
-### 3. 主智能体决策
+当前阶段为了保持旧方案行为等价，模型可见的 `runtime_context.state` 继续使用旧兼容语义：
+`agent_mode=single_main_agent`、`execution_mode=single`。`main_coordinator_passthrough`、
+`delegated_agent=cozymate_service_agent`、`routing_source=passthrough` 等新架构字段只写入
+runtime ledger、checkpoint 和调试投影，不进入模型输入。这样可以先重构状态机和审计边界，
+避免因为架构命名变化影响模型回复和 eval。
 
-主智能体输出结构化 plan：
+### 3. 主智能体透传
+
+当前阶段主智能体输出固定结构化 plan：
 
 ```json
 {
-  "mode": "direct_answer | single_agent | multi_agent | clarification",
+  "mode": "delegate_to_cozymate",
+  "execution_mode": "passthrough",
   "intents": [
     {
-      "agent": "pregnancy_service_agent",
-      "task": "create_hospital_bag_intake_form",
-      "confidence": 0.87,
-      "reason": "用户想准备待产包，需要孕期服务智能体处理"
+      "agent": "cozymate_service_agent",
+      "task": "cozymate_service_request",
+      "confidence": 1,
+      "reason": "当前阶段主智能体不做判断，所有请求透传给 CozyMate 服务智能体"
     }
   ],
   "needs_clarification": false,
@@ -160,31 +195,28 @@ FastAPI 接收 App 请求，创建：
 }
 ```
 
-主智能体可以直接回复的情况：
+`direct_answer`、`clarification` 和 `safety_blocked` 都是后续阶段能力。当前阶段即使是寒暄或
+边界说明，也先透传给 `cozymate_service_agent`。
 
-- 用户寒暄。
-- 简单产品说明。
-- 不需要读取业务数据或调用工具的普通问答。
-- 明确无法提供服务但可以解释边界的问题。
+### 4. 第一阶段委派执行
 
-### 4. 单意图执行
-
-当 plan 为 `single_agent`：
+当 plan 为 `delegate_to_cozymate`：
 
 ```text
 Main Agent
-  -> target Scene Agent
-  -> target Scene Agent uses its skill + tools
-  -> target Scene Agent returns final answer + artifacts/actions
+  -> cozymate_service_agent
+  -> current single-agent implementation uses existing service skills + tools
+  -> cozymate_service_agent returns final answer + artifacts/actions
   -> final answer streamed to App
 ```
 
-单意图场景下，最终回复直接采用目标子智能体的回答。主智能体只做必要的安全和格式收口，
-不要二次改写到丢失子智能体服务风格。
+第一阶段最终回复直接采用 `cozymate_service_agent` 的回答。主智能体只做必要的安全和格式收口，
+不要二次改写到丢失当前 CozyMate 服务风格。
 
-### 5. 多意图执行
+### 5. 后续多意图执行
 
-当 plan 为 `multi_agent`：
+多意图并行不是第一阶段目标。等至少两个独立 scene agents 从 `cozymate_service_agent` 中拆出后，
+再支持：
 
 ```text
 Main Agent
@@ -223,21 +255,53 @@ Main Agent
 - 保留各子智能体 artifact。
 - 保持最终回复简短、自然、稳定。
 
-## Skill 设计
+## Agent 目录设计
 
-保留标准 skill 结构：
+当前代码先按真实子智能体收拢，而不是按横切技术层继续堆在
+`agent_runtime/` 根目录：
 
 ```text
-skills/
-  pregnancy-service/
+app/modules/agent_runtime/
+  agents/
+    main_coordinator_agent/
+      schemas.py
+      planner.py
+    cozymate_service_agent/
+      prompts/
+      skills/
+      tools/
+      context/
+      skill_registry.py
+  graphs/
+  run_lifecycle/
+  event_stream/
+  memory/
+  safety/
+```
+
+- `agents/main_coordinator_agent/` 放主智能体的 plan schema 和第一阶段最小 planner。
+- `agents/cozymate_service_agent/` 放当前单智能体的 system prompt、service
+  skills、tool schema、tool contract、tool handler 和 business facts projection。
+- `graphs/`、`run_lifecycle/`、`event_stream/`、`memory/`、`safety/` 保持为多智能体共用 runtime 能力。
+- 后续如果从 CozyMate 中拆出独立子智能体，应新增
+  `agents/<new_agent_name>/`，而不是继续把 prompt、skill、tool handler 加到
+  runtime 根目录。
+
+## Skill 设计
+
+第一阶段保留 CozyMate 子智能体内部的标准 skill 结构：
+
+```text
+agents/cozymate_service_agent/skills/
+  birth-prep/
     SKILL.md
-  lactation/
+  milk-management/
     SKILL.md
-  postpartum-recovery/
+  health-consultation/
     SKILL.md
-  device-after-sales/
+  emotion-support/
     SKILL.md
-  general-support/
+  device-guidance/
     SKILL.md
 ```
 
@@ -254,12 +318,25 @@ skills/
 不要在 `SKILL.md` 中重复全局人设、全局医疗安全免责声明、全局工具契约或后端权限规则。
 这些由全局 prompt 和后端 runtime contract 统一负责。
 
+当前测试门禁要求 service skill 不重新声明全局 prompt ownership，例如全局规则、全局人设、
+CozyMate 身份、默认回复长度、快捷输入总规则、工具结果总规则和 runtime 边界。skill 可以写
+场景回复规则，但不能把全局规则复制进来。
+
 ## 工具包设计
 
-每个子智能体绑定自己的工具包：
+第一阶段仍由 `cozymate_service_agent` 暴露工具，但工具不再作为一组扁平自然语言能力描述。
+后端从 `ToolContract.domain` 派生 Responses API 风格 namespace，并在 SDK request contract 中记录：
+
+- `tool_namespaces`：按 `records`、`plans`、`devices`、`support` 等领域分组。
+- `tool_search_enabled`：当 namespace 中存在 deferred tools 时启用。
+- `tools`：contract name 继续映射到真实 handler；OpenAI provider 在 `tool_search_enabled`
+  时走 Responses namespace adapter，非 Responses provider（例如 Minimax）走 flat `FunctionTool`
+  兼容层并且不标记 deferred loading。
+
+典型 namespace 如下：
 
 ```text
-pregnancy_service_agent tools:
+birth_prep namespace:
   profile.read
   pregnancy.plan_context.read
   birth_plan_form_create
@@ -269,29 +346,43 @@ pregnancy_service_agent tools:
   hospital_bag_cart_update
   diary.entry_upsert.propose
 
-lactation_agent tools:
+records / plans / notifications namespace:
+  records.milk_status.read
   records.milk_summary.read
+  records.milk_analysis.read
+  records.growth.read
   records.feeding_record.propose
   records.pumping_record.propose
+  records.feeding_record_delete.propose
+  records.pumping_record_delete.propose
+  records.growth_record.propose
+  records.growth_record_update.propose
+  records.growth_record_delete.propose
+  plans.calendar.read
   plans.milk_plan.propose
+  plans.milk_plan_preview.create
+  plans.task_update.propose
+  plans.task_delete.propose
+  plans.plan_delete.propose
   notifications.milk_reminder.propose
   support.ticket.propose
 
-postpartum_recovery_agent tools:
+postpartum / diary / plans namespace:
   profile.read
   diary.recent.read
   plans.task_create.propose
-  artifacts.postpartum_checkin.create
   memory.create.propose
 
-device_after_sales_agent tools:
+devices / files / support namespace:
   devices.pump_status.read
   devices.guidance_assets.read
   files.vision_summary.read
   support.ticket.propose
 ```
 
-工具包不是自然语言说明，而是后端 `ToolContract` 的显式集合。每个工具仍必须声明：
+namespace 不是 prompt 里让模型“加载旧工具”的自然语言指令，而是后端 `ToolContract` 的显式集合。
+service skill 可以引用当前 namespace / contract，但不能引用未注册的旧工具名，例如
+`milk_status_query`、`milk_analysis_intake_manage`、`device_manual_search`。每个工具仍必须声明：
 
 - read/write。
 - permission。
@@ -361,7 +452,8 @@ token delta 可通过 Redis transient stream 提供实时打字体验；权威�
 
 ```text
 Main Agent:
-  轻量模型，负责路由、通用问答、追问和汇总。
+  当前阶段不调用模型，只做 passthrough delegate_to_cozymate。
+  后续阶段再升级为轻量模型，负责路由、通用问答、追问和汇总。
 
 Scene Agents:
   可按场景选择更强模型，负责工具调用和复杂服务交付物。
@@ -422,7 +514,7 @@ Context projection:
 
 ## Eval 验收
 
-每个子智能体至少覆盖：
+第一阶段 `cozymate_service_agent` 至少覆盖：
 
 - 单意图主流程。
 - 多轮信息收集。
@@ -431,16 +523,29 @@ Context projection:
 - action 生命周期。
 - 安全红旗。
 - 权限越权。
-- 多意图协作。
 - replay 后 UI 可恢复。
 
-主智能体额外覆盖：
+eval 口径要分层：
+
+- wrapper/delegated agent：第一阶段真实 run 级执行者是 `cozymate_service_agent`。
+- scene service skill：seed case 仍可描述 `milk-management`、`device-guidance` 等期望场景。
+
+因此 runtime eval 不能把 run 级 `cozymate_service_agent` 直接判成 scene skill routing mismatch；
+只有当可观测 scene skill 选择出现错误，或后续拆出独立 scene agents 后，才按 scene skill 严格比较。
+
+第一阶段 Main Agent 覆盖：
+
+- 所有请求固定透传到 `cozymate_service_agent`。
+- ledger 中记录 `delegate_to_cozymate` / `passthrough`。
+- 不做通用问答、追问、模糊意图判断或直接回复。
+
+后续主智能体升级为轻量 LLM 或拆出多个独立 scene agents 后，再增加：
 
 - 通用问答直接回复。
-- 单意图路由。
-- 多意图拆分。
 - 需要追问时不误调用工具。
 - 模糊意图不强行路由。
+- 多意图拆分。
+- 多子智能体协作。
 - 多子智能体结果汇总不丢 artifact/action。
 
 ## 迁移步骤
@@ -448,33 +553,45 @@ Context projection:
 ### Phase 1: 固定目标 contract
 
 - 定义 `MainAgentPlan` schema。
-- 定义 `SceneAgentResult` schema。
-- 定义子智能体 registry。
-- 定义 agent -> tool package 映射。
+- `MainAgentPlan.mode` 当前阶段只允许 `delegate_to_cozymate`。
+- 主智能体 planner 是纯透传，不调用 LLM，不读取 prompt，不做条件分支。
+- 定义 `cozymate_service_agent` 的子智能体入口，但内部直接复用当前单智能体实现。
+- 定义最小 agent registry：`main_coordinator_agent` 和 `cozymate_service_agent`。
 - 定义 progress event 文案集合。
 
-### Phase 2: 重构当前 routing
+### Phase 2: 建立 Main Agent 外壳
 
-- 删除不再使用的应用侧复杂 specialist routing。
 - 保留 deterministic safety、permission、runtime guard。
-- 将路由决策改为主智能体结构化输出。
+- 将当前 routing 决策收敛为固定 Main Agent 透传输出。
+- 所有请求先输出 `delegate_to_cozymate`。
+- 通用闲聊、边界说明、低风险直接问答和澄清都先交给 `cozymate_service_agent`。
 - routing decision 继续写入 runtime ledger，便于调试和 eval。
 
-### Phase 3: 子智能体 skill 化
+### Phase 3: 包装当前单智能体为子智能体
 
-- 为每个场景建立标准 `SKILL.md`。
-- 从旧版 skill 中迁移体验语义、服务流程和交付物要求。
-- 删除迁移后不再使用的 playbook 或重复 prompt。
+- 新增 `cozymate_service_agent` runner 或 adapter。
+- `cozymate_service_agent` 内部继续加载当前 service skills。
+- `cozymate_service_agent` 内部继续使用当前 tool registry / tool executor。
+- `cozymate_service_agent` 继续产出现有 action、artifact、message 和 stream events。
+- 不在本阶段拆分 lactation、birth prep、device、postpartum 等独立子智能体。
 
-### Phase 4: 子智能体工具包
+### Phase 4: 收敛工具暴露
 
-- 按场景绑定 tool allowlist。
-- 补齐 tool contract 缺口。
+- Main Agent 不暴露业务写工具。
+- `cozymate_service_agent` 暂时沿用当前工具集合，但以 namespace + deferred tool loading 的 request contract 暴露。
+- 常用读取工具保持 eager；写入、artifact、support 等低频或高风险工具标记为 deferred，由 tool search 加载。
+- OpenAI provider 使用 Responses API 的 namespace/tool_search adapter 执行这一 contract；不支持该能力的 provider
+  保持 flat tools 兼容执行，但 runtime metadata 中 `tool_search_enabled=false`。
+- 补齐当前工具 contract 缺口。
+- 旧方案中的精细颗粒度读写能力必须落到当前 contract：奶量分析快照、生长记录读写、计划日历读取、计划任务更新/删除、计划删除、记录删除、奶量计划预览和 IBCLC 咨询卡片都应有注册工具、handler、action policy 和 outbox apply 路径。
 - 保证工具结果只返回事实、资源 ID、artifact/action 状态，不返回额外提示词。
+- 工具输出进入模型前递归剥离 `assistant_instruction`、`prompt_hint`、`response_contract`、
+  `system_prompt` 等指令型字段；工具结果只能作为事实、状态、候选数据、artifact/action ID
+  或缺失字段摘要使用，不能成为隐藏提示词渠道。
 
 ### Phase 5: 单意图闭环
 
-优先实现：
+优先验证当前单智能体作为子智能体后的闭环：
 
 1. 待产包信息采集表单。
 2. 奶量分析。
@@ -483,14 +600,31 @@ Context projection:
 
 每个闭环必须包含：prompt、skill、tools、artifact、stream event、eval、App 渲染验证。
 
-### Phase 6: 多意图并行和汇总
+### Phase 6: 后续拆分独立子智能体
+
+只有当某个场景满足以下条件时，才从 `cozymate_service_agent` 中拆出独立子智能体：
+
+- 场景 prompt 和服务流程稳定。
+- 工具包 allowlist 清晰。
+- artifact/action contract 稳定。
+- 主流程 eval 覆盖完整。
+- App 已经能稳定渲染该场景交付物。
+
+拆分优先级仍按产品价值排序：
+
+1. 待产包 / 分娩沟通。
+2. 奶量管理。
+3. 设备指导。
+4. 产后恢复。
+
+### Phase 7: 多意图并行和汇总
 
 - 支持独立任务并行。
 - 支持依赖任务串行。
 - 支持汇总模型。
 - 支持多 artifact 合并展示。
 
-### Phase 7: 体验对齐
+### Phase 8: 体验对齐
 
 - 状态条与旧版 loop 阶段语义对齐。
 - 流式回复可见。
