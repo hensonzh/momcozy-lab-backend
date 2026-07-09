@@ -79,11 +79,11 @@ def test_agent_support_ticket_main_flow_confirms_queues_applies_and_replays_even
         "message.completed",
         "action.confirmation_required",
         "action.queued",
-        "run.completed",
         "action.applied",
+        "run.completed",
     ]
-    assert runtime_repository.events[-1].payload["resource_type"] == "support_ticket"
-    assert runtime_repository.events[-1].payload["resource_id"] == str(ticket.id)
+    assert runtime_repository.events[-2].payload["resource_type"] == "support_ticket"
+    assert runtime_repository.events[-2].payload["resource_id"] == str(ticket.id)
     assert support_audit.entries[-1]["action"] == "support.tickets.create"
 
 

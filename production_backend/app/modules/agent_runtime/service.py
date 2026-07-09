@@ -327,6 +327,7 @@ class AgentRuntimeService:
         schema_version: str = "v1",
         status: str = "created",
         raw_payload_ref: str = "",
+        emit_event: bool = True,
     ) -> AgentArtifact:
         run = await self.get_run(owner_user_id=owner_user_id, run_id=run_id)
         artifact = await self.repository.create_artifact(
@@ -338,12 +339,13 @@ class AgentRuntimeService:
             payload=payload,
             raw_payload_ref=_normalize_text(raw_payload_ref, max_length=512),
         )
-        await self._append_event(
-            thread_id=run.thread_id,
-            run_id=run.id,
-            event_type="artifact.created",
-            payload=_artifact_event_payload(artifact),
-        )
+        if emit_event:
+            await self._append_event(
+                thread_id=run.thread_id,
+                run_id=run.id,
+                event_type="artifact.created",
+                payload=_artifact_event_payload(artifact),
+            )
         return artifact
 
     async def confirm_action(
@@ -374,7 +376,6 @@ class AgentRuntimeService:
         )
         run = await self.get_run(owner_user_id=owner_user_id, run_id=confirmed.run_id)
         await self._queue_action_apply(owner_user_id=owner_user_id, run=run, action=confirmed)
-        await self._complete_waiting_run_after_action_decision(run=run, action_id=confirmed.id, decision="confirmed")
         return confirmed
 
     async def _queue_action_apply(self, *, owner_user_id: UUID, run: AgentRun, action: AgentAction) -> None:

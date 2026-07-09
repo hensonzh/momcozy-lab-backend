@@ -83,6 +83,8 @@ class Settings:
     openai_agent_prompt_version: str = "momcozy-agent-prompt-v1"
     voice_provider: str = "disabled"
     voice_api_key: str = ""
+    voice_app_id: str = ""
+    voice_access_key: str = ""
     voice_base_url: str = DEFAULT_DOUBAO_TTS_WS_URL
     voice_transcribe_model: str = ""
     voice_tts_resource_id: str = DEFAULT_DOUBAO_TTS_RESOURCE_ID
@@ -164,6 +166,17 @@ class Settings:
             voice_api_key=_env_first(
                 ("VOICE_API_KEY", "VOLC_TTS_API_KEY", "VOLC_REALTIME_VOICE_API_KEY", "VOLCENGINE_TTS_API_KEY"),
                 cls.voice_api_key,
+            ),
+            voice_app_id=_env_first(("VOICE_APP_ID", "VOLC_TTS_APP_ID", "VOLC_REALTIME_VOICE_APP_ID"), cls.voice_app_id),
+            voice_access_key=_env_first(
+                (
+                    "VOICE_ACCESS_KEY",
+                    "VOLC_TTS_ACCESS_TOKEN",
+                    "VOLC_TTS_ACCESS_KEY",
+                    "VOLC_REALTIME_VOICE_ACCESS_TOKEN",
+                    "VOLC_REALTIME_VOICE_ACCESS_KEY",
+                ),
+                cls.voice_access_key,
             ),
             voice_base_url=_env_first(("VOICE_BASE_URL", "VOLC_TTS_WS_URL"), cls.voice_base_url),
             voice_transcribe_model=_env("VOICE_TRANSCRIBE_MODEL", cls.voice_transcribe_model),
@@ -256,8 +269,8 @@ class Settings:
             errors.append("OPENAI_AGENT_PROMPT_VERSION must be at most 80 characters")
         if self.voice_provider not in SUPPORTED_VOICE_PROVIDERS:
             errors.append(f"VOICE_PROVIDER must be one of {', '.join(sorted(SUPPORTED_VOICE_PROVIDERS))}")
-        if self.voice_provider in {"doubao", "volcengine"} and not self.voice_api_key:
-            errors.append("VOICE_API_KEY is required when VOICE_PROVIDER=doubao")
+        if self.voice_provider in {"doubao", "volcengine"} and not self.voice_api_key and not (self.voice_app_id and self.voice_access_key):
+            errors.append("VOICE_API_KEY or VOICE_APP_ID + VOICE_ACCESS_KEY is required when VOICE_PROVIDER=doubao")
         if not self.voice_base_url:
             errors.append("VOICE_BASE_URL is required")
         if not self.voice_tts_resource_id:

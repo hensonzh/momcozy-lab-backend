@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+from io import BytesIO
 from collections.abc import AsyncGenerator, AsyncIterator
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -14,6 +15,7 @@ from ...core.settings import Settings
 
 DOUBAO_TTS_MAX_INPUT_CHARS = 4096
 DOUBAO_TTS_NAMESPACE = "BidirectionalTTS"
+OPENAI_STT_DEFAULT_MODEL = "whisper-1"
 
 DOUBAO_WS_FULL_CLIENT_REQUEST = 0b0001
 DOUBAO_WS_FULL_SERVER_RESPONSE = 0b1001
@@ -43,6 +45,18 @@ class SpeechTranscription:
     text: str
 
 
+class SpeechTranscriber(Protocol):
+    async def transcribe_chunk(
+        self,
+        *,
+        actor_user_id: UUID,
+        body: bytes,
+        filename: str,
+        content_type: str,
+        language: str | None,
+    ) -> SpeechTranscription: ...
+
+
 class VoiceProvider(Protocol):
     provider_name: str
 
@@ -61,6 +75,16 @@ class VoiceProvider(Protocol):
     def synthesize_pcm_stream(self, *, actor_user_id: UUID, text: str) -> AsyncIterator[bytes]: ...
 
     def realtime_session_events(self, *, actor_user_id: UUID) -> AsyncIterator[dict[str, object]]: ...
+
+    async def run_realtime_session(self, *, actor_user_id: UUID, client: RealtimeVoiceClient) -> None: ...
+
+
+class RealtimeVoiceClient(Protocol):
+    async def send_json(self, payload: dict[str, object]) -> None: ...
+
+    async def send_bytes(self, payload: bytes) -> None: ...
+
+    async def receive_text(self) -> str: ...
 
 
 class DisabledVoiceProvider:
@@ -94,6 +118,9 @@ class DisabledVoiceProvider:
         if False:
             yield {}
 
+    async def run_realtime_session(self, *, actor_user_id: UUID, client: RealtimeVoiceClient) -> None:
+        self.ensure_available()
+
 
 class LocalStubVoiceProvider:
     provider_name = "local_stub"
@@ -120,10 +147,76 @@ class LocalStubVoiceProvider:
         yield {"type": "session.open", "session_id": session_id, "sequence": 0}
         yield {"type": "audio.done", "session_id": session_id, "sequence": 1}
 
+    async def run_realtime_session(self, *, actor_user_id: UUID, client: RealtimeVoiceClient) -> None:
+        session_id = f"voice_session_{uuid4().hex}"
+        await client.send_json(
+            {
+                "type": "ready",
+                "session_id": session_id,
+                "sequence": 0,
+                "audio_format": "pcm16",
+                "sample_rate": 24000,
+                "channels": 1,
+            }
+        )
+        await client.send_json({"type": "done", "session_id": session_id, "sequence": 1})
+
+
+class OpenAiSpeechTranscriber:
+    def __init__(self, settings: Settings) -> None:
+        self.api_key = settings.openai_api_key.strip()
+        self.model = settings.voice_transcribe_model.strip() or OPENAI_STT_DEFAULT_MODEL
+
+    async def transcribe_chunk(
+        self,
+        *,
+        actor_user_id: UUID,
+        body: bytes,
+        filename: str,
+        content_type: str,
+        language: str | None,
+    ) -> SpeechTranscription:
+        if not self.api_key:
+            raise ApiError(
+                code="openai_stt_config_missing",
+                message="OpenAI speech transcription is not configured.",
+                status=400,
+            )
+        try:
+            from openai import AsyncOpenAI
+        except ImportError as exc:
+            raise ApiError(
+                code="openai_sdk_missing",
+                message="OpenAI SDK is not installed.",
+                status=501,
+            ) from exc
+
+        kwargs: dict[str, Any] = {
+            "model": self.model,
+            "file": (filename or "speech.wav", BytesIO(body), content_type or "audio/wav"),
+            "response_format": "json",
+        }
+        if language:
+            kwargs["language"] = language
+        try:
+            async with AsyncOpenAI(api_key=self.api_key) as client:
+                transcription = await client.audio.transcriptions.create(**kwargs)
+        except Exception as exc:
+            raise ApiError(
+                code="openai_stt_failed",
+                message="OpenAI speech transcription failed.",
+                status=502,
+            ) from exc
+
+        text = transcription.get("text") if isinstance(transcription, dict) else getattr(transcription, "text", None)
+        return SpeechTranscription(text=str(text or "").strip())
+
 
 @dataclass(frozen=True)
 class DoubaoRealtimeTtsSettings:
     api_key: str
+    app_id: str
+    access_key: str
     ws_url: str
     resource_id: str
     voice_type: str
@@ -138,12 +231,13 @@ class DoubaoRealtimeTtsSettings:
 class DoubaoRealtimeVoiceProvider:
     provider_name = "doubao"
 
-    def __init__(self, settings: Settings, *, connect: Any | None = None) -> None:
+    def __init__(self, settings: Settings, *, connect: Any | None = None, transcriber: SpeechTranscriber | None = None) -> None:
         self.settings = _doubao_settings(settings)
         self._connect = connect
+        self._transcriber = transcriber or OpenAiSpeechTranscriber(settings)
 
     def ensure_available(self) -> None:
-        if not self.settings.api_key:
+        if not self.settings.api_key and not (self.settings.app_id and self.settings.access_key):
             raise ApiError(
                 code="doubao_tts_config_missing",
                 message="Doubao realtime TTS is not configured.",
@@ -159,10 +253,12 @@ class DoubaoRealtimeVoiceProvider:
         content_type: str,
         language: str | None,
     ) -> SpeechTranscription:
-        raise ApiError(
-            code="voice_transcription_provider_unavailable",
-            message="Speech transcription provider is not configured.",
-            status=503,
+        return await self._transcriber.transcribe_chunk(
+            actor_user_id=actor_user_id,
+            body=body,
+            filename=filename,
+            content_type=content_type,
+            language=language,
         )
 
     def synthesize_pcm_stream(self, *, actor_user_id: UUID, text: str) -> AsyncIterator[bytes]:
@@ -186,6 +282,15 @@ class DoubaoRealtimeVoiceProvider:
             "channels": 1,
         }
         yield {"type": "audio.done", "session_id": session_id, "sequence": 1}
+
+    async def run_realtime_session(self, *, actor_user_id: UUID, client: RealtimeVoiceClient) -> None:
+        self.ensure_available()
+        await _run_doubao_realtime_voice_session(
+            client=client,
+            settings=self.settings,
+            user_id=str(actor_user_id),
+            connect=self._resolve_connect(),
+        )
 
     def _resolve_connect(self) -> Any:
         if self._connect is not None:
@@ -261,6 +366,8 @@ def _doubao_settings(settings: Settings) -> DoubaoRealtimeTtsSettings:
     speed_ratio = settings.voice_tts_speed_ratio
     return DoubaoRealtimeTtsSettings(
         api_key=settings.voice_api_key.strip(),
+        app_id=settings.voice_app_id.strip(),
+        access_key=settings.voice_access_key.strip(),
         ws_url=settings.voice_base_url.strip(),
         resource_id=settings.voice_tts_resource_id.strip(),
         voice_type=settings.voice_tts_voice_type.strip(),
@@ -274,11 +381,16 @@ def _doubao_settings(settings: Settings) -> DoubaoRealtimeTtsSettings:
 
 
 def _doubao_headers(settings: DoubaoRealtimeTtsSettings) -> dict[str, str]:
-    return {
-        "X-Api-Key": settings.api_key,
+    headers = {
         "X-Api-Resource-Id": settings.resource_id,
         "X-Api-Connect-Id": str(uuid4()),
     }
+    if settings.api_key:
+        headers["X-Api-Key"] = settings.api_key
+    else:
+        headers["X-Api-App-Key"] = settings.app_id
+        headers["X-Api-Access-Key"] = settings.access_key
+    return headers
 
 
 async def _iter_doubao_realtime_voice_audio(
@@ -326,6 +438,127 @@ async def _iter_doubao_realtime_voice_audio(
                 with contextlib.suppress(Exception):
                     await _doubao_finish_connection(ws)
                 break
+
+
+async def _run_doubao_realtime_voice_session(
+    *,
+    client: RealtimeVoiceClient,
+    settings: DoubaoRealtimeTtsSettings,
+    user_id: str,
+    connect: Any,
+) -> None:
+    session_id = uuid4().hex
+    session_done = asyncio.Event()
+    send_lock = asyncio.Lock()
+    upstream_error: RuntimeError | None = None
+
+    async with connect(
+        settings.ws_url,
+        additional_headers=_doubao_headers(settings),
+        open_timeout=15,
+        max_size=1000000000,
+    ) as ws:
+        await _doubao_start_connection(ws)
+        response = await _doubao_receive_response(ws)
+        _doubao_expect_event(response, DOUBAO_EVENT_CONNECTION_STARTED, "start connection")
+
+        await _doubao_start_session(ws, settings=settings, session_id=session_id, user_id=user_id)
+        response = await _doubao_receive_response(ws)
+        _doubao_expect_event(response, DOUBAO_EVENT_SESSION_STARTED, "start session")
+
+        await client.send_json(
+            {
+                "type": "ready",
+                "session_id": session_id,
+                "audio_format": "pcm16",
+                "sample_rate": settings.sample_rate,
+                "channels": 1,
+            }
+        )
+
+        async def upstream_reader() -> None:
+            nonlocal upstream_error
+            async for raw in ws:
+                response = _doubao_parse_response(raw)
+                event = int(response.get("event") or 0)
+                message_type = int(response.get("message_type") or 0)
+                if message_type == DOUBAO_WS_ERROR_INFORMATION or event in {
+                    DOUBAO_EVENT_CONNECTION_FAILED,
+                    DOUBAO_EVENT_SESSION_FAILED,
+                }:
+                    message = _format_doubao_realtime_error(response)
+                    upstream_error = RuntimeError(message)
+                    session_done.set()
+                    await client.send_json({"type": "error", "code": "doubao_realtime_error", "message": message})
+                    return
+                if event == DOUBAO_EVENT_TTS_RESPONSE:
+                    payload = response.get("payload")
+                    if isinstance(payload, bytes) and payload:
+                        await client.send_bytes(payload)
+                    continue
+                if event in {DOUBAO_EVENT_TTS_SENTENCE_START, DOUBAO_EVENT_TTS_SENTENCE_END}:
+                    continue
+                if event == DOUBAO_EVENT_SESSION_FINISHED:
+                    session_done.set()
+                    return
+
+        async def client_reader() -> None:
+            while True:
+                raw = await client.receive_text()
+                try:
+                    payload = json.loads(raw or "{}")
+                except json.JSONDecodeError:
+                    await client.send_json({"type": "error", "code": "invalid_request", "message": "message must be valid JSON"})
+                    continue
+                if not isinstance(payload, dict):
+                    await client.send_json({"type": "error", "code": "invalid_request", "message": "message must be a JSON object"})
+                    continue
+
+                event_type = str(payload.get("type") or "").strip().lower()
+                if event_type == "append":
+                    text = str(payload.get("text") or "").strip()
+                    if text:
+                        async with send_lock:
+                            await _doubao_send_task_request(
+                                ws,
+                                settings=settings,
+                                session_id=session_id,
+                                text=text[:DOUBAO_TTS_MAX_INPUT_CHARS],
+                                user_id=user_id,
+                            )
+                    continue
+                if event_type in {"finish", "cancel"}:
+                    async with send_lock:
+                        await _doubao_finish_session(ws, session_id=session_id)
+                    return
+                await client.send_json(
+                    {"type": "error", "code": "invalid_request", "message": f"unsupported event type: {event_type}"}
+                )
+
+        upstream_task = asyncio.create_task(upstream_reader())
+        client_task = asyncio.create_task(client_reader())
+        tasks = {upstream_task, client_task}
+        try:
+            done, _pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                exc = task.exception()
+                if exc is not None:
+                    raise exc
+            if upstream_task in done and not session_done.is_set():
+                client_task.cancel()
+                raise RuntimeError("Doubao realtime TTS session closed")
+            if client_task in done:
+                await asyncio.wait_for(session_done.wait(), timeout=settings.response_timeout_seconds)
+                if upstream_error is not None:
+                    raise upstream_error
+                await client.send_json({"type": "done", "session_id": session_id})
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            with contextlib.suppress(Exception):
+                await _doubao_finish_connection(ws)
 
 
 async def _doubao_start_connection(ws: Any) -> None:

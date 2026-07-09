@@ -5,9 +5,11 @@ from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from production_backend.app.api.dependencies import require_current_user
+from production_backend.app.core.errors import ApiError
 from production_backend.app.core.settings import Settings
 from production_backend.app.factory import create_app
 from production_backend.app.modules.auth import CurrentUser, issue_access_token
+from production_backend.app.modules.voice.router import get_voice_service
 
 
 def test_transcribe_chunk_requires_current_user() -> None:
@@ -77,6 +79,21 @@ def test_realtime_voice_stream_returns_disabled_error_when_provider_is_not_confi
     assert response.json()["error"]["code"] == "voice_provider_disabled"
 
 
+def test_realtime_voice_stream_prefetches_before_sending_pcm_headers() -> None:
+    app = create_app(Settings(app_env="test", voice_provider="local_stub"))
+    _override_current_user(app, uuid4())
+    app.dependency_overrides[get_voice_service] = lambda: _FirstChunkFailVoiceService()
+
+    response = TestClient(app).get(
+        "/v1/realtime-voice-stream?text=hello",
+        headers={"Authorization": "Bearer ignored-by-override"},
+    )
+
+    assert response.status_code == 502
+    assert response.headers["content-type"].startswith("application/json")
+    assert response.json()["error"]["code"] == "doubao_realtime_voice_failed"
+
+
 def test_realtime_voice_session_sends_disabled_error_frame() -> None:
     user_id = uuid4()
     settings = Settings(
@@ -118,3 +135,17 @@ def _override_current_user(app, user_id: UUID) -> None:
         )
 
     app.dependency_overrides[require_current_user] = fake_current_user
+
+
+class _FirstChunkFailVoiceService:
+    def synthesize_pcm_stream(self, *, actor_user_id: UUID, text: str):
+        async def stream():
+            raise ApiError(
+                code="doubao_realtime_voice_failed",
+                message="Failed to stream Doubao realtime voice.",
+                status=502,
+            )
+            if False:
+                yield b""
+
+        return stream()

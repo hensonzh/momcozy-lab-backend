@@ -192,6 +192,18 @@ def test_settings_from_env_keeps_legacy_volc_tts_aliases(monkeypatch: pytest.Mon
     assert settings.voice_tts_speed_ratio == 1.1
 
 
+def test_settings_from_env_keeps_legacy_volc_app_access_key_aliases(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("VOICE_PROVIDER", "doubao")
+    monkeypatch.setenv("VOLC_TTS_APP_ID", "legacy-app-id")
+    monkeypatch.setenv("VOLC_TTS_ACCESS_TOKEN", "legacy-access-token")
+
+    settings = Settings.from_env()
+
+    assert settings.voice_app_id == "legacy-app-id"
+    assert settings.voice_access_key == "legacy-access-token"
+    settings.validate_for_startup()
+
+
 def test_settings_from_env_reads_vision_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("VISION_PROVIDER", "local_stub")
 

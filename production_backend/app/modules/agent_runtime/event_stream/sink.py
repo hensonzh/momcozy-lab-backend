@@ -35,3 +35,7 @@ class AgentEventSink:
         if self.after_append is not None:
             await self.after_append()
         return event
+
+    async def clear_active_run(self, *, thread_id: UUID, run_id: UUID) -> None:
+        if self.controls is not None:
+            await self.controls.clear_active_run(thread_id=thread_id, run_id=run_id)

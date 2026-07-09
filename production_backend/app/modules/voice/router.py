@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import contextlib
+from collections.abc import AsyncIterator
+
 from fastapi import Depends, File, Form, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 
@@ -52,6 +55,7 @@ async def realtime_voice_stream(
     service: VoiceService = Depends(get_voice_service),
 ) -> StreamingResponse:
     stream = service.synthesize_pcm_stream(actor_user_id=current_user.user_id, text=text)
+    stream = await _prefetch_pcm_stream(stream)
     sample_rate = request.app.state.settings.voice_tts_sample_rate
     return StreamingResponse(
         stream,
@@ -84,8 +88,7 @@ async def realtime_voice_session(websocket: WebSocket) -> None:
 
     await websocket.accept()
     try:
-        async for event in service.realtime_session_events(actor_user_id=current_user.user_id):
-            await websocket.send_json(event)
+        await service.run_realtime_session(actor_user_id=current_user.user_id, client=websocket)
     except ApiError as exc:
         if exc.code == "voice_provider_disabled":
             await websocket.send_json(service.disabled_frame())
@@ -114,6 +117,48 @@ async def _read_upload_body(*, file: UploadFile, max_bytes: int) -> bytes:
             )
         chunks.append(chunk)
     return b"".join(chunks)
+
+
+async def _prefetch_pcm_stream(stream: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
+    try:
+        first_chunk = await anext(stream)
+    except StopAsyncIteration:
+        return _empty_pcm_stream()
+    except ApiError:
+        await _close_async_iterator(stream)
+        raise
+    except Exception as exc:
+        await _close_async_iterator(stream)
+        raise ApiError(
+            code="voice_stream_failed",
+            message="Failed to start voice stream.",
+            status=502,
+        ) from exc
+
+    return _chain_prefetched_pcm_stream(first_chunk=first_chunk, stream=stream)
+
+
+async def _chain_prefetched_pcm_stream(*, first_chunk: bytes, stream: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
+    try:
+        if first_chunk:
+            yield first_chunk
+        async for chunk in stream:
+            if chunk:
+                yield chunk
+    finally:
+        await _close_async_iterator(stream)
+
+
+async def _empty_pcm_stream() -> AsyncIterator[bytes]:
+    if False:
+        yield b""
+
+
+async def _close_async_iterator(stream: AsyncIterator[bytes]) -> None:
+    aclose = getattr(stream, "aclose", None)
+    if callable(aclose):
+        with contextlib.suppress(Exception):
+            await aclose()
 
 
 def _bearer_token(websocket: WebSocket) -> str:

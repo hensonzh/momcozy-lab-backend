@@ -44,6 +44,36 @@ def test_tool_executor_persists_safe_args_and_output() -> None:
     assert repository.events[1].payload["tool_output_id"] == str(repository.output.id)
 
 
+def test_tool_executor_emits_deferred_artifact_events_after_tool_completed() -> None:
+    actor = _user(permissions={"profile:read:self"})
+    repository = FakeToolRepository()
+    executor = ToolExecutor(
+        registry=default_tool_registry(),
+        repository=repository,
+        handlers={"profile.read": artifact_creating_handler},
+    )
+
+    result = asyncio.run(
+        executor.execute(
+            actor=actor,
+            run_id=uuid4(),
+            tool_name="profile.read",
+            call_id="call-artifact",
+            args={},
+        )
+    )
+
+    assert "_deferred_agent_events" not in result.safe_output
+    assert "_deferred_agent_events" not in repository.output.safe_output
+    assert [event.event_type for event in repository.events] == [
+        "tool.started",
+        "tool.completed",
+        "artifact.created",
+    ]
+    assert repository.events[-1].payload["artifact_id"] == "artifact-1"
+    assert repository.events[-1].payload["tool_call_id"] == str(repository.tool_call.id)
+
+
 def test_tool_executor_externalizes_large_safe_output_after_redaction() -> None:
     actor = _user(permissions={"profile:read:self"})
     repository = FakeToolRepository()
@@ -328,6 +358,18 @@ def test_tool_executor_records_success_and_authorization_failure_metrics() -> No
 
 async def profile_read_handler(context: ToolHandlerContext):
     return {"profile": {"name": "Mai"}, "session_token": "secret-token"}
+
+
+async def artifact_creating_handler(context: ToolHandlerContext):
+    return {
+        "artifact_id": "artifact-1",
+        "_deferred_agent_events": [
+            {
+                "event_type": "artifact.created",
+                "payload": {"artifact_id": "artifact-1", "artifact_type": "hospital_bag_card"},
+            }
+        ],
+    }
 
 
 async def large_profile_read_handler(context: ToolHandlerContext):

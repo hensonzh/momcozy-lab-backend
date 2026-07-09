@@ -33,6 +33,21 @@ def test_agent_action_outbox_handler_applies_action_and_emits_event() -> None:
     assert repository.events[0].payload["resource_id"] == "ticket_1"
 
 
+def test_agent_action_outbox_handler_completes_waiting_run_after_apply_event() -> None:
+    repository = FakeAgentActionRepository(run_status="waiting_for_confirmation")
+
+    async def apply(_action: AgentAction) -> AgentActionApplyResult:
+        return AgentActionApplyResult(resource_type="support_ticket", resource_id="ticket_1")
+
+    handler = AgentActionOutboxHandler(repository=repository, handlers={"support.ticket.create": apply})
+
+    asyncio.run(handler(_job(repository.action.id)))
+
+    assert repository.run.status == "completed"
+    assert [event.event_type for event in repository.events] == ["action.applied", "run.completed"]
+    assert repository.events[-1].payload == {"reason": "action_applied", "action_id": str(repository.action.id)}
+
+
 def test_agent_action_outbox_handler_marks_failed_when_handler_missing() -> None:
     repository = FakeAgentActionRepository()
     handler = AgentActionOutboxHandler(repository=repository, handlers={})
@@ -114,12 +129,12 @@ def test_agent_action_outbox_handler_fails_unexpected_error_on_final_attempt() -
 
 
 class FakeAgentActionRepository:
-    def __init__(self, *, action_status: str = "confirmed") -> None:
+    def __init__(self, *, action_status: str = "confirmed", run_status: str = "completed") -> None:
         self.run = AgentRun(
             id=uuid4(),
             thread_id=uuid4(),
             actor_user_id=uuid4(),
-            status="completed",
+            status=run_status,
             runtime_pattern="langgraph_sdk",
             graph_version="momcozy-agent-v1",
             prompt_version="",
@@ -164,6 +179,11 @@ class FakeAgentActionRepository:
         action.failed_at = failed_at
         action.error_code = error_code
         return action
+
+    async def mark_run_completed(self, *, run, completed_at):
+        run.status = "completed"
+        run.completed_at = completed_at
+        return run
 
     async def append_event(self, **kwargs):
         event = AgentEvent(

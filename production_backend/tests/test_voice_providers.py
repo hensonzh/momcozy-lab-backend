@@ -11,6 +11,8 @@ from production_backend.app.modules.voice.providers import (
     DisabledVoiceProvider,
     DoubaoRealtimeVoiceProvider,
     LocalStubVoiceProvider,
+    OpenAiSpeechTranscriber,
+    SpeechTranscription,
     create_voice_provider,
 )
 
@@ -55,6 +57,54 @@ def test_local_stub_voice_provider_shapes_match_service_contract() -> None:
     assert [event["type"] for event in session_events] == ["session.open", "audio.done"]
 
 
+def test_doubao_realtime_voice_provider_keeps_speech_transcription_independent_from_tts() -> None:
+    actor_user_id = uuid4()
+    transcriber = _FakeSpeechTranscriber()
+    provider = DoubaoRealtimeVoiceProvider(
+        Settings(app_env="test", voice_provider="doubao", voice_api_key="doubao-test"),
+        transcriber=transcriber,
+    )
+
+    transcription = asyncio.run(
+        provider.transcribe_chunk(
+            actor_user_id=actor_user_id,
+            body=b"audio",
+            filename="speech.wav",
+            content_type="audio/wav",
+            language="zh-CN",
+        )
+    )
+
+    assert transcription.text == "你好"
+    assert transcriber.calls == [
+        {
+            "actor_user_id": actor_user_id,
+            "body": b"audio",
+            "filename": "speech.wav",
+            "content_type": "audio/wav",
+            "language": "zh-CN",
+        }
+    ]
+
+
+def test_openai_speech_transcriber_reports_missing_stt_credentials() -> None:
+    transcriber = OpenAiSpeechTranscriber(Settings(app_env="test", openai_api_key=""))
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            transcriber.transcribe_chunk(
+                actor_user_id=uuid4(),
+                body=b"audio",
+                filename="speech.wav",
+                content_type="audio/wav",
+                language=None,
+            )
+        )
+
+    assert exc_info.value.code == "openai_stt_config_missing"
+    assert exc_info.value.status == 400
+
+
 def test_doubao_realtime_voice_provider_uses_legacy_bidirectional_tts_contract() -> None:
     actor_user_id = uuid4()
     _FakeDoubaoStreamWebSocket.sent_events = []
@@ -90,6 +140,77 @@ def test_doubao_realtime_voice_provider_uses_legacy_bidirectional_tts_contract()
     task_payload = _FakeDoubaoStreamWebSocket.sent_events[2]["payload"]
     assert task_payload["namespace"] == "BidirectionalTTS"
     assert task_payload["req_params"]["text"] == "你好，今天状态怎么样？"
+    assert task_payload["req_params"]["speaker"] == "saturn_zh_female_qingyingduoduo_cs_tob"
+    assert task_payload["req_params"]["audio_params"] == {"format": "pcm", "sample_rate": 24000, "speech_rate": 10}
+
+
+def test_doubao_realtime_voice_provider_accepts_legacy_app_access_key_credentials() -> None:
+    actor_user_id = uuid4()
+    _FakeDoubaoStreamWebSocket.sent_events = []
+    _FakeDoubaoStreamWebSocket.last_url = None
+    _FakeDoubaoStreamWebSocket.last_kwargs = None
+    provider = DoubaoRealtimeVoiceProvider(
+        Settings(
+            app_env="test",
+            voice_provider="doubao",
+            voice_app_id="legacy-app-id",
+            voice_access_key="legacy-access-token",
+            voice_tts_resource_id="seed-tts-2.0",
+            voice_tts_voice_type="saturn_zh_female_qingyingduoduo_cs_tob",
+        ),
+        connect=_fake_stream_connect,
+    )
+
+    chunks = asyncio.run(_collect_bytes(provider.synthesize_pcm_stream(actor_user_id=actor_user_id, text="你好")))
+
+    assert chunks == [b"pcm-1", b"pcm-2"]
+    headers = (_FakeDoubaoStreamWebSocket.last_kwargs or {})["additional_headers"]
+    assert "X-Api-Key" not in headers
+    assert headers["X-Api-App-Key"] == "legacy-app-id"
+    assert headers["X-Api-Access-Key"] == "legacy-access-token"
+
+
+def test_doubao_realtime_voice_session_keeps_one_bidirectional_tts_connection() -> None:
+    actor_user_id = uuid4()
+    _FakeDoubaoSessionWebSocket.sent_events = []
+    _FakeDoubaoSessionWebSocket.last_url = None
+    _FakeDoubaoSessionWebSocket.last_kwargs = None
+    client = _FakeRealtimeVoiceClient(
+        [
+            {"type": "append", "text": "你好呀。"},
+            {"type": "finish"},
+        ]
+    )
+    provider = DoubaoRealtimeVoiceProvider(
+        Settings(
+            app_env="test",
+            voice_provider="doubao",
+            voice_api_key="doubao-test",
+            voice_tts_resource_id="seed-tts-2.0",
+            voice_tts_voice_type="saturn_zh_female_qingyingduoduo_cs_tob",
+            voice_tts_speed_ratio=1.1,
+        ),
+        connect=_fake_session_connect,
+    )
+
+    asyncio.run(provider.run_realtime_session(actor_user_id=actor_user_id, client=client))
+
+    assert [frame["type"] for frame in client.json_frames] == ["ready", "done"]
+    assert client.bytes_frames == [b"session-pcm"]
+    assert _FakeDoubaoSessionWebSocket.last_url == "wss://openspeech.bytedance.com/api/v3/tts/bidirection"
+    headers = (_FakeDoubaoSessionWebSocket.last_kwargs or {})["additional_headers"]
+    assert headers["X-Api-Key"] == "doubao-test"
+    assert headers["X-Api-Resource-Id"] == "seed-tts-2.0"
+    assert [event["event"] for event in _FakeDoubaoSessionWebSocket.sent_events] == [
+        providers.DOUBAO_EVENT_START_CONNECTION,
+        providers.DOUBAO_EVENT_START_SESSION,
+        providers.DOUBAO_EVENT_TASK_REQUEST,
+        providers.DOUBAO_EVENT_FINISH_SESSION,
+        providers.DOUBAO_EVENT_FINISH_CONNECTION,
+    ]
+    task_payload = _FakeDoubaoSessionWebSocket.sent_events[2]["payload"]
+    assert task_payload["namespace"] == "BidirectionalTTS"
+    assert task_payload["req_params"]["text"] == "你好呀。"
     assert task_payload["req_params"]["speaker"] == "saturn_zh_female_qingyingduoduo_cs_tob"
     assert task_payload["req_params"]["audio_params"] == {"format": "pcm", "sample_rate": 24000, "speech_rate": 10}
 
@@ -209,3 +330,81 @@ def _fake_stream_connect(url: str, **kwargs) -> _FakeDoubaoStreamWebSocket:
     _FakeDoubaoStreamWebSocket.last_url = url
     _FakeDoubaoStreamWebSocket.last_kwargs = kwargs
     return _FakeDoubaoStreamWebSocket()
+
+
+class _FakeDoubaoSessionWebSocket:
+    sent_events: list[dict] = []
+    last_url: str | None = None
+    last_kwargs: dict | None = None
+
+    def __init__(self) -> None:
+        self._queue: asyncio.Queue[bytes] = asyncio.Queue()
+
+    async def __aenter__(self) -> "_FakeDoubaoSessionWebSocket":
+        return self
+
+    async def __aexit__(self, exc_type, exc, exc_tb) -> None:
+        return None
+
+    async def send(self, payload: bytes) -> None:
+        event = _parse_client_frame(payload)
+        type(self).sent_events.append(event)
+        event_type = event["event"]
+        if event_type == providers.DOUBAO_EVENT_START_CONNECTION:
+            await self._queue.put(_server_frame(providers.DOUBAO_EVENT_CONNECTION_STARTED))
+        elif event_type == providers.DOUBAO_EVENT_START_SESSION:
+            await self._queue.put(_server_frame(providers.DOUBAO_EVENT_SESSION_STARTED))
+        elif event_type == providers.DOUBAO_EVENT_TASK_REQUEST:
+            await self._queue.put(
+                _server_frame(
+                    providers.DOUBAO_EVENT_TTS_RESPONSE,
+                    message_type=providers.DOUBAO_WS_AUDIO_ONLY_RESPONSE,
+                    payload=b"session-pcm",
+                )
+            )
+        elif event_type == providers.DOUBAO_EVENT_FINISH_SESSION:
+            await self._queue.put(_server_frame(providers.DOUBAO_EVENT_SESSION_FINISHED))
+
+    async def recv(self) -> bytes:
+        return await self._queue.get()
+
+    def __aiter__(self) -> "_FakeDoubaoSessionWebSocket":
+        return self
+
+    async def __anext__(self) -> bytes:
+        return await self._queue.get()
+
+
+def _fake_session_connect(url: str, **kwargs) -> _FakeDoubaoSessionWebSocket:
+    _FakeDoubaoSessionWebSocket.last_url = url
+    _FakeDoubaoSessionWebSocket.last_kwargs = kwargs
+    return _FakeDoubaoSessionWebSocket()
+
+
+class _FakeRealtimeVoiceClient:
+    def __init__(self, messages: list[dict[str, object]]) -> None:
+        self._messages = iter(json.dumps(message, ensure_ascii=False) for message in messages)
+        self.json_frames: list[dict[str, object]] = []
+        self.bytes_frames: list[bytes] = []
+
+    async def send_json(self, payload: dict[str, object]) -> None:
+        self.json_frames.append(payload)
+
+    async def send_bytes(self, payload: bytes) -> None:
+        self.bytes_frames.append(payload)
+
+    async def receive_text(self) -> str:
+        try:
+            return next(self._messages)
+        except StopIteration:
+            await asyncio.sleep(3600)
+            raise AssertionError("unreachable") from None
+
+
+class _FakeSpeechTranscriber:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    async def transcribe_chunk(self, **kwargs) -> SpeechTranscription:
+        self.calls.append(kwargs)
+        return SpeechTranscription(text="你好")

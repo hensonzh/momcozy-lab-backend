@@ -32,6 +32,7 @@ class ToolHandlerContext:
 
 
 ToolHandler = Callable[[ToolHandlerContext], Awaitable[dict[str, Any]] | dict[str, Any]]
+DEFERRED_AGENT_EVENTS_KEY = "_deferred_agent_events"
 
 
 @dataclass(frozen=True)
@@ -135,6 +136,7 @@ class ToolExecutor:
             self._record(tool_name=tool_name, outcome="failed", error_code="tool_failed", started_at=started_at)
             raise ApiError(code="tool_failed", message="Tool execution failed.", status=500) from exc
 
+        deferred_events = _extract_deferred_agent_events(result)
         safe_output = strip_instructional_tool_output_keys(_safe_payload(result))
         externalized_output = await maybe_externalize_json_payload(
             payload=safe_output,
@@ -163,6 +165,15 @@ class ToolExecutor:
             event_type="tool.completed",
             payload=completed_payload,
         )
+        for deferred_event in deferred_events:
+            payload = dict(deferred_event["payload"])
+            payload.setdefault("tool_call_id", str(completed.id))
+            await self._append_tool_event(
+                thread_id=run.thread_id,
+                run_id=run.id,
+                event_type=deferred_event["event_type"],
+                payload=payload,
+            )
         self._record(tool_name=tool_name, outcome="completed", error_code="", started_at=started_at)
         return ToolExecutionResult(tool_call=completed, safe_output=externalized_output.inline_payload)
 
@@ -208,6 +219,21 @@ async def _maybe_await(value: Awaitable[dict[str, Any]] | dict[str, Any]) -> dic
     if hasattr(value, "__await__"):
         return await value
     return value
+
+
+def _extract_deferred_agent_events(result: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_events = result.pop(DEFERRED_AGENT_EVENTS_KEY, [])
+    if not isinstance(raw_events, list):
+        return []
+    events: list[dict[str, Any]] = []
+    for item in raw_events:
+        if not isinstance(item, dict):
+            continue
+        event_type = str(item.get("event_type") or "").strip()
+        payload = item.get("payload")
+        if event_type and isinstance(payload, dict):
+            events.append({"event_type": event_type, "payload": payload})
+    return events
 
 
 def _safe_payload(value: Any) -> Any:

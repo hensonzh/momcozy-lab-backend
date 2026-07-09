@@ -32,7 +32,7 @@ from ...support.agent_actions import SUPPORT_TICKET_CREATE_ACTION
 from ..memory.actions import AGENT_MEMORY_CREATE_ACTION
 from ..memory.service import validate_memory_write_policy
 from ..service import AgentRuntimeService
-from .executor import ToolHandler, ToolHandlerContext
+from .executor import DEFERRED_AGENT_EVENTS_KEY, ToolHandler, ToolHandlerContext
 from .legacy_artifacts import artifact_record_from_legacy_result, create_legacy_artifact_result
 
 
@@ -138,6 +138,7 @@ class AgentArtifactCreateToolHandler:
             schema_version="v1",
             status="created",
             payload=payload,
+            emit_event=False,
         )
         return {
             "artifact_id": str(artifact.id),
@@ -145,6 +146,7 @@ class AgentArtifactCreateToolHandler:
             "status": artifact.status,
             "title": _text(payload, "title"),
             "summary": _text(payload, "summary"),
+            DEFERRED_AGENT_EVENTS_KEY: [_deferred_artifact_created_event(artifact)],
         }
 
 
@@ -166,12 +168,14 @@ class LegacyArtifactToolHandler:
             schema_version=str(artifact_record["schema_version"]),
             status="created",
             payload=artifact_record["payload"],
+            emit_event=False,
         )
         return {
             **result,
             "artifact_id": str(artifact.id),
             "artifact_type": artifact.artifact_type,
             "schema_version": artifact.schema_version,
+            DEFERRED_AGENT_EVENTS_KEY: [_deferred_artifact_created_event(artifact)],
         }
 
 
@@ -1318,6 +1322,32 @@ def _telemetry_payload(event: PumpTelemetryEvent) -> dict[str, Any]:
         "occurred_at": _datetime_iso(event.occurred_at),
         "payload": event.payload,
     }
+
+
+def _deferred_artifact_created_event(artifact: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "artifact_id": str(artifact.id),
+        "artifact_type": artifact.artifact_type,
+        "schema_version": artifact.schema_version,
+        "status": artifact.status,
+        "artifact": {
+            "id": str(artifact.id),
+            "artifact_type": artifact.artifact_type,
+            "schema_version": artifact.schema_version,
+            "status": artifact.status,
+            "payload": artifact.payload,
+            "raw_payload_ref": artifact.raw_payload_ref,
+        },
+    }
+    if isinstance(artifact.payload, dict):
+        payload.update(
+            {
+                key: value
+                for key, value in artifact.payload.items()
+                if key in {"form", "card", "card_json", "cart_update", "summary"}
+            }
+        )
+    return {"event_type": "artifact.created", "payload": payload}
 
 
 def _limit(value: Any, *, default: int, max_limit: int) -> int:

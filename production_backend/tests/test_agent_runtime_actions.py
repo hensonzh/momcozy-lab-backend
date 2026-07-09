@@ -48,7 +48,7 @@ def test_agent_runtime_actions_confirm_to_action_queued_without_queued_status() 
     assert confirmed.status != "queued"
     assert confirmed.idempotency_key == "idem-action"
     assert confirmed.apply_payload["issue_summary"] == "Pump does not turn on after charging"
-    proposal_event = repository.events[-3]
+    proposal_event = repository.events[-2]
     assert proposal_event.event_type == "action.confirmation_required"
     assert proposal_event.payload["action_id"] == str(action.id)
     assert proposal_event.payload["action_status"] == "confirmation_required"
@@ -57,16 +57,15 @@ def test_agent_runtime_actions_confirm_to_action_queued_without_queued_status() 
     assert proposal_event.payload["side_effect_level"] == "medium"
     assert proposal_event.payload["preview_payload"] == {"summary": "Pump does not turn on"}
     assert "apply_payload" not in proposal_event.payload
-    queued_event = repository.events[-2]
+    queued_event = repository.events[-1]
     assert queued_event.event_type == "action.queued"
     assert queued_event.payload["action_status"] == "confirmed"
     assert queued_event.payload["action_type"] == "support.ticket.create"
     assert queued_event.payload["target_type"] == "support_ticket"
     assert queued_event.payload["outbox_status"] == "queued"
     assert queued_event.payload["outbox_job_id"] == str(outbox_service.job.id)
-    assert repository.run.status == "completed"
-    assert repository.events[-1].event_type == "run.completed"
-    assert repository.events[-1].payload == {"reason": "action_confirmed", "action_id": str(action.id)}
+    assert repository.run.status == "waiting_for_confirmation"
+    assert repository.events[-1].event_type == "action.queued"
     assert outbox_service.enqueue_kwargs["job_type"] == AGENT_ACTION_APPLY_JOB
     assert outbox_service.enqueue_kwargs["payload"]["action_id"] == str(action.id)
     assert outbox_service.enqueue_kwargs["idempotency_key"] == f"agent-action:{action.id}:apply"
@@ -166,7 +165,10 @@ def test_agent_runtime_actions_scope_outbox_idempotency_key_to_each_action() -> 
     )
     first_run.status = "waiting_for_confirmation"
     asyncio.run(service.confirm_action(owner_user_id=owner_user_id, action_id=first_action.id, idempotency_key="shared-key"))
-    second_run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=repository.thread.id, message="Create second ticket"))
+    first_run.status = "completed"
+    second_run = asyncio.run(
+        service.create_run(actor_user_id=owner_user_id, thread_id=repository.thread.id, message="Create second ticket")
+    )
     second_action = asyncio.run(
         service.propose_action(owner_user_id=owner_user_id, run_id=second_run.id, action_type="support.ticket.create")
     )
@@ -303,8 +305,8 @@ def test_agent_runtime_actions_accept_milk_plan_policy() -> None:
     assert confirmed.action_type == "plans.milk_plan.create"
     assert confirmed.target_type == "plan"
     assert confirmed.side_effect_level == "medium"
-    assert repository.events[-3].payload["action_type"] == "plans.milk_plan.create"
-    assert repository.events[-2].event_type == "action.queued"
+    assert repository.events[-2].payload["action_type"] == "plans.milk_plan.create"
+    assert repository.events[-1].event_type == "action.queued"
     assert outbox_service.enqueue_kwargs["payload"]["apply_payload"] == {"title": "Increase pumping consistency"}
 
 
@@ -354,8 +356,8 @@ def test_agent_runtime_actions_accept_pregnancy_plan_and_task_policies() -> None
         assert confirmed.action_type == action_type
         assert confirmed.target_type == target_type
         assert confirmed.side_effect_level == "medium"
-        assert repository.events[-3].payload["action_type"] == action_type
-        assert repository.events[-2].event_type == "action.queued"
+        assert repository.events[-2].payload["action_type"] == action_type
+        assert repository.events[-1].event_type == "action.queued"
         assert outbox_service.enqueue_kwargs["payload"]["apply_payload"] == apply_payload
 
 
@@ -384,8 +386,8 @@ def test_agent_runtime_actions_accept_milk_reminder_policy() -> None:
     assert confirmed.action_type == "notifications.milk_reminder.create"
     assert confirmed.target_type == "notification"
     assert confirmed.side_effect_level == "medium"
-    assert repository.events[-3].payload["action_type"] == "notifications.milk_reminder.create"
-    assert repository.events[-2].event_type == "action.queued"
+    assert repository.events[-2].payload["action_type"] == "notifications.milk_reminder.create"
+    assert repository.events[-1].event_type == "action.queued"
     assert outbox_service.enqueue_kwargs["payload"]["apply_payload"] == {"title": "Time to pump"}
 
 
@@ -414,8 +416,8 @@ def test_agent_runtime_actions_accept_diary_entry_upsert_policy() -> None:
     assert confirmed.action_type == "diary.entry.upsert"
     assert confirmed.target_type == "pregnancy_diary_entry"
     assert confirmed.side_effect_level == "medium"
-    assert repository.events[-3].payload["action_type"] == "diary.entry.upsert"
-    assert repository.events[-2].event_type == "action.queued"
+    assert repository.events[-2].payload["action_type"] == "diary.entry.upsert"
+    assert repository.events[-1].event_type == "action.queued"
     assert outbox_service.enqueue_kwargs["payload"]["apply_payload"] == {
         "entry_date": "2026-07-04",
         "values": {"content": "Today I felt steady."},
@@ -455,10 +457,10 @@ def test_agent_runtime_actions_accept_memory_create_policy() -> None:
     assert confirmed.action_type == AGENT_MEMORY_CREATE_ACTION
     assert confirmed.target_type == "agent_memory"
     assert confirmed.side_effect_level == "medium"
-    assert repository.events[-3].payload["action_type"] == AGENT_MEMORY_CREATE_ACTION
-    assert repository.events[-3].payload["target_type"] == "agent_memory"
-    assert repository.events[-2].event_type == "action.queued"
-    assert repository.events[-2].payload["action_status"] == "confirmed"
+    assert repository.events[-2].payload["action_type"] == AGENT_MEMORY_CREATE_ACTION
+    assert repository.events[-2].payload["target_type"] == "agent_memory"
+    assert repository.events[-1].event_type == "action.queued"
+    assert repository.events[-1].payload["action_status"] == "confirmed"
     assert outbox_service.enqueue_kwargs["payload"]["apply_payload"] == {
         "memory_type": "communication_preference",
         "content": {"summary": "Prefers concise reminders"},
@@ -587,7 +589,7 @@ def test_agent_pregnancy_plan_main_flow_confirms_applies_and_replays_events() ->
     asyncio.run(runtime_service.confirm_action(owner_user_id=owner_user_id, action_id=action.id))
     asyncio.run(handler(outbox_service.job))
 
-    applied_event = repository.events[-1]
+    applied_event = repository.events[-2]
 
     assert confirmed.status == "applied"
     assert len(outbox_service.enqueue_calls) == 1
@@ -600,8 +602,8 @@ def test_agent_pregnancy_plan_main_flow_confirms_applies_and_replays_events() ->
         "message.completed",
         "action.confirmation_required",
         "action.queued",
-        "run.completed",
         "action.applied",
+        "run.completed",
     ]
     assert applied_event.payload["action_id"] == str(action.id)
     assert applied_event.payload["action_status"] == "applied"

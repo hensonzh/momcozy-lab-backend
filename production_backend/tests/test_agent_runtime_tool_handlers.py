@@ -182,6 +182,7 @@ def test_agent_artifact_create_tool_handler_creates_service_artifact() -> None:
     assert runtime_service.artifact.run_id == context.run_id
     assert runtime_service.artifact.payload["sections"][0]["title"] == "妈妈住院"
     assert runtime_service.artifact.payload["source_context"] == {"gestational_week": "36w"}
+    assert runtime_service.calls[-1]["emit_event"] is False
 
 
 def test_legacy_artifact_tool_handler_returns_old_form_card_and_cart_envelopes() -> None:
@@ -225,6 +226,7 @@ def test_legacy_artifact_tool_handler_returns_old_form_card_and_cart_envelopes()
     assert card_result["assistant_followup"]["kind"] == "hospital_bag_cart"
     assert runtime_service.artifact.artifact_type == "hospital_bag_card"
     assert runtime_service.artifact.payload["card"]["card_json"]["title"] == "待产包"
+    assert runtime_service.calls[-1]["emit_event"] is False
 
     cart_result = asyncio.run(
         LegacyArtifactToolHandler(runtime_service=runtime_service, tool_name="hospital_bag_cart_update")(

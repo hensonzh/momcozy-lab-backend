@@ -53,21 +53,21 @@ class AgentActionOutboxHandler:
 
         handler = self.handlers.get(action.action_type)
         if handler is None:
-            await self._fail(action=action, thread_id=run.thread_id, error_code="agent_action_handler_not_found")
+            await self._fail(action=action, run=run, error_code="agent_action_handler_not_found")
             raise PermanentJobError("agent_action_handler_not_found")
 
         await self.repository.mark_action_applying(action=action)
         try:
             result = await handler(action)
         except RetryableJobError as exc:
-            await self._fail_if_final_attempt(job=job, action=action, thread_id=run.thread_id, error_code=exc.code)
+            await self._fail_if_final_attempt(job=job, action=action, run=run, error_code=exc.code)
             raise
         except PermanentJobError as exc:
-            await self._fail(action=action, thread_id=run.thread_id, error_code=exc.code)
+            await self._fail(action=action, run=run, error_code=exc.code)
             raise
         except Exception as exc:
             error_code = "agent_action_handler_error"
-            await self._fail_if_final_attempt(job=job, action=action, thread_id=run.thread_id, error_code=error_code)
+            await self._fail_if_final_attempt(job=job, action=action, run=run, error_code=error_code)
             raise RetryableJobError(error_code) from exc
 
         applied = await self.repository.mark_action_applied(action=action, applied_at=_utcnow())
@@ -83,25 +83,40 @@ class AgentActionOutboxHandler:
                 "details": result.details or {},
             },
         )
+        await self._complete_waiting_run(run=run, action=applied, decision="applied")
 
-    async def _fail(self, *, action: AgentAction, thread_id: UUID, error_code: str) -> None:
+    async def _fail(self, *, action: AgentAction, run: Any, error_code: str) -> None:
         failed = await self.repository.mark_action_failed(action=action, failed_at=_utcnow(), error_code=error_code)
         await self._append_event(
-            thread_id=thread_id,
+            thread_id=run.thread_id,
             run_id=failed.run_id,
             event_type="action.failed",
             payload={**_action_event_payload(failed), "code": error_code},
         )
+        await self._complete_waiting_run(run=run, action=failed, decision="failed")
 
-    async def _fail_if_final_attempt(self, *, job: OutboxJob, action: AgentAction, thread_id: UUID, error_code: str) -> None:
+    async def _fail_if_final_attempt(self, *, job: OutboxJob, action: AgentAction, run: Any, error_code: str) -> None:
         if job.attempts >= job.max_attempts:
-            await self._fail(action=action, thread_id=thread_id, error_code=error_code)
+            await self._fail(action=action, run=run, error_code=error_code)
 
     async def _append_event(self, *, thread_id: UUID, run_id: UUID, event_type: str, payload: dict[str, Any]) -> None:
         if self.event_sink is not None:
             await self.event_sink.append_event(thread_id=thread_id, run_id=run_id, event_type=event_type, payload=payload)
             return
         await self.repository.append_event(thread_id=thread_id, run_id=run_id, event_type=event_type, payload=payload)
+
+    async def _complete_waiting_run(self, *, run: Any, action: AgentAction, decision: str) -> None:
+        if run.status != "waiting_for_confirmation":
+            return
+        completed = await self.repository.mark_run_completed(run=run, completed_at=_utcnow())
+        await self._append_event(
+            thread_id=completed.thread_id,
+            run_id=completed.id,
+            event_type="run.completed",
+            payload={"reason": f"action_{decision}", "action_id": str(action.id)},
+        )
+        if self.event_sink is not None:
+            await self.event_sink.clear_active_run(thread_id=completed.thread_id, run_id=completed.id)
 
 
 def _action_id_from_job(job: OutboxJob) -> UUID:

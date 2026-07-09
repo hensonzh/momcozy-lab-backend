@@ -5,7 +5,7 @@ from uuid import UUID
 
 from ...core.errors import ApiError
 from ...core.settings import Settings
-from .providers import SpeechTranscription, VoiceProvider, create_voice_provider
+from .providers import RealtimeVoiceClient, SpeechTranscription, VoiceProvider, create_voice_provider
 
 
 class VoiceService:
@@ -41,6 +41,10 @@ class VoiceService:
         self.provider.ensure_available()
         async for event in self.provider.realtime_session_events(actor_user_id=actor_user_id):
             yield event
+
+    async def run_realtime_session(self, *, actor_user_id: UUID, client: RealtimeVoiceClient) -> None:
+        self.provider.ensure_available()
+        await self.provider.run_realtime_session(actor_user_id=actor_user_id, client=client)
 
     def disabled_frame(self) -> dict[str, object]:
         return {

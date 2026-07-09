@@ -652,7 +652,9 @@ def birth_journey_plan_card_result(args: dict[str, Any]) -> dict[str, Any]:
         "next_action": {"label": "继续整理待产包", "send_text": "帮我整理一份个性化待产包清单"},
         "disclaimer": "这份计划用于准备和沟通，不能替代医生、助产士或医院的具体建议；有破水、出血、胎动明显减少、规律宫缩加密或明显不适时，请按医院或医生指导处理。",
     }
-    card_json["owner"] = {key: value for key, value in card_json["owner"].items() if _has_value(value)}
+    owner = card_json.get("owner")
+    if isinstance(owner, dict):
+        card_json["owner"] = {key: value for key, value in owner.items() if _has_value(value)}
     return {
         "tool_name": "birth_journey_plan_card_create",
         "status": "card_created",
