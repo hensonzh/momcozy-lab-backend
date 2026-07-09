@@ -38,7 +38,6 @@ from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.
     PlansCalendarReadToolHandler,
     PlansCurrentReadToolHandler,
     ProfileReadToolHandler,
-    PumpingRecordDeleteProposeToolHandler,
     PumpingRecordProposeToolHandler,
     PregnancyPlanContextReadToolHandler,
     PregnancyPlanProposeToolHandler,
@@ -73,7 +72,6 @@ from production_backend.app.modules.records.agent_actions import (
     GROWTH_RECORD_DELETE_ACTION,
     GROWTH_RECORD_UPDATE_ACTION,
     PUMPING_RECORD_CREATE_ACTION,
-    PUMPING_RECORD_DELETE_ACTION,
 )
 from production_backend.app.modules.records.schemas import MilkTrendDayRead, MilkTrendListResponse
 
@@ -575,7 +573,7 @@ def test_device_guidance_assets_read_tool_handler_returns_bounded_metadata() -> 
         "assets": [
             {
                 "id": "asset-guide",
-                "label": "Pump guide",
+                "label": "Air1 unboxing pump guide",
                 "domain": "device_guidance",
                 "content_type": "application/pdf",
                 "size_bytes": 1200,

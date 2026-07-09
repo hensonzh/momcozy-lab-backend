@@ -256,11 +256,14 @@ before increasing limits.
    `python production_backend/scripts/recover_stuck_agent_runs.py --apply`.
 8. If the run failed, create an eval or replay regression case when safe.
 
-## Agent Eval Budget
+## Provider Eval Budget
 
 Provider-backed eval is deferred for the current simplified multi-agent phase.
-Release readiness uses deterministic seed and replay evals until the provider
-eval path is reintroduced with a concrete product need.
+Keep `AGENT_PROVIDER_EVAL_MAX_CASES` and
+`AGENT_PROVIDER_EVAL_COST_BUDGET_USD` set in staging secret templates so the
+budget switch is explicit when provider evals are reintroduced. Release
+readiness uses deterministic seed and replay evals until the provider eval path
+is reintroduced with a concrete product need.
 
 ## Security Incident
 

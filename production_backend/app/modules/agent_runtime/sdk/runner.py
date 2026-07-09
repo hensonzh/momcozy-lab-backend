@@ -126,7 +126,7 @@ class OpenAIResponsesApiBackend:
             latest_response = await create_response(
                 model=self.model,
                 instructions=request.instructions,
-                input=context,
+                input=list(context),
                 tools=tools_payload,
                 parallel_tool_calls=False,
             )
