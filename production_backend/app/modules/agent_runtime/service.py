@@ -10,7 +10,6 @@ from .actions.policy import AgentActionPolicy
 from .run_lifecycle.controls import AgentRunControls
 from .models import AgentAction, AgentArtifact, AgentEvent, AgentRun, AgentThread
 from .repository import AgentRuntimeRepository
-from .safety.service import AgentSafetyService
 
 
 AGENT_RUN_CREATE_IDEMPOTENCY_SCOPE = "agent.runs.create"
@@ -28,14 +27,12 @@ class AgentRuntimeService:
         idempotency_service: IdempotencyService | None = None,
         outbox_service: OutboxService | None = None,
         controls: AgentRunControls | None = None,
-        safety_service: AgentSafetyService | None = None,
         action_policy: AgentActionPolicy | None = None,
     ) -> None:
         self.repository = repository
         self.idempotency_service = idempotency_service
         self.outbox_service = outbox_service
         self.controls = controls
-        self.safety_service = safety_service
         self.action_policy = action_policy or AgentActionPolicy()
 
     async def create_thread(
@@ -119,15 +116,6 @@ class AgentRuntimeService:
             status="completed",
         )
         await self.repository.touch_thread(thread=thread, updated_at=_utcnow())
-        safety_blocked = await self._apply_input_safety_gate(
-            owner_user_id=actor_user_id,
-            run=run,
-            message_record_id=message_record.id,
-            text=normalized_message,
-        )
-        if safety_blocked is not None:
-            await self._complete_idempotency(idempotency_record=idempotency_record, response_ref=str(safety_blocked.id))
-            return safety_blocked
 
         await self._append_event(
             thread_id=thread.id,
@@ -492,53 +480,6 @@ class AgentRuntimeService:
         if self.controls is not None:
             await self.controls.set_stream_cursor(run_id=run_id, sequence=event.sequence)
         return event
-
-    async def _apply_input_safety_gate(
-        self,
-        *,
-        owner_user_id: UUID,
-        run: AgentRun,
-        message_record_id: UUID,
-        text: str,
-    ) -> AgentRun | None:
-        if self.safety_service is None:
-            return None
-        decision, safety_event = await self.safety_service.evaluate_and_record(owner_user_id=owner_user_id, text=text, run_id=run.id)
-        if not decision.should_block_normal_flow:
-            return None
-        await self._append_event(
-            thread_id=run.thread_id,
-            run_id=run.id,
-            event_type="message.completed",
-            payload={"message_id": str(message_record_id), "role": "user"},
-        )
-        await self._append_event(
-            thread_id=run.thread_id,
-            run_id=run.id,
-            event_type="safety.blocked",
-            payload={
-                "category": decision.category,
-                "severity": decision.severity,
-                "decision": decision.decision,
-                "safety_event_id": str(safety_event.id) if safety_event else "",
-                "response_template_key": decision.response_template_key,
-                "response_template_version": decision.response_template_version,
-                "handoff_type": decision.handoff_type,
-            },
-        )
-        failed = await self.repository.mark_run_failed(
-            run=run,
-            completed_at=_utcnow(),
-            error_code=decision.category,
-            error_details={"decision": decision.decision, "severity": decision.severity},
-        )
-        await self._append_event(
-            thread_id=run.thread_id,
-            run_id=run.id,
-            event_type="run.failed",
-            payload={"code": decision.category, "decision": decision.decision},
-        )
-        return failed
 
     async def _reserve_run_idempotency(self, *, actor_user_id: UUID, key: str | None, payload: dict[str, Any]) -> IdempotencyKey | None:
         if not key:

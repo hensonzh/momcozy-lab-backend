@@ -36,14 +36,10 @@ def default_graph_registry() -> AgentGraphRegistry:
             version="momcozy-agent-v1",
             runtime_pattern="langgraph_sdk",
             node_names=(
-                "load_context",
-                "safety_gate",
                 "sdk_reasoning",
                 "finish",
             ),
             edge_names=(
-                "load_context->safety_gate",
-                "safety_gate->sdk_reasoning",
                 "sdk_reasoning->finish",
             ),
         )

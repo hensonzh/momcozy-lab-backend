@@ -37,6 +37,36 @@ def test_agent_run_worker_completes_run_with_assistant_message_events_and_lock()
     assert controls.stream_cursor == (repository.run.id, 3)
 
 
+def test_agent_run_worker_attaches_quick_replies_to_final_assistant_message() -> None:
+    repository = FakeAgentRuntimeRepository()
+    assistant_message_id = uuid4()
+    replies = [{"text": "看今日安排"}, {"text": "先不保存"}, {"text": "换简单版"}]
+
+    async def handler(_run: AgentRun) -> AgentRunWorkerResult:
+        return AgentRunWorkerResult(
+            status="completed",
+            final_text="已经整理好了。",
+            assistant_message_id=assistant_message_id,
+            quick_replies=replies,
+        )
+
+    worker = AgentRunWorker(repository=repository, handler=handler)
+
+    asyncio.run(worker.run_once(run_id=repository.run.id))
+
+    assert repository.messages[0].id == assistant_message_id
+    assert repository.messages[0].content == {
+        "text": "已经整理好了。",
+        "quick_replies": replies,
+    }
+    assert repository.events[1].payload == {
+        "message_id": str(assistant_message_id),
+        "role": "assistant",
+        "text": "已经整理好了。",
+        "quick_replies": replies,
+    }
+
+
 def test_agent_run_worker_cancels_before_handler_when_cancel_requested() -> None:
     repository = FakeAgentRuntimeRepository()
     controls = FakeAgentRunControls(cancel_requested=True)
@@ -219,7 +249,7 @@ class FakeAgentRuntimeRepository:
 
     async def create_message(self, **kwargs):
         message = AgentMessage(
-            id=uuid4(),
+            id=kwargs.get("message_id") or uuid4(),
             thread_id=kwargs["thread_id"],
             run_id=kwargs["run_id"],
             role=kwargs["role"],

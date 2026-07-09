@@ -44,8 +44,68 @@ def test_tool_executor_persists_safe_args_and_output() -> None:
         "tool_name": "support.ticket.propose",
         "call_id": "call-1",
         "label": "售后工单草稿",
+        "safe_args": {"issue_summary": "Pump does not start", "payload": {"api_token": "[redacted]"}},
     }
     assert repository.events[1].payload["tool_output_id"] == str(repository.output.id)
+    assert repository.events[1].payload["safe_output"] == repository.output.safe_output
+
+
+def test_tool_executor_publishes_optimistic_live_events_before_persisted_events() -> None:
+    actor = _user(permissions={"profile:read:self"})
+    repository = FakeToolRepository()
+    transient_stream = FakeOptimisticTransientStream(operations=repository.operations)
+    executor = ToolExecutor(
+        registry=default_tool_registry(),
+        repository=repository,
+        handlers={"profile.read": profile_read_handler},
+        transient_stream=transient_stream,
+    )
+
+    asyncio.run(
+        executor.execute(
+            actor=actor,
+            run_id=uuid4(),
+            tool_name="profile.read",
+            call_id="call-live",
+            args={},
+        )
+    )
+
+    assert repository.operations == [
+        "live:tool.started",
+        "db:tool.started",
+        "live:tool.completed",
+        "db:tool.completed",
+    ]
+    assert [event["event_type"] for event in transient_stream.events] == ["tool.started", "tool.completed"]
+    assert transient_stream.events[0]["payload"]["tool_call_id"] == str(repository.tool_call.id)
+    assert transient_stream.events[0]["dedupe_key"] == f"{repository.tool_call.run_id}:tool.started:{repository.tool_call.id}"
+    assert transient_stream.events[0]["optimistic"] is True
+    assert transient_stream.events[0]["durable"] is False
+
+
+def test_tool_executor_ignores_optimistic_live_publish_failure() -> None:
+    actor = _user(permissions={"profile:read:self"})
+    repository = FakeToolRepository()
+    executor = ToolExecutor(
+        registry=default_tool_registry(),
+        repository=repository,
+        handlers={"profile.read": profile_read_handler},
+        transient_stream=FailingOptimisticTransientStream(),
+    )
+
+    result = asyncio.run(
+        executor.execute(
+            actor=actor,
+            run_id=uuid4(),
+            tool_name="profile.read",
+            call_id="call-live-failure",
+            args={},
+        )
+    )
+
+    assert result.tool_call.status == "completed"
+    assert [event.event_type for event in repository.events] == ["tool.started", "tool.completed"]
 
 
 def test_tool_executor_emits_deferred_artifact_events_after_tool_completed() -> None:
@@ -420,6 +480,7 @@ class FakeToolRepository:
         self.tool_call = None
         self.output = None
         self.events = []
+        self.operations = []
         self.thread_id = uuid4()
 
     async def get_run(self, *, run_id):
@@ -470,6 +531,7 @@ class FakeToolRepository:
         return self.output
 
     async def append_event(self, **kwargs):
+        self.operations.append(f"db:{kwargs['event_type']}")
         event = AgentEvent(
             event_id=uuid4(),
             thread_id=kwargs["thread_id"],
@@ -480,6 +542,22 @@ class FakeToolRepository:
         )
         self.events.append(event)
         return event
+
+
+class FakeOptimisticTransientStream:
+    def __init__(self, *, operations: list[str]) -> None:
+        self.operations = operations
+        self.events = []
+
+    async def publish_application_event(self, **kwargs):
+        self.operations.append(f"live:{kwargs['event_type']}")
+        self.events.append(kwargs)
+        return None
+
+
+class FailingOptimisticTransientStream:
+    async def publish_application_event(self, **_kwargs):
+        raise RuntimeError("redis unavailable")
 
 
 class FakeToolOutput:

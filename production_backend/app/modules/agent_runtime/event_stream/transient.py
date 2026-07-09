@@ -68,6 +68,92 @@ class AgentTransientStream:
         await self.redis.expire(key, ttl_seconds)
         return _event_from_fields(cursor=cursor, fields=fields)
 
+    async def publish_progress(
+        self,
+        *,
+        thread_id: UUID,
+        run_id: UUID,
+        phase: str,
+        label: str,
+        ttl_seconds: int = TRANSIENT_STREAM_TTL_SECONDS,
+    ) -> AgentTransientStreamEvent | None:
+        normalized_phase = str(phase or "")
+        normalized_label = str(label or "")
+        if not normalized_phase and not normalized_label:
+            return None
+        key = _run_transient_stream_key(run_id)
+        fields = {
+            "type": "run.progress",
+            "thread_id": str(thread_id),
+            "run_id": str(run_id),
+            "payload": json.dumps(
+                {
+                    "phase": normalized_phase,
+                    "label": normalized_label,
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ),
+            "created_at": _utcnow_iso(),
+        }
+        cursor = str(
+            await self.redis.xadd(
+                key,
+                cast(dict[Any, Any], fields),
+                maxlen=TRANSIENT_STREAM_MAXLEN,
+                approximate=True,
+            )
+        )
+        await self.redis.expire(key, ttl_seconds)
+        return _event_from_fields(cursor=cursor, fields=fields)
+
+    async def publish_application_event(
+        self,
+        *,
+        thread_id: UUID,
+        run_id: UUID,
+        event_type: str,
+        payload: dict[str, Any],
+        dedupe_key: str,
+        optimistic: bool = True,
+        durable: bool = False,
+        ttl_seconds: int = TRANSIENT_STREAM_TTL_SECONDS,
+    ) -> AgentTransientStreamEvent | None:
+        normalized_event_type = str(event_type or "").strip()
+        normalized_dedupe_key = str(dedupe_key or "").strip()
+        if not normalized_event_type or not normalized_dedupe_key:
+            return None
+        key = _run_transient_stream_key(run_id)
+        live_payload = dict(payload)
+        live_payload["_live_semantic"] = {
+            "dedupe_key": normalized_dedupe_key,
+            "optimistic": bool(optimistic),
+            "durable": bool(durable),
+        }
+        fields = {
+            "type": normalized_event_type,
+            "thread_id": str(thread_id),
+            "run_id": str(run_id),
+            "payload": json.dumps(
+                live_payload,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ),
+            "created_at": _utcnow_iso(),
+        }
+        cursor = str(
+            await self.redis.xadd(
+                key,
+                cast(dict[Any, Any], fields),
+                maxlen=TRANSIENT_STREAM_MAXLEN,
+                approximate=True,
+            )
+        )
+        await self.redis.expire(key, ttl_seconds)
+        return _event_from_fields(cursor=cursor, fields=fields)
+
     async def read(
         self,
         *,
@@ -91,9 +177,10 @@ class AgentTransientStream:
 
 def _event_from_fields(*, cursor: str, fields: dict[str, Any]) -> AgentTransientStreamEvent:
     payload = _json_object(fields.get("payload"))
+    event_type = str(fields.get("type") or "message.delta")
     return AgentTransientStreamEvent(
-        event_id=f"delta:{cursor}",
-        type=str(fields.get("type") or "message.delta"),
+        event_id=f"{_event_id_prefix(event_type)}:{cursor}",
+        type=event_type,
         thread_id=UUID(str(fields.get("thread_id"))),
         run_id=UUID(str(fields.get("run_id"))),
         cursor=cursor,
@@ -112,6 +199,14 @@ def _json_object(raw: Any) -> dict[str, Any]:
 
 def _run_transient_stream_key(run_id: UUID) -> str:
     return f"agent:run:{run_id}:transient_stream"
+
+
+def _event_id_prefix(event_type: str) -> str:
+    if event_type == "message.delta":
+        return "delta"
+    if event_type == "run.progress":
+        return "progress"
+    return "transient"
 
 
 def _utcnow_iso() -> str:

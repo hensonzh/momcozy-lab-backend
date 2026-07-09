@@ -7,11 +7,11 @@ description: Momcozy 吸奶器设备指导服务，基于官方资料处理设�
 
 当前已接入官方资料的型号：Air1 (BP334)。
 
-Air1 设备资料必须通过当前 `devices` namespace 中的 `devices.guidance_assets.read` 获取；不要尝试直接读取内部 `manual.md` 或 `faq.md`。
+Air1 设备资料必须通过当前 `device_support` namespace 中的 `devices.guidance_assets.read` 获取；不要尝试直接读取内部 `manual.md` 或 `faq.md`。
 
 ## 设备资料检索工具
 
-使用 `devices.guidance_assets.read` 检索 Air1 官方说明书、FAQ、步骤图片、Quick Start PDF 和操作视频资源；使用 `support.ticket.propose` 整理售后工单信息。
+使用 `device_support` namespace 中的 `devices.guidance_assets.read` 检索 Air1 官方说明书、FAQ、步骤图片、Quick Start PDF 和操作视频资源；使用 `support.ticket.propose` 整理售后工单信息。
 
 ## 资源链接展示
 

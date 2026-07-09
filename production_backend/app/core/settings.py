@@ -65,7 +65,7 @@ class Settings:
     agent_runtime_worker_enabled: bool = False
     agent_runtime_worker_batch_limit: int = 10
     agent_runtime_worker_concurrency: int = 1
-    agent_runtime_worker_idle_seconds: int = 2
+    agent_runtime_worker_idle_seconds: float = 0.1
     agent_runtime_recover_running_older_than_seconds: int = 900
     agent_runtime_max_inline_payload_bytes: int = DEFAULT_AGENT_RUNTIME_MAX_INLINE_PAYLOAD_BYTES
     outbox_worker_enabled: bool = False
@@ -140,7 +140,7 @@ class Settings:
             agent_runtime_worker_enabled=_env_bool("AGENT_RUNTIME_WORKER_ENABLED", cls.agent_runtime_worker_enabled),
             agent_runtime_worker_batch_limit=_env_int("AGENT_RUNTIME_WORKER_BATCH_LIMIT", cls.agent_runtime_worker_batch_limit),
             agent_runtime_worker_concurrency=_env_int("AGENT_RUNTIME_WORKER_CONCURRENCY", cls.agent_runtime_worker_concurrency),
-            agent_runtime_worker_idle_seconds=_env_int("AGENT_RUNTIME_WORKER_IDLE_SECONDS", cls.agent_runtime_worker_idle_seconds),
+            agent_runtime_worker_idle_seconds=_env_float("AGENT_RUNTIME_WORKER_IDLE_SECONDS", cls.agent_runtime_worker_idle_seconds),
             agent_runtime_recover_running_older_than_seconds=_env_int(
                 "AGENT_RUNTIME_RECOVER_RUNNING_OLDER_THAN_SECONDS",
                 cls.agent_runtime_recover_running_older_than_seconds,
@@ -374,6 +374,16 @@ def _env_int_first(names: tuple[str, ...], default: int) -> int:
             except ValueError:
                 raise ValueError(f"{name} must be an integer") from None
     return default
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return float(raw.strip())
+    except ValueError:
+        raise ValueError(f"{name} must be a number") from None
 
 
 def _env_float_first(names: tuple[str, ...], default: float) -> float:

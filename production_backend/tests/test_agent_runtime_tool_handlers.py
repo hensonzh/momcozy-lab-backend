@@ -38,11 +38,13 @@ from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.
     PlansCalendarReadToolHandler,
     PlansCurrentReadToolHandler,
     ProfileReadToolHandler,
+    ProfileUpdateToolHandler,
     PumpingRecordProposeToolHandler,
     PregnancyPlanContextReadToolHandler,
     PregnancyPlanProposeToolHandler,
     SupportTicketProposeToolHandler,
     ToolHandlerContext,
+    UiQuickRepliesCreateToolHandler,
     build_default_tool_handlers,
 )
 from production_backend.app.modules.auth import CurrentUser
@@ -111,6 +113,91 @@ def test_profile_read_tool_handler_returns_safe_context_projection() -> None:
             "status": "active",
         }
     ]
+
+
+def test_profile_update_tool_handler_updates_explicit_profile_fields() -> None:
+    actor = _user()
+    profile_service = FakeProfileService(profile=None, infants=[])
+    handler = ProfileUpdateToolHandler(service=profile_service)
+
+    result = asyncio.run(
+        handler(
+            _context(
+                actor=actor,
+                args={"display_name": " Mai ", "age": 31, "onboarding_skipped": True},
+            )
+        )
+    )
+
+    assert result["status"] == "profile_updated"
+    assert result["updated_fields"] == ["age", "display_name", "profile_onboarding_skipped_at"]
+    assert result["profile"]["display_name"] == "Mai"
+    assert result["profile"]["age"] == 31
+    assert result["profile"]["profile_onboarding_skipped"] is True
+    assert profile_service.update_profile_kwargs["user_id"] == actor.user_id
+    assert profile_service.update_profile_kwargs["request_id"] == "call-1"
+    assert profile_service.update_profile_kwargs["values"]["display_name"] == "Mai"
+    assert profile_service.update_profile_kwargs["values"]["age"] == 31
+    assert profile_service.update_profile_kwargs["values"]["profile_onboarding_skipped_at"] is not None
+
+
+def test_profile_update_tool_handler_requires_at_least_one_field() -> None:
+    handler = ProfileUpdateToolHandler(service=FakeProfileService(profile=None, infants=[]))
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(handler(_context(args={})))
+
+    assert exc_info.value.code == "validation_failed"
+
+
+def test_ui_quick_replies_create_tool_handler_normalizes_three_replies() -> None:
+    handler = UiQuickRepliesCreateToolHandler()
+
+    result = asyncio.run(
+        handler(
+            _context(
+                args={
+                    "replies": [
+                        {"text": "  我想看看今天安排  "},
+                        {"text": "先不保存"},
+                        {"text": "换成简单版"},
+                    ]
+                }
+            )
+        )
+    )
+
+    assert result == {
+        "status": "quick_replies_ready",
+        "quick_replies": [
+            {"text": "我想看看今天安排"},
+            {"text": "先不保存"},
+            {"text": "换成简单版"},
+        ],
+        "side_effect_performed": False,
+    }
+    assert "_deferred_agent_events" not in result
+
+
+def test_ui_quick_replies_create_tool_handler_rejects_duplicates() -> None:
+    handler = UiQuickRepliesCreateToolHandler()
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            handler(
+                _context(
+                    args={
+                        "replies": [
+                            {"text": "好的"},
+                            {"text": "好的"},
+                            {"text": "先不用"},
+                        ]
+                    }
+                )
+            )
+        )
+
+    assert exc_info.value.code == "validation_failed"
 
 
 def test_support_ticket_propose_tool_handler_creates_confirmation_action() -> None:
@@ -1156,6 +1243,8 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
         "hospital_bag_cart_update",
         "hospital_bag_pump_recommend",
         "profile.read",
+        "profile_update",
+        "ui_quick_replies_create",
         "business.context.read",
         "ibclc_consult_card_create",
         "records.growth.read",
@@ -1212,7 +1301,9 @@ def _user() -> CurrentUser:
         permissions=frozenset(
             {
                 "profile:read:self",
+                "profile:write:self",
                 "business_context:read:self",
+                "ui_quick_replies:create:self",
                 "files:read:self",
                 "diary:write:self",
                 "memory:write:self",
@@ -1232,6 +1323,7 @@ class FakeProfileService:
         self.infants = infants
         self.profile_user_id = None
         self.infant_owner_user_id = None
+        self.update_profile_kwargs = {}
 
     async def get_user_profile(self, *, user_id):
         self.profile_user_id = user_id
@@ -1240,6 +1332,21 @@ class FakeProfileService:
     async def list_infants(self, *, owner_user_id):
         self.infant_owner_user_id = owner_user_id
         return self.infants
+
+    async def update_user_profile(self, **kwargs):
+        self.update_profile_kwargs = kwargs
+        values = kwargs["values"]
+        self.profile = UserProfile(
+            user_id=kwargs["user_id"],
+            display_name=values.get("display_name", ""),
+            age=values.get("age"),
+            delivery_date=values.get("delivery_date"),
+            lactation_advice=values.get("lactation_advice", ""),
+            feeding_advice=values.get("feeding_advice", ""),
+            profile_onboarding_skipped_at=values.get("profile_onboarding_skipped_at"),
+            profile_onboarding_completed_at=values.get("profile_onboarding_completed_at"),
+        )
+        return self.profile
 
 
 class FakeRecordsService:

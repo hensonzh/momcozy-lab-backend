@@ -113,6 +113,7 @@ class OpenAIResponsesApiBackend:
         client = async_openai_cls(**client_kwargs)
         responses = getattr(client, "responses", None)
         create_response = getattr(responses, "create", None)
+        stream_response = getattr(responses, "stream", None)
         if create_response is None:
             raise ApiError(code="dependency_not_configured", message="OpenAI Responses API client is unavailable.", status=503)
 
@@ -123,20 +124,33 @@ class OpenAIResponsesApiBackend:
         latest_response: Any | None = None
 
         for _turn_index in range(self.max_turns):
-            latest_response = await create_response(
-                model=self.model,
-                instructions=request.instructions,
-                input=list(context),
-                tools=tools_payload,
-                parallel_tool_calls=False,
-            )
+            streamed_text = ""
+            emitted_stream = False
+            if request.on_text_delta is not None and callable(stream_response):
+                latest_response, streamed_text, emitted_stream = await _create_response_streamed(
+                    create_response=create_response,
+                    stream_response=stream_response,
+                    model=self.model,
+                    instructions=request.instructions,
+                    context=context,
+                    tools_payload=tools_payload,
+                    on_text_delta=request.on_text_delta,
+                )
+            else:
+                latest_response = await create_response(
+                    model=self.model,
+                    instructions=request.instructions,
+                    input=list(context),
+                    tools=tools_payload,
+                    parallel_tool_calls=False,
+                )
             output_items = _response_output_items(latest_response)
             function_calls = [_response_function_call(item) for item in output_items]
             function_calls = [call for call in function_calls if call is not None]
             if not function_calls:
-                final_text = _response_output_text(latest_response, output_items=output_items)
+                final_text = _response_output_text(latest_response, output_items=output_items) or streamed_text
                 sanitized_text = _sanitize_model_text(final_text)
-                if request.on_text_delta is not None and sanitized_text:
+                if request.on_text_delta is not None and sanitized_text and not emitted_stream:
                     await request.on_text_delta(sanitized_text)
                 return SdkNodeResult(final_text=sanitized_text, tool_calls=observed_tool_calls)
 
@@ -270,6 +284,7 @@ class OpenAIAgentsSdkRunner:
         base_url: str = "",
         use_responses: bool | None = None,
         buffer_streamed_tool_calls: bool = False,
+        metrics_node_name: str = "openai_agents_sdk",
     ) -> None:
         self.backend = backend
         self.metrics = metrics
@@ -282,6 +297,7 @@ class OpenAIAgentsSdkRunner:
         self.base_url = base_url
         self.use_responses = use_responses
         self.buffer_streamed_tool_calls = buffer_streamed_tool_calls
+        self.metrics_node_name = metrics_node_name
 
     async def run_reasoning(self, request: SdkNodeRequest) -> SdkNodeResult:
         started_at = perf_counter()
@@ -309,7 +325,7 @@ class OpenAIAgentsSdkRunner:
     def _record(self, *, outcome: str, error_code: str, started_at: float) -> None:
         if self.metrics is not None:
             self.metrics.record_agent_sdk(
-                node_name="openai_agents_sdk",
+                node_name=self.metrics_node_name,
                 outcome=outcome,
                 error_code=error_code,
                 duration_ms=(perf_counter() - started_at) * 1000,
@@ -348,6 +364,10 @@ def responses_tools_payload(request: SdkNodeRequest) -> list[dict[str, Any]]:
         return payload
 
     payload: list[dict[str, Any]] = []
+    namespaced_contracts = {contract_name for namespace in request.tool_namespaces for contract_name in namespace.tool_names}
+    for tool in request.tools:
+        if tool.contract_name not in namespaced_contracts:
+            payload.append(_responses_function_tool_payload(tool))
     for namespace in request.tool_namespaces:
         missing_tool_names = [contract_name for contract_name in namespace.tool_names if contract_name not in tools_by_contract]
         if missing_tool_names:
@@ -399,6 +419,110 @@ def _responses_input_items(model_input: list[dict[str, Any]]) -> list[dict[str, 
             item_content = str(content)
         items.append({"role": role, "content": item_content})
     return items
+
+
+async def _create_response_streamed(
+    *,
+    create_response: Callable[..., Awaitable[Any]],
+    stream_response: Callable[..., Any],
+    model: str,
+    instructions: str,
+    context: list[Any],
+    tools_payload: list[dict[str, Any]],
+    on_text_delta: SdkTextDeltaHandler,
+) -> tuple[Any | None, str, bool]:
+    kwargs = {
+        "model": model,
+        "instructions": instructions,
+        "input": list(context),
+        "tools": tools_payload,
+        "parallel_tool_calls": False,
+    }
+    response, streamed_text = await _consume_response_stream(await _maybe_await(stream_response(**kwargs)), on_text_delta)
+    if response is None and not streamed_text:
+        response = await create_response(**kwargs)
+    return response, streamed_text, bool(streamed_text)
+
+
+async def _consume_response_stream(stream: Any, on_text_delta: SdkTextDeltaHandler) -> tuple[Any | None, str]:
+    response: Any | None = None
+    raw_text = ""
+    if hasattr(stream, "__aenter__"):
+        async with stream as entered_stream:
+            response, raw_text = await _iterate_response_stream(entered_stream, on_text_delta)
+            if response is None:
+                response = await _stream_final_response(entered_stream)
+        if response is None:
+            response = await _stream_final_response(stream)
+        return response, raw_text
+    response, raw_text = await _iterate_response_stream(stream, on_text_delta)
+    if response is None:
+        response = await _stream_final_response(stream)
+    return response, raw_text
+
+
+async def _iterate_response_stream(stream: Any, on_text_delta: SdkTextDeltaHandler) -> tuple[Any | None, str]:
+    response: Any | None = None
+    raw_text = ""
+    emitted_text = ""
+    stream_events = stream
+    if not hasattr(stream_events, "__aiter__"):
+        stream_events_factory = getattr(stream_events, "stream_events", None)
+        if callable(stream_events_factory):
+            stream_events = stream_events_factory()
+    async for event in stream_events:
+        delta = _text_delta_from_response_stream_event(event)
+        if delta:
+            raw_text += delta
+            sanitized_text = _sanitize_model_text(raw_text)
+            if sanitized_text.startswith(emitted_text):
+                sanitized_delta = sanitized_text[len(emitted_text) :]
+            else:
+                sanitized_delta = sanitized_text
+            if sanitized_delta:
+                await on_text_delta(sanitized_delta)
+                emitted_text = sanitized_text
+        event_response = _response_from_response_stream_event(event)
+        if event_response is not None:
+            response = event_response
+    return response, raw_text
+
+
+def _text_delta_from_response_stream_event(event: Any) -> str:
+    event_type = str(_item_value(event, "type", "") or "")
+    if event_type and "delta" not in event_type:
+        return ""
+    for attr in ("delta", "text", "content"):
+        value = _item_value(event, attr, None)
+        if isinstance(value, str) and value:
+            return value
+    return ""
+
+
+def _response_from_response_stream_event(event: Any) -> Any | None:
+    event_type = str(_item_value(event, "type", "") or "")
+    if event_type != "response.completed":
+        return None
+    response = _item_value(event, "response", None)
+    return response if response is not None else None
+
+
+async def _stream_final_response(stream: Any) -> Any | None:
+    for method_name in ("get_final_response", "get_final_output"):
+        method = getattr(stream, method_name, None)
+        if callable(method):
+            return await _maybe_await(method())
+    for attr in ("final_response", "response"):
+        value = getattr(stream, attr, None)
+        if value is not None:
+            return value
+    return None
+
+
+async def _maybe_await(value: Any) -> Any:
+    if hasattr(value, "__await__"):
+        return await value
+    return value
 
 
 def _response_output_items(response: Any) -> list[Any]:

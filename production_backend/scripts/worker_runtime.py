@@ -12,7 +12,7 @@ def install_stop_signal_handlers(stop_event: asyncio.Event) -> None:
             loop.add_signal_handler(signum, stop_event.set)
 
 
-async def sleep_until_stop(*, seconds: int, stop_event: asyncio.Event | None) -> None:
+async def sleep_until_stop(*, seconds: float, stop_event: asyncio.Event | None) -> None:
     if seconds <= 0:
         return
     if stop_event is None:

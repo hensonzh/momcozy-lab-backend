@@ -1,7 +1,8 @@
 from .planner import plan_current_request
-from .schemas import IntentItem, RoutingPlan, RoutingSource, ServiceSkillId
+from .schemas import AgentId, IntentItem, RoutingPlan, RoutingSource, ServiceSkillId
 
 __all__ = [
+    "AgentId",
     "IntentItem",
     "RoutingPlan",
     "RoutingSource",

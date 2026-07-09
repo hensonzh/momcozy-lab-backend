@@ -28,7 +28,6 @@ from production_backend.app.modules.agent_runtime.repository import AgentRuntime
 from production_backend.app.modules.agent_runtime.run_lifecycle.controls import AgentRunControls
 from production_backend.app.modules.agent_runtime.run_lifecycle.executor import AgentRuntimeExecutor
 from production_backend.app.modules.agent_runtime.run_lifecycle.state_store import AgentRuntimeStateStore
-from production_backend.app.modules.agent_runtime.safety.service import AgentSafetyService
 from production_backend.app.modules.agent_runtime.sdk import create_agent_sdk_runner
 from production_backend.app.modules.agent_runtime.service import AgentRuntimeService
 from production_backend.app.modules.assets.service import ProductAssetService
@@ -173,7 +172,6 @@ async def _process_agent_run(
             idempotency_service=IdempotencyService(repository=audit_repository),
             outbox_service=OutboxService(repository=OutboxRepository(session)),
             controls=controls,
-            safety_service=AgentSafetyService(repository=repository, metrics=metrics),
         )
         profile_service = ProfileService(
             repository=ProfileRepository(session),
@@ -207,6 +205,7 @@ async def _process_agent_run(
         tool_registry = default_tool_registry()
         memory_service = AgentMemoryService(repository=AgentMemoryRepository(session))
         event_sink = AgentEventSink(repository=repository, controls=controls, after_append=session.commit)
+        transient_stream = AgentTransientStream(redis_client)
         tool_handlers = build_default_tool_handlers(
             profile_service=profile_service,
             records_service=records_service,
@@ -225,6 +224,7 @@ async def _process_agent_run(
             object_storage=object_storage,
             max_inline_output_bytes=settings.agent_runtime_max_inline_payload_bytes,
             handlers=tool_handlers,
+            transient_stream=transient_stream,
         )
         checkpoint_store = AgentGraphCheckpointStore(repository=repository)
         sdk_runner = create_agent_sdk_runner(settings=settings, metrics=metrics)
@@ -237,7 +237,7 @@ async def _process_agent_run(
             event_sink=event_sink,
             memory_service=memory_service,
             business_facts_projector=BusinessFactsProjector(handlers=tool_handlers),
-            transient_stream=AgentTransientStream(redis_client),
+            transient_stream=transient_stream,
             sdk_runner=sdk_runner,
             object_storage=object_storage,
             max_inline_artifact_payload_bytes=settings.agent_runtime_max_inline_payload_bytes,

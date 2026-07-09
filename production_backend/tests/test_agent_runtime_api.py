@@ -1,4 +1,5 @@
 import asyncio
+import json
 from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
@@ -69,7 +70,7 @@ def test_agent_thread_run_events_and_cancel_use_current_user_scope() -> None:
     assert events.status_code == 200
     assert events.json()["items"][0]["type"] == "run.queued"
     assert stream.status_code == 200
-    assert "event: run.queued" in stream.text
+    assert _sse_payloads(stream.text)[0]["type"] == "RUN_STARTED"
     assert cancel.status_code == 200
     assert fake_service.list_threads_kwargs["owner_user_id"] == user_id
     assert fake_service.get_run_kwargs["owner_user_id"] == user_id
@@ -123,8 +124,9 @@ def test_agent_stream_can_follow_until_terminal_event() -> None:
     )
 
     assert response.status_code == 200
-    assert "event: run.progress" in response.text
-    assert "event: run.completed" in response.text
+    payloads = _sse_payloads(response.text)
+    assert [payload["type"] for payload in payloads] == ["CUSTOM", "RUN_FINISHED"]
+    assert payloads[0]["name"] == "momcozy.agent.status"
     assert fake_service.list_events_call_count == 2
 
 
@@ -277,6 +279,14 @@ def _override_current_user(app, user_id: UUID) -> None:
         )
 
     app.dependency_overrides[require_current_user] = fake_current_user
+
+
+def _sse_payloads(chunk: str) -> list[dict]:
+    payloads = []
+    for line in chunk.splitlines():
+        if line.startswith("data: "):
+            payloads.append(json.loads(line.removeprefix("data: ")))
+    return payloads
 
 
 class FakeAgentRuntimeService:

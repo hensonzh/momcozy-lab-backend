@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -12,6 +13,7 @@ from production_backend.app.core.errors import ApiError
 from production_backend.app.core.metrics import RequestMetrics
 from production_backend.app.infrastructure.object_storage.base import ObjectStorage
 from production_backend.app.modules.agent_runtime.event_stream.sink import AgentEventSink
+from production_backend.app.modules.agent_runtime.event_stream.transient import AgentTransientStream
 from production_backend.app.modules.agent_runtime.models import AgentToolCall
 from production_backend.app.modules.agent_runtime.payloads import DEFAULT_MAX_INLINE_PAYLOAD_BYTES, maybe_externalize_json_payload
 from production_backend.app.modules.agent_runtime.repository import AgentRuntimeRepository
@@ -34,6 +36,7 @@ class ToolHandlerContext:
 
 ToolHandler = Callable[[ToolHandlerContext], Awaitable[dict[str, Any]] | dict[str, Any]]
 DEFERRED_AGENT_EVENTS_KEY = "_deferred_agent_events"
+LOGGER = logging.getLogger("production_backend.agent_runtime.tools")
 
 
 @dataclass(frozen=True)
@@ -54,6 +57,7 @@ class ToolExecutor:
         metrics: RequestMetrics | None = None,
         object_storage: ObjectStorage | None = None,
         max_inline_output_bytes: int = DEFAULT_MAX_INLINE_PAYLOAD_BYTES,
+        transient_stream: AgentTransientStream | None = None,
     ) -> None:
         self.registry = registry
         self.repository = repository
@@ -63,6 +67,7 @@ class ToolExecutor:
         self.metrics = metrics
         self.object_storage = object_storage
         self.max_inline_output_bytes = max_inline_output_bytes
+        self.transient_stream = transient_stream
 
     async def execute(
         self,
@@ -93,16 +98,24 @@ class ToolExecutor:
                 safe_args=_safe_payload(args),
                 started_at=_utcnow(),
             )
+            started_payload = {
+                "tool_call_id": str(tool_call.id),
+                "tool_name": tool_name,
+                "call_id": call_id,
+                "label": _tool_event_label(tool_name),
+                "safe_args": _safe_payload(args),
+            }
+            await self._publish_optimistic_tool_event(
+                thread_id=run.thread_id,
+                run_id=run.id,
+                event_type="tool.started",
+                payload=started_payload,
+            )
             await self._append_tool_event(
                 thread_id=run.thread_id,
                 run_id=run.id,
                 event_type="tool.started",
-                payload={
-                    "tool_call_id": str(tool_call.id),
-                    "tool_name": tool_name,
-                    "call_id": call_id,
-                    "label": _tool_event_label(tool_name),
-                },
+                payload=started_payload,
             )
             result = await asyncio.wait_for(
                 _maybe_await(
@@ -159,7 +172,14 @@ class ToolExecutor:
             "tool_name": completed.tool_name,
             "call_id": completed.call_id,
             "label": _tool_event_label(completed.tool_name),
+            "safe_output": externalized_output.inline_payload,
         }
+        await self._publish_optimistic_tool_event(
+            thread_id=run.thread_id,
+            run_id=run.id,
+            event_type="tool.completed",
+            payload=completed_payload,
+        )
         await self._append_tool_event(
             thread_id=run.thread_id,
             run_id=run.id,
@@ -196,17 +216,24 @@ class ToolExecutor:
         run = await self.repository.get_run(run_id=tool_call.run_id)
         if run is None:
             return
+        payload = {
+            "tool_call_id": str(tool_call.id),
+            "tool_name": tool_call.tool_name,
+            "call_id": tool_call.call_id,
+            "error_code": error_code,
+            "label": _tool_event_label(tool_call.tool_name),
+        }
+        await self._publish_optimistic_tool_event(
+            thread_id=run.thread_id,
+            run_id=run.id,
+            event_type="tool.failed",
+            payload=payload,
+        )
         await self._append_tool_event(
             thread_id=run.thread_id,
             run_id=run.id,
             event_type="tool.failed",
-            payload={
-                "tool_call_id": str(tool_call.id),
-                "tool_name": tool_call.tool_name,
-                "call_id": tool_call.call_id,
-                "error_code": error_code,
-                "label": _tool_event_label(tool_call.tool_name),
-            },
+            payload=payload,
         )
 
     async def _append_tool_event(self, *, thread_id: UUID, run_id: UUID, event_type: str, payload: dict[str, Any]) -> None:
@@ -214,6 +241,32 @@ class ToolExecutor:
             await self.event_sink.append_event(thread_id=thread_id, run_id=run_id, event_type=event_type, payload=payload)
             return
         await self.repository.append_event(thread_id=thread_id, run_id=run_id, event_type=event_type, payload=payload)
+
+    async def _publish_optimistic_tool_event(
+        self,
+        *,
+        thread_id: UUID,
+        run_id: UUID,
+        event_type: str,
+        payload: dict[str, Any],
+    ) -> None:
+        if self.transient_stream is None:
+            return
+        dedupe_key = _tool_live_dedupe_key(run_id=run_id, event_type=event_type, payload=payload)
+        if not dedupe_key:
+            return
+        try:
+            await self.transient_stream.publish_application_event(
+                thread_id=thread_id,
+                run_id=run_id,
+                event_type=event_type,
+                payload=payload,
+                dedupe_key=dedupe_key,
+                optimistic=True,
+                durable=False,
+            )
+        except Exception:
+            LOGGER.warning("Failed to publish optimistic agent tool event.", exc_info=True)
 
 
 async def _maybe_await(value: Awaitable[dict[str, Any]] | dict[str, Any]) -> dict[str, Any]:
@@ -252,6 +305,13 @@ def _redacted_value(key: str, value: Any) -> Any:
     return _safe_payload(value)
 
 
+def _tool_live_dedupe_key(*, run_id: UUID, event_type: str, payload: dict[str, Any]) -> str:
+    if event_type not in {"tool.started", "tool.completed", "tool.failed"}:
+        return ""
+    tool_call_id = str(payload.get("tool_call_id") or payload.get("call_id") or "").strip()
+    return f"{run_id}:{event_type}:{tool_call_id}" if tool_call_id else ""
+
+
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -259,6 +319,8 @@ def _utcnow() -> datetime:
 def _tool_event_label(tool_name: str) -> str:
     return {
         "profile.read": "个人资料",
+        "profile_update": "更新个人资料",
+        "ui_quick_replies_create": "我在帮你准备下一轮的快捷输入～",
         "business.context.read": "业务上下文",
         "records.milk_summary.read": "奶量摘要",
         "records.milk_status.read": "奶量状态",

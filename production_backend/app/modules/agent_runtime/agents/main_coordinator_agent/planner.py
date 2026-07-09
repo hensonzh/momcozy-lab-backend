@@ -1,20 +1,22 @@
 from __future__ import annotations
 
-from .schemas import IntentItem, RoutingPlan, RoutingSource, ServiceSkillId
+from .schemas import AgentId, IntentItem, RoutingPlan, RoutingSource
 
 
-def plan_current_request() -> RoutingPlan:
-    """First-stage coordinator plan: pass every request through to CozyMate."""
+def plan_current_request(*, user_message_text: str = "") -> RoutingPlan:
+    """Runtime no longer routes service skills before the model turn."""
     return RoutingPlan(
-        selected_skill_id=ServiceSkillId.COZYMATE_SERVICE_AGENT,
+        target_kind="agent",
+        selected_agent_id=AgentId.COZYMATE_SERVICE_AGENT,
+        selected_service_skill_id=None,
         intents=[
             IntentItem(
-                intent_type="cozymate_service_request",
-                service_skill_id=ServiceSkillId.COZYMATE_SERVICE_AGENT,
+                intent_type=f"{AgentId.COZYMATE_SERVICE_AGENT.value}_request",
+                service_skill_id=None,
             )
         ],
         execution_mode="passthrough",
         confidence=1,
         source=RoutingSource.PASSTHROUGH,
-        reason_codes=["delegate_to_cozymate"],
+        reason_codes=["default_to_cozymate"],
     )

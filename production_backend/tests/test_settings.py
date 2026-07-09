@@ -101,7 +101,7 @@ def test_settings_from_env_reads_agent_worker_controls(monkeypatch: pytest.Monke
     monkeypatch.setenv("AGENT_RUNTIME_WORKER_ENABLED", "true")
     monkeypatch.setenv("AGENT_RUNTIME_WORKER_BATCH_LIMIT", "25")
     monkeypatch.setenv("AGENT_RUNTIME_WORKER_CONCURRENCY", "4")
-    monkeypatch.setenv("AGENT_RUNTIME_WORKER_IDLE_SECONDS", "5")
+    monkeypatch.setenv("AGENT_RUNTIME_WORKER_IDLE_SECONDS", "0.25")
     monkeypatch.setenv("AGENT_RUNTIME_RECOVER_RUNNING_OLDER_THAN_SECONDS", "120")
     monkeypatch.setenv("AGENT_MODEL_PROVIDER", "openai")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
@@ -116,7 +116,7 @@ def test_settings_from_env_reads_agent_worker_controls(monkeypatch: pytest.Monke
     assert settings.agent_runtime_worker_enabled is True
     assert settings.agent_runtime_worker_batch_limit == 25
     assert settings.agent_runtime_worker_concurrency == 4
-    assert settings.agent_runtime_worker_idle_seconds == 5
+    assert settings.agent_runtime_worker_idle_seconds == 0.25
     assert settings.agent_runtime_recover_running_older_than_seconds == 120
     assert settings.agent_model_provider == "openai"
     assert settings.openai_api_key == "sk-test"

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal, NotRequired, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 
 
 class AgentGraphState(TypedDict):
@@ -15,4 +15,6 @@ class AgentGraphState(TypedDict):
     visited_nodes: NotRequired[list[str]]
     outcome_status: NotRequired[Literal["completed", "waiting_for_confirmation"]]
     final_text: NotRequired[str]
+    assistant_message_id: NotRequired[str | None]
+    quick_replies: NotRequired[list[dict[str, Any]]]
     cancellation_requested: NotRequired[bool]

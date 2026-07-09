@@ -143,22 +143,29 @@ class AgentRunWorker:
 
         if result.status == "completed":
             if result.final_text:
+                content: dict[str, Any] = {"text": result.final_text}
+                if result.quick_replies:
+                    content["quick_replies"] = result.quick_replies
                 message = await self.repository.create_message(
+                    message_id=result.assistant_message_id,
                     thread_id=run.thread_id,
                     run_id=run.id,
                     role="assistant",
                     message_type="text",
-                    content={"text": result.final_text},
+                    content=content,
                     status="completed",
                 )
+                payload: dict[str, Any] = {
+                    "message_id": str(message.id),
+                    "role": "assistant",
+                    "text": result.final_text,
+                }
+                if result.quick_replies:
+                    payload["quick_replies"] = result.quick_replies
                 await self._append_event(
                     run=run,
                     event_type="message.completed",
-                    payload={
-                        "message_id": str(message.id),
-                        "role": "assistant",
-                        "text": result.final_text,
-                    },
+                    payload=payload,
                 )
             completed = await self.repository.mark_run_completed(run=run, completed_at=_utcnow())
             await self._append_event(run=completed, event_type="run.completed", payload={})
@@ -184,7 +191,7 @@ class AgentRunWorker:
         await self._clear_controls(failed)
         return failed
 
-    async def _append_event(self, *, run: AgentRun, event_type: str, payload: dict[str, str]) -> AgentEvent:
+    async def _append_event(self, *, run: AgentRun, event_type: str, payload: dict[str, Any]) -> AgentEvent:
         event = await self.repository.append_event(thread_id=run.thread_id, run_id=run.id, event_type=event_type, payload=payload)
         if self.controls is not None:
             await self.controls.set_stream_cursor(run_id=run.id, sequence=event.sequence)

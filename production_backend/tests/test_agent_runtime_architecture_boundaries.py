@@ -9,7 +9,12 @@ import pytest
 from production_backend.app.core.errors import ApiError
 from production_backend.app.core.metrics import RequestMetrics
 from production_backend.app.modules.agent_runtime.graphs import default_graph_registry
-from production_backend.app.modules.agent_runtime.agents.main_coordinator_agent import ServiceSkillId, plan_current_request
+from production_backend.app.modules.agent_runtime.agents.main_coordinator_agent import (
+    AgentId,
+    RoutingSource,
+    ServiceSkillId,
+    plan_current_request,
+)
 from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.prompts import (
     BASE_AGENT_INSTRUCTIONS,
     ContextProjection,
@@ -47,16 +52,36 @@ def test_default_graph_registry_uses_langgraph_sdk_pattern() -> None:
     graph = default_graph_registry().get("momcozy-agent-v1")
 
     assert graph.runtime_pattern == "langgraph_sdk"
-    assert graph.node_names == ("load_context", "safety_gate", "sdk_reasoning", "finish")
+    assert graph.node_names == ("sdk_reasoning", "finish")
     assert "sdk_reasoning" in graph.node_names
 
 
 def test_main_coordinator_agent_owns_first_stage_plan() -> None:
-    plan = plan_current_request()
+    plan = plan_current_request(user_message_text="Summarize what we discussed.")
 
-    assert plan.selected_skill_id == ServiceSkillId.COZYMATE_SERVICE_AGENT
+    assert plan.target_kind == "agent"
+    assert plan.selected_agent_id == AgentId.COZYMATE_SERVICE_AGENT
+    assert plan.selected_service_skill_id is None
     assert plan.execution_mode == "passthrough"
-    assert plan.reason_codes == ["delegate_to_cozymate"]
+    assert plan.source == RoutingSource.PASSTHROUGH
+    assert plan.reason_codes == ["default_to_cozymate"]
+
+
+def test_main_coordinator_agent_keeps_service_skill_selection_model_driven() -> None:
+    service_texts = [
+        "今天奶量怎么样？",
+        "帮我准备待产包和分娩沟通单",
+        "My Air1 pump suction feels weak today.",
+    ]
+
+    for text in service_texts:
+        plan = plan_current_request(user_message_text=text)
+
+        assert plan.target_kind == "agent"
+        assert plan.selected_agent_id == AgentId.COZYMATE_SERVICE_AGENT
+        assert plan.selected_service_skill_id is None
+        assert plan.source == RoutingSource.PASSTHROUGH
+        assert plan.reason_codes == ["default_to_cozymate"]
 
 
 def test_service_skill_registry_is_the_model_facing_entrypoint() -> None:
@@ -70,6 +95,7 @@ def test_service_skill_registry_is_the_model_facing_entrypoint() -> None:
         "health-consultation",
         "milk-management",
     }
+    assert {skill_id.value for skill_id in ServiceSkillId} == skill_ids
     pregnancy_skill = skill_registry.get("birth-prep")
     assert pregnancy_skill.service_skill_id == "birth-prep"
     assert "制定孕期计划" in pregnancy_skill.prompt_block()
@@ -115,8 +141,6 @@ def test_service_skills_do_not_redeclare_global_prompt_ownership() -> None:
 
 def test_service_skills_do_not_reference_legacy_tool_namespaces() -> None:
     legacy_tool_fragments = (
-        "milk_management",
-        "device_support",
         "load_skill",
         "read_skill_file",
         "birth_journey_intake_manage",
@@ -145,8 +169,10 @@ def test_service_skills_do_not_reference_legacy_tool_namespaces() -> None:
 
 
 def test_service_skill_tool_references_are_registered_contracts() -> None:
-    registry_names = set(default_tool_registry().names_for_sdk())
-    allowed_external_helpers = {"ui_quick_replies_create"}
+    registry = default_tool_registry()
+    registry_names = set(registry.names_for_sdk())
+    namespace_names = {namespace.name for namespace in default_tool_namespace_registry(registry).list()}
+    allowed_external_helpers: set[str] = set()
     tool_like_suffixes = (
         ".read",
         ".propose",
@@ -161,7 +187,7 @@ def test_service_skill_tool_references_are_registered_contracts() -> None:
     violations: list[str] = []
     for skill in default_service_skill_registry().list():
         for reference in _code_span_references(skill.prompt_block()):
-            if reference in allowed_external_helpers:
+            if reference in allowed_external_helpers or reference in namespace_names:
                 continue
             if any(reference.endswith(suffix) or suffix in reference for suffix in tool_like_suffixes):
                 if reference not in registry_names:
@@ -412,13 +438,27 @@ def test_tool_contract_registry_declares_permission_confirmation_and_blocking_po
     assert ibclc_artifact.required_permission == "agent_artifact:create:self"
     assert labor_communication_artifact.required_permission == "agent_artifact:create:self"
     assert "profile.read" in registry.names_for_sdk()
+    assert "profile_update" in registry.names_for_sdk()
+    assert "ui_quick_replies_create" in registry.names_for_sdk()
     assert "business.context.read" in registry.names_for_sdk()
+    profile_update = registry.get("profile_update")
+    quick_replies = registry.get("ui_quick_replies_create")
     plans_current = registry.get("plans.current.read")
     diary_recent = registry.get("diary.recent.read")
     pregnancy_context = registry.get("pregnancy.plan_context.read")
     device_status = registry.get("devices.pump_status.read")
     device_guidance_assets = registry.get("devices.guidance_assets.read")
     file_vision = registry.get("files.vision_summary.read")
+    assert profile_update.read_or_write == "write"
+    assert profile_update.owner_scope == "actor"
+    assert profile_update.required_permission == "profile:write:self"
+    assert profile_update.requires_confirmation is False
+    assert profile_update.audit_required is True
+    assert quick_replies.read_or_write == "write"
+    assert quick_replies.owner_scope == "actor"
+    assert quick_replies.required_permission == "ui_quick_replies:create:self"
+    assert quick_replies.side_effect_level == "none"
+    assert quick_replies.requires_confirmation is False
     assert plans_current.read_or_write == "read"
     assert plans_current.owner_scope == "actor"
     assert plans_current.requires_confirmation is False
@@ -477,33 +517,47 @@ def test_tool_contracts_are_exported_as_responses_namespaces() -> None:
     namespace_registry = default_tool_namespace_registry(registry)
     namespaces = {namespace.name: namespace for namespace in namespace_registry.list()}
     assigned_contracts = [tool_name for namespace in namespace_registry.list() for tool_name in namespace.tool_contracts]
+    root_contracts = sorted(set(registry.names_for_sdk()) - set(assigned_contracts))
 
-    assert sorted(assigned_contracts) == list(registry.names_for_sdk())
-    assert "milk_management" not in namespaces
-    assert "device_support" not in namespaces
-    assert "records.milk_status.read" in namespaces["records"].tool_contracts
-    assert "records.milk_summary.read" in namespaces["records"].tool_contracts
-    assert "records.milk_analysis.read" in namespaces["records"].tool_contracts
-    assert "records.growth.read" in namespaces["records"].tool_contracts
-    assert "records.feeding_record.propose" in namespaces["records"].deferred_tool_contracts
-    assert "records.pumping_record.propose" in namespaces["records"].deferred_tool_contracts
-    assert "records.growth_record.propose" in namespaces["records"].deferred_tool_contracts
-    assert "records.milk_status.read" not in namespaces["records"].deferred_tool_contracts
-    assert "records.milk_analysis.read" not in namespaces["records"].deferred_tool_contracts
-    assert "records.growth.read" not in namespaces["records"].deferred_tool_contracts
-    assert "plans.milk_plan.propose" in namespaces["plans"].deferred_tool_contracts
-    assert "plans.calendar.read" not in namespaces["plans"].deferred_tool_contracts
-    assert "plans.task_update.propose" in namespaces["plans"].deferred_tool_contracts
-    assert "devices.pump_status.read" in namespaces["devices"].tool_contracts
-    assert "devices.guidance_assets.read" in namespaces["devices"].tool_contracts
-    assert "support.ticket.propose" in namespaces["support"].deferred_tool_contracts
-    assert "ibclc_consult_card_create" in namespaces["support"].deferred_tool_contracts
-    assert namespace_registry.names_for_sdk() == registry.names_for_sdk()
+    assert len(assigned_contracts) == len(set(assigned_contracts))
+    assert root_contracts == [
+        "business.context.read",
+        "files.vision_summary.read",
+        "profile.read",
+        "profile_update",
+        "ui_quick_replies_create",
+    ]
+    assert "records" not in namespaces
+    assert "plans" not in namespaces
+    assert "devices" not in namespaces
+    assert "milk_management" in namespaces
+    assert "device_support" in namespaces
+    assert "records.milk_status.read" in namespaces["milk_management"].tool_contracts
+    assert "records.milk_summary.read" in namespaces["milk_management"].tool_contracts
+    assert "records.milk_analysis.read" in namespaces["milk_management"].tool_contracts
+    assert "records.growth.read" in namespaces["milk_management"].tool_contracts
+    assert "records.feeding_record.propose" in namespaces["milk_management"].deferred_tool_contracts
+    assert "records.pumping_record.propose" in namespaces["milk_management"].deferred_tool_contracts
+    assert "records.growth_record.propose" in namespaces["milk_management"].deferred_tool_contracts
+    assert "records.milk_status.read" not in namespaces["milk_management"].deferred_tool_contracts
+    assert "records.milk_analysis.read" not in namespaces["milk_management"].deferred_tool_contracts
+    assert "records.growth.read" not in namespaces["milk_management"].deferred_tool_contracts
+    assert "plans.milk_plan.propose" in namespaces["milk_management"].deferred_tool_contracts
+    assert "plans.calendar.read" not in namespaces["milk_management"].deferred_tool_contracts
+    assert "plans.task_update.propose" in namespaces["birth_prep"].deferred_tool_contracts
+    assert "hospital_bag_cart_update" in namespaces["hospital_bag_cart"].deferred_tool_contracts
+    assert "hospital_bag_pump_recommend" in namespaces["pump_recommendation"].deferred_tool_contracts
+    assert "devices.pump_status.read" in namespaces["device_support"].tool_contracts
+    assert "devices.guidance_assets.read" in namespaces["device_support"].tool_contracts
+    assert "support.ticket.propose" in namespaces["device_support"].deferred_tool_contracts
+    assert "ibclc_consult_card_create" in namespaces["health_consultation"].deferred_tool_contracts
 
 
 def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> None:
     registry = default_tool_registry()
     profile_schema = tool_input_schema(registry.get("profile.read").input_schema_ref)
+    profile_update_schema = tool_input_schema(registry.get("profile_update").input_schema_ref)
+    quick_replies_schema = tool_input_schema(registry.get("ui_quick_replies_create").input_schema_ref)
     business_schema = tool_input_schema(registry.get("business.context.read").input_schema_ref)
     support_schema = tool_input_schema(registry.get("support.ticket.propose").input_schema_ref)
     milk_schema = tool_input_schema(registry.get("records.milk_summary.read").input_schema_ref)
@@ -542,6 +596,15 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
         "additionalProperties": False,
         "properties": {},
     }
+    assert profile_update_schema["additionalProperties"] is False
+    assert profile_update_schema["properties"]["display_name"]["maxLength"] == 120
+    assert profile_update_schema["properties"]["age"]["minimum"] == 12
+    assert profile_update_schema["properties"]["age"]["maximum"] == 70
+    assert profile_update_schema["properties"]["onboarding_skipped"]["type"] == "boolean"
+    assert quick_replies_schema["required"] == ["replies"]
+    assert quick_replies_schema["properties"]["replies"]["minItems"] == 3
+    assert quick_replies_schema["properties"]["replies"]["maxItems"] == 3
+    assert quick_replies_schema["properties"]["replies"]["items"]["properties"]["text"]["maxLength"] == 32
     assert business_schema["additionalProperties"] is False
     assert business_schema["properties"]["limit"]["maximum"] == 20
     assert support_schema["required"] == ["issue_summary"]
@@ -731,7 +794,7 @@ def test_context_builder_projects_dynamic_context_after_selected_history() -> No
         projection=ContextProjection(
             stable_system_prompt="system-v1",
             selected_conversation_history=[{"role": "user", "content": "history"}],
-            current_state_projection={"service_skill_id": "cozymate_service_agent"},
+            current_state_projection={"agent_id": "cozymate_service_agent", "selected_service_skill_id": None},
             user_context={"current_time": "2026-07-08T12:00:00+08:00", "timezone": "Asia/Shanghai"},
             recent_run_facts=[{"run_id": "run_1", "facts": {"assistant_conclusion": "已整理过喂养目标"}}],
             fresh_business_facts={"profile": {"name": "Mai"}},
@@ -743,7 +806,7 @@ def test_context_builder_projects_dynamic_context_after_selected_history() -> No
     assert model_input[0] == {"role": "user", "content": "history"}
     assert model_input[-2]["content"] == {
         "runtime_context": {
-            "state": {"service_skill_id": "cozymate_service_agent"},
+            "state": {"agent_id": "cozymate_service_agent", "selected_service_skill_id": None},
             "user_context": {"current_time": "2026-07-08T12:00:00+08:00", "timezone": "Asia/Shanghai"},
             "recent_run_facts": [{"run_id": "run_1", "facts": {"assistant_conclusion": "已整理过喂养目标"}}],
             "memory": [],
@@ -779,7 +842,7 @@ def test_sdk_request_can_render_responses_namespace_tool_payload() -> None:
         actor_user_id="user_1",
         instructions="Use tools.",
         model_input=[{"role": "user", "content": "milk summary"}],
-        tool_names=("records.milk_status.read", "records.feeding_record.propose"),
+        tool_names=("load_service_skill", "records.milk_status.read", "records.feeding_record.propose"),
         tool_namespaces=(
             SdkToolNamespace(
                 name="records",
@@ -790,6 +853,13 @@ def test_sdk_request_can_render_responses_namespace_tool_payload() -> None:
         ),
         tool_search_enabled=True,
         tools=(
+            SdkToolDefinition(
+                contract_name="load_service_skill",
+                sdk_name="load_service_skill",
+                description="加载服务技能。",
+                params_json_schema={"type": "object", "properties": {}},
+                invoke_json=invoke_json,
+            ),
             SdkToolDefinition(
                 contract_name="records.milk_status.read",
                 sdk_name=sdk_tool_name("records.milk_status.read"),
@@ -813,6 +883,12 @@ def test_sdk_request_can_render_responses_namespace_tool_payload() -> None:
     payload = responses_tools_payload(request)
 
     assert payload == [
+        {
+            "type": "function",
+            "name": "load_service_skill",
+            "description": "加载服务技能。",
+            "parameters": {"type": "object", "properties": {}},
+        },
         {
             "type": "namespace",
             "name": "records",
@@ -926,6 +1002,54 @@ def test_sdk_runner_uses_responses_namespace_backend_for_tool_search(monkeypatch
         "call_id": "call_1",
         "output": '{"ok": true}',
     }
+
+
+def test_sdk_runner_streams_responses_api_text_deltas(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_openai = types.ModuleType("openai")
+    fake_openai.__spec__ = ModuleSpec("openai", loader=None)
+    fake_openai.AsyncOpenAI = FakeAsyncOpenAI
+    monkeypatch.setitem(sys.modules, "openai", fake_openai)
+    final_response = FakeOpenAIResponse(
+        id="resp_stream",
+        output=[
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "hello"}],
+            }
+        ],
+        output_text="hello",
+    )
+    FakeAsyncOpenAI.reset(
+        [],
+        stream_events_to_return=[
+            types.SimpleNamespace(type="response.output_text.delta", delta="hel"),
+            types.SimpleNamespace(type="response.output_text.delta", delta="lo"),
+            types.SimpleNamespace(type="response.completed", response=final_response),
+        ],
+        stream_final_response=final_response,
+    )
+    deltas = []
+
+    async def on_text_delta(delta: str) -> None:
+        deltas.append(delta)
+
+    request = SdkNodeRequest(
+        run_id="run_1",
+        thread_id="thread_1",
+        actor_user_id="user_1",
+        instructions="Be concise.",
+        model_input=[{"role": "user", "content": "hello"}],
+        tool_search_enabled=True,
+        on_text_delta=on_text_delta,
+    )
+
+    result = asyncio.run(OpenAIAgentsSdkRunner(model="gpt-test").run_reasoning(request))
+
+    assert deltas == ["hel", "lo"]
+    assert result.final_text == "hello"
+    assert FakeAsyncOpenAI.calls == []
+    assert FakeAsyncOpenAI.stream_calls[0]["input"] == [{"role": "user", "content": "hello"}]
 
 
 def test_sdk_runner_rejects_deferred_tool_loading_when_responses_backend_disabled() -> None:
@@ -1230,17 +1354,29 @@ class FakeOpenAIResponse:
 class FakeAsyncOpenAI:
     created_kwargs = {}
     calls = []
+    stream_calls = []
     responses_to_return = []
+    stream_events_to_return = None
+    stream_final_response = None
 
     def __init__(self, **kwargs) -> None:
         FakeAsyncOpenAI.created_kwargs = kwargs
         self.responses = FakeOpenAIResponsesResource()
 
     @classmethod
-    def reset(cls, responses_to_return: list[FakeOpenAIResponse]) -> None:
+    def reset(
+        cls,
+        responses_to_return: list[FakeOpenAIResponse],
+        *,
+        stream_events_to_return: list[object] | None = None,
+        stream_final_response: FakeOpenAIResponse | None = None,
+    ) -> None:
         cls.created_kwargs = {}
         cls.calls = []
+        cls.stream_calls = []
         cls.responses_to_return = list(responses_to_return)
+        cls.stream_events_to_return = list(stream_events_to_return) if stream_events_to_return is not None else None
+        cls.stream_final_response = stream_final_response
 
 
 class FakeOpenAIResponsesResource:
@@ -1249,6 +1385,38 @@ class FakeOpenAIResponsesResource:
         if not FakeAsyncOpenAI.responses_to_return:
             raise RuntimeError("fake responses exhausted")
         return FakeAsyncOpenAI.responses_to_return.pop(0)
+
+    def stream(self, **kwargs):
+        FakeAsyncOpenAI.stream_calls.append(kwargs)
+        events = FakeAsyncOpenAI.stream_events_to_return or []
+        return FakeOpenAIResponseStream(events=events, final_response=FakeAsyncOpenAI.stream_final_response)
+
+
+class FakeOpenAIResponseStream:
+    def __init__(self, *, events: list[object], final_response: FakeOpenAIResponse | None) -> None:
+        self._events = list(events)
+        self._index = 0
+        self._final_response = final_response
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return None
+
+    def __aiter__(self):
+        self._index = 0
+        return self
+
+    async def __anext__(self):
+        if self._index >= len(self._events):
+            raise StopAsyncIteration
+        event = self._events[self._index]
+        self._index += 1
+        return event
+
+    async def get_final_response(self):
+        return self._final_response
 
 
 class FakeAgentsSdkAgent:

@@ -42,8 +42,7 @@ from .schemas import (
 )
 from .service import AgentRuntimeService
 from .run_lifecycle.controls import AgentRunControls
-from .safety.service import AgentSafetyService
-from .event_stream.sse import encode_sse_events, encode_transient_sse_events
+from .event_stream.ag_ui import AgUiSseEncoder
 from .event_stream.transient import AgentTransientStream, AgentTransientStreamEvent
 
 
@@ -64,7 +63,6 @@ def get_agent_runtime_service(request: Request, session: AsyncSession = Depends(
         idempotency_service=IdempotencyService(repository=audit_repository),
         outbox_service=OutboxService(repository=OutboxRepository(session)),
         controls=AgentRunControls(request.app.state.redis_client),
-        safety_service=AgentSafetyService(repository=repository, metrics=request.app.state.request_metrics),
     )
 
 
@@ -376,6 +374,7 @@ async def _stream_run_event_chunks(
     cursor = after_sequence
     transient_cursor = "0-0"
     deadline = monotonic() + max_wait_seconds
+    encoder = AgUiSseEncoder()
     while True:
         if is_disconnected is not None and await is_disconnected():
             return
@@ -384,7 +383,9 @@ async def _stream_run_event_chunks(
             final_event_index = _first_final_event_index(events)
             if final_event_index > 0:
                 pre_final_events = events[:final_event_index]
-                yield encode_sse_events(pre_final_events)
+                encoded = encoder.encode_persisted(pre_final_events)
+                if encoded:
+                    yield encoded
                 cursor = pre_final_events[-1].sequence
             if final_event_index != -1:
                 transient_events = await _read_transient_events(
@@ -395,12 +396,18 @@ async def _stream_run_event_chunks(
                 )
                 if transient_events:
                     transient_cursor = transient_events[-1].cursor
-                    yield encode_transient_sse_events(transient_events)
+                    encoded = encoder.encode_transient(transient_events)
+                    if encoded:
+                        yield encoded
                 final_events = events[final_event_index:]
-                yield encode_sse_events(final_events)
+                encoded = encoder.encode_persisted(final_events)
+                if encoded:
+                    yield encoded
                 cursor = final_events[-1].sequence
             elif final_event_index == -1:
-                yield encode_sse_events(events)
+                encoded = encoder.encode_persisted(events)
+                if encoded:
+                    yield encoded
                 cursor = events[-1].sequence
             if any(event.event_type in TERMINAL_STREAM_EVENT_TYPES for event in events):
                 return
@@ -415,7 +422,9 @@ async def _stream_run_event_chunks(
             )
             if transient_events:
                 transient_cursor = transient_events[-1].cursor
-                yield encode_transient_sse_events(transient_events)
+                encoded = encoder.encode_transient(transient_events)
+                if encoded:
+                    yield encoded
                 continue
         else:
             await asyncio.sleep(poll_interval_seconds)

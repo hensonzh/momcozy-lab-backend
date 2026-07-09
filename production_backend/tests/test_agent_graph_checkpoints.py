@@ -19,7 +19,7 @@ def test_graph_checkpoint_store_saves_run_checkpoint_with_thread_namespace() -> 
             state_summary={
                 "run_id": run.id,
                 "pending_action_id": nested_id,
-                "visited_nodes": ("load_context", "sdk_reasoning"),
+                "visited_nodes": ("sdk_reasoning", "finish"),
                 "created_for": date(2026, 7, 2),
                 "observed_at": datetime(2026, 7, 2, 10, 15, tzinfo=timezone.utc),
             },
@@ -31,7 +31,7 @@ def test_graph_checkpoint_store_saves_run_checkpoint_with_thread_namespace() -> 
     assert checkpoint.state_ref == "oss://agent-state/checkpoint-1.json"
     assert checkpoint.state_summary["run_id"] == str(run.id)
     assert checkpoint.state_summary["pending_action_id"] == str(nested_id)
-    assert checkpoint.state_summary["visited_nodes"] == ["load_context", "sdk_reasoning"]
+    assert checkpoint.state_summary["visited_nodes"] == ["sdk_reasoning", "finish"]
     assert checkpoint.state_summary["created_for"] == "2026-07-02"
     assert checkpoint.state_summary["observed_at"].startswith("2026-07-02T10:15:00")
 

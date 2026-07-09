@@ -76,10 +76,10 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() ->
     assert request.prompt_version == "prompt-v2"
     assert request.service_skill_id == "cozymate_service_agent"
     assert "你叫 CozyMate，来自 Momcozy 团队。" in request.instructions
-    assert "制定孕期计划" in request.instructions
-    assert "奶量管理仅处理三类任务" in request.instructions
+    assert "制定孕期计划" not in request.instructions
+    assert "奶量管理仅处理三类任务" not in request.instructions
     assert "已选择服务技能" not in request.instructions
-    assert request.tool_names == ()
+    assert request.tool_names == ("load_service_skill",)
     assert [item["role"] for item in request.model_input] == [
         "user",
         "assistant",
@@ -91,6 +91,9 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() ->
     runtime_context = _runtime_context(request)
     assert runtime_context["state"] == {
         "agent_mode": "single_main_agent",
+        "agent_id": "cozymate_service_agent",
+        "selected_service_skill_id": None,
+        "loaded_service_skill_ids": [],
         "available_service_skill_ids": [
             "birth-prep",
             "milk-management",
@@ -98,7 +101,15 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() ->
             "emotion-support",
             "device-guidance",
         ],
-        "visible_tool_count": 0,
+        "recent_loaded_service_skills": [],
+        "resident_loaded_service_skill": None,
+        "expired_loaded_service_skills": [],
+        "skill_loading": {
+            "mode": "model_tool_call",
+            "tool_name": "load_service_skill",
+            "rule": "Call load_service_skill before following a service skill flow or using service-specific tools.",
+        },
+        "visible_tool_count": 1,
         "execution_mode": "single",
         "needs_clarification": False,
         "safety_flags": [],
@@ -118,27 +129,17 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() ->
     assert repository.routing_decisions[0]["routing_source"] == "passthrough"
     assert repository.routing_decisions[0]["confidence"] == 1
     assert request.model_input[-1] == {"role": "user", "content": "Summarize it."}
-    assert [checkpoint["state_summary"]["node_name"] for checkpoint in checkpoint_store.checkpoints] == ["sdk_reasoning", "finish"]
+    assert [checkpoint["state_summary"]["node_name"] for checkpoint in checkpoint_store.checkpoints] == ["finish"]
     assert checkpoint_store.checkpoints[0]["state_summary"]["current_user_message_id"] == str(current_user.id)
-    assert state_store.projections[0]["selected_message_ids"] == [prior_user.id, prior_assistant.id, current_user.id]
-    assert state_store.projections[0]["projection_summary"]["history_message_count"] == 2
-    assert state_store.projections[0]["projection_summary"]["state_keys"] == [
-        "agent_mode",
-        "available_service_skill_ids",
-        "execution_mode",
-        "needs_clarification",
-        "safety_flags",
-        "visible_tool_count",
-    ]
-    assert state_store.projections[0]["projection_summary"]["recent_run_fact_count"] == 0
+    assert "context_base" in checkpoint_store.checkpoints[0]["state_summary"]["timings_ms"]
+    assert "routing" in checkpoint_store.checkpoints[0]["state_summary"]["timings_ms"]
+    assert "facts_projection" in checkpoint_store.checkpoints[0]["state_summary"]["timings_ms"]
+    assert "model_reasoning" in checkpoint_store.checkpoints[0]["state_summary"]["timings_ms"]
+    assert "total_before_finish_checkpoint" in checkpoint_store.checkpoints[0]["state_summary"]["timings_ms"]
+    assert state_store.projections == []
     assert repository.run_summaries[0].payload["user_goal"] == "Summarize it."
     assert repository.run_summaries[0].payload["assistant_conclusion"] == "Here is the summary."
-    assert _progress_phases(repository) == [
-        "context_loading",
-        "context_ready",
-        "model_reasoning",
-        "response_finalizing",
-    ]
+    assert _progress_phases(repository) == []
 
 
 def test_agent_runtime_executor_projects_active_memory_into_dynamic_context() -> None:
@@ -184,16 +185,49 @@ def test_agent_runtime_executor_projects_active_memory_into_dynamic_context() ->
         }
     ]
     assert "raw_evidence" not in memory_facts[0]
-    assert state_store.projections[0]["projection_summary"]["memory_count"] == 1
-    assert state_store.projections[0]["projection_summary"]["fresh_business_fact_keys"] == []
+    assert state_store.projections == []
 
 
-def test_agent_runtime_executor_projects_fresh_business_facts_into_dynamic_context() -> None:
+def test_agent_runtime_executor_loads_base_context_without_parallel_shared_session_access() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="Hello", sequence=1)
+    session_guard = FakeSharedSessionGuard()
+    repository = SessionGuardedRuntimeRepository(messages=[current_user], current_message=current_user, session_guard=session_guard)
+    memory_service = SessionGuardedMemoryService(memories=[], session_guard=session_guard)
+    backend = CapturingSdkBackend(result=SdkNodeResult(final_text="Hello."))
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            memory_service=memory_service,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+        ).execute(run=run)
+    )
+
+    assert result.status == "completed"
+    assert session_guard.calls[:4] == [
+        "current_message",
+        "thread_messages",
+        "memory_projection",
+        "recent_run_summaries",
+    ]
+
+
+def test_agent_runtime_executor_load_service_skill_returns_facts_and_records_ledger() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)
     current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="今天奶量怎么样？", sequence=1)
     repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
-    backend = CapturingSdkBackend(result=SdkNodeResult(final_text="我先看今天和最近趋势。"))
+    backend = ScriptedSdkBackend(
+        [
+            scripted_sdk_response(
+                final_text="我看了最近奶量状态。",
+                tool_invocations=(scripted_tool_invocation("load_service_skill", {"service_skill_id": "milk-management"}),),
+                expected_available_tools=("load_service_skill",),
+            )
+        ]
+    )
     state_store = FakeStateStore()
     business_facts_projector = FakeBusinessFactsProjector(
         facts={"schema_version": "v1", "milk_status": {"totals": {"trend_pumped_volume_ml": 420}}}
@@ -208,17 +242,30 @@ def test_agent_runtime_executor_projects_fresh_business_facts_into_dynamic_conte
         ).execute(run=run)
     )
 
-    business_facts = _runtime_context(backend.requests[0])["business_facts"]
     assert result.status == "completed"
-    assert business_facts == {"schema_version": "v1", "milk_status": {"totals": {"trend_pumped_volume_ml": 420}}}
+    assert _runtime_context(backend.requests[0])["business_facts"] == {}
     assert business_facts_projector.calls == [
         {
             "actor_user_id": run.actor_user_id,
             "run_id": run.id,
-            "selected_skill_id": ServiceSkillId.COZYMATE_SERVICE_AGENT,
+            "selected_service_skill_id": ServiceSkillId.MILK_MANAGEMENT,
         }
     ]
-    assert state_store.projections[0]["projection_summary"]["fresh_business_fact_keys"] == ["milk_status", "schema_version"]
+    assert state_store.projections == []
+    assert repository.tool_call.tool_name == "load_service_skill"
+    assert repository.tool_output.safe_output["service_skill_id"] == "milk-management"
+    assert "奶量管理仅处理三类任务" in repository.tool_output.safe_output["skill"]["instructions"]
+    assert repository.tool_output.safe_output["tool_scope"]["namespace_names"] == ["milk_management"]
+    assert "records.milk_status.read" in repository.tool_output.safe_output["tool_scope"]["tool_names"]
+    assert repository.tool_output.safe_output["business_facts"] == {
+        "schema_version": "v1",
+        "milk_status": {"totals": {"trend_pumped_volume_ml": 420}},
+    }
+    skill_loaded_events = [event for event in repository.events if event.event_type == "skill.loaded"]
+    assert skill_loaded_events[0].payload["service_skill_id"] == "milk-management"
+    assert repository.run_summaries[-1].service_skill_id == "milk-management"
+    assert repository.run_summaries[-1].payload["tool_facts"] == []
+    assert repository.run_summaries[-1].payload["loaded_service_skills"][0]["service_skill_id"] == "milk-management"
 
 
 def test_default_service_skills_are_file_backed() -> None:
@@ -254,11 +301,19 @@ def test_agent_runtime_executor_publishes_text_deltas_to_transient_stream() -> N
 
     assert result.status == "completed"
     assert result.final_text == "hello"
+    assert result.assistant_message_id is not None
     assert transient_stream.deltas == [
-        {"thread_id": thread_id, "run_id": run.id, "delta": "hel"},
-        {"thread_id": thread_id, "run_id": run.id, "delta": "lo"},
+        {"thread_id": thread_id, "run_id": run.id, "delta": "hel", "message_stream_id": str(result.assistant_message_id)},
+        {"thread_id": thread_id, "run_id": run.id, "delta": "lo", "message_stream_id": str(result.assistant_message_id)},
+    ]
+    assert transient_stream.progresses == [
+        {"thread_id": thread_id, "run_id": run.id, "phase": "context_loading", "label": "我已经收到你的消息啦～"},
+        {"thread_id": thread_id, "run_id": run.id, "phase": "context_ready", "label": "我看一下你的信息"},
+        {"thread_id": thread_id, "run_id": run.id, "phase": "model_reasoning", "label": "我想一下"},
+        {"thread_id": thread_id, "run_id": run.id, "phase": "response_finalizing", "label": "我在组织回复～"},
     ]
     assert all(event.event_type != "message.delta" for event in repository.events)
+    assert all(event.event_type != "run.progress" for event in repository.events)
 
 
 def test_agent_runtime_executor_requires_current_user_message() -> None:
@@ -312,6 +367,7 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert result.status == "completed"
     assert result.final_text == '{"profile": {"display_name": "Mai"}}'
     assert backend.tool_names == (
+        "load_service_skill",
         "birth_journey_plan_card_create",
         "birth_plan_form_create",
         "business_context_read",
@@ -340,6 +396,7 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
         "pregnancy_plan_context_read",
         "pregnancy_plan_create_propose",
         "profile_read",
+        "profile_update",
         "records_feeding_record_propose",
         "records_feeding_record_delete_propose",
         "records_growth_read",
@@ -352,6 +409,7 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
         "records_pumping_record_propose",
         "records_pumping_record_delete_propose",
         "support_ticket_propose",
+        "ui_quick_replies_create",
     )
     assert backend.tool_schemas["hospital_bag_card_create"]["additionalProperties"] is True
     assert backend.tool_schemas["hospital_bag_card_create"]["properties"]["confirmed_form_data"]["type"] == "object"
@@ -385,6 +443,9 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert backend.tool_schemas["pregnancy_plan_create_propose"]["required"] == ["title"]
     assert backend.tool_schemas["profile_read"]["additionalProperties"] is False
     assert backend.tool_schemas["profile_read"]["properties"] == {}
+    assert backend.tool_schemas["profile_update"]["properties"]["age"]["maximum"] == 70
+    assert backend.tool_schemas["ui_quick_replies_create"]["required"] == ["replies"]
+    assert backend.tool_schemas["ui_quick_replies_create"]["properties"]["replies"]["maxItems"] == 3
     assert backend.tool_schemas["records_feeding_record_propose"]["required"] == ["feed_time", "feed_type"]
     assert backend.tool_schemas["records_feeding_record_delete_propose"]["required"] == ["record_id"]
     assert backend.tool_schemas["records_growth_read"]["properties"]["limit"]["maximum"] == 20
@@ -398,34 +459,52 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert backend.tool_schemas["support_ticket_propose"]["required"] == ["issue_summary"]
     assert backend.tool_schemas["support_ticket_propose"]["additionalProperties"] is False
     assert backend.tool_search_enabled is True
-    assert "records" in backend.tool_namespaces
-    assert backend.tool_namespaces["records"]["tool_names"] == [
-        "records.feeding_record.propose",
-        "records.feeding_record_delete.propose",
-        "records.growth.read",
-        "records.growth_record.propose",
-        "records.growth_record_delete.propose",
-        "records.growth_record_update.propose",
-        "records.milk_analysis.read",
+    assert "milk_management" in backend.tool_namespaces
+    assert backend.tool_namespaces["milk_management"]["tool_names"] == [
         "records.milk_status.read",
         "records.milk_summary.read",
-        "records.pumping_record.propose",
-        "records.pumping_record_delete.propose",
-    ]
-    assert backend.tool_namespaces["records"]["deferred_tool_names"] == [
+        "records.milk_analysis.read",
+        "records.growth.read",
         "records.feeding_record.propose",
         "records.feeding_record_delete.propose",
-        "records.growth_record.propose",
-        "records.growth_record_delete.propose",
-        "records.growth_record_update.propose",
         "records.pumping_record.propose",
         "records.pumping_record_delete.propose",
+        "records.growth_record.propose",
+        "records.growth_record_update.propose",
+        "records.growth_record_delete.propose",
+        "plans.current.read",
+        "plans.calendar.read",
+        "plans.milk_plan.propose",
+        "plans.milk_plan_preview.create",
+        "plans.task_complete.propose",
+        "plans.task_create.propose",
+        "notifications.milk_reminder.propose",
     ]
-    assert backend.tool_namespaces["devices"]["tool_names"] == [
-        "devices.guidance_assets.read",
+    assert backend.tool_namespaces["milk_management"]["deferred_tool_names"] == [
+        "records.feeding_record.propose",
+        "records.feeding_record_delete.propose",
+        "records.pumping_record.propose",
+        "records.pumping_record_delete.propose",
+        "records.growth_record.propose",
+        "records.growth_record_update.propose",
+        "records.growth_record_delete.propose",
+        "plans.milk_plan.propose",
+        "plans.milk_plan_preview.create",
+        "plans.task_complete.propose",
+        "plans.task_create.propose",
+        "notifications.milk_reminder.propose",
+    ]
+    assert backend.tool_namespaces["device_support"]["tool_names"] == [
         "devices.pump_status.read",
+        "devices.guidance_assets.read",
+        "support.ticket.propose",
     ]
-    assert backend.tool_namespace_by_contract["records.milk_status.read"] == "records"
+    assert backend.tool_namespace_by_contract["profile.read"] == ""
+    assert backend.tool_namespace_by_contract["profile_update"] == ""
+    assert backend.tool_namespace_by_contract["ui_quick_replies_create"] == ""
+    assert backend.tool_namespace_by_contract["business.context.read"] == ""
+    assert backend.tool_namespace_by_contract["files.vision_summary.read"] == ""
+    assert backend.tool_namespace_by_contract["records.milk_status.read"] == "milk_management"
     assert backend.tool_deferred_by_contract["records.milk_status.read"] is False
     assert backend.tool_deferred_by_contract["records.milk_analysis.read"] is False
     assert backend.tool_deferred_by_contract["records.growth.read"] is False
@@ -436,6 +515,116 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert tool_executor.calls[0]["run_id"] == run.id
     assert tool_executor.calls[0]["tool_name"] == "profile.read"
     assert tool_executor.calls[0]["args"] == {}
+
+
+def test_agent_runtime_executor_allows_service_tool_without_skill_load() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="今天奶量怎么样？", sequence=1)
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    tool_executor = FakeToolExecutor(safe_output={"milk_status": {"total_ml": 420}})
+    backend = ScriptedSdkBackend(
+        [
+            scripted_sdk_response(
+                final_text="最近奶量是 420ml。",
+                tool_invocations=(scripted_tool_invocation("records.milk_status.read"),),
+                expected_available_tools=("load_service_skill", "records.milk_status.read"),
+            )
+        ]
+    )
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            tool_executor=tool_executor,
+        ).execute(run=run)
+    )
+
+    assert result.status == "completed"
+    assert result.final_text == "最近奶量是 420ml。"
+    assert tool_executor.calls[0]["tool_name"] == "records.milk_status.read"
+    assert tool_executor.calls[0]["args"] == {}
+
+
+def test_agent_runtime_executor_collects_quick_replies_for_final_message() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="给我三个下一步选项", sequence=1)
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    replies = [{"text": "看今日安排"}, {"text": "先不保存"}, {"text": "换简单版"}]
+    tool_executor = FakeToolExecutor(
+        safe_output={
+            "status": "quick_replies_ready",
+            "quick_replies": replies,
+            "side_effect_performed": False,
+        }
+    )
+    transient_stream = FakeTransientStream()
+    backend = ScriptedSdkBackend(
+        [
+            scripted_sdk_response(
+                final_text="已经整理好了。",
+                text_deltas=("已经", "整理好了。"),
+                tool_invocations=(
+                    scripted_tool_invocation(
+                        "ui_quick_replies_create",
+                        {"replies": replies},
+                    ),
+                ),
+                expected_available_tools=("ui_quick_replies_create",),
+            )
+        ]
+    )
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            tool_executor=tool_executor,
+            transient_stream=transient_stream,
+        ).execute(run=run)
+    )
+
+    assert result.status == "completed"
+    assert result.assistant_message_id is not None
+    assert result.quick_replies == replies
+    assert tool_executor.calls[0]["tool_name"] == "ui_quick_replies_create"
+    assert {delta["message_stream_id"] for delta in transient_stream.deltas} == {str(result.assistant_message_id)}
+
+
+def test_agent_runtime_executor_allows_service_tool_after_skill_load() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="今天奶量怎么样？", sequence=1)
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    tool_executor = FakeToolExecutor(safe_output={"milk_status": {"total_ml": 420}})
+    backend = ScriptedSdkBackend(
+        [
+            scripted_sdk_response(
+                final_text="最近奶量是 420ml。",
+                tool_invocations=(
+                    scripted_tool_invocation("load_service_skill", {"service_skill_id": "milk-management"}),
+                    scripted_tool_invocation("records.milk_status.read", {"days": 7, "limit": 5}),
+                ),
+                expected_available_tools=("load_service_skill", "records.milk_status.read"),
+            )
+        ]
+    )
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            tool_executor=tool_executor,
+        ).execute(run=run)
+    )
+
+    assert result.status == "completed"
+    assert repository.tool_output.safe_output["service_skill_id"] == "milk-management"
+    assert tool_executor.calls[0]["tool_name"] == "records.milk_status.read"
+    assert tool_executor.calls[0]["args"] == {"days": 7, "limit": 5}
+    assert repository.run_summaries[-1].service_skill_id == "milk-management"
 
 
 def test_agent_runtime_executor_does_not_advertise_tool_search_when_runner_cannot_use_namespaces() -> None:
@@ -462,7 +651,7 @@ def test_agent_runtime_executor_does_not_advertise_tool_search_when_runner_canno
     assert tool_executor.calls[0]["tool_name"] == "profile.read"
 
 
-def test_agent_runtime_executor_passes_lactation_text_to_cozymate_service_agent() -> None:
+def test_agent_runtime_executor_does_not_inject_service_skill_before_model_loads_it() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)
     current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="今天奶量怎么样？", sequence=1)
@@ -479,20 +668,279 @@ def test_agent_runtime_executor_passes_lactation_text_to_cozymate_service_agent(
     request = backend.requests[0]
     assert result.status == "completed"
     assert request.service_skill_id == "cozymate_service_agent"
-    assert "奶量管理仅处理三类任务" in request.instructions
+    assert "奶量管理仅处理三类任务" not in request.instructions
+    assert "待产包清单" not in request.instructions
+    assert "当前已接入官方资料的型号：Air1" not in request.instructions
     state = _runtime_context(request)["state"]
     assert state["agent_mode"] == "single_main_agent"
     assert "delegated_agent" not in state
+    assert state["agent_id"] == "cozymate_service_agent"
+    assert state["selected_service_skill_id"] is None
+    assert state["loaded_service_skill_ids"] == []
     assert "milk-management" in state["available_service_skill_ids"]
-    assert request.tool_names == ()
+    assert repository.routing_decisions[0]["selected_skill_id"] == "cozymate_service_agent"
+    assert repository.run_summaries[0].service_skill_id == "cozymate_service_agent"
+    assert request.tool_names == ("load_service_skill",)
 
 
-def test_agent_runtime_executor_injects_all_service_skills_for_pregnancy_text() -> None:
+def test_agent_runtime_executor_projects_recent_loaded_skills_as_model_hint_only() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    previous_run_id = uuid4()
+    previous_summary = AgentRunSummary(
+        id=uuid4(),
+        run_id=previous_run_id,
+        thread_id=thread_id,
+        owner_user_id=run.actor_user_id,
+        service_skill_id="milk-management",
+        summary_type="run_fact",
+        schema_version="v1",
+        payload={
+            "user_goal": "昨天奶量怎么样？",
+            "assistant_conclusion": "昨天总奶量偏低。",
+            "loaded_service_skills": [
+                {
+                    "service_skill_id": "milk-management",
+                    "skill_version": "v1",
+                    "loaded_at": "2026-07-07T10:00:00+00:00",
+                    "tool_names": ["records.milk_status.read"],
+                }
+            ],
+        },
+        source_message_ids=[],
+        source_tool_call_ids=[],
+        created_at=datetime(2026, 7, 7, 10, 0, tzinfo=timezone.utc),
+        updated_at=datetime(2026, 7, 7, 10, 0, tzinfo=timezone.utc),
+    )
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="那今天怎么安排？", sequence=1)
+    repository = FakeRuntimeRepository(
+        messages=[current_user],
+        current_message=current_user,
+        run_summaries=[previous_summary],
+    )
+    backend = CapturingSdkBackend(result=SdkNodeResult(final_text="继续看奶量安排。"))
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+        ).execute(run=run)
+    )
+
+    state = _runtime_context(backend.requests[0])["state"]
+    assert result.status == "completed"
+    assert backend.requests[0].service_skill_id == "cozymate_service_agent"
+    assert state["recent_loaded_service_skills"] == [
+        {
+            "service_skill_id": "milk-management",
+            "skill_version": "v1",
+            "last_run_id": str(previous_run_id),
+            "loaded_at": "2026-07-07T10:00:00+00:00",
+            "user_goal": "昨天奶量怎么样？",
+            "assistant_conclusion": "昨天总奶量偏低。",
+        }
+    ]
+    assert "奶量管理仅处理三类任务" not in backend.requests[0].instructions
+    assert repository.run_summaries[-1].run_id == run.id
+    assert repository.run_summaries[-1].service_skill_id == "cozymate_service_agent"
+
+
+def test_agent_runtime_executor_injects_resident_loaded_skill_for_three_followup_turns() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    loaded_run_id = uuid4()
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="那今天怎么安排？", sequence=1)
+    repository = FakeRuntimeRepository(
+        messages=[current_user],
+        current_message=current_user,
+        run_summaries=[
+            _run_summary(
+                run=run,
+                thread_id=thread_id,
+                run_id=loaded_run_id,
+                service_skill_id="milk-management",
+                user_goal="昨天奶量怎么样？",
+                assistant_conclusion="昨天总奶量偏低。",
+                loaded_service_skill_id="milk-management",
+                created_at=datetime(2026, 7, 7, 10, 0, tzinfo=timezone.utc),
+            )
+        ],
+    )
+    backend = CapturingSdkBackend(result=SdkNodeResult(final_text="继续看奶量安排。"))
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+        ).execute(run=run)
+    )
+
+    request = backend.requests[0]
+    state = _runtime_context(request)["state"]
+    model_input_text = json.dumps(request.model_input, ensure_ascii=False)
+    assert result.status == "completed"
+    assert "奶量管理仅处理三类任务" in model_input_text
+    assert "奶量管理仅处理三类任务" not in request.instructions
+    assert state["resident_loaded_service_skill"]["service_skill_id"] == "milk-management"
+    assert state["resident_loaded_service_skill"]["last_loaded_run_id"] == str(loaded_run_id)
+    assert state["resident_loaded_service_skill"]["remaining_turns"] == 3
+    assert state["resident_loaded_service_skill"]["skill"]["instructions"]
+    assert state["expired_loaded_service_skills"] == []
+    resident_summary = repository.run_summaries[-1].payload["resident_loaded_service_skill"]
+    assert resident_summary["service_skill_id"] == "milk-management"
+    assert "skill" not in resident_summary
+
+
+def test_agent_runtime_executor_allows_service_tool_with_resident_loaded_skill() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="继续看奶量", sequence=1)
+    repository = FakeRuntimeRepository(
+        messages=[current_user],
+        current_message=current_user,
+        run_summaries=[
+            _run_summary(
+                run=run,
+                thread_id=thread_id,
+                service_skill_id="milk-management",
+                loaded_service_skill_id="milk-management",
+            )
+        ],
+    )
+    tool_executor = FakeToolExecutor(safe_output={"milk_status": {"total_ml": 420}})
+    backend = ScriptedSdkBackend(
+        [
+            scripted_sdk_response(
+                final_text="最近奶量是 420ml。",
+                tool_invocations=(scripted_tool_invocation("records.milk_status.read", {"days": 7, "limit": 5}),),
+                expected_available_tools=("load_service_skill", "records.milk_status.read"),
+            )
+        ]
+    )
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            tool_executor=tool_executor,
+        ).execute(run=run)
+    )
+
+    assert result.status == "completed"
+    assert tool_executor.calls[0]["tool_name"] == "records.milk_status.read"
+    assert tool_executor.calls[0]["args"] == {"days": 7, "limit": 5}
+
+
+def test_agent_runtime_executor_expires_resident_loaded_skill_after_three_followup_turns() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="那今天怎么安排？", sequence=1)
+    repository = FakeRuntimeRepository(
+        messages=[current_user],
+        current_message=current_user,
+        run_summaries=[
+            _run_summary(
+                run=run,
+                thread_id=thread_id,
+                service_skill_id="milk-management",
+                loaded_service_skill_id="milk-management",
+                created_at=datetime(2026, 7, 7, 10, 0, tzinfo=timezone.utc),
+            ),
+            _run_summary(run=run, thread_id=thread_id, created_at=datetime(2026, 7, 7, 11, 0, tzinfo=timezone.utc)),
+            _run_summary(run=run, thread_id=thread_id, created_at=datetime(2026, 7, 7, 12, 0, tzinfo=timezone.utc)),
+            _run_summary(run=run, thread_id=thread_id, created_at=datetime(2026, 7, 7, 13, 0, tzinfo=timezone.utc)),
+        ],
+    )
+    backend = CapturingSdkBackend(result=SdkNodeResult(final_text="今天先确认目标。"))
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+        ).execute(run=run)
+    )
+
+    state = _runtime_context(backend.requests[0])["state"]
+    model_input_text = json.dumps(backend.requests[0].model_input, ensure_ascii=False)
+    assert result.status == "completed"
+    assert state["resident_loaded_service_skill"] is None
+    assert state["expired_loaded_service_skills"] == [
+        {
+            "service_skill_id": "milk-management",
+            "skill_version": "v1",
+            "last_loaded_run_id": str(repository.run_summaries[0].run_id),
+            "loaded_at": "2026-07-07T10:00:00+00:00",
+            "expired_reason": "turn_ttl_exceeded",
+            "instruction": (
+                "milk-management was loaded before, but its SKILL.md has been removed from context. "
+                "Call load_service_skill if this turn still needs that skill."
+            ),
+        }
+    ]
+    assert "奶量管理仅处理三类任务" not in model_input_text
+    assert repository.run_summaries[-1].payload["expired_loaded_service_skills"][0]["service_skill_id"] == "milk-management"
+
+
+def test_agent_runtime_executor_keeps_recent_loaded_skill_hint_for_default_route() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    previous_summary = AgentRunSummary(
+        id=uuid4(),
+        run_id=uuid4(),
+        thread_id=thread_id,
+        owner_user_id=run.actor_user_id,
+        service_skill_id="milk-management",
+        summary_type="run_fact",
+        schema_version="v1",
+        payload={
+            "loaded_service_skills": [
+                {
+                    "service_skill_id": "milk-management",
+                    "skill_version": "v1",
+                    "loaded_at": "2026-07-07T10:00:00+00:00",
+                }
+            ]
+        },
+        source_message_ids=[],
+        source_tool_call_ids=[],
+        created_at=datetime(2026, 7, 7, 10, 0, tzinfo=timezone.utc),
+        updated_at=datetime(2026, 7, 7, 10, 0, tzinfo=timezone.utc),
+    )
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="Summarize what we discussed.", sequence=1)
+    repository = FakeRuntimeRepository(
+        messages=[current_user],
+        current_message=current_user,
+        run_summaries=[previous_summary],
+    )
+    backend = CapturingSdkBackend(result=SdkNodeResult(final_text="Here is the summary."))
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+        ).execute(run=run)
+    )
+
+    assert result.status == "completed"
+    assert backend.requests[0].service_skill_id == "cozymate_service_agent"
+    assert _runtime_context(backend.requests[0])["state"]["recent_loaded_service_skills"][0]["service_skill_id"] == "milk-management"
+    assert repository.run_summaries[-1].service_skill_id == "cozymate_service_agent"
+
+
+def test_agent_runtime_executor_loads_birth_prep_skill_only_when_model_calls_tool() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)
     current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="帮我准备待产包和分娩沟通单", sequence=1)
     repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
-    backend = CapturingSdkBackend(result=SdkNodeResult(final_text="我先帮你确认关键信息。"))
+    backend = ScriptedSdkBackend(
+        [
+            scripted_sdk_response(
+                final_text="我先帮你确认关键信息。",
+                tool_invocations=(scripted_tool_invocation("load_service_skill", {"service_skill_id": "birth-prep"}),),
+                expected_available_tools=("load_service_skill",),
+            )
+        ]
+    )
     state_store = FakeStateStore()
 
     result = asyncio.run(
@@ -504,19 +952,20 @@ def test_agent_runtime_executor_injects_all_service_skills_for_pregnancy_text() 
     )
 
     request = backend.requests[0]
-    state = _runtime_context(request)["state"]
+    loaded_skill = repository.tool_output.safe_output["skill"]
     assert result.status == "completed"
     assert request.service_skill_id == "cozymate_service_agent"
-    assert state["agent_mode"] == "single_main_agent"
-    assert "delegated_agent" not in state
-    assert "birth-prep" in state["available_service_skill_ids"]
     assert "CozyMate" in request.instructions
-    assert "待产包清单" in request.instructions
-    assert "分娩沟通单" in request.instructions
-    assert "每轮最多问一个缺失字段" in request.instructions
-    assert "不要调用 load_skill" in request.instructions
-    assert request.tool_names == ()
-    assert state_store.projections[0]["projection_summary"]["service_skill_id"] == ""
+    assert "待产包清单" not in request.instructions
+    assert loaded_skill["service_skill_id"] == "birth-prep"
+    assert "待产包清单" in loaded_skill["instructions"]
+    assert "分娩沟通单" in loaded_skill["instructions"]
+    assert "每轮最多问一个缺失字段" in loaded_skill["instructions"]
+    assert "奶量管理仅处理三类任务" not in request.instructions
+    assert "当前已接入官方资料的型号：Air1" not in request.instructions
+    assert request.tool_names == ("load_service_skill",)
+    assert state_store.projections == []
+    assert repository.run_summaries[-1].service_skill_id == "birth-prep"
 
 
 def test_agent_runtime_executor_projects_recent_run_facts_into_dynamic_context() -> None:
@@ -536,6 +985,14 @@ def test_agent_runtime_executor_projects_recent_run_facts_into_dynamic_context()
             "assistant_conclusion": "昨天总奶量偏低，建议今天观察补水和吸奶频率。",
             "tools_used": ["records.milk_summary.read"],
             "tool_facts": [{"tool_name": "records.milk_summary.read", "safe_output": {"total_ml": 420}}],
+            "loaded_service_skills": [
+                {
+                    "service_skill_id": "milk-management",
+                    "skill_version": "v1",
+                    "loaded_at": "2026-07-07T10:00:00+00:00",
+                    "tool_names": ["records.milk_summary.read"],
+                }
+            ],
             "verbose_unused": "x" * 3000,
         },
         source_message_ids=[],
@@ -544,7 +1001,11 @@ def test_agent_runtime_executor_projects_recent_run_facts_into_dynamic_context()
         updated_at=datetime(2026, 7, 7, 10, 0, tzinfo=timezone.utc),
     )
     current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="那今天怎么安排？", sequence=1)
-    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user, run_summaries=[previous_summary])
+    repository = FakeRuntimeRepository(
+        messages=[current_user],
+        current_message=current_user,
+        run_summaries=[previous_summary],
+    )
     backend = CapturingSdkBackend(result=SdkNodeResult(final_text="今天先看最近一次记录。"))
 
     result = asyncio.run(
@@ -554,7 +1015,8 @@ def test_agent_runtime_executor_projects_recent_run_facts_into_dynamic_context()
         ).execute(run=run)
     )
 
-    recent_run_facts = _runtime_context(backend.requests[0])["recent_run_facts"]
+    runtime_context = _runtime_context(backend.requests[0])
+    recent_run_facts = runtime_context["recent_run_facts"]
     assert result.status == "completed"
     assert recent_run_facts == [
         {
@@ -567,15 +1029,151 @@ def test_agent_runtime_executor_projects_recent_run_facts_into_dynamic_context()
                 "assistant_conclusion": "昨天总奶量偏低，建议今天观察补水和吸奶频率。",
                 "tools_used": ["records.milk_summary.read"],
                 "tool_facts": [{"tool_name": "records.milk_summary.read", "safe_output": {"total_ml": 420}}],
+                "loaded_service_skills": [
+                    {
+                        "service_skill_id": "milk-management",
+                        "skill_version": "v1",
+                        "loaded_at": "2026-07-07T10:00:00+00:00",
+                        "tool_names": ["records.milk_summary.read"],
+                    }
+                ],
                 "verbose_unused": ("x" * 2400) + "...",
             },
         }
     ]
+    assert runtime_context["state"]["recent_loaded_service_skills"][0]["service_skill_id"] == "milk-management"
     assert repository.run_summaries[-1].run_id == run.id
+    assert repository.run_summaries[-1].service_skill_id == "cozymate_service_agent"
     assert repository.run_summaries[-1].payload["assistant_conclusion"] == "今天先看最近一次记录。"
+    assert backend.requests[0].service_skill_id == "cozymate_service_agent"
 
 
-def test_agent_runtime_executor_passes_device_text_to_cozymate_service_agent() -> None:
+def test_agent_runtime_executor_trims_recent_run_facts_already_visible_in_history() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    previous_run_id = uuid4()
+    previous_user = _message(thread_id=thread_id, run_id=previous_run_id, role="user", text="昨天奶量怎么样？", sequence=1)
+    previous_assistant = _message(thread_id=thread_id, run_id=previous_run_id, role="assistant", text="昨天总奶量偏低。", sequence=2)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="那今天怎么安排？", sequence=3)
+    previous_summary = AgentRunSummary(
+        id=uuid4(),
+        run_id=previous_run_id,
+        thread_id=thread_id,
+        owner_user_id=run.actor_user_id,
+        service_skill_id="milk-management",
+        summary_type="run_fact",
+        schema_version="v1",
+        payload={
+            "user_goal": "昨天奶量怎么样？",
+            "assistant_conclusion": "昨天总奶量偏低。",
+            "tools_used": ["records.milk_summary.read"],
+            "tool_facts": [{"tool_name": "records.milk_summary.read", "safe_output": {"total_ml": 420}}],
+            "loaded_service_skills": [
+                {
+                    "service_skill_id": "milk-management",
+                    "skill_version": "v1",
+                    "loaded_at": "2026-07-07T10:00:00+00:00",
+                    "tool_names": ["records.milk_summary.read"],
+                }
+            ],
+        },
+        source_message_ids=[str(previous_user.id)],
+        source_tool_call_ids=[],
+        created_at=datetime(2026, 7, 7, 10, 0, tzinfo=timezone.utc),
+        updated_at=datetime(2026, 7, 7, 10, 0, tzinfo=timezone.utc),
+    )
+    repository = FakeRuntimeRepository(
+        messages=[previous_user, previous_assistant, current_user],
+        current_message=current_user,
+        run_summaries=[previous_summary],
+    )
+    backend = CapturingSdkBackend(result=SdkNodeResult(final_text="今天先看最近一次记录。"))
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+        ).execute(run=run)
+    )
+
+    runtime_context = _runtime_context(backend.requests[0])
+    recent_run_facts = runtime_context["recent_run_facts"]
+    state = runtime_context["state"]
+    assert result.status == "completed"
+    assert recent_run_facts == [
+        {
+            "run_id": str(previous_run_id),
+            "service_skill_id": "milk-management",
+            "schema_version": "v1",
+            "created_at": "2026-07-07T10:00:00+00:00",
+            "facts": {
+                "tools_used": ["records.milk_summary.read"],
+                "tool_facts": [{"tool_name": "records.milk_summary.read", "safe_output": {"total_ml": 420}}],
+            },
+        }
+    ]
+    assert state["recent_loaded_service_skills"][0]["service_skill_id"] == "milk-management"
+    assert backend.requests[0].model_input[0] == {"role": "user", "content": "昨天奶量怎么样？"}
+    assert backend.requests[0].model_input[1] == {"role": "assistant", "content": "昨天总奶量偏低。"}
+
+
+def test_agent_runtime_executor_keeps_recent_assistant_conclusion_when_not_visible_in_history() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    previous_run_id = uuid4()
+    previous_user = _message(thread_id=thread_id, run_id=previous_run_id, role="user", text="昨天奶量怎么样？", sequence=1)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="那今天怎么安排？", sequence=2)
+    previous_summary = AgentRunSummary(
+        id=uuid4(),
+        run_id=previous_run_id,
+        thread_id=thread_id,
+        owner_user_id=run.actor_user_id,
+        service_skill_id="milk-management",
+        summary_type="run_fact",
+        schema_version="v1",
+        payload={
+            "user_goal": "昨天奶量怎么样？",
+            "assistant_conclusion": "昨天总奶量偏低。",
+            "tools_used": ["records.milk_summary.read"],
+            "tool_facts": [{"tool_name": "records.milk_summary.read", "safe_output": {"total_ml": 420}}],
+            "loaded_service_skills": [
+                {
+                    "service_skill_id": "milk-management",
+                    "skill_version": "v1",
+                    "loaded_at": "2026-07-07T10:00:00+00:00",
+                    "tool_names": ["records.milk_summary.read"],
+                }
+            ],
+        },
+        source_message_ids=[str(previous_user.id)],
+        source_tool_call_ids=[],
+        created_at=datetime(2026, 7, 7, 10, 0, tzinfo=timezone.utc),
+        updated_at=datetime(2026, 7, 7, 10, 0, tzinfo=timezone.utc),
+    )
+    repository = FakeRuntimeRepository(
+        messages=[previous_user, current_user],
+        current_message=current_user,
+        run_summaries=[previous_summary],
+    )
+    backend = CapturingSdkBackend(result=SdkNodeResult(final_text="今天先看最近一次记录。"))
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+        ).execute(run=run)
+    )
+
+    recent_run_facts = _runtime_context(backend.requests[0])["recent_run_facts"]
+    assert result.status == "completed"
+    assert recent_run_facts[0]["facts"] == {
+        "assistant_conclusion": "昨天总奶量偏低。",
+        "tools_used": ["records.milk_summary.read"],
+        "tool_facts": [{"tool_name": "records.milk_summary.read", "safe_output": {"total_ml": 420}}],
+    }
+
+
+def test_agent_runtime_executor_loads_device_skill_only_when_model_calls_tool() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)
     current_user = _message(
@@ -586,7 +1184,15 @@ def test_agent_runtime_executor_passes_device_text_to_cozymate_service_agent() -
         sequence=1,
     )
     repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
-    backend = CapturingSdkBackend(result=SdkNodeResult(final_text="I will check device status."))
+    backend = ScriptedSdkBackend(
+        [
+            scripted_sdk_response(
+                final_text="I will check device status.",
+                tool_invocations=(scripted_tool_invocation("load_service_skill", {"service_skill_id": "device-guidance"}),),
+                expected_available_tools=("load_service_skill",),
+            )
+        ]
+    )
 
     asyncio.run(
         AgentRuntimeExecutor(
@@ -596,9 +1202,14 @@ def test_agent_runtime_executor_passes_device_text_to_cozymate_service_agent() -
     )
 
     request = backend.requests[0]
+    loaded_skill = repository.tool_output.safe_output["skill"]
     assert request.service_skill_id == "cozymate_service_agent"
-    assert "Air1 (BP334)" in request.instructions
-    assert request.tool_names == ()
+    assert "每轮给 1 个主步骤" not in request.instructions
+    assert "Air1 (BP334)" in loaded_skill["instructions"]
+    assert "每轮给 1 个主步骤" in loaded_skill["instructions"]
+    assert "待产包清单" not in request.instructions
+    assert "奶量管理仅处理三类任务" not in request.instructions
+    assert repository.run_summaries[-1].service_skill_id == "device-guidance"
 
 
 def test_agent_runtime_executor_excludes_tool_messages_from_conversation_history() -> None:
@@ -719,7 +1330,6 @@ def test_agent_runtime_executor_persists_sdk_action_proposal_and_waits_for_confi
     assert repository.events[-1].payload["preview_payload"] == {"summary": "Pump does not turn on"}
     assert "apply_payload" not in repository.events[-1].payload
     assert [checkpoint["state_summary"]["node_name"] for checkpoint in checkpoint_store.checkpoints] == [
-        "sdk_reasoning",
         "confirmation_interrupt",
     ]
     assert checkpoint_store.checkpoints[-1]["state_summary"]["pending_action_id"] == str(repository.actions[0].id)
@@ -912,6 +1522,47 @@ def _non_progress_event_types(repository: "FakeRuntimeRepository") -> list[str]:
     return [event.event_type for event in repository.events if event.event_type != "run.progress"]
 
 
+def _run_summary(
+    *,
+    run: AgentRun,
+    thread_id,
+    run_id=None,
+    service_skill_id: str = "cozymate_service_agent",
+    user_goal: str = "Summarize it.",
+    assistant_conclusion: str = "Summary.",
+    loaded_service_skill_id: str = "",
+    created_at: datetime | None = None,
+) -> AgentRunSummary:
+    payload: dict[str, Any] = {
+        "user_goal": user_goal,
+        "assistant_conclusion": assistant_conclusion,
+    }
+    if loaded_service_skill_id:
+        payload["loaded_service_skills"] = [
+            {
+                "service_skill_id": loaded_service_skill_id,
+                "skill_version": "v1",
+                "loaded_at": (created_at or datetime(2026, 7, 7, 10, 0, tzinfo=timezone.utc)).isoformat(),
+                "tool_names": ["records.milk_status.read"],
+            }
+        ]
+    summary_created_at = created_at or datetime(2026, 7, 7, 10, 0, tzinfo=timezone.utc)
+    return AgentRunSummary(
+        id=uuid4(),
+        run_id=run_id or uuid4(),
+        thread_id=thread_id,
+        owner_user_id=run.actor_user_id,
+        service_skill_id=service_skill_id,
+        summary_type="run_fact",
+        schema_version="v1",
+        payload=payload,
+        source_message_ids=[],
+        source_tool_call_ids=[],
+        created_at=summary_created_at,
+        updated_at=summary_created_at,
+    )
+
+
 class FakeRuntimeRepository:
     def __init__(
         self,
@@ -1091,6 +1742,62 @@ class FakeRuntimeRepository:
         return summary
 
 
+class FakeSharedSessionGuard:
+    def __init__(self) -> None:
+        self.active_label = ""
+        self.calls = []
+
+    async def run(self, label: str, callback):
+        if self.active_label:
+            raise AssertionError(f"shared session used concurrently by {self.active_label} and {label}")
+        self.active_label = label
+        self.calls.append(label)
+        await asyncio.sleep(0)
+        try:
+            return await callback()
+        finally:
+            self.active_label = ""
+
+
+class SessionGuardedRuntimeRepository(FakeRuntimeRepository):
+    def __init__(self, *, session_guard: FakeSharedSessionGuard, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.session_guard = session_guard
+
+    async def get_latest_user_message_for_run(self, *, run_id):
+        async def load_current_message():
+            return await super(SessionGuardedRuntimeRepository, self).get_latest_user_message_for_run(run_id=run_id)
+
+        return await self.session_guard.run(
+            "current_message",
+            load_current_message,
+        )
+
+    async def list_messages_for_thread(self, *, thread_id, limit=40):
+        async def load_thread_messages():
+            return await super(SessionGuardedRuntimeRepository, self).list_messages_for_thread(thread_id=thread_id, limit=limit)
+
+        return await self.session_guard.run(
+            "thread_messages",
+            load_thread_messages,
+        )
+
+    async def list_recent_run_summaries(self, *, thread_id, owner_user_id, limit, summary_type="run_fact", exclude_run_id=None):
+        async def load_recent_run_summaries():
+            return await super(SessionGuardedRuntimeRepository, self).list_recent_run_summaries(
+                thread_id=thread_id,
+                owner_user_id=owner_user_id,
+                limit=limit,
+                summary_type=summary_type,
+                exclude_run_id=exclude_run_id,
+            )
+
+        return await self.session_guard.run(
+            "recent_run_summaries",
+            load_recent_run_summaries,
+        )
+
+
 class FakeCheckpointStore:
     def __init__(self) -> None:
         self.checkpoints = []
@@ -1117,6 +1824,22 @@ class FakeMemoryService:
         return [memory for memory in self.memories if memory.owner_user_id == owner_user_id and memory.status == "active"][:limit]
 
 
+class SessionGuardedMemoryService(FakeMemoryService):
+    def __init__(self, *, memories: list[AgentMemory], session_guard: FakeSharedSessionGuard) -> None:
+        super().__init__(memories=memories)
+        self.session_guard = session_guard
+
+    async def list_active_memories(self, *, owner_user_id, memory_type=None, limit=20):
+        async def load_memories():
+            return await super(SessionGuardedMemoryService, self).list_active_memories(
+                owner_user_id=owner_user_id,
+                memory_type=memory_type,
+                limit=limit,
+            )
+
+        return await self.session_guard.run("memory_projection", load_memories)
+
+
 class FakeBusinessFactsProjector:
     def __init__(self, *, facts: dict[str, Any]) -> None:
         self.facts = facts
@@ -1127,7 +1850,7 @@ class FakeBusinessFactsProjector:
             {
                 "actor_user_id": actor.user_id,
                 "run_id": run_id,
-                "selected_skill_id": routing_plan.selected_skill_id,
+                "selected_service_skill_id": routing_plan.selected_service_skill_id,
             }
         )
         return self.facts
@@ -1136,9 +1859,14 @@ class FakeBusinessFactsProjector:
 class FakeTransientStream:
     def __init__(self) -> None:
         self.deltas = []
+        self.progresses = []
 
     async def publish_message_delta(self, *, thread_id, run_id, delta, message_stream_id="assistant", ttl_seconds=600):
-        self.deltas.append({"thread_id": thread_id, "run_id": run_id, "delta": delta})
+        self.deltas.append({"thread_id": thread_id, "run_id": run_id, "delta": delta, "message_stream_id": message_stream_id})
+        return None
+
+    async def publish_progress(self, *, thread_id, run_id, phase, label, ttl_seconds=600):
+        self.progresses.append({"thread_id": thread_id, "run_id": run_id, "phase": phase, "label": label})
         return None
 
 

@@ -230,6 +230,7 @@ class AgentRuntimeRepository:
     async def create_message(
         self,
         *,
+        message_id: UUID | None = None,
         thread_id: UUID,
         run_id: UUID | None,
         role: str,
@@ -238,7 +239,9 @@ class AgentRuntimeRepository:
         status: str,
     ) -> AgentMessage:
         sequence = await self._next_thread_message_sequence(thread_id=thread_id)
+        identity = {"id": message_id} if message_id is not None else {}
         message = AgentMessage(
+            **identity,
             thread_id=thread_id,
             run_id=run_id,
             role=role,

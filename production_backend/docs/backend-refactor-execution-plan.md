@@ -429,9 +429,10 @@ Completed:
 - Deterministic safety guard foundation: emotional crisis, maternal/baby health
   red flags, and prompt injection rule gates with persisted non-allow safety
   decisions.
-- Agent run safety gate integration: unsafe user messages persist the user
-  message and safety event, emit `safety.blocked` and `run.failed`, and do not
-  queue model work.
+- Agent run safety gate integration was retired from the run-create path:
+  unsafe-looking user messages now queue model work normally; standalone safety
+  event storage and eval fixtures remain available for future explicit safety
+  tooling.
 - Worker/runtime observability foundation: request metrics now include outbox
   job outcomes, agent tool outcomes, and OpenAI Agents SDK node outcomes without
   recording prompt text, tool args, job payloads, or secrets.

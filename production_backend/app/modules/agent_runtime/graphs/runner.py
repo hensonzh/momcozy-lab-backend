@@ -48,7 +48,12 @@ class AgentRuntimeGraphRunner:
         final_state = await graph.ainvoke(_initial_state(run))
         status = final_state.get("outcome_status")
         if status == "completed":
-            return AgentRunExecutionResult(status="completed", final_text=str(final_state.get("final_text") or ""))
+            return AgentRunExecutionResult(
+                status="completed",
+                final_text=str(final_state.get("final_text") or ""),
+                assistant_message_id=_uuid_or_none(final_state.get("assistant_message_id")),
+                quick_replies=_list_of_dicts(final_state.get("quick_replies")),
+            )
         if status == "waiting_for_confirmation":
             pending_action_id = _uuid_or_none(final_state.get("pending_action_id"))
             return AgentRunExecutionResult(status="waiting_for_confirmation", pending_action_id=pending_action_id)
@@ -56,31 +61,12 @@ class AgentRuntimeGraphRunner:
 
     def _build_graph(self, *, run: AgentRun) -> Any:
         graph = StateGraph(AgentGraphState)
-        graph.add_node("load_context", cast(Any, self._load_context_node(run=run)))
-        graph.add_node("safety_gate", cast(Any, self._checkpointing_node(run=run, node_name="safety_gate")))
         graph.add_node("sdk_reasoning", cast(Any, self._sdk_reasoning_node(run=run)))
         graph.add_node("finish", cast(Any, self._checkpointing_node(run=run, node_name="finish")))
-        graph.add_edge(START, "load_context")
-        graph.add_edge("load_context", "safety_gate")
-        graph.add_edge("safety_gate", "sdk_reasoning")
+        graph.add_edge(START, "sdk_reasoning")
         graph.add_edge("sdk_reasoning", "finish")
         graph.add_edge("finish", END)
         return graph.compile()
-
-    def _load_context_node(self, *, run: AgentRun) -> GraphNode:
-        async def load_context(state: AgentGraphState) -> dict[str, Any]:
-            current_message = await self.repository.get_latest_user_message_for_run(run_id=run.id)
-            if current_message is None:
-                raise ApiError(code="missing_user_message", message="Agent run has no user message.", status=409)
-            next_state = _node_update(
-                state,
-                node_name="load_context",
-                current_user_message_id=str(current_message.id),
-            )
-            await self._save_checkpoint(run=run, node_name="load_context", state=cast(AgentGraphState, state | next_state))
-            return next_state
-
-        return load_context
 
     def _sdk_reasoning_node(self, *, run: AgentRun) -> GraphNode:
         async def sdk_reasoning(state: AgentGraphState) -> dict[str, Any]:
@@ -91,6 +77,8 @@ class AgentRuntimeGraphRunner:
                 outcome_status=result.status,
                 final_text=result.final_text,
                 pending_action_id=str(result.pending_action_id) if result.pending_action_id else None,
+                assistant_message_id=str(result.assistant_message_id) if result.assistant_message_id else None,
+                quick_replies=result.quick_replies,
             )
             await self._save_checkpoint(run=run, node_name="sdk_reasoning", state=cast(AgentGraphState, state | update))
             return update
@@ -118,6 +106,8 @@ class AgentRuntimeGraphRunner:
                 "visited_nodes": state.get("visited_nodes", []),
                 "pending_action_id": state.get("pending_action_id"),
                 "final_message_id": state.get("final_message_id"),
+                "assistant_message_id": state.get("assistant_message_id"),
+                "quick_reply_count": len(state.get("quick_replies", [])),
                 "outcome_status": state.get("outcome_status", ""),
             },
         )
@@ -162,3 +152,9 @@ def _node_update(state: AgentGraphState, *, node_name: str, **values: Any) -> di
 def _uuid_or_none(value: object) -> UUID | None:
     normalized = str(value or "").strip()
     return UUID(normalized) if normalized else None
+
+
+def _list_of_dicts(value: object) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [dict(item) for item in value if isinstance(item, dict)]

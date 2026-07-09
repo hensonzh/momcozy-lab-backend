@@ -25,11 +25,12 @@
 - OpenAI Agents SDK runner 边界。
 - tool contract / tool executor / action policy 的基础实现。
 - action confirmation -> outbox apply 的 effect lane。
-- deterministic safety gate、replay bundle、eval seed 基础。
+- replay bundle、eval seed 基础；deterministic safety guard 仅保留为独立
+  规则/eval 基础，不再作为 run 创建阶段的 gate。
 - `AgentRuntimeGraphRunner` 已通过 LangGraph `StateGraph` 执行
-  `load_context -> safety_gate -> select_service_skill -> sdk_reasoning ->
-  tool_result_review -> action_policy -> confirmation_interrupt/final_response ->
-  finish`。
+  `load_context -> sdk_reasoning -> finish`；service skill selection、tool
+  result review、action policy 和 confirmation interrupt 在 SDK reasoning /
+  executor 链路内处理。
 
 截至 2026-07-04 的最新增量：
 
@@ -241,7 +242,6 @@ LangGraph workflow。
 - 定义 `AgentGraphState` 的最小稳定 schema。
 - 实现 `StateGraph` 节点：
   - `load_context`
-  - `safety_gate`
   - `sdk_reasoning`
   - `tool_result_review`
   - `action_policy`
@@ -510,8 +510,10 @@ eval regression。
 当前进展：
 
 - Deterministic safety guard 已覆盖母婴健康红旗、婴儿高风险症状、情绪/自伤/可能伤害宝宝、prompt injection，并输出 `allow`、`escalate`、`block`。
-- 高风险输入会在 run 创建阶段写入 `agent_safety_events`，发送 `safety.blocked`，并阻断普通 agent run，不会进入工具/action 流程。
-- `safety.blocked` event 已带 `response_template_key`、`response_template_version`、`handoff_type`，便于 App 端展示版本化安全引导。
+- run 创建阶段的 deterministic safety gate 已移除；高风险输入不再在
+  `create_run` 阶段写入 `agent_safety_events`、发送 `safety.blocked` 或阻断
+  普通 agent run，而是进入正常 worker / SDK reasoning 链路。
+- `safety.blocked` event contract 仅保留给后续显式安全工具或模型侧安全层复用。
 - Eval seed 已包含 health、infant health、emotion、harm-baby、mixed intent、permission bypass、prompt injection regression；runner 使用 deterministic assertions 验证 safety decision 和 forbidden side effect。
 
 验收：

@@ -43,7 +43,10 @@ class BusinessFactsProjector:
         self.clock = clock or _utcnow
 
     async def project(self, *, actor: CurrentUser, run_id: UUID, routing_plan: RoutingPlan) -> dict[str, Any]:
-        sources = _sources_for_skill(skill_id=routing_plan.selected_skill_id, config=self.config)
+        skill_id = routing_plan.selected_service_skill_id
+        if skill_id is None:
+            return {}
+        sources = _sources_for_skill(skill_id=skill_id, config=self.config)
         if not sources:
             return {}
 
@@ -51,31 +54,35 @@ class BusinessFactsProjector:
         facts: dict[str, Any] = {
             "schema_version": "v1",
             "loaded_at": loaded_at,
-            "service_skill_id": routing_plan.selected_skill_id.value,
+            "service_skill_id": skill_id.value,
             "sources": [],
         }
 
         for source in sources:
-            handler = self.handlers.get(source.tool_name)
-            if handler is None:
+            if source.tool_name not in self.handlers:
                 continue
-            payload = await _maybe_await(
-                handler(
-                    ToolHandlerContext(
-                        actor=actor,
-                        run_id=run_id,
-                        tool_name=source.tool_name,
-                        call_id=f"context-projection:{source.tool_name}",
-                        args=dict(source.args),
-                    )
-                )
-            )
+            source, payload = await self._project_source(actor=actor, run_id=run_id, source=source)
             facts[source.context_key] = strip_instructional_tool_output_keys(payload)
             facts["sources"].append({"key": source.context_key, "tool_name": source.tool_name})
 
         if not facts["sources"]:
             return {}
         return facts
+
+    async def _project_source(self, *, actor: CurrentUser, run_id: UUID, source: BusinessFactSource) -> tuple[BusinessFactSource, dict[str, Any]]:
+        handler = self.handlers[source.tool_name]
+        payload = await _maybe_await(
+            handler(
+                ToolHandlerContext(
+                    actor=actor,
+                    run_id=run_id,
+                    tool_name=source.tool_name,
+                    call_id=f"context-projection:{source.tool_name}",
+                    args=dict(source.args),
+                )
+            )
+        )
+        return source, payload
 
 
 async def _maybe_await(value: Awaitable[dict[str, Any]] | dict[str, Any]) -> dict[str, Any]:
@@ -87,10 +94,6 @@ async def _maybe_await(value: Awaitable[dict[str, Any]] | dict[str, Any]) -> dic
 def _sources_for_skill(*, skill_id: ServiceSkillId, config: BusinessFactsProjectorConfig) -> tuple[BusinessFactSource, ...]:
     default_limit = config.default_limit
     recent_limit = config.recent_limit
-    if skill_id == ServiceSkillId.COZYMATE_SERVICE_AGENT:
-        return (
-            BusinessFactSource("profile.read", "profile"),
-        )
     if skill_id == ServiceSkillId.BIRTH_PREP:
         return (
             BusinessFactSource("pregnancy.plan_context.read", "pregnancy", {"limit": default_limit}),

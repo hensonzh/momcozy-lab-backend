@@ -59,6 +59,46 @@ def test_business_facts_projector_projects_lactation_sources() -> None:
     assert "assistant_hint" not in facts["profile"]
 
 
+def test_business_facts_projector_reads_sources_without_parallel_shared_session_access() -> None:
+    session_guard = FakeSharedSessionGuard()
+
+    async def profile_handler(context):
+        await session_guard.enter("profile.read")
+        try:
+            return {"profile": {"display_name": "Mai"}}
+        finally:
+            session_guard.exit("profile.read")
+
+    async def milk_status_handler(context):
+        await session_guard.enter("records.milk_status.read")
+        try:
+            return {"totals": {"trend_pumped_volume_ml": 420}}
+        finally:
+            session_guard.exit("records.milk_status.read")
+
+    facts = asyncio.run(
+        BusinessFactsProjector(
+            handlers={
+                "profile.read": profile_handler,
+                "records.milk_status.read": milk_status_handler,
+            },
+            clock=lambda: datetime(2026, 7, 8, 8, 0, tzinfo=timezone.utc),
+        ).project(
+            actor=_actor(),
+            run_id=uuid4(),
+            routing_plan=_plan(ServiceSkillId.MILK_MANAGEMENT),
+        )
+    )
+
+    assert session_guard.calls == ["profile.read", "records.milk_status.read"]
+    assert facts["sources"] == [
+        {"key": "profile", "tool_name": "profile.read"},
+        {"key": "milk_status", "tool_name": "records.milk_status.read"},
+    ]
+    assert facts["profile"] == {"profile": {"display_name": "Mai"}}
+    assert facts["milk_status"] == {"totals": {"trend_pumped_volume_ml": 420}}
+
+
 def test_business_facts_projector_uses_compact_postpartum_limits() -> None:
     calls = []
 
@@ -104,11 +144,29 @@ def test_business_facts_projector_returns_empty_when_no_handlers_are_available()
 
 def _plan(skill_id: ServiceSkillId) -> RoutingPlan:
     return RoutingPlan(
-        selected_skill_id=skill_id,
+        target_kind="service_skill",
+        selected_service_skill_id=skill_id,
         intents=[IntentItem(intent_type=f"{skill_id.value}_request", service_skill_id=skill_id)],
         confidence=1,
         source=RoutingSource.PASSTHROUGH,
     )
+
+
+class FakeSharedSessionGuard:
+    def __init__(self) -> None:
+        self.active_label = ""
+        self.calls = []
+
+    async def enter(self, label: str) -> None:
+        if self.active_label:
+            raise AssertionError(f"shared session used concurrently by {self.active_label} and {label}")
+        self.active_label = label
+        self.calls.append(label)
+        await asyncio.sleep(0)
+
+    def exit(self, label: str) -> None:
+        assert self.active_label == label
+        self.active_label = ""
 
 
 def _actor() -> CurrentUser:

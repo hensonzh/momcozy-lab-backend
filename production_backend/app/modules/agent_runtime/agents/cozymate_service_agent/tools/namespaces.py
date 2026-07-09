@@ -4,7 +4,6 @@ from dataclasses import dataclass
 
 from production_backend.app.core.errors import ApiError
 
-from .contracts import ToolContract
 from .registry import ToolContractRegistry
 
 
@@ -52,38 +51,83 @@ class ToolNamespaceRegistry:
         return tuple(sorted(names))
 
 
-NAMESPACE_DOMAIN_ORDER = (
-    "profiles",
-    "business_context",
-    "records",
-    "plans",
-    "diary",
-    "memory",
-    "devices",
-    "files",
-    "birth_prep",
-    "hospital_bag",
-    "notifications",
-    "support",
+SCENARIO_NAMESPACE_DEFINITIONS: tuple[ToolNamespace, ...] = (
+    ToolNamespace(
+        name="milk_management",
+        description="奶量、喂养、吸奶、生长记录、奶量计划、提醒和奶量任务工具包。",
+        tool_contracts=(
+            "records.milk_status.read",
+            "records.milk_summary.read",
+            "records.milk_analysis.read",
+            "records.growth.read",
+            "records.feeding_record.propose",
+            "records.feeding_record_delete.propose",
+            "records.pumping_record.propose",
+            "records.pumping_record_delete.propose",
+            "records.growth_record.propose",
+            "records.growth_record_update.propose",
+            "records.growth_record_delete.propose",
+            "plans.current.read",
+            "plans.calendar.read",
+            "plans.milk_plan.propose",
+            "plans.milk_plan_preview.create",
+            "plans.task_complete.propose",
+            "plans.task_create.propose",
+            "notifications.milk_reminder.propose",
+        ),
+    ),
+    ToolNamespace(
+        name="birth_prep",
+        description="孕期计划、分娩沟通、待产包表单与待产包卡片工具包。",
+        tool_contracts=(
+            "pregnancy.plan_context.read",
+            "pregnancy.plan_create.propose",
+            "plans.plan_delete.propose",
+            "plans.task_update.propose",
+            "plans.task_delete.propose",
+            "birth_journey_plan_card_create",
+            "birth_plan_form_create",
+            "labor_communication_card_create",
+            "hospital_bag_form_create",
+            "hospital_bag_card_create",
+        ),
+    ),
+    ToolNamespace(
+        name="hospital_bag_cart",
+        description="待产包购物车调整工具包。",
+        tool_contracts=("hospital_bag_cart_update",),
+    ),
+    ToolNamespace(
+        name="pump_recommendation",
+        description="待产包相关吸奶器推荐工具包。",
+        tool_contracts=("hospital_bag_pump_recommend",),
+    ),
+    ToolNamespace(
+        name="device_support",
+        description="吸奶器设备状态、官方指导素材和售后工单工具包。",
+        tool_contracts=(
+            "devices.pump_status.read",
+            "devices.guidance_assets.read",
+            "support.ticket.propose",
+        ),
+    ),
+    ToolNamespace(
+        name="health_consultation",
+        description="健康咨询中用于读取近期日记、提出日记记录和创建 IBCLC 咨询卡片的工具包。",
+        tool_contracts=(
+            "diary.recent.read",
+            "diary.entry_upsert.propose",
+            "ibclc_consult_card_create",
+        ),
+    ),
+    ToolNamespace(
+        name="emotion_support",
+        description="情绪支持中用于提出长期记忆沉淀的工具包。",
+        tool_contracts=("memory.create.propose",),
+    ),
 )
-NAMESPACE_DESCRIPTIONS = {
-    "profiles": "读取当前用户基础资料的工具。",
-    "business_context": "读取当前用户业务上下文摘要的工具。",
-    "records": "读取奶量、喂养、吸奶记录，并提出记录草稿的工具。",
-    "plans": "读取和提出孕期、奶量、任务计划的工具。",
-    "diary": "读取和提出孕期日记更新的工具。",
-    "memory": "提出长期记忆写入的工具。",
-    "devices": "读取吸奶器状态和官方设备指导素材的工具。",
-    "files": "读取用户上传图片视觉摘要的工具。",
-    "birth_prep": "创建产前准备表单和分娩沟通产物的工具。",
-    "hospital_bag": "创建待产包卡片、购物车调整和吸奶器推荐产物的工具。",
-    "notifications": "提出提醒创建的工具。",
-    "support": "提出售后或人工支持工单的工具。",
-}
 EAGER_READ_CONTRACTS = frozenset(
     {
-        "profile.read",
-        "business.context.read",
         "records.milk_status.read",
         "records.milk_analysis.read",
         "records.milk_summary.read",
@@ -100,29 +144,30 @@ EAGER_READ_CONTRACTS = frozenset(
 
 def default_tool_namespace_registry(tool_registry: ToolContractRegistry | None = None) -> ToolNamespaceRegistry:
     registry = tool_registry or _default_tool_registry()
-    contracts_by_domain: dict[str, list[ToolContract]] = {}
-    for contract in registry.list():
-        contracts_by_domain.setdefault(contract.domain, []).append(contract)
-
-    ordered_domains = [
-        domain
-        for domain in NAMESPACE_DOMAIN_ORDER
-        if domain in contracts_by_domain
-    ]
-    ordered_domains.extend(sorted(domain for domain in contracts_by_domain if domain not in set(ordered_domains)))
+    registered_names = set(registry.names_for_sdk())
+    configured_names = {
+        tool_name
+        for namespace in SCENARIO_NAMESPACE_DEFINITIONS
+        for tool_name in namespace.tool_contracts
+    }
+    unknown_names = sorted(configured_names - registered_names)
+    if unknown_names:
+        raise ValueError(f"agent tool namespace references unknown contracts: {unknown_names}")
     return ToolNamespaceRegistry(
-        namespaces=tuple(_namespace_for_domain(domain=domain, contracts=contracts_by_domain[domain]) for domain in ordered_domains)
+        namespaces=tuple(
+            _scenario_namespace(namespace=namespace, registry=registry)
+            for namespace in SCENARIO_NAMESPACE_DEFINITIONS
+        )
     )
 
 
-def _namespace_for_domain(*, domain: str, contracts: list[ToolContract]) -> ToolNamespace:
-    tool_contracts = tuple(sorted(contract.name for contract in contracts))
-    deferred_tool_contracts = tuple(
-        sorted(contract.name for contract in contracts if _defer_loading(contract))
-    )
+def _scenario_namespace(*, namespace: ToolNamespace, registry: ToolContractRegistry) -> ToolNamespace:
+    contracts = [registry.get(tool_name) for tool_name in namespace.tool_contracts]
+    tool_contracts = tuple(contract.name for contract in contracts)
+    deferred_tool_contracts = tuple(contract.name for contract in contracts if _defer_loading(contract))
     return ToolNamespace(
-        name=domain,
-        description=NAMESPACE_DESCRIPTIONS.get(domain, f"{domain} 领域工具。"),
+        name=namespace.name,
+        description=namespace.description,
         tool_contracts=tool_contracts,
         deferred_tool_contracts=deferred_tool_contracts,
     )
