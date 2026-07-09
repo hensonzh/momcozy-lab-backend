@@ -49,18 +49,26 @@ def test_production_backend_has_no_legacy_bridge_fallback() -> None:
 def test_agent_runtime_uses_explicit_internal_subdomains() -> None:
     expected_subdomains = {
         "actions",
+        "agents",
         "evals",
         "event_stream",
         "graphs",
         "memory",
-        "prompts",
         "routing",
         "run_lifecycle",
         "safety",
         "sdk",
-        "tools",
     }
     missing_subdomains = sorted(name for name in expected_subdomains if not (AGENT_RUNTIME_ROOT / name).is_dir())
+    expected_agent_subdomains = {
+        "cozymate_service_agent/prompts",
+        "cozymate_service_agent/skills",
+        "cozymate_service_agent/tools",
+        "main_coordinator_agent",
+    }
+    missing_agent_subdomains = sorted(
+        name for name in expected_agent_subdomains if not (AGENT_RUNTIME_ROOT / "agents" / name).is_dir()
+    )
 
     flattened_runtime_files = {
         "action_outbox.py",
@@ -81,6 +89,7 @@ def test_agent_runtime_uses_explicit_internal_subdomains() -> None:
     leaked_files = sorted(name for name in flattened_runtime_files if (AGENT_RUNTIME_ROOT / name).exists())
 
     assert missing_subdomains == []
+    assert missing_agent_subdomains == []
     assert leaked_files == []
 
 

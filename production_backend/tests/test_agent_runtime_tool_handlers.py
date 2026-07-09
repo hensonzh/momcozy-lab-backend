@@ -573,13 +573,13 @@ def test_device_guidance_assets_read_tool_handler_returns_bounded_metadata() -> 
 
     assert result == {
         "assets": [
-                {
-                    "id": "asset-guide",
-                    "label": "Air1 unboxing pump guide",
-                    "domain": "device_guidance",
-                    "content_type": "application/pdf",
-                    "size_bytes": 1200,
-                }
+            {
+                "id": "asset-guide",
+                "label": "Air1 unboxing pump guide",
+                "domain": "device_guidance",
+                "content_type": "application/pdf",
+                "size_bytes": 1200,
+            }
         ],
         "count": 1,
         "available_count": 1,
