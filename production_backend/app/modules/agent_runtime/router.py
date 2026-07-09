@@ -474,10 +474,19 @@ async def _stream_run_event_chunks(
 
 def _first_final_event_index(events: list[object]) -> int:
     for index, event in enumerate(events):
-        event_type = str(getattr(event, "event_type", "") or "")
-        if event_type == "message.completed" or event_type in TERMINAL_STREAM_EVENT_TYPES:
+        if _is_final_stream_event(event):
             return index
     return -1
+
+
+def _is_final_stream_event(event: object) -> bool:
+    event_type = str(getattr(event, "event_type", "") or "")
+    if event_type in TERMINAL_STREAM_EVENT_TYPES:
+        return True
+    if event_type != "message.completed":
+        return False
+    payload = getattr(event, "payload", None)
+    return isinstance(payload, dict) and payload.get("role") == "assistant"
 
 
 async def _read_transient_events(

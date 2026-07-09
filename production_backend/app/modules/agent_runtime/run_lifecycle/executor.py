@@ -343,7 +343,7 @@ class AgentRuntimeExecutor:
                 prompt_version=run.prompt_version,
                 trace_id=run.trace_id,
                 service_skill_id=_routing_target_id(turn_context.routing_plan),
-                on_text_delta=self._text_delta_handler(run=run),
+                on_text_delta=None,
             )
         )
         turn_context.timings_ms["model_reasoning"] = _elapsed_ms(model_started_at)
@@ -425,8 +425,6 @@ class AgentRuntimeExecutor:
         quick_replies = [] if run.id in self._run_suppress_quick_replies else list(self._run_quick_replies.get(run.id, []))
         if not quick_replies and run.id not in self._run_suppress_quick_replies:
             quick_replies = list(sanitized_response.quick_replies)
-        if not quick_replies and run.id not in self._run_suppress_quick_replies:
-            quick_replies = _fallback_quick_replies(final_text)
         return AgentRunExecutionResult(
             status="completed",
             final_text=final_text,
@@ -1494,19 +1492,6 @@ def _quick_replies_from_tool_output(payload: dict[str, Any]) -> list[dict[str, A
         seen.add(text)
         replies.append({"text": text})
     return replies if len(replies) == 3 else []
-
-
-def _fallback_quick_replies(final_text: str) -> list[dict[str, Any]]:
-    text = final_text.strip()
-    if not text:
-        return []
-    if any(marker in text for marker in ("称呼", "名字", "多大", "年龄")):
-        replies = ("我来说名字和年龄", "先跳过这个", "为什么需要这些")
-    elif any(marker in text for marker in ("？", "?", "吗", "要不要", "是否")):
-        replies = ("好的，继续", "我不太确定", "换个问法")
-    else:
-        replies = ("继续聊这个", "给我更多细节", "换个方向")
-    return [{"text": reply} for reply in replies]
 
 
 def _contains_form_like_artifact(payload: dict[str, Any]) -> bool:

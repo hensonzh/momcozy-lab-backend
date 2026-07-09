@@ -263,6 +263,75 @@ def test_stream_run_event_chunks_flushes_transient_delta_before_final_events() -
     assert [payload["type"] for payload in _sse_payloads(chunks[2])] == ["message.completed", "run.completed"]
 
 
+def test_stream_run_event_chunks_does_not_treat_user_message_as_final() -> None:
+    thread_id = uuid4()
+    run_id = uuid4()
+    queued = AgentEvent(
+        event_id=uuid4(),
+        thread_id=thread_id,
+        run_id=run_id,
+        sequence=1,
+        event_type="run.queued",
+        payload={},
+    )
+    user_message = AgentEvent(
+        event_id=uuid4(),
+        thread_id=thread_id,
+        run_id=run_id,
+        sequence=2,
+        event_type="message.completed",
+        payload={"message_id": "user", "role": "user"},
+    )
+    progress = AgentEvent(
+        event_id=uuid4(),
+        thread_id=thread_id,
+        run_id=run_id,
+        sequence=3,
+        event_type="run.progress",
+        payload={"label": "我想一下"},
+    )
+    final_message = AgentEvent(
+        event_id=uuid4(),
+        thread_id=thread_id,
+        run_id=run_id,
+        sequence=4,
+        event_type="message.completed",
+        payload={"message_id": "assistant", "role": "assistant", "text": "完整回复"},
+    )
+    completed = AgentEvent(
+        event_id=uuid4(),
+        thread_id=thread_id,
+        run_id=run_id,
+        sequence=5,
+        event_type="run.completed",
+        payload={},
+    )
+
+    async def exercise() -> list[str]:
+        chunks = []
+        async for chunk in _stream_run_event_chunks(
+            service=FakeAgentRuntimeService([[queued, user_message, progress, final_message, completed]]),
+            owner_user_id=uuid4(),
+            run_id=run_id,
+            after_sequence=0,
+            limit=20,
+            follow=True,
+            poll_interval_seconds=0.1,
+            max_wait_seconds=1,
+            transient_stream=FakeTransientStream([]),
+        ):
+            chunks.append(chunk)
+        return chunks
+
+    chunks = asyncio.run(exercise())
+
+    assert len(chunks) == 2
+    assert [payload["type"] for payload in _sse_payloads(chunks[0])] == ["run.queued", "message.completed", "run.progress"]
+    assert [payload["type"] for payload in _sse_payloads(chunks[1])] == ["message.completed", "run.completed"]
+    assert _sse_payloads(chunks[0])[1]["payload"]["role"] == "user"
+    assert _sse_payloads(chunks[1])[0]["payload"]["role"] == "assistant"
+
+
 def test_stream_run_event_chunks_can_finish_from_transient_terminal_events() -> None:
     thread_id = uuid4()
     run_id = uuid4()

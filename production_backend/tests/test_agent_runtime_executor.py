@@ -288,7 +288,7 @@ def test_default_service_skills_are_file_backed() -> None:
         assert service_skill.prompt_block().strip()
 
 
-def test_agent_runtime_executor_publishes_text_deltas_to_transient_stream() -> None:
+def test_agent_runtime_executor_does_not_publish_model_loop_deltas_to_transient_stream() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)
     current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="Stream please", sequence=1)
@@ -307,10 +307,8 @@ def test_agent_runtime_executor_publishes_text_deltas_to_transient_stream() -> N
     assert result.status == "completed"
     assert result.final_text == "hello"
     assert result.assistant_message_id is not None
-    assert transient_stream.deltas == [
-        {"thread_id": thread_id, "run_id": run.id, "delta": "hel", "message_stream_id": str(result.assistant_message_id)},
-        {"thread_id": thread_id, "run_id": run.id, "delta": "lo", "message_stream_id": str(result.assistant_message_id)},
-    ]
+    assert backend.requests[0].on_text_delta is None
+    assert transient_stream.deltas == []
     assert transient_stream.progresses == [
         {
             "thread_id": thread_id,
@@ -630,7 +628,7 @@ def test_agent_runtime_executor_collects_quick_replies_for_final_message() -> No
     assert result.assistant_message_id is not None
     assert result.quick_replies == replies
     assert tool_executor.calls[0]["tool_name"] == "ui_quick_replies_create"
-    assert {delta["message_stream_id"] for delta in transient_stream.deltas} == {str(result.assistant_message_id)}
+    assert transient_stream.deltas == []
 
 
 def test_agent_runtime_executor_extracts_quick_replies_from_final_text_json() -> None:
@@ -689,7 +687,7 @@ def test_agent_runtime_executor_suppresses_streamed_structured_json_deltas() -> 
     assert transient_stream.deltas == []
 
 
-def test_agent_runtime_executor_adds_fallback_quick_replies_when_model_skips_tool() -> None:
+def test_agent_runtime_executor_does_not_add_fallback_quick_replies_when_model_skips_tool() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)
     current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="继续聊这个", sequence=1)
@@ -710,7 +708,7 @@ def test_agent_runtime_executor_adds_fallback_quick_replies_when_model_skips_too
     )
 
     assert result.status == "completed"
-    assert result.quick_replies == [{"text": "好的，继续"}, {"text": "我不太确定"}, {"text": "换个问法"}]
+    assert result.quick_replies == []
 
 
 def test_agent_runtime_executor_allows_service_tool_after_skill_load() -> None:
