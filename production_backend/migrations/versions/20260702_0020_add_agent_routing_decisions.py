@@ -38,7 +38,7 @@ def upgrade() -> None:
         sa.Column("primary_specialist_id", sa.String(length=80), nullable=False),
         sa.Column("routing_source", sa.String(length=80), nullable=False),
         sa.Column("confidence_score", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("execution_mode", sa.String(length=40), nullable=False, server_default="single"),
+        sa.Column("execution_mode", sa.String(length=40), nullable=False, server_default="passthrough"),
         sa.Column("intents_json", postgresql.JSONB(), nullable=False, server_default=sa.text("'[]'::jsonb")),
         sa.Column("reason_codes_json", postgresql.JSONB(), nullable=False, server_default=sa.text("'[]'::jsonb")),
         sa.Column("safety_flags_json", postgresql.JSONB(), nullable=False, server_default=sa.text("'[]'::jsonb")),

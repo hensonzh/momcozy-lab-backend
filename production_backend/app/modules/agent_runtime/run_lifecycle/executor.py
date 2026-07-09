@@ -12,29 +12,41 @@ from ....core.errors import ApiError
 from ....infrastructure.object_storage.base import ObjectStorage
 from ...auth import CurrentUser
 from ..actions.policy import AgentActionPolicy, AgentActionPolicyDecision
-from ..context import BusinessFactsProjector
+from ..agents.cozymate_service_agent.context import BusinessFactsProjector
+from ..agents.cozymate_service_agent.prompts import (
+    ContextProjection,
+    DEFAULT_STABLE_SYSTEM_PROMPT,
+    ModelInputBuilder,
+)
+from ..agents.cozymate_service_agent.skill_registry import (
+    AgentServiceSkill,
+    AgentServiceSkillRegistry,
+    default_service_skill_registry,
+)
+from ..agents.cozymate_service_agent.tools import (
+    ToolContractRegistry,
+    ToolExecutor,
+    ToolNamespace,
+    ToolNamespaceRegistry,
+    default_tool_namespace_registry,
+    default_tool_registry,
+)
+from ..agents.cozymate_service_agent.tools.schemas import tool_input_schema
+from ..agents.main_coordinator_agent import RoutingPlan, ServiceSkillId, plan_current_request
 from ..event_stream.sink import AgentEventSink
 from ..event_stream.transient import AgentTransientStream
 from ..graphs import AgentGraphCheckpointStore, AgentGraphRegistry, default_graph_registry
 from ..memory.service import AgentMemoryService
 from ..models import AgentAction, AgentArtifact, AgentEvent, AgentMessage, AgentRun
 from ..payloads import DEFAULT_MAX_INLINE_PAYLOAD_BYTES, maybe_externalize_json_payload
-from ..prompts import (
-    ContextProjection,
-    DEFAULT_STABLE_SYSTEM_PROMPT,
-    ModelInputBuilder,
-)
 from ..repository import AgentRuntimeRepository
-from ..routing import IntentItem, RoutingPlan, RoutingSource, ServiceSkillId, SkillRoutingService
 from ..sdk import (
     OpenAIAgentsSdkRunner,
     SdkNodeRequest,
     SdkToolDefinition,
+    SdkToolNamespace,
     sdk_tool_name,
 )
-from ..skill_registry import AgentServiceSkill, AgentServiceSkillRegistry, default_service_skill_registry
-from ..tools import ToolContractRegistry, ToolExecutor, ToolGroupRegistry, default_tool_group_registry, default_tool_registry
-from ..tools.schemas import tool_input_schema
 from .execution import AgentRunExecutionResult
 from .state_store import AgentRuntimeStateStore
 
@@ -57,13 +69,12 @@ class AgentRuntimeExecutor:
         checkpoint_store: AgentGraphCheckpointStore | None = None,
         state_store: AgentRuntimeStateStore | None = None,
         tool_registry: ToolContractRegistry | None = None,
+        tool_namespace_registry: ToolNamespaceRegistry | None = None,
         tool_executor: ToolExecutor | None = None,
         event_sink: AgentEventSink | None = None,
         action_policy: AgentActionPolicy | None = None,
         memory_service: AgentMemoryService | None = None,
         service_skill_registry: AgentServiceSkillRegistry | None = None,
-        routing_service: SkillRoutingService | None = None,
-        tool_group_registry: ToolGroupRegistry | None = None,
         business_facts_projector: BusinessFactsProjector | None = None,
         transient_stream: AgentTransientStream | None = None,
         input_builder: ModelInputBuilder | None = None,
@@ -78,13 +89,12 @@ class AgentRuntimeExecutor:
         self.checkpoint_store = checkpoint_store
         self.state_store = state_store
         self.tool_registry = tool_registry or default_tool_registry()
-        self.tool_group_registry = tool_group_registry or default_tool_group_registry()
+        self.tool_namespace_registry = tool_namespace_registry or default_tool_namespace_registry(self.tool_registry)
         self.tool_executor = tool_executor
         self.event_sink = event_sink
         self.action_policy = action_policy or AgentActionPolicy()
         self.memory_service = memory_service
         self.service_skill_registry = service_skill_registry or default_service_skill_registry()
-        self.routing_service = routing_service or SkillRoutingService()
         self.business_facts_projector = business_facts_projector
         self.transient_stream = transient_stream
         self.input_builder = input_builder or ModelInputBuilder()
@@ -109,23 +119,26 @@ class AgentRuntimeExecutor:
         messages = await self.repository.list_messages_for_thread(thread_id=run.thread_id, limit=self.config.history_limit)
         memory_projection = await self._memory_projection(run=run)
         recent_run_facts = await self._recent_run_facts(run=run)
-        routing_plan = _main_agent_plan()
+        routing_plan = plan_current_request()
         service_skills = self.service_skill_registry.list()
         await self._record_routing_decision(run=run, current_message=current_message, routing_plan=routing_plan)
-        tool_names = self.tool_registry.names_for_sdk() if self.tool_executor is not None else ()
+        tool_namespaces = (
+            self.tool_namespace_registry.list()
+            if self.tool_executor is not None and self.sdk_runner.supports_tool_namespaces()
+            else ()
+        )
+        tool_names = self.tool_namespace_registry.names_for_sdk() if self.tool_executor is not None else ()
         fresh_business_facts = await self._fresh_business_facts(run=run, routing_plan=routing_plan)
         await self._append_progress(run=run, phase="context_ready", label="我看一下你的信息")
+        model_visible_state = _model_visible_state_projection(
+            service_skills=service_skills,
+            tool_names=tool_names,
+            routing_plan=routing_plan,
+        )
         projection = ContextProjection(
             stable_system_prompt=self.config.stable_system_prompt,
             selected_conversation_history=_history_before(messages=messages, before_sequence=current_message.sequence),
-            current_state_projection={
-                "agent_mode": "single_main_agent",
-                "available_service_skill_ids": [skill.service_skill_id for skill in service_skills],
-                "visible_tool_count": len(tool_names),
-                "execution_mode": routing_plan.execution_mode,
-                "needs_clarification": routing_plan.needs_clarification,
-                "safety_flags": routing_plan.safety_flags,
-            },
+            current_state_projection=model_visible_state,
             user_context=_user_context(current_message=current_message, now=self.clock()),
             recent_run_facts=recent_run_facts,
             memory_projection=memory_projection,
@@ -144,12 +157,15 @@ class AgentRuntimeExecutor:
                 "context_refs": [],
                 "pending_action_id": None,
                 "final_message_id": None,
-                "agent_mode": "single_main_agent",
+                "agent_mode": "main_coordinator_passthrough",
+                "delegated_agent": "cozymate_service_agent",
                 "available_service_skill_ids": [skill.service_skill_id for skill in service_skills],
                 "routing_source": routing_plan.source.value,
                 "routing_confidence": routing_plan.confidence,
                 "routing_reason_codes": routing_plan.reason_codes,
                 "tool_names": list(tool_names),
+                "tool_namespaces": [namespace.state_summary() for namespace in tool_namespaces],
+                "tool_search_enabled": _tool_search_enabled(tool_namespaces),
             },
         )
         await self._append_progress(run=run, phase="model_reasoning", label="我想一下")
@@ -161,10 +177,12 @@ class AgentRuntimeExecutor:
                 instructions=_sdk_instructions(projection=projection, service_skills=service_skills),
                 model_input=model_input,
                 tool_names=tool_names,
-                tools=self._sdk_tools(run=run, tool_names=tool_names),
+                tool_namespaces=_sdk_tool_namespaces(tool_namespaces),
+                tool_search_enabled=_tool_search_enabled(tool_namespaces),
+                tools=self._sdk_tools(run=run, tool_names=tool_names, tool_namespaces=tool_namespaces),
                 prompt_version=run.prompt_version,
                 trace_id=run.trace_id,
-                service_skill_id="main_agent",
+                service_skill_id="cozymate_service_agent",
                 on_text_delta=self._text_delta_handler(run=run),
             )
         )
@@ -220,7 +238,7 @@ class AgentRuntimeExecutor:
         await self._upsert_run_summary(
             run=run,
             current_message=current_message,
-            service_skill_id="main_agent",
+            service_skill_id="cozymate_service_agent",
             result=result,
         )
         return AgentRunExecutionResult(status="completed", final_text=final_text)
@@ -289,12 +307,26 @@ class AgentRuntimeExecutor:
 
         return publish
 
-    def _sdk_tools(self, *, run: AgentRun, tool_names: tuple[str, ...]) -> tuple[SdkToolDefinition, ...]:
+    def _sdk_tools(
+        self,
+        *,
+        run: AgentRun,
+        tool_names: tuple[str, ...],
+        tool_namespaces: tuple[ToolNamespace, ...],
+    ) -> tuple[SdkToolDefinition, ...]:
         if self.tool_executor is None:
             return ()
-        return tuple(self._sdk_tool_definition(run=run, tool_name=tool_name) for tool_name in tool_names)
+        namespace_by_tool = _namespace_by_tool(tool_namespaces)
+        return tuple(
+            self._sdk_tool_definition(
+                run=run,
+                tool_name=tool_name,
+                namespace=namespace_by_tool.get(tool_name),
+            )
+            for tool_name in tool_names
+        )
 
-    def _sdk_tool_definition(self, *, run: AgentRun, tool_name: str) -> SdkToolDefinition:
+    def _sdk_tool_definition(self, *, run: AgentRun, tool_name: str, namespace: ToolNamespace | None = None) -> SdkToolDefinition:
         contract = self.tool_registry.get(tool_name)
         sdk_name = sdk_tool_name(contract.name)
 
@@ -307,6 +339,8 @@ class AgentRuntimeExecutor:
             description=contract.description,
             params_json_schema=tool_input_schema(contract.input_schema_ref),
             invoke_json=invoke_json,
+            namespace_name=namespace.name if namespace is not None else "",
+            defer_loading=contract.name in set(namespace.deferred_tool_contracts) if namespace is not None else False,
         )
 
     async def _invoke_sdk_tool(self, *, run: AgentRun, contract_name: str, sdk_name: str, args_json: str) -> str:
@@ -358,14 +392,13 @@ class AgentRuntimeExecutor:
         recorder = getattr(self.repository, "record_routing_decision", None)
         if recorder is None:
             return
-        direct_main_agent = "direct_main_agent" in routing_plan.reason_codes
         await recorder(
             run_id=run.id,
             thread_id=run.thread_id,
             actor_user_id=run.actor_user_id,
             message_id=current_message.id,
-            selected_skill_id="main_agent" if direct_main_agent else routing_plan.selected_skill_id.value,
-            routing_source="direct_main_agent" if direct_main_agent else routing_plan.source.value,
+            selected_skill_id=routing_plan.selected_skill_id.value,
+            routing_source=routing_plan.source.value,
             confidence=routing_plan.confidence,
             execution_mode=routing_plan.execution_mode,
             intents=[intent.model_dump(mode="json") for intent in routing_plan.intents],
@@ -374,7 +407,6 @@ class AgentRuntimeExecutor:
             needs_clarification=routing_plan.needs_clarification,
             tool_scope_version=_tool_scope_version_for_ledger(
                 routing_plan=routing_plan,
-                direct_main_agent=direct_main_agent,
                 tool_executor_configured=self.tool_executor is not None,
             ),
         )
@@ -514,16 +546,20 @@ def _history_before(*, messages: list[AgentMessage], before_sequence: int) -> li
     ]
 
 
-def _main_agent_plan() -> RoutingPlan:
-    return RoutingPlan(
-        selected_skill_id=ServiceSkillId.MAIN_AGENT,
-        intents=[IntentItem(intent_type="main_agent_request", service_skill_id=ServiceSkillId.MAIN_AGENT)],
-        tool_group_ids=[],
-        execution_mode="single",
-        confidence=1,
-        source=RoutingSource.FALLBACK,
-        reason_codes=["direct_main_agent"],
-    )
+def _model_visible_state_projection(
+    *,
+    service_skills: tuple[AgentServiceSkill, ...],
+    tool_names: tuple[str, ...],
+    routing_plan: RoutingPlan,
+) -> dict[str, Any]:
+    return {
+        "agent_mode": "single_main_agent",
+        "available_service_skill_ids": [skill.service_skill_id for skill in service_skills],
+        "visible_tool_count": len(tool_names),
+        "execution_mode": "single",
+        "needs_clarification": routing_plan.needs_clarification,
+        "safety_flags": list(routing_plan.safety_flags),
+    }
 
 
 def _artifact_event_payload(artifact: AgentArtifact) -> dict[str, Any]:
@@ -549,12 +585,31 @@ def _artifact_event_payload(artifact: AgentArtifact) -> dict[str, Any]:
 def _tool_scope_version_for_ledger(
     *,
     routing_plan: RoutingPlan,
-    direct_main_agent: bool,
     tool_executor_configured: bool,
 ) -> str:
-    if direct_main_agent and tool_executor_configured:
-        return "all_registered_tools"
-    return ",".join(routing_plan.tool_group_ids) or "none"
+    if routing_plan.selected_skill_id == ServiceSkillId.COZYMATE_SERVICE_AGENT and tool_executor_configured:
+        return "namespaced_tool_registry"
+    return "none"
+
+
+def _sdk_tool_namespaces(tool_namespaces: tuple[ToolNamespace, ...]) -> tuple[SdkToolNamespace, ...]:
+    return tuple(
+        SdkToolNamespace(
+            name=namespace.name,
+            description=namespace.description,
+            tool_names=namespace.tool_contracts,
+            deferred_tool_names=namespace.deferred_tool_contracts,
+        )
+        for namespace in tool_namespaces
+    )
+
+
+def _tool_search_enabled(tool_namespaces: tuple[ToolNamespace, ...]) -> bool:
+    return any(namespace.deferred_tool_contracts for namespace in tool_namespaces)
+
+
+def _namespace_by_tool(tool_namespaces: tuple[ToolNamespace, ...]) -> dict[str, ToolNamespace]:
+    return {tool_name: namespace for namespace in tool_namespaces for tool_name in namespace.tool_contracts}
 
 
 def _sdk_instructions(*, projection: ContextProjection, service_skills: tuple[AgentServiceSkill, ...]) -> str:

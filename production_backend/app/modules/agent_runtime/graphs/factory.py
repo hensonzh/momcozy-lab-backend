@@ -38,24 +38,13 @@ def default_graph_registry() -> AgentGraphRegistry:
             node_names=(
                 "load_context",
                 "safety_gate",
-                "select_service_skill",
                 "sdk_reasoning",
-                "tool_result_review",
-                "action_policy",
-                "confirmation_interrupt",
-                "final_response",
                 "finish",
             ),
             edge_names=(
                 "load_context->safety_gate",
-                "safety_gate->select_service_skill",
-                "select_service_skill->sdk_reasoning",
-                "sdk_reasoning->tool_result_review",
-                "tool_result_review->action_policy",
-                "action_policy->confirmation_interrupt",
-                "action_policy->final_response",
-                "confirmation_interrupt->finish",
-                "final_response->finish",
+                "safety_gate->sdk_reasoning",
+                "sdk_reasoning->finish",
             ),
         )
     )

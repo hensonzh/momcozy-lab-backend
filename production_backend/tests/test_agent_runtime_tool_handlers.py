@@ -6,24 +6,36 @@ import pytest
 
 from production_backend.app.core.errors import ApiError
 from production_backend.app.modules.agent_runtime.models import AgentAction, AgentArtifact
-from production_backend.app.modules.agent_runtime.tools import (
+from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.tools import (
     AgentArtifactCreateToolHandler,
     BusinessContextReadToolHandler,
     DeviceGuidanceAssetsReadToolHandler,
     DevicesPumpStatusReadToolHandler,
     DiaryEntryUpsertProposeToolHandler,
     DiaryRecentReadToolHandler,
+    FeedingRecordDeleteProposeToolHandler,
     FeedingRecordProposeToolHandler,
     FileVisionSummaryReadToolHandler,
+    GrowthRecordDeleteProposeToolHandler,
+    GrowthRecordProposeToolHandler,
+    GrowthRecordUpdateProposeToolHandler,
+    GrowthRecordsReadToolHandler,
     HospitalBagCartUpdateProposeToolHandler,
+    IbclcConsultCardCreateToolHandler,
     LegacyArtifactToolHandler,
+    MilkAnalysisReadToolHandler,
+    MilkPlanPreviewCreateToolHandler,
     MemoryCreateProposeToolHandler,
-    MilkStatusReadToolHandler,
     MilkPlanProposeToolHandler,
     MilkReminderProposeToolHandler,
     MilkSummaryReadToolHandler,
+    MilkStatusReadToolHandler,
+    PlanDeleteProposeToolHandler,
     PlanTaskCompleteProposeToolHandler,
     PlanTaskCreateProposeToolHandler,
+    PlanTaskDeleteProposeToolHandler,
+    PlanTaskUpdateProposeToolHandler,
+    PlansCalendarReadToolHandler,
     PlansCurrentReadToolHandler,
     ProfileReadToolHandler,
     PumpingRecordProposeToolHandler,
@@ -45,12 +57,22 @@ from production_backend.app.modules.plans.agent_actions import (
     MILK_PLAN_CREATE_ACTION,
     PLAN_TASK_COMPLETE_ACTION,
     PLAN_TASK_CREATE_ACTION,
+    PLAN_TASK_DELETE_ACTION,
+    PLAN_TASK_UPDATE_ACTION,
+    PLAN_DELETE_ACTION,
     PREGNANCY_PLAN_CREATE_ACTION,
 )
 from production_backend.app.modules.plans.models import Plan, PlanTask
 from production_backend.app.modules.profiles.models import InfantProfile, UserProfile
 from production_backend.app.modules.records.models import FeedingRecord, GrowthRecord, PumpingRecord
-from production_backend.app.modules.records.agent_actions import FEEDING_RECORD_CREATE_ACTION, PUMPING_RECORD_CREATE_ACTION
+from production_backend.app.modules.records.agent_actions import (
+    FEEDING_RECORD_CREATE_ACTION,
+    FEEDING_RECORD_DELETE_ACTION,
+    GROWTH_RECORD_CREATE_ACTION,
+    GROWTH_RECORD_DELETE_ACTION,
+    GROWTH_RECORD_UPDATE_ACTION,
+    PUMPING_RECORD_CREATE_ACTION,
+)
 from production_backend.app.modules.records.schemas import MilkTrendDayRead, MilkTrendListResponse
 
 
@@ -426,6 +448,37 @@ def test_milk_status_read_tool_handler_returns_deterministic_status_snapshot() -
     }
 
 
+def test_milk_analysis_read_tool_handler_returns_growth_and_next_step_snapshot() -> None:
+    actor = _user()
+    records_service = FakeRecordsService(owner_user_id=actor.user_id)
+    profile_service = FakeProfileService(profile=None, infants=[])
+    handler = MilkAnalysisReadToolHandler(records_service=records_service, profile_service=profile_service)
+
+    result = asyncio.run(handler(_context(actor=actor, args={"days": 3, "limit": 2})))
+
+    assert records_service.owner_user_id == actor.user_id
+    assert result["status"]["data_coverage"] == "ready"
+    assert result["counts"]["recent_growth"] == 1
+    assert result["recent_growth"][0]["weight_kg"] == 6.2
+    assert result["analysis"]["pathway"] == "补充宝宝资料后再判断供需"
+    assert result["analysis"]["recommended_next_step"] == "先确认宝宝资料或体重/尿布等摄入信号。"
+
+
+def test_growth_records_read_tool_handler_returns_bounded_owner_scoped_records() -> None:
+    actor = _user()
+    records_service = FakeRecordsService(owner_user_id=actor.user_id)
+    infant_id = uuid4()
+    handler = GrowthRecordsReadToolHandler(records_service=records_service)
+
+    result = asyncio.run(handler(_context(actor=actor, args={"infant_id": str(infant_id), "limit": 2})))
+
+    assert records_service.owner_user_id == actor.user_id
+    assert records_service.growth_infant_id == infant_id
+    assert result["count"] == 1
+    assert result["infant_id"] == str(infant_id)
+    assert result["growth"][0]["height_cm"] == 62
+
+
 def test_plans_current_read_tool_handler_returns_bounded_owner_scoped_summary() -> None:
     actor = _user()
     plans_service = FakePlansService(owner_user_id=actor.user_id)
@@ -439,6 +492,20 @@ def test_plans_current_read_tool_handler_returns_bounded_owner_scoped_summary() 
     assert result["plans"][0]["title"] == "Birth plan"
     assert result["tasks"][0]["task_date"] == "2026-07-03"
     assert result["counts"] == {"plans": 1, "tasks": 1}
+
+
+def test_plans_calendar_read_tool_handler_filters_by_date_and_status() -> None:
+    actor = _user()
+    plans_service = FakePlansService(owner_user_id=actor.user_id)
+    handler = PlansCalendarReadToolHandler(plans_service=plans_service)
+
+    result = asyncio.run(handler(_context(actor=actor, args={"task_date": "2026-07-03", "status": "pending", "limit": 2})))
+
+    assert plans_service.owner_user_id == actor.user_id
+    assert plans_service.task_date == date(2026, 7, 3)
+    assert plans_service.task_status == "pending"
+    assert result["filters"] == {"task_date": "2026-07-03", "status": "pending", "limit": 2}
+    assert result["tasks"][0]["title"] == "Call clinic"
 
 
 def test_diary_recent_read_tool_handler_returns_bounded_owner_scoped_summary() -> None:
@@ -502,20 +569,21 @@ def test_devices_pump_status_read_tool_handler_returns_bounded_owner_scoped_summ
 def test_device_guidance_assets_read_tool_handler_returns_bounded_metadata() -> None:
     handler = DeviceGuidanceAssetsReadToolHandler(asset_service=FakeAssetService())
 
-    result = asyncio.run(handler(_context(args={"limit": 1, "content_type": "application/pdf"})))
+    result = asyncio.run(handler(_context(args={"limit": 1, "content_type": "application/pdf", "model": "Air1", "topic": "setup"})))
 
     assert result == {
         "assets": [
-            {
-                "id": "asset-guide",
-                "label": "Pump guide",
-                "domain": "device_guidance",
-                "content_type": "application/pdf",
-                "size_bytes": 1200,
-            }
+                {
+                    "id": "asset-guide",
+                    "label": "Air1 unboxing pump guide",
+                    "domain": "device_guidance",
+                    "content_type": "application/pdf",
+                    "size_bytes": 1200,
+                }
         ],
         "count": 1,
         "available_count": 1,
+        "query_context": {"model": "Air1", "topic": "setup", "query": "", "measured_nipple_mm": None},
     }
 
 
@@ -608,6 +676,56 @@ def test_pumping_record_propose_tool_handler_creates_confirmation_action() -> No
     assert runtime_service.calls[0]["apply_payload"]["metadata"] == {"timezone": "Asia/Shanghai"}
 
 
+def test_record_delete_and_growth_propose_tool_handlers_create_actions() -> None:
+    actor = _user()
+    runtime_service = FakeAgentRuntimeService()
+    record_id = uuid4()
+    growth_id = uuid4()
+
+    feeding_delete = asyncio.run(
+        FeedingRecordDeleteProposeToolHandler(runtime_service=runtime_service)(
+            _context(actor=actor, args={"record_id": str(record_id), "reason": "duplicate"})
+        )
+    )
+    growth_create = asyncio.run(
+        GrowthRecordProposeToolHandler(runtime_service=runtime_service)(
+            _context(
+                actor=actor,
+                args={
+                    "measured_at": "2026-07-04T10:00:00+00:00",
+                    "weight_kg": 6.4,
+                    "timezone": "Asia/Shanghai",
+                },
+            )
+        )
+    )
+    growth_update = asyncio.run(
+        GrowthRecordUpdateProposeToolHandler(runtime_service=runtime_service)(
+            _context(actor=actor, args={"record_id": str(growth_id), "height_cm": 63})
+        )
+    )
+    growth_delete = asyncio.run(
+        GrowthRecordDeleteProposeToolHandler(runtime_service=runtime_service)(
+            _context(actor=actor, args={"record_id": str(growth_id)})
+        )
+    )
+
+    assert feeding_delete["action_type"] == FEEDING_RECORD_DELETE_ACTION
+    assert feeding_delete["preview_payload"] == {
+        "record_type": "feeding_record",
+        "record_id": str(record_id),
+        "reason": "duplicate",
+    }
+    assert growth_create["action_type"] == GROWTH_RECORD_CREATE_ACTION
+    assert growth_create["action_status"] == "confirmation_required"
+    assert growth_create["preview_payload"]["weight_kg"] == 6.4
+    assert runtime_service.calls[-3]["apply_payload"]["metadata"] == {"timezone": "Asia/Shanghai"}
+    assert growth_update["action_type"] == GROWTH_RECORD_UPDATE_ACTION
+    assert growth_update["preview_payload"]["fields"] == ["height_cm"]
+    assert growth_delete["action_type"] == GROWTH_RECORD_DELETE_ACTION
+    assert growth_delete["preview_payload"]["record_type"] == "growth_record"
+
+
 def test_milk_plan_propose_tool_handler_creates_confirmation_action() -> None:
     actor = _user()
     runtime_service = FakeAgentRuntimeService()
@@ -635,6 +753,45 @@ def test_milk_plan_propose_tool_handler_creates_confirmation_action() -> None:
     assert runtime_service.calls[0]["side_effect_level"] == "medium"
     assert runtime_service.calls[0]["apply_payload"]["payload"] == {"target_sessions_per_day": 2}
     assert runtime_service.calls[0]["apply_payload"]["metadata"] == {"timezone": "Asia/Shanghai"}
+
+
+def test_milk_plan_preview_and_ibclc_card_handlers_create_artifacts() -> None:
+    actor = _user()
+    runtime_service = FakeAgentRuntimeService()
+
+    preview = asyncio.run(
+        MilkPlanPreviewCreateToolHandler(runtime_service=runtime_service)(
+            _context(
+                actor=actor,
+                args={
+                    "title": "Three day pumping preview",
+                    "summary": "Move evening session earlier.",
+                    "direction": "maintain",
+                    "tasks": [{"title": "Pump at 20:00"}],
+                    "reminders": [{"title": "Drink water"}],
+                },
+            )
+        )
+    )
+    ibclc = asyncio.run(
+        IbclcConsultCardCreateToolHandler(runtime_service=runtime_service)(
+            _context(
+                actor=actor,
+                args={
+                    "reason": "Latch pain",
+                    "feeding_context": "Pain on left side after feeding.",
+                    "urgency": "soon",
+                },
+            )
+        )
+    )
+
+    assert preview["artifact_type"] == "milk_plan_preview"
+    assert preview["task_count"] == 1
+    assert runtime_service.artifacts[-2].payload["direction"] == "maintain"
+    assert ibclc["artifact_type"] == "ibclc_consult_card"
+    assert ibclc["reason"] == "Latch pain"
+    assert runtime_service.artifacts[-1].payload["feeding_context"] == "Pain on left side after feeding."
 
 
 def test_pregnancy_plan_propose_tool_handler_creates_confirmation_action() -> None:
@@ -728,6 +885,45 @@ def test_plan_task_complete_propose_tool_handler_creates_confirmation_action() -
     assert runtime_service.calls[0]["apply_payload"]["task_id"] == str(task_id)
     assert runtime_service.calls[0]["apply_payload"]["completed"] is False
     assert runtime_service.calls[0]["apply_payload"]["metadata"] == {"timezone": "Asia/Shanghai"}
+
+
+def test_plan_task_update_delete_and_plan_delete_tool_handlers_create_confirmation_actions() -> None:
+    actor = _user()
+    runtime_service = FakeAgentRuntimeService()
+    task_id = uuid4()
+    plan_id = uuid4()
+
+    update = asyncio.run(
+        PlanTaskUpdateProposeToolHandler(runtime_service=runtime_service)(
+            _context(
+                actor=actor,
+                args={
+                    "task_id": str(task_id),
+                    "task_date": "2026-07-05",
+                    "task_time": "10:30",
+                    "title": "Move pumping session",
+                },
+            )
+        )
+    )
+    task_delete = asyncio.run(
+        PlanTaskDeleteProposeToolHandler(runtime_service=runtime_service)(
+            _context(actor=actor, args={"task_id": str(task_id), "reason": "no longer needed"})
+        )
+    )
+    plan_delete = asyncio.run(
+        PlanDeleteProposeToolHandler(runtime_service=runtime_service)(
+            _context(actor=actor, args={"plan_id": str(plan_id)})
+        )
+    )
+
+    assert update["action_type"] == PLAN_TASK_UPDATE_ACTION
+    assert update["preview_payload"]["fields"] == ["task_date", "task_time", "title"]
+    assert runtime_service.calls[-3]["target_id"] == str(task_id)
+    assert task_delete["action_type"] == PLAN_TASK_DELETE_ACTION
+    assert task_delete["preview_payload"]["reason"] == "no longer needed"
+    assert plan_delete["action_type"] == PLAN_DELETE_ACTION
+    assert runtime_service.calls[-1]["target_type"] == "plan"
 
 
 def test_milk_reminder_propose_tool_handler_creates_confirmation_action() -> None:
@@ -961,8 +1157,17 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
         "hospital_bag_pump_recommend",
         "profile.read",
         "business.context.read",
+        "ibclc_consult_card_create",
+        "records.growth.read",
+        "records.growth_record.propose",
+        "records.growth_record_delete.propose",
+        "records.growth_record_update.propose",
+        "records.feeding_record_delete.propose",
         "records.milk_summary.read",
         "records.milk_status.read",
+        "records.milk_analysis.read",
+        "records.pumping_record_delete.propose",
+        "plans.calendar.read",
         "plans.current.read",
         "diary.entry_upsert.propose",
         "diary.recent.read",
@@ -972,8 +1177,12 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
         "files.vision_summary.read",
         "notifications.milk_reminder.propose",
         "plans.milk_plan.propose",
+        "plans.milk_plan_preview.create",
         "plans.task_complete.propose",
         "plans.task_create.propose",
+        "plans.task_delete.propose",
+        "plans.task_update.propose",
+        "plans.plan_delete.propose",
         "pregnancy.plan_context.read",
         "pregnancy.plan_create.propose",
         "records.feeding_record.propose",
@@ -1037,6 +1246,7 @@ class FakeRecordsService:
     def __init__(self, *, owner_user_id) -> None:
         self.owner_user_id = None
         self._owner_user_id = owner_user_id
+        self.growth_infant_id = None
 
     async def list_feedings(self, *, owner_user_id, limit):
         self.owner_user_id = owner_user_id
@@ -1069,7 +1279,9 @@ class FakeRecordsService:
             )
         ]
 
-    async def list_growth(self, *, owner_user_id, limit):
+    async def list_growth(self, *, owner_user_id, infant_id=None, limit):
+        self.owner_user_id = owner_user_id
+        self.growth_infant_id = infant_id
         return [
             GrowthRecord(
                 id=uuid4(),
@@ -1098,6 +1310,8 @@ class FakePlansService:
         self._owner_user_id = owner_user_id
         self.owner_user_id = None
         self.plan_status = None
+        self.task_date = None
+        self.task_status = None
         self.limit = None
 
     async def list_plans(self, *, owner_user_id, limit, status="active"):
@@ -1117,8 +1331,10 @@ class FakePlansService:
             )
         ]
 
-    async def list_tasks(self, *, owner_user_id, limit):
+    async def list_tasks(self, *, owner_user_id, task_date=None, status=None, limit):
         self.owner_user_id = owner_user_id
+        self.task_date = task_date
+        self.task_status = status
         self.limit = limit
         return [
             PlanTask(
@@ -1196,7 +1412,7 @@ class FakeAssetService:
         return [
             ProductAsset(
                 id="asset-guide",
-                label="Pump guide",
+                label="Air1 unboxing pump guide",
                 domain="device_guidance",
                 content_type="application/pdf",
                 size_bytes=1200,
@@ -1248,6 +1464,8 @@ class FakeFileVisionService:
 class FakeAgentRuntimeService:
     def __init__(self) -> None:
         self.calls = []
+        self.actions = []
+        self.artifacts = []
         self.action = AgentAction(
             id=uuid4(),
             run_id=uuid4(),
@@ -1272,28 +1490,41 @@ class FakeAgentRuntimeService:
             payload={},
             raw_payload_ref="",
         )
+        self.actions.append(self.action)
+        self.artifacts.append(self.artifact)
 
     async def propose_action(self, **kwargs):
         self.calls.append(kwargs)
-        self.action.run_id = kwargs["run_id"]
-        self.action.actor_user_id = kwargs["owner_user_id"]
-        self.action.action_type = kwargs["action_type"]
-        self.action.target_type = kwargs["target_type"]
-        self.action.side_effect_level = kwargs["side_effect_level"]
-        self.action.status = "confirmed" if kwargs["action_type"] == "hospital_bag.cart.update" else "confirmation_required"
-        self.action.preview_payload = kwargs["preview_payload"]
-        self.action.apply_payload = kwargs["apply_payload"]
-        self.action.idempotency_key = kwargs["idempotency_key"]
+        self.action = AgentAction(
+            id=uuid4(),
+            run_id=kwargs["run_id"],
+            actor_user_id=kwargs["owner_user_id"],
+            action_type=kwargs["action_type"],
+            target_type=kwargs["target_type"],
+            target_id=kwargs.get("target_id", ""),
+            status="confirmed" if kwargs["action_type"] == "hospital_bag.cart.update" else "confirmation_required",
+            side_effect_level=kwargs["side_effect_level"],
+            preview_payload=kwargs["preview_payload"],
+            apply_payload=kwargs["apply_payload"],
+            idempotency_key=kwargs["idempotency_key"],
+            error_code="",
+        )
+        self.actions.append(self.action)
         return self.action
 
     async def create_artifact(self, **kwargs):
         self.calls.append(kwargs)
-        self.artifact.run_id = kwargs["run_id"]
-        self.artifact.owner_user_id = kwargs["owner_user_id"]
-        self.artifact.artifact_type = kwargs["artifact_type"]
-        self.artifact.schema_version = kwargs["schema_version"]
-        self.artifact.status = kwargs["status"]
-        self.artifact.payload = kwargs["payload"]
+        self.artifact = AgentArtifact(
+            id=uuid4(),
+            run_id=kwargs["run_id"],
+            owner_user_id=kwargs["owner_user_id"],
+            artifact_type=kwargs["artifact_type"],
+            schema_version=kwargs["schema_version"],
+            status=kwargs["status"],
+            payload=kwargs["payload"],
+            raw_payload_ref="",
+        )
+        self.artifacts.append(self.artifact)
         return self.artifact
 
 

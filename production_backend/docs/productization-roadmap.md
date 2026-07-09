@@ -238,8 +238,7 @@ Already covered:
 Completed backend-only PR slices:
 
 - `agent: add postpartum recovery service skill fixtures and eval cases`;
-- `agent: add provider-backed eval budget policy docs`;
-- `agent: add provider-backed eval max-case and cost-budget controls`.
+- `agent: defer provider-backed eval until product need is proven`.
 
 External dependencies:
 
@@ -265,8 +264,8 @@ Acceptance:
   in metrics;
 - action responses and stream events never expose server-only `apply_payload`;
 - auth/session/owner-scope tests prove cross-user access fails closed;
-- provider-backed evals have explicit cost budget and skip behavior when
-  credentials are absent.
+- provider-backed evals are deferred; deterministic seed and replay evals remain
+  the current gate.
 
 Current status: `green` for code-local acceptance. Product-approved safety copy
 and real provider budget approval remain external.
@@ -300,8 +299,7 @@ Acceptance:
   seed eval smoke;
 - release smoke covers auth, files, records/plans, agent stream/replay, metrics,
   workers, rollback, backup/restore, and security incident response;
-- provider-backed eval workflow runs manually and nightly with explicit skip or
-  cost controls;
+- provider-backed eval workflow is not part of the current gate;
 - production incidents can become redacted replay bundles and regression eval
   cases;
 - every Phase 0-6 yellow item has either a backend PR or an external dependency.

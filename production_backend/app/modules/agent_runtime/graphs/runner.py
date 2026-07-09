@@ -58,29 +58,12 @@ class AgentRuntimeGraphRunner:
         graph = StateGraph(AgentGraphState)
         graph.add_node("load_context", cast(Any, self._load_context_node(run=run)))
         graph.add_node("safety_gate", cast(Any, self._checkpointing_node(run=run, node_name="safety_gate")))
-        graph.add_node("select_service_skill", cast(Any, self._checkpointing_node(run=run, node_name="select_service_skill")))
         graph.add_node("sdk_reasoning", cast(Any, self._sdk_reasoning_node(run=run)))
-        graph.add_node("tool_result_review", cast(Any, self._checkpointing_node(run=run, node_name="tool_result_review")))
-        graph.add_node("action_policy", cast(Any, self._checkpointing_node(run=run, node_name="action_policy")))
-        graph.add_node("confirmation_interrupt", cast(Any, self._checkpointing_node(run=run, node_name="confirmation_interrupt")))
-        graph.add_node("final_response", cast(Any, self._checkpointing_node(run=run, node_name="final_response")))
         graph.add_node("finish", cast(Any, self._checkpointing_node(run=run, node_name="finish")))
         graph.add_edge(START, "load_context")
         graph.add_edge("load_context", "safety_gate")
-        graph.add_edge("safety_gate", "select_service_skill")
-        graph.add_edge("select_service_skill", "sdk_reasoning")
-        graph.add_edge("sdk_reasoning", "tool_result_review")
-        graph.add_edge("tool_result_review", "action_policy")
-        graph.add_conditional_edges(
-            "action_policy",
-            _route_after_reasoning,
-            {
-                "confirmation_interrupt": "confirmation_interrupt",
-                "final_response": "final_response",
-            },
-        )
-        graph.add_edge("confirmation_interrupt", "finish")
-        graph.add_edge("final_response", "finish")
+        graph.add_edge("safety_gate", "sdk_reasoning")
+        graph.add_edge("sdk_reasoning", "finish")
         graph.add_edge("finish", END)
         return graph.compile()
 
@@ -174,15 +157,6 @@ def _node_update(state: AgentGraphState, *, node_name: str, **values: Any) -> di
         "current_step": node_name,
         "visited_nodes": [*state.get("visited_nodes", []), node_name],
     }
-
-
-def _route_after_reasoning(state: AgentGraphState) -> str:
-    status = state.get("outcome_status")
-    if status == "waiting_for_confirmation":
-        return "confirmation_interrupt"
-    if status == "completed":
-        return "final_response"
-    raise ApiError(code="missing_runtime_outcome", message="Agent graph did not produce a terminal or waiting outcome.", status=502)
 
 
 def _uuid_or_none(value: object) -> UUID | None:

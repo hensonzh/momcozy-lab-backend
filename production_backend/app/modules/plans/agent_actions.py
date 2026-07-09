@@ -15,6 +15,9 @@ MILK_PLAN_CREATE_ACTION = "plans.milk_plan.create"
 PREGNANCY_PLAN_CREATE_ACTION = "pregnancy.plan.create"
 PLAN_TASK_CREATE_ACTION = "plans.task.create"
 PLAN_TASK_COMPLETE_ACTION = "plans.task.complete"
+PLAN_TASK_UPDATE_ACTION = "plans.task.update"
+PLAN_TASK_DELETE_ACTION = "plans.task.delete"
+PLAN_DELETE_ACTION = "plans.plan.delete"
 
 
 class MilkPlanCreateActionHandler:
@@ -175,6 +178,87 @@ class PlanTaskCompleteActionHandler:
         )
 
 
+class PlanTaskUpdateActionHandler:
+    def __init__(self, *, service: PlansService) -> None:
+        self.service = service
+
+    async def __call__(self, action: AgentAction) -> AgentActionApplyResult:
+        payload = dict(action.apply_payload or {})
+        task_id = _required_uuid(payload, "task_id", "missing_task_id", "invalid_task_id")
+        updates = _task_updates(payload)
+        if not updates:
+            raise PermanentJobError("missing_task_update")
+        try:
+            task = await self.service.update_task(
+                owner_user_id=action.actor_user_id,
+                task_id=task_id,
+                updates=updates,
+                request_id=f"agent-action:{action.id}",
+            )
+        except ApiError as exc:
+            raise PermanentJobError(exc.code) from exc
+        return AgentActionApplyResult(
+            resource_type="plan_task",
+            resource_id=str(task.id),
+            details={
+                "status": task.status,
+                "fields": sorted(updates),
+                "agent_action_id": str(action.id),
+                "agent_run_id": str(action.run_id),
+            },
+        )
+
+
+class PlanTaskDeleteActionHandler:
+    def __init__(self, *, service: PlansService) -> None:
+        self.service = service
+
+    async def __call__(self, action: AgentAction) -> AgentActionApplyResult:
+        payload = dict(action.apply_payload or {})
+        task_id = _required_uuid(payload, "task_id", "missing_task_id", "invalid_task_id")
+        try:
+            await self.service.delete_task(
+                owner_user_id=action.actor_user_id,
+                task_id=task_id,
+                request_id=f"agent-action:{action.id}",
+            )
+        except ApiError as exc:
+            raise PermanentJobError(exc.code) from exc
+        return AgentActionApplyResult(
+            resource_type="plan_task",
+            resource_id=str(task_id),
+            details={
+                "agent_action_id": str(action.id),
+                "agent_run_id": str(action.run_id),
+            },
+        )
+
+
+class PlanDeleteActionHandler:
+    def __init__(self, *, service: PlansService) -> None:
+        self.service = service
+
+    async def __call__(self, action: AgentAction) -> AgentActionApplyResult:
+        payload = dict(action.apply_payload or {})
+        plan_id = _required_uuid(payload, "plan_id", "missing_plan_id", "invalid_plan_id")
+        try:
+            await self.service.delete_plan(
+                owner_user_id=action.actor_user_id,
+                plan_id=plan_id,
+                request_id=f"agent-action:{action.id}",
+            )
+        except ApiError as exc:
+            raise PermanentJobError(exc.code) from exc
+        return AgentActionApplyResult(
+            resource_type="plan",
+            resource_id=str(plan_id),
+            details={
+                "agent_action_id": str(action.id),
+                "agent_run_id": str(action.run_id),
+            },
+        )
+
+
 def _text(payload: dict[str, Any], key: str) -> str:
     return str(payload.get(key) or "").strip()
 
@@ -216,3 +300,18 @@ def _optional_bool(payload: dict[str, Any], key: str, *, default: bool, code: st
     if isinstance(value, bool):
         return value
     raise PermanentJobError(code)
+
+
+def _task_updates(payload: dict[str, Any]) -> dict[str, Any]:
+    updates: dict[str, Any] = {}
+    if "plan_id" in payload:
+        updates["plan_id"] = _optional_uuid(payload, "plan_id", "invalid_plan_id")
+    if "task_date" in payload:
+        updates["task_date"] = _optional_date(payload, "task_date", "invalid_task_date")
+    for key in ("task_time", "title", "description"):
+        if key in payload:
+            updates[key] = _text(payload, key)
+    task_payload = payload.get("payload")
+    if isinstance(task_payload, dict):
+        updates["payload"] = task_payload
+    return updates

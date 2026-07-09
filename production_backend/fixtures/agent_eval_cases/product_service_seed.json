@@ -684,7 +684,7 @@
         "intent": "memory_preference_capture",
         "route": "action_proposal",
         "requires_confirmation_before_write": true,
-        "service_skill_id": "main_agent",
+        "service_skill_id": "cozymate_service_agent",
         "must_include": [
           "memory_preview",
           "confirmation_card"
@@ -723,7 +723,7 @@
         "intent": "memory_sensitive_rejection",
         "route": "memory_policy_refusal",
         "requires_confirmation_before_write": false,
-        "service_skill_id": "main_agent",
+        "service_skill_id": "cozymate_service_agent",
         "must_include": [
           "memory_policy_boundary",
           "user_controlled_health_profile"

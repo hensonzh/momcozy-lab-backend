@@ -6,8 +6,9 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
-from ...auth import CurrentUser
-from ..routing import RoutingPlan, ServiceSkillId
+from production_backend.app.modules.agent_runtime.agents.main_coordinator_agent import RoutingPlan, ServiceSkillId
+from production_backend.app.modules.auth import CurrentUser
+
 from ..tools import ToolHandlerContext
 from ..tools.executor import ToolHandler
 from ..tools.output_policy import strip_instructional_tool_output_keys
@@ -86,7 +87,7 @@ async def _maybe_await(value: Awaitable[dict[str, Any]] | dict[str, Any]) -> dic
 def _sources_for_skill(*, skill_id: ServiceSkillId, config: BusinessFactsProjectorConfig) -> tuple[BusinessFactSource, ...]:
     default_limit = config.default_limit
     recent_limit = config.recent_limit
-    if skill_id == ServiceSkillId.MAIN_AGENT:
+    if skill_id == ServiceSkillId.COZYMATE_SERVICE_AGENT:
         return (
             BusinessFactSource("profile.read", "profile"),
         )

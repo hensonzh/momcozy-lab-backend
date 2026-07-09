@@ -45,7 +45,6 @@ def test_release_smoke_checklist_covers_auth_core_agent_and_observability() -> N
         "make backend-productization-status",
         "make backend-smoke",
         "run_agent_seed_eval.py",
-        "run_agent_provider_eval.py",
         "make backend-worker-backlog",
         "OpenAPI snapshot",
     ]:

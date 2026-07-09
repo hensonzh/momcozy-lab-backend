@@ -122,7 +122,7 @@ class AgentRoutingDecision(Base):
     selected_skill_id: Mapped[str] = mapped_column(String(80), nullable=False)
     routing_source: Mapped[str] = mapped_column(String(80), nullable=False)
     confidence_score: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
-    execution_mode: Mapped[str] = mapped_column(String(40), default="single", server_default="single", nullable=False)
+    execution_mode: Mapped[str] = mapped_column(String(40), default="passthrough", server_default="passthrough", nullable=False)
     intents: Mapped[list[Any]] = mapped_column(
         "intents_json",
         postgresql.JSONB,

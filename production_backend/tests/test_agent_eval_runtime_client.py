@@ -64,6 +64,7 @@ def test_agent_eval_runtime_client_executes_run_and_evaluates_seed_case() -> Non
 
     assert result.execution_result.status == "waiting_for_confirmation"
     assert result.eval_result.passed is True
+    assert result.trace.service_skill_id == "cozymate_service_agent"
     assert result.trace.tool_calls[0]["tool_name"] == "memory.create.propose"
     assert any(event["type"] == "action.confirmation_required" for event in result.trace.events)
     assert result.trace.actions[0]["action_type"] == "agent.memory.create"
@@ -91,6 +92,24 @@ class FakeEvalRuntimeRepository:
 
     async def list_messages_for_thread(self, *, thread_id: UUID, limit: int = 40):
         return [message for message in self.messages if message.thread_id == thread_id][:limit]
+
+    async def get_run(self, *, run_id: UUID):
+        return self.run if self.run.id == run_id else None
+
+    async def record_routing_decision(self, **kwargs):
+        if self.run.id == kwargs["run_id"]:
+            self.run.service_skill_id = kwargs["selected_skill_id"]
+            self.run.routing_source = kwargs["routing_source"]
+            self.run.routing_confidence_score = int(float(kwargs["confidence"]) * 100)
+            self.run.routing_summary = {
+                "execution_mode": kwargs["execution_mode"],
+                "intents": kwargs["intents"],
+                "reason_codes": kwargs["reason_codes"],
+                "safety_flags": kwargs["safety_flags"],
+                "needs_clarification": kwargs["needs_clarification"],
+                "tool_scope_version": kwargs["tool_scope_version"],
+            }
+        return kwargs
 
     async def create_action(self, **kwargs):
         action = AgentAction(

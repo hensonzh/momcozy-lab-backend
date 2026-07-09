@@ -193,6 +193,16 @@ REQUIRED_PRODUCT_AGENT_EVAL_CASE_FIELDS = (
     "expected_safety_decision",
 )
 ALLOWED_PRODUCT_AGENT_SAFETY_DECISIONS = frozenset({"allow", "escalate", "block"})
+COZYMATE_WRAPPER_AGENT_ID = "cozymate_service_agent"
+SCENE_SERVICE_SKILL_IDS = frozenset(
+    {
+        "birth-prep",
+        "milk-management",
+        "health-consultation",
+        "emotion-support",
+        "device-guidance",
+    }
+)
 
 
 def load_product_agent_eval_seed_cases(path: Path) -> list[dict[str, Any]]:
@@ -330,6 +340,8 @@ def _service_skill_routing_failures(*, case: dict[str, Any], trace: AgentEvalTra
     expected = str(behavior.get("service_skill_id") or "").strip()
     if not expected or not trace.service_skill_id or trace.service_skill_id == expected:
         return []
+    if expected in SCENE_SERVICE_SKILL_IDS and trace.service_skill_id == COZYMATE_WRAPPER_AGENT_ID:
+        return []
     return [
         AgentEvalFailure(
             category="routing_mismatch",
@@ -391,7 +403,7 @@ def _observed_action_statuses(trace: AgentEvalTrace) -> str:
 
 
 def _observed_write_tool_contracts(trace: AgentEvalTrace) -> list[str]:
-    from ..tools import default_tool_registry
+    from ..agents.cozymate_service_agent.tools import default_tool_registry
 
     registry = default_tool_registry()
     write_contracts = {contract.name for contract in registry.list() if contract.read_or_write == "write"}

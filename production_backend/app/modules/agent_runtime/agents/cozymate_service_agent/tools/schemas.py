@@ -3,7 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-from ....core.errors import ApiError
+from production_backend.app.core.errors import ApiError
 
 
 JsonSchema = dict[str, Any]
@@ -72,6 +72,42 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             },
         },
     },
+    "MilkAnalysisReadQuery": {
+        "title": "MilkAnalysisReadQuery",
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "days": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 30,
+                "default": 7,
+                "description": "用于生成奶量分析快照的近期趋势天数。",
+            },
+            "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 20,
+                "default": 8,
+                "description": "最多纳入的近期喂养、吸奶和宝宝生长记录数。",
+            },
+        },
+    },
+    "GrowthRecordsQuery": {
+        "title": "GrowthRecordsQuery",
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "infant_id": {"type": "string", "maxLength": 80},
+            "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 20,
+                "default": 5,
+                "description": "最多返回的宝宝生长记录数。",
+            },
+        },
+    },
     "PlansCurrentQuery": {
         "title": "PlansCurrentQuery",
         "type": "object",
@@ -84,6 +120,22 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
                 "default": 5,
                 "description": "最多纳入的当前计划和任务数。",
             }
+        },
+    },
+    "PlansCalendarQuery": {
+        "title": "PlansCalendarQuery",
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "task_date": {"type": "string", "maxLength": 20},
+            "status": {"type": "string", "maxLength": 32},
+            "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 50,
+                "default": 10,
+                "description": "最多返回的日程任务数。",
+            },
         },
     },
     "DiaryRecentQuery": {
@@ -208,6 +260,26 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
                 "maxLength": 80,
                 "description": "可选内容类型过滤条件，例如 application/pdf 或 video/mp4。",
             },
+            "model": {
+                "type": "string",
+                "maxLength": 120,
+                "description": "可选设备型号过滤条件，例如 Air1 或 BP334。",
+            },
+            "topic": {
+                "type": "string",
+                "maxLength": 80,
+                "description": "可选指导主题，例如 setup、cleaning、flange、suction 或 bluetooth。",
+            },
+            "query": {
+                "type": "string",
+                "maxLength": 200,
+                "description": "可选关键词过滤条件。",
+            },
+            "measured_nipple_mm": {
+                "type": "number",
+                "minimum": 0,
+                "description": "用户提供的乳头根部测量值，供回复时按官方素材核对。",
+            },
         },
     },
     "FileVisionSummaryQuery": {
@@ -239,6 +311,24 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "locale": {"type": "string", "maxLength": 35},
             "timezone": {"type": "string", "maxLength": 80},
             "idempotency_key": {"type": "string", "maxLength": 255},
+        },
+    },
+    "MilkPlanPreviewCreate": {
+        "title": "MilkPlanPreviewCreate",
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["title"],
+        "properties": {
+            "title": {"type": "string", "minLength": 1, "maxLength": 255},
+            "summary": {"type": "string", "maxLength": 2000},
+            "direction": {"type": "string", "enum": ["increase", "maintain", "decrease", "observe", "unknown"]},
+            "start_date": {"type": "string", "maxLength": 20},
+            "days": {"type": "integer", "minimum": 1, "maximum": 30},
+            "tasks": {"type": "array", "maxItems": 40, "items": {"type": "object", "additionalProperties": True}},
+            "reminders": {"type": "array", "maxItems": 40, "items": {"type": "object", "additionalProperties": True}},
+            "payload": {"type": "object", "additionalProperties": True},
+            "locale": {"type": "string", "maxLength": 35},
+            "timezone": {"type": "string", "maxLength": 80},
         },
     },
     "PregnancyPlanProposalCreate": {
@@ -286,6 +376,50 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
         "properties": {
             "task_id": {"type": "string", "minLength": 1, "maxLength": 80},
             "completed": {"type": "boolean", "default": True},
+            "locale": {"type": "string", "maxLength": 35},
+            "timezone": {"type": "string", "maxLength": 80},
+            "idempotency_key": {"type": "string", "maxLength": 255},
+        },
+    },
+    "PlanTaskUpdateProposalCreate": {
+        "title": "PlanTaskUpdateProposalCreate",
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["task_id"],
+        "properties": {
+            "task_id": {"type": "string", "minLength": 1, "maxLength": 80},
+            "plan_id": {"type": "string", "maxLength": 80},
+            "task_date": {"type": "string", "maxLength": 20},
+            "task_time": {"type": "string", "maxLength": 16},
+            "title": {"type": "string", "maxLength": 255},
+            "description": {"type": "string", "maxLength": 2000},
+            "payload": {"type": "object", "additionalProperties": True},
+            "locale": {"type": "string", "maxLength": 35},
+            "timezone": {"type": "string", "maxLength": 80},
+            "idempotency_key": {"type": "string", "maxLength": 255},
+        },
+    },
+    "PlanTaskDeleteProposalCreate": {
+        "title": "PlanTaskDeleteProposalCreate",
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["task_id"],
+        "properties": {
+            "task_id": {"type": "string", "minLength": 1, "maxLength": 80},
+            "reason": {"type": "string", "maxLength": 500},
+            "locale": {"type": "string", "maxLength": 35},
+            "timezone": {"type": "string", "maxLength": 80},
+            "idempotency_key": {"type": "string", "maxLength": 255},
+        },
+    },
+    "PlanDeleteProposalCreate": {
+        "title": "PlanDeleteProposalCreate",
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["plan_id"],
+        "properties": {
+            "plan_id": {"type": "string", "minLength": 1, "maxLength": 80},
+            "reason": {"type": "string", "maxLength": 500},
             "locale": {"type": "string", "maxLength": 35},
             "timezone": {"type": "string", "maxLength": 80},
             "idempotency_key": {"type": "string", "maxLength": 255},
@@ -340,6 +474,52 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "duration_seconds": {"type": "integer", "minimum": 0},
             "source": {"type": "string", "maxLength": 32},
             "title": {"type": "string", "maxLength": 255},
+            "locale": {"type": "string", "maxLength": 35},
+            "timezone": {"type": "string", "maxLength": 80},
+            "idempotency_key": {"type": "string", "maxLength": 255},
+        },
+    },
+    "RecordDeleteProposalCreate": {
+        "title": "RecordDeleteProposalCreate",
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["record_id"],
+        "properties": {
+            "record_id": {"type": "string", "minLength": 1, "maxLength": 80},
+            "reason": {"type": "string", "maxLength": 500},
+            "locale": {"type": "string", "maxLength": 35},
+            "timezone": {"type": "string", "maxLength": 80},
+            "idempotency_key": {"type": "string", "maxLength": 255},
+        },
+    },
+    "GrowthRecordProposalCreate": {
+        "title": "GrowthRecordProposalCreate",
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["measured_at"],
+        "properties": {
+            "infant_id": {"type": "string", "maxLength": 80},
+            "measured_at": {"type": "string", "minLength": 1, "maxLength": 80},
+            "height_cm": {"type": "number", "minimum": 0},
+            "weight_kg": {"type": "number", "minimum": 0},
+            "head_cm": {"type": "number", "minimum": 0},
+            "locale": {"type": "string", "maxLength": 35},
+            "timezone": {"type": "string", "maxLength": 80},
+            "idempotency_key": {"type": "string", "maxLength": 255},
+        },
+    },
+    "GrowthRecordUpdateProposalCreate": {
+        "title": "GrowthRecordUpdateProposalCreate",
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["record_id"],
+        "properties": {
+            "record_id": {"type": "string", "minLength": 1, "maxLength": 80},
+            "infant_id": {"type": "string", "maxLength": 80},
+            "measured_at": {"type": "string", "maxLength": 80},
+            "height_cm": {"type": "number", "minimum": 0},
+            "weight_kg": {"type": "number", "minimum": 0},
+            "head_cm": {"type": "number", "minimum": 0},
             "locale": {"type": "string", "maxLength": 35},
             "timezone": {"type": "string", "maxLength": 80},
             "idempotency_key": {"type": "string", "maxLength": 255},
@@ -550,6 +730,21 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
                 "additionalProperties": True,
             },
             "idempotency_key": {"type": "string", "maxLength": 255},
+        },
+    },
+    "IbclcConsultCardCreate": {
+        "title": "IbclcConsultCardCreate",
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["reason"],
+        "properties": {
+            "reason": {"type": "string", "minLength": 1, "maxLength": 500},
+            "feeding_context": {"type": "string", "maxLength": 2000},
+            "urgency": {"type": "string", "enum": ["routine", "soon", "urgent"]},
+            "preferred_language": {"type": "string", "maxLength": 80},
+            "payload": {"type": "object", "additionalProperties": True},
+            "locale": {"type": "string", "maxLength": 35},
+            "timezone": {"type": "string", "maxLength": 80},
         },
     },
 }

@@ -127,7 +127,7 @@ def test_agent_eval_seed_assertion_engine_passes_hospital_bag_cart_trace() -> No
     assert result.failures == []
 
 
-def test_agent_eval_seed_assertion_engine_reports_service_skill_mismatch_when_trace_has_route() -> None:
+def test_agent_eval_seed_assertion_engine_treats_cozymate_as_wrapper_for_scene_skill_expectation() -> None:
     case = _case("milk_daily_summary")
     trace = AgentEvalTrace(
         tool_calls=[
@@ -135,7 +135,25 @@ def test_agent_eval_seed_assertion_engine_reports_service_skill_mismatch_when_tr
             {"tool_name": "records.milk_summary.read", "status": "completed"},
         ],
         safety_decision="allow",
-        service_skill_id="main_agent",
+        service_skill_id="cozymate_service_agent",
+        final_text="Here is your milk summary.",
+    )
+
+    result = AgentEvalSeedAssertionEngine().evaluate(case=case, trace=trace)
+
+    assert result.passed is True
+    assert result.failures == []
+
+
+def test_agent_eval_seed_assertion_engine_reports_wrong_scene_skill_when_trace_has_route() -> None:
+    case = _case("milk_daily_summary")
+    trace = AgentEvalTrace(
+        tool_calls=[
+            {"tool_name": "records.milk_status.read", "status": "completed"},
+            {"tool_name": "records.milk_summary.read", "status": "completed"},
+        ],
+        safety_decision="allow",
+        service_skill_id="birth-prep",
         final_text="Here is your milk summary.",
     )
 
@@ -144,7 +162,7 @@ def test_agent_eval_seed_assertion_engine_reports_service_skill_mismatch_when_tr
     assert result.passed is False
     assert result.failures[0].category == "routing_mismatch"
     assert result.failures[0].expected == "milk-management"
-    assert result.failures[0].observed == "main_agent"
+    assert result.failures[0].observed == "birth-prep"
 
 
 def test_agent_eval_seed_assertion_engine_passes_known_device_guidance_trace() -> None:

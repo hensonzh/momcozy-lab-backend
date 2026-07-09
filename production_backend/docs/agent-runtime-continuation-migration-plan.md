@@ -59,24 +59,22 @@
   占位 contract。
 - IBCLC/professional support eval 已对齐到真实 `support.ticket.propose`
   handoff contract，不再要求不存在的 `ibclc_consult_proposal`。
-- 场景专家 routing 已有后端基础：runtime 先通过
-  `SkillRoutingService` 生成 routing plan，再选择
-  `general_assistant`、`pregnancy_service`、`lactation`、
-  `postpartum_recovery`、`after_sales` 或 `safety_guardrail` profile。routing
-  decision 会写入 `agent_routing_decisions`，并把摘要写入 `agent_runs`、
-  context projection、checkpoint 和 SDK trace metadata；service skill plan
-  使用显式 tool contract allowlist，避免把无关工具暴露给当前 run。
+- 旧的场景专家 routing / model planner 已从当前推进路径移除。下一阶段只建立
+  `main_coordinator_agent -> cozymate_service_agent` 的最小委派边界，当前单智能体
+  继续作为 `cozymate_service_agent` 沿用现有 service skills 和工具集合。
 - 低风险、不影响下一步推理的写操作已支持 `enqueue_and_continue`：
   feeding record、pumping record、hospital-bag cart update 会创建 action、
   立即确认并进入 outbox effect lane，不再让 run 进入
   `waiting_for_confirmation`。中高风险 action 仍走 confirmation。
-- 场景专家不再只是 tool allowlist。`app/modules/agent_runtime/skills/`
-  已把旧版 service skill
-  的核心体验语义沉淀为版本化 service skill，并在每轮 SDK instructions 和
-  context projection 中注入 `service_skill_id/version/scope/deliverables`。
-  当前 service skill 覆盖 `pregnancy_service`、`lactation`、
-  `postpartum_recovery`、`after_sales`、`safety_guardrail` 和
-  `general_assistant`。
+- CozyMate 子智能体的 prompt、service skills、工具契约、工具 handler 和
+  business facts projection 已收拢到
+  `app/modules/agent_runtime/agents/cozymate_service_agent/`。当前 service skill
+  覆盖 `birth-prep`、`milk-management`、`health-consultation`、
+  `emotion-support` 和 `device-guidance`，仍由同一个 CozyMate 子智能体在
+  SDK instructions 和 context projection 中统一使用。
+- 主智能体的第一阶段 plan schema 和最小 planner 已收拢到
+  `app/modules/agent_runtime/agents/main_coordinator_agent/`，避免主智能体逻辑继续
+  散落在 runtime lifecycle 或根级 `routing/` 目录下。
 - 全局智能体角色已恢复为 CozyMate：温柔、稳定、简短、中文用户使用简体中文，
   但不恢复旧版动态 `load_skill`，也不保留 Responses API loop 兜底。
 - 孕期服务、泌乳和产后恢复已具备第一批服务交付物 artifact tool：
@@ -92,8 +90,8 @@
 
 仍未完成或后续产品化：
 
-- OpenAI Agents SDK 已有 adapter 边界、settings/tracing metadata 和
-  provider-backed eval harness；真实运营 handoff 仍需后续产品化。
+- OpenAI Agents SDK 已有 adapter 边界、settings/tracing metadata；真实运营 handoff
+  仍需后续产品化。
 - 待产包、奶量、孕期计划、日记、设备指导、支持工单、健康/情绪安全和长期
   记忆均已有新 tool/action/eval contract 的后端基础闭环；图片/语音等体验可
   在 Flutter integration 或后续产品需求中继续补齐。
@@ -115,6 +113,37 @@
 ## 目标状态
 
 智能体重构完成时，应满足以下目标。
+
+### 当前推进里程碑
+
+下一阶段不直接拆出多个业务 scene agents。当前推进方案是：
+
+```text
+main_coordinator_agent
+  -> cozymate_service_agent
+       当前单智能体原样迁入。
+       继续加载现有 service skills。
+       继续使用现有 tool registry / tool executor。
+       继续生成现有 actions / artifacts / replies。
+```
+
+这个阶段的目标是建立多智能体架构边界，而不是重写业务智能体：
+
+- Main Agent 当前是纯透传节点，不做意图判断、通用问答、边界说明或澄清。
+- 所有请求都先委派给 `cozymate_service_agent`。
+- `cozymate_service_agent` 直接沿用当前单智能体能力，保持既有闭环和 eval 稳定。
+- lactation、birth prep、device guidance、postpartum recovery 等细分子智能体后续再拆。
+- 不做多 agent 并行、不做复杂 summary agent、不做大规模目录重组，直到至少两个独立子智能体被产品闭环证明有必要。
+
+第一阶段的 `MainAgentPlan.mode` 只覆盖：
+
+- `delegate_to_cozymate`
+
+`direct_answer`、`clarification` 和 `safety_blocked` 都暂不进入主智能体。安全和权限仍由
+runtime guard 与工具执行层兜底。
+
+细分 scene agents、`SceneAgentResult` 汇总、多意图并行和 agent-specific tool package
+都属于后续阶段。
 
 ### Runtime
 
@@ -169,11 +198,14 @@
 
 ## 迁移原则
 
+- 先建立 `main_coordinator_agent -> cozymate_service_agent` 的最小多智能体边界，再考虑拆分场景智能体。
+- 当前单智能体作为 `cozymate_service_agent` 原样迁入，先保持现有服务闭环稳定。
 - 先完成一个垂直业务主流程，再迁下一个流程。
 - 每个 PR 只改变一个 durable boundary：graph、tool、action、eval、API、
   worker 或文档契约。
 - 不为了复用旧逻辑而引入旧 adapter。必要时复制业务规则到新 service/tool，
   然后删除旧路径依赖。
+- 不为了“形态上像多智能体”而提前创建多个空 scene agents。
 - 后端先独立完成并通过测试；Flutter 集成作为后续 contract verification。
 - 每个阶段先写验收标准和测试，再实现。
 
@@ -584,16 +616,13 @@ eval regression。
   报告。
 - CI 已接入 `run_agent_seed_eval.py` smoke gate。
 - CI 已上传 seed eval JSON/JUnit 报告 artifact，便于失败排查。
-- `run_agent_provider_eval.py` 已提供 provider-backed eval harness：无凭证时可
-  明确 skipped，有凭证时复用 OpenAI Agents SDK runner、当前 service skill
-  routing、tool schema 和 seed assertion engine 生成 JSON 报告。
-- `.github/workflows/agent-provider-eval.yml` 已支持手动/定时运行，并上传
-  `agent-provider-eval` 报告 artifact。
+- Provider-backed eval harness 已从当前阶段移除；本阶段只保留 deterministic seed
+  eval 和 replay eval。
 
 后续 PR：
 
 1. `eval: add isolated runtime client for agent seed cases` - done
-2. `eval: add provider-backed nightly evals` - done
+2. `eval: keep provider-backed nightly evals deferred until product need is proven`
 3. `eval: add report artifact upload in CI` - done
 
 验收：
@@ -658,19 +687,15 @@ eval regression。
 后端-only 的下一步建议：
 
 ```text
-PR: ops: configure provider-backed eval credentials and budget
+PR: agent: add main coordinator shell and delegate current agent to cozymate_service_agent
 ```
 
 包含：
 
-- 配置 GitHub secret `OPENAI_API_KEY` 和可选 repo var `OPENAI_MODEL`。
-- 确定 nightly/manual eval 的 suite 范围、`max_cases`、成本预算和失败阈值。
-- 第一次真实运行后，把 provider report 中的 flaky case 标记为 quarantine
-  或转成更具体的 deterministic regression。
-- 根据真实 token/latency 数据补充 SLO 和告警阈值。
-
-该 PR 依赖真实 provider credential、成本策略和运行环境，不属于当前本地代码
-分支可以完全闭环的工作。
+- 定义第一阶段 `MainAgentPlan`：只包含 `delegate_to_cozymate` / `passthrough`。
+- 保持当前单智能体执行逻辑作为 `cozymate_service_agent`。
+- Main Agent 不暴露业务写工具。
+- 只新增当前委派链路的单元测试和最小集成测试。
 
 Flutter integration 已在当前分支启动。剩余收口重点是 typed client/OpenAPI
 校验、真实 Flutter SDK 环境下的 widget/integration test、以及 staging smoke。

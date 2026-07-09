@@ -47,6 +47,36 @@ DEFAULT_AGENT_ACTION_RULES: Mapping[str, AgentActionPolicyRule] = {
         side_effect_level="low",
         requires_confirmation=False,
     ),
+    "records.feeding_record.delete": AgentActionPolicyRule(
+        action_type="records.feeding_record.delete",
+        target_type="feeding_record",
+        side_effect_level="medium",
+        requires_confirmation=True,
+    ),
+    "records.pumping_record.delete": AgentActionPolicyRule(
+        action_type="records.pumping_record.delete",
+        target_type="pumping_record",
+        side_effect_level="medium",
+        requires_confirmation=True,
+    ),
+    "records.growth_record.create": AgentActionPolicyRule(
+        action_type="records.growth_record.create",
+        target_type="growth_record",
+        side_effect_level="low",
+        requires_confirmation=False,
+    ),
+    "records.growth_record.update": AgentActionPolicyRule(
+        action_type="records.growth_record.update",
+        target_type="growth_record",
+        side_effect_level="medium",
+        requires_confirmation=True,
+    ),
+    "records.growth_record.delete": AgentActionPolicyRule(
+        action_type="records.growth_record.delete",
+        target_type="growth_record",
+        side_effect_level="medium",
+        requires_confirmation=True,
+    ),
     "plans.milk_plan.create": AgentActionPolicyRule(
         action_type="plans.milk_plan.create",
         target_type="plan",
@@ -68,6 +98,24 @@ DEFAULT_AGENT_ACTION_RULES: Mapping[str, AgentActionPolicyRule] = {
     "plans.task.complete": AgentActionPolicyRule(
         action_type="plans.task.complete",
         target_type="plan_task",
+        side_effect_level="medium",
+        requires_confirmation=True,
+    ),
+    "plans.task.update": AgentActionPolicyRule(
+        action_type="plans.task.update",
+        target_type="plan_task",
+        side_effect_level="medium",
+        requires_confirmation=True,
+    ),
+    "plans.task.delete": AgentActionPolicyRule(
+        action_type="plans.task.delete",
+        target_type="plan_task",
+        side_effect_level="medium",
+        requires_confirmation=True,
+    ),
+    "plans.plan.delete": AgentActionPolicyRule(
+        action_type="plans.plan.delete",
+        target_type="plan",
         side_effect_level="medium",
         requires_confirmation=True,
     ),

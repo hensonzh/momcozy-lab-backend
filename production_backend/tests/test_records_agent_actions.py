@@ -7,11 +7,17 @@ import pytest
 from production_backend.app.modules.agent_runtime.models import AgentAction
 from production_backend.app.modules.records.agent_actions import (
     FEEDING_RECORD_CREATE_ACTION,
+    FEEDING_RECORD_DELETE_ACTION,
+    GROWTH_RECORD_CREATE_ACTION,
+    GROWTH_RECORD_UPDATE_ACTION,
     PUMPING_RECORD_CREATE_ACTION,
     FeedingRecordCreateActionHandler,
+    FeedingRecordDeleteActionHandler,
+    GrowthRecordCreateActionHandler,
+    GrowthRecordUpdateActionHandler,
     PumpingRecordCreateActionHandler,
 )
-from production_backend.app.modules.records.models import FeedingRecord, PumpingRecord
+from production_backend.app.modules.records.models import FeedingRecord, GrowthRecord, PumpingRecord
 from production_backend.app.workers.errors import PermanentJobError
 
 
@@ -138,6 +144,83 @@ def test_pumping_record_create_action_handler_rejects_negative_quantity() -> Non
     assert exc_info.value.code == "invalid_milk_volume_ml"
 
 
+def test_feeding_record_delete_action_handler_deletes_record_through_service() -> None:
+    service = FakeRecordsService()
+    record_id = uuid4()
+    action = _action(
+        action_type=FEEDING_RECORD_DELETE_ACTION,
+        target_type="feeding_record",
+        apply_payload={"record_id": str(record_id)},
+    )
+
+    result = asyncio.run(FeedingRecordDeleteActionHandler(service=service)(action))
+
+    assert result.resource_type == "feeding_record"
+    assert result.resource_id == str(record_id)
+    assert service.delete_feeding_kwargs["owner_user_id"] == action.actor_user_id
+    assert service.delete_feeding_kwargs["record_id"] == record_id
+
+
+def test_growth_record_create_action_handler_creates_growth_through_service() -> None:
+    infant_id = uuid4()
+    service = FakeRecordsService()
+    action = _action(
+        action_type=GROWTH_RECORD_CREATE_ACTION,
+        target_type="growth_record",
+        apply_payload={
+            "infant_id": str(infant_id),
+            "measured_at": "2026-07-04T10:00:00Z",
+            "height_cm": 62.5,
+            "weight_kg": 6.4,
+        },
+    )
+
+    result = asyncio.run(GrowthRecordCreateActionHandler(service=service)(action))
+
+    assert result.resource_type == "growth_record"
+    assert result.resource_id == str(service.growth_record.id)
+    assert service.create_growth_kwargs["owner_user_id"] == action.actor_user_id
+    assert service.create_growth_kwargs["infant_id"] == infant_id
+    assert service.create_growth_kwargs["measured_at"] == datetime(2026, 7, 4, 10, 0, tzinfo=timezone.utc)
+    assert service.create_growth_kwargs["height_cm"] == 62.5
+    assert service.create_growth_kwargs["weight_kg"] == 6.4
+    assert service.create_growth_kwargs["idempotency_key"] == "idem-action"
+
+
+def test_growth_record_update_action_handler_updates_growth_through_service() -> None:
+    service = FakeRecordsService()
+    record_id = uuid4()
+    action = _action(
+        action_type=GROWTH_RECORD_UPDATE_ACTION,
+        target_type="growth_record",
+        apply_payload={"record_id": str(record_id), "weight_kg": 6.5},
+    )
+
+    result = asyncio.run(GrowthRecordUpdateActionHandler(service=service)(action))
+
+    assert result.resource_type == "growth_record"
+    assert result.resource_id == str(service.growth_record.id)
+    assert result.details["fields"] == ["weight_kg"]
+    assert service.update_growth_kwargs["owner_user_id"] == action.actor_user_id
+    assert service.update_growth_kwargs["record_id"] == record_id
+    assert service.update_growth_kwargs["updates"] == {"weight_kg": 6.5}
+
+
+def test_growth_record_create_action_handler_rejects_missing_measurement() -> None:
+    with pytest.raises(PermanentJobError) as exc_info:
+        asyncio.run(
+            GrowthRecordCreateActionHandler(service=FakeRecordsService())(
+                _action(
+                    action_type=GROWTH_RECORD_CREATE_ACTION,
+                    target_type="growth_record",
+                    apply_payload={"measured_at": "2026-07-04T10:00:00Z"},
+                )
+            )
+        )
+
+    assert exc_info.value.code == "missing_growth_measurement"
+
+
 class FakeRecordsService:
     def __init__(self) -> None:
         self.feeding_record = FeedingRecord(
@@ -162,8 +245,20 @@ class FakeRecordsService:
             source="agent",
             title="Morning pump",
         )
+        self.growth_record = GrowthRecord(
+            id=uuid4(),
+            owner_user_id=uuid4(),
+            infant_id=None,
+            measured_at=datetime(2026, 7, 4, 10, 0, tzinfo=timezone.utc),
+            height_cm=62.5,
+            weight_kg=6.4,
+            head_cm=None,
+        )
         self.feeding_kwargs = {}
         self.pumping_kwargs = {}
+        self.delete_feeding_kwargs = {}
+        self.create_growth_kwargs = {}
+        self.update_growth_kwargs = {}
 
     async def create_feeding(self, **kwargs):
         self.feeding_kwargs = kwargs
@@ -188,6 +283,25 @@ class FakeRecordsService:
         self.pumping_record.source = kwargs["source"]
         self.pumping_record.title = kwargs["title"]
         return self.pumping_record
+
+    async def delete_feeding(self, **kwargs):
+        self.delete_feeding_kwargs = kwargs
+
+    async def create_growth(self, **kwargs):
+        self.create_growth_kwargs = kwargs
+        self.growth_record.owner_user_id = kwargs["owner_user_id"]
+        self.growth_record.infant_id = kwargs["infant_id"]
+        self.growth_record.measured_at = kwargs["measured_at"]
+        self.growth_record.height_cm = kwargs["height_cm"]
+        self.growth_record.weight_kg = kwargs["weight_kg"]
+        self.growth_record.head_cm = kwargs["head_cm"]
+        return self.growth_record
+
+    async def update_growth(self, **kwargs):
+        self.update_growth_kwargs = kwargs
+        for key, value in kwargs["updates"].items():
+            setattr(self.growth_record, key, value)
+        return self.growth_record
 
 
 def _action(*, action_type: str, target_type: str, apply_payload: dict) -> AgentAction:
