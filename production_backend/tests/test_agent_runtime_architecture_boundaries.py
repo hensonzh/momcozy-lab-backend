@@ -3,6 +3,7 @@ import json
 import sys
 import types
 from importlib.machinery import ModuleSpec
+from pathlib import Path
 
 import pytest
 
@@ -47,6 +48,9 @@ from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.
     INSTRUCTIONAL_TOOL_OUTPUT_KEYS,
     strip_instructional_tool_output_keys,
 )
+
+
+PRODUCTION_BACKEND = Path(__file__).resolve().parents[1]
 
 
 def test_default_graph_registry_uses_langgraph_sdk_pattern() -> None:
@@ -167,6 +171,16 @@ def test_service_skills_do_not_reference_legacy_tool_namespaces() -> None:
                 violations.append(f"{skill.service_skill_id}: {fragment}")
 
     assert violations == []
+
+
+def test_production_runtime_packages_do_not_eagerly_import_langgraph_runner() -> None:
+    runtime_init = (PRODUCTION_BACKEND / "app" / "modules" / "agent_runtime" / "__init__.py").read_text()
+    graphs_init = (PRODUCTION_BACKEND / "app" / "modules" / "agent_runtime" / "graphs" / "__init__.py").read_text()
+    worker_source = (PRODUCTION_BACKEND / "scripts" / "run_agent_worker.py").read_text()
+
+    assert "AgentRuntimeGraphRunner" not in runtime_init
+    assert "AgentRuntimeGraphRunner" not in graphs_init
+    assert "AgentRuntimeGraphRunner" not in worker_source
 
 
 def test_service_skill_tool_references_are_registered_contracts() -> None:

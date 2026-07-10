@@ -2,7 +2,7 @@ import asyncio
 from uuid import uuid4
 
 from production_backend.app.modules.agent_runtime.run_lifecycle.execution import AgentRunExecutionResult
-from production_backend.app.modules.agent_runtime.graphs import AgentRuntimeGraphRunner
+from production_backend.app.modules.agent_runtime.graphs.runner import AgentRuntimeGraphRunner
 from production_backend.app.modules.agent_runtime.models import AgentContextCheckpoint, AgentMessage, AgentRun
 
 
