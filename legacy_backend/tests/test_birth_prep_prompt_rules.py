@@ -610,7 +610,7 @@ class BirthPrepPromptRuleTests(unittest.TestCase):
         self.assertNotIn("active_personalized_followup_id", instruction)
         self.assertIn("收集会改变计划安排的事实", instruction)
         self.assertIn("不要同时追问症状、生活方式或喂养信息", instruction)
-        self.assertIn("不要再调用 ui_quick_replies_create", instruction)
+        self.assertIn("快捷回复由 runtime", instruction)
 
     def test_birth_prep_context_extracts_shared_fields_for_hospital_bag_form(self) -> None:
         state = ContextState()

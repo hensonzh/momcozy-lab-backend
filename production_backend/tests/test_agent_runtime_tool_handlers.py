@@ -44,7 +44,6 @@ from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.
     PregnancyPlanProposeToolHandler,
     SupportTicketProposeToolHandler,
     ToolHandlerContext,
-    UiQuickRepliesCreateToolHandler,
     build_default_tool_handlers,
 )
 from production_backend.app.modules.auth import CurrentUser
@@ -146,56 +145,6 @@ def test_profile_update_tool_handler_requires_at_least_one_field() -> None:
 
     with pytest.raises(ApiError) as exc_info:
         asyncio.run(handler(_context(args={})))
-
-    assert exc_info.value.code == "validation_failed"
-
-
-def test_ui_quick_replies_create_tool_handler_normalizes_three_replies() -> None:
-    handler = UiQuickRepliesCreateToolHandler()
-
-    result = asyncio.run(
-        handler(
-            _context(
-                args={
-                    "replies": [
-                        {"text": "  我想看看今天安排  "},
-                        {"text": "先不保存"},
-                        {"text": "换成简单版"},
-                    ]
-                }
-            )
-        )
-    )
-
-    assert result == {
-        "status": "quick_replies_ready",
-        "quick_replies": [
-            {"text": "我想看看今天安排"},
-            {"text": "先不保存"},
-            {"text": "换成简单版"},
-        ],
-        "side_effect_performed": False,
-    }
-    assert "_deferred_agent_events" not in result
-
-
-def test_ui_quick_replies_create_tool_handler_rejects_duplicates() -> None:
-    handler = UiQuickRepliesCreateToolHandler()
-
-    with pytest.raises(ApiError) as exc_info:
-        asyncio.run(
-            handler(
-                _context(
-                    args={
-                        "replies": [
-                            {"text": "好的"},
-                            {"text": "好的"},
-                            {"text": "先不用"},
-                        ]
-                    }
-                )
-            )
-        )
 
     assert exc_info.value.code == "validation_failed"
 
@@ -1244,7 +1193,6 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
         "hospital_bag_pump_recommend",
         "profile.read",
         "profile_update",
-        "ui_quick_replies_create",
         "business.context.read",
         "ibclc_consult_card_create",
         "records.growth.read",
@@ -1303,7 +1251,6 @@ def _user() -> CurrentUser:
                 "profile:read:self",
                 "profile:write:self",
                 "business_context:read:self",
-                "ui_quick_replies:create:self",
                 "files:read:self",
                 "diary:write:self",
                 "memory:write:self",

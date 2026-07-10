@@ -16,7 +16,6 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .agents import (
     AgentRunCancelled,
-    QUICK_REPLIES_TOOL_NAME,
     clean_internal_tool_error_text,
     clean_web_search_citation_markers,
     quick_replies_event,
@@ -518,9 +517,6 @@ async def stream_ag_ui_events(
                 return
             if _is_form_like_artifact_event(event):
                 suppress_quick_replies = True
-            quick_replies = _quick_replies_from_tool_result_event(event)
-            if quick_replies is not None:
-                pending_quick_replies = quick_replies
             send_event(event)
 
         def send_text_delta(delta: str) -> None:
@@ -1196,17 +1192,6 @@ def _merge_profile_context(persisted: dict[str, Any], provided: dict[str, Any]) 
     return merged
 
 
-def _is_quick_replies_tool_event(event: dict[str, Any]) -> bool:
-    if str(event.get("tool_call_name") or "") == QUICK_REPLIES_TOOL_NAME:
-        return True
-    if event.get("type") == "CUSTOM":
-        value = event.get("value")
-        if isinstance(value, dict):
-            metadata = value.get("metadata")
-            return isinstance(metadata, dict) and str(metadata.get("tool_name") or "") == QUICK_REPLIES_TOOL_NAME
-    return False
-
-
 def _is_form_like_artifact_event(event: dict[str, Any]) -> bool:
     if event.get("type") != "ARTIFACT_CREATED":
         return False
@@ -1220,21 +1205,6 @@ def _is_form_like_artifact_event(event: dict[str, Any]) -> bool:
         "hospital_bag_form_create",
         "support_ticket_draft_create",
     }
-
-
-def _quick_replies_from_tool_result_event(event: dict[str, Any]) -> list[dict[str, str]] | None:
-    if event.get("type") != "TOOL_CALL_RESULT" or not _is_quick_replies_tool_event(event):
-        return None
-    content = event.get("content")
-    if not isinstance(content, str):
-        return None
-    try:
-        payload = json.loads(content)
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(payload, dict):
-        return None
-    return _validated_quick_replies(payload.get("quick_replies"))
 
 
 def _validated_quick_replies(value: Any) -> list[dict[str, str]] | None:

@@ -30,21 +30,16 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertEqual(tool_names, ["hospital_bag_pump_recommend"])
         self.assertTrue(namespaces["pump_recommendation"]["tools"][0]["defer_loading"])
 
-    def test_runtime_tools_expose_global_quick_replies_tool(self) -> None:
+    def test_runtime_tools_keep_quick_reply_generation_out_of_tool_registry(self) -> None:
         tools = {
             str(tool.get("name")): tool
             for tool in select_runtime_tools()
             if tool.get("type") == "function"
         }
 
-        self.assertIn("ui_quick_replies_create", tools)
-        description = str(tools["ui_quick_replies_create"]["description"])
-        self.assertIn("每轮最终回复都应调用一次", description)
-        self.assertIn("只提供 3 个短提示", description)
-        self.assertIn("不能绕过保存、提交、替换、转接等确认流程", description)
-        parameters = tools["ui_quick_replies_create"]["parameters"]
-        reply_item_properties = parameters["properties"]["replies"]["items"]["properties"]
-        self.assertEqual(set(reply_item_properties.keys()), {"text"})
+        self.assertIn("profile_update", tools)
+        profile_parameters = tools["profile_update"]["parameters"]
+        self.assertNotIn("replies", profile_parameters.get("properties", {}))
 
     def test_runtime_tools_expose_global_pregnancy_diary_tool(self) -> None:
         tools = {

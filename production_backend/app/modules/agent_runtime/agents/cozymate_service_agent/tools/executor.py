@@ -362,7 +362,6 @@ def _tool_event_label(tool_name: str) -> str:
     return {
         "profile.read": "个人资料",
         "profile_update": "更新个人资料",
-        "ui_quick_replies_create": "我在帮你准备下一轮的快捷输入～",
         "business.context.read": "业务上下文",
         "records.milk_summary.read": "奶量摘要",
         "records.milk_status.read": "奶量状态",

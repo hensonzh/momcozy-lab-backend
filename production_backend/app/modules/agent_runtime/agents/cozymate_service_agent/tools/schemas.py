@@ -29,33 +29,6 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             },
         },
     },
-    "UiQuickRepliesCreate": {
-        "title": "UiQuickRepliesCreate",
-        "type": "object",
-        "additionalProperties": False,
-        "required": ["replies"],
-        "properties": {
-            "replies": {
-                "type": "array",
-                "minItems": 3,
-                "maxItems": 3,
-                "description": "恰好 3 个快捷输入提示。",
-                "items": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["text"],
-                    "properties": {
-                        "text": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 32,
-                            "description": "按钮上展示的短文案。",
-                        }
-                    },
-                },
-            }
-        },
-    },
     "BusinessContextQuery": {
         "title": "BusinessContextQuery",
         "type": "object",

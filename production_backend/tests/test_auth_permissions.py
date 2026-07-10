@@ -24,7 +24,6 @@ def test_permission_policy_allows_user_role_tool_permissions() -> None:
     PermissionPolicy().require_permission(user, "profile:read:self")
     PermissionPolicy().require_permission(user, "profile:write:self")
     PermissionPolicy().require_permission(user, "business_context:read:self")
-    PermissionPolicy().require_permission(user, "ui_quick_replies:create:self")
     PermissionPolicy().require_permission(user, "files:read:self")
     PermissionPolicy().require_permission(user, "diary:write:self")
     PermissionPolicy().require_permission(user, "memory:write:self")

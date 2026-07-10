@@ -61,7 +61,6 @@ _DIARY_ENTRY_VALUE_FIELDS = (
     "content",
     "attachments",
 )
-MAX_QUICK_REPLY_TEXT_CHARS = 32
 
 
 class ProfileReadToolHandler:
@@ -94,18 +93,6 @@ class ProfileUpdateToolHandler:
             "status": "profile_updated",
             "updated_fields": sorted(values),
             "profile": _profile_payload(profile=profile, actor_user_id=context.actor.user_id),
-        }
-
-
-class UiQuickRepliesCreateToolHandler:
-    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
-        replies = _normalized_quick_replies(context.args.get("replies"))
-        if replies is None:
-            raise ApiError(code="validation_failed", message="quick replies require exactly 3 unique non-empty items.", status=422)
-        return {
-            "status": "quick_replies_ready",
-            "quick_replies": replies,
-            "side_effect_performed": False,
         }
 
 
@@ -1029,7 +1016,6 @@ def build_default_tool_handlers(
     return {
         "profile.read": ProfileReadToolHandler(service=profile_service),
         "profile_update": ProfileUpdateToolHandler(service=profile_service),
-        "ui_quick_replies_create": UiQuickRepliesCreateToolHandler(),
         "business.context.read": BusinessContextReadToolHandler(
             records_service=records_service,
             plans_service=plans_service,
@@ -1137,34 +1123,6 @@ def _profile_update_values(args: dict[str, Any]) -> dict[str, Any]:
     if "onboarding_skipped" in args:
         values["profile_onboarding_skipped_at"] = datetime.now(timezone.utc) if args["onboarding_skipped"] else None
     return values
-
-
-def _normalized_quick_replies(value: Any) -> list[dict[str, str]] | None:
-    if not isinstance(value, list):
-        return None
-    normalized: list[dict[str, str]] = []
-    seen: set[str] = set()
-    for item in value:
-        if not isinstance(item, dict):
-            continue
-        text = _trim_quick_reply_text(item.get("text"))
-        if not text:
-            continue
-        key = text.casefold()
-        if key in seen:
-            continue
-        seen.add(key)
-        normalized.append({"text": text})
-    if len(normalized) != 3:
-        return None
-    return normalized
-
-
-def _trim_quick_reply_text(value: Any) -> str:
-    text = " ".join(str(value or "").strip().split())
-    if not text:
-        return ""
-    return text[:MAX_QUICK_REPLY_TEXT_CHARS]
 
 
 def _support_ticket_apply_payload(args: dict[str, Any]) -> dict[str, Any]:

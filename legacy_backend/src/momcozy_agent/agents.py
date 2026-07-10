@@ -41,7 +41,6 @@ AG_UI_WEB_SEARCH_CITATIONS_CUSTOM_NAME = "momcozy.web_search.citations"
 PRIVATE_USE_CITATION_START = "\ue200"
 PRIVATE_USE_CITATION_END = "\ue201"
 MAX_INLINE_CITATION_MARKER_CHARS = 240
-QUICK_REPLIES_TOOL_NAME = "ui_quick_replies_create"
 PSEUDO_TOOL_USE_OPEN = "<tool_use"
 PSEUDO_TOOL_USE_RE = re.compile(r"<tool_use>\s*(\{[\s\S]*?\})\s*</tool_use>", re.IGNORECASE)
 PSEUDO_TOOL_CALL_BLOCKS = (
@@ -553,34 +552,10 @@ def _tool_semantic(
     result: dict[str, Any] | None = None,
 ) -> AgUiSemantic:
     normalized = _normalize_tool_name(tool_name)
-    if normalized == QUICK_REPLIES_TOOL_NAME:
-        return _quick_replies_tool_semantic(stage, tool_call_id)
     phase = _tool_semantic_phase(normalized)
     label = _tool_stage_label(normalized, stage, arguments or {}, result or {})
     visibility = "work_item"
     return _semantic_payload(phase, label, visibility, f"tool:{tool_call_id or normalized or 'current'}", priority=50)
-
-
-def _quick_replies_tool_semantic(stage: str, tool_call_id: str) -> AgUiSemantic:
-    if stage == "result":
-        return _semantic_payload(
-            "done",
-            "我帮你准备好下一轮的快捷输入啦",
-            "status",
-            f"quick_replies:{tool_call_id or 'current'}",
-            priority=60,
-        )
-    if stage == "end":
-        label = "我在帮你准备下一轮的快捷输入～"
-    else:
-        label = "我在帮你准备下一轮的快捷输入～"
-    return _semantic_payload(
-        "planning",
-        label,
-        "status",
-        f"quick_replies:{tool_call_id or 'current'}",
-        priority=60,
-    )
 
 
 def _normalize_tool_name(tool_name: str) -> str:
@@ -730,8 +705,6 @@ def _tool_start_label(tool_name: str, arguments: dict[str, Any]) -> str:
         return "我先整理孕期计划信息～"
     if tool_name == "handoff_summary_generate":
         return "我先整理转接摘要～"
-    if tool_name == "ui_quick_replies_create":
-        return "我在帮你准备下一轮的快捷输入～"
     if tool_name == "run_approved_skill_script":
         return "我按场景说明处理这一步～"
     return "我按当前场景继续处理～"
@@ -1240,8 +1213,6 @@ def safe_tool_result(result: dict[str, Any]) -> dict[str, Any]:
             for key in ("updated_items", "todo_items", "completion_followups"):
                 if key in tool_result:
                     safe[key] = tool_result[key]
-        if result.get("tool_name") == QUICK_REPLIES_TOOL_NAME and isinstance(tool_result.get("quick_replies"), list):
-            safe["quick_replies"] = tool_result["quick_replies"]
     if isinstance(result.get("error"), dict):
         safe["error"] = result["error"]
     return safe
@@ -1275,14 +1246,6 @@ def model_tool_output(result: dict[str, Any]) -> dict[str, Any]:
     if tool_name == "birth_journey_intake_manage":
         return _compact_birth_journey_intake_output(safe, result)
 
-    if tool_name == QUICK_REPLIES_TOOL_NAME:
-        return {
-            "ok": safe.get("ok"),
-            "tool_name": safe.get("tool_name"),
-            "status": safe.get("status"),
-            "quick_replies_ready": bool(safe.get("quick_replies")),
-            "final_response_instruction": "快捷输入已经作为前端 UI 元数据准备好。最终回复不要提到快捷输入，也不要把这些提示写进正文。",
-        }
     if tool_name == "ibclc_consult_card_create" and safe.get("status") == "ibclc_consult_blocked":
         return {
             "ok": safe.get("ok"),
@@ -1633,7 +1596,7 @@ def _compact_birth_journey_intake_output(safe: dict[str, Any], raw_result: dict[
         compact["final_response_instruction"] = (
             str(auto_compact.get("final_response_instruction") or "孕期计划已经处理完成。最终回复简短说明处理结果。")
             + "\n\nbirth_journey_plan_card_create 已由应用侧自动执行，"
-            "不要再次调用 birth_journey_plan_card_create，也不要再调用 ui_quick_replies_create。"
+            "不要再次调用 birth_journey_plan_card_create。"
         )
         return {key: value for key, value in compact.items() if value not in (None, "", [])}
     if isinstance(safe.get("form"), dict):
@@ -1674,13 +1637,13 @@ def _compact_birth_journey_intake_output(safe: dict[str, Any], raw_result: dict[
             "然后只推进产检报告这一步；如果有 confirmation_question，就只问这个问题。"
             "如果存在 upload_panel，说明产检报告在手边可以上传，报告不在手边也可以先跳过。"
             "不要同时询问个性化风险、症状、生活方式或喂养信息，也不要生成孕期计划。"
-            "当前步骤的快捷回复已由应用侧准备好，不要再调用 ui_quick_replies_create。"
+            "快捷回复由 runtime 在最终回复后统一生成。"
         )
     elif next_step == "final_plan_confirmation":
         compact["final_response_instruction"] = (
             "最终回复只问这一句：还有其他需要补充的信息吗？如果没有，我就基于目前的信息开始为你制定孕期计划啦。"
             "不要展开计划内容，不要总结已收集的信息，不要追加其它问题，也不要生成孕期计划。"
-            "当前步骤的快捷回复已由应用侧准备好，不要再调用 ui_quick_replies_create。"
+            "快捷回复由 runtime 在最终回复后统一生成。"
         )
     elif next_step == "personalized_followup":
         compact["final_response_instruction"] = (
@@ -1694,7 +1657,7 @@ def _compact_birth_journey_intake_output(safe: dict[str, Any], raw_result: dict[
             "不要改写成“医生有没有交代/安排/说明”这类问题，也不要要求用户必须回答医生说过什么。"
             "不要用“不代表一定有问题”轻飘飘带过高龄等管理因素。"
             "不要同时追问症状、生活方式或喂养信息，也不要生成孕期计划。"
-            "当前步骤的快捷回复已由应用侧准备好，不要再调用 ui_quick_replies_create。"
+            "快捷回复由 runtime 在最终回复后统一生成。"
         )
     else:
         compact["final_response_instruction"] = (
@@ -1702,7 +1665,7 @@ def _compact_birth_journey_intake_output(safe: dict[str, Any], raw_result: dict[
             "confirmation_question 是本轮唯一要问的问题；不要同时询问多个后续阶段，也不要生成孕期计划。"
             "不要自行追加字段完整性判断，尤其不要追问已经填写过的孕周是否为整周或 30+几天；"
             "如果已有 30周/孕30周 这类大致孕周，视为可用信息。"
-            "当前步骤的快捷回复已由应用侧准备好，不要再调用 ui_quick_replies_create。"
+            "快捷回复由 runtime 在最终回复后统一生成。"
         )
     return {key: value for key, value in compact.items() if value not in (None, "", [])}
 
@@ -2795,7 +2758,7 @@ def _milk_single_question_final_response_instruction(
         "但必须只追问下面这一项。"
         "不要说“最后一个”“最后再问”“只差一个”“再确认最后一个”；"
         "不要同时追问其它缺失项，不要输出奶量结论，不要给追奶、稳奶或减奶计划。"
-        "如果需要快捷输入，可以调用 ui_quick_replies_create；快捷输入优先使用工具结果里的 quick_replies，不要把快捷输入写进正文。"
+        "快捷回复由 runtime 在最终回复后统一生成；不要把快捷输入写进正文。"
         "不要输出 <tool_call>、</tool_call>、«tool_call» 或 «/tool_call»。"
         f"{progress_text}"
         f"{count_text}"
@@ -3031,7 +2994,7 @@ def _compact_milk_plan_card_output(safe: dict[str, Any], result: dict[str, Any])
         compact["final_response_instruction"] = (
             "奶量计划预览卡片已经展示，但因为明天起已经存在未来未完成计划任务，本轮还不能泛泛询问“是否同步”。"
             "最终回复必须只请用户选择：追加到现有日程，或替换未来未完成计划任务；不要说已经保存或已经同步。"
-            "如果需要快捷输入，可以调用 ui_quick_replies_create 提供：追加到现有日程、替换旧计划任务、先不保存。"
+            "快捷回复由 runtime 在最终回复后统一生成。"
         )
     return compact
 
@@ -3244,7 +3207,7 @@ def _compact_milk_plan_not_saved_output(safe: dict[str, Any]) -> dict[str, Any]:
         final_response_instruction = (
             "这版奶量计划还没有保存。最终回复不要再次泛泛询问是否同步；"
             "必须只询问用户选择追加到现有日程还是替换未来未完成计划任务。"
-            "如果需要快捷输入，可以调用 ui_quick_replies_create 提供：追加到现有日程、替换旧计划任务、先不保存。"
+            "快捷回复由 runtime 在最终回复后统一生成。"
             "不要说已经保存或已经同步。"
         )
     else:
@@ -3795,46 +3758,8 @@ def _required_milk_tool_after_tool_results(results: list[dict[str, Any]], inputs
     return None
 
 
-def _tool_calls_with_quick_replies_last(tool_calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return sorted(
-        tool_calls,
-        key=lambda tool_call: 1 if str(tool_call.get("name") or "") == QUICK_REPLIES_TOOL_NAME else 0,
-    )
-
-
-def _tool_results_require_quick_replies_window(results: list[dict[str, Any]]) -> bool:
-    if any(str(result.get("tool_name") or "") == QUICK_REPLIES_TOOL_NAME for result in results):
-        return False
-    return any(_tool_result_requires_quick_replies_window(result) for result in results)
-
-
-def _tool_result_requires_quick_replies_window(result: dict[str, Any]) -> bool:
-    tool_name = str(result.get("tool_name") or "")
-    if _milk_tool_result_would_disable_followup_tools(result):
-        return True
-    if tool_name not in {"milk_analysis_intake_manage", "milk_analysis_evaluate", "milk_plan_preview_create"}:
-        return False
-    tool_result = result.get("result") if isinstance(result.get("result"), dict) else {}
-    status = str(tool_result.get("status") or "").strip()
-    if tool_name == "milk_plan_preview_create":
-        workflow_control = _workflow_control_from_tool_result(result)
-        return bool(workflow_control and _workflow_control_requires_user_turn(workflow_control))
-    if status not in {
-        "milk_analysis_intake_collecting",
-        "milk_analysis_intake_needs_records",
-        "milk_plan_needs_clinical_context",
-    }:
-        return False
-    workflow_control = _workflow_control_from_tool_result(result)
-    if not workflow_control:
-        return False
-    return _workflow_control_requires_user_turn(workflow_control)
-
-
 def _milk_tool_result_would_disable_followup_tools(result: dict[str, Any]) -> bool:
     tool_name = str(result.get("tool_name") or "")
-    if tool_name == QUICK_REPLIES_TOOL_NAME:
-        return False
     if not (tool_name.startswith("milk_") or tool_name in MILK_WRITE_TOOL_NAMES):
         return False
     return _tool_result_disables_followup_tools(result)
@@ -3842,8 +3767,6 @@ def _milk_tool_result_would_disable_followup_tools(result: dict[str, Any]) -> bo
 
 def _tool_result_disables_followup_tools(result: dict[str, Any]) -> bool:
     tool_name = str(result.get("tool_name") or "")
-    if tool_name == QUICK_REPLIES_TOOL_NAME:
-        return True
     tool_result = result.get("result") if isinstance(result.get("result"), dict) else {}
     status = str(tool_result.get("status") or "").strip()
     data = tool_result.get("data") if isinstance(tool_result.get("data"), dict) else {}
@@ -4703,7 +4626,7 @@ def run_agent_loop(
         tool_outputs = []
         executed_tool_results = []
         direct_quick_replies_sent = False
-        for tool_call in _tool_calls_with_quick_replies_last(tool_calls):
+        for tool_call in tool_calls:
             raise_if_cancelled()
             tool_name = tool_call["name"]
             if not _tool_call_was_seen(streamed_tool_call_keys, tool_call):
@@ -4758,10 +4681,7 @@ def run_agent_loop(
                 ag_ui_status_message_id,
             )
             tool_inputs = _tool_inputs_for_call(inputs, options)
-            if tool_name == QUICK_REPLIES_TOOL_NAME and _should_suppress_model_quick_replies_after_tool_results(executed_tool_results):
-                result = _suppressed_quick_replies_tool_result(tool_name)
-            else:
-                result = _execute_project_tool(tool_call["name"], tool_call["arguments"], tool_inputs)
+            result = _execute_project_tool(tool_call["name"], tool_call["arguments"], tool_inputs)
             raise_if_cancelled()
             executed_tool_results.append(result)
             _sync_runtime_profile_from_tool_inputs(inputs, tool_inputs)
@@ -4916,18 +4836,9 @@ def run_agent_loop(
         next_options = dict(options)
         next_options.pop("_required_tool_name", None)  # type: ignore[typeddict-item]
         next_options.pop("_allowed_tool_names", None)  # type: ignore[typeddict-item]
-        if _tool_results_require_quick_replies_window(executed_tool_results):
-            next_options["enable_tools"] = True
-            next_options["_allowed_tool_names"] = [QUICK_REPLIES_TOOL_NAME]  # type: ignore[typeddict-unknown-key]
-            next_options["_required_tool_name"] = QUICK_REPLIES_TOOL_NAME  # type: ignore[typeddict-unknown-key]
-        elif _should_disable_tools_after_tool_results(executed_tool_results):
+        if _should_disable_tools_after_tool_results(executed_tool_results):
             next_options["enable_tools"] = False
         else:
-            if direct_quick_replies_sent:
-                disabled_tool_names = list(_disabled_tool_names_from_options(next_options))
-                if QUICK_REPLIES_TOOL_NAME not in disabled_tool_names:
-                    disabled_tool_names.append(QUICK_REPLIES_TOOL_NAME)
-                next_options["_disabled_tool_names"] = disabled_tool_names  # type: ignore[typeddict-unknown-key]
             required_next_tool = _required_milk_tool_after_tool_results(executed_tool_results, inputs)
             if required_next_tool:
                 next_options["_required_tool_name"] = required_next_tool
@@ -6259,29 +6170,6 @@ def _birth_journey_personalized_followup_for_quick_replies(data: dict[str, Any])
         if isinstance(topic, dict):
             return topic
     return None
-
-
-def _should_suppress_model_quick_replies_after_tool_results(results: list[dict[str, Any]]) -> bool:
-    return any(_birth_journey_intake_suppresses_model_quick_replies(result) for result in results)
-
-
-def _birth_journey_intake_suppresses_model_quick_replies(result: dict[str, Any]) -> bool:
-    if str(result.get("tool_name") or "") != "birth_journey_intake_manage":
-        return False
-    if result.get("ok") is False:
-        return False
-    return _birth_journey_intake_direct_quick_replies(result) is None
-
-
-def _suppressed_quick_replies_tool_result(tool_name: str) -> dict[str, Any]:
-    return {
-        "ok": True,
-        "tool_name": tool_name,
-        "result": {
-            "status": "quick_replies_suppressed",
-            "side_effect_performed": False,
-        },
-    }
 
 
 def _birth_journey_auto_plan_arguments(result: dict[str, Any]) -> dict[str, Any] | None:

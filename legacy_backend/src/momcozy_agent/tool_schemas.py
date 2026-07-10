@@ -162,24 +162,6 @@ FUNCTION_TOOLS: dict[ToolName, FunctionToolDefinition] = {
             },
         },
     ),
-    "ui_quick_replies_create": _function_tool(
-        "ui_quick_replies_create",
-        "为当前最终回复创建 3 个前端快捷输入提示。无后端副作用；每轮最终回复都应调用一次。不要用于替代正文回答，不要在正文里复述这些快捷输入。每次调用必须提供且只提供 3 个短提示；点击后只会把该提示文案作为普通用户消息发送，不能绕过保存、提交、替换、转接等确认流程。",
-        {
-            "replies": {
-                "type": "array",
-                "minItems": 3,
-                "maxItems": 3,
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "text": {"type": "string", "description": "按钮上展示的短文案，建议 6-18 个字。"},
-                    },
-                },
-                "description": "恰好 3 个快捷输入提示。",
-            },
-        },
-    ),
     "birth_plan_form_create": _function_tool(
         "birth_plan_form_create",
         "创建分娩沟通单信息采集表单。LLM 只传已知字段 default_values；表单字段、顺序、分类、选项和排他选项过滤由工具稳定生成。无后端副作用。",

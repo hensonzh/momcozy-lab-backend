@@ -118,7 +118,7 @@ Step3：推荐孕期计划服务
   4. `checkup_records_upload`：请用户上传目前能找到的产检记录。不要在聊天里逐项问 B 超、NT/NIPT、唐筛、血常规、尿检等检查清单；如果用户说跳过、没有记录或暂时不上传，调用 `birth_journey_intake_manage` 的 `skip_checkup_records`，不要调用 `mark_checkup_records_uploaded`。
   5. `final_plan_confirmation`：个性化追问和产检记录处理完后，生成计划前只补充这一轮确认：“还有其他需要补充的信息吗？如果没有，我就基于目前的信息开始为你制定孕期计划啦。”不要展开计划内容，也不要追加其它问题。用户说没有、可以、开始制定时，调用 `confirm_ready_to_generate`；用户补充最后信息时，调用 `submit_final_additional_info` 并把补充内容放入 payload。
 要求：用户回答“不知道”“还没想好”“跳过”“暂时不说”都算该步骤已问到；把用户回答交给 `birth_journey_intake_manage`，不要反复追问。
-要求：信息采集期间，使用 `ui_quick_replies_create` 时，快捷输入必须是当前 `next_step`/`confirmation_question` 的可能回答；不要生成“帮我准备待产包”“看看本周重点”“整理分娩沟通单”等跨服务入口。
+要求：快捷回复由 runtime 在最终回复后统一生成；本技能不要在正文里输出快捷回复候选。
 要求：工具返回 `ready_to_generate` 后，应用侧会自动串联执行 `birth_journey_plan_card_create` 并使用工具返回的 `plan_context`；不要再让模型额外调用一次。
 
 [DONT]

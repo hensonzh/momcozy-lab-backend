@@ -257,12 +257,6 @@ _TOOL_COPY: dict[str, dict[str, str]] = {
         "completed": "我准备好继续处理啦",
         "failed": "这个场景暂时没准备好",
     },
-    "ui_quick_replies_create": {
-        "phase": "planning",
-        "started": "我在帮你准备下一轮的快捷输入～",
-        "completed": "我帮你准备好下一轮的快捷输入啦",
-        "failed": "快捷输入暂时没准备好",
-    },
     "profile.read": {
         "phase": "reading",
         "started": "我先看看你的基础信息～",

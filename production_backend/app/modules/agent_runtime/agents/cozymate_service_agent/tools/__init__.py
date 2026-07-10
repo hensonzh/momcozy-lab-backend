@@ -38,7 +38,6 @@ from .handlers import (
     PumpingRecordProposeToolHandler,
     PregnancyPlanProposeToolHandler,
     SupportTicketProposeToolHandler,
-    UiQuickRepliesCreateToolHandler,
     build_default_tool_handlers,
 )
 from .registry import ToolContractRegistry, default_tool_registry
@@ -83,7 +82,6 @@ __all__ = [
     "PumpingRecordProposeToolHandler",
     "PregnancyPlanProposeToolHandler",
     "SupportTicketProposeToolHandler",
-    "UiQuickRepliesCreateToolHandler",
     "ToolContract",
     "ToolContractRegistry",
     "ToolExecutionResult",

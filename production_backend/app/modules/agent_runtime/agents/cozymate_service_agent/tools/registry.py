@@ -72,28 +72,6 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         ToolContract(
-            name="ui_quick_replies_create",
-            domain="global",
-            description=(
-                "为当前最终回复创建恰好 3 个前端快捷输入提示。无业务副作用；"
-                "不要把快捷输入写进正文，也不要用快捷输入绕过保存、提交、替换、转接等确认流程。"
-            ),
-            input_schema_ref="UiQuickRepliesCreate",
-            output_schema_ref="UiQuickRepliesRead",
-            read_or_write="write",
-            required_permission="ui_quick_replies:create:self",
-            owner_scope="actor",
-            side_effect_level="none",
-            blocking_policy="must_wait",
-            result_dependency="final_response",
-            requires_confirmation=False,
-            idempotency_required=False,
-            audit_required=False,
-            timeout_seconds=5,
-        )
-    )
-    registry.register(
-        ToolContract(
             name="business.context.read",
             domain="business_context",
             description="读取当前用户近期记录、计划、日记和设备上下文的有限摘要。",

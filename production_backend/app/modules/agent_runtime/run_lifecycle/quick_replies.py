@@ -16,11 +16,11 @@ QUICK_REPLY_FINALIZER_INSTRUCTIONS = """
 规则：
 - 只返回 JSON，不要 Markdown，不要解释。
 - JSON 格式必须是 {"replies":[{"text":"..."}]}。
-- replies 最多 3 条，可以为空数组。
+- replies 必须恰好 3 条；不要返回 1 条、2 条或超过 3 条。
 - 每条 text 必须像用户会说的话，简短自然，不能超过 32 个中文字符。
 - 不要生成保存、提交、确认、取消、转接、替换等会绕过业务确认流程的动作。
 - 不要重复助手正文，不要承诺已经执行动作。
-- 如果没有明确、自然的下一句建议，返回 {"replies":[]}。
+- 如果无法生成 3 条明确、自然的下一句建议，返回 {"replies":[]}。
 """.strip()
 
 
@@ -162,4 +162,4 @@ def _normalize_quick_replies(value: Any, *, max_count: int, max_text_chars: int)
         replies.append({"id": f"qr_{len(replies) + 1}", "text": text})
         if len(replies) >= max_count:
             break
-    return replies
+    return replies if len(replies) == max_count else []

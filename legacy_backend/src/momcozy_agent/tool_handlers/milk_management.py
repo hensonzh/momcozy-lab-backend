@@ -586,7 +586,7 @@ def _intake_collecting_result(flow: dict[str, Any], records_result: dict[str, An
             "assistant_instruction": (
                 "最终回复只问 next_question 这一项；不要说最后一个、最后再问、只差一个或再确认最后一个；"
                 "不要同时追问其它 missing_fields，也不要直接输出奶量结论或计划；"
-                "在最终回复前调用 ui_quick_replies_create 创建恰好 3 个快捷输入，优先使用 quick_replies。"
+                "快捷回复由 runtime 在最终回复后统一生成；不要把快捷输入写进正文。"
             ),
             "records_result": records_result,
             "executed_step": "intake",

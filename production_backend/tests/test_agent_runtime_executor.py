@@ -678,6 +678,32 @@ def test_agent_runtime_executor_generates_quick_replies_with_finalizer() -> None
     ]
 
 
+def test_agent_runtime_executor_requires_exactly_three_finalizer_quick_replies() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="那下一步呢？", sequence=1)
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    backend = ScriptedSdkBackend([scripted_sdk_response(final_text="已经整理好了。")])
+    quick_reply_backend = ScriptedSdkBackend(
+        [
+            scripted_sdk_response(
+                final_text='{"replies":[{"text":"继续聊这个"},{"text":"给我更多细节"}]}',
+            )
+        ]
+    )
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            quick_reply_finalizer=QuickReplyFinalizer(sdk_runner=OpenAIAgentsSdkRunner(backend=quick_reply_backend)),
+        ).execute(run=run)
+    )
+
+    assert result.status == "completed"
+    assert result.quick_replies == []
+
+
 def test_agent_runtime_executor_does_not_use_quick_replies_from_final_text_json() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)

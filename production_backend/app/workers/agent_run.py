@@ -201,13 +201,16 @@ class AgentRunWorker:
                     "role": "assistant",
                     "text": result.final_text,
                 }
+                live_payload = dict(payload)
+                if _has_exactly_three_quick_replies(result.quick_replies):
+                    live_payload["quick_replies"] = result.quick_replies
                 await self._append_event(
                     run=run,
                     event_type="message.completed",
                     payload=payload,
+                    live_payload=live_payload,
+                    live_durable=not _has_exactly_three_quick_replies(result.quick_replies),
                 )
-                if result.quick_replies:
-                    await self._publish_quick_replies(run=run, message_id=message.id, quick_replies=result.quick_replies)
             completed = await self.repository.mark_run_completed(run=run, completed_at=_utcnow())
             await self._append_event(run=completed, event_type="run.completed", payload={})
             await self._clear_controls(completed)
@@ -239,12 +242,25 @@ class AgentRunWorker:
             error_details={"reason": "stale_running_run_not_resumed"},
         )
 
-    async def _append_event(self, *, run: AgentRun, event_type: str, payload: dict[str, Any]) -> AgentEvent:
+    async def _append_event(
+        self,
+        *,
+        run: AgentRun,
+        event_type: str,
+        payload: dict[str, Any],
+        live_payload: dict[str, Any] | None = None,
+        live_durable: bool = True,
+    ) -> AgentEvent:
         event = await self.event_publisher.append_event(thread_id=run.thread_id, run_id=run.id, event_type=event_type, payload=payload)
-        await self._publish_live_event(run=run, event_type=event_type, payload=payload)
+        await self._publish_live_event(
+            run=run,
+            event_type=event_type,
+            payload=payload if live_payload is None else live_payload,
+            durable=live_durable,
+        )
         return event
 
-    async def _publish_live_event(self, *, run: AgentRun, event_type: str, payload: dict[str, Any]) -> None:
+    async def _publish_live_event(self, *, run: AgentRun, event_type: str, payload: dict[str, Any], durable: bool) -> None:
         if self.transient_stream is None or event_type not in LIVE_DURABLE_EVENT_TYPES:
             return
         dedupe_key = _live_event_dedupe_key(run_id=run.id, event_type=event_type, payload=payload)
@@ -258,24 +274,10 @@ class AgentRunWorker:
                 payload=payload,
                 dedupe_key=dedupe_key,
                 optimistic=False,
-                durable=True,
+                durable=durable,
             )
         except Exception:
             LOGGER.warning("Failed to publish durable live agent event.", exc_info=True)
-
-    async def _publish_quick_replies(self, *, run: AgentRun, message_id: UUID, quick_replies: list[dict[str, Any]]) -> None:
-        await self.event_publisher.publish_application_event(
-            thread_id=run.thread_id,
-            run_id=run.id,
-            event_type="quick_replies.updated",
-            payload={
-                "message_id": str(message_id),
-                "replies": quick_replies,
-            },
-            dedupe_key=f"{run.id}:quick_replies.updated:{message_id}",
-            optimistic=False,
-            durable=False,
-        )
 
     async def _clear_controls(self, run: AgentRun) -> None:
         if self.controls is None:
@@ -316,6 +318,10 @@ def _log_run_failure(*, run: AgentRun, error_code: str, error_details: dict[str,
             sort_keys=True,
         )
     )
+
+
+def _has_exactly_three_quick_replies(value: list[dict[str, Any]]) -> bool:
+    return len(value) == 3
 
 
 LIVE_DURABLE_EVENT_TYPES = {

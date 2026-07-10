@@ -223,7 +223,6 @@ def test_static_prompts_keep_runtime_boundaries_and_legacy_style() -> None:
     assert "温柔不啰嗦，默认极简、自然聊天" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "默认回复要短：优先 1-3 句" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "不要先输出用户可见的过渡说明或中间解释" in DEFAULT_STABLE_SYSTEM_PROMPT
-    assert "使用 `ui_quick_replies_create` 创建" not in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "runtime_context" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "当前可见工具" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "如果当前轮需要进入某个服务技能流程" in DEFAULT_STABLE_SYSTEM_PROMPT
@@ -437,10 +436,8 @@ def test_tool_contract_registry_declares_permission_confirmation_and_blocking_po
     assert labor_communication_artifact.required_permission == "agent_artifact:create:self"
     assert "profile.read" in registry.names_for_sdk()
     assert "profile_update" in registry.names_for_sdk()
-    assert "ui_quick_replies_create" in registry.names_for_sdk()
     assert "business.context.read" in registry.names_for_sdk()
     profile_update = registry.get("profile_update")
-    quick_replies = registry.get("ui_quick_replies_create")
     plans_current = registry.get("plans.current.read")
     diary_recent = registry.get("diary.recent.read")
     pregnancy_context = registry.get("pregnancy.plan_context.read")
@@ -452,11 +449,6 @@ def test_tool_contract_registry_declares_permission_confirmation_and_blocking_po
     assert profile_update.required_permission == "profile:write:self"
     assert profile_update.requires_confirmation is False
     assert profile_update.audit_required is True
-    assert quick_replies.read_or_write == "write"
-    assert quick_replies.owner_scope == "actor"
-    assert quick_replies.required_permission == "ui_quick_replies:create:self"
-    assert quick_replies.side_effect_level == "none"
-    assert quick_replies.requires_confirmation is False
     assert plans_current.read_or_write == "read"
     assert plans_current.owner_scope == "actor"
     assert plans_current.requires_confirmation is False
@@ -523,7 +515,6 @@ def test_tool_contracts_are_exported_as_responses_namespaces() -> None:
         "files.vision_summary.read",
         "profile.read",
         "profile_update",
-        "ui_quick_replies_create",
     ]
     assert "records" not in namespaces
     assert "plans" not in namespaces
@@ -555,7 +546,6 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
     registry = default_tool_registry()
     profile_schema = tool_input_schema(registry.get("profile.read").input_schema_ref)
     profile_update_schema = tool_input_schema(registry.get("profile_update").input_schema_ref)
-    quick_replies_schema = tool_input_schema(registry.get("ui_quick_replies_create").input_schema_ref)
     business_schema = tool_input_schema(registry.get("business.context.read").input_schema_ref)
     support_schema = tool_input_schema(registry.get("support.ticket.propose").input_schema_ref)
     milk_schema = tool_input_schema(registry.get("records.milk_summary.read").input_schema_ref)
@@ -599,10 +589,6 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
     assert profile_update_schema["properties"]["age"]["minimum"] == 12
     assert profile_update_schema["properties"]["age"]["maximum"] == 70
     assert profile_update_schema["properties"]["onboarding_skipped"]["type"] == "boolean"
-    assert quick_replies_schema["required"] == ["replies"]
-    assert quick_replies_schema["properties"]["replies"]["minItems"] == 3
-    assert quick_replies_schema["properties"]["replies"]["maxItems"] == 3
-    assert quick_replies_schema["properties"]["replies"]["items"]["properties"]["text"]["maxLength"] == 32
     assert business_schema["additionalProperties"] is False
     assert business_schema["properties"]["limit"]["maximum"] == 20
     assert support_schema["required"] == ["issue_summary"]
@@ -1145,9 +1131,9 @@ def test_sdk_runner_streams_each_turn_before_response_completed(monkeypatch: pyt
         output=[
             {
                 "type": "function_call",
-                "name": "ui_quick_replies_create",
+                "name": "profile_update",
                 "call_id": "call_1",
-                "arguments": "{\"replies\":[{\"text\":\"继续\"},{\"text\":\"换个说法\"},{\"text\":\"稍后再说\"}]}",
+                "arguments": "{\"display_name\":\"Mai\"}",
             }
         ],
     )
@@ -1186,20 +1172,20 @@ def test_sdk_runner_streams_each_turn_before_response_completed(monkeypatch: pyt
         callback_events.append(f"delta:{delta}")
 
     async def invoke_json(args_json: str) -> str:
-        return json.dumps({"status": "quick_replies_ready", "args": json.loads(args_json)}, ensure_ascii=False, sort_keys=True)
+        return json.dumps({"status": "profile_updated", "args": json.loads(args_json)}, ensure_ascii=False, sort_keys=True)
 
     request = SdkNodeRequest(
         run_id="run_1",
         thread_id="thread_1",
         actor_user_id="user_1",
-        instructions="Use quick replies before final text.",
+        instructions="Use profile update before final text.",
         model_input=[{"role": "user", "content": "给我三个下一步"}],
         tool_search_enabled=True,
         tools=(
             SdkToolDefinition(
-                contract_name="ui_quick_replies_create",
-                sdk_name="ui_quick_replies_create",
-                description="Create quick replies.",
+                contract_name="profile_update",
+                sdk_name="profile_update",
+                description="Update profile.",
                 params_json_schema={"type": "object", "properties": {}},
                 invoke_json=invoke_json,
             ),

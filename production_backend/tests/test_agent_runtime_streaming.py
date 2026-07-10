@@ -565,7 +565,7 @@ def test_stream_run_event_chunks_dedupes_transient_and_persisted_final_events() 
     assert payloads[0]["transient"] is True
 
 
-def test_stream_run_event_chunks_keeps_transient_quick_replies_before_terminal_event() -> None:
+def test_stream_run_event_chunks_keeps_transient_completed_message_quick_replies_before_terminal_event() -> None:
     thread_id = uuid4()
     run_id = uuid4()
     message_id = str(uuid4())
@@ -579,25 +579,13 @@ def test_stream_run_event_chunks_keeps_transient_quick_replies_before_terminal_e
             "message_id": message_id,
             "role": "assistant",
             "text": "完整回复",
+            "quick_replies": [
+                {"id": "qr_1", "text": "继续聊这个"},
+                {"id": "qr_2", "text": "给我更多细节"},
+                {"id": "qr_3", "text": "换个方向"},
+            ],
             "_live_semantic": {
                 "dedupe_key": f"{run_id}:message.completed:{message_id}",
-                "optimistic": False,
-                "durable": True,
-            },
-        },
-        created_at="2026-07-04T00:00:00+00:00",
-    )
-    transient_quick_replies = AgentTransientStreamEvent(
-        event_id="transient:2-0",
-        type="quick_replies.updated",
-        thread_id=thread_id,
-        run_id=run_id,
-        cursor="2-0",
-        payload={
-            "message_id": message_id,
-            "replies": [{"id": "qr_1", "text": "继续聊这个"}],
-            "_live_semantic": {
-                "dedupe_key": f"{run_id}:quick_replies.updated:{message_id}",
                 "optimistic": False,
                 "durable": False,
             },
@@ -605,7 +593,7 @@ def test_stream_run_event_chunks_keeps_transient_quick_replies_before_terminal_e
         created_at="2026-07-04T00:00:00+00:00",
     )
     transient_completed = AgentTransientStreamEvent(
-        event_id="transient:3-0",
+        event_id="transient:2-0",
         type="run.completed",
         thread_id=thread_id,
         run_id=run_id,
@@ -631,7 +619,7 @@ def test_stream_run_event_chunks_keeps_transient_quick_replies_before_terminal_e
             follow=True,
             poll_interval_seconds=0.1,
             max_wait_seconds=1,
-            transient_stream=FakeTransientStream([[transient_message, transient_quick_replies, transient_completed]]),
+            transient_stream=FakeTransientStream([[transient_message, transient_completed]]),
         ):
             chunks.append(chunk)
         return chunks
@@ -639,8 +627,12 @@ def test_stream_run_event_chunks_keeps_transient_quick_replies_before_terminal_e
     chunks = asyncio.run(exercise())
 
     payloads = _sse_payloads(chunks[0])
-    assert [payload["type"] for payload in payloads] == ["message.completed", "quick_replies.updated", "run.completed"]
-    assert payloads[1]["payload"]["replies"] == [{"id": "qr_1", "text": "继续聊这个"}]
+    assert [payload["type"] for payload in payloads] == ["message.completed", "run.completed"]
+    assert payloads[0]["payload"]["quick_replies"] == [
+        {"id": "qr_1", "text": "继续聊这个"},
+        {"id": "qr_2", "text": "给我更多细节"},
+        {"id": "qr_3", "text": "换个方向"},
+    ]
 
 
 def test_stream_run_event_chunks_dedupes_optimistic_tool_event_before_persisted_event() -> None:

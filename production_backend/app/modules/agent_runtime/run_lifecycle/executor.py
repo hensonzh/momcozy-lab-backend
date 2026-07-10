@@ -72,8 +72,6 @@ from .state_store import AgentRuntimeStateStore
 
 LOAD_SERVICE_SKILL_TOOL_NAME = "load_service_skill"
 LOGGER = logging.getLogger("production_backend.agent_runtime.executor")
-QUICK_REPLIES_TOOL_NAME = "ui_quick_replies_create"
-MAIN_MODEL_EXCLUDED_TOOL_NAMES = frozenset({QUICK_REPLIES_TOOL_NAME})
 LOAD_SERVICE_SKILL_INPUT_SCHEMA: dict[str, Any] = {
     "title": "LoadServiceSkillInput",
     "type": "object",
@@ -281,11 +279,7 @@ class AgentRuntimeExecutor:
         if self.tool_executor is None:
             business_tool_names: tuple[str, ...] = ()
         else:
-            business_tool_names = tuple(
-                tool_name
-                for tool_name in self.tool_registry.names_for_sdk()
-                if tool_name not in MAIN_MODEL_EXCLUDED_TOOL_NAMES
-            )
+            business_tool_names = self.tool_registry.names_for_sdk()
         tool_names = (LOAD_SERVICE_SKILL_TOOL_NAME, *business_tool_names)
         return _AgentTurnToolScope(tool_namespaces=tool_namespaces, tool_names=tool_names)
 

@@ -50,7 +50,7 @@ def test_agent_run_worker_completes_run_with_assistant_message_events_and_lock()
     assert {event["optimistic"] for event in transient_stream.events} == {False}
 
 
-def test_agent_run_worker_publishes_quick_replies_as_transient_event_only() -> None:
+def test_agent_run_worker_attaches_quick_replies_to_transient_completed_message_only() -> None:
     repository = FakeAgentRuntimeRepository()
     transient_stream = FakeTransientStream()
     assistant_message_id = uuid4()
@@ -80,19 +80,21 @@ def test_agent_run_worker_publishes_quick_replies_as_transient_event_only() -> N
     assert repository.events[2].event_type == "run.completed"
     assert [event["event_type"] for event in transient_stream.events] == [
         "message.completed",
-        "quick_replies.updated",
         "run.completed",
     ]
-    assert transient_stream.events[1] == {
-        "event_type": "quick_replies.updated",
+    assert transient_stream.events[0] == {
+        "event_type": "message.completed",
         "payload": {
             "message_id": str(assistant_message_id),
-            "replies": replies,
+            "role": "assistant",
+            "text": "已经整理好了。",
+            "quick_replies": replies,
         },
-        "dedupe_key": f"{repository.run.id}:quick_replies.updated:{assistant_message_id}",
+        "dedupe_key": f"{repository.run.id}:message.completed:{assistant_message_id}",
         "optimistic": False,
         "durable": False,
     }
+    assert transient_stream.events[1]["durable"] is True
 
 
 def test_agent_run_worker_cancels_before_handler_when_cancel_requested() -> None:

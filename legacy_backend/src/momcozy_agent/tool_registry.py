@@ -31,7 +31,6 @@ from .tool_handlers.skill_runtime import (
     run_approved_skill_script,
     search_skill_assets,
 )
-from .tool_handlers.ui import create_quick_replies
 from .tool_schemas import FUNCTION_TOOLS
 from .types import FunctionToolDefinition, RuntimeInputs, ToolDefinition, ToolName
 
@@ -42,7 +41,6 @@ SKILL_RUNTIME_TOOLS: list[ToolName] = ["list_skills", "load_skill", "search_skil
 CORE_IMMEDIATE_TOOLS: list[ToolName] = [
     *ALWAYS_ON_TOOLS,
     *SKILL_RUNTIME_TOOLS,
-    "ui_quick_replies_create",
     "ibclc_consult_card_create",
     "pregnancy_diary_manage",
 ]
@@ -126,7 +124,6 @@ READ_ONLY_TOOL_NAMES = {
     "hospital_bag_card_create",
     "hospital_bag_cart_update",
     "hospital_bag_pump_recommend",
-    "ui_quick_replies_create",
     "device_manual_search",
     "support_ticket_draft_create",
     *MILK_MANAGEMENT_READ_ONLY_TOOLS,
@@ -139,7 +136,6 @@ TOOL_HANDLERS: dict[ToolName, ToolHandler] = {
     "read_skill_file": read_skill_file,
     "run_approved_skill_script": run_approved_skill_script,
     "ui_form_create": create_form,
-    "ui_quick_replies_create": create_quick_replies,
     "birth_plan_form_create": create_birth_plan_form,
     "labor_communication_card_create": create_labor_communication_card,
     "birth_journey_intake_manage": manage_birth_journey_intake,
