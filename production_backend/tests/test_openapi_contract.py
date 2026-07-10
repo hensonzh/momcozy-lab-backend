@@ -133,7 +133,7 @@ def test_agent_stream_contract_keeps_tokens_out_of_query_parameters() -> None:
 
     assert "token" not in query_names
     assert {"after_sequence", "limit"} <= query_names
-    assert poll_interval["schema"]["default"] == 0.01
+    assert poll_interval["schema"]["default"] == 0.1
     assert poll_interval["schema"]["minimum"] == 0.01
 
 

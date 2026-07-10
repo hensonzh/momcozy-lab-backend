@@ -236,12 +236,16 @@ class OpenAIAgentsSdkBackend:
                 status=503,
             )
 
-        agent = agent_cls(
-            name="MomCozy assistant",
-            instructions=request.instructions,
-            model=self.model,
-            tools=[_build_function_tool(agents_module=agents_module, definition=definition) for definition in request.tools],
-        )
+        agent_kwargs: dict[str, Any] = {
+            "name": "MomCozy assistant",
+            "instructions": request.instructions,
+            "model": self.model,
+            "tools": [_build_function_tool(agents_module=agents_module, definition=definition) for definition in request.tools],
+        }
+        model_settings = _build_agent_model_settings(agents_module=agents_module, provider=self.provider)
+        if model_settings is not None:
+            agent_kwargs["model_settings"] = model_settings
+        agent = agent_cls(**agent_kwargs)
         run_kwargs: dict[str, Any] = {"max_turns": self.max_turns}
         run_config = _build_run_config(
             agents_module=agents_module,
@@ -777,6 +781,18 @@ def _build_run_config(
                 status=503,
             ) from exc
         return None
+
+
+def _build_agent_model_settings(*, agents_module: Any, provider: str) -> Any | None:
+    model_settings_cls = getattr(agents_module, "ModelSettings", None)
+    if provider != "minimax" or model_settings_cls is None:
+        return None
+    return model_settings_cls(
+        extra_body={
+            "thinking": {"type": "disabled"},
+            "service_tier": "priority",
+        }
+    )
 
 
 def _build_model_provider(
