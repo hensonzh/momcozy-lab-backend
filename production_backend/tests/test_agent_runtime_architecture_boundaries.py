@@ -1118,6 +1118,7 @@ def test_sdk_runner_discards_responses_api_streamed_text_from_tool_call_turn(mon
             ),
         ),
         on_text_delta=on_text_delta,
+        final_text_only_after_tool_names=("profile.read",),
     )
 
     result = asyncio.run(OpenAIAgentsSdkRunner(model="gpt-test").run_reasoning(request))
@@ -1133,6 +1134,89 @@ def test_sdk_runner_discards_responses_api_streamed_text_from_tool_call_turn(mon
         }
     ]
     assert FakeAsyncOpenAI.calls == []
+    assert FakeAsyncOpenAI.stream_calls[1]["tools"] == []
+
+
+def test_sdk_runner_live_streams_text_only_turn_before_response_completed(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_openai = types.ModuleType("openai")
+    fake_openai.__spec__ = ModuleSpec("openai", loader=None)
+    fake_openai.AsyncOpenAI = FakeAsyncOpenAI
+    monkeypatch.setitem(sys.modules, "openai", fake_openai)
+    tool_call_response = FakeOpenAIResponse(
+        id="resp_tool",
+        output=[
+            {
+                "type": "function_call",
+                "name": "ui_quick_replies_create",
+                "call_id": "call_1",
+                "arguments": "{\"replies\":[{\"text\":\"继续\"},{\"text\":\"换个说法\"},{\"text\":\"稍后再说\"}]}",
+            }
+        ],
+    )
+    final_response = FakeOpenAIResponse(
+        id="resp_final",
+        output=[
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "已经整理好了。"}],
+            }
+        ],
+        output_text="已经整理好了。",
+    )
+    callback_events: list[str] = []
+    FakeAsyncOpenAI.reset(
+        [],
+        stream_event_batches_to_return=[
+            [
+                types.SimpleNamespace(type="response.output_text.delta", delta="工具轮草稿。"),
+                types.SimpleNamespace(type="response.completed", response=tool_call_response),
+            ],
+            [
+                types.SimpleNamespace(type="response.output_text.delta", delta="已经"),
+                CallbackProbeEvent(callback_events, "after_delta_before_completed"),
+                types.SimpleNamespace(type="response.output_text.delta", delta="整理好了。"),
+                types.SimpleNamespace(type="response.completed", response=final_response),
+            ],
+        ],
+        stream_final_responses_to_return=[tool_call_response, final_response],
+    )
+    deltas = []
+
+    async def on_text_delta(delta: str) -> None:
+        deltas.append(delta)
+        callback_events.append(f"delta:{delta}")
+
+    async def invoke_json(args_json: str) -> str:
+        return json.dumps({"status": "quick_replies_ready", "args": json.loads(args_json)}, ensure_ascii=False, sort_keys=True)
+
+    request = SdkNodeRequest(
+        run_id="run_1",
+        thread_id="thread_1",
+        actor_user_id="user_1",
+        instructions="Use quick replies before final text.",
+        model_input=[{"role": "user", "content": "给我三个下一步"}],
+        tool_search_enabled=True,
+        tools=(
+            SdkToolDefinition(
+                contract_name="ui_quick_replies_create",
+                sdk_name="ui_quick_replies_create",
+                description="Create quick replies.",
+                params_json_schema={"type": "object", "properties": {}},
+                invoke_json=invoke_json,
+            ),
+        ),
+        on_text_delta=on_text_delta,
+        final_text_only_after_tool_names=("ui_quick_replies_create",),
+    )
+
+    result = asyncio.run(OpenAIAgentsSdkRunner(model="gpt-test").run_reasoning(request))
+
+    assert deltas == ["已经", "整理好了。"]
+    assert callback_events == ["delta:已经", "after_delta_before_completed", "delta:整理好了。"]
+    assert result.final_text == "已经整理好了。"
+    assert FakeAsyncOpenAI.stream_calls[0]["tools"] == responses_tools_payload(request)
+    assert FakeAsyncOpenAI.stream_calls[1]["tools"] == []
 
 
 def test_sdk_runner_falls_back_when_streamed_response_cannot_be_classified(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1488,6 +1572,16 @@ class FakeOpenAIResponse:
         self.output_text = output_text
 
 
+class CallbackProbeEvent:
+    def __init__(self, events: list[str], marker: str) -> None:
+        self.type = "response.probe"
+        self.events = events
+        self.marker = marker
+
+    def emit_probe(self) -> None:
+        self.events.append(self.marker)
+
+
 class FakeAsyncOpenAI:
     created_kwargs = {}
     calls = []
@@ -1567,6 +1661,9 @@ class FakeOpenAIResponseStream:
             raise StopAsyncIteration
         event = self._events[self._index]
         self._index += 1
+        emit_probe = getattr(event, "emit_probe", None)
+        if callable(emit_probe):
+            emit_probe()
         return event
 
     async def get_final_response(self):

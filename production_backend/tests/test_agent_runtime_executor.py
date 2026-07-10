@@ -631,6 +631,7 @@ def test_agent_runtime_executor_collects_quick_replies_for_final_message() -> No
     assert result.assistant_message_id is not None
     assert result.quick_replies == replies
     assert tool_executor.calls[0]["tool_name"] == "ui_quick_replies_create"
+    assert "ui_quick_replies_create" in backend.requests[0].final_text_only_after_tool_names
     assert transient_stream.deltas == []
 
 
