@@ -96,9 +96,26 @@ local `agent-worker` Compose service enables the worker when the `workers`
 profile is started, so your private `env/compose.local.env` must include the
 configured model provider credentials. `AGENT_MODEL_PROVIDER=openai` is the
 default. When the worker is enabled with the default provider, `OPENAI_API_KEY`
-must be set and `OPENAI_MODEL` controls the agent model. OpenAI runs
-namespace/deferred tool loading through the Responses API adapter when
-`tool_search` is enabled.
+must be set. The default main runtime uses `gpt-5.6-sol` with low reasoning,
+does not retain provider-side Responses state, and uses the native Responses
+runner. Namespace/deferred tool loading uses hosted `tool_search` while keeping
+the declared tool surface stable between model turns. The quick reply finalizer
+uses `gpt-5.6-luna` separately so it does not add reasoning latency to the main
+reply.
+
+```env
+AGENT_MODEL_PROVIDER=openai
+OPENAI_API_KEY=...
+OPENAI_MODEL=gpt-5.6-sol
+OPENAI_REASONING_EFFORT=low
+OPENAI_RESPONSES_STORE=false
+OPENAI_AGENT_USE_RESPONSES=true
+AGENT_QUICK_REPLY_MODEL=gpt-5.6-luna
+AGENT_QUICK_REPLY_TIMEOUT_SECONDS=3.0
+```
+
+`OPENAI_AGENT_USE_RESPONSES=false` selects the temporary OpenAI Agents SDK
+rollback path and should not be used for normal local or production traffic.
 
 Minimax is available as an experimental OpenAI-compatible provider. To test it,
 set these values in a private env file and run the provider eval before using it
@@ -138,7 +155,12 @@ AGENT_RUNTIME_WORKER_ENABLED=true
 OUTBOX_WORKER_ENABLED=true
 AGENT_MODEL_PROVIDER=openai
 OPENAI_API_KEY=...
-OPENAI_MODEL=...
+OPENAI_MODEL=gpt-5.6-sol
+OPENAI_REASONING_EFFORT=low
+OPENAI_RESPONSES_STORE=false
+OPENAI_AGENT_USE_RESPONSES=true
+AGENT_QUICK_REPLY_MODEL=gpt-5.6-luna
+AGENT_QUICK_REPLY_TIMEOUT_SECONDS=3.0
 ```
 
 ## Production Docker Compose

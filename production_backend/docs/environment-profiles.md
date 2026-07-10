@@ -61,11 +61,26 @@ OBJECT_STORAGE_ACCESS_KEY_ID=...
 OBJECT_STORAGE_SECRET_ACCESS_KEY=...
 AGENT_MODEL_PROVIDER=openai|minimax
 OPENAI_API_KEY=...
-OPENAI_MODEL=...
+OPENAI_MODEL=gpt-5.6-sol
+OPENAI_REASONING_EFFORT=low
+OPENAI_RESPONSES_STORE=false
+OPENAI_AGENT_USE_RESPONSES=true
+AGENT_QUICK_REPLY_MODEL=gpt-5.6-luna
+AGENT_QUICK_REPLY_TIMEOUT_SECONDS=3.0
 MINIMAX_API_KEY=...
 MINIMAX_BASE_URL=https://api.minimax.io/v1
 MINIMAX_MODEL=MiniMax-M3
 ```
+
+The OpenAI production path uses the native Responses runner. Keep
+`OPENAI_AGENT_USE_RESPONSES=true` for normal traffic; setting it to `false`
+selects the temporary Agents SDK rollback path. `OPENAI_RESPONSES_STORE=false`
+keeps conversation authority in the application database, while the runtime
+round-trips required response and reasoning items within the active run.
+
+The main agent uses `OPENAI_MODEL` and `OPENAI_REASONING_EFFORT`. Quick replies
+use `AGENT_QUICK_REPLY_MODEL` as a separate lightweight finalizer and do not
+persist to the message database.
 
 Local and server-test development use Docker Compose managed Postgres, Redis,
 and MinIO. Production should point the same variables at managed Postgres,
