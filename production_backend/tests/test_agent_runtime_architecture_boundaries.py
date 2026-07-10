@@ -1414,6 +1414,87 @@ def test_sdk_runner_streams_text_without_changing_tools_between_tool_turns(monke
     assert FakeAsyncOpenAI.stream_calls[1]["tools"] == responses_tools_payload(request)
 
 
+def test_responses_runner_strips_parsed_function_arguments_before_next_tool_turn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openai.types.responses.parsed_response import ParsedResponseFunctionToolCall
+
+    fake_openai = types.ModuleType("openai")
+    fake_openai.__spec__ = ModuleSpec("openai", loader=None)
+    fake_openai.AsyncOpenAI = FakeAsyncOpenAI
+    monkeypatch.setitem(sys.modules, "openai", fake_openai)
+    tool_search_output = {
+        "type": "tool_search_output",
+        "tools": [
+            {
+                "type": "function",
+                "name": "profile_read",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"parsed": {"type": "string"}},
+                },
+            }
+        ],
+    }
+    tool_call_response = FakeOpenAIResponse(
+        id="resp_tool",
+        output=[
+            tool_search_output,
+            ParsedResponseFunctionToolCall(
+                type="function_call",
+                id="fc_1",
+                call_id="call_1",
+                name="profile_read",
+                arguments='{"owner_user_id":"user_1"}',
+                parsed_arguments={"owner_user_id": "user_1"},
+                status="completed",
+            )
+        ],
+    )
+    final_response = FakeOpenAIResponse(id="resp_final", output=[], output_text="读取完成。")
+    FakeAsyncOpenAI.reset(
+        [],
+        stream_event_batches_to_return=[
+            [types.SimpleNamespace(type="response.completed", response=tool_call_response)],
+            [types.SimpleNamespace(type="response.completed", response=final_response)],
+        ],
+    )
+
+    async def invoke_json(_args_json: str) -> str:
+        return '{"status":"ok"}'
+
+    request = SdkNodeRequest(
+        run_id="run_1",
+        thread_id="thread_1",
+        actor_user_id="user_1",
+        instructions="Read the profile before replying.",
+        model_input=[{"role": "user", "content": "读取资料"}],
+        tools=(
+            SdkToolDefinition(
+                contract_name="profile.read",
+                sdk_name="profile_read",
+                description="Read profile.",
+                params_json_schema={"type": "object", "properties": {}},
+                invoke_json=invoke_json,
+            ),
+        ),
+        on_text_delta=lambda _delta: asyncio.sleep(0),
+    )
+
+    result = asyncio.run(OpenAIResponsesRunner(model="gpt-test").run_reasoning(request))
+
+    assert result.final_text == "读取完成。"
+    assert FakeAsyncOpenAI.stream_calls[1]["input"][1] == tool_search_output
+    assert FakeAsyncOpenAI.stream_calls[1]["input"][2] == {
+        "type": "function_call",
+        "id": "fc_1",
+        "call_id": "call_1",
+        "name": "profile_read",
+        "arguments": '{"owner_user_id":"user_1"}',
+        "status": "completed",
+    }
+
+
 def test_sdk_runner_streams_each_turn_before_response_completed(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_openai = types.ModuleType("openai")
     fake_openai.__spec__ = ModuleSpec("openai", loader=None)

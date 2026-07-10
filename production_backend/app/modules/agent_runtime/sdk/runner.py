@@ -188,7 +188,7 @@ class OpenAIResponsesApiBackend:
                     await _emit_buffered_text_deltas(sanitized_text, request.on_text_delta)
                 return SdkNodeResult(final_text=sanitized_text, tool_calls=observed_tool_calls)
 
-            context.extend(output_items)
+            context.extend(_response_output_items_for_input(output_items))
             for function_call in function_calls:
                 tool = tools_by_address.get((function_call["namespace"], function_call["name"]))
                 if tool is None and not function_call["namespace"]:
@@ -690,6 +690,70 @@ def _response_output_items(response: Any) -> list[Any]:
     if isinstance(output, list | tuple):
         return list(output)
     return []
+
+
+def _response_output_items_for_input(output_items: list[Any]) -> list[dict[str, Any]]:
+    return [_response_output_item_for_input(item) for item in output_items]
+
+
+def _response_output_item_for_input(item: Any) -> dict[str, Any]:
+    if _item_value(item, "type") == "function_call":
+        function_call = _response_function_call(item)
+        if function_call is None:  # pragma: no cover - guarded by the item type above
+            raise ApiError(
+                code="sdk_malformed_tool_call",
+                message="Responses API returned a malformed function call item.",
+                status=502,
+            )
+        payload: dict[str, Any] = {
+            "type": "function_call",
+            "call_id": function_call["call_id"],
+            "name": function_call["name"],
+            "arguments": function_call["arguments"],
+        }
+        for key in ("id", "status"):
+            value = _item_value(item, key)
+            if isinstance(value, str) and value:
+                payload[key] = value
+        if function_call["namespace"]:
+            payload["namespace"] = function_call["namespace"]
+        return payload
+
+    if isinstance(item, dict):
+        payload = item
+    else:
+        model_dump = getattr(item, "model_dump", None)
+        if not callable(model_dump):
+            raise ApiError(
+                code="sdk_malformed_response_item",
+                message="Responses API returned an unsupported output item.",
+                status=502,
+                details={"item_type": _item_value(item, "type")},
+            )
+        payload = model_dump(
+            mode="json",
+            by_alias=True,
+            exclude_none=True,
+            exclude=getattr(item, "__api_exclude__", None),
+        )
+    return _strip_sdk_only_response_fields(payload)
+
+
+def _strip_sdk_only_response_fields(value: Any) -> Any:
+    if isinstance(value, dict):
+        item_type = str(value.get("type") or "")
+        excluded_fields = {
+            "function_call": {"parsed_arguments"},
+            "output_text": {"parsed"},
+        }.get(item_type, set())
+        return {
+            key: _strip_sdk_only_response_fields(item)
+            for key, item in value.items()
+            if key not in excluded_fields
+        }
+    if isinstance(value, list | tuple):
+        return [_strip_sdk_only_response_fields(item) for item in value]
+    return value
 
 
 def _response_function_call(item: Any) -> dict[str, str] | None:
