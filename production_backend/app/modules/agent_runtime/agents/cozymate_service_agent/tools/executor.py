@@ -78,6 +78,7 @@ class ToolExecutor:
         tool_name: str,
         call_id: str,
         args: dict[str, Any],
+        handler_override: ToolHandler | None = None,
     ) -> ToolExecutionResult:
         started_at = perf_counter()
         tool_call: AgentToolCall | None = None
@@ -85,7 +86,7 @@ class ToolExecutor:
             contract = self.registry.get(tool_name)
             self._authorize(actor=actor, contract=contract, args=args)
             validate_tool_input(schema_ref=contract.input_schema_ref, value=args)
-            handler = self.handlers.get(tool_name)
+            handler = handler_override or self.handlers.get(tool_name)
             if handler is None:
                 raise ApiError(code="unsupported_operation", message="Tool handler is not configured.", status=501)
             run = await self.repository.get_run(run_id=run_id)
@@ -360,6 +361,7 @@ def _utcnow() -> datetime:
 
 def _tool_event_label(tool_name: str) -> str:
     return {
+        "load_service_skill": "加载服务技能",
         "profile.read": "个人资料",
         "profile_update": "更新个人资料",
         "business.context.read": "业务上下文",

@@ -10,6 +10,25 @@ JsonSchema = dict[str, Any]
 
 
 _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
+    "LoadServiceSkillInput": {
+        "title": "LoadServiceSkillInput",
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["service_skill_id"],
+        "properties": {
+            "service_skill_id": {
+                "type": "string",
+                "enum": [
+                    "birth-prep",
+                    "milk-management",
+                    "health-consultation",
+                    "emotion-support",
+                    "device-guidance",
+                ],
+                "description": "要加载的具体服务技能 id。",
+            }
+        },
+    },
     "ProfileContextQuery": {
         "title": "ProfileContextQuery",
         "type": "object",

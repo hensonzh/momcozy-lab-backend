@@ -24,6 +24,7 @@ from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.
 )
 from production_backend.app.modules.agent_runtime.sdk import (
     OpenAIAgentsSdkRunner,
+    OpenAIResponsesRunner,
     SdkNodeRequest,
     SdkNodeResult,
     SdkToolDefinition,
@@ -514,6 +515,7 @@ def test_tool_contracts_are_exported_as_responses_namespaces() -> None:
     assert root_contracts == [
         "business.context.read",
         "files.vision_summary.read",
+        "load_service_skill",
         "profile.read",
         "profile_update",
     ]
@@ -1096,6 +1098,68 @@ def test_sdk_runner_routes_responses_function_call_by_namespace_and_name(monkeyp
     assert result.final_text == "已读取。"
     assert invoked == ["milk"]
     assert result.tool_calls[0]["tool_name"] == "milk_records.read_status"
+
+
+def test_responses_runner_appends_trusted_developer_context_after_tool_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_openai = types.ModuleType("openai")
+    fake_openai.__spec__ = ModuleSpec("openai", loader=None)
+    fake_openai.AsyncOpenAI = FakeAsyncOpenAI
+    monkeypatch.setitem(sys.modules, "openai", fake_openai)
+    FakeAsyncOpenAI.reset(
+        [
+            FakeOpenAIResponse(
+                id="resp_1",
+                output=[
+                    {
+                        "type": "function_call",
+                        "name": "load_service_skill",
+                        "call_id": "call_1",
+                        "arguments": '{"service_skill_id":"milk-management"}',
+                    }
+                ],
+            ),
+            FakeOpenAIResponse(id="resp_2", output=[], output_text="已加载。"),
+        ]
+    )
+
+    async def invoke_json(args_json: str) -> str:
+        return '{"service_skill_id":"milk-management","skill_version":"v1"}'
+
+    request = SdkNodeRequest(
+        run_id="run_1",
+        thread_id="thread_1",
+        actor_user_id="user_1",
+        instructions="Use service skills when needed.",
+        model_input=[{"role": "user", "content": "帮我看看奶量"}],
+        tools=(
+            SdkToolDefinition(
+                contract_name="load_service_skill",
+                sdk_name="load_service_skill",
+                description="加载服务技能。",
+                params_json_schema={"type": "object", "properties": {}},
+                invoke_json=invoke_json,
+                model_context_after_invoke=lambda _output: (
+                    {
+                        "role": "developer",
+                        "content": "validated milk-management skill instructions",
+                    },
+                ),
+            ),
+        ),
+    )
+
+    result = asyncio.run(OpenAIResponsesRunner(model="gpt-test").run_reasoning(request))
+
+    assert result.final_text == "已加载。"
+    assert FakeAsyncOpenAI.calls[1]["input"][-2] == {
+        "type": "function_call_output",
+        "call_id": "call_1",
+        "output": '{"service_skill_id":"milk-management","skill_version":"v1"}',
+    }
+    assert FakeAsyncOpenAI.calls[1]["input"][-1] == {
+        "role": "developer",
+        "content": "validated milk-management skill instructions",
+    }
 
 
 def test_sdk_runner_uses_responses_backend_without_deferred_tools(monkeypatch: pytest.MonkeyPatch) -> None:

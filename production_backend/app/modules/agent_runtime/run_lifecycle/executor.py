@@ -30,6 +30,7 @@ from ..agents.cozymate_service_agent.service_skills import ServiceSkillId
 from ..agents.cozymate_service_agent.tools import (
     ToolContractRegistry,
     ToolExecutor,
+    ToolHandlerContext,
     ToolNamespace,
     ToolNamespaceRegistry,
     default_tool_namespace_registry,
@@ -70,25 +71,7 @@ from .state_store import AgentRuntimeStateStore
 
 LOAD_SERVICE_SKILL_TOOL_NAME = "load_service_skill"
 LOGGER = logging.getLogger("production_backend.agent_runtime.executor")
-LOAD_SERVICE_SKILL_INPUT_SCHEMA: dict[str, Any] = {
-    "title": "LoadServiceSkillInput",
-    "type": "object",
-    "additionalProperties": False,
-    "required": ["service_skill_id"],
-    "properties": {
-        "service_skill_id": {
-            "type": "string",
-            "enum": [
-                ServiceSkillId.BIRTH_PREP.value,
-                ServiceSkillId.MILK_MANAGEMENT.value,
-                ServiceSkillId.HEALTH_CONSULTATION.value,
-                ServiceSkillId.EMOTION_SUPPORT.value,
-                ServiceSkillId.DEVICE_GUIDANCE.value,
-            ],
-            "description": "要加载的具体服务技能 id。",
-        }
-    },
-}
+LOAD_SERVICE_SKILL_INPUT_SCHEMA = tool_input_schema("LoadServiceSkillInput")
 DEFAULT_RESIDENT_SERVICE_SKILL_TTL_TURNS = 3
 
 
@@ -176,6 +159,7 @@ class AgentRuntimeExecutor:
         self._run_assistant_message_ids: dict[UUID, UUID] = {}
         self._run_text_stream_buffers: dict[UUID, str] = {}
         self._run_text_stream_emitted: dict[UUID, str] = {}
+        self._unified_load_service_skill = isinstance(self.tool_executor, ToolExecutor)
 
     async def __call__(self, run: AgentRun) -> AgentRunExecutionResult:
         return await self.execute(run=run)
@@ -277,7 +261,11 @@ class AgentRuntimeExecutor:
         if self.tool_executor is None:
             business_tool_names: tuple[str, ...] = ()
         else:
-            business_tool_names = self.tool_registry.names_for_sdk()
+            business_tool_names = tuple(
+                tool_name
+                for tool_name in self.tool_registry.names_for_sdk()
+                if tool_name != LOAD_SERVICE_SKILL_TOOL_NAME
+            )
         tool_names = (LOAD_SERVICE_SKILL_TOOL_NAME, *business_tool_names)
         return _AgentTurnToolScope(tool_namespaces=tool_namespaces, tool_names=tool_names)
 
@@ -552,7 +540,14 @@ class AgentRuntimeExecutor:
             for tool_name in tool_names
             if tool_name != LOAD_SERVICE_SKILL_TOOL_NAME
         )
-        return (self._load_service_skill_tool_definition(run=run), *business_tools)
+        if self._unified_load_service_skill:
+            load_service_skill = self._sdk_tool_definition(
+                run=run,
+                tool_name=LOAD_SERVICE_SKILL_TOOL_NAME,
+            )
+        else:
+            load_service_skill = self._load_service_skill_tool_definition(run=run)
+        return (load_service_skill, *business_tools)
 
     def _load_service_skill_tool_definition(self, *, run: AgentRun) -> SdkToolDefinition:
         async def invoke_json(args_json: str) -> str:
@@ -571,6 +566,7 @@ class AgentRuntimeExecutor:
             ),
             params_json_schema=LOAD_SERVICE_SKILL_INPUT_SCHEMA,
             invoke_json=invoke_json,
+            model_context_after_invoke=self._loaded_service_skill_model_context,
         )
 
     def _sdk_tool_definition(self, *, run: AgentRun, tool_name: str, namespace: ToolNamespace | None = None) -> SdkToolDefinition:
@@ -588,19 +584,92 @@ class AgentRuntimeExecutor:
             invoke_json=invoke_json,
             namespace_name=namespace.name if namespace is not None else "",
             defer_loading=contract.name in set(namespace.deferred_tool_contracts) if namespace is not None else False,
+            model_context_after_invoke=(
+                self._loaded_service_skill_model_context
+                if contract.name == LOAD_SERVICE_SKILL_TOOL_NAME
+                else None
+            ),
+        )
+
+    async def _load_service_skill_handler(self, context: ToolHandlerContext) -> dict[str, Any]:
+        raw_skill_id = _text(context.args, "service_skill_id")
+        try:
+            skill_id = ServiceSkillId(raw_skill_id)
+        except ValueError as exc:
+            raise ApiError(code="invalid_service_skill", message="Unsupported service_skill_id.", status=422) from exc
+        skill = self.service_skill_registry.get(skill_id.value)
+        facts = await self.business_facts_projector.project(
+            actor=context.actor,
+            run_id=context.run_id,
+            service_skill_id=skill_id,
+        ) if self.business_facts_projector is not None else {}
+        output = _load_service_skill_output(
+            skill=skill,
+            tool_namespaces=_tool_namespaces_for_service_skill(
+                tool_namespace_registry=self.tool_namespace_registry,
+                skill_id=skill_id,
+            ),
+            business_facts=facts,
+            loaded_at=self.clock(),
+        )
+        self._run_loaded_service_skill_ids.setdefault(context.run_id, set()).add(skill.service_skill_id)
+        output["_deferred_agent_events"] = [
+            {
+                "event_type": "skill.loaded",
+                "payload": {
+                    "service_skill_id": skill.service_skill_id,
+                    "skill_version": skill.version,
+                    "loaded_at": output["loaded_at"],
+                    "tool_names": output["tool_scope"]["tool_names"],
+                },
+            }
+        ]
+        return output
+
+    def _loaded_service_skill_model_context(self, output_json: str) -> tuple[dict[str, Any], ...]:
+        output = _json_object(output_json)
+        service_skill_id = _required_text(output, "service_skill_id")
+        try:
+            skill = self.service_skill_registry.get(service_skill_id)
+        except KeyError as exc:
+            raise ApiError(code="invalid_service_skill", message="Loaded service skill is not registered.", status=502) from exc
+        trusted_context = {
+            "runtime_loaded_service_skill": {
+                "service_skill_id": skill.service_skill_id,
+                "skill_version": skill.version,
+                "loaded_at": _text(output, "loaded_at"),
+                "name": skill.name,
+                "description": skill.description,
+                "instructions": skill.prompt_block(),
+                "business_facts": _dict(output, "business_facts"),
+                "instruction": "Apply this service skill only while it is relevant to the current user request.",
+            }
+        }
+        return (
+            {
+                "role": "developer",
+                "content": json.dumps(trusted_context, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
+            },
         )
 
     async def _invoke_sdk_tool(self, *, run: AgentRun, contract_name: str, sdk_name: str, args_json: str) -> str:
         if self.tool_executor is None:
             raise ApiError(code="unsupported_operation", message="Tool executor is not configured.", status=501)
         args = _json_object(args_json)
-        result = await self.tool_executor.execute(
-            actor=_run_actor(run),
-            run_id=run.id,
-            tool_name=contract_name,
-            call_id=f"sdk-{sdk_name}-{uuid4().hex}",
-            args=args,
-        )
+        execute_kwargs = {
+            "actor": _run_actor(run),
+            "run_id": run.id,
+            "tool_name": contract_name,
+            "call_id": f"sdk-{sdk_name}-{uuid4().hex}",
+            "args": args,
+        }
+        if contract_name == LOAD_SERVICE_SKILL_TOOL_NAME and isinstance(self.tool_executor, ToolExecutor):
+            result = await self.tool_executor.execute(
+                **execute_kwargs,
+                handler_override=self._load_service_skill_handler,
+            )
+        else:
+            result = await self.tool_executor.execute(**execute_kwargs)
         await self._append_progress(run=run, phase="model_reasoning_after_tool", label="我接着处理下一步")
         return json.dumps(result.safe_output, sort_keys=True)
 

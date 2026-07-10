@@ -1482,6 +1482,46 @@ def test_agent_runtime_executor_real_tool_executor_uses_run_actor_role_permissio
     ]
 
 
+def test_agent_runtime_executor_loads_skill_through_unified_tool_executor() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="帮我看看最近奶量", sequence=1)
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user, run=run)
+    registry = default_tool_registry()
+    tool_executor = ToolExecutor(registry=registry, repository=repository, handlers={})
+    backend = ScriptedSdkBackend(
+        [
+            scripted_sdk_response(
+                final_text="我来看看最近奶量。",
+                tool_invocations=(
+                    scripted_tool_invocation("load_service_skill", {"service_skill_id": "milk-management"}),
+                ),
+            )
+        ]
+    )
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            tool_registry=registry,
+            tool_executor=tool_executor,
+        ).execute(run=run)
+    )
+
+    assert result.status == "completed"
+    assert repository.tool_call is not None
+    assert repository.tool_call.tool_name == "load_service_skill"
+    assert repository.tool_call.status == "completed"
+    assert repository.tool_output.safe_output["service_skill_id"] == "milk-management"
+    assert "instructions" not in repository.tool_output.safe_output["skill"]
+    assert [event.event_type for event in repository.events if event.event_type.startswith("tool.")] == [
+        "tool.started",
+        "tool.completed",
+    ]
+    assert any(event.event_type == "skill.loaded" for event in repository.events)
+
+
 def test_agent_runtime_executor_persists_sdk_action_proposal_and_waits_for_confirmation() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)

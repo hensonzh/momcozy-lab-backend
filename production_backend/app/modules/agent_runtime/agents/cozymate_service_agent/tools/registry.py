@@ -31,6 +31,28 @@ def default_tool_registry() -> ToolContractRegistry:
     registry = ToolContractRegistry()
     registry.register(
         ToolContract(
+            name="load_service_skill",
+            domain="agent_runtime",
+            description=(
+                "按 service_skill_id 加载一个 MomCozy 服务技能。"
+                "需要进入奶量、产前准备、健康咨询、情绪支持或设备指导流程前调用。"
+            ),
+            input_schema_ref="LoadServiceSkillInput",
+            output_schema_ref="ServiceSkillLoad",
+            read_or_write="read",
+            required_permission="agent:skill:load:self",
+            owner_scope="actor",
+            side_effect_level="none",
+            blocking_policy="must_wait",
+            result_dependency="next_tool_call",
+            requires_confirmation=False,
+            idempotency_required=False,
+            audit_required=True,
+            timeout_seconds=20,
+        )
+    )
+    registry.register(
+        ToolContract(
             name="profile.read",
             domain="profiles",
             description="读取当前用户的用户资料上下文投影。",

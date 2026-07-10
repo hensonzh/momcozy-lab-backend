@@ -17,6 +17,7 @@ from ..response_text import sanitize_agent_response_text
 
 SdkToolInvoker = Callable[[str], Awaitable[str]]
 SdkTextDeltaHandler = Callable[[str], Awaitable[None]]
+SdkToolModelContextBuilder = Callable[[str], tuple[dict[str, Any], ...]]
 THINK_TAG = "<think>"
 
 
@@ -29,6 +30,7 @@ class SdkToolDefinition:
     invoke_json: SdkToolInvoker
     namespace_name: str = ""
     defer_loading: bool = False
+    model_context_after_invoke: SdkToolModelContextBuilder | None = None
 
 
 @dataclass(frozen=True)
@@ -167,8 +169,11 @@ class OpenAIResponsesApiBackend:
                     )
                 )
             output_items = _response_output_items(latest_response)
-            function_calls = [_response_function_call(item) for item in output_items]
-            function_calls = [call for call in function_calls if call is not None]
+            function_calls: list[dict[str, str]] = []
+            for item in output_items:
+                function_call = _response_function_call(item)
+                if function_call is not None:
+                    function_calls.append(function_call)
             if not function_calls:
                 final_text = _response_output_text(latest_response, output_items=output_items) or streamed_text
                 sanitized_text = _sanitize_model_text(final_text)
@@ -197,6 +202,8 @@ class OpenAIResponsesApiBackend:
                         "output": output_json,
                     }
                 )
+                if tool.model_context_after_invoke is not None:
+                    context.extend(tool.model_context_after_invoke(output_json))
                 observed_tool_calls.append(
                     {
                         "tool_name": tool.contract_name,
@@ -465,10 +472,10 @@ class OpenAIAgentsSdkRunner:
 def responses_tools_payload(request: SdkNodeRequest) -> list[dict[str, Any]]:
     tools_by_contract = {tool.contract_name: tool for tool in request.tools}
     if not request.tool_namespaces:
-        payload = [_responses_function_tool_payload(tool) for tool in request.tools]
+        flat_payload = [_responses_function_tool_payload(tool) for tool in request.tools]
         if request.tool_search_enabled:
-            payload.append({"type": "tool_search"})
-        return payload
+            flat_payload.append({"type": "tool_search"})
+        return flat_payload
 
     payload: list[dict[str, Any]] = []
     namespaced_contracts = {contract_name for namespace in request.tool_namespaces for contract_name in namespace.tool_names}
