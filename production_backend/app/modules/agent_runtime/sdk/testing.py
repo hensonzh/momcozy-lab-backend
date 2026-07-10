@@ -37,7 +37,7 @@ class ScriptedSdkBackend(SdkRunnerBackend):
             raise ApiError(code="sdk_mock_exhausted", message="Scripted SDK backend has no response left.", status=500)
         response = self._responses.pop(0)
         _assert_expected_tools(response=response, request=request)
-        if request.on_text_delta is not None and not response.tool_invocations and not response.tool_calls:
+        if request.on_text_delta is not None:
             for delta in response.text_deltas:
                 await request.on_text_delta(delta)
         invoked_tool_calls = await _invoke_scripted_tools(response=response, request=request)

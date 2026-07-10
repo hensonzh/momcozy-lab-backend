@@ -1046,13 +1046,13 @@ def test_sdk_runner_streams_responses_api_text_deltas(monkeypatch: pytest.Monkey
 
     result = asyncio.run(OpenAIAgentsSdkRunner(model="gpt-test").run_reasoning(request))
 
-    assert deltas == ["hello"]
+    assert deltas == ["hel", "lo"]
     assert result.final_text == "hello"
     assert FakeAsyncOpenAI.calls == []
     assert FakeAsyncOpenAI.stream_calls[0]["input"] == [{"role": "user", "content": "hello"}]
 
 
-def test_sdk_runner_discards_responses_api_streamed_text_from_tool_call_turn(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_sdk_runner_streams_text_without_changing_tools_between_tool_turns(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_openai = types.ModuleType("openai")
     fake_openai.__spec__ = ModuleSpec("openai", loader=None)
     fake_openai.AsyncOpenAI = FakeAsyncOpenAI
@@ -1083,7 +1083,7 @@ def test_sdk_runner_discards_responses_api_streamed_text_from_tool_call_turn(mon
         [],
         stream_event_batches_to_return=[
             [
-                types.SimpleNamespace(type="response.output_text.delta", delta="工具草稿不该出现。"),
+                types.SimpleNamespace(type="response.output_text.delta", delta="工具轮文本。"),
                 types.SimpleNamespace(type="response.completed", response=tool_call_response),
             ],
             [
@@ -1118,12 +1118,11 @@ def test_sdk_runner_discards_responses_api_streamed_text_from_tool_call_turn(mon
             ),
         ),
         on_text_delta=on_text_delta,
-        final_text_only_after_tool_names=("profile.read",),
     )
 
     result = asyncio.run(OpenAIAgentsSdkRunner(model="gpt-test").run_reasoning(request))
 
-    assert deltas == ["保存好了。"]
+    assert deltas == ["工具轮文本。", "保存好了。"]
     assert result.final_text == "保存好了。"
     assert result.tool_calls == [
         {
@@ -1134,10 +1133,11 @@ def test_sdk_runner_discards_responses_api_streamed_text_from_tool_call_turn(mon
         }
     ]
     assert FakeAsyncOpenAI.calls == []
-    assert FakeAsyncOpenAI.stream_calls[1]["tools"] == []
+    assert FakeAsyncOpenAI.stream_calls[0]["tools"] == responses_tools_payload(request)
+    assert FakeAsyncOpenAI.stream_calls[1]["tools"] == responses_tools_payload(request)
 
 
-def test_sdk_runner_live_streams_text_only_turn_before_response_completed(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_sdk_runner_streams_each_turn_before_response_completed(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_openai = types.ModuleType("openai")
     fake_openai.__spec__ = ModuleSpec("openai", loader=None)
     fake_openai.AsyncOpenAI = FakeAsyncOpenAI
@@ -1207,37 +1207,25 @@ def test_sdk_runner_live_streams_text_only_turn_before_response_completed(monkey
             ),
         ),
         on_text_delta=on_text_delta,
-        final_text_only_after_tool_names=("ui_quick_replies_create",),
     )
 
     result = asyncio.run(OpenAIAgentsSdkRunner(model="gpt-test").run_reasoning(request))
 
-    assert deltas == ["已经", "整理好了。"]
-    assert callback_events == ["delta:已经", "after_delta_before_completed", "delta:整理好了。"]
+    assert deltas == ["工具轮草稿。", "已经", "整理好了。"]
+    assert callback_events == ["delta:工具轮草稿。", "delta:已经", "after_delta_before_completed", "delta:整理好了。"]
     assert result.final_text == "已经整理好了。"
     assert FakeAsyncOpenAI.stream_calls[0]["tools"] == responses_tools_payload(request)
-    assert FakeAsyncOpenAI.stream_calls[1]["tools"] == []
+    assert FakeAsyncOpenAI.stream_calls[1]["tools"] == responses_tools_payload(request)
 
 
-def test_sdk_runner_falls_back_when_streamed_response_cannot_be_classified(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_sdk_runner_uses_streamed_text_when_response_completed_event_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_openai = types.ModuleType("openai")
     fake_openai.__spec__ = ModuleSpec("openai", loader=None)
     fake_openai.AsyncOpenAI = FakeAsyncOpenAI
     monkeypatch.setitem(sys.modules, "openai", fake_openai)
-    classified_response = FakeOpenAIResponse(
-        id="resp_classified",
-        output=[
-            {
-                "type": "message",
-                "role": "assistant",
-                "content": [{"type": "output_text", "text": "安全回复。"}],
-            }
-        ],
-        output_text="安全回复。",
-    )
     FakeAsyncOpenAI.reset(
-        [classified_response],
-        stream_events_to_return=[types.SimpleNamespace(type="response.output_text.delta", delta="不能直接发。")],
+        [],
+        stream_events_to_return=[types.SimpleNamespace(type="response.output_text.delta", delta="直接实时发。")],
     )
     deltas = []
 
@@ -1268,9 +1256,9 @@ def test_sdk_runner_falls_back_when_streamed_response_cannot_be_classified(monke
 
     result = asyncio.run(OpenAIAgentsSdkRunner(model="gpt-test").run_reasoning(request))
 
-    assert deltas == ["安全回复。"]
-    assert result.final_text == "安全回复。"
-    assert FakeAsyncOpenAI.calls[0]["input"] == [{"role": "user", "content": "hello"}]
+    assert deltas == ["直接实时发。"]
+    assert result.final_text == "直接实时发。"
+    assert FakeAsyncOpenAI.calls == []
 
 
 def test_sdk_runner_rejects_deferred_tool_loading_when_responses_backend_disabled() -> None:
@@ -1407,7 +1395,7 @@ def test_sdk_runner_maps_streamed_text_deltas_to_callback(monkeypatch: pytest.Mo
         )
     )
 
-    assert deltas == ["hello"]
+    assert deltas == ["hel", "lo"]
     assert result.final_text == "hello"
     assert StreamingAgentsSdkRunner.last_input == "user: hello"
 

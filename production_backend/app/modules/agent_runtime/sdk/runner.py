@@ -54,7 +54,6 @@ class SdkNodeRequest:
     trace_id: str = ""
     service_skill_id: str = "cozymate_service_agent"
     on_text_delta: SdkTextDeltaHandler | None = None
-    final_text_only_after_tool_names: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -124,12 +123,9 @@ class OpenAIResponsesApiBackend:
         tools_by_sdk_name = {tool.sdk_name: tool for tool in request.tools}
         observed_tool_calls: list[dict[str, Any]] = []
         latest_response: Any | None = None
-        final_text_only_turn = False
-        final_text_only_after_tools = set(request.final_text_only_after_tool_names)
 
         for _turn_index in range(self.max_turns):
             streamed_text = ""
-            turn_tools_payload = [] if final_text_only_turn else tools_payload
             if request.on_text_delta is not None and callable(stream_response):
                 latest_response, streamed_text, emitted_stream = await _create_response_streamed(
                     create_response=create_response,
@@ -137,8 +133,8 @@ class OpenAIResponsesApiBackend:
                     model=self.model,
                     instructions=request.instructions,
                     context=context,
-                    tools_payload=turn_tools_payload,
-                    on_text_delta=request.on_text_delta if not turn_tools_payload else None,
+                    tools_payload=tools_payload,
+                    on_text_delta=request.on_text_delta,
                 )
             else:
                 emitted_stream = False
@@ -146,7 +142,7 @@ class OpenAIResponsesApiBackend:
                     model=self.model,
                     instructions=request.instructions,
                     input=list(context),
-                    tools=turn_tools_payload,
+                    tools=tools_payload,
                     parallel_tool_calls=False,
                 )
             output_items = _response_output_items(latest_response)
@@ -186,8 +182,6 @@ class OpenAIResponsesApiBackend:
                         "safe_output": _json_object_or_raw(output_json),
                     }
                 )
-                if tool.contract_name in final_text_only_after_tools:
-                    final_text_only_turn = True
 
         raise ApiError(
             code="sdk_run_max_turns_exceeded",
@@ -449,7 +443,7 @@ async def _create_response_streamed(
         await _maybe_await(stream_response(**kwargs)),
         on_text_delta=on_text_delta,
     )
-    if response is None and (not streamed_text or tools_payload):
+    if response is None and not streamed_text:
         response = await create_response(**kwargs)
     return response, streamed_text, emitted_stream
 
@@ -639,13 +633,25 @@ async def _run_streamed(
 ) -> SdkNodeResult:
     streamed = runner_cls.run_streamed(agent, model_input, **run_kwargs)
     raw_text = ""
+    emitted_text = ""
+    emitted_stream = False
     async for event in streamed.stream_events():
         delta = _text_delta_from_stream_event(event)
         if delta:
             raw_text += delta
+            sanitized_text = _sanitize_model_text(raw_text)
+            if sanitized_text.startswith(emitted_text):
+                sanitized_delta = sanitized_text[len(emitted_text) :]
+            else:
+                sanitized_delta = sanitized_text
+            if sanitized_delta:
+                await on_text_delta(sanitized_delta)
+                emitted_text = sanitized_text
+                emitted_stream = True
     final_output = getattr(streamed, "final_output", "")
     sanitized_text = _sanitize_model_text(str(final_output or "") or raw_text)
-    await _emit_buffered_text_deltas(sanitized_text, on_text_delta)
+    if not emitted_stream:
+        await _emit_buffered_text_deltas(sanitized_text, on_text_delta)
     return SdkNodeResult(final_text=sanitized_text)
 
 

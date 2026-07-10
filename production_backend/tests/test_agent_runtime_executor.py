@@ -631,8 +631,10 @@ def test_agent_runtime_executor_collects_quick_replies_for_final_message() -> No
     assert result.assistant_message_id is not None
     assert result.quick_replies == replies
     assert tool_executor.calls[0]["tool_name"] == "ui_quick_replies_create"
-    assert "ui_quick_replies_create" in backend.requests[0].final_text_only_after_tool_names
-    assert transient_stream.deltas == []
+    assert transient_stream.deltas == [
+        {"thread_id": thread_id, "run_id": run.id, "delta": "已经", "message_stream_id": str(result.assistant_message_id)},
+        {"thread_id": thread_id, "run_id": run.id, "delta": "整理好了。", "message_stream_id": str(result.assistant_message_id)},
+    ]
 
 
 def test_agent_runtime_executor_extracts_quick_replies_from_final_text_json() -> None:
