@@ -103,7 +103,7 @@ def test_compose_env_declares_disabled_agent_worker_controls() -> None:
     assert "AGENT_RUNTIME_WORKER_ENABLED=false" in env
     assert "AGENT_RUNTIME_WORKER_BATCH_LIMIT=10" in env
     assert "AGENT_RUNTIME_WORKER_IDLE_SECONDS=0.1" in env
-    assert "AGENT_RUNTIME_RECOVER_RUNNING_OLDER_THAN_SECONDS=900" in env
+    assert "AGENT_RUNTIME_INTERRUPT_RUNNING_OLDER_THAN_SECONDS=900" in env
     assert "AGENT_MODEL_PROVIDER=openai" in env
     assert "OPENAI_API_KEY=" in env
     assert "OPENAI_MODEL=gpt-5.5" in env

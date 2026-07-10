@@ -24,7 +24,7 @@ from production_backend.app.modules.agent_runtime.repository import AgentRuntime
 from production_backend.app.modules.agent_runtime.run_lifecycle.controls import AgentRunControls  # noqa: E402
 
 
-RECOVERY_ERROR_CODE = "stuck_run_recovered"
+RECOVERY_ERROR_CODE = "runtime_interrupted"
 
 
 async def recover_stuck_agent_runs(
@@ -38,7 +38,7 @@ async def recover_stuck_agent_runs(
         raise ValueError("limit must be positive")
     resolved_settings = settings or Settings.from_env()
     resolved_settings.validate_for_startup()
-    threshold_seconds = older_than_seconds or resolved_settings.agent_runtime_recover_running_older_than_seconds
+    threshold_seconds = older_than_seconds or resolved_settings.agent_runtime_interrupt_running_older_than_seconds
     cutoff = _stuck_run_cutoff(older_than_seconds=threshold_seconds)
     engine = create_db_engine(resolved_settings)
     session_factory = create_session_factory(engine)
@@ -65,13 +65,13 @@ async def recover_stuck_agent_runs(
                     run=run,
                     completed_at=_utcnow(),
                     error_code=RECOVERY_ERROR_CODE,
-                    error_details={"recovered_by": "recover_stuck_agent_runs.py"},
+                    error_details={"interrupted_by": "recover_stuck_agent_runs.py"},
                 )
                 await repository.append_event(
                     thread_id=failed.thread_id,
                     run_id=failed.id,
                     event_type="run.failed",
-                    payload={"code": RECOVERY_ERROR_CODE, "recovered": True},
+                    payload={"code": RECOVERY_ERROR_CODE, "interrupted": True},
                 )
                 if controls is not None:
                     await controls.clear_active_run(thread_id=failed.thread_id, run_id=failed.id)

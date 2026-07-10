@@ -54,6 +54,7 @@ from production_backend.scripts.worker_runtime import install_stop_signal_handle
 class AgentRunProcessResult:
     status_changed: bool
     terminal: bool
+    interrupted: bool = False
 
 
 @dataclass(frozen=True)
@@ -75,7 +76,7 @@ async def run_agent_worker(
     resolved_settings = settings or Settings.from_env()
     resolved_settings.validate_for_startup()
     if not resolved_settings.agent_runtime_worker_enabled:
-        return {"status": "disabled", "cycles": 0, "scanned": 0, "processed": 0, "terminal": 0}
+        return {"status": "disabled", "cycles": 0, "scanned": 0, "processed": 0, "terminal": 0, "interrupted": 0}
 
     db_engine = create_db_engine(resolved_settings)
     session_factory = create_session_factory(db_engine)
@@ -83,16 +84,32 @@ async def run_agent_worker(
     redis_client = create_redis_client(resolved_settings)
     controls = AgentRunControls(redis_client)
     metrics = RequestMetrics()
-    totals: dict[str, Any] = {"status": "ok", "cycles": 0, "scanned": 0, "processed": 0, "terminal": 0}
+    totals: dict[str, Any] = {"status": "ok", "cycles": 0, "scanned": 0, "processed": 0, "terminal": 0, "interrupted": 0}
     try:
         while True:
             if stop_event is not None and stop_event.is_set():
                 totals["status"] = "stopping"
                 return _with_metrics(totals, metrics)
-            run_refs = await _list_runnable_run_refs(
+            stale_run_refs = await _list_stale_running_run_refs(
                 session_factory=session_factory,
                 batch_limit=resolved_settings.agent_runtime_worker_batch_limit,
-                recover_running_older_than_seconds=resolved_settings.agent_runtime_recover_running_older_than_seconds,
+                interrupt_running_older_than_seconds=resolved_settings.agent_runtime_interrupt_running_older_than_seconds,
+            )
+            interrupt_results = await _process_with_concurrency(
+                items=stale_run_refs,
+                concurrency=resolved_settings.agent_runtime_worker_concurrency,
+                processor=lambda run_ref: _interrupt_agent_run(
+                    run_id=run_ref.run_id,
+                    before_status=run_ref.status,
+                    session_factory=session_factory,
+                    redis_client=redis_client,
+                    controls=controls,
+                ),
+            )
+            queued_limit = max(0, resolved_settings.agent_runtime_worker_batch_limit - len(stale_run_refs))
+            run_refs = await _list_runnable_run_refs(
+                session_factory=session_factory,
+                batch_limit=queued_limit,
             )
             run_results = await _process_with_concurrency(
                 items=run_refs,
@@ -108,19 +125,22 @@ async def run_agent_worker(
                     metrics=metrics,
                 ),
             )
+            all_results = [*interrupt_results, *run_results]
             result = AgentRunQueueWorkerResult(
-                scanned=len(run_refs),
-                processed=sum(1 for item in run_results if item.status_changed),
-                terminal=sum(1 for item in run_results if item.terminal),
+                scanned=len(stale_run_refs) + len(run_refs),
+                processed=sum(1 for item in all_results if item.status_changed),
+                terminal=sum(1 for item in all_results if item.terminal),
+                interrupted=sum(1 for item in all_results if item.interrupted),
             )
 
             totals["cycles"] += 1
             totals["scanned"] += result.scanned
             totals["processed"] += result.processed
             totals["terminal"] += result.terminal
+            totals["interrupted"] = int(totals.get("interrupted", 0)) + result.interrupted
             if once or (max_cycles is not None and totals["cycles"] >= max_cycles):
                 return _with_metrics(totals, metrics)
-            if result.scanned == 0:
+            if result.scanned == 0 or result.processed == 0:
                 await _wait_for_next_agent_run_signal(
                     controls=controls,
                     idle_seconds=resolved_settings.agent_runtime_worker_idle_seconds,
@@ -139,13 +159,28 @@ async def _list_runnable_run_refs(
     *,
     session_factory: Any,
     batch_limit: int,
-    recover_running_older_than_seconds: int | None,
 ) -> list[RunnableAgentRunRef]:
+    if batch_limit <= 0:
+        return []
     async with session_factory() as session:
         repository = AgentRuntimeRepository(session)
-        runs = await repository.list_runnable_runs(
+        runs = await repository.list_runnable_runs(limit=batch_limit)
+        return [RunnableAgentRunRef(run_id=run.id, status=run.status) for run in runs]
+
+
+async def _list_stale_running_run_refs(
+    *,
+    session_factory: Any,
+    batch_limit: int,
+    interrupt_running_older_than_seconds: int | None,
+) -> list[RunnableAgentRunRef]:
+    if batch_limit <= 0:
+        return []
+    async with session_factory() as session:
+        repository = AgentRuntimeRepository(session)
+        runs = await repository.list_stale_running_runs(
+            cutoff=_interrupt_running_before(interrupt_running_older_than_seconds),
             limit=batch_limit,
-            recover_running_before=_recover_running_before(recover_running_older_than_seconds),
         )
         return [RunnableAgentRunRef(run_id=run.id, status=run.status) for run in runs]
 
@@ -310,10 +345,42 @@ async def _process_agent_run(
         )
 
 
-def _recover_running_before(recover_running_older_than_seconds: int | None) -> datetime | None:
-    if recover_running_older_than_seconds is None:
+async def _interrupt_agent_run(
+    *,
+    run_id: UUID,
+    before_status: str,
+    session_factory: Any,
+    redis_client: Any,
+    controls: AgentRunControls,
+) -> AgentRunProcessResult:
+    async with session_factory() as session:
+        repository = AgentRuntimeRepository(session)
+        transient_stream = AgentTransientStream(redis_client)
+        worker = AgentRunWorker(
+            repository=repository,
+            controls=controls,
+            after_event_append=session.commit,
+            transient_stream=transient_stream,
+        )
+        try:
+            after_run = await worker.interrupt_running(run_id=run_id)
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        after_status = after_run.status if after_run is not None else before_status
+        interrupted = bool(before_status == "running" and after_status == "failed")
+        return AgentRunProcessResult(
+            status_changed=bool(after_run is not None and after_status != before_status),
+            terminal=after_status in TERMINAL_RUN_STATUSES,
+            interrupted=interrupted,
+        )
+
+
+def _interrupt_running_before(interrupt_running_older_than_seconds: int | None) -> datetime | None:
+    if interrupt_running_older_than_seconds is None:
         return None
-    return datetime.now(timezone.utc) - timedelta(seconds=recover_running_older_than_seconds)
+    return datetime.now(timezone.utc) - timedelta(seconds=interrupt_running_older_than_seconds)
 
 
 def main() -> None:

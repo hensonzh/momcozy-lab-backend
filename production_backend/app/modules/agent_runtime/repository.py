@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Any, cast
 from uuid import UUID
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...infrastructure.db.session import add_after_commit_callback
@@ -196,17 +196,28 @@ class AgentRuntimeRepository:
         self,
         *,
         limit: int,
-        recover_running_before: datetime | None = None,
     ) -> list[AgentRun]:
-        conditions = [AgentRun.status == "queued"]
-        if recover_running_before is not None:
-            conditions.append(
-                and_(
-                    AgentRun.status == "running",
-                    or_(AgentRun.started_at.is_(None), AgentRun.started_at <= recover_running_before),
-                )
+        statement = select(AgentRun).where(AgentRun.status == "queued").order_by(AgentRun.created_at.asc(), AgentRun.id.asc()).limit(limit)
+        result = await self.session.scalars(statement)
+        return list(result.all())
+
+    async def list_stale_running_runs(
+        self,
+        *,
+        cutoff: datetime | None,
+        limit: int,
+    ) -> list[AgentRun]:
+        if cutoff is None:
+            return []
+        statement = (
+            select(AgentRun)
+            .where(
+                AgentRun.status == "running",
+                or_(AgentRun.started_at.is_(None), AgentRun.started_at <= cutoff),
             )
-        statement = select(AgentRun).where(or_(*conditions)).order_by(AgentRun.created_at.asc(), AgentRun.id.asc()).limit(limit)
+            .order_by(AgentRun.started_at.asc().nullsfirst(), AgentRun.created_at.asc(), AgentRun.id.asc())
+            .limit(limit)
+        )
         result = await self.session.scalars(statement)
         return list(result.all())
 

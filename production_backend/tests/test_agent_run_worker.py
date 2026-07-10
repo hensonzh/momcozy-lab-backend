@@ -3,7 +3,7 @@ from uuid import uuid4
 
 from production_backend.app.core.errors import ApiError
 from production_backend.app.modules.agent_runtime.models import AgentEvent, AgentMessage, AgentRun
-from production_backend.app.workers.agent_run import AgentRunQueueWorker, AgentRunWorker, AgentRunWorkerResult
+from production_backend.app.workers.agent_run import INTERRUPTED_RUN_ERROR_CODE, AgentRunQueueWorker, AgentRunWorkerResult, AgentRunWorker
 
 
 def test_agent_run_worker_completes_run_with_assistant_message_events_and_lock() -> None:
@@ -164,11 +164,33 @@ def test_agent_run_worker_preserves_waiting_for_confirmation_state() -> None:
     assert repository.events[-1].payload["action_id"] == str(action_id)
 
 
-def test_agent_run_queue_worker_scans_queued_and_recoverable_running_runs() -> None:
+def test_agent_run_worker_does_not_resume_existing_running_run() -> None:
     repository = FakeAgentRuntimeRepository()
-    running = repository.add_run(status="running")
+    repository.run.status = "running"
+    handler_called = False
 
     async def handler(_run: AgentRun) -> AgentRunWorkerResult:
+        nonlocal handler_called
+        handler_called = True
+        return AgentRunWorkerResult(status="completed")
+
+    worker = AgentRunWorker(repository=repository, handler=handler)
+
+    run = asyncio.run(worker.run_once(run_id=repository.run.id))
+
+    assert run is repository.run
+    assert run.status == "running"
+    assert handler_called is False
+    assert repository.events == []
+
+
+def test_agent_run_queue_worker_interrupts_stale_running_runs_without_resuming() -> None:
+    repository = FakeAgentRuntimeRepository()
+    running = repository.add_run(status="running")
+    handled_run_ids = []
+
+    async def handler(run: AgentRun) -> AgentRunWorkerResult:
+        handled_run_ids.append(run.id)
         return AgentRunWorkerResult(status="completed")
 
     run_worker = AgentRunWorker(repository=repository, handler=handler)
@@ -179,8 +201,11 @@ def test_agent_run_queue_worker_scans_queued_and_recoverable_running_runs() -> N
     assert result.scanned == 2
     assert result.processed == 2
     assert result.terminal == 2
+    assert result.interrupted == 1
     assert repository.run.status == "completed"
-    assert running.status == "completed"
+    assert running.status == "failed"
+    assert running.error_code == INTERRUPTED_RUN_ERROR_CODE
+    assert handled_run_ids == [repository.run.id]
 
 
 class FakeAgentRuntimeRepository:
@@ -228,8 +253,14 @@ class FakeAgentRuntimeRepository:
             run.status = self.external_status_on_refresh
         return run
 
-    async def list_runnable_runs(self, *, limit, recover_running_before=None):
-        runnable = [run for run in self.runs if run.status == "queued" or (run.status == "running" and recover_running_before is not None)]
+    async def list_runnable_runs(self, *, limit):
+        runnable = [run for run in self.runs if run.status == "queued"]
+        return runnable[:limit]
+
+    async def list_stale_running_runs(self, *, cutoff, limit):
+        if cutoff is None:
+            return []
+        runnable = [run for run in self.runs if run.status == "running"]
         return runnable[:limit]
 
     async def mark_run_running(self, *, run, started_at):

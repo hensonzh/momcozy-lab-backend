@@ -66,7 +66,7 @@ class Settings:
     agent_runtime_worker_batch_limit: int = 10
     agent_runtime_worker_concurrency: int = 1
     agent_runtime_worker_idle_seconds: float = 0.1
-    agent_runtime_recover_running_older_than_seconds: int = 900
+    agent_runtime_interrupt_running_older_than_seconds: int = 900
     agent_runtime_max_inline_payload_bytes: int = DEFAULT_AGENT_RUNTIME_MAX_INLINE_PAYLOAD_BYTES
     outbox_worker_enabled: bool = False
     outbox_worker_idle_seconds: int = 2
@@ -141,9 +141,9 @@ class Settings:
             agent_runtime_worker_batch_limit=_env_int("AGENT_RUNTIME_WORKER_BATCH_LIMIT", cls.agent_runtime_worker_batch_limit),
             agent_runtime_worker_concurrency=_env_int("AGENT_RUNTIME_WORKER_CONCURRENCY", cls.agent_runtime_worker_concurrency),
             agent_runtime_worker_idle_seconds=_env_float("AGENT_RUNTIME_WORKER_IDLE_SECONDS", cls.agent_runtime_worker_idle_seconds),
-            agent_runtime_recover_running_older_than_seconds=_env_int(
-                "AGENT_RUNTIME_RECOVER_RUNNING_OLDER_THAN_SECONDS",
-                cls.agent_runtime_recover_running_older_than_seconds,
+            agent_runtime_interrupt_running_older_than_seconds=_env_int_first(
+                ("AGENT_RUNTIME_INTERRUPT_RUNNING_OLDER_THAN_SECONDS", "AGENT_RUNTIME_RECOVER_RUNNING_OLDER_THAN_SECONDS"),
+                cls.agent_runtime_interrupt_running_older_than_seconds,
             ),
             agent_runtime_max_inline_payload_bytes=_env_int(
                 "AGENT_RUNTIME_MAX_INLINE_PAYLOAD_BYTES",
@@ -231,8 +231,8 @@ class Settings:
             errors.append("AGENT_RUNTIME_WORKER_CONCURRENCY must be positive")
         if self.agent_runtime_worker_idle_seconds < 0:
             errors.append("AGENT_RUNTIME_WORKER_IDLE_SECONDS must be non-negative")
-        if self.agent_runtime_recover_running_older_than_seconds < 1:
-            errors.append("AGENT_RUNTIME_RECOVER_RUNNING_OLDER_THAN_SECONDS must be positive")
+        if self.agent_runtime_interrupt_running_older_than_seconds < 1:
+            errors.append("AGENT_RUNTIME_INTERRUPT_RUNNING_OLDER_THAN_SECONDS must be positive")
         if self.agent_runtime_max_inline_payload_bytes < 1:
             errors.append("AGENT_RUNTIME_MAX_INLINE_PAYLOAD_BYTES must be positive")
         if self.outbox_worker_idle_seconds < 0:

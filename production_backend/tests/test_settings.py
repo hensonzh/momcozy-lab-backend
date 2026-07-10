@@ -102,7 +102,7 @@ def test_settings_from_env_reads_agent_worker_controls(monkeypatch: pytest.Monke
     monkeypatch.setenv("AGENT_RUNTIME_WORKER_BATCH_LIMIT", "25")
     monkeypatch.setenv("AGENT_RUNTIME_WORKER_CONCURRENCY", "4")
     monkeypatch.setenv("AGENT_RUNTIME_WORKER_IDLE_SECONDS", "0.25")
-    monkeypatch.setenv("AGENT_RUNTIME_RECOVER_RUNNING_OLDER_THAN_SECONDS", "120")
+    monkeypatch.setenv("AGENT_RUNTIME_INTERRUPT_RUNNING_OLDER_THAN_SECONDS", "120")
     monkeypatch.setenv("AGENT_MODEL_PROVIDER", "openai")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setenv("OPENAI_MODEL", "gpt-test")
@@ -117,7 +117,7 @@ def test_settings_from_env_reads_agent_worker_controls(monkeypatch: pytest.Monke
     assert settings.agent_runtime_worker_batch_limit == 25
     assert settings.agent_runtime_worker_concurrency == 4
     assert settings.agent_runtime_worker_idle_seconds == 0.25
-    assert settings.agent_runtime_recover_running_older_than_seconds == 120
+    assert settings.agent_runtime_interrupt_running_older_than_seconds == 120
     assert settings.agent_model_provider == "openai"
     assert settings.openai_api_key == "sk-test"
     assert settings.openai_model == "gpt-test"
@@ -230,6 +230,14 @@ def test_settings_from_env_reads_outbox_worker_controls(monkeypatch: pytest.Monk
     assert settings.outbox_worker_enabled is True
     assert settings.outbox_worker_idle_seconds == 4
     assert settings.outbox_worker_lease_seconds == 90
+
+
+def test_settings_from_env_accepts_legacy_agent_recover_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENT_RUNTIME_RECOVER_RUNNING_OLDER_THAN_SECONDS", "180")
+
+    settings = Settings.from_env()
+
+    assert settings.agent_runtime_interrupt_running_older_than_seconds == 180
 
 
 def test_settings_reject_invalid_agent_worker_controls() -> None:

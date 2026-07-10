@@ -31,7 +31,7 @@ async def inspect_worker_backlog(*, settings: Settings | None = None) -> dict[st
     try:
         async with session_factory() as session:
             now = _utcnow()
-            stale_cutoff = now - timedelta(seconds=resolved_settings.agent_runtime_recover_running_older_than_seconds)
+            stale_cutoff = now - timedelta(seconds=resolved_settings.agent_runtime_interrupt_running_older_than_seconds)
             return {
                 "status": "ok",
                 "outbox": {

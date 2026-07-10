@@ -18,6 +18,7 @@ from ..modules.agent_runtime.repository import AgentRuntimeRepository
 
 
 TERMINAL_RUN_STATUSES = {"completed", "failed", "cancelled", "expired"}
+INTERRUPTED_RUN_ERROR_CODE = "runtime_interrupted"
 AgentRunWorkerResult = AgentRunExecutionResult
 LOGGER = logging.getLogger("production_backend.agent_worker")
 
@@ -27,6 +28,7 @@ class AgentRunQueueWorkerResult:
     scanned: int
     processed: int
     terminal: int
+    interrupted: int = 0
 
 
 async def missing_agent_run_handler(_run: AgentRun) -> AgentRunExecutionResult:
@@ -40,20 +42,28 @@ class AgentRunQueueWorker:
         repository: AgentRuntimeRepository,
         run_worker: "AgentRunWorker",
         batch_limit: int = 10,
-        recover_running_older_than_seconds: int | None = 900,
+        interrupt_running_older_than_seconds: int | None = 900,
     ) -> None:
         if batch_limit < 1:
             raise ValueError("batch_limit must be positive")
         self.repository = repository
         self.run_worker = run_worker
         self.batch_limit = batch_limit
-        self.recover_running_older_than_seconds = recover_running_older_than_seconds
+        self.interrupt_running_older_than_seconds = interrupt_running_older_than_seconds
 
     async def run_once(self) -> AgentRunQueueWorkerResult:
-        runs = await self.repository.list_runnable_runs(
+        stale_running_runs = await self.repository.list_stale_running_runs(
+            cutoff=self._interrupt_running_before(),
             limit=self.batch_limit,
-            recover_running_before=self._recover_running_before(),
         )
+        interrupted = 0
+        for run in stale_running_runs:
+            after_run = await self.run_worker.interrupt_running(run_id=run.id)
+            if after_run is not None and after_run.status in TERMINAL_RUN_STATUSES:
+                interrupted += 1
+
+        queued_limit = max(0, self.batch_limit - len(stale_running_runs))
+        runs = await self.repository.list_runnable_runs(limit=queued_limit) if queued_limit else []
         processed = 0
         terminal = 0
         for run in runs:
@@ -65,12 +75,17 @@ class AgentRunQueueWorker:
                 processed += 1
             if after_run.status in TERMINAL_RUN_STATUSES:
                 terminal += 1
-        return AgentRunQueueWorkerResult(scanned=len(runs), processed=processed, terminal=terminal)
+        return AgentRunQueueWorkerResult(
+            scanned=len(stale_running_runs) + len(runs),
+            processed=interrupted + processed,
+            terminal=interrupted + terminal,
+            interrupted=interrupted,
+        )
 
-    def _recover_running_before(self) -> datetime | None:
-        if self.recover_running_older_than_seconds is None:
+    def _interrupt_running_before(self) -> datetime | None:
+        if self.interrupt_running_older_than_seconds is None:
             return None
-        return _utcnow() - timedelta(seconds=self.recover_running_older_than_seconds)
+        return _utcnow() - timedelta(seconds=self.interrupt_running_older_than_seconds)
 
 
 class AgentRunWorker:
@@ -108,8 +123,26 @@ class AgentRunWorker:
                 return run
             return await self._execute_locked(run)
 
+    async def interrupt_running(self, *, run_id: UUID) -> AgentRun | None:
+        run = await self.repository.get_run(run_id=run_id)
+        if run is None or run.status != "running":
+            return run
+
+        if self.controls is None:
+            return await self._interrupt_running_locked(run)
+
+        async with self.controls.run_lock(run_id=run.id) as acquired:
+            if not acquired:
+                return run
+            run = await self.repository.refresh_run(run=run)
+            if run.status != "running":
+                return run
+            return await self._interrupt_running_locked(run)
+
     async def _execute_locked(self, run: AgentRun) -> AgentRun:
         if run.status == "waiting_for_confirmation":
+            return run
+        if run.status == "running":
             return run
         if await self._cancel_requested(run):
             return await self._cancel(run=run, error_code="cancelled_before_start")
@@ -117,7 +150,7 @@ class AgentRunWorker:
         if run.status == "queued":
             run = await self.repository.mark_run_running(run=run, started_at=_utcnow())
             await self._append_event(run=run, event_type="run.started", payload={})
-        elif run.status != "running":
+        else:
             return run
 
         if await self._cancel_requested(run):
@@ -200,6 +233,13 @@ class AgentRunWorker:
         await self._append_event(run=failed, event_type="run.failed", payload={"code": error_code})
         await self._clear_controls(failed)
         return failed
+
+    async def _interrupt_running_locked(self, run: AgentRun) -> AgentRun:
+        return await self._fail(
+            run=run,
+            error_code=INTERRUPTED_RUN_ERROR_CODE,
+            error_details={"reason": "stale_running_run_not_resumed"},
+        )
 
     async def _append_event(self, *, run: AgentRun, event_type: str, payload: dict[str, Any]) -> AgentEvent:
         event = await self.event_publisher.append_event(thread_id=run.thread_id, run_id=run.id, event_type=event_type, payload=payload)
