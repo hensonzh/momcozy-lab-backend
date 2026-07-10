@@ -198,7 +198,7 @@ class AgentRuntimeExecutor:
             if turn_context.resident_loaded_service_skill is not None:
                 self._run_loaded_service_skill_ids[run.id].add(_text(turn_context.resident_loaded_service_skill, "service_skill_id"))
             tool_scope = self._tool_scope_for_turn()
-            await self._append_progress(run=run, phase="context_ready", label="我看一下你的信息")
+            await self._append_progress(run=run, phase="context_ready", label="我先理解一下你的需求～")
             prepared_turn = await self._prepare_model_turn(run=run, turn_context=turn_context, tool_scope=tool_scope)
             result = await self._run_model_turn(run=run, turn_context=turn_context, tool_scope=tool_scope, prepared_turn=prepared_turn)
             return await self._finalize_turn_result(

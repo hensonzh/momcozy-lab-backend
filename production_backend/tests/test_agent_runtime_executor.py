@@ -339,7 +339,7 @@ def test_agent_runtime_executor_publishes_final_text_deltas_to_transient_stream(
             "thread_id": thread_id,
             "run_id": run.id,
             "phase": "context_ready",
-            "label": "我看一下你的信息",
+            "label": "我先理解一下你的需求～",
             "semantic": transient_stream.progresses[1]["semantic"],
             "dedupe_key": f"{run.id}:run.progress:progress:context_ready",
         },

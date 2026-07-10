@@ -32,7 +32,7 @@ def run_progress_semantic(*, phase: str, label: str) -> dict[str, Any]:
         },
         "context_ready": {
             "phase": "reading",
-            "label": "我看一下你的信息",
+            "label": "我先理解一下你的需求～",
             "surface": STATUS_BAR,
             "priority": 20,
         },
