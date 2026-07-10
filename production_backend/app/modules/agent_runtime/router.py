@@ -53,6 +53,9 @@ router = SurfaceAPIRouter(
 )
 
 TERMINAL_STREAM_EVENT_TYPES = {"run.completed", "run.failed", "run.cancelled", "run.waiting_for_confirmation"}
+DEFAULT_STREAM_POLL_INTERVAL_SECONDS = 0.1
+MIN_STREAM_POLL_INTERVAL_SECONDS = 0.01
+MIN_PERSISTED_FALLBACK_POLL_INTERVAL_SECONDS = 0.1
 
 
 def get_agent_runtime_service(request: Request, session: AsyncSession = Depends(get_session)) -> AgentRuntimeService:
@@ -192,7 +195,11 @@ async def stream_run_events(
     after_sequence: int = Query(default=0, ge=0),
     limit: int = Query(default=200, ge=1, le=500),
     follow: bool = Query(default=False),
-    poll_interval_seconds: float = Query(default=0.01, ge=0.01, le=5.0),
+    poll_interval_seconds: float = Query(
+        default=DEFAULT_STREAM_POLL_INTERVAL_SECONDS,
+        ge=MIN_STREAM_POLL_INTERVAL_SECONDS,
+        le=5.0,
+    ),
     max_wait_seconds: int = Query(default=30, ge=1, le=300),
     current_user: CurrentUser = Depends(require_current_user),
     service: AgentRuntimeService = Depends(get_agent_runtime_service),
@@ -374,6 +381,10 @@ async def _stream_run_event_chunks(
     cursor = after_sequence
     transient_cursor = "0-0"
     streamed_dedupe_keys: set[str] = set()
+    transient_block_ms = _transient_block_ms(poll_interval_seconds)
+    persisted_fallback_poll_interval_seconds = _persisted_fallback_poll_interval_seconds(
+        poll_interval_seconds
+    )
     deadline = monotonic() + max_wait_seconds
     while True:
         if is_disconnected is not None and await is_disconnected():
@@ -449,7 +460,7 @@ async def _stream_run_event_chunks(
                 transient_stream=transient_stream,
                 run_id=run_id,
                 after_cursor=transient_cursor,
-                block_ms=int(poll_interval_seconds * 1000),
+                block_ms=transient_block_ms,
             )
             if transient_events:
                 transient_cursor = transient_events[-1].cursor
@@ -467,9 +478,17 @@ async def _stream_run_event_chunks(
                     return
                 continue
         else:
-            await asyncio.sleep(poll_interval_seconds)
+            await asyncio.sleep(persisted_fallback_poll_interval_seconds)
         if is_disconnected is not None and await is_disconnected():
             return
+
+
+def _transient_block_ms(poll_interval_seconds: float) -> int:
+    return max(1, int(max(poll_interval_seconds, MIN_STREAM_POLL_INTERVAL_SECONDS) * 1000))
+
+
+def _persisted_fallback_poll_interval_seconds(poll_interval_seconds: float) -> float:
+    return max(poll_interval_seconds, MIN_PERSISTED_FALLBACK_POLL_INTERVAL_SECONDS)
 
 
 def _first_final_event_index(events: list[object]) -> int:

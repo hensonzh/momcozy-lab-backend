@@ -5190,7 +5190,7 @@
             "name": "poll_interval_seconds",
             "required": false,
             "schema": {
-              "default": 0.01,
+              "default": 0.1,
               "maximum": 5.0,
               "minimum": 0.01,
               "title": "Poll Interval Seconds",

@@ -4,7 +4,11 @@ from dataclasses import dataclass
 from uuid import uuid4
 
 from production_backend.app.modules.agent_runtime.models import AgentEvent
-from production_backend.app.modules.agent_runtime.router import _stream_run_event_chunks
+from production_backend.app.modules.agent_runtime.router import (
+    _persisted_fallback_poll_interval_seconds,
+    _stream_run_event_chunks,
+    _transient_block_ms,
+)
 from production_backend.app.modules.agent_runtime.event_stream.sse import encode_sse_events, encode_transient_sse_events
 from production_backend.app.modules.agent_runtime.event_stream.transient import AgentTransientStream, AgentTransientStreamEvent
 
@@ -51,6 +55,14 @@ def test_encode_transient_sse_events_uses_delta_cursor_not_db_sequence() -> None
     assert '"transient":true' in encoded
     assert '"sequence"' not in encoded
     assert '"delta":"hel"' in encoded
+
+
+def test_stream_polling_uses_fast_transient_and_slower_persisted_fallback() -> None:
+    assert _transient_block_ms(0.01) == 10
+    assert _transient_block_ms(0.05) == 50
+    assert _persisted_fallback_poll_interval_seconds(0.01) == 0.1
+    assert _persisted_fallback_poll_interval_seconds(0.05) == 0.1
+    assert _persisted_fallback_poll_interval_seconds(0.2) == 0.2
 
 
 def test_agent_transient_stream_round_trips_message_delta() -> None:
