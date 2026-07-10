@@ -803,6 +803,7 @@ class AgentRuntimeExecutor:
         payload = run_progress_payload(phase=phase, label=label)
         semantic = payload.get("semantic")
         dedupe_key = progress_live_dedupe_key(run_id=run.id, semantic=semantic) if isinstance(semantic, dict) else ""
+        published_live = False
         if self.event_sink is not None:
             await self.event_sink.publish_progress(
                 thread_id=run.thread_id,
@@ -814,6 +815,7 @@ class AgentRuntimeExecutor:
                 optimistic=True,
                 durable=False,
             )
+            published_live = True
         elif self.transient_stream is not None:
             try:
                 await self.transient_stream.publish_progress(
@@ -826,8 +828,11 @@ class AgentRuntimeExecutor:
                     optimistic=True,
                     durable=False,
                 )
+                published_live = True
             except Exception:
                 LOGGER.warning("Failed to publish live run.progress event.", exc_info=True)
+        if published_live:
+            return
         await self._append_event(
             thread_id=run.thread_id,
             run_id=run.id,

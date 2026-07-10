@@ -17,6 +17,7 @@ from production_backend.app.modules.agent_runtime.models import (
     AgentRunSummary,
     AgentToolCall,
 )
+from production_backend.app.modules.agent_runtime.event_stream.sink import AgentEventSink
 from production_backend.app.modules.agent_runtime.agents.main_coordinator_agent import ServiceSkillId
 from production_backend.app.modules.agent_runtime.run_lifecycle.executor import AgentRuntimeExecutor
 from production_backend.app.modules.agent_runtime.sdk import (
@@ -318,7 +319,7 @@ def test_agent_runtime_executor_publishes_final_text_deltas_to_transient_stream(
             "run_id": run.id,
             "phase": "context_loading",
             "label": "我已经收到你的消息啦～",
-            "semantic": repository.events[0].payload["semantic"],
+            "semantic": transient_stream.progresses[0]["semantic"],
             "dedupe_key": f"{run.id}:run.progress:progress:context_loading",
         },
         {
@@ -326,7 +327,7 @@ def test_agent_runtime_executor_publishes_final_text_deltas_to_transient_stream(
             "run_id": run.id,
             "phase": "context_ready",
             "label": "我看一下你的信息",
-            "semantic": repository.events[1].payload["semantic"],
+            "semantic": transient_stream.progresses[1]["semantic"],
             "dedupe_key": f"{run.id}:run.progress:progress:context_ready",
         },
         {
@@ -334,7 +335,7 @@ def test_agent_runtime_executor_publishes_final_text_deltas_to_transient_stream(
             "run_id": run.id,
             "phase": "model_reasoning",
             "label": "我想一下",
-            "semantic": repository.events[2].payload["semantic"],
+            "semantic": transient_stream.progresses[2]["semantic"],
             "dedupe_key": f"{run.id}:run.progress:progress:model_reasoning",
         },
         {
@@ -342,19 +343,48 @@ def test_agent_runtime_executor_publishes_final_text_deltas_to_transient_stream(
             "run_id": run.id,
             "phase": "response_finalizing",
             "label": "我在组织回复～",
-            "semantic": repository.events[3].payload["semantic"],
+            "semantic": transient_stream.progresses[3]["semantic"],
             "dedupe_key": f"{run.id}:run.progress:progress:response_finalizing",
         },
     ]
     assert all(event.event_type != "message.delta" for event in repository.events)
-    assert _progress_phases(repository) == [
+    assert all(event.event_type != "run.progress" for event in repository.events)
+    assert [progress["phase"] for progress in transient_stream.progresses] == [
         "context_loading",
         "context_ready",
         "model_reasoning",
         "response_finalizing",
     ]
-    assert repository.events[0].payload["semantic"]["surface"] == "status_bar"
-    assert repository.events[2].payload["semantic"]["surface"] == "thinking_note"
+    assert transient_stream.progresses[0]["semantic"]["surface"] == "status_bar"
+    assert transient_stream.progresses[2]["semantic"]["surface"] == "thinking_note"
+
+
+def test_agent_runtime_executor_keeps_progress_transient_when_event_sink_is_configured() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="Stream please", sequence=1)
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    transient_stream = FakeTransientStream()
+    event_sink = AgentEventSink(repository=repository, transient_stream=transient_stream)
+    backend = CapturingSdkBackend(result=SdkNodeResult(final_text="done"))
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            event_sink=event_sink,
+            transient_stream=transient_stream,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+        ).execute(run=run)
+    )
+
+    assert result.status == "completed"
+    assert [progress["phase"] for progress in transient_stream.progresses] == [
+        "context_loading",
+        "context_ready",
+        "model_reasoning",
+        "response_finalizing",
+    ]
+    assert all(event.event_type != "run.progress" for event in repository.events)
 
 
 def test_agent_runtime_executor_requires_current_user_message() -> None:
