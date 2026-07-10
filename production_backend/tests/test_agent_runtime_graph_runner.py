@@ -103,7 +103,7 @@ def test_agent_runtime_graph_runner_does_not_preload_context_before_handler() ->
     assert repository.current_message_reads == 0
 
 
-def test_agent_runtime_graph_runner_resumes_waiting_checkpoint_without_reinvoking_handler() -> None:
+def test_agent_runtime_graph_runner_ignores_waiting_checkpoint_and_invokes_handler() -> None:
     run = _run()
     action_id = uuid4()
     checkpoint_store = FakeCheckpointStore()
@@ -123,7 +123,7 @@ def test_agent_runtime_graph_runner_resumes_waiting_checkpoint_without_reinvokin
             },
         )
     )
-    handler = FakeNodeHandler(result=AgentRunExecutionResult(status="completed", final_text="Should not run"))
+    handler = FakeNodeHandler(result=AgentRunExecutionResult(status="completed", final_text="Runs again"))
 
     result = asyncio.run(
         AgentRuntimeGraphRunner(
@@ -133,13 +133,14 @@ def test_agent_runtime_graph_runner_resumes_waiting_checkpoint_without_reinvokin
         ).execute(run=run)
     )
 
-    assert result.status == "waiting_for_confirmation"
-    assert result.pending_action_id == action_id
-    assert handler.runs == []
-    assert _checkpoint_nodes(checkpoint_store) == ["sdk_reasoning"]
+    assert result.status == "completed"
+    assert result.final_text == "Runs again"
+    assert handler.runs == [run.id]
+    assert _checkpoint_nodes(checkpoint_store) == ["sdk_reasoning", "sdk_reasoning", "finish"]
+    assert checkpoint_store.checkpoints[0].state_summary["pending_action_id"] == str(action_id)
 
 
-def test_agent_runtime_graph_runner_resumes_confirmation_interrupt_checkpoint_without_reinvoking_handler() -> None:
+def test_agent_runtime_graph_runner_ignores_confirmation_interrupt_checkpoint_and_invokes_handler() -> None:
     run = _run()
     action_id = uuid4()
     checkpoint_store = FakeCheckpointStore()
@@ -158,7 +159,7 @@ def test_agent_runtime_graph_runner_resumes_confirmation_interrupt_checkpoint_wi
             },
         )
     )
-    handler = FakeNodeHandler(result=AgentRunExecutionResult(status="completed", final_text="Should not run"))
+    handler = FakeNodeHandler(result=AgentRunExecutionResult(status="completed", final_text="Runs again"))
 
     result = asyncio.run(
         AgentRuntimeGraphRunner(
@@ -168,10 +169,11 @@ def test_agent_runtime_graph_runner_resumes_confirmation_interrupt_checkpoint_wi
         ).execute(run=run)
     )
 
-    assert result.status == "waiting_for_confirmation"
-    assert result.pending_action_id == action_id
-    assert handler.runs == []
-    assert _checkpoint_nodes(checkpoint_store) == ["confirmation_interrupt"]
+    assert result.status == "completed"
+    assert result.final_text == "Runs again"
+    assert handler.runs == [run.id]
+    assert _checkpoint_nodes(checkpoint_store) == ["confirmation_interrupt", "sdk_reasoning", "finish"]
+    assert checkpoint_store.checkpoints[0].state_summary["pending_action_id"] == str(action_id)
 
 
 def _checkpoint_nodes(store: "FakeCheckpointStore") -> list[str]:
