@@ -25,13 +25,11 @@ from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.
 )
 from production_backend.app.modules.agent_runtime.event_stream.sink import AgentEventSink
 from production_backend.app.modules.agent_runtime.event_stream.transient import AgentTransientStream
-from production_backend.app.modules.agent_runtime.graphs import AgentGraphCheckpointStore, AgentRuntimeGraphRunner
 from production_backend.app.modules.agent_runtime.memory.service import AgentMemoryRepository, AgentMemoryService
 from production_backend.app.modules.agent_runtime.repository import AgentRuntimeRepository
 from production_backend.app.modules.agent_runtime.run_lifecycle.controls import AgentRunControls
 from production_backend.app.modules.agent_runtime.run_lifecycle.executor import AgentRuntimeExecutor
 from production_backend.app.modules.agent_runtime.run_lifecycle.quick_replies import QuickReplyFinalizer
-from production_backend.app.modules.agent_runtime.run_lifecycle.state_store import AgentRuntimeStateStore
 from production_backend.app.modules.agent_runtime.sdk import create_agent_model_runner
 from production_backend.app.modules.agent_runtime.service import AgentRuntimeService
 from production_backend.app.modules.assets.service import ProductAssetService
@@ -200,7 +198,15 @@ async def _process_with_concurrency(
 
     async def guarded(item: ItemT) -> AgentRunProcessResult:
         async with semaphore:
-            return await processor(item)
+            try:
+                return await processor(item)
+            except Exception as exc:
+                log_agent_runtime_event(
+                    "agent.run.worker_item_failed",
+                    outcome="exception",
+                    error_type=type(exc).__name__,
+                )
+                return AgentRunProcessResult(status_changed=False, terminal=False)
 
     return list(await asyncio.gather(*(guarded(item) for item in items)))
 
@@ -230,6 +236,48 @@ async def _wait_for_next_agent_run_signal(
 
 
 async def _process_agent_run(
+    *,
+    run_id: UUID,
+    before_status: str,
+    session_factory: Any,
+    settings: Settings,
+    object_storage: Any,
+    redis_client: Any,
+    controls: AgentRunControls,
+    metrics: RequestMetrics,
+) -> AgentRunProcessResult:
+    started_at = perf_counter()
+    try:
+        return await _execute_agent_run(
+            run_id=run_id,
+            before_status=before_status,
+            session_factory=session_factory,
+            settings=settings,
+            object_storage=object_storage,
+            redis_client=redis_client,
+            controls=controls,
+            metrics=metrics,
+        )
+    except Exception as exc:
+        _log_agent_run_process_timing(
+            run_id=run_id,
+            before_status=before_status,
+            after_status=before_status,
+            started_at=started_at,
+            outcome="exception",
+            error_type=type(exc).__name__,
+        )
+        return await _fail_run_after_worker_error(
+            run_id=run_id,
+            before_status=before_status,
+            session_factory=session_factory,
+            redis_client=redis_client,
+            controls=controls,
+            error_type=type(exc).__name__,
+        )
+
+
+async def _execute_agent_run(
     *,
     run_id: UUID,
     before_status: str,
@@ -308,7 +356,6 @@ async def _process_agent_run(
             handlers=tool_handlers,
             transient_stream=transient_stream,
         )
-        checkpoint_store = AgentGraphCheckpointStore(repository=repository)
         sdk_runner = create_agent_model_runner(settings=settings, metrics=metrics)
         quick_reply_runner = create_agent_model_runner(
             settings=settings,
@@ -321,8 +368,6 @@ async def _process_agent_run(
         )
         runtime_executor = AgentRuntimeExecutor(
             repository=repository,
-            checkpoint_store=checkpoint_store,
-            state_store=AgentRuntimeStateStore(repository=repository),
             tool_registry=tool_registry,
             tool_executor=tool_executor,
             event_sink=event_sink,
@@ -334,32 +379,15 @@ async def _process_agent_run(
             object_storage=object_storage,
             max_inline_artifact_payload_bytes=settings.agent_runtime_max_inline_payload_bytes,
         )
-        handler = AgentRuntimeGraphRunner(
-            repository=repository,
-            checkpoint_store=checkpoint_store,
-            node_handler=runtime_executor,
-        )
         worker = AgentRunWorker(
             repository=repository,
             controls=controls,
-            handler=handler,
+            handler=runtime_executor,
             after_event_append=session.commit,
             transient_stream=transient_stream,
         )
-        try:
-            after_run = await worker.run_once(run_id=run_id)
-            await session.commit()
-        except Exception as exc:
-            await session.rollback()
-            _log_agent_run_process_timing(
-                run_id=run_id,
-                before_status=before_status,
-                after_status=before_status,
-                started_at=started_at,
-                outcome="exception",
-                error_type=type(exc).__name__,
-            )
-            raise
+        after_run = await worker.run_once(run_id=run_id)
+        await session.commit()
         after_status = after_run.status if after_run is not None else before_status
         _log_agent_run_process_timing(
             run_id=run_id,
@@ -376,6 +404,69 @@ async def _process_agent_run(
             status_changed=bool(after_run is not None and after_status != before_status),
             terminal=after_status in TERMINAL_RUN_STATUSES,
         )
+
+
+async def _fail_run_after_worker_error(
+    *,
+    run_id: UUID,
+    before_status: str,
+    session_factory: Any,
+    redis_client: Any,
+    controls: AgentRunControls,
+    error_type: str,
+) -> AgentRunProcessResult:
+    async with session_factory() as session:
+        repository = AgentRuntimeRepository(session)
+        run = await repository.get_run(run_id=run_id)
+        if run is None:
+            return AgentRunProcessResult(status_changed=False, terminal=False)
+        if run.status in TERMINAL_RUN_STATUSES:
+            return AgentRunProcessResult(status_changed=run.status != before_status, terminal=True)
+
+        payload = {"code": "worker_process_error"}
+        transient_stream = AgentTransientStream(redis_client)
+        try:
+            await transient_stream.publish_application_event(
+                thread_id=run.thread_id,
+                run_id=run.id,
+                event_type="run.failed",
+                payload=payload,
+                dedupe_key=f"{run.id}:run.failed",
+                optimistic=True,
+                durable=False,
+            )
+        except Exception:
+            log_agent_runtime_event(
+                "agent.run.worker_failure_event_publish_failed",
+                run_id=str(run.id),
+                outcome="exception",
+            )
+
+        completed_at = datetime.now(timezone.utc)
+        failed = await repository.mark_run_failed(
+            run=run,
+            completed_at=completed_at,
+            error_code="worker_process_error",
+            error_details={"exception_type": error_type},
+        )
+        event = await repository.append_event(
+            thread_id=failed.thread_id,
+            run_id=failed.id,
+            event_type="run.failed",
+            payload=payload,
+        )
+        await session.commit()
+        try:
+            await controls.set_stream_cursor(run_id=failed.id, sequence=event.sequence)
+            await controls.clear_active_run(thread_id=failed.thread_id, run_id=failed.id)
+            await controls.clear_cancel(run_id=failed.id)
+        except Exception:
+            log_agent_runtime_event(
+                "agent.run.worker_failure_control_cleanup_failed",
+                run_id=str(failed.id),
+                outcome="exception",
+            )
+        return AgentRunProcessResult(status_changed=failed.status != before_status, terminal=True)
 
 
 async def _interrupt_agent_run(

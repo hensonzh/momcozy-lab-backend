@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 from time import perf_counter
+from types import SimpleNamespace
 from uuid import uuid4
 
 from production_backend.app.core.metrics import RequestMetrics
@@ -10,11 +11,13 @@ from production_backend.scripts.run_agent_worker import (
     AgentRunProcessResult,
     RunnableAgentRunRef,
     _log_agent_run_process_timing,
+    _fail_run_after_worker_error,
     _process_with_concurrency,
     _wait_for_next_agent_run_signal,
     _with_metrics,
     run_agent_worker,
 )
+from production_backend.scripts import run_agent_worker as worker_module
 from production_backend.scripts.worker_runtime import sleep_until_stop
 
 
@@ -56,6 +59,32 @@ def test_agent_worker_process_bounds_in_process_run_concurrency() -> None:
     assert set(processed) == set(run_ids)
     assert len(results) == 5
     assert all(result.status_changed and result.terminal for result in results)
+
+
+def test_agent_worker_process_isolates_one_failed_run_from_the_batch() -> None:
+    failed_run_id = uuid4()
+    completed_run_id = uuid4()
+    processed = []
+
+    async def processor(run_id):
+        if run_id == failed_run_id:
+            raise RuntimeError("run failed")
+        processed.append(run_id)
+        return AgentRunProcessResult(status_changed=True, terminal=True)
+
+    results = asyncio.run(
+        _process_with_concurrency(
+            items=[failed_run_id, completed_run_id],
+            concurrency=2,
+            processor=processor,
+        )
+    )
+
+    assert processed == [completed_run_id]
+    assert results == [
+        AgentRunProcessResult(status_changed=False, terminal=False),
+        AgentRunProcessResult(status_changed=True, terminal=True),
+    ]
 
 
 def test_runnable_agent_run_ref_carries_scanned_status() -> None:
@@ -110,6 +139,73 @@ def test_agent_worker_idle_wait_returns_immediately_when_stopping() -> None:
     asyncio.run(_wait_for_next_agent_run_signal(controls=controls, idle_seconds=30, stop_event=stop_event))
 
     assert controls.wait_timeouts == []
+
+
+def test_agent_worker_failure_cleanup_publishes_live_before_persisting(monkeypatch) -> None:
+    operations = []
+    run = SimpleNamespace(id=uuid4(), thread_id=uuid4(), status="running")
+
+    class FakeRepository:
+        async def get_run(self, *, run_id):
+            return run if run_id == run.id else None
+
+        async def mark_run_failed(self, **kwargs):
+            operations.append("db:mark_failed")
+            kwargs["run"].status = "failed"
+            return kwargs["run"]
+
+        async def append_event(self, **kwargs):
+            operations.append(f"db:{kwargs['event_type']}")
+            return SimpleNamespace(sequence=7)
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def commit(self):
+            operations.append("db:commit")
+
+    class FakeTransientStream:
+        async def publish_application_event(self, **kwargs):
+            operations.append(f"redis:{kwargs['event_type']}")
+
+    class FakeControls:
+        async def set_stream_cursor(self, **_kwargs):
+            operations.append("redis:set_cursor")
+
+        async def clear_active_run(self, **_kwargs):
+            operations.append("redis:clear_active")
+
+        async def clear_cancel(self, **_kwargs):
+            operations.append("redis:clear_cancel")
+
+    monkeypatch.setattr(worker_module, "AgentRuntimeRepository", lambda _session: FakeRepository())
+    monkeypatch.setattr(worker_module, "AgentTransientStream", lambda _redis: FakeTransientStream())
+
+    result = asyncio.run(
+        _fail_run_after_worker_error(
+            run_id=run.id,
+            before_status="running",
+            session_factory=FakeSession,
+            redis_client=object(),
+            controls=FakeControls(),
+            error_type="RuntimeError",
+        )
+    )
+
+    assert result == AgentRunProcessResult(status_changed=True, terminal=True)
+    assert operations == [
+        "redis:run.failed",
+        "db:mark_failed",
+        "db:run.failed",
+        "db:commit",
+        "redis:set_cursor",
+        "redis:clear_active",
+        "redis:clear_cancel",
+    ]
 
 
 def test_worker_runtime_sleep_returns_when_stop_event_is_set() -> None:
