@@ -1214,7 +1214,7 @@ def test_responses_runner_passes_structured_text_format(monkeypatch: pytest.Monk
         },
     }
 
-    asyncio.run(
+    result = asyncio.run(
         OpenAIResponsesRunner(model="gpt-test").run_reasoning(
             SdkNodeRequest(
                 run_id="run_1",
@@ -1228,6 +1228,7 @@ def test_responses_runner_passes_structured_text_format(monkeypatch: pytest.Monk
     )
 
     assert FakeAsyncOpenAI.calls[0]["text"] == {"format": response_format}
+    assert result.final_text == '{"items":[]}'
 
 
 def test_sdk_runner_streams_responses_api_text_deltas(monkeypatch: pytest.MonkeyPatch) -> None:

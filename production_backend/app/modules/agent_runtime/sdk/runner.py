@@ -179,7 +179,11 @@ class OpenAIResponsesApiBackend:
                     function_calls.append(function_call)
             if not function_calls:
                 final_text = _response_output_text(latest_response, output_items=output_items) or streamed_text
-                sanitized_text = _sanitize_model_text(final_text)
+                sanitized_text = (
+                    final_text.strip()
+                    if request.response_text_format is not None
+                    else _sanitize_model_text(final_text)
+                )
                 if not emitted_stream:
                     await _emit_buffered_text_deltas(sanitized_text, request.on_text_delta)
                 return SdkNodeResult(final_text=sanitized_text, tool_calls=observed_tool_calls)
