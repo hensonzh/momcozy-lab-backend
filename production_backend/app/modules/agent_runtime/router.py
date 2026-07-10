@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...api.dependencies import normalize_idempotency_key, optional_idempotency_key, require_current_user, require_service_client
 from ...api.surface import SurfaceAPIRouter, api_surface
+from ...core.logging import log_agent_runtime_event
 from ...infrastructure.db import get_session
 from ..audit import IdempotencyService, OutboxService
 from ..audit.repository import AuditRepository, OutboxRepository
@@ -125,6 +126,7 @@ async def create_run(
     service: AgentRuntimeService = Depends(get_agent_runtime_service),
 ) -> AgentRunRead:
     settings = request.app.state.settings
+    started_at = monotonic()
     run = await service.create_run(
         actor_user_id=current_user.user_id,
         thread_id=payload.thread_id,
@@ -136,6 +138,14 @@ async def create_run(
         request_id=str(getattr(request.state, "request_id", "") or ""),
         trace_id=str(getattr(request.state, "request_id", "") or ""),
         idempotency_key=idempotency_key or normalize_idempotency_key(payload.idempotency_key),
+    )
+    log_agent_runtime_event(
+        "agent.run.api_create",
+        request_id=str(getattr(request.state, "request_id", "") or ""),
+        run_id=str(run.id),
+        thread_id=str(run.thread_id),
+        status=run.status,
+        duration_ms=_elapsed_monotonic_ms(started_at),
     )
     return AgentRunRead.model_validate(run)
 
@@ -378,6 +388,13 @@ async def _stream_run_event_chunks(
     is_disconnected: Callable[[], Awaitable[bool]] | None = None,
     transient_stream: AgentTransientStream | None = None,
 ) -> AsyncIterator[str]:
+    stream_started_at = monotonic()
+    first_event_ms: float | None = None
+    chunks_sent = 0
+    events_sent = 0
+    persisted_poll_count = 0
+    transient_read_count = 0
+    end_reason = "unknown"
     cursor = after_sequence
     transient_cursor = "0-0"
     streamed_dedupe_keys: set[str] = set()
@@ -387,129 +404,164 @@ async def _stream_run_event_chunks(
     )
     deadline = monotonic() + max_wait_seconds
     next_persisted_poll_at = monotonic()
-    while True:
-        if is_disconnected is not None and await is_disconnected():
-            return
-        if monotonic() >= next_persisted_poll_at:
-            events = await service.list_events(
-                owner_user_id=owner_user_id,
-                run_id=run_id,
-                after_sequence=cursor,
-                limit=limit,
-            )
-            next_persisted_poll_at = monotonic() + persisted_fallback_poll_interval_seconds
-            if events:
-                final_event_index = _first_final_event_index(events)
-                if final_event_index > 0:
-                    pre_final_candidates = events[:final_event_index]
-                    pre_final_events = _filter_events_seen_in_transient_stream(
-                        pre_final_candidates,
-                        run_id=run_id,
-                        dedupe_keys=streamed_dedupe_keys,
-                    )
-                    streamed_dedupe_keys.update(
-                        key
-                        for event in pre_final_events
-                        if (key := _persisted_event_dedupe_key(event, run_id=run_id))
-                    )
-                    encoded = encode_sse_events(pre_final_events)
-                    if encoded:
-                        yield encoded
-                    cursor = pre_final_candidates[-1].sequence
-                if final_event_index != -1:
-                    transient_events = await _read_transient_events(
-                        transient_stream=transient_stream,
-                        run_id=run_id,
-                        after_cursor=transient_cursor,
-                        block_ms=0,
-                    )
-                    if transient_events:
-                        transient_cursor = transient_events[-1].cursor
-                        transient_events = _filter_transient_events_seen_in_stream(
-                            transient_events,
+
+    def record_stream_chunk(event_count: int) -> None:
+        nonlocal chunks_sent, events_sent, first_event_ms
+        chunks_sent += 1
+        events_sent += event_count
+        first_event_ms = _first_event_ms(first_event_ms=first_event_ms, stream_started_at=stream_started_at)
+
+    try:
+        while True:
+            if is_disconnected is not None and await is_disconnected():
+                end_reason = "client_disconnected"
+                return
+            if monotonic() >= next_persisted_poll_at:
+                persisted_poll_count += 1
+                events = await service.list_events(
+                    owner_user_id=owner_user_id,
+                    run_id=run_id,
+                    after_sequence=cursor,
+                    limit=limit,
+                )
+                next_persisted_poll_at = monotonic() + persisted_fallback_poll_interval_seconds
+                if events:
+                    final_event_index = _first_final_event_index(events)
+                    if final_event_index > 0:
+                        pre_final_candidates = events[:final_event_index]
+                        pre_final_events = _filter_events_seen_in_transient_stream(
+                            pre_final_candidates,
+                            run_id=run_id,
                             dedupe_keys=streamed_dedupe_keys,
                         )
                         streamed_dedupe_keys.update(
                             key
-                            for event in transient_events
-                            if (key := _transient_event_dedupe_key(event))
+                            for event in pre_final_events
+                            if (key := _persisted_event_dedupe_key(event, run_id=run_id))
                         )
-                        encoded = encode_transient_sse_events(transient_events)
+                        encoded = encode_sse_events(pre_final_events)
                         if encoded:
+                            record_stream_chunk(len(pre_final_events))
                             yield encoded
-                    final_events = events[final_event_index:]
-                    visible_final_events = _filter_events_seen_in_transient_stream(
-                        final_events,
-                        run_id=run_id,
+                        cursor = pre_final_candidates[-1].sequence
+                    if final_event_index != -1:
+                        transient_read_count += 1
+                        transient_events = await _read_transient_events(
+                            transient_stream=transient_stream,
+                            run_id=run_id,
+                            after_cursor=transient_cursor,
+                            block_ms=0,
+                        )
+                        if transient_events:
+                            transient_cursor = transient_events[-1].cursor
+                            transient_events = _filter_transient_events_seen_in_stream(
+                                transient_events,
+                                dedupe_keys=streamed_dedupe_keys,
+                            )
+                            streamed_dedupe_keys.update(
+                                key
+                                for event in transient_events
+                                if (key := _transient_event_dedupe_key(event))
+                            )
+                            encoded = encode_transient_sse_events(transient_events)
+                            if encoded:
+                                record_stream_chunk(len(transient_events))
+                                yield encoded
+                        final_events = events[final_event_index:]
+                        visible_final_events = _filter_events_seen_in_transient_stream(
+                            final_events,
+                            run_id=run_id,
+                            dedupe_keys=streamed_dedupe_keys,
+                        )
+                        streamed_dedupe_keys.update(
+                            key
+                            for event in visible_final_events
+                            if (key := _persisted_event_dedupe_key(event, run_id=run_id))
+                        )
+                        encoded = encode_sse_events(visible_final_events)
+                        if encoded:
+                            record_stream_chunk(len(visible_final_events))
+                            yield encoded
+                        cursor = final_events[-1].sequence
+                    elif final_event_index == -1:
+                        visible_events = _filter_events_seen_in_transient_stream(
+                            events,
+                            run_id=run_id,
+                            dedupe_keys=streamed_dedupe_keys,
+                        )
+                        streamed_dedupe_keys.update(
+                            key
+                            for event in visible_events
+                            if (key := _persisted_event_dedupe_key(event, run_id=run_id))
+                        )
+                        encoded = encode_sse_events(visible_events)
+                        if encoded:
+                            record_stream_chunk(len(visible_events))
+                            yield encoded
+                        cursor = events[-1].sequence
+                    if any(event.event_type in TERMINAL_STREAM_EVENT_TYPES for event in events):
+                        end_reason = "terminal_persisted"
+                        return
+            if not follow:
+                end_reason = "snapshot_complete"
+                return
+            if monotonic() >= deadline:
+                end_reason = "deadline"
+                return
+            if transient_stream is not None:
+                seconds_until_persisted_poll = next_persisted_poll_at - monotonic()
+                if seconds_until_persisted_poll <= 0:
+                    continue
+                block_ms = min(transient_block_ms, max(1, int(seconds_until_persisted_poll * 1000)))
+                read_started_at = monotonic()
+                transient_read_count += 1
+                transient_events = await _read_transient_events(
+                    transient_stream=transient_stream,
+                    run_id=run_id,
+                    after_cursor=transient_cursor,
+                    block_ms=block_ms,
+                )
+                if transient_events:
+                    transient_cursor = transient_events[-1].cursor
+                    transient_events = _filter_transient_events_seen_in_stream(
+                        transient_events,
                         dedupe_keys=streamed_dedupe_keys,
                     )
                     streamed_dedupe_keys.update(
-                        key
-                        for event in visible_final_events
-                        if (key := _persisted_event_dedupe_key(event, run_id=run_id))
+                        key for event in transient_events if (key := _transient_event_dedupe_key(event))
                     )
-                    encoded = encode_sse_events(visible_final_events)
+                    encoded = encode_transient_sse_events(transient_events)
                     if encoded:
+                        record_stream_chunk(len(transient_events))
                         yield encoded
-                    cursor = final_events[-1].sequence
-                elif final_event_index == -1:
-                    visible_events = _filter_events_seen_in_transient_stream(
-                        events,
-                        run_id=run_id,
-                        dedupe_keys=streamed_dedupe_keys,
-                    )
-                    streamed_dedupe_keys.update(
-                        key
-                        for event in visible_events
-                        if (key := _persisted_event_dedupe_key(event, run_id=run_id))
-                    )
-                    encoded = encode_sse_events(visible_events)
-                    if encoded:
-                        yield encoded
-                    cursor = events[-1].sequence
-                if any(event.event_type in TERMINAL_STREAM_EVENT_TYPES for event in events):
-                    return
-        if not follow or monotonic() >= deadline:
-            return
-        if transient_stream is not None:
-            seconds_until_persisted_poll = next_persisted_poll_at - monotonic()
-            if seconds_until_persisted_poll <= 0:
-                continue
-            block_ms = min(transient_block_ms, max(1, int(seconds_until_persisted_poll * 1000)))
-            read_started_at = monotonic()
-            transient_events = await _read_transient_events(
-                transient_stream=transient_stream,
-                run_id=run_id,
-                after_cursor=transient_cursor,
-                block_ms=block_ms,
-            )
-            if transient_events:
-                transient_cursor = transient_events[-1].cursor
-                transient_events = _filter_transient_events_seen_in_stream(
-                    transient_events,
-                    dedupe_keys=streamed_dedupe_keys,
+                    if _has_terminal_transient_event(transient_events):
+                        end_reason = "terminal_transient"
+                        return
+                    continue
+                remaining_block_seconds = (block_ms / 1000) - (monotonic() - read_started_at)
+                if remaining_block_seconds > 0:
+                    await asyncio.sleep(remaining_block_seconds)
+            else:
+                sleep_seconds = min(
+                    persisted_fallback_poll_interval_seconds,
+                    max(0.0, next_persisted_poll_at - monotonic()),
                 )
-                streamed_dedupe_keys.update(
-                    key for event in transient_events if (key := _transient_event_dedupe_key(event))
-                )
-                encoded = encode_transient_sse_events(transient_events)
-                if encoded:
-                    yield encoded
-                if _has_terminal_transient_event(transient_events):
-                    return
-                continue
-            remaining_block_seconds = (block_ms / 1000) - (monotonic() - read_started_at)
-            if remaining_block_seconds > 0:
-                await asyncio.sleep(remaining_block_seconds)
-        else:
-            sleep_seconds = min(
-                persisted_fallback_poll_interval_seconds,
-                max(0.0, next_persisted_poll_at - monotonic()),
-            )
-            if sleep_seconds > 0:
-                await asyncio.sleep(sleep_seconds)
-        if is_disconnected is not None and await is_disconnected():
-            return
+                if sleep_seconds > 0:
+                    await asyncio.sleep(sleep_seconds)
+    finally:
+        log_agent_runtime_event(
+            "agent.run.sse_stream",
+            run_id=str(run_id),
+            follow=follow,
+            after_sequence=after_sequence,
+            duration_ms=_elapsed_monotonic_ms(stream_started_at),
+            first_event_ms=first_event_ms,
+            chunks_sent=chunks_sent,
+            events_sent=events_sent,
+            persisted_poll_count=persisted_poll_count,
+            transient_read_count=transient_read_count,
+            end_reason=end_reason,
+        )
 
 
 def _transient_block_ms(poll_interval_seconds: float) -> int:
@@ -518,6 +570,14 @@ def _transient_block_ms(poll_interval_seconds: float) -> int:
 
 def _persisted_fallback_poll_interval_seconds(poll_interval_seconds: float) -> float:
     return max(poll_interval_seconds, MIN_PERSISTED_FALLBACK_POLL_INTERVAL_SECONDS)
+
+
+def _elapsed_monotonic_ms(started_at: float) -> float:
+    return round((monotonic() - started_at) * 1000, 3)
+
+
+def _first_event_ms(*, first_event_ms: float | None, stream_started_at: float) -> float:
+    return first_event_ms if first_event_ms is not None else _elapsed_monotonic_ms(stream_started_at)
 
 
 def _first_final_event_index(events: list[object]) -> int:

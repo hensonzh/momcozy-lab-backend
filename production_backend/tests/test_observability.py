@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from production_backend.app.core.settings import Settings
 from production_backend.app.factory import create_app
 from production_backend.app.core.metrics import RequestMetrics
+from production_backend.app.core.logging import log_agent_runtime_event
 
 
 SERVICE_KEY = "service-key-value-with-at-least-32-bytes"
@@ -62,6 +63,19 @@ def test_request_log_is_structured_and_uses_request_id(caplog) -> None:
         "route": "/v1/health/live",
         "status_code": 200,
     }.items() <= payloads[-1].items()
+
+
+def test_agent_runtime_log_is_structured(caplog) -> None:
+    caplog.set_level(logging.INFO, logger="production_backend.agent_runtime")
+
+    log_agent_runtime_event("agent.run.executor_turn", run_id="run_1", duration_ms=12.345)
+
+    payloads = [json.loads(record.getMessage()) for record in caplog.records if record.name == "production_backend.agent_runtime"]
+    assert payloads[-1] == {
+        "duration_ms": 12.345,
+        "event": "agent.run.executor_turn",
+        "run_id": "run_1",
+    }
 
 
 def test_backend_metrics_record_worker_tool_and_sdk_operations() -> None:

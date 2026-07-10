@@ -1,4 +1,7 @@
 import asyncio
+import json
+import logging
+from time import perf_counter
 from uuid import uuid4
 
 from production_backend.app.core.metrics import RequestMetrics
@@ -6,6 +9,7 @@ from production_backend.app.core.settings import Settings
 from production_backend.scripts.run_agent_worker import (
     AgentRunProcessResult,
     RunnableAgentRunRef,
+    _log_agent_run_process_timing,
     _process_with_concurrency,
     _wait_for_next_agent_run_signal,
     _with_metrics,
@@ -61,6 +65,33 @@ def test_runnable_agent_run_ref_carries_scanned_status() -> None:
 
     assert ref.run_id == run_id
     assert ref.status == "queued"
+
+
+def test_agent_worker_process_logs_run_timing(caplog) -> None:
+    caplog.set_level(logging.INFO, logger="production_backend.agent_runtime")
+    run_id = uuid4()
+
+    _log_agent_run_process_timing(
+        run_id=run_id,
+        before_status="queued",
+        after_status="completed",
+        started_at=perf_counter(),
+        outcome="completed",
+        queue_wait_ms=42.0,
+    )
+
+    payloads = [json.loads(record.getMessage()) for record in caplog.records if record.name == "production_backend.agent_runtime"]
+    assert {
+        "event": "agent.run.worker_execute",
+        "run_id": str(run_id),
+        "before_status": "queued",
+        "after_status": "completed",
+        "outcome": "completed",
+        "terminal": True,
+        "queue_wait_ms": 42.0,
+        "error_type": "",
+    }.items() <= payloads[-1].items()
+    assert payloads[-1]["duration_ms"] >= 0
 
 
 def test_agent_worker_idle_wait_uses_queue_signal() -> None:

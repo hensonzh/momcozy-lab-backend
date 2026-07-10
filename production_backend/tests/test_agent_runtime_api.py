@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
@@ -31,7 +32,8 @@ def test_agent_runtime_requires_current_user() -> None:
     assert response.json()["error"]["code"] == "authentication_required"
 
 
-def test_create_run_uses_current_user_request_id_and_idempotency_key() -> None:
+def test_create_run_uses_current_user_request_id_and_idempotency_key(caplog) -> None:
+    caplog.set_level(logging.INFO, logger="production_backend.agent_runtime")
     user_id = uuid4()
     fake_service = FakeAgentRuntimeService(user_id=user_id)
     app = create_app(Settings(app_env="test", openai_agent_prompt_version="prompt-default"))
@@ -50,6 +52,13 @@ def test_create_run_uses_current_user_request_id_and_idempotency_key() -> None:
     assert fake_service.create_run_kwargs["request_id"] == "req_agent"
     assert fake_service.create_run_kwargs["prompt_version"] == "prompt-default"
     assert fake_service.create_run_kwargs["idempotency_key"] == "idem-run"
+    payloads = [json.loads(record.getMessage()) for record in caplog.records if record.name == "production_backend.agent_runtime"]
+    timing = next(payload for payload in payloads if payload["event"] == "agent.run.api_create")
+    assert timing["request_id"] == "req_agent"
+    assert timing["run_id"] == str(fake_service.run_id)
+    assert timing["thread_id"] == str(fake_service.thread_id)
+    assert timing["status"] == "queued"
+    assert timing["duration_ms"] >= 0
 
 
 def test_agent_thread_run_events_and_cancel_use_current_user_scope() -> None:

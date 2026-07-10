@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
@@ -36,7 +37,8 @@ from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.
 )
 
 
-def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() -> None:
+def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result(caplog) -> None:
+    caplog.set_level(logging.INFO, logger="production_backend.agent_runtime")
     thread_id = uuid4()
     run = _run(thread_id=thread_id, prompt_version="prompt-v2")
     prior_user = _message(thread_id=thread_id, run_id=uuid4(), role="user", text="What did we discuss?", sequence=1)
@@ -146,6 +148,16 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result() ->
         "model_reasoning",
         "response_finalizing",
     ]
+    timing_payloads = [
+        json.loads(record.getMessage())
+        for record in caplog.records
+        if record.name == "production_backend.agent_runtime"
+        and json.loads(record.getMessage()).get("event") == "agent.run.executor_turn"
+    ]
+    assert timing_payloads[-1]["run_id"] == str(run.id)
+    assert timing_payloads[-1]["status"] == "completed"
+    assert timing_payloads[-1]["final_text_length"] == len("Here is the summary.")
+    assert "model_reasoning" in timing_payloads[-1]["timings_ms"]
 
 
 def test_agent_runtime_executor_projects_active_memory_into_dynamic_context() -> None:

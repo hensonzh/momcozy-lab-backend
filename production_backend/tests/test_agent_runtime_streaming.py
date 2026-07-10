@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 from dataclasses import dataclass
 from uuid import uuid4
 
@@ -211,6 +212,48 @@ def test_stream_run_event_chunks_yields_transient_delta_while_following() -> Non
     payloads = _sse_payloads(chunk)
     assert [payload["type"] for payload in payloads] == ["message.delta"]
     assert payloads[0]["payload"]["delta"] == "hello"
+
+
+def test_stream_run_event_chunks_logs_stream_timing(caplog) -> None:
+    caplog.set_level(logging.INFO, logger="production_backend.agent_runtime")
+    thread_id = uuid4()
+    run_id = uuid4()
+    terminal_event = AgentTransientStreamEvent(
+        event_id="run.completed:1-0",
+        type="run.completed",
+        thread_id=thread_id,
+        run_id=run_id,
+        cursor="1-0",
+        payload={"reason": "ok"},
+        created_at="2026-07-04T00:00:00+00:00",
+    )
+
+    async def exercise() -> list[str]:
+        chunks = []
+        async for chunk in _stream_run_event_chunks(
+            service=FakeAgentRuntimeService(),
+            owner_user_id=uuid4(),
+            run_id=run_id,
+            after_sequence=0,
+            limit=20,
+            follow=True,
+            poll_interval_seconds=0.1,
+            max_wait_seconds=1,
+            transient_stream=FakeTransientStream([terminal_event]),
+        ):
+            chunks.append(chunk)
+        return chunks
+
+    chunks = asyncio.run(exercise())
+
+    assert [payload["type"] for payload in _sse_payloads(chunks[0])] == ["run.completed"]
+    payloads = [json.loads(record.getMessage()) for record in caplog.records if record.name == "production_backend.agent_runtime"]
+    timing = next(payload for payload in payloads if payload["event"] == "agent.run.sse_stream")
+    assert timing["run_id"] == str(run_id)
+    assert timing["end_reason"] == "terminal_transient"
+    assert timing["chunks_sent"] == 1
+    assert timing["events_sent"] == 1
+    assert timing["first_event_ms"] >= 0
 
 
 def test_stream_run_event_chunks_uses_transient_stream_before_next_persisted_poll() -> None:

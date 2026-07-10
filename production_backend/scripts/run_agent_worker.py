@@ -7,9 +7,11 @@ from collections.abc import Awaitable, Callable, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from time import perf_counter
 from typing import Any, TypeVar
 from uuid import UUID
 
+from production_backend.app.core.logging import log_agent_runtime_event
 from production_backend.app.core.metrics import RequestMetrics
 from production_backend.app.core.settings import Settings
 from production_backend.app.infrastructure.db.session import create_db_engine, create_session_factory
@@ -237,6 +239,7 @@ async def _process_agent_run(
     controls: AgentRunControls,
     metrics: RequestMetrics,
 ) -> AgentRunProcessResult:
+    started_at = perf_counter()
     async with session_factory() as session:
         repository = AgentRuntimeRepository(session)
         audit_repository = AuditRepository(session)
@@ -335,10 +338,29 @@ async def _process_agent_run(
         try:
             after_run = await worker.run_once(run_id=run_id)
             await session.commit()
-        except Exception:
+        except Exception as exc:
             await session.rollback()
+            _log_agent_run_process_timing(
+                run_id=run_id,
+                before_status=before_status,
+                after_status=before_status,
+                started_at=started_at,
+                outcome="exception",
+                error_type=type(exc).__name__,
+            )
             raise
         after_status = after_run.status if after_run is not None else before_status
+        _log_agent_run_process_timing(
+            run_id=run_id,
+            before_status=before_status,
+            after_status=after_status,
+            started_at=started_at,
+            outcome="completed",
+            queue_wait_ms=_duration_between_ms(
+                after_run.created_at if after_run is not None else None,
+                after_run.started_at if after_run is not None else None,
+            ),
+        )
         return AgentRunProcessResult(
             status_changed=bool(after_run is not None and after_status != before_status),
             terminal=after_status in TERMINAL_RUN_STATUSES,
@@ -353,6 +375,7 @@ async def _interrupt_agent_run(
     redis_client: Any,
     controls: AgentRunControls,
 ) -> AgentRunProcessResult:
+    started_at = perf_counter()
     async with session_factory() as session:
         repository = AgentRuntimeRepository(session)
         transient_stream = AgentTransientStream(redis_client)
@@ -365,11 +388,28 @@ async def _interrupt_agent_run(
         try:
             after_run = await worker.interrupt_running(run_id=run_id)
             await session.commit()
-        except Exception:
+        except Exception as exc:
             await session.rollback()
+            _log_agent_run_process_timing(
+                run_id=run_id,
+                before_status=before_status,
+                after_status=before_status,
+                started_at=started_at,
+                outcome="exception",
+                error_type=type(exc).__name__,
+                event_name="agent.run.worker_interrupt",
+            )
             raise
         after_status = after_run.status if after_run is not None else before_status
         interrupted = bool(before_status == "running" and after_status == "failed")
+        _log_agent_run_process_timing(
+            run_id=run_id,
+            before_status=before_status,
+            after_status=after_status,
+            started_at=started_at,
+            outcome="completed",
+            event_name="agent.run.worker_interrupt",
+        )
         return AgentRunProcessResult(
             status_changed=bool(after_run is not None and after_status != before_status),
             terminal=after_status in TERMINAL_RUN_STATUSES,
@@ -381,6 +421,44 @@ def _interrupt_running_before(interrupt_running_older_than_seconds: int | None) 
     if interrupt_running_older_than_seconds is None:
         return None
     return datetime.now(timezone.utc) - timedelta(seconds=interrupt_running_older_than_seconds)
+
+
+def _log_agent_run_process_timing(
+    *,
+    run_id: UUID,
+    before_status: str,
+    after_status: str,
+    started_at: float,
+    outcome: str,
+    queue_wait_ms: float | None = None,
+    error_type: str = "",
+    event_name: str = "agent.run.worker_execute",
+) -> None:
+    log_agent_runtime_event(
+        event_name,
+        run_id=str(run_id),
+        before_status=before_status,
+        after_status=after_status,
+        outcome=outcome,
+        terminal=after_status in TERMINAL_RUN_STATUSES,
+        queue_wait_ms=queue_wait_ms,
+        duration_ms=_elapsed_ms(started_at),
+        error_type=error_type,
+    )
+
+
+def _elapsed_ms(started_at: float) -> float:
+    return round((perf_counter() - started_at) * 1000, 3)
+
+
+def _duration_between_ms(started_at: datetime | None, ended_at: datetime | None) -> float | None:
+    if started_at is None or ended_at is None:
+        return None
+    if started_at.tzinfo is None and ended_at.tzinfo is not None:
+        started_at = started_at.replace(tzinfo=ended_at.tzinfo)
+    elif started_at.tzinfo is not None and ended_at.tzinfo is None:
+        ended_at = ended_at.replace(tzinfo=started_at.tzinfo)
+    return round((ended_at - started_at).total_seconds() * 1000, 3)
 
 
 def main() -> None:

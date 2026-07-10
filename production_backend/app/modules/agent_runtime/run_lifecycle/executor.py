@@ -11,6 +11,7 @@ from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from ....core.errors import ApiError
+from ....core.logging import log_agent_runtime_event
 from ....infrastructure.object_storage.base import ObjectStorage
 from ...auth import CurrentUser
 from ..actions.policy import AgentActionPolicy, AgentActionPolicyDecision
@@ -214,6 +215,14 @@ class AgentRuntimeExecutor:
                 result=result,
                 run_started_at=run_started_at,
             )
+        except Exception as exc:
+            self._log_executor_timing(
+                run=run,
+                status="failed",
+                timings_ms={"total_executor_ms": _elapsed_ms(run_started_at)},
+                error_type=type(exc).__name__,
+            )
+            raise
         finally:
             self._run_assistant_message_ids.pop(run.id, None)
             self._run_loaded_service_skill_ids.pop(run.id, None)
@@ -372,6 +381,7 @@ class AgentRuntimeExecutor:
                     status=422,
                 )
             action = await self._create_action_from_proposal(run=run, proposal=action_proposal, decision=action_decision)
+            timings_ms = _timings_with_total(turn_context.timings_ms, run_started_at)
             await self._append_event(
                 thread_id=run.thread_id,
                 run_id=run.id,
@@ -386,16 +396,19 @@ class AgentRuntimeExecutor:
                     "context_refs": [],
                     "pending_action_id": str(action.id),
                     "final_message_id": None,
-                    "timings_ms": _timings_with_total(turn_context.timings_ms, run_started_at),
+                    "timings_ms": timings_ms,
                 },
             )
+            self._log_executor_timing(run=run, status="waiting_for_confirmation", timings_ms=timings_ms)
             return AgentRunExecutionResult(status="waiting_for_confirmation", pending_action_id=action.id)
+        pending_timings_ms = _timings_with_total(turn_context.timings_ms, run_started_at)
         pending_action = await self._pending_confirmation_action_from_tool(
             run=run,
             current_user_message_id=str(turn_context.current_message.id),
-            timings_ms=_timings_with_total(turn_context.timings_ms, run_started_at),
+            timings_ms=pending_timings_ms,
         )
         if pending_action is not None:
+            self._log_executor_timing(run=run, status="waiting_for_confirmation", timings_ms=pending_timings_ms)
             return AgentRunExecutionResult(status="waiting_for_confirmation", pending_action_id=pending_action.id)
         sanitized_response = sanitize_agent_response_text(str(result.final_text or ""))
         final_text = sanitized_response.text.strip()
@@ -403,6 +416,7 @@ class AgentRuntimeExecutor:
             final_text = "我已经整理好了。"
         if not final_text:
             raise ApiError(code="empty_agent_response", message="Agent runtime returned an empty response.", status=502)
+        finish_timings_ms = _timings_with_total(turn_context.timings_ms, run_started_at)
         await self._save_checkpoint(
             run=run,
             node_name="finish",
@@ -412,7 +426,7 @@ class AgentRuntimeExecutor:
                 "pending_action_id": None,
                 "final_message_id": None,
                 "final_response_ready": True,
-                "timings_ms": _timings_with_total(turn_context.timings_ms, run_started_at),
+                "timings_ms": finish_timings_ms,
             },
         )
         await self._upsert_run_summary(
@@ -425,6 +439,13 @@ class AgentRuntimeExecutor:
         quick_replies = [] if run.id in self._run_suppress_quick_replies else list(self._run_quick_replies.get(run.id, []))
         if not quick_replies and run.id not in self._run_suppress_quick_replies:
             quick_replies = list(sanitized_response.quick_replies)
+        self._log_executor_timing(
+            run=run,
+            status="completed",
+            timings_ms=finish_timings_ms,
+            final_text_length=len(final_text),
+            quick_reply_count=len(quick_replies),
+        )
         return AgentRunExecutionResult(
             status="completed",
             final_text=final_text,
@@ -838,6 +859,30 @@ class AgentRuntimeExecutor:
             run_id=run.id,
             event_type="run.progress",
             payload=payload,
+        )
+
+    def _log_executor_timing(
+        self,
+        *,
+        run: AgentRun,
+        status: str,
+        timings_ms: dict[str, float],
+        final_text_length: int = 0,
+        quick_reply_count: int = 0,
+        error_type: str = "",
+    ) -> None:
+        log_agent_runtime_event(
+            "agent.run.executor_turn",
+            run_id=str(run.id),
+            thread_id=str(run.thread_id),
+            trace_id=run.trace_id,
+            status=status,
+            service_skill_id=run.service_skill_id,
+            routing_source=run.routing_source,
+            timings_ms=timings_ms,
+            final_text_length=final_text_length,
+            quick_reply_count=quick_reply_count,
+            error_type=error_type,
         )
 
     async def _record_routing_decision(self, *, run: AgentRun, current_message: AgentMessage, routing_plan: RoutingPlan) -> None:
