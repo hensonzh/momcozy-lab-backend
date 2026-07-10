@@ -32,7 +32,7 @@ from production_backend.app.modules.agent_runtime.run_lifecycle.controls import 
 from production_backend.app.modules.agent_runtime.run_lifecycle.executor import AgentRuntimeExecutor
 from production_backend.app.modules.agent_runtime.run_lifecycle.quick_replies import QuickReplyFinalizer
 from production_backend.app.modules.agent_runtime.run_lifecycle.state_store import AgentRuntimeStateStore
-from production_backend.app.modules.agent_runtime.sdk import create_agent_sdk_runner
+from production_backend.app.modules.agent_runtime.sdk import create_agent_model_runner
 from production_backend.app.modules.agent_runtime.service import AgentRuntimeService
 from production_backend.app.modules.assets.service import ProductAssetService
 from production_backend.app.modules.audit import AuditService, IdempotencyService, OutboxService
@@ -309,8 +309,8 @@ async def _process_agent_run(
             transient_stream=transient_stream,
         )
         checkpoint_store = AgentGraphCheckpointStore(repository=repository)
-        sdk_runner = create_agent_sdk_runner(settings=settings, metrics=metrics)
-        quick_reply_runner = create_agent_sdk_runner(
+        sdk_runner = create_agent_model_runner(settings=settings, metrics=metrics)
+        quick_reply_runner = create_agent_model_runner(
             settings=settings,
             metrics=metrics,
             trace_enabled=False,

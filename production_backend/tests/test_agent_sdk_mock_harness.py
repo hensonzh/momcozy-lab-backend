@@ -9,6 +9,7 @@ from production_backend.app.core.settings import Settings
 from production_backend.app.modules.agent_runtime.sdk import (
     OpenAIAgentsSdkBackend,
     OpenAIAgentsSdkRunner,
+    OpenAIResponsesRunner,
     SdkNodeRequest,
     SdkToolDefinition,
     ScriptedSdkBackend,
@@ -157,10 +158,27 @@ def test_agent_sdk_runner_factory_selects_responses_contract_for_openai() -> Non
     )
 
     assert runner.provider == "openai"
+    assert isinstance(runner, OpenAIResponsesRunner)
     assert runner.model == "gpt-5.6-sol"
     assert runner.reasoning_effort == "low"
     assert runner.store_responses is False
     assert runner.use_responses is True
+
+
+def test_agent_sdk_runner_factory_keeps_explicit_openai_sdk_rollback_path() -> None:
+    runner = create_agent_sdk_runner(
+        settings=Settings(
+            app_env="test",
+            agent_model_provider="openai",
+            openai_api_key="openai-key",
+            openai_model="gpt-test",
+            openai_agent_use_responses=False,
+        )
+    )
+
+    assert isinstance(runner, OpenAIAgentsSdkRunner)
+    assert runner.provider == "openai"
+    assert runner.use_responses is False
 
 
 def test_minimax_backend_uses_openai_compatible_model_provider(monkeypatch: pytest.MonkeyPatch) -> None:

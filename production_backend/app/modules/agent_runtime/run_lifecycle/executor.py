@@ -57,7 +57,7 @@ from ..payloads import DEFAULT_MAX_INLINE_PAYLOAD_BYTES, maybe_externalize_json_
 from ..repository import AgentRuntimeRepository
 from ..response_text import sanitize_agent_response_text
 from ..sdk import (
-    OpenAIAgentsSdkRunner,
+    AgentModelRunner,
     SdkNodeRequest,
     SdkToolDefinition,
     SdkToolNamespace,
@@ -132,7 +132,7 @@ class AgentRuntimeExecutor:
         self,
         *,
         repository: AgentRuntimeRepository,
-        sdk_runner: OpenAIAgentsSdkRunner,
+        sdk_runner: AgentModelRunner,
         graph_registry: AgentGraphRegistry | None = None,
         checkpoint_store: AgentGraphCheckpointStore | None = None,
         state_store: AgentRuntimeStateStore | None = None,

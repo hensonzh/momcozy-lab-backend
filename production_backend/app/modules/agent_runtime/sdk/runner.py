@@ -70,6 +70,14 @@ class SdkRunnerBackend(Protocol):
         ...
 
 
+class AgentModelRunner(Protocol):
+    async def run_reasoning(self, request: SdkNodeRequest) -> SdkNodeResult:
+        ...
+
+    def supports_tool_namespaces(self) -> bool:
+        ...
+
+
 class OpenAIResponsesApiBackend:
     def __init__(
         self,
@@ -204,6 +212,77 @@ class OpenAIResponsesApiBackend:
             status=504,
             details={"response_id": _response_id(latest_response)},
         )
+
+
+class OpenAIResponsesRunner:
+    def __init__(
+        self,
+        *,
+        backend: SdkRunnerBackend | None = None,
+        metrics: RequestMetrics | None = None,
+        model: str = "gpt-5.6-sol",
+        max_turns: int = 10,
+        timeout_seconds: float = 60,
+        api_key: str = "",
+        base_url: str = "",
+        reasoning_effort: str = "low",
+        store_responses: bool = False,
+        metrics_node_name: str = "openai_responses",
+    ) -> None:
+        self.backend = backend
+        self.metrics = metrics
+        self.model = model
+        self.max_turns = max_turns
+        self.timeout_seconds = timeout_seconds
+        self.provider = "openai"
+        self.api_key = api_key
+        self.base_url = base_url
+        self.reasoning_effort = reasoning_effort
+        self.store_responses = store_responses
+        self.use_responses = True
+        self.metrics_node_name = metrics_node_name
+
+    async def run_reasoning(self, request: SdkNodeRequest) -> SdkNodeResult:
+        started_at = perf_counter()
+        try:
+            backend = self.backend or OpenAIResponsesApiBackend(
+                model=self.model,
+                max_turns=self.max_turns,
+                api_key=self.api_key,
+                base_url=self.base_url,
+                reasoning_effort=self.reasoning_effort,
+                store_responses=self.store_responses,
+            )
+            result = await asyncio.wait_for(backend.run(request), timeout=self.timeout_seconds)
+            self._record(outcome="completed", error_code="", started_at=started_at)
+            return result
+        except TimeoutError as exc:
+            self._record(outcome="failed", error_code="sdk_run_timed_out", started_at=started_at)
+            raise ApiError(code="sdk_run_timed_out", message="OpenAI Responses run timed out.", status=504) from exc
+        except ApiError as exc:
+            self._record(outcome="failed", error_code=exc.code, started_at=started_at)
+            raise
+        except Exception as exc:
+            mapped = _provider_error_mapping(exc)
+            self._record(outcome="failed", error_code=mapped.code, started_at=started_at)
+            raise ApiError(
+                code=mapped.code,
+                message=mapped.message,
+                status=mapped.status,
+                details=_provider_error_details(exc),
+            ) from exc
+
+    def supports_tool_namespaces(self) -> bool:
+        return True
+
+    def _record(self, *, outcome: str, error_code: str, started_at: float) -> None:
+        if self.metrics is not None:
+            self.metrics.record_agent_sdk(
+                node_name=self.metrics_node_name,
+                outcome=outcome,
+                error_code=error_code,
+                duration_ms=(perf_counter() - started_at) * 1000,
+            )
 
 
 class OpenAIAgentsSdkBackend:

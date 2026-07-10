@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..models import AgentMessage, AgentRun
-from ..sdk import OpenAIAgentsSdkRunner, SdkNodeRequest
+from ..sdk import AgentModelRunner, SdkNodeRequest
 
 
 QUICK_REPLY_FINALIZER_INSTRUCTIONS = """
@@ -37,7 +37,7 @@ class QuickReplyFinalizer:
     def __init__(
         self,
         *,
-        sdk_runner: OpenAIAgentsSdkRunner,
+        sdk_runner: AgentModelRunner,
         config: QuickReplyFinalizerConfig | None = None,
     ) -> None:
         self.sdk_runner = sdk_runner
