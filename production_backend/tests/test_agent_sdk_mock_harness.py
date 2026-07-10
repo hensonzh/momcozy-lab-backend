@@ -165,6 +165,23 @@ def test_agent_sdk_runner_factory_selects_responses_contract_for_openai() -> Non
     assert runner.use_responses is True
 
 
+def test_agent_model_runner_factory_allows_low_latency_reasoning_override() -> None:
+    runner = create_agent_sdk_runner(
+        settings=Settings(
+            app_env="test",
+            agent_model_provider="openai",
+            openai_api_key="openai-key",
+            openai_reasoning_effort="low",
+        ),
+        model="gpt-5.6-luna",
+        reasoning_effort="none",
+    )
+
+    assert isinstance(runner, OpenAIResponsesRunner)
+    assert runner.model == "gpt-5.6-luna"
+    assert runner.reasoning_effort == "none"
+
+
 def test_agent_sdk_runner_factory_keeps_explicit_openai_sdk_rollback_path() -> None:
     runner = create_agent_sdk_runner(
         settings=Settings(

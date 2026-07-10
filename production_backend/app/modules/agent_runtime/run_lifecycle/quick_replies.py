@@ -22,6 +22,29 @@ QUICK_REPLY_FINALIZER_INSTRUCTIONS = """
 - 不要重复助手正文，不要承诺已经执行动作。
 - 如果无法生成 3 条明确、自然的下一句建议，返回 {"replies":[]}。
 """.strip()
+QUICK_REPLY_RESPONSE_FORMAT: dict[str, Any] = {
+    "type": "json_schema",
+    "name": "quick_replies",
+    "strict": True,
+    "schema": {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["replies"],
+        "properties": {
+            "replies": {
+                "type": "array",
+                "minItems": 3,
+                "maxItems": 3,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["text"],
+                    "properties": {"text": {"type": "string"}},
+                },
+            }
+        },
+    },
+}
 
 
 @dataclass(frozen=True)
@@ -80,6 +103,7 @@ class QuickReplyFinalizer:
                 prompt_version=run.prompt_version,
                 trace_id=run.trace_id,
                 service_skill_id=run.service_skill_id or "cozymate_service_agent",
+                response_text_format=QUICK_REPLY_RESPONSE_FORMAT,
             )
         )
         return _normalize_quick_replies(

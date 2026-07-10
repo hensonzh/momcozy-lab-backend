@@ -13,6 +13,7 @@ def create_agent_model_runner(
     model: str | None = None,
     max_turns: int | None = None,
     timeout_seconds: float | None = None,
+    reasoning_effort: str | None = None,
     metrics_node_name: str | None = None,
 ) -> AgentModelRunner:
     if settings.agent_model_provider not in SUPPORTED_AGENT_MODEL_PROVIDERS:
@@ -53,7 +54,7 @@ def create_agent_model_runner(
         max_turns=max_turns or settings.openai_agent_max_turns,
         timeout_seconds=timeout_seconds or settings.openai_agent_timeout_seconds,
         api_key=settings.openai_api_key,
-        reasoning_effort=settings.openai_reasoning_effort,
+        reasoning_effort=reasoning_effort or settings.openai_reasoning_effort,
         store_responses=settings.openai_responses_store,
         metrics=metrics,
         metrics_node_name=metrics_node_name or "openai_responses",
@@ -68,6 +69,7 @@ def create_agent_sdk_runner(
     model: str | None = None,
     max_turns: int | None = None,
     timeout_seconds: float | None = None,
+    reasoning_effort: str | None = None,
     metrics_node_name: str | None = None,
 ) -> AgentModelRunner:
     return create_agent_model_runner(
@@ -77,5 +79,6 @@ def create_agent_sdk_runner(
         model=model,
         max_turns=max_turns,
         timeout_seconds=timeout_seconds,
+        reasoning_effort=reasoning_effort,
         metrics_node_name=metrics_node_name,
     )

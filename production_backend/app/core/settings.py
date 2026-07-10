@@ -85,7 +85,7 @@ class Settings:
     openai_agent_timeout_seconds: int = 60
     openai_agent_trace_enabled: bool = False
     openai_agent_prompt_version: str = "momcozy-agent-prompt-v1"
-    agent_quick_reply_model: str = ""
+    agent_quick_reply_model: str = "gpt-5.6-luna"
     agent_quick_reply_timeout_seconds: float = 3.0
     voice_provider: str = "disabled"
     voice_api_key: str = ""

@@ -338,8 +338,6 @@ class AgentRuntimeExecutor:
         result: Any,
         run_started_at: float,
     ) -> AgentRunExecutionResult:
-        await self._append_progress(run=run, phase="response_finalizing", label="我在组织回复～")
-
         action_proposal = _single_action_proposal(result.action_proposals)
         action_decision = self._action_decision_from_proposal(action_proposal) if action_proposal is not None else None
 

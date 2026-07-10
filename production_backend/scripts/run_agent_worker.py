@@ -364,6 +364,7 @@ async def _execute_agent_run(
             model=settings.agent_quick_reply_model or None,
             max_turns=1,
             timeout_seconds=settings.agent_quick_reply_timeout_seconds,
+            reasoning_effort="none",
             metrics_node_name="quick_reply_finalizer",
         )
         runtime_executor = AgentRuntimeExecutor(

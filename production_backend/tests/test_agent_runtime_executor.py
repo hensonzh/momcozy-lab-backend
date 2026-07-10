@@ -21,7 +21,7 @@ from production_backend.app.modules.agent_runtime.models import (
 from production_backend.app.modules.agent_runtime.event_stream.sink import AgentEventSink
 from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent import ServiceSkillId
 from production_backend.app.modules.agent_runtime.run_lifecycle.executor import AgentRuntimeExecutor
-from production_backend.app.modules.agent_runtime.run_lifecycle.quick_replies import QuickReplyFinalizer
+from production_backend.app.modules.agent_runtime.run_lifecycle.quick_replies import QUICK_REPLY_RESPONSE_FORMAT, QuickReplyFinalizer
 from production_backend.app.modules.agent_runtime.sdk import (
     OpenAIAgentsSdkRunner,
     SdkNodeRequest,
@@ -141,7 +141,6 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result(capl
         "context_loading",
         "context_ready",
         "model_reasoning",
-        "response_finalizing",
     ]
     timing_payloads = [
         json.loads(record.getMessage())
@@ -345,14 +344,6 @@ def test_agent_runtime_executor_publishes_final_text_deltas_to_transient_stream(
             "semantic": transient_stream.progresses[2]["semantic"],
             "dedupe_key": f"{run.id}:run.progress:progress:model_reasoning",
         },
-        {
-            "thread_id": thread_id,
-            "run_id": run.id,
-            "phase": "response_finalizing",
-            "label": "我在组织回复～",
-            "semantic": transient_stream.progresses[3]["semantic"],
-            "dedupe_key": f"{run.id}:run.progress:progress:response_finalizing",
-        },
     ]
     assert all(event.event_type != "message.delta" for event in repository.events)
     assert all(event.event_type != "run.progress" for event in repository.events)
@@ -360,7 +351,6 @@ def test_agent_runtime_executor_publishes_final_text_deltas_to_transient_stream(
         "context_loading",
         "context_ready",
         "model_reasoning",
-        "response_finalizing",
     ]
     assert transient_stream.progresses[0]["semantic"]["surface"] == "status_bar"
     assert transient_stream.progresses[2]["semantic"]["surface"] == "thinking_note"
@@ -389,7 +379,6 @@ def test_agent_runtime_executor_keeps_progress_transient_when_event_sink_is_conf
         "context_loading",
         "context_ready",
         "model_reasoning",
-        "response_finalizing",
     ]
     assert all(event.event_type != "run.progress" for event in repository.events)
 
@@ -663,6 +652,7 @@ def test_agent_runtime_executor_generates_quick_replies_with_finalizer() -> None
     ]
     assert backend.requests[0].tool_names == ("load_service_skill",)
     assert quick_reply_backend.requests[0].tool_names == ()
+    assert quick_reply_backend.requests[0].response_text_format == QUICK_REPLY_RESPONSE_FORMAT
     finalizer_payload = json.loads(quick_reply_backend.requests[0].model_input[0]["content"])
     assert finalizer_payload["assistant_final_text"] == "已经整理好了。"
     assert [item["text"] for item in finalizer_payload["dialogue"]] == ["我想看看今天奶量", "我帮你看一下。", "那下一步呢？"]
@@ -670,6 +660,7 @@ def test_agent_runtime_executor_generates_quick_replies_with_finalizer() -> None
         {"thread_id": thread_id, "run_id": run.id, "delta": "已经", "message_stream_id": str(result.assistant_message_id)},
         {"thread_id": thread_id, "run_id": run.id, "delta": "整理好了。", "message_stream_id": str(result.assistant_message_id)},
     ]
+    assert "response_finalizing" not in [progress["phase"] for progress in transient_stream.progresses]
 
 
 def test_agent_runtime_executor_requires_exactly_three_finalizer_quick_replies() -> None:

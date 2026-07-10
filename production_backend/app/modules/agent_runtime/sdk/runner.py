@@ -56,6 +56,7 @@ class SdkNodeRequest:
     trace_id: str = ""
     service_skill_id: str = "cozymate_service_agent"
     on_text_delta: SdkTextDeltaHandler | None = None
+    response_text_format: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -154,6 +155,7 @@ class OpenAIResponsesApiBackend:
                     tools_payload=tools_payload,
                     reasoning_effort=self.reasoning_effort,
                     store_responses=self.store_responses,
+                    response_text_format=request.response_text_format,
                     on_text_delta=request.on_text_delta,
                 )
             else:
@@ -166,6 +168,7 @@ class OpenAIResponsesApiBackend:
                         tools_payload=tools_payload,
                         reasoning_effort=self.reasoning_effort,
                         store_responses=self.store_responses,
+                        response_text_format=request.response_text_format,
                     )
                 )
             output_items = _response_output_items(latest_response)
@@ -545,6 +548,7 @@ async def _create_response_streamed(
     tools_payload: list[dict[str, Any]],
     reasoning_effort: str,
     store_responses: bool,
+    response_text_format: dict[str, Any] | None,
     on_text_delta: SdkTextDeltaHandler | None = None,
 ) -> tuple[Any | None, str, bool]:
     kwargs = _responses_request_kwargs(
@@ -554,6 +558,7 @@ async def _create_response_streamed(
         tools_payload=tools_payload,
         reasoning_effort=reasoning_effort,
         store_responses=store_responses,
+        response_text_format=response_text_format,
     )
     response, streamed_text, emitted_stream = await _consume_response_stream(
         await _maybe_await(stream_response(**kwargs)),
@@ -572,6 +577,7 @@ def _responses_request_kwargs(
     tools_payload: list[dict[str, Any]],
     reasoning_effort: str,
     store_responses: bool,
+    response_text_format: dict[str, Any] | None,
 ) -> dict[str, Any]:
     kwargs: dict[str, Any] = {
         "model": model,
@@ -584,6 +590,8 @@ def _responses_request_kwargs(
     }
     if not store_responses:
         kwargs["include"] = ["reasoning.encrypted_content"]
+    if response_text_format is not None:
+        kwargs["text"] = {"format": response_text_format}
     return kwargs
 
 
@@ -641,13 +649,10 @@ async def _iterate_response_stream(
 
 def _text_delta_from_response_stream_event(event: Any) -> str:
     event_type = str(_item_value(event, "type", "") or "")
-    if event_type and "delta" not in event_type:
+    if event_type != "response.output_text.delta":
         return ""
-    for attr in ("delta", "text", "content"):
-        value = _item_value(event, attr, None)
-        if isinstance(value, str) and value:
-            return value
-    return ""
+    delta = _item_value(event, "delta", "")
+    return delta if isinstance(delta, str) else ""
 
 
 def _response_from_response_stream_event(event: Any) -> Any | None:

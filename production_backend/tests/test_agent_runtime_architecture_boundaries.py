@@ -1196,6 +1196,40 @@ def test_sdk_runner_uses_responses_backend_without_deferred_tools(monkeypatch: p
     assert len(FakeAsyncOpenAI.calls) == 1
 
 
+def test_responses_runner_passes_structured_text_format(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_openai = types.ModuleType("openai")
+    fake_openai.__spec__ = ModuleSpec("openai", loader=None)
+    fake_openai.AsyncOpenAI = FakeAsyncOpenAI
+    monkeypatch.setitem(sys.modules, "openai", fake_openai)
+    FakeAsyncOpenAI.reset([FakeOpenAIResponse(id="resp_1", output=[], output_text='{"items":[]}')])
+    response_format = {
+        "type": "json_schema",
+        "name": "items",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["items"],
+            "properties": {"items": {"type": "array", "items": {"type": "string"}}},
+        },
+    }
+
+    asyncio.run(
+        OpenAIResponsesRunner(model="gpt-test").run_reasoning(
+            SdkNodeRequest(
+                run_id="run_1",
+                thread_id="thread_1",
+                actor_user_id="user_1",
+                instructions="Return JSON.",
+                model_input=[{"role": "user", "content": "list items"}],
+                response_text_format=response_format,
+            )
+        )
+    )
+
+    assert FakeAsyncOpenAI.calls[0]["text"] == {"format": response_format}
+
+
 def test_sdk_runner_streams_responses_api_text_deltas(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_openai = types.ModuleType("openai")
     fake_openai.__spec__ = ModuleSpec("openai", loader=None)
@@ -1240,6 +1274,42 @@ def test_sdk_runner_streams_responses_api_text_deltas(monkeypatch: pytest.Monkey
 
     assert deltas == ["hel", "lo"]
     assert result.final_text == "hello"
+
+
+def test_responses_stream_ignores_reasoning_and_tool_argument_deltas(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_openai = types.ModuleType("openai")
+    fake_openai.__spec__ = ModuleSpec("openai", loader=None)
+    fake_openai.AsyncOpenAI = FakeAsyncOpenAI
+    monkeypatch.setitem(sys.modules, "openai", fake_openai)
+    FakeAsyncOpenAI.reset(
+        [],
+        stream_events_to_return=[
+            types.SimpleNamespace(type="response.reasoning_summary_text.delta", delta="hidden reasoning"),
+            types.SimpleNamespace(type="response.function_call_arguments.delta", delta='{"secret":"value"}'),
+            types.SimpleNamespace(type="response.output_text.delta", delta="用户可见正文"),
+        ],
+        stream_final_response=FakeOpenAIResponse(id="resp_1", output=[], output_text="用户可见正文"),
+    )
+    deltas: list[str] = []
+
+    async def on_text_delta(delta: str) -> None:
+        deltas.append(delta)
+
+    result = asyncio.run(
+        OpenAIResponsesRunner(model="gpt-test").run_reasoning(
+            SdkNodeRequest(
+                run_id="run_1",
+                thread_id="thread_1",
+                actor_user_id="user_1",
+                instructions="Answer.",
+                model_input=[{"role": "user", "content": "hello"}],
+                on_text_delta=on_text_delta,
+            )
+        )
+    )
+
+    assert result.final_text == "用户可见正文"
+    assert deltas == ["用户可见正文"]
     assert FakeAsyncOpenAI.calls == []
     assert FakeAsyncOpenAI.stream_calls[0]["input"] == [{"role": "user", "content": "hello"}]
 
