@@ -10,21 +10,13 @@ class AgentId(StrEnum):
     COZYMATE_SERVICE_AGENT = "cozymate_service_agent"
 
 
-class ServiceSkillId(StrEnum):
-    BIRTH_PREP = "birth-prep"
-    MILK_MANAGEMENT = "milk-management"
-    HEALTH_CONSULTATION = "health-consultation"
-    EMOTION_SUPPORT = "emotion-support"
-    DEVICE_GUIDANCE = "device-guidance"
-
-
 class RoutingSource(StrEnum):
     PASSTHROUGH = "passthrough"
 
 
 class IntentItem(BaseModel):
     intent_type: str
-    service_skill_id: ServiceSkillId | None = None
+    agent_id: AgentId | None = None
     priority: int = 50
     requires_write: bool = False
     safety_sensitive: bool = False
@@ -32,9 +24,8 @@ class IntentItem(BaseModel):
 
 
 class RoutingPlan(BaseModel):
-    target_kind: Literal["agent", "service_skill"] = "agent"
+    target_kind: Literal["agent"] = "agent"
     selected_agent_id: AgentId = AgentId.COZYMATE_SERVICE_AGENT
-    selected_service_skill_id: ServiceSkillId | None = None
     intents: list[IntentItem]
     execution_mode: Literal["passthrough"] = "passthrough"
     confidence: float = Field(ge=0, le=1)

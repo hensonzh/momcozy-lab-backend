@@ -22,6 +22,15 @@ def test_run_progress_payload_uses_status_bar_semantic_for_visible_progress() ->
     assert progress_live_dedupe_key(run_id=uuid4(), semantic=payload["semantic"])
 
 
+def test_run_progress_payload_aligns_context_ready_with_legacy_routing_copy() -> None:
+    payload = run_progress_payload(phase="context_ready", label="我先理解一下你的需求～")
+
+    assert payload["label"] == "我先理解一下你的需求～"
+    assert payload["semantic"]["label"] == "我先理解一下你的需求～"
+    assert payload["semantic"]["surface"] == "status_bar"
+    assert payload["semantic"]["visibility"] == "status"
+
+
 def test_run_progress_payload_keeps_model_reasoning_out_of_status_bar() -> None:
     payload = run_progress_payload(phase="model_reasoning", label="我想一下")
 

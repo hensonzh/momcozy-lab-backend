@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from production_backend.app.modules.agent_runtime.agents.main_coordinator_agent import ServiceSkillId
+from .service_skills import ServiceSkillId
 
 
 SERVICE_SKILLS_ROOT = Path(__file__).resolve().parent / "skills"
