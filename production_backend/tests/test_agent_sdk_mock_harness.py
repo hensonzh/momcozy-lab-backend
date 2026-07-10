@@ -143,6 +143,26 @@ def test_agent_sdk_runner_factory_selects_minimax_provider_config() -> None:
     assert runner.timeout_seconds == 30
 
 
+def test_agent_sdk_runner_factory_selects_responses_contract_for_openai() -> None:
+    runner = create_agent_sdk_runner(
+        settings=Settings(
+            app_env="test",
+            agent_model_provider="openai",
+            openai_api_key="openai-key",
+            openai_model="gpt-5.6-sol",
+            openai_reasoning_effort="low",
+            openai_responses_store=False,
+            openai_agent_use_responses=True,
+        )
+    )
+
+    assert runner.provider == "openai"
+    assert runner.model == "gpt-5.6-sol"
+    assert runner.reasoning_effort == "low"
+    assert runner.store_responses is False
+    assert runner.use_responses is True
+
+
 def test_minimax_backend_uses_openai_compatible_model_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     class FakeOpenAIProvider:
         def __init__(self, **kwargs: object) -> None:

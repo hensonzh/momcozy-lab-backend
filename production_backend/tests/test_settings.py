@@ -106,6 +106,9 @@ def test_settings_from_env_reads_agent_worker_controls(monkeypatch: pytest.Monke
     monkeypatch.setenv("AGENT_MODEL_PROVIDER", "openai")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setenv("OPENAI_MODEL", "gpt-test")
+    monkeypatch.setenv("OPENAI_REASONING_EFFORT", "low")
+    monkeypatch.setenv("OPENAI_RESPONSES_STORE", "false")
+    monkeypatch.setenv("OPENAI_AGENT_USE_RESPONSES", "true")
     monkeypatch.setenv("OPENAI_AGENT_MAX_TURNS", "7")
     monkeypatch.setenv("OPENAI_AGENT_TIMEOUT_SECONDS", "45")
     monkeypatch.setenv("OPENAI_AGENT_TRACE_ENABLED", "true")
@@ -123,6 +126,9 @@ def test_settings_from_env_reads_agent_worker_controls(monkeypatch: pytest.Monke
     assert settings.agent_model_provider == "openai"
     assert settings.openai_api_key == "sk-test"
     assert settings.openai_model == "gpt-test"
+    assert settings.openai_reasoning_effort == "low"
+    assert settings.openai_responses_store is False
+    assert settings.openai_agent_use_responses is True
     assert settings.openai_agent_max_turns == 7
     assert settings.openai_agent_timeout_seconds == 45
     assert settings.openai_agent_trace_enabled is True

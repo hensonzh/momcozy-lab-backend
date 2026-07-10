@@ -79,12 +79,16 @@ class OpenAIResponsesApiBackend:
         provider: str = "openai",
         api_key: str = "",
         base_url: str = "",
+        reasoning_effort: str = "low",
+        store_responses: bool = False,
     ) -> None:
         self.model = model
         self.max_turns = max_turns
         self.provider = provider
         self.api_key = api_key
         self.base_url = base_url
+        self.reasoning_effort = reasoning_effort
+        self.store_responses = store_responses
 
     async def run(self, request: SdkNodeRequest) -> SdkNodeResult:
         if self.provider != "openai":
@@ -120,7 +124,11 @@ class OpenAIResponsesApiBackend:
 
         tools_payload = responses_tools_payload(request)
         context: list[Any] = _responses_input_items(request.model_input)
-        tools_by_sdk_name = {tool.sdk_name: tool for tool in request.tools}
+        tools_by_address = {
+            (tool.namespace_name, tool.sdk_name): tool
+            for tool in request.tools
+        }
+        tools_by_name = {tool.sdk_name: tool for tool in request.tools}
         observed_tool_calls: list[dict[str, Any]] = []
         latest_response: Any | None = None
 
@@ -134,16 +142,21 @@ class OpenAIResponsesApiBackend:
                     instructions=request.instructions,
                     context=context,
                     tools_payload=tools_payload,
+                    reasoning_effort=self.reasoning_effort,
+                    store_responses=self.store_responses,
                     on_text_delta=request.on_text_delta,
                 )
             else:
                 emitted_stream = False
                 latest_response = await create_response(
-                    model=self.model,
-                    instructions=request.instructions,
-                    input=list(context),
-                    tools=tools_payload,
-                    parallel_tool_calls=False,
+                    **_responses_request_kwargs(
+                        model=self.model,
+                        instructions=request.instructions,
+                        context=context,
+                        tools_payload=tools_payload,
+                        reasoning_effort=self.reasoning_effort,
+                        store_responses=self.store_responses,
+                    )
                 )
             output_items = _response_output_items(latest_response)
             function_calls = [_response_function_call(item) for item in output_items]
@@ -157,7 +170,9 @@ class OpenAIResponsesApiBackend:
 
             context.extend(output_items)
             for function_call in function_calls:
-                tool = tools_by_sdk_name.get(function_call["name"])
+                tool = tools_by_address.get((function_call["namespace"], function_call["name"]))
+                if tool is None and not function_call["namespace"]:
+                    tool = tools_by_name.get(function_call["name"])
                 if tool is None:
                     raise ApiError(
                         code="sdk_unknown_tool_call",
@@ -290,6 +305,8 @@ class OpenAIAgentsSdkRunner:
         use_responses: bool | None = None,
         buffer_streamed_tool_calls: bool = False,
         metrics_node_name: str = "openai_agents_sdk",
+        reasoning_effort: str = "low",
+        store_responses: bool = False,
     ) -> None:
         self.backend = backend
         self.metrics = metrics
@@ -303,6 +320,8 @@ class OpenAIAgentsSdkRunner:
         self.use_responses = use_responses
         self.buffer_streamed_tool_calls = buffer_streamed_tool_calls
         self.metrics_node_name = metrics_node_name
+        self.reasoning_effort = reasoning_effort
+        self.store_responses = store_responses
 
     async def run_reasoning(self, request: SdkNodeRequest) -> SdkNodeResult:
         started_at = perf_counter()
@@ -340,13 +359,17 @@ class OpenAIAgentsSdkRunner:
         return self.provider == "openai" and self.use_responses is not False
 
     def _default_backend(self, request: SdkNodeRequest) -> SdkRunnerBackend:
-        if request.tool_search_enabled and self.supports_tool_namespaces():
+        if self.provider == "openai" and (
+            self.use_responses is True or self.use_responses is None and request.tool_search_enabled
+        ):
             return OpenAIResponsesApiBackend(
                 model=self.model,
                 max_turns=self.max_turns,
                 provider=self.provider,
                 api_key=self.api_key,
                 base_url=self.base_url,
+                reasoning_effort=self.reasoning_effort,
+                store_responses=self.store_responses,
             )
         return OpenAIAgentsSdkBackend(
             model=self.model,
@@ -434,15 +457,18 @@ async def _create_response_streamed(
     instructions: str,
     context: list[Any],
     tools_payload: list[dict[str, Any]],
+    reasoning_effort: str,
+    store_responses: bool,
     on_text_delta: SdkTextDeltaHandler | None = None,
 ) -> tuple[Any | None, str, bool]:
-    kwargs = {
-        "model": model,
-        "instructions": instructions,
-        "input": list(context),
-        "tools": tools_payload,
-        "parallel_tool_calls": False,
-    }
+    kwargs = _responses_request_kwargs(
+        model=model,
+        instructions=instructions,
+        context=context,
+        tools_payload=tools_payload,
+        reasoning_effort=reasoning_effort,
+        store_responses=store_responses,
+    )
     response, streamed_text, emitted_stream = await _consume_response_stream(
         await _maybe_await(stream_response(**kwargs)),
         on_text_delta=on_text_delta,
@@ -450,6 +476,29 @@ async def _create_response_streamed(
     if response is None and not streamed_text:
         response = await create_response(**kwargs)
     return response, streamed_text, emitted_stream
+
+
+def _responses_request_kwargs(
+    *,
+    model: str,
+    instructions: str,
+    context: list[Any],
+    tools_payload: list[dict[str, Any]],
+    reasoning_effort: str,
+    store_responses: bool,
+) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {
+        "model": model,
+        "instructions": instructions,
+        "input": list(context),
+        "tools": tools_payload,
+        "parallel_tool_calls": False,
+        "reasoning": {"effort": reasoning_effort},
+        "store": store_responses,
+    }
+    if not store_responses:
+        kwargs["include"] = ["reasoning.encrypted_content"]
+    return kwargs
 
 
 async def _consume_response_stream(stream: Any, *, on_text_delta: SdkTextDeltaHandler | None = None) -> tuple[Any | None, str, bool]:
@@ -565,7 +614,8 @@ def _response_function_call(item: Any) -> dict[str, str] | None:
             status=502,
             details={"item_type": _item_value(item, "type")},
         )
-    return {"name": name, "call_id": call_id, "arguments": arguments}
+    namespace = str(_item_value(item, "namespace", "") or "")
+    return {"namespace": namespace, "name": name, "call_id": call_id, "arguments": arguments}
 
 
 def _response_output_text(response: Any, *, output_items: list[Any]) -> str:

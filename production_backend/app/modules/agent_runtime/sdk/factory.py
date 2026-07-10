@@ -42,6 +42,9 @@ def create_agent_sdk_runner(
         trace_enabled=settings.openai_agent_trace_enabled if trace_enabled is None else trace_enabled,
         provider="openai",
         api_key=settings.openai_api_key,
+        use_responses=settings.openai_agent_use_responses,
+        reasoning_effort=settings.openai_reasoning_effort,
+        store_responses=settings.openai_responses_store,
         metrics=metrics,
         metrics_node_name=metrics_node_name,
     )

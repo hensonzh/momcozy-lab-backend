@@ -972,7 +972,14 @@ def test_sdk_runner_uses_responses_namespace_backend_for_tool_search(monkeypatch
         ),
     )
 
-    result = asyncio.run(OpenAIAgentsSdkRunner(model="gpt-test").run_reasoning(request))
+    result = asyncio.run(
+        OpenAIAgentsSdkRunner(
+            model="gpt-test",
+            reasoning_effort="low",
+            store_responses=False,
+            use_responses=True,
+        ).run_reasoning(request)
+    )
 
     assert result.final_text == "记录草稿已准备好。"
     assert result.tool_calls == [
@@ -987,12 +994,142 @@ def test_sdk_runner_uses_responses_namespace_backend_for_tool_search(monkeypatch
     assert FakeAsyncOpenAI.created_kwargs == {"api_key": None}
     assert FakeAsyncOpenAI.calls[0]["tools"] == responses_tools_payload(request)
     assert FakeAsyncOpenAI.calls[0]["parallel_tool_calls"] is False
+    assert FakeAsyncOpenAI.calls[0]["reasoning"] == {"effort": "low"}
+    assert FakeAsyncOpenAI.calls[0]["store"] is False
+    assert FakeAsyncOpenAI.calls[0]["include"] == ["reasoning.encrypted_content"]
     assert FakeAsyncOpenAI.calls[0]["input"] == [{"role": "user", "content": "帮我记录一次瓶喂 80ml"}]
     assert FakeAsyncOpenAI.calls[1]["input"][-1] == {
         "type": "function_call_output",
         "call_id": "call_1",
         "output": '{"ok": true}',
     }
+    assert FakeAsyncOpenAI.calls[1]["reasoning"] == {"effort": "low"}
+    assert FakeAsyncOpenAI.calls[1]["store"] is False
+    assert FakeAsyncOpenAI.calls[1]["include"] == ["reasoning.encrypted_content"]
+
+
+def test_sdk_runner_routes_responses_function_call_by_namespace_and_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_openai = types.ModuleType("openai")
+    fake_openai.__spec__ = ModuleSpec("openai", loader=None)
+    fake_openai.AsyncOpenAI = FakeAsyncOpenAI
+    monkeypatch.setitem(sys.modules, "openai", fake_openai)
+    FakeAsyncOpenAI.reset(
+        [
+            FakeOpenAIResponse(
+                id="resp_1",
+                output=[
+                    {
+                        "type": "function_call",
+                        "namespace": "milk_records",
+                        "name": "read_status",
+                        "call_id": "call_1",
+                        "arguments": "{}",
+                    }
+                ],
+            ),
+            FakeOpenAIResponse(
+                id="resp_2",
+                output=[
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": "已读取。"}],
+                    }
+                ],
+                output_text="已读取。",
+            ),
+        ]
+    )
+    invoked: list[str] = []
+
+    async def invoke_json(args_json: str) -> str:
+        invoked.append("milk")
+        return '{"status":"ok"}'
+
+    async def conflicting_invoke_json(args_json: str) -> str:
+        invoked.append("device")
+        return '{"status":"wrong"}'
+
+    request = SdkNodeRequest(
+        run_id="run_1",
+        thread_id="thread_1",
+        actor_user_id="user_1",
+        instructions="Use the requested namespace.",
+        model_input=[{"role": "user", "content": "读取奶量状态"}],
+        tool_namespaces=(
+            SdkToolNamespace(
+                name="milk_records",
+                description="奶量记录工具。",
+                tool_names=("milk_records.read_status",),
+            ),
+            SdkToolNamespace(
+                name="device_records",
+                description="设备记录工具。",
+                tool_names=("device_records.read_status",),
+            ),
+        ),
+        tool_search_enabled=True,
+        tools=(
+            SdkToolDefinition(
+                contract_name="milk_records.read_status",
+                sdk_name="read_status",
+                description="读取奶量状态。",
+                params_json_schema={"type": "object", "properties": {}},
+                invoke_json=invoke_json,
+                namespace_name="milk_records",
+            ),
+            SdkToolDefinition(
+                contract_name="device_records.read_status",
+                sdk_name="read_status",
+                description="读取设备状态。",
+                params_json_schema={"type": "object", "properties": {}},
+                invoke_json=conflicting_invoke_json,
+                namespace_name="device_records",
+            ),
+        ),
+    )
+
+    result = asyncio.run(
+        OpenAIAgentsSdkRunner(model="gpt-test", use_responses=True).run_reasoning(request)
+    )
+
+    assert result.final_text == "已读取。"
+    assert invoked == ["milk"]
+    assert result.tool_calls[0]["tool_name"] == "milk_records.read_status"
+
+
+def test_sdk_runner_uses_responses_backend_without_deferred_tools(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_openai = types.ModuleType("openai")
+    fake_openai.__spec__ = ModuleSpec("openai", loader=None)
+    fake_openai.AsyncOpenAI = FakeAsyncOpenAI
+    monkeypatch.setitem(sys.modules, "openai", fake_openai)
+    FakeAsyncOpenAI.reset(
+        [
+            FakeOpenAIResponse(
+                id="resp_1",
+                output=[
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": "hello"}],
+                    }
+                ],
+                output_text="hello",
+            )
+        ]
+    )
+    request = SdkNodeRequest(
+        run_id="run_1",
+        thread_id="thread_1",
+        actor_user_id="user_1",
+        instructions="Be concise.",
+        model_input=[{"role": "user", "content": "hello"}],
+    )
+
+    result = asyncio.run(OpenAIAgentsSdkRunner(model="gpt-test", use_responses=True).run_reasoning(request))
+
+    assert result.final_text == "hello"
+    assert len(FakeAsyncOpenAI.calls) == 1
 
 
 def test_sdk_runner_streams_responses_api_text_deltas(monkeypatch: pytest.MonkeyPatch) -> None:
