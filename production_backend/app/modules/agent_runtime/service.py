@@ -145,6 +145,7 @@ class AgentRuntimeService:
         )
         if self.controls is not None:
             await self.controls.set_active_run(thread_id=thread.id, run_id=run.id)
+            self._register_run_queue_wakeup(run_id=run.id)
         await self._complete_idempotency(idempotency_record=idempotency_record, response_ref=str(run.id))
         return run
 
@@ -502,6 +503,19 @@ class AgentRuntimeService:
     async def _complete_idempotency(self, *, idempotency_record: IdempotencyKey | None, response_ref: str) -> None:
         if idempotency_record is not None and self.idempotency_service is not None:
             await self.idempotency_service.mark_completed(record=idempotency_record, response_ref=response_ref)
+
+    def _register_run_queue_wakeup(self, *, run_id: UUID) -> None:
+        if self.controls is None:
+            return
+        notify_run_queued = getattr(self.controls, "notify_run_queued", None)
+        add_after_commit_callback = getattr(self.repository, "add_after_commit_callback", None)
+        if not callable(notify_run_queued) or not callable(add_after_commit_callback):
+            return
+
+        async def notify_after_commit() -> None:
+            await notify_run_queued(run_id=run_id)
+
+        add_after_commit_callback(notify_after_commit)
 
     async def _release_idempotency(self, *, idempotency_record: IdempotencyKey | None) -> None:
         if idempotency_record is not None and self.idempotency_service is not None:

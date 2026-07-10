@@ -30,6 +30,21 @@ def test_agent_run_controls_manage_active_run_cancel_and_cursor() -> None:
     assert asyncio.run(controls.get_stream_cursor(run_id=run_id)) is None
 
 
+def test_agent_run_controls_round_trips_queue_wakeup_signal() -> None:
+    redis = FakeRedis()
+    controls = AgentRunControls(redis)
+    run_id = uuid4()
+
+    async def exercise() -> str | None:
+        await controls.notify_run_queued(run_id=run_id)
+        return await controls.wait_for_run_queue_signal(timeout_seconds=0.01)
+
+    signal = asyncio.run(exercise())
+
+    assert signal == str(run_id)
+    assert redis.expired_keys == {"agent:run_queue:wakeup"}
+
+
 def test_agent_run_controls_lock_context_releases_owned_lock() -> None:
     redis = FakeRedis()
     controls = AgentRunControls(redis)
@@ -84,6 +99,8 @@ def test_agent_run_controls_lock_context_refreshes_owned_lock() -> None:
 class FakeRedis:
     def __init__(self) -> None:
         self.values = {}
+        self.lists = {}
+        self.expired_keys = set()
         self.set_count = 0
 
     async def set(self, key, value, *, ex=None, nx=False):
@@ -99,6 +116,28 @@ class FakeRedis:
     async def delete(self, key):
         self.values.pop(key, None)
         return 1
+
+    async def lpush(self, key, value):
+        values = self.lists.setdefault(key, [])
+        values.insert(0, str(value))
+        return len(values)
+
+    async def ltrim(self, key, start, end):
+        values = self.lists.get(key, [])
+        self.lists[key] = values[start : end + 1]
+        return True
+
+    async def expire(self, key, ttl_seconds):
+        self.expired_keys.add(key)
+        return True
+
+    async def blpop(self, key, timeout=0):
+        values = self.lists.get(key, [])
+        if values:
+            return key, values.pop(0)
+        if timeout:
+            await asyncio.sleep(timeout)
+        return None
 
     async def eval(self, script, numkeys, *keys_and_args):
         key = keys_and_args[0]

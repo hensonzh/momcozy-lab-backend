@@ -37,6 +37,9 @@ def test_agent_runtime_service_creates_run_with_thread_message_events_and_idempo
     assert repository.touched_updated_at is not None
     assert controls.active_run == (repository.thread.id, run.id)
     assert controls.stream_cursor == (run.id, 2)
+    assert controls.queued_run_ids == []
+    asyncio.run(repository.run_after_commit_callbacks())
+    assert controls.queued_run_ids == [run.id]
     assert idempotency_service.reserve_kwargs["scope"] == "agent.runs.create"
     assert idempotency_service.completed_response_ref == str(run.id)
 
@@ -311,6 +314,15 @@ class FakeAgentRuntimeRepository:
         self.safety_event = None
         self.touched_thread = None
         self.touched_updated_at = None
+        self.after_commit_callbacks = []
+
+    def add_after_commit_callback(self, callback):
+        self.after_commit_callbacks.append(callback)
+
+    async def run_after_commit_callbacks(self):
+        for callback in self.after_commit_callbacks:
+            await callback()
+        self.after_commit_callbacks.clear()
 
     async def create_thread(self, **kwargs):
         self.thread = _thread(owner_user_id=kwargs["owner_user_id"])
@@ -466,6 +478,7 @@ class FakeAgentRunControls:
         self.cancelled_run_id = None
         self.cleared_cancel_run_id = None
         self.stream_cursor = None
+        self.queued_run_ids = []
 
     async def set_active_run(self, *, thread_id, run_id):
         self.active_run = (thread_id, run_id)
@@ -481,3 +494,6 @@ class FakeAgentRunControls:
 
     async def set_stream_cursor(self, *, run_id, sequence):
         self.stream_cursor = (run_id, sequence)
+
+    async def notify_run_queued(self, *, run_id):
+        self.queued_run_ids.append(run_id)

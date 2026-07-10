@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Any, cast
 from uuid import UUID
@@ -7,6 +8,7 @@ from uuid import UUID
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ...infrastructure.db.session import add_after_commit_callback
 from .models import (
     ACTIVE_RUN_STATUSES,
     AgentAction,
@@ -30,6 +32,9 @@ from .models import (
 class AgentRuntimeRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    def add_after_commit_callback(self, callback: Callable[[], Awaitable[None]]) -> None:
+        add_after_commit_callback(self.session, callback)
 
     async def create_thread(
         self,

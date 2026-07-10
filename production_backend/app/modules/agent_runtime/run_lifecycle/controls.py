@@ -61,6 +61,23 @@ class AgentRunControls:
     async def clear_stream_cursor(self, *, run_id: UUID) -> None:
         await self.redis.delete(_stream_cursor_key(run_id))
 
+    async def notify_run_queued(self, *, run_id: UUID, ttl_seconds: int = 3600) -> None:
+        key = _run_queue_wakeup_key()
+        await self.redis.lpush(key, str(run_id))
+        await self.redis.ltrim(key, 0, 999)
+        await self.redis.expire(key, ttl_seconds)
+
+    async def wait_for_run_queue_signal(self, *, timeout_seconds: float) -> str | None:
+        if timeout_seconds <= 0:
+            return None
+        result = await self.redis.blpop(_run_queue_wakeup_key(), timeout=timeout_seconds)
+        if not result:
+            return None
+        _key, value = result
+        if isinstance(value, bytes):
+            return value.decode("utf-8")
+        return str(value)
+
     async def acquire_run_lock(self, *, run_id: UUID, owner_token: str, ttl_seconds: int = 60) -> bool:
         return bool(await self.redis.set(_run_lock_key(run_id), owner_token, ex=ttl_seconds, nx=True))
 
@@ -130,6 +147,10 @@ def _cancel_key(run_id: UUID) -> str:
 
 def _stream_cursor_key(run_id: UUID) -> str:
     return f"agent:run:{run_id}:stream_cursor"
+
+
+def _run_queue_wakeup_key() -> str:
+    return "agent:run_queue:wakeup"
 
 
 def _active_run_key(thread_id: UUID) -> str:

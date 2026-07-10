@@ -7,6 +7,7 @@ from production_backend.scripts.run_agent_worker import (
     AgentRunProcessResult,
     RunnableAgentRunRef,
     _process_with_concurrency,
+    _wait_for_next_agent_run_signal,
     _with_metrics,
     run_agent_worker,
 )
@@ -62,6 +63,24 @@ def test_runnable_agent_run_ref_carries_scanned_status() -> None:
     assert ref.status == "queued"
 
 
+def test_agent_worker_idle_wait_uses_queue_signal() -> None:
+    controls = FakeAgentRunControls()
+
+    asyncio.run(_wait_for_next_agent_run_signal(controls=controls, idle_seconds=0.25, stop_event=None))
+
+    assert controls.wait_timeouts == [0.25]
+
+
+def test_agent_worker_idle_wait_returns_immediately_when_stopping() -> None:
+    controls = FakeAgentRunControls()
+    stop_event = asyncio.Event()
+    stop_event.set()
+
+    asyncio.run(_wait_for_next_agent_run_signal(controls=controls, idle_seconds=30, stop_event=stop_event))
+
+    assert controls.wait_timeouts == []
+
+
 def test_worker_runtime_sleep_returns_when_stop_event_is_set() -> None:
     async def run() -> None:
         stop_event = asyncio.Event()
@@ -69,3 +88,12 @@ def test_worker_runtime_sleep_returns_when_stop_event_is_set() -> None:
         await sleep_until_stop(seconds=30, stop_event=stop_event)
 
     asyncio.run(run())
+
+
+class FakeAgentRunControls:
+    def __init__(self) -> None:
+        self.wait_timeouts = []
+
+    async def wait_for_run_queue_signal(self, *, timeout_seconds):
+        self.wait_timeouts.append(timeout_seconds)
+        return "run-id"

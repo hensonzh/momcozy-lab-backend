@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import json
 from collections.abc import Awaitable, Callable, Sequence
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, TypeVar
@@ -46,7 +47,7 @@ from production_backend.app.modules.profiles.service import ProfileService
 from production_backend.app.modules.records.repository import RecordsRepository
 from production_backend.app.modules.records.service import RecordsService
 from production_backend.app.workers.agent_run import AgentRunQueueWorkerResult, AgentRunWorker, TERMINAL_RUN_STATUSES
-from production_backend.scripts.worker_runtime import install_stop_signal_handlers, sleep_until_stop
+from production_backend.scripts.worker_runtime import install_stop_signal_handlers
 
 
 @dataclass(frozen=True)
@@ -120,7 +121,11 @@ async def run_agent_worker(
             if once or (max_cycles is not None and totals["cycles"] >= max_cycles):
                 return _with_metrics(totals, metrics)
             if result.scanned == 0:
-                await sleep_until_stop(seconds=resolved_settings.agent_runtime_worker_idle_seconds, stop_event=stop_event)
+                await _wait_for_next_agent_run_signal(
+                    controls=controls,
+                    idle_seconds=resolved_settings.agent_runtime_worker_idle_seconds,
+                    stop_event=stop_event,
+                )
     finally:
         await close_redis_client(redis_client)
         await db_engine.dispose()
@@ -160,6 +165,30 @@ async def _process_with_concurrency(
             return await processor(item)
 
     return list(await asyncio.gather(*(guarded(item) for item in items)))
+
+
+async def _wait_for_next_agent_run_signal(
+    *,
+    controls: AgentRunControls,
+    idle_seconds: float,
+    stop_event: asyncio.Event | None,
+) -> None:
+    if idle_seconds <= 0:
+        return
+    if stop_event is None:
+        await controls.wait_for_run_queue_signal(timeout_seconds=idle_seconds)
+        return
+    if stop_event.is_set():
+        return
+    signal_task = asyncio.create_task(controls.wait_for_run_queue_signal(timeout_seconds=idle_seconds))
+    stop_task = asyncio.create_task(stop_event.wait())
+    done, pending = await asyncio.wait({signal_task, stop_task}, return_when=asyncio.FIRST_COMPLETED)
+    for task in pending:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+    if signal_task in done:
+        await signal_task
 
 
 async def _process_agent_run(
