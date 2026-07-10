@@ -6,7 +6,7 @@ import json
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, TypeVar
 from uuid import UUID
 
 from production_backend.app.core.metrics import RequestMetrics
@@ -55,6 +55,15 @@ class AgentRunProcessResult:
     terminal: bool
 
 
+@dataclass(frozen=True)
+class RunnableAgentRunRef:
+    run_id: UUID
+    status: str
+
+
+ItemT = TypeVar("ItemT")
+
+
 async def run_agent_worker(
     *,
     settings: Settings | None = None,
@@ -79,16 +88,17 @@ async def run_agent_worker(
             if stop_event is not None and stop_event.is_set():
                 totals["status"] = "stopping"
                 return _with_metrics(totals, metrics)
-            run_ids = await _list_runnable_run_ids(
+            run_refs = await _list_runnable_run_refs(
                 session_factory=session_factory,
                 batch_limit=resolved_settings.agent_runtime_worker_batch_limit,
                 recover_running_older_than_seconds=resolved_settings.agent_runtime_recover_running_older_than_seconds,
             )
             run_results = await _process_with_concurrency(
-                items=run_ids,
+                items=run_refs,
                 concurrency=resolved_settings.agent_runtime_worker_concurrency,
-                processor=lambda run_id: _process_agent_run(
-                    run_id=run_id,
+                processor=lambda run_ref: _process_agent_run(
+                    run_id=run_ref.run_id,
+                    before_status=run_ref.status,
                     session_factory=session_factory,
                     settings=resolved_settings,
                     object_storage=object_storage,
@@ -98,7 +108,7 @@ async def run_agent_worker(
                 ),
             )
             result = AgentRunQueueWorkerResult(
-                scanned=len(run_ids),
+                scanned=len(run_refs),
                 processed=sum(1 for item in run_results if item.status_changed),
                 terminal=sum(1 for item in run_results if item.terminal),
             )
@@ -120,32 +130,32 @@ def _with_metrics(totals: dict[str, Any], metrics: RequestMetrics) -> dict[str, 
     return {**totals, "metrics": metrics.snapshot()}
 
 
-async def _list_runnable_run_ids(
+async def _list_runnable_run_refs(
     *,
     session_factory: Any,
     batch_limit: int,
     recover_running_older_than_seconds: int | None,
-) -> list[UUID]:
+) -> list[RunnableAgentRunRef]:
     async with session_factory() as session:
         repository = AgentRuntimeRepository(session)
         runs = await repository.list_runnable_runs(
             limit=batch_limit,
             recover_running_before=_recover_running_before(recover_running_older_than_seconds),
         )
-        return [run.id for run in runs]
+        return [RunnableAgentRunRef(run_id=run.id, status=run.status) for run in runs]
 
 
 async def _process_with_concurrency(
     *,
-    items: Sequence[UUID],
+    items: Sequence[ItemT],
     concurrency: int,
-    processor: Callable[[UUID], Awaitable[AgentRunProcessResult]],
+    processor: Callable[[ItemT], Awaitable[AgentRunProcessResult]],
 ) -> list[AgentRunProcessResult]:
     if not items:
         return []
     semaphore = asyncio.Semaphore(concurrency)
 
-    async def guarded(item: UUID) -> AgentRunProcessResult:
+    async def guarded(item: ItemT) -> AgentRunProcessResult:
         async with semaphore:
             return await processor(item)
 
@@ -155,6 +165,7 @@ async def _process_with_concurrency(
 async def _process_agent_run(
     *,
     run_id: UUID,
+    before_status: str,
     session_factory: Any,
     settings: Settings,
     object_storage: Any,
@@ -164,8 +175,6 @@ async def _process_agent_run(
 ) -> AgentRunProcessResult:
     async with session_factory() as session:
         repository = AgentRuntimeRepository(session)
-        before_run = await repository.get_run(run_id=run_id)
-        before_status = before_run.status if before_run is not None else ""
         audit_repository = AuditRepository(session)
         agent_runtime_service = AgentRuntimeService(
             repository=repository,

@@ -3,7 +3,13 @@ from uuid import uuid4
 
 from production_backend.app.core.metrics import RequestMetrics
 from production_backend.app.core.settings import Settings
-from production_backend.scripts.run_agent_worker import AgentRunProcessResult, _process_with_concurrency, _with_metrics, run_agent_worker
+from production_backend.scripts.run_agent_worker import (
+    AgentRunProcessResult,
+    RunnableAgentRunRef,
+    _process_with_concurrency,
+    _with_metrics,
+    run_agent_worker,
+)
 from production_backend.scripts.worker_runtime import sleep_until_stop
 
 
@@ -45,6 +51,15 @@ def test_agent_worker_process_bounds_in_process_run_concurrency() -> None:
     assert set(processed) == set(run_ids)
     assert len(results) == 5
     assert all(result.status_changed and result.terminal for result in results)
+
+
+def test_runnable_agent_run_ref_carries_scanned_status() -> None:
+    run_id = uuid4()
+
+    ref = RunnableAgentRunRef(run_id=run_id, status="queued")
+
+    assert ref.run_id == run_id
+    assert ref.status == "queued"
 
 
 def test_worker_runtime_sleep_returns_when_stop_event_is_set() -> None:
