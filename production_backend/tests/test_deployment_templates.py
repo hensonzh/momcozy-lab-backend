@@ -27,7 +27,7 @@ def test_compose_uses_local_infra_service_names_not_localhost() -> None:
     assert "postgres:16" in compose
     assert "redis:7" in compose
     assert "minio/minio:latest" in compose
-    assert "${MOMCOZY_BACKEND_ENV_FILE:-env/compose.local.env.example}" in compose
+    assert "${MOMCOZY_BACKEND_ENV_FILE:-env/compose.local.env}" in compose
     assert "postgresql+asyncpg://momcozy:momcozy@postgres:5432/momcozy" in env
     assert "redis://redis:6379/0" in env
     assert "localhost" not in env
@@ -63,7 +63,7 @@ def test_compose_environment_profile_examples_exist() -> None:
 def test_makefile_infra_checks_use_project_python_environment() -> None:
     makefile = (ROOT / "Makefile").read_text()
 
-    assert "COMPOSE_ENV_FILE ?= production_backend/env/compose.local.env.example" in makefile
+    assert "COMPOSE_ENV_FILE ?= production_backend/env/compose.local.env" in makefile
     assert "COMPOSE_ENV_FILE_FOR_COMPOSE = $(patsubst production_backend/%,%,$(COMPOSE_ENV_FILE))" in makefile
     assert "docker-compose.local.yml" in makefile
     assert "PYTHON ?= production_backend/.venv/bin/python" in makefile
@@ -106,10 +106,14 @@ def test_compose_env_declares_disabled_agent_worker_controls() -> None:
     assert "AGENT_RUNTIME_INTERRUPT_RUNNING_OLDER_THAN_SECONDS=900" in env
     assert "AGENT_MODEL_PROVIDER=openai" in env
     assert "OPENAI_API_KEY=" in env
-    assert "OPENAI_MODEL=gpt-5.5" in env
+    assert "OPENAI_MODEL=gpt-5.6-sol" in env
+    assert "OPENAI_REASONING_EFFORT=low" in env
+    assert "OPENAI_RESPONSES_STORE=false" in env
+    assert "OPENAI_AGENT_USE_RESPONSES=true" in env
     assert "MINIMAX_API_KEY=" in env
-    assert "MINIMAX_BASE_URL=https://api.minimax.io/v1" in env
+    assert "MINIMAX_BASE_URL=https://api.minimaxi.com/v1" in env
     assert "MINIMAX_MODEL=MiniMax-M3" in env
+    assert "AGENT_QUICK_REPLY_MODEL=gpt-5.6-luna" in env
     assert "VOICE_PROVIDER=disabled" in env
     assert "VOICE_API_KEY=" in env
     assert "VOICE_BASE_URL=wss://openspeech.bytedance.com/api/v3/tts/bidirection" in env
