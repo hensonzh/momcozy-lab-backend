@@ -50,10 +50,11 @@ def test_agent_run_worker_completes_run_with_assistant_message_events_and_lock()
     assert {event["optimistic"] for event in transient_stream.events} == {False}
 
 
-def test_agent_run_worker_attaches_quick_replies_to_final_assistant_message() -> None:
+def test_agent_run_worker_publishes_quick_replies_as_transient_event_only() -> None:
     repository = FakeAgentRuntimeRepository()
+    transient_stream = FakeTransientStream()
     assistant_message_id = uuid4()
-    replies = [{"text": "看今日安排"}, {"text": "先不保存"}, {"text": "换简单版"}]
+    replies = [{"id": "qr_1", "text": "看今日安排"}, {"id": "qr_2", "text": "先不保存"}, {"id": "qr_3", "text": "换简单版"}]
 
     async def handler(_run: AgentRun) -> AgentRunWorkerResult:
         return AgentRunWorkerResult(
@@ -63,20 +64,34 @@ def test_agent_run_worker_attaches_quick_replies_to_final_assistant_message() ->
             quick_replies=replies,
         )
 
-    worker = AgentRunWorker(repository=repository, handler=handler)
+    worker = AgentRunWorker(repository=repository, handler=handler, transient_stream=transient_stream)
 
     asyncio.run(worker.run_once(run_id=repository.run.id))
 
     assert repository.messages[0].id == assistant_message_id
     assert repository.messages[0].content == {
         "text": "已经整理好了。",
-        "quick_replies": replies,
     }
     assert repository.events[1].payload == {
         "message_id": str(assistant_message_id),
         "role": "assistant",
         "text": "已经整理好了。",
-        "quick_replies": replies,
+    }
+    assert repository.events[2].event_type == "run.completed"
+    assert [event["event_type"] for event in transient_stream.events] == [
+        "message.completed",
+        "quick_replies.updated",
+        "run.completed",
+    ]
+    assert transient_stream.events[1] == {
+        "event_type": "quick_replies.updated",
+        "payload": {
+            "message_id": str(assistant_message_id),
+            "replies": replies,
+        },
+        "dedupe_key": f"{repository.run.id}:quick_replies.updated:{assistant_message_id}",
+        "optimistic": False,
+        "durable": False,
     }
 
 

@@ -30,6 +30,7 @@ from production_backend.app.modules.agent_runtime.memory.service import AgentMem
 from production_backend.app.modules.agent_runtime.repository import AgentRuntimeRepository
 from production_backend.app.modules.agent_runtime.run_lifecycle.controls import AgentRunControls
 from production_backend.app.modules.agent_runtime.run_lifecycle.executor import AgentRuntimeExecutor
+from production_backend.app.modules.agent_runtime.run_lifecycle.quick_replies import QuickReplyFinalizer
 from production_backend.app.modules.agent_runtime.run_lifecycle.state_store import AgentRuntimeStateStore
 from production_backend.app.modules.agent_runtime.sdk import create_agent_sdk_runner
 from production_backend.app.modules.agent_runtime.service import AgentRuntimeService
@@ -309,6 +310,15 @@ async def _process_agent_run(
         )
         checkpoint_store = AgentGraphCheckpointStore(repository=repository)
         sdk_runner = create_agent_sdk_runner(settings=settings, metrics=metrics)
+        quick_reply_runner = create_agent_sdk_runner(
+            settings=settings,
+            metrics=metrics,
+            trace_enabled=False,
+            model=settings.agent_quick_reply_model or None,
+            max_turns=1,
+            timeout_seconds=settings.agent_quick_reply_timeout_seconds,
+            metrics_node_name="quick_reply_finalizer",
+        )
         runtime_executor = AgentRuntimeExecutor(
             repository=repository,
             checkpoint_store=checkpoint_store,
@@ -319,6 +329,7 @@ async def _process_agent_run(
             memory_service=memory_service,
             business_facts_projector=BusinessFactsProjector(handlers=tool_handlers),
             transient_stream=transient_stream,
+            quick_reply_finalizer=QuickReplyFinalizer(sdk_runner=quick_reply_runner),
             sdk_runner=sdk_runner,
             object_storage=object_storage,
             max_inline_artifact_payload_bytes=settings.agent_runtime_max_inline_payload_bytes,

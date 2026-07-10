@@ -15,7 +15,7 @@ def test_sanitize_agent_response_text_removes_service_skill_json_after_text() ->
     assert result.quick_replies == []
 
 
-def test_sanitize_agent_response_text_extracts_quick_replies_from_json_block() -> None:
+def test_sanitize_agent_response_text_removes_quick_replies_json_block_without_extracting_ui_state() -> None:
     result = sanitize_agent_response_text(
         """
 已经整理好了。
@@ -26,7 +26,7 @@ def test_sanitize_agent_response_text_extracts_quick_replies_from_json_block() -
     )
 
     assert result.text == "已经整理好了。"
-    assert result.quick_replies == [{"text": "继续聊这个"}, {"text": "给我更多细节"}, {"text": "换个方向"}]
+    assert result.quick_replies == []
 
 
 def test_sanitize_agent_response_text_suppresses_partial_structured_json() -> None:

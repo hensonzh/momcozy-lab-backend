@@ -81,6 +81,8 @@ class Settings:
     openai_agent_timeout_seconds: int = 60
     openai_agent_trace_enabled: bool = False
     openai_agent_prompt_version: str = "momcozy-agent-prompt-v1"
+    agent_quick_reply_model: str = ""
+    agent_quick_reply_timeout_seconds: float = 1.2
     voice_provider: str = "disabled"
     voice_api_key: str = ""
     voice_app_id: str = ""
@@ -162,6 +164,11 @@ class Settings:
             openai_agent_timeout_seconds=_env_int("OPENAI_AGENT_TIMEOUT_SECONDS", cls.openai_agent_timeout_seconds),
             openai_agent_trace_enabled=_env_bool("OPENAI_AGENT_TRACE_ENABLED", cls.openai_agent_trace_enabled),
             openai_agent_prompt_version=_env("OPENAI_AGENT_PROMPT_VERSION", cls.openai_agent_prompt_version),
+            agent_quick_reply_model=_env("AGENT_QUICK_REPLY_MODEL", cls.agent_quick_reply_model),
+            agent_quick_reply_timeout_seconds=_env_float(
+                "AGENT_QUICK_REPLY_TIMEOUT_SECONDS",
+                cls.agent_quick_reply_timeout_seconds,
+            ),
             voice_provider=_env("VOICE_PROVIDER", cls.voice_provider).lower(),
             voice_api_key=_env_first(
                 ("VOICE_API_KEY", "VOLC_TTS_API_KEY", "VOLC_REALTIME_VOICE_API_KEY", "VOLCENGINE_TTS_API_KEY"),
@@ -267,6 +274,8 @@ class Settings:
             errors.append("OPENAI_AGENT_PROMPT_VERSION is required")
         if len(self.openai_agent_prompt_version) > 80:
             errors.append("OPENAI_AGENT_PROMPT_VERSION must be at most 80 characters")
+        if self.agent_quick_reply_timeout_seconds <= 0:
+            errors.append("AGENT_QUICK_REPLY_TIMEOUT_SECONDS must be positive")
         if self.voice_provider not in SUPPORTED_VOICE_PROVIDERS:
             errors.append(f"VOICE_PROVIDER must be one of {', '.join(sorted(SUPPORTED_VOICE_PROVIDERS))}")
         if self.voice_provider in {"doubao", "volcengine"} and not self.voice_api_key and not (self.voice_app_id and self.voice_access_key):

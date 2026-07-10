@@ -124,9 +124,8 @@ def test_service_skills_do_not_redeclare_global_prompt_ownership() -> None:
         "## 全局人设",
         "你叫 CozyMate",
         "默认回复要短",
-        "每轮最终回复后都要展示快捷输入",
-        "工具结果只代表事实、资源、产物、动作和状态",
-        "不要依赖供应商会话状态",
+        "是否加载 skill，只根据用户当前意图",
+        "工具结果是事实、校验、候选方案或执行结果",
         "不要调用 load_skill、read_skill_file、旧版 namespace",
     )
 
@@ -224,16 +223,15 @@ def test_static_prompts_keep_runtime_boundaries_and_legacy_style() -> None:
     assert "温柔不啰嗦，默认极简、自然聊天" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "默认回复要短：优先 1-3 句" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "不要先输出用户可见的过渡说明或中间解释" in DEFAULT_STABLE_SYSTEM_PROMPT
-    assert "每轮最终回复后都要展示快捷输入" in DEFAULT_STABLE_SYSTEM_PROMPT
-    assert "使用 `ui_quick_replies_create` 创建" in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert "使用 `ui_quick_replies_create` 创建" not in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "runtime_context" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "当前可见工具" in DEFAULT_STABLE_SYSTEM_PROMPT
-    assert "不要依赖供应商会话状态" in DEFAULT_STABLE_SYSTEM_PROMPT
-    assert "不要调用 load_skill、read_skill_file、旧版 namespace" in DEFAULT_STABLE_SYSTEM_PROMPT
-    assert "不要向用户暴露内部服务技能名称" in DEFAULT_STABLE_SYSTEM_PROMPT
-    assert "不要编造已执行" in DEFAULT_STABLE_SYSTEM_PROMPT
-    assert "工具结果只代表事实、资源、产物、动作和状态" in DEFAULT_STABLE_SYSTEM_PROMPT
-    assert "不能声称已直接应用" in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert "如果当前轮需要进入某个服务技能流程" in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert "必须重新调用 `load_service_skill`" in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert "read_skill_file" not in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert "旧版 namespace" not in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert "工具结果是事实、校验、候选方案或执行结果" in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert "不重复工具产物主体内容" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "## 可用 Skill" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "skill_manifests:" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert '"id": "birth-prep"' in DEFAULT_STABLE_SYSTEM_PROMPT
@@ -788,7 +786,7 @@ def _code_span_references(text: str) -> list[str]:
 def test_context_builder_projects_dynamic_context_after_selected_history() -> None:
     assert "CozyMate" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "你叫 CozyMate，来自 Momcozy 团队。" in DEFAULT_STABLE_SYSTEM_PROMPT
-    assert "供应商会话状态" in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert "是否加载 skill，只根据用户当前意图" in DEFAULT_STABLE_SYSTEM_PROMPT
 
     model_input = ModelInputBuilder().build(
         projection=ContextProjection(

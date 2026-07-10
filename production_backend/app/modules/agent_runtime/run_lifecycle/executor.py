@@ -66,20 +66,14 @@ from ..sdk import (
     sdk_tool_name,
 )
 from .execution import AgentRunExecutionResult
+from .quick_replies import QuickReplyFinalizer
 from .state_store import AgentRuntimeStateStore
 
 
 LOAD_SERVICE_SKILL_TOOL_NAME = "load_service_skill"
 LOGGER = logging.getLogger("production_backend.agent_runtime.executor")
 QUICK_REPLIES_TOOL_NAME = "ui_quick_replies_create"
-FORM_LIKE_TOOL_NAMES = frozenset(
-    {
-        "birth_plan_form_create",
-        "hospital_bag_form_create",
-        "support.ticket.propose",
-    }
-)
-FORM_LIKE_ARTIFACT_TYPES = frozenset({"form", "support_ticket", "support_ticket_draft"})
+MAIN_MODEL_EXCLUDED_TOOL_NAMES = frozenset({QUICK_REPLIES_TOOL_NAME})
 LOAD_SERVICE_SKILL_INPUT_SCHEMA: dict[str, Any] = {
     "title": "LoadServiceSkillInput",
     "type": "object",
@@ -155,6 +149,7 @@ class AgentRuntimeExecutor:
         service_skill_registry: AgentServiceSkillRegistry | None = None,
         business_facts_projector: BusinessFactsProjector | None = None,
         transient_stream: AgentTransientStream | None = None,
+        quick_reply_finalizer: QuickReplyFinalizer | None = None,
         input_builder: ModelInputBuilder | None = None,
         config: AgentRuntimeExecutorConfig | None = None,
         object_storage: ObjectStorage | None = None,
@@ -175,6 +170,7 @@ class AgentRuntimeExecutor:
         self.service_skill_registry = service_skill_registry or default_service_skill_registry()
         self.business_facts_projector = business_facts_projector
         self.transient_stream = transient_stream
+        self.quick_reply_finalizer = quick_reply_finalizer
         self.input_builder = input_builder or ModelInputBuilder()
         self.config = config or AgentRuntimeExecutorConfig()
         self.object_storage = object_storage
@@ -182,8 +178,6 @@ class AgentRuntimeExecutor:
         self.clock = clock or _utcnow
         self._run_loaded_service_skill_ids: dict[UUID, set[str]] = {}
         self._run_assistant_message_ids: dict[UUID, UUID] = {}
-        self._run_quick_replies: dict[UUID, list[dict[str, Any]]] = {}
-        self._run_suppress_quick_replies: set[UUID] = set()
         self._run_text_stream_buffers: dict[UUID, str] = {}
         self._run_text_stream_emitted: dict[UUID, str] = {}
 
@@ -197,8 +191,6 @@ class AgentRuntimeExecutor:
             raise ApiError(code="runtime_graph_mismatch", message="Run runtime pattern does not match graph version.", status=409)
         self._run_assistant_message_ids[run.id] = uuid4()
         self._run_loaded_service_skill_ids[run.id] = set()
-        self._run_quick_replies[run.id] = []
-        self._run_suppress_quick_replies.discard(run.id)
         self._run_text_stream_buffers[run.id] = ""
         self._run_text_stream_emitted[run.id] = ""
         try:
@@ -226,8 +218,6 @@ class AgentRuntimeExecutor:
         finally:
             self._run_assistant_message_ids.pop(run.id, None)
             self._run_loaded_service_skill_ids.pop(run.id, None)
-            self._run_quick_replies.pop(run.id, None)
-            self._run_suppress_quick_replies.discard(run.id)
             self._run_text_stream_buffers.pop(run.id, None)
             self._run_text_stream_emitted.pop(run.id, None)
 
@@ -291,7 +281,11 @@ class AgentRuntimeExecutor:
         if self.tool_executor is None:
             business_tool_names: tuple[str, ...] = ()
         else:
-            business_tool_names = self.tool_registry.names_for_sdk()
+            business_tool_names = tuple(
+                tool_name
+                for tool_name in self.tool_registry.names_for_sdk()
+                if tool_name not in MAIN_MODEL_EXCLUDED_TOOL_NAMES
+            )
         tool_names = (LOAD_SERVICE_SKILL_TOOL_NAME, *business_tool_names)
         return _AgentTurnToolScope(tool_namespaces=tool_namespaces, tool_names=tool_names)
 
@@ -436,9 +430,14 @@ class AgentRuntimeExecutor:
             turn_context=turn_context,
             final_text=final_text,
         )
-        quick_replies = [] if run.id in self._run_suppress_quick_replies else list(self._run_quick_replies.get(run.id, []))
-        if not quick_replies and run.id not in self._run_suppress_quick_replies:
-            quick_replies = list(sanitized_response.quick_replies)
+        quick_reply_started_at = perf_counter()
+        quick_replies = await self._generate_quick_replies(
+            run=run,
+            turn_context=turn_context,
+            final_text=final_text,
+            artifacts=list(result.artifacts or []),
+        )
+        finish_timings_ms["quick_reply_finalizer"] = _elapsed_ms(quick_reply_started_at)
         self._log_executor_timing(
             run=run,
             status="completed",
@@ -483,8 +482,6 @@ class AgentRuntimeExecutor:
 
     async def _persist_artifacts_from_result(self, *, run: AgentRun, artifacts: list[dict[str, Any]]) -> None:
         for artifact_payload in artifacts:
-            if _is_form_like_artifact_type(_text(artifact_payload, "artifact_type")):
-                self._run_suppress_quick_replies.add(run.id)
             raw_payload_ref = _text(artifact_payload, "raw_payload_ref")
             externalized_payload = await maybe_externalize_json_payload(
                 payload=_dict(artifact_payload, "payload"),
@@ -614,17 +611,30 @@ class AgentRuntimeExecutor:
             call_id=f"sdk-{sdk_name}-{uuid4().hex}",
             args=args,
         )
-        self._capture_tool_output_side_effects(run=run, tool_name=contract_name, safe_output=result.safe_output)
         await self._append_progress(run=run, phase="model_reasoning_after_tool", label="我接着处理下一步")
         return json.dumps(result.safe_output, sort_keys=True)
 
-    def _capture_tool_output_side_effects(self, *, run: AgentRun, tool_name: str, safe_output: dict[str, Any]) -> None:
-        if tool_name == QUICK_REPLIES_TOOL_NAME:
-            replies = _quick_replies_from_tool_output(safe_output)
-            if replies:
-                self._run_quick_replies[run.id] = replies
-        if tool_name in FORM_LIKE_TOOL_NAMES or _contains_form_like_artifact(safe_output):
-            self._run_suppress_quick_replies.add(run.id)
+    async def _generate_quick_replies(
+        self,
+        *,
+        run: AgentRun,
+        turn_context: _AgentTurnContext,
+        final_text: str,
+        artifacts: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        if self.quick_reply_finalizer is None:
+            return []
+        try:
+            return await self.quick_reply_finalizer.generate(
+                run=run,
+                messages=turn_context.messages,
+                current_message=turn_context.current_message,
+                final_text=final_text,
+                artifacts=artifacts,
+            )
+        except Exception:
+            LOGGER.warning("Failed to generate quick replies.", exc_info=True)
+            return []
 
     async def _invoke_load_service_skill_tool(self, *, run: AgentRun, args: dict[str, Any]) -> dict[str, Any]:
         raw_skill_id = _text(args, "service_skill_id") or _text(args, "skill_id")
@@ -1558,40 +1568,6 @@ def _text(payload: dict[str, Any], key: str) -> str:
 def _dict(payload: dict[str, Any], key: str) -> dict[str, Any]:
     value = payload.get(key)
     return dict(value) if isinstance(value, dict) else {}
-
-
-def _quick_replies_from_tool_output(payload: dict[str, Any]) -> list[dict[str, Any]]:
-    raw_replies = payload.get("quick_replies")
-    if not isinstance(raw_replies, list):
-        return []
-    replies: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for item in raw_replies:
-        if not isinstance(item, dict):
-            continue
-        text = str(item.get("text") or "").strip()
-        if not text or text in seen:
-            continue
-        seen.add(text)
-        replies.append({"text": text})
-    return replies if len(replies) == 3 else []
-
-
-def _contains_form_like_artifact(payload: dict[str, Any]) -> bool:
-    artifact_type = _text(payload, "artifact_type")
-    if _is_form_like_artifact_type(artifact_type):
-        return True
-    artifact = payload.get("artifact")
-    if isinstance(artifact, dict) and _is_form_like_artifact_type(_text(artifact, "artifact_type")):
-        return True
-    artifacts = payload.get("artifacts")
-    if isinstance(artifacts, list):
-        return any(isinstance(item, dict) and _is_form_like_artifact_type(_text(item, "artifact_type")) for item in artifacts)
-    return False
-
-
-def _is_form_like_artifact_type(artifact_type: str) -> bool:
-    return str(artifact_type or "").strip() in FORM_LIKE_ARTIFACT_TYPES
 
 
 def _tool_live_dedupe_key(*, run_id: UUID, event_type: str, payload: dict[str, Any]) -> str:

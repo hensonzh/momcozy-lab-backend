@@ -187,8 +187,6 @@ class AgentRunWorker:
         if result.status == "completed":
             if result.final_text:
                 content: dict[str, Any] = {"text": result.final_text}
-                if result.quick_replies:
-                    content["quick_replies"] = result.quick_replies
                 message = await self.repository.create_message(
                     message_id=result.assistant_message_id,
                     thread_id=run.thread_id,
@@ -203,13 +201,13 @@ class AgentRunWorker:
                     "role": "assistant",
                     "text": result.final_text,
                 }
-                if result.quick_replies:
-                    payload["quick_replies"] = result.quick_replies
                 await self._append_event(
                     run=run,
                     event_type="message.completed",
                     payload=payload,
                 )
+                if result.quick_replies:
+                    await self._publish_quick_replies(run=run, message_id=message.id, quick_replies=result.quick_replies)
             completed = await self.repository.mark_run_completed(run=run, completed_at=_utcnow())
             await self._append_event(run=completed, event_type="run.completed", payload={})
             await self._clear_controls(completed)
@@ -264,6 +262,20 @@ class AgentRunWorker:
             )
         except Exception:
             LOGGER.warning("Failed to publish durable live agent event.", exc_info=True)
+
+    async def _publish_quick_replies(self, *, run: AgentRun, message_id: UUID, quick_replies: list[dict[str, Any]]) -> None:
+        await self.event_publisher.publish_application_event(
+            thread_id=run.thread_id,
+            run_id=run.id,
+            event_type="quick_replies.updated",
+            payload={
+                "message_id": str(message_id),
+                "replies": quick_replies,
+            },
+            dedupe_key=f"{run.id}:quick_replies.updated:{message_id}",
+            optimistic=False,
+            durable=False,
+        )
 
     async def _clear_controls(self, run: AgentRun) -> None:
         if self.controls is None:

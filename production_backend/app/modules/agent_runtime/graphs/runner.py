@@ -103,7 +103,6 @@ class AgentRuntimeGraphRunner:
                 "pending_action_id": state.get("pending_action_id"),
                 "final_message_id": state.get("final_message_id"),
                 "assistant_message_id": state.get("assistant_message_id"),
-                "quick_reply_count": len(state.get("quick_replies", [])),
                 "outcome_status": state.get("outcome_status", ""),
             },
         )

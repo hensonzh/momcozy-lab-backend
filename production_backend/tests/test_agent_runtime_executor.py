@@ -21,6 +21,7 @@ from production_backend.app.modules.agent_runtime.models import (
 from production_backend.app.modules.agent_runtime.event_stream.sink import AgentEventSink
 from production_backend.app.modules.agent_runtime.agents.main_coordinator_agent import ServiceSkillId
 from production_backend.app.modules.agent_runtime.run_lifecycle.executor import AgentRuntimeExecutor
+from production_backend.app.modules.agent_runtime.run_lifecycle.quick_replies import QuickReplyFinalizer
 from production_backend.app.modules.agent_runtime.sdk import (
     OpenAIAgentsSdkRunner,
     SdkNodeRequest,
@@ -492,7 +493,6 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
         "records_pumping_record_propose",
         "records_pumping_record_delete_propose",
         "support_ticket_propose",
-        "ui_quick_replies_create",
     )
     assert backend.tool_schemas["hospital_bag_card_create"]["additionalProperties"] is True
     assert backend.tool_schemas["hospital_bag_card_create"]["properties"]["confirmed_form_data"]["type"] == "object"
@@ -527,8 +527,6 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert backend.tool_schemas["profile_read"]["additionalProperties"] is False
     assert backend.tool_schemas["profile_read"]["properties"] == {}
     assert backend.tool_schemas["profile_update"]["properties"]["age"]["maximum"] == 70
-    assert backend.tool_schemas["ui_quick_replies_create"]["required"] == ["replies"]
-    assert backend.tool_schemas["ui_quick_replies_create"]["properties"]["replies"]["maxItems"] == 3
     assert backend.tool_schemas["records_feeding_record_propose"]["required"] == ["feed_time", "feed_type"]
     assert backend.tool_schemas["records_feeding_record_delete_propose"]["required"] == ["record_id"]
     assert backend.tool_schemas["records_growth_read"]["properties"]["limit"]["maximum"] == 20
@@ -584,7 +582,6 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     ]
     assert backend.tool_namespace_by_contract["profile.read"] == ""
     assert backend.tool_namespace_by_contract["profile_update"] == ""
-    assert backend.tool_namespace_by_contract["ui_quick_replies_create"] == ""
     assert backend.tool_namespace_by_contract["business.context.read"] == ""
     assert backend.tool_namespace_by_contract["files.vision_summary.read"] == ""
     assert backend.tool_namespace_by_contract["records.milk_status.read"] == "milk_management"
@@ -630,32 +627,26 @@ def test_agent_runtime_executor_allows_service_tool_without_skill_load() -> None
     assert tool_executor.calls[0]["args"] == {}
 
 
-def test_agent_runtime_executor_collects_quick_replies_for_final_message() -> None:
+def test_agent_runtime_executor_generates_quick_replies_with_finalizer() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)
-    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="给我三个下一步选项", sequence=1)
-    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
-    replies = [{"text": "看今日安排"}, {"text": "先不保存"}, {"text": "换简单版"}]
-    tool_executor = FakeToolExecutor(
-        safe_output={
-            "status": "quick_replies_ready",
-            "quick_replies": replies,
-            "side_effect_performed": False,
-        }
-    )
+    prior_user = _message(thread_id=thread_id, run_id=uuid4(), role="user", text="我想看看今天奶量", sequence=1)
+    prior_assistant = _message(thread_id=thread_id, run_id=uuid4(), role="assistant", text="我帮你看一下。", sequence=2)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="那下一步呢？", sequence=3)
+    repository = FakeRuntimeRepository(messages=[prior_user, prior_assistant, current_user], current_message=current_user)
     transient_stream = FakeTransientStream()
     backend = ScriptedSdkBackend(
         [
             scripted_sdk_response(
                 final_text="已经整理好了。",
                 text_deltas=("已经", "整理好了。"),
-                tool_invocations=(
-                    scripted_tool_invocation(
-                        "ui_quick_replies_create",
-                        {"replies": replies},
-                    ),
-                ),
-                expected_available_tools=("ui_quick_replies_create",),
+            )
+        ]
+    )
+    quick_reply_backend = ScriptedSdkBackend(
+        [
+            scripted_sdk_response(
+                final_text='{"replies":[{"text":"看今日安排"},{"text":"先不保存"},{"text":"换简单版"}]}',
             )
         ]
     )
@@ -664,22 +655,30 @@ def test_agent_runtime_executor_collects_quick_replies_for_final_message() -> No
         AgentRuntimeExecutor(
             repository=repository,
             sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
-            tool_executor=tool_executor,
+            quick_reply_finalizer=QuickReplyFinalizer(sdk_runner=OpenAIAgentsSdkRunner(backend=quick_reply_backend)),
             transient_stream=transient_stream,
         ).execute(run=run)
     )
 
     assert result.status == "completed"
     assert result.assistant_message_id is not None
-    assert result.quick_replies == replies
-    assert tool_executor.calls[0]["tool_name"] == "ui_quick_replies_create"
+    assert result.quick_replies == [
+        {"id": "qr_1", "text": "看今日安排"},
+        {"id": "qr_2", "text": "先不保存"},
+        {"id": "qr_3", "text": "换简单版"},
+    ]
+    assert backend.requests[0].tool_names == ("load_service_skill",)
+    assert quick_reply_backend.requests[0].tool_names == ()
+    finalizer_payload = json.loads(quick_reply_backend.requests[0].model_input[0]["content"])
+    assert finalizer_payload["assistant_final_text"] == "已经整理好了。"
+    assert [item["text"] for item in finalizer_payload["dialogue"]] == ["我想看看今天奶量", "我帮你看一下。", "那下一步呢？"]
     assert transient_stream.deltas == [
         {"thread_id": thread_id, "run_id": run.id, "delta": "已经", "message_stream_id": str(result.assistant_message_id)},
         {"thread_id": thread_id, "run_id": run.id, "delta": "整理好了。", "message_stream_id": str(result.assistant_message_id)},
     ]
 
 
-def test_agent_runtime_executor_extracts_quick_replies_from_final_text_json() -> None:
+def test_agent_runtime_executor_does_not_use_quick_replies_from_final_text_json() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)
     current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="给我三个下一步选项", sequence=1)
@@ -704,7 +703,7 @@ def test_agent_runtime_executor_extracts_quick_replies_from_final_text_json() ->
 
     assert result.status == "completed"
     assert result.final_text == "已经整理好了。"
-    assert result.quick_replies == [{"text": "继续聊这个"}, {"text": "给我更多细节"}, {"text": "换个方向"}]
+    assert result.quick_replies == []
 
 
 def test_agent_runtime_executor_suppresses_streamed_structured_json_deltas() -> None:
