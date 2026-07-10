@@ -126,16 +126,14 @@ class OpenAIResponsesApiBackend:
 
         for _turn_index in range(self.max_turns):
             streamed_text = ""
-            emitted_stream = False
             if request.on_text_delta is not None and callable(stream_response):
-                latest_response, streamed_text, emitted_stream = await _create_response_streamed(
+                latest_response, streamed_text = await _create_response_streamed(
                     create_response=create_response,
                     stream_response=stream_response,
                     model=self.model,
                     instructions=request.instructions,
                     context=context,
                     tools_payload=tools_payload,
-                    on_text_delta=request.on_text_delta,
                 )
             else:
                 latest_response = await create_response(
@@ -151,8 +149,7 @@ class OpenAIResponsesApiBackend:
             if not function_calls:
                 final_text = _response_output_text(latest_response, output_items=output_items) or streamed_text
                 sanitized_text = _sanitize_model_text(final_text)
-                if request.on_text_delta is not None and sanitized_text and not emitted_stream:
-                    await request.on_text_delta(sanitized_text)
+                await _emit_buffered_text_deltas(sanitized_text, request.on_text_delta)
                 return SdkNodeResult(final_text=sanitized_text, tool_calls=observed_tool_calls)
 
             context.extend(output_items)
@@ -430,8 +427,7 @@ async def _create_response_streamed(
     instructions: str,
     context: list[Any],
     tools_payload: list[dict[str, Any]],
-    on_text_delta: SdkTextDeltaHandler,
-) -> tuple[Any | None, str, bool]:
+) -> tuple[Any | None, str]:
     kwargs = {
         "model": model,
         "instructions": instructions,
@@ -439,33 +435,32 @@ async def _create_response_streamed(
         "tools": tools_payload,
         "parallel_tool_calls": False,
     }
-    response, streamed_text = await _consume_response_stream(await _maybe_await(stream_response(**kwargs)), on_text_delta)
-    if response is None and not streamed_text:
+    response, streamed_text = await _consume_response_stream(await _maybe_await(stream_response(**kwargs)))
+    if response is None and (not streamed_text or tools_payload):
         response = await create_response(**kwargs)
-    return response, streamed_text, bool(streamed_text)
+    return response, streamed_text
 
 
-async def _consume_response_stream(stream: Any, on_text_delta: SdkTextDeltaHandler) -> tuple[Any | None, str]:
+async def _consume_response_stream(stream: Any) -> tuple[Any | None, str]:
     response: Any | None = None
     raw_text = ""
     if hasattr(stream, "__aenter__"):
         async with stream as entered_stream:
-            response, raw_text = await _iterate_response_stream(entered_stream, on_text_delta)
+            response, raw_text = await _iterate_response_stream(entered_stream)
             if response is None:
                 response = await _stream_final_response(entered_stream)
         if response is None:
             response = await _stream_final_response(stream)
         return response, raw_text
-    response, raw_text = await _iterate_response_stream(stream, on_text_delta)
+    response, raw_text = await _iterate_response_stream(stream)
     if response is None:
         response = await _stream_final_response(stream)
     return response, raw_text
 
 
-async def _iterate_response_stream(stream: Any, on_text_delta: SdkTextDeltaHandler) -> tuple[Any | None, str]:
+async def _iterate_response_stream(stream: Any) -> tuple[Any | None, str]:
     response: Any | None = None
     raw_text = ""
-    emitted_text = ""
     stream_events = stream
     if not hasattr(stream_events, "__aiter__"):
         stream_events_factory = getattr(stream_events, "stream_events", None)
@@ -475,14 +470,6 @@ async def _iterate_response_stream(stream: Any, on_text_delta: SdkTextDeltaHandl
         delta = _text_delta_from_response_stream_event(event)
         if delta:
             raw_text += delta
-            sanitized_text = _sanitize_model_text(raw_text)
-            if sanitized_text.startswith(emitted_text):
-                sanitized_delta = sanitized_text[len(emitted_text) :]
-            else:
-                sanitized_delta = sanitized_text
-            if sanitized_delta:
-                await on_text_delta(sanitized_delta)
-                emitted_text = sanitized_text
         event_response = _response_from_response_stream_event(event)
         if event_response is not None:
             response = event_response
@@ -622,21 +609,25 @@ async def _run_streamed(
 ) -> SdkNodeResult:
     streamed = runner_cls.run_streamed(agent, model_input, **run_kwargs)
     raw_text = ""
-    emitted_text = ""
     async for event in streamed.stream_events():
         delta = _text_delta_from_stream_event(event)
         if delta:
             raw_text += delta
-            sanitized_text = _sanitize_model_text(raw_text)
-            if sanitized_text.startswith(emitted_text):
-                sanitized_delta = sanitized_text[len(emitted_text) :]
-            else:
-                sanitized_delta = sanitized_text
-            if sanitized_delta:
-                await on_text_delta(sanitized_delta)
-                emitted_text = sanitized_text
     final_output = getattr(streamed, "final_output", "")
-    return SdkNodeResult(final_text=_sanitize_model_text(str(final_output or "")))
+    sanitized_text = _sanitize_model_text(str(final_output or "") or raw_text)
+    await _emit_buffered_text_deltas(sanitized_text, on_text_delta)
+    return SdkNodeResult(final_text=sanitized_text)
+
+
+async def _emit_buffered_text_deltas(text: str, on_text_delta: SdkTextDeltaHandler | None) -> None:
+    if on_text_delta is None or not text:
+        return
+    for chunk in _text_delta_chunks(text):
+        await on_text_delta(chunk)
+
+
+def _text_delta_chunks(text: str, *, max_chars: int = 48) -> list[str]:
+    return [text[index : index + max_chars] for index in range(0, len(text), max_chars)]
 
 
 def _text_delta_from_stream_event(event: Any) -> str:

@@ -288,7 +288,7 @@ def test_default_service_skills_are_file_backed() -> None:
         assert service_skill.prompt_block().strip()
 
 
-def test_agent_runtime_executor_does_not_publish_model_loop_deltas_to_transient_stream() -> None:
+def test_agent_runtime_executor_publishes_final_text_deltas_to_transient_stream() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)
     current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="Stream please", sequence=1)
@@ -307,8 +307,11 @@ def test_agent_runtime_executor_does_not_publish_model_loop_deltas_to_transient_
     assert result.status == "completed"
     assert result.final_text == "hello"
     assert result.assistant_message_id is not None
-    assert backend.requests[0].on_text_delta is None
-    assert transient_stream.deltas == []
+    assert backend.requests[0].on_text_delta is not None
+    assert transient_stream.deltas == [
+        {"thread_id": thread_id, "run_id": run.id, "delta": "hel", "message_stream_id": str(result.assistant_message_id)},
+        {"thread_id": thread_id, "run_id": run.id, "delta": "lo", "message_stream_id": str(result.assistant_message_id)},
+    ]
     assert transient_stream.progresses == [
         {
             "thread_id": thread_id,

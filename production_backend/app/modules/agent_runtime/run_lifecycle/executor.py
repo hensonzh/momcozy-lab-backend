@@ -343,7 +343,7 @@ class AgentRuntimeExecutor:
                 prompt_version=run.prompt_version,
                 trace_id=run.trace_id,
                 service_skill_id=_routing_target_id(turn_context.routing_plan),
-                on_text_delta=None,
+                on_text_delta=self._text_delta_handler(run=run),
             )
         )
         turn_context.timings_ms["model_reasoning"] = _elapsed_ms(model_started_at)
