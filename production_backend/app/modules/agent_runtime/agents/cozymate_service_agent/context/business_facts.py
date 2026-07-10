@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
-from production_backend.app.modules.agent_runtime.agents.main_coordinator_agent import RoutingPlan, ServiceSkillId
+from ..service_skills import ServiceSkillId
 from production_backend.app.modules.auth import CurrentUser
 
 from ..tools import ToolHandlerContext
@@ -42,11 +42,10 @@ class BusinessFactsProjector:
         self.config = config or BusinessFactsProjectorConfig()
         self.clock = clock or _utcnow
 
-    async def project(self, *, actor: CurrentUser, run_id: UUID, routing_plan: RoutingPlan) -> dict[str, Any]:
-        skill_id = routing_plan.selected_service_skill_id
-        if skill_id is None:
+    async def project(self, *, actor: CurrentUser, run_id: UUID, service_skill_id: ServiceSkillId | None) -> dict[str, Any]:
+        if service_skill_id is None:
             return {}
-        sources = _sources_for_skill(skill_id=skill_id, config=self.config)
+        sources = _sources_for_skill(skill_id=service_skill_id, config=self.config)
         if not sources:
             return {}
 
@@ -54,7 +53,7 @@ class BusinessFactsProjector:
         facts: dict[str, Any] = {
             "schema_version": "v1",
             "loaded_at": loaded_at,
-            "service_skill_id": skill_id.value,
+            "service_skill_id": service_skill_id.value,
             "sources": [],
         }
 

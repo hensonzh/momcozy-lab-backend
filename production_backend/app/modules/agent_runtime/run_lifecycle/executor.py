@@ -26,6 +26,7 @@ from ..agents.cozymate_service_agent.skill_registry import (
     AgentServiceSkillRegistry,
     default_service_skill_registry,
 )
+from ..agents.cozymate_service_agent.service_skills import ServiceSkillId
 from ..agents.cozymate_service_agent.tools import (
     ToolContractRegistry,
     ToolExecutor,
@@ -37,10 +38,7 @@ from ..agents.cozymate_service_agent.tools import (
 from ..agents.cozymate_service_agent.tools.schemas import tool_input_schema
 from ..agents.main_coordinator_agent import (
     AgentId,
-    IntentItem,
     RoutingPlan,
-    RoutingSource,
-    ServiceSkillId,
     plan_current_request,
 )
 from ..event_stream.sink import AgentEventSink
@@ -297,11 +295,9 @@ class AgentRuntimeExecutor:
         tool_scope: _AgentTurnToolScope,
     ) -> _PreparedModelTurn:
         model_visible_state = _model_visible_state_projection(
-            service_skills=turn_context.service_skills,
             recent_loaded_service_skills=turn_context.recent_loaded_service_skills,
             resident_loaded_service_skill=turn_context.resident_loaded_service_skill,
             expired_loaded_service_skills=turn_context.expired_loaded_service_skills,
-            tool_names=tool_scope.tool_names,
             routing_plan=turn_context.routing_plan,
         )
         projection = ContextProjection(
@@ -345,7 +341,7 @@ class AgentRuntimeExecutor:
                 tools=self._sdk_tools(run=run, tool_names=tool_scope.tool_names, tool_namespaces=tool_scope.tool_namespaces),
                 prompt_version=run.prompt_version,
                 trace_id=run.trace_id,
-                service_skill_id=_routing_target_id(turn_context.routing_plan),
+                service_skill_id=_routing_target_agent_id(turn_context.routing_plan),
                 on_text_delta=self._text_delta_handler(run=run),
             )
         )
@@ -904,7 +900,7 @@ class AgentRuntimeExecutor:
             thread_id=run.thread_id,
             actor_user_id=run.actor_user_id,
             message_id=current_message.id,
-            selected_skill_id=_routing_target_id(routing_plan),
+            selected_skill_id=_routing_target_agent_id(routing_plan),
             routing_source=routing_plan.source.value,
             confidence=routing_plan.confidence,
             execution_mode=routing_plan.execution_mode,
@@ -913,7 +909,6 @@ class AgentRuntimeExecutor:
             safety_flags=list(routing_plan.safety_flags),
             needs_clarification=routing_plan.needs_clarification,
             tool_scope_version=_tool_scope_version_for_ledger(
-                routing_plan=routing_plan,
                 tool_executor_configured=self.tool_executor is not None,
             ),
         )
@@ -961,11 +956,10 @@ class AgentRuntimeExecutor:
     async def _fresh_business_facts_for_skill(self, *, run: AgentRun, skill_id: ServiceSkillId) -> dict[str, Any]:
         if self.business_facts_projector is None:
             return {}
-        routing_plan = _routing_plan_for_loaded_service_skill(skill_id)
         return await self.business_facts_projector.project(
             actor=_run_actor(run),
             run_id=run.id,
-            routing_plan=routing_plan,
+            service_skill_id=skill_id,
         )
 
     async def _upsert_run_summary(
@@ -1031,27 +1025,7 @@ def _history_messages_before(*, messages: list[AgentMessage], before_sequence: i
     ]
 
 
-def _routing_plan_for_loaded_service_skill(skill_id: ServiceSkillId) -> RoutingPlan:
-    return RoutingPlan(
-        target_kind="service_skill",
-        selected_agent_id=AgentId.COZYMATE_SERVICE_AGENT,
-        selected_service_skill_id=skill_id,
-        intents=[
-            IntentItem(
-                intent_type=f"{skill_id.value}_request",
-                service_skill_id=skill_id,
-            )
-        ],
-        execution_mode="passthrough",
-        confidence=1,
-        source=RoutingSource.PASSTHROUGH,
-        reason_codes=["model_loaded_service_skill"],
-    )
-
-
-def _routing_target_id(routing_plan: RoutingPlan) -> str:
-    if routing_plan.selected_service_skill_id is not None:
-        return routing_plan.selected_service_skill_id.value
+def _routing_target_agent_id(routing_plan: RoutingPlan) -> str:
     return routing_plan.selected_agent_id.value
 
 
@@ -1084,30 +1058,26 @@ def _load_service_skill_output(
 
 def _model_visible_state_projection(
     *,
-    service_skills: tuple[AgentServiceSkill, ...],
     recent_loaded_service_skills: list[dict[str, Any]],
     resident_loaded_service_skill: dict[str, Any] | None,
     expired_loaded_service_skills: list[dict[str, Any]],
-    tool_names: tuple[str, ...],
     routing_plan: RoutingPlan,
 ) -> dict[str, Any]:
     return {
-        "agent_mode": "single_main_agent",
+        "agent_mode": "single_downstream_agent",
         "agent_id": routing_plan.selected_agent_id.value,
-        "selected_service_skill_id": (
-            routing_plan.selected_service_skill_id.value if routing_plan.selected_service_skill_id is not None else None
-        ),
-        "loaded_service_skill_ids": [],
-        "available_service_skill_ids": [skill.service_skill_id for skill in service_skills],
-        "recent_loaded_service_skills": recent_loaded_service_skills,
-        "resident_loaded_service_skill": resident_loaded_service_skill,
-        "expired_loaded_service_skills": expired_loaded_service_skills,
-        "skill_loading": {
-            "mode": "model_tool_call",
-            "tool_name": LOAD_SERVICE_SKILL_TOOL_NAME,
-            "rule": "Call load_service_skill before following a service skill flow or using service-specific tools.",
+        "coordinator": {
+            "target_kind": routing_plan.target_kind,
+            "selected_agent_id": routing_plan.selected_agent_id.value,
+            "execution_mode": routing_plan.execution_mode,
+            "source": routing_plan.source.value,
+            "reason_codes": list(routing_plan.reason_codes),
         },
-        "visible_tool_count": len(tool_names),
+        "service_skill_context": {
+            "recent_loaded_service_skills": recent_loaded_service_skills,
+            "resident_loaded_service_skill": resident_loaded_service_skill,
+            "expired_loaded_service_skills": expired_loaded_service_skills,
+        },
         "execution_mode": "single",
         "needs_clarification": routing_plan.needs_clarification,
         "safety_flags": list(routing_plan.safety_flags),
@@ -1135,10 +1105,10 @@ def _artifact_event_payload(artifact: AgentArtifact) -> dict[str, Any]:
     return payload
 
 
-def _tool_scope_version_for_ledger(*, routing_plan: RoutingPlan, tool_executor_configured: bool) -> str:
+def _tool_scope_version_for_ledger(*, tool_executor_configured: bool) -> str:
     if not tool_executor_configured:
-        return "runtime_load_service_skill:v1"
-    return "runtime_load_service_skill+namespaced_tool_registry:v1"
+        return "agent_load_service_skill:v1"
+    return "agent_load_service_skill+namespaced_tool_registry:v1"
 
 
 def _sdk_tool_namespaces(tool_namespaces: tuple[ToolNamespace, ...]) -> tuple[SdkToolNamespace, ...]:

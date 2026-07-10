@@ -12,9 +12,9 @@ from production_backend.app.modules.agent_runtime.graphs import default_graph_re
 from production_backend.app.modules.agent_runtime.agents.main_coordinator_agent import (
     AgentId,
     RoutingSource,
-    ServiceSkillId,
     plan_current_request,
 )
+from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent import ServiceSkillId
 from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.prompts import (
     BASE_AGENT_INSTRUCTIONS,
     ContextProjection,
@@ -61,7 +61,8 @@ def test_main_coordinator_agent_owns_first_stage_plan() -> None:
 
     assert plan.target_kind == "agent"
     assert plan.selected_agent_id == AgentId.COZYMATE_SERVICE_AGENT
-    assert plan.selected_service_skill_id is None
+    assert "selected_service_skill_id" not in plan.model_dump()
+    assert plan.intents[0].agent_id == AgentId.COZYMATE_SERVICE_AGENT
     assert plan.execution_mode == "passthrough"
     assert plan.source == RoutingSource.PASSTHROUGH
     assert plan.reason_codes == ["default_to_cozymate"]
@@ -79,7 +80,7 @@ def test_main_coordinator_agent_keeps_service_skill_selection_model_driven() -> 
 
         assert plan.target_kind == "agent"
         assert plan.selected_agent_id == AgentId.COZYMATE_SERVICE_AGENT
-        assert plan.selected_service_skill_id is None
+        assert "selected_service_skill_id" not in plan.model_dump()
         assert plan.source == RoutingSource.PASSTHROUGH
         assert plan.reason_codes == ["default_to_cozymate"]
 
@@ -792,7 +793,10 @@ def test_context_builder_projects_dynamic_context_after_selected_history() -> No
         projection=ContextProjection(
             stable_system_prompt="system-v1",
             selected_conversation_history=[{"role": "user", "content": "history"}],
-            current_state_projection={"agent_id": "cozymate_service_agent", "selected_service_skill_id": None},
+            current_state_projection={
+                "agent_id": "cozymate_service_agent",
+                "coordinator": {"selected_agent_id": "cozymate_service_agent"},
+            },
             user_context={"current_time": "2026-07-08T12:00:00+08:00", "timezone": "Asia/Shanghai"},
             recent_run_facts=[{"run_id": "run_1", "facts": {"assistant_conclusion": "已整理过喂养目标"}}],
             fresh_business_facts={"profile": {"name": "Mai"}},
@@ -804,7 +808,10 @@ def test_context_builder_projects_dynamic_context_after_selected_history() -> No
     assert model_input[0] == {"role": "user", "content": "history"}
     assert model_input[-2]["content"] == {
         "runtime_context": {
-            "state": {"agent_id": "cozymate_service_agent", "selected_service_skill_id": None},
+            "state": {
+                "agent_id": "cozymate_service_agent",
+                "coordinator": {"selected_agent_id": "cozymate_service_agent"},
+            },
             "user_context": {"current_time": "2026-07-08T12:00:00+08:00", "timezone": "Asia/Shanghai"},
             "recent_run_facts": [{"run_id": "run_1", "facts": {"assistant_conclusion": "已整理过喂养目标"}}],
             "memory": [],

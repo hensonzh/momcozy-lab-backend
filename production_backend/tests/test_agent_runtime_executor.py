@@ -19,7 +19,7 @@ from production_backend.app.modules.agent_runtime.models import (
     AgentToolCall,
 )
 from production_backend.app.modules.agent_runtime.event_stream.sink import AgentEventSink
-from production_backend.app.modules.agent_runtime.agents.main_coordinator_agent import ServiceSkillId
+from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent import ServiceSkillId
 from production_backend.app.modules.agent_runtime.run_lifecycle.executor import AgentRuntimeExecutor
 from production_backend.app.modules.agent_runtime.run_lifecycle.quick_replies import QuickReplyFinalizer
 from production_backend.app.modules.agent_runtime.sdk import (
@@ -94,26 +94,20 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result(capl
     assert request.model_input[0] == {"role": "user", "content": "What did we discuss?"}
     runtime_context = _runtime_context(request)
     assert runtime_context["state"] == {
-        "agent_mode": "single_main_agent",
+        "agent_mode": "single_downstream_agent",
         "agent_id": "cozymate_service_agent",
-        "selected_service_skill_id": None,
-        "loaded_service_skill_ids": [],
-        "available_service_skill_ids": [
-            "birth-prep",
-            "milk-management",
-            "health-consultation",
-            "emotion-support",
-            "device-guidance",
-        ],
-        "recent_loaded_service_skills": [],
-        "resident_loaded_service_skill": None,
-        "expired_loaded_service_skills": [],
-        "skill_loading": {
-            "mode": "model_tool_call",
-            "tool_name": "load_service_skill",
-            "rule": "Call load_service_skill before following a service skill flow or using service-specific tools.",
+        "coordinator": {
+            "target_kind": "agent",
+            "selected_agent_id": "cozymate_service_agent",
+            "execution_mode": "passthrough",
+            "source": "passthrough",
+            "reason_codes": ["default_to_cozymate"],
         },
-        "visible_tool_count": 1,
+        "service_skill_context": {
+            "recent_loaded_service_skills": [],
+            "resident_loaded_service_skill": None,
+            "expired_loaded_service_skills": [],
+        },
         "execution_mode": "single",
         "needs_clarification": False,
         "safety_flags": [],
@@ -267,7 +261,7 @@ def test_agent_runtime_executor_load_service_skill_returns_facts_and_records_led
         {
             "actor_user_id": run.actor_user_id,
             "run_id": run.id,
-            "selected_service_skill_id": ServiceSkillId.MILK_MANAGEMENT,
+            "service_skill_id": ServiceSkillId.MILK_MANAGEMENT,
         }
     ]
     assert state_store.projections == []
@@ -837,12 +831,13 @@ def test_agent_runtime_executor_does_not_inject_service_skill_before_model_loads
     assert "待产包清单" not in request.instructions
     assert "当前已接入官方资料的型号：Air1" not in request.instructions
     state = _runtime_context(request)["state"]
-    assert state["agent_mode"] == "single_main_agent"
+    assert state["agent_mode"] == "single_downstream_agent"
     assert "delegated_agent" not in state
     assert state["agent_id"] == "cozymate_service_agent"
-    assert state["selected_service_skill_id"] is None
-    assert state["loaded_service_skill_ids"] == []
-    assert "milk-management" in state["available_service_skill_ids"]
+    assert "selected_service_skill_id" not in state
+    assert "loaded_service_skill_ids" not in state
+    assert "available_service_skill_ids" not in state
+    assert state["coordinator"]["selected_agent_id"] == "cozymate_service_agent"
     assert repository.routing_decisions[0]["selected_skill_id"] == "cozymate_service_agent"
     assert repository.run_summaries[0].service_skill_id == "cozymate_service_agent"
     assert request.tool_names == ("load_service_skill",)
@@ -895,7 +890,7 @@ def test_agent_runtime_executor_projects_recent_loaded_skills_as_model_hint_only
     state = _runtime_context(backend.requests[0])["state"]
     assert result.status == "completed"
     assert backend.requests[0].service_skill_id == "cozymate_service_agent"
-    assert state["recent_loaded_service_skills"] == [
+    assert state["service_skill_context"]["recent_loaded_service_skills"] == [
         {
             "service_skill_id": "milk-management",
             "skill_version": "v1",
@@ -946,11 +941,12 @@ def test_agent_runtime_executor_injects_resident_loaded_skill_for_three_followup
     assert result.status == "completed"
     assert "奶量管理仅处理三类任务" in model_input_text
     assert "奶量管理仅处理三类任务" not in request.instructions
-    assert state["resident_loaded_service_skill"]["service_skill_id"] == "milk-management"
-    assert state["resident_loaded_service_skill"]["last_loaded_run_id"] == str(loaded_run_id)
-    assert state["resident_loaded_service_skill"]["remaining_turns"] == 3
-    assert state["resident_loaded_service_skill"]["skill"]["instructions"]
-    assert state["expired_loaded_service_skills"] == []
+    skill_context = state["service_skill_context"]
+    assert skill_context["resident_loaded_service_skill"]["service_skill_id"] == "milk-management"
+    assert skill_context["resident_loaded_service_skill"]["last_loaded_run_id"] == str(loaded_run_id)
+    assert skill_context["resident_loaded_service_skill"]["remaining_turns"] == 3
+    assert skill_context["resident_loaded_service_skill"]["skill"]["instructions"]
+    assert skill_context["expired_loaded_service_skills"] == []
     resident_summary = repository.run_summaries[-1].payload["resident_loaded_service_skill"]
     assert resident_summary["service_skill_id"] == "milk-management"
     assert "skill" not in resident_summary
@@ -1028,8 +1024,9 @@ def test_agent_runtime_executor_expires_resident_loaded_skill_after_three_follow
     state = _runtime_context(backend.requests[0])["state"]
     model_input_text = json.dumps(backend.requests[0].model_input, ensure_ascii=False)
     assert result.status == "completed"
-    assert state["resident_loaded_service_skill"] is None
-    assert state["expired_loaded_service_skills"] == [
+    skill_context = state["service_skill_context"]
+    assert skill_context["resident_loaded_service_skill"] is None
+    assert skill_context["expired_loaded_service_skills"] == [
         {
             "service_skill_id": "milk-management",
             "skill_version": "v1",
@@ -1088,7 +1085,10 @@ def test_agent_runtime_executor_keeps_recent_loaded_skill_hint_for_default_route
 
     assert result.status == "completed"
     assert backend.requests[0].service_skill_id == "cozymate_service_agent"
-    assert _runtime_context(backend.requests[0])["state"]["recent_loaded_service_skills"][0]["service_skill_id"] == "milk-management"
+    assert (
+        _runtime_context(backend.requests[0])["state"]["service_skill_context"]["recent_loaded_service_skills"][0]["service_skill_id"]
+        == "milk-management"
+    )
     assert repository.run_summaries[-1].service_skill_id == "cozymate_service_agent"
 
 
@@ -1206,7 +1206,7 @@ def test_agent_runtime_executor_projects_recent_run_facts_into_dynamic_context()
             },
         }
     ]
-    assert runtime_context["state"]["recent_loaded_service_skills"][0]["service_skill_id"] == "milk-management"
+    assert runtime_context["state"]["service_skill_context"]["recent_loaded_service_skills"][0]["service_skill_id"] == "milk-management"
     assert repository.run_summaries[-1].run_id == run.id
     assert repository.run_summaries[-1].service_skill_id == "cozymate_service_agent"
     assert repository.run_summaries[-1].payload["assistant_conclusion"] == "今天先看最近一次记录。"
@@ -1277,7 +1277,7 @@ def test_agent_runtime_executor_trims_recent_run_facts_already_visible_in_histor
             },
         }
     ]
-    assert state["recent_loaded_service_skills"][0]["service_skill_id"] == "milk-management"
+    assert state["service_skill_context"]["recent_loaded_service_skills"][0]["service_skill_id"] == "milk-management"
     assert backend.requests[0].model_input[0] == {"role": "user", "content": "昨天奶量怎么样？"}
     assert backend.requests[0].model_input[1] == {"role": "assistant", "content": "昨天总奶量偏低。"}
 
@@ -2014,12 +2014,12 @@ class FakeBusinessFactsProjector:
         self.facts = facts
         self.calls = []
 
-    async def project(self, *, actor, run_id, routing_plan):
+    async def project(self, *, actor, run_id, service_skill_id):
         self.calls.append(
             {
                 "actor_user_id": actor.user_id,
                 "run_id": run_id,
-                "selected_service_skill_id": routing_plan.selected_service_skill_id,
+                "service_skill_id": service_skill_id,
             }
         )
         return self.facts

@@ -6,12 +6,7 @@ from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.
     BusinessFactsProjector,
     BusinessFactsProjectorConfig,
 )
-from production_backend.app.modules.agent_runtime.agents.main_coordinator_agent import (
-    IntentItem,
-    RoutingPlan,
-    RoutingSource,
-    ServiceSkillId,
-)
+from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent import ServiceSkillId
 from production_backend.app.modules.auth import CurrentUser
 
 
@@ -37,7 +32,7 @@ def test_business_facts_projector_projects_lactation_sources() -> None:
         ).project(
             actor=_actor(),
             run_id=run_id,
-            routing_plan=_plan(ServiceSkillId.MILK_MANAGEMENT),
+            service_skill_id=ServiceSkillId.MILK_MANAGEMENT,
         )
     )
 
@@ -86,7 +81,7 @@ def test_business_facts_projector_reads_sources_without_parallel_shared_session_
         ).project(
             actor=_actor(),
             run_id=uuid4(),
-            routing_plan=_plan(ServiceSkillId.MILK_MANAGEMENT),
+            service_skill_id=ServiceSkillId.MILK_MANAGEMENT,
         )
     )
 
@@ -118,7 +113,7 @@ def test_business_facts_projector_uses_compact_postpartum_limits() -> None:
         ).project(
             actor=_actor(),
             run_id=uuid4(),
-            routing_plan=_plan(ServiceSkillId.HEALTH_CONSULTATION),
+            service_skill_id=ServiceSkillId.HEALTH_CONSULTATION,
         )
     )
 
@@ -135,21 +130,11 @@ def test_business_facts_projector_returns_empty_when_no_handlers_are_available()
         BusinessFactsProjector(handlers={}).project(
             actor=_actor(),
             run_id=uuid4(),
-            routing_plan=_plan(ServiceSkillId.EMOTION_SUPPORT),
+            service_skill_id=ServiceSkillId.EMOTION_SUPPORT,
         )
     )
 
     assert facts == {}
-
-
-def _plan(skill_id: ServiceSkillId) -> RoutingPlan:
-    return RoutingPlan(
-        target_kind="service_skill",
-        selected_service_skill_id=skill_id,
-        intents=[IntentItem(intent_type=f"{skill_id.value}_request", service_skill_id=skill_id)],
-        confidence=1,
-        source=RoutingSource.PASSTHROUGH,
-    )
 
 
 class FakeSharedSessionGuard:

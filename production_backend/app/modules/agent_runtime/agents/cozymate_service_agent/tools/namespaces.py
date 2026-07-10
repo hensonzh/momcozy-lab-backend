@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from production_backend.app.core.errors import ApiError
 
+from .contracts import ToolContract
 from .registry import ToolContractRegistry
 
 

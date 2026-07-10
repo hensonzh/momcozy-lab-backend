@@ -4,15 +4,14 @@ from .schemas import AgentId, IntentItem, RoutingPlan, RoutingSource
 
 
 def plan_current_request(*, user_message_text: str = "") -> RoutingPlan:
-    """Runtime no longer routes service skills before the model turn."""
+    """First-stage coordinator plan: select only the downstream agent."""
     return RoutingPlan(
         target_kind="agent",
         selected_agent_id=AgentId.COZYMATE_SERVICE_AGENT,
-        selected_service_skill_id=None,
         intents=[
             IntentItem(
                 intent_type=f"{AgentId.COZYMATE_SERVICE_AGENT.value}_request",
-                service_skill_id=None,
+                agent_id=AgentId.COZYMATE_SERVICE_AGENT,
             )
         ],
         execution_mode="passthrough",
