@@ -9,6 +9,7 @@ from typing import Any
 from uuid import UUID
 
 from ..core.errors import ApiError
+from ..modules.agent_runtime.event_stream.publisher import AgentEventPublisher
 from ..modules.agent_runtime.event_stream.transient import AgentTransientStream
 from ..modules.agent_runtime.run_lifecycle.controls import AgentRunControls
 from ..modules.agent_runtime.run_lifecycle.execution import AgentRunExecutionResult, AgentRunHandler
@@ -87,6 +88,12 @@ class AgentRunWorker:
         self.handler = handler or missing_agent_run_handler
         self.after_event_append = after_event_append
         self.transient_stream = transient_stream
+        self.event_publisher = AgentEventPublisher(
+            repository=repository,
+            controls=controls,
+            after_append=after_event_append,
+            transient_stream=transient_stream,
+        )
 
     async def run_once(self, *, run_id: UUID) -> AgentRun | None:
         run = await self.repository.get_run(run_id=run_id)
@@ -195,11 +202,7 @@ class AgentRunWorker:
         return failed
 
     async def _append_event(self, *, run: AgentRun, event_type: str, payload: dict[str, Any]) -> AgentEvent:
-        event = await self.repository.append_event(thread_id=run.thread_id, run_id=run.id, event_type=event_type, payload=payload)
-        if self.controls is not None:
-            await self.controls.set_stream_cursor(run_id=run.id, sequence=event.sequence)
-        if self.after_event_append is not None:
-            await self.after_event_append()
+        event = await self.event_publisher.append_event(thread_id=run.thread_id, run_id=run.id, event_type=event_type, payload=payload)
         await self._publish_live_event(run=run, event_type=event_type, payload=payload)
         return event
 
@@ -210,7 +213,7 @@ class AgentRunWorker:
         if not dedupe_key:
             return
         try:
-            await self.transient_stream.publish_application_event(
+            await self.event_publisher.publish_application_event(
                 thread_id=run.thread_id,
                 run_id=run.id,
                 event_type=event_type,

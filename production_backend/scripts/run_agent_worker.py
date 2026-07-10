@@ -204,8 +204,13 @@ async def _process_agent_run(
         )
         tool_registry = default_tool_registry()
         memory_service = AgentMemoryService(repository=AgentMemoryRepository(session))
-        event_sink = AgentEventSink(repository=repository, controls=controls, after_append=session.commit)
         transient_stream = AgentTransientStream(redis_client)
+        event_sink = AgentEventSink(
+            repository=repository,
+            controls=controls,
+            after_append=session.commit,
+            transient_stream=transient_stream,
+        )
         tool_handlers = build_default_tool_handlers(
             profile_service=profile_service,
             records_service=records_service,

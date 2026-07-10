@@ -489,8 +489,9 @@ class AgentRuntimeExecutor:
             )
 
     def _text_delta_handler(self, *, run: AgentRun) -> Callable[[str], Awaitable[None]] | None:
+        event_publisher = self.event_sink
         transient_stream = self.transient_stream
-        if transient_stream is None:
+        if event_publisher is None and transient_stream is None:
             return None
 
         async def publish(delta: str) -> None:
@@ -505,12 +506,22 @@ class AgentRuntimeExecutor:
             if not sanitized_delta:
                 return
             self._run_text_stream_emitted[run.id] = sanitized_text
-            await transient_stream.publish_message_delta(
-                thread_id=run.thread_id,
-                run_id=run.id,
-                delta=sanitized_delta,
-                message_stream_id=str(self._run_assistant_message_ids.get(run.id) or "assistant"),
-            )
+            message_stream_id = str(self._run_assistant_message_ids.get(run.id) or "assistant")
+            if event_publisher is not None:
+                await event_publisher.publish_message_delta(
+                    thread_id=run.thread_id,
+                    run_id=run.id,
+                    delta=sanitized_delta,
+                    message_stream_id=message_stream_id,
+                )
+                return
+            if transient_stream is not None:
+                await transient_stream.publish_message_delta(
+                    thread_id=run.thread_id,
+                    run_id=run.id,
+                    delta=sanitized_delta,
+                    message_stream_id=message_stream_id,
+                )
 
         return publish
 
@@ -759,10 +770,21 @@ class AgentRuntimeExecutor:
         event_type: str,
         payload: dict[str, Any],
     ) -> None:
-        if self.transient_stream is None:
-            return
         dedupe_key = _tool_live_dedupe_key(run_id=run_id, event_type=event_type, payload=payload)
         if not dedupe_key:
+            return
+        if self.event_sink is not None:
+            await self.event_sink.publish_application_event(
+                thread_id=thread_id,
+                run_id=run_id,
+                event_type=event_type,
+                payload=payload,
+                dedupe_key=dedupe_key,
+                optimistic=True,
+                durable=False,
+            )
+            return
+        if self.transient_stream is None:
             return
         try:
             await self.transient_stream.publish_application_event(
@@ -781,7 +803,18 @@ class AgentRuntimeExecutor:
         payload = run_progress_payload(phase=phase, label=label)
         semantic = payload.get("semantic")
         dedupe_key = progress_live_dedupe_key(run_id=run.id, semantic=semantic) if isinstance(semantic, dict) else ""
-        if self.transient_stream is not None:
+        if self.event_sink is not None:
+            await self.event_sink.publish_progress(
+                thread_id=run.thread_id,
+                run_id=run.id,
+                phase=phase,
+                label=label,
+                semantic=semantic if isinstance(semantic, dict) else None,
+                dedupe_key=dedupe_key,
+                optimistic=True,
+                durable=False,
+            )
+        elif self.transient_stream is not None:
             try:
                 await self.transient_stream.publish_progress(
                     thread_id=run.thread_id,

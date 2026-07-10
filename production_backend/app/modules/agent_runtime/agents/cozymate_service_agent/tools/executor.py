@@ -281,10 +281,21 @@ class ToolExecutor:
         event_type: str,
         payload: dict[str, Any],
     ) -> None:
-        if self.transient_stream is None:
-            return
         dedupe_key = _tool_live_dedupe_key(run_id=run_id, event_type=event_type, payload=payload)
         if not dedupe_key:
+            return
+        if self.event_sink is not None:
+            await self.event_sink.publish_application_event(
+                thread_id=thread_id,
+                run_id=run_id,
+                event_type=event_type,
+                payload=payload,
+                dedupe_key=dedupe_key,
+                optimistic=True,
+                durable=False,
+            )
+            return
+        if self.transient_stream is None:
             return
         try:
             await self.transient_stream.publish_application_event(
