@@ -213,6 +213,44 @@ def test_stream_run_event_chunks_yields_transient_delta_while_following() -> Non
     assert payloads[0]["payload"]["delta"] == "hello"
 
 
+def test_stream_run_event_chunks_uses_transient_stream_before_next_persisted_poll() -> None:
+    thread_id = uuid4()
+    run_id = uuid4()
+    transient_event = AgentTransientStreamEvent(
+        event_id="delta:1-0",
+        type="message.delta",
+        thread_id=thread_id,
+        run_id=run_id,
+        cursor="1-0",
+        payload={"delta": "hello", "message_stream_id": "assistant"},
+        created_at="2026-07-04T00:00:00+00:00",
+    )
+    service = FakeAgentRuntimeService([[]])
+    transient_stream = FakeTransientStream([[], transient_event])
+
+    async def exercise() -> str:
+        chunks = _stream_run_event_chunks(
+            service=service,
+            owner_user_id=uuid4(),
+            run_id=run_id,
+            after_sequence=0,
+            limit=20,
+            follow=True,
+            poll_interval_seconds=0.01,
+            max_wait_seconds=1,
+            transient_stream=transient_stream,
+        )
+        return await anext(chunks)
+
+    chunk = asyncio.run(exercise())
+
+    payloads = _sse_payloads(chunk)
+    assert [payload["type"] for payload in payloads] == ["message.delta"]
+    assert payloads[0]["payload"]["delta"] == "hello"
+    assert len(service.calls) == 1
+    assert [call["block_ms"] for call in transient_stream.calls] == [10, 10]
+
+
 def test_stream_run_event_chunks_flushes_transient_delta_before_final_events() -> None:
     thread_id = uuid4()
     run_id = uuid4()
@@ -716,8 +754,10 @@ class FakeStreamRedis:
 class FakeAgentRuntimeService:
     def __init__(self, batches=None) -> None:
         self.batches = list(batches or [])
+        self.calls = []
 
     async def list_events(self, **_kwargs):
+        self.calls.append(_kwargs)
         if self.batches:
             return self.batches.pop(0)
         return []
@@ -727,7 +767,11 @@ class FakeAgentRuntimeService:
 class FakeTransientStream:
     batches: list[list[AgentTransientStreamEvent] | AgentTransientStreamEvent]
 
+    def __post_init__(self) -> None:
+        self.calls = []
+
     async def read(self, **_kwargs):
+        self.calls.append(_kwargs)
         if not self.batches:
             return []
         batch = self.batches.pop(0)
