@@ -6,6 +6,13 @@ from production_backend.app.core.settings import Settings
 SERVICE_KEY = "service-key-value-with-at-least-32-bytes"
 
 
+def test_settings_use_current_openai_model_defaults() -> None:
+    settings = Settings()
+
+    assert settings.openai_model == "gpt-5.6-terra"
+    assert settings.agent_quick_reply_model == "gpt-5.4-nano"
+
+
 def test_settings_from_env_reads_infrastructure_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("APP_ENV", "staging")
     monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://example")

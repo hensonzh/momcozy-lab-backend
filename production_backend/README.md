@@ -96,21 +96,21 @@ local `agent-worker` Compose service enables the worker when the `workers`
 profile is started, so your private `env/compose.local.env` must include the
 configured model provider credentials. `AGENT_MODEL_PROVIDER=openai` is the
 default. When the worker is enabled with the default provider, `OPENAI_API_KEY`
-must be set. The default main runtime uses `gpt-5.6-sol` with low reasoning,
+must be set. The default main runtime uses `gpt-5.6-terra` with low reasoning,
 does not retain provider-side Responses state, and uses the native Responses
 runner. Namespace/deferred tool loading uses hosted `tool_search` while keeping
 the declared tool surface stable between model turns. The quick reply finalizer
-uses `gpt-5.6-luna` separately so it does not add reasoning latency to the main
-reply.
+uses `gpt-5.4-nano` separately with reasoning disabled to keep finalization
+lightweight.
 
 ```env
 AGENT_MODEL_PROVIDER=openai
 OPENAI_API_KEY=...
-OPENAI_MODEL=gpt-5.6-sol
+OPENAI_MODEL=gpt-5.6-terra
 OPENAI_REASONING_EFFORT=low
 OPENAI_RESPONSES_STORE=false
 OPENAI_AGENT_USE_RESPONSES=true
-AGENT_QUICK_REPLY_MODEL=gpt-5.6-luna
+AGENT_QUICK_REPLY_MODEL=gpt-5.4-nano
 AGENT_QUICK_REPLY_TIMEOUT_SECONDS=3.0
 ```
 
@@ -155,11 +155,11 @@ AGENT_RUNTIME_WORKER_ENABLED=true
 OUTBOX_WORKER_ENABLED=true
 AGENT_MODEL_PROVIDER=openai
 OPENAI_API_KEY=...
-OPENAI_MODEL=gpt-5.6-sol
+OPENAI_MODEL=gpt-5.6-terra
 OPENAI_REASONING_EFFORT=low
 OPENAI_RESPONSES_STORE=false
 OPENAI_AGENT_USE_RESPONSES=true
-AGENT_QUICK_REPLY_MODEL=gpt-5.6-luna
+AGENT_QUICK_REPLY_MODEL=gpt-5.4-nano
 AGENT_QUICK_REPLY_TIMEOUT_SECONDS=3.0
 ```
 

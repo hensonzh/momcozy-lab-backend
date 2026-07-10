@@ -60,6 +60,14 @@ def test_compose_environment_profile_examples_exist() -> None:
     assert "OBJECT_STORAGE_PROVIDER=oss" in (env_dir / "compose.prod.env.example").read_text()
 
 
+def test_compose_environment_profiles_use_current_openai_model_defaults() -> None:
+    for env_path in (COMPOSE_LOCAL_ENV, COMPOSE_TEST_ENV, COMPOSE_PROD_ENV):
+        env = env_path.read_text()
+
+        assert "OPENAI_MODEL=gpt-5.6-terra" in env
+        assert "AGENT_QUICK_REPLY_MODEL=gpt-5.4-nano" in env
+
+
 def test_makefile_infra_checks_use_project_python_environment() -> None:
     makefile = (ROOT / "Makefile").read_text()
 
@@ -106,14 +114,14 @@ def test_compose_env_declares_disabled_agent_worker_controls() -> None:
     assert "AGENT_RUNTIME_INTERRUPT_RUNNING_OLDER_THAN_SECONDS=900" in env
     assert "AGENT_MODEL_PROVIDER=openai" in env
     assert "OPENAI_API_KEY=" in env
-    assert "OPENAI_MODEL=gpt-5.6-sol" in env
+    assert "OPENAI_MODEL=gpt-5.6-terra" in env
     assert "OPENAI_REASONING_EFFORT=low" in env
     assert "OPENAI_RESPONSES_STORE=false" in env
     assert "OPENAI_AGENT_USE_RESPONSES=true" in env
     assert "MINIMAX_API_KEY=" in env
     assert "MINIMAX_BASE_URL=https://api.minimaxi.com/v1" in env
     assert "MINIMAX_MODEL=MiniMax-M3" in env
-    assert "AGENT_QUICK_REPLY_MODEL=gpt-5.6-luna" in env
+    assert "AGENT_QUICK_REPLY_MODEL=gpt-5.4-nano" in env
     assert "VOICE_PROVIDER=disabled" in env
     assert "VOICE_API_KEY=" in env
     assert "VOICE_BASE_URL=wss://openspeech.bytedance.com/api/v3/tts/bidirection" in env
