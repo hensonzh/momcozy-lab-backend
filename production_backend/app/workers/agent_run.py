@@ -210,6 +210,7 @@ class AgentRunWorker:
                     payload=payload,
                     live_payload=live_payload,
                     live_durable=not _has_exactly_three_quick_replies(result.quick_replies),
+                    live_before_append=_has_exactly_three_quick_replies(result.quick_replies),
                 )
             completed = await self.repository.mark_run_completed(run=run, completed_at=_utcnow())
             await self._append_event(run=completed, event_type="run.completed", payload={})
@@ -250,14 +251,23 @@ class AgentRunWorker:
         payload: dict[str, Any],
         live_payload: dict[str, Any] | None = None,
         live_durable: bool = True,
+        live_before_append: bool = False,
     ) -> AgentEvent:
+        if live_before_append:
+            await self._publish_live_event(
+                run=run,
+                event_type=event_type,
+                payload=payload if live_payload is None else live_payload,
+                durable=live_durable,
+            )
         event = await self.event_publisher.append_event(thread_id=run.thread_id, run_id=run.id, event_type=event_type, payload=payload)
-        await self._publish_live_event(
-            run=run,
-            event_type=event_type,
-            payload=payload if live_payload is None else live_payload,
-            durable=live_durable,
-        )
+        if not live_before_append:
+            await self._publish_live_event(
+                run=run,
+                event_type=event_type,
+                payload=payload if live_payload is None else live_payload,
+                durable=live_durable,
+            )
         return event
 
     async def _publish_live_event(self, *, run: AgentRun, event_type: str, payload: dict[str, Any], durable: bool) -> None:

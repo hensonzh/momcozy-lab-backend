@@ -52,7 +52,7 @@ def test_agent_run_worker_completes_run_with_assistant_message_events_and_lock()
 
 def test_agent_run_worker_attaches_quick_replies_to_transient_completed_message_only() -> None:
     repository = FakeAgentRuntimeRepository()
-    transient_stream = FakeTransientStream()
+    transient_stream = FakeTransientStream(operations=repository.operations)
     assistant_message_id = uuid4()
     replies = [{"id": "qr_1", "text": "看今日安排"}, {"id": "qr_2", "text": "先不保存"}, {"id": "qr_3", "text": "换简单版"}]
 
@@ -95,6 +95,12 @@ def test_agent_run_worker_attaches_quick_replies_to_transient_completed_message_
         "durable": False,
     }
     assert transient_stream.events[1]["durable"] is True
+    assert repository.operations[:4] == [
+        "db:run.started",
+        "redis:message.completed",
+        "db:message.completed",
+        "db:run.completed",
+    ]
 
 
 def test_agent_run_worker_cancels_before_handler_when_cancel_requested() -> None:
@@ -243,6 +249,7 @@ class FakeAgentRuntimeRepository:
         self.runs = [self.run]
         self.messages = []
         self.events = []
+        self.operations = []
         self.external_status_on_refresh = ""
 
     def add_run(self, *, status):
@@ -323,6 +330,7 @@ class FakeAgentRuntimeRepository:
         return message
 
     async def append_event(self, **kwargs):
+        self.operations.append(f"db:{kwargs['event_type']}")
         event = AgentEvent(
             event_id=uuid4(),
             thread_id=kwargs["thread_id"],
@@ -336,10 +344,13 @@ class FakeAgentRuntimeRepository:
 
 
 class FakeTransientStream:
-    def __init__(self) -> None:
+    def __init__(self, *, operations: list[str] | None = None) -> None:
         self.events = []
+        self.operations = operations
 
     async def publish_application_event(self, **kwargs):
+        if self.operations is not None:
+            self.operations.append(f"redis:{kwargs['event_type']}")
         self.events.append(
             {
                 "event_type": kwargs["event_type"],
