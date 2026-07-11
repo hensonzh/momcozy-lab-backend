@@ -74,6 +74,13 @@ LOAD_SERVICE_SKILL_TOOL_NAME = "load_service_skill"
 LOGGER = logging.getLogger("production_backend.agent_runtime.executor")
 LOAD_SERVICE_SKILL_INPUT_SCHEMA = tool_input_schema("LoadServiceSkillInput")
 DEFAULT_RESIDENT_SERVICE_SKILL_TTL_TURNS = 3
+MAX_CONFIRMED_FORM_MESSAGE_CHARS = 100_000
+FLUTTER_FORM_CONFIRMATION_HEADER = "我已提交信息采集表单，请基于确认后的表单数据继续完成对应服务。"
+CONFIRMED_FORM_ID_BY_TOOL = {
+    "hospital_bag_card_create": "hospital_bag_intake",
+    "labor_communication_card_create": "birth_plan_card_intake",
+}
+CONFIRMED_FORM_ARGUMENT_KEYS = ("confirmed_form_data", "form_data", "payload")
 
 
 @dataclass(frozen=True)
@@ -85,9 +92,16 @@ class AgentRuntimeExecutorConfig:
     resident_service_skill_ttl_turns: int = DEFAULT_RESIDENT_SERVICE_SKILL_TTL_TURNS
 
 
+@dataclass(frozen=True)
+class _ConfirmedFormSubmission:
+    form_id: str
+    data: dict[str, Any]
+
+
 @dataclass
 class _AgentTurnContext:
     current_message: AgentMessage
+    confirmed_form_submission: _ConfirmedFormSubmission | None
     messages: list[AgentMessage]
     memory_projection: list[dict[str, Any]]
     service_skills: tuple[AgentServiceSkill, ...]
@@ -245,6 +259,7 @@ class AgentRuntimeExecutor:
         await self._record_routing_decision(run=run, current_message=current_message, routing_plan=routing_plan)
         return _AgentTurnContext(
             current_message=current_message,
+            confirmed_form_submission=_parse_confirmed_form_submission(_message_text(current_message)),
             messages=messages,
             memory_projection=memory_projection,
             service_skills=service_skills,
@@ -258,17 +273,13 @@ class AgentRuntimeExecutor:
 
     def _tool_scope_for_turn(self) -> _AgentTurnToolScope:
         tool_namespaces: tuple[ToolNamespace, ...] = (
-            self.tool_namespace_registry.list()
-            if self.tool_executor is not None and self.sdk_runner.supports_tool_namespaces()
-            else ()
+            self.tool_namespace_registry.list() if self.tool_executor is not None and self.sdk_runner.supports_tool_namespaces() else ()
         )
         if self.tool_executor is None:
             business_tool_names: tuple[str, ...] = ()
         else:
             business_tool_names = tuple(
-                tool_name
-                for tool_name in self.tool_registry.names_for_sdk()
-                if tool_name != LOAD_SERVICE_SKILL_TOOL_NAME
+                tool_name for tool_name in self.tool_registry.names_for_sdk() if tool_name != LOAD_SERVICE_SKILL_TOOL_NAME
             )
         tool_names = (LOAD_SERVICE_SKILL_TOOL_NAME, *business_tool_names)
         return _AgentTurnToolScope(tool_namespaces=tool_namespaces, tool_names=tool_names)
@@ -324,7 +335,12 @@ class AgentRuntimeExecutor:
                 tool_names=tool_scope.tool_names,
                 tool_namespaces=_sdk_tool_namespaces(tool_scope.tool_namespaces),
                 tool_search_enabled=_tool_search_enabled(tool_scope.tool_namespaces),
-                tools=self._sdk_tools(run=run, tool_names=tool_scope.tool_names, tool_namespaces=tool_scope.tool_namespaces),
+                tools=self._sdk_tools(
+                    run=run,
+                    tool_names=tool_scope.tool_names,
+                    tool_namespaces=tool_scope.tool_namespaces,
+                    confirmed_form_submission=turn_context.confirmed_form_submission,
+                ),
                 prompt_version=run.prompt_version,
                 trace_id=run.trace_id,
                 service_skill_id=_routing_target_agent_id(turn_context.routing_plan),
@@ -593,6 +609,7 @@ class AgentRuntimeExecutor:
         run: AgentRun,
         tool_names: tuple[str, ...],
         tool_namespaces: tuple[ToolNamespace, ...],
+        confirmed_form_submission: _ConfirmedFormSubmission | None,
     ) -> tuple[SdkToolDefinition, ...]:
         if self.tool_executor is None:
             return (self._load_service_skill_tool_definition(run=run),)
@@ -602,6 +619,7 @@ class AgentRuntimeExecutor:
                 run=run,
                 tool_name=tool_name,
                 namespace=namespace_by_tool.get(tool_name),
+                confirmed_form_submission=confirmed_form_submission,
             )
             for tool_name in tool_names
             if tool_name != LOAD_SERVICE_SKILL_TOOL_NAME
@@ -610,6 +628,7 @@ class AgentRuntimeExecutor:
             load_service_skill = self._sdk_tool_definition(
                 run=run,
                 tool_name=LOAD_SERVICE_SKILL_TOOL_NAME,
+                confirmed_form_submission=confirmed_form_submission,
             )
         else:
             load_service_skill = self._load_service_skill_tool_definition(run=run)
@@ -635,12 +654,25 @@ class AgentRuntimeExecutor:
             model_context_after_invoke=self._loaded_service_skill_model_context,
         )
 
-    def _sdk_tool_definition(self, *, run: AgentRun, tool_name: str, namespace: ToolNamespace | None = None) -> SdkToolDefinition:
+    def _sdk_tool_definition(
+        self,
+        *,
+        run: AgentRun,
+        tool_name: str,
+        namespace: ToolNamespace | None = None,
+        confirmed_form_submission: _ConfirmedFormSubmission | None = None,
+    ) -> SdkToolDefinition:
         contract = self.tool_registry.get(tool_name)
         sdk_name = sdk_tool_name(contract.name)
 
         async def invoke_json(args_json: str) -> str:
-            return await self._invoke_sdk_tool(run=run, contract_name=contract.name, sdk_name=sdk_name, args_json=args_json)
+            return await self._invoke_sdk_tool(
+                run=run,
+                contract_name=contract.name,
+                sdk_name=sdk_name,
+                args_json=args_json,
+                confirmed_form_submission=confirmed_form_submission,
+            )
 
         return SdkToolDefinition(
             contract_name=contract.name,
@@ -651,9 +683,7 @@ class AgentRuntimeExecutor:
             namespace_name=namespace.name if namespace is not None else "",
             defer_loading=contract.name in set(namespace.deferred_tool_contracts) if namespace is not None else False,
             model_context_after_invoke=(
-                self._loaded_service_skill_model_context
-                if contract.name == LOAD_SERVICE_SKILL_TOOL_NAME
-                else None
+                self._loaded_service_skill_model_context if contract.name == LOAD_SERVICE_SKILL_TOOL_NAME else None
             ),
         )
 
@@ -664,11 +694,15 @@ class AgentRuntimeExecutor:
         except ValueError as exc:
             raise ApiError(code="invalid_service_skill", message="Unsupported service_skill_id.", status=422) from exc
         skill = self.service_skill_registry.get(skill_id.value)
-        facts = await self.business_facts_projector.project(
-            actor=context.actor,
-            run_id=context.run_id,
-            service_skill_id=skill_id,
-        ) if self.business_facts_projector is not None else {}
+        facts = (
+            await self.business_facts_projector.project(
+                actor=context.actor,
+                run_id=context.run_id,
+                service_skill_id=skill_id,
+            )
+            if self.business_facts_projector is not None
+            else {}
+        )
         output = _load_service_skill_output(
             skill=skill,
             tool_namespaces=_tool_namespaces_for_service_skill(
@@ -718,10 +752,22 @@ class AgentRuntimeExecutor:
             },
         )
 
-    async def _invoke_sdk_tool(self, *, run: AgentRun, contract_name: str, sdk_name: str, args_json: str) -> str:
+    async def _invoke_sdk_tool(
+        self,
+        *,
+        run: AgentRun,
+        contract_name: str,
+        sdk_name: str,
+        args_json: str,
+        confirmed_form_submission: _ConfirmedFormSubmission | None,
+    ) -> str:
         if self.tool_executor is None:
             raise ApiError(code="unsupported_operation", message="Tool executor is not configured.", status=501)
-        args = _json_object(args_json)
+        args = _tool_args_with_confirmed_form(
+            tool_name=contract_name,
+            model_args=_json_object(args_json),
+            submission=confirmed_form_submission,
+        )
         execute_kwargs = {
             "actor": _run_actor(run),
             "run_id": run.id,
@@ -1103,7 +1149,9 @@ class AgentRuntimeExecutor:
         tool_outputs = await self.repository.list_tool_outputs_for_run(run_id=run.id)
         actions = await self.repository.list_actions_for_run(run_id=run.id)
         artifacts = await self.repository.list_artifacts_for_run(run_id=run.id)
-        loaded_service_skills = _loaded_service_skill_summaries(tool_outputs=tool_outputs, result_tool_calls=getattr(result, "tool_calls", []))
+        loaded_service_skills = _loaded_service_skill_summaries(
+            tool_outputs=tool_outputs, result_tool_calls=getattr(result, "tool_calls", [])
+        )
         service_skill_id = loaded_service_skills[-1]["service_skill_id"] if loaded_service_skills else AgentId.COZYMATE_SERVICE_AGENT.value
         payload = {
             "user_goal": _compact_text(_message_text(current_message), max_chars=500),
@@ -1149,9 +1197,7 @@ def _history_before(*, messages: list[AgentMessage], before_sequence: int) -> li
 
 
 def _history_messages_before(*, messages: list[AgentMessage], before_sequence: int) -> list[AgentMessage]:
-    return [
-        message for message in messages if message.sequence < before_sequence and message.role in {"user", "assistant"}
-    ]
+    return [message for message in messages if message.sequence < before_sequence and message.role in {"user", "assistant"}]
 
 
 def _routing_target_agent_id(routing_plan: RoutingPlan) -> str:
@@ -1229,7 +1275,9 @@ def _artifact_event_payload(artifact: AgentArtifact) -> dict[str, Any]:
         },
     }
     if isinstance(artifact.payload, dict):
-        payload.update({key: value for key, value in artifact.payload.items() if key in {"form", "card", "card_json", "cart_update", "summary"}})
+        payload.update(
+            {key: value for key, value in artifact.payload.items() if key in {"form", "card", "card_json", "cart_update", "summary"}}
+        )
     payload["semantic"] = artifact_event_payload_semantic(artifact_type=artifact.artifact_type)
     return payload
 
@@ -1648,6 +1696,59 @@ def _utcnow() -> datetime:
 
 def _iso_or_empty(value: Any) -> str:
     return value.isoformat() if hasattr(value, "isoformat") else ""
+
+
+def _parse_confirmed_form_submission(message_text: str) -> _ConfirmedFormSubmission | None:
+    normalized = message_text.strip()
+    if not normalized or len(normalized) > MAX_CONFIRMED_FORM_MESSAGE_CHARS:
+        return None
+    lines = normalized.splitlines()
+    if len(lines) < 3 or not _is_form_confirmation_header(lines[0].strip()):
+        return None
+
+    form_label, separator, form_id = lines[1].strip().partition(":")
+    if separator != ":" or form_label != "form_id":
+        return None
+    normalized_form_id = form_id.strip()
+    if normalized_form_id not in CONFIRMED_FORM_ID_BY_TOOL.values():
+        return None
+
+    data_label, separator, inline_json = lines[2].strip().partition(":")
+    if separator != ":" or data_label != "confirmed_form_data":
+        return None
+    json_parts = [inline_json.strip(), *(line for line in lines[3:])]
+    json_payload = "\n".join(part for part in json_parts if part).strip()
+    if not json_payload:
+        return None
+    try:
+        data = json.loads(json_payload)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    return _ConfirmedFormSubmission(form_id=normalized_form_id, data=dict(data))
+
+
+def _is_form_confirmation_header(value: str) -> bool:
+    if value == FLUTTER_FORM_CONFIRMATION_HEADER:
+        return True
+    return value.startswith("我已确认 ") and value.endswith(" 信息，请基于这些信息生成对应卡片。")
+
+
+def _tool_args_with_confirmed_form(
+    *,
+    tool_name: str,
+    model_args: dict[str, Any],
+    submission: _ConfirmedFormSubmission | None,
+) -> dict[str, Any]:
+    expected_form_id = CONFIRMED_FORM_ID_BY_TOOL.get(tool_name)
+    if expected_form_id is None:
+        return model_args
+
+    effective_args = {key: value for key, value in model_args.items() if key not in CONFIRMED_FORM_ARGUMENT_KEYS}
+    if submission is not None and submission.form_id == expected_form_id:
+        effective_args["confirmed_form_data"] = dict(submission.data)
+    return effective_args
 
 
 def _message_text(message: AgentMessage) -> str:

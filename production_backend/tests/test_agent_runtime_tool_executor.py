@@ -54,6 +54,41 @@ def test_tool_executor_persists_safe_args_and_output() -> None:
     assert repository.events[1].payload["semantic"]["label"] == "我已经准备好预览，等你确认～"
 
 
+def test_tool_executor_redacts_confirmed_form_data_from_audit_payloads() -> None:
+    actor = _user(permissions={"agent_artifact:create:self"})
+    repository = FakeToolRepository()
+    observed_args = {}
+
+    async def handler(context: ToolHandlerContext):
+        observed_args.update(context.args)
+        return {"status": "card_created"}
+
+    executor = ToolExecutor(
+        registry=default_tool_registry(),
+        repository=repository,
+        handlers={"hospital_bag_card_create": handler},
+    )
+
+    asyncio.run(
+        executor.execute(
+            actor=actor,
+            run_id=uuid4(),
+            tool_name="hospital_bag_card_create",
+            call_id="call-confirmed-form",
+            args={
+                "confirmed_form_data": {
+                    "due_date_or_week": "32 weeks",
+                    "medical_notes": "private health detail",
+                }
+            },
+        )
+    )
+
+    assert observed_args["confirmed_form_data"]["medical_notes"] == "private health detail"
+    assert repository.tool_call.safe_args == {"confirmed_form_data": "[redacted]"}
+    assert repository.events[0].payload["safe_args"] == {"confirmed_form_data": "[redacted]"}
+
+
 def test_tool_executor_publishes_optimistic_live_events_before_persisted_events() -> None:
     actor = _user(permissions={"profile:read:self"})
     repository = FakeToolRepository()

@@ -146,8 +146,7 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result(capl
     timing_payloads = [
         json.loads(record.getMessage())
         for record in caplog.records
-        if record.name == "production_backend.agent_runtime"
-        and json.loads(record.getMessage()).get("event") == "agent.run.executor_turn"
+        if record.name == "production_backend.agent_runtime" and json.loads(record.getMessage()).get("event") == "agent.run.executor_turn"
     ]
     assert timing_payloads[-1]["run_id"] == str(run.id)
     assert timing_payloads[-1]["status"] == "completed"
@@ -473,9 +472,7 @@ def test_agent_runtime_executor_does_not_append_unclosed_provider_json_tail() ->
     current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="Keep the safe prefix", sequence=1)
     repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
     transient_stream = FakeTransientStream()
-    backend = ScriptedSdkBackend(
-        [scripted_sdk_response(final_text='Safe answer.\n{"service_skill_id":', text_deltas=("Safe answer.",))]
-    )
+    backend = ScriptedSdkBackend([scripted_sdk_response(final_text='Safe answer.\n{"service_skill_id":', text_deltas=("Safe answer.",))])
 
     result = asyncio.run(
         AgentRuntimeExecutor(
@@ -713,6 +710,143 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert tool_executor.calls[0]["args"] == {}
 
 
+@pytest.mark.parametrize(
+    ("header", "form_id", "tool_name", "confirmation_payload"),
+    [
+        (
+            "我已提交信息采集表单，请基于确认后的表单数据继续完成对应服务。",
+            "hospital_bag_intake",
+            "hospital_bag_card_create",
+            'confirmed_form_data: {"due_date_or_week":"32 weeks","first_birth":"yes"}',
+        ),
+        (
+            "我已确认 信息采集 信息，请基于这些信息生成对应卡片。",
+            "birth_plan_card_intake",
+            "labor_communication_card_create",
+            'confirmed_form_data:\n{"support_person":"partner","medical_notes":"none"}',
+        ),
+    ],
+)
+def test_agent_runtime_executor_injects_current_confirmed_form_into_matching_card_tool(
+    header: str,
+    form_id: str,
+    tool_name: str,
+    confirmation_payload: str,
+) -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(
+        thread_id=thread_id,
+        run_id=run.id,
+        role="user",
+        text=(f"{header}\nform_id: {form_id}\n{confirmation_payload}"),
+        sequence=1,
+    )
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    tool_executor = FakeToolExecutor(safe_output={"status": "card_created"})
+    backend = ScriptedSdkBackend(
+        [
+            scripted_sdk_response(
+                final_text="卡片已经整理好了。",
+                tool_invocations=(
+                    scripted_tool_invocation(
+                        tool_name,
+                        {
+                            "confirmed_form_data": {"forged": "model value"},
+                            "generation_mode": "quick",
+                        },
+                    ),
+                ),
+                expected_available_tools=(tool_name,),
+            )
+        ]
+    )
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            tool_executor=tool_executor,
+        ).execute(run=run)
+    )
+
+    expected_data = json.loads(confirmation_payload.split(":", 1)[1].strip())
+    assert result.status == "completed"
+    assert tool_executor.calls[0]["tool_name"] == tool_name
+    assert tool_executor.calls[0]["args"] == {
+        "confirmed_form_data": expected_data,
+        "generation_mode": "quick",
+    }
+
+
+@pytest.mark.parametrize(
+    ("current_text", "tool_name"),
+    [
+        (
+            "我已提交信息采集表单，请基于确认后的表单数据继续完成对应服务。\n"
+            'form_id: birth_plan_card_intake\nconfirmed_form_data:\n{"support_person":"partner"}',
+            "hospital_bag_card_create",
+        ),
+        (
+            "我已提交信息采集表单，请基于确认后的表单数据继续完成对应服务。\nform_id: hospital_bag_intake\nconfirmed_form_data: not-json",
+            "hospital_bag_card_create",
+        ),
+        ("请继续生成卡片。", "hospital_bag_card_create"),
+    ],
+)
+def test_agent_runtime_executor_rejects_stale_mismatched_or_malformed_form_injection(
+    current_text: str,
+    tool_name: str,
+) -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    prior_user = _message(
+        thread_id=thread_id,
+        run_id=uuid4(),
+        role="user",
+        text=('form_id: hospital_bag_intake\nconfirmed_form_data:\n{"due_date_or_week":"32 weeks"}'),
+        sequence=1,
+    )
+    current_user = _message(
+        thread_id=thread_id,
+        run_id=run.id,
+        role="user",
+        text=current_text,
+        sequence=2,
+    )
+    repository = FakeRuntimeRepository(messages=[prior_user, current_user], current_message=current_user)
+    tool_executor = FakeToolExecutor(safe_output={"status": "needs_confirmed_form_data"})
+    backend = ScriptedSdkBackend(
+        [
+            scripted_sdk_response(
+                final_text="请先提交表单。",
+                tool_invocations=(
+                    scripted_tool_invocation(
+                        tool_name,
+                        {
+                            "confirmed_form_data": {"forged": "model value"},
+                            "form_data": {"forged": "alias"},
+                            "payload": {"forged": "payload alias"},
+                            "generation_mode": "quick",
+                        },
+                    ),
+                ),
+                expected_available_tools=(tool_name,),
+            )
+        ]
+    )
+
+    asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            tool_executor=tool_executor,
+        ).execute(run=run)
+    )
+
+    assert tool_executor.calls[0]["args"] == {"generation_mode": "quick"}
+
+
 def test_agent_runtime_executor_allows_service_tool_without_skill_load() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)
@@ -830,10 +964,7 @@ def test_agent_runtime_executor_does_not_use_quick_replies_from_final_text_json(
     backend = ScriptedSdkBackend(
         [
             scripted_sdk_response(
-                final_text=(
-                    '已经整理好了。\n'
-                    '{"quick_replies":[{"text":"继续聊这个"},{"text":"给我更多细节"},{"text":"换个方向"}]}'
-                ),
+                final_text=('已经整理好了。\n{"quick_replies":[{"text":"继续聊这个"},{"text":"给我更多细节"},{"text":"换个方向"}]}'),
             )
         ]
     )
@@ -1617,9 +1748,7 @@ def test_agent_runtime_executor_loads_skill_through_unified_tool_executor() -> N
         [
             scripted_sdk_response(
                 final_text="我来看看最近奶量。",
-                tool_invocations=(
-                    scripted_tool_invocation("load_service_skill", {"service_skill_id": "milk-management"}),
-                ),
+                tool_invocations=(scripted_tool_invocation("load_service_skill", {"service_skill_id": "milk-management"}),),
             )
         ]
     )
