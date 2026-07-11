@@ -132,6 +132,7 @@ async def create_run(
         thread_id=payload.thread_id,
         message=payload.message,
         attachments=payload.attachments,
+        client_context=payload.client_context,
         runtime_pattern=payload.runtime_pattern,
         graph_version=payload.graph_version,
         prompt_version=payload.prompt_version or settings.openai_agent_prompt_version,

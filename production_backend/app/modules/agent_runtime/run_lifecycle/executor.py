@@ -15,6 +15,7 @@ from ....core.logging import log_agent_runtime_event
 from ....infrastructure.object_storage.base import ObjectStorage
 from ...auth import CurrentUser
 from ..actions.policy import AgentActionPolicy, AgentActionPolicyDecision
+from ..client_context import project_agent_client_context
 from ..agents.cozymate_service_agent.context import BusinessFactsProjector
 from ..agents.cozymate_service_agent.prompts import (
     ContextProjection,
@@ -1597,15 +1598,19 @@ def _compact_text(value: str, *, max_chars: int) -> str:
 
 def _user_context(*, current_message: AgentMessage, now: datetime) -> dict[str, Any]:
     content = current_message.content if isinstance(current_message.content, dict) else {}
+    client_context = project_agent_client_context(content.get("client_context"))
     location = _location_context(content.get("location"))
-    timezone_name = _text(content, "timezone") or _text(location, "timezone") or "UTC"
+    timezone_name = _text(client_context, "timezone") or _text(content, "timezone") or _text(location, "timezone") or "UTC"
     timezone_info, normalized_timezone = _timezone_info(timezone_name)
     current_time = _aware_datetime(now).astimezone(timezone_info).isoformat()
     user_context: dict[str, Any] = {
         "current_time": current_time,
         "timezone": normalized_timezone,
-        "locale": _text(content, "locale") or "zh-CN",
+        "locale": _text(client_context, "locale") or _text(content, "locale") or "zh-CN",
     }
+    for key in ("message_sent_at", "hospital_bag_cart"):
+        if key in client_context:
+            user_context[key] = client_context[key]
     if location:
         user_context["location"] = location
     return user_context

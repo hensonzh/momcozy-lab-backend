@@ -30,6 +30,7 @@ class AgentRunCreate(BaseModel):
     thread_id: UUID | None = None
     message: str = Field(min_length=1, max_length=8000)
     attachments: list[dict[str, Any]] = Field(default_factory=list)
+    client_context: dict[str, Any] = Field(default_factory=dict)
     runtime_pattern: Literal["langgraph_sdk"] | None = None
     graph_version: str | None = Field(default=None, max_length=80)
     prompt_version: str | None = Field(default=None, max_length=80)

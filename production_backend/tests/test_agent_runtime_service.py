@@ -22,6 +22,20 @@ def test_agent_runtime_service_creates_run_with_thread_message_events_and_idempo
             actor_user_id=owner_user_id,
             thread_id=None,
             message="Review my pumping pattern",
+            client_context={
+                "source": "flutter-agent-hub",
+                "locale": "en-US",
+                "hospital_bag_cart": {
+                    "groups": [
+                        {
+                            "title": "Feeding",
+                            "tone": "sky",
+                            "items": [{"id": "pump-custom", "name": "Custom pump", "qty": 1, "price": 999.0}],
+                        }
+                    ],
+                    "totals": {"itemCount": 1, "total": 919.08},
+                },
+            },
             request_id="req_run",
             idempotency_key="idem-run",
         )
@@ -30,6 +44,7 @@ def test_agent_runtime_service_creates_run_with_thread_message_events_and_idempo
     assert run.actor_user_id == owner_user_id
     assert run.runtime_pattern == "langgraph_sdk"
     assert repository.messages[0].content["text"] == "Review my pumping pattern"
+    assert repository.messages[0].content["client_context"]["hospital_bag_cart"]["groups"][0]["items"][0]["id"] == "pump-custom"
     assert [event.event_type for event in repository.events] == ["run.queued", "message.completed"]
     assert repository.events[0].payload["phase"] == "queued"
     assert repository.events[0].payload["label"] == "我已经收到你的消息啦～"

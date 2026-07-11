@@ -7,6 +7,7 @@ from uuid import UUID
 from ...core.errors import ApiError
 from ..audit import IdempotencyKey, IdempotencyService, OutboxService, parse_idempotency_response_ref, request_hash
 from .actions.policy import AgentActionPolicy
+from .client_context import sanitize_agent_client_context
 from .run_lifecycle.controls import AgentRunControls
 from .models import AgentAction, AgentArtifact, AgentEvent, AgentRun, AgentThread
 from .repository import AgentRuntimeRepository
@@ -65,6 +66,7 @@ class AgentRuntimeService:
         thread_id: UUID | None,
         message: str,
         attachments: list[dict[str, Any]] | None = None,
+        client_context: dict[str, Any] | None = None,
         runtime_pattern: str | None = None,
         graph_version: str | None = None,
         prompt_version: str | None = None,
@@ -77,6 +79,7 @@ class AgentRuntimeService:
             raise ApiError(code="validation_failed", message="Only langgraph_sdk runtime is supported.", status=422)
         normalized_message = _normalize_text(message, max_length=8000, required=True)
         safe_attachments = attachments or []
+        safe_client_context = sanitize_agent_client_context(client_context)
         idempotency_record = await self._reserve_run_idempotency(
             actor_user_id=actor_user_id,
             key=idempotency_key,
@@ -84,6 +87,7 @@ class AgentRuntimeService:
                 "thread_id": str(thread_id or ""),
                 "message": normalized_message,
                 "attachments": safe_attachments,
+                "client_context": safe_client_context,
                 "runtime_pattern": normalized_runtime_pattern,
                 "graph_version": graph_version or DEFAULT_GRAPH_VERSION,
                 "prompt_version": prompt_version or "",
@@ -107,12 +111,18 @@ class AgentRuntimeService:
             request_id=request_id,
             trace_id=trace_id,
         )
+        message_content: dict[str, Any] = {
+            "text": normalized_message,
+            "attachments": safe_attachments,
+        }
+        if safe_client_context:
+            message_content["client_context"] = safe_client_context
         message_record = await self.repository.create_message(
             thread_id=thread.id,
             run_id=run.id,
             role="user",
             message_type="text",
-            content={"text": normalized_message, "attachments": safe_attachments},
+            content=message_content,
             status="completed",
         )
         await self.repository.touch_thread(thread=thread, updated_at=_utcnow())
