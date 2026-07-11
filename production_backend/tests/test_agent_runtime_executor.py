@@ -138,6 +138,72 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result(capl
     assert "model_reasoning" in timing_payloads[-1]["timings_ms"]
 
 
+def test_agent_runtime_executor_projects_only_current_user_images_into_model_input() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    prior_user = _message(
+        thread_id=thread_id,
+        run_id=uuid4(),
+        role="user",
+        text="上一轮图片",
+        sequence=1,
+        content_overrides={
+            "attachments": [
+                {
+                    "type": "image",
+                    "data_url": "data:image/png;base64,cHJpb3I=",
+                    "detail": "high",
+                }
+            ]
+        },
+    )
+    current_user = _message(
+        thread_id=thread_id,
+        run_id=run.id,
+        role="user",
+        text="请看这张图片",
+        sequence=2,
+        content_overrides={
+            "attachments": [
+                {
+                    "type": "image",
+                    "data_url": "data:image/jpeg;base64,Y3VycmVudA==",
+                    "detail": "high",
+                },
+                {
+                    "type": "form_submission",
+                    "form_id": "hospital_bag_intake",
+                    "values": {"due_date_or_week": "32周"},
+                    "verified": True,
+                },
+            ]
+        },
+    )
+    repository = FakeRuntimeRepository(messages=[prior_user, current_user], current_message=current_user)
+    backend = CapturingSdkBackend(result=SdkNodeResult(final_text="我看到了。"))
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+        ).execute(run=run)
+    )
+
+    assert result.status == "completed"
+    assert backend.requests[0].model_input[0] == {"role": "user", "content": "上一轮图片"}
+    assert backend.requests[0].model_input[-1] == {
+        "role": "user",
+        "content": [
+            {"type": "input_text", "text": "请看这张图片"},
+            {
+                "type": "input_image",
+                "image_url": "data:image/jpeg;base64,Y3VycmVudA==",
+                "detail": "high",
+            },
+        ],
+    }
+
+
 def test_agent_runtime_executor_projects_precomputed_memory_snapshot_into_dynamic_context() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)

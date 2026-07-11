@@ -82,6 +82,10 @@ FORM_TOOL_IDS = {
 }
 FORM_CREATION_TOOL_NAMES = {"birth_plan_form_create", "hospital_bag_form_create"}
 MARKDOWN_IMAGE_URL_PATTERN = re.compile(r"!\[[^\]]*\]\(\s*(?:<([^>]+)>|([^\s)]+))")
+MODEL_IMAGE_DATA_URL_PATTERN = re.compile(
+    r"^data:image/(?:png|jpe?g|webp|gif);base64,",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -314,7 +318,10 @@ class AgentRuntimeExecutor:
         )
         model_input = self.input_builder.build(
             projection=projection,
-            current_user_message=_to_model_message(turn_context.current_message),
+            current_user_message=_to_model_message(
+                turn_context.current_message,
+                include_image_attachments=True,
+            ),
         )
         return _PreparedModelTurn(projection=projection, model_input=model_input)
 
@@ -1448,9 +1455,50 @@ def _sdk_instructions(*, projection: ContextProjection) -> str:
     return projection.stable_system_prompt
 
 
-def _to_model_message(message: AgentMessage) -> dict[str, Any]:
+def _to_model_message(
+    message: AgentMessage,
+    *,
+    include_image_attachments: bool = False,
+) -> dict[str, Any]:
     role = message.role if message.role in {"user", "assistant"} else "user"
-    return {"role": role, "content": _message_text(message)}
+    text = _message_text(message)
+    if role != "user" or not include_image_attachments:
+        return {"role": role, "content": text}
+
+    image_inputs = _current_message_image_inputs(message)
+    if not image_inputs:
+        return {"role": role, "content": text}
+    return {
+        "role": role,
+        "content": [
+            {"type": "input_text", "text": text},
+            *image_inputs,
+        ],
+    }
+
+
+def _current_message_image_inputs(message: AgentMessage) -> list[dict[str, str]]:
+    content = message.content if isinstance(message.content, dict) else {}
+    attachments = content.get("attachments")
+    if not isinstance(attachments, list):
+        return []
+
+    image_inputs: list[dict[str, str]] = []
+    for attachment in attachments:
+        if not isinstance(attachment, dict) or attachment.get("type") != "image":
+            continue
+        image_url = _text(attachment, "data_url")
+        if not MODEL_IMAGE_DATA_URL_PATTERN.match(image_url):
+            continue
+        detail = _text(attachment, "detail")
+        image_inputs.append(
+            {
+                "type": "input_image",
+                "image_url": image_url,
+                "detail": detail if detail in {"auto", "low", "high"} else "auto",
+            }
+        )
+    return image_inputs
 
 
 RECENT_RUN_FACT_KEYS = ("user_goal", "assistant_conclusion", "tool_facts", "actions", "artifacts")
