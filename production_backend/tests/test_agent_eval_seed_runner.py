@@ -44,22 +44,20 @@ def test_agent_eval_seed_assertion_engine_reports_profile_write_for_memory_reque
     assert result.failures[0].observed == "profile_update"
 
 
-def test_agent_eval_seed_assertion_engine_reports_missing_diary_confirmation() -> None:
+def test_agent_eval_seed_assertion_engine_accepts_auto_queued_diary_create() -> None:
     case = _case("pregnancy_diary_entry")
     trace = AgentEvalTrace(
-        tool_calls=[{"tool_name": "diary.entry_upsert.propose", "status": "completed"}],
-        events=[],
-        actions=[],
+        tool_calls=[{"tool_name": "pregnancy_diary.entry_create.propose", "status": "completed"}],
+        events=[{"type": "action.queued"}],
+        actions=[{"action_type": "pregnancy_diary.entry.create", "status": "confirmed"}],
         safety_decision="allow",
         final_text="Saved.",
     )
 
     result = AgentEvalSeedAssertionEngine().evaluate(case=case, trace=trace)
 
-    assert result.passed is False
-    assert [(failure.category, failure.assertion) for failure in result.failures] == [
-        ("missing_confirmation", "action.confirmation_required"),
-    ]
+    assert result.passed is True
+    assert result.failures == []
 
 
 def test_agent_eval_seed_assertion_engine_reports_safety_mismatch() -> None:

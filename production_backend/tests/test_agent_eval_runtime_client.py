@@ -3,7 +3,14 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 from production_backend.app.modules.agent_runtime.evals.service import AgentEvalRuntimeClient, load_product_agent_eval_seed_cases
-from production_backend.app.modules.agent_runtime.models import AgentAction, AgentEvent, AgentMessage, AgentRun, AgentSafetyEvent, AgentToolCall
+from production_backend.app.modules.agent_runtime.models import (
+    AgentAction,
+    AgentEvent,
+    AgentMessage,
+    AgentRun,
+    AgentSafetyEvent,
+    AgentToolCall,
+)
 from production_backend.app.modules.agent_runtime.run_lifecycle.executor import AgentRuntimeExecutor
 from production_backend.app.modules.agent_runtime.sdk import OpenAIAgentsSdkRunner, ScriptedSdkBackend, scripted_sdk_response
 
@@ -19,7 +26,7 @@ def test_agent_eval_runtime_client_executes_run_and_evaluates_seed_case() -> Non
         thread_id=thread_id,
         run_id=run.id,
         role="user",
-        text="Save that I felt calm in today's pregnancy diary.",
+        text="Delete today's pregnancy diary.",
         sequence=1,
     )
     repository = FakeEvalRuntimeRepository(
@@ -30,7 +37,7 @@ def test_agent_eval_runtime_client_executes_run_and_evaluates_seed_case() -> Non
             AgentToolCall(
                 id=uuid4(),
                 run_id=run.id,
-                tool_name="diary.entry_upsert.propose",
+                tool_name="pregnancy_diary.entry_delete.propose",
                 call_id="call-diary",
                 status="completed",
                 safe_args={},
@@ -43,15 +50,12 @@ def test_agent_eval_runtime_client_executes_run_and_evaluates_seed_case() -> Non
             scripted_sdk_response(
                 action_proposals=(
                     {
-                        "action_type": "diary.entry.upsert",
+                        "action_type": "pregnancy_diary.entry.delete",
                         "target_type": "pregnancy_diary_entry",
                         "side_effect_level": "medium",
-                        "preview_payload": {"entry_date": "2026-07-11", "fields": ["mood"]},
-                        "apply_payload": {
-                            "entry_date": "2026-07-11",
-                            "values": {"mood": "calm"},
-                        },
-                        "idempotency_key": "idem-diary",
+                        "preview_payload": {"entry_date": "2026-07-11"},
+                        "apply_payload": {"entry_date": "2026-07-11"},
+                        "idempotency_key": "idem-diary-delete",
                     },
                 )
             )
@@ -61,7 +65,7 @@ def test_agent_eval_runtime_client_executes_run_and_evaluates_seed_case() -> Non
     case = {
         "suite": "runtime_trace_collection",
         "name": "supported action trace",
-        "expected_tool_calls": [{"contract": "diary.entry_upsert.propose"}],
+        "expected_tool_calls": [{"contract": "pregnancy_diary.entry_delete.propose"}],
         "forbidden_tool_calls": [],
         "expected_safety_decision": "allow",
         "expected_behavior": {
@@ -76,9 +80,9 @@ def test_agent_eval_runtime_client_executes_run_and_evaluates_seed_case() -> Non
     assert result.execution_result.status == "waiting_for_confirmation"
     assert result.eval_result.passed is True
     assert result.trace.service_skill_id == "cozymate_service_agent"
-    assert result.trace.tool_calls[0]["tool_name"] == "diary.entry_upsert.propose"
+    assert result.trace.tool_calls[0]["tool_name"] == "pregnancy_diary.entry_delete.propose"
     assert any(event["type"] == "action.confirmation_required" for event in result.trace.events)
-    assert result.trace.actions[0]["action_type"] == "diary.entry.upsert"
+    assert result.trace.actions[0]["action_type"] == "pregnancy_diary.entry.delete"
 
 
 class FakeEvalRuntimeRepository:

@@ -4,6 +4,8 @@ from datetime import date, datetime, timezone
 from typing import Any
 from uuid import UUID
 
+from sqlalchemy.exc import IntegrityError
+
 from ...core.errors import ApiError
 from ..audit import AuditService
 from .models import PregnancyDiaryEntry
@@ -38,7 +40,7 @@ class DiaryService:
             limit=limit,
         )
 
-    async def upsert_entry(
+    async def create_entry(
         self,
         *,
         owner_user_id: UUID,
@@ -46,11 +48,48 @@ class DiaryService:
         values: dict[str, Any],
         request_id: str = "",
     ) -> PregnancyDiaryEntry:
-        entry = await self.repository.upsert_entry(owner_user_id=owner_user_id, entry_date=entry_date, values=values)
-        await self._audit(owner_user_id=owner_user_id, action="diary.entry.upsert", resource_id=str(entry.id), request_id=request_id)
+        _require_values(values)
+        try:
+            entry = await self.repository.create_entry(owner_user_id=owner_user_id, entry_date=entry_date, values=values)
+        except IntegrityError as exc:
+            raise ApiError(code="conflict", message="Diary entry already exists for this date.", status=409) from exc
+        if entry is None:
+            raise ApiError(code="conflict", message="Diary entry already exists for this date.", status=409)
+        await self._audit(
+            owner_user_id=owner_user_id,
+            action="pregnancy_diary.entry.create",
+            resource_id=str(entry.id),
+            request_id=request_id,
+        )
         return entry
 
-    async def delete_entry(self, *, owner_user_id: UUID, entry_date: date, request_id: str = "") -> None:
+    async def update_entry(
+        self,
+        *,
+        owner_user_id: UUID,
+        entry_date: date,
+        values: dict[str, Any],
+        request_id: str = "",
+    ) -> PregnancyDiaryEntry:
+        _require_values(values)
+        entry = await self.repository.update_entry(owner_user_id=owner_user_id, entry_date=entry_date, values=values)
+        if entry is None:
+            raise ApiError(code="not_found", message="Diary entry not found.", status=404)
+        await self._audit(
+            owner_user_id=owner_user_id,
+            action="pregnancy_diary.entry.update",
+            resource_id=str(entry.id),
+            request_id=request_id,
+        )
+        return entry
+
+    async def delete_entry(
+        self,
+        *,
+        owner_user_id: UUID,
+        entry_date: date,
+        request_id: str = "",
+    ) -> PregnancyDiaryEntry:
         deleted = await self.repository.soft_delete_entry(
             owner_user_id=owner_user_id,
             entry_date=entry_date,
@@ -58,7 +97,13 @@ class DiaryService:
         )
         if deleted is None:
             raise ApiError(code="not_found", message="Diary entry not found.", status=404)
-        await self._audit(owner_user_id=owner_user_id, action="diary.entry.delete", resource_id=str(deleted.id), request_id=request_id)
+        await self._audit(
+            owner_user_id=owner_user_id,
+            action="pregnancy_diary.entry.delete",
+            resource_id=str(deleted.id),
+            request_id=request_id,
+        )
+        return deleted
 
     async def _audit(self, *, owner_user_id: UUID, action: str, resource_id: str, request_id: str) -> None:
         if self.audit_service is not None:
@@ -69,3 +114,8 @@ class DiaryService:
                 resource_id=resource_id,
                 request_id=request_id,
             )
+
+
+def _require_values(values: dict[str, Any]) -> None:
+    if not values:
+        raise ApiError(code="validation_failed", message="At least one diary field is required.", status=422)

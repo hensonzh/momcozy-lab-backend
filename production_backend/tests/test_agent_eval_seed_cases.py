@@ -83,7 +83,9 @@ def test_product_agent_eval_seed_uses_current_pregnancy_action_contracts() -> No
     assert "pregnancy.plan.propose" in plan_contracts
     assert "load_service_skill" in task_contracts
     assert "plans.task_complete.propose" in task_contracts
-    assert "diary.entry_upsert.propose" in diary_contracts
+    assert diary_contracts == {"pregnancy_diary.entry_create.propose"}
+    assert by_suite["pregnancy_diary_entry"]["expected_behavior"]["service_skill_id"] == "cozymate_service_agent"
+    assert by_suite["pregnancy_diary_entry"]["expected_behavior"]["requires_confirmation_before_write"] is False
     assert "pregnancy_plan_proposal" not in plan_contracts
     assert "plan_task_update_proposal" not in task_contracts
     assert "diary_entry_upsert_proposal" not in diary_contracts
@@ -148,12 +150,8 @@ def test_product_agent_eval_seed_keeps_memory_writes_off_live_run_contract() -> 
     by_suite = {case["suite"]: case for case in cases}
 
     memory_contracts = {tool_call["contract"] for tool_call in by_suite["memory_preference_capture"]["expected_tool_calls"]}
-    forbidden_preference_contracts = {
-        tool_call["contract"] for tool_call in by_suite["memory_preference_capture"]["forbidden_tool_calls"]
-    }
-    forbidden_sensitive_contracts = {
-        tool_call["contract"] for tool_call in by_suite["memory_sensitive_rejection"]["forbidden_tool_calls"]
-    }
+    forbidden_preference_contracts = {tool_call["contract"] for tool_call in by_suite["memory_preference_capture"]["forbidden_tool_calls"]}
+    forbidden_sensitive_contracts = {tool_call["contract"] for tool_call in by_suite["memory_sensitive_rejection"]["forbidden_tool_calls"]}
 
     assert memory_contracts == set()
     assert "profile_update" in forbidden_preference_contracts
@@ -173,7 +171,8 @@ def test_product_agent_eval_seed_covers_postpartum_recovery_service_skill() -> N
 
     assert by_suite["postpartum_recovery_checkin"]["expected_behavior"]["service_skill_id"] == "health-consultation"
     assert by_suite["postpartum_recovery_checkin"]["expected_behavior"]["requires_confirmation_before_write"] is False
-    assert {"profile.read", "plans.current.read", "diary.recent.read"} <= checkin_contracts
+    assert {"profile.read", "plans.current.read"} <= checkin_contracts
+    assert "pregnancy_diary.entries.read" not in checkin_contracts
     assert by_suite["postpartum_recovery_task"]["expected_behavior"]["service_skill_id"] == "health-consultation"
     assert by_suite["postpartum_recovery_task"]["expected_behavior"]["requires_confirmation_before_write"] is True
     assert "plans.task_create.propose" in task_contracts

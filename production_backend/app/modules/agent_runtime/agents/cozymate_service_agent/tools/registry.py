@@ -83,8 +83,7 @@ def default_tool_registry() -> ToolContractRegistry:
             name="profile_update",
             domain="global",
             description=(
-                "更新当前用户明确提供的基础资料字段，例如 display_name、age 或 onboarding_skipped。"
-                "不要根据图片、语气或上下文猜测资料。"
+                "更新当前用户明确提供的基础资料字段，例如 display_name、age 或 onboarding_skipped。不要根据图片、语气或上下文猜测资料。"
             ),
             loading_mode="eager",
             read_or_write="write",
@@ -195,9 +194,59 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="diary.entry_upsert.propose",
-            domain="diary",
-            description="提出孕期日记写入或更新动作，等待用户确认。",
+            name="pregnancy_diary.entries.read",
+            domain="pregnancy_diary",
+            description=("读取当前用户某一天或一个日期范围内的孕期日记。用户要查看、回顾、整理孕期日记，或更新前需要取得原记录时调用。"),
+            read_or_write="read",
+            side_effect_level="none",
+            blocking_policy="must_wait",
+            result_dependency="next_tool_call",
+            requires_confirmation=False,
+            idempotency_required=False,
+            audit_required=False,
+            timeout_seconds=10,
+        )
+    )
+    registry.register(
+        _tool_contract(
+            name="pregnancy_diary.entry_create.propose",
+            domain="pregnancy_diary",
+            description=(
+                "为当前用户创建指定日期的孕期日记。"
+                "用户明确要求记录，且该日期尚无日记时调用；可记录用户提供的正文、心情、睡眠、胎动、症状或产检问题。"
+            ),
+            read_or_write="write",
+            side_effect_level="low",
+            blocking_policy="enqueue_and_continue",
+            result_dependency="none",
+            requires_confirmation=False,
+            idempotency_required=True,
+            audit_required=True,
+            timeout_seconds=15,
+        )
+    )
+    registry.register(
+        _tool_contract(
+            name="pregnancy_diary.entry_update.propose",
+            domain="pregnancy_diary",
+            description=(
+                "更新当前用户指定日期已有的孕期日记。用户明确补充或修改已有记录时调用；修改正文前先读取原日记并提交合并后的完整正文。"
+            ),
+            read_or_write="write",
+            side_effect_level="low",
+            blocking_policy="enqueue_and_continue",
+            result_dependency="none",
+            requires_confirmation=False,
+            idempotency_required=True,
+            audit_required=True,
+            timeout_seconds=15,
+        )
+    )
+    registry.register(
+        _tool_contract(
+            name="pregnancy_diary.entry_delete.propose",
+            domain="pregnancy_diary",
+            description="删除当前用户指定日期的孕期日记。用户明确要求删除某天记录时调用，并等待用户确认。",
             read_or_write="write",
             side_effect_level="medium",
             blocking_policy="wait_for_confirmation",

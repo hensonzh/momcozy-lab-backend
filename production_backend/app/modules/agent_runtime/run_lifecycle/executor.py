@@ -1415,7 +1415,6 @@ SERVICE_SKILL_RECOMMENDED_TOOL_CONTRACTS: dict[ServiceSkillId, tuple[str, ...]] 
     ),
     ServiceSkillId.HEALTH_CONSULTATION: (
         "records.milk_status.read",
-        "diary.entry_upsert.propose",
         "ibclc_consult_card_create",
     ),
     ServiceSkillId.EMOTION_SUPPORT: (),

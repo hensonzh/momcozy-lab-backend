@@ -111,29 +111,31 @@ SCENARIO_NAMESPACE_DEFINITIONS: tuple[ToolNamespace, ...] = (
     ),
     ToolNamespace(
         name="health_consultation",
-        description="健康咨询中用于提出日记记录和创建 IBCLC 咨询卡片的工具包。",
+        description="健康咨询中用于创建 IBCLC 咨询卡片的工具包。",
+        tool_contracts=("ibclc_consult_card_create",),
+    ),
+    ToolNamespace(
+        name="pregnancy_diary",
+        description="独立管理孕期日记的读取、创建、更新和删除工具包。",
         tool_contracts=(
-            "diary.entry_upsert.propose",
-            "ibclc_consult_card_create",
+            "pregnancy_diary.entries.read",
+            "pregnancy_diary.entry_create.propose",
+            "pregnancy_diary.entry_update.propose",
+            "pregnancy_diary.entry_delete.propose",
         ),
     ),
 )
+
+
 def default_tool_namespace_registry(tool_registry: ToolContractRegistry | None = None) -> ToolNamespaceRegistry:
     registry = tool_registry or _default_tool_registry()
     registered_names = set(registry.names_for_sdk())
-    configured_names = {
-        tool_name
-        for namespace in SCENARIO_NAMESPACE_DEFINITIONS
-        for tool_name in namespace.tool_contracts
-    }
+    configured_names = {tool_name for namespace in SCENARIO_NAMESPACE_DEFINITIONS for tool_name in namespace.tool_contracts}
     unknown_names = sorted(configured_names - registered_names)
     if unknown_names:
         raise ValueError(f"agent tool namespace references unknown contracts: {unknown_names}")
     return ToolNamespaceRegistry(
-        namespaces=tuple(
-            _scenario_namespace(namespace=namespace, registry=registry)
-            for namespace in SCENARIO_NAMESPACE_DEFINITIONS
-        )
+        namespaces=tuple(_scenario_namespace(namespace=namespace, registry=registry) for namespace in SCENARIO_NAMESPACE_DEFINITIONS)
     )
 
 

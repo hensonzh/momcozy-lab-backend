@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 from uuid import UUID
 
@@ -22,11 +22,13 @@ class PregnancyDiaryEntryRead(BaseModel):
     content: str
     attachments: list[Any]
     status: str
+    created_at: datetime
+    updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
 
 
-class PregnancyDiaryEntryUpdate(BaseModel):
+class PregnancyDiaryEntryValues(BaseModel):
     gestational_week: str | None = Field(default=None, max_length=32)
     mood: str | None = Field(default=None, max_length=64)
     energy_level: str | None = Field(default=None, max_length=64)
@@ -37,6 +39,14 @@ class PregnancyDiaryEntryUpdate(BaseModel):
     nutrition_note: str | None = None
     content: str | None = None
     attachments: list[Any] | None = None
+
+
+class PregnancyDiaryEntryCreate(PregnancyDiaryEntryValues):
+    entry_date: date
+
+
+class PregnancyDiaryEntryUpdate(PregnancyDiaryEntryValues):
+    pass
 
 
 class PregnancyDiaryEntryListResponse(BaseModel):

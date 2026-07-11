@@ -5,69 +5,74 @@ from uuid import uuid4
 import pytest
 
 from production_backend.app.modules.agent_runtime.models import AgentAction
-from production_backend.app.modules.diary.agent_actions import DIARY_ENTRY_UPSERT_ACTION, DiaryEntryUpsertActionHandler
+from production_backend.app.modules.diary.agent_actions import (
+    PREGNANCY_DIARY_ENTRY_CREATE_ACTION,
+    PREGNANCY_DIARY_ENTRY_DELETE_ACTION,
+    PREGNANCY_DIARY_ENTRY_UPDATE_ACTION,
+    PregnancyDiaryEntryCreateActionHandler,
+    PregnancyDiaryEntryDeleteActionHandler,
+    PregnancyDiaryEntryUpdateActionHandler,
+)
 from production_backend.app.modules.diary.models import PregnancyDiaryEntry
 from production_backend.app.workers.errors import PermanentJobError
 
 
-def test_diary_entry_upsert_action_handler_upserts_entry_through_service() -> None:
+def test_pregnancy_diary_create_action_calls_create_service() -> None:
     service = FakeDiaryService()
     action = _action(
+        action_type=PREGNANCY_DIARY_ENTRY_CREATE_ACTION,
         apply_payload={
             "entry_date": "2026-07-04",
-            "values": {
-                "mood": "calm",
-                "content": "Today I felt steady.",
-                "unknown_field": "ignored",
-            },
-        }
+            "values": {"mood": "calm", "content": "Today I felt steady.", "unknown_field": "ignored"},
+        },
     )
 
-    result = asyncio.run(DiaryEntryUpsertActionHandler(service=service)(action))
+    result = asyncio.run(PregnancyDiaryEntryCreateActionHandler(service=service)(action))
 
     assert result.resource_type == "pregnancy_diary_entry"
     assert result.resource_id == str(service.entry.id)
-    assert result.details == {
-        "entry_date": "2026-07-04",
-        "agent_action_id": str(action.id),
-        "agent_run_id": str(action.run_id),
-    }
-    assert service.upsert_entry_kwargs["owner_user_id"] == action.actor_user_id
-    assert service.upsert_entry_kwargs["entry_date"] == date(2026, 7, 4)
-    assert service.upsert_entry_kwargs["values"] == {
-        "mood": "calm",
-        "content": "Today I felt steady.",
-    }
-    assert service.upsert_entry_kwargs["request_id"] == f"agent-action:{action.id}"
+    assert service.create_kwargs["entry_date"] == date(2026, 7, 4)
+    assert service.create_kwargs["values"] == {"mood": "calm", "content": "Today I felt steady."}
 
 
-def test_diary_entry_upsert_action_handler_accepts_flat_payload_values() -> None:
+def test_pregnancy_diary_update_action_calls_update_service() -> None:
     service = FakeDiaryService()
-    action = _action(apply_payload={"entry_date": date(2026, 7, 4), "mood": "calm", "content": "Flat payload"})
+    action = _action(
+        action_type=PREGNANCY_DIARY_ENTRY_UPDATE_ACTION,
+        apply_payload={"entry_date": "2026-07-04", "values": {"content": "Updated entry"}},
+    )
 
-    asyncio.run(DiaryEntryUpsertActionHandler(service=service)(action))
+    asyncio.run(PregnancyDiaryEntryUpdateActionHandler(service=service)(action))
 
-    assert service.upsert_entry_kwargs["values"] == {"mood": "calm", "content": "Flat payload"}
+    assert service.update_kwargs["entry_date"] == date(2026, 7, 4)
+    assert service.update_kwargs["values"] == {"content": "Updated entry"}
 
 
-def test_diary_entry_upsert_action_handler_rejects_missing_entry_date() -> None:
+def test_pregnancy_diary_delete_action_calls_delete_service() -> None:
+    service = FakeDiaryService()
+    action = _action(
+        action_type=PREGNANCY_DIARY_ENTRY_DELETE_ACTION,
+        apply_payload={"entry_date": "2026-07-04"},
+    )
+
+    asyncio.run(PregnancyDiaryEntryDeleteActionHandler(service=service)(action))
+
+    assert service.delete_kwargs["entry_date"] == date(2026, 7, 4)
+
+
+@pytest.mark.parametrize(
+    "handler",
+    [
+        PregnancyDiaryEntryCreateActionHandler,
+        PregnancyDiaryEntryUpdateActionHandler,
+        PregnancyDiaryEntryDeleteActionHandler,
+    ],
+)
+def test_pregnancy_diary_actions_require_entry_date(handler) -> None:
     with pytest.raises(PermanentJobError) as exc_info:
-        asyncio.run(
-            DiaryEntryUpsertActionHandler(service=FakeDiaryService())(
-                _action(apply_payload={"values": {"content": "Today I felt steady."}})
-            )
-        )
+        asyncio.run(handler(service=FakeDiaryService())(_action(action_type="test", apply_payload={})))
 
     assert exc_info.value.code == "missing_entry_date"
-
-
-def test_diary_entry_upsert_action_handler_rejects_missing_values() -> None:
-    with pytest.raises(PermanentJobError) as exc_info:
-        asyncio.run(
-            DiaryEntryUpsertActionHandler(service=FakeDiaryService())(_action(apply_payload={"entry_date": "2026-07-04"}))
-        )
-
-    assert exc_info.value.code == "missing_diary_values"
 
 
 class FakeDiaryService:
@@ -81,27 +86,33 @@ class FakeDiaryService:
             symptom_tags=[],
             attachments=[],
         )
-        self.upsert_entry_kwargs = {}
+        self.create_kwargs = {}
+        self.update_kwargs = {}
+        self.delete_kwargs = {}
 
-    async def upsert_entry(self, **kwargs):
-        self.upsert_entry_kwargs = kwargs
-        self.entry.owner_user_id = kwargs["owner_user_id"]
-        self.entry.entry_date = kwargs["entry_date"]
-        for key, value in kwargs["values"].items():
-            setattr(self.entry, key, value)
+    async def create_entry(self, **kwargs):
+        self.create_kwargs = kwargs
+        return self.entry
+
+    async def update_entry(self, **kwargs):
+        self.update_kwargs = kwargs
+        return self.entry
+
+    async def delete_entry(self, **kwargs):
+        self.delete_kwargs = kwargs
         return self.entry
 
 
-def _action(*, apply_payload: dict) -> AgentAction:
+def _action(*, action_type: str, apply_payload: dict) -> AgentAction:
     return AgentAction(
         id=uuid4(),
         run_id=uuid4(),
         actor_user_id=uuid4(),
-        action_type=DIARY_ENTRY_UPSERT_ACTION,
+        action_type=action_type,
         target_type="pregnancy_diary_entry",
-        target_id="",
+        target_id="2026-07-04",
         status="confirmed",
-        side_effect_level="medium",
+        side_effect_level="low",
         preview_payload={},
         apply_payload=apply_payload,
         idempotency_key="idem-action",

@@ -67,9 +67,10 @@ The source of truth is each FastAPI route's OpenAPI extension metadata.
 | DELETE | `/v1/plans/{plan_id}` | plans | flutter | stable | Delete Plan |
 | GET | `/v1/plans/{plan_id}` | plans | flutter | stable | Get Plan |
 | GET | `/v1/pregnancy-diary/entries` | pregnancy-diary | flutter | stable | List Entries |
+| POST | `/v1/pregnancy-diary/entries` | pregnancy-diary | flutter | stable | Create Entry |
 | DELETE | `/v1/pregnancy-diary/entries/{entry_date}` | pregnancy-diary | flutter | stable | Delete Entry |
 | GET | `/v1/pregnancy-diary/entries/{entry_date}` | pregnancy-diary | flutter | stable | Get Entry |
-| PUT | `/v1/pregnancy-diary/entries/{entry_date}` | pregnancy-diary | flutter | stable | Upsert Entry |
+| PATCH | `/v1/pregnancy-diary/entries/{entry_date}` | pregnancy-diary | flutter | stable | Update Entry |
 | GET | `/v1/profile/infants` | profiles | flutter | stable | List My Infants |
 | POST | `/v1/profile/infants` | profiles | flutter | stable | Create My Infant |
 | GET | `/v1/profile/me` | profiles | flutter | stable | Get My Profile |

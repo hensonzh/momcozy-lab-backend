@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, timezone
 from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
@@ -17,22 +17,32 @@ def test_diary_entries_require_current_user() -> None:
     assert response.json()["error"]["code"] == "authentication_required"
 
 
-def test_upsert_entry_uses_current_user_and_request_id() -> None:
+def test_create_and_update_entry_use_current_user_and_request_id() -> None:
     user_id = uuid4()
     fake_service = FakeDiaryService(user_id=user_id)
     app = create_app(Settings(app_env="test"))
     _override_current_user(app, user_id)
     app.dependency_overrides[get_diary_service] = lambda: fake_service
 
-    response = TestClient(app).put(
-        "/v1/pregnancy-diary/entries/2026-07-02",
+    create_response = TestClient(app).post(
+        "/v1/pregnancy-diary/entries",
         headers={"X-Request-ID": "req_diary"},
-        json={"mood": "calm"},
+        json={"entry_date": "2026-07-02", "mood": "calm"},
+    )
+    update_response = TestClient(app).patch(
+        "/v1/pregnancy-diary/entries/2026-07-02",
+        headers={"X-Request-ID": "req_update"},
+        json={"content": "updated"},
     )
 
-    assert response.status_code == 200
-    assert fake_service.upsert_kwargs["owner_user_id"] == user_id
-    assert fake_service.upsert_kwargs["request_id"] == "req_diary"
+    assert create_response.status_code == 201
+    assert update_response.status_code == 200
+    assert fake_service.create_kwargs["owner_user_id"] == user_id
+    assert fake_service.create_kwargs["entry_date"] == date(2026, 7, 2)
+    assert fake_service.create_kwargs["request_id"] == "req_diary"
+    assert fake_service.update_kwargs["owner_user_id"] == user_id
+    assert fake_service.update_kwargs["entry_date"] == date(2026, 7, 2)
+    assert fake_service.update_kwargs["request_id"] == "req_update"
 
 
 def test_list_and_delete_entries_use_current_user_scope() -> None:
@@ -74,7 +84,8 @@ def _override_current_user(app, user_id: UUID) -> None:
 class FakeDiaryService:
     def __init__(self, *, user_id: UUID) -> None:
         self.user_id = user_id
-        self.upsert_kwargs = {}
+        self.create_kwargs = {}
+        self.update_kwargs = {}
         self.list_kwargs = {}
         self.delete_kwargs = {}
 
@@ -85,8 +96,12 @@ class FakeDiaryService:
         self.list_kwargs = kwargs
         return [self._entry()]
 
-    async def upsert_entry(self, **kwargs):
-        self.upsert_kwargs = kwargs
+    async def create_entry(self, **kwargs):
+        self.create_kwargs = kwargs
+        return self._entry()
+
+    async def update_entry(self, **kwargs):
+        self.update_kwargs = kwargs
         return self._entry()
 
     async def delete_entry(self, **kwargs):
@@ -101,4 +116,6 @@ class FakeDiaryService:
             status="active",
             symptom_tags=[],
             attachments=[],
+            created_at=datetime(2026, 7, 2, tzinfo=timezone.utc),
+            updated_at=datetime(2026, 7, 2, tzinfo=timezone.utc),
         )

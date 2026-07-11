@@ -125,8 +125,20 @@ DEFAULT_AGENT_ACTION_RULES: Mapping[str, AgentActionPolicyRule] = {
         side_effect_level="medium",
         requires_confirmation=True,
     ),
-    "diary.entry.upsert": AgentActionPolicyRule(
-        action_type="diary.entry.upsert",
+    "pregnancy_diary.entry.create": AgentActionPolicyRule(
+        action_type="pregnancy_diary.entry.create",
+        target_type="pregnancy_diary_entry",
+        side_effect_level="low",
+        requires_confirmation=False,
+    ),
+    "pregnancy_diary.entry.update": AgentActionPolicyRule(
+        action_type="pregnancy_diary.entry.update",
+        target_type="pregnancy_diary_entry",
+        side_effect_level="low",
+        requires_confirmation=False,
+    ),
+    "pregnancy_diary.entry.delete": AgentActionPolicyRule(
+        action_type="pregnancy_diary.entry.delete",
         target_type="pregnancy_diary_entry",
         side_effect_level="medium",
         requires_confirmation=True,

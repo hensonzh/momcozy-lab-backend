@@ -16,7 +16,14 @@ from production_backend.app.modules.agent_runtime.repository import AgentRuntime
 from production_backend.app.modules.agent_runtime.run_lifecycle.controls import AgentRunControls
 from production_backend.app.modules.audit import AuditService, IdempotencyService, OutboxService
 from production_backend.app.modules.audit.repository import AuditRepository, OutboxRepository
-from production_backend.app.modules.diary.agent_actions import DIARY_ENTRY_UPSERT_ACTION, DiaryEntryUpsertActionHandler
+from production_backend.app.modules.diary.agent_actions import (
+    PREGNANCY_DIARY_ENTRY_CREATE_ACTION,
+    PREGNANCY_DIARY_ENTRY_DELETE_ACTION,
+    PREGNANCY_DIARY_ENTRY_UPDATE_ACTION,
+    PregnancyDiaryEntryCreateActionHandler,
+    PregnancyDiaryEntryDeleteActionHandler,
+    PregnancyDiaryEntryUpdateActionHandler,
+)
 from production_backend.app.modules.diary.repository import DiaryRepository
 from production_backend.app.modules.diary.service import DiaryService
 from production_backend.app.modules.notifications import (
@@ -140,7 +147,9 @@ async def run_outbox_worker(
                             PLAN_TASK_UPDATE_ACTION: PlanTaskUpdateActionHandler(service=plans_service),
                             PLAN_TASK_DELETE_ACTION: PlanTaskDeleteActionHandler(service=plans_service),
                             PLAN_DELETE_ACTION: PlanDeleteActionHandler(service=plans_service),
-                            DIARY_ENTRY_UPSERT_ACTION: DiaryEntryUpsertActionHandler(service=diary_service),
+                            PREGNANCY_DIARY_ENTRY_CREATE_ACTION: PregnancyDiaryEntryCreateActionHandler(service=diary_service),
+                            PREGNANCY_DIARY_ENTRY_UPDATE_ACTION: PregnancyDiaryEntryUpdateActionHandler(service=diary_service),
+                            PREGNANCY_DIARY_ENTRY_DELETE_ACTION: PregnancyDiaryEntryDeleteActionHandler(service=diary_service),
                             FEEDING_RECORD_CREATE_ACTION: FeedingRecordCreateActionHandler(service=records_service),
                             PUMPING_RECORD_CREATE_ACTION: PumpingRecordCreateActionHandler(service=records_service),
                             FEEDING_RECORD_DELETE_ACTION: FeedingRecordDeleteActionHandler(service=records_service),

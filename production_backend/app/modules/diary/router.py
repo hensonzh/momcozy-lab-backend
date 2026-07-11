@@ -13,7 +13,12 @@ from ..audit.repository import AuditRepository
 from ..auth import CurrentUser
 from .models import PregnancyDiaryEntry
 from .repository import DiaryRepository
-from .schemas import PregnancyDiaryEntryListResponse, PregnancyDiaryEntryRead, PregnancyDiaryEntryUpdate
+from .schemas import (
+    PregnancyDiaryEntryCreate,
+    PregnancyDiaryEntryListResponse,
+    PregnancyDiaryEntryRead,
+    PregnancyDiaryEntryUpdate,
+)
 from .service import DiaryService
 
 
@@ -58,15 +63,32 @@ async def get_entry(
     return _entry_read(entry)
 
 
-@router.put("/entries/{entry_date}", response_model=PregnancyDiaryEntryRead)
-async def upsert_entry(
+@router.post("/entries", response_model=PregnancyDiaryEntryRead, status_code=status.HTTP_201_CREATED)
+async def create_entry(
+    payload: PregnancyDiaryEntryCreate,
+    request: Request,
+    current_user: CurrentUser = Depends(require_current_user),
+    service: DiaryService = Depends(get_diary_service),
+) -> PregnancyDiaryEntryRead:
+    values = payload.model_dump(exclude={"entry_date"}, exclude_unset=True)
+    entry = await service.create_entry(
+        owner_user_id=current_user.user_id,
+        entry_date=payload.entry_date,
+        values=values,
+        request_id=str(getattr(request.state, "request_id", "") or ""),
+    )
+    return _entry_read(entry)
+
+
+@router.patch("/entries/{entry_date}", response_model=PregnancyDiaryEntryRead)
+async def update_entry(
     entry_date: date,
     payload: PregnancyDiaryEntryUpdate,
     request: Request,
     current_user: CurrentUser = Depends(require_current_user),
     service: DiaryService = Depends(get_diary_service),
 ) -> PregnancyDiaryEntryRead:
-    entry = await service.upsert_entry(
+    entry = await service.update_entry(
         owner_user_id=current_user.user_id,
         entry_date=entry_date,
         values=payload.model_dump(exclude_unset=True),
@@ -106,4 +128,6 @@ def _entry_read(entry: PregnancyDiaryEntry) -> PregnancyDiaryEntryRead:
         content=entry.content or "",
         attachments=entry.attachments or [],
         status=entry.status or "active",
+        created_at=entry.created_at,
+        updated_at=entry.updated_at,
     )

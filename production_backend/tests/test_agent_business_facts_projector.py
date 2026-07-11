@@ -106,7 +106,6 @@ def test_business_facts_projector_uses_compact_postpartum_limits() -> None:
             handlers={
                 "profile.read": handler,
                 "plans.current.read": handler,
-                "diary.recent.read": handler,
                 "records.milk_summary.read": handler,
             },
             config=BusinessFactsProjectorConfig(default_limit=4, recent_limit=2, milk_days=14),
@@ -120,7 +119,6 @@ def test_business_facts_projector_uses_compact_postpartum_limits() -> None:
     assert calls == [
         {"tool_name": "profile.read", "args": {}},
         {"tool_name": "plans.current.read", "args": {"limit": 4}},
-        {"tool_name": "diary.recent.read", "args": {"limit": 2}},
         {"tool_name": "records.milk_summary.read", "args": {"days": 14, "limit": 2}},
     ]
 

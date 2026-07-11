@@ -9,14 +9,14 @@ from production_backend.app.modules.diary.repository import DiaryRepository
 from production_backend.app.modules.diary.service import DiaryService
 
 
-def test_diary_service_upserts_entry_and_records_audit() -> None:
+def test_diary_service_creates_entry_and_records_audit() -> None:
     owner_user_id = uuid4()
     repository = FakeDiaryRepository()
     audit_service = FakeAuditService()
     service = DiaryService(repository=repository, audit_service=audit_service)
 
     entry = asyncio.run(
-        service.upsert_entry(
+        service.create_entry(
             owner_user_id=owner_user_id,
             entry_date=date(2026, 7, 2),
             values={"mood": "calm", "content": "A good day"},
@@ -26,7 +26,7 @@ def test_diary_service_upserts_entry_and_records_audit() -> None:
 
     assert entry.owner_user_id == owner_user_id
     assert entry.mood == "calm"
-    assert audit_service.record_kwargs["action"] == "diary.entry.upsert"
+    assert audit_service.record_kwargs["action"] == "pregnancy_diary.entry.create"
 
 
 def test_diary_service_lists_and_deletes_entries() -> None:
@@ -41,21 +41,22 @@ def test_diary_service_lists_and_deletes_entries() -> None:
 
     assert entries == [entry]
     assert entry.status == "deleted"
-    assert audit_service.record_kwargs["action"] == "diary.entry.delete"
+    assert audit_service.record_kwargs["action"] == "pregnancy_diary.entry.delete"
 
 
-def test_diary_repository_upsert_restores_soft_deleted_entry() -> None:
+def test_diary_repository_create_restores_soft_deleted_entry_without_stale_values() -> None:
     owner_user_id = uuid4()
     entry_date = date(2026, 7, 2)
     deleted_entry = _entry(owner_user_id=owner_user_id)
     deleted_entry.entry_date = entry_date
     deleted_entry.status = "deleted"
     deleted_entry.deleted_at = datetime(2026, 7, 3, tzinfo=timezone.utc)
+    deleted_entry.appointment_note = "old question"
     session = FakeDiarySession(entry=deleted_entry)
     repository = DiaryRepository(session=session)  # type: ignore[arg-type]
 
     entry = asyncio.run(
-        repository.upsert_entry(
+        repository.create_entry(
             owner_user_id=owner_user_id,
             entry_date=entry_date,
             values={"mood": "calm again", "content": "Restored entry"},
@@ -66,6 +67,7 @@ def test_diary_repository_upsert_restores_soft_deleted_entry() -> None:
     assert entry.status == "active"
     assert entry.deleted_at is None
     assert entry.mood == "calm again"
+    assert entry.appointment_note == ""
     assert session.added == []
     assert session.flushed is True
 
@@ -93,13 +95,22 @@ class FakeDiaryRepository:
     async def list_entries(self, **kwargs):
         return self.entries
 
-    async def upsert_entry(self, *, owner_user_id: UUID, entry_date: date, values: dict):
+    async def create_entry(self, *, owner_user_id: UUID, entry_date: date, values: dict):
+        if self.entry is not None and self.entry.deleted_at is None:
+            return None
         entry = self.entry or _entry(owner_user_id=owner_user_id)
         entry.entry_date = entry_date
         for field, value in values.items():
             setattr(entry, field, value)
         self.entry = entry
         return entry
+
+    async def update_entry(self, *, owner_user_id: UUID, entry_date: date, values: dict):
+        if self.entry is None or self.entry.deleted_at is not None:
+            return None
+        for field, value in values.items():
+            setattr(self.entry, field, value)
+        return self.entry
 
     async def soft_delete_entry(self, **kwargs):
         if self.entry is None:

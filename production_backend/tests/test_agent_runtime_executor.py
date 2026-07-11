@@ -345,7 +345,6 @@ def test_agent_runtime_executor_load_service_skill_returns_facts_and_records_led
             "health-consultation",
             {
                 "records_milk_status_read",
-                "diary_entry_upsert_propose",
                 "ibclc_consult_card_create",
             },
         ),
@@ -678,7 +677,6 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
         "birth_plan_form_create",
         "devices_guidance_assets_read",
         "devices_pump_status_read",
-        "diary_entry_upsert_propose",
         "hospital_bag_card_create",
         "hospital_bag_cart_update",
         "hospital_bag_form_create",
@@ -696,6 +694,10 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
         "plans_task_delete_propose",
         "plans_task_update_propose",
         "pregnancy_plan_propose",
+        "pregnancy_diary_entries_read",
+        "pregnancy_diary_entry_create_propose",
+        "pregnancy_diary_entry_delete_propose",
+        "pregnancy_diary_entry_update_propose",
         "profile_read",
         "profile_update",
         "records_feeding_record_propose",
@@ -720,8 +722,11 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert backend.tool_schemas["devices_guidance_assets_read"]["properties"]["limit"]["maximum"] == 20
     assert backend.tool_schemas["devices_guidance_assets_read"]["properties"]["content_type"]["type"] == "string"
     assert backend.tool_schemas["devices_pump_status_read"]["properties"]["limit"]["maximum"] == 20
-    assert backend.tool_schemas["diary_entry_upsert_propose"]["required"] == ["entry_date"]
-    assert backend.tool_schemas["diary_entry_upsert_propose"]["properties"]["content"]["maxLength"] == 5000
+    assert backend.tool_schemas["pregnancy_diary_entries_read"]["properties"]["limit"]["maximum"] == 14
+    assert backend.tool_schemas["pregnancy_diary_entry_create_propose"]["required"] == ["entry_date"]
+    assert backend.tool_schemas["pregnancy_diary_entry_create_propose"]["properties"]["content"]["maxLength"] == 5000
+    assert backend.tool_schemas["pregnancy_diary_entry_update_propose"]["required"] == ["entry_date"]
+    assert backend.tool_schemas["pregnancy_diary_entry_delete_propose"]["required"] == ["entry_date"]
     assert backend.tool_schemas["images_inspect"]["required"] == ["image_url"]
     assert backend.tool_schemas["hospital_bag_cart_update"]["additionalProperties"] is False
     assert "groups" not in backend.tool_schemas["hospital_bag_cart_update"]["properties"]
@@ -790,16 +795,30 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
         "devices.guidance_assets.read",
         "support.ticket.propose",
     ]
+    assert backend.tool_namespaces["pregnancy_diary"]["tool_names"] == [
+        "pregnancy_diary.entries.read",
+        "pregnancy_diary.entry_create.propose",
+        "pregnancy_diary.entry_update.propose",
+        "pregnancy_diary.entry_delete.propose",
+    ]
+    assert backend.tool_namespaces["pregnancy_diary"]["deferred_tool_names"] == [
+        "pregnancy_diary.entries.read",
+        "pregnancy_diary.entry_create.propose",
+        "pregnancy_diary.entry_update.propose",
+        "pregnancy_diary.entry_delete.propose",
+    ]
     assert backend.tool_namespace_by_contract["profile.read"] == ""
     assert backend.tool_namespace_by_contract["profile_update"] == ""
     assert backend.tool_namespace_by_contract["images.inspect"] == ""
     assert backend.tool_namespace_by_contract["records.milk_status.read"] == "milk_management"
+    assert backend.tool_namespace_by_contract["pregnancy_diary.entries.read"] == "pregnancy_diary"
     assert backend.tool_deferred_by_contract["records.milk_status.read"] is False
     assert backend.tool_deferred_by_contract["records.milk_analysis.read"] is False
     assert backend.tool_deferred_by_contract["records.growth.read"] is False
     assert backend.tool_deferred_by_contract["records.feeding_record.propose"] is True
     assert backend.tool_deferred_by_contract["plans.task_update.propose"] is True
     assert backend.tool_deferred_by_contract["support.ticket.propose"] is True
+    assert backend.tool_deferred_by_contract["pregnancy_diary.entries.read"] is True
     assert tool_executor.calls[0]["actor"].user_id == run.actor_user_id
     assert tool_executor.calls[0]["run_id"] == run.id
     assert tool_executor.calls[0]["tool_name"] == "profile.read"

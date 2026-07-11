@@ -10,6 +10,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .models import PregnancyDiaryEntry
 
 
+_ENTRY_DEFAULTS: dict[str, Any] = {
+    "gestational_week": "",
+    "mood": "",
+    "energy_level": "",
+    "sleep_summary": "",
+    "fetal_movement": "",
+    "symptom_tags": [],
+    "appointment_note": "",
+    "nutrition_note": "",
+    "content": "",
+    "attachments": [],
+}
+
+
 class DiaryRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -51,19 +65,39 @@ class DiaryRepository:
         result = await self.session.scalars(statement)
         return list(result.all())
 
-    async def upsert_entry(
+    async def create_entry(
         self,
         *,
         owner_user_id: UUID,
         entry_date: date,
         values: dict[str, Any],
-    ) -> PregnancyDiaryEntry:
+    ) -> PregnancyDiaryEntry | None:
         entry = await self.get_entry_by_date(owner_user_id=owner_user_id, entry_date=entry_date, include_deleted=True)
         if entry is None:
             entry = PregnancyDiaryEntry(owner_user_id=owner_user_id, entry_date=entry_date)
             self.session.add(entry)
+        elif entry.deleted_at is None:
+            return None
+        else:
+            for field, value in _ENTRY_DEFAULTS.items():
+                setattr(entry, field, list(value) if isinstance(value, list) else value)
         entry.status = "active"
         entry.deleted_at = None
+        for field, value in values.items():
+            setattr(entry, field, value)
+        await self.session.flush()
+        return entry
+
+    async def update_entry(
+        self,
+        *,
+        owner_user_id: UUID,
+        entry_date: date,
+        values: dict[str, Any],
+    ) -> PregnancyDiaryEntry | None:
+        entry = await self.get_entry_by_date(owner_user_id=owner_user_id, entry_date=entry_date)
+        if entry is None:
+            return None
         for field, value in values.items():
             setattr(entry, field, value)
         await self.session.flush()

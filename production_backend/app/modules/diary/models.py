@@ -53,35 +53,3 @@ class PregnancyDiaryEntry(Base):
         nullable=False,
     )
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
-
-
-class PregnancyDiaryHealthNote(Base):
-    __tablename__ = "pregnancy_diary_health_notes"
-    __table_args__ = (
-        Index("ix_pregnancy_diary_health_notes_entry", "entry_id", "created_at"),
-        Index("ix_pregnancy_diary_health_notes_owner_date", "owner_user_id", "entry_date"),
-    )
-
-    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
-    entry_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("pregnancy_diary_entries.id"), nullable=False)
-    owner_user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    entry_date: Mapped[date] = mapped_column(Date, nullable=False)
-    topic: Mapped[str] = mapped_column(String(120), default="", server_default="", nullable=False)
-    user_report: Mapped[str] = mapped_column(Text, default="", server_default="", nullable=False)
-    asked_questions: Mapped[list[Any]] = mapped_column(
-        "asked_questions_json",
-        postgresql.JSONB,
-        default=list,
-        server_default=text("'[]'::jsonb"),
-        nullable=False,
-    )
-    known_answers: Mapped[dict[str, Any]] = mapped_column(
-        "known_answers_json",
-        postgresql.JSONB,
-        default=dict,
-        server_default=text("'{}'::jsonb"),
-        nullable=False,
-    )
-    suggestion_summary: Mapped[str] = mapped_column(Text, default="", server_default="", nullable=False)
-    follow_up: Mapped[str] = mapped_column(Text, default="", server_default="", nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

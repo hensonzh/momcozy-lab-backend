@@ -11,10 +11,5 @@ def test_pregnancy_diary_entries_are_unique_by_owner_date() -> None:
     assert "uq_pregnancy_diary_owner_date" in constraint_names
 
 
-def test_pregnancy_diary_health_notes_link_to_entry_and_owner() -> None:
-    table = Base.metadata.tables["pregnancy_diary_health_notes"]
-    index_names = {index.name for index in table.indexes}
-
-    assert "entry_id" in table.columns
-    assert "owner_user_id" in table.columns
-    assert "ix_pregnancy_diary_health_notes_owner_date" in index_names
+def test_pregnancy_diary_has_no_health_consultation_coupling_table() -> None:
+    assert "pregnancy_diary_health_notes" not in Base.metadata.tables

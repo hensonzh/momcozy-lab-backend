@@ -2,12 +2,12 @@
 
 本文档是当前 MomCozy Agent 模型可见工具与 namespace 的审查快照，便于评审工具是否必要、命名是否清晰、分组是否合理，以及后续变更是否意外扩大模型工具面。
 
-快照基线：`feat/test1`，commit `4faa8c6`，2026-07-11。
+快照基线：`feat/test1`，2026-07-11，以本文档所在 commit 为准。
 
 ## 1. 口径与运行时语义
 
-- 工具注册表只登记**模型可见工具**。当前共 36 个 tool contract。
-- 当前生产 OpenAI Responses 路径向模型提供 4 个独立全局工具和 6 个全局 namespace；namespace 内共 32 个工具。
+- 工具注册表只登记**模型可见工具**。当前共 39 个 tool contract。
+- 当前生产 OpenAI Responses 路径向模型提供 4 个独立全局工具和 7 个全局 namespace；namespace 内共 35 个工具。
 - namespace 不与 service skill 强绑定。模型无需先加载某个 skill 才能看到或检索某个 namespace。
 - `recommended_tools` 只是在 `load_service_skill` 返回中的建议清单，不承担权限控制，也不改变工具曝光范围。
 - `eager` 工具随本轮 tools 定义直接提供；namespace 内的 `deferred` 工具通过 Responses API 的 `defer_loading=true` 和 `tool_search` 按需检索。
@@ -18,12 +18,12 @@
 
 | 项目 | 数量 |
 | --- | ---: |
-| 模型可见 tool contract | 36 |
+| 模型可见 tool contract | 39 |
 | 独立全局工具 | 4 |
-| 全局 namespace | 6 |
-| namespace 内工具 | 32 |
+| 全局 namespace | 7 |
+| namespace 内工具 | 35 |
 | eager 工具 | 12 |
-| deferred 工具 | 24 |
+| deferred 工具 | 27 |
 
 ## 2. 独立全局工具
 
@@ -45,7 +45,8 @@
 | `hospital_bag_cart` | 1 | 0 | 1 | 待产包购物车调整。 |
 | `pump_recommendation` | 1 | 0 | 1 | 待产包相关吸奶器推荐。 |
 | `device_support` | 3 | 2 | 1 | 吸奶器设备状态、官方指导素材和售后工单。 |
-| `health_consultation` | 2 | 0 | 2 | 健康咨询日记动作和 IBCLC 咨询卡片。 |
+| `health_consultation` | 1 | 0 | 1 | 健康咨询中的 IBCLC 咨询卡片。 |
+| `pregnancy_diary` | 4 | 0 | 4 | 独立管理孕期日记的读取、创建、更新和删除。 |
 
 ## 4. `milk_management`
 
@@ -106,10 +107,20 @@
 
 | Canonical contract | 模型看到的 SDK name | 加载 | 读写 | 需确认 | 用途 |
 | --- | --- | --- | --- | --- | --- |
-| `diary.entry_upsert.propose` | `diary_entry_upsert_propose` | deferred | write | 是 | 提出孕期日记写入或更新动作。 |
 | `ibclc_consult_card_create` | `ibclc_consult_card_create` | deferred | write | 否 | 创建 IBCLC 哺乳顾问咨询入口卡片，无外部预约副作用。 |
 
-## 10. Skill 与工具的关系
+## 10. `pregnancy_diary`
+
+这个 namespace 独立于全部 service skill。模型可按用户意图直接检索和调用，不需要先加载健康咨询或其他 skill。读取和写入均使用“宝宝和我”页面同一份 `pregnancy_diary_entries` 数据。
+
+| Canonical contract | 模型看到的 SDK name | 加载 | 读写 | 需确认 | 用途 |
+| --- | --- | --- | --- | --- | --- |
+| `pregnancy_diary.entries.read` | `pregnancy_diary_entries_read` | deferred | read | 否 | 按指定日期或日期范围读取当前用户的孕期日记；回顾日记或更新前获取原记录时调用。 |
+| `pregnancy_diary.entry_create.propose` | `pregnancy_diary_entry_create_propose` | deferred | write | 否 | 用户明确要求记录且当天尚无日记时，创建正文及可选心情、睡眠、胎动、症状和产检问题。 |
+| `pregnancy_diary.entry_update.propose` | `pregnancy_diary_entry_update_propose` | deferred | write | 否 | 用户明确补充或修改已有日记时更新；正文更新前需读取原记录并提交合并后的完整正文。 |
+| `pregnancy_diary.entry_delete.propose` | `pregnancy_diary_entry_delete_propose` | deferred | write | 是 | 用户明确要求删除某天日记时提出删除动作并等待确认。 |
+
+## 11. Skill 与工具的关系
 
 service skill 只通过 `recommended_tools` 向模型提示常用工具，不拥有工具，也不限制跨 namespace 调用。
 
@@ -117,25 +128,26 @@ service skill 只通过 `recommended_tools` 向模型提示常用工具，不拥
 | --- | --- |
 | `milk-management` | `milk_management` namespace 的全部 17 个工具 |
 | `birth-prep` | `pregnancy.plan.propose`、`plans.plan_delete.propose`、`plans.task_complete.propose`、`plans.task_update.propose`、`plans.task_delete.propose`、4 个表单/卡片工具、`hospital_bag_cart_update`、`hospital_bag_pump_recommend` |
-| `health-consultation` | `records.milk_status.read`、`diary.entry_upsert.propose`、`ibclc_consult_card_create` |
+| `health-consultation` | `records.milk_status.read`、`ibclc_consult_card_create` |
 | `emotion-support` | 空；当前没有专属 recommended tool |
 | `device-guidance` | `device_support` namespace 的全部 3 个工具 |
 
 这张映射刻意允许跨 namespace 推荐。例如 `birth-prep` 可以推荐位于 `milk_management` 的 `plans.task_complete.propose`，`health-consultation` 可以推荐位于 `milk_management` 的 `records.milk_status.read`。
 
-## 11. 不暴露给模型的内部 Handler
+孕期日记工具不出现在任何 skill 的 `recommended_tools` 中。它们由全局 `pregnancy_diary` namespace 独立提供，不参与 skill 加载、驻留或业务事实投影。
+
+## 12. 不暴露给模型的内部 Handler
 
 以下名称存在于默认 handler map 或内部执行语义中，但不在 `ToolContractRegistry`，不会进入 Responses API 的 `tools`：
 
 | 内部名称 | 用途 |
 | --- | --- |
 | `business.context.read` | runtime 内部读取业务上下文。 |
-| `diary.recent.read` | runtime 内部读取近期日记。 |
 | `pregnancy.plan_context.read` | runtime 内部读取孕期计划上下文。 |
 
 它们不应被加入 namespace，也不应写入 skill 的 `recommended_tools`。若未来确实需要模型调用，应先正式定义 tool contract、schema、description、handler 与测试，再进入注册表。
 
-## 12. 权威来源与审查清单
+## 13. 权威来源与审查清单
 
 权威来源：
 

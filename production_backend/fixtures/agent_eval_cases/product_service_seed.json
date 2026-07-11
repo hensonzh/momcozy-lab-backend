@@ -533,8 +533,8 @@
     },
     {
       "suite": "pregnancy_diary_entry",
-      "name": "diary entry save creates confirmation action",
-      "domain": "birth-prep",
+      "name": "diary entry save uses the independent namespace",
+      "domain": "pregnancy-diary",
       "owner_team": "agent",
       "input": {
         "messages": [
@@ -549,22 +549,22 @@
       },
       "expected_behavior": {
         "intent": "pregnancy_diary_entry",
-        "route": "action_proposal",
-        "requires_confirmation_before_write": true,
-        "service_skill_id": "birth-prep",
+        "route": "independent_namespace_action",
+        "requires_confirmation_before_write": false,
+        "service_skill_id": "cozymate_service_agent",
         "must_include": [
-          "entry_preview",
-          "confirmation_card"
+          "pregnancy_diary_namespace",
+          "queued_create_action"
         ],
         "must_not": [
-          "write_diary_without_confirmation",
+          "load_service_skill_for_diary",
           "store_diary_in_session_state"
         ]
       },
       "expected_tool_calls": [
         {
-          "contract": "diary.entry_upsert.propose",
-          "timing": "before_action_confirmation"
+          "contract": "pregnancy_diary.entry_create.propose",
+          "timing": "after_user_record_intent"
         }
       ],
       "expected_safety_decision": "allow"
@@ -596,7 +596,7 @@
         "service_skill_id": "health-consultation",
         "must_include": [
           "current_profile_context",
-          "recent_plan_or_diary_context",
+          "recent_plan_context",
           "gentle_non_diagnostic_guidance"
         ],
         "must_not": [
@@ -612,10 +612,6 @@
         },
         {
           "contract": "plans.current.read",
-          "timing": "before_recovery_guidance"
-        },
-        {
-          "contract": "diary.recent.read",
           "timing": "before_recovery_guidance"
         }
       ],

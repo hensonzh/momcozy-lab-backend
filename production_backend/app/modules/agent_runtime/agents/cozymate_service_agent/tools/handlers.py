@@ -15,7 +15,11 @@ from production_backend.app.modules.assets.models import ProductAsset
 from production_backend.app.modules.assets.service import ProductAssetService
 from production_backend.app.modules.devices.models import PumpDevice, PumpTelemetryEvent
 from production_backend.app.modules.devices.service import DevicesService
-from production_backend.app.modules.diary.agent_actions import DIARY_ENTRY_UPSERT_ACTION
+from production_backend.app.modules.diary.agent_actions import (
+    PREGNANCY_DIARY_ENTRY_CREATE_ACTION,
+    PREGNANCY_DIARY_ENTRY_DELETE_ACTION,
+    PREGNANCY_DIARY_ENTRY_UPDATE_ACTION,
+)
 from production_backend.app.modules.diary.models import PregnancyDiaryEntry
 from production_backend.app.modules.diary.service import DiaryService
 from production_backend.app.modules.hospital_bag import HOSPITAL_BAG_CART_UPDATE_ACTION
@@ -222,12 +226,10 @@ class BusinessContextReadToolHandler:
         *,
         records_service: RecordsService,
         plans_service: PlansService,
-        diary_service: DiaryService,
         devices_service: DevicesService,
     ) -> None:
         self.records_service = records_service
         self.plans_service = plans_service
-        self.diary_service = diary_service
         self.devices_service = devices_service
 
     async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
@@ -238,7 +240,6 @@ class BusinessContextReadToolHandler:
         growth = await self.records_service.list_growth(owner_user_id=owner_user_id, limit=limit)
         plans = await self.plans_service.list_plans(owner_user_id=owner_user_id, limit=limit)
         tasks = await self.plans_service.list_tasks(owner_user_id=owner_user_id, limit=limit)
-        diary_entries = await self.diary_service.list_entries(owner_user_id=owner_user_id, limit=limit)
         devices = await self.devices_service.list_devices(owner_user_id=owner_user_id)
         telemetry = await self.devices_service.list_telemetry_events(owner_user_id=owner_user_id, limit=limit)
         return {
@@ -250,9 +251,6 @@ class BusinessContextReadToolHandler:
             "plans": {
                 "plans": [_plan_payload(plan) for plan in plans],
                 "tasks": [_task_payload(task) for task in tasks],
-            },
-            "diary": {
-                "entries": [_diary_payload(entry) for entry in diary_entries],
             },
             "devices": {
                 "pumps": [_device_payload(device) for device in devices[:limit]],
@@ -418,17 +416,48 @@ class PlansCalendarReadToolHandler:
         }
 
 
-class DiaryRecentReadToolHandler:
+class PregnancyDiaryEntriesReadToolHandler:
     def __init__(self, *, diary_service: DiaryService) -> None:
         self.diary_service = diary_service
 
     async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
         owner_user_id = context.actor.user_id
-        limit = _limit(context.args.get("limit"), default=5, max_limit=20)
-        entries = await self.diary_service.list_entries(owner_user_id=owner_user_id, limit=limit)
+        entry_date = _optional_date_arg(context.args, "entry_date")
+        if entry_date is not None:
+            try:
+                entry = await self.diary_service.get_entry(owner_user_id=owner_user_id, entry_date=entry_date)
+            except ApiError as exc:
+                if exc.code != "not_found":
+                    raise
+                return {
+                    "status": "entry_not_found",
+                    "entry_date": entry_date.isoformat(),
+                    "entry": None,
+                }
+            return {
+                "status": "entry_read",
+                "entry_date": entry_date.isoformat(),
+                "entry": _diary_payload(entry, include_content=True),
+            }
+
+        start_date = _optional_date_arg(context.args, "start_date")
+        end_date = _optional_date_arg(context.args, "end_date")
+        limit = _limit(context.args.get("limit"), default=7, max_limit=14)
+        entries = await self.diary_service.list_entries(
+            owner_user_id=owner_user_id,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit,
+        )
         return {
-            "entries": [_diary_payload(entry) for entry in entries],
+            "status": "entries_read",
+            "entries": [_diary_payload(entry, include_content=False) for entry in entries],
             "count": len(entries),
+            "filters": {
+                "start_date": _date_iso(start_date),
+                "end_date": _date_iso(end_date),
+                "limit": limit,
+            },
         }
 
 
@@ -438,11 +467,9 @@ class PregnancyPlanContextReadToolHandler:
         *,
         profile_service: ProfileService,
         plans_service: PlansService,
-        diary_service: DiaryService,
     ) -> None:
         self.profile_service = profile_service
         self.plans_service = plans_service
-        self.diary_service = diary_service
 
     async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
         owner_user_id = context.actor.user_id
@@ -455,42 +482,63 @@ class PregnancyPlanContextReadToolHandler:
             limit=limit,
         )
         tasks = await self.plans_service.list_tasks(owner_user_id=owner_user_id, limit=limit)
-        diary_entries = await self.diary_service.list_entries(owner_user_id=owner_user_id, limit=limit)
         return {
             "profile": _profile_payload(profile=profile, actor_user_id=owner_user_id),
             "plans": [_plan_payload(plan) for plan in plans],
             "tasks": [_task_payload(task) for task in tasks],
-            "recent_diary_entries": [_diary_payload(entry) for entry in diary_entries],
             "counts": {
                 "plans": len(plans),
                 "tasks": len(tasks),
-                "recent_diary_entries": len(diary_entries),
             },
         }
 
 
-class DiaryEntryUpsertProposeToolHandler:
+class PregnancyDiaryEntryCreateProposeToolHandler:
     def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
         self.runtime_service = runtime_service
 
     async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
-        apply_payload = _diary_entry_apply_payload(context.args)
-        entry_date = _text(apply_payload, "entry_date")
+        return await _propose_pregnancy_diary_write(
+            context=context,
+            runtime_service=self.runtime_service,
+            action_type=PREGNANCY_DIARY_ENTRY_CREATE_ACTION,
+            operation="create",
+        )
+
+
+class PregnancyDiaryEntryUpdateProposeToolHandler:
+    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
+        self.runtime_service = runtime_service
+
+    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
+        return await _propose_pregnancy_diary_write(
+            context=context,
+            runtime_service=self.runtime_service,
+            action_type=PREGNANCY_DIARY_ENTRY_UPDATE_ACTION,
+            operation="update",
+        )
+
+
+class PregnancyDiaryEntryDeleteProposeToolHandler:
+    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
+        self.runtime_service = runtime_service
+
+    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
+        entry_date = _text(context.args, "entry_date")
         if not entry_date:
             raise ApiError(code="validation_failed", message="entry_date is required.", status=422)
-        values = apply_payload.get("values")
-        if not isinstance(values, dict) or not values:
-            raise ApiError(code="validation_failed", message="At least one diary field is required.", status=422)
-        preview_payload = _diary_entry_preview_payload(apply_payload)
+        apply_payload = {"entry_date": entry_date}
+        preview_payload = {"operation": "delete", "entry_date": entry_date}
         action = await self.runtime_service.propose_action(
             owner_user_id=context.actor.user_id,
             run_id=context.run_id,
-            action_type=DIARY_ENTRY_UPSERT_ACTION,
+            action_type=PREGNANCY_DIARY_ENTRY_DELETE_ACTION,
             target_type="pregnancy_diary_entry",
+            target_id=entry_date,
             side_effect_level="medium",
             preview_payload=preview_payload,
             apply_payload=apply_payload,
-            idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:diary-entry",
+            idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:pregnancy-diary-delete",
         )
         return _proposal_result(action=action, preview_payload=preview_payload)
 
@@ -1035,7 +1083,6 @@ def build_default_tool_handlers(
         "business.context.read": BusinessContextReadToolHandler(
             records_service=records_service,
             plans_service=plans_service,
-            diary_service=diary_service,
             devices_service=devices_service,
         ),
         "records.milk_summary.read": MilkSummaryReadToolHandler(
@@ -1053,13 +1100,14 @@ def build_default_tool_handlers(
         "records.growth.read": GrowthRecordsReadToolHandler(records_service=records_service),
         "plans.current.read": PlansCurrentReadToolHandler(plans_service=plans_service),
         "plans.calendar.read": PlansCalendarReadToolHandler(plans_service=plans_service),
-        "diary.recent.read": DiaryRecentReadToolHandler(diary_service=diary_service),
+        "pregnancy_diary.entries.read": PregnancyDiaryEntriesReadToolHandler(diary_service=diary_service),
         "pregnancy.plan_context.read": PregnancyPlanContextReadToolHandler(
             profile_service=profile_service,
             plans_service=plans_service,
-            diary_service=diary_service,
         ),
-        "diary.entry_upsert.propose": DiaryEntryUpsertProposeToolHandler(runtime_service=agent_runtime_service),
+        "pregnancy_diary.entry_create.propose": PregnancyDiaryEntryCreateProposeToolHandler(runtime_service=agent_runtime_service),
+        "pregnancy_diary.entry_update.propose": PregnancyDiaryEntryUpdateProposeToolHandler(runtime_service=agent_runtime_service),
+        "pregnancy_diary.entry_delete.propose": PregnancyDiaryEntryDeleteProposeToolHandler(runtime_service=agent_runtime_service),
         "devices.pump_status.read": DevicesPumpStatusReadToolHandler(devices_service=devices_service),
         "devices.guidance_assets.read": DeviceGuidanceAssetsReadToolHandler(asset_service=asset_service),
         "images.inspect": ImageInspectToolHandler(asset_service=asset_service, object_storage=object_storage),
@@ -1566,11 +1614,41 @@ def _diary_entry_apply_payload(args: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in payload.items() if value not in ("", None, {})}
 
 
-def _diary_entry_preview_payload(apply_payload: dict[str, Any]) -> dict[str, Any]:
+async def _propose_pregnancy_diary_write(
+    *,
+    context: ToolHandlerContext,
+    runtime_service: AgentRuntimeService,
+    action_type: str,
+    operation: str,
+) -> dict[str, Any]:
+    apply_payload = _diary_entry_apply_payload(context.args)
+    entry_date = _text(apply_payload, "entry_date")
+    if not entry_date:
+        raise ApiError(code="validation_failed", message="entry_date is required.", status=422)
+    values = apply_payload.get("values")
+    if not isinstance(values, dict) or not values:
+        raise ApiError(code="validation_failed", message="At least one diary field is required.", status=422)
+    preview_payload = _diary_entry_preview_payload(apply_payload, operation=operation)
+    action = await runtime_service.propose_action(
+        owner_user_id=context.actor.user_id,
+        run_id=context.run_id,
+        action_type=action_type,
+        target_type="pregnancy_diary_entry",
+        target_id=entry_date,
+        side_effect_level="low",
+        preview_payload=preview_payload,
+        apply_payload=apply_payload,
+        idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:pregnancy-diary-{operation}",
+    )
+    return _proposal_result(action=action, preview_payload=preview_payload)
+
+
+def _diary_entry_preview_payload(apply_payload: dict[str, Any], *, operation: str) -> dict[str, Any]:
     values = apply_payload.get("values")
     if not isinstance(values, dict):
         values = {}
     preview: dict[str, Any] = {
+        "operation": operation,
         "entry_date": _text(apply_payload, "entry_date"),
         "fields": sorted(values),
         "gestational_week": _text(values, "gestational_week"),
@@ -1942,16 +2020,26 @@ def _task_payload(task: PlanTask) -> dict[str, Any]:
     }
 
 
-def _diary_payload(entry: PregnancyDiaryEntry) -> dict[str, Any]:
-    return {
+def _diary_payload(entry: PregnancyDiaryEntry, *, include_content: bool) -> dict[str, Any]:
+    payload: dict[str, Any] = {
         "id": str(entry.id),
         "entry_date": _date_iso(entry.entry_date),
         "gestational_week": entry.gestational_week,
         "mood": entry.mood,
         "energy_level": entry.energy_level,
+        "sleep_summary": entry.sleep_summary,
+        "fetal_movement": entry.fetal_movement,
         "symptom_tags": entry.symptom_tags,
-        "content_summary": _truncate(entry.content),
+        "appointment_note": entry.appointment_note,
+        "nutrition_note": entry.nutrition_note,
+        "attachments": entry.attachments,
+        "updated_at": _datetime_iso(entry.updated_at),
     }
+    if include_content:
+        payload["content"] = entry.content
+    else:
+        payload["content_summary"] = _truncate(entry.content, max_length=500)
+    return payload
 
 
 def _device_payload(device: PumpDevice) -> dict[str, Any]:

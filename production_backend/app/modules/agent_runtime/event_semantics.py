@@ -172,7 +172,9 @@ def action_event_payload_semantic(*, action_status: str) -> dict[str, Any]:
         "rejected": "动作已拒绝",
         "failed": "动作处理失败",
     }.get(normalized_status, "需要确认后继续")
-    lifecycle = "failed" if normalized_status == "failed" else "completed" if normalized_status in {"queued", "applied", "rejected"} else "running"
+    lifecycle = (
+        "failed" if normalized_status == "failed" else "completed" if normalized_status in {"queued", "applied", "rejected"} else "running"
+    )
     return {
         "phase": "saving" if normalized_status in {"queued", "applied"} else "planning",
         "label": label,
@@ -294,10 +296,25 @@ _TOOL_COPY: dict[str, dict[str, str]] = {
         "started": "我先看看孕期计划上下文～",
         "completed": "我把孕期计划上下文整理好啦",
     },
-    "diary.recent.read": {
+    "pregnancy_diary.entries.read": {
         "phase": "reading",
-        "started": "我先看看近期日记～",
-        "completed": "我把近期日记整理好啦",
+        "started": "我先看看孕期日记～",
+        "completed": "我把孕期日记看好啦",
+    },
+    "pregnancy_diary.entry_create.propose": {
+        "phase": "saving",
+        "started": "我先帮你记录这篇孕期日记～",
+        "completed": "我已经提交保存啦",
+    },
+    "pregnancy_diary.entry_update.propose": {
+        "phase": "saving",
+        "started": "我先帮你更新这篇孕期日记～",
+        "completed": "我已经提交更新啦",
+    },
+    "pregnancy_diary.entry_delete.propose": {
+        "phase": "saving",
+        "started": "我先帮你准备删除这篇孕期日记～",
+        "completed": "我已经准备好删除确认啦",
     },
     "devices.pump_status.read": {
         "phase": "reading",

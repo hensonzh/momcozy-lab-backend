@@ -1,8 +1,7 @@
-from .models import PregnancyDiaryEntry, PregnancyDiaryHealthNote
+from .models import PregnancyDiaryEntry
 from .service import DiaryService
 
 __all__ = [
     "DiaryService",
     "PregnancyDiaryEntry",
-    "PregnancyDiaryHealthNote",
 ]

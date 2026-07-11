@@ -213,12 +213,11 @@ def test_service_skill_tool_references_are_registered_contracts() -> None:
     assert violations == []
 
 
-def test_confirmation_required_skill_text_does_not_claim_direct_diary_write() -> None:
+def test_service_skill_text_does_not_own_pregnancy_diary_behavior() -> None:
     health = default_service_skill_registry().get("health-consultation").prompt_block()
 
-    assert "确认后会保存到宝宝和我页面" in health
-    assert "已经记到宝宝和我页面" not in health
-    assert "已经直接覆盖旧日记" not in health
+    assert "孕期日记" not in health
+    assert "pregnancy_diary" not in health
 
 
 def test_skills_directory_contains_only_skill_directories() -> None:
@@ -308,12 +307,7 @@ def test_model_facing_prompt_text_is_chinese() -> None:
         "service skill owns",
         "tool results are",
     )
-    offenders = [
-        fragment
-        for text in prompt_texts
-        for fragment in forbidden_fragments
-        if fragment in text
-    ]
+    offenders = [fragment for text in prompt_texts for fragment in forbidden_fragments if fragment in text]
 
     assert offenders == []
 
@@ -397,7 +391,10 @@ def test_model_tool_schema_registry_has_no_internal_or_legacy_orphans() -> None:
         ("records.feeding_record.propose", "write", False, "deferred"),
         ("records.feeding_record_delete.propose", "write", True, "deferred"),
         ("plans.milk_plan.propose", "write", True, "deferred"),
-        ("diary.entry_upsert.propose", "write", True, "deferred"),
+        ("pregnancy_diary.entries.read", "read", False, "deferred"),
+        ("pregnancy_diary.entry_create.propose", "write", False, "deferred"),
+        ("pregnancy_diary.entry_update.propose", "write", False, "deferred"),
+        ("pregnancy_diary.entry_delete.propose", "write", True, "deferred"),
         ("hospital_bag_card_create", "write", False, "deferred"),
         ("support.ticket.propose", "write", True, "deferred"),
     ],
@@ -506,7 +503,10 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
     growth_read_schema = registry.get("records.growth.read").input_schema
     plans_schema = registry.get("plans.current.read").input_schema
     calendar_schema = registry.get("plans.calendar.read").input_schema
-    diary_entry_schema = registry.get("diary.entry_upsert.propose").input_schema
+    diary_read_schema = registry.get("pregnancy_diary.entries.read").input_schema
+    diary_create_schema = registry.get("pregnancy_diary.entry_create.propose").input_schema
+    diary_update_schema = registry.get("pregnancy_diary.entry_update.propose").input_schema
+    diary_delete_schema = registry.get("pregnancy_diary.entry_delete.propose").input_schema
     devices_schema = registry.get("devices.pump_status.read").input_schema
     device_guidance_schema = registry.get("devices.guidance_assets.read").input_schema
     image_inspect_schema = registry.get("images.inspect").input_schema
@@ -557,10 +557,13 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
     assert plans_schema["properties"]["limit"]["maximum"] == 20
     assert calendar_schema["properties"]["task_date"]["maxLength"] == 20
     assert calendar_schema["properties"]["status"]["maxLength"] == 32
-    assert diary_entry_schema["additionalProperties"] is False
-    assert diary_entry_schema["required"] == ["entry_date"]
-    assert diary_entry_schema["properties"]["content"]["maxLength"] == 5000
-    assert diary_entry_schema["properties"]["symptom_tags"]["type"] == "array"
+    assert diary_read_schema["additionalProperties"] is False
+    assert diary_read_schema["properties"]["limit"]["maximum"] == 14
+    assert diary_create_schema["required"] == ["entry_date"]
+    assert diary_create_schema["properties"]["content"]["maxLength"] == 5000
+    assert diary_update_schema["required"] == ["entry_date"]
+    assert diary_update_schema["properties"]["symptom_tags"]["type"] == "array"
+    assert diary_delete_schema["required"] == ["entry_date"]
     assert devices_schema["additionalProperties"] is False
     assert devices_schema["properties"]["limit"]["maximum"] == 20
     assert device_guidance_schema["additionalProperties"] is False
@@ -674,9 +677,7 @@ def _instructional_schema_property_paths(*, value: object, path: str) -> list[st
         matches: list[str] = []
         properties = value.get("properties")
         if isinstance(properties, dict):
-            matches.extend(
-                f"{path}.{key}" for key in properties if _normalized_key(key) in INSTRUCTIONAL_TOOL_OUTPUT_KEYS
-            )
+            matches.extend(f"{path}.{key}" for key in properties if _normalized_key(key) in INSTRUCTIONAL_TOOL_OUTPUT_KEYS)
         for key, item in value.items():
             matches.extend(_instructional_schema_property_paths(value=item, path=f"{path}.{key}"))
         return matches
@@ -868,7 +869,7 @@ def test_sdk_runner_uses_responses_namespace_backend_for_tool_search(monkeypatch
                         "type": "function_call",
                         "name": "records_feeding_record_propose",
                         "call_id": "call_1",
-                        "arguments": "{\"volume_ml\":80}",
+                        "arguments": '{"volume_ml":80}',
                     },
                 ],
             ),
@@ -1037,9 +1038,7 @@ def test_sdk_runner_routes_responses_function_call_by_namespace_and_name(monkeyp
         ),
     )
 
-    result = asyncio.run(
-        OpenAIAgentsSdkRunner(model="gpt-test", use_responses=True).run_reasoning(request)
-    )
+    result = asyncio.run(OpenAIAgentsSdkRunner(model="gpt-test", use_responses=True).run_reasoning(request))
 
     assert result.final_text == "已读取。"
     assert invoked == ["milk"]
@@ -1339,7 +1338,7 @@ def test_sdk_runner_streams_text_without_changing_tools_between_tool_turns(monke
                 "type": "function_call",
                 "name": "profile_read",
                 "call_id": "call_1",
-                "arguments": "{\"owner_user_id\":\"user_1\"}",
+                "arguments": '{"owner_user_id":"user_1"}',
             }
         ],
     )
@@ -1448,7 +1447,7 @@ def test_responses_runner_strips_parsed_function_arguments_before_next_tool_turn
                 arguments='{"owner_user_id":"user_1"}',
                 parsed_arguments={"owner_user_id": "user_1"},
                 status="completed",
-            )
+            ),
         ],
     )
     final_response = FakeOpenAIResponse(id="resp_final", output=[], output_text="读取完成。")
@@ -1507,7 +1506,7 @@ def test_sdk_runner_streams_each_turn_before_response_completed(monkeypatch: pyt
                 "type": "function_call",
                 "name": "profile_update",
                 "call_id": "call_1",
-                "arguments": "{\"display_name\":\"Mai\"}",
+                "arguments": '{"display_name":"Mai"}',
             }
         ],
     )

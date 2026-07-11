@@ -76,9 +76,7 @@ def test_agent_runtime_actions_reject_confirmation_required_action() -> None:
     repository = FakeActionRepository()
     service = AgentRuntimeService(repository=repository)
     run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Create ticket"))
-    action = asyncio.run(
-        service.propose_action(owner_user_id=owner_user_id, run_id=run.id, action_type="support.ticket.create")
-    )
+    action = asyncio.run(service.propose_action(owner_user_id=owner_user_id, run_id=run.id, action_type="support.ticket.create"))
     run.status = "waiting_for_confirmation"
 
     rejected = asyncio.run(service.reject_action(owner_user_id=owner_user_id, action_id=action.id, reason="not now"))
@@ -101,9 +99,7 @@ def test_agent_runtime_actions_do_not_reject_confirmed_action() -> None:
     outbox_service = FakeOutboxService()
     service = AgentRuntimeService(repository=repository, outbox_service=outbox_service)
     run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Create ticket"))
-    action = asyncio.run(
-        service.propose_action(owner_user_id=owner_user_id, run_id=run.id, action_type="support.ticket.create")
-    )
+    action = asyncio.run(service.propose_action(owner_user_id=owner_user_id, run_id=run.id, action_type="support.ticket.create"))
     confirmed = asyncio.run(service.confirm_action(owner_user_id=owner_user_id, action_id=action.id))
     event_count = len(repository.events)
 
@@ -121,9 +117,7 @@ def test_agent_runtime_actions_do_not_overwrite_terminal_rejection_states() -> N
     repository = FakeActionRepository()
     service = AgentRuntimeService(repository=repository)
     run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Create ticket"))
-    action = asyncio.run(
-        service.propose_action(owner_user_id=owner_user_id, run_id=run.id, action_type="support.ticket.create")
-    )
+    action = asyncio.run(service.propose_action(owner_user_id=owner_user_id, run_id=run.id, action_type="support.ticket.create"))
     action.status = "expired"
     action.error_code = "action_expired"
     event_count = len(repository.events)
@@ -141,9 +135,7 @@ def test_agent_runtime_actions_generate_action_idempotency_key_for_confirmation(
     outbox_service = FakeOutboxService()
     service = AgentRuntimeService(repository=repository, outbox_service=outbox_service)
     run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Create ticket"))
-    action = asyncio.run(
-        service.propose_action(owner_user_id=owner_user_id, run_id=run.id, action_type="support.ticket.create")
-    )
+    action = asyncio.run(service.propose_action(owner_user_id=owner_user_id, run_id=run.id, action_type="support.ticket.create"))
 
     confirmed = asyncio.run(service.confirm_action(owner_user_id=owner_user_id, action_id=action.id))
 
@@ -390,7 +382,7 @@ def test_agent_runtime_actions_accept_milk_reminder_policy() -> None:
     assert outbox_service.enqueue_kwargs["payload"]["apply_payload"] == {"title": "Time to pump"}
 
 
-def test_agent_runtime_actions_accept_diary_entry_upsert_policy() -> None:
+def test_agent_runtime_actions_auto_queue_pregnancy_diary_create() -> None:
     owner_user_id = uuid4()
     repository = FakeActionRepository()
     outbox_service = FakeOutboxService()
@@ -401,26 +393,45 @@ def test_agent_runtime_actions_accept_diary_entry_upsert_policy() -> None:
         service.propose_action(
             owner_user_id=owner_user_id,
             run_id=run.id,
-            action_type="diary.entry.upsert",
+            action_type="pregnancy_diary.entry.create",
             target_type="pregnancy_diary_entry",
-            side_effect_level="medium",
+            side_effect_level="low",
             preview_payload={"entry_date": "2026-07-04", "fields": ["content"]},
             apply_payload={"entry_date": "2026-07-04", "values": {"content": "Today I felt steady."}},
         )
     )
-    run.status = "waiting_for_confirmation"
-    confirmed = asyncio.run(service.confirm_action(owner_user_id=owner_user_id, action_id=action.id))
 
-    assert confirmed.status == "confirmed"
-    assert confirmed.action_type == "diary.entry.upsert"
-    assert confirmed.target_type == "pregnancy_diary_entry"
-    assert confirmed.side_effect_level == "medium"
-    assert repository.events[-2].payload["action_type"] == "diary.entry.upsert"
+    assert action.status == "confirmed"
+    assert action.action_type == "pregnancy_diary.entry.create"
+    assert action.target_type == "pregnancy_diary_entry"
+    assert action.side_effect_level == "low"
     assert repository.events[-1].event_type == "action.queued"
     assert outbox_service.enqueue_kwargs["payload"]["apply_payload"] == {
         "entry_date": "2026-07-04",
         "values": {"content": "Today I felt steady."},
     }
+
+
+def test_agent_runtime_actions_require_confirmation_for_pregnancy_diary_delete() -> None:
+    owner_user_id = uuid4()
+    repository = FakeActionRepository()
+    service = AgentRuntimeService(repository=repository, outbox_service=FakeOutboxService())
+    run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Delete my diary"))
+
+    action = asyncio.run(
+        service.propose_action(
+            owner_user_id=owner_user_id,
+            run_id=run.id,
+            action_type="pregnancy_diary.entry.delete",
+            target_type="pregnancy_diary_entry",
+            side_effect_level="medium",
+            preview_payload={"entry_date": "2026-07-04"},
+            apply_payload={"entry_date": "2026-07-04"},
+        )
+    )
+
+    assert action.status == "confirmation_required"
+    assert repository.events[-1].event_type == "action.confirmation_required"
 
 
 def test_agent_milk_feeding_main_flow_confirms_applies_and_replays_events() -> None:

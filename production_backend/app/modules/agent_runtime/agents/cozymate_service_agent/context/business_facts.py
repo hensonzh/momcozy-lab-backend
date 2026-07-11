@@ -68,7 +68,9 @@ class BusinessFactsProjector:
             return {}
         return facts
 
-    async def _project_source(self, *, actor: CurrentUser, run_id: UUID, source: BusinessFactSource) -> tuple[BusinessFactSource, dict[str, Any]]:
+    async def _project_source(
+        self, *, actor: CurrentUser, run_id: UUID, source: BusinessFactSource
+    ) -> tuple[BusinessFactSource, dict[str, Any]]:
         handler = self.handlers[source.tool_name]
         payload = await _maybe_await(
             handler(
@@ -94,9 +96,7 @@ def _sources_for_skill(*, skill_id: ServiceSkillId, config: BusinessFactsProject
     default_limit = config.default_limit
     recent_limit = config.recent_limit
     if skill_id == ServiceSkillId.BIRTH_PREP:
-        return (
-            BusinessFactSource("pregnancy.plan_context.read", "pregnancy", {"limit": default_limit}),
-        )
+        return (BusinessFactSource("pregnancy.plan_context.read", "pregnancy", {"limit": default_limit}),)
     if skill_id == ServiceSkillId.MILK_MANAGEMENT:
         return (
             BusinessFactSource("profile.read", "profile"),
@@ -106,14 +106,10 @@ def _sources_for_skill(*, skill_id: ServiceSkillId, config: BusinessFactsProject
         return (
             BusinessFactSource("profile.read", "profile"),
             BusinessFactSource("plans.current.read", "plans", {"limit": default_limit}),
-            BusinessFactSource("diary.recent.read", "diary", {"limit": recent_limit}),
             BusinessFactSource("records.milk_summary.read", "milk_summary", {"days": config.milk_days, "limit": recent_limit}),
         )
     if skill_id == ServiceSkillId.EMOTION_SUPPORT:
-        return (
-            BusinessFactSource("profile.read", "profile"),
-            BusinessFactSource("diary.recent.read", "diary", {"limit": recent_limit}),
-        )
+        return (BusinessFactSource("profile.read", "profile"),)
     if skill_id == ServiceSkillId.DEVICE_GUIDANCE:
         return (
             BusinessFactSource("profile.read", "profile"),

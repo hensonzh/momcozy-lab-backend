@@ -21,7 +21,7 @@ def test_today_diary_main_flow_restores_soft_deleted_entry() -> None:
     assert empty_exc.value.code == "not_found"
 
     created = asyncio.run(
-        service.upsert_entry(
+        service.create_entry(
             owner_user_id=owner_user_id,
             entry_date=entry_date,
             values={"mood": "calm", "content": "Packed the hospital bag."},
@@ -42,7 +42,7 @@ def test_today_diary_main_flow_restores_soft_deleted_entry() -> None:
     assert asyncio.run(service.list_entries(owner_user_id=owner_user_id, limit=10)) == []
 
     restored = asyncio.run(
-        service.upsert_entry(
+        service.create_entry(
             owner_user_id=owner_user_id,
             entry_date=entry_date,
             values={"mood": "hopeful", "content": "Restored today's note."},
@@ -57,9 +57,9 @@ def test_today_diary_main_flow_restores_soft_deleted_entry() -> None:
     assert restored.mood == "hopeful"
     assert [entry.id for entry in visible_after_restore] == [created.id]
     assert [entry["action"] for entry in audit_service.entries] == [
-        "diary.entry.upsert",
-        "diary.entry.delete",
-        "diary.entry.upsert",
+        "pregnancy_diary.entry.create",
+        "pregnancy_diary.entry.delete",
+        "pregnancy_diary.entry.create",
     ]
 
 
@@ -72,9 +72,7 @@ class InMemoryDiaryRepository:
             (
                 entry
                 for entry in self.entries
-                if entry.owner_user_id == owner_user_id
-                and entry.entry_date == entry_date
-                and (include_deleted or entry.deleted_at is None)
+                if entry.owner_user_id == owner_user_id and entry.entry_date == entry_date and (include_deleted or entry.deleted_at is None)
             ),
             None,
         )
@@ -91,7 +89,7 @@ class InMemoryDiaryRepository:
         ]
         return sorted(entries, key=lambda entry: entry.entry_date, reverse=True)[:limit]
 
-    async def upsert_entry(self, *, owner_user_id: UUID, entry_date: date, values: dict):
+    async def create_entry(self, *, owner_user_id: UUID, entry_date: date, values: dict):
         entry = await self.get_entry_by_date(owner_user_id=owner_user_id, entry_date=entry_date, include_deleted=True)
         if entry is None:
             entry = PregnancyDiaryEntry(
@@ -103,8 +101,18 @@ class InMemoryDiaryRepository:
                 attachments=[],
             )
             self.entries.append(entry)
+        elif entry.deleted_at is None:
+            return None
         entry.status = "active"
         entry.deleted_at = None
+        for field, value in values.items():
+            setattr(entry, field, value)
+        return entry
+
+    async def update_entry(self, *, owner_user_id: UUID, entry_date: date, values: dict):
+        entry = await self.get_entry_by_date(owner_user_id=owner_user_id, entry_date=entry_date)
+        if entry is None:
+            return None
         for field, value in values.items():
             setattr(entry, field, value)
         return entry
