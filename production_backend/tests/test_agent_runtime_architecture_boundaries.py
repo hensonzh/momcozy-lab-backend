@@ -392,9 +392,9 @@ def test_model_tool_schema_registry_has_no_internal_or_legacy_orphans() -> None:
         ("records.feeding_record_delete.propose", "write", True, "deferred"),
         ("plans.milk_plan.propose", "write", True, "deferred"),
         ("pregnancy_diary.entries.read", "read", False, "deferred"),
-        ("pregnancy_diary.entry_create.propose", "write", False, "deferred"),
-        ("pregnancy_diary.entry_update.propose", "write", False, "deferred"),
-        ("pregnancy_diary.entry_delete.propose", "write", True, "deferred"),
+        ("pregnancy_diary.entry.create", "write", False, "deferred"),
+        ("pregnancy_diary.entry.update", "write", False, "deferred"),
+        ("pregnancy_diary.entry.delete.propose", "write", True, "deferred"),
         ("hospital_bag_card_create", "write", False, "deferred"),
         ("support.ticket.propose", "write", True, "deferred"),
     ],
@@ -504,9 +504,9 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
     plans_schema = registry.get("plans.current.read").input_schema
     calendar_schema = registry.get("plans.calendar.read").input_schema
     diary_read_schema = registry.get("pregnancy_diary.entries.read").input_schema
-    diary_create_schema = registry.get("pregnancy_diary.entry_create.propose").input_schema
-    diary_update_schema = registry.get("pregnancy_diary.entry_update.propose").input_schema
-    diary_delete_schema = registry.get("pregnancy_diary.entry_delete.propose").input_schema
+    diary_create_schema = registry.get("pregnancy_diary.entry.create").input_schema
+    diary_update_schema = registry.get("pregnancy_diary.entry.update").input_schema
+    diary_delete_schema = registry.get("pregnancy_diary.entry.delete.propose").input_schema
     devices_schema = registry.get("devices.pump_status.read").input_schema
     device_guidance_schema = registry.get("devices.guidance_assets.read").input_schema
     image_inspect_schema = registry.get("images.inspect").input_schema
@@ -563,7 +563,12 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
     assert diary_create_schema["properties"]["content"]["maxLength"] == 5000
     assert diary_update_schema["required"] == ["entry_date"]
     assert diary_update_schema["properties"]["symptom_tags"]["type"] == "array"
+    assert diary_update_schema["properties"]["content_mode"]["default"] == "append"
     assert diary_delete_schema["required"] == ["entry_date"]
+    for schema in (diary_create_schema, diary_update_schema, diary_delete_schema):
+        assert "idempotency_key" not in schema["properties"]
+        assert "locale" not in schema["properties"]
+        assert "timezone" not in schema["properties"]
     assert devices_schema["additionalProperties"] is False
     assert devices_schema["properties"]["limit"]["maximum"] == 20
     assert device_guidance_schema["additionalProperties"] is False

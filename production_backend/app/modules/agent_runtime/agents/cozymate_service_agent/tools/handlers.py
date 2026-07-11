@@ -16,9 +16,7 @@ from production_backend.app.modules.assets.service import ProductAssetService
 from production_backend.app.modules.devices.models import PumpDevice, PumpTelemetryEvent
 from production_backend.app.modules.devices.service import DevicesService
 from production_backend.app.modules.diary.agent_actions import (
-    PREGNANCY_DIARY_ENTRY_CREATE_ACTION,
     PREGNANCY_DIARY_ENTRY_DELETE_ACTION,
-    PREGNANCY_DIARY_ENTRY_UPDATE_ACTION,
 )
 from production_backend.app.modules.diary.models import PregnancyDiaryEntry
 from production_backend.app.modules.diary.service import DiaryService
@@ -493,30 +491,75 @@ class PregnancyPlanContextReadToolHandler:
         }
 
 
-class PregnancyDiaryEntryCreateProposeToolHandler:
-    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
-        self.runtime_service = runtime_service
+class PregnancyDiaryEntryCreateToolHandler:
+    def __init__(self, *, diary_service: DiaryService) -> None:
+        self.diary_service = diary_service
 
     async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
-        return await _propose_pregnancy_diary_write(
-            context=context,
-            runtime_service=self.runtime_service,
-            action_type=PREGNANCY_DIARY_ENTRY_CREATE_ACTION,
-            operation="create",
-        )
+        entry_date = _required_diary_entry_date(context.args)
+        values = _diary_entry_values(context.args)
+        _require_diary_entry_values(values)
+        try:
+            entry = await self.diary_service.create_entry(
+                owner_user_id=context.actor.user_id,
+                entry_date=entry_date,
+                values=values,
+                request_id=_diary_tool_request_id(context),
+            )
+        except ApiError as exc:
+            if exc.code != "conflict":
+                raise
+            existing = await self.diary_service.get_entry(
+                owner_user_id=context.actor.user_id,
+                entry_date=entry_date,
+            )
+            return {
+                "status": "entry_already_exists",
+                "entry_date": entry_date.isoformat(),
+                "entry": _diary_payload(existing, include_content=True),
+            }
+        return {
+            "status": "entry_created",
+            "entry_date": entry_date.isoformat(),
+            "entry": _diary_payload(entry, include_content=True),
+        }
 
 
-class PregnancyDiaryEntryUpdateProposeToolHandler:
-    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
-        self.runtime_service = runtime_service
+class PregnancyDiaryEntryUpdateToolHandler:
+    def __init__(self, *, diary_service: DiaryService) -> None:
+        self.diary_service = diary_service
 
     async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
-        return await _propose_pregnancy_diary_write(
-            context=context,
-            runtime_service=self.runtime_service,
-            action_type=PREGNANCY_DIARY_ENTRY_UPDATE_ACTION,
-            operation="update",
-        )
+        entry_date = _required_diary_entry_date(context.args)
+        values = _diary_entry_values(context.args)
+        _require_diary_entry_values(values)
+        if "content" in values and _text(context.args, "content_mode") != "replace":
+            try:
+                existing = await self.diary_service.get_entry(
+                    owner_user_id=context.actor.user_id,
+                    entry_date=entry_date,
+                )
+            except ApiError as exc:
+                if exc.code != "not_found":
+                    raise
+                return _diary_entry_not_found(entry_date)
+            values["content"] = _append_diary_content(existing.content, str(values["content"]))
+        try:
+            entry = await self.diary_service.update_entry(
+                owner_user_id=context.actor.user_id,
+                entry_date=entry_date,
+                values=values,
+                request_id=_diary_tool_request_id(context),
+            )
+        except ApiError as exc:
+            if exc.code != "not_found":
+                raise
+            return _diary_entry_not_found(entry_date)
+        return {
+            "status": "entry_updated",
+            "entry_date": entry_date.isoformat(),
+            "entry": _diary_payload(entry, include_content=True),
+        }
 
 
 class PregnancyDiaryEntryDeleteProposeToolHandler:
@@ -1105,9 +1148,9 @@ def build_default_tool_handlers(
             profile_service=profile_service,
             plans_service=plans_service,
         ),
-        "pregnancy_diary.entry_create.propose": PregnancyDiaryEntryCreateProposeToolHandler(runtime_service=agent_runtime_service),
-        "pregnancy_diary.entry_update.propose": PregnancyDiaryEntryUpdateProposeToolHandler(runtime_service=agent_runtime_service),
-        "pregnancy_diary.entry_delete.propose": PregnancyDiaryEntryDeleteProposeToolHandler(runtime_service=agent_runtime_service),
+        "pregnancy_diary.entry.create": PregnancyDiaryEntryCreateToolHandler(diary_service=diary_service),
+        "pregnancy_diary.entry.update": PregnancyDiaryEntryUpdateToolHandler(diary_service=diary_service),
+        "pregnancy_diary.entry.delete.propose": PregnancyDiaryEntryDeleteProposeToolHandler(runtime_service=agent_runtime_service),
         "devices.pump_status.read": DevicesPumpStatusReadToolHandler(devices_service=devices_service),
         "devices.guidance_assets.read": DeviceGuidanceAssetsReadToolHandler(asset_service=asset_service),
         "images.inspect": ImageInspectToolHandler(asset_service=asset_service, object_storage=object_storage),
@@ -1601,70 +1644,42 @@ def _milk_reminder_preview_payload(apply_payload: dict[str, Any]) -> dict[str, A
     return {key: value for key, value in preview.items() if value not in ("", None)}
 
 
-def _diary_entry_apply_payload(args: dict[str, Any]) -> dict[str, Any]:
-    values = {key: args[key] for key in _DIARY_ENTRY_VALUE_FIELDS if key in args and args[key] is not None}
-    payload: dict[str, Any] = {
-        "entry_date": _text(args, "entry_date"),
-    }
-    if values:
-        payload["values"] = values
-    metadata = _metadata_payload(args)
-    if metadata:
-        payload["metadata"] = metadata
-    return {key: value for key, value in payload.items() if value not in ("", None, {})}
+def _diary_entry_values(args: dict[str, Any]) -> dict[str, Any]:
+    return {key: args[key] for key in _DIARY_ENTRY_VALUE_FIELDS if key in args and args[key] is not None}
 
 
-async def _propose_pregnancy_diary_write(
-    *,
-    context: ToolHandlerContext,
-    runtime_service: AgentRuntimeService,
-    action_type: str,
-    operation: str,
-) -> dict[str, Any]:
-    apply_payload = _diary_entry_apply_payload(context.args)
-    entry_date = _text(apply_payload, "entry_date")
-    if not entry_date:
+def _required_diary_entry_date(args: dict[str, Any]) -> date:
+    entry_date = _optional_date_arg(args, "entry_date")
+    if entry_date is None:
         raise ApiError(code="validation_failed", message="entry_date is required.", status=422)
-    values = apply_payload.get("values")
-    if not isinstance(values, dict) or not values:
+    return entry_date
+
+
+def _require_diary_entry_values(values: dict[str, Any]) -> None:
+    if not values:
         raise ApiError(code="validation_failed", message="At least one diary field is required.", status=422)
-    preview_payload = _diary_entry_preview_payload(apply_payload, operation=operation)
-    action = await runtime_service.propose_action(
-        owner_user_id=context.actor.user_id,
-        run_id=context.run_id,
-        action_type=action_type,
-        target_type="pregnancy_diary_entry",
-        target_id=entry_date,
-        side_effect_level="low",
-        preview_payload=preview_payload,
-        apply_payload=apply_payload,
-        idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:pregnancy-diary-{operation}",
-    )
-    return _proposal_result(action=action, preview_payload=preview_payload)
 
 
-def _diary_entry_preview_payload(apply_payload: dict[str, Any], *, operation: str) -> dict[str, Any]:
-    values = apply_payload.get("values")
-    if not isinstance(values, dict):
-        values = {}
-    preview: dict[str, Any] = {
-        "operation": operation,
-        "entry_date": _text(apply_payload, "entry_date"),
-        "fields": sorted(values),
-        "gestational_week": _text(values, "gestational_week"),
-        "mood": _text(values, "mood"),
-        "energy_level": _text(values, "energy_level"),
+def _diary_tool_request_id(context: ToolHandlerContext) -> str:
+    return f"agent-tool:{context.run_id}:{context.call_id}"
+
+
+def _append_diary_content(existing: str, addition: str) -> str:
+    current = existing.rstrip()
+    added = addition.strip()
+    if not current:
+        return added
+    if not added or current == added or current.endswith(f"\n{added}"):
+        return current
+    return f"{current}\n{added}"
+
+
+def _diary_entry_not_found(entry_date: date) -> dict[str, Any]:
+    return {
+        "status": "entry_not_found",
+        "entry_date": entry_date.isoformat(),
+        "entry": None,
     }
-    symptom_tags = values.get("symptom_tags")
-    if isinstance(symptom_tags, list):
-        preview["symptom_tags"] = symptom_tags
-    content = _text(values, "content")
-    if content:
-        preview["content_summary"] = _truncate(content, max_length=240)
-    attachments = values.get("attachments")
-    if isinstance(attachments, list):
-        preview["attachment_count"] = len(attachments)
-    return {key: value for key, value in preview.items() if value not in ("", None, [], {})}
 
 
 def _proposal_result(*, action: Any, preview_payload: dict[str, Any]) -> dict[str, Any]:

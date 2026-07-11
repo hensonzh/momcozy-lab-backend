@@ -48,7 +48,7 @@ def default_tool_registry() -> ToolContractRegistry:
             domain="agent_runtime",
             description=(
                 "按 service_skill_id 加载一个 MomCozy 服务技能。"
-                "需要进入奶量、产前准备、健康咨询、情绪支持或设备指导流程前先调用；"
+                "用户当前请求需要进入奶量、产前准备、健康咨询、情绪支持或设备指导流程，且对应技能尚未驻留时调用；"
                 "返回该技能说明、建议工具和小型业务事实包。"
             ),
             loading_mode="eager",
@@ -66,7 +66,7 @@ def default_tool_registry() -> ToolContractRegistry:
         _tool_contract(
             name="profile.read",
             domain="profiles",
-            description="读取当前用户的用户资料上下文投影。",
+            description="读取当前用户及宝宝的基础资料投影。用户的问题或后续动作需要核对姓名、年龄、孕产状态或宝宝资料时调用。",
             loading_mode="eager",
             read_or_write="read",
             side_effect_level="none",
@@ -82,9 +82,7 @@ def default_tool_registry() -> ToolContractRegistry:
         _tool_contract(
             name="profile_update",
             domain="global",
-            description=(
-                "更新当前用户明确提供的基础资料字段，例如 display_name、age 或 onboarding_skipped。不要根据图片、语气或上下文猜测资料。"
-            ),
+            description="更新当前用户的基础资料。用户明确提供或更正姓名、年龄或 onboarding 状态时调用。",
             loading_mode="eager",
             read_or_write="write",
             side_effect_level="low",
@@ -100,7 +98,7 @@ def default_tool_registry() -> ToolContractRegistry:
         _tool_contract(
             name="records.milk_summary.read",
             domain="records",
-            description="从近期喂养、吸奶和趋势记录中读取有限奶量管理摘要。",
+            description="读取当前用户近期喂养、吸奶和趋势记录的简要摘要。用户要回顾近期记录或需要奶量管理概览时调用。",
             loading_mode="eager",
             read_or_write="read",
             side_effect_level="none",
@@ -116,7 +114,7 @@ def default_tool_registry() -> ToolContractRegistry:
         _tool_contract(
             name="records.milk_status.read",
             domain="records",
-            description="从近期喂养、吸奶和趋势记录中读取确定性奶量状态快照。",
+            description="读取当前用户近期奶量状态的确定性快照。用户询问当前奶量表现、近期是否有记录或今日状态时调用。",
             loading_mode="eager",
             read_or_write="read",
             side_effect_level="none",
@@ -132,7 +130,7 @@ def default_tool_registry() -> ToolContractRegistry:
         _tool_contract(
             name="records.milk_analysis.read",
             domain="records",
-            description="读取近期奶量、生长和趋势事实，并返回确定性奶量分析快照。",
+            description="读取当前用户近期奶量、宝宝生长和趋势事实并生成分析快照。用户要分析奶量变化、趋势或与生长记录的关系时调用。",
             loading_mode="eager",
             read_or_write="read",
             side_effect_level="none",
@@ -148,7 +146,7 @@ def default_tool_registry() -> ToolContractRegistry:
         _tool_contract(
             name="records.growth.read",
             domain="records",
-            description="按当前用户范围读取宝宝身高、体重、头围等生长记录。",
+            description="读取当前用户宝宝的身高、体重和头围等生长记录。用户要查看宝宝近期生长数据或趋势时调用。",
             loading_mode="eager",
             read_or_write="read",
             side_effect_level="none",
@@ -164,7 +162,7 @@ def default_tool_registry() -> ToolContractRegistry:
         _tool_contract(
             name="plans.current.read",
             domain="plans",
-            description="读取当前用户生效中计划和近期任务的有限摘要。",
+            description="读取当前用户生效中的计划和近期任务摘要。用户要查看当前计划、待办或后续安排时调用。",
             loading_mode="eager",
             read_or_write="read",
             side_effect_level="none",
@@ -180,7 +178,7 @@ def default_tool_registry() -> ToolContractRegistry:
         _tool_contract(
             name="plans.calendar.read",
             domain="plans",
-            description="按日期、状态读取当前用户计划任务日程。",
+            description="按日期和状态读取当前用户的计划任务日程。用户询问某天安排、待完成事项或任务状态时调用。",
             loading_mode="eager",
             read_or_write="read",
             side_effect_level="none",
@@ -196,7 +194,7 @@ def default_tool_registry() -> ToolContractRegistry:
         _tool_contract(
             name="pregnancy_diary.entries.read",
             domain="pregnancy_diary",
-            description=("读取当前用户某一天或一个日期范围内的孕期日记。用户要查看、回顾、整理孕期日记，或更新前需要取得原记录时调用。"),
+            description="读取当前用户某一天或一个日期范围内的孕期日记。用户要查看、回顾、整理历史日记，或需要核对某日原文时调用。",
             read_or_write="read",
             side_effect_level="none",
             blocking_policy="must_wait",
@@ -209,44 +207,45 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="pregnancy_diary.entry_create.propose",
+            name="pregnancy_diary.entry.create",
             domain="pregnancy_diary",
             description=(
-                "为当前用户创建指定日期的孕期日记。"
-                "用户明确要求记录，且该日期尚无日记时调用；可记录用户提供的正文、心情、睡眠、胎动、症状或产检问题。"
+                "同步创建当前用户指定日期的孕期日记并返回已写入记录。"
+                "用户明确要求保存一篇新的孕期记录时调用；目标日期已有记录时返回现有记录供继续更新。"
             ),
             read_or_write="write",
             side_effect_level="low",
-            blocking_policy="enqueue_and_continue",
-            result_dependency="none",
+            blocking_policy="must_wait",
+            result_dependency="final_response",
             requires_confirmation=False,
-            idempotency_required=True,
+            idempotency_required=False,
             audit_required=True,
             timeout_seconds=15,
         )
     )
     registry.register(
         _tool_contract(
-            name="pregnancy_diary.entry_update.propose",
+            name="pregnancy_diary.entry.update",
             domain="pregnancy_diary",
             description=(
-                "更新当前用户指定日期已有的孕期日记。用户明确补充或修改已有记录时调用；修改正文前先读取原日记并提交合并后的完整正文。"
+                "同步补充或修改当前用户指定日期已有的孕期日记并返回更新后记录。"
+                "用户明确要求追加、更正或重写已有记录时调用；正文可选择 append 或 replace。"
             ),
             read_or_write="write",
             side_effect_level="low",
-            blocking_policy="enqueue_and_continue",
-            result_dependency="none",
+            blocking_policy="must_wait",
+            result_dependency="final_response",
             requires_confirmation=False,
-            idempotency_required=True,
+            idempotency_required=False,
             audit_required=True,
             timeout_seconds=15,
         )
     )
     registry.register(
         _tool_contract(
-            name="pregnancy_diary.entry_delete.propose",
+            name="pregnancy_diary.entry.delete.propose",
             domain="pregnancy_diary",
-            description="删除当前用户指定日期的孕期日记。用户明确要求删除某天记录时调用，并等待用户确认。",
+            description="为当前用户指定日期的孕期日记创建删除确认。用户明确要求删除且已确定目标日期时调用；用户确认后执行删除。",
             read_or_write="write",
             side_effect_level="medium",
             blocking_policy="wait_for_confirmation",
@@ -261,7 +260,7 @@ def default_tool_registry() -> ToolContractRegistry:
         _tool_contract(
             name="devices.pump_status.read",
             domain="devices",
-            description="读取当前用户吸奶器设备和近期遥测状态的有限摘要。",
+            description="读取当前用户吸奶器设备及近期遥测状态摘要。用户询问设备连接、在线状态、固件或近期运行状态时调用。",
             loading_mode="eager",
             read_or_write="read",
             side_effect_level="none",
@@ -277,7 +276,7 @@ def default_tool_registry() -> ToolContractRegistry:
         _tool_contract(
             name="devices.guidance_assets.read",
             domain="devices",
-            description="按元数据读取已打包设备指导素材的有限列表。",
+            description="读取 Momcozy 设备的官方指导图片、视频和文档素材。用户需要安装、使用、清洁或排查设备问题的指导内容时调用。",
             loading_mode="eager",
             read_or_write="read",
             side_effect_level="none",
@@ -295,8 +294,7 @@ def default_tool_registry() -> ToolContractRegistry:
             domain="images",
             description=(
                 "查看当前可见对话历史中已经展示过的一张图片。"
-                "当用户询问上图、这张图或历史回复中的具体图片内容时，"
-                "自行选择对应 image_url 后调用；不要只根据文件名或图片 alt 文本猜测。"
+                "用户询问上图、这张图或历史回复中某张具体图片的可见内容时调用，并传入对应 image_url。"
             ),
             loading_mode="eager",
             read_or_write="read",
@@ -313,7 +311,7 @@ def default_tool_registry() -> ToolContractRegistry:
         _tool_contract(
             name="plans.milk_plan.propose",
             domain="plans",
-            description="创建奶量计划预览并提出唯一的计划创建动作，等待用户确认；不要再调用独立预览工具。",
+            description="创建当前用户的奶量计划预览并发起待确认动作。用户明确希望制定泌乳、喂养或吸奶计划时调用。",
             read_or_write="write",
             side_effect_level="medium",
             blocking_policy="wait_for_confirmation",
@@ -328,7 +326,7 @@ def default_tool_registry() -> ToolContractRegistry:
         _tool_contract(
             name="pregnancy.plan.propose",
             domain="plans",
-            description="基于 runtime 提供的可信孕期资料和少量本轮偏好，创建孕期计划预览并提出唯一的计划创建动作，等待用户确认。",
+            description="基于可信孕期资料和本轮偏好创建孕期计划预览并发起待确认动作。用户明确希望制定孕期计划时调用。",
             read_or_write="write",
             side_effect_level="medium",
             blocking_policy="wait_for_confirmation",
@@ -343,7 +341,7 @@ def default_tool_registry() -> ToolContractRegistry:
         _tool_contract(
             name="plans.task_create.propose",
             domain="plans",
-            description="提出计划任务创建动作，等待用户确认。",
+            description="为当前用户的计划创建一个待确认任务。用户明确要求新增某项待办、安排或计划任务时调用。",
             read_or_write="write",
             side_effect_level="medium",
             blocking_policy="wait_for_confirmation",
@@ -358,7 +356,7 @@ def default_tool_registry() -> ToolContractRegistry:
         _tool_contract(
             name="plans.task_complete.propose",
             domain="plans",
-            description="提出计划任务完成状态更新动作，等待用户确认。",
+            description="把当前用户指定的计划任务标记为完成并等待确认。用户明确表示某项任务已经完成时调用。",
             read_or_write="write",
             side_effect_level="medium",
             blocking_policy="wait_for_confirmation",
@@ -373,7 +371,7 @@ def default_tool_registry() -> ToolContractRegistry:
         _tool_contract(
             name="plans.task_update.propose",
             domain="plans",
-            description="提出计划任务日期、时间、标题、描述或载荷更新动作，等待用户确认。",
+            description="修改当前用户指定计划任务的日期、时间、标题、描述或载荷并等待确认。用户明确要求调整已有任务时调用。",
             read_or_write="write",
             side_effect_level="medium",
             blocking_policy="wait_for_confirmation",
@@ -388,7 +386,7 @@ def default_tool_registry() -> ToolContractRegistry:
         _tool_contract(
             name="plans.task_delete.propose",
             domain="plans",
-            description="提出计划任务删除动作，等待用户确认。",
+            description="为当前用户指定的计划任务创建删除确认。用户明确要求删除已有任务时调用。",
             read_or_write="write",
             side_effect_level="medium",
             blocking_policy="wait_for_confirmation",
@@ -403,7 +401,7 @@ def default_tool_registry() -> ToolContractRegistry:
         _tool_contract(
             name="plans.plan_delete.propose",
             domain="plans",
-            description="提出计划删除动作，等待用户确认。",
+            description="为当前用户指定的计划创建删除确认。用户明确要求删除整个已有计划时调用。",
             read_or_write="write",
             side_effect_level="medium",
             blocking_policy="wait_for_confirmation",
@@ -418,7 +416,7 @@ def default_tool_registry() -> ToolContractRegistry:
         _tool_contract(
             name="notifications.milk_reminder.propose",
             domain="notifications",
-            description="提出奶量管理提醒通知动作，等待用户确认。",
+            description="为当前用户创建奶量、喂养或吸奶提醒并等待确认。用户明确要求在指定时间收到相关提醒时调用。",
             read_or_write="write",
             side_effect_level="medium",
             blocking_policy="wait_for_confirmation",
@@ -433,7 +431,7 @@ def default_tool_registry() -> ToolContractRegistry:
         _tool_contract(
             name="records.feeding_record.propose",
             domain="records",
-            description="提出喂养记录创建动作。",
+            description="保存当前用户明确提供的一次喂养记录。用户要求记录喂养时间、方式或奶量时调用。",
             read_or_write="write",
             side_effect_level="low",
             blocking_policy="enqueue_and_continue",
@@ -448,7 +446,7 @@ def default_tool_registry() -> ToolContractRegistry:
         _tool_contract(
             name="records.pumping_record.propose",
             domain="records",
-            description="提出吸奶记录创建动作。",
+            description="保存当前用户明确提供的一次吸奶记录。用户要求记录吸奶时间、时长、档位或奶量时调用。",
             read_or_write="write",
             side_effect_level="low",
             blocking_policy="enqueue_and_continue",
@@ -463,7 +461,7 @@ def default_tool_registry() -> ToolContractRegistry:
         _tool_contract(
             name="records.feeding_record_delete.propose",
             domain="records",
-            description="提出删除喂养记录动作，等待用户确认。",
+            description="为当前用户指定的喂养记录创建删除确认。用户明确要求删除某次已有喂养记录时调用。",
             read_or_write="write",
             side_effect_level="medium",
             blocking_policy="wait_for_confirmation",
@@ -478,7 +476,7 @@ def default_tool_registry() -> ToolContractRegistry:
         _tool_contract(
             name="records.pumping_record_delete.propose",
             domain="records",
-            description="提出删除吸奶记录动作，等待用户确认。",
+            description="为当前用户指定的吸奶记录创建删除确认。用户明确要求删除某次已有吸奶记录时调用。",
             read_or_write="write",
             side_effect_level="medium",
             blocking_policy="wait_for_confirmation",
@@ -493,7 +491,7 @@ def default_tool_registry() -> ToolContractRegistry:
         _tool_contract(
             name="records.growth_record.propose",
             domain="records",
-            description="提出宝宝生长记录创建动作。",
+            description="保存当前用户明确提供的一次宝宝生长记录。用户要求记录宝宝身高、体重或头围时调用。",
             read_or_write="write",
             side_effect_level="low",
             blocking_policy="enqueue_and_continue",
@@ -508,7 +506,7 @@ def default_tool_registry() -> ToolContractRegistry:
         _tool_contract(
             name="records.growth_record_update.propose",
             domain="records",
-            description="提出宝宝生长记录更新动作，等待用户确认。",
+            description="修改当前用户宝宝的指定生长记录并等待确认。用户明确要求更正已有身高、体重或头围记录时调用。",
             read_or_write="write",
             side_effect_level="medium",
             blocking_policy="wait_for_confirmation",
@@ -523,7 +521,7 @@ def default_tool_registry() -> ToolContractRegistry:
         _tool_contract(
             name="records.growth_record_delete.propose",
             domain="records",
-            description="提出宝宝生长记录删除动作，等待用户确认。",
+            description="为当前用户宝宝的指定生长记录创建删除确认。用户明确要求删除已有生长记录时调用。",
             read_or_write="write",
             side_effect_level="medium",
             blocking_policy="wait_for_confirmation",
@@ -538,7 +536,7 @@ def default_tool_registry() -> ToolContractRegistry:
         _tool_contract(
             name="birth_plan_form_create",
             domain="birth_prep",
-            description="创建分娩沟通单信息采集表单。模型只决定是否创建；预填信息、表单字段、顺序、分类、选项和排他选项过滤由 runtime 与工具稳定生成。无后端副作用。",
+            description="创建分娩沟通单信息采集表单，字段和预填信息由 runtime 生成。用户希望开始梳理分娩偏好或准备分娩沟通单时调用。",
             read_or_write="write",
             side_effect_level="low",
             blocking_policy="must_wait",
@@ -553,7 +551,7 @@ def default_tool_registry() -> ToolContractRegistry:
         _tool_contract(
             name="labor_communication_card_create",
             domain="birth_prep",
-            description="根据应用侧注入的 birth_plan_card_intake 表单提交数据生成前端可渲染的分娩沟通单。LLM 不需要生成 card_json，也不能用参数伪造表单提交；字段映射、强诉求降级、分区整理、医院问题和安全声明由工具稳定生成。无后端副作用。",
+            description="根据应用侧可信的 birth_plan_card_intake 表单提交生成可渲染的分娩沟通单。用户完成信息采集并要求生成沟通单时调用。",
             read_or_write="write",
             side_effect_level="low",
             blocking_policy="must_wait",
@@ -568,7 +566,7 @@ def default_tool_registry() -> ToolContractRegistry:
         _tool_contract(
             name="hospital_bag_form_create",
             domain="hospital_bag",
-            description="创建待产包信息采集表单。用户确认开始待产包整理后可直接调用；模型只决定是否创建，runtime 自动合并可信的 profile 和 active 孕期计划信息。表单字段、顺序、分类、选项和样式约束由工具稳定生成。无后端副作用。",
+            description="创建待产包信息采集表单，并由 runtime 合并可信资料和当前孕期计划。用户确认开始整理待产包时调用。",
             read_or_write="write",
             side_effect_level="low",
             blocking_policy="must_wait",
@@ -583,7 +581,7 @@ def default_tool_registry() -> ToolContractRegistry:
         _tool_contract(
             name="hospital_bag_card_create",
             domain="hospital_bag",
-            description="根据应用侧注入的 hospital_bag_intake 表单提交数据生成前端可渲染的待产包清单。LLM 不需要生成 card_json，也不能用参数伪造表单提交；分包、物品、数量、医院确认项、购物车入口和兼容字段由工具稳定生成。无后端副作用。调用本工具后的最终回复遵循工具返回结果，不要再复述已确认字段、设计思路、住院天数或医院确认逻辑。",
+            description="根据应用侧可信的 hospital_bag_intake 表单提交生成可渲染的待产包清单。用户完成信息采集并要求生成待产包清单时调用。",
             read_or_write="write",
             side_effect_level="low",
             blocking_policy="must_wait",
@@ -598,7 +596,11 @@ def default_tool_registry() -> ToolContractRegistry:
         _tool_contract(
             name="hospital_bag_cart_update",
             domain="hospital_bag",
-            description="根据用户自然语言修改当前待产包购物车。只在上下文已有当前待产包购物车，或当前对话明确处于待产包购物车页面/购物车调整流程时使用；不要用于首次生成待产包清单、独立吸奶器型号选型、设备故障排查或真实下单。用于用户说预算上限、太贵、便宜一点、删掉/加回某个商品、医院会提供、家里已有、调整数量、恢复默认购物车、把已推荐的 Momcozy 吸奶器型号同步到购物车等。用户给出明确金额时必须使用 action=optimize_budget 并设置 target_budget。工具只返回前端可应用的购物车更新，不真正下单。预算优化默认尽量保留吸奶器；只有用户明确要求删除吸奶器，或 allow_remove_pump=true 时才可移除。",
+            description=(
+                "修改当前用户已有的待产包购物车并返回前端可应用的更新。"
+                "用户在待产包购物车场景中要求调整预算、增删商品、修改数量、标记已有物品、恢复默认或同步已推荐吸奶器时调用；"
+                "用户给出明确预算金额时使用 optimize_budget 和 target_budget。"
+            ),
             read_or_write="write",
             side_effect_level="low",
             blocking_policy="must_wait",
@@ -613,7 +615,10 @@ def default_tool_registry() -> ToolContractRegistry:
         _tool_contract(
             name="hospital_bag_pump_recommend",
             domain="hospital_bag",
-            description="购买前选型工具：根据用户预算、使用场景和偏好，从 Momcozy 官方吸奶器型号目录里推荐 1 款主推型号和 1-2 款备选。适用于用户问哪款吸奶器适合自己、型号差异、预算内怎么选、某型号多少钱或“Air1 呢”等点名型号追问，也适用于待产包场景中先确定吸奶器型号。不要用于已购设备故障、说明书/FAQ、配件问题或奶量是否正常。无购物车副作用；如果用户要同步购物车，拿返回的 cart_sync_suggestion 再调用 hospital_bag_cart_update。价格口径使用 Momcozy 官方对外价格，保留官方 USD 标价和活动价字段。Air 1 是高价轻薄款，不能描述为降低预算、省钱或更便宜选择。",
+            description=(
+                "根据当前用户的预算、使用场景和偏好，从 Momcozy 官方目录推荐吸奶器型号并返回购物车同步建议。"
+                "用户在购买前询问适合的型号、型号差异、预算内选择、价格或点名某型号时调用。"
+            ),
             read_or_write="write",
             side_effect_level="low",
             blocking_policy="must_wait",
@@ -628,7 +633,7 @@ def default_tool_registry() -> ToolContractRegistry:
         _tool_contract(
             name="support.ticket.propose",
             domain="support",
-            description="在用户确认意图明确后，创建售后工单动作提案。",
+            description="为当前用户创建 Momcozy 设备售后工单并等待确认。用户明确希望把设备故障或服务问题提交给售后处理时调用。",
             read_or_write="write",
             side_effect_level="medium",
             blocking_policy="wait_for_confirmation",
@@ -643,7 +648,7 @@ def default_tool_registry() -> ToolContractRegistry:
         _tool_contract(
             name="ibclc_consult_card_create",
             domain="support",
-            description="创建 IBCLC 哺乳顾问咨询入口卡片。无外部预约副作用。",
+            description="为当前用户创建 IBCLC 哺乳顾问咨询入口卡片。用户希望联系专业哺乳顾问或需要进一步人工咨询时调用。",
             read_or_write="write",
             side_effect_level="low",
             blocking_policy="must_wait",

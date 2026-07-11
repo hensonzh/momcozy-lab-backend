@@ -5,6 +5,7 @@ from typing import Any, cast
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import PregnancyDiaryEntry
@@ -72,21 +73,25 @@ class DiaryRepository:
         entry_date: date,
         values: dict[str, Any],
     ) -> PregnancyDiaryEntry | None:
-        entry = await self.get_entry_by_date(owner_user_id=owner_user_id, entry_date=entry_date, include_deleted=True)
-        if entry is None:
-            entry = PregnancyDiaryEntry(owner_user_id=owner_user_id, entry_date=entry_date)
-            self.session.add(entry)
-        elif entry.deleted_at is None:
+        try:
+            async with self.session.begin_nested():
+                entry = await self.get_entry_by_date(owner_user_id=owner_user_id, entry_date=entry_date, include_deleted=True)
+                if entry is None:
+                    entry = PregnancyDiaryEntry(owner_user_id=owner_user_id, entry_date=entry_date)
+                    self.session.add(entry)
+                elif entry.deleted_at is None:
+                    return None
+                else:
+                    for field, value in _ENTRY_DEFAULTS.items():
+                        setattr(entry, field, list(value) if isinstance(value, list) else value)
+                entry.status = "active"
+                entry.deleted_at = None
+                for field, value in values.items():
+                    setattr(entry, field, value)
+                await self.session.flush()
+                return entry
+        except IntegrityError:
             return None
-        else:
-            for field, value in _ENTRY_DEFAULTS.items():
-                setattr(entry, field, list(value) if isinstance(value, list) else value)
-        entry.status = "active"
-        entry.deleted_at = None
-        for field, value in values.items():
-            setattr(entry, field, value)
-        await self.session.flush()
-        return entry
 
     async def update_entry(
         self,

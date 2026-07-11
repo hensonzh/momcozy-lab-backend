@@ -554,7 +554,7 @@
         "service_skill_id": "cozymate_service_agent",
         "must_include": [
           "pregnancy_diary_namespace",
-          "queued_create_action"
+          "synchronous_create"
         ],
         "must_not": [
           "load_service_skill_for_diary",
@@ -563,7 +563,7 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "pregnancy_diary.entry_create.propose",
+          "contract": "pregnancy_diary.entry.create",
           "timing": "after_user_record_intent"
         }
       ],

@@ -695,9 +695,9 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
         "plans_task_update_propose",
         "pregnancy_plan_propose",
         "pregnancy_diary_entries_read",
-        "pregnancy_diary_entry_create_propose",
+        "pregnancy_diary_entry_create",
         "pregnancy_diary_entry_delete_propose",
-        "pregnancy_diary_entry_update_propose",
+        "pregnancy_diary_entry_update",
         "profile_read",
         "profile_update",
         "records_feeding_record_propose",
@@ -723,9 +723,10 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert backend.tool_schemas["devices_guidance_assets_read"]["properties"]["content_type"]["type"] == "string"
     assert backend.tool_schemas["devices_pump_status_read"]["properties"]["limit"]["maximum"] == 20
     assert backend.tool_schemas["pregnancy_diary_entries_read"]["properties"]["limit"]["maximum"] == 14
-    assert backend.tool_schemas["pregnancy_diary_entry_create_propose"]["required"] == ["entry_date"]
-    assert backend.tool_schemas["pregnancy_diary_entry_create_propose"]["properties"]["content"]["maxLength"] == 5000
-    assert backend.tool_schemas["pregnancy_diary_entry_update_propose"]["required"] == ["entry_date"]
+    assert backend.tool_schemas["pregnancy_diary_entry_create"]["required"] == ["entry_date"]
+    assert backend.tool_schemas["pregnancy_diary_entry_create"]["properties"]["content"]["maxLength"] == 5000
+    assert backend.tool_schemas["pregnancy_diary_entry_update"]["required"] == ["entry_date"]
+    assert backend.tool_schemas["pregnancy_diary_entry_update"]["properties"]["content_mode"]["default"] == "append"
     assert backend.tool_schemas["pregnancy_diary_entry_delete_propose"]["required"] == ["entry_date"]
     assert backend.tool_schemas["images_inspect"]["required"] == ["image_url"]
     assert backend.tool_schemas["hospital_bag_cart_update"]["additionalProperties"] is False
@@ -797,15 +798,15 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     ]
     assert backend.tool_namespaces["pregnancy_diary"]["tool_names"] == [
         "pregnancy_diary.entries.read",
-        "pregnancy_diary.entry_create.propose",
-        "pregnancy_diary.entry_update.propose",
-        "pregnancy_diary.entry_delete.propose",
+        "pregnancy_diary.entry.create",
+        "pregnancy_diary.entry.update",
+        "pregnancy_diary.entry.delete.propose",
     ]
     assert backend.tool_namespaces["pregnancy_diary"]["deferred_tool_names"] == [
         "pregnancy_diary.entries.read",
-        "pregnancy_diary.entry_create.propose",
-        "pregnancy_diary.entry_update.propose",
-        "pregnancy_diary.entry_delete.propose",
+        "pregnancy_diary.entry.create",
+        "pregnancy_diary.entry.update",
+        "pregnancy_diary.entry.delete.propose",
     ]
     assert backend.tool_namespace_by_contract["profile.read"] == ""
     assert backend.tool_namespace_by_contract["profile_update"] == ""

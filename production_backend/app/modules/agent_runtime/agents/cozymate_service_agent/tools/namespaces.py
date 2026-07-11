@@ -55,7 +55,10 @@ class ToolNamespaceRegistry:
 SCENARIO_NAMESPACE_DEFINITIONS: tuple[ToolNamespace, ...] = (
     ToolNamespace(
         name="milk_management",
-        description="奶量、喂养、吸奶、生长记录、奶量计划、提醒和奶量任务工具包。",
+        description=(
+            "管理当前用户的喂养、吸奶、奶量、生长记录及相关计划和提醒。"
+            "用户要查看数据、记录一次喂养/吸奶/生长、分析趋势，或创建和调整相关计划与提醒时使用。"
+        ),
         tool_contracts=(
             "records.milk_status.read",
             "records.milk_summary.read",
@@ -78,7 +81,10 @@ SCENARIO_NAMESPACE_DEFINITIONS: tuple[ToolNamespace, ...] = (
     ),
     ToolNamespace(
         name="birth_prep",
-        description="孕期计划、分娩沟通、待产包表单与待产包卡片工具包。",
+        description=(
+            "处理当前用户的孕期计划、分娩沟通和待产包表单/卡片。"
+            "用户要制定或调整孕期待办、梳理分娩偏好、生成沟通单或整理待产包时使用。"
+        ),
         tool_contracts=(
             "pregnancy.plan.propose",
             "plans.plan_delete.propose",
@@ -92,17 +98,17 @@ SCENARIO_NAMESPACE_DEFINITIONS: tuple[ToolNamespace, ...] = (
     ),
     ToolNamespace(
         name="hospital_bag_cart",
-        description="待产包购物车调整工具包。",
+        description="调整当前用户已有的待产包购物车。用户要控制预算、增删物品、修改数量或同步吸奶器推荐时使用。",
         tool_contracts=("hospital_bag_cart_update",),
     ),
     ToolNamespace(
         name="pump_recommendation",
-        description="待产包相关吸奶器推荐工具包。",
+        description="根据当前用户预算、使用场景和偏好推荐 Momcozy 吸奶器。用户在购买前询问型号、差异、价格或如何选择时使用。",
         tool_contracts=("hospital_bag_pump_recommend",),
     ),
     ToolNamespace(
         name="device_support",
-        description="吸奶器设备状态、官方指导素材和售后工单工具包。",
+        description="处理当前用户吸奶器的状态查询、官方操作指导和售后工单。用户需要查看设备状态、安装使用、排查问题或联系售后时使用。",
         tool_contracts=(
             "devices.pump_status.read",
             "devices.guidance_assets.read",
@@ -111,17 +117,20 @@ SCENARIO_NAMESPACE_DEFINITIONS: tuple[ToolNamespace, ...] = (
     ),
     ToolNamespace(
         name="health_consultation",
-        description="健康咨询中用于创建 IBCLC 咨询卡片的工具包。",
+        description="为当前用户创建 IBCLC 哺乳顾问咨询入口。用户希望联系专业哺乳顾问或需要进一步人工咨询时使用。",
         tool_contracts=("ibclc_consult_card_create",),
     ),
     ToolNamespace(
         name="pregnancy_diary",
-        description="独立管理孕期日记的读取、创建、更新和删除工具包。",
+        description=(
+            "管理当前用户孕期日记的读取、记录、补充、修改和删除。"
+            "用户要查看某日记录，或把心情、精力、睡眠、胎动、症状、饮食与产检信息保存到孕期日记时使用。"
+        ),
         tool_contracts=(
             "pregnancy_diary.entries.read",
-            "pregnancy_diary.entry_create.propose",
-            "pregnancy_diary.entry_update.propose",
-            "pregnancy_diary.entry_delete.propose",
+            "pregnancy_diary.entry.create",
+            "pregnancy_diary.entry.update",
+            "pregnancy_diary.entry.delete.propose",
         ),
     ),
 )

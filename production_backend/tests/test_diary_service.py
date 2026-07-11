@@ -3,6 +3,7 @@ from datetime import date, datetime, timezone
 from uuid import UUID, uuid4
 
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.exc import IntegrityError
 
 from production_backend.app.modules.diary.models import PregnancyDiaryEntry
 from production_backend.app.modules.diary.repository import DiaryRepository
@@ -70,6 +71,24 @@ def test_diary_repository_create_restores_soft_deleted_entry_without_stale_value
     assert entry.appointment_note == ""
     assert session.added == []
     assert session.flushed is True
+    assert session.nested_transactions == 1
+
+
+def test_diary_repository_contains_concurrent_create_conflict_in_savepoint() -> None:
+    owner_user_id = uuid4()
+    session = FakeDiarySession(entry=None, flush_error=IntegrityError("INSERT", {}, Exception("duplicate owner/date")))
+    repository = DiaryRepository(session=session)  # type: ignore[arg-type]
+
+    entry = asyncio.run(
+        repository.create_entry(
+            owner_user_id=owner_user_id,
+            entry_date=date(2026, 7, 2),
+            values={"content": "Concurrent entry"},
+        )
+    )
+
+    assert entry is None
+    assert session.nested_transactions == 1
 
 
 def _entry(*, owner_user_id: UUID) -> PregnancyDiaryEntry:
@@ -121,12 +140,16 @@ class FakeDiaryRepository:
 
 
 class FakeDiarySession:
-    def __init__(self, *, entry: PregnancyDiaryEntry) -> None:
+    def __init__(self, *, entry: PregnancyDiaryEntry | None, flush_error: Exception | None = None) -> None:
         self.entry = entry
+        self.flush_error = flush_error
         self.added = []
         self.flushed = False
+        self.nested_transactions = 0
 
     async def scalar(self, statement):
+        if self.entry is None:
+            return None
         sql = str(statement.compile(dialect=postgresql.dialect()))
         if "deleted_at IS NULL" in sql and self.entry.deleted_at is not None:
             return None
@@ -137,6 +160,20 @@ class FakeDiarySession:
 
     async def flush(self) -> None:
         self.flushed = True
+        if self.flush_error is not None:
+            raise self.flush_error
+
+    def begin_nested(self):
+        self.nested_transactions += 1
+        return FakeNestedTransaction()
+
+
+class FakeNestedTransaction:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, traceback):
+        return False
 
 
 class FakeAuditService:

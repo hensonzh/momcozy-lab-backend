@@ -382,36 +382,6 @@ def test_agent_runtime_actions_accept_milk_reminder_policy() -> None:
     assert outbox_service.enqueue_kwargs["payload"]["apply_payload"] == {"title": "Time to pump"}
 
 
-def test_agent_runtime_actions_auto_queue_pregnancy_diary_create() -> None:
-    owner_user_id = uuid4()
-    repository = FakeActionRepository()
-    outbox_service = FakeOutboxService()
-    service = AgentRuntimeService(repository=repository, outbox_service=outbox_service)
-    run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Save my diary"))
-
-    action = asyncio.run(
-        service.propose_action(
-            owner_user_id=owner_user_id,
-            run_id=run.id,
-            action_type="pregnancy_diary.entry.create",
-            target_type="pregnancy_diary_entry",
-            side_effect_level="low",
-            preview_payload={"entry_date": "2026-07-04", "fields": ["content"]},
-            apply_payload={"entry_date": "2026-07-04", "values": {"content": "Today I felt steady."}},
-        )
-    )
-
-    assert action.status == "confirmed"
-    assert action.action_type == "pregnancy_diary.entry.create"
-    assert action.target_type == "pregnancy_diary_entry"
-    assert action.side_effect_level == "low"
-    assert repository.events[-1].event_type == "action.queued"
-    assert outbox_service.enqueue_kwargs["payload"]["apply_payload"] == {
-        "entry_date": "2026-07-04",
-        "values": {"content": "Today I felt steady."},
-    }
-
-
 def test_agent_runtime_actions_require_confirmation_for_pregnancy_diary_delete() -> None:
     owner_user_id = uuid4()
     repository = FakeActionRepository()

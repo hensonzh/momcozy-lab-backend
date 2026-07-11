@@ -83,7 +83,7 @@ def test_product_agent_eval_seed_uses_current_pregnancy_action_contracts() -> No
     assert "pregnancy.plan.propose" in plan_contracts
     assert "load_service_skill" in task_contracts
     assert "plans.task_complete.propose" in task_contracts
-    assert diary_contracts == {"pregnancy_diary.entry_create.propose"}
+    assert diary_contracts == {"pregnancy_diary.entry.create"}
     assert by_suite["pregnancy_diary_entry"]["expected_behavior"]["service_skill_id"] == "cozymate_service_agent"
     assert by_suite["pregnancy_diary_entry"]["expected_behavior"]["requires_confirmation_before_write"] is False
     assert "pregnancy_plan_proposal" not in plan_contracts

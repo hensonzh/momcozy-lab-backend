@@ -31,83 +31,83 @@
 
 | Canonical contract | 模型看到的 SDK name | 加载 | 读写 | 需确认 | 用途与调用条件 |
 | --- | --- | --- | --- | --- | --- |
-| `load_service_skill` | `load_service_skill` | eager | read | 否 | 进入奶量、产前准备、健康咨询、情绪支持或设备指导流程前，按 `service_skill_id` 加载技能说明、建议工具和小型业务事实包。 |
-| `profile.read` | `profile_read` | eager | read | 否 | 读取当前用户的资料上下文投影。 |
-| `profile_update` | `profile_update` | eager | write | 否 | 更新用户明确提供的基础资料字段，例如 `display_name`、`age` 或 `onboarding_skipped`。 |
+| `load_service_skill` | `load_service_skill` | eager | read | 否 | 用户请求需要进入服务流程且技能尚未驻留时，按 `service_skill_id` 加载技能说明、建议工具和业务事实包。 |
+| `profile.read` | `profile_read` | eager | read | 否 | 用户问题或后续动作需要核对姓名、年龄、孕产状态或宝宝资料时，读取当前用户及宝宝的资料投影。 |
+| `profile_update` | `profile_update` | eager | write | 否 | 用户明确提供或更正姓名、年龄或 onboarding 状态时更新资料。 |
 | `images.inspect` | `images_inspect` | eager | read | 否 | 用户询问当前可见历史中的某张图片时，由模型选择对应 `image_url`，让当前 agent loop 追加图片并进行多模态理解。 |
 
 ## 3. 全局 Namespace
 
 | Namespace | 工具数 | eager | deferred | 定位 |
 | --- | ---: | ---: | ---: | --- |
-| `milk_management` | 17 | 6 | 11 | 奶量、喂养、吸奶、生长记录、奶量计划、提醒和奶量任务。 |
-| `birth_prep` | 8 | 0 | 8 | 孕期计划、分娩沟通、待产包表单与待产包卡片。 |
-| `hospital_bag_cart` | 1 | 0 | 1 | 待产包购物车调整。 |
-| `pump_recommendation` | 1 | 0 | 1 | 待产包相关吸奶器推荐。 |
-| `device_support` | 3 | 2 | 1 | 吸奶器设备状态、官方指导素材和售后工单。 |
-| `health_consultation` | 1 | 0 | 1 | 健康咨询中的 IBCLC 咨询卡片。 |
-| `pregnancy_diary` | 4 | 0 | 4 | 独立管理孕期日记的读取、创建、更新和删除。 |
+| `milk_management` | 17 | 6 | 11 | 用户查看或记录喂养、吸奶、生长数据，分析奶量趋势，或管理相关计划与提醒时使用。 |
+| `birth_prep` | 8 | 0 | 8 | 用户制定孕期计划、梳理分娩偏好、生成沟通单或整理待产包时使用。 |
+| `hospital_bag_cart` | 1 | 0 | 1 | 用户调整已有待产包购物车的预算、物品、数量或吸奶器时使用。 |
+| `pump_recommendation` | 1 | 0 | 1 | 用户购买前询问吸奶器型号、差异、价格或如何选择时使用。 |
+| `device_support` | 3 | 2 | 1 | 用户查看设备状态、需要官方指导、排查问题或联系售后时使用。 |
+| `health_consultation` | 1 | 0 | 1 | 用户希望联系 IBCLC 哺乳顾问或进一步人工咨询时使用。 |
+| `pregnancy_diary` | 4 | 0 | 4 | 用户查看、记录、补充、修改或删除孕期日记时使用。 |
 
 ## 4. `milk_management`
 
 | Canonical contract | 模型看到的 SDK name | 加载 | 读写 | 需确认 | 用途 |
 | --- | --- | --- | --- | --- | --- |
-| `records.milk_status.read` | `records_milk_status_read` | eager | read | 否 | 读取确定性的近期奶量状态快照。 |
-| `records.milk_summary.read` | `records_milk_summary_read` | eager | read | 否 | 读取近期喂养、吸奶和趋势的有限摘要。 |
-| `records.milk_analysis.read` | `records_milk_analysis_read` | eager | read | 否 | 读取近期奶量、生长和趋势事实并形成分析快照。 |
-| `records.growth.read` | `records_growth_read` | eager | read | 否 | 读取当前用户范围内的宝宝身高、体重、头围等记录。 |
-| `records.feeding_record.propose` | `records_feeding_record_propose` | deferred | write | 否 | 提出喂养记录创建动作。 |
-| `records.feeding_record_delete.propose` | `records_feeding_record_delete_propose` | deferred | write | 是 | 提出删除喂养记录动作。 |
-| `records.pumping_record.propose` | `records_pumping_record_propose` | deferred | write | 否 | 提出吸奶记录创建动作。 |
-| `records.pumping_record_delete.propose` | `records_pumping_record_delete_propose` | deferred | write | 是 | 提出删除吸奶记录动作。 |
-| `records.growth_record.propose` | `records_growth_record_propose` | deferred | write | 否 | 提出宝宝生长记录创建动作。 |
-| `records.growth_record_update.propose` | `records_growth_record_update_propose` | deferred | write | 是 | 提出宝宝生长记录更新动作。 |
-| `records.growth_record_delete.propose` | `records_growth_record_delete_propose` | deferred | write | 是 | 提出宝宝生长记录删除动作。 |
-| `plans.current.read` | `plans_current_read` | eager | read | 否 | 读取当前生效计划和近期任务的有限摘要。 |
-| `plans.calendar.read` | `plans_calendar_read` | eager | read | 否 | 按日期、状态读取当前用户的计划任务日程。 |
-| `plans.milk_plan.propose` | `plans_milk_plan_propose` | deferred | write | 是 | 创建奶量计划预览并提出计划创建动作。 |
-| `plans.task_complete.propose` | `plans_task_complete_propose` | deferred | write | 是 | 提出计划任务完成状态更新动作。 |
-| `plans.task_create.propose` | `plans_task_create_propose` | deferred | write | 是 | 提出计划任务创建动作。 |
-| `notifications.milk_reminder.propose` | `notifications_milk_reminder_propose` | deferred | write | 是 | 提出奶量管理提醒通知动作。 |
+| `records.milk_status.read` | `records_milk_status_read` | eager | read | 否 | 用户询问当前奶量表现、近期是否有记录或今日状态时读取确定性快照。 |
+| `records.milk_summary.read` | `records_milk_summary_read` | eager | read | 否 | 用户回顾近期喂养、吸奶记录或需要奶量概览时读取简要摘要。 |
+| `records.milk_analysis.read` | `records_milk_analysis_read` | eager | read | 否 | 用户分析奶量变化、趋势或与宝宝生长的关系时读取分析快照。 |
+| `records.growth.read` | `records_growth_read` | eager | read | 否 | 用户查看宝宝近期身高、体重、头围或生长趋势时读取记录。 |
+| `records.feeding_record.propose` | `records_feeding_record_propose` | deferred | write | 否 | 用户要求记录喂养时间、方式或奶量时保存一次喂养记录。 |
+| `records.feeding_record_delete.propose` | `records_feeding_record_delete_propose` | deferred | write | 是 | 用户明确删除某次喂养记录时创建删除确认。 |
+| `records.pumping_record.propose` | `records_pumping_record_propose` | deferred | write | 否 | 用户要求记录吸奶时间、时长、档位或奶量时保存一次吸奶记录。 |
+| `records.pumping_record_delete.propose` | `records_pumping_record_delete_propose` | deferred | write | 是 | 用户明确删除某次吸奶记录时创建删除确认。 |
+| `records.growth_record.propose` | `records_growth_record_propose` | deferred | write | 否 | 用户要求记录宝宝身高、体重或头围时保存一次生长记录。 |
+| `records.growth_record_update.propose` | `records_growth_record_update_propose` | deferred | write | 是 | 用户明确更正已有身高、体重或头围记录时创建更新确认。 |
+| `records.growth_record_delete.propose` | `records_growth_record_delete_propose` | deferred | write | 是 | 用户明确删除已有生长记录时创建删除确认。 |
+| `plans.current.read` | `plans_current_read` | eager | read | 否 | 用户查看当前计划、待办或后续安排时读取生效计划和近期任务。 |
+| `plans.calendar.read` | `plans_calendar_read` | eager | read | 否 | 用户询问某天安排、待完成事项或任务状态时按日期和状态读取日程。 |
+| `plans.milk_plan.propose` | `plans_milk_plan_propose` | deferred | write | 是 | 用户明确希望制定泌乳、喂养或吸奶计划时创建待确认计划。 |
+| `plans.task_complete.propose` | `plans_task_complete_propose` | deferred | write | 是 | 用户明确表示某项任务已完成时创建状态更新确认。 |
+| `plans.task_create.propose` | `plans_task_create_propose` | deferred | write | 是 | 用户明确要求新增待办、安排或计划任务时创建确认。 |
+| `notifications.milk_reminder.propose` | `notifications_milk_reminder_propose` | deferred | write | 是 | 用户要求在指定时间收到奶量、喂养或吸奶提醒时创建确认。 |
 
 ## 5. `birth_prep`
 
 | Canonical contract | 模型看到的 SDK name | 加载 | 读写 | 需确认 | 用途 |
 | --- | --- | --- | --- | --- | --- |
-| `pregnancy.plan.propose` | `pregnancy_plan_propose` | deferred | write | 是 | 基于 runtime 的可信孕期资料和本轮偏好，创建孕期计划预览并提出创建动作。 |
-| `plans.plan_delete.propose` | `plans_plan_delete_propose` | deferred | write | 是 | 提出计划删除动作。 |
-| `plans.task_update.propose` | `plans_task_update_propose` | deferred | write | 是 | 提出计划任务日期、时间、标题、描述或载荷更新动作。 |
-| `plans.task_delete.propose` | `plans_task_delete_propose` | deferred | write | 是 | 提出计划任务删除动作。 |
-| `birth_plan_form_create` | `birth_plan_form_create` | deferred | write | 否 | 创建分娩沟通单信息采集表单；模型只决定是否创建，字段和预填由 runtime/工具生成。 |
-| `labor_communication_card_create` | `labor_communication_card_create` | deferred | write | 否 | 根据应用侧注入的 `birth_plan_card_intake` 表单数据生成前端可渲染的分娩沟通单。 |
-| `hospital_bag_form_create` | `hospital_bag_form_create` | deferred | write | 否 | 创建待产包信息采集表单；runtime 合并可信 profile 和 active 孕期计划信息。 |
-| `hospital_bag_card_create` | `hospital_bag_card_create` | deferred | write | 否 | 根据应用侧注入的 `hospital_bag_intake` 表单数据生成前端可渲染的待产包清单。 |
+| `pregnancy.plan.propose` | `pregnancy_plan_propose` | deferred | write | 是 | 用户明确希望制定孕期计划时，基于可信资料和偏好创建待确认计划。 |
+| `plans.plan_delete.propose` | `plans_plan_delete_propose` | deferred | write | 是 | 用户明确删除整个已有计划时创建删除确认。 |
+| `plans.task_update.propose` | `plans_task_update_propose` | deferred | write | 是 | 用户明确调整已有任务日期、时间、标题、描述或载荷时创建更新确认。 |
+| `plans.task_delete.propose` | `plans_task_delete_propose` | deferred | write | 是 | 用户明确删除已有任务时创建删除确认。 |
+| `birth_plan_form_create` | `birth_plan_form_create` | deferred | write | 否 | 用户开始梳理分娩偏好或准备沟通单时创建信息采集表单。 |
+| `labor_communication_card_create` | `labor_communication_card_create` | deferred | write | 否 | 用户完成可信表单并要求生成沟通单时创建可渲染卡片。 |
+| `hospital_bag_form_create` | `hospital_bag_form_create` | deferred | write | 否 | 用户确认开始整理待产包时创建信息采集表单。 |
+| `hospital_bag_card_create` | `hospital_bag_card_create` | deferred | write | 否 | 用户完成可信表单并要求生成待产包清单时创建可渲染卡片。 |
 
 ## 6. `hospital_bag_cart`
 
 | Canonical contract | 模型看到的 SDK name | 加载 | 读写 | 需确认 | 用途 |
 | --- | --- | --- | --- | --- | --- |
-| `hospital_bag_cart_update` | `hospital_bag_cart_update` | deferred | write | 否 | 在已有待产包购物车或明确处于购物车调整流程时，根据自然语言调整预算、商品、数量或吸奶器型号；只返回前端可应用的更新，不真实下单。 |
+| `hospital_bag_cart_update` | `hospital_bag_cart_update` | deferred | write | 否 | 用户在已有待产包购物车中调整预算、商品、数量、已有物品或吸奶器时返回前端更新。 |
 
 ## 7. `pump_recommendation`
 
 | Canonical contract | 模型看到的 SDK name | 加载 | 读写 | 需确认 | 用途 |
 | --- | --- | --- | --- | --- | --- |
-| `hospital_bag_pump_recommend` | `hospital_bag_pump_recommend` | deferred | write | 否 | 根据预算、使用场景和偏好，从 Momcozy 官方目录推荐 1 款主推和 1-2 款备选；无购物车副作用。 |
+| `hospital_bag_pump_recommend` | `hospital_bag_pump_recommend` | deferred | write | 否 | 用户购买前询问型号、差异、预算内选择或价格时，根据偏好从 Momcozy 官方目录推荐。 |
 
 ## 8. `device_support`
 
 | Canonical contract | 模型看到的 SDK name | 加载 | 读写 | 需确认 | 用途 |
 | --- | --- | --- | --- | --- | --- |
-| `devices.pump_status.read` | `devices_pump_status_read` | eager | read | 否 | 读取当前用户吸奶器设备和近期遥测状态的有限摘要。 |
-| `devices.guidance_assets.read` | `devices_guidance_assets_read` | eager | read | 否 | 按元数据读取已打包设备指导素材的有限列表。 |
-| `support.ticket.propose` | `support_ticket_propose` | deferred | write | 是 | 在用户确认售后意图明确后，创建售后工单动作提案。 |
+| `devices.pump_status.read` | `devices_pump_status_read` | eager | read | 否 | 用户询问设备连接、在线状态、固件或近期运行状态时读取设备摘要。 |
+| `devices.guidance_assets.read` | `devices_guidance_assets_read` | eager | read | 否 | 用户需要安装、使用、清洁或排查设备问题的指导时读取官方素材。 |
+| `support.ticket.propose` | `support_ticket_propose` | deferred | write | 是 | 用户明确希望把设备故障或服务问题提交售后时创建工单确认。 |
 
 ## 9. `health_consultation`
 
 | Canonical contract | 模型看到的 SDK name | 加载 | 读写 | 需确认 | 用途 |
 | --- | --- | --- | --- | --- | --- |
-| `ibclc_consult_card_create` | `ibclc_consult_card_create` | deferred | write | 否 | 创建 IBCLC 哺乳顾问咨询入口卡片，无外部预约副作用。 |
+| `ibclc_consult_card_create` | `ibclc_consult_card_create` | deferred | write | 否 | 用户希望联系专业哺乳顾问或进一步人工咨询时创建 IBCLC 入口卡片。 |
 
 ## 10. `pregnancy_diary`
 
@@ -115,10 +115,10 @@
 
 | Canonical contract | 模型看到的 SDK name | 加载 | 读写 | 需确认 | 用途 |
 | --- | --- | --- | --- | --- | --- |
-| `pregnancy_diary.entries.read` | `pregnancy_diary_entries_read` | deferred | read | 否 | 按指定日期或日期范围读取当前用户的孕期日记；回顾日记或更新前获取原记录时调用。 |
-| `pregnancy_diary.entry_create.propose` | `pregnancy_diary_entry_create_propose` | deferred | write | 否 | 用户明确要求记录且当天尚无日记时，创建正文及可选心情、睡眠、胎动、症状和产检问题。 |
-| `pregnancy_diary.entry_update.propose` | `pregnancy_diary_entry_update_propose` | deferred | write | 否 | 用户明确补充或修改已有日记时更新；正文更新前需读取原记录并提交合并后的完整正文。 |
-| `pregnancy_diary.entry_delete.propose` | `pregnancy_diary_entry_delete_propose` | deferred | write | 是 | 用户明确要求删除某天日记时提出删除动作并等待确认。 |
+| `pregnancy_diary.entries.read` | `pregnancy_diary_entries_read` | deferred | read | 否 | 用户查看、回顾、整理历史日记或需要核对某日原文时读取指定日期或日期范围。 |
+| `pregnancy_diary.entry.create` | `pregnancy_diary_entry_create` | deferred | write | 否 | 用户明确保存一篇新孕期记录时同步创建；同日已有记录时返回现有记录供继续更新。 |
+| `pregnancy_diary.entry.update` | `pregnancy_diary_entry_update` | deferred | write | 否 | 用户明确补充或修改已有日记时同步更新；正文支持追加或替换。 |
+| `pregnancy_diary.entry.delete.propose` | `pregnancy_diary_entry_delete_propose` | deferred | write | 是 | 用户明确要求删除某天日记时创建删除确认。 |
 
 ## 11. Skill 与工具的关系
 

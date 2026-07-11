@@ -390,7 +390,7 @@ def test_tool_executor_rejects_invalid_array_tool_args_before_persisting_call() 
     executor = ToolExecutor(
         registry=default_tool_registry(),
         repository=repository,
-        handlers={"pregnancy_diary.entry_create.propose": profile_read_handler},
+        handlers={"pregnancy_diary.entry.create": profile_read_handler},
     )
 
     with pytest.raises(ApiError) as exc_info:
@@ -398,7 +398,7 @@ def test_tool_executor_rejects_invalid_array_tool_args_before_persisting_call() 
             executor.execute(
                 actor=actor,
                 run_id=uuid4(),
-                tool_name="pregnancy_diary.entry_create.propose",
+                tool_name="pregnancy_diary.entry.create",
                 call_id="call-1",
                 args={"entry_date": "2026-07-04", "symptom_tags": "backache"},
             )

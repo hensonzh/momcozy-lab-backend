@@ -10,9 +10,9 @@ from production_backend.app.modules.agent_runtime.run_lifecycle.executor import 
 
 PREGNANCY_DIARY_TOOL_CONTRACTS = {
     "pregnancy_diary.entries.read",
-    "pregnancy_diary.entry_create.propose",
-    "pregnancy_diary.entry_update.propose",
-    "pregnancy_diary.entry_delete.propose",
+    "pregnancy_diary.entry.create",
+    "pregnancy_diary.entry.update",
+    "pregnancy_diary.entry.delete.propose",
 }
 
 
@@ -32,12 +32,36 @@ def test_pregnancy_diary_tools_are_not_recommended_by_any_service_skill() -> Non
     assert "diary.entry_upsert.propose" not in recommended
 
 
-def test_pregnancy_diary_action_policy_auto_applies_create_and_update_only() -> None:
-    create = DEFAULT_AGENT_ACTION_RULES["pregnancy_diary.entry.create"]
-    update = DEFAULT_AGENT_ACTION_RULES["pregnancy_diary.entry.update"]
+def test_only_pregnancy_diary_delete_uses_the_action_policy() -> None:
     delete = DEFAULT_AGENT_ACTION_RULES["pregnancy_diary.entry.delete"]
 
-    assert create.requires_confirmation is False
-    assert update.requires_confirmation is False
+    assert "pregnancy_diary.entry.create" not in DEFAULT_AGENT_ACTION_RULES
+    assert "pregnancy_diary.entry.update" not in DEFAULT_AGENT_ACTION_RULES
     assert delete.requires_confirmation is True
-    assert {create.target_type, update.target_type, delete.target_type} == {"pregnancy_diary_entry"}
+    assert delete.target_type == "pregnancy_diary_entry"
+
+
+def test_pregnancy_diary_direct_writes_wait_for_real_database_result() -> None:
+    registry = default_tool_registry()
+    create = registry.get("pregnancy_diary.entry.create")
+    update = registry.get("pregnancy_diary.entry.update")
+    delete = registry.get("pregnancy_diary.entry.delete.propose")
+
+    for contract in (create, update):
+        assert contract.blocking_policy == "must_wait"
+        assert contract.result_dependency == "final_response"
+        assert contract.idempotency_required is False
+    assert delete.blocking_policy == "wait_for_confirmation"
+    assert delete.requires_confirmation is True
+
+
+def test_every_model_tool_and_namespace_explains_its_user_and_trigger() -> None:
+    registry = default_tool_registry()
+    namespaces = default_tool_namespace_registry(registry).list()
+
+    for namespace in namespaces:
+        assert "用户" in namespace.description, namespace.name
+        assert "时使用" in namespace.description, namespace.name
+    for contract in registry.list():
+        assert "用户" in contract.description, contract.name
+        assert "时调用" in contract.description or "前调用" in contract.description, contract.name

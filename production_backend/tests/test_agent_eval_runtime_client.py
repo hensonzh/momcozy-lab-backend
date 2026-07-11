@@ -37,7 +37,7 @@ def test_agent_eval_runtime_client_executes_run_and_evaluates_seed_case() -> Non
             AgentToolCall(
                 id=uuid4(),
                 run_id=run.id,
-                tool_name="pregnancy_diary.entry_delete.propose",
+                tool_name="pregnancy_diary.entry.delete.propose",
                 call_id="call-diary",
                 status="completed",
                 safe_args={},
@@ -65,7 +65,7 @@ def test_agent_eval_runtime_client_executes_run_and_evaluates_seed_case() -> Non
     case = {
         "suite": "runtime_trace_collection",
         "name": "supported action trace",
-        "expected_tool_calls": [{"contract": "pregnancy_diary.entry_delete.propose"}],
+        "expected_tool_calls": [{"contract": "pregnancy_diary.entry.delete.propose"}],
         "forbidden_tool_calls": [],
         "expected_safety_decision": "allow",
         "expected_behavior": {
@@ -80,7 +80,7 @@ def test_agent_eval_runtime_client_executes_run_and_evaluates_seed_case() -> Non
     assert result.execution_result.status == "waiting_for_confirmation"
     assert result.eval_result.passed is True
     assert result.trace.service_skill_id == "cozymate_service_agent"
-    assert result.trace.tool_calls[0]["tool_name"] == "pregnancy_diary.entry_delete.propose"
+    assert result.trace.tool_calls[0]["tool_name"] == "pregnancy_diary.entry.delete.propose"
     assert any(event["type"] == "action.confirmation_required" for event in result.trace.events)
     assert result.trace.actions[0]["action_type"] == "pregnancy_diary.entry.delete"
 

@@ -44,12 +44,10 @@ def test_agent_eval_seed_assertion_engine_reports_profile_write_for_memory_reque
     assert result.failures[0].observed == "profile_update"
 
 
-def test_agent_eval_seed_assertion_engine_accepts_auto_queued_diary_create() -> None:
+def test_agent_eval_seed_assertion_engine_accepts_synchronous_diary_create() -> None:
     case = _case("pregnancy_diary_entry")
     trace = AgentEvalTrace(
-        tool_calls=[{"tool_name": "pregnancy_diary.entry_create.propose", "status": "completed"}],
-        events=[{"type": "action.queued"}],
-        actions=[{"action_type": "pregnancy_diary.entry.create", "status": "confirmed"}],
+        tool_calls=[{"tool_name": "pregnancy_diary.entry.create", "status": "completed"}],
         safety_decision="allow",
         final_text="Saved.",
     )
