@@ -24,7 +24,6 @@ from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.
     IbclcConsultCardCreateToolHandler,
     LegacyArtifactToolHandler,
     MilkAnalysisReadToolHandler,
-    MilkPlanPreviewCreateToolHandler,
     MemoryCreateProposeToolHandler,
     MilkPlanProposeToolHandler,
     MilkReminderProposeToolHandler,
@@ -582,6 +581,7 @@ def test_pregnancy_plan_context_read_tool_handler_returns_bounded_owner_scoped_s
     assert profile_service.profile_user_id == actor.user_id
     assert plans_service.owner_user_id == actor.user_id
     assert plans_service.plan_status == "active"
+    assert plans_service.plan_type == "pregnancy"
     assert diary_service.owner_user_id == actor.user_id
     assert result["profile"]["delivery_date"] == "2026-09-20"
     assert result["plans"][0]["title"] == "Birth plan"
@@ -772,8 +772,10 @@ def test_milk_plan_propose_tool_handler_creates_confirmation_action() -> None:
         args={
             "title": "Increase pumping consistency",
             "summary": "Pump after morning and evening feeds for the next week.",
-            "payload": {"target_sessions_per_day": 2},
-            "timezone": "Asia/Shanghai",
+            "direction": "maintain",
+            "days": 7,
+            "tasks": [{"title": "Pump at 20:00"}],
+            "reminders": [{"title": "Drink water"}],
         },
     )
 
@@ -789,28 +791,22 @@ def test_milk_plan_propose_tool_handler_creates_confirmation_action() -> None:
     }
     assert runtime_service.calls[0]["target_type"] == "plan"
     assert runtime_service.calls[0]["side_effect_level"] == "medium"
-    assert runtime_service.calls[0]["apply_payload"]["payload"] == {"target_sessions_per_day": 2}
-    assert runtime_service.calls[0]["apply_payload"]["metadata"] == {"timezone": "Asia/Shanghai"}
+    assert runtime_service.calls[0]["apply_payload"]["payload"] == {
+        "direction": "maintain",
+        "days": 7,
+        "tasks": [{"title": "Pump at 20:00"}],
+        "reminders": [{"title": "Drink water"}],
+    }
+    assert result["artifact_type"] == "milk_plan_preview"
+    assert result["task_count"] == 1
+    assert runtime_service.artifact.payload["action_id"] == result["action_id"]
+    assert result["_deferred_agent_events"][0]["event_type"] == "artifact.created"
 
 
-def test_milk_plan_preview_and_ibclc_card_handlers_create_artifacts() -> None:
+def test_ibclc_card_handler_creates_artifact() -> None:
     actor = _user()
     runtime_service = FakeAgentRuntimeService()
 
-    preview = asyncio.run(
-        MilkPlanPreviewCreateToolHandler(runtime_service=runtime_service)(
-            _context(
-                actor=actor,
-                args={
-                    "title": "Three day pumping preview",
-                    "summary": "Move evening session earlier.",
-                    "direction": "maintain",
-                    "tasks": [{"title": "Pump at 20:00"}],
-                    "reminders": [{"title": "Drink water"}],
-                },
-            )
-        )
-    )
     ibclc = asyncio.run(
         IbclcConsultCardCreateToolHandler(runtime_service=runtime_service)(
             _context(
@@ -824,9 +820,6 @@ def test_milk_plan_preview_and_ibclc_card_handlers_create_artifacts() -> None:
         )
     )
 
-    assert preview["artifact_type"] == "milk_plan_preview"
-    assert preview["task_count"] == 1
-    assert runtime_service.artifacts[-2].payload["direction"] == "maintain"
     assert ibclc["artifact_type"] == "ibclc_consult_card"
     assert ibclc["reason"] == "Latch pain"
     assert runtime_service.artifacts[-1].payload["feeding_context"] == "Pain on left side after feeding."
@@ -838,10 +831,10 @@ def test_pregnancy_plan_propose_tool_handler_creates_confirmation_action() -> No
     context = _context(
         actor=actor,
         args={
-            "title": "Third trimester plan",
             "summary": "Prepare appointments and bag tasks.",
-            "payload": {"gestational_week": 32},
-            "timezone": "Asia/Shanghai",
+            "due_date_or_week": "32周",
+            "birth_path": "顺产",
+            "runtime_plan_context": {"has_active_plan": False, "delivery_date": "2026-09-18"},
         },
     )
 
@@ -851,14 +844,38 @@ def test_pregnancy_plan_propose_tool_handler_creates_confirmation_action() -> No
     assert result["action_status"] == "confirmation_required"
     assert result["preview_payload"] == {
         "plan_type": "pregnancy",
-        "title": "Third trimester plan",
+        "title": "孕期计划",
         "summary": "Prepare appointments and bag tasks.",
         "has_payload": True,
     }
     assert runtime_service.calls[0]["target_type"] == "plan"
     assert runtime_service.calls[0]["side_effect_level"] == "medium"
-    assert runtime_service.calls[0]["apply_payload"]["payload"] == {"gestational_week": 32}
-    assert runtime_service.calls[0]["apply_payload"]["metadata"] == {"timezone": "Asia/Shanghai"}
+    assert runtime_service.calls[0]["apply_payload"]["payload"]["plan_context"]["due_date_or_week"] == "32周"
+    assert runtime_service.calls[0]["apply_payload"]["payload"]["plan_context"]["delivery_date"] == "2026-09-18"
+    assert runtime_service.calls[0]["apply_payload"]["payload"]["card"]["card_type"] == "birth_journey_plan_card"
+    assert result["artifact_type"] == "birth_journey_plan_card"
+    assert runtime_service.artifact.payload["action_id"] == result["action_id"]
+
+
+def test_pregnancy_plan_propose_tool_handler_reuses_existing_active_plan() -> None:
+    runtime_service = FakeAgentRuntimeService()
+
+    result = asyncio.run(
+        PregnancyPlanProposeToolHandler(runtime_service=runtime_service)(
+            _context(
+                args={
+                    "runtime_plan_context": {
+                        "has_active_plan": True,
+                        "active_plan_id": "plan-1",
+                        "active_plan_title": "我的孕期计划",
+                    }
+                }
+            )
+        )
+    )
+
+    assert result == {"status": "existing_plan_found", "plan_id": "plan-1", "title": "我的孕期计划"}
+    assert runtime_service.calls == []
 
 
 def test_plan_task_create_propose_tool_handler_creates_confirmation_action() -> None:
@@ -1103,15 +1120,12 @@ def test_milk_plan_propose_tool_handler_requires_title() -> None:
     assert exc_info.value.code == "validation_failed"
 
 
-def test_pregnancy_plan_and_task_propose_tool_handlers_require_required_fields() -> None:
-    with pytest.raises(ApiError) as plan_exc:
-        asyncio.run(PregnancyPlanProposeToolHandler(runtime_service=FakeAgentRuntimeService())(_context(args={})))
+def test_plan_task_propose_tool_handlers_require_required_fields() -> None:
     with pytest.raises(ApiError) as task_create_exc:
         asyncio.run(PlanTaskCreateProposeToolHandler(runtime_service=FakeAgentRuntimeService())(_context(args={})))
     with pytest.raises(ApiError) as task_complete_exc:
         asyncio.run(PlanTaskCompleteProposeToolHandler(runtime_service=FakeAgentRuntimeService())(_context(args={})))
 
-    assert plan_exc.value.code == "validation_failed"
     assert task_create_exc.value.code == "validation_failed"
     assert task_complete_exc.value.code == "validation_failed"
 
@@ -1188,7 +1202,6 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
     assert set(handlers) == {
         "birth_plan_form_create",
         "labor_communication_card_create",
-        "birth_journey_plan_card_create",
         "hospital_bag_form_create",
         "hospital_bag_card_create",
         "hospital_bag_cart_update",
@@ -1216,14 +1229,13 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
         "files.vision_summary.read",
         "notifications.milk_reminder.propose",
         "plans.milk_plan.propose",
-        "plans.milk_plan_preview.create",
         "plans.task_complete.propose",
         "plans.task_create.propose",
         "plans.task_delete.propose",
         "plans.task_update.propose",
         "plans.plan_delete.propose",
         "pregnancy.plan_context.read",
-        "pregnancy.plan_create.propose",
+        "pregnancy.plan.propose",
         "records.feeding_record.propose",
         "records.pumping_record.propose",
         "support.ticket.propose",
@@ -1366,19 +1378,21 @@ class FakePlansService:
         self._owner_user_id = owner_user_id
         self.owner_user_id = None
         self.plan_status = None
+        self.plan_type = None
         self.task_date = None
         self.task_status = None
         self.limit = None
 
-    async def list_plans(self, *, owner_user_id, limit, status="active"):
+    async def list_plans(self, *, owner_user_id, limit, status="active", plan_type=""):
         self.owner_user_id = owner_user_id
         self.plan_status = status
+        self.plan_type = plan_type
         self.limit = limit
         return [
             Plan(
                 id=uuid4(),
                 owner_user_id=self._owner_user_id,
-                plan_type="birth_journey",
+                plan_type=plan_type or "pregnancy",
                 title="Birth plan",
                 summary="Pack hospital bag",
                 status="active",

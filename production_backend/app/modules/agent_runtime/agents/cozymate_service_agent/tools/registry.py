@@ -278,7 +278,7 @@ def default_tool_registry() -> ToolContractRegistry:
         ToolContract(
             name="plans.milk_plan.propose",
             domain="plans",
-            description="提出奶量管理计划创建动作，等待用户确认。",
+            description="创建奶量计划预览并提出唯一的计划创建动作，等待用户确认；不要再调用独立预览工具。",
             input_schema_ref="MilkPlanProposalCreate",
             output_schema_ref="AgentActionRead",
             read_or_write="write",
@@ -293,26 +293,9 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         ToolContract(
-            name="plans.milk_plan_preview.create",
+            name="pregnancy.plan.propose",
             domain="plans",
-            description="创建奶量计划预览产物，不直接保存为计划或日程。",
-            input_schema_ref="MilkPlanPreviewCreate",
-            output_schema_ref="AgentArtifactRead",
-            read_or_write="write",
-            side_effect_level="low",
-            blocking_policy="must_wait",
-            result_dependency="final_response",
-            requires_confirmation=False,
-            idempotency_required=False,
-            audit_required=True,
-            timeout_seconds=15,
-        )
-    )
-    registry.register(
-        ToolContract(
-            name="pregnancy.plan_create.propose",
-            domain="plans",
-            description="提出孕期计划创建动作，等待用户确认。",
+            description="基于 runtime 提供的可信孕期资料和少量本轮偏好，创建孕期计划预览并提出唯一的计划创建动作，等待用户确认。",
             input_schema_ref="PregnancyPlanProposalCreate",
             output_schema_ref="AgentActionRead",
             read_or_write="write",
@@ -569,23 +552,6 @@ def default_tool_registry() -> ToolContractRegistry:
             domain="birth_prep",
             description="根据应用侧注入的 birth_plan_card_intake 表单提交数据生成前端可渲染的分娩沟通单。LLM 不需要生成 card_json，也不能用参数伪造表单提交；字段映射、强诉求降级、分区整理、医院问题和安全声明由工具稳定生成。无后端副作用。",
             input_schema_ref="EmptyArtifactDecision",
-            output_schema_ref="LegacyArtifactToolOutput",
-            read_or_write="write",
-            side_effect_level="low",
-            blocking_policy="must_wait",
-            result_dependency="final_response",
-            requires_confirmation=False,
-            idempotency_required=False,
-            audit_required=True,
-            timeout_seconds=15,
-        )
-    )
-    registry.register(
-        ToolContract(
-            name="birth_journey_plan_card_create",
-            domain="birth_prep",
-            description="根据已采集或已问过的信息，生成前端可渲染并保存为 active care plan 的孕期计划。生成前必须完成基础信息、个性化追问，以及按孕周决定的产检记录上传或跳过状态；不要为了生成计划再补问旧版模板化的高风险因素、当前症状、生活方式或喂养/IBCLC 信息。用户回答不清楚、跳过、暂不提供也算已问到，并应在 plan_context 中显式传入对应字段。LLM 不需要生成 card_json；规则分层、日期换算、行动清单、7 天待办分组和安全声明由工具稳定生成。已有 active 孕期计划时工具会返回 existing_plan_found，不要重复生成。",
-            input_schema_ref="LegacyArtifactToolInput",
             output_schema_ref="LegacyArtifactToolOutput",
             read_or_write="write",
             side_effect_level="low",

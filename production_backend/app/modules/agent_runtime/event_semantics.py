@@ -205,6 +205,8 @@ def _completed_tool_semantic(
     output_status = str(safe_output.get("status") or "").strip()
     if output_status.startswith("needs_"):
         return "planning", "我还需要先确认几件事～"
+    if output_status == "existing_plan_found":
+        return "reading", "我找到已有的孕期计划啦"
     if safe_output.get("requires_confirmation") is True or requires_confirmation:
         return "planning", "我已经准备好预览，等你确认～"
     if tool_copy is not None and tool_copy.get("completed"):
@@ -322,10 +324,15 @@ _TOOL_COPY: dict[str, dict[str, str]] = {
         "started": "我先帮你整理分娩沟通单～",
         "completed": "我整理好分娩沟通单啦",
     },
-    "birth_journey_plan_card_create": {
+    "pregnancy.plan.propose": {
         "phase": "planning",
         "started": "我先帮你整理孕期计划～",
-        "completed": "我整理好孕期计划啦",
+        "completed": "我已经准备好孕期计划预览，等你确认～",
+    },
+    "plans.milk_plan.propose": {
+        "phase": "planning",
+        "started": "我先帮你整理奶量计划～",
+        "completed": "我已经准备好奶量计划预览，等你确认～",
     },
     "hospital_bag_form_create": {
         "phase": "planning",

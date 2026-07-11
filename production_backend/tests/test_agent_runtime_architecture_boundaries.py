@@ -321,7 +321,8 @@ def test_service_skills_capture_legacy_domain_flow_semantics() -> None:
     after_sales = registry.get("device-guidance").prompt_block()
     safety = registry.get("emotion-support").prompt_block()
 
-    assert "birth_journey_plan_card_create" in pregnancy
+    assert "pregnancy.plan.propose" in pregnancy
+    assert "birth_journey_plan_card_create" not in pregnancy
     assert "plans.plan_delete.propose" in pregnancy
     assert "plans.task_complete.propose" in pregnancy
     assert "hospital_bag_form_create" in pregnancy
@@ -354,8 +355,13 @@ def test_tool_contract_registry_contains_only_model_visible_tools_and_loading_po
             "diary.recent.read",
             "pregnancy.plan_context.read",
             "memory.create.propose",
+            "plans.milk_plan_preview.create",
+            "pregnancy.plan_create.propose",
+            "birth_journey_plan_card_create",
         }
     )
+    assert "plans.milk_plan.propose" in registered_names
+    assert "pregnancy.plan.propose" in registered_names
     assert {contract.loading_mode for contract in registry.list()} == {"eager", "deferred"}
     assert set(registry.eager_names()).isdisjoint(registry.deferred_names())
     assert set(registry.eager_names()) | set(registry.deferred_names()) == registered_names
@@ -429,6 +435,7 @@ def test_tool_contracts_are_exported_as_responses_namespaces() -> None:
     assert "records.milk_analysis.read" not in namespaces["milk_management"].deferred_tool_contracts
     assert "records.growth.read" not in namespaces["milk_management"].deferred_tool_contracts
     assert "plans.milk_plan.propose" in namespaces["milk_management"].deferred_tool_contracts
+    assert "pregnancy.plan.propose" in namespaces["birth_prep"].deferred_tool_contracts
     assert "plans.calendar.read" not in namespaces["milk_management"].deferred_tool_contracts
     assert "plans.task_update.propose" in namespaces["birth_prep"].deferred_tool_contracts
     assert "hospital_bag_cart_update" in namespaces["hospital_bag_cart"].deferred_tool_contracts
@@ -455,8 +462,7 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
     device_guidance_schema = tool_input_schema(registry.get("devices.guidance_assets.read").input_schema_ref)
     file_vision_schema = tool_input_schema(registry.get("files.vision_summary.read").input_schema_ref)
     milk_plan_schema = tool_input_schema(registry.get("plans.milk_plan.propose").input_schema_ref)
-    milk_plan_preview_schema = tool_input_schema(registry.get("plans.milk_plan_preview.create").input_schema_ref)
-    pregnancy_plan_schema = tool_input_schema(registry.get("pregnancy.plan_create.propose").input_schema_ref)
+    pregnancy_plan_schema = tool_input_schema(registry.get("pregnancy.plan.propose").input_schema_ref)
     task_create_schema = tool_input_schema(registry.get("plans.task_create.propose").input_schema_ref)
     task_complete_schema = tool_input_schema(registry.get("plans.task_complete.propose").input_schema_ref)
     task_update_schema = tool_input_schema(registry.get("plans.task_update.propose").input_schema_ref)
@@ -520,11 +526,13 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
     assert file_vision_schema["properties"]["file_id"]["type"] == "string"
     assert milk_plan_schema["additionalProperties"] is False
     assert milk_plan_schema["required"] == ["title"]
-    assert milk_plan_schema["properties"]["payload"]["type"] == "object"
-    assert milk_plan_preview_schema["required"] == ["title"]
-    assert milk_plan_preview_schema["properties"]["tasks"]["maxItems"] == 40
+    assert "payload" not in milk_plan_schema["properties"]
+    assert milk_plan_schema["properties"]["tasks"]["maxItems"] == 40
+    assert milk_plan_schema["properties"]["direction"]["enum"] == ["increase", "maintain", "decrease", "observe", "unknown"]
     assert pregnancy_plan_schema["additionalProperties"] is False
-    assert pregnancy_plan_schema["required"] == ["title"]
+    assert "title" not in pregnancy_plan_schema["properties"]
+    assert "payload" not in pregnancy_plan_schema["properties"]
+    assert pregnancy_plan_schema["properties"]["scope"]["enum"] == ["full", "prenatal_only", "short_range"]
     assert task_create_schema["additionalProperties"] is False
     assert task_create_schema["required"] == ["title"]
     assert task_create_schema["properties"]["task_date"]["type"] == "string"

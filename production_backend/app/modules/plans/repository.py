@@ -40,13 +40,11 @@ class PlansRepository:
         statement = select(Plan).where(Plan.id == plan_id, Plan.owner_user_id == owner_user_id, Plan.deleted_at.is_(None))
         return cast(Plan | None, await self.session.scalar(statement))
 
-    async def list_plans(self, *, owner_user_id: UUID, status: str, limit: int) -> list[Plan]:
-        statement = (
-            select(Plan)
-            .where(Plan.owner_user_id == owner_user_id, Plan.status == status, Plan.deleted_at.is_(None))
-            .order_by(Plan.updated_at.desc(), Plan.id.desc())
-            .limit(limit)
-        )
+    async def list_plans(self, *, owner_user_id: UUID, plan_type: str, status: str, limit: int) -> list[Plan]:
+        statement = select(Plan).where(Plan.owner_user_id == owner_user_id, Plan.status == status, Plan.deleted_at.is_(None))
+        if plan_type:
+            statement = statement.where(Plan.plan_type == plan_type)
+        statement = statement.order_by(Plan.updated_at.desc(), Plan.id.desc()).limit(limit)
         result = await self.session.scalars(statement)
         return list(result.all())
 

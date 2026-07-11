@@ -79,9 +79,9 @@ def test_product_agent_eval_seed_uses_current_pregnancy_action_contracts() -> No
     task_contracts = {tool_call["contract"] for tool_call in by_suite["pregnancy_task_completion"]["expected_tool_calls"]}
     diary_contracts = {tool_call["contract"] for tool_call in by_suite["pregnancy_diary_entry"]["expected_tool_calls"]}
 
-    assert "pregnancy.plan_context.read" in plan_contracts
-    assert "pregnancy.plan_create.propose" in plan_contracts
-    assert "pregnancy.plan_context.read" in task_contracts
+    assert "load_service_skill" in plan_contracts
+    assert "pregnancy.plan.propose" in plan_contracts
+    assert "load_service_skill" in task_contracts
     assert "plans.task_complete.propose" in task_contracts
     assert "diary.entry_upsert.propose" in diary_contracts
     assert "pregnancy_plan_proposal" not in plan_contracts
@@ -96,7 +96,7 @@ def test_product_agent_eval_seed_uses_current_pregnancy_artifact_contracts() -> 
     birth_prep_contracts = {tool_call["contract"] for tool_call in by_suite["birth_prep"]["expected_tool_calls"]}
     communication_contracts = {tool_call["contract"] for tool_call in by_suite["labor_communication"]["expected_tool_calls"]}
 
-    assert "pregnancy.plan_context.read" in birth_prep_contracts
+    assert "load_service_skill" in birth_prep_contracts
     assert "hospital_bag_card_create" in birth_prep_contracts
     assert "labor_communication_card_create" in communication_contracts
     assert "birth_prep_intake" not in birth_prep_contracts

@@ -35,7 +35,7 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "pregnancy.plan_context.read",
+          "contract": "load_service_skill",
           "timing": "before_contextual_questions"
         },
         {
@@ -479,11 +479,11 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "pregnancy.plan_context.read",
+          "contract": "load_service_skill",
           "timing": "before_plan_proposal"
         },
         {
-          "contract": "pregnancy.plan_create.propose",
+          "contract": "pregnancy.plan.propose",
           "timing": "after_needed_context"
         }
       ],
@@ -521,7 +521,7 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "pregnancy.plan_context.read",
+          "contract": "load_service_skill",
           "timing": "before_task_match"
         },
         {

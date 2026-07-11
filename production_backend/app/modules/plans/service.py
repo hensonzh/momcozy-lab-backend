@@ -59,9 +59,21 @@ class PlansService:
         await self._audit(owner_user_id=owner_user_id, action="plans.create", resource_type="plan", resource_id=str(plan.id), request_id=request_id)
         return plan
 
-    async def list_plans(self, *, owner_user_id: UUID, status: str = "active", limit: int = 50) -> list[Plan]:
+    async def list_plans(
+        self,
+        *,
+        owner_user_id: UUID,
+        plan_type: str = "",
+        status: str = "active",
+        limit: int = 50,
+    ) -> list[Plan]:
         self._validate_limit(limit)
-        return await self.repository.list_plans(owner_user_id=owner_user_id, status=status, limit=limit)
+        return await self.repository.list_plans(
+            owner_user_id=owner_user_id,
+            plan_type=plan_type.strip(),
+            status=status,
+            limit=limit,
+        )
 
     async def get_plan(self, *, owner_user_id: UUID, plan_id: UUID) -> Plan:
         plan = await self.repository.get_plan_for_owner(plan_id=plan_id, owner_user_id=owner_user_id)

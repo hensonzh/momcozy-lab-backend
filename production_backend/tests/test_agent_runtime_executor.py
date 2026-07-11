@@ -20,7 +20,10 @@ from production_backend.app.modules.agent_runtime.models import (
 )
 from production_backend.app.modules.agent_runtime.event_stream.sink import AgentEventSink
 from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent import ServiceSkillId
-from production_backend.app.modules.agent_runtime.run_lifecycle.executor import AgentRuntimeExecutor
+from production_backend.app.modules.agent_runtime.run_lifecycle.executor import (
+    AgentRuntimeExecutor,
+    _pregnancy_runtime_plan_context,
+)
 from production_backend.app.modules.agent_runtime.run_lifecycle.quick_replies import QUICK_REPLY_RESPONSE_FORMAT, QuickReplyFinalizer
 from production_backend.app.modules.agent_runtime.sdk import (
     OpenAIAgentsSdkRunner,
@@ -269,16 +272,15 @@ def test_agent_runtime_executor_load_service_skill_returns_facts_and_records_led
     ("service_skill_id", "expected_tool_names"),
     [
         (
-            "birth-prep",
-            {
-                "pregnancy_plan_create_propose",
+                "birth-prep",
+                {
+                    "pregnancy_plan_propose",
                 "plans_plan_delete_propose",
                 "plans_task_complete_propose",
                 "plans_task_update_propose",
                 "plans_task_delete_propose",
                 "birth_plan_form_create",
                 "labor_communication_card_create",
-                "birth_journey_plan_card_create",
                 "hospital_bag_form_create",
                 "hospital_bag_card_create",
                 "hospital_bag_cart_update",
@@ -492,7 +494,6 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert result.final_text == "我已经整理好了。"
     assert backend.tool_names == (
         "load_service_skill",
-        "birth_journey_plan_card_create",
         "birth_plan_form_create",
         "devices_guidance_assets_read",
         "devices_pump_status_read",
@@ -508,13 +509,12 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
         "plans_calendar_read",
         "plans_current_read",
         "plans_milk_plan_propose",
-        "plans_milk_plan_preview_create",
         "plans_plan_delete_propose",
         "plans_task_complete_propose",
         "plans_task_create_propose",
         "plans_task_delete_propose",
         "plans_task_update_propose",
-        "pregnancy_plan_create_propose",
+        "pregnancy_plan_propose",
         "profile_read",
         "profile_update",
         "records_feeding_record_propose",
@@ -545,14 +545,13 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert backend.tool_schemas["plans_calendar_read"]["properties"]["task_date"]["maxLength"] == 20
     assert backend.tool_schemas["plans_current_read"]["properties"]["limit"]["maximum"] == 20
     assert backend.tool_schemas["plans_milk_plan_propose"]["required"] == ["title"]
-    assert backend.tool_schemas["plans_milk_plan_preview_create"]["required"] == ["title"]
     assert backend.tool_schemas["plans_plan_delete_propose"]["required"] == ["plan_id"]
     assert backend.tool_schemas["plans_task_complete_propose"]["required"] == ["task_id"]
     assert backend.tool_schemas["plans_task_complete_propose"]["properties"]["completed"]["type"] == "boolean"
     assert backend.tool_schemas["plans_task_create_propose"]["required"] == ["title"]
     assert backend.tool_schemas["plans_task_delete_propose"]["required"] == ["task_id"]
     assert backend.tool_schemas["plans_task_update_propose"]["required"] == ["task_id"]
-    assert backend.tool_schemas["pregnancy_plan_create_propose"]["required"] == ["title"]
+    assert "title" not in backend.tool_schemas["pregnancy_plan_propose"]["properties"]
     assert backend.tool_schemas["profile_read"]["additionalProperties"] is False
     assert backend.tool_schemas["profile_read"]["properties"] == {}
     assert backend.tool_schemas["profile_update"]["properties"]["age"]["maximum"] == 70
@@ -585,7 +584,6 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
         "plans.current.read",
         "plans.calendar.read",
         "plans.milk_plan.propose",
-        "plans.milk_plan_preview.create",
         "plans.task_complete.propose",
         "plans.task_create.propose",
         "notifications.milk_reminder.propose",
@@ -599,7 +597,6 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
         "records.growth_record_update.propose",
         "records.growth_record_delete.propose",
         "plans.milk_plan.propose",
-        "plans.milk_plan_preview.create",
         "plans.task_complete.propose",
         "plans.task_create.propose",
         "notifications.milk_reminder.propose",
@@ -1633,6 +1630,41 @@ def test_agent_runtime_executor_prefills_form_from_runtime_business_facts_withou
     assert repository.tool_call.safe_args == {}
     assert captured_args == {"default_values": {"due_date_or_week": "2026-09-18"}}
     assert business_facts_projector.calls[0]["service_skill_id"] == ServiceSkillId.BIRTH_PREP
+
+
+def test_pregnancy_runtime_plan_context_ignores_active_non_pregnancy_plans() -> None:
+    context = _pregnancy_runtime_plan_context(
+        {
+            "pregnancy": {
+                "profile": {"delivery_date": "2026-09-18"},
+                "plans": [
+                    {"id": "milk-plan", "plan_type": "milk_management", "status": "active", "title": "追奶计划"},
+                    {"id": "pregnancy-plan", "plan_type": "pregnancy", "status": "active", "title": "孕期计划"},
+                ],
+            }
+        }
+    )
+
+    assert context == {
+        "has_active_plan": True,
+        "delivery_date": "2026-09-18",
+        "active_plan_id": "pregnancy-plan",
+        "active_plan_title": "孕期计划",
+    }
+
+
+def test_pregnancy_runtime_plan_context_allows_creation_when_only_other_plan_types_are_active() -> None:
+    context = _pregnancy_runtime_plan_context(
+        {
+            "pregnancy": {
+                "plans": [
+                    {"id": "milk-plan", "plan_type": "milk_management", "status": "active", "title": "追奶计划"},
+                ],
+            }
+        }
+    )
+
+    assert context == {"has_active_plan": False}
 
 
 def test_agent_runtime_executor_injects_latest_cart_state_without_exposing_groups_to_model() -> None:

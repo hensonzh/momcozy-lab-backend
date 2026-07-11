@@ -100,11 +100,14 @@ class InMemoryPlansRepository:
             None,
         )
 
-    async def list_plans(self, *, owner_user_id: UUID, status: str, limit: int):
+    async def list_plans(self, *, owner_user_id: UUID, plan_type: str, status: str, limit: int):
         plans = [
             plan
             for plan in self.plans
-            if plan.owner_user_id == owner_user_id and plan.status == status and plan.deleted_at is None
+            if plan.owner_user_id == owner_user_id
+            and plan.status == status
+            and (not plan_type or plan.plan_type == plan_type)
+            and plan.deleted_at is None
         ]
         return plans[:limit]
 

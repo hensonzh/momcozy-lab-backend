@@ -46,7 +46,7 @@ from production_backend.app.modules.records.service import RecordsService
 from production_backend.app.modules.support.agent_actions import SUPPORT_TICKET_CREATE_ACTION
 
 from .executor import DEFERRED_AGENT_EVENTS_KEY, ToolHandler, ToolHandlerContext
-from .legacy_artifacts import artifact_record_from_legacy_result, create_legacy_artifact_result
+from .legacy_artifacts import artifact_record_from_legacy_result, build_birth_journey_plan_result, create_legacy_artifact_result
 
 
 _DIARY_ENTRY_VALUE_FIELDS = (
@@ -472,7 +472,12 @@ class PregnancyPlanContextReadToolHandler:
         owner_user_id = context.actor.user_id
         limit = _limit(context.args.get("limit"), default=5, max_limit=20)
         profile = await self.profile_service.get_user_profile(user_id=owner_user_id)
-        plans = await self.plans_service.list_plans(owner_user_id=owner_user_id, status="active", limit=limit)
+        plans = await self.plans_service.list_plans(
+            owner_user_id=owner_user_id,
+            plan_type="pregnancy",
+            status="active",
+            limit=limit,
+        )
         tasks = await self.plans_service.list_tasks(owner_user_id=owner_user_id, limit=limit)
         diary_entries = await self.diary_service.list_entries(owner_user_id=owner_user_id, limit=limit)
         return {
@@ -804,17 +809,7 @@ class MilkPlanProposeToolHandler:
             apply_payload=apply_payload,
             idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:milk-plan",
         )
-        return _proposal_result(action=action, preview_payload=preview_payload)
-
-
-class MilkPlanPreviewCreateToolHandler:
-    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
-        self.runtime_service = runtime_service
-
-    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
-        payload = _milk_plan_preview_artifact_payload(context.args)
-        if not _text(payload, "title"):
-            raise ApiError(code="validation_failed", message="title is required.", status=422)
+        payload = {**_milk_plan_artifact_payload(context.args), "action_id": str(action.id)}
         artifact = await self.runtime_service.create_artifact(
             owner_user_id=context.actor.user_id,
             run_id=context.run_id,
@@ -825,6 +820,7 @@ class MilkPlanPreviewCreateToolHandler:
             emit_event=False,
         )
         return {
+            **_proposal_result(action=action, preview_payload=preview_payload),
             "artifact_id": str(artifact.id),
             "artifact_type": artifact.artifact_type,
             "status": artifact.status,
@@ -841,10 +837,24 @@ class PregnancyPlanProposeToolHandler:
         self.runtime_service = runtime_service
 
     async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
+        runtime_plan_context = _dict(context.args, "runtime_plan_context")
+        if runtime_plan_context.get("has_active_plan") is True:
+            return {
+                "status": "existing_plan_found",
+                "plan_id": _text(runtime_plan_context, "active_plan_id"),
+                "title": _text(runtime_plan_context, "active_plan_title") or "孕期计划",
+            }
         apply_payload = _pregnancy_plan_apply_payload(context.args)
         title = _text(apply_payload, "title")
         if not title:
             raise ApiError(code="validation_failed", message="title is required.", status=422)
+        plan_payload = _dict(apply_payload, "payload")
+        plan_result = build_birth_journey_plan_result(_dict(plan_payload, "plan_context"))
+        artifact_record = artifact_record_from_legacy_result(plan_result)
+        if artifact_record is None:
+            raise ApiError(code="tool_failed", message="Pregnancy plan preview could not be created.", status=500)
+        plan_payload["card"] = _dict(plan_result, "card")
+        apply_payload["payload"] = plan_payload
         preview_payload = _pregnancy_plan_preview_payload(apply_payload)
         action = await self.runtime_service.propose_action(
             owner_user_id=context.actor.user_id,
@@ -856,7 +866,23 @@ class PregnancyPlanProposeToolHandler:
             apply_payload=apply_payload,
             idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:pregnancy-plan",
         )
-        return _proposal_result(action=action, preview_payload=preview_payload)
+        artifact_payload = {**dict(artifact_record["payload"]), "action_id": str(action.id)}
+        artifact = await self.runtime_service.create_artifact(
+            owner_user_id=context.actor.user_id,
+            run_id=context.run_id,
+            artifact_type=str(artifact_record["artifact_type"]),
+            schema_version=str(artifact_record["schema_version"]),
+            status="created",
+            payload=artifact_payload,
+            emit_event=False,
+        )
+        return {
+            **_proposal_result(action=action, preview_payload=preview_payload),
+            "artifact_id": str(artifact.id),
+            "artifact_type": artifact.artifact_type,
+            "status": artifact.status,
+            DEFERRED_AGENT_EVENTS_KEY: [_deferred_artifact_created_event(artifact)],
+        }
 
 
 class PlanTaskCreateProposeToolHandler:
@@ -1049,8 +1075,7 @@ def build_default_tool_handlers(
         "devices.guidance_assets.read": DeviceGuidanceAssetsReadToolHandler(asset_service=asset_service),
         "files.vision_summary.read": FileVisionSummaryReadToolHandler(vision_service=file_vision_service),
         "plans.milk_plan.propose": MilkPlanProposeToolHandler(runtime_service=agent_runtime_service),
-        "plans.milk_plan_preview.create": MilkPlanPreviewCreateToolHandler(runtime_service=agent_runtime_service),
-        "pregnancy.plan_create.propose": PregnancyPlanProposeToolHandler(runtime_service=agent_runtime_service),
+        "pregnancy.plan.propose": PregnancyPlanProposeToolHandler(runtime_service=agent_runtime_service),
         "plans.task_create.propose": PlanTaskCreateProposeToolHandler(runtime_service=agent_runtime_service),
         "plans.task_complete.propose": PlanTaskCompleteProposeToolHandler(runtime_service=agent_runtime_service),
         "plans.task_update.propose": PlanTaskUpdateProposeToolHandler(runtime_service=agent_runtime_service),
@@ -1066,7 +1091,6 @@ def build_default_tool_handlers(
         "records.growth_record_delete.propose": GrowthRecordDeleteProposeToolHandler(runtime_service=agent_runtime_service),
         "birth_plan_form_create": LegacyArtifactToolHandler(runtime_service=agent_runtime_service, tool_name="birth_plan_form_create"),
         "labor_communication_card_create": LegacyArtifactToolHandler(runtime_service=agent_runtime_service, tool_name="labor_communication_card_create"),
-        "birth_journey_plan_card_create": LegacyArtifactToolHandler(runtime_service=agent_runtime_service, tool_name="birth_journey_plan_card_create"),
         "hospital_bag_form_create": LegacyArtifactToolHandler(runtime_service=agent_runtime_service, tool_name="hospital_bag_form_create"),
         "hospital_bag_card_create": LegacyArtifactToolHandler(runtime_service=agent_runtime_service, tool_name="hospital_bag_card_create"),
         "hospital_bag_cart_update": LegacyArtifactToolHandler(runtime_service=agent_runtime_service, tool_name="hospital_bag_cart_update"),
@@ -1343,12 +1367,13 @@ def _milk_plan_apply_payload(args: dict[str, Any]) -> dict[str, Any]:
         "title": _text(args, "title"),
         "summary": _text(args, "summary"),
     }
-    plan_payload = args.get("payload")
-    if isinstance(plan_payload, dict):
+    plan_payload: dict[str, Any] = {}
+    for key in ("direction", "start_date", "days", "tasks", "reminders"):
+        value = args.get(key)
+        if value not in (None, "", []):
+            plan_payload[key] = value
+    if plan_payload:
         payload["payload"] = plan_payload
-    metadata = _metadata_payload(args)
-    if metadata:
-        payload["metadata"] = metadata
     return {key: value for key, value in payload.items() if value not in ("", None, {})}
 
 
@@ -1362,7 +1387,7 @@ def _milk_plan_preview_payload(apply_payload: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in preview.items() if value not in ("", None)}
 
 
-def _milk_plan_preview_artifact_payload(args: dict[str, Any]) -> dict[str, Any]:
+def _milk_plan_artifact_payload(args: dict[str, Any]) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "title": _text(args, "title"),
         "summary": _text(args, "summary"),
@@ -1374,27 +1399,27 @@ def _milk_plan_preview_artifact_payload(args: dict[str, Any]) -> dict[str, Any]:
         value = args.get(key)
         if isinstance(value, list):
             payload[key] = value
-    extra_payload = args.get("payload")
-    if isinstance(extra_payload, dict):
-        payload["payload"] = extra_payload
-    metadata = _metadata_payload(args)
-    if metadata:
-        payload["metadata"] = metadata
     return {key: value for key, value in payload.items() if value not in ("", None, [], {})}
 
 
 def _pregnancy_plan_apply_payload(args: dict[str, Any]) -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "title": _text(args, "title"),
-        "summary": _text(args, "summary"),
+    runtime_plan_context = _dict(args, "runtime_plan_context")
+    plan_context = {
+        key: value
+        for key, value in runtime_plan_context.items()
+        if key not in {"has_active_plan", "active_plan_id", "active_plan_title"} and value not in ("", None)
     }
-    plan_payload = args.get("payload")
-    if isinstance(plan_payload, dict):
-        payload["payload"] = plan_payload
-    metadata = _metadata_payload(args)
-    if metadata:
-        payload["metadata"] = metadata
-    return {key: value for key, value in payload.items() if value not in ("", None, {})}
+    for key in ("due_date_or_week", "birth_path", "birth_setting", "support_person", "feeding_intention", "scope"):
+        value = args.get(key)
+        if value not in (None, ""):
+            plan_context[key] = value
+    if "due_date_or_week" not in plan_context and _text(plan_context, "delivery_date"):
+        plan_context["due_date_or_week"] = _text(plan_context, "delivery_date")
+    return {
+        "title": "孕期计划",
+        "summary": _text(args, "summary") or "从现在到生产前后的阶段计划与待办",
+        "payload": {"plan_context": plan_context},
+    }
 
 
 def _pregnancy_plan_preview_payload(apply_payload: dict[str, Any]) -> dict[str, Any]:
@@ -1650,6 +1675,11 @@ def _metadata_payload(payload: dict[str, Any]) -> dict[str, str]:
 
 def _text(payload: dict[str, Any], key: str) -> str:
     return str(payload.get(key) or "").strip()
+
+
+def _dict(payload: dict[str, Any], key: str) -> dict[str, Any]:
+    value = payload.get(key)
+    return dict(value) if isinstance(value, dict) else {}
 
 
 def _uuid(value: str, *, code: str, field_name: str) -> UUID:

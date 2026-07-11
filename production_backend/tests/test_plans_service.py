@@ -140,6 +140,21 @@ def test_plans_service_lists_and_deletes_owner_scoped_resources() -> None:
     assert task.status == "deleted"
 
 
+def test_plans_service_can_filter_plans_by_type() -> None:
+    owner_user_id = uuid4()
+    repository = FakePlansRepository(plans=[])
+    service = PlansService(repository=repository)
+
+    asyncio.run(service.list_plans(owner_user_id=owner_user_id, plan_type="pregnancy", status="active", limit=5))
+
+    assert repository.list_plans_kwargs == {
+        "owner_user_id": owner_user_id,
+        "plan_type": "pregnancy",
+        "status": "active",
+        "limit": 5,
+    }
+
+
 def _now() -> datetime:
     return datetime(2026, 7, 2, tzinfo=timezone.utc)
 
@@ -159,6 +174,7 @@ class FakePlansRepository:
         self.plans = plans or []
         self.tasks = tasks or []
         self.update_task_kwargs = {}
+        self.list_plans_kwargs = {}
 
     async def create_plan(self, **kwargs):
         self.plan = _plan(owner_user_id=kwargs["owner_user_id"])
@@ -168,6 +184,7 @@ class FakePlansRepository:
         return self.plan
 
     async def list_plans(self, **kwargs):
+        self.list_plans_kwargs = kwargs
         return self.plans
 
     async def soft_delete_plan(self, **kwargs):

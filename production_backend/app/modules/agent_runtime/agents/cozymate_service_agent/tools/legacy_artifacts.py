@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -475,8 +475,6 @@ def create_legacy_artifact_result(tool_name: str, args: dict[str, Any]) -> dict[
         return hospital_bag_card_result(args)
     if tool_name == "labor_communication_card_create":
         return labor_communication_card_result(args)
-    if tool_name == "birth_journey_plan_card_create":
-        return birth_journey_plan_card_result(args)
     if tool_name == "hospital_bag_cart_update":
         return hospital_bag_cart_update_result(args)
     if tool_name == "hospital_bag_pump_recommend":
@@ -611,8 +609,7 @@ def labor_communication_card_result(args: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def birth_journey_plan_card_result(args: dict[str, Any]) -> dict[str, Any]:
-    plan_context = _dict(args.get("plan_context")) or _confirmed_form_data(args) or _dict(args.get("payload"))
+def build_birth_journey_plan_result(plan_context: dict[str, Any]) -> dict[str, Any]:
     due = _first_text(plan_context.get("due_date_or_week"), plan_context.get("current_week"), plan_context.get("due_date")) or "待确认"
     card_json = {
         "card_type": "birth_journey_plan_card",
@@ -654,7 +651,7 @@ def birth_journey_plan_card_result(args: dict[str, Any]) -> dict[str, Any]:
                 },
             ]
         },
-        "generation_context": {"source": "agent", "created_at": datetime.utcnow().isoformat(timespec="seconds") + "Z"},
+        "generation_context": {"source": "agent", "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds")},
         "next_action": {"label": "继续整理待产包", "send_text": "帮我整理一份个性化待产包清单"},
         "disclaimer": "这份计划用于准备和沟通，不能替代医生、助产士或医院的具体建议；有破水、出血、胎动明显减少、规律宫缩加密或明显不适时，请按医院或医生指导处理。",
     }
@@ -662,7 +659,7 @@ def birth_journey_plan_card_result(args: dict[str, Any]) -> dict[str, Any]:
     if isinstance(owner, dict):
         card_json["owner"] = {key: value for key, value in owner.items() if _has_value(value)}
     return {
-        "tool_name": "birth_journey_plan_card_create",
+        "tool_name": "pregnancy.plan.propose",
         "status": "card_created",
         "card": {"card_type": "birth_journey_plan_card", "schema_version": "1.0", "card_json": card_json},
         "plan": {"payload": card_json, "status": "active"},

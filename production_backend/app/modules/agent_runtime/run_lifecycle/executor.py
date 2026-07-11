@@ -692,6 +692,9 @@ class AgentRuntimeExecutor:
                 "confirmed_form_data": _dict(submission, "values"),
                 "form_submission_id": _text(submission, "submission_id"),
             }
+        if contract_name == "pregnancy.plan.propose":
+            facts = await self._birth_prep_business_facts(run=run)
+            return {"runtime_plan_context": _pregnancy_runtime_plan_context(facts)}
         if contract_name in FORM_CREATION_TOOL_NAMES:
             facts = await self._birth_prep_business_facts(run=run)
             default_values = _birth_prep_form_default_values(facts)
@@ -1257,14 +1260,13 @@ def _timings_with_total(timings_ms: dict[str, float], run_started_at: float) -> 
 
 SERVICE_SKILL_RECOMMENDED_TOOL_CONTRACTS: dict[ServiceSkillId, tuple[str, ...]] = {
     ServiceSkillId.BIRTH_PREP: (
-        "pregnancy.plan_create.propose",
+        "pregnancy.plan.propose",
         "plans.plan_delete.propose",
         "plans.task_complete.propose",
         "plans.task_update.propose",
         "plans.task_delete.propose",
         "birth_plan_form_create",
         "labor_communication_card_create",
-        "birth_journey_plan_card_create",
         "hospital_bag_form_create",
         "hospital_bag_card_create",
         "hospital_bag_cart_update",
@@ -1286,7 +1288,6 @@ SERVICE_SKILL_RECOMMENDED_TOOL_CONTRACTS: dict[ServiceSkillId, tuple[str, ...]] 
         "plans.current.read",
         "plans.calendar.read",
         "plans.milk_plan.propose",
-        "plans.milk_plan_preview.create",
         "plans.task_complete.propose",
         "plans.task_create.propose",
         "notifications.milk_reminder.propose",
@@ -1703,6 +1704,31 @@ def _birth_prep_form_default_values(facts: dict[str, Any]) -> dict[str, Any]:
         "",
     )
     return {"due_date_or_week": due_date_or_week} if due_date_or_week else {}
+
+
+def _pregnancy_runtime_plan_context(facts: dict[str, Any]) -> dict[str, Any]:
+    pregnancy = _dict(facts, "pregnancy")
+    profile = _dict(pregnancy, "profile") or _dict(facts, "profile")
+    plans = pregnancy.get("plans")
+    active_plans = (
+        [
+            item
+            for item in plans
+            if isinstance(item, dict)
+            and _text(item, "status") == "active"
+            and _text(item, "plan_type") == "pregnancy"
+        ]
+        if isinstance(plans, list)
+        else []
+    )
+    context: dict[str, Any] = {
+        "has_active_plan": bool(active_plans),
+        "delivery_date": _text(profile, "delivery_date"),
+    }
+    if active_plans:
+        context["active_plan_id"] = _text(active_plans[0], "id")
+        context["active_plan_title"] = _text(active_plans[0], "title")
+    return {key: value for key, value in context.items() if value not in ("", None)}
 
 
 def _required_text(payload: dict[str, Any], key: str) -> str:
