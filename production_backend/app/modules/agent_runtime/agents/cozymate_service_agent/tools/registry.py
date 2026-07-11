@@ -258,24 +258,6 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         ToolContract(
-            name="files.vision_summary.read",
-            domain="files",
-            description="读取当前用户拥有的上传图片，并返回有限视觉摘要。",
-            input_schema_ref="FileVisionSummaryQuery",
-            output_schema_ref="FileVisionSummaryRead",
-            loading_mode="eager",
-            read_or_write="read",
-            side_effect_level="none",
-            blocking_policy="must_wait",
-            result_dependency="next_tool_call",
-            requires_confirmation=False,
-            idempotency_required=False,
-            audit_required=False,
-            timeout_seconds=20,
-        )
-    )
-    registry.register(
-        ToolContract(
             name="images.inspect",
             domain="images",
             description=(

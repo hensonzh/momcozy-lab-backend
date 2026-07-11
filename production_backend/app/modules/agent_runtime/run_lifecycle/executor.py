@@ -1308,7 +1308,6 @@ SERVICE_SKILL_RECOMMENDED_TOOL_CONTRACTS: dict[ServiceSkillId, tuple[str, ...]] 
         "hospital_bag_card_create",
         "hospital_bag_cart_update",
         "hospital_bag_pump_recommend",
-        "files.vision_summary.read",
     ),
     ServiceSkillId.MILK_MANAGEMENT: (
         "records.milk_status.read",
@@ -1333,14 +1332,12 @@ SERVICE_SKILL_RECOMMENDED_TOOL_CONTRACTS: dict[ServiceSkillId, tuple[str, ...]] 
         "records.milk_status.read",
         "diary.entry_upsert.propose",
         "ibclc_consult_card_create",
-        "files.vision_summary.read",
     ),
     ServiceSkillId.EMOTION_SUPPORT: (),
     ServiceSkillId.DEVICE_GUIDANCE: (
         "devices.pump_status.read",
         "devices.guidance_assets.read",
         "support.ticket.propose",
-        "files.vision_summary.read",
     ),
 }
 

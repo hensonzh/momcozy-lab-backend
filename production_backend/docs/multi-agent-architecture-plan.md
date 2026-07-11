@@ -378,7 +378,7 @@ global eager tools:
   load_service_skill
   profile.read
   profile_update
-  files.vision_summary.read
+  images.inspect
 ```
 
 namespace 不是 prompt 里让模型“加载旧工具”的自然语言指令，而是后端 `ToolContract` 的显式集合。

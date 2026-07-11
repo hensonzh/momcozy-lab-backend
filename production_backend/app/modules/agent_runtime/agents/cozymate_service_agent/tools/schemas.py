@@ -231,20 +231,6 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             },
         },
     },
-    "FileVisionSummaryQuery": {
-        "title": "FileVisionSummaryQuery",
-        "type": "object",
-        "additionalProperties": False,
-        "required": ["file_id"],
-        "properties": {
-            "file_id": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 80,
-                "description": "需要摘要的当前用户范围内上传图片 file_id。",
-            }
-        },
-    },
     "ImageInspectInput": {
         "title": "ImageInspectInput",
         "type": "object",

@@ -275,7 +275,6 @@ def test_agent_runtime_executor_load_service_skill_returns_facts_and_records_led
                 "hospital_bag_card_create",
                 "hospital_bag_cart_update",
                 "hospital_bag_pump_recommend",
-                "files_vision_summary_read",
             },
         ),
         (
@@ -284,7 +283,6 @@ def test_agent_runtime_executor_load_service_skill_returns_facts_and_records_led
                 "records_milk_status_read",
                 "diary_entry_upsert_propose",
                 "ibclc_consult_card_create",
-                "files_vision_summary_read",
             },
         ),
         ("emotion-support", set()),
@@ -294,7 +292,6 @@ def test_agent_runtime_executor_load_service_skill_returns_facts_and_records_led
                 "devices_pump_status_read",
                 "devices_guidance_assets_read",
                 "support_ticket_propose",
-                "files_vision_summary_read",
             },
         ),
     ],
@@ -488,7 +485,6 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
         "devices_guidance_assets_read",
         "devices_pump_status_read",
         "diary_entry_upsert_propose",
-        "files_vision_summary_read",
         "hospital_bag_card_create",
         "hospital_bag_cart_update",
         "hospital_bag_form_create",
@@ -529,7 +525,6 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert backend.tool_schemas["devices_pump_status_read"]["properties"]["limit"]["maximum"] == 20
     assert backend.tool_schemas["diary_entry_upsert_propose"]["required"] == ["entry_date"]
     assert backend.tool_schemas["diary_entry_upsert_propose"]["properties"]["content"]["maxLength"] == 5000
-    assert backend.tool_schemas["files_vision_summary_read"]["required"] == ["file_id"]
     assert backend.tool_schemas["images_inspect"]["required"] == ["image_url"]
     assert backend.tool_schemas["hospital_bag_cart_update"]["additionalProperties"] is False
     assert "groups" not in backend.tool_schemas["hospital_bag_cart_update"]["properties"]
@@ -600,7 +595,6 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     ]
     assert backend.tool_namespace_by_contract["profile.read"] == ""
     assert backend.tool_namespace_by_contract["profile_update"] == ""
-    assert backend.tool_namespace_by_contract["files.vision_summary.read"] == ""
     assert backend.tool_namespace_by_contract["images.inspect"] == ""
     assert backend.tool_namespace_by_contract["records.milk_status.read"] == "milk_management"
     assert backend.tool_deferred_by_contract["records.milk_status.read"] is False

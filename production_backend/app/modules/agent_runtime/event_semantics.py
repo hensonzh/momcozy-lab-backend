@@ -309,11 +309,6 @@ _TOOL_COPY: dict[str, dict[str, str]] = {
         "started": "我先看看设备说明～",
         "completed": "我把设备说明整理好啦",
     },
-    "files.vision_summary.read": {
-        "phase": "reading",
-        "started": "我先看看图片内容～",
-        "completed": "我把图片内容看好啦",
-    },
     "images.inspect": {
         "phase": "reading",
         "started": "我先看看图片内容～",

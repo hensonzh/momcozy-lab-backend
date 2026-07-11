@@ -18,7 +18,6 @@ from production_backend.app.modules.devices.service import DevicesService
 from production_backend.app.modules.diary.agent_actions import DIARY_ENTRY_UPSERT_ACTION
 from production_backend.app.modules.diary.models import PregnancyDiaryEntry
 from production_backend.app.modules.diary.service import DiaryService
-from production_backend.app.modules.files.vision_service import FileVisionService
 from production_backend.app.modules.hospital_bag import HOSPITAL_BAG_CART_UPDATE_ACTION
 from production_backend.app.modules.notifications.agent_actions import MILK_REMINDER_CREATE_ACTION
 from production_backend.app.modules.plans.agent_actions import (
@@ -542,36 +541,6 @@ class DeviceGuidanceAssetsReadToolHandler:
         }
 
 
-class FileVisionSummaryReadToolHandler:
-    def __init__(self, *, vision_service: FileVisionService) -> None:
-        self.vision_service = vision_service
-
-    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
-        file_id = _uuid(_text(context.args, "file_id"), code="validation_failed", field_name="file_id")
-        events = await self.vision_service.events_for_owner(file_id=file_id, owner_user_id=context.actor.user_id)
-        safe_events = [
-            {
-                "type": event.type,
-                "sequence": event.sequence,
-                "payload": _safe_vision_payload(event.payload),
-            }
-            for event in events
-        ]
-        summary = ""
-        for event in safe_events:
-            event_payload = event.get("payload")
-            event_summary = _text(event_payload if isinstance(event_payload, dict) else {}, "summary")
-            if event_summary:
-                summary = event_summary
-                break
-        return {
-            "file_id": str(file_id),
-            "summary": summary,
-            "events": safe_events,
-            "event_count": len(safe_events),
-        }
-
-
 class ImageInspectToolHandler:
     def __init__(self, *, asset_service: ProductAssetService, object_storage: ObjectStorage | None) -> None:
         self.asset_service = asset_service
@@ -1050,7 +1019,6 @@ def build_default_tool_handlers(
     diary_service: DiaryService,
     devices_service: DevicesService,
     asset_service: ProductAssetService,
-    file_vision_service: FileVisionService,
     agent_runtime_service: AgentRuntimeService,
     object_storage: ObjectStorage | None = None,
 ) -> dict[str, ToolHandler]:
@@ -1087,7 +1055,6 @@ def build_default_tool_handlers(
         "diary.entry_upsert.propose": DiaryEntryUpsertProposeToolHandler(runtime_service=agent_runtime_service),
         "devices.pump_status.read": DevicesPumpStatusReadToolHandler(devices_service=devices_service),
         "devices.guidance_assets.read": DeviceGuidanceAssetsReadToolHandler(asset_service=asset_service),
-        "files.vision_summary.read": FileVisionSummaryReadToolHandler(vision_service=file_vision_service),
         "images.inspect": ImageInspectToolHandler(asset_service=asset_service, object_storage=object_storage),
         "plans.milk_plan.propose": MilkPlanProposeToolHandler(runtime_service=agent_runtime_service),
         "pregnancy.plan.propose": PregnancyPlanProposeToolHandler(runtime_service=agent_runtime_service),
@@ -1675,15 +1642,6 @@ def _optional_date_arg(payload: dict[str, Any], key: str) -> date | None:
             status=422,
             details={"field": key},
         ) from exc
-
-
-def _safe_vision_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    safe: dict[str, Any] = {}
-    for key in ("content_type", "original_filename", "size_bytes", "provider", "summary", "event_count"):
-        value = payload.get(key)
-        if value not in ("", None):
-            safe[key] = value
-    return safe
 
 
 def _packaged_image_asset_for_url(*, asset_service: ProductAssetService, image_url: str) -> ProductAsset | None:

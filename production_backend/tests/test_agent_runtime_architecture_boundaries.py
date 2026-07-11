@@ -424,7 +424,6 @@ def test_tool_contracts_are_exported_as_responses_namespaces() -> None:
 
     assert len(assigned_contracts) == len(set(assigned_contracts))
     assert root_contracts == [
-        "files.vision_summary.read",
         "images.inspect",
         "load_service_skill",
         "profile.read",
@@ -471,7 +470,6 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
     diary_entry_schema = tool_input_schema(registry.get("diary.entry_upsert.propose").input_schema_ref)
     devices_schema = tool_input_schema(registry.get("devices.pump_status.read").input_schema_ref)
     device_guidance_schema = tool_input_schema(registry.get("devices.guidance_assets.read").input_schema_ref)
-    file_vision_schema = tool_input_schema(registry.get("files.vision_summary.read").input_schema_ref)
     image_inspect_schema = tool_input_schema(registry.get("images.inspect").input_schema_ref)
     milk_plan_schema = tool_input_schema(registry.get("plans.milk_plan.propose").input_schema_ref)
     pregnancy_plan_schema = tool_input_schema(registry.get("pregnancy.plan.propose").input_schema_ref)
@@ -533,11 +531,8 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
     assert device_guidance_schema["properties"]["model"]["type"] == "string"
     assert device_guidance_schema["properties"]["topic"]["type"] == "string"
     assert device_guidance_schema["properties"]["measured_nipple_mm"]["type"] == "number"
-    assert file_vision_schema["additionalProperties"] is False
-    assert file_vision_schema["required"] == ["file_id"]
     assert image_inspect_schema["required"] == ["image_url"]
     assert image_inspect_schema["properties"]["detail"]["enum"] == ["low", "high"]
-    assert file_vision_schema["properties"]["file_id"]["type"] == "string"
     assert milk_plan_schema["additionalProperties"] is False
     assert milk_plan_schema["required"] == ["title"]
     assert "payload" not in milk_plan_schema["properties"]

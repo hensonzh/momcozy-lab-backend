@@ -335,7 +335,6 @@ LangGraph workflow。
 - `plans.current.read`
 - `diary.recent.read`
 - `devices.pump_status.read`
-- `files.vision_summary.read`
 
 建议 PR：
 
@@ -348,8 +347,8 @@ LangGraph workflow。
 - `records.milk_summary.read` 已返回 owner-scoped feeding、pumping、trend 和
   bounded infant projection，支持“回答前先读真实奶量事实和宝宝资料”。
 - `plans.current.read`、`diary.recent.read`、`devices.pump_status.read`、
-  `devices.guidance_assets.read`、`files.vision_summary.read` 已纳入 tool
-  registry、schema、default handler wiring 和 handler tests。
+  `devices.guidance_assets.read` 已纳入 tool registry、schema、default handler
+  wiring 和 handler tests。
 
 验收：
 

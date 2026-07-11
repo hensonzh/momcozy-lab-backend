@@ -14,7 +14,6 @@ from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.
     DiaryRecentReadToolHandler,
     FeedingRecordDeleteProposeToolHandler,
     FeedingRecordProposeToolHandler,
-    FileVisionSummaryReadToolHandler,
     GrowthRecordDeleteProposeToolHandler,
     GrowthRecordProposeToolHandler,
     GrowthRecordUpdateProposeToolHandler,
@@ -50,7 +49,6 @@ from production_backend.app.modules.assets.models import ProductAsset
 from production_backend.app.modules.devices.models import PumpDevice, PumpTelemetryEvent
 from production_backend.app.modules.diary.agent_actions import DIARY_ENTRY_UPSERT_ACTION
 from production_backend.app.modules.diary.models import PregnancyDiaryEntry
-from production_backend.app.modules.files.vision_service import FileVisionEvent
 from production_backend.app.modules.notifications.agent_actions import MILK_REMINDER_CREATE_ACTION
 from production_backend.app.modules.plans.agent_actions import (
     MILK_PLAN_CREATE_ACTION,
@@ -588,38 +586,6 @@ def test_device_guidance_assets_read_tool_handler_returns_bounded_metadata() -> 
         "available_count": 1,
         "query_context": {"model": "Air1", "topic": "setup", "query": "", "measured_nipple_mm": None},
     }
-
-
-def test_file_vision_summary_read_tool_handler_returns_owner_scoped_safe_summary() -> None:
-    actor = _user()
-    file_id = uuid4()
-    vision_service = FakeFileVisionService()
-    handler = FileVisionSummaryReadToolHandler(vision_service=vision_service)
-
-    result = asyncio.run(handler(_context(actor=actor, args={"file_id": str(file_id), "owner_user_id": str(uuid4())})))
-
-    assert vision_service.calls == [{"file_id": file_id, "owner_user_id": actor.user_id}]
-    assert result["file_id"] == str(file_id)
-    assert result["summary"] == "The image shows a packed pump bag."
-    assert result["event_count"] == 3
-    assert result["events"][0]["payload"] == {
-        "content_type": "image/png",
-        "original_filename": "bag.png",
-        "size_bytes": 42,
-    }
-    assert result["events"][1]["payload"] == {
-        "provider": "local_stub",
-        "summary": "The image shows a packed pump bag.",
-    }
-    assert "bytes_read" not in result["events"][1]["payload"]
-
-
-def test_file_vision_summary_read_tool_handler_rejects_invalid_file_id() -> None:
-    with pytest.raises(ApiError) as exc_info:
-        asyncio.run(FileVisionSummaryReadToolHandler(vision_service=FakeFileVisionService())(_context(args={"file_id": "x"})))
-
-    assert exc_info.value.code == "validation_failed"
-    assert exc_info.value.details == {"field": "file_id"}
 
 
 def test_image_inspect_tool_handler_loads_visible_packaged_image_as_transient_model_context() -> None:
@@ -1161,7 +1127,6 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
         diary_service=FakeDiaryService(owner_user_id=actor_id),
         devices_service=FakeDevicesService(owner_user_id=actor_id),
         asset_service=FakeAssetService(),
-        file_vision_service=FakeFileVisionService(),
         agent_runtime_service=FakeAgentRuntimeService(),
     )
 
@@ -1191,7 +1156,6 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
         "diary.recent.read",
         "devices.guidance_assets.read",
         "devices.pump_status.read",
-        "files.vision_summary.read",
         "images.inspect",
         "notifications.milk_reminder.propose",
         "plans.milk_plan.propose",
@@ -1487,38 +1451,6 @@ class FakeImageObjectStorage:
     async def get_bytes(self, *, key):
         self.keys.append(key)
         return self.body
-
-
-class FakeFileVisionService:
-    def __init__(self) -> None:
-        self.calls = []
-
-    async def events_for_owner(self, *, file_id, owner_user_id):
-        self.calls.append({"file_id": file_id, "owner_user_id": owner_user_id})
-        return [
-            FileVisionEvent(
-                type="vision.started",
-                sequence=1,
-                file_id=file_id,
-                payload={"content_type": "image/png", "original_filename": "bag.png", "size_bytes": 42},
-            ),
-            FileVisionEvent(
-                type="vision.event",
-                sequence=2,
-                file_id=file_id,
-                payload={
-                    "provider": "local_stub",
-                    "summary": "The image shows a packed pump bag.",
-                    "bytes_read": 42,
-                },
-            ),
-            FileVisionEvent(
-                type="vision.completed",
-                sequence=3,
-                file_id=file_id,
-                payload={"event_count": 1},
-            ),
-        ]
 
 
 class FakeAgentRuntimeService:

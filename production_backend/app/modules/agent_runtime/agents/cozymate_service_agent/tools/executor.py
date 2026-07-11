@@ -406,7 +406,6 @@ def _tool_event_label(tool_name: str) -> str:
         "diary.entry_upsert.propose": "日记草稿",
         "devices.pump_status.read": "设备状态",
         "devices.guidance_assets.read": "设备指导资料",
-        "files.vision_summary.read": "图片内容",
         "images.inspect": "图片内容",
         "birth_plan_form_create": "我先帮你准备确认内容～",
         "labor_communication_card_create": "我先帮你整理分娩沟通单～",

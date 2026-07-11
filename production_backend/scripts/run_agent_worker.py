@@ -39,8 +39,6 @@ from production_backend.app.modules.devices.repository import DevicesRepository
 from production_backend.app.modules.devices.service import DevicesService
 from production_backend.app.modules.diary.repository import DiaryRepository
 from production_backend.app.modules.diary.service import DiaryService
-from production_backend.app.modules.files.repository import FileRepository
-from production_backend.app.modules.files.vision_service import FileVisionService
 from production_backend.app.modules.plans.repository import PlansRepository
 from production_backend.app.modules.plans.service import PlansService
 from production_backend.app.modules.profiles.repository import ProfileRepository
@@ -322,11 +320,6 @@ async def _execute_agent_run(
             audit_service=AuditService(repository=audit_repository),
             idempotency_service=IdempotencyService(repository=audit_repository),
         )
-        file_vision_service = FileVisionService(
-            repository=FileRepository(session),
-            object_storage=object_storage,
-            settings=settings,
-        )
         tool_registry = default_tool_registry()
         memory_service = AgentMemoryService(repository=AgentMemoryRepository(session))
         transient_stream = AgentTransientStream(redis_client)
@@ -343,7 +336,6 @@ async def _execute_agent_run(
             diary_service=diary_service,
             devices_service=devices_service,
             asset_service=ProductAssetService(),
-            file_vision_service=file_vision_service,
             agent_runtime_service=agent_runtime_service,
             object_storage=object_storage,
         )
