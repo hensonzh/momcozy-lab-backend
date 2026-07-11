@@ -93,7 +93,7 @@ class ToolExecutor:
         try:
             contract = self.registry.get(tool_name)
             self._enforce_actor_scope(args=args)
-            validate_tool_input(schema_ref=contract.input_schema_ref, value=args)
+            validate_tool_input(schema=contract.input_schema, value=args)
             handler = handler_override or self.handlers.get(tool_name)
             if handler is None:
                 raise ApiError(code="unsupported_operation", message="Tool handler is not configured.", status=501)

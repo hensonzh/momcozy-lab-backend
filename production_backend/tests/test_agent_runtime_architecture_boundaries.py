@@ -44,9 +44,8 @@ from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.
     ToolContract,
     default_tool_namespace_registry,
     default_tool_registry,
-    tool_input_schema,
-    tool_input_schema_refs,
 )
+from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.tools.schemas import input_schema_tool_names
 from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.tools.output_policy import (
     INSTRUCTIONAL_TOOL_OUTPUT_KEYS,
     strip_instructional_tool_output_keys,
@@ -292,7 +291,7 @@ def test_model_facing_prompt_text_is_chinese() -> None:
         *(contract.description for contract in registry.list()),
     ]
     for contract in registry.list():
-        prompt_texts.extend(_schema_descriptions(tool_input_schema(contract.input_schema_ref)))
+        prompt_texts.extend(_schema_descriptions(contract.input_schema))
 
     forbidden_fragments = (
         "You are",
@@ -387,7 +386,7 @@ def test_tool_contract_registry_contains_only_model_visible_tools_and_loading_po
 def test_model_tool_schema_registry_has_no_internal_or_legacy_orphans() -> None:
     registry = default_tool_registry()
 
-    assert set(tool_input_schema_refs()) == {contract.input_schema_ref for contract in registry.list()}
+    assert set(input_schema_tool_names()) == set(registry.names_for_sdk())
 
 
 @pytest.mark.parametrize(
@@ -460,9 +459,11 @@ def test_tool_contracts_are_exported_as_responses_namespaces() -> None:
 def test_tool_schema_contract_exposes_only_effective_fields() -> None:
     registry = default_tool_registry()
 
+    assert "input_schema_ref" not in ToolContract.model_fields
     assert "output_schema_ref" not in ToolContract.model_fields
     for contract in registry.list():
-        assert "title" not in tool_input_schema(contract.input_schema_ref)
+        assert isinstance(contract.input_schema, dict)
+        assert "title" not in contract.input_schema
 
 
 def test_responses_tool_parameters_match_registered_input_schemas() -> None:
@@ -475,7 +476,7 @@ def test_responses_tool_parameters_match_registered_input_schemas() -> None:
             contract_name=contract.name,
             sdk_name=sdk_tool_name(contract.name),
             description=contract.description,
-            params_json_schema=tool_input_schema(contract.input_schema_ref),
+            params_json_schema=contract.input_schema,
             invoke=invoke,
         )
         for contract in registry.list()
@@ -491,44 +492,44 @@ def test_responses_tool_parameters_match_registered_input_schemas() -> None:
 
     payload_by_name = {item["name"]: item for item in responses_tools_payload(request)}
     for contract in registry.list():
-        assert payload_by_name[sdk_tool_name(contract.name)]["parameters"] == tool_input_schema(contract.input_schema_ref)
+        assert payload_by_name[sdk_tool_name(contract.name)]["parameters"] == contract.input_schema
 
 
-def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> None:
+def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
     registry = default_tool_registry()
-    profile_schema = tool_input_schema(registry.get("profile.read").input_schema_ref)
-    profile_update_schema = tool_input_schema(registry.get("profile_update").input_schema_ref)
-    support_schema = tool_input_schema(registry.get("support.ticket.propose").input_schema_ref)
-    milk_schema = tool_input_schema(registry.get("records.milk_summary.read").input_schema_ref)
-    milk_status_schema = tool_input_schema(registry.get("records.milk_status.read").input_schema_ref)
-    milk_analysis_schema = tool_input_schema(registry.get("records.milk_analysis.read").input_schema_ref)
-    growth_read_schema = tool_input_schema(registry.get("records.growth.read").input_schema_ref)
-    plans_schema = tool_input_schema(registry.get("plans.current.read").input_schema_ref)
-    calendar_schema = tool_input_schema(registry.get("plans.calendar.read").input_schema_ref)
-    diary_entry_schema = tool_input_schema(registry.get("diary.entry_upsert.propose").input_schema_ref)
-    devices_schema = tool_input_schema(registry.get("devices.pump_status.read").input_schema_ref)
-    device_guidance_schema = tool_input_schema(registry.get("devices.guidance_assets.read").input_schema_ref)
-    image_inspect_schema = tool_input_schema(registry.get("images.inspect").input_schema_ref)
-    milk_plan_schema = tool_input_schema(registry.get("plans.milk_plan.propose").input_schema_ref)
-    pregnancy_plan_schema = tool_input_schema(registry.get("pregnancy.plan.propose").input_schema_ref)
-    task_create_schema = tool_input_schema(registry.get("plans.task_create.propose").input_schema_ref)
-    task_complete_schema = tool_input_schema(registry.get("plans.task_complete.propose").input_schema_ref)
-    task_update_schema = tool_input_schema(registry.get("plans.task_update.propose").input_schema_ref)
-    task_delete_schema = tool_input_schema(registry.get("plans.task_delete.propose").input_schema_ref)
-    plan_delete_schema = tool_input_schema(registry.get("plans.plan_delete.propose").input_schema_ref)
-    milk_reminder_schema = tool_input_schema(registry.get("notifications.milk_reminder.propose").input_schema_ref)
-    feeding_schema = tool_input_schema(registry.get("records.feeding_record.propose").input_schema_ref)
-    pumping_schema = tool_input_schema(registry.get("records.pumping_record.propose").input_schema_ref)
-    record_delete_schema = tool_input_schema(registry.get("records.feeding_record_delete.propose").input_schema_ref)
-    growth_schema = tool_input_schema(registry.get("records.growth_record.propose").input_schema_ref)
-    growth_update_schema = tool_input_schema(registry.get("records.growth_record_update.propose").input_schema_ref)
-    birth_form_schema = tool_input_schema(registry.get("birth_plan_form_create").input_schema_ref)
-    labor_card_schema = tool_input_schema(registry.get("labor_communication_card_create").input_schema_ref)
-    hospital_bag_form_schema = tool_input_schema(registry.get("hospital_bag_form_create").input_schema_ref)
-    hospital_bag_card_schema = tool_input_schema(registry.get("hospital_bag_card_create").input_schema_ref)
-    hospital_bag_cart_schema = tool_input_schema(registry.get("hospital_bag_cart_update").input_schema_ref)
-    pump_recommend_schema = tool_input_schema(registry.get("hospital_bag_pump_recommend").input_schema_ref)
-    ibclc_schema = tool_input_schema(registry.get("ibclc_consult_card_create").input_schema_ref)
+    profile_schema = registry.get("profile.read").input_schema
+    profile_update_schema = registry.get("profile_update").input_schema
+    support_schema = registry.get("support.ticket.propose").input_schema
+    milk_schema = registry.get("records.milk_summary.read").input_schema
+    milk_status_schema = registry.get("records.milk_status.read").input_schema
+    milk_analysis_schema = registry.get("records.milk_analysis.read").input_schema
+    growth_read_schema = registry.get("records.growth.read").input_schema
+    plans_schema = registry.get("plans.current.read").input_schema
+    calendar_schema = registry.get("plans.calendar.read").input_schema
+    diary_entry_schema = registry.get("diary.entry_upsert.propose").input_schema
+    devices_schema = registry.get("devices.pump_status.read").input_schema
+    device_guidance_schema = registry.get("devices.guidance_assets.read").input_schema
+    image_inspect_schema = registry.get("images.inspect").input_schema
+    milk_plan_schema = registry.get("plans.milk_plan.propose").input_schema
+    pregnancy_plan_schema = registry.get("pregnancy.plan.propose").input_schema
+    task_create_schema = registry.get("plans.task_create.propose").input_schema
+    task_complete_schema = registry.get("plans.task_complete.propose").input_schema
+    task_update_schema = registry.get("plans.task_update.propose").input_schema
+    task_delete_schema = registry.get("plans.task_delete.propose").input_schema
+    plan_delete_schema = registry.get("plans.plan_delete.propose").input_schema
+    milk_reminder_schema = registry.get("notifications.milk_reminder.propose").input_schema
+    feeding_schema = registry.get("records.feeding_record.propose").input_schema
+    pumping_schema = registry.get("records.pumping_record.propose").input_schema
+    record_delete_schema = registry.get("records.feeding_record_delete.propose").input_schema
+    growth_schema = registry.get("records.growth_record.propose").input_schema
+    growth_update_schema = registry.get("records.growth_record_update.propose").input_schema
+    birth_form_schema = registry.get("birth_plan_form_create").input_schema
+    labor_card_schema = registry.get("labor_communication_card_create").input_schema
+    hospital_bag_form_schema = registry.get("hospital_bag_form_create").input_schema
+    hospital_bag_card_schema = registry.get("hospital_bag_card_create").input_schema
+    hospital_bag_cart_schema = registry.get("hospital_bag_cart_update").input_schema
+    pump_recommend_schema = registry.get("hospital_bag_pump_recommend").input_schema
+    ibclc_schema = registry.get("ibclc_consult_card_create").input_schema
 
     assert profile_schema == {
         "type": "object",
@@ -627,11 +628,10 @@ def test_tool_input_schema_properties_do_not_define_instruction_channels() -> No
     registry = default_tool_registry()
     forbidden_schema_paths: list[str] = []
     for contract in registry.list():
-        schema = tool_input_schema(contract.input_schema_ref)
         forbidden_schema_paths.extend(
             _instructional_schema_property_paths(
-                value=schema,
-                path=contract.input_schema_ref,
+                value=contract.input_schema,
+                path=contract.name,
             )
         )
 

@@ -10,7 +10,7 @@ JsonSchema = dict[str, Any]
 
 
 _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
-    "LoadServiceSkillInput": {
+    "load_service_skill": {
         "type": "object",
         "additionalProperties": False,
         "required": ["service_skill_id"],
@@ -28,12 +28,12 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             }
         },
     },
-    "ProfileContextQuery": {
+    "profile.read": {
         "type": "object",
         "additionalProperties": False,
         "properties": {},
     },
-    "ProfileUpdate": {
+    "profile_update": {
         "type": "object",
         "additionalProperties": False,
         "properties": {
@@ -45,7 +45,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             },
         },
     },
-    "MilkSummaryQuery": {
+    "records.milk_summary.read": {
         "type": "object",
         "additionalProperties": False,
         "properties": {
@@ -65,7 +65,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             },
         },
     },
-    "MilkStatusQuery": {
+    "records.milk_status.read": {
         "type": "object",
         "additionalProperties": False,
         "properties": {
@@ -85,7 +85,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             },
         },
     },
-    "MilkAnalysisReadQuery": {
+    "records.milk_analysis.read": {
         "type": "object",
         "additionalProperties": False,
         "properties": {
@@ -105,7 +105,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             },
         },
     },
-    "GrowthRecordsQuery": {
+    "records.growth.read": {
         "type": "object",
         "additionalProperties": False,
         "properties": {
@@ -119,7 +119,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             },
         },
     },
-    "PlansCurrentQuery": {
+    "plans.current.read": {
         "type": "object",
         "additionalProperties": False,
         "properties": {
@@ -132,7 +132,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             }
         },
     },
-    "PlansCalendarQuery": {
+    "plans.calendar.read": {
         "type": "object",
         "additionalProperties": False,
         "properties": {
@@ -147,7 +147,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             },
         },
     },
-    "DiaryEntryUpsertProposalCreate": {
+    "diary.entry_upsert.propose": {
         "type": "object",
         "additionalProperties": False,
         "required": ["entry_date"],
@@ -168,7 +168,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "idempotency_key": {"type": "string", "maxLength": 255},
         },
     },
-    "DevicesPumpStatusQuery": {
+    "devices.pump_status.read": {
         "type": "object",
         "additionalProperties": False,
         "properties": {
@@ -181,7 +181,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             }
         },
     },
-    "DeviceGuidanceAssetsQuery": {
+    "devices.guidance_assets.read": {
         "type": "object",
         "additionalProperties": False,
         "properties": {
@@ -219,7 +219,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             },
         },
     },
-    "ImageInspectInput": {
+    "images.inspect": {
         "type": "object",
         "additionalProperties": False,
         "required": ["image_url"],
@@ -238,7 +238,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             },
         },
     },
-    "MilkPlanProposalCreate": {
+    "plans.milk_plan.propose": {
         "type": "object",
         "additionalProperties": False,
         "required": ["title"],
@@ -252,7 +252,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "reminders": {"type": "array", "maxItems": 40, "items": {"type": "object", "additionalProperties": True}},
         },
     },
-    "PregnancyPlanProposalCreate": {
+    "pregnancy.plan.propose": {
         "type": "object",
         "additionalProperties": False,
         "properties": {
@@ -265,7 +265,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "scope": {"type": "string", "enum": ["full", "prenatal_only", "short_range"]},
         },
     },
-    "PlanTaskCreateProposalCreate": {
+    "plans.task_create.propose": {
         "type": "object",
         "additionalProperties": False,
         "required": ["title"],
@@ -284,7 +284,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "idempotency_key": {"type": "string", "maxLength": 255},
         },
     },
-    "PlanTaskCompleteProposalCreate": {
+    "plans.task_complete.propose": {
         "type": "object",
         "additionalProperties": False,
         "required": ["task_id"],
@@ -296,7 +296,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "idempotency_key": {"type": "string", "maxLength": 255},
         },
     },
-    "PlanTaskUpdateProposalCreate": {
+    "plans.task_update.propose": {
         "type": "object",
         "additionalProperties": False,
         "required": ["task_id"],
@@ -313,7 +313,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "idempotency_key": {"type": "string", "maxLength": 255},
         },
     },
-    "PlanTaskDeleteProposalCreate": {
+    "plans.task_delete.propose": {
         "type": "object",
         "additionalProperties": False,
         "required": ["task_id"],
@@ -325,7 +325,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "idempotency_key": {"type": "string", "maxLength": 255},
         },
     },
-    "PlanDeleteProposalCreate": {
+    "plans.plan_delete.propose": {
         "type": "object",
         "additionalProperties": False,
         "required": ["plan_id"],
@@ -337,7 +337,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "idempotency_key": {"type": "string", "maxLength": 255},
         },
     },
-    "MilkReminderProposalCreate": {
+    "notifications.milk_reminder.propose": {
         "type": "object",
         "additionalProperties": False,
         "required": ["title"],
@@ -354,7 +354,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "idempotency_key": {"type": "string", "maxLength": 255},
         },
     },
-    "FeedingRecordProposalCreate": {
+    "records.feeding_record.propose": {
         "type": "object",
         "additionalProperties": False,
         "required": ["feed_time", "feed_type"],
@@ -371,7 +371,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "idempotency_key": {"type": "string", "maxLength": 255},
         },
     },
-    "PumpingRecordProposalCreate": {
+    "records.pumping_record.propose": {
         "type": "object",
         "additionalProperties": False,
         "required": ["pump_start_time"],
@@ -388,7 +388,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "idempotency_key": {"type": "string", "maxLength": 255},
         },
     },
-    "RecordDeleteProposalCreate": {
+    "records.feeding_record_delete.propose": {
         "type": "object",
         "additionalProperties": False,
         "required": ["record_id"],
@@ -400,7 +400,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "idempotency_key": {"type": "string", "maxLength": 255},
         },
     },
-    "GrowthRecordProposalCreate": {
+    "records.growth_record.propose": {
         "type": "object",
         "additionalProperties": False,
         "required": ["measured_at"],
@@ -415,7 +415,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "idempotency_key": {"type": "string", "maxLength": 255},
         },
     },
-    "GrowthRecordUpdateProposalCreate": {
+    "records.growth_record_update.propose": {
         "type": "object",
         "additionalProperties": False,
         "required": ["record_id"],
@@ -431,12 +431,12 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "idempotency_key": {"type": "string", "maxLength": 255},
         },
     },
-    "EmptyArtifactDecision": {
+    "birth_plan_form_create": {
         "type": "object",
         "additionalProperties": False,
         "properties": {},
     },
-    "HospitalBagCartMutation": {
+    "hospital_bag_cart_update": {
         "type": "object",
         "additionalProperties": False,
         "required": ["action"],
@@ -490,7 +490,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "allow_remove_pump": {"type": "boolean"},
         },
     },
-    "HospitalBagPumpRecommendation": {
+    "hospital_bag_pump_recommend": {
         "type": "object",
         "additionalProperties": False,
         "properties": {
@@ -509,7 +509,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "need_single_unit": {"type": ["boolean", "null"]},
         },
     },
-    "SupportTicketProposalCreate": {
+    "support.ticket.propose": {
         "type": "object",
         "additionalProperties": False,
         "required": ["issue_summary"],
@@ -543,7 +543,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "idempotency_key": {"type": "string", "maxLength": 255},
         },
     },
-    "IbclcConsultCardCreate": {
+    "ibclc_consult_card_create": {
         "type": "object",
         "additionalProperties": False,
         "required": ["reason"],
@@ -560,19 +560,25 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
 }
 
 
-def tool_input_schema(schema_ref: str) -> JsonSchema:
-    schema = _TOOL_INPUT_SCHEMAS.get(schema_ref)
+for _tool_name in ("records.pumping_record_delete.propose", "records.growth_record_delete.propose"):
+    _TOOL_INPUT_SCHEMAS[_tool_name] = _TOOL_INPUT_SCHEMAS["records.feeding_record_delete.propose"]
+
+for _tool_name in ("labor_communication_card_create", "hospital_bag_form_create", "hospital_bag_card_create"):
+    _TOOL_INPUT_SCHEMAS[_tool_name] = _TOOL_INPUT_SCHEMAS["birth_plan_form_create"]
+
+
+def input_schema_for_tool(tool_name: str) -> JsonSchema:
+    schema = _TOOL_INPUT_SCHEMAS.get(tool_name)
     if schema is None:
         raise ApiError(code="tool_schema_not_found", message="Tool input schema is not registered.", status=500)
     return deepcopy(schema)
 
 
-def tool_input_schema_refs() -> tuple[str, ...]:
+def input_schema_tool_names() -> tuple[str, ...]:
     return tuple(sorted(_TOOL_INPUT_SCHEMAS))
 
 
-def validate_tool_input(*, schema_ref: str, value: dict[str, Any]) -> None:
-    schema = tool_input_schema(schema_ref)
+def validate_tool_input(*, schema: JsonSchema, value: dict[str, Any]) -> None:
     _validate_value(schema=schema, value=value, path="$")
 
 

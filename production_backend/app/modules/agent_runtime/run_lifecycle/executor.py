@@ -38,7 +38,6 @@ from ..agents.cozymate_service_agent.tools import (
     default_tool_namespace_registry,
     default_tool_registry,
 )
-from ..agents.cozymate_service_agent.tools.schemas import tool_input_schema
 from ..agents.main_coordinator_agent import (
     AgentId,
     RoutingPlan,
@@ -75,7 +74,6 @@ from .state_store import AgentRuntimeStateStore
 LOAD_SERVICE_SKILL_TOOL_NAME = "load_service_skill"
 IMAGE_INSPECT_TOOL_NAME = "images.inspect"
 LOGGER = logging.getLogger("production_backend.agent_runtime.executor")
-LOAD_SERVICE_SKILL_INPUT_SCHEMA = tool_input_schema("LoadServiceSkillInput")
 DEFAULT_RESIDENT_SERVICE_SKILL_TTL_TURNS = 3
 FORM_TOOL_IDS = {
     "hospital_bag_card_create": "hospital_bag_intake",
@@ -565,6 +563,8 @@ class AgentRuntimeExecutor:
         return (load_service_skill, *business_tools)
 
     def _load_service_skill_tool_definition(self, *, run: AgentRun) -> SdkToolDefinition:
+        contract = self.tool_registry.get(LOAD_SERVICE_SKILL_TOOL_NAME)
+
         async def invoke(args_json: str) -> SdkToolInvocationResult:
             args = _json_object(args_json)
             output = await self._invoke_load_service_skill_tool(run=run, args=args)
@@ -576,14 +576,10 @@ class AgentRuntimeExecutor:
             )
 
         return SdkToolDefinition(
-            contract_name=LOAD_SERVICE_SKILL_TOOL_NAME,
-            sdk_name=LOAD_SERVICE_SKILL_TOOL_NAME,
-            description=(
-                "按 service_skill_id 加载一个 MomCozy 服务技能。"
-                "需要进入奶量、产前准备、健康咨询、情绪支持或设备指导流程前先调用；"
-                "返回该技能说明、建议工具和小型业务事实包。"
-            ),
-            params_json_schema=LOAD_SERVICE_SKILL_INPUT_SCHEMA,
+            contract_name=contract.name,
+            sdk_name=sdk_tool_name(contract.name),
+            description=contract.description,
+            params_json_schema=contract.input_schema,
             invoke=invoke,
         )
 
@@ -598,7 +594,7 @@ class AgentRuntimeExecutor:
             contract_name=contract.name,
             sdk_name=sdk_name,
             description=contract.description,
-            params_json_schema=tool_input_schema(contract.input_schema_ref),
+            params_json_schema=contract.input_schema,
             invoke=invoke,
             namespace_name=namespace.name if namespace is not None else "",
             defer_loading=namespace is not None and contract.loading_mode == "deferred",

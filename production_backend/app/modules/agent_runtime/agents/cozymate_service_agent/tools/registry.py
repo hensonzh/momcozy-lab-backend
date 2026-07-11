@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from typing import Any
+
 from production_backend.app.core.errors import ApiError
 
 from .contracts import ToolContract
+from .schemas import input_schema_for_tool
 
 
 class ToolContractRegistry:
@@ -33,17 +36,21 @@ class ToolContractRegistry:
         return tuple(sorted(contract.name for contract in self._contracts.values() if contract.loading_mode == "deferred"))
 
 
+def _tool_contract(*, name: str, **values: Any) -> ToolContract:
+    return ToolContract(name=name, input_schema=input_schema_for_tool(name), **values)
+
+
 def default_tool_registry() -> ToolContractRegistry:
     registry = ToolContractRegistry()
     registry.register(
-        ToolContract(
+        _tool_contract(
             name="load_service_skill",
             domain="agent_runtime",
             description=(
                 "按 service_skill_id 加载一个 MomCozy 服务技能。"
-                "需要进入奶量、产前准备、健康咨询、情绪支持或设备指导流程前调用。"
+                "需要进入奶量、产前准备、健康咨询、情绪支持或设备指导流程前先调用；"
+                "返回该技能说明、建议工具和小型业务事实包。"
             ),
-            input_schema_ref="LoadServiceSkillInput",
             loading_mode="eager",
             read_or_write="read",
             side_effect_level="none",
@@ -56,11 +63,10 @@ def default_tool_registry() -> ToolContractRegistry:
         )
     )
     registry.register(
-        ToolContract(
+        _tool_contract(
             name="profile.read",
             domain="profiles",
             description="读取当前用户的用户资料上下文投影。",
-            input_schema_ref="ProfileContextQuery",
             loading_mode="eager",
             read_or_write="read",
             side_effect_level="none",
@@ -73,14 +79,13 @@ def default_tool_registry() -> ToolContractRegistry:
         )
     )
     registry.register(
-        ToolContract(
+        _tool_contract(
             name="profile_update",
             domain="global",
             description=(
                 "更新当前用户明确提供的基础资料字段，例如 display_name、age 或 onboarding_skipped。"
                 "不要根据图片、语气或上下文猜测资料。"
             ),
-            input_schema_ref="ProfileUpdate",
             loading_mode="eager",
             read_or_write="write",
             side_effect_level="low",
@@ -93,11 +98,10 @@ def default_tool_registry() -> ToolContractRegistry:
         )
     )
     registry.register(
-        ToolContract(
+        _tool_contract(
             name="records.milk_summary.read",
             domain="records",
             description="从近期喂养、吸奶和趋势记录中读取有限奶量管理摘要。",
-            input_schema_ref="MilkSummaryQuery",
             loading_mode="eager",
             read_or_write="read",
             side_effect_level="none",
@@ -110,11 +114,10 @@ def default_tool_registry() -> ToolContractRegistry:
         )
     )
     registry.register(
-        ToolContract(
+        _tool_contract(
             name="records.milk_status.read",
             domain="records",
             description="从近期喂养、吸奶和趋势记录中读取确定性奶量状态快照。",
-            input_schema_ref="MilkStatusQuery",
             loading_mode="eager",
             read_or_write="read",
             side_effect_level="none",
@@ -127,11 +130,10 @@ def default_tool_registry() -> ToolContractRegistry:
         )
     )
     registry.register(
-        ToolContract(
+        _tool_contract(
             name="records.milk_analysis.read",
             domain="records",
             description="读取近期奶量、生长和趋势事实，并返回确定性奶量分析快照。",
-            input_schema_ref="MilkAnalysisReadQuery",
             loading_mode="eager",
             read_or_write="read",
             side_effect_level="none",
@@ -144,11 +146,10 @@ def default_tool_registry() -> ToolContractRegistry:
         )
     )
     registry.register(
-        ToolContract(
+        _tool_contract(
             name="records.growth.read",
             domain="records",
             description="按当前用户范围读取宝宝身高、体重、头围等生长记录。",
-            input_schema_ref="GrowthRecordsQuery",
             loading_mode="eager",
             read_or_write="read",
             side_effect_level="none",
@@ -161,11 +162,10 @@ def default_tool_registry() -> ToolContractRegistry:
         )
     )
     registry.register(
-        ToolContract(
+        _tool_contract(
             name="plans.current.read",
             domain="plans",
             description="读取当前用户生效中计划和近期任务的有限摘要。",
-            input_schema_ref="PlansCurrentQuery",
             loading_mode="eager",
             read_or_write="read",
             side_effect_level="none",
@@ -178,11 +178,10 @@ def default_tool_registry() -> ToolContractRegistry:
         )
     )
     registry.register(
-        ToolContract(
+        _tool_contract(
             name="plans.calendar.read",
             domain="plans",
             description="按日期、状态读取当前用户计划任务日程。",
-            input_schema_ref="PlansCalendarQuery",
             loading_mode="eager",
             read_or_write="read",
             side_effect_level="none",
@@ -195,11 +194,10 @@ def default_tool_registry() -> ToolContractRegistry:
         )
     )
     registry.register(
-        ToolContract(
+        _tool_contract(
             name="diary.entry_upsert.propose",
             domain="diary",
             description="提出孕期日记写入或更新动作，等待用户确认。",
-            input_schema_ref="DiaryEntryUpsertProposalCreate",
             read_or_write="write",
             side_effect_level="medium",
             blocking_policy="wait_for_confirmation",
@@ -211,11 +209,10 @@ def default_tool_registry() -> ToolContractRegistry:
         )
     )
     registry.register(
-        ToolContract(
+        _tool_contract(
             name="devices.pump_status.read",
             domain="devices",
             description="读取当前用户吸奶器设备和近期遥测状态的有限摘要。",
-            input_schema_ref="DevicesPumpStatusQuery",
             loading_mode="eager",
             read_or_write="read",
             side_effect_level="none",
@@ -228,11 +225,10 @@ def default_tool_registry() -> ToolContractRegistry:
         )
     )
     registry.register(
-        ToolContract(
+        _tool_contract(
             name="devices.guidance_assets.read",
             domain="devices",
             description="按元数据读取已打包设备指导素材的有限列表。",
-            input_schema_ref="DeviceGuidanceAssetsQuery",
             loading_mode="eager",
             read_or_write="read",
             side_effect_level="none",
@@ -245,7 +241,7 @@ def default_tool_registry() -> ToolContractRegistry:
         )
     )
     registry.register(
-        ToolContract(
+        _tool_contract(
             name="images.inspect",
             domain="images",
             description=(
@@ -253,7 +249,6 @@ def default_tool_registry() -> ToolContractRegistry:
                 "当用户询问上图、这张图或历史回复中的具体图片内容时，"
                 "自行选择对应 image_url 后调用；不要只根据文件名或图片 alt 文本猜测。"
             ),
-            input_schema_ref="ImageInspectInput",
             loading_mode="eager",
             read_or_write="read",
             side_effect_level="none",
@@ -266,11 +261,10 @@ def default_tool_registry() -> ToolContractRegistry:
         )
     )
     registry.register(
-        ToolContract(
+        _tool_contract(
             name="plans.milk_plan.propose",
             domain="plans",
             description="创建奶量计划预览并提出唯一的计划创建动作，等待用户确认；不要再调用独立预览工具。",
-            input_schema_ref="MilkPlanProposalCreate",
             read_or_write="write",
             side_effect_level="medium",
             blocking_policy="wait_for_confirmation",
@@ -282,11 +276,10 @@ def default_tool_registry() -> ToolContractRegistry:
         )
     )
     registry.register(
-        ToolContract(
+        _tool_contract(
             name="pregnancy.plan.propose",
             domain="plans",
             description="基于 runtime 提供的可信孕期资料和少量本轮偏好，创建孕期计划预览并提出唯一的计划创建动作，等待用户确认。",
-            input_schema_ref="PregnancyPlanProposalCreate",
             read_or_write="write",
             side_effect_level="medium",
             blocking_policy="wait_for_confirmation",
@@ -298,11 +291,10 @@ def default_tool_registry() -> ToolContractRegistry:
         )
     )
     registry.register(
-        ToolContract(
+        _tool_contract(
             name="plans.task_create.propose",
             domain="plans",
             description="提出计划任务创建动作，等待用户确认。",
-            input_schema_ref="PlanTaskCreateProposalCreate",
             read_or_write="write",
             side_effect_level="medium",
             blocking_policy="wait_for_confirmation",
@@ -314,11 +306,10 @@ def default_tool_registry() -> ToolContractRegistry:
         )
     )
     registry.register(
-        ToolContract(
+        _tool_contract(
             name="plans.task_complete.propose",
             domain="plans",
             description="提出计划任务完成状态更新动作，等待用户确认。",
-            input_schema_ref="PlanTaskCompleteProposalCreate",
             read_or_write="write",
             side_effect_level="medium",
             blocking_policy="wait_for_confirmation",
@@ -330,11 +321,10 @@ def default_tool_registry() -> ToolContractRegistry:
         )
     )
     registry.register(
-        ToolContract(
+        _tool_contract(
             name="plans.task_update.propose",
             domain="plans",
             description="提出计划任务日期、时间、标题、描述或载荷更新动作，等待用户确认。",
-            input_schema_ref="PlanTaskUpdateProposalCreate",
             read_or_write="write",
             side_effect_level="medium",
             blocking_policy="wait_for_confirmation",
@@ -346,11 +336,10 @@ def default_tool_registry() -> ToolContractRegistry:
         )
     )
     registry.register(
-        ToolContract(
+        _tool_contract(
             name="plans.task_delete.propose",
             domain="plans",
             description="提出计划任务删除动作，等待用户确认。",
-            input_schema_ref="PlanTaskDeleteProposalCreate",
             read_or_write="write",
             side_effect_level="medium",
             blocking_policy="wait_for_confirmation",
@@ -362,11 +351,10 @@ def default_tool_registry() -> ToolContractRegistry:
         )
     )
     registry.register(
-        ToolContract(
+        _tool_contract(
             name="plans.plan_delete.propose",
             domain="plans",
             description="提出计划删除动作，等待用户确认。",
-            input_schema_ref="PlanDeleteProposalCreate",
             read_or_write="write",
             side_effect_level="medium",
             blocking_policy="wait_for_confirmation",
@@ -378,11 +366,10 @@ def default_tool_registry() -> ToolContractRegistry:
         )
     )
     registry.register(
-        ToolContract(
+        _tool_contract(
             name="notifications.milk_reminder.propose",
             domain="notifications",
             description="提出奶量管理提醒通知动作，等待用户确认。",
-            input_schema_ref="MilkReminderProposalCreate",
             read_or_write="write",
             side_effect_level="medium",
             blocking_policy="wait_for_confirmation",
@@ -394,11 +381,10 @@ def default_tool_registry() -> ToolContractRegistry:
         )
     )
     registry.register(
-        ToolContract(
+        _tool_contract(
             name="records.feeding_record.propose",
             domain="records",
             description="提出喂养记录创建动作。",
-            input_schema_ref="FeedingRecordProposalCreate",
             read_or_write="write",
             side_effect_level="low",
             blocking_policy="enqueue_and_continue",
@@ -410,11 +396,10 @@ def default_tool_registry() -> ToolContractRegistry:
         )
     )
     registry.register(
-        ToolContract(
+        _tool_contract(
             name="records.pumping_record.propose",
             domain="records",
             description="提出吸奶记录创建动作。",
-            input_schema_ref="PumpingRecordProposalCreate",
             read_or_write="write",
             side_effect_level="low",
             blocking_policy="enqueue_and_continue",
@@ -426,11 +411,10 @@ def default_tool_registry() -> ToolContractRegistry:
         )
     )
     registry.register(
-        ToolContract(
+        _tool_contract(
             name="records.feeding_record_delete.propose",
             domain="records",
             description="提出删除喂养记录动作，等待用户确认。",
-            input_schema_ref="RecordDeleteProposalCreate",
             read_or_write="write",
             side_effect_level="medium",
             blocking_policy="wait_for_confirmation",
@@ -442,11 +426,10 @@ def default_tool_registry() -> ToolContractRegistry:
         )
     )
     registry.register(
-        ToolContract(
+        _tool_contract(
             name="records.pumping_record_delete.propose",
             domain="records",
             description="提出删除吸奶记录动作，等待用户确认。",
-            input_schema_ref="RecordDeleteProposalCreate",
             read_or_write="write",
             side_effect_level="medium",
             blocking_policy="wait_for_confirmation",
@@ -458,11 +441,10 @@ def default_tool_registry() -> ToolContractRegistry:
         )
     )
     registry.register(
-        ToolContract(
+        _tool_contract(
             name="records.growth_record.propose",
             domain="records",
             description="提出宝宝生长记录创建动作。",
-            input_schema_ref="GrowthRecordProposalCreate",
             read_or_write="write",
             side_effect_level="low",
             blocking_policy="enqueue_and_continue",
@@ -474,11 +456,10 @@ def default_tool_registry() -> ToolContractRegistry:
         )
     )
     registry.register(
-        ToolContract(
+        _tool_contract(
             name="records.growth_record_update.propose",
             domain="records",
             description="提出宝宝生长记录更新动作，等待用户确认。",
-            input_schema_ref="GrowthRecordUpdateProposalCreate",
             read_or_write="write",
             side_effect_level="medium",
             blocking_policy="wait_for_confirmation",
@@ -490,11 +471,10 @@ def default_tool_registry() -> ToolContractRegistry:
         )
     )
     registry.register(
-        ToolContract(
+        _tool_contract(
             name="records.growth_record_delete.propose",
             domain="records",
             description="提出宝宝生长记录删除动作，等待用户确认。",
-            input_schema_ref="RecordDeleteProposalCreate",
             read_or_write="write",
             side_effect_level="medium",
             blocking_policy="wait_for_confirmation",
@@ -506,11 +486,10 @@ def default_tool_registry() -> ToolContractRegistry:
         )
     )
     registry.register(
-        ToolContract(
+        _tool_contract(
             name="birth_plan_form_create",
             domain="birth_prep",
             description="创建分娩沟通单信息采集表单。模型只决定是否创建；预填信息、表单字段、顺序、分类、选项和排他选项过滤由 runtime 与工具稳定生成。无后端副作用。",
-            input_schema_ref="EmptyArtifactDecision",
             read_or_write="write",
             side_effect_level="low",
             blocking_policy="must_wait",
@@ -522,11 +501,10 @@ def default_tool_registry() -> ToolContractRegistry:
         )
     )
     registry.register(
-        ToolContract(
+        _tool_contract(
             name="labor_communication_card_create",
             domain="birth_prep",
             description="根据应用侧注入的 birth_plan_card_intake 表单提交数据生成前端可渲染的分娩沟通单。LLM 不需要生成 card_json，也不能用参数伪造表单提交；字段映射、强诉求降级、分区整理、医院问题和安全声明由工具稳定生成。无后端副作用。",
-            input_schema_ref="EmptyArtifactDecision",
             read_or_write="write",
             side_effect_level="low",
             blocking_policy="must_wait",
@@ -538,11 +516,10 @@ def default_tool_registry() -> ToolContractRegistry:
         )
     )
     registry.register(
-        ToolContract(
+        _tool_contract(
             name="hospital_bag_form_create",
             domain="hospital_bag",
             description="创建待产包信息采集表单。用户确认开始待产包整理后可直接调用；模型只决定是否创建，runtime 自动合并可信的 profile 和 active 孕期计划信息。表单字段、顺序、分类、选项和样式约束由工具稳定生成。无后端副作用。",
-            input_schema_ref="EmptyArtifactDecision",
             read_or_write="write",
             side_effect_level="low",
             blocking_policy="must_wait",
@@ -554,11 +531,10 @@ def default_tool_registry() -> ToolContractRegistry:
         )
     )
     registry.register(
-        ToolContract(
+        _tool_contract(
             name="hospital_bag_card_create",
             domain="hospital_bag",
             description="根据应用侧注入的 hospital_bag_intake 表单提交数据生成前端可渲染的待产包清单。LLM 不需要生成 card_json，也不能用参数伪造表单提交；分包、物品、数量、医院确认项、购物车入口和兼容字段由工具稳定生成。无后端副作用。调用本工具后的最终回复遵循工具返回结果，不要再复述已确认字段、设计思路、住院天数或医院确认逻辑。",
-            input_schema_ref="EmptyArtifactDecision",
             read_or_write="write",
             side_effect_level="low",
             blocking_policy="must_wait",
@@ -570,11 +546,10 @@ def default_tool_registry() -> ToolContractRegistry:
         )
     )
     registry.register(
-        ToolContract(
+        _tool_contract(
             name="hospital_bag_cart_update",
             domain="hospital_bag",
             description="根据用户自然语言修改当前待产包购物车。只在上下文已有当前待产包购物车，或当前对话明确处于待产包购物车页面/购物车调整流程时使用；不要用于首次生成待产包清单、独立吸奶器型号选型、设备故障排查或真实下单。用于用户说预算上限、太贵、便宜一点、删掉/加回某个商品、医院会提供、家里已有、调整数量、恢复默认购物车、把已推荐的 Momcozy 吸奶器型号同步到购物车等。用户给出明确金额时必须使用 action=optimize_budget 并设置 target_budget。工具只返回前端可应用的购物车更新，不真正下单。预算优化默认尽量保留吸奶器；只有用户明确要求删除吸奶器，或 allow_remove_pump=true 时才可移除。",
-            input_schema_ref="HospitalBagCartMutation",
             read_or_write="write",
             side_effect_level="low",
             blocking_policy="must_wait",
@@ -586,11 +561,10 @@ def default_tool_registry() -> ToolContractRegistry:
         )
     )
     registry.register(
-        ToolContract(
+        _tool_contract(
             name="hospital_bag_pump_recommend",
             domain="hospital_bag",
             description="购买前选型工具：根据用户预算、使用场景和偏好，从 Momcozy 官方吸奶器型号目录里推荐 1 款主推型号和 1-2 款备选。适用于用户问哪款吸奶器适合自己、型号差异、预算内怎么选、某型号多少钱或“Air1 呢”等点名型号追问，也适用于待产包场景中先确定吸奶器型号。不要用于已购设备故障、说明书/FAQ、配件问题或奶量是否正常。无购物车副作用；如果用户要同步购物车，拿返回的 cart_sync_suggestion 再调用 hospital_bag_cart_update。价格口径使用 Momcozy 官方对外价格，保留官方 USD 标价和活动价字段。Air 1 是高价轻薄款，不能描述为降低预算、省钱或更便宜选择。",
-            input_schema_ref="HospitalBagPumpRecommendation",
             read_or_write="write",
             side_effect_level="low",
             blocking_policy="must_wait",
@@ -602,11 +576,10 @@ def default_tool_registry() -> ToolContractRegistry:
         )
     )
     registry.register(
-        ToolContract(
+        _tool_contract(
             name="support.ticket.propose",
             domain="support",
             description="在用户确认意图明确后，创建售后工单动作提案。",
-            input_schema_ref="SupportTicketProposalCreate",
             read_or_write="write",
             side_effect_level="medium",
             blocking_policy="wait_for_confirmation",
@@ -618,11 +591,10 @@ def default_tool_registry() -> ToolContractRegistry:
         )
     )
     registry.register(
-        ToolContract(
+        _tool_contract(
             name="ibclc_consult_card_create",
             domain="support",
             description="创建 IBCLC 哺乳顾问咨询入口卡片。无外部预约副作用。",
-            input_schema_ref="IbclcConsultCardCreate",
             read_or_write="write",
             side_effect_level="low",
             blocking_policy="must_wait",

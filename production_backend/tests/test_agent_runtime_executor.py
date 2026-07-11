@@ -517,6 +517,13 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
         "records_pumping_record_delete_propose",
         "support_ticket_propose",
     )
+    contracts = {contract.name: contract for contract in default_tool_registry().list()}
+    assert backend.tool_descriptions_by_contract == {
+        contract_name: contract.description for contract_name, contract in contracts.items()
+    }
+    assert backend.tool_schemas_by_contract == {
+        contract_name: contract.input_schema for contract_name, contract in contracts.items()
+    }
     assert backend.tool_schemas["hospital_bag_card_create"]["additionalProperties"] is False
     assert backend.tool_schemas["hospital_bag_card_create"]["properties"] == {}
     assert backend.tool_schemas["hospital_bag_cart_update"]["required"] == ["action"]
@@ -2427,6 +2434,8 @@ class InvokingSdkBackend:
     def __init__(self) -> None:
         self.tool_names = ()
         self.tool_schemas = {}
+        self.tool_schemas_by_contract = {}
+        self.tool_descriptions_by_contract = {}
         self.tool_namespaces = {}
         self.tool_search_enabled = False
         self.tool_namespace_by_contract = {}
@@ -2435,6 +2444,8 @@ class InvokingSdkBackend:
     async def run(self, request: SdkNodeRequest) -> SdkNodeResult:
         self.tool_names = tuple(tool.sdk_name for tool in request.tools)
         self.tool_schemas = {tool.sdk_name: tool.params_json_schema for tool in request.tools}
+        self.tool_schemas_by_contract = {tool.contract_name: tool.params_json_schema for tool in request.tools}
+        self.tool_descriptions_by_contract = {tool.contract_name: tool.description for tool in request.tools}
         self.tool_namespaces = {
             namespace.name: {
                 "tool_names": list(namespace.tool_names),

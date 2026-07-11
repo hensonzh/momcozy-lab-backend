@@ -39,7 +39,6 @@ from .handlers import (
 )
 from .registry import ToolContractRegistry, default_tool_registry
 from .namespaces import ToolNamespace, ToolNamespaceRegistry, default_tool_namespace_registry
-from .schemas import tool_input_schema, tool_input_schema_refs
 
 __all__ = [
     "BusinessContextReadToolHandler",
@@ -87,6 +86,4 @@ __all__ = [
     "build_default_tool_handlers",
     "default_tool_namespace_registry",
     "default_tool_registry",
-    "tool_input_schema",
-    "tool_input_schema_refs",
 ]

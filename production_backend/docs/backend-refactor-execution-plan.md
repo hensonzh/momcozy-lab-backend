@@ -360,9 +360,9 @@ Completed:
 - Outbox worker process entry: environment-controlled worker script and optional
   compose `workers` profile process file cleanup and confirmed agent action
   jobs separately from API and agent run workers.
-- SDK tool input schemas: tool contracts now resolve `input_schema_ref` to
-  explicit JSON Schema before being exposed to the OpenAI Agents SDK, so models
-  no longer receive unconstrained `additionalProperties: true` tool parameters.
+- SDK tool input schemas: each tool contract directly owns its explicit JSON
+  Schema, and validation plus the OpenAI SDK projection consume that same
+  schema without an intermediate reference or payload rewrite.
 - Agent business context tool: `business.context.read` exposes bounded,
   owner-scoped read summaries for records, plans, diary, and devices through
   service-layer permissions instead of session-state snapshots.
