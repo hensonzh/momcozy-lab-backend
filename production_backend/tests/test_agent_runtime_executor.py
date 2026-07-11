@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import logging
 from datetime import datetime, timezone
@@ -319,6 +320,19 @@ def test_agent_runtime_executor_publishes_final_text_deltas_to_transient_stream(
         {"thread_id": thread_id, "run_id": run.id, "delta": "hel", "message_stream_id": str(result.assistant_message_id)},
         {"thread_id": thread_id, "run_id": run.id, "delta": "lo", "message_stream_id": str(result.assistant_message_id)},
     ]
+    assert transient_stream.delta_metadata == [
+        {
+            "segment_index": 0,
+            "prefix_utf8_bytes": 3,
+            "prefix_sha256": hashlib.sha256(b"hel").hexdigest(),
+        },
+        {
+            "segment_index": 1,
+            "prefix_utf8_bytes": 5,
+            "prefix_sha256": hashlib.sha256(b"hello").hexdigest(),
+        },
+    ]
+    assert result.stream_segment_count == 2
     assert transient_stream.progresses == [
         {
             "thread_id": thread_id,
@@ -2204,10 +2218,29 @@ class FakeBusinessFactsProjector:
 class FakeTransientStream:
     def __init__(self) -> None:
         self.deltas = []
+        self.delta_metadata = []
         self.progresses = []
 
-    async def publish_message_delta(self, *, thread_id, run_id, delta, message_stream_id="assistant", ttl_seconds=600):
+    async def publish_message_delta(
+        self,
+        *,
+        thread_id,
+        run_id,
+        delta,
+        message_stream_id="assistant",
+        segment_index=None,
+        prefix_utf8_bytes=None,
+        prefix_sha256="",
+        ttl_seconds=600,
+    ):
         self.deltas.append({"thread_id": thread_id, "run_id": run_id, "delta": delta, "message_stream_id": message_stream_id})
+        self.delta_metadata.append(
+            {
+                "segment_index": segment_index,
+                "prefix_utf8_bytes": prefix_utf8_bytes,
+                "prefix_sha256": prefix_sha256,
+            }
+        )
         return None
 
     async def publish_progress(

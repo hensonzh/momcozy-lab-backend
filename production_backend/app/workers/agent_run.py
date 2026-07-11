@@ -15,6 +15,10 @@ from ..modules.agent_runtime.run_lifecycle.controls import AgentRunControls
 from ..modules.agent_runtime.run_lifecycle.execution import AgentRunExecutionResult, AgentRunHandler
 from ..modules.agent_runtime.models import AgentEvent, AgentRun
 from ..modules.agent_runtime.repository import AgentRuntimeRepository
+from ..modules.agent_runtime.response_text import (
+    APPEND_ONLY_TEXT_STREAM_SCHEMA_VERSION,
+    agent_response_text_integrity,
+)
 
 
 TERMINAL_RUN_STATUSES = {"completed", "failed", "cancelled", "expired"}
@@ -196,10 +200,16 @@ class AgentRunWorker:
                     content=content,
                     status="completed",
                 )
+                text_integrity = agent_response_text_integrity(result.final_text)
                 payload: dict[str, Any] = {
                     "message_id": str(message.id),
+                    "message_stream_id": str(message.id),
                     "role": "assistant",
                     "text": result.final_text,
+                    "stream_schema_version": APPEND_ONLY_TEXT_STREAM_SCHEMA_VERSION,
+                    "segment_count": max(0, result.stream_segment_count),
+                    "content_utf8_bytes": text_integrity.utf8_bytes,
+                    "content_sha256": text_integrity.sha256,
                 }
                 live_payload = dict(payload)
                 if _has_exactly_three_quick_replies(result.quick_replies):

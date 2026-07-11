@@ -56,7 +56,7 @@ from ..memory.service import AgentMemoryService
 from ..models import AgentAction, AgentArtifact, AgentEvent, AgentMessage, AgentRun
 from ..payloads import DEFAULT_MAX_INLINE_PAYLOAD_BYTES, maybe_externalize_json_payload
 from ..repository import AgentRuntimeRepository
-from ..response_text import AppendOnlyAgentResponseProjector
+from ..response_text import AppendOnlyAgentResponseProjector, agent_response_text_integrity
 from ..sdk import (
     AgentModelRunner,
     SdkNodeRequest,
@@ -159,6 +159,7 @@ class AgentRuntimeExecutor:
         self._run_assistant_message_ids: dict[UUID, UUID] = {}
         self._run_text_projectors: dict[UUID, AppendOnlyAgentResponseProjector] = {}
         self._run_text_stream_emitted: dict[UUID, str] = {}
+        self._run_text_segment_counts: dict[UUID, int] = {}
         self._unified_load_service_skill = isinstance(self.tool_executor, ToolExecutor)
 
     async def __call__(self, run: AgentRun) -> AgentRunExecutionResult:
@@ -173,6 +174,7 @@ class AgentRuntimeExecutor:
         self._run_loaded_service_skill_ids[run.id] = set()
         self._run_text_projectors[run.id] = AppendOnlyAgentResponseProjector()
         self._run_text_stream_emitted[run.id] = ""
+        self._run_text_segment_counts[run.id] = 0
         try:
             turn_context = await self._load_turn_context(run=run)
             if turn_context.resident_loaded_service_skill is not None:
@@ -200,6 +202,7 @@ class AgentRuntimeExecutor:
             self._run_loaded_service_skill_ids.pop(run.id, None)
             self._run_text_projectors.pop(run.id, None)
             self._run_text_stream_emitted.pop(run.id, None)
+            self._run_text_segment_counts.pop(run.id, None)
 
     async def _load_turn_context(self, *, run: AgentRun) -> _AgentTurnContext:
         timings_ms: dict[str, float] = {}
@@ -431,6 +434,7 @@ class AgentRuntimeExecutor:
             final_text=final_text,
             assistant_message_id=self._run_assistant_message_ids.get(run.id),
             quick_replies=quick_replies,
+            stream_segment_count=self._run_text_segment_counts.get(run.id, 0),
         )
 
     def _action_decision_from_proposal(self, proposal: dict[str, Any]) -> AgentActionPolicyDecision:
@@ -558,21 +562,29 @@ class AgentRuntimeExecutor:
         if not delta:
             return
         message_stream_id = str(self._run_assistant_message_ids.get(run.id) or "assistant")
+        segment_index = self._run_text_segment_counts.get(run.id, 0)
+        prefix_integrity = agent_response_text_integrity(self._run_text_stream_emitted.get(run.id, ""))
         if event_publisher is not None:
             await event_publisher.publish_message_delta(
                 thread_id=run.thread_id,
                 run_id=run.id,
                 delta=delta,
                 message_stream_id=message_stream_id,
+                segment_index=segment_index,
+                prefix_utf8_bytes=prefix_integrity.utf8_bytes,
+                prefix_sha256=prefix_integrity.sha256,
             )
-            return
-        if transient_stream is not None:
+        elif transient_stream is not None:
             await transient_stream.publish_message_delta(
                 thread_id=run.thread_id,
                 run_id=run.id,
                 delta=delta,
                 message_stream_id=message_stream_id,
+                segment_index=segment_index,
+                prefix_utf8_bytes=prefix_integrity.utf8_bytes,
+                prefix_sha256=prefix_integrity.sha256,
             )
+        self._run_text_segment_counts[run.id] = segment_index + 1
 
     def _sdk_tools(
         self,

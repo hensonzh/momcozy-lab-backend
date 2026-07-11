@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 from uuid import uuid4
 
 from production_backend.app.core.errors import ApiError
@@ -14,7 +15,7 @@ def test_agent_run_worker_completes_run_with_assistant_message_events_and_lock()
 
     async def handler(run: AgentRun) -> AgentRunWorkerResult:
         assert run.status == "running"
-        return AgentRunWorkerResult(status="completed", final_text="Here is the summary.")
+        return AgentRunWorkerResult(status="completed", final_text="Here is the summary.", stream_segment_count=2)
 
     async def after_event_append() -> None:
         commits.append("commit")
@@ -35,8 +36,13 @@ def test_agent_run_worker_completes_run_with_assistant_message_events_and_lock()
     assert repository.messages[0].content == {"text": "Here is the summary."}
     assert repository.events[1].payload == {
         "message_id": str(repository.messages[0].id),
+        "message_stream_id": str(repository.messages[0].id),
         "role": "assistant",
         "text": "Here is the summary.",
+        "stream_schema_version": "append-only.v1",
+        "segment_count": 2,
+        "content_utf8_bytes": len("Here is the summary.".encode("utf-8")),
+        "content_sha256": hashlib.sha256(b"Here is the summary.").hexdigest(),
     }
     assert commits == ["commit", "commit", "commit"]
     assert controls.lock_released is True
@@ -74,8 +80,13 @@ def test_agent_run_worker_attaches_quick_replies_to_transient_completed_message_
     }
     assert repository.events[1].payload == {
         "message_id": str(assistant_message_id),
+        "message_stream_id": str(assistant_message_id),
         "role": "assistant",
         "text": "已经整理好了。",
+        "stream_schema_version": "append-only.v1",
+        "segment_count": 0,
+        "content_utf8_bytes": len("已经整理好了。".encode("utf-8")),
+        "content_sha256": hashlib.sha256("已经整理好了。".encode("utf-8")).hexdigest(),
     }
     assert repository.events[2].event_type == "run.completed"
     assert [event["event_type"] for event in transient_stream.events] == [
@@ -86,8 +97,13 @@ def test_agent_run_worker_attaches_quick_replies_to_transient_completed_message_
         "event_type": "message.completed",
         "payload": {
             "message_id": str(assistant_message_id),
+            "message_stream_id": str(assistant_message_id),
             "role": "assistant",
             "text": "已经整理好了。",
+            "stream_schema_version": "append-only.v1",
+            "segment_count": 0,
+            "content_utf8_bytes": len("已经整理好了。".encode("utf-8")),
+            "content_sha256": hashlib.sha256("已经整理好了。".encode("utf-8")).hexdigest(),
             "quick_replies": replies,
         },
         "dedupe_key": f"{repository.run.id}:message.completed:{assistant_message_id}",

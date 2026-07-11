@@ -45,6 +45,7 @@ def test_agent_runtime_graph_runner_preserves_final_message_metadata() -> None:
             final_text="Done.",
             assistant_message_id=assistant_message_id,
             quick_replies=quick_replies,
+            stream_segment_count=3,
         )
     )
 
@@ -59,6 +60,7 @@ def test_agent_runtime_graph_runner_preserves_final_message_metadata() -> None:
     assert result.status == "completed"
     assert result.assistant_message_id == assistant_message_id
     assert result.quick_replies == quick_replies
+    assert result.stream_segment_count == 3
 
 
 def test_agent_runtime_graph_runner_executes_confirmation_interrupt_path() -> None:

@@ -2,17 +2,30 @@ from __future__ import annotations
 
 import json
 import re
+from hashlib import sha256
 from dataclasses import dataclass, field
 from typing import Any
 
 
 THINK_TAG = "<think>"
+APPEND_ONLY_TEXT_STREAM_SCHEMA_VERSION = "append-only.v1"
 
 
 @dataclass(frozen=True)
 class SanitizedAgentResponseText:
     text: str
     quick_replies: list[dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class AgentResponseTextIntegrity:
+    utf8_bytes: int
+    sha256: str
+
+
+def agent_response_text_integrity(text: str) -> AgentResponseTextIntegrity:
+    encoded = str(text or "").encode("utf-8")
+    return AgentResponseTextIntegrity(utf8_bytes=len(encoded), sha256=sha256(encoded).hexdigest())
 
 
 class AppendOnlyAgentResponseProjector:
