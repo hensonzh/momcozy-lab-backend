@@ -11,7 +11,6 @@ JsonSchema = dict[str, Any]
 
 _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
     "LoadServiceSkillInput": {
-        "title": "LoadServiceSkillInput",
         "type": "object",
         "additionalProperties": False,
         "required": ["service_skill_id"],
@@ -30,13 +29,11 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
         },
     },
     "ProfileContextQuery": {
-        "title": "ProfileContextQuery",
         "type": "object",
         "additionalProperties": False,
         "properties": {},
     },
     "ProfileUpdate": {
-        "title": "ProfileUpdate",
         "type": "object",
         "additionalProperties": False,
         "properties": {
@@ -49,7 +46,6 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
         },
     },
     "MilkSummaryQuery": {
-        "title": "MilkSummaryQuery",
         "type": "object",
         "additionalProperties": False,
         "properties": {
@@ -70,7 +66,6 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
         },
     },
     "MilkStatusQuery": {
-        "title": "MilkStatusQuery",
         "type": "object",
         "additionalProperties": False,
         "properties": {
@@ -91,7 +86,6 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
         },
     },
     "MilkAnalysisReadQuery": {
-        "title": "MilkAnalysisReadQuery",
         "type": "object",
         "additionalProperties": False,
         "properties": {
@@ -112,7 +106,6 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
         },
     },
     "GrowthRecordsQuery": {
-        "title": "GrowthRecordsQuery",
         "type": "object",
         "additionalProperties": False,
         "properties": {
@@ -127,7 +120,6 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
         },
     },
     "PlansCurrentQuery": {
-        "title": "PlansCurrentQuery",
         "type": "object",
         "additionalProperties": False,
         "properties": {
@@ -141,7 +133,6 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
         },
     },
     "PlansCalendarQuery": {
-        "title": "PlansCalendarQuery",
         "type": "object",
         "additionalProperties": False,
         "properties": {
@@ -157,7 +148,6 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
         },
     },
     "DiaryEntryUpsertProposalCreate": {
-        "title": "DiaryEntryUpsertProposalCreate",
         "type": "object",
         "additionalProperties": False,
         "required": ["entry_date"],
@@ -179,7 +169,6 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
         },
     },
     "DevicesPumpStatusQuery": {
-        "title": "DevicesPumpStatusQuery",
         "type": "object",
         "additionalProperties": False,
         "properties": {
@@ -193,7 +182,6 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
         },
     },
     "DeviceGuidanceAssetsQuery": {
-        "title": "DeviceGuidanceAssetsQuery",
         "type": "object",
         "additionalProperties": False,
         "properties": {
@@ -232,7 +220,6 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
         },
     },
     "ImageInspectInput": {
-        "title": "ImageInspectInput",
         "type": "object",
         "additionalProperties": False,
         "required": ["image_url"],
@@ -252,7 +239,6 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
         },
     },
     "MilkPlanProposalCreate": {
-        "title": "MilkPlanProposalCreate",
         "type": "object",
         "additionalProperties": False,
         "required": ["title"],
@@ -267,7 +253,6 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
         },
     },
     "PregnancyPlanProposalCreate": {
-        "title": "PregnancyPlanProposalCreate",
         "type": "object",
         "additionalProperties": False,
         "properties": {
@@ -281,7 +266,6 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
         },
     },
     "PlanTaskCreateProposalCreate": {
-        "title": "PlanTaskCreateProposalCreate",
         "type": "object",
         "additionalProperties": False,
         "required": ["title"],
@@ -301,7 +285,6 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
         },
     },
     "PlanTaskCompleteProposalCreate": {
-        "title": "PlanTaskCompleteProposalCreate",
         "type": "object",
         "additionalProperties": False,
         "required": ["task_id"],
@@ -314,7 +297,6 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
         },
     },
     "PlanTaskUpdateProposalCreate": {
-        "title": "PlanTaskUpdateProposalCreate",
         "type": "object",
         "additionalProperties": False,
         "required": ["task_id"],
@@ -332,7 +314,6 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
         },
     },
     "PlanTaskDeleteProposalCreate": {
-        "title": "PlanTaskDeleteProposalCreate",
         "type": "object",
         "additionalProperties": False,
         "required": ["task_id"],
@@ -345,7 +326,6 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
         },
     },
     "PlanDeleteProposalCreate": {
-        "title": "PlanDeleteProposalCreate",
         "type": "object",
         "additionalProperties": False,
         "required": ["plan_id"],
@@ -358,7 +338,6 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
         },
     },
     "MilkReminderProposalCreate": {
-        "title": "MilkReminderProposalCreate",
         "type": "object",
         "additionalProperties": False,
         "required": ["title"],
@@ -376,7 +355,6 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
         },
     },
     "FeedingRecordProposalCreate": {
-        "title": "FeedingRecordProposalCreate",
         "type": "object",
         "additionalProperties": False,
         "required": ["feed_time", "feed_type"],
@@ -394,7 +372,6 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
         },
     },
     "PumpingRecordProposalCreate": {
-        "title": "PumpingRecordProposalCreate",
         "type": "object",
         "additionalProperties": False,
         "required": ["pump_start_time"],
@@ -412,7 +389,6 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
         },
     },
     "RecordDeleteProposalCreate": {
-        "title": "RecordDeleteProposalCreate",
         "type": "object",
         "additionalProperties": False,
         "required": ["record_id"],
@@ -425,7 +401,6 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
         },
     },
     "GrowthRecordProposalCreate": {
-        "title": "GrowthRecordProposalCreate",
         "type": "object",
         "additionalProperties": False,
         "required": ["measured_at"],
@@ -441,7 +416,6 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
         },
     },
     "GrowthRecordUpdateProposalCreate": {
-        "title": "GrowthRecordUpdateProposalCreate",
         "type": "object",
         "additionalProperties": False,
         "required": ["record_id"],
@@ -458,13 +432,11 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
         },
     },
     "EmptyArtifactDecision": {
-        "title": "EmptyArtifactDecision",
         "type": "object",
         "additionalProperties": False,
         "properties": {},
     },
     "HospitalBagCartMutation": {
-        "title": "HospitalBagCartMutation",
         "type": "object",
         "additionalProperties": False,
         "required": ["action"],
@@ -519,7 +491,6 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
         },
     },
     "HospitalBagPumpRecommendation": {
-        "title": "HospitalBagPumpRecommendation",
         "type": "object",
         "additionalProperties": False,
         "properties": {
@@ -539,7 +510,6 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
         },
     },
     "SupportTicketProposalCreate": {
-        "title": "SupportTicketProposalCreate",
         "type": "object",
         "additionalProperties": False,
         "required": ["issue_summary"],
@@ -574,7 +544,6 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
         },
     },
     "IbclcConsultCardCreate": {
-        "title": "IbclcConsultCardCreate",
         "type": "object",
         "additionalProperties": False,
         "required": ["reason"],

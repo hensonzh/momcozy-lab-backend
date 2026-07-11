@@ -41,6 +41,7 @@ from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.
     load_service_skill,
 )
 from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.tools import (
+    ToolContract,
     default_tool_namespace_registry,
     default_tool_registry,
     tool_input_schema,
@@ -456,6 +457,43 @@ def test_tool_contracts_are_exported_as_responses_namespaces() -> None:
     assert "ibclc_consult_card_create" in namespaces["health_consultation"].deferred_tool_contracts
 
 
+def test_tool_schema_contract_exposes_only_effective_fields() -> None:
+    registry = default_tool_registry()
+
+    assert "output_schema_ref" not in ToolContract.model_fields
+    for contract in registry.list():
+        assert "title" not in tool_input_schema(contract.input_schema_ref)
+
+
+def test_responses_tool_parameters_match_registered_input_schemas() -> None:
+    async def invoke(args_json: str) -> SdkToolInvocationResult:
+        return SdkToolInvocationResult(output_json=args_json)
+
+    registry = default_tool_registry()
+    tools = tuple(
+        SdkToolDefinition(
+            contract_name=contract.name,
+            sdk_name=sdk_tool_name(contract.name),
+            description=contract.description,
+            params_json_schema=tool_input_schema(contract.input_schema_ref),
+            invoke=invoke,
+        )
+        for contract in registry.list()
+    )
+    request = SdkNodeRequest(
+        run_id="run_1",
+        thread_id="thread_1",
+        actor_user_id="user_1",
+        instructions="Use tools.",
+        model_input=[],
+        tools=tools,
+    )
+
+    payload_by_name = {item["name"]: item for item in responses_tools_payload(request)}
+    for contract in registry.list():
+        assert payload_by_name[sdk_tool_name(contract.name)]["parameters"] == tool_input_schema(contract.input_schema_ref)
+
+
 def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> None:
     registry = default_tool_registry()
     profile_schema = tool_input_schema(registry.get("profile.read").input_schema_ref)
@@ -493,7 +531,6 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
     ibclc_schema = tool_input_schema(registry.get("ibclc_consult_card_create").input_schema_ref)
 
     assert profile_schema == {
-        "title": "ProfileContextQuery",
         "type": "object",
         "additionalProperties": False,
         "properties": {},

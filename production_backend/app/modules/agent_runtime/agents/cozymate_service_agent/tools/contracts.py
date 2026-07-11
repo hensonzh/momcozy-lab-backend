@@ -12,7 +12,6 @@ class ToolContract(BaseModel):
     domain: str = Field(min_length=1, max_length=120)
     description: str = ""
     input_schema_ref: str
-    output_schema_ref: str
     loading_mode: Literal["eager", "deferred"] = "deferred"
     read_or_write: Literal["read", "write"]
     side_effect_level: Literal["none", "low", "medium", "high"]
