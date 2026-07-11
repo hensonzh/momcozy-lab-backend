@@ -615,12 +615,34 @@ def test_device_guidance_assets_read_tool_handler_returns_bounded_metadata() -> 
                 "domain": "device_guidance",
                 "content_type": "application/pdf",
                 "size_bytes": 1200,
+                "kind": "pdf",
+                "url": "/v1/assets/asset-guide?kind=pdf",
+                "markdown_link": "[Air1 unboxing pump guide](/v1/assets/asset-guide?kind=pdf)",
             }
         ],
         "count": 1,
         "available_count": 1,
         "query_context": {"model": "Air1", "topic": "setup", "query": "", "measured_nipple_mm": None},
     }
+
+
+def test_device_guidance_assets_read_tool_handler_returns_copyable_image_markdown() -> None:
+    handler = DeviceGuidanceAssetsReadToolHandler(asset_service=FakeAssetService())
+
+    result = asyncio.run(handler(_context(args={"content_type": "image/png"})))
+
+    assert result["assets"] == [
+        {
+            "id": "asset-image",
+            "label": "Air1 components overview",
+            "domain": "device_guidance",
+            "content_type": "image/png",
+            "size_bytes": 800,
+            "kind": "image",
+            "url": "/v1/assets/asset-image?kind=image",
+            "markdown_image": "![Air1 components overview](/v1/assets/asset-image?kind=image)",
+        }
+    ]
 
 
 def test_file_vision_summary_read_tool_handler_returns_owner_scoped_safe_summary() -> None:
@@ -1478,6 +1500,14 @@ class FakeAssetService:
                 domain="device_guidance",
                 content_type="video/mp4",
                 size_bytes=2400,
+                path=None,
+            ),
+            ProductAsset(
+                id="asset-image",
+                label="Air1 components overview",
+                domain="device_guidance",
+                content_type="image/png",
+                size_bytes=800,
                 path=None,
             ),
         ][:limit]

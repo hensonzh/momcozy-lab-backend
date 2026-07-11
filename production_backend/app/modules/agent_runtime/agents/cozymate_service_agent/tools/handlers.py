@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from datetime import date, datetime, timezone
 from typing import Any
+from urllib.parse import quote
 from uuid import UUID
 
 from production_backend.app.core.errors import ApiError
@@ -1953,13 +1954,36 @@ def _device_payload(device: PumpDevice) -> dict[str, Any]:
 
 
 def _asset_payload(asset: ProductAsset) -> dict[str, Any]:
-    return {
+    kind = _asset_kind(asset.content_type)
+    url = f"/v1/assets/{quote(asset.id, safe='')}?kind={kind}"
+    label = _markdown_label(asset.label)
+    payload = {
         "id": asset.id,
         "label": asset.label,
         "domain": asset.domain,
         "content_type": asset.content_type,
         "size_bytes": asset.size_bytes,
+        "kind": kind,
+        "url": url,
     }
+    if kind == "image":
+        payload["markdown_image"] = f"![{label}]({url})"
+    else:
+        payload["markdown_link"] = f"[{label}]({url})"
+    return payload
+
+
+def _asset_kind(content_type: str) -> str:
+    normalized = content_type.strip().lower()
+    if normalized.startswith("image/"):
+        return "image"
+    if normalized.startswith("video/"):
+        return "video"
+    return "pdf"
+
+
+def _markdown_label(label: str) -> str:
+    return label.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
 
 
 def _filter_guidance_assets(*, assets: list[ProductAsset], model: str, topic: str, query: str) -> list[ProductAsset]:
