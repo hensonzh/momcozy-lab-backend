@@ -423,6 +423,58 @@ def test_agent_runtime_executor_does_not_overwrite_streamed_text_with_conflictin
     assert [item["delta"] for item in transient_stream.deltas] == ["already shown"]
 
 
+def test_agent_runtime_executor_never_streams_partial_tool_json_after_visible_text() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="Load a skill", sequence=1)
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    transient_stream = FakeTransientStream()
+    backend = ScriptedSdkBackend(
+        [
+            scripted_sdk_response(
+                final_text="我先帮你看一下。",
+                text_deltas=(
+                    '我先帮你看一下。\n{"service_skill_id":',
+                    '"milk-management","status":"service_skill_loaded"}',
+                ),
+            )
+        ]
+    )
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            transient_stream=transient_stream,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+        ).execute(run=run)
+    )
+
+    assert result.final_text == "我先帮你看一下。"
+    assert [item["delta"] for item in transient_stream.deltas] == ["我先帮你看一下。"]
+
+
+def test_agent_runtime_executor_does_not_append_unclosed_provider_json_tail() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="Keep the safe prefix", sequence=1)
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    transient_stream = FakeTransientStream()
+    backend = ScriptedSdkBackend(
+        [scripted_sdk_response(final_text='Safe answer.\n{"service_skill_id":', text_deltas=("Safe answer.",))]
+    )
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            transient_stream=transient_stream,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+        ).execute(run=run)
+    )
+
+    assert result.final_text == "Safe answer."
+    assert [item["delta"] for item in transient_stream.deltas] == ["Safe answer."]
+
+
 def test_agent_runtime_executor_keeps_progress_transient_when_event_sink_is_configured() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)

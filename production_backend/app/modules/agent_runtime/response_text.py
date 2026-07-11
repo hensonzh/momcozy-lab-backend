@@ -15,6 +15,34 @@ class SanitizedAgentResponseText:
     quick_replies: list[dict[str, Any]] = field(default_factory=list)
 
 
+class AppendOnlyAgentResponseProjector:
+    def __init__(self) -> None:
+        self._raw_text = ""
+        self.text = ""
+        self._finalized = False
+
+    def push(self, delta: str) -> str:
+        if self._finalized:
+            raise RuntimeError("Cannot append text after the response projector is finalized.")
+        self._raw_text += str(delta or "")
+        stable_end = _stable_response_prefix_end(self._raw_text)
+        return self._commit(sanitize_agent_response_text(self._raw_text[:stable_end]).text)
+
+    def finalize(self) -> str:
+        if self._finalized:
+            return ""
+        self._finalized = True
+        stable_end = _stable_response_prefix_end(self._raw_text)
+        return self._commit(sanitize_agent_response_text(self._raw_text[:stable_end]).text)
+
+    def _commit(self, candidate: str) -> str:
+        if not candidate.startswith(self.text):
+            return ""
+        delta = candidate[len(self.text) :]
+        self.text = candidate
+        return delta
+
+
 def sanitize_agent_response_text(text: str) -> SanitizedAgentResponseText:
     normalized = _strip_think_text(str(text or ""))
     if _looks_like_partial_structured_json(normalized):
@@ -23,6 +51,83 @@ def sanitize_agent_response_text(text: str) -> SanitizedAgentResponseText:
     without_chunks = _replace_structured_json_chunks(without_fences)
     cleaned = _clean_response_text(without_chunks)
     return SanitizedAgentResponseText(text=cleaned)
+
+
+def _stable_response_prefix_end(text: str) -> int:
+    unstable_starts = [
+        start
+        for start in (
+            _unclosed_json_start(text),
+            _unclosed_fence_start(text),
+            _possible_quick_reply_header_start(text),
+            _trailing_whitespace_start(text),
+        )
+        if start is not None
+    ]
+    return min(unstable_starts, default=len(text))
+
+
+def _unclosed_json_start(text: str) -> int | None:
+    stack: list[tuple[str, int]] = []
+    in_string = False
+    escaped = False
+    for index, char in enumerate(text):
+        if not stack:
+            if char in "{[":
+                stack.append(("}" if char == "{" else "]", index))
+            continue
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char in "{[":
+            stack.append(("}" if char == "{" else "]", index))
+        elif char == stack[-1][0]:
+            stack.pop()
+    return stack[0][1] if stack else None
+
+
+def _unclosed_fence_start(text: str) -> int | None:
+    search_from = 0
+    while True:
+        start = text.find("```", search_from)
+        if start < 0:
+            break
+        end = text.find("```", start + 3)
+        if end < 0:
+            return start
+        search_from = end + 3
+    for marker_size in (2, 1):
+        marker = "`" * marker_size
+        if text.endswith(marker):
+            return len(text) - marker_size
+    return None
+
+
+def _possible_quick_reply_header_start(text: str) -> int | None:
+    line_start = max(text.rfind("\n"), text.rfind("\r")) + 1
+    line = text[line_start:].lstrip()
+    if not line:
+        return None
+    normalized = line.lower()
+    headers = ("快捷回复", "推荐回复", "quick replies", "quick_replies", "replies")
+    for header in headers:
+        if header.startswith(normalized):
+            return line_start
+        if normalized.startswith(header) and normalized[len(header) :].strip(" \t:：") == "":
+            return line_start
+    return None
+
+
+def _trailing_whitespace_start(text: str) -> int | None:
+    stripped = text.rstrip()
+    return len(stripped) if len(stripped) < len(text) else None
 
 
 def _strip_think_text(text: str) -> str:

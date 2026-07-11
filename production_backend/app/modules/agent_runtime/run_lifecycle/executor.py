@@ -56,7 +56,7 @@ from ..memory.service import AgentMemoryService
 from ..models import AgentAction, AgentArtifact, AgentEvent, AgentMessage, AgentRun
 from ..payloads import DEFAULT_MAX_INLINE_PAYLOAD_BYTES, maybe_externalize_json_payload
 from ..repository import AgentRuntimeRepository
-from ..response_text import sanitize_agent_response_text
+from ..response_text import AppendOnlyAgentResponseProjector
 from ..sdk import (
     AgentModelRunner,
     SdkNodeRequest,
@@ -157,7 +157,7 @@ class AgentRuntimeExecutor:
         self.clock = clock or _utcnow
         self._run_loaded_service_skill_ids: dict[UUID, set[str]] = {}
         self._run_assistant_message_ids: dict[UUID, UUID] = {}
-        self._run_text_stream_buffers: dict[UUID, str] = {}
+        self._run_text_projectors: dict[UUID, AppendOnlyAgentResponseProjector] = {}
         self._run_text_stream_emitted: dict[UUID, str] = {}
         self._unified_load_service_skill = isinstance(self.tool_executor, ToolExecutor)
 
@@ -171,7 +171,7 @@ class AgentRuntimeExecutor:
             raise ApiError(code="runtime_graph_mismatch", message="Run runtime pattern does not match graph version.", status=409)
         self._run_assistant_message_ids[run.id] = uuid4()
         self._run_loaded_service_skill_ids[run.id] = set()
-        self._run_text_stream_buffers[run.id] = ""
+        self._run_text_projectors[run.id] = AppendOnlyAgentResponseProjector()
         self._run_text_stream_emitted[run.id] = ""
         try:
             turn_context = await self._load_turn_context(run=run)
@@ -198,7 +198,7 @@ class AgentRuntimeExecutor:
         finally:
             self._run_assistant_message_ids.pop(run.id, None)
             self._run_loaded_service_skill_ids.pop(run.id, None)
-            self._run_text_stream_buffers.pop(run.id, None)
+            self._run_text_projectors.pop(run.id, None)
             self._run_text_stream_emitted.pop(run.id, None)
 
     async def _load_turn_context(self, *, run: AgentRun) -> _AgentTurnContext:
@@ -381,10 +381,13 @@ class AgentRuntimeExecutor:
             self._log_executor_timing(run=run, status="waiting_for_confirmation", timings_ms=pending_timings_ms)
             return AgentRunExecutionResult(status="waiting_for_confirmation", pending_action_id=pending_action.id)
         raw_provider_final = str(result.final_text or "")
-        sanitized_response = sanitize_agent_response_text(raw_provider_final)
-        provider_final_text = sanitized_response.text.strip()
+        provider_projector = AppendOnlyAgentResponseProjector()
+        provider_projector.push(raw_provider_final)
+        provider_projector.finalize()
+        provider_final_text = provider_projector.text
         if not provider_final_text and raw_provider_final.strip():
             provider_final_text = "我已经整理好了。"
+        await self._finalize_text_projector(run=run)
         final_text = await self._canonical_final_text(run=run, provider_final_text=provider_final_text)
         if not final_text:
             raise ApiError(code="empty_agent_response", message="Agent runtime returned an empty response.", status=502)
@@ -491,17 +494,11 @@ class AgentRuntimeExecutor:
             return None
 
         async def publish(delta: str) -> None:
-            raw_text = f"{self._run_text_stream_buffers.get(run.id, '')}{delta or ''}"
-            self._run_text_stream_buffers[run.id] = raw_text
-            sanitized_text = sanitize_agent_response_text(raw_text).text
-            emitted_text = self._run_text_stream_emitted.get(run.id, "")
-            if sanitized_text.startswith(emitted_text):
-                sanitized_delta = sanitized_text[len(emitted_text) :]
-            else:
-                sanitized_delta = sanitized_text
+            projector = self._run_text_projectors[run.id]
+            sanitized_delta = projector.push(delta)
             if not sanitized_delta:
                 return
-            self._run_text_stream_emitted[run.id] = sanitized_text
+            self._run_text_stream_emitted[run.id] = projector.text
             await self._publish_text_delta(
                 run=run,
                 delta=sanitized_delta,
@@ -510,6 +507,19 @@ class AgentRuntimeExecutor:
             )
 
         return publish
+
+    async def _finalize_text_projector(self, *, run: AgentRun) -> None:
+        projector = self._run_text_projectors[run.id]
+        final_delta = projector.finalize()
+        if not final_delta:
+            return
+        self._run_text_stream_emitted[run.id] = projector.text
+        await self._publish_text_delta(
+            run=run,
+            delta=final_delta,
+            event_publisher=self.event_sink,
+            transient_stream=self.transient_stream,
+        )
 
     async def _canonical_final_text(self, *, run: AgentRun, provider_final_text: str) -> str:
         streamed_text = self._run_text_stream_emitted.get(run.id, "")

@@ -12,7 +12,7 @@ from typing import Any, Protocol
 
 from ....core.metrics import RequestMetrics
 from ....core.errors import ApiError
-from ..response_text import sanitize_agent_response_text
+from ..response_text import AppendOnlyAgentResponseProjector, sanitize_agent_response_text
 
 
 SdkToolInvoker = Callable[[str], Awaitable[str]]
@@ -624,7 +624,7 @@ async def _iterate_response_stream(
 ) -> tuple[Any | None, str, bool]:
     response: Any | None = None
     raw_text = ""
-    emitted_text = ""
+    projector = AppendOnlyAgentResponseProjector()
     emitted_stream = False
     stream_events = stream
     if not hasattr(stream_events, "__aiter__"):
@@ -636,18 +636,18 @@ async def _iterate_response_stream(
         if delta:
             raw_text += delta
             if on_text_delta is not None:
-                sanitized_text = _sanitize_model_text(raw_text)
-                if sanitized_text.startswith(emitted_text):
-                    sanitized_delta = sanitized_text[len(emitted_text) :]
-                else:
-                    sanitized_delta = sanitized_text
+                sanitized_delta = projector.push(delta)
                 if sanitized_delta:
                     await on_text_delta(sanitized_delta)
-                    emitted_text = sanitized_text
                     emitted_stream = True
         event_response = _response_from_response_stream_event(event)
         if event_response is not None:
             response = event_response
+    if on_text_delta is not None:
+        final_delta = projector.finalize()
+        if final_delta:
+            await on_text_delta(final_delta)
+            emitted_stream = True
     return response, raw_text, emitted_stream
 
 
@@ -846,21 +846,20 @@ async def _run_streamed(
 ) -> SdkNodeResult:
     streamed = runner_cls.run_streamed(agent, model_input, **run_kwargs)
     raw_text = ""
-    emitted_text = ""
+    projector = AppendOnlyAgentResponseProjector()
     emitted_stream = False
     async for event in streamed.stream_events():
         delta = _text_delta_from_stream_event(event)
         if delta:
             raw_text += delta
-            sanitized_text = _sanitize_model_text(raw_text)
-            if sanitized_text.startswith(emitted_text):
-                sanitized_delta = sanitized_text[len(emitted_text) :]
-            else:
-                sanitized_delta = sanitized_text
+            sanitized_delta = projector.push(delta)
             if sanitized_delta:
                 await on_text_delta(sanitized_delta)
-                emitted_text = sanitized_text
                 emitted_stream = True
+    final_delta = projector.finalize()
+    if final_delta:
+        await on_text_delta(final_delta)
+        emitted_stream = True
     final_output = getattr(streamed, "final_output", "")
     sanitized_text = _sanitize_model_text(str(final_output or "") or raw_text)
     if not emitted_stream:
