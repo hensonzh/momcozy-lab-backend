@@ -19,6 +19,7 @@ from production_backend.app.modules.diary.agent_actions import (
     PREGNANCY_DIARY_ENTRY_DELETE_ACTION,
 )
 from production_backend.app.modules.diary.models import PregnancyDiaryEntry
+from production_backend.app.modules.diary.events import PREGNANCY_DIARY_CHANGED_EVENT, pregnancy_diary_changed_payload
 from production_backend.app.modules.diary.service import DiaryService
 from production_backend.app.modules.hospital_bag import HOSPITAL_BAG_CART_UPDATE_ACTION
 from production_backend.app.modules.notifications.agent_actions import MILK_REMINDER_CREATE_ACTION
@@ -516,12 +517,13 @@ class PregnancyDiaryEntryCreateToolHandler:
             return {
                 "status": "entry_already_exists",
                 "entry_date": entry_date.isoformat(),
-                "entry": _diary_payload(existing, include_content=True),
+                "entry": _diary_reference_payload(existing),
             }
         return {
             "status": "entry_created",
             "entry_date": entry_date.isoformat(),
-            "entry": _diary_payload(entry, include_content=True),
+            "entry": _diary_reference_payload(entry),
+            DEFERRED_AGENT_EVENTS_KEY: [_pregnancy_diary_changed_event(entry=entry, operation="created")],
         }
 
 
@@ -533,32 +535,31 @@ class PregnancyDiaryEntryUpdateToolHandler:
         entry_date = _required_diary_entry_date(context.args)
         values = _diary_entry_values(context.args)
         _require_diary_entry_values(values)
-        if "content" in values and _text(context.args, "content_mode") != "replace":
-            try:
-                existing = await self.diary_service.get_entry(
-                    owner_user_id=context.actor.user_id,
-                    entry_date=entry_date,
-                )
-            except ApiError as exc:
-                if exc.code != "not_found":
-                    raise
-                return _diary_entry_not_found(entry_date)
-            values["content"] = _append_diary_content(existing.content, str(values["content"]))
+        content_mode = _text(context.args, "content_mode") or "append"
         try:
-            entry = await self.diary_service.update_entry(
+            mutation = await self.diary_service.update_entry_with_status(
                 owner_user_id=context.actor.user_id,
                 entry_date=entry_date,
                 values=values,
                 request_id=_diary_tool_request_id(context),
+                content_mode=content_mode,
             )
         except ApiError as exc:
             if exc.code != "not_found":
                 raise
             return _diary_entry_not_found(entry_date)
+        entry = mutation.entry
+        if not mutation.changed:
+            return {
+                "status": "entry_unchanged",
+                "entry_date": entry_date.isoformat(),
+                "entry": _diary_reference_payload(entry),
+            }
         return {
             "status": "entry_updated",
             "entry_date": entry_date.isoformat(),
-            "entry": _diary_payload(entry, include_content=True),
+            "entry": _diary_reference_payload(entry),
+            DEFERRED_AGENT_EVENTS_KEY: [_pregnancy_diary_changed_event(entry=entry, operation="updated")],
         }
 
 
@@ -1664,14 +1665,11 @@ def _diary_tool_request_id(context: ToolHandlerContext) -> str:
     return f"agent-tool:{context.run_id}:{context.call_id}"
 
 
-def _append_diary_content(existing: str, addition: str) -> str:
-    current = existing.rstrip()
-    added = addition.strip()
-    if not current:
-        return added
-    if not added or current == added or current.endswith(f"\n{added}"):
-        return current
-    return f"{current}\n{added}"
+def _pregnancy_diary_changed_event(*, entry: PregnancyDiaryEntry, operation: str) -> dict[str, Any]:
+    return {
+        "event_type": PREGNANCY_DIARY_CHANGED_EVENT,
+        "payload": pregnancy_diary_changed_payload(entry=entry, operation=operation, source="agent"),
+    }
 
 
 def _diary_entry_not_found(entry_date: date) -> dict[str, Any]:
@@ -2055,6 +2053,14 @@ def _diary_payload(entry: PregnancyDiaryEntry, *, include_content: bool) -> dict
     else:
         payload["content_summary"] = _truncate(entry.content, max_length=500)
     return payload
+
+
+def _diary_reference_payload(entry: PregnancyDiaryEntry) -> dict[str, Any]:
+    return {
+        "id": str(entry.id),
+        "entry_date": _date_iso(entry.entry_date),
+        "updated_at": _datetime_iso(entry.updated_at),
+    }
 
 
 def _device_payload(device: PumpDevice) -> dict[str, Any]:

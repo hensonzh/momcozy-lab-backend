@@ -779,8 +779,10 @@ class AgentRuntimeExecutor:
         else:
             result = await self.tool_executor.execute(**execute_kwargs)
         await self._append_progress(run=run, phase="model_reasoning_after_tool", label="我接着处理下一步")
+        model_output = getattr(result, "model_output", result.safe_output)
         return SdkToolInvocationResult(
-            output_json=json.dumps(result.safe_output, sort_keys=True),
+            output_json=json.dumps(model_output, sort_keys=True),
+            safe_output_json=json.dumps(result.safe_output, sort_keys=True),
             model_context=result.model_context,
         )
 

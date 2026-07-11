@@ -110,11 +110,19 @@ def _trace_from_payload(payload: dict[str, Any]) -> AgentEvalTrace:
         actions=_list_of_dicts(payload.get("actions")),
         safety_decision=str(payload.get("safety_decision") or ""),
         final_text=str(payload.get("final_text") or ""),
+        service_skill_id=str(payload.get("service_skill_id") or ""),
     )
 
 
 def _synthetic_expected_trace(case: dict[str, Any]) -> AgentEvalTrace:
-    expected_tools = [{"tool_name": _contract(tool_call), "status": "completed"} for tool_call in case.get("expected_tool_calls", [])]
+    expected_tools = [
+        {
+            "tool_name": _contract(tool_call),
+            "status": "completed",
+            "safe_args": dict(tool_call.get("args_subset") or {}) if isinstance(tool_call, dict) else {},
+        }
+        for tool_call in case.get("expected_tool_calls", [])
+    ]
     raw_behavior = case.get("expected_behavior")
     behavior = raw_behavior if isinstance(raw_behavior, dict) else {}
     requires_confirmation = bool(behavior.get("requires_confirmation_before_write"))
@@ -125,7 +133,8 @@ def _synthetic_expected_trace(case: dict[str, Any]) -> AgentEvalTrace:
         events=events,
         actions=actions,
         safety_decision=str(case.get("expected_safety_decision") or ""),
-        final_text="",
+        final_text="Synthetic final response" if behavior.get("requires_final_response_after_tools") else "",
+        service_skill_id=str(behavior.get("service_skill_id") or ""),
     )
 
 

@@ -37,11 +37,67 @@ class AgentEventPublisher:
         payload: dict[str, Any],
     ) -> AgentEvent:
         event = await self.repository.append_event(thread_id=thread_id, run_id=run_id, event_type=event_type, payload=payload)
-        if self.controls is not None:
-            await self.controls.set_stream_cursor(run_id=run_id, sequence=event.sequence)
+        await self._finalize_durable_append(run_id=run_id, sequence=event.sequence)
+        return event
+
+    async def append_events(
+        self,
+        *,
+        thread_id: UUID,
+        run_id: UUID,
+        events: tuple[tuple[str, dict[str, Any]], ...],
+    ) -> tuple[AgentEvent, ...]:
+        """Append a related event group and cross the commit boundary once."""
+        appended = await self.stage_events(thread_id=thread_id, run_id=run_id, events=events)
+        await self.finalize_staged_events(run_id=run_id, events=appended)
+        return appended
+
+    async def stage_events(
+        self,
+        *,
+        thread_id: UUID,
+        run_id: UUID,
+        events: tuple[tuple[str, dict[str, Any]], ...],
+    ) -> tuple[AgentEvent, ...]:
+        """Flush related events without crossing the caller's transaction boundary."""
+        appended: list[AgentEvent] = []
+        for event_type, payload in events:
+            appended.append(
+                await self.repository.append_event(
+                    thread_id=thread_id,
+                    run_id=run_id,
+                    event_type=event_type,
+                    payload=payload,
+                )
+            )
+        return tuple(appended)
+
+    async def finalize_staged_events(self, *, run_id: UUID, events: tuple[AgentEvent, ...]) -> None:
+        if events:
+            await self._finalize_durable_append(run_id=run_id, sequence=events[-1].sequence)
+
+    async def _finalize_durable_append(self, *, run_id: UUID, sequence: int) -> None:
         if self.after_append is not None:
             await self.after_append()
-        return event
+            await self._set_stream_cursor(run_id=run_id, sequence=sequence)
+            return
+        add_after_commit_callback = getattr(self.repository, "add_after_commit_callback", None)
+        if callable(add_after_commit_callback):
+
+            async def set_cursor_after_commit() -> None:
+                await self._set_stream_cursor(run_id=run_id, sequence=sequence)
+
+            add_after_commit_callback(set_cursor_after_commit)
+            return
+        await self._set_stream_cursor(run_id=run_id, sequence=sequence)
+
+    async def _set_stream_cursor(self, *, run_id: UUID, sequence: int) -> None:
+        if self.controls is None:
+            return
+        try:
+            await self.controls.set_stream_cursor(run_id=run_id, sequence=sequence)
+        except Exception:
+            LOGGER.warning("Failed to update stream cursor after durable event append.", exc_info=True)
 
     async def publish_application_event(
         self,
@@ -136,5 +192,14 @@ class AgentEventPublisher:
             LOGGER.warning("Failed to publish live message.delta event.", exc_info=True)
 
     async def clear_active_run(self, *, thread_id: UUID, run_id: UUID) -> None:
-        if self.controls is not None:
-            await self.controls.clear_active_run(thread_id=thread_id, run_id=run_id)
+        if self.controls is None:
+            return
+        add_after_commit_callback = getattr(self.repository, "add_after_commit_callback", None)
+        if self.after_append is None and callable(add_after_commit_callback):
+
+            async def clear_after_commit() -> None:
+                await self.controls.clear_active_run(thread_id=thread_id, run_id=run_id)
+
+            add_after_commit_callback(clear_after_commit)
+            return
+        await self.controls.clear_active_run(thread_id=thread_id, run_id=run_id)

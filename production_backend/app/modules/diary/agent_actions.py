@@ -5,12 +5,14 @@ from typing import Any
 
 from ...core.errors import ApiError
 from ...workers.errors import PermanentJobError
-from ..agent_runtime.actions.outbox import AgentActionApplyResult
+from ..agent_runtime.actions.outbox import AgentActionApplyResult, AgentApplicationEvent
 from ..agent_runtime.models import AgentAction
 from .service import DiaryService
+from .events import PREGNANCY_DIARY_CHANGED_EVENT, pregnancy_diary_changed_payload
 
 
 PREGNANCY_DIARY_ENTRY_DELETE_ACTION = "pregnancy_diary.entry.delete"
+
 
 class PregnancyDiaryEntryDeleteActionHandler:
     def __init__(self, *, service: DiaryService) -> None:
@@ -41,6 +43,12 @@ def _action_result(*, action: AgentAction, entry: Any) -> AgentActionApplyResult
             "agent_action_id": str(action.id),
             "agent_run_id": str(action.run_id),
         },
+        application_events=(
+            AgentApplicationEvent(
+                event_type=PREGNANCY_DIARY_CHANGED_EVENT,
+                payload=pregnancy_diary_changed_payload(entry=entry, operation="deleted", source="agent_action"),
+            ),
+        ),
     )
 
 

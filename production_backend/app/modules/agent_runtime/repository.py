@@ -33,6 +33,12 @@ class AgentRuntimeRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
+    def begin_nested(self):
+        return self.session.begin_nested()
+
+    async def rollback(self) -> None:
+        await self.session.rollback()
+
     def add_after_commit_callback(self, callback: Callable[[], Awaitable[None]]) -> None:
         add_after_commit_callback(self.session, callback)
 
@@ -172,6 +178,10 @@ class AgentRuntimeRepository:
     async def get_run(self, *, run_id: UUID) -> AgentRun | None:
         statement = select(AgentRun).where(AgentRun.id == run_id).execution_options(populate_existing=True)
         return cast(AgentRun | None, await self.session.scalar(statement))
+
+    async def get_tool_call(self, *, tool_call_id: UUID) -> AgentToolCall | None:
+        statement = select(AgentToolCall).where(AgentToolCall.id == tool_call_id).execution_options(populate_existing=True)
+        return cast(AgentToolCall | None, await self.session.scalar(statement))
 
     async def get_active_run_for_thread(self, *, thread_id: UUID, owner_user_id: UUID) -> AgentRun | None:
         statement = (
@@ -381,7 +391,7 @@ class AgentRuntimeRepository:
         return cast(AgentAction | None, await self.session.scalar(statement))
 
     async def get_action(self, *, action_id: UUID) -> AgentAction | None:
-        statement = select(AgentAction).where(AgentAction.id == action_id)
+        statement = select(AgentAction).where(AgentAction.id == action_id).execution_options(populate_existing=True)
         return cast(AgentAction | None, await self.session.scalar(statement))
 
     async def mark_action_confirmed(

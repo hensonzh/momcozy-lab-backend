@@ -18,6 +18,7 @@ from ..response_text import AppendOnlyAgentResponseProjector, sanitize_agent_res
 @dataclass(frozen=True)
 class SdkToolInvocationResult:
     output_json: str
+    safe_output_json: str | None = None
     model_context: tuple[dict[str, Any], ...] = ()
 
 
@@ -209,7 +210,7 @@ class OpenAIResponsesApiBackend:
                         "tool_name": tool.contract_name,
                         "status": "completed",
                         "args": _json_object_or_raw(args_json),
-                        "safe_output": _json_object_or_raw(invocation.output_json),
+                        "safe_output": _json_object_or_raw(invocation.safe_output_json or invocation.output_json),
                     }
                 )
 
@@ -903,6 +904,8 @@ def _build_function_tool(*, agents_module: Any, definition: SdkToolDefinition) -
             invocation = await definition.invoke(args)
             return invocation.output_json
         except ApiError as exc:
+            if exc.code == "tool_commit_failed":
+                raise
             return json.dumps(
                 {"error": {"code": exc.code, "message": "Tool call was rejected by application policy."}},
                 sort_keys=True,
@@ -930,7 +933,11 @@ def _build_run_config(
 ) -> Any | None:
     run_config_cls = getattr(agents_module, "RunConfig", None)
     if run_config_cls is None:
-        return None
+        raise ApiError(
+            code="sdk_trace_privacy_not_supported",
+            message="OpenAI Agents SDK RunConfig is required to enforce private tracing defaults.",
+            status=503,
+        )
     model_provider = _build_model_provider(
         agents_module=agents_module,
         provider=provider,
@@ -948,6 +955,7 @@ def _build_run_config(
     try:
         kwargs: dict[str, Any] = {
             "tracing_disabled": not trace_enabled,
+            "trace_include_sensitive_data": False,
             "trace_id": request.trace_id or None,
             "group_id": request.thread_id or None,
             "workflow_name": "MomCozy agent runtime",
@@ -966,14 +974,27 @@ def _build_run_config(
         if model_provider is not None:
             kwargs["model_provider"] = model_provider
         return run_config_cls(**kwargs)
-    except TypeError as exc:
-        if provider != "openai":
-            raise ApiError(
-                code="sdk_provider_not_supported",
-                message=f"OpenAI Agents SDK RunConfig does not support provider '{provider}'.",
-                status=503,
-            ) from exc
-        return None
+    except TypeError:
+        safe_fallback_kwargs = dict(kwargs)
+        safe_fallback_kwargs.pop("trace_include_sensitive_data", None)
+        safe_fallback_kwargs["tracing_disabled"] = True
+        try:
+            return run_config_cls(**safe_fallback_kwargs)
+        except TypeError as fallback_exc:
+            if provider != "openai":
+                raise ApiError(
+                    code="sdk_provider_not_supported",
+                    message=f"OpenAI Agents SDK RunConfig does not support provider '{provider}'.",
+                    status=503,
+                ) from fallback_exc
+            try:
+                return run_config_cls(tracing_disabled=True)
+            except TypeError:
+                raise ApiError(
+                    code="sdk_trace_privacy_not_supported",
+                    message="OpenAI Agents SDK cannot enforce private tracing defaults.",
+                    status=503,
+                ) from fallback_exc
 
 
 def _build_agent_model_settings(*, agents_module: Any, provider: str) -> Any | None:

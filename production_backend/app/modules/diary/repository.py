@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, cast
 from uuid import UUID
@@ -25,6 +26,12 @@ _ENTRY_DEFAULTS: dict[str, Any] = {
 }
 
 
+@dataclass(frozen=True)
+class DiaryEntryMutation:
+    entry: PregnancyDiaryEntry
+    changed: bool
+
+
 class DiaryRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -35,6 +42,7 @@ class DiaryRepository:
         owner_user_id: UUID,
         entry_date: date,
         include_deleted: bool = False,
+        for_update: bool = False,
     ) -> PregnancyDiaryEntry | None:
         conditions = [
             PregnancyDiaryEntry.owner_user_id == owner_user_id,
@@ -43,6 +51,8 @@ class DiaryRepository:
         if not include_deleted:
             conditions.append(PregnancyDiaryEntry.deleted_at.is_(None))
         statement = select(PregnancyDiaryEntry).where(*conditions)
+        if for_update:
+            statement = statement.with_for_update()
         return cast(PregnancyDiaryEntry | None, await self.session.scalar(statement))
 
     async def list_entries(
@@ -75,7 +85,12 @@ class DiaryRepository:
     ) -> PregnancyDiaryEntry | None:
         try:
             async with self.session.begin_nested():
-                entry = await self.get_entry_by_date(owner_user_id=owner_user_id, entry_date=entry_date, include_deleted=True)
+                entry = await self.get_entry_by_date(
+                    owner_user_id=owner_user_id,
+                    entry_date=entry_date,
+                    include_deleted=True,
+                    for_update=True,
+                )
                 if entry is None:
                     entry = PregnancyDiaryEntry(owner_user_id=owner_user_id, entry_date=entry_date)
                     self.session.add(entry)
@@ -89,6 +104,7 @@ class DiaryRepository:
                 for field, value in values.items():
                     setattr(entry, field, value)
                 await self.session.flush()
+                await self.session.refresh(entry, attribute_names=["updated_at"])
                 return entry
         except IntegrityError:
             return None
@@ -99,14 +115,38 @@ class DiaryRepository:
         owner_user_id: UUID,
         entry_date: date,
         values: dict[str, Any],
+        content_mode: str = "replace",
     ) -> PregnancyDiaryEntry | None:
-        entry = await self.get_entry_by_date(owner_user_id=owner_user_id, entry_date=entry_date)
+        mutation = await self.update_entry_with_status(
+            owner_user_id=owner_user_id,
+            entry_date=entry_date,
+            values=values,
+            content_mode=content_mode,
+        )
+        return mutation.entry if mutation is not None else None
+
+    async def update_entry_with_status(
+        self,
+        *,
+        owner_user_id: UUID,
+        entry_date: date,
+        values: dict[str, Any],
+        content_mode: str = "replace",
+    ) -> DiaryEntryMutation | None:
+        entry = await self.get_entry_by_date(owner_user_id=owner_user_id, entry_date=entry_date, for_update=True)
         if entry is None:
             return None
-        for field, value in values.items():
+        resolved_values = dict(values)
+        if content_mode == "append" and "content" in resolved_values:
+            resolved_values["content"] = _append_content(entry.content, str(resolved_values["content"]))
+        changed = any(getattr(entry, field) != value for field, value in resolved_values.items())
+        if not changed:
+            return DiaryEntryMutation(entry=entry, changed=False)
+        for field, value in resolved_values.items():
             setattr(entry, field, value)
         await self.session.flush()
-        return entry
+        await self.session.refresh(entry, attribute_names=["updated_at"])
+        return DiaryEntryMutation(entry=entry, changed=True)
 
     async def soft_delete_entry(
         self,
@@ -115,10 +155,25 @@ class DiaryRepository:
         entry_date: date,
         deleted_at: datetime,
     ) -> PregnancyDiaryEntry | None:
-        entry = await self.get_entry_by_date(owner_user_id=owner_user_id, entry_date=entry_date)
+        entry = await self.get_entry_by_date(
+            owner_user_id=owner_user_id,
+            entry_date=entry_date,
+            for_update=True,
+        )
         if entry is None:
             return None
         entry.status = "deleted"
         entry.deleted_at = deleted_at
         await self.session.flush()
+        await self.session.refresh(entry, attribute_names=["updated_at"])
         return entry
+
+
+def _append_content(existing: str, addition: str) -> str:
+    current = str(existing or "").rstrip()
+    added = str(addition or "").strip()
+    if not current:
+        return added
+    if not added or current == added or current.endswith(f"\n{added}"):
+        return current
+    return f"{current}\n{added}"

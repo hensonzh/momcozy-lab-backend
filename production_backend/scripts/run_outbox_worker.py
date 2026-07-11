@@ -7,7 +7,7 @@ from typing import Any
 
 from production_backend.app.core.metrics import RequestMetrics
 from production_backend.app.core.settings import Settings
-from production_backend.app.infrastructure.db.session import create_db_engine, create_session_factory
+from production_backend.app.infrastructure.db.session import create_db_engine, create_session_factory, run_after_commit_callbacks
 from production_backend.app.infrastructure.object_storage.factory import create_object_storage
 from production_backend.app.infrastructure.redis.client import close_redis_client, create_redis_client
 from production_backend.app.modules.agent_runtime.event_stream.sink import AgentEventSink
@@ -160,6 +160,7 @@ async def run_outbox_worker(
                 try:
                     processed = await worker.run_once()
                     await session.commit()
+                    await run_after_commit_callbacks(session)
                 except Exception:
                     await session.rollback()
                     raise

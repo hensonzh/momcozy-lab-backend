@@ -1701,6 +1701,7 @@ def test_sdk_runner_uses_real_agents_sdk_shape_when_package_is_available(monkeyp
     assert FakeAgentsSdkRunner.last_input == "user: hello"
     assert FakeAgentsSdkRunner.last_max_turns == 3
     assert FakeAgentsSdkRunner.last_run_config.tracing_disabled is False
+    assert FakeAgentsSdkRunner.last_run_config.trace_include_sensitive_data is False
     assert FakeAgentsSdkRunner.last_run_config.trace_id == "trace_1"
     assert FakeAgentsSdkRunner.last_run_config.group_id == "thread_1"
     assert FakeAgentsSdkRunner.last_run_config.trace_metadata["run_id"] == "run_1"
@@ -1773,6 +1774,7 @@ def test_sdk_runner_flattens_structured_context_as_stable_json(monkeypatch: pyte
     fake_agents.__spec__ = ModuleSpec("agents", loader=None)
     fake_agents.Agent = FakeAgentsSdkAgent
     fake_agents.FunctionTool = FakeAgentsSdkFunctionTool
+    fake_agents.RunConfig = FakeAgentsSdkRunConfig
     fake_agents.Runner = FakeAgentsSdkRunner
     monkeypatch.setitem(sys.modules, "agents", fake_agents)
     request = SdkNodeRequest(
@@ -1796,6 +1798,7 @@ def test_sdk_runner_wraps_application_tool_executor_for_agents_sdk(monkeypatch: 
     fake_agents.__spec__ = ModuleSpec("agents", loader=None)
     fake_agents.Agent = FakeAgentsSdkAgent
     fake_agents.FunctionTool = FakeAgentsSdkFunctionTool
+    fake_agents.RunConfig = FakeAgentsSdkRunConfig
     fake_agents.Runner = ToolCallingAgentsSdkRunner
     monkeypatch.setitem(sys.modules, "agents", fake_agents)
 
@@ -2059,12 +2062,14 @@ class FakeAgentsSdkRunConfig:
         self,
         *,
         tracing_disabled: bool,
+        trace_include_sensitive_data: bool,
         trace_id: str | None,
         group_id: str | None,
         workflow_name: str,
         trace_metadata: dict,
     ) -> None:
         self.tracing_disabled = tracing_disabled
+        self.trace_include_sensitive_data = trace_include_sensitive_data
         self.trace_id = trace_id
         self.group_id = group_id
         self.workflow_name = workflow_name

@@ -570,6 +570,264 @@
       "expected_safety_decision": "allow"
     },
     {
+      "suite": "pregnancy_diary_implicit_entry",
+      "name": "concrete first person pregnancy narrative is diary worthy without a save phrase",
+      "domain": "pregnancy-diary",
+      "owner_team": "agent",
+      "input": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "Today at 32 weeks, the baby kicked a lot after lunch. I felt calm, but my lower back was a little sore by evening."
+          }
+        ],
+        "fixtures": {
+          "timezone": "Asia/Shanghai",
+          "entry_for_local_date_exists": false
+        }
+      },
+      "expected_behavior": {
+        "intent": "pregnancy_diary_implicit_entry",
+        "route": "independent_namespace_action",
+        "requires_confirmation_before_write": false,
+        "service_skill_id": "cozymate_service_agent",
+        "must_include": [
+          "implicit_diary_worthy_narrative",
+          "user_stated_facts_only",
+          "synchronous_create"
+        ],
+        "must_not": [
+          "require_explicit_save_phrase",
+          "add_model_advice_to_diary",
+          "load_service_skill_for_diary"
+        ]
+      },
+      "expected_tool_calls": [
+        {
+          "contract": "pregnancy_diary.entry.create",
+          "timing": "after_diary_worthy_narrative"
+        }
+      ],
+      "expected_safety_decision": "allow"
+    },
+    {
+      "suite": "pregnancy_diary_existing_entry",
+      "name": "create conflict continues with append update before the final response",
+      "domain": "pregnancy-diary",
+      "owner_team": "agent",
+      "input": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "This afternoon at 32 weeks I felt the baby kick strongly after lunch and I want to keep that memory."
+          }
+        ],
+        "fixtures": {
+          "timezone": "Asia/Shanghai",
+          "entry_for_local_date_exists": true
+        }
+      },
+      "expected_behavior": {
+        "intent": "pregnancy_diary_existing_entry",
+        "route": "independent_namespace_action",
+        "requires_confirmation_before_write": false,
+        "requires_final_response_after_tools": true,
+        "service_skill_id": "cozymate_service_agent",
+        "must_include": [
+          "continue_after_create_conflict",
+          "append_user_stated_facts",
+          "wait_for_update_result"
+        ],
+        "must_not": [
+          "claim_create_conflict_was_saved",
+          "replace_existing_diary_without_request",
+          "add_model_advice_to_diary"
+        ]
+      },
+      "expected_tool_calls": [
+        {
+          "contract": "pregnancy_diary.entry.create",
+          "timing": "first_write_attempt"
+        },
+        {
+          "contract": "pregnancy_diary.entry.update",
+          "timing": "after_entry_already_exists",
+          "args_subset": {
+            "content_mode": "append"
+          }
+        }
+      ],
+      "expected_safety_decision": "allow"
+    },
+    {
+      "suite": "pregnancy_diary_opt_out",
+      "name": "explicit diary opt out prevents an otherwise diary worthy write",
+      "domain": "pregnancy-diary",
+      "owner_team": "agent",
+      "input": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "Today the baby moved normally and I slept badly, but please do not save this in my pregnancy diary."
+          }
+        ],
+        "fixtures": {
+          "timezone": "Asia/Shanghai"
+        }
+      },
+      "expected_behavior": {
+        "intent": "pregnancy_diary_opt_out",
+        "route": "normal_response_without_write",
+        "requires_confirmation_before_write": false,
+        "service_skill_id": "cozymate_service_agent",
+        "must_include": [
+          "respect_explicit_opt_out"
+        ],
+        "must_not": [
+          "create_diary_entry",
+          "update_diary_entry",
+          "claim_diary_saved"
+        ]
+      },
+      "expected_tool_calls": [],
+      "forbidden_tool_calls": [
+        {
+          "contract": "pregnancy_diary.entry.create"
+        },
+        {
+          "contract": "pregnancy_diary.entry.update"
+        }
+      ],
+      "expected_safety_decision": "allow"
+    },
+    {
+      "suite": "pregnancy_diary_negative",
+      "name": "general pregnancy question is not silently turned into a diary entry",
+      "domain": "pregnancy-diary",
+      "owner_team": "agent",
+      "input": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "Is mild lower back soreness common around 32 weeks of pregnancy?"
+          }
+        ],
+        "fixtures": {}
+      },
+      "expected_behavior": {
+        "intent": "pregnancy_diary_negative",
+        "route": "health_guidance_without_diary_write",
+        "requires_confirmation_before_write": false,
+        "service_skill_id": "health-consultation",
+        "must_include": [
+          "answer_the_health_question"
+        ],
+        "must_not": [
+          "create_diary_entry",
+          "update_diary_entry",
+          "claim_diary_saved"
+        ]
+      },
+      "expected_tool_calls": [],
+      "forbidden_tool_calls": [
+        {
+          "contract": "pregnancy_diary.entry.create"
+        },
+        {
+          "contract": "pregnancy_diary.entry.update"
+        }
+      ],
+      "expected_safety_decision": "allow"
+    },
+    {
+      "suite": "pregnancy_diary_plan_intent",
+      "name": "pregnancy planning intent is not silently stored as a diary entry",
+      "domain": "pregnancy-diary",
+      "owner_team": "agent",
+      "input": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "Help me plan what to ask at my next prenatal appointment and what I should prepare this week."
+          }
+        ],
+        "fixtures": {
+          "timezone": "Asia/Shanghai"
+        }
+      },
+      "expected_behavior": {
+        "intent": "pregnancy_diary_plan_intent",
+        "route": "pregnancy_planning_without_diary_write",
+        "requires_confirmation_before_write": false,
+        "service_skill_id": "birth-prep",
+        "must_include": [
+          "handle_planning_intent"
+        ],
+        "must_not": [
+          "create_diary_entry",
+          "update_diary_entry",
+          "claim_diary_saved"
+        ]
+      },
+      "expected_tool_calls": [],
+      "forbidden_tool_calls": [
+        {
+          "contract": "pregnancy_diary.entry.create"
+        },
+        {
+          "contract": "pregnancy_diary.entry.update"
+        }
+      ],
+      "expected_safety_decision": "allow"
+    },
+    {
+      "suite": "pregnancy_diary_health_mixed",
+      "name": "diary write remains adjunct to an active health consultation",
+      "domain": "pregnancy-diary",
+      "owner_team": "agent",
+      "input": {
+        "messages": [
+          {
+            "role": "assistant",
+            "content": "Before we continue, are you having bleeding, fever, worsening pain, or reduced fetal movement?"
+          },
+          {
+            "role": "user",
+            "content": "No bleeding or fever, the pain is not getting worse, and the baby is moving normally. I only noticed a mild pulling feeling after my walk this afternoon."
+          }
+        ],
+        "fixtures": {
+          "timezone": "Asia/Shanghai",
+          "active_service_skill_id": "health-consultation",
+          "entry_for_local_date_exists": false
+        }
+      },
+      "expected_behavior": {
+        "intent": "pregnancy_diary_health_mixed",
+        "route": "health_guidance_with_adjunct_diary_write",
+        "requires_confirmation_before_write": false,
+        "requires_final_response_after_tools": true,
+        "service_skill_id": "health-consultation",
+        "must_include": [
+          "pregnancy_diary_namespace",
+          "user_stated_facts_only",
+          "continue_health_consultation_after_write"
+        ],
+        "must_not": [
+          "stop_after_diary_success",
+          "write_model_risk_assessment_to_diary",
+          "diagnose_from_diary_content"
+        ]
+      },
+      "expected_tool_calls": [
+        {
+          "contract": "pregnancy_diary.entry.create",
+          "timing": "as_adjunct_to_health_response"
+        }
+      ],
+      "expected_safety_decision": "allow"
+    },
+    {
       "suite": "postpartum_recovery_checkin",
       "name": "postpartum recovery check-in reads current context",
       "domain": "health-consultation",

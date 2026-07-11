@@ -53,6 +53,7 @@ from production_backend.app.modules.diary.agent_actions import (
     PREGNANCY_DIARY_ENTRY_DELETE_ACTION,
 )
 from production_backend.app.modules.diary.models import PregnancyDiaryEntry
+from production_backend.app.modules.diary.repository import DiaryEntryMutation
 from production_backend.app.modules.notifications.agent_actions import MILK_REMINDER_CREATE_ACTION
 from production_backend.app.modules.plans.agent_actions import (
     MILK_PLAN_CREATE_ACTION,
@@ -1060,17 +1061,18 @@ def test_pregnancy_diary_create_tool_returns_existing_entry_on_date_conflict() -
     )
 
     assert result["status"] == "entry_already_exists"
-    assert result["entry"]["content"] == "x" * 600
+    assert result["entry"]["id"]
+    assert "content" not in result["entry"]
 
 
 @pytest.mark.parametrize(
-    ("content_mode", "expected_content"),
+    "content_mode",
     [
-        ("append", f"{'x' * 600}\nOne more thing."),
-        ("replace", "One more thing."),
+        "append",
+        "replace",
     ],
 )
-def test_pregnancy_diary_update_tool_supports_explicit_content_mode(content_mode, expected_content) -> None:
+def test_pregnancy_diary_update_tool_delegates_content_mode_atomically(content_mode) -> None:
     actor = _user()
     diary_service = FakeDiaryService(owner_user_id=actor.user_id)
 
@@ -1089,7 +1091,8 @@ def test_pregnancy_diary_update_tool_supports_explicit_content_mode(content_mode
 
     assert result["status"] == "entry_updated"
     assert diary_service.update_kwargs["owner_user_id"] == actor.user_id
-    assert diary_service.update_kwargs["values"]["content"] == expected_content
+    assert diary_service.update_kwargs["values"]["content"] == "One more thing."
+    assert diary_service.update_kwargs["content_mode"] == content_mode
 
 
 def test_support_ticket_propose_tool_handler_requires_summary() -> None:
@@ -1445,6 +1448,9 @@ class FakeDiaryService:
         for key, value in kwargs["values"].items():
             setattr(entry, key, value)
         return entry
+
+    async def update_entry_with_status(self, **kwargs):
+        return DiaryEntryMutation(entry=await self.update_entry(**kwargs), changed=True)
 
     def _entry(self, *, entry_date):
         return PregnancyDiaryEntry(

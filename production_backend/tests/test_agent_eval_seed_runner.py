@@ -58,6 +58,79 @@ def test_agent_eval_seed_assertion_engine_accepts_synchronous_diary_create() -> 
     assert result.failures == []
 
 
+def test_agent_eval_seed_assertion_engine_enforces_diary_conflict_update_order_and_append_mode() -> None:
+    case = {
+        **_case("pregnancy_diary_entry"),
+        "expected_tool_calls": [
+            {"contract": "pregnancy_diary.entry.create"},
+            {
+                "contract": "pregnancy_diary.entry.update",
+                "args_subset": {"content_mode": "append"},
+            },
+        ],
+    }
+    trace = AgentEvalTrace(
+        tool_calls=[
+            {
+                "tool_name": "pregnancy_diary.entry.update",
+                "status": "completed",
+                "safe_args": {"content_mode": "replace"},
+            },
+            {"tool_name": "pregnancy_diary.entry.create", "status": "completed"},
+        ],
+        safety_decision="allow",
+        final_text="Saved.",
+    )
+
+    result = AgentEvalSeedAssertionEngine().evaluate(case=case, trace=trace)
+
+    assert result.passed is False
+    assert {failure.category for failure in result.failures} == {
+        "tool_argument_mismatch",
+        "tool_order_mismatch",
+    }
+
+
+def test_agent_eval_seed_assertion_engine_requires_health_flow_to_continue_after_diary_write() -> None:
+    case = {
+        **_case("pregnancy_diary_health_mixed"),
+        "expected_behavior": {
+            **_case("pregnancy_diary_health_mixed")["expected_behavior"],
+            "requires_final_response_after_tools": True,
+        },
+    }
+    trace = AgentEvalTrace(
+        tool_calls=[{"tool_name": "pregnancy_diary.entry.create", "status": "completed"}],
+        safety_decision="allow",
+        final_text="",
+    )
+
+    result = AgentEvalSeedAssertionEngine().evaluate(case=case, trace=trace)
+
+    assert result.passed is False
+    assert result.failures[-1].category == "missing_final_response"
+
+
+@pytest.mark.parametrize(
+    "suite",
+    ["pregnancy_diary_opt_out", "pregnancy_diary_negative", "pregnancy_diary_plan_intent"],
+)
+def test_agent_eval_seed_assertion_engine_rejects_diary_write_for_negative_cases(suite: str) -> None:
+    case = _case(suite)
+    trace = AgentEvalTrace(
+        tool_calls=[{"tool_name": "pregnancy_diary.entry.create", "status": "completed"}],
+        safety_decision="allow",
+        final_text="Saved.",
+    )
+
+    result = AgentEvalSeedAssertionEngine().evaluate(case=case, trace=trace)
+
+    assert result.passed is False
+    assert result.failures[0].category == "forbidden_tool"
+    assert result.failures[0].assertion == "tool.forbidden"
+    assert result.failures[0].observed == "pregnancy_diary.entry.create"
+
+
 def test_agent_eval_seed_assertion_engine_reports_safety_mismatch() -> None:
     case = _case("emotion_support")
     trace = AgentEvalTrace(safety_decision="allow", final_text="Let's continue with your plan.")

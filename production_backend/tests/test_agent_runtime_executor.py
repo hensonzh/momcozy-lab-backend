@@ -820,10 +820,39 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert backend.tool_deferred_by_contract["plans.task_update.propose"] is True
     assert backend.tool_deferred_by_contract["support.ticket.propose"] is True
     assert backend.tool_deferred_by_contract["pregnancy_diary.entries.read"] is True
+
+
+def test_agent_runtime_executor_uses_ephemeral_model_output_for_private_diary_read() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="Read today's diary", sequence=1)
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    tool_executor = FakeToolExecutor(
+        safe_output={"status": "entry_read", "entry_date": "2026-07-12"},
+        model_output={"status": "entry_read", "entry": {"content": "private diary content"}},
+    )
+    backend = CapturingDiaryToolOutputSdkBackend()
+
+    asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            tool_executor=tool_executor,
+        ).execute(run=run)
+    )
+
+    assert json.loads(backend.output_json) == {
+        "status": "entry_read",
+        "entry": {"content": "private diary content"},
+    }
+    assert json.loads(backend.safe_output_json) == {
+        "status": "entry_read",
+        "entry_date": "2026-07-12",
+    }
     assert tool_executor.calls[0]["actor"].user_id == run.actor_user_id
     assert tool_executor.calls[0]["run_id"] == run.id
-    assert tool_executor.calls[0]["tool_name"] == "profile.read"
-    assert tool_executor.calls[0]["args"] == {}
+    assert tool_executor.calls[0]["tool_name"] == "pregnancy_diary.entries.read"
+    assert tool_executor.calls[0]["args"] == {"entry_date": "2026-07-12"}
 
 
 def test_agent_runtime_executor_adds_model_selected_visible_image_to_current_loop() -> None:
@@ -2652,20 +2681,27 @@ class FakeTransientStream:
 
 
 class FakeToolExecutor:
-    def __init__(self, *, safe_output, model_context=()):
+    def __init__(self, *, safe_output, model_context=(), model_output=None):
         self.safe_output = safe_output
         self.model_context = model_context
+        self.model_output = model_output
         self.calls = []
 
     async def execute(self, **kwargs):
         self.calls.append(kwargs)
-        return FakeToolExecutionResult(safe_output=self.safe_output, model_context=self.model_context)
+        return FakeToolExecutionResult(
+            safe_output=self.safe_output,
+            model_context=self.model_context,
+            model_output=self.model_output,
+        )
 
 
 class FakeToolExecutionResult:
-    def __init__(self, *, safe_output, model_context=()):
+    def __init__(self, *, safe_output, model_context=(), model_output=None):
         self.safe_output = safe_output
         self.model_context = model_context
+        if model_output is not None:
+            self.model_output = model_output
 
 
 class FakeToolOutput:
@@ -2737,6 +2773,19 @@ class InvokingSdkBackend:
         profile_tool = next(tool for tool in request.tools if tool.contract_name == "profile.read")
         invocation = await profile_tool.invoke("{}")
         return SdkNodeResult(final_text=invocation.output_json)
+
+
+class CapturingDiaryToolOutputSdkBackend:
+    def __init__(self) -> None:
+        self.output_json = ""
+        self.safe_output_json = ""
+
+    async def run(self, request: SdkNodeRequest) -> SdkNodeResult:
+        diary_tool = next(tool for tool in request.tools if tool.contract_name == "pregnancy_diary.entries.read")
+        invocation = await diary_tool.invoke(json.dumps({"entry_date": "2026-07-12"}))
+        self.output_json = invocation.output_json
+        self.safe_output_json = invocation.safe_output_json or ""
+        return SdkNodeResult(final_text="我已经读到这篇日记。")
 
 
 class ImageInspectingSdkBackend:

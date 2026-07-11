@@ -91,7 +91,14 @@ class FakeDiaryRepository:
             setattr(self.entry, key, value)
         return self.entry
 
-    async def update_entry(self, *, owner_user_id: UUID, entry_date: date, values: dict):
+    async def update_entry(
+        self,
+        *,
+        owner_user_id: UUID,
+        entry_date: date,
+        values: dict,
+        content_mode: str = "replace",
+    ):
         if self.entry is None or self.entry.owner_user_id != owner_user_id or self.entry.entry_date != entry_date:
             return None
         for key, value in values.items():

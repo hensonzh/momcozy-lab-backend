@@ -211,7 +211,8 @@ def default_tool_registry() -> ToolContractRegistry:
             domain="pregnancy_diary",
             description=(
                 "同步创建当前用户指定日期的孕期日记并返回已写入记录。"
-                "用户明确要求保存一篇新的孕期记录时调用；目标日期已有记录时返回现有记录供继续更新。"
+                "用户明确要求保存，或第一人称具体讲述可留存的孕期事实且没有拒绝记录时调用。"
+                "目标日期已有记录时返回 entry_already_exists；此时必须继续调用更新工具 append 本轮事实，不能说已经保存。"
             ),
             read_or_write="write",
             side_effect_level="low",
@@ -229,7 +230,8 @@ def default_tool_registry() -> ToolContractRegistry:
             domain="pregnancy_diary",
             description=(
                 "同步补充或修改当前用户指定日期已有的孕期日记并返回更新后记录。"
-                "用户明确要求追加、更正或重写已有记录时调用；正文可选择 append 或 replace。"
+                "用户明确要求追加、更正或重写已有记录，或创建发现同日记录后继续保存本轮事实时调用；正文可选择 append 或 replace。"
+                "返回 entry_not_found 时没有发生写入，不能说已经更新。"
             ),
             read_or_write="write",
             side_effect_level="low",

@@ -109,7 +109,14 @@ class InMemoryDiaryRepository:
             setattr(entry, field, value)
         return entry
 
-    async def update_entry(self, *, owner_user_id: UUID, entry_date: date, values: dict):
+    async def update_entry(
+        self,
+        *,
+        owner_user_id: UUID,
+        entry_date: date,
+        values: dict,
+        content_mode: str = "replace",
+    ):
         entry = await self.get_entry_by_date(owner_user_id=owner_user_id, entry_date=entry_date)
         if entry is None:
             return None

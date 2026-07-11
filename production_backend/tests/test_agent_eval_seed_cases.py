@@ -91,6 +91,36 @@ def test_product_agent_eval_seed_uses_current_pregnancy_action_contracts() -> No
     assert "diary_entry_upsert_proposal" not in diary_contracts
 
 
+def test_product_agent_eval_seed_covers_implicit_opt_out_negative_and_health_mixed_diary_parity() -> None:
+    cases = load_product_agent_eval_seed_cases(PRODUCT_AGENT_EVAL_SEED)
+    by_suite = {case["suite"]: case for case in cases}
+    diary_create = "pregnancy_diary.entry.create"
+    diary_update = "pregnancy_diary.entry.update"
+
+    implicit = by_suite["pregnancy_diary_implicit_entry"]
+    assert {call["contract"] for call in implicit["expected_tool_calls"]} == {diary_create}
+    assert "require_explicit_save_phrase" in implicit["expected_behavior"]["must_not"]
+    assert implicit["expected_behavior"]["requires_confirmation_before_write"] is False
+
+    existing = by_suite["pregnancy_diary_existing_entry"]
+    assert [call["contract"] for call in existing["expected_tool_calls"]] == [diary_create, diary_update]
+    assert existing["expected_tool_calls"][1]["args_subset"] == {"content_mode": "append"}
+    assert existing["expected_behavior"]["requires_final_response_after_tools"] is True
+
+    for suite in ("pregnancy_diary_opt_out", "pregnancy_diary_negative", "pregnancy_diary_plan_intent"):
+        case = by_suite[suite]
+        assert case["expected_tool_calls"] == []
+        assert {call["contract"] for call in case["forbidden_tool_calls"]} == {diary_create, diary_update}
+        assert "claim_diary_saved" in case["expected_behavior"]["must_not"]
+
+    mixed = by_suite["pregnancy_diary_health_mixed"]
+    assert {call["contract"] for call in mixed["expected_tool_calls"]} == {diary_create}
+    assert mixed["expected_behavior"]["service_skill_id"] == "health-consultation"
+    assert mixed["expected_behavior"]["requires_final_response_after_tools"] is True
+    assert "continue_health_consultation_after_write" in mixed["expected_behavior"]["must_include"]
+    assert "stop_after_diary_success" in mixed["expected_behavior"]["must_not"]
+
+
 def test_product_agent_eval_seed_uses_current_pregnancy_artifact_contracts() -> None:
     cases = load_product_agent_eval_seed_cases(PRODUCT_AGENT_EVAL_SEED)
     by_suite = {case["suite"]: case for case in cases}

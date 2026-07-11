@@ -207,6 +207,12 @@ def _completed_tool_semantic(
     output_status = str(safe_output.get("status") or "").strip()
     if output_status.startswith("needs_"):
         return "planning", "我还需要先确认几件事～"
+    if output_status == "entry_already_exists":
+        return "saving", "这一天已有记录，我继续补充～"
+    if output_status == "entry_not_found":
+        return "planning", "这一天还没有可更新的记录"
+    if output_status == "entry_unchanged":
+        return "reading", "这一天的记录没有变化"
     if output_status == "existing_plan_found":
         return "reading", "我找到已有的孕期计划啦"
     if safe_output.get("requires_confirmation") is True or requires_confirmation:

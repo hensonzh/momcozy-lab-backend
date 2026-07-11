@@ -48,11 +48,14 @@ class AgentEvalSeedAssertionEngine:
     def evaluate(self, *, case: dict[str, Any], trace: AgentEvalTrace) -> AgentEvalRunResult:
         failures: list[AgentEvalFailure] = []
         failures.extend(_tool_contract_failures(case=case, trace=trace))
+        failures.extend(_tool_sequence_failures(case=case, trace=trace))
+        failures.extend(_tool_argument_failures(case=case, trace=trace))
         failures.extend(_forbidden_tool_failures(case=case, trace=trace))
         failures.extend(_safety_decision_failures(case=case, trace=trace))
         failures.extend(_service_skill_routing_failures(case=case, trace=trace))
         failures.extend(_confirmation_failures(case=case, trace=trace))
         failures.extend(_forbidden_side_effect_failures(case=case, trace=trace))
+        failures.extend(_final_response_failures(case=case, trace=trace))
         return AgentEvalRunResult(
             suite=str(case.get("suite") or ""),
             name=str(case.get("name") or ""),
@@ -146,7 +149,9 @@ class AgentEvalService:
                 "event_types": [event["type"] for event in bundle["events"]],
                 "action_statuses": [action["status"] for action in bundle["actions"]],
             },
-            expected_tool_calls=[{"tool_name": tool_call["tool_name"], "status": tool_call["status"]} for tool_call in bundle["tool_calls"]],
+            expected_tool_calls=[
+                {"tool_name": tool_call["tool_name"], "status": tool_call["status"]} for tool_call in bundle["tool_calls"]
+            ],
             expected_safety_decision=_last_safety_decision(bundle),
             source_run_id=run_id,
             status="draft",
@@ -260,6 +265,7 @@ def _tool_call_trace(tool_call: Any) -> dict[str, Any]:
         "tool_name": str(getattr(tool_call, "tool_name", "") or ""),
         "status": str(getattr(tool_call, "status", "") or ""),
         "error_code": str(getattr(tool_call, "error_code", "") or ""),
+        "safe_args": getattr(tool_call, "safe_args", {}) if isinstance(getattr(tool_call, "safe_args", {}), dict) else {},
     }
 
 
@@ -300,6 +306,66 @@ def _tool_contract_failures(*, case: dict[str, Any], trace: AgentEvalTrace) -> l
         for contract in expected_contracts
         if contract not in observed_contracts
     ]
+
+
+def _tool_sequence_failures(*, case: dict[str, Any], trace: AgentEvalTrace) -> list[AgentEvalFailure]:
+    expected = [_contract(tool_call) for tool_call in case.get("expected_tool_calls", []) if _contract(tool_call)]
+    if len(expected) < 2:
+        return []
+    observed = [_observed_tool_contract(tool_call) for tool_call in trace.tool_calls if _observed_tool_contract(tool_call)]
+    cursor = 0
+    for contract in observed:
+        if cursor < len(expected) and contract == expected[cursor]:
+            cursor += 1
+    if cursor == len(expected):
+        return []
+    return [
+        AgentEvalFailure(
+            category="tool_order_mismatch",
+            assertion="tool.sequence",
+            expected=" -> ".join(expected),
+            observed=" -> ".join(observed) or "<none>",
+        )
+    ]
+
+
+def _tool_argument_failures(*, case: dict[str, Any], trace: AgentEvalTrace) -> list[AgentEvalFailure]:
+    failures: list[AgentEvalFailure] = []
+    observed_by_contract: dict[str, list[dict[str, Any]]] = {}
+    for tool_call in trace.tool_calls:
+        contract = _observed_tool_contract(tool_call)
+        if contract:
+            observed_by_contract.setdefault(contract, []).append(tool_call)
+    expected_occurrences: dict[str, int] = {}
+    for expected_call in case.get("expected_tool_calls", []):
+        contract = _contract(expected_call)
+        if not contract or not isinstance(expected_call, dict):
+            continue
+        expected_args = expected_call.get("args_subset")
+        if not isinstance(expected_args, dict) or not expected_args:
+            continue
+        occurrence = expected_occurrences.get(contract, 0)
+        expected_occurrences[contract] = occurrence + 1
+        observed_calls = observed_by_contract.get(contract, [])
+        if occurrence >= len(observed_calls):
+            continue
+        observed_call = observed_calls[occurrence]
+        raw_args = observed_call.get("safe_args")
+        if not isinstance(raw_args, dict) or not raw_args:
+            raw_args = observed_call.get("args")
+        observed_args = raw_args if isinstance(raw_args, dict) else {}
+        for key, expected_value in expected_args.items():
+            if observed_args.get(key) == expected_value:
+                continue
+            failures.append(
+                AgentEvalFailure(
+                    category="tool_argument_mismatch",
+                    assertion=f"tool.args.{key}",
+                    expected=f"{contract}.{key}={expected_value!r}",
+                    observed=repr(observed_args.get(key, "<missing>")),
+                )
+            )
+    return failures
 
 
 def _forbidden_tool_failures(*, case: dict[str, Any], trace: AgentEvalTrace) -> list[AgentEvalFailure]:
@@ -357,7 +423,9 @@ def _confirmation_failures(*, case: dict[str, Any], trace: AgentEvalTrace) -> li
     behavior = raw_behavior if isinstance(raw_behavior, dict) else {}
     if not bool(behavior.get("requires_confirmation_before_write")):
         return []
-    proposal_contracts = [_contract(tool_call) for tool_call in case.get("expected_tool_calls", []) if _contract(tool_call).endswith(".propose")]
+    proposal_contracts = [
+        _contract(tool_call) for tool_call in case.get("expected_tool_calls", []) if _contract(tool_call).endswith(".propose")
+    ]
     if not proposal_contracts:
         return []
     if _has_confirmation(trace):
@@ -387,6 +455,21 @@ def _forbidden_side_effect_failures(*, case: dict[str, Any], trace: AgentEvalTra
             assertion="side_effect.none",
             expected="no write proposal or action in safety-only flow",
             observed=observed,
+        )
+    ]
+
+
+def _final_response_failures(*, case: dict[str, Any], trace: AgentEvalTrace) -> list[AgentEvalFailure]:
+    raw_behavior = case.get("expected_behavior")
+    behavior = raw_behavior if isinstance(raw_behavior, dict) else {}
+    if not bool(behavior.get("requires_final_response_after_tools")) or trace.final_text.strip():
+        return []
+    return [
+        AgentEvalFailure(
+            category="missing_final_response",
+            assertion="response.after_tools",
+            expected="non-empty final response after tool execution",
+            observed="<empty>",
         )
     ]
 

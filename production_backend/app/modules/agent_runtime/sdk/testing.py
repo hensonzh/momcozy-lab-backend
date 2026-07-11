@@ -107,7 +107,7 @@ async def _invoke_scripted_tools(*, response: ScriptedSdkResponse, request: SdkN
                 "tool_name": invocation.contract_name,
                 "status": "completed",
                 "args": invocation.args,
-                "safe_output": _json_object_or_raw(invocation_result.output_json),
+                "safe_output": _json_object_or_raw(invocation_result.safe_output_json or invocation_result.output_json),
             }
         )
     return tool_calls

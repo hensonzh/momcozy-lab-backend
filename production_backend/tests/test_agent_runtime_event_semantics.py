@@ -1,5 +1,7 @@
 from uuid import uuid4
 
+import pytest
+
 from production_backend.app.modules.agent_runtime.event_semantics import (
     progress_live_dedupe_key,
     run_progress_payload,
@@ -108,3 +110,27 @@ def test_plan_tool_event_semantics_use_single_preview_and_confirmation_lifecycle
     assert milk_started["label"] == "我先帮你整理奶量计划～"
     assert pregnancy_completed["label"] == "我已经准备好预览，等你确认～"
     assert existing_plan["label"] == "我找到已有的孕期计划啦"
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "status", "forbidden_success_copy"),
+    [
+        ("pregnancy_diary.entry.create", "entry_already_exists", "已经保存好"),
+        ("pregnancy_diary.entry.update", "entry_not_found", "已经更新好"),
+        ("pregnancy_diary.entry.update", "entry_unchanged", "已经保存好"),
+    ],
+)
+def test_pregnancy_diary_no_op_completion_does_not_claim_write_success(
+    tool_name: str,
+    status: str,
+    forbidden_success_copy: str,
+) -> None:
+    semantic = tool_event_semantic(
+        event_type="tool.completed",
+        tool_name=tool_name,
+        safe_output={"status": status},
+        read_or_write="write",
+    )
+
+    assert semantic["lifecycle"] == "completed"
+    assert forbidden_success_copy not in semantic["label"]

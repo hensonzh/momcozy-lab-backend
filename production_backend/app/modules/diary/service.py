@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from ...core.errors import ApiError
 from ..audit import AuditService
 from .models import PregnancyDiaryEntry
-from .repository import DiaryRepository
+from .repository import DiaryEntryMutation, DiaryRepository
 
 
 class DiaryService:
@@ -70,18 +70,55 @@ class DiaryService:
         entry_date: date,
         values: dict[str, Any],
         request_id: str = "",
+        content_mode: str = "replace",
     ) -> PregnancyDiaryEntry:
-        _require_values(values)
-        entry = await self.repository.update_entry(owner_user_id=owner_user_id, entry_date=entry_date, values=values)
-        if entry is None:
-            raise ApiError(code="not_found", message="Diary entry not found.", status=404)
-        await self._audit(
+        mutation = await self.update_entry_with_status(
             owner_user_id=owner_user_id,
-            action="pregnancy_diary.entry.update",
-            resource_id=str(entry.id),
+            entry_date=entry_date,
+            values=values,
             request_id=request_id,
+            content_mode=content_mode,
         )
-        return entry
+        return mutation.entry
+
+    async def update_entry_with_status(
+        self,
+        *,
+        owner_user_id: UUID,
+        entry_date: date,
+        values: dict[str, Any],
+        request_id: str = "",
+        content_mode: str = "replace",
+    ) -> DiaryEntryMutation:
+        _require_values(values)
+        if content_mode not in {"append", "replace"}:
+            raise ApiError(code="validation_failed", message="content_mode must be append or replace.", status=422)
+        update_with_status = getattr(self.repository, "update_entry_with_status", None)
+        if callable(update_with_status):
+            mutation = await update_with_status(
+                owner_user_id=owner_user_id,
+                entry_date=entry_date,
+                values=values,
+                content_mode=content_mode,
+            )
+        else:
+            entry = await self.repository.update_entry(
+                owner_user_id=owner_user_id,
+                entry_date=entry_date,
+                values=values,
+                content_mode=content_mode,
+            )
+            mutation = DiaryEntryMutation(entry=entry, changed=True) if entry is not None else None
+        if mutation is None:
+            raise ApiError(code="not_found", message="Diary entry not found.", status=404)
+        if mutation.changed:
+            await self._audit(
+                owner_user_id=owner_user_id,
+                action="pregnancy_diary.entry.update",
+                resource_id=str(mutation.entry.id),
+                request_id=request_id,
+            )
+        return mutation
 
     async def delete_entry(
         self,
