@@ -468,7 +468,12 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
     record_delete_schema = tool_input_schema(registry.get("records.feeding_record_delete.propose").input_schema_ref)
     growth_schema = tool_input_schema(registry.get("records.growth_record.propose").input_schema_ref)
     growth_update_schema = tool_input_schema(registry.get("records.growth_record_update.propose").input_schema_ref)
-    artifact_schema = tool_input_schema(registry.get("hospital_bag_card_create").input_schema_ref)
+    birth_form_schema = tool_input_schema(registry.get("birth_plan_form_create").input_schema_ref)
+    labor_card_schema = tool_input_schema(registry.get("labor_communication_card_create").input_schema_ref)
+    hospital_bag_form_schema = tool_input_schema(registry.get("hospital_bag_form_create").input_schema_ref)
+    hospital_bag_card_schema = tool_input_schema(registry.get("hospital_bag_card_create").input_schema_ref)
+    hospital_bag_cart_schema = tool_input_schema(registry.get("hospital_bag_cart_update").input_schema_ref)
+    pump_recommend_schema = tool_input_schema(registry.get("hospital_bag_pump_recommend").input_schema_ref)
     ibclc_schema = tool_input_schema(registry.get("ibclc_consult_card_create").input_schema_ref)
 
     assert profile_schema == {
@@ -541,10 +546,25 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
     assert growth_schema["required"] == ["measured_at"]
     assert growth_schema["properties"]["weight_kg"]["type"] == "number"
     assert growth_update_schema["required"] == ["record_id"]
-    assert artifact_schema["additionalProperties"] is True
-    assert artifact_schema["properties"]["confirmed_form_data"]["type"] == "object"
-    assert artifact_schema["properties"]["plan_context"]["type"] == "object"
-    assert artifact_schema["properties"]["groups"]["type"] == "array"
+    for schema in (birth_form_schema, labor_card_schema, hospital_bag_form_schema, hospital_bag_card_schema):
+        assert schema["additionalProperties"] is False
+        assert schema["properties"] == {}
+    assert hospital_bag_cart_schema["additionalProperties"] is False
+    assert hospital_bag_cart_schema["required"] == ["action"]
+    assert "groups" not in hospital_bag_cart_schema["properties"]
+    assert "confirmed_form_data" not in hospital_bag_cart_schema["properties"]
+    assert hospital_bag_cart_schema["properties"]["quantity_updates"]["type"] == "array"
+    assert pump_recommend_schema["additionalProperties"] is False
+    assert "confirmed_form_data" not in pump_recommend_schema["properties"]
+    assert set(pump_recommend_schema["properties"]) == {
+        "requested_model",
+        "use_case",
+        "feeding_intention",
+        "preference",
+        "target_budget_usd",
+        "must_have_app",
+        "need_single_unit",
+    }
     assert ibclc_schema["required"] == ["reason"]
     assert ibclc_schema["properties"]["urgency"]["enum"] == ["routine", "soon", "urgent"]
 

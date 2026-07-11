@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 from typing import Any
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from ...core.errors import ApiError
 from ..audit import IdempotencyKey, IdempotencyService, OutboxService, parse_idempotency_response_ref, request_hash
@@ -17,6 +18,8 @@ AGENT_ACTION_APPLY_JOB = "agent.action.apply"
 DEFAULT_RUNTIME_PATTERN = "langgraph_sdk"
 DEFAULT_GRAPH_VERSION = "momcozy-agent-v1"
 TERMINAL_RUN_STATUSES = {"completed", "failed", "cancelled", "expired"}
+MAX_AGENT_RUN_ATTACHMENTS = 20
+MAX_FORM_SUBMISSION_BYTES = 16_384
 
 
 class AgentRuntimeService:
@@ -76,14 +79,14 @@ class AgentRuntimeService:
         if normalized_runtime_pattern != DEFAULT_RUNTIME_PATTERN:
             raise ApiError(code="validation_failed", message="Only langgraph_sdk runtime is supported.", status=422)
         normalized_message = _normalize_text(message, max_length=8000, required=True)
-        safe_attachments = attachments or []
+        requested_attachments = attachments or []
         idempotency_record = await self._reserve_run_idempotency(
             actor_user_id=actor_user_id,
             key=idempotency_key,
             payload={
                 "thread_id": str(thread_id or ""),
                 "message": normalized_message,
-                "attachments": safe_attachments,
+                "attachments": requested_attachments,
                 "runtime_pattern": normalized_runtime_pattern,
                 "graph_version": graph_version or DEFAULT_GRAPH_VERSION,
                 "prompt_version": prompt_version or "",
@@ -93,6 +96,10 @@ class AgentRuntimeService:
             return await self._replay_run(owner_user_id=actor_user_id, response_ref=idempotency_record.response_ref)
 
         try:
+            safe_attachments = await self._verified_run_attachments(
+                actor_user_id=actor_user_id,
+                attachments=requested_attachments,
+            )
             thread = await self._get_or_create_thread(actor_user_id=actor_user_id, thread_id=thread_id, title=_title_from_message(normalized_message))
             await self._ensure_no_active_thread_run(owner_user_id=actor_user_id, thread_id=thread.id)
         except ApiError:
@@ -148,6 +155,64 @@ class AgentRuntimeService:
             self._register_run_queue_wakeup(run_id=run.id)
         await self._complete_idempotency(idempotency_record=idempotency_record, response_ref=str(run.id))
         return run
+
+    async def _verified_run_attachments(
+        self,
+        *,
+        actor_user_id: UUID,
+        attachments: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        if len(attachments) > MAX_AGENT_RUN_ATTACHMENTS:
+            raise ApiError(code="validation_failed", message="Too many agent attachments.", status=422)
+        verified: list[dict[str, Any]] = []
+        for attachment in attachments:
+            if str(attachment.get("type") or "").strip() != "form_submission":
+                verified.append(dict(attachment))
+                continue
+            verified.append(
+                await self._verify_form_submission_attachment(
+                    actor_user_id=actor_user_id,
+                    attachment=attachment,
+                )
+            )
+        return verified
+
+    async def _verify_form_submission_attachment(
+        self,
+        *,
+        actor_user_id: UUID,
+        attachment: dict[str, Any],
+    ) -> dict[str, Any]:
+        form_id = _normalize_text(str(attachment.get("form_id") or ""), max_length=120, required=True)
+        artifact_id = _parse_uuid(attachment.get("artifact_id"), error_code="invalid_form_submission")
+        values = attachment.get("values")
+        if not isinstance(values, dict) or not values or len(values) > 100:
+            raise ApiError(code="invalid_form_submission", message="Form submission values are invalid.", status=422)
+        serialized_values = json.dumps(values, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+        if len(serialized_values.encode("utf-8")) > MAX_FORM_SUBMISSION_BYTES:
+            raise ApiError(code="invalid_form_submission", message="Form submission is too large.", status=422)
+
+        artifact = await self.repository.get_artifact_for_owner(
+            artifact_id=artifact_id,
+            owner_user_id=actor_user_id,
+        )
+        artifact_form = artifact.payload.get("form") if artifact is not None and isinstance(artifact.payload, dict) else None
+        artifact_form_id = str(artifact_form.get("id") or "").strip() if isinstance(artifact_form, dict) else ""
+        if artifact is None or artifact.status == "deleted" or artifact.artifact_type != "form" or artifact_form_id != form_id:
+            raise ApiError(code="invalid_form_submission", message="Form submission does not match an active owned form.", status=422)
+
+        submission_id = uuid5(
+            NAMESPACE_URL,
+            f"momcozy-form-submission:{actor_user_id}:{artifact_id}:{form_id}:{request_hash(values)}",
+        )
+        return {
+            "type": "form_submission",
+            "submission_id": str(submission_id),
+            "artifact_id": str(artifact_id),
+            "form_id": form_id,
+            "values": dict(values),
+            "verified": True,
+        }
 
     async def get_run(self, *, owner_user_id: UUID, run_id: UUID) -> AgentRun:
         run = await self.repository.get_run_for_owner(run_id=run_id, owner_user_id=owner_user_id)
@@ -536,6 +601,13 @@ def _normalize_text(value: str | None, *, max_length: int, required: bool = Fals
     if len(normalized) > max_length:
         raise ApiError(code="validation_failed", message="value is too long.", status=422)
     return normalized
+
+
+def _parse_uuid(value: Any, *, error_code: str) -> UUID:
+    try:
+        return UUID(str(value or ""))
+    except (TypeError, ValueError) as exc:
+        raise ApiError(code=error_code, message="Attachment resource id is invalid.", status=422) from exc
 
 
 def _action_outbox_idempotency_key(*, action_id: UUID) -> str:

@@ -483,6 +483,28 @@ class AgentRuntimeRepository:
         result = await self.session.scalars(statement)
         return list(result.all())
 
+    async def get_latest_artifact_for_thread(
+        self,
+        *,
+        thread_id: UUID,
+        owner_user_id: UUID,
+        artifact_type: str,
+    ) -> AgentArtifact | None:
+        statement = (
+            select(AgentArtifact)
+            .join(AgentRun, AgentRun.id == AgentArtifact.run_id)
+            .where(
+                AgentRun.thread_id == thread_id,
+                AgentRun.actor_user_id == owner_user_id,
+                AgentArtifact.owner_user_id == owner_user_id,
+                AgentArtifact.artifact_type == artifact_type,
+                AgentArtifact.status != "deleted",
+            )
+            .order_by(AgentArtifact.created_at.desc(), AgentArtifact.id.desc())
+            .limit(1)
+        )
+        return cast(AgentArtifact | None, await self.session.scalar(statement))
+
     async def get_artifact_for_owner(self, *, artifact_id: UUID, owner_user_id: UUID) -> AgentArtifact | None:
         statement = (
             select(AgentArtifact)

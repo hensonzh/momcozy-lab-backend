@@ -262,6 +262,7 @@ def test_legacy_artifact_tool_handler_returns_old_form_card_and_cart_envelopes()
             _context(
                 actor=actor,
                 args={
+                    "form_submission_id": "submission-1",
                     "confirmed_form_data": {
                         "due_date_or_week": "36 周",
                         "first_birth": "是",
@@ -284,6 +285,7 @@ def test_legacy_artifact_tool_handler_returns_old_form_card_and_cart_envelopes()
     assert card_result["assistant_followup"]["kind"] == "hospital_bag_cart"
     assert runtime_service.artifact.artifact_type == "hospital_bag_card"
     assert runtime_service.artifact.payload["card"]["card_json"]["title"] == "待产包"
+    assert runtime_service.artifact.payload["source_form_submission_id"] == "submission-1"
     assert runtime_service.calls[-1]["emit_event"] is False
 
     cart_result = asyncio.run(

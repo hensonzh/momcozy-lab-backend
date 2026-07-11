@@ -44,6 +44,85 @@ def test_agent_runtime_service_creates_run_with_thread_message_events_and_idempo
     assert idempotency_service.completed_response_ref == str(run.id)
 
 
+def test_agent_runtime_service_verifies_form_submission_attachment_against_owned_form_artifact() -> None:
+    owner_user_id = uuid4()
+    repository = FakeAgentRuntimeRepository()
+    repository.artifact = AgentArtifact(
+        id=uuid4(),
+        run_id=uuid4(),
+        owner_user_id=owner_user_id,
+        artifact_type="form",
+        schema_version="1.0",
+        status="created",
+        payload={"form": {"id": "hospital_bag_intake"}},
+        raw_payload_ref="",
+    )
+    service = AgentRuntimeService(repository=repository)
+
+    asyncio.run(
+        service.create_run(
+            actor_user_id=owner_user_id,
+            thread_id=None,
+            message="我已提交待产包信息采集表单。",
+            attachments=[
+                {
+                    "type": "form_submission",
+                    "artifact_id": str(repository.artifact.id),
+                    "form_id": "hospital_bag_intake",
+                    "values": {"due_date_or_week": "32周", "birth_path": "顺产"},
+                }
+            ],
+        )
+    )
+
+    attachment = repository.messages[0].content["attachments"][0]
+    assert attachment == {
+        "type": "form_submission",
+        "submission_id": attachment["submission_id"],
+        "artifact_id": str(repository.artifact.id),
+        "form_id": "hospital_bag_intake",
+        "values": {"due_date_or_week": "32周", "birth_path": "顺产"},
+        "verified": True,
+    }
+    assert UUID(attachment["submission_id"])
+
+
+def test_agent_runtime_service_rejects_form_submission_for_mismatched_artifact() -> None:
+    owner_user_id = uuid4()
+    repository = FakeAgentRuntimeRepository()
+    repository.artifact = AgentArtifact(
+        id=uuid4(),
+        run_id=uuid4(),
+        owner_user_id=owner_user_id,
+        artifact_type="form",
+        schema_version="1.0",
+        status="created",
+        payload={"form": {"id": "birth_plan_card_intake"}},
+        raw_payload_ref="",
+    )
+    service = AgentRuntimeService(repository=repository)
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            service.create_run(
+                actor_user_id=owner_user_id,
+                thread_id=None,
+                message="我已提交待产包信息采集表单。",
+                attachments=[
+                    {
+                        "type": "form_submission",
+                        "artifact_id": str(repository.artifact.id),
+                        "form_id": "hospital_bag_intake",
+                        "values": {"due_date_or_week": "32周"},
+                    }
+                ],
+            )
+        )
+
+    assert exc_info.value.code == "invalid_form_submission"
+    assert repository.messages == []
+
+
 def test_agent_runtime_service_cancels_run_idempotently_and_replays_events() -> None:
     owner_user_id = uuid4()
     repository = FakeAgentRuntimeRepository()

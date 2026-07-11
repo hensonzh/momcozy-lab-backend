@@ -75,6 +75,7 @@ class ToolExecutor:
         tool_name: str,
         call_id: str,
         args: dict[str, Any],
+        trusted_args: dict[str, Any] | None = None,
         handler_override: ToolHandler | None = None,
     ) -> ToolExecutionResult:
         started_at = perf_counter()
@@ -131,7 +132,7 @@ class ToolExecutor:
                             run_id=run_id,
                             tool_name=tool_name,
                             call_id=call_id,
-                            args=args,
+                            args={**args, **(trusted_args or {})},
                         )
                     )
                 ),

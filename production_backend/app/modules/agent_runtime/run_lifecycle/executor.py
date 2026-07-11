@@ -73,6 +73,11 @@ LOAD_SERVICE_SKILL_TOOL_NAME = "load_service_skill"
 LOGGER = logging.getLogger("production_backend.agent_runtime.executor")
 LOAD_SERVICE_SKILL_INPUT_SCHEMA = tool_input_schema("LoadServiceSkillInput")
 DEFAULT_RESIDENT_SERVICE_SKILL_TTL_TURNS = 3
+FORM_TOOL_IDS = {
+    "hospital_bag_card_create": "hospital_bag_intake",
+    "labor_communication_card_create": "birth_plan_card_intake",
+}
+FORM_CREATION_TOOL_NAMES = {"birth_plan_form_create", "hospital_bag_form_create"}
 
 
 @dataclass(frozen=True)
@@ -158,6 +163,8 @@ class AgentRuntimeExecutor:
         self._run_assistant_message_ids: dict[UUID, UUID] = {}
         self._run_text_stream_buffers: dict[UUID, str] = {}
         self._run_text_stream_emitted: dict[UUID, str] = {}
+        self._run_trusted_form_submissions: dict[UUID, dict[str, dict[str, Any]]] = {}
+        self._run_business_facts: dict[UUID, dict[ServiceSkillId, dict[str, Any]]] = {}
         self._unified_load_service_skill = isinstance(self.tool_executor, ToolExecutor)
 
     async def __call__(self, run: AgentRun) -> AgentRunExecutionResult:
@@ -172,8 +179,10 @@ class AgentRuntimeExecutor:
         self._run_loaded_service_skill_ids[run.id] = set()
         self._run_text_stream_buffers[run.id] = ""
         self._run_text_stream_emitted[run.id] = ""
+        self._run_business_facts[run.id] = {}
         try:
             turn_context = await self._load_turn_context(run=run)
+            self._run_trusted_form_submissions[run.id] = _trusted_form_submissions(turn_context.current_message)
             if turn_context.resident_loaded_service_skill is not None:
                 self._run_loaded_service_skill_ids[run.id].add(_text(turn_context.resident_loaded_service_skill, "service_skill_id"))
             tool_catalog = self._tool_catalog_for_turn()
@@ -199,6 +208,8 @@ class AgentRuntimeExecutor:
             self._run_loaded_service_skill_ids.pop(run.id, None)
             self._run_text_stream_buffers.pop(run.id, None)
             self._run_text_stream_emitted.pop(run.id, None)
+            self._run_trusted_form_submissions.pop(run.id, None)
+            self._run_business_facts.pop(run.id, None)
 
     async def _load_turn_context(self, *, run: AgentRun) -> _AgentTurnContext:
         timings_ms: dict[str, float] = {}
@@ -595,6 +606,7 @@ class AgentRuntimeExecutor:
             run_id=context.run_id,
             service_skill_id=skill_id,
         ) if self.business_facts_projector is not None else {}
+        self._run_business_facts.setdefault(context.run_id, {})[skill_id] = facts
         output = _load_service_skill_output(
             skill=skill,
             recommended_tools=_recommended_tools_for_service_skill(
@@ -657,6 +669,9 @@ class AgentRuntimeExecutor:
             "call_id": f"sdk-{sdk_name}-{uuid4().hex}",
             "args": args,
         }
+        trusted_args = await self._trusted_tool_args(run=run, contract_name=contract_name)
+        if trusted_args:
+            execute_kwargs["trusted_args"] = trusted_args
         if contract_name == LOAD_SERVICE_SKILL_TOOL_NAME and isinstance(self.tool_executor, ToolExecutor):
             result = await self.tool_executor.execute(
                 **execute_kwargs,
@@ -666,6 +681,48 @@ class AgentRuntimeExecutor:
             result = await self.tool_executor.execute(**execute_kwargs)
         await self._append_progress(run=run, phase="model_reasoning_after_tool", label="我接着处理下一步")
         return json.dumps(result.safe_output, sort_keys=True)
+
+    async def _trusted_tool_args(self, *, run: AgentRun, contract_name: str) -> dict[str, Any]:
+        expected_form_id = FORM_TOOL_IDS.get(contract_name)
+        if expected_form_id is not None:
+            submission = self._run_trusted_form_submissions.get(run.id, {}).get(expected_form_id)
+            if submission is None:
+                return {}
+            return {
+                "confirmed_form_data": _dict(submission, "values"),
+                "form_submission_id": _text(submission, "submission_id"),
+            }
+        if contract_name in FORM_CREATION_TOOL_NAMES:
+            facts = await self._birth_prep_business_facts(run=run)
+            default_values = _birth_prep_form_default_values(facts)
+            return {"default_values": default_values} if default_values else {}
+        if contract_name == "hospital_bag_cart_update":
+            groups = await self._latest_hospital_bag_cart_groups(run=run)
+            return {"groups": groups} if groups else {}
+        return {}
+
+    async def _birth_prep_business_facts(self, *, run: AgentRun) -> dict[str, Any]:
+        cached = self._run_business_facts.setdefault(run.id, {}).get(ServiceSkillId.BIRTH_PREP)
+        if cached is not None:
+            return cached
+        facts = await self._fresh_business_facts_for_skill(run=run, skill_id=ServiceSkillId.BIRTH_PREP)
+        self._run_business_facts[run.id][ServiceSkillId.BIRTH_PREP] = facts
+        return facts
+
+    async def _latest_hospital_bag_cart_groups(self, *, run: AgentRun) -> list[dict[str, Any]]:
+        loader = getattr(self.repository, "get_latest_artifact_for_thread", None)
+        if not callable(loader):
+            return []
+        artifact = await loader(
+            thread_id=run.thread_id,
+            owner_user_id=run.actor_user_id,
+            artifact_type="hospital_bag_cart",
+        )
+        if artifact is None or not isinstance(artifact.payload, dict):
+            return []
+        cart_update = artifact.payload.get("cart_update")
+        groups = cart_update.get("groups") if isinstance(cart_update, dict) else None
+        return [dict(group) for group in groups if isinstance(group, dict)] if isinstance(groups, list) else []
 
     async def _generate_quick_replies(
         self,
@@ -731,6 +788,7 @@ class AgentRuntimeExecutor:
         )
         try:
             facts = await self._fresh_business_facts_for_skill(run=run, skill_id=skill_id)
+            self._run_business_facts.setdefault(run.id, {})[skill_id] = facts
             output = _load_service_skill_output(
                 skill=skill,
                 recommended_tools=_recommended_tools_for_service_skill(
@@ -1603,6 +1661,48 @@ def _message_text(message: AgentMessage) -> str:
     if isinstance(text, str):
         return text
     return ""
+
+
+def _trusted_form_submissions(message: AgentMessage) -> dict[str, dict[str, Any]]:
+    content = message.content if isinstance(message.content, dict) else {}
+    attachments = content.get("attachments")
+    if not isinstance(attachments, list):
+        return {}
+    submissions: dict[str, dict[str, Any]] = {}
+    for attachment in attachments:
+        if not isinstance(attachment, dict):
+            continue
+        if attachment.get("type") != "form_submission" or attachment.get("verified") is not True:
+            continue
+        form_id = _text(attachment, "form_id")
+        submission_id = _text(attachment, "submission_id")
+        values = attachment.get("values")
+        if not form_id or not submission_id or not isinstance(values, dict):
+            continue
+        submissions[form_id] = {
+            "submission_id": submission_id,
+            "artifact_id": _text(attachment, "artifact_id"),
+            "values": dict(values),
+        }
+    return submissions
+
+
+def _birth_prep_form_default_values(facts: dict[str, Any]) -> dict[str, Any]:
+    pregnancy = _dict(facts, "pregnancy")
+    profile = _dict(pregnancy, "profile") or _dict(facts, "profile")
+    due_date_or_week = next(
+        (
+            value
+            for value in (
+                _text(pregnancy, "due_date_or_week"),
+                _text(pregnancy, "current_week"),
+                _text(profile, "delivery_date"),
+            )
+            if value
+        ),
+        "",
+    )
+    return {"due_date_or_week": due_date_or_week} if due_date_or_week else {}
 
 
 def _required_text(payload: dict[str, Any], key: str) -> str:

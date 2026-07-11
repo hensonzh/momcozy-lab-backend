@@ -498,15 +498,19 @@ def artifact_record_from_legacy_result(result: dict[str, Any]) -> dict[str, Any]
     card = _dict(result.get("card"))
     if card:
         card_json = _dict(card.get("card_json"))
+        payload = {
+            "tool_name": result.get("tool_name"),
+            "card": card,
+            "card_json": card_json,
+            "assistant_followup": result.get("assistant_followup"),
+        }
+        source_form_submission_id = _text(result.get("source_form_submission_id"))
+        if source_form_submission_id:
+            payload["source_form_submission_id"] = source_form_submission_id
         return {
             "artifact_type": _text(card.get("card_type")) or _text(card_json.get("card_type")) or "card",
             "schema_version": _text(card.get("schema_version")) or _text(card_json.get("schema_version")) or "1.0",
-            "payload": {
-                "tool_name": result.get("tool_name"),
-                "card": card,
-                "card_json": card_json,
-                "assistant_followup": result.get("assistant_followup"),
-            },
+            "payload": payload,
         }
     cart_update = _dict(result.get("cart_update"))
     if cart_update:
@@ -574,6 +578,7 @@ def hospital_bag_card_result(args: dict[str, Any]) -> dict[str, Any]:
         "tool_name": "hospital_bag_card_create",
         "status": "card_created",
         "card": {"card_type": "hospital_bag_card", "schema_version": "1.0", "card_json": card_json},
+        "source_form_submission_id": _text(args.get("form_submission_id")),
         "assistant_followup": {
             "kind": "hospital_bag_cart",
             "message": (
@@ -601,6 +606,7 @@ def labor_communication_card_result(args: dict[str, Any]) -> dict[str, Any]:
         "tool_name": "labor_communication_card_create",
         "status": "card_created",
         "card": {"card_type": "birth_plan_card", "schema_version": "1.0", "card_json": card_json},
+        "source_form_submission_id": _text(args.get("form_submission_id")),
         "assistant_followup": "我已经把你的生产偏好整理成沟通单了。可以带着它和医生、助产士或家人一起确认。",
     }
 

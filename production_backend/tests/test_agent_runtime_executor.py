@@ -530,17 +530,17 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
         "records_pumping_record_delete_propose",
         "support_ticket_propose",
     )
-    assert backend.tool_schemas["hospital_bag_card_create"]["additionalProperties"] is True
-    assert backend.tool_schemas["hospital_bag_card_create"]["properties"]["confirmed_form_data"]["type"] == "object"
-    assert backend.tool_schemas["hospital_bag_cart_update"]["properties"]["groups"]["type"] == "array"
+    assert backend.tool_schemas["hospital_bag_card_create"]["additionalProperties"] is False
+    assert backend.tool_schemas["hospital_bag_card_create"]["properties"] == {}
+    assert backend.tool_schemas["hospital_bag_cart_update"]["required"] == ["action"]
     assert backend.tool_schemas["devices_guidance_assets_read"]["properties"]["limit"]["maximum"] == 20
     assert backend.tool_schemas["devices_guidance_assets_read"]["properties"]["content_type"]["type"] == "string"
     assert backend.tool_schemas["devices_pump_status_read"]["properties"]["limit"]["maximum"] == 20
     assert backend.tool_schemas["diary_entry_upsert_propose"]["required"] == ["entry_date"]
     assert backend.tool_schemas["diary_entry_upsert_propose"]["properties"]["content"]["maxLength"] == 5000
     assert backend.tool_schemas["files_vision_summary_read"]["required"] == ["file_id"]
-    assert backend.tool_schemas["hospital_bag_cart_update"]["additionalProperties"] is True
-    assert backend.tool_schemas["hospital_bag_cart_update"]["properties"]["groups"]["type"] == "array"
+    assert backend.tool_schemas["hospital_bag_cart_update"]["additionalProperties"] is False
+    assert "groups" not in backend.tool_schemas["hospital_bag_cart_update"]["properties"]
     assert backend.tool_schemas["notifications_milk_reminder_propose"]["required"] == ["title"]
     assert backend.tool_schemas["plans_calendar_read"]["properties"]["task_date"]["maxLength"] == 20
     assert backend.tool_schemas["plans_current_read"]["properties"]["limit"]["maximum"] == 20
@@ -1529,6 +1529,166 @@ def test_agent_runtime_executor_loads_skill_through_unified_tool_executor() -> N
     assert "records.milk_status.read" in loaded_event.payload["recommended_tool_contracts"]
 
 
+def test_agent_runtime_executor_injects_verified_form_submission_as_non_persistent_trusted_tool_args() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(
+        thread_id=thread_id,
+        run_id=run.id,
+        role="user",
+        text="我已提交待产包信息采集表单。",
+        sequence=1,
+        content_overrides={
+            "attachments": [
+                {
+                    "type": "form_submission",
+                    "submission_id": str(uuid4()),
+                    "artifact_id": str(uuid4()),
+                    "form_id": "hospital_bag_intake",
+                    "values": {"due_date_or_week": "32周", "birth_path": "顺产"},
+                    "verified": True,
+                }
+            ]
+        },
+    )
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user, run=run)
+    registry = default_tool_registry()
+    captured_args: dict[str, Any] = {}
+
+    async def capture_handler(context: ToolHandlerContext) -> dict[str, Any]:
+        captured_args.update(context.args)
+        return {"status": "card_created"}
+
+    tool_executor = ToolExecutor(
+        registry=registry,
+        repository=repository,
+        handlers={"hospital_bag_card_create": capture_handler},
+    )
+    backend = ScriptedSdkBackend(
+        [
+            scripted_sdk_response(
+                final_text="待产包清单已生成。",
+                tool_invocations=(scripted_tool_invocation("hospital_bag_card_create", {}),),
+            )
+        ]
+    )
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            tool_registry=registry,
+            tool_executor=tool_executor,
+        ).execute(run=run)
+    )
+
+    attachment = current_user.content["attachments"][0]
+    assert result.status == "completed"
+    assert repository.tool_call.safe_args == {}
+    assert captured_args == {
+        "confirmed_form_data": {"due_date_or_week": "32周", "birth_path": "顺产"},
+        "form_submission_id": attachment["submission_id"],
+    }
+
+
+def test_agent_runtime_executor_prefills_form_from_runtime_business_facts_without_model_args() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="开始准备待产包", sequence=1)
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user, run=run)
+    registry = default_tool_registry()
+    captured_args: dict[str, Any] = {}
+
+    async def capture_handler(context: ToolHandlerContext) -> dict[str, Any]:
+        captured_args.update(context.args)
+        return {"status": "form_created"}
+
+    tool_executor = ToolExecutor(
+        registry=registry,
+        repository=repository,
+        handlers={"hospital_bag_form_create": capture_handler},
+    )
+    business_facts_projector = FakeBusinessFactsProjector(
+        facts={"pregnancy": {"profile": {"delivery_date": "2026-09-18"}}}
+    )
+    backend = ScriptedSdkBackend(
+        [
+            scripted_sdk_response(
+                final_text="信息采集表已准备好。",
+                tool_invocations=(scripted_tool_invocation("hospital_bag_form_create", {}),),
+            )
+        ]
+    )
+
+    asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            tool_registry=registry,
+            tool_executor=tool_executor,
+            business_facts_projector=business_facts_projector,
+        ).execute(run=run)
+    )
+
+    assert repository.tool_call.safe_args == {}
+    assert captured_args == {"default_values": {"due_date_or_week": "2026-09-18"}}
+    assert business_facts_projector.calls[0]["service_skill_id"] == ServiceSkillId.BIRTH_PREP
+
+
+def test_agent_runtime_executor_injects_latest_cart_state_without_exposing_groups_to_model() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="把纸尿裤删掉", sequence=1)
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user, run=run)
+    repository.latest_thread_artifact = AgentArtifact(
+        id=uuid4(),
+        run_id=uuid4(),
+        owner_user_id=run.actor_user_id,
+        artifact_type="hospital_bag_cart",
+        schema_version="1.0",
+        status="created",
+        payload={"cart_update": {"groups": [{"title": "宝宝用品", "items": [{"id": "baby-diaper", "qty": 1}]}]}},
+        raw_payload_ref="",
+    )
+    registry = default_tool_registry()
+    captured_args: dict[str, Any] = {}
+
+    async def capture_handler(context: ToolHandlerContext) -> dict[str, Any]:
+        captured_args.update(context.args)
+        return {"status": "cart_updated"}
+
+    tool_executor = ToolExecutor(
+        registry=registry,
+        repository=repository,
+        handlers={"hospital_bag_cart_update": capture_handler},
+    )
+    backend = ScriptedSdkBackend(
+        [
+            scripted_sdk_response(
+                final_text="已经移除纸尿裤。",
+                tool_invocations=(
+                    scripted_tool_invocation(
+                        "hospital_bag_cart_update",
+                        {"action": "remove_items", "item_ids": ["baby-diaper"]},
+                    ),
+                ),
+            )
+        ]
+    )
+
+    asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            tool_registry=registry,
+            tool_executor=tool_executor,
+        ).execute(run=run)
+    )
+
+    assert repository.tool_call.safe_args == {"action": "remove_items", "item_ids": ["baby-diaper"]}
+    assert captured_args["groups"] == [{"title": "宝宝用品", "items": [{"id": "baby-diaper", "qty": 1}]}]
+
+
 def test_agent_runtime_executor_persists_sdk_action_proposal_and_waits_for_confirmation() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)
@@ -1824,6 +1984,7 @@ class FakeRuntimeRepository:
         self.tool_call = None
         self.tool_output = None
         self.run_summaries = list(run_summaries or [])
+        self.latest_thread_artifact = None
 
     async def get_latest_user_message_for_run(self, *, run_id):
         if self.current_message is not None and self.current_message.run_id == run_id:
@@ -1940,6 +2101,14 @@ class FakeRuntimeRepository:
 
     async def list_artifacts_for_run(self, *, run_id):
         return [artifact for artifact in self.artifacts if artifact.run_id == run_id]
+
+    async def get_latest_artifact_for_thread(self, **kwargs):
+        artifact = self.latest_thread_artifact
+        if artifact is None:
+            return None
+        if artifact.owner_user_id != kwargs["owner_user_id"] or artifact.artifact_type != kwargs["artifact_type"]:
+            return None
+        return artifact
 
     async def list_tool_outputs_for_run(self, *, run_id):
         if self.tool_call is None or self.tool_output is None or self.tool_call.run_id != run_id:

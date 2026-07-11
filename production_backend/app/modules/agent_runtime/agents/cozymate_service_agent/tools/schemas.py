@@ -578,6 +578,87 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "idempotency_key": {"type": "string", "maxLength": 255},
         },
     },
+    "EmptyArtifactDecision": {
+        "title": "EmptyArtifactDecision",
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {},
+    },
+    "HospitalBagCartMutation": {
+        "title": "HospitalBagCartMutation",
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["action"],
+        "properties": {
+            "action": {
+                "type": "string",
+                "enum": [
+                    "replace_pump_model",
+                    "add_pump_model",
+                    "optimize_budget",
+                    "remove_items",
+                    "restore_items",
+                    "replace_items",
+                    "mark_provided",
+                    "mark_owned",
+                    "update_quantity",
+                    "reset_cart",
+                    "clarify",
+                ],
+            },
+            "item_ids": {
+                "type": "array",
+                "maxItems": 40,
+                "items": {"type": "string", "maxLength": 120},
+            },
+            "product_sku_id": {"type": ["string", "null"], "maxLength": 120},
+            "quantity_updates": {
+                "type": "array",
+                "maxItems": 40,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["item_id", "qty"],
+                    "properties": {
+                        "item_id": {"type": "string", "maxLength": 120},
+                        "qty": {"type": "integer", "minimum": 0, "maximum": 99},
+                    },
+                },
+            },
+            "target_budget": {"type": ["number", "null"], "minimum": 0},
+            "budget_mode": {"type": "string", "enum": ["under", "around", "cheaper", "minimal", "none"]},
+            "preference": {
+                "type": "string",
+                "enum": ["balanced", "cheapest", "comfort", "breastfeeding", "minimal", "budget", "portable", "performance", "app", "simple", "premium"],
+            },
+            "preserve_item_ids": {
+                "type": "array",
+                "maxItems": 40,
+                "items": {"type": "string", "maxLength": 120},
+            },
+            "allow_remove_pump": {"type": "boolean"},
+        },
+    },
+    "HospitalBagPumpRecommendation": {
+        "title": "HospitalBagPumpRecommendation",
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "requested_model": {"type": ["string", "null"], "maxLength": 120},
+            "use_case": {
+                "type": "string",
+                "enum": ["unknown", "hospital_backup", "daily_home", "work_pumping", "portable", "comfort", "performance", "high_output", "budget"],
+            },
+            "feeding_intention": {"type": "string", "enum": ["unknown", "breastfeeding", "mixed", "formula"]},
+            "preference": {
+                "type": "string",
+                "enum": ["balanced", "cheapest", "comfort", "breastfeeding", "minimal", "budget", "portable", "performance", "app", "simple", "premium"],
+            },
+            "target_budget_usd": {"type": ["number", "null"], "minimum": 0},
+            "must_have_app": {"type": ["boolean", "null"]},
+            "need_single_unit": {"type": ["boolean", "null"]},
+        },
+    },
     "LegacyArtifactToolInput": {
         "title": "LegacyArtifactToolInput",
         "type": "object",
