@@ -53,6 +53,17 @@ class S3ObjectStorage:
         body = response["Body"]
         return await asyncio.to_thread(body.read)
 
+    async def get_byte_range(self, *, key: str, start: int, end: int) -> bytes:
+        normalized_key = LocalObjectStorage._normalize_key(key)
+        response = await asyncio.to_thread(
+            self.client.get_object,
+            Bucket=self.bucket,
+            Key=normalized_key,
+            Range=f"bytes={start}-{end}",
+        )
+        body = response["Body"]
+        return await asyncio.to_thread(body.read)
+
     async def delete(self, *, key: str) -> None:
         normalized_key = LocalObjectStorage._normalize_key(key)
         await asyncio.to_thread(self.client.delete_object, Bucket=self.bucket, Key=normalized_key)

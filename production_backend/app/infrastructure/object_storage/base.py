@@ -19,5 +19,8 @@ class ObjectStorage(Protocol):
     async def get_bytes(self, *, key: str) -> bytes:
         raise NotImplementedError
 
+    async def get_byte_range(self, *, key: str, start: int, end: int) -> bytes:
+        raise NotImplementedError
+
     async def delete(self, *, key: str) -> None:
         raise NotImplementedError
