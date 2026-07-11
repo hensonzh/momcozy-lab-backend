@@ -70,6 +70,18 @@ services:
       minio-init:
         condition: service_completed_successfully
 
+  memory-worker:
+    <<: *backend-image
+    command: python -m production_backend.scripts.run_memory_consolidation
+    environment:
+      AGENT_MEMORY_CONSOLIDATION_ENABLED: "true"
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 60s
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   postgres:
     image: postgres:16
     environment:

@@ -67,6 +67,9 @@ OPENAI_RESPONSES_STORE=false
 OPENAI_AGENT_USE_RESPONSES=true
 AGENT_QUICK_REPLY_MODEL=gpt-5.4-nano
 AGENT_QUICK_REPLY_TIMEOUT_SECONDS=3.0
+AGENT_MEMORY_CONSOLIDATION_MODEL=gpt-5.4-nano
+AGENT_MEMORY_CONSOLIDATION_TIMEZONE=Asia/Shanghai
+AGENT_MEMORY_CONSOLIDATION_HOUR=3
 MINIMAX_API_KEY=...
 MINIMAX_BASE_URL=https://api.minimax.io/v1
 MINIMAX_MODEL=MiniMax-M3
@@ -80,7 +83,11 @@ round-trips required response and reasoning items within the active run.
 
 The main agent uses `OPENAI_MODEL` and `OPENAI_REASONING_EFFORT`. Quick replies
 use `AGENT_QUICK_REPLY_MODEL` as a separate lightweight finalizer and do not
-persist to the message database.
+persist to the message database. Long-term memory extraction is also outside
+the live run path: the independent `memory-worker` reads only completed
+conversations for the previous local day, uses
+`AGENT_MEMORY_CONSOLIDATION_MODEL`, and publishes a bounded database snapshot
+that the live worker reads with one primary-key query.
 
 Local and server-test development use Docker Compose managed Postgres, Redis,
 and MinIO. Production should point the same variables at managed Postgres,

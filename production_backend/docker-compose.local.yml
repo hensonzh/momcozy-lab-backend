@@ -78,6 +78,21 @@ services:
       minio-init:
         condition: service_completed_successfully
 
+  memory-worker:
+    build:
+      context: ..
+      dockerfile: production_backend/Dockerfile
+    command: python -m production_backend.scripts.run_memory_consolidation
+    env_file:
+      - ${MOMCOZY_BACKEND_ENV_FILE:-env/compose.local.env}
+    environment:
+      AGENT_MEMORY_CONSOLIDATION_ENABLED: "true"
+    profiles:
+      - workers
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   postgres:
     image: postgres:16
     environment:

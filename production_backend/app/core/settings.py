@@ -4,6 +4,7 @@ import os
 from dataclasses import dataclass
 from functools import lru_cache
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 LOCAL_DATABASE_URL = "postgresql+asyncpg://momcozy:momcozy@localhost:5432/momcozy"
@@ -87,6 +88,14 @@ class Settings:
     openai_agent_prompt_version: str = "momcozy-agent-prompt-v1"
     agent_quick_reply_model: str = "gpt-5.4-nano"
     agent_quick_reply_timeout_seconds: float = 3.0
+    agent_memory_consolidation_enabled: bool = False
+    agent_memory_consolidation_model: str = "gpt-5.4-nano"
+    agent_memory_consolidation_timeout_seconds: float = 30.0
+    agent_memory_consolidation_timezone: str = "Asia/Shanghai"
+    agent_memory_consolidation_hour: int = 3
+    agent_memory_consolidation_max_users: int = 500
+    agent_memory_consolidation_message_limit: int = 200
+    agent_memory_consolidation_extractor_version: str = "memory-extractor-v1"
     voice_provider: str = "disabled"
     voice_api_key: str = ""
     voice_app_id: str = ""
@@ -176,6 +185,38 @@ class Settings:
                 "AGENT_QUICK_REPLY_TIMEOUT_SECONDS",
                 cls.agent_quick_reply_timeout_seconds,
             ),
+            agent_memory_consolidation_enabled=_env_bool(
+                "AGENT_MEMORY_CONSOLIDATION_ENABLED",
+                cls.agent_memory_consolidation_enabled,
+            ),
+            agent_memory_consolidation_model=_env(
+                "AGENT_MEMORY_CONSOLIDATION_MODEL",
+                cls.agent_memory_consolidation_model,
+            ),
+            agent_memory_consolidation_timeout_seconds=_env_float(
+                "AGENT_MEMORY_CONSOLIDATION_TIMEOUT_SECONDS",
+                cls.agent_memory_consolidation_timeout_seconds,
+            ),
+            agent_memory_consolidation_timezone=_env(
+                "AGENT_MEMORY_CONSOLIDATION_TIMEZONE",
+                cls.agent_memory_consolidation_timezone,
+            ),
+            agent_memory_consolidation_hour=_env_int(
+                "AGENT_MEMORY_CONSOLIDATION_HOUR",
+                cls.agent_memory_consolidation_hour,
+            ),
+            agent_memory_consolidation_max_users=_env_int(
+                "AGENT_MEMORY_CONSOLIDATION_MAX_USERS",
+                cls.agent_memory_consolidation_max_users,
+            ),
+            agent_memory_consolidation_message_limit=_env_int(
+                "AGENT_MEMORY_CONSOLIDATION_MESSAGE_LIMIT",
+                cls.agent_memory_consolidation_message_limit,
+            ),
+            agent_memory_consolidation_extractor_version=_env(
+                "AGENT_MEMORY_CONSOLIDATION_EXTRACTOR_VERSION",
+                cls.agent_memory_consolidation_extractor_version,
+            ),
             voice_provider=_env("VOICE_PROVIDER", cls.voice_provider).lower(),
             voice_api_key=_env_first(
                 ("VOICE_API_KEY", "VOLC_TTS_API_KEY", "VOLC_REALTIME_VOICE_API_KEY", "VOLCENGINE_TTS_API_KEY"),
@@ -262,8 +303,10 @@ class Settings:
         if self.agent_model_provider not in SUPPORTED_AGENT_MODEL_PROVIDERS:
             errors.append(f"AGENT_MODEL_PROVIDER must be one of {', '.join(sorted(SUPPORTED_AGENT_MODEL_PROVIDERS))}")
         if self.agent_model_provider == "openai":
-            if self.agent_runtime_worker_enabled and not self.openai_api_key:
-                errors.append("OPENAI_API_KEY is required when AGENT_RUNTIME_WORKER_ENABLED is true and AGENT_MODEL_PROVIDER=openai")
+            if (self.agent_runtime_worker_enabled or self.agent_memory_consolidation_enabled) and not self.openai_api_key:
+                errors.append(
+                    "OPENAI_API_KEY is required when an agent worker is enabled and AGENT_MODEL_PROVIDER=openai"
+                )
             if not self.openai_model:
                 errors.append("OPENAI_MODEL is required when AGENT_MODEL_PROVIDER=openai")
             if self.openai_reasoning_effort not in SUPPORTED_OPENAI_REASONING_EFFORTS:
@@ -272,8 +315,10 @@ class Settings:
                     + ", ".join(sorted(SUPPORTED_OPENAI_REASONING_EFFORTS))
                 )
         if self.agent_model_provider == "minimax":
-            if self.agent_runtime_worker_enabled and not self.minimax_api_key:
-                errors.append("MINIMAX_API_KEY is required when AGENT_RUNTIME_WORKER_ENABLED is true and AGENT_MODEL_PROVIDER=minimax")
+            if (self.agent_runtime_worker_enabled or self.agent_memory_consolidation_enabled) and not self.minimax_api_key:
+                errors.append(
+                    "MINIMAX_API_KEY is required when an agent worker is enabled and AGENT_MODEL_PROVIDER=minimax"
+                )
             if not self.minimax_base_url:
                 errors.append("MINIMAX_BASE_URL is required when AGENT_MODEL_PROVIDER=minimax")
             if not self.minimax_model:
@@ -288,6 +333,24 @@ class Settings:
             errors.append("OPENAI_AGENT_PROMPT_VERSION must be at most 80 characters")
         if self.agent_quick_reply_timeout_seconds <= 0:
             errors.append("AGENT_QUICK_REPLY_TIMEOUT_SECONDS must be positive")
+        if self.agent_memory_consolidation_enabled and not self.agent_memory_consolidation_model:
+            errors.append("AGENT_MEMORY_CONSOLIDATION_MODEL is required when memory consolidation is enabled")
+        if self.agent_memory_consolidation_timeout_seconds <= 0:
+            errors.append("AGENT_MEMORY_CONSOLIDATION_TIMEOUT_SECONDS must be positive")
+        if self.agent_memory_consolidation_hour < 0 or self.agent_memory_consolidation_hour > 23:
+            errors.append("AGENT_MEMORY_CONSOLIDATION_HOUR must be between 0 and 23")
+        if self.agent_memory_consolidation_max_users < 1:
+            errors.append("AGENT_MEMORY_CONSOLIDATION_MAX_USERS must be positive")
+        if self.agent_memory_consolidation_message_limit < 1 or self.agent_memory_consolidation_message_limit > 1000:
+            errors.append("AGENT_MEMORY_CONSOLIDATION_MESSAGE_LIMIT must be between 1 and 1000")
+        if not self.agent_memory_consolidation_extractor_version:
+            errors.append("AGENT_MEMORY_CONSOLIDATION_EXTRACTOR_VERSION is required")
+        elif len(self.agent_memory_consolidation_extractor_version) > 80:
+            errors.append("AGENT_MEMORY_CONSOLIDATION_EXTRACTOR_VERSION must be at most 80 characters")
+        try:
+            ZoneInfo(self.agent_memory_consolidation_timezone)
+        except (ZoneInfoNotFoundError, ValueError):
+            errors.append("AGENT_MEMORY_CONSOLIDATION_TIMEZONE must be a valid IANA timezone")
         if self.voice_provider not in SUPPORTED_VOICE_PROVIDERS:
             errors.append(f"VOICE_PROVIDER must be one of {', '.join(sorted(SUPPORTED_VOICE_PROVIDERS))}")
         if self.voice_provider in {"doubao", "volcengine"} and not self.voice_api_key and not (self.voice_app_id and self.voice_access_key):

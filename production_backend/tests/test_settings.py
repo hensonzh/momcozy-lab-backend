@@ -11,6 +11,8 @@ def test_settings_use_current_openai_model_defaults() -> None:
 
     assert settings.openai_model == "gpt-5.6-terra"
     assert settings.agent_quick_reply_model == "gpt-5.4-nano"
+    assert settings.agent_memory_consolidation_model == "gpt-5.4-nano"
+    assert settings.agent_memory_consolidation_enabled is False
 
 
 def test_settings_from_env_reads_infrastructure_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -142,6 +144,28 @@ def test_settings_from_env_reads_agent_worker_controls(monkeypatch: pytest.Monke
     assert settings.openai_agent_prompt_version == "prompt-v2"
     assert settings.agent_quick_reply_model == "quick-reply-test"
     assert settings.agent_quick_reply_timeout_seconds == 0.8
+
+
+def test_settings_from_env_reads_memory_consolidation_controls(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENT_MEMORY_CONSOLIDATION_ENABLED", "true")
+    monkeypatch.setenv("AGENT_MEMORY_CONSOLIDATION_MODEL", "memory-test")
+    monkeypatch.setenv("AGENT_MEMORY_CONSOLIDATION_TIMEOUT_SECONDS", "12.5")
+    monkeypatch.setenv("AGENT_MEMORY_CONSOLIDATION_TIMEZONE", "Asia/Shanghai")
+    monkeypatch.setenv("AGENT_MEMORY_CONSOLIDATION_HOUR", "2")
+    monkeypatch.setenv("AGENT_MEMORY_CONSOLIDATION_MAX_USERS", "250")
+    monkeypatch.setenv("AGENT_MEMORY_CONSOLIDATION_MESSAGE_LIMIT", "120")
+    monkeypatch.setenv("AGENT_MEMORY_CONSOLIDATION_EXTRACTOR_VERSION", "memory-extractor-v2")
+
+    settings = Settings.from_env()
+
+    assert settings.agent_memory_consolidation_enabled is True
+    assert settings.agent_memory_consolidation_model == "memory-test"
+    assert settings.agent_memory_consolidation_timeout_seconds == 12.5
+    assert settings.agent_memory_consolidation_timezone == "Asia/Shanghai"
+    assert settings.agent_memory_consolidation_hour == 2
+    assert settings.agent_memory_consolidation_max_users == 250
+    assert settings.agent_memory_consolidation_message_limit == 120
+    assert settings.agent_memory_consolidation_extractor_version == "memory-extractor-v2"
 
 
 def test_settings_from_env_reads_minimax_agent_provider(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -276,6 +300,13 @@ def test_settings_requires_openai_key_when_agent_worker_is_enabled() -> None:
         settings.validate_for_startup()
 
 
+def test_settings_requires_openai_key_when_memory_consolidation_is_enabled() -> None:
+    settings = Settings(agent_memory_consolidation_enabled=True, agent_model_provider="openai", openai_api_key="")
+
+    with pytest.raises(ValueError, match="OPENAI_API_KEY"):
+        settings.validate_for_startup()
+
+
 def test_settings_requires_minimax_key_when_minimax_agent_worker_is_enabled() -> None:
     settings = Settings(agent_runtime_worker_enabled=True, agent_model_provider="minimax", minimax_api_key="")
 
@@ -306,6 +337,10 @@ def test_settings_reject_invalid_openai_agent_controls() -> None:
         Settings(openai_agent_prompt_version="x" * 81).validate_for_startup()
     with pytest.raises(ValueError, match="AGENT_QUICK_REPLY_TIMEOUT_SECONDS"):
         Settings(agent_quick_reply_timeout_seconds=0).validate_for_startup()
+    with pytest.raises(ValueError, match="AGENT_MEMORY_CONSOLIDATION_HOUR"):
+        Settings(agent_memory_consolidation_hour=24).validate_for_startup()
+    with pytest.raises(ValueError, match="AGENT_MEMORY_CONSOLIDATION_TIMEZONE"):
+        Settings(agent_memory_consolidation_timezone="Mars/Base").validate_for_startup()
 
 
 def test_settings_reject_invalid_outbox_worker_controls() -> None:

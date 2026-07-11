@@ -85,7 +85,7 @@ required to switch providers.
 Agent runs are processed by a separate worker process, not by the API lifespan.
 `make backend-local-up` first builds the local `migrate`, `api`,
 `agent-worker`, and `outbox-worker` images from the current source tree, then
-starts infrastructure, runs Alembic migrations, and starts the three runtime
+starts infrastructure, runs Alembic migrations, and starts the four runtime
 services with recreated containers. The worker processes still run as separate
 Compose services, so they can be restarted or scaled independently. For a fully
 uncached rebuild, run `BACKEND_BUILD_FLAGS=--no-cache make backend-local-up`.
@@ -100,8 +100,10 @@ must be set. The default main runtime uses `gpt-5.6-terra` with low reasoning,
 does not retain provider-side Responses state, and uses the native Responses
 runner. Namespace/deferred tool loading uses hosted `tool_search` while keeping
 the declared tool surface stable between model turns. The quick reply finalizer
-uses `gpt-5.4-nano` separately with reasoning disabled to keep finalization
-lightweight.
+uses `gpt-5.4-nano` separately with reasoning disabled. Long-term memory writes
+are not part of the live agent loop: `memory-worker` uses the same lightweight
+model to consolidate the previous local day's completed conversations into a
+small runtime snapshot.
 
 ```env
 AGENT_MODEL_PROVIDER=openai
@@ -112,6 +114,9 @@ OPENAI_RESPONSES_STORE=false
 OPENAI_AGENT_USE_RESPONSES=true
 AGENT_QUICK_REPLY_MODEL=gpt-5.4-nano
 AGENT_QUICK_REPLY_TIMEOUT_SECONDS=3.0
+AGENT_MEMORY_CONSOLIDATION_MODEL=gpt-5.4-nano
+AGENT_MEMORY_CONSOLIDATION_TIMEZONE=Asia/Shanghai
+AGENT_MEMORY_CONSOLIDATION_HOUR=3
 ```
 
 `OPENAI_AGENT_USE_RESPONSES=false` selects the temporary OpenAI Agents SDK
@@ -161,13 +166,24 @@ OPENAI_RESPONSES_STORE=false
 OPENAI_AGENT_USE_RESPONSES=true
 AGENT_QUICK_REPLY_MODEL=gpt-5.4-nano
 AGENT_QUICK_REPLY_TIMEOUT_SECONDS=3.0
+AGENT_MEMORY_CONSOLIDATION_MODEL=gpt-5.4-nano
+AGENT_MEMORY_CONSOLIDATION_TIMEZONE=Asia/Shanghai
+AGENT_MEMORY_CONSOLIDATION_HOUR=3
+```
+
+The independent memory worker runs once at startup (idempotently) and then at
+the configured local hour. To inspect or backfill one local date without
+starting the scheduler:
+
+```bash
+python -m production_backend.scripts.run_memory_consolidation --once --date 2026-07-10
 ```
 
 ## Production Docker Compose
 
 Use `production_backend/docker-compose.prod.yml` on a server when Postgres,
 Redis, and object storage are managed outside the compose project. The production
-compose starts only `api`, `agent-worker`, and `outbox-worker`; the one-time
+compose starts `api`, `agent-worker`, `outbox-worker`, and `memory-worker`; the one-time
 `migrate` service is available through the `tools` profile.
 
 ```bash
@@ -176,7 +192,7 @@ make backend-prod-up
 ```
 
 `backend-prod-up` builds local runtime images, runs Alembic migrations, and then
-starts the three runtime services with recreated containers. Use
+starts the four runtime services with recreated containers. Use
 `backend-prod-services` for restarts that should not run migrations again; it
 still builds runtime images before restart. See
 `production_backend/docs/deployment-runbook.md` for reverse proxy, scaling, and

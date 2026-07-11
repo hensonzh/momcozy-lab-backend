@@ -17,7 +17,7 @@ backend-local-build:
 	$(MAKE) backend-build
 
 backend-build:
-	$(COMPOSE) --profile tools --profile workers build $(BACKEND_BUILD_FLAGS) migrate api agent-worker outbox-worker
+	$(COMPOSE) --profile tools --profile workers build $(BACKEND_BUILD_FLAGS) migrate api agent-worker outbox-worker memory-worker
 
 backend-local-up:
 	$(MAKE) backend-up
@@ -26,7 +26,7 @@ backend-up:
 	$(MAKE) backend-build COMPOSE_ENV_FILE=$(COMPOSE_ENV_FILE) BACKEND_BUILD_FLAGS="$(BACKEND_BUILD_FLAGS)"
 	$(COMPOSE) up -d postgres redis minio minio-init
 	$(COMPOSE) --profile tools run --rm migrate
-	$(COMPOSE) --profile workers up -d --force-recreate api agent-worker outbox-worker
+	$(COMPOSE) --profile workers up -d --force-recreate api agent-worker outbox-worker memory-worker
 
 backend-down:
 	$(COMPOSE) down
@@ -42,14 +42,14 @@ backend-local-workers:
 	$(MAKE) backend-workers
 
 backend-workers:
-	$(COMPOSE) --profile workers build $(BACKEND_BUILD_FLAGS) agent-worker outbox-worker
-	$(COMPOSE) --profile workers up -d --force-recreate agent-worker outbox-worker
+	$(COMPOSE) --profile workers build $(BACKEND_BUILD_FLAGS) agent-worker outbox-worker memory-worker
+	$(COMPOSE) --profile workers up -d --force-recreate agent-worker outbox-worker memory-worker
 
 backend-local-minio:
 	$(COMPOSE) up -d minio minio-init
 
 backend-test-build:
-	$(TEST_COMPOSE) --profile tools --profile workers build $(BACKEND_BUILD_FLAGS) migrate api agent-worker outbox-worker
+	$(TEST_COMPOSE) --profile tools --profile workers build $(BACKEND_BUILD_FLAGS) migrate api agent-worker outbox-worker memory-worker
 
 backend-test-migrate:
 	$(TEST_COMPOSE) --profile tools build $(BACKEND_BUILD_FLAGS) migrate
@@ -59,11 +59,11 @@ backend-test-up:
 	$(MAKE) backend-test-build TEST_COMPOSE_ENV_FILE=$(TEST_COMPOSE_ENV_FILE) BACKEND_BUILD_FLAGS="$(BACKEND_BUILD_FLAGS)"
 	$(TEST_COMPOSE) up -d postgres redis minio minio-init
 	$(MAKE) backend-test-migrate TEST_COMPOSE_ENV_FILE=$(TEST_COMPOSE_ENV_FILE)
-	$(TEST_COMPOSE) up -d --force-recreate api agent-worker outbox-worker
+	$(TEST_COMPOSE) up -d --force-recreate api agent-worker outbox-worker memory-worker
 
 backend-test-services:
-	$(TEST_COMPOSE) --profile workers build $(BACKEND_BUILD_FLAGS) api agent-worker outbox-worker
-	$(TEST_COMPOSE) up -d --force-recreate api agent-worker outbox-worker
+	$(TEST_COMPOSE) --profile workers build $(BACKEND_BUILD_FLAGS) api agent-worker outbox-worker memory-worker
+	$(TEST_COMPOSE) up -d --force-recreate api agent-worker outbox-worker memory-worker
 
 backend-test-down:
 	$(TEST_COMPOSE) down
@@ -72,10 +72,10 @@ backend-test-ps:
 	$(TEST_COMPOSE) ps
 
 backend-test-logs:
-	$(TEST_COMPOSE) logs -f api agent-worker outbox-worker
+	$(TEST_COMPOSE) logs -f api agent-worker outbox-worker memory-worker
 
 backend-prod-build:
-	$(PROD_COMPOSE) --profile tools --profile workers build $(BACKEND_BUILD_FLAGS) migrate api agent-worker outbox-worker
+	$(PROD_COMPOSE) --profile tools --profile workers build $(BACKEND_BUILD_FLAGS) migrate api agent-worker outbox-worker memory-worker
 
 backend-prod-migrate:
 	$(PROD_COMPOSE) --profile tools build $(BACKEND_BUILD_FLAGS) migrate
@@ -84,11 +84,11 @@ backend-prod-migrate:
 backend-prod-up:
 	$(MAKE) backend-prod-build PROD_COMPOSE_ENV_FILE=$(PROD_COMPOSE_ENV_FILE) BACKEND_BUILD_FLAGS="$(BACKEND_BUILD_FLAGS)"
 	$(MAKE) backend-prod-migrate PROD_COMPOSE_ENV_FILE=$(PROD_COMPOSE_ENV_FILE)
-	$(PROD_COMPOSE) up -d --force-recreate api agent-worker outbox-worker
+	$(PROD_COMPOSE) up -d --force-recreate api agent-worker outbox-worker memory-worker
 
 backend-prod-services:
-	$(PROD_COMPOSE) --profile workers build $(BACKEND_BUILD_FLAGS) api agent-worker outbox-worker
-	$(PROD_COMPOSE) up -d --force-recreate api agent-worker outbox-worker
+	$(PROD_COMPOSE) --profile workers build $(BACKEND_BUILD_FLAGS) api agent-worker outbox-worker memory-worker
+	$(PROD_COMPOSE) up -d --force-recreate api agent-worker outbox-worker memory-worker
 
 backend-prod-down:
 	$(PROD_COMPOSE) down
@@ -97,7 +97,7 @@ backend-prod-ps:
 	$(PROD_COMPOSE) ps
 
 backend-prod-logs:
-	$(PROD_COMPOSE) logs -f api agent-worker outbox-worker
+	$(PROD_COMPOSE) logs -f api agent-worker outbox-worker memory-worker
 
 backend-export-contracts:
 	$(PYTHON) production_backend/scripts/export_openapi.py --output production_backend/docs/openapi.generated.json
