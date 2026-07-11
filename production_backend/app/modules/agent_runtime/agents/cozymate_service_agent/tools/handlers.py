@@ -764,6 +764,8 @@ class MilkPlanProposeToolHandler:
             payload=payload,
             emit_event=False,
         )
+        tasks = payload.get("tasks")
+        reminders = payload.get("reminders")
         return {
             **_proposal_result(action=action, preview_payload=preview_payload),
             "artifact_id": str(artifact.id),
@@ -771,8 +773,8 @@ class MilkPlanProposeToolHandler:
             "status": artifact.status,
             "title": _text(payload, "title"),
             "summary": _text(payload, "summary"),
-            "task_count": len(payload.get("tasks") if isinstance(payload.get("tasks"), list) else []),
-            "reminder_count": len(payload.get("reminders") if isinstance(payload.get("reminders"), list) else []),
+            "task_count": len(tasks) if isinstance(tasks, list) else 0,
+            "reminder_count": len(reminders) if isinstance(reminders, list) else 0,
             DEFERRED_AGENT_EVENTS_KEY: [_deferred_artifact_created_event(artifact)],
         }
 
