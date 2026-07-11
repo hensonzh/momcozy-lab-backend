@@ -29,6 +29,7 @@ from production_backend.app.modules.agent_runtime.sdk import (
     SdkNodeRequest,
     SdkNodeResult,
     SdkToolDefinition,
+    SdkToolInvocationResult,
     SdkToolNamespace,
     responses_tools_payload,
     sdk_tool_name,
@@ -739,8 +740,8 @@ def test_sdk_runner_uses_injected_backend_and_never_legacy_loop() -> None:
 
 
 def test_sdk_request_can_render_responses_namespace_tool_payload() -> None:
-    async def invoke_json(args_json: str) -> str:
-        return args_json
+    async def invoke_json(args_json: str) -> SdkToolInvocationResult:
+        return SdkToolInvocationResult(output_json=args_json)
 
     request = SdkNodeRequest(
         run_id="run_1",
@@ -764,7 +765,7 @@ def test_sdk_request_can_render_responses_namespace_tool_payload() -> None:
                 sdk_name="load_service_skill",
                 description="加载服务技能。",
                 params_json_schema={"type": "object", "properties": {}},
-                invoke_json=invoke_json,
+                invoke=invoke_json,
             ),
             SdkToolDefinition(
                 contract_name="records.milk_status.read",
@@ -772,7 +773,7 @@ def test_sdk_request_can_render_responses_namespace_tool_payload() -> None:
                 description="读取奶量状态。",
                 params_json_schema={"type": "object", "properties": {}},
                 namespace_name="records",
-                invoke_json=invoke_json,
+                invoke=invoke_json,
             ),
             SdkToolDefinition(
                 contract_name="records.feeding_record.propose",
@@ -781,7 +782,7 @@ def test_sdk_request_can_render_responses_namespace_tool_payload() -> None:
                 params_json_schema={"type": "object", "properties": {}},
                 namespace_name="records",
                 defer_loading=True,
-                invoke_json=invoke_json,
+                invoke=invoke_json,
             ),
         ),
     )
@@ -854,9 +855,9 @@ def test_sdk_runner_uses_responses_namespace_backend_for_tool_search(monkeypatch
     )
     invoked_args = []
 
-    async def invoke_json(args_json: str) -> str:
+    async def invoke_json(args_json: str) -> SdkToolInvocationResult:
         invoked_args.append(args_json)
-        return json.dumps({"ok": True}, sort_keys=True)
+        return SdkToolInvocationResult(output_json=json.dumps({"ok": True}, sort_keys=True))
 
     request = SdkNodeRequest(
         run_id="run_1",
@@ -880,7 +881,7 @@ def test_sdk_runner_uses_responses_namespace_backend_for_tool_search(monkeypatch
                 sdk_name=sdk_tool_name("records.feeding_record.propose"),
                 description="提出喂养记录草稿。",
                 params_json_schema={"type": "object", "properties": {"volume_ml": {"type": "number"}}},
-                invoke_json=invoke_json,
+                invoke=invoke_json,
                 namespace_name="records",
                 defer_loading=True,
             ),
@@ -957,13 +958,13 @@ def test_sdk_runner_routes_responses_function_call_by_namespace_and_name(monkeyp
     )
     invoked: list[str] = []
 
-    async def invoke_json(args_json: str) -> str:
+    async def invoke_json(args_json: str) -> SdkToolInvocationResult:
         invoked.append("milk")
-        return '{"status":"ok"}'
+        return SdkToolInvocationResult(output_json='{"status":"ok"}')
 
-    async def conflicting_invoke_json(args_json: str) -> str:
+    async def conflicting_invoke_json(args_json: str) -> SdkToolInvocationResult:
         invoked.append("device")
-        return '{"status":"wrong"}'
+        return SdkToolInvocationResult(output_json='{"status":"wrong"}')
 
     request = SdkNodeRequest(
         run_id="run_1",
@@ -990,7 +991,7 @@ def test_sdk_runner_routes_responses_function_call_by_namespace_and_name(monkeyp
                 sdk_name="read_status",
                 description="读取奶量状态。",
                 params_json_schema={"type": "object", "properties": {}},
-                invoke_json=invoke_json,
+                invoke=invoke_json,
                 namespace_name="milk_records",
             ),
             SdkToolDefinition(
@@ -998,7 +999,7 @@ def test_sdk_runner_routes_responses_function_call_by_namespace_and_name(monkeyp
                 sdk_name="read_status",
                 description="读取设备状态。",
                 params_json_schema={"type": "object", "properties": {}},
-                invoke_json=conflicting_invoke_json,
+                invoke=conflicting_invoke_json,
                 namespace_name="device_records",
             ),
         ),
@@ -1035,8 +1036,16 @@ def test_responses_runner_appends_trusted_developer_context_after_tool_output(mo
         ]
     )
 
-    async def invoke_json(args_json: str) -> str:
-        return '{"service_skill_id":"milk-management","skill_version":"v1"}'
+    async def invoke(args_json: str) -> SdkToolInvocationResult:
+        return SdkToolInvocationResult(
+            output_json='{"service_skill_id":"milk-management","skill_version":"v1"}',
+            model_context=(
+                {
+                    "role": "developer",
+                    "content": "validated milk-management skill instructions",
+                },
+            ),
+        )
 
     request = SdkNodeRequest(
         run_id="run_1",
@@ -1050,13 +1059,7 @@ def test_responses_runner_appends_trusted_developer_context_after_tool_output(mo
                 sdk_name="load_service_skill",
                 description="加载服务技能。",
                 params_json_schema={"type": "object", "properties": {}},
-                invoke_json=invoke_json,
-                model_context_after_invoke=lambda _output: (
-                    {
-                        "role": "developer",
-                        "content": "validated milk-management skill instructions",
-                    },
-                ),
+                invoke=invoke,
             ),
         ),
     )
@@ -1097,9 +1100,6 @@ def test_responses_runner_preserves_multimodal_context_added_after_tool_output(m
         ]
     )
 
-    async def invoke_json(_args_json: str) -> str:
-        return '{"status":"image_context_ready"}'
-
     multimodal_context = {
         "role": "user",
         "content": [
@@ -1111,6 +1111,13 @@ def test_responses_runner_preserves_multimodal_context_added_after_tool_output(m
             },
         ],
     }
+
+    async def invoke(_args_json: str) -> SdkToolInvocationResult:
+        return SdkToolInvocationResult(
+            output_json='{"status":"image_context_ready"}',
+            model_context=(multimodal_context,),
+        )
+
     request = SdkNodeRequest(
         run_id="run_1",
         thread_id="thread_1",
@@ -1123,8 +1130,7 @@ def test_responses_runner_preserves_multimodal_context_added_after_tool_output(m
                 sdk_name="images_inspect",
                 description="查看历史图片。",
                 params_json_schema={"type": "object", "properties": {}},
-                invoke_json=invoke_json,
-                model_context_after_invoke=lambda _output: (multimodal_context,),
+                invoke=invoke,
             ),
         ),
     )
@@ -1335,8 +1341,10 @@ def test_sdk_runner_streams_text_without_changing_tools_between_tool_turns(monke
     async def on_text_delta(delta: str) -> None:
         deltas.append(delta)
 
-    async def invoke_json(args_json: str) -> str:
-        return json.dumps({"status": "ok", "args": json.loads(args_json)}, ensure_ascii=False, sort_keys=True)
+    async def invoke_json(args_json: str) -> SdkToolInvocationResult:
+        return SdkToolInvocationResult(
+            output_json=json.dumps({"status": "ok", "args": json.loads(args_json)}, ensure_ascii=False, sort_keys=True)
+        )
 
     request = SdkNodeRequest(
         run_id="run_1",
@@ -1351,7 +1359,7 @@ def test_sdk_runner_streams_text_without_changing_tools_between_tool_turns(monke
                 sdk_name="profile_read",
                 description="Read profile.",
                 params_json_schema={"type": "object", "properties": {}},
-                invoke_json=invoke_json,
+                invoke=invoke_json,
             ),
         ),
         on_text_delta=on_text_delta,
@@ -1420,8 +1428,8 @@ def test_responses_runner_strips_parsed_function_arguments_before_next_tool_turn
         ],
     )
 
-    async def invoke_json(_args_json: str) -> str:
-        return '{"status":"ok"}'
+    async def invoke_json(_args_json: str) -> SdkToolInvocationResult:
+        return SdkToolInvocationResult(output_json='{"status":"ok"}')
 
     request = SdkNodeRequest(
         run_id="run_1",
@@ -1435,7 +1443,7 @@ def test_responses_runner_strips_parsed_function_arguments_before_next_tool_turn
                 sdk_name="profile_read",
                 description="Read profile.",
                 params_json_schema={"type": "object", "properties": {}},
-                invoke_json=invoke_json,
+                invoke=invoke_json,
             ),
         ),
         on_text_delta=lambda _delta: asyncio.sleep(0),
@@ -1505,8 +1513,14 @@ def test_sdk_runner_streams_each_turn_before_response_completed(monkeypatch: pyt
         deltas.append(delta)
         callback_events.append(f"delta:{delta}")
 
-    async def invoke_json(args_json: str) -> str:
-        return json.dumps({"status": "profile_updated", "args": json.loads(args_json)}, ensure_ascii=False, sort_keys=True)
+    async def invoke_json(args_json: str) -> SdkToolInvocationResult:
+        return SdkToolInvocationResult(
+            output_json=json.dumps(
+                {"status": "profile_updated", "args": json.loads(args_json)},
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        )
 
     request = SdkNodeRequest(
         run_id="run_1",
@@ -1521,7 +1535,7 @@ def test_sdk_runner_streams_each_turn_before_response_completed(monkeypatch: pyt
                 sdk_name="profile_update",
                 description="Update profile.",
                 params_json_schema={"type": "object", "properties": {}},
-                invoke_json=invoke_json,
+                invoke=invoke_json,
             ),
         ),
         on_text_delta=on_text_delta,
@@ -1550,8 +1564,8 @@ def test_sdk_runner_uses_streamed_text_when_response_completed_event_is_missing(
     async def on_text_delta(delta: str) -> None:
         deltas.append(delta)
 
-    async def invoke_json(args_json: str) -> str:
-        return args_json
+    async def invoke_json(args_json: str) -> SdkToolInvocationResult:
+        return SdkToolInvocationResult(output_json=args_json)
 
     request = SdkNodeRequest(
         run_id="run_1",
@@ -1566,7 +1580,7 @@ def test_sdk_runner_uses_streamed_text_when_response_completed_event_is_missing(
                 sdk_name="profile_read",
                 description="Read profile.",
                 params_json_schema={"type": "object", "properties": {}},
-                invoke_json=invoke_json,
+                invoke=invoke_json,
             ),
         ),
         on_text_delta=on_text_delta,
@@ -1580,8 +1594,8 @@ def test_sdk_runner_uses_streamed_text_when_response_completed_event_is_missing(
 
 
 def test_sdk_runner_rejects_deferred_tool_loading_when_responses_backend_disabled() -> None:
-    async def invoke_json(args_json: str) -> str:
-        return args_json
+    async def invoke_json(args_json: str) -> SdkToolInvocationResult:
+        return SdkToolInvocationResult(output_json=args_json)
 
     request = SdkNodeRequest(
         run_id="run_1",
@@ -1596,7 +1610,7 @@ def test_sdk_runner_rejects_deferred_tool_loading_when_responses_backend_disable
                 sdk_name=sdk_tool_name("records.feeding_record.propose"),
                 description="提出喂养记录草稿。",
                 params_json_schema={"type": "object", "properties": {}},
-                invoke_json=invoke_json,
+                invoke=invoke_json,
                 defer_loading=True,
             ),
         ),
@@ -1749,8 +1763,8 @@ def test_sdk_runner_wraps_application_tool_executor_for_agents_sdk(monkeypatch: 
     fake_agents.Runner = ToolCallingAgentsSdkRunner
     monkeypatch.setitem(sys.modules, "agents", fake_agents)
 
-    async def invoke_json(args_json: str) -> str:
-        return f"tool-output:{args_json}"
+    async def invoke_json(args_json: str) -> SdkToolInvocationResult:
+        return SdkToolInvocationResult(output_json=f"tool-output:{args_json}")
 
     request = SdkNodeRequest(
         run_id="run_1",
@@ -1764,7 +1778,7 @@ def test_sdk_runner_wraps_application_tool_executor_for_agents_sdk(monkeypatch: 
                 sdk_name=sdk_tool_name("profile.read"),
                 description="Read profile.",
                 params_json_schema={"type": "object", "properties": {}},
-                invoke_json=invoke_json,
+                invoke=invoke_json,
             ),
         ),
     )

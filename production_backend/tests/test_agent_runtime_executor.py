@@ -1534,16 +1534,7 @@ def test_agent_runtime_executor_loads_skill_through_unified_tool_executor() -> N
     repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user, run=run)
     registry = default_tool_registry()
     tool_executor = ToolExecutor(registry=registry, repository=repository, handlers={})
-    backend = ScriptedSdkBackend(
-        [
-            scripted_sdk_response(
-                final_text="我来看看最近奶量。",
-                tool_invocations=(
-                    scripted_tool_invocation("load_service_skill", {"service_skill_id": "milk-management"}),
-                ),
-            )
-        ]
-    )
+    backend = ServiceSkillLoadingSdkBackend(service_skill_id="milk-management")
 
     result = asyncio.run(
         AgentRuntimeExecutor(
@@ -1560,6 +1551,9 @@ def test_agent_runtime_executor_loads_skill_through_unified_tool_executor() -> N
     assert repository.tool_call.status == "completed"
     assert repository.tool_output.safe_output["service_skill_id"] == "milk-management"
     assert "instructions" not in repository.tool_output.safe_output["skill"]
+    loaded_model_context = json.loads(backend.model_context[0]["content"])["runtime_loaded_service_skill"]
+    assert loaded_model_context["service_skill_id"] == "milk-management"
+    assert "奶量管理仅处理三类任务" in loaded_model_context["instructions"]
     assert {"namespace": "milk_management", "name": "records_milk_status_read"} in repository.tool_output.safe_output[
         "recommended_tools"
     ]
@@ -2458,8 +2452,8 @@ class InvokingSdkBackend:
         self.tool_namespace_by_contract = {tool.contract_name: tool.namespace_name for tool in request.tools}
         self.tool_deferred_by_contract = {tool.contract_name: tool.defer_loading for tool in request.tools}
         profile_tool = next(tool for tool in request.tools if tool.contract_name == "profile.read")
-        output = await profile_tool.invoke_json("{}")
-        return SdkNodeResult(final_text=output)
+        invocation = await profile_tool.invoke("{}")
+        return SdkNodeResult(final_text=invocation.output_json)
 
 
 class ImageInspectingSdkBackend:
@@ -2469,10 +2463,21 @@ class ImageInspectingSdkBackend:
 
     async def run(self, request: SdkNodeRequest) -> SdkNodeResult:
         image_tool = next(tool for tool in request.tools if tool.contract_name == "images.inspect")
-        output = await image_tool.invoke_json(json.dumps({"image_url": self.image_url}))
-        assert image_tool.model_context_after_invoke is not None
-        self.model_context = image_tool.model_context_after_invoke(output)
+        invocation = await image_tool.invoke(json.dumps({"image_url": self.image_url}))
+        self.model_context = invocation.model_context
         return SdkNodeResult(final_text="图中有四个主要部件。")
+
+
+class ServiceSkillLoadingSdkBackend:
+    def __init__(self, *, service_skill_id: str) -> None:
+        self.service_skill_id = service_skill_id
+        self.model_context = ()
+
+    async def run(self, request: SdkNodeRequest) -> SdkNodeResult:
+        load_skill_tool = next(tool for tool in request.tools if tool.contract_name == "load_service_skill")
+        invocation = await load_skill_tool.invoke(json.dumps({"service_skill_id": self.service_skill_id}))
+        self.model_context = invocation.model_context
+        return SdkNodeResult(final_text="我来看看最近奶量。")
 
 
 async def profile_read_handler(context: ToolHandlerContext):

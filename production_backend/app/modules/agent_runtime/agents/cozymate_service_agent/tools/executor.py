@@ -34,9 +34,17 @@ class ToolHandlerContext:
     args: dict[str, Any]
 
 
-ToolHandler = Callable[[ToolHandlerContext], Awaitable[dict[str, Any]] | dict[str, Any]]
+@dataclass(frozen=True)
+class ToolHandlerResult:
+    output: dict[str, Any]
+    model_context: tuple[dict[str, Any], ...] = ()
+
+
+ToolHandler = Callable[
+    [ToolHandlerContext],
+    Awaitable[ToolHandlerResult | dict[str, Any]] | ToolHandlerResult | dict[str, Any],
+]
 DEFERRED_AGENT_EVENTS_KEY = "_deferred_agent_events"
-TRANSIENT_MODEL_CONTEXT_KEY = "_model_context_after_invoke"
 LOGGER = logging.getLogger("production_backend.agent_runtime.tools")
 
 
@@ -126,7 +134,7 @@ class ToolExecutor:
                 event_type="tool.started",
                 payload=started_payload,
             )
-            result = await asyncio.wait_for(
+            raw_result = await asyncio.wait_for(
                 _maybe_await(
                     handler(
                         ToolHandlerContext(
@@ -140,6 +148,7 @@ class ToolExecutor:
                 ),
                 timeout=contract.timeout_seconds,
             )
+            result = _normalize_handler_result(raw_result)
         except ApiError as exc:
             if tool_call is not None:
                 await self.repository.fail_tool_call(tool_call=tool_call, completed_at=_utcnow(), error_code=exc.code)
@@ -159,9 +168,9 @@ class ToolExecutor:
             self._record(tool_name=tool_name, outcome="failed", error_code="tool_failed", started_at=started_at)
             raise ApiError(code="tool_failed", message="Tool execution failed.", status=500) from exc
 
-        deferred_events = _extract_deferred_agent_events(result)
-        model_context = _extract_transient_model_context(result)
-        safe_output = strip_instructional_tool_output_keys(_safe_payload(result))
+        output_payload = dict(result.output)
+        deferred_events = _extract_deferred_agent_events(output_payload)
+        safe_output = strip_instructional_tool_output_keys(_safe_payload(output_payload))
         externalized_output = await maybe_externalize_json_payload(
             payload=safe_output,
             object_storage=self.object_storage,
@@ -217,7 +226,7 @@ class ToolExecutor:
         return ToolExecutionResult(
             tool_call=completed,
             safe_output=externalized_output.inline_payload,
-            model_context=model_context,
+            model_context=result.model_context,
         )
 
     @staticmethod
@@ -317,10 +326,23 @@ class ToolExecutor:
             LOGGER.warning("Failed to publish optimistic agent tool event.", exc_info=True)
 
 
-async def _maybe_await(value: Awaitable[dict[str, Any]] | dict[str, Any]) -> dict[str, Any]:
+async def _maybe_await(
+    value: Awaitable[ToolHandlerResult | dict[str, Any]] | ToolHandlerResult | dict[str, Any],
+) -> ToolHandlerResult | dict[str, Any]:
     if hasattr(value, "__await__"):
         return await value
     return value
+
+
+def _normalize_handler_result(result: ToolHandlerResult | dict[str, Any]) -> ToolHandlerResult:
+    if isinstance(result, ToolHandlerResult):
+        return ToolHandlerResult(
+            output=dict(result.output),
+            model_context=tuple(dict(item) for item in result.model_context),
+        )
+    if isinstance(result, dict):
+        return ToolHandlerResult(output=dict(result))
+    raise TypeError("Tool handler must return a mapping or ToolHandlerResult.")
 
 
 def _extract_deferred_agent_events(result: dict[str, Any]) -> list[dict[str, Any]]:
@@ -336,13 +358,6 @@ def _extract_deferred_agent_events(result: dict[str, Any]) -> list[dict[str, Any
         if event_type and isinstance(payload, dict):
             events.append({"event_type": event_type, "payload": payload})
     return events
-
-
-def _extract_transient_model_context(result: dict[str, Any]) -> tuple[dict[str, Any], ...]:
-    raw_context = result.pop(TRANSIENT_MODEL_CONTEXT_KEY, [])
-    if not isinstance(raw_context, list):
-        return ()
-    return tuple(dict(item) for item in raw_context if isinstance(item, dict))
 
 
 def _safe_payload(value: Any) -> Any:

@@ -12,6 +12,7 @@ from production_backend.app.modules.agent_runtime.sdk import (
     OpenAIResponsesRunner,
     SdkNodeRequest,
     SdkToolDefinition,
+    SdkToolInvocationResult,
     ScriptedSdkBackend,
     create_agent_sdk_runner,
     scripted_sdk_response,
@@ -23,9 +24,9 @@ from production_backend.app.modules.agent_runtime.sdk import (
 def test_scripted_sdk_backend_invokes_application_tool_contracts() -> None:
     invoked_args: list[str] = []
 
-    async def invoke_json(args_json: str) -> str:
+    async def invoke_json(args_json: str) -> SdkToolInvocationResult:
         invoked_args.append(args_json)
-        return '{"profile":{"display_name":"Mai"}}'
+        return SdkToolInvocationResult(output_json='{"profile":{"display_name":"Mai"}}')
 
     backend = ScriptedSdkBackend(
         [
@@ -49,7 +50,7 @@ def test_scripted_sdk_backend_invokes_application_tool_contracts() -> None:
                 sdk_name=sdk_tool_name("profile.read"),
                 description="Read profile.",
                 params_json_schema={"type": "object", "additionalProperties": False, "properties": {}},
-                invoke_json=invoke_json,
+                invoke=invoke_json,
             ),
         ),
     )

@@ -42,6 +42,7 @@ from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.
     PregnancyPlanProposeToolHandler,
     SupportTicketProposeToolHandler,
     ToolHandlerContext,
+    ToolHandlerResult,
     build_default_tool_handlers,
 )
 from production_backend.app.modules.auth import CurrentUser
@@ -638,12 +639,13 @@ def test_image_inspect_tool_handler_loads_visible_packaged_image_as_transient_mo
         )
     )
 
-    assert result["status"] == "image_context_ready"
-    assert result["image_url"] == image_url
-    assert result["asset_id"] == "asset-image"
-    assert result["detail"] == "high"
+    assert isinstance(result, ToolHandlerResult)
+    assert result.output["status"] == "image_context_ready"
+    assert result.output["image_url"] == image_url
+    assert result.output["asset_id"] == "asset-image"
+    assert result.output["detail"] == "high"
     assert storage.keys == ["product-assets/device-guidance/assets/air1/images/guide.png"]
-    assert result["_model_context_after_invoke"] == [
+    assert result.model_context == (
         {
             "role": "user",
             "content": [
@@ -657,8 +659,8 @@ def test_image_inspect_tool_handler_loads_visible_packaged_image_as_transient_mo
                     "detail": "high",
                 },
             ],
-        }
-    ]
+        },
+    )
 
 
 def test_image_inspect_tool_handler_rejects_url_not_visible_to_model() -> None:

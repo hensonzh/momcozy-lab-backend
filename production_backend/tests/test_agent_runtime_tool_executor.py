@@ -8,8 +8,8 @@ from production_backend.app.core.errors import ApiError
 from production_backend.app.core.metrics import RequestMetrics
 from production_backend.app.modules.agent_runtime.models import AgentEvent, AgentRun, AgentToolCall
 from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.tools import (
-    TRANSIENT_MODEL_CONTEXT_KEY,
     ToolExecutor,
+    ToolHandlerResult,
     ToolHandlerContext,
     default_tool_registry,
 )
@@ -180,8 +180,8 @@ def test_tool_executor_returns_model_context_without_persisting_it() -> None:
             ],
         },
     )
-    assert TRANSIENT_MODEL_CONTEXT_KEY not in repository.output.safe_output
-    assert TRANSIENT_MODEL_CONTEXT_KEY not in repository.events[-1].payload["safe_output"]
+    assert repository.output.safe_output == result.safe_output
+    assert repository.events[-1].payload["safe_output"] == result.safe_output
 
 
 def test_tool_executor_externalizes_large_safe_output_after_redaction() -> None:
@@ -510,11 +510,13 @@ async def failing_handler(context: ToolHandlerContext):
 
 
 async def image_context_handler(context: ToolHandlerContext):
-    return {
-        "status": "image_context_ready",
-        "image_url": context.args["image_url"],
-        "detail": "low",
-        TRANSIENT_MODEL_CONTEXT_KEY: [
+    return ToolHandlerResult(
+        output={
+            "status": "image_context_ready",
+            "image_url": context.args["image_url"],
+            "detail": "low",
+        },
+        model_context=(
             {
                 "role": "user",
                 "content": [
@@ -525,9 +527,9 @@ async def image_context_handler(context: ToolHandlerContext):
                         "detail": "low",
                     },
                 ],
-            }
-        ],
-    }
+            },
+        ),
+    )
 
 
 def _user(*, roles: set[str] | None = None, permissions: set[str] | None = None) -> CurrentUser:

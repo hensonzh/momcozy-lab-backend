@@ -47,7 +47,7 @@ from production_backend.app.modules.records.models import FeedingRecord, GrowthR
 from production_backend.app.modules.records.service import RecordsService
 from production_backend.app.modules.support.agent_actions import SUPPORT_TICKET_CREATE_ACTION
 
-from .executor import DEFERRED_AGENT_EVENTS_KEY, TRANSIENT_MODEL_CONTEXT_KEY, ToolHandler, ToolHandlerContext
+from .executor import DEFERRED_AGENT_EVENTS_KEY, ToolHandler, ToolHandlerContext, ToolHandlerResult
 from .legacy_artifacts import artifact_record_from_legacy_result, build_birth_journey_plan_result, create_legacy_artifact_result
 
 
@@ -577,7 +577,7 @@ class ImageInspectToolHandler:
         self.asset_service = asset_service
         self.object_storage = object_storage
 
-    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
+    async def __call__(self, context: ToolHandlerContext) -> ToolHandlerResult:
         image_url = _text(context.args, "image_url")
         visible_image_urls = _string_list(context.args.get("visible_image_urls"))
         if image_url not in visible_image_urls:
@@ -614,23 +614,25 @@ class ImageInspectToolHandler:
         if asset_id:
             safe_output["asset_id"] = asset_id
             safe_output["content_type"] = content_type
-        safe_output[TRANSIENT_MODEL_CONTEXT_KEY] = [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "input_text",
-                        "text": "这是你选择查看的历史图片。请结合当前用户问题，只依据图片中可见内容回答。",
-                    },
-                    {
-                        "type": "input_image",
-                        "image_url": model_image_url,
-                        "detail": detail,
-                    },
-                ],
-            }
-        ]
-        return safe_output
+        return ToolHandlerResult(
+            output=safe_output,
+            model_context=(
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": "这是你选择查看的历史图片。请结合当前用户问题，只依据图片中可见内容回答。",
+                        },
+                        {
+                            "type": "input_image",
+                            "image_url": model_image_url,
+                            "detail": detail,
+                        },
+                    ],
+                },
+            ),
+        )
 
 
 class FeedingRecordProposeToolHandler:

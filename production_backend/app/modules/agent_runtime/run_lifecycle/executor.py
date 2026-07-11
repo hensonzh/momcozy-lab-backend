@@ -32,6 +32,7 @@ from ..agents.cozymate_service_agent.tools import (
     ToolContractRegistry,
     ToolExecutor,
     ToolHandlerContext,
+    ToolHandlerResult,
     ToolNamespace,
     ToolNamespaceRegistry,
     default_tool_namespace_registry,
@@ -62,6 +63,7 @@ from ..sdk import (
     AgentModelRunner,
     SdkNodeRequest,
     SdkToolDefinition,
+    SdkToolInvocationResult,
     SdkToolNamespace,
     sdk_tool_name,
 )
@@ -169,7 +171,6 @@ class AgentRuntimeExecutor:
         self._run_trusted_form_submissions: dict[UUID, dict[str, dict[str, Any]]] = {}
         self._run_business_facts: dict[UUID, dict[ServiceSkillId, dict[str, Any]]] = {}
         self._run_visible_image_urls: dict[UUID, tuple[str, ...]] = {}
-        self._run_tool_model_context: dict[UUID, tuple[dict[str, Any], ...]] = {}
         self._unified_load_service_skill = isinstance(self.tool_executor, ToolExecutor)
 
     async def __call__(self, run: AgentRun) -> AgentRunExecutionResult:
@@ -185,7 +186,6 @@ class AgentRuntimeExecutor:
         self._run_text_stream_buffers[run.id] = ""
         self._run_text_stream_emitted[run.id] = ""
         self._run_visible_image_urls[run.id] = ()
-        self._run_tool_model_context[run.id] = ()
         self._run_business_facts[run.id] = {}
         try:
             turn_context = await self._load_turn_context(run=run)
@@ -218,7 +218,6 @@ class AgentRuntimeExecutor:
             self._run_trusted_form_submissions.pop(run.id, None)
             self._run_business_facts.pop(run.id, None)
             self._run_visible_image_urls.pop(run.id, None)
-            self._run_tool_model_context.pop(run.id, None)
 
     async def _load_turn_context(self, *, run: AgentRun) -> _AgentTurnContext:
         timings_ms: dict[str, float] = {}
@@ -566,11 +565,15 @@ class AgentRuntimeExecutor:
         return (load_service_skill, *business_tools)
 
     def _load_service_skill_tool_definition(self, *, run: AgentRun) -> SdkToolDefinition:
-        async def invoke_json(args_json: str) -> str:
+        async def invoke(args_json: str) -> SdkToolInvocationResult:
             args = _json_object(args_json)
             output = await self._invoke_load_service_skill_tool(run=run, args=args)
             await self._append_progress(run=run, phase="model_reasoning_after_tool", label="我接着处理下一步")
-            return json.dumps(output, ensure_ascii=False, sort_keys=True)
+            skill = self.service_skill_registry.get(_required_text(output, "service_skill_id"))
+            return SdkToolInvocationResult(
+                output_json=json.dumps(output, ensure_ascii=False, sort_keys=True),
+                model_context=self._service_skill_model_context(skill=skill, output=output),
+            )
 
         return SdkToolDefinition(
             contract_name=LOAD_SERVICE_SKILL_TOOL_NAME,
@@ -581,38 +584,27 @@ class AgentRuntimeExecutor:
                 "返回该技能说明、建议工具和小型业务事实包。"
             ),
             params_json_schema=LOAD_SERVICE_SKILL_INPUT_SCHEMA,
-            invoke_json=invoke_json,
-            model_context_after_invoke=self._loaded_service_skill_model_context,
+            invoke=invoke,
         )
 
     def _sdk_tool_definition(self, *, run: AgentRun, tool_name: str, namespace: ToolNamespace | None = None) -> SdkToolDefinition:
         contract = self.tool_registry.get(tool_name)
         sdk_name = sdk_tool_name(contract.name)
 
-        async def invoke_json(args_json: str) -> str:
+        async def invoke(args_json: str) -> SdkToolInvocationResult:
             return await self._invoke_sdk_tool(run=run, contract_name=contract.name, sdk_name=sdk_name, args_json=args_json)
 
-        if contract.name == LOAD_SERVICE_SKILL_TOOL_NAME:
-            model_context_after_invoke = self._loaded_service_skill_model_context
-        elif contract.name == IMAGE_INSPECT_TOOL_NAME:
-            model_context_after_invoke = lambda output_json: self._image_model_context_after_invoke(
-                run=run,
-                output_json=output_json,
-            )
-        else:
-            model_context_after_invoke = None
         return SdkToolDefinition(
             contract_name=contract.name,
             sdk_name=sdk_name,
             description=contract.description,
             params_json_schema=tool_input_schema(contract.input_schema_ref),
-            invoke_json=invoke_json,
+            invoke=invoke,
             namespace_name=namespace.name if namespace is not None else "",
             defer_loading=namespace is not None and contract.loading_mode == "deferred",
-            model_context_after_invoke=model_context_after_invoke,
         )
 
-    async def _load_service_skill_handler(self, context: ToolHandlerContext) -> dict[str, Any]:
+    async def _load_service_skill_handler(self, context: ToolHandlerContext) -> ToolHandlerResult:
         raw_skill_id = _text(context.args, "service_skill_id")
         try:
             skill_id = ServiceSkillId(raw_skill_id)
@@ -647,15 +639,17 @@ class AgentRuntimeExecutor:
                 },
             }
         ]
-        return output
+        return ToolHandlerResult(
+            output=output,
+            model_context=self._service_skill_model_context(skill=skill, output=output),
+        )
 
-    def _loaded_service_skill_model_context(self, output_json: str) -> tuple[dict[str, Any], ...]:
-        output = _json_object(output_json)
-        service_skill_id = _required_text(output, "service_skill_id")
-        try:
-            skill = self.service_skill_registry.get(service_skill_id)
-        except KeyError as exc:
-            raise ApiError(code="invalid_service_skill", message="Loaded service skill is not registered.", status=502) from exc
+    def _service_skill_model_context(
+        self,
+        *,
+        skill: AgentServiceSkill,
+        output: dict[str, Any],
+    ) -> tuple[dict[str, Any], ...]:
         trusted_context = {
             "runtime_loaded_service_skill": {
                 "service_skill_id": skill.service_skill_id,
@@ -676,16 +670,14 @@ class AgentRuntimeExecutor:
             },
         )
 
-    def _image_model_context_after_invoke(self, *, run: AgentRun, output_json: str) -> tuple[dict[str, Any], ...]:
-        output = _json_object(output_json)
-        if _text(output, "status") != "image_context_ready":
-            raise ApiError(code="image_context_invalid", message="Image context tool returned an invalid result.", status=502)
-        model_context = self._run_tool_model_context.pop(run.id, ())
-        if not model_context:
-            raise ApiError(code="image_context_missing", message="Image context is unavailable.", status=502)
-        return model_context
-
-    async def _invoke_sdk_tool(self, *, run: AgentRun, contract_name: str, sdk_name: str, args_json: str) -> str:
+    async def _invoke_sdk_tool(
+        self,
+        *,
+        run: AgentRun,
+        contract_name: str,
+        sdk_name: str,
+        args_json: str,
+    ) -> SdkToolInvocationResult:
         if self.tool_executor is None:
             raise ApiError(code="unsupported_operation", message="Tool executor is not configured.", status=501)
         args = _json_object(args_json)
@@ -706,11 +698,11 @@ class AgentRuntimeExecutor:
             )
         else:
             result = await self.tool_executor.execute(**execute_kwargs)
-        if contract_name == IMAGE_INSPECT_TOOL_NAME:
-            model_context = getattr(result, "model_context", ())
-            self._run_tool_model_context[run.id] = tuple(model_context) if isinstance(model_context, tuple | list) else ()
         await self._append_progress(run=run, phase="model_reasoning_after_tool", label="我接着处理下一步")
-        return json.dumps(result.safe_output, sort_keys=True)
+        return SdkToolInvocationResult(
+            output_json=json.dumps(result.safe_output, sort_keys=True),
+            model_context=result.model_context,
+        )
 
     async def _trusted_tool_args(self, *, run: AgentRun, contract_name: str) -> dict[str, Any]:
         expected_form_id = FORM_TOOL_IDS.get(contract_name)

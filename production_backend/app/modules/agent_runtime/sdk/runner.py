@@ -15,9 +15,14 @@ from ....core.errors import ApiError
 from ..response_text import sanitize_agent_response_text
 
 
-SdkToolInvoker = Callable[[str], Awaitable[str]]
+@dataclass(frozen=True)
+class SdkToolInvocationResult:
+    output_json: str
+    model_context: tuple[dict[str, Any], ...] = ()
+
+
+SdkToolInvoker = Callable[[str], Awaitable[SdkToolInvocationResult]]
 SdkTextDeltaHandler = Callable[[str], Awaitable[None]]
-SdkToolModelContextBuilder = Callable[[str], tuple[dict[str, Any], ...]]
 THINK_TAG = "<think>"
 
 
@@ -27,10 +32,9 @@ class SdkToolDefinition:
     sdk_name: str
     description: str
     params_json_schema: dict[str, Any]
-    invoke_json: SdkToolInvoker
+    invoke: SdkToolInvoker
     namespace_name: str = ""
     defer_loading: bool = False
-    model_context_after_invoke: SdkToolModelContextBuilder | None = None
 
 
 @dataclass(frozen=True)
@@ -201,22 +205,21 @@ class OpenAIResponsesApiBackend:
                         details={"sdk_tool_name": function_call["name"]},
                     )
                 args_json = function_call["arguments"]
-                output_json = await tool.invoke_json(args_json)
+                invocation = await tool.invoke(args_json)
                 context.append(
                     {
                         "type": "function_call_output",
                         "call_id": function_call["call_id"],
-                        "output": output_json,
+                        "output": invocation.output_json,
                     }
                 )
-                if tool.model_context_after_invoke is not None:
-                    context.extend(tool.model_context_after_invoke(output_json))
+                context.extend(invocation.model_context)
                 observed_tool_calls.append(
                     {
                         "tool_name": tool.contract_name,
                         "status": "completed",
                         "args": _json_object_or_raw(args_json),
-                        "safe_output": _json_object_or_raw(output_json),
+                        "safe_output": _json_object_or_raw(invocation.output_json),
                     }
                 )
 
@@ -917,7 +920,8 @@ def _build_function_tool(*, agents_module: Any, definition: SdkToolDefinition) -
 
     async def invoke_tool(_ctx: Any, args: str) -> str:
         try:
-            return await definition.invoke_json(args)
+            invocation = await definition.invoke(args)
+            return invocation.output_json
         except ApiError as exc:
             return json.dumps(
                 {"error": {"code": exc.code, "message": "Tool call was rejected by application policy."}},
