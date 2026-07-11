@@ -92,14 +92,13 @@ class _AgentTurnContext:
     service_skills: tuple[AgentServiceSkill, ...]
     routing_plan: RoutingPlan
     recent_run_facts: list[dict[str, Any]]
-    recent_loaded_service_skills: list[dict[str, Any]]
     resident_loaded_service_skill: dict[str, Any] | None
     expired_loaded_service_skills: list[dict[str, Any]]
     timings_ms: dict[str, float]
 
 
 @dataclass(frozen=True)
-class _AgentTurnToolScope:
+class _AgentTurnToolCatalog:
     tool_namespaces: tuple[ToolNamespace, ...]
     tool_names: tuple[str, ...]
 
@@ -177,10 +176,10 @@ class AgentRuntimeExecutor:
             turn_context = await self._load_turn_context(run=run)
             if turn_context.resident_loaded_service_skill is not None:
                 self._run_loaded_service_skill_ids[run.id].add(_text(turn_context.resident_loaded_service_skill, "service_skill_id"))
-            tool_scope = self._tool_scope_for_turn()
+            tool_catalog = self._tool_catalog_for_turn()
             await self._append_progress(run=run, phase="context_ready", label="我先理解一下你的需求～")
-            prepared_turn = await self._prepare_model_turn(run=run, turn_context=turn_context, tool_scope=tool_scope)
-            result = await self._run_model_turn(run=run, turn_context=turn_context, tool_scope=tool_scope, prepared_turn=prepared_turn)
+            prepared_turn = self._prepare_model_turn(turn_context=turn_context)
+            result = await self._run_model_turn(run=run, turn_context=turn_context, tool_catalog=tool_catalog, prepared_turn=prepared_turn)
             return await self._finalize_turn_result(
                 run=run,
                 turn_context=turn_context,
@@ -229,10 +228,10 @@ class AgentRuntimeExecutor:
             selected_history_message_ids=selected_history_message_ids,
             selected_history_assistant_run_ids=selected_history_assistant_run_ids,
         )
-        recent_loaded_service_skills = _recent_loaded_service_skills(recent_summaries)
         resident_loaded_service_skill, expired_loaded_service_skills = _resident_loaded_service_skill_context(
             summaries=recent_summaries,
             service_skill_registry=self.service_skill_registry,
+            tool_registry=self.tool_registry,
             tool_namespace_registry=self.tool_namespace_registry,
             ttl_turns=self.config.resident_service_skill_ttl_turns,
         )
@@ -246,13 +245,12 @@ class AgentRuntimeExecutor:
             service_skills=service_skills,
             routing_plan=routing_plan,
             recent_run_facts=recent_run_facts,
-            recent_loaded_service_skills=recent_loaded_service_skills,
             resident_loaded_service_skill=resident_loaded_service_skill,
             expired_loaded_service_skills=expired_loaded_service_skills,
             timings_ms=timings_ms,
         )
 
-    def _tool_scope_for_turn(self) -> _AgentTurnToolScope:
+    def _tool_catalog_for_turn(self) -> _AgentTurnToolCatalog:
         tool_namespaces: tuple[ToolNamespace, ...] = (
             self.tool_namespace_registry.list()
             if self.tool_executor is not None and self.sdk_runner.supports_tool_namespaces()
@@ -267,20 +265,16 @@ class AgentRuntimeExecutor:
                 if tool_name != LOAD_SERVICE_SKILL_TOOL_NAME
             )
         tool_names = (LOAD_SERVICE_SKILL_TOOL_NAME, *business_tool_names)
-        return _AgentTurnToolScope(tool_namespaces=tool_namespaces, tool_names=tool_names)
+        return _AgentTurnToolCatalog(tool_namespaces=tool_namespaces, tool_names=tool_names)
 
-    async def _prepare_model_turn(
+    def _prepare_model_turn(
         self,
         *,
-        run: AgentRun,
         turn_context: _AgentTurnContext,
-        tool_scope: _AgentTurnToolScope,
     ) -> _PreparedModelTurn:
         model_visible_state = _model_visible_state_projection(
-            recent_loaded_service_skills=turn_context.recent_loaded_service_skills,
             resident_loaded_service_skill=turn_context.resident_loaded_service_skill,
             expired_loaded_service_skills=turn_context.expired_loaded_service_skills,
-            routing_plan=turn_context.routing_plan,
         )
         projection = ContextProjection(
             stable_system_prompt=self.config.stable_system_prompt,
@@ -305,7 +299,7 @@ class AgentRuntimeExecutor:
         *,
         run: AgentRun,
         turn_context: _AgentTurnContext,
-        tool_scope: _AgentTurnToolScope,
+        tool_catalog: _AgentTurnToolCatalog,
         prepared_turn: _PreparedModelTurn,
     ) -> Any:
         await self._append_progress(run=run, phase="model_reasoning", label="我想一下")
@@ -317,10 +311,10 @@ class AgentRuntimeExecutor:
                 actor_user_id=str(run.actor_user_id),
                 instructions=_sdk_instructions(projection=prepared_turn.projection),
                 model_input=prepared_turn.model_input,
-                tool_names=tool_scope.tool_names,
-                tool_namespaces=_sdk_tool_namespaces(tool_scope.tool_namespaces),
-                tool_search_enabled=_tool_search_enabled(tool_scope.tool_namespaces),
-                tools=self._sdk_tools(run=run, tool_names=tool_scope.tool_names, tool_namespaces=tool_scope.tool_namespaces),
+                tool_names=tool_catalog.tool_names,
+                tool_namespaces=_sdk_tool_namespaces(tool_catalog.tool_namespaces),
+                tool_search_enabled=_tool_search_enabled(tool_catalog.tool_namespaces),
+                tools=self._sdk_tools(run=run, tool_names=tool_catalog.tool_names, tool_namespaces=tool_catalog.tool_namespaces),
                 prompt_version=run.prompt_version,
                 trace_id=run.trace_id,
                 service_skill_id=_routing_target_agent_id(turn_context.routing_plan),
@@ -560,7 +554,7 @@ class AgentRuntimeExecutor:
             description=(
                 "按 service_skill_id 加载一个 MomCozy 服务技能。"
                 "需要进入奶量、产前准备、健康咨询、情绪支持或设备指导流程前先调用；"
-                "返回该技能说明、可用工具范围和小型业务事实包。"
+                "返回该技能说明、建议工具和小型业务事实包。"
             ),
             params_json_schema=LOAD_SERVICE_SKILL_INPUT_SCHEMA,
             invoke_json=invoke_json,
@@ -603,7 +597,8 @@ class AgentRuntimeExecutor:
         ) if self.business_facts_projector is not None else {}
         output = _load_service_skill_output(
             skill=skill,
-            tool_namespaces=_tool_namespaces_for_service_skill(
+            recommended_tools=_recommended_tools_for_service_skill(
+                tool_registry=self.tool_registry,
                 tool_namespace_registry=self.tool_namespace_registry,
                 skill_id=skill_id,
             ),
@@ -618,7 +613,7 @@ class AgentRuntimeExecutor:
                     "service_skill_id": skill.service_skill_id,
                     "skill_version": skill.version,
                     "loaded_at": output["loaded_at"],
-                    "tool_names": output["tool_scope"]["tool_names"],
+                    "recommended_tool_contracts": list(_recommended_tool_contracts(skill_id)),
                 },
             }
         ]
@@ -639,6 +634,7 @@ class AgentRuntimeExecutor:
                 "name": skill.name,
                 "description": skill.description,
                 "instructions": skill.prompt_block(),
+                "recommended_tools": _list_of_dicts(output, "recommended_tools"),
                 "business_facts": _dict(output, "business_facts"),
                 "instruction": "Apply this service skill only while it is relevant to the current user request.",
             }
@@ -737,7 +733,8 @@ class AgentRuntimeExecutor:
             facts = await self._fresh_business_facts_for_skill(run=run, skill_id=skill_id)
             output = _load_service_skill_output(
                 skill=skill,
-                tool_namespaces=_tool_namespaces_for_service_skill(
+                recommended_tools=_recommended_tools_for_service_skill(
+                    tool_registry=self.tool_registry,
                     tool_namespace_registry=self.tool_namespace_registry,
                     skill_id=skill_id,
                 ),
@@ -787,7 +784,7 @@ class AgentRuntimeExecutor:
                     "service_skill_id": skill.service_skill_id,
                     "skill_version": skill.version,
                     "loaded_at": output["loaded_at"],
-                    "tool_names": output["tool_scope"]["tool_names"],
+                    "recommended_tool_contracts": list(_recommended_tool_contracts(skill_id)),
                 },
             )
             return output
@@ -969,7 +966,7 @@ class AgentRuntimeExecutor:
             reason_codes=list(routing_plan.reason_codes),
             safety_flags=list(routing_plan.safety_flags),
             needs_clarification=routing_plan.needs_clarification,
-            tool_scope_version=_tool_scope_version_for_ledger(
+            tool_scope_version=_tool_catalog_version_for_ledger(
                 tool_executor_configured=self.tool_executor is not None,
             ),
         )
@@ -1093,13 +1090,12 @@ def _routing_target_agent_id(routing_plan: RoutingPlan) -> str:
 def _load_service_skill_output(
     *,
     skill: AgentServiceSkill,
-    tool_namespaces: tuple[ToolNamespace, ...],
+    recommended_tools: list[dict[str, str]],
     business_facts: dict[str, Any],
     loaded_at: datetime,
 ) -> dict[str, Any]:
-    tool_names = _tool_names_for_namespaces(tool_namespaces)
     return {
-        "schema_version": "service_skill_load.v1",
+        "schema_version": "service_skill_load.v2",
         "service_skill_id": skill.service_skill_id,
         "skill_version": skill.version,
         "loaded_at": _aware_datetime(loaded_at).astimezone(timezone.utc).isoformat(),
@@ -1109,39 +1105,40 @@ def _load_service_skill_output(
             "description": skill.description,
             "instructions": skill.prompt_block(),
         },
-        "tool_scope": {
-            "namespace_names": [namespace.name for namespace in tool_namespaces],
-            "tool_names": list(tool_names),
-        },
+        "recommended_tools": recommended_tools,
         "business_facts": business_facts,
     }
 
 
 def _model_visible_state_projection(
     *,
-    recent_loaded_service_skills: list[dict[str, Any]],
     resident_loaded_service_skill: dict[str, Any] | None,
     expired_loaded_service_skills: list[dict[str, Any]],
-    routing_plan: RoutingPlan,
 ) -> dict[str, Any]:
     return {
-        "agent_mode": "single_downstream_agent",
-        "agent_id": routing_plan.selected_agent_id.value,
-        "coordinator": {
-            "target_kind": routing_plan.target_kind,
-            "selected_agent_id": routing_plan.selected_agent_id.value,
-            "execution_mode": routing_plan.execution_mode,
-            "source": routing_plan.source.value,
-            "reason_codes": list(routing_plan.reason_codes),
+        "service_skills": {
+            "resident": _model_visible_resident_service_skill(resident_loaded_service_skill),
+            "expired": [_model_visible_expired_service_skill(item) for item in expired_loaded_service_skills],
         },
-        "service_skill_context": {
-            "recent_loaded_service_skills": recent_loaded_service_skills,
-            "resident_loaded_service_skill": resident_loaded_service_skill,
-            "expired_loaded_service_skills": expired_loaded_service_skills,
-        },
-        "execution_mode": "single",
-        "needs_clarification": routing_plan.needs_clarification,
-        "safety_flags": list(routing_plan.safety_flags),
+    }
+
+
+def _model_visible_resident_service_skill(resident: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not resident:
+        return None
+    skill = _dict(resident, "skill")
+    return {
+        "service_skill_id": _text(resident, "service_skill_id"),
+        "skill_version": _text(resident, "skill_version"),
+        "instructions": _text(skill, "instructions"),
+        "recommended_tools": _list_of_dicts(resident, "recommended_tools"),
+    }
+
+
+def _model_visible_expired_service_skill(expired: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "service_skill_id": _text(expired, "service_skill_id"),
+        "instruction": _text(expired, "instruction"),
     }
 
 
@@ -1166,10 +1163,10 @@ def _artifact_event_payload(artifact: AgentArtifact) -> dict[str, Any]:
     return payload
 
 
-def _tool_scope_version_for_ledger(*, tool_executor_configured: bool) -> str:
+def _tool_catalog_version_for_ledger(*, tool_executor_configured: bool) -> str:
     if not tool_executor_configured:
-        return "agent_load_service_skill:v1"
-    return "agent_load_service_skill+namespaced_tool_registry:v1"
+        return "agent_load_service_skill:v2"
+    return "global_model_tool_registry:v2"
 
 
 def _sdk_tool_namespaces(tool_namespaces: tuple[ToolNamespace, ...]) -> tuple[SdkToolNamespace, ...]:
@@ -1192,10 +1189,6 @@ def _namespace_by_tool(tool_namespaces: tuple[ToolNamespace, ...]) -> dict[str, 
     return {tool_name: namespace for namespace in tool_namespaces for tool_name in namespace.tool_contracts}
 
 
-def _tool_names_for_namespaces(tool_namespaces: tuple[ToolNamespace, ...]) -> tuple[str, ...]:
-    return tuple(sorted({tool_name for namespace in tool_namespaces for tool_name in namespace.tool_contracts}))
-
-
 def _elapsed_ms(started_at: float) -> float:
     return round((perf_counter() - started_at) * 1000, 3)
 
@@ -1204,25 +1197,80 @@ def _timings_with_total(timings_ms: dict[str, float], run_started_at: float) -> 
     return {**timings_ms, "total_before_finish_checkpoint": _elapsed_ms(run_started_at)}
 
 
-SERVICE_TOOL_NAMESPACE_NAMES: dict[ServiceSkillId, frozenset[str]] = {
-    ServiceSkillId.BIRTH_PREP: frozenset({"birth_prep", "hospital_bag_cart", "pump_recommendation"}),
-    ServiceSkillId.MILK_MANAGEMENT: frozenset({"milk_management"}),
-    ServiceSkillId.HEALTH_CONSULTATION: frozenset({"health_consultation", "milk_management"}),
-    ServiceSkillId.EMOTION_SUPPORT: frozenset({"emotion_support", "health_consultation"}),
-    ServiceSkillId.DEVICE_GUIDANCE: frozenset({"device_support"}),
+SERVICE_SKILL_RECOMMENDED_TOOL_CONTRACTS: dict[ServiceSkillId, tuple[str, ...]] = {
+    ServiceSkillId.BIRTH_PREP: (
+        "pregnancy.plan_create.propose",
+        "plans.plan_delete.propose",
+        "plans.task_complete.propose",
+        "plans.task_update.propose",
+        "plans.task_delete.propose",
+        "birth_plan_form_create",
+        "labor_communication_card_create",
+        "birth_journey_plan_card_create",
+        "hospital_bag_form_create",
+        "hospital_bag_card_create",
+        "hospital_bag_cart_update",
+        "hospital_bag_pump_recommend",
+        "files.vision_summary.read",
+    ),
+    ServiceSkillId.MILK_MANAGEMENT: (
+        "records.milk_status.read",
+        "records.milk_summary.read",
+        "records.milk_analysis.read",
+        "records.growth.read",
+        "records.feeding_record.propose",
+        "records.feeding_record_delete.propose",
+        "records.pumping_record.propose",
+        "records.pumping_record_delete.propose",
+        "records.growth_record.propose",
+        "records.growth_record_update.propose",
+        "records.growth_record_delete.propose",
+        "plans.current.read",
+        "plans.calendar.read",
+        "plans.milk_plan.propose",
+        "plans.milk_plan_preview.create",
+        "plans.task_complete.propose",
+        "plans.task_create.propose",
+        "notifications.milk_reminder.propose",
+    ),
+    ServiceSkillId.HEALTH_CONSULTATION: (
+        "records.milk_status.read",
+        "diary.entry_upsert.propose",
+        "ibclc_consult_card_create",
+        "files.vision_summary.read",
+    ),
+    ServiceSkillId.EMOTION_SUPPORT: (),
+    ServiceSkillId.DEVICE_GUIDANCE: (
+        "devices.pump_status.read",
+        "devices.guidance_assets.read",
+        "support.ticket.propose",
+        "files.vision_summary.read",
+    ),
 }
 
 
-def _tool_namespaces_for_service_skill(
+def _recommended_tool_contracts(skill_id: ServiceSkillId) -> tuple[str, ...]:
+    return SERVICE_SKILL_RECOMMENDED_TOOL_CONTRACTS.get(skill_id, ())
+
+
+def _recommended_tools_for_service_skill(
     *,
+    tool_registry: ToolContractRegistry,
     tool_namespace_registry: ToolNamespaceRegistry,
     skill_id: ServiceSkillId,
-) -> tuple[ToolNamespace, ...]:
-    namespaces = tool_namespace_registry.list()
-    allowed_namespace_names = SERVICE_TOOL_NAMESPACE_NAMES.get(skill_id)
-    if allowed_namespace_names is None:
-        return ()
-    return tuple(namespace for namespace in namespaces if namespace.name in allowed_namespace_names)
+) -> list[dict[str, str]]:
+    namespace_by_tool = _namespace_by_tool(tool_namespace_registry.list())
+    recommendations: list[dict[str, str]] = []
+    for contract_name in _recommended_tool_contracts(skill_id):
+        contract = tool_registry.get(contract_name)
+        namespace = namespace_by_tool.get(contract_name)
+        recommendations.append(
+            {
+                "namespace": namespace.name if namespace is not None else "",
+                "name": sdk_tool_name(contract.name),
+            }
+        )
+    return recommendations
 
 
 def _sdk_instructions(*, projection: ContextProjection) -> str:
@@ -1245,7 +1293,7 @@ def _memory_projection_item(memory: Any) -> dict[str, Any]:
     }
 
 
-RECENT_RUN_FACT_KEYS_FOR_VISIBLE_HISTORY = ("assistant_conclusion", "tools_used", "tool_facts", "actions", "artifacts")
+RECENT_RUN_FACT_KEYS = ("user_goal", "assistant_conclusion", "tool_facts", "actions", "artifacts")
 
 
 def _recent_run_fact_projection_items(
@@ -1273,17 +1321,19 @@ def _run_fact_projection_item(
     selected_history_assistant_run_ids: set[str],
 ) -> dict[str, Any] | None:
     payload = summary.payload if isinstance(summary.payload, dict) else {}
-    if _summary_source_is_visible_in_history(summary=summary, selected_history_message_ids=selected_history_message_ids):
-        payload = _deduplicated_recent_fact_payload(
-            payload,
-            assistant_conclusion_visible=str(summary.run_id) in selected_history_assistant_run_ids,
-        )
-        if not payload:
-            return None
+    user_goal_visible = _summary_source_is_visible_in_history(
+        summary=summary,
+        selected_history_message_ids=selected_history_message_ids,
+    )
+    payload = _recent_fact_payload(
+        payload,
+        user_goal_visible=user_goal_visible,
+        assistant_conclusion_visible=str(summary.run_id) in selected_history_assistant_run_ids,
+    )
+    if not payload:
+        return None
     return {
-        "run_id": str(summary.run_id),
         "service_skill_id": summary.service_skill_id,
-        "schema_version": summary.schema_version,
         "created_at": _iso_or_empty(getattr(summary, "created_at", None)),
         "facts": _compact_mapping(payload, max_items=8, max_chars=2400),
     }
@@ -1296,9 +1346,16 @@ def _summary_source_is_visible_in_history(*, summary: Any, selected_history_mess
     return any(str(message_id) in selected_history_message_ids for message_id in source_message_ids)
 
 
-def _deduplicated_recent_fact_payload(payload: dict[str, Any], *, assistant_conclusion_visible: bool) -> dict[str, Any]:
+def _recent_fact_payload(
+    payload: dict[str, Any],
+    *,
+    user_goal_visible: bool,
+    assistant_conclusion_visible: bool,
+) -> dict[str, Any]:
     compact_payload: dict[str, Any] = {}
-    for key in RECENT_RUN_FACT_KEYS_FOR_VISIBLE_HISTORY:
+    for key in RECENT_RUN_FACT_KEYS:
+        if key == "user_goal" and user_goal_visible:
+            continue
         if key == "assistant_conclusion" and assistant_conclusion_visible:
             continue
         value = payload.get(key)
@@ -1312,6 +1369,7 @@ def _resident_loaded_service_skill_context(
     *,
     summaries: list[Any],
     service_skill_registry: AgentServiceSkillRegistry,
+    tool_registry: ToolContractRegistry,
     tool_namespace_registry: ToolNamespaceRegistry,
     ttl_turns: int,
 ) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
@@ -1343,7 +1401,8 @@ def _resident_loaded_service_skill_context(
         skill_id = ServiceSkillId(service_skill_id)
     except (KeyError, ValueError):
         return None, [expired]
-    tool_namespaces = _tool_namespaces_for_service_skill(
+    recommended_tools = _recommended_tools_for_service_skill(
+        tool_registry=tool_registry,
         tool_namespace_registry=tool_namespace_registry,
         skill_id=skill_id,
     )
@@ -1365,10 +1424,7 @@ def _resident_loaded_service_skill_context(
                 "description": service_skill.description,
                 "instructions": service_skill.prompt_block(),
             },
-            "tool_scope": {
-                "namespace_names": [namespace.name for namespace in tool_namespaces],
-                "tool_names": list(_tool_names_for_namespaces(tool_namespaces)),
-            },
+            "recommended_tools": recommended_tools,
         },
         [],
     )
@@ -1390,36 +1446,6 @@ def _latest_loaded_service_skill_record(summaries: list[Any]) -> dict[str, Any] 
                 "turns_since_loaded": len(summaries) - 1 - index,
             }
     return None
-
-
-def _recent_loaded_service_skills(summaries: list[Any]) -> list[dict[str, Any]]:
-    seen: set[str] = set()
-    recent: list[dict[str, Any]] = []
-    for summary in reversed(summaries):
-        payload = summary.payload if isinstance(summary.payload, dict) else {}
-        loaded_skills = payload.get("loaded_service_skills")
-        if not isinstance(loaded_skills, list):
-            continue
-        for item in reversed(loaded_skills):
-            if not isinstance(item, dict):
-                continue
-            service_skill_id = _text(item, "service_skill_id")
-            if not service_skill_id or service_skill_id in seen:
-                continue
-            seen.add(service_skill_id)
-            recent.append(
-                {
-                    "service_skill_id": service_skill_id,
-                    "skill_version": _text(item, "skill_version"),
-                    "last_run_id": str(summary.run_id),
-                    "loaded_at": _text(item, "loaded_at"),
-                    "user_goal": _compact_text(_text(payload, "user_goal"), max_chars=160),
-                    "assistant_conclusion": _compact_text(_text(payload, "assistant_conclusion"), max_chars=240),
-                }
-            )
-            if len(recent) >= 3:
-                return recent
-    return recent
 
 
 def _loaded_service_skill_summaries(*, tool_outputs: list[tuple[Any, Any]], result_tool_calls: Any) -> list[dict[str, Any]]:
@@ -1446,21 +1472,16 @@ def _loaded_service_skill_summary_from_output(output: dict[str, Any]) -> dict[st
     service_skill_id = _text(output, "service_skill_id")
     if not service_skill_id:
         return {}
-    tool_scope = output.get("tool_scope")
-    tool_names = tool_scope.get("tool_names") if isinstance(tool_scope, dict) else []
     return {
         "service_skill_id": service_skill_id,
         "skill_version": _text(output, "skill_version"),
         "loaded_at": _text(output, "loaded_at"),
-        "tool_names": [str(tool_name) for tool_name in tool_names] if isinstance(tool_names, list) else [],
     }
 
 
 def _resident_loaded_service_skill_summary(resident_loaded_service_skill: dict[str, Any] | None) -> dict[str, Any]:
     if not resident_loaded_service_skill:
         return {}
-    tool_scope = resident_loaded_service_skill.get("tool_scope")
-    tool_names = tool_scope.get("tool_names") if isinstance(tool_scope, dict) else []
     return {
         "service_skill_id": _text(resident_loaded_service_skill, "service_skill_id"),
         "skill_version": _text(resident_loaded_service_skill, "skill_version"),
@@ -1468,7 +1489,6 @@ def _resident_loaded_service_skill_summary(resident_loaded_service_skill: dict[s
         "loaded_at": _text(resident_loaded_service_skill, "loaded_at"),
         "turns_since_loaded": int(resident_loaded_service_skill.get("turns_since_loaded") or 0),
         "remaining_turns": int(resident_loaded_service_skill.get("remaining_turns") or 0),
-        "tool_names": [str(tool_name) for tool_name in tool_names] if isinstance(tool_names, list) else [],
     }
 
 
@@ -1599,6 +1619,13 @@ def _text(payload: dict[str, Any], key: str) -> str:
 def _dict(payload: dict[str, Any], key: str) -> dict[str, Any]:
     value = payload.get(key)
     return dict(value) if isinstance(value, dict) else {}
+
+
+def _list_of_dicts(payload: dict[str, Any], key: str) -> list[dict[str, Any]]:
+    value = payload.get(key)
+    if not isinstance(value, list):
+        return []
+    return [dict(item) for item in value if isinstance(item, dict)]
 
 
 def _tool_live_dedupe_key(*, run_id: UUID, event_type: str, payload: dict[str, Any]) -> str:

@@ -93,25 +93,7 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result(capl
     assert request.instructions.startswith("# 全局规则")
     assert request.model_input[0] == {"role": "user", "content": "What did we discuss?"}
     runtime_context = _runtime_context(request)
-    assert runtime_context["state"] == {
-        "agent_mode": "single_downstream_agent",
-        "agent_id": "cozymate_service_agent",
-        "coordinator": {
-            "target_kind": "agent",
-            "selected_agent_id": "cozymate_service_agent",
-            "execution_mode": "passthrough",
-            "source": "passthrough",
-            "reason_codes": ["default_to_cozymate"],
-        },
-        "service_skill_context": {
-            "recent_loaded_service_skills": [],
-            "resident_loaded_service_skill": None,
-            "expired_loaded_service_skills": [],
-        },
-        "execution_mode": "single",
-        "needs_clarification": False,
-        "safety_flags": [],
-    }
+    assert runtime_context["state"] == {"service_skills": {"resident": None, "expired": []}}
     assert "delegated_agent" not in runtime_context["state"]
     assert "run_id" not in runtime_context["state"]
     assert "thread_id" not in runtime_context["state"]
@@ -267,17 +249,92 @@ def test_agent_runtime_executor_load_service_skill_returns_facts_and_records_led
     assert repository.tool_call.tool_name == "load_service_skill"
     assert repository.tool_output.safe_output["service_skill_id"] == "milk-management"
     assert "奶量管理仅处理三类任务" in repository.tool_output.safe_output["skill"]["instructions"]
-    assert repository.tool_output.safe_output["tool_scope"]["namespace_names"] == ["milk_management"]
-    assert "records.milk_status.read" in repository.tool_output.safe_output["tool_scope"]["tool_names"]
+    assert "tool_scope" not in repository.tool_output.safe_output
+    assert {"namespace": "milk_management", "name": "records_milk_status_read"} in repository.tool_output.safe_output[
+        "recommended_tools"
+    ]
     assert repository.tool_output.safe_output["business_facts"] == {
         "schema_version": "v1",
         "milk_status": {"totals": {"trend_pumped_volume_ml": 420}},
     }
     skill_loaded_events = [event for event in repository.events if event.event_type == "skill.loaded"]
     assert skill_loaded_events[0].payload["service_skill_id"] == "milk-management"
+    assert "records.milk_status.read" in skill_loaded_events[0].payload["recommended_tool_contracts"]
     assert repository.run_summaries[-1].service_skill_id == "milk-management"
     assert repository.run_summaries[-1].payload["tool_facts"] == []
     assert repository.run_summaries[-1].payload["loaded_service_skills"][0]["service_skill_id"] == "milk-management"
+
+
+@pytest.mark.parametrize(
+    ("service_skill_id", "expected_tool_names"),
+    [
+        (
+            "birth-prep",
+            {
+                "pregnancy_plan_create_propose",
+                "plans_plan_delete_propose",
+                "plans_task_complete_propose",
+                "plans_task_update_propose",
+                "plans_task_delete_propose",
+                "birth_plan_form_create",
+                "labor_communication_card_create",
+                "birth_journey_plan_card_create",
+                "hospital_bag_form_create",
+                "hospital_bag_card_create",
+                "hospital_bag_cart_update",
+                "hospital_bag_pump_recommend",
+                "files_vision_summary_read",
+            },
+        ),
+        (
+            "health-consultation",
+            {
+                "records_milk_status_read",
+                "diary_entry_upsert_propose",
+                "ibclc_consult_card_create",
+                "files_vision_summary_read",
+            },
+        ),
+        ("emotion-support", set()),
+        (
+            "device-guidance",
+            {
+                "devices_pump_status_read",
+                "devices_guidance_assets_read",
+                "support_ticket_propose",
+                "files_vision_summary_read",
+            },
+        ),
+    ],
+)
+def test_service_skill_recommendations_are_small_non_authoritative_provider_tool_hints(
+    service_skill_id: str,
+    expected_tool_names: set[str],
+) -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="继续", sequence=1)
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    backend = ScriptedSdkBackend(
+        [
+            scripted_sdk_response(
+                final_text="我来继续处理。",
+                tool_invocations=(scripted_tool_invocation("load_service_skill", {"service_skill_id": service_skill_id}),),
+                expected_available_tools=("load_service_skill",),
+            )
+        ]
+    )
+
+    asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+        ).execute(run=run)
+    )
+
+    recommendations = repository.tool_output.safe_output["recommended_tools"]
+    assert {item["name"] for item in recommendations} == expected_tool_names
+    assert all(set(item) == {"namespace", "name"} for item in recommendations)
 
 
 def test_default_service_skills_are_file_backed() -> None:
@@ -836,19 +893,13 @@ def test_agent_runtime_executor_does_not_inject_service_skill_before_model_loads
     assert "待产包清单" not in request.instructions
     assert "当前已接入官方资料的型号：Air1" not in request.instructions
     state = _runtime_context(request)["state"]
-    assert state["agent_mode"] == "single_downstream_agent"
-    assert "delegated_agent" not in state
-    assert state["agent_id"] == "cozymate_service_agent"
-    assert "selected_service_skill_id" not in state
-    assert "loaded_service_skill_ids" not in state
-    assert "available_service_skill_ids" not in state
-    assert state["coordinator"]["selected_agent_id"] == "cozymate_service_agent"
+    assert state == {"service_skills": {"resident": None, "expired": []}}
     assert repository.routing_decisions[0]["selected_skill_id"] == "cozymate_service_agent"
     assert repository.run_summaries[0].service_skill_id == "cozymate_service_agent"
     assert request.tool_names == ("load_service_skill",)
 
 
-def test_agent_runtime_executor_projects_recent_loaded_skills_as_model_hint_only() -> None:
+def test_agent_runtime_executor_projects_recent_loaded_skill_only_as_resident_context() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)
     previous_run_id = uuid4()
@@ -895,16 +946,10 @@ def test_agent_runtime_executor_projects_recent_loaded_skills_as_model_hint_only
     state = _runtime_context(backend.requests[0])["state"]
     assert result.status == "completed"
     assert backend.requests[0].service_skill_id == "cozymate_service_agent"
-    assert state["service_skill_context"]["recent_loaded_service_skills"] == [
-        {
-            "service_skill_id": "milk-management",
-            "skill_version": "v1",
-            "last_run_id": str(previous_run_id),
-            "loaded_at": "2026-07-07T10:00:00+00:00",
-            "user_goal": "昨天奶量怎么样？",
-            "assistant_conclusion": "昨天总奶量偏低。",
-        }
-    ]
+    assert state["service_skills"]["resident"]["service_skill_id"] == "milk-management"
+    assert "last_run_id" not in json.dumps(state)
+    assert "assistant_conclusion" not in json.dumps(state)
+    assert "coordinator" not in state
     assert "奶量管理仅处理三类任务" not in backend.requests[0].instructions
     assert repository.run_summaries[-1].run_id == run.id
     assert repository.run_summaries[-1].service_skill_id == "cozymate_service_agent"
@@ -946,12 +991,14 @@ def test_agent_runtime_executor_injects_resident_loaded_skill_for_three_followup
     assert result.status == "completed"
     assert "奶量管理仅处理三类任务" in model_input_text
     assert "奶量管理仅处理三类任务" not in request.instructions
-    skill_context = state["service_skill_context"]
-    assert skill_context["resident_loaded_service_skill"]["service_skill_id"] == "milk-management"
-    assert skill_context["resident_loaded_service_skill"]["last_loaded_run_id"] == str(loaded_run_id)
-    assert skill_context["resident_loaded_service_skill"]["remaining_turns"] == 3
-    assert skill_context["resident_loaded_service_skill"]["skill"]["instructions"]
-    assert skill_context["expired_loaded_service_skills"] == []
+    skill_context = state["service_skills"]
+    assert skill_context["resident"]["service_skill_id"] == "milk-management"
+    assert skill_context["resident"]["instructions"]
+    assert {"namespace": "milk_management", "name": "records_milk_status_read"} in skill_context["resident"]["recommended_tools"]
+    assert skill_context["expired"] == []
+    assert "last_loaded_run_id" not in skill_context["resident"]
+    assert "loaded_at" not in skill_context["resident"]
+    assert "remaining_turns" not in skill_context["resident"]
     resident_summary = repository.run_summaries[-1].payload["resident_loaded_service_skill"]
     assert resident_summary["service_skill_id"] == "milk-management"
     assert "skill" not in resident_summary
@@ -1029,15 +1076,11 @@ def test_agent_runtime_executor_expires_resident_loaded_skill_after_three_follow
     state = _runtime_context(backend.requests[0])["state"]
     model_input_text = json.dumps(backend.requests[0].model_input, ensure_ascii=False)
     assert result.status == "completed"
-    skill_context = state["service_skill_context"]
-    assert skill_context["resident_loaded_service_skill"] is None
-    assert skill_context["expired_loaded_service_skills"] == [
+    skill_context = state["service_skills"]
+    assert skill_context["resident"] is None
+    assert skill_context["expired"] == [
         {
             "service_skill_id": "milk-management",
-            "skill_version": "v1",
-            "last_loaded_run_id": str(repository.run_summaries[0].run_id),
-            "loaded_at": "2026-07-07T10:00:00+00:00",
-            "expired_reason": "turn_ttl_exceeded",
             "instruction": (
                 "milk-management was loaded before, but its SKILL.md has been removed from context. "
                 "Call load_service_skill if this turn still needs that skill."
@@ -1090,10 +1133,7 @@ def test_agent_runtime_executor_keeps_recent_loaded_skill_hint_for_default_route
 
     assert result.status == "completed"
     assert backend.requests[0].service_skill_id == "cozymate_service_agent"
-    assert (
-        _runtime_context(backend.requests[0])["state"]["service_skill_context"]["recent_loaded_service_skills"][0]["service_skill_id"]
-        == "milk-management"
-    )
+    assert _runtime_context(backend.requests[0])["state"]["service_skills"]["resident"]["service_skill_id"] == "milk-management"
     assert repository.run_summaries[-1].service_skill_id == "cozymate_service_agent"
 
 
@@ -1190,28 +1230,16 @@ def test_agent_runtime_executor_projects_recent_run_facts_into_dynamic_context()
     assert result.status == "completed"
     assert recent_run_facts == [
         {
-            "run_id": str(previous_run_id),
             "service_skill_id": "milk-management",
-            "schema_version": "v1",
             "created_at": "2026-07-07T10:00:00+00:00",
-            "facts": {
-                "user_goal": "昨天奶量怎么样？",
-                "assistant_conclusion": "昨天总奶量偏低，建议今天观察补水和吸奶频率。",
-                "tools_used": ["records.milk_summary.read"],
-                "tool_facts": [{"tool_name": "records.milk_summary.read", "safe_output": {"total_ml": 420}}],
-                "loaded_service_skills": [
-                    {
-                        "service_skill_id": "milk-management",
-                        "skill_version": "v1",
-                        "loaded_at": "2026-07-07T10:00:00+00:00",
-                        "tool_names": ["records.milk_summary.read"],
-                    }
-                ],
-                "verbose_unused": ("x" * 2400) + "...",
-            },
+                "facts": {
+                    "user_goal": "昨天奶量怎么样？",
+                    "assistant_conclusion": "昨天总奶量偏低，建议今天观察补水和吸奶频率。",
+                    "tool_facts": [{"tool_name": "records.milk_summary.read", "safe_output": {"total_ml": 420}}],
+                },
         }
     ]
-    assert runtime_context["state"]["service_skill_context"]["recent_loaded_service_skills"][0]["service_skill_id"] == "milk-management"
+    assert runtime_context["state"]["service_skills"]["resident"]["service_skill_id"] == "milk-management"
     assert repository.run_summaries[-1].run_id == run.id
     assert repository.run_summaries[-1].service_skill_id == "cozymate_service_agent"
     assert repository.run_summaries[-1].payload["assistant_conclusion"] == "今天先看最近一次记录。"
@@ -1272,17 +1300,14 @@ def test_agent_runtime_executor_trims_recent_run_facts_already_visible_in_histor
     assert result.status == "completed"
     assert recent_run_facts == [
         {
-            "run_id": str(previous_run_id),
             "service_skill_id": "milk-management",
-            "schema_version": "v1",
             "created_at": "2026-07-07T10:00:00+00:00",
-            "facts": {
-                "tools_used": ["records.milk_summary.read"],
-                "tool_facts": [{"tool_name": "records.milk_summary.read", "safe_output": {"total_ml": 420}}],
-            },
+                "facts": {
+                    "tool_facts": [{"tool_name": "records.milk_summary.read", "safe_output": {"total_ml": 420}}],
+                },
         }
     ]
-    assert state["service_skill_context"]["recent_loaded_service_skills"][0]["service_skill_id"] == "milk-management"
+    assert state["service_skills"]["resident"]["service_skill_id"] == "milk-management"
     assert backend.requests[0].model_input[0] == {"role": "user", "content": "昨天奶量怎么样？"}
     assert backend.requests[0].model_input[1] == {"role": "assistant", "content": "昨天总奶量偏低。"}
 
@@ -1338,7 +1363,6 @@ def test_agent_runtime_executor_keeps_recent_assistant_conclusion_when_not_visib
     assert result.status == "completed"
     assert recent_run_facts[0]["facts"] == {
         "assistant_conclusion": "昨天总奶量偏低。",
-        "tools_used": ["records.milk_summary.read"],
         "tool_facts": [{"tool_name": "records.milk_summary.read", "safe_output": {"total_ml": 420}}],
     }
 
@@ -1494,11 +1518,15 @@ def test_agent_runtime_executor_loads_skill_through_unified_tool_executor() -> N
     assert repository.tool_call.status == "completed"
     assert repository.tool_output.safe_output["service_skill_id"] == "milk-management"
     assert "instructions" not in repository.tool_output.safe_output["skill"]
+    assert {"namespace": "milk_management", "name": "records_milk_status_read"} in repository.tool_output.safe_output[
+        "recommended_tools"
+    ]
     assert [event.event_type for event in repository.events if event.event_type.startswith("tool.")] == [
         "tool.started",
         "tool.completed",
     ]
-    assert any(event.event_type == "skill.loaded" for event in repository.events)
+    loaded_event = next(event for event in repository.events if event.event_type == "skill.loaded")
+    assert "records.milk_status.read" in loaded_event.payload["recommended_tool_contracts"]
 
 
 def test_agent_runtime_executor_persists_sdk_action_proposal_and_waits_for_confirmation() -> None:

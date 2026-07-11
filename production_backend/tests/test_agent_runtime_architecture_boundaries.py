@@ -243,6 +243,8 @@ def test_static_prompts_keep_runtime_boundaries_and_legacy_style() -> None:
     assert "当前可见工具" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "如果当前轮需要进入某个服务技能流程" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "必须重新调用 `load_service_skill`" in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert "`recommended_tools` 只是当前 skill 的常用工具提示，不是权限或可用范围" in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert "tool_scope" not in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "read_skill_file" not in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "旧版 namespace" not in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "工具结果是事实、校验、候选方案或执行结果" in DEFAULT_STABLE_SYSTEM_PROMPT
