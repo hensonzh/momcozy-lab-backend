@@ -26,6 +26,16 @@ class LocalObjectStorage:
         path = self._path_for_key(key)
         return await asyncio.to_thread(path.read_bytes)
 
+    async def get_byte_range(self, *, key: str, start: int, end: int) -> bytes:
+        path = self._path_for_key(key)
+
+        def _read_range() -> bytes:
+            with path.open("rb") as handle:
+                handle.seek(start)
+                return handle.read(end - start + 1)
+
+        return await asyncio.to_thread(_read_range)
+
     async def delete(self, *, key: str) -> None:
         path = self._path_for_key(key)
         if path.exists():

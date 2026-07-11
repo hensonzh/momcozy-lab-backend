@@ -12,7 +12,7 @@ from typing import Any, Protocol
 
 from ....core.metrics import RequestMetrics
 from ....core.errors import ApiError
-from ..response_text import sanitize_agent_response_text
+from ..response_text import AppendOnlyAgentResponseProjector, sanitize_agent_response_text
 
 
 @dataclass(frozen=True)
@@ -73,16 +73,13 @@ class SdkNodeResult:
 
 
 class SdkRunnerBackend(Protocol):
-    async def run(self, request: SdkNodeRequest) -> SdkNodeResult:
-        ...
+    async def run(self, request: SdkNodeRequest) -> SdkNodeResult: ...
 
 
 class AgentModelRunner(Protocol):
-    async def run_reasoning(self, request: SdkNodeRequest) -> SdkNodeResult:
-        ...
+    async def run_reasoning(self, request: SdkNodeRequest) -> SdkNodeResult: ...
 
-    def supports_tool_namespaces(self) -> bool:
-        ...
+    def supports_tool_namespaces(self) -> bool: ...
 
 
 class OpenAIResponsesApiBackend:
@@ -139,10 +136,7 @@ class OpenAIResponsesApiBackend:
 
         tools_payload = responses_tools_payload(request)
         context: list[Any] = _responses_input_items(request.model_input)
-        tools_by_address = {
-            (tool.namespace_name, tool.sdk_name): tool
-            for tool in request.tools
-        }
+        tools_by_address = {(tool.namespace_name, tool.sdk_name): tool for tool in request.tools}
         tools_by_name = {tool.sdk_name: tool for tool in request.tools}
         observed_tool_calls: list[dict[str, Any]] = []
         latest_response: Any | None = None
@@ -183,11 +177,7 @@ class OpenAIResponsesApiBackend:
                     function_calls.append(function_call)
             if not function_calls:
                 final_text = _response_output_text(latest_response, output_items=output_items) or streamed_text
-                sanitized_text = (
-                    final_text.strip()
-                    if request.response_text_format is not None
-                    else _sanitize_model_text(final_text)
-                )
+                sanitized_text = final_text.strip() if request.response_text_format is not None else _sanitize_model_text(final_text)
                 if not emitted_stream:
                     await _emit_buffered_text_deltas(sanitized_text, request.on_text_delta)
                 return SdkNodeResult(final_text=sanitized_text, tool_calls=observed_tool_calls)
@@ -455,9 +445,7 @@ class OpenAIAgentsSdkRunner:
         return self.provider == "openai" and self.use_responses is not False
 
     def _default_backend(self, request: SdkNodeRequest) -> SdkRunnerBackend:
-        if self.provider == "openai" and (
-            self.use_responses is True or self.use_responses is None and request.tool_search_enabled
-        ):
+        if self.provider == "openai" and (self.use_responses is True or self.use_responses is None and request.tool_search_enabled):
             return OpenAIResponsesApiBackend(
                 model=self.model,
                 max_turns=self.max_turns,
@@ -501,10 +489,7 @@ def responses_tools_payload(request: SdkNodeRequest) -> list[dict[str, Any]]:
                 status=500,
                 details={"namespace": namespace.name, "missing_tool_names": missing_tool_names},
             )
-        namespace_tools = [
-            _responses_function_tool_payload(tools_by_contract[contract_name])
-            for contract_name in namespace.tool_names
-        ]
+        namespace_tools = [_responses_function_tool_payload(tools_by_contract[contract_name]) for contract_name in namespace.tool_names]
         payload.append(
             {
                 "type": "namespace",
@@ -627,7 +612,7 @@ async def _iterate_response_stream(
 ) -> tuple[Any | None, str, bool]:
     response: Any | None = None
     raw_text = ""
-    emitted_text = ""
+    projector = AppendOnlyAgentResponseProjector()
     emitted_stream = False
     stream_events = stream
     if not hasattr(stream_events, "__aiter__"):
@@ -639,18 +624,18 @@ async def _iterate_response_stream(
         if delta:
             raw_text += delta
             if on_text_delta is not None:
-                sanitized_text = _sanitize_model_text(raw_text)
-                if sanitized_text.startswith(emitted_text):
-                    sanitized_delta = sanitized_text[len(emitted_text) :]
-                else:
-                    sanitized_delta = sanitized_text
+                sanitized_delta = projector.push(delta)
                 if sanitized_delta:
                     await on_text_delta(sanitized_delta)
-                    emitted_text = sanitized_text
                     emitted_stream = True
         event_response = _response_from_response_stream_event(event)
         if event_response is not None:
             response = event_response
+    if on_text_delta is not None:
+        final_delta = projector.finalize()
+        if final_delta:
+            await on_text_delta(final_delta)
+            emitted_stream = True
     return response, raw_text, emitted_stream
 
 
@@ -749,11 +734,7 @@ def _strip_sdk_only_response_fields(value: Any) -> Any:
             "function_call": {"parsed_arguments"},
             "output_text": {"parsed"},
         }.get(item_type, set())
-        return {
-            key: _strip_sdk_only_response_fields(item)
-            for key, item in value.items()
-            if key not in excluded_fields
-        }
+        return {key: _strip_sdk_only_response_fields(item) for key, item in value.items() if key not in excluded_fields}
     if isinstance(value, list | tuple):
         return [_strip_sdk_only_response_fields(item) for item in value]
     return value
@@ -849,21 +830,20 @@ async def _run_streamed(
 ) -> SdkNodeResult:
     streamed = runner_cls.run_streamed(agent, model_input, **run_kwargs)
     raw_text = ""
-    emitted_text = ""
+    projector = AppendOnlyAgentResponseProjector()
     emitted_stream = False
     async for event in streamed.stream_events():
         delta = _text_delta_from_stream_event(event)
         if delta:
             raw_text += delta
-            sanitized_text = _sanitize_model_text(raw_text)
-            if sanitized_text.startswith(emitted_text):
-                sanitized_delta = sanitized_text[len(emitted_text) :]
-            else:
-                sanitized_delta = sanitized_text
+            sanitized_delta = projector.push(delta)
             if sanitized_delta:
                 await on_text_delta(sanitized_delta)
-                emitted_text = sanitized_text
                 emitted_stream = True
+    final_delta = projector.finalize()
+    if final_delta:
+        await on_text_delta(final_delta)
+        emitted_stream = True
     final_output = getattr(streamed, "final_output", "")
     sanitized_text = _sanitize_model_text(str(final_output or "") or raw_text)
     if not emitted_stream:

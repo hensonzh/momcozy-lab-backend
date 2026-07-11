@@ -43,7 +43,23 @@ def test_create_run_uses_current_user_request_id_and_idempotency_key(caplog) -> 
     response = TestClient(app).post(
         "/v1/agent/runs",
         headers={"X-Request-ID": "req_agent", "Idempotency-Key": " idem-run "},
-        json={"message": "Review my pumping pattern"},
+        json={
+            "message": "Review my pumping pattern",
+            "client_context": {
+                "source": "flutter-agent-hub",
+                "locale": "en-US",
+                "hospital_bag_cart": {
+                    "groups": [
+                        {
+                            "title": "Feeding",
+                            "tone": "sky",
+                            "items": [{"id": "pump-custom", "name": "Custom pump", "qty": 1, "price": 999.0}],
+                        }
+                    ],
+                    "totals": {"itemCount": 1, "total": 919.08},
+                },
+            },
+        },
     )
 
     assert response.status_code == 201
@@ -52,6 +68,7 @@ def test_create_run_uses_current_user_request_id_and_idempotency_key(caplog) -> 
     assert fake_service.create_run_kwargs["request_id"] == "req_agent"
     assert fake_service.create_run_kwargs["prompt_version"] == "prompt-default"
     assert fake_service.create_run_kwargs["idempotency_key"] == "idem-run"
+    assert fake_service.create_run_kwargs["client_context"]["hospital_bag_cart"]["groups"][0]["items"][0]["id"] == "pump-custom"
     payloads = [json.loads(record.getMessage()) for record in caplog.records if record.name == "production_backend.agent_runtime"]
     timing = next(payload for payload in payloads if payload["event"] == "agent.run.api_create")
     assert timing["request_id"] == "req_agent"

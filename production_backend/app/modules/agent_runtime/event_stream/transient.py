@@ -8,6 +8,8 @@ from uuid import UUID
 
 from redis.asyncio import Redis
 
+from ..response_text import APPEND_ONLY_TEXT_STREAM_SCHEMA_VERSION
+
 
 TRANSIENT_STREAM_MAXLEN = 2000
 TRANSIENT_STREAM_TTL_SECONDS = 600
@@ -36,21 +38,34 @@ class AgentTransientStream:
         run_id: UUID,
         delta: str,
         message_stream_id: str = "assistant",
+        segment_index: int | None = None,
+        prefix_utf8_bytes: int | None = None,
+        prefix_sha256: str = "",
         ttl_seconds: int = TRANSIENT_STREAM_TTL_SECONDS,
     ) -> AgentTransientStreamEvent | None:
         normalized_delta = str(delta or "")
         if not normalized_delta:
             return None
         key = _run_transient_stream_key(run_id)
+        payload: dict[str, Any] = {
+            "delta": normalized_delta,
+            "message_stream_id": message_stream_id,
+        }
+        if segment_index is not None and prefix_utf8_bytes is not None and prefix_sha256:
+            payload.update(
+                {
+                    "stream_schema_version": APPEND_ONLY_TEXT_STREAM_SCHEMA_VERSION,
+                    "segment_index": segment_index,
+                    "prefix_utf8_bytes": prefix_utf8_bytes,
+                    "prefix_sha256": prefix_sha256,
+                }
+            )
         fields = {
             "type": "message.delta",
             "thread_id": str(thread_id),
             "run_id": str(run_id),
             "payload": json.dumps(
-                {
-                    "delta": normalized_delta,
-                    "message_stream_id": message_stream_id,
-                },
+                payload,
                 ensure_ascii=False,
                 separators=(",", ":"),
                 sort_keys=True,

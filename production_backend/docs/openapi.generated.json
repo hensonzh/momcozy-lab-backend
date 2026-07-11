@@ -681,6 +681,11 @@
             "title": "Attachments",
             "type": "array"
           },
+          "client_context": {
+            "additionalProperties": true,
+            "title": "Client Context",
+            "type": "object"
+          },
           "graph_version": {
             "anyOf": [
               {

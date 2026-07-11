@@ -5,7 +5,7 @@ import base64
 import re
 from datetime import date, datetime, timezone
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 from uuid import UUID
 
 from production_backend.app.core.errors import ApiError
@@ -62,6 +62,8 @@ _DIARY_ENTRY_VALUE_FIELDS = (
     "content",
     "attachments",
 )
+_MAX_MEDIA_VOICE_ITEMS = 2
+_DEVICE_GUIDANCE_IMAGE_SPOKEN_LABEL = "我放了一张当前步骤的对照图，你可以边看图边完成这一步。"
 
 
 class ProfileReadToolHandler:
@@ -528,8 +530,9 @@ class DeviceGuidanceAssetsReadToolHandler:
             assets = [asset for asset in assets if asset.content_type == content_type]
         assets = _filter_guidance_assets(assets=assets, model=model, topic=topic, query=query)
         bounded_assets = assets[:limit]
-        return {
-            "assets": [_asset_payload(asset) for asset in bounded_assets],
+        asset_payloads = [_asset_payload(asset) for asset in bounded_assets]
+        result = {
+            "assets": asset_payloads,
             "count": len(bounded_assets),
             "available_count": len(assets),
             "query_context": {
@@ -539,6 +542,10 @@ class DeviceGuidanceAssetsReadToolHandler:
                 "measured_nipple_mm": context.args.get("measured_nipple_mm"),
             },
         }
+        media_voice = _asset_media_voice_payloads(asset_payloads)
+        if media_voice:
+            result["media_voice"] = media_voice
+        return result
 
 
 class ImageInspectToolHandler:
@@ -1072,11 +1079,15 @@ def build_default_tool_handlers(
         "records.growth_record_update.propose": GrowthRecordUpdateProposeToolHandler(runtime_service=agent_runtime_service),
         "records.growth_record_delete.propose": GrowthRecordDeleteProposeToolHandler(runtime_service=agent_runtime_service),
         "birth_plan_form_create": LegacyArtifactToolHandler(runtime_service=agent_runtime_service, tool_name="birth_plan_form_create"),
-        "labor_communication_card_create": LegacyArtifactToolHandler(runtime_service=agent_runtime_service, tool_name="labor_communication_card_create"),
+        "labor_communication_card_create": LegacyArtifactToolHandler(
+            runtime_service=agent_runtime_service, tool_name="labor_communication_card_create"
+        ),
         "hospital_bag_form_create": LegacyArtifactToolHandler(runtime_service=agent_runtime_service, tool_name="hospital_bag_form_create"),
         "hospital_bag_card_create": LegacyArtifactToolHandler(runtime_service=agent_runtime_service, tool_name="hospital_bag_card_create"),
         "hospital_bag_cart_update": LegacyArtifactToolHandler(runtime_service=agent_runtime_service, tool_name="hospital_bag_cart_update"),
-        "hospital_bag_pump_recommend": LegacyArtifactToolHandler(runtime_service=agent_runtime_service, tool_name="hospital_bag_pump_recommend"),
+        "hospital_bag_pump_recommend": LegacyArtifactToolHandler(
+            runtime_service=agent_runtime_service, tool_name="hospital_bag_pump_recommend"
+        ),
         "ibclc_consult_card_create": IbclcConsultCardCreateToolHandler(runtime_service=agent_runtime_service),
         "support.ticket.propose": SupportTicketProposeToolHandler(runtime_service=agent_runtime_service),
     }
@@ -1955,13 +1966,60 @@ def _device_payload(device: PumpDevice) -> dict[str, Any]:
 
 
 def _asset_payload(asset: ProductAsset) -> dict[str, Any]:
-    return {
+    kind = _asset_kind(asset.content_type)
+    url = f"/v1/assets/{quote(asset.id, safe='')}?kind={kind}"
+    label = _markdown_label(asset.label)
+    payload = {
         "id": asset.id,
         "label": asset.label,
         "domain": asset.domain,
         "content_type": asset.content_type,
         "size_bytes": asset.size_bytes,
+        "kind": kind,
+        "url": url,
     }
+    if kind == "image":
+        payload["markdown_image"] = f"![{label}]({url})"
+    else:
+        payload["markdown_link"] = f"[{label}]({url})"
+    return payload
+
+
+def _asset_media_voice_payloads(assets: list[dict[str, Any]]) -> list[dict[str, str]]:
+    items: list[dict[str, str]] = []
+    for asset in assets:
+        if asset.get("kind") != "image":
+            continue
+        media_id = _text(asset, "url")
+        if not media_id:
+            continue
+        item = {
+            "media_id": media_id,
+            "kind": "image",
+            "voice_policy": "announce",
+            "priority": "instructional",
+            "spoken_label": _DEVICE_GUIDANCE_IMAGE_SPOKEN_LABEL,
+        }
+        visual_label = _text(asset, "label")
+        if visual_label:
+            item["visual_label"] = visual_label
+        items.append(item)
+        if len(items) >= _MAX_MEDIA_VOICE_ITEMS:
+            break
+    return items
+
+
+def _asset_kind(content_type: str) -> str:
+    normalized = content_type.strip().lower()
+    if normalized.startswith("image/"):
+        return "image"
+    if normalized.startswith("video/"):
+        return "video"
+    return "pdf"
+
+
+def _markdown_label(label: str) -> str:
+    return label.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
 
 
 def _filter_guidance_assets(*, assets: list[ProductAsset], model: str, topic: str, query: str) -> list[ProductAsset]:
@@ -1985,11 +2043,7 @@ def _normalized_search_terms(value: object) -> list[str]:
     if not raw_value:
         return []
     raw_terms = re.findall(r"[\w\u4e00-\u9fff]+", raw_value)
-    return [
-        term
-        for term in (_normalized_search_term(raw_term) for raw_term in raw_terms)
-        if term
-    ]
+    return [term for term in (_normalized_search_term(raw_term) for raw_term in raw_terms) if term]
 
 
 def _guidance_search_term_groups(*, model: str, topic: str, query: str) -> list[list[str]]:
@@ -2055,11 +2109,7 @@ def _deferred_artifact_created_event(artifact: Any) -> dict[str, Any]:
     }
     if isinstance(artifact.payload, dict):
         payload.update(
-            {
-                key: value
-                for key, value in artifact.payload.items()
-                if key in {"form", "card", "card_json", "cart_update", "summary"}
-            }
+            {key: value for key, value in artifact.payload.items() if key in {"form", "card", "card_json", "cart_update", "summary"}}
         )
     return {"event_type": "artifact.created", "payload": payload}
 

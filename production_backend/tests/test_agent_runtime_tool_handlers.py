@@ -235,7 +235,7 @@ def test_legacy_artifact_tool_handler_returns_old_form_card_and_cart_envelopes()
                         "return_to_work_timing": "3 个月后",
                         "support_person": "有人全天帮忙",
                         "top_worries": ["怕漏买"],
-                    }
+                    },
                 },
             )
         )
@@ -299,12 +299,7 @@ def test_legacy_artifact_tool_handler_matches_old_cart_and_pump_actions() -> Non
             _context(actor=actor, args={"action": "replace_pump_model", "product_sku_id": "pump-m9"})
         )
     )
-    pump_items = [
-        item
-        for group in replace_result["cart_update"]["groups"]
-        for item in group["items"]
-        if item["id"] == "pump-m9"
-    ]
+    pump_items = [item for group in replace_result["cart_update"]["groups"] for item in group["items"] if item["id"] == "pump-m9"]
     assert pump_items
     assert pump_items[0]["official_price_usd"] == 159.99
     assert pump_items[0]["price_label"].startswith("¥")
@@ -580,12 +575,44 @@ def test_device_guidance_assets_read_tool_handler_returns_bounded_metadata() -> 
                 "domain": "device_guidance",
                 "content_type": "application/pdf",
                 "size_bytes": 1200,
+                "kind": "pdf",
+                "url": "/v1/assets/asset-guide?kind=pdf",
+                "markdown_link": "[Air1 unboxing pump guide](/v1/assets/asset-guide?kind=pdf)",
             }
         ],
         "count": 1,
         "available_count": 1,
         "query_context": {"model": "Air1", "topic": "setup", "query": "", "measured_nipple_mm": None},
     }
+
+
+def test_device_guidance_assets_read_tool_handler_returns_copyable_image_markdown() -> None:
+    handler = DeviceGuidanceAssetsReadToolHandler(asset_service=FakeAssetService())
+
+    result = asyncio.run(handler(_context(args={"content_type": "image/png"})))
+
+    assert result["assets"] == [
+        {
+            "id": "asset-image",
+            "label": "Air1 components overview",
+            "domain": "device_guidance",
+            "content_type": "image/png",
+            "size_bytes": 800,
+            "kind": "image",
+            "url": "/v1/assets/asset-image?kind=image",
+            "markdown_image": "![Air1 components overview](/v1/assets/asset-image?kind=image)",
+        }
+    ]
+    assert result["media_voice"] == [
+        {
+            "media_id": "/v1/assets/asset-image?kind=image",
+            "kind": "image",
+            "visual_label": "Air1 components overview",
+            "voice_policy": "announce",
+            "priority": "instructional",
+            "spoken_label": "我放了一张当前步骤的对照图，你可以边看图边完成这一步。",
+        }
+    ]
 
 
 def test_image_inspect_tool_handler_loads_visible_packaged_image_as_transient_model_context() -> None:
@@ -736,9 +763,7 @@ def test_record_delete_and_growth_propose_tool_handlers_create_actions() -> None
         )
     )
     growth_delete = asyncio.run(
-        GrowthRecordDeleteProposeToolHandler(runtime_service=runtime_service)(
-            _context(actor=actor, args={"record_id": str(growth_id)})
-        )
+        GrowthRecordDeleteProposeToolHandler(runtime_service=runtime_service)(_context(actor=actor, args={"record_id": str(growth_id)}))
     )
 
     assert feeding_delete["action_type"] == FEEDING_RECORD_DELETE_ACTION
@@ -960,9 +985,7 @@ def test_plan_task_update_delete_and_plan_delete_tool_handlers_create_confirmati
         )
     )
     plan_delete = asyncio.run(
-        PlanDeleteProposeToolHandler(runtime_service=runtime_service)(
-            _context(actor=actor, args={"plan_id": str(plan_id)})
-        )
+        PlanDeleteProposeToolHandler(runtime_service=runtime_service)(_context(actor=actor, args={"plan_id": str(plan_id)}))
     )
 
     assert update["action_type"] == PLAN_TASK_UPDATE_ACTION
@@ -1099,9 +1122,7 @@ def test_milk_reminder_propose_tool_handler_requires_title() -> None:
 def test_diary_entry_upsert_propose_tool_handler_requires_values() -> None:
     with pytest.raises(ApiError) as exc_info:
         asyncio.run(
-            DiaryEntryUpsertProposeToolHandler(runtime_service=FakeAgentRuntimeService())(
-                _context(args={"entry_date": "2026-07-04"})
-            )
+            DiaryEntryUpsertProposeToolHandler(runtime_service=FakeAgentRuntimeService())(_context(args={"entry_date": "2026-07-04"}))
         )
 
     assert exc_info.value.code == "validation_failed"
@@ -1424,6 +1445,14 @@ class FakeAssetService:
                 domain="device_guidance",
                 content_type="video/mp4",
                 size_bytes=2400,
+                path=None,
+            ),
+            ProductAsset(
+                id="asset-image",
+                label="Air1 components overview",
+                domain="device_guidance",
+                content_type="image/png",
+                size_bytes=800,
                 path=None,
             ),
         ][:limit]

@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import logging
 from datetime import datetime, timezone
@@ -129,8 +130,7 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result(capl
     timing_payloads = [
         json.loads(record.getMessage())
         for record in caplog.records
-        if record.name == "production_backend.agent_runtime"
-        and json.loads(record.getMessage()).get("event") == "agent.run.executor_turn"
+        if record.name == "production_backend.agent_runtime" and json.loads(record.getMessage()).get("event") == "agent.run.executor_turn"
     ]
     assert timing_payloads[-1]["run_id"] == str(run.id)
     assert timing_payloads[-1]["status"] == "completed"
@@ -243,9 +243,7 @@ def test_agent_runtime_executor_load_service_skill_returns_facts_and_records_led
     assert repository.tool_output.safe_output["service_skill_id"] == "milk-management"
     assert "奶量管理仅处理三类任务" in repository.tool_output.safe_output["skill"]["instructions"]
     assert "tool_scope" not in repository.tool_output.safe_output
-    assert {"namespace": "milk_management", "name": "records_milk_status_read"} in repository.tool_output.safe_output[
-        "recommended_tools"
-    ]
+    assert {"namespace": "milk_management", "name": "records_milk_status_read"} in repository.tool_output.safe_output["recommended_tools"]
     assert repository.tool_output.safe_output["business_facts"] == {
         "schema_version": "v1",
         "milk_status": {"totals": {"trend_pumped_volume_ml": 420}},
@@ -262,9 +260,9 @@ def test_agent_runtime_executor_load_service_skill_returns_facts_and_records_led
     ("service_skill_id", "expected_tool_names"),
     [
         (
-                "birth-prep",
-                {
-                    "pregnancy_plan_propose",
+            "birth-prep",
+            {
+                "pregnancy_plan_propose",
                 "plans_plan_delete_propose",
                 "plans_task_complete_propose",
                 "plans_task_update_propose",
@@ -365,6 +363,19 @@ def test_agent_runtime_executor_publishes_final_text_deltas_to_transient_stream(
         {"thread_id": thread_id, "run_id": run.id, "delta": "hel", "message_stream_id": str(result.assistant_message_id)},
         {"thread_id": thread_id, "run_id": run.id, "delta": "lo", "message_stream_id": str(result.assistant_message_id)},
     ]
+    assert transient_stream.delta_metadata == [
+        {
+            "segment_index": 0,
+            "prefix_utf8_bytes": 3,
+            "prefix_sha256": hashlib.sha256(b"hel").hexdigest(),
+        },
+        {
+            "segment_index": 1,
+            "prefix_utf8_bytes": 5,
+            "prefix_sha256": hashlib.sha256(b"hello").hexdigest(),
+        },
+    ]
+    assert result.stream_segment_count == 2
     assert transient_stream.progresses == [
         {
             "thread_id": thread_id,
@@ -400,6 +411,123 @@ def test_agent_runtime_executor_publishes_final_text_deltas_to_transient_stream(
     ]
     assert transient_stream.progresses[0]["semantic"]["surface"] == "status_bar"
     assert transient_stream.progresses[2]["semantic"]["surface"] == "thinking_note"
+
+
+def test_agent_runtime_executor_persists_all_text_shown_before_and_after_tool_turns() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="Read my profile", sequence=1)
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    transient_stream = FakeTransientStream()
+    backend = ScriptedSdkBackend(
+        [
+            scripted_sdk_response(
+                final_text="已经整理好了。",
+                text_deltas=("我先帮你查一下。", "已经", "整理好了。"),
+            )
+        ]
+    )
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            transient_stream=transient_stream,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+        ).execute(run=run)
+    )
+
+    assert result.final_text == "我先帮你查一下。已经整理好了。"
+    assert [item["delta"] for item in transient_stream.deltas] == ["我先帮你查一下。", "已经", "整理好了。"]
+
+
+def test_agent_runtime_executor_streams_missing_provider_suffix_before_finalizing() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="Finish the answer", sequence=1)
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    transient_stream = FakeTransientStream()
+    backend = ScriptedSdkBackend([scripted_sdk_response(final_text="hello world", text_deltas=("hello",))])
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            transient_stream=transient_stream,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+        ).execute(run=run)
+    )
+
+    assert result.final_text == "hello world"
+    assert [item["delta"] for item in transient_stream.deltas] == ["hello", " world"]
+
+
+def test_agent_runtime_executor_does_not_overwrite_streamed_text_with_conflicting_provider_final() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="Keep streamed text", sequence=1)
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    transient_stream = FakeTransientStream()
+    backend = ScriptedSdkBackend([scripted_sdk_response(final_text="replacement", text_deltas=("already shown",))])
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            transient_stream=transient_stream,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+        ).execute(run=run)
+    )
+
+    assert result.final_text == "already shown"
+    assert [item["delta"] for item in transient_stream.deltas] == ["already shown"]
+
+
+def test_agent_runtime_executor_never_streams_partial_tool_json_after_visible_text() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="Load a skill", sequence=1)
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    transient_stream = FakeTransientStream()
+    backend = ScriptedSdkBackend(
+        [
+            scripted_sdk_response(
+                final_text="我先帮你看一下。",
+                text_deltas=(
+                    '我先帮你看一下。\n{"service_skill_id":',
+                    '"milk-management","status":"service_skill_loaded"}',
+                ),
+            )
+        ]
+    )
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            transient_stream=transient_stream,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+        ).execute(run=run)
+    )
+
+    assert result.final_text == "我先帮你看一下。"
+    assert [item["delta"] for item in transient_stream.deltas] == ["我先帮你看一下。"]
+
+
+def test_agent_runtime_executor_does_not_append_unclosed_provider_json_tail() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="Keep the safe prefix", sequence=1)
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    transient_stream = FakeTransientStream()
+    backend = ScriptedSdkBackend([scripted_sdk_response(final_text='Safe answer.\n{"service_skill_id":', text_deltas=("Safe answer.",))])
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            transient_stream=transient_stream,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+        ).execute(run=run)
+    )
+
+    assert result.final_text == "Safe answer."
+    assert [item["delta"] for item in transient_stream.deltas] == ["Safe answer."]
 
 
 def test_agent_runtime_executor_keeps_progress_transient_when_event_sink_is_configured() -> None:
@@ -518,12 +646,8 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
         "support_ticket_propose",
     )
     contracts = {contract.name: contract for contract in default_tool_registry().list()}
-    assert backend.tool_descriptions_by_contract == {
-        contract_name: contract.description for contract_name, contract in contracts.items()
-    }
-    assert backend.tool_schemas_by_contract == {
-        contract_name: contract.input_schema for contract_name, contract in contracts.items()
-    }
+    assert backend.tool_descriptions_by_contract == {contract_name: contract.description for contract_name, contract in contracts.items()}
+    assert backend.tool_schemas_by_contract == {contract_name: contract.input_schema for contract_name, contract in contracts.items()}
     assert backend.tool_schemas["hospital_bag_card_create"]["additionalProperties"] is False
     assert backend.tool_schemas["hospital_bag_card_create"]["properties"] == {}
     assert backend.tool_schemas["hospital_bag_cart_update"]["required"] == ["action"]
@@ -785,10 +909,7 @@ def test_agent_runtime_executor_does_not_use_quick_replies_from_final_text_json(
     backend = ScriptedSdkBackend(
         [
             scripted_sdk_response(
-                final_text=(
-                    '已经整理好了。\n'
-                    '{"quick_replies":[{"text":"继续聊这个"},{"text":"给我更多细节"},{"text":"换个方向"}]}'
-                ),
+                final_text=('已经整理好了。\n{"quick_replies":[{"text":"继续聊这个"},{"text":"给我更多细节"},{"text":"换个方向"}]}'),
             )
         ]
     )
@@ -1275,11 +1396,11 @@ def test_agent_runtime_executor_projects_recent_run_facts_into_dynamic_context()
         {
             "service_skill_id": "milk-management",
             "created_at": "2026-07-07T10:00:00+00:00",
-                "facts": {
-                    "user_goal": "昨天奶量怎么样？",
-                    "assistant_conclusion": "昨天总奶量偏低，建议今天观察补水和吸奶频率。",
-                    "tool_facts": [{"tool_name": "records.milk_summary.read", "safe_output": {"total_ml": 420}}],
-                },
+            "facts": {
+                "user_goal": "昨天奶量怎么样？",
+                "assistant_conclusion": "昨天总奶量偏低，建议今天观察补水和吸奶频率。",
+                "tool_facts": [{"tool_name": "records.milk_summary.read", "safe_output": {"total_ml": 420}}],
+            },
         }
     ]
     assert runtime_context["state"]["service_skills"]["resident"]["service_skill_id"] == "milk-management"
@@ -1345,9 +1466,9 @@ def test_agent_runtime_executor_trims_recent_run_facts_already_visible_in_histor
         {
             "service_skill_id": "milk-management",
             "created_at": "2026-07-07T10:00:00+00:00",
-                "facts": {
-                    "tool_facts": [{"tool_name": "records.milk_summary.read", "safe_output": {"total_ml": 420}}],
-                },
+            "facts": {
+                "tool_facts": [{"tool_name": "records.milk_summary.read", "safe_output": {"total_ml": 420}}],
+            },
         }
     ]
     assert state["service_skills"]["resident"]["service_skill_id"] == "milk-management"
@@ -1555,9 +1676,7 @@ def test_agent_runtime_executor_loads_skill_through_unified_tool_executor() -> N
     loaded_model_context = json.loads(backend.model_context[0]["content"])["runtime_loaded_service_skill"]
     assert loaded_model_context["service_skill_id"] == "milk-management"
     assert "奶量管理仅处理三类任务" in loaded_model_context["instructions"]
-    assert {"namespace": "milk_management", "name": "records_milk_status_read"} in repository.tool_output.safe_output[
-        "recommended_tools"
-    ]
+    assert {"namespace": "milk_management", "name": "records_milk_status_read"} in repository.tool_output.safe_output["recommended_tools"]
     assert [event.event_type for event in repository.events if event.event_type.startswith("tool.")] == [
         "tool.started",
         "tool.completed",
@@ -1645,9 +1764,7 @@ def test_agent_runtime_executor_prefills_form_from_runtime_business_facts_withou
         repository=repository,
         handlers={"hospital_bag_form_create": capture_handler},
     )
-    business_facts_projector = FakeBusinessFactsProjector(
-        facts={"pregnancy": {"profile": {"delivery_date": "2026-09-18"}}}
-    )
+    business_facts_projector = FakeBusinessFactsProjector(facts={"pregnancy": {"profile": {"delivery_date": "2026-09-18"}}})
     backend = ScriptedSdkBackend(
         [
             scripted_sdk_response(
@@ -1759,6 +1876,62 @@ def test_agent_runtime_executor_injects_latest_cart_state_without_exposing_group
 
     assert repository.tool_call.safe_args == {"action": "remove_items", "item_ids": ["baby-diaper"]}
     assert captured_args["groups"] == [{"title": "宝宝用品", "items": [{"id": "baby-diaper", "qty": 1}]}]
+
+
+def test_agent_runtime_executor_prefers_explicit_empty_client_cart_over_persisted_cart() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(
+        thread_id=thread_id,
+        run_id=run.id,
+        role="user",
+        text="恢复默认购物车",
+        sequence=1,
+        content_overrides={"client_context": {"hospital_bag_cart": {"groups": [], "totals": {"item_count": 0}}}},
+    )
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user, run=run)
+    repository.latest_thread_artifact = AgentArtifact(
+        id=uuid4(),
+        run_id=uuid4(),
+        owner_user_id=run.actor_user_id,
+        artifact_type="hospital_bag_cart",
+        schema_version="1.0",
+        status="created",
+        payload={"cart_update": {"groups": [{"title": "旧购物车", "items": [{"id": "stale-item", "qty": 1}]}]}},
+        raw_payload_ref="",
+    )
+    registry = default_tool_registry()
+    captured_args: dict[str, Any] = {}
+
+    async def capture_handler(context: ToolHandlerContext) -> dict[str, Any]:
+        captured_args.update(context.args)
+        return {"status": "cart_updated"}
+
+    tool_executor = ToolExecutor(
+        registry=registry,
+        repository=repository,
+        handlers={"hospital_bag_cart_update": capture_handler},
+    )
+    backend = ScriptedSdkBackend(
+        [
+            scripted_sdk_response(
+                final_text="已经恢复默认购物车。",
+                tool_invocations=(scripted_tool_invocation("hospital_bag_cart_update", {"action": "reset_cart"}),),
+            )
+        ]
+    )
+
+    asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            tool_registry=registry,
+            tool_executor=tool_executor,
+        ).execute(run=run)
+    )
+
+    assert repository.tool_call.safe_args == {"action": "reset_cart"}
+    assert captured_args["groups"] == []
 
 
 def test_agent_runtime_executor_persists_sdk_action_proposal_and_waits_for_confirmation() -> None:
@@ -2341,10 +2514,29 @@ class FakeBusinessFactsProjector:
 class FakeTransientStream:
     def __init__(self) -> None:
         self.deltas = []
+        self.delta_metadata = []
         self.progresses = []
 
-    async def publish_message_delta(self, *, thread_id, run_id, delta, message_stream_id="assistant", ttl_seconds=600):
+    async def publish_message_delta(
+        self,
+        *,
+        thread_id,
+        run_id,
+        delta,
+        message_stream_id="assistant",
+        segment_index=None,
+        prefix_utf8_bytes=None,
+        prefix_sha256="",
+        ttl_seconds=600,
+    ):
         self.deltas.append({"thread_id": thread_id, "run_id": run_id, "delta": delta, "message_stream_id": message_stream_id})
+        self.delta_metadata.append(
+            {
+                "segment_index": segment_index,
+                "prefix_utf8_bytes": prefix_utf8_bytes,
+                "prefix_sha256": prefix_sha256,
+            }
+        )
         return None
 
     async def publish_progress(

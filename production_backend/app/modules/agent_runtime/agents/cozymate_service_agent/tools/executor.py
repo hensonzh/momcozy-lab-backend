@@ -370,6 +370,8 @@ def _safe_payload(value: Any) -> Any:
 
 def _redacted_value(key: str, value: Any) -> Any:
     lowered = key.lower()
+    if lowered in {"confirmed_form_data", "form_data"}:
+        return "[redacted]"
     if any(token in lowered for token in ("authorization", "password", "secret", "token", "api_key")):
         return "[redacted]"
     return _safe_payload(value)

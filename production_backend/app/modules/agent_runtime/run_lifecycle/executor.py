@@ -16,6 +16,7 @@ from ....core.logging import log_agent_runtime_event
 from ....infrastructure.object_storage.base import ObjectStorage
 from ...auth import CurrentUser
 from ..actions.policy import AgentActionPolicy, AgentActionPolicyDecision
+from ..client_context import project_agent_client_context
 from ..agents.cozymate_service_agent.context import BusinessFactsProjector
 from ..agents.cozymate_service_agent.prompts import (
     ContextProjection,
@@ -57,7 +58,7 @@ from ..memory.service import AgentMemoryService
 from ..models import AgentAction, AgentArtifact, AgentEvent, AgentMessage, AgentRun
 from ..payloads import DEFAULT_MAX_INLINE_PAYLOAD_BYTES, maybe_externalize_json_payload
 from ..repository import AgentRuntimeRepository
-from ..response_text import sanitize_agent_response_text
+from ..response_text import AppendOnlyAgentResponseProjector, agent_response_text_integrity
 from ..sdk import (
     AgentModelRunner,
     SdkNodeRequest,
@@ -164,11 +165,13 @@ class AgentRuntimeExecutor:
         self.clock = clock or _utcnow
         self._run_loaded_service_skill_ids: dict[UUID, set[str]] = {}
         self._run_assistant_message_ids: dict[UUID, UUID] = {}
-        self._run_text_stream_buffers: dict[UUID, str] = {}
+        self._run_text_projectors: dict[UUID, AppendOnlyAgentResponseProjector] = {}
         self._run_text_stream_emitted: dict[UUID, str] = {}
         self._run_trusted_form_submissions: dict[UUID, dict[str, dict[str, Any]]] = {}
         self._run_business_facts: dict[UUID, dict[ServiceSkillId, dict[str, Any]]] = {}
         self._run_visible_image_urls: dict[UUID, tuple[str, ...]] = {}
+        self._run_hospital_bag_cart_groups: dict[UUID, list[dict[str, Any]] | None] = {}
+        self._run_text_segment_counts: dict[UUID, int] = {}
         self._unified_load_service_skill = isinstance(self.tool_executor, ToolExecutor)
 
     async def __call__(self, run: AgentRun) -> AgentRunExecutionResult:
@@ -181,13 +184,15 @@ class AgentRuntimeExecutor:
             raise ApiError(code="runtime_graph_mismatch", message="Run runtime pattern does not match graph version.", status=409)
         self._run_assistant_message_ids[run.id] = uuid4()
         self._run_loaded_service_skill_ids[run.id] = set()
-        self._run_text_stream_buffers[run.id] = ""
+        self._run_text_projectors[run.id] = AppendOnlyAgentResponseProjector()
         self._run_text_stream_emitted[run.id] = ""
         self._run_visible_image_urls[run.id] = ()
         self._run_business_facts[run.id] = {}
+        self._run_text_segment_counts[run.id] = 0
         try:
             turn_context = await self._load_turn_context(run=run)
             self._run_trusted_form_submissions[run.id] = _trusted_form_submissions(turn_context.current_message)
+            self._run_hospital_bag_cart_groups[run.id] = _current_hospital_bag_cart_groups(turn_context.current_message)
             if turn_context.resident_loaded_service_skill is not None:
                 self._run_loaded_service_skill_ids[run.id].add(_text(turn_context.resident_loaded_service_skill, "service_skill_id"))
             tool_catalog = self._tool_catalog_for_turn()
@@ -211,11 +216,13 @@ class AgentRuntimeExecutor:
         finally:
             self._run_assistant_message_ids.pop(run.id, None)
             self._run_loaded_service_skill_ids.pop(run.id, None)
-            self._run_text_stream_buffers.pop(run.id, None)
+            self._run_text_projectors.pop(run.id, None)
             self._run_text_stream_emitted.pop(run.id, None)
             self._run_trusted_form_submissions.pop(run.id, None)
             self._run_business_facts.pop(run.id, None)
             self._run_visible_image_urls.pop(run.id, None)
+            self._run_hospital_bag_cart_groups.pop(run.id, None)
+            self._run_text_segment_counts.pop(run.id, None)
 
     async def _load_turn_context(self, *, run: AgentRun) -> _AgentTurnContext:
         timings_ms: dict[str, float] = {}
@@ -273,17 +280,13 @@ class AgentRuntimeExecutor:
 
     def _tool_catalog_for_turn(self) -> _AgentTurnToolCatalog:
         tool_namespaces: tuple[ToolNamespace, ...] = (
-            self.tool_namespace_registry.list()
-            if self.tool_executor is not None and self.sdk_runner.supports_tool_namespaces()
-            else ()
+            self.tool_namespace_registry.list() if self.tool_executor is not None and self.sdk_runner.supports_tool_namespaces() else ()
         )
         if self.tool_executor is None:
             business_tool_names: tuple[str, ...] = ()
         else:
             business_tool_names = tuple(
-                tool_name
-                for tool_name in self.tool_registry.names_for_sdk()
-                if tool_name != LOAD_SERVICE_SKILL_TOOL_NAME
+                tool_name for tool_name in self.tool_registry.names_for_sdk() if tool_name != LOAD_SERVICE_SKILL_TOOL_NAME
             )
         tool_names = (LOAD_SERVICE_SKILL_TOOL_NAME, *business_tool_names)
         return _AgentTurnToolCatalog(tool_namespaces=tool_namespaces, tool_names=tool_names)
@@ -395,10 +398,15 @@ class AgentRuntimeExecutor:
         if pending_action is not None:
             self._log_executor_timing(run=run, status="waiting_for_confirmation", timings_ms=pending_timings_ms)
             return AgentRunExecutionResult(status="waiting_for_confirmation", pending_action_id=pending_action.id)
-        sanitized_response = sanitize_agent_response_text(str(result.final_text or ""))
-        final_text = sanitized_response.text.strip()
-        if not final_text and str(result.final_text or "").strip():
-            final_text = "我已经整理好了。"
+        raw_provider_final = str(result.final_text or "")
+        provider_projector = AppendOnlyAgentResponseProjector()
+        provider_projector.push(raw_provider_final)
+        provider_projector.finalize()
+        provider_final_text = provider_projector.text
+        if not provider_final_text and raw_provider_final.strip():
+            provider_final_text = "我已经整理好了。"
+        await self._finalize_text_projector(run=run)
+        final_text = await self._canonical_final_text(run=run, provider_final_text=provider_final_text)
         if not final_text:
             raise ApiError(code="empty_agent_response", message="Agent runtime returned an empty response.", status=502)
         finish_timings_ms = _timings_with_total(turn_context.timings_ms, run_started_at)
@@ -441,6 +449,7 @@ class AgentRuntimeExecutor:
             final_text=final_text,
             assistant_message_id=self._run_assistant_message_ids.get(run.id),
             quick_replies=quick_replies,
+            stream_segment_count=self._run_text_segment_counts.get(run.id, 0),
         )
 
     def _action_decision_from_proposal(self, proposal: dict[str, Any]) -> AgentActionPolicyDecision:
@@ -504,35 +513,93 @@ class AgentRuntimeExecutor:
             return None
 
         async def publish(delta: str) -> None:
-            raw_text = f"{self._run_text_stream_buffers.get(run.id, '')}{delta or ''}"
-            self._run_text_stream_buffers[run.id] = raw_text
-            sanitized_text = sanitize_agent_response_text(raw_text).text
-            emitted_text = self._run_text_stream_emitted.get(run.id, "")
-            if sanitized_text.startswith(emitted_text):
-                sanitized_delta = sanitized_text[len(emitted_text) :]
-            else:
-                sanitized_delta = sanitized_text
+            projector = self._run_text_projectors[run.id]
+            sanitized_delta = projector.push(delta)
             if not sanitized_delta:
                 return
-            self._run_text_stream_emitted[run.id] = sanitized_text
-            message_stream_id = str(self._run_assistant_message_ids.get(run.id) or "assistant")
-            if event_publisher is not None:
-                await event_publisher.publish_message_delta(
-                    thread_id=run.thread_id,
-                    run_id=run.id,
-                    delta=sanitized_delta,
-                    message_stream_id=message_stream_id,
-                )
-                return
-            if transient_stream is not None:
-                await transient_stream.publish_message_delta(
-                    thread_id=run.thread_id,
-                    run_id=run.id,
-                    delta=sanitized_delta,
-                    message_stream_id=message_stream_id,
-                )
+            self._run_text_stream_emitted[run.id] = projector.text
+            await self._publish_text_delta(
+                run=run,
+                delta=sanitized_delta,
+                event_publisher=event_publisher,
+                transient_stream=transient_stream,
+            )
 
         return publish
+
+    async def _finalize_text_projector(self, *, run: AgentRun) -> None:
+        projector = self._run_text_projectors[run.id]
+        final_delta = projector.finalize()
+        if not final_delta:
+            return
+        self._run_text_stream_emitted[run.id] = projector.text
+        await self._publish_text_delta(
+            run=run,
+            delta=final_delta,
+            event_publisher=self.event_sink,
+            transient_stream=self.transient_stream,
+        )
+
+    async def _canonical_final_text(self, *, run: AgentRun, provider_final_text: str) -> str:
+        streamed_text = self._run_text_stream_emitted.get(run.id, "")
+        if not streamed_text:
+            return provider_final_text
+        if not provider_final_text or streamed_text.endswith(provider_final_text):
+            return streamed_text
+        if provider_final_text.startswith(streamed_text):
+            missing_suffix = provider_final_text[len(streamed_text) :]
+            self._run_text_stream_emitted[run.id] = provider_final_text
+            await self._publish_text_delta(
+                run=run,
+                delta=missing_suffix,
+                event_publisher=self.event_sink,
+                transient_stream=self.transient_stream,
+            )
+            return provider_final_text
+        log_agent_runtime_event(
+            "agent.run.stream_final_mismatch",
+            run_id=str(run.id),
+            thread_id=str(run.thread_id),
+            trace_id=run.trace_id,
+            streamed_text_length=len(streamed_text),
+            provider_final_text_length=len(provider_final_text),
+        )
+        return streamed_text
+
+    async def _publish_text_delta(
+        self,
+        *,
+        run: AgentRun,
+        delta: str,
+        event_publisher: AgentEventSink | None,
+        transient_stream: AgentTransientStream | None,
+    ) -> None:
+        if not delta:
+            return
+        message_stream_id = str(self._run_assistant_message_ids.get(run.id) or "assistant")
+        segment_index = self._run_text_segment_counts.get(run.id, 0)
+        prefix_integrity = agent_response_text_integrity(self._run_text_stream_emitted.get(run.id, ""))
+        if event_publisher is not None:
+            await event_publisher.publish_message_delta(
+                thread_id=run.thread_id,
+                run_id=run.id,
+                delta=delta,
+                message_stream_id=message_stream_id,
+                segment_index=segment_index,
+                prefix_utf8_bytes=prefix_integrity.utf8_bytes,
+                prefix_sha256=prefix_integrity.sha256,
+            )
+        elif transient_stream is not None:
+            await transient_stream.publish_message_delta(
+                thread_id=run.thread_id,
+                run_id=run.id,
+                delta=delta,
+                message_stream_id=message_stream_id,
+                segment_index=segment_index,
+                prefix_utf8_bytes=prefix_integrity.utf8_bytes,
+                prefix_sha256=prefix_integrity.sha256,
+            )
+        self._run_text_segment_counts[run.id] = segment_index + 1
 
     def _sdk_tools(
         self,
@@ -583,7 +650,13 @@ class AgentRuntimeExecutor:
             invoke=invoke,
         )
 
-    def _sdk_tool_definition(self, *, run: AgentRun, tool_name: str, namespace: ToolNamespace | None = None) -> SdkToolDefinition:
+    def _sdk_tool_definition(
+        self,
+        *,
+        run: AgentRun,
+        tool_name: str,
+        namespace: ToolNamespace | None = None,
+    ) -> SdkToolDefinition:
         contract = self.tool_registry.get(tool_name)
         sdk_name = sdk_tool_name(contract.name)
 
@@ -607,11 +680,15 @@ class AgentRuntimeExecutor:
         except ValueError as exc:
             raise ApiError(code="invalid_service_skill", message="Unsupported service_skill_id.", status=422) from exc
         skill = self.service_skill_registry.get(skill_id.value)
-        facts = await self.business_facts_projector.project(
-            actor=context.actor,
-            run_id=context.run_id,
-            service_skill_id=skill_id,
-        ) if self.business_facts_projector is not None else {}
+        facts = (
+            await self.business_facts_projector.project(
+                actor=context.actor,
+                run_id=context.run_id,
+                service_skill_id=skill_id,
+            )
+            if self.business_facts_projector is not None
+            else {}
+        )
         self._run_business_facts.setdefault(context.run_id, {})[skill_id] = facts
         output = _load_service_skill_output(
             skill=skill,
@@ -718,8 +795,11 @@ class AgentRuntimeExecutor:
             default_values = _birth_prep_form_default_values(facts)
             return {"default_values": default_values} if default_values else {}
         if contract_name == "hospital_bag_cart_update":
+            client_groups = self._run_hospital_bag_cart_groups.get(run.id)
+            if client_groups is not None:
+                return {"groups": client_groups}
             groups = await self._latest_hospital_bag_cart_groups(run=run)
-            return {"groups": groups} if groups else {}
+            return {"groups": groups} if groups is not None else {}
         if contract_name == IMAGE_INSPECT_TOOL_NAME:
             return {"visible_image_urls": list(self._run_visible_image_urls.get(run.id, ()))}
         return {}
@@ -732,20 +812,20 @@ class AgentRuntimeExecutor:
         self._run_business_facts[run.id][ServiceSkillId.BIRTH_PREP] = facts
         return facts
 
-    async def _latest_hospital_bag_cart_groups(self, *, run: AgentRun) -> list[dict[str, Any]]:
+    async def _latest_hospital_bag_cart_groups(self, *, run: AgentRun) -> list[dict[str, Any]] | None:
         loader = getattr(self.repository, "get_latest_artifact_for_thread", None)
         if not callable(loader):
-            return []
+            return None
         artifact = await loader(
             thread_id=run.thread_id,
             owner_user_id=run.actor_user_id,
             artifact_type="hospital_bag_cart",
         )
         if artifact is None or not isinstance(artifact.payload, dict):
-            return []
+            return None
         cart_update = artifact.payload.get("cart_update")
         groups = cart_update.get("groups") if isinstance(cart_update, dict) else None
-        return [dict(group) for group in groups if isinstance(group, dict)] if isinstance(groups, list) else []
+        return [dict(group) for group in groups if isinstance(group, dict)] if isinstance(groups, list) else None
 
     async def _generate_quick_replies(
         self,
@@ -1112,7 +1192,9 @@ class AgentRuntimeExecutor:
         tool_outputs = await self.repository.list_tool_outputs_for_run(run_id=run.id)
         actions = await self.repository.list_actions_for_run(run_id=run.id)
         artifacts = await self.repository.list_artifacts_for_run(run_id=run.id)
-        loaded_service_skills = _loaded_service_skill_summaries(tool_outputs=tool_outputs, result_tool_calls=getattr(result, "tool_calls", []))
+        loaded_service_skills = _loaded_service_skill_summaries(
+            tool_outputs=tool_outputs, result_tool_calls=getattr(result, "tool_calls", [])
+        )
         service_skill_id = loaded_service_skills[-1]["service_skill_id"] if loaded_service_skills else AgentId.COZYMATE_SERVICE_AGENT.value
         payload = {
             "user_goal": _compact_text(_message_text(current_message), max_chars=500),
@@ -1158,9 +1240,7 @@ def _history_before(*, messages: list[AgentMessage], before_sequence: int) -> li
 
 
 def _history_messages_before(*, messages: list[AgentMessage], before_sequence: int) -> list[AgentMessage]:
-    return [
-        message for message in messages if message.sequence < before_sequence and message.role in {"user", "assistant"}
-    ]
+    return [message for message in messages if message.sequence < before_sequence and message.role in {"user", "assistant"}]
 
 
 def _visible_assistant_image_urls(*, messages: list[AgentMessage], before_sequence: int) -> tuple[str, ...]:
@@ -1252,7 +1332,9 @@ def _artifact_event_payload(artifact: AgentArtifact) -> dict[str, Any]:
         },
     }
     if isinstance(artifact.payload, dict):
-        payload.update({key: value for key, value in artifact.payload.items() if key in {"form", "card", "card_json", "cart_update", "summary"}})
+        payload.update(
+            {key: value for key, value in artifact.payload.items() if key in {"form", "card", "card_json", "cart_update", "summary"}}
+        )
     payload["semantic"] = artifact_event_payload_semantic(artifact_type=artifact.artifact_type)
     return payload
 
@@ -1628,15 +1710,19 @@ def _compact_text(value: str, *, max_chars: int) -> str:
 
 def _user_context(*, current_message: AgentMessage, now: datetime) -> dict[str, Any]:
     content = current_message.content if isinstance(current_message.content, dict) else {}
+    client_context = project_agent_client_context(content.get("client_context"))
     location = _location_context(content.get("location"))
-    timezone_name = _text(content, "timezone") or _text(location, "timezone") or "UTC"
+    timezone_name = _text(client_context, "timezone") or _text(content, "timezone") or _text(location, "timezone") or "UTC"
     timezone_info, normalized_timezone = _timezone_info(timezone_name)
     current_time = _aware_datetime(now).astimezone(timezone_info).isoformat()
     user_context: dict[str, Any] = {
         "current_time": current_time,
         "timezone": normalized_timezone,
-        "locale": _text(content, "locale") or "zh-CN",
+        "locale": _text(client_context, "locale") or _text(content, "locale") or "zh-CN",
     }
+    for key in ("message_sent_at", "hospital_bag_cart"):
+        if key in client_context:
+            user_context[key] = client_context[key]
     if location:
         user_context["location"] = location
     return user_context
@@ -1707,6 +1793,14 @@ def _trusted_form_submissions(message: AgentMessage) -> dict[str, dict[str, Any]
     return submissions
 
 
+def _current_hospital_bag_cart_groups(message: AgentMessage) -> list[dict[str, Any]] | None:
+    content = message.content if isinstance(message.content, dict) else {}
+    client_context = project_agent_client_context(content.get("client_context"))
+    cart = client_context.get("hospital_bag_cart")
+    groups = cart.get("groups") if isinstance(cart, dict) else None
+    return [dict(group) for group in groups if isinstance(group, dict)] if isinstance(groups, list) else None
+
+
 def _birth_prep_form_default_values(facts: dict[str, Any]) -> dict[str, Any]:
     pregnancy = _dict(facts, "pregnancy")
     profile = _dict(pregnancy, "profile") or _dict(facts, "profile")
@@ -1730,13 +1824,7 @@ def _pregnancy_runtime_plan_context(facts: dict[str, Any]) -> dict[str, Any]:
     profile = _dict(pregnancy, "profile") or _dict(facts, "profile")
     plans = pregnancy.get("plans")
     active_plans = (
-        [
-            item
-            for item in plans
-            if isinstance(item, dict)
-            and _text(item, "status") == "active"
-            and _text(item, "plan_type") == "pregnancy"
-        ]
+        [item for item in plans if isinstance(item, dict) and _text(item, "status") == "active" and _text(item, "plan_type") == "pregnancy"]
         if isinstance(plans, list)
         else []
     )

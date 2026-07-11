@@ -113,6 +113,9 @@ class AgentEventPublisher:
         run_id: UUID,
         delta: str,
         message_stream_id: str = "assistant",
+        segment_index: int | None = None,
+        prefix_utf8_bytes: int | None = None,
+        prefix_sha256: str = "",
         ignore_errors: bool = False,
     ) -> None:
         if self.transient_stream is None:
@@ -123,6 +126,9 @@ class AgentEventPublisher:
                 run_id=run_id,
                 delta=delta,
                 message_stream_id=message_stream_id,
+                segment_index=segment_index,
+                prefix_utf8_bytes=prefix_utf8_bytes,
+                prefix_sha256=prefix_sha256,
             )
         except Exception:
             if not ignore_errors:

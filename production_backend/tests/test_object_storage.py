@@ -20,9 +20,27 @@ def test_local_object_storage_put_get_delete(tmp_path) -> None:
     assert stored.uri == "local://uploads/example.txt"
     assert stored.size_bytes == 5
     assert asyncio.run(storage.get_bytes(key="uploads/example.txt")) == b"hello"
+    assert asyncio.run(storage.get_byte_range(key="uploads/example.txt", start=1, end=3)) == b"ell"
 
     asyncio.run(storage.delete(key="uploads/example.txt"))
     assert not (tmp_path / "uploads" / "example.txt").exists()
+
+
+def test_s3_object_storage_requests_only_the_selected_byte_range() -> None:
+    storage = object.__new__(S3ObjectStorage)
+    storage.bucket = "bucket"
+    storage.client = _FakeS3Client(body=b"ell")
+
+    body = asyncio.run(storage.get_byte_range(key="uploads/example.txt", start=1, end=3))
+
+    assert body == b"ell"
+    assert storage.client.calls == [
+        {
+            "Bucket": "bucket",
+            "Key": "uploads/example.txt",
+            "Range": "bytes=1-3",
+        },
+    ]
 
 
 def test_local_object_storage_rejects_path_traversal(tmp_path) -> None:
@@ -88,3 +106,21 @@ def test_lifespan_starts_with_production_s3_compatible_storage() -> None:
 
     with TestClient(app):
         assert isinstance(app.state.object_storage, S3ObjectStorage)
+
+
+class _FakeS3Client:
+    def __init__(self, *, body: bytes) -> None:
+        self.body = body
+        self.calls: list[dict[str, str]] = []
+
+    def get_object(self, **kwargs):
+        self.calls.append(kwargs)
+        return {"Body": _FakeS3Body(self.body)}
+
+
+class _FakeS3Body:
+    def __init__(self, body: bytes) -> None:
+        self.body = body
+
+    def read(self) -> bytes:
+        return self.body

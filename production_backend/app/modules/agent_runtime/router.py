@@ -132,6 +132,7 @@ async def create_run(
         thread_id=payload.thread_id,
         message=payload.message,
         attachments=payload.attachments,
+        client_context=payload.client_context,
         runtime_pattern=payload.runtime_pattern,
         graph_version=payload.graph_version,
         prompt_version=payload.prompt_version or settings.openai_agent_prompt_version,
@@ -399,9 +400,7 @@ async def _stream_run_event_chunks(
     transient_cursor = "0-0"
     streamed_dedupe_keys: set[str] = set()
     transient_block_ms = _transient_block_ms(poll_interval_seconds)
-    persisted_fallback_poll_interval_seconds = _persisted_fallback_poll_interval_seconds(
-        poll_interval_seconds
-    )
+    persisted_fallback_poll_interval_seconds = _persisted_fallback_poll_interval_seconds(poll_interval_seconds)
     deadline = monotonic() + max_wait_seconds
     next_persisted_poll_at = monotonic()
 
@@ -435,9 +434,7 @@ async def _stream_run_event_chunks(
                             dedupe_keys=streamed_dedupe_keys,
                         )
                         streamed_dedupe_keys.update(
-                            key
-                            for event in pre_final_events
-                            if (key := _persisted_event_dedupe_key(event, run_id=run_id))
+                            key for event in pre_final_events if (key := _persisted_event_dedupe_key(event, run_id=run_id))
                         )
                         encoded = encode_sse_events(pre_final_events)
                         if encoded:
@@ -458,11 +455,7 @@ async def _stream_run_event_chunks(
                                 transient_events,
                                 dedupe_keys=streamed_dedupe_keys,
                             )
-                            streamed_dedupe_keys.update(
-                                key
-                                for event in transient_events
-                                if (key := _transient_event_dedupe_key(event))
-                            )
+                            streamed_dedupe_keys.update(key for event in transient_events if (key := _transient_event_dedupe_key(event)))
                             encoded = encode_transient_sse_events(transient_events)
                             if encoded:
                                 record_stream_chunk(len(transient_events))
@@ -474,9 +467,7 @@ async def _stream_run_event_chunks(
                             dedupe_keys=streamed_dedupe_keys,
                         )
                         streamed_dedupe_keys.update(
-                            key
-                            for event in visible_final_events
-                            if (key := _persisted_event_dedupe_key(event, run_id=run_id))
+                            key for event in visible_final_events if (key := _persisted_event_dedupe_key(event, run_id=run_id))
                         )
                         encoded = encode_sse_events(visible_final_events)
                         if encoded:
@@ -490,9 +481,7 @@ async def _stream_run_event_chunks(
                             dedupe_keys=streamed_dedupe_keys,
                         )
                         streamed_dedupe_keys.update(
-                            key
-                            for event in visible_events
-                            if (key := _persisted_event_dedupe_key(event, run_id=run_id))
+                            key for event in visible_events if (key := _persisted_event_dedupe_key(event, run_id=run_id))
                         )
                         encoded = encode_sse_events(visible_events)
                         if encoded:
@@ -527,9 +516,7 @@ async def _stream_run_event_chunks(
                         transient_events,
                         dedupe_keys=streamed_dedupe_keys,
                     )
-                    streamed_dedupe_keys.update(
-                        key for event in transient_events if (key := _transient_event_dedupe_key(event))
-                    )
+                    streamed_dedupe_keys.update(key for event in transient_events if (key := _transient_event_dedupe_key(event)))
                     encoded = encode_transient_sse_events(transient_events)
                     if encoded:
                         record_stream_chunk(len(transient_events))

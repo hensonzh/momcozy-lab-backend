@@ -17,4 +17,5 @@ class AgentGraphState(TypedDict):
     final_text: NotRequired[str]
     assistant_message_id: NotRequired[str | None]
     quick_replies: NotRequired[list[dict[str, Any]]]
+    stream_segment_count: NotRequired[int]
     cancellation_requested: NotRequired[bool]

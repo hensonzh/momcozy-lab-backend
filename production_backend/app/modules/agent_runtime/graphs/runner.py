@@ -49,6 +49,7 @@ class AgentRuntimeGraphRunner:
                 final_text=str(final_state.get("final_text") or ""),
                 assistant_message_id=_uuid_or_none(final_state.get("assistant_message_id")),
                 quick_replies=_list_of_dicts(final_state.get("quick_replies")),
+                stream_segment_count=_non_negative_int(final_state.get("stream_segment_count")),
             )
         if status == "waiting_for_confirmation":
             pending_action_id = _uuid_or_none(final_state.get("pending_action_id"))
@@ -75,6 +76,7 @@ class AgentRuntimeGraphRunner:
                 pending_action_id=str(result.pending_action_id) if result.pending_action_id else None,
                 assistant_message_id=str(result.assistant_message_id) if result.assistant_message_id else None,
                 quick_replies=result.quick_replies,
+                stream_segment_count=result.stream_segment_count,
             )
             await self._save_checkpoint(run=run, node_name="sdk_reasoning", state=cast(AgentGraphState, state | update))
             return update
@@ -107,6 +109,7 @@ class AgentRuntimeGraphRunner:
             },
         )
 
+
 def _initial_state(run: AgentRun) -> AgentGraphState:
     return {
         "run_id": str(run.id),
@@ -132,6 +135,10 @@ def _node_update(state: AgentGraphState, *, node_name: str, **values: Any) -> di
 def _uuid_or_none(value: object) -> UUID | None:
     normalized = str(value or "").strip()
     return UUID(normalized) if normalized else None
+
+
+def _non_negative_int(value: object) -> int:
+    return max(0, int(value)) if isinstance(value, int | str) and str(value).isdigit() else 0
 
 
 def _list_of_dicts(value: object) -> list[dict[str, Any]]:

@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import logging
 from dataclasses import dataclass
@@ -73,7 +74,14 @@ def test_agent_transient_stream_round_trips_message_delta() -> None:
 
     async def exercise():
         stream = AgentTransientStream(redis)
-        published = await stream.publish_message_delta(thread_id=thread_id, run_id=run_id, delta="hello")
+        published = await stream.publish_message_delta(
+            thread_id=thread_id,
+            run_id=run_id,
+            delta="hello",
+            segment_index=0,
+            prefix_utf8_bytes=5,
+            prefix_sha256=hashlib.sha256(b"hello").hexdigest(),
+        )
         events = await stream.read(run_id=run_id, after_cursor="0-0")
         return published, events
 
@@ -81,7 +89,14 @@ def test_agent_transient_stream_round_trips_message_delta() -> None:
 
     assert published is not None
     assert published.type == "message.delta"
-    assert published.payload["delta"] == "hello"
+    assert published.payload == {
+        "delta": "hello",
+        "message_stream_id": "assistant",
+        "stream_schema_version": "append-only.v1",
+        "segment_index": 0,
+        "prefix_utf8_bytes": 5,
+        "prefix_sha256": hashlib.sha256(b"hello").hexdigest(),
+    }
     assert events == [published]
     assert redis.expired_keys == {f"agent:run:{run_id}:transient_stream"}
 
@@ -853,9 +868,7 @@ class FakeStreamRedis:
         result = []
         for key, after_cursor in streams.items():
             events = [
-                (cursor, fields)
-                for cursor, fields in self.streams.get(key, [])
-                if _cursor_index(cursor) > _cursor_index(after_cursor)
+                (cursor, fields) for cursor, fields in self.streams.get(key, []) if _cursor_index(cursor) > _cursor_index(after_cursor)
             ]
             if count is not None:
                 events = events[:count]

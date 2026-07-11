@@ -18,6 +18,7 @@ class AgentRunExecutionResult:
     pending_action_id: UUID | None = None
     assistant_message_id: UUID | None = None
     quick_replies: list[dict[str, Any]] = field(default_factory=list)
+    stream_segment_count: int = 0
 
 
 AgentRunHandler = Callable[[AgentRun], Awaitable[AgentRunExecutionResult]]

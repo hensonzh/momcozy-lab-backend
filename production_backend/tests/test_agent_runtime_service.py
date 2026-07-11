@@ -5,7 +5,14 @@ from uuid import UUID, uuid4
 import pytest
 
 from production_backend.app.core.errors import ApiError
-from production_backend.app.modules.agent_runtime.models import AgentArtifact, AgentEvent, AgentMessage, AgentRun, AgentSafetyEvent, AgentThread
+from production_backend.app.modules.agent_runtime.models import (
+    AgentArtifact,
+    AgentEvent,
+    AgentMessage,
+    AgentRun,
+    AgentSafetyEvent,
+    AgentThread,
+)
 from production_backend.app.modules.agent_runtime.service import AgentRuntimeService
 from production_backend.app.modules.audit.models import IdempotencyKey
 
@@ -22,6 +29,20 @@ def test_agent_runtime_service_creates_run_with_thread_message_events_and_idempo
             actor_user_id=owner_user_id,
             thread_id=None,
             message="Review my pumping pattern",
+            client_context={
+                "source": "flutter-agent-hub",
+                "locale": "en-US",
+                "hospital_bag_cart": {
+                    "groups": [
+                        {
+                            "title": "Feeding",
+                            "tone": "sky",
+                            "items": [{"id": "pump-custom", "name": "Custom pump", "qty": 1, "price": 999.0}],
+                        }
+                    ],
+                    "totals": {"itemCount": 1, "total": 919.08},
+                },
+            },
             request_id="req_run",
             idempotency_key="idem-run",
         )
@@ -30,6 +51,7 @@ def test_agent_runtime_service_creates_run_with_thread_message_events_and_idempo
     assert run.actor_user_id == owner_user_id
     assert run.runtime_pattern == "langgraph_sdk"
     assert repository.messages[0].content["text"] == "Review my pumping pattern"
+    assert repository.messages[0].content["client_context"]["hospital_bag_cart"]["groups"][0]["items"][0]["id"] == "pump-custom"
     assert [event.event_type for event in repository.events] == ["run.queued", "message.completed"]
     assert repository.events[0].payload["phase"] == "queued"
     assert repository.events[0].payload["label"] == "我已经收到你的消息啦～"
@@ -167,13 +189,9 @@ def test_agent_runtime_conversation_main_flow_replays_client_events_cancels_and_
             client_sequence=1,
         )
     )
-    after_initial_cursor = asyncio.run(
-        service.list_events(owner_user_id=owner_user_id, run_id=first_run.id, after_sequence=2, limit=10)
-    )
+    after_initial_cursor = asyncio.run(service.list_events(owner_user_id=owner_user_id, run_id=first_run.id, after_sequence=2, limit=10))
     cancelled = asyncio.run(service.cancel_run(owner_user_id=owner_user_id, run_id=first_run.id, reason="user changed topic"))
-    replay_after_message = asyncio.run(
-        service.list_events(owner_user_id=owner_user_id, run_id=first_run.id, after_sequence=2, limit=10)
-    )
+    replay_after_message = asyncio.run(service.list_events(owner_user_id=owner_user_id, run_id=first_run.id, after_sequence=2, limit=10))
     second_run = asyncio.run(
         service.create_run(
             actor_user_id=owner_user_id,
