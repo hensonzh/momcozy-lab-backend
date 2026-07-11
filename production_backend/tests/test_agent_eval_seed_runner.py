@@ -15,14 +15,11 @@ ROOT = Path(__file__).resolve().parents[2]
 PRODUCT_AGENT_EVAL_SEED = ROOT / "production_backend" / "fixtures" / "agent_eval_cases" / "product_service_seed.json"
 
 
-def test_agent_eval_seed_assertion_engine_passes_memory_preference_trace() -> None:
+def test_agent_eval_seed_assertion_engine_passes_live_run_without_memory_side_effect() -> None:
     case = _case("memory_preference_capture")
     trace = AgentEvalTrace(
-        tool_calls=[{"tool_name": "memory.create.propose", "status": "completed"}],
-        events=[{"type": "action.confirmation_required"}],
-        actions=[{"action_type": "agent.memory.create", "status": "confirmation_required"}],
         safety_decision="allow",
-        final_text="I can remember that after you confirm.",
+        final_text="好的，接下来我会尽量用简短的方式提醒你。",
     )
 
     result = AgentEvalSeedAssertionEngine().evaluate(case=case, trace=trace)
@@ -31,12 +28,12 @@ def test_agent_eval_seed_assertion_engine_passes_memory_preference_trace() -> No
     assert result.failures == []
 
 
-def test_agent_eval_seed_assertion_engine_reports_forbidden_memory_tool() -> None:
+def test_agent_eval_seed_assertion_engine_reports_profile_write_for_memory_request() -> None:
     case = _case("memory_sensitive_rejection")
     trace = AgentEvalTrace(
-        tool_calls=[{"tool_name": "memory.create.propose", "status": "failed"}],
+        tool_calls=[{"tool_name": "profile_update", "status": "completed"}],
         safety_decision="allow",
-        final_text="Please confirm this memory.",
+        final_text="Saved to profile.",
     )
 
     result = AgentEvalSeedAssertionEngine().evaluate(case=case, trace=trace)
@@ -44,13 +41,13 @@ def test_agent_eval_seed_assertion_engine_reports_forbidden_memory_tool() -> Non
     assert result.passed is False
     assert result.failures[0].category == "forbidden_tool"
     assert result.failures[0].assertion == "tool.forbidden"
-    assert result.failures[0].observed == "memory.create.propose"
+    assert result.failures[0].observed == "profile_update"
 
 
-def test_agent_eval_seed_assertion_engine_reports_missing_tool_and_confirmation() -> None:
-    case = _case("memory_preference_capture")
+def test_agent_eval_seed_assertion_engine_reports_missing_diary_confirmation() -> None:
+    case = _case("pregnancy_diary_entry")
     trace = AgentEvalTrace(
-        tool_calls=[],
+        tool_calls=[{"tool_name": "diary.entry_upsert.propose", "status": "completed"}],
         events=[],
         actions=[],
         safety_decision="allow",
@@ -61,7 +58,6 @@ def test_agent_eval_seed_assertion_engine_reports_missing_tool_and_confirmation(
 
     assert result.passed is False
     assert [(failure.category, failure.assertion) for failure in result.failures] == [
-        ("missing_tool", "tool.required"),
         ("missing_confirmation", "action.confirmation_required"),
     ]
 
@@ -187,18 +183,18 @@ def test_agent_eval_replay_runner_evaluates_replay_bundle_trace() -> None:
     replay_bundle = {
         "messages": [
             {"role": "user", "content": {"text": "Remember my reminder style."}},
-            {"role": "assistant", "content": {"text": "Please confirm this memory."}},
+            {"role": "assistant", "content": {"text": "I will keep reminders concise."}},
         ],
-        "events": [{"type": "action.confirmation_required"}],
-        "tool_calls": [{"tool_name": "memory.create.propose", "status": "completed"}],
-        "actions": [{"action_type": "agent.memory.create", "status": "confirmation_required"}],
+        "events": [],
+        "tool_calls": [],
+        "actions": [],
         "safety_events": [{"decision": "allow"}],
     }
 
     trace = agent_eval_trace_from_replay_bundle(replay_bundle)
     result = AgentEvalReplayAssertionRunner().evaluate_bundle(case=case, replay_bundle=replay_bundle)
 
-    assert trace.final_text == "Please confirm this memory."
+    assert trace.final_text == "I will keep reminders concise."
     assert trace.safety_decision == "allow"
     assert result.passed is True
 

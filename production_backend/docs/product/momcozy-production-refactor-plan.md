@@ -431,8 +431,7 @@ Derived model input
 tool_name
 domain
 read / write
-required_permission
-owner_scope
+loading_mode (eager / deferred)
 side_effect_level
 requires_confirmation
 idempotency_required
@@ -443,6 +442,9 @@ safe args policy
 safe result policy
 blocking policy
 ```
+
+当前模型工具 contract 不声明逐工具权限或请求方 owner；runtime 从认证 actor
+统一派生 owner，并由 service/repository 执行资源隔离。
 
 缺少正式 contract 会导致：
 

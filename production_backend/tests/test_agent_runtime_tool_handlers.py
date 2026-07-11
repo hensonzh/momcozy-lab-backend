@@ -7,7 +7,6 @@ import pytest
 from production_backend.app.core.errors import ApiError
 from production_backend.app.modules.agent_runtime.models import AgentAction, AgentArtifact
 from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.tools import (
-    AgentArtifactCreateToolHandler,
     BusinessContextReadToolHandler,
     DeviceGuidanceAssetsReadToolHandler,
     DevicesPumpStatusReadToolHandler,
@@ -204,40 +203,6 @@ def test_hospital_bag_cart_update_propose_tool_handler_creates_confirmation_acti
     assert runtime_service.calls[0]["target_type"] == "hospital_bag_cart"
     assert runtime_service.calls[0]["side_effect_level"] == "low"
     assert runtime_service.calls[0]["apply_payload"]["metadata"] == {"timezone": "Asia/Shanghai"}
-
-
-def test_agent_artifact_create_tool_handler_creates_service_artifact() -> None:
-    actor = _user()
-    runtime_service = FakeAgentRuntimeService()
-    handler = AgentArtifactCreateToolHandler(
-        runtime_service=runtime_service,
-        artifact_type="hospital_bag_card",
-        default_title="待产包清单",
-    )
-    context = _context(
-        actor=actor,
-        args={
-            "title": "36 周待产包清单",
-            "summary": "按顺产和母乳喂养意向整理。",
-            "sections": [
-                {"title": "妈妈住院", "items": ["证件", "护理垫"]},
-                {"title": "宝宝用品", "items": ["纸尿裤", "包被"]},
-            ],
-            "source_context": {"gestational_week": "36w"},
-        },
-    )
-
-    result = asyncio.run(handler(context))
-
-    assert result["artifact_id"] == str(runtime_service.artifact.id)
-    assert result["artifact_type"] == "hospital_bag_card"
-    assert result["status"] == "created"
-    assert result["title"] == "36 周待产包清单"
-    assert runtime_service.artifact.owner_user_id == actor.user_id
-    assert runtime_service.artifact.run_id == context.run_id
-    assert runtime_service.artifact.payload["sections"][0]["title"] == "妈妈住院"
-    assert runtime_service.artifact.payload["source_context"] == {"gestational_week": "36w"}
-    assert runtime_service.calls[-1]["emit_event"] is False
 
 
 def test_legacy_artifact_tool_handler_returns_old_form_card_and_cart_envelopes() -> None:

@@ -407,7 +407,15 @@ class AgentMemoryService:
         snapshot = await self.repository.get_memory_snapshot(owner_user_id=owner_user_id)
         if snapshot is None or not isinstance(snapshot.items, list):
             return []
-        return [item for item in (_runtime_snapshot_item(value) for value in snapshot.items[:limit]) if item is not None]
+        now = datetime.now(timezone.utc)
+        items: list[dict[str, Any]] = []
+        for value in snapshot.items:
+            item = _runtime_snapshot_item(value, now=now)
+            if item is not None:
+                items.append(item)
+            if len(items) >= limit:
+                break
+        return items
 
     async def refresh_runtime_snapshot(
         self,
@@ -522,14 +530,24 @@ def _snapshot_item(memory: AgentMemory) -> dict[str, Any]:
         "memory_type": memory.memory_type,
         "summary": str(content.get("summary") or "").strip(),
         "confidence_score": int(memory.confidence_score or 0),
+        "expires_at": memory.expires_at.isoformat() if memory.expires_at is not None else "",
     }
 
 
-def _runtime_snapshot_item(value: Any) -> dict[str, Any] | None:
+def _runtime_snapshot_item(value: Any, *, now: datetime) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
     memory_type = str(value.get("memory_type") or "").strip()
     summary = str(value.get("summary") or "").strip()
     if memory_type not in MEMORY_TYPES or not summary:
         return None
+    raw_expires_at = str(value.get("expires_at") or "").strip()
+    if raw_expires_at:
+        try:
+            expires_at = datetime.fromisoformat(raw_expires_at.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        comparable_expires_at = expires_at if expires_at.tzinfo is not None else expires_at.replace(tzinfo=timezone.utc)
+        if comparable_expires_at <= now:
+            return None
     return {"memory_type": memory_type, "summary": summary[:500]}

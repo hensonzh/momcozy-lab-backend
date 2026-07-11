@@ -48,20 +48,6 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             },
         },
     },
-    "BusinessContextQuery": {
-        "title": "BusinessContextQuery",
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {
-            "limit": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 20,
-                "default": 5,
-                "description": "每个业务上下文分区最多返回的条目数。",
-            }
-        },
-    },
     "MilkSummaryQuery": {
         "title": "MilkSummaryQuery",
         "type": "object",
@@ -168,34 +154,6 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
                 "default": 10,
                 "description": "最多返回的日程任务数。",
             },
-        },
-    },
-    "DiaryRecentQuery": {
-        "title": "DiaryRecentQuery",
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {
-            "limit": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 20,
-                "default": 5,
-                "description": "最多纳入的近期日记条目数。",
-            }
-        },
-    },
-    "PregnancyPlanContextQuery": {
-        "title": "PregnancyPlanContextQuery",
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {
-            "limit": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 20,
-                "default": 5,
-                "description": "最多纳入的当前计划、任务和日记条目数。",
-            }
         },
     },
     "DiaryEntryUpsertProposalCreate": {
@@ -493,27 +451,6 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "idempotency_key": {"type": "string", "maxLength": 255},
         },
     },
-    "HospitalBagCartUpdateProposalCreate": {
-        "title": "HospitalBagCartUpdateProposalCreate",
-        "type": "object",
-        "additionalProperties": False,
-        "required": ["cart_update"],
-        "properties": {
-            "cart_update": {
-                "type": "object",
-                "description": "用于预览并在用户确认后应用的最小购物车变更。",
-                "additionalProperties": True,
-            },
-            "summary": {
-                "type": "string",
-                "description": "面向用户展示的简短购物车变更说明。",
-                "maxLength": 500,
-            },
-            "locale": {"type": "string", "maxLength": 35},
-            "timezone": {"type": "string", "maxLength": 80},
-            "idempotency_key": {"type": "string", "maxLength": 255},
-        },
-    },
     "EmptyArtifactDecision": {
         "title": "EmptyArtifactDecision",
         "type": "object",
@@ -595,36 +532,6 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "need_single_unit": {"type": ["boolean", "null"]},
         },
     },
-    "AgentArtifactCreate": {
-        "title": "AgentArtifactCreate",
-        "type": "object",
-        "additionalProperties": False,
-        "required": ["title"],
-        "properties": {
-            "title": {"type": "string", "minLength": 1, "maxLength": 255},
-            "summary": {"type": "string", "maxLength": 2000},
-            "sections": {
-                "type": "array",
-                "maxItems": 20,
-                "items": {
-                    "type": "object",
-                    "additionalProperties": True,
-                },
-            },
-            "payload": {
-                "type": "object",
-                "additionalProperties": True,
-                "description": "可选结构化载荷，用于承载不适合放入 title、summary 或 sections 的字段。",
-            },
-            "source_context": {
-                "type": "object",
-                "additionalProperties": True,
-                "description": "用于生成产物的简短、非敏感事实。",
-            },
-            "locale": {"type": "string", "maxLength": 35},
-            "timezone": {"type": "string", "maxLength": 80},
-        },
-    },
     "SupportTicketProposalCreate": {
         "title": "SupportTicketProposalCreate",
         "type": "object",
@@ -683,6 +590,10 @@ def tool_input_schema(schema_ref: str) -> JsonSchema:
     if schema is None:
         raise ApiError(code="tool_schema_not_found", message="Tool input schema is not registered.", status=500)
     return deepcopy(schema)
+
+
+def tool_input_schema_refs() -> tuple[str, ...]:
+    return tuple(sorted(_TOOL_INPUT_SCHEMAS))
 
 
 def validate_tool_input(*, schema_ref: str, value: dict[str, Any]) -> None:

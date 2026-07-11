@@ -79,6 +79,33 @@ def test_agent_memory_service_reads_only_minimal_precomputed_runtime_snapshot() 
     assert repository.settings_reads == 0
 
 
+def test_agent_memory_service_runtime_snapshot_excludes_expired_items_without_another_query() -> None:
+    owner_user_id = uuid4()
+    repository = FakeMemoryRepository()
+    repository.snapshots_by_owner[owner_user_id] = AgentMemorySnapshot(
+        owner_user_id=owner_user_id,
+        items=[
+            {
+                "memory_type": "communication_preference",
+                "summary": "Expired preference",
+                "expires_at": (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(),
+            },
+            {
+                "memory_type": "communication_preference",
+                "summary": "Active preference",
+                "expires_at": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+            },
+        ],
+    )
+    service = AgentMemoryService(repository=repository)
+
+    snapshot = asyncio.run(service.get_runtime_snapshot(owner_user_id=owner_user_id))
+
+    assert snapshot == [{"memory_type": "communication_preference", "summary": "Active preference"}]
+    assert repository.snapshot_reads == 1
+    assert repository.settings_reads == 0
+
+
 def test_agent_memory_service_rejects_unsupported_type_and_empty_content() -> None:
     service = AgentMemoryService(repository=FakeMemoryRepository())
 

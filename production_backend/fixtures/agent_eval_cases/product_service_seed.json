@@ -666,7 +666,7 @@
     },
     {
       "suite": "memory_preference_capture",
-      "name": "explicit communication preference becomes memory proposal",
+      "name": "explicit communication preference stays off the live run path",
       "domain": "main_agent",
       "owner_team": "agent",
       "input": {
@@ -682,23 +682,23 @@
       },
       "expected_behavior": {
         "intent": "memory_preference_capture",
-        "route": "action_proposal",
-        "requires_confirmation_before_write": true,
+        "route": "async_memory_consolidation",
+        "requires_confirmation_before_write": false,
         "service_skill_id": "cozymate_service_agent",
         "must_include": [
-          "memory_preview",
-          "confirmation_card"
+          "normal_response"
         ],
         "must_not": [
-          "write_memory_without_confirmation",
+          "write_memory_in_live_run",
+          "create_memory_confirmation_card",
           "store_preference_as_profile_fact",
           "store_full_transcript_as_memory"
         ]
       },
-      "expected_tool_calls": [
+      "expected_tool_calls": [],
+      "forbidden_tool_calls": [
         {
-          "contract": "memory.create.propose",
-          "timing": "before_action_confirmation"
+          "contract": "profile_update"
         }
       ],
       "expected_safety_decision": "allow"
@@ -721,12 +721,11 @@
       },
       "expected_behavior": {
         "intent": "memory_sensitive_rejection",
-        "route": "memory_policy_refusal",
+        "route": "async_memory_filter",
         "requires_confirmation_before_write": false,
         "service_skill_id": "cozymate_service_agent",
         "must_include": [
-          "memory_policy_boundary",
-          "user_controlled_health_profile"
+          "normal_response"
         ],
         "must_not": [
           "store_sensitive_health_memory",
@@ -737,7 +736,7 @@
       "expected_tool_calls": [],
       "forbidden_tool_calls": [
         {
-          "contract": "memory.create.propose"
+          "contract": "profile_update"
         }
       ],
       "expected_safety_decision": "allow"

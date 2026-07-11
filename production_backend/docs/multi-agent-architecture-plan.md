@@ -337,16 +337,16 @@ CozyMate 身份、默认回复长度、快捷输入总规则、工具结果总�
 
 ```text
 birth_prep namespace:
-  profile.read
-  pregnancy.plan_context.read
+  pregnancy.plan.propose
+  plans.plan_delete.propose
+  plans.task_update.propose
+  plans.task_delete.propose
   birth_plan_form_create
   labor_communication_card_create
   hospital_bag_form_create
   hospital_bag_card_create
-  hospital_bag_cart_update
-  diary.entry_upsert.propose
 
-records / plans / notifications namespace:
+milk_management namespace:
   records.milk_status.read
   records.milk_summary.read
   records.milk_analysis.read
@@ -358,26 +358,27 @@ records / plans / notifications namespace:
   records.growth_record.propose
   records.growth_record_update.propose
   records.growth_record_delete.propose
+  plans.current.read
   plans.calendar.read
   plans.milk_plan.propose
-  plans.milk_plan_preview.create
-  plans.task_update.propose
-  plans.task_delete.propose
-  plans.plan_delete.propose
-  notifications.milk_reminder.propose
-  support.ticket.propose
-
-postpartum / diary / plans namespace:
-  profile.read
-  diary.recent.read
   plans.task_create.propose
-  memory.create.propose
+  plans.task_complete.propose
+  notifications.milk_reminder.propose
 
-devices / files / support namespace:
+health_consultation namespace:
+  diary.entry_upsert.propose
+  ibclc_consult_card_create
+
+device_support namespace:
   devices.pump_status.read
   devices.guidance_assets.read
-  files.vision_summary.read
   support.ticket.propose
+
+global eager tools:
+  load_service_skill
+  profile.read
+  profile_update
+  files.vision_summary.read
 ```
 
 namespace 不是 prompt 里让模型“加载旧工具”的自然语言指令，而是后端 `ToolContract` 的显式集合。
@@ -385,13 +386,15 @@ service skill 可以引用当前 namespace / contract，但不能引用未注册
 `milk_status_query`、`milk_analysis_intake_manage`、`device_manual_search`。每个工具仍必须声明：
 
 - read/write。
-- permission。
-- owner scope。
+- eager/deferred loading mode。
 - side effect level。
 - blocking policy。
 - timeout。
 - safe result policy。
 - audit/idempotency 要求。
+
+模型可见 contract 不携带逐工具权限或 owner 字段；当前 actor 与 owner scope
+由 runtime/service 统一派生和校验。
 
 ## Artifact 和 Action
 

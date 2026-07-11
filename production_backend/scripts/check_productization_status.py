@@ -60,6 +60,7 @@ def _check_required_files(root: Path) -> list[CheckResult]:
         "production_backend/docs/release-smoke-checklist.md",
         "production_backend/scripts/run_agent_worker.py",
         "production_backend/scripts/run_outbox_worker.py",
+        "production_backend/scripts/run_memory_consolidation.py",
         "production_backend/scripts/inspect_worker_backlog.py",
         "production_backend/scripts/recover_stuck_agent_runs.py",
         "production_backend/scripts/run_agent_seed_eval.py",
@@ -77,6 +78,7 @@ def _check_environment_profiles(backend: Path) -> list[CheckResult]:
             "OBJECT_STORAGE_PROVIDER=minio",
             "OBJECT_STORAGE_ENDPOINT_URL=http://minio:9000",
             "AGENT_MODEL_PROVIDER=openai",
+            "AGENT_MEMORY_CONSOLIDATION_MODEL=gpt-5.4-nano",
         ],
         "env/compose.test.env.example": [
             "APP_ENV=test",
@@ -85,6 +87,7 @@ def _check_environment_profiles(backend: Path) -> list[CheckResult]:
             "OBJECT_STORAGE_PROVIDER=minio",
             "OBJECT_STORAGE_ENDPOINT_URL=http://minio:9000",
             "AGENT_MODEL_PROVIDER=openai",
+            "AGENT_MEMORY_CONSOLIDATION_MODEL=gpt-5.4-nano",
         ],
         "env/compose.prod.env.example": [
             "APP_ENV=production",
@@ -93,6 +96,7 @@ def _check_environment_profiles(backend: Path) -> list[CheckResult]:
             "METRICS_REQUIRE_SERVICE_KEY=true",
             "OUTBOX_WORKER_ENABLED=true",
             "AGENT_MODEL_PROVIDER=openai",
+            "AGENT_MEMORY_CONSOLIDATION_MODEL=gpt-5.4-nano",
         ],
     }
     results: list[CheckResult] = []

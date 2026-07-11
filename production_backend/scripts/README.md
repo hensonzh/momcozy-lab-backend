@@ -1,7 +1,7 @@
 # Production Backend Scripts
 
-本目录放显式执行的开发、回归、验收、运维脚本。除 `run_agent_worker.py`
-和 `run_outbox_worker.py` 会作为独立 worker 进程入口外，其他脚本不会随着
+本目录放显式执行的开发、回归、验收、运维脚本。除 `run_agent_worker.py`、
+`run_outbox_worker.py` 和 `run_memory_consolidation.py` 会作为独立 worker 进程入口外，其他脚本不会随着
 FastAPI API 服务启动自动运行。
 
 ## 使用原则
@@ -29,9 +29,9 @@ production_backend/.venv/bin/python
 
 | 场景 | 推荐命令 | 会运行的脚本 |
 |---|---|---|
-| 本地启动完整后端 | `make backend-local-up` | Compose 启动基础设施，运行 Alembic migration，然后启动 API、agent-worker、outbox-worker |
+| 本地启动完整后端 | `make backend-local-up` | Compose 启动基础设施，运行 Alembic migration，然后启动 API、agent-worker、outbox-worker、memory-worker |
 | 本地单独迁移数据库 | `make backend-local-migrate` | Alembic migration，不走本目录脚本 |
-| 本地单独启动/重启 worker | `make backend-local-workers` | `run_agent_worker.py`, `run_outbox_worker.py` |
+| 本地单独启动/重启 worker | `make backend-local-workers` | `run_agent_worker.py`, `run_outbox_worker.py`, `run_memory_consolidation.py` |
 | 基础设施验收 | `make backend-check-infra` | database / Redis / object storage / product asset checks |
 | 后端产品化门禁 | `make backend-productization-status` | `check_productization_status.py` |
 | 后端 smoke | `make backend-smoke` | productization status + seed eval |
@@ -58,7 +58,8 @@ production_backend/.venv/bin/python
 | `run_agent_seed_eval.py` | 运行确定性的产品 agent seed eval，可输出 JSON/JUnit。 | 每次 PR CI、本地 smoke、改动 agent runtime/工具/路由时。 | `python production_backend/scripts/run_agent_seed_eval.py --output /tmp/agent-seed-eval.json --junit-output /tmp/agent-seed-eval.junit.xml` |
 | `run_agent_worker.py` | 独立 agent run worker 进程入口，扫描可运行 run 并执行 LangGraph + OpenAI Agents SDK runtime。 | `make backend-local-up` 或单独 worker 服务启动时运行。 | `python -m production_backend.scripts.run_agent_worker`; 本地完整启动推荐 `make backend-local-up`，单独重启推荐 `make backend-local-workers` |
 | `run_outbox_worker.py` | 独立 outbox worker 进程入口，处理持久副作用任务、重试和 action apply。 | `make backend-local-up` 或单独 worker 服务启动时运行。 | `python -m production_backend.scripts.run_outbox_worker`; 本地完整启动推荐 `make backend-local-up`，单独重启推荐 `make backend-local-workers` |
-| `worker_runtime.py` | worker 共享运行时工具，负责 stop signal 和 sleep 控制。 | 不单独启动；被 `run_agent_worker.py` 和 `run_outbox_worker.py` import。 | 不直接执行 |
+| `run_memory_consolidation.py` | 独立夜间记忆 worker；读取前一日本地自然日的已完成对话，幂等更新长期记忆与 bounded snapshot。 | 启动时补跑一次，此后按配置小时运行；也可手工 backfill。 | `python -m production_backend.scripts.run_memory_consolidation`; 单次补跑用 `--once --date YYYY-MM-DD` |
+| `worker_runtime.py` | worker 共享运行时工具，负责 stop signal 和 sleep 控制。 | 不单独启动；被三个 worker 入口 import。 | 不直接执行 |
 
 ## 回归测试分层
 

@@ -38,7 +38,7 @@
   `records.milk_summary.read`、feeding/pumping record proposal、
   milk plan proposal、milk reminder proposal。
 - 孕期计划和日记已具备核心 action proposal：
-  `pregnancy.plan_create.propose`、`plans.task_create.propose`、
+  `pregnancy.plan.propose`、`plans.task_create.propose`、
   `plans.task_complete.propose`、`diary.entry_upsert.propose`。
 - 计划、任务、日记、提醒、奶量记录的 action apply handler 已接入 outbox
   worker。
@@ -46,10 +46,10 @@
 - deterministic safety gate 已覆盖更多母婴健康和情绪危机红旗表达。
 - product eval seed 已覆盖孕期计划、任务完成、日记写入和当前 support ticket
   tool contract。
-- 长期记忆已有后端底座：`agent_memories` schema/repository/service、
-  `memory.create.propose` tool、`agent.memory.create` action/outbox handler，
-  每轮 bounded `memory_projection` 上下文投射，以及用户可见的
-  `GET/DELETE /v1/agent/memories` 管理 API。
+- 长期记忆已移出实时 agent loop：独立 `memory-worker` 每晚读取已完成对话，
+  通过轻量模型执行幂等 consolidation，更新 `agent_memories` 与 bounded
+  `agent_memory_snapshots`；实时 run 只做一次快照主键读取。用户仍可通过
+  `GET/DELETE /v1/agent/memories` 管理记忆。
 - eval harness 已具备 seed schema 校验、memory preference seed case、
   deterministic assertion engine、replay bundle -> eval trace 转换，以及
   `scripts/run_agent_replay_eval.py` 最小 CLI。
@@ -428,7 +428,7 @@ event、eval 的全链路。
 建议 tool/action：
 
 - `pregnancy.plan_context.read`
-- `pregnancy.plan_create.propose`
+- `pregnancy.plan.propose`
 - `plans.task_create.propose`
 - `plans.task_complete.propose`
 - `diary.entry_upsert.propose`
@@ -446,7 +446,7 @@ event、eval 的全链路。
   tasks 和 recent diary entries。
 - 孕期计划生成和任务完成 eval seed 已要求先读
   `pregnancy.plan_context.read`，再进入 action proposal。
-- `pregnancy.plan_create.propose`、`plans.task_create.propose`、
+- `pregnancy.plan.propose`、`plans.task_create.propose`、
   `plans.task_complete.propose`、`diary.entry_upsert.propose` 均为
   confirmation-first action proposal。
 - 孕期计划 confirmed action 已有 outbox apply 主流程测试；diary upsert

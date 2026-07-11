@@ -143,20 +143,24 @@ def test_product_agent_eval_seed_does_not_reference_missing_device_tool_contract
     assert by_suite["device_known_guidance"]["expected_behavior"]["requires_confirmation_before_write"] is False
 
 
-def test_product_agent_eval_seed_uses_current_memory_action_contract() -> None:
+def test_product_agent_eval_seed_keeps_memory_writes_off_live_run_contract() -> None:
     cases = load_product_agent_eval_seed_cases(PRODUCT_AGENT_EVAL_SEED)
     by_suite = {case["suite"]: case for case in cases}
 
     memory_contracts = {tool_call["contract"] for tool_call in by_suite["memory_preference_capture"]["expected_tool_calls"]}
+    forbidden_preference_contracts = {
+        tool_call["contract"] for tool_call in by_suite["memory_preference_capture"]["forbidden_tool_calls"]
+    }
     forbidden_sensitive_contracts = {
         tool_call["contract"] for tool_call in by_suite["memory_sensitive_rejection"]["forbidden_tool_calls"]
     }
 
-    assert "memory.create.propose" in memory_contracts
-    assert "agent.memory.create" not in memory_contracts
-    assert "memory_write" not in memory_contracts
+    assert memory_contracts == set()
+    assert "profile_update" in forbidden_preference_contracts
+    assert by_suite["memory_preference_capture"]["expected_behavior"]["route"] == "async_memory_consolidation"
+    assert by_suite["memory_preference_capture"]["expected_behavior"]["requires_confirmation_before_write"] is False
     assert by_suite["memory_sensitive_rejection"]["expected_tool_calls"] == []
-    assert "memory.create.propose" in forbidden_sensitive_contracts
+    assert "profile_update" in forbidden_sensitive_contracts
     assert by_suite["memory_sensitive_rejection"]["expected_behavior"]["requires_confirmation_before_write"] is False
 
 

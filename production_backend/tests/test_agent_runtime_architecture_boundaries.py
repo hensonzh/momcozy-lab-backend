@@ -43,6 +43,7 @@ from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.
     default_tool_namespace_registry,
     default_tool_registry,
     tool_input_schema,
+    tool_input_schema_refs,
 )
 from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.tools.output_policy import (
     INSTRUCTIONAL_TOOL_OUTPUT_KEYS,
@@ -377,6 +378,12 @@ def test_tool_contract_registry_contains_only_model_visible_tools_and_loading_po
     for contract in registry.list():
         assert not hasattr(contract, "required_permission")
         assert not hasattr(contract, "owner_scope")
+
+
+def test_model_tool_schema_registry_has_no_internal_or_legacy_orphans() -> None:
+    registry = default_tool_registry()
+
+    assert set(tool_input_schema_refs()) == {contract.input_schema_ref for contract in registry.list()}
 
 
 @pytest.mark.parametrize(

@@ -154,33 +154,6 @@ class HospitalBagCartUpdateProposeToolHandler:
         }
 
 
-class AgentArtifactCreateToolHandler:
-    def __init__(self, *, runtime_service: AgentRuntimeService, artifact_type: str, default_title: str) -> None:
-        self.runtime_service = runtime_service
-        self.artifact_type = artifact_type
-        self.default_title = default_title
-
-    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
-        payload = _artifact_payload(args=context.args, default_title=self.default_title)
-        artifact = await self.runtime_service.create_artifact(
-            owner_user_id=context.actor.user_id,
-            run_id=context.run_id,
-            artifact_type=self.artifact_type,
-            schema_version="v1",
-            status="created",
-            payload=payload,
-            emit_event=False,
-        )
-        return {
-            "artifact_id": str(artifact.id),
-            "artifact_type": artifact.artifact_type,
-            "status": artifact.status,
-            "title": _text(payload, "title"),
-            "summary": _text(payload, "summary"),
-            DEFERRED_AGENT_EVENTS_KEY: [_deferred_artifact_created_event(artifact)],
-        }
-
-
 class IbclcConsultCardCreateToolHandler:
     def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
         self.runtime_service = runtime_service
@@ -1171,25 +1144,6 @@ def _hospital_bag_cart_preview_payload(apply_payload: dict[str, Any]) -> dict[st
         "cart_update": cart_update if isinstance(cart_update, dict) else {},
     }
     return {key: value for key, value in preview.items() if value not in ("", None, {})}
-
-
-def _artifact_payload(*, args: dict[str, Any], default_title: str) -> dict[str, Any]:
-    payload: dict[str, Any] = {}
-    extra_payload = args.get("payload")
-    if isinstance(extra_payload, dict):
-        payload.update(extra_payload)
-    payload["title"] = _text(args, "title") or default_title
-    payload["summary"] = _text(args, "summary")
-    sections = args.get("sections")
-    if isinstance(sections, list):
-        payload["sections"] = sections
-    source_context = args.get("source_context")
-    if isinstance(source_context, dict):
-        payload["source_context"] = source_context
-    metadata = _metadata_payload(args)
-    if metadata:
-        payload["metadata"] = metadata
-    return {key: value for key, value in payload.items() if value not in ("", None, [], {})}
 
 
 def _ibclc_consult_card_payload(args: dict[str, Any]) -> dict[str, Any]:
