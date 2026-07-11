@@ -1,33 +1,36 @@
-# Production Backend Refactor Docs
+# Production Backend Docs
 
-Use this directory for documents that guide or verify the new production backend:
+This directory contains current production contracts, operational guides, and
+product references. Completed migration plans, refactor inventories, and
+legacy-route comparison documents do not belong here.
 
-- API inventory.
-- SQLite schema inventory.
-- Tool and action inventory.
-- Event contract inventory.
-- Migration decisions and ADRs.
-- Operational runbooks.
-- Engineering-loop acceptance gates.
-- Product-level PRD, refactor plan, and agent service test plan under `product/`.
+## Agent And Product
 
-The first document to add should be `backend-refactor-inventory.md`.
+- `agent-tool-catalog.md`: model-visible global tools, namespaces, loading
+  modes, and internal non-model handlers.
+- `product/momcozy-mai-integrated-prd.md`: current product requirements and
+  user journeys.
+- `product/momcozy-agent-service-test-plan.md`: product-level agent scenarios
+  and acceptance criteria.
 
-Key documents:
+## API And Client Contracts
 
-- `agent-tool-catalog.md`: current model-visible global tools, namespaces,
-  namespace members, loading modes, and internal non-model handlers.
-- `backend-refactor-inventory.generated.md`: generated legacy route/table risk
-  inventory.
-- `productization-roadmap.md`: Phase 0-6 backend-only productization roadmap,
-  status matrix, Flutter boundary, and remaining PR slices.
-- `agent-runtime-continuation-migration-plan.md`: continuation plan for taking
-  the agent runtime foundation to complete product-level agent behavior.
-- `legacy-backend-acceptance-loop.md`: maps legacy domains to production
-  acceptance tests, evals, and Codex loop gates.
-- `environment-profiles.md`: local, staging, and production environment
-  switching rules.
-- `product-asset-storage.md`: manifest + object storage policy for large
-  product assets.
-- `module-layering.md`: router/service/domain/repository boundary convention
-  for production modules.
+- `openapi.generated.json`: generated OpenAPI contract snapshot.
+- `api-surface-catalog.md`: generated API surface classification.
+- `api-contract-handoff.md`: human-readable API and agent event contract.
+- `flutter-client-compatibility.md`: generated-client compatibility policy.
+- `flutter-smoke-flows.json`: mobile integration smoke scenarios.
+
+## Operations
+
+- `deployment-runbook.md`: deployment, rollback, recovery, and incident steps.
+- `release-smoke-checklist.md`: release acceptance checklist.
+- `environment-profiles.md`: local, test, and production environment rules.
+- `postgres-integration-profile.md`: PostgreSQL integration checks.
+- `redis-runtime-profile.md`: Redis runtime checks.
+- `object-storage-integration-profile.md`: object storage integration checks.
+- `product-asset-storage.md`: product asset manifest and storage policy.
+
+## Engineering Conventions
+
+- `module-layering.md`: router, service, domain, and repository boundaries.

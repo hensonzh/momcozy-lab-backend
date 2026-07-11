@@ -1,6 +1,6 @@
 # MomCozy Production Backend
 
-This directory is the isolated workspace for the production backend refactor.
+This directory contains the MomCozy production backend.
 
 The legacy backend has been moved under the repository-level `legacy_backend/`
 directory. New production code should be built here first so the target
@@ -12,7 +12,8 @@ session, SQLite data store, or static API-key user boundary.
 - New production FastAPI code lives under `production_backend/app/`.
 - New Alembic migrations live under `production_backend/migrations/`.
 - New backend tests live under `production_backend/tests/`.
-- Refactor inventories, ADRs, and runbooks live under `production_backend/docs/`.
+- Current contracts, architecture conventions, and runbooks live under
+  `production_backend/docs/`.
 - Development and migration scripts live under `production_backend/scripts/`.
 - The old demo backend, old tests, old scripts, old skill prompts, and local
   legacy runtime artifacts live under repository-level `legacy_backend/`.

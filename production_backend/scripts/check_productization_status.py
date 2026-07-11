@@ -52,7 +52,6 @@ def main() -> None:
 
 def _check_required_files(root: Path) -> list[CheckResult]:
     required = [
-        "production_backend/docs/productization-roadmap.md",
         "production_backend/docs/api-contract-handoff.md",
         "production_backend/docs/api-surface-catalog.md",
         "production_backend/docs/openapi.generated.json",
