@@ -143,7 +143,10 @@ services:
         sleep 1;
       done;
       mc mb --ignore-existing local/momcozy-local;
+      mc mirror --overwrite /seed/product-assets local/momcozy-local/product-assets;
       "
+    volumes:
+      - ./.local/object_storage/product-assets:/seed/product-assets:ro
 
 volumes:
   postgres_data:

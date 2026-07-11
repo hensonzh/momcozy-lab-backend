@@ -345,6 +345,7 @@ async def _execute_agent_run(
             asset_service=ProductAssetService(),
             file_vision_service=file_vision_service,
             agent_runtime_service=agent_runtime_service,
+            object_storage=object_storage,
         )
         tool_executor = ToolExecutor(
             registry=tool_registry,

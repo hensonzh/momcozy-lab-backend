@@ -52,6 +52,23 @@ def test_tool_event_semantic_uses_tool_specific_copy() -> None:
     assert semantic["lifecycle"] == "running"
 
 
+def test_image_inspect_tool_event_semantic_uses_image_copy() -> None:
+    started = tool_event_semantic(
+        event_type="tool.started",
+        tool_name="images.inspect",
+        read_or_write="read",
+    )
+    completed = tool_event_semantic(
+        event_type="tool.completed",
+        tool_name="images.inspect",
+        safe_output={"status": "image_context_ready"},
+        read_or_write="read",
+    )
+
+    assert started["label"] == "我先看看图片内容～"
+    assert completed["label"] == "我把图片内容看好啦"
+
+
 def test_tool_event_semantic_maps_confirmation_outputs() -> None:
     semantic = tool_event_semantic(
         event_type="tool.completed",

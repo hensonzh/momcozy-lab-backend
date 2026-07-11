@@ -21,6 +21,7 @@ from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.
     GrowthRecordsReadToolHandler,
     HospitalBagCartUpdateProposeToolHandler,
     IbclcConsultCardCreateToolHandler,
+    ImageInspectToolHandler,
     LegacyArtifactToolHandler,
     MilkAnalysisReadToolHandler,
     MilkPlanProposeToolHandler,
@@ -620,6 +621,67 @@ def test_file_vision_summary_read_tool_handler_rejects_invalid_file_id() -> None
     assert exc_info.value.details == {"field": "file_id"}
 
 
+def test_image_inspect_tool_handler_loads_visible_packaged_image_as_transient_model_context() -> None:
+    storage = FakeImageObjectStorage(body=b"image")
+    handler = ImageInspectToolHandler(asset_service=FakeImageAssetService(), object_storage=storage)
+    image_url = "/skill-assets/device-guidance/air1/images/guide.png"
+
+    result = asyncio.run(
+        handler(
+            _context(
+                args={
+                    "image_url": image_url,
+                    "detail": "high",
+                    "visible_image_urls": [image_url],
+                }
+            )
+        )
+    )
+
+    assert result["status"] == "image_context_ready"
+    assert result["image_url"] == image_url
+    assert result["asset_id"] == "asset-image"
+    assert result["detail"] == "high"
+    assert storage.keys == ["product-assets/device-guidance/assets/air1/images/guide.png"]
+    assert result["_model_context_after_invoke"] == [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "input_text",
+                    "text": "这是你选择查看的历史图片。请结合当前用户问题，只依据图片中可见内容回答。",
+                },
+                {
+                    "type": "input_image",
+                    "image_url": "data:image/png;base64,aW1hZ2U=",
+                    "detail": "high",
+                },
+            ],
+        }
+    ]
+
+
+def test_image_inspect_tool_handler_rejects_url_not_visible_to_model() -> None:
+    handler = ImageInspectToolHandler(
+        asset_service=FakeImageAssetService(),
+        object_storage=FakeImageObjectStorage(body=b"image"),
+    )
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            handler(
+                _context(
+                    args={
+                        "image_url": "/skill-assets/device-guidance/air1/images/guide.png",
+                        "visible_image_urls": [],
+                    }
+                )
+            )
+        )
+
+    assert exc_info.value.code == "image_reference_not_visible"
+
+
 def test_feeding_record_propose_tool_handler_creates_confirmation_action() -> None:
     actor = _user()
     runtime_service = FakeAgentRuntimeService()
@@ -1128,6 +1190,7 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
         "devices.guidance_assets.read",
         "devices.pump_status.read",
         "files.vision_summary.read",
+        "images.inspect",
         "notifications.milk_reminder.propose",
         "plans.milk_plan.propose",
         "plans.task_complete.propose",
@@ -1398,6 +1461,30 @@ class FakeAssetService:
                 path=None,
             ),
         ][:limit]
+
+
+class FakeImageAssetService:
+    def list_assets(self, *, limit):
+        return [
+            ProductAsset(
+                id="asset-image",
+                label="Air1 guide",
+                domain="device_guidance",
+                content_type="image/png",
+                size_bytes=5,
+                object_key="product-assets/device-guidance/assets/air1/images/guide.png",
+            )
+        ][:limit]
+
+
+class FakeImageObjectStorage:
+    def __init__(self, *, body: bytes) -> None:
+        self.body = body
+        self.keys = []
+
+    async def get_bytes(self, *, key):
+        self.keys.append(key)
+        return self.body
 
 
 class FakeFileVisionService:

@@ -276,6 +276,28 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         ToolContract(
+            name="images.inspect",
+            domain="images",
+            description=(
+                "查看当前可见对话历史中已经展示过的一张图片。"
+                "当用户询问上图、这张图或历史回复中的具体图片内容时，"
+                "自行选择对应 image_url 后调用；不要只根据文件名或图片 alt 文本猜测。"
+            ),
+            input_schema_ref="ImageInspectInput",
+            output_schema_ref="ImageContextReady",
+            loading_mode="eager",
+            read_or_write="read",
+            side_effect_level="none",
+            blocking_policy="must_wait",
+            result_dependency="next_tool_call",
+            requires_confirmation=False,
+            idempotency_required=False,
+            audit_required=False,
+            timeout_seconds=10,
+        )
+    )
+    registry.register(
+        ToolContract(
             name="plans.milk_plan.propose",
             domain="plans",
             description="创建奶量计划预览并提出唯一的计划创建动作，等待用户确认；不要再调用独立预览工具。",

@@ -36,6 +36,7 @@ class ToolHandlerContext:
 
 ToolHandler = Callable[[ToolHandlerContext], Awaitable[dict[str, Any]] | dict[str, Any]]
 DEFERRED_AGENT_EVENTS_KEY = "_deferred_agent_events"
+TRANSIENT_MODEL_CONTEXT_KEY = "_model_context_after_invoke"
 LOGGER = logging.getLogger("production_backend.agent_runtime.tools")
 
 
@@ -43,6 +44,7 @@ LOGGER = logging.getLogger("production_backend.agent_runtime.tools")
 class ToolExecutionResult:
     tool_call: AgentToolCall
     safe_output: dict[str, Any]
+    model_context: tuple[dict[str, Any], ...] = ()
 
 
 class ToolExecutor:
@@ -158,6 +160,7 @@ class ToolExecutor:
             raise ApiError(code="tool_failed", message="Tool execution failed.", status=500) from exc
 
         deferred_events = _extract_deferred_agent_events(result)
+        model_context = _extract_transient_model_context(result)
         safe_output = strip_instructional_tool_output_keys(_safe_payload(result))
         externalized_output = await maybe_externalize_json_payload(
             payload=safe_output,
@@ -211,7 +214,11 @@ class ToolExecutor:
                 payload=payload,
             )
         self._record(tool_name=tool_name, outcome="completed", error_code="", started_at=started_at)
-        return ToolExecutionResult(tool_call=completed, safe_output=externalized_output.inline_payload)
+        return ToolExecutionResult(
+            tool_call=completed,
+            safe_output=externalized_output.inline_payload,
+            model_context=model_context,
+        )
 
     @staticmethod
     def _enforce_actor_scope(*, args: dict[str, Any]) -> None:
@@ -331,6 +338,13 @@ def _extract_deferred_agent_events(result: dict[str, Any]) -> list[dict[str, Any
     return events
 
 
+def _extract_transient_model_context(result: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+    raw_context = result.pop(TRANSIENT_MODEL_CONTEXT_KEY, [])
+    if not isinstance(raw_context, list):
+        return ()
+    return tuple(dict(item) for item in raw_context if isinstance(item, dict))
+
+
 def _safe_payload(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: _redacted_value(key, item) for key, item in value.items()}
@@ -378,6 +392,7 @@ def _tool_event_label(tool_name: str) -> str:
         "devices.pump_status.read": "设备状态",
         "devices.guidance_assets.read": "设备指导资料",
         "files.vision_summary.read": "图片内容",
+        "images.inspect": "图片内容",
         "birth_plan_form_create": "我先帮你准备确认内容～",
         "labor_communication_card_create": "我先帮你整理分娩沟通单～",
         "hospital_bag_form_create": "我先帮你准备确认内容～",

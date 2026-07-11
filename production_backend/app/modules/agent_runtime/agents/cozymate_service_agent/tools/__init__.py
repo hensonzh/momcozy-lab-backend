@@ -1,5 +1,5 @@
 from .contracts import ToolContract
-from .executor import ToolExecutionResult, ToolExecutor, ToolHandlerContext
+from .executor import TRANSIENT_MODEL_CONTEXT_KEY, ToolExecutionResult, ToolExecutor, ToolHandlerContext
 from .handlers import (
     BusinessContextReadToolHandler,
     DeviceGuidanceAssetsReadToolHandler,
@@ -15,6 +15,7 @@ from .handlers import (
     GrowthRecordsReadToolHandler,
     HospitalBagCartUpdateProposeToolHandler,
     IbclcConsultCardCreateToolHandler,
+    ImageInspectToolHandler,
     LegacyArtifactToolHandler,
     MilkAnalysisReadToolHandler,
     MilkStatusReadToolHandler,
@@ -56,6 +57,7 @@ __all__ = [
     "GrowthRecordsReadToolHandler",
     "HospitalBagCartUpdateProposeToolHandler",
     "IbclcConsultCardCreateToolHandler",
+    "ImageInspectToolHandler",
     "LegacyArtifactToolHandler",
     "MilkAnalysisReadToolHandler",
     "MilkStatusReadToolHandler",
@@ -78,6 +80,7 @@ __all__ = [
     "SupportTicketProposeToolHandler",
     "ToolContract",
     "ToolContractRegistry",
+    "TRANSIENT_MODEL_CONTEXT_KEY",
     "ToolExecutionResult",
     "ToolExecutor",
     "ToolHandlerContext",

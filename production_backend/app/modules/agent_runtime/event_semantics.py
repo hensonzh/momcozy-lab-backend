@@ -314,6 +314,11 @@ _TOOL_COPY: dict[str, dict[str, str]] = {
         "started": "我先看看图片内容～",
         "completed": "我把图片内容看好啦",
     },
+    "images.inspect": {
+        "phase": "reading",
+        "started": "我先看看图片内容～",
+        "completed": "我把图片内容看好啦",
+    },
     "birth_plan_form_create": {
         "phase": "planning",
         "started": "我先帮你准备确认内容～",

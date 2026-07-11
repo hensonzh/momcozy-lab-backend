@@ -45,6 +45,8 @@ BASE_AGENT_INSTRUCTIONS = """
 
 ## 图片处理方式
 只描述图片中可见且和用户问题相关的内容。不要从图片推断身份、敏感特征或隐藏医学事实。
+- 当用户询问当前可见对话历史中展示过的图片时，由你从历史回复中判断对应的图片 URL，调用 `images.inspect` 后再回答。
+- 不要只根据图片文件名或 alt 文本猜测；无法确定用户指的是哪张图片时，直接向用户确认。
 """.strip()
 
 _SERVICE_SKILLS_ROOT = Path(__file__).resolve().parents[1] / "skills"

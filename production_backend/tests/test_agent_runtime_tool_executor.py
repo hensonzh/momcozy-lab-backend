@@ -8,6 +8,7 @@ from production_backend.app.core.errors import ApiError
 from production_backend.app.core.metrics import RequestMetrics
 from production_backend.app.modules.agent_runtime.models import AgentEvent, AgentRun, AgentToolCall
 from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.tools import (
+    TRANSIENT_MODEL_CONTEXT_KEY,
     ToolExecutor,
     ToolHandlerContext,
     default_tool_registry,
@@ -140,6 +141,47 @@ def test_tool_executor_emits_deferred_artifact_events_after_tool_completed() -> 
     ]
     assert repository.events[-1].payload["artifact_id"] == "artifact-1"
     assert repository.events[-1].payload["tool_call_id"] == str(repository.tool_call.id)
+
+
+def test_tool_executor_returns_model_context_without_persisting_it() -> None:
+    actor = _user()
+    repository = FakeToolRepository()
+    executor = ToolExecutor(
+        registry=default_tool_registry(),
+        repository=repository,
+        handlers={"images.inspect": image_context_handler},
+    )
+
+    result = asyncio.run(
+        executor.execute(
+            actor=actor,
+            run_id=uuid4(),
+            tool_name="images.inspect",
+            call_id="call-image",
+            args={"image_url": "/v1/assets/asset-image"},
+        )
+    )
+
+    assert result.safe_output == {
+        "status": "image_context_ready",
+        "image_url": "/v1/assets/asset-image",
+        "detail": "low",
+    }
+    assert result.model_context == (
+        {
+            "role": "user",
+            "content": [
+                {"type": "input_text", "text": "Inspect the selected image for the current question."},
+                {
+                    "type": "input_image",
+                    "image_url": "data:image/png;base64,aW1hZ2U=",
+                    "detail": "low",
+                },
+            ],
+        },
+    )
+    assert TRANSIENT_MODEL_CONTEXT_KEY not in repository.output.safe_output
+    assert TRANSIENT_MODEL_CONTEXT_KEY not in repository.events[-1].payload["safe_output"]
 
 
 def test_tool_executor_externalizes_large_safe_output_after_redaction() -> None:
@@ -465,6 +507,27 @@ async def instructional_profile_read_handler(context: ToolHandlerContext):
 
 async def failing_handler(context: ToolHandlerContext):
     raise ApiError(code="dependency_failed", message="Profile service unavailable.", status=503)
+
+
+async def image_context_handler(context: ToolHandlerContext):
+    return {
+        "status": "image_context_ready",
+        "image_url": context.args["image_url"],
+        "detail": "low",
+        TRANSIENT_MODEL_CONTEXT_KEY: [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": "Inspect the selected image for the current question."},
+                    {
+                        "type": "input_image",
+                        "image_url": "data:image/png;base64,aW1hZ2U=",
+                        "detail": "low",
+                    },
+                ],
+            }
+        ],
+    }
 
 
 def _user(*, roles: set[str] | None = None, permissions: set[str] | None = None) -> CurrentUser:

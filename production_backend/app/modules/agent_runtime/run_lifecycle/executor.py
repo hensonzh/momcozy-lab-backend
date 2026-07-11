@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -70,6 +71,7 @@ from .state_store import AgentRuntimeStateStore
 
 
 LOAD_SERVICE_SKILL_TOOL_NAME = "load_service_skill"
+IMAGE_INSPECT_TOOL_NAME = "images.inspect"
 LOGGER = logging.getLogger("production_backend.agent_runtime.executor")
 LOAD_SERVICE_SKILL_INPUT_SCHEMA = tool_input_schema("LoadServiceSkillInput")
 DEFAULT_RESIDENT_SERVICE_SKILL_TTL_TURNS = 3
@@ -78,6 +80,7 @@ FORM_TOOL_IDS = {
     "labor_communication_card_create": "birth_plan_card_intake",
 }
 FORM_CREATION_TOOL_NAMES = {"birth_plan_form_create", "hospital_bag_form_create"}
+MARKDOWN_IMAGE_URL_PATTERN = re.compile(r"!\[[^\]]*\]\(\s*(?:<([^>]+)>|([^\s)]+))")
 
 
 @dataclass(frozen=True)
@@ -165,6 +168,8 @@ class AgentRuntimeExecutor:
         self._run_text_stream_emitted: dict[UUID, str] = {}
         self._run_trusted_form_submissions: dict[UUID, dict[str, dict[str, Any]]] = {}
         self._run_business_facts: dict[UUID, dict[ServiceSkillId, dict[str, Any]]] = {}
+        self._run_visible_image_urls: dict[UUID, tuple[str, ...]] = {}
+        self._run_tool_model_context: dict[UUID, tuple[dict[str, Any], ...]] = {}
         self._unified_load_service_skill = isinstance(self.tool_executor, ToolExecutor)
 
     async def __call__(self, run: AgentRun) -> AgentRunExecutionResult:
@@ -179,6 +184,8 @@ class AgentRuntimeExecutor:
         self._run_loaded_service_skill_ids[run.id] = set()
         self._run_text_stream_buffers[run.id] = ""
         self._run_text_stream_emitted[run.id] = ""
+        self._run_visible_image_urls[run.id] = ()
+        self._run_tool_model_context[run.id] = ()
         self._run_business_facts[run.id] = {}
         try:
             turn_context = await self._load_turn_context(run=run)
@@ -210,6 +217,8 @@ class AgentRuntimeExecutor:
             self._run_text_stream_emitted.pop(run.id, None)
             self._run_trusted_form_submissions.pop(run.id, None)
             self._run_business_facts.pop(run.id, None)
+            self._run_visible_image_urls.pop(run.id, None)
+            self._run_tool_model_context.pop(run.id, None)
 
     async def _load_turn_context(self, *, run: AgentRun) -> _AgentTurnContext:
         timings_ms: dict[str, float] = {}
@@ -219,6 +228,10 @@ class AgentRuntimeExecutor:
         if current_message is None:
             raise ApiError(code="missing_user_message", message="Agent run has no user message.", status=409)
         messages = await self.repository.list_messages_for_thread(thread_id=run.thread_id, limit=self.config.history_limit)
+        self._run_visible_image_urls[run.id] = _visible_assistant_image_urls(
+            messages=messages,
+            before_sequence=current_message.sequence,
+        )
         memory_projection = await self._memory_projection(run=run)
         timings_ms["context_base"] = _elapsed_ms(context_started_at)
 
@@ -579,6 +592,15 @@ class AgentRuntimeExecutor:
         async def invoke_json(args_json: str) -> str:
             return await self._invoke_sdk_tool(run=run, contract_name=contract.name, sdk_name=sdk_name, args_json=args_json)
 
+        if contract.name == LOAD_SERVICE_SKILL_TOOL_NAME:
+            model_context_after_invoke = self._loaded_service_skill_model_context
+        elif contract.name == IMAGE_INSPECT_TOOL_NAME:
+            model_context_after_invoke = lambda output_json: self._image_model_context_after_invoke(
+                run=run,
+                output_json=output_json,
+            )
+        else:
+            model_context_after_invoke = None
         return SdkToolDefinition(
             contract_name=contract.name,
             sdk_name=sdk_name,
@@ -587,11 +609,7 @@ class AgentRuntimeExecutor:
             invoke_json=invoke_json,
             namespace_name=namespace.name if namespace is not None else "",
             defer_loading=namespace is not None and contract.loading_mode == "deferred",
-            model_context_after_invoke=(
-                self._loaded_service_skill_model_context
-                if contract.name == LOAD_SERVICE_SKILL_TOOL_NAME
-                else None
-            ),
+            model_context_after_invoke=model_context_after_invoke,
         )
 
     async def _load_service_skill_handler(self, context: ToolHandlerContext) -> dict[str, Any]:
@@ -658,6 +676,15 @@ class AgentRuntimeExecutor:
             },
         )
 
+    def _image_model_context_after_invoke(self, *, run: AgentRun, output_json: str) -> tuple[dict[str, Any], ...]:
+        output = _json_object(output_json)
+        if _text(output, "status") != "image_context_ready":
+            raise ApiError(code="image_context_invalid", message="Image context tool returned an invalid result.", status=502)
+        model_context = self._run_tool_model_context.pop(run.id, ())
+        if not model_context:
+            raise ApiError(code="image_context_missing", message="Image context is unavailable.", status=502)
+        return model_context
+
     async def _invoke_sdk_tool(self, *, run: AgentRun, contract_name: str, sdk_name: str, args_json: str) -> str:
         if self.tool_executor is None:
             raise ApiError(code="unsupported_operation", message="Tool executor is not configured.", status=501)
@@ -679,6 +706,9 @@ class AgentRuntimeExecutor:
             )
         else:
             result = await self.tool_executor.execute(**execute_kwargs)
+        if contract_name == IMAGE_INSPECT_TOOL_NAME:
+            model_context = getattr(result, "model_context", ())
+            self._run_tool_model_context[run.id] = tuple(model_context) if isinstance(model_context, tuple | list) else ()
         await self._append_progress(run=run, phase="model_reasoning_after_tool", label="我接着处理下一步")
         return json.dumps(result.safe_output, sort_keys=True)
 
@@ -702,6 +732,8 @@ class AgentRuntimeExecutor:
         if contract_name == "hospital_bag_cart_update":
             groups = await self._latest_hospital_bag_cart_groups(run=run)
             return {"groups": groups} if groups else {}
+        if contract_name == IMAGE_INSPECT_TOOL_NAME:
+            return {"visible_image_urls": list(self._run_visible_image_urls.get(run.id, ()))}
         return {}
 
     async def _birth_prep_business_facts(self, *, run: AgentRun) -> dict[str, Any]:
@@ -1141,6 +1173,20 @@ def _history_messages_before(*, messages: list[AgentMessage], before_sequence: i
     return [
         message for message in messages if message.sequence < before_sequence and message.role in {"user", "assistant"}
     ]
+
+
+def _visible_assistant_image_urls(*, messages: list[AgentMessage], before_sequence: int) -> tuple[str, ...]:
+    urls: list[str] = []
+    seen: set[str] = set()
+    for message in messages:
+        if message.sequence >= before_sequence or message.role != "assistant":
+            continue
+        for match in MARKDOWN_IMAGE_URL_PATTERN.finditer(_message_text(message)):
+            image_url = str(match.group(1) or match.group(2) or "").strip()
+            if image_url and image_url not in seen:
+                seen.add(image_url)
+                urls.append(image_url)
+    return tuple(urls)
 
 
 def _routing_target_agent_id(routing_plan: RoutingPlan) -> str:

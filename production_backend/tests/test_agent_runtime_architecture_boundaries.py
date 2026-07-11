@@ -234,6 +234,8 @@ def test_static_prompts_keep_runtime_boundaries_and_legacy_style() -> None:
     global_prompt = DEFAULT_STABLE_SYSTEM_PROMPT
     static_context = build_static_agent_context()
     assert DEFAULT_STABLE_SYSTEM_PROMPT == f"{BASE_AGENT_INSTRUCTIONS}\n\n{static_context}"
+    assert "调用 `images.inspect` 后再回答" in BASE_AGENT_INSTRUCTIONS
+    assert "不要只根据图片文件名或 alt 文本猜测" in BASE_AGENT_INSTRUCTIONS
     assert "# 全局规则" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "## 全局人设" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "你叫 CozyMate，来自 Momcozy 团队。" in DEFAULT_STABLE_SYSTEM_PROMPT
@@ -422,6 +424,7 @@ def test_tool_contracts_are_exported_as_responses_namespaces() -> None:
     assert len(assigned_contracts) == len(set(assigned_contracts))
     assert root_contracts == [
         "files.vision_summary.read",
+        "images.inspect",
         "load_service_skill",
         "profile.read",
         "profile_update",
@@ -468,6 +471,7 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
     devices_schema = tool_input_schema(registry.get("devices.pump_status.read").input_schema_ref)
     device_guidance_schema = tool_input_schema(registry.get("devices.guidance_assets.read").input_schema_ref)
     file_vision_schema = tool_input_schema(registry.get("files.vision_summary.read").input_schema_ref)
+    image_inspect_schema = tool_input_schema(registry.get("images.inspect").input_schema_ref)
     milk_plan_schema = tool_input_schema(registry.get("plans.milk_plan.propose").input_schema_ref)
     pregnancy_plan_schema = tool_input_schema(registry.get("pregnancy.plan.propose").input_schema_ref)
     task_create_schema = tool_input_schema(registry.get("plans.task_create.propose").input_schema_ref)
@@ -530,6 +534,8 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
     assert device_guidance_schema["properties"]["measured_nipple_mm"]["type"] == "number"
     assert file_vision_schema["additionalProperties"] is False
     assert file_vision_schema["required"] == ["file_id"]
+    assert image_inspect_schema["required"] == ["image_url"]
+    assert image_inspect_schema["properties"]["detail"]["enum"] == ["low", "high"]
     assert file_vision_schema["properties"]["file_id"]["type"] == "string"
     assert milk_plan_schema["additionalProperties"] is False
     assert milk_plan_schema["required"] == ["title"]
@@ -1067,6 +1073,67 @@ def test_responses_runner_appends_trusted_developer_context_after_tool_output(mo
         "role": "developer",
         "content": "validated milk-management skill instructions",
     }
+
+
+def test_responses_runner_preserves_multimodal_context_added_after_tool_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_openai = types.ModuleType("openai")
+    fake_openai.__spec__ = ModuleSpec("openai", loader=None)
+    fake_openai.AsyncOpenAI = FakeAsyncOpenAI
+    monkeypatch.setitem(sys.modules, "openai", fake_openai)
+    FakeAsyncOpenAI.reset(
+        [
+            FakeOpenAIResponse(
+                id="resp_1",
+                output=[
+                    {
+                        "type": "function_call",
+                        "name": "images_inspect",
+                        "call_id": "call_image",
+                        "arguments": '{"image_url":"/v1/assets/asset-image"}',
+                    }
+                ],
+            ),
+            FakeOpenAIResponse(id="resp_2", output=[], output_text="图中有四个主要部件。"),
+        ]
+    )
+
+    async def invoke_json(_args_json: str) -> str:
+        return '{"status":"image_context_ready"}'
+
+    multimodal_context = {
+        "role": "user",
+        "content": [
+            {"type": "input_text", "text": "Inspect the selected image."},
+            {
+                "type": "input_image",
+                "image_url": "data:image/png;base64,aW1hZ2U=",
+                "detail": "low",
+            },
+        ],
+    }
+    request = SdkNodeRequest(
+        run_id="run_1",
+        thread_id="thread_1",
+        actor_user_id="user_1",
+        instructions="Inspect a referenced image when the user asks about it.",
+        model_input=[{"role": "user", "content": "这张图里有什么？"}],
+        tools=(
+            SdkToolDefinition(
+                contract_name="images.inspect",
+                sdk_name="images_inspect",
+                description="查看历史图片。",
+                params_json_schema={"type": "object", "properties": {}},
+                invoke_json=invoke_json,
+                model_context_after_invoke=lambda _output: (multimodal_context,),
+            ),
+        ),
+    )
+
+    result = asyncio.run(OpenAIResponsesRunner(model="gpt-test").run_reasoning(request))
+
+    assert result.final_text == "图中有四个主要部件。"
+    assert FakeAsyncOpenAI.calls[1]["input"][-1] == multimodal_context
+    assert isinstance(FakeAsyncOpenAI.calls[1]["input"][-1]["content"], list)
 
 
 def test_sdk_runner_uses_responses_backend_without_deferred_tools(monkeypatch: pytest.MonkeyPatch) -> None:

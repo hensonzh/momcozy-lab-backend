@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import asyncio
+import base64
 import re
 from datetime import date, datetime, timezone
 from typing import Any
+from urllib.parse import urlsplit
 from uuid import UUID
 
 from production_backend.app.core.errors import ApiError
+from production_backend.app.infrastructure.object_storage.base import ObjectStorage
 from production_backend.app.modules.agent_runtime.service import AgentRuntimeService
 from production_backend.app.modules.assets.models import ProductAsset
 from production_backend.app.modules.assets.service import ProductAssetService
@@ -43,7 +47,7 @@ from production_backend.app.modules.records.models import FeedingRecord, GrowthR
 from production_backend.app.modules.records.service import RecordsService
 from production_backend.app.modules.support.agent_actions import SUPPORT_TICKET_CREATE_ACTION
 
-from .executor import DEFERRED_AGENT_EVENTS_KEY, ToolHandler, ToolHandlerContext
+from .executor import DEFERRED_AGENT_EVENTS_KEY, TRANSIENT_MODEL_CONTEXT_KEY, ToolHandler, ToolHandlerContext
 from .legacy_artifacts import artifact_record_from_legacy_result, build_birth_journey_plan_result, create_legacy_artifact_result
 
 
@@ -568,6 +572,67 @@ class FileVisionSummaryReadToolHandler:
         }
 
 
+class ImageInspectToolHandler:
+    def __init__(self, *, asset_service: ProductAssetService, object_storage: ObjectStorage | None) -> None:
+        self.asset_service = asset_service
+        self.object_storage = object_storage
+
+    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
+        image_url = _text(context.args, "image_url")
+        visible_image_urls = _string_list(context.args.get("visible_image_urls"))
+        if image_url not in visible_image_urls:
+            raise ApiError(
+                code="image_reference_not_visible",
+                message="The selected image URL is not visible in the current conversation context.",
+                status=422,
+            )
+        detail = _text(context.args, "detail") or "low"
+        if detail not in {"low", "high"}:
+            raise ApiError(code="validation_failed", message="detail must be low or high.", status=422)
+
+        asset = _packaged_image_asset_for_url(asset_service=self.asset_service, image_url=image_url)
+        if asset is None:
+            parsed = urlsplit(image_url)
+            if parsed.scheme != "https" or not parsed.netloc:
+                raise ApiError(code="image_input_unavailable", message="The selected image cannot be loaded.", status=422)
+            model_image_url = image_url
+            asset_id = ""
+            content_type = ""
+        else:
+            if not asset.content_type.startswith("image/"):
+                raise ApiError(code="image_input_unavailable", message="The selected asset is not an image.", status=422)
+            body = await _read_product_asset_bytes(asset=asset, object_storage=self.object_storage)
+            model_image_url = f"data:{asset.content_type};base64,{base64.b64encode(body).decode('ascii')}"
+            asset_id = asset.id
+            content_type = asset.content_type
+
+        safe_output = {
+            "status": "image_context_ready",
+            "image_url": image_url,
+            "detail": detail,
+        }
+        if asset_id:
+            safe_output["asset_id"] = asset_id
+            safe_output["content_type"] = content_type
+        safe_output[TRANSIENT_MODEL_CONTEXT_KEY] = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": "这是你选择查看的历史图片。请结合当前用户问题，只依据图片中可见内容回答。",
+                    },
+                    {
+                        "type": "input_image",
+                        "image_url": model_image_url,
+                        "detail": detail,
+                    },
+                ],
+            }
+        ]
+        return safe_output
+
+
 class FeedingRecordProposeToolHandler:
     def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
         self.runtime_service = runtime_service
@@ -985,6 +1050,7 @@ def build_default_tool_handlers(
     asset_service: ProductAssetService,
     file_vision_service: FileVisionService,
     agent_runtime_service: AgentRuntimeService,
+    object_storage: ObjectStorage | None = None,
 ) -> dict[str, ToolHandler]:
     return {
         "profile.read": ProfileReadToolHandler(service=profile_service),
@@ -1020,6 +1086,7 @@ def build_default_tool_handlers(
         "devices.pump_status.read": DevicesPumpStatusReadToolHandler(devices_service=devices_service),
         "devices.guidance_assets.read": DeviceGuidanceAssetsReadToolHandler(asset_service=asset_service),
         "files.vision_summary.read": FileVisionSummaryReadToolHandler(vision_service=file_vision_service),
+        "images.inspect": ImageInspectToolHandler(asset_service=asset_service, object_storage=object_storage),
         "plans.milk_plan.propose": MilkPlanProposeToolHandler(runtime_service=agent_runtime_service),
         "pregnancy.plan.propose": PregnancyPlanProposeToolHandler(runtime_service=agent_runtime_service),
         "plans.task_create.propose": PlanTaskCreateProposeToolHandler(runtime_service=agent_runtime_service),
@@ -1615,6 +1682,59 @@ def _safe_vision_payload(payload: dict[str, Any]) -> dict[str, Any]:
         if value not in ("", None):
             safe[key] = value
     return safe
+
+
+def _packaged_image_asset_for_url(*, asset_service: ProductAssetService, image_url: str) -> ProductAsset | None:
+    path = urlsplit(image_url).path
+    asset_id_prefix = "/v1/assets/"
+    if path.startswith(asset_id_prefix):
+        asset_id = path.removeprefix(asset_id_prefix).strip("/")
+        if not asset_id or "/" in asset_id:
+            return None
+        try:
+            return asset_service.get_asset(asset_id=asset_id)
+        except ApiError:
+            return None
+    for asset in asset_service.list_assets(limit=200):
+        if _legacy_skill_asset_url(asset) == path:
+            return asset
+    return None
+
+
+def _legacy_skill_asset_url(asset: ProductAsset) -> str:
+    object_key = str(asset.object_key or "").strip("/")
+    prefix = "product-assets/"
+    if not object_key.startswith(prefix):
+        return ""
+    parts = object_key.removeprefix(prefix).split("/")
+    if len(parts) < 3 or parts[1] != "assets":
+        return ""
+    return f"/skill-assets/{parts[0]}/{'/'.join(parts[2:])}"
+
+
+async def _read_product_asset_bytes(*, asset: ProductAsset, object_storage: ObjectStorage | None) -> bytes:
+    if asset.path is not None:
+        try:
+            body = await asyncio.to_thread(asset.path.read_bytes)
+        except OSError as exc:
+            raise ApiError(code="image_input_unavailable", message="The selected image cannot be loaded.", status=503) from exc
+    else:
+        object_key = str(asset.object_key or "").strip()
+        if object_storage is None or not object_key:
+            raise ApiError(code="image_input_unavailable", message="The selected image cannot be loaded.", status=503)
+        try:
+            body = await object_storage.get_bytes(key=object_key)
+        except Exception as exc:
+            raise ApiError(code="image_input_unavailable", message="The selected image cannot be loaded.", status=503) from exc
+    if not body:
+        raise ApiError(code="image_input_unavailable", message="The selected image is empty.", status=503)
+    return body
+
+
+def _string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
 
 
 def _optional_number(payload: dict[str, Any], key: str) -> float | None:

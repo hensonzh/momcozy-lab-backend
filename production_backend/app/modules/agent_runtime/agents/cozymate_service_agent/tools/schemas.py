@@ -245,6 +245,26 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             }
         },
     },
+    "ImageInspectInput": {
+        "title": "ImageInspectInput",
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["image_url"],
+        "properties": {
+            "image_url": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048,
+                "description": "当前可见对话历史中已经展示过的图片 URL。",
+            },
+            "detail": {
+                "type": "string",
+                "enum": ["low", "high"],
+                "default": "low",
+                "description": "普通内容识别使用 low；小字或精细结构识别使用 high。",
+            },
+        },
+    },
     "MilkPlanProposalCreate": {
         "title": "MilkPlanProposalCreate",
         "type": "object",

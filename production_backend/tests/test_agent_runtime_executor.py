@@ -494,6 +494,7 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
         "hospital_bag_form_create",
         "hospital_bag_pump_recommend",
         "ibclc_consult_card_create",
+        "images_inspect",
         "labor_communication_card_create",
         "notifications_milk_reminder_propose",
         "plans_calendar_read",
@@ -529,6 +530,7 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert backend.tool_schemas["diary_entry_upsert_propose"]["required"] == ["entry_date"]
     assert backend.tool_schemas["diary_entry_upsert_propose"]["properties"]["content"]["maxLength"] == 5000
     assert backend.tool_schemas["files_vision_summary_read"]["required"] == ["file_id"]
+    assert backend.tool_schemas["images_inspect"]["required"] == ["image_url"]
     assert backend.tool_schemas["hospital_bag_cart_update"]["additionalProperties"] is False
     assert "groups" not in backend.tool_schemas["hospital_bag_cart_update"]["properties"]
     assert backend.tool_schemas["notifications_milk_reminder_propose"]["required"] == ["title"]
@@ -599,6 +601,7 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert backend.tool_namespace_by_contract["profile.read"] == ""
     assert backend.tool_namespace_by_contract["profile_update"] == ""
     assert backend.tool_namespace_by_contract["files.vision_summary.read"] == ""
+    assert backend.tool_namespace_by_contract["images.inspect"] == ""
     assert backend.tool_namespace_by_contract["records.milk_status.read"] == "milk_management"
     assert backend.tool_deferred_by_contract["records.milk_status.read"] is False
     assert backend.tool_deferred_by_contract["records.milk_analysis.read"] is False
@@ -610,6 +613,58 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert tool_executor.calls[0]["run_id"] == run.id
     assert tool_executor.calls[0]["tool_name"] == "profile.read"
     assert tool_executor.calls[0]["args"] == {}
+
+
+def test_agent_runtime_executor_adds_model_selected_visible_image_to_current_loop() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    image_url = "/skill-assets/device-guidance/air1/images/air1_guide_parts_components.png"
+    prior_assistant = _message(
+        thread_id=thread_id,
+        run_id=uuid4(),
+        role="assistant",
+        text=f"![Air1 核心部件]({image_url})\n请对照这张图。",
+        sequence=1,
+    )
+    current_user = _message(
+        thread_id=thread_id,
+        run_id=run.id,
+        role="user",
+        text="这张图里有什么？",
+        sequence=2,
+    )
+    repository = FakeRuntimeRepository(messages=[prior_assistant, current_user], current_message=current_user)
+    model_context = (
+        {
+            "role": "user",
+            "content": [
+                {"type": "input_text", "text": "Inspect the selected image."},
+                {
+                    "type": "input_image",
+                    "image_url": "data:image/png;base64,aW1hZ2U=",
+                    "detail": "low",
+                },
+            ],
+        },
+    )
+    tool_executor = FakeToolExecutor(
+        safe_output={"status": "image_context_ready", "image_url": image_url, "detail": "low"},
+        model_context=model_context,
+    )
+    backend = ImageInspectingSdkBackend(image_url=image_url)
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            tool_executor=tool_executor,
+        ).execute(run=run)
+    )
+
+    assert result.final_text == "图中有四个主要部件。"
+    assert backend.model_context == model_context
+    assert tool_executor.calls[0]["args"] == {"image_url": image_url}
+    assert tool_executor.calls[0]["trusted_args"] == {"visible_image_urls": [image_url]}
 
 
 def test_agent_runtime_executor_allows_service_tool_without_skill_load() -> None:
@@ -2324,18 +2379,20 @@ class FakeTransientStream:
 
 
 class FakeToolExecutor:
-    def __init__(self, *, safe_output):
+    def __init__(self, *, safe_output, model_context=()):
         self.safe_output = safe_output
+        self.model_context = model_context
         self.calls = []
 
     async def execute(self, **kwargs):
         self.calls.append(kwargs)
-        return FakeToolExecutionResult(safe_output=self.safe_output)
+        return FakeToolExecutionResult(safe_output=self.safe_output, model_context=self.model_context)
 
 
 class FakeToolExecutionResult:
-    def __init__(self, *, safe_output):
+    def __init__(self, *, safe_output, model_context=()):
         self.safe_output = safe_output
+        self.model_context = model_context
 
 
 class FakeToolOutput:
@@ -2403,6 +2460,19 @@ class InvokingSdkBackend:
         profile_tool = next(tool for tool in request.tools if tool.contract_name == "profile.read")
         output = await profile_tool.invoke_json("{}")
         return SdkNodeResult(final_text=output)
+
+
+class ImageInspectingSdkBackend:
+    def __init__(self, *, image_url: str) -> None:
+        self.image_url = image_url
+        self.model_context = ()
+
+    async def run(self, request: SdkNodeRequest) -> SdkNodeResult:
+        image_tool = next(tool for tool in request.tools if tool.contract_name == "images.inspect")
+        output = await image_tool.invoke_json(json.dumps({"image_url": self.image_url}))
+        assert image_tool.model_context_after_invoke is not None
+        self.model_context = image_tool.model_context_after_invoke(output)
+        return SdkNodeResult(final_text="图中有四个主要部件。")
 
 
 async def profile_read_handler(context: ToolHandlerContext):
