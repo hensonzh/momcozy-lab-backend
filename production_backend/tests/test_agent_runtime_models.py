@@ -29,6 +29,7 @@ def test_agent_runtime_ledger_tables_are_registered() -> None:
         "agent_memories",
         "agent_memory_settings",
         "agent_memory_snapshots",
+        "agent_memory_consolidation_runs",
     }
 
     assert expected_tables.issubset(Base.metadata.tables)
@@ -95,6 +96,7 @@ def test_agent_actions_and_checkpoints_have_runtime_indexes() -> None:
     run_summaries = Base.metadata.tables["agent_run_summaries"]
     memories = Base.metadata.tables["agent_memories"]
     memory_snapshots = Base.metadata.tables["agent_memory_snapshots"]
+    memory_consolidation_runs = Base.metadata.tables["agent_memory_consolidation_runs"]
 
     assert "uq_agent_runs_thread_active" in {index.name for index in runs.indexes}
     assert "service_skill_id" in runs.columns
@@ -125,4 +127,10 @@ def test_agent_actions_and_checkpoints_have_runtime_indexes() -> None:
         "source_date",
         "extractor_version",
         "updated_at",
+    }
+    assert "uq_agent_memory_consolidation_source" in {
+        constraint.name for constraint in memory_consolidation_runs.constraints
+    }
+    assert "ix_agent_memory_consolidation_date_status" in {
+        index.name for index in memory_consolidation_runs.indexes
     }

@@ -8,7 +8,16 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ....core.errors import ApiError
-from ..models import MEMORY_TYPES, AgentMemory, AgentMemorySettings, AgentMemorySnapshot
+from ..models import (
+    MEMORY_TYPES,
+    AgentMemory,
+    AgentMemoryConsolidationRun,
+    AgentMemorySettings,
+    AgentMemorySnapshot,
+    AgentMessage,
+    AgentRun,
+    AgentThread,
+)
 
 
 ALLOWED_MEMORY_SENSITIVITIES = frozenset({"normal", "personal"})
@@ -107,6 +116,205 @@ class AgentMemoryRepository:
         snapshot.updated_at = datetime.now(timezone.utc)
         await self.session.flush()
         return snapshot
+
+    async def list_conversation_owner_ids(
+        self,
+        *,
+        range_start: datetime,
+        range_end: datetime,
+        limit: int,
+    ) -> list[UUID]:
+        statement = (
+            select(AgentThread.owner_user_id)
+            .join(AgentMessage, AgentMessage.thread_id == AgentThread.id)
+            .join(AgentRun, AgentRun.id == AgentMessage.run_id)
+            .where(
+                AgentMessage.created_at >= range_start,
+                AgentMessage.created_at < range_end,
+                AgentMessage.status == "completed",
+                AgentMessage.role.in_(("user", "assistant")),
+                AgentRun.status == "completed",
+                AgentThread.deleted_at.is_(None),
+            )
+            .distinct()
+            .order_by(AgentThread.owner_user_id)
+            .limit(limit)
+        )
+        return list((await self.session.scalars(statement)).all())
+
+    async def list_completed_conversation_messages(
+        self,
+        *,
+        owner_user_id: UUID,
+        range_start: datetime,
+        range_end: datetime,
+        limit: int,
+    ) -> list[AgentMessage]:
+        statement = (
+            select(AgentMessage)
+            .join(AgentThread, AgentThread.id == AgentMessage.thread_id)
+            .join(AgentRun, AgentRun.id == AgentMessage.run_id)
+            .where(
+                AgentThread.owner_user_id == owner_user_id,
+                AgentThread.deleted_at.is_(None),
+                AgentMessage.created_at >= range_start,
+                AgentMessage.created_at < range_end,
+                AgentMessage.status == "completed",
+                AgentMessage.role.in_(("user", "assistant")),
+                AgentRun.status == "completed",
+            )
+            .order_by(AgentMessage.created_at.asc(), AgentMessage.id.asc())
+            .limit(limit)
+        )
+        return list((await self.session.scalars(statement)).all())
+
+    async def get_consolidation_run(
+        self,
+        *,
+        owner_user_id: UUID,
+        source_date: date,
+        source_hash: str,
+        extractor_version: str,
+    ) -> AgentMemoryConsolidationRun | None:
+        statement = select(AgentMemoryConsolidationRun).where(
+            AgentMemoryConsolidationRun.owner_user_id == owner_user_id,
+            AgentMemoryConsolidationRun.source_date == source_date,
+            AgentMemoryConsolidationRun.source_hash == source_hash,
+            AgentMemoryConsolidationRun.extractor_version == extractor_version,
+        )
+        return await self.session.scalar(statement)
+
+    async def create_consolidation_run(
+        self,
+        *,
+        owner_user_id: UUID,
+        source_date: date,
+        source_hash: str,
+        extractor_version: str,
+        input_message_count: int,
+        started_at: datetime,
+    ) -> AgentMemoryConsolidationRun:
+        run = AgentMemoryConsolidationRun(
+            owner_user_id=owner_user_id,
+            source_date=source_date,
+            source_hash=source_hash,
+            extractor_version=extractor_version,
+            status="extracting",
+            input_message_count=input_message_count,
+            started_at=started_at,
+        )
+        self.session.add(run)
+        await self.session.flush()
+        return run
+
+    async def restart_consolidation_run(
+        self,
+        *,
+        run: AgentMemoryConsolidationRun,
+        started_at: datetime,
+        input_message_count: int,
+    ) -> AgentMemoryConsolidationRun:
+        run.status = "extracting"
+        run.input_message_count = input_message_count
+        run.upserted_count = 0
+        run.archived_count = 0
+        run.rejected_count = 0
+        run.error_code = ""
+        run.started_at = started_at
+        run.completed_at = None
+        await self.session.flush()
+        return run
+
+    async def complete_consolidation_run(
+        self,
+        *,
+        run_id: UUID,
+        completed_at: datetime,
+        upserted_count: int,
+        archived_count: int,
+        rejected_count: int,
+    ) -> AgentMemoryConsolidationRun:
+        run = await self.session.get(AgentMemoryConsolidationRun, run_id)
+        if run is None:
+            raise ApiError(code="not_found", message="Memory consolidation run not found.", status=404)
+        run.status = "completed"
+        run.upserted_count = upserted_count
+        run.archived_count = archived_count
+        run.rejected_count = rejected_count
+        run.error_code = ""
+        run.completed_at = completed_at
+        await self.session.flush()
+        return run
+
+    async def fail_consolidation_run(
+        self,
+        *,
+        run_id: UUID,
+        completed_at: datetime,
+        error_code: str,
+    ) -> AgentMemoryConsolidationRun | None:
+        run = await self.session.get(AgentMemoryConsolidationRun, run_id)
+        if run is None:
+            return None
+        run.status = "failed"
+        run.error_code = error_code[:120]
+        run.completed_at = completed_at
+        await self.session.flush()
+        return run
+
+    async def upsert_memory_by_key(
+        self,
+        *,
+        owner_user_id: UUID,
+        memory_key: str,
+        memory_type: str,
+        content: dict[str, Any],
+        schema_version: str,
+        source_run_id: UUID,
+        source_message_id: UUID,
+        confidence_score: int,
+        expires_at: datetime | None,
+    ) -> tuple[AgentMemory, bool]:
+        statement = select(AgentMemory).where(
+            AgentMemory.owner_user_id == owner_user_id,
+            AgentMemory.memory_key == memory_key,
+        )
+        memory = await self.session.scalar(statement)
+        created = memory is None
+        if memory is None:
+            memory = AgentMemory(owner_user_id=owner_user_id, memory_key=memory_key)
+            self.session.add(memory)
+        memory.memory_type = memory_type
+        memory.content = content
+        memory.schema_version = schema_version
+        memory.source_run_id = source_run_id
+        memory.source_message_id = source_message_id
+        memory.confidence_score = confidence_score
+        memory.expires_at = expires_at
+        memory.status = "active"
+        memory.archived_at = None
+        await self.session.flush()
+        return memory, created
+
+    async def archive_memory_by_key(
+        self,
+        *,
+        owner_user_id: UUID,
+        memory_key: str,
+        archived_at: datetime,
+    ) -> AgentMemory | None:
+        statement = select(AgentMemory).where(
+            AgentMemory.owner_user_id == owner_user_id,
+            AgentMemory.memory_key == memory_key,
+            AgentMemory.status == "active",
+        )
+        memory = await self.session.scalar(statement)
+        if memory is None:
+            return None
+        memory.status = "archived"
+        memory.archived_at = archived_at
+        await self.session.flush()
+        return memory
 
     async def list_active_memories(
         self,

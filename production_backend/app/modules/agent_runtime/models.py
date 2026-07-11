@@ -538,6 +538,42 @@ class AgentMemorySnapshot(Base):
     )
 
 
+class AgentMemoryConsolidationRun(Base):
+    __tablename__ = "agent_memory_consolidation_runs"
+    __table_args__ = (
+        UniqueConstraint(
+            "owner_user_id",
+            "source_date",
+            "source_hash",
+            "extractor_version",
+            name="uq_agent_memory_consolidation_source",
+        ),
+        Index("ix_agent_memory_consolidation_date_status", "source_date", "status"),
+        Index("ix_agent_memory_consolidation_owner_created", "owner_user_id", "created_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    owner_user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    source_date: Mapped[date] = mapped_column(Date, nullable=False)
+    source_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    extractor_version: Mapped[str] = mapped_column(String(80), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="extracting", server_default="extracting", nullable=False)
+    input_message_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    upserted_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    archived_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    rejected_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    error_code: Mapped[str] = mapped_column(String(120), default="", server_default="", nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+
 class AgentSafetyEvent(Base):
     __tablename__ = "agent_safety_events"
     __table_args__ = (
