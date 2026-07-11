@@ -15,6 +15,8 @@ The first document to add should be `backend-refactor-inventory.md`.
 
 Key documents:
 
+- `agent-tool-catalog.md`: current model-visible global tools, namespaces,
+  namespace members, loading modes, and internal non-model handlers.
 - `backend-refactor-inventory.generated.md`: generated legacy route/table risk
   inventory.
 - `productization-roadmap.md`: Phase 0-6 backend-only productization roadmap,
