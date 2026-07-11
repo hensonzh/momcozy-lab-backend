@@ -1057,11 +1057,10 @@ class AgentRuntimeExecutor:
     async def _memory_projection(self, *, run: AgentRun) -> list[dict[str, Any]]:
         if self.memory_service is None:
             return []
-        memories = await self.memory_service.list_active_memories(
+        return await self.memory_service.get_runtime_snapshot(
             owner_user_id=run.actor_user_id,
             limit=self.config.memory_limit,
         )
-        return [_memory_projection_item(memory) for memory in memories]
 
     async def _recent_run_summaries(self, *, run: AgentRun) -> list[Any]:
         return await self.repository.list_recent_run_summaries(
@@ -1339,17 +1338,6 @@ def _sdk_instructions(*, projection: ContextProjection) -> str:
 def _to_model_message(message: AgentMessage) -> dict[str, Any]:
     role = message.role if message.role in {"user", "assistant"} else "user"
     return {"role": role, "content": _message_text(message)}
-
-
-def _memory_projection_item(memory: Any) -> dict[str, Any]:
-    content = memory.content if isinstance(memory.content, dict) else {}
-    return {
-        "memory_id": str(memory.id),
-        "memory_type": memory.memory_type,
-        "summary": _text(content, "summary"),
-        "confidence_score": int(memory.confidence_score or 0),
-        "updated_at": _iso_or_empty(getattr(memory, "updated_at", None)),
-    }
 
 
 RECENT_RUN_FACT_KEYS = ("user_goal", "assistant_conclusion", "tool_facts", "actions", "artifacts")

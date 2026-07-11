@@ -27,6 +27,8 @@ def test_agent_runtime_ledger_tables_are_registered() -> None:
         "agent_context_projections",
         "agent_run_summaries",
         "agent_memories",
+        "agent_memory_settings",
+        "agent_memory_snapshots",
     }
 
     assert expected_tables.issubset(Base.metadata.tables)
@@ -92,6 +94,7 @@ def test_agent_actions_and_checkpoints_have_runtime_indexes() -> None:
     context_projections = Base.metadata.tables["agent_context_projections"]
     run_summaries = Base.metadata.tables["agent_run_summaries"]
     memories = Base.metadata.tables["agent_memories"]
+    memory_snapshots = Base.metadata.tables["agent_memory_snapshots"]
 
     assert "uq_agent_runs_thread_active" in {index.name for index in runs.indexes}
     assert "service_skill_id" in runs.columns
@@ -113,3 +116,13 @@ def test_agent_actions_and_checkpoints_have_runtime_indexes() -> None:
     assert "ix_agent_run_summaries_owner_skill_created" in {index.name for index in run_summaries.indexes}
     assert "ix_agent_memories_owner_type_status" in {index.name for index in memories.indexes}
     assert "ix_agent_memories_expires_at" in {index.name for index in memories.indexes}
+    assert "memory_key" in memories.columns
+    assert "uq_agent_memories_owner_memory_key" in {constraint.name for constraint in memories.constraints}
+    assert set(memory_snapshots.columns.keys()) == {
+        "owner_user_id",
+        "schema_version",
+        "items_json",
+        "source_date",
+        "extractor_version",
+        "updated_at",
+    }

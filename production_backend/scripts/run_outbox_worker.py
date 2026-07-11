@@ -12,8 +12,6 @@ from production_backend.app.infrastructure.object_storage.factory import create_
 from production_backend.app.infrastructure.redis.client import close_redis_client, create_redis_client
 from production_backend.app.modules.agent_runtime.event_stream.sink import AgentEventSink
 from production_backend.app.modules.agent_runtime.event_stream.transient import AgentTransientStream
-from production_backend.app.modules.agent_runtime.memory.service import AgentMemoryRepository, AgentMemoryService
-from production_backend.app.modules.agent_runtime.memory.actions import AGENT_MEMORY_CREATE_ACTION, AgentMemoryCreateActionHandler
 from production_backend.app.modules.agent_runtime.repository import AgentRuntimeRepository
 from production_backend.app.modules.agent_runtime.run_lifecycle.controls import AgentRunControls
 from production_backend.app.modules.audit import AuditService, IdempotencyService, OutboxService
@@ -123,7 +121,6 @@ async def run_outbox_worker(
                     audit_service=AuditService(repository=audit_repository),
                 )
                 agent_runtime_repository = AgentRuntimeRepository(session)
-                memory_service = AgentMemoryService(repository=AgentMemoryRepository(session))
                 worker = OutboxWorker(
                     service=OutboxService(repository=OutboxRepository(session)),
                     handlers=build_outbox_handlers(
@@ -144,7 +141,6 @@ async def run_outbox_worker(
                             PLAN_TASK_DELETE_ACTION: PlanTaskDeleteActionHandler(service=plans_service),
                             PLAN_DELETE_ACTION: PlanDeleteActionHandler(service=plans_service),
                             DIARY_ENTRY_UPSERT_ACTION: DiaryEntryUpsertActionHandler(service=diary_service),
-                            AGENT_MEMORY_CREATE_ACTION: AgentMemoryCreateActionHandler(service=memory_service),
                             FEEDING_RECORD_CREATE_ACTION: FeedingRecordCreateActionHandler(service=records_service),
                             PUMPING_RECORD_CREATE_ACTION: PumpingRecordCreateActionHandler(service=records_service),
                             FEEDING_RECORD_DELETE_ACTION: FeedingRecordDeleteActionHandler(service=records_service),

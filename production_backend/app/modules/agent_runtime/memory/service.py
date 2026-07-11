@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
@@ -8,12 +8,13 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ....core.errors import ApiError
-from ..models import MEMORY_TYPES, AgentMemory, AgentMemorySettings
+from ..models import MEMORY_TYPES, AgentMemory, AgentMemorySettings, AgentMemorySnapshot
 
 
 ALLOWED_MEMORY_SENSITIVITIES = frozenset({"normal", "personal"})
 BLOCKED_MEMORY_SENSITIVITIES = frozenset({"health", "child", "crisis", "regulated", "financial", "legal"})
 MAX_MEMORY_RETENTION_DAYS = 365
+MAX_RUNTIME_MEMORY_ITEMS = 5
 SENSITIVE_MEMORY_SUMMARY_TERMS = (
     "diagnosis",
     "diagnosed",
@@ -84,6 +85,28 @@ class AgentMemoryRepository:
         settings.updated_at = datetime.now(timezone.utc)
         await self.session.flush()
         return settings
+
+    async def get_memory_snapshot(self, *, owner_user_id: UUID) -> AgentMemorySnapshot | None:
+        return await self.session.get(AgentMemorySnapshot, owner_user_id)
+
+    async def upsert_memory_snapshot(
+        self,
+        *,
+        owner_user_id: UUID,
+        items: list[dict[str, Any]],
+        source_date: date | None = None,
+        extractor_version: str = "",
+    ) -> AgentMemorySnapshot:
+        snapshot = await self.get_memory_snapshot(owner_user_id=owner_user_id)
+        if snapshot is None:
+            snapshot = AgentMemorySnapshot(owner_user_id=owner_user_id)
+            self.session.add(snapshot)
+        snapshot.items = items
+        snapshot.source_date = source_date
+        snapshot.extractor_version = extractor_version.strip()
+        snapshot.updated_at = datetime.now(timezone.utc)
+        await self.session.flush()
+        return snapshot
 
     async def list_active_memories(
         self,
@@ -166,6 +189,37 @@ class AgentMemoryService:
             raise ApiError(code="validation_failed", message="limit must be between 1 and 100.", status=422)
         return await self.repository.list_active_memories(owner_user_id=owner_user_id, memory_type=memory_type, limit=limit)
 
+    async def get_runtime_snapshot(self, *, owner_user_id: UUID, limit: int = MAX_RUNTIME_MEMORY_ITEMS) -> list[dict[str, Any]]:
+        if limit < 1 or limit > MAX_RUNTIME_MEMORY_ITEMS:
+            raise ApiError(
+                code="validation_failed",
+                message=f"runtime memory snapshot limit must be between 1 and {MAX_RUNTIME_MEMORY_ITEMS}.",
+                status=422,
+            )
+        snapshot = await self.repository.get_memory_snapshot(owner_user_id=owner_user_id)
+        if snapshot is None or not isinstance(snapshot.items, list):
+            return []
+        return [item for item in (_runtime_snapshot_item(value) for value in snapshot.items[:limit]) if item is not None]
+
+    async def refresh_runtime_snapshot(
+        self,
+        *,
+        owner_user_id: UUID,
+        source_date: date | None = None,
+        extractor_version: str = "",
+    ) -> AgentMemorySnapshot:
+        memories = await self.repository.list_active_memories(
+            owner_user_id=owner_user_id,
+            memory_type=None,
+            limit=MAX_RUNTIME_MEMORY_ITEMS,
+        )
+        return await self.repository.upsert_memory_snapshot(
+            owner_user_id=owner_user_id,
+            items=[_snapshot_item(memory) for memory in memories],
+            source_date=source_date,
+            extractor_version=extractor_version,
+        )
+
     async def get_settings(self, *, owner_user_id: UUID) -> AgentMemorySettings:
         settings = await self.repository.get_memory_settings(owner_user_id=owner_user_id)
         if settings is not None:
@@ -175,7 +229,12 @@ class AgentMemoryService:
     async def update_settings(self, *, owner_user_id: UUID, memory_enabled: bool) -> AgentMemorySettings:
         if not isinstance(memory_enabled, bool):
             raise ApiError(code="validation_failed", message="memory_enabled must be a boolean.", status=422)
-        return await self.repository.upsert_memory_settings(owner_user_id=owner_user_id, memory_enabled=memory_enabled)
+        settings = await self.repository.upsert_memory_settings(owner_user_id=owner_user_id, memory_enabled=memory_enabled)
+        if memory_enabled:
+            await self.refresh_runtime_snapshot(owner_user_id=owner_user_id)
+        else:
+            await self.repository.upsert_memory_snapshot(owner_user_id=owner_user_id, items=[])
+        return settings
 
     async def is_memory_enabled(self, *, owner_user_id: UUID) -> bool:
         return (await self.get_settings(owner_user_id=owner_user_id)).memory_enabled
@@ -188,6 +247,7 @@ class AgentMemoryService:
         )
         if memory is None:
             raise ApiError(code="not_found", message="Agent memory not found.", status=404)
+        await self.refresh_runtime_snapshot(owner_user_id=owner_user_id)
         return memory
 
 
@@ -244,3 +304,24 @@ def _normalize_expires_at(expires_at: datetime | None) -> datetime | None:
 def _looks_sensitive_summary(summary: str) -> bool:
     normalized = " ".join(summary.lower().split())
     return any(term.lower() in normalized for term in SENSITIVE_MEMORY_SUMMARY_TERMS)
+
+
+def _snapshot_item(memory: AgentMemory) -> dict[str, Any]:
+    content = memory.content if isinstance(memory.content, dict) else {}
+    return {
+        "memory_id": str(memory.id),
+        "memory_key": str(memory.memory_key or ""),
+        "memory_type": memory.memory_type,
+        "summary": str(content.get("summary") or "").strip(),
+        "confidence_score": int(memory.confidence_score or 0),
+    }
+
+
+def _runtime_snapshot_item(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    memory_type = str(value.get("memory_type") or "").strip()
+    summary = str(value.get("summary") or "").strip()
+    if memory_type not in MEMORY_TYPES or not summary:
+        return None
+    return {"memory_type": memory_type, "summary": summary[:500]}

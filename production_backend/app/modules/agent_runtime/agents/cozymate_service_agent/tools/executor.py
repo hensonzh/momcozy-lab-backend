@@ -385,6 +385,5 @@ def _tool_event_label(tool_name: str) -> str:
         "hospital_bag_cart_update": "我先帮你调整待产包购物车～",
         "hospital_bag_pump_recommend": "我先帮你看看吸奶器型号～",
         "notifications.milk_reminder.propose": "奶量提醒草稿",
-        "memory.create.propose": "长期记忆草稿",
         "support.ticket.propose": "售后工单草稿",
     }.get(tool_name, "相关信息")

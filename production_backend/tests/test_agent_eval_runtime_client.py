@@ -19,7 +19,7 @@ def test_agent_eval_runtime_client_executes_run_and_evaluates_seed_case() -> Non
         thread_id=thread_id,
         run_id=run.id,
         role="user",
-        text="Please remember that I prefer concise evening reminders.",
+        text="Save that I felt calm in today's pregnancy diary.",
         sequence=1,
     )
     repository = FakeEvalRuntimeRepository(
@@ -30,8 +30,8 @@ def test_agent_eval_runtime_client_executes_run_and_evaluates_seed_case() -> Non
             AgentToolCall(
                 id=uuid4(),
                 run_id=run.id,
-                tool_name="memory.create.propose",
-                call_id="call-memory",
+                tool_name="diary.entry_upsert.propose",
+                call_id="call-diary",
                 status="completed",
                 safe_args={},
                 error_code="",
@@ -43,31 +43,42 @@ def test_agent_eval_runtime_client_executes_run_and_evaluates_seed_case() -> Non
             scripted_sdk_response(
                 action_proposals=(
                     {
-                        "action_type": "agent.memory.create",
-                        "target_type": "agent_memory",
+                        "action_type": "diary.entry.upsert",
+                        "target_type": "pregnancy_diary_entry",
                         "side_effect_level": "medium",
-                        "preview_payload": {"summary": "Prefers concise evening reminders"},
+                        "preview_payload": {"entry_date": "2026-07-11", "fields": ["mood"]},
                         "apply_payload": {
-                            "memory_type": "communication_preference",
-                            "content": {"summary": "Prefers concise evening reminders"},
+                            "entry_date": "2026-07-11",
+                            "values": {"mood": "calm"},
                         },
-                        "idempotency_key": "idem-memory",
+                        "idempotency_key": "idem-diary",
                     },
                 )
             )
         ]
     )
     executor = AgentRuntimeExecutor(repository=repository, sdk_runner=OpenAIAgentsSdkRunner(backend=backend))
-    case = _case("memory_preference_capture")
+    case = {
+        "suite": "runtime_trace_collection",
+        "name": "supported action trace",
+        "expected_tool_calls": [{"contract": "diary.entry_upsert.propose"}],
+        "forbidden_tool_calls": [],
+        "expected_safety_decision": "allow",
+        "expected_behavior": {
+            "service_skill_id": "cozymate_service_agent",
+            "requires_confirmation_before_write": True,
+            "must_not": [],
+        },
+    }
 
     result = asyncio.run(AgentEvalRuntimeClient(executor=executor, repository=repository).execute_case(run=run, case=case))
 
     assert result.execution_result.status == "waiting_for_confirmation"
     assert result.eval_result.passed is True
     assert result.trace.service_skill_id == "cozymate_service_agent"
-    assert result.trace.tool_calls[0]["tool_name"] == "memory.create.propose"
+    assert result.trace.tool_calls[0]["tool_name"] == "diary.entry_upsert.propose"
     assert any(event["type"] == "action.confirmation_required" for event in result.trace.events)
-    assert result.trace.actions[0]["action_type"] == "agent.memory.create"
+    assert result.trace.actions[0]["action_type"] == "diary.entry.upsert"
 
 
 class FakeEvalRuntimeRepository:

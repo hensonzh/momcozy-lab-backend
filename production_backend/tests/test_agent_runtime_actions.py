@@ -7,7 +7,6 @@ import pytest
 from production_backend.app.core.errors import ApiError
 from production_backend.app.modules.audit.models import OutboxJob
 from production_backend.app.modules.agent_runtime.actions.outbox import AgentActionOutboxHandler
-from production_backend.app.modules.agent_runtime.memory.actions import AGENT_MEMORY_CREATE_ACTION
 from production_backend.app.modules.agent_runtime.models import AgentAction
 from production_backend.app.modules.agent_runtime.service import AGENT_ACTION_APPLY_JOB, AgentRuntimeService
 from production_backend.app.modules.plans.agent_actions import PREGNANCY_PLAN_CREATE_ACTION, PregnancyPlanCreateActionHandler
@@ -421,50 +420,6 @@ def test_agent_runtime_actions_accept_diary_entry_upsert_policy() -> None:
     assert outbox_service.enqueue_kwargs["payload"]["apply_payload"] == {
         "entry_date": "2026-07-04",
         "values": {"content": "Today I felt steady."},
-    }
-
-
-def test_agent_runtime_actions_accept_memory_create_policy() -> None:
-    owner_user_id = uuid4()
-    repository = FakeActionRepository()
-    outbox_service = FakeOutboxService()
-    service = AgentRuntimeService(repository=repository, outbox_service=outbox_service)
-    run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Remember my preference"))
-
-    action = asyncio.run(
-        service.propose_action(
-            owner_user_id=owner_user_id,
-            run_id=run.id,
-            action_type=AGENT_MEMORY_CREATE_ACTION,
-            target_type="agent_memory",
-            side_effect_level="medium",
-            preview_payload={
-                "memory_type": "communication_preference",
-                "summary": "Prefers concise reminders",
-            },
-            apply_payload={
-                "memory_type": "communication_preference",
-                "content": {"summary": "Prefers concise reminders"},
-                "confidence_score": 80,
-            },
-        )
-    )
-    run.status = "waiting_for_confirmation"
-
-    confirmed = asyncio.run(service.confirm_action(owner_user_id=owner_user_id, action_id=action.id))
-
-    assert confirmed.status == "confirmed"
-    assert confirmed.action_type == AGENT_MEMORY_CREATE_ACTION
-    assert confirmed.target_type == "agent_memory"
-    assert confirmed.side_effect_level == "medium"
-    assert repository.events[-2].payload["action_type"] == AGENT_MEMORY_CREATE_ACTION
-    assert repository.events[-2].payload["target_type"] == "agent_memory"
-    assert repository.events[-1].event_type == "action.queued"
-    assert repository.events[-1].payload["action_status"] == "confirmed"
-    assert outbox_service.enqueue_kwargs["payload"]["apply_payload"] == {
-        "memory_type": "communication_preference",
-        "content": {"summary": "Prefers concise reminders"},
-        "confidence_score": 80,
     }
 
 

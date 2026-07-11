@@ -14,7 +14,6 @@ from .agents.cozymate_service_agent.skill_registry import (
     AgentServiceSkillRegistry,
     default_service_skill_registry,
 )
-from .memory.actions import AGENT_MEMORY_CREATE_ACTION, AgentMemoryCreateActionHandler
 from .memory.service import AgentMemoryRepository, AgentMemoryService
 from .models import (
     AgentAction,
@@ -25,6 +24,7 @@ from .models import (
     AgentEvent,
     AgentMemory,
     AgentMemorySettings,
+    AgentMemorySnapshot,
     AgentMessage,
     AgentRun,
     AgentSafetyEvent,
@@ -40,7 +40,6 @@ from .run_lifecycle.state_store import AgentRuntimeStateStore
 
 __all__ = [
     "AgentAction",
-    "AGENT_MEMORY_CREATE_ACTION",
     "AgentActionPolicy",
     "AgentActionPolicyDecision",
     "AgentActionPolicyRule",
@@ -54,7 +53,7 @@ __all__ = [
     "AgentGraphCheckpointStore",
     "AgentMemory",
     "AgentMemorySettings",
-    "AgentMemoryCreateActionHandler",
+    "AgentMemorySnapshot",
     "AgentMemoryRepository",
     "AgentMemoryService",
     "AgentRunControls",

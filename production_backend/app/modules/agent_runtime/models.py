@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint, func, text
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint, func, text
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -468,6 +468,7 @@ class AgentRunSummary(Base):
 class AgentMemory(Base):
     __tablename__ = "agent_memories"
     __table_args__ = (
+        UniqueConstraint("owner_user_id", "memory_key", name="uq_agent_memories_owner_memory_key"),
         Index("ix_agent_memories_owner_type_status", "owner_user_id", "memory_type", "status"),
         Index("ix_agent_memories_owner_updated", "owner_user_id", "updated_at"),
         Index("ix_agent_memories_source_run", "source_run_id"),
@@ -476,6 +477,7 @@ class AgentMemory(Base):
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
     owner_user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    memory_key: Mapped[str | None] = mapped_column(String(120), nullable=True)
     source_run_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("agent_runs.id"), nullable=True)
     source_message_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("agent_messages.id"), nullable=True)
     memory_type: Mapped[str] = mapped_column(String(80), nullable=False)
@@ -506,6 +508,28 @@ class AgentMemorySettings(Base):
 
     owner_user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id"), primary_key=True)
     memory_enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("true"), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+
+class AgentMemorySnapshot(Base):
+    __tablename__ = "agent_memory_snapshots"
+
+    owner_user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id"), primary_key=True)
+    schema_version: Mapped[str] = mapped_column(String(80), default="v1", server_default="v1", nullable=False)
+    items: Mapped[list[Any]] = mapped_column(
+        "items_json",
+        postgresql.JSONB,
+        default=list,
+        server_default=text("'[]'::jsonb"),
+        nullable=False,
+    )
+    source_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    extractor_version: Mapped[str] = mapped_column(String(80), default="", server_default="", nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

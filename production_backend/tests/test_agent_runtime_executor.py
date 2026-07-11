@@ -12,7 +12,6 @@ from production_backend.app.modules.agent_runtime.models import (
     AgentAction,
     AgentArtifact,
     AgentEvent,
-    AgentMemory,
     AgentMessage,
     AgentRun,
     AgentRunSummary,
@@ -139,7 +138,7 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result(capl
     assert "model_reasoning" in timing_payloads[-1]["timings_ms"]
 
 
-def test_agent_runtime_executor_projects_active_memory_into_dynamic_context() -> None:
+def test_agent_runtime_executor_projects_precomputed_memory_snapshot_into_dynamic_context() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)
     current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="How should you remind me?", sequence=1)
@@ -147,16 +146,11 @@ def test_agent_runtime_executor_projects_active_memory_into_dynamic_context() ->
     backend = CapturingSdkBackend(result=SdkNodeResult(final_text="I will keep reminders concise."))
     state_store = FakeStateStore()
     memory_service = FakeMemoryService(
-        memories=[
-            AgentMemory(
-                id=uuid4(),
-                owner_user_id=run.actor_user_id,
-                memory_type="communication_preference",
-                content={"summary": "Prefers concise reminders", "raw_evidence": "do not project this"},
-                confidence_score=90,
-                status="active",
-                updated_at=datetime(2026, 7, 4, 8, 30, tzinfo=timezone.utc),
-            )
+        snapshot=[
+            {
+                "memory_type": "communication_preference",
+                "summary": "Prefers concise reminders",
+            }
         ]
     )
 
@@ -171,17 +165,13 @@ def test_agent_runtime_executor_projects_active_memory_into_dynamic_context() ->
 
     memory_facts = _runtime_context(backend.requests[0])["memory"]
     assert result.status == "completed"
-    assert memory_service.calls == [{"owner_user_id": run.actor_user_id, "memory_type": None, "limit": 5}]
+    assert memory_service.calls == [{"owner_user_id": run.actor_user_id, "limit": 5}]
     assert memory_facts == [
         {
-            "memory_id": str(memory_service.memories[0].id),
             "memory_type": "communication_preference",
             "summary": "Prefers concise reminders",
-            "confidence_score": 90,
-            "updated_at": "2026-07-04T08:30:00+00:00",
         }
     ]
-    assert "raw_evidence" not in memory_facts[0]
     assert state_store.projections == []
 
 
@@ -191,7 +181,7 @@ def test_agent_runtime_executor_loads_base_context_without_parallel_shared_sessi
     current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="Hello", sequence=1)
     session_guard = FakeSharedSessionGuard()
     repository = SessionGuardedRuntimeRepository(messages=[current_user], current_message=current_user, session_guard=session_guard)
-    memory_service = SessionGuardedMemoryService(memories=[], session_guard=session_guard)
+    memory_service = SessionGuardedMemoryService(snapshot=[], session_guard=session_guard)
     backend = CapturingSdkBackend(result=SdkNodeResult(final_text="Hello."))
 
     result = asyncio.run(
@@ -206,7 +196,7 @@ def test_agent_runtime_executor_loads_base_context_without_parallel_shared_sessi
     assert session_guard.calls[:4] == [
         "current_message",
         "thread_messages",
-        "memory_projection",
+        "memory_snapshot",
         "recent_run_summaries",
     ]
 
@@ -2258,29 +2248,28 @@ class FakeStateStore:
 
 
 class FakeMemoryService:
-    def __init__(self, *, memories: list[AgentMemory]) -> None:
-        self.memories = memories
+    def __init__(self, *, snapshot: list[dict[str, Any]]) -> None:
+        self.snapshot = snapshot
         self.calls = []
 
-    async def list_active_memories(self, *, owner_user_id, memory_type=None, limit=20):
-        self.calls.append({"owner_user_id": owner_user_id, "memory_type": memory_type, "limit": limit})
-        return [memory for memory in self.memories if memory.owner_user_id == owner_user_id and memory.status == "active"][:limit]
+    async def get_runtime_snapshot(self, *, owner_user_id, limit=5):
+        self.calls.append({"owner_user_id": owner_user_id, "limit": limit})
+        return self.snapshot[:limit]
 
 
 class SessionGuardedMemoryService(FakeMemoryService):
-    def __init__(self, *, memories: list[AgentMemory], session_guard: FakeSharedSessionGuard) -> None:
-        super().__init__(memories=memories)
+    def __init__(self, *, snapshot: list[dict[str, Any]], session_guard: FakeSharedSessionGuard) -> None:
+        super().__init__(snapshot=snapshot)
         self.session_guard = session_guard
 
-    async def list_active_memories(self, *, owner_user_id, memory_type=None, limit=20):
-        async def load_memories():
-            return await super(SessionGuardedMemoryService, self).list_active_memories(
+    async def get_runtime_snapshot(self, *, owner_user_id, limit=5):
+        async def load_snapshot():
+            return await super(SessionGuardedMemoryService, self).get_runtime_snapshot(
                 owner_user_id=owner_user_id,
-                memory_type=memory_type,
                 limit=limit,
             )
 
-        return await self.session_guard.run("memory_projection", load_memories)
+        return await self.session_guard.run("memory_snapshot", load_snapshot)
 
 
 class FakeBusinessFactsProjector:

@@ -220,47 +220,6 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "idempotency_key": {"type": "string", "maxLength": 255},
         },
     },
-    "MemoryCreateProposalCreate": {
-        "title": "MemoryCreateProposalCreate",
-        "type": "object",
-        "additionalProperties": False,
-        "required": ["memory_type", "content"],
-        "properties": {
-            "memory_type": {
-                "type": "string",
-                "enum": [
-                    "user_preference",
-                    "stable_care_preference",
-                    "communication_preference",
-                    "recurring_constraint",
-                ],
-            },
-            "content": {
-                "type": "object",
-                "additionalProperties": True,
-                "required": ["summary"],
-                "properties": {
-                    "summary": {"type": "string", "minLength": 1, "maxLength": 500},
-                },
-            },
-            "confidence_score": {"type": "integer", "minimum": 0, "maximum": 100, "default": 0},
-            "sensitivity": {
-                "type": "string",
-                "enum": ["normal", "personal", "health", "child", "crisis", "regulated", "financial", "legal"],
-                "default": "normal",
-                "description": "拟写入记忆的敏感度分类；高敏感类型会被策略门控。",
-            },
-            "expires_in_days": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 365,
-                "description": "短期记忆记录的可选有效天数。",
-            },
-            "locale": {"type": "string", "maxLength": 35},
-            "timezone": {"type": "string", "maxLength": 80},
-            "idempotency_key": {"type": "string", "maxLength": 255},
-        },
-    },
     "DevicesPumpStatusQuery": {
         "title": "DevicesPumpStatusQuery",
         "type": "object",

@@ -6,7 +6,7 @@ import pytest
 
 from production_backend.app.core.errors import ApiError
 from production_backend.app.modules.agent_runtime.memory.service import AgentMemoryService
-from production_backend.app.modules.agent_runtime.models import AgentMemory, AgentMemorySettings
+from production_backend.app.modules.agent_runtime.models import AgentMemory, AgentMemorySettings, AgentMemorySnapshot
 
 
 def test_agent_memory_service_creates_owner_scoped_memory() -> None:
@@ -48,6 +48,35 @@ def test_agent_memory_service_lists_and_archives_active_memories() -> None:
     assert memories == [memory]
     assert archived.status == "archived"
     assert archived.archived_at is not None
+
+
+def test_agent_memory_service_reads_only_minimal_precomputed_runtime_snapshot() -> None:
+    owner_user_id = uuid4()
+    repository = FakeMemoryRepository()
+    repository.snapshots_by_owner[owner_user_id] = AgentMemorySnapshot(
+        owner_user_id=owner_user_id,
+        items=[
+            {
+                "memory_id": str(uuid4()),
+                "memory_key": "communication.reminder_style",
+                "memory_type": "communication_preference",
+                "summary": "Prefers concise reminders",
+                "confidence_score": 90,
+            }
+        ],
+    )
+    service = AgentMemoryService(repository=repository)
+
+    snapshot = asyncio.run(service.get_runtime_snapshot(owner_user_id=owner_user_id, limit=5))
+
+    assert snapshot == [
+        {
+            "memory_type": "communication_preference",
+            "summary": "Prefers concise reminders",
+        }
+    ]
+    assert repository.snapshot_reads == 1
+    assert repository.settings_reads == 0
 
 
 def test_agent_memory_service_rejects_unsupported_type_and_empty_content() -> None:
@@ -157,6 +186,7 @@ def test_agent_memory_service_settings_disable_writes_and_runtime_projection() -
 
     assert default_settings.memory_enabled is True
     assert disabled_settings.memory_enabled is False
+    assert repository.snapshots_by_owner[owner_user_id].items == []
     assert projected == []
     assert len(management_list) == 1
     assert create_exc.value.code == "memory_disabled"
@@ -174,8 +204,12 @@ class FakeMemoryRepository:
         self.memories: list[AgentMemory] = []
         self.create_kwargs = {}
         self.settings_by_owner: dict[UUID, AgentMemorySettings] = {}
+        self.snapshots_by_owner: dict[UUID, AgentMemorySnapshot] = {}
+        self.settings_reads = 0
+        self.snapshot_reads = 0
 
     async def get_memory_settings(self, *, owner_user_id):
+        self.settings_reads += 1
         return self.settings_by_owner.get(owner_user_id)
 
     async def upsert_memory_settings(self, *, owner_user_id, memory_enabled):
@@ -222,3 +256,18 @@ class FakeMemoryRepository:
                 memory.archived_at = archived_at
                 return memory
         return None
+
+    async def get_memory_snapshot(self, *, owner_user_id):
+        self.snapshot_reads += 1
+        return self.snapshots_by_owner.get(owner_user_id)
+
+    async def upsert_memory_snapshot(self, *, owner_user_id, items, source_date=None, extractor_version=""):
+        snapshot = self.snapshots_by_owner.get(owner_user_id)
+        if snapshot is None:
+            snapshot = AgentMemorySnapshot(owner_user_id=owner_user_id)
+            self.snapshots_by_owner[owner_user_id] = snapshot
+        snapshot.items = items
+        snapshot.source_date = source_date
+        snapshot.extractor_version = extractor_version
+        snapshot.updated_at = datetime.now(timezone.utc)
+        return snapshot
