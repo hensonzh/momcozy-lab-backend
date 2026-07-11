@@ -81,7 +81,6 @@ SCENARIO_NAMESPACE_DEFINITIONS: tuple[ToolNamespace, ...] = (
         name="birth_prep",
         description="孕期计划、分娩沟通、待产包表单与待产包卡片工具包。",
         tool_contracts=(
-            "pregnancy.plan_context.read",
             "pregnancy.plan_create.propose",
             "plans.plan_delete.propose",
             "plans.task_update.propose",
@@ -114,35 +113,13 @@ SCENARIO_NAMESPACE_DEFINITIONS: tuple[ToolNamespace, ...] = (
     ),
     ToolNamespace(
         name="health_consultation",
-        description="健康咨询中用于读取近期日记、提出日记记录和创建 IBCLC 咨询卡片的工具包。",
+        description="健康咨询中用于提出日记记录和创建 IBCLC 咨询卡片的工具包。",
         tool_contracts=(
-            "diary.recent.read",
             "diary.entry_upsert.propose",
             "ibclc_consult_card_create",
         ),
     ),
-    ToolNamespace(
-        name="emotion_support",
-        description="情绪支持中用于提出长期记忆沉淀的工具包。",
-        tool_contracts=("memory.create.propose",),
-    ),
 )
-EAGER_READ_CONTRACTS = frozenset(
-    {
-        "records.milk_status.read",
-        "records.milk_analysis.read",
-        "records.milk_summary.read",
-        "records.growth.read",
-        "plans.calendar.read",
-        "plans.current.read",
-        "diary.recent.read",
-        "pregnancy.plan_context.read",
-        "devices.pump_status.read",
-        "devices.guidance_assets.read",
-    }
-)
-
-
 def default_tool_namespace_registry(tool_registry: ToolContractRegistry | None = None) -> ToolNamespaceRegistry:
     registry = tool_registry or _default_tool_registry()
     registered_names = set(registry.names_for_sdk())
@@ -175,9 +152,7 @@ def _scenario_namespace(*, namespace: ToolNamespace, registry: ToolContractRegis
 
 
 def _defer_loading(contract: ToolContract) -> bool:
-    if contract.name in EAGER_READ_CONTRACTS:
-        return False
-    return True
+    return contract.loading_mode == "deferred"
 
 
 def _default_tool_registry() -> ToolContractRegistry:

@@ -437,11 +437,9 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
         "load_service_skill",
         "birth_journey_plan_card_create",
         "birth_plan_form_create",
-        "business_context_read",
         "devices_guidance_assets_read",
         "devices_pump_status_read",
         "diary_entry_upsert_propose",
-        "diary_recent_read",
         "files_vision_summary_read",
         "hospital_bag_card_create",
         "hospital_bag_cart_update",
@@ -449,7 +447,6 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
         "hospital_bag_pump_recommend",
         "ibclc_consult_card_create",
         "labor_communication_card_create",
-        "memory_create_propose",
         "notifications_milk_reminder_propose",
         "plans_calendar_read",
         "plans_current_read",
@@ -460,7 +457,6 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
         "plans_task_create_propose",
         "plans_task_delete_propose",
         "plans_task_update_propose",
-        "pregnancy_plan_context_read",
         "pregnancy_plan_create_propose",
         "profile_read",
         "profile_update",
@@ -480,20 +476,14 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert backend.tool_schemas["hospital_bag_card_create"]["additionalProperties"] is True
     assert backend.tool_schemas["hospital_bag_card_create"]["properties"]["confirmed_form_data"]["type"] == "object"
     assert backend.tool_schemas["hospital_bag_cart_update"]["properties"]["groups"]["type"] == "array"
-    assert backend.tool_schemas["business_context_read"]["properties"]["limit"]["maximum"] == 20
     assert backend.tool_schemas["devices_guidance_assets_read"]["properties"]["limit"]["maximum"] == 20
     assert backend.tool_schemas["devices_guidance_assets_read"]["properties"]["content_type"]["type"] == "string"
     assert backend.tool_schemas["devices_pump_status_read"]["properties"]["limit"]["maximum"] == 20
     assert backend.tool_schemas["diary_entry_upsert_propose"]["required"] == ["entry_date"]
     assert backend.tool_schemas["diary_entry_upsert_propose"]["properties"]["content"]["maxLength"] == 5000
-    assert backend.tool_schemas["diary_recent_read"]["properties"]["limit"]["maximum"] == 20
     assert backend.tool_schemas["files_vision_summary_read"]["required"] == ["file_id"]
     assert backend.tool_schemas["hospital_bag_cart_update"]["additionalProperties"] is True
     assert backend.tool_schemas["hospital_bag_cart_update"]["properties"]["groups"]["type"] == "array"
-    assert backend.tool_schemas["memory_create_propose"]["required"] == ["memory_type", "content"]
-    assert backend.tool_schemas["memory_create_propose"]["properties"]["content"]["required"] == ["summary"]
-    assert "health" in backend.tool_schemas["memory_create_propose"]["properties"]["sensitivity"]["enum"]
-    assert backend.tool_schemas["memory_create_propose"]["properties"]["expires_in_days"]["maximum"] == 365
     assert backend.tool_schemas["notifications_milk_reminder_propose"]["required"] == ["title"]
     assert backend.tool_schemas["plans_calendar_read"]["properties"]["task_date"]["maxLength"] == 20
     assert backend.tool_schemas["plans_current_read"]["properties"]["limit"]["maximum"] == 20
@@ -505,7 +495,6 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert backend.tool_schemas["plans_task_create_propose"]["required"] == ["title"]
     assert backend.tool_schemas["plans_task_delete_propose"]["required"] == ["task_id"]
     assert backend.tool_schemas["plans_task_update_propose"]["required"] == ["task_id"]
-    assert backend.tool_schemas["pregnancy_plan_context_read"]["properties"]["limit"]["maximum"] == 20
     assert backend.tool_schemas["pregnancy_plan_create_propose"]["required"] == ["title"]
     assert backend.tool_schemas["profile_read"]["additionalProperties"] is False
     assert backend.tool_schemas["profile_read"]["properties"] == {}
@@ -565,7 +554,6 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     ]
     assert backend.tool_namespace_by_contract["profile.read"] == ""
     assert backend.tool_namespace_by_contract["profile_update"] == ""
-    assert backend.tool_namespace_by_contract["business.context.read"] == ""
     assert backend.tool_namespace_by_contract["files.vision_summary.read"] == ""
     assert backend.tool_namespace_by_contract["records.milk_status.read"] == "milk_management"
     assert backend.tool_deferred_by_contract["records.milk_status.read"] is False

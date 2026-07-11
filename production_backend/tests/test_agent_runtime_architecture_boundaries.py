@@ -340,182 +340,61 @@ def test_service_skills_capture_legacy_domain_flow_semantics() -> None:
     assert "当前没有情绪支持专用工具" in safety
 
 
-def test_tool_contract_registry_declares_permission_confirmation_and_blocking_policy() -> None:
+def test_tool_contract_registry_contains_only_model_visible_tools_and_loading_policy() -> None:
     registry = default_tool_registry()
+    registered_names = set(registry.names_for_sdk())
     support_ticket = registry.get("support.ticket.propose")
-    business_context = registry.get("business.context.read")
+    milk_status = registry.get("records.milk_status.read")
 
+    assert registered_names.isdisjoint(
+        {
+            "business.context.read",
+            "diary.recent.read",
+            "pregnancy.plan_context.read",
+            "memory.create.propose",
+        }
+    )
+    assert {contract.loading_mode for contract in registry.list()} == {"eager", "deferred"}
+    assert set(registry.eager_names()).isdisjoint(registry.deferred_names())
+    assert set(registry.eager_names()) | set(registry.deferred_names()) == registered_names
+    assert registry.get("load_service_skill").loading_mode == "eager"
+    assert milk_status.loading_mode == "eager"
+    assert support_ticket.loading_mode == "deferred"
     assert support_ticket.read_or_write == "write"
-    assert support_ticket.owner_scope == "actor"
     assert support_ticket.requires_confirmation is True
     assert support_ticket.blocking_policy == "wait_for_confirmation"
-    assert business_context.read_or_write == "read"
-    assert business_context.requires_confirmation is False
-    assert business_context.audit_required is False
-    milk_summary = registry.get("records.milk_summary.read")
-    assert milk_summary.read_or_write == "read"
-    assert milk_summary.owner_scope == "actor"
-    assert milk_summary.requires_confirmation is False
-    milk_status = registry.get("records.milk_status.read")
     assert milk_status.read_or_write == "read"
-    assert milk_status.owner_scope == "actor"
     assert milk_status.requires_confirmation is False
     assert milk_status.blocking_policy == "must_wait"
-    milk_analysis = registry.get("records.milk_analysis.read")
-    growth_read = registry.get("records.growth.read")
-    feeding_proposal = registry.get("records.feeding_record.propose")
-    pumping_proposal = registry.get("records.pumping_record.propose")
-    feeding_delete = registry.get("records.feeding_record_delete.propose")
-    pumping_delete = registry.get("records.pumping_record_delete.propose")
-    growth_proposal = registry.get("records.growth_record.propose")
-    growth_update = registry.get("records.growth_record_update.propose")
-    growth_delete = registry.get("records.growth_record_delete.propose")
-    milk_plan_proposal = registry.get("plans.milk_plan.propose")
-    milk_plan_preview = registry.get("plans.milk_plan_preview.create")
-    pregnancy_plan_proposal = registry.get("pregnancy.plan_create.propose")
-    calendar_read = registry.get("plans.calendar.read")
-    task_create_proposal = registry.get("plans.task_create.propose")
-    task_complete_proposal = registry.get("plans.task_complete.propose")
-    task_update_proposal = registry.get("plans.task_update.propose")
-    task_delete_proposal = registry.get("plans.task_delete.propose")
-    plan_delete_proposal = registry.get("plans.plan_delete.propose")
-    milk_reminder_proposal = registry.get("notifications.milk_reminder.propose")
-    diary_entry_proposal = registry.get("diary.entry_upsert.propose")
-    memory_create_proposal = registry.get("memory.create.propose")
-    hospital_bag_artifact = registry.get("hospital_bag_card_create")
-    ibclc_artifact = registry.get("ibclc_consult_card_create")
-    labor_communication_artifact = registry.get("labor_communication_card_create")
-    assert milk_analysis.read_or_write == "read"
-    assert milk_analysis.requires_confirmation is False
-    assert growth_read.read_or_write == "read"
-    assert growth_read.required_permission == "business_context:read:self"
-    assert feeding_proposal.read_or_write == "write"
-    assert feeding_proposal.requires_confirmation is False
-    assert feeding_proposal.blocking_policy == "enqueue_and_continue"
-    assert feeding_proposal.side_effect_level == "low"
-    assert feeding_proposal.required_permission == "records:write:self"
-    assert pumping_proposal.read_or_write == "write"
-    assert pumping_proposal.requires_confirmation is False
-    assert pumping_proposal.blocking_policy == "enqueue_and_continue"
-    assert pumping_proposal.required_permission == "records:write:self"
-    assert feeding_delete.requires_confirmation is True
-    assert feeding_delete.side_effect_level == "medium"
-    assert pumping_delete.requires_confirmation is True
-    assert growth_proposal.requires_confirmation is False
-    assert growth_proposal.blocking_policy == "enqueue_and_continue"
-    assert growth_update.requires_confirmation is True
-    assert growth_delete.requires_confirmation is True
-    assert milk_plan_proposal.read_or_write == "write"
-    assert milk_plan_proposal.requires_confirmation is True
-    assert milk_plan_proposal.side_effect_level == "medium"
-    assert milk_plan_proposal.required_permission == "plans:write:self"
-    assert milk_plan_preview.read_or_write == "write"
-    assert milk_plan_preview.requires_confirmation is False
-    assert milk_plan_preview.required_permission == "agent_artifact:create:self"
-    assert calendar_read.read_or_write == "read"
-    assert calendar_read.required_permission == "business_context:read:self"
-    assert pregnancy_plan_proposal.read_or_write == "write"
-    assert pregnancy_plan_proposal.requires_confirmation is True
-    assert pregnancy_plan_proposal.required_permission == "plans:write:self"
-    assert task_create_proposal.read_or_write == "write"
-    assert task_create_proposal.requires_confirmation is True
-    assert task_create_proposal.required_permission == "plans:write:self"
-    assert task_complete_proposal.read_or_write == "write"
-    assert task_complete_proposal.requires_confirmation is True
-    assert task_complete_proposal.required_permission == "plans:write:self"
-    assert task_update_proposal.requires_confirmation is True
-    assert task_update_proposal.side_effect_level == "medium"
-    assert task_delete_proposal.requires_confirmation is True
-    assert plan_delete_proposal.requires_confirmation is True
-    assert milk_reminder_proposal.read_or_write == "write"
-    assert milk_reminder_proposal.requires_confirmation is True
-    assert milk_reminder_proposal.side_effect_level == "medium"
-    assert milk_reminder_proposal.required_permission == "notifications:create:self"
-    assert diary_entry_proposal.read_or_write == "write"
-    assert diary_entry_proposal.requires_confirmation is True
-    assert diary_entry_proposal.side_effect_level == "medium"
-    assert diary_entry_proposal.required_permission == "diary:write:self"
-    assert memory_create_proposal.read_or_write == "write"
-    assert memory_create_proposal.owner_scope == "actor"
-    assert memory_create_proposal.requires_confirmation is True
-    assert memory_create_proposal.side_effect_level == "medium"
-    assert memory_create_proposal.required_permission == "memory:write:self"
-    assert hospital_bag_artifact.read_or_write == "write"
-    assert hospital_bag_artifact.owner_scope == "actor"
-    assert hospital_bag_artifact.requires_confirmation is False
-    assert hospital_bag_artifact.side_effect_level == "low"
-    assert hospital_bag_artifact.result_dependency == "final_response"
-    assert hospital_bag_artifact.required_permission == "agent_artifact:create:self"
-    assert ibclc_artifact.read_or_write == "write"
-    assert ibclc_artifact.requires_confirmation is False
-    assert ibclc_artifact.required_permission == "agent_artifact:create:self"
-    assert labor_communication_artifact.required_permission == "agent_artifact:create:self"
-    assert "profile.read" in registry.names_for_sdk()
-    assert "profile_update" in registry.names_for_sdk()
-    assert "business.context.read" in registry.names_for_sdk()
-    profile_update = registry.get("profile_update")
-    plans_current = registry.get("plans.current.read")
-    diary_recent = registry.get("diary.recent.read")
-    pregnancy_context = registry.get("pregnancy.plan_context.read")
-    device_status = registry.get("devices.pump_status.read")
-    device_guidance_assets = registry.get("devices.guidance_assets.read")
-    file_vision = registry.get("files.vision_summary.read")
-    assert profile_update.read_or_write == "write"
-    assert profile_update.owner_scope == "actor"
-    assert profile_update.required_permission == "profile:write:self"
-    assert profile_update.requires_confirmation is False
-    assert profile_update.audit_required is True
-    assert plans_current.read_or_write == "read"
-    assert plans_current.owner_scope == "actor"
-    assert plans_current.requires_confirmation is False
-    assert diary_recent.read_or_write == "read"
-    assert diary_recent.owner_scope == "actor"
-    assert diary_recent.requires_confirmation is False
-    assert pregnancy_context.read_or_write == "read"
-    assert pregnancy_context.owner_scope == "actor"
-    assert pregnancy_context.required_permission == "business_context:read:self"
-    assert pregnancy_context.requires_confirmation is False
-    assert device_status.read_or_write == "read"
-    assert device_status.owner_scope == "actor"
-    assert device_status.requires_confirmation is False
-    assert device_guidance_assets.read_or_write == "read"
-    assert device_guidance_assets.owner_scope == "actor"
-    assert device_guidance_assets.requires_confirmation is False
-    assert file_vision.read_or_write == "read"
-    assert file_vision.owner_scope == "actor"
-    assert file_vision.required_permission == "files:read:self"
-    assert file_vision.requires_confirmation is False
-    assert "records.milk_summary.read" in registry.names_for_sdk()
-    assert "records.milk_status.read" in registry.names_for_sdk()
-    assert "records.milk_analysis.read" in registry.names_for_sdk()
-    assert "records.growth.read" in registry.names_for_sdk()
-    assert "records.growth_record.propose" in registry.names_for_sdk()
-    assert "records.growth_record_update.propose" in registry.names_for_sdk()
-    assert "records.growth_record_delete.propose" in registry.names_for_sdk()
-    assert "records.feeding_record_delete.propose" in registry.names_for_sdk()
-    assert "records.pumping_record_delete.propose" in registry.names_for_sdk()
-    assert "plans.calendar.read" in registry.names_for_sdk()
-    assert "plans.current.read" in registry.names_for_sdk()
-    assert "diary.recent.read" in registry.names_for_sdk()
-    assert "diary.entry_upsert.propose" in registry.names_for_sdk()
-    assert "memory.create.propose" in registry.names_for_sdk()
-    assert "devices.guidance_assets.read" in registry.names_for_sdk()
-    assert "pregnancy.plan_context.read" in registry.names_for_sdk()
-    assert "pregnancy.plan_create.propose" in registry.names_for_sdk()
-    assert "plans.task_create.propose" in registry.names_for_sdk()
-    assert "plans.task_complete.propose" in registry.names_for_sdk()
-    assert "plans.task_update.propose" in registry.names_for_sdk()
-    assert "plans.task_delete.propose" in registry.names_for_sdk()
-    assert "plans.plan_delete.propose" in registry.names_for_sdk()
-    assert "plans.milk_plan_preview.create" in registry.names_for_sdk()
-    assert "devices.pump_status.read" in registry.names_for_sdk()
-    assert "files.vision_summary.read" in registry.names_for_sdk()
-    assert "hospital_bag_form_create" in registry.names_for_sdk()
-    assert "hospital_bag_card_create" in registry.names_for_sdk()
-    assert "hospital_bag_cart_update" in registry.names_for_sdk()
-    assert "birth_plan_form_create" in registry.names_for_sdk()
-    assert "labor_communication_card_create" in registry.names_for_sdk()
-    assert "ibclc_consult_card_create" in registry.names_for_sdk()
+    for contract in registry.list():
+        assert not hasattr(contract, "required_permission")
+        assert not hasattr(contract, "owner_scope")
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "read_or_write", "requires_confirmation", "loading_mode"),
+    [
+        ("profile_update", "write", False, "eager"),
+        ("records.milk_status.read", "read", False, "eager"),
+        ("records.feeding_record.propose", "write", False, "deferred"),
+        ("records.feeding_record_delete.propose", "write", True, "deferred"),
+        ("plans.milk_plan.propose", "write", True, "deferred"),
+        ("diary.entry_upsert.propose", "write", True, "deferred"),
+        ("hospital_bag_card_create", "write", False, "deferred"),
+        ("support.ticket.propose", "write", True, "deferred"),
+    ],
+)
+def test_model_tool_contracts_keep_side_effect_policy(
+    tool_name: str,
+    read_or_write: str,
+    requires_confirmation: bool,
+    loading_mode: str,
+) -> None:
+    contract = default_tool_registry().get(tool_name)
+
+    assert contract.read_or_write == read_or_write
+    assert contract.requires_confirmation is requires_confirmation
+    assert contract.loading_mode == loading_mode
 
 
 def test_tool_contracts_are_exported_as_responses_namespaces() -> None:
@@ -527,7 +406,6 @@ def test_tool_contracts_are_exported_as_responses_namespaces() -> None:
 
     assert len(assigned_contracts) == len(set(assigned_contracts))
     assert root_contracts == [
-        "business.context.read",
         "files.vision_summary.read",
         "load_service_skill",
         "profile.read",
@@ -563,7 +441,6 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
     registry = default_tool_registry()
     profile_schema = tool_input_schema(registry.get("profile.read").input_schema_ref)
     profile_update_schema = tool_input_schema(registry.get("profile_update").input_schema_ref)
-    business_schema = tool_input_schema(registry.get("business.context.read").input_schema_ref)
     support_schema = tool_input_schema(registry.get("support.ticket.propose").input_schema_ref)
     milk_schema = tool_input_schema(registry.get("records.milk_summary.read").input_schema_ref)
     milk_status_schema = tool_input_schema(registry.get("records.milk_status.read").input_schema_ref)
@@ -571,8 +448,6 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
     growth_read_schema = tool_input_schema(registry.get("records.growth.read").input_schema_ref)
     plans_schema = tool_input_schema(registry.get("plans.current.read").input_schema_ref)
     calendar_schema = tool_input_schema(registry.get("plans.calendar.read").input_schema_ref)
-    diary_schema = tool_input_schema(registry.get("diary.recent.read").input_schema_ref)
-    pregnancy_context_schema = tool_input_schema(registry.get("pregnancy.plan_context.read").input_schema_ref)
     diary_entry_schema = tool_input_schema(registry.get("diary.entry_upsert.propose").input_schema_ref)
     devices_schema = tool_input_schema(registry.get("devices.pump_status.read").input_schema_ref)
     device_guidance_schema = tool_input_schema(registry.get("devices.guidance_assets.read").input_schema_ref)
@@ -593,7 +468,6 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
     growth_update_schema = tool_input_schema(registry.get("records.growth_record_update.propose").input_schema_ref)
     artifact_schema = tool_input_schema(registry.get("hospital_bag_card_create").input_schema_ref)
     ibclc_schema = tool_input_schema(registry.get("ibclc_consult_card_create").input_schema_ref)
-    memory_create_schema = tool_input_schema(registry.get("memory.create.propose").input_schema_ref)
 
     assert profile_schema == {
         "title": "ProfileContextQuery",
@@ -606,8 +480,6 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
     assert profile_update_schema["properties"]["age"]["minimum"] == 12
     assert profile_update_schema["properties"]["age"]["maximum"] == 70
     assert profile_update_schema["properties"]["onboarding_skipped"]["type"] == "boolean"
-    assert business_schema["additionalProperties"] is False
-    assert business_schema["properties"]["limit"]["maximum"] == 20
     assert support_schema["required"] == ["issue_summary"]
     assert support_schema["additionalProperties"] is False
     assert "issue_summary" in support_schema["properties"]
@@ -624,26 +496,10 @@ def test_tool_input_schemas_are_explicit_and_registered_by_contract_ref() -> Non
     assert plans_schema["properties"]["limit"]["maximum"] == 20
     assert calendar_schema["properties"]["task_date"]["maxLength"] == 20
     assert calendar_schema["properties"]["status"]["maxLength"] == 32
-    assert diary_schema["additionalProperties"] is False
-    assert diary_schema["properties"]["limit"]["maximum"] == 20
-    assert pregnancy_context_schema["additionalProperties"] is False
-    assert pregnancy_context_schema["properties"]["limit"]["maximum"] == 20
     assert diary_entry_schema["additionalProperties"] is False
     assert diary_entry_schema["required"] == ["entry_date"]
     assert diary_entry_schema["properties"]["content"]["maxLength"] == 5000
     assert diary_entry_schema["properties"]["symptom_tags"]["type"] == "array"
-    assert memory_create_schema["additionalProperties"] is False
-    assert memory_create_schema["required"] == ["memory_type", "content"]
-    assert memory_create_schema["properties"]["memory_type"]["enum"] == [
-        "user_preference",
-        "stable_care_preference",
-        "communication_preference",
-        "recurring_constraint",
-    ]
-    assert memory_create_schema["properties"]["content"]["required"] == ["summary"]
-    assert memory_create_schema["properties"]["confidence_score"]["maximum"] == 100
-    assert "health" in memory_create_schema["properties"]["sensitivity"]["enum"]
-    assert memory_create_schema["properties"]["expires_in_days"]["maximum"] == 365
     assert devices_schema["additionalProperties"] is False
     assert devices_schema["properties"]["limit"]["maximum"] == 20
     assert device_guidance_schema["additionalProperties"] is False

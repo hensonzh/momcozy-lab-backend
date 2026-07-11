@@ -581,7 +581,7 @@ class AgentRuntimeExecutor:
             params_json_schema=tool_input_schema(contract.input_schema_ref),
             invoke_json=invoke_json,
             namespace_name=namespace.name if namespace is not None else "",
-            defer_loading=contract.name in set(namespace.deferred_tool_contracts) if namespace is not None else False,
+            defer_loading=namespace is not None and contract.loading_mode == "deferred",
             model_context_after_invoke=(
                 self._loaded_service_skill_model_context
                 if contract.name == LOAD_SERVICE_SKILL_TOOL_NAME

@@ -208,7 +208,7 @@ def test_tool_executor_strips_instructional_output_keys_before_persisting() -> N
     assert repository.output.safe_output == result.safe_output
 
 
-def test_tool_executor_denies_missing_permission_before_persisting_call() -> None:
+def test_tool_executor_uses_authenticated_actor_without_per_tool_permission_strings() -> None:
     repository = FakeToolRepository()
     executor = ToolExecutor(
         registry=default_tool_registry(),
@@ -216,20 +216,18 @@ def test_tool_executor_denies_missing_permission_before_persisting_call() -> Non
         handlers={"profile.read": profile_read_handler},
     )
 
-    with pytest.raises(ApiError) as exc_info:
-        asyncio.run(
-            executor.execute(
-                actor=_user(roles={"limited"}),
-                run_id=uuid4(),
-                tool_name="profile.read",
-                call_id="call-1",
-                args={},
-            )
+    result = asyncio.run(
+        executor.execute(
+            actor=_user(roles={"limited"}),
+            run_id=uuid4(),
+            tool_name="profile.read",
+            call_id="call-1",
+            args={},
         )
+    )
 
-    assert exc_info.value.code == "permission_denied"
-    assert repository.tool_call is None
-    assert repository.events == []
+    assert result.tool_call.status == "completed"
+    assert repository.tool_call is not None
 
 
 def test_tool_executor_blocks_cross_owner_actor_scoped_args() -> None:
@@ -389,7 +387,7 @@ def test_tool_executor_marks_tool_call_failed_on_handler_error() -> None:
     assert repository.events[-1].payload["semantic"]["label"] == "个人资料暂时没处理好"
 
 
-def test_tool_executor_records_success_and_authorization_failure_metrics() -> None:
+def test_tool_executor_records_success_and_actor_scope_failure_metrics() -> None:
     actor = _user(permissions={"profile:read:self"})
     metrics = RequestMetrics()
     executor = ToolExecutor(
@@ -415,7 +413,7 @@ def test_tool_executor_records_success_and_authorization_failure_metrics() -> No
                 run_id=uuid4(),
                 tool_name="profile.read",
                 call_id="call-2",
-                args={},
+                args={"owner_user_id": str(uuid4())},
             )
         )
 
@@ -423,7 +421,7 @@ def test_tool_executor_records_success_and_authorization_failure_metrics() -> No
     assert tool_metrics["tool_name"] == "profile.read"
     assert tool_metrics["outcome_counts"]["completed"] == 1
     assert tool_metrics["outcome_counts"]["failed"] == 1
-    assert tool_metrics["error_code_counts"]["permission_denied"] == 1
+    assert tool_metrics["error_code_counts"]["owner_scope_violation"] == 1
 
 
 async def profile_read_handler(context: ToolHandlerContext):

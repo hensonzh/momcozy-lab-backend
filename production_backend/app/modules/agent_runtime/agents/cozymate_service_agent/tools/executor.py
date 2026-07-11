@@ -18,9 +18,8 @@ from production_backend.app.modules.agent_runtime.event_semantics import with_to
 from production_backend.app.modules.agent_runtime.models import AgentToolCall
 from production_backend.app.modules.agent_runtime.payloads import DEFAULT_MAX_INLINE_PAYLOAD_BYTES, maybe_externalize_json_payload
 from production_backend.app.modules.agent_runtime.repository import AgentRuntimeRepository
-from production_backend.app.modules.auth import CurrentUser, PermissionPolicy
+from production_backend.app.modules.auth import CurrentUser
 
-from .contracts import ToolContract
 from .output_policy import strip_instructional_tool_output_keys
 from .registry import ToolContractRegistry
 from .schemas import validate_tool_input
@@ -52,7 +51,6 @@ class ToolExecutor:
         *,
         registry: ToolContractRegistry,
         repository: AgentRuntimeRepository,
-        permission_policy: PermissionPolicy | None = None,
         handlers: dict[str, ToolHandler] | None = None,
         event_sink: AgentEventSink | None = None,
         metrics: RequestMetrics | None = None,
@@ -62,7 +60,6 @@ class ToolExecutor:
     ) -> None:
         self.registry = registry
         self.repository = repository
-        self.permission_policy = permission_policy or PermissionPolicy()
         self.handlers = handlers or {}
         self.event_sink = event_sink
         self.metrics = metrics
@@ -84,7 +81,7 @@ class ToolExecutor:
         tool_call: AgentToolCall | None = None
         try:
             contract = self.registry.get(tool_name)
-            self._authorize(actor=actor, contract=contract, args=args)
+            self._enforce_actor_scope(args=args)
             validate_tool_input(schema_ref=contract.input_schema_ref, value=args)
             handler = handler_override or self.handlers.get(tool_name)
             if handler is None:
@@ -215,10 +212,10 @@ class ToolExecutor:
         self._record(tool_name=tool_name, outcome="completed", error_code="", started_at=started_at)
         return ToolExecutionResult(tool_call=completed, safe_output=externalized_output.inline_payload)
 
-    def _authorize(self, *, actor: CurrentUser, contract: ToolContract, args: dict[str, Any]) -> None:
-        self.permission_policy.require_permission(actor, contract.required_permission)
-        if contract.owner_scope == "actor" and args.get("owner_user_id") not in {None, "", str(actor.user_id), actor.user_id}:
-            raise ApiError(code="owner_scope_violation", message="Tool arguments are outside the current user scope.", status=403)
+    @staticmethod
+    def _enforce_actor_scope(*, args: dict[str, Any]) -> None:
+        if "owner_user_id" in args:
+            raise ApiError(code="owner_scope_violation", message="Tool ownership is derived from the current actor.", status=403)
 
     def _record(self, *, tool_name: str, outcome: str, error_code: str, started_at: float) -> None:
         if self.metrics is not None:
