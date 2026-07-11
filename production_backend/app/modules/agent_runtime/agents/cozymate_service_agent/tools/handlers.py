@@ -62,6 +62,8 @@ _DIARY_ENTRY_VALUE_FIELDS = (
     "content",
     "attachments",
 )
+_MAX_MEDIA_VOICE_ITEMS = 2
+_DEVICE_GUIDANCE_IMAGE_SPOKEN_LABEL = "我放了一张当前步骤的对照图，你可以边看图边完成这一步。"
 
 
 class ProfileReadToolHandler:
@@ -576,8 +578,9 @@ class DeviceGuidanceAssetsReadToolHandler:
             assets = [asset for asset in assets if asset.content_type == content_type]
         assets = _filter_guidance_assets(assets=assets, model=model, topic=topic, query=query)
         bounded_assets = assets[:limit]
-        return {
-            "assets": [_asset_payload(asset) for asset in bounded_assets],
+        asset_payloads = [_asset_payload(asset) for asset in bounded_assets]
+        result = {
+            "assets": asset_payloads,
             "count": len(bounded_assets),
             "available_count": len(assets),
             "query_context": {
@@ -587,6 +590,10 @@ class DeviceGuidanceAssetsReadToolHandler:
                 "measured_nipple_mm": context.args.get("measured_nipple_mm"),
             },
         }
+        media_voice = _asset_media_voice_payloads(asset_payloads)
+        if media_voice:
+            result["media_voice"] = media_voice
+        return result
 
 
 class FileVisionSummaryReadToolHandler:
@@ -1971,6 +1978,30 @@ def _asset_payload(asset: ProductAsset) -> dict[str, Any]:
     else:
         payload["markdown_link"] = f"[{label}]({url})"
     return payload
+
+
+def _asset_media_voice_payloads(assets: list[dict[str, Any]]) -> list[dict[str, str]]:
+    items: list[dict[str, str]] = []
+    for asset in assets:
+        if asset.get("kind") != "image":
+            continue
+        media_id = _text(asset, "url")
+        if not media_id:
+            continue
+        item = {
+            "media_id": media_id,
+            "kind": "image",
+            "voice_policy": "announce",
+            "priority": "instructional",
+            "spoken_label": _DEVICE_GUIDANCE_IMAGE_SPOKEN_LABEL,
+        }
+        visual_label = _text(asset, "label")
+        if visual_label:
+            item["visual_label"] = visual_label
+        items.append(item)
+        if len(items) >= _MAX_MEDIA_VOICE_ITEMS:
+            break
+    return items
 
 
 def _asset_kind(content_type: str) -> str:

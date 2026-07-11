@@ -643,6 +643,16 @@ def test_device_guidance_assets_read_tool_handler_returns_copyable_image_markdow
             "markdown_image": "![Air1 components overview](/v1/assets/asset-image?kind=image)",
         }
     ]
+    assert result["media_voice"] == [
+        {
+            "media_id": "/v1/assets/asset-image?kind=image",
+            "kind": "image",
+            "visual_label": "Air1 components overview",
+            "voice_policy": "announce",
+            "priority": "instructional",
+            "spoken_label": "我放了一张当前步骤的对照图，你可以边看图边完成这一步。",
+        }
+    ]
 
 
 def test_file_vision_summary_read_tool_handler_returns_owner_scoped_safe_summary() -> None:
