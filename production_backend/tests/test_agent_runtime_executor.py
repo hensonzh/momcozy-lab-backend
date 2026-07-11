@@ -356,6 +356,73 @@ def test_agent_runtime_executor_publishes_final_text_deltas_to_transient_stream(
     assert transient_stream.progresses[2]["semantic"]["surface"] == "thinking_note"
 
 
+def test_agent_runtime_executor_persists_all_text_shown_before_and_after_tool_turns() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="Read my profile", sequence=1)
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    transient_stream = FakeTransientStream()
+    backend = ScriptedSdkBackend(
+        [
+            scripted_sdk_response(
+                final_text="已经整理好了。",
+                text_deltas=("我先帮你查一下。", "已经", "整理好了。"),
+            )
+        ]
+    )
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            transient_stream=transient_stream,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+        ).execute(run=run)
+    )
+
+    assert result.final_text == "我先帮你查一下。已经整理好了。"
+    assert [item["delta"] for item in transient_stream.deltas] == ["我先帮你查一下。", "已经", "整理好了。"]
+
+
+def test_agent_runtime_executor_streams_missing_provider_suffix_before_finalizing() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="Finish the answer", sequence=1)
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    transient_stream = FakeTransientStream()
+    backend = ScriptedSdkBackend([scripted_sdk_response(final_text="hello world", text_deltas=("hello",))])
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            transient_stream=transient_stream,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+        ).execute(run=run)
+    )
+
+    assert result.final_text == "hello world"
+    assert [item["delta"] for item in transient_stream.deltas] == ["hello", " world"]
+
+
+def test_agent_runtime_executor_does_not_overwrite_streamed_text_with_conflicting_provider_final() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="Keep streamed text", sequence=1)
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    transient_stream = FakeTransientStream()
+    backend = ScriptedSdkBackend([scripted_sdk_response(final_text="replacement", text_deltas=("already shown",))])
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            transient_stream=transient_stream,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+        ).execute(run=run)
+    )
+
+    assert result.final_text == "already shown"
+    assert [item["delta"] for item in transient_stream.deltas] == ["already shown"]
+
+
 def test_agent_runtime_executor_keeps_progress_transient_when_event_sink_is_configured() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)

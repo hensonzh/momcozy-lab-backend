@@ -380,10 +380,12 @@ class AgentRuntimeExecutor:
         if pending_action is not None:
             self._log_executor_timing(run=run, status="waiting_for_confirmation", timings_ms=pending_timings_ms)
             return AgentRunExecutionResult(status="waiting_for_confirmation", pending_action_id=pending_action.id)
-        sanitized_response = sanitize_agent_response_text(str(result.final_text or ""))
-        final_text = sanitized_response.text.strip()
-        if not final_text and str(result.final_text or "").strip():
-            final_text = "我已经整理好了。"
+        raw_provider_final = str(result.final_text or "")
+        sanitized_response = sanitize_agent_response_text(raw_provider_final)
+        provider_final_text = sanitized_response.text.strip()
+        if not provider_final_text and raw_provider_final.strip():
+            provider_final_text = "我已经整理好了。"
+        final_text = await self._canonical_final_text(run=run, provider_final_text=provider_final_text)
         if not final_text:
             raise ApiError(code="empty_agent_response", message="Agent runtime returned an empty response.", status=502)
         finish_timings_ms = _timings_with_total(turn_context.timings_ms, run_started_at)
@@ -500,24 +502,67 @@ class AgentRuntimeExecutor:
             if not sanitized_delta:
                 return
             self._run_text_stream_emitted[run.id] = sanitized_text
-            message_stream_id = str(self._run_assistant_message_ids.get(run.id) or "assistant")
-            if event_publisher is not None:
-                await event_publisher.publish_message_delta(
-                    thread_id=run.thread_id,
-                    run_id=run.id,
-                    delta=sanitized_delta,
-                    message_stream_id=message_stream_id,
-                )
-                return
-            if transient_stream is not None:
-                await transient_stream.publish_message_delta(
-                    thread_id=run.thread_id,
-                    run_id=run.id,
-                    delta=sanitized_delta,
-                    message_stream_id=message_stream_id,
-                )
+            await self._publish_text_delta(
+                run=run,
+                delta=sanitized_delta,
+                event_publisher=event_publisher,
+                transient_stream=transient_stream,
+            )
 
         return publish
+
+    async def _canonical_final_text(self, *, run: AgentRun, provider_final_text: str) -> str:
+        streamed_text = self._run_text_stream_emitted.get(run.id, "")
+        if not streamed_text:
+            return provider_final_text
+        if not provider_final_text or streamed_text.endswith(provider_final_text):
+            return streamed_text
+        if provider_final_text.startswith(streamed_text):
+            missing_suffix = provider_final_text[len(streamed_text) :]
+            self._run_text_stream_emitted[run.id] = provider_final_text
+            await self._publish_text_delta(
+                run=run,
+                delta=missing_suffix,
+                event_publisher=self.event_sink,
+                transient_stream=self.transient_stream,
+            )
+            return provider_final_text
+        log_agent_runtime_event(
+            "agent.run.stream_final_mismatch",
+            run_id=str(run.id),
+            thread_id=str(run.thread_id),
+            trace_id=run.trace_id,
+            streamed_text_length=len(streamed_text),
+            provider_final_text_length=len(provider_final_text),
+        )
+        return streamed_text
+
+    async def _publish_text_delta(
+        self,
+        *,
+        run: AgentRun,
+        delta: str,
+        event_publisher: AgentEventSink | None,
+        transient_stream: AgentTransientStream | None,
+    ) -> None:
+        if not delta:
+            return
+        message_stream_id = str(self._run_assistant_message_ids.get(run.id) or "assistant")
+        if event_publisher is not None:
+            await event_publisher.publish_message_delta(
+                thread_id=run.thread_id,
+                run_id=run.id,
+                delta=delta,
+                message_stream_id=message_stream_id,
+            )
+            return
+        if transient_stream is not None:
+            await transient_stream.publish_message_delta(
+                thread_id=run.thread_id,
+                run_id=run.id,
+                delta=delta,
+                message_stream_id=message_stream_id,
+            )
 
     def _sdk_tools(
         self,
