@@ -1,5 +1,6 @@
 import asyncio
 from datetime import date, datetime, timedelta, timezone
+from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
@@ -78,6 +79,26 @@ def test_records_service_rejects_cross_owner_plan_task_before_record_create() ->
     assert repository.create_pumping_kwargs == {}
 
 
+def test_records_service_rejects_record_kind_that_conflicts_with_typed_task() -> None:
+    repository = FakeRecordsRepository(plan_task_kind="pumping")
+    service = RecordsService(repository=repository)
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            service.create_feeding(
+                owner_user_id=uuid4(),
+                infant_id=None,
+                plan_task_id=uuid4(),
+                feed_time=_now(),
+                feed_type="bottle",
+                volume_ml=90,
+            )
+        )
+
+    assert exc_info.value.code == "task_record_type_mismatch"
+    assert repository.create_feeding_kwargs == {}
+
+
 def test_records_service_rejects_cross_owner_infant() -> None:
     service = RecordsService(repository=FakeRecordsRepository(infant_owner_ok=False))
 
@@ -118,6 +139,53 @@ def test_records_service_replays_completed_feeding_create() -> None:
 
     assert returned is existing
     assert repository.create_feeding_kwargs == {}
+
+
+def test_records_service_replays_linked_feeding_without_completing_task_again() -> None:
+    owner_user_id = uuid4()
+    task_id = uuid4()
+    record_id = uuid4()
+    existing = _feeding(owner_user_id=owner_user_id, record_id=record_id, plan_task_id=task_id)
+    repository = FakeRecordsRepository(feeding=existing, plan_task_kind="feeding")
+    service = RecordsService(
+        repository=repository,
+        idempotency_service=FakeIdempotencyService(status="replay", response_ref=str(record_id)),
+    )
+
+    returned = asyncio.run(
+        service.create_feeding(
+            owner_user_id=owner_user_id,
+            infant_id=None,
+            plan_task_id=task_id,
+            feed_time=_now(),
+            feed_type="bottle",
+            volume_ml=90,
+            idempotency_key="idem-linked-feed",
+        )
+    )
+
+    assert returned is existing
+    assert repository.create_feeding_kwargs == {}
+    assert repository.completed_plan_task_id is None
+
+
+def test_records_service_does_not_complete_task_when_record_create_fails() -> None:
+    repository = FakeRecordsRepository(plan_task_kind="feeding", create_feeding_error=RuntimeError("write failed"))
+    service = RecordsService(repository=repository)
+
+    with pytest.raises(RuntimeError, match="write failed"):
+        asyncio.run(
+            service.create_feeding(
+                owner_user_id=uuid4(),
+                infant_id=None,
+                plan_task_id=uuid4(),
+                feed_time=_now(),
+                feed_type="bottle",
+                volume_ml=90,
+            )
+        )
+
+    assert repository.completed_plan_task_id is None
 
 
 def test_records_service_lists_feedings_with_limit() -> None:
@@ -357,6 +425,8 @@ class FakeRecordsRepository:
         *,
         infant_owner_ok=True,
         plan_task_owner_ok=True,
+        plan_task_kind=None,
+        create_feeding_error=None,
         feeding=None,
         feedings=None,
         pumping=None,
@@ -366,6 +436,8 @@ class FakeRecordsRepository:
     ) -> None:
         self.infant_owner_ok = infant_owner_ok
         self.plan_task_owner_ok = plan_task_owner_ok
+        self.plan_task_kind = plan_task_kind
+        self.create_feeding_error = create_feeding_error
         self.completed_plan_task_id = None
         self.feeding = feeding
         self.feedings = feedings or []
@@ -387,14 +459,19 @@ class FakeRecordsRepository:
     async def infant_belongs_to_owner(self, *, infant_id: UUID, owner_user_id: UUID):
         return self.infant_owner_ok
 
-    async def plan_task_belongs_to_owner(self, *, plan_task_id: UUID, owner_user_id: UUID):
-        return self.plan_task_owner_ok
+    async def get_plan_task_for_owner(self, *, plan_task_id: UUID, owner_user_id: UUID):
+        if not self.plan_task_owner_ok:
+            return None
+        payload = {} if self.plan_task_kind is None else {"task_type": self.plan_task_kind}
+        return SimpleNamespace(id=plan_task_id, payload=payload)
 
     async def complete_plan_task(self, *, plan_task_id: UUID, owner_user_id: UUID):
         self.completed_plan_task_id = plan_task_id
         return True
 
     async def create_feeding(self, **kwargs):
+        if self.create_feeding_error is not None:
+            raise self.create_feeding_error
         self.create_feeding_kwargs = kwargs
         self.feeding = _feeding(owner_user_id=kwargs["owner_user_id"], plan_task_id=kwargs["plan_task_id"])
         self.feeding.infant_id = kwargs["infant_id"]

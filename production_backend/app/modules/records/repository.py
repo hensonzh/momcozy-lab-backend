@@ -24,13 +24,13 @@ class RecordsRepository:
         )
         return await self.session.scalar(statement) is not None
 
-    async def plan_task_belongs_to_owner(self, *, plan_task_id: UUID, owner_user_id: UUID) -> bool:
-        statement = select(PlanTask.id).where(
+    async def get_plan_task_for_owner(self, *, plan_task_id: UUID, owner_user_id: UUID) -> PlanTask | None:
+        statement = select(PlanTask).where(
             PlanTask.id == plan_task_id,
             PlanTask.owner_user_id == owner_user_id,
             PlanTask.deleted_at.is_(None),
         )
-        return await self.session.scalar(statement) is not None
+        return cast(PlanTask | None, await self.session.scalar(statement))
 
     async def complete_plan_task(self, *, plan_task_id: UUID, owner_user_id: UUID) -> bool:
         statement = select(PlanTask).where(

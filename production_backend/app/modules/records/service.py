@@ -49,7 +49,11 @@ class RecordsService:
             owner_user_id=owner_user_id,
         ):
             raise ApiError(code="owner_scope_violation", message="Infant profile is outside the current user scope.", status=403)
-        await self._validate_plan_task_owner(plan_task_id=plan_task_id, owner_user_id=owner_user_id)
+        await self._validate_plan_task_owner(
+            plan_task_id=plan_task_id,
+            owner_user_id=owner_user_id,
+            expected_record_kind="feeding",
+        )
         if not domain.has_feeding_measurement(volume_ml=volume_ml, duration_seconds=duration_seconds):
             raise ApiError(code="validation_failed", message="volume_ml or duration_seconds is required.", status=422)
 
@@ -158,7 +162,11 @@ class RecordsService:
         request_id: str = "",
         idempotency_key: str | None = None,
     ) -> PumpingRecord:
-        await self._validate_plan_task_owner(plan_task_id=plan_task_id, owner_user_id=owner_user_id)
+        await self._validate_plan_task_owner(
+            plan_task_id=plan_task_id,
+            owner_user_id=owner_user_id,
+            expected_record_kind="pumping",
+        )
         if not domain.has_pumping_measurement(milk_volume_ml=milk_volume_ml, duration_seconds=duration_seconds):
             raise ApiError(code="validation_failed", message="milk_volume_ml or duration_seconds is required.", status=422)
 
@@ -218,17 +226,31 @@ class RecordsService:
             )
         return record
 
-    async def _validate_plan_task_owner(self, *, plan_task_id: UUID | None, owner_user_id: UUID) -> None:
+    async def _validate_plan_task_owner(
+        self,
+        *,
+        plan_task_id: UUID | None,
+        owner_user_id: UUID,
+        expected_record_kind: str,
+    ) -> None:
         if plan_task_id is None:
             return
-        if not await self.repository.plan_task_belongs_to_owner(
+        task = await self.repository.get_plan_task_for_owner(
             plan_task_id=plan_task_id,
             owner_user_id=owner_user_id,
-        ):
+        )
+        if task is None:
             raise ApiError(
                 code="owner_scope_violation",
                 message="Plan task is outside the current user scope.",
                 status=403,
+            )
+        task_record_kind = _task_record_kind(task.payload)
+        if task_record_kind is not None and task_record_kind != expected_record_kind:
+            raise ApiError(
+                code="task_record_type_mismatch",
+                message=f"A {expected_record_kind} record cannot be linked to a {task_record_kind} task.",
+                status=409,
             )
 
     async def _complete_linked_plan_task(self, *, plan_task_id: UUID | None, owner_user_id: UUID) -> None:
@@ -493,3 +515,30 @@ class RecordsService:
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _task_record_kind(payload: dict[str, Any]) -> str | None:
+    aliases = {
+        "feed": "feeding",
+        "feeding": "feeding",
+        "breastfeed": "feeding",
+        "breastfeeding": "feeding",
+        "bottle_feed": "feeding",
+        "pump": "pumping",
+        "pumping": "pumping",
+        "breast_pump": "pumping",
+        "milk_expression": "pumping",
+        "expression": "pumping",
+        "喂养": "feeding",
+        "喂奶": "feeding",
+        "吸奶": "pumping",
+        "泵奶": "pumping",
+    }
+    for key in ("task_type", "record_type", "type", "kind"):
+        value = payload.get(key)
+        if not isinstance(value, str):
+            continue
+        normalized = value.strip().lower().replace("-", "_").replace(" ", "_")
+        if normalized in aliases:
+            return aliases[normalized]
+    return None
