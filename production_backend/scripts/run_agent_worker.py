@@ -23,6 +23,8 @@ from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.
     build_default_tool_handlers,
     default_tool_registry,
 )
+from production_backend.app.modules.agent_runtime.actions.executor import AgentActionExecutor
+from production_backend.app.modules.agent_runtime.actions.registry import build_agent_action_handlers
 from production_backend.app.modules.agent_runtime.event_stream.sink import AgentEventSink
 from production_backend.app.modules.agent_runtime.event_stream.transient import AgentTransientStream
 from production_backend.app.modules.agent_runtime.memory.service import AgentMemoryRepository, AgentMemoryService
@@ -33,18 +35,22 @@ from production_backend.app.modules.agent_runtime.run_lifecycle.quick_replies im
 from production_backend.app.modules.agent_runtime.sdk import create_agent_model_runner
 from production_backend.app.modules.agent_runtime.service import AgentRuntimeService
 from production_backend.app.modules.assets.service import ProductAssetService
-from production_backend.app.modules.audit import AuditService, IdempotencyService, OutboxService
-from production_backend.app.modules.audit.repository import AuditRepository, OutboxRepository
+from production_backend.app.modules.audit import AuditService, IdempotencyService
+from production_backend.app.modules.audit.repository import AuditRepository
 from production_backend.app.modules.devices.repository import DevicesRepository
 from production_backend.app.modules.devices.service import DevicesService
 from production_backend.app.modules.diary.repository import DiaryRepository
 from production_backend.app.modules.diary.service import DiaryService
+from production_backend.app.modules.notifications import NotificationsService
+from production_backend.app.modules.notifications.repository import NotificationsRepository
 from production_backend.app.modules.plans.repository import PlansRepository
 from production_backend.app.modules.plans.service import PlansService
 from production_backend.app.modules.profiles.repository import ProfileRepository
 from production_backend.app.modules.profiles.service import ProfileService
 from production_backend.app.modules.records.repository import RecordsRepository
 from production_backend.app.modules.records.service import RecordsService
+from production_backend.app.modules.support import SupportTicketsService
+from production_backend.app.modules.support.repository import SupportTicketsRepository
 from production_backend.app.workers.agent_run import AgentRunQueueWorkerResult, AgentRunWorker, TERMINAL_RUN_STATUSES
 from production_backend.scripts.worker_runtime import install_stop_signal_handlers
 
@@ -290,12 +296,6 @@ async def _execute_agent_run(
     async with session_factory() as session:
         repository = AgentRuntimeRepository(session)
         audit_repository = AuditRepository(session)
-        agent_runtime_service = AgentRuntimeService(
-            repository=repository,
-            idempotency_service=IdempotencyService(repository=audit_repository),
-            outbox_service=OutboxService(repository=OutboxRepository(session)),
-            controls=controls,
-        )
         profile_service = ProfileService(
             repository=ProfileRepository(session),
             audit_service=AuditService(repository=audit_repository),
@@ -319,6 +319,32 @@ async def _execute_agent_run(
             repository=DevicesRepository(session),
             audit_service=AuditService(repository=audit_repository),
             idempotency_service=IdempotencyService(repository=audit_repository),
+        )
+        notifications_service = NotificationsService(
+            repository=NotificationsRepository(session),
+            audit_service=AuditService(repository=audit_repository),
+            idempotency_service=IdempotencyService(repository=audit_repository),
+        )
+        support_service = SupportTicketsService(
+            repository=SupportTicketsRepository(session),
+            audit_service=AuditService(repository=audit_repository),
+            idempotency_service=IdempotencyService(repository=audit_repository),
+        )
+        action_executor = AgentActionExecutor(
+            repository=repository,
+            handlers=build_agent_action_handlers(
+                diary_service=diary_service,
+                notifications_service=notifications_service,
+                plans_service=plans_service,
+                records_service=records_service,
+                support_service=support_service,
+            ),
+        )
+        agent_runtime_service = AgentRuntimeService(
+            repository=repository,
+            idempotency_service=IdempotencyService(repository=audit_repository),
+            action_executor=action_executor,
+            controls=controls,
         )
         tool_registry = default_tool_registry()
         memory_service = AgentMemoryService(repository=AgentMemoryRepository(session))
@@ -377,6 +403,7 @@ async def _execute_agent_run(
             repository=repository,
             controls=controls,
             handler=runtime_executor,
+            action_executor=action_executor,
             after_event_append=session.commit,
             transient_stream=transient_stream,
         )

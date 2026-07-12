@@ -5,10 +5,12 @@ from uuid import UUID, uuid4
 import pytest
 
 from production_backend.app.core.errors import ApiError
-from production_backend.app.modules.audit.models import OutboxJob
-from production_backend.app.modules.agent_runtime.actions.outbox import AgentActionOutboxHandler
+from production_backend.app.modules.agent_runtime.actions.executor import (
+    AgentActionApplyResult,
+    AgentActionExecutor,
+)
 from production_backend.app.modules.agent_runtime.models import AgentAction
-from production_backend.app.modules.agent_runtime.service import AGENT_ACTION_APPLY_JOB, AgentRuntimeService
+from production_backend.app.modules.agent_runtime.service import AgentRuntimeService
 from production_backend.app.modules.plans.agent_actions import (
     PREGNANCY_PLAN_CREATE_ACTION,
     PregnancyPlanCreateActionHandler,
@@ -22,13 +24,11 @@ from production_backend.tests.test_agent_runtime_service import FakeAgentRuntime
 PREGNANCY_PLAN_CHANGED_EVENT = "pregnancy_plan.changed"
 
 
-def test_agent_runtime_actions_confirm_to_action_queued_without_queued_status() -> None:
+def test_confirmation_only_authorizes_and_requeues_same_run_without_domain_apply() -> None:
     owner_user_id = uuid4()
     repository = FakeActionRepository()
-    outbox_service = FakeOutboxService()
-    service = AgentRuntimeService(repository=repository, outbox_service=outbox_service)
+    service = AgentRuntimeService(repository=repository)
     run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Create ticket"))
-
     action = asyncio.run(
         service.propose_action(
             owner_user_id=owner_user_id,
@@ -40,6 +40,7 @@ def test_agent_runtime_actions_confirm_to_action_queued_without_queued_status() 
         )
     )
     run.status = "waiting_for_confirmation"
+
     confirmed = asyncio.run(
         service.confirm_action(
             owner_user_id=owner_user_id,
@@ -50,34 +51,29 @@ def test_agent_runtime_actions_confirm_to_action_queued_without_queued_status() 
     )
 
     assert confirmed.status == "confirmed"
-    assert confirmed.status != "queued"
     assert confirmed.idempotency_key == "idem-action"
-    assert confirmed.apply_payload["issue_summary"] == "Pump does not turn on after charging"
-    proposal_event = repository.events[-2]
-    assert proposal_event.event_type == "action.confirmation_required"
-    assert proposal_event.payload["action_id"] == str(action.id)
-    assert proposal_event.payload["action_status"] == "confirmation_required"
-    assert proposal_event.payload["action_type"] == "support.ticket.create"
-    assert proposal_event.payload["target_type"] == "support_ticket"
-    assert proposal_event.payload["side_effect_level"] == "medium"
-    assert proposal_event.payload["preview_payload"] == {"summary": "Pump does not turn on"}
-    assert "apply_payload" not in proposal_event.payload
-    queued_event = repository.events[-1]
-    assert queued_event.event_type == "action.queued"
-    assert queued_event.payload["action_status"] == "confirmed"
-    assert queued_event.payload["action_type"] == "support.ticket.create"
-    assert queued_event.payload["target_type"] == "support_ticket"
-    assert queued_event.payload["outbox_status"] == "queued"
-    assert queued_event.payload["outbox_job_id"] == str(outbox_service.job.id)
-    assert repository.run.status == "waiting_for_confirmation"
-    assert repository.events[-1].event_type == "action.queued"
-    assert outbox_service.enqueue_kwargs["job_type"] == AGENT_ACTION_APPLY_JOB
-    assert outbox_service.enqueue_kwargs["payload"]["action_id"] == str(action.id)
-    assert outbox_service.enqueue_kwargs["idempotency_key"] == f"agent-action:{action.id}:apply"
-    assert outbox_service.enqueue_kwargs["action_id"] == action.id
+    assert confirmed.apply_payload == {"issue_summary": "Pump does not turn on after charging"}
+    assert run.status == "queued"
+    assert [event.event_type for event in repository.events][-3:] == [
+        "action.confirmation_required",
+        "action.confirmed",
+        "run.queued",
+    ]
+    confirmation = repository.events[-3]
+    assert confirmation.payload["preview_payload"] == {"summary": "Pump does not turn on"}
+    assert confirmation.payload["requires_confirmation"] is True
+    assert confirmation.payload["confirmation_policy"] == "always"
+    assert confirmation.payload["user_visible"] is True
+    assert "apply_payload" not in confirmation.payload
+    assert repository.events[-2].payload["action_status"] == "confirmed"
+    assert repository.events[-1].payload == {
+        "reason": "action_confirmed",
+        "action_id": str(action.id),
+        "phase": "queued",
+    }
 
 
-def test_agent_runtime_actions_reject_confirmation_required_action() -> None:
+def test_duplicate_confirmation_is_idempotent_and_does_not_requeue_twice() -> None:
     owner_user_id = uuid4()
     repository = FakeActionRepository()
     service = AgentRuntimeService(repository=repository)
@@ -85,169 +81,70 @@ def test_agent_runtime_actions_reject_confirmation_required_action() -> None:
     action = asyncio.run(service.propose_action(owner_user_id=owner_user_id, run_id=run.id, action_type="support.ticket.create"))
     run.status = "waiting_for_confirmation"
 
-    rejected = asyncio.run(service.reject_action(owner_user_id=owner_user_id, action_id=action.id, reason="not now"))
+    first = asyncio.run(service.confirm_action(owner_user_id=owner_user_id, action_id=action.id))
+    event_count = len(repository.events)
+    second = asyncio.run(service.confirm_action(owner_user_id=owner_user_id, action_id=action.id, idempotency_key="retry"))
 
-    assert rejected.status == "rejected"
-    assert rejected.error_code == "rejected_by_user"
-    rejected_event = repository.events[-2]
-    assert rejected_event.event_type == "action.rejected"
-    assert rejected_event.payload["action_status"] == "rejected"
-    assert rejected_event.payload["action_type"] == "support.ticket.create"
-    assert rejected_event.payload["reason"] == "not now"
-    assert repository.run.status == "completed"
-    assert repository.events[-1].event_type == "run.completed"
-    assert repository.events[-1].payload == {"reason": "action_rejected", "action_id": str(action.id)}
+    assert first is second
+    assert second.status == "confirmed"
+    assert len(repository.events) == event_count
+    assert [event.event_type for event in repository.events].count("action.confirmed") == 1
+    assert [event.event_type for event in repository.events].count("run.queued") == 2  # initial run plus resume
 
 
-def test_agent_runtime_actions_do_not_reject_confirmed_action() -> None:
+def test_cross_owner_cannot_read_or_confirm_action() -> None:
     owner_user_id = uuid4()
     repository = FakeActionRepository()
-    outbox_service = FakeOutboxService()
-    service = AgentRuntimeService(repository=repository, outbox_service=outbox_service)
+    service = AgentRuntimeService(repository=repository)
     run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Create ticket"))
     action = asyncio.run(service.propose_action(owner_user_id=owner_user_id, run_id=run.id, action_type="support.ticket.create"))
-    confirmed = asyncio.run(service.confirm_action(owner_user_id=owner_user_id, action_id=action.id))
-    event_count = len(repository.events)
+    run.status = "waiting_for_confirmation"
 
     with pytest.raises(ApiError) as exc_info:
-        asyncio.run(service.reject_action(owner_user_id=owner_user_id, action_id=action.id, reason="too late"))
+        asyncio.run(service.confirm_action(owner_user_id=uuid4(), action_id=action.id))
 
-    assert exc_info.value.code == "conflict"
-    assert confirmed.status == "confirmed"
-    assert repository.action.status == "confirmed"
-    assert len(repository.events) == event_count
+    assert exc_info.value.code == "not_found"
+    assert action.status == "confirmation_required"
 
 
-def test_agent_runtime_actions_do_not_overwrite_terminal_rejection_states() -> None:
+def test_reject_and_expire_finish_waiting_run_without_apply() -> None:
     owner_user_id = uuid4()
     repository = FakeActionRepository()
     service = AgentRuntimeService(repository=repository)
     run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Create ticket"))
-    action = asyncio.run(service.propose_action(owner_user_id=owner_user_id, run_id=run.id, action_type="support.ticket.create"))
-    action.status = "expired"
-    action.error_code = "action_expired"
-    event_count = len(repository.events)
-
-    rejected = asyncio.run(service.reject_action(owner_user_id=owner_user_id, action_id=action.id, reason="too late"))
-
-    assert rejected.status == "expired"
-    assert rejected.error_code == "action_expired"
-    assert len(repository.events) == event_count
-
-
-def test_agent_runtime_actions_generate_action_idempotency_key_for_confirmation() -> None:
-    owner_user_id = uuid4()
-    repository = FakeActionRepository()
-    outbox_service = FakeOutboxService()
-    service = AgentRuntimeService(repository=repository, outbox_service=outbox_service)
-    run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Create ticket"))
-    action = asyncio.run(service.propose_action(owner_user_id=owner_user_id, run_id=run.id, action_type="support.ticket.create"))
-
-    confirmed = asyncio.run(service.confirm_action(owner_user_id=owner_user_id, action_id=action.id))
-
-    generated_key = f"agent-action:{action.id}"
-    outbox_key = f"agent-action:{action.id}:apply"
-    assert confirmed.idempotency_key == generated_key
-    assert outbox_service.enqueue_kwargs["idempotency_key"] == outbox_key
-
-
-def test_agent_runtime_action_proposal_once_reuses_same_run_action_and_emits_one_confirmation_event() -> None:
-    owner_user_id = uuid4()
-    repository = FakeActionRepository()
-    service = AgentRuntimeService(repository=repository)
-    run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Create pregnancy plan"))
-    kwargs = {
-        "owner_user_id": owner_user_id,
-        "run_id": run.id,
-        "action_type": PREGNANCY_PLAN_CREATE_ACTION,
-        "target_type": "plan",
-        "preview_payload": {"title": "孕期计划"},
-        "apply_payload": {"title": "孕期计划"},
-        "idempotency_key": "pregnancy-plan:analysis-1",
-    }
-
-    first, first_created = asyncio.run(service.propose_action_once(**kwargs))
-    second, second_created = asyncio.run(service.propose_action_once(**kwargs))
-
-    assert first_created is True
-    assert second_created is False
-    assert second.id == first.id
-    assert len(repository.actions) == 1
-    assert repository.locked_run_ids == [run.id, run.id]
-    assert [event.event_type for event in repository.events].count("action.confirmation_required") == 1
-
-
-def test_agent_runtime_actions_scope_outbox_idempotency_key_to_each_action() -> None:
-    owner_user_id = uuid4()
-    repository = FakeActionRepository()
-    outbox_service = FakeOutboxService()
-    service = AgentRuntimeService(repository=repository, outbox_service=outbox_service)
-    first_run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Create first ticket"))
-    first_action = asyncio.run(
-        service.propose_action(owner_user_id=owner_user_id, run_id=first_run.id, action_type="support.ticket.create")
+    rejected_action = asyncio.run(
+        service.propose_action(owner_user_id=owner_user_id, run_id=run.id, action_type="support.ticket.create")
     )
-    first_run.status = "waiting_for_confirmation"
-    asyncio.run(service.confirm_action(owner_user_id=owner_user_id, action_id=first_action.id, idempotency_key="shared-key"))
-    first_run.status = "completed"
+    run.status = "waiting_for_confirmation"
+    rejected = asyncio.run(service.reject_action(owner_user_id=owner_user_id, action_id=rejected_action.id, reason="not now"))
+
+    assert rejected.status == "rejected"
+    assert run.status == "completed"
+    assert repository.events[-2].payload["user_visible"] is True
+    assert repository.events[-1].payload == {"reason": "action_rejected", "action_id": str(rejected.id)}
+
+    run.status = "completed"
     second_run = asyncio.run(
-        service.create_run(actor_user_id=owner_user_id, thread_id=repository.thread.id, message="Create second ticket")
+        service.create_run(actor_user_id=owner_user_id, thread_id=repository.thread.id, message="Create another ticket")
     )
-    second_action = asyncio.run(
-        service.propose_action(owner_user_id=owner_user_id, run_id=second_run.id, action_type="support.ticket.create")
-    )
-    second_run.status = "waiting_for_confirmation"
-
-    asyncio.run(service.confirm_action(owner_user_id=owner_user_id, action_id=second_action.id, idempotency_key="shared-key"))
-
-    assert first_action.idempotency_key == "shared-key"
-    assert second_action.idempotency_key == "shared-key"
-    assert [call["idempotency_key"] for call in outbox_service.enqueue_calls] == [
-        f"agent-action:{first_action.id}:apply",
-        f"agent-action:{second_action.id}:apply",
-    ]
-
-
-def test_agent_runtime_actions_expire_past_confirmation_without_enqueueing() -> None:
-    owner_user_id = uuid4()
-    repository = FakeActionRepository()
-    outbox_service = FakeOutboxService()
-    service = AgentRuntimeService(repository=repository, outbox_service=outbox_service)
-    run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Create ticket"))
-    action = asyncio.run(
+    expired_action = asyncio.run(
         service.propose_action(
             owner_user_id=owner_user_id,
-            run_id=run.id,
+            run_id=second_run.id,
             action_type="support.ticket.create",
             expires_at=datetime.now(timezone.utc) - timedelta(seconds=1),
         )
     )
-    run.status = "waiting_for_confirmation"
-
-    expired = asyncio.run(service.confirm_action(owner_user_id=owner_user_id, action_id=action.id))
+    second_run.status = "waiting_for_confirmation"
+    expired = asyncio.run(service.confirm_action(owner_user_id=owner_user_id, action_id=expired_action.id))
 
     assert expired.status == "expired"
-    assert expired.error_code == "action_expired"
-    assert outbox_service.enqueue_kwargs == {}
+    assert second_run.status == "completed"
     assert repository.events[-2].event_type == "action.expired"
-    assert repository.events[-2].payload["action_status"] == "expired"
-    assert repository.events[-1].event_type == "run.completed"
-    assert repository.events[-1].payload == {"reason": "action_expired", "action_id": str(action.id)}
+    assert repository.events[-1].payload == {"reason": "action_expired", "action_id": str(expired.id)}
 
 
-def test_agent_runtime_actions_reject_unsupported_action_type_before_persisting() -> None:
-    owner_user_id = uuid4()
-    repository = FakeActionRepository()
-    service = AgentRuntimeService(repository=repository)
-    run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Delete my device"))
-
-    with pytest.raises(ApiError) as exc_info:
-        asyncio.run(service.propose_action(owner_user_id=owner_user_id, run_id=run.id, action_type="device.delete"))
-
-    assert exc_info.value.code == "unsupported_agent_action"
-    assert repository.action is None
-
-
-def test_agent_runtime_actions_require_outbox_for_direct_apply_before_persisting() -> None:
+def test_direct_action_requires_in_process_executor_before_persisting() -> None:
     owner_user_id = uuid4()
     repository = FakeActionRepository()
     service = AgentRuntimeService(repository=repository)
@@ -261,174 +158,87 @@ def test_agent_runtime_actions_require_outbox_for_direct_apply_before_persisting
                 action_type=FEEDING_RECORD_CREATE_ACTION,
                 target_type="feeding_record",
                 side_effect_level="low",
-                apply_payload={"feed_time": "2026-07-04T08:30:00Z", "feed_type": "bottle"},
             )
         )
 
-    assert exc_info.value.code == "outbox_not_configured"
+    assert exc_info.value.code == "action_executor_not_configured"
     assert repository.action is None
 
 
-def test_agent_runtime_actions_accept_hospital_bag_cart_update_policy() -> None:
+@pytest.mark.parametrize(
+    ("action_type", "target_type", "side_effect_level"),
+    [
+        ("pregnancy.plan.create", "plan", "medium"),
+        ("pregnancy_diary.entry.delete", "pregnancy_diary_entry", "medium"),
+        ("plans.plan.delete", "plan", "medium"),
+        ("hospital_bag.cart.update", "hospital_bag_cart", "low"),
+        ("records.feeding_record.create", "feeding_record", "low"),
+        ("records.feeding_record.delete", "feeding_record", "medium"),
+        ("records.pumping_record.delete", "pumping_record", "medium"),
+        ("records.growth_record.update", "growth_record", "medium"),
+        ("records.growth_record.delete", "growth_record", "medium"),
+        ("plans.task.create", "plan_task", "medium"),
+        ("plans.task.complete", "plan_task", "medium"),
+        ("plans.task.update", "plan_task", "medium"),
+        ("plans.task.delete", "plan_task", "medium"),
+    ],
+)
+def test_explicit_intent_actions_apply_synchronously_without_confirmation_card(
+    action_type: str,
+    target_type: str,
+    side_effect_level: str,
+) -> None:
     owner_user_id = uuid4()
     repository = FakeActionRepository()
-    outbox_service = FakeOutboxService()
-    service = AgentRuntimeService(repository=repository, outbox_service=outbox_service)
-    run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Update hospital bag cart"))
+
+    async def apply(_action: AgentAction) -> AgentActionApplyResult:
+        return AgentActionApplyResult(resource_type=target_type, resource_id="resource-1")
+
+    executor = AgentActionExecutor(repository=repository, handlers={action_type: apply})
+    service = AgentRuntimeService(repository=repository, action_executor=executor)
+    run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Do the exact action"))
 
     action = asyncio.run(
         service.propose_action(
             owner_user_id=owner_user_id,
             run_id=run.id,
-            action_type="hospital_bag.cart.update",
-            target_type="hospital_bag_cart",
-            side_effect_level="low",
-            preview_payload={"summary": "Mark nursing bra packed"},
-            apply_payload={"cart_update": {"set_checked": [{"item_id": "nursing-bra", "checked": True}]}},
+            action_type=action_type,
+            target_type=target_type,
+            side_effect_level=side_effect_level,
         )
     )
-    confirmed = asyncio.run(service.confirm_action(owner_user_id=owner_user_id, action_id=action.id))
 
-    assert confirmed.status == "confirmed"
-    assert confirmed.action_type == "hospital_bag.cart.update"
-    assert confirmed.target_type == "hospital_bag_cart"
-    assert confirmed.side_effect_level == "low"
+    assert action.status == "applied"
     assert "action.confirmation_required" not in [event.event_type for event in repository.events]
-    assert repository.events[-1].event_type == "action.queued"
-    assert repository.events[-1].payload["action_status"] == "confirmed"
-    assert repository.events[-1].payload["action_type"] == "hospital_bag.cart.update"
-    assert repository.events[-1].payload["target_type"] == "hospital_bag_cart"
-    assert outbox_service.enqueue_kwargs["payload"]["apply_payload"] == {
-        "cart_update": {"set_checked": [{"item_id": "nursing-bra", "checked": True}]}
-    }
+    assert "action.queued" not in [event.event_type for event in repository.events]
+    applied = repository.events[-1]
+    assert applied.event_type == "action.applied"
+    assert applied.payload["requires_confirmation"] is False
+    assert applied.payload["confirmation_policy"] == "explicit_intent"
+    assert applied.payload["user_visible"] is False
 
 
-def test_agent_runtime_actions_accept_milk_plan_policy() -> None:
+@pytest.mark.parametrize(
+    ("action_type", "target_type"),
+    [
+        ("support.ticket.create", "support_ticket"),
+        ("plans.milk_plan.create", "plan"),
+        ("notifications.milk_reminder.create", "notification"),
+    ],
+)
+def test_value_bearing_preview_actions_still_require_one_confirmation(action_type: str, target_type: str) -> None:
     owner_user_id = uuid4()
     repository = FakeActionRepository()
-    outbox_service = FakeOutboxService()
-    service = AgentRuntimeService(repository=repository, outbox_service=outbox_service)
-    run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Create a milk plan"))
+    service = AgentRuntimeService(repository=repository)
+    run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Prepare action"))
 
     action = asyncio.run(
         service.propose_action(
             owner_user_id=owner_user_id,
             run_id=run.id,
-            action_type="plans.milk_plan.create",
-            target_type="plan",
+            action_type=action_type,
+            target_type=target_type,
             side_effect_level="medium",
-            preview_payload={"title": "Increase pumping consistency"},
-            apply_payload={"title": "Increase pumping consistency"},
-        )
-    )
-    run.status = "waiting_for_confirmation"
-    confirmed = asyncio.run(service.confirm_action(owner_user_id=owner_user_id, action_id=action.id))
-
-    assert confirmed.status == "confirmed"
-    assert confirmed.action_type == "plans.milk_plan.create"
-    assert confirmed.target_type == "plan"
-    assert confirmed.side_effect_level == "medium"
-    assert repository.events[-2].payload["action_type"] == "plans.milk_plan.create"
-    assert repository.events[-1].event_type == "action.queued"
-    assert outbox_service.enqueue_kwargs["payload"]["apply_payload"] == {"title": "Increase pumping consistency"}
-
-
-def test_agent_runtime_actions_accept_pregnancy_plan_and_task_policies() -> None:
-    owner_user_id = uuid4()
-    repository = FakeActionRepository()
-    outbox_service = FakeOutboxService()
-    service = AgentRuntimeService(repository=repository, outbox_service=outbox_service)
-    run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Create pregnancy plan tasks"))
-    cases = [
-        (
-            "pregnancy.plan.create",
-            "plan",
-            {"title": "Third trimester plan"},
-            {"title": "Third trimester plan"},
-        ),
-        (
-            "plans.task.create",
-            "plan_task",
-            {"title": "Book prenatal appointment"},
-            {"title": "Book prenatal appointment"},
-        ),
-        (
-            "plans.task.complete",
-            "plan_task",
-            {"task_id": "task_1", "completed": True},
-            {"task_id": "task_1", "completed": True},
-        ),
-    ]
-
-    for action_type, target_type, preview_payload, apply_payload in cases:
-        action = asyncio.run(
-            service.propose_action(
-                owner_user_id=owner_user_id,
-                run_id=run.id,
-                action_type=action_type,
-                target_type=target_type,
-                side_effect_level="medium",
-                preview_payload=preview_payload,
-                apply_payload=apply_payload,
-            )
-        )
-        run.status = "waiting_for_confirmation"
-        confirmed = asyncio.run(service.confirm_action(owner_user_id=owner_user_id, action_id=action.id))
-
-        assert confirmed.status == "confirmed"
-        assert confirmed.action_type == action_type
-        assert confirmed.target_type == target_type
-        assert confirmed.side_effect_level == "medium"
-        assert repository.events[-2].payload["action_type"] == action_type
-        assert repository.events[-1].event_type == "action.queued"
-        assert outbox_service.enqueue_kwargs["payload"]["apply_payload"] == apply_payload
-
-
-def test_agent_runtime_actions_accept_milk_reminder_policy() -> None:
-    owner_user_id = uuid4()
-    repository = FakeActionRepository()
-    outbox_service = FakeOutboxService()
-    service = AgentRuntimeService(repository=repository, outbox_service=outbox_service)
-    run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Create a milk reminder"))
-
-    action = asyncio.run(
-        service.propose_action(
-            owner_user_id=owner_user_id,
-            run_id=run.id,
-            action_type="notifications.milk_reminder.create",
-            target_type="notification",
-            side_effect_level="medium",
-            preview_payload={"title": "Time to pump"},
-            apply_payload={"title": "Time to pump"},
-        )
-    )
-    run.status = "waiting_for_confirmation"
-    confirmed = asyncio.run(service.confirm_action(owner_user_id=owner_user_id, action_id=action.id))
-
-    assert confirmed.status == "confirmed"
-    assert confirmed.action_type == "notifications.milk_reminder.create"
-    assert confirmed.target_type == "notification"
-    assert confirmed.side_effect_level == "medium"
-    assert repository.events[-2].payload["action_type"] == "notifications.milk_reminder.create"
-    assert repository.events[-1].event_type == "action.queued"
-    assert outbox_service.enqueue_kwargs["payload"]["apply_payload"] == {"title": "Time to pump"}
-
-
-def test_agent_runtime_actions_require_confirmation_for_pregnancy_diary_delete() -> None:
-    owner_user_id = uuid4()
-    repository = FakeActionRepository()
-    service = AgentRuntimeService(repository=repository, outbox_service=FakeOutboxService())
-    run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Delete my diary"))
-
-    action = asyncio.run(
-        service.propose_action(
-            owner_user_id=owner_user_id,
-            run_id=run.id,
-            action_type="pregnancy_diary.entry.delete",
-            target_type="pregnancy_diary_entry",
-            side_effect_level="medium",
-            preview_payload={"entry_date": "2026-07-04"},
-            apply_payload={"entry_date": "2026-07-04"},
         )
     )
 
@@ -436,169 +246,94 @@ def test_agent_runtime_actions_require_confirmation_for_pregnancy_diary_delete()
     assert repository.events[-1].event_type == "action.confirmation_required"
 
 
-def test_agent_milk_feeding_main_flow_confirms_applies_and_replays_events() -> None:
+def test_direct_feeding_apply_and_idempotent_replay_do_not_duplicate_domain_write() -> None:
     owner_user_id = uuid4()
     repository = FakeActionRepository()
-    outbox_service = FakeOutboxService()
     records_service = FakeAgentRecordsService()
-    runtime_service = AgentRuntimeService(repository=repository, outbox_service=outbox_service)
-
-    run = asyncio.run(
-        runtime_service.create_run(
-            actor_user_id=owner_user_id,
-            thread_id=None,
-            message="Add a 90 ml bottle feeding for 8:30.",
-            request_id="req_milk_agent",
-            trace_id="trace_milk_agent",
-        )
-    )
-    action = asyncio.run(
-        runtime_service.propose_action(
-            owner_user_id=owner_user_id,
-            run_id=run.id,
-            action_type=FEEDING_RECORD_CREATE_ACTION,
-            target_type="feeding_record",
-            side_effect_level="low",
-            preview_payload={
-                "feed_time": "2026-07-04T08:30:00Z",
-                "feed_type": "bottle",
-                "volume_ml": 90,
-            },
-            apply_payload={
-                "feed_time": "2026-07-04T08:30:00Z",
-                "feed_type": "bottle",
-                "volume_ml": 90,
-                "title": "Morning bottle",
-            },
-            idempotency_key="idem-milk-action",
-        )
-    )
-
-    confirmed = asyncio.run(
-        runtime_service.confirm_action(
-            owner_user_id=owner_user_id,
-            action_id=action.id,
-            idempotency_key="idem-milk-action",
-        )
-    )
-    handler = AgentActionOutboxHandler(
+    executor = AgentActionExecutor(
         repository=repository,
         handlers={FEEDING_RECORD_CREATE_ACTION: FeedingRecordCreateActionHandler(service=records_service)},
     )
-    asyncio.run(handler(outbox_service.job))
-    asyncio.run(runtime_service.confirm_action(owner_user_id=owner_user_id, action_id=action.id, idempotency_key="retry-key"))
-    asyncio.run(handler(outbox_service.job))
+    service = AgentRuntimeService(repository=repository, action_executor=executor)
+    run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Add a 90 ml bottle feeding"))
+    kwargs = {
+        "owner_user_id": owner_user_id,
+        "run_id": run.id,
+        "action_type": FEEDING_RECORD_CREATE_ACTION,
+        "target_type": "feeding_record",
+        "side_effect_level": "low",
+        "apply_payload": {
+            "feed_time": "2026-07-04T08:30:00Z",
+            "feed_type": "bottle",
+            "volume_ml": 90,
+            "title": "Morning bottle",
+        },
+        "idempotency_key": "idem-milk-action",
+    }
 
-    applied_event = repository.events[-1]
+    first, created = asyncio.run(service.propose_action_once(**kwargs))
+    second, replay_created = asyncio.run(service.propose_action_once(**kwargs))
 
-    assert confirmed.status == "applied"
-    assert outbox_service.enqueue_calls[-1]["idempotency_key"] == f"agent-action:{action.id}:apply"
-    assert len(outbox_service.enqueue_calls) == 1
+    assert created is True and replay_created is False
+    assert second.id == first.id and second.status == "applied"
     assert len(records_service.feedings) == 1
     assert records_service.feedings[0].owner_user_id == owner_user_id
     assert records_service.feedings[0].feed_time == datetime(2026, 7, 4, 8, 30, tzinfo=timezone.utc)
-    assert records_service.create_feeding_kwargs["idempotency_key"] == "idem-milk-action"
-    assert [event.event_type for event in repository.events] == [
-        "run.queued",
-        "message.completed",
-        "action.queued",
-        "action.applied",
-    ]
-    assert applied_event.payload["action_id"] == str(action.id)
-    assert applied_event.payload["action_status"] == "applied"
-    assert applied_event.payload["resource_type"] == "feeding_record"
-    assert applied_event.payload["resource_id"] == str(records_service.feedings[0].id)
-    assert applied_event.payload["details"]["agent_action_id"] == str(action.id)
-    assert "apply_payload" not in repository.events[2].payload
+    assert [event.event_type for event in repository.events].count("action.applied") == 1
 
 
-def test_agent_pregnancy_plan_main_flow_confirms_applies_and_replays_events() -> None:
+def test_pregnancy_plan_applies_synchronously_and_changed_event_replays_once() -> None:
     owner_user_id = uuid4()
     repository = FakeActionRepository()
-    outbox_service = FakeOutboxService()
     plans_service = FakeAgentPlansService()
-    runtime_service = AgentRuntimeService(repository=repository, outbox_service=outbox_service)
-
-    run = asyncio.run(
-        runtime_service.create_run(
-            actor_user_id=owner_user_id,
-            thread_id=None,
-            message="Create a third trimester plan.",
-            request_id="req_pregnancy_agent",
-            trace_id="trace_pregnancy_agent",
-        )
+    executor = AgentActionExecutor(
+        repository=repository,
+        handlers={PREGNANCY_PLAN_CREATE_ACTION: PregnancyPlanCreateActionHandler(service=plans_service)},
     )
+    service = AgentRuntimeService(repository=repository, action_executor=executor)
+    run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Create a third trimester plan"))
+
     action = asyncio.run(
-        runtime_service.propose_action(
+        service.propose_action(
             owner_user_id=owner_user_id,
             run_id=run.id,
             action_type=PREGNANCY_PLAN_CREATE_ACTION,
             target_type="plan",
             side_effect_level="medium",
-            preview_payload={
-                "title": "Third trimester plan",
-                "summary": "Prepare appointments and bag tasks.",
-            },
             apply_payload={
                 "title": "Third trimester plan",
                 "summary": "Prepare appointments and bag tasks.",
                 "payload": {"gestational_week": 32},
             },
+            idempotency_key="pregnancy-plan-1",
         )
     )
-    run.status = "waiting_for_confirmation"
-
-    confirmed = asyncio.run(runtime_service.confirm_action(owner_user_id=owner_user_id, action_id=action.id))
-    handler = AgentActionOutboxHandler(
-        repository=repository,
-        handlers={PREGNANCY_PLAN_CREATE_ACTION: PregnancyPlanCreateActionHandler(service=plans_service)},
-    )
-    asyncio.run(handler(outbox_service.job))
-    asyncio.run(runtime_service.confirm_action(owner_user_id=owner_user_id, action_id=action.id))
-    asyncio.run(handler(outbox_service.job))
-
-    applied_event = next(event for event in repository.events if event.event_type == "action.applied")
-    changed_event = next(event for event in repository.events if event.event_type == PREGNANCY_PLAN_CHANGED_EVENT)
-
-    assert confirmed.status == "applied"
-    assert len(outbox_service.enqueue_calls) == 1
-    assert len(plans_service.plans) == 1
-    assert plans_service.plans[0].owner_user_id == owner_user_id
-    assert plans_service.plans[0].plan_type == "pregnancy"
-    assert plans_service.create_plan_kwargs["idempotency_key"] == f"agent-action:{action.id}"
-    assert [event.event_type for event in repository.events] == [
-        "run.queued",
-        "message.completed",
-        "action.confirmation_required",
-        "action.queued",
-        "action.applied",
-        PREGNANCY_PLAN_CHANGED_EVENT,
-        "run.completed",
-    ]
-    assert applied_event.payload["action_id"] == str(action.id)
-    assert applied_event.payload["action_status"] == "applied"
-    assert applied_event.payload["resource_type"] == "plan"
-    assert applied_event.payload["resource_id"] == str(plans_service.plans[0].id)
-    assert applied_event.payload["details"]["plan_type"] == "pregnancy"
-    assert changed_event.payload == {
-        "operation": "created",
-        "plan_id": str(plans_service.plans[0].id),
-        "plan_type": "pregnancy",
-        "source": "agent_action",
-        "action_id": str(action.id),
-    }
-    assert [event.event_type for event in repository.events].count(PREGNANCY_PLAN_CHANGED_EVENT) == 1
-    replayed_events = asyncio.run(
-        runtime_service.list_events(
+    replay, created = asyncio.run(
+        service.propose_action_once(
             owner_user_id=owner_user_id,
             run_id=run.id,
-            after_sequence=changed_event.sequence - 1,
-            limit=10,
+            action_type=PREGNANCY_PLAN_CREATE_ACTION,
+            target_type="plan",
+            side_effect_level="medium",
+            apply_payload=action.apply_payload,
+            idempotency_key="pregnancy-plan-1",
         )
     )
-    assert [event.event_type for event in replayed_events] == [PREGNANCY_PLAN_CHANGED_EVENT, "run.completed"]
-    assert replayed_events[0].payload == changed_event.payload
-    assert "apply_payload" not in repository.events[2].payload
+
+    assert action.status == "applied"
+    assert replay.id == action.id and created is False
+    assert len(plans_service.plans) == 1
+    assert plans_service.plans[0].plan_type == "pregnancy"
+    event_types = [event.event_type for event in repository.events]
+    assert event_types == ["run.queued", "message.completed", "action.applied", PREGNANCY_PLAN_CHANGED_EVENT]
+    assert "action.confirmation_required" not in event_types
+    assert "action.queued" not in event_types
+    changed = repository.events[-1]
+    assert changed.payload["plan_id"] == str(plans_service.plans[0].id)
+    assert changed.payload["action_id"] == str(action.id)
+    assert changed.payload["user_visible"] is False
+    replayed = asyncio.run(service.list_events(owner_user_id=owner_user_id, run_id=run.id, after_sequence=changed.sequence - 1, limit=10))
+    assert replayed == [changed]
 
 
 class FakeActionRepository(FakeAgentRuntimeRepository):
@@ -607,6 +342,9 @@ class FakeActionRepository(FakeAgentRuntimeRepository):
         self.action = None
         self.actions = []
         self.locked_run_ids = []
+
+    def begin_nested(self):
+        return _NoopSavepoint()
 
     async def create_action(self, **kwargs):
         self.action = AgentAction(
@@ -630,14 +368,7 @@ class FakeActionRepository(FakeAgentRuntimeRepository):
     async def lock_run_for_action_proposal(self, *, run_id):
         self.locked_run_ids.append(run_id)
 
-    async def get_reusable_action_by_idempotency_key(
-        self,
-        *,
-        run_id,
-        actor_user_id,
-        action_type,
-        idempotency_key,
-    ):
+    async def get_reusable_action_by_idempotency_key(self, *, run_id, actor_user_id, action_type, idempotency_key):
         return next(
             (
                 action
@@ -659,6 +390,11 @@ class FakeActionRepository(FakeAgentRuntimeRepository):
 
     async def get_run(self, *, run_id: UUID):
         return next((run for run in self.runs if run.id == run_id), None)
+
+    async def mark_run_queued(self, *, run):
+        run.status = "queued"
+        run.started_at = None
+        return run
 
     async def mark_action_confirmed(self, **kwargs):
         action = kwargs["action"]
@@ -699,45 +435,19 @@ class FakeActionRepository(FakeAgentRuntimeRepository):
         return action
 
 
-class FakeOutboxService:
-    def __init__(self) -> None:
-        self.job = OutboxJob(
-            id=uuid4(),
-            job_type=AGENT_ACTION_APPLY_JOB,
-            status="queued",
-            payload={},
-            idempotency_key="",
-            request_id="",
-            trace_id="",
-        )
-        self.enqueue_kwargs = {}
-        self.enqueue_calls = []
+class _NoopSavepoint:
+    async def __aenter__(self):
+        return self
 
-    async def enqueue(self, **kwargs):
-        self.job = OutboxJob(
-            id=uuid4(),
-            job_type=AGENT_ACTION_APPLY_JOB,
-            status="queued",
-            payload={},
-            idempotency_key="",
-            request_id="",
-            trace_id="",
-        )
-        self.enqueue_kwargs = kwargs
-        self.enqueue_calls.append(kwargs)
-        self.job.action_id = kwargs["action_id"]
-        self.job.payload = kwargs["payload"]
-        self.job.idempotency_key = kwargs["idempotency_key"]
-        return self.job
+    async def __aexit__(self, _exc_type, _exc, _traceback):
+        return False
 
 
 class FakeAgentRecordsService:
     def __init__(self) -> None:
         self.feedings = []
-        self.create_feeding_kwargs = {}
 
     async def create_feeding(self, **kwargs):
-        self.create_feeding_kwargs = kwargs
         record = FeedingRecord(
             id=uuid4(),
             owner_user_id=kwargs["owner_user_id"],
@@ -757,10 +467,8 @@ class FakeAgentRecordsService:
 class FakeAgentPlansService:
     def __init__(self) -> None:
         self.plans = []
-        self.create_plan_kwargs = {}
 
     async def create_plan(self, **kwargs):
-        self.create_plan_kwargs = kwargs
         plan = Plan(
             id=uuid4(),
             owner_user_id=kwargs["owner_user_id"],

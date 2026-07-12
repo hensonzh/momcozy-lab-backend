@@ -38,7 +38,7 @@ def test_only_pregnancy_diary_delete_uses_the_action_policy() -> None:
 
     assert "pregnancy_diary.entry.create" not in DEFAULT_AGENT_ACTION_RULES
     assert "pregnancy_diary.entry.update" not in DEFAULT_AGENT_ACTION_RULES
-    assert delete.requires_confirmation is True
+    assert delete.requires_confirmation is False
     assert delete.target_type == "pregnancy_diary_entry"
 
 

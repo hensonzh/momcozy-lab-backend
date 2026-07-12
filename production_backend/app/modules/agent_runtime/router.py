@@ -13,8 +13,8 @@ from ...api.dependencies import normalize_idempotency_key, optional_idempotency_
 from ...api.surface import SurfaceAPIRouter, api_surface
 from ...core.logging import log_agent_runtime_event
 from ...infrastructure.db import get_session
-from ..audit import IdempotencyService, OutboxService
-from ..audit.repository import AuditRepository, OutboxRepository
+from ..audit import IdempotencyService
+from ..audit.repository import AuditRepository
 from ..auth import CurrentUser, ServiceClient
 from ..files.repository import FileRepository
 from .evals.service import AgentEvalService
@@ -66,7 +66,6 @@ def get_agent_runtime_service(request: Request, session: AsyncSession = Depends(
     return AgentRuntimeService(
         repository=repository,
         idempotency_service=IdempotencyService(repository=audit_repository),
-        outbox_service=OutboxService(repository=OutboxRepository(session)),
         file_repository=FileRepository(session),
         controls=AgentRunControls(request.app.state.redis_client),
     )

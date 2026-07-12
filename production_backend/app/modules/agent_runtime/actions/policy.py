@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Mapping
+from typing import Any, Mapping
 
 from ....core.errors import ApiError
 
@@ -51,13 +51,13 @@ DEFAULT_AGENT_ACTION_RULES: Mapping[str, AgentActionPolicyRule] = {
         action_type="records.feeding_record.delete",
         target_type="feeding_record",
         side_effect_level="medium",
-        requires_confirmation=True,
+        requires_confirmation=False,
     ),
     "records.pumping_record.delete": AgentActionPolicyRule(
         action_type="records.pumping_record.delete",
         target_type="pumping_record",
         side_effect_level="medium",
-        requires_confirmation=True,
+        requires_confirmation=False,
     ),
     "records.growth_record.create": AgentActionPolicyRule(
         action_type="records.growth_record.create",
@@ -69,13 +69,13 @@ DEFAULT_AGENT_ACTION_RULES: Mapping[str, AgentActionPolicyRule] = {
         action_type="records.growth_record.update",
         target_type="growth_record",
         side_effect_level="medium",
-        requires_confirmation=True,
+        requires_confirmation=False,
     ),
     "records.growth_record.delete": AgentActionPolicyRule(
         action_type="records.growth_record.delete",
         target_type="growth_record",
         side_effect_level="medium",
-        requires_confirmation=True,
+        requires_confirmation=False,
     ),
     "plans.milk_plan.create": AgentActionPolicyRule(
         action_type="plans.milk_plan.create",
@@ -87,37 +87,37 @@ DEFAULT_AGENT_ACTION_RULES: Mapping[str, AgentActionPolicyRule] = {
         action_type="pregnancy.plan.create",
         target_type="plan",
         side_effect_level="medium",
-        requires_confirmation=True,
+        requires_confirmation=False,
     ),
     "plans.task.create": AgentActionPolicyRule(
         action_type="plans.task.create",
         target_type="plan_task",
         side_effect_level="medium",
-        requires_confirmation=True,
+        requires_confirmation=False,
     ),
     "plans.task.complete": AgentActionPolicyRule(
         action_type="plans.task.complete",
         target_type="plan_task",
         side_effect_level="medium",
-        requires_confirmation=True,
+        requires_confirmation=False,
     ),
     "plans.task.update": AgentActionPolicyRule(
         action_type="plans.task.update",
         target_type="plan_task",
         side_effect_level="medium",
-        requires_confirmation=True,
+        requires_confirmation=False,
     ),
     "plans.task.delete": AgentActionPolicyRule(
         action_type="plans.task.delete",
         target_type="plan_task",
         side_effect_level="medium",
-        requires_confirmation=True,
+        requires_confirmation=False,
     ),
     "plans.plan.delete": AgentActionPolicyRule(
         action_type="plans.plan.delete",
         target_type="plan",
         side_effect_level="medium",
-        requires_confirmation=True,
+        requires_confirmation=False,
     ),
     "notifications.milk_reminder.create": AgentActionPolicyRule(
         action_type="notifications.milk_reminder.create",
@@ -129,7 +129,7 @@ DEFAULT_AGENT_ACTION_RULES: Mapping[str, AgentActionPolicyRule] = {
         action_type="pregnancy_diary.entry.delete",
         target_type="pregnancy_diary_entry",
         side_effect_level="medium",
-        requires_confirmation=True,
+        requires_confirmation=False,
     ),
 }
 
@@ -163,3 +163,21 @@ class AgentActionPolicy:
             side_effect_level=rule.side_effect_level,
             requires_confirmation=rule.requires_confirmation,
         )
+
+
+def action_presentation_payload(
+    *,
+    action: Any,
+    action_policy: AgentActionPolicy | None = None,
+) -> dict[str, bool | str]:
+    policy = action_policy or AgentActionPolicy()
+    decision = policy.validate(
+        action_type=str(getattr(action, "action_type", "") or ""),
+        target_type=str(getattr(action, "target_type", "") or ""),
+        side_effect_level=str(getattr(action, "side_effect_level", "") or ""),
+    )
+    return {
+        "requires_confirmation": decision.requires_confirmation,
+        "confirmation_policy": "always" if decision.requires_confirmation else "explicit_intent",
+        "user_visible": decision.requires_confirmation,
+    }

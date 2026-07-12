@@ -197,12 +197,13 @@ def test_compose_exposes_memory_worker_as_optional_worker_profile() -> None:
     assert "redis:" not in memory_worker_section
 
 
-def test_outbox_worker_waits_for_redis_because_agent_events_use_stream_cursor() -> None:
+def test_generic_outbox_worker_has_no_agent_stream_redis_dependency() -> None:
     compose = LOCAL_COMPOSE.read_text()
     outbox_worker_section = compose.split("outbox-worker:", maxsplit=1)[1].split("\n  postgres:", maxsplit=1)[0]
 
-    assert "redis:" in outbox_worker_section
-    assert "condition: service_healthy" in outbox_worker_section
+    assert "redis:" not in outbox_worker_section
+    assert "postgres:" in outbox_worker_section
+    assert "minio-init:" in outbox_worker_section
 
 
 def test_production_compose_only_starts_application_processes() -> None:

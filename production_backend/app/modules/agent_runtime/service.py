@@ -9,8 +9,9 @@ from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from ...core.errors import ApiError
-from ..audit import IdempotencyKey, IdempotencyService, OutboxService, parse_idempotency_response_ref, request_hash
-from .actions.policy import AgentActionPolicy
+from ..audit import IdempotencyKey, IdempotencyService, parse_idempotency_response_ref, request_hash
+from .actions.executor import AgentActionExecutor
+from .actions.policy import AgentActionPolicy, action_presentation_payload
 from .client_context import sanitize_agent_client_context
 from .run_lifecycle.controls import AgentRunControls
 from .models import AgentAction, AgentArtifact, AgentEvent, AgentRun, AgentThread
@@ -18,7 +19,6 @@ from .repository import AgentRuntimeRepository
 
 
 AGENT_RUN_CREATE_IDEMPOTENCY_SCOPE = "agent.runs.create"
-AGENT_ACTION_APPLY_JOB = "agent.action.apply"
 DEFAULT_RUNTIME_PATTERN = "langgraph_sdk"
 DEFAULT_GRAPH_VERSION = "momcozy-agent-v1"
 TERMINAL_RUN_STATUSES = {"completed", "failed", "cancelled", "expired"}
@@ -37,14 +37,14 @@ class AgentRuntimeService:
         *,
         repository: AgentRuntimeRepository,
         idempotency_service: IdempotencyService | None = None,
-        outbox_service: OutboxService | None = None,
+        action_executor: AgentActionExecutor | None = None,
         file_repository: Any | None = None,
         controls: AgentRunControls | None = None,
         action_policy: AgentActionPolicy | None = None,
     ) -> None:
         self.repository = repository
         self.idempotency_service = idempotency_service
-        self.outbox_service = outbox_service
+        self.action_executor = action_executor
         self.file_repository = file_repository
         self.controls = controls
         self.action_policy = action_policy or AgentActionPolicy()
@@ -401,8 +401,8 @@ class AgentRuntimeService:
             target_type=_normalize_text(target_type, max_length=120),
             side_effect_level=_normalize_text(side_effect_level, max_length=32),
         )
-        if not decision.requires_confirmation and self.outbox_service is None:
-            raise ApiError(code="outbox_not_configured", message="Agent action outbox is not configured.", status=500)
+        if not decision.requires_confirmation and self.action_executor is None:
+            raise ApiError(code="action_executor_not_configured", message="Agent action executor is not configured.", status=500)
         normalized_idempotency_key = _normalize_text(idempotency_key, max_length=255)
         if normalized_idempotency_key and reuse_existing:
             lock = getattr(self.repository, "lock_run_for_action_proposal", None)
@@ -417,6 +417,9 @@ class AgentRuntimeService:
                     idempotency_key=normalized_idempotency_key,
                 )
                 if existing is not None:
+                    if not decision.requires_confirmation and existing.status in {"confirmed", "applying"}:
+                        outcome = await self.action_executor.apply(existing)
+                        return outcome.action, False
                     return existing, False
         initial_status = "confirmation_required" if decision.requires_confirmation else "proposed"
         action = await self.repository.create_action(
@@ -440,8 +443,8 @@ class AgentRuntimeService:
                 apply_payload=None,
                 idempotency_key=action_idempotency_key,
             )
-            await self._queue_action_apply(owner_user_id=owner_user_id, run=run, action=confirmed)
-            return confirmed, True
+            outcome = await self.action_executor.apply(confirmed)
+            return outcome.action, True
         await self._append_event(
             thread_id=run.thread_id,
             run_id=run.id,
@@ -454,6 +457,7 @@ class AgentRuntimeService:
                 "target_id": action.target_id,
                 "side_effect_level": action.side_effect_level,
                 "preview_payload": action.preview_payload,
+                **action_presentation_payload(action=action, action_policy=self.action_policy),
             },
         )
         return action, True
@@ -519,6 +523,9 @@ class AgentRuntimeService:
         edited_apply_payload: dict[str, Any] | None = None,
         idempotency_key: str = "",
     ) -> AgentAction:
+        lock_action = getattr(self.repository, "lock_action_for_confirmation", None)
+        if callable(lock_action):
+            await lock_action(action_id=action_id, owner_user_id=owner_user_id)
         action = await self.get_action(owner_user_id=owner_user_id, action_id=action_id)
         if action.status in {"confirmed", "applying", "applied"}:
             return action
@@ -528,8 +535,13 @@ class AgentRuntimeService:
             raise ApiError(code="conflict", message="Agent action cannot be confirmed from its current status.", status=409)
         if _is_expired(action.expires_at):
             return await self._expire_action(owner_user_id=owner_user_id, action=action)
-        if self.outbox_service is None:
-            raise ApiError(code="outbox_not_configured", message="Agent action outbox is not configured.", status=500)
+        run = await self.get_run(owner_user_id=owner_user_id, run_id=action.run_id)
+        if run.status != "waiting_for_confirmation":
+            raise ApiError(
+                code="agent_run_not_waiting_for_confirmation",
+                message="Agent run is not waiting for this confirmation.",
+                status=409,
+            )
         action_idempotency_key = _normalize_text(idempotency_key, max_length=255) or f"agent-action:{action.id}"
         confirmed = await self.repository.mark_action_confirmed(
             action=action,
@@ -537,43 +549,33 @@ class AgentRuntimeService:
             apply_payload=edited_apply_payload,
             idempotency_key=action_idempotency_key,
         )
-        run = await self.get_run(owner_user_id=owner_user_id, run_id=confirmed.run_id)
-        await self._queue_action_apply(owner_user_id=owner_user_id, run=run, action=confirmed)
-        return confirmed
-
-    async def _queue_action_apply(self, *, owner_user_id: UUID, run: AgentRun, action: AgentAction) -> None:
-        if self.outbox_service is None:
-            raise ApiError(code="outbox_not_configured", message="Agent action outbox is not configured.", status=500)
-        outbox_job = await self.outbox_service.enqueue(
-            job_type=AGENT_ACTION_APPLY_JOB,
+        await self.repository.mark_run_queued(run=run)
+        presentation = action_presentation_payload(action=confirmed, action_policy=self.action_policy)
+        await self._append_event(
+            thread_id=run.thread_id,
+            run_id=run.id,
+            event_type="action.confirmed",
             payload={
-                "action_id": str(action.id),
-                "run_id": str(run.id),
-                "actor_user_id": str(owner_user_id),
-                "action_type": action.action_type,
-                "target_type": action.target_type,
-                "target_id": action.target_id,
-                "apply_payload": action.apply_payload,
+                "action_id": str(confirmed.id),
+                "action_status": confirmed.status,
+                "action_type": confirmed.action_type,
+                "target_type": confirmed.target_type,
+                "target_id": confirmed.target_id,
+                **presentation,
             },
-            idempotency_key=_action_outbox_idempotency_key(action_id=action.id),
-            action_id=action.id,
-            request_id=run.request_id,
-            trace_id=run.trace_id,
         )
         await self._append_event(
             thread_id=run.thread_id,
             run_id=run.id,
-            event_type="action.queued",
+            event_type="run.queued",
             payload={
-                "action_id": str(action.id),
-                "action_status": action.status,
-                "action_type": action.action_type,
-                "target_type": action.target_type,
-                "target_id": action.target_id,
-                "outbox_status": outbox_job.status,
-                "outbox_job_id": str(outbox_job.id),
+                "reason": "action_confirmed",
+                "action_id": str(confirmed.id),
+                "phase": "queued",
             },
         )
+        self._register_run_queue_wakeup(run_id=run.id)
+        return confirmed
 
     async def reject_action(self, *, owner_user_id: UUID, action_id: UUID, reason: str = "") -> AgentAction:
         action = await self.get_action(owner_user_id=owner_user_id, action_id=action_id)
@@ -594,6 +596,7 @@ class AgentRuntimeService:
                 "target_type": rejected.target_type,
                 "target_id": rejected.target_id,
                 "reason": _normalize_text(reason, max_length=500),
+                **action_presentation_payload(action=rejected, action_policy=self.action_policy),
             },
         )
         await self._complete_waiting_run_after_action_decision(run=run, action_id=rejected.id, decision="rejected")
@@ -613,6 +616,7 @@ class AgentRuntimeService:
                 "target_type": expired.target_type,
                 "target_id": expired.target_id,
                 "code": expired.error_code,
+                **action_presentation_payload(action=expired, action_policy=self.action_policy),
             },
         )
         await self._complete_waiting_run_after_action_decision(run=run, action_id=expired.id, decision="expired")
@@ -739,10 +743,6 @@ def _parse_uuid(value: Any, *, error_code: str) -> UUID:
         return UUID(str(value or ""))
     except (TypeError, ValueError) as exc:
         raise ApiError(code=error_code, message="Attachment resource id is invalid.", status=422) from exc
-
-
-def _action_outbox_idempotency_key(*, action_id: UUID) -> str:
-    return f"agent-action:{action_id}:apply"
 
 
 def _title_from_message(message: str) -> str:

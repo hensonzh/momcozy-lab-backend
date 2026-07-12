@@ -6,7 +6,7 @@ from uuid import UUID
 
 from ...core.errors import ApiError
 from ...workers.errors import PermanentJobError
-from ..agent_runtime.actions.outbox import AgentActionApplyResult, AgentApplicationEvent
+from ..agent_runtime.actions.executor import AgentActionApplyResult, AgentApplicationEvent
 from ..agent_runtime.models import AgentAction
 from .service import PlansService
 

@@ -253,6 +253,15 @@ class AgentRuntimeRepository:
         await self.session.flush()
         return run
 
+    async def mark_run_queued(self, *, run: AgentRun) -> AgentRun:
+        run.status = "queued"
+        run.started_at = None
+        run.completed_at = None
+        run.error_code = ""
+        run.error_details = {}
+        await self.session.flush()
+        return run
+
     async def create_message(
         self,
         *,
@@ -296,6 +305,15 @@ class AgentRuntimeRepository:
         statement = (
             select(AgentMessage)
             .where(AgentMessage.run_id == run_id, AgentMessage.role == "user")
+            .order_by(AgentMessage.sequence.desc())
+            .limit(1)
+        )
+        return cast(AgentMessage | None, await self.session.scalar(statement))
+
+    async def get_latest_assistant_message_for_run(self, *, run_id: UUID) -> AgentMessage | None:
+        statement = (
+            select(AgentMessage)
+            .where(AgentMessage.run_id == run_id, AgentMessage.role == "assistant", AgentMessage.status == "completed")
             .order_by(AgentMessage.sequence.desc())
             .limit(1)
         )
@@ -418,6 +436,21 @@ class AgentRuntimeRepository:
             )
         )
         return cast(AgentAction | None, await self.session.scalar(statement))
+
+    async def lock_action_for_confirmation(self, *, action_id: UUID, owner_user_id: UUID) -> None:
+        statement = (
+            select(AgentAction.id)
+            .join(AgentRun, AgentRun.id == AgentAction.run_id)
+            .join(AgentThread, AgentThread.id == AgentRun.thread_id)
+            .where(
+                AgentAction.id == action_id,
+                AgentAction.actor_user_id == owner_user_id,
+                AgentThread.owner_user_id == owner_user_id,
+                AgentThread.deleted_at.is_(None),
+            )
+            .with_for_update()
+        )
+        await self.session.scalar(statement)
 
     async def get_action(self, *, action_id: UUID) -> AgentAction | None:
         statement = select(AgentAction).where(AgentAction.id == action_id).execution_options(populate_existing=True)

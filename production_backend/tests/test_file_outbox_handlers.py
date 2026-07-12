@@ -3,8 +3,6 @@ import asyncio
 import pytest
 
 from production_backend.app.modules.audit.models import OutboxJob
-from production_backend.app.modules.agent_runtime.service import AGENT_ACTION_APPLY_JOB
-from production_backend.app.modules.hospital_bag import HOSPITAL_BAG_CART_UPDATE_ACTION
 from production_backend.app.modules.files.outbox_handlers import FileObjectDeleteHandler
 from production_backend.app.modules.files.service import FILE_OBJECT_DELETE_JOB
 from production_backend.app.workers.errors import PermanentJobError
@@ -36,15 +34,7 @@ def test_file_object_delete_handler_rejects_missing_object_key() -> None:
 def test_build_outbox_handlers_registers_file_cleanup_handler() -> None:
     handlers = build_outbox_handlers(object_storage=FakeObjectStorage())
 
-    assert FILE_OBJECT_DELETE_JOB in handlers
-    assert AGENT_ACTION_APPLY_JOB not in handlers
-
-
-def test_build_outbox_handlers_registers_agent_action_handler_when_repository_is_available() -> None:
-    handlers = build_outbox_handlers(object_storage=FakeObjectStorage(), agent_runtime_repository=object())
-
-    assert AGENT_ACTION_APPLY_JOB in handlers
-    assert handlers[AGENT_ACTION_APPLY_JOB].handlers.keys() >= {HOSPITAL_BAG_CART_UPDATE_ACTION}
+    assert set(handlers) == {FILE_OBJECT_DELETE_JOB}
 
 
 class FakeObjectStorage:

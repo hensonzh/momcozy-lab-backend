@@ -27,7 +27,7 @@ def test_outbox_service_rejects_same_key_for_different_action() -> None:
     service = OutboxService(repository=repository)
 
     with pytest.raises(ApiError) as exc_info:
-        asyncio.run(service.enqueue(job_type="agent.action.apply", payload={}, idempotency_key="job-1", action_id=uuid4()))
+        asyncio.run(service.enqueue(job_type="files.cleanup", payload={}, idempotency_key="job-1", action_id=uuid4()))
 
     assert exc_info.value.code == "idempotency_conflict"
     assert repository.created_job is None

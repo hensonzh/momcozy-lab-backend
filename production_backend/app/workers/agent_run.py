@@ -9,11 +9,12 @@ from typing import Any
 from uuid import UUID
 
 from ..core.errors import ApiError
+from ..modules.agent_runtime.actions.executor import AgentActionExecutor
 from ..modules.agent_runtime.event_stream.publisher import AgentEventPublisher
 from ..modules.agent_runtime.event_stream.transient import AgentTransientStream
 from ..modules.agent_runtime.run_lifecycle.controls import AgentRunControls
 from ..modules.agent_runtime.run_lifecycle.execution import AgentRunExecutionResult, AgentRunHandler
-from ..modules.agent_runtime.models import AgentEvent, AgentRun
+from ..modules.agent_runtime.models import AgentAction, AgentEvent, AgentRun
 from ..modules.agent_runtime.repository import AgentRuntimeRepository
 from ..modules.agent_runtime.response_text import (
     APPEND_ONLY_TEXT_STREAM_SCHEMA_VERSION,
@@ -99,12 +100,14 @@ class AgentRunWorker:
         repository: AgentRuntimeRepository,
         controls: AgentRunControls | None = None,
         handler: AgentRunHandler | None = None,
+        action_executor: AgentActionExecutor | None = None,
         after_event_append: Callable[[], Awaitable[None]] | None = None,
         transient_stream: AgentTransientStream | None = None,
     ) -> None:
         self.repository = repository
         self.controls = controls
         self.handler = handler or missing_agent_run_handler
+        self.action_executor = action_executor
         self.after_event_append = after_event_append
         self.transient_stream = transient_stream
         self.event_publisher = AgentEventPublisher(
@@ -161,7 +164,9 @@ class AgentRunWorker:
             return await self._cancel(run=run, error_code="cancelled_during_startup")
 
         try:
-            result = await self.handler(run)
+            result = await self._resume_action(run)
+            if result is None:
+                result = await self.handler(run)
         except ApiError as exc:
             error_details = _api_error_details(exc)
             _log_run_failure(run=run, error_code=exc.code, error_details=error_details)
@@ -223,7 +228,12 @@ class AgentRunWorker:
                     live_before_append=_has_exactly_three_quick_replies(result.quick_replies),
                 )
             completed = await self.repository.mark_run_completed(run=run, completed_at=_utcnow())
-            await self._append_event(run=completed, event_type="run.completed", payload={})
+            completion_payload: dict[str, Any] = {}
+            if result.completion_reason:
+                completion_payload["reason"] = result.completion_reason
+            if result.completed_action_id is not None:
+                completion_payload["action_id"] = str(result.completed_action_id)
+            await self._append_event(run=completed, event_type="run.completed", payload=completion_payload)
             await self._clear_controls(completed)
             return completed
 
@@ -247,11 +257,65 @@ class AgentRunWorker:
         return failed
 
     async def _interrupt_running_locked(self, run: AgentRun) -> AgentRun:
+        action = await self._latest_resumable_action(run=run)
+        if action is not None:
+            queued = await self.repository.mark_run_queued(run=run)
+            await self._append_event(
+                run=queued,
+                event_type="run.queued",
+                payload={"reason": "action_resume", "action_id": str(action.id), "phase": "queued"},
+            )
+            await self._notify_run_queued(run_id=queued.id)
+            return queued
         return await self._fail(
             run=run,
             error_code=INTERRUPTED_RUN_ERROR_CODE,
             error_details={"reason": "stale_running_run_not_resumed"},
         )
+
+    async def _resume_action(self, run: AgentRun) -> AgentRunExecutionResult | None:
+        action = await self._latest_resumable_action(run=run)
+        if action is None:
+            return None
+        if self.action_executor is None:
+            raise ApiError(
+                code="action_executor_not_configured",
+                message="Agent action executor is not configured.",
+                status=503,
+            )
+        outcome = await self.action_executor.apply(action)
+        action = outcome.action
+
+        get_latest_message = getattr(self.repository, "get_latest_assistant_message_for_run", None)
+        latest_message = await get_latest_message(run_id=run.id) if callable(get_latest_message) else None
+        final_text = "" if latest_message is not None else _action_completion_text(action)
+        return AgentRunExecutionResult(
+            status="completed",
+            final_text=final_text,
+            completed_action_id=action.id,
+            completion_reason=f"action_{action.status}",
+        )
+
+    async def _latest_resumable_action(self, *, run: AgentRun) -> AgentAction | None:
+        list_actions = getattr(self.repository, "list_actions_for_run", None)
+        if not callable(list_actions):
+            return None
+        actions = await list_actions(run_id=run.id)
+        return next(
+            (
+                action
+                for action in reversed(actions)
+                if action.status in {"confirmed", "applying", "applied", "failed"}
+            ),
+            None,
+        )
+
+    async def _notify_run_queued(self, *, run_id: UUID) -> None:
+        if self.controls is None:
+            return
+        notify = getattr(self.controls, "notify_run_queued", None)
+        if callable(notify):
+            await notify(run_id=run_id)
 
     async def _append_event(
         self,
@@ -345,12 +409,25 @@ def _has_exactly_three_quick_replies(value: list[dict[str, Any]]) -> bool:
 
 
 LIVE_DURABLE_EVENT_TYPES = {
+    "run.queued",
     "message.completed",
     "run.completed",
     "run.failed",
     "run.cancelled",
     "run.waiting_for_confirmation",
 }
+
+
+def _action_completion_text(action: AgentAction) -> str:
+    if action.status == "failed":
+        return "这次操作没有成功，数据没有被更改，请稍后重试。"
+    success_messages = {
+        "pregnancy.plan.create": "孕期计划已生成，并同步到「宝宝和我」。",
+        "pregnancy_diary.entry.delete": "孕期日记已删除。",
+        "plans.plan.delete": "计划已删除。",
+        "support.ticket.create": "客服工单已提交。",
+    }
+    return success_messages.get(action.action_type, "操作已完成并保存。")
 
 
 def _live_event_dedupe_key(*, run_id: UUID, event_type: str, payload: dict[str, Any]) -> str:

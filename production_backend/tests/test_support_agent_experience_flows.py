@@ -2,21 +2,20 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
-from production_backend.app.modules.agent_runtime.actions.outbox import AgentActionOutboxHandler
+from production_backend.app.modules.agent_runtime.actions.executor import AgentActionExecutor
 from production_backend.app.modules.agent_runtime.models import AgentAction, AgentEvent, AgentMessage, AgentRun, AgentThread
-from production_backend.app.modules.agent_runtime.service import AGENT_ACTION_APPLY_JOB, AgentRuntimeService
-from production_backend.app.modules.audit.models import IdempotencyKey, OutboxJob
+from production_backend.app.modules.agent_runtime.service import AgentRuntimeService
+from production_backend.app.modules.audit.models import IdempotencyKey
 from production_backend.app.modules.hospital_bag import HOSPITAL_BAG_CART_UPDATE_ACTION, HospitalBagCartUpdateActionHandler
 from production_backend.app.modules.support.agent_actions import SUPPORT_TICKET_CREATE_ACTION, SupportTicketCreateActionHandler
 from production_backend.app.modules.support.models import SupportTicket
 from production_backend.app.modules.support.service import SupportTicketsService
+from production_backend.app.workers.agent_run import AgentRunWorker
 
 
-def test_agent_support_ticket_main_flow_confirms_queues_applies_and_replays_events() -> None:
+def test_agent_support_ticket_confirmation_requeues_same_run_and_worker_applies() -> None:
     owner_user_id = uuid4()
     runtime_repository = InMemoryAgentRuntimeRepository()
-    outbox_service = CapturingOutboxService()
-    runtime_service = AgentRuntimeService(repository=runtime_repository, outbox_service=outbox_service)
     support_repository = InMemorySupportTicketsRepository()
     support_audit = FlowAuditService()
     support_service = SupportTicketsService(
@@ -24,6 +23,11 @@ def test_agent_support_ticket_main_flow_confirms_queues_applies_and_replays_even
         audit_service=support_audit,
         idempotency_service=FlowIdempotencyService(),
     )
+    action_executor = AgentActionExecutor(
+        repository=runtime_repository,
+        handlers={SUPPORT_TICKET_CREATE_ACTION: SupportTicketCreateActionHandler(service=support_service)},
+    )
+    runtime_service = AgentRuntimeService(repository=runtime_repository, action_executor=action_executor)
 
     run = asyncio.run(
         runtime_service.create_run(
@@ -59,11 +63,7 @@ def test_agent_support_ticket_main_flow_confirms_queues_applies_and_replays_even
             idempotency_key="idem-support-action",
         )
     )
-    handler = AgentActionOutboxHandler(
-        repository=runtime_repository,
-        handlers={SUPPORT_TICKET_CREATE_ACTION: SupportTicketCreateActionHandler(service=support_service)},
-    )
-    asyncio.run(handler(outbox_service.job))
+    asyncio.run(AgentRunWorker(repository=runtime_repository, action_executor=action_executor).run_once(run_id=run.id))
 
     ticket = support_repository.tickets[0]
     event_types = [event.event_type for event in runtime_repository.events]
@@ -73,25 +73,31 @@ def test_agent_support_ticket_main_flow_confirms_queues_applies_and_replays_even
     assert ticket.issue_summary == "Air1 pump does not turn on after charging"
     assert ticket.source == "agent_action"
     assert ticket.payload["agent_action_id"] == str(action.id)
-    assert outbox_service.enqueue_kwargs["idempotency_key"] == f"agent-action:{action.id}:apply"
     assert event_types == [
         "run.queued",
         "message.completed",
         "action.confirmation_required",
-        "action.queued",
+        "action.confirmed",
+        "run.queued",
+        "run.started",
         "action.applied",
+        "message.completed",
         "run.completed",
     ]
-    assert runtime_repository.events[-2].payload["resource_type"] == "support_ticket"
-    assert runtime_repository.events[-2].payload["resource_id"] == str(ticket.id)
+    applied_event = next(event for event in runtime_repository.events if event.event_type == "action.applied")
+    assert applied_event.payload["resource_type"] == "support_ticket"
+    assert applied_event.payload["resource_id"] == str(ticket.id)
     assert support_audit.entries[-1]["action"] == "support.tickets.create"
 
 
-def test_agent_hospital_bag_cart_main_flow_direct_queues_applies_and_replays_events() -> None:
+def test_agent_hospital_bag_cart_main_flow_applies_inside_current_tool_transaction() -> None:
     owner_user_id = uuid4()
     runtime_repository = InMemoryAgentRuntimeRepository()
-    outbox_service = CapturingOutboxService()
-    runtime_service = AgentRuntimeService(repository=runtime_repository, outbox_service=outbox_service)
+    action_executor = AgentActionExecutor(
+        repository=runtime_repository,
+        handlers={HOSPITAL_BAG_CART_UPDATE_ACTION: HospitalBagCartUpdateActionHandler()},
+    )
+    runtime_service = AgentRuntimeService(repository=runtime_repository, action_executor=action_executor)
 
     run = asyncio.run(
         runtime_service.create_run(
@@ -118,23 +124,15 @@ def test_agent_hospital_bag_cart_main_flow_direct_queues_applies_and_replays_eve
             },
         )
     )
-    confirmed = asyncio.run(runtime_service.confirm_action(owner_user_id=owner_user_id, action_id=action.id))
-    handler = AgentActionOutboxHandler(
-        repository=runtime_repository,
-        handlers={HOSPITAL_BAG_CART_UPDATE_ACTION: HospitalBagCartUpdateActionHandler()},
-    )
-    asyncio.run(handler(outbox_service.job))
-
     applied_event = runtime_repository.events[-1]
 
-    assert confirmed.status == "applied"
-    assert outbox_service.enqueue_kwargs["idempotency_key"] == f"agent-action:{action.id}:apply"
+    assert action.status == "applied"
     assert [event.event_type for event in runtime_repository.events] == [
         "run.queued",
         "message.completed",
-        "action.queued",
         "action.applied",
     ]
+    assert applied_event.payload["user_visible"] is False
     assert applied_event.payload["resource_type"] == "hospital_bag_cart"
     assert applied_event.payload["resource_id"] == str(action.id)
     assert applied_event.payload["details"]["cart_update"] == {
@@ -197,15 +195,38 @@ class InMemoryAgentRuntimeRepository:
             return self.run
         return None
 
+    def begin_nested(self):
+        return _NoopSavepoint()
+
+    async def refresh_run(self, *, run: AgentRun):
+        return run
+
+    async def mark_run_running(self, *, run: AgentRun, started_at):
+        run.status = "running"
+        run.started_at = started_at
+        return run
+
+    async def mark_run_queued(self, *, run: AgentRun):
+        run.status = "queued"
+        run.started_at = None
+        return run
+
     async def mark_run_completed(self, *, run: AgentRun, completed_at):
         run.status = "completed"
         run.completed_at = completed_at
         return run
 
     async def create_message(self, **kwargs):
-        message = AgentMessage(id=uuid4(), sequence=len(self.messages) + 1, **kwargs)
+        message_id = kwargs.pop("message_id", None)
+        message = AgentMessage(id=message_id or uuid4(), sequence=len(self.messages) + 1, **kwargs)
         self.messages.append(message)
         return message
+
+    async def get_latest_assistant_message_for_run(self, *, run_id: UUID):
+        return next(
+            (message for message in reversed(self.messages) if message.run_id == run_id and message.role == "assistant"),
+            None,
+        )
 
     async def create_action(self, **kwargs):
         action = AgentAction(
@@ -231,6 +252,9 @@ class InMemoryAgentRuntimeRepository:
 
     async def get_action_for_owner(self, *, action_id: UUID, owner_user_id: UUID):
         return next((action for action in self.actions if action.id == action_id and action.actor_user_id == owner_user_id), None)
+
+    async def list_actions_for_run(self, *, run_id: UUID):
+        return [action for action in self.actions if action.run_id == run_id]
 
     async def mark_action_confirmed(self, *, action: AgentAction, confirmed_at, apply_payload, idempotency_key: str):
         action.status = "confirmed"
@@ -268,32 +292,12 @@ class InMemoryAgentRuntimeRepository:
         return event
 
 
-class CapturingOutboxService:
-    def __init__(self) -> None:
-        self.enqueue_kwargs = {}
-        self.job = OutboxJob(
-            id=uuid4(),
-            job_type=AGENT_ACTION_APPLY_JOB,
-            status="queued",
-            payload={},
-            idempotency_key="",
-            request_id="",
-            trace_id="",
-        )
+class _NoopSavepoint:
+    async def __aenter__(self):
+        return self
 
-    async def enqueue(self, **kwargs):
-        self.enqueue_kwargs = kwargs
-        self.job = OutboxJob(
-            id=uuid4(),
-            action_id=kwargs["action_id"],
-            job_type=kwargs["job_type"],
-            status="queued",
-            payload=kwargs["payload"],
-            idempotency_key=kwargs["idempotency_key"],
-            request_id=kwargs["request_id"],
-            trace_id=kwargs["trace_id"],
-        )
-        return self.job
+    async def __aexit__(self, _exc_type, _exc, _traceback):
+        return False
 
 
 class InMemorySupportTicketsRepository:

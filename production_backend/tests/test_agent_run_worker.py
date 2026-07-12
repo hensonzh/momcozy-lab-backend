@@ -3,7 +3,8 @@ import hashlib
 from uuid import uuid4
 
 from production_backend.app.core.errors import ApiError
-from production_backend.app.modules.agent_runtime.models import AgentEvent, AgentMessage, AgentRun
+from production_backend.app.modules.agent_runtime.actions.executor import AgentActionExecutionOutcome
+from production_backend.app.modules.agent_runtime.models import AgentAction, AgentEvent, AgentMessage, AgentRun
 from production_backend.app.workers.agent_run import INTERRUPTED_RUN_ERROR_CODE, AgentRunQueueWorker, AgentRunWorkerResult, AgentRunWorker
 
 
@@ -247,6 +248,75 @@ def test_agent_run_queue_worker_interrupts_stale_running_runs_without_resuming()
     assert handled_run_ids == [repository.run.id]
 
 
+def test_agent_run_worker_resumes_confirmed_action_in_worker_before_terminal_result() -> None:
+    repository = FakeAgentRuntimeRepository()
+    action = repository.add_action(status="confirmed", action_type="support.ticket.create")
+    action_executor = FakeActionExecutor()
+    handler_called = False
+
+    async def handler(_run: AgentRun) -> AgentRunWorkerResult:
+        nonlocal handler_called
+        handler_called = True
+        return AgentRunWorkerResult(status="completed")
+
+    worker = AgentRunWorker(repository=repository, handler=handler, action_executor=action_executor)  # type: ignore[arg-type]
+
+    run = asyncio.run(worker.run_once(run_id=repository.run.id))
+
+    assert run is not None and run.status == "completed"
+    assert handler_called is False
+    assert action_executor.calls == [action.id]
+    assert action.status == "applied"
+    assert repository.messages[-1].content == {"text": "客服工单已提交。"}
+    assert repository.events[-1].event_type == "run.completed"
+    assert repository.events[-1].payload == {"reason": "action_applied", "action_id": str(action.id)}
+
+
+def test_agent_run_worker_recovers_post_apply_crash_without_reapplying_or_duplicate_message() -> None:
+    repository = FakeAgentRuntimeRepository()
+    action = repository.add_action(status="applied", action_type="pregnancy.plan.create")
+    existing = asyncio.run(
+        repository.create_message(
+            thread_id=repository.run.thread_id,
+            run_id=repository.run.id,
+            role="assistant",
+            message_type="text",
+            content={"text": "孕期计划已生成。"},
+            status="completed",
+        )
+    )
+    action_executor = FakeActionExecutor()
+    worker = AgentRunWorker(repository=repository, action_executor=action_executor)  # type: ignore[arg-type]
+
+    run = asyncio.run(worker.run_once(run_id=repository.run.id))
+
+    assert run is not None and run.status == "completed"
+    assert action_executor.calls == [action.id]
+    assert action_executor.handler_calls == []
+    assert repository.messages == [existing]
+    assert repository.events[-1].payload == {"reason": "action_applied", "action_id": str(action.id)}
+
+
+def test_agent_run_worker_requeues_stale_confirmed_action_instead_of_failing_run() -> None:
+    repository = FakeAgentRuntimeRepository()
+    repository.run.status = "running"
+    action = repository.add_action(status="confirmed", action_type="support.ticket.create")
+    controls = FakeAgentRunControls()
+    worker = AgentRunWorker(repository=repository, controls=controls)
+
+    run = asyncio.run(worker.interrupt_running(run_id=repository.run.id))
+
+    assert run is not None and run.status == "queued"
+    assert run.error_code == ""
+    assert repository.events[-1].event_type == "run.queued"
+    assert repository.events[-1].payload == {
+        "reason": "action_resume",
+        "action_id": str(action.id),
+        "phase": "queued",
+    }
+    assert controls.notified_run_ids == [repository.run.id]
+
+
 class FakeAgentRuntimeRepository:
     def __init__(self) -> None:
         self.run = AgentRun(
@@ -265,6 +335,7 @@ class FakeAgentRuntimeRepository:
         self.runs = [self.run]
         self.messages = []
         self.events = []
+        self.actions = []
         self.operations = []
         self.external_status_on_refresh = ""
 
@@ -285,6 +356,25 @@ class FakeAgentRuntimeRepository:
         self.runs.append(run)
         return run
 
+    def add_action(self, *, status, action_type):
+        target_type = "plan" if action_type == "pregnancy.plan.create" else "support_ticket"
+        action = AgentAction(
+            id=uuid4(),
+            run_id=self.run.id,
+            actor_user_id=self.run.actor_user_id,
+            action_type=action_type,
+            target_type=target_type,
+            target_id="",
+            status=status,
+            side_effect_level="medium",
+            preview_payload={},
+            apply_payload={},
+            idempotency_key="idem",
+            error_code="",
+        )
+        self.actions.append(action)
+        return action
+
     async def get_run(self, *, run_id):
         return next((run for run in self.runs if run.id == run_id), None)
 
@@ -303,6 +393,9 @@ class FakeAgentRuntimeRepository:
         runnable = [run for run in self.runs if run.status == "running"]
         return runnable[:limit]
 
+    async def list_actions_for_run(self, *, run_id):
+        return [action for action in self.actions if action.run_id == run_id]
+
     async def mark_run_running(self, *, run, started_at):
         run.status = "running"
         run.started_at = started_at
@@ -315,6 +408,13 @@ class FakeAgentRuntimeRepository:
 
     async def mark_run_waiting_for_confirmation(self, *, run):
         run.status = "waiting_for_confirmation"
+        return run
+
+    async def mark_run_queued(self, *, run):
+        run.status = "queued"
+        run.started_at = None
+        run.error_code = ""
+        run.error_details = {}
         return run
 
     async def mark_run_cancelled(self, *, run, cancelled_at, error_code):
@@ -344,6 +444,12 @@ class FakeAgentRuntimeRepository:
         )
         self.messages.append(message)
         return message
+
+    async def get_latest_assistant_message_for_run(self, *, run_id):
+        return next(
+            (message for message in reversed(self.messages) if message.run_id == run_id and message.role == "assistant"),
+            None,
+        )
 
     async def append_event(self, **kwargs):
         self.operations.append(f"db:{kwargs['event_type']}")
@@ -385,6 +491,7 @@ class FakeAgentRunControls:
         self.lock_released = False
         self.cleared_active_run = None
         self.stream_cursor = None
+        self.notified_run_ids = []
 
     def run_lock(self, *, run_id, ttl_seconds=60):
         return FakeRunLock(self, acquired=True)
@@ -402,6 +509,23 @@ class FakeAgentRunControls:
 
     async def clear_cancel(self, *, run_id):
         self.cancel_requested = False
+
+    async def notify_run_queued(self, *, run_id):
+        self.notified_run_ids.append(run_id)
+
+
+class FakeActionExecutor:
+    def __init__(self) -> None:
+        self.calls = []
+        self.handler_calls = []
+
+    async def apply(self, action):
+        self.calls.append(action.id)
+        if action.status in {"applied", "failed"}:
+            return AgentActionExecutionOutcome(action=action, replayed=True)
+        self.handler_calls.append(action.id)
+        action.status = "applied"
+        return AgentActionExecutionOutcome(action=action)
 
 
 class FakeRunLock:

@@ -16,6 +16,8 @@ class AgentRunExecutionResult:
     status: AgentRunExecutionStatus
     final_text: str = ""
     pending_action_id: UUID | None = None
+    completed_action_id: UUID | None = None
+    completion_reason: str = ""
     assistant_message_id: UUID | None = None
     quick_replies: list[dict[str, Any]] = field(default_factory=list)
     stream_segment_count: int = 0

@@ -2168,6 +2168,9 @@ def _action_confirmation_event_payload(action: AgentAction) -> dict[str, Any]:
         "target_id": action.target_id,
         "side_effect_level": action.side_effect_level,
         "preview_payload": action.preview_payload,
+        "requires_confirmation": True,
+        "confirmation_policy": "always",
+        "user_visible": True,
         "semantic": action_event_payload_semantic(action_status=action.status),
     }
 
