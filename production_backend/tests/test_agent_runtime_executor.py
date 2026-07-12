@@ -1912,6 +1912,7 @@ def test_agent_runtime_executor_loads_skill_through_unified_tool_executor() -> N
 def test_agent_runtime_executor_injects_verified_form_submission_as_non_persistent_trusted_tool_args() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)
+    form_artifact_id = uuid4()
     current_user = _message(
         thread_id=thread_id,
         run_id=run.id,
@@ -1923,7 +1924,7 @@ def test_agent_runtime_executor_injects_verified_form_submission_as_non_persiste
                 {
                     "type": "form_submission",
                     "submission_id": str(uuid4()),
-                    "artifact_id": str(uuid4()),
+                    "artifact_id": str(form_artifact_id),
                     "form_id": "hospital_bag_intake",
                     "values": {"due_date_or_week": "32周", "birth_path": "顺产"},
                     "verified": True,
@@ -1931,7 +1932,20 @@ def test_agent_runtime_executor_injects_verified_form_submission_as_non_persiste
             ]
         },
     )
-    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user, run=run)
+    workflow = _hospital_bag_workflow(
+        run=run,
+        state={
+            "phase": "collecting_intake",
+            "form_id": "hospital_bag_intake",
+            "source_form_artifact_id": str(form_artifact_id),
+        },
+    )
+    repository = FakeRuntimeRepository(
+        messages=[current_user],
+        current_message=current_user,
+        run=run,
+        workflow_states=[workflow],
+    )
     registry = default_tool_registry()
     captured_args: dict[str, Any] = {}
 
@@ -1968,6 +1982,8 @@ def test_agent_runtime_executor_injects_verified_form_submission_as_non_persiste
     assert captured_args == {
         "confirmed_form_data": {"due_date_or_week": "32周", "birth_path": "顺产"},
         "form_submission_id": attachment["submission_id"],
+        "form_artifact_id": str(form_artifact_id),
+        "runtime_workflow_context": workflow.state,
     }
 
 
@@ -3493,6 +3509,20 @@ def _pregnancy_workflow(*, run: AgentRun, state: dict[str, Any], status: str = "
         workflow_type="pregnancy_plan",
         status=status,
         schema_version="v2",
+        state=state,
+        active_step=str(state.get("phase") or ""),
+    )
+
+
+def _hospital_bag_workflow(*, run: AgentRun, state: dict[str, Any], status: str = "collecting") -> AgentWorkflowState:
+    return AgentWorkflowState(
+        id=uuid4(),
+        thread_id=run.thread_id,
+        owner_user_id=run.actor_user_id,
+        run_id=run.id,
+        workflow_type="hospital_bag",
+        status=status,
+        schema_version="v1",
         state=state,
         active_step=str(state.get("phase") or ""),
     )

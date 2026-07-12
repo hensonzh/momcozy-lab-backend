@@ -40,6 +40,7 @@ from ..agents.cozymate_service_agent.tools import (
     default_tool_registry,
 )
 from ..agents.cozymate_service_agent.tools.executor import project_load_service_skill_model_output
+from ..agents.cozymate_service_agent.tools.hospital_bag_flow import HOSPITAL_BAG_WORKFLOW_TYPE
 from ..agents.cozymate_service_agent.tools.pregnancy_plan_flow import (
     PREGNANCY_PLAN_FINAL_QUESTION,
     PREGNANCY_PLAN_FINAL_QUICK_REPLIES,
@@ -868,6 +869,12 @@ class AgentRuntimeExecutor:
                 workflow = await self._latest_pregnancy_plan_workflow(run=run)
                 trusted_args["runtime_plan_context"] = _pregnancy_runtime_plan_context(facts, workflow=workflow)
                 trusted_args["runtime_workflow_context"] = _dict(workflow, "state")
+            elif contract_name == "hospital_bag_card_create":
+                workflow = await self._latest_hospital_bag_workflow(run=run)
+                trusted_args["form_artifact_id"] = _text(submission, "artifact_id")
+                workflow_state = _dict(workflow, "state")
+                if workflow_state:
+                    trusted_args["runtime_workflow_context"] = workflow_state
             return trusted_args
         if contract_name == "pregnancy.plan.propose":
             facts = await self._birth_prep_business_facts(run=run)
@@ -894,6 +901,11 @@ class AgentRuntimeExecutor:
                 workflow = await self._latest_pregnancy_plan_workflow(run=run)
                 trusted_args["runtime_plan_context"] = _pregnancy_runtime_plan_context(facts, workflow=workflow)
                 trusted_args["runtime_workflow_context"] = _dict(workflow, "state")
+            elif contract_name == "hospital_bag_form_create":
+                workflow = await self._latest_hospital_bag_workflow(run=run)
+                workflow_state = _dict(workflow, "state")
+                if workflow_state:
+                    trusted_args["runtime_workflow_context"] = workflow_state
             return trusted_args
         if contract_name == "hospital_bag_cart_update":
             client_groups = self._run_hospital_bag_cart_groups.get(run.id)
@@ -1010,6 +1022,23 @@ class AgentRuntimeExecutor:
         cart_update = artifact.payload.get("cart_update")
         groups = cart_update.get("groups") if isinstance(cart_update, dict) else None
         return [dict(group) for group in groups if isinstance(group, dict)] if isinstance(groups, list) else None
+
+    async def _latest_hospital_bag_workflow(self, *, run: AgentRun) -> dict[str, Any]:
+        loader = getattr(self.repository, "get_latest_workflow_state_for_thread", None)
+        if not callable(loader):
+            return {}
+        workflow = await loader(
+            thread_id=run.thread_id,
+            owner_user_id=run.actor_user_id,
+            workflow_type=HOSPITAL_BAG_WORKFLOW_TYPE,
+        )
+        if workflow is None:
+            return {}
+        return {
+            "workflow_state_id": str(workflow.id),
+            "status": workflow.status,
+            "state": dict(workflow.state) if isinstance(workflow.state, dict) else {},
+        }
 
     async def _generate_quick_replies(
         self,

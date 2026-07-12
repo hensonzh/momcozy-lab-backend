@@ -56,6 +56,7 @@ from production_backend.app.modules.support.agent_actions import SUPPORT_TICKET_
 from ..device_guidance import AIR1_UNBOXING_STEPS, DeviceGuidanceReferenceService
 from .executor import DEFERRED_AGENT_EVENTS_KEY, RetainedToolInformation, ToolHandler, ToolHandlerContext, ToolHandlerResult
 from .legacy_artifacts import artifact_record_from_legacy_result, create_legacy_artifact_result
+from .hospital_bag_flow import HOSPITAL_BAG_FORM_ID, HOSPITAL_BAG_WORKFLOW_SCHEMA_VERSION, HOSPITAL_BAG_WORKFLOW_TYPE
 from .pregnancy_plan_flow import (
     PREGNANCY_PLAN_INTAKE_FORM_ID,
     PREGNANCY_PLAN_URGENT_RESPONSE,
@@ -241,6 +242,91 @@ class LegacyArtifactToolHandler:
             "schema_version": artifact.schema_version,
             DEFERRED_AGENT_EVENTS_KEY: [_deferred_artifact_created_event(artifact)],
         }
+
+
+class HospitalBagFormCreateToolHandler:
+    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
+        self.runtime_service = runtime_service
+        self.artifact_handler = LegacyArtifactToolHandler(
+            runtime_service=runtime_service,
+            tool_name="hospital_bag_form_create",
+        )
+
+    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
+        _require_hospital_bag_thread_id(context)
+        workflow = _dict(context.args, "runtime_workflow_context")
+        if _text(workflow, "phase") == "collecting_intake":
+            return {
+                "status": "hospital_bag_intake_already_started",
+                "form_artifact_id": _text(workflow, "source_form_artifact_id"),
+            }
+        result = await self.artifact_handler(context)
+        if _text(result, "status") != "form_created":
+            return result
+        await _upsert_hospital_bag_workflow(
+            runtime_service=self.runtime_service,
+            context=context,
+            status="collecting",
+            state={
+                "phase": "collecting_intake",
+                "form_id": HOSPITAL_BAG_FORM_ID,
+                "source_form_artifact_id": _text(result, "artifact_id"),
+            },
+            active_step="collecting_intake",
+        )
+        return result
+
+
+class HospitalBagCardCreateToolHandler:
+    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
+        self.runtime_service = runtime_service
+        self.artifact_handler = LegacyArtifactToolHandler(
+            runtime_service=runtime_service,
+            tool_name="hospital_bag_card_create",
+        )
+
+    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
+        _require_hospital_bag_thread_id(context)
+        workflow = _dict(context.args, "runtime_workflow_context")
+        form_artifact_id = _text(context.args, "form_artifact_id")
+        form_submission_id = _text(context.args, "form_submission_id")
+        if (
+            _text(workflow, "phase") == "completed"
+            and _text(workflow, "source_form_artifact_id") == form_artifact_id
+            and _text(workflow, "source_form_submission_id") == form_submission_id
+        ):
+            return {
+                "status": "hospital_bag_card_already_created",
+                "artifact_id": _text(workflow, "result_artifact_id"),
+                "artifact_type": "hospital_bag_card",
+            }
+        if (
+            _text(workflow, "phase") != "collecting_intake"
+            or not form_artifact_id
+            or _text(workflow, "source_form_artifact_id") != form_artifact_id
+        ):
+            raise ApiError(
+                code="stale_hospital_bag_intake",
+                message="This hospital bag form is no longer the active intake.",
+                status=409,
+            )
+        result = await self.artifact_handler(context)
+        if _text(result, "status") != "card_created":
+            return result
+        await _upsert_hospital_bag_workflow(
+            runtime_service=self.runtime_service,
+            context=context,
+            status="completed",
+            state={
+                "phase": "completed",
+                "form_id": HOSPITAL_BAG_FORM_ID,
+                "source_form_artifact_id": form_artifact_id,
+                "source_form_submission_id": form_submission_id,
+                "result_artifact_id": _text(result, "artifact_id"),
+            },
+            active_step="",
+        )
+        return result
 
 
 class PregnancyPlanIntakeStartToolHandler:
@@ -1812,8 +1898,8 @@ def build_default_tool_handlers(
         "labor_communication_card_create": LegacyArtifactToolHandler(
             runtime_service=agent_runtime_service, tool_name="labor_communication_card_create"
         ),
-        "hospital_bag_form_create": LegacyArtifactToolHandler(runtime_service=agent_runtime_service, tool_name="hospital_bag_form_create"),
-        "hospital_bag_card_create": LegacyArtifactToolHandler(runtime_service=agent_runtime_service, tool_name="hospital_bag_card_create"),
+        "hospital_bag_form_create": HospitalBagFormCreateToolHandler(runtime_service=agent_runtime_service),
+        "hospital_bag_card_create": HospitalBagCardCreateToolHandler(runtime_service=agent_runtime_service),
         "hospital_bag_cart_update": LegacyArtifactToolHandler(runtime_service=agent_runtime_service, tool_name="hospital_bag_cart_update"),
         "hospital_bag_pump_recommend": LegacyArtifactToolHandler(
             runtime_service=agent_runtime_service, tool_name="hospital_bag_pump_recommend"
@@ -2386,6 +2472,32 @@ def _require_pregnancy_plan_thread_id(context: ToolHandlerContext) -> UUID:
     if context.thread_id is None:
         raise ApiError(code="missing_thread_context", message="Pregnancy planning requires a thread context.", status=409)
     return context.thread_id
+
+
+def _require_hospital_bag_thread_id(context: ToolHandlerContext) -> UUID:
+    if context.thread_id is None:
+        raise ApiError(code="missing_thread_context", message="Hospital bag planning requires a thread context.", status=409)
+    return context.thread_id
+
+
+async def _upsert_hospital_bag_workflow(
+    *,
+    runtime_service: AgentRuntimeService,
+    context: ToolHandlerContext,
+    status: str,
+    state: dict[str, Any],
+    active_step: str,
+) -> AgentWorkflowState:
+    return await runtime_service.upsert_workflow_state(
+        owner_user_id=context.actor.user_id,
+        thread_id=_require_hospital_bag_thread_id(context),
+        run_id=context.run_id,
+        workflow_type=HOSPITAL_BAG_WORKFLOW_TYPE,
+        status=status,
+        schema_version=HOSPITAL_BAG_WORKFLOW_SCHEMA_VERSION,
+        state=state,
+        active_step=active_step,
+    )
 
 
 async def _upsert_pregnancy_plan_workflow(
