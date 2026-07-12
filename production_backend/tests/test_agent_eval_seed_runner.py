@@ -235,7 +235,7 @@ def test_agent_eval_seed_assertion_engine_passes_known_device_guidance_trace() -
     trace = AgentEvalTrace(
         tool_calls=[
             {"tool_name": "devices.pump_status.read", "status": "completed"},
-            {"tool_name": "devices.guidance_assets.read", "status": "completed"},
+            {"tool_name": "devices.guidance.read", "status": "completed"},
         ],
         safety_decision="allow",
         final_text="I checked your pump status and the Air1 guidance assets.",

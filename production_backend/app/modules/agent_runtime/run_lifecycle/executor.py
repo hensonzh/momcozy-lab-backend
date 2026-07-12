@@ -1396,7 +1396,11 @@ class AgentRuntimeExecutor:
                     source=source,
                     information=dict(getattr(item, "information", {}) or {}),
                     guidance=str(getattr(item, "guidance", "") or ""),
-                    ttl_turns=max(1, int(getattr(item, "ttl_turns", 3) or 3)),
+                    ttl_turns=(
+                        None
+                        if getattr(item, "ttl_turns", 3) is None
+                        else max(1, int(getattr(item, "ttl_turns", 3) or 3))
+                    ),
                     token_budget=self.config.known_information_token_budget,
                     invalidate_prefixes=tuple(getattr(item, "invalidate_prefixes", ()) or ()),
                     priority=max(0, int(getattr(item, "priority", 100) or 100)),
@@ -1654,7 +1658,8 @@ SERVICE_SKILL_RECOMMENDED_TOOL_CONTRACTS: dict[ServiceSkillId, tuple[str, ...]] 
     ServiceSkillId.EMOTION_SUPPORT: (),
     ServiceSkillId.DEVICE_GUIDANCE: (
         "devices.pump_status.read",
-        "devices.guidance_assets.read",
+        "devices.guidance.read",
+        "devices.unboxing.advance",
         "support.ticket.propose",
     ),
 }

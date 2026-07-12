@@ -279,9 +279,12 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="devices.guidance_assets.read",
+            name="devices.guidance.read",
             domain="devices",
-            description="读取 Momcozy 设备的官方指导图片、视频和文档素材。用户需要安装、使用、清洁或排查设备问题的指导内容时调用。",
+            description=(
+                "按设备型号、主题或明确步骤读取版本化的 Momcozy 官方说明书、FAQ、图片、PDF 和视频素材。"
+                "用户需要安装、开箱、使用、清洁、排查问题，或追问某个官方步骤时调用。"
+            ),
             loading_mode="eager",
             read_or_write="read",
             side_effect_level="none",
@@ -290,6 +293,25 @@ def default_tool_registry() -> ToolContractRegistry:
             requires_confirmation=False,
             idempotency_required=False,
             audit_required=False,
+            timeout_seconds=10,
+        )
+    )
+    registry.register(
+        _tool_contract(
+            name="devices.unboxing.advance",
+            domain="devices",
+            description=(
+                "开始、恢复、推进或取消当前线程中的设备开箱分步指导，并返回当前或下一步骤的官方资料。"
+                "用户明确要一步步开箱，或确认当前主步骤已经完成时调用；不要仅凭含糊的‘好了’跳过尚未核对的子动作。"
+            ),
+            loading_mode="eager",
+            read_or_write="write",
+            side_effect_level="low",
+            blocking_policy="must_wait",
+            result_dependency="next_tool_call",
+            requires_confirmation=False,
+            idempotency_required=False,
+            audit_required=True,
             timeout_seconds=10,
         )
     )

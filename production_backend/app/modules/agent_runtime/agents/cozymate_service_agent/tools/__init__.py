@@ -2,7 +2,8 @@ from .contracts import ToolContract
 from .executor import RetainedToolInformation, ToolExecutionResult, ToolExecutor, ToolHandlerContext, ToolHandlerResult
 from .handlers import (
     BusinessContextReadToolHandler,
-    DeviceGuidanceAssetsReadToolHandler,
+    DeviceGuidanceReadToolHandler,
+    DeviceUnboxingAdvanceToolHandler,
     DevicesPumpStatusReadToolHandler,
     FeedingRecordDeleteProposeToolHandler,
     FeedingRecordProposeToolHandler,
@@ -47,7 +48,8 @@ from .namespaces import ToolNamespace, ToolNamespaceRegistry, default_tool_names
 
 __all__ = [
     "BusinessContextReadToolHandler",
-    "DeviceGuidanceAssetsReadToolHandler",
+    "DeviceGuidanceReadToolHandler",
+    "DeviceUnboxingAdvanceToolHandler",
     "DevicesPumpStatusReadToolHandler",
     "FeedingRecordDeleteProposeToolHandler",
     "FeedingRecordProposeToolHandler",

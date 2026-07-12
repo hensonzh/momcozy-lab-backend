@@ -245,9 +245,10 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             }
         },
     },
-    "devices.guidance_assets.read": {
+    "devices.guidance.read": {
         "type": "object",
         "additionalProperties": False,
+        "required": ["model"],
         "properties": {
             "limit": {
                 "type": "integer",
@@ -263,13 +264,19 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             },
             "model": {
                 "type": "string",
+                "minLength": 1,
                 "maxLength": 120,
-                "description": "可选设备型号过滤条件，例如 Air1 或 BP334。",
+                "description": "已经由用户确认的设备型号；当前支持 Air1 或 BP334。",
             },
             "topic": {
                 "type": "string",
                 "maxLength": 80,
                 "description": "可选指导主题，例如 setup、cleaning、flange、suction 或 bluetooth。",
+            },
+            "step": {
+                "type": "string",
+                "maxLength": 80,
+                "description": "需要读取的明确指导步骤，例如 guide.parts、guide.charging 或 guide.assembly。",
             },
             "query": {
                 "type": "string",
@@ -280,6 +287,29 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
                 "type": "number",
                 "minimum": 0,
                 "description": "用户提供的乳头根部测量值，供回复时按官方素材核对。",
+            },
+        },
+    },
+    "devices.unboxing.advance": {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["model", "action"],
+        "properties": {
+            "model": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120,
+                "description": "已经由用户确认的设备型号；当前支持 Air1 或 BP334。",
+            },
+            "action": {
+                "type": "string",
+                "enum": ["start", "resume", "complete_current", "cancel"],
+                "description": "开始新流程、恢复当前流程、确认完成当前主步骤，或取消流程。",
+            },
+            "expected_step": {
+                "type": "string",
+                "maxLength": 80,
+                "description": "complete_current 时模型认为用户刚完成的当前步骤，例如 guide.parts，用于防止过期回复跳错步骤。",
             },
         },
     },

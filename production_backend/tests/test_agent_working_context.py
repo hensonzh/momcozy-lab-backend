@@ -232,6 +232,47 @@ def test_known_information_budget_keeps_higher_priority_then_more_recent_items()
     assert [item["source"] for item in project_working_context(state)["known_information"]] == ["important.write"]
 
 
+def test_workflow_step_information_survives_turns_until_explicitly_replaced() -> None:
+    redis = FakeRedis()
+    store = RedisAgentWorkingContextStore(redis)
+    thread_id = uuid4()
+
+    asyncio.run(store.begin_turn(thread_id=thread_id, skill_ttl_turns=3))
+    asyncio.run(
+        store.retain_information(
+            thread_id=thread_id,
+            context_key="device_guidance:step:air1",
+            source="devices.unboxing.advance",
+            information={"current_step": "guide.parts"},
+            guidance="Use until the step changes.",
+            ttl_turns=None,
+            token_budget=4000,
+        )
+    )
+    state = None
+    for _ in range(8):
+        state = asyncio.run(store.begin_turn(thread_id=thread_id, skill_ttl_turns=3))
+
+    assert state is not None
+    assert project_working_context(state)["known_information"][0]["information"] == {"current_step": "guide.parts"}
+
+    replaced = asyncio.run(
+        store.retain_information(
+            thread_id=thread_id,
+            context_key="device_guidance:step:air1",
+            source="devices.unboxing.advance",
+            information={"current_step": "guide.controls"},
+            guidance="Use until the step changes.",
+            ttl_turns=None,
+            token_budget=4000,
+            invalidate_prefixes=("device_guidance:step:",),
+        )
+    )
+    assert project_working_context(replaced)["known_information"][0]["information"] == {
+        "current_step": "guide.controls"
+    }
+
+
 class FakeRedis:
     def __init__(self) -> None:
         self.values: dict[str, str] = {}

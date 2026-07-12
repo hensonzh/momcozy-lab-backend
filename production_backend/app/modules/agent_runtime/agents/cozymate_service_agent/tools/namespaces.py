@@ -113,7 +113,8 @@ SCENARIO_NAMESPACE_DEFINITIONS: tuple[ToolNamespace, ...] = (
         description="处理当前用户吸奶器的状态查询、官方操作指导和售后工单。用户需要查看设备状态、安装使用、排查问题或联系售后时使用。",
         tool_contracts=(
             "devices.pump_status.read",
-            "devices.guidance_assets.read",
+            "devices.guidance.read",
+            "devices.unboxing.advance",
             "support.ticket.propose",
         ),
     ),

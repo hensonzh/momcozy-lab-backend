@@ -240,7 +240,7 @@ def test_product_agent_eval_seed_does_not_reference_missing_device_tool_contract
     assert "devices.pump_status.read" not in clarify_contracts
     assert by_suite["device_guidance"]["expected_behavior"]["must_clarify"] == ["device_model", "first_use_context"]
     assert "devices.pump_status.read" in known_device_contracts
-    assert "devices.guidance_assets.read" in known_device_contracts
+    assert "devices.guidance.read" in known_device_contracts
     assert by_suite["device_known_guidance"]["expected_behavior"]["requires_confirmation_before_write"] is False
 
 

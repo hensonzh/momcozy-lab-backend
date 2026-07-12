@@ -40,7 +40,7 @@ class RetainedToolInformation:
     context_key: str
     information: dict[str, Any]
     guidance: str
-    ttl_turns: int = 3
+    ttl_turns: int | None = 3
     priority: int = 100
     invalidate_prefixes: tuple[str, ...] = ()
 
@@ -787,7 +787,8 @@ def _tool_event_label(tool_name: str) -> str:
         "pregnancy_diary.entry.update": "更新孕期日记",
         "pregnancy_diary.entry.delete": "删除孕期日记",
         "devices.pump_status.read": "设备状态",
-        "devices.guidance_assets.read": "设备指导资料",
+        "devices.guidance.read": "设备指导资料",
+        "devices.unboxing.advance": "设备开箱步骤",
         "images.inspect": "图片内容",
         "birth_plan_form_create": "我先帮你准备确认内容～",
         "labor_communication_card_create": "我先帮你整理分娩沟通单～",

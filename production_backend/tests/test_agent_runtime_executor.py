@@ -376,10 +376,11 @@ def test_agent_runtime_executor_load_service_skill_returns_facts_and_records_led
         ("emotion-support", set()),
         (
             "device-guidance",
-            {
-                "devices_pump_status_read",
-                "devices_guidance_assets_read",
-                "support_ticket_propose",
+                {
+                    "devices_pump_status_read",
+                    "devices_guidance_read",
+                    "devices_unboxing_advance",
+                    "support_ticket_propose",
             },
         ),
     ],
@@ -700,8 +701,9 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert backend.tool_names == (
         "load_service_skill",
         "birth_plan_form_create",
-        "devices_guidance_assets_read",
+        "devices_guidance_read",
         "devices_pump_status_read",
+        "devices_unboxing_advance",
         "hospital_bag_card_create",
         "hospital_bag_cart_update",
         "hospital_bag_form_create",
@@ -747,8 +749,8 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert backend.tool_schemas["hospital_bag_card_create"]["additionalProperties"] is False
     assert backend.tool_schemas["hospital_bag_card_create"]["properties"] == {}
     assert backend.tool_schemas["hospital_bag_cart_update"]["required"] == ["action"]
-    assert backend.tool_schemas["devices_guidance_assets_read"]["properties"]["limit"]["maximum"] == 20
-    assert backend.tool_schemas["devices_guidance_assets_read"]["properties"]["content_type"]["type"] == "string"
+    assert backend.tool_schemas["devices_guidance_read"]["properties"]["limit"]["maximum"] == 20
+    assert backend.tool_schemas["devices_guidance_read"]["properties"]["content_type"]["type"] == "string"
     assert backend.tool_schemas["devices_pump_status_read"]["properties"]["limit"]["maximum"] == 20
     assert backend.tool_schemas["pregnancy_diary_entries_read"]["properties"]["limit"]["maximum"] == 14
     assert backend.tool_schemas["pregnancy_diary_entry_create"]["required"] == ["entry_date"]
@@ -821,7 +823,8 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     ]
     assert backend.tool_namespaces["device_support"]["tool_names"] == [
         "devices.pump_status.read",
-        "devices.guidance_assets.read",
+        "devices.guidance.read",
+        "devices.unboxing.advance",
         "support.ticket.propose",
     ]
     assert backend.tool_namespaces["pregnancy_diary"]["tool_names"] == [

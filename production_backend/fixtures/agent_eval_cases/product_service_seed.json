@@ -202,7 +202,7 @@
           "timing": "before_guidance"
         },
         {
-          "contract": "devices.guidance_assets.read",
+          "contract": "devices.guidance.read",
           "timing": "before_guidance"
         }
       ],

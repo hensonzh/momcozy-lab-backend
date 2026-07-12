@@ -12,7 +12,7 @@ from uuid import UUID
 
 from production_backend.app.core.errors import ApiError
 from production_backend.app.infrastructure.object_storage.base import ObjectStorage
-from production_backend.app.modules.agent_runtime.models import AgentArtifact
+from production_backend.app.modules.agent_runtime.models import AgentArtifact, AgentWorkflowState
 from production_backend.app.modules.agent_runtime.service import AgentRuntimeService
 from production_backend.app.modules.assets.models import ProductAsset
 from production_backend.app.modules.assets.service import ProductAssetService
@@ -53,6 +53,7 @@ from production_backend.app.modules.records.models import FeedingRecord, GrowthR
 from production_backend.app.modules.records.service import RecordsService
 from production_backend.app.modules.support.agent_actions import SUPPORT_TICKET_CREATE_ACTION
 
+from ..device_guidance import AIR1_UNBOXING_STEPS, DeviceGuidanceReferenceService
 from .executor import DEFERRED_AGENT_EVENTS_KEY, RetainedToolInformation, ToolHandler, ToolHandlerContext, ToolHandlerResult
 from .legacy_artifacts import artifact_record_from_legacy_result, create_legacy_artifact_result
 from .pregnancy_plan_flow import (
@@ -945,29 +946,50 @@ class DevicesPumpStatusReadToolHandler:
         )
 
 
-class DeviceGuidanceAssetsReadToolHandler:
-    def __init__(self, *, asset_service: ProductAssetService) -> None:
+class DeviceGuidanceReadToolHandler:
+    def __init__(
+        self,
+        *,
+        asset_service: ProductAssetService,
+        reference_service: DeviceGuidanceReferenceService | None = None,
+    ) -> None:
         self.asset_service = asset_service
+        self.reference_service = reference_service or DeviceGuidanceReferenceService()
 
-    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
+    async def __call__(self, context: ToolHandlerContext) -> ToolHandlerResult:
         limit = _limit(context.args.get("limit"), default=10, max_limit=20)
         content_type = _text(context.args, "content_type")
         model = _text(context.args, "model")
         topic = _text(context.args, "topic")
+        step = _text(context.args, "step")
         query = _text(context.args, "query")
+        reference = self.reference_service.read(
+            model=model,
+            topic=topic,
+            step=step,
+            query=query,
+            limit=limit,
+        )
         assets = self.asset_service.list_assets(limit=200)
         if content_type:
             assets = [asset for asset in assets if asset.content_type == content_type]
-        assets = _filter_guidance_assets(assets=assets, model=model, topic=topic, query=query)
+        assets = _filter_guidance_assets(
+            assets=assets,
+            model=model,
+            topic=topic or _device_guidance_step_asset_topic(step),
+            query=query,
+        )
         bounded_assets = assets[:limit]
         asset_payloads = [_asset_payload(asset) for asset in bounded_assets]
         result = {
+            **reference,
             "assets": asset_payloads,
             "count": len(bounded_assets),
             "available_count": len(assets),
             "query_context": {
                 "model": model,
                 "topic": topic,
+                "step": step,
                 "query": query,
                 "measured_nipple_mm": context.args.get("measured_nipple_mm"),
             },
@@ -975,7 +997,244 @@ class DeviceGuidanceAssetsReadToolHandler:
         media_voice = _asset_media_voice_payloads(asset_payloads)
         if media_voice:
             result["media_voice"] = media_voice
-        return result
+        current_step = reference.get("current_step")
+        retained_step = _text(current_step, "id") if isinstance(current_step, dict) else ""
+        if retained_step:
+            context_key = f"device_guidance:step:{reference['device_model'].lower()}"
+            ttl_turns: int | None = None
+            invalidate_prefixes = ("device_guidance:step:",)
+        else:
+            context_key = f"device_guidance:reference:{reference['device_model'].lower()}:{topic or 'query'}"
+            ttl_turns = 3
+            invalidate_prefixes = ()
+        return ToolHandlerResult(
+            output=result,
+            retained_information=(
+                RetainedToolInformation(
+                    context_key=context_key,
+                    information=result,
+                    guidance=(
+                        "Use this official device reference for the current step. It remains valid until the workflow step or device model changes."
+                        if retained_step
+                        else "Use this official device reference for follow-up; read again when the model, topic, or question changes."
+                    ),
+                    ttl_turns=ttl_turns,
+                    invalidate_prefixes=invalidate_prefixes,
+                ),
+            ),
+        )
+
+
+class DeviceUnboxingAdvanceToolHandler:
+    WORKFLOW_TYPE = "device_unboxing"
+    SCHEMA_VERSION = "device-unboxing.v1"
+
+    def __init__(
+        self,
+        *,
+        runtime_service: AgentRuntimeService,
+        asset_service: ProductAssetService,
+        reference_service: DeviceGuidanceReferenceService | None = None,
+    ) -> None:
+        self.runtime_service = runtime_service
+        self.reference_service = reference_service or DeviceGuidanceReferenceService()
+        self.guidance_reader = DeviceGuidanceReadToolHandler(
+            asset_service=asset_service,
+            reference_service=self.reference_service,
+        )
+
+    async def __call__(self, context: ToolHandlerContext) -> ToolHandlerResult:
+        if context.thread_id is None:
+            raise ApiError(code="missing_thread_context", message="Device unboxing requires a thread context.", status=409)
+        action = _text(context.args, "action")
+        model = _text(context.args, "model")
+        existing = await self.runtime_service.get_latest_workflow_state(
+            owner_user_id=context.actor.user_id,
+            thread_id=context.thread_id,
+            workflow_type=self.WORKFLOW_TYPE,
+        )
+        if action == "start":
+            return await self._start_or_resume(context=context, model=model, existing=existing, started=True)
+        if action == "resume":
+            return await self._start_or_resume(context=context, model=model, existing=existing, started=False)
+        if action == "complete_current":
+            return await self._complete_current(context=context, model=model, existing=existing)
+        if action == "cancel":
+            return await self._finish(context=context, model=model, existing=existing, phase="cancelled")
+        raise ApiError(code="validation_failed", message="Unsupported device unboxing action.", status=422)
+
+    async def _start_or_resume(
+        self,
+        *,
+        context: ToolHandlerContext,
+        model: str,
+        existing: AgentWorkflowState | None,
+        started: bool,
+    ) -> ToolHandlerResult:
+        if existing is not None and existing.status in {"collecting", "ready", "waiting", "paused"}:
+            state = dict(existing.state) if isinstance(existing.state, dict) else {}
+            current_step = existing.active_step or _text(state, "current_step")
+            normalized_model = _text(state, "device_model") or model
+            status = "unboxing_resumed"
+        else:
+            current_step = AIR1_UNBOXING_STEPS[0]
+            initial_reference = self.reference_service.read(model=model, step=current_step)
+            normalized_model = _text(initial_reference, "device_model")
+            state = {
+                "phase": "guiding",
+                "device_model": normalized_model,
+                "completed_steps": [],
+                "document_version": _text(initial_reference, "document_version"),
+            }
+            status = "unboxing_started" if started else "unboxing_resumed"
+        workflow = await self.runtime_service.upsert_workflow_state(
+            owner_user_id=context.actor.user_id,
+            thread_id=context.thread_id,
+            run_id=context.run_id,
+            workflow_type=self.WORKFLOW_TYPE,
+            status="waiting",
+            schema_version=self.SCHEMA_VERSION,
+            state=state,
+            active_step=current_step,
+        )
+        return await self._step_result(context=context, workflow=workflow, status=status)
+
+    async def _complete_current(
+        self,
+        *,
+        context: ToolHandlerContext,
+        model: str,
+        existing: AgentWorkflowState | None,
+    ) -> ToolHandlerResult:
+        workflow = _require_active_device_unboxing(existing)
+        state = dict(workflow.state) if isinstance(workflow.state, dict) else {}
+        current_step = workflow.active_step
+        expected_step = _text(context.args, "expected_step")
+        if expected_step and expected_step != current_step:
+            raise ApiError(code="stale_device_unboxing_step", message="The device unboxing step has already changed.", status=409)
+        if current_step not in AIR1_UNBOXING_STEPS:
+            raise ApiError(code="invalid_device_unboxing_step", message="The current device unboxing step is invalid.", status=409)
+        normalized_model = _text(state, "device_model") or model
+        self.reference_service.read(model=normalized_model, step=current_step)
+        completed_steps = [
+            step for step in state.get("completed_steps", []) if isinstance(step, str) and step in AIR1_UNBOXING_STEPS
+        ]
+        if current_step not in completed_steps:
+            completed_steps.append(current_step)
+        current_index = AIR1_UNBOXING_STEPS.index(current_step)
+        if current_index + 1 >= len(AIR1_UNBOXING_STEPS):
+            return await self._finish(context=context, model=normalized_model, existing=workflow, phase="completed")
+        next_step = AIR1_UNBOXING_STEPS[current_index + 1]
+        state.update(
+            {
+                "phase": "guiding",
+                "device_model": normalized_model,
+                "completed_steps": completed_steps,
+            }
+        )
+        updated = await self.runtime_service.upsert_workflow_state(
+            owner_user_id=context.actor.user_id,
+            thread_id=context.thread_id,
+            run_id=context.run_id,
+            workflow_type=self.WORKFLOW_TYPE,
+            status="waiting",
+            schema_version=self.SCHEMA_VERSION,
+            state=state,
+            active_step=next_step,
+        )
+        return await self._step_result(context=context, workflow=updated, status="unboxing_step_advanced")
+
+    async def _finish(
+        self,
+        *,
+        context: ToolHandlerContext,
+        model: str,
+        existing: AgentWorkflowState | None,
+        phase: str,
+    ) -> ToolHandlerResult:
+        workflow = _require_active_device_unboxing(existing)
+        state = dict(workflow.state) if isinstance(workflow.state, dict) else {}
+        current_step = workflow.active_step
+        completed_steps = [
+            step for step in state.get("completed_steps", []) if isinstance(step, str) and step in AIR1_UNBOXING_STEPS
+        ]
+        if phase == "completed" and current_step in AIR1_UNBOXING_STEPS and current_step not in completed_steps:
+            completed_steps.append(current_step)
+        state.update(
+            {
+                "phase": phase,
+                "device_model": _text(state, "device_model") or model,
+                "completed_steps": completed_steps,
+            }
+        )
+        updated = await self.runtime_service.upsert_workflow_state(
+            owner_user_id=context.actor.user_id,
+            thread_id=context.thread_id,
+            run_id=context.run_id,
+            workflow_type=self.WORKFLOW_TYPE,
+            status="completed",
+            schema_version=self.SCHEMA_VERSION,
+            state=state,
+            active_step="",
+        )
+        workflow_projection = _device_unboxing_workflow_payload(updated)
+        return ToolHandlerResult(
+            output={
+                "status": "unboxing_completed" if phase == "completed" else "unboxing_cancelled",
+                "workflow": workflow_projection,
+            },
+            retained_information=(
+                RetainedToolInformation(
+                    context_key="device_guidance:unboxing:result",
+                    information={"workflow": workflow_projection},
+                    guidance="The device unboxing workflow is no longer active.",
+                    ttl_turns=3,
+                    priority=200,
+                    invalidate_prefixes=("device_guidance:step:",),
+                ),
+            ),
+        )
+
+    async def _step_result(
+        self,
+        *,
+        context: ToolHandlerContext,
+        workflow: AgentWorkflowState,
+        status: str,
+    ) -> ToolHandlerResult:
+        workflow_projection = _device_unboxing_workflow_payload(workflow)
+        guidance_result = await self.guidance_reader(
+            ToolHandlerContext(
+                actor=context.actor,
+                run_id=context.run_id,
+                tool_name="devices.guidance.read",
+                call_id=context.call_id,
+                args={
+                    "model": workflow_projection["device_model"],
+                    "step": workflow_projection["current_step"],
+                    "limit": 10,
+                },
+                thread_id=context.thread_id,
+            )
+        )
+        output = {
+            "status": status,
+            "workflow": workflow_projection,
+            "guidance": guidance_result.output,
+        }
+        return ToolHandlerResult(
+            output=output,
+            retained_information=(
+                RetainedToolInformation(
+                    context_key=f"device_guidance:step:{workflow_projection['device_model'].lower()}",
+                    information=output,
+                    guidance="Use this official reference until the current unboxing step or device model changes.",
+                    ttl_turns=None,
+                    priority=200,
+                    invalidate_prefixes=("device_guidance:step:",),
+                ),
+            ),
+        )
 
 
 class ImageInspectToolHandler:
@@ -1502,7 +1761,9 @@ def build_default_tool_handlers(
     asset_service: ProductAssetService,
     agent_runtime_service: AgentRuntimeService,
     object_storage: ObjectStorage | None = None,
+    device_guidance_reference_service: DeviceGuidanceReferenceService | None = None,
 ) -> dict[str, ToolHandler]:
+    guidance_reference_service = device_guidance_reference_service or DeviceGuidanceReferenceService()
     return {
         "profile.read": ProfileReadToolHandler(service=profile_service),
         "profile_update": ProfileUpdateToolHandler(service=profile_service),
@@ -1535,7 +1796,15 @@ def build_default_tool_handlers(
         "pregnancy_diary.entry.update": PregnancyDiaryEntryUpdateToolHandler(diary_service=diary_service),
         "pregnancy_diary.entry.delete": PregnancyDiaryEntryDeleteToolHandler(diary_service=diary_service),
         "devices.pump_status.read": DevicesPumpStatusReadToolHandler(devices_service=devices_service),
-        "devices.guidance_assets.read": DeviceGuidanceAssetsReadToolHandler(asset_service=asset_service),
+        "devices.guidance.read": DeviceGuidanceReadToolHandler(
+            asset_service=asset_service,
+            reference_service=guidance_reference_service,
+        ),
+        "devices.unboxing.advance": DeviceUnboxingAdvanceToolHandler(
+            runtime_service=agent_runtime_service,
+            asset_service=asset_service,
+            reference_service=guidance_reference_service,
+        ),
         "images.inspect": ImageInspectToolHandler(asset_service=asset_service, object_storage=object_storage),
         "plans.milk_plan.propose": MilkPlanProposeToolHandler(runtime_service=agent_runtime_service),
         "pregnancy.plan_intake.start": PregnancyPlanIntakeStartToolHandler(runtime_service=agent_runtime_service),
@@ -1671,6 +1940,25 @@ def _pregnancy_diary_retained_result(
         priority=200 if mutation else 100,
         invalidate_prefixes=("pregnancy_diary:",) if mutation else (),
     )
+
+
+def _require_active_device_unboxing(workflow: AgentWorkflowState | None) -> AgentWorkflowState:
+    if workflow is None or workflow.status not in {"collecting", "ready", "waiting", "paused"}:
+        raise ApiError(code="device_unboxing_not_active", message="No active device unboxing workflow was found.", status=409)
+    return workflow
+
+
+def _device_unboxing_workflow_payload(workflow: AgentWorkflowState) -> dict[str, Any]:
+    state = workflow.state if isinstance(workflow.state, dict) else {}
+    completed_steps = [
+        step for step in state.get("completed_steps", []) if isinstance(step, str) and step in AIR1_UNBOXING_STEPS
+    ]
+    return {
+        "device_model": _text(state, "device_model"),
+        "phase": _text(state, "phase"),
+        "current_step": workflow.active_step,
+        "completed_steps": completed_steps,
+    }
 
 
 def _profile_payload(*, profile: UserProfile | None, actor_user_id: UUID) -> dict[str, Any]:
@@ -2825,6 +3113,21 @@ def _filter_guidance_assets(*, assets: list[ProductAsset], model: str, topic: st
         if all(any(term in haystack for term in group) for group in term_groups):
             matched.append(asset)
     return matched
+
+
+def _device_guidance_step_asset_topic(step: str) -> str:
+    return {
+        "guide.parts": "components",
+        "guide.controls": "indicator",
+        "guide.charging": "charging",
+        "guide.disassembly": "disassembly",
+        "guide.cleaning": "cleaning",
+        "guide.flange": "flange",
+        "guide.assembly": "assembly",
+        "guide.wearing_start": "wearing",
+        "guide.bluetooth": "bluetooth",
+        "guide.finish_storage": "pouring",
+    }.get(str(step or "").strip(), "")
 
 
 def _normalized_search_term(value: object) -> str:

@@ -340,7 +340,7 @@ def test_service_skills_capture_legacy_domain_flow_semantics() -> None:
 
     assert "Air1 (BP334)" in after_sales
     assert "每轮给 1 个主步骤" in after_sales
-    assert "devices.guidance_assets.read" in after_sales
+    assert "devices.guidance.read" in after_sales
     assert "support.ticket.propose" in after_sales
 
     assert "宝宝交给身边可信成年人" in safety
@@ -462,7 +462,7 @@ def test_tool_contracts_are_exported_as_responses_namespaces() -> None:
     assert "hospital_bag_cart_update" in namespaces["hospital_bag_cart"].deferred_tool_contracts
     assert "hospital_bag_pump_recommend" in namespaces["pump_recommendation"].deferred_tool_contracts
     assert "devices.pump_status.read" in namespaces["device_support"].tool_contracts
-    assert "devices.guidance_assets.read" in namespaces["device_support"].tool_contracts
+    assert "devices.guidance.read" in namespaces["device_support"].tool_contracts
     assert "support.ticket.propose" in namespaces["device_support"].deferred_tool_contracts
     assert "ibclc_consult_card_create" in namespaces["health_consultation"].deferred_tool_contracts
 
@@ -522,7 +522,7 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
     diary_update_schema = registry.get("pregnancy_diary.entry.update").input_schema
     diary_delete_schema = registry.get("pregnancy_diary.entry.delete").input_schema
     devices_schema = registry.get("devices.pump_status.read").input_schema
-    device_guidance_schema = registry.get("devices.guidance_assets.read").input_schema
+    device_guidance_schema = registry.get("devices.guidance.read").input_schema
     image_inspect_schema = registry.get("images.inspect").input_schema
     milk_plan_schema = registry.get("plans.milk_plan.propose").input_schema
     pregnancy_plan_schema = registry.get("pregnancy.plan.propose").input_schema

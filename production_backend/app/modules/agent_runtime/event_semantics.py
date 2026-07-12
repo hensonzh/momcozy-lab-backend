@@ -327,10 +327,15 @@ _TOOL_COPY: dict[str, dict[str, str]] = {
         "started": "我先看看设备状态～",
         "completed": "我把设备状态看好啦",
     },
-    "devices.guidance_assets.read": {
+    "devices.guidance.read": {
         "phase": "reading",
         "started": "我先看看设备说明～",
         "completed": "我把设备说明整理好啦",
+    },
+    "devices.unboxing.advance": {
+        "phase": "planning",
+        "started": "我继续带你完成这一步～",
+        "completed": "这一步已经衔接好啦",
     },
     "images.inspect": {
         "phase": "reading",

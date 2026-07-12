@@ -104,7 +104,8 @@
 | Canonical contract | 模型看到的 SDK name | 加载 | 读写 | 需确认 | 用途 |
 | --- | --- | --- | --- | --- | --- |
 | `devices.pump_status.read` | `devices_pump_status_read` | eager | read | 否 | 用户询问设备连接、在线状态、固件或近期运行状态时读取设备摘要。 |
-| `devices.guidance_assets.read` | `devices_guidance_assets_read` | eager | read | 否 | 用户需要安装、使用、清洁或排查设备问题的指导时读取官方素材。 |
+| `devices.guidance.read` | `devices_guidance_read` | eager | read | 否 | 用户需要安装、使用、清洁或排查设备问题时，按型号、主题或步骤读取官方文档与素材。 |
+| `devices.unboxing.advance` | `devices_unboxing_advance` | eager | write | 否 | 用户确认进入分步开箱，或完成当前主步骤时，持久化进度并返回下一步骤资料。 |
 | `support.ticket.propose` | `support_ticket_propose` | deferred | write | 是 | 用户明确希望把设备故障或服务问题提交售后时创建工单确认。 |
 
 ## 9. `health_consultation`

@@ -45,7 +45,7 @@ class AgentWorkingContextStore(Protocol):
         source: str,
         information: dict[str, Any],
         guidance: str,
-        ttl_turns: int,
+        ttl_turns: int | None,
         token_budget: int,
         invalidate_prefixes: tuple[str, ...] = (),
         priority: int = 100,
@@ -68,7 +68,7 @@ class RetainedKnownInformation:
     information: dict[str, Any]
     guidance: str
     captured_turn: int
-    expires_after_turn: int
+    expires_after_turn: int | None
     priority: int
 
 
@@ -105,7 +105,11 @@ class RedisAgentWorkingContextStore:
             if turn_index <= max(skill.forget_after_turn, skill.loaded_turn + (fallback_ttl * 2))
         )
         known_information = _trim_known_information(
-            (item for item in state.known_information if turn_index <= item.expires_after_turn),
+            (
+                item
+                for item in state.known_information
+                if item.expires_after_turn is None or turn_index <= item.expires_after_turn
+            ),
             token_budget=information_token_budget,
         )
         next_state = AgentWorkingContextState(
@@ -151,7 +155,7 @@ class RedisAgentWorkingContextStore:
         source: str,
         information: dict[str, Any],
         guidance: str,
-        ttl_turns: int,
+        ttl_turns: int | None,
         token_budget: int,
         invalidate_prefixes: tuple[str, ...] = (),
         priority: int = 100,
@@ -168,7 +172,7 @@ class RedisAgentWorkingContextStore:
             information=_bounded_information(information),
             guidance=str(guidance or "").strip(),
             captured_turn=state.turn_index,
-            expires_after_turn=state.turn_index + max(1, int(ttl_turns)),
+            expires_after_turn=None if ttl_turns is None else state.turn_index + max(1, int(ttl_turns)),
             priority=max(0, int(priority)),
         )
         known_information = (
@@ -316,7 +320,9 @@ def _retained_information_from_json(value: Any) -> RetainedKnownInformation | No
         information=_bounded_information(information),
         guidance=str(value.get("guidance") or "").strip(),
         captured_turn=_non_negative_int(value.get("captured_turn")),
-        expires_after_turn=_non_negative_int(value.get("expires_after_turn")),
+        expires_after_turn=(
+            None if value.get("expires_after_turn") is None else _non_negative_int(value.get("expires_after_turn"))
+        ),
         priority=_non_negative_int(value.get("priority")),
     )
 

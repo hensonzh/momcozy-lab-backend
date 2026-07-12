@@ -5,10 +5,11 @@ from uuid import uuid4
 import pytest
 
 from production_backend.app.core.errors import ApiError
-from production_backend.app.modules.agent_runtime.models import AgentAction, AgentArtifact
+from production_backend.app.modules.agent_runtime.models import AgentAction, AgentArtifact, AgentWorkflowState
 from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.tools import (
     BusinessContextReadToolHandler,
-    DeviceGuidanceAssetsReadToolHandler,
+    DeviceGuidanceReadToolHandler,
+    DeviceUnboxingAdvanceToolHandler,
     DevicesPumpStatusReadToolHandler,
     FeedingRecordDeleteProposeToolHandler,
     FeedingRecordProposeToolHandler,
@@ -566,34 +567,30 @@ def test_devices_pump_status_read_tool_handler_returns_bounded_owner_scoped_summ
     assert result.retained_information[0].context_key == "devices:pump_status"
 
 
-def test_device_guidance_assets_read_tool_handler_returns_bounded_metadata() -> None:
-    handler = DeviceGuidanceAssetsReadToolHandler(asset_service=FakeAssetService())
+def test_device_guidance_read_tool_handler_returns_reference_and_bounded_metadata() -> None:
+    handler = DeviceGuidanceReadToolHandler(asset_service=FakeAssetService())
 
     result = asyncio.run(handler(_context(args={"limit": 1, "content_type": "application/pdf", "model": "Air1", "topic": "setup"})))
 
-    assert result == {
-        "assets": [
-            {
-                "id": "asset-guide",
-                "label": "Air1 unboxing pump guide",
-                "domain": "device_guidance",
-                "content_type": "application/pdf",
-                "size_bytes": 1200,
-                "kind": "pdf",
-                "url": "/v1/assets/asset-guide?kind=pdf",
-                "markdown_link": "[Air1 unboxing pump guide](/v1/assets/asset-guide?kind=pdf)",
-            }
-        ],
-        "count": 1,
-        "available_count": 1,
-        "query_context": {"model": "Air1", "topic": "setup", "query": "", "measured_nipple_mm": None},
+    assert isinstance(result, ToolHandlerResult)
+    assert result["device_model"] == "Air1"
+    assert result["current_step"]["id"] == "guide.parts"
+    assert result["assets"][0]["id"] == "asset-guide"
+    assert result["count"] == 1
+    assert result["query_context"] == {
+        "model": "Air1",
+        "topic": "setup",
+        "step": "",
+        "query": "",
+        "measured_nipple_mm": None,
     }
+    assert result.retained_information[0].ttl_turns is None
 
 
-def test_device_guidance_assets_read_tool_handler_returns_copyable_image_markdown() -> None:
-    handler = DeviceGuidanceAssetsReadToolHandler(asset_service=FakeAssetService())
+def test_device_guidance_read_tool_handler_returns_copyable_image_markdown() -> None:
+    handler = DeviceGuidanceReadToolHandler(asset_service=FakeAssetService())
 
-    result = asyncio.run(handler(_context(args={"content_type": "image/png"})))
+    result = asyncio.run(handler(_context(args={"model": "Air1", "content_type": "image/png", "step": "guide.parts"})))
 
     assert result["assets"] == [
         {
@@ -617,6 +614,108 @@ def test_device_guidance_assets_read_tool_handler_returns_copyable_image_markdow
             "spoken_label": "我放了一张当前步骤的对照图，你可以边看图边完成这一步。",
         }
     ]
+
+
+def test_device_unboxing_advance_tool_starts_and_returns_first_step_reference() -> None:
+    actor = _user()
+    thread_id = uuid4()
+    runtime_service = FakeAgentRuntimeService()
+    handler = DeviceUnboxingAdvanceToolHandler(
+        runtime_service=runtime_service,
+        asset_service=FakeAssetService(),
+    )
+
+    result = asyncio.run(
+        handler(
+            _context(
+                actor=actor,
+                thread_id=thread_id,
+                args={"model": "Air1", "action": "start"},
+            )
+        )
+    )
+
+    assert result["status"] == "unboxing_started"
+    assert result["workflow"] == {
+        "device_model": "Air1",
+        "phase": "guiding",
+        "current_step": "guide.parts",
+        "completed_steps": [],
+    }
+    assert result["guidance"]["current_step"]["id"] == "guide.parts"
+    assert runtime_service.workflow_state.thread_id == thread_id
+    assert runtime_service.workflow_state.owner_user_id == actor.user_id
+    assert runtime_service.workflow_state.active_step == "guide.parts"
+    assert result.retained_information[0].ttl_turns is None
+    assert result.retained_information[0].invalidate_prefixes == ("device_guidance:step:",)
+
+
+def test_device_unboxing_advance_tool_completes_current_step_and_returns_next_step() -> None:
+    actor = _user()
+    thread_id = uuid4()
+    runtime_service = FakeAgentRuntimeService()
+    runtime_service.workflow_state = AgentWorkflowState(
+        id=uuid4(),
+        thread_id=thread_id,
+        owner_user_id=actor.user_id,
+        run_id=uuid4(),
+        workflow_type="device_unboxing",
+        status="waiting",
+        schema_version="v1",
+        state={"phase": "guiding", "device_model": "Air1", "completed_steps": []},
+        active_step="guide.parts",
+    )
+    handler = DeviceUnboxingAdvanceToolHandler(
+        runtime_service=runtime_service,
+        asset_service=FakeAssetService(),
+    )
+
+    result = asyncio.run(
+        handler(
+            _context(
+                actor=actor,
+                thread_id=thread_id,
+                args={"model": "Air1", "action": "complete_current", "expected_step": "guide.parts"},
+            )
+        )
+    )
+
+    assert result["status"] == "unboxing_step_advanced"
+    assert result["workflow"]["completed_steps"] == ["guide.parts"]
+    assert result["workflow"]["current_step"] == "guide.controls"
+    assert result["guidance"]["current_step"]["id"] == "guide.controls"
+    assert runtime_service.workflow_state.active_step == "guide.controls"
+
+
+def test_device_unboxing_advance_tool_rejects_stale_expected_step() -> None:
+    actor = _user()
+    thread_id = uuid4()
+    runtime_service = FakeAgentRuntimeService()
+    runtime_service.workflow_state = AgentWorkflowState(
+        id=uuid4(),
+        thread_id=thread_id,
+        owner_user_id=actor.user_id,
+        run_id=uuid4(),
+        workflow_type="device_unboxing",
+        status="waiting",
+        schema_version="v1",
+        state={"phase": "guiding", "device_model": "Air1", "completed_steps": ["guide.parts"]},
+        active_step="guide.controls",
+    )
+    handler = DeviceUnboxingAdvanceToolHandler(runtime_service=runtime_service, asset_service=FakeAssetService())
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            handler(
+                _context(
+                    actor=actor,
+                    thread_id=thread_id,
+                    args={"model": "Air1", "action": "complete_current", "expected_step": "guide.parts"},
+                )
+            )
+        )
+
+    assert exc_info.value.code == "stale_device_unboxing_step"
 
 
 def test_image_inspect_tool_handler_loads_visible_packaged_image_as_transient_model_context() -> None:
@@ -1972,8 +2071,9 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
         "pregnancy_diary.entry.create",
         "pregnancy_diary.entry.update",
         "pregnancy_diary.entry.delete",
-        "devices.guidance_assets.read",
+        "devices.guidance.read",
         "devices.pump_status.read",
+        "devices.unboxing.advance",
         "images.inspect",
         "notifications.milk_reminder.propose",
         "plans.milk_plan.propose",
@@ -1993,13 +2093,14 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
     }
 
 
-def _context(*, actor: CurrentUser | None = None, args: dict | None = None) -> ToolHandlerContext:
+def _context(*, actor: CurrentUser | None = None, args: dict | None = None, thread_id=None) -> ToolHandlerContext:
     return ToolHandlerContext(
         actor=actor or _user(),
         run_id=uuid4(),
         tool_name="tool",
         call_id="call-1",
         args=args or {},
+        thread_id=thread_id,
     )
 
 
@@ -2322,6 +2423,7 @@ class FakeAgentRuntimeService:
         self.calls = []
         self.actions = []
         self.artifacts = []
+        self.workflow_state = None
         self.failed_action_types = failed_action_types or set()
         self.action = AgentAction(
             id=uuid4(),
@@ -2349,6 +2451,39 @@ class FakeAgentRuntimeService:
         )
         self.actions.append(self.action)
         self.artifacts.append(self.artifact)
+
+    async def get_latest_workflow_state(self, **kwargs):
+        workflow = self.workflow_state
+        if workflow is None:
+            return None
+        if (
+            workflow.owner_user_id != kwargs["owner_user_id"]
+            or workflow.thread_id != kwargs["thread_id"]
+            or workflow.workflow_type != kwargs["workflow_type"]
+        ):
+            return None
+        return workflow
+
+    async def upsert_workflow_state(self, **kwargs):
+        if self.workflow_state is None or self.workflow_state.status in {"completed", "expired", "failed"}:
+            self.workflow_state = AgentWorkflowState(
+                id=uuid4(),
+                thread_id=kwargs["thread_id"],
+                owner_user_id=kwargs["owner_user_id"],
+                run_id=kwargs["run_id"],
+                workflow_type=kwargs["workflow_type"],
+                status=kwargs["status"],
+                schema_version=kwargs["schema_version"],
+                state=kwargs["state"],
+                active_step=kwargs["active_step"],
+            )
+        else:
+            self.workflow_state.run_id = kwargs["run_id"]
+            self.workflow_state.status = kwargs["status"]
+            self.workflow_state.schema_version = kwargs["schema_version"]
+            self.workflow_state.state = kwargs["state"]
+            self.workflow_state.active_step = kwargs["active_step"]
+        return self.workflow_state
 
     async def propose_action(self, **kwargs):
         self.calls.append(kwargs)

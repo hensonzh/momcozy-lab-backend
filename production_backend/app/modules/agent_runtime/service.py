@@ -14,7 +14,8 @@ from .actions.executor import AgentActionExecutor
 from .actions.policy import AgentActionPolicy, action_presentation_payload
 from .client_context import sanitize_agent_client_context
 from .run_lifecycle.controls import AgentRunControls
-from .models import AgentAction, AgentArtifact, AgentEvent, AgentRun, AgentThread
+from .run_lifecycle.state_store import AgentRuntimeStateStore
+from .models import AgentAction, AgentArtifact, AgentEvent, AgentRun, AgentThread, AgentWorkflowState
 from .repository import AgentRuntimeRepository
 
 
@@ -48,6 +49,43 @@ class AgentRuntimeService:
         self.file_repository = file_repository
         self.controls = controls
         self.action_policy = action_policy or AgentActionPolicy()
+        self.state_store = AgentRuntimeStateStore(repository=repository)
+
+    async def get_latest_workflow_state(
+        self,
+        *,
+        owner_user_id: UUID,
+        thread_id: UUID,
+        workflow_type: str,
+    ) -> AgentWorkflowState | None:
+        return await self.repository.get_latest_workflow_state_for_thread(
+            thread_id=thread_id,
+            owner_user_id=owner_user_id,
+            workflow_type=workflow_type,
+        )
+
+    async def upsert_workflow_state(
+        self,
+        *,
+        owner_user_id: UUID,
+        thread_id: UUID,
+        run_id: UUID,
+        workflow_type: str,
+        status: str,
+        schema_version: str,
+        state: dict[str, Any],
+        active_step: str,
+    ) -> AgentWorkflowState:
+        return await self.state_store.upsert_active_workflow(
+            thread_id=thread_id,
+            owner_user_id=owner_user_id,
+            run_id=run_id,
+            workflow_type=workflow_type,
+            status=status,
+            schema_version=schema_version,
+            state=state,
+            active_step=active_step,
+        )
 
     async def create_thread(
         self,
