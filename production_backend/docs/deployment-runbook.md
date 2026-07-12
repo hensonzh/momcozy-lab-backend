@@ -293,7 +293,7 @@ before increasing limits.
 5. Agent action writes are not outbox jobs; inspect `agent_runs` and
    `agent_actions` instead. For repeated permanent failures in remaining
    generic jobs, move affected jobs to dead-letter and open
-   a repair ticket with `job_id`, `action_id`, and `request_id`.
+   a repair ticket with `job_id`, `job_type`, and `request_id`.
 
 ## Agent Run Recovery
 

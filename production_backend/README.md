@@ -157,10 +157,11 @@ quality smoke pass are ready. `VISION_PROVIDER=local_stub` is deterministic,
 local/test-only, and rejected in production. See
 `production_backend/docs/vision-provider-integration.md`.
 
-Durable side effects are processed by a separate outbox worker. It handles file
-cleanup jobs and confirmed agent actions, and is also disabled by default in the
-example env. Enable it in your private `env/compose.local.env` for full local
-agent behavior:
+Durable file-object cleanup jobs are processed by the separate outbox worker.
+Agent action writes execute synchronously inside the Agent worker run and never
+use that outbox. Both workers are disabled by default in the example env; enable
+the Agent worker for Agent runs and the outbox worker when local file cleanup is
+also required:
 
 ```env
 AGENT_RUNTIME_WORKER_ENABLED=true
