@@ -50,10 +50,6 @@ from ..agents.cozymate_service_agent.tools.pregnancy_plan_flow import (
     ensure_pregnancy_plan_final_question,
     pregnancy_plan_urgent_signal_ids,
 )
-from ..agents.main_coordinator_agent import (
-    RoutingPlan,
-    plan_current_request,
-)
 from ..event_stream.sink import AgentEventSink
 from ..event_stream.transient import AgentTransientStream
 from ..event_semantics import (
@@ -92,6 +88,7 @@ from .working_context import (
 
 LOAD_SERVICE_SKILL_TOOL_NAME = "load_service_skill"
 IMAGE_INSPECT_TOOL_NAME = "images.inspect"
+COZYMATE_AGENT_ID = "cozymate_service_agent"
 LOGGER = logging.getLogger("production_backend.agent_runtime.executor")
 DEFAULT_RESIDENT_SERVICE_SKILL_TTL_TURNS = 3
 FORM_TOOL_IDS = {
@@ -122,8 +119,8 @@ class _AgentTurnContext:
     messages: list[AgentMessage]
     memory_projection: list[dict[str, Any]]
     service_skills: tuple[AgentServiceSkill, ...]
-    routing_plan: RoutingPlan
     working_context_state: AgentWorkingContextState
+    workflow_states: list[AgentWorkflowState]
     ongoing_work: list[dict[str, str]]
     timings_ms: dict[str, float]
 
@@ -225,6 +222,14 @@ class AgentRuntimeExecutor:
             urgent_signal_ids = await self._pregnancy_plan_pre_model_urgent_signal_ids(
                 run=run,
                 current_user_text=self._run_current_user_text[run.id],
+                workflow_state=next(
+                    (
+                        workflow
+                        for workflow in turn_context.workflow_states
+                        if workflow.workflow_type == PREGNANCY_PLAN_WORKFLOW_TYPE
+                    ),
+                    None,
+                ),
             )
             if urgent_signal_ids:
                 self._run_authoritative_final_text[run.id] = PREGNANCY_PLAN_URGENT_RESPONSE
@@ -267,10 +272,13 @@ class AgentRuntimeExecutor:
         timings_ms: dict[str, float] = {}
         await self._append_progress(run=run, phase="context_loading", label="我已经收到你的消息啦～")
         context_started_at = perf_counter()
-        current_message = await self.repository.get_latest_user_message_for_run(run_id=run.id)
+        messages = await self.repository.list_messages_for_thread(thread_id=run.thread_id, limit=self.config.history_limit)
+        current_message = next(
+            (message for message in reversed(messages) if message.run_id == run.id and message.role == "user"),
+            None,
+        )
         if current_message is None:
             raise ApiError(code="missing_user_message", message="Agent run has no user message.", status=409)
-        messages = await self.repository.list_messages_for_thread(thread_id=run.thread_id, limit=self.config.history_limit)
         self._run_visible_image_urls[run.id] = _visible_assistant_image_urls(
             messages=messages,
             before_sequence=current_message.sequence,
@@ -279,9 +287,6 @@ class AgentRuntimeExecutor:
         timings_ms["context_base"] = _elapsed_ms(context_started_at)
 
         service_skills = self.service_skill_registry.list()
-        routing_started_at = perf_counter()
-        routing_plan = plan_current_request(user_message_text=_message_text(current_message))
-        timings_ms["routing"] = _elapsed_ms(routing_started_at)
 
         working_context_started_at = perf_counter()
         working_context_state = await self._begin_working_context_turn(run=run)
@@ -297,14 +302,13 @@ class AgentRuntimeExecutor:
         ongoing_work = project_ongoing_work(workflow_states, resident_skill_ids=resident_skill_ids)
         timings_ms["ongoing_work"] = _elapsed_ms(ongoing_work_started_at)
 
-        await self._record_routing_decision(run=run, current_message=current_message, routing_plan=routing_plan)
         return _AgentTurnContext(
             current_message=current_message,
             messages=messages,
             memory_projection=memory_projection,
             service_skills=service_skills,
-            routing_plan=routing_plan,
             working_context_state=working_context_state,
+            workflow_states=workflow_states,
             ongoing_work=ongoing_work,
             timings_ms=timings_ms,
         )
@@ -372,7 +376,7 @@ class AgentRuntimeExecutor:
                 tools=self._sdk_tools(run=run, tool_names=tool_catalog.tool_names, tool_namespaces=tool_catalog.tool_namespaces),
                 prompt_version=run.prompt_version,
                 trace_id=run.trace_id,
-                service_skill_id=_routing_target_agent_id(turn_context.routing_plan),
+                service_skill_id=COZYMATE_AGENT_ID,
                 on_text_delta=self._text_delta_handler(run=run),
             )
         )
@@ -911,9 +915,13 @@ class AgentRuntimeExecutor:
         *,
         run: AgentRun,
         current_user_text: str,
+        workflow_state: AgentWorkflowState | None,
     ) -> list[str]:
-        workflow = await self._latest_pregnancy_plan_workflow(run=run)
-        workflow_payload = _dict(workflow, "state")
+        workflow_payload = (
+            dict(workflow_state.state)
+            if workflow_state is not None and isinstance(workflow_state.state, dict)
+            else {}
+        )
         submission = self._run_trusted_form_submissions.get(run.id, {}).get("birth_journey_basic_info_intake")
         submission_values = _dict(submission or {}, "values")
         signal_ids = pregnancy_plan_urgent_signal_ids(submission_values)
@@ -1267,34 +1275,10 @@ class AgentRuntimeExecutor:
             thread_id=str(run.thread_id),
             trace_id=run.trace_id,
             status=status,
-            service_skill_id=run.service_skill_id,
-            routing_source=run.routing_source,
             timings_ms=timings_ms,
             final_text_length=final_text_length,
             quick_reply_count=quick_reply_count,
             error_type=error_type,
-        )
-
-    async def _record_routing_decision(self, *, run: AgentRun, current_message: AgentMessage, routing_plan: RoutingPlan) -> None:
-        recorder = getattr(self.repository, "record_routing_decision", None)
-        if recorder is None:
-            return
-        await recorder(
-            run_id=run.id,
-            thread_id=run.thread_id,
-            actor_user_id=run.actor_user_id,
-            message_id=current_message.id,
-            selected_skill_id=_routing_target_agent_id(routing_plan),
-            routing_source=routing_plan.source.value,
-            confidence=routing_plan.confidence,
-            execution_mode=routing_plan.execution_mode,
-            intents=[intent.model_dump(mode="json") for intent in routing_plan.intents],
-            reason_codes=list(routing_plan.reason_codes),
-            safety_flags=list(routing_plan.safety_flags),
-            needs_clarification=routing_plan.needs_clarification,
-            tool_scope_version=_tool_catalog_version_for_ledger(
-                tool_executor_configured=self.tool_executor is not None,
-            ),
         )
 
     async def _memory_projection(self, *, run: AgentRun) -> list[dict[str, Any]]:
@@ -1401,10 +1385,6 @@ def _visible_assistant_image_urls(*, messages: list[AgentMessage], before_sequen
     return tuple(urls)
 
 
-def _routing_target_agent_id(routing_plan: RoutingPlan) -> str:
-    return routing_plan.selected_agent_id.value
-
-
 def _load_service_skill_output(
     *,
     skill: AgentServiceSkill,
@@ -1449,12 +1429,6 @@ def _artifact_event_payload(artifact: AgentArtifact) -> dict[str, Any]:
         )
     payload["semantic"] = artifact_event_payload_semantic(artifact_type=artifact.artifact_type)
     return payload
-
-
-def _tool_catalog_version_for_ledger(*, tool_executor_configured: bool) -> str:
-    if not tool_executor_configured:
-        return "agent_load_service_skill:v2"
-    return "global_model_tool_registry:v2"
 
 
 def _sdk_tool_namespaces(tool_namespaces: tuple[ToolNamespace, ...]) -> tuple[SdkToolNamespace, ...]:

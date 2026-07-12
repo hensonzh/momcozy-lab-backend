@@ -116,9 +116,8 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result(capl
         "locale": "zh-CN",
         "location": {"country": "CN", "region": "Shanghai", "city": "Shanghai"},
     }
-    assert repository.routing_decisions[0]["selected_skill_id"] == "cozymate_service_agent"
-    assert repository.routing_decisions[0]["routing_source"] == "passthrough"
-    assert repository.routing_decisions[0]["confidence"] == 1
+    assert repository.routing_decisions == []
+    assert repository.latest_workflow_queries == 0
     assert request.model_input[-1] == {"role": "user", "content": "Summarize it."}
     assert repository.run_summaries == []
     assert _progress_phases(repository) == [
@@ -135,7 +134,7 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result(capl
     assert timing_payloads[-1]["status"] == "completed"
     assert timing_payloads[-1]["final_text_length"] == len("Here is the summary.")
     assert "context_base" in timing_payloads[-1]["timings_ms"]
-    assert "routing" in timing_payloads[-1]["timings_ms"]
+    assert "routing" not in timing_payloads[-1]["timings_ms"]
     assert "working_context" in timing_payloads[-1]["timings_ms"]
     assert "model_reasoning" in timing_payloads[-1]["timings_ms"]
     assert "total_before_finalize" in timing_payloads[-1]["timings_ms"]
@@ -259,8 +258,7 @@ def test_agent_runtime_executor_loads_base_context_without_parallel_shared_sessi
     )
 
     assert result.status == "completed"
-    assert session_guard.calls[:4] == [
-        "current_message",
+    assert session_guard.calls[:3] == [
         "thread_messages",
         "memory_snapshot",
         "active_workflows",
@@ -1190,7 +1188,7 @@ def test_agent_runtime_executor_does_not_inject_service_skill_before_model_loads
         "ongoing_work": [],
         "known_information": [],
     }
-    assert repository.routing_decisions[0]["selected_skill_id"] == "cozymate_service_agent"
+    assert repository.routing_decisions == []
     assert repository.run_summaries == []
     assert request.tool_names == ("load_service_skill",)
 
@@ -2836,6 +2834,7 @@ class FakeRuntimeRepository:
         self.artifacts = []
         self.events = []
         self.routing_decisions = []
+        self.latest_workflow_queries = 0
         self.tool_call = None
         self.tool_output = None
         self.run_summaries = list(run_summaries or [])
@@ -2979,6 +2978,7 @@ class FakeRuntimeRepository:
         ][:limit]
 
     async def get_latest_workflow_state_for_thread(self, *, thread_id, owner_user_id, workflow_type):
+        self.latest_workflow_queries += 1
         matches = [
             workflow
             for workflow in self.workflow_states

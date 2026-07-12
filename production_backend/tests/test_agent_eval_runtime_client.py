@@ -2,7 +2,11 @@ import asyncio
 from pathlib import Path
 from uuid import UUID, uuid4
 
-from production_backend.app.modules.agent_runtime.evals.service import AgentEvalRuntimeClient, load_product_agent_eval_seed_cases
+from production_backend.app.modules.agent_runtime.evals.service import (
+    AgentEvalRuntimeClient,
+    AgentEvalRuntimeTraceCollector,
+    load_product_agent_eval_seed_cases,
+)
 from production_backend.app.modules.agent_runtime.models import (
     AgentAction,
     AgentEvent,
@@ -83,6 +87,27 @@ def test_agent_eval_runtime_client_executes_run_and_evaluates_seed_case() -> Non
     assert result.trace.tool_calls[0]["tool_name"] == "support.ticket.propose"
     assert any(event["type"] == "action.confirmation_required" for event in result.trace.events)
     assert result.trace.actions[0]["action_type"] == "support.ticket.create"
+
+
+def test_agent_eval_trace_uses_latest_loaded_service_skill_event() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="Continue setup.", sequence=1)
+    repository = FakeEvalRuntimeRepository(run=run, messages=[current_user], current_message=current_user, tool_calls=[])
+    repository.events.append(
+        AgentEvent(
+            event_id=uuid4(),
+            thread_id=thread_id,
+            run_id=run.id,
+            sequence=1,
+            event_type="skill.loaded",
+            payload={"service_skill_id": "device-guidance"},
+        )
+    )
+
+    trace = asyncio.run(AgentEvalRuntimeTraceCollector(repository=repository).collect(run_id=run.id))
+
+    assert trace.service_skill_id == "device-guidance"
 
 
 class FakeEvalRuntimeRepository:

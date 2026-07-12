@@ -10,11 +10,6 @@ import pytest
 from production_backend.app.core.errors import ApiError
 from production_backend.app.core.metrics import RequestMetrics
 from production_backend.app.modules.agent_runtime.graphs import default_graph_registry
-from production_backend.app.modules.agent_runtime.agents.main_coordinator_agent import (
-    AgentId,
-    RoutingSource,
-    plan_current_request,
-)
 from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent import ServiceSkillId
 from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.prompts import (
     BASE_AGENT_INSTRUCTIONS,
@@ -61,35 +56,6 @@ def test_default_graph_registry_uses_langgraph_sdk_pattern() -> None:
     assert graph.runtime_pattern == "langgraph_sdk"
     assert graph.node_names == ("sdk_reasoning", "finish")
     assert "sdk_reasoning" in graph.node_names
-
-
-def test_main_coordinator_agent_owns_first_stage_plan() -> None:
-    plan = plan_current_request(user_message_text="Summarize what we discussed.")
-
-    assert plan.target_kind == "agent"
-    assert plan.selected_agent_id == AgentId.COZYMATE_SERVICE_AGENT
-    assert "selected_service_skill_id" not in plan.model_dump()
-    assert plan.intents[0].agent_id == AgentId.COZYMATE_SERVICE_AGENT
-    assert plan.execution_mode == "passthrough"
-    assert plan.source == RoutingSource.PASSTHROUGH
-    assert plan.reason_codes == ["default_to_cozymate"]
-
-
-def test_main_coordinator_agent_keeps_service_skill_selection_model_driven() -> None:
-    service_texts = [
-        "今天奶量怎么样？",
-        "帮我准备待产包和分娩沟通单",
-        "My Air1 pump suction feels weak today.",
-    ]
-
-    for text in service_texts:
-        plan = plan_current_request(user_message_text=text)
-
-        assert plan.target_kind == "agent"
-        assert plan.selected_agent_id == AgentId.COZYMATE_SERVICE_AGENT
-        assert "selected_service_skill_id" not in plan.model_dump()
-        assert plan.source == RoutingSource.PASSTHROUGH
-        assert plan.reason_codes == ["default_to_cozymate"]
 
 
 def test_service_skill_registry_is_the_model_facing_entrypoint() -> None:

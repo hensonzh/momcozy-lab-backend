@@ -216,6 +216,52 @@ def test_product_agent_eval_seed_uses_current_hospital_bag_action_contract() -> 
     assert "hospital_bag_cart_update_proposal" not in cart_contracts
 
 
+def test_product_agent_eval_seed_covers_working_context_and_durable_workflows() -> None:
+    cases = load_product_agent_eval_seed_cases(PRODUCT_AGENT_EVAL_SEED)
+    by_suite = {case["suite"]: case for case in cases}
+
+    continuity = by_suite["working_context_multi_skill_continuity"]
+    assert continuity["expected_tool_calls"] == []
+    assert continuity["forbidden_tool_calls"] == [{"contract": "load_service_skill"}]
+    assert continuity["input"]["fixtures"]["working_context"]["skills"] == [
+        "milk-management",
+        "device-guidance",
+    ]
+
+    redis_loss = by_suite["working_context_redis_loss_reload"]
+    assert [call["contract"] for call in redis_loss["expected_tool_calls"]] == [
+        "load_service_skill",
+        "records.milk_status.read",
+    ]
+    assert redis_loss["input"]["fixtures"]["working_context_redis_available"] is False
+
+    device = by_suite["device_unboxing_step_continuation"]
+    assert device["expected_tool_calls"] == [
+        {
+            "contract": "devices.unboxing.advance",
+            "timing": "after_user_completes_current_step",
+            "args_subset": {"action": "complete_current", "expected_step": "guide.parts"},
+        }
+    ]
+
+    hospital_bag = by_suite["hospital_bag_form_to_card_workflow"]
+    assert [call["contract"] for call in hospital_bag["expected_tool_calls"]] == [
+        "load_service_skill",
+        "hospital_bag_form_create",
+        "hospital_bag_card_create",
+    ]
+
+    pregnancy = by_suite["pregnancy_plan_end_to_end_workflow"]
+    assert [call["contract"] for call in pregnancy["expected_tool_calls"]] == [
+        "load_service_skill",
+        "pregnancy.plan_intake.start",
+        "pregnancy.plan_intake.analyze",
+        "pregnancy.plan_intake.advance",
+        "pregnancy.plan.propose",
+    ]
+    assert "internal_workflow_artifact" in pregnancy["expected_behavior"]["must_not"]
+
+
 def test_product_agent_eval_seed_uses_current_support_action_contract() -> None:
     cases = load_product_agent_eval_seed_cases(PRODUCT_AGENT_EVAL_SEED)
     by_suite = {case["suite"]: case for case in cases}

@@ -90,7 +90,7 @@ class AgentEvalRuntimeTraceCollector:
             actions=[_action_trace(action) for action in actions],
             safety_decision=safety_decision,
             final_text=final_text,
-            service_skill_id=str(getattr(run, "service_skill_id", "") or ""),
+            service_skill_id=_runtime_trace_service_skill_id(run=run, events=events),
         )
 
 
@@ -208,6 +208,17 @@ SCENE_SERVICE_SKILL_IDS = frozenset(
         "device-guidance",
     }
 )
+
+
+def _runtime_trace_service_skill_id(*, run: Any, events: list[Any]) -> str:
+    for event in reversed(events):
+        if str(getattr(event, "event_type", "") or "") != "skill.loaded":
+            continue
+        payload = getattr(event, "payload", {})
+        service_skill_id = str(payload.get("service_skill_id") or "").strip() if isinstance(payload, dict) else ""
+        if service_skill_id:
+            return service_skill_id
+    return str(getattr(run, "service_skill_id", "") or "").strip() or COZYMATE_WRAPPER_AGENT_ID
 
 
 def load_product_agent_eval_seed_cases(path: Path) -> list[dict[str, Any]]:

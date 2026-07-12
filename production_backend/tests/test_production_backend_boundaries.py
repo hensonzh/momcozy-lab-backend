@@ -64,7 +64,6 @@ def test_agent_runtime_uses_explicit_internal_subdomains() -> None:
         "cozymate_service_agent/prompts",
         "cozymate_service_agent/skills",
         "cozymate_service_agent/tools",
-        "main_coordinator_agent",
     }
     missing_agent_subdomains = sorted(
         name for name in expected_agent_subdomains if not (AGENT_RUNTIME_ROOT / "agents" / name).is_dir()
