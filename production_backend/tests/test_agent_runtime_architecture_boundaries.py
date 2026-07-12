@@ -398,12 +398,14 @@ def test_model_tool_schema_registry_has_no_internal_or_legacy_orphans() -> None:
         ("profile_update", "write", False, "eager"),
         ("records.milk_status.read", "read", False, "eager"),
         ("records.feeding_record.propose", "write", False, "deferred"),
-        ("records.feeding_record_delete.propose", "write", True, "deferred"),
+        ("records.feeding_record_delete.propose", "write", False, "deferred"),
+        ("records.growth_record_update.propose", "write", False, "deferred"),
+        ("plans.task_complete.propose", "write", False, "deferred"),
         ("plans.milk_plan.propose", "write", True, "deferred"),
         ("pregnancy_diary.entries.read", "read", False, "deferred"),
         ("pregnancy_diary.entry.create", "write", False, "deferred"),
         ("pregnancy_diary.entry.update", "write", False, "deferred"),
-        ("pregnancy_diary.entry.delete.propose", "write", True, "deferred"),
+        ("pregnancy_diary.entry.delete.propose", "write", False, "deferred"),
         ("hospital_bag_card_create", "write", False, "deferred"),
         ("support.ticket.propose", "write", True, "deferred"),
     ],
@@ -532,6 +534,7 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
     task_update_schema = registry.get("plans.task_update.propose").input_schema
     task_delete_schema = registry.get("plans.task_delete.propose").input_schema
     plan_delete_schema = registry.get("plans.plan_delete.propose").input_schema
+    plan_delete_description = registry.get("plans.plan_delete.propose").description
     milk_reminder_schema = registry.get("notifications.milk_reminder.propose").input_schema
     feeding_schema = registry.get("records.feeding_record.propose").input_schema
     pumping_schema = registry.get("records.pumping_record.propose").input_schema
@@ -630,6 +633,9 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
     assert task_update_schema["properties"]["task_date"]["type"] == "string"
     assert task_delete_schema["required"] == ["task_id"]
     assert plan_delete_schema["required"] == ["plan_id"]
+    assert "用户当前已明确表达删除意图" in plan_delete_description
+    assert "不要再追加口头确认或通用确认卡" in plan_delete_description
+    assert "skill 已完成口头确认" not in plan_delete_description
     assert milk_reminder_schema["additionalProperties"] is False
     assert milk_reminder_schema["required"] == ["title"]
     assert milk_reminder_schema["properties"]["remind_at"]["type"] == "string"

@@ -86,6 +86,8 @@ def test_product_agent_eval_seed_uses_current_pregnancy_action_contracts() -> No
 
     assert "load_service_skill" in plan_contracts
     assert "pregnancy.plan.propose" in plan_contracts
+    assert by_suite["pregnancy_plan_creation"]["expected_behavior"]["requires_confirmation_before_write"] is False
+    assert "confirmation_card" in by_suite["pregnancy_plan_creation"]["expected_behavior"]["must_not"]
     assert intake_contracts == {"load_service_skill", "pregnancy.plan_intake.start"}
     assert analysis_contracts == {"pregnancy.plan_intake.analyze"}
     assert followup_contracts == {"pregnancy.plan_intake.advance"}
@@ -105,6 +107,57 @@ def test_product_agent_eval_seed_uses_current_pregnancy_action_contracts() -> No
     assert "pregnancy_plan_proposal" not in plan_contracts
     assert "plan_task_update_proposal" not in task_contracts
     assert "diary_entry_upsert_proposal" not in diary_contracts
+
+    diary_delete = by_suite["pregnancy_diary_delete_exact"]
+    assert diary_delete["input"]["fixtures"]["trusted_exact_target"]["owner_scoped"] is True
+    assert diary_delete["input"]["fixtures"]["explicit_delete_intent"] is True
+    assert "oral_confirmation_complete" not in diary_delete["input"]["fixtures"]
+    assert "redundant_confirmation_question" in diary_delete["expected_behavior"]["must_not"]
+    assert diary_delete["expected_tool_calls"] == [
+        {
+            "contract": "pregnancy_diary.entry.delete.propose",
+            "timing": "on_explicit_intent_and_exact_target",
+            "args_subset": {"entry_date": "2026-07-04"},
+        }
+    ]
+    assert by_suite["pregnancy_diary_delete_ambiguous"]["expected_tool_calls"] == []
+    assert by_suite["pregnancy_diary_delete_ambiguous"]["forbidden_tool_calls"] == [
+        {"contract": "pregnancy_diary.entry.delete.propose"}
+    ]
+
+    plan_delete = by_suite["pregnancy_plan_delete_exact"]
+    assert plan_delete["input"]["fixtures"]["trusted_exact_target"]["owner_scoped"] is True
+    assert plan_delete["input"]["fixtures"]["explicit_delete_intent"] is True
+    assert "oral_confirmation_complete" not in plan_delete["input"]["fixtures"]
+    assert plan_delete["expected_behavior"]["requires_confirmation_before_write"] is False
+    assert "redundant_confirmation_question" in plan_delete["expected_behavior"]["must_not"]
+    assert plan_delete["expected_tool_calls"] == [
+        {
+            "contract": "plans.plan_delete.propose",
+            "timing": "on_explicit_intent_and_exact_target",
+            "args_subset": {"plan_id": "11111111-1111-4111-8111-111111111111"},
+        }
+    ]
+    assert by_suite["pregnancy_plan_delete_ambiguous"]["expected_tool_calls"] == []
+    assert by_suite["pregnancy_plan_delete_ambiguous"]["forbidden_tool_calls"] == [
+        {"contract": "plans.plan_delete.propose"}
+    ]
+
+    task_exact = by_suite["pregnancy_task_completion"]
+    assert task_exact["input"]["fixtures"]["trusted_exact_target"]["owner_scoped"] is True
+    assert task_exact["expected_behavior"]["requires_confirmation_before_write"] is False
+    assert "confirmation_card" in task_exact["expected_behavior"]["must_not"]
+    assert by_suite["pregnancy_task_ambiguous"]["expected_tool_calls"] == []
+    assert {item["contract"] for item in by_suite["pregnancy_task_ambiguous"]["forbidden_tool_calls"]} == {
+        "plans.task_complete.propose",
+        "plans.task_update.propose",
+        "plans.task_delete.propose",
+    }
+
+    record_exact = by_suite["feeding_record_delete_exact"]
+    assert record_exact["input"]["fixtures"]["trusted_exact_target"]["owner_scoped"] is True
+    assert record_exact["expected_behavior"]["requires_confirmation_before_write"] is False
+    assert by_suite["feeding_record_delete_ambiguous"]["expected_tool_calls"] == []
 
 
 def test_product_agent_eval_seed_covers_implicit_opt_out_negative_and_health_mixed_diary_parity() -> None:
@@ -220,7 +273,8 @@ def test_product_agent_eval_seed_covers_postpartum_recovery_service_skill() -> N
     assert {"profile.read", "plans.current.read"} <= checkin_contracts
     assert "pregnancy_diary.entries.read" not in checkin_contracts
     assert by_suite["postpartum_recovery_task"]["expected_behavior"]["service_skill_id"] == "health-consultation"
-    assert by_suite["postpartum_recovery_task"]["expected_behavior"]["requires_confirmation_before_write"] is True
+    assert by_suite["postpartum_recovery_task"]["expected_behavior"]["requires_confirmation_before_write"] is False
+    assert "confirmation_card" in by_suite["postpartum_recovery_task"]["expected_behavior"]["must_not"]
     assert "plans.task_create.propose" in task_contracts
 
 

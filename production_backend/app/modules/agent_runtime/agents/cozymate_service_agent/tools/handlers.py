@@ -67,6 +67,7 @@ from .pregnancy_plan_flow import (
     initialize_pregnancy_plan_workflow,
     invalid_pregnancy_plan_intake_fields,
     missing_pregnancy_plan_intake_fields,
+    normalize_pregnancy_plan_generation_context,
     pregnancy_plan_current_followup,
     pregnancy_plan_urgent_signal_ids,
 )
@@ -142,13 +143,7 @@ class SupportTicketProposeToolHandler:
             apply_payload=apply_payload,
             idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:support-ticket",
         )
-        return {
-            "action_id": str(action.id),
-            "action_type": action.action_type,
-            "action_status": action.status,
-            "requires_confirmation": _action_requires_confirmation(action),
-            "preview_payload": preview_payload,
-        }
+        return _proposal_result(action=action, preview_payload=preview_payload)
 
 
 class HospitalBagCartUpdateProposeToolHandler:
@@ -172,13 +167,7 @@ class HospitalBagCartUpdateProposeToolHandler:
             apply_payload=apply_payload,
             idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:hospital-bag-cart",
         )
-        return {
-            "action_id": str(action.id),
-            "action_type": action.action_type,
-            "action_status": action.status,
-            "requires_confirmation": _action_requires_confirmation(action),
-            "preview_payload": preview_payload,
-        }
+        return _proposal_result(action=action, preview_payload=preview_payload)
 
 
 class IbclcConsultCardCreateToolHandler:
@@ -1219,6 +1208,8 @@ class PregnancyPlanProposeToolHandler:
         else:
             action = await self.runtime_service.propose_action(**action_kwargs)
             action_created = True
+        if str(getattr(action, "status", "") or "") == "failed":
+            return _failed_action_result(action=action, preview_payload=preview_payload)
         if not action_created:
             return _proposal_result(action=action, preview_payload=dict(action.preview_payload or preview_payload))
         artifact_payload = {**dict(artifact_record["payload"]), "action_id": str(action.id)}
@@ -1762,30 +1753,11 @@ def _milk_plan_artifact_payload(args: dict[str, Any]) -> dict[str, Any]:
 
 def _pregnancy_plan_apply_payload(args: dict[str, Any]) -> dict[str, Any]:
     runtime_plan_context = _dict(args, "runtime_plan_context")
-    plan_context = {
-        key: value
-        for key, value in runtime_plan_context.items()
-        if key
-        not in {
-            "has_active_plan",
-            "active_plan_id",
-            "active_plan_title",
-            "workflow_phase",
-            "analysis_run_id",
-            "analysis_artifact_id",
-            "source_form_artifact_id",
-            "source_form_submission_id",
-        }
-        and value not in ("", None)
-    }
+    generation_context = dict(runtime_plan_context)
     scope = args.get("scope")
     if scope not in (None, ""):
-        plan_context["scope"] = scope
-    additional_info = _text(args, "additional_info")
-    if additional_info:
-        plan_context["final_additional_info"] = additional_info
-    if "due_date_or_week" not in plan_context and _text(plan_context, "delivery_date"):
-        plan_context["due_date_or_week"] = _text(plan_context, "delivery_date")
+        generation_context["scope"] = scope
+    plan_context = normalize_pregnancy_plan_generation_context(generation_context)
     lineage = {
         key: _text(runtime_plan_context, key)
         for key in ("analysis_artifact_id", "source_form_artifact_id", "source_form_submission_id")
@@ -2146,13 +2118,46 @@ def _diary_entry_not_found(entry_date: date) -> dict[str, Any]:
 
 
 def _proposal_result(*, action: Any, preview_payload: dict[str, Any]) -> dict[str, Any]:
-    return {
+    requires_confirmation = _action_requires_confirmation(action)
+    action_status = str(getattr(action, "status", "") or "")
+    result = {
         "action_id": str(action.id),
         "action_type": action.action_type,
-        "action_status": action.status,
-        "requires_confirmation": _action_requires_confirmation(action),
+        "action_status": action_status,
+        "requires_confirmation": requires_confirmation,
+        "confirmation_policy": "always" if requires_confirmation else "explicit_intent",
+        "user_visible": requires_confirmation,
+        "write_succeeded": action_status == "applied",
         "preview_payload": preview_payload,
     }
+    if action_status == "failed":
+        result["status"] = "action_failed"
+        result["error_code"] = str(getattr(action, "error_code", "") or "agent_action_handler_error")
+    return result
+
+
+def _failed_action_result(*, action: Any, preview_payload: dict[str, Any]) -> ToolHandlerResult:
+    output = _proposal_result(action=action, preview_payload=preview_payload)
+    model_payload = {
+        "agent_action_failure": {
+            "action_id": output["action_id"],
+            "action_type": output["action_type"],
+            "error_code": output["error_code"],
+            "instruction": (
+                "The write failed and no plan was created. State that the operation did not succeed, never claim it was "
+                "saved or synced, and offer a retry. Do not describe a preview as an applied plan."
+            ),
+        }
+    }
+    return ToolHandlerResult(
+        output=output,
+        model_context=(
+            {
+                "role": "developer",
+                "content": json.dumps(model_payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
+            },
+        ),
+    )
 
 
 def _action_requires_confirmation(action: Any) -> bool:

@@ -135,25 +135,43 @@ includes user-visible `preview_payload` plus action metadata:
 `action_type`, `action_status`, `target_type`, `target_id`, and
 `side_effect_level`.
 
-`action.queued`, `action.applied`, `action.failed`, and `action.rejected`
-include `action_status`, `action_type`, `target_type`, and `target_id` so
-clients can merge replayed events into the same action card. `apply_payload` is
-never streamed; it is only persisted inside the server-side action/outbox apply
-path.
+`action.confirmed`, `action.applied`, `action.failed`, and `action.rejected`
+include `action_status`, `action_type`, `target_type`, and `target_id`, plus the
+stable presentation fields `requires_confirmation`, `confirmation_policy`, and
+`user_visible`. `apply_payload` is never streamed; it is persisted only in the
+server-side action ledger. Direct explicit-intent actions use
+`requires_confirmation=false`, `confirmation_policy=explicit_intent`, and
+`user_visible=false`, so clients must not create an action card for them.
+
+Actions that still require a value-bearing preview (for example support
+handoff, milk-plan save, and reminders) emit `action.confirmation_required`.
+The confirm API records authorization, emits `action.confirmed`, and moves the
+same run back to `queued`; it never writes domain state in the HTTP request.
+The agent worker resumes that run, executes the action synchronously, persists
+the domain mutation plus action/domain events, returns an explicit result, and
+only then completes the run. There is no `agent.action.apply` outbox job.
 
 Action API responses likewise expose preview/status metadata only. They do not
 return server-side `apply_payload` or action idempotency keys.
 
-The confirmed `pregnancy.plan.create` apply path also emits the durable
-application event `pregnancy_plan.changed` after the authoritative Plan and
-action result are committed. Its payload is intentionally limited to
+The direct `pregnancy.plan.create` tool path also emits the durable application
+event `pregnancy_plan.changed` in the same transaction as the authoritative
+Plan and action result. Its payload is intentionally limited to
 `operation=created`, opaque `plan_id`, `plan_type=pregnancy`,
-`source=agent_action`, and the generic outbox-added `action_id`. Preview,
-confirmation, rejection, and failed apply states do not emit this business
+`source=agent_action`, and `action_id`. Failed apply states do not emit this business
 event, and it never contains the personalized card, plan context, or health
 facts. Clients use it only as an invalidation/notification signal and reload the
 owner-scoped resource through
 `GET /v1/plans?plan_type=pregnancy&status=active`.
+
+After an authorized milk plan is actually created, the same executor
+transaction emits durable `milk_plan.changed`. Before executor metadata is
+added, its exact domain payload is `operation=created`, `reason=created`, opaque
+`plan_id`, `plan_type=milk_management`, `source=agent_action`, and a deduplicated,
+sorted `affected_dates` list capped at 30 valid `YYYY-MM-DD` values. The
+executor adds `action_id` and stable presentation fields. The event contains no
+title, summary, task text, reminder text, lactation history, or health facts;
+failed writes and applied-action replays emit no duplicate event.
 
 ## Files
 

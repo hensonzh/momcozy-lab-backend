@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -12,6 +12,7 @@ from .service import PlansService
 
 
 MILK_PLAN_CREATE_ACTION = "plans.milk_plan.create"
+MILK_PLAN_CHANGED_EVENT = "milk_plan.changed"
 PREGNANCY_PLAN_CREATE_ACTION = "pregnancy.plan.create"
 PREGNANCY_PLAN_CHANGED_EVENT = "pregnancy_plan.changed"
 PLAN_TASK_CREATE_ACTION = "plans.task.create"
@@ -19,6 +20,41 @@ PLAN_TASK_COMPLETE_ACTION = "plans.task.complete"
 PLAN_TASK_UPDATE_ACTION = "plans.task.update"
 PLAN_TASK_DELETE_ACTION = "plans.task.delete"
 PLAN_DELETE_ACTION = "plans.plan.delete"
+_MILK_PLAN_CHANGED_MAX_AFFECTED_DATES = 30
+
+
+def _milk_plan_affected_dates(plan_payload: dict[str, Any]) -> list[str]:
+    affected: set[date] = set()
+    start_date = _event_date(plan_payload.get("start_date"))
+    raw_days = plan_payload.get("days")
+    days = raw_days if isinstance(raw_days, int) and not isinstance(raw_days, bool) else 1
+    days = max(1, min(days, _MILK_PLAN_CHANGED_MAX_AFFECTED_DATES))
+    if start_date is not None:
+        affected.update(start_date + timedelta(days=offset) for offset in range(days))
+
+    for collection_key in ("tasks", "reminders"):
+        collection = plan_payload.get(collection_key)
+        if not isinstance(collection, list):
+            continue
+        for item in collection[:40]:
+            if not isinstance(item, dict):
+                continue
+            for key in ("date", "task_date", "remind_at", "scheduled_at"):
+                parsed = _event_date(item.get(key))
+                if parsed is not None:
+                    affected.add(parsed)
+                    break
+    return [value.isoformat() for value in sorted(affected)[:_MILK_PLAN_CHANGED_MAX_AFFECTED_DATES]]
+
+
+def _event_date(value: Any) -> date | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return date.fromisoformat(text[:10])
+    except ValueError:
+        return None
 
 
 class MilkPlanCreateActionHandler:
@@ -60,6 +96,19 @@ class MilkPlanCreateActionHandler:
                 "agent_action_id": str(action.id),
                 "agent_run_id": str(action.run_id),
             },
+            application_events=(
+                AgentApplicationEvent(
+                    event_type=MILK_PLAN_CHANGED_EVENT,
+                    payload={
+                        "operation": "created",
+                        "reason": "created",
+                        "plan_id": str(plan.id),
+                        "plan_type": plan.plan_type,
+                        "source": "agent_action",
+                        "affected_dates": _milk_plan_affected_dates(plan_payload),
+                    },
+                ),
+            ),
         )
 
 

@@ -52,8 +52,9 @@ def test_pregnancy_diary_direct_writes_wait_for_real_database_result() -> None:
         assert contract.blocking_policy == "must_wait"
         assert contract.result_dependency == "final_response"
         assert contract.idempotency_required is False
-    assert delete.blocking_policy == "wait_for_confirmation"
-    assert delete.requires_confirmation is True
+    assert delete.blocking_policy == "must_wait"
+    assert delete.result_dependency == "final_response"
+    assert delete.requires_confirmation is False
 
 
 def test_pregnancy_diary_global_contract_restores_autonomous_fact_capture_boundaries() -> None:

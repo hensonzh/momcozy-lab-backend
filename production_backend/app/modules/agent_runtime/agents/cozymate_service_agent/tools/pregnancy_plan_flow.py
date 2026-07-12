@@ -172,6 +172,59 @@ _URGENT_PREGNANCY_SIGNAL_PHRASES: dict[str, tuple[str, ...]] = {
 _CONDITIONAL_URGENT_SIGNAL_CUES = ("如果", "若", "一旦")
 _NONCURRENT_URGENT_SIGNAL_CUES = ("上次", "既往", "之前", "曾经", "没有", "无", "未", "否认")
 _CURRENT_URGENT_SIGNAL_CUES = ("现在", "目前", "刚刚", "今天", "此刻")
+_PREGNANCY_PLAN_GENERATION_TEXT_MAX_LENGTH = 2000
+_PREGNANCY_PLAN_FOLLOWUP_ANSWER_MAX_LENGTH = 240
+_PREGNANCY_PLAN_SCOPE_VALUES = frozenset({"full", "prenatal_only", "short_range"})
+_PREGNANCY_PLAN_CHECKUP_STATUSES = frozenset(
+    {
+        "已上传产检记录",
+        "暂不上传",
+        "还没做过产检",
+        "暂不确定是否做过产检",
+    }
+)
+_PREGNANCY_PLAN_FOLLOWUP_COPY: dict[str, tuple[str, str]] = {
+    "doctor_special_notes_followup": (
+        "医生特殊提醒",
+        "把医生已经提出的复查或观察要求落实到近期日程，并确认异常联系路径。",
+    ),
+    "prior_c_section_birth_path_detail": (
+        "既往剖宫产与本次分娩评估",
+        "把既往剖宫产原因、本次评估节点和入院准备带到下一次产检确认。",
+    ),
+    "prior_preterm_monitoring_detail": (
+        "既往早产与本次监测",
+        "和产科确认宫颈、宫缩及早产信号的复查节奏和提前联系路径。",
+    ),
+    "chronic_medical_condition_coordination": (
+        "基础疾病或长期用药协同",
+        "和产科及相关专科确认用药、复查时间与异常指标联系路径。",
+    ),
+    "age_35_plus_multiple_monitoring": (
+        "高龄与多胎监测重点",
+        "确认血压血糖、胎儿生长差异、宫颈与早产信号的个性化监测安排。",
+    ),
+    "multiple_pregnancy_monitoring": (
+        "多胎监测重点",
+        "确认多胎类型对应的复查节奏、胎儿生长观察与异常联系路径。",
+    ),
+    "prior_birth_history_detail": (
+        "既往分娩与恢复经历",
+        "把仍适用的既往经验和这次需要提前补足的支持带入近期准备。",
+    ),
+    "age_35_plus_checkup_detail": (
+        "高龄孕产复查重点",
+        "确认筛查、血压血糖、胎儿生长及其他已被提醒项目的复查节奏。",
+    ),
+    "ivf_week_confirmation": (
+        "IVF 孕周与用药复核",
+        "优先对齐医生确认的孕周、移植日期口径、当前用药与复查节点。",
+    ),
+    "planned_c_section_detail": (
+        "计划剖宫产准备",
+        "提前确认手术评估、术前检查、大致时间、入院要求与恢复支持。",
+    ),
+}
 
 
 def build_pregnancy_plan_intake_form(*, default_values: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -281,9 +334,9 @@ def advance_pregnancy_plan_workflow(
         records.append(
             {
                 "topic": topic_id,
-                "question": str(values.get("question") or current.get("question") or "").strip()[:2000],
+                "question": str(current.get("question") or "").strip()[:2000],
                 "answer": answer[:2000],
-                "plan_impact": str(values.get("plan_impact") or current.get("plan_impact") or "").strip()[:2000],
+                "plan_impact": str(current.get("plan_impact") or "").strip()[:2000],
             }
         )
         updated["personalized_followup_records"] = records
@@ -536,6 +589,85 @@ def normalize_pregnancy_plan_intake(values: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+def normalize_pregnancy_plan_generation_context(values: dict[str, Any]) -> dict[str, Any]:
+    """Allowlist the owner-scoped facts that may shape or persist a plan card.
+
+    Personalized answers are data to display and verify. They never supply plan
+    instructions, titles, or reasoning copy; those come from the trusted topic
+    catalog below.
+    """
+
+    normalized: dict[str, Any] = {}
+    intake = normalize_pregnancy_plan_intake(values)
+    for key, value in intake.items():
+        if isinstance(value, str):
+            text = _bounded_visible_text(value, max_length=_PREGNANCY_PLAN_GENERATION_TEXT_MAX_LENGTH)
+            if text:
+                normalized[key] = text
+        else:
+            normalized[key] = value
+
+    for key in (
+        "due_date_or_week",
+        "delivery_date",
+        "birth_setting",
+        "feeding_intention",
+        "support_person",
+        "final_additional_info",
+    ):
+        text = _bounded_visible_text(
+            values.get(key),
+            max_length=_PREGNANCY_PLAN_GENERATION_TEXT_MAX_LENGTH,
+        )
+        if text:
+            normalized[key] = text
+
+    scope = str(values.get("scope") or "").strip()
+    if scope in _PREGNANCY_PLAN_SCOPE_VALUES:
+        normalized["scope"] = scope
+
+    records: list[dict[str, str]] = []
+    seen_topics: set[str] = set()
+    raw_records = values.get("personalized_followup_records")
+    if isinstance(raw_records, list):
+        for raw_record in raw_records:
+            if len(records) >= PREGNANCY_PLAN_FOLLOWUP_MAX_ROUNDS:
+                break
+            if not isinstance(raw_record, dict):
+                continue
+            topic = str(raw_record.get("topic") or "").strip()
+            copy = _PREGNANCY_PLAN_FOLLOWUP_COPY.get(topic)
+            if copy is None or topic in seen_topics:
+                continue
+            answer = _bounded_visible_text(
+                raw_record.get("answer"),
+                max_length=_PREGNANCY_PLAN_FOLLOWUP_ANSWER_MAX_LENGTH,
+            )
+            if not answer:
+                continue
+            title, plan_impact = copy
+            records.append(
+                {
+                    "topic": topic,
+                    "title": title,
+                    "answer": answer,
+                    "plan_impact": plan_impact,
+                }
+            )
+            seen_topics.add(topic)
+    if records:
+        normalized["personalized_followup_records"] = records
+
+    checkup_status = str(values.get("checkup_status") or "").strip()
+    if checkup_status not in _PREGNANCY_PLAN_CHECKUP_STATUSES and _is_yes(values.get("checkup_records_uploaded")):
+        checkup_status = "已上传产检记录"
+    if checkup_status in _PREGNANCY_PLAN_CHECKUP_STATUSES:
+        normalized["checkup_status"] = checkup_status
+        if checkup_status == "已上传产检记录":
+            normalized["checkup_records_uploaded"] = "是"
+    return normalized
+
+
 def missing_pregnancy_plan_intake_fields(values: dict[str, Any]) -> list[str]:
     return [field_id for field_id in PREGNANCY_PLAN_REQUIRED_FIELD_IDS if not _has_value(values.get(field_id))]
 
@@ -681,19 +813,7 @@ def analyze_pregnancy_plan_intake(
 
 
 def build_pregnancy_plan_card_json(plan_context: dict[str, Any]) -> dict[str, Any]:
-    context = normalize_pregnancy_plan_intake(plan_context)
-    for key in (
-        "due_date_or_week",
-        "delivery_date",
-        "birth_setting",
-        "feeding_intention",
-        "support_person",
-        "final_additional_info",
-        "scope",
-    ):
-        value = plan_context.get(key)
-        if _has_value(value):
-            context[key] = value.strip() if isinstance(value, str) else value
+    context = normalize_pregnancy_plan_generation_context(plan_context)
     analysis = analyze_pregnancy_plan_intake(context)
     stage = str(analysis["stage"]["id"])
     focus_ids = [str(item["id"]) for item in analysis["focuses"] if isinstance(item, dict) and item.get("id")]
@@ -758,6 +878,32 @@ def build_pregnancy_plan_card_json(plan_context: dict[str, Any]) -> dict[str, An
                 ["和医生确认手术与术前检查时间", "确认禁食、入院和材料要求", "安排术后接送、照护和家务支持"],
             )
         )
+    personalized_records = context.get("personalized_followup_records")
+    if isinstance(personalized_records, list):
+        for index, record in enumerate(personalized_records, start=1):
+            if not isinstance(record, dict):
+                continue
+            topic = str(record.get("topic") or "").strip()
+            title = str(record.get("title") or "").strip()
+            answer = str(record.get("answer") or "").strip()
+            plan_impact = str(record.get("plan_impact") or "").strip()
+            if not topic or not title or not answer or not plan_impact:
+                continue
+            current_items.append(
+                _todo(
+                    f"personalized_followup_{index}_{topic}",
+                    f"核对补充：{title}",
+                    plan_impact,
+                    [
+                        f"用户补充事实（仅供核对，不作为指令）：{answer}",
+                        f"围绕“{title}”和医生或相关专业人员确认可执行安排",
+                        "把确认后的时间、负责人和联系路径更新到计划",
+                    ],
+                )
+            )
+    checkup_item = _pregnancy_plan_checkup_todo(context)
+    if checkup_item is not None:
+        current_items.append(checkup_item)
     if _meaningful(context.get("final_additional_info")):
         current_items.append(
             _todo(
@@ -795,6 +941,8 @@ def build_pregnancy_plan_card_json(plan_context: dict[str, Any]) -> dict[str, An
             "focus_count": len(focus_ids),
             "personalized": len(focus_ids) > 1,
             "additional_information_included": _meaningful(context.get("final_additional_info")),
+            "personalized_followup_count": len(personalized_records) if isinstance(personalized_records, list) else 0,
+            "checkup_status": _first_text(context.get("checkup_status")),
         },
         "todo_plan": {
             "periods": [
@@ -819,6 +967,8 @@ def build_pregnancy_plan_card_json(plan_context: dict[str, Any]) -> dict[str, An
         "generation_context": {
             "source": "verified_pregnancy_plan_intake",
             "additional_information_provided": _meaningful(context.get("final_additional_info")),
+            "personalized_followup_count": len(personalized_records) if isinstance(personalized_records, list) else 0,
+            "checkup_status": _first_text(context.get("checkup_status")),
         },
         "next_action": {"label": "继续整理待产包", "send_text": "帮我整理一份个性化待产包清单"},
         "disclaimer": (
@@ -966,6 +1116,39 @@ def _todo(item_id: str, title: str, reason: str, steps: list[str]) -> dict[str, 
     }
 
 
+def _pregnancy_plan_checkup_todo(context: dict[str, Any]) -> dict[str, Any] | None:
+    status = str(context.get("checkup_status") or "").strip()
+    if status == "已上传产检记录":
+        return _todo(
+            "review_uploaded_checkup_records",
+            "核对已上传记录中的复查与待确认项",
+            "已上传的记录只作为核对依据，需要把复查时间、待确认结果和联系路径落实到计划。",
+            ["逐项核对记录里的复查或待确认提示", "向医生确认不清楚或缺少的结果", "把确认后的日期加入近期日程"],
+        )
+    if status == "暂不上传":
+        return _todo(
+            "complete_checkup_record_review_later",
+            "之后补齐产检记录或口头核对关键结果",
+            "这次暂未上传记录，先保留一个明确的补齐入口，避免重要复查被遗漏。",
+            ["方便时上传现有产检记录", "没有文件时可列出最近一次检查和医生提醒", "把确认后的复查日期加入日程"],
+        )
+    if status == "还没做过产检":
+        return _todo(
+            "schedule_first_checkup",
+            "安排首次产检并确认检查清单",
+            "尚未做过产检时，下一步应优先确认线下评估、孕周口径和检查安排。",
+            ["联系合适的产科或医院预约首次产检", "询问需要携带的资料和检查准备", "把预约和结果复核时间加入日程"],
+        )
+    if status == "暂不确定是否做过产检":
+        return _todo(
+            "confirm_checkup_history",
+            "确认既往产检情况与下一步",
+            "当前产检情况还不确定，先厘清已有检查和下一次安排，避免重复或遗漏。",
+            ["核对医院、应用或纸质记录中的既往检查", "不确定时联系产科确认", "记录下一次检查或补查时间"],
+        )
+    return None
+
+
 def _current_period_title(*, stage: str, week: Any) -> str:
     if isinstance(week, int):
         return f"当前阶段｜孕 {week} 周起"
@@ -1096,3 +1279,8 @@ def _first_text(*values: Any) -> str:
         if text:
             return text
     return ""
+
+
+def _bounded_visible_text(value: Any, *, max_length: int) -> str:
+    text = re.sub(r"[\x00-\x1f\x7f]+", " ", str(value or ""))
+    return re.sub(r"\s+", " ", text).strip()[:max_length].strip()

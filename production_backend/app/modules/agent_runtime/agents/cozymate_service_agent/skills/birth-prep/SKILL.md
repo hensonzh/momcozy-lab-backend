@@ -134,8 +134,8 @@ Step3：推荐孕期计划服务
 [DO]
 要求：如果 `runtime_loaded_service_skill.business_facts.pregnancy.plans` 显示已经存在 active 孕期计划，说明用户已经有计划；不要再次调用 `pregnancy.plan.propose` 重新生成。用户要求“生成/制定孕期计划”时，先说明已有计划，并围绕查看、继续推进或宝宝和我页面里的计划展开。
 要求：只有 `pregnancy.plan_intake.advance` 返回 `ready_to_generate` 后，才调用 `pregnancy.plan.propose` 整理孕期计划。
-要求：调用 `pregnancy.plan.propose` 前不要输出给用户可见的过渡文本；不要在计划生成前展开阶段、当前重点、温馨提醒、接下来建议或我能帮你做，也不要展开当前阶段、后续阶段或临产住院前的待办；这些只通过计划预览和确认流程表达一次。
-要求：`pregnancy.plan.propose` 返回后只说明计划预览已经准备好、主要按哪些可信信息安排，并请用户在确认卡上确认；action 真正 applied 前不要说“已同步到宝宝和我”。当前展开阶段待办由结构化计划卡展示，正文不要复述完整计划。
+要求：调用 `pregnancy.plan.propose` 前不要输出给用户可见的过渡文本；不要在计划生成前展开阶段、当前重点、温馨提醒、接下来建议或我能帮你做，也不要展开当前阶段、后续阶段或临产住院前的待办。
+要求：`pregnancy.plan.propose` 会在当前工具调用中同步写入。只有工具返回 `action_status=applied` / `write_succeeded=true` 后，才说明计划已经生成并同步到宝宝和我；结构化计划卡展示当前阶段待办，正文不要复述完整计划。若返回 `action_status=failed` / `write_succeeded=false`，必须明确说明未生成、未同步并可重试；不得创建成功假象或把未落库的卡片说成计划。
 要求：如果用户在后续对话里明确表示已经完成或取消完成某一项，并且 `runtime_loaded_service_skill.business_facts.pregnancy.tasks` 能用事项名唯一定位到已保存的 `task_id`，调用 `plans.task_complete.propose` 同步完成状态。
 要求：如果只能定位到计划卡片里的 `item_id` 或事项名，但没有可写入的 `task_id`，不要调用不存在的工具，也不要说已经同步完成状态；先说明当前可以帮她确认这件事已经处理过，但需要在计划页任务上同步时还要选择对应任务。
 要求：如果用户说“我完成了那个/检查那个”等无法唯一定位的表达，先追问编号或事项名，不要猜测。
@@ -148,9 +148,9 @@ Step3：推荐孕期计划服务
 
 [DO]
 要求：用户提到删除当前计划、已有计划或这份计划时，都按已保存的孕期计划处理。
-要求：删除具有后端副作用。只有用户已经明确确认删除，并且能从上下文唯一定位到已保存 `plan_id` 时，才调用 `plans.plan_delete.propose`。
-要求：如果用户只是说“我不想要这个计划了”“可以删吗”“怎么删除”，先说明删除后宝宝和我页面不再展示这份计划，并追问是否确认删除，不要直接调用工具。
-要求：`plans.plan_delete.propose` 返回后，只能说明已创建删除确认/等待确认；不要在 action 真正应用前说已经删除。不要重新生成计划，不要复述旧计划内容。
+要求：删除具有后端副作用。用户当前已经明确表达删除意图，并且能从 trusted owner-scoped 上下文唯一定位到已保存 `plan_id` 时，立即调用 `plans.plan_delete.propose`，不要再追问一次口头确认。
+要求：如果目标计划含糊，先只澄清要删除哪一份，不要猜测或调用工具。用户只是询问“可以删吗”“怎么删除”而没有表达要现在删除时，只回答方法或澄清意图；一旦用户明确要求删除且目标唯一，不再追加影响说明、确认问题或通用确认卡。
+要求：`plans.plan_delete.propose` 会在当前工具调用中同步删除，不再追加第二张通用确认卡。只有返回 `action_status=applied` / `write_succeeded=true` 后才说明已删除；失败时明确说明没有删除并可重试。不要重新生成计划，不要复述旧计划内容。
 
 # 服务2：[SERVICE S2] “准备待产包” 服务
 

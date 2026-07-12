@@ -57,17 +57,17 @@
 | `records.milk_analysis.read` | `records_milk_analysis_read` | eager | read | 否 | 用户分析奶量变化、趋势或与宝宝生长的关系时读取分析快照。 |
 | `records.growth.read` | `records_growth_read` | eager | read | 否 | 用户查看宝宝近期身高、体重、头围或生长趋势时读取记录。 |
 | `records.feeding_record.propose` | `records_feeding_record_propose` | deferred | write | 否 | 用户要求记录喂养时间、方式或奶量时保存一次喂养记录。 |
-| `records.feeding_record_delete.propose` | `records_feeding_record_delete_propose` | deferred | write | 是 | 用户明确删除某次喂养记录时创建删除确认。 |
+| `records.feeding_record_delete.propose` | `records_feeding_record_delete_propose` | deferred | write | 否 | 用户明确要求且 owner-scoped 记录唯一确定时同步软删除；目标含糊时先追问。 |
 | `records.pumping_record.propose` | `records_pumping_record_propose` | deferred | write | 否 | 用户要求记录吸奶时间、时长、档位或奶量时保存一次吸奶记录。 |
-| `records.pumping_record_delete.propose` | `records_pumping_record_delete_propose` | deferred | write | 是 | 用户明确删除某次吸奶记录时创建删除确认。 |
+| `records.pumping_record_delete.propose` | `records_pumping_record_delete_propose` | deferred | write | 否 | 用户明确要求且 owner-scoped 记录唯一确定时同步软删除；目标含糊时先追问。 |
 | `records.growth_record.propose` | `records_growth_record_propose` | deferred | write | 否 | 用户要求记录宝宝身高、体重或头围时保存一次生长记录。 |
-| `records.growth_record_update.propose` | `records_growth_record_update_propose` | deferred | write | 是 | 用户明确更正已有身高、体重或头围记录时创建更新确认。 |
-| `records.growth_record_delete.propose` | `records_growth_record_delete_propose` | deferred | write | 是 | 用户明确删除已有生长记录时创建删除确认。 |
+| `records.growth_record_update.propose` | `records_growth_record_update_propose` | deferred | write | 否 | 用户明确更正且 owner-scoped 记录唯一确定时同步修改。 |
+| `records.growth_record_delete.propose` | `records_growth_record_delete_propose` | deferred | write | 否 | 用户明确要求且 owner-scoped 记录唯一确定时同步软删除。 |
 | `plans.current.read` | `plans_current_read` | eager | read | 否 | 用户查看当前计划、待办或后续安排时读取生效计划和近期任务。 |
 | `plans.calendar.read` | `plans_calendar_read` | eager | read | 否 | 用户询问某天安排、待完成事项或任务状态时按日期和状态读取日程。 |
 | `plans.milk_plan.propose` | `plans_milk_plan_propose` | deferred | write | 是 | 用户明确希望制定泌乳、喂养或吸奶计划时创建待确认计划。 |
-| `plans.task_complete.propose` | `plans_task_complete_propose` | deferred | write | 是 | 用户明确表示某项任务已完成时创建状态更新确认。 |
-| `plans.task_create.propose` | `plans_task_create_propose` | deferred | write | 是 | 用户明确要求新增待办、安排或计划任务时创建确认。 |
+| `plans.task_complete.propose` | `plans_task_complete_propose` | deferred | write | 否 | 用户明确表示唯一指定的单项任务已完成/取消完成时同步更新。 |
+| `plans.task_create.propose` | `plans_task_create_propose` | deferred | write | 否 | 用户明确要求新增一项内容和归属清晰的待办时同步创建；批量或含糊范围先澄清。 |
 | `notifications.milk_reminder.propose` | `notifications_milk_reminder_propose` | deferred | write | 是 | 用户要求在指定时间收到奶量、喂养或吸奶提醒时创建确认。 |
 
 ## 5. `birth_prep`
@@ -77,10 +77,10 @@
 | `pregnancy.plan_intake.start` | `pregnancy_plan_intake_start` | deferred | write | 否 | 用户同意开始制定孕期计划且当前没有 active 计划时，创建一张可信基础信息表单。 |
 | `pregnancy.plan_intake.analyze` | `pregnancy_plan_intake_analyze` | deferred | write | 否 | 只消费应用侧已校验的孕期计划表单提交，按风险/信息缺口进入 0..3 轮不重复个性化追问或产检资料步骤。 |
 | `pregnancy.plan_intake.advance` | `pregnancy_plan_intake_advance` | deferred | write | 否 | 只推进当前可信步骤：个性化追问、孕早期产检确认、当前 run 附件上传/跳过、最终补充确认。 |
-| `pregnancy.plan.propose` | `pregnancy_plan_propose` | deferred | write | 是 | intake 完成产检资料步骤并进入 `ready_to_generate` 后，基于可信快照创建待确认计划。 |
-| `plans.plan_delete.propose` | `plans_plan_delete_propose` | deferred | write | 是 | 用户明确删除整个已有计划时创建删除确认。 |
-| `plans.task_update.propose` | `plans_task_update_propose` | deferred | write | 是 | 用户明确调整已有任务日期、时间、标题、描述或载荷时创建更新确认。 |
-| `plans.task_delete.propose` | `plans_task_delete_propose` | deferred | write | 是 | 用户明确删除已有任务时创建删除确认。 |
+| `pregnancy.plan.propose` | `pregnancy_plan_propose` | deferred | write | 否 | intake 完成产检资料步骤并进入 `ready_to_generate` 后，在当前 agent tool 事务中基于可信快照同步创建计划；失败时返回明确失败且不消费 workflow。 |
+| `plans.plan_delete.propose` | `plans_plan_delete_propose` | deferred | write | 否 | 用户当前明确删除且 owner-scoped `plan_id` 唯一确定时立即同步删除，不再追加口头/通用确认；仅目标含糊时澄清。 |
+| `plans.task_update.propose` | `plans_task_update_propose` | deferred | write | 否 | 用户明确调整 owner-scoped 唯一单项任务时同步更新；批量修改不走该工具。 |
+| `plans.task_delete.propose` | `plans_task_delete_propose` | deferred | write | 否 | 用户明确删除 owner-scoped 唯一单项任务时同步软删除；目标含糊时先澄清。 |
 | `birth_plan_form_create` | `birth_plan_form_create` | deferred | write | 否 | 用户开始梳理分娩偏好或准备沟通单时创建信息采集表单。 |
 | `labor_communication_card_create` | `labor_communication_card_create` | deferred | write | 否 | 用户完成可信表单并要求生成沟通单时创建可渲染卡片。 |
 | `hospital_bag_form_create` | `hospital_bag_form_create` | deferred | write | 否 | 用户确认开始整理待产包时创建信息采集表单。 |
@@ -121,7 +121,7 @@
 | `pregnancy_diary.entries.read` | `pregnancy_diary_entries_read` | deferred | read | 否 | 用户查看、回顾、整理历史日记或需要核对某日原文时读取指定日期或日期范围。 |
 | `pregnancy_diary.entry.create` | `pregnancy_diary_entry_create` | deferred | write | 否 | 用户明确保存一篇新孕期记录时同步创建；同日已有记录时返回现有记录供继续更新。 |
 | `pregnancy_diary.entry.update` | `pregnancy_diary_entry_update` | deferred | write | 否 | 用户明确补充或修改已有日记时同步更新；正文支持追加或替换。 |
-| `pregnancy_diary.entry.delete.propose` | `pregnancy_diary_entry_delete_propose` | deferred | write | 是 | 用户明确要求删除某天日记时创建删除确认。 |
+| `pregnancy_diary.entry.delete.propose` | `pregnancy_diary_entry_delete_propose` | deferred | write | 否 | 用户明确要求且 owner-scoped 日期唯一确定时同步删除；目标含糊时先追问。 |
 
 ## 11. Skill 与工具的关系
 

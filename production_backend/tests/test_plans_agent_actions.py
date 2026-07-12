@@ -1,4 +1,5 @@
 import asyncio
+import json
 from uuid import uuid4
 
 import pytest
@@ -6,6 +7,7 @@ import pytest
 from production_backend.app.modules.agent_runtime.models import AgentAction
 from production_backend.app.modules.plans.agent_actions import (
     MILK_PLAN_CREATE_ACTION,
+    MILK_PLAN_CHANGED_EVENT,
     PLAN_TASK_COMPLETE_ACTION,
     PLAN_TASK_CREATE_ACTION,
     PLAN_TASK_DELETE_ACTION,
@@ -22,6 +24,9 @@ from production_backend.app.modules.plans.agent_actions import (
 )
 from production_backend.app.modules.plans.models import Plan, PlanTask
 from production_backend.app.workers.errors import PermanentJobError
+from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.tools.pregnancy_plan_flow import (
+    build_pregnancy_plan_result,
+)
 
 
 PRIVATE_PREGNANCY_PLAN_CONTENT = "private thyroid medication and birth plan card"
@@ -55,7 +60,47 @@ def test_milk_plan_create_action_handler_creates_plan_through_service() -> None:
     assert service.create_plan_kwargs["payload"]["target_sessions_per_day"] == 2
     assert service.create_plan_kwargs["payload"]["agent_action_id"] == str(action.id)
     assert service.create_plan_kwargs["idempotency_key"] == "idem-action"
-    assert result.application_events == ()
+    assert len(result.application_events) == 1
+    changed_event = result.application_events[0]
+    assert changed_event.event_type == MILK_PLAN_CHANGED_EVENT
+    assert changed_event.payload == {
+        "operation": "created",
+        "reason": "created",
+        "plan_id": str(service.plan.id),
+        "plan_type": "milk_management",
+        "source": "agent_action",
+        "affected_dates": [],
+    }
+    rendered_event = json.dumps(changed_event.payload, ensure_ascii=False)
+    assert "Pump after morning and evening feeds" not in rendered_event
+    assert "target_sessions_per_day" not in rendered_event
+
+
+def test_milk_plan_changed_event_contains_only_bounded_dates_and_no_private_plan_content() -> None:
+    service = FakePlansService()
+    private_summary = "private lactation health history and supply target"
+    action = _action(
+        apply_payload={
+            "title": "Private milk plan title",
+            "summary": private_summary,
+            "payload": {
+                "start_date": "2026-07-04",
+                "days": 99,
+                "tasks": [{"title": "private task", "health_note": "private diagnosis"}],
+            },
+        }
+    )
+
+    result = asyncio.run(MilkPlanCreateActionHandler(service=service)(action))
+
+    changed_event = result.application_events[0]
+    assert len(changed_event.payload["affected_dates"]) == 30
+    assert changed_event.payload["affected_dates"][0] == "2026-07-04"
+    assert changed_event.payload["affected_dates"][-1] == "2026-08-02"
+    rendered_event = json.dumps(changed_event.payload, ensure_ascii=False)
+    assert private_summary not in rendered_event
+    assert "private task" not in rendered_event
+    assert "private diagnosis" not in rendered_event
 
 
 def test_milk_plan_create_action_handler_rejects_missing_title() -> None:
@@ -99,6 +144,49 @@ def test_pregnancy_plan_create_action_handler_creates_plan_through_service() -> 
         "plan_type": "pregnancy",
         "source": "agent_action",
     }
+
+
+def test_pregnancy_plan_create_action_handler_persists_personalized_and_checkup_card() -> None:
+    service = FakePlansService()
+    result_payload = build_pregnancy_plan_result(
+        {
+            "current_week": "24周",
+            "ivf": "否",
+            "fetus_count": "单胎",
+            "age": 30,
+            "first_birth": "是",
+            "birth_path": "顺产",
+            "personalized_followup_records": [
+                {
+                    "topic": "doctor_special_notes_followup",
+                    "answer": "医生让我下周复查",
+                    "plan_impact": "来自客户端的不可信覆盖",
+                }
+            ],
+            "checkup_status": "已上传产检记录",
+            "owner_user_id": "other-owner-id",
+        }
+    )
+    action = _action(
+        action_type=PREGNANCY_PLAN_CREATE_ACTION,
+        target_type="plan",
+        apply_payload={
+            "title": "孕期计划",
+            "payload": {
+                "plan_context": {"current_week": "24周"},
+                "card": result_payload["card"],
+            },
+        },
+    )
+
+    asyncio.run(PregnancyPlanCreateActionHandler(service=service)(action))
+
+    persisted_card = service.create_plan_kwargs["payload"]["card"]["card_json"]
+    current_items = persisted_card["todo_plan"]["periods"][0]["items"]
+    assert any(item["id"].startswith("personalized_followup_") for item in current_items)
+    assert any(item["id"] == "review_uploaded_checkup_records" for item in current_items)
+    assert "来自客户端的不可信覆盖" not in str(persisted_card)
+    assert "other-owner-id" not in str(persisted_card)
 
 
 def test_plan_task_create_action_handler_creates_task_through_service() -> None:

@@ -202,7 +202,7 @@ def test_hospital_bag_cart_update_propose_tool_handler_creates_confirmation_acti
 
     assert result["action_id"] == str(runtime_service.action.id)
     assert result["action_type"] == "hospital_bag.cart.update"
-    assert result["action_status"] == "confirmed"
+    assert result["action_status"] == "applied"
     assert result["requires_confirmation"] is False
     assert result["preview_payload"]["summary"] == "Mark nursing bra packed and add a phone charger"
     assert result["preview_payload"]["cart_update"]["set_checked"][0]["item_id"] == "nursing-bra"
@@ -699,7 +699,8 @@ def test_feeding_record_propose_tool_handler_creates_confirmation_action() -> No
 
     assert result["action_id"] == str(runtime_service.action.id)
     assert result["action_type"] == FEEDING_RECORD_CREATE_ACTION
-    assert result["action_status"] == "confirmation_required"
+    assert result["action_status"] == "applied"
+    assert result["user_visible"] is False
     assert result["preview_payload"]["volume_ml"] == 75.0
     assert result["preview_payload"]["has_infant_id"] is True
     assert "infant_id" not in result["preview_payload"]
@@ -728,7 +729,7 @@ def test_pumping_record_propose_tool_handler_creates_confirmation_action() -> No
     result = asyncio.run(PumpingRecordProposeToolHandler(runtime_service=runtime_service)(context))
 
     assert result["action_type"] == PUMPING_RECORD_CREATE_ACTION
-    assert result["action_status"] == "confirmation_required"
+    assert result["action_status"] == "applied"
     assert result["preview_payload"]["milk_volume_ml"] == 90.0
     assert result["preview_payload"]["duration_seconds"] == 1080
     assert runtime_service.calls[0]["target_type"] == "pumping_record"
@@ -769,18 +770,21 @@ def test_record_delete_and_growth_propose_tool_handlers_create_actions() -> None
     )
 
     assert feeding_delete["action_type"] == FEEDING_RECORD_DELETE_ACTION
+    assert feeding_delete["action_status"] == "applied"
     assert feeding_delete["preview_payload"] == {
         "record_type": "feeding_record",
         "record_id": str(record_id),
         "reason": "duplicate",
     }
     assert growth_create["action_type"] == GROWTH_RECORD_CREATE_ACTION
-    assert growth_create["action_status"] == "confirmation_required"
+    assert growth_create["action_status"] == "applied"
     assert growth_create["preview_payload"]["weight_kg"] == 6.4
     assert runtime_service.calls[-3]["apply_payload"]["metadata"] == {"timezone": "Asia/Shanghai"}
     assert growth_update["action_type"] == GROWTH_RECORD_UPDATE_ACTION
+    assert growth_update["action_status"] == "applied"
     assert growth_update["preview_payload"]["fields"] == ["height_cm"]
     assert growth_delete["action_type"] == GROWTH_RECORD_DELETE_ACTION
+    assert growth_delete["action_status"] == "applied"
     assert growth_delete["preview_payload"]["record_type"] == "growth_record"
 
 
@@ -803,6 +807,7 @@ def test_milk_plan_propose_tool_handler_creates_confirmation_action() -> None:
 
     assert result["action_type"] == MILK_PLAN_CREATE_ACTION
     assert result["action_status"] == "confirmation_required"
+    assert result["user_visible"] is True
     assert result["preview_payload"] == {
         "plan_type": "milk_management",
         "title": "Increase pumping consistency",
@@ -845,7 +850,7 @@ def test_ibclc_card_handler_creates_artifact() -> None:
     assert runtime_service.artifacts[-1].payload["feeding_context"] == "Pain on left side after feeding."
 
 
-def test_pregnancy_plan_propose_tool_handler_creates_confirmation_action() -> None:
+def test_pregnancy_plan_propose_tool_handler_applies_without_duplicate_confirmation() -> None:
     actor = _user()
     runtime_service = FakeAgentRuntimeService()
     context = _context(
@@ -854,7 +859,7 @@ def test_pregnancy_plan_propose_tool_handler_creates_confirmation_action() -> No
             "summary": "Prepare appointments and bag tasks.",
             "due_date_or_week": "99周",
             "birth_path": "剖宫产",
-            "additional_info": "下周需要出差两天",
+            "additional_info": "模型臆造的补充不得覆盖耐久工作流事实",
             "runtime_plan_context": {
                 "has_active_plan": False,
                 "delivery_date": "2026-09-18",
@@ -866,6 +871,18 @@ def test_pregnancy_plan_propose_tool_handler_creates_confirmation_action() -> No
                 "analysis_artifact_id": "analysis-1",
                 "source_form_artifact_id": "form-1",
                 "source_form_submission_id": "submission-1",
+                "final_additional_info": "下周需要出差两天",
+                "personalized_followup_records": [
+                    {"topic": "doctor_special_notes_followup", "answer": "医生让我下周复查", "plan_impact": "不可信覆盖"},
+                    {"topic": "prior_c_section_birth_path_detail", "answer": "上次因胎位剖宫产"},
+                    {"topic": "chronic_medical_condition_coordination", "answer": "下周复核用药"},
+                    {"topic": "ivf_week_confirmation", "answer": "第四条不得进入"},
+                    {"topic": "foreign_owner_secret", "answer": "另一位用户的秘密"},
+                ],
+                "checkup_status": "已上传产检记录",
+                "checkup_records_uploaded": "是",
+                "owner_user_id": "other-owner-id",
+                "foreign_plan_id": "other-owner-plan",
             },
         },
     )
@@ -873,7 +890,10 @@ def test_pregnancy_plan_propose_tool_handler_creates_confirmation_action() -> No
     result = asyncio.run(PregnancyPlanProposeToolHandler(runtime_service=runtime_service)(context))
 
     assert result["action_type"] == PREGNANCY_PLAN_CREATE_ACTION
-    assert result["action_status"] == "confirmation_required"
+    assert result["action_status"] == "applied"
+    assert result["requires_confirmation"] is False
+    assert result["confirmation_policy"] == "explicit_intent"
+    assert result["user_visible"] is False
     assert result["preview_payload"] == {
         "plan_type": "pregnancy",
         "title": "孕期计划",
@@ -887,12 +907,26 @@ def test_pregnancy_plan_propose_tool_handler_creates_confirmation_action() -> No
     assert runtime_service.calls[0]["apply_payload"]["payload"]["plan_context"]["birth_path"] == "顺产"
     assert runtime_service.calls[0]["apply_payload"]["payload"]["plan_context"]["delivery_date"] == "2026-09-18"
     assert runtime_service.calls[0]["apply_payload"]["payload"]["plan_context"]["final_additional_info"] == "下周需要出差两天"
+    sanitized_context = runtime_service.calls[0]["apply_payload"]["payload"]["plan_context"]
+    assert len(sanitized_context["personalized_followup_records"]) == 3
+    assert sanitized_context["checkup_status"] == "已上传产检记录"
+    assert sanitized_context["checkup_records_uploaded"] == "是"
+    assert "owner_user_id" not in sanitized_context
+    assert "foreign_plan_id" not in sanitized_context
+    assert "模型臆造的补充" not in str(sanitized_context)
+    assert "不可信覆盖" not in str(sanitized_context)
+    assert "第四条不得进入" not in str(sanitized_context)
+    assert "另一位用户的秘密" not in str(sanitized_context)
     assert runtime_service.calls[0]["apply_payload"]["payload"]["lineage"] == {
         "analysis_artifact_id": "analysis-1",
         "source_form_artifact_id": "form-1",
         "source_form_submission_id": "submission-1",
     }
     assert runtime_service.calls[0]["apply_payload"]["payload"]["card"]["card_type"] == "birth_journey_plan_card"
+    card_json = runtime_service.calls[0]["apply_payload"]["payload"]["card"]["card_json"]
+    current_item_ids = {item["id"] for item in card_json["todo_plan"]["periods"][0]["items"]}
+    assert len([item_id for item_id in current_item_ids if item_id.startswith("personalized_followup_")]) == 3
+    assert "review_uploaded_checkup_records" in current_item_ids
     assert (
         runtime_service.calls[0]["apply_payload"]["payload"]["card"]["card_json"]["generation_context"]["additional_information_provided"]
         is True
@@ -917,8 +951,42 @@ def test_pregnancy_plan_propose_tool_handler_creates_confirmation_action() -> No
     duplicate = asyncio.run(PregnancyPlanProposeToolHandler(runtime_service=runtime_service)(context))
 
     assert duplicate["action_id"] == result["action_id"]
-    assert duplicate["action_status"] == "confirmation_required"
+    assert duplicate["action_status"] == "applied"
     assert len(runtime_service.artifacts) == artifact_count
+
+
+def test_failed_pregnancy_plan_apply_does_not_create_card_or_consume_workflow() -> None:
+    runtime_service = FakeAgentRuntimeService(failed_action_types={PREGNANCY_PLAN_CREATE_ACTION})
+    artifact_count = len(runtime_service.artifacts)
+    context = _context(
+        args={
+            "summary": "Prepare appointments and bag tasks.",
+            "runtime_plan_context": {
+                "has_active_plan": False,
+                "current_week": "32周",
+                "workflow_phase": "ready_to_generate",
+                "analysis_run_id": str(uuid4()),
+                "analysis_artifact_id": "analysis-1",
+                "source_form_artifact_id": "form-1",
+                "source_form_submission_id": "submission-1",
+            },
+        }
+    )
+
+    result = asyncio.run(PregnancyPlanProposeToolHandler(runtime_service=runtime_service)(context))
+
+    assert isinstance(result, ToolHandlerResult)
+    assert result.output["status"] == "action_failed"
+    assert result.output["action_status"] == "failed"
+    assert result.output["write_succeeded"] is False
+    assert result.output["error_code"] == "plan_create_failed"
+    assert len(runtime_service.artifacts) == artifact_count
+    assert "no plan was created" in result.model_context[0]["content"]
+    assert not any(
+        artifact.artifact_type == "pregnancy_plan_workflow"
+        and artifact.payload.get("consumed_by_action_id") == result.output["action_id"]
+        for artifact in runtime_service.artifacts
+    )
 
 
 def test_pregnancy_plan_intake_start_creates_one_form_and_internal_collecting_snapshot() -> None:
@@ -1564,7 +1632,7 @@ def test_plan_task_create_propose_tool_handler_creates_confirmation_action() -> 
     result = asyncio.run(PlanTaskCreateProposeToolHandler(runtime_service=runtime_service)(context))
 
     assert result["action_type"] == PLAN_TASK_CREATE_ACTION
-    assert result["action_status"] == "confirmation_required"
+    assert result["action_status"] == "applied"
     assert result["preview_payload"] == {
         "task_date": "2026-07-04",
         "task_time": "09:00",
@@ -1596,7 +1664,8 @@ def test_plan_task_complete_propose_tool_handler_creates_confirmation_action() -
     result = asyncio.run(PlanTaskCompleteProposeToolHandler(runtime_service=runtime_service)(context))
 
     assert result["action_type"] == PLAN_TASK_COMPLETE_ACTION
-    assert result["action_status"] == "confirmation_required"
+    assert result["action_status"] == "applied"
+    assert result["user_visible"] is False
     assert result["preview_payload"] == {
         "task_id": str(task_id),
         "completed": False,
@@ -1637,11 +1706,15 @@ def test_plan_task_update_delete_and_plan_delete_tool_handlers_create_confirmati
     )
 
     assert update["action_type"] == PLAN_TASK_UPDATE_ACTION
+    assert update["action_status"] == "applied"
     assert update["preview_payload"]["fields"] == ["task_date", "task_time", "title"]
     assert runtime_service.calls[-3]["target_id"] == str(task_id)
     assert task_delete["action_type"] == PLAN_TASK_DELETE_ACTION
+    assert task_delete["action_status"] == "applied"
     assert task_delete["preview_payload"]["reason"] == "no longer needed"
     assert plan_delete["action_type"] == PLAN_DELETE_ACTION
+    assert plan_delete["action_status"] == "applied"
+    assert plan_delete["user_visible"] is False
     assert runtime_service.calls[-1]["target_type"] == "plan"
 
 
@@ -1811,7 +1884,7 @@ def test_pregnancy_diary_create_tool_requires_values() -> None:
     assert exc_info.value.code == "validation_failed"
 
 
-def test_pregnancy_diary_delete_tool_creates_confirmation_action() -> None:
+def test_pregnancy_diary_delete_tool_applies_after_exact_target_is_resolved() -> None:
     runtime_service = FakeAgentRuntimeService()
 
     result = asyncio.run(
@@ -1819,7 +1892,9 @@ def test_pregnancy_diary_delete_tool_creates_confirmation_action() -> None:
     )
 
     assert result["action_type"] == PREGNANCY_DIARY_ENTRY_DELETE_ACTION
-    assert result["action_status"] == "confirmation_required"
+    assert result["action_status"] == "applied"
+    assert result["requires_confirmation"] is False
+    assert result["user_visible"] is False
     assert runtime_service.calls[0]["side_effect_level"] == "medium"
 
 
@@ -2213,10 +2288,11 @@ class FakeImageObjectStorage:
 
 
 class FakeAgentRuntimeService:
-    def __init__(self) -> None:
+    def __init__(self, *, failed_action_types: set[str] | None = None) -> None:
         self.calls = []
         self.actions = []
         self.artifacts = []
+        self.failed_action_types = failed_action_types or set()
         self.action = AgentAction(
             id=uuid4(),
             run_id=uuid4(),
@@ -2254,18 +2330,36 @@ class FakeAgentRuntimeService:
             target_type=kwargs["target_type"],
             target_id=kwargs.get("target_id", ""),
             status=(
-                "confirmed"
-                if kwargs["action_type"]
-                in {
+                "failed"
+                if kwargs["action_type"] in self.failed_action_types
+                else (
+                    "applied"
+                    if kwargs["action_type"]
+                    in {
                     "hospital_bag.cart.update",
-                }
-                else "confirmation_required"
+                    "records.feeding_record.create",
+                    "records.pumping_record.create",
+                    "records.growth_record.create",
+                    "records.feeding_record.delete",
+                    "records.pumping_record.delete",
+                    "records.growth_record.update",
+                    "records.growth_record.delete",
+                    "pregnancy.plan.create",
+                    "pregnancy_diary.entry.delete",
+                    "plans.task.create",
+                    "plans.task.complete",
+                    "plans.task.update",
+                    "plans.task.delete",
+                    "plans.plan.delete",
+                    }
+                    else "confirmation_required"
+                )
             ),
             side_effect_level=kwargs["side_effect_level"],
             preview_payload=kwargs["preview_payload"],
             apply_payload=kwargs["apply_payload"],
             idempotency_key=kwargs["idempotency_key"],
-            error_code="",
+            error_code="plan_create_failed" if kwargs["action_type"] in self.failed_action_types else "",
         )
         self.actions.append(self.action)
         return self.action

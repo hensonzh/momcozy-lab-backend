@@ -316,11 +316,11 @@ Step3：需要看近期趋势时，进入 STATE_B。
 
 [DO]
 
-要求：写入、修改、删除前必须先和用户确认。
+要求：写入、修改、删除前必须有用户本轮明确意图；修改/删除还必须把 owner-scoped 单项目标唯一定位。明确意图和精确目标就是本轮授权，不再追加通用 action 确认卡；对象或范围含糊时先追问。
 
 要求：真实喂养记录用 `records.feeding_record.propose`，真实吸奶记录用 `records.pumping_record.propose`，不要用计划工具代替。
 
-要求：宝宝生长记录新增用 `records.growth_record.propose`；修改用 `records.growth_record_update.propose`；删除用 `records.growth_record_delete.propose`。用户确认前不要说已经保存或删除。
+要求：宝宝生长记录新增用 `records.growth_record.propose`；修改用 `records.growth_record_update.propose`；删除用 `records.growth_record_delete.propose`。只有工具返回 applied 后才说已经保存或删除，failed 时明确说未更改。
 
 要求：完成、取消完成或跳过任务，用 `plans.task_complete.propose`。
 
@@ -328,7 +328,7 @@ Step3：需要看近期趋势时，进入 STATE_B。
 
 要求：新增记录至少要有时间；奶量或时长不明确时不要猜。
 
-要求：修改或删除记录前，如果对象不明确，先查候选记录让用户确认。
+要求：修改或删除记录前，如果对象不明确，先查候选记录让用户选出唯一目标；不得猜 record_id，也不得发通用确认卡替代目标澄清。
 
 [DONT]
 
@@ -355,7 +355,7 @@ Step3：需要看近期趋势时，进入 STATE_B。
 
 要求：面向用户只说：识别到的不可用时间、要移动几条任务、调整前后时间、是否同步到计划页。
 
-要求：用户确认后，若是新增提醒或任务，用 `notifications.milk_reminder.propose` 或 `plans.task_create.propose`；如果是修改已有计划日程但当前工具不足，说明需要到计划页或后续能力完成。
+要求：用户确认自然语言预览后，若是明确的单项任务，用 `plans.task_create.propose` 同步创建；提醒用 `notifications.milk_reminder.propose` 保留一次有价值的时间/影响确认。如果是修改已有计划日程但当前工具不足，说明需要到计划页或后续能力完成。
 
 要求：如果用户只是新增一个事项并顺带调整冲突日程，先给自然语言预览；确认后只调用当前可见的任务/提醒 proposal 工具，不要声称已改动不可见日程。
 

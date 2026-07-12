@@ -64,8 +64,11 @@ versioning plan.
   `thread_id`, `run_id`, `last_sequence`, rendered event/action state, draft
   composer state, and the active request. This snapshot is only a UI recovery
   aid; backend run/message/action ledgers remain authoritative.
-- Merge action events by `action_id`; render `preview_payload` from
-  `action.confirmation_required` and never expect `apply_payload` in streams.
+- Merge action events by `action_id`; render a card only for
+  `action.confirmation_required` with `user_visible=true`. Direct action events
+  have `requires_confirmation=false`, `confirmation_policy=explicit_intent`,
+  and `user_visible=false`; show their normal tool/run result instead of a card.
+  Never expect `apply_payload` in streams.
 - After confirming or rejecting an action, continue following the same run with
   `/v1/agent/runs/{run_id}/stream?after_sequence=<last_sequence>&follow=true`
   so `action.applied`, `action.failed`, `action.rejected`, and final message
@@ -84,6 +87,13 @@ versioning plan.
   `version` as `expected_version`. Replace local plan state with the returned
   `PlanRead`; on `version_conflict`, reload before retrying. Never fall back to
   title matching when `item_id` is absent.
+- Treat durable `milk_plan.changed` as a privacy-safe Schedule invalidation
+  signal. Accept only `operation=created`, `reason=created`, opaque `plan_id`,
+  `plan_type=milk_management`, `source=agent_action`, and at most 30 sorted,
+  unique `YYYY-MM-DD` `affected_dates` plus executor action/presentation
+  metadata. Deduplicate by `event_id`, persist only that event ID and date keys,
+  refresh the owner-scoped authoritative plan, and never expect private plan
+  text in the event.
 - Treat `voice_provider_disabled` as a stable unavailable-state response for
   voice UI; do not fall back to legacy realtime voice endpoints.
 
@@ -97,6 +107,7 @@ versioning plan.
 6. Verify agent event reducers use stable IDs such as `run_id`, `event_id`,
    `message_id`, `tool_call_id`, and `action_id`.
 7. Verify voice UI handles `voice_provider_disabled` without token URLs.
-8. Verify `waiting_for_confirmation` can recover after app restart and action
-   confirmation resumes the original run stream.
+8. Verify `waiting_for_confirmation` can recover after app restart; confirmation
+   requeues and resumes the original run, and no domain write happens in the
+   confirm HTTP request.
 9. Record backend schema version and Flutter build version in the release note.
