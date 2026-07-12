@@ -13,7 +13,7 @@ PREGNANCY_DIARY_TOOL_CONTRACTS = {
     "pregnancy_diary.entries.read",
     "pregnancy_diary.entry.create",
     "pregnancy_diary.entry.update",
-    "pregnancy_diary.entry.delete.propose",
+    "pregnancy_diary.entry.delete",
 }
 
 
@@ -33,27 +33,24 @@ def test_pregnancy_diary_tools_are_not_recommended_by_any_service_skill() -> Non
     assert "diary.entry_upsert.propose" not in recommended
 
 
-def test_only_pregnancy_diary_delete_uses_the_action_policy() -> None:
-    delete = DEFAULT_AGENT_ACTION_RULES["pregnancy_diary.entry.delete"]
-
-    assert "pregnancy_diary.entry.create" not in DEFAULT_AGENT_ACTION_RULES
-    assert "pregnancy_diary.entry.update" not in DEFAULT_AGENT_ACTION_RULES
-    assert delete.requires_confirmation is False
-    assert delete.target_type == "pregnancy_diary_entry"
+def test_pregnancy_diary_writes_do_not_use_the_action_policy() -> None:
+    assert not {
+        "pregnancy_diary.entry.create",
+        "pregnancy_diary.entry.update",
+        "pregnancy_diary.entry.delete",
+    } & set(DEFAULT_AGENT_ACTION_RULES)
 
 
 def test_pregnancy_diary_direct_writes_wait_for_real_database_result() -> None:
     registry = default_tool_registry()
     create = registry.get("pregnancy_diary.entry.create")
     update = registry.get("pregnancy_diary.entry.update")
-    delete = registry.get("pregnancy_diary.entry.delete.propose")
+    delete = registry.get("pregnancy_diary.entry.delete")
 
-    for contract in (create, update):
+    for contract in (create, update, delete):
         assert contract.blocking_policy == "must_wait"
         assert contract.result_dependency == "final_response"
         assert contract.idempotency_required is False
-    assert delete.blocking_policy == "must_wait"
-    assert delete.result_dependency == "final_response"
     assert delete.requires_confirmation is False
 
 

@@ -125,12 +125,6 @@ DEFAULT_AGENT_ACTION_RULES: Mapping[str, AgentActionPolicyRule] = {
         side_effect_level="medium",
         requires_confirmation=True,
     ),
-    "pregnancy_diary.entry.delete": AgentActionPolicyRule(
-        action_type="pregnancy_diary.entry.delete",
-        target_type="pregnancy_diary_entry",
-        side_effect_level="medium",
-        requires_confirmation=False,
-    ),
 }
 
 

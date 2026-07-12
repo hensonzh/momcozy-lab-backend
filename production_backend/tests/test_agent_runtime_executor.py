@@ -707,7 +707,7 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
         "pregnancy_plan_intake_start",
         "pregnancy_diary_entries_read",
         "pregnancy_diary_entry_create",
-        "pregnancy_diary_entry_delete_propose",
+        "pregnancy_diary_entry_delete",
         "pregnancy_diary_entry_update",
         "profile_read",
         "profile_update",
@@ -738,7 +738,7 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert backend.tool_schemas["pregnancy_diary_entry_create"]["properties"]["content"]["maxLength"] == 5000
     assert backend.tool_schemas["pregnancy_diary_entry_update"]["required"] == ["entry_date"]
     assert backend.tool_schemas["pregnancy_diary_entry_update"]["properties"]["content_mode"]["default"] == "append"
-    assert backend.tool_schemas["pregnancy_diary_entry_delete_propose"]["required"] == ["entry_date"]
+    assert backend.tool_schemas["pregnancy_diary_entry_delete"]["required"] == ["entry_date"]
     assert backend.tool_schemas["images_inspect"]["required"] == ["image_url"]
     assert backend.tool_schemas["hospital_bag_cart_update"]["additionalProperties"] is False
     assert "groups" not in backend.tool_schemas["hospital_bag_cart_update"]["properties"]
@@ -811,13 +811,13 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
         "pregnancy_diary.entries.read",
         "pregnancy_diary.entry.create",
         "pregnancy_diary.entry.update",
-        "pregnancy_diary.entry.delete.propose",
+        "pregnancy_diary.entry.delete",
     ]
     assert backend.tool_namespaces["pregnancy_diary"]["deferred_tool_names"] == [
         "pregnancy_diary.entries.read",
         "pregnancy_diary.entry.create",
         "pregnancy_diary.entry.update",
-        "pregnancy_diary.entry.delete.propose",
+        "pregnancy_diary.entry.delete",
     ]
     assert backend.tool_namespace_by_contract["profile.read"] == ""
     assert backend.tool_namespace_by_contract["profile_update"] == ""

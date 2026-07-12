@@ -219,7 +219,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "attachments": {"type": "array", "items": {}, "maxItems": 10, "description": "更新后的可信附件信息。"},
         },
     },
-    "pregnancy_diary.entry.delete.propose": {
+    "pregnancy_diary.entry.delete": {
         "type": "object",
         "additionalProperties": False,
         "required": ["entry_date"],

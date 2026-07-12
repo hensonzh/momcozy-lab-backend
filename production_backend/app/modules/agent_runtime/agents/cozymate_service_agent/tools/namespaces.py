@@ -133,7 +133,7 @@ SCENARIO_NAMESPACE_DEFINITIONS: tuple[ToolNamespace, ...] = (
             "pregnancy_diary.entries.read",
             "pregnancy_diary.entry.create",
             "pregnancy_diary.entry.update",
-            "pregnancy_diary.entry.delete.propose",
+            "pregnancy_diary.entry.delete",
         ),
     ),
 )

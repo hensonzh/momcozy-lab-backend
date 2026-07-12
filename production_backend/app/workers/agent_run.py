@@ -423,7 +423,6 @@ def _action_completion_text(action: AgentAction) -> str:
         return "这次操作没有成功，数据没有被更改，请稍后重试。"
     success_messages = {
         "pregnancy.plan.create": "孕期计划已生成，并同步到「宝宝和我」。",
-        "pregnancy_diary.entry.delete": "孕期日记已删除。",
         "plans.plan.delete": "计划已删除。",
         "support.ticket.create": "客服工单已提交。",
     }

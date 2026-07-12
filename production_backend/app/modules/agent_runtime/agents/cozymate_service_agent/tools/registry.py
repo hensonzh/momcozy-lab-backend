@@ -245,15 +245,18 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="pregnancy_diary.entry.delete.propose",
+            name="pregnancy_diary.entry.delete",
             domain="pregnancy_diary",
-            description="删除当前用户指定日期的孕期日记。仅在用户已明确要求删除且目标日期唯一确定时调用并同步执行；目标含糊时不得调用。",
+            description=(
+                "同步删除当前用户指定日期的孕期日记并返回真实数据库结果。"
+                "仅在用户已明确要求删除且目标日期唯一确定时调用；目标含糊时先询问日期。"
+            ),
             read_or_write="write",
             side_effect_level="medium",
             blocking_policy="must_wait",
             result_dependency="final_response",
             requires_confirmation=False,
-            idempotency_required=True,
+            idempotency_required=False,
             audit_required=True,
             timeout_seconds=15,
         )

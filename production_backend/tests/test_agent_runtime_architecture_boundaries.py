@@ -405,7 +405,7 @@ def test_model_tool_schema_registry_has_no_internal_or_legacy_orphans() -> None:
         ("pregnancy_diary.entries.read", "read", False, "deferred"),
         ("pregnancy_diary.entry.create", "write", False, "deferred"),
         ("pregnancy_diary.entry.update", "write", False, "deferred"),
-        ("pregnancy_diary.entry.delete.propose", "write", False, "deferred"),
+        ("pregnancy_diary.entry.delete", "write", False, "deferred"),
         ("hospital_bag_card_create", "write", False, "deferred"),
         ("support.ticket.propose", "write", True, "deferred"),
     ],
@@ -520,7 +520,7 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
     diary_read_schema = registry.get("pregnancy_diary.entries.read").input_schema
     diary_create_schema = registry.get("pregnancy_diary.entry.create").input_schema
     diary_update_schema = registry.get("pregnancy_diary.entry.update").input_schema
-    diary_delete_schema = registry.get("pregnancy_diary.entry.delete.propose").input_schema
+    diary_delete_schema = registry.get("pregnancy_diary.entry.delete").input_schema
     devices_schema = registry.get("devices.pump_status.read").input_schema
     device_guidance_schema = registry.get("devices.guidance_assets.read").input_schema
     image_inspect_schema = registry.get("images.inspect").input_schema

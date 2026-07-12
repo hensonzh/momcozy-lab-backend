@@ -169,7 +169,6 @@ def test_direct_action_requires_in_process_executor_before_persisting() -> None:
     ("action_type", "target_type", "side_effect_level"),
     [
         ("pregnancy.plan.create", "plan", "medium"),
-        ("pregnancy_diary.entry.delete", "pregnancy_diary_entry", "medium"),
         ("plans.plan.delete", "plan", "medium"),
         ("hospital_bag.cart.update", "hospital_bag_cart", "low"),
         ("records.feeding_record.create", "feeding_record", "low"),

@@ -1,7 +1,6 @@
 import asyncio
 import json
 from datetime import date
-from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -13,7 +12,7 @@ from production_backend.app.modules.agent_runtime.event_stream.sink import Agent
 from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.tools import (
     PregnancyDiaryEntriesReadToolHandler,
     PregnancyDiaryEntryCreateToolHandler,
-    PregnancyDiaryEntryDeleteProposeToolHandler,
+    PregnancyDiaryEntryDeleteToolHandler,
     PregnancyDiaryEntryUpdateToolHandler,
     ToolExecutor,
     ToolHandlerResult,
@@ -26,6 +25,59 @@ from production_backend.app.modules.diary.repository import DiaryEntryMutation
 
 
 PRIVATE_DIARY_CONTENT = "private diary narrative that must not enter safe event output"
+
+
+def test_load_service_skill_injects_business_facts_once_into_model_context() -> None:
+    actor = _user()
+    repository = FakeToolRepository()
+    facts = {"milk_status": {"totals": {"trend_pumped_volume_ml": 420}}}
+
+    async def handler(_context: ToolHandlerContext):
+        trusted_context = {"runtime_loaded_service_skill": {"business_facts": facts}}
+        return ToolHandlerResult(
+            output={
+                "schema_version": "service_skill_load.v2",
+                "service_skill_id": "milk-management",
+                "skill_version": "v1",
+                "loaded_at": "2026-07-12T00:00:00+00:00",
+                "skill": {"instructions": "full skill instructions"},
+                "recommended_tools": [],
+                "business_facts": facts,
+            },
+            model_context=(
+                {
+                    "role": "developer",
+                    "content": json.dumps(trusted_context, ensure_ascii=False),
+                },
+            ),
+        )
+
+    result = asyncio.run(
+        ToolExecutor(
+            registry=default_tool_registry(),
+            repository=repository,
+            handlers={"load_service_skill": handler},
+        ).execute(
+            actor=actor,
+            run_id=uuid4(),
+            tool_name="load_service_skill",
+            call_id="call-load-skill",
+            args={"service_skill_id": "milk-management"},
+        )
+    )
+
+    assert result.model_output == {
+        "status": "service_skill_loaded",
+        "service_skill_id": "milk-management",
+        "skill_version": "v1",
+        "loaded_at": "2026-07-12T00:00:00+00:00",
+    }
+    assert repository.output.safe_output["business_facts"] == facts
+    serialized_model_input = json.dumps(
+        {"function_call_output": result.model_output, "model_context": result.model_context},
+        ensure_ascii=False,
+    )
+    assert serialized_model_input.count("business_facts") == 1
 
 
 def test_tool_executor_persists_safe_args_and_output() -> None:
@@ -672,16 +724,15 @@ def test_tool_executor_cancellation_closes_savepoint_and_terminalizes_tool_call(
     assert [event.event_type for event in repository.events] == ["tool.started", "tool.failed"]
 
 
-def test_pregnancy_diary_delete_proposal_does_not_emit_changed_event_before_apply() -> None:
+def test_pregnancy_diary_delete_tool_applies_directly_and_emits_changed_event() -> None:
     actor = _user()
     repository = FakeToolRepository()
+    diary_service = FakeDiaryMutationService(owner_user_id=actor.user_id)
     executor = ToolExecutor(
         registry=default_tool_registry(),
         repository=repository,
         handlers={
-            "pregnancy_diary.entry.delete.propose": PregnancyDiaryEntryDeleteProposeToolHandler(
-                runtime_service=FakeDiaryDeleteProposalService()
-            )
+            "pregnancy_diary.entry.delete": PregnancyDiaryEntryDeleteToolHandler(diary_service=diary_service)
         },
     )
 
@@ -689,14 +740,42 @@ def test_pregnancy_diary_delete_proposal_does_not_emit_changed_event_before_appl
         executor.execute(
             actor=actor,
             run_id=uuid4(),
-            tool_name="pregnancy_diary.entry.delete.propose",
-            call_id="call-delete-proposal",
+            tool_name="pregnancy_diary.entry.delete",
+            call_id="call-delete",
             args={"entry_date": "2026-07-04"},
         )
     )
 
-    assert result.safe_output["action_status"] == "confirmation_required"
-    assert "pregnancy_diary.changed" not in [event.event_type for event in repository.events]
+    assert result.safe_output["status"] == "entry_deleted"
+    assert diary_service.delete_kwargs["owner_user_id"] == actor.user_id
+    assert [event.event_type for event in repository.events] == [
+        "tool.started",
+        "tool.completed",
+        "pregnancy_diary.changed",
+    ]
+
+
+def test_pregnancy_diary_delete_tool_reports_missing_entry_without_changed_event() -> None:
+    actor = _user()
+    repository = FakeToolRepository()
+    diary_service = FakeDiaryMutationService(owner_user_id=actor.user_id, mode="delete_not_found")
+
+    result = asyncio.run(
+        ToolExecutor(
+            registry=default_tool_registry(),
+            repository=repository,
+            handlers={"pregnancy_diary.entry.delete": PregnancyDiaryEntryDeleteToolHandler(diary_service=diary_service)},
+        ).execute(
+            actor=actor,
+            run_id=uuid4(),
+            tool_name="pregnancy_diary.entry.delete",
+            call_id="call-delete-missing",
+            args={"entry_date": "2026-07-04"},
+        )
+    )
+
+    assert result.safe_output["status"] == "entry_not_found"
+    assert [event.event_type for event in repository.events] == ["tool.started", "tool.completed"]
 
 
 def test_tool_executor_returns_model_context_without_persisting_it() -> None:
@@ -1113,6 +1192,7 @@ class FakeDiaryMutationService:
             symptom_tags=[],
             attachments=[],
         )
+        self.delete_kwargs = {}
 
     async def create_entry(self, **kwargs):
         assert kwargs["owner_user_id"] == self.owner_user_id
@@ -1140,14 +1220,13 @@ class FakeDiaryMutationService:
         entry = await self.update_entry(**kwargs)
         return DiaryEntryMutation(entry=entry, changed=self.mode != "update_unchanged")
 
-
-class FakeDiaryDeleteProposalService:
-    async def propose_action(self, **kwargs):
-        return SimpleNamespace(
-            id=uuid4(),
-            action_type=kwargs["action_type"],
-            status="confirmation_required",
-        )
+    async def delete_entry(self, **kwargs):
+        assert kwargs["owner_user_id"] == self.owner_user_id
+        self.delete_kwargs = kwargs
+        if self.mode == "delete_not_found":
+            raise ApiError(code="not_found", message="Diary entry not found.", status=404)
+        self.entry.entry_date = kwargs["entry_date"]
+        return self.entry
 
 
 class FakeToolRepository:

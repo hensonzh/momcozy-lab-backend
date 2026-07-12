@@ -626,9 +626,20 @@ def _model_tool_output(
     output: dict[str, Any],
     safe_output: dict[str, Any],
 ) -> dict[str, Any]:
+    if tool_name == "load_service_skill":
+        return project_load_service_skill_model_output(output)
     if tool_name == "pregnancy_diary.entries.read":
         return _diary_model_output(output)
     return safe_output
+
+
+def project_load_service_skill_model_output(output: dict[str, Any]) -> dict[str, Any]:
+    projected: dict[str, Any] = {"status": "service_skill_loaded"}
+    for key in ("service_skill_id", "skill_version", "loaded_at"):
+        value = output.get(key)
+        if isinstance(value, str) and value:
+            projected[key] = value
+    return projected
 
 
 def _diary_model_output(output: dict[str, Any]) -> dict[str, Any]:
@@ -739,7 +750,7 @@ def _tool_event_label(tool_name: str) -> str:
         "pregnancy_diary.entries.read": "孕期日记",
         "pregnancy_diary.entry.create": "记录孕期日记",
         "pregnancy_diary.entry.update": "更新孕期日记",
-        "pregnancy_diary.entry.delete.propose": "删除孕期日记",
+        "pregnancy_diary.entry.delete": "删除孕期日记",
         "devices.pump_status.read": "设备状态",
         "devices.guidance_assets.read": "设备指导资料",
         "images.inspect": "图片内容",

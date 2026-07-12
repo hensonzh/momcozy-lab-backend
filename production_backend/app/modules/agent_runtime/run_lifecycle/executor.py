@@ -39,6 +39,7 @@ from ..agents.cozymate_service_agent.tools import (
     default_tool_namespace_registry,
     default_tool_registry,
 )
+from ..agents.cozymate_service_agent.tools.executor import project_load_service_skill_model_output
 from ..agents.cozymate_service_agent.tools.pregnancy_plan_flow import (
     PREGNANCY_PLAN_FINAL_QUESTION,
     PREGNANCY_PLAN_FINAL_QUICK_REPLIES,
@@ -708,7 +709,7 @@ class AgentRuntimeExecutor:
             await self._append_progress(run=run, phase="model_reasoning_after_tool", label="我接着处理下一步")
             skill = self.service_skill_registry.get(_required_text(output, "service_skill_id"))
             return SdkToolInvocationResult(
-                output_json=json.dumps(output, ensure_ascii=False, sort_keys=True),
+                output_json=json.dumps(project_load_service_skill_model_output(output), ensure_ascii=False, sort_keys=True),
                 model_context=self._service_skill_model_context(skill=skill, output=output),
             )
 

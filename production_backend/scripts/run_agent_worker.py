@@ -333,7 +333,6 @@ async def _execute_agent_run(
         action_executor = AgentActionExecutor(
             repository=repository,
             handlers=build_agent_action_handlers(
-                diary_service=diary_service,
                 notifications_service=notifications_service,
                 plans_service=plans_service,
                 records_service=records_service,

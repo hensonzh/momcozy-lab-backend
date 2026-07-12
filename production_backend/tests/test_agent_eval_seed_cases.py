@@ -115,14 +115,14 @@ def test_product_agent_eval_seed_uses_current_pregnancy_action_contracts() -> No
     assert "redundant_confirmation_question" in diary_delete["expected_behavior"]["must_not"]
     assert diary_delete["expected_tool_calls"] == [
         {
-            "contract": "pregnancy_diary.entry.delete.propose",
+            "contract": "pregnancy_diary.entry.delete",
             "timing": "on_explicit_intent_and_exact_target",
             "args_subset": {"entry_date": "2026-07-04"},
         }
     ]
     assert by_suite["pregnancy_diary_delete_ambiguous"]["expected_tool_calls"] == []
     assert by_suite["pregnancy_diary_delete_ambiguous"]["forbidden_tool_calls"] == [
-        {"contract": "pregnancy_diary.entry.delete.propose"}
+        {"contract": "pregnancy_diary.entry.delete"}
     ]
 
     plan_delete = by_suite["pregnancy_plan_delete_exact"]

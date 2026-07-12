@@ -10,6 +10,7 @@
 - 当前生产 OpenAI Responses 路径向模型提供 4 个独立全局工具和 7 个全局 namespace；namespace 内共 37 个工具。
 - namespace 不与 service skill 强绑定。模型无需先加载某个 skill 才能看到或检索某个 namespace。
 - `recommended_tools` 只是在 `load_service_skill` 返回中的建议清单，不承担权限控制，也不改变工具曝光范围。
+- `load_service_skill` 的模型可见工具结果只返回加载状态；完整 skill instructions、`recommended_tools` 和 `business_facts` 仅通过可信 `model_context` 注入一次。持久化 tool output 仍保留安全投影，供审计和排障。
 - `eager` 工具随本轮 tools 定义直接提供；namespace 内的 `deferred` 工具通过 Responses API 的 `defer_loading=true` 和 `tool_search` 按需检索。
 - canonical contract 名用于 runtime 注册、校验、执行和审计；包含 `.` 的名称传给模型时会转换为 `_`。例如 `profile.read` 对模型显示为 `profile_read`。
 - 若 runner 不支持 namespace，runtime 会退化为扁平工具集；本文主要记录当前 OpenAI Responses namespace 路径。
@@ -121,7 +122,7 @@
 | `pregnancy_diary.entries.read` | `pregnancy_diary_entries_read` | deferred | read | 否 | 用户查看、回顾、整理历史日记或需要核对某日原文时读取指定日期或日期范围。 |
 | `pregnancy_diary.entry.create` | `pregnancy_diary_entry_create` | deferred | write | 否 | 用户明确保存一篇新孕期记录时同步创建；同日已有记录时返回现有记录供继续更新。 |
 | `pregnancy_diary.entry.update` | `pregnancy_diary_entry_update` | deferred | write | 否 | 用户明确补充或修改已有日记时同步更新；正文支持追加或替换。 |
-| `pregnancy_diary.entry.delete.propose` | `pregnancy_diary_entry_delete_propose` | deferred | write | 否 | 用户明确要求且 owner-scoped 日期唯一确定时同步删除；目标含糊时先追问。 |
+| `pregnancy_diary.entry.delete` | `pregnancy_diary_entry_delete` | deferred | write | 否 | 用户明确要求且 owner-scoped 日期唯一确定时直接同步删除；目标含糊时先追问。 |
 
 ## 11. Skill 与工具的关系
 

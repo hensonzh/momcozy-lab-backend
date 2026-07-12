@@ -317,10 +317,10 @@ _TOOL_COPY: dict[str, dict[str, str]] = {
         "started": "我先帮你更新这篇孕期日记～",
         "completed": "我已经更新好啦",
     },
-    "pregnancy_diary.entry.delete.propose": {
+    "pregnancy_diary.entry.delete": {
         "phase": "saving",
-        "started": "我先帮你准备删除这篇孕期日记～",
-        "completed": "我已经准备好删除确认啦",
+        "started": "我正在删除这篇孕期日记～",
+        "completed": "这篇孕期日记已经删除啦",
     },
     "devices.pump_status.read": {
         "phase": "reading",

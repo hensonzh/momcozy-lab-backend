@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from ...diary.agent_actions import PREGNANCY_DIARY_ENTRY_DELETE_ACTION, PregnancyDiaryEntryDeleteActionHandler
 from ...hospital_bag.agent_actions import HOSPITAL_BAG_CART_UPDATE_ACTION, HospitalBagCartUpdateActionHandler
 from ...notifications.agent_actions import MILK_REMINDER_CREATE_ACTION, MilkReminderCreateActionHandler
 from ...plans.agent_actions import (
@@ -43,7 +42,6 @@ from .executor import AgentActionApplyHandler
 
 def build_agent_action_handlers(
     *,
-    diary_service: Any,
     notifications_service: Any,
     plans_service: Any,
     records_service: Any,
@@ -59,7 +57,6 @@ def build_agent_action_handlers(
         PLAN_TASK_UPDATE_ACTION: PlanTaskUpdateActionHandler(service=plans_service),
         PLAN_TASK_DELETE_ACTION: PlanTaskDeleteActionHandler(service=plans_service),
         PLAN_DELETE_ACTION: PlanDeleteActionHandler(service=plans_service),
-        PREGNANCY_DIARY_ENTRY_DELETE_ACTION: PregnancyDiaryEntryDeleteActionHandler(service=diary_service),
         FEEDING_RECORD_CREATE_ACTION: FeedingRecordCreateActionHandler(service=records_service),
         PUMPING_RECORD_CREATE_ACTION: PumpingRecordCreateActionHandler(service=records_service),
         FEEDING_RECORD_DELETE_ACTION: FeedingRecordDeleteActionHandler(service=records_service),

@@ -18,9 +18,6 @@ from production_backend.app.modules.assets.models import ProductAsset
 from production_backend.app.modules.assets.service import ProductAssetService
 from production_backend.app.modules.devices.models import PumpDevice, PumpTelemetryEvent
 from production_backend.app.modules.devices.service import DevicesService
-from production_backend.app.modules.diary.agent_actions import (
-    PREGNANCY_DIARY_ENTRY_DELETE_ACTION,
-)
 from production_backend.app.modules.diary.models import PregnancyDiaryEntry
 from production_backend.app.modules.diary.events import PREGNANCY_DIARY_CHANGED_EVENT, pregnancy_diary_changed_payload
 from production_backend.app.modules.diary.service import DiaryService
@@ -799,28 +796,28 @@ class PregnancyDiaryEntryUpdateToolHandler:
         }
 
 
-class PregnancyDiaryEntryDeleteProposeToolHandler:
-    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
-        self.runtime_service = runtime_service
+class PregnancyDiaryEntryDeleteToolHandler:
+    def __init__(self, *, diary_service: DiaryService) -> None:
+        self.diary_service = diary_service
 
     async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
-        entry_date = _text(context.args, "entry_date")
-        if not entry_date:
-            raise ApiError(code="validation_failed", message="entry_date is required.", status=422)
-        apply_payload = {"entry_date": entry_date}
-        preview_payload = {"operation": "delete", "entry_date": entry_date}
-        action = await self.runtime_service.propose_action(
-            owner_user_id=context.actor.user_id,
-            run_id=context.run_id,
-            action_type=PREGNANCY_DIARY_ENTRY_DELETE_ACTION,
-            target_type="pregnancy_diary_entry",
-            target_id=entry_date,
-            side_effect_level="medium",
-            preview_payload=preview_payload,
-            apply_payload=apply_payload,
-            idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:pregnancy-diary-delete",
-        )
-        return _proposal_result(action=action, preview_payload=preview_payload)
+        entry_date = _required_diary_entry_date(context.args)
+        try:
+            entry = await self.diary_service.delete_entry(
+                owner_user_id=context.actor.user_id,
+                entry_date=entry_date,
+                request_id=_diary_tool_request_id(context),
+            )
+        except ApiError as exc:
+            if exc.code != "not_found":
+                raise
+            return _diary_entry_not_found(entry_date)
+        return {
+            "status": "entry_deleted",
+            "entry_date": entry_date.isoformat(),
+            "entry": _diary_reference_payload(entry),
+            DEFERRED_AGENT_EVENTS_KEY: [_pregnancy_diary_changed_event(entry=entry, operation="deleted")],
+        }
 
 
 class DevicesPumpStatusReadToolHandler:
@@ -1431,7 +1428,7 @@ def build_default_tool_handlers(
         ),
         "pregnancy_diary.entry.create": PregnancyDiaryEntryCreateToolHandler(diary_service=diary_service),
         "pregnancy_diary.entry.update": PregnancyDiaryEntryUpdateToolHandler(diary_service=diary_service),
-        "pregnancy_diary.entry.delete.propose": PregnancyDiaryEntryDeleteProposeToolHandler(runtime_service=agent_runtime_service),
+        "pregnancy_diary.entry.delete": PregnancyDiaryEntryDeleteToolHandler(diary_service=diary_service),
         "devices.pump_status.read": DevicesPumpStatusReadToolHandler(devices_service=devices_service),
         "devices.guidance_assets.read": DeviceGuidanceAssetsReadToolHandler(asset_service=asset_service),
         "images.inspect": ImageInspectToolHandler(asset_service=asset_service, object_storage=object_storage),

@@ -34,7 +34,7 @@ from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.
     PlansCurrentReadToolHandler,
     PregnancyDiaryEntriesReadToolHandler,
     PregnancyDiaryEntryCreateToolHandler,
-    PregnancyDiaryEntryDeleteProposeToolHandler,
+    PregnancyDiaryEntryDeleteToolHandler,
     PregnancyDiaryEntryUpdateToolHandler,
     ProfileReadToolHandler,
     ProfileUpdateToolHandler,
@@ -52,9 +52,6 @@ from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.
 from production_backend.app.modules.auth import CurrentUser
 from production_backend.app.modules.assets.models import ProductAsset
 from production_backend.app.modules.devices.models import PumpDevice, PumpTelemetryEvent
-from production_backend.app.modules.diary.agent_actions import (
-    PREGNANCY_DIARY_ENTRY_DELETE_ACTION,
-)
 from production_backend.app.modules.diary.models import PregnancyDiaryEntry
 from production_backend.app.modules.diary.repository import DiaryEntryMutation
 from production_backend.app.modules.notifications.agent_actions import MILK_REMINDER_CREATE_ACTION
@@ -1902,18 +1899,20 @@ def test_pregnancy_diary_create_tool_requires_values() -> None:
     assert exc_info.value.code == "validation_failed"
 
 
-def test_pregnancy_diary_delete_tool_applies_after_exact_target_is_resolved() -> None:
-    runtime_service = FakeAgentRuntimeService()
+def test_pregnancy_diary_delete_tool_deletes_entry_synchronously() -> None:
+    actor = _user()
+    diary_service = FakeDiaryService(owner_user_id=actor.user_id)
 
     result = asyncio.run(
-        PregnancyDiaryEntryDeleteProposeToolHandler(runtime_service=runtime_service)(_context(args={"entry_date": "2026-07-04"}))
+        PregnancyDiaryEntryDeleteToolHandler(diary_service=diary_service)(
+            _context(actor=actor, args={"entry_date": "2026-07-04"})
+        )
     )
 
-    assert result["action_type"] == PREGNANCY_DIARY_ENTRY_DELETE_ACTION
-    assert result["action_status"] == "applied"
-    assert result["requires_confirmation"] is False
-    assert result["user_visible"] is False
-    assert runtime_service.calls[0]["side_effect_level"] == "medium"
+    assert result["status"] == "entry_deleted"
+    assert result["entry_date"] == "2026-07-04"
+    assert diary_service.delete_kwargs["owner_user_id"] == actor.user_id
+    assert diary_service.delete_kwargs["entry_date"] == date(2026, 7, 4)
 
 
 def test_support_ticket_propose_tool_handler_rejects_legacy_nested_ticket_shape() -> None:
@@ -1964,7 +1963,7 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
         "pregnancy_diary.entries.read",
         "pregnancy_diary.entry.create",
         "pregnancy_diary.entry.update",
-        "pregnancy_diary.entry.delete.propose",
+        "pregnancy_diary.entry.delete",
         "devices.guidance_assets.read",
         "devices.pump_status.read",
         "images.inspect",
@@ -2170,6 +2169,7 @@ class FakeDiaryService:
         self.limit = None
         self.create_kwargs = {}
         self.update_kwargs = {}
+        self.delete_kwargs = {}
 
     async def get_entry(self, *, owner_user_id, entry_date):
         self.owner_user_id = owner_user_id
@@ -2196,6 +2196,10 @@ class FakeDiaryService:
 
     async def update_entry_with_status(self, **kwargs):
         return DiaryEntryMutation(entry=await self.update_entry(**kwargs), changed=True)
+
+    async def delete_entry(self, **kwargs):
+        self.delete_kwargs = kwargs
+        return self._entry(entry_date=kwargs["entry_date"])
 
     def _entry(self, *, entry_date):
         return PregnancyDiaryEntry(
@@ -2363,7 +2367,6 @@ class FakeAgentRuntimeService:
                         "records.growth_record.update",
                         "records.growth_record.delete",
                         "pregnancy.plan.create",
-                        "pregnancy_diary.entry.delete",
                         "plans.task.create",
                         "plans.task.complete",
                         "plans.task.update",
