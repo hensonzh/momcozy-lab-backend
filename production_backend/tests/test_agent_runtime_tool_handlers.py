@@ -976,7 +976,7 @@ def test_pregnancy_plan_propose_tool_handler_applies_without_duplicate_confirmat
                 "birth_path": "顺产",
                 "workflow_phase": "ready_to_generate",
                 "analysis_run_id": str(uuid4()),
-                "analysis_artifact_id": "analysis-1",
+                "workflow_state_id": "workflow-1",
                 "source_form_artifact_id": "form-1",
                 "source_form_submission_id": "submission-1",
                 "final_additional_info": "下周需要出差两天",
@@ -1026,7 +1026,7 @@ def test_pregnancy_plan_propose_tool_handler_applies_without_duplicate_confirmat
     assert "第四条不得进入" not in str(sanitized_context)
     assert "另一位用户的秘密" not in str(sanitized_context)
     assert runtime_service.calls[0]["apply_payload"]["payload"]["lineage"] == {
-        "analysis_artifact_id": "analysis-1",
+        "workflow_state_id": "workflow-1",
         "source_form_artifact_id": "form-1",
         "source_form_submission_id": "submission-1",
     }
@@ -1040,15 +1040,15 @@ def test_pregnancy_plan_propose_tool_handler_applies_without_duplicate_confirmat
         is True
     )
     assert result["artifact_type"] == "birth_journey_plan_card"
-    card_artifact = runtime_service.artifacts[-2]
-    workflow_artifact = runtime_service.artifacts[-1]
+    card_artifact = runtime_service.artifacts[-1]
     assert card_artifact.artifact_type == "birth_journey_plan_card"
     assert card_artifact.payload["action_id"] == result["action_id"]
-    assert workflow_artifact.artifact_type == "pregnancy_plan_workflow"
-    assert workflow_artifact.payload == {
+    assert runtime_service.workflow_state.workflow_type == "pregnancy_plan"
+    assert runtime_service.workflow_state.status == "completed"
+    assert runtime_service.workflow_state.active_step == ""
+    assert runtime_service.workflow_state.state == {
         "phase": "ready_to_generate",
         "consumed_by_action_id": result["action_id"],
-        "source_analysis_artifact_id": "analysis-1",
         "source_form_artifact_id": "form-1",
         "source_form_submission_id": "submission-1",
         "form_id": "birth_journey_basic_info_intake",
@@ -1074,7 +1074,7 @@ def test_failed_pregnancy_plan_apply_does_not_create_card_or_consume_workflow() 
                 "current_week": "32周",
                 "workflow_phase": "ready_to_generate",
                 "analysis_run_id": str(uuid4()),
-                "analysis_artifact_id": "analysis-1",
+                "workflow_state_id": "workflow-1",
                 "source_form_artifact_id": "form-1",
                 "source_form_submission_id": "submission-1",
             },
@@ -1090,13 +1090,10 @@ def test_failed_pregnancy_plan_apply_does_not_create_card_or_consume_workflow() 
     assert result.output["error_code"] == "plan_create_failed"
     assert len(runtime_service.artifacts) == artifact_count
     assert "no plan was created" in result.model_context[0]["content"]
-    assert not any(
-        artifact.artifact_type == "pregnancy_plan_workflow" and artifact.payload.get("consumed_by_action_id") == result.output["action_id"]
-        for artifact in runtime_service.artifacts
-    )
+    assert runtime_service.workflow_state is None
 
 
-def test_pregnancy_plan_intake_start_creates_one_form_and_internal_collecting_snapshot() -> None:
+def test_pregnancy_plan_intake_start_creates_one_form_and_durable_workflow_state() -> None:
     actor = _user()
     runtime_service = FakeAgentRuntimeService()
     context = _context(
@@ -1115,27 +1112,30 @@ def test_pregnancy_plan_intake_start_creates_one_form_and_internal_collecting_sn
     assert result["form"]["default_values"] == {"current_week": "32周", "age": 36}
     required_ids = {field["id"] for field in result["form"]["fields"] if field["required"]}
     assert required_ids == {"current_week", "ivf", "fetus_count", "age", "first_birth", "birth_path"}
-    created = runtime_service.artifacts[-2:]
-    assert [artifact.artifact_type for artifact in created] == ["form", "pregnancy_plan_workflow"]
-    assert created[1].payload == {
+    form_artifact = runtime_service.artifacts[-1]
+    assert form_artifact.artifact_type == "form"
+    assert runtime_service.workflow_state.workflow_type == "pregnancy_plan"
+    assert runtime_service.workflow_state.status == "collecting"
+    assert runtime_service.workflow_state.active_step == "collecting_intake"
+    assert runtime_service.workflow_state.state == {
         "phase": "collecting_intake",
-        "source_form_artifact_id": str(created[0].id),
+        "source_form_artifact_id": str(form_artifact.id),
         "form_id": "birth_journey_basic_info_intake",
     }
     assert result["_deferred_agent_events"] == [
         {
             "event_type": "artifact.created",
             "payload": {
-                "artifact_id": str(created[0].id),
+                "artifact_id": str(form_artifact.id),
                 "artifact_type": "form",
                 "schema_version": "1.0",
                 "status": "created",
                 "artifact": {
-                    "id": str(created[0].id),
+                    "id": str(form_artifact.id),
                     "artifact_type": "form",
                     "schema_version": "1.0",
                     "status": "created",
-                    "payload": created[0].payload,
+                    "payload": form_artifact.payload,
                     "raw_payload_ref": "",
                 },
                 "form": result["form"],
@@ -1227,9 +1227,9 @@ def test_pregnancy_plan_intake_start_creates_a_fresh_form_after_prior_intake_was
     )
 
     assert result["status"] == "form_created"
-    assert [artifact.artifact_type for artifact in runtime_service.artifacts[-2:]] == ["form", "pregnancy_plan_workflow"]
-    assert runtime_service.artifacts[-1].payload["phase"] == "collecting_intake"
-    assert runtime_service.artifacts[-1].payload["source_form_artifact_id"] != "old-form"
+    assert runtime_service.artifacts[-1].artifact_type == "form"
+    assert runtime_service.workflow_state.state["phase"] == "collecting_intake"
+    assert runtime_service.workflow_state.state["source_form_artifact_id"] != "old-form"
 
 
 def test_pregnancy_plan_intake_start_creates_a_fresh_form_after_safety_interruption() -> None:
@@ -1251,8 +1251,9 @@ def test_pregnancy_plan_intake_start_creates_a_fresh_form_after_safety_interrupt
     )
 
     assert result["status"] == "form_created"
-    assert runtime_service.artifacts[-1].payload["phase"] == "collecting_intake"
-    assert runtime_service.artifacts[-1].payload["source_form_artifact_id"] != "urgent-form"
+    assert runtime_service.artifacts[-1].artifact_type == "form"
+    assert runtime_service.workflow_state.state["phase"] == "collecting_intake"
+    assert runtime_service.workflow_state.state["source_form_artifact_id"] != "urgent-form"
 
 
 def test_pregnancy_plan_intake_analyze_uses_verified_form_and_returns_private_model_context() -> None:
@@ -1262,6 +1263,7 @@ def test_pregnancy_plan_intake_analyze_uses_verified_form_and_returns_private_mo
     context = ToolHandlerContext(
         actor=_user(),
         run_id=run_id,
+        thread_id=uuid4(),
         tool_name="pregnancy.plan_intake.analyze",
         call_id="call-1",
         args={
@@ -1306,12 +1308,14 @@ def test_pregnancy_plan_intake_analyze_uses_verified_form_and_returns_private_mo
     assert "这会直接影响复查时间、观察重点和异常联系路径" in trusted
     assert "这项提醒具体对应什么复查或观察要求" in trusted
     assert "还有其他需要补充的信息吗" not in trusted
-    workflow = runtime_service.artifacts[-1]
-    assert workflow.artifact_type == "pregnancy_plan_workflow"
-    assert workflow.payload["phase"] == "personalized_followup"
-    assert workflow.payload["analysis_run_id"] == str(run_id)
-    assert workflow.payload["source_form_submission_id"] == "submission-1"
-    assert workflow.payload["plan_context"]["medical_notes"] == "甲状腺用药"
+    workflow = runtime_service.workflow_state
+    assert workflow.workflow_type == "pregnancy_plan"
+    assert workflow.status == "waiting"
+    assert workflow.active_step == "personalized_followup"
+    assert workflow.state["phase"] == "personalized_followup"
+    assert workflow.state["analysis_run_id"] == str(run_id)
+    assert workflow.state["source_form_submission_id"] == "submission-1"
+    assert workflow.state["plan_context"]["medical_notes"] == "甲状腺用药"
 
 
 def test_pregnancy_plan_initial_analysis_bridges_to_checkup_upload_before_asking_one_question() -> None:
@@ -1554,7 +1558,7 @@ def test_pregnancy_plan_intake_upload_cannot_be_forged_without_runtime_verified_
         "next_step": "checkup_records_upload",
         "requires_user_reply": True,
     }
-    assert runtime_service.artifacts[-1].payload["phase"] == "checkup_records_upload"
+    assert runtime_service.workflow_state is None
 
     verified = asyncio.run(
         handler(
@@ -1569,7 +1573,7 @@ def test_pregnancy_plan_intake_upload_cannot_be_forged_without_runtime_verified_
     )
     assert isinstance(verified, ToolHandlerResult)
     assert verified.output["workflow_phase"] == "final_plan_confirmation"
-    assert runtime_service.artifacts[-1].payload["plan_context"]["checkup_records_uploaded"] == "是"
+    assert runtime_service.workflow_state.state["plan_context"]["checkup_records_uploaded"] == "是"
 
 
 def test_pregnancy_plan_intake_analyze_stops_for_urgent_signals_without_advancing_workflow() -> None:
@@ -1616,9 +1620,10 @@ def test_pregnancy_plan_propose_requires_workflow_ready_to_generate() -> None:
 
     missing = asyncio.run(
         handler(
-            ToolHandlerContext(
-                actor=_user(),
-                run_id=run_id,
+                ToolHandlerContext(
+                    actor=_user(),
+                    run_id=run_id,
+                    thread_id=uuid4(),
                 tool_name="pregnancy.plan.propose",
                 call_id="call-1",
                 args={"runtime_plan_context": {"has_active_plan": False, "workflow_phase": "collecting_intake"}},
@@ -1629,9 +1634,10 @@ def test_pregnancy_plan_propose_requires_workflow_ready_to_generate() -> None:
 
     not_ready = asyncio.run(
         handler(
-            ToolHandlerContext(
-                actor=_user(),
-                run_id=run_id,
+                ToolHandlerContext(
+                    actor=_user(),
+                    run_id=run_id,
+                    thread_id=uuid4(),
                 tool_name="pregnancy.plan.propose",
                 call_id="call-2",
                 args={
@@ -2100,7 +2106,7 @@ def _context(*, actor: CurrentUser | None = None, args: dict | None = None, thre
         tool_name="tool",
         call_id="call-1",
         args=args or {},
-        thread_id=thread_id,
+        thread_id=thread_id or uuid4(),
     )
 
 

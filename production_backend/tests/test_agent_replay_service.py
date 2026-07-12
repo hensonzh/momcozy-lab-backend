@@ -74,10 +74,10 @@ def test_agent_replay_service_redacts_pii_from_export_payloads() -> None:
     assert bundle["safety_events"][0]["evidence"] == {"matched_term": "fever", "patient_phone": "[redacted]"}
 
 
-def test_agent_replay_service_projects_internal_pregnancy_workflow_without_health_facts() -> None:
+def test_agent_replay_service_projects_pregnancy_workflow_state_without_health_facts() -> None:
     repository = FakeReplayRepository()
-    repository.artifact.artifact_type = "pregnancy_plan_workflow"
-    repository.artifact.payload = {
+    repository.workflow_state.workflow_type = "pregnancy_plan"
+    repository.workflow_state.state = {
         "phase": "awaiting_additional_information",
         "source_form_artifact_id": "form-1",
         "source_form_submission_id": "submission-1",
@@ -98,7 +98,7 @@ def test_agent_replay_service_projects_internal_pregnancy_workflow_without_healt
 
     bundle = asyncio.run(AgentReplayService(repository=repository).export_run_bundle(run_id=repository.run.id))
 
-    assert bundle["artifacts"][0]["payload"] == {
+    assert bundle["workflow_states"][0]["state"] == {
         "phase": "awaiting_additional_information",
         "source_form_artifact_id": "form-1",
         "source_form_submission_id": "submission-1",

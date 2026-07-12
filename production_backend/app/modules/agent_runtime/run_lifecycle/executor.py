@@ -45,6 +45,7 @@ from ..agents.cozymate_service_agent.tools.pregnancy_plan_flow import (
     PREGNANCY_PLAN_FINAL_QUICK_REPLIES,
     PREGNANCY_PLAN_URGENT_RESPONSE,
     PREGNANCY_PLAN_WORKFLOW_SCHEMA_VERSION,
+    PREGNANCY_PLAN_WORKFLOW_TYPE,
     ensure_pregnancy_plan_final_question,
     pregnancy_plan_urgent_signal_ids,
 )
@@ -169,7 +170,7 @@ class AgentRuntimeExecutor:
         self.sdk_runner = sdk_runner
         self.graph_registry = graph_registry or default_graph_registry()
         self.checkpoint_store = checkpoint_store
-        self.state_store = state_store
+        self.state_store = state_store or AgentRuntimeStateStore(repository=repository)
         self.tool_registry = tool_registry or default_tool_registry()
         self.tool_namespace_registry = tool_namespace_registry or default_tool_namespace_registry(self.tool_registry)
         self.tool_executor = tool_executor
@@ -866,19 +867,20 @@ class AgentRuntimeExecutor:
                 facts = await self._birth_prep_business_facts(run=run)
                 workflow = await self._latest_pregnancy_plan_workflow(run=run)
                 trusted_args["runtime_plan_context"] = _pregnancy_runtime_plan_context(facts, workflow=workflow)
-                trusted_args["runtime_workflow_context"] = _dict(workflow, "payload")
+                trusted_args["runtime_workflow_context"] = _dict(workflow, "state")
             return trusted_args
         if contract_name == "pregnancy.plan.propose":
             facts = await self._birth_prep_business_facts(run=run)
             workflow = await self._latest_pregnancy_plan_workflow(run=run)
             return {
                 "runtime_plan_context": _pregnancy_runtime_plan_context(facts, workflow=workflow),
+                "runtime_workflow_context": _dict(workflow, "state"),
                 "trusted_current_user_text": self._run_current_user_text.get(run.id, ""),
             }
         if contract_name == "pregnancy.plan_intake.advance":
             workflow = await self._latest_pregnancy_plan_workflow(run=run)
             return {
-                "runtime_workflow_context": _dict(workflow, "payload"),
+                "runtime_workflow_context": _dict(workflow, "state"),
                 "trusted_current_user_text": self._run_current_user_text.get(run.id, ""),
                 "runtime_checkup_attachment_count": self._run_checkup_attachment_counts.get(run.id, 0),
             }
@@ -891,7 +893,7 @@ class AgentRuntimeExecutor:
             if contract_name == "pregnancy.plan_intake.start":
                 workflow = await self._latest_pregnancy_plan_workflow(run=run)
                 trusted_args["runtime_plan_context"] = _pregnancy_runtime_plan_context(facts, workflow=workflow)
-                trusted_args["runtime_workflow_context"] = _dict(workflow, "payload")
+                trusted_args["runtime_workflow_context"] = _dict(workflow, "state")
             return trusted_args
         if contract_name == "hospital_bag_cart_update":
             client_groups = self._run_hospital_bag_cart_groups.get(run.id)
@@ -912,20 +914,21 @@ class AgentRuntimeExecutor:
         return facts
 
     async def _latest_pregnancy_plan_workflow(self, *, run: AgentRun) -> dict[str, Any]:
-        loader = getattr(self.repository, "get_latest_artifact_for_thread", None)
+        loader = getattr(self.repository, "get_latest_workflow_state_for_thread", None)
         if not callable(loader):
             return {}
-        artifact = await loader(
+        workflow = await loader(
             thread_id=run.thread_id,
             owner_user_id=run.actor_user_id,
-            artifact_type="pregnancy_plan_workflow",
+            workflow_type=PREGNANCY_PLAN_WORKFLOW_TYPE,
         )
-        if artifact is None:
+        if workflow is None:
             return {}
         return {
-            "artifact_id": str(artifact.id),
-            "run_id": str(artifact.run_id),
-            "payload": dict(artifact.payload) if isinstance(artifact.payload, dict) else {},
+            "workflow_state_id": str(workflow.id),
+            "run_id": str(workflow.run_id or ""),
+            "status": workflow.status,
+            "state": dict(workflow.state) if isinstance(workflow.state, dict) else {},
         }
 
     async def _pregnancy_plan_pre_model_urgent_signal_ids(
@@ -935,7 +938,7 @@ class AgentRuntimeExecutor:
         current_user_text: str,
     ) -> list[str]:
         workflow = await self._latest_pregnancy_plan_workflow(run=run)
-        workflow_payload = _dict(workflow, "payload")
+        workflow_payload = _dict(workflow, "state")
         submission = self._run_trusted_form_submissions.get(run.id, {}).get("birth_journey_basic_info_intake")
         submission_values = _dict(submission or {}, "values")
         signal_ids = pregnancy_plan_urgent_signal_ids(submission_values)
@@ -975,20 +978,22 @@ class AgentRuntimeExecutor:
     ) -> None:
         if workflow_payload.get("interrupted_by_safety_signal") is True:
             return
-        await self.repository.create_artifact(
-            run_id=run.id,
+        await self.state_store.upsert_active_workflow(
+            thread_id=run.thread_id,
             owner_user_id=run.actor_user_id,
-            artifact_type="pregnancy_plan_workflow",
+            run_id=run.id,
+            workflow_type=PREGNANCY_PLAN_WORKFLOW_TYPE,
+            status="failed",
             schema_version=PREGNANCY_PLAN_WORKFLOW_SCHEMA_VERSION,
-            status="created",
-            payload={
+            state={
+                **workflow_payload,
                 "phase": _text(workflow_payload, "phase") or "collecting_intake",
                 "interrupted_by_safety_signal": True,
                 "source_form_artifact_id": form_artifact_id,
                 "source_form_submission_id": form_submission_id,
                 "form_id": "birth_journey_basic_info_intake",
             },
-            raw_payload_ref="",
+            active_step="",
         )
 
     async def _latest_hospital_bag_cart_groups(self, *, run: AgentRun) -> list[dict[str, Any]] | None:
@@ -2150,7 +2155,7 @@ def _pregnancy_runtime_plan_context(
     if active_plans:
         context["active_plan_id"] = _text(active_plans[0], "id")
         context["active_plan_title"] = _text(active_plans[0], "title")
-    workflow_payload = _dict(workflow or {}, "payload")
+    workflow_payload = _dict(workflow or {}, "state")
     if workflow_payload:
         if _text(workflow_payload, "consumed_by_action_id") or workflow_payload.get("interrupted_by_safety_signal") is True:
             return {key: value for key, value in context.items() if value not in ("", None)}
@@ -2167,9 +2172,9 @@ def _pregnancy_runtime_plan_context(
             "ready_to_generate",
             "awaiting_additional_information",
         }:
-            workflow_artifact_id = _text(workflow or {}, "artifact_id")
-            if workflow_artifact_id:
-                context["analysis_artifact_id"] = workflow_artifact_id
+            workflow_state_id = _text(workflow or {}, "workflow_state_id")
+            if workflow_state_id:
+                context["workflow_state_id"] = workflow_state_id
             plan_context = _dict(workflow_payload, "plan_context")
             context.update({key: value for key, value in plan_context.items() if value not in ("", None)})
     return {key: value for key, value in context.items() if value not in ("", None)}

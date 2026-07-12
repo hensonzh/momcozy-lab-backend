@@ -2002,20 +2002,20 @@ def test_agent_runtime_executor_injects_pregnancy_intake_submission_and_latest_w
             ]
         },
     )
-    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user, run=run)
-    repository.latest_thread_artifact = AgentArtifact(
-        id=uuid4(),
-        run_id=uuid4(),
-        owner_user_id=run.actor_user_id,
-        artifact_type="pregnancy_plan_workflow",
-        schema_version="v1",
-        status="created",
-        payload={
+    workflow = _pregnancy_workflow(
+        run=run,
+        status="collecting",
+        state={
             "phase": "collecting_intake",
             "source_form_artifact_id": str(form_artifact_id),
             "form_id": "birth_journey_basic_info_intake",
         },
-        raw_payload_ref="",
+    )
+    repository = FakeRuntimeRepository(
+        messages=[current_user],
+        current_message=current_user,
+        run=run,
+        workflow_states=[workflow],
     )
     registry = default_tool_registry()
     captured_args: dict[str, Any] = {}
@@ -2059,7 +2059,7 @@ def test_agent_runtime_executor_injects_pregnancy_intake_submission_and_latest_w
             "workflow_phase": "collecting_intake",
             "source_form_artifact_id": str(form_artifact_id),
         },
-        "runtime_workflow_context": repository.latest_thread_artifact.payload,
+        "runtime_workflow_context": workflow.state,
     }
     assert result.final_text == "这些因素会影响复查节奏。我想再确认一个会改变计划安排的点。"
     assert "甲状腺用药" not in json.dumps(backend.requests[0].model_input, ensure_ascii=False)
@@ -2085,21 +2085,20 @@ def test_agent_runtime_executor_injects_current_workflow_and_authenticated_check
             ]
         },
     )
-    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user, run=run)
-    repository.latest_thread_artifact = AgentArtifact(
-        id=uuid4(),
-        run_id=uuid4(),
-        owner_user_id=run.actor_user_id,
-        artifact_type="pregnancy_plan_workflow",
-        schema_version="v1",
-        status="created",
-        payload={
+    workflow = _pregnancy_workflow(
+        run=run,
+        state={
             "phase": "checkup_records_upload",
             "source_form_artifact_id": "form-1",
             "source_form_submission_id": "submission-1",
             "plan_context": {"current_week": "20周"},
         },
-        raw_payload_ref="",
+    )
+    repository = FakeRuntimeRepository(
+        messages=[current_user],
+        current_message=current_user,
+        run=run,
+        workflow_states=[workflow],
     )
     registry = default_tool_registry()
     captured_args: dict[str, Any] = {}
@@ -2139,7 +2138,7 @@ def test_agent_runtime_executor_injects_current_workflow_and_authenticated_check
     assert result.status == "completed"
     assert captured_args == {
         "action": "mark_checkup_records_uploaded",
-        "runtime_workflow_context": repository.latest_thread_artifact.payload,
+        "runtime_workflow_context": workflow.state,
         "trusted_current_user_text": "我已经上传了这份产检记录。",
         "runtime_checkup_attachment_count": 1,
     }
@@ -2225,22 +2224,21 @@ def test_agent_runtime_executor_blocks_model_and_tools_for_urgent_text_while_awa
         text="我现在大量出血",
         sequence=1,
     )
-    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user, run=run)
-    repository.latest_thread_artifact = AgentArtifact(
-        id=uuid4(),
-        run_id=uuid4(),
-        owner_user_id=run.actor_user_id,
-        artifact_type="pregnancy_plan_workflow",
-        schema_version="v1",
-        status="created",
-        payload={
+    workflow = _pregnancy_workflow(
+        run=run,
+        state={
             "phase": "awaiting_additional_information",
             "analysis_run_id": str(uuid4()),
             "source_form_artifact_id": "form-1",
             "source_form_submission_id": "submission-1",
             "plan_context": {"current_week": "32周"},
         },
-        raw_payload_ref="",
+    )
+    repository = FakeRuntimeRepository(
+        messages=[current_user],
+        current_message=current_user,
+        run=run,
+        workflow_states=[workflow],
     )
     registry = default_tool_registry()
     captured_args: dict[str, Any] = {}
@@ -2283,12 +2281,16 @@ def test_agent_runtime_executor_blocks_model_and_tools_for_urgent_text_while_awa
     assert backend.requests == []
     assert result.final_text == PREGNANCY_PLAN_URGENT_RESPONSE
     assert result.quick_replies == []
-    assert repository.artifacts[-1].payload == {
+    assert workflow.status == "failed"
+    assert workflow.active_step == ""
+    assert workflow.state == {
         "phase": "awaiting_additional_information",
+        "analysis_run_id": workflow.state["analysis_run_id"],
         "interrupted_by_safety_signal": True,
         "source_form_artifact_id": "form-1",
         "source_form_submission_id": "submission-1",
         "form_id": "birth_journey_basic_info_intake",
+        "plan_context": {"current_week": "32周"},
     }
     assert "孕期计划啦" not in result.final_text
 
@@ -2324,19 +2326,19 @@ def test_agent_runtime_executor_blocks_model_for_urgent_signal_hidden_in_verifie
             ]
         },
     )
-    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user, run=run)
-    repository.latest_thread_artifact = AgentArtifact(
-        id=uuid4(),
-        run_id=uuid4(),
-        owner_user_id=run.actor_user_id,
-        artifact_type="pregnancy_plan_workflow",
-        schema_version="v1",
-        status="created",
-        payload={
+    workflow = _pregnancy_workflow(
+        run=run,
+        status="collecting",
+        state={
             "phase": "collecting_intake",
             "source_form_artifact_id": str(form_artifact_id),
         },
-        raw_payload_ref="",
+    )
+    repository = FakeRuntimeRepository(
+        messages=[current_user],
+        current_message=current_user,
+        run=run,
+        workflow_states=[workflow],
     )
     backend = CapturingSdkBackend(result=SdkNodeResult(final_text="不应调用模型"))
 
@@ -2350,9 +2352,9 @@ def test_agent_runtime_executor_blocks_model_for_urgent_signal_hidden_in_verifie
     assert backend.requests == []
     assert result.final_text == PREGNANCY_PLAN_URGENT_RESPONSE
     assert result.quick_replies == []
-    interruption = repository.artifacts[-1]
-    assert interruption.artifact_type == "pregnancy_plan_workflow"
-    assert interruption.payload == {
+    assert workflow.status == "failed"
+    assert workflow.active_step == ""
+    assert workflow.state == {
         "phase": "collecting_intake",
         "interrupted_by_safety_signal": True,
         "source_form_artifact_id": str(form_artifact_id),
@@ -2438,13 +2440,13 @@ def test_pregnancy_runtime_plan_context_allows_creation_when_only_other_plan_typ
     assert context == {"has_active_plan": False}
 
 
-def test_pregnancy_runtime_plan_context_recovers_analyzed_intake_from_latest_artifact() -> None:
+def test_pregnancy_runtime_plan_context_recovers_analyzed_intake_from_workflow_state() -> None:
     context = _pregnancy_runtime_plan_context(
         {"pregnancy": {"profile": {"delivery_date": "2026-09-18"}, "plans": []}},
         workflow={
-            "artifact_id": "analysis-1",
+            "workflow_state_id": "workflow-1",
             "run_id": "analysis-run-1",
-            "payload": {
+            "state": {
                 "phase": "awaiting_additional_information",
                 "analysis_run_id": "analysis-run-1",
                 "source_form_artifact_id": "form-1",
@@ -2467,7 +2469,7 @@ def test_pregnancy_runtime_plan_context_recovers_analyzed_intake_from_latest_art
         "analysis_run_id": "analysis-run-1",
         "source_form_artifact_id": "form-1",
         "source_form_submission_id": "submission-1",
-        "analysis_artifact_id": "analysis-1",
+        "workflow_state_id": "workflow-1",
         "current_week": "32周",
         "due_date_or_week": "32周",
         "ivf": "是",
@@ -2480,8 +2482,8 @@ def test_pregnancy_runtime_plan_context_does_not_resurrect_consumed_intake_after
     context = _pregnancy_runtime_plan_context(
         {"pregnancy": {"profile": {"delivery_date": "2026-09-18"}, "plans": []}},
         workflow={
-            "artifact_id": "consumed-1",
-            "payload": {
+            "workflow_state_id": "consumed-1",
+            "state": {
                 "phase": "awaiting_additional_information",
                 "consumed_by_action_id": "action-1",
                 "source_form_artifact_id": "old-form",
@@ -3053,6 +3055,30 @@ class FakeRuntimeRepository:
             if workflow.thread_id == thread_id and workflow.owner_user_id == owner_user_id
         ][:limit]
 
+    async def get_latest_workflow_state_for_thread(self, *, thread_id, owner_user_id, workflow_type):
+        matches = [
+            workflow
+            for workflow in self.workflow_states
+            if workflow.thread_id == thread_id
+            and workflow.owner_user_id == owner_user_id
+            and workflow.workflow_type == workflow_type
+        ]
+        return matches[-1] if matches else None
+
+    async def create_workflow_state(self, **kwargs):
+        workflow = AgentWorkflowState(id=uuid4(), **kwargs)
+        self.workflow_states.append(workflow)
+        return workflow
+
+    async def update_workflow_state(self, *, workflow_state, status=None, state=None, active_step=None, **kwargs):
+        if status is not None:
+            workflow_state.status = status
+        if state is not None:
+            workflow_state.state = state
+        if active_step is not None:
+            workflow_state.active_step = active_step
+        return workflow_state
+
     async def upsert_run_summary(self, **kwargs):
         for summary in self.run_summaries:
             if summary.run_id == kwargs["run_id"] and summary.summary_type == kwargs["summary_type"]:
@@ -3456,6 +3482,20 @@ class ServiceSkillLoadingSdkBackend:
 
 async def profile_read_handler(context: ToolHandlerContext):
     return {"profile": {"actor_user_id": str(context.actor.user_id)}}
+
+
+def _pregnancy_workflow(*, run: AgentRun, state: dict[str, Any], status: str = "waiting") -> AgentWorkflowState:
+    return AgentWorkflowState(
+        id=uuid4(),
+        thread_id=run.thread_id,
+        owner_user_id=run.actor_user_id,
+        run_id=run.id,
+        workflow_type="pregnancy_plan",
+        status=status,
+        schema_version="v2",
+        state=state,
+        active_step=str(state.get("phase") or ""),
+    )
 
 
 def _run(*, thread_id, run_id=None, prompt_version: str = "") -> AgentRun:

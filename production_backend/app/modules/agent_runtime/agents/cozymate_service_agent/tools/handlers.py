@@ -12,7 +12,7 @@ from uuid import UUID
 
 from production_backend.app.core.errors import ApiError
 from production_backend.app.infrastructure.object_storage.base import ObjectStorage
-from production_backend.app.modules.agent_runtime.models import AgentArtifact, AgentWorkflowState
+from production_backend.app.modules.agent_runtime.models import AgentWorkflowState
 from production_backend.app.modules.agent_runtime.service import AgentRuntimeService
 from production_backend.app.modules.assets.models import ProductAsset
 from production_backend.app.modules.assets.service import ProductAssetService
@@ -59,8 +59,8 @@ from .legacy_artifacts import artifact_record_from_legacy_result, create_legacy_
 from .pregnancy_plan_flow import (
     PREGNANCY_PLAN_INTAKE_FORM_ID,
     PREGNANCY_PLAN_URGENT_RESPONSE,
-    PREGNANCY_PLAN_WORKFLOW_ARTIFACT_TYPE,
     PREGNANCY_PLAN_WORKFLOW_SCHEMA_VERSION,
+    PREGNANCY_PLAN_WORKFLOW_TYPE,
     PregnancyPlanPhase,
     advance_pregnancy_plan_workflow,
     build_pregnancy_plan_result,
@@ -248,6 +248,7 @@ class PregnancyPlanIntakeStartToolHandler:
         self.runtime_service = runtime_service
 
     async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
+        _require_pregnancy_plan_thread_id(context)
         runtime_plan_context = _dict(context.args, "runtime_plan_context")
         existing = _existing_pregnancy_plan_result(runtime_plan_context)
         if existing is not None:
@@ -279,14 +280,10 @@ class PregnancyPlanIntakeStartToolHandler:
             payload={"tool_name": "pregnancy.plan_intake.start", "form": form},
             emit_event=False,
         )
-        await self.runtime_service.create_artifact(
-            owner_user_id=context.actor.user_id,
-            run_id=context.run_id,
-            artifact_type=PREGNANCY_PLAN_WORKFLOW_ARTIFACT_TYPE,
-            schema_version=PREGNANCY_PLAN_WORKFLOW_SCHEMA_VERSION,
-            status="created",
-            payload=collecting_intake_snapshot(form_artifact_id=str(form_artifact.id)),
-            emit_event=False,
+        await _upsert_pregnancy_plan_workflow(
+            runtime_service=self.runtime_service,
+            context=context,
+            workflow=collecting_intake_snapshot(form_artifact_id=str(form_artifact.id)),
         )
         return {
             "tool_name": "ui_form_create",
@@ -304,6 +301,7 @@ class PregnancyPlanIntakeAnalyzeToolHandler:
         self.runtime_service = runtime_service
 
     async def __call__(self, context: ToolHandlerContext) -> ToolHandlerResult | dict[str, Any]:
+        _require_pregnancy_plan_thread_id(context)
         form_values = _dict(context.args, "confirmed_form_data")
         form_artifact_id = _text(context.args, "form_artifact_id")
         submission_id = _text(context.args, "form_submission_id")
@@ -373,18 +371,13 @@ class PregnancyPlanIntakeAnalyzeToolHandler:
             form_submission_id=submission_id,
             analysis_run_id=str(context.run_id),
         )
-        workflow_artifact = await self.runtime_service.create_artifact(
-            owner_user_id=context.actor.user_id,
-            run_id=context.run_id,
-            artifact_type=PREGNANCY_PLAN_WORKFLOW_ARTIFACT_TYPE,
-            schema_version=PREGNANCY_PLAN_WORKFLOW_SCHEMA_VERSION,
-            status="created",
-            payload=snapshot,
-            emit_event=False,
+        await _upsert_pregnancy_plan_workflow(
+            runtime_service=self.runtime_service,
+            context=context,
+            workflow=snapshot,
         )
         return _pregnancy_plan_workflow_result(
             snapshot,
-            workflow_artifact_id=str(workflow_artifact.id),
             initial_analysis=True,
         )
 
@@ -394,6 +387,7 @@ class PregnancyPlanIntakeAdvanceToolHandler:
         self.runtime_service = runtime_service
 
     async def __call__(self, context: ToolHandlerContext) -> ToolHandlerResult | dict[str, Any]:
+        _require_pregnancy_plan_thread_id(context)
         workflow = _dict(context.args, "runtime_workflow_context")
         action = _text(context.args, "action")
         if not workflow or not action:
@@ -415,10 +409,8 @@ class PregnancyPlanIntakeAdvanceToolHandler:
 
         completed_followup = pregnancy_plan_current_followup(workflow)
         if action == "mark_checkup_records_uploaded" and (_optional_int(context.args, "runtime_checkup_attachment_count") or 0) < 1:
-            workflow_artifact = await self._persist_workflow(context=context, workflow=workflow)
             return _pregnancy_plan_workflow_result(
                 workflow,
-                workflow_artifact_id=str(workflow_artifact.id),
                 status_override="checkup_attachment_required",
             )
 
@@ -448,22 +440,14 @@ class PregnancyPlanIntakeAdvanceToolHandler:
                 message="Pregnancy plan intake action is not valid for the current step.",
                 status=409,
             ) from exc
-        workflow_artifact = await self._persist_workflow(context=context, workflow=advanced)
+        await _upsert_pregnancy_plan_workflow(
+            runtime_service=self.runtime_service,
+            context=context,
+            workflow=advanced,
+        )
         return _pregnancy_plan_workflow_result(
             advanced,
-            workflow_artifact_id=str(workflow_artifact.id),
             completed_followup=completed_followup,
-        )
-
-    async def _persist_workflow(self, *, context: ToolHandlerContext, workflow: dict[str, Any]) -> AgentArtifact:
-        return await self.runtime_service.create_artifact(
-            owner_user_id=context.actor.user_id,
-            run_id=context.run_id,
-            artifact_type=PREGNANCY_PLAN_WORKFLOW_ARTIFACT_TYPE,
-            schema_version=PREGNANCY_PLAN_WORKFLOW_SCHEMA_VERSION,
-            status="created",
-            payload=workflow,
-            emit_event=False,
         )
 
 
@@ -1515,6 +1499,7 @@ class PregnancyPlanProposeToolHandler:
         self.runtime_service = runtime_service
 
     async def __call__(self, context: ToolHandlerContext) -> ToolHandlerResult | dict[str, Any]:
+        _require_pregnancy_plan_thread_id(context)
         urgent_signal_ids = pregnancy_plan_urgent_signal_ids(
             {
                 "additional_info": "\n".join(
@@ -1583,21 +1568,20 @@ class PregnancyPlanProposeToolHandler:
             payload=artifact_payload,
             emit_event=False,
         )
-        await self.runtime_service.create_artifact(
-            owner_user_id=context.actor.user_id,
-            run_id=context.run_id,
-            artifact_type=PREGNANCY_PLAN_WORKFLOW_ARTIFACT_TYPE,
-            schema_version=PREGNANCY_PLAN_WORKFLOW_SCHEMA_VERSION,
-            status="created",
-            payload={
+        workflow = _dict(context.args, "runtime_workflow_context")
+        workflow.update(
+            {
                 "phase": PregnancyPlanPhase.READY_TO_GENERATE.value,
                 "consumed_by_action_id": str(action.id),
-                "source_analysis_artifact_id": _text(runtime_plan_context, "analysis_artifact_id"),
                 "source_form_artifact_id": _text(runtime_plan_context, "source_form_artifact_id"),
                 "source_form_submission_id": _text(runtime_plan_context, "source_form_submission_id"),
                 "form_id": PREGNANCY_PLAN_INTAKE_FORM_ID,
-            },
-            emit_event=False,
+            }
+        )
+        await _upsert_pregnancy_plan_workflow(
+            runtime_service=self.runtime_service,
+            context=context,
+            workflow=workflow,
         )
         return {
             **_proposal_result(action=action, preview_payload=preview_payload),
@@ -2266,7 +2250,7 @@ def _pregnancy_plan_apply_payload(args: dict[str, Any]) -> dict[str, Any]:
     plan_context = normalize_pregnancy_plan_generation_context(generation_context)
     lineage = {
         key: _text(runtime_plan_context, key)
-        for key in ("analysis_artifact_id", "source_form_artifact_id", "source_form_submission_id")
+        for key in ("workflow_state_id", "source_form_artifact_id", "source_form_submission_id")
         if _text(runtime_plan_context, key)
     }
     payload: dict[str, Any] = {"plan_context": plan_context}
@@ -2288,7 +2272,7 @@ def _pregnancy_plan_action_idempotency_key(
     lineage = _dict(payload, "lineage")
     identity = {
         "run_id": str(run_id),
-        "analysis_artifact_id": _text(lineage, "analysis_artifact_id"),
+        "workflow_state_id": _text(lineage, "workflow_state_id"),
         "source_form_submission_id": _text(lineage, "source_form_submission_id"),
     }
     canonical = json.dumps(identity, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
@@ -2308,7 +2292,6 @@ def _existing_pregnancy_plan_result(runtime_plan_context: dict[str, Any]) -> dic
 def _pregnancy_plan_workflow_result(
     workflow: dict[str, Any],
     *,
-    workflow_artifact_id: str = "",
     completed_followup: dict[str, Any] | None = None,
     status_override: str = "",
     initial_analysis: bool = False,
@@ -2379,7 +2362,6 @@ def _pregnancy_plan_workflow_result(
         "trusted_pregnancy_plan_intake": {
             "source": "verified_form_submission",
             "workflow_phase": phase,
-            "workflow_artifact_id": workflow_artifact_id,
             "facts": model_facts,
             "analysis": analysis_for_model,
             "asked_followups": asked_followups,
@@ -2397,6 +2379,42 @@ def _pregnancy_plan_workflow_result(
                 "content": json.dumps(model_payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
             },
         ),
+    )
+
+
+def _require_pregnancy_plan_thread_id(context: ToolHandlerContext) -> UUID:
+    if context.thread_id is None:
+        raise ApiError(code="missing_thread_context", message="Pregnancy planning requires a thread context.", status=409)
+    return context.thread_id
+
+
+async def _upsert_pregnancy_plan_workflow(
+    *,
+    runtime_service: AgentRuntimeService,
+    context: ToolHandlerContext,
+    workflow: dict[str, Any],
+) -> AgentWorkflowState:
+    thread_id = _require_pregnancy_plan_thread_id(context)
+    phase = _text(workflow, "phase") or PregnancyPlanPhase.COLLECTING_INTAKE.value
+    if workflow.get("interrupted_by_safety_signal") is True:
+        status = "failed"
+    elif _text(workflow, "consumed_by_action_id"):
+        status = "completed"
+    elif phase == PregnancyPlanPhase.COLLECTING_INTAKE.value:
+        status = "collecting"
+    elif phase == PregnancyPlanPhase.READY_TO_GENERATE.value:
+        status = "ready"
+    else:
+        status = "waiting"
+    return await runtime_service.upsert_workflow_state(
+        owner_user_id=context.actor.user_id,
+        thread_id=thread_id,
+        run_id=context.run_id,
+        workflow_type=PREGNANCY_PLAN_WORKFLOW_TYPE,
+        status=status,
+        schema_version=PREGNANCY_PLAN_WORKFLOW_SCHEMA_VERSION,
+        state=workflow,
+        active_step="" if status in {"completed", "failed"} else phase,
     )
 
 

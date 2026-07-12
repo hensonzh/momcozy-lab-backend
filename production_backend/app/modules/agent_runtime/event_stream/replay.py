@@ -117,11 +117,6 @@ def _action(action: AgentAction) -> dict[str, Any]:
 
 
 def _artifact(artifact: AgentArtifact) -> dict[str, Any]:
-    payload = (
-        _pregnancy_plan_workflow_replay_payload(artifact.payload)
-        if artifact.artifact_type == "pregnancy_plan_workflow"
-        else _redact_replay_value(artifact.payload)
-    )
     return {
         "id": str(artifact.id),
         "run_id": str(artifact.run_id),
@@ -129,31 +124,30 @@ def _artifact(artifact: AgentArtifact) -> dict[str, Any]:
         "artifact_type": artifact.artifact_type,
         "schema_version": artifact.schema_version,
         "status": artifact.status,
-        "payload": payload,
+        "payload": _redact_replay_value(artifact.payload),
         "raw_payload_ref": artifact.raw_payload_ref,
         "created_at": artifact.created_at.isoformat() if artifact.created_at else None,
         "updated_at": artifact.updated_at.isoformat() if artifact.updated_at else None,
     }
 
 
-def _pregnancy_plan_workflow_replay_payload(payload: Any) -> dict[str, Any]:
-    if not isinstance(payload, dict):
+def _pregnancy_plan_workflow_replay_state(state: Any) -> dict[str, Any]:
+    if not isinstance(state, dict):
         return {}
     projected = {
-        key: _redact_replay_value(payload.get(key))
+        key: _redact_replay_value(state.get(key))
         for key in (
             "phase",
             "form_id",
             "source_form_artifact_id",
             "source_form_submission_id",
             "analysis_run_id",
-            "source_analysis_artifact_id",
             "consumed_by_action_id",
             "interrupted_by_safety_signal",
         )
-        if payload.get(key) not in (None, "")
+        if state.get(key) not in (None, "")
     }
-    analysis = payload.get("analysis")
+    analysis = state.get("analysis")
     focuses = analysis.get("focuses") if isinstance(analysis, dict) else None
     if isinstance(focuses, list):
         focus_count = sum(1 for focus in focuses if isinstance(focus, dict) and str(focus.get("id") or "").strip())
@@ -177,6 +171,11 @@ def _checkpoint(checkpoint: AgentContextCheckpoint) -> dict[str, Any]:
 
 
 def _workflow_state(workflow_state: AgentWorkflowState) -> dict[str, Any]:
+    state = (
+        _pregnancy_plan_workflow_replay_state(workflow_state.state)
+        if workflow_state.workflow_type == "pregnancy_plan"
+        else _redact_replay_value(workflow_state.state)
+    )
     return {
         "id": str(workflow_state.id),
         "thread_id": str(workflow_state.thread_id),
@@ -186,7 +185,7 @@ def _workflow_state(workflow_state: AgentWorkflowState) -> dict[str, Any]:
         "status": workflow_state.status,
         "schema_version": workflow_state.schema_version,
         "active_step": workflow_state.active_step,
-        "state": _redact_replay_value(workflow_state.state),
+        "state": state,
         "created_at": workflow_state.created_at.isoformat() if workflow_state.created_at else None,
         "updated_at": workflow_state.updated_at.isoformat() if workflow_state.updated_at else None,
     }
