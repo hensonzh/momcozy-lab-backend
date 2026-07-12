@@ -51,7 +51,6 @@ from ..agents.cozymate_service_agent.tools.pregnancy_plan_flow import (
     pregnancy_plan_urgent_signal_ids,
 )
 from ..agents.main_coordinator_agent import (
-    AgentId,
     RoutingPlan,
     plan_current_request,
 )
@@ -64,7 +63,7 @@ from ..event_semantics import (
     run_progress_payload,
     with_tool_event_semantic,
 )
-from ..graphs import AgentGraphCheckpointStore, AgentGraphRegistry, default_graph_registry
+from ..graphs import AgentGraphRegistry, default_graph_registry
 from ..memory.service import AgentMemoryService
 from ..models import AgentAction, AgentArtifact, AgentEvent, AgentMessage, AgentRun, AgentWorkflowState
 from ..payloads import DEFAULT_MAX_INLINE_PAYLOAD_BYTES, maybe_externalize_json_payload
@@ -148,8 +147,6 @@ class AgentRuntimeExecutor:
         repository: AgentRuntimeRepository,
         sdk_runner: AgentModelRunner,
         graph_registry: AgentGraphRegistry | None = None,
-        checkpoint_store: AgentGraphCheckpointStore | None = None,
-        state_store: AgentRuntimeStateStore | None = None,
         tool_registry: ToolContractRegistry | None = None,
         tool_namespace_registry: ToolNamespaceRegistry | None = None,
         tool_executor: ToolExecutor | None = None,
@@ -170,8 +167,7 @@ class AgentRuntimeExecutor:
         self.repository = repository
         self.sdk_runner = sdk_runner
         self.graph_registry = graph_registry or default_graph_registry()
-        self.checkpoint_store = checkpoint_store
-        self.state_store = state_store or AgentRuntimeStateStore(repository=repository)
+        self.state_store = AgentRuntimeStateStore(repository=repository)
         self.tool_registry = tool_registry or default_tool_registry()
         self.tool_namespace_registry = tool_namespace_registry or default_tool_namespace_registry(self.tool_registry)
         self.tool_executor = tool_executor
@@ -411,25 +407,10 @@ class AgentRuntimeExecutor:
                 event_type="action.confirmation_required",
                 payload=_action_confirmation_event_payload(action),
             )
-            await self._save_checkpoint(
-                run=run,
-                node_name="confirmation_interrupt",
-                current_user_message_id=str(turn_context.current_message.id),
-                state_summary={
-                    "context_refs": [],
-                    "pending_action_id": str(action.id),
-                    "final_message_id": None,
-                    "timings_ms": timings_ms,
-                },
-            )
             self._log_executor_timing(run=run, status="waiting_for_confirmation", timings_ms=timings_ms)
             return AgentRunExecutionResult(status="waiting_for_confirmation", pending_action_id=action.id)
         pending_timings_ms = _timings_with_total(turn_context.timings_ms, run_started_at)
-        pending_action = await self._pending_confirmation_action_from_tool(
-            run=run,
-            current_user_message_id=str(turn_context.current_message.id),
-            timings_ms=pending_timings_ms,
-        )
+        pending_action = await self._pending_confirmation_action_from_tool(run=run)
         if pending_action is not None:
             self._log_executor_timing(run=run, status="waiting_for_confirmation", timings_ms=pending_timings_ms)
             return AgentRunExecutionResult(status="waiting_for_confirmation", pending_action_id=pending_action.id)
@@ -454,24 +435,6 @@ class AgentRuntimeExecutor:
         if not final_text:
             raise ApiError(code="empty_agent_response", message="Agent runtime returned an empty response.", status=502)
         finish_timings_ms = _timings_with_total(turn_context.timings_ms, run_started_at)
-        await self._save_checkpoint(
-            run=run,
-            node_name="finish",
-            current_user_message_id=str(turn_context.current_message.id),
-            state_summary={
-                "context_refs": [],
-                "pending_action_id": None,
-                "final_message_id": None,
-                "final_response_ready": True,
-                "timings_ms": finish_timings_ms,
-            },
-        )
-        await self._upsert_run_summary(
-            run=run,
-            current_message=turn_context.current_message,
-            result=result,
-            final_text=final_text,
-        )
         quick_reply_started_at = perf_counter()
         quick_replies = (
             []
@@ -1196,8 +1159,6 @@ class AgentRuntimeExecutor:
         self,
         *,
         run: AgentRun,
-        current_user_message_id: str,
-        timings_ms: dict[str, float],
     ) -> AgentAction | None:
         if self.tool_executor is None:
             return None
@@ -1205,17 +1166,6 @@ class AgentRuntimeExecutor:
         pending_action = next((action for action in reversed(actions) if action.status == "confirmation_required"), None)
         if pending_action is None:
             return None
-        await self._save_checkpoint(
-            run=run,
-            node_name="confirmation_interrupt",
-            current_user_message_id=current_user_message_id,
-            state_summary={
-                "context_refs": [],
-                "pending_action_id": str(pending_action.id),
-                "final_message_id": None,
-                "timings_ms": dict(timings_ms),
-            },
-        )
         return pending_action
 
     async def _append_event(self, *, thread_id: UUID, run_id: UUID, event_type: str, payload: dict[str, Any]) -> AgentEvent:
@@ -1347,28 +1297,6 @@ class AgentRuntimeExecutor:
             ),
         )
 
-    async def _save_checkpoint(
-        self,
-        *,
-        run: AgentRun,
-        node_name: str,
-        current_user_message_id: str,
-        state_summary: dict[str, Any],
-    ) -> None:
-        if self.checkpoint_store is None:
-            return
-        await self.checkpoint_store.save_run_checkpoint(
-            run=run,
-            state_summary={
-                "node_name": node_name,
-                "run_id": str(run.id),
-                "thread_id": str(run.thread_id),
-                "actor_user_id": str(run.actor_user_id),
-                "current_user_message_id": current_user_message_id,
-                **state_summary,
-            },
-        )
-
     async def _memory_projection(self, *, run: AgentRun) -> list[dict[str, Any]]:
         if self.memory_service is None:
             return []
@@ -1451,58 +1379,6 @@ class AgentRuntimeExecutor:
             service_skill_id=skill_id,
         )
 
-    async def _upsert_run_summary(
-        self,
-        *,
-        run: AgentRun,
-        current_message: AgentMessage,
-        result: Any,
-        final_text: str,
-    ) -> None:
-        tool_outputs = await self.repository.list_tool_outputs_for_run(run_id=run.id)
-        actions = await self.repository.list_actions_for_run(run_id=run.id)
-        artifacts = await self.repository.list_artifacts_for_run(run_id=run.id)
-        loaded_service_skills = _loaded_service_skill_summaries(
-            tool_outputs=tool_outputs, result_tool_calls=getattr(result, "tool_calls", [])
-        )
-        service_skill_id = loaded_service_skills[-1]["service_skill_id"] if loaded_service_skills else AgentId.COZYMATE_SERVICE_AGENT.value
-        payload = {
-            "user_goal": _compact_text(_message_text(current_message), max_chars=500),
-            "assistant_conclusion": _compact_text(final_text, max_chars=1000),
-            "tools_used": _tool_names_from_summary_sources(tool_outputs=tool_outputs, result_tool_calls=getattr(result, "tool_calls", [])),
-            "tool_facts": _tool_fact_projection(tool_outputs),
-            "loaded_service_skills": loaded_service_skills,
-            "actions": [
-                {
-                    "action_id": str(action.id),
-                    "action_type": action.action_type,
-                    "status": action.status,
-                    "target_type": action.target_type,
-                }
-                for action in actions[:8]
-            ],
-            "artifacts": [
-                {
-                    "artifact_id": str(artifact.id),
-                    "artifact_type": artifact.artifact_type,
-                    "status": artifact.status,
-                }
-                for artifact in artifacts[:8]
-            ],
-        }
-        await self.repository.upsert_run_summary(
-            run_id=run.id,
-            thread_id=run.thread_id,
-            owner_user_id=run.actor_user_id,
-            service_skill_id=service_skill_id,
-            summary_type="run_fact",
-            schema_version="v1",
-            payload=payload,
-            source_message_ids=[str(current_message.id)],
-            source_tool_call_ids=[str(tool_call.id) for tool_call, _output in tool_outputs],
-        )
-
-
 def _history_before(*, messages: list[AgentMessage], before_sequence: int) -> list[dict[str, Any]]:
     return [_to_model_message(message) for message in _history_messages_before(messages=messages, before_sequence=before_sequence)]
 
@@ -1549,38 +1425,6 @@ def _load_service_skill_output(
         },
         "recommended_tools": recommended_tools,
         "business_facts": business_facts,
-    }
-
-
-def _model_visible_state_projection(
-    *,
-    resident_loaded_service_skill: dict[str, Any] | None,
-    expired_loaded_service_skills: list[dict[str, Any]],
-) -> dict[str, Any]:
-    return {
-        "service_skills": {
-            "resident": _model_visible_resident_service_skill(resident_loaded_service_skill),
-            "expired": [_model_visible_expired_service_skill(item) for item in expired_loaded_service_skills],
-        },
-    }
-
-
-def _model_visible_resident_service_skill(resident: dict[str, Any] | None) -> dict[str, Any] | None:
-    if not resident:
-        return None
-    skill = _dict(resident, "skill")
-    return {
-        "service_skill_id": _text(resident, "service_skill_id"),
-        "skill_version": _text(resident, "skill_version"),
-        "instructions": _text(skill, "instructions"),
-        "recommended_tools": _list_of_dicts(resident, "recommended_tools"),
-    }
-
-
-def _model_visible_expired_service_skill(expired: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "service_skill_id": _text(expired, "service_skill_id"),
-        "instruction": _text(expired, "instruction"),
     }
 
 
@@ -1646,7 +1490,7 @@ def _has_completed_pregnancy_plan_analysis(tool_calls: list[dict[str, Any]]) -> 
 
 
 def _timings_with_total(timings_ms: dict[str, float], run_started_at: float) -> dict[str, float]:
-    return {**timings_ms, "total_before_finish_checkpoint": _elapsed_ms(run_started_at)}
+    return {**timings_ms, "total_before_finalize": _elapsed_ms(run_started_at)}
 
 
 SERVICE_SKILL_RECOMMENDED_TOOL_CONTRACTS: dict[ServiceSkillId, tuple[str, ...]] = {
@@ -1773,261 +1617,6 @@ def _current_message_image_inputs(message: AgentMessage) -> list[dict[str, str]]
     return image_inputs
 
 
-RECENT_RUN_FACT_KEYS = ("user_goal", "assistant_conclusion", "tool_facts", "actions", "artifacts")
-
-
-def _recent_run_fact_projection_items(
-    *,
-    summaries: list[Any],
-    selected_history_message_ids: set[str],
-    selected_history_assistant_run_ids: set[str],
-) -> list[dict[str, Any]]:
-    items: list[dict[str, Any]] = []
-    for summary in summaries:
-        item = _run_fact_projection_item(
-            summary,
-            selected_history_message_ids=selected_history_message_ids,
-            selected_history_assistant_run_ids=selected_history_assistant_run_ids,
-        )
-        if item is not None:
-            items.append(item)
-    return items
-
-
-def _run_fact_projection_item(
-    summary: Any,
-    *,
-    selected_history_message_ids: set[str],
-    selected_history_assistant_run_ids: set[str],
-) -> dict[str, Any] | None:
-    payload = summary.payload if isinstance(summary.payload, dict) else {}
-    user_goal_visible = _summary_source_is_visible_in_history(
-        summary=summary,
-        selected_history_message_ids=selected_history_message_ids,
-    )
-    payload = _recent_fact_payload(
-        payload,
-        user_goal_visible=user_goal_visible,
-        assistant_conclusion_visible=str(summary.run_id) in selected_history_assistant_run_ids,
-    )
-    if not payload:
-        return None
-    return {
-        "service_skill_id": summary.service_skill_id,
-        "created_at": _iso_or_empty(getattr(summary, "created_at", None)),
-        "facts": _compact_mapping(payload, max_items=8, max_chars=2400),
-    }
-
-
-def _summary_source_is_visible_in_history(*, summary: Any, selected_history_message_ids: set[str]) -> bool:
-    source_message_ids = getattr(summary, "source_message_ids", None)
-    if not isinstance(source_message_ids, (list, tuple, set)):
-        return False
-    return any(str(message_id) in selected_history_message_ids for message_id in source_message_ids)
-
-
-def _recent_fact_payload(
-    payload: dict[str, Any],
-    *,
-    user_goal_visible: bool,
-    assistant_conclusion_visible: bool,
-) -> dict[str, Any]:
-    compact_payload: dict[str, Any] = {}
-    for key in RECENT_RUN_FACT_KEYS:
-        if key == "user_goal" and user_goal_visible:
-            continue
-        if key == "assistant_conclusion" and assistant_conclusion_visible:
-            continue
-        value = payload.get(key)
-        if value in (None, "", [], {}):
-            continue
-        compact_payload[key] = value
-    return compact_payload
-
-
-def _resident_loaded_service_skill_context(
-    *,
-    summaries: list[Any],
-    service_skill_registry: AgentServiceSkillRegistry,
-    tool_registry: ToolContractRegistry,
-    tool_namespace_registry: ToolNamespaceRegistry,
-    ttl_turns: int,
-) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
-    latest = _latest_loaded_service_skill_record(summaries)
-    if latest is None:
-        return None, []
-    service_skill_id = _text(latest["item"], "service_skill_id")
-    if not service_skill_id:
-        return None, []
-    turns_since_loaded = int(latest["turns_since_loaded"])
-    loaded_at = _text(latest["item"], "loaded_at")
-    skill_version = _text(latest["item"], "skill_version")
-    last_loaded_run_id = str(latest["summary"].run_id)
-    expired = {
-        "service_skill_id": service_skill_id,
-        "skill_version": skill_version,
-        "last_loaded_run_id": last_loaded_run_id,
-        "loaded_at": loaded_at,
-        "expired_reason": "turn_ttl_exceeded",
-        "instruction": (
-            f"{service_skill_id} was loaded before, but its SKILL.md has been removed from context. "
-            "Call load_service_skill if this turn still needs that skill."
-        ),
-    }
-    if ttl_turns <= 0 or turns_since_loaded >= ttl_turns:
-        return None, [expired]
-    try:
-        service_skill = service_skill_registry.get(service_skill_id)
-        skill_id = ServiceSkillId(service_skill_id)
-    except (KeyError, ValueError):
-        return None, [expired]
-    recommended_tools = _recommended_tools_for_service_skill(
-        tool_registry=tool_registry,
-        tool_namespace_registry=tool_namespace_registry,
-        skill_id=skill_id,
-    )
-    return (
-        {
-            "service_skill_id": service_skill.service_skill_id,
-            "skill_version": skill_version or service_skill.version,
-            "last_loaded_run_id": last_loaded_run_id,
-            "loaded_at": loaded_at,
-            "turns_since_loaded": turns_since_loaded,
-            "remaining_turns": ttl_turns - turns_since_loaded,
-            "instruction": (
-                "This SKILL.md is currently available in context. "
-                "Use it only if the current user message still belongs to this service flow."
-            ),
-            "skill": {
-                "service_skill_id": service_skill.service_skill_id,
-                "name": service_skill.name,
-                "description": service_skill.description,
-                "instructions": service_skill.prompt_block(),
-            },
-            "recommended_tools": recommended_tools,
-        },
-        [],
-    )
-
-
-def _latest_loaded_service_skill_record(summaries: list[Any]) -> dict[str, Any] | None:
-    for index in range(len(summaries) - 1, -1, -1):
-        summary = summaries[index]
-        payload = summary.payload if isinstance(summary.payload, dict) else {}
-        loaded_skills = payload.get("loaded_service_skills")
-        if not isinstance(loaded_skills, list):
-            continue
-        for item in reversed(loaded_skills):
-            if not isinstance(item, dict) or not _text(item, "service_skill_id"):
-                continue
-            return {
-                "summary": summary,
-                "item": item,
-                "turns_since_loaded": len(summaries) - 1 - index,
-            }
-    return None
-
-
-def _loaded_service_skill_summaries(*, tool_outputs: list[tuple[Any, Any]], result_tool_calls: Any) -> list[dict[str, Any]]:
-    loaded: list[dict[str, Any]] = []
-    for tool_call, output in tool_outputs:
-        if str(getattr(tool_call, "tool_name", "") or "") != LOAD_SERVICE_SKILL_TOOL_NAME:
-            continue
-        safe_output = output.safe_output if isinstance(output.safe_output, dict) else {}
-        item = _loaded_service_skill_summary_from_output(safe_output)
-        if item:
-            loaded.append(item)
-    if isinstance(result_tool_calls, list):
-        for call in result_tool_calls:
-            if not isinstance(call, dict) or _text(call, "tool_name") != LOAD_SERVICE_SKILL_TOOL_NAME:
-                continue
-            safe_output = call.get("safe_output")
-            item = _loaded_service_skill_summary_from_output(safe_output if isinstance(safe_output, dict) else {})
-            if item and item not in loaded:
-                loaded.append(item)
-    return loaded
-
-
-def _loaded_service_skill_summary_from_output(output: dict[str, Any]) -> dict[str, Any]:
-    service_skill_id = _text(output, "service_skill_id")
-    if not service_skill_id:
-        return {}
-    return {
-        "service_skill_id": service_skill_id,
-        "skill_version": _text(output, "skill_version"),
-        "loaded_at": _text(output, "loaded_at"),
-    }
-
-
-def _resident_loaded_service_skill_summary(resident_loaded_service_skill: dict[str, Any] | None) -> dict[str, Any]:
-    if not resident_loaded_service_skill:
-        return {}
-    return {
-        "service_skill_id": _text(resident_loaded_service_skill, "service_skill_id"),
-        "skill_version": _text(resident_loaded_service_skill, "skill_version"),
-        "last_loaded_run_id": _text(resident_loaded_service_skill, "last_loaded_run_id"),
-        "loaded_at": _text(resident_loaded_service_skill, "loaded_at"),
-        "turns_since_loaded": int(resident_loaded_service_skill.get("turns_since_loaded") or 0),
-        "remaining_turns": int(resident_loaded_service_skill.get("remaining_turns") or 0),
-    }
-
-
-def _tool_names_from_summary_sources(
-    *,
-    tool_outputs: list[tuple[Any, Any]],
-    result_tool_calls: Any,
-) -> list[str]:
-    names = {str(tool_call.tool_name) for tool_call, _output in tool_outputs if str(getattr(tool_call, "tool_name", "") or "")}
-    if isinstance(result_tool_calls, list):
-        for item in result_tool_calls:
-            if isinstance(item, dict):
-                tool_name = _text(item, "tool_name")
-                if tool_name:
-                    names.add(tool_name)
-    return sorted(names)
-
-
-def _tool_fact_projection(tool_outputs: list[tuple[Any, Any]]) -> list[dict[str, Any]]:
-    facts: list[dict[str, Any]] = []
-    for tool_call, output in tool_outputs[:6]:
-        if str(getattr(tool_call, "tool_name", "") or "") == LOAD_SERVICE_SKILL_TOOL_NAME:
-            continue
-        safe_output = output.safe_output if isinstance(output.safe_output, dict) else {}
-        facts.append(
-            {
-                "tool_call_id": str(tool_call.id),
-                "tool_name": str(tool_call.tool_name),
-                "status": str(tool_call.status),
-                "safe_output": _compact_mapping(safe_output, max_items=8, max_chars=1200),
-            }
-        )
-    return facts
-
-
-def _compact_mapping(payload: dict[str, Any], *, max_items: int, max_chars: int) -> dict[str, Any]:
-    compacted: dict[str, Any] = {}
-    for key, value in list(payload.items())[:max_items]:
-        compacted[str(key)] = _compact_value(value=value, max_chars=max_chars)
-    return compacted
-
-
-def _compact_value(*, value: Any, max_chars: int) -> Any:
-    if isinstance(value, str):
-        return _compact_text(value, max_chars=max_chars)
-    if isinstance(value, int | float | bool) or value is None:
-        return value
-    if isinstance(value, dict):
-        return _compact_mapping(value, max_items=8, max_chars=max_chars)
-    if isinstance(value, list):
-        return [_compact_value(value=item, max_chars=max_chars) for item in value[:8]]
-    return _compact_text(str(value), max_chars=max_chars)
-
-
-def _compact_text(value: str, *, max_chars: int) -> str:
-    stripped = value.strip()
-    return stripped if len(stripped) <= max_chars else f"{stripped[:max_chars]}..."
-
-
 def _user_context(*, current_message: AgentMessage, now: datetime) -> dict[str, Any]:
     content = current_message.content if isinstance(current_message.content, dict) else {}
     client_context = project_agent_client_context(content.get("client_context"))
@@ -2076,10 +1665,6 @@ def _aware_datetime(value: datetime) -> datetime:
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
-
-
-def _iso_or_empty(value: Any) -> str:
-    return value.isoformat() if hasattr(value, "isoformat") else ""
 
 
 def _message_text(message: AgentMessage) -> str:
