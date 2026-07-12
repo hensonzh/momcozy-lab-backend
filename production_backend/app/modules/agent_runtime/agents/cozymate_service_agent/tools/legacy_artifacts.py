@@ -547,6 +547,7 @@ def birth_plan_form_result(args: dict[str, Any]) -> dict[str, Any]:
             "description": "",
             "submit_label": "生成我的沟通卡",
             "fields": _fields_with_defaults(BIRTH_PLAN_FORM_FIELDS, default_values),
+            "default_values": _allowed_defaults(BIRTH_PLAN_FORM_FIELDS, default_values),
         },
     }
 

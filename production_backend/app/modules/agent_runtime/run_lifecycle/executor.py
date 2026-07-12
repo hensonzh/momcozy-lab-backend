@@ -62,6 +62,7 @@ from ..event_semantics import (
     with_tool_event_semantic,
 )
 from ..graphs import AgentGraphCheckpointStore, AgentGraphRegistry, default_graph_registry
+from ..facts import AgentFactCaptureService, AgentFactService, FactExtractionContext
 from ..memory.service import AgentMemoryService
 from ..models import AgentAction, AgentArtifact, AgentEvent, AgentMessage, AgentRun
 from ..payloads import DEFAULT_MAX_INLINE_PAYLOAD_BYTES, maybe_externalize_json_payload
@@ -91,6 +92,11 @@ FORM_TOOL_IDS = {
     "labor_communication_card_create": "birth_plan_card_intake",
 }
 FORM_CREATION_TOOL_NAMES = {"pregnancy.plan_intake.start", "birth_plan_form_create", "hospital_bag_form_create"}
+FORM_CREATION_IDS = {
+    "pregnancy.plan_intake.start": "birth_journey_basic_info_intake",
+    "hospital_bag_form_create": "hospital_bag_intake",
+    "birth_plan_form_create": "birth_plan_card_intake",
+}
 MARKDOWN_IMAGE_URL_PATTERN = re.compile(r"!\[[^\]]*\]\(\s*(?:<([^>]+)>|([^\s)]+))")
 MODEL_IMAGE_DATA_URL_PATTERN = re.compile(
     r"^data:image/(?:png|jpe?g|webp|gif);base64,",
@@ -151,6 +157,8 @@ class AgentRuntimeExecutor:
         business_facts_projector: BusinessFactsProjector | None = None,
         transient_stream: AgentTransientStream | None = None,
         quick_reply_finalizer: QuickReplyFinalizer | None = None,
+        fact_service: AgentFactService | None = None,
+        fact_capture_service: AgentFactCaptureService | None = None,
         input_builder: ModelInputBuilder | None = None,
         config: AgentRuntimeExecutorConfig | None = None,
         object_storage: ObjectStorage | None = None,
@@ -172,6 +180,8 @@ class AgentRuntimeExecutor:
         self.business_facts_projector = business_facts_projector
         self.transient_stream = transient_stream
         self.quick_reply_finalizer = quick_reply_finalizer
+        self.fact_service = fact_service
+        self.fact_capture_service = fact_capture_service
         self.input_builder = input_builder or ModelInputBuilder()
         self.config = config or AgentRuntimeExecutorConfig()
         self.object_storage = object_storage
@@ -233,12 +243,14 @@ class AgentRuntimeExecutor:
                     tool_catalog=tool_catalog,
                     prepared_turn=prepared_turn,
                 )
-            return await self._finalize_turn_result(
+            execution_result = await self._finalize_turn_result(
                 run=run,
                 turn_context=turn_context,
                 result=result,
                 run_started_at=run_started_at,
             )
+            await self._capture_current_user_facts(run=run, turn_context=turn_context)
+            return execution_result
         except Exception as exc:
             self._log_executor_timing(
                 run=run,
@@ -889,6 +901,12 @@ class AgentRuntimeExecutor:
             default_values = _birth_prep_form_default_values(facts)
             if contract_name != "pregnancy.plan_intake.start":
                 default_values = {key: value for key, value in default_values.items() if key == "due_date_or_week"}
+            if self.fact_service is not None:
+                stored_defaults = await self.fact_service.form_defaults(
+                    owner_user_id=run.actor_user_id,
+                    form_id=FORM_CREATION_IDS[contract_name],
+                )
+                default_values.update(stored_defaults)
             trusted_args = {"default_values": default_values} if default_values else {}
             if contract_name == "pregnancy.plan_intake.start":
                 workflow = await self._latest_pregnancy_plan_workflow(run=run)
@@ -904,6 +922,36 @@ class AgentRuntimeExecutor:
         if contract_name == IMAGE_INSPECT_TOOL_NAME:
             return {"visible_image_urls": list(self._run_visible_image_urls.get(run.id, ()))}
         return {}
+
+    async def _capture_current_user_facts(self, *, run: AgentRun, turn_context: _AgentTurnContext) -> None:
+        if self.fact_capture_service is None or self.fact_service is None:
+            return
+        try:
+            existing_facts = await self.fact_service.values(owner_user_id=run.actor_user_id)
+            dialogue = tuple(
+                (message.role, _message_text(message))
+                for message in turn_context.messages
+                if message.role in {"user", "assistant"}
+                and message.sequence <= turn_context.current_message.sequence
+                and _message_text(message)
+            )
+            await self.fact_capture_service.capture(
+                context=FactExtractionContext(
+                    owner_user_id=run.actor_user_id,
+                    run_id=run.id,
+                    source_message_id=turn_context.current_message.id,
+                    source_text=_message_text(turn_context.current_message),
+                    recent_dialogue=dialogue[-5:],
+                    existing_facts=existing_facts,
+                    observed_at=(
+                        turn_context.current_message.created_at
+                        if isinstance(turn_context.current_message.created_at, datetime)
+                        else self.clock()
+                    ),
+                )
+            )
+        except Exception:
+            LOGGER.warning("Turn fact extraction failed without failing the agent response.", exc_info=True)
 
     async def _birth_prep_business_facts(self, *, run: AgentRun) -> dict[str, Any]:
         cached = self._run_business_facts.setdefault(run.id, {}).get(ServiceSkillId.BIRTH_PREP)

@@ -168,7 +168,8 @@ def test_agent_runtime_service_verifies_form_submission_attachment_against_owned
         payload={"form": {"id": "hospital_bag_intake"}},
         raw_payload_ref="",
     )
-    service = AgentRuntimeService(repository=repository)
+    fact_service = FakeFactService()
+    service = AgentRuntimeService(repository=repository, fact_service=fact_service)
 
     asyncio.run(
         service.create_run(
@@ -196,6 +197,14 @@ def test_agent_runtime_service_verifies_form_submission_attachment_against_owned
         "verified": True,
     }
     assert UUID(attachment["submission_id"])
+    assert fact_service.form_submissions == [
+        {
+            "owner_user_id": owner_user_id,
+            "form_id": "hospital_bag_intake",
+            "values": {"due_date_or_week": "32周", "birth_path": "顺产"},
+            "submission_id": attachment["submission_id"],
+        }
+    ]
 
 
 def test_agent_runtime_service_rejects_form_submission_for_mismatched_artifact() -> None:
@@ -631,6 +640,14 @@ class FakeFileRepository:
         if self.file_object.id != file_id or self.file_object.owner_user_id != owner_user_id:
             return None
         return self.file_object
+
+
+class FakeFactService:
+    def __init__(self) -> None:
+        self.form_submissions = []
+
+    async def sync_form_submission(self, **kwargs):
+        self.form_submissions.append({key: value for key, value in kwargs.items() if key != "observed_at"})
 
 
 class FakeIdempotencyService:

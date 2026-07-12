@@ -2282,6 +2282,10 @@ def test_agent_runtime_executor_prefills_form_from_runtime_business_facts_withou
         handlers={"hospital_bag_form_create": capture_handler},
     )
     business_facts_projector = FakeBusinessFactsProjector(facts={"pregnancy": {"profile": {"delivery_date": "2026-09-18"}}})
+    fact_service = FakeFactService(
+        defaults={"due_date_or_week": "30周", "first_birth": "否", "feeding_intention": "混合喂养"}
+    )
+    fact_capture_service = FakeFactCaptureService()
     backend = ScriptedSdkBackend(
         [
             scripted_sdk_response(
@@ -2298,12 +2302,19 @@ def test_agent_runtime_executor_prefills_form_from_runtime_business_facts_withou
             tool_registry=registry,
             tool_executor=tool_executor,
             business_facts_projector=business_facts_projector,
+            fact_service=fact_service,
+            fact_capture_service=fact_capture_service,
         ).execute(run=run)
     )
 
     assert repository.tool_call.safe_args == {}
-    assert captured_args == {"default_values": {"due_date_or_week": "2026-09-18"}}
+    assert captured_args == {
+        "default_values": {"due_date_or_week": "30周", "feeding_intention": "混合喂养", "first_birth": "否"}
+    }
     assert business_facts_projector.calls[0]["service_skill_id"] == ServiceSkillId.BIRTH_PREP
+    assert fact_service.requested_form_ids == ["hospital_bag_intake"]
+    assert fact_capture_service.contexts[0].source_message_id == current_user.id
+    assert fact_capture_service.contexts[0].source_text == "开始准备待产包"
 
 
 def test_pregnancy_runtime_plan_context_ignores_active_non_pregnancy_plans() -> None:
@@ -3155,6 +3166,28 @@ class FakeToolExecutor:
             model_context=self.model_context,
             model_output=self.model_output,
         )
+
+
+class FakeFactService:
+    def __init__(self, *, defaults=None, values=None) -> None:
+        self.defaults = defaults or {}
+        self.fact_values = values or {}
+        self.requested_form_ids = []
+
+    async def form_defaults(self, *, owner_user_id, form_id):
+        self.requested_form_ids.append(form_id)
+        return dict(self.defaults)
+
+    async def values(self, *, owner_user_id):
+        return dict(self.fact_values)
+
+
+class FakeFactCaptureService:
+    def __init__(self) -> None:
+        self.contexts = []
+
+    async def capture(self, *, context):
+        self.contexts.append(context)
 
 
 class FakeToolExecutionResult:

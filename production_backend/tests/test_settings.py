@@ -11,6 +11,8 @@ def test_settings_use_current_openai_model_defaults() -> None:
 
     assert settings.openai_model == "gpt-5.6-terra"
     assert settings.agent_quick_reply_model == "gpt-5.4-nano"
+    assert settings.agent_fact_extraction_enabled is True
+    assert settings.agent_fact_extraction_model == "gpt-5.4-nano"
     assert settings.agent_memory_consolidation_model == "gpt-5.4-nano"
     assert settings.agent_memory_consolidation_enabled is False
     assert settings.vision_openai_model == "gpt-5.4-mini"
@@ -126,6 +128,10 @@ def test_settings_from_env_reads_agent_worker_controls(monkeypatch: pytest.Monke
     monkeypatch.setenv("OPENAI_AGENT_PROMPT_VERSION", "prompt-v2")
     monkeypatch.setenv("AGENT_QUICK_REPLY_MODEL", "quick-reply-test")
     monkeypatch.setenv("AGENT_QUICK_REPLY_TIMEOUT_SECONDS", "0.8")
+    monkeypatch.setenv("AGENT_FACT_EXTRACTION_ENABLED", "true")
+    monkeypatch.setenv("AGENT_FACT_EXTRACTION_MODEL", "fact-test")
+    monkeypatch.setenv("AGENT_FACT_EXTRACTION_TIMEOUT_SECONDS", "1.5")
+    monkeypatch.setenv("AGENT_FACT_EXTRACTION_VERSION", "fact-v2")
 
     settings = Settings.from_env()
 
@@ -146,6 +152,10 @@ def test_settings_from_env_reads_agent_worker_controls(monkeypatch: pytest.Monke
     assert settings.openai_agent_prompt_version == "prompt-v2"
     assert settings.agent_quick_reply_model == "quick-reply-test"
     assert settings.agent_quick_reply_timeout_seconds == 0.8
+    assert settings.agent_fact_extraction_enabled is True
+    assert settings.agent_fact_extraction_model == "fact-test"
+    assert settings.agent_fact_extraction_timeout_seconds == 1.5
+    assert settings.agent_fact_extraction_version == "fact-v2"
 
 
 def test_settings_from_env_reads_memory_consolidation_controls(monkeypatch: pytest.MonkeyPatch) -> None:

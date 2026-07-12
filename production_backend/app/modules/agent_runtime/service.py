@@ -13,6 +13,7 @@ from ..audit import IdempotencyKey, IdempotencyService, parse_idempotency_respon
 from .actions.executor import AgentActionExecutor
 from .actions.policy import AgentActionPolicy, action_presentation_payload
 from .client_context import sanitize_agent_client_context
+from .facts.service import AgentFactService
 from .run_lifecycle.controls import AgentRunControls
 from .models import AgentAction, AgentArtifact, AgentEvent, AgentRun, AgentThread
 from .repository import AgentRuntimeRepository
@@ -41,6 +42,7 @@ class AgentRuntimeService:
         file_repository: Any | None = None,
         controls: AgentRunControls | None = None,
         action_policy: AgentActionPolicy | None = None,
+        fact_service: AgentFactService | None = None,
     ) -> None:
         self.repository = repository
         self.idempotency_service = idempotency_service
@@ -48,6 +50,7 @@ class AgentRuntimeService:
         self.file_repository = file_repository
         self.controls = controls
         self.action_policy = action_policy or AgentActionPolicy()
+        self.fact_service = fact_service
 
     async def create_thread(
         self,
@@ -144,6 +147,11 @@ class AgentRuntimeService:
             content=message_content,
             status="completed",
         )
+        await self._sync_verified_form_facts(
+            actor_user_id=actor_user_id,
+            attachments=safe_attachments,
+            observed_at=message_record.created_at if isinstance(message_record.created_at, datetime) else _utcnow(),
+        )
         await self.repository.touch_thread(thread=thread, updated_at=_utcnow())
 
         await self._append_event(
@@ -177,6 +185,29 @@ class AgentRuntimeService:
             self._register_run_queue_wakeup(run_id=run.id)
         await self._complete_idempotency(idempotency_record=idempotency_record, response_ref=str(run.id))
         return run
+
+    async def _sync_verified_form_facts(
+        self,
+        *,
+        actor_user_id: UUID,
+        attachments: list[dict[str, Any]],
+        observed_at: datetime,
+    ) -> None:
+        if self.fact_service is None:
+            return
+        for attachment in attachments:
+            if attachment.get("type") != "form_submission" or attachment.get("verified") is not True:
+                continue
+            values = attachment.get("values")
+            if not isinstance(values, dict):
+                continue
+            await self.fact_service.sync_form_submission(
+                owner_user_id=actor_user_id,
+                form_id=str(attachment.get("form_id") or ""),
+                values=values,
+                submission_id=str(attachment.get("submission_id") or ""),
+                observed_at=observed_at,
+            )
 
     async def _verified_run_attachments(
         self,

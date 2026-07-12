@@ -19,6 +19,7 @@ from ..auth import CurrentUser, ServiceClient
 from ..files.repository import FileRepository
 from .evals.service import AgentEvalService
 from .memory.service import AgentMemoryRepository, AgentMemoryService
+from .facts import AgentFactRepository, AgentFactService
 from .repository import AgentRuntimeRepository
 from .event_stream.replay import AgentReplayService
 from .schemas import (
@@ -68,6 +69,7 @@ def get_agent_runtime_service(request: Request, session: AsyncSession = Depends(
         idempotency_service=IdempotencyService(repository=audit_repository),
         file_repository=FileRepository(session),
         controls=AgentRunControls(request.app.state.redis_client),
+        fact_service=AgentFactService(repository=AgentFactRepository(session)),
     )
 
 

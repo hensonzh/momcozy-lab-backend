@@ -28,11 +28,17 @@ from production_backend.app.modules.agent_runtime.actions.registry import build_
 from production_backend.app.modules.agent_runtime.event_stream.sink import AgentEventSink
 from production_backend.app.modules.agent_runtime.event_stream.transient import AgentTransientStream
 from production_backend.app.modules.agent_runtime.memory.service import AgentMemoryRepository, AgentMemoryService
+from production_backend.app.modules.agent_runtime.facts import (
+    AgentFactCaptureService,
+    AgentFactExtractor,
+    AgentFactRepository,
+    AgentFactService,
+)
 from production_backend.app.modules.agent_runtime.repository import AgentRuntimeRepository
 from production_backend.app.modules.agent_runtime.run_lifecycle.controls import AgentRunControls
 from production_backend.app.modules.agent_runtime.run_lifecycle.executor import AgentRuntimeExecutor
 from production_backend.app.modules.agent_runtime.run_lifecycle.quick_replies import QuickReplyFinalizer
-from production_backend.app.modules.agent_runtime.sdk import create_agent_model_runner
+from production_backend.app.modules.agent_runtime.sdk import OpenAIResponsesRunner, create_agent_model_runner
 from production_backend.app.modules.agent_runtime.service import AgentRuntimeService
 from production_backend.app.modules.assets.service import ProductAssetService
 from production_backend.app.modules.audit import AuditService, IdempotencyService
@@ -295,6 +301,8 @@ async def _execute_agent_run(
     started_at = perf_counter()
     async with session_factory() as session:
         repository = AgentRuntimeRepository(session)
+        fact_repository = AgentFactRepository(session)
+        fact_service = AgentFactService(repository=fact_repository)
         audit_repository = AuditRepository(session)
         profile_service = ProfileService(
             repository=ProfileRepository(session),
@@ -345,6 +353,7 @@ async def _execute_agent_run(
             idempotency_service=IdempotencyService(repository=audit_repository),
             action_executor=action_executor,
             controls=controls,
+            fact_service=fact_service,
         )
         tool_registry = default_tool_registry()
         memory_service = AgentMemoryService(repository=AgentMemoryRepository(session))
@@ -386,6 +395,28 @@ async def _execute_agent_run(
             reasoning_effort="none",
             metrics_node_name="quick_reply_finalizer",
         )
+        fact_capture_service = None
+        if settings.agent_fact_extraction_enabled:
+            fact_runner = OpenAIResponsesRunner(
+                model=settings.agent_fact_extraction_model,
+                max_turns=1,
+                timeout_seconds=settings.agent_fact_extraction_timeout_seconds,
+                api_key=settings.openai_api_key,
+                reasoning_effort="none",
+                store_responses=False,
+                metrics=metrics,
+                metrics_node_name="turn_fact_extractor",
+            )
+            fact_capture_service = AgentFactCaptureService(
+                repository=fact_repository,
+                fact_service=fact_service,
+                extractor=AgentFactExtractor(
+                    model_runner=fact_runner,
+                    extractor_version=settings.agent_fact_extraction_version,
+                ),
+                model=settings.agent_fact_extraction_model,
+                extractor_version=settings.agent_fact_extraction_version,
+            )
         runtime_executor = AgentRuntimeExecutor(
             repository=repository,
             tool_registry=tool_registry,
@@ -395,6 +426,8 @@ async def _execute_agent_run(
             business_facts_projector=BusinessFactsProjector(handlers=tool_handlers),
             transient_stream=transient_stream,
             quick_reply_finalizer=QuickReplyFinalizer(sdk_runner=quick_reply_runner),
+            fact_service=fact_service,
+            fact_capture_service=fact_capture_service,
             sdk_runner=sdk_runner,
             object_storage=object_storage,
             max_inline_artifact_payload_bytes=settings.agent_runtime_max_inline_payload_bytes,

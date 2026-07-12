@@ -66,6 +66,7 @@ def test_compose_environment_profiles_use_current_openai_model_defaults() -> Non
 
         assert "OPENAI_MODEL=gpt-5.6-terra" in env
         assert "AGENT_QUICK_REPLY_MODEL=gpt-5.4-nano" in env
+        assert "AGENT_FACT_EXTRACTION_MODEL=gpt-5.4-nano" in env
 
 
 def test_makefile_infra_checks_use_project_python_environment() -> None:
