@@ -333,10 +333,10 @@ def test_agent_runtime_executor_load_service_skill_returns_facts_and_records_led
         (
             "birth-prep",
             {
-                    "pregnancy_plan_intake_start",
-                    "pregnancy_plan_intake_analyze",
-                    "pregnancy_plan_intake_advance",
-                    "pregnancy_plan_propose",
+                "pregnancy_plan_intake_start",
+                "pregnancy_plan_intake_analyze",
+                "pregnancy_plan_intake_advance",
+                "pregnancy_plan_propose",
                 "plans_plan_delete_propose",
                 "plans_task_complete_propose",
                 "plans_task_update_propose",
@@ -701,9 +701,9 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
         "plans_task_create_propose",
         "plans_task_delete_propose",
         "plans_task_update_propose",
-            "pregnancy_plan_propose",
-            "pregnancy_plan_intake_advance",
-            "pregnancy_plan_intake_analyze",
+        "pregnancy_plan_propose",
+        "pregnancy_plan_intake_advance",
+        "pregnancy_plan_intake_analyze",
         "pregnancy_plan_intake_start",
         "pregnancy_diary_entries_read",
         "pregnancy_diary_entry_create",
@@ -745,7 +745,7 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert backend.tool_schemas["notifications_milk_reminder_propose"]["required"] == ["title"]
     assert backend.tool_schemas["plans_calendar_read"]["properties"]["task_date"]["maxLength"] == 20
     assert backend.tool_schemas["plans_current_read"]["properties"]["limit"]["maximum"] == 20
-    assert backend.tool_schemas["plans_milk_plan_propose"]["required"] == ["title"]
+    assert backend.tool_schemas["plans_milk_plan_propose"]["required"] == ["title", "tasks"]
     assert backend.tool_schemas["plans_plan_delete_propose"]["required"] == ["plan_id"]
     assert backend.tool_schemas["plans_task_complete_propose"]["required"] == ["task_id"]
     assert backend.tool_schemas["plans_task_complete_propose"]["properties"]["completed"]["type"] == "boolean"

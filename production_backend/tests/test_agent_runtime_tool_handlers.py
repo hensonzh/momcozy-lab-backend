@@ -797,8 +797,9 @@ def test_milk_plan_propose_tool_handler_creates_confirmation_action() -> None:
             "title": "Increase pumping consistency",
             "summary": "Pump after morning and evening feeds for the next week.",
             "direction": "maintain",
-            "days": 7,
-            "tasks": [{"title": "Pump at 20:00"}],
+            "start_date": "2026-07-13",
+            "days": 2,
+            "tasks": [{"title": "Pump at 20:00", "time": "20:00", "task_type": "pumping"}],
             "reminders": [{"title": "Drink water"}],
         },
     )
@@ -813,17 +814,23 @@ def test_milk_plan_propose_tool_handler_creates_confirmation_action() -> None:
         "title": "Increase pumping consistency",
         "summary": "Pump after morning and evening feeds for the next week.",
         "has_payload": True,
+        "start_date": "2026-07-13",
+        "days": 2,
+        "scheduled_task_count": 2,
+        "calendar_write_strategy": "create_schedule_tasks",
     }
     assert runtime_service.calls[0]["target_type"] == "plan"
     assert runtime_service.calls[0]["side_effect_level"] == "medium"
     assert runtime_service.calls[0]["apply_payload"]["payload"] == {
         "direction": "maintain",
-        "days": 7,
-        "tasks": [{"title": "Pump at 20:00"}],
+        "start_date": "2026-07-13",
+        "days": 2,
+        "tasks": [{"title": "Pump at 20:00", "time": "20:00", "task_type": "pumping"}],
         "reminders": [{"title": "Drink water"}],
     }
     assert result["artifact_type"] == "milk_plan_preview"
-    assert result["task_count"] == 1
+    assert result["task_count"] == 2
+    assert runtime_service.artifact.payload["scheduled_task_count"] == 2
     assert runtime_service.artifact.payload["action_id"] == result["action_id"]
     assert result["_deferred_agent_events"][0]["event_type"] == "artifact.created"
 
@@ -983,8 +990,7 @@ def test_failed_pregnancy_plan_apply_does_not_create_card_or_consume_workflow() 
     assert len(runtime_service.artifacts) == artifact_count
     assert "no plan was created" in result.model_context[0]["content"]
     assert not any(
-        artifact.artifact_type == "pregnancy_plan_workflow"
-        and artifact.payload.get("consumed_by_action_id") == result.output["action_id"]
+        artifact.artifact_type == "pregnancy_plan_workflow" and artifact.payload.get("consumed_by_action_id") == result.output["action_id"]
         for artifact in runtime_service.artifacts
     )
 
@@ -1856,6 +1862,18 @@ def test_milk_plan_propose_tool_handler_requires_title() -> None:
     assert exc_info.value.code == "validation_failed"
 
 
+def test_milk_plan_propose_rejects_unschedulable_tasks_before_confirmation() -> None:
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            MilkPlanProposeToolHandler(runtime_service=FakeAgentRuntimeService())(
+                _context(args={"title": "Broken plan", "tasks": [{"title": "Missing time"}]})
+            )
+        )
+
+    assert exc_info.value.code == "validation_failed"
+    assert "HH:mm" in exc_info.value.message
+
+
 def test_plan_task_propose_tool_handlers_require_required_fields() -> None:
     with pytest.raises(ApiError) as task_create_exc:
         asyncio.run(PlanTaskCreateProposeToolHandler(runtime_service=FakeAgentRuntimeService())(_context(args={})))
@@ -1958,9 +1976,9 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
         "plans.task_update.propose",
         "plans.plan_delete.propose",
         "pregnancy.plan_context.read",
-            "pregnancy.plan_intake.analyze",
-            "pregnancy.plan_intake.advance",
-            "pregnancy.plan_intake.start",
+        "pregnancy.plan_intake.analyze",
+        "pregnancy.plan_intake.advance",
+        "pregnancy.plan_intake.start",
         "pregnancy.plan.propose",
         "records.feeding_record.propose",
         "records.pumping_record.propose",
@@ -2336,21 +2354,21 @@ class FakeAgentRuntimeService:
                     "applied"
                     if kwargs["action_type"]
                     in {
-                    "hospital_bag.cart.update",
-                    "records.feeding_record.create",
-                    "records.pumping_record.create",
-                    "records.growth_record.create",
-                    "records.feeding_record.delete",
-                    "records.pumping_record.delete",
-                    "records.growth_record.update",
-                    "records.growth_record.delete",
-                    "pregnancy.plan.create",
-                    "pregnancy_diary.entry.delete",
-                    "plans.task.create",
-                    "plans.task.complete",
-                    "plans.task.update",
-                    "plans.task.delete",
-                    "plans.plan.delete",
+                        "hospital_bag.cart.update",
+                        "records.feeding_record.create",
+                        "records.pumping_record.create",
+                        "records.growth_record.create",
+                        "records.feeding_record.delete",
+                        "records.pumping_record.delete",
+                        "records.growth_record.update",
+                        "records.growth_record.delete",
+                        "pregnancy.plan.create",
+                        "pregnancy_diary.entry.delete",
+                        "plans.task.create",
+                        "plans.task.complete",
+                        "plans.task.update",
+                        "plans.task.delete",
+                        "plans.plan.delete",
                     }
                     else "confirmation_required"
                 )

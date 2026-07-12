@@ -65,7 +65,7 @@
 | `records.growth_record_delete.propose` | `records_growth_record_delete_propose` | deferred | write | 否 | 用户明确要求且 owner-scoped 记录唯一确定时同步软删除。 |
 | `plans.current.read` | `plans_current_read` | eager | read | 否 | 用户查看当前计划、待办或后续安排时读取生效计划和近期任务。 |
 | `plans.calendar.read` | `plans_calendar_read` | eager | read | 否 | 用户询问某天安排、待完成事项或任务状态时按日期和状态读取日程。 |
-| `plans.milk_plan.propose` | `plans_milk_plan_propose` | deferred | write | 是 | 用户明确希望制定泌乳、喂养或吸奶计划时创建待确认计划。 |
+| `plans.milk_plan.propose` | `plans_milk_plan_propose` | deferred | write | 是 | 用户明确希望制定泌乳、喂养或吸奶计划时创建含日期、时间和类型的待确认日程草稿；确认后 Plan 与展开的 PlanTask 同事务写入。 |
 | `plans.task_complete.propose` | `plans_task_complete_propose` | deferred | write | 否 | 用户明确表示唯一指定的单项任务已完成/取消完成时同步更新。 |
 | `plans.task_create.propose` | `plans_task_create_propose` | deferred | write | 否 | 用户明确要求新增一项内容和归属清晰的待办时同步创建；批量或含糊范围先澄清。 |
 | `notifications.milk_reminder.propose` | `notifications_milk_reminder_propose` | deferred | write | 是 | 用户要求在指定时间收到奶量、喂养或吸奶提醒时创建确认。 |

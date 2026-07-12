@@ -39,7 +39,11 @@ def test_milk_plan_create_action_handler_creates_plan_through_service() -> None:
         apply_payload={
             "title": "Increase pumping consistency",
             "summary": "Pump after morning and evening feeds.",
-            "payload": {"target_sessions_per_day": 2},
+            "payload": {
+                "start_date": "2026-07-13",
+                "days": 2,
+                "tasks": [{"title": "Morning pump", "time": "08:00", "task_type": "pumping"}],
+            },
         }
     )
 
@@ -49,6 +53,7 @@ def test_milk_plan_create_action_handler_creates_plan_through_service() -> None:
     assert result.resource_id == str(service.plan.id)
     assert result.details == {
         "plan_type": "milk_management",
+        "task_count": 2,
         "agent_action_id": str(action.id),
         "agent_run_id": str(action.run_id),
     }
@@ -57,9 +62,16 @@ def test_milk_plan_create_action_handler_creates_plan_through_service() -> None:
     assert service.create_plan_kwargs["title"] == "Increase pumping consistency"
     assert service.create_plan_kwargs["summary"] == "Pump after morning and evening feeds."
     assert service.create_plan_kwargs["source"] == "agent_action"
-    assert service.create_plan_kwargs["payload"]["target_sessions_per_day"] == 2
+    assert service.create_plan_kwargs["payload"]["start_date"] == "2026-07-13"
     assert service.create_plan_kwargs["payload"]["agent_action_id"] == str(action.id)
     assert service.create_plan_kwargs["idempotency_key"] == "idem-action"
+    assert len(service.create_task_kwargs_list) == 2
+    assert [call["task_date"].isoformat() for call in service.create_task_kwargs_list] == [
+        "2026-07-13",
+        "2026-07-14",
+    ]
+    assert all(call["plan_id"] == service.plan.id for call in service.create_task_kwargs_list)
+    assert all(call["payload"]["source"] == "agent_action" for call in service.create_task_kwargs_list)
     assert len(result.application_events) == 1
     changed_event = result.application_events[0]
     assert changed_event.event_type == MILK_PLAN_CHANGED_EVENT
@@ -69,11 +81,11 @@ def test_milk_plan_create_action_handler_creates_plan_through_service() -> None:
         "plan_id": str(service.plan.id),
         "plan_type": "milk_management",
         "source": "agent_action",
-        "affected_dates": [],
+        "affected_dates": ["2026-07-13", "2026-07-14"],
     }
     rendered_event = json.dumps(changed_event.payload, ensure_ascii=False)
     assert "Pump after morning and evening feeds" not in rendered_event
-    assert "target_sessions_per_day" not in rendered_event
+    assert "Morning pump" not in rendered_event
 
 
 def test_milk_plan_changed_event_contains_only_bounded_dates_and_no_private_plan_content() -> None:
@@ -85,8 +97,15 @@ def test_milk_plan_changed_event_contains_only_bounded_dates_and_no_private_plan
             "summary": private_summary,
             "payload": {
                 "start_date": "2026-07-04",
-                "days": 99,
-                "tasks": [{"title": "private task", "health_note": "private diagnosis"}],
+                "days": 30,
+                "tasks": [
+                    {
+                        "title": "private task",
+                        "time": "08:00",
+                        "task_type": "pumping",
+                        "health_note": "private diagnosis",
+                    }
+                ],
             },
         }
     )
@@ -108,6 +127,17 @@ def test_milk_plan_create_action_handler_rejects_missing_title() -> None:
         asyncio.run(MilkPlanCreateActionHandler(service=FakePlansService())(_action(apply_payload={})))
 
     assert exc_info.value.code == "missing_plan_title"
+
+
+def test_milk_plan_create_action_handler_rejects_a_plan_that_cannot_reach_schedule() -> None:
+    with pytest.raises(PermanentJobError) as exc_info:
+        asyncio.run(
+            MilkPlanCreateActionHandler(service=FakePlansService())(
+                _action(apply_payload={"title": "Plan without tasks", "payload": {"days": 7}})
+            )
+        )
+
+    assert exc_info.value.code == "invalid_milk_plan_schedule"
 
 
 def test_pregnancy_plan_create_action_handler_creates_plan_through_service() -> None:
@@ -344,6 +374,7 @@ class FakePlansService:
         )
         self.create_plan_kwargs = {}
         self.create_task_kwargs = {}
+        self.create_task_kwargs_list = []
         self.set_task_completed_kwargs = {}
         self.update_task_kwargs = {}
         self.delete_task_kwargs = {}
@@ -361,6 +392,7 @@ class FakePlansService:
 
     async def create_task(self, **kwargs):
         self.create_task_kwargs = kwargs
+        self.create_task_kwargs_list.append(kwargs)
         self.task.owner_user_id = kwargs["owner_user_id"]
         self.task.plan_id = kwargs["plan_id"]
         self.task.task_date = kwargs["task_date"]

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date
 from typing import Any
 from uuid import UUID
 
@@ -9,6 +9,11 @@ from ...workers.errors import PermanentJobError
 from ..agent_runtime.actions.executor import AgentActionApplyResult, AgentApplicationEvent
 from ..agent_runtime.models import AgentAction
 from .service import PlansService
+from .milk_plan_schedule import (
+    MilkPlanScheduleValidationError,
+    normalize_milk_plan_payload,
+    scheduled_task_dates,
+)
 
 
 MILK_PLAN_CREATE_ACTION = "plans.milk_plan.create"
@@ -20,41 +25,6 @@ PLAN_TASK_COMPLETE_ACTION = "plans.task.complete"
 PLAN_TASK_UPDATE_ACTION = "plans.task.update"
 PLAN_TASK_DELETE_ACTION = "plans.task.delete"
 PLAN_DELETE_ACTION = "plans.plan.delete"
-_MILK_PLAN_CHANGED_MAX_AFFECTED_DATES = 30
-
-
-def _milk_plan_affected_dates(plan_payload: dict[str, Any]) -> list[str]:
-    affected: set[date] = set()
-    start_date = _event_date(plan_payload.get("start_date"))
-    raw_days = plan_payload.get("days")
-    days = raw_days if isinstance(raw_days, int) and not isinstance(raw_days, bool) else 1
-    days = max(1, min(days, _MILK_PLAN_CHANGED_MAX_AFFECTED_DATES))
-    if start_date is not None:
-        affected.update(start_date + timedelta(days=offset) for offset in range(days))
-
-    for collection_key in ("tasks", "reminders"):
-        collection = plan_payload.get(collection_key)
-        if not isinstance(collection, list):
-            continue
-        for item in collection[:40]:
-            if not isinstance(item, dict):
-                continue
-            for key in ("date", "task_date", "remind_at", "scheduled_at"):
-                parsed = _event_date(item.get(key))
-                if parsed is not None:
-                    affected.add(parsed)
-                    break
-    return [value.isoformat() for value in sorted(affected)[:_MILK_PLAN_CHANGED_MAX_AFFECTED_DATES]]
-
-
-def _event_date(value: Any) -> date | None:
-    text = str(value or "").strip()
-    if not text:
-        return None
-    try:
-        return date.fromisoformat(text[:10])
-    except ValueError:
-        return None
 
 
 class MilkPlanCreateActionHandler:
@@ -71,6 +41,10 @@ class MilkPlanCreateActionHandler:
         if not isinstance(plan_payload, dict):
             plan_payload = {}
         try:
+            normalized_plan_payload, scheduled_tasks = normalize_milk_plan_payload(plan_payload)
+        except MilkPlanScheduleValidationError as exc:
+            raise PermanentJobError("invalid_milk_plan_schedule") from exc
+        try:
             plan = await self.service.create_plan(
                 owner_user_id=action.actor_user_id,
                 plan_type="milk_management",
@@ -78,13 +52,31 @@ class MilkPlanCreateActionHandler:
                 summary=_text(payload, "summary"),
                 source="agent_action",
                 payload={
-                    **plan_payload,
+                    **normalized_plan_payload,
                     "agent_action_id": str(action.id),
                     "agent_run_id": str(action.run_id),
                 },
                 request_id=f"agent-action:{action.id}",
                 idempotency_key=action.idempotency_key or f"agent-action:{action.id}",
             )
+            for index, scheduled in enumerate(scheduled_tasks):
+                await self.service.create_task(
+                    owner_user_id=action.actor_user_id,
+                    plan_id=plan.id,
+                    task_date=scheduled.task_date,
+                    task_time=scheduled.task_time,
+                    title=scheduled.title,
+                    description=scheduled.description,
+                    payload={
+                        "task_type": scheduled.task_type,
+                        "source": "agent_action",
+                        "agent_action_id": str(action.id),
+                        "agent_run_id": str(action.run_id),
+                        **({"duration_minutes": scheduled.duration_minutes} if scheduled.duration_minutes is not None else {}),
+                    },
+                    request_id=f"agent-action:{action.id}",
+                    idempotency_key=f"agent-action:{action.id}:schedule:{index}",
+                )
         except ApiError as exc:
             raise PermanentJobError(exc.code) from exc
 
@@ -93,6 +85,7 @@ class MilkPlanCreateActionHandler:
             resource_id=str(plan.id),
             details={
                 "plan_type": plan.plan_type,
+                "task_count": len(scheduled_tasks),
                 "agent_action_id": str(action.id),
                 "agent_run_id": str(action.run_id),
             },
@@ -105,7 +98,7 @@ class MilkPlanCreateActionHandler:
                         "plan_id": str(plan.id),
                         "plan_type": plan.plan_type,
                         "source": "agent_action",
-                        "affected_dates": _milk_plan_affected_dates(plan_payload),
+                        "affected_dates": scheduled_task_dates(scheduled_tasks),
                     },
                 ),
             ),

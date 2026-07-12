@@ -1,6 +1,7 @@
 import asyncio
 from uuid import uuid4
 
+from production_backend.app.core.errors import ApiError
 from production_backend.app.modules.agent_runtime.actions.executor import AgentActionExecutor
 from production_backend.app.modules.agent_runtime.models import AgentAction, AgentEvent, AgentRun
 from production_backend.app.modules.plans.agent_actions import (
@@ -8,7 +9,7 @@ from production_backend.app.modules.plans.agent_actions import (
     MILK_PLAN_CREATE_ACTION,
     MilkPlanCreateActionHandler,
 )
-from production_backend.app.modules.plans.models import Plan
+from production_backend.app.modules.plans.models import Plan, PlanTask
 
 
 def test_milk_plan_event_is_persisted_once_and_applied_replay_is_side_effect_free() -> None:
@@ -17,7 +18,11 @@ def test_milk_plan_event_is_persisted_once_and_applied_replay_is_side_effect_fre
     repository.action.apply_payload = {
         "title": "Private milk plan",
         "summary": "private supply and health context",
-        "payload": {"start_date": "2026-07-04", "days": 2, "tasks": [{"title": "private task"}]},
+        "payload": {
+            "start_date": "2026-07-04",
+            "days": 2,
+            "tasks": [{"title": "private task", "time": "08:00", "task_type": "pumping"}],
+        },
     }
     executor = AgentActionExecutor(
         repository=repository,
@@ -29,7 +34,8 @@ def test_milk_plan_event_is_persisted_once_and_applied_replay_is_side_effect_fre
 
     assert first.action.status == "applied"
     assert replay.replayed is True
-    assert len(repository.domain_rows) == 1
+    assert len(repository.domain_rows) == 3
+    assert len([row for row in repository.domain_rows if isinstance(row, PlanTask)]) == 2
     assert [event.event_type for event in repository.events] == ["action.applied", MILK_PLAN_CHANGED_EVENT]
     changed = repository.events[-1]
     assert changed.thread_id == repository.run.thread_id
@@ -49,7 +55,11 @@ def test_milk_plan_event_failure_rolls_back_plan_and_success_events_before_durab
     plan_service = TransactionalMilkPlanService(repository=repository)
     repository.action.apply_payload = {
         "title": "Milk plan",
-        "payload": {"start_date": "2026-07-04", "days": 2},
+        "payload": {
+            "start_date": "2026-07-04",
+            "days": 2,
+            "tasks": [{"title": "吸奶", "time": "08:00", "task_type": "pumping"}],
+        },
     }
     executor = AgentActionExecutor(
         repository=repository,
@@ -62,6 +72,32 @@ def test_milk_plan_event_failure_rolls_back_plan_and_success_events_before_durab
     assert repository.domain_rows == []
     assert [event.event_type for event in repository.events] == ["action.failed"]
     assert MILK_PLAN_CHANGED_EVENT not in [event.event_type for event in repository.events]
+
+
+def test_milk_plan_task_failure_rolls_back_the_plan_and_all_earlier_tasks() -> None:
+    repository = MilkActionRepository()
+    plan_service = FailingTransactionalMilkPlanService(repository=repository)
+    repository.action.apply_payload = {
+        "title": "Milk plan",
+        "payload": {
+            "start_date": "2026-07-04",
+            "days": 1,
+            "tasks": [
+                {"title": "晨间吸奶", "time": "08:00", "task_type": "pumping"},
+                {"title": "晚间吸奶", "time": "20:00", "task_type": "pumping"},
+            ],
+        },
+    }
+    executor = AgentActionExecutor(
+        repository=repository,
+        handlers={MILK_PLAN_CREATE_ACTION: MilkPlanCreateActionHandler(service=plan_service)},
+    )
+
+    outcome = asyncio.run(executor.apply(repository.action))
+
+    assert outcome.action.status == "failed"
+    assert repository.domain_rows == []
+    assert [event.event_type for event in repository.events] == ["action.failed"]
 
 
 class MilkActionRepository:
@@ -94,7 +130,7 @@ class MilkActionRepository:
             error_code="",
         )
         self.events: list[AgentEvent] = []
-        self.domain_rows: list[Plan] = []
+        self.domain_rows: list[Plan | PlanTask] = []
         self.failed_event_type = failed_event_type
 
     async def get_run_for_owner(self, *, run_id, owner_user_id):
@@ -154,6 +190,33 @@ class TransactionalMilkPlanService:
         )
         self.repository.domain_rows.append(plan)
         return plan
+
+    async def create_task(self, **kwargs):
+        task = PlanTask(
+            id=uuid4(),
+            owner_user_id=kwargs["owner_user_id"],
+            plan_id=kwargs["plan_id"],
+            task_date=kwargs["task_date"],
+            task_time=kwargs["task_time"],
+            title=kwargs["title"],
+            description=kwargs["description"],
+            status="pending",
+            payload=kwargs["payload"],
+        )
+        self.repository.domain_rows.append(task)
+        return task
+
+
+class FailingTransactionalMilkPlanService(TransactionalMilkPlanService):
+    def __init__(self, *, repository: MilkActionRepository) -> None:
+        super().__init__(repository=repository)
+        self.task_calls = 0
+
+    async def create_task(self, **kwargs):
+        self.task_calls += 1
+        if self.task_calls == 2:
+            raise ApiError(code="dependency_failed", message="task insert failed", status=503)
+        return await super().create_task(**kwargs)
 
 
 class MilkSavepoint:

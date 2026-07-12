@@ -165,10 +165,14 @@ owner-scoped resource through
 `GET /v1/plans?plan_type=pregnancy&status=active`.
 
 After an authorized milk plan is actually created, the same executor
-transaction emits durable `milk_plan.changed`. Before executor metadata is
+transaction persists both the owner-scoped Plan and every expanded PlanTask.
+The proposal must contain at least one bounded, schedulable task template;
+templates without an explicit date repeat across the persisted `start_date`
+and `days` range. Any plan or task failure rolls the entire action back. The
+same transaction emits durable `milk_plan.changed`. Before executor metadata is
 added, its exact domain payload is `operation=created`, `reason=created`, opaque
 `plan_id`, `plan_type=milk_management`, `source=agent_action`, and a deduplicated,
-sorted `affected_dates` list capped at 30 valid `YYYY-MM-DD` values. The
+sorted `affected_dates` list derived from the PlanTasks actually written. The
 executor adds `action_id` and stable presentation fields. The event contains no
 title, summary, task text, reminder text, lactation history, or health facts;
 failed writes and applied-action replays emit no duplicate event.

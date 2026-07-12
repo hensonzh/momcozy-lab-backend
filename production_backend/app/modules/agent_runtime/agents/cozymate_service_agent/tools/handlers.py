@@ -36,6 +36,10 @@ from production_backend.app.modules.plans.agent_actions import (
     PREGNANCY_PLAN_CREATE_ACTION,
 )
 from production_backend.app.modules.plans.models import Plan, PlanTask
+from production_backend.app.modules.plans.milk_plan_schedule import (
+    MilkPlanScheduleValidationError,
+    normalize_milk_plan_payload,
+)
 from production_backend.app.modules.plans.service import PlansService
 from production_backend.app.modules.profiles.models import InfantProfile, UserProfile
 from production_backend.app.modules.profiles.service import ProfileService
@@ -319,9 +323,10 @@ class PregnancyPlanIntakeAnalyzeToolHandler:
                 "requires_fresh_intake": True,
             }
 
-        if _text(workflow, "phase") != PregnancyPlanPhase.COLLECTING_INTAKE.value and _text(
-            workflow, "source_form_submission_id"
-        ) == submission_id:
+        if (
+            _text(workflow, "phase") != PregnancyPlanPhase.COLLECTING_INTAKE.value
+            and _text(workflow, "source_form_submission_id") == submission_id
+        ):
             return _pregnancy_plan_workflow_result(workflow)
         if (
             _text(workflow, "phase") != PregnancyPlanPhase.COLLECTING_INTAKE.value
@@ -392,16 +397,12 @@ class PregnancyPlanIntakeAdvanceToolHandler:
                 "requires_fresh_intake": True,
             }
 
-        urgent_signal_ids = pregnancy_plan_urgent_signal_ids(
-            {"additional_info": _text(context.args, "trusted_current_user_text")}
-        )
+        urgent_signal_ids = pregnancy_plan_urgent_signal_ids({"additional_info": _text(context.args, "trusted_current_user_text")})
         if urgent_signal_ids:
             return _pregnancy_plan_urgent_result(urgent_signal_ids)
 
         completed_followup = pregnancy_plan_current_followup(workflow)
-        if action == "mark_checkup_records_uploaded" and (
-            _optional_int(context.args, "runtime_checkup_attachment_count") or 0
-        ) < 1:
+        if action == "mark_checkup_records_uploaded" and (_optional_int(context.args, "runtime_checkup_attachment_count") or 0) < 1:
             workflow_artifact = await self._persist_workflow(context=context, workflow=workflow)
             return _pregnancy_plan_workflow_result(
                 workflow,
@@ -1124,7 +1125,7 @@ class MilkPlanProposeToolHandler:
             apply_payload=apply_payload,
             idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:milk-plan",
         )
-        payload = {**_milk_plan_artifact_payload(context.args), "action_id": str(action.id)}
+        payload = {**_milk_plan_artifact_payload(apply_payload), "action_id": str(action.id)}
         artifact = await self.runtime_service.create_artifact(
             owner_user_id=context.actor.user_id,
             run_id=context.run_id,
@@ -1134,7 +1135,6 @@ class MilkPlanProposeToolHandler:
             payload=payload,
             emit_event=False,
         )
-        tasks = payload.get("tasks")
         reminders = payload.get("reminders")
         return {
             **_proposal_result(action=action, preview_payload=preview_payload),
@@ -1143,7 +1143,7 @@ class MilkPlanProposeToolHandler:
             "status": artifact.status,
             "title": _text(payload, "title"),
             "summary": _text(payload, "summary"),
-            "task_count": len(tasks) if isinstance(tasks, list) else 0,
+            "task_count": int(payload.get("scheduled_task_count") or 0),
             "reminder_count": len(reminders) if isinstance(reminders, list) else 0,
             DEFERRED_AGENT_EVENTS_KEY: [_deferred_artifact_created_event(artifact)],
         }
@@ -1721,31 +1721,44 @@ def _milk_plan_apply_payload(args: dict[str, Any]) -> dict[str, Any]:
         value = args.get(key)
         if value not in (None, "", []):
             plan_payload[key] = value
-    if plan_payload:
-        payload["payload"] = plan_payload
+    try:
+        normalized_plan_payload, _ = normalize_milk_plan_payload(plan_payload)
+    except MilkPlanScheduleValidationError as exc:
+        raise ApiError(code="validation_failed", message=str(exc), status=422) from exc
+    payload["payload"] = normalized_plan_payload
     return {key: value for key, value in payload.items() if value not in ("", None, {})}
 
 
 def _milk_plan_preview_payload(apply_payload: dict[str, Any]) -> dict[str, Any]:
+    plan_payload = _dict(apply_payload, "payload")
+    _, scheduled_tasks = normalize_milk_plan_payload(plan_payload)
     preview = {
         "plan_type": "milk_management",
         "title": _text(apply_payload, "title"),
         "summary": _text(apply_payload, "summary"),
-        "has_payload": isinstance(apply_payload.get("payload"), dict) and bool(apply_payload.get("payload")),
+        "has_payload": bool(plan_payload),
+        "start_date": _text(plan_payload, "start_date"),
+        "days": plan_payload.get("days"),
+        "scheduled_task_count": len(scheduled_tasks),
+        "calendar_write_strategy": "create_schedule_tasks",
     }
     return {key: value for key, value in preview.items() if value not in ("", None)}
 
 
-def _milk_plan_artifact_payload(args: dict[str, Any]) -> dict[str, Any]:
+def _milk_plan_artifact_payload(apply_payload: dict[str, Any]) -> dict[str, Any]:
+    plan_payload = _dict(apply_payload, "payload")
+    _, scheduled_tasks = normalize_milk_plan_payload(plan_payload)
     payload: dict[str, Any] = {
-        "title": _text(args, "title"),
-        "summary": _text(args, "summary"),
-        "direction": _text(args, "direction") or "unknown",
-        "start_date": _text(args, "start_date"),
-        "days": _optional_int(args, "days"),
+        "title": _text(apply_payload, "title"),
+        "summary": _text(apply_payload, "summary"),
+        "direction": _text(plan_payload, "direction") or "unknown",
+        "start_date": _text(plan_payload, "start_date"),
+        "days": _optional_int(plan_payload, "days"),
+        "scheduled_task_count": len(scheduled_tasks),
+        "calendar_write_strategy": "create_schedule_tasks",
     }
     for key in ("tasks", "reminders"):
-        value = args.get(key)
+        value = plan_payload.get(key)
         if isinstance(value, list):
             payload[key] = value
     return {key: value for key, value in payload.items() if value not in ("", None, [], {})}
@@ -1860,11 +1873,7 @@ def _pregnancy_plan_workflow_result(
     analysis_for_model.pop("final_question", None)
     asked_followups = (
         [
-            {
-                key: record[key]
-                for key in ("topic", "answer", "plan_impact")
-                if key in record
-            }
+            {key: record[key] for key in ("topic", "answer", "plan_impact") if key in record}
             for record in records
             if isinstance(record, dict)
         ]
