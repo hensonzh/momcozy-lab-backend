@@ -141,8 +141,11 @@ def test_file_vision_stream_contract_keeps_tokens_out_of_query_parameters() -> N
     operation = build_openapi_schema()["paths"]["/v1/files/{file_id}/vision/events/stream"]["get"]
     parameters = operation.get("parameters", [])
     query_names = {parameter["name"] for parameter in parameters if parameter.get("in") == "query"}
+    purpose = next(parameter for parameter in parameters if parameter.get("in") == "query" and parameter["name"] == "purpose")
 
     assert "token" not in query_names
+    assert purpose["schema"]["enum"] == ["general", "schedule"]
+    assert purpose["schema"]["default"] == "general"
 
 
 def test_retryable_writes_declare_idempotency_header() -> None:

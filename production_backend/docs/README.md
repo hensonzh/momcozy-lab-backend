@@ -20,6 +20,8 @@ legacy-route comparison documents do not belong here.
 - `api-contract-handoff.md`: human-readable API and agent event contract.
 - `flutter-client-compatibility.md`: generated-client compatibility policy.
 - `flutter-smoke-flows.json`: mobile integration smoke scenarios.
+- `vision-provider-integration.md`: owner-scoped schedule screenshot preview,
+  OpenAI adapter, error contract, and rollout quality gate.
 
 ## Operations
 

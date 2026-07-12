@@ -138,16 +138,32 @@ def test_file_vision_stream_uses_current_user_owner_scope_and_sse_contract() -> 
     _override_current_user(app, user_id)
     app.dependency_overrides[get_file_vision_service] = lambda: fake_service
 
-    response = TestClient(app).get(f"/v1/files/{fake_service.file_id}/vision/events/stream")
+    response = TestClient(app).get(f"/v1/files/{fake_service.file_id}/vision/events/stream?purpose=schedule")
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["x-accel-buffering"] == "no"
     assert "event: vision.started" in response.text
     assert "event: vision.completed" in response.text
     assert f'"file_id":"{fake_service.file_id}"' in response.text
     assert "token" not in response.request.url.query.decode()
     assert fake_service.events_kwargs["owner_user_id"] == user_id
     assert fake_service.events_kwargs["file_id"] == fake_service.file_id
+    assert fake_service.events_kwargs["purpose"] == "schedule"
+
+
+def test_file_vision_stream_rejects_unknown_purpose_before_service_call() -> None:
+    user_id = uuid4()
+    fake_service = FakeFileVisionService()
+    app = create_app(Settings(app_env="test", vision_provider="local_stub"))
+    _override_current_user(app, user_id)
+    app.dependency_overrides[get_file_vision_service] = lambda: fake_service
+
+    response = TestClient(app).get(f"/v1/files/{fake_service.file_id}/vision/events/stream?purpose=calendar-write")
+
+    assert response.status_code == 422
+    assert fake_service.events_kwargs == {}
 
 
 def test_file_vision_stream_returns_provider_disabled_error() -> None:

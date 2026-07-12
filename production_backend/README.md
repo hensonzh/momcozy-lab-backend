@@ -58,6 +58,8 @@ environment variables, not code changes:
 - `VOICE_REALTIME_MODEL`
 - `VOICE_REQUEST_TIMEOUT_SECONDS`
 - `VISION_PROVIDER`
+- `VISION_OPENAI_MODEL`
+- `VISION_REQUEST_TIMEOUT_SECONDS`
 
 Use the `production_backend/env/compose.*.env.example` files as the only
 committed environment templates. Copy them to ignored private files such as
@@ -145,11 +147,15 @@ TTS endpoint/resource/voice values unless the provider account changes. The App
 requests `/v1/realtime-voice-stream` and plays PCM chunks locally. `local_stub`
 is only for local/test contract checks and is rejected in production.
 
-Vision event endpoints are exposed in the production contract, but image
-analysis provider integration is disabled by default. Keep
-`VISION_PROVIDER=disabled` until a managed provider adapter is configured;
-`VISION_PROVIDER=local_stub` is only for local/test contract checks and is
-rejected in production.
+Vision event endpoints are exposed in the production contract and remain
+disabled by default. Set `VISION_PROVIDER=openai` to use the existing
+`OPENAI_API_KEY` with the Responses image-input/structured-output adapter;
+`VISION_OPENAI_MODEL` and `VISION_REQUEST_TIMEOUT_SECONDS` are independent from
+the live Agent model controls. Requests always use `store=false`. Keep
+`VISION_PROVIDER=disabled` until production credentials and a curated screenshot
+quality smoke pass are ready. `VISION_PROVIDER=local_stub` is deterministic,
+local/test-only, and rejected in production. See
+`production_backend/docs/vision-provider-integration.md`.
 
 Durable side effects are processed by a separate outbox worker. It handles file
 cleanup jobs and confirmed agent actions, and is also disabled by default in the

@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from functools import lru_cache
+from math import isfinite
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -24,7 +25,7 @@ SUPPORTED_OBJECT_STORAGE_PROVIDERS = {"local", "s3", "oss", "cos", "minio"}
 PRODUCTION_ENVS = {"prod", "production"}
 SUPPORTED_AUTH_JWT_ALGORITHMS = {"HS256"}
 SUPPORTED_VOICE_PROVIDERS = {"disabled", "local_stub", "doubao", "volcengine"}
-SUPPORTED_VISION_PROVIDERS = {"disabled", "local_stub"}
+SUPPORTED_VISION_PROVIDERS = {"disabled", "local_stub", "openai"}
 SUPPORTED_AGENT_MODEL_PROVIDERS = {"openai", "minimax"}
 SUPPORTED_OPENAI_REASONING_EFFORTS = {"none", "low", "medium", "high", "xhigh", "max"}
 
@@ -111,6 +112,8 @@ class Settings:
     voice_realtime_model: str = ""
     voice_request_timeout_seconds: int = 30
     vision_provider: str = "disabled"
+    vision_openai_model: str = "gpt-5.4-mini"
+    vision_request_timeout_seconds: float = 20.0
     log_level: str = "INFO"
 
     @classmethod
@@ -253,6 +256,11 @@ class Settings:
                 cls.voice_request_timeout_seconds,
             ),
             vision_provider=_env("VISION_PROVIDER", cls.vision_provider).lower(),
+            vision_openai_model=_env("VISION_OPENAI_MODEL", cls.vision_openai_model),
+            vision_request_timeout_seconds=_env_float(
+                "VISION_REQUEST_TIMEOUT_SECONDS",
+                cls.vision_request_timeout_seconds,
+            ),
             log_level=_env("LOG_LEVEL", cls.log_level).upper(),
         )
 
@@ -304,21 +312,14 @@ class Settings:
             errors.append(f"AGENT_MODEL_PROVIDER must be one of {', '.join(sorted(SUPPORTED_AGENT_MODEL_PROVIDERS))}")
         if self.agent_model_provider == "openai":
             if (self.agent_runtime_worker_enabled or self.agent_memory_consolidation_enabled) and not self.openai_api_key:
-                errors.append(
-                    "OPENAI_API_KEY is required when an agent worker is enabled and AGENT_MODEL_PROVIDER=openai"
-                )
+                errors.append("OPENAI_API_KEY is required when an agent worker is enabled and AGENT_MODEL_PROVIDER=openai")
             if not self.openai_model:
                 errors.append("OPENAI_MODEL is required when AGENT_MODEL_PROVIDER=openai")
             if self.openai_reasoning_effort not in SUPPORTED_OPENAI_REASONING_EFFORTS:
-                errors.append(
-                    "OPENAI_REASONING_EFFORT must be one of "
-                    + ", ".join(sorted(SUPPORTED_OPENAI_REASONING_EFFORTS))
-                )
+                errors.append("OPENAI_REASONING_EFFORT must be one of " + ", ".join(sorted(SUPPORTED_OPENAI_REASONING_EFFORTS)))
         if self.agent_model_provider == "minimax":
             if (self.agent_runtime_worker_enabled or self.agent_memory_consolidation_enabled) and not self.minimax_api_key:
-                errors.append(
-                    "MINIMAX_API_KEY is required when an agent worker is enabled and AGENT_MODEL_PROVIDER=minimax"
-                )
+                errors.append("MINIMAX_API_KEY is required when an agent worker is enabled and AGENT_MODEL_PROVIDER=minimax")
             if not self.minimax_base_url:
                 errors.append("MINIMAX_BASE_URL is required when AGENT_MODEL_PROVIDER=minimax")
             if not self.minimax_model:
@@ -375,6 +376,12 @@ class Settings:
             errors.append("VOICE_REQUEST_TIMEOUT_SECONDS must be positive")
         if self.vision_provider not in SUPPORTED_VISION_PROVIDERS:
             errors.append(f"VISION_PROVIDER must be one of {', '.join(sorted(SUPPORTED_VISION_PROVIDERS))}")
+        if self.vision_provider == "openai" and not self.openai_api_key:
+            errors.append("OPENAI_API_KEY is required when VISION_PROVIDER=openai")
+        if self.vision_provider == "openai" and not self.vision_openai_model:
+            errors.append("VISION_OPENAI_MODEL is required when VISION_PROVIDER=openai")
+        if not isfinite(self.vision_request_timeout_seconds) or self.vision_request_timeout_seconds <= 0:
+            errors.append("VISION_REQUEST_TIMEOUT_SECONDS must be positive")
 
         if self.is_production:
             if _is_local_url(self.database_url, LOCAL_DATABASE_URL):

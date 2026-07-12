@@ -73,6 +73,9 @@ AGENT_MEMORY_CONSOLIDATION_HOUR=3
 MINIMAX_API_KEY=...
 MINIMAX_BASE_URL=https://api.minimax.io/v1
 MINIMAX_MODEL=MiniMax-M3
+VISION_PROVIDER=disabled|openai
+VISION_OPENAI_MODEL=gpt-5.4-mini
+VISION_REQUEST_TIMEOUT_SECONDS=20
 ```
 
 The OpenAI production path uses the native Responses runner. Keep
@@ -88,6 +91,12 @@ the live run path: the independent `memory-worker` reads only completed
 conversations for the previous local day, uses
 `AGENT_MEMORY_CONSOLIDATION_MODEL`, and publishes a bounded database snapshot
 that the live worker reads with one primary-key query.
+
+The vision adapter is independent from the Agent worker. `VISION_PROVIDER=openai`
+reuses `OPENAI_API_KEY`, sends the owner-scoped object bytes to the Responses API
+with `store=false`, and uses `VISION_OPENAI_MODEL` plus a hard
+`VISION_REQUEST_TIMEOUT_SECONDS` bound. Keep it disabled until the release smoke
+in `vision-provider-integration.md` passes with deployment-owned credentials.
 
 Local and server-test development use Docker Compose managed Postgres, Redis,
 and MinIO. Production should point the same variables at managed Postgres,

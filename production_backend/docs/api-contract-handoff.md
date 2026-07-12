@@ -232,12 +232,27 @@ the returned PCM chunks through the native PCM player. `VOICE_PROVIDER=disabled`
 keeps the stable `code=voice_provider_disabled` error contract, and
 `VOICE_PROVIDER=local_stub` remains local/test-only.
 
-`VISION_PROVIDER=disabled` is the default stable production contract until a
-managed image analysis provider is configured. The production replacement for
-the legacy vision WebSocket is `GET /v1/files/{file_id}/vision/events/stream`;
-it requires bearer auth, verifies file ownership through current user scope, and
-never accepts tokens in URLs. Disabled provider responses use the standard error
-envelope with `code=vision_provider_disabled` and status `503`.
+`VISION_PROVIDER=disabled` remains the default stable production contract. The
+production replacement for the legacy vision WebSocket is
+`GET /v1/files/{file_id}/vision/events/stream`; it requires bearer auth, resolves
+the file through current-user owner scope, and never accepts tokens in URLs.
+Disabled provider responses use the standard error envelope with
+`code=vision_provider_disabled` and status `503`.
+
+The default `purpose=general` keeps the existing `vision.event` summary. For an
+editable Schedule screenshot preview, call the same endpoint with
+`purpose=schedule`. It emits `vision.started`, zero to 32
+`vision.schedule_task.preview` events, then `vision.completed`. Each task preview
+payload contains `purpose=schedule`, `time` as strict 24-hour `HH:mm`, `event` as
+the editable task title (1-80 characters), and `event_type` as `pump`,
+`breastfeed`, or `custom`. `vision.completed.payload.event_count` is the number
+of preview tasks. The endpoint is read-only: it does not create or update a
+Plan, PlanTask, feeding, or pumping record.
+
+`VISION_PROVIDER=openai` enables the Responses structured-output adapter using
+the existing `OPENAI_API_KEY`; provider requests use `store=false`, a bounded
+output schema, no original filename, no bearer token, and a hard timeout. See
+`vision-provider-integration.md` for stable error codes and rollout gates.
 
 ## Flutter Integration Rule
 

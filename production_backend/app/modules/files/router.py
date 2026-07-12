@@ -17,6 +17,7 @@ from ..auth import CurrentUser
 from .repository import FileRepository
 from .schemas import FileListResponse, FileRead
 from .service import FileService
+from .vision_providers import VisionPurpose
 from .vision_service import FileVisionService
 from .vision_streaming import encode_file_vision_sse_events
 
@@ -54,6 +55,7 @@ def get_file_vision_service(
         repository=FileRepository(session),
         object_storage=object_storage,
         settings=request.app.state.settings,
+        release_read_transaction=session.rollback,
     )
 
 
@@ -103,13 +105,22 @@ async def get_file(
 )
 async def stream_file_vision_events(
     file_id: UUID,
+    purpose: VisionPurpose = Query(
+        default="general",
+        description="Use schedule for a read-only, bounded task preview. This endpoint never writes plan or task data.",
+    ),
     current_user: CurrentUser = Depends(require_current_user),
     service: FileVisionService = Depends(get_file_vision_service),
 ) -> StreamingResponse:
-    events = await service.events_for_owner(file_id=file_id, owner_user_id=current_user.user_id)
+    events = await service.events_for_owner(
+        file_id=file_id,
+        owner_user_id=current_user.user_id,
+        purpose=purpose,
+    )
     return StreamingResponse(
         iter([encode_file_vision_sse_events(events)]),
         media_type="text/event-stream",
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
     )
 
 

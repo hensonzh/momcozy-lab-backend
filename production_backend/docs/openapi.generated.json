@@ -6872,6 +6872,22 @@
               "title": "File Id",
               "type": "string"
             }
+          },
+          {
+            "description": "Use schedule for a read-only, bounded task preview. This endpoint never writes plan or task data.",
+            "in": "query",
+            "name": "purpose",
+            "required": false,
+            "schema": {
+              "default": "general",
+              "description": "Use schedule for a read-only, bounded task preview. This endpoint never writes plan or task data.",
+              "enum": [
+                "general",
+                "schedule"
+              ],
+              "title": "Purpose",
+              "type": "string"
+            }
           }
         ],
         "responses": {

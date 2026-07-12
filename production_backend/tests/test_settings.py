@@ -13,6 +13,8 @@ def test_settings_use_current_openai_model_defaults() -> None:
     assert settings.agent_quick_reply_model == "gpt-5.4-nano"
     assert settings.agent_memory_consolidation_model == "gpt-5.4-nano"
     assert settings.agent_memory_consolidation_enabled is False
+    assert settings.vision_openai_model == "gpt-5.4-mini"
+    assert settings.vision_request_timeout_seconds == 20.0
 
 
 def test_settings_from_env_reads_infrastructure_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -246,11 +248,15 @@ def test_settings_from_env_keeps_legacy_volc_app_access_key_aliases(monkeypatch:
 
 
 def test_settings_from_env_reads_vision_provider(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("VISION_PROVIDER", "local_stub")
+    monkeypatch.setenv("VISION_PROVIDER", "openai")
+    monkeypatch.setenv("VISION_OPENAI_MODEL", "gpt-vision-test")
+    monkeypatch.setenv("VISION_REQUEST_TIMEOUT_SECONDS", "7.5")
 
     settings = Settings.from_env()
 
-    assert settings.vision_provider == "local_stub"
+    assert settings.vision_provider == "openai"
+    assert settings.vision_openai_model == "gpt-vision-test"
+    assert settings.vision_request_timeout_seconds == 7.5
 
 
 def test_settings_from_env_reads_active_session_auth_gate(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -406,6 +412,20 @@ def test_settings_reject_invalid_vision_provider() -> None:
         settings.validate_for_startup()
 
 
+@pytest.mark.parametrize("timeout", [0.0, -1.0, float("nan"), float("inf")])
+def test_settings_require_openai_vision_credentials_model_and_finite_positive_timeout(timeout: float) -> None:
+    with pytest.raises(ValueError, match="OPENAI_API_KEY"):
+        Settings(vision_provider="openai", openai_api_key="").validate_for_startup()
+    with pytest.raises(ValueError, match="VISION_OPENAI_MODEL"):
+        Settings(vision_provider="openai", openai_api_key="test-key", vision_openai_model="").validate_for_startup()
+    with pytest.raises(ValueError, match="VISION_REQUEST_TIMEOUT_SECONDS"):
+        Settings(
+            vision_provider="openai",
+            openai_api_key="test-key",
+            vision_request_timeout_seconds=timeout,
+        ).validate_for_startup()
+
+
 def test_production_settings_reject_local_object_storage() -> None:
     settings = Settings(app_env="production", object_storage_provider="local")
 
@@ -514,6 +534,26 @@ def test_production_accepts_explicit_managed_infrastructure_urls() -> None:
         auth_jwt_secret="test-secret-value-with-at-least-32-bytes",
         service_api_key=SERVICE_KEY,
         trusted_hosts=("api.example.test",),
+    )
+
+    settings.validate_for_startup()
+
+
+def test_production_accepts_configured_openai_vision_provider() -> None:
+    settings = Settings(
+        app_env="production",
+        database_url="postgresql+asyncpg://app:secret@postgres.internal:5432/momcozy",
+        redis_url="redis://redis.internal:6379/0",
+        object_storage_provider="s3",
+        object_storage_bucket="bucket",
+        object_storage_access_key_id="access",
+        object_storage_secret_access_key="secret",
+        auth_jwt_secret="test-secret-value-with-at-least-32-bytes",
+        service_api_key=SERVICE_KEY,
+        trusted_hosts=("api.example.test",),
+        vision_provider="openai",
+        openai_api_key="test-key",
+        vision_openai_model="gpt-vision-test",
     )
 
     settings.validate_for_startup()
