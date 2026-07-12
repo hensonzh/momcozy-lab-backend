@@ -43,6 +43,7 @@ from ..agents.cozymate_service_agent.tools.pregnancy_plan_flow import (
     PREGNANCY_PLAN_FINAL_QUESTION,
     PREGNANCY_PLAN_FINAL_QUICK_REPLIES,
     PREGNANCY_PLAN_URGENT_RESPONSE,
+    PREGNANCY_PLAN_WORKFLOW_SCHEMA_VERSION,
     ensure_pregnancy_plan_final_question,
     pregnancy_plan_urgent_signal_ids,
 )
@@ -183,6 +184,7 @@ class AgentRuntimeExecutor:
         self._run_authoritative_final_text: dict[UUID, str] = {}
         self._run_current_user_text: dict[UUID, str] = {}
         self._run_trusted_form_submissions: dict[UUID, dict[str, dict[str, Any]]] = {}
+        self._run_checkup_attachment_counts: dict[UUID, int] = {}
         self._run_business_facts: dict[UUID, dict[ServiceSkillId, dict[str, Any]]] = {}
         self._run_visible_image_urls: dict[UUID, tuple[str, ...]] = {}
         self._run_hospital_bag_cart_groups: dict[UUID, list[dict[str, Any]] | None] = {}
@@ -207,6 +209,9 @@ class AgentRuntimeExecutor:
         try:
             turn_context = await self._load_turn_context(run=run)
             self._run_trusted_form_submissions[run.id] = _trusted_form_submissions(turn_context.current_message)
+            self._run_checkup_attachment_counts[run.id] = _runtime_checkup_attachment_count(
+                turn_context.current_message
+            )
             self._run_current_user_text[run.id] = _message_text(turn_context.current_message)
             self._run_hospital_bag_cart_groups[run.id] = _current_hospital_bag_cart_groups(turn_context.current_message)
             if turn_context.resident_loaded_service_skill is not None:
@@ -250,6 +255,7 @@ class AgentRuntimeExecutor:
             self._run_authoritative_final_text.pop(run.id, None)
             self._run_current_user_text.pop(run.id, None)
             self._run_trusted_form_submissions.pop(run.id, None)
+            self._run_checkup_attachment_counts.pop(run.id, None)
             self._run_business_facts.pop(run.id, None)
             self._run_visible_image_urls.pop(run.id, None)
             self._run_hospital_bag_cart_groups.pop(run.id, None)
@@ -871,6 +877,13 @@ class AgentRuntimeExecutor:
                 "runtime_plan_context": _pregnancy_runtime_plan_context(facts, workflow=workflow),
                 "trusted_current_user_text": self._run_current_user_text.get(run.id, ""),
             }
+        if contract_name == "pregnancy.plan_intake.advance":
+            workflow = await self._latest_pregnancy_plan_workflow(run=run)
+            return {
+                "runtime_workflow_context": _dict(workflow, "payload"),
+                "trusted_current_user_text": self._run_current_user_text.get(run.id, ""),
+                "runtime_checkup_attachment_count": self._run_checkup_attachment_counts.get(run.id, 0),
+            }
         if contract_name in FORM_CREATION_TOOL_NAMES:
             facts = await self._birth_prep_business_facts(run=run)
             default_values = _birth_prep_form_default_values(facts)
@@ -936,7 +949,13 @@ class AgentRuntimeExecutor:
                 form_submission_id=_text(submission or {}, "submission_id"),
             )
             return signal_ids
-        if _text(workflow_payload, "phase") != "awaiting_additional_information" or _text(workflow_payload, "consumed_by_action_id"):
+        if _text(workflow_payload, "phase") not in {
+            "personalized_followup",
+            "checkup_done_question",
+            "checkup_records_upload",
+            "final_plan_confirmation",
+            "awaiting_additional_information",
+        } or _text(workflow_payload, "consumed_by_action_id"):
             return []
         signal_ids = pregnancy_plan_urgent_signal_ids({"additional_info": current_user_text})
         if signal_ids:
@@ -962,7 +981,7 @@ class AgentRuntimeExecutor:
             run_id=run.id,
             owner_user_id=run.actor_user_id,
             artifact_type="pregnancy_plan_workflow",
-            schema_version="v1",
+            schema_version=PREGNANCY_PLAN_WORKFLOW_SCHEMA_VERSION,
             status="created",
             payload={
                 "phase": _text(workflow_payload, "phase") or "collecting_intake",
@@ -1549,6 +1568,7 @@ SERVICE_SKILL_RECOMMENDED_TOOL_CONTRACTS: dict[ServiceSkillId, tuple[str, ...]] 
     ServiceSkillId.BIRTH_PREP: (
         "pregnancy.plan_intake.start",
         "pregnancy.plan_intake.analyze",
+        "pregnancy.plan_intake.advance",
         "pregnancy.plan.propose",
         "plans.plan_delete.propose",
         "plans.task_complete.propose",
@@ -2007,6 +2027,24 @@ def _trusted_form_submissions(message: AgentMessage) -> dict[str, dict[str, Any]
     return submissions
 
 
+def _runtime_checkup_attachment_count(message: AgentMessage) -> int:
+    content = message.content if isinstance(message.content, dict) else {}
+    attachments = content.get("attachments")
+    if not isinstance(attachments, list):
+        return 0
+    count = 0
+    for attachment in attachments:
+        if not isinstance(attachment, dict) or attachment.get("runtime_validated") is not True:
+            continue
+        attachment_type = _text(attachment, "type")
+        content_type = _text(attachment, "content_type").lower()
+        if attachment_type == "image" and MODEL_IMAGE_DATA_URL_PATTERN.match(_text(attachment, "data_url")):
+            count += 1
+        elif attachment_type == "file" and content_type == "application/pdf" and _text(attachment, "file_id"):
+            count += 1
+    return count
+
+
 def _current_hospital_bag_cart_groups(message: AgentMessage) -> list[dict[str, Any]] | None:
     content = message.content if isinstance(message.content, dict) else {}
     client_context = project_agent_client_context(content.get("client_context"))
@@ -2069,7 +2107,14 @@ def _pregnancy_runtime_plan_context(
             value = _text(workflow_payload, key)
             if value:
                 context[key] = value
-        if _text(workflow_payload, "phase") == "awaiting_additional_information":
+        if _text(workflow_payload, "phase") in {
+            "personalized_followup",
+            "checkup_done_question",
+            "checkup_records_upload",
+            "final_plan_confirmation",
+            "ready_to_generate",
+            "awaiting_additional_information",
+        }:
             workflow_artifact_id = _text(workflow or {}, "artifact_id")
             if workflow_artifact_id:
                 context["analysis_artifact_id"] = workflow_artifact_id

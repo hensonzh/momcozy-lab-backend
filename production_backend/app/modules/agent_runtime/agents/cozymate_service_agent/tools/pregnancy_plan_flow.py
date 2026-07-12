@@ -9,7 +9,15 @@ from typing import Any
 
 PREGNANCY_PLAN_INTAKE_FORM_ID = "birth_journey_basic_info_intake"
 PREGNANCY_PLAN_WORKFLOW_ARTIFACT_TYPE = "pregnancy_plan_workflow"
-PREGNANCY_PLAN_WORKFLOW_SCHEMA_VERSION = "v1"
+PREGNANCY_PLAN_WORKFLOW_SCHEMA_VERSION = "v2"
+PREGNANCY_PLAN_FOLLOWUP_MAX_ROUNDS = 3
+PREGNANCY_PLAN_CHECKUP_DONE_QUESTION = (
+    "你目前有没有做过产检？做过的话我再请你上传能找到的记录；还没做过或不确定也可以直接说。"
+)
+PREGNANCY_PLAN_CHECKUP_UPLOAD_QUESTION = (
+    "请上传目前能找到的产检记录，我会把关键复查和待确认项纳入计划；"
+    "如果暂时没有或不方便上传，也可以直接跳过。"
+)
 PREGNANCY_PLAN_FINAL_QUESTION = "还有其他需要补充的信息吗？如果没有，我就基于目前的信息开始为你制定孕期计划啦。"
 PREGNANCY_PLAN_FINAL_QUICK_REPLIES = ("没有了，开始制定", "我想补充一点", "稍等我再看看")
 PREGNANCY_PLAN_URGENT_RESPONSE = (
@@ -19,14 +27,14 @@ PREGNANCY_PLAN_URGENT_RESPONSE = (
 
 
 class PregnancyPlanPhase(StrEnum):
-    """Durable pre-generation phases only.
-
-    Technical progress belongs to AgentRun/AgentToolCall. Proposal confirmation
-    belongs to AgentAction, and an applied plan belongs to the plans domain.
-    """
+    """Durable, user-visible pregnancy-plan intake phases."""
 
     COLLECTING_INTAKE = "collecting_intake"
-    AWAITING_ADDITIONAL_INFORMATION = "awaiting_additional_information"
+    PERSONALIZED_FOLLOWUP = "personalized_followup"
+    CHECKUP_DONE_QUESTION = "checkup_done_question"
+    CHECKUP_RECORDS_UPLOAD = "checkup_records_upload"
+    FINAL_PLAN_CONFIRMATION = "final_plan_confirmation"
+    READY_TO_GENERATE = "ready_to_generate"
 
 
 PREGNANCY_PLAN_INTAKE_FIELDS: tuple[dict[str, Any], ...] = (
@@ -189,6 +197,326 @@ def collecting_intake_snapshot(*, form_artifact_id: str) -> dict[str, str]:
         "source_form_artifact_id": str(form_artifact_id).strip(),
         "form_id": PREGNANCY_PLAN_INTAKE_FORM_ID,
     }
+
+
+def initialize_pregnancy_plan_workflow(
+    values: dict[str, Any],
+    *,
+    form_artifact_id: str,
+    form_submission_id: str,
+    analysis_run_id: str,
+) -> dict[str, Any]:
+    plan_context = normalize_pregnancy_plan_intake(values)
+    analysis = analyze_pregnancy_plan_intake(values)
+    followup_topics = _pregnancy_plan_followup_topics(plan_context)
+    phase = (
+        PregnancyPlanPhase.PERSONALIZED_FOLLOWUP
+        if followup_topics
+        else _phase_after_personalized_followups(analysis)
+    )
+    workflow: dict[str, Any] = {
+        "phase": phase.value,
+        "source_form_artifact_id": str(form_artifact_id).strip(),
+        "source_form_submission_id": str(form_submission_id).strip(),
+        "form_id": PREGNANCY_PLAN_INTAKE_FORM_ID,
+        "analysis_run_id": str(analysis_run_id).strip(),
+        "plan_context": plan_context,
+        "analysis": analysis,
+        "followup_topics": followup_topics,
+        "personalized_followup_records": [],
+    }
+    return _with_current_visible_question(workflow)
+
+
+def pregnancy_plan_current_followup(workflow: dict[str, Any]) -> dict[str, Any] | None:
+    if str(workflow.get("phase") or "") != PregnancyPlanPhase.PERSONALIZED_FOLLOWUP.value:
+        return None
+    records = _followup_records(workflow)
+    if len(records) >= PREGNANCY_PLAN_FOLLOWUP_MAX_ROUNDS:
+        return None
+    answered = {str(record.get("topic") or "").strip() for record in records}
+    topics = workflow.get("followup_topics")
+    if not isinstance(topics, list):
+        return None
+    for topic in topics:
+        if not isinstance(topic, dict):
+            continue
+        topic_id = str(topic.get("id") or "").strip()
+        if topic_id and topic_id not in answered:
+            return deepcopy(topic)
+    return None
+
+
+def advance_pregnancy_plan_workflow(
+    workflow: dict[str, Any],
+    *,
+    action: str,
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    updated = deepcopy(workflow)
+    normalized_action = str(action or "").strip()
+    values = payload or {}
+    phase = str(updated.get("phase") or "")
+
+    if phase == PregnancyPlanPhase.PERSONALIZED_FOLLOWUP.value:
+        if normalized_action == "finish_personalized_followups":
+            updated["personalized_followup_done"] = True
+            summary = str(values.get("summary") or "").strip()
+            if summary:
+                updated["personalized_followup_summary"] = summary[:2000]
+            updated["phase"] = _phase_after_personalized_followups(_dict(updated, "analysis")).value
+            return _with_current_visible_question(updated)
+        if normalized_action != "submit_personalized_followup":
+            raise ValueError("invalid_pregnancy_plan_followup_action")
+        current = pregnancy_plan_current_followup(updated)
+        if current is None:
+            raise ValueError("pregnancy_plan_followup_not_available")
+        topic_id = str(values.get("topic") or values.get("followup_id") or "").strip()
+        if topic_id != str(current.get("id") or ""):
+            raise ValueError("unexpected_pregnancy_plan_followup_topic")
+        answer = str(values.get("answer") or "").strip()
+        if not answer:
+            raise ValueError("missing_pregnancy_plan_followup_answer")
+        records = _followup_records(updated)
+        records.append(
+            {
+                "topic": topic_id,
+                "question": str(values.get("question") or current.get("question") or "").strip()[:2000],
+                "answer": answer[:2000],
+                "plan_impact": str(values.get("plan_impact") or current.get("plan_impact") or "").strip()[:2000],
+            }
+        )
+        updated["personalized_followup_records"] = records
+        plan_context = _dict(updated, "plan_context")
+        plan_context["personalized_followup_records"] = deepcopy(records)
+        plan_context["personalized_facts"] = "；".join(
+            f"{record['topic']} / {record['answer']}" for record in records if record.get("topic") and record.get("answer")
+        )
+        updated["plan_context"] = plan_context
+        if len(records) >= PREGNANCY_PLAN_FOLLOWUP_MAX_ROUNDS or pregnancy_plan_current_followup(updated) is None:
+            updated["phase"] = _phase_after_personalized_followups(_dict(updated, "analysis")).value
+        return _with_current_visible_question(updated)
+
+    if phase == PregnancyPlanPhase.CHECKUP_DONE_QUESTION.value:
+        plan_context = _dict(updated, "plan_context")
+        if normalized_action == "confirm_checkup_done":
+            updated["checkup_done_confirmed"] = True
+            updated["phase"] = PregnancyPlanPhase.CHECKUP_RECORDS_UPLOAD.value
+        elif normalized_action in {"confirm_no_checkup_yet", "confirm_checkup_unknown"}:
+            checkup_status = "还没做过产检" if normalized_action == "confirm_no_checkup_yet" else "暂不确定是否做过产检"
+            updated["checkup_status"] = checkup_status
+            plan_context["checkup_status"] = checkup_status
+            updated["phase"] = PregnancyPlanPhase.FINAL_PLAN_CONFIRMATION.value
+        else:
+            raise ValueError("invalid_pregnancy_plan_checkup_action")
+        updated["plan_context"] = plan_context
+        return _with_current_visible_question(updated)
+
+    if phase == PregnancyPlanPhase.CHECKUP_RECORDS_UPLOAD.value:
+        plan_context = _dict(updated, "plan_context")
+        if normalized_action == "mark_checkup_records_uploaded":
+            updated["checkup_records_uploaded"] = True
+            plan_context["checkup_records_uploaded"] = "是"
+            plan_context["checkup_status"] = "已上传产检记录"
+        elif normalized_action == "skip_checkup_records":
+            updated["checkup_status"] = "暂不上传"
+            plan_context["checkup_status"] = "暂不上传"
+        else:
+            raise ValueError("invalid_pregnancy_plan_checkup_records_action")
+        updated["plan_context"] = plan_context
+        updated["phase"] = PregnancyPlanPhase.FINAL_PLAN_CONFIRMATION.value
+        return _with_current_visible_question(updated)
+
+    if phase == PregnancyPlanPhase.FINAL_PLAN_CONFIRMATION.value:
+        if normalized_action not in {"confirm_ready_to_generate", "submit_final_additional_info"}:
+            raise ValueError("invalid_pregnancy_plan_final_confirmation_action")
+        plan_context = _dict(updated, "plan_context")
+        if normalized_action == "submit_final_additional_info":
+            additional_info = str(values.get("additional_info") or values.get("final_additional_info") or "").strip()
+            if not additional_info:
+                raise ValueError("missing_pregnancy_plan_final_additional_info")
+            plan_context["final_additional_info"] = additional_info[:2000]
+        updated["plan_context"] = plan_context
+        updated["final_plan_confirmed"] = True
+        updated["phase"] = PregnancyPlanPhase.READY_TO_GENERATE.value
+        return _with_current_visible_question(updated)
+
+    if phase == PregnancyPlanPhase.READY_TO_GENERATE.value and normalized_action in {
+        "confirm_ready_to_generate",
+        "submit_final_additional_info",
+    }:
+        return _with_current_visible_question(updated)
+    raise ValueError("pregnancy_plan_workflow_action_not_allowed")
+
+
+def _pregnancy_plan_followup_topics(plan_context: dict[str, Any]) -> list[dict[str, Any]]:
+    topics: list[dict[str, Any]] = []
+    age = _age(plan_context.get("age"))
+    prior_history = str(plan_context.get("prior_birth_history") or "").strip()
+    medical_notes = str(plan_context.get("medical_notes") or "").strip()
+    doctor_notes = str(plan_context.get("doctor_notes") or "").strip()
+    is_multiple = _is_multiple(plan_context.get("fetus_count"))
+
+    if _meaningful(doctor_notes):
+        topics.append(
+            _followup_topic(
+                "doctor_special_notes_followup",
+                "医生已经给了需要优先落实的特殊提醒。",
+                "这会直接影响复查时间、观察重点和异常联系路径。",
+                "这项提醒具体对应什么复查或观察要求、计划在什么时候完成？如果暂时不清楚，可以说“还不确定”。",
+                ("我补充具体安排", "还不确定", "先放进待确认"),
+            )
+        )
+    if _contains_any(prior_history, ("剖", "c-section", "cesarean")):
+        topics.append(
+            _followup_topic(
+                "prior_c_section_birth_path_detail",
+                "既往剖宫产经历会影响这次分娩方式评估和孕晚期准备。",
+                "计划需要纳入上次剖宫产原因、这次评估节点和入院准备。",
+                "上次剖宫产的主要原因是什么，这次目前倾向顺产还是再次剖宫产？不确定也可以先记为待确认。",
+                ("我补充上次原因", "还不确定", "先放进待确认"),
+            )
+        )
+    if _contains_any(prior_history, ("早产", "preterm", "premature")):
+        topics.append(
+            _followup_topic(
+                "prior_preterm_monitoring_detail",
+                "既往早产经历会让这次更关注宫颈、宫缩和早产信号。",
+                "计划会把相关复查、异常联系路径和提前准备适当前置。",
+                "上次大约在多少孕周早产，这次有没有已经在复查宫颈或被提醒关注宫缩？暂不清楚也可以。",
+                ("我补充孕周/复查", "还不确定", "先放进待确认"),
+            )
+        )
+    if _meaningful(medical_notes):
+        topics.append(
+            _followup_topic(
+                "chronic_medical_condition_coordination",
+                "基础疾病或长期用药需要和产科复查、相关专科保持一致。",
+                "计划会纳入用药安全确认、专科复查和异常指标联系路径。",
+                "目前长期吃药的名称或用途是什么，下一次用药确认或相关专科复查安排在什么时候？还不确定也可以。",
+                ("我补充用药/复查", "还不确定", "先放进待确认"),
+            )
+        )
+    if age is not None and age >= 35 and is_multiple:
+        topics.append(
+            _followup_topic(
+                "age_35_plus_multiple_monitoring",
+                f"你 {age} 岁且是多胎妊娠，这会同时影响产科管理分层和多胎监测重点。",
+                "计划会更早关注血压血糖、胎儿生长差异、宫颈长度、复查频率和早产信号。",
+                "目前产检记录里的多胎类型、宫颈长度或胎儿生长差异有没有已经确认的结果？暂无异常或还没确认都可以。",
+                ("暂无异常", "还没确认", "我补充一下"),
+            )
+        )
+    elif is_multiple:
+        topics.append(
+            _followup_topic(
+                "multiple_pregnancy_monitoring",
+                "多胎妊娠会更关注胎儿生长差异、宫颈情况、复查频率和早产信号。",
+                "计划会把多胎类型对应的复查节奏和异常联系路径纳入近期安排。",
+                "目前产检记录里的双胎类型是单绒双羊、双绒双羊，还是还没确认？",
+                ("单绒双羊", "双绒双羊", "还没确认"),
+            )
+        )
+    if _is_no(plan_context.get("first_birth")) and not _meaningful(prior_history):
+        topics.append(
+            _followup_topic(
+                "prior_birth_history_detail",
+                "既往分娩和恢复经历会影响这次分娩沟通、入院准备和产后支持。",
+                "计划会保留仍适用的经验，并把上次出现的问题提前纳入准备。",
+                "上一胎的分娩方式，以及早产、产后出血或恢复困难等情况有需要纳入这次计划的吗？暂无也可以。",
+                ("没有特殊情况", "我补充一下", "先放进待确认"),
+            )
+        )
+    if age is not None and age >= 35 and not is_multiple:
+        topics.append(
+            _followup_topic(
+                "age_35_plus_checkup_detail",
+                f"你 {age} 岁，在产科管理上通常会被归入高龄孕产妇范围。",
+                "计划会更早关注筛查选择、血压血糖、胎儿生长和复查节奏。",
+                "血压/血糖、胎儿生长或甲状腺/免疫或长期用药方面，有没有已经被提醒过或正在复查的项目？暂无异常也可以。",
+                ("暂无异常", "正在复查", "还不确定"),
+            )
+        )
+    if _is_yes(plan_context.get("ivf")):
+        topics.append(
+            _followup_topic(
+                "ivf_week_confirmation",
+                "IVF/辅助生殖会影响孕周和预产期的确认口径，也可能关联用药复查。",
+                "计划会优先对齐医生确认的孕周、移植日期口径、用药与复查节点。",
+                "移植日期/孕周口径是否已经由医生确认，目前还有黄体支持或其他需要复核的用药吗？不确定也可以。",
+                ("已经确认", "还在用药", "还不确定"),
+            )
+        )
+    if "剖" in str(plan_context.get("birth_path") or "") and not _contains_any(prior_history, ("剖", "c-section", "cesarean")):
+        topics.append(
+            _followup_topic(
+                "planned_c_section_detail",
+                "计划剖宫产会影响孕晚期沟通、入院时间和术后支持准备。",
+                "计划会提前安排手术评估、术前检查、入院要求和恢复支持。",
+                "计划剖宫产主要是因为什么，目前手术评估或大致时间有没有确定？还没确定也可以。",
+                ("我补充原因", "时间已确定", "还不确定"),
+            )
+        )
+    return topics
+
+
+def _followup_topic(
+    topic_id: str,
+    observation: str,
+    plan_impact: str,
+    question: str,
+    reply_options: tuple[str, str, str],
+) -> dict[str, Any]:
+    return {
+        "id": topic_id,
+        "observation": observation,
+        "management_meaning": observation,
+        "plan_impact": plan_impact,
+        "question": question,
+        "reply_options": list(reply_options),
+    }
+
+
+def _phase_after_personalized_followups(analysis: dict[str, Any]) -> PregnancyPlanPhase:
+    stage = _dict(analysis, "stage")
+    if str(stage.get("id") or "") == "first_trimester":
+        return PregnancyPlanPhase.CHECKUP_DONE_QUESTION
+    return PregnancyPlanPhase.CHECKUP_RECORDS_UPLOAD
+
+
+def _with_current_visible_question(workflow: dict[str, Any]) -> dict[str, Any]:
+    updated = deepcopy(workflow)
+    phase = str(updated.get("phase") or "")
+    question = ""
+    if phase == PregnancyPlanPhase.PERSONALIZED_FOLLOWUP.value:
+        current = pregnancy_plan_current_followup(updated)
+        question = str((current or {}).get("question") or "").strip()
+    elif phase == PregnancyPlanPhase.CHECKUP_DONE_QUESTION.value:
+        question = PREGNANCY_PLAN_CHECKUP_DONE_QUESTION
+    elif phase == PregnancyPlanPhase.CHECKUP_RECORDS_UPLOAD.value:
+        question = PREGNANCY_PLAN_CHECKUP_UPLOAD_QUESTION
+    elif phase == PregnancyPlanPhase.FINAL_PLAN_CONFIRMATION.value:
+        question = PREGNANCY_PLAN_FINAL_QUESTION
+    if question:
+        updated["visible_question"] = question
+    else:
+        updated.pop("visible_question", None)
+    return updated
+
+
+def _followup_records(workflow: dict[str, Any]) -> list[dict[str, Any]]:
+    records = workflow.get("personalized_followup_records")
+    return [deepcopy(record) for record in records if isinstance(record, dict)] if isinstance(records, list) else []
+
+
+def _dict(payload: dict[str, Any], key: str) -> dict[str, Any]:
+    value = payload.get(key)
+    return deepcopy(value) if isinstance(value, dict) else {}
+
+
+def _contains_any(value: str, tokens: tuple[str, ...]) -> bool:
+    normalized = value.lower()
+    return bool(normalized) and any(token.lower() in normalized for token in tokens)
 
 
 def normalize_pregnancy_plan_intake(values: dict[str, Any]) -> dict[str, Any]:

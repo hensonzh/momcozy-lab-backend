@@ -75,8 +75,9 @@
 | Canonical contract | 模型看到的 SDK name | 加载 | 读写 | 需确认 | 用途 |
 | --- | --- | --- | --- | --- | --- |
 | `pregnancy.plan_intake.start` | `pregnancy_plan_intake_start` | deferred | write | 否 | 用户同意开始制定孕期计划且当前没有 active 计划时，创建一张可信基础信息表单。 |
-| `pregnancy.plan_intake.analyze` | `pregnancy_plan_intake_analyze` | deferred | write | 否 | 只消费应用侧已校验的孕期计划表单提交，生成针对性分析快照并进入最后补充信息确认。 |
-| `pregnancy.plan.propose` | `pregnancy_plan_propose` | deferred | write | 是 | 针对性分析完成且用户在下一轮确认无补充或给出最后补充后，基于可信快照创建待确认计划。 |
+| `pregnancy.plan_intake.analyze` | `pregnancy_plan_intake_analyze` | deferred | write | 否 | 只消费应用侧已校验的孕期计划表单提交，按风险/信息缺口进入 0..3 轮不重复个性化追问或产检资料步骤。 |
+| `pregnancy.plan_intake.advance` | `pregnancy_plan_intake_advance` | deferred | write | 否 | 只推进当前可信步骤：个性化追问、孕早期产检确认、当前 run 附件上传/跳过、最终补充确认。 |
+| `pregnancy.plan.propose` | `pregnancy_plan_propose` | deferred | write | 是 | intake 完成产检资料步骤并进入 `ready_to_generate` 后，基于可信快照创建待确认计划。 |
 | `plans.plan_delete.propose` | `plans_plan_delete_propose` | deferred | write | 是 | 用户明确删除整个已有计划时创建删除确认。 |
 | `plans.task_update.propose` | `plans_task_update_propose` | deferred | write | 是 | 用户明确调整已有任务日期、时间、标题、描述或载荷时创建更新确认。 |
 | `plans.task_delete.propose` | `plans_task_delete_propose` | deferred | write | 是 | 用户明确删除已有任务时创建删除确认。 |
@@ -129,7 +130,7 @@ service skill 只通过 `recommended_tools` 向模型提示常用工具，不拥
 | Service skill | 当前 recommended tool contract |
 | --- | --- |
 | `milk-management` | `milk_management` namespace 的全部 17 个工具 |
-| `birth-prep` | `pregnancy.plan_intake.start`、`pregnancy.plan_intake.analyze`、`pregnancy.plan.propose`、`plans.plan_delete.propose`、`plans.task_complete.propose`、`plans.task_update.propose`、`plans.task_delete.propose`、4 个分娩沟通/待产包表单与卡片工具、`hospital_bag_cart_update`、`hospital_bag_pump_recommend` |
+| `birth-prep` | `pregnancy.plan_intake.start`、`pregnancy.plan_intake.analyze`、`pregnancy.plan_intake.advance`、`pregnancy.plan.propose`、`plans.plan_delete.propose`、`plans.task_complete.propose`、`plans.task_update.propose`、`plans.task_delete.propose`、4 个分娩沟通/待产包表单与卡片工具、`hospital_bag_cart_update`、`hospital_bag_pump_recommend` |
 | `health-consultation` | `records.milk_status.read`、`ibclc_consult_card_create` |
 | `emotion-support` | 空；当前没有专属 recommended tool |
 | `device-guidance` | `device_support` namespace 的全部 3 个工具 |

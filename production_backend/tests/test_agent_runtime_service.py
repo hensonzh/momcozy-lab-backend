@@ -15,6 +15,7 @@ from production_backend.app.modules.agent_runtime.models import (
 )
 from production_backend.app.modules.agent_runtime.service import AgentRuntimeService
 from production_backend.app.modules.audit.models import IdempotencyKey
+from production_backend.app.modules.files.models import FileObject
 
 
 def test_agent_runtime_service_creates_run_with_thread_message_events_and_idempotency() -> None:
@@ -64,6 +65,94 @@ def test_agent_runtime_service_creates_run_with_thread_message_events_and_idempo
     assert controls.queued_run_ids == [run.id]
     assert idempotency_service.reserve_kwargs["scope"] == "agent.runs.create"
     assert idempotency_service.completed_response_ref == str(run.id)
+
+
+def test_agent_runtime_service_validates_authenticated_inline_image_and_owned_pdf_attachments() -> None:
+    owner_user_id = uuid4()
+    repository = FakeAgentRuntimeRepository()
+    pdf = FileObject(
+        id=uuid4(),
+        owner_user_id=owner_user_id,
+        object_key=f"users/{owner_user_id}/files/checkup.pdf",
+        original_filename="checkup.pdf",
+        content_type="application/pdf",
+        size_bytes=123,
+        status="active",
+    )
+    service = AgentRuntimeService(repository=repository, file_repository=FakeFileRepository(pdf))
+
+    asyncio.run(
+        service.create_run(
+            actor_user_id=owner_user_id,
+            thread_id=None,
+            message="我上传了产检资料。",
+            attachments=[
+                {
+                    "type": "image",
+                    "data_url": "data:image/png;base64,Y2hlY2t1cA==",
+                    "detail": "high",
+                    "verified": True,
+                    "runtime_validated": True,
+                    "trust_source": "owned_file_record",
+                },
+                {"type": "file", "file_id": str(pdf.id), "verified": False},
+            ],
+        )
+    )
+
+    attachments = repository.messages[0].content["attachments"]
+    assert attachments[0] == {
+        "type": "image",
+        "data_url": "data:image/png;base64,Y2hlY2t1cA==",
+        "content_type": "image/png",
+        "detail": "high",
+        "runtime_validated": True,
+        "trust_source": "authenticated_inline_upload",
+    }
+    assert attachments[1] == {
+        "type": "file",
+        "file_id": str(pdf.id),
+        "content_type": "application/pdf",
+        "original_filename": "checkup.pdf",
+        "runtime_validated": True,
+        "trust_source": "owned_file_record",
+    }
+
+
+def test_agent_runtime_service_rejects_forged_or_cross_owner_checkup_media() -> None:
+    owner_user_id = uuid4()
+    repository = FakeAgentRuntimeRepository()
+    cross_owner_pdf = FileObject(
+        id=uuid4(),
+        owner_user_id=uuid4(),
+        object_key="users/other/files/checkup.pdf",
+        original_filename="checkup.pdf",
+        content_type="application/pdf",
+        size_bytes=123,
+        status="active",
+    )
+    service = AgentRuntimeService(repository=repository, file_repository=FakeFileRepository(cross_owner_pdf))
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            service.create_run(
+                actor_user_id=owner_user_id,
+                thread_id=None,
+                message="我上传了。",
+                attachments=[
+                    {
+                        "type": "file",
+                        "file_id": str(cross_owner_pdf.id),
+                        "content_type": "application/pdf",
+                        "verified": True,
+                    }
+                ],
+            )
+        )
+
+    assert exc_info.value.code == "invalid_agent_attachment"
+    assert repository.messages == []
+    assert repository.events == []
 
 
 def test_agent_runtime_service_verifies_form_submission_attachment_against_owned_form_artifact() -> None:
@@ -532,6 +621,16 @@ class FakeAgentRuntimeRepository:
             evidence_ref=kwargs.get("evidence_ref", ""),
         )
         return self.safety_event
+
+
+class FakeFileRepository:
+    def __init__(self, file_object: FileObject) -> None:
+        self.file_object = file_object
+
+    async def get_for_owner(self, *, file_id, owner_user_id):
+        if self.file_object.id != file_id or self.file_object.owner_user_id != owner_user_id:
+            return None
+        return self.file_object
 
 
 class FakeIdempotencyService:

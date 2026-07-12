@@ -348,7 +348,25 @@ def default_tool_registry() -> ToolContractRegistry:
             domain="birth_prep",
             description=(
                 "分析应用侧已校验的孕期计划基础表单提交。当前用户消息包含 birth_journey_basic_info_intake 提交时调用，"
-                "工具参数保持空对象；分析后必须向用户说明针对性影响并询问是否还有补充，本轮不要生成计划。"
+                "工具参数保持空对象；工具会按风险和信息缺口进入最多三轮个性化追问，或直接进入产检资料步骤。"
+            ),
+            read_or_write="write",
+            side_effect_level="low",
+            blocking_policy="must_wait",
+            result_dependency="final_response",
+            requires_confirmation=False,
+            idempotency_required=True,
+            audit_required=True,
+            timeout_seconds=15,
+        )
+    )
+    registry.register(
+        _tool_contract(
+            name="pregnancy.plan_intake.advance",
+            domain="birth_prep",
+            description=(
+                "推进当前用户已验证的孕期计划 intake，用户回答当前可见步骤时调用。只提交一项回答：个性化追问、"
+                "孕早期产检确认、产检资料上传/跳过或最终补充；不要在参数中伪造 workflow 或附件。"
             ),
             read_or_write="write",
             side_effect_level="low",
@@ -365,8 +383,8 @@ def default_tool_registry() -> ToolContractRegistry:
             name="pregnancy.plan.propose",
             domain="plans",
             description=(
-                "基于最近一次已分析的可信孕期计划表单和本轮最终补充创建计划预览并发起待确认动作。"
-                "只在针对性分析已经完成、用户随后明确没有更多信息或给出最后补充时调用。"
+                "基于当前用户已完成个性化追问、产检资料步骤和最终补充确认的可信 intake 创建孕期计划。"
+                "只在 pregnancy.plan_intake.advance 返回 ready_to_generate 时调用。"
             ),
             read_or_write="write",
             side_effect_level="medium",

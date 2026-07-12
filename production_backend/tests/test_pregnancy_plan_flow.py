@@ -1,23 +1,161 @@
 from datetime import date, datetime, timezone
 
 from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.tools.pregnancy_plan_flow import (
+    PREGNANCY_PLAN_CHECKUP_DONE_QUESTION,
+    PREGNANCY_PLAN_CHECKUP_UPLOAD_QUESTION,
     PREGNANCY_PLAN_FINAL_QUESTION,
+    PREGNANCY_PLAN_FOLLOWUP_MAX_ROUNDS,
+    PREGNANCY_PLAN_WORKFLOW_SCHEMA_VERSION,
     PregnancyPlanPhase,
+    advance_pregnancy_plan_workflow,
     analyze_pregnancy_plan_intake,
     build_pregnancy_plan_card_json,
     build_pregnancy_plan_intake_form,
     build_pregnancy_plan_result,
     collecting_intake_snapshot,
     ensure_pregnancy_plan_final_question,
+    initialize_pregnancy_plan_workflow,
+    pregnancy_plan_current_followup,
     pregnancy_plan_urgent_signal_ids,
 )
 
 
-def test_pregnancy_plan_flow_keeps_only_durable_pregeneration_phases() -> None:
+def test_pregnancy_plan_flow_matches_legacy_visible_pregeneration_phases() -> None:
     assert [phase.value for phase in PregnancyPlanPhase] == [
         "collecting_intake",
-        "awaiting_additional_information",
+        "personalized_followup",
+        "checkup_done_question",
+        "checkup_records_upload",
+        "final_plan_confirmation",
+        "ready_to_generate",
     ]
+    assert PREGNANCY_PLAN_FOLLOWUP_MAX_ROUNDS == 3
+    assert PREGNANCY_PLAN_WORKFLOW_SCHEMA_VERSION == "v2"
+
+
+def test_pregnancy_plan_workflow_asks_zero_followups_when_the_form_has_no_material_gap() -> None:
+    workflow = initialize_pregnancy_plan_workflow(
+        {
+            "current_week": "20周",
+            "ivf": "否",
+            "fetus_count": "单胎",
+            "age": 30,
+            "first_birth": "是",
+            "birth_path": "顺产",
+            "prior_birth_history": "没有异常孕产史",
+            "medical_notes": "没有基础疾病",
+            "doctor_notes": "医生没有特殊提醒",
+        },
+        form_artifact_id="form-1",
+        form_submission_id="submission-1",
+        analysis_run_id="run-1",
+    )
+
+    assert workflow["phase"] == PregnancyPlanPhase.CHECKUP_RECORDS_UPLOAD.value
+    assert workflow["followup_topics"] == []
+    assert workflow["visible_question"] == PREGNANCY_PLAN_CHECKUP_UPLOAD_QUESTION
+
+
+def test_pregnancy_plan_workflow_asks_at_most_three_non_repeating_risk_followups() -> None:
+    workflow = initialize_pregnancy_plan_workflow(
+        {
+            "current_week": "20周",
+            "ivf": "是",
+            "fetus_count": "双胎",
+            "age": 38,
+            "first_birth": "否",
+            "prior_birth_history": "上次剖宫产，早产，有流产和产后出血史",
+            "birth_path": "剖宫产",
+            "medical_notes": "高血压，妊娠糖尿病，甲状腺长期用药",
+            "doctor_notes": "胎盘低置，需要复查",
+        },
+        form_artifact_id="form-1",
+        form_submission_id="submission-1",
+        analysis_run_id="run-1",
+    )
+
+    asked_topics: list[str] = []
+    while workflow["phase"] == PregnancyPlanPhase.PERSONALIZED_FOLLOWUP.value:
+        followup = pregnancy_plan_current_followup(workflow)
+        assert followup is not None
+        asked_topics.append(followup["id"])
+        workflow = advance_pregnancy_plan_workflow(
+            workflow,
+            action="submit_personalized_followup",
+            payload={
+                "topic": followup["id"],
+                "question": followup["question"],
+                "answer": "还不确定",
+                "plan_impact": followup["plan_impact"],
+            },
+        )
+
+    assert asked_topics == [
+        "doctor_special_notes_followup",
+        "prior_c_section_birth_path_detail",
+        "prior_preterm_monitoring_detail",
+    ]
+    assert len(asked_topics) == PREGNANCY_PLAN_FOLLOWUP_MAX_ROUNDS
+    assert len(set(asked_topics)) == len(asked_topics)
+    assert workflow["phase"] == PregnancyPlanPhase.CHECKUP_RECORDS_UPLOAD.value
+
+
+def test_pregnancy_plan_workflow_early_stage_asks_checkup_done_then_upload_or_skip() -> None:
+    workflow = initialize_pregnancy_plan_workflow(
+        {
+            "current_week": "8周",
+            "ivf": "否",
+            "fetus_count": "单胎",
+            "age": 30,
+            "first_birth": "是",
+            "birth_path": "还没确定",
+        },
+        form_artifact_id="form-1",
+        form_submission_id="submission-1",
+        analysis_run_id="run-1",
+    )
+
+    assert workflow["phase"] == PregnancyPlanPhase.CHECKUP_DONE_QUESTION.value
+    assert workflow["visible_question"] == PREGNANCY_PLAN_CHECKUP_DONE_QUESTION
+
+    done = advance_pregnancy_plan_workflow(workflow, action="confirm_checkup_done", payload={})
+    assert done["phase"] == PregnancyPlanPhase.CHECKUP_RECORDS_UPLOAD.value
+    assert done["visible_question"] == PREGNANCY_PLAN_CHECKUP_UPLOAD_QUESTION
+
+    skipped = advance_pregnancy_plan_workflow(workflow, action="confirm_no_checkup_yet", payload={})
+    assert skipped["phase"] == PregnancyPlanPhase.FINAL_PLAN_CONFIRMATION.value
+    assert skipped["plan_context"]["checkup_status"] == "还没做过产检"
+    assert skipped["visible_question"] == PREGNANCY_PLAN_FINAL_QUESTION
+
+
+def test_pregnancy_plan_workflow_upload_or_skip_reaches_one_final_confirmation_then_ready() -> None:
+    workflow = initialize_pregnancy_plan_workflow(
+        {
+            "current_week": "28周",
+            "ivf": "否",
+            "fetus_count": "单胎",
+            "age": 30,
+            "first_birth": "是",
+            "birth_path": "顺产",
+        },
+        form_artifact_id="form-1",
+        form_submission_id="submission-1",
+        analysis_run_id="run-1",
+    )
+    assert workflow["phase"] == PregnancyPlanPhase.CHECKUP_RECORDS_UPLOAD.value
+
+    skipped = advance_pregnancy_plan_workflow(workflow, action="skip_checkup_records", payload={})
+    assert skipped["phase"] == PregnancyPlanPhase.FINAL_PLAN_CONFIRMATION.value
+    assert skipped["plan_context"]["checkup_status"] == "暂不上传"
+
+    ready = advance_pregnancy_plan_workflow(
+        skipped,
+        action="submit_final_additional_info",
+        payload={"additional_info": "胎盘低置需要复查"},
+    )
+    assert ready["phase"] == PregnancyPlanPhase.READY_TO_GENERATE.value
+    assert ready["plan_context"]["final_additional_info"] == "胎盘低置需要复查"
+    assert "visible_question" not in ready
 
 
 def test_pregnancy_plan_intake_form_matches_legacy_visible_contract() -> None:

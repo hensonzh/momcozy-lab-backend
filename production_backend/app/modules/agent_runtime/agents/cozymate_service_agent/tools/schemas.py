@@ -339,6 +339,31 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
         "additionalProperties": False,
         "properties": {},
     },
+    "pregnancy.plan_intake.advance": {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["action"],
+        "properties": {
+            "action": {
+                "type": "string",
+                "enum": [
+                    "submit_personalized_followup",
+                    "finish_personalized_followups",
+                    "confirm_checkup_done",
+                    "confirm_no_checkup_yet",
+                    "confirm_checkup_unknown",
+                    "mark_checkup_records_uploaded",
+                    "skip_checkup_records",
+                    "confirm_ready_to_generate",
+                    "submit_final_additional_info",
+                ],
+            },
+            "topic": {"type": "string", "maxLength": 120},
+            "answer": {"type": "string", "maxLength": 2000},
+            "summary": {"type": "string", "maxLength": 2000},
+            "additional_info": {"type": "string", "maxLength": 2000},
+        },
+    },
     "plans.task_create.propose": {
         "type": "object",
         "additionalProperties": False,

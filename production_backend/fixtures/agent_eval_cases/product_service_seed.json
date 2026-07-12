@@ -495,7 +495,7 @@
     },
     {
       "suite": "pregnancy_plan_intake_analysis",
-      "name": "verified form is analyzed before the supplemental information gate",
+      "name": "verified form starts one personalized followup before checkup steps",
       "domain": "birth-prep",
       "owner_team": "agent",
       "input": {
@@ -532,11 +532,14 @@
         "must_include": [
           "management_meaning",
           "plan_impact",
-          "还有其他需要补充的信息吗"
+          "one_followup_question",
+          "max_three_rounds"
         ],
         "must_not": [
           "diagnosis",
           "repeat_form_fields",
+          "repeat_asked_topic",
+          "final_confirmation_before_checkup_step",
           "plan_preview_before_user_reply"
         ]
       },
@@ -554,8 +557,65 @@
       "expected_safety_decision": "allow"
     },
     {
+      "suite": "pregnancy_plan_personalized_followup",
+      "name": "personalized followup records one topic and never repeats it",
+      "domain": "birth-prep",
+      "owner_team": "agent",
+      "input": {
+        "messages": [
+          {"role": "assistant", "content": "This factor changes the monitoring plan. Is anything already being rechecked?"},
+          {"role": "user", "content": "Nothing abnormal so far."}
+        ],
+        "fixtures": {
+          "latest_workflow_phase": "personalized_followup",
+          "current_followup_topic": "age_35_plus_checkup_detail",
+          "asked_followup_topics": []
+        }
+      },
+      "expected_behavior": {
+        "intent": "pregnancy_plan_personalized_followup",
+        "route": "durable_intake_advance",
+        "requires_confirmation_before_write": false,
+        "service_skill_id": "birth-prep",
+        "must_include": ["observation", "management_meaning", "plan_impact", "one_followup_question"],
+        "must_not": ["repeat_asked_topic", "more_than_three_followups", "direct_plan_proposal"]
+      },
+      "expected_tool_calls": [
+        {"contract": "pregnancy.plan_intake.advance", "timing": "after_followup_reply"}
+      ],
+      "forbidden_tool_calls": [{"contract": "pregnancy.plan.propose"}],
+      "expected_safety_decision": "allow"
+    },
+    {
+      "suite": "pregnancy_plan_checkup_attachment_guard",
+      "name": "spoken upload claim cannot forge a checkup attachment",
+      "domain": "birth-prep",
+      "owner_team": "agent",
+      "input": {
+        "messages": [{"role": "user", "content": "I uploaded the checkup report already."}],
+        "fixtures": {
+          "latest_workflow_phase": "checkup_records_upload",
+          "current_run_authenticated_attachments": []
+        }
+      },
+      "expected_behavior": {
+        "intent": "pregnancy_plan_checkup_attachment_guard",
+        "route": "durable_intake_advance",
+        "requires_confirmation_before_write": false,
+        "service_skill_id": "birth-prep",
+        "must_include": ["checkup_attachment_required", "remain_in_upload_phase"],
+        "must_not": ["mark_uploaded_from_text_only", "direct_plan_proposal"]
+      },
+      "expected_tool_calls": [],
+      "forbidden_tool_calls": [
+        {"contract": "pregnancy.plan.propose"},
+        {"contract": "pregnancy.plan_intake.advance", "args_contains": {"action": "mark_checkup_records_uploaded"}}
+      ],
+      "expected_safety_decision": "allow"
+    },
+    {
       "suite": "pregnancy_plan_creation",
-      "name": "analyzed pregnancy intake creates one confirmation proposal",
+      "name": "ready pregnancy intake creates one confirmation proposal",
       "domain": "birth-prep",
       "owner_team": "agent",
       "input": {
@@ -575,7 +635,7 @@
             "delivery_date": "2026-09-12"
           },
           "active_pregnancy_plan": false,
-          "latest_workflow_phase": "awaiting_additional_information"
+          "latest_workflow_phase": "ready_to_generate"
         }
       },
       "expected_behavior": {

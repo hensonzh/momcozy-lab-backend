@@ -41,6 +41,7 @@ from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.
     default_tool_registry,
 )
 from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.tools.pregnancy_plan_flow import (
+    PREGNANCY_PLAN_CHECKUP_UPLOAD_QUESTION,
     PREGNANCY_PLAN_URGENT_RESPONSE,
 )
 
@@ -332,9 +333,10 @@ def test_agent_runtime_executor_load_service_skill_returns_facts_and_records_led
         (
             "birth-prep",
             {
-                "pregnancy_plan_intake_start",
-                "pregnancy_plan_intake_analyze",
-                "pregnancy_plan_propose",
+                    "pregnancy_plan_intake_start",
+                    "pregnancy_plan_intake_analyze",
+                    "pregnancy_plan_intake_advance",
+                    "pregnancy_plan_propose",
                 "plans_plan_delete_propose",
                 "plans_task_complete_propose",
                 "plans_task_update_propose",
@@ -699,8 +701,9 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
         "plans_task_create_propose",
         "plans_task_delete_propose",
         "plans_task_update_propose",
-        "pregnancy_plan_propose",
-        "pregnancy_plan_intake_analyze",
+            "pregnancy_plan_propose",
+            "pregnancy_plan_intake_advance",
+            "pregnancy_plan_intake_analyze",
         "pregnancy_plan_intake_start",
         "pregnancy_diary_entries_read",
         "pregnancy_diary_entry_create",
@@ -1922,7 +1925,7 @@ def test_agent_runtime_executor_injects_pregnancy_intake_submission_and_latest_w
 
     async def capture_handler(context: ToolHandlerContext) -> dict[str, Any]:
         captured_args.update(context.args)
-        return {"status": "intake_analyzed"}
+        return {"status": "intake_in_progress", "workflow_phase": "personalized_followup"}
 
     tool_executor = ToolExecutor(
         registry=registry,
@@ -1932,7 +1935,7 @@ def test_agent_runtime_executor_injects_pregnancy_intake_submission_and_latest_w
     backend = ScriptedSdkBackend(
         [
             scripted_sdk_response(
-                final_text="我已经按你的情况分析好了。还有其他需要补充的信息吗？",
+                final_text="这些因素会影响复查节奏。我想再确认一个会改变计划安排的点。",
                 tool_invocations=(scripted_tool_invocation("pregnancy.plan_intake.analyze", {}),),
             )
         ]
@@ -1961,13 +1964,158 @@ def test_agent_runtime_executor_injects_pregnancy_intake_submission_and_latest_w
         },
         "runtime_workflow_context": repository.latest_thread_artifact.payload,
     }
-    assert result.final_text.endswith("还有其他需要补充的信息吗？如果没有，我就基于目前的信息开始为你制定孕期计划啦。")
-    assert result.quick_replies == [
-        {"text": "没有了，开始制定"},
-        {"text": "我想补充一点"},
-        {"text": "稍等我再看看"},
-    ]
+    assert result.final_text == "这些因素会影响复查节奏。我想再确认一个会改变计划安排的点。"
     assert "甲状腺用药" not in json.dumps(backend.requests[0].model_input, ensure_ascii=False)
+
+
+def test_agent_runtime_executor_injects_current_workflow_and_authenticated_checkup_attachment_count() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(
+        thread_id=thread_id,
+        run_id=run.id,
+        role="user",
+        text="我已经上传了这份产检记录。",
+        sequence=1,
+        content_overrides={
+            "attachments": [
+                {
+                    "type": "image",
+                    "data_url": "data:image/png;base64,Y2hlY2t1cA==",
+                    "runtime_validated": True,
+                    "trust_source": "authenticated_inline_upload",
+                }
+            ]
+        },
+    )
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user, run=run)
+    repository.latest_thread_artifact = AgentArtifact(
+        id=uuid4(),
+        run_id=uuid4(),
+        owner_user_id=run.actor_user_id,
+        artifact_type="pregnancy_plan_workflow",
+        schema_version="v1",
+        status="created",
+        payload={
+            "phase": "checkup_records_upload",
+            "source_form_artifact_id": "form-1",
+            "source_form_submission_id": "submission-1",
+            "plan_context": {"current_week": "20周"},
+        },
+        raw_payload_ref="",
+    )
+    registry = default_tool_registry()
+    captured_args: dict[str, Any] = {}
+
+    async def capture_handler(context: ToolHandlerContext) -> dict[str, Any]:
+        captured_args.update(context.args)
+        return {"status": "intake_in_progress", "workflow_phase": "final_plan_confirmation"}
+
+    tool_executor = ToolExecutor(
+        registry=registry,
+        repository=repository,
+        handlers={"pregnancy.plan_intake.advance": capture_handler},
+    )
+    backend = ScriptedSdkBackend(
+        [
+            scripted_sdk_response(
+                final_text="资料已收到。还有其他需要补充的信息吗？",
+                tool_invocations=(
+                    scripted_tool_invocation(
+                        "pregnancy.plan_intake.advance",
+                        {"action": "mark_checkup_records_uploaded"},
+                    ),
+                ),
+            )
+        ]
+    )
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            tool_registry=registry,
+            tool_executor=tool_executor,
+        ).execute(run=run)
+    )
+
+    assert result.status == "completed"
+    assert captured_args == {
+        "action": "mark_checkup_records_uploaded",
+        "runtime_workflow_context": repository.latest_thread_artifact.payload,
+        "trusted_current_user_text": "我已经上传了这份产检记录。",
+        "runtime_checkup_attachment_count": 1,
+    }
+
+
+def test_agent_runtime_executor_preserves_initial_analysis_then_one_checkup_upload_prompt() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(
+        thread_id=thread_id,
+        run_id=run.id,
+        role="user",
+        text="我提交了基础信息。",
+        sequence=1,
+    )
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user, run=run)
+    registry = default_tool_registry()
+
+    async def capture_handler(_context: ToolHandlerContext) -> ToolHandlerResult:
+        return ToolHandlerResult(
+            output={"status": "intake_in_progress", "workflow_phase": "checkup_records_upload"},
+            model_context=(
+                {
+                    "role": "developer",
+                    "content": json.dumps(
+                        {
+                            "trusted_pregnancy_plan_intake": {
+                                "analysis": {
+                                    "focuses": [
+                                        {
+                                            "management_meaning": "孕中期检查有明确时间窗。",
+                                            "plan_impact": "计划会按孕周安排检查和结果复核。",
+                                        }
+                                    ]
+                                },
+                                "visible_question": PREGNANCY_PLAN_CHECKUP_UPLOAD_QUESTION,
+                                "instruction": "Explain 1-2 analysis items, then ask exactly visible_question and stop.",
+                            }
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+            ),
+        )
+
+    tool_executor = ToolExecutor(
+        registry=registry,
+        repository=repository,
+        handlers={"pregnancy.plan_intake.analyze": capture_handler},
+    )
+    final_text = f"孕中期检查有明确时间窗，我会按孕周安排检查和结果复核。\n\n{PREGNANCY_PLAN_CHECKUP_UPLOAD_QUESTION}"
+    backend = ScriptedSdkBackend(
+        [
+            scripted_sdk_response(
+                final_text=final_text,
+                tool_invocations=(scripted_tool_invocation("pregnancy.plan_intake.analyze", {}),),
+            )
+        ]
+    )
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            tool_registry=registry,
+            tool_executor=tool_executor,
+        ).execute(run=run)
+    )
+
+    assert result.status == "completed"
+    assert result.final_text == final_text
+    assert result.final_text.endswith(PREGNANCY_PLAN_CHECKUP_UPLOAD_QUESTION)
+    assert "还有其他需要补充的信息吗" not in result.final_text
 
 
 def test_agent_runtime_executor_blocks_model_and_tools_for_urgent_text_while_awaiting_plan_supplement() -> None:

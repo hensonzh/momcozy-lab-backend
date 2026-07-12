@@ -16,6 +16,7 @@ from ...infrastructure.db import get_session
 from ..audit import IdempotencyService, OutboxService
 from ..audit.repository import AuditRepository, OutboxRepository
 from ..auth import CurrentUser, ServiceClient
+from ..files.repository import FileRepository
 from .evals.service import AgentEvalService
 from .memory.service import AgentMemoryRepository, AgentMemoryService
 from .repository import AgentRuntimeRepository
@@ -66,6 +67,7 @@ def get_agent_runtime_service(request: Request, session: AsyncSession = Depends(
         repository=repository,
         idempotency_service=IdempotencyService(repository=audit_repository),
         outbox_service=OutboxService(repository=OutboxRepository(session)),
+        file_repository=FileRepository(session),
         controls=AgentRunControls(request.app.state.redis_client),
     )
 

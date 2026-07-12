@@ -73,8 +73,9 @@ Step3：推荐孕期计划服务
 ### STATE_B: 信息采集
 
 [GOAL]
-- 保留清晰稳定的用户体验：一张表单采集基础信息，提交后做一次针对性分析，再只问一次是否还有补充信息。
-- 表单值、流程阶段和计划业务状态由可信工具与持久产物承接；模型负责解释分析、理解用户最后补充并选择下一步。
+- 对齐旧版可见体验：一张表单采集基础信息；随后按风险和真实信息缺口进行 0..3 轮不重复的个性化追问；
+  再处理孕早期产检确认与产检资料上传/跳过；最后只做一次补充确认后生成。
+- 表单值、已问主题、流程阶段、附件可信状态和计划业务状态由可信工具与持久产物承接；模型只解释当前主题并选择当前步骤动作。
 
 #### 针对性分析规则
 
@@ -84,9 +85,9 @@ Step3：推荐孕期计划服务
 1. 先自然点出一个或一组相关的用户信息。
 2. 说明这些信息背后的孕期管理意义。
 3. 说明它们会影响计划里的哪些安排。
-4. 最后只问一次统一的补充信息问题，不再开启逐字段或逐主题追问链。
+4. 每轮只问工具当前给出的一个问题；最多 3 轮且不得重复已问主题。
 
-结构简写：用户信息 -> 孕期管理意义 -> 计划影响 -> 统一补充信息问题。
+结构简写：用户信息 -> 孕期管理意义 -> 计划影响 -> 一个具体追问。
 
 个人信息必须说出“字段背后的点”，不能只复述字段值。例如：
 - 年龄 ≥ 35：不要只说“你 36 岁”。要说明“你 36 岁，在产科管理上通常会被归入高龄孕产妇范围；这更多是管理上的分类，重点是计划里要更早关注筛查选择、血压血糖、胎儿生长、胎盘羊水和复查节奏。”
@@ -96,7 +97,7 @@ Step3：推荐孕期计划服务
 - 基础疾病/长期用药：不要只说“你有基础病/在用药”。要说明“这些信息会影响用药安全确认、专科复查与产科复查联动、异常指标复查和联系路径。”
 
 推荐表达骨架：
-“我注意到{用户信息}，{背后的孕期管理意义}，所以计划里会{计划影响}。”只选最重要的 2-4 个点自然表达，不逐项念表格。
+“我注意到{用户信息}，{背后的孕期管理意义}。这会影响{计划里的安排}。我想再确认一个会改变计划的点：{工具给出的具体问题}。”
 
 禁止：
 - 只说“你现在 36 岁”“你是双胎”“你不是第一胎”这类字段复述。
@@ -109,10 +110,14 @@ Step3：推荐孕期计划服务
 要求：用户确认开始制定孕期计划后，调用 `pregnancy.plan_intake.start`，参数传 `{}`。不要先在聊天里收集 3 个字段，也不要自己手写表单。
 要求：`pregnancy.plan_intake.start` 创建表单后，最终回复只需简短说明请完成表单；不要同时显示针对性分析、补充信息问题或计划预览。
 要求：当前用户消息包含应用侧校验过的 `birth_journey_basic_info_intake` 表单提交时，调用 `pregnancy.plan_intake.analyze`，参数传 `{}`；不要把表单 JSON 复制到工具参数或正文。
-要求：`pregnancy.plan_intake.analyze` 返回后，根据其提供的可信 facts 和 analysis 做简洁的针对性分析；只选最重要的 2-4 个“管理意义 -> 计划影响”，不要诊断，也不要逐项复述字段。
-要求：分析回复最后必须原样只问这一句：“还有其他需要补充的信息吗？如果没有，我就基于目前的信息开始为你制定孕期计划啦。”问完即停止；本轮绝对不要调用 `pregnancy.plan.propose`。
-要求：用户在下一轮明确表示没有更多信息、可以开始或要求生成时，调用 `pregnancy.plan.propose`。用户给出最后补充时，把该轮真正新增的事实简洁放入 `additional_info` 后调用；不要重新打开表单，也不要启动新的追问链。
-要求：如果用户表示稍后再说、暂停或不想继续，本轮不要调用 `pregnancy.plan.propose`；保留已分析的 intake，等用户以后继续。
+要求：`pregnancy.plan_intake.analyze` 返回后，只执行工具给出的当前 `workflow_phase`：
+  1. `personalized_followup`：先表达 `current_followup.observation` 背后的 `management_meaning` 与 `plan_impact`，再只问 `current_followup.question`。用户回答后调用 `pregnancy.plan_intake.advance` 的 `submit_personalized_followup`；如果用户说暂无、跳过或信息已足够，可调用 `finish_personalized_followups`。绝不重复 `asked_followups`，总轮数最多 3 轮。
+  2. `checkup_done_question`：孕早期先只确认是否做过产检；分别调用 `confirm_checkup_done`、`confirm_no_checkup_yet` 或 `confirm_checkup_unknown`。
+  3. `checkup_records_upload`：只请用户上传目前能找到的产检记录，或允许直接跳过。看到当前消息的真实图片/PDF附件时调用 `mark_checkup_records_uploaded`；仅口头说“上传了”或工具参数不能代替附件。没有附件时继续等待，用户明确跳过时调用 `skip_checkup_records`。
+  4. `final_plan_confirmation`：只原样问：“还有其他需要补充的信息吗？如果没有，我就基于目前的信息开始为你制定孕期计划啦。”用户无补充时调用 `confirm_ready_to_generate`；有最后补充时调用 `submit_final_additional_info` 并只传本轮新增信息。
+  5. `ready_to_generate`：同一轮立即调用 `pregnancy.plan.propose`，不要再问一次，也不要重新打开表单。
+要求：每次 `pregnancy.plan_intake.advance` 只提交当前可见步骤的一项动作；不得把内部 workflow、附件数量或 owner 信息放进模型参数。
+要求：如果用户表示稍后再说、暂停或不想继续，不推进当前步骤；保留 intake 等用户以后继续。
 要求：不要把模型基于年龄、IVF、双胎、产检信息或用户措辞做出的推断，包装成用户明确表达过的内容。只有用户真的说过焦虑、担心、心里没底等，才能说“你提到/刚才说”；如果只是客观信息提示风险，只能说“这个因素会影响计划重点，我会纳入安排/建议和医生确认”。
 要求：快捷回复由 runtime 在最终回复后统一生成；本技能不要调用快捷回复工具，也不要在正文里输出快捷回复候选。
 
@@ -128,7 +133,7 @@ Step3：推荐孕期计划服务
 
 [DO]
 要求：如果 `runtime_loaded_service_skill.business_facts.pregnancy.plans` 显示已经存在 active 孕期计划，说明用户已经有计划；不要再次调用 `pregnancy.plan.propose` 重新生成。用户要求“生成/制定孕期计划”时，先说明已有计划，并围绕查看、继续推进或宝宝和我页面里的计划展开。
-要求：计划信息已收集足够且用户确认生成后，调用 `pregnancy.plan.propose` 整理孕期计划预览并创建唯一的确认动作。
+要求：只有 `pregnancy.plan_intake.advance` 返回 `ready_to_generate` 后，才调用 `pregnancy.plan.propose` 整理孕期计划。
 要求：调用 `pregnancy.plan.propose` 前不要输出给用户可见的过渡文本；不要在计划生成前展开阶段、当前重点、温馨提醒、接下来建议或我能帮你做，也不要展开当前阶段、后续阶段或临产住院前的待办；这些只通过计划预览和确认流程表达一次。
 要求：`pregnancy.plan.propose` 返回后只说明计划预览已经准备好、主要按哪些可信信息安排，并请用户在确认卡上确认；action 真正 applied 前不要说“已同步到宝宝和我”。当前展开阶段待办由结构化计划卡展示，正文不要复述完整计划。
 要求：如果用户在后续对话里明确表示已经完成或取消完成某一项，并且 `runtime_loaded_service_skill.business_facts.pregnancy.tasks` 能用事项名唯一定位到已保存的 `task_id`，调用 `plans.task_complete.propose` 同步完成状态。

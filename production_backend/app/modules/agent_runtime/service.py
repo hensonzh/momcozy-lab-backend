@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import json
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
@@ -21,6 +24,11 @@ DEFAULT_GRAPH_VERSION = "momcozy-agent-v1"
 TERMINAL_RUN_STATUSES = {"completed", "failed", "cancelled", "expired"}
 MAX_AGENT_RUN_ATTACHMENTS = 20
 MAX_FORM_SUBMISSION_BYTES = 16_384
+MAX_INLINE_AGENT_IMAGE_BYTES = 10 * 1024 * 1024
+_INLINE_AGENT_IMAGE_PATTERN = re.compile(
+    r"^data:image/(?P<subtype>png|jpe?g|webp|gif);base64,(?P<body>[A-Za-z0-9+/=]+)$",
+    re.IGNORECASE,
+)
 
 
 class AgentRuntimeService:
@@ -30,12 +38,14 @@ class AgentRuntimeService:
         repository: AgentRuntimeRepository,
         idempotency_service: IdempotencyService | None = None,
         outbox_service: OutboxService | None = None,
+        file_repository: Any | None = None,
         controls: AgentRunControls | None = None,
         action_policy: AgentActionPolicy | None = None,
     ) -> None:
         self.repository = repository
         self.idempotency_service = idempotency_service
         self.outbox_service = outbox_service
+        self.file_repository = file_repository
         self.controls = controls
         self.action_policy = action_policy or AgentActionPolicy()
 
@@ -178,16 +188,56 @@ class AgentRuntimeService:
             raise ApiError(code="validation_failed", message="Too many agent attachments.", status=422)
         verified: list[dict[str, Any]] = []
         for attachment in attachments:
-            if str(attachment.get("type") or "").strip() != "form_submission":
-                verified.append(dict(attachment))
-                continue
-            verified.append(
-                await self._verify_form_submission_attachment(
-                    actor_user_id=actor_user_id,
-                    attachment=attachment,
+            attachment_type = str(attachment.get("type") or "").strip()
+            if attachment_type == "form_submission":
+                verified.append(
+                    await self._verify_form_submission_attachment(
+                        actor_user_id=actor_user_id,
+                        attachment=attachment,
+                    )
                 )
-            )
+            elif attachment_type == "image":
+                verified.append(_validate_inline_image_attachment(attachment))
+            elif attachment_type == "file":
+                verified.append(
+                    await self._verify_owned_file_attachment(
+                        actor_user_id=actor_user_id,
+                        attachment=attachment,
+                    )
+                )
+            else:
+                safe_attachment = dict(attachment)
+                safe_attachment.pop("verified", None)
+                safe_attachment.pop("runtime_validated", None)
+                safe_attachment.pop("trust_source", None)
+                verified.append(safe_attachment)
         return verified
+
+    async def _verify_owned_file_attachment(
+        self,
+        *,
+        actor_user_id: UUID,
+        attachment: dict[str, Any],
+    ) -> dict[str, Any]:
+        file_id = _parse_uuid(attachment.get("file_id"), error_code="invalid_agent_attachment")
+        if self.file_repository is None:
+            raise ApiError(code="invalid_agent_attachment", message="File attachment verification is unavailable.", status=422)
+        file_object = await self.file_repository.get_for_owner(file_id=file_id, owner_user_id=actor_user_id)
+        if (
+            file_object is None
+            or getattr(file_object, "deleted_at", None) is not None
+            or str(getattr(file_object, "status", "") or "") != "active"
+            or str(getattr(file_object, "content_type", "") or "").lower() != "application/pdf"
+        ):
+            raise ApiError(code="invalid_agent_attachment", message="File attachment is not an active owned PDF.", status=422)
+        return {
+            "type": "file",
+            "file_id": str(file_object.id),
+            "content_type": "application/pdf",
+            "original_filename": str(getattr(file_object, "original_filename", "") or "")[:255],
+            "runtime_validated": True,
+            "trust_source": "owned_file_record",
+        }
 
     async def _verify_form_submission_attachment(
         self,
@@ -649,6 +699,30 @@ class AgentRuntimeService:
         if run is None:
             raise ApiError(code="conflict", message="Idempotency response resource is unavailable.", status=409)
         return run
+
+
+def _validate_inline_image_attachment(attachment: dict[str, Any]) -> dict[str, Any]:
+    data_url = str(attachment.get("data_url") or "").strip()
+    match = _INLINE_AGENT_IMAGE_PATTERN.fullmatch(data_url)
+    if match is None:
+        raise ApiError(code="invalid_agent_attachment", message="Inline image attachment is invalid.", status=422)
+    try:
+        body = base64.b64decode(match.group("body"), validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ApiError(code="invalid_agent_attachment", message="Inline image attachment is invalid.", status=422) from exc
+    if not body or len(body) > MAX_INLINE_AGENT_IMAGE_BYTES:
+        raise ApiError(code="invalid_agent_attachment", message="Inline image attachment size is invalid.", status=422)
+    subtype = match.group("subtype").lower()
+    content_type = "image/jpeg" if subtype in {"jpg", "jpeg"} else f"image/{subtype}"
+    detail = str(attachment.get("detail") or "").strip()
+    return {
+        "type": "image",
+        "data_url": data_url,
+        "content_type": content_type,
+        "detail": detail if detail in {"auto", "low", "high"} else "auto",
+        "runtime_validated": True,
+        "trust_source": "authenticated_inline_upload",
+    }
 
 
 def _normalize_text(value: str | None, *, max_length: int, required: bool = False) -> str:

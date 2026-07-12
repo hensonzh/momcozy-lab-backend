@@ -78,6 +78,9 @@ def test_product_agent_eval_seed_uses_current_pregnancy_action_contracts() -> No
     plan_contracts = {tool_call["contract"] for tool_call in by_suite["pregnancy_plan_creation"]["expected_tool_calls"]}
     intake_contracts = {tool_call["contract"] for tool_call in by_suite["pregnancy_plan_intake_start"]["expected_tool_calls"]}
     analysis_contracts = {tool_call["contract"] for tool_call in by_suite["pregnancy_plan_intake_analysis"]["expected_tool_calls"]}
+    followup_contracts = {
+        tool_call["contract"] for tool_call in by_suite["pregnancy_plan_personalized_followup"]["expected_tool_calls"]
+    }
     task_contracts = {tool_call["contract"] for tool_call in by_suite["pregnancy_task_completion"]["expected_tool_calls"]}
     diary_contracts = {tool_call["contract"] for tool_call in by_suite["pregnancy_diary_entry"]["expected_tool_calls"]}
 
@@ -85,6 +88,13 @@ def test_product_agent_eval_seed_uses_current_pregnancy_action_contracts() -> No
     assert "pregnancy.plan.propose" in plan_contracts
     assert intake_contracts == {"load_service_skill", "pregnancy.plan_intake.start"}
     assert analysis_contracts == {"pregnancy.plan_intake.analyze"}
+    assert followup_contracts == {"pregnancy.plan_intake.advance"}
+    assert by_suite["pregnancy_plan_personalized_followup"]["forbidden_tool_calls"] == [
+        {"contract": "pregnancy.plan.propose"}
+    ]
+    attachment_guard = by_suite["pregnancy_plan_checkup_attachment_guard"]
+    assert attachment_guard["input"]["fixtures"]["current_run_authenticated_attachments"] == []
+    assert "mark_uploaded_from_text_only" in attachment_guard["expected_behavior"]["must_not"]
     assert by_suite["pregnancy_plan_intake_start"]["forbidden_tool_calls"] == [{"contract": "pregnancy.plan.propose"}]
     assert by_suite["pregnancy_plan_intake_analysis"]["forbidden_tool_calls"] == [{"contract": "pregnancy.plan.propose"}]
     assert "load_service_skill" in task_contracts

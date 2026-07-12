@@ -87,6 +87,7 @@ SCENARIO_NAMESPACE_DEFINITIONS: tuple[ToolNamespace, ...] = (
         tool_contracts=(
             "pregnancy.plan_intake.start",
             "pregnancy.plan_intake.analyze",
+            "pregnancy.plan_intake.advance",
             "pregnancy.plan.propose",
             "plans.plan_delete.propose",
             "plans.task_update.propose",
