@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class PlanRead(BaseModel):
@@ -16,6 +16,12 @@ class PlanRead(BaseModel):
     status: str
     source: str
     payload: dict[str, Any]
+    version: int
+
+    @field_validator("version", mode="before")
+    @classmethod
+    def default_legacy_version(cls, value: object) -> int:
+        return value if isinstance(value, int) and value >= 1 else 1
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -66,6 +72,15 @@ class PlanTaskUpdate(BaseModel):
 
 class PlanTaskCompletionUpdate(BaseModel):
     completed: bool = True
+
+
+class PlanTaskStateUpdate(BaseModel):
+    state: Literal["pending", "completed", "skipped"]
+
+
+class PlanTodoCompletionUpdate(BaseModel):
+    completed: bool
+    expected_version: int = Field(ge=1)
 
 
 class PlanTaskListResponse(BaseModel):

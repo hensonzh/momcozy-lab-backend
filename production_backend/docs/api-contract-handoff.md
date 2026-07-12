@@ -161,6 +161,29 @@ File upload uses multipart form data at `POST /v1/files/upload`. File metadata
 is owner-scoped and object bytes are stored through the configured object
 storage provider.
 
+## Schedule And Plan Progress
+
+Schedule resources are owner-scoped and never accept a mobile-provided
+`user_id` as authority:
+
+- `GET /v1/plans?plan_type=milk_management&status=active` loads plan context.
+- `GET /v1/plans/tasks/list?task_date=YYYY-MM-DD` loads the selected day.
+- `POST /v1/plans/tasks`, `PATCH/DELETE /v1/plans/tasks/{task_id}` implement
+  task creation and editing.
+- `PATCH /v1/plans/tasks/{task_id}/state` accepts the typed states `pending`,
+  `completed`, and `skipped`.
+- Pumping and feeding creates accept optional `plan_task_id`. When present,
+  record creation and task completion happen in the same database transaction;
+  the record create remains retry-safe through `Idempotency-Key`.
+
+Pregnancy-card todos are not `PlanTask` rows. New pregnancy plan payloads
+persist a stable `item_id` on every structured todo. Clients update one item via
+`PATCH /v1/plans/{plan_id}/todos/{item_id}/completion` with
+`{completed, expected_version}` and an `Idempotency-Key`. The response is the
+complete authoritative `PlanRead` with an incremented `version`. A stale write
+returns `version_conflict`; an old item without `item_id` remains read-only and
+returns `todo_item_not_found`. Clients must never match todo items by title.
+
 ## Product Assets
 
 Legacy `/skill-assets/...` and `/images/Air_img/...` paths are retired. Product

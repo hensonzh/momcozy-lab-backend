@@ -64,8 +64,10 @@ The source of truth is each FastAPI route's OpenAPI extension metadata.
 | DELETE | `/v1/plans/tasks/{task_id}` | plans | flutter | stable | Delete Task |
 | PATCH | `/v1/plans/tasks/{task_id}` | plans | flutter | stable | Update Task |
 | PATCH | `/v1/plans/tasks/{task_id}/completion` | plans | flutter | stable | Update Task Completion |
+| PATCH | `/v1/plans/tasks/{task_id}/state` | plans | flutter | stable | Update Task State |
 | DELETE | `/v1/plans/{plan_id}` | plans | flutter | stable | Delete Plan |
 | GET | `/v1/plans/{plan_id}` | plans | flutter | stable | Get Plan |
+| PATCH | `/v1/plans/{plan_id}/todos/{item_id}/completion` | plans | flutter | stable | Update Plan Todo Completion |
 | GET | `/v1/pregnancy-diary/entries` | pregnancy-diary | flutter | stable | List Entries |
 | POST | `/v1/pregnancy-diary/entries` | pregnancy-diary | flutter | stable | Create Entry |
 | DELETE | `/v1/pregnancy-diary/entries/{entry_date}` | pregnancy-diary | flutter | stable | Delete Entry |

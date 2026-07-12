@@ -75,6 +75,15 @@ versioning plan.
   current user's authoritative Plan from
   `/v1/plans?plan_type=pregnancy&status=active`; do not derive or cache the
   personalized plan from the event payload.
+- Keep Schedule task state authoritative: use `/plans/tasks/{task_id}/state`
+  for `pending/completed/skipped`, and refetch the selected day after writes.
+  A pumping or feeding record created for task completion must send the stable
+  `plan_task_id` and reuse its `Idempotency-Key` on retry.
+- Update pregnancy-card todo completion only through
+  `/plans/{plan_id}/todos/{item_id}/completion`, sending the last observed plan
+  `version` as `expected_version`. Replace local plan state with the returned
+  `PlanRead`; on `version_conflict`, reload before retrying. Never fall back to
+  title matching when `item_id` is absent.
 - Treat `voice_provider_disabled` as a stable unavailable-state response for
   voice UI; do not fall back to legacy realtime voice endpoints.
 

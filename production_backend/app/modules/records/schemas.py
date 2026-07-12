@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 class FeedingRecordRead(BaseModel):
     id: UUID
     owner_user_id: UUID
+    plan_task_id: UUID | None = None
     infant_id: UUID | None = None
     feed_time: datetime
     feed_type: str
@@ -23,6 +24,7 @@ class FeedingRecordRead(BaseModel):
 
 class FeedingRecordCreate(BaseModel):
     infant_id: UUID | None = None
+    plan_task_id: UUID | None = None
     feed_time: datetime
     feed_type: str = Field(min_length=1, max_length=32)
     feed_action: str | None = Field(default=None, max_length=32)
@@ -44,6 +46,7 @@ class FeedingRecordListResponse(BaseModel):
 class PumpingRecordRead(BaseModel):
     id: UUID
     owner_user_id: UUID
+    plan_task_id: UUID | None = None
     pump_start_time: datetime
     pump_end_time: datetime | None = None
     milk_volume_ml: float | None = None
@@ -57,6 +60,7 @@ class PumpingRecordRead(BaseModel):
 
 
 class PumpingRecordCreate(BaseModel):
+    plan_task_id: UUID | None = None
     pump_start_time: datetime
     pump_end_time: datetime | None = None
     milk_volume_ml: float | None = Field(default=None, ge=0)

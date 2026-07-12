@@ -628,6 +628,7 @@ def _labor_and_hospital_items() -> list[dict[str, Any]]:
 def _todo(item_id: str, title: str, reason: str, steps: list[str]) -> dict[str, Any]:
     return {
         "id": item_id,
+        "item_id": item_id,
         "title": title,
         "reason": reason,
         "why_for_you": reason,

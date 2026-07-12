@@ -40,6 +40,34 @@ class PlansRepository:
         statement = select(Plan).where(Plan.id == plan_id, Plan.owner_user_id == owner_user_id, Plan.deleted_at.is_(None))
         return cast(Plan | None, await self.session.scalar(statement))
 
+    async def get_plan_for_owner_for_update(self, *, plan_id: UUID, owner_user_id: UUID) -> Plan | None:
+        statement = (
+            select(Plan)
+            .where(
+                Plan.id == plan_id,
+                Plan.owner_user_id == owner_user_id,
+                Plan.deleted_at.is_(None),
+            )
+            .with_for_update()
+        )
+        return cast(Plan | None, await self.session.scalar(statement))
+
+    async def update_plan_payload_and_version(
+        self,
+        *,
+        plan_id: UUID,
+        owner_user_id: UUID,
+        expected_version: int,
+        payload: dict[str, Any],
+    ) -> Plan | None:
+        plan = await self.get_plan_for_owner_for_update(plan_id=plan_id, owner_user_id=owner_user_id)
+        if plan is None or plan.version != expected_version:
+            return None
+        plan.payload = payload
+        plan.version += 1
+        await self.session.flush()
+        return plan
+
     async def list_plans(self, *, owner_user_id: UUID, plan_type: str, status: str, limit: int) -> list[Plan]:
         statement = select(Plan).where(Plan.owner_user_id == owner_user_id, Plan.status == status, Plan.deleted_at.is_(None))
         if plan_type:
@@ -118,6 +146,22 @@ class PlansRepository:
         if task is None:
             return None
         task.status = "completed" if completed else "pending"
+        task.completed_at = completed_at
+        await self.session.flush()
+        return task
+
+    async def set_task_state(
+        self,
+        *,
+        task_id: UUID,
+        owner_user_id: UUID,
+        state: str,
+        completed_at: datetime | None,
+    ) -> PlanTask | None:
+        task = await self.get_task_for_owner(task_id=task_id, owner_user_id=owner_user_id)
+        if task is None:
+            return None
+        task.status = state
         task.completed_at = completed_at
         await self.session.flush()
         return task

@@ -15,10 +15,12 @@ class FeedingRecord(Base):
     __table_args__ = (
         Index("ix_feeding_records_owner_time", "owner_user_id", "feed_time"),
         Index("ix_feeding_records_owner_infant_time", "owner_user_id", "infant_id", "feed_time"),
+        Index("ix_feeding_records_plan_task", "plan_task_id"),
     )
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
     owner_user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    plan_task_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("plan_tasks.id"), nullable=True)
     infant_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("infant_profiles.id"), nullable=True)
     feed_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     feed_type: Mapped[str] = mapped_column(String(32), default="", server_default="", nullable=False)
@@ -42,10 +44,12 @@ class PumpingRecord(Base):
     __table_args__ = (
         Index("ix_pumping_records_owner_start", "owner_user_id", "pump_start_time"),
         Index("ix_pumping_records_owner_status", "owner_user_id", "status"),
+        Index("ix_pumping_records_plan_task", "plan_task_id"),
     )
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
     owner_user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    plan_task_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("plan_tasks.id"), nullable=True)
     pump_start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     pump_end_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     milk_volume_ml: Mapped[float | None] = mapped_column(Float, default=None)

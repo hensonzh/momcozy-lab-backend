@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, cast
 from uuid import UUID
 
@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..profiles.models import InfantProfile
+from ..plans.models import PlanTask
 from .models import FeedingRecord, GrowthRecord, PumpingRecord
 
 
@@ -23,10 +24,33 @@ class RecordsRepository:
         )
         return await self.session.scalar(statement) is not None
 
+    async def plan_task_belongs_to_owner(self, *, plan_task_id: UUID, owner_user_id: UUID) -> bool:
+        statement = select(PlanTask.id).where(
+            PlanTask.id == plan_task_id,
+            PlanTask.owner_user_id == owner_user_id,
+            PlanTask.deleted_at.is_(None),
+        )
+        return await self.session.scalar(statement) is not None
+
+    async def complete_plan_task(self, *, plan_task_id: UUID, owner_user_id: UUID) -> bool:
+        statement = select(PlanTask).where(
+            PlanTask.id == plan_task_id,
+            PlanTask.owner_user_id == owner_user_id,
+            PlanTask.deleted_at.is_(None),
+        ).with_for_update()
+        task = await self.session.scalar(statement)
+        if task is None:
+            return False
+        task.status = "completed"
+        task.completed_at = datetime.now(timezone.utc)
+        await self.session.flush()
+        return True
+
     async def create_feeding(
         self,
         *,
         owner_user_id: UUID,
+        plan_task_id: UUID | None,
         infant_id: UUID | None,
         feed_time: datetime,
         feed_type: str,
@@ -37,6 +61,7 @@ class RecordsRepository:
     ) -> FeedingRecord:
         record = FeedingRecord(
             owner_user_id=owner_user_id,
+            plan_task_id=plan_task_id,
             infant_id=infant_id,
             feed_time=feed_time,
             feed_type=feed_type,
@@ -97,6 +122,7 @@ class RecordsRepository:
         self,
         *,
         owner_user_id: UUID,
+        plan_task_id: UUID | None,
         pump_start_time: datetime,
         pump_end_time: datetime | None,
         milk_volume_ml: float | None,
@@ -107,6 +133,7 @@ class RecordsRepository:
     ) -> PumpingRecord:
         record = PumpingRecord(
             owner_user_id=owner_user_id,
+            plan_task_id=plan_task_id,
             pump_start_time=pump_start_time,
             pump_end_time=pump_end_time,
             milk_volume_ml=milk_volume_ml,

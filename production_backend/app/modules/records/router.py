@@ -56,6 +56,7 @@ async def create_feeding(
     record = await service.create_feeding(
         owner_user_id=current_user.user_id,
         infant_id=payload.infant_id,
+        plan_task_id=payload.plan_task_id,
         feed_time=payload.feed_time,
         feed_type=payload.feed_type,
         feed_action=payload.feed_action or "",
@@ -110,6 +111,7 @@ async def create_pumping(
 ) -> PumpingRecordRead:
     record = await service.create_pumping(
         owner_user_id=current_user.user_id,
+        plan_task_id=payload.plan_task_id,
         pump_start_time=payload.pump_start_time,
         pump_end_time=payload.pump_end_time,
         milk_volume_ml=payload.milk_volume_ml,

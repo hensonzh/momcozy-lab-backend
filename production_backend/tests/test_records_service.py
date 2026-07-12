@@ -37,6 +37,47 @@ def test_records_service_creates_feeding_with_idempotency_and_audit() -> None:
     assert audit_service.record_kwargs["action"] == "records.feeding.create"
 
 
+def test_records_service_atomically_links_feeding_and_completes_owner_task() -> None:
+    owner_user_id = uuid4()
+    task_id = uuid4()
+    repository = FakeRecordsRepository(plan_task_owner_ok=True)
+    service = RecordsService(repository=repository, idempotency_service=FakeIdempotencyService(status="reserved"))
+
+    record = asyncio.run(
+        service.create_feeding(
+            owner_user_id=owner_user_id,
+            infant_id=None,
+            plan_task_id=task_id,
+            feed_time=_now(),
+            feed_type="bottle",
+            volume_ml=90,
+            idempotency_key="complete-feed-task",
+        )
+    )
+
+    assert record.plan_task_id == task_id
+    assert repository.completed_plan_task_id == task_id
+    assert repository.create_feeding_kwargs["plan_task_id"] == task_id
+
+
+def test_records_service_rejects_cross_owner_plan_task_before_record_create() -> None:
+    repository = FakeRecordsRepository(plan_task_owner_ok=False)
+    service = RecordsService(repository=repository)
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            service.create_pumping(
+                owner_user_id=uuid4(),
+                plan_task_id=uuid4(),
+                pump_start_time=_now(),
+                milk_volume_ml=120,
+            )
+        )
+
+    assert exc_info.value.code == "owner_scope_violation"
+    assert repository.create_pumping_kwargs == {}
+
+
 def test_records_service_rejects_cross_owner_infant() -> None:
     service = RecordsService(repository=FakeRecordsRepository(infant_owner_ok=False))
 
@@ -265,7 +306,7 @@ def _now() -> datetime:
     return datetime(2026, 7, 2, 8, 0, tzinfo=timezone.utc)
 
 
-def _feeding(*, owner_user_id: UUID, record_id: UUID | None = None) -> FeedingRecord:
+def _feeding(*, owner_user_id: UUID, record_id: UUID | None = None, plan_task_id: UUID | None = None) -> FeedingRecord:
     return FeedingRecord(
         id=record_id or uuid4(),
         owner_user_id=owner_user_id,
@@ -277,10 +318,11 @@ def _feeding(*, owner_user_id: UUID, record_id: UUID | None = None) -> FeedingRe
         duration_seconds=None,
         title="",
         status="active",
+        plan_task_id=plan_task_id,
     )
 
 
-def _pumping(*, owner_user_id: UUID, record_id: UUID | None = None) -> PumpingRecord:
+def _pumping(*, owner_user_id: UUID, record_id: UUID | None = None, plan_task_id: UUID | None = None) -> PumpingRecord:
     return PumpingRecord(
         id=record_id or uuid4(),
         owner_user_id=owner_user_id,
@@ -292,6 +334,7 @@ def _pumping(*, owner_user_id: UUID, record_id: UUID | None = None) -> PumpingRe
         source="manual",
         title="",
         status="active",
+        plan_task_id=plan_task_id,
     )
 
 
@@ -313,6 +356,7 @@ class FakeRecordsRepository:
         self,
         *,
         infant_owner_ok=True,
+        plan_task_owner_ok=True,
         feeding=None,
         feedings=None,
         pumping=None,
@@ -321,6 +365,8 @@ class FakeRecordsRepository:
         growths=None,
     ) -> None:
         self.infant_owner_ok = infant_owner_ok
+        self.plan_task_owner_ok = plan_task_owner_ok
+        self.completed_plan_task_id = None
         self.feeding = feeding
         self.feedings = feedings or []
         self.pumping = pumping
@@ -341,9 +387,16 @@ class FakeRecordsRepository:
     async def infant_belongs_to_owner(self, *, infant_id: UUID, owner_user_id: UUID):
         return self.infant_owner_ok
 
+    async def plan_task_belongs_to_owner(self, *, plan_task_id: UUID, owner_user_id: UUID):
+        return self.plan_task_owner_ok
+
+    async def complete_plan_task(self, *, plan_task_id: UUID, owner_user_id: UUID):
+        self.completed_plan_task_id = plan_task_id
+        return True
+
     async def create_feeding(self, **kwargs):
         self.create_feeding_kwargs = kwargs
-        self.feeding = _feeding(owner_user_id=kwargs["owner_user_id"])
+        self.feeding = _feeding(owner_user_id=kwargs["owner_user_id"], plan_task_id=kwargs["plan_task_id"])
         self.feeding.infant_id = kwargs["infant_id"]
         return self.feeding
 
@@ -364,7 +417,7 @@ class FakeRecordsRepository:
 
     async def create_pumping(self, **kwargs):
         self.create_pumping_kwargs = kwargs
-        self.pumping = _pumping(owner_user_id=kwargs["owner_user_id"])
+        self.pumping = _pumping(owner_user_id=kwargs["owner_user_id"], plan_task_id=kwargs["plan_task_id"])
         return self.pumping
 
     async def get_pumping_for_owner(self, *, record_id: UUID, owner_user_id: UUID):

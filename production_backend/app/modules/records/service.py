@@ -34,6 +34,7 @@ class RecordsService:
         *,
         owner_user_id: UUID,
         infant_id: UUID | None,
+        plan_task_id: UUID | None = None,
         feed_time: datetime,
         feed_type: str,
         feed_action: str = "",
@@ -48,6 +49,7 @@ class RecordsService:
             owner_user_id=owner_user_id,
         ):
             raise ApiError(code="owner_scope_violation", message="Infant profile is outside the current user scope.", status=403)
+        await self._validate_plan_task_owner(plan_task_id=plan_task_id, owner_user_id=owner_user_id)
         if not domain.has_feeding_measurement(volume_ml=volume_ml, duration_seconds=duration_seconds):
             raise ApiError(code="validation_failed", message="volume_ml or duration_seconds is required.", status=422)
 
@@ -62,6 +64,7 @@ class RecordsService:
                 request_hash=request_hash(
                     {
                         "infant_id": str(infant_id or ""),
+                        "plan_task_id": str(plan_task_id or ""),
                         "feed_time": feed_time.isoformat(),
                         "feed_type": feed_type,
                         "feed_action": feed_action,
@@ -78,6 +81,7 @@ class RecordsService:
 
         record = await self.repository.create_feeding(
             owner_user_id=owner_user_id,
+            plan_task_id=plan_task_id,
             infant_id=infant_id,
             feed_time=feed_time,
             feed_type=feed_type,
@@ -85,6 +89,12 @@ class RecordsService:
             volume_ml=volume_ml,
             duration_seconds=duration_seconds,
             title=title,
+        )
+        await self._complete_linked_plan_task(plan_task_id=plan_task_id, owner_user_id=owner_user_id)
+        await self._audit_linked_plan_task(
+            plan_task_id=plan_task_id,
+            owner_user_id=owner_user_id,
+            request_id=request_id,
         )
         if idempotency_record is not None and self.idempotency_service is not None:
             await self.idempotency_service.mark_completed(record=idempotency_record, response_ref=str(record.id))
@@ -137,6 +147,7 @@ class RecordsService:
         self,
         *,
         owner_user_id: UUID,
+        plan_task_id: UUID | None = None,
         pump_start_time: datetime,
         pump_end_time: datetime | None = None,
         milk_volume_ml: float | None = None,
@@ -147,6 +158,7 @@ class RecordsService:
         request_id: str = "",
         idempotency_key: str | None = None,
     ) -> PumpingRecord:
+        await self._validate_plan_task_owner(plan_task_id=plan_task_id, owner_user_id=owner_user_id)
         if not domain.has_pumping_measurement(milk_volume_ml=milk_volume_ml, duration_seconds=duration_seconds):
             raise ApiError(code="validation_failed", message="milk_volume_ml or duration_seconds is required.", status=422)
 
@@ -161,6 +173,7 @@ class RecordsService:
                 request_hash=request_hash(
                     {
                         "pump_start_time": pump_start_time.isoformat(),
+                        "plan_task_id": str(plan_task_id or ""),
                         "pump_end_time": pump_end_time.isoformat() if pump_end_time else "",
                         "milk_volume_ml": milk_volume_ml,
                         "pump_type": pump_type,
@@ -177,6 +190,7 @@ class RecordsService:
 
         record = await self.repository.create_pumping(
             owner_user_id=owner_user_id,
+            plan_task_id=plan_task_id,
             pump_start_time=pump_start_time,
             pump_end_time=pump_end_time,
             milk_volume_ml=milk_volume_ml,
@@ -184,6 +198,12 @@ class RecordsService:
             duration_seconds=duration_seconds,
             source=source,
             title=title,
+        )
+        await self._complete_linked_plan_task(plan_task_id=plan_task_id, owner_user_id=owner_user_id)
+        await self._audit_linked_plan_task(
+            plan_task_id=plan_task_id,
+            owner_user_id=owner_user_id,
+            request_id=request_id,
         )
         if idempotency_record is not None and self.idempotency_service is not None:
             await self.idempotency_service.mark_completed(record=idempotency_record, response_ref=str(record.id))
@@ -197,6 +217,46 @@ class RecordsService:
                 details={"source": source},
             )
         return record
+
+    async def _validate_plan_task_owner(self, *, plan_task_id: UUID | None, owner_user_id: UUID) -> None:
+        if plan_task_id is None:
+            return
+        if not await self.repository.plan_task_belongs_to_owner(
+            plan_task_id=plan_task_id,
+            owner_user_id=owner_user_id,
+        ):
+            raise ApiError(
+                code="owner_scope_violation",
+                message="Plan task is outside the current user scope.",
+                status=403,
+            )
+
+    async def _complete_linked_plan_task(self, *, plan_task_id: UUID | None, owner_user_id: UUID) -> None:
+        if plan_task_id is None:
+            return
+        completed = await self.repository.complete_plan_task(
+            plan_task_id=plan_task_id,
+            owner_user_id=owner_user_id,
+        )
+        if not completed:
+            raise ApiError(code="not_found", message="Plan task not found.", status=404)
+
+    async def _audit_linked_plan_task(
+        self,
+        *,
+        plan_task_id: UUID | None,
+        owner_user_id: UUID,
+        request_id: str,
+    ) -> None:
+        if plan_task_id is None or self.audit_service is None:
+            return
+        await self.audit_service.record(
+            actor_user_id=owner_user_id,
+            action="plans.tasks.complete_from_record",
+            resource_type="plan_task",
+            resource_id=str(plan_task_id),
+            request_id=request_id,
+        )
 
     async def list_pumpings(
         self,

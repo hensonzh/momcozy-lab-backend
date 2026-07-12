@@ -21,7 +21,9 @@ from .schemas import (
     PlanTaskCreate,
     PlanTaskListResponse,
     PlanTaskRead,
+    PlanTaskStateUpdate,
     PlanTaskUpdate,
+    PlanTodoCompletionUpdate,
 )
 from .service import PlansService
 
@@ -105,6 +107,28 @@ async def delete_plan(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@router.patch("/{plan_id}/todos/{item_id}/completion", response_model=PlanRead)
+async def update_plan_todo_completion(
+    plan_id: UUID,
+    item_id: str,
+    payload: PlanTodoCompletionUpdate,
+    request: Request,
+    idempotency_key: str | None = Depends(optional_idempotency_key),
+    current_user: CurrentUser = Depends(require_current_user),
+    service: PlansService = Depends(get_plans_service),
+) -> PlanRead:
+    plan = await service.update_plan_todo_completion(
+        owner_user_id=current_user.user_id,
+        plan_id=plan_id,
+        item_id=item_id,
+        completed=payload.completed,
+        expected_version=payload.expected_version,
+        request_id=str(getattr(request.state, "request_id", "") or ""),
+        idempotency_key=idempotency_key,
+    )
+    return PlanRead.model_validate(plan)
+
+
 @router.post("/tasks", response_model=PlanTaskRead, status_code=status.HTTP_201_CREATED)
 async def create_task(
     payload: PlanTaskCreate,
@@ -173,6 +197,23 @@ async def update_task_completion(
         owner_user_id=current_user.user_id,
         task_id=task_id,
         completed=payload.completed,
+        request_id=str(getattr(request.state, "request_id", "") or ""),
+    )
+    return PlanTaskRead.model_validate(task)
+
+
+@router.patch("/tasks/{task_id}/state", response_model=PlanTaskRead)
+async def update_task_state(
+    task_id: UUID,
+    payload: PlanTaskStateUpdate,
+    request: Request,
+    current_user: CurrentUser = Depends(require_current_user),
+    service: PlansService = Depends(get_plans_service),
+) -> PlanTaskRead:
+    task = await service.set_task_state(
+        owner_user_id=current_user.user_id,
+        task_id=task_id,
+        state=payload.state,
         request_id=str(getattr(request.state, "request_id", "") or ""),
     )
     return PlanTaskRead.model_validate(task)

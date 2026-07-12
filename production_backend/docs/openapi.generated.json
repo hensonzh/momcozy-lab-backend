@@ -1038,6 +1038,18 @@
             ],
             "title": "Infant Id"
           },
+          "plan_task_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan Task Id"
+          },
           "title": {
             "anyOf": [
               {
@@ -1133,6 +1145,18 @@
             "format": "uuid",
             "title": "Owner User Id",
             "type": "string"
+          },
+          "plan_task_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan Task Id"
           },
           "status": {
             "title": "Status",
@@ -2165,6 +2189,10 @@
           "title": {
             "title": "Title",
             "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
           }
         },
         "required": [
@@ -2175,7 +2203,8 @@
           "summary",
           "status",
           "source",
-          "payload"
+          "payload",
+          "version"
         ],
         "title": "PlanRead",
         "type": "object"
@@ -2344,6 +2373,24 @@
         "title": "PlanTaskRead",
         "type": "object"
       },
+      "PlanTaskStateUpdate": {
+        "properties": {
+          "state": {
+            "enum": [
+              "pending",
+              "completed",
+              "skipped"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "title": "PlanTaskStateUpdate",
+        "type": "object"
+      },
       "PlanTaskUpdate": {
         "properties": {
           "description": {
@@ -2420,6 +2467,25 @@
           }
         },
         "title": "PlanTaskUpdate",
+        "type": "object"
+      },
+      "PlanTodoCompletionUpdate": {
+        "properties": {
+          "completed": {
+            "title": "Completed",
+            "type": "boolean"
+          },
+          "expected_version": {
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "completed",
+          "expected_version"
+        ],
+        "title": "PlanTodoCompletionUpdate",
         "type": "object"
       },
       "PregnancyDiaryEntryCreate": {
@@ -3377,6 +3443,18 @@
             ],
             "title": "Milk Volume Ml"
           },
+          "plan_task_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan Task Id"
+          },
           "pump_end_time": {
             "anyOf": [
               {
@@ -3487,6 +3565,18 @@
             "format": "uuid",
             "title": "Owner User Id",
             "type": "string"
+          },
+          "plan_task_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan Task Id"
           },
           "pump_end_time": {
             "anyOf": [
@@ -7688,6 +7778,70 @@
         "x-momcozy-stability": "stable"
       }
     },
+    "/v1/plans/tasks/{task_id}/state": {
+      "patch": {
+        "operationId": "update_task_state_v1_plans_tasks__task_id__state_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanTaskStateUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanTaskRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Task State",
+        "tags": [
+          "plans"
+        ],
+        "x-momcozy-api-surface": "public_app_api",
+        "x-momcozy-client": [
+          "flutter"
+        ],
+        "x-momcozy-owner": "plans",
+        "x-momcozy-stability": "stable"
+      }
+    },
     "/v1/plans/{plan_id}": {
       "delete": {
         "operationId": "delete_plan_v1_plans__plan_id__delete",
@@ -7776,6 +7930,95 @@
           }
         ],
         "summary": "Get Plan",
+        "tags": [
+          "plans"
+        ],
+        "x-momcozy-api-surface": "public_app_api",
+        "x-momcozy-client": [
+          "flutter"
+        ],
+        "x-momcozy-owner": "plans",
+        "x-momcozy-stability": "stable"
+      }
+    },
+    "/v1/plans/{plan_id}/todos/{item_id}/completion": {
+      "patch": {
+        "operationId": "update_plan_todo_completion_v1_plans__plan_id__todos__item_id__completion_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plan_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Plan Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanTodoCompletionUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Plan Todo Completion",
         "tags": [
           "plans"
         ],

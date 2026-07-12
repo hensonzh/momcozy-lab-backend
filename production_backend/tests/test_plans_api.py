@@ -76,17 +76,52 @@ def test_task_apis_use_current_user_scope() -> None:
         json={"title": "Pack hospital bag"},
     )
     complete_response = TestClient(app).patch(f"/v1/plans/tasks/{fake_service.task_id}/completion", json={"completed": True})
+    skip_response = TestClient(app).patch(
+        f"/v1/plans/tasks/{fake_service.task_id}/state",
+        json={"state": "skipped"},
+    )
 
     assert create_response.status_code == 201
     assert list_response.status_code == 200
     assert update_response.status_code == 200
     assert complete_response.status_code == 200
+    assert skip_response.status_code == 200
     assert fake_service.create_task_kwargs["owner_user_id"] == user_id
     assert fake_service.list_tasks_kwargs["limit"] == 10
     assert fake_service.update_task_kwargs["owner_user_id"] == user_id
     assert fake_service.update_task_kwargs["updates"] == {"title": "Pack hospital bag"}
     assert fake_service.update_task_kwargs["request_id"] == "req_task_update"
     assert fake_service.set_task_completed_kwargs["owner_user_id"] == user_id
+    assert fake_service.set_task_state_kwargs["owner_user_id"] == user_id
+    assert fake_service.set_task_state_kwargs["task_id"] == fake_service.task_id
+    assert fake_service.set_task_state_kwargs["state"] == "skipped"
+    assert fake_service.set_task_state_kwargs["request_id"].startswith("req_")
+
+
+def test_todo_completion_uses_owner_version_request_id_and_idempotency() -> None:
+    user_id = uuid4()
+    fake_service = FakePlansService(user_id=user_id)
+    app = create_app(Settings(app_env="test"))
+    _override_current_user(app, user_id)
+    app.dependency_overrides[get_plans_service] = lambda: fake_service
+
+    response = TestClient(app).patch(
+        f"/v1/plans/{fake_service.plan_id}/todos/prepare-hospital-bag/completion",
+        headers={"X-Request-ID": "req_todo", "Idempotency-Key": " idem-todo "},
+        json={"completed": True, "expected_version": 1},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["version"] == 2
+    assert fake_service.update_plan_todo_completion_kwargs == {
+        "owner_user_id": user_id,
+        "plan_id": fake_service.plan_id,
+        "item_id": "prepare-hospital-bag",
+        "completed": True,
+        "expected_version": 1,
+        "request_id": "req_todo",
+        "idempotency_key": "idem-todo",
+    }
 
 
 def _override_current_user(app, user_id: UUID) -> None:
@@ -116,6 +151,8 @@ class FakePlansService:
         self.list_tasks_kwargs = {}
         self.update_task_kwargs = {}
         self.set_task_completed_kwargs = {}
+        self.set_task_state_kwargs = {}
+        self.update_plan_todo_completion_kwargs = {}
 
     async def create_plan(self, **kwargs):
         self.create_plan_kwargs = kwargs
@@ -145,6 +182,36 @@ class FakePlansService:
         task.status = "completed"
         return task
 
+    async def set_task_state(self, **kwargs):
+        self.set_task_state_kwargs = kwargs
+        task = self._task()
+        task.status = kwargs["state"]
+        return task
+
+    async def update_plan_todo_completion(self, **kwargs):
+        self.update_plan_todo_completion_kwargs = kwargs
+        plan = self._plan()
+        plan.version = kwargs["expected_version"] + 1
+        plan.payload = {
+            "card": {
+                "card_json": {
+                    "todo_plan": {
+                        "periods": [
+                            {
+                                "items": [
+                                    {
+                                        "item_id": kwargs["item_id"],
+                                        "completed": kwargs["completed"],
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+        return plan
+
     async def update_task(self, **kwargs):
         self.update_task_kwargs = kwargs
         task = self._task()
@@ -156,7 +223,7 @@ class FakePlansService:
         return None
 
     def _plan(self) -> Plan:
-        return Plan(id=self.plan_id, owner_user_id=self.user_id, title="Birth plan", plan_type="", summary="", source="manual", payload={}, status="active")
+        return Plan(id=self.plan_id, owner_user_id=self.user_id, title="Birth plan", plan_type="", summary="", source="manual", payload={}, status="active", version=1)
 
     def _task(self) -> PlanTask:
         return PlanTask(

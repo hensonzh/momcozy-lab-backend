@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from ...core.errors import ApiError
 from ..audit import AuditService, IdempotencyKey, IdempotencyService, parse_idempotency_response_ref, request_hash
@@ -12,6 +13,8 @@ from .repository import PlansRepository
 
 PLAN_CREATE_IDEMPOTENCY_SCOPE = "plans.create"
 PLAN_TASK_CREATE_IDEMPOTENCY_SCOPE = "plans.tasks.create"
+PLAN_TODO_COMPLETION_IDEMPOTENCY_SCOPE = "plans.todos.completion"
+PLAN_TASK_STATES = frozenset({"pending", "completed", "skipped"})
 
 
 class PlansService:
@@ -38,11 +41,12 @@ class PlansService:
         request_id: str = "",
         idempotency_key: str | None = None,
     ) -> Plan:
+        normalized_payload = _normalize_plan_payload(plan_type=plan_type, payload=payload or {})
         idempotency_record = await self._reserve_idempotency(
             owner_user_id=owner_user_id,
             scope=PLAN_CREATE_IDEMPOTENCY_SCOPE,
             key=idempotency_key,
-            payload={"plan_type": plan_type, "title": title, "summary": summary, "source": source, "payload": payload or {}},
+            payload={"plan_type": plan_type, "title": title, "summary": summary, "source": source, "payload": normalized_payload},
         )
         if idempotency_record is not None and idempotency_record.response_ref:
             return await self._replay_plan(owner_user_id=owner_user_id, response_ref=idempotency_record.response_ref)
@@ -53,7 +57,7 @@ class PlansService:
             title=title.strip(),
             summary=summary,
             source=source,
-            payload=payload or {},
+            payload=normalized_payload,
         )
         await self._complete_idempotency(idempotency_record=idempotency_record, response_ref=str(plan.id))
         await self._audit(owner_user_id=owner_user_id, action="plans.create", resource_type="plan", resource_id=str(plan.id), request_id=request_id)
@@ -153,6 +157,108 @@ class PlansService:
             raise ApiError(code="not_found", message="Plan task not found.", status=404)
         await self._audit(owner_user_id=owner_user_id, action="plans.tasks.complete", resource_type="plan_task", resource_id=str(task_id), request_id=request_id)
         return task
+
+    async def set_task_state(
+        self,
+        *,
+        owner_user_id: UUID,
+        task_id: UUID,
+        state: str,
+        request_id: str = "",
+    ) -> PlanTask:
+        normalized_state = state.strip().lower()
+        if normalized_state not in PLAN_TASK_STATES:
+            raise ApiError(
+                code="validation_failed",
+                message="state must be pending, completed, or skipped.",
+                status=422,
+            )
+        task = await self.repository.set_task_state(
+            task_id=task_id,
+            owner_user_id=owner_user_id,
+            state=normalized_state,
+            completed_at=_utcnow() if normalized_state == "completed" else None,
+        )
+        if task is None:
+            raise ApiError(code="not_found", message="Plan task not found.", status=404)
+        await self._audit(
+            owner_user_id=owner_user_id,
+            action="plans.tasks.state",
+            resource_type="plan_task",
+            resource_id=str(task_id),
+            request_id=request_id,
+        )
+        return task
+
+    async def update_plan_todo_completion(
+        self,
+        *,
+        owner_user_id: UUID,
+        plan_id: UUID,
+        item_id: str,
+        completed: bool,
+        expected_version: int,
+        request_id: str = "",
+        idempotency_key: str | None = None,
+    ) -> Plan:
+        normalized_item_id = item_id.strip()
+        if not normalized_item_id:
+            raise ApiError(code="validation_failed", message="item_id is required.", status=422)
+        idempotency_record = await self._reserve_idempotency(
+            owner_user_id=owner_user_id,
+            scope=PLAN_TODO_COMPLETION_IDEMPOTENCY_SCOPE,
+            key=idempotency_key,
+            payload={
+                "plan_id": str(plan_id),
+                "item_id": normalized_item_id,
+                "completed": completed,
+                "expected_version": expected_version,
+            },
+        )
+        if idempotency_record is not None and idempotency_record.response_ref:
+            return await self._replay_plan(owner_user_id=owner_user_id, response_ref=idempotency_record.response_ref)
+
+        plan = await self.repository.get_plan_for_owner_for_update(
+            plan_id=plan_id,
+            owner_user_id=owner_user_id,
+        )
+        if plan is None:
+            raise ApiError(code="not_found", message="Plan not found.", status=404)
+        if plan.version != expected_version:
+            raise ApiError(
+                code="version_conflict",
+                message="Plan was updated by another request.",
+                status=409,
+                details={"expected_version": expected_version, "current_version": plan.version},
+            )
+
+        next_payload = deepcopy(plan.payload)
+        item = _find_todo_item_by_item_id(next_payload, normalized_item_id)
+        if item is None:
+            raise ApiError(
+                code="todo_item_not_found",
+                message="Plan todo item was not found or does not have a stable item_id.",
+                status=404,
+            )
+        item["completed"] = completed
+        item["status"] = "completed" if completed else "pending"
+        updated = await self.repository.update_plan_payload_and_version(
+            plan_id=plan_id,
+            owner_user_id=owner_user_id,
+            expected_version=expected_version,
+            payload=next_payload,
+        )
+        if updated is None:
+            raise ApiError(code="version_conflict", message="Plan was updated by another request.", status=409)
+        await self._complete_idempotency(idempotency_record=idempotency_record, response_ref=str(plan_id))
+        await self._audit(
+            owner_user_id=owner_user_id,
+            action="plans.todos.completion",
+            resource_type="plan",
+            resource_id=str(plan_id),
+            request_id=request_id,
+        )
+        return updated
 
     async def update_task(
         self,
@@ -258,3 +364,64 @@ class PlansService:
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _normalize_plan_payload(*, plan_type: str, payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = deepcopy(payload)
+    if plan_type.strip().lower() != "pregnancy":
+        return normalized
+    periods = _todo_periods(normalized)
+    for period_index, period in enumerate(periods):
+        raw_items = period.get("items")
+        if not isinstance(raw_items, list):
+            continue
+        normalized_items: list[Any] = []
+        period_id = _nonempty_text(period.get("id")) or f"period-{period_index + 1}"
+        for item_index, raw_item in enumerate(raw_items):
+            if isinstance(raw_item, str):
+                item: dict[str, Any] = {"title": raw_item}
+            elif isinstance(raw_item, dict):
+                item = deepcopy(raw_item)
+            else:
+                normalized_items.append(raw_item)
+                continue
+            stable_id = _nonempty_text(item.get("item_id")) or _nonempty_text(item.get("id"))
+            if not stable_id:
+                title = _nonempty_text(item.get("title"))
+                seed = f"momcozy:pregnancy-plan:{period_id}:{item_index}:{title}"
+                stable_id = f"todo-{uuid5(NAMESPACE_URL, seed)}"
+            item["item_id"] = stable_id
+            normalized_items.append(item)
+        period["items"] = normalized_items
+    return normalized
+
+
+def _find_todo_item_by_item_id(payload: dict[str, Any], item_id: str) -> dict[str, Any] | None:
+    for period in _todo_periods(payload):
+        items = period.get("items")
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if isinstance(item, dict) and _nonempty_text(item.get("item_id")) == item_id:
+                return item
+    return None
+
+
+def _todo_periods(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    card = payload.get("card")
+    if not isinstance(card, dict):
+        return []
+    card_json = card.get("card_json")
+    if not isinstance(card_json, dict):
+        return []
+    todo_plan = card_json.get("todo_plan")
+    if not isinstance(todo_plan, dict):
+        return []
+    periods = todo_plan.get("periods")
+    if not isinstance(periods, list):
+        return []
+    return [period for period in periods if isinstance(period, dict)]
+
+
+def _nonempty_text(value: Any) -> str:
+    return value.strip() if isinstance(value, str) else ""

@@ -31,13 +31,19 @@ def test_create_feeding_uses_current_user_request_id_and_idempotency() -> None:
     response = TestClient(app).post(
         "/v1/records/feeding",
         headers={"X-Request-ID": "req_feed", "Idempotency-Key": " idem-feed "},
-        json={"feed_time": _now_iso(), "feed_type": "bottle", "volume_ml": 90},
+        json={
+            "feed_time": _now_iso(),
+            "feed_type": "bottle",
+            "volume_ml": 90,
+            "plan_task_id": str(fake_service.task_id),
+        },
     )
 
     assert response.status_code == 201
     assert fake_service.create_feeding_kwargs["owner_user_id"] == user_id
     assert fake_service.create_feeding_kwargs["request_id"] == "req_feed"
     assert fake_service.create_feeding_kwargs["idempotency_key"] == "idem-feed"
+    assert fake_service.create_feeding_kwargs["plan_task_id"] == fake_service.task_id
 
 
 def test_list_feedings_uses_current_user_scope() -> None:
@@ -82,13 +88,18 @@ def test_create_pumping_uses_current_user_request_id_and_idempotency() -> None:
     response = TestClient(app).post(
         "/v1/records/pumping",
         headers={"X-Request-ID": "req_pump", "Idempotency-Key": " idem-pump "},
-        json={"pump_start_time": _now_iso(), "milk_volume_ml": 120},
+        json={
+            "pump_start_time": _now_iso(),
+            "milk_volume_ml": 120,
+            "plan_task_id": str(fake_service.task_id),
+        },
     )
 
     assert response.status_code == 201
     assert fake_service.create_pumping_kwargs["owner_user_id"] == user_id
     assert fake_service.create_pumping_kwargs["request_id"] == "req_pump"
     assert fake_service.create_pumping_kwargs["idempotency_key"] == "idem-pump"
+    assert fake_service.create_pumping_kwargs["plan_task_id"] == fake_service.task_id
 
 
 def test_list_and_delete_pumping_use_current_user_scope() -> None:
@@ -218,6 +229,7 @@ class FakeRecordsService:
     def __init__(self, *, user_id: UUID) -> None:
         self.user_id = user_id
         self.record_id = uuid4()
+        self.task_id = uuid4()
         self.create_feeding_kwargs = {}
         self.create_pumping_kwargs = {}
         self.create_growth_kwargs = {}
@@ -297,6 +309,7 @@ class FakeRecordsService:
             duration_seconds=None,
             title="",
             status="active",
+            plan_task_id=self.task_id,
         )
 
     def _growth(self) -> GrowthRecord:
@@ -323,4 +336,5 @@ class FakeRecordsService:
             source="manual",
             title="",
             status="active",
+            plan_task_id=self.task_id,
         )
