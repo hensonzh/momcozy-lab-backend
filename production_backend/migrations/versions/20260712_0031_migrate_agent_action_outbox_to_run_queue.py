@@ -1,7 +1,7 @@
 """migrate agent action outbox work to the agent run queue
 
-Revision ID: 20260712_0030
-Revises: 20260711_0029
+Revision ID: 20260712_0031
+Revises: 20260712_0030
 Create Date: 2026-07-12 18:00:00
 """
 
@@ -10,8 +10,8 @@ from __future__ import annotations
 from alembic import op
 
 
-revision = "20260712_0030"
-down_revision = "20260711_0029"
+revision = "20260712_0031"
+down_revision = "20260712_0030"
 branch_labels = None
 depends_on = None
 

@@ -2,14 +2,14 @@ import importlib
 
 
 MIGRATION = importlib.import_module(
-    "production_backend.migrations.versions.20260712_0030_migrate_agent_action_outbox_to_run_queue"
+    "production_backend.migrations.versions.20260712_0031_migrate_agent_action_outbox_to_run_queue"
 )
 
 
 def test_agent_action_outbox_upgrade_fails_closed_before_recovering_or_terminating_jobs() -> None:
     sql = MIGRATION.UPGRADE_SQL
 
-    assert MIGRATION.down_revision == "20260711_0029"
+    assert MIGRATION.down_revision == "20260712_0030"
     assert sql.startswith("\nDO $migration$")
     assert "LEFT JOIN agent_actions AS a" in sql
     assert "LEFT JOIN agent_runs AS r ON r.id = a.run_id" in sql

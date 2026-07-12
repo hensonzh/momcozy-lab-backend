@@ -62,7 +62,7 @@ Start incident and release debugging from these IDs when available:
 8. During rolling restarts, let agent and outbox workers receive SIGTERM/SIGINT
    and stop at the next idle point before force killing the process.
 
-### Agent action executor cutover (`20260712_0030`)
+### Agent action executor cutover (`20260712_0031`)
 
 This migration removes only the legacy `agent.action.apply` consumer. The
 generic outbox worker remains required for file-object cleanup and other
