@@ -76,11 +76,17 @@ def test_product_agent_eval_seed_uses_current_pregnancy_action_contracts() -> No
     by_suite = {case["suite"]: case for case in cases}
 
     plan_contracts = {tool_call["contract"] for tool_call in by_suite["pregnancy_plan_creation"]["expected_tool_calls"]}
+    intake_contracts = {tool_call["contract"] for tool_call in by_suite["pregnancy_plan_intake_start"]["expected_tool_calls"]}
+    analysis_contracts = {tool_call["contract"] for tool_call in by_suite["pregnancy_plan_intake_analysis"]["expected_tool_calls"]}
     task_contracts = {tool_call["contract"] for tool_call in by_suite["pregnancy_task_completion"]["expected_tool_calls"]}
     diary_contracts = {tool_call["contract"] for tool_call in by_suite["pregnancy_diary_entry"]["expected_tool_calls"]}
 
     assert "load_service_skill" in plan_contracts
     assert "pregnancy.plan.propose" in plan_contracts
+    assert intake_contracts == {"load_service_skill", "pregnancy.plan_intake.start"}
+    assert analysis_contracts == {"pregnancy.plan_intake.analyze"}
+    assert by_suite["pregnancy_plan_intake_start"]["forbidden_tool_calls"] == [{"contract": "pregnancy.plan.propose"}]
+    assert by_suite["pregnancy_plan_intake_analysis"]["forbidden_tool_calls"] == [{"contract": "pregnancy.plan.propose"}]
     assert "load_service_skill" in task_contracts
     assert "plans.task_complete.propose" in task_contracts
     assert diary_contracts == {"pregnancy_diary.entry.create"}

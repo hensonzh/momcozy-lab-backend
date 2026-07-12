@@ -1,0 +1,234 @@
+from datetime import date, datetime, timezone
+
+from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.tools.pregnancy_plan_flow import (
+    PREGNANCY_PLAN_FINAL_QUESTION,
+    PregnancyPlanPhase,
+    analyze_pregnancy_plan_intake,
+    build_pregnancy_plan_card_json,
+    build_pregnancy_plan_intake_form,
+    build_pregnancy_plan_result,
+    collecting_intake_snapshot,
+    ensure_pregnancy_plan_final_question,
+    pregnancy_plan_urgent_signal_ids,
+)
+
+
+def test_pregnancy_plan_flow_keeps_only_durable_pregeneration_phases() -> None:
+    assert [phase.value for phase in PregnancyPlanPhase] == [
+        "collecting_intake",
+        "awaiting_additional_information",
+    ]
+
+
+def test_pregnancy_plan_intake_form_matches_legacy_visible_contract() -> None:
+    form = build_pregnancy_plan_intake_form(
+        default_values={
+            "current_week": "28+3周",
+            "age": 35,
+            "unknown": "must be ignored",
+        }
+    )
+
+    assert form["id"] == "birth_journey_basic_info_intake"
+    assert form["title"] == "孕周与基本情况"
+    assert form["description"] == "先填写几项基础信息，后面我会按你的孕周、身体情况和准备状态来整理更贴合你的孕期计划。"
+    assert [field["id"] for field in form["fields"]] == [
+        "current_week",
+        "ivf",
+        "fetus_count",
+        "age",
+        "first_birth",
+        "prior_birth_history",
+        "birth_path",
+        "city_or_country",
+        "birth_hospital",
+        "medical_notes",
+        "doctor_notes",
+    ]
+    assert form["default_values"] == {"current_week": "28+3周", "age": 35}
+
+
+def test_pregnancy_plan_analysis_is_personalized_but_never_diagnostic() -> None:
+    analysis = analyze_pregnancy_plan_intake(
+        {
+            "current_week": "28周",
+            "ivf": "是",
+            "fetus_count": "双胎",
+            "age": 36,
+            "first_birth": "否",
+            "prior_birth_history": "上次剖宫产",
+            "birth_path": "还没确定",
+            "city_or_country": "深圳",
+            "birth_hospital": "市妇幼",
+            "medical_notes": "甲状腺用药",
+            "doctor_notes": "医生提醒复查胎儿生长",
+        }
+    )
+
+    assert analysis["stage"]["id"] == "third_trimester"
+    assert analysis["stage"]["current_week"] == 28
+    assert [focus["id"] for focus in analysis["focuses"]] == [
+        "late_pregnancy_timing",
+        "advanced_maternal_age",
+        "ivf_pregnancy",
+        "multiple_pregnancy",
+        "prior_birth_experience",
+        "prior_birth_history",
+        "medical_coordination",
+        "doctor_followup",
+    ]
+    assert all(focus["management_meaning"] and focus["plan_impact"] for focus in analysis["focuses"])
+    rendered = str(analysis)
+    assert "诊断" not in rendered
+    assert "一定" not in rendered
+    assert analysis["final_question"] == PREGNANCY_PLAN_FINAL_QUESTION
+
+
+def test_pregnancy_plan_analysis_does_not_turn_common_negative_notes_into_risk_focuses() -> None:
+    analysis = analyze_pregnancy_plan_intake(
+        {
+            "current_week": "20周",
+            "ivf": "否",
+            "fetus_count": "单胎",
+            "age": 30,
+            "first_birth": "不确定/暂不说",
+            "birth_path": "顺产",
+            "prior_birth_history": "没有异常孕产史。",
+            "medical_notes": "没有基础疾病",
+            "doctor_notes": "医生没有特殊提醒",
+        }
+    )
+
+    assert [focus["id"] for focus in analysis["focuses"]] == ["pregnancy_stage_timing"]
+
+
+def test_pregnancy_plan_analysis_final_question_is_appended_exactly_once() -> None:
+    text = ensure_pregnancy_plan_final_question("这是针对你的分析。")
+
+    assert text == f"这是针对你的分析。\n\n{PREGNANCY_PLAN_FINAL_QUESTION}"
+    assert ensure_pregnancy_plan_final_question(text) == text
+    assert ensure_pregnancy_plan_final_question("这是针对你的分析。还有其他需要补充的信息吗？") == (
+        f"这是针对你的分析。{PREGNANCY_PLAN_FINAL_QUESTION}"
+    )
+
+
+def test_pregnancy_plan_analysis_derives_stage_from_an_iso_due_date() -> None:
+    analysis = analyze_pregnancy_plan_intake(
+        {
+            "current_week": "2026-09-18",
+            "ivf": "否",
+            "fetus_count": "单胎",
+            "age": 30,
+            "first_birth": "否",
+            "birth_path": "顺产",
+        },
+        as_of_date=date(2026, 7, 12),
+    )
+
+    assert analysis["stage"]["id"] == "third_trimester"
+    assert analysis["stage"]["current_week"] == 30
+
+
+def test_pregnancy_plan_analysis_accepts_the_visible_bare_week_plus_days_placeholder() -> None:
+    analysis = analyze_pregnancy_plan_intake(
+        {
+            "current_week": "28+3",
+            "ivf": "否",
+            "fetus_count": "单胎",
+            "age": 30,
+            "first_birth": "否",
+            "birth_path": "顺产",
+        }
+    )
+
+    assert analysis["stage"]["id"] == "third_trimester"
+    assert analysis["stage"]["current_week"] == 28
+
+
+def test_pregnancy_plan_urgent_signals_ignore_historical_conditional_and_negated_mentions() -> None:
+    assert pregnancy_plan_urgent_signal_ids({"doctor_notes": "刚刚胎动明显减少，并且大量出血"}) == [
+        "reduced_fetal_movement",
+        "heavy_bleeding",
+    ]
+    assert pregnancy_plan_urgent_signal_ids({"doctor_notes": "如果破水就去医院，目前没有出血"}) == []
+    assert pregnancy_plan_urgent_signal_ids({"medical_notes": "上次分娩曾经大量出血"}) == []
+    assert pregnancy_plan_urgent_signal_ids({"doctor_notes": "之前没有出血，但现在大量出血"}) == ["heavy_bleeding"]
+    assert pregnancy_plan_urgent_signal_ids({"doctor_notes": "上次产检正常，现在胎动明显减少"}) == ["reduced_fetal_movement"]
+
+
+def test_collecting_snapshot_contains_only_phase_and_canonical_form_reference() -> None:
+    assert collecting_intake_snapshot(form_artifact_id="form-1") == {
+        "phase": "collecting_intake",
+        "source_form_artifact_id": "form-1",
+        "form_id": "birth_journey_basic_info_intake",
+    }
+
+
+def test_pregnancy_plan_card_turns_analyzed_factors_into_executable_todos() -> None:
+    card = build_pregnancy_plan_card_json(
+        {
+            "current_week": "32周",
+            "due_date_or_week": "32周",
+            "ivf": "是",
+            "fetus_count": "双胎",
+            "age": 36,
+            "first_birth": "是",
+            "birth_path": "剖宫产",
+            "birth_hospital": "市妇幼",
+            "medical_notes": "甲状腺用药",
+            "doctor_notes": "医生提醒复查胎儿生长",
+            "final_additional_info": "下周需要出差两天",
+        }
+    )
+
+    assert card["todo_engine_version"] == "pregnancy-plan-flow-v2"
+    assert card["owner"]["due_date_or_week"] == "32周"
+    assert card["owner"]["birth_path"] == "剖宫产"
+    assert card["owner"]["birth_setting"] == "市妇幼"
+    assert card["plan_basis"]["focus_count"] == 8
+    periods = card["todo_plan"]["periods"]
+    assert periods[0]["display_mode"] == "expanded"
+    assert periods[1]["display_mode"] == "collapsed"
+    current_items = periods[0]["items"]
+    item_ids = {item["id"] for item in current_items}
+    assert {
+        "confirm_late_pregnancy_checks",
+        "align_personalized_monitoring",
+        "coordinate_medication_and_specialty_care",
+        "schedule_doctor_requested_followup",
+        "prepare_planned_c_section",
+        "review_final_additional_information",
+    } <= item_ids
+    assert all(item["steps"] and len(item["steps"]) <= 3 for item in current_items)
+    assert card["generation_context"]["additional_information_provided"] is True
+    assert card["plan_basis"]["additional_information_included"] is True
+
+
+def test_pregnancy_plan_card_uses_prior_birth_experience_without_inventing_details() -> None:
+    card = build_pregnancy_plan_card_json(
+        {
+            "current_week": "24周",
+            "ivf": "否",
+            "fetus_count": "单胎",
+            "age": 30,
+            "first_birth": "否",
+            "birth_path": "顺产",
+        }
+    )
+
+    item_ids = {item["id"] for item in card["todo_plan"]["periods"][0]["items"]}
+    assert "review_prior_birth_experience" in item_ids
+    assert "上次最有帮助的一件事" in str(card)
+
+
+def test_pregnancy_plan_result_keeps_legacy_envelope_and_injected_timestamp() -> None:
+    result = build_pregnancy_plan_result(
+        {"due_date_or_week": "32周", "birth_path": "顺产"},
+        now=datetime(2026, 7, 12, 8, 30, tzinfo=timezone.utc),
+    )
+
+    assert result["tool_name"] == "pregnancy.plan.propose"
+    assert result["status"] == "card_created"
+    card_json = result["card"]["card_json"]
+    assert card_json["owner"]["due_date_or_week"] == "32周"
+    assert card_json["generation_context"]["created_at"] == "2026-07-12T08:30:00+00:00"

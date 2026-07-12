@@ -347,6 +347,16 @@ _TOOL_COPY: dict[str, dict[str, str]] = {
         "started": "我先帮你整理分娩沟通单～",
         "completed": "我整理好分娩沟通单啦",
     },
+    "pregnancy.plan_intake.start": {
+        "phase": "planning",
+        "started": "我先帮你准备孕期计划信息表～",
+        "completed": "孕期计划信息表已经准备好啦",
+    },
+    "pregnancy.plan_intake.analyze": {
+        "phase": "planning",
+        "started": "我先按你填写的信息做针对性分析～",
+        "completed": "我已经把会影响计划的重点分析好啦",
+    },
     "pregnancy.plan.propose": {
         "phase": "planning",
         "started": "我先帮你整理孕期计划～",

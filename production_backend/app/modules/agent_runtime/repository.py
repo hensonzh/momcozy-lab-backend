@@ -376,6 +376,35 @@ class AgentRuntimeRepository:
         await self.session.flush()
         return action
 
+    async def lock_run_for_action_proposal(self, *, run_id: UUID) -> None:
+        await self.session.scalar(select(AgentRun.id).where(AgentRun.id == run_id).with_for_update())
+
+    async def get_reusable_action_by_idempotency_key(
+        self,
+        *,
+        run_id: UUID,
+        actor_user_id: UUID,
+        action_type: str,
+        idempotency_key: str,
+    ) -> AgentAction | None:
+        statement = (
+            select(AgentAction)
+            .join(AgentRun, AgentRun.id == AgentAction.run_id)
+            .join(AgentThread, AgentThread.id == AgentRun.thread_id)
+            .where(
+                AgentAction.actor_user_id == actor_user_id,
+                AgentAction.run_id == run_id,
+                AgentAction.action_type == action_type,
+                AgentAction.idempotency_key == idempotency_key,
+                AgentAction.status.in_(("confirmation_required", "proposed", "confirmed", "applying", "applied")),
+                AgentThread.owner_user_id == actor_user_id,
+                AgentThread.deleted_at.is_(None),
+            )
+            .order_by(AgentAction.created_at.desc())
+            .limit(1)
+        )
+        return cast(AgentAction | None, await self.session.scalar(statement))
+
     async def get_action_for_owner(self, *, action_id: UUID, owner_user_id: UUID) -> AgentAction | None:
         statement = (
             select(AgentAction)

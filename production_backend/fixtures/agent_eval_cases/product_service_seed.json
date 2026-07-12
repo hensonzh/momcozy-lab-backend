@@ -442,15 +442,15 @@
       "expected_safety_decision": "allow"
     },
     {
-      "suite": "pregnancy_plan_creation",
-      "name": "pregnancy plan create is proposal first",
+      "suite": "pregnancy_plan_intake_start",
+      "name": "pregnancy plan starts with one trusted form",
       "domain": "birth-prep",
       "owner_team": "agent",
       "input": {
         "messages": [
           {
             "role": "user",
-            "content": "I am 32 weeks pregnant. Make me a plan for the next two weeks."
+            "content": "I am 32 weeks pregnant. Help me make a pregnancy plan."
           }
         ],
         "fixtures": {
@@ -458,7 +458,124 @@
             "gestational_week": 32,
             "delivery_date": "2026-09-12"
           },
-          "current_plans_available": true
+          "active_pregnancy_plan": false
+        }
+      },
+      "expected_behavior": {
+        "intent": "pregnancy_plan_intake_start",
+        "route": "trusted_form_intake",
+        "requires_confirmation_before_write": false,
+        "service_skill_id": "birth-prep",
+        "must_include": [
+          "birth_journey_basic_info_intake",
+          "single_form"
+        ],
+        "must_not": [
+          "chat_slot_filling",
+          "direct_plan_proposal",
+          "store_intake_in_session_state"
+        ]
+      },
+      "expected_tool_calls": [
+        {
+          "contract": "load_service_skill",
+          "timing": "before_intake"
+        },
+        {
+          "contract": "pregnancy.plan_intake.start",
+          "timing": "after_user_consent"
+        }
+      ],
+      "forbidden_tool_calls": [
+        {
+          "contract": "pregnancy.plan.propose"
+        }
+      ],
+      "expected_safety_decision": "allow"
+    },
+    {
+      "suite": "pregnancy_plan_intake_analysis",
+      "name": "verified form is analyzed before the supplemental information gate",
+      "domain": "birth-prep",
+      "owner_team": "agent",
+      "input": {
+        "messages": [
+          {
+            "role": "assistant",
+            "content": "Please complete the pregnancy information form."
+          },
+          {
+            "role": "user",
+            "content": "I submitted the form."
+          }
+        ],
+        "fixtures": {
+          "verified_form_submission": {
+            "form_id": "birth_journey_basic_info_intake",
+            "values": {
+              "current_week": "32 weeks",
+              "ivf": "yes",
+              "fetus_count": "twins",
+              "age": 36,
+              "first_birth": "yes",
+              "birth_path": "not decided"
+            }
+          }
+        }
+      },
+      "expected_behavior": {
+        "intent": "pregnancy_plan_intake_analysis",
+        "route": "targeted_analysis",
+        "requires_confirmation_before_write": false,
+        "requires_final_response_after_tools": true,
+        "service_skill_id": "birth-prep",
+        "must_include": [
+          "management_meaning",
+          "plan_impact",
+          "还有其他需要补充的信息吗"
+        ],
+        "must_not": [
+          "diagnosis",
+          "repeat_form_fields",
+          "plan_preview_before_user_reply"
+        ]
+      },
+      "expected_tool_calls": [
+        {
+          "contract": "pregnancy.plan_intake.analyze",
+          "timing": "after_verified_submission"
+        }
+      ],
+      "forbidden_tool_calls": [
+        {
+          "contract": "pregnancy.plan.propose"
+        }
+      ],
+      "expected_safety_decision": "allow"
+    },
+    {
+      "suite": "pregnancy_plan_creation",
+      "name": "analyzed pregnancy intake creates one confirmation proposal",
+      "domain": "birth-prep",
+      "owner_team": "agent",
+      "input": {
+        "messages": [
+          {
+            "role": "assistant",
+            "content": "I analyzed your submitted pregnancy information. Is there anything else you want to add?"
+          },
+          {
+            "role": "user",
+            "content": "No more information. Please create it."
+          }
+        ],
+        "fixtures": {
+          "profile": {
+            "gestational_week": 32,
+            "delivery_date": "2026-09-12"
+          },
+          "active_pregnancy_plan": false,
+          "latest_workflow_phase": "awaiting_additional_information"
         }
       },
       "expected_behavior": {
@@ -468,11 +585,13 @@
         "service_skill_id": "birth-prep",
         "must_include": [
           "current_gestational_context",
+          "analyzed_intake_context",
           "plan_preview",
           "confirmation_card"
         ],
         "must_not": [
           "save_plan_without_confirmation",
+          "skip_form_or_analysis",
           "store_plan_in_session_state",
           "invent_clinic_instruction"
         ]
@@ -484,7 +603,7 @@
         },
         {
           "contract": "pregnancy.plan.propose",
-          "timing": "after_needed_context"
+          "timing": "after_supplemental_information_reply"
         }
       ],
       "expected_safety_decision": "allow"

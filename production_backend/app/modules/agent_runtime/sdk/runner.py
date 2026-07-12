@@ -338,11 +338,19 @@ class OpenAIAgentsSdkBackend:
                 status=503,
             )
 
+        observed_tool_calls: list[dict[str, Any]] = []
         agent_kwargs: dict[str, Any] = {
             "name": "MomCozy assistant",
             "instructions": request.instructions,
             "model": self.model,
-            "tools": [_build_function_tool(agents_module=agents_module, definition=definition) for definition in request.tools],
+            "tools": [
+                _build_function_tool(
+                    agents_module=agents_module,
+                    definition=definition,
+                    observed_tool_calls=observed_tool_calls,
+                )
+                for definition in request.tools
+            ],
         }
         model_settings = _build_agent_model_settings(agents_module=agents_module, provider=self.provider)
         if model_settings is not None:
@@ -369,11 +377,15 @@ class OpenAIAgentsSdkBackend:
                 run_kwargs=run_kwargs,
                 on_text_delta=request.on_text_delta,
             )
+            result.tool_calls.extend(observed_tool_calls)
             return result
 
         result = await runner_cls.run(agent, _flatten_model_input(request.model_input), **run_kwargs)
         final_output = getattr(result, "final_output", "")
-        return SdkNodeResult(final_text=_sanitize_model_text(str(final_output or "")))
+        return SdkNodeResult(
+            final_text=_sanitize_model_text(str(final_output or "")),
+            tool_calls=observed_tool_calls,
+        )
 
 
 class OpenAIAgentsSdkRunner:
@@ -894,7 +906,12 @@ def sdk_tool_name(contract_name: str) -> str:
     return normalized or "tool"
 
 
-def _build_function_tool(*, agents_module: Any, definition: SdkToolDefinition) -> Any:
+def _build_function_tool(
+    *,
+    agents_module: Any,
+    definition: SdkToolDefinition,
+    observed_tool_calls: list[dict[str, Any]] | None = None,
+) -> Any:
     function_tool_cls = getattr(agents_module, "FunctionTool", None)
     if function_tool_cls is None:
         raise ApiError(code="dependency_not_configured", message="OpenAI Agents SDK FunctionTool is unavailable.", status=503)
@@ -902,7 +919,16 @@ def _build_function_tool(*, agents_module: Any, definition: SdkToolDefinition) -
     async def invoke_tool(_ctx: Any, args: str) -> str:
         try:
             invocation = await definition.invoke(args)
-            return invocation.output_json
+            if observed_tool_calls is not None:
+                observed_tool_calls.append(
+                    {
+                        "tool_name": definition.contract_name,
+                        "status": "completed",
+                        "args": _json_object_or_raw(args),
+                        "safe_output": _json_object_or_raw(invocation.safe_output_json or invocation.output_json),
+                    }
+                )
+            return _agents_sdk_tool_model_output(invocation)
         except ApiError as exc:
             if exc.code == "tool_commit_failed":
                 raise
@@ -917,6 +943,20 @@ def _build_function_tool(*, agents_module: Any, definition: SdkToolDefinition) -
         params_json_schema=definition.params_json_schema,
         on_invoke_tool=invoke_tool,
         strict_json_schema=False,
+    )
+
+
+def _agents_sdk_tool_model_output(invocation: SdkToolInvocationResult) -> str:
+    if not invocation.model_context:
+        return invocation.output_json
+    return json.dumps(
+        {
+            "result": _json_object_or_raw(invocation.output_json),
+            "trusted_model_context": [dict(item) for item in invocation.model_context],
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
     )
 
 

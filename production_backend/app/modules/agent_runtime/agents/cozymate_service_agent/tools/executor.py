@@ -733,6 +733,8 @@ def _tool_event_label(tool_name: str) -> str:
         "plans.task_create.propose": "任务草稿",
         "plans.task_complete.propose": "任务状态",
         "pregnancy.plan_context.read": "孕期计划上下文",
+        "pregnancy.plan_intake.start": "孕期计划信息表",
+        "pregnancy.plan_intake.analyze": "孕期计划信息分析",
         "pregnancy.plan.propose": "孕期计划草稿",
         "pregnancy_diary.entries.read": "孕期日记",
         "pregnancy_diary.entry.create": "记录孕期日记",

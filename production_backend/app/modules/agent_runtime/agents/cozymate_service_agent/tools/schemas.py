@@ -321,13 +321,23 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
         "additionalProperties": False,
         "properties": {
             "summary": {"type": "string", "maxLength": 2000},
-            "due_date_or_week": {"type": "string", "maxLength": 120},
-            "birth_path": {"type": "string", "maxLength": 120},
-            "birth_setting": {"type": "string", "maxLength": 255},
-            "support_person": {"type": "string", "maxLength": 500},
-            "feeding_intention": {"type": "string", "maxLength": 120},
             "scope": {"type": "string", "enum": ["full", "prenatal_only", "short_range"]},
+            "additional_info": {
+                "type": "string",
+                "maxLength": 2000,
+                "description": "用户在针对性分析后的最后一轮主动补充；没有补充时省略。",
+            },
         },
+    },
+    "pregnancy.plan_intake.start": {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {},
+    },
+    "pregnancy.plan_intake.analyze": {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {},
     },
     "plans.task_create.propose": {
         "type": "object",

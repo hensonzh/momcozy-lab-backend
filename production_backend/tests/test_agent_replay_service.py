@@ -74,6 +74,40 @@ def test_agent_replay_service_redacts_pii_from_export_payloads() -> None:
     assert bundle["safety_events"][0]["evidence"] == {"matched_term": "fever", "patient_phone": "[redacted]"}
 
 
+def test_agent_replay_service_projects_internal_pregnancy_workflow_without_health_facts() -> None:
+    repository = FakeReplayRepository()
+    repository.artifact.artifact_type = "pregnancy_plan_workflow"
+    repository.artifact.payload = {
+        "phase": "awaiting_additional_information",
+        "source_form_artifact_id": "form-1",
+        "source_form_submission_id": "submission-1",
+        "plan_context": {
+            "age": 36,
+            "ivf": "是",
+            "fetus_count": "双胎",
+            "medical_notes": "甲状腺用药",
+            "doctor_notes": "复查胎儿生长",
+        },
+        "analysis": {
+            "focuses": [
+                {"id": "advanced_maternal_age", "management_meaning": "private"},
+                {"id": "medical_coordination", "management_meaning": "private"},
+            ]
+        },
+    }
+
+    bundle = asyncio.run(AgentReplayService(repository=repository).export_run_bundle(run_id=repository.run.id))
+
+    assert bundle["artifacts"][0]["payload"] == {
+        "phase": "awaiting_additional_information",
+        "source_form_artifact_id": "form-1",
+        "source_form_submission_id": "submission-1",
+        "focus_count": 2,
+        "personalized": True,
+    }
+    assert "甲状腺" not in str(bundle)
+
+
 class FakeReplayRepository:
     def __init__(self) -> None:
         self.run = AgentRun(

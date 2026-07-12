@@ -85,6 +85,8 @@ SCENARIO_NAMESPACE_DEFINITIONS: tuple[ToolNamespace, ...] = (
             "处理当前用户的孕期计划、分娩沟通和待产包表单/卡片。用户要制定或调整孕期待办、梳理分娩偏好、生成沟通单或整理待产包时使用。"
         ),
         tool_contracts=(
+            "pregnancy.plan_intake.start",
+            "pregnancy.plan_intake.analyze",
             "pregnancy.plan.propose",
             "plans.plan_delete.propose",
             "plans.task_update.propose",

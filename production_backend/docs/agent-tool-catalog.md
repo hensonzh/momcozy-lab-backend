@@ -2,12 +2,12 @@
 
 本文档是当前 MomCozy Agent 模型可见工具与 namespace 的审查快照，便于评审工具是否必要、命名是否清晰、分组是否合理，以及后续变更是否意外扩大模型工具面。
 
-快照基线：`feat/test1`，2026-07-11，以本文档所在 commit 为准。
+快照基线：`feat/test1`，2026-07-12，以本文档所在 commit 为准。
 
 ## 1. 口径与运行时语义
 
-- 工具注册表只登记**模型可见工具**。当前共 39 个 tool contract。
-- 当前生产 OpenAI Responses 路径向模型提供 4 个独立全局工具和 7 个全局 namespace；namespace 内共 35 个工具。
+- 工具注册表只登记**模型可见工具**。当前共 41 个 tool contract。
+- 当前生产 OpenAI Responses 路径向模型提供 4 个独立全局工具和 7 个全局 namespace；namespace 内共 37 个工具。
 - namespace 不与 service skill 强绑定。模型无需先加载某个 skill 才能看到或检索某个 namespace。
 - `recommended_tools` 只是在 `load_service_skill` 返回中的建议清单，不承担权限控制，也不改变工具曝光范围。
 - `eager` 工具随本轮 tools 定义直接提供；namespace 内的 `deferred` 工具通过 Responses API 的 `defer_loading=true` 和 `tool_search` 按需检索。
@@ -18,12 +18,12 @@
 
 | 项目 | 数量 |
 | --- | ---: |
-| 模型可见 tool contract | 39 |
+| 模型可见 tool contract | 41 |
 | 独立全局工具 | 4 |
 | 全局 namespace | 7 |
-| namespace 内工具 | 35 |
+| namespace 内工具 | 37 |
 | eager 工具 | 12 |
-| deferred 工具 | 27 |
+| deferred 工具 | 29 |
 
 ## 2. 独立全局工具
 
@@ -41,7 +41,7 @@
 | Namespace | 工具数 | eager | deferred | 定位 |
 | --- | ---: | ---: | ---: | --- |
 | `milk_management` | 17 | 6 | 11 | 用户查看或记录喂养、吸奶、生长数据，分析奶量趋势，或管理相关计划与提醒时使用。 |
-| `birth_prep` | 8 | 0 | 8 | 用户制定孕期计划、梳理分娩偏好、生成沟通单或整理待产包时使用。 |
+| `birth_prep` | 10 | 0 | 10 | 用户制定孕期计划、梳理分娩偏好、生成沟通单或整理待产包时使用。 |
 | `hospital_bag_cart` | 1 | 0 | 1 | 用户调整已有待产包购物车的预算、物品、数量或吸奶器时使用。 |
 | `pump_recommendation` | 1 | 0 | 1 | 用户购买前询问吸奶器型号、差异、价格或如何选择时使用。 |
 | `device_support` | 3 | 2 | 1 | 用户查看设备状态、需要官方指导、排查问题或联系售后时使用。 |
@@ -74,7 +74,9 @@
 
 | Canonical contract | 模型看到的 SDK name | 加载 | 读写 | 需确认 | 用途 |
 | --- | --- | --- | --- | --- | --- |
-| `pregnancy.plan.propose` | `pregnancy_plan_propose` | deferred | write | 是 | 用户明确希望制定孕期计划时，基于可信资料和偏好创建待确认计划。 |
+| `pregnancy.plan_intake.start` | `pregnancy_plan_intake_start` | deferred | write | 否 | 用户同意开始制定孕期计划且当前没有 active 计划时，创建一张可信基础信息表单。 |
+| `pregnancy.plan_intake.analyze` | `pregnancy_plan_intake_analyze` | deferred | write | 否 | 只消费应用侧已校验的孕期计划表单提交，生成针对性分析快照并进入最后补充信息确认。 |
+| `pregnancy.plan.propose` | `pregnancy_plan_propose` | deferred | write | 是 | 针对性分析完成且用户在下一轮确认无补充或给出最后补充后，基于可信快照创建待确认计划。 |
 | `plans.plan_delete.propose` | `plans_plan_delete_propose` | deferred | write | 是 | 用户明确删除整个已有计划时创建删除确认。 |
 | `plans.task_update.propose` | `plans_task_update_propose` | deferred | write | 是 | 用户明确调整已有任务日期、时间、标题、描述或载荷时创建更新确认。 |
 | `plans.task_delete.propose` | `plans_task_delete_propose` | deferred | write | 是 | 用户明确删除已有任务时创建删除确认。 |
@@ -127,7 +129,7 @@ service skill 只通过 `recommended_tools` 向模型提示常用工具，不拥
 | Service skill | 当前 recommended tool contract |
 | --- | --- |
 | `milk-management` | `milk_management` namespace 的全部 17 个工具 |
-| `birth-prep` | `pregnancy.plan.propose`、`plans.plan_delete.propose`、`plans.task_complete.propose`、`plans.task_update.propose`、`plans.task_delete.propose`、4 个表单/卡片工具、`hospital_bag_cart_update`、`hospital_bag_pump_recommend` |
+| `birth-prep` | `pregnancy.plan_intake.start`、`pregnancy.plan_intake.analyze`、`pregnancy.plan.propose`、`plans.plan_delete.propose`、`plans.task_complete.propose`、`plans.task_update.propose`、`plans.task_delete.propose`、4 个分娩沟通/待产包表单与卡片工具、`hospital_bag_cart_update`、`hospital_bag_pump_recommend` |
 | `health-consultation` | `records.milk_status.read`、`ibclc_consult_card_create` |
 | `emotion-support` | 空；当前没有专属 recommended tool |
 | `device-guidance` | `device_support` namespace 的全部 3 个工具 |

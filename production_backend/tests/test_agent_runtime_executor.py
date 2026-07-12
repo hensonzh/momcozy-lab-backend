@@ -37,7 +37,11 @@ from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.
 from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.tools import (
     ToolExecutor,
     ToolHandlerContext,
+    ToolHandlerResult,
     default_tool_registry,
+)
+from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.tools.pregnancy_plan_flow import (
+    PREGNANCY_PLAN_URGENT_RESPONSE,
 )
 
 
@@ -328,6 +332,8 @@ def test_agent_runtime_executor_load_service_skill_returns_facts_and_records_led
         (
             "birth-prep",
             {
+                "pregnancy_plan_intake_start",
+                "pregnancy_plan_intake_analyze",
                 "pregnancy_plan_propose",
                 "plans_plan_delete_propose",
                 "plans_task_complete_propose",
@@ -694,6 +700,8 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
         "plans_task_delete_propose",
         "plans_task_update_propose",
         "pregnancy_plan_propose",
+        "pregnancy_plan_intake_analyze",
+        "pregnancy_plan_intake_start",
         "pregnancy_diary_entries_read",
         "pregnancy_diary_entry_create",
         "pregnancy_diary_entry_delete_propose",
@@ -1449,6 +1457,7 @@ def test_agent_runtime_executor_loads_birth_prep_skill_only_when_model_calls_too
     assert loaded_skill["service_skill_id"] == "birth-prep"
     assert "待产包清单" in loaded_skill["instructions"]
     assert "分娩沟通单" in loaded_skill["instructions"]
+    assert "孕期计划基础信息是例外，必须走一张可信表单" in loaded_skill["instructions"]
     assert "每轮最多问一个缺失字段" in loaded_skill["instructions"]
     assert "奶量管理仅处理三类任务" not in request.instructions
     assert "当前已接入官方资料的型号：Air1" not in request.instructions
@@ -1862,6 +1871,251 @@ def test_agent_runtime_executor_injects_verified_form_submission_as_non_persiste
     }
 
 
+def test_agent_runtime_executor_injects_pregnancy_intake_submission_and_latest_workflow_snapshot() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    form_artifact_id = uuid4()
+    current_user = _message(
+        thread_id=thread_id,
+        run_id=run.id,
+        role="user",
+        text="我已提交信息采集表单，请继续分析。",
+        sequence=1,
+        content_overrides={
+            "attachments": [
+                {
+                    "type": "form_submission",
+                    "submission_id": str(uuid4()),
+                    "artifact_id": str(form_artifact_id),
+                    "form_id": "birth_journey_basic_info_intake",
+                    "values": {
+                        "current_week": "32周",
+                        "ivf": "是",
+                        "fetus_count": "双胎",
+                        "age": 36,
+                        "first_birth": "是",
+                        "birth_path": "还没确定",
+                        "medical_notes": "甲状腺用药",
+                    },
+                    "verified": True,
+                }
+            ]
+        },
+    )
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user, run=run)
+    repository.latest_thread_artifact = AgentArtifact(
+        id=uuid4(),
+        run_id=uuid4(),
+        owner_user_id=run.actor_user_id,
+        artifact_type="pregnancy_plan_workflow",
+        schema_version="v1",
+        status="created",
+        payload={
+            "phase": "collecting_intake",
+            "source_form_artifact_id": str(form_artifact_id),
+            "form_id": "birth_journey_basic_info_intake",
+        },
+        raw_payload_ref="",
+    )
+    registry = default_tool_registry()
+    captured_args: dict[str, Any] = {}
+
+    async def capture_handler(context: ToolHandlerContext) -> dict[str, Any]:
+        captured_args.update(context.args)
+        return {"status": "intake_analyzed"}
+
+    tool_executor = ToolExecutor(
+        registry=registry,
+        repository=repository,
+        handlers={"pregnancy.plan_intake.analyze": capture_handler},
+    )
+    backend = ScriptedSdkBackend(
+        [
+            scripted_sdk_response(
+                final_text="我已经按你的情况分析好了。还有其他需要补充的信息吗？",
+                tool_invocations=(scripted_tool_invocation("pregnancy.plan_intake.analyze", {}),),
+            )
+        ]
+    )
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            tool_registry=registry,
+            tool_executor=tool_executor,
+        ).execute(run=run)
+    )
+
+    attachment = current_user.content["attachments"][0]
+    assert result.status == "completed"
+    assert repository.tool_call.safe_args == {}
+    assert captured_args == {
+        "confirmed_form_data": attachment["values"],
+        "form_submission_id": attachment["submission_id"],
+        "form_artifact_id": str(form_artifact_id),
+        "runtime_plan_context": {
+            "has_active_plan": False,
+            "workflow_phase": "collecting_intake",
+            "source_form_artifact_id": str(form_artifact_id),
+        },
+        "runtime_workflow_context": repository.latest_thread_artifact.payload,
+    }
+    assert result.final_text.endswith("还有其他需要补充的信息吗？如果没有，我就基于目前的信息开始为你制定孕期计划啦。")
+    assert result.quick_replies == [
+        {"text": "没有了，开始制定"},
+        {"text": "我想补充一点"},
+        {"text": "稍等我再看看"},
+    ]
+    assert "甲状腺用药" not in json.dumps(backend.requests[0].model_input, ensure_ascii=False)
+
+
+def test_agent_runtime_executor_blocks_model_and_tools_for_urgent_text_while_awaiting_plan_supplement() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(
+        thread_id=thread_id,
+        run_id=run.id,
+        role="user",
+        text="我现在大量出血",
+        sequence=1,
+    )
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user, run=run)
+    repository.latest_thread_artifact = AgentArtifact(
+        id=uuid4(),
+        run_id=uuid4(),
+        owner_user_id=run.actor_user_id,
+        artifact_type="pregnancy_plan_workflow",
+        schema_version="v1",
+        status="created",
+        payload={
+            "phase": "awaiting_additional_information",
+            "analysis_run_id": str(uuid4()),
+            "source_form_artifact_id": "form-1",
+            "source_form_submission_id": "submission-1",
+            "plan_context": {"current_week": "32周"},
+        },
+        raw_payload_ref="",
+    )
+    registry = default_tool_registry()
+    captured_args: dict[str, Any] = {}
+
+    async def urgent_handler(context: ToolHandlerContext) -> ToolHandlerResult:
+        captured_args.update(context.args)
+        return ToolHandlerResult(
+            output={
+                "status": "urgent_care_required",
+                "signal_ids": ["heavy_bleeding"],
+                "blocks_plan_flow": True,
+                "required_response": PREGNANCY_PLAN_URGENT_RESPONSE,
+            }
+        )
+
+    tool_executor = ToolExecutor(
+        registry=registry,
+        repository=repository,
+        handlers={"pregnancy.plan.propose": urgent_handler},
+    )
+    backend = ScriptedSdkBackend(
+        [
+            scripted_sdk_response(
+                final_text="计划已经生成，请继续。",
+                tool_invocations=(scripted_tool_invocation("pregnancy.plan.propose", {}),),
+            )
+        ]
+    )
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            tool_registry=registry,
+            tool_executor=tool_executor,
+        ).execute(run=run)
+    )
+
+    assert captured_args == {}
+    assert backend.requests == []
+    assert result.final_text == PREGNANCY_PLAN_URGENT_RESPONSE
+    assert result.quick_replies == []
+    assert repository.artifacts[-1].payload == {
+        "phase": "awaiting_additional_information",
+        "interrupted_by_safety_signal": True,
+        "source_form_artifact_id": "form-1",
+        "source_form_submission_id": "submission-1",
+        "form_id": "birth_journey_basic_info_intake",
+    }
+    assert "孕期计划啦" not in result.final_text
+
+
+def test_agent_runtime_executor_blocks_model_for_urgent_signal_hidden_in_verified_intake() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    form_artifact_id = uuid4()
+    current_user = _message(
+        thread_id=thread_id,
+        run_id=run.id,
+        role="user",
+        text="我已提交表单。",
+        sequence=1,
+        content_overrides={
+            "attachments": [
+                {
+                    "type": "form_submission",
+                    "submission_id": str(uuid4()),
+                    "artifact_id": str(form_artifact_id),
+                    "form_id": "birth_journey_basic_info_intake",
+                    "values": {
+                        "current_week": "32周",
+                        "ivf": "否",
+                        "fetus_count": "单胎",
+                        "age": 30,
+                        "first_birth": "是",
+                        "birth_path": "顺产",
+                        "doctor_notes": "刚刚胎动明显减少",
+                    },
+                    "verified": True,
+                }
+            ]
+        },
+    )
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user, run=run)
+    repository.latest_thread_artifact = AgentArtifact(
+        id=uuid4(),
+        run_id=uuid4(),
+        owner_user_id=run.actor_user_id,
+        artifact_type="pregnancy_plan_workflow",
+        schema_version="v1",
+        status="created",
+        payload={
+            "phase": "collecting_intake",
+            "source_form_artifact_id": str(form_artifact_id),
+        },
+        raw_payload_ref="",
+    )
+    backend = CapturingSdkBackend(result=SdkNodeResult(final_text="不应调用模型"))
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+        ).execute(run=run)
+    )
+
+    assert backend.requests == []
+    assert result.final_text == PREGNANCY_PLAN_URGENT_RESPONSE
+    assert result.quick_replies == []
+    interruption = repository.artifacts[-1]
+    assert interruption.artifact_type == "pregnancy_plan_workflow"
+    assert interruption.payload == {
+        "phase": "collecting_intake",
+        "interrupted_by_safety_signal": True,
+        "source_form_artifact_id": str(form_artifact_id),
+        "source_form_submission_id": current_user.content["attachments"][0]["submission_id"],
+        "form_id": "birth_journey_basic_info_intake",
+    }
+
+
 def test_agent_runtime_executor_prefills_form_from_runtime_business_facts_without_model_args() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)
@@ -1937,6 +2191,65 @@ def test_pregnancy_runtime_plan_context_allows_creation_when_only_other_plan_typ
     )
 
     assert context == {"has_active_plan": False}
+
+
+def test_pregnancy_runtime_plan_context_recovers_analyzed_intake_from_latest_artifact() -> None:
+    context = _pregnancy_runtime_plan_context(
+        {"pregnancy": {"profile": {"delivery_date": "2026-09-18"}, "plans": []}},
+        workflow={
+            "artifact_id": "analysis-1",
+            "run_id": "analysis-run-1",
+            "payload": {
+                "phase": "awaiting_additional_information",
+                "analysis_run_id": "analysis-run-1",
+                "source_form_artifact_id": "form-1",
+                "source_form_submission_id": "submission-1",
+                "plan_context": {
+                    "current_week": "32周",
+                    "due_date_or_week": "32周",
+                    "ivf": "是",
+                    "fetus_count": "双胎",
+                    "age": 36,
+                },
+            },
+        },
+    )
+
+    assert context == {
+        "has_active_plan": False,
+        "delivery_date": "2026-09-18",
+        "workflow_phase": "awaiting_additional_information",
+        "analysis_run_id": "analysis-run-1",
+        "source_form_artifact_id": "form-1",
+        "source_form_submission_id": "submission-1",
+        "analysis_artifact_id": "analysis-1",
+        "current_week": "32周",
+        "due_date_or_week": "32周",
+        "ivf": "是",
+        "fetus_count": "双胎",
+        "age": 36,
+    }
+
+
+def test_pregnancy_runtime_plan_context_does_not_resurrect_consumed_intake_after_plan_deletion() -> None:
+    context = _pregnancy_runtime_plan_context(
+        {"pregnancy": {"profile": {"delivery_date": "2026-09-18"}, "plans": []}},
+        workflow={
+            "artifact_id": "consumed-1",
+            "payload": {
+                "phase": "awaiting_additional_information",
+                "consumed_by_action_id": "action-1",
+                "source_form_artifact_id": "old-form",
+                "source_form_submission_id": "old-submission",
+                "plan_context": {"current_week": "32周", "medical_notes": "private"},
+            },
+        },
+    )
+
+    assert context == {
+        "has_active_plan": False,
+        "delivery_date": "2026-09-18",
+    }
 
 
 def test_agent_runtime_executor_injects_latest_cart_state_without_exposing_groups_to_model() -> None:

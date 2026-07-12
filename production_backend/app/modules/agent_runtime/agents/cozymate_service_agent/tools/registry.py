@@ -326,9 +326,48 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
+            name="pregnancy.plan_intake.start",
+            domain="birth_prep",
+            description=(
+                "为当前用户创建孕期计划基础信息表单。用户同意开始制定孕期计划且当前没有 active 孕期计划时调用；"
+                "不要先在聊天里逐项收集表单字段。"
+            ),
+            read_or_write="write",
+            side_effect_level="low",
+            blocking_policy="must_wait",
+            result_dependency="final_response",
+            requires_confirmation=False,
+            idempotency_required=True,
+            audit_required=True,
+            timeout_seconds=15,
+        )
+    )
+    registry.register(
+        _tool_contract(
+            name="pregnancy.plan_intake.analyze",
+            domain="birth_prep",
+            description=(
+                "分析应用侧已校验的孕期计划基础表单提交。当前用户消息包含 birth_journey_basic_info_intake 提交时调用，"
+                "工具参数保持空对象；分析后必须向用户说明针对性影响并询问是否还有补充，本轮不要生成计划。"
+            ),
+            read_or_write="write",
+            side_effect_level="low",
+            blocking_policy="must_wait",
+            result_dependency="final_response",
+            requires_confirmation=False,
+            idempotency_required=True,
+            audit_required=True,
+            timeout_seconds=15,
+        )
+    )
+    registry.register(
+        _tool_contract(
             name="pregnancy.plan.propose",
             domain="plans",
-            description="基于可信孕期资料和本轮偏好创建孕期计划预览并发起待确认动作。用户明确希望制定孕期计划时调用。",
+            description=(
+                "基于最近一次已分析的可信孕期计划表单和本轮最终补充创建计划预览并发起待确认动作。"
+                "只在针对性分析已经完成、用户随后明确没有更多信息或给出最后补充时调用。"
+            ),
             read_or_write="write",
             side_effect_level="medium",
             blocking_policy="wait_for_confirmation",

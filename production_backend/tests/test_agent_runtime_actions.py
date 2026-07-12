@@ -145,6 +145,32 @@ def test_agent_runtime_actions_generate_action_idempotency_key_for_confirmation(
     assert outbox_service.enqueue_kwargs["idempotency_key"] == outbox_key
 
 
+def test_agent_runtime_action_proposal_once_reuses_same_run_action_and_emits_one_confirmation_event() -> None:
+    owner_user_id = uuid4()
+    repository = FakeActionRepository()
+    service = AgentRuntimeService(repository=repository)
+    run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Create pregnancy plan"))
+    kwargs = {
+        "owner_user_id": owner_user_id,
+        "run_id": run.id,
+        "action_type": PREGNANCY_PLAN_CREATE_ACTION,
+        "target_type": "plan",
+        "preview_payload": {"title": "孕期计划"},
+        "apply_payload": {"title": "孕期计划"},
+        "idempotency_key": "pregnancy-plan:analysis-1",
+    }
+
+    first, first_created = asyncio.run(service.propose_action_once(**kwargs))
+    second, second_created = asyncio.run(service.propose_action_once(**kwargs))
+
+    assert first_created is True
+    assert second_created is False
+    assert second.id == first.id
+    assert len(repository.actions) == 1
+    assert repository.locked_run_ids == [run.id, run.id]
+    assert [event.event_type for event in repository.events].count("action.confirmation_required") == 1
+
+
 def test_agent_runtime_actions_scope_outbox_idempotency_key_to_each_action() -> None:
     owner_user_id = uuid4()
     repository = FakeActionRepository()
@@ -554,6 +580,7 @@ class FakeActionRepository(FakeAgentRuntimeRepository):
         super().__init__()
         self.action = None
         self.actions = []
+        self.locked_run_ids = []
 
     async def create_action(self, **kwargs):
         self.action = AgentAction(
@@ -573,6 +600,30 @@ class FakeActionRepository(FakeAgentRuntimeRepository):
         )
         self.actions.append(self.action)
         return self.action
+
+    async def lock_run_for_action_proposal(self, *, run_id):
+        self.locked_run_ids.append(run_id)
+
+    async def get_reusable_action_by_idempotency_key(
+        self,
+        *,
+        run_id,
+        actor_user_id,
+        action_type,
+        idempotency_key,
+    ):
+        return next(
+            (
+                action
+                for action in reversed(self.actions)
+                if action.run_id == run_id
+                and action.actor_user_id == actor_user_id
+                and action.action_type == action_type
+                and action.idempotency_key == idempotency_key
+                and action.status in {"confirmation_required", "proposed", "confirmed", "applying", "applied"}
+            ),
+            None,
+        )
 
     async def get_action_for_owner(self, *, action_id: UUID, owner_user_id: UUID):
         return next((action for action in self.actions if action.id == action_id and action.actor_user_id == owner_user_id), None)

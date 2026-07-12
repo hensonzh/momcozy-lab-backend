@@ -117,6 +117,11 @@ def _action(action: AgentAction) -> dict[str, Any]:
 
 
 def _artifact(artifact: AgentArtifact) -> dict[str, Any]:
+    payload = (
+        _pregnancy_plan_workflow_replay_payload(artifact.payload)
+        if artifact.artifact_type == "pregnancy_plan_workflow"
+        else _redact_replay_value(artifact.payload)
+    )
     return {
         "id": str(artifact.id),
         "run_id": str(artifact.run_id),
@@ -124,11 +129,37 @@ def _artifact(artifact: AgentArtifact) -> dict[str, Any]:
         "artifact_type": artifact.artifact_type,
         "schema_version": artifact.schema_version,
         "status": artifact.status,
-        "payload": _redact_replay_value(artifact.payload),
+        "payload": payload,
         "raw_payload_ref": artifact.raw_payload_ref,
         "created_at": artifact.created_at.isoformat() if artifact.created_at else None,
         "updated_at": artifact.updated_at.isoformat() if artifact.updated_at else None,
     }
+
+
+def _pregnancy_plan_workflow_replay_payload(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {}
+    projected = {
+        key: _redact_replay_value(payload.get(key))
+        for key in (
+            "phase",
+            "form_id",
+            "source_form_artifact_id",
+            "source_form_submission_id",
+            "analysis_run_id",
+            "source_analysis_artifact_id",
+            "consumed_by_action_id",
+            "interrupted_by_safety_signal",
+        )
+        if payload.get(key) not in (None, "")
+    }
+    analysis = payload.get("analysis")
+    focuses = analysis.get("focuses") if isinstance(analysis, dict) else None
+    if isinstance(focuses, list):
+        focus_count = sum(1 for focus in focuses if isinstance(focus, dict) and str(focus.get("id") or "").strip())
+        projected["focus_count"] = focus_count
+        projected["personalized"] = focus_count > 1
+    return projected
 
 
 def _checkpoint(checkpoint: AgentContextCheckpoint) -> dict[str, Any]:
@@ -170,7 +201,9 @@ def _context_projection(context_projection: AgentContextProjection) -> dict[str,
         "prompt_version": context_projection.prompt_version,
         "tool_schema_version": context_projection.tool_schema_version,
         "selected_message_ids": context_projection.selected_message_ids,
-        "active_workflow_state_id": str(context_projection.active_workflow_state_id) if context_projection.active_workflow_state_id else None,
+        "active_workflow_state_id": str(context_projection.active_workflow_state_id)
+        if context_projection.active_workflow_state_id
+        else None,
         "source_refs": _redact_replay_value(context_projection.source_refs),
         "projection_summary": _redact_replay_value(context_projection.projection_summary),
         "token_estimate": context_projection.token_estimate,
@@ -208,10 +241,7 @@ PHONE_RE = re.compile(r"\+?\d[\d\s().-]{6,}\d")
 
 def _redact_replay_value(value: Any) -> Any:
     if isinstance(value, dict):
-        return {
-            str(key): "[redacted]" if _is_sensitive_replay_key(str(key)) else _redact_replay_value(item)
-            for key, item in value.items()
-        }
+        return {str(key): "[redacted]" if _is_sensitive_replay_key(str(key)) else _redact_replay_value(item) for key, item in value.items()}
     if isinstance(value, list):
         return [_redact_replay_value(item) for item in value]
     if isinstance(value, tuple):

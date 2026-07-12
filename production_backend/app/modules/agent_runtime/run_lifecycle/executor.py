@@ -39,6 +39,13 @@ from ..agents.cozymate_service_agent.tools import (
     default_tool_namespace_registry,
     default_tool_registry,
 )
+from ..agents.cozymate_service_agent.tools.pregnancy_plan_flow import (
+    PREGNANCY_PLAN_FINAL_QUESTION,
+    PREGNANCY_PLAN_FINAL_QUICK_REPLIES,
+    PREGNANCY_PLAN_URGENT_RESPONSE,
+    ensure_pregnancy_plan_final_question,
+    pregnancy_plan_urgent_signal_ids,
+)
 from ..agents.main_coordinator_agent import (
     AgentId,
     RoutingPlan,
@@ -62,6 +69,7 @@ from ..response_text import AppendOnlyAgentResponseProjector, agent_response_tex
 from ..sdk import (
     AgentModelRunner,
     SdkNodeRequest,
+    SdkNodeResult,
     SdkToolDefinition,
     SdkToolInvocationResult,
     SdkToolNamespace,
@@ -77,10 +85,11 @@ IMAGE_INSPECT_TOOL_NAME = "images.inspect"
 LOGGER = logging.getLogger("production_backend.agent_runtime.executor")
 DEFAULT_RESIDENT_SERVICE_SKILL_TTL_TURNS = 3
 FORM_TOOL_IDS = {
+    "pregnancy.plan_intake.analyze": "birth_journey_basic_info_intake",
     "hospital_bag_card_create": "hospital_bag_intake",
     "labor_communication_card_create": "birth_plan_card_intake",
 }
-FORM_CREATION_TOOL_NAMES = {"birth_plan_form_create", "hospital_bag_form_create"}
+FORM_CREATION_TOOL_NAMES = {"pregnancy.plan_intake.start", "birth_plan_form_create", "hospital_bag_form_create"}
 MARKDOWN_IMAGE_URL_PATTERN = re.compile(r"!\[[^\]]*\]\(\s*(?:<([^>]+)>|([^\s)]+))")
 MODEL_IMAGE_DATA_URL_PATTERN = re.compile(
     r"^data:image/(?:png|jpe?g|webp|gif);base64,",
@@ -171,6 +180,8 @@ class AgentRuntimeExecutor:
         self._run_assistant_message_ids: dict[UUID, UUID] = {}
         self._run_text_projectors: dict[UUID, AppendOnlyAgentResponseProjector] = {}
         self._run_text_stream_emitted: dict[UUID, str] = {}
+        self._run_authoritative_final_text: dict[UUID, str] = {}
+        self._run_current_user_text: dict[UUID, str] = {}
         self._run_trusted_form_submissions: dict[UUID, dict[str, dict[str, Any]]] = {}
         self._run_business_facts: dict[UUID, dict[ServiceSkillId, dict[str, Any]]] = {}
         self._run_visible_image_urls: dict[UUID, tuple[str, ...]] = {}
@@ -196,13 +207,27 @@ class AgentRuntimeExecutor:
         try:
             turn_context = await self._load_turn_context(run=run)
             self._run_trusted_form_submissions[run.id] = _trusted_form_submissions(turn_context.current_message)
+            self._run_current_user_text[run.id] = _message_text(turn_context.current_message)
             self._run_hospital_bag_cart_groups[run.id] = _current_hospital_bag_cart_groups(turn_context.current_message)
             if turn_context.resident_loaded_service_skill is not None:
                 self._run_loaded_service_skill_ids[run.id].add(_text(turn_context.resident_loaded_service_skill, "service_skill_id"))
             tool_catalog = self._tool_catalog_for_turn()
             await self._append_progress(run=run, phase="context_ready", label="我先理解一下你的需求～")
             prepared_turn = self._prepare_model_turn(turn_context=turn_context)
-            result = await self._run_model_turn(run=run, turn_context=turn_context, tool_catalog=tool_catalog, prepared_turn=prepared_turn)
+            urgent_signal_ids = await self._pregnancy_plan_pre_model_urgent_signal_ids(
+                run=run,
+                current_user_text=self._run_current_user_text[run.id],
+            )
+            if urgent_signal_ids:
+                self._run_authoritative_final_text[run.id] = PREGNANCY_PLAN_URGENT_RESPONSE
+                result = SdkNodeResult(final_text=PREGNANCY_PLAN_URGENT_RESPONSE)
+            else:
+                result = await self._run_model_turn(
+                    run=run,
+                    turn_context=turn_context,
+                    tool_catalog=tool_catalog,
+                    prepared_turn=prepared_turn,
+                )
             return await self._finalize_turn_result(
                 run=run,
                 turn_context=turn_context,
@@ -222,6 +247,8 @@ class AgentRuntimeExecutor:
             self._run_loaded_service_skill_ids.pop(run.id, None)
             self._run_text_projectors.pop(run.id, None)
             self._run_text_stream_emitted.pop(run.id, None)
+            self._run_authoritative_final_text.pop(run.id, None)
+            self._run_current_user_text.pop(run.id, None)
             self._run_trusted_form_submissions.pop(run.id, None)
             self._run_business_facts.pop(run.id, None)
             self._run_visible_image_urls.pop(run.id, None)
@@ -412,8 +439,17 @@ class AgentRuntimeExecutor:
         provider_final_text = provider_projector.text
         if not provider_final_text and raw_provider_final.strip():
             provider_final_text = "我已经整理好了。"
+        authoritative_final_text = self._run_authoritative_final_text.get(run.id, "")
+        if authoritative_final_text:
+            provider_final_text = authoritative_final_text
+        elif _has_completed_pregnancy_plan_analysis(result.tool_calls):
+            provider_final_text = ensure_pregnancy_plan_final_question(provider_final_text)
         await self._finalize_text_projector(run=run)
-        final_text = await self._canonical_final_text(run=run, provider_final_text=provider_final_text)
+        final_text = await self._canonical_final_text(
+            run=run,
+            provider_final_text=provider_final_text,
+            authoritative=bool(authoritative_final_text),
+        )
         if not final_text:
             raise ApiError(code="empty_agent_response", message="Agent runtime returned an empty response.", status=502)
         finish_timings_ms = _timings_with_total(turn_context.timings_ms, run_started_at)
@@ -437,11 +473,15 @@ class AgentRuntimeExecutor:
             final_text=final_text,
         )
         quick_reply_started_at = perf_counter()
-        quick_replies = await self._generate_quick_replies(
-            run=run,
-            turn_context=turn_context,
-            final_text=final_text,
-            artifacts=list(result.artifacts or []),
+        quick_replies = (
+            []
+            if authoritative_final_text
+            else await self._generate_quick_replies(
+                run=run,
+                turn_context=turn_context,
+                final_text=final_text,
+                artifacts=list(result.artifacts or []),
+            )
         )
         finish_timings_ms["quick_reply_finalizer"] = _elapsed_ms(quick_reply_started_at)
         self._log_executor_timing(
@@ -520,6 +560,8 @@ class AgentRuntimeExecutor:
             return None
 
         async def publish(delta: str) -> None:
+            if self._run_authoritative_final_text.get(run.id):
+                return
             projector = self._run_text_projectors[run.id]
             sanitized_delta = projector.push(delta)
             if not sanitized_delta:
@@ -547,8 +589,23 @@ class AgentRuntimeExecutor:
             transient_stream=self.transient_stream,
         )
 
-    async def _canonical_final_text(self, *, run: AgentRun, provider_final_text: str) -> str:
+    async def _canonical_final_text(
+        self,
+        *,
+        run: AgentRun,
+        provider_final_text: str,
+        authoritative: bool = False,
+    ) -> str:
         streamed_text = self._run_text_stream_emitted.get(run.id, "")
+        if authoritative:
+            if streamed_text and not streamed_text.endswith(provider_final_text):
+                await self._publish_text_delta(
+                    run=run,
+                    delta=f"\n\n{provider_final_text}",
+                    event_publisher=self.event_sink,
+                    transient_stream=self.transient_stream,
+                )
+            return provider_final_text
         if not streamed_text:
             return provider_final_text
         if not provider_final_text or streamed_text.endswith(provider_final_text):
@@ -778,6 +835,10 @@ class AgentRuntimeExecutor:
             )
         else:
             result = await self.tool_executor.execute(**execute_kwargs)
+        if _text(result.safe_output, "status") == "urgent_care_required":
+            required_response = _text(result.safe_output, "required_response")
+            if required_response:
+                self._run_authoritative_final_text[run.id] = required_response
         await self._append_progress(run=run, phase="model_reasoning_after_tool", label="我接着处理下一步")
         model_output = getattr(result, "model_output", result.safe_output)
         return SdkToolInvocationResult(
@@ -792,17 +853,35 @@ class AgentRuntimeExecutor:
             submission = self._run_trusted_form_submissions.get(run.id, {}).get(expected_form_id)
             if submission is None:
                 return {}
-            return {
+            trusted_args: dict[str, Any] = {
                 "confirmed_form_data": _dict(submission, "values"),
                 "form_submission_id": _text(submission, "submission_id"),
             }
+            if contract_name == "pregnancy.plan_intake.analyze":
+                trusted_args["form_artifact_id"] = _text(submission, "artifact_id")
+                facts = await self._birth_prep_business_facts(run=run)
+                workflow = await self._latest_pregnancy_plan_workflow(run=run)
+                trusted_args["runtime_plan_context"] = _pregnancy_runtime_plan_context(facts, workflow=workflow)
+                trusted_args["runtime_workflow_context"] = _dict(workflow, "payload")
+            return trusted_args
         if contract_name == "pregnancy.plan.propose":
             facts = await self._birth_prep_business_facts(run=run)
-            return {"runtime_plan_context": _pregnancy_runtime_plan_context(facts)}
+            workflow = await self._latest_pregnancy_plan_workflow(run=run)
+            return {
+                "runtime_plan_context": _pregnancy_runtime_plan_context(facts, workflow=workflow),
+                "trusted_current_user_text": self._run_current_user_text.get(run.id, ""),
+            }
         if contract_name in FORM_CREATION_TOOL_NAMES:
             facts = await self._birth_prep_business_facts(run=run)
             default_values = _birth_prep_form_default_values(facts)
-            return {"default_values": default_values} if default_values else {}
+            if contract_name != "pregnancy.plan_intake.start":
+                default_values = {key: value for key, value in default_values.items() if key == "due_date_or_week"}
+            trusted_args = {"default_values": default_values} if default_values else {}
+            if contract_name == "pregnancy.plan_intake.start":
+                workflow = await self._latest_pregnancy_plan_workflow(run=run)
+                trusted_args["runtime_plan_context"] = _pregnancy_runtime_plan_context(facts, workflow=workflow)
+                trusted_args["runtime_workflow_context"] = _dict(workflow, "payload")
+            return trusted_args
         if contract_name == "hospital_bag_cart_update":
             client_groups = self._run_hospital_bag_cart_groups.get(run.id)
             if client_groups is not None:
@@ -820,6 +899,80 @@ class AgentRuntimeExecutor:
         facts = await self._fresh_business_facts_for_skill(run=run, skill_id=ServiceSkillId.BIRTH_PREP)
         self._run_business_facts[run.id][ServiceSkillId.BIRTH_PREP] = facts
         return facts
+
+    async def _latest_pregnancy_plan_workflow(self, *, run: AgentRun) -> dict[str, Any]:
+        loader = getattr(self.repository, "get_latest_artifact_for_thread", None)
+        if not callable(loader):
+            return {}
+        artifact = await loader(
+            thread_id=run.thread_id,
+            owner_user_id=run.actor_user_id,
+            artifact_type="pregnancy_plan_workflow",
+        )
+        if artifact is None:
+            return {}
+        return {
+            "artifact_id": str(artifact.id),
+            "run_id": str(artifact.run_id),
+            "payload": dict(artifact.payload) if isinstance(artifact.payload, dict) else {},
+        }
+
+    async def _pregnancy_plan_pre_model_urgent_signal_ids(
+        self,
+        *,
+        run: AgentRun,
+        current_user_text: str,
+    ) -> list[str]:
+        workflow = await self._latest_pregnancy_plan_workflow(run=run)
+        workflow_payload = _dict(workflow, "payload")
+        submission = self._run_trusted_form_submissions.get(run.id, {}).get("birth_journey_basic_info_intake")
+        submission_values = _dict(submission or {}, "values")
+        signal_ids = pregnancy_plan_urgent_signal_ids(submission_values)
+        if signal_ids:
+            await self._record_pregnancy_plan_safety_interruption(
+                run=run,
+                workflow_payload=workflow_payload,
+                form_artifact_id=_text(submission or {}, "artifact_id"),
+                form_submission_id=_text(submission or {}, "submission_id"),
+            )
+            return signal_ids
+        if _text(workflow_payload, "phase") != "awaiting_additional_information" or _text(workflow_payload, "consumed_by_action_id"):
+            return []
+        signal_ids = pregnancy_plan_urgent_signal_ids({"additional_info": current_user_text})
+        if signal_ids:
+            await self._record_pregnancy_plan_safety_interruption(
+                run=run,
+                workflow_payload=workflow_payload,
+                form_artifact_id=_text(workflow_payload, "source_form_artifact_id"),
+                form_submission_id=_text(workflow_payload, "source_form_submission_id"),
+            )
+        return signal_ids
+
+    async def _record_pregnancy_plan_safety_interruption(
+        self,
+        *,
+        run: AgentRun,
+        workflow_payload: dict[str, Any],
+        form_artifact_id: str,
+        form_submission_id: str,
+    ) -> None:
+        if workflow_payload.get("interrupted_by_safety_signal") is True:
+            return
+        await self.repository.create_artifact(
+            run_id=run.id,
+            owner_user_id=run.actor_user_id,
+            artifact_type="pregnancy_plan_workflow",
+            schema_version="v1",
+            status="created",
+            payload={
+                "phase": _text(workflow_payload, "phase") or "collecting_intake",
+                "interrupted_by_safety_signal": True,
+                "source_form_artifact_id": form_artifact_id,
+                "source_form_submission_id": form_submission_id,
+                "form_id": "birth_journey_basic_info_intake",
+            },
+            raw_payload_ref="",
+        )
 
     async def _latest_hospital_bag_cart_groups(self, *, run: AgentRun) -> list[dict[str, Any]] | None:
         loader = getattr(self.repository, "get_latest_artifact_for_thread", None)
@@ -844,6 +997,8 @@ class AgentRuntimeExecutor:
         final_text: str,
         artifacts: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
+        if final_text.endswith(PREGNANCY_PLAN_FINAL_QUESTION):
+            return [{"text": text} for text in PREGNANCY_PLAN_FINAL_QUICK_REPLIES]
         if self.quick_reply_finalizer is None:
             return []
         try:
@@ -1378,12 +1533,22 @@ def _elapsed_ms(started_at: float) -> float:
     return round((perf_counter() - started_at) * 1000, 3)
 
 
+def _has_completed_pregnancy_plan_analysis(tool_calls: list[dict[str, Any]]) -> bool:
+    return any(
+        _text(tool_call, "tool_name") == "pregnancy.plan_intake.analyze"
+        and _text(_dict(tool_call, "safe_output"), "status") == "intake_analyzed"
+        for tool_call in tool_calls
+    )
+
+
 def _timings_with_total(timings_ms: dict[str, float], run_started_at: float) -> dict[str, float]:
     return {**timings_ms, "total_before_finish_checkpoint": _elapsed_ms(run_started_at)}
 
 
 SERVICE_SKILL_RECOMMENDED_TOOL_CONTRACTS: dict[ServiceSkillId, tuple[str, ...]] = {
     ServiceSkillId.BIRTH_PREP: (
+        "pregnancy.plan_intake.start",
+        "pregnancy.plan_intake.analyze",
         "pregnancy.plan.propose",
         "plans.plan_delete.propose",
         "plans.task_complete.propose",
@@ -1865,10 +2030,21 @@ def _birth_prep_form_default_values(facts: dict[str, Any]) -> dict[str, Any]:
         ),
         "",
     )
-    return {"due_date_or_week": due_date_or_week} if due_date_or_week else {}
+    defaults: dict[str, Any] = {}
+    if due_date_or_week:
+        defaults["due_date_or_week"] = due_date_or_week
+        defaults["current_week"] = due_date_or_week
+    age = profile.get("age")
+    if isinstance(age, (int, float)) and 12 <= int(age) <= 70:
+        defaults["age"] = int(age)
+    return defaults
 
 
-def _pregnancy_runtime_plan_context(facts: dict[str, Any]) -> dict[str, Any]:
+def _pregnancy_runtime_plan_context(
+    facts: dict[str, Any],
+    *,
+    workflow: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     pregnancy = _dict(facts, "pregnancy")
     profile = _dict(pregnancy, "profile") or _dict(facts, "profile")
     plans = pregnancy.get("plans")
@@ -1884,6 +2060,21 @@ def _pregnancy_runtime_plan_context(facts: dict[str, Any]) -> dict[str, Any]:
     if active_plans:
         context["active_plan_id"] = _text(active_plans[0], "id")
         context["active_plan_title"] = _text(active_plans[0], "title")
+    workflow_payload = _dict(workflow or {}, "payload")
+    if workflow_payload:
+        if _text(workflow_payload, "consumed_by_action_id") or workflow_payload.get("interrupted_by_safety_signal") is True:
+            return {key: value for key, value in context.items() if value not in ("", None)}
+        context["workflow_phase"] = _text(workflow_payload, "phase")
+        for key in ("analysis_run_id", "source_form_artifact_id", "source_form_submission_id"):
+            value = _text(workflow_payload, key)
+            if value:
+                context[key] = value
+        if _text(workflow_payload, "phase") == "awaiting_additional_information":
+            workflow_artifact_id = _text(workflow or {}, "artifact_id")
+            if workflow_artifact_id:
+                context["analysis_artifact_id"] = workflow_artifact_id
+            plan_context = _dict(workflow_payload, "plan_context")
+            context.update({key: value for key, value in plan_context.items() if value not in ("", None)})
     return {key: value for key, value in context.items() if value not in ("", None)}
 
 

@@ -320,6 +320,9 @@ def test_service_skills_capture_legacy_domain_flow_semantics() -> None:
     safety = registry.get("emotion-support").prompt_block()
 
     assert "pregnancy.plan.propose" in pregnancy
+    assert "pregnancy.plan_intake.start" in pregnancy
+    assert "pregnancy.plan_intake.analyze" in pregnancy
+    assert "还有其他需要补充的信息吗？如果没有，我就基于目前的信息开始为你制定孕期计划啦。" in pregnancy
     assert "birth_journey_plan_card_create" not in pregnancy
     assert "plans.plan_delete.propose" in pregnancy
     assert "plans.task_complete.propose" in pregnancy
@@ -360,6 +363,8 @@ def test_tool_contract_registry_contains_only_model_visible_tools_and_loading_po
     )
     assert "plans.milk_plan.propose" in registered_names
     assert "pregnancy.plan.propose" in registered_names
+    assert "pregnancy.plan_intake.start" in registered_names
+    assert "pregnancy.plan_intake.analyze" in registered_names
     assert {contract.loading_mode for contract in registry.list()} == {"eager", "deferred"}
     assert set(registry.eager_names()).isdisjoint(registry.deferred_names())
     assert set(registry.eager_names()) | set(registry.deferred_names()) == registered_names
@@ -443,6 +448,8 @@ def test_tool_contracts_are_exported_as_responses_namespaces() -> None:
     assert "records.growth.read" not in namespaces["milk_management"].deferred_tool_contracts
     assert "plans.milk_plan.propose" in namespaces["milk_management"].deferred_tool_contracts
     assert "pregnancy.plan.propose" in namespaces["birth_prep"].deferred_tool_contracts
+    assert "pregnancy.plan_intake.start" in namespaces["birth_prep"].deferred_tool_contracts
+    assert "pregnancy.plan_intake.analyze" in namespaces["birth_prep"].deferred_tool_contracts
     assert "plans.calendar.read" not in namespaces["milk_management"].deferred_tool_contracts
     assert "plans.task_update.propose" in namespaces["birth_prep"].deferred_tool_contracts
     assert "hospital_bag_cart_update" in namespaces["hospital_bag_cart"].deferred_tool_contracts
@@ -512,6 +519,8 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
     image_inspect_schema = registry.get("images.inspect").input_schema
     milk_plan_schema = registry.get("plans.milk_plan.propose").input_schema
     pregnancy_plan_schema = registry.get("pregnancy.plan.propose").input_schema
+    pregnancy_intake_start_schema = registry.get("pregnancy.plan_intake.start").input_schema
+    pregnancy_intake_analyze_schema = registry.get("pregnancy.plan_intake.analyze").input_schema
     task_create_schema = registry.get("plans.task_create.propose").input_schema
     task_complete_schema = registry.get("plans.task_complete.propose").input_schema
     task_update_schema = registry.get("plans.task_update.propose").input_schema
@@ -588,6 +597,9 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
     assert "title" not in pregnancy_plan_schema["properties"]
     assert "payload" not in pregnancy_plan_schema["properties"]
     assert pregnancy_plan_schema["properties"]["scope"]["enum"] == ["full", "prenatal_only", "short_range"]
+    assert pregnancy_plan_schema["properties"]["additional_info"]["maxLength"] == 2000
+    assert pregnancy_intake_start_schema == {"type": "object", "additionalProperties": False, "properties": {}}
+    assert pregnancy_intake_analyze_schema == {"type": "object", "additionalProperties": False, "properties": {}}
     assert task_create_schema["additionalProperties"] is False
     assert task_create_schema["required"] == ["title"]
     assert task_create_schema["properties"]["task_date"]["type"] == "string"
@@ -1825,9 +1837,66 @@ def test_sdk_runner_wraps_application_tool_executor_for_agents_sdk(monkeypatch: 
     result = asyncio.run(OpenAIAgentsSdkRunner(model="gpt-test").run_reasoning(request))
 
     assert result.final_text == 'tool-output:{"owner_user_id": "user_1"}'
+    assert result.tool_calls == [
+        {
+            "tool_name": "profile.read",
+            "status": "completed",
+            "args": {"owner_user_id": "user_1"},
+            "safe_output": 'tool-output:{"owner_user_id": "user_1"}',
+        }
+    ]
     assert FakeAgentsSdkAgent.created["tools"][0].name == "profile_read"
     assert FakeAgentsSdkAgent.created["tools"][0].params_json_schema == {"type": "object", "properties": {}}
     assert FakeAgentsSdkAgent.created["tools"][0].strict_json_schema is False
+
+
+def test_agents_sdk_flat_tool_fallback_preserves_transient_model_context(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_agents = types.ModuleType("agents")
+    fake_agents.__spec__ = ModuleSpec("agents", loader=None)
+    fake_agents.Agent = FakeAgentsSdkAgent
+    fake_agents.FunctionTool = FakeAgentsSdkFunctionTool
+    fake_agents.RunConfig = FakeAgentsSdkRunConfig
+    fake_agents.Runner = ToolCallingAgentsSdkRunner
+    monkeypatch.setitem(sys.modules, "agents", fake_agents)
+
+    async def invoke_json(_args_json: str) -> SdkToolInvocationResult:
+        return SdkToolInvocationResult(
+            output_json='{"status":"intake_analyzed"}',
+            safe_output_json='{"status":"intake_analyzed"}',
+            model_context=(
+                {
+                    "role": "developer",
+                    "content": '{"trusted_pregnancy_plan_intake":{"facts":{"age":36}}}',
+                },
+            ),
+        )
+
+    result = asyncio.run(
+        OpenAIAgentsSdkRunner(model="gpt-test").run_reasoning(
+            SdkNodeRequest(
+                run_id="run_1",
+                thread_id="thread_1",
+                actor_user_id="user_1",
+                instructions="Use tools.",
+                model_input=[{"role": "user", "content": "analyze"}],
+                tools=(
+                    SdkToolDefinition(
+                        contract_name="pregnancy.plan_intake.analyze",
+                        sdk_name=sdk_tool_name("pregnancy.plan_intake.analyze"),
+                        description="Analyze intake.",
+                        params_json_schema={"type": "object", "properties": {}},
+                        invoke=invoke_json,
+                    ),
+                ),
+            )
+        )
+    )
+
+    output = json.loads(result.final_text)
+    assert output["result"] == {"status": "intake_analyzed"}
+    assert output["trusted_model_context"][0]["role"] == "developer"
+    assert '"age":36' in output["trusted_model_context"][0]["content"]
+    assert result.tool_calls[0]["safe_output"] == {"status": "intake_analyzed"}
 
 
 def test_sdk_runner_records_backend_metrics() -> None:

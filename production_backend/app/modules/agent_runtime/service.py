@@ -315,6 +315,36 @@ class AgentRuntimeService:
         idempotency_key: str = "",
         expires_at: datetime | None = None,
     ) -> AgentAction:
+        action, _ = await self.propose_action_once(
+            owner_user_id=owner_user_id,
+            run_id=run_id,
+            action_type=action_type,
+            target_type=target_type,
+            target_id=target_id,
+            side_effect_level=side_effect_level,
+            preview_payload=preview_payload,
+            apply_payload=apply_payload,
+            idempotency_key=idempotency_key,
+            expires_at=expires_at,
+            reuse_existing=False,
+        )
+        return action
+
+    async def propose_action_once(
+        self,
+        *,
+        owner_user_id: UUID,
+        run_id: UUID,
+        action_type: str,
+        target_type: str = "",
+        target_id: str = "",
+        side_effect_level: str = "medium",
+        preview_payload: dict[str, Any] | None = None,
+        apply_payload: dict[str, Any] | None = None,
+        idempotency_key: str = "",
+        expires_at: datetime | None = None,
+        reuse_existing: bool = True,
+    ) -> tuple[AgentAction, bool]:
         run = await self.get_run(owner_user_id=owner_user_id, run_id=run_id)
         decision = self.action_policy.validate(
             action_type=_normalize_text(action_type, max_length=120, required=True),
@@ -323,6 +353,21 @@ class AgentRuntimeService:
         )
         if not decision.requires_confirmation and self.outbox_service is None:
             raise ApiError(code="outbox_not_configured", message="Agent action outbox is not configured.", status=500)
+        normalized_idempotency_key = _normalize_text(idempotency_key, max_length=255)
+        if normalized_idempotency_key and reuse_existing:
+            lock = getattr(self.repository, "lock_run_for_action_proposal", None)
+            if callable(lock):
+                await lock(run_id=run.id)
+            find_existing = getattr(self.repository, "get_reusable_action_by_idempotency_key", None)
+            if callable(find_existing):
+                existing = await find_existing(
+                    run_id=run.id,
+                    actor_user_id=owner_user_id,
+                    action_type=decision.action_type,
+                    idempotency_key=normalized_idempotency_key,
+                )
+                if existing is not None:
+                    return existing, False
         initial_status = "confirmation_required" if decision.requires_confirmation else "proposed"
         action = await self.repository.create_action(
             run_id=run.id,
@@ -334,7 +379,7 @@ class AgentRuntimeService:
             side_effect_level=decision.side_effect_level,
             preview_payload=preview_payload or {},
             apply_payload=apply_payload or {},
-            idempotency_key=_normalize_text(idempotency_key, max_length=255),
+            idempotency_key=normalized_idempotency_key,
             expires_at=expires_at,
         )
         if not decision.requires_confirmation:
@@ -346,7 +391,7 @@ class AgentRuntimeService:
                 idempotency_key=action_idempotency_key,
             )
             await self._queue_action_apply(owner_user_id=owner_user_id, run=run, action=confirmed)
-            return confirmed
+            return confirmed, True
         await self._append_event(
             thread_id=run.thread_id,
             run_id=run.id,
@@ -361,7 +406,7 @@ class AgentRuntimeService:
                 "preview_payload": action.preview_payload,
             },
         )
-        return action
+        return action, True
 
     async def get_action(self, *, owner_user_id: UUID, action_id: UUID) -> AgentAction:
         action = await self.repository.get_action_for_owner(action_id=action_id, owner_user_id=owner_user_id)
