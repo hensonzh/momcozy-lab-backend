@@ -32,6 +32,7 @@ from production_backend.app.modules.agent_runtime.repository import AgentRuntime
 from production_backend.app.modules.agent_runtime.run_lifecycle.controls import AgentRunControls
 from production_backend.app.modules.agent_runtime.run_lifecycle.executor import AgentRuntimeExecutor
 from production_backend.app.modules.agent_runtime.run_lifecycle.quick_replies import QuickReplyFinalizer
+from production_backend.app.modules.agent_runtime.run_lifecycle.working_context import RedisAgentWorkingContextStore
 from production_backend.app.modules.agent_runtime.sdk import create_agent_model_runner
 from production_backend.app.modules.agent_runtime.service import AgentRuntimeService
 from production_backend.app.modules.assets.service import ProductAssetService
@@ -394,6 +395,7 @@ async def _execute_agent_run(
             business_facts_projector=BusinessFactsProjector(handlers=tool_handlers),
             transient_stream=transient_stream,
             quick_reply_finalizer=QuickReplyFinalizer(sdk_runner=quick_reply_runner),
+            working_context_store=RedisAgentWorkingContextStore(redis_client),
             sdk_runner=sdk_runner,
             object_storage=object_storage,
             max_inline_artifact_payload_bytes=settings.agent_runtime_max_inline_payload_bytes,

@@ -8,11 +8,15 @@ from typing import Any
 class ContextProjection:
     stable_system_prompt: str
     selected_conversation_history: list[dict[str, Any]] = field(default_factory=list)
-    current_state_projection: dict[str, Any] = field(default_factory=dict)
     user_context: dict[str, Any] = field(default_factory=dict)
-    recent_run_facts: list[dict[str, Any]] = field(default_factory=list)
     memory_projection: list[dict[str, Any]] = field(default_factory=list)
-    fresh_business_facts: dict[str, Any] = field(default_factory=dict)
+    working_context: dict[str, Any] = field(
+        default_factory=lambda: {
+            "skills": [],
+            "ongoing_work": [],
+            "known_information": [],
+        }
+    )
 
 
 class ModelInputBuilder:
@@ -23,11 +27,9 @@ class ModelInputBuilder:
                 "role": "developer",
                 "content": {
                     "runtime_context": {
-                        "state": projection.current_state_projection,
                         "user_context": projection.user_context,
-                        "recent_run_facts": projection.recent_run_facts,
                         "memory": projection.memory_projection,
-                        "business_facts": projection.fresh_business_facts,
+                        "working_context": projection.working_context,
                     }
                 },
             },

@@ -32,6 +32,7 @@ class ToolHandlerContext:
     tool_name: str
     call_id: str
     args: dict[str, Any]
+    thread_id: UUID | None = None
 
 
 @dataclass(frozen=True)
@@ -176,6 +177,7 @@ class ToolExecutor:
                             tool_name=tool_name,
                             call_id=call_id,
                             args={**args, **(trusted_args or {})},
+                            thread_id=run.thread_id,
                         )
                     )
                 ),

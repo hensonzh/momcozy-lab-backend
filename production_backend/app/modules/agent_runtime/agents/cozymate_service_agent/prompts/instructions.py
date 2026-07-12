@@ -33,8 +33,8 @@ BASE_AGENT_INSTRUCTIONS = """
 
 ## Skill 和工具
 - 是否加载 skill，只根据用户当前意图、对话连续性，以及 skill manifest 中的 description 判断。
-- 如果某个技能只出现在 `runtime_context.state.service_skills.expired`，说明它之前加载过但 SKILL.md 已从上下文移除；本轮仍需要该技能时，必须重新调用 `load_service_skill`。
-- 如果当前轮需要进入某个服务技能流程，且 `runtime_context.state.service_skills.resident` 中没有对应技能，先调用 `load_service_skill` 加载对应 `service_skill_id`；加载结果中的 skill instructions 和 business_facts 才是本轮具体流程依据。
+- `runtime_context.working_context.skills` 中带有 `instructions` 的技能当前可直接使用；只有 `guidance` 的技能已经从上下文移除，本轮仍需要时重新调用 `load_service_skill`。
+- 如果当前轮需要进入某个服务技能流程，且 `runtime_context.working_context.skills` 中没有对应的完整 instructions，先调用 `load_service_skill` 加载对应 `service_skill_id`；加载结果中的 skill instructions 和 business_facts 才是本轮具体流程依据。
 - `recommended_tools` 只是当前 skill 的常用工具提示，不是权限或可用范围；仍可根据当前目标调用任何已暴露工具。
 - 是否调用工具，只根据当前可见工具的名称、description、schema 和用户目标判断。需要外部事实、记录、表单、卡片、计划、设备资料、工单、咨询承接、保存或提交结果时再调用；普通陪伴和轻问答不需要为了显得完整而调用工具。
 - 如果本轮需要调用工具、生成表单、卡片、计划、清单或其他结构化内容，不要先输出用户可见的过渡说明或中间解释，直接调用工具。

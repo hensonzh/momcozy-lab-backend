@@ -245,7 +245,7 @@ def test_static_prompts_keep_runtime_boundaries_and_legacy_style() -> None:
     assert "runtime_context" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "当前可见工具" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "如果当前轮需要进入某个服务技能流程" in DEFAULT_STABLE_SYSTEM_PROMPT
-    assert "必须重新调用 `load_service_skill`" in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert "重新调用 `load_service_skill`" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "`recommended_tools` 只是当前 skill 的常用工具提示，不是权限或可用范围" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "tool_scope" not in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "read_skill_file" not in DEFAULT_STABLE_SYSTEM_PROMPT
@@ -773,13 +773,12 @@ def test_context_builder_projects_dynamic_context_after_selected_history() -> No
         projection=ContextProjection(
             stable_system_prompt="system-v1",
             selected_conversation_history=[{"role": "user", "content": "history"}],
-            current_state_projection={
-                "agent_id": "cozymate_service_agent",
-                "coordinator": {"selected_agent_id": "cozymate_service_agent"},
-            },
             user_context={"current_time": "2026-07-08T12:00:00+08:00", "timezone": "Asia/Shanghai"},
-            recent_run_facts=[{"run_id": "run_1", "facts": {"assistant_conclusion": "已整理过喂养目标"}}],
-            fresh_business_facts={"profile": {"name": "Mai"}},
+            working_context={
+                "skills": [{"id": "milk-management", "instructions": "milk instructions"}],
+                "ongoing_work": [],
+                "known_information": [],
+            },
         ),
         current_user_message={"role": "user", "content": "hello"},
     )
@@ -788,14 +787,13 @@ def test_context_builder_projects_dynamic_context_after_selected_history() -> No
     assert model_input[0] == {"role": "user", "content": "history"}
     assert model_input[-2]["content"] == {
         "runtime_context": {
-            "state": {
-                "agent_id": "cozymate_service_agent",
-                "coordinator": {"selected_agent_id": "cozymate_service_agent"},
-            },
             "user_context": {"current_time": "2026-07-08T12:00:00+08:00", "timezone": "Asia/Shanghai"},
-            "recent_run_facts": [{"run_id": "run_1", "facts": {"assistant_conclusion": "已整理过喂养目标"}}],
             "memory": [],
-            "business_facts": {"profile": {"name": "Mai"}},
+            "working_context": {
+                "skills": [{"id": "milk-management", "instructions": "milk instructions"}],
+                "ongoing_work": [],
+                "known_information": [],
+            },
         }
     }
     assert model_input[-1]["content"] == "hello"

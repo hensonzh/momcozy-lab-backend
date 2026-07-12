@@ -80,6 +80,12 @@ from ..sdk import (
 from .execution import AgentRunExecutionResult
 from .quick_replies import QuickReplyFinalizer
 from .state_store import AgentRuntimeStateStore
+from .working_context import (
+    AgentWorkingContextState,
+    AgentWorkingContextStore,
+    empty_working_context_state,
+    project_working_context,
+)
 
 
 LOAD_SERVICE_SKILL_TOOL_NAME = "load_service_skill"
@@ -104,7 +110,6 @@ class AgentRuntimeExecutorConfig:
     stable_system_prompt: str = DEFAULT_STABLE_SYSTEM_PROMPT
     history_limit: int = 40
     memory_limit: int = 5
-    recent_run_fact_limit: int = 5
     resident_service_skill_ttl_turns: int = DEFAULT_RESIDENT_SERVICE_SKILL_TTL_TURNS
 
 
@@ -115,9 +120,7 @@ class _AgentTurnContext:
     memory_projection: list[dict[str, Any]]
     service_skills: tuple[AgentServiceSkill, ...]
     routing_plan: RoutingPlan
-    recent_run_facts: list[dict[str, Any]]
-    resident_loaded_service_skill: dict[str, Any] | None
-    expired_loaded_service_skills: list[dict[str, Any]]
+    working_context_state: AgentWorkingContextState
     timings_ms: dict[str, float]
 
 
@@ -152,6 +155,7 @@ class AgentRuntimeExecutor:
         business_facts_projector: BusinessFactsProjector | None = None,
         transient_stream: AgentTransientStream | None = None,
         quick_reply_finalizer: QuickReplyFinalizer | None = None,
+        working_context_store: AgentWorkingContextStore | None = None,
         input_builder: ModelInputBuilder | None = None,
         config: AgentRuntimeExecutorConfig | None = None,
         object_storage: ObjectStorage | None = None,
@@ -173,12 +177,12 @@ class AgentRuntimeExecutor:
         self.business_facts_projector = business_facts_projector
         self.transient_stream = transient_stream
         self.quick_reply_finalizer = quick_reply_finalizer
+        self.working_context_store = working_context_store
         self.input_builder = input_builder or ModelInputBuilder()
         self.config = config or AgentRuntimeExecutorConfig()
         self.object_storage = object_storage
         self.max_inline_artifact_payload_bytes = max_inline_artifact_payload_bytes
         self.clock = clock or _utcnow
-        self._run_loaded_service_skill_ids: dict[UUID, set[str]] = {}
         self._run_assistant_message_ids: dict[UUID, UUID] = {}
         self._run_text_projectors: dict[UUID, AppendOnlyAgentResponseProjector] = {}
         self._run_text_stream_emitted: dict[UUID, str] = {}
@@ -201,7 +205,6 @@ class AgentRuntimeExecutor:
         if graph.runtime_pattern != run.runtime_pattern:
             raise ApiError(code="runtime_graph_mismatch", message="Run runtime pattern does not match graph version.", status=409)
         self._run_assistant_message_ids[run.id] = uuid4()
-        self._run_loaded_service_skill_ids[run.id] = set()
         self._run_text_projectors[run.id] = AppendOnlyAgentResponseProjector()
         self._run_text_stream_emitted[run.id] = ""
         self._run_visible_image_urls[run.id] = ()
@@ -215,8 +218,6 @@ class AgentRuntimeExecutor:
             )
             self._run_current_user_text[run.id] = _message_text(turn_context.current_message)
             self._run_hospital_bag_cart_groups[run.id] = _current_hospital_bag_cart_groups(turn_context.current_message)
-            if turn_context.resident_loaded_service_skill is not None:
-                self._run_loaded_service_skill_ids[run.id].add(_text(turn_context.resident_loaded_service_skill, "service_skill_id"))
             tool_catalog = self._tool_catalog_for_turn()
             await self._append_progress(run=run, phase="context_ready", label="我先理解一下你的需求～")
             prepared_turn = self._prepare_model_turn(turn_context=turn_context)
@@ -250,7 +251,6 @@ class AgentRuntimeExecutor:
             raise
         finally:
             self._run_assistant_message_ids.pop(run.id, None)
-            self._run_loaded_service_skill_ids.pop(run.id, None)
             self._run_text_projectors.pop(run.id, None)
             self._run_text_stream_emitted.pop(run.id, None)
             self._run_authoritative_final_text.pop(run.id, None)
@@ -282,26 +282,9 @@ class AgentRuntimeExecutor:
         routing_plan = plan_current_request(user_message_text=_message_text(current_message))
         timings_ms["routing"] = _elapsed_ms(routing_started_at)
 
-        facts_started_at = perf_counter()
-        recent_summaries = await self._recent_run_summaries(run=run)
-        selected_history_messages = _history_messages_before(messages=messages, before_sequence=current_message.sequence)
-        selected_history_message_ids = {str(message.id) for message in selected_history_messages}
-        selected_history_assistant_run_ids = {
-            str(message.run_id) for message in selected_history_messages if message.role == "assistant" and message.run_id is not None
-        }
-        recent_run_facts = _recent_run_fact_projection_items(
-            summaries=recent_summaries,
-            selected_history_message_ids=selected_history_message_ids,
-            selected_history_assistant_run_ids=selected_history_assistant_run_ids,
-        )
-        resident_loaded_service_skill, expired_loaded_service_skills = _resident_loaded_service_skill_context(
-            summaries=recent_summaries,
-            service_skill_registry=self.service_skill_registry,
-            tool_registry=self.tool_registry,
-            tool_namespace_registry=self.tool_namespace_registry,
-            ttl_turns=self.config.resident_service_skill_ttl_turns,
-        )
-        timings_ms["facts_projection"] = _elapsed_ms(facts_started_at)
+        working_context_started_at = perf_counter()
+        working_context_state = await self._begin_working_context_turn(run=run)
+        timings_ms["working_context"] = _elapsed_ms(working_context_started_at)
 
         await self._record_routing_decision(run=run, current_message=current_message, routing_plan=routing_plan)
         return _AgentTurnContext(
@@ -310,9 +293,7 @@ class AgentRuntimeExecutor:
             memory_projection=memory_projection,
             service_skills=service_skills,
             routing_plan=routing_plan,
-            recent_run_facts=recent_run_facts,
-            resident_loaded_service_skill=resident_loaded_service_skill,
-            expired_loaded_service_skills=expired_loaded_service_skills,
+            working_context_state=working_context_state,
             timings_ms=timings_ms,
         )
 
@@ -334,21 +315,15 @@ class AgentRuntimeExecutor:
         *,
         turn_context: _AgentTurnContext,
     ) -> _PreparedModelTurn:
-        model_visible_state = _model_visible_state_projection(
-            resident_loaded_service_skill=turn_context.resident_loaded_service_skill,
-            expired_loaded_service_skills=turn_context.expired_loaded_service_skills,
-        )
         projection = ContextProjection(
             stable_system_prompt=self.config.stable_system_prompt,
             selected_conversation_history=_history_before(
                 messages=turn_context.messages,
                 before_sequence=turn_context.current_message.sequence,
             ),
-            current_state_projection=model_visible_state,
             user_context=_user_context(current_message=turn_context.current_message, now=self.clock()),
-            recent_run_facts=turn_context.recent_run_facts,
             memory_projection=turn_context.memory_projection,
-            fresh_business_facts={},
+            working_context=project_working_context(turn_context.working_context_state),
         )
         model_input = self.input_builder.build(
             projection=projection,
@@ -476,7 +451,6 @@ class AgentRuntimeExecutor:
             run=run,
             current_message=turn_context.current_message,
             result=result,
-            turn_context=turn_context,
             final_text=final_text,
         )
         quick_reply_started_at = perf_counter()
@@ -771,7 +745,8 @@ class AgentRuntimeExecutor:
             business_facts=facts,
             loaded_at=self.clock(),
         )
-        self._run_loaded_service_skill_ids.setdefault(context.run_id, set()).add(skill.service_skill_id)
+        if context.thread_id is not None:
+            await self._retain_service_skill(thread_id=context.thread_id, skill=skill)
         output["_deferred_agent_events"] = [
             {
                 "event_type": "skill.loaded",
@@ -1088,7 +1063,7 @@ class AgentRuntimeExecutor:
             )
             completed = await self.repository.complete_tool_call(tool_call=tool_call, completed_at=_utcnow())
             tool_output = await self.repository.create_tool_output(tool_call_id=completed.id, safe_output=output, raw_output_ref="")
-            self._run_loaded_service_skill_ids[run.id] = {skill.service_skill_id}
+            await self._retain_service_skill(thread_id=run.thread_id, skill=skill)
             completed_payload = {
                 "tool_call_id": str(completed.id),
                 "tool_output_id": str(tool_output.id),
@@ -1346,14 +1321,30 @@ class AgentRuntimeExecutor:
             limit=self.config.memory_limit,
         )
 
-    async def _recent_run_summaries(self, *, run: AgentRun) -> list[Any]:
-        return await self.repository.list_recent_run_summaries(
-            thread_id=run.thread_id,
-            owner_user_id=run.actor_user_id,
-            limit=max(1, self.config.recent_run_fact_limit, self.config.resident_service_skill_ttl_turns + 1),
-            summary_type="run_fact",
-            exclude_run_id=run.id,
-        )
+    async def _begin_working_context_turn(self, *, run: AgentRun) -> AgentWorkingContextState:
+        if self.working_context_store is None:
+            return empty_working_context_state()
+        try:
+            return await self.working_context_store.begin_turn(
+                thread_id=run.thread_id,
+                skill_ttl_turns=self.config.resident_service_skill_ttl_turns,
+            )
+        except Exception:
+            LOGGER.warning("Failed to load working context; continuing with an empty short-term context.", exc_info=True)
+            return empty_working_context_state()
+
+    async def _retain_service_skill(self, *, thread_id: UUID, skill: AgentServiceSkill) -> None:
+        if self.working_context_store is None:
+            return
+        try:
+            await self.working_context_store.retain_skill(
+                thread_id=thread_id,
+                service_skill_id=skill.service_skill_id,
+                instructions=skill.prompt_block(),
+                skill_ttl_turns=self.config.resident_service_skill_ttl_turns,
+            )
+        except Exception:
+            LOGGER.warning("Failed to retain loaded service skill in working context.", exc_info=True)
 
     async def _fresh_business_facts_for_skill(self, *, run: AgentRun, skill_id: ServiceSkillId) -> dict[str, Any]:
         if self.business_facts_projector is None:
@@ -1370,7 +1361,6 @@ class AgentRuntimeExecutor:
         run: AgentRun,
         current_message: AgentMessage,
         result: Any,
-        turn_context: _AgentTurnContext,
         final_text: str,
     ) -> None:
         tool_outputs = await self.repository.list_tool_outputs_for_run(run_id=run.id)
@@ -1386,8 +1376,6 @@ class AgentRuntimeExecutor:
             "tools_used": _tool_names_from_summary_sources(tool_outputs=tool_outputs, result_tool_calls=getattr(result, "tool_calls", [])),
             "tool_facts": _tool_fact_projection(tool_outputs),
             "loaded_service_skills": loaded_service_skills,
-            "resident_loaded_service_skill": _resident_loaded_service_skill_summary(turn_context.resident_loaded_service_skill),
-            "expired_loaded_service_skills": turn_context.expired_loaded_service_skills,
             "actions": [
                 {
                     "action_id": str(action.id),
