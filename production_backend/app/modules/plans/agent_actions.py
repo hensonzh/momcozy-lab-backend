@@ -6,13 +6,14 @@ from uuid import UUID
 
 from ...core.errors import ApiError
 from ...workers.errors import PermanentJobError
-from ..agent_runtime.actions.outbox import AgentActionApplyResult
+from ..agent_runtime.actions.outbox import AgentActionApplyResult, AgentApplicationEvent
 from ..agent_runtime.models import AgentAction
 from .service import PlansService
 
 
 MILK_PLAN_CREATE_ACTION = "plans.milk_plan.create"
 PREGNANCY_PLAN_CREATE_ACTION = "pregnancy.plan.create"
+PREGNANCY_PLAN_CHANGED_EVENT = "pregnancy_plan.changed"
 PLAN_TASK_CREATE_ACTION = "plans.task.create"
 PLAN_TASK_COMPLETE_ACTION = "plans.task.complete"
 PLAN_TASK_UPDATE_ACTION = "plans.task.update"
@@ -101,6 +102,17 @@ class PregnancyPlanCreateActionHandler:
                 "agent_action_id": str(action.id),
                 "agent_run_id": str(action.run_id),
             },
+            application_events=(
+                AgentApplicationEvent(
+                    event_type=PREGNANCY_PLAN_CHANGED_EVENT,
+                    payload={
+                        "operation": "created",
+                        "plan_id": str(plan.id),
+                        "plan_type": plan.plan_type,
+                        "source": plan.source,
+                    },
+                ),
+            ),
         )
 
 

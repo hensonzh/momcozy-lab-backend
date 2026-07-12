@@ -7217,6 +7217,17 @@
         "parameters": [
           {
             "in": "query",
+            "name": "plan_type",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 64,
+              "title": "Plan Type",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
             "name": "status",
             "required": false,
             "schema": {

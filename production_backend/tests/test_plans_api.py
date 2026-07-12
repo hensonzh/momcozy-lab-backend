@@ -17,6 +17,13 @@ def test_create_plan_requires_current_user() -> None:
     assert response.json()["error"]["code"] == "authentication_required"
 
 
+def test_list_plans_requires_current_user() -> None:
+    response = TestClient(create_app(Settings(app_env="test"))).get("/v1/plans?plan_type=pregnancy")
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "authentication_required"
+
+
 def test_create_plan_uses_current_user_request_id_and_idempotency() -> None:
     user_id = uuid4()
     fake_service = FakePlansService(user_id=user_id)
@@ -34,6 +41,24 @@ def test_create_plan_uses_current_user_request_id_and_idempotency() -> None:
     assert fake_service.create_plan_kwargs["owner_user_id"] == user_id
     assert fake_service.create_plan_kwargs["request_id"] == "req_plan"
     assert fake_service.create_plan_kwargs["idempotency_key"] == "idem-plan"
+
+
+def test_list_plans_filters_by_type_status_and_limit_with_current_user_scope() -> None:
+    user_id = uuid4()
+    fake_service = FakePlansService(user_id=user_id)
+    app = create_app(Settings(app_env="test"))
+    _override_current_user(app, user_id)
+    app.dependency_overrides[get_plans_service] = lambda: fake_service
+
+    response = TestClient(app).get("/v1/plans?plan_type=pregnancy&status=active&limit=5")
+
+    assert response.status_code == 200
+    assert fake_service.list_plans_kwargs == {
+        "owner_user_id": user_id,
+        "plan_type": "pregnancy",
+        "status": "active",
+        "limit": 5,
+    }
 
 
 def test_task_apis_use_current_user_scope() -> None:
@@ -86,6 +111,7 @@ class FakePlansService:
         self.plan_id = uuid4()
         self.task_id = uuid4()
         self.create_plan_kwargs = {}
+        self.list_plans_kwargs = {}
         self.create_task_kwargs = {}
         self.list_tasks_kwargs = {}
         self.update_task_kwargs = {}
@@ -96,6 +122,7 @@ class FakePlansService:
         return self._plan()
 
     async def list_plans(self, **kwargs):
+        self.list_plans_kwargs = kwargs
         return [self._plan()]
 
     async def get_plan(self, **kwargs):

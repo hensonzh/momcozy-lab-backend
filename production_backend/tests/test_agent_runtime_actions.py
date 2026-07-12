@@ -9,11 +9,17 @@ from production_backend.app.modules.audit.models import OutboxJob
 from production_backend.app.modules.agent_runtime.actions.outbox import AgentActionOutboxHandler
 from production_backend.app.modules.agent_runtime.models import AgentAction
 from production_backend.app.modules.agent_runtime.service import AGENT_ACTION_APPLY_JOB, AgentRuntimeService
-from production_backend.app.modules.plans.agent_actions import PREGNANCY_PLAN_CREATE_ACTION, PregnancyPlanCreateActionHandler
+from production_backend.app.modules.plans.agent_actions import (
+    PREGNANCY_PLAN_CREATE_ACTION,
+    PregnancyPlanCreateActionHandler,
+)
 from production_backend.app.modules.plans.models import Plan
 from production_backend.app.modules.records.agent_actions import FEEDING_RECORD_CREATE_ACTION, FeedingRecordCreateActionHandler
 from production_backend.app.modules.records.models import FeedingRecord
 from production_backend.tests.test_agent_runtime_service import FakeAgentRuntimeRepository
+
+
+PREGNANCY_PLAN_CHANGED_EVENT = "pregnancy_plan.changed"
 
 
 def test_agent_runtime_actions_confirm_to_action_queued_without_queued_status() -> None:
@@ -551,7 +557,8 @@ def test_agent_pregnancy_plan_main_flow_confirms_applies_and_replays_events() ->
     asyncio.run(runtime_service.confirm_action(owner_user_id=owner_user_id, action_id=action.id))
     asyncio.run(handler(outbox_service.job))
 
-    applied_event = repository.events[-2]
+    applied_event = next(event for event in repository.events if event.event_type == "action.applied")
+    changed_event = next(event for event in repository.events if event.event_type == PREGNANCY_PLAN_CHANGED_EVENT)
 
     assert confirmed.status == "applied"
     assert len(outbox_service.enqueue_calls) == 1
@@ -565,6 +572,7 @@ def test_agent_pregnancy_plan_main_flow_confirms_applies_and_replays_events() ->
         "action.confirmation_required",
         "action.queued",
         "action.applied",
+        PREGNANCY_PLAN_CHANGED_EVENT,
         "run.completed",
     ]
     assert applied_event.payload["action_id"] == str(action.id)
@@ -572,6 +580,24 @@ def test_agent_pregnancy_plan_main_flow_confirms_applies_and_replays_events() ->
     assert applied_event.payload["resource_type"] == "plan"
     assert applied_event.payload["resource_id"] == str(plans_service.plans[0].id)
     assert applied_event.payload["details"]["plan_type"] == "pregnancy"
+    assert changed_event.payload == {
+        "operation": "created",
+        "plan_id": str(plans_service.plans[0].id),
+        "plan_type": "pregnancy",
+        "source": "agent_action",
+        "action_id": str(action.id),
+    }
+    assert [event.event_type for event in repository.events].count(PREGNANCY_PLAN_CHANGED_EVENT) == 1
+    replayed_events = asyncio.run(
+        runtime_service.list_events(
+            owner_user_id=owner_user_id,
+            run_id=run.id,
+            after_sequence=changed_event.sequence - 1,
+            limit=10,
+        )
+    )
+    assert [event.event_type for event in replayed_events] == [PREGNANCY_PLAN_CHANGED_EVENT, "run.completed"]
+    assert replayed_events[0].payload == changed_event.payload
     assert "apply_payload" not in repository.events[2].payload
 
 

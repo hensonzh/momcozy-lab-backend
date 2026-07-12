@@ -19,10 +19,15 @@ from production_backend.app.modules.diary.agent_actions import (
     PregnancyDiaryEntryDeleteActionHandler,
 )
 from production_backend.app.modules.diary.models import PregnancyDiaryEntry
+from production_backend.app.modules.plans.agent_actions import (
+    PREGNANCY_PLAN_CREATE_ACTION,
+    PregnancyPlanCreateActionHandler,
+)
 from production_backend.app.workers.errors import PermanentJobError, RetryableJobError
 
 
 PRIVATE_DELETED_DIARY_CONTENT = "private deleted diary narrative"
+PREGNANCY_PLAN_CHANGED_EVENT = "pregnancy_plan.changed"
 
 
 def test_agent_action_outbox_handler_applies_action_and_emits_event() -> None:
@@ -161,6 +166,28 @@ def test_pregnancy_diary_applied_delete_replay_does_not_emit_duplicate_changed_e
     asyncio.run(handler(_job(repository.action.id)))
 
     assert repository.events == []
+
+
+def test_failed_pregnancy_plan_create_does_not_emit_changed_event() -> None:
+    repository = FakeAgentActionRepository(
+        action_type=PREGNANCY_PLAN_CREATE_ACTION,
+        target_type="plan",
+        apply_payload={"title": "Pregnancy plan"},
+    )
+    handler = AgentActionOutboxHandler(
+        repository=repository,
+        handlers={
+            PREGNANCY_PLAN_CREATE_ACTION: PregnancyPlanCreateActionHandler(service=FailingPlansService())
+        },
+    )
+
+    with pytest.raises(PermanentJobError) as exc_info:
+        asyncio.run(handler(_job(repository.action.id)))
+
+    assert exc_info.value.code == "plan_create_failed"
+    assert repository.action.status == "failed"
+    assert [event.event_type for event in repository.events] == ["action.failed"]
+    assert PREGNANCY_PLAN_CHANGED_EVENT not in [event.event_type for event in repository.events]
 
 
 def test_action_apply_event_failure_rolls_back_mutation_scope_before_retry() -> None:
@@ -319,6 +346,11 @@ class FakeDiaryDeleteService:
         if self.mode == "not_found":
             raise ApiError(code="not_found", message="Diary entry not found.", status=404)
         return self.entry
+
+
+class FailingPlansService:
+    async def create_plan(self, **_kwargs):
+        raise ApiError(code="plan_create_failed", message="Plan could not be created.", status=500)
 
 
 class FakeAgentActionRepository:

@@ -65,12 +65,18 @@ async def create_plan(
 
 @router.get("", response_model=PlanListResponse)
 async def list_plans(
+    plan_type: str = Query(default="", max_length=64),
     status_filter: str = Query(default="active", alias="status"),
     limit: int = Query(default=50, ge=1, le=100),
     current_user: CurrentUser = Depends(require_current_user),
     service: PlansService = Depends(get_plans_service),
 ) -> PlanListResponse:
-    plans = await service.list_plans(owner_user_id=current_user.user_id, status=status_filter, limit=limit)
+    plans = await service.list_plans(
+        owner_user_id=current_user.user_id,
+        plan_type=plan_type,
+        status=status_filter,
+        limit=limit,
+    )
     return PlanListResponse(items=[PlanRead.model_validate(plan) for plan in plans])
 
 

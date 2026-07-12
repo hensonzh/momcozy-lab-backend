@@ -144,6 +144,17 @@ path.
 Action API responses likewise expose preview/status metadata only. They do not
 return server-side `apply_payload` or action idempotency keys.
 
+The confirmed `pregnancy.plan.create` apply path also emits the durable
+application event `pregnancy_plan.changed` after the authoritative Plan and
+action result are committed. Its payload is intentionally limited to
+`operation=created`, opaque `plan_id`, `plan_type=pregnancy`,
+`source=agent_action`, and the generic outbox-added `action_id`. Preview,
+confirmation, rejection, and failed apply states do not emit this business
+event, and it never contains the personalized card, plan context, or health
+facts. Clients use it only as an invalidation/notification signal and reload the
+owner-scoped resource through
+`GET /v1/plans?plan_type=pregnancy&status=active`.
+
 ## Files
 
 File upload uses multipart form data at `POST /v1/files/upload`. File metadata

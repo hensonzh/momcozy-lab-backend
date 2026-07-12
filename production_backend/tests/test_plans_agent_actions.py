@@ -24,6 +24,10 @@ from production_backend.app.modules.plans.models import Plan, PlanTask
 from production_backend.app.workers.errors import PermanentJobError
 
 
+PRIVATE_PREGNANCY_PLAN_CONTENT = "private thyroid medication and birth plan card"
+PREGNANCY_PLAN_CHANGED_EVENT = "pregnancy_plan.changed"
+
+
 def test_milk_plan_create_action_handler_creates_plan_through_service() -> None:
     service = FakePlansService()
     action = _action(
@@ -51,6 +55,7 @@ def test_milk_plan_create_action_handler_creates_plan_through_service() -> None:
     assert service.create_plan_kwargs["payload"]["target_sessions_per_day"] == 2
     assert service.create_plan_kwargs["payload"]["agent_action_id"] == str(action.id)
     assert service.create_plan_kwargs["idempotency_key"] == "idem-action"
+    assert result.application_events == ()
 
 
 def test_milk_plan_create_action_handler_rejects_missing_title() -> None:
@@ -68,7 +73,11 @@ def test_pregnancy_plan_create_action_handler_creates_plan_through_service() -> 
         apply_payload={
             "title": "Third trimester plan",
             "summary": "Prepare appointments and bag tasks.",
-            "payload": {"gestational_week": 32},
+            "payload": {
+                "gestational_week": 32,
+                "plan_context": {"medical_notes": PRIVATE_PREGNANCY_PLAN_CONTENT},
+                "card": {"card_json": {"title": PRIVATE_PREGNANCY_PLAN_CONTENT}},
+            },
         },
     )
 
@@ -81,6 +90,15 @@ def test_pregnancy_plan_create_action_handler_creates_plan_through_service() -> 
     assert service.create_plan_kwargs["source"] == "agent_action"
     assert service.create_plan_kwargs["payload"]["gestational_week"] == 32
     assert service.create_plan_kwargs["payload"]["agent_action_id"] == str(action.id)
+    assert len(result.application_events) == 1
+    changed_event = result.application_events[0]
+    assert changed_event.event_type == PREGNANCY_PLAN_CHANGED_EVENT
+    assert changed_event.payload == {
+        "operation": "created",
+        "plan_id": str(service.plan.id),
+        "plan_type": "pregnancy",
+        "source": "agent_action",
+    }
 
 
 def test_plan_task_create_action_handler_creates_task_through_service() -> None:
