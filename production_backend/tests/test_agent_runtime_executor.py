@@ -26,6 +26,7 @@ from production_backend.app.modules.agent_runtime.run_lifecycle.executor import 
 )
 from production_backend.app.modules.agent_runtime.run_lifecycle.working_context import (
     AgentWorkingContextState,
+    RetainedKnownInformation,
     RetainedServiceSkill,
 )
 from production_backend.app.modules.agent_runtime.run_lifecycle.quick_replies import QUICK_REPLY_RESPONSE_FORMAT, QuickReplyFinalizer
@@ -39,6 +40,7 @@ from production_backend.app.modules.agent_runtime.sdk import (
 )
 from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.skill_registry import default_service_skill_registry
 from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.tools import (
+    RetainedToolInformation,
     ToolExecutor,
     ToolHandlerContext,
     ToolHandlerResult,
@@ -1262,6 +1264,48 @@ def test_agent_runtime_executor_projects_loaded_skill_from_working_context() -> 
     assert repository.run_summaries[-1].service_skill_id == "cozymate_service_agent"
 
 
+def test_agent_runtime_executor_projects_retained_tool_information_without_internal_metadata() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="那今天呢？", sequence=1)
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    backend = CapturingSdkBackend(result=SdkNodeResult(final_text="我接着看。"))
+    state = AgentWorkingContextState(
+        turn_index=2,
+        known_information=(
+            RetainedKnownInformation(
+                context_key="milk:status",
+                source="records.milk_status.read",
+                information={"volumes": {"trend_pumped_volume_ml": 420}},
+                guidance="Use for follow-up on the same measured window.",
+                captured_turn=1,
+                expires_after_turn=4,
+                priority=100,
+            ),
+        ),
+    )
+
+    asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            working_context_store=FakeWorkingContextStore(state=state),
+        ).execute(run=run)
+    )
+
+    known_information = _runtime_context(backend.requests[0])["working_context"]["known_information"]
+    assert known_information == [
+        {
+            "source": "records.milk_status.read",
+            "information": {"volumes": {"trend_pumped_volume_ml": 420}},
+            "guidance": "Use for follow-up on the same measured window.",
+        }
+    ]
+    serialized = json.dumps(known_information)
+    assert "context_key" not in serialized
+    assert "expires_after_turn" not in serialized
+
+
 def test_agent_runtime_executor_injects_only_model_visible_skill_fields() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)
@@ -1330,6 +1374,56 @@ def test_agent_runtime_executor_allows_service_tool_with_resident_loaded_skill()
     assert result.status == "completed"
     assert tool_executor.calls[0]["tool_name"] == "records.milk_status.read"
     assert tool_executor.calls[0]["args"] == {"days": 7, "limit": 5}
+
+
+def test_agent_runtime_executor_retains_handler_projected_tool_information() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="看看最近奶量", sequence=1)
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    retained = RetainedToolInformation(
+        context_key="milk:status",
+        information={"volumes": {"trend_pumped_volume_ml": 420}},
+        guidance="Use for follow-up on the same measured window.",
+    )
+    tool_executor = FakeToolExecutor(
+        safe_output={"volumes": {"trend_pumped_volume_ml": 420}},
+        retained_information=(retained,),
+    )
+    working_context_store = FakeWorkingContextStore()
+    backend = ScriptedSdkBackend(
+        [
+            scripted_sdk_response(
+                final_text="最近记录是 420ml。",
+                tool_invocations=(scripted_tool_invocation("records.milk_status.read", {}),),
+                expected_available_tools=("load_service_skill", "records.milk_status.read"),
+            )
+        ]
+    )
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            tool_executor=tool_executor,
+            working_context_store=working_context_store,
+        ).execute(run=run)
+    )
+
+    assert result.status == "completed"
+    assert working_context_store.retained_information == [
+        {
+            "thread_id": thread_id,
+            "context_key": "milk:status",
+            "source": "records.milk_status.read",
+            "information": {"volumes": {"trend_pumped_volume_ml": 420}},
+            "guidance": "Use for follow-up on the same measured window.",
+            "ttl_turns": 3,
+            "token_budget": 4000,
+            "invalidate_prefixes": (),
+            "priority": 100,
+        }
+    ]
 
 
 def test_agent_runtime_executor_expires_resident_loaded_skill_after_three_followup_turns() -> None:
@@ -2983,11 +3077,18 @@ class FakeWorkingContextStore:
         self.fail = fail
         self.begin_calls = []
         self.retained_skills = []
+        self.retained_information = []
 
     async def begin_turn(self, **kwargs):
         self.begin_calls.append(kwargs)
         if self.fail:
             raise RuntimeError("redis unavailable")
+        return self.state
+
+    async def retain_information(self, **kwargs):
+        if self.fail:
+            raise RuntimeError("redis unavailable")
+        self.retained_information.append(kwargs)
         return self.state
 
     async def retain_skill(self, **kwargs):
@@ -3004,6 +3105,7 @@ class FakeWorkingContextStore:
         self.state = AgentWorkingContextState(
             turn_index=self.state.turn_index,
             skills=tuple(skill for skill in self.state.skills if skill.service_skill_id != retained.service_skill_id) + (retained,),
+            known_information=self.state.known_information,
         )
         return self.state
 
@@ -3143,10 +3245,11 @@ class FakeTransientStream:
 
 
 class FakeToolExecutor:
-    def __init__(self, *, safe_output, model_context=(), model_output=None):
+    def __init__(self, *, safe_output, model_context=(), model_output=None, retained_information=()):
         self.safe_output = safe_output
         self.model_context = model_context
         self.model_output = model_output
+        self.retained_information = retained_information
         self.calls = []
 
     async def execute(self, **kwargs):
@@ -3155,13 +3258,15 @@ class FakeToolExecutor:
             safe_output=self.safe_output,
             model_context=self.model_context,
             model_output=self.model_output,
+            retained_information=self.retained_information,
         )
 
 
 class FakeToolExecutionResult:
-    def __init__(self, *, safe_output, model_context=(), model_output=None):
+    def __init__(self, *, safe_output, model_context=(), model_output=None, retained_information=()):
         self.safe_output = safe_output
         self.model_context = model_context
+        self.retained_information = retained_information
         if model_output is not None:
             self.model_output = model_output
 

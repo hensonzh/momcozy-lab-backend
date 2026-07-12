@@ -111,6 +111,7 @@ class AgentRuntimeExecutorConfig:
     history_limit: int = 40
     memory_limit: int = 5
     resident_service_skill_ttl_turns: int = DEFAULT_RESIDENT_SERVICE_SKILL_TTL_TURNS
+    known_information_token_budget: int = 4000
 
 
 @dataclass
@@ -817,6 +818,11 @@ class AgentRuntimeExecutor:
             )
         else:
             result = await self.tool_executor.execute(**execute_kwargs)
+        await self._retain_tool_information(
+            thread_id=run.thread_id,
+            source=contract_name,
+            retained_information=getattr(result, "retained_information", ()),
+        )
         if _text(result.safe_output, "status") == "urgent_care_required":
             required_response = _text(result.safe_output, "required_response")
             if required_response:
@@ -1328,6 +1334,7 @@ class AgentRuntimeExecutor:
             return await self.working_context_store.begin_turn(
                 thread_id=run.thread_id,
                 skill_ttl_turns=self.config.resident_service_skill_ttl_turns,
+                information_token_budget=self.config.known_information_token_budget,
             )
         except Exception:
             LOGGER.warning("Failed to load working context; continuing with an empty short-term context.", exc_info=True)
@@ -1345,6 +1352,31 @@ class AgentRuntimeExecutor:
             )
         except Exception:
             LOGGER.warning("Failed to retain loaded service skill in working context.", exc_info=True)
+
+    async def _retain_tool_information(
+        self,
+        *,
+        thread_id: UUID,
+        source: str,
+        retained_information: Any,
+    ) -> None:
+        if self.working_context_store is None or not isinstance(retained_information, (list, tuple)):
+            return
+        try:
+            for item in retained_information:
+                await self.working_context_store.retain_information(
+                    thread_id=thread_id,
+                    context_key=str(getattr(item, "context_key", "") or ""),
+                    source=source,
+                    information=dict(getattr(item, "information", {}) or {}),
+                    guidance=str(getattr(item, "guidance", "") or ""),
+                    ttl_turns=max(1, int(getattr(item, "ttl_turns", 3) or 3)),
+                    token_budget=self.config.known_information_token_budget,
+                    invalidate_prefixes=tuple(getattr(item, "invalidate_prefixes", ()) or ()),
+                    priority=max(0, int(getattr(item, "priority", 100) or 100)),
+                )
+        except Exception:
+            LOGGER.warning("Failed to retain tool information in working context.", exc_info=True)
 
     async def _fresh_business_facts_for_skill(self, *, run: AgentRun, skill_id: ServiceSkillId) -> dict[str, Any]:
         if self.business_facts_projector is None:

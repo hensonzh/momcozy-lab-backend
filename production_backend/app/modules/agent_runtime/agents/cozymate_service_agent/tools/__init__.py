@@ -1,5 +1,5 @@
 from .contracts import ToolContract
-from .executor import ToolExecutionResult, ToolExecutor, ToolHandlerContext, ToolHandlerResult
+from .executor import RetainedToolInformation, ToolExecutionResult, ToolExecutor, ToolHandlerContext, ToolHandlerResult
 from .handlers import (
     BusinessContextReadToolHandler,
     DeviceGuidanceAssetsReadToolHandler,
@@ -85,6 +85,7 @@ __all__ = [
     "PumpingRecordProposeToolHandler",
     "PregnancyPlanProposeToolHandler",
     "SupportTicketProposeToolHandler",
+    "RetainedToolInformation",
     "ToolContract",
     "ToolContractRegistry",
     "ToolExecutionResult",

@@ -417,7 +417,8 @@ def test_milk_status_read_tool_handler_returns_deterministic_status_snapshot() -
 
     assert records_service.owner_user_id == actor.user_id
     assert profile_service.infant_owner_user_id == actor.user_id
-    assert result == {
+    assert isinstance(result, ToolHandlerResult)
+    assert result.output == {
         "window": {"days": 3, "limit": 2, "include_today": True},
         "status": {
             "data_coverage": "ready",
@@ -444,6 +445,9 @@ def test_milk_status_read_tool_handler_returns_deterministic_status_snapshot() -
         },
         "observation_flags": [],
     }
+    assert result.retained_information[0].context_key == "milk:status"
+    assert result.retained_information[0].information == result.output
+    assert result.retained_information[0].ttl_turns == 3
 
 
 def test_milk_analysis_read_tool_handler_returns_growth_and_next_step_snapshot() -> None:
@@ -559,6 +563,7 @@ def test_devices_pump_status_read_tool_handler_returns_bounded_owner_scoped_summ
     assert result["pumps"][0]["device_id"] == "pump-1"
     assert result["telemetry"][0]["payload"] == {"mode": "stimulation"}
     assert result["counts"] == {"pumps": 1, "telemetry": 1}
+    assert result.retained_information[0].context_key == "devices:pump_status"
 
 
 def test_device_guidance_assets_read_tool_handler_returns_bounded_metadata() -> None:
@@ -1911,6 +1916,9 @@ def test_pregnancy_diary_delete_tool_deletes_entry_synchronously() -> None:
 
     assert result["status"] == "entry_deleted"
     assert result["entry_date"] == "2026-07-04"
+    assert result.retained_information[0].context_key == "pregnancy_diary:entry:2026-07-04"
+    assert result.retained_information[0].priority == 200
+    assert result.retained_information[0].invalidate_prefixes == ("pregnancy_diary:",)
     assert diary_service.delete_kwargs["owner_user_id"] == actor.user_id
     assert diary_service.delete_kwargs["entry_date"] == date(2026, 7, 4)
 

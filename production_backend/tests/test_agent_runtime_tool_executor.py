@@ -14,6 +14,7 @@ from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.
     PregnancyDiaryEntryCreateToolHandler,
     PregnancyDiaryEntryDeleteToolHandler,
     PregnancyDiaryEntryUpdateToolHandler,
+    RetainedToolInformation,
     ToolExecutor,
     ToolHandlerResult,
     ToolHandlerContext,
@@ -78,6 +79,47 @@ def test_load_service_skill_injects_business_facts_once_into_model_context() -> 
         ensure_ascii=False,
     )
     assert serialized_model_input.count("business_facts") == 1
+
+
+def test_tool_executor_carries_retained_information_without_persisting_it_as_tool_output() -> None:
+    actor = _user()
+    repository = FakeToolRepository()
+
+    async def handler(_context: ToolHandlerContext):
+        return ToolHandlerResult(
+            output={"status": "ok", "total_ml": 420},
+            retained_information=(
+                RetainedToolInformation(
+                    context_key="milk:status",
+                    information={"total_ml": 420},
+                    guidance="Use for milk-status follow-up questions.",
+                ),
+            ),
+        )
+
+    result = asyncio.run(
+        ToolExecutor(
+            registry=default_tool_registry(),
+            repository=repository,
+            handlers={"records.milk_status.read": handler},
+        ).execute(
+            actor=actor,
+            run_id=uuid4(),
+            tool_name="records.milk_status.read",
+            call_id="call-retained",
+            args={},
+        )
+    )
+
+    assert result.retained_information == (
+        RetainedToolInformation(
+            context_key="milk:status",
+            information={"total_ml": 420},
+            guidance="Use for milk-status follow-up questions.",
+        ),
+    )
+    assert repository.output.safe_output == {"status": "ok", "total_ml": 420}
+    assert "retained_information" not in repository.output.safe_output
 
 
 def test_tool_executor_persists_safe_args_and_output() -> None:

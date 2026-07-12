@@ -36,9 +36,29 @@ class ToolHandlerContext:
 
 
 @dataclass(frozen=True)
+class RetainedToolInformation:
+    context_key: str
+    information: dict[str, Any]
+    guidance: str
+    ttl_turns: int = 3
+    priority: int = 100
+    invalidate_prefixes: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class ToolHandlerResult:
     output: dict[str, Any]
     model_context: tuple[dict[str, Any], ...] = ()
+    retained_information: tuple[RetainedToolInformation, ...] = ()
+
+    def __getitem__(self, key: str) -> Any:
+        return self.output[key]
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return self.output.get(key, default)
+
+    def __contains__(self, key: object) -> bool:
+        return key in self.output
 
 
 ToolHandler = Callable[
@@ -80,6 +100,7 @@ class ToolExecutionResult:
     safe_output: dict[str, Any]
     model_output: dict[str, Any]
     model_context: tuple[dict[str, Any], ...] = ()
+    retained_information: tuple[RetainedToolInformation, ...] = ()
 
 
 class ToolExecutor:
@@ -341,6 +362,7 @@ class ToolExecutor:
             safe_output=externalized_output.inline_payload,
             model_output=model_output,
             model_context=result.model_context,
+            retained_information=result.retained_information,
         )
 
     async def _reload_started_tool_call(
@@ -567,6 +589,17 @@ def _normalize_handler_result(result: ToolHandlerResult | dict[str, Any]) -> Too
         return ToolHandlerResult(
             output=dict(result.output),
             model_context=tuple(dict(item) for item in result.model_context),
+            retained_information=tuple(
+                RetainedToolInformation(
+                    context_key=item.context_key,
+                    information=dict(item.information),
+                    guidance=item.guidance,
+                    ttl_turns=item.ttl_turns,
+                    priority=item.priority,
+                    invalidate_prefixes=tuple(item.invalidate_prefixes),
+                )
+                for item in result.retained_information
+            ),
         )
     if isinstance(result, dict):
         return ToolHandlerResult(output=dict(result))
