@@ -62,6 +62,58 @@ Start incident and release debugging from these IDs when available:
 8. During rolling restarts, let agent and outbox workers receive SIGTERM/SIGINT
    and stop at the next idle point before force killing the process.
 
+### Agent action executor cutover (`20260712_0030`)
+
+This migration removes only the legacy `agent.action.apply` consumer. The
+generic outbox worker remains required for file-object cleanup and other
+non-Agent jobs.
+
+Use this order; do not run the data migration concurrently with the old Agent
+action outbox consumer:
+
+1. Quiesce traffic that can create Agent actions, then gracefully stop the old
+   agent worker and old outbox worker. Confirm the worker transaction has
+   finished; for a `locked` job, wait for the owning process to exit/commit or
+   for its lease to expire. A row that merely says `locked` is not proof that
+   the old handler has stopped.
+2. Run Alembic upgrade. The migration waits on any still-open row transaction,
+   fails closed if any active legacy job is orphaned, points at an action
+   outside `confirmed`/`applying`/`applied`/`failed`, or points at a
+   `confirmed`/`applying` action whose run is already terminal instead of
+   `waiting_for_confirmation`/`running`/`queued`,
+   resets recoverable `applying` actions to `confirmed`, moves recoverable
+   `waiting_for_confirmation`/`running` runs to `queued`, and marks the legacy
+   jobs `completed` with `error_code=migrated_to_agent_run_executor`. Runs whose
+   action is already `applied` or `failed` are also queued so the new worker
+   only fills the missing message/terminal state and never calls the handler
+   again.
+3. Verify there are no active legacy jobs:
+
+   ```sql
+   SELECT status, count(*)
+   FROM outbox_jobs
+   WHERE job_type = 'agent.action.apply'
+     AND status IN ('queued', 'locked', 'processing', 'retry')
+   GROUP BY status;
+   ```
+
+   The query must return zero rows. Also inspect the requeued runs and their
+   action statuses before restoring traffic.
+4. Start the new agent worker first, then the API and the generic outbox worker.
+   Watch `action.applied`/`action.failed` and run terminal events until the
+   migrated queue drains.
+
+Rollback requires a maintenance window. First keep the new agent worker running
+until every migration-marked `applied`/`failed` action has a terminal run; verify
+none of those actions still has a `queued`, `running`, or
+`waiting_for_confirmation` run. Then stop the new API and all workers, downgrade
+to `20260711_0029`, and deploy the old image. The downgrade fails closed if this
+drain check is not satisfied. It requeues only
+migration-marked jobs whose actions remain `confirmed`/`applying` and restores
+their runs to `waiting_for_confirmation`; actions already applied by the new
+executor are never requeued. Never manually reactivate a migration-marked job
+for an `applied` action.
+
 ## Production Docker Compose
 
 `production_backend/docker-compose.prod.yml` is the server deployment template.
@@ -233,12 +285,14 @@ before increasing limits.
 
 1. Check `/v1/health/metrics` with `X-Service-Key` in production for worker
    outcomes and error codes.
-2. Inspect queued and locked `outbox_jobs` with
+2. Inspect queued and locked non-Agent `outbox_jobs` with
    `make backend-worker-backlog BACKEND_ENV_FILE=<env file>`.
 3. Confirm Redis and external providers are reachable.
 4. If jobs are locked by a dead worker, wait for lease expiry or release them
    with an audited maintenance script.
-5. For repeated permanent failures, move affected jobs to dead-letter and open
+5. Agent action writes are not outbox jobs; inspect `agent_runs` and
+   `agent_actions` instead. For repeated permanent failures in remaining
+   generic jobs, move affected jobs to dead-letter and open
    a repair ticket with `job_id`, `action_id`, and `request_id`.
 
 ## Agent Run Recovery
@@ -249,7 +303,10 @@ before increasing limits.
 3. Check Redis active run lock and cancel flag; Redis state is reconstructable.
 4. Replay persisted events before attempting any new model call.
 5. If the run is waiting for confirmation, keep it waiting and ask the client to
-   resume from persisted action state.
+   resume from persisted action state. If its action is already confirmed,
+   applied, or failed but the run is still waiting/running, queue the same run;
+   the worker resumes confirmed work or only fills terminal output for an
+   already-applied/failed action.
 6. Dry-run stuck running recovery with
    `make backend-agent-recover-stuck-runs BACKEND_ENV_FILE=<env file>`.
 7. Only after support/incident approval, run
