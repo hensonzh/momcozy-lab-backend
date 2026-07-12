@@ -63,6 +63,72 @@ def test_state_store_records_context_projection_as_derived_view() -> None:
     assert projection.token_estimate == 0
 
 
+def test_state_store_upserts_one_active_workflow_per_thread_and_type() -> None:
+    repository = FakeStateRepository()
+    store = AgentRuntimeStateStore(repository=repository)
+    owner_user_id = uuid4()
+    thread_id = uuid4()
+
+    created = asyncio.run(
+        store.upsert_active_workflow(
+            thread_id=thread_id,
+            owner_user_id=owner_user_id,
+            run_id=uuid4(),
+            workflow_type="device_unboxing",
+            status="collecting",
+            state={"phase": "guiding", "device_model": "Air1"},
+            active_step="guide.parts",
+        )
+    )
+    updated_run_id = uuid4()
+    updated = asyncio.run(
+        store.upsert_active_workflow(
+            thread_id=thread_id,
+            owner_user_id=owner_user_id,
+            run_id=updated_run_id,
+            workflow_type="device_unboxing",
+            status="waiting",
+            state={"phase": "guiding", "device_model": "Air1", "completed_steps": ["guide.parts"]},
+            active_step="guide.controls",
+        )
+    )
+
+    assert updated is created
+    assert updated.run_id == updated_run_id
+    assert updated.status == "waiting"
+    assert updated.active_step == "guide.controls"
+    assert updated.state["completed_steps"] == ["guide.parts"]
+    assert len(repository.workflow_states) == 1
+
+
+def test_state_store_lists_only_repository_selected_active_workflows() -> None:
+    repository = FakeStateRepository()
+    store = AgentRuntimeStateStore(repository=repository)
+    workflow = AgentWorkflowState(
+        id=uuid4(),
+        thread_id=uuid4(),
+        owner_user_id=uuid4(),
+        run_id=uuid4(),
+        workflow_type="hospital_bag",
+        status="collecting",
+        schema_version="v1",
+        state={"phase": "collecting_intake"},
+        active_step="collecting_intake",
+    )
+    repository.workflow_states.append(workflow)
+
+    result = asyncio.run(
+        store.list_active_workflows(
+            thread_id=workflow.thread_id,
+            owner_user_id=workflow.owner_user_id,
+            limit=3,
+        )
+    )
+
+    assert result == [workflow]
+    assert repository.list_active_kwargs["limit"] == 3
+
+
 def _run() -> AgentRun:
     return AgentRun(
         id=uuid4(),
@@ -80,8 +146,38 @@ def _run() -> AgentRun:
 
 
 class FakeStateRepository:
+    def __init__(self) -> None:
+        self.workflow_states = []
+        self.list_active_kwargs = {}
+
     async def create_workflow_state(self, **kwargs):
-        return AgentWorkflowState(id=uuid4(), **kwargs)
+        workflow = AgentWorkflowState(id=uuid4(), **kwargs)
+        self.workflow_states.append(workflow)
+        return workflow
+
+    async def get_latest_workflow_state_for_thread(self, **kwargs):
+        matches = [
+            workflow
+            for workflow in self.workflow_states
+            if workflow.thread_id == kwargs["thread_id"]
+            and workflow.owner_user_id == kwargs["owner_user_id"]
+            and workflow.workflow_type == kwargs["workflow_type"]
+        ]
+        return matches[-1] if matches else None
+
+    async def update_workflow_state(self, *, workflow_state, **kwargs):
+        for key, value in kwargs.items():
+            if value is not None:
+                setattr(workflow_state, key, value)
+        return workflow_state
+
+    async def list_active_workflow_states_for_thread(self, **kwargs):
+        self.list_active_kwargs = kwargs
+        return [
+            workflow
+            for workflow in self.workflow_states
+            if workflow.thread_id == kwargs["thread_id"] and workflow.owner_user_id == kwargs["owner_user_id"]
+        ][: kwargs["limit"]]
 
     async def create_context_projection(self, **kwargs):
         return AgentContextProjection(id=uuid4(), **kwargs)

@@ -64,7 +64,7 @@ from ..event_semantics import (
 )
 from ..graphs import AgentGraphCheckpointStore, AgentGraphRegistry, default_graph_registry
 from ..memory.service import AgentMemoryService
-from ..models import AgentAction, AgentArtifact, AgentEvent, AgentMessage, AgentRun
+from ..models import AgentAction, AgentArtifact, AgentEvent, AgentMessage, AgentRun, AgentWorkflowState
 from ..payloads import DEFAULT_MAX_INLINE_PAYLOAD_BYTES, maybe_externalize_json_payload
 from ..repository import AgentRuntimeRepository
 from ..response_text import AppendOnlyAgentResponseProjector, agent_response_text_integrity
@@ -78,6 +78,7 @@ from ..sdk import (
     sdk_tool_name,
 )
 from .execution import AgentRunExecutionResult
+from .ongoing_work import project_ongoing_work
 from .quick_replies import QuickReplyFinalizer
 from .state_store import AgentRuntimeStateStore
 from .working_context import (
@@ -122,6 +123,7 @@ class _AgentTurnContext:
     service_skills: tuple[AgentServiceSkill, ...]
     routing_plan: RoutingPlan
     working_context_state: AgentWorkingContextState
+    ongoing_work: list[dict[str, str]]
     timings_ms: dict[str, float]
 
 
@@ -287,6 +289,16 @@ class AgentRuntimeExecutor:
         working_context_state = await self._begin_working_context_turn(run=run)
         timings_ms["working_context"] = _elapsed_ms(working_context_started_at)
 
+        ongoing_work_started_at = perf_counter()
+        workflow_states = await self._active_workflow_states(run=run)
+        resident_skill_ids = {
+            skill.service_skill_id
+            for skill in working_context_state.skills
+            if working_context_state.turn_index <= skill.expires_after_turn
+        }
+        ongoing_work = project_ongoing_work(workflow_states, resident_skill_ids=resident_skill_ids)
+        timings_ms["ongoing_work"] = _elapsed_ms(ongoing_work_started_at)
+
         await self._record_routing_decision(run=run, current_message=current_message, routing_plan=routing_plan)
         return _AgentTurnContext(
             current_message=current_message,
@@ -295,6 +307,7 @@ class AgentRuntimeExecutor:
             service_skills=service_skills,
             routing_plan=routing_plan,
             working_context_state=working_context_state,
+            ongoing_work=ongoing_work,
             timings_ms=timings_ms,
         )
 
@@ -324,7 +337,10 @@ class AgentRuntimeExecutor:
             ),
             user_context=_user_context(current_message=turn_context.current_message, now=self.clock()),
             memory_projection=turn_context.memory_projection,
-            working_context=project_working_context(turn_context.working_context_state),
+            working_context=project_working_context(
+                turn_context.working_context_state,
+                ongoing_work=turn_context.ongoing_work,
+            ),
         )
         model_input = self.input_builder.build(
             projection=projection,
@@ -1339,6 +1355,16 @@ class AgentRuntimeExecutor:
         except Exception:
             LOGGER.warning("Failed to load working context; continuing with an empty short-term context.", exc_info=True)
             return empty_working_context_state()
+
+    async def _active_workflow_states(self, *, run: AgentRun) -> list[AgentWorkflowState]:
+        loader = getattr(self.repository, "list_active_workflow_states_for_thread", None)
+        if not callable(loader):
+            return []
+        return await loader(
+            thread_id=run.thread_id,
+            owner_user_id=run.actor_user_id,
+            limit=5,
+        )
 
     async def _retain_service_skill(self, *, thread_id: UUID, skill: AgentServiceSkill) -> None:
         if self.working_context_store is None:

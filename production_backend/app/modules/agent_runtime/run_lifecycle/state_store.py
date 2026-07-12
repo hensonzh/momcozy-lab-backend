@@ -37,6 +37,59 @@ class AgentRuntimeStateStore:
             expires_at=expires_at,
         )
 
+    async def upsert_active_workflow(
+        self,
+        *,
+        thread_id: UUID,
+        owner_user_id: UUID,
+        workflow_type: str,
+        state: dict[str, Any],
+        run_id: UUID | None = None,
+        status: str = "collecting",
+        schema_version: str = "v1",
+        active_step: str = "",
+        expires_at: datetime | None = None,
+    ) -> AgentWorkflowState:
+        workflow = await self.repository.get_latest_workflow_state_for_thread(
+            thread_id=thread_id,
+            owner_user_id=owner_user_id,
+            workflow_type=workflow_type,
+        )
+        if workflow is None or workflow.status in {"completed", "expired", "failed"}:
+            return await self.create_workflow_state(
+                thread_id=thread_id,
+                owner_user_id=owner_user_id,
+                workflow_type=workflow_type,
+                state=state,
+                run_id=run_id,
+                status=status,
+                schema_version=schema_version,
+                active_step=active_step,
+                expires_at=expires_at,
+            )
+        workflow.run_id = run_id
+        workflow.schema_version = schema_version
+        return await self.repository.update_workflow_state(
+            workflow_state=workflow,
+            status=status,
+            state=_json_compatible(state),
+            active_step=active_step,
+            expires_at=expires_at,
+        )
+
+    async def list_active_workflows(
+        self,
+        *,
+        thread_id: UUID,
+        owner_user_id: UUID,
+        limit: int = 5,
+    ) -> list[AgentWorkflowState]:
+        return await self.repository.list_active_workflow_states_for_thread(
+            thread_id=thread_id,
+            owner_user_id=owner_user_id,
+            limit=limit,
+        )
+
     async def record_context_projection(
         self,
         *,

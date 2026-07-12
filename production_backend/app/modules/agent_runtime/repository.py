@@ -772,6 +772,27 @@ class AgentRuntimeRepository:
         )
         return cast(AgentWorkflowState | None, await self.session.scalar(statement))
 
+    async def list_active_workflow_states_for_thread(
+        self,
+        *,
+        thread_id: UUID,
+        owner_user_id: UUID,
+        limit: int = 5,
+    ) -> list[AgentWorkflowState]:
+        statement = (
+            select(AgentWorkflowState)
+            .where(
+                AgentWorkflowState.thread_id == thread_id,
+                AgentWorkflowState.owner_user_id == owner_user_id,
+                AgentWorkflowState.status.in_(("collecting", "ready", "waiting", "paused")),
+                or_(AgentWorkflowState.expires_at.is_(None), AgentWorkflowState.expires_at > func.now()),
+            )
+            .order_by(AgentWorkflowState.updated_at.desc(), AgentWorkflowState.id.desc())
+            .limit(max(1, min(int(limit), 20)))
+        )
+        result = await self.session.scalars(statement)
+        return list(result.all())
+
     async def list_workflow_states_for_run(self, *, run_id: UUID) -> list[AgentWorkflowState]:
         statement = select(AgentWorkflowState).where(AgentWorkflowState.run_id == run_id).order_by(
             AgentWorkflowState.updated_at,

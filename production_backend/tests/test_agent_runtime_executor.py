@@ -17,6 +17,7 @@ from production_backend.app.modules.agent_runtime.models import (
     AgentRun,
     AgentRunSummary,
     AgentToolCall,
+    AgentWorkflowState,
 )
 from production_backend.app.modules.agent_runtime.event_stream.sink import AgentEventSink
 from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent import ServiceSkillId
@@ -270,10 +271,11 @@ def test_agent_runtime_executor_loads_base_context_without_parallel_shared_sessi
     )
 
     assert result.status == "completed"
-    assert session_guard.calls[:3] == [
+    assert session_guard.calls[:4] == [
         "current_message",
         "thread_messages",
         "memory_snapshot",
+        "active_workflows",
     ]
 
 
@@ -1304,6 +1306,57 @@ def test_agent_runtime_executor_projects_retained_tool_information_without_inter
     serialized = json.dumps(known_information)
     assert "context_key" not in serialized
     assert "expires_after_turn" not in serialized
+
+
+def test_agent_runtime_executor_projects_active_workflow_as_minimal_ongoing_work() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="继续", sequence=1)
+    workflow = AgentWorkflowState(
+        id=uuid4(),
+        thread_id=thread_id,
+        owner_user_id=run.actor_user_id,
+        run_id=uuid4(),
+        workflow_type="pregnancy_plan",
+        status="waiting",
+        schema_version="v1",
+        state={
+            "phase": "personalized_followup",
+            "personalized_followup_records": [{"answer": "private answer"}],
+            "visible_question": "最近睡眠最困扰你的是什么？",
+            "plan_context": {"medical_notes": "private note"},
+        },
+        active_step="personalized_followup",
+    )
+    repository = FakeRuntimeRepository(
+        messages=[current_user],
+        current_message=current_user,
+        workflow_states=[workflow],
+    )
+    backend = CapturingSdkBackend(result=SdkNodeResult(final_text="我们继续。"))
+    skill = default_service_skill_registry().get("birth-prep")
+    working_context_store = FakeWorkingContextStore(
+        state=_working_context_state(service_skill_id="birth-prep", instructions=skill.prompt_block())
+    )
+
+    asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            working_context_store=working_context_store,
+        ).execute(run=run)
+    )
+
+    ongoing_work = _runtime_context(backend.requests[0])["working_context"]["ongoing_work"]
+    assert ongoing_work == [
+        {
+            "name": "孕期计划",
+            "progress": "基础信息已提交，个性化分析已完成 1 轮。",
+            "next_step": "最近睡眠最困扰你的是什么？",
+        }
+    ]
+    assert "private answer" not in str(ongoing_work)
+    assert "private note" not in str(ongoing_work)
 
 
 def test_agent_runtime_executor_injects_only_model_visible_skill_fields() -> None:
@@ -2835,6 +2888,7 @@ class FakeRuntimeRepository:
         current_message: AgentMessage | None,
         run: AgentRun | None = None,
         run_summaries: list[AgentRunSummary] | None = None,
+        workflow_states: list[AgentWorkflowState] | None = None,
     ) -> None:
         self.messages = messages
         self.current_message = current_message
@@ -2846,6 +2900,7 @@ class FakeRuntimeRepository:
         self.tool_call = None
         self.tool_output = None
         self.run_summaries = list(run_summaries or [])
+        self.workflow_states = list(workflow_states or [])
         self.latest_thread_artifact = None
 
     async def get_latest_user_message_for_run(self, *, run_id):
@@ -2988,6 +3043,13 @@ class FakeRuntimeRepository:
         ]
         return summaries[-limit:]
 
+    async def list_active_workflow_states_for_thread(self, *, thread_id, owner_user_id, limit=5):
+        return [
+            workflow
+            for workflow in self.workflow_states
+            if workflow.thread_id == thread_id and workflow.owner_user_id == owner_user_id
+        ][:limit]
+
     async def upsert_run_summary(self, **kwargs):
         for summary in self.run_summaries:
             if summary.run_id == kwargs["run_id"] and summary.summary_type == kwargs["summary_type"]:
@@ -3069,6 +3131,16 @@ class SessionGuardedRuntimeRepository(FakeRuntimeRepository):
             "recent_run_summaries",
             load_recent_run_summaries,
         )
+
+    async def list_active_workflow_states_for_thread(self, *, thread_id, owner_user_id, limit=5):
+        async def load_active_workflows():
+            return await super(SessionGuardedRuntimeRepository, self).list_active_workflow_states_for_thread(
+                thread_id=thread_id,
+                owner_user_id=owner_user_id,
+                limit=limit,
+            )
+
+        return await self.session_guard.run("active_workflows", load_active_workflows)
 
 
 class FakeWorkingContextStore:
