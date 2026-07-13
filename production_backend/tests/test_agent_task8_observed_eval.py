@@ -615,6 +615,33 @@ def test_observed_ibclc_requires_semantic_consent_and_creates_no_support_action(
     _assert_event_types(opened.trace, forbidden={"action.confirmation_required"})
 
 
+def test_observed_ibclc_canonical_offer_opens_on_first_short_confirmation() -> None:
+    scenario = ObservedScenario()
+    handlers = scenario.ibclc_handlers()
+    scenario.run_turn(
+        text="乳头疼，宝宝总是吸不住。",
+        handlers=handlers,
+        final_text="我这里有很多优秀的 IBCLC 可以帮助到你，你需要我帮你推荐吗？",
+    )
+
+    opened = scenario.run_turn(
+        text="好的",
+        handlers=handlers,
+        tool_invocations=(
+            scripted_tool_invocation(
+                "ibclc_consult_card_create",
+                {"reason": "衔乳疼痛", "feeding_context": "宝宝吸不住"},
+            ),
+        ),
+        final_text="IBCLC 咨询入口已经准备好。",
+    )
+
+    _assert_tools(opened.trace, "ibclc_consult_card_create")
+    _assert_artifact_events(opened.trace, "ibclc_consult_card")
+    assert opened.trace.actions == []
+    _assert_event_types(opened.trace, forbidden={"action.confirmation_required"})
+
+
 @dataclass(frozen=True)
 class ObservedTurn:
     execution_result: Any

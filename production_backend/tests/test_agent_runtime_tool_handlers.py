@@ -1515,6 +1515,25 @@ def test_ibclc_card_handler_allows_short_confirmation_after_previous_offer() -> 
     assert result["artifact_type"] == "ibclc_consult_card"
 
 
+def test_ibclc_card_handler_allows_confirmation_after_canonical_cross_clause_offer() -> None:
+    runtime_service = FakeAgentRuntimeService()
+
+    result = asyncio.run(
+        IbclcConsultCardCreateToolHandler(runtime_service=runtime_service)(
+            _context(
+                args={
+                    "reason": "Latch pain",
+                    "trusted_current_user_text": "好的",
+                    "trusted_previous_assistant_text": "我这里有很多优秀的 IBCLC 可以帮助到你，你需要我帮你推荐吗？",
+                }
+            )
+        )
+    )
+
+    assert result["status"] == "created"
+    assert result["artifact_type"] == "ibclc_consult_card"
+
+
 @pytest.mark.parametrize(
     "message",
     [
@@ -1598,6 +1617,9 @@ def test_ibclc_card_handler_accepts_offer_after_negative_context_clause(
         "目前没有必要帮你打开 IBCLC 在线咨询入口。",
         "我不建议现在帮你找 IBCLC，需要我帮你看看其他喂养资料吗？",
         "目前没有必要打开 IBCLC 在线咨询入口，要我继续讲讲含乳姿势吗？",
+        "目前不需要找 IBCLC，你需要我帮你整理喂养记录吗？",
+        "IBCLC 是国际认证哺乳顾问。你需要我帮你整理喂养记录吗？",
+        "IBCLC 可以提供专业支持，你需要我帮你整理喂养记录吗？",
     ],
 )
 def test_ibclc_card_handler_rejects_short_affirmation_after_negated_previous_offer(

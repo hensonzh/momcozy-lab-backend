@@ -2732,6 +2732,7 @@ def _previous_assistant_offered_ibclc(text: str) -> bool:
         "不会推荐",
         "不能推荐",
         "无法推荐",
+        "不需要",
         "不需要我",
         "无需我",
         "不用我",
@@ -2740,13 +2741,28 @@ def _previous_assistant_offered_ibclc(text: str) -> bool:
         "没有必要",
         "没必要",
     )
-    clauses = re.split(r"[。！？!?；;，,\n]+", text)
-    return any(
-        any(token in clause for token in subject_tokens)
-        and any(token in clause for token in offer_tokens)
-        and not any(token in clause for token in negative_offer_tokens)
-        for clause in clauses
-    )
+    sentences = [sentence for sentence in re.split(r"[。！？!?；;\n]+", text) if sentence]
+    cross_clause_offer_tokens = ("帮你推荐", "帮你打开")
+
+    def matches(subject_clause: str, offer_clause: str, *, cross_clause: bool = False) -> bool:
+        expected_offer_tokens = cross_clause_offer_tokens if cross_clause else offer_tokens
+        return (
+            any(token in subject_clause for token in subject_tokens)
+            and any(token in offer_clause for token in expected_offer_tokens)
+            and not any(token in subject_clause for token in negative_offer_tokens)
+            and not any(token in offer_clause for token in negative_offer_tokens)
+        )
+
+    for sentence in sentences:
+        clauses = [clause for clause in re.split(r"[，,]+", sentence) if clause]
+        if any(matches(clause, clause) for clause in clauses):
+            return True
+        if any(
+            matches(subject_clause, offer_clause, cross_clause=True)
+            for subject_clause, offer_clause in zip(clauses, clauses[1:], strict=False)
+        ):
+            return True
+    return False
 
 
 def _short_ibclc_affirmation(text: str) -> bool:
