@@ -51,7 +51,7 @@ from ..agents.cozymate_service_agent.tools import (
 from ..agents.cozymate_service_agent.tools.executor import project_load_service_skill_model_output
 from ..agents.cozymate_service_agent.tools.hospital_bag_flow import (
     HOSPITAL_BAG_WORKFLOW_TYPE,
-    ensure_hospital_bag_cart_link,
+    ensure_hospital_bag_completion_followup,
 )
 from ..agents.cozymate_service_agent.tools.pregnancy_plan_flow import (
     PREGNANCY_PLAN_FINAL_QUESTION,
@@ -565,7 +565,10 @@ class AgentRuntimeExecutor:
             authoritative=bool(authoritative_final_text),
         )
         if not authoritative_final_text and _has_completed_hospital_bag_card(result.tool_calls):
-            linked_final_text = ensure_hospital_bag_cart_link(final_text)
+            linked_final_text = ensure_hospital_bag_completion_followup(
+                final_text,
+                card=_completed_hospital_bag_card(result.tool_calls),
+            )
             if linked_final_text != final_text:
                 await self._publish_text_delta(
                     run=run,
@@ -1640,9 +1643,30 @@ def _has_completed_hospital_bag_card(tool_calls: list[dict[str, Any]]) -> bool:
     completed_statuses = {"card_created", "hospital_bag_card_already_created"}
     return any(
         _text(tool_call, "tool_name") == "hospital_bag_card_create"
-        and _text(_dict(tool_call, "safe_output"), "status") in completed_statuses
+        and _text(_hospital_bag_tool_output(tool_call), "status") in completed_statuses
         for tool_call in tool_calls
     )
+
+
+def _completed_hospital_bag_card(tool_calls: list[dict[str, Any]]) -> dict[str, Any] | None:
+    completed_statuses = {"card_created", "hospital_bag_card_already_created"}
+    for tool_call in reversed(tool_calls):
+        if _text(tool_call, "tool_name") != "hospital_bag_card_create":
+            continue
+        safe_output = _hospital_bag_tool_output(tool_call)
+        if _text(safe_output, "status") not in completed_statuses:
+            continue
+        card = _dict(safe_output, "card")
+        card_json = card.get("card_json") or card.get("cardJson")
+        if isinstance(card_json, dict):
+            return dict(card_json)
+    return None
+
+
+def _hospital_bag_tool_output(tool_call: dict[str, Any]) -> dict[str, Any]:
+    safe_output = _dict(tool_call, "safe_output")
+    payload_summary = _dict(safe_output, "payload_summary")
+    return payload_summary or safe_output
 
 
 def _timings_with_total(timings_ms: dict[str, float], run_started_at: float) -> dict[str, float]:

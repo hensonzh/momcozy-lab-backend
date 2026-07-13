@@ -2284,10 +2284,14 @@ def test_agent_runtime_executor_injects_verified_form_submission_as_non_persiste
 
     attachment = current_user.content["attachments"][0]
     assert result.status == "completed"
-    assert result.final_text == ("待产包清单已生成。\n\n**[打开待产包购物车](/hospital-bag-cart)**")
+    assert result.final_text.startswith("待产包清单已生成。\n\n")
+    assert "我只保留和孕周、喂养、医院确认真正相关的非常规物品" in result.final_text
+    assert "不用一次买完" in result.final_text
+    assert result.final_text.endswith("**[打开待产包购物车](/hospital-bag-cart)**")
+    assert result.final_text.index("不用一次买完") < result.final_text.index("/hospital-bag-cart")
     assert [item["delta"] for item in transient_stream.deltas] == [
         "待产包清单已生成。",
-        "\n\n**[打开待产包购物车](/hospital-bag-cart)**",
+        result.final_text[len("待产包清单已生成。") :],
     ]
     assert repository.tool_call.safe_args == {}
     assert captured_args == {
