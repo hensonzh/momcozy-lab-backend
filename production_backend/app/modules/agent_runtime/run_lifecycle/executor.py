@@ -49,7 +49,10 @@ from ..agents.cozymate_service_agent.tools import (
     default_tool_registry,
 )
 from ..agents.cozymate_service_agent.tools.executor import project_load_service_skill_model_output
-from ..agents.cozymate_service_agent.tools.hospital_bag_flow import HOSPITAL_BAG_WORKFLOW_TYPE
+from ..agents.cozymate_service_agent.tools.hospital_bag_flow import (
+    HOSPITAL_BAG_WORKFLOW_TYPE,
+    ensure_hospital_bag_cart_link,
+)
 from ..agents.cozymate_service_agent.tools.pregnancy_plan_flow import (
     PREGNANCY_PLAN_FINAL_QUESTION,
     PREGNANCY_PLAN_FINAL_QUICK_REPLIES,
@@ -561,6 +564,17 @@ class AgentRuntimeExecutor:
             provider_final_text=provider_final_text,
             authoritative=bool(authoritative_final_text),
         )
+        if not authoritative_final_text and _has_completed_hospital_bag_card(result.tool_calls):
+            linked_final_text = ensure_hospital_bag_cart_link(final_text)
+            if linked_final_text != final_text:
+                await self._publish_text_delta(
+                    run=run,
+                    delta=linked_final_text[len(final_text) :],
+                    event_publisher=self.event_sink,
+                    transient_stream=self.transient_stream,
+                )
+                self._run_text_stream_emitted[run.id] = linked_final_text
+                final_text = linked_final_text
         if not final_text:
             raise ApiError(code="empty_agent_response", message="Agent runtime returned an empty response.", status=502)
         finish_timings_ms = _timings_with_total(turn_context.timings_ms, run_started_at)
@@ -1618,6 +1632,15 @@ def _has_completed_pregnancy_plan_analysis(tool_calls: list[dict[str, Any]]) -> 
     return any(
         _text(tool_call, "tool_name") == "pregnancy.plan_intake.analyze"
         and _text(_dict(tool_call, "safe_output"), "status") == "intake_analyzed"
+        for tool_call in tool_calls
+    )
+
+
+def _has_completed_hospital_bag_card(tool_calls: list[dict[str, Any]]) -> bool:
+    completed_statuses = {"card_created", "hospital_bag_card_already_created"}
+    return any(
+        _text(tool_call, "tool_name") == "hospital_bag_card_create"
+        and _text(_dict(tool_call, "safe_output"), "status") in completed_statuses
         for tool_call in tool_calls
     )
 

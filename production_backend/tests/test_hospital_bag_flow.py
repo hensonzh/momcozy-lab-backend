@@ -1,6 +1,7 @@
 from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.tools.hospital_bag_flow import (
     build_hospital_bag_card_json,
     build_hospital_bag_followup,
+    ensure_hospital_bag_cart_link,
 )
 
 
@@ -10,6 +11,14 @@ def _items(card: dict) -> list[dict]:
 
 def _item(card: dict, label: str) -> dict:
     return next(item for item in _items(card) if item["label"] == label)
+
+
+def test_hospital_bag_cart_link_finalizer_is_append_only_and_idempotent() -> None:
+    link = "**[打开待产包购物车](/hospital-bag-cart)**"
+
+    assert ensure_hospital_bag_cart_link("待产包清单已生成。") == f"待产包清单已生成。\n\n{link}"
+    assert ensure_hospital_bag_cart_link(f"待产包清单已生成。\n\n{link}") == f"待产包清单已生成。\n\n{link}"
+    assert ensure_hospital_bag_cart_link("") == link
 
 
 def test_hospital_bag_card_personalizes_all_legacy_high_impact_inputs() -> None:
