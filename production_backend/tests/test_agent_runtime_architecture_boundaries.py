@@ -1392,6 +1392,44 @@ def test_responses_runner_preserves_multimodal_context_added_after_tool_output(m
     assert isinstance(FakeAsyncOpenAI.calls[1]["input"][-1]["content"], list)
 
 
+def test_responses_runner_preserves_initial_user_image_input(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_openai = types.ModuleType("openai")
+    fake_openai.__spec__ = ModuleSpec("openai", loader=None)
+    fake_openai.AsyncOpenAI = FakeAsyncOpenAI
+    monkeypatch.setitem(sys.modules, "openai", fake_openai)
+    FakeAsyncOpenAI.reset([FakeOpenAIResponse(id="resp_1", output=[], output_text="我看到了图片。")])
+    multimodal_input = {
+        "role": "user",
+        "content": [
+            {"type": "input_text", "text": "请看这张图片"},
+            {
+                "type": "input_image",
+                "image_url": "data:image/png;base64,aW1hZ2U=",
+                "detail": "high",
+            },
+        ],
+    }
+    request = SdkNodeRequest(
+        run_id="run_1",
+        thread_id="thread_1",
+        actor_user_id="user_1",
+        instructions="Describe only visible image content.",
+        model_input=[
+            {"role": "developer", "content": {"runtime_context": {"skills": []}}},
+            multimodal_input,
+        ],
+    )
+
+    result = asyncio.run(OpenAIResponsesRunner(model="gpt-test").run_reasoning(request))
+
+    assert result.final_text == "我看到了图片。"
+    assert FakeAsyncOpenAI.calls[0]["input"] == [
+        {"role": "developer", "content": '{"runtime_context":{"skills":[]}}'},
+        multimodal_input,
+    ]
+    assert isinstance(FakeAsyncOpenAI.calls[0]["input"][-1]["content"], list)
+
+
 def test_sdk_runner_uses_responses_backend_without_deferred_tools(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_openai = types.ModuleType("openai")
     fake_openai.__spec__ = ModuleSpec("openai", loader=None)
@@ -2109,6 +2147,45 @@ def test_sdk_runner_flattens_structured_context_as_stable_json(monkeypatch: pyte
     asyncio.run(OpenAIAgentsSdkRunner(model="gpt-test").run_reasoning(request))
 
     assert FakeAgentsSdkRunner.last_input == 'developer: {"state":{"a":1,"z":2}}\nuser: hello'
+
+
+def test_agents_sdk_runner_preserves_initial_user_image_input(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_agents = types.ModuleType("agents")
+    fake_agents.__spec__ = ModuleSpec("agents", loader=None)
+    fake_agents.Agent = FakeAgentsSdkAgent
+    fake_agents.FunctionTool = FakeAgentsSdkFunctionTool
+    fake_agents.RunConfig = FakeAgentsSdkRunConfig
+    fake_agents.Runner = FakeAgentsSdkRunner
+    monkeypatch.setitem(sys.modules, "agents", fake_agents)
+    multimodal_input = {
+        "role": "user",
+        "content": [
+            {"type": "input_text", "text": "请看这张图片"},
+            {
+                "type": "input_image",
+                "image_url": "data:image/jpeg;base64,aW1hZ2U=",
+                "detail": "auto",
+            },
+        ],
+    }
+    request = SdkNodeRequest(
+        run_id="run_1",
+        thread_id="thread_1",
+        actor_user_id="user_1",
+        instructions="Describe only visible image content.",
+        model_input=[
+            {"role": "developer", "content": {"runtime_context": {"skills": []}}},
+            multimodal_input,
+        ],
+    )
+
+    result = asyncio.run(OpenAIAgentsSdkRunner(model="gpt-test").run_reasoning(request))
+
+    assert result.final_text == "sdk final"
+    assert FakeAgentsSdkRunner.last_input == [
+        {"role": "developer", "content": '{"runtime_context":{"skills":[]}}'},
+        multimodal_input,
+    ]
 
 
 def test_sdk_runner_wraps_application_tool_executor_for_agents_sdk(monkeypatch: pytest.MonkeyPatch) -> None:

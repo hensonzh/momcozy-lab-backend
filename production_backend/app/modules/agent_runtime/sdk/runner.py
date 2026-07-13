@@ -417,14 +417,14 @@ class OpenAIAgentsSdkBackend:
             result = await _run_streamed(
                 runner_cls=runner_cls,
                 agent=agent,
-                model_input=_flatten_model_input(request.model_input),
+                model_input=_agents_sdk_input(request.model_input),
                 run_kwargs=run_kwargs,
                 on_text_delta=request.on_text_delta,
             )
             result.tool_calls.extend(observed_tool_calls)
             return result
 
-        result = await runner_cls.run(agent, _flatten_model_input(request.model_input), **run_kwargs)
+        result = await runner_cls.run(agent, _agents_sdk_input(request.model_input), **run_kwargs)
         final_output = getattr(result, "final_output", "")
         return SdkNodeResult(
             final_text=_sanitize_model_text(str(final_output or "")),
@@ -593,9 +593,12 @@ def _responses_input_items(model_input: list[dict[str, Any]]) -> list[dict[str, 
     for item in model_input:
         role = str(item.get("role") or "user")
         content = item.get("content")
+        item_content: str | list[Any]
         if isinstance(content, str):
             item_content = content
-        elif isinstance(content, dict | list):
+        elif isinstance(content, list):
+            item_content = content
+        elif isinstance(content, dict):
             item_content = json.dumps(content, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
         else:
             item_content = str(content)
@@ -972,11 +975,17 @@ def _flatten_model_input(model_input: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def _agents_sdk_input(model_input: list[dict[str, Any]]) -> str | list[dict[str, Any]]:
+    if any(isinstance(item.get("content"), list) for item in model_input):
+        return _responses_input_items(model_input)
+    return _flatten_model_input(model_input)
+
+
 async def _run_streamed(
     *,
     runner_cls: Any,
     agent: Any,
-    model_input: str,
+    model_input: str | list[dict[str, Any]],
     run_kwargs: dict[str, Any],
     on_text_delta: SdkTextDeltaHandler,
 ) -> SdkNodeResult:
