@@ -127,6 +127,10 @@ class PlansService:
         if idempotency_record is not None and idempotency_record.response_ref:
             return await self._replay_task(owner_user_id=owner_user_id, response_ref=idempotency_record.response_ref)
 
+        await self._lock_task_schedule_dates(
+            owner_user_id=owner_user_id,
+            task_dates=[task_date] if task_date is not None else [],
+        )
         task = await self.repository.create_task(
             owner_user_id=owner_user_id,
             plan_id=plan_id,
@@ -431,6 +435,32 @@ class PlansService:
             if not normalized_updates["title"]:
                 raise ApiError(code="validation_failed", message="title is required.", status=422)
 
+        task_before_update: PlanTask | None = None
+        if "task_date" in normalized_updates or "task_time" in normalized_updates:
+            task_before_update = await self.repository.get_task_for_owner(
+                task_id=task_id,
+                owner_user_id=owner_user_id,
+            )
+            if task_before_update is None:
+                raise ApiError(code="not_found", message="Plan task not found.", status=404)
+            task_date_before_update = task_before_update.task_date
+            next_task_date = normalized_updates.get("task_date", task_date_before_update)
+            await self._lock_task_schedule_dates(
+                owner_user_id=owner_user_id,
+                task_dates=[value for value in (task_date_before_update, next_task_date) if isinstance(value, date)],
+            )
+            locked_loader = getattr(self.repository, "get_task_for_owner_for_update", None)
+            if callable(locked_loader):
+                locked_task = await locked_loader(task_id=task_id, owner_user_id=owner_user_id)
+                if locked_task is None:
+                    raise ApiError(code="not_found", message="Plan task not found.", status=404)
+                if locked_task.task_date != task_date_before_update:
+                    raise ApiError(
+                        code="milk_schedule_conflict",
+                        message="The plan task schedule changed during update. Retry with the latest task.",
+                        status=409,
+                    )
+
         task = await self.repository.update_task(
             task_id=task_id,
             owner_user_id=owner_user_id,
@@ -446,6 +476,13 @@ class PlansService:
             request_id=request_id,
         )
         return task
+
+    async def _lock_task_schedule_dates(self, *, owner_user_id: UUID, task_dates: list[date]) -> None:
+        if not task_dates:
+            return
+        lock_dates = getattr(self.repository, "lock_milk_schedule_dates", None)
+        if callable(lock_dates):
+            await lock_dates(owner_user_id=owner_user_id, task_dates=task_dates)
 
     async def delete_task(self, *, owner_user_id: UUID, task_id: UUID, request_id: str = "") -> None:
         deleted = await self.repository.soft_delete_task(task_id=task_id, owner_user_id=owner_user_id, deleted_at=_utcnow())

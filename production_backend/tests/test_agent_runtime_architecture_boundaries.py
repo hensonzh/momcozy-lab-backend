@@ -566,7 +566,7 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
     assert image_inspect_schema["required"] == ["image_url"]
     assert image_inspect_schema["properties"]["detail"]["enum"] == ["low", "high"]
     assert milk_plan_schema["additionalProperties"] is False
-    assert milk_plan_schema["required"] == ["title", "tasks"]
+    assert milk_plan_schema["required"] == ["title", "direction", "tasks"]
     assert "payload" not in milk_plan_schema["properties"]
     assert milk_plan_schema["properties"]["tasks"]["maxItems"] == 16
     assert milk_plan_schema["properties"]["tasks"]["minItems"] == 1

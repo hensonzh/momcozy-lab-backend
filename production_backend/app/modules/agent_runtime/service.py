@@ -766,6 +766,17 @@ class AgentRuntimeService:
             raise ApiError(code="conflict", message="Agent action cannot be confirmed from its current status.", status=409)
         if _is_expired(action.expires_at):
             return await self._expire_action(owner_user_id=owner_user_id, action=action)
+        decision = self.action_policy.validate(
+            action_type=action.action_type,
+            target_type=action.target_type,
+            side_effect_level=action.side_effect_level,
+        )
+        if edited_apply_payload is not None and not decision.allows_apply_payload_edit:
+            raise ApiError(
+                code="action_payload_edit_not_allowed",
+                message="This agent action must be confirmed without changing its reviewed payload.",
+                status=409,
+            )
         run = await self.get_run(owner_user_id=owner_user_id, run_id=action.run_id)
         if run.status != "waiting_for_confirmation":
             raise ApiError(

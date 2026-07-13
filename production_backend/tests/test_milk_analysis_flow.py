@@ -98,6 +98,8 @@ def test_explicit_maternal_red_flags_block_plan_eligibility_but_negation_does_no
         "没有发热、寒战，乳房有硬块",
         "没有发烧和寒战，有红肿",
         "无发热，但右侧乳房越来越痛",
+        "没有发热，不过寒战",
+        "无发热，但疼痛加重",
     ],
 )
 def test_mixed_negated_and_positive_maternal_red_flags_still_block_plan(red_flags: str) -> None:

@@ -354,7 +354,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
     "plans.milk_plan.propose": {
         "type": "object",
         "additionalProperties": False,
-        "required": ["title", "tasks"],
+        "required": ["title", "direction", "tasks"],
         "properties": {
             "title": {"type": "string", "minLength": 1, "maxLength": 255},
             "summary": {"type": "string", "maxLength": 2000},

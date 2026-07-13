@@ -43,6 +43,7 @@ class MilkPlanCreateActionHandler:
         plan_payload = payload.get("payload")
         if not isinstance(plan_payload, dict):
             plan_payload = {}
+        _validate_milk_plan_lineage(plan_payload)
         try:
             normalized_plan_payload, scheduled_tasks = normalize_milk_plan_payload(plan_payload)
         except MilkPlanScheduleValidationError as exc:
@@ -471,6 +472,17 @@ def _is_expired(expires_at: datetime | None) -> bool:
         return False
     comparable = expires_at if expires_at.tzinfo is not None else expires_at.replace(tzinfo=timezone.utc)
     return comparable <= datetime.now(timezone.utc)
+
+
+def _validate_milk_plan_lineage(payload: dict[str, Any]) -> None:
+    if _text(payload, "direction") not in {"increase", "maintain", "decrease"}:
+        raise PermanentJobError("invalid_milk_analysis_lineage")
+    if not _text(payload, "analysis_context_fingerprint"):
+        raise PermanentJobError("invalid_milk_analysis_lineage")
+    try:
+        UUID(_text(payload, "analysis_workflow_state_id"))
+    except (TypeError, ValueError) as exc:
+        raise PermanentJobError("invalid_milk_analysis_lineage") from exc
 
 
 def _required_uuid(payload: dict[str, Any], key: str, missing_code: str, invalid_code: str) -> UUID:

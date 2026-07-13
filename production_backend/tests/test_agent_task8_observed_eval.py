@@ -389,7 +389,7 @@ def test_observed_milk_red_flags_block_plan_action_and_artifact() -> None:
         "24 小时有 7 片湿尿布",
         "精神不错，吃奶后能安稳",
         "最近体重增长正常",
-        "有发热，右侧乳房红肿而且越来越痛",
+        "没有发热，不过寒战",
         "吸完后仍然很痛",
     ):
         scenario.run_turn(
@@ -580,6 +580,23 @@ def test_observed_ibclc_requires_semantic_consent_and_creates_no_support_action(
     assert blocked.trace.actions == []
     assert scenario.repository.artifacts == []
     _assert_event_types(blocked.trace, forbidden={"artifact.created", "action.confirmation_required"})
+
+    scenario.run_turn(
+        text="我是不是需要 IBCLC？",
+        handlers=handlers,
+        final_text="我不建议现在帮你推荐 IBCLC 哺乳顾问。",
+    )
+    negated_offer = scenario.run_turn(
+        text="好的",
+        handlers=handlers,
+        tool_invocations=(
+            scripted_tool_invocation("ibclc_consult_card_create", {"reason": "衔乳疼痛"}),
+        ),
+        final_text="当前不创建咨询入口。",
+    )
+    _assert_tools(negated_offer.trace, "ibclc_consult_card_create")
+    assert scenario.repository.artifacts == []
+    _assert_event_types(negated_offer.trace, forbidden={"artifact.created", "action.confirmation_required"})
 
     opened = scenario.run_turn(
         text="请帮我打开 IBCLC 咨询入口。",

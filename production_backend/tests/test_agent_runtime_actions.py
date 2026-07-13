@@ -92,6 +92,39 @@ def test_duplicate_confirmation_is_idempotent_and_does_not_requeue_twice() -> No
     assert [event.event_type for event in repository.events].count("run.queued") == 2  # initial run plus resume
 
 
+@pytest.mark.parametrize("action_type", ["plans.milk_plan.create", "plans.milk_schedule.reschedule"])
+def test_milk_actions_reject_confirmation_payload_edits(action_type: str) -> None:
+    owner_user_id = uuid4()
+    repository = FakeActionRepository()
+    service = AgentRuntimeService(repository=repository)
+    run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Create milk plan"))
+    original_payload = {"title": "稳奶计划", "payload": {"direction": "maintain"}}
+    action = asyncio.run(
+        service.propose_action(
+            owner_user_id=owner_user_id,
+            run_id=run.id,
+            action_type=action_type,
+            target_type="plan",
+            apply_payload=original_payload,
+        )
+    )
+    run.status = "waiting_for_confirmation"
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            service.confirm_action(
+                owner_user_id=owner_user_id,
+                action_id=action.id,
+                edited_apply_payload={"title": "追奶计划", "payload": {"direction": "increase"}},
+            )
+        )
+
+    assert exc_info.value.code == "action_payload_edit_not_allowed"
+    assert action.status == "confirmation_required"
+    assert action.apply_payload == original_payload
+    assert run.status == "waiting_for_confirmation"
+
+
 def test_cross_owner_cannot_read_or_confirm_action() -> None:
     owner_user_id = uuid4()
     repository = FakeActionRepository()

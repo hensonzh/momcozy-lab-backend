@@ -136,6 +136,58 @@ def test_reschedule_service_ignores_another_owners_task_in_the_target_slot() -> 
     assert repository.update_calls == [(tasks[0].id, "07:30")]
 
 
+def test_create_task_locks_the_owner_and_target_date_before_insert() -> None:
+    service, repository, plan, _ = _fixture()
+
+    created = asyncio.run(
+        service.create_task(
+            owner_user_id=plan.owner_user_id,
+            plan_id=plan.id,
+            task_date=date(2026, 7, 15),
+            task_time="09:00",
+            title="吸奶",
+        )
+    )
+
+    assert created.task_date == date(2026, 7, 15)
+    assert repository.lock_calls[-1] == (plan.owner_user_id, (date(2026, 7, 15),))
+
+
+def test_update_task_locks_both_old_and_new_dates_before_moving() -> None:
+    service, repository, plan, tasks = _fixture()
+
+    updated = asyncio.run(
+        service.update_task(
+            owner_user_id=plan.owner_user_id,
+            task_id=tasks[0].id,
+            updates={"task_date": date(2026, 7, 15), "task_time": "09:00"},
+        )
+    )
+
+    assert updated.task_date == date(2026, 7, 15)
+    assert repository.lock_calls[-1] == (
+        plan.owner_user_id,
+        (date(2026, 7, 14), date(2026, 7, 15)),
+    )
+
+
+def test_update_task_fails_closed_if_the_date_changed_before_row_lock() -> None:
+    service, repository, plan, tasks = _fixture()
+    repository.locked_task_date_override = date(2026, 7, 16)
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            service.update_task(
+                owner_user_id=plan.owner_user_id,
+                task_id=tasks[0].id,
+                updates={"task_date": date(2026, 7, 15), "task_time": "09:00"},
+            )
+        )
+
+    assert exc_info.value.code == "milk_schedule_conflict"
+    assert repository.update_calls == []
+
+
 def test_reschedule_service_hides_cross_owner_task_and_does_not_write() -> None:
     service, repository, plan, tasks = _fixture()
 
@@ -158,6 +210,8 @@ class MemoryPlansRepository:
         self.tasks = {task.id: task for task in tasks}
         self.update_calls: list[tuple[object, str]] = []
         self.locked_dates: list[date] = []
+        self.lock_calls: list[tuple[object, tuple[date, ...]]] = []
+        self.locked_task_date_override: date | None = None
 
     async def get_plan_for_owner(self, *, plan_id, owner_user_id):
         if plan_id == self.plan.id and owner_user_id == self.plan.owner_user_id:
@@ -167,6 +221,12 @@ class MemoryPlansRepository:
     async def get_task_for_owner(self, *, task_id, owner_user_id):
         task = self.tasks.get(task_id)
         return task if task is not None and task.owner_user_id == owner_user_id else None
+
+    async def get_task_for_owner_for_update(self, *, task_id, owner_user_id):
+        task = await self.get_task_for_owner(task_id=task_id, owner_user_id=owner_user_id)
+        if task is not None and self.locked_task_date_override is not None:
+            task.task_date = self.locked_task_date_override
+        return task
 
     async def list_tasks_for_milk_reschedule_for_update(self, *, owner_user_id, task_ids, task_dates):
         dates = set(task_dates)
@@ -185,6 +245,12 @@ class MemoryPlansRepository:
     async def lock_milk_schedule_dates(self, *, owner_user_id, task_dates):
         assert owner_user_id == self.plan.owner_user_id
         self.locked_dates = sorted(set(task_dates))
+        self.lock_calls.append((owner_user_id, tuple(self.locked_dates)))
+
+    async def create_task(self, **kwargs):
+        task = PlanTask(id=uuid4(), status="pending", **kwargs)
+        self.tasks[task.id] = task
+        return task
 
     async def update_task(self, *, task_id, owner_user_id, updates):
         task = await self.get_task_for_owner(task_id=task_id, owner_user_id=owner_user_id)

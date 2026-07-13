@@ -1409,6 +1409,45 @@ def test_milk_plan_proposal_rejects_an_expired_analysis_before_creating_an_actio
     assert runtime_service.calls == []
 
 
+def test_milk_plan_proposal_requires_the_assessment_direction() -> None:
+    actor = _user()
+    runtime_service = FakeAgentRuntimeService()
+    context = _context(
+        actor=actor,
+        args={
+            "title": "稳奶计划",
+            "days": 1,
+            "tasks": [{"title": "吸奶", "time": "08:00", "task_type": "pumping"}],
+        },
+    )
+    analysis_context = {"records_snapshot": {"status": "normal"}, "answers": {}}
+    runtime_service.workflow_state = AgentWorkflowState(
+        id=uuid4(),
+        thread_id=context.thread_id,
+        owner_user_id=actor.user_id,
+        run_id=context.run_id,
+        workflow_type="milk_analysis",
+        status="ready",
+        schema_version="milk_analysis.v1",
+        state={
+            "phase": "assessment_complete",
+            "assessment": {
+                "analysis_context": analysis_context,
+                "analysis_context_fingerprint": milk_analysis_context_fingerprint(analysis_context),
+                "valid_until": (datetime.now(timezone.utc) + timedelta(minutes=20)).isoformat(),
+                "plan_decision": {"can_start_plan": True, "recommended_direction": "maintain"},
+            },
+        },
+        active_step="assessment_complete",
+    )
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(MilkPlanProposeToolHandler(runtime_service=runtime_service)(context))
+
+    assert exc_info.value.code == "milk_plan_direction_required"
+    assert runtime_service.calls == []
+
+
 def test_milk_schedule_proposal_is_owner_scoped_and_contains_freshness_guards() -> None:
     actor = _user()
     runtime_service = FakeAgentRuntimeService()
@@ -1559,6 +1598,8 @@ def test_ibclc_card_handler_accepts_legacy_short_affirmation_after_previous_offe
         "目前不需要我帮你打开 IBCLC 在线咨询入口。",
         "现在无需我帮你推荐 IBCLC 哺乳顾问。",
         "暂时不用我帮你联系泌乳顾问。",
+        "我不建议现在帮你推荐 IBCLC 哺乳顾问。",
+        "目前没有必要帮你打开 IBCLC 在线咨询入口。",
     ],
 )
 def test_ibclc_card_handler_rejects_short_affirmation_after_negated_previous_offer(

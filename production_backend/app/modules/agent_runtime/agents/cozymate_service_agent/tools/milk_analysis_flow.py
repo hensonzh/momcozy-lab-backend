@@ -206,7 +206,14 @@ def _has_maternal_red_flags(answer: str) -> bool:
     if not text:
         return True
     negative_list_open = False
-    for clause in re.split(r"但是|不过|可是|然而|却|但|[，,。；;！？!?]", text):
+    contrast_tokens = {"但是", "不过", "可是", "然而", "却", "但"}
+    clause_boundaries = contrast_tokens | {"。", "；", ";", "！", "？", "!", "?"}
+    for clause in re.split(r"(但是|不过|可是|然而|却|但|[，,。；;！？!?])", text):
+        if clause in clause_boundaries:
+            negative_list_open = False
+            continue
+        if clause in {"，", ","}:
+            continue
         if not _positive_red_flag_text(clause):
             continue
         if _red_flag_clause_is_negated(clause):

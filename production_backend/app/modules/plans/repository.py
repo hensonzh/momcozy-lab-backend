@@ -127,6 +127,7 @@ class PlansRepository:
                 PlanTask.deleted_at.is_(None),
             )
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
         return cast(PlanTask | None, await self.session.scalar(statement))
 
@@ -152,8 +153,7 @@ class PlansRepository:
 
     async def lock_milk_schedule_dates(self, *, owner_user_id: UUID, task_dates: list[date]) -> None:
         for task_date in sorted(set(task_dates)):
-            digest = hashlib.sha256(f"{owner_user_id}:{task_date.isoformat()}".encode()).digest()
-            lock_key = int.from_bytes(digest[:8], byteorder="big", signed=True)
+            lock_key = _schedule_advisory_lock_key(owner_user_id=owner_user_id, task_date=task_date)
             await self.session.execute(select(func.pg_advisory_xact_lock(lock_key)))
 
     async def list_tasks(
@@ -252,3 +252,8 @@ class PlansRepository:
         task.deleted_at = deleted_at
         await self.session.flush()
         return task
+
+
+def _schedule_advisory_lock_key(*, owner_user_id: UUID, task_date: date) -> int:
+    digest = hashlib.sha256(f"plan-task-schedule:{owner_user_id}:{task_date.isoformat()}".encode()).digest()
+    return int.from_bytes(digest[:8], byteorder="big", signed=True)

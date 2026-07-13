@@ -12,6 +12,7 @@ class AgentActionPolicyDecision:
     target_type: str
     side_effect_level: str
     requires_confirmation: bool
+    allows_apply_payload_edit: bool
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,7 @@ class AgentActionPolicyRule:
     target_type: str
     side_effect_level: str
     requires_confirmation: bool = True
+    allows_apply_payload_edit: bool = True
 
 
 DEFAULT_AGENT_ACTION_RULES: Mapping[str, AgentActionPolicyRule] = {
@@ -82,12 +84,14 @@ DEFAULT_AGENT_ACTION_RULES: Mapping[str, AgentActionPolicyRule] = {
         target_type="plan",
         side_effect_level="medium",
         requires_confirmation=True,
+        allows_apply_payload_edit=False,
     ),
     "plans.milk_schedule.reschedule": AgentActionPolicyRule(
         action_type="plans.milk_schedule.reschedule",
         target_type="plan",
         side_effect_level="medium",
         requires_confirmation=True,
+        allows_apply_payload_edit=False,
     ),
     "pregnancy.plan.create": AgentActionPolicyRule(
         action_type="pregnancy.plan.create",
@@ -162,6 +166,7 @@ class AgentActionPolicy:
             target_type=rule.target_type,
             side_effect_level=rule.side_effect_level,
             requires_confirmation=rule.requires_confirmation,
+            allows_apply_payload_edit=rule.allows_apply_payload_edit,
         )
 
 

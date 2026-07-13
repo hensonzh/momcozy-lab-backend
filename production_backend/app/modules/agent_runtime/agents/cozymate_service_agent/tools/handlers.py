@@ -1847,6 +1847,12 @@ class MilkPlanProposeToolHandler:
             raise ApiError(code="milk_plan_not_eligible", message="The latest milk analysis does not allow a plan.", status=409)
         requested_direction = _text(context.args, "direction")
         recommended_direction = _text(decision, "recommended_direction")
+        if not requested_direction:
+            raise ApiError(
+                code="milk_plan_direction_required",
+                message="Use the recommended direction from the latest milk analysis.",
+                status=409,
+            )
         if requested_direction and requested_direction != recommended_direction:
             raise ApiError(
                 code="milk_plan_direction_mismatch",
@@ -2732,6 +2738,9 @@ def _previous_assistant_offered_ibclc(text: str) -> bool:
             "无需我",
             "不用我",
             "不必我",
+            "不建议",
+            "没有必要",
+            "没必要",
         )
     ):
         return False

@@ -15,6 +15,13 @@ from production_backend.app.modules.plans.agent_actions import (
 from production_backend.app.modules.plans.models import Plan, PlanTask
 
 
+MILK_ANALYSIS_LINEAGE = {
+    "direction": "maintain",
+    "analysis_context_fingerprint": "fingerprint",
+    "analysis_workflow_state_id": "00000000-0000-4000-8000-000000000001",
+}
+
+
 def test_milk_plan_event_is_persisted_once_and_applied_replay_is_side_effect_free() -> None:
     repository = MilkActionRepository()
     plan_service = TransactionalMilkPlanService(repository=repository)
@@ -22,6 +29,7 @@ def test_milk_plan_event_is_persisted_once_and_applied_replay_is_side_effect_fre
         "title": "Private milk plan",
         "summary": "private supply and health context",
         "payload": {
+            **MILK_ANALYSIS_LINEAGE,
             "start_date": "2026-07-04",
             "days": 2,
             "tasks": [{"title": "private task", "time": "08:00", "task_type": "pumping"}],
@@ -59,6 +67,7 @@ def test_milk_plan_event_failure_rolls_back_plan_and_success_events_before_durab
     repository.action.apply_payload = {
         "title": "Milk plan",
         "payload": {
+            **MILK_ANALYSIS_LINEAGE,
             "start_date": "2026-07-04",
             "days": 2,
             "tasks": [{"title": "吸奶", "time": "08:00", "task_type": "pumping"}],
@@ -83,6 +92,7 @@ def test_milk_plan_task_failure_rolls_back_the_plan_and_all_earlier_tasks() -> N
     repository.action.apply_payload = {
         "title": "Milk plan",
         "payload": {
+            **MILK_ANALYSIS_LINEAGE,
             "start_date": "2026-07-04",
             "days": 1,
             "tasks": [

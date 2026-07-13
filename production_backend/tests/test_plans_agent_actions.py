@@ -35,6 +35,7 @@ from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.
 
 PRIVATE_PREGNANCY_PLAN_CONTENT = "private thyroid medication and birth plan card"
 PREGNANCY_PLAN_CHANGED_EVENT = "pregnancy_plan.changed"
+MILK_ANALYSIS_WORKFLOW_STATE_ID = "00000000-0000-4000-8000-000000000001"
 
 
 def test_milk_plan_create_action_handler_creates_plan_through_service() -> None:
@@ -44,6 +45,9 @@ def test_milk_plan_create_action_handler_creates_plan_through_service() -> None:
             "title": "Increase pumping consistency",
             "summary": "Pump after morning and evening feeds.",
             "payload": {
+                "direction": "maintain",
+                "analysis_context_fingerprint": "fingerprint",
+                "analysis_workflow_state_id": MILK_ANALYSIS_WORKFLOW_STATE_ID,
                 "start_date": "2026-07-13",
                 "days": 2,
                 "tasks": [{"title": "Morning pump", "time": "08:00", "task_type": "pumping"}],
@@ -100,6 +104,9 @@ def test_milk_plan_changed_event_contains_only_bounded_dates_and_no_private_plan
             "title": "Private milk plan title",
             "summary": private_summary,
             "payload": {
+                "direction": "maintain",
+                "analysis_context_fingerprint": "fingerprint",
+                "analysis_workflow_state_id": MILK_ANALYSIS_WORKFLOW_STATE_ID,
                 "start_date": "2026-07-04",
                 "days": 30,
                 "tasks": [
@@ -137,11 +144,53 @@ def test_milk_plan_create_action_handler_rejects_a_plan_that_cannot_reach_schedu
     with pytest.raises(PermanentJobError) as exc_info:
         asyncio.run(
             MilkPlanCreateActionHandler(service=FakePlansService())(
-                _action(apply_payload={"title": "Plan without tasks", "payload": {"days": 7}})
+                _action(
+                    apply_payload={
+                        "title": "Plan without tasks",
+                        "payload": {
+                            "direction": "maintain",
+                            "analysis_context_fingerprint": "fingerprint",
+                            "analysis_workflow_state_id": MILK_ANALYSIS_WORKFLOW_STATE_ID,
+                            "days": 7,
+                        },
+                    }
+                )
             )
         )
 
     assert exc_info.value.code == "invalid_milk_plan_schedule"
+
+
+@pytest.mark.parametrize(
+    "plan_payload",
+    [
+        {
+            "direction": "maintain",
+            "days": 1,
+            "tasks": [{"title": "Morning pump", "time": "08:00", "task_type": "pumping"}],
+        },
+        {
+            "analysis_context_fingerprint": "fingerprint",
+            "days": 1,
+            "tasks": [{"title": "Morning pump", "time": "08:00", "task_type": "pumping"}],
+        },
+        {
+            "direction": "maintain",
+            "analysis_context_fingerprint": "fingerprint",
+            "days": 1,
+            "tasks": [{"title": "Morning pump", "time": "08:00", "task_type": "pumping"}],
+        },
+    ],
+)
+def test_milk_plan_create_action_handler_rechecks_analysis_lineage(plan_payload: dict) -> None:
+    service = FakePlansService()
+    action = _action(apply_payload={"title": "Milk plan", "payload": plan_payload})
+
+    with pytest.raises(PermanentJobError) as exc_info:
+        asyncio.run(MilkPlanCreateActionHandler(service=service)(action))
+
+    assert exc_info.value.code == "invalid_milk_analysis_lineage"
+    assert service.create_plan_kwargs == {}
 
 
 def test_milk_plan_create_action_handler_rejects_an_expired_analysis_before_side_effects() -> None:
