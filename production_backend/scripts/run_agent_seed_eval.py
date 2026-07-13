@@ -30,7 +30,6 @@ def run_seed_eval(
     suite: str | None = None,
     output_path: Path | None = None,
     junit_output_path: Path | None = None,
-    fail_on_missing_trace: bool = False,
 ) -> dict[str, Any]:
     cases = load_product_agent_eval_seed_cases(cases_path)
     if suite:
@@ -40,10 +39,10 @@ def run_seed_eval(
     results: list[dict[str, Any]] = []
     for case in cases:
         trace = traces.get(_case_key(case))
-        if trace is None and fail_on_missing_trace:
+        if trace is None:
             result = _missing_trace_result(case)
         else:
-            result = engine.evaluate(case=case, trace=trace or _synthetic_expected_trace(case))
+            result = engine.evaluate(case=case, trace=trace)
         results.append(_result_payload(result))
 
     report = {
@@ -67,7 +66,6 @@ def main() -> None:
     parser.add_argument("--suite", default=None)
     parser.add_argument("--output", type=Path, default=None)
     parser.add_argument("--junit-output", type=Path, default=None)
-    parser.add_argument("--fail-on-missing-trace", action="store_true")
     args = parser.parse_args()
 
     report = run_seed_eval(
@@ -76,7 +74,6 @@ def main() -> None:
         suite=args.suite,
         output_path=args.output,
         junit_output_path=args.junit_output,
-        fail_on_missing_trace=args.fail_on_missing_trace,
     )
     if args.output is None:
         print(json.dumps(report, indent=2, sort_keys=True))
@@ -87,6 +84,8 @@ def _load_trace_fixtures(path: Path | None) -> dict[tuple[str, str], AgentEvalTr
     if path is None:
         return {}
     payload = json.loads(path.read_text())
+    if not isinstance(payload, dict) or payload.get("schema_version") != "agent_eval_observed_trace.v1":
+        raise ValueError("Trace fixtures must use schema_version agent_eval_observed_trace.v1.")
     items = payload.get("traces") if isinstance(payload, dict) else payload
     if not isinstance(items, list):
         raise ValueError("Trace fixtures must be a list or an object with a traces list.")
@@ -96,10 +95,21 @@ def _load_trace_fixtures(path: Path | None) -> dict[tuple[str, str], AgentEvalTr
             raise ValueError(f"Trace fixture {index} must be an object.")
         suite = str(item.get("suite") or "").strip()
         name = str(item.get("name") or "").strip()
+        provenance = item.get("provenance")
         trace_payload = item.get("trace")
         if not suite or not name or not isinstance(trace_payload, dict):
             raise ValueError(f"Trace fixture {index} must include suite, name, and trace object.")
-        traces[(suite, name)] = _trace_from_payload(trace_payload)
+        if not isinstance(provenance, dict):
+            raise ValueError(f"Trace fixture {index} must include provenance.")
+        capture_mode = str(provenance.get("capture_mode") or "").strip()
+        if capture_mode not in {"runtime_replay", "provider_live"}:
+            raise ValueError(f"Trace fixture {index} capture_mode must be runtime_replay or provider_live.")
+        if not str(provenance.get("run_id") or "").strip():
+            raise ValueError(f"Trace fixture {index} provenance must include run_id.")
+        key = (suite, name)
+        if key in traces:
+            raise ValueError(f"Trace fixture {index} duplicates {suite}/{name}.")
+        traces[key] = _trace_from_payload(trace_payload)
     return traces
 
 
@@ -111,30 +121,6 @@ def _trace_from_payload(payload: dict[str, Any]) -> AgentEvalTrace:
         safety_decision=str(payload.get("safety_decision") or ""),
         final_text=str(payload.get("final_text") or ""),
         service_skill_id=str(payload.get("service_skill_id") or ""),
-    )
-
-
-def _synthetic_expected_trace(case: dict[str, Any]) -> AgentEvalTrace:
-    expected_tools = [
-        {
-            "tool_name": _contract(tool_call),
-            "status": "completed",
-            "safe_args": dict(tool_call.get("args_subset") or {}) if isinstance(tool_call, dict) else {},
-        }
-        for tool_call in case.get("expected_tool_calls", [])
-    ]
-    raw_behavior = case.get("expected_behavior")
-    behavior = raw_behavior if isinstance(raw_behavior, dict) else {}
-    requires_confirmation = bool(behavior.get("requires_confirmation_before_write"))
-    events = [{"type": "action.confirmation_required"}] if requires_confirmation and expected_tools else []
-    actions = [{"status": "confirmation_required"}] if events else []
-    return AgentEvalTrace(
-        tool_calls=expected_tools,
-        events=events,
-        actions=actions,
-        safety_decision=str(case.get("expected_safety_decision") or ""),
-        final_text="Synthetic final response" if behavior.get("requires_final_response_after_tools") else "",
-        service_skill_id=str(behavior.get("service_skill_id") or ""),
     )
 
 
@@ -197,12 +183,6 @@ def _write_junit_report(*, report: dict[str, Any], output_path: Path) -> None:
 
 def _case_key(case: dict[str, Any]) -> tuple[str, str]:
     return str(case.get("suite") or ""), str(case.get("name") or "")
-
-
-def _contract(tool_call: Any) -> str:
-    if not isinstance(tool_call, dict):
-        return ""
-    return str(tool_call.get("contract") or tool_call.get("tool_name") or "").strip()
 
 
 def _list_of_dicts(value: Any) -> list[dict[str, Any]]:
