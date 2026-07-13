@@ -10,6 +10,7 @@ class ContextProjection:
     selected_conversation_history: list[dict[str, Any]] = field(default_factory=list)
     user_context: dict[str, Any] = field(default_factory=dict)
     memory_projection: list[dict[str, Any]] = field(default_factory=list)
+    workflow_context: list[dict[str, Any]] = field(default_factory=list)
     working_context: dict[str, Any] = field(
         default_factory=lambda: {
             "skills": [],
@@ -29,6 +30,7 @@ class ModelInputBuilder:
                     "runtime_context": {
                         "user_context": projection.user_context,
                         "memory": projection.memory_projection,
+                        "workflow_context": projection.workflow_context,
                         "working_context": projection.working_context,
                     }
                 },

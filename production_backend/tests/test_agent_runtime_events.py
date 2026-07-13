@@ -43,7 +43,7 @@ def test_agent_event_sink_batches_related_events_into_one_commit() -> None:
             thread_id=uuid4(),
             run_id=run_id,
             events=(
-                ("tool.completed", {"tool_name": "pregnancy_diary.entry.create"}),
+                ("tool.completed", {"tool_name": "pregnancy_diary.manage"}),
                 ("pregnancy_diary.changed", {"operation": "created"}),
             ),
         )
@@ -73,7 +73,7 @@ def test_agent_event_sink_can_stage_batch_inside_caller_savepoint_before_commit(
             thread_id=uuid4(),
             run_id=run_id,
             events=(
-                ("tool.completed", {"tool_name": "pregnancy_diary.entry.create"}),
+                ("tool.completed", {"tool_name": "pregnancy_diary.manage"}),
                 ("pregnancy_diary.changed", {"operation": "created"}),
             ),
         )

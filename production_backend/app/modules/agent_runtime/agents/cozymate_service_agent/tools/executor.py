@@ -67,12 +67,8 @@ ToolHandler = Callable[
     Awaitable[ToolHandlerResult | dict[str, Any]] | ToolHandlerResult | dict[str, Any],
 ]
 DEFERRED_AGENT_EVENTS_KEY = "_deferred_agent_events"
-_PREGNANCY_DIARY_WRITE_TOOLS = frozenset(
-    {
-        "pregnancy_diary.entry.create",
-        "pregnancy_diary.entry.update",
-    }
-)
+_PREGNANCY_DIARY_TOOL = "pregnancy_diary.manage"
+_PREGNANCY_DIARY_WRITE_ACTIONS = frozenset({"write", "update"})
 _PREGNANCY_DIARY_PRIVATE_FIELDS = frozenset(
     {
         "gestational_week",
@@ -153,6 +149,7 @@ class ToolExecutor:
             run = await self.repository.get_run(run_id=run_id)
             if run is None:
                 raise ApiError(code="not_found", message="Agent run not found.", status=404)
+            read_or_write = _effective_read_or_write(tool_name=tool_name, args=args, default=contract.read_or_write)
 
             tool_call = await self.repository.start_tool_call(
                 run_id=run_id,
@@ -166,14 +163,14 @@ class ToolExecutor:
                 "tool_call_id": str(tool_call.id),
                 "tool_name": tool_name,
                 "call_id": call_id,
-                "label": _tool_event_label(tool_name),
+                "label": _tool_event_label(tool_name, args),
                 "safe_args": _safe_tool_args(tool_name=tool_name, args=args),
             }
             started_payload = with_tool_event_semantic(
                 started_payload,
                 event_type="tool.started",
                 tool_name=tool_name,
-                read_or_write=contract.read_or_write,
+                read_or_write=read_or_write,
                 requires_confirmation=contract.requires_confirmation,
             )
             await self._publish_optimistic_tool_event(
@@ -234,7 +231,7 @@ class ToolExecutor:
                 "tool_output_id": str(output.id),
                 "tool_name": completed.tool_name,
                 "call_id": completed.call_id,
-                "label": _tool_event_label(completed.tool_name),
+                "label": _tool_event_label(completed.tool_name, output_payload),
                 "safe_output": externalized_output.inline_payload,
             }
             completed_payload = with_tool_event_semantic(
@@ -242,7 +239,7 @@ class ToolExecutor:
                 event_type="tool.completed",
                 tool_name=completed.tool_name,
                 safe_output=externalized_output.inline_payload,
-                read_or_write=contract.read_or_write,
+                read_or_write=read_or_write,
                 requires_confirmation=contract.requires_confirmation,
             )
             await self._publish_optimistic_tool_event(
@@ -452,7 +449,7 @@ class ToolExecutor:
             "tool_name": tool_call.tool_name,
             "call_id": tool_call.call_id,
             "error_code": error_code,
-            "label": _tool_event_label(tool_call.tool_name),
+            "label": _tool_event_label(tool_call.tool_name, tool_call.safe_args),
         }
         try:
             contract = self.registry.get(tool_call.tool_name)
@@ -460,7 +457,11 @@ class ToolExecutor:
                 payload,
                 event_type="tool.failed",
                 tool_name=tool_call.tool_name,
-                read_or_write=contract.read_or_write,
+                read_or_write=_effective_read_or_write(
+                    tool_name=tool_call.tool_name,
+                    args=tool_call.safe_args,
+                    default=contract.read_or_write,
+                ),
                 requires_confirmation=contract.requires_confirmation,
             )
         except ApiError:
@@ -637,10 +638,10 @@ def _safe_payload(value: Any) -> Any:
 
 
 def _safe_tool_args(*, tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
-    if tool_name not in _PREGNANCY_DIARY_WRITE_TOOLS:
+    if tool_name != _PREGNANCY_DIARY_TOOL or str(args.get("action") or "").strip() not in _PREGNANCY_DIARY_WRITE_ACTIONS:
         return _safe_payload(args)
     safe_args: dict[str, Any] = {}
-    for key in ("entry_date", "content_mode"):
+    for key in ("action", "entry_date"):
         if key in args:
             safe_args[key] = _safe_payload(args[key])
     safe_args["provided_field_count"] = sum(1 for key in args if key in _PREGNANCY_DIARY_PRIVATE_FIELDS)
@@ -670,7 +671,7 @@ def _model_tool_output(
 ) -> dict[str, Any]:
     if tool_name == "load_service_skill":
         return project_load_service_skill_model_output(output)
-    if tool_name == "pregnancy_diary.entries.read":
+    if tool_name == _PREGNANCY_DIARY_TOOL:
         return _diary_model_output(output)
     return safe_output
 
@@ -771,7 +772,22 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _tool_event_label(tool_name: str) -> str:
+def _effective_read_or_write(*, tool_name: str, args: dict[str, Any], default: str) -> str:
+    if tool_name == _PREGNANCY_DIARY_TOOL and str(args.get("action") or "").strip() in {"read", "list"}:
+        return "read"
+    return default
+
+
+def _tool_event_label(tool_name: str, payload: dict[str, Any] | None = None) -> str:
+    if tool_name == _PREGNANCY_DIARY_TOOL:
+        action = str((payload or {}).get("action") or "").strip()
+        return {
+            "read": "孕期日记",
+            "list": "孕期日记",
+            "write": "记录孕期日记",
+            "update": "更新孕期日记",
+            "delete": "删除孕期日记",
+        }.get(action, "孕期日记")
     return {
         "load_service_skill": "加载服务技能",
         "profile.read": "个人资料",
@@ -789,10 +805,6 @@ def _tool_event_label(tool_name: str) -> str:
         "pregnancy.plan_intake.start": "孕期计划信息表",
         "pregnancy.plan_intake.analyze": "孕期计划信息分析",
         "pregnancy.plan.propose": "孕期计划草稿",
-        "pregnancy_diary.entries.read": "孕期日记",
-        "pregnancy_diary.entry.create": "记录孕期日记",
-        "pregnancy_diary.entry.update": "更新孕期日记",
-        "pregnancy_diary.entry.delete": "删除孕期日记",
         "devices.pump_status.read": "设备状态",
         "devices.guidance.read": "设备指导资料",
         "devices.unboxing.advance": "设备开箱步骤",

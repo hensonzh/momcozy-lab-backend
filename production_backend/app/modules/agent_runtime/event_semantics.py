@@ -302,26 +302,6 @@ _TOOL_COPY: dict[str, dict[str, str]] = {
         "started": "我先看看孕期计划上下文～",
         "completed": "我把孕期计划上下文整理好啦",
     },
-    "pregnancy_diary.entries.read": {
-        "phase": "reading",
-        "started": "我先看看孕期日记～",
-        "completed": "我把孕期日记看好啦",
-    },
-    "pregnancy_diary.entry.create": {
-        "phase": "saving",
-        "started": "我先帮你记录这篇孕期日记～",
-        "completed": "我已经保存好啦",
-    },
-    "pregnancy_diary.entry.update": {
-        "phase": "saving",
-        "started": "我先帮你更新这篇孕期日记～",
-        "completed": "我已经更新好啦",
-    },
-    "pregnancy_diary.entry.delete": {
-        "phase": "saving",
-        "started": "我正在删除这篇孕期日记～",
-        "completed": "这篇孕期日记已经删除啦",
-    },
     "devices.pump_status.read": {
         "phase": "reading",
         "started": "我先看看设备状态～",

@@ -45,7 +45,7 @@ def test_diary_service_lists_and_deletes_entries() -> None:
     assert audit_service.record_kwargs["action"] == "pregnancy_diary.entry.delete"
 
 
-def test_diary_service_appends_content_under_repository_lock() -> None:
+def test_diary_service_replaces_content_and_preserves_unmodified_fields() -> None:
     owner_user_id = uuid4()
     entry = _entry(owner_user_id=owner_user_id)
     entry.content = "Existing fact"
@@ -56,19 +56,18 @@ def test_diary_service_appends_content_under_repository_lock() -> None:
         service.update_entry(
             owner_user_id=owner_user_id,
             entry_date=entry.entry_date,
-            values={"content": "New fact"},
-            content_mode="append",
+            values={"content": "Existing fact rewritten together with the new fact"},
         )
     )
 
-    assert updated.content == "Existing fact\nNew fact"
-    assert repository.update_content_mode == "append"
+    assert updated.content == "Existing fact rewritten together with the new fact"
+    assert updated.mood == "calm"
 
 
-def test_diary_service_append_is_idempotent_for_replayed_suffix() -> None:
+def test_diary_service_full_replacement_is_idempotent_for_identical_content() -> None:
     owner_user_id = uuid4()
     entry = _entry(owner_user_id=owner_user_id)
-    entry.content = "Existing fact\nNew fact"
+    entry.content = "Existing fact rewritten together with the new fact"
     repository = FakeDiaryRepository(entry=entry)
     audit_service = FakeAuditService()
     service = DiaryService(repository=repository, audit_service=audit_service)
@@ -77,12 +76,11 @@ def test_diary_service_append_is_idempotent_for_replayed_suffix() -> None:
         service.update_entry_with_status(
             owner_user_id=owner_user_id,
             entry_date=entry.entry_date,
-            values={"content": "New fact"},
-            content_mode="append",
+            values={"content": "Existing fact rewritten together with the new fact"},
         )
     )
 
-    assert mutation.entry.content == "Existing fact\nNew fact"
+    assert mutation.entry.content == "Existing fact rewritten together with the new fact"
     assert mutation.changed is False
     assert audit_service.record_kwargs == {}
 
@@ -190,7 +188,6 @@ class FakeDiaryRepository:
     def __init__(self, *, entry=None, entries=None) -> None:
         self.entry = entry
         self.entries = entries or []
-        self.update_content_mode = None
 
     async def get_entry_by_date(self, *, owner_user_id: UUID, entry_date: date):
         return self.entry
@@ -208,16 +205,10 @@ class FakeDiaryRepository:
         self.entry = entry
         return entry
 
-    async def update_entry(self, *, owner_user_id: UUID, entry_date: date, values: dict, content_mode: str = "replace"):
+    async def update_entry(self, *, owner_user_id: UUID, entry_date: date, values: dict):
         if self.entry is None or self.entry.deleted_at is not None:
             return None
-        self.update_content_mode = content_mode
-        resolved_values = dict(values)
-        if content_mode == "append" and "content" in resolved_values:
-            current = str(self.entry.content or "").rstrip()
-            addition = str(resolved_values["content"] or "").strip()
-            resolved_values["content"] = current if not addition or current.endswith(f"\n{addition}") else f"{current}\n{addition}"
-        for field, value in resolved_values.items():
+        for field, value in values.items():
             setattr(self.entry, field, value)
         return self.entry
 

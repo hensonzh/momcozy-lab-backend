@@ -585,8 +585,8 @@
       "owner_team": "agent",
       "input": {
         "messages": [
-          {"role": "assistant", "content": "This factor changes the monitoring plan. Is anything already being rechecked?"},
-          {"role": "user", "content": "Nothing abnormal so far."}
+          {"role": "assistant", "content": "目前产检记录里的双胎类型是单绒双羊、双绒双羊，还是还没确认？"},
+          {"role": "user", "content": "我还没确认双胎类型呢"}
         ],
         "fixtures": {
           "latest_workflow_phase": "personalized_followup",
@@ -605,7 +605,10 @@
       "expected_tool_calls": [
         {"contract": "pregnancy.plan_intake.advance", "timing": "after_followup_reply"}
       ],
-      "forbidden_tool_calls": [{"contract": "pregnancy.plan.propose"}],
+      "forbidden_tool_calls": [
+        {"contract": "pregnancy.plan_intake.analyze"},
+        {"contract": "pregnancy.plan.propose"}
+      ],
       "expected_safety_decision": "allow"
     },
     {
@@ -776,9 +779,9 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "pregnancy_diary.entry.delete",
+          "contract": "pregnancy_diary.manage",
           "timing": "on_explicit_intent_and_exact_target",
-          "args_subset": {"entry_date": "2026-07-04"}
+          "args_subset": {"action": "delete", "entry_date": "2026-07-04", "confirmed": true}
         }
       ],
       "expected_safety_decision": "allow"
@@ -804,7 +807,7 @@
         "must_not": ["guess_target_date", "delete_any_entry", "confirmation_card"]
       },
       "expected_tool_calls": [],
-      "forbidden_tool_calls": [{"contract": "pregnancy_diary.entry.delete"}],
+      "forbidden_tool_calls": [{"contract": "pregnancy_diary.manage"}],
       "expected_safety_decision": "allow"
     },
     {
@@ -897,10 +900,12 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "pregnancy_diary.entry.create",
-          "timing": "after_user_record_intent"
+          "contract": "pregnancy_diary.manage",
+          "timing": "after_user_record_intent",
+          "args_subset": {"action": "write"}
         }
       ],
+      "forbidden_tool_calls": [{"contract": "load_service_skill"}],
       "expected_safety_decision": "allow"
     },
     {
@@ -938,15 +943,17 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "pregnancy_diary.entry.create",
-          "timing": "after_diary_worthy_narrative"
+          "contract": "pregnancy_diary.manage",
+          "timing": "after_diary_worthy_narrative",
+          "args_subset": {"action": "write"}
         }
       ],
+      "forbidden_tool_calls": [{"contract": "load_service_skill"}],
       "expected_safety_decision": "allow"
     },
     {
       "suite": "pregnancy_diary_existing_entry",
-      "name": "create conflict continues with append update before the final response",
+      "name": "write conflict continues with a complete rewritten update before the final response",
       "domain": "pregnancy-diary",
       "owner_team": "agent",
       "input": {
@@ -968,29 +975,30 @@
         "requires_final_response_after_tools": true,
         "service_skill_id": "cozymate_service_agent",
         "must_include": [
-          "continue_after_create_conflict",
-          "append_user_stated_facts",
+          "continue_after_write_conflict",
+          "complete_rewrite_preserving_existing_user_facts",
           "wait_for_update_result"
         ],
         "must_not": [
-          "claim_create_conflict_was_saved",
-          "replace_existing_diary_without_request",
+          "claim_write_conflict_was_saved",
+          "append_increment_or_supplement",
+          "discard_existing_user_facts",
           "add_model_advice_to_diary"
         ]
       },
       "expected_tool_calls": [
         {
-          "contract": "pregnancy_diary.entry.create",
-          "timing": "first_write_attempt"
+          "contract": "pregnancy_diary.manage",
+          "timing": "first_write_attempt",
+          "args_subset": {"action": "write"}
         },
         {
-          "contract": "pregnancy_diary.entry.update",
+          "contract": "pregnancy_diary.manage",
           "timing": "after_entry_already_exists",
-          "args_subset": {
-            "content_mode": "append"
-          }
+          "args_subset": {"action": "update"}
         }
       ],
+      "forbidden_tool_calls": [{"contract": "load_service_skill"}],
       "expected_safety_decision": "allow"
     },
     {
@@ -1026,10 +1034,7 @@
       "expected_tool_calls": [],
       "forbidden_tool_calls": [
         {
-          "contract": "pregnancy_diary.entry.create"
-        },
-        {
-          "contract": "pregnancy_diary.entry.update"
+          "contract": "pregnancy_diary.manage"
         }
       ],
       "expected_safety_decision": "allow"
@@ -1065,10 +1070,7 @@
       "expected_tool_calls": [],
       "forbidden_tool_calls": [
         {
-          "contract": "pregnancy_diary.entry.create"
-        },
-        {
-          "contract": "pregnancy_diary.entry.update"
+          "contract": "pregnancy_diary.manage"
         }
       ],
       "expected_safety_decision": "allow"
@@ -1106,10 +1108,7 @@
       "expected_tool_calls": [],
       "forbidden_tool_calls": [
         {
-          "contract": "pregnancy_diary.entry.create"
-        },
-        {
-          "contract": "pregnancy_diary.entry.update"
+          "contract": "pregnancy_diary.manage"
         }
       ],
       "expected_safety_decision": "allow"
@@ -1155,8 +1154,9 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "pregnancy_diary.entry.create",
-          "timing": "as_adjunct_to_health_response"
+          "contract": "pregnancy_diary.manage",
+          "timing": "as_adjunct_to_health_response",
+          "args_subset": {"action": "write"}
         }
       ],
       "expected_safety_decision": "allow"

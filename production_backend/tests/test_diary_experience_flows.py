@@ -115,7 +115,6 @@ class InMemoryDiaryRepository:
         owner_user_id: UUID,
         entry_date: date,
         values: dict,
-        content_mode: str = "replace",
     ):
         entry = await self.get_entry_by_date(owner_user_id=owner_user_id, entry_date=entry_date)
         if entry is None:

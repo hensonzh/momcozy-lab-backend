@@ -49,7 +49,7 @@ def default_tool_registry() -> ToolContractRegistry:
             description=(
                 "按 service_skill_id 加载一个 MomCozy 服务技能。"
                 "用户当前请求需要进入奶量、产前准备、健康咨询、情绪支持或设备指导流程，且对应技能尚未驻留时调用；"
-                "返回该技能说明、建议工具和小型业务事实包。"
+                "返回该技能说明、建议工具和小型业务事实包。仅涉及孕期日记时不要调用，直接使用全局 pregnancy_diary.manage。"
             ),
             loading_mode="eager",
             read_or_write="read",
@@ -229,65 +229,17 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="pregnancy_diary.entries.read",
-            domain="pregnancy_diary",
-            description="读取当前用户某一天或一个日期范围内的孕期日记。用户要查看、回顾、整理历史日记，或需要核对某日原文时调用。",
-            read_or_write="read",
-            side_effect_level="none",
-            blocking_policy="must_wait",
-            result_dependency="next_tool_call",
-            requires_confirmation=False,
-            idempotency_required=False,
-            audit_required=False,
-            timeout_seconds=10,
-        )
-    )
-    registry.register(
-        _tool_contract(
-            name="pregnancy_diary.entry.create",
+            name="pregnancy_diary.manage",
             domain="pregnancy_diary",
             description=(
-                "同步创建当前用户指定日期的孕期日记并返回已写入记录。"
-                "用户明确要求保存，或第一人称具体讲述可留存的孕期事实且没有拒绝记录时调用。"
-                "目标日期已有记录时返回 entry_already_exists；此时必须继续调用更新工具 append 本轮事实，不能说已经保存。"
+                "按日期读取、列出、写入、更新或删除当前用户的孕期日记，用户需要处理孕期日记时调用。"
+                "用户明确要求记录，或以第一人称具体讲述值得留存的孕期经历、身体感受、情绪、产检、胎动、饮食、睡眠、用药补剂、已尝试措施或问题时，可主动用 action=write 记录，不要求用户先说‘记一下’。"
+                "正文只能包含用户明确表达的事实，不写入模型建议、安抚、风险判断、医疗提醒、观察计划或诊断结论。"
+                "纯科普、泛泛咨询、孕期计划或服务安排意图、用户明确拒绝记录时不要写入；健康咨询中的日记记录只能作为附带动作，仍需完成主要健康回应。"
+                "write 遇到同日记录会返回 entry_already_exists 和旧日记正文；此时不能说已经保存，必须结合旧正文与本轮新增事实重新组织完整正文，并继续调用 action=update。"
+                "update 只接受整合后的完整正文，不能追加‘补充’或只传增量。delete 仅在日期明确且用户已确认时传 confirmed=true。"
             ),
-            read_or_write="write",
-            side_effect_level="low",
-            blocking_policy="must_wait",
-            result_dependency="final_response",
-            requires_confirmation=False,
-            idempotency_required=False,
-            audit_required=True,
-            timeout_seconds=15,
-        )
-    )
-    registry.register(
-        _tool_contract(
-            name="pregnancy_diary.entry.update",
-            domain="pregnancy_diary",
-            description=(
-                "同步补充或修改当前用户指定日期已有的孕期日记并返回更新后记录。"
-                "用户明确要求追加、更正或重写已有记录，或创建发现同日记录后继续保存本轮事实时调用；正文可选择 append 或 replace。"
-                "返回 entry_not_found 时没有发生写入，不能说已经更新。"
-            ),
-            read_or_write="write",
-            side_effect_level="low",
-            blocking_policy="must_wait",
-            result_dependency="final_response",
-            requires_confirmation=False,
-            idempotency_required=False,
-            audit_required=True,
-            timeout_seconds=15,
-        )
-    )
-    registry.register(
-        _tool_contract(
-            name="pregnancy_diary.entry.delete",
-            domain="pregnancy_diary",
-            description=(
-                "同步删除当前用户指定日期的孕期日记并返回真实数据库结果。"
-                "仅在用户已明确要求删除且目标日期唯一确定时调用；目标含糊时先询问日期。"
-            ),
+            loading_mode="eager",
             read_or_write="write",
             side_effect_level="medium",
             blocking_policy="must_wait",
