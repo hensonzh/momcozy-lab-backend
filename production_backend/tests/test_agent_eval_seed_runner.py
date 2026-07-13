@@ -247,6 +247,38 @@ def test_agent_eval_seed_assertion_engine_passes_known_device_guidance_trace() -
     assert result.failures == []
 
 
+def test_agent_eval_seed_assertion_engine_requires_expected_application_event() -> None:
+    case = {
+        **_case("memory_preference_capture"),
+        "expected_events": [
+            {"type": "CUSTOM", "name": "momcozy.web_search.citations"},
+        ],
+    }
+
+    missing = AgentEvalSeedAssertionEngine().evaluate(
+        case=case,
+        trace=AgentEvalTrace(safety_decision="allow", final_text="Answer without sources."),
+    )
+    observed = AgentEvalSeedAssertionEngine().evaluate(
+        case=case,
+        trace=AgentEvalTrace(
+            events=[
+                {
+                    "type": "CUSTOM",
+                    "payload": {"name": "momcozy.web_search.citations"},
+                }
+            ],
+            safety_decision="allow",
+            final_text="Answer with sources.",
+        ),
+    )
+
+    assert missing.passed is False
+    assert missing.failures[0].category == "missing_event"
+    assert missing.failures[0].assertion == "event.required"
+    assert observed.passed is True
+
+
 def test_agent_eval_replay_runner_evaluates_replay_bundle_trace() -> None:
     case = _case("memory_preference_capture")
     replay_bundle = {

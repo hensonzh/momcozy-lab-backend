@@ -51,6 +51,7 @@ class AgentEvalSeedAssertionEngine:
         failures.extend(_tool_sequence_failures(case=case, trace=trace))
         failures.extend(_tool_argument_failures(case=case, trace=trace))
         failures.extend(_forbidden_tool_failures(case=case, trace=trace))
+        failures.extend(_required_event_failures(case=case, trace=trace))
         failures.extend(_safety_decision_failures(case=case, trace=trace))
         failures.extend(_service_skill_routing_failures(case=case, trace=trace))
         failures.extend(_confirmation_failures(case=case, trace=trace))
@@ -395,6 +396,30 @@ def _forbidden_tool_failures(*, case: dict[str, Any], trace: AgentEvalTrace) -> 
         for contract in forbidden_contracts
         if contract in observed_contracts
     ]
+
+
+def _required_event_failures(*, case: dict[str, Any], trace: AgentEvalTrace) -> list[AgentEvalFailure]:
+    failures: list[AgentEvalFailure] = []
+    for expected_event in case.get("expected_events", []):
+        if not isinstance(expected_event, dict):
+            continue
+        if any(_event_matches_expected(event=event, expected=expected_event) for event in trace.events):
+            continue
+        failures.append(
+            AgentEvalFailure(
+                category="missing_event",
+                assertion="event.required",
+                expected=json.dumps(expected_event, sort_keys=True),
+                observed=json.dumps(trace.events, sort_keys=True),
+            )
+        )
+    return failures
+
+
+def _event_matches_expected(*, event: dict[str, Any], expected: dict[str, Any]) -> bool:
+    raw_payload = event.get("payload")
+    payload = raw_payload if isinstance(raw_payload, dict) else {}
+    return all(event.get(key, payload.get(key)) == value for key, value in expected.items())
 
 
 def _safety_decision_failures(*, case: dict[str, Any], trace: AgentEvalTrace) -> list[AgentEvalFailure]:
