@@ -821,7 +821,7 @@ def default_tool_registry() -> ToolContractRegistry:
             name="ibclc_consult_card_create",
             domain="health_consultation",
             description=(
-                "仅在当前用户明确要求联系/打开 IBCLC 哺乳顾问咨询，或明确确认上一轮 IBCLC 推荐后，创建咨询入口卡片。"
+                "当前用户明确要求联系/打开 IBCLC 哺乳顾问咨询，或明确确认上一轮 IBCLC 推荐时调用，创建咨询入口卡片。"
                 "仅询问 IBCLC 是什么、是否需要顾问、否定/暂缓意图或无上一轮推荐的孤立确认都不得创建。"
             ),
             read_or_write="write",
