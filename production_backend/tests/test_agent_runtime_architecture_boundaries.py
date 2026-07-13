@@ -1501,6 +1501,110 @@ def test_sdk_runner_streams_responses_api_text_deltas(monkeypatch: pytest.Monkey
     assert result.final_text == "hello"
 
 
+def test_responses_runner_uses_create_streaming_when_stream_helper_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    final_response = FakeOpenAIResponse(
+        id="resp_stream",
+        output=[
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "hello"}],
+            }
+        ],
+        output_text="hello",
+    )
+    calls: list[dict] = []
+
+    class CreateStreamingResponsesResource:
+        stream = None
+
+        async def create(self, **kwargs):
+            calls.append(kwargs)
+            if kwargs.get("stream") is True:
+                return FakeOpenAIResponseStream(
+                    events=[
+                        types.SimpleNamespace(type="response.output_text.delta", delta="hel"),
+                        types.SimpleNamespace(type="response.output_text.delta", delta="lo"),
+                        types.SimpleNamespace(type="response.completed", response=final_response),
+                    ],
+                    final_response=final_response,
+                )
+            return final_response
+
+    class CreateStreamingAsyncOpenAI:
+        def __init__(self, **_kwargs) -> None:
+            self.responses = CreateStreamingResponsesResource()
+
+    fake_openai = types.ModuleType("openai")
+    fake_openai.__spec__ = ModuleSpec("openai", loader=None)
+    fake_openai.AsyncOpenAI = CreateStreamingAsyncOpenAI
+    monkeypatch.setitem(sys.modules, "openai", fake_openai)
+    deltas: list[str] = []
+
+    async def on_text_delta(delta: str) -> None:
+        deltas.append(delta)
+
+    result = asyncio.run(
+        OpenAIResponsesRunner(model="gpt-test").run_reasoning(
+            SdkNodeRequest(
+                run_id="run_1",
+                thread_id="thread_1",
+                actor_user_id="user_1",
+                instructions="Be concise.",
+                model_input=[{"role": "user", "content": "hello"}],
+                on_text_delta=on_text_delta,
+            )
+        )
+    )
+
+    assert calls[0]["stream"] is True
+    assert deltas == ["hel", "lo"]
+    assert result.final_text == "hello"
+
+
+def test_responses_runner_does_not_replay_completed_text_as_fake_deltas(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_openai = types.ModuleType("openai")
+    fake_openai.__spec__ = ModuleSpec("openai", loader=None)
+    fake_openai.AsyncOpenAI = FakeAsyncOpenAI
+    monkeypatch.setitem(sys.modules, "openai", fake_openai)
+    final_response = FakeOpenAIResponse(
+        id="resp_stream",
+        output=[
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "hello"}],
+            }
+        ],
+        output_text="hello",
+    )
+    FakeAsyncOpenAI.reset(
+        [],
+        stream_events_to_return=[types.SimpleNamespace(type="response.completed", response=final_response)],
+        stream_final_response=final_response,
+    )
+    deltas: list[str] = []
+
+    async def on_text_delta(delta: str) -> None:
+        deltas.append(delta)
+
+    result = asyncio.run(
+        OpenAIResponsesRunner(model="gpt-test").run_reasoning(
+            SdkNodeRequest(
+                run_id="run_1",
+                thread_id="thread_1",
+                actor_user_id="user_1",
+                instructions="Be concise.",
+                model_input=[{"role": "user", "content": "hello"}],
+                on_text_delta=on_text_delta,
+            )
+        )
+    )
+
+    assert deltas == []
+    assert result.final_text == "hello"
+
+
 def test_responses_stream_ignores_reasoning_and_tool_argument_deltas(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_openai = types.ModuleType("openai")
     fake_openai.__spec__ = ModuleSpec("openai", loader=None)

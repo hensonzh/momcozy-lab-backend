@@ -124,6 +124,7 @@ def test_agent_thread_run_events_and_cancel_use_current_user_scope() -> None:
     assert events.status_code == 200
     assert events.json()["items"][0]["type"] == "run.queued"
     assert stream.status_code == 200
+    assert stream.headers["x-accel-buffering"] == "no"
     assert _sse_payloads(stream.text)[0]["type"] == "run.queued"
     assert cancel.status_code == 200
     assert fake_service.list_threads_kwargs["owner_user_id"] == user_id

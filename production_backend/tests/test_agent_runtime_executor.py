@@ -142,6 +142,8 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result(capl
     assert timing_payloads[-1]["run_id"] == str(run.id)
     assert timing_payloads[-1]["status"] == "completed"
     assert timing_payloads[-1]["final_text_length"] == len("Here is the summary.")
+    assert timing_payloads[-1]["text_delivery_mode"] == "none"
+    assert timing_payloads[-1]["text_segment_count"] == 0
     assert "context_base" in timing_payloads[-1]["timings_ms"]
     assert "routing" not in timing_payloads[-1]["timings_ms"]
     assert "working_context" in timing_payloads[-1]["timings_ms"]
@@ -160,11 +162,19 @@ def test_agent_runtime_executor_requires_allowlisted_web_search_for_complex_heal
         sequence=1,
     )
     repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
-    backend = CapturingSdkBackend(result=SdkNodeResult(final_text="请结合宝宝日龄和胆红素数值判断。"))
+    transient_stream = FakeTransientStream()
+    backend = CapturingSdkBackend(
+        result=SdkNodeResult(
+            final_text="请结合宝宝日龄和胆红素数值判断。",
+            web_search_used=True,
+        ),
+        text_deltas=("请结合宝宝日龄", "和胆红素数值判断。"),
+    )
 
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
+            transient_stream=transient_stream,
             sdk_runner=OpenAIAgentsSdkRunner(backend=backend, provider="openai", use_responses=True),
         ).execute(run=run)
     )
@@ -174,9 +184,43 @@ def test_agent_runtime_executor_requires_allowlisted_web_search_for_complex_heal
     assert request.web_search_enabled is True
     assert request.web_search_required is True
     assert request.web_search_allowed_domains == tuple(HEALTH_GUIDANCE_ALLOWED_DOMAINS)
-    assert request.on_text_delta is None
+    assert request.on_text_delta is not None
+    assert [item["delta"] for item in transient_stream.deltas] == ["请结合宝宝日龄", "和胆红素数值判断。"]
     assert "health_guidance_context" in json.dumps(request.model_input, ensure_ascii=False)
     assert "优先使用 web_search 检索" in json.dumps(request.model_input, ensure_ascii=False)
+
+
+def test_agent_runtime_executor_keeps_streamed_health_text_when_required_search_is_not_observed() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(
+        thread_id=thread_id,
+        run_id=run.id,
+        role="user",
+        text="宝宝黄疸一直不退怎么办？",
+        sequence=1,
+    )
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    transient_stream = FakeTransientStream()
+    backend = CapturingSdkBackend(
+        result=SdkNodeResult(final_text="先记录宝宝现在的情况。"),
+        text_deltas=("先记录宝宝现在的情况。",),
+    )
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            transient_stream=transient_stream,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, provider="openai", use_responses=True),
+        ).execute(run=run)
+    )
+
+    expected_text = f"先记录宝宝现在的情况。\n\n{COMPLEX_HEALTH_SEARCH_UNAVAILABLE_RESPONSE}"
+    assert result.final_text == expected_text
+    assert [item["delta"] for item in transient_stream.deltas] == [
+        "先记录宝宝现在的情况。",
+        f"\n\n{COMPLEX_HEALTH_SEARCH_UNAVAILABLE_RESPONSE}",
+    ]
 
 
 def test_agent_runtime_executor_suppresses_web_search_for_first_breast_lump_triage_turn() -> None:
@@ -378,11 +422,13 @@ def test_agent_runtime_executor_blocks_normal_device_flow_for_electrical_hazard(
     run = _run(thread_id=thread_id)
     current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text=message, sequence=1)
     repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    transient_stream = FakeTransientStream()
     backend = CapturingSdkBackend(result=SdkNodeResult(final_text="不应该调用模型。"))
 
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
+            transient_stream=transient_stream,
             sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
         ).execute(run=run)
     )
@@ -394,6 +440,7 @@ def test_agent_runtime_executor_blocks_normal_device_flow_for_electrical_hazard(
     assert "创建售后工单" in result.final_text
     assert all(term not in result.final_text for term in ("医生", "就医", "急救"))
     assert not any(event.event_type == "safety.blocked" for event in repository.events)
+    assert [item["delta"] for item in transient_stream.deltas] == [DEVICE_ELECTRICAL_HAZARD_RESPONSE]
 
 
 def test_agent_runtime_executor_does_not_trigger_device_hazard_for_negated_burnt_smell() -> None:
@@ -936,6 +983,7 @@ def test_agent_runtime_executor_keeps_progress_transient_when_event_sink_is_conf
     )
 
     assert result.status == "completed"
+    assert [item["delta"] for item in transient_stream.deltas] == ["done"]
     assert [progress["phase"] for progress in transient_stream.progresses] == [
         "context_loading",
         "context_ready",
@@ -1410,7 +1458,7 @@ def test_agent_runtime_executor_suppresses_streamed_structured_json_deltas() -> 
 
     assert result.status == "completed"
     assert result.final_text == "我已经整理好了。"
-    assert transient_stream.deltas == []
+    assert [item["delta"] for item in transient_stream.deltas] == ["我已经整理好了。"]
 
 
 def test_agent_runtime_executor_does_not_add_fallback_quick_replies_when_model_skips_tool() -> None:
@@ -3488,12 +3536,16 @@ def test_agent_runtime_executor_externalizes_large_sdk_artifacts() -> None:
 
 
 class CapturingSdkBackend:
-    def __init__(self, *, result: SdkNodeResult) -> None:
+    def __init__(self, *, result: SdkNodeResult, text_deltas: tuple[str, ...] = ()) -> None:
         self.result = result
+        self.text_deltas = text_deltas
         self.requests = []
 
     async def run(self, request: SdkNodeRequest) -> SdkNodeResult:
         self.requests.append(request)
+        if request.on_text_delta is not None:
+            for delta in self.text_deltas:
+                await request.on_text_delta(delta)
         return self.result
 
 

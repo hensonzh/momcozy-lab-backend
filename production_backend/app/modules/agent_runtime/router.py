@@ -285,7 +285,10 @@ async def stream_run_events(
             transient_stream=transient_stream,
         ),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache"},
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 

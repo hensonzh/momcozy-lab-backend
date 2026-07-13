@@ -231,6 +231,7 @@ class AgentRuntimeExecutor:
         self._run_visible_image_urls: dict[UUID, tuple[str, ...]] = {}
         self._run_hospital_bag_cart_groups: dict[UUID, list[dict[str, Any]] | None] = {}
         self._run_text_segment_counts: dict[UUID, int] = {}
+        self._run_provider_text_delta_seen: dict[UUID, bool] = {}
         self._run_workflow_replies: dict[UUID, dict[str, Any]] = {}
         self._run_guarded_workflow_types: dict[UUID, list[str]] = {}
         self._run_workflow_reply_recovery_types: dict[UUID, str] = {}
@@ -250,6 +251,7 @@ class AgentRuntimeExecutor:
         self._run_visible_image_urls[run.id] = ()
         self._run_business_facts[run.id] = {}
         self._run_text_segment_counts[run.id] = 0
+        self._run_provider_text_delta_seen[run.id] = False
         try:
             turn_context = await self._load_turn_context(run=run)
             self._run_trusted_form_submissions[run.id] = _trusted_form_submissions(turn_context.current_message)
@@ -353,6 +355,7 @@ class AgentRuntimeExecutor:
             self._run_visible_image_urls.pop(run.id, None)
             self._run_hospital_bag_cart_groups.pop(run.id, None)
             self._run_text_segment_counts.pop(run.id, None)
+            self._run_provider_text_delta_seen.pop(run.id, None)
             self._run_workflow_replies.pop(run.id, None)
             self._run_guarded_workflow_types.pop(run.id, None)
             self._run_workflow_reply_recovery_types.pop(run.id, None)
@@ -480,7 +483,7 @@ class AgentRuntimeExecutor:
                 prompt_version=run.prompt_version,
                 trace_id=run.trace_id,
                 service_skill_id=COZYMATE_AGENT_ID,
-                on_text_delta=None if health_web_search_required else self._text_delta_handler(run=run),
+                on_text_delta=self._text_delta_handler(run=run),
                 web_search_enabled=health_web_search_required,
                 web_search_required=health_web_search_required,
                 web_search_allowed_domains=HEALTH_GUIDANCE_ALLOWED_DOMAINS if health_web_search_required else (),
@@ -684,7 +687,7 @@ class AgentRuntimeExecutor:
     def _text_delta_handler(self, *, run: AgentRun) -> Callable[[str], Awaitable[None]] | None:
         event_publisher = self.event_sink
         transient_stream = self.transient_stream
-        if event_publisher is None and transient_stream is None:
+        if getattr(event_publisher, "transient_stream", None) is None and transient_stream is None:
             return None
 
         async def publish(delta: str) -> None:
@@ -694,6 +697,7 @@ class AgentRuntimeExecutor:
             sanitized_delta = projector.push(delta)
             if not sanitized_delta:
                 return
+            self._run_provider_text_delta_seen[run.id] = True
             self._run_text_stream_emitted[run.id] = projector.text
             await self._publish_text_delta(
                 run=run,
@@ -726,15 +730,26 @@ class AgentRuntimeExecutor:
     ) -> str:
         streamed_text = self._run_text_stream_emitted.get(run.id, "")
         if authoritative:
-            if streamed_text and not streamed_text.endswith(provider_final_text):
-                await self._publish_text_delta(
-                    run=run,
-                    delta=f"\n\n{provider_final_text}",
-                    event_publisher=self.event_sink,
-                    transient_stream=self.transient_stream,
-                )
-            return provider_final_text
+            if streamed_text.endswith(provider_final_text):
+                return streamed_text
+            authoritative_delta = provider_final_text if not streamed_text else f"\n\n{provider_final_text}"
+            combined_text = f"{streamed_text}{authoritative_delta}"
+            self._run_text_stream_emitted[run.id] = combined_text
+            await self._publish_text_delta(
+                run=run,
+                delta=authoritative_delta,
+                event_publisher=self.event_sink,
+                transient_stream=self.transient_stream,
+            )
+            return combined_text
         if not streamed_text:
+            self._run_text_stream_emitted[run.id] = provider_final_text
+            await self._publish_text_delta(
+                run=run,
+                delta=provider_final_text,
+                event_publisher=self.event_sink,
+                transient_stream=self.transient_stream,
+            )
             return provider_final_text
         if not provider_final_text or streamed_text.endswith(provider_final_text):
             return streamed_text
@@ -771,7 +786,7 @@ class AgentRuntimeExecutor:
         message_stream_id = str(self._run_assistant_message_ids.get(run.id) or "assistant")
         segment_index = self._run_text_segment_counts.get(run.id, 0)
         prefix_integrity = agent_response_text_integrity(self._run_text_stream_emitted.get(run.id, ""))
-        if event_publisher is not None:
+        if event_publisher is not None and getattr(event_publisher, "transient_stream", None) is not None:
             await event_publisher.publish_message_delta(
                 thread_id=run.thread_id,
                 run_id=run.id,
@@ -791,6 +806,8 @@ class AgentRuntimeExecutor:
                 prefix_utf8_bytes=prefix_integrity.utf8_bytes,
                 prefix_sha256=prefix_integrity.sha256,
             )
+        else:
+            return
         self._run_text_segment_counts[run.id] = segment_index + 1
 
     def _sdk_tools(
@@ -1514,6 +1531,14 @@ class AgentRuntimeExecutor:
             timings_ms=timings_ms,
             final_text_length=final_text_length,
             quick_reply_count=quick_reply_count,
+            text_delivery_mode=(
+                "provider_delta"
+                if self._run_provider_text_delta_seen.get(run.id, False)
+                else "final_fallback"
+                if self._run_text_segment_counts.get(run.id, 0) > 0
+                else "none"
+            ),
+            text_segment_count=self._run_text_segment_counts.get(run.id, 0),
             error_type=error_type,
         )
 
