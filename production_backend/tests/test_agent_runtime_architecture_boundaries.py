@@ -317,6 +317,7 @@ def test_tool_contract_registry_contains_only_model_visible_tools_and_loading_po
     registry = default_tool_registry()
     registered_names = set(registry.names_for_sdk())
     support_ticket = registry.get("support.ticket.propose")
+    ibclc_consult = registry.get("ibclc_consult_card_create")
     milk_status = registry.get("records.milk_status.read")
 
     assert registered_names.isdisjoint(
@@ -344,6 +345,7 @@ def test_tool_contract_registry_contains_only_model_visible_tools_and_loading_po
     assert support_ticket.read_or_write == "write"
     assert support_ticket.requires_confirmation is True
     assert support_ticket.blocking_policy == "wait_for_confirmation"
+    assert ibclc_consult.idempotency_required is True
     assert milk_status.read_or_write == "read"
     assert milk_status.requires_confirmation is False
     assert milk_status.blocking_policy == "must_wait"

@@ -19,6 +19,7 @@ from ...auth import CurrentUser
 from ..actions.policy import AgentActionPolicy, AgentActionPolicyDecision
 from ..client_context import project_agent_client_context
 from ..agents.cozymate_service_agent.context import BusinessFactsProjector
+from ..agents.cozymate_service_agent.device_guidance import device_electrical_hazard_response
 from ..agents.cozymate_service_agent.prompts import (
     ContextProjection,
     DEFAULT_STABLE_SYSTEM_PROMPT,
@@ -285,6 +286,9 @@ class AgentRuntimeExecutor:
             if urgent_signal_ids:
                 self._run_authoritative_final_text[run.id] = PREGNANCY_PLAN_URGENT_RESPONSE
                 result = SdkNodeResult(final_text=PREGNANCY_PLAN_URGENT_RESPONSE)
+            elif device_hazard_response := device_electrical_hazard_response(self._run_current_user_text[run.id]):
+                self._run_authoritative_final_text[run.id] = device_hazard_response
+                result = SdkNodeResult(final_text=device_hazard_response)
             elif health_web_search_required and not _runner_supports_web_search(self.sdk_runner):
                 self._run_authoritative_final_text[run.id] = COMPLEX_HEALTH_SEARCH_UNAVAILABLE_RESPONSE
                 result = SdkNodeResult(final_text=COMPLEX_HEALTH_SEARCH_UNAVAILABLE_RESPONSE)
@@ -371,7 +375,11 @@ class AgentRuntimeExecutor:
             if working_context_state.turn_index <= skill.expires_after_turn
         }
         ongoing_work = project_ongoing_work(workflow_states, resident_skill_ids=resident_skill_ids)
-        client_events = await self.repository.list_client_events_for_thread(thread_id=run.thread_id, limit=10)
+        client_events = await self.repository.list_client_events_for_thread(
+            thread_id=run.thread_id,
+            owner_user_id=run.actor_user_id,
+            limit=10,
+        )
         timings_ms["ongoing_work"] = _elapsed_ms(ongoing_work_started_at)
 
         return _AgentTurnContext(
@@ -1525,16 +1533,7 @@ def _recent_ibclc_client_event_context(events: list[AgentEvent]) -> list[dict[st
         event_type = _text(event.payload, "client_event_type")
         if event_type not in {"ibclc_consult_started", "ibclc_consult_completed"}:
             continue
-        client_payload = _dict(event.payload, "payload")
-        metadata = _dict(client_payload, "metadata")
-        item = {
-            "type": event_type,
-            "occurred_at": _text(client_payload, "occurred_at"),
-            "label": _text(client_payload, "label"),
-            "consult_id": _text(metadata, "consult_id"),
-            "source_artifact_id": _text(metadata, "source_artifact_id"),
-        }
-        projected.append({key: value for key, value in item.items() if value})
+        projected.append({"type": event_type})
     return projected
 
 

@@ -362,11 +362,23 @@ class AgentRuntimeRepository:
         result = await self.session.scalars(statement)
         return list(result.all())
 
-    async def list_client_events_for_thread(self, *, thread_id: UUID, limit: int = 10) -> list[AgentEvent]:
+    async def list_client_events_for_thread(
+        self,
+        *,
+        thread_id: UUID,
+        owner_user_id: UUID,
+        limit: int = 10,
+    ) -> list[AgentEvent]:
         bounded_limit = max(1, min(limit, 50))
         statement = (
             select(AgentEvent)
-            .where(AgentEvent.thread_id == thread_id, AgentEvent.event_type == "client.event")
+            .join(AgentThread, AgentThread.id == AgentEvent.thread_id)
+            .where(
+                AgentEvent.thread_id == thread_id,
+                AgentEvent.event_type == "client.event",
+                AgentThread.owner_user_id == owner_user_id,
+                AgentThread.deleted_at.is_(None),
+            )
             .order_by(AgentEvent.created_at.desc(), AgentEvent.event_id.desc())
             .limit(bounded_limit)
         )

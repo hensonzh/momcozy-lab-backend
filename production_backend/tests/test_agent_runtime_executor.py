@@ -21,6 +21,9 @@ from production_backend.app.modules.agent_runtime.models import (
 )
 from production_backend.app.modules.agent_runtime.event_stream.sink import AgentEventSink
 from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent import ServiceSkillId
+from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.device_guidance import (
+    DEVICE_ELECTRICAL_HAZARD_RESPONSE,
+)
 from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.health_guidance import (
     COMPLEX_HEALTH_SEARCH_UNAVAILABLE_RESPONSE,
     HEALTH_GUIDANCE_ALLOWED_DOMAINS,
@@ -358,16 +361,67 @@ def test_agent_runtime_executor_projects_recent_ibclc_client_event_into_next_tur
     )
 
     client_events = _runtime_context(backend.requests[0])["working_context"]["client_events"]
-    assert client_events == [
-        {
-            "type": "ibclc_consult_completed",
-            "occurred_at": "2026-07-13T10:00:00+08:00",
-            "label": "用户已完成一次 IBCLC 在线咨询",
-            "consult_id": "ibclc_12345678",
-            "source_artifact_id": "artifact-1",
-        }
-    ]
+    assert client_events == [{"type": "ibclc_consult_completed"}]
     assert "private health detail" not in str(client_events)
+    assert repository.client_event_queries == [
+        {"thread_id": thread_id, "owner_user_id": run.actor_user_id, "limit": 10}
+    ]
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Air1 充电时有烧焦味。",
+        "吸奶器主机正在冒烟。",
+        "充电线开裂了，还出现了电火花。",
+        "电池鼓包，主机摸起来烫手。",
+    ],
+)
+def test_agent_runtime_executor_blocks_normal_device_flow_for_electrical_hazard(message: str) -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text=message, sequence=1)
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    backend = CapturingSdkBackend(result=SdkNodeResult(final_text="不应该调用模型。"))
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+        ).execute(run=run)
+    )
+
+    assert result.final_text == DEVICE_ELECTRICAL_HAZARD_RESPONSE
+    assert backend.requests == []
+    assert "立即停止使用" in result.final_text
+    assert "拔下电源适配器" in result.final_text
+    assert "创建售后工单" in result.final_text
+    assert all(term not in result.final_text for term in ("医生", "就医", "急救"))
+    assert not any(event.event_type == "safety.blocked" for event in repository.events)
+
+
+def test_agent_runtime_executor_does_not_trigger_device_hazard_for_negated_burnt_smell() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(
+        thread_id=thread_id,
+        run_id=run.id,
+        role="user",
+        text="没有烧焦味，也没有冒烟，只是充电灯一直闪。",
+        sequence=1,
+    )
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    backend = CapturingSdkBackend(result=SdkNodeResult(final_text="我来帮你看充电灯。"))
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+        ).execute(run=run)
+    )
+
+    assert result.final_text == "我来帮你看充电灯。"
+    assert len(backend.requests) == 1
 
 
 def test_agent_runtime_executor_projects_only_current_user_images_into_model_input() -> None:
@@ -3087,6 +3141,7 @@ class FakeRuntimeRepository:
         self.run_summaries = list(run_summaries or [])
         self.workflow_states = list(workflow_states or [])
         self.latest_thread_artifact = None
+        self.client_event_queries = []
 
     async def get_latest_user_message_for_run(self, *, run_id):
         if self.current_message is not None and self.current_message.run_id == run_id:
@@ -3096,7 +3151,10 @@ class FakeRuntimeRepository:
     async def list_messages_for_thread(self, *, thread_id, limit=40):
         return [message for message in self.messages if message.thread_id == thread_id][:limit]
 
-    async def list_client_events_for_thread(self, *, thread_id, limit=10):
+    async def list_client_events_for_thread(self, *, thread_id, owner_user_id, limit=10):
+        self.client_event_queries.append(
+            {"thread_id": thread_id, "owner_user_id": owner_user_id, "limit": limit}
+        )
         return [
             event
             for event in self.events

@@ -758,6 +758,25 @@ def test_device_guidance_read_tool_handler_restores_unboxing_overview_resources(
     assert all(resource.get("markdown_link") for resource in result["quick_start_resources"])
 
 
+def test_device_guidance_unboxing_query_does_not_erase_topic_resources() -> None:
+    handler = DeviceGuidanceReadToolHandler(asset_service=FakeAssetService())
+
+    result = asyncio.run(
+        handler(
+            _context(
+                args={
+                    "model": "Air1",
+                    "topic": "unboxing",
+                    "query": "我刚收到吸奶器，想开箱",
+                    "limit": 10,
+                }
+            )
+        )
+    )
+
+    assert [resource["kind"] for resource in result["quick_start_resources"]] == ["pdf", "video"]
+
+
 def test_device_guidance_read_tool_handler_returns_real_manifest_quick_start_media() -> None:
     handler = DeviceGuidanceReadToolHandler(asset_service=ProductAssetService())
 
@@ -1179,6 +1198,91 @@ def test_ibclc_card_handler_allows_short_confirmation_after_previous_offer() -> 
 
     assert result["status"] == "created"
     assert result["artifact_type"] == "ibclc_consult_card"
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "别推荐 IBCLC",
+        "不推荐 IBCLC",
+        "我不想咨询 IBCLC",
+        "我不想联系 IBCLC",
+        "别打开 IBCLC 咨询入口",
+        "取消 IBCLC 咨询",
+        "你推荐 IBCLC 吗？",
+        "请问你推荐 IBCLC 吗？",
+        "麻烦问下，你推荐 IBCLC 吗？",
+    ],
+)
+def test_ibclc_card_handler_blocks_negative_or_decision_question_bypasses(message: str) -> None:
+    runtime_service = FakeAgentRuntimeService()
+
+    result = asyncio.run(
+        IbclcConsultCardCreateToolHandler(runtime_service=runtime_service)(
+            _context(args={"reason": "Latch pain", "trusted_current_user_text": message})
+        )
+    )
+
+    assert result["status"] == "ibclc_consult_blocked"
+    assert not any(artifact.artifact_type == "ibclc_consult_card" for artifact in runtime_service.artifacts)
+
+
+def test_ibclc_card_handler_accepts_legacy_short_affirmation_after_previous_offer() -> None:
+    runtime_service = FakeAgentRuntimeService()
+
+    result = asyncio.run(
+        IbclcConsultCardCreateToolHandler(runtime_service=runtime_service)(
+            _context(
+                args={
+                    "reason": "Latch pain",
+                    "trusted_current_user_text": "嗯嗯",
+                    "trusted_previous_assistant_text": "需要我帮你推荐一位 IBCLC 哺乳顾问吗？",
+                }
+            )
+        )
+    )
+
+    assert result["status"] == "created"
+
+
+def test_ibclc_card_handler_rejects_short_affirmation_after_negated_previous_offer() -> None:
+    runtime_service = FakeAgentRuntimeService()
+
+    result = asyncio.run(
+        IbclcConsultCardCreateToolHandler(runtime_service=runtime_service)(
+            _context(
+                args={
+                    "reason": "Latch pain",
+                    "trusted_current_user_text": "好的",
+                    "trusted_previous_assistant_text": "我现在不能帮你推荐 IBCLC 哺乳顾问。",
+                }
+            )
+        )
+    )
+
+    assert result["status"] == "ibclc_consult_blocked"
+    assert result["reason"] == "short_confirmation_without_ibclc_offer"
+
+
+def test_ibclc_card_handler_reuses_same_run_artifact_without_duplicate_event() -> None:
+    runtime_service = FakeAgentRuntimeService()
+    context = _context(
+        args={
+            "reason": "Latch pain",
+            "trusted_current_user_text": "请帮我找一位 IBCLC 顾问",
+        }
+    )
+
+    first = asyncio.run(IbclcConsultCardCreateToolHandler(runtime_service=runtime_service)(context))
+    second = asyncio.run(IbclcConsultCardCreateToolHandler(runtime_service=runtime_service)(context))
+
+    cards = [artifact for artifact in runtime_service.artifacts if artifact.artifact_type == "ibclc_consult_card"]
+    assert len(cards) == 1
+    assert first["artifact_id"] == second["artifact_id"]
+    assert first["reused"] is False
+    assert second["reused"] is True
+    assert "_deferred_agent_events" in first
+    assert "_deferred_agent_events" not in second
 
 
 def test_pregnancy_plan_propose_tool_handler_applies_without_duplicate_confirmation() -> None:
@@ -2788,6 +2892,22 @@ class FakeAgentRuntimeService:
         )
         self.artifacts.append(self.artifact)
         return self.artifact
+
+    async def create_artifact_once(self, **kwargs):
+        existing = next(
+            (
+                artifact
+                for artifact in reversed(self.artifacts)
+                if artifact.run_id == kwargs["run_id"]
+                and artifact.owner_user_id == kwargs["owner_user_id"]
+                and artifact.artifact_type == kwargs["artifact_type"]
+                and artifact.status != "deleted"
+            ),
+            None,
+        )
+        if existing is not None:
+            return existing, False
+        return await self.create_artifact(**kwargs), True
 
 
 def _now() -> datetime:

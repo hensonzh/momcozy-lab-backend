@@ -203,7 +203,7 @@ class IbclcConsultCardCreateToolHandler:
                 "requires_confirmation": True,
                 "confirmation_question": "要我帮你打开 IBCLC 在线咨询入口吗？",
             }
-        artifact = await self.runtime_service.create_artifact(
+        artifact, created = await self.runtime_service.create_artifact_once(
             owner_user_id=context.actor.user_id,
             run_id=context.run_id,
             artifact_type="ibclc_consult_card",
@@ -212,15 +212,18 @@ class IbclcConsultCardCreateToolHandler:
             payload=payload,
             emit_event=False,
         )
-        return {
+        result = {
             "artifact_id": str(artifact.id),
             "artifact_type": artifact.artifact_type,
             "status": artifact.status,
+            "reused": not created,
             "title": _text(payload, "title"),
             "reason": _text(payload, "reason"),
             "urgency": _text(payload, "urgency") or "routine",
-            DEFERRED_AGENT_EVENTS_KEY: [_deferred_artifact_created_event(artifact)],
         }
+        if created:
+            result[DEFERRED_AGENT_EVENTS_KEY] = [_deferred_artifact_created_event(artifact)]
+        return result
 
 
 class LegacyArtifactToolHandler:
@@ -2186,7 +2189,7 @@ def _ibclc_consult_consent(args: dict[str, Any]) -> dict[str, Any]:
     current = _normalize_ibclc_text(args.get("trusted_current_user_text"))
     if _explicit_ibclc_request(current):
         return {"allowed": True, "source": "explicit_user_request"}
-    if current in {"好", "好的", "可以", "行", "没问题", "ok", "okay", "yes", "同意", "确认"}:
+    if _short_ibclc_affirmation(current):
         previous = _normalize_ibclc_text(args.get("trusted_previous_assistant_text"))
         if _previous_assistant_offered_ibclc(previous):
             return {"allowed": True, "source": "confirmed_previous_offer"}
@@ -2240,7 +2243,38 @@ def _explicit_ibclc_request(text: str) -> bool:
 
 
 def _negative_ibclc_intent(text: str) -> bool:
-    negative_tokens = ("不要", "不用", "不需要", "不找", "不想找", "别找", "先别", "先不", "暂时不", "暂时别", "没必要")
+    negative_tokens = (
+        "不要",
+        "不用",
+        "不需要",
+        "不找",
+        "不想找",
+        "不推荐",
+        "别找",
+        "别推荐",
+        "不想咨询",
+        "不咨询",
+        "不用咨询",
+        "别咨询",
+        "不想联系",
+        "不联系",
+        "别联系",
+        "不想预约",
+        "不预约",
+        "别预约",
+        "不想打开",
+        "不打开",
+        "别打开",
+        "不想启动",
+        "不启动",
+        "别启动",
+        "取消",
+        "先别",
+        "先不",
+        "暂时不",
+        "暂时别",
+        "没必要",
+    )
     return any(token in text for token in negative_tokens)
 
 
@@ -2257,20 +2291,55 @@ def _ibclc_decision_question(text: str) -> bool:
         "有没有必要",
         "有必要",
         "需要不需要",
+        "是否推荐",
+        "推荐不推荐",
+        "会不会推荐",
     )
     if any(phrase in text for phrase in decision_phrases):
         return True
     if not any(token in text for token in ("?", "？", "吗", "么", "嘛")):
         return False
+    if "推荐" in text:
+        direct_recommend_requests = ("帮我推荐", "给我推荐", "请推荐", "麻烦推荐", "推荐一个", "推荐个", "推荐一位", "推荐一下")
+        if not any(token in text for token in direct_recommend_requests):
+            return True
     if not any(token in text for token in ("需要", "应该", "该", "可以", "能不能", "要")):
         return False
     return not any(token in text for token in ("帮我", "给我", "请", "麻烦"))
 
 
 def _previous_assistant_offered_ibclc(text: str) -> bool:
+    if any(token in text for token in ("不能帮你", "无法帮你", "不帮你", "不会推荐", "不能推荐", "无法推荐")):
+        return False
     has_subject = any(token in text for token in ("ibclc", "哺乳顾问", "泌乳顾问", "咨询入口", "在线咨询"))
     has_offer = any(token in text for token in ("需要我", "要我", "可以帮你", "帮你推荐", "帮你打开", "是否要"))
     return has_subject and has_offer
+
+
+def _short_ibclc_affirmation(text: str) -> bool:
+    normalized = re.sub(r"[。！？!?,，、~～….\-_]", "", text)
+    return normalized in {
+        "ok",
+        "okay",
+        "yes",
+        "好",
+        "好的",
+        "好啊",
+        "可以",
+        "行",
+        "可以的",
+        "要",
+        "需要",
+        "没问题",
+        "同意",
+        "确认",
+        "打开吧",
+        "帮我打开",
+        "推荐一下",
+        "开始吧",
+        "嗯",
+        "嗯嗯",
+    }
 
 
 def _feeding_record_apply_payload(args: dict[str, Any]) -> dict[str, Any]:
@@ -3357,15 +3426,30 @@ def _markdown_label(label: str) -> str:
 
 
 def _filter_guidance_assets(*, assets: list[ProductAsset], model: str, topic: str, query: str) -> list[ProductAsset]:
-    term_groups = _guidance_search_term_groups(model=model, topic=topic, query=query)
-    if not term_groups:
+    topic_groups = _guidance_search_term_groups(model=model, topic=topic, query="")
+    if not topic_groups:
         return assets
-    matched: list[ProductAsset] = []
+    topic_matches: list[ProductAsset] = []
     for asset in assets:
         haystack = _normalized_search_term(" ".join([asset.id, asset.label, asset.domain, asset.object_key or ""]))
-        if all(any(term in haystack for term in group) for group in term_groups):
-            matched.append(asset)
-    return matched
+        if all(any(term in haystack for term in group) for group in topic_groups):
+            topic_matches.append(asset)
+    query_terms = _normalized_search_terms(query)
+    if not query_terms:
+        return topic_matches
+    query_matches = [
+        asset
+        for asset in topic_matches
+        if any(
+            term in _normalized_search_term(" ".join([asset.id, asset.label, asset.domain, asset.object_key or ""]))
+            for term in query_terms
+        )
+    ]
+    if not query_matches:
+        return topic_matches
+    if topic:
+        return [*query_matches, *(asset for asset in topic_matches if asset not in query_matches)]
+    return query_matches
 
 
 def _device_guidance_step_asset_topic(step: str) -> str:

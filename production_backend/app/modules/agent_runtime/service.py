@@ -696,6 +696,54 @@ class AgentRuntimeService:
             )
         return artifact
 
+    async def create_artifact_once(
+        self,
+        *,
+        owner_user_id: UUID,
+        run_id: UUID,
+        artifact_type: str,
+        payload: dict[str, Any],
+        schema_version: str = "v1",
+        status: str = "created",
+        raw_payload_ref: str = "",
+        emit_event: bool = True,
+    ) -> tuple[AgentArtifact, bool]:
+        run = await self.get_run(owner_user_id=owner_user_id, run_id=run_id)
+        normalized_artifact_type = _normalize_text(artifact_type, max_length=120, required=True)
+        lock = getattr(self.repository, "lock_run_for_action_proposal", None)
+        if callable(lock):
+            await lock(run_id=run.id)
+        artifacts = await self.repository.list_artifacts_for_run(run_id=run.id)
+        existing = next(
+            (
+                artifact
+                for artifact in reversed(artifacts)
+                if artifact.owner_user_id == owner_user_id
+                and artifact.artifact_type == normalized_artifact_type
+                and artifact.status != "deleted"
+            ),
+            None,
+        )
+        if existing is not None:
+            return existing, False
+        artifact = await self.repository.create_artifact(
+            run_id=run.id,
+            owner_user_id=owner_user_id,
+            artifact_type=normalized_artifact_type,
+            schema_version=_normalize_text(schema_version, max_length=80) or "v1",
+            status=_normalize_text(status, max_length=32) or "created",
+            payload=payload,
+            raw_payload_ref=_normalize_text(raw_payload_ref, max_length=512),
+        )
+        if emit_event:
+            await self._append_event(
+                thread_id=run.thread_id,
+                run_id=run.id,
+                event_type="artifact.created",
+                payload=_artifact_event_payload(artifact),
+            )
+        return artifact, True
+
     async def confirm_action(
         self,
         *,
