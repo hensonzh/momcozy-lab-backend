@@ -1054,6 +1054,8 @@ class AgentRuntimeExecutor:
             return {"runtime_local_date": local_date} if local_date else {}
         if contract_name == "records.milk_analysis.intake":
             return {"trusted_current_user_text": self._run_current_user_text.get(run.id, "")}
+        if contract_name == "support.ticket.propose":
+            return {"trusted_current_user_text": self._run_current_user_text.get(run.id, "")}
         expected_form_id = FORM_TOOL_IDS.get(contract_name)
         if expected_form_id is not None:
             submission = self._run_trusted_form_submissions.get(run.id, {}).get(expected_form_id)

@@ -757,12 +757,15 @@ def default_tool_registry() -> ToolContractRegistry:
         _tool_contract(
             name="support.ticket.propose",
             domain="support",
-            description="为当前用户创建 Momcozy 设备售后工单并等待确认。用户明确希望把设备故障或服务问题提交给售后处理时调用。",
+            description=(
+                "在用户明确同意创建售后工单后，整理可编辑的 Momcozy 售后信息表。"
+                "表单由用户确认并直接提交，不再发起第二次 action 确认。"
+            ),
             read_or_write="write",
             side_effect_level="medium",
-            blocking_policy="wait_for_confirmation",
-            result_dependency="none",
-            requires_confirmation=True,
+            blocking_policy="must_wait",
+            result_dependency="final_response",
+            requires_confirmation=False,
             idempotency_required=True,
             audit_required=True,
             timeout_seconds=15,

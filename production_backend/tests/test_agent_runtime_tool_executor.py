@@ -134,12 +134,16 @@ def test_tool_executor_persists_safe_args_and_output() -> None:
             run_id=uuid4(),
             tool_name="support.ticket.propose",
             call_id="call-1",
-            args={"issue_summary": "Pump does not start", "payload": {"api_token": "secret-token"}},
+            args={
+                "issue_summary": "Pump does not start",
+                "user_confirmed": True,
+                "user_contact": "mai@example.com",
+            },
         )
     )
 
     assert result.tool_call.status == "completed"
-    assert repository.tool_call.safe_args["payload"]["api_token"] == "[redacted]"
+    assert repository.tool_call.safe_args["user_confirmed"] is True
     assert result.safe_output["profile"]["name"] == "Mai"
     assert repository.output.safe_output["session_token"] == "[redacted]"
     assert [event.event_type for event in repository.events] == ["tool.started", "tool.completed"]
@@ -149,14 +153,15 @@ def test_tool_executor_persists_safe_args_and_output() -> None:
     assert repository.events[0].payload["label"] == "售后工单草稿"
     assert repository.events[0].payload["safe_args"] == {
         "issue_summary": "Pump does not start",
-        "payload": {"api_token": "[redacted]"},
+        "user_confirmed": True,
+        "user_contact": "mai@example.com",
     }
     assert repository.events[0].payload["semantic"]["surface"] == "work_item"
     assert repository.events[0].payload["semantic"]["visibility"] == "work_item"
     assert repository.events[0].payload["semantic"]["label"] == "我先帮你准备售后信息表～"
     assert repository.events[1].payload["tool_output_id"] == str(repository.output.id)
     assert repository.events[1].payload["safe_output"] == repository.output.safe_output
-    assert repository.events[1].payload["semantic"]["label"] == "我已经准备好预览，等你确认～"
+    assert repository.events[1].payload["semantic"]["label"] == "请确认售后信息"
 
 
 def test_tool_executor_excludes_trusted_confirmed_form_data_from_audit_payloads() -> None:

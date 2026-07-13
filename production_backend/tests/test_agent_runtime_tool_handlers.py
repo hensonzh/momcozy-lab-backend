@@ -157,33 +157,61 @@ def test_profile_update_tool_handler_requires_at_least_one_field() -> None:
     assert exc_info.value.code == "validation_failed"
 
 
-def test_support_ticket_propose_tool_handler_creates_confirmation_action() -> None:
+def test_support_ticket_propose_tool_handler_creates_editable_draft_artifact() -> None:
     actor = _user()
     runtime_service = FakeAgentRuntimeService()
     handler = SupportTicketProposeToolHandler(runtime_service=runtime_service)
     context = _context(
         actor=actor,
         args={
-            "issue_type": "pump",
+            "issue_type": "malfunction",
             "issue_summary": "Pump does not start",
             "product_model": "M9",
             "user_contact": "mai@example.com",
+            "urgency": "high",
+            "user_confirmed": True,
+            "trusted_current_user_text": "Yes, please create the support ticket now.",
             "locale": "en-US",
         },
     )
 
     result = asyncio.run(handler(context))
 
-    assert result["action_id"] == str(runtime_service.action.id)
-    assert result["action_type"] == "support.ticket.create"
-    assert result["action_status"] == "confirmation_required"
-    assert result["requires_confirmation"] is True
-    assert result["preview_payload"]["has_user_contact"] is True
-    assert "user_contact" not in result["preview_payload"]
+    assert result["status"] == "ticket_draft_created"
+    assert result["artifact_id"] == str(runtime_service.artifact.id)
+    assert result["artifact_type"] == "support_ticket_draft"
+    assert result["submit_label"] == "确认并提交"
+    assert result["ticket"]["issue_type"] == "malfunction"
+    assert result["ticket"]["user_contact"] == "mai@example.com"
+    assert result["_deferred_agent_events"][0]["event_type"] == "artifact.created"
+    assert result["_deferred_agent_events"][0]["payload"]["artifact_type"] == "support_ticket_draft"
     assert runtime_service.calls[0]["owner_user_id"] == actor.user_id
     assert runtime_service.calls[0]["run_id"] == context.run_id
-    assert runtime_service.calls[0]["apply_payload"]["user_contact"] == "mai@example.com"
-    assert runtime_service.calls[0]["apply_payload"]["metadata"] == {"locale": "en-US"}
+    assert runtime_service.calls[0]["artifact_type"] == "support_ticket_draft"
+    assert runtime_service.calls[0]["payload"]["ticket"]["issue_summary"] == "Pump does not start"
+    assert not any("action_type" in call for call in runtime_service.calls)
+
+
+def test_support_ticket_propose_tool_handler_asks_in_chat_before_creating_draft() -> None:
+    runtime_service = FakeAgentRuntimeService()
+    result = asyncio.run(
+        SupportTicketProposeToolHandler(runtime_service=runtime_service)(
+            _context(
+                args={
+                    "issue_type": "defect",
+                    "issue_summary": "The new pump is cracked.",
+                    "user_confirmed": False,
+                    "user_emotion": "upset",
+                    "trusted_current_user_text": "The new pump is cracked and I am very upset.",
+                }
+            )
+        )
+    )
+
+    assert result["status"] == "needs_support_ticket_confirmation"
+    assert result["requires_confirmation"] is True
+    assert "需要我现在帮你创建吗" in result["confirmation_question"]
+    assert runtime_service.calls == []
 
 
 def test_hospital_bag_cart_update_propose_tool_handler_creates_confirmation_action() -> None:

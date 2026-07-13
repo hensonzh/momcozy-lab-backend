@@ -344,8 +344,9 @@ def test_tool_contract_registry_contains_only_model_visible_tools_and_loading_po
     assert milk_status.loading_mode == "eager"
     assert support_ticket.loading_mode == "deferred"
     assert support_ticket.read_or_write == "write"
-    assert support_ticket.requires_confirmation is True
-    assert support_ticket.blocking_policy == "wait_for_confirmation"
+    assert support_ticket.requires_confirmation is False
+    assert support_ticket.blocking_policy == "must_wait"
+    assert support_ticket.result_dependency == "final_response"
     assert ibclc_consult.idempotency_required is True
     assert milk_status.read_or_write == "read"
     assert milk_status.requires_confirmation is False
@@ -373,7 +374,7 @@ def test_model_tool_schema_registry_has_no_internal_or_legacy_orphans() -> None:
         ("plans.milk_plan.propose", "write", True, "deferred"),
         ("pregnancy_diary.manage", "write", False, "eager"),
         ("hospital_bag_card_create", "write", False, "deferred"),
-        ("support.ticket.propose", "write", True, "deferred"),
+        ("support.ticket.propose", "write", False, "deferred"),
     ],
 )
 def test_model_tool_contracts_keep_side_effect_policy(
@@ -522,9 +523,21 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
     assert profile_update_schema["properties"]["age"]["minimum"] == 12
     assert profile_update_schema["properties"]["age"]["maximum"] == 70
     assert profile_update_schema["properties"]["onboarding_skipped"]["type"] == "boolean"
-    assert support_schema["required"] == ["issue_summary"]
+    assert support_schema["required"] == ["issue_summary", "user_confirmed"]
     assert support_schema["additionalProperties"] is False
     assert "issue_summary" in support_schema["properties"]
+    assert support_schema["properties"]["user_confirmed"]["type"] == "boolean"
+    assert support_schema["properties"]["issue_type"]["enum"] == [
+        "malfunction",
+        "missing_parts",
+        "defect",
+        "warranty",
+        "return_or_refund",
+        "order_or_shipping",
+        "usage_help",
+        "safety_concern",
+        "other",
+    ]
     assert milk_schema["additionalProperties"] is False
     assert milk_schema["properties"]["days"]["maximum"] == 30
     assert milk_schema["properties"]["limit"]["maximum"] == 20

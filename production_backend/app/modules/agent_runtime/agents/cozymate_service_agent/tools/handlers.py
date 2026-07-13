@@ -52,8 +52,6 @@ from production_backend.app.modules.records.agent_actions import (
 )
 from production_backend.app.modules.records.models import FeedingRecord, GrowthRecord, PumpingRecord
 from production_backend.app.modules.records.service import RecordsService
-from production_backend.app.modules.support.agent_actions import SUPPORT_TICKET_CREATE_ACTION
-
 from ..device_guidance import AIR1_UNBOXING_STEPS, DeviceGuidanceReferenceService
 from .executor import DEFERRED_AGENT_EVENTS_KEY, RetainedToolInformation, ToolHandler, ToolHandlerContext, ToolHandlerResult
 from .legacy_artifacts import (
@@ -163,23 +161,53 @@ class SupportTicketProposeToolHandler:
         self.runtime_service = runtime_service
 
     async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
-        apply_payload = _support_ticket_apply_payload(context.args)
-        issue_summary = _text(apply_payload, "issue_summary")
+        ticket = _support_ticket_draft(context)
+        issue_summary = _text(ticket, "issue_summary")
         if not issue_summary:
             raise ApiError(code="validation_failed", message="issue_summary is required.", status=422)
 
-        preview_payload = _support_ticket_preview_payload(apply_payload)
-        action = await self.runtime_service.propose_action(
+        if not _support_ticket_creation_confirmed(context.args):
+            message = _support_ticket_confirmation_message(context.args)
+            return {
+                "tool_name": context.tool_name,
+                "status": "needs_support_ticket_confirmation",
+                "requires_confirmation": True,
+                "confirmation_question": message,
+                "assistant_followup": {"message": message},
+            }
+
+        followup = {"message": _support_ticket_followup_message(ticket)}
+        payload = {
+            "tool_name": context.tool_name,
+            "ticket": ticket,
+            "submit_label": "确认并提交",
+            "assistant_followup": followup,
+        }
+        artifact, created = await self.runtime_service.create_artifact_once(
             owner_user_id=context.actor.user_id,
             run_id=context.run_id,
-            action_type=SUPPORT_TICKET_CREATE_ACTION,
-            target_type="support_ticket",
-            side_effect_level="medium",
-            preview_payload=preview_payload,
-            apply_payload=apply_payload,
-            idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:support-ticket",
+            artifact_type="support_ticket_draft",
+            schema_version="1.0",
+            status="created",
+            payload=payload,
+            emit_event=False,
         )
-        return _proposal_result(action=action, preview_payload=preview_payload)
+        artifact_payload = artifact.payload if isinstance(artifact.payload, dict) else payload
+        artifact_ticket = artifact_payload.get("ticket")
+        result = {
+            "tool_name": context.tool_name,
+            "status": "ticket_draft_created",
+            "artifact_id": str(artifact.id),
+            "artifact_type": artifact.artifact_type,
+            "schema_version": artifact.schema_version,
+            "reused": not created,
+            "ticket": dict(artifact_ticket) if isinstance(artifact_ticket, dict) else ticket,
+            "submit_label": _text(artifact_payload, "submit_label") or "确认并提交",
+            "assistant_followup": artifact_payload.get("assistant_followup", followup),
+        }
+        if created:
+            result[DEFERRED_AGENT_EVENTS_KEY] = [_deferred_artifact_created_event(artifact)]
+        return result
 
 
 class HospitalBagCartUpdateProposeToolHandler:
@@ -2555,36 +2583,93 @@ def _profile_update_values(args: dict[str, Any]) -> dict[str, Any]:
     return values
 
 
-def _support_ticket_apply_payload(args: dict[str, Any]) -> dict[str, Any]:
-    payload: dict[str, Any] = {
+def _support_ticket_draft(context: ToolHandlerContext) -> dict[str, Any]:
+    args = context.args
+    ticket: dict[str, Any] = {
+        "draft_id": f"draft_{hashlib.sha256(f'{context.run_id}:{context.call_id}'.encode()).hexdigest()[:10]}",
         "issue_type": _text(args, "issue_type") or "other",
         "issue_summary": _text(args, "issue_summary"),
         "product_model": _text(args, "product_model"),
         "order_number": _text(args, "order_number"),
         "purchase_channel": _text(args, "purchase_channel"),
         "user_contact": _text(args, "user_contact"),
+        "troubleshooting_done": _string_list(args.get("troubleshooting_done")),
         "urgency": _text(args, "urgency") or "normal",
+        "user_emotion": _text(args, "user_emotion"),
+        "attachments_note": _text(args, "attachments_note"),
+        "preferred_language": _text(args, "locale") or "en-US",
     }
-    extra_payload = args.get("payload")
-    if isinstance(extra_payload, dict):
-        payload["payload"] = extra_payload
-    metadata = _metadata_payload(args)
-    if metadata:
-        payload["metadata"] = metadata
-    return {key: value for key, value in payload.items() if value not in ("", None, {})}
+    return {key: value for key, value in ticket.items() if value not in ("", None, [])}
 
 
-def _support_ticket_preview_payload(apply_payload: dict[str, Any]) -> dict[str, Any]:
-    preview = {
-        "issue_type": _text(apply_payload, "issue_type") or "other",
-        "issue_summary": _text(apply_payload, "issue_summary"),
-        "product_model": _text(apply_payload, "product_model"),
-        "order_number": _text(apply_payload, "order_number"),
-        "purchase_channel": _text(apply_payload, "purchase_channel"),
-        "urgency": _text(apply_payload, "urgency") or "normal",
-        "has_user_contact": bool(_text(apply_payload, "user_contact")),
-    }
-    return {key: value for key, value in preview.items() if value not in ("", None)}
+def _support_ticket_creation_confirmed(args: dict[str, Any]) -> bool:
+    if args.get("user_confirmed") is not True:
+        return False
+    message = re.sub(r"\s+", "", _text(args, "trusted_current_user_text").lower())
+    if not message:
+        return False
+    negative_terms = (
+        "不需要",
+        "不用",
+        "先不用",
+        "暂时不用",
+        "不要",
+        "别创建",
+        "先别",
+        "不用创建",
+        "不要创建",
+    )
+    if any(term in message for term in negative_terms):
+        return False
+    raw_message = _text(args, "trusted_current_user_text").lower()
+    if re.search(r"\b(?:no|not now|do not|don't|cancel)\b", raw_message):
+        return False
+    confirmation_terms = (
+        "需要",
+        "可以",
+        "好",
+        "确认",
+        "同意",
+        "创建",
+        "帮我建",
+        "建售后",
+        "建工单",
+        "提交工单",
+        "提交售后",
+        "售后工单",
+        "联系客服",
+        "现在帮我",
+    )
+    return any(term in message for term in confirmation_terms) or bool(
+        re.search(r"\b(?:yes|ok(?:ay)?|confirm|agree|create|submit|contact support)\b", raw_message)
+    )
+
+
+def _support_ticket_confirmation_message(args: dict[str, Any]) -> str:
+    needs_empathy = not _string_list(args.get("troubleshooting_done")) and (
+        bool(_text(args, "user_emotion"))
+        or _text(args, "issue_type") in {"missing_parts", "defect", "safety_concern", "return_or_refund", "warranty"}
+    )
+    if needs_empathy:
+        return "这件事确实很影响使用体验，我可以帮你创建一个售后工单，我们客服团队会在 24 小时之内联系到你。你看，需要我现在帮你创建吗？"
+    return "非常抱歉没有解决你的问题，我可以帮你创建一个售后工单，我们客服团队会在 24 小时之内联系到你。你看，需要我现在帮你创建吗？"
+
+
+def _support_ticket_followup_message(ticket: dict[str, Any]) -> str:
+    issue_type = _text(ticket, "issue_type")
+    if issue_type == "missing_parts":
+        opening = "收到设备却发现配件不完整，确实很影响体验，也会耽误正常使用。"
+    elif issue_type in {"malfunction", "defect"}:
+        opening = "设备还是没法正常使用，确实很让人着急，尤其是已经按步骤排查过还没有变化的时候。"
+    elif issue_type == "safety_concern":
+        opening = "这个情况会让人不放心，先把安全放在第一位是对的。"
+    elif issue_type == "return_or_refund":
+        opening = "退换货这类事情本来就很耗心力，我先帮你把关键信息整理清楚。"
+    elif issue_type == "order_or_shipping":
+        opening = "订单或物流问题拖着不清楚，确实容易让人焦虑。"
+    else:
+        opening = "这件事确实会影响使用体验，也容易让人着急。"
+    return f"{opening}\n\n我已经帮你把售后信息整理好了，你可以看一下有没有需要补充或修改的地方。"
 
 
 def _hospital_bag_cart_apply_payload(args: dict[str, Any]) -> dict[str, Any]:

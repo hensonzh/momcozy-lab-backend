@@ -376,6 +376,19 @@ def test_agent_runtime_executor_injects_trusted_ibclc_consent_context() -> None:
     }
 
 
+def test_agent_runtime_executor_injects_trusted_support_ticket_confirmation_text() -> None:
+    run = _run(thread_id=uuid4())
+    executor = AgentRuntimeExecutor(
+        repository=FakeRuntimeRepository(messages=[], current_message=None),
+        sdk_runner=OpenAIAgentsSdkRunner(backend=CapturingSdkBackend(result=SdkNodeResult(final_text=""))),
+    )
+    executor._run_current_user_text[run.id] = "好的，请现在帮我创建售后工单"
+
+    trusted_args = asyncio.run(executor._trusted_tool_args(run=run, contract_name="support.ticket.propose"))
+
+    assert trusted_args == {"trusted_current_user_text": "好的，请现在帮我创建售后工单"}
+
+
 def test_agent_runtime_executor_projects_recent_ibclc_client_event_into_next_turn() -> None:
     thread_id = uuid4()
     prior_run_id = uuid4()
@@ -1163,7 +1176,7 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert backend.tool_schemas["records_milk_summary_read"]["properties"]["days"]["maximum"] == 30
     assert backend.tool_schemas["records_pumping_record_propose"]["required"] == ["pump_start_time"]
     assert backend.tool_schemas["records_pumping_record_delete_propose"]["required"] == ["record_id"]
-    assert backend.tool_schemas["support_ticket_propose"]["required"] == ["issue_summary"]
+    assert backend.tool_schemas["support_ticket_propose"]["required"] == ["issue_summary", "user_confirmed"]
     assert backend.tool_schemas["support_ticket_propose"]["additionalProperties"] is False
     assert backend.tool_search_enabled is True
     assert "milk_management" in backend.tool_namespaces
