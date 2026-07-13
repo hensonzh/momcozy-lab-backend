@@ -45,6 +45,24 @@ def test_agent_run_controls_round_trips_queue_wakeup_signal() -> None:
     assert redis.expired_keys == {"agent:run_queue:wakeup"}
 
 
+def test_agent_run_controls_keep_fact_wakeup_separate_from_run_queue() -> None:
+    redis = FakeRedis()
+    controls = AgentRunControls(redis)
+    run_id = uuid4()
+
+    async def exercise() -> tuple[str | None, str | None]:
+        await controls.notify_fact_queued(run_id=run_id)
+        run_signal = await controls.wait_for_run_queue_signal(timeout_seconds=0)
+        fact_signal = await controls.wait_for_fact_queue_signal(timeout_seconds=0.01)
+        return run_signal, fact_signal
+
+    run_signal, fact_signal = asyncio.run(exercise())
+
+    assert run_signal is None
+    assert fact_signal == str(run_id)
+    assert redis.expired_keys == {"agent:fact_queue:wakeup"}
+
+
 def test_agent_run_controls_lock_context_releases_owned_lock() -> None:
     redis = FakeRedis()
     controls = AgentRunControls(redis)

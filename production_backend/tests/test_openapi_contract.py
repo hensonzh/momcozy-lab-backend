@@ -90,6 +90,8 @@ def test_openapi_contains_core_flutter_handoff_paths() -> None:
         "/v1/agent/memories",
         "/v1/agent/memories/settings",
         "/v1/agent/memories/{memory_id}",
+        "/v1/agent/facts",
+        "/v1/agent/facts/{fact_id}",
         "/v1/agent/runs",
         "/v1/agent/runs/{run_id}/client-events",
         "/v1/agent/runs/{run_id}/stream",

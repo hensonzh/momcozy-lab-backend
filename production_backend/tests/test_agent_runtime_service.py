@@ -168,7 +168,8 @@ def test_agent_runtime_service_verifies_form_submission_attachment_against_owned
         payload={"form": {"id": "hospital_bag_intake"}},
         raw_payload_ref="",
     )
-    service = AgentRuntimeService(repository=repository)
+    fact_service = FakeFactService()
+    service = AgentRuntimeService(repository=repository, fact_service=fact_service)
 
     asyncio.run(
         service.create_run(
@@ -196,6 +197,95 @@ def test_agent_runtime_service_verifies_form_submission_attachment_against_owned
         "verified": True,
     }
     assert UUID(attachment["submission_id"])
+    assert fact_service.form_submissions == [
+        {
+            "owner_user_id": owner_user_id,
+            "form_id": "hospital_bag_intake",
+            "values": {"due_date_or_week": "32周", "birth_path": "顺产"},
+            "submission_id": attachment["submission_id"],
+        }
+    ]
+
+
+def test_agent_runtime_service_enqueues_conversation_fact_job_with_the_user_message() -> None:
+    owner_user_id = uuid4()
+    repository = FakeAgentRuntimeRepository()
+    fact_service = FakeFactService()
+    controls = FakeAgentRunControls()
+    service = AgentRuntimeService(
+        repository=repository,
+        fact_service=fact_service,
+        memory_service=FakeMemoryConsentService(enabled=True),
+        controls=controls,
+    )
+
+    run = asyncio.run(
+        service.create_run(
+            actor_user_id=owner_user_id,
+            thread_id=None,
+            message="我现在 30 周，准备顺产。",
+            request_id="req-fact",
+            trace_id="trace-fact",
+        )
+    )
+
+    assert fact_service.queued_extractions == [
+        {
+            "owner_user_id": owner_user_id,
+            "run_id": run.id,
+            "message_id": repository.messages[0].id,
+            "request_id": "req-fact",
+            "trace_id": "trace-fact",
+        }
+    ]
+    assert run.status == "queued"
+    assert controls.queued_run_ids == []
+    assert controls.queued_fact_run_ids == []
+
+    asyncio.run(repository.run_after_commit_callbacks())
+
+    assert controls.queued_run_ids == [run.id]
+    assert controls.queued_fact_run_ids == [run.id]
+
+
+def test_agent_runtime_service_memory_opt_out_skips_form_fact_sync_and_conversation_job() -> None:
+    owner_user_id = uuid4()
+    repository = FakeAgentRuntimeRepository()
+    repository.artifact = AgentArtifact(
+        id=uuid4(),
+        run_id=uuid4(),
+        owner_user_id=owner_user_id,
+        artifact_type="form",
+        schema_version="1.0",
+        status="created",
+        payload={"form": {"id": "hospital_bag_intake"}},
+        raw_payload_ref="",
+    )
+    fact_service = FakeFactService()
+    service = AgentRuntimeService(
+        repository=repository,
+        fact_service=fact_service,
+        memory_service=FakeMemoryConsentService(enabled=False),
+    )
+
+    asyncio.run(
+        service.create_run(
+            actor_user_id=owner_user_id,
+            thread_id=None,
+            message="我已提交待产包表单。",
+            attachments=[
+                {
+                    "type": "form_submission",
+                    "artifact_id": str(repository.artifact.id),
+                    "form_id": "hospital_bag_intake",
+                    "values": {"due_date_or_week": "30周"},
+                }
+            ],
+        )
+    )
+
+    assert fact_service.form_submissions == []
+    assert fact_service.queued_extractions == []
 
 
 def test_agent_runtime_service_rejects_form_submission_for_mismatched_artifact() -> None:
@@ -633,6 +723,29 @@ class FakeFileRepository:
         return self.file_object
 
 
+class FakeFactService:
+    def __init__(self) -> None:
+        self.form_submissions = []
+        self.queued_extractions = []
+
+    async def sync_form_submission(self, **kwargs):
+        self.form_submissions.append(
+            {key: value for key, value in kwargs.items() if key not in {"observed_at", "request_id"}}
+        )
+
+    async def enqueue_conversation_extraction(self, **kwargs):
+        self.queued_extractions.append(kwargs)
+        return kwargs
+
+
+class FakeMemoryConsentService:
+    def __init__(self, *, enabled: bool) -> None:
+        self.enabled = enabled
+
+    async def is_memory_enabled(self, *, owner_user_id):
+        return self.enabled
+
+
 class FakeIdempotencyService:
     def __init__(self, *, status: str, response_ref: str = "") -> None:
         self.status = status
@@ -675,6 +788,7 @@ class FakeAgentRunControls:
         self.cleared_cancel_run_id = None
         self.stream_cursor = None
         self.queued_run_ids = []
+        self.queued_fact_run_ids = []
 
     async def set_active_run(self, *, thread_id, run_id):
         self.active_run = (thread_id, run_id)
@@ -693,3 +807,6 @@ class FakeAgentRunControls:
 
     async def notify_run_queued(self, *, run_id):
         self.queued_run_ids.append(run_id)
+
+    async def notify_fact_queued(self, *, run_id):
+        self.queued_fact_run_ids.append(run_id)

@@ -34,7 +34,7 @@ production_backend/.venv/bin/python
 | 本地单独启动/重启 worker | `make backend-local-workers` | `run_agent_worker.py`, `run_outbox_worker.py`, `run_memory_consolidation.py` |
 | 基础设施验收 | `make backend-check-infra` | database / Redis / object storage / product asset checks |
 | 后端产品化门禁 | `make backend-productization-status` | `check_productization_status.py` |
-| 后端 smoke | `make backend-smoke` | productization status + seed eval |
+| 后端 smoke | `make backend-smoke` | productization status + seed eval + fact extraction eval |
 | Server test smoke | `make backend-test-smoke` | productization status + infra checks |
 | Production readiness | `make backend-prod-readiness` | productization status + infra checks |
 
@@ -55,6 +55,7 @@ production_backend/.venv/bin/python
 | `recover_stuck_agent_runs.py` | 查找长时间停留在 `running` 的 agent run；默认 dry run，`--apply` 后标记失败并清理 Redis 控制状态。 | 运维恢复卡住的 run 时手动执行。 | `python production_backend/scripts/recover_stuck_agent_runs.py --limit 20`; 真正修改用 `--apply` |
 | `run_agent_replay_eval.py` | 用已保存的 replay bundle 对单个 seed case 做回放断言。 | 线上问题复盘、事故回归、专题修复验证。 | `python production_backend/scripts/run_agent_replay_eval.py --replay <bundle.json> --suite <suite> --name <case-name>` |
 | `run_agent_seed_eval.py` | 运行确定性的产品 agent seed eval，可输出 JSON/JUnit。 | 每次 PR CI、本地 smoke、改动 agent runtime/工具/路由时。 | `python production_backend/scripts/run_agent_seed_eval.py --output /tmp/agent-seed-eval.json --junit-output /tmp/agent-seed-eval.junit.xml` |
+| `run_agent_fact_eval.py` | 通过真实 `AgentFactExtractor` 与确定性 scripted backend 运行聊天事实提取 eval，可输出 JSON/JUnit。 | 每次 PR CI、本地 smoke、改动事实目录/提取规则时。 | `python production_backend/scripts/run_agent_fact_eval.py --output /tmp/agent-fact-eval.json --junit-output /tmp/agent-fact-eval.junit.xml` |
 | `run_agent_worker.py` | 独立 agent run worker 进程入口，扫描可运行 run 并执行 LangGraph + OpenAI Agents SDK runtime。 | `make backend-local-up` 或单独 worker 服务启动时运行。 | `python -m production_backend.scripts.run_agent_worker`; 本地完整启动推荐 `make backend-local-up`，单独重启推荐 `make backend-local-workers` |
 | `run_outbox_worker.py` | 独立通用 outbox worker 进程入口；当前只处理文件对象清理等非 Agent action 的持久副作用与重试。Agent action 由 agent worker 在 run 内同步执行。 | `make backend-local-up` 或单独 worker 服务启动时运行。 | `python -m production_backend.scripts.run_outbox_worker`; 本地完整启动推荐 `make backend-local-up`，单独重启推荐 `make backend-local-workers` |
 | `run_memory_consolidation.py` | 独立夜间记忆 worker；读取前一日本地自然日的已完成对话，幂等更新长期记忆与 bounded snapshot。 | 启动时补跑一次，此后按配置小时运行；也可手工 backfill。 | `python -m production_backend.scripts.run_memory_consolidation`; 单次补跑用 `--once --date YYYY-MM-DD` |
@@ -68,6 +69,7 @@ PR 级别通常需要：
 - `mypy app scripts`
 - `pytest production_backend/tests`
 - `run_agent_seed_eval.py`
+- `run_agent_fact_eval.py`
 - `check_backup_restore_hooks.py`
 - `export_openapi.py` + 快照 diff
 

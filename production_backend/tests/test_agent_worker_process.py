@@ -10,9 +10,13 @@ from production_backend.app.core.settings import Settings
 from production_backend.scripts.run_agent_worker import (
     AgentRunProcessResult,
     RunnableAgentRunRef,
+    _expire_due_fact_candidates,
+    _run_fact_worker_lane,
     _log_agent_run_process_timing,
     _fail_run_after_worker_error,
     _process_with_concurrency,
+    _supervise_fact_worker_lane,
+    _wait_for_next_fact_signal,
     _wait_for_next_agent_run_signal,
     _with_metrics,
     run_agent_worker,
@@ -141,6 +145,211 @@ def test_agent_worker_idle_wait_returns_immediately_when_stopping() -> None:
     assert controls.wait_timeouts == []
 
 
+def test_agent_fact_worker_idle_wait_uses_separate_queue_signal() -> None:
+    controls = FakeAgentRunControls()
+
+    asyncio.run(_wait_for_next_fact_signal(controls=controls, idle_seconds=0.25, stop_event=None))
+
+    assert controls.fact_wait_timeouts == [0.25]
+    assert controls.wait_timeouts == []
+
+
+def test_agent_worker_runs_main_and_fact_lanes_concurrently(monkeypatch) -> None:
+    main_started = asyncio.Event()
+    fact_started = asyncio.Event()
+
+    async def fake_main_lane(**_kwargs):
+        main_started.set()
+        await fact_started.wait()
+        return {"status": "ok", "cycles": 1, "scanned": 0, "processed": 0, "terminal": 0, "interrupted": 0}
+
+    async def fake_fact_lane(**_kwargs):
+        await main_started.wait()
+        fact_started.set()
+        return {"status": "ok", "cycles": 1, "scanned": 0, "processed": 0, "completed": 0, "dead_lettered": 0}
+
+    class FakeEngine:
+        async def dispose(self):
+            return None
+
+    async def fake_close_redis(_redis):
+        return None
+
+    monkeypatch.setattr(worker_module, "create_db_engine", lambda _settings: FakeEngine())
+    monkeypatch.setattr(worker_module, "create_session_factory", lambda _engine: object())
+    monkeypatch.setattr(worker_module, "create_object_storage", lambda _settings: object())
+    monkeypatch.setattr(worker_module, "create_redis_client", lambda _settings: object())
+    monkeypatch.setattr(worker_module, "close_redis_client", fake_close_redis)
+    monkeypatch.setattr(worker_module, "_run_agent_run_lane", fake_main_lane)
+    monkeypatch.setattr(worker_module, "_run_fact_worker_lane", fake_fact_lane)
+
+    result = asyncio.run(
+        run_agent_worker(
+            settings=Settings(
+                app_env="test",
+                agent_runtime_worker_enabled=True,
+                agent_fact_extraction_enabled=True,
+                openai_api_key="test-key",
+            ),
+            once=True,
+        )
+    )
+
+    assert result["status"] == "ok"
+    assert result["facts"]["status"] == "ok"
+    assert main_started.is_set() and fact_started.is_set()
+
+
+def test_agent_fact_lane_crash_restarts_without_cancelling_main_lane() -> None:
+    main_completed = asyncio.Event()
+    attempts = 0
+
+    async def main_lane():
+        await asyncio.sleep(0)
+        main_completed.set()
+        return "main-completed"
+
+    async def fact_lane():
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("fact lane crashed")
+        return {"status": "ok"}
+
+    async def exercise():
+        return await asyncio.gather(
+            main_lane(),
+            _supervise_fact_worker_lane(
+                lane_factory=fact_lane,
+                restart=True,
+                restart_delay_seconds=0.1,
+                stop_event=None,
+            ),
+        )
+
+    main_result, fact_result = asyncio.run(exercise())
+
+    assert main_completed.is_set()
+    assert main_result == "main-completed"
+    assert attempts == 2
+    assert fact_result["status"] == "ok"
+
+
+def test_agent_fact_worker_cycle_failure_isolated_as_degraded(monkeypatch) -> None:
+    async def fail_claim(**_kwargs):
+        raise RuntimeError("fact database unavailable")
+
+    monkeypatch.setattr(worker_module, "_claim_due_fact_extractions", fail_claim)
+
+    result = asyncio.run(
+        _run_fact_worker_lane(
+            worker=object(),
+            settings=Settings(),
+            once=True,
+            max_cycles=None,
+            stop_event=None,
+            session_factory=object(),
+            controls=FakeAgentRunControls(),
+        )
+    )
+
+    assert result == {
+        "status": "degraded",
+        "cycles": 1,
+        "scanned": 0,
+        "processed": 0,
+        "completed": 0,
+        "dead_lettered": 0,
+    }
+
+
+def test_agent_fact_worker_redis_wait_failure_is_retried_without_escaping(monkeypatch) -> None:
+    async def no_claims(**_kwargs):
+        return []
+
+    class FailingFactWaitControls(FakeAgentRunControls):
+        async def wait_for_fact_queue_signal(self, *, timeout_seconds):
+            raise RuntimeError("redis unavailable")
+
+    monkeypatch.setattr(worker_module, "_claim_due_fact_extractions", no_claims)
+
+    result = asyncio.run(
+        _run_fact_worker_lane(
+            worker=object(),
+            settings=Settings(agent_fact_worker_idle_seconds=0.01),
+            once=False,
+            max_cycles=2,
+            stop_event=None,
+            session_factory=object(),
+            controls=FailingFactWaitControls(),
+        )
+    )
+
+    assert result["status"] == "degraded"
+    assert result["cycles"] == 2
+
+
+def test_agent_fact_expiration_scrubs_with_value_free_audit(monkeypatch) -> None:
+    fact = SimpleNamespace(
+        id=uuid4(),
+        owner_user_id=uuid4(),
+        fact_key="profile.age",
+        fact_kind="conversation_candidate",
+    )
+    audit_calls = []
+
+    class FakeSession:
+        committed = False
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def commit(self):
+            self.committed = True
+
+    session = FakeSession()
+
+    class FakeRepository:
+        async def expire_due_candidates(self, **_kwargs):
+            return [fact]
+
+    class FakeAuditService:
+        async def record(self, **kwargs):
+            audit_calls.append(kwargs)
+
+    monkeypatch.setattr(worker_module, "AgentFactRepository", lambda _session: FakeRepository())
+    monkeypatch.setattr(worker_module, "AuditRepository", lambda _session: object())
+    monkeypatch.setattr(worker_module, "AuditService", lambda **_kwargs: FakeAuditService())
+
+    expired = asyncio.run(
+        _expire_due_fact_candidates(
+            session_factory=lambda: session,
+            batch_limit=10,
+        )
+    )
+
+    assert expired == 1
+    assert session.committed is True
+    assert audit_calls == [
+        {
+            "actor_user_id": fact.owner_user_id,
+            "actor_type": "service",
+            "actor_service": "agent-fact-worker",
+            "action": "agent.fact.candidate.expired",
+            "resource_type": "agent_user_fact",
+            "resource_id": str(fact.id),
+            "details": {
+                "fact_key": "profile.age",
+                "fact_kind": "conversation_candidate",
+                "deletion_reason": "expired",
+            },
+        }
+    ]
+
+
 def test_agent_worker_failure_cleanup_publishes_live_before_persisting(monkeypatch) -> None:
     operations = []
     run = SimpleNamespace(id=uuid4(), thread_id=uuid4(), status="running")
@@ -220,7 +429,12 @@ def test_worker_runtime_sleep_returns_when_stop_event_is_set() -> None:
 class FakeAgentRunControls:
     def __init__(self) -> None:
         self.wait_timeouts = []
+        self.fact_wait_timeouts = []
 
     async def wait_for_run_queue_signal(self, *, timeout_seconds):
         self.wait_timeouts.append(timeout_seconds)
+        return "run-id"
+
+    async def wait_for_fact_queue_signal(self, *, timeout_seconds):
+        self.fact_wait_timeouts.append(timeout_seconds)
         return "run-id"

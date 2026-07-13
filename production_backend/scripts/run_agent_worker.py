@@ -28,12 +28,22 @@ from production_backend.app.modules.agent_runtime.actions.registry import build_
 from production_backend.app.modules.agent_runtime.event_stream.sink import AgentEventSink
 from production_backend.app.modules.agent_runtime.event_stream.transient import AgentTransientStream
 from production_backend.app.modules.agent_runtime.memory.service import AgentMemoryRepository, AgentMemoryService
+from production_backend.app.modules.agent_runtime.facts import (
+    AgentFactExtractor,
+    AgentFactRepository,
+    AgentFactService,
+    FactExtractionJobClaim,
+)
+from production_backend.app.modules.agent_runtime.facts.worker import (
+    AgentFactExtractionWorker,
+    FactExtractionProcessResult,
+)
 from production_backend.app.modules.agent_runtime.repository import AgentRuntimeRepository
 from production_backend.app.modules.agent_runtime.run_lifecycle.controls import AgentRunControls
 from production_backend.app.modules.agent_runtime.run_lifecycle.executor import AgentRuntimeExecutor
 from production_backend.app.modules.agent_runtime.run_lifecycle.quick_replies import QuickReplyFinalizer
 from production_backend.app.modules.agent_runtime.run_lifecycle.working_context import RedisAgentWorkingContextStore
-from production_backend.app.modules.agent_runtime.sdk import create_agent_model_runner
+from production_backend.app.modules.agent_runtime.sdk import OpenAIResponsesRunner, create_agent_model_runner
 from production_backend.app.modules.agent_runtime.service import AgentRuntimeService
 from production_backend.app.modules.assets.service import ProductAssetService
 from production_backend.app.modules.audit import AuditService, IdempotencyService
@@ -90,71 +100,221 @@ async def run_agent_worker(
     redis_client = create_redis_client(resolved_settings)
     controls = AgentRunControls(redis_client)
     metrics = RequestMetrics()
-    totals: dict[str, Any] = {"status": "ok", "cycles": 0, "scanned": 0, "processed": 0, "terminal": 0, "interrupted": 0}
+    lane_tasks: list[asyncio.Task[dict[str, Any]]] = []
     try:
-        while True:
-            if stop_event is not None and stop_event.is_set():
-                totals["status"] = "stopping"
-                return _with_metrics(totals, metrics)
-            stale_run_refs = await _list_stale_running_run_refs(
-                session_factory=session_factory,
-                batch_limit=resolved_settings.agent_runtime_worker_batch_limit,
-                interrupt_running_older_than_seconds=resolved_settings.agent_runtime_interrupt_running_older_than_seconds,
-            )
-            interrupt_results = await _process_with_concurrency(
-                items=stale_run_refs,
-                concurrency=resolved_settings.agent_runtime_worker_concurrency,
-                processor=lambda run_ref: _interrupt_agent_run(
-                    run_id=run_ref.run_id,
-                    before_status=run_ref.status,
-                    session_factory=session_factory,
-                    redis_client=redis_client,
-                    controls=controls,
-                ),
-            )
-            queued_limit = max(0, resolved_settings.agent_runtime_worker_batch_limit - len(stale_run_refs))
-            run_refs = await _list_runnable_run_refs(
-                session_factory=session_factory,
-                batch_limit=queued_limit,
-            )
-            run_results = await _process_with_concurrency(
-                items=run_refs,
-                concurrency=resolved_settings.agent_runtime_worker_concurrency,
-                processor=lambda run_ref: _process_agent_run(
-                    run_id=run_ref.run_id,
-                    before_status=run_ref.status,
-                    session_factory=session_factory,
+        lane_tasks.append(
+            asyncio.create_task(
+                _run_agent_run_lane(
                     settings=resolved_settings,
+                    once=once,
+                    max_cycles=max_cycles,
+                    stop_event=stop_event,
+                    session_factory=session_factory,
                     object_storage=object_storage,
                     redis_client=redis_client,
                     controls=controls,
                     metrics=metrics,
+                )
+            )
+        )
+        if resolved_settings.agent_fact_extraction_enabled:
+            fact_runner = OpenAIResponsesRunner(
+                model=resolved_settings.agent_fact_extraction_model,
+                max_turns=1,
+                timeout_seconds=resolved_settings.agent_fact_extraction_timeout_seconds,
+                api_key=resolved_settings.openai_api_key,
+                reasoning_effort="none",
+                store_responses=False,
+                metrics=metrics,
+                metrics_node_name="turn_fact_extractor",
+            )
+            fact_worker = AgentFactExtractionWorker(
+                session_factory=session_factory,
+                extractor=AgentFactExtractor(
+                    model_runner=fact_runner,
+                    extractor_version=resolved_settings.agent_fact_extraction_version,
                 ),
             )
-            all_results = [*interrupt_results, *run_results]
-            result = AgentRunQueueWorkerResult(
-                scanned=len(stale_run_refs) + len(run_refs),
-                processed=sum(1 for item in all_results if item.status_changed),
-                terminal=sum(1 for item in all_results if item.terminal),
-                interrupted=sum(1 for item in all_results if item.interrupted),
-            )
-
-            totals["cycles"] += 1
-            totals["scanned"] += result.scanned
-            totals["processed"] += result.processed
-            totals["terminal"] += result.terminal
-            totals["interrupted"] = int(totals.get("interrupted", 0)) + result.interrupted
-            if once or (max_cycles is not None and totals["cycles"] >= max_cycles):
-                return _with_metrics(totals, metrics)
-            if result.scanned == 0 or result.processed == 0:
-                await _wait_for_next_agent_run_signal(
-                    controls=controls,
-                    idle_seconds=resolved_settings.agent_runtime_worker_idle_seconds,
-                    stop_event=stop_event,
+            lane_tasks.append(
+                asyncio.create_task(
+                    _supervise_fact_worker_lane(
+                        lane_factory=lambda: _run_fact_worker_lane(
+                            worker=fact_worker,
+                            settings=resolved_settings,
+                            once=once,
+                            max_cycles=max_cycles,
+                            stop_event=stop_event,
+                            session_factory=session_factory,
+                            controls=controls,
+                        ),
+                        restart=not once and max_cycles is None,
+                        restart_delay_seconds=max(resolved_settings.agent_fact_worker_idle_seconds, 0.1),
+                        stop_event=stop_event,
+                    )
                 )
+            )
+        lane_results = await asyncio.gather(*lane_tasks)
+        totals = lane_results[0]
+        if len(lane_results) > 1:
+            totals["facts"] = lane_results[1]
+        return _with_metrics(totals, metrics)
     finally:
+        for task in lane_tasks:
+            if not task.done():
+                task.cancel()
+        for task in lane_tasks:
+            if not task.done():
+                with suppress(asyncio.CancelledError):
+                    await task
         await close_redis_client(redis_client)
         await db_engine.dispose()
+
+
+async def _run_agent_run_lane(
+    *,
+    settings: Settings,
+    once: bool,
+    max_cycles: int | None,
+    stop_event: asyncio.Event | None,
+    session_factory: Any,
+    object_storage: Any,
+    redis_client: Any,
+    controls: AgentRunControls,
+    metrics: RequestMetrics,
+) -> dict[str, Any]:
+    totals: dict[str, Any] = {
+        "status": "ok",
+        "cycles": 0,
+        "scanned": 0,
+        "processed": 0,
+        "terminal": 0,
+        "interrupted": 0,
+    }
+    while True:
+        if stop_event is not None and stop_event.is_set():
+            totals["status"] = "stopping"
+            return totals
+        try:
+            await _expire_due_fact_candidates(
+                session_factory=session_factory,
+                batch_limit=settings.agent_fact_worker_batch_limit,
+            )
+        except Exception as exc:
+            log_agent_runtime_event(
+                "agent.fact.expiration_failed",
+                outcome="exception",
+                error_type=type(exc).__name__,
+            )
+        stale_run_refs = await _list_stale_running_run_refs(
+            session_factory=session_factory,
+            batch_limit=settings.agent_runtime_worker_batch_limit,
+            interrupt_running_older_than_seconds=settings.agent_runtime_interrupt_running_older_than_seconds,
+        )
+        interrupt_results = await _process_with_concurrency(
+            items=stale_run_refs,
+            concurrency=settings.agent_runtime_worker_concurrency,
+            processor=lambda run_ref: _interrupt_agent_run(
+                run_id=run_ref.run_id,
+                before_status=run_ref.status,
+                session_factory=session_factory,
+                redis_client=redis_client,
+                controls=controls,
+            ),
+        )
+        queued_limit = max(0, settings.agent_runtime_worker_batch_limit - len(stale_run_refs))
+        run_refs = await _list_runnable_run_refs(
+            session_factory=session_factory,
+            batch_limit=queued_limit,
+        )
+        run_results = await _process_with_concurrency(
+            items=run_refs,
+            concurrency=settings.agent_runtime_worker_concurrency,
+            processor=lambda run_ref: _process_agent_run(
+                run_id=run_ref.run_id,
+                before_status=run_ref.status,
+                session_factory=session_factory,
+                settings=settings,
+                object_storage=object_storage,
+                redis_client=redis_client,
+                controls=controls,
+                metrics=metrics,
+            ),
+        )
+        all_results = [*interrupt_results, *run_results]
+        result = AgentRunQueueWorkerResult(
+            scanned=len(stale_run_refs) + len(run_refs),
+            processed=sum(1 for item in all_results if item.status_changed),
+            terminal=sum(1 for item in all_results if item.terminal),
+            interrupted=sum(1 for item in all_results if item.interrupted),
+        )
+
+        totals["cycles"] += 1
+        totals["scanned"] += result.scanned
+        totals["processed"] += result.processed
+        totals["terminal"] += result.terminal
+        totals["interrupted"] = int(totals.get("interrupted", 0)) + result.interrupted
+        if once or (max_cycles is not None and totals["cycles"] >= max_cycles):
+            return totals
+        if result.scanned == 0 or result.processed == 0:
+            await _wait_for_next_agent_run_signal(
+                controls=controls,
+                idle_seconds=settings.agent_runtime_worker_idle_seconds,
+                stop_event=stop_event,
+            )
+
+
+async def _supervise_fact_worker_lane(
+    *,
+    lane_factory: Callable[[], Awaitable[dict[str, Any]]],
+    restart: bool,
+    restart_delay_seconds: float,
+    stop_event: asyncio.Event | None,
+) -> dict[str, Any]:
+    while True:
+        try:
+            return await lane_factory()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log_agent_runtime_event(
+                "agent.fact.worker_lane_failed",
+                outcome="exception",
+                error_type=type(exc).__name__,
+            )
+            if not restart or (stop_event is not None and stop_event.is_set()):
+                return _failed_fact_lane_totals(status="failed")
+            await _wait_before_fact_lane_restart(
+                delay_seconds=restart_delay_seconds,
+                stop_event=stop_event,
+            )
+            if stop_event is not None and stop_event.is_set():
+                return _failed_fact_lane_totals(status="stopping")
+
+
+async def _wait_before_fact_lane_restart(
+    *,
+    delay_seconds: float,
+    stop_event: asyncio.Event | None,
+) -> None:
+    delay = max(delay_seconds, 0.1)
+    if stop_event is None:
+        await asyncio.sleep(delay)
+        return
+    try:
+        await asyncio.wait_for(stop_event.wait(), timeout=delay)
+    except TimeoutError:
+        return
+
+
+def _failed_fact_lane_totals(*, status: str) -> dict[str, Any]:
+    return {
+        "status": status,
+        "cycles": 0,
+        "scanned": 0,
+        "processed": 0,
+        "completed": 0,
+        "dead_lettered": 0,
+    }
 
 
 def _with_metrics(totals: dict[str, Any], metrics: RequestMetrics) -> dict[str, Any]:
@@ -216,6 +376,152 @@ async def _process_with_concurrency(
     return list(await asyncio.gather(*(guarded(item) for item in items)))
 
 
+async def _run_fact_worker_lane(
+    *,
+    worker: AgentFactExtractionWorker,
+    settings: Settings,
+    once: bool,
+    max_cycles: int | None,
+    stop_event: asyncio.Event | None,
+    session_factory: Any,
+    controls: AgentRunControls,
+) -> dict[str, Any]:
+    totals: dict[str, Any] = {
+        "status": "ok",
+        "cycles": 0,
+        "scanned": 0,
+        "processed": 0,
+        "completed": 0,
+        "dead_lettered": 0,
+    }
+    while True:
+        if stop_event is not None and stop_event.is_set():
+            totals["status"] = "stopping"
+            return totals
+        try:
+            claims = await _claim_due_fact_extractions(
+                session_factory=session_factory,
+                batch_limit=settings.agent_fact_worker_batch_limit,
+                lease_seconds=settings.agent_fact_worker_lease_seconds,
+            )
+            results = await _process_fact_claims(
+                claims=claims,
+                concurrency=settings.agent_fact_worker_concurrency,
+                worker=worker,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log_agent_runtime_event(
+                "agent.fact.worker_cycle_failed",
+                outcome="exception",
+                error_type=type(exc).__name__,
+            )
+            claims = []
+            results = []
+            totals["status"] = "degraded"
+
+        totals["cycles"] += 1
+        totals["scanned"] += len(claims)
+        totals["processed"] += sum(1 for result in results if result.status != "stale_lease")
+        totals["completed"] += sum(1 for result in results if result.status == "completed")
+        totals["dead_lettered"] += sum(1 for result in results if result.status == "dead_lettered")
+        if once or (max_cycles is not None and totals["cycles"] >= max_cycles):
+            return totals
+        if not claims:
+            try:
+                await _wait_for_next_fact_signal(
+                    controls=controls,
+                    idle_seconds=settings.agent_fact_worker_idle_seconds,
+                    stop_event=stop_event,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                totals["status"] = "degraded"
+                log_agent_runtime_event(
+                    "agent.fact.worker_wait_failed",
+                    outcome="exception",
+                    error_type=type(exc).__name__,
+                )
+                await asyncio.sleep(max(settings.agent_fact_worker_idle_seconds, 0.1))
+
+
+async def _claim_due_fact_extractions(
+    *,
+    session_factory: Any,
+    batch_limit: int,
+    lease_seconds: int,
+) -> list[FactExtractionJobClaim]:
+    if batch_limit <= 0:
+        return []
+    now = datetime.now(timezone.utc)
+    async with session_factory() as session:
+        repository = AgentFactRepository(session)
+        claims: list[FactExtractionJobClaim] = await repository.claim_due_extractions(
+            now=now,
+            locked_until=now + timedelta(seconds=lease_seconds),
+            limit=batch_limit,
+        )
+        await session.commit()
+        return claims
+
+
+async def _expire_due_fact_candidates(*, session_factory: Any, batch_limit: int) -> int:
+    if batch_limit <= 0:
+        return 0
+    async with session_factory() as session:
+        repository = AgentFactRepository(session)
+        expired = await repository.expire_due_candidates(
+            now=datetime.now(timezone.utc),
+            limit=batch_limit,
+        )
+        audit_service = AuditService(repository=AuditRepository(session))
+        for fact in expired:
+            await audit_service.record(
+                actor_user_id=fact.owner_user_id,
+                actor_type="service",
+                actor_service="agent-fact-worker",
+                action="agent.fact.candidate.expired",
+                resource_type="agent_user_fact",
+                resource_id=str(fact.id),
+                details={
+                    "fact_key": fact.fact_key,
+                    "fact_kind": fact.fact_kind,
+                    "deletion_reason": "expired",
+                },
+            )
+        await session.commit()
+        return len(expired)
+
+
+async def _process_fact_claims(
+    *,
+    claims: Sequence[FactExtractionJobClaim],
+    concurrency: int,
+    worker: AgentFactExtractionWorker,
+) -> list[FactExtractionProcessResult]:
+    if not claims:
+        return []
+    semaphore = asyncio.Semaphore(concurrency)
+
+    async def guarded(claim: FactExtractionJobClaim) -> FactExtractionProcessResult:
+        async with semaphore:
+            try:
+                return await worker.process(claim)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                log_agent_runtime_event(
+                    "agent.fact.worker_item_failed",
+                    outcome="exception",
+                    error_type=type(exc).__name__,
+                )
+                return FactExtractionProcessResult(status="worker_error")
+
+    return list(await asyncio.gather(*(guarded(claim) for claim in claims)))
+
+
 async def _wait_for_next_agent_run_signal(
     *,
     controls: AgentRunControls,
@@ -230,6 +536,30 @@ async def _wait_for_next_agent_run_signal(
     if stop_event.is_set():
         return
     signal_task = asyncio.create_task(controls.wait_for_run_queue_signal(timeout_seconds=idle_seconds))
+    stop_task = asyncio.create_task(stop_event.wait())
+    done, pending = await asyncio.wait({signal_task, stop_task}, return_when=asyncio.FIRST_COMPLETED)
+    for task in pending:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+    if signal_task in done:
+        await signal_task
+
+
+async def _wait_for_next_fact_signal(
+    *,
+    controls: AgentRunControls,
+    idle_seconds: float,
+    stop_event: asyncio.Event | None,
+) -> None:
+    if idle_seconds <= 0:
+        return
+    if stop_event is None:
+        await controls.wait_for_fact_queue_signal(timeout_seconds=idle_seconds)
+        return
+    if stop_event.is_set():
+        return
+    signal_task = asyncio.create_task(controls.wait_for_fact_queue_signal(timeout_seconds=idle_seconds))
     stop_task = asyncio.create_task(stop_event.wait())
     done, pending = await asyncio.wait({signal_task, stop_task}, return_when=asyncio.FIRST_COMPLETED)
     for task in pending:
@@ -296,7 +626,15 @@ async def _execute_agent_run(
     started_at = perf_counter()
     async with session_factory() as session:
         repository = AgentRuntimeRepository(session)
+        fact_repository = AgentFactRepository(session)
         audit_repository = AuditRepository(session)
+        memory_service = AgentMemoryService(repository=AgentMemoryRepository(session))
+        fact_service = AgentFactService(
+            repository=fact_repository,
+            audit_service=AuditService(repository=audit_repository),
+            memory_consent_reader=memory_service,
+            extraction_enabled=False,
+        )
         profile_service = ProfileService(
             repository=ProfileRepository(session),
             audit_service=AuditService(repository=audit_repository),
@@ -345,9 +683,10 @@ async def _execute_agent_run(
             idempotency_service=IdempotencyService(repository=audit_repository),
             action_executor=action_executor,
             controls=controls,
+            fact_service=fact_service,
+            memory_service=memory_service,
         )
         tool_registry = default_tool_registry()
-        memory_service = AgentMemoryService(repository=AgentMemoryRepository(session))
         transient_stream = AgentTransientStream(redis_client)
         event_sink = AgentEventSink(
             repository=repository,
@@ -396,6 +735,7 @@ async def _execute_agent_run(
             transient_stream=transient_stream,
             quick_reply_finalizer=QuickReplyFinalizer(sdk_runner=quick_reply_runner),
             working_context_store=RedisAgentWorkingContextStore(redis_client),
+            fact_service=fact_service,
             sdk_runner=sdk_runner,
             object_storage=object_storage,
             max_inline_artifact_payload_bytes=settings.agent_runtime_max_inline_payload_bytes,

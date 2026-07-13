@@ -20,6 +20,7 @@ if str(ROOT) not in sys.path:
 from production_backend.app.core.settings import Settings  # noqa: E402
 from production_backend.app.infrastructure.db.session import create_db_engine, create_session_factory  # noqa: E402
 from production_backend.app.modules.agent_runtime.models import AgentRun  # noqa: E402
+from production_backend.app.modules.agent_runtime.facts.models import UserFactExtractionRun  # noqa: E402
 from production_backend.app.modules.audit.models import OutboxJob  # noqa: E402
 
 
@@ -43,6 +44,13 @@ async def inspect_worker_backlog(*, settings: Settings | None = None) -> dict[st
                     "by_status": await _agent_runs_by_status(session),
                     "stale_running": await _stale_running_agent_run_count(session, cutoff=stale_cutoff),
                     "stale_running_cutoff": stale_cutoff.isoformat(),
+                },
+                "fact_extractions": {
+                    "by_status": await _fact_extractions_by_status(session),
+                    "due_or_expired_locked": await _due_or_expired_locked_fact_extraction_count(
+                        session,
+                        now=now,
+                    ),
                 },
             }
     finally:
@@ -99,6 +107,34 @@ async def _stale_running_agent_run_count(session: AsyncSession, *, cutoff: datet
     statement = select(func.count()).select_from(AgentRun).where(
         AgentRun.status == "running",
         or_(AgentRun.started_at.is_(None), AgentRun.started_at <= cutoff),
+    )
+    count = await session.scalar(statement)
+    return int(count or 0)
+
+
+async def _fact_extractions_by_status(session: AsyncSession) -> dict[str, int]:
+    statement = (
+        select(UserFactExtractionRun.status, func.count())
+        .group_by(UserFactExtractionRun.status)
+        .order_by(UserFactExtractionRun.status)
+    )
+    rows = (await session.execute(statement)).all()
+    return _status_counts_from_rows((str(status), int(count)) for status, count in rows)
+
+
+async def _due_or_expired_locked_fact_extraction_count(session: AsyncSession, *, now: datetime) -> int:
+    statement = select(func.count()).select_from(UserFactExtractionRun).where(
+        or_(
+            and_(
+                UserFactExtractionRun.status.in_(("queued", "ready_to_apply")),
+                UserFactExtractionRun.next_attempt_at <= now,
+            ),
+            and_(
+                UserFactExtractionRun.status == "locked",
+                UserFactExtractionRun.locked_until.is_not(None),
+                UserFactExtractionRun.locked_until <= now,
+            ),
+        )
     )
     count = await session.scalar(statement)
     return int(count or 0)

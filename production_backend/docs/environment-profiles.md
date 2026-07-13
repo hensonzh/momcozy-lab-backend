@@ -67,6 +67,15 @@ OPENAI_RESPONSES_STORE=false
 OPENAI_AGENT_USE_RESPONSES=true
 AGENT_QUICK_REPLY_MODEL=gpt-5.4-nano
 AGENT_QUICK_REPLY_TIMEOUT_SECONDS=3.0
+AGENT_FACT_EXTRACTION_ENABLED=true
+AGENT_FACT_EXTRACTION_MODEL=gpt-5.4-nano
+AGENT_FACT_EXTRACTION_TIMEOUT_SECONDS=5.0
+AGENT_FACT_EXTRACTION_VERSION=turn-fact-extractor-v2
+AGENT_FACT_WORKER_CONCURRENCY=2
+AGENT_FACT_WORKER_BATCH_LIMIT=10
+AGENT_FACT_WORKER_IDLE_SECONDS=0.5
+AGENT_FACT_WORKER_LEASE_SECONDS=30
+AGENT_FACT_WORKER_MAX_ATTEMPTS=3
 AGENT_MEMORY_CONSOLIDATION_MODEL=gpt-5.4-nano
 AGENT_MEMORY_CONSOLIDATION_TIMEZONE=Asia/Shanghai
 AGENT_MEMORY_CONSOLIDATION_HOUR=3
@@ -86,7 +95,12 @@ round-trips required response and reasoning items within the active run.
 
 The main agent uses `OPENAI_MODEL` and `OPENAI_REASONING_EFFORT`. Quick replies
 use `AGENT_QUICK_REPLY_MODEL` as a separate lightweight finalizer and do not
-persist to the message database. Long-term memory extraction is also outside
+persist to the message database. Turn-level form-prefill fact extraction is a
+separate OpenAI Responses lane inside `agent-worker`, even when the main Agent
+provider is Minimax. A Minimax-only deployment must set
+`AGENT_FACT_EXTRACTION_ENABLED=false`; an enabled fact lane requires
+`OPENAI_API_KEY`. Its lease must remain greater than its provider timeout.
+Long-term memory extraction is also outside
 the live run path: the independent `memory-worker` reads only completed
 conversations for the previous local day, uses
 `AGENT_MEMORY_CONSOLIDATION_MODEL`, and publishes a bounded database snapshot

@@ -50,6 +50,21 @@ jobs:
             /tmp/agent-seed-eval.json
             /tmp/agent-seed-eval.junit.xml
 
+      - name: Run observed agent fact extraction eval
+        run: >
+          python production_backend/scripts/run_agent_fact_eval.py
+          --output /tmp/agent-fact-eval.json
+          --junit-output /tmp/agent-fact-eval.junit.xml
+
+      - name: Upload agent fact extraction eval reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-fact-eval
+          path: |
+            /tmp/agent-fact-eval.json
+            /tmp/agent-fact-eval.junit.xml
+
       - name: Check Alembic head
         run: python -m alembic -c production_backend/alembic.ini heads
 

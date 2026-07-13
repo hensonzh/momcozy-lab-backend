@@ -63,14 +63,31 @@ class AgentRunControls:
 
     async def notify_run_queued(self, *, run_id: UUID, ttl_seconds: int = 3600) -> None:
         key = _run_queue_wakeup_key()
-        await self.redis.lpush(key, str(run_id))
-        await self.redis.ltrim(key, 0, 999)
-        await self.redis.expire(key, ttl_seconds)
+        await cast(Awaitable[Any], self.redis.lpush(key, str(run_id)))
+        await cast(Awaitable[Any], self.redis.ltrim(key, 0, 999))
+        await cast(Awaitable[Any], self.redis.expire(key, ttl_seconds))
 
     async def wait_for_run_queue_signal(self, *, timeout_seconds: float) -> str | None:
         if timeout_seconds <= 0:
             return None
-        result = await self.redis.blpop(_run_queue_wakeup_key(), timeout=timeout_seconds)
+        result = await cast(Awaitable[Any], self.redis.blpop(_run_queue_wakeup_key(), timeout=timeout_seconds))
+        if not result:
+            return None
+        _key, value = result
+        if isinstance(value, bytes):
+            return value.decode("utf-8")
+        return str(value)
+
+    async def notify_fact_queued(self, *, run_id: UUID, ttl_seconds: int = 3600) -> None:
+        key = _fact_queue_wakeup_key()
+        await cast(Awaitable[Any], self.redis.lpush(key, str(run_id)))
+        await cast(Awaitable[Any], self.redis.ltrim(key, 0, 999))
+        await cast(Awaitable[Any], self.redis.expire(key, ttl_seconds))
+
+    async def wait_for_fact_queue_signal(self, *, timeout_seconds: float) -> str | None:
+        if timeout_seconds <= 0:
+            return None
+        result = await cast(Awaitable[Any], self.redis.blpop(_fact_queue_wakeup_key(), timeout=timeout_seconds))
         if not result:
             return None
         _key, value = result
@@ -151,6 +168,10 @@ def _stream_cursor_key(run_id: UUID) -> str:
 
 def _run_queue_wakeup_key() -> str:
     return "agent:run_queue:wakeup"
+
+
+def _fact_queue_wakeup_key() -> str:
+    return "agent:fact_queue:wakeup"
 
 
 def _active_run_key(thread_id: UUID) -> str:

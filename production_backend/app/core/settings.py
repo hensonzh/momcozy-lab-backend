@@ -89,6 +89,15 @@ class Settings:
     openai_agent_prompt_version: str = "momcozy-agent-prompt-v1"
     agent_quick_reply_model: str = "gpt-5.4-nano"
     agent_quick_reply_timeout_seconds: float = 3.0
+    agent_fact_extraction_enabled: bool = True
+    agent_fact_extraction_model: str = "gpt-5.4-nano"
+    agent_fact_extraction_timeout_seconds: float = 5.0
+    agent_fact_extraction_version: str = "turn-fact-extractor-v2"
+    agent_fact_worker_concurrency: int = 2
+    agent_fact_worker_batch_limit: int = 10
+    agent_fact_worker_idle_seconds: float = 0.5
+    agent_fact_worker_lease_seconds: int = 30
+    agent_fact_worker_max_attempts: int = 3
     agent_memory_consolidation_enabled: bool = False
     agent_memory_consolidation_model: str = "gpt-5.4-nano"
     agent_memory_consolidation_timeout_seconds: float = 30.0
@@ -187,6 +196,42 @@ class Settings:
             agent_quick_reply_timeout_seconds=_env_float(
                 "AGENT_QUICK_REPLY_TIMEOUT_SECONDS",
                 cls.agent_quick_reply_timeout_seconds,
+            ),
+            agent_fact_extraction_enabled=_env_bool(
+                "AGENT_FACT_EXTRACTION_ENABLED",
+                cls.agent_fact_extraction_enabled,
+            ),
+            agent_fact_extraction_model=_env(
+                "AGENT_FACT_EXTRACTION_MODEL",
+                cls.agent_fact_extraction_model,
+            ),
+            agent_fact_extraction_timeout_seconds=_env_float(
+                "AGENT_FACT_EXTRACTION_TIMEOUT_SECONDS",
+                cls.agent_fact_extraction_timeout_seconds,
+            ),
+            agent_fact_extraction_version=_env(
+                "AGENT_FACT_EXTRACTION_VERSION",
+                cls.agent_fact_extraction_version,
+            ),
+            agent_fact_worker_concurrency=_env_int(
+                "AGENT_FACT_WORKER_CONCURRENCY",
+                cls.agent_fact_worker_concurrency,
+            ),
+            agent_fact_worker_batch_limit=_env_int(
+                "AGENT_FACT_WORKER_BATCH_LIMIT",
+                cls.agent_fact_worker_batch_limit,
+            ),
+            agent_fact_worker_idle_seconds=_env_float(
+                "AGENT_FACT_WORKER_IDLE_SECONDS",
+                cls.agent_fact_worker_idle_seconds,
+            ),
+            agent_fact_worker_lease_seconds=_env_int(
+                "AGENT_FACT_WORKER_LEASE_SECONDS",
+                cls.agent_fact_worker_lease_seconds,
+            ),
+            agent_fact_worker_max_attempts=_env_int(
+                "AGENT_FACT_WORKER_MAX_ATTEMPTS",
+                cls.agent_fact_worker_max_attempts,
             ),
             agent_memory_consolidation_enabled=_env_bool(
                 "AGENT_MEMORY_CONSOLIDATION_ENABLED",
@@ -334,6 +379,28 @@ class Settings:
             errors.append("OPENAI_AGENT_PROMPT_VERSION must be at most 80 characters")
         if self.agent_quick_reply_timeout_seconds <= 0:
             errors.append("AGENT_QUICK_REPLY_TIMEOUT_SECONDS must be positive")
+        if self.agent_fact_extraction_enabled and not self.agent_fact_extraction_model:
+            errors.append("AGENT_FACT_EXTRACTION_MODEL is required when fact extraction is enabled")
+        if not isfinite(self.agent_fact_extraction_timeout_seconds) or self.agent_fact_extraction_timeout_seconds <= 0:
+            errors.append("AGENT_FACT_EXTRACTION_TIMEOUT_SECONDS must be finite and positive")
+        if not self.agent_fact_extraction_version or len(self.agent_fact_extraction_version) > 80:
+            errors.append("AGENT_FACT_EXTRACTION_VERSION must be between 1 and 80 characters")
+        if self.agent_fact_worker_concurrency < 1:
+            errors.append("AGENT_FACT_WORKER_CONCURRENCY must be positive")
+        if self.agent_fact_worker_batch_limit < 1:
+            errors.append("AGENT_FACT_WORKER_BATCH_LIMIT must be positive")
+        if not isfinite(self.agent_fact_worker_idle_seconds) or self.agent_fact_worker_idle_seconds < 0:
+            errors.append("AGENT_FACT_WORKER_IDLE_SECONDS must be finite and non-negative")
+        if self.agent_fact_worker_lease_seconds < 1:
+            errors.append("AGENT_FACT_WORKER_LEASE_SECONDS must be positive")
+        elif self.agent_fact_worker_lease_seconds <= self.agent_fact_extraction_timeout_seconds:
+            errors.append(
+                "AGENT_FACT_WORKER_LEASE_SECONDS must be greater than AGENT_FACT_EXTRACTION_TIMEOUT_SECONDS"
+            )
+        if self.agent_fact_worker_max_attempts < 1:
+            errors.append("AGENT_FACT_WORKER_MAX_ATTEMPTS must be positive")
+        if self.agent_runtime_worker_enabled and self.agent_fact_extraction_enabled and not self.openai_api_key:
+            errors.append("OPENAI_API_KEY is required when agent fact extraction is enabled")
         if self.agent_memory_consolidation_enabled and not self.agent_memory_consolidation_model:
             errors.append("AGENT_MEMORY_CONSOLIDATION_MODEL is required when memory consolidation is enabled")
         if self.agent_memory_consolidation_timeout_seconds <= 0:

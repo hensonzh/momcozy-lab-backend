@@ -66,6 +66,13 @@ def test_compose_environment_profiles_use_current_openai_model_defaults() -> Non
 
         assert "OPENAI_MODEL=gpt-5.6-terra" in env
         assert "AGENT_QUICK_REPLY_MODEL=gpt-5.4-nano" in env
+        assert "AGENT_FACT_EXTRACTION_MODEL=gpt-5.4-nano" in env
+        assert "AGENT_FACT_EXTRACTION_VERSION=turn-fact-extractor-v2" in env
+        assert "AGENT_FACT_WORKER_CONCURRENCY=2" in env
+        assert "AGENT_FACT_WORKER_BATCH_LIMIT=10" in env
+        assert "AGENT_FACT_WORKER_IDLE_SECONDS=0.5" in env
+        assert "AGENT_FACT_WORKER_LEASE_SECONDS=30" in env
+        assert "AGENT_FACT_WORKER_MAX_ATTEMPTS=3" in env
 
 
 def test_makefile_infra_checks_use_project_python_environment() -> None:

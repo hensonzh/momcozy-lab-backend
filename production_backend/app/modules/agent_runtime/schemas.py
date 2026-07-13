@@ -145,6 +145,26 @@ class AgentMemoryListResponse(BaseModel):
     items: list[AgentMemoryRead]
 
 
+class AgentFactRead(BaseModel):
+    id: UUID
+    fact_key: str
+    fact_kind: str
+    status: str
+    value: Any
+    sensitivity: str
+    catalog_version: str
+    observed_at: datetime
+    expires_at: datetime | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AgentFactListResponse(BaseModel):
+    items: list[AgentFactRead]
+
+
 class AgentReplayBundle(BaseModel):
     run: dict[str, Any]
     messages: list[dict[str, Any]]

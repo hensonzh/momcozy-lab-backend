@@ -20,6 +20,9 @@ The source of truth is each FastAPI route's OpenAPI extension metadata.
 | POST | `/v1/agent/actions/{action_id}/confirm` | agent-runtime | flutter | stable | Confirm Action |
 | POST | `/v1/agent/actions/{action_id}/reject` | agent-runtime | flutter | stable | Reject Action |
 | DELETE | `/v1/agent/artifacts/{artifact_id}` | agent-runtime | flutter | stable | Delete Artifact |
+| DELETE | `/v1/agent/facts` | agent-runtime | flutter | stable | Clear Facts |
+| GET | `/v1/agent/facts` | agent-runtime | flutter | stable | List Facts |
+| DELETE | `/v1/agent/facts/{fact_id}` | agent-runtime | flutter | stable | Delete Fact |
 | GET | `/v1/agent/memories` | agent-runtime | flutter | stable | List Memories |
 | GET | `/v1/agent/memories/settings` | agent-runtime | flutter | stable | Get Memory Settings |
 | PUT | `/v1/agent/memories/settings` | agent-runtime | flutter | stable | Update Memory Settings |

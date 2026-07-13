@@ -13,11 +13,12 @@ from ...api.dependencies import normalize_idempotency_key, optional_idempotency_
 from ...api.surface import SurfaceAPIRouter, api_surface
 from ...core.logging import log_agent_runtime_event
 from ...infrastructure.db import get_session
-from ..audit import IdempotencyService
+from ..audit import AuditService, IdempotencyService
 from ..audit.repository import AuditRepository
 from ..auth import CurrentUser, ServiceClient
 from ..files.repository import FileRepository
 from .evals.service import AgentEvalService
+from .facts import AgentFactRepository, AgentFactService
 from .memory.service import AgentMemoryRepository, AgentMemoryService
 from .repository import AgentRuntimeRepository
 from .event_stream.replay import AgentReplayService
@@ -30,6 +31,8 @@ from .schemas import (
     AgentClientEventCreate,
     AgentEventPage,
     AgentEventRead,
+    AgentFactListResponse,
+    AgentFactRead,
     AgentReplayBundle,
     AgentMemoryListResponse,
     AgentMemoryRead,
@@ -63,11 +66,20 @@ MIN_PERSISTED_FALLBACK_POLL_INTERVAL_SECONDS = 0.1
 def get_agent_runtime_service(request: Request, session: AsyncSession = Depends(get_session)) -> AgentRuntimeService:
     repository = AgentRuntimeRepository(session)
     audit_repository = AuditRepository(session)
+    memory_service = _build_agent_memory_service(session)
+    fact_service = _build_agent_fact_service(
+        request=request,
+        session=session,
+        audit_repository=audit_repository,
+        memory_service=memory_service,
+    )
     return AgentRuntimeService(
         repository=repository,
         idempotency_service=IdempotencyService(repository=audit_repository),
         file_repository=FileRepository(session),
         controls=AgentRunControls(request.app.state.redis_client),
+        fact_service=fact_service,
+        memory_service=memory_service,
     )
 
 
@@ -81,7 +93,43 @@ def get_agent_eval_service(session: AsyncSession = Depends(get_session)) -> Agen
 
 
 def get_agent_memory_service(session: AsyncSession = Depends(get_session)) -> AgentMemoryService:
+    return _build_agent_memory_service(session)
+
+
+def get_agent_fact_service(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> AgentFactService:
+    memory_service = _build_agent_memory_service(session)
+    return _build_agent_fact_service(
+        request=request,
+        session=session,
+        audit_repository=AuditRepository(session),
+        memory_service=memory_service,
+    )
+
+
+def _build_agent_memory_service(session: AsyncSession) -> AgentMemoryService:
     return AgentMemoryService(repository=AgentMemoryRepository(session))
+
+
+def _build_agent_fact_service(
+    *,
+    request: Request,
+    session: AsyncSession,
+    audit_repository: AuditRepository,
+    memory_service: AgentMemoryService,
+) -> AgentFactService:
+    settings = request.app.state.settings
+    return AgentFactService(
+        repository=AgentFactRepository(session),
+        audit_service=AuditService(repository=audit_repository),
+        memory_consent_reader=memory_service,
+        extraction_enabled=settings.agent_fact_extraction_enabled,
+        extraction_model=settings.agent_fact_extraction_model,
+        extraction_version=settings.agent_fact_extraction_version,
+        extraction_max_attempts=settings.agent_fact_worker_max_attempts,
+    )
 
 
 @router.post("/threads", response_model=AgentThreadRead, status_code=status.HTTP_201_CREATED)
@@ -295,6 +343,50 @@ async def reject_action(
     return AgentActionRead.model_validate(action)
 
 
+@router.get("/facts", response_model=AgentFactListResponse)
+async def list_facts(
+    fact_kind: str | None = Query(default=None, max_length=32),
+    limit: int = Query(default=50, ge=1, le=100),
+    current_user: CurrentUser = Depends(require_current_user),
+    service: AgentFactService = Depends(get_agent_fact_service),
+) -> AgentFactListResponse:
+    facts = await service.list_facts(
+        owner_user_id=current_user.user_id,
+        fact_kind=fact_kind,
+        limit=limit,
+        include_when_disabled=True,
+    )
+    return AgentFactListResponse(items=[AgentFactRead.model_validate(fact) for fact in facts])
+
+
+@router.delete("/facts", status_code=status.HTTP_204_NO_CONTENT)
+async def clear_facts(
+    request: Request,
+    current_user: CurrentUser = Depends(require_current_user),
+    service: AgentFactService = Depends(get_agent_fact_service),
+) -> Response:
+    await service.clear_facts(
+        owner_user_id=current_user.user_id,
+        request_id=str(getattr(request.state, "request_id", "") or ""),
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.delete("/facts/{fact_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_fact(
+    fact_id: UUID,
+    request: Request,
+    current_user: CurrentUser = Depends(require_current_user),
+    service: AgentFactService = Depends(get_agent_fact_service),
+) -> Response:
+    await service.delete_fact(
+        owner_user_id=current_user.user_id,
+        fact_id=fact_id,
+        request_id=str(getattr(request.state, "request_id", "") or ""),
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.get("/memories", response_model=AgentMemoryListResponse)
 async def list_memories(
     memory_type: str | None = Query(default=None, max_length=80),
@@ -323,10 +415,18 @@ async def get_memory_settings(
 @router.put("/memories/settings", response_model=AgentMemorySettingsRead)
 async def update_memory_settings(
     payload: AgentMemorySettingsUpdate,
+    request: Request,
     current_user: CurrentUser = Depends(require_current_user),
     service: AgentMemoryService = Depends(get_agent_memory_service),
+    fact_service: AgentFactService = Depends(get_agent_fact_service),
 ) -> AgentMemorySettingsRead:
     settings = await service.update_settings(owner_user_id=current_user.user_id, memory_enabled=payload.memory_enabled)
+    if not payload.memory_enabled:
+        await fact_service.cancel_pending_extractions(
+            owner_user_id=current_user.user_id,
+            reason="memory_disabled",
+            request_id=str(getattr(request.state, "request_id", "") or ""),
+        )
     return AgentMemorySettingsRead.model_validate(settings)
 
 

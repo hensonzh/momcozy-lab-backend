@@ -60,6 +60,7 @@ from ..event_semantics import (
     with_tool_event_semantic,
 )
 from ..graphs import AgentGraphRegistry, default_graph_registry
+from ..facts import AgentFactService
 from ..memory.service import AgentMemoryService
 from ..models import AgentAction, AgentArtifact, AgentEvent, AgentMessage, AgentRun, AgentWorkflowState
 from ..payloads import DEFAULT_MAX_INLINE_PAYLOAD_BYTES, maybe_externalize_json_payload
@@ -97,6 +98,11 @@ FORM_TOOL_IDS = {
     "labor_communication_card_create": "birth_plan_card_intake",
 }
 FORM_CREATION_TOOL_NAMES = {"pregnancy.plan_intake.start", "birth_plan_form_create", "hospital_bag_form_create"}
+FORM_CREATION_IDS = {
+    "pregnancy.plan_intake.start": "birth_journey_basic_info_intake",
+    "hospital_bag_form_create": "hospital_bag_intake",
+    "birth_plan_form_create": "birth_plan_card_intake",
+}
 MARKDOWN_IMAGE_URL_PATTERN = re.compile(r"!\[[^\]]*\]\(\s*(?:<([^>]+)>|([^\s)]+))")
 MODEL_IMAGE_DATA_URL_PATTERN = re.compile(
     r"^data:image/(?:png|jpe?g|webp|gif);base64,",
@@ -155,6 +161,7 @@ class AgentRuntimeExecutor:
         transient_stream: AgentTransientStream | None = None,
         quick_reply_finalizer: QuickReplyFinalizer | None = None,
         working_context_store: AgentWorkingContextStore | None = None,
+        fact_service: AgentFactService | None = None,
         input_builder: ModelInputBuilder | None = None,
         config: AgentRuntimeExecutorConfig | None = None,
         object_storage: ObjectStorage | None = None,
@@ -176,6 +183,7 @@ class AgentRuntimeExecutor:
         self.transient_stream = transient_stream
         self.quick_reply_finalizer = quick_reply_finalizer
         self.working_context_store = working_context_store
+        self.fact_service = fact_service
         self.input_builder = input_builder or ModelInputBuilder()
         self.config = config or AgentRuntimeExecutorConfig()
         self.object_storage = object_storage
@@ -863,6 +871,13 @@ class AgentRuntimeExecutor:
             default_values = _birth_prep_form_default_values(facts)
             if contract_name != "pregnancy.plan_intake.start":
                 default_values = {key: value for key, value in default_values.items() if key == "due_date_or_week"}
+            if self.fact_service is not None:
+                stored_defaults = await self.fact_service.form_defaults(
+                    owner_user_id=run.actor_user_id,
+                    form_id=FORM_CREATION_IDS[contract_name],
+                )
+                for key, value in stored_defaults.items():
+                    default_values.setdefault(key, value)
             trusted_args = {"default_values": default_values} if default_values else {}
             if contract_name == "pregnancy.plan_intake.start":
                 workflow = await self._latest_pregnancy_plan_workflow(run=run)

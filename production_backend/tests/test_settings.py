@@ -11,6 +11,14 @@ def test_settings_use_current_openai_model_defaults() -> None:
 
     assert settings.openai_model == "gpt-5.6-terra"
     assert settings.agent_quick_reply_model == "gpt-5.4-nano"
+    assert settings.agent_fact_extraction_enabled is True
+    assert settings.agent_fact_extraction_model == "gpt-5.4-nano"
+    assert settings.agent_fact_extraction_version == "turn-fact-extractor-v2"
+    assert settings.agent_fact_worker_concurrency == 2
+    assert settings.agent_fact_worker_batch_limit == 10
+    assert settings.agent_fact_worker_idle_seconds == 0.5
+    assert settings.agent_fact_worker_lease_seconds == 30
+    assert settings.agent_fact_worker_max_attempts == 3
     assert settings.agent_memory_consolidation_model == "gpt-5.4-nano"
     assert settings.agent_memory_consolidation_enabled is False
     assert settings.vision_openai_model == "gpt-5.4-mini"
@@ -126,6 +134,15 @@ def test_settings_from_env_reads_agent_worker_controls(monkeypatch: pytest.Monke
     monkeypatch.setenv("OPENAI_AGENT_PROMPT_VERSION", "prompt-v2")
     monkeypatch.setenv("AGENT_QUICK_REPLY_MODEL", "quick-reply-test")
     monkeypatch.setenv("AGENT_QUICK_REPLY_TIMEOUT_SECONDS", "0.8")
+    monkeypatch.setenv("AGENT_FACT_EXTRACTION_ENABLED", "true")
+    monkeypatch.setenv("AGENT_FACT_EXTRACTION_MODEL", "fact-test")
+    monkeypatch.setenv("AGENT_FACT_EXTRACTION_TIMEOUT_SECONDS", "1.5")
+    monkeypatch.setenv("AGENT_FACT_EXTRACTION_VERSION", "fact-v2")
+    monkeypatch.setenv("AGENT_FACT_WORKER_CONCURRENCY", "3")
+    monkeypatch.setenv("AGENT_FACT_WORKER_BATCH_LIMIT", "12")
+    monkeypatch.setenv("AGENT_FACT_WORKER_IDLE_SECONDS", "0.4")
+    monkeypatch.setenv("AGENT_FACT_WORKER_LEASE_SECONDS", "25")
+    monkeypatch.setenv("AGENT_FACT_WORKER_MAX_ATTEMPTS", "4")
 
     settings = Settings.from_env()
 
@@ -146,6 +163,38 @@ def test_settings_from_env_reads_agent_worker_controls(monkeypatch: pytest.Monke
     assert settings.openai_agent_prompt_version == "prompt-v2"
     assert settings.agent_quick_reply_model == "quick-reply-test"
     assert settings.agent_quick_reply_timeout_seconds == 0.8
+    assert settings.agent_fact_extraction_enabled is True
+    assert settings.agent_fact_extraction_model == "fact-test"
+    assert settings.agent_fact_extraction_timeout_seconds == 1.5
+    assert settings.agent_fact_extraction_version == "fact-v2"
+    assert settings.agent_fact_worker_concurrency == 3
+    assert settings.agent_fact_worker_batch_limit == 12
+    assert settings.agent_fact_worker_idle_seconds == 0.4
+    assert settings.agent_fact_worker_lease_seconds == 25
+    assert settings.agent_fact_worker_max_attempts == 4
+
+
+@pytest.mark.parametrize(
+    ("overrides", "expected_error"),
+    [
+        ({"agent_fact_worker_concurrency": 0}, "AGENT_FACT_WORKER_CONCURRENCY must be positive"),
+        ({"agent_fact_worker_batch_limit": 0}, "AGENT_FACT_WORKER_BATCH_LIMIT must be positive"),
+        ({"agent_fact_worker_idle_seconds": -0.1}, "AGENT_FACT_WORKER_IDLE_SECONDS must be finite and non-negative"),
+        ({"agent_fact_worker_idle_seconds": float("nan")}, "AGENT_FACT_WORKER_IDLE_SECONDS must be finite"),
+        ({"agent_fact_worker_idle_seconds": float("inf")}, "AGENT_FACT_WORKER_IDLE_SECONDS must be finite"),
+        ({"agent_fact_extraction_timeout_seconds": float("nan")}, "AGENT_FACT_EXTRACTION_TIMEOUT_SECONDS must be finite"),
+        ({"agent_fact_extraction_timeout_seconds": float("inf")}, "AGENT_FACT_EXTRACTION_TIMEOUT_SECONDS must be finite"),
+        ({"agent_fact_worker_lease_seconds": 0}, "AGENT_FACT_WORKER_LEASE_SECONDS must be positive"),
+        ({"agent_fact_worker_max_attempts": 0}, "AGENT_FACT_WORKER_MAX_ATTEMPTS must be positive"),
+        (
+            {"agent_fact_extraction_timeout_seconds": 5.0, "agent_fact_worker_lease_seconds": 5},
+            "AGENT_FACT_WORKER_LEASE_SECONDS must be greater than AGENT_FACT_EXTRACTION_TIMEOUT_SECONDS",
+        ),
+    ],
+)
+def test_settings_validate_fact_worker_controls(overrides: dict, expected_error: str) -> None:
+    with pytest.raises(ValueError, match=expected_error):
+        Settings(app_env="test", **overrides).validate_for_startup()
 
 
 def test_settings_from_env_reads_memory_consolidation_controls(monkeypatch: pytest.MonkeyPatch) -> None:

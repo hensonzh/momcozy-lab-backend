@@ -1,8 +1,10 @@
 import asyncio
 import json
 import logging
+from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
+from fastapi import Request
 from fastapi.testclient import TestClient
 
 from production_backend.app.core.settings import Settings
@@ -18,10 +20,12 @@ from production_backend.app.modules.agent_runtime.models import (
 from production_backend.app.modules.agent_runtime.router import (
     _stream_run_event_chunks,
     get_agent_eval_service,
+    get_agent_fact_service,
     get_agent_memory_service,
     get_agent_replay_service,
     get_agent_runtime_service,
 )
+from production_backend.app.modules.agent_runtime.facts.models import UserFact
 from production_backend.app.modules.auth import CurrentUser
 
 
@@ -30,6 +34,30 @@ def test_agent_runtime_requires_current_user() -> None:
 
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "authentication_required"
+
+
+def test_agent_runtime_dependencies_share_consent_aware_configured_fact_service() -> None:
+    settings = Settings(
+        app_env="test",
+        agent_fact_extraction_enabled=False,
+        agent_fact_extraction_model="fact-model",
+        agent_fact_extraction_version="fact-v9",
+        agent_fact_worker_max_attempts=7,
+    )
+    app = create_app(settings)
+    app.state.redis_client = None
+    request = Request({"type": "http", "app": app})
+
+    service = get_agent_runtime_service(request=request, session=object())  # type: ignore[arg-type]
+
+    assert service.memory_service is not None
+    assert service.fact_service is not None
+    assert service.fact_service.memory_consent_reader is service.memory_service
+    assert service.fact_service.audit_service is not None
+    assert service.fact_service.extraction_enabled is False
+    assert service.fact_service.extraction_model == "fact-model"
+    assert service.fact_service.extraction_version == "fact-v9"
+    assert service.fact_service.extraction_max_attempts == 7
 
 
 def test_create_run_uses_current_user_request_id_and_idempotency_key(caplog) -> None:
@@ -230,14 +258,20 @@ def test_agent_memory_management_uses_current_user_scope() -> None:
     user_id = uuid4()
     memory_id = uuid4()
     fake_service = FakeMemoryService(user_id=user_id, memory_id=memory_id)
+    fake_fact_service = FakeFactService(user_id=user_id, fact_id=uuid4())
     app = create_app(Settings(app_env="test"))
     _override_current_user(app, user_id)
     app.dependency_overrides[get_agent_memory_service] = lambda: fake_service
+    app.dependency_overrides[get_agent_fact_service] = lambda: fake_fact_service
     client = TestClient(app)
 
     list_response = client.get("/v1/agent/memories?memory_type=communication_preference&limit=10")
     settings_response = client.get("/v1/agent/memories/settings")
-    update_settings_response = client.put("/v1/agent/memories/settings", json={"memory_enabled": False})
+    update_settings_response = client.put(
+        "/v1/agent/memories/settings",
+        json={"memory_enabled": False},
+        headers={"X-Request-ID": "req-memory-disable"},
+    )
     delete_response = client.delete(f"/v1/agent/memories/{memory_id}")
 
     assert list_response.status_code == 200
@@ -258,6 +292,52 @@ def test_agent_memory_management_uses_current_user_scope() -> None:
     assert fake_service.get_settings_kwargs == {"owner_user_id": user_id}
     assert fake_service.update_settings_kwargs == {"owner_user_id": user_id, "memory_enabled": False}
     assert fake_service.archive_kwargs == {"owner_user_id": user_id, "memory_id": memory_id}
+    assert fake_fact_service.cancel_pending_kwargs == {
+        "owner_user_id": user_id,
+        "reason": "memory_disabled",
+        "request_id": "req-memory-disable",
+    }
+
+
+def test_agent_fact_management_is_owner_scoped_and_omits_internal_provenance() -> None:
+    user_id = uuid4()
+    fact_id = uuid4()
+    fake_service = FakeFactService(user_id=user_id, fact_id=fact_id)
+    app = create_app(Settings(app_env="test"))
+    _override_current_user(app, user_id)
+    app.dependency_overrides[get_agent_fact_service] = lambda: fake_service
+    client = TestClient(app)
+
+    list_response = client.get("/v1/agent/facts?fact_kind=conversation_candidate&limit=10")
+    delete_response = client.delete(f"/v1/agent/facts/{fact_id}", headers={"X-Request-ID": "req-fact-delete"})
+    clear_response = client.delete("/v1/agent/facts", headers={"X-Request-ID": "req-facts-clear"})
+
+    assert list_response.status_code == 200
+    assert delete_response.status_code == 204
+    assert clear_response.status_code == 204
+    item = list_response.json()["items"][0]
+    assert item["id"] == str(fact_id)
+    assert item["value"] == 35
+    assert {
+        "source_id",
+        "source_type",
+        "evidence",
+        "raw_text",
+        "owner_user_id",
+        "deletion_reason",
+    }.isdisjoint(item)
+    assert fake_service.list_kwargs == {
+        "owner_user_id": user_id,
+        "fact_kind": "conversation_candidate",
+        "limit": 10,
+        "include_when_disabled": True,
+    }
+    assert fake_service.delete_kwargs == {
+        "owner_user_id": user_id,
+        "fact_id": fact_id,
+        "request_id": "req-fact-delete",
+    }
+    assert fake_service.clear_kwargs == {"owner_user_id": user_id, "request_id": "req-facts-clear"}
 
 
 def test_agent_admin_replay_and_eval_endpoints_require_service_key() -> None:
@@ -489,6 +569,45 @@ class FakeMemoryService:
     async def update_settings(self, **kwargs):
         self.update_settings_kwargs = kwargs
         return AgentMemorySettings(owner_user_id=kwargs["owner_user_id"], memory_enabled=kwargs["memory_enabled"])
+
+
+class FakeFactService:
+    def __init__(self, *, user_id: UUID, fact_id: UUID) -> None:
+        self.user_id = user_id
+        self.fact_id = fact_id
+        self.list_kwargs = {}
+        self.delete_kwargs = {}
+        self.clear_kwargs = {}
+        self.cancel_pending_kwargs = {}
+
+    async def list_facts(self, **kwargs):
+        self.list_kwargs = kwargs
+        return [
+            UserFact(
+                id=self.fact_id,
+                owner_user_id=self.user_id,
+                fact_key="profile.age",
+                fact_kind="conversation_candidate",
+                status="active",
+                value=35,
+                source_type="conversation",
+                source_id="internal-message-id",
+                sensitivity="personal",
+                catalog_version="user-fact-catalog-v1",
+                observed_at=datetime(2026, 7, 13, tzinfo=timezone.utc),
+            )
+        ]
+
+    async def delete_fact(self, **kwargs):
+        self.delete_kwargs = kwargs
+
+    async def clear_facts(self, **kwargs):
+        self.clear_kwargs = kwargs
+        return 1
+
+    async def cancel_pending_extractions(self, **kwargs):
+        self.cancel_pending_kwargs = kwargs
+        return 2
 
 
 class FakeReplayService:

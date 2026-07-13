@@ -13,6 +13,8 @@ from ..audit import IdempotencyKey, IdempotencyService, parse_idempotency_respon
 from .actions.executor import AgentActionExecutor
 from .actions.policy import AgentActionPolicy, action_presentation_payload
 from .client_context import sanitize_agent_client_context
+from .facts.service import AgentFactService
+from .memory.service import AgentMemoryService
 from .run_lifecycle.controls import AgentRunControls
 from .run_lifecycle.state_store import AgentRuntimeStateStore
 from .models import AgentAction, AgentArtifact, AgentEvent, AgentRun, AgentThread, AgentWorkflowState
@@ -42,6 +44,8 @@ class AgentRuntimeService:
         file_repository: Any | None = None,
         controls: AgentRunControls | None = None,
         action_policy: AgentActionPolicy | None = None,
+        fact_service: AgentFactService | None = None,
+        memory_service: AgentMemoryService | None = None,
     ) -> None:
         self.repository = repository
         self.idempotency_service = idempotency_service
@@ -50,6 +54,8 @@ class AgentRuntimeService:
         self.controls = controls
         self.action_policy = action_policy or AgentActionPolicy()
         self.state_store = AgentRuntimeStateStore(repository=repository)
+        self.fact_service = fact_service
+        self.memory_service = memory_service
 
     async def get_latest_workflow_state(
         self,
@@ -86,7 +92,6 @@ class AgentRuntimeService:
             state=state,
             active_step=active_step,
         )
-
     async def create_thread(
         self,
         *,
@@ -182,6 +187,21 @@ class AgentRuntimeService:
             content=message_content,
             status="completed",
         )
+        fact_job_enqueued = False
+        if await self._fact_capture_enabled(owner_user_id=actor_user_id):
+            await self._sync_verified_form_facts(
+                actor_user_id=actor_user_id,
+                attachments=safe_attachments,
+                observed_at=message_record.created_at if isinstance(message_record.created_at, datetime) else _utcnow(),
+                request_id=request_id,
+            )
+            fact_job_enqueued = await self._enqueue_conversation_fact_extraction(
+                actor_user_id=actor_user_id,
+                run_id=run.id,
+                message_id=message_record.id,
+                request_id=request_id,
+                trace_id=trace_id,
+            )
         await self.repository.touch_thread(thread=thread, updated_at=_utcnow())
 
         await self._append_event(
@@ -213,8 +233,68 @@ class AgentRuntimeService:
         if self.controls is not None:
             await self.controls.set_active_run(thread_id=thread.id, run_id=run.id)
             self._register_run_queue_wakeup(run_id=run.id)
+            if fact_job_enqueued:
+                self._register_fact_queue_wakeup(run_id=run.id)
         await self._complete_idempotency(idempotency_record=idempotency_record, response_ref=str(run.id))
         return run
+
+    async def _sync_verified_form_facts(
+        self,
+        *,
+        actor_user_id: UUID,
+        attachments: list[dict[str, Any]],
+        observed_at: datetime,
+        request_id: str,
+    ) -> None:
+        if self.fact_service is None:
+            return
+        for attachment in attachments:
+            if attachment.get("type") != "form_submission" or attachment.get("verified") is not True:
+                continue
+            values = attachment.get("values")
+            if not isinstance(values, dict):
+                continue
+            await self.fact_service.sync_form_submission(
+                owner_user_id=actor_user_id,
+                form_id=str(attachment.get("form_id") or ""),
+                values=values,
+                submission_id=str(attachment.get("submission_id") or ""),
+                observed_at=observed_at,
+                request_id=request_id,
+            )
+
+    async def _fact_capture_enabled(self, *, owner_user_id: UUID) -> bool:
+        if self.fact_service is None:
+            return False
+        if self.memory_service is not None:
+            return await self.memory_service.is_memory_enabled(owner_user_id=owner_user_id)
+        capture_enabled = getattr(self.fact_service, "is_capture_enabled", None)
+        if callable(capture_enabled):
+            return bool(await capture_enabled(owner_user_id=owner_user_id))
+        return True
+
+    async def _enqueue_conversation_fact_extraction(
+        self,
+        *,
+        actor_user_id: UUID,
+        run_id: UUID,
+        message_id: UUID,
+        request_id: str,
+        trace_id: str,
+    ) -> bool:
+        if self.fact_service is None:
+            return False
+        enqueue = getattr(self.fact_service, "enqueue_conversation_extraction", None)
+        if not callable(enqueue):
+            return False
+        job = await enqueue(
+            owner_user_id=actor_user_id,
+            run_id=run_id,
+            message_id=message_id,
+            request_id=request_id,
+            trace_id=trace_id,
+        )
+        return job is not None
 
     async def _verified_run_attachments(
         self,
@@ -728,6 +808,19 @@ class AgentRuntimeService:
 
         async def notify_after_commit() -> None:
             await notify_run_queued(run_id=run_id)
+
+        add_after_commit_callback(notify_after_commit)
+
+    def _register_fact_queue_wakeup(self, *, run_id: UUID) -> None:
+        if self.controls is None:
+            return
+        notify_fact_queued = getattr(self.controls, "notify_fact_queued", None)
+        add_after_commit_callback = getattr(self.repository, "add_after_commit_callback", None)
+        if not callable(notify_fact_queued) or not callable(add_after_commit_callback):
+            return
+
+        async def notify_after_commit() -> None:
+            await notify_fact_queued(run_id=run_id)
 
         add_after_commit_callback(notify_after_commit)
 

@@ -30,6 +30,8 @@ def test_agent_runtime_ledger_tables_are_registered() -> None:
         "agent_memory_settings",
         "agent_memory_snapshots",
         "agent_memory_consolidation_runs",
+        "user_facts",
+        "user_fact_extraction_runs",
     }
 
     assert expected_tables.issubset(Base.metadata.tables)
@@ -97,6 +99,8 @@ def test_agent_actions_and_checkpoints_have_runtime_indexes() -> None:
     memories = Base.metadata.tables["agent_memories"]
     memory_snapshots = Base.metadata.tables["agent_memory_snapshots"]
     memory_consolidation_runs = Base.metadata.tables["agent_memory_consolidation_runs"]
+    user_facts = Base.metadata.tables["user_facts"]
+    fact_extraction_runs = Base.metadata.tables["user_fact_extraction_runs"]
 
     assert "uq_agent_runs_thread_active" in {index.name for index in runs.indexes}
     assert "service_skill_id" in runs.columns
@@ -133,4 +137,24 @@ def test_agent_actions_and_checkpoints_have_runtime_indexes() -> None:
     }
     assert "ix_agent_memory_consolidation_date_status" in {
         index.name for index in memory_consolidation_runs.indexes
+    }
+    assert "uq_user_facts_owner_key_kind" in {constraint.name for constraint in user_facts.constraints}
+    assert {"fact_kind", "status", "value_json", "sensitivity", "expires_at", "deleted_at", "version"}.issubset(
+        user_facts.columns.keys()
+    )
+    assert "uq_user_fact_extractions_source_version" in {
+        constraint.name for constraint in fact_extraction_runs.constraints
+    }
+    assert {
+        "status",
+        "stage",
+        "attempts",
+        "max_attempts",
+        "next_attempt_at",
+        "locked_until",
+        "lease_token",
+        "candidates_json",
+    }.issubset(fact_extraction_runs.columns.keys())
+    assert "ix_user_fact_extractions_status_next_attempt" in {
+        index.name for index in fact_extraction_runs.indexes
     }

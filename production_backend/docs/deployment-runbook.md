@@ -215,6 +215,7 @@ private env file:
 ```env
 AGENT_RUNTIME_WORKER_ENABLED=true
 AGENT_MODEL_PROVIDER=minimax
+AGENT_FACT_EXTRACTION_ENABLED=false
 MINIMAX_API_KEY=...
 MINIMAX_BASE_URL=https://api.minimax.io/v1
 MINIMAX_MODEL=MiniMax-M3
@@ -222,6 +223,9 @@ MINIMAX_MODEL=MiniMax-M3
 
 The Minimax path remains the flat OpenAI-compatible Agents SDK tool path; runtime
 metadata keeps `tool_search_enabled=false` there.
+Turn-level fact extraction always uses the OpenAI Responses adapter. Keep it
+disabled for a Minimax-only smoke as shown above, or retain a separate
+`OPENAI_API_KEY` and the `AGENT_FACT_*` settings when testing both lanes.
 
 Start the full test stack:
 
@@ -262,6 +266,7 @@ slots:
 
 ```text
 total agent run slots ~= agent-worker replicas * AGENT_RUNTIME_WORKER_CONCURRENCY
+total fact extraction slots ~= agent-worker replicas * AGENT_FACT_WORKER_CONCURRENCY
 ```
 
 Each concurrent run uses its own database session and still acquires the Redis
@@ -270,7 +275,10 @@ with `AGENT_RUNTIME_WORKER_BATCH_LIMIT`, database pool capacity, OpenAI
 RPM/TPM limits, tool latency budgets, and cost controls. For I/O-heavy agent
 runs, 100 concurrent run slots do not imply 100 CPU cores; measure CPU,
 provider wait time, DB pool saturation, Redis latency, and token/cost usage
-before increasing limits.
+before increasing limits. Fact extraction has its own batch/concurrency/idle
+controls and database sessions; keep `AGENT_FACT_WORKER_LEASE_SECONDS` greater
+than `AGENT_FACT_EXTRACTION_TIMEOUT_SECONDS` so a live provider request cannot
+lose its lease under normal timing.
 
 ## Rollback
 
@@ -285,12 +293,17 @@ before increasing limits.
 
 1. Check `/v1/health/metrics` with `X-Service-Key` in production for worker
    outcomes and error codes.
-2. Inspect queued and locked non-Agent `outbox_jobs` with
+2. Inspect queued and locked non-Agent `outbox_jobs`, Agent runs, and durable
+   fact-extraction jobs with
    `make backend-worker-backlog BACKEND_ENV_FILE=<env file>`.
 3. Confirm Redis and external providers are reachable.
 4. If jobs are locked by a dead worker, wait for lease expiry or release them
    with an audited maintenance script.
-5. Agent action writes are not outbox jobs; inspect `agent_runs` and
+5. A fact job in `ready_to_apply` waits until its source run leaves
+   `queued`/`running`; repeated `dead_lettered` jobs require checking provider,
+   consent, source ownership, and lease settings without copying message or
+   fact values into incident tickets.
+6. Agent action writes are not outbox jobs; inspect `agent_runs` and
    `agent_actions` instead. For repeated permanent failures in remaining
    generic jobs, move affected jobs to dead-letter and open
    a repair ticket with `job_id`, `job_type`, and `request_id`.
