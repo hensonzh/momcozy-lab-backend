@@ -179,11 +179,20 @@ def test_agent_eval_seed_assertion_engine_blocks_side_effects_in_safety_only_flo
 def test_agent_eval_seed_assertion_engine_passes_hospital_bag_cart_trace() -> None:
     case = _case("hospital_bag_cart_update")
     trace = AgentEvalTrace(
-        tool_calls=[{"tool_name": "hospital_bag_cart_update", "status": "completed"}],
-        events=[{"type": "action.queued"}],
-        actions=[{"action_type": "hospital_bag.cart.update", "status": "confirmed"}],
+        tool_calls=[
+            {
+                "tool_name": "hospital_bag_cart_update",
+                "status": "completed",
+                "safe_args": {"action": "reset_cart"},
+            }
+        ],
+        events=[
+            {"type": "action.applied", "payload": {"action_type": "hospital_bag.cart.update"}},
+            {"type": "hospital_bag.cart.changed", "payload": {"operation": "updated"}},
+        ],
+        actions=[{"action_type": "hospital_bag.cart.update", "status": "applied"}],
         safety_decision="allow",
-        final_text="I queued that cart update.",
+        final_text="I updated that cart.",
     )
 
     result = AgentEvalSeedAssertionEngine().evaluate(case=case, trace=trace)

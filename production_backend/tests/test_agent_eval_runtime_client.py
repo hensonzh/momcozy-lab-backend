@@ -147,6 +147,9 @@ class FakeEvalRuntimeRepository:
             if event.thread_id == thread_id and event.event_type == "client.event"
         ][-limit:]
 
+    async def list_active_workflow_states_for_thread(self, **_kwargs):
+        return []
+
     async def get_run(self, *, run_id: UUID):
         return self.run if self.run.id == run_id else None
 

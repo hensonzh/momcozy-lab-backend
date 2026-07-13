@@ -115,7 +115,7 @@ def _check_ci_workflows(root: Path) -> list[CheckResult]:
         (workflow, "python -m ruff check app tests scripts"),
         (workflow, "python -m mypy app scripts"),
         (workflow, "python -m pytest production_backend/tests"),
-        (workflow, "production_backend/scripts/run_agent_seed_eval.py"),
+        (workflow, "production_backend/tests/test_agent_task8_observed_eval.py"),
         (workflow, "python -m alembic -c production_backend/alembic.ini upgrade head --sql"),
         (workflow, "production_backend/scripts/check_redis_runtime_controls.py"),
         (workflow, "production_backend/scripts/check_object_storage_profile.py"),

@@ -35,20 +35,17 @@ jobs:
       - name: Run backend tests
         run: python -m pytest production_backend/tests
 
-      - name: Run agent seed eval smoke
+      - name: Run observed agent service eval
         run: >
-          python production_backend/scripts/run_agent_seed_eval.py
-          --output /tmp/agent-seed-eval.json
-          --junit-output /tmp/agent-seed-eval.junit.xml
+          python -m pytest -q production_backend/tests/test_agent_task8_observed_eval.py
+          --junitxml=/tmp/agent-service-observed-eval.junit.xml
 
-      - name: Upload agent seed eval reports
+      - name: Upload observed agent service eval report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: agent-seed-eval
-          path: |
-            /tmp/agent-seed-eval.json
-            /tmp/agent-seed-eval.junit.xml
+          name: agent-service-observed-eval
+          path: /tmp/agent-service-observed-eval.junit.xml
 
       - name: Run observed agent fact extraction eval
         run: >

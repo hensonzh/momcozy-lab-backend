@@ -115,7 +115,7 @@ backend-productization-status:
 
 backend-smoke:
 	$(PYTHON) production_backend/scripts/check_productization_status.py
-	$(PYTHON) production_backend/scripts/run_agent_seed_eval.py
+	$(PYTHON) -m pytest -q production_backend/tests/test_agent_task8_observed_eval.py
 	$(PYTHON) production_backend/scripts/run_agent_fact_eval.py
 
 backend-test-smoke:

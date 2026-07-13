@@ -136,3 +136,15 @@ def test_run_agent_seed_eval_missing_trace_is_always_blocking() -> None:
 
     assert report["failed"] == 1
     assert report["results"][0]["failures"][0]["category"] == "missing_trace"
+
+
+def test_ci_and_backend_smoke_run_the_observed_runtime_gate() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "production-backend-ci.yml").read_text()
+    makefile = (ROOT / "Makefile").read_text()
+    observed_command = "python -m pytest -q production_backend/tests/test_agent_task8_observed_eval.py"
+
+    assert observed_command in workflow
+    assert "run_agent_seed_eval.py" not in workflow
+    backend_smoke = makefile.split("backend-smoke:", 1)[1].split("\n\n", 1)[0]
+    assert "production_backend/tests/test_agent_task8_observed_eval.py" in backend_smoke
+    assert "run_agent_seed_eval.py" not in backend_smoke
