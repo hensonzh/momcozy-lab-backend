@@ -2725,28 +2725,30 @@ def _ibclc_decision_question(text: str) -> bool:
 
 
 def _previous_assistant_offered_ibclc(text: str) -> bool:
-    if any(
-        token in text
-        for token in (
-            "不能帮你",
-            "无法帮你",
-            "不帮你",
-            "不会推荐",
-            "不能推荐",
-            "无法推荐",
-            "不需要我",
-            "无需我",
-            "不用我",
-            "不必我",
-            "不建议",
-            "没有必要",
-            "没必要",
-        )
-    ):
-        return False
-    has_subject = any(token in text for token in ("ibclc", "哺乳顾问", "泌乳顾问", "咨询入口", "在线咨询"))
-    has_offer = any(token in text for token in ("需要我", "要我", "可以帮你", "帮你推荐", "帮你打开", "是否要"))
-    return has_subject and has_offer
+    subject_tokens = ("ibclc", "哺乳顾问", "泌乳顾问", "咨询入口", "在线咨询")
+    offer_tokens = ("需要我", "要我", "可以帮你", "帮你推荐", "帮你打开", "是否要")
+    negative_offer_tokens = (
+        "不能帮你",
+        "无法帮你",
+        "不帮你",
+        "不会推荐",
+        "不能推荐",
+        "无法推荐",
+        "不需要我",
+        "无需我",
+        "不用我",
+        "不必我",
+        "不建议",
+        "没有必要",
+        "没必要",
+    )
+    clauses = re.split(r"[。！？!?；;，,\n]+", text)
+    return any(
+        any(token in clause for token in subject_tokens)
+        and any(token in clause for token in offer_tokens)
+        and not any(token in clause for token in negative_offer_tokens)
+        for clause in clauses
+    )
 
 
 def _short_ibclc_affirmation(text: str) -> bool:

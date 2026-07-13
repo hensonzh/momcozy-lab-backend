@@ -1594,12 +1594,41 @@ def test_ibclc_card_handler_accepts_legacy_short_affirmation_after_previous_offe
 @pytest.mark.parametrize(
     "previous_assistant_text",
     [
+        "我不建议继续忍痛，需要我帮你打开 IBCLC 在线咨询入口吗？",
+        "没有必要一个人硬撑，需要我帮你推荐一位 IBCLC 吗？",
+    ],
+)
+def test_ibclc_card_handler_accepts_offer_after_negative_context_clause(
+    previous_assistant_text: str,
+) -> None:
+    runtime_service = FakeAgentRuntimeService()
+
+    result = asyncio.run(
+        IbclcConsultCardCreateToolHandler(runtime_service=runtime_service)(
+            _context(
+                args={
+                    "reason": "Latch pain",
+                    "trusted_current_user_text": "好的",
+                    "trusted_previous_assistant_text": previous_assistant_text,
+                }
+            )
+        )
+    )
+
+    assert result["status"] == "created"
+
+
+@pytest.mark.parametrize(
+    "previous_assistant_text",
+    [
         "我现在不能帮你推荐 IBCLC 哺乳顾问。",
         "目前不需要我帮你打开 IBCLC 在线咨询入口。",
         "现在无需我帮你推荐 IBCLC 哺乳顾问。",
         "暂时不用我帮你联系泌乳顾问。",
         "我不建议现在帮你推荐 IBCLC 哺乳顾问。",
         "目前没有必要帮你打开 IBCLC 在线咨询入口。",
+        "我不建议现在帮你找 IBCLC，需要我帮你看看其他喂养资料吗？",
+        "目前没有必要打开 IBCLC 在线咨询入口，要我继续讲讲含乳姿势吗？",
     ],
 )
 def test_ibclc_card_handler_rejects_short_affirmation_after_negated_previous_offer(
