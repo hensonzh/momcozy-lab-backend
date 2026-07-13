@@ -11,7 +11,7 @@ from production_backend.app.core.errors import ApiError
 
 
 _DEVICE_GUIDANCE_ROOT = Path(__file__).resolve().parent / "skills" / "device-guidance" / "references" / "air1"
-_MARKDOWN_IMAGE_PATTERN = re.compile(r"!\[([^\]]*)\]\([^)]*\)")
+_MARKDOWN_IMAGE_PATTERN = re.compile(r"!\[([^\]]*)\]\(([^)]*)\)")
 _GUIDE_HEADING_PATTERN = re.compile(r"^###\s+(guide\.[A-Za-z0-9_-]+)\s+(.+?)\s*$")
 _FAQ_HEADING_PATTERN = re.compile(r"^##\s+\d+\.\s+(.+?)\s*$")
 _TOPIC_DEFAULT_STEPS = {
@@ -85,6 +85,7 @@ class _GuideSection:
     content: str
     completion_condition: str
     image_labels: tuple[str, ...]
+    image_urls: tuple[str, ...]
 
 
 class DeviceGuidanceReferenceService:
@@ -143,7 +144,9 @@ class DeviceGuidanceReferenceService:
         for position, (start, step_id, title) in enumerate(headings):
             end = headings[position + 1][0] if position + 1 < len(headings) else len(lines)
             body_lines = lines[start + 1 : end]
-            image_labels = tuple(label.strip() for label in _MARKDOWN_IMAGE_PATTERN.findall("\n".join(body_lines)) if label.strip())
+            image_references = _MARKDOWN_IMAGE_PATTERN.findall("\n".join(body_lines))
+            image_labels = tuple(label.strip() for label, _url in image_references if label.strip())
+            image_urls = tuple(url.strip() for _label, url in image_references if url.strip())
             clean_lines = [line for line in body_lines if not _MARKDOWN_IMAGE_PATTERN.search(line)]
             clean_lines = [line for line in clean_lines if line.strip() != "图片："]
             content = "\n".join(clean_lines).strip()
@@ -153,8 +156,13 @@ class DeviceGuidanceReferenceService:
                 content=content[:8000],
                 completion_condition=_completion_condition(clean_lines),
                 image_labels=image_labels,
+                image_urls=image_urls,
             )
         return sections
+
+    def image_urls_for_step(self, step: str) -> tuple[str, ...]:
+        section = self.guide_sections.get(str(step or "").strip())
+        return section.image_urls if section is not None else ()
 
     @cached_property
     def faq_entries(self) -> tuple[dict[str, str], ...]:

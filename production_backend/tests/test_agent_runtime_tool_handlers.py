@@ -916,6 +916,52 @@ def test_device_guidance_read_tool_handler_returns_copyable_image_markdown() -> 
     ]
 
 
+@pytest.mark.parametrize(
+    ("step", "expected_labels"),
+    [
+        ("guide.parts", ["air1 guide parts components"]),
+        ("guide.controls", ["air1 guide controls button indicator"]),
+        ("guide.charging", ["air1 guide charging methods"]),
+        ("guide.disassembly", ["air1 guide disassembly steps"]),
+        (
+            "guide.cleaning",
+            [
+                "air1 guide cleaning washable parts",
+                "air1 guide cleaning disinfection methods",
+            ],
+        ),
+        (
+            "guide.flange",
+            ["air1 guide flange measurement", "air1 guide flange size card"],
+        ),
+        ("guide.assembly", ["air1 guide assembly steps"]),
+        ("guide.wearing_start", ["air1 guide wearing start"]),
+        ("guide.bluetooth", ["air1 guide bluetooth pairing"]),
+        ("guide.finish_storage", ["air1 guide finish storage pouring"]),
+    ],
+)
+def test_device_guidance_explicit_step_returns_only_manual_images(
+    step: str,
+    expected_labels: list[str],
+) -> None:
+    handler = DeviceGuidanceReadToolHandler(asset_service=ProductAssetService())
+
+    result = asyncio.run(
+        handler(
+            _context(
+                args={
+                    "model": "Air1",
+                    "content_type": "image/png",
+                    "step": step,
+                    "limit": 10,
+                }
+            )
+        )
+    )
+
+    assert [asset["label"] for asset in result["assets"]] == expected_labels
+
+
 def test_device_guidance_read_tool_handler_restores_unboxing_overview_resources() -> None:
     handler = DeviceGuidanceReadToolHandler(asset_service=FakeAssetService())
 
@@ -3243,6 +3289,7 @@ class FakeAssetService:
                 content_type="image/png",
                 size_bytes=800,
                 path=None,
+                object_key="product-assets/device-guidance/assets/air1/images/air1_guide_parts_components.png",
             ),
         ][:limit]
 
