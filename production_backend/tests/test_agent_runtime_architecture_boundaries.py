@@ -196,28 +196,29 @@ def test_skills_directory_contains_only_skill_directories() -> None:
     assert all(path.is_dir() and (path / SERVICE_SKILL_FILE_NAME).exists() for path in paths)
 
 
-def test_static_prompts_keep_runtime_boundaries_and_legacy_style() -> None:
+def test_static_prompt_keeps_outcome_and_progressive_loading_boundaries() -> None:
     global_prompt = DEFAULT_STABLE_SYSTEM_PROMPT
     static_context = build_static_agent_context()
     assert DEFAULT_STABLE_SYSTEM_PROMPT == f"{BASE_AGENT_INSTRUCTIONS}\n\n{static_context}"
-    assert "调用 `images.inspect` 后再回答" in BASE_AGENT_INSTRUCTIONS
-    assert "不要只根据图片文件名或 alt 文本猜测" in BASE_AGENT_INSTRUCTIONS
-    assert "# 全局规则" in DEFAULT_STABLE_SYSTEM_PROMPT
-    assert "## 全局人设" in DEFAULT_STABLE_SYSTEM_PROMPT
-    assert "你叫 CozyMate，来自 Momcozy 团队。" in DEFAULT_STABLE_SYSTEM_PROMPT
-    assert "温柔不啰嗦，默认极简、自然聊天" in DEFAULT_STABLE_SYSTEM_PROMPT
-    assert "默认回复要短：优先 1-3 句" in DEFAULT_STABLE_SYSTEM_PROMPT
-    assert "不要先输出用户可见的过渡说明或中间解释" in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert "# CozyMate" in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert "## Role" in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert "你是 CozyMate，来自 Momcozy 团队" in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert "温和、自然、直接" in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert "当前请求的成功条件已经满足时，直接给出最终回复" in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert "工具调用前不要输出面向用户的过渡文本" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "runtime_context" in DEFAULT_STABLE_SYSTEM_PROMPT
-    assert "当前可见工具" in DEFAULT_STABLE_SYSTEM_PROMPT
-    assert "如果当前轮需要进入某个服务技能流程" in DEFAULT_STABLE_SYSTEM_PROMPT
-    assert "重新调用 `load_service_skill`" in DEFAULT_STABLE_SYSTEM_PROMPT
-    assert "`recommended_tools` 只是当前 skill 的常用工具提示，不是权限或可用范围" in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert "请求需要某个服务流程且其完整 instructions 当前不可用时" in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert "本轮仍需要时重新调用 `load_service_skill`" in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert "`recommended_tools` 只是当前 skill 的常用工具建议，不是权限或可用范围" in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert "namespace 按业务能力组织工具，与 service skill 相互独立" in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert "使用 `tool_search` 在相关 namespace 中发现所需工具" in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert "不展开无关 namespace 或全量工具" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "tool_scope" not in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "read_skill_file" not in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "旧版 namespace" not in DEFAULT_STABLE_SYSTEM_PROMPT
-    assert "工具结果是事实、校验、候选方案或执行结果" in DEFAULT_STABLE_SYSTEM_PROMPT
-    assert "不重复工具产物主体内容" in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert "不输出原始工具 JSON、内部 ID、contract 名称或运行时字段" in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert "默认回复要短：优先 1-3 句" not in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert "一句话超过30个字" not in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "## 可用 Skill" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "skill_manifests:" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert '"id": "birth-prep"' in DEFAULT_STABLE_SYSTEM_PROMPT
@@ -738,8 +739,8 @@ def _code_span_references(text: str) -> list[str]:
 
 def test_context_builder_projects_dynamic_context_after_selected_history() -> None:
     assert "CozyMate" in DEFAULT_STABLE_SYSTEM_PROMPT
-    assert "你叫 CozyMate，来自 Momcozy 团队。" in DEFAULT_STABLE_SYSTEM_PROMPT
-    assert "是否加载 skill，只根据用户当前意图" in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert "你是 CozyMate，来自 Momcozy 团队" in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert "根据当前消息、对话历史和 skill manifest 自主判断" in DEFAULT_STABLE_SYSTEM_PROMPT
 
     model_input = ModelInputBuilder().build(
         projection=ContextProjection(

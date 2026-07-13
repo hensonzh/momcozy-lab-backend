@@ -98,7 +98,7 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result(capl
     assert request.thread_id == str(thread_id)
     assert request.prompt_version == "prompt-v2"
     assert request.service_skill_id == "cozymate_service_agent"
-    assert "你叫 CozyMate，来自 Momcozy 团队。" in request.instructions
+    assert "你是 CozyMate，来自 Momcozy 团队" in request.instructions
     assert "制定孕期计划" not in request.instructions
     assert "奶量管理仅处理三类任务" not in request.instructions
     assert "已选择服务技能" not in request.instructions
@@ -109,7 +109,7 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result(capl
         "developer",
         "user",
     ]
-    assert request.instructions.startswith("# 全局规则")
+    assert request.instructions.startswith("# CozyMate")
     assert request.model_input[0] == {"role": "user", "content": "What did we discuss?"}
     runtime_context = _runtime_context(request)
     assert set(runtime_context) == {"user_context", "memory", "working_context"}
