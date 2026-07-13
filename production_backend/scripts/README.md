@@ -54,7 +54,7 @@ production_backend/.venv/bin/python
 | `inspect_worker_backlog.py` | 只读查看 durable outbox 和 agent run backlog 数量，不修改状态。 | 本地/线上排查 worker 堆积、发布后观察。 | `set -a; . <env-file>; set +a; python production_backend/scripts/inspect_worker_backlog.py` |
 | `recover_stuck_agent_runs.py` | 查找长时间停留在 `running` 的 agent run；默认 dry run，`--apply` 后标记失败并清理 Redis 控制状态。 | 运维恢复卡住的 run 时手动执行。 | `python production_backend/scripts/recover_stuck_agent_runs.py --limit 20`; 真正修改用 `--apply` |
 | `run_agent_replay_eval.py` | 用已保存的 replay bundle 对单个 seed case 做回放断言。 | 线上问题复盘、事故回归、专题修复验证。 | `python production_backend/scripts/run_agent_replay_eval.py --replay <bundle.json> --suite <suite> --name <case-name>` |
-| `run_agent_seed_eval.py` | 运行确定性的产品 agent seed eval，可输出 JSON/JUnit。 | 每次 PR CI、本地 smoke、改动 agent runtime/工具/路由时。 | `python production_backend/scripts/run_agent_seed_eval.py --output /tmp/agent-seed-eval.json --junit-output /tmp/agent-seed-eval.junit.xml` |
+| `run_agent_seed_eval.py` | 对已捕获的真实 runtime/provider trace 执行历史 seed 断言，可输出 JSON/JUnit；缺少 observed trace 时会 fail closed。 | 线上问题复盘、provider-live/nightly 回放，不作为无 trace 的 PR gate。 | `python production_backend/scripts/run_agent_seed_eval.py --trace-fixtures <observed-traces.json> --output /tmp/agent-seed-eval.json --junit-output /tmp/agent-seed-eval.junit.xml` |
 | `run_agent_fact_eval.py` | 通过真实 `AgentFactExtractor` 与确定性 scripted backend 运行聊天事实提取 eval，可输出 JSON/JUnit。 | 每次 PR CI、本地 smoke、改动事实目录/提取规则时。 | `python production_backend/scripts/run_agent_fact_eval.py --output /tmp/agent-fact-eval.json --junit-output /tmp/agent-fact-eval.junit.xml` |
 | `run_agent_worker.py` | 独立 agent run worker 进程入口，扫描可运行 run 并执行 LangGraph + OpenAI Agents SDK runtime。 | `make backend-local-up` 或单独 worker 服务启动时运行。 | `python -m production_backend.scripts.run_agent_worker`; 本地完整启动推荐 `make backend-local-up`，单独重启推荐 `make backend-local-workers` |
 | `run_outbox_worker.py` | 独立通用 outbox worker 进程入口；当前只处理文件对象清理等非 Agent action 的持久副作用与重试。Agent action 由 agent worker 在 run 内同步执行。 | `make backend-local-up` 或单独 worker 服务启动时运行。 | `python -m production_backend.scripts.run_outbox_worker`; 本地完整启动推荐 `make backend-local-up`，单独重启推荐 `make backend-local-workers` |
@@ -68,7 +68,7 @@ PR 级别通常需要：
 - `ruff check app tests scripts`
 - `mypy app scripts`
 - `pytest production_backend/tests`
-- `run_agent_seed_eval.py`
+- `pytest -q production_backend/tests/test_agent_task8_observed_eval.py`
 - `run_agent_fact_eval.py`
 - `check_backup_restore_hooks.py`
 - `export_openapi.py` + 快照 diff
@@ -82,6 +82,7 @@ PR 级别通常需要：
 
 定时或发布前需要：
 
+- `run_agent_seed_eval.py --trace-fixtures <observed-traces.json>`
 - `run_agent_replay_eval.py`
 - `backend-test-smoke`
 - `backend-prod-readiness`

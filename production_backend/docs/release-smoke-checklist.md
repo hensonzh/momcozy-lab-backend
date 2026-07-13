@@ -58,8 +58,11 @@ Run this checklist after migrations and before a release is declared healthy.
 - Open SSE replay through `GET /v1/agent/runs/{run_id}/stream` using bearer
   auth headers, not query tokens.
 - Confirm/reject a test action if one is available.
-- Run deterministic agent seed eval:
-  `python production_backend/scripts/run_agent_seed_eval.py`.
+- Run the deterministic observed runtime/service gate:
+  `python -m pytest -q production_backend/tests/test_agent_task8_observed_eval.py`.
+- If the release includes captured runtime/provider traces, replay the historical
+  seed assertions with `python production_backend/scripts/run_agent_seed_eval.py
+  --trace-fixtures <observed-traces.json>`.
 - Run replay eval for any incident-derived bundle that is part of the release:
   `python production_backend/scripts/run_agent_replay_eval.py --replay <bundle.json> --suite <suite> --name <case-name>`.
 

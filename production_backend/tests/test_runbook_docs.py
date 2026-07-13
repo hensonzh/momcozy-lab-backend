@@ -44,7 +44,8 @@ def test_release_smoke_checklist_covers_auth_core_agent_and_observability() -> N
         "/v1/health/metrics",
         "make backend-productization-status",
         "make backend-smoke",
-        "run_agent_seed_eval.py",
+        "test_agent_task8_observed_eval.py",
+        "--trace-fixtures <observed-traces.json>",
         "make backend-worker-backlog",
         "OpenAPI snapshot",
     ]:

@@ -34,6 +34,9 @@ from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.
     ToolExecutor,
     default_tool_registry,
 )
+from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.tools.pregnancy_plan_flow import (
+    PREGNANCY_PLAN_URGENT_RESPONSE,
+)
 from production_backend.app.modules.agent_runtime.evals.service import (
     AgentEvalRuntimeClient,
     AgentEvalRuntimeTraceCollector,
@@ -190,7 +193,7 @@ def test_observed_pregnancy_plan_urgent_turn_has_no_model_tool_or_side_effect() 
         final_text="不应返回这段模型文本。",
     )
 
-    assert result.execution_result.final_text != "不应返回这段模型文本。"
+    assert result.execution_result.final_text == PREGNANCY_PLAN_URGENT_RESPONSE
     assert result.trace.tool_calls == []
     assert result.trace.actions == []
     assert scenario.repository.artifacts == []
@@ -370,7 +373,7 @@ def test_observed_milk_analysis_plan_and_schedule_persist_real_action_lifecycles
     _assert_actions(schedule_trace, ("plans.milk_schedule.reschedule", "applied", "plan"))
     rescheduled = _event_by_type(schedule_trace, "milk_plan.changed")
     assert rescheduled["payload"]["operation"] == "rescheduled"
-    assert any(task.task_time != original for task, original in zip(scenario.plans.tasks, ("08:00", "11:00", "14:00"), strict=True))
+    assert [task.task_time for task in scenario.plans.tasks] == ["08:00", "10:00", "14:00"]
 
 
 def test_observed_milk_red_flags_block_plan_action_and_artifact() -> None:
