@@ -264,6 +264,9 @@ def test_server_test_compose_starts_containerized_infrastructure_without_publish
     assert "5432:5432" not in compose
     assert "6379:6379" not in compose
     assert "9000:9000" not in compose
+    assert "  postgres:\n    image: postgres:16\n    restart: unless-stopped" in compose
+    assert "  redis:\n    image: redis:7\n    restart: unless-stopped" in compose
+    assert "  minio:\n    image: minio/minio:latest\n    restart: unless-stopped" in compose
 
 
 def test_server_test_compose_uses_test_env_and_safe_api_bind() -> None:
