@@ -66,11 +66,13 @@ def test_confirmation_only_authorizes_and_requeues_same_run_without_domain_apply
     assert confirmation.payload["user_visible"] is True
     assert "apply_payload" not in confirmation.payload
     assert repository.events[-2].payload["action_status"] == "confirmed"
-    assert repository.events[-1].payload == {
+    queued_payload = repository.events[-1].payload
+    assert {key: queued_payload[key] for key in ("reason", "action_id", "phase")} == {
         "reason": "action_confirmed",
         "action_id": str(action.id),
         "phase": "queued",
     }
+    assert queued_payload["semantic"]["label"] == "我已经收到你的消息啦～"
 
 
 def test_duplicate_confirmation_is_idempotent_and_does_not_requeue_twice() -> None:
@@ -145,16 +147,16 @@ def test_reject_and_expire_finish_waiting_run_without_apply() -> None:
     repository = FakeActionRepository()
     service = AgentRuntimeService(repository=repository)
     run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Create ticket"))
-    rejected_action = asyncio.run(
-        service.propose_action(owner_user_id=owner_user_id, run_id=run.id, action_type="support.ticket.create")
-    )
+    rejected_action = asyncio.run(service.propose_action(owner_user_id=owner_user_id, run_id=run.id, action_type="support.ticket.create"))
     run.status = "waiting_for_confirmation"
     rejected = asyncio.run(service.reject_action(owner_user_id=owner_user_id, action_id=rejected_action.id, reason="not now"))
 
     assert rejected.status == "rejected"
     assert run.status == "completed"
     assert repository.events[-2].payload["user_visible"] is True
-    assert repository.events[-1].payload == {"reason": "action_rejected", "action_id": str(rejected.id)}
+    assert repository.events[-1].payload["reason"] == "action_rejected"
+    assert repository.events[-1].payload["action_id"] == str(rejected.id)
+    assert repository.events[-1].payload["semantic"]["surface"] == "hidden"
 
     run.status = "completed"
     second_run = asyncio.run(
@@ -174,7 +176,9 @@ def test_reject_and_expire_finish_waiting_run_without_apply() -> None:
     assert expired.status == "expired"
     assert second_run.status == "completed"
     assert repository.events[-2].event_type == "action.expired"
-    assert repository.events[-1].payload == {"reason": "action_expired", "action_id": str(expired.id)}
+    assert repository.events[-1].payload["reason"] == "action_expired"
+    assert repository.events[-1].payload["action_id"] == str(expired.id)
+    assert repository.events[-1].payload["semantic"]["surface"] == "hidden"
 
 
 def test_direct_action_requires_in_process_executor_before_persisting() -> None:

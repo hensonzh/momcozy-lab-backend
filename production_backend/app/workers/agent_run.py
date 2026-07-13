@@ -12,6 +12,7 @@ from ..core.errors import ApiError
 from ..modules.agent_runtime.actions.executor import AgentActionExecutor
 from ..modules.agent_runtime.event_stream.publisher import AgentEventPublisher
 from ..modules.agent_runtime.event_stream.transient import AgentTransientStream
+from ..modules.agent_runtime.event_semantics import with_run_event_semantic
 from ..modules.agent_runtime.run_lifecycle.controls import AgentRunControls
 from ..modules.agent_runtime.run_lifecycle.execution import AgentRunExecutionResult, AgentRunHandler
 from ..modules.agent_runtime.models import AgentAction, AgentEvent, AgentRun
@@ -306,11 +307,7 @@ class AgentRunWorker:
             return None
         actions = await list_actions(run_id=run.id)
         return next(
-            (
-                action
-                for action in reversed(actions)
-                if action.status in {"confirmed", "applying", "applied", "failed"}
-            ),
+            (action for action in reversed(actions) if action.status in {"confirmed", "applying", "applied", "failed"}),
             None,
         )
 
@@ -331,11 +328,15 @@ class AgentRunWorker:
         live_durable: bool = True,
         live_before_append: bool = False,
     ) -> AgentEvent:
+        payload = with_run_event_semantic(payload, event_type=event_type, run_id=str(run.id))
+        resolved_live_payload = (
+            payload if live_payload is None else with_run_event_semantic(live_payload, event_type=event_type, run_id=str(run.id))
+        )
         if live_before_append:
             await self._publish_live_event(
                 run=run,
                 event_type=event_type,
-                payload=payload if live_payload is None else live_payload,
+                payload=resolved_live_payload,
                 durable=live_durable,
             )
         event = await self.event_publisher.append_event(thread_id=run.thread_id, run_id=run.id, event_type=event_type, payload=payload)
@@ -343,7 +344,7 @@ class AgentRunWorker:
             await self._publish_live_event(
                 run=run,
                 event_type=event_type,
-                payload=payload if live_payload is None else live_payload,
+                payload=resolved_live_payload,
                 durable=live_durable,
             )
         return event

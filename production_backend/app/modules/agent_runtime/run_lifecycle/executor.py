@@ -69,6 +69,7 @@ from ..event_semantics import (
     artifact_event_payload_semantic,
     progress_live_dedupe_key,
     run_progress_payload,
+    web_search_event_semantic,
     with_tool_event_semantic,
 )
 from ..graphs import AgentGraphRegistry, default_graph_registry
@@ -483,6 +484,8 @@ class AgentRuntimeExecutor:
         health_web_search_required: bool = False,
     ) -> Any:
         await self._append_progress(run=run, phase="model_reasoning", label="我想一下")
+        if health_web_search_required:
+            await self._append_health_web_search_status(run=run, status="searching")
         model_started_at = perf_counter()
         result = await self.sdk_runner.run_reasoning(
             SdkNodeRequest(
@@ -517,21 +520,7 @@ class AgentRuntimeExecutor:
         if not required:
             return
         status = "completed" if result.web_search_used or result.web_search_citations else "failed"
-        await self._append_event(
-            thread_id=run.thread_id,
-            run_id=run.id,
-            event_type="CUSTOM",
-            payload={
-                "name": "momcozy.agent.web_search",
-                "value": {"status": status},
-                "semantic": {
-                    "phase": "done" if status == "completed" else "error",
-                    "label": "我查好专业资料啦" if status == "completed" else "专业资料检索暂时不可用",
-                    "surface": "work_item",
-                    "merge_key": "web_search:current",
-                },
-            },
-        )
+        await self._append_health_web_search_status(run=run, status=status)
         citations = _allowed_health_web_search_citations(result.web_search_citations)
         if not citations:
             return
@@ -546,6 +535,18 @@ class AgentRuntimeExecutor:
             },
         )
 
+    async def _append_health_web_search_status(self, *, run: AgentRun, status: str) -> None:
+        await self._append_event(
+            thread_id=run.thread_id,
+            run_id=run.id,
+            event_type="CUSTOM",
+            payload={
+                "name": "momcozy.agent.web_search",
+                "value": {"status": status},
+                "semantic": web_search_event_semantic(status=status),
+            },
+        )
+
     async def _finalize_turn_result(
         self,
         *,
@@ -554,6 +555,7 @@ class AgentRuntimeExecutor:
         result: Any,
         run_started_at: float,
     ) -> AgentRunExecutionResult:
+        await self._append_progress(run=run, phase="response_finalizing", label="我在组织回复～")
         action_proposal = _single_action_proposal(result.action_proposals)
         action_decision = self._action_decision_from_proposal(action_proposal) if action_proposal is not None else None
 
@@ -617,6 +619,12 @@ class AgentRuntimeExecutor:
             raise ApiError(code="empty_agent_response", message="Agent runtime returned an empty response.", status=502)
         finish_timings_ms = _timings_with_total(turn_context.timings_ms, run_started_at)
         quick_reply_started_at = perf_counter()
+        if not authoritative_final_text and (self.quick_reply_finalizer is not None or final_text.endswith(PREGNANCY_PLAN_FINAL_QUESTION)):
+            await self._append_progress(
+                run=run,
+                phase="quick_replies_preparing",
+                label="我在帮你准备下一轮的快捷输入～",
+            )
         quick_replies = (
             []
             if authoritative_final_text
@@ -845,7 +853,8 @@ class AgentRuntimeExecutor:
         async def invoke(args_json: str) -> SdkToolInvocationResult:
             args = _json_object(args_json)
             output = await self._invoke_load_service_skill_tool(run=run, args=args)
-            await self._append_progress(run=run, phase="model_reasoning_after_tool", label="我接着处理下一步")
+            await self._append_progress(run=run, phase="model_followup", label="我接着处理下一步")
+            await self._append_progress(run=run, phase="model_reasoning_after_tool", label="我想一下")
             skill = self.service_skill_registry.get(_required_text(output, "service_skill_id"))
             return SdkToolInvocationResult(
                 output_json=json.dumps(project_load_service_skill_model_output(output), ensure_ascii=False, sort_keys=True),
@@ -991,7 +1000,8 @@ class AgentRuntimeExecutor:
             required_response = _text(result.safe_output, "required_response")
             if required_response:
                 self._run_authoritative_final_text[run.id] = required_response
-        await self._append_progress(run=run, phase="model_reasoning_after_tool", label="我接着处理下一步")
+        await self._append_progress(run=run, phase="model_followup", label="我接着处理下一步")
+        await self._append_progress(run=run, phase="model_reasoning_after_tool", label="我想一下")
         model_output = getattr(result, "model_output", result.safe_output)
         return SdkToolInvocationResult(
             output_json=json.dumps(model_output, sort_keys=True),
@@ -1479,7 +1489,6 @@ class AgentRuntimeExecutor:
         payload = run_progress_payload(phase=phase, label=label)
         semantic = payload.get("semantic")
         dedupe_key = progress_live_dedupe_key(run_id=run.id, semantic=semantic) if isinstance(semantic, dict) else ""
-        published_live = False
         if self.event_sink is not None:
             await self.event_sink.publish_progress(
                 thread_id=run.thread_id,
@@ -1491,7 +1500,6 @@ class AgentRuntimeExecutor:
                 optimistic=True,
                 durable=False,
             )
-            published_live = True
         elif self.transient_stream is not None:
             try:
                 await self.transient_stream.publish_progress(
@@ -1504,11 +1512,8 @@ class AgentRuntimeExecutor:
                     optimistic=True,
                     durable=False,
                 )
-                published_live = True
             except Exception:
                 LOGGER.warning("Failed to publish live run.progress event.", exc_info=True)
-        if published_live:
-            return
         await self._append_event(
             thread_id=run.thread_id,
             run_id=run.id,
@@ -1698,7 +1703,10 @@ def _artifact_event_payload(artifact: AgentArtifact) -> dict[str, Any]:
         payload.update(
             {key: value for key, value in artifact.payload.items() if key in {"form", "card", "card_json", "cart_update", "summary"}}
         )
-    payload["semantic"] = artifact_event_payload_semantic(artifact_type=artifact.artifact_type)
+    payload["semantic"] = artifact_event_payload_semantic(
+        artifact_type=artifact.artifact_type,
+        artifact_id=str(artifact.id),
+    )
     return payload
 
 
@@ -2201,7 +2209,7 @@ def _action_confirmation_event_payload(action: AgentAction) -> dict[str, Any]:
         "requires_confirmation": True,
         "confirmation_policy": "always",
         "user_visible": True,
-        "semantic": action_event_payload_semantic(action_status=action.status),
+        "semantic": action_event_payload_semantic(action_status=action.status, action_id=str(action.id)),
     }
 
 

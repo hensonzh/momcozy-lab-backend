@@ -34,6 +34,10 @@ def test_agent_run_worker_completes_run_with_assistant_message_events_and_lock()
     assert run is not None
     assert run.status == "completed"
     assert [event.event_type for event in repository.events] == ["run.started", "message.completed", "run.completed"]
+    assert repository.events[0].payload["semantic"]["phase"] == "thinking"
+    assert repository.events[0].payload["semantic"]["label"] == "我已经收到你的消息啦～"
+    assert repository.events[2].payload["semantic"]["surface"] == "hidden"
+    assert repository.events[2].payload["semantic"]["lifecycle"] == "completed"
     assert repository.messages[0].content == {"text": "Here is the summary."}
     assert repository.events[1].payload == {
         "message_id": str(repository.messages[0].id),
@@ -227,6 +231,8 @@ def test_agent_run_worker_preserves_waiting_for_confirmation_state() -> None:
     assert run.status == "waiting_for_confirmation"
     assert repository.events[-1].event_type == "run.waiting_for_confirmation"
     assert repository.events[-1].payload["action_id"] == str(action_id)
+    assert repository.events[-1].payload["semantic"]["phase"] == "confirming"
+    assert repository.events[-1].payload["semantic"]["visibility"] == "action"
 
 
 def test_agent_run_worker_does_not_resume_existing_running_run() -> None:
@@ -294,7 +300,9 @@ def test_agent_run_worker_resumes_confirmed_action_in_worker_before_terminal_res
     assert action.status == "applied"
     assert repository.messages[-1].content == {"text": "客服工单已提交。"}
     assert repository.events[-1].event_type == "run.completed"
-    assert repository.events[-1].payload == {"reason": "action_applied", "action_id": str(action.id)}
+    assert repository.events[-1].payload["reason"] == "action_applied"
+    assert repository.events[-1].payload["action_id"] == str(action.id)
+    assert repository.events[-1].payload["semantic"]["surface"] == "hidden"
 
 
 def test_agent_run_worker_recovers_post_apply_crash_without_reapplying_or_duplicate_message() -> None:
@@ -319,7 +327,9 @@ def test_agent_run_worker_recovers_post_apply_crash_without_reapplying_or_duplic
     assert action_executor.calls == [action.id]
     assert action_executor.handler_calls == []
     assert repository.messages == [existing]
-    assert repository.events[-1].payload == {"reason": "action_applied", "action_id": str(action.id)}
+    assert repository.events[-1].payload["reason"] == "action_applied"
+    assert repository.events[-1].payload["action_id"] == str(action.id)
+    assert repository.events[-1].payload["semantic"]["surface"] == "hidden"
 
 
 def test_agent_run_worker_requeues_stale_confirmed_action_instead_of_failing_run() -> None:
@@ -334,11 +344,10 @@ def test_agent_run_worker_requeues_stale_confirmed_action_instead_of_failing_run
     assert run is not None and run.status == "queued"
     assert run.error_code == ""
     assert repository.events[-1].event_type == "run.queued"
-    assert repository.events[-1].payload == {
-        "reason": "action_resume",
-        "action_id": str(action.id),
-        "phase": "queued",
-    }
+    assert repository.events[-1].payload["reason"] == "action_resume"
+    assert repository.events[-1].payload["action_id"] == str(action.id)
+    assert repository.events[-1].payload["phase"] == "queued"
+    assert repository.events[-1].payload["semantic"]["label"] == "我已经收到你的消息啦～"
     assert controls.notified_run_ids == [repository.run.id]
 
 
