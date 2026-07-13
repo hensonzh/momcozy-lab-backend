@@ -994,8 +994,6 @@ class AgentRuntimeExecutor:
         if contract_name in FORM_CREATION_TOOL_NAMES:
             facts = await self._birth_prep_business_facts(run=run)
             default_values = _birth_prep_form_default_values(facts)
-            if contract_name != "pregnancy.plan_intake.start":
-                default_values = {key: value for key, value in default_values.items() if key == "due_date_or_week"}
             if self.fact_service is not None:
                 stored_defaults = await self.fact_service.form_defaults(
                     owner_user_id=run.actor_user_id,
@@ -1003,6 +1001,9 @@ class AgentRuntimeExecutor:
                 )
                 for key, value in stored_defaults.items():
                     default_values.setdefault(key, value)
+            same_turn_defaults = _birth_prep_same_turn_form_default_values(self._run_current_user_text.get(run.id, ""))
+            for key, value in same_turn_defaults.items():
+                default_values.setdefault(key, value)
             trusted_args = {"default_values": default_values} if default_values else {}
             if contract_name == "pregnancy.plan_intake.start":
                 workflow = await self._latest_pregnancy_plan_workflow(run=run)
@@ -1048,6 +1049,11 @@ class AgentRuntimeExecutor:
         )
         if workflow is None:
             return {}
+        expires_at = workflow.expires_at
+        if expires_at is not None:
+            normalized_expires_at = expires_at if expires_at.tzinfo is not None else expires_at.replace(tzinfo=timezone.utc)
+            if normalized_expires_at <= datetime.now(timezone.utc):
+                return {}
         return {
             "workflow_state_id": str(workflow.id),
             "run_id": str(workflow.run_id or ""),
@@ -1886,6 +1892,62 @@ def _birth_prep_form_default_values(facts: dict[str, Any]) -> dict[str, Any]:
     age = profile.get("age")
     if isinstance(age, (int, float)) and 12 <= int(age) <= 70:
         defaults["age"] = int(age)
+    plans = pregnancy.get("plans")
+    active_plan = (
+        next(
+            (
+                plan
+                for plan in plans
+                if isinstance(plan, dict) and _text(plan, "status") == "active" and _text(plan, "plan_type") == "pregnancy"
+            ),
+            None,
+        )
+        if isinstance(plans, list)
+        else None
+    )
+    owner = _dict(active_plan or {}, "owner")
+    active_defaults = {
+        "due_date_or_week": _text(owner, "due_date_or_week") or _text(owner, "current_week"),
+        "current_week": _text(owner, "current_week") or _text(owner, "due_date_or_week"),
+        "age": owner.get("age"),
+        "ivf": _text(owner, "ivf"),
+        "fetus_count": _text(owner, "fetus_count"),
+        "first_birth": _text(owner, "first_birth"),
+        "birth_path": _text(owner, "birth_path"),
+        "birth_hospital": _text(owner, "birth_setting"),
+        "feeding_intention": _text(owner, "feeding_intention"),
+        "support_person": _text(owner, "support_person"),
+        "medical_notes": _text(owner, "medical_notes"),
+        "doctor_notes": _text(owner, "doctor_notes"),
+    }
+    active_notes = [
+        note
+        for note in (_text(owner, "medical_notes"), _text(owner, "doctor_notes"))
+        if note
+    ]
+    if active_notes:
+        active_defaults["pregnancy_history_or_notes"] = active_notes
+    for key, value in active_defaults.items():
+        if value not in ("", None):
+            defaults.setdefault(key, value)
+    return defaults
+
+
+def _birth_prep_same_turn_form_default_values(text: str) -> dict[str, Any]:
+    defaults: dict[str, Any] = {}
+    age_match = re.search(r"(?<!\d)(\d{2})\s*岁", str(text or ""))
+    if age_match is not None:
+        age = int(age_match.group(1))
+        if 12 <= age <= 70:
+            defaults["age"] = age
+    week_match = re.search(r"(?:怀孕|孕)?\s*(\d{1,2})(?:\s*[+＋]\s*(\d))?\s*周", str(text or ""))
+    if week_match is not None:
+        week = int(week_match.group(1))
+        days = int(week_match.group(2) or 0)
+        if 1 <= week <= 42 and 0 <= days <= 6:
+            current_week = f"{week}+{days}周" if days else f"{week}周"
+            defaults["current_week"] = current_week
+            defaults["due_date_or_week"] = current_week
     return defaults
 
 

@@ -5,6 +5,7 @@ import pytest
 
 from production_backend.app.modules.agent_runtime.models import AgentAction
 from production_backend.app.modules.hospital_bag import HOSPITAL_BAG_CART_UPDATE_ACTION, HospitalBagCartUpdateActionHandler
+from production_backend.app.modules.hospital_bag.agent_actions import HOSPITAL_BAG_CART_CHANGED_EVENT
 from production_backend.app.workers.errors import PermanentJobError
 
 
@@ -25,6 +26,12 @@ def test_hospital_bag_cart_update_action_handler_applies_confirmed_cart_delta() 
     assert result.details["cart_update"]["set_checked"][0]["item_id"] == "nursing-bra"
     assert result.details["agent_action_id"] == str(action.id)
     assert result.details["agent_run_id"] == str(action.run_id)
+    assert result.application_events[0].event_type == HOSPITAL_BAG_CART_CHANGED_EVENT
+    assert result.application_events[0].payload == {
+        "operation": "updated",
+        "source": "agent_action",
+        "cart_update": action.apply_payload["cart_update"],
+    }
 
 
 def test_hospital_bag_cart_update_action_handler_rejects_missing_cart_delta() -> None:

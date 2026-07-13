@@ -84,6 +84,7 @@ class AgentRuntimeService:
         schema_version: str,
         state: dict[str, Any],
         active_step: str,
+        expires_at: datetime | None = None,
     ) -> AgentWorkflowState:
         return await self.state_store.upsert_active_workflow(
             thread_id=thread_id,
@@ -94,6 +95,7 @@ class AgentRuntimeService:
             schema_version=schema_version,
             state=state,
             active_step=active_step,
+            expires_at=expires_at,
         )
     async def create_thread(
         self,

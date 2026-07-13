@@ -449,3 +449,85 @@ def test_pregnancy_plan_result_keeps_legacy_envelope_and_injected_timestamp() ->
     card_json = result["card"]["card_json"]
     assert card_json["owner"]["due_date_or_week"] == "32周"
     assert card_json["generation_context"]["created_at"] == "2026-07-12T08:30:00+00:00"
+
+
+def test_pregnancy_plan_card_restores_full_legacy_phase_route_and_monthly_cadence() -> None:
+    card = build_pregnancy_plan_card_json(
+        {
+            "current_week": "8周",
+            "ivf": "否",
+            "fetus_count": "单胎",
+            "age": 30,
+            "first_birth": "是",
+            "birth_path": "还没确定",
+            "scope": "full",
+        }
+    )
+
+    assert [phase["id"] for phase in card["phases"]] == [
+        "early_pregnancy",
+        "mid_pregnancy",
+        "late_pregnancy",
+        "labor_recognition",
+        "hospital_birth",
+        "postpartum",
+    ]
+    assert card["phases"][0]["status"] == "current"
+    assert card["todo_plan"]["cadence"] == "monthly"
+    assert card["todo_plan"]["cadence_label"] == "按月计划"
+    assert card["todo_plan"]["periods"][0]["title"] == "孕 8-11 周"
+    assert card["todo_plan"]["periods"][-1]["id"] == "period_terminal"
+    assert card["generation_context"]["scope"] == "full"
+    assert card["subtitle"] == "从孕8周到产后 42 天的阶段路线图"
+
+
+@pytest.mark.parametrize(
+    ("week", "cadence", "first_period"),
+    [
+        (30, "biweekly", "孕 30-31 周"),
+        (36, "weekly", "孕 36 周"),
+    ],
+)
+def test_pregnancy_plan_card_uses_legacy_dynamic_late_pregnancy_cadence(
+    week: int,
+    cadence: str,
+    first_period: str,
+) -> None:
+    card = build_pregnancy_plan_card_json(
+        {
+            "current_week": f"{week}周",
+            "ivf": "否",
+            "fetus_count": "单胎",
+            "age": 30,
+            "first_birth": "否",
+            "birth_path": "顺产",
+        }
+    )
+
+    assert card["todo_plan"]["cadence"] == cadence
+    assert card["todo_plan"]["periods"][0]["title"] == first_period
+
+
+def test_pregnancy_plan_card_applies_collected_scope_to_visible_phase_route() -> None:
+    base = {
+        "current_week": "20周",
+        "ivf": "否",
+        "fetus_count": "单胎",
+        "age": 30,
+        "first_birth": "是",
+        "birth_path": "顺产",
+    }
+
+    prenatal = build_pregnancy_plan_card_json({**base, "scope": "prenatal_only"})
+    short = build_pregnancy_plan_card_json({**base, "scope": "short_range"})
+
+    assert [phase["id"] for phase in prenatal["phases"]] == [
+        "mid_pregnancy",
+        "late_pregnancy",
+        "labor_recognition",
+    ]
+    assert "hospital_birth" not in {phase["id"] for phase in prenatal["phases"]}
+    assert "postpartum" not in {phase["id"] for phase in prenatal["phases"]}
+    assert prenatal["subtitle"] == "从孕20周到生产前的阶段路线图"
+    assert [phase["id"] for phase in short["phases"]] == ["mid_pregnancy", "late_pregnancy"]
+    assert short["subtitle"] == "从孕20周开始的近期准备节奏"

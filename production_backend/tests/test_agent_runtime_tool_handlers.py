@@ -214,6 +214,48 @@ def test_hospital_bag_cart_update_propose_tool_handler_creates_confirmation_acti
     assert runtime_service.calls[0]["apply_payload"]["metadata"] == {"timezone": "Asia/Shanghai"}
 
 
+def test_registered_hospital_bag_cart_handler_preserves_legacy_cart_result_through_idempotent_action() -> None:
+    actor = _user()
+    runtime_service = FakeAgentRuntimeService()
+    handlers = build_default_tool_handlers(
+        profile_service=FakeProfileService(profile=None, infants=[]),
+        records_service=FakeRecordsService(owner_user_id=actor.user_id),
+        plans_service=FakePlansService(owner_user_id=actor.user_id),
+        diary_service=FakeDiaryService(owner_user_id=actor.user_id),
+        devices_service=FakeDevicesService(owner_user_id=actor.user_id),
+        asset_service=FakeAssetService(),
+        agent_runtime_service=runtime_service,
+    )
+    handler = handlers["hospital_bag_cart_update"]
+    context = _context(actor=actor, args={"action": "reset_cart"})
+
+    first = asyncio.run(handler(context))
+    second = asyncio.run(handler(context))
+
+    assert first["status"] == "cart_updated"
+    assert first["action_type"] == "hospital_bag.cart.update"
+    assert first["action_status"] == "applied"
+    assert first["write_succeeded"] is True
+    assert first["cart_update"]["groups"][0]["items"][0]["name"] == "产褥垫组合装"
+    assert second["action_id"] == first["action_id"]
+    cart_actions = [action for action in runtime_service.actions if action.action_type == "hospital_bag.cart.update"]
+    assert len(cart_actions) == 1
+    assert cart_actions[0].actor_user_id == actor.user_id
+    assert cart_actions[0].apply_payload["cart_update"] == first["cart_update"]
+
+
+def test_registered_hospital_bag_cart_handler_does_not_create_action_for_clarification() -> None:
+    actor = _user()
+    runtime_service = FakeAgentRuntimeService()
+    handler = HospitalBagCartUpdateProposeToolHandler(runtime_service=runtime_service)
+
+    result = asyncio.run(handler(_context(actor=actor, args={"action": "clarify"})))
+
+    assert result["status"] == "needs_clarification"
+    assert "action_id" not in result
+    assert not [action for action in runtime_service.actions if action.action_type == "hospital_bag.cart.update"]
+
+
 def test_hospital_bag_form_and_card_use_one_durable_workflow_state() -> None:
     actor = _user()
     thread_id = uuid4()
@@ -681,6 +723,37 @@ def test_pregnancy_plan_context_read_tool_handler_returns_bounded_owner_scoped_s
     assert result["tasks"][0]["title"] == "Call clinic"
     assert "recent_diary_entries" not in result
     assert result["counts"] == {"plans": 1, "tasks": 1}
+
+
+def test_pregnancy_plan_context_exposes_only_active_plan_owner_defaults_for_birth_prep_prefill() -> None:
+    actor = _user()
+    profile_service = FakeProfileService(profile=None, infants=[])
+    plans_service = FakePlansService(owner_user_id=actor.user_id)
+    plans_service.plan_payload = {
+        "card": {
+            "owner": {
+                "due_date_or_week": "31周",
+                "birth_path": "剖宫产",
+                "birth_setting": "市妇幼",
+                "feeding_intention": "混合",
+                "support_person": "伴侣",
+            },
+            "medical_notes": "must not be projected",
+        }
+    }
+    handler = PregnancyPlanContextReadToolHandler(profile_service=profile_service, plans_service=plans_service)
+
+    result = asyncio.run(handler(_context(actor=actor, args={})))
+
+    assert result["plans"][0]["owner"] == {
+        "due_date_or_week": "31周",
+        "birth_path": "剖宫产",
+        "birth_setting": "市妇幼",
+        "feeding_intention": "混合",
+        "support_person": "伴侣",
+    }
+    assert "payload" not in result["plans"][0]
+    assert "medical_notes" not in str(result["plans"][0])
 
 
 def test_devices_pump_status_read_tool_handler_returns_bounded_owner_scoped_summary() -> None:
@@ -1583,6 +1656,54 @@ def test_pregnancy_plan_intake_start_creates_a_fresh_form_after_safety_interrupt
     assert runtime_service.workflow_state.state["source_form_artifact_id"] != "urgent-form"
 
 
+def test_pregnancy_plan_intake_start_restarts_only_when_explicitly_requested() -> None:
+    runtime_service = FakeAgentRuntimeService()
+    old_form_id = "old-active-form"
+
+    result = asyncio.run(
+        PregnancyPlanIntakeStartToolHandler(runtime_service=runtime_service)(
+            _context(
+                args={
+                    "restart": True,
+                    "runtime_plan_context": {"has_active_plan": False},
+                    "runtime_workflow_context": {
+                        "phase": "collecting_intake",
+                        "source_form_artifact_id": old_form_id,
+                    },
+                }
+            )
+        )
+    )
+
+    assert result["status"] == "form_created"
+    assert runtime_service.workflow_state.state["source_form_artifact_id"] != old_form_id
+    assert runtime_service.workflow_calls[-1]["expires_at"] > datetime.now(timezone.utc)
+
+
+def test_pregnancy_plan_intake_can_be_abandoned_and_then_requires_fresh_intake() -> None:
+    runtime_service = FakeAgentRuntimeService()
+    workflow = {
+        "phase": "personalized_followup",
+        "source_form_artifact_id": "form-1",
+        "source_form_submission_id": "submission-1",
+    }
+
+    result = asyncio.run(
+        PregnancyPlanIntakeAdvanceToolHandler(runtime_service=runtime_service)(
+            _context(args={"action": "abandon", "runtime_workflow_context": workflow})
+        )
+    )
+
+    assert result == {
+        "status": "pregnancy_plan_intake_abandoned",
+        "requires_fresh_intake": True,
+    }
+    assert runtime_service.workflow_state.status == "failed"
+    assert runtime_service.workflow_state.active_step == ""
+    assert runtime_service.workflow_state.state["abandoned"] is True
+    assert runtime_service.workflow_calls[-1]["expires_at"] is None
+
+
 def test_pregnancy_plan_intake_analyze_uses_verified_form_and_returns_private_model_context() -> None:
     runtime_service = FakeAgentRuntimeService()
     run_id = uuid4()
@@ -1947,10 +2068,10 @@ def test_pregnancy_plan_propose_requires_workflow_ready_to_generate() -> None:
 
     missing = asyncio.run(
         handler(
-                ToolHandlerContext(
-                    actor=_user(),
-                    run_id=run_id,
-                    thread_id=uuid4(),
+            ToolHandlerContext(
+                actor=_user(),
+                run_id=run_id,
+                thread_id=uuid4(),
                 tool_name="pregnancy.plan.propose",
                 call_id="call-1",
                 args={"runtime_plan_context": {"has_active_plan": False, "workflow_phase": "collecting_intake"}},
@@ -1961,10 +2082,10 @@ def test_pregnancy_plan_propose_requires_workflow_ready_to_generate() -> None:
 
     not_ready = asyncio.run(
         handler(
-                ToolHandlerContext(
-                    actor=_user(),
-                    run_id=run_id,
-                    thread_id=uuid4(),
+            ToolHandlerContext(
+                actor=_user(),
+                run_id=run_id,
+                thread_id=uuid4(),
                 tool_name="pregnancy.plan.propose",
                 call_id="call-2",
                 args={
@@ -2341,9 +2462,7 @@ def test_pregnancy_diary_delete_tool_deletes_entry_synchronously() -> None:
     diary_service = FakeDiaryService(owner_user_id=actor.user_id)
 
     result = asyncio.run(
-        PregnancyDiaryEntryDeleteToolHandler(diary_service=diary_service)(
-            _context(actor=actor, args={"entry_date": "2026-07-04"})
-        )
+        PregnancyDiaryEntryDeleteToolHandler(diary_service=diary_service)(_context(actor=actor, args={"entry_date": "2026-07-04"}))
     )
 
     assert result["status"] == "entry_deleted"
@@ -2424,6 +2543,7 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
         "records.pumping_record.propose",
         "support.ticket.propose",
     }
+    assert isinstance(handlers["hospital_bag_cart_update"], HospitalBagCartUpdateProposeToolHandler)
 
 
 def _context(*, actor: CurrentUser | None = None, args: dict | None = None, thread_id=None) -> ToolHandlerContext:
@@ -2567,6 +2687,7 @@ class FakePlansService:
         self.task_date = None
         self.task_status = None
         self.limit = None
+        self.plan_payload = {}
 
     async def list_plans(self, *, owner_user_id, limit, status="active", plan_type=""):
         self.owner_user_id = owner_user_id
@@ -2582,6 +2703,7 @@ class FakePlansService:
                 summary="Pack hospital bag",
                 status="active",
                 source="manual",
+                payload=self.plan_payload,
                 updated_at=_now(),
             )
         ]
@@ -2757,6 +2879,7 @@ class FakeAgentRuntimeService:
         self.actions = []
         self.artifacts = []
         self.workflow_state = None
+        self.workflow_calls = []
         self.failed_action_types = failed_action_types or set()
         self.action = AgentAction(
             id=uuid4(),
@@ -2798,6 +2921,7 @@ class FakeAgentRuntimeService:
         return workflow
 
     async def upsert_workflow_state(self, **kwargs):
+        self.workflow_calls.append(kwargs)
         if self.workflow_state is None or self.workflow_state.status in {"completed", "expired", "failed"}:
             self.workflow_state = AgentWorkflowState(
                 id=uuid4(),

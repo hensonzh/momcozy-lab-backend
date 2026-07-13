@@ -4,6 +4,8 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
 
+from .hospital_bag_flow import build_hospital_bag_card_json, build_hospital_bag_followup
+
 
 HOSPITAL_BAG_CART_URL = "/hospital-bag-cart"
 HOSPITAL_BAG_CART_LINK = f"[打开待产包购物车]({HOSPITAL_BAG_CART_URL})"
@@ -572,21 +574,16 @@ def hospital_bag_card_result(args: dict[str, Any]) -> dict[str, Any]:
             missing,
             f"待产包清单还不能生成，表单里还差{'、'.join(labels)}。请先补全并提交待产包信息采集表单。",
         )
-    card_json = _hospital_bag_card_json(form_data)
+    card_json = _hospital_bag_card_json(
+        form_data,
+        generation_mode=_text(args.get("generation_mode")) or "standard",
+    )
     return {
         "tool_name": "hospital_bag_card_create",
         "status": "card_created",
         "card": {"card_type": "hospital_bag_card", "schema_version": "1.0", "card_json": card_json},
         "source_form_submission_id": _text(args.get("form_submission_id")),
-        "assistant_followup": {
-            "kind": "hospital_bag_cart",
-            "message": (
-                "待产包清单我整理好了。\n\n"
-                "我顺手把清单里适合放入购物车参考的妈妈/宝宝用品整理好了，"
-                "不用一次买完，先看清单里的优先级，按实际情况删减后再决定是否购买。\n\n"
-                f"**{HOSPITAL_BAG_CART_LINK}**"
-            ),
-        },
+        "assistant_followup": build_hospital_bag_followup(card_json),
     }
 
 
@@ -859,44 +856,8 @@ def hospital_bag_pump_recommend_result(args: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _hospital_bag_card_json(form_data: dict[str, Any]) -> dict[str, Any]:
-    birth_path = _first_text(form_data.get("birth_path")) or "待确认"
-    feeding = _first_text(form_data.get("feeding_intention")) or "待确认"
-    support = _first_text(form_data.get("support_person")) or "待确认"
-    return {
-        "card_type": "hospital_bag_card",
-        "schema_version": "1.0",
-        "title": "待产包",
-        "subtitle": "个性化入院物品清单",
-        "owner": {
-            "due_date_or_week": _first_text(form_data.get("due_date_or_week")) or "待确认",
-            "birth_setting": _first_text(form_data.get("birth_setting")) or "待确认",
-            "birth_path": birth_path,
-            "first_birth": _first_text(form_data.get("first_birth")) or "待确认",
-            "feeding_intention": feeding,
-            "support_person": support,
-            "fetus_count": _first_text(form_data.get("fetus_count")) or "待确认",
-            "return_to_work_timing": _first_text(form_data.get("return_to_work_timing")) or "待确认",
-        },
-        "hospital_context": {
-            "expected_stay": _first_text(form_data.get("expected_stay")) or "待确认",
-            "hospital_provided_items": _string_list(form_data.get("hospital_provided_items")),
-            "items_to_confirm_with_hospital": ["医院是否提供纸尿裤/产褥垫", "入院证件和产检资料要求", "陪产、探视和停车安排"],
-        },
-        "focus_items": ["证件文件包", "妈妈住院包", "宝宝出院包", "母乳喂养备用用品"],
-        "hospital_questions": ["需要自带胎监带吗？", "宝宝出生后护理流程是什么？", "产后有没有母乳喂养支持？"],
-        "packing_groups": [
-            {"group_id": "documents", "title": "证件文件包", "items": [_bag_item("身份证件", "must"), _bag_item("医保卡/保险卡", "must"), _bag_item("产检本/产检资料", "must")]},
-            {"group_id": "mom_hospital_bag", "title": "妈妈住院包", "items": [_bag_item("宽松出院衣物", "must", "1套"), _bag_item("产褥垫/产妇卫生巾", "must"), _bag_item("一次性内裤", "recommended")]},
-            {"group_id": "baby_discharge_bag", "title": "宝宝出院包", "items": [_bag_item("宝宝出院衣物", "must", "1套"), _bag_item("包被", "must", "1条"), _bag_item("纸尿裤", "confirm_first")]},
-            {"group_id": "feeding", "title": "母乳喂养备用", "items": [_bag_item("防溢乳垫", "recommended"), _bag_item("乳头护理霜", "recommended"), _bag_item("便携式吸奶器", "recommended", "1台")]},
-        ],
-        "missing_or_to_buy": [],
-        "timeline": ["32～34 周：确认医院要求", "36 周左右：按清单打包", "临产前：把证件和充电器放到随手可拿处"],
-        "personalized_notes": [f"分娩方式：{birth_path}", f"喂养意向：{feeding}", f"支持情况：{support}"],
-        "missing_fields": [],
-        "disclaimer": HOSPITAL_BAG_DISCLAIMER,
-    }
+def _hospital_bag_card_json(form_data: dict[str, Any], *, generation_mode: str = "standard") -> dict[str, Any]:
+    return build_hospital_bag_card_json(form_data, generation_mode=generation_mode)
 
 
 def _birth_plan_card_json(form_data: dict[str, Any]) -> dict[str, Any]:
@@ -953,13 +914,6 @@ def _confirmed_form_data(args: dict[str, Any]) -> dict[str, Any]:
         if value:
             return value
     return {}
-
-
-def _bag_item(label: str, priority: str, quantity: str = "") -> dict[str, Any]:
-    item = {"label": label, "priority": priority}
-    if quantity:
-        item["quantity"] = quantity
-    return item
 
 
 def _todo_item(item_id: str, title: str, reason: str) -> dict[str, Any]:

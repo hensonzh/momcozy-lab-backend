@@ -30,6 +30,7 @@ from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.
 )
 from production_backend.app.modules.agent_runtime.run_lifecycle.executor import (
     AgentRuntimeExecutor,
+    _birth_prep_form_default_values,
     _pregnancy_runtime_plan_context,
 )
 from production_backend.app.modules.agent_runtime.run_lifecycle.working_context import (
@@ -641,11 +642,11 @@ def test_agent_runtime_executor_load_service_skill_returns_facts_and_records_led
         ("emotion-support", set()),
         (
             "device-guidance",
-                {
-                    "devices_pump_status_read",
-                    "devices_guidance_read",
-                    "devices_unboxing_advance",
-                    "support_ticket_propose",
+            {
+                "devices_pump_status_read",
+                "devices_guidance_read",
+                "devices_unboxing_advance",
+                "support_ticket_propose",
             },
         ),
     ],
@@ -1012,7 +1013,11 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert backend.tool_descriptions_by_contract == {contract_name: contract.description for contract_name, contract in contracts.items()}
     assert backend.tool_schemas_by_contract == {contract_name: contract.input_schema for contract_name, contract in contracts.items()}
     assert backend.tool_schemas["hospital_bag_card_create"]["additionalProperties"] is False
-    assert backend.tool_schemas["hospital_bag_card_create"]["properties"] == {}
+    assert backend.tool_schemas["hospital_bag_card_create"]["properties"]["generation_mode"]["enum"] == [
+        "standard",
+        "quick",
+        "immediate",
+    ]
     assert backend.tool_schemas["hospital_bag_cart_update"]["required"] == ["action"]
     assert backend.tool_schemas["devices_guidance_read"]["properties"]["limit"]["maximum"] == 20
     assert backend.tool_schemas["devices_guidance_read"]["properties"]["content_type"]["type"] == "string"
@@ -2629,7 +2634,13 @@ def test_agent_runtime_executor_blocks_model_for_urgent_signal_hidden_in_verifie
 def test_agent_runtime_executor_prefills_form_from_runtime_business_facts_without_model_args() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)
-    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="开始准备待产包", sequence=1)
+    current_user = _message(
+        thread_id=thread_id,
+        run_id=run.id,
+        role="user",
+        text="我现在25周，32岁，开始准备待产包",
+        sequence=1,
+    )
     repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user, run=run)
     registry = default_tool_registry()
     captured_args: dict[str, Any] = {}
@@ -2644,9 +2655,7 @@ def test_agent_runtime_executor_prefills_form_from_runtime_business_facts_withou
         handlers={"hospital_bag_form_create": capture_handler},
     )
     business_facts_projector = FakeBusinessFactsProjector(facts={"pregnancy": {"profile": {"delivery_date": "2026-09-18"}}})
-    fact_service = FakeFactService(
-        defaults={"due_date_or_week": "30周", "first_birth": "否", "feeding_intention": "混合喂养"}
-    )
+    fact_service = FakeFactService(defaults={"due_date_or_week": "30周", "age": 34, "first_birth": "否", "feeding_intention": "混合喂养"})
     backend = ScriptedSdkBackend(
         [
             scripted_sdk_response(
@@ -2669,10 +2678,107 @@ def test_agent_runtime_executor_prefills_form_from_runtime_business_facts_withou
 
     assert repository.tool_call.safe_args == {}
     assert captured_args == {
-        "default_values": {"due_date_or_week": "2026-09-18", "feeding_intention": "混合喂养", "first_birth": "否"}
+        "default_values": {
+            "age": 34,
+            "current_week": "2026-09-18",
+            "due_date_or_week": "2026-09-18",
+            "feeding_intention": "混合喂养",
+            "first_birth": "否",
+        }
     }
     assert business_facts_projector.calls[0]["service_skill_id"] == ServiceSkillId.BIRTH_PREP
     assert fact_service.requested_form_ids == ["hospital_bag_intake"]
+
+
+def test_agent_runtime_executor_prefills_pregnancy_form_from_reliable_same_turn_week_and_age() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(
+        thread_id=thread_id,
+        run_id=run.id,
+        role="user",
+        text="我现在孕25+3周，32岁，想制定孕期计划",
+        sequence=1,
+    )
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user, run=run)
+    registry = default_tool_registry()
+    captured_args: dict[str, Any] = {}
+
+    async def capture_handler(context: ToolHandlerContext) -> dict[str, Any]:
+        captured_args.update(context.args)
+        return {"status": "form_created"}
+
+    tool_executor = ToolExecutor(
+        registry=registry,
+        repository=repository,
+        handlers={"pregnancy.plan_intake.start": capture_handler},
+    )
+    backend = ScriptedSdkBackend(
+        [
+            scripted_sdk_response(
+                final_text="信息采集表已准备好。",
+                tool_invocations=(scripted_tool_invocation("pregnancy.plan_intake.start", {}),),
+            )
+        ]
+    )
+
+    asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            tool_registry=registry,
+            tool_executor=tool_executor,
+            business_facts_projector=FakeBusinessFactsProjector(facts={}),
+        ).execute(run=run)
+    )
+
+    assert captured_args["default_values"] == {
+        "age": 32,
+        "current_week": "25+3周",
+        "due_date_or_week": "25+3周",
+    }
+    assert captured_args["runtime_plan_context"] == {"has_active_plan": False}
+    assert captured_args["runtime_workflow_context"] == {}
+
+
+def test_birth_prep_prefill_uses_verified_profile_then_active_plan_owner_without_exposing_payload() -> None:
+    defaults = _birth_prep_form_default_values(
+        {
+            "pregnancy": {
+                "profile": {"delivery_date": "2026-09-18", "age": 33},
+                "plans": [
+                    {
+                        "status": "active",
+                        "plan_type": "pregnancy",
+                        "owner": {
+                            "due_date_or_week": "31周",
+                            "age": 35,
+                            "ivf": "是",
+                            "fetus_count": "双胎",
+                            "first_birth": "否",
+                            "birth_path": "剖宫产",
+                            "birth_setting": "市妇幼",
+                            "feeding_intention": "混合",
+                            "support_person": "伴侣",
+                        },
+                    }
+                ],
+            }
+        }
+    )
+
+    assert defaults == {
+        "due_date_or_week": "2026-09-18",
+        "current_week": "2026-09-18",
+        "age": 33,
+        "ivf": "是",
+        "fetus_count": "双胎",
+        "first_birth": "否",
+        "birth_path": "剖宫产",
+        "birth_hospital": "市妇幼",
+        "feeding_intention": "混合",
+        "support_person": "伴侣",
+    }
 
 
 def test_pregnancy_runtime_plan_context_ignores_active_non_pregnancy_plans() -> None:
@@ -2708,6 +2814,32 @@ def test_pregnancy_runtime_plan_context_allows_creation_when_only_other_plan_typ
     )
 
     assert context == {"has_active_plan": False}
+
+
+def test_expired_pregnancy_workflow_is_not_reused_as_trusted_intake_context() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    workflow = _pregnancy_workflow(
+        run=run,
+        status="waiting",
+        state={"phase": "personalized_followup", "source_form_artifact_id": "expired-form"},
+    )
+    workflow.expires_at = datetime(2026, 7, 1, tzinfo=timezone.utc)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="重新开始", sequence=1)
+    repository = FakeRuntimeRepository(
+        messages=[current_user],
+        current_message=current_user,
+        run=run,
+        workflow_states=[workflow],
+    )
+    executor = AgentRuntimeExecutor(
+        repository=repository,
+        sdk_runner=OpenAIAgentsSdkRunner(backend=CapturingSdkBackend(result=SdkNodeResult(final_text=""))),
+    )
+
+    result = asyncio.run(executor._latest_pregnancy_plan_workflow(run=run))
+
+    assert result == {}
 
 
 def test_pregnancy_runtime_plan_context_recovers_analyzed_intake_from_workflow_state() -> None:
@@ -3284,9 +3416,7 @@ class FakeRuntimeRepository:
 
     async def list_active_workflow_states_for_thread(self, *, thread_id, owner_user_id, limit=5):
         return [
-            workflow
-            for workflow in self.workflow_states
-            if workflow.thread_id == thread_id and workflow.owner_user_id == owner_user_id
+            workflow for workflow in self.workflow_states if workflow.thread_id == thread_id and workflow.owner_user_id == owner_user_id
         ][:limit]
 
     async def get_latest_workflow_state_for_thread(self, *, thread_id, owner_user_id, workflow_type):
@@ -3294,9 +3424,7 @@ class FakeRuntimeRepository:
         matches = [
             workflow
             for workflow in self.workflow_states
-            if workflow.thread_id == thread_id
-            and workflow.owner_user_id == owner_user_id
-            and workflow.workflow_type == workflow_type
+            if workflow.thread_id == thread_id and workflow.owner_user_id == owner_user_id and workflow.workflow_type == workflow_type
         ]
         return matches[-1] if matches else None
 
@@ -3313,6 +3441,7 @@ class FakeRuntimeRepository:
         if active_step is not None:
             workflow_state.active_step = active_step
         return workflow_state
+
 
 class FakeSharedSessionGuard:
     def __init__(self) -> None:

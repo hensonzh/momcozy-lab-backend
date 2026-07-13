@@ -3,11 +3,12 @@ from __future__ import annotations
 from typing import Any
 
 from ...workers.errors import PermanentJobError
-from ..agent_runtime.actions.executor import AgentActionApplyResult
+from ..agent_runtime.actions.executor import AgentActionApplyResult, AgentApplicationEvent
 from ..agent_runtime.models import AgentAction
 
 
 HOSPITAL_BAG_CART_UPDATE_ACTION = "hospital_bag.cart.update"
+HOSPITAL_BAG_CART_CHANGED_EVENT = "hospital_bag.cart.changed"
 
 
 class HospitalBagCartUpdateActionHandler:
@@ -25,6 +26,16 @@ class HospitalBagCartUpdateActionHandler:
                 "agent_action_id": str(action.id),
                 "agent_run_id": str(action.run_id),
             },
+            application_events=(
+                AgentApplicationEvent(
+                    event_type=HOSPITAL_BAG_CART_CHANGED_EVENT,
+                    payload={
+                        "operation": "updated",
+                        "source": "agent_action",
+                        "cart_update": cart_update,
+                    },
+                ),
+            ),
         )
 
 

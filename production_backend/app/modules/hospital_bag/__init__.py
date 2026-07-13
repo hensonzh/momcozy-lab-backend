@@ -1,6 +1,11 @@
-from .agent_actions import HOSPITAL_BAG_CART_UPDATE_ACTION, HospitalBagCartUpdateActionHandler
+from .agent_actions import (
+    HOSPITAL_BAG_CART_CHANGED_EVENT,
+    HOSPITAL_BAG_CART_UPDATE_ACTION,
+    HospitalBagCartUpdateActionHandler,
+)
 
 __all__ = [
+    "HOSPITAL_BAG_CART_CHANGED_EVENT",
     "HOSPITAL_BAG_CART_UPDATE_ACTION",
     "HospitalBagCartUpdateActionHandler",
 ]

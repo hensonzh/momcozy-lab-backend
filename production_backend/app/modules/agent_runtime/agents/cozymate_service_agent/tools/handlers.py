@@ -5,7 +5,7 @@ import base64
 import hashlib
 import json
 import re
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import quote, urlsplit
 from uuid import UUID
@@ -55,7 +55,11 @@ from production_backend.app.modules.support.agent_actions import SUPPORT_TICKET_
 
 from ..device_guidance import AIR1_UNBOXING_STEPS, DeviceGuidanceReferenceService
 from .executor import DEFERRED_AGENT_EVENTS_KEY, RetainedToolInformation, ToolHandler, ToolHandlerContext, ToolHandlerResult
-from .legacy_artifacts import artifact_record_from_legacy_result, create_legacy_artifact_result
+from .legacy_artifacts import (
+    artifact_record_from_legacy_result,
+    create_legacy_artifact_result,
+    hospital_bag_cart_update_result,
+)
 from .hospital_bag_flow import HOSPITAL_BAG_FORM_ID, HOSPITAL_BAG_WORKFLOW_SCHEMA_VERSION, HOSPITAL_BAG_WORKFLOW_TYPE
 from .pregnancy_plan_flow import (
     PREGNANCY_PLAN_INTAKE_FORM_ID,
@@ -168,23 +172,50 @@ class HospitalBagCartUpdateProposeToolHandler:
         self.runtime_service = runtime_service
 
     async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
-        apply_payload = _hospital_bag_cart_apply_payload(context.args)
+        legacy_result: dict[str, Any] = {}
+        cart_update = context.args.get("cart_update")
+        if not isinstance(cart_update, dict) or not cart_update:
+            if not _text(context.args, "action"):
+                raise ApiError(code="validation_failed", message="action is required.", status=422)
+            legacy_result = hospital_bag_cart_update_result(context.args)
+            if _text(legacy_result, "status") not in {"cart_updated"}:
+                return legacy_result
+            cart_update = legacy_result.get("cart_update")
+            if not isinstance(cart_update, dict) or not cart_update:
+                return legacy_result
+        apply_payload = _hospital_bag_cart_apply_payload(
+            {
+                **context.args,
+                "cart_update": cart_update,
+                "summary": _text(context.args, "summary") or _text(legacy_result, "summary"),
+            }
+        )
         cart_update = apply_payload.get("cart_update")
         if not isinstance(cart_update, dict) or not cart_update:
             raise ApiError(code="validation_failed", message="cart_update is required.", status=422)
 
         preview_payload = _hospital_bag_cart_preview_payload(apply_payload)
-        action = await self.runtime_service.propose_action(
-            owner_user_id=context.actor.user_id,
-            run_id=context.run_id,
-            action_type=HOSPITAL_BAG_CART_UPDATE_ACTION,
-            target_type="hospital_bag_cart",
-            side_effect_level="low",
-            preview_payload=preview_payload,
-            apply_payload=apply_payload,
-            idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:hospital-bag-cart",
-        )
-        return _proposal_result(action=action, preview_payload=preview_payload)
+        action_kwargs = {
+            "owner_user_id": context.actor.user_id,
+            "run_id": context.run_id,
+            "action_type": HOSPITAL_BAG_CART_UPDATE_ACTION,
+            "target_type": "hospital_bag_cart",
+            "side_effect_level": "low",
+            "preview_payload": preview_payload,
+            "apply_payload": apply_payload,
+            "idempotency_key": _text(context.args, "idempotency_key")
+            or _hospital_bag_cart_idempotency_key(run_id=context.run_id, cart_update=cart_update),
+        }
+        propose_once = getattr(self.runtime_service, "propose_action_once", None)
+        if callable(propose_once):
+            action, _ = await propose_once(**action_kwargs)
+        else:
+            action = await self.runtime_service.propose_action(**action_kwargs)
+        return {
+            **legacy_result,
+            **_proposal_result(action=action, preview_payload=preview_payload),
+            "cart_update": cart_update,
+        }
 
 
 class IbclcConsultCardCreateToolHandler:
@@ -351,7 +382,13 @@ class PregnancyPlanIntakeStartToolHandler:
         if existing is not None:
             return existing
         workflow = _dict(context.args, "runtime_workflow_context")
-        if _text(workflow, "consumed_by_action_id") or workflow.get("interrupted_by_safety_signal") is True:
+        restart = context.args.get("restart") is True
+        if (
+            restart
+            or workflow.get("abandoned") is True
+            or _text(workflow, "consumed_by_action_id")
+            or workflow.get("interrupted_by_safety_signal") is True
+        ):
             workflow = {}
         phase = _text(workflow, "phase")
         if phase == PregnancyPlanPhase.COLLECTING_INTAKE.value:
@@ -497,6 +534,21 @@ class PregnancyPlanIntakeAdvanceToolHandler:
         if workflow.get("interrupted_by_safety_signal") is True:
             return {
                 "status": "pregnancy_plan_intake_interrupted_for_safety",
+                "requires_fresh_intake": True,
+            }
+        if action == "abandon":
+            abandoned = {
+                **workflow,
+                "abandoned": True,
+                "abandoned_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            }
+            await _upsert_pregnancy_plan_workflow(
+                runtime_service=self.runtime_service,
+                context=context,
+                workflow=abandoned,
+            )
+            return {
+                "status": "pregnancy_plan_intake_abandoned",
                 "requires_fresh_intake": True,
             }
 
@@ -852,7 +904,7 @@ class PregnancyPlanContextReadToolHandler:
         tasks = await self.plans_service.list_tasks(owner_user_id=owner_user_id, limit=limit)
         output = {
             "profile": _profile_payload(profile=profile, actor_user_id=owner_user_id),
-            "plans": [_plan_payload(plan) for plan in plans],
+            "plans": [_pregnancy_plan_context_payload(plan) for plan in plans],
             "tasks": [_task_payload(task) for task in tasks],
             "counts": {
                 "plans": len(plans),
@@ -1915,7 +1967,9 @@ def build_default_tool_handlers(
         ),
         "hospital_bag_form_create": HospitalBagFormCreateToolHandler(runtime_service=agent_runtime_service),
         "hospital_bag_card_create": HospitalBagCardCreateToolHandler(runtime_service=agent_runtime_service),
-        "hospital_bag_cart_update": LegacyArtifactToolHandler(runtime_service=agent_runtime_service, tool_name="hospital_bag_cart_update"),
+        "hospital_bag_cart_update": HospitalBagCartUpdateProposeToolHandler(
+            runtime_service=agent_runtime_service
+        ),
         "hospital_bag_pump_recommend": LegacyArtifactToolHandler(
             runtime_service=agent_runtime_service, tool_name="hospital_bag_pump_recommend"
         ),
@@ -2146,6 +2200,11 @@ def _hospital_bag_cart_preview_payload(apply_payload: dict[str, Any]) -> dict[st
         "cart_update": cart_update if isinstance(cart_update, dict) else {},
     }
     return {key: value for key, value in preview.items() if value not in ("", None, {})}
+
+
+def _hospital_bag_cart_idempotency_key(*, run_id: Any, cart_update: dict[str, Any]) -> str:
+    canonical = json.dumps(cart_update, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    return f"hospital-bag-cart:{run_id}:{hashlib.sha256(canonical.encode('utf-8')).hexdigest()}"
 
 
 def _ibclc_consult_card_payload(args: dict[str, Any]) -> dict[str, Any]:
@@ -2700,7 +2759,7 @@ async def _upsert_pregnancy_plan_workflow(
 ) -> AgentWorkflowState:
     thread_id = _require_pregnancy_plan_thread_id(context)
     phase = _text(workflow, "phase") or PregnancyPlanPhase.COLLECTING_INTAKE.value
-    if workflow.get("interrupted_by_safety_signal") is True:
+    if workflow.get("interrupted_by_safety_signal") is True or workflow.get("abandoned") is True:
         status = "failed"
     elif _text(workflow, "consumed_by_action_id"):
         status = "completed"
@@ -2719,6 +2778,7 @@ async def _upsert_pregnancy_plan_workflow(
         schema_version=PREGNANCY_PLAN_WORKFLOW_SCHEMA_VERSION,
         state=workflow,
         active_step="" if status in {"completed", "failed"} else phase,
+        expires_at=(None if status in {"completed", "failed"} else datetime.now(timezone.utc) + timedelta(days=14)),
     )
 
 
@@ -3313,6 +3373,31 @@ def _plan_payload(plan: Plan) -> dict[str, Any]:
         "source": plan.source,
         "updated_at": _datetime_iso(plan.updated_at),
     }
+
+
+def _pregnancy_plan_context_payload(plan: Plan) -> dict[str, Any]:
+    output = _plan_payload(plan)
+    payload = plan.payload if isinstance(plan.payload, dict) else {}
+    card = payload.get("card") if isinstance(payload.get("card"), dict) else {}
+    owner = card.get("owner") if isinstance(card.get("owner"), dict) else {}
+    allowed_owner_keys = {
+        "due_date_or_week",
+        "current_week",
+        "age",
+        "ivf",
+        "fetus_count",
+        "first_birth",
+        "birth_path",
+        "birth_setting",
+        "feeding_intention",
+        "support_person",
+        "medical_notes",
+        "doctor_notes",
+    }
+    safe_owner = {key: value for key, value in owner.items() if key in allowed_owner_keys and value not in ("", None)}
+    if safe_owner:
+        output["owner"] = safe_owner
+    return output
 
 
 def _task_payload(task: PlanTask) -> dict[str, Any]:

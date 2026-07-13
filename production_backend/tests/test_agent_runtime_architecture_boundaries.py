@@ -577,7 +577,8 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
     assert "payload" not in pregnancy_plan_schema["properties"]
     assert pregnancy_plan_schema["properties"]["scope"]["enum"] == ["full", "prenatal_only", "short_range"]
     assert pregnancy_plan_schema["properties"]["additional_info"]["maxLength"] == 2000
-    assert pregnancy_intake_start_schema == {"type": "object", "additionalProperties": False, "properties": {}}
+    assert pregnancy_intake_start_schema["additionalProperties"] is False
+    assert pregnancy_intake_start_schema["properties"]["restart"]["type"] == "boolean"
     assert pregnancy_intake_analyze_schema == {"type": "object", "additionalProperties": False, "properties": {}}
     assert pregnancy_intake_advance_schema["required"] == ["action"]
     assert set(pregnancy_intake_advance_schema["properties"]["action"]["enum"]) == {
@@ -590,6 +591,7 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
         "skip_checkup_records",
         "confirm_ready_to_generate",
         "submit_final_additional_info",
+        "abandon",
     }
     assert "runtime_workflow_context" not in pregnancy_intake_advance_schema["properties"]
     assert "runtime_checkup_attachment_count" not in pregnancy_intake_advance_schema["properties"]
@@ -617,9 +619,11 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
     assert growth_schema["required"] == ["measured_at"]
     assert growth_schema["properties"]["weight_kg"]["type"] == "number"
     assert growth_update_schema["required"] == ["record_id"]
-    for schema in (birth_form_schema, labor_card_schema, hospital_bag_form_schema, hospital_bag_card_schema):
+    for schema in (birth_form_schema, labor_card_schema, hospital_bag_form_schema):
         assert schema["additionalProperties"] is False
         assert schema["properties"] == {}
+    assert hospital_bag_card_schema["additionalProperties"] is False
+    assert hospital_bag_card_schema["properties"]["generation_mode"]["enum"] == ["standard", "quick", "immediate"]
     assert hospital_bag_cart_schema["additionalProperties"] is False
     assert hospital_bag_cart_schema["required"] == ["action"]
     assert "groups" not in hospital_bag_cart_schema["properties"]

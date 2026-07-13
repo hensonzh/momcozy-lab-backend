@@ -380,7 +380,12 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
     "pregnancy.plan_intake.start": {
         "type": "object",
         "additionalProperties": False,
-        "properties": {},
+        "properties": {
+            "restart": {
+                "type": "boolean",
+                "description": "仅当用户明确要求放弃当前采集并重新开始时设为 true。",
+            },
+        },
     },
     "pregnancy.plan_intake.analyze": {
         "type": "object",
@@ -404,6 +409,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
                     "skip_checkup_records",
                     "confirm_ready_to_generate",
                     "submit_final_additional_info",
+                    "abandon",
                 ],
             },
             "topic": {"type": "string", "maxLength": 120},
@@ -647,6 +653,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
                 "items": {"type": "string", "maxLength": 120},
             },
             "allow_remove_pump": {"type": "boolean"},
+            "idempotency_key": {"type": "string", "maxLength": 255},
         },
     },
     "hospital_bag_pump_recommend": {
@@ -746,6 +753,14 @@ for _tool_name in ("records.pumping_record_delete.propose", "records.growth_reco
 
 for _tool_name in ("labor_communication_card_create", "hospital_bag_form_create", "hospital_bag_card_create"):
     _TOOL_INPUT_SCHEMAS[_tool_name] = _TOOL_INPUT_SCHEMAS["birth_plan_form_create"]
+
+_TOOL_INPUT_SCHEMAS["hospital_bag_card_create"] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "generation_mode": {"type": "string", "enum": ["standard", "quick", "immediate"]},
+    },
+}
 
 
 def input_schema_for_tool(tool_name: str) -> JsonSchema:

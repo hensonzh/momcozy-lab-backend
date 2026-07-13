@@ -816,6 +816,8 @@ def build_pregnancy_plan_card_json(plan_context: dict[str, Any]) -> dict[str, An
     context = normalize_pregnancy_plan_generation_context(plan_context)
     analysis = analyze_pregnancy_plan_intake(context)
     stage = str(analysis["stage"]["id"])
+    week = analysis["stage"].get("current_week")
+    scope = str(context.get("scope") or "full")
     focus_ids = [str(item["id"]) for item in analysis["focuses"] if isinstance(item, dict) and item.get("id")]
     focus_set = set(focus_ids)
     current_items = _stage_todo_items(stage)
@@ -924,17 +926,26 @@ def build_pregnancy_plan_card_json(plan_context: dict[str, Any]) -> dict[str, An
     )
     owner = {
         "due_date_or_week": due,
+        "current_week": _first_text(context.get("current_week")),
+        "age": context.get("age"),
+        "ivf": _first_text(context.get("ivf")),
+        "fetus_count": _first_text(context.get("fetus_count")),
+        "first_birth": _first_text(context.get("first_birth")),
         "birth_path": _first_text(context.get("birth_path")),
         "birth_setting": _first_text(context.get("birth_setting"), context.get("birth_hospital")),
         "support_person": _first_text(context.get("support_person")),
         "feeding_intention": _first_text(context.get("feeding_intention")),
+        "medical_notes": _first_text(context.get("medical_notes")),
+        "doctor_notes": _first_text(context.get("doctor_notes")),
     }
+    periods = _pregnancy_plan_todo_periods(week=week, current_items=current_items)
+    phases = _pregnancy_plan_phases(week=week, context=context, scope=scope)
     return {
         "card_type": "birth_journey_plan_card",
         "schema_version": "1.0",
         "todo_engine_version": "pregnancy-plan-flow-v2",
         "title": "孕期计划",
-        "subtitle": "从你现在的孕周开始，把检查、沟通和准备事项按阶段排清楚",
+        "subtitle": _pregnancy_plan_subtitle(week=week, scope=scope),
         "owner": {key: value for key, value in owner.items() if _has_value(value)},
         "plan_basis": {
             "stage_summary": analysis["stage"]["summary"],
@@ -945,27 +956,17 @@ def build_pregnancy_plan_card_json(plan_context: dict[str, Any]) -> dict[str, An
             "checkup_status": _first_text(context.get("checkup_status")),
         },
         "todo_plan": {
-            "periods": [
-                {
-                    "id": "current_stage",
-                    "title": _current_period_title(stage=stage, week=analysis["stage"].get("current_week")),
-                    "subtitle": "先完成会影响近期检查、沟通和安心感的事项",
-                    "display_mode": "expanded",
-                    "status": "current",
-                    "items": current_items,
-                },
-                {
-                    "id": "labor_and_hospital",
-                    "title": "临产与住院",
-                    "subtitle": "把去医院、分娩沟通和支持安排提前准备好",
-                    "display_mode": "collapsed",
-                    "status": "upcoming",
-                    "items": _labor_and_hospital_items(),
-                },
-            ]
+            "cadence": _pregnancy_plan_cadence(week)[0],
+            "cadence_label": _pregnancy_plan_cadence(week)[1],
+            "cadence_reason": _pregnancy_plan_cadence_reason(week),
+            "route_summary": _pregnancy_plan_route_summary(week),
+            "periods": periods,
         },
+        "phases": phases,
         "generation_context": {
             "source": "verified_pregnancy_plan_intake",
+            "scope": scope,
+            "current_week": week,
             "additional_information_provided": _meaningful(context.get("final_additional_info")),
             "personalized_followup_count": len(personalized_records) if isinstance(personalized_records, list) else 0,
             "checkup_status": _first_text(context.get("checkup_status")),
@@ -975,6 +976,196 @@ def build_pregnancy_plan_card_json(plan_context: dict[str, Any]) -> dict[str, An
             "这份计划用于准备和沟通，不能替代医生、助产士或医院的具体建议；有破水、出血、胎动明显减少、"
             "规律宫缩加密或明显不适时，请按医院或医生指导处理。"
         ),
+    }
+
+
+def _pregnancy_plan_subtitle(*, week: Any, scope: str) -> str:
+    if scope == "prenatal_only":
+        return f"从孕{week}周到生产前的阶段路线图" if isinstance(week, int) else "从现在到生产前的阶段路线图"
+    if scope == "short_range":
+        return f"从孕{week}周开始的近期准备节奏" if isinstance(week, int) else "从现在开始的近期准备节奏"
+    return f"从孕{week}周到产后 42 天的阶段路线图" if isinstance(week, int) else "从现在到产后 42 天的阶段路线图"
+
+
+def _pregnancy_plan_phases(*, week: Any, context: dict[str, Any], scope: str) -> list[dict[str, Any]]:
+    phase_ids: list[str] = []
+    if isinstance(week, int) and week <= 13:
+        phase_ids.append("early_pregnancy")
+    if isinstance(week, int) and week <= 27:
+        phase_ids.append("mid_pregnancy")
+    phase_ids.extend(["late_pregnancy", "labor_recognition", "hospital_birth", "postpartum"])
+    if scope == "prenatal_only":
+        phase_ids = [phase_id for phase_id in phase_ids if phase_id not in {"hospital_birth", "postpartum"}][:4]
+    elif scope == "short_range":
+        phase_ids = phase_ids[:2]
+    else:
+        phase_ids = phase_ids[:6]
+
+    phases: list[dict[str, Any]] = []
+    for index, phase_id in enumerate(phase_ids):
+        phase = _pregnancy_plan_phase(phase_id=phase_id, context=context)
+        phase["status"] = "current" if index == 0 else "upcoming"
+        phases.append(phase)
+    return phases
+
+
+def _pregnancy_plan_phase(*, phase_id: str, context: dict[str, Any]) -> dict[str, Any]:
+    base: dict[str, tuple[str, str, str, list[str], list[str]]] = {
+        "early_pregnancy": (
+            "孕早期",
+            "孕 1-13 周",
+            "确认怀孕情况，顺利完成首次产检，把重要信息准备好。",
+            ["确认首次产检或建档时间", "整理检查结果、用药和补充剂信息", "记下想咨询医生的问题"],
+            ["现阶段先关注产检和身体变化，不用着急考虑生产和待产准备。"],
+        ),
+        "mid_pregnancy": (
+            "孕中期",
+            "孕 14-27 周",
+            "关注宝宝发育，跟上产检节奏，并开始规划生产和产后支持。",
+            ["准备下次产检想问的问题", "了解生产医院和相关流程", "和家人讨论产后支持安排"],
+            ["很多事情不用一次准备完成，先把医院选择和家庭支持安排理顺。"],
+        ),
+        "late_pregnancy": (
+            "孕晚期",
+            "孕 28-36 周",
+            "逐步落实生产前准备，让临产时更从容。",
+            ["确认医院入院和陪产要求", "准备待产包和重要证件", "和家人明确临产时的分工安排"],
+            ["距离生产越来越近，提前做好准备会让临产和住院过程更顺利。"],
+        ),
+        "labor_recognition": (
+            "临产阶段",
+            "孕 37 周起",
+            "了解临产信号，知道什么时候联系医院、什么时候出发。",
+            ["保存医院和重要联系人的电话", "熟悉去医院的路线和交通方案", "把证件和住院材料放在容易拿取的位置"],
+            ["如果出现破水、大量出血、胎动明显减少或其他异常情况，请及时联系医院。"],
+        ),
+        "hospital_birth": (
+            "住院分娩",
+            "入院当天～出院当天",
+            "专注分娩和恢复，把重要沟通和记录安排好。",
+            ["和医护确认你的重点需求", "记录妈妈和宝宝的重要情况", "出院前确认复诊和护理事项"],
+            ["医疗决策以医护团队建议为准，有任何需求或担忧都可以及时沟通。"],
+        ),
+        "postpartum": (
+            "产后恢复",
+            "出院后 0～42 天",
+            "关注妈妈恢复和宝宝喂养，让家庭逐步适应新的节奏。",
+            ["记录喂养、尿布和宝宝情况", "关注身体恢复情况", "安排夜间照护和休息时间"],
+            ["如果妈妈或宝宝出现异常情况，请及时联系医生、儿科医生或 IBCLC。"],
+        ),
+    }
+    title, date_range, goal, actions, watchouts = base[phase_id]
+    personalized_actions = list(actions)
+    if phase_id in {"late_pregnancy", "labor_recognition"} and _is_yes(context.get("first_birth")):
+        personalized_actions.append("让支持人也看一遍入院流程和临产信号")
+    if phase_id in {"late_pregnancy", "hospital_birth", "postpartum"} and "剖" in str(context.get("birth_path") or ""):
+        personalized_actions.append("按医生口径确认剖宫产入院、术前和恢复安排")
+    if phase_id in {"hospital_birth", "postpartum"} and any(
+        token in str(context.get("feeding_intention") or "") for token in ("母乳", "混合", "泵")
+    ):
+        personalized_actions.append("尽早确认含乳、涨奶处理和 IBCLC/泌乳顾问支持")
+    return {
+        "id": phase_id,
+        "title": title,
+        "date_range": date_range,
+        "goal": goal,
+        "watchouts": watchouts[:4],
+        "actions": personalized_actions[:4],
+        "comate_help": ["制定个性化待产清单"] if phase_id == "late_pregnancy" else [],
+    }
+
+
+def _pregnancy_plan_cadence(week: Any) -> tuple[str, str]:
+    if isinstance(week, int) and week >= 36:
+        return "weekly", "每周计划"
+    if isinstance(week, int) and week >= 28:
+        return "biweekly", "双周计划"
+    return "monthly", "按月计划"
+
+
+def _pregnancy_plan_cadence_reason(week: Any) -> str:
+    if not isinstance(week, int):
+        return "补齐孕周后，再按当前阶段选择按月、双周或每周推进。"
+    if week >= 36:
+        return "36 周后产检和临产信号更密集，适合每周逐项确认。"
+    if week >= 28:
+        return "进入孕晚期后，产检、胎动观察和入院准备变密，适合按双周推进。"
+    return f"孕 {week} 周阶段适合先按 4 周窗口推进，把检查、复查和生活安排分块完成。"
+
+
+def _pregnancy_plan_route_summary(week: Any) -> str:
+    if not isinstance(week, int):
+        return "补齐孕周后，会按当前阶段生成从现在到住院生产的路线。"
+    if week < 28:
+        return f"从孕 {week} 周开始，先按月推进，孕晚期改成双周，36 周后按周收口到住院生产。"
+    if week < 36:
+        return f"从孕 {week} 周开始，先按双周推进，36 周后按周收口到住院生产。"
+    return f"从孕 {week} 周开始，按每周产检和临产信号一路收口到住院生产。"
+
+
+def _pregnancy_plan_todo_periods(*, week: Any, current_items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not isinstance(week, int):
+        return [
+            {
+                "id": "period_01",
+                "title": "补齐孕周后生成清单",
+                "week_start": None,
+                "week_end": None,
+                "granularity": "monthly",
+                "display_mode": "expanded",
+                "status": "current",
+                "subtitle": "先补充孕周或预产期，再把产检窗口、身体变化和生产准备排成可执行事项。",
+                "items": current_items,
+            },
+            _pregnancy_plan_terminal_period(),
+        ]
+
+    periods: list[dict[str, Any]] = []
+    start_week = max(1, min(40, week))
+    while start_week <= 40:
+        index = len(periods) + 1
+        if start_week >= 36:
+            granularity, span = "weekly", 1
+        elif start_week >= 28:
+            granularity, span = "biweekly", 2
+        else:
+            granularity, span = "monthly", 4
+        end_week = min(40, start_week + span - 1)
+        if start_week < 28:
+            end_week = min(end_week, 27)
+        elif start_week < 36:
+            end_week = min(end_week, 35)
+        title = f"孕 {start_week} 周" if start_week == end_week else f"孕 {start_week}-{end_week} 周"
+        period_stage = _pregnancy_stage(start_week)
+        periods.append(
+            {
+                "id": f"period_{index:02d}",
+                "title": title,
+                "week_start": start_week,
+                "week_end": end_week,
+                "granularity": granularity,
+                "display_mode": "expanded" if index == 1 else "collapsed",
+                "status": "current" if index == 1 else "upcoming",
+                "subtitle": "先完成会影响近期检查、沟通和安心感的事项" if index == 1 else _stage_summary(period_stage),
+                "items": current_items if index == 1 else _stage_todo_items(period_stage),
+            }
+        )
+        start_week = end_week + 1
+    periods.append(_pregnancy_plan_terminal_period())
+    return periods
+
+
+def _pregnancy_plan_terminal_period() -> dict[str, Any]:
+    return {
+        "id": "period_terminal",
+        "title": "临产与住院生产",
+        "week_start": None,
+        "week_end": None,
+        "granularity": "terminal",
+        "display_mode": "terminal",
+        "status": "terminal",
+        "subtitle": "把临产信号、医院入口、证件报告和陪同分工收口。",
+        "items": _labor_and_hospital_items(),
     }
 
 

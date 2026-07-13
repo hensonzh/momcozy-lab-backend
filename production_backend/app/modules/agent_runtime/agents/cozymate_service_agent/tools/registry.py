@@ -693,7 +693,7 @@ def default_tool_registry() -> ToolContractRegistry:
             blocking_policy="must_wait",
             result_dependency="final_response",
             requires_confirmation=False,
-            idempotency_required=False,
+            idempotency_required=True,
             audit_required=True,
             timeout_seconds=15,
         )

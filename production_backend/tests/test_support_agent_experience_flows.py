@@ -124,22 +124,25 @@ def test_agent_hospital_bag_cart_main_flow_applies_inside_current_tool_transacti
             },
         )
     )
-    applied_event = runtime_repository.events[-1]
+    applied_event = runtime_repository.events[-2]
+    changed_event = runtime_repository.events[-1]
 
     assert action.status == "applied"
     assert [event.event_type for event in runtime_repository.events] == [
         "run.queued",
         "message.completed",
         "action.applied",
+        "hospital_bag.cart.changed",
     ]
     assert applied_event.payload["user_visible"] is False
     assert applied_event.payload["resource_type"] == "hospital_bag_cart"
     assert applied_event.payload["resource_id"] == str(action.id)
-    assert applied_event.payload["details"]["cart_update"] == {
-        "set_checked": [{"item_id": "nursing-bra", "checked": True}]
-    }
+    assert applied_event.payload["details"]["cart_update"] == {"set_checked": [{"item_id": "nursing-bra", "checked": True}]}
     assert applied_event.payload["details"]["agent_action_id"] == str(action.id)
     assert applied_event.payload["details"]["agent_run_id"] == str(run.id)
+    assert changed_event.payload["action_id"] == str(action.id)
+    assert changed_event.payload["source"] == "agent_action"
+    assert changed_event.payload["cart_update"] == {"set_checked": [{"item_id": "nursing-bra", "checked": True}]}
 
 
 class InMemoryAgentRuntimeRepository:
@@ -167,7 +170,12 @@ class InMemoryAgentRuntimeRepository:
         return thread
 
     async def get_active_run_for_thread(self, *, thread_id: UUID, owner_user_id: UUID):
-        if self.run and self.run.thread_id == thread_id and self.run.actor_user_id == owner_user_id and self.run.status in {"queued", "running"}:
+        if (
+            self.run
+            and self.run.thread_id == thread_id
+            and self.run.actor_user_id == owner_user_id
+            and self.run.status in {"queued", "running"}
+        ):
             return self.run
         return None
 
@@ -313,7 +321,9 @@ class InMemorySupportTicketsRepository:
         return next((ticket for ticket in self.tickets if ticket.id == ticket_id and ticket.owner_user_id == owner_user_id), None)
 
     async def list_for_owner(self, *, owner_user_id: UUID, status: str | None, limit: int):
-        tickets = [ticket for ticket in self.tickets if ticket.owner_user_id == owner_user_id and (status is None or ticket.status == status)]
+        tickets = [
+            ticket for ticket in self.tickets if ticket.owner_user_id == owner_user_id and (status is None or ticket.status == status)
+        ]
         return tickets[:limit]
 
 
