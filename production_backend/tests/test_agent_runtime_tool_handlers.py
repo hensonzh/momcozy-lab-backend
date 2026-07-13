@@ -54,6 +54,7 @@ from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.
 )
 from production_backend.app.modules.auth import CurrentUser
 from production_backend.app.modules.assets.models import ProductAsset
+from production_backend.app.modules.assets.service import ProductAssetService
 from production_backend.app.modules.devices.models import PumpDevice, PumpTelemetryEvent
 from production_backend.app.modules.diary.models import PregnancyDiaryEntry
 from production_backend.app.modules.diary.repository import DiaryEntryMutation
@@ -746,6 +747,52 @@ def test_device_guidance_read_tool_handler_returns_copyable_image_markdown() -> 
     ]
 
 
+def test_device_guidance_read_tool_handler_restores_unboxing_overview_resources() -> None:
+    handler = DeviceGuidanceReadToolHandler(asset_service=FakeAssetService())
+
+    result = asyncio.run(handler(_context(args={"model": "Air1", "topic": "unboxing", "limit": 10})))
+
+    assert result["product_highlights"]
+    assert any("无线可穿戴" in item for item in result["product_highlights"])
+    assert [resource["kind"] for resource in result["quick_start_resources"]] == ["pdf", "video"]
+    assert all(resource.get("markdown_link") for resource in result["quick_start_resources"])
+
+
+def test_device_guidance_read_tool_handler_returns_real_manifest_quick_start_media() -> None:
+    handler = DeviceGuidanceReadToolHandler(asset_service=ProductAssetService())
+
+    result = asyncio.run(handler(_context(args={"model": "Air1", "topic": "unboxing", "limit": 10})))
+
+    resources = result["quick_start_resources"]
+    assert [resource["kind"] for resource in resources] == ["pdf", "video"]
+    assert resources[0]["content_type"] == "application/pdf"
+    assert resources[1]["content_type"] == "video/mp4"
+
+
+def test_device_guidance_read_tool_handler_restores_flange_recommendation() -> None:
+    handler = DeviceGuidanceReadToolHandler(asset_service=FakeAssetService())
+
+    result = asyncio.run(
+        handler(
+            _context(
+                args={
+                    "model": "Air1",
+                    "topic": "flange",
+                    "query": "量到 14 毫米",
+                    "measured_nipple_mm": 14,
+                }
+            )
+        )
+    )
+
+    recommendation = result["flange_recommendation"]
+    assert recommendation["status"] == "recommended"
+    assert recommendation["matched_range"] == "13-15mm"
+    assert recommendation["recommended_flange_mm"] == 17
+    assert recommendation["recommended_insert_mm"] == 17
+    assert recommendation["included_with_air1"] is True
+
+
 def test_device_unboxing_advance_tool_starts_and_returns_first_step_reference() -> None:
     actor = _user()
     thread_id = uuid4()
@@ -1078,6 +1125,7 @@ def test_ibclc_card_handler_creates_artifact() -> None:
                     "reason": "Latch pain",
                     "feeding_context": "Pain on left side after feeding.",
                     "urgency": "soon",
+                    "trusted_current_user_text": "请帮我找一位 IBCLC 顾问",
                 },
             )
         )
@@ -1086,6 +1134,51 @@ def test_ibclc_card_handler_creates_artifact() -> None:
     assert ibclc["artifact_type"] == "ibclc_consult_card"
     assert ibclc["reason"] == "Latch pain"
     assert runtime_service.artifacts[-1].payload["feeding_context"] == "Pain on left side after feeding."
+    assert runtime_service.artifacts[-1].payload["consultant"]["credentials"] == "IBCLC 国际认证哺乳顾问"
+    assert runtime_service.artifacts[-1].payload["chat"]["label"] == "咨询 IBCLC"
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "先不用找 IBCLC",
+        "IBCLC 是什么？",
+        "我需要找 IBCLC 吗？",
+        "好的",
+    ],
+)
+def test_ibclc_card_handler_blocks_without_explicit_semantic_consent(message: str) -> None:
+    runtime_service = FakeAgentRuntimeService()
+    initial_artifact_count = len(runtime_service.artifacts)
+
+    result = asyncio.run(
+        IbclcConsultCardCreateToolHandler(runtime_service=runtime_service)(
+            _context(args={"reason": "Latch pain", "trusted_current_user_text": message})
+        )
+    )
+
+    assert result["status"] == "ibclc_consult_blocked"
+    assert result["requires_confirmation"] is True
+    assert len(runtime_service.artifacts) == initial_artifact_count
+
+
+def test_ibclc_card_handler_allows_short_confirmation_after_previous_offer() -> None:
+    runtime_service = FakeAgentRuntimeService()
+
+    result = asyncio.run(
+        IbclcConsultCardCreateToolHandler(runtime_service=runtime_service)(
+            _context(
+                args={
+                    "reason": "Latch pain",
+                    "trusted_current_user_text": "好的",
+                    "trusted_previous_assistant_text": "需要我帮你打开 IBCLC 在线咨询入口吗？",
+                }
+            )
+        )
+    )
+
+    assert result["status"] == "created"
+    assert result["artifact_type"] == "ibclc_consult_card"
 
 
 def test_pregnancy_plan_propose_tool_handler_applies_without_duplicate_confirmation() -> None:
@@ -2513,7 +2606,7 @@ class FakeAssetService:
             ),
             ProductAsset(
                 id="asset-video",
-                label="Pump setup video",
+                label="Air1 pump setup operation video",
                 domain="device_guidance",
                 content_type="video/mp4",
                 size_bytes=2400,

@@ -146,6 +146,7 @@ class _AgentTurnContext:
     working_context_state: AgentWorkingContextState
     workflow_states: list[AgentWorkflowState]
     ongoing_work: list[dict[str, str]]
+    recent_client_events: list[dict[str, str]]
     timings_ms: dict[str, float]
 
 
@@ -212,6 +213,7 @@ class AgentRuntimeExecutor:
         self._run_text_stream_emitted: dict[UUID, str] = {}
         self._run_authoritative_final_text: dict[UUID, str] = {}
         self._run_current_user_text: dict[UUID, str] = {}
+        self._run_previous_assistant_text: dict[UUID, str] = {}
         self._run_trusted_form_submissions: dict[UUID, dict[str, dict[str, Any]]] = {}
         self._run_checkup_attachment_counts: dict[UUID, int] = {}
         self._run_business_facts: dict[UUID, dict[ServiceSkillId, dict[str, Any]]] = {}
@@ -241,6 +243,10 @@ class AgentRuntimeExecutor:
                 turn_context.current_message
             )
             self._run_current_user_text[run.id] = _message_text(turn_context.current_message)
+            self._run_previous_assistant_text[run.id] = _latest_assistant_text_before(
+                messages=turn_context.messages,
+                before_sequence=turn_context.current_message.sequence,
+            )
             self._run_hospital_bag_cart_groups[run.id] = _current_hospital_bag_cart_groups(turn_context.current_message)
             tool_catalog = self._tool_catalog_for_turn()
             await self._append_progress(run=run, phase="context_ready", label="我先理解一下你的需求～")
@@ -325,6 +331,7 @@ class AgentRuntimeExecutor:
             self._run_text_stream_emitted.pop(run.id, None)
             self._run_authoritative_final_text.pop(run.id, None)
             self._run_current_user_text.pop(run.id, None)
+            self._run_previous_assistant_text.pop(run.id, None)
             self._run_trusted_form_submissions.pop(run.id, None)
             self._run_checkup_attachment_counts.pop(run.id, None)
             self._run_business_facts.pop(run.id, None)
@@ -364,6 +371,7 @@ class AgentRuntimeExecutor:
             if working_context_state.turn_index <= skill.expires_after_turn
         }
         ongoing_work = project_ongoing_work(workflow_states, resident_skill_ids=resident_skill_ids)
+        client_events = await self.repository.list_client_events_for_thread(thread_id=run.thread_id, limit=10)
         timings_ms["ongoing_work"] = _elapsed_ms(ongoing_work_started_at)
 
         return _AgentTurnContext(
@@ -374,6 +382,7 @@ class AgentRuntimeExecutor:
             working_context_state=working_context_state,
             workflow_states=workflow_states,
             ongoing_work=ongoing_work,
+            recent_client_events=_recent_ibclc_client_event_context(client_events),
             timings_ms=timings_ms,
         )
 
@@ -396,6 +405,12 @@ class AgentRuntimeExecutor:
         turn_context: _AgentTurnContext,
         health_context_lines: list[str] | None = None,
     ) -> _PreparedModelTurn:
+        working_context = project_working_context(
+            turn_context.working_context_state,
+            ongoing_work=turn_context.ongoing_work,
+        )
+        if turn_context.recent_client_events:
+            working_context["client_events"] = turn_context.recent_client_events
         projection = ContextProjection(
             stable_system_prompt=self.config.stable_system_prompt,
             selected_conversation_history=_history_before(
@@ -404,10 +419,7 @@ class AgentRuntimeExecutor:
             ),
             user_context=_user_context(current_message=turn_context.current_message, now=self.clock()),
             memory_projection=turn_context.memory_projection,
-            working_context=project_working_context(
-                turn_context.working_context_state,
-                ongoing_work=turn_context.ongoing_work,
-            ),
+            working_context=working_context,
         )
         model_input = self.input_builder.build(
             projection=projection,
@@ -1000,6 +1012,11 @@ class AgentRuntimeExecutor:
                 return {"groups": client_groups}
             groups = await self._latest_hospital_bag_cart_groups(run=run)
             return {"groups": groups} if groups is not None else {}
+        if contract_name == "ibclc_consult_card_create":
+            return {
+                "trusted_current_user_text": self._run_current_user_text.get(run.id, ""),
+                "trusted_previous_assistant_text": self._run_previous_assistant_text.get(run.id, ""),
+            }
         if contract_name == IMAGE_INSPECT_TOOL_NAME:
             return {"visible_image_urls": list(self._run_visible_image_urls.get(run.id, ()))}
         return {}
@@ -1489,6 +1506,36 @@ def _history_before(*, messages: list[AgentMessage], before_sequence: int) -> li
 
 def _history_messages_before(*, messages: list[AgentMessage], before_sequence: int) -> list[AgentMessage]:
     return [message for message in messages if message.sequence < before_sequence and message.role in {"user", "assistant"}]
+
+
+def _latest_assistant_text_before(*, messages: list[AgentMessage], before_sequence: int) -> str:
+    return next(
+        (
+            _message_text(message)
+            for message in reversed(messages)
+            if message.sequence < before_sequence and message.role == "assistant"
+        ),
+        "",
+    )
+
+
+def _recent_ibclc_client_event_context(events: list[AgentEvent]) -> list[dict[str, str]]:
+    projected: list[dict[str, str]] = []
+    for event in events:
+        event_type = _text(event.payload, "client_event_type")
+        if event_type not in {"ibclc_consult_started", "ibclc_consult_completed"}:
+            continue
+        client_payload = _dict(event.payload, "payload")
+        metadata = _dict(client_payload, "metadata")
+        item = {
+            "type": event_type,
+            "occurred_at": _text(client_payload, "occurred_at"),
+            "label": _text(client_payload, "label"),
+            "consult_id": _text(metadata, "consult_id"),
+            "source_artifact_id": _text(metadata, "source_artifact_id"),
+        }
+        projected.append({key: value for key, value in item.items() if value})
+    return projected
 
 
 def _visible_assistant_image_urls(*, messages: list[AgentMessage], before_sequence: int) -> tuple[str, ...]:

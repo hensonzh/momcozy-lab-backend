@@ -195,6 +195,14 @@ class IbclcConsultCardCreateToolHandler:
         payload = _ibclc_consult_card_payload(context.args)
         if not _text(payload, "reason"):
             raise ApiError(code="validation_failed", message="reason is required.", status=422)
+        consent = _ibclc_consult_consent(context.args)
+        if not consent["allowed"]:
+            return {
+                "status": "ibclc_consult_blocked",
+                "reason": consent["reason"],
+                "requires_confirmation": True,
+                "confirmation_question": "要我帮你打开 IBCLC 在线咨询入口吗？",
+            }
         artifact = await self.runtime_service.create_artifact(
             owner_user_id=context.actor.user_id,
             run_id=context.run_id,
@@ -1051,11 +1059,15 @@ class DeviceGuidanceReadToolHandler:
         )
         bounded_assets = assets[:limit]
         asset_payloads = [_asset_payload(asset) for asset in bounded_assets]
+        all_asset_payloads = [_asset_payload(asset) for asset in assets]
         result = {
             **reference,
             "assets": asset_payloads,
             "count": len(bounded_assets),
             "available_count": len(assets),
+            "product_highlights": list(_AIR1_PRODUCT_HIGHLIGHTS),
+            "quick_start_resources": _quick_start_resources(all_asset_payloads),
+            "flange_recommendation": _air1_flange_recommendation(context.args.get("measured_nipple_mm")),
             "query_context": {
                 "model": model,
                 "topic": topic,
@@ -2134,12 +2146,32 @@ def _hospital_bag_cart_preview_payload(apply_payload: dict[str, Any]) -> dict[st
 
 
 def _ibclc_consult_card_payload(args: dict[str, Any]) -> dict[str, Any]:
+    reason = _text(args, "reason")
     payload: dict[str, Any] = {
-        "title": "IBCLC 咨询入口",
-        "reason": _text(args, "reason"),
+        "title": "IBCLC 在线咨询",
+        "reason": reason,
         "feeding_context": _text(args, "feeding_context"),
         "urgency": _text(args, "urgency") or "routine",
         "preferred_language": _text(args, "preferred_language"),
+        "consultant": {
+            "name": "Emily Chen",
+            "credentials": "IBCLC 国际认证哺乳顾问",
+            "experience": "8 年产后哺乳支持经验",
+            "bio": (
+                "拥有 8 年产后哺乳支持经验，核心擅长含乳评估、有效吸吮与母乳移出观察。"
+                "可结合宝宝尿布、体重和吃奶表现判断摄入信号，并围绕亲喂姿势、乳头疼痛、"
+                "堵奶/乳房不适、吸奶器使用和排乳计划给出个性化调整建议。"
+            ),
+        },
+        "recommendation_reason": (
+            "我推荐 Emily Chen，是因为她擅长含乳、排乳、亲喂/吸奶效果和乳房不适；"
+            f"正好对应你刚才提到的{reason}。她也恰好和你同城，后面有必要也可以上门服务。"
+        ),
+        "chat": {
+            "url": "/ibclc-chat.html",
+            "label": "咨询 IBCLC",
+            "note": "启动咨询后，会自动将你的问题同步给顾问",
+        },
     }
     extra_payload = args.get("payload")
     if isinstance(extra_payload, dict):
@@ -2148,6 +2180,97 @@ def _ibclc_consult_card_payload(args: dict[str, Any]) -> dict[str, Any]:
     if metadata:
         payload["metadata"] = metadata
     return {key: value for key, value in payload.items() if value not in ("", None, {})}
+
+
+def _ibclc_consult_consent(args: dict[str, Any]) -> dict[str, Any]:
+    current = _normalize_ibclc_text(args.get("trusted_current_user_text"))
+    if _explicit_ibclc_request(current):
+        return {"allowed": True, "source": "explicit_user_request"}
+    if current in {"好", "好的", "可以", "行", "没问题", "ok", "okay", "yes", "同意", "确认"}:
+        previous = _normalize_ibclc_text(args.get("trusted_previous_assistant_text"))
+        if _previous_assistant_offered_ibclc(previous):
+            return {"allowed": True, "source": "confirmed_previous_offer"}
+        return {"allowed": False, "reason": "short_confirmation_without_ibclc_offer"}
+    return {"allowed": False, "reason": "missing_explicit_ibclc_request"}
+
+
+def _normalize_ibclc_text(value: Any) -> str:
+    return re.sub(r"\s+", "", str(value or "").strip().lower())
+
+
+def _explicit_ibclc_request(text: str) -> bool:
+    if not text or _negative_ibclc_intent(text):
+        return False
+    if "同意推荐" in text or "同意你推荐" in text:
+        return True
+    subject_tokens = ("ibclc", "哺乳顾问", "泌乳顾问", "真人哺乳咨询", "人工哺乳咨询")
+    entry_tokens = ("咨询入口", "在线咨询", "顾问咨询", "哺乳咨询", "泌乳咨询")
+    has_subject = any(token in text for token in (*subject_tokens, *entry_tokens))
+    if not has_subject or _ibclc_decision_question(text):
+        return False
+    direct_actions = (
+        "帮我找",
+        "给我找",
+        "帮我推荐",
+        "给我推荐",
+        "请推荐",
+        "麻烦推荐",
+        "推荐",
+        "我想找",
+        "想找",
+        "我要找",
+        "需要找",
+        "安排",
+        "预约",
+        "联系",
+        "接通",
+        "转接",
+        "打开",
+        "启动",
+        "进入",
+        "创建",
+        "生成",
+        "开始",
+        "我想咨询",
+        "想咨询",
+        "我要咨询",
+        "咨询一下",
+    )
+    return any(action in text for action in direct_actions)
+
+
+def _negative_ibclc_intent(text: str) -> bool:
+    negative_tokens = ("不要", "不用", "不需要", "不找", "不想找", "别找", "先别", "先不", "暂时不", "暂时别", "没必要")
+    return any(token in text for token in negative_tokens)
+
+
+def _ibclc_decision_question(text: str) -> bool:
+    decision_phrases = (
+        "需不需要",
+        "要不要",
+        "是否需要",
+        "是不是需要",
+        "是不是该",
+        "是不是应该",
+        "该不该",
+        "应不应该",
+        "有没有必要",
+        "有必要",
+        "需要不需要",
+    )
+    if any(phrase in text for phrase in decision_phrases):
+        return True
+    if not any(token in text for token in ("?", "？", "吗", "么", "嘛")):
+        return False
+    if not any(token in text for token in ("需要", "应该", "该", "可以", "能不能", "要")):
+        return False
+    return not any(token in text for token in ("帮我", "给我", "请", "麻烦"))
+
+
+def _previous_assistant_offered_ibclc(text: str) -> bool:
+    has_subject = any(token in text for token in ("ibclc", "哺乳顾问", "泌乳顾问", "咨询入口", "在线咨询"))
+    has_offer = any(token in text for token in ("需要我", "要我", "可以帮你", "帮你推荐", "帮你打开", "是否要"))
+    return has_subject and has_offer
 
 
 def _feeding_record_apply_payload(args: dict[str, Any]) -> dict[str, Any]:
@@ -3296,6 +3419,7 @@ _GUIDANCE_MODEL_ALIASES: dict[str, tuple[str, ...]] = {
     "bp334": ("air1",),
 }
 _GUIDANCE_TOPIC_ALIASES: dict[str, tuple[str, ...]] = {
+    "unboxing": ("components", "parts", "quickstart", "quick", "start", "operation", "setup"),
     "setup": ("unboxing", "assembly", "quickstart", "quick", "start", "components"),
     "firstuse": ("unboxing", "assembly", "quickstart", "quick", "start", "components"),
     "gettingstarted": ("unboxing", "assembly", "quickstart", "quick", "start", "components"),
@@ -3306,6 +3430,82 @@ _GUIDANCE_TOPIC_ALIASES: dict[str, tuple[str, ...]] = {
     "bluetooth": ("pairing", "connection", "appcontrol"),
     "pairing": ("bluetooth", "connection", "appcontrol"),
 }
+
+_AIR1_PRODUCT_HIGHLIGHTS = (
+    "无线可穿戴吸奶器，可放入内衣中使用。",
+    "支持充电盒给主机充电，也支持充电线直充主机。",
+    "可通过主机按钮完成开关机、暂停、模式选择和吸力调节。",
+    "连接 App 后可选择 Auto、Manual 或 Customize 模式，并调节 15 级吸力。",
+)
+_AIR1_INCLUDED_FLANGE_INSERTS_MM = {17, 19, 21}
+_AIR1_FLANGE_SIZE_RANGES = (
+    (11.0, 13.0, "11-13mm", 15, "flange_insert"),
+    (13.0, 15.0, "13-15mm", 17, "flange_insert"),
+    (15.0, 17.0, "15-17mm", 19, "flange_insert"),
+    (17.0, 20.0, "17-20mm", 21, "flange_insert"),
+    (20.0, 23.0, "20-23mm", 24, "base_flange"),
+    (23.0, 26.0, "23-26mm", 27, "flange_insert"),
+    (26.0, 29.0, "26-29mm", 30, "flange_insert"),
+)
+
+
+def _quick_start_resources(assets: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_kind: dict[str, dict[str, Any]] = {}
+    for asset in assets:
+        kind = _text(asset, "kind")
+        if kind in {"pdf", "video"} and kind not in by_kind:
+            by_kind[kind] = asset
+    return [by_kind[kind] for kind in ("pdf", "video") if kind in by_kind]
+
+
+def _air1_flange_recommendation(value: Any) -> dict[str, Any] | None:
+    try:
+        measured_nipple_mm = float(value)
+    except (TypeError, ValueError):
+        return None
+    if measured_nipple_mm <= 0:
+        return None
+    matched = next(
+        (
+            item
+            for item in _AIR1_FLANGE_SIZE_RANGES
+            if item[0] <= measured_nipple_mm < item[1]
+            or measured_nipple_mm == _AIR1_FLANGE_SIZE_RANGES[-1][1] == item[1]
+        ),
+        None,
+    )
+    rounded = round(measured_nipple_mm, 1)
+    display_measurement: int | float = int(rounded) if rounded.is_integer() else rounded
+    if matched is None:
+        return {
+            "measured_nipple_mm": display_measurement,
+            "status": "out_of_official_chart_range",
+            "message": "这个测量值不在 Air1 官方法兰尺寸对照表覆盖范围内，建议重新测量一次，或联系 Momcozy 客服确认合适配件。",
+        }
+    _min_mm, _max_mm, range_label, recommended_mm, accessory_type = matched
+    included = accessory_type == "base_flange" or recommended_mm in _AIR1_INCLUDED_FLANGE_INSERTS_MM
+    if accessory_type == "base_flange":
+        accessory_label = "24mm 基础法兰"
+        purchase_note = "24mm 直接使用基础法兰，不需要额外法兰硅胶塞。"
+    else:
+        accessory_label = f"{recommended_mm}mm 法兰硅胶塞"
+        purchase_note = (
+            f"Air1 随机附带 {recommended_mm}mm 法兰硅胶塞。"
+            if included
+            else f"{recommended_mm}mm 法兰硅胶塞通常需要单独购买。"
+        )
+    return {
+        "measured_nipple_mm": display_measurement,
+        "status": "recommended",
+        "matched_range": range_label,
+        "recommended_flange_mm": recommended_mm,
+        "recommended_insert_mm": recommended_mm if accessory_type == "flange_insert" else None,
+        "accessory_type": accessory_type,
+        "accessory_label": accessory_label,
+        "included_with_air1": included,
+        "purchase_note": purchase_note,
+        "message": f"{display_measurement:g}mm 落在 {range_label} 区间，建议使用 {accessory_label}。{purchase_note}",
+    }
 
 
 def _telemetry_payload(event: PumpTelemetryEvent) -> dict[str, Any]:

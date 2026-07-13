@@ -304,6 +304,72 @@ def test_agent_runtime_executor_uses_bounded_fallback_when_required_web_search_f
     assert status_event.payload["value"]["status"] == "failed"
 
 
+def test_agent_runtime_executor_injects_trusted_ibclc_consent_context() -> None:
+    run = _run(thread_id=uuid4())
+    executor = AgentRuntimeExecutor(
+        repository=FakeRuntimeRepository(messages=[], current_message=None),
+        sdk_runner=OpenAIAgentsSdkRunner(backend=CapturingSdkBackend(result=SdkNodeResult(final_text=""))),
+    )
+    executor._run_current_user_text[run.id] = "好的"
+    executor._run_previous_assistant_text[run.id] = "需要我帮你打开 IBCLC 在线咨询入口吗？"
+
+    trusted_args = asyncio.run(executor._trusted_tool_args(run=run, contract_name="ibclc_consult_card_create"))
+
+    assert trusted_args == {
+        "trusted_current_user_text": "好的",
+        "trusted_previous_assistant_text": "需要我帮你打开 IBCLC 在线咨询入口吗？",
+    }
+
+
+def test_agent_runtime_executor_projects_recent_ibclc_client_event_into_next_turn() -> None:
+    thread_id = uuid4()
+    prior_run_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="咨询结束了，接下来呢？", sequence=2)
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    repository.events.append(
+        AgentEvent(
+            event_id=uuid4(),
+            thread_id=thread_id,
+            run_id=prior_run_id,
+            sequence=7,
+            event_type="client.event",
+            payload={
+                "client_event_type": "ibclc_consult_completed",
+                "payload": {
+                    "label": "用户已完成一次 IBCLC 在线咨询",
+                    "occurred_at": "2026-07-13T10:00:00+08:00",
+                    "metadata": {
+                        "consult_id": "ibclc_12345678",
+                        "source_artifact_id": "artifact-1",
+                        "reason": "private health detail must not be projected",
+                    },
+                },
+            },
+        )
+    )
+    backend = CapturingSdkBackend(result=SdkNodeResult(final_text="我们继续。"))
+
+    asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+        ).execute(run=run)
+    )
+
+    client_events = _runtime_context(backend.requests[0])["working_context"]["client_events"]
+    assert client_events == [
+        {
+            "type": "ibclc_consult_completed",
+            "occurred_at": "2026-07-13T10:00:00+08:00",
+            "label": "用户已完成一次 IBCLC 在线咨询",
+            "consult_id": "ibclc_12345678",
+            "source_artifact_id": "artifact-1",
+        }
+    ]
+    assert "private health detail" not in str(client_events)
+
+
 def test_agent_runtime_executor_projects_only_current_user_images_into_model_input() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)
@@ -3029,6 +3095,13 @@ class FakeRuntimeRepository:
 
     async def list_messages_for_thread(self, *, thread_id, limit=40):
         return [message for message in self.messages if message.thread_id == thread_id][:limit]
+
+    async def list_client_events_for_thread(self, *, thread_id, limit=10):
+        return [
+            event
+            for event in self.events
+            if event.thread_id == thread_id and event.event_type == "client.event"
+        ][-limit:]
 
     async def get_run(self, *, run_id):
         if self.run is not None and self.run.id == run_id:

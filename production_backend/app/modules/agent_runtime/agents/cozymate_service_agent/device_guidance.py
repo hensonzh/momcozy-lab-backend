@@ -24,6 +24,10 @@ _TOPIC_DEFAULT_STEPS = {
     "bluetooth": "guide.bluetooth",
     "flange": "guide.flange",
 }
+_TOPIC_FAQ_QUERIES = {
+    "suction": "吸力减小 低吸力 没有母乳流出",
+    "troubleshooting": "吸奶器不工作 没有母乳流出 吸力减小",
+}
 AIR1_UNBOXING_STEPS = (
     "guide.parts",
     "guide.controls",
@@ -85,8 +89,9 @@ class DeviceGuidanceReferenceService:
                 "image_labels": list(section.image_labels),
             }
 
-        if normalized_topic == "faq" or (query and not normalized_step):
-            result["faq_matches"] = self._faq_matches(query=query, limit=limit)
+        faq_query = query or _TOPIC_FAQ_QUERIES.get(normalized_topic, "")
+        if normalized_topic == "faq" or faq_query and not normalized_step:
+            result["faq_matches"] = self._faq_matches(query=faq_query, limit=limit)
         return result
 
     @cached_property

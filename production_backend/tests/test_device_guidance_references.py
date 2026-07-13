@@ -36,6 +36,20 @@ def test_device_guidance_reference_service_returns_bounded_faq_matches() -> None
     assert all(set(item) == {"question", "answer"} for item in result["faq_matches"])
 
 
+def test_device_guidance_reference_service_returns_focused_suction_faq_without_query() -> None:
+    result = DeviceGuidanceReferenceService().read(model="Air1", topic="suction", limit=3)
+
+    assert result["faq_matches"]
+    assert any("吸力" in item["question"] for item in result["faq_matches"])
+
+
+def test_device_guidance_reference_service_returns_focused_troubleshooting_faq_without_query() -> None:
+    result = DeviceGuidanceReferenceService().read(model="Air1", topic="troubleshooting", limit=3)
+
+    assert result["faq_matches"]
+    assert any("不工作" in item["question"] or "吸力" in item["question"] for item in result["faq_matches"])
+
+
 def test_device_guidance_reference_service_rejects_unknown_model_and_step() -> None:
     service = DeviceGuidanceReferenceService()
 
