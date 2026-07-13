@@ -24,6 +24,14 @@ _REQUIRED_FIELDS = {
 }
 
 
+def ensure_hospital_bag_cart_link(text: str) -> str:
+    normalized = str(text or "").strip()
+    if "/hospital-bag-cart" in normalized:
+        return normalized
+    link = f"**{HOSPITAL_BAG_CART_LINK}**"
+    return f"{normalized}\n\n{link}" if normalized else link
+
+
 def build_hospital_bag_card_json(
     form_data: dict[str, Any],
     *,

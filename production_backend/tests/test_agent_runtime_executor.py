@@ -2261,10 +2261,12 @@ def test_agent_runtime_executor_injects_verified_form_submission_as_non_persiste
         repository=repository,
         handlers={"hospital_bag_card_create": capture_handler},
     )
+    transient_stream = FakeTransientStream()
     backend = ScriptedSdkBackend(
         [
             scripted_sdk_response(
                 final_text="待产包清单已生成。",
+                text_deltas=("待产包清单已生成。",),
                 tool_invocations=(scripted_tool_invocation("hospital_bag_card_create", {}),),
             )
         ]
@@ -2276,11 +2278,17 @@ def test_agent_runtime_executor_injects_verified_form_submission_as_non_persiste
             sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
             tool_registry=registry,
             tool_executor=tool_executor,
+            transient_stream=transient_stream,
         ).execute(run=run)
     )
 
     attachment = current_user.content["attachments"][0]
     assert result.status == "completed"
+    assert result.final_text == ("待产包清单已生成。\n\n**[打开待产包购物车](/hospital-bag-cart)**")
+    assert [item["delta"] for item in transient_stream.deltas] == [
+        "待产包清单已生成。",
+        "\n\n**[打开待产包购物车](/hospital-bag-cart)**",
+    ]
     assert repository.tool_call.safe_args == {}
     assert captured_args == {
         "confirmed_form_data": {"due_date_or_week": "32周", "birth_path": "顺产"},
