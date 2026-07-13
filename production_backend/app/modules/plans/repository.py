@@ -117,6 +117,18 @@ class PlansRepository:
         )
         return cast(PlanTask | None, await self.session.scalar(statement))
 
+    async def get_task_for_owner_for_update(self, *, task_id: UUID, owner_user_id: UUID) -> PlanTask | None:
+        statement = (
+            select(PlanTask)
+            .where(
+                PlanTask.id == task_id,
+                PlanTask.owner_user_id == owner_user_id,
+                PlanTask.deleted_at.is_(None),
+            )
+            .with_for_update()
+        )
+        return cast(PlanTask | None, await self.session.scalar(statement))
+
     async def list_tasks(
         self,
         *,
@@ -131,6 +143,30 @@ class PlansRepository:
         if status is not None:
             conditions.append(PlanTask.status == status)
         statement = select(PlanTask).where(*conditions).order_by(PlanTask.task_date.asc(), PlanTask.task_time.asc()).limit(limit)
+        result = await self.session.scalars(statement)
+        return list(result.all())
+
+    async def list_tasks_for_plan(
+        self,
+        *,
+        owner_user_id: UUID,
+        plan_id: UUID,
+        task_dates: list[date] | None = None,
+        status: str | None = None,
+        limit: int = 200,
+    ) -> list[PlanTask]:
+        conditions = [
+            PlanTask.owner_user_id == owner_user_id,
+            PlanTask.plan_id == plan_id,
+            PlanTask.deleted_at.is_(None),
+        ]
+        if task_dates:
+            conditions.append(PlanTask.task_date.in_(task_dates))
+        if status is not None:
+            conditions.append(PlanTask.status == status)
+        statement = (
+            select(PlanTask).where(*conditions).order_by(PlanTask.task_date.asc(), PlanTask.task_time.asc(), PlanTask.id.asc()).limit(limit)
+        )
         result = await self.session.scalars(statement)
         return list(result.all())
 

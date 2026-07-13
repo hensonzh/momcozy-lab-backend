@@ -240,9 +240,7 @@ class AgentRuntimeExecutor:
         try:
             turn_context = await self._load_turn_context(run=run)
             self._run_trusted_form_submissions[run.id] = _trusted_form_submissions(turn_context.current_message)
-            self._run_checkup_attachment_counts[run.id] = _runtime_checkup_attachment_count(
-                turn_context.current_message
-            )
+            self._run_checkup_attachment_counts[run.id] = _runtime_checkup_attachment_count(turn_context.current_message)
             self._run_current_user_text[run.id] = _message_text(turn_context.current_message)
             self._run_previous_assistant_text[run.id] = _latest_assistant_text_before(
                 messages=turn_context.messages,
@@ -275,11 +273,7 @@ class AgentRuntimeExecutor:
                 run=run,
                 current_user_text=self._run_current_user_text[run.id],
                 workflow_state=next(
-                    (
-                        workflow
-                        for workflow in turn_context.workflow_states
-                        if workflow.workflow_type == PREGNANCY_PLAN_WORKFLOW_TYPE
-                    ),
+                    (workflow for workflow in turn_context.workflow_states if workflow.workflow_type == PREGNANCY_PLAN_WORKFLOW_TYPE),
                     None,
                 ),
             )
@@ -370,9 +364,7 @@ class AgentRuntimeExecutor:
         ongoing_work_started_at = perf_counter()
         workflow_states = await self._active_workflow_states(run=run)
         resident_skill_ids = {
-            skill.service_skill_id
-            for skill in working_context_state.skills
-            if working_context_state.turn_index <= skill.expires_after_turn
+            skill.service_skill_id for skill in working_context_state.skills if working_context_state.turn_index <= skill.expires_after_turn
         }
         ongoing_work = project_ongoing_work(workflow_states, resident_skill_ids=resident_skill_ids)
         client_events = await self.repository.list_client_events_for_thread(
@@ -954,6 +946,8 @@ class AgentRuntimeExecutor:
         )
 
     async def _trusted_tool_args(self, *, run: AgentRun, contract_name: str) -> dict[str, Any]:
+        if contract_name == "records.milk_analysis.intake":
+            return {"trusted_current_user_text": self._run_current_user_text.get(run.id, "")}
         expected_form_id = FORM_TOOL_IDS.get(contract_name)
         if expected_form_id is not None:
             submission = self._run_trusted_form_submissions.get(run.id, {}).get(expected_form_id)
@@ -1068,11 +1062,7 @@ class AgentRuntimeExecutor:
         current_user_text: str,
         workflow_state: AgentWorkflowState | None,
     ) -> list[str]:
-        workflow_payload = (
-            dict(workflow_state.state)
-            if workflow_state is not None and isinstance(workflow_state.state, dict)
-            else {}
-        )
+        workflow_payload = dict(workflow_state.state) if workflow_state is not None and isinstance(workflow_state.state, dict) else {}
         submission = self._run_trusted_form_submissions.get(run.id, {}).get("birth_journey_basic_info_intake")
         submission_values = _dict(submission or {}, "values")
         signal_ids = pregnancy_plan_urgent_signal_ids(submission_values)
@@ -1493,11 +1483,7 @@ class AgentRuntimeExecutor:
                     source=source,
                     information=dict(getattr(item, "information", {}) or {}),
                     guidance=str(getattr(item, "guidance", "") or ""),
-                    ttl_turns=(
-                        None
-                        if getattr(item, "ttl_turns", 3) is None
-                        else max(1, int(getattr(item, "ttl_turns", 3) or 3))
-                    ),
+                    ttl_turns=(None if getattr(item, "ttl_turns", 3) is None else max(1, int(getattr(item, "ttl_turns", 3) or 3))),
                     token_budget=self.config.known_information_token_budget,
                     invalidate_prefixes=tuple(getattr(item, "invalidate_prefixes", ()) or ()),
                     priority=max(0, int(getattr(item, "priority", 100) or 100)),
@@ -1513,6 +1499,7 @@ class AgentRuntimeExecutor:
             run_id=run.id,
             service_skill_id=skill_id,
         )
+
 
 def _history_before(*, messages: list[AgentMessage], before_sequence: int) -> list[dict[str, Any]]:
     return [_to_model_message(message) for message in _history_messages_before(messages=messages, before_sequence=before_sequence)]

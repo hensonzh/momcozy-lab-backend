@@ -1,13 +1,16 @@
 import asyncio
 import json
+from datetime import date
 from uuid import uuid4
 
 import pytest
 
+from production_backend.app.core.errors import ApiError
 from production_backend.app.modules.agent_runtime.models import AgentAction
 from production_backend.app.modules.plans.agent_actions import (
     MILK_PLAN_CREATE_ACTION,
     MILK_PLAN_CHANGED_EVENT,
+    MILK_SCHEDULE_RESCHEDULE_ACTION,
     PLAN_TASK_COMPLETE_ACTION,
     PLAN_TASK_CREATE_ACTION,
     PLAN_TASK_DELETE_ACTION,
@@ -15,6 +18,7 @@ from production_backend.app.modules.plans.agent_actions import (
     PLAN_DELETE_ACTION,
     PREGNANCY_PLAN_CREATE_ACTION,
     MilkPlanCreateActionHandler,
+    MilkScheduleRescheduleActionHandler,
     PlanDeleteActionHandler,
     PlanTaskCompleteActionHandler,
     PlanTaskCreateActionHandler,
@@ -138,6 +142,45 @@ def test_milk_plan_create_action_handler_rejects_a_plan_that_cannot_reach_schedu
         )
 
     assert exc_info.value.code == "invalid_milk_plan_schedule"
+
+
+def test_milk_schedule_reschedule_action_emits_authoritative_change_event() -> None:
+    service = FakePlansService()
+    service.task.plan_id = service.plan.id
+    service.task.task_date = date(2026, 7, 14)
+    service.task.task_time = "08:00"
+    action = _action(
+        action_type=MILK_SCHEDULE_RESCHEDULE_ACTION,
+        target_type="plan",
+        apply_payload={
+            "plan_id": str(service.plan.id),
+            "updates": [
+                {
+                    "task_id": str(service.task.id),
+                    "expected_plan_id": str(service.plan.id),
+                    "expected_task_date": "2026-07-14",
+                    "expected_task_time": "08:00",
+                    "new_task_date": "2026-07-14",
+                    "new_task_time": "07:30",
+                }
+            ],
+        },
+    )
+
+    result = asyncio.run(MilkScheduleRescheduleActionHandler(service=service)(action))
+
+    assert result.resource_id == str(service.plan.id)
+    assert service.reschedule_milk_tasks_kwargs["owner_user_id"] == action.actor_user_id
+    assert result.application_events[0].event_type == MILK_PLAN_CHANGED_EVENT
+    assert result.application_events[0].payload == {
+        "operation": "rescheduled",
+        "reason": "schedule_adjustment",
+        "plan_id": str(service.plan.id),
+        "plan_type": "milk_management",
+        "source": "agent_action",
+        "affected_dates": ["2026-07-14"],
+        "task_ids": [str(service.task.id)],
+    }
 
 
 def test_pregnancy_plan_create_action_handler_creates_plan_through_service() -> None:
@@ -305,6 +348,8 @@ def test_plan_task_delete_action_handler_deletes_task_through_service() -> None:
         target_type="plan_task",
         apply_payload={"task_id": str(task_id)},
     )
+    service.task.id = task_id
+    service.task.owner_user_id = action.actor_user_id
 
     result = asyncio.run(PlanTaskDeleteActionHandler(service=service)(action))
 
@@ -322,6 +367,8 @@ def test_plan_delete_action_handler_deletes_plan_through_service() -> None:
         target_type="plan",
         apply_payload={"plan_id": str(plan_id)},
     )
+    service.plan.id = plan_id
+    service.plan.owner_user_id = action.actor_user_id
 
     result = asyncio.run(PlanDeleteActionHandler(service=service)(action))
 
@@ -329,6 +376,52 @@ def test_plan_delete_action_handler_deletes_plan_through_service() -> None:
     assert result.resource_id == str(plan_id)
     assert service.delete_plan_kwargs["owner_user_id"] == action.actor_user_id
     assert service.delete_plan_kwargs["plan_id"] == plan_id
+
+
+def test_milk_task_update_delete_and_plan_delete_emit_change_operations() -> None:
+    service = FakePlansService()
+    owner = uuid4()
+    service.plan.owner_user_id = owner
+    service.plan.payload = {"start_date": "2026-07-14", "days": 2}
+    service.task.owner_user_id = owner
+    service.task.plan_id = service.plan.id
+    service.task.task_date = date(2026, 7, 14)
+    service.task.task_time = "08:00"
+
+    update_action = _action(
+        action_type=PLAN_TASK_UPDATE_ACTION,
+        target_type="plan_task",
+        apply_payload={"task_id": str(service.task.id), "task_time": "08:30"},
+    )
+    update_action.actor_user_id = owner
+    updated = asyncio.run(PlanTaskUpdateActionHandler(service=service)(update_action))
+
+    delete_action = _action(
+        action_type=PLAN_TASK_DELETE_ACTION,
+        target_type="plan_task",
+        apply_payload={"task_id": str(service.task.id)},
+    )
+    delete_action.actor_user_id = owner
+    deleted = asyncio.run(PlanTaskDeleteActionHandler(service=service)(delete_action))
+
+    plan_delete_action = _action(
+        action_type=PLAN_DELETE_ACTION,
+        target_type="plan",
+        apply_payload={"plan_id": str(service.plan.id)},
+    )
+    plan_delete_action.actor_user_id = owner
+    plan_deleted = asyncio.run(PlanDeleteActionHandler(service=service)(plan_delete_action))
+
+    assert updated.application_events[0].payload["operation"] == "updated"
+    assert deleted.application_events[0].payload["operation"] == "deleted"
+    assert plan_deleted.application_events[0].payload == {
+        "operation": "deleted",
+        "reason": "plan_deleted",
+        "plan_id": str(service.plan.id),
+        "plan_type": "milk_management",
+        "source": "agent_action",
+        "affected_dates": ["2026-07-14", "2026-07-15"],
+    }
 
 
 def test_plan_task_create_action_handler_rejects_missing_title() -> None:
@@ -379,6 +472,7 @@ class FakePlansService:
         self.update_task_kwargs = {}
         self.delete_task_kwargs = {}
         self.delete_plan_kwargs = {}
+        self.reschedule_milk_tasks_kwargs = {}
 
     async def create_plan(self, **kwargs):
         self.create_plan_kwargs = kwargs
@@ -402,6 +496,16 @@ class FakePlansService:
         self.task.payload = kwargs["payload"]
         return self.task
 
+    async def get_plan(self, **kwargs):
+        if kwargs["owner_user_id"] != self.plan.owner_user_id or kwargs["plan_id"] != self.plan.id:
+            raise ApiError(code="not_found", message="Plan not found.", status=404)
+        return self.plan
+
+    async def get_task(self, **kwargs):
+        if kwargs["owner_user_id"] != self.task.owner_user_id or kwargs["task_id"] != self.task.id:
+            raise ApiError(code="not_found", message="Plan task not found.", status=404)
+        return self.task
+
     async def set_task_completed(self, **kwargs):
         self.set_task_completed_kwargs = kwargs
         self.task.owner_user_id = kwargs["owner_user_id"]
@@ -420,6 +524,14 @@ class FakePlansService:
 
     async def delete_plan(self, **kwargs):
         self.delete_plan_kwargs = kwargs
+
+    async def reschedule_milk_tasks(self, **kwargs):
+        self.reschedule_milk_tasks_kwargs = kwargs
+        update = kwargs["updates"][0]
+        self.task.task_date = date.fromisoformat(update["new_task_date"])
+        self.task.task_time = update["new_task_time"]
+        self.task.owner_user_id = kwargs["owner_user_id"]
+        return [self.task]
 
 
 def _action(*, apply_payload: dict, action_type: str = MILK_PLAN_CREATE_ACTION, target_type: str = "plan") -> AgentAction:

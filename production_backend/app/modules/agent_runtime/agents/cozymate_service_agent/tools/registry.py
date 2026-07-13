@@ -144,6 +144,43 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
+            name="records.milk_analysis.intake",
+            domain="records",
+            description=(
+                "用户要求完整分析奶量，或回答上一轮奶量分析问题时调用；开始、恢复或推进当前线程的六项采集。"
+                "每轮只回答工具返回的 current_field，直到 can_evaluate 为 true。"
+            ),
+            loading_mode="eager",
+            read_or_write="write",
+            side_effect_level="low",
+            blocking_policy="must_wait",
+            result_dependency="next_tool_call",
+            requires_confirmation=False,
+            idempotency_required=True,
+            audit_required=True,
+            timeout_seconds=15,
+        )
+    )
+    registry.register(
+        _tool_contract(
+            name="records.milk_analysis.evaluate",
+            domain="records",
+            description=(
+                "用户已完成六项奶量采集且 intake 返回 can_evaluate=true 时调用；做确定性评估并生成奶量分析卡、上下文指纹和计划准入结论。"
+            ),
+            loading_mode="eager",
+            read_or_write="write",
+            side_effect_level="low",
+            blocking_policy="must_wait",
+            result_dependency="next_tool_call",
+            requires_confirmation=False,
+            idempotency_required=True,
+            audit_required=True,
+            timeout_seconds=15,
+        )
+    )
+    registry.register(
+        _tool_contract(
             name="records.growth.read",
             domain="records",
             description="读取当前用户宝宝的身高、体重和头围等生长记录。用户要查看宝宝近期生长数据或趋势时调用。",
@@ -351,6 +388,24 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
+            name="plans.milk_schedule.propose",
+            domain="plans",
+            description=(
+                "读取当前用户指定奶量计划的待执行任务，避开一个或多个明确不可用时间段，"
+                "用户明确日期和不可用时间、要求调整日程时调用；生成保持间隔的单日或批量重排预览并发起待确认动作。"
+            ),
+            read_or_write="write",
+            side_effect_level="medium",
+            blocking_policy="wait_for_confirmation",
+            result_dependency="none",
+            requires_confirmation=True,
+            idempotency_required=True,
+            audit_required=True,
+            timeout_seconds=15,
+        )
+    )
+    registry.register(
+        _tool_contract(
             name="pregnancy.plan_intake.start",
             domain="birth_prep",
             description=(
@@ -471,6 +526,36 @@ def default_tool_registry() -> ToolContractRegistry:
             name="plans.task_delete.propose",
             domain="plans",
             description="软删除当前用户唯一指定的单项计划任务。用户明确要求删除且 trusted task target 唯一时调用并同步执行；目标含糊时先澄清。",
+            read_or_write="write",
+            side_effect_level="medium",
+            blocking_policy="must_wait",
+            result_dependency="final_response",
+            requires_confirmation=False,
+            idempotency_required=True,
+            audit_required=True,
+            timeout_seconds=15,
+        )
+    )
+    registry.register(
+        _tool_contract(
+            name="plans.milk_task_update.propose",
+            domain="plans",
+            description="用户明确要求调整唯一奶量计划任务且目标已确定时调用；目标含糊或批量修改时先澄清，批量避开日程使用 plans.milk_schedule.propose。",
+            read_or_write="write",
+            side_effect_level="medium",
+            blocking_policy="must_wait",
+            result_dependency="final_response",
+            requires_confirmation=False,
+            idempotency_required=True,
+            audit_required=True,
+            timeout_seconds=15,
+        )
+    )
+    registry.register(
+        _tool_contract(
+            name="plans.milk_task_delete.propose",
+            domain="plans",
+            description="软删除当前用户唯一指定的奶量计划任务。用户明确要求删除且目标唯一时调用。",
             read_or_write="write",
             side_effect_level="medium",
             blocking_policy="must_wait",

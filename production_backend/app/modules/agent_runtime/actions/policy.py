@@ -83,6 +83,12 @@ DEFAULT_AGENT_ACTION_RULES: Mapping[str, AgentActionPolicyRule] = {
         side_effect_level="medium",
         requires_confirmation=True,
     ),
+    "plans.milk_schedule.reschedule": AgentActionPolicyRule(
+        action_type="plans.milk_schedule.reschedule",
+        target_type="plan",
+        side_effect_level="medium",
+        requires_confirmation=True,
+    ),
     "pregnancy.plan.create": AgentActionPolicyRule(
         action_type="pregnancy.plan.create",
         target_type="plan",

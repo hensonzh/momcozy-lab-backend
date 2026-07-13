@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -18,6 +18,7 @@ from .milk_plan_schedule import (
 
 MILK_PLAN_CREATE_ACTION = "plans.milk_plan.create"
 MILK_PLAN_CHANGED_EVENT = "milk_plan.changed"
+MILK_SCHEDULE_RESCHEDULE_ACTION = "plans.milk_schedule.reschedule"
 PREGNANCY_PLAN_CREATE_ACTION = "pregnancy.plan.create"
 PREGNANCY_PLAN_CHANGED_EVENT = "pregnancy_plan.changed"
 PLAN_TASK_CREATE_ACTION = "plans.task.create"
@@ -99,6 +100,54 @@ class MilkPlanCreateActionHandler:
                         "plan_type": plan.plan_type,
                         "source": "agent_action",
                         "affected_dates": scheduled_task_dates(scheduled_tasks),
+                    },
+                ),
+            ),
+        )
+
+
+class MilkScheduleRescheduleActionHandler:
+    def __init__(self, *, service: PlansService) -> None:
+        self.service = service
+
+    async def __call__(self, action: AgentAction) -> AgentActionApplyResult:
+        payload = dict(action.apply_payload or {})
+        plan_id = _required_uuid(payload, "plan_id", "missing_plan_id", "invalid_plan_id")
+        updates = payload.get("updates")
+        if not isinstance(updates, list) or not all(isinstance(item, dict) for item in updates):
+            raise PermanentJobError("invalid_milk_schedule_updates")
+        try:
+            tasks = await self.service.reschedule_milk_tasks(
+                owner_user_id=action.actor_user_id,
+                plan_id=plan_id,
+                updates=[dict(item) for item in updates],
+                request_id=f"agent-action:{action.id}",
+            )
+        except ApiError as exc:
+            raise PermanentJobError(exc.code) from exc
+        affected_dates = sorted(
+            {str(value) for item in updates for value in (item.get("expected_task_date"), item.get("new_task_date")) if value}
+        )
+        return AgentActionApplyResult(
+            resource_type="plan",
+            resource_id=str(plan_id),
+            details={
+                "plan_type": "milk_management",
+                "task_count": len(tasks),
+                "agent_action_id": str(action.id),
+                "agent_run_id": str(action.run_id),
+            },
+            application_events=(
+                AgentApplicationEvent(
+                    event_type=MILK_PLAN_CHANGED_EVENT,
+                    payload={
+                        "operation": "rescheduled",
+                        "reason": "schedule_adjustment",
+                        "plan_id": str(plan_id),
+                        "plan_type": "milk_management",
+                        "source": "agent_action",
+                        "affected_dates": affected_dates,
+                        "task_ids": [str(task.id) for task in tasks],
                     },
                 ),
             ),
@@ -190,6 +239,13 @@ class PlanTaskCreateActionHandler:
         except ApiError as exc:
             raise PermanentJobError(exc.code) from exc
 
+        application_events = await _milk_plan_task_events(
+            service=self.service,
+            task=task,
+            operation="updated",
+            reason="task_created",
+        )
+
         return AgentActionApplyResult(
             resource_type="plan_task",
             resource_id=str(task.id),
@@ -198,6 +254,7 @@ class PlanTaskCreateActionHandler:
                 "agent_action_id": str(action.id),
                 "agent_run_id": str(action.run_id),
             },
+            application_events=application_events,
         )
 
 
@@ -220,6 +277,13 @@ class PlanTaskCompleteActionHandler:
         except ApiError as exc:
             raise PermanentJobError(exc.code) from exc
 
+        application_events = await _milk_plan_task_events(
+            service=self.service,
+            task=task,
+            operation="updated",
+            reason="task_completion_changed",
+        )
+
         return AgentActionApplyResult(
             resource_type="plan_task",
             resource_id=str(task.id),
@@ -229,6 +293,7 @@ class PlanTaskCompleteActionHandler:
                 "agent_action_id": str(action.id),
                 "agent_run_id": str(action.run_id),
             },
+            application_events=application_events,
         )
 
 
@@ -251,6 +316,12 @@ class PlanTaskUpdateActionHandler:
             )
         except ApiError as exc:
             raise PermanentJobError(exc.code) from exc
+        application_events = await _milk_plan_task_events(
+            service=self.service,
+            task=task,
+            operation="updated",
+            reason="task_updated",
+        )
         return AgentActionApplyResult(
             resource_type="plan_task",
             resource_id=str(task.id),
@@ -260,6 +331,7 @@ class PlanTaskUpdateActionHandler:
                 "agent_action_id": str(action.id),
                 "agent_run_id": str(action.run_id),
             },
+            application_events=application_events,
         )
 
 
@@ -271,6 +343,8 @@ class PlanTaskDeleteActionHandler:
         payload = dict(action.apply_payload or {})
         task_id = _required_uuid(payload, "task_id", "missing_task_id", "invalid_task_id")
         try:
+            get_task = getattr(self.service, "get_task", None)
+            task = await get_task(owner_user_id=action.actor_user_id, task_id=task_id) if callable(get_task) else None
             await self.service.delete_task(
                 owner_user_id=action.actor_user_id,
                 task_id=task_id,
@@ -278,6 +352,16 @@ class PlanTaskDeleteActionHandler:
             )
         except ApiError as exc:
             raise PermanentJobError(exc.code) from exc
+        application_events = (
+            await _milk_plan_task_events(
+                service=self.service,
+                task=task,
+                operation="deleted",
+                reason="task_deleted",
+            )
+            if task is not None
+            else ()
+        )
         return AgentActionApplyResult(
             resource_type="plan_task",
             resource_id=str(task_id),
@@ -285,6 +369,7 @@ class PlanTaskDeleteActionHandler:
                 "agent_action_id": str(action.id),
                 "agent_run_id": str(action.run_id),
             },
+            application_events=application_events,
         )
 
 
@@ -296,6 +381,8 @@ class PlanDeleteActionHandler:
         payload = dict(action.apply_payload or {})
         plan_id = _required_uuid(payload, "plan_id", "missing_plan_id", "invalid_plan_id")
         try:
+            get_plan = getattr(self.service, "get_plan", None)
+            plan = await get_plan(owner_user_id=action.actor_user_id, plan_id=plan_id) if callable(get_plan) else None
             await self.service.delete_plan(
                 owner_user_id=action.actor_user_id,
                 plan_id=plan_id,
@@ -303,6 +390,21 @@ class PlanDeleteActionHandler:
             )
         except ApiError as exc:
             raise PermanentJobError(exc.code) from exc
+        application_events: tuple[AgentApplicationEvent, ...] = ()
+        if plan is not None and plan.plan_type == "milk_management":
+            application_events = (
+                AgentApplicationEvent(
+                    event_type=MILK_PLAN_CHANGED_EVENT,
+                    payload={
+                        "operation": "deleted",
+                        "reason": "plan_deleted",
+                        "plan_id": str(plan.id),
+                        "plan_type": "milk_management",
+                        "source": "agent_action",
+                        "affected_dates": _milk_plan_affected_dates(plan),
+                    },
+                ),
+            )
         return AgentActionApplyResult(
             resource_type="plan",
             resource_id=str(plan_id),
@@ -310,7 +412,52 @@ class PlanDeleteActionHandler:
                 "agent_action_id": str(action.id),
                 "agent_run_id": str(action.run_id),
             },
+            application_events=application_events,
         )
+
+
+async def _milk_plan_task_events(
+    *,
+    service: PlansService,
+    task: Any,
+    operation: str,
+    reason: str,
+) -> tuple[AgentApplicationEvent, ...]:
+    plan_id = getattr(task, "plan_id", None)
+    get_plan = getattr(service, "get_plan", None)
+    if plan_id is None or not callable(get_plan):
+        return ()
+    try:
+        plan = await get_plan(owner_user_id=task.owner_user_id, plan_id=plan_id)
+    except ApiError:
+        return ()
+    if plan.plan_type != "milk_management":
+        return ()
+    task_date = getattr(task, "task_date", None)
+    return (
+        AgentApplicationEvent(
+            event_type=MILK_PLAN_CHANGED_EVENT,
+            payload={
+                "operation": operation,
+                "reason": reason,
+                "plan_id": str(plan.id),
+                "plan_type": "milk_management",
+                "source": "agent_action",
+                "affected_dates": [task_date.isoformat()] if isinstance(task_date, date) else [],
+                "task_ids": [str(task.id)],
+            },
+        ),
+    )
+
+
+def _milk_plan_affected_dates(plan: Any) -> list[str]:
+    payload = plan.payload if isinstance(getattr(plan, "payload", None), dict) else {}
+    try:
+        start = date.fromisoformat(str(payload.get("start_date") or ""))
+        days = max(1, min(int(payload.get("days") or 1), 31))
+    except (TypeError, ValueError):
+        return []
+    return [(start + timedelta(days=offset)).isoformat() for offset in range(days)]
 
 
 def _text(payload: dict[str, Any], key: str) -> str:

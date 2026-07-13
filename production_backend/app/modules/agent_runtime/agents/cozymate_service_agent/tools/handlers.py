@@ -6,7 +6,7 @@ import hashlib
 import json
 import re
 from datetime import date, datetime, timedelta, timezone
-from typing import Any
+from typing import Any, cast
 from urllib.parse import quote, urlsplit
 from uuid import UUID
 
@@ -25,6 +25,7 @@ from production_backend.app.modules.hospital_bag import HOSPITAL_BAG_CART_UPDATE
 from production_backend.app.modules.notifications.agent_actions import MILK_REMINDER_CREATE_ACTION
 from production_backend.app.modules.plans.agent_actions import (
     MILK_PLAN_CREATE_ACTION,
+    MILK_SCHEDULE_RESCHEDULE_ACTION,
     PLAN_TASK_COMPLETE_ACTION,
     PLAN_TASK_CREATE_ACTION,
     PLAN_TASK_DELETE_ACTION,
@@ -78,6 +79,16 @@ from .pregnancy_plan_flow import (
     pregnancy_plan_current_followup,
     pregnancy_plan_urgent_signal_ids,
 )
+from .milk_analysis_flow import (
+    MILK_ANALYSIS_SCHEMA_VERSION,
+    MILK_ANALYSIS_WORKFLOW_TYPE,
+    MilkAnalysisFlowError,
+    advance_milk_analysis_intake,
+    build_milk_analysis_assessment,
+    initialize_milk_analysis_intake,
+    milk_analysis_context_fingerprint,
+)
+from .milk_schedule_adjustment import MilkScheduleAdjustmentError, build_milk_schedule_preview
 
 
 _DIARY_ENTRY_VALUE_FIELDS = (
@@ -750,6 +761,188 @@ class MilkAnalysisReadToolHandler:
         )
 
 
+class MilkAnalysisIntakeToolHandler:
+    def __init__(
+        self,
+        *,
+        records_service: RecordsService,
+        profile_service: ProfileService,
+        runtime_service: AgentRuntimeService,
+    ) -> None:
+        self.analysis_reader = MilkAnalysisReadToolHandler(
+            records_service=records_service,
+            profile_service=profile_service,
+        )
+        self.runtime_service = runtime_service
+
+    async def __call__(self, context: ToolHandlerContext) -> ToolHandlerResult:
+        if context.thread_id is None:
+            raise ApiError(code="validation_failed", message="A thread is required for milk analysis.", status=422)
+        action = _text(context.args, "action") or "start"
+        existing = await self.runtime_service.get_latest_workflow_state(
+            owner_user_id=context.actor.user_id,
+            thread_id=context.thread_id,
+            workflow_type=MILK_ANALYSIS_WORKFLOW_TYPE,
+        )
+        existing_state = dict(existing.state) if existing is not None and isinstance(existing.state, dict) else {}
+        starts_new_analysis = action == "reset" or (
+            action == "start" and (existing is None or _text(existing_state, "phase") == "assessment_complete")
+        )
+        if starts_new_analysis:
+            snapshot_result = await self.analysis_reader(context)
+            workflow = initialize_milk_analysis_intake(records_snapshot=dict(snapshot_result.output))
+        elif existing is None:
+            raise ApiError(code="milk_analysis_not_active", message="Start milk analysis before answering intake questions.", status=409)
+        else:
+            workflow = existing_state
+            if action == "answer":
+                answer = _text(context.args, "trusted_current_user_text")
+                turn_key = _stable_payload_key(
+                    "milk-analysis-answer",
+                    {"run_id": str(context.run_id), "answer": answer},
+                )
+                processed_turn_keys = list(workflow.get("processed_turn_keys") or [])
+                if turn_key in processed_turn_keys:
+                    action = "resume"
+                else:
+                    processed_turn_keys.append(turn_key)
+                try:
+                    if action == "answer":
+                        workflow = advance_milk_analysis_intake(workflow, answer=answer)
+                except MilkAnalysisFlowError as exc:
+                    raise ApiError(code=str(exc), message="Milk analysis intake could not advance.", status=409) from exc
+                workflow["processed_turn_keys"] = processed_turn_keys[-16:]
+            elif action not in {"start", "resume"}:
+                raise ApiError(code="validation_failed", message="Unsupported milk analysis intake action.", status=422)
+
+        current_field = _text(workflow, "current_field")
+        phase = _text(workflow, "phase")
+        persisted = await self.runtime_service.upsert_workflow_state(
+            owner_user_id=context.actor.user_id,
+            thread_id=context.thread_id,
+            run_id=context.run_id,
+            workflow_type=MILK_ANALYSIS_WORKFLOW_TYPE,
+            status="collecting" if phase == "collecting_intake" else "ready",
+            schema_version=MILK_ANALYSIS_SCHEMA_VERSION,
+            state=workflow,
+            active_step=current_field or "ready_to_evaluate",
+        )
+        progress_value = workflow.get("progress")
+        progress = dict(cast(dict[str, Any], progress_value)) if isinstance(progress_value, dict) else {}
+        output = {
+            "status": "milk_analysis_intake_collecting" if current_field else "milk_analysis_ready_to_evaluate",
+            "workflow_state_id": str(persisted.id),
+            "workflow_phase": phase,
+            "current_field": current_field or None,
+            "next_question": _text(workflow, "next_question"),
+            "progress": progress,
+            "can_evaluate": not current_field,
+        }
+        return _retained_tool_result(
+            output=output,
+            context_key="milk:analysis_workflow",
+            information=output,
+            guidance="Continue only the current intake question. Evaluate only when can_evaluate is true.",
+            priority=200,
+            invalidate_prefixes=("milk:analysis_workflow",),
+        )
+
+
+class MilkAnalysisEvaluateToolHandler:
+    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
+        self.runtime_service = runtime_service
+
+    async def __call__(self, context: ToolHandlerContext) -> ToolHandlerResult:
+        if context.thread_id is None:
+            raise ApiError(code="validation_failed", message="A thread is required for milk analysis.", status=422)
+        existing = await self.runtime_service.get_latest_workflow_state(
+            owner_user_id=context.actor.user_id,
+            thread_id=context.thread_id,
+            workflow_type=MILK_ANALYSIS_WORKFLOW_TYPE,
+        )
+        if existing is None:
+            raise ApiError(code="milk_analysis_not_active", message="Complete milk analysis intake first.", status=409)
+        existing_state = dict(existing.state) if isinstance(existing.state, dict) else {}
+        replay_artifact_id = _text(existing_state, "evaluation_artifact_id")
+        raw_existing_assessment = existing_state.get("assessment")
+        existing_assessment: dict[str, Any] = (
+            dict(cast(dict[str, Any], raw_existing_assessment)) if isinstance(raw_existing_assessment, dict) else {}
+        )
+        if _text(existing_state, "phase") == "assessment_complete" and replay_artifact_id and existing_assessment:
+            raw_replay_decision = existing_assessment.get("plan_decision")
+            replay_decision: dict[str, Any] = (
+                dict(cast(dict[str, Any], raw_replay_decision)) if isinstance(raw_replay_decision, dict) else {}
+            )
+            return _retained_tool_result(
+                output={
+                    "status": "milk_analysis_completed",
+                    "replayed": True,
+                    "workflow_state_id": str(existing.id),
+                    "artifact_id": replay_artifact_id,
+                    "artifact_type": "milk_analysis_card",
+                    "can_start_plan": replay_decision.get("can_start_plan") is True,
+                    "recommended_direction": replay_decision.get("recommended_direction"),
+                    "reason": replay_decision.get("reason"),
+                },
+                context_key="milk:analysis_workflow",
+                information={
+                    "can_start_plan": replay_decision.get("can_start_plan") is True,
+                    "recommended_direction": replay_decision.get("recommended_direction"),
+                },
+                guidance="Reuse this completed evaluation; do not create another analysis artifact.",
+                priority=200,
+            )
+        try:
+            assessment = build_milk_analysis_assessment(existing_state)
+        except MilkAnalysisFlowError as exc:
+            raise ApiError(code=str(exc), message="Complete milk analysis intake first.", status=409) from exc
+        card = dict(assessment["card"])
+        artifact = await self.runtime_service.create_artifact(
+            owner_user_id=context.actor.user_id,
+            run_id=context.run_id,
+            artifact_type="milk_analysis_card",
+            schema_version="v1",
+            status="created",
+            payload=card,
+            emit_event=False,
+        )
+        state = {
+            **existing_state,
+            "phase": "assessment_complete",
+            "assessment": assessment,
+            "evaluation_artifact_id": str(artifact.id),
+        }
+        persisted = await self.runtime_service.upsert_workflow_state(
+            owner_user_id=context.actor.user_id,
+            thread_id=context.thread_id,
+            run_id=context.run_id,
+            workflow_type=MILK_ANALYSIS_WORKFLOW_TYPE,
+            status="ready",
+            schema_version=MILK_ANALYSIS_SCHEMA_VERSION,
+            state=state,
+            active_step="assessment_complete",
+        )
+        decision = assessment["plan_decision"]
+        output = {
+            "status": "milk_analysis_completed",
+            "workflow_state_id": str(persisted.id),
+            "artifact_id": str(artifact.id),
+            "artifact_type": artifact.artifact_type,
+            "can_start_plan": decision["can_start_plan"],
+            "recommended_direction": decision["recommended_direction"],
+            "reason": decision["reason"],
+            DEFERRED_AGENT_EVENTS_KEY: [_deferred_artifact_created_event(artifact)],
+        }
+        return _retained_tool_result(
+            output=output,
+            context_key="milk:analysis_workflow",
+            information={key: value for key, value in output.items() if key != DEFERRED_AGENT_EVENTS_KEY},
+            guidance="Use can_start_plan and recommended_direction as the authoritative plan gate.",
+            priority=200,
+            invalidate_prefixes=("milk:analysis_workflow",),
+        )
+
+
 class GrowthRecordsReadToolHandler:
     def __init__(self, *, records_service: RecordsService) -> None:
         self.records_service = records_service
@@ -1253,9 +1446,7 @@ class DeviceUnboxingAdvanceToolHandler:
             raise ApiError(code="invalid_device_unboxing_step", message="The current device unboxing step is invalid.", status=409)
         normalized_model = _text(state, "device_model") or model
         self.reference_service.read(model=normalized_model, step=current_step)
-        completed_steps = [
-            step for step in state.get("completed_steps", []) if isinstance(step, str) and step in AIR1_UNBOXING_STEPS
-        ]
+        completed_steps = [step for step in state.get("completed_steps", []) if isinstance(step, str) and step in AIR1_UNBOXING_STEPS]
         if current_step not in completed_steps:
             completed_steps.append(current_step)
         current_index = AIR1_UNBOXING_STEPS.index(current_step)
@@ -1292,9 +1483,7 @@ class DeviceUnboxingAdvanceToolHandler:
         workflow = _require_active_device_unboxing(existing)
         state = dict(workflow.state) if isinstance(workflow.state, dict) else {}
         current_step = workflow.active_step
-        completed_steps = [
-            step for step in state.get("completed_steps", []) if isinstance(step, str) and step in AIR1_UNBOXING_STEPS
-        ]
+        completed_steps = [step for step in state.get("completed_steps", []) if isinstance(step, str) and step in AIR1_UNBOXING_STEPS]
         if phase == "completed" and current_step in AIR1_UNBOXING_STEPS and current_step not in completed_steps:
             completed_steps.append(current_step)
         state.update(
@@ -1612,8 +1801,56 @@ class MilkPlanProposeToolHandler:
         title = _text(apply_payload, "title")
         if not title:
             raise ApiError(code="validation_failed", message="title is required.", status=422)
+        if context.thread_id is None:
+            raise ApiError(code="validation_failed", message="A thread is required for a milk plan.", status=422)
+        workflow = await self.runtime_service.get_latest_workflow_state(
+            owner_user_id=context.actor.user_id,
+            thread_id=context.thread_id,
+            workflow_type=MILK_ANALYSIS_WORKFLOW_TYPE,
+        )
+        state = dict(workflow.state) if workflow is not None and isinstance(workflow.state, dict) else {}
+        raw_assessment = state.get("assessment")
+        assessment: dict[str, Any] = dict(cast(dict[str, Any], raw_assessment)) if isinstance(raw_assessment, dict) else {}
+        raw_decision = assessment.get("plan_decision")
+        decision: dict[str, Any] = dict(cast(dict[str, Any], raw_decision)) if isinstance(raw_decision, dict) else {}
+        fingerprint = _text(assessment, "analysis_context_fingerprint")
+        raw_analysis_context = assessment.get("analysis_context")
+        analysis_context: dict[str, Any] = (
+            dict(cast(dict[str, Any], raw_analysis_context)) if isinstance(raw_analysis_context, dict) else {}
+        )
+        expected_fingerprint = milk_analysis_context_fingerprint(analysis_context) if analysis_context else ""
+        if _text(state, "phase") != "assessment_complete" or not fingerprint:
+            raise ApiError(
+                code="milk_analysis_required_before_plan",
+                message="Complete the durable milk analysis before creating a plan.",
+                status=409,
+            )
+        if not expected_fingerprint or fingerprint != expected_fingerprint:
+            raise ApiError(
+                code="milk_analysis_fingerprint_mismatch",
+                message="The latest milk analysis context changed. Evaluate it again before creating a plan.",
+                status=409,
+            )
+        if decision.get("can_start_plan") is not True:
+            raise ApiError(code="milk_plan_not_eligible", message="The latest milk analysis does not allow a plan.", status=409)
+        requested_direction = _text(context.args, "direction")
+        recommended_direction = _text(decision, "recommended_direction")
+        if requested_direction and requested_direction != recommended_direction:
+            raise ApiError(
+                code="milk_plan_direction_mismatch",
+                message="The proposed direction does not match the latest milk analysis.",
+                status=409,
+            )
+        raw_plan_payload = apply_payload.get("payload")
+        plan_payload: dict[str, Any] = dict(cast(dict[str, Any], raw_plan_payload)) if isinstance(raw_plan_payload, dict) else {}
+        apply_payload["payload"] = {
+            **plan_payload,
+            "analysis_context_fingerprint": fingerprint,
+            "analysis_workflow_state_id": str(workflow.id),
+        }
         preview_payload = _milk_plan_preview_payload(apply_payload)
-        action = await self.runtime_service.propose_action(
+        action = await _propose_action_reusing_idempotency(
+            self.runtime_service,
             owner_user_id=context.actor.user_id,
             run_id=context.run_id,
             action_type=MILK_PLAN_CREATE_ACTION,
@@ -1621,7 +1858,11 @@ class MilkPlanProposeToolHandler:
             side_effect_level="medium",
             preview_payload=preview_payload,
             apply_payload=apply_payload,
-            idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:milk-plan",
+            idempotency_key=_text(context.args, "idempotency_key")
+            or _stable_payload_key(
+                "milk-plan",
+                {"owner": str(context.actor.user_id), "thread": str(context.thread_id), "payload": apply_payload},
+            ),
         )
         payload = {**_milk_plan_artifact_payload(apply_payload), "action_id": str(action.id)}
         artifact = await self.runtime_service.create_artifact(
@@ -1643,6 +1884,99 @@ class MilkPlanProposeToolHandler:
             "summary": _text(payload, "summary"),
             "task_count": int(payload.get("scheduled_task_count") or 0),
             "reminder_count": len(reminders) if isinstance(reminders, list) else 0,
+            DEFERRED_AGENT_EVENTS_KEY: [_deferred_artifact_created_event(artifact)],
+        }
+
+
+class MilkScheduleRescheduleProposeToolHandler:
+    def __init__(self, *, runtime_service: AgentRuntimeService, plans_service: PlansService) -> None:
+        self.runtime_service = runtime_service
+        self.plans_service = plans_service
+
+    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
+        plan_id = _optional_uuid_arg(context.args, "plan_id")
+        if plan_id is None:
+            raise ApiError(code="validation_failed", message="plan_id is required.", status=422)
+        target_dates = _milk_schedule_target_dates(context.args)
+        plan = await self.plans_service.get_plan(owner_user_id=context.actor.user_id, plan_id=plan_id)
+        if plan.plan_type != "milk_management":
+            raise ApiError(code="validation_failed", message="Plan is not a milk-management plan.", status=422)
+        tasks = await self.plans_service.list_tasks_for_plan(
+            owner_user_id=context.actor.user_id,
+            plan_id=plan_id,
+            task_dates=target_dates,
+            status="pending",
+            limit=200,
+        )
+        fixed_tasks: list[PlanTask] = []
+        for target_date in target_dates:
+            fixed_tasks.extend(
+                await self.plans_service.list_tasks(
+                    owner_user_id=context.actor.user_id,
+                    task_date=target_date,
+                    status="pending",
+                    limit=100,
+                )
+            )
+        try:
+            preview = build_milk_schedule_preview(
+                plan_id=plan_id,
+                tasks=tasks,
+                fixed_tasks=fixed_tasks,
+                target_dates=target_dates,
+                busy_windows=list(context.args.get("busy_windows") or []),
+                min_gap_minutes=int(context.args.get("min_gap_minutes") or 90),
+                default_duration_minutes=int(context.args.get("default_duration_minutes") or 30),
+            )
+        except (MilkScheduleAdjustmentError, TypeError, ValueError) as exc:
+            code = str(exc) if isinstance(exc, MilkScheduleAdjustmentError) else "invalid_milk_schedule_adjustment"
+            raise ApiError(code=code, message="A milk schedule preview could not be created.", status=422) from exc
+        if not preview["updates"]:
+            return {
+                "status": "milk_schedule_no_changes",
+                "plan_id": str(plan_id),
+                "conflict_count": preview["conflict_count"],
+                "updated_count": 0,
+                "affected_dates": [],
+            }
+        action = await _propose_action_reusing_idempotency(
+            self.runtime_service,
+            owner_user_id=context.actor.user_id,
+            run_id=context.run_id,
+            action_type=MILK_SCHEDULE_RESCHEDULE_ACTION,
+            target_type="plan",
+            target_id=str(plan_id),
+            side_effect_level="medium",
+            preview_payload=preview,
+            apply_payload={
+                "plan_id": str(plan_id),
+                "updates": preview["updates"],
+                "affected_dates": preview["affected_dates"],
+            },
+            idempotency_key=_text(context.args, "idempotency_key")
+            or _stable_payload_key(
+                "milk-schedule-reschedule",
+                {"owner": str(context.actor.user_id), "plan_id": str(plan_id), "updates": preview["updates"]},
+            ),
+        )
+        artifact_payload = {**preview, "action_id": str(action.id), "title": "奶量计划日程调整预览"}
+        artifact = await self.runtime_service.create_artifact(
+            owner_user_id=context.actor.user_id,
+            run_id=context.run_id,
+            artifact_type="milk_schedule_reschedule_preview",
+            schema_version="v1",
+            status="created",
+            payload=artifact_payload,
+            emit_event=False,
+        )
+        return {
+            **_proposal_result(action=action, preview_payload=preview),
+            "artifact_id": str(artifact.id),
+            "artifact_type": artifact.artifact_type,
+            "plan_id": str(plan_id),
+            "conflict_count": preview["conflict_count"],
+            "updated_count": preview["updated_count"],
+            "affected_dates": preview["affected_dates"],
             DEFERRED_AGENT_EVENTS_KEY: [_deferred_artifact_created_event(artifact)],
         }
 
@@ -1921,6 +2255,12 @@ def build_default_tool_handlers(
             records_service=records_service,
             profile_service=profile_service,
         ),
+        "records.milk_analysis.intake": MilkAnalysisIntakeToolHandler(
+            records_service=records_service,
+            profile_service=profile_service,
+            runtime_service=agent_runtime_service,
+        ),
+        "records.milk_analysis.evaluate": MilkAnalysisEvaluateToolHandler(runtime_service=agent_runtime_service),
         "records.growth.read": GrowthRecordsReadToolHandler(records_service=records_service),
         "plans.current.read": PlansCurrentReadToolHandler(plans_service=plans_service),
         "plans.calendar.read": PlansCalendarReadToolHandler(plans_service=plans_service),
@@ -1944,6 +2284,10 @@ def build_default_tool_handlers(
         ),
         "images.inspect": ImageInspectToolHandler(asset_service=asset_service, object_storage=object_storage),
         "plans.milk_plan.propose": MilkPlanProposeToolHandler(runtime_service=agent_runtime_service),
+        "plans.milk_schedule.propose": MilkScheduleRescheduleProposeToolHandler(
+            runtime_service=agent_runtime_service,
+            plans_service=plans_service,
+        ),
         "pregnancy.plan_intake.start": PregnancyPlanIntakeStartToolHandler(runtime_service=agent_runtime_service),
         "pregnancy.plan_intake.analyze": PregnancyPlanIntakeAnalyzeToolHandler(runtime_service=agent_runtime_service),
         "pregnancy.plan_intake.advance": PregnancyPlanIntakeAdvanceToolHandler(runtime_service=agent_runtime_service),
@@ -1952,6 +2296,8 @@ def build_default_tool_handlers(
         "plans.task_complete.propose": PlanTaskCompleteProposeToolHandler(runtime_service=agent_runtime_service),
         "plans.task_update.propose": PlanTaskUpdateProposeToolHandler(runtime_service=agent_runtime_service),
         "plans.task_delete.propose": PlanTaskDeleteProposeToolHandler(runtime_service=agent_runtime_service),
+        "plans.milk_task_update.propose": PlanTaskUpdateProposeToolHandler(runtime_service=agent_runtime_service),
+        "plans.milk_task_delete.propose": PlanTaskDeleteProposeToolHandler(runtime_service=agent_runtime_service),
         "plans.plan_delete.propose": PlanDeleteProposeToolHandler(runtime_service=agent_runtime_service),
         "notifications.milk_reminder.propose": MilkReminderProposeToolHandler(runtime_service=agent_runtime_service),
         "records.feeding_record.propose": FeedingRecordProposeToolHandler(runtime_service=agent_runtime_service),
@@ -2010,11 +2356,7 @@ def _profile_retained_information(output: dict[str, Any]) -> dict[str, Any]:
     infants = output.get("infants")
     if isinstance(infants, list):
         information["infants"] = [
-            {
-                key: item[key]
-                for key in ("infant_name", "sex", "birth_date", "status")
-                if key in item
-            }
+            {key: item[key] for key in ("infant_name", "sex", "birth_date", "status") if key in item}
             for item in infants[:5]
             if isinstance(item, dict)
         ]
@@ -2052,9 +2394,7 @@ def _milk_summary_retained_information(output: dict[str, Any]) -> dict[str, Any]
 
 def _milk_analysis_retained_information(output: dict[str, Any]) -> dict[str, Any]:
     return {
-        key: output[key]
-        for key in ("window", "status", "counts", "volumes", "latest", "observation_flags", "analysis")
-        if key in output
+        key: output[key] for key in ("window", "status", "counts", "volumes", "latest", "observation_flags", "analysis") if key in output
     } | {
         "recent_feedings": list(output.get("recent_feedings") or [])[:3],
         "recent_pumpings": list(output.get("recent_pumpings") or [])[:3],
@@ -2089,9 +2429,7 @@ def _require_active_device_unboxing(workflow: AgentWorkflowState | None) -> Agen
 
 def _device_unboxing_workflow_payload(workflow: AgentWorkflowState) -> dict[str, Any]:
     state = workflow.state if isinstance(workflow.state, dict) else {}
-    completed_steps = [
-        step for step in state.get("completed_steps", []) if isinstance(step, str) and step in AIR1_UNBOXING_STEPS
-    ]
+    completed_steps = [step for step in state.get("completed_steps", []) if isinstance(step, str) and step in AIR1_UNBOXING_STEPS]
     return {
         "device_model": _text(state, "device_model"),
         "phase": _text(state, "phase"),
@@ -3057,6 +3395,22 @@ def _metadata_payload(payload: dict[str, Any]) -> dict[str, str]:
     return metadata
 
 
+def _stable_payload_key(prefix: str, payload: dict[str, Any]) -> str:
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    return f"{prefix}:{hashlib.sha256(encoded.encode('utf-8')).hexdigest()}"
+
+
+async def _propose_action_reusing_idempotency(
+    runtime_service: AgentRuntimeService,
+    **kwargs: Any,
+) -> Any:
+    propose_once = getattr(runtime_service, "propose_action_once", None)
+    if callable(propose_once):
+        action, _ = await propose_once(**kwargs, reuse_existing=True)
+        return action
+    return await runtime_service.propose_action(**kwargs)
+
+
 def _text(payload: dict[str, Any], key: str) -> str:
     return str(payload.get(key) or "").strip()
 
@@ -3098,6 +3452,26 @@ def _optional_date_arg(payload: dict[str, Any], key: str) -> date | None:
             status=422,
             details={"field": key},
         ) from exc
+
+
+def _milk_schedule_target_dates(payload: dict[str, Any]) -> list[date]:
+    values = payload.get("target_dates")
+    raw_dates = list(values) if isinstance(values, list) else []
+    target_date = _text(payload, "target_date")
+    if target_date:
+        raw_dates.append(target_date)
+    parsed: list[date] = []
+    for value in raw_dates:
+        try:
+            candidate = date.fromisoformat(str(value))
+        except ValueError as exc:
+            raise ApiError(code="validation_failed", message="target_dates must contain valid dates.", status=422) from exc
+        if candidate not in parsed:
+            parsed.append(candidate)
+    parsed.sort()
+    if not parsed or len(parsed) > 7:
+        raise ApiError(code="validation_failed", message="One to seven target dates are required.", status=422)
+    return parsed
 
 
 def _packaged_image_asset_for_url(*, asset_service: ProductAssetService, image_url: str) -> ProductAsset | None:

@@ -6,6 +6,7 @@ from ...hospital_bag.agent_actions import HOSPITAL_BAG_CART_UPDATE_ACTION, Hospi
 from ...notifications.agent_actions import MILK_REMINDER_CREATE_ACTION, MilkReminderCreateActionHandler
 from ...plans.agent_actions import (
     MILK_PLAN_CREATE_ACTION,
+    MILK_SCHEDULE_RESCHEDULE_ACTION,
     PLAN_DELETE_ACTION,
     PLAN_TASK_COMPLETE_ACTION,
     PLAN_TASK_CREATE_ACTION,
@@ -13,6 +14,7 @@ from ...plans.agent_actions import (
     PLAN_TASK_UPDATE_ACTION,
     PREGNANCY_PLAN_CREATE_ACTION,
     MilkPlanCreateActionHandler,
+    MilkScheduleRescheduleActionHandler,
     PlanDeleteActionHandler,
     PlanTaskCompleteActionHandler,
     PlanTaskCreateActionHandler,
@@ -51,6 +53,7 @@ def build_agent_action_handlers(
         HOSPITAL_BAG_CART_UPDATE_ACTION: HospitalBagCartUpdateActionHandler(),
         MILK_REMINDER_CREATE_ACTION: MilkReminderCreateActionHandler(service=notifications_service),
         MILK_PLAN_CREATE_ACTION: MilkPlanCreateActionHandler(service=plans_service),
+        MILK_SCHEDULE_RESCHEDULE_ACTION: MilkScheduleRescheduleActionHandler(service=plans_service),
         PREGNANCY_PLAN_CREATE_ACTION: PregnancyPlanCreateActionHandler(service=plans_service),
         PLAN_TASK_CREATE_ACTION: PlanTaskCreateActionHandler(service=plans_service),
         PLAN_TASK_COMPLETE_ACTION: PlanTaskCompleteActionHandler(service=plans_service),

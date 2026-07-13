@@ -105,6 +105,25 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             },
         },
     },
+    "records.milk_analysis.intake": {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "action": {
+                "type": "string",
+                "enum": ["start", "resume", "answer", "reset"],
+                "default": "start",
+                "description": "开始、恢复、回答当前唯一问题，或明确重置六项奶量分析采集。",
+            },
+            "days": {"type": "integer", "minimum": 1, "maximum": 30, "default": 7},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 20, "default": 8},
+        },
+    },
+    "records.milk_analysis.evaluate": {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {},
+    },
     "records.growth.read": {
         "type": "object",
         "additionalProperties": False,
@@ -362,6 +381,40 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
                 },
             },
             "reminders": {"type": "array", "maxItems": 40, "items": {"type": "object", "additionalProperties": True}},
+        },
+    },
+    "plans.milk_schedule.propose": {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["plan_id", "busy_windows"],
+        "properties": {
+            "plan_id": {"type": "string", "format": "uuid"},
+            "target_date": {"type": "string", "format": "date"},
+            "target_dates": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 7,
+                "uniqueItems": True,
+                "items": {"type": "string", "format": "date"},
+            },
+            "busy_windows": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 21,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["start_time", "end_time"],
+                    "properties": {
+                        "date": {"type": "string", "format": "date"},
+                        "start_time": {"type": "string", "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$"},
+                        "end_time": {"type": "string", "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$"},
+                        "title": {"type": "string", "maxLength": 120},
+                    },
+                },
+            },
+            "min_gap_minutes": {"type": "integer", "minimum": 0, "maximum": 360, "default": 90},
+            "default_duration_minutes": {"type": "integer", "minimum": 1, "maximum": 240, "default": 30},
         },
     },
     "pregnancy.plan.propose": {
@@ -750,6 +803,9 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
 
 for _tool_name in ("records.pumping_record_delete.propose", "records.growth_record_delete.propose"):
     _TOOL_INPUT_SCHEMAS[_tool_name] = _TOOL_INPUT_SCHEMAS["records.feeding_record_delete.propose"]
+
+_TOOL_INPUT_SCHEMAS["plans.milk_task_update.propose"] = _TOOL_INPUT_SCHEMAS["plans.task_update.propose"]
+_TOOL_INPUT_SCHEMAS["plans.milk_task_delete.propose"] = _TOOL_INPUT_SCHEMAS["plans.task_delete.propose"]
 
 for _tool_name in ("labor_communication_card_create", "hospital_bag_form_create", "hospital_bag_card_create"):
     _TOOL_INPUT_SCHEMAS[_tool_name] = _TOOL_INPUT_SCHEMAS["birth_plan_form_create"]

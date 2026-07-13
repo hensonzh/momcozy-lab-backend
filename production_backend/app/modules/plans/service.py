@@ -15,6 +15,7 @@ PLAN_CREATE_IDEMPOTENCY_SCOPE = "plans.create"
 PLAN_TASK_CREATE_IDEMPOTENCY_SCOPE = "plans.tasks.create"
 PLAN_TODO_COMPLETION_IDEMPOTENCY_SCOPE = "plans.todos.completion"
 PLAN_TASK_STATES = frozenset({"pending", "completed", "skipped"})
+MAX_MILK_SCHEDULE_RESCHEDULE_TASKS = 100
 
 
 class PlansService:
@@ -60,7 +61,9 @@ class PlansService:
             payload=normalized_payload,
         )
         await self._complete_idempotency(idempotency_record=idempotency_record, response_ref=str(plan.id))
-        await self._audit(owner_user_id=owner_user_id, action="plans.create", resource_type="plan", resource_id=str(plan.id), request_id=request_id)
+        await self._audit(
+            owner_user_id=owner_user_id, action="plans.create", resource_type="plan", resource_id=str(plan.id), request_id=request_id
+        )
         return plan
 
     async def list_plans(
@@ -89,7 +92,9 @@ class PlansService:
         deleted = await self.repository.soft_delete_plan(plan_id=plan_id, owner_user_id=owner_user_id, deleted_at=_utcnow())
         if deleted is None:
             raise ApiError(code="not_found", message="Plan not found.", status=404)
-        await self._audit(owner_user_id=owner_user_id, action="plans.delete", resource_type="plan", resource_id=str(plan_id), request_id=request_id)
+        await self._audit(
+            owner_user_id=owner_user_id, action="plans.delete", resource_type="plan", resource_id=str(plan_id), request_id=request_id
+        )
 
     async def create_task(
         self,
@@ -132,7 +137,13 @@ class PlansService:
             payload=payload or {},
         )
         await self._complete_idempotency(idempotency_record=idempotency_record, response_ref=str(task.id))
-        await self._audit(owner_user_id=owner_user_id, action="plans.tasks.create", resource_type="plan_task", resource_id=str(task.id), request_id=request_id)
+        await self._audit(
+            owner_user_id=owner_user_id,
+            action="plans.tasks.create",
+            resource_type="plan_task",
+            resource_id=str(task.id),
+            request_id=request_id,
+        )
         return task
 
     async def list_tasks(
@@ -146,6 +157,97 @@ class PlansService:
         self._validate_limit(limit)
         return await self.repository.list_tasks(owner_user_id=owner_user_id, task_date=task_date, status=status, limit=limit)
 
+    async def get_task(self, *, owner_user_id: UUID, task_id: UUID) -> PlanTask:
+        task = await self.repository.get_task_for_owner(task_id=task_id, owner_user_id=owner_user_id)
+        if task is None:
+            raise ApiError(code="not_found", message="Plan task not found.", status=404)
+        return task
+
+    async def list_tasks_for_plan(
+        self,
+        *,
+        owner_user_id: UUID,
+        plan_id: UUID,
+        task_dates: list[date] | None = None,
+        status: str | None = None,
+        limit: int = 200,
+    ) -> list[PlanTask]:
+        if limit < 1 or limit > 500:
+            raise ApiError(code="validation_failed", message="limit must be between 1 and 500.", status=422)
+        plan = await self.get_plan(owner_user_id=owner_user_id, plan_id=plan_id)
+        if plan.plan_type != "milk_management":
+            raise ApiError(code="validation_failed", message="Plan is not a milk-management plan.", status=422)
+        return await self.repository.list_tasks_for_plan(
+            owner_user_id=owner_user_id,
+            plan_id=plan_id,
+            task_dates=task_dates,
+            status=status,
+            limit=limit,
+        )
+
+    async def reschedule_milk_tasks(
+        self,
+        *,
+        owner_user_id: UUID,
+        plan_id: UUID,
+        updates: list[dict[str, Any]],
+        request_id: str = "",
+    ) -> list[PlanTask]:
+        if not updates or len(updates) > MAX_MILK_SCHEDULE_RESCHEDULE_TASKS:
+            raise ApiError(code="validation_failed", message="A bounded list of schedule updates is required.", status=422)
+        plan = await self.get_plan(owner_user_id=owner_user_id, plan_id=plan_id)
+        if plan.plan_type != "milk_management":
+            raise ApiError(code="validation_failed", message="Plan is not a milk-management plan.", status=422)
+
+        parsed_updates: list[tuple[PlanTask, date, str]] = []
+        seen_task_ids: set[UUID] = set()
+        for update in updates:
+            task_id = _required_uuid_value(update.get("task_id"), code="invalid_task_id")
+            if task_id in seen_task_ids:
+                raise ApiError(code="validation_failed", message="Duplicate task update.", status=422)
+            seen_task_ids.add(task_id)
+            locked_loader = getattr(self.repository, "get_task_for_owner_for_update", None)
+            task = (
+                await locked_loader(task_id=task_id, owner_user_id=owner_user_id)
+                if callable(locked_loader)
+                else await self.repository.get_task_for_owner(task_id=task_id, owner_user_id=owner_user_id)
+            )
+            if task is None:
+                raise ApiError(code="not_found", message="Plan task not found.", status=404)
+            if task.plan_id != plan_id or task.status != "pending":
+                raise ApiError(code="owner_scope_violation", message="Task is outside the requested active milk plan.", status=403)
+            expected_plan_id = _required_uuid_value(update.get("expected_plan_id"), code="invalid_expected_plan_id")
+            expected_date = _required_date_value(update.get("expected_task_date"), code="invalid_expected_task_date")
+            expected_time = _required_time_value(update.get("expected_task_time"), code="invalid_expected_task_time")
+            if expected_plan_id != plan_id or task.task_date != expected_date or task.task_time != expected_time:
+                raise ApiError(
+                    code="milk_schedule_conflict",
+                    message="The milk schedule changed after preview. Create a fresh preview before applying.",
+                    status=409,
+                )
+            new_date = _required_date_value(update.get("new_task_date"), code="invalid_new_task_date")
+            new_time = _required_time_value(update.get("new_task_time"), code="invalid_new_task_time")
+            parsed_updates.append((task, new_date, new_time))
+
+        applied: list[PlanTask] = []
+        for task, new_date, new_time in parsed_updates:
+            updated = await self.repository.update_task(
+                task_id=task.id,
+                owner_user_id=owner_user_id,
+                updates={"task_date": new_date, "task_time": new_time},
+            )
+            if updated is None:
+                raise ApiError(code="milk_schedule_conflict", message="A milk-plan task changed during apply.", status=409)
+            applied.append(updated)
+            await self._audit(
+                owner_user_id=owner_user_id,
+                action="plans.milk_schedule.reschedule",
+                resource_type="plan_task",
+                resource_id=str(updated.id),
+                request_id=request_id,
+            )
+        return applied
+
     async def set_task_completed(self, *, owner_user_id: UUID, task_id: UUID, completed: bool, request_id: str = "") -> PlanTask:
         task = await self.repository.set_task_completed(
             task_id=task_id,
@@ -155,7 +257,13 @@ class PlansService:
         )
         if task is None:
             raise ApiError(code="not_found", message="Plan task not found.", status=404)
-        await self._audit(owner_user_id=owner_user_id, action="plans.tasks.complete", resource_type="plan_task", resource_id=str(task_id), request_id=request_id)
+        await self._audit(
+            owner_user_id=owner_user_id,
+            action="plans.tasks.complete",
+            resource_type="plan_task",
+            resource_id=str(task_id),
+            request_id=request_id,
+        )
         return task
 
     async def set_task_state(
@@ -311,9 +419,17 @@ class PlansService:
         deleted = await self.repository.soft_delete_task(task_id=task_id, owner_user_id=owner_user_id, deleted_at=_utcnow())
         if deleted is None:
             raise ApiError(code="not_found", message="Plan task not found.", status=404)
-        await self._audit(owner_user_id=owner_user_id, action="plans.tasks.delete", resource_type="plan_task", resource_id=str(task_id), request_id=request_id)
+        await self._audit(
+            owner_user_id=owner_user_id,
+            action="plans.tasks.delete",
+            resource_type="plan_task",
+            resource_id=str(task_id),
+            request_id=request_id,
+        )
 
-    async def _reserve_idempotency(self, *, owner_user_id: UUID, scope: str, key: str | None, payload: dict[str, Any]) -> IdempotencyKey | None:
+    async def _reserve_idempotency(
+        self, *, owner_user_id: UUID, scope: str, key: str | None, payload: dict[str, Any]
+    ) -> IdempotencyKey | None:
         if not key:
             return None
         if self.idempotency_service is None:
@@ -364,6 +480,33 @@ class PlansService:
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _required_uuid_value(value: Any, *, code: str) -> UUID:
+    try:
+        return UUID(str(value or ""))
+    except ValueError as exc:
+        raise ApiError(code=code, message="A valid UUID is required.", status=422) from exc
+
+
+def _required_date_value(value: Any, *, code: str) -> date:
+    if isinstance(value, date):
+        return value
+    try:
+        return date.fromisoformat(str(value or ""))
+    except ValueError as exc:
+        raise ApiError(code=code, message="A valid date is required.", status=422) from exc
+
+
+def _required_time_value(value: Any, *, code: str) -> str:
+    token = str(value or "").strip()
+    try:
+        hour, minute = (int(part) for part in token.split(":"))
+    except (TypeError, ValueError):
+        hour, minute = -1, -1
+    if len(token) != 5 or hour not in range(24) or minute not in range(60):
+        raise ApiError(code=code, message="A valid HH:mm time is required.", status=422)
+    return token
 
 
 def _normalize_plan_payload(*, plan_type: str, payload: dict[str, Any]) -> dict[str, Any]:

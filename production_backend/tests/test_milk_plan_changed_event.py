@@ -1,4 +1,5 @@
 import asyncio
+from datetime import date
 from uuid import uuid4
 
 from production_backend.app.core.errors import ApiError
@@ -7,7 +8,9 @@ from production_backend.app.modules.agent_runtime.models import AgentAction, Age
 from production_backend.app.modules.plans.agent_actions import (
     MILK_PLAN_CHANGED_EVENT,
     MILK_PLAN_CREATE_ACTION,
+    MILK_SCHEDULE_RESCHEDULE_ACTION,
     MilkPlanCreateActionHandler,
+    MilkScheduleRescheduleActionHandler,
 )
 from production_backend.app.modules.plans.models import Plan, PlanTask
 
@@ -98,6 +101,40 @@ def test_milk_plan_task_failure_rolls_back_the_plan_and_all_earlier_tasks() -> N
     assert outcome.action.status == "failed"
     assert repository.domain_rows == []
     assert [event.event_type for event in repository.events] == ["action.failed"]
+
+
+def test_milk_schedule_reschedule_confirmation_replay_is_idempotent() -> None:
+    repository = MilkActionRepository()
+    repository.action.action_type = MILK_SCHEDULE_RESCHEDULE_ACTION
+    plan_id = uuid4()
+    task_id = uuid4()
+    repository.action.apply_payload = {
+        "plan_id": str(plan_id),
+        "updates": [
+            {
+                "task_id": str(task_id),
+                "expected_plan_id": str(plan_id),
+                "expected_task_date": "2026-07-14",
+                "expected_task_time": "11:00",
+                "new_task_date": "2026-07-14",
+                "new_task_time": "10:00",
+            }
+        ],
+    }
+    service = IdempotentRescheduleService(task_id=task_id, plan_id=plan_id)
+    executor = AgentActionExecutor(
+        repository=repository,
+        handlers={MILK_SCHEDULE_RESCHEDULE_ACTION: MilkScheduleRescheduleActionHandler(service=service)},
+    )
+
+    first = asyncio.run(executor.apply(repository.action))
+    replay = asyncio.run(executor.apply(repository.action))
+
+    assert first.action.status == "applied"
+    assert replay.replayed is True
+    assert service.apply_count == 1
+    assert [event.event_type for event in repository.events] == ["action.applied", MILK_PLAN_CHANGED_EVENT]
+    assert repository.events[-1].payload["operation"] == "rescheduled"
 
 
 class MilkActionRepository:
@@ -217,6 +254,28 @@ class FailingTransactionalMilkPlanService(TransactionalMilkPlanService):
         if self.task_calls == 2:
             raise ApiError(code="dependency_failed", message="task insert failed", status=503)
         return await super().create_task(**kwargs)
+
+
+class IdempotentRescheduleService:
+    def __init__(self, *, task_id, plan_id) -> None:
+        self.task_id = task_id
+        self.plan_id = plan_id
+        self.apply_count = 0
+
+    async def reschedule_milk_tasks(self, **kwargs):
+        self.apply_count += 1
+        return [
+            PlanTask(
+                id=self.task_id,
+                owner_user_id=kwargs["owner_user_id"],
+                plan_id=self.plan_id,
+                task_date=date(2026, 7, 14),
+                task_time="10:00",
+                title="吸奶",
+                status="pending",
+                payload={"task_type": "pumping"},
+            )
+        ]
 
 
 class MilkSavepoint:
