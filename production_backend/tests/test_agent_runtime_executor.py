@@ -21,6 +21,7 @@ from production_backend.app.modules.agent_runtime.models import (
 )
 from production_backend.app.modules.agent_runtime.event_stream.sink import AgentEventSink
 from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent import ServiceSkillId
+from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.context import BusinessFactsProjector
 from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.device_guidance import (
     DEVICE_ELECTRICAL_HAZARD_RESPONSE,
 )
@@ -608,6 +609,43 @@ def test_agent_runtime_executor_load_service_skill_returns_facts_and_records_led
     assert skill_loaded_events[0].payload["service_skill_id"] == "milk-management"
     assert "records.milk_status.read" in skill_loaded_events[0].payload["recommended_tool_contracts"]
     assert repository.run_summaries == []
+
+
+def test_agent_runtime_executor_loads_birth_prep_with_structured_business_fact_result() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="帮我生成孕期计划", sequence=1)
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+
+    async def pregnancy_context_handler(_context):
+        return ToolHandlerResult(output={"profile": {"age": 32}, "plans": [], "tasks": []})
+
+    backend = ScriptedSdkBackend(
+        [
+            scripted_sdk_response(
+                final_text="我可以帮你制定孕期计划。",
+                tool_invocations=(scripted_tool_invocation("load_service_skill", {"service_skill_id": "birth-prep"}),),
+                expected_available_tools=("load_service_skill",),
+            )
+        ]
+    )
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            business_facts_projector=BusinessFactsProjector(
+                handlers={"pregnancy.plan_context.read": pregnancy_context_handler}
+            ),
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+        ).execute(run=run)
+    )
+
+    assert result.status == "completed"
+    assert repository.tool_output.safe_output["business_facts"]["pregnancy"] == {
+        "profile": {"age": 32},
+        "plans": [],
+        "tasks": [],
+    }
 
 
 @pytest.mark.parametrize(

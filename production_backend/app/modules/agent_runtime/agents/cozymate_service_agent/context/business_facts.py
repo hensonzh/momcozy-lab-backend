@@ -10,7 +10,7 @@ from ..service_skills import ServiceSkillId
 from production_backend.app.modules.auth import CurrentUser
 
 from ..tools import ToolHandlerContext
-from ..tools.executor import ToolHandler
+from ..tools.executor import ToolHandler, ToolHandlerResult
 from ..tools.output_policy import strip_instructional_tool_output_keys
 
 
@@ -72,7 +72,7 @@ class BusinessFactsProjector:
         self, *, actor: CurrentUser, run_id: UUID, source: BusinessFactSource
     ) -> tuple[BusinessFactSource, dict[str, Any]]:
         handler = self.handlers[source.tool_name]
-        payload = await _maybe_await(
+        result = await _maybe_await(
             handler(
                 ToolHandlerContext(
                     actor=actor,
@@ -83,6 +83,7 @@ class BusinessFactsProjector:
                 )
             )
         )
+        payload = result.output if isinstance(result, ToolHandlerResult) else result
         return source, payload
 
 

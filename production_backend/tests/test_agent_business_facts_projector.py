@@ -1,4 +1,5 @@
 import asyncio
+import json
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -7,6 +8,7 @@ from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.
     BusinessFactsProjectorConfig,
 )
 from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent import ServiceSkillId
+from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.tools import ToolHandlerResult
 from production_backend.app.modules.auth import CurrentUser
 
 
@@ -133,6 +135,34 @@ def test_business_facts_projector_returns_empty_when_no_handlers_are_available()
     )
 
     assert facts == {}
+
+
+def test_business_facts_projector_unwraps_structured_tool_handler_results() -> None:
+    async def pregnancy_context_handler(_context):
+        return ToolHandlerResult(
+            output={
+                "profile": {"age": 32},
+                "plans": [],
+                "assistant_hint": "do not project",
+            }
+        )
+
+    facts = asyncio.run(
+        BusinessFactsProjector(
+            handlers={"pregnancy.plan_context.read": pregnancy_context_handler},
+            clock=lambda: datetime(2026, 7, 13, 8, 0, tzinfo=timezone.utc),
+        ).project(
+            actor=_actor(),
+            run_id=uuid4(),
+            service_skill_id=ServiceSkillId.BIRTH_PREP,
+        )
+    )
+
+    assert facts["pregnancy"] == {
+        "profile": {"age": 32},
+        "plans": [],
+    }
+    assert json.loads(json.dumps(facts, ensure_ascii=False)) == facts
 
 
 class FakeSharedSessionGuard:

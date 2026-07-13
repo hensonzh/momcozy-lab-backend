@@ -10,6 +10,7 @@ from typing import Any
 from uuid import UUID
 
 from production_backend.app.core.errors import ApiError
+from production_backend.app.core.logging import log_agent_runtime_event
 from production_backend.app.core.metrics import RequestMetrics
 from production_backend.app.infrastructure.object_storage.base import ObjectStorage
 from production_backend.app.modules.agent_runtime.event_stream.sink import AgentEventSink
@@ -339,6 +340,12 @@ class ToolExecutor:
             self._record(tool_name=tool_name, outcome="failed", error_code="timeout", started_at=started_at)
             raise ApiError(code="timeout", message="Tool execution timed out.", status=504) from exc
         except Exception as exc:
+            log_agent_runtime_event(
+                "agent.tool.unexpected_failure",
+                run_id=str(run_id),
+                tool_name=tool_name,
+                exception_type=type(exc).__name__,
+            )
             await _rollback_tool_scope(tool_scope, exc=exc)
             tool_scope = None
             if tool_call_id is not None and not tool_started_committed:
