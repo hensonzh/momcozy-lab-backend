@@ -1338,12 +1338,20 @@ class DeviceGuidanceReadToolHandler:
         assets = self.asset_service.list_assets(limit=200)
         if content_type:
             assets = [asset for asset in assets if asset.content_type == content_type]
-        assets = _filter_guidance_assets(
-            assets=assets,
-            model=model,
-            topic=topic or _device_guidance_step_asset_topic(step),
-            query=query,
-        )
+        current_step = reference.get("current_step")
+        resolved_step = _text(current_step, "id") if isinstance(current_step, dict) else ""
+        if step and resolved_step:
+            assets = _exact_guidance_step_assets(
+                assets=assets,
+                image_urls=self.reference_service.image_urls_for_step(resolved_step),
+            )
+        else:
+            assets = _filter_guidance_assets(
+                assets=assets,
+                model=model,
+                topic=topic or _device_guidance_step_asset_topic(step),
+                query=query,
+            )
         bounded_assets = assets[:limit]
         asset_payloads = [_asset_payload(asset) for asset in bounded_assets]
         all_asset_payloads = [_asset_payload(asset) for asset in assets]
@@ -1366,7 +1374,6 @@ class DeviceGuidanceReadToolHandler:
         media_voice = _asset_media_voice_payloads(asset_payloads)
         if media_voice:
             result["media_voice"] = media_voice
-        current_step = reference.get("current_step")
         retained_step = _text(current_step, "id") if isinstance(current_step, dict) else ""
         if retained_step:
             context_key = f"device_guidance:step:{reference['device_model'].lower()}"
@@ -4020,6 +4027,37 @@ def _filter_guidance_assets(*, assets: list[ProductAsset], model: str, topic: st
     if topic:
         return [*query_matches, *(asset for asset in topic_matches if asset not in query_matches)]
     return query_matches
+
+
+def _exact_guidance_step_assets(*, assets: list[ProductAsset], image_urls: tuple[str, ...]) -> list[ProductAsset]:
+    expected_paths = [path for path in (_guidance_asset_relative_path(image_url) for image_url in image_urls) if path]
+    selected: list[ProductAsset] = []
+    for expected_path in expected_paths:
+        match = next(
+            (
+                asset
+                for asset in assets
+                if any(
+                    candidate.endswith(expected_path)
+                    for candidate in (
+                        str(asset.object_key or "").replace("\\", "/"),
+                        str(asset.path or "").replace("\\", "/"),
+                    )
+                )
+            ),
+            None,
+        )
+        if match is not None and match not in selected:
+            selected.append(match)
+    return selected
+
+
+def _guidance_asset_relative_path(value: str) -> str:
+    path = urlsplit(str(value or "")).path.replace("\\", "/")
+    marker = "/skill-assets/device-guidance/"
+    if marker not in path:
+        return ""
+    return path.split(marker, 1)[1].lstrip("/")
 
 
 def _device_guidance_step_asset_topic(step: str) -> str:
