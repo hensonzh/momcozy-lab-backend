@@ -133,6 +133,20 @@ class FakeEvalRuntimeRepository:
     async def list_messages_for_thread(self, *, thread_id: UUID, limit: int = 40):
         return [message for message in self.messages if message.thread_id == thread_id][:limit]
 
+    async def list_client_events_for_thread(
+        self,
+        *,
+        thread_id: UUID,
+        owner_user_id: UUID,
+        limit: int = 10,
+    ):
+        assert owner_user_id == self.run.actor_user_id
+        return [
+            event
+            for event in self.events
+            if event.thread_id == thread_id and event.event_type == "client.event"
+        ][-limit:]
+
     async def get_run(self, *, run_id: UUID):
         return self.run if self.run.id == run_id else None
 
