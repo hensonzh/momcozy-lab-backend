@@ -95,7 +95,7 @@ from ..sdk import (
     sdk_tool_name,
 )
 from .execution import AgentRunExecutionResult
-from .ongoing_work import project_ongoing_work
+from .ongoing_work import project_ongoing_work, project_workflow_context
 from .quick_replies import QuickReplyFinalizer
 from .state_store import AgentRuntimeStateStore
 from .working_context import (
@@ -157,6 +157,10 @@ class _AgentTurnContext:
     working_context_state: AgentWorkingContextState
     workflow_states: list[AgentWorkflowState]
     ongoing_work: list[dict[str, str]]
+    workflow_context: list[dict[str, Any]]
+    trusted_form_submissions: dict[str, dict[str, Any]]
+    checkup_attachment_count: int
+    workflow_reply: dict[str, Any]
     recent_client_events: list[dict[str, str]]
     timings_ms: dict[str, float]
 
@@ -224,6 +228,7 @@ class AgentRuntimeExecutor:
         self._run_text_stream_emitted: dict[UUID, str] = {}
         self._run_authoritative_final_text: dict[UUID, str] = {}
         self._run_current_user_text: dict[UUID, str] = {}
+        self._run_local_dates: dict[UUID, str] = {}
         self._run_previous_assistant_text: dict[UUID, str] = {}
         self._run_trusted_form_submissions: dict[UUID, dict[str, dict[str, Any]]] = {}
         self._run_checkup_attachment_counts: dict[UUID, int] = {}
@@ -252,13 +257,10 @@ class AgentRuntimeExecutor:
         self._run_text_segment_counts[run.id] = 0
         try:
             turn_context = await self._load_turn_context(run=run)
-            self._run_trusted_form_submissions[run.id] = _trusted_form_submissions(turn_context.current_message)
-            self._run_checkup_attachment_counts[run.id] = _runtime_checkup_attachment_count(turn_context.current_message)
+            self._run_trusted_form_submissions[run.id] = turn_context.trusted_form_submissions
+            self._run_checkup_attachment_counts[run.id] = turn_context.checkup_attachment_count
             self._run_current_user_text[run.id] = _message_text(turn_context.current_message)
-            self._run_workflow_replies[run.id] = _workflow_reply_for_turn(
-                current_message=turn_context.current_message,
-                messages=turn_context.messages,
-            )
+            self._run_workflow_replies[run.id] = turn_context.workflow_reply
             self._run_guarded_workflow_types[run.id] = []
             self._run_workflow_reply_recovery_types[run.id] = ""
             self._run_previous_assistant_text[run.id] = _latest_assistant_text_before(
@@ -286,6 +288,7 @@ class AgentRuntimeExecutor:
                 turn_context=turn_context,
                 health_context_lines=health_context_lines,
             )
+            self._run_local_dates[run.id] = _user_context_local_date(prepared_turn.projection.user_context)
             urgent_signal_ids = await self._pregnancy_plan_pre_model_urgent_signal_ids(
                 run=run,
                 current_user_text=self._run_current_user_text[run.id],
@@ -346,6 +349,7 @@ class AgentRuntimeExecutor:
             self._run_text_stream_emitted.pop(run.id, None)
             self._run_authoritative_final_text.pop(run.id, None)
             self._run_current_user_text.pop(run.id, None)
+            self._run_local_dates.pop(run.id, None)
             self._run_previous_assistant_text.pop(run.id, None)
             self._run_trusted_form_submissions.pop(run.id, None)
             self._run_checkup_attachment_counts.pop(run.id, None)
@@ -383,10 +387,19 @@ class AgentRuntimeExecutor:
 
         ongoing_work_started_at = perf_counter()
         workflow_states = await self._active_workflow_states(run=run)
+        trusted_form_submissions = _trusted_form_submissions(current_message)
+        checkup_attachment_count = _runtime_checkup_attachment_count(current_message)
+        workflow_reply = _workflow_reply_for_turn(current_message=current_message, messages=messages)
         resident_skill_ids = {
             skill.service_skill_id for skill in working_context_state.skills if working_context_state.turn_index <= skill.expires_after_turn
         }
         ongoing_work = project_ongoing_work(workflow_states, resident_skill_ids=resident_skill_ids)
+        workflow_context = project_workflow_context(
+            workflow_states,
+            trusted_form_submissions=trusted_form_submissions,
+            checkup_attachment_count=checkup_attachment_count,
+            workflow_reply=workflow_reply,
+        )
         client_events = await self.repository.list_client_events_for_thread(
             thread_id=run.thread_id,
             owner_user_id=run.actor_user_id,
@@ -402,6 +415,10 @@ class AgentRuntimeExecutor:
             working_context_state=working_context_state,
             workflow_states=workflow_states,
             ongoing_work=ongoing_work,
+            workflow_context=workflow_context,
+            trusted_form_submissions=trusted_form_submissions,
+            checkup_attachment_count=checkup_attachment_count,
+            workflow_reply=workflow_reply,
             recent_client_events=_recent_ibclc_client_event_context(client_events),
             timings_ms=timings_ms,
         )
@@ -439,6 +456,7 @@ class AgentRuntimeExecutor:
             ),
             user_context=_user_context(current_message=turn_context.current_message, now=self.clock()),
             memory_projection=turn_context.memory_projection,
+            workflow_context=turn_context.workflow_context,
             working_context=working_context,
         )
         model_input = self.input_builder.build(
@@ -1004,6 +1022,9 @@ class AgentRuntimeExecutor:
                     if exc.code in {"missing_workflow_reply_context", "stale_workflow_step"}:
                         self._run_workflow_reply_recovery_types[run.id] = guarded_type
                     raise
+        if contract_name == "pregnancy_diary.manage":
+            local_date = self._run_local_dates.get(run.id, "")
+            return {"runtime_local_date": local_date} if local_date else {}
         if contract_name == "records.milk_analysis.intake":
             return {"trusted_current_user_text": self._run_current_user_text.get(run.id, "")}
         expected_form_id = FORM_TOOL_IDS.get(contract_name)
@@ -1889,6 +1910,16 @@ def _user_context(*, current_message: AgentMessage, now: datetime) -> dict[str, 
     if location:
         user_context["location"] = location
     return user_context
+
+
+def _user_context_local_date(user_context: dict[str, Any]) -> str:
+    raw = _text(user_context, "message_sent_at") or _text(user_context, "current_time")
+    if not raw:
+        return ""
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00")).date().isoformat()
+    except ValueError:
+        return raw[:10] if len(raw) >= 10 and raw[4:5] == "-" and raw[7:8] == "-" else ""
 
 
 def _location_context(value: Any) -> dict[str, Any]:

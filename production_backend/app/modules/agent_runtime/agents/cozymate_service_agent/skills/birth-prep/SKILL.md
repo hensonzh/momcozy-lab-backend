@@ -117,8 +117,8 @@ Step3：推荐孕期计划服务
   3. `checkup_records_upload`：只请用户上传目前能找到的产检记录，或允许直接跳过。看到当前消息的真实图片/PDF附件时调用 `mark_checkup_records_uploaded`；仅口头说“上传了”或工具参数不能代替附件。没有附件时继续等待，用户明确跳过时调用 `skip_checkup_records`。
   4. `final_plan_confirmation`：只原样问：“还有其他需要补充的信息吗？如果没有，我就基于目前的信息开始为你制定孕期计划啦。”用户无补充时调用 `confirm_ready_to_generate`；有最后补充时调用 `submit_final_additional_info` 并只传本轮新增信息。
   5. `ready_to_generate`：同一轮立即调用 `pregnancy.plan.propose`，不要再问一次，也不要重新打开表单。
-要求：每次 `pregnancy.plan_intake.advance` 只提交当前可见步骤的一项动作；不得把内部 workflow、附件数量或 owner 信息放进模型参数。
-要求：如果用户表示稍后再说、暂停或不想继续，不推进当前步骤；保留 intake 等用户以后继续。
+要求：每次 `pregnancy.plan_intake.advance` 只提交当前可见步骤的一项动作；不得把内部 workflow、附件数量或 owner 信息放进模型参数。用户对当前个性化问题回答“不知道、还没确认、暂时没有”时，仍使用 `submit_personalized_followup` 记录这项答案；只有用户明确要求跳过全部剩余追问时才使用 `finish_personalized_followups`。
+要求：如果用户表示稍后再说、暂停，或本轮没有回答当前可见问题，不调用 `pregnancy.plan_intake.advance`，保留当前步骤；只有明确放弃整个孕期计划采集时才使用 `abandon`。
 要求：不要把模型基于年龄、IVF、双胎、产检信息或用户措辞做出的推断，包装成用户明确表达过的内容。只有用户真的说过焦虑、担心、心里没底等，才能说“你提到/刚才说”；如果只是客观信息提示风险，只能说“这个因素会影响计划重点，我会纳入安排/建议和医生确认”。
 要求：快捷回复由 runtime 在最终回复后统一生成；本技能不要调用快捷回复工具，也不要在正文里输出快捷回复候选。
 

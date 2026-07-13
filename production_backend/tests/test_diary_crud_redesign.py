@@ -97,7 +97,6 @@ class FakeDiaryRepository:
         owner_user_id: UUID,
         entry_date: date,
         values: dict,
-        content_mode: str = "replace",
     ):
         if self.entry is None or self.entry.owner_user_id != owner_user_id or self.entry.entry_date != entry_date:
             return None

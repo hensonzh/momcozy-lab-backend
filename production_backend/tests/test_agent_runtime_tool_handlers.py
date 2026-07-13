@@ -38,10 +38,7 @@ from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.
     PlanTaskUpdateProposeToolHandler,
     PlansCalendarReadToolHandler,
     PlansCurrentReadToolHandler,
-    PregnancyDiaryEntriesReadToolHandler,
-    PregnancyDiaryEntryCreateToolHandler,
-    PregnancyDiaryEntryDeleteToolHandler,
-    PregnancyDiaryEntryUpdateToolHandler,
+    PregnancyDiaryManageToolHandler,
     ProfileReadToolHandler,
     ProfileUpdateToolHandler,
     PumpingRecordProposeToolHandler,
@@ -783,9 +780,9 @@ def test_plans_calendar_read_tool_handler_filters_by_date_and_status() -> None:
 def test_pregnancy_diary_read_tool_handler_returns_owner_scoped_entry() -> None:
     actor = _user()
     diary_service = FakeDiaryService(owner_user_id=actor.user_id)
-    handler = PregnancyDiaryEntriesReadToolHandler(diary_service=diary_service)
+    handler = PregnancyDiaryManageToolHandler(diary_service=diary_service)
 
-    result = asyncio.run(handler(_context(actor=actor, args={"entry_date": "2026-07-02"})))
+    result = asyncio.run(handler(_context(actor=actor, args={"action": "read", "entry_date": "2026-07-02"})))
 
     assert diary_service.owner_user_id == actor.user_id
     assert result["status"] == "entry_read"
@@ -2663,63 +2660,79 @@ def test_milk_reminder_propose_tool_handler_creates_confirmation_action() -> Non
     assert runtime_service.calls[0]["apply_payload"]["metadata"] == {"timezone": "Asia/Shanghai"}
 
 
-def test_pregnancy_diary_create_tool_writes_entry_synchronously() -> None:
+def test_pregnancy_diary_manage_write_creates_content_only() -> None:
     actor = _user()
     diary_service = FakeDiaryService(owner_user_id=actor.user_id)
     context = _context(
         actor=actor,
         args={
+            "action": "write",
             "entry_date": "2026-07-04",
-            "gestational_week": "32w",
-            "mood": "calm",
-            "energy_level": "medium",
-            "symptom_tags": ["backache"],
             "content": "Today I felt steady.",
         },
     )
 
-    result = asyncio.run(PregnancyDiaryEntryCreateToolHandler(diary_service=diary_service)(context))
+    result = asyncio.run(PregnancyDiaryManageToolHandler(diary_service=diary_service)(context))
 
     assert result["status"] == "entry_created"
     assert result["entry"]["entry_date"] == "2026-07-04"
     assert diary_service.create_kwargs["owner_user_id"] == actor.user_id
-    assert diary_service.create_kwargs["values"]["content"] == "Today I felt steady."
+    assert diary_service.create_kwargs["values"] == {"content": "Today I felt steady."}
 
 
-def test_pregnancy_diary_create_tool_returns_existing_entry_on_date_conflict() -> None:
+def test_pregnancy_diary_manage_write_bounds_long_model_call_id_for_audit() -> None:
+    actor = _user()
+    diary_service = FakeDiaryService(owner_user_id=actor.user_id)
+    run_id = uuid4()
+    context = ToolHandlerContext(
+        actor=actor,
+        run_id=run_id,
+        tool_name="pregnancy_diary.manage",
+        call_id="fc_" + "x" * 120,
+        args={
+            "action": "write",
+            "entry_date": "2026-07-04",
+            "content": "Today I felt steady.",
+        },
+    )
+
+    asyncio.run(PregnancyDiaryManageToolHandler(diary_service=diary_service)(context))
+
+    request_id = diary_service.create_kwargs["request_id"]
+    assert request_id.startswith(f"agent-tool:{run_id}:")
+    assert len(request_id) <= 80
+
+
+def test_pregnancy_diary_manage_write_returns_full_existing_entry_on_date_conflict() -> None:
     actor = _user()
     diary_service = ExistingDiaryService(owner_user_id=actor.user_id)
 
     result = asyncio.run(
-        PregnancyDiaryEntryCreateToolHandler(diary_service=diary_service)(
-            _context(actor=actor, args={"entry_date": "2026-07-02", "content": "New content"})
+        PregnancyDiaryManageToolHandler(diary_service=diary_service)(
+            _context(actor=actor, args={"action": "write", "entry_date": "2026-07-02", "content": "New content"})
         )
     )
 
     assert result["status"] == "entry_already_exists"
     assert result["entry"]["id"]
-    assert "content" not in result["entry"]
+    assert result["entry"]["content"] == "x" * 600
+    assert result["side_effect_performed"] is False
+    assert "action=update" in result.retained_information[0].guidance
+    assert "content" not in result.retained_information[0].information["entry"]
 
 
-@pytest.mark.parametrize(
-    "content_mode",
-    [
-        "append",
-        "replace",
-    ],
-)
-def test_pregnancy_diary_update_tool_delegates_content_mode_atomically(content_mode) -> None:
+def test_pregnancy_diary_manage_update_replaces_with_complete_content() -> None:
     actor = _user()
     diary_service = FakeDiaryService(owner_user_id=actor.user_id)
 
     result = asyncio.run(
-        PregnancyDiaryEntryUpdateToolHandler(diary_service=diary_service)(
+        PregnancyDiaryManageToolHandler(diary_service=diary_service)(
             _context(
                 actor=actor,
                 args={
+                    "action": "update",
                     "entry_date": "2026-07-02",
-                    "content": "One more thing.",
-                    "content_mode": content_mode,
+                    "content": "Earlier facts and the new fact rewritten as one complete entry.",
                 },
             )
         )
@@ -2727,8 +2740,10 @@ def test_pregnancy_diary_update_tool_delegates_content_mode_atomically(content_m
 
     assert result["status"] == "entry_updated"
     assert diary_service.update_kwargs["owner_user_id"] == actor.user_id
-    assert diary_service.update_kwargs["values"]["content"] == "One more thing."
-    assert diary_service.update_kwargs["content_mode"] == content_mode
+    assert diary_service.update_kwargs["values"] == {
+        "content": "Earlier facts and the new fact rewritten as one complete entry."
+    }
+    assert "content_mode" not in diary_service.update_kwargs
 
 
 def test_support_ticket_propose_tool_handler_requires_summary() -> None:
@@ -2799,23 +2814,40 @@ def test_milk_reminder_propose_tool_handler_requires_title() -> None:
     assert exc_info.value.code == "validation_failed"
 
 
-def test_pregnancy_diary_create_tool_requires_values() -> None:
+def test_pregnancy_diary_manage_write_requires_content() -> None:
     with pytest.raises(ApiError) as exc_info:
         asyncio.run(
-            PregnancyDiaryEntryCreateToolHandler(diary_service=FakeDiaryService(owner_user_id=_user().user_id))(
-                _context(args={"entry_date": "2026-07-04"})
+            PregnancyDiaryManageToolHandler(diary_service=FakeDiaryService(owner_user_id=_user().user_id))(
+                _context(args={"action": "write", "entry_date": "2026-07-04"})
             )
         )
 
     assert exc_info.value.code == "validation_failed"
 
 
-def test_pregnancy_diary_delete_tool_deletes_entry_synchronously() -> None:
+def test_pregnancy_diary_manage_delete_requires_confirmation() -> None:
     actor = _user()
     diary_service = FakeDiaryService(owner_user_id=actor.user_id)
 
     result = asyncio.run(
-        PregnancyDiaryEntryDeleteToolHandler(diary_service=diary_service)(_context(actor=actor, args={"entry_date": "2026-07-04"}))
+        PregnancyDiaryManageToolHandler(diary_service=diary_service)(
+            _context(actor=actor, args={"action": "delete", "entry_date": "2026-07-04", "confirmed": False})
+        )
+    )
+
+    assert result["status"] == "needs_delete_confirmation"
+    assert result["side_effect_performed"] is False
+    assert diary_service.delete_kwargs == {}
+
+
+def test_pregnancy_diary_manage_delete_deletes_confirmed_entry_synchronously() -> None:
+    actor = _user()
+    diary_service = FakeDiaryService(owner_user_id=actor.user_id)
+
+    result = asyncio.run(
+        PregnancyDiaryManageToolHandler(diary_service=diary_service)(
+            _context(actor=actor, args={"action": "delete", "entry_date": "2026-07-04", "confirmed": True})
+        )
     )
 
     assert result["status"] == "entry_deleted"
@@ -2874,10 +2906,7 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
         "records.pumping_record_delete.propose",
         "plans.calendar.read",
         "plans.current.read",
-        "pregnancy_diary.entries.read",
-        "pregnancy_diary.entry.create",
-        "pregnancy_diary.entry.update",
-        "pregnancy_diary.entry.delete",
+        "pregnancy_diary.manage",
         "devices.guidance.read",
         "devices.pump_status.read",
         "devices.unboxing.advance",

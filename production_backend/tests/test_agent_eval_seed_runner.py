@@ -44,10 +44,12 @@ def test_agent_eval_seed_assertion_engine_reports_profile_write_for_memory_reque
     assert result.failures[0].observed == "profile_update"
 
 
-def test_agent_eval_seed_assertion_engine_accepts_synchronous_diary_create() -> None:
+def test_agent_eval_seed_assertion_engine_accepts_synchronous_diary_write() -> None:
     case = _case("pregnancy_diary_entry")
     trace = AgentEvalTrace(
-        tool_calls=[{"tool_name": "pregnancy_diary.entry.create", "status": "completed"}],
+        tool_calls=[
+            {"tool_name": "pregnancy_diary.manage", "status": "completed", "safe_args": {"action": "write"}}
+        ],
         safety_decision="allow",
         final_text="Saved.",
     )
@@ -58,25 +60,25 @@ def test_agent_eval_seed_assertion_engine_accepts_synchronous_diary_create() -> 
     assert result.failures == []
 
 
-def test_agent_eval_seed_assertion_engine_enforces_diary_conflict_update_order_and_append_mode() -> None:
+def test_agent_eval_seed_assertion_engine_enforces_diary_write_then_complete_update_order() -> None:
     case = {
         **_case("pregnancy_diary_entry"),
         "expected_tool_calls": [
-            {"contract": "pregnancy_diary.entry.create"},
+            {"contract": "pregnancy_diary.manage", "args_subset": {"action": "write"}},
             {
-                "contract": "pregnancy_diary.entry.update",
-                "args_subset": {"content_mode": "append"},
+                "contract": "pregnancy_diary.manage",
+                "args_subset": {"action": "update"},
             },
         ],
     }
     trace = AgentEvalTrace(
         tool_calls=[
             {
-                "tool_name": "pregnancy_diary.entry.update",
+                "tool_name": "pregnancy_diary.manage",
                 "status": "completed",
-                "safe_args": {"content_mode": "replace"},
+                "safe_args": {"action": "update"},
             },
-            {"tool_name": "pregnancy_diary.entry.create", "status": "completed"},
+            {"tool_name": "pregnancy_diary.manage", "status": "completed", "safe_args": {"action": "write"}},
         ],
         safety_decision="allow",
         final_text="Saved.",
@@ -100,7 +102,9 @@ def test_agent_eval_seed_assertion_engine_requires_health_flow_to_continue_after
         },
     }
     trace = AgentEvalTrace(
-        tool_calls=[{"tool_name": "pregnancy_diary.entry.create", "status": "completed"}],
+        tool_calls=[
+            {"tool_name": "pregnancy_diary.manage", "status": "completed", "safe_args": {"action": "write"}}
+        ],
         safety_decision="allow",
         final_text="",
     )
@@ -118,7 +122,9 @@ def test_agent_eval_seed_assertion_engine_requires_health_flow_to_continue_after
 def test_agent_eval_seed_assertion_engine_rejects_diary_write_for_negative_cases(suite: str) -> None:
     case = _case(suite)
     trace = AgentEvalTrace(
-        tool_calls=[{"tool_name": "pregnancy_diary.entry.create", "status": "completed"}],
+        tool_calls=[
+            {"tool_name": "pregnancy_diary.manage", "status": "completed", "safe_args": {"action": "write"}}
+        ],
         safety_decision="allow",
         final_text="Saved.",
     )
@@ -128,7 +134,7 @@ def test_agent_eval_seed_assertion_engine_rejects_diary_write_for_negative_cases
     assert result.passed is False
     assert result.failures[0].category == "forbidden_tool"
     assert result.failures[0].assertion == "tool.forbidden"
-    assert result.failures[0].observed == "pregnancy_diary.entry.create"
+    assert result.failures[0].observed == "pregnancy_diary.manage"
 
 
 def test_agent_eval_seed_assertion_engine_reports_safety_mismatch() -> None:

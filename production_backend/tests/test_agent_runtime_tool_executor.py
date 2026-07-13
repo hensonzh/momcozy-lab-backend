@@ -10,10 +10,7 @@ from production_backend.app.core.metrics import RequestMetrics
 from production_backend.app.modules.agent_runtime.models import AgentEvent, AgentRun, AgentToolCall
 from production_backend.app.modules.agent_runtime.event_stream.sink import AgentEventSink
 from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.tools import (
-    PregnancyDiaryEntriesReadToolHandler,
-    PregnancyDiaryEntryCreateToolHandler,
-    PregnancyDiaryEntryDeleteToolHandler,
-    PregnancyDiaryEntryUpdateToolHandler,
+    PregnancyDiaryManageToolHandler,
     RetainedToolInformation,
     ToolExecutor,
     ToolHandlerResult,
@@ -286,24 +283,21 @@ def test_tool_executor_emits_deferred_artifact_events_after_tool_completed() -> 
 
 
 @pytest.mark.parametrize(
-    ("tool_name", "handler_type", "args"),
+    ("args", "expected_operation"),
     [
         (
-            "pregnancy_diary.entry.create",
-            PregnancyDiaryEntryCreateToolHandler,
-            {"entry_date": "2026-07-04", "content": PRIVATE_DIARY_CONTENT},
+            {"action": "write", "entry_date": "2026-07-04", "content": PRIVATE_DIARY_CONTENT},
+            "created",
         ),
         (
-            "pregnancy_diary.entry.update",
-            PregnancyDiaryEntryUpdateToolHandler,
-            {"entry_date": "2026-07-04", "content": PRIVATE_DIARY_CONTENT, "content_mode": "replace"},
+            {"action": "update", "entry_date": "2026-07-04", "content": PRIVATE_DIARY_CONTENT},
+            "updated",
         ),
     ],
 )
 def test_pregnancy_diary_committed_write_emits_durable_changed_event_after_tool_completion(
-    tool_name: str,
-    handler_type,
     args: dict,
+    expected_operation: str,
 ) -> None:
     actor = _user()
     repository = FakeToolRepository()
@@ -311,15 +305,15 @@ def test_pregnancy_diary_committed_write_emits_durable_changed_event_after_tool_
     executor = ToolExecutor(
         registry=default_tool_registry(),
         repository=repository,
-        handlers={tool_name: handler_type(diary_service=diary_service)},
+        handlers={"pregnancy_diary.manage": PregnancyDiaryManageToolHandler(diary_service=diary_service)},
     )
 
     asyncio.run(
         executor.execute(
             actor=actor,
             run_id=uuid4(),
-            tool_name=tool_name,
-            call_id=f"call-{tool_name.rsplit('.', 1)[-1]}",
+            tool_name="pregnancy_diary.manage",
+            call_id=f"call-{args['action']}",
             args=args,
         )
     )
@@ -331,7 +325,7 @@ def test_pregnancy_diary_committed_write_emits_durable_changed_event_after_tool_
     ]
     changed = repository.events[-1]
     assert changed.payload["tool_call_id"] == str(repository.tool_call.id)
-    assert changed.payload["operation"] == ("created" if tool_name.endswith("create") else "updated")
+    assert changed.payload["operation"] == expected_operation
     assert changed.payload["entry_id"]
     assert changed.payload["entry_date"] == "2026-07-04"
     assert changed.payload["updated_at"]
@@ -353,7 +347,7 @@ def test_pregnancy_diary_write_and_changed_event_share_one_commit_boundary() -> 
         repository=repository,
         event_sink=AgentEventSink(repository=repository, after_append=commit),
         handlers={
-            "pregnancy_diary.entry.create": PregnancyDiaryEntryCreateToolHandler(
+            "pregnancy_diary.manage": PregnancyDiaryManageToolHandler(
                 diary_service=FakeDiaryMutationService(owner_user_id=actor.user_id)
             )
         },
@@ -363,9 +357,9 @@ def test_pregnancy_diary_write_and_changed_event_share_one_commit_boundary() -> 
         executor.execute(
             actor=actor,
             run_id=uuid4(),
-            tool_name="pregnancy_diary.entry.create",
+            tool_name="pregnancy_diary.manage",
             call_id="call-atomic-create",
-            args={"entry_date": "2026-07-04", "content": PRIVATE_DIARY_CONTENT},
+            args={"action": "write", "entry_date": "2026-07-04", "content": PRIVATE_DIARY_CONTENT},
         )
     )
 
@@ -379,37 +373,27 @@ def test_pregnancy_diary_write_and_changed_event_share_one_commit_boundary() -> 
 
 
 @pytest.mark.parametrize(
-    ("tool_name", "handler_type", "args", "service_mode"),
+    ("args", "service_mode"),
     [
         (
-            "pregnancy_diary.entry.create",
-            PregnancyDiaryEntryCreateToolHandler,
-            {"entry_date": "2026-07-04", "content": PRIVATE_DIARY_CONTENT},
+            {"action": "write", "entry_date": "2026-07-04", "content": PRIVATE_DIARY_CONTENT},
             "success",
         ),
         (
-            "pregnancy_diary.entry.create",
-            PregnancyDiaryEntryCreateToolHandler,
-            {"entry_date": "2026-07-04", "content": "new diary narrative"},
+            {"action": "write", "entry_date": "2026-07-04", "content": "new diary narrative"},
             "create_conflict",
         ),
         (
-            "pregnancy_diary.entry.update",
-            PregnancyDiaryEntryUpdateToolHandler,
-            {"entry_date": "2026-07-04", "content": PRIVATE_DIARY_CONTENT, "content_mode": "replace"},
+            {"action": "update", "entry_date": "2026-07-04", "content": PRIVATE_DIARY_CONTENT},
             "success",
         ),
         (
-            "pregnancy_diary.entries.read",
-            PregnancyDiaryEntriesReadToolHandler,
-            {"entry_date": "2026-07-04"},
+            {"action": "read", "entry_date": "2026-07-04"},
             "success",
         ),
     ],
 )
 def test_pregnancy_diary_tool_completed_safe_output_omits_diary_content(
-    tool_name: str,
-    handler_type,
     args: dict,
     service_mode: str,
 ) -> None:
@@ -418,15 +402,19 @@ def test_pregnancy_diary_tool_completed_safe_output_omits_diary_content(
     executor = ToolExecutor(
         registry=default_tool_registry(),
         repository=repository,
-        handlers={tool_name: handler_type(diary_service=FakeDiaryMutationService(owner_user_id=actor.user_id, mode=service_mode))},
+        handlers={
+            "pregnancy_diary.manage": PregnancyDiaryManageToolHandler(
+                diary_service=FakeDiaryMutationService(owner_user_id=actor.user_id, mode=service_mode)
+            )
+        },
     )
 
     asyncio.run(
         executor.execute(
             actor=actor,
             run_id=uuid4(),
-            tool_name=tool_name,
-            call_id=f"call-safe-{tool_name.rsplit('.', 1)[-1]}",
+            tool_name="pregnancy_diary.manage",
+            call_id=f"call-safe-{args['action']}",
             args=args,
         )
     )
@@ -444,7 +432,7 @@ def test_pregnancy_diary_write_safe_args_omit_health_narrative() -> None:
         registry=default_tool_registry(),
         repository=repository,
         handlers={
-            "pregnancy_diary.entry.create": PregnancyDiaryEntryCreateToolHandler(
+            "pregnancy_diary.manage": PregnancyDiaryManageToolHandler(
                 diary_service=FakeDiaryMutationService(owner_user_id=actor.user_id)
             )
         },
@@ -454,20 +442,19 @@ def test_pregnancy_diary_write_safe_args_omit_health_narrative() -> None:
         executor.execute(
             actor=actor,
             run_id=uuid4(),
-            tool_name="pregnancy_diary.entry.create",
+            tool_name="pregnancy_diary.manage",
             call_id="call-private-safe-args",
             args={
+                "action": "write",
                 "entry_date": "2026-07-04",
                 "content": PRIVATE_DIARY_CONTENT,
-                "mood": "anxious",
-                "symptom_tags": ["private symptom"],
             },
         )
     )
 
     safe_args_json = json.dumps(repository.tool_call.safe_args, ensure_ascii=False)
     assert PRIVATE_DIARY_CONTENT not in safe_args_json
-    assert "private symptom" not in safe_args_json
+    assert repository.tool_call.safe_args["action"] == "write"
     assert repository.tool_call.safe_args["entry_date"] == "2026-07-04"
 
 
@@ -478,7 +465,7 @@ def test_pregnancy_diary_read_keeps_private_content_in_ephemeral_tool_output() -
         registry=default_tool_registry(),
         repository=repository,
         handlers={
-            "pregnancy_diary.entries.read": PregnancyDiaryEntriesReadToolHandler(
+            "pregnancy_diary.manage": PregnancyDiaryManageToolHandler(
                 diary_service=FakeDiaryMutationService(owner_user_id=actor.user_id)
             )
         },
@@ -488,9 +475,9 @@ def test_pregnancy_diary_read_keeps_private_content_in_ephemeral_tool_output() -
         executor.execute(
             actor=actor,
             run_id=uuid4(),
-            tool_name="pregnancy_diary.entries.read",
+            tool_name="pregnancy_diary.manage",
             call_id="call-private-diary-read",
-            args={"entry_date": "2026-07-04"},
+            args={"action": "read", "entry_date": "2026-07-04"},
         )
     )
 
@@ -520,16 +507,16 @@ def test_pregnancy_diary_ephemeral_model_output_is_bounded_and_omits_attachment_
     executor = ToolExecutor(
         registry=default_tool_registry(),
         repository=repository,
-        handlers={"pregnancy_diary.entries.read": PregnancyDiaryEntriesReadToolHandler(diary_service=diary_service)},
+        handlers={"pregnancy_diary.manage": PregnancyDiaryManageToolHandler(diary_service=diary_service)},
     )
 
     result = asyncio.run(
         executor.execute(
             actor=actor,
             run_id=uuid4(),
-            tool_name="pregnancy_diary.entries.read",
+            tool_name="pregnancy_diary.manage",
             call_id="call-bounded-diary-read",
-            args={"entry_date": "2026-07-04"},
+            args={"action": "read", "entry_date": "2026-07-04"},
         )
     )
 
@@ -545,34 +532,26 @@ def test_pregnancy_diary_ephemeral_model_output_is_bounded_and_omits_attachment_
 
 
 @pytest.mark.parametrize(
-    ("tool_name", "handler_type", "args", "service_mode", "expected_status"),
+    ("args", "service_mode", "expected_status"),
     [
         (
-            "pregnancy_diary.entry.create",
-            PregnancyDiaryEntryCreateToolHandler,
-            {"entry_date": "2026-07-04", "content": PRIVATE_DIARY_CONTENT},
+            {"action": "write", "entry_date": "2026-07-04", "content": PRIVATE_DIARY_CONTENT},
             "create_conflict",
             "entry_already_exists",
         ),
         (
-            "pregnancy_diary.entry.update",
-            PregnancyDiaryEntryUpdateToolHandler,
-            {"entry_date": "2026-07-04", "content": PRIVATE_DIARY_CONTENT, "content_mode": "replace"},
+            {"action": "update", "entry_date": "2026-07-04", "content": PRIVATE_DIARY_CONTENT},
             "update_not_found",
             "entry_not_found",
         ),
         (
-            "pregnancy_diary.entry.update",
-            PregnancyDiaryEntryUpdateToolHandler,
-            {"entry_date": "2026-07-04", "content": PRIVATE_DIARY_CONTENT, "content_mode": "append"},
+            {"action": "update", "entry_date": "2026-07-04", "content": PRIVATE_DIARY_CONTENT},
             "update_unchanged",
             "entry_unchanged",
         ),
     ],
 )
 def test_pregnancy_diary_no_op_write_does_not_emit_changed_event(
-    tool_name: str,
-    handler_type,
     args: dict,
     service_mode: str,
     expected_status: str,
@@ -582,15 +561,19 @@ def test_pregnancy_diary_no_op_write_does_not_emit_changed_event(
     executor = ToolExecutor(
         registry=default_tool_registry(),
         repository=repository,
-        handlers={tool_name: handler_type(diary_service=FakeDiaryMutationService(owner_user_id=actor.user_id, mode=service_mode))},
+        handlers={
+            "pregnancy_diary.manage": PregnancyDiaryManageToolHandler(
+                diary_service=FakeDiaryMutationService(owner_user_id=actor.user_id, mode=service_mode)
+            )
+        },
     )
 
     result = asyncio.run(
         executor.execute(
             actor=actor,
             run_id=uuid4(),
-            tool_name=tool_name,
-            call_id=f"call-no-op-{tool_name.rsplit('.', 1)[-1]}",
+            tool_name="pregnancy_diary.manage",
+            call_id=f"call-no-op-{args['action']}",
             args=args,
         )
     )
@@ -606,7 +589,7 @@ def test_pregnancy_diary_failed_write_does_not_emit_changed_event() -> None:
         registry=default_tool_registry(),
         repository=repository,
         handlers={
-            "pregnancy_diary.entry.create": PregnancyDiaryEntryCreateToolHandler(
+            "pregnancy_diary.manage": PregnancyDiaryManageToolHandler(
                 diary_service=FakeDiaryMutationService(owner_user_id=actor.user_id, mode="create_failed")
             )
         },
@@ -617,9 +600,9 @@ def test_pregnancy_diary_failed_write_does_not_emit_changed_event() -> None:
             executor.execute(
                 actor=actor,
                 run_id=uuid4(),
-                tool_name="pregnancy_diary.entry.create",
+                tool_name="pregnancy_diary.manage",
                 call_id="call-create-failed",
-                args={"entry_date": "2026-07-04", "content": PRIVATE_DIARY_CONTENT},
+                args={"action": "write", "entry_date": "2026-07-04", "content": PRIVATE_DIARY_CONTENT},
             )
         )
 
@@ -637,7 +620,7 @@ def test_tool_executor_rolls_back_handler_mutation_before_recording_failure() ->
     executor = ToolExecutor(
         registry=default_tool_registry(),
         repository=repository,
-        handlers={"pregnancy_diary.entry.create": failing_handler},
+        handlers={"pregnancy_diary.manage": failing_handler},
     )
 
     with pytest.raises(ApiError) as exc_info:
@@ -645,9 +628,9 @@ def test_tool_executor_rolls_back_handler_mutation_before_recording_failure() ->
             executor.execute(
                 actor=_user(),
                 run_id=uuid4(),
-                tool_name="pregnancy_diary.entry.create",
+                tool_name="pregnancy_diary.manage",
                 call_id="call-handler-rollback",
-                args={"entry_date": "2026-07-04", "content": PRIVATE_DIARY_CONTENT},
+                args={"action": "write", "entry_date": "2026-07-04", "content": PRIVATE_DIARY_CONTENT},
             )
         )
 
@@ -678,7 +661,7 @@ def test_tool_executor_rolls_back_business_write_when_completion_event_batch_fai
         registry=default_tool_registry(),
         repository=repository,
         event_sink=FailingCompletionBatchEventSink(repository),
-        handlers={"pregnancy_diary.entry.create": successful_handler},
+        handlers={"pregnancy_diary.manage": successful_handler},
     )
 
     with pytest.raises(ApiError) as exc_info:
@@ -686,9 +669,9 @@ def test_tool_executor_rolls_back_business_write_when_completion_event_batch_fai
             executor.execute(
                 actor=_user(),
                 run_id=uuid4(),
-                tool_name="pregnancy_diary.entry.create",
+                tool_name="pregnancy_diary.manage",
                 call_id="call-completion-rollback",
-                args={"entry_date": "2026-07-04", "content": PRIVATE_DIARY_CONTENT},
+                args={"action": "write", "entry_date": "2026-07-04", "content": PRIVATE_DIARY_CONTENT},
             )
         )
 
@@ -712,7 +695,7 @@ def test_tool_executor_terminalizes_started_call_after_fatal_commit_failure() ->
         registry=default_tool_registry(),
         repository=repository,
         event_sink=FailingFinalizeEventSink(repository),
-        handlers={"pregnancy_diary.entry.create": successful_handler},
+        handlers={"pregnancy_diary.manage": successful_handler},
     )
 
     with pytest.raises(ApiError) as exc_info:
@@ -720,9 +703,9 @@ def test_tool_executor_terminalizes_started_call_after_fatal_commit_failure() ->
             executor.execute(
                 actor=_user(),
                 run_id=uuid4(),
-                tool_name="pregnancy_diary.entry.create",
+                tool_name="pregnancy_diary.manage",
                 call_id="call-fatal-commit",
-                args={"entry_date": "2026-07-04", "content": PRIVATE_DIARY_CONTENT},
+                args={"action": "write", "entry_date": "2026-07-04", "content": PRIVATE_DIARY_CONTENT},
             )
         )
 
@@ -744,7 +727,7 @@ def test_tool_executor_cancellation_closes_savepoint_and_terminalizes_tool_call(
     executor = ToolExecutor(
         registry=default_tool_registry(),
         repository=repository,
-        handlers={"pregnancy_diary.entry.create": cancelled_handler},
+        handlers={"pregnancy_diary.manage": cancelled_handler},
     )
 
     with pytest.raises(asyncio.CancelledError):
@@ -752,9 +735,9 @@ def test_tool_executor_cancellation_closes_savepoint_and_terminalizes_tool_call(
             executor.execute(
                 actor=_user(),
                 run_id=uuid4(),
-                tool_name="pregnancy_diary.entry.create",
+                tool_name="pregnancy_diary.manage",
                 call_id="call-cancelled",
-                args={"entry_date": "2026-07-04", "content": PRIVATE_DIARY_CONTENT},
+                args={"action": "write", "entry_date": "2026-07-04", "content": PRIVATE_DIARY_CONTENT},
             )
         )
 
@@ -766,7 +749,7 @@ def test_tool_executor_cancellation_closes_savepoint_and_terminalizes_tool_call(
     assert [event.event_type for event in repository.events] == ["tool.started", "tool.failed"]
 
 
-def test_pregnancy_diary_delete_tool_applies_directly_and_emits_changed_event() -> None:
+def test_pregnancy_diary_manage_delete_applies_after_confirmation_and_emits_changed_event() -> None:
     actor = _user()
     repository = FakeToolRepository()
     diary_service = FakeDiaryMutationService(owner_user_id=actor.user_id)
@@ -774,7 +757,7 @@ def test_pregnancy_diary_delete_tool_applies_directly_and_emits_changed_event() 
         registry=default_tool_registry(),
         repository=repository,
         handlers={
-            "pregnancy_diary.entry.delete": PregnancyDiaryEntryDeleteToolHandler(diary_service=diary_service)
+            "pregnancy_diary.manage": PregnancyDiaryManageToolHandler(diary_service=diary_service)
         },
     )
 
@@ -782,9 +765,9 @@ def test_pregnancy_diary_delete_tool_applies_directly_and_emits_changed_event() 
         executor.execute(
             actor=actor,
             run_id=uuid4(),
-            tool_name="pregnancy_diary.entry.delete",
+            tool_name="pregnancy_diary.manage",
             call_id="call-delete",
-            args={"entry_date": "2026-07-04"},
+            args={"action": "delete", "entry_date": "2026-07-04", "confirmed": True},
         )
     )
 
@@ -797,7 +780,7 @@ def test_pregnancy_diary_delete_tool_applies_directly_and_emits_changed_event() 
     ]
 
 
-def test_pregnancy_diary_delete_tool_reports_missing_entry_without_changed_event() -> None:
+def test_pregnancy_diary_manage_delete_reports_missing_entry_without_changed_event() -> None:
     actor = _user()
     repository = FakeToolRepository()
     diary_service = FakeDiaryMutationService(owner_user_id=actor.user_id, mode="delete_not_found")
@@ -806,13 +789,13 @@ def test_pregnancy_diary_delete_tool_reports_missing_entry_without_changed_event
         ToolExecutor(
             registry=default_tool_registry(),
             repository=repository,
-            handlers={"pregnancy_diary.entry.delete": PregnancyDiaryEntryDeleteToolHandler(diary_service=diary_service)},
+            handlers={"pregnancy_diary.manage": PregnancyDiaryManageToolHandler(diary_service=diary_service)},
         ).execute(
             actor=actor,
             run_id=uuid4(),
-            tool_name="pregnancy_diary.entry.delete",
+            tool_name="pregnancy_diary.manage",
             call_id="call-delete-missing",
-            args={"entry_date": "2026-07-04"},
+            args={"action": "delete", "entry_date": "2026-07-04", "confirmed": True},
         )
     )
 
@@ -1025,13 +1008,13 @@ def test_tool_executor_rejects_missing_required_tool_args_before_persisting_call
     assert repository.events == []
 
 
-def test_tool_executor_rejects_invalid_array_tool_args_before_persisting_call() -> None:
+def test_tool_executor_rejects_invalid_diary_content_before_persisting_call() -> None:
     actor = _user(permissions={"diary:write:self"})
     repository = FakeToolRepository()
     executor = ToolExecutor(
         registry=default_tool_registry(),
         repository=repository,
-        handlers={"pregnancy_diary.entry.create": profile_read_handler},
+        handlers={"pregnancy_diary.manage": profile_read_handler},
     )
 
     with pytest.raises(ApiError) as exc_info:
@@ -1039,14 +1022,14 @@ def test_tool_executor_rejects_invalid_array_tool_args_before_persisting_call() 
             executor.execute(
                 actor=actor,
                 run_id=uuid4(),
-                tool_name="pregnancy_diary.entry.create",
+                tool_name="pregnancy_diary.manage",
                 call_id="call-1",
-                args={"entry_date": "2026-07-04", "symptom_tags": "backache"},
+                args={"action": "write", "entry_date": "2026-07-04", "content": ["not", "text"]},
             )
         )
 
     assert exc_info.value.code == "tool_input_invalid"
-    assert exc_info.value.details == {"path": "$.symptom_tags", "reason": "must be an array"}
+    assert exc_info.value.details == {"path": "$.content", "reason": "must be a string"}
     assert repository.tool_call is None
     assert repository.events == []
 

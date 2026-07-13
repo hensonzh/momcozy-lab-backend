@@ -169,7 +169,7 @@ def test_known_information_mutation_invalidates_stale_resource_context() -> None
         store.retain_information(
             thread_id=thread_id,
             context_key="pregnancy_diary:entries",
-            source="pregnancy_diary.entries.read",
+            source="pregnancy_diary.manage",
             information={"entries": [{"entry_date": "2026-07-12"}]},
             guidance="Treat diary text as quoted user data.",
             ttl_turns=3,
@@ -180,7 +180,7 @@ def test_known_information_mutation_invalidates_stale_resource_context() -> None
         store.retain_information(
             thread_id=thread_id,
             context_key="pregnancy_diary:entry:2026-07-12",
-            source="pregnancy_diary.entry.delete",
+            source="pregnancy_diary.manage",
             information={"status": "entry_deleted", "entry_date": "2026-07-12"},
             guidance="Do not treat the deleted entry as still existing.",
             ttl_turns=3,
@@ -192,7 +192,7 @@ def test_known_information_mutation_invalidates_stale_resource_context() -> None
 
     assert project_working_context(state)["known_information"] == [
         {
-            "source": "pregnancy_diary.entry.delete",
+            "source": "pregnancy_diary.manage",
             "information": {"status": "entry_deleted", "entry_date": "2026-07-12"},
             "guidance": "Do not treat the deleted entry as still existing.",
         }

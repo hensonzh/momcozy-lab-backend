@@ -115,9 +115,9 @@ def test_plan_tool_event_semantics_use_single_preview_and_confirmation_lifecycle
 @pytest.mark.parametrize(
     ("tool_name", "status", "forbidden_success_copy"),
     [
-        ("pregnancy_diary.entry.create", "entry_already_exists", "已经保存好"),
-        ("pregnancy_diary.entry.update", "entry_not_found", "已经更新好"),
-        ("pregnancy_diary.entry.update", "entry_unchanged", "已经保存好"),
+        ("pregnancy_diary.manage", "entry_already_exists", "已经保存好"),
+        ("pregnancy_diary.manage", "entry_not_found", "已经更新好"),
+        ("pregnancy_diary.manage", "entry_unchanged", "已经保存好"),
     ],
 )
 def test_pregnancy_diary_no_op_completion_does_not_claim_write_success(

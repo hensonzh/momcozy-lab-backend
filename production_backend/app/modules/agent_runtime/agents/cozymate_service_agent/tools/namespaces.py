@@ -131,16 +131,11 @@ SCENARIO_NAMESPACE_DEFINITIONS: tuple[ToolNamespace, ...] = (
     ToolNamespace(
         name="pregnancy_diary",
         description=(
-            "管理当前用户孕期日记的读取、记录、补充、修改和删除。"
-            "用户要查看某日记录，或明确要求保存时使用；用户第一人称具体讲述值得留存的孕期事实时也可以主动记录，不要求先说‘记一下’。"
+            "管理当前用户孕期日记的读取、记录、完整重写和删除。"
+            "用户要查看某日记录，或明确要求保存时使用；用户第一人称具体讲述值得留存的孕期事实时也应主动记录，不要求先说‘记一下’。"
             "只保存用户说过的事实，不保存模型建议；纯科普、孕期计划意图、明确拒绝记录时不写入。"
         ),
-        tool_contracts=(
-            "pregnancy_diary.entries.read",
-            "pregnancy_diary.entry.create",
-            "pregnancy_diary.entry.update",
-            "pregnancy_diary.entry.delete",
-        ),
+        tool_contracts=("pregnancy_diary.manage",),
     ),
 )
 

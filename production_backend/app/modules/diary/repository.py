@@ -115,13 +115,11 @@ class DiaryRepository:
         owner_user_id: UUID,
         entry_date: date,
         values: dict[str, Any],
-        content_mode: str = "replace",
     ) -> PregnancyDiaryEntry | None:
         mutation = await self.update_entry_with_status(
             owner_user_id=owner_user_id,
             entry_date=entry_date,
             values=values,
-            content_mode=content_mode,
         )
         return mutation.entry if mutation is not None else None
 
@@ -131,18 +129,14 @@ class DiaryRepository:
         owner_user_id: UUID,
         entry_date: date,
         values: dict[str, Any],
-        content_mode: str = "replace",
     ) -> DiaryEntryMutation | None:
         entry = await self.get_entry_by_date(owner_user_id=owner_user_id, entry_date=entry_date, for_update=True)
         if entry is None:
             return None
-        resolved_values = dict(values)
-        if content_mode == "append" and "content" in resolved_values:
-            resolved_values["content"] = _append_content(entry.content, str(resolved_values["content"]))
-        changed = any(getattr(entry, field) != value for field, value in resolved_values.items())
+        changed = any(getattr(entry, field) != value for field, value in values.items())
         if not changed:
             return DiaryEntryMutation(entry=entry, changed=False)
-        for field, value in resolved_values.items():
+        for field, value in values.items():
             setattr(entry, field, value)
         await self.session.flush()
         await self.session.refresh(entry, attribute_names=["updated_at"])
@@ -167,13 +161,3 @@ class DiaryRepository:
         await self.session.flush()
         await self.session.refresh(entry, attribute_names=["updated_at"])
         return entry
-
-
-def _append_content(existing: str, addition: str) -> str:
-    current = str(existing or "").rstrip()
-    added = str(addition or "").strip()
-    if not current:
-        return added
-    if not added or current == added or current.endswith(f"\n{added}"):
-        return current
-    return f"{current}\n{added}"

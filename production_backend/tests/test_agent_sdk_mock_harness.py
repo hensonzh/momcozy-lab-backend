@@ -82,8 +82,8 @@ def test_scripted_sdk_backend_keeps_private_model_output_out_of_observed_trace()
         [
             scripted_sdk_response(
                 final_text="I found the entry.",
-                tool_invocations=(scripted_tool_invocation("pregnancy_diary.entries.read", {}),),
-                expected_available_tools=("pregnancy_diary.entries.read",),
+                tool_invocations=(scripted_tool_invocation("pregnancy_diary.manage", {"action": "read"}),),
+                expected_available_tools=("pregnancy_diary.manage",),
             )
         ]
     )
@@ -93,11 +93,11 @@ def test_scripted_sdk_backend_keeps_private_model_output_out_of_observed_trace()
         actor_user_id="user_1",
         instructions="Use tools.",
         model_input=[{"role": "user", "content": "read my diary"}],
-        tool_names=("pregnancy_diary.entries.read",),
+        tool_names=("pregnancy_diary.manage",),
         tools=(
             SdkToolDefinition(
-                contract_name="pregnancy_diary.entries.read",
-                sdk_name=sdk_tool_name("pregnancy_diary.entries.read"),
+                contract_name="pregnancy_diary.manage",
+                sdk_name=sdk_tool_name("pregnancy_diary.manage"),
                 description="Read diary.",
                 params_json_schema={"type": "object", "properties": {}},
                 invoke=invoke_json,
@@ -154,8 +154,8 @@ def test_agents_sdk_function_tool_does_not_convert_fatal_commit_failure_to_model
     tool = _build_function_tool(
         agents_module=types.SimpleNamespace(FunctionTool=FakeFunctionTool),
         definition=SdkToolDefinition(
-            contract_name="pregnancy_diary.entry.create",
-            sdk_name="pregnancy_diary_entry_create",
+            contract_name="pregnancy_diary.manage",
+            sdk_name="pregnancy_diary_manage",
             description="Create diary entry.",
             params_json_schema={"type": "object", "properties": {}},
             invoke=invoke_json,

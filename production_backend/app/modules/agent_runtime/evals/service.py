@@ -321,24 +321,57 @@ def _tool_contract_failures(*, case: dict[str, Any], trace: AgentEvalTrace) -> l
 
 
 def _tool_sequence_failures(*, case: dict[str, Any], trace: AgentEvalTrace) -> list[AgentEvalFailure]:
-    expected = [_contract(tool_call) for tool_call in case.get("expected_tool_calls", []) if _contract(tool_call)]
-    if len(expected) < 2:
+    expected_calls = [tool_call for tool_call in case.get("expected_tool_calls", []) if _contract(tool_call)]
+    if len(expected_calls) < 2:
         return []
-    observed = [_observed_tool_contract(tool_call) for tool_call in trace.tool_calls if _observed_tool_contract(tool_call)]
+    observed_calls = [tool_call for tool_call in trace.tool_calls if _observed_tool_contract(tool_call)]
     cursor = 0
-    for contract in observed:
-        if cursor < len(expected) and contract == expected[cursor]:
+    for observed_call in observed_calls:
+        if cursor < len(expected_calls) and _tool_call_matches_expected(
+            expected_call=expected_calls[cursor],
+            observed_call=observed_call,
+        ):
             cursor += 1
-    if cursor == len(expected):
+    if cursor == len(expected_calls):
         return []
     return [
         AgentEvalFailure(
             category="tool_order_mismatch",
             assertion="tool.sequence",
-            expected=" -> ".join(expected),
-            observed=" -> ".join(observed) or "<none>",
+            expected=" -> ".join(_tool_call_sequence_label(tool_call, expected=True) for tool_call in expected_calls),
+            observed=" -> ".join(_tool_call_sequence_label(tool_call, expected=False) for tool_call in observed_calls) or "<none>",
         )
     ]
+
+
+def _tool_call_matches_expected(*, expected_call: Any, observed_call: Any) -> bool:
+    if _contract(expected_call) != _observed_tool_contract(observed_call):
+        return False
+    if not isinstance(expected_call, dict):
+        return True
+    expected_args = expected_call.get("args_subset")
+    if not isinstance(expected_args, dict) or not expected_args:
+        return True
+    observed_args = _observed_tool_args(observed_call)
+    return all(observed_args.get(key) == value for key, value in expected_args.items())
+
+
+def _tool_call_sequence_label(tool_call: Any, *, expected: bool) -> str:
+    contract = _contract(tool_call) if expected else _observed_tool_contract(tool_call)
+    if not isinstance(tool_call, dict):
+        return contract
+    args = tool_call.get("args_subset") if expected else _observed_tool_args(tool_call)
+    action = str(args.get("action") or "").strip() if isinstance(args, dict) else ""
+    return f"{contract}[action={action}]" if action else contract
+
+
+def _observed_tool_args(tool_call: Any) -> dict[str, Any]:
+    if not isinstance(tool_call, dict):
+        return {}
+    raw_args = tool_call.get("safe_args")
+    if not isinstance(raw_args, dict) or not raw_args:
+        raw_args = tool_call.get("args")
+    return raw_args if isinstance(raw_args, dict) else {}
 
 
 def _tool_argument_failures(*, case: dict[str, Any], trace: AgentEvalTrace) -> list[AgentEvalFailure]:
@@ -362,10 +395,7 @@ def _tool_argument_failures(*, case: dict[str, Any], trace: AgentEvalTrace) -> l
         if occurrence >= len(observed_calls):
             continue
         observed_call = observed_calls[occurrence]
-        raw_args = observed_call.get("safe_args")
-        if not isinstance(raw_args, dict) or not raw_args:
-            raw_args = observed_call.get("args")
-        observed_args = raw_args if isinstance(raw_args, dict) else {}
+        observed_args = _observed_tool_args(observed_call)
         for key, expected_value in expected_args.items():
             if observed_args.get(key) == expected_value:
                 continue
@@ -530,7 +560,11 @@ def _observed_write_tool_contracts(trace: AgentEvalTrace) -> list[str]:
         {
             contract
             for tool_call in trace.tool_calls
-            if (contract := _observed_tool_contract(tool_call)) in write_contracts or contract.endswith(".propose")
+            if ((contract := _observed_tool_contract(tool_call)) in write_contracts or contract.endswith(".propose"))
+            and not (
+                contract == "pregnancy_diary.manage"
+                and str(_observed_tool_args(tool_call).get("action") or "").strip() in {"read", "list"}
+            )
         }
     )
 

@@ -146,21 +146,11 @@ def test_observed_pregnancy_plan_creates_durable_form_then_applies_one_plan() ->
     _assert_tools(skipped.trace, "pregnancy.plan_intake.advance")
     assert scenario.workflow("pregnancy_plan").state["phase"] == "final_plan_confirmation"
 
-    ready = scenario.run_turn(
+    created = scenario.run_turn(
         text="没有更多信息，请生成。",
         handlers=handlers,
         tool_invocations=(
             scripted_tool_invocation("pregnancy.plan_intake.advance", {"action": "confirm_ready_to_generate"}),
-        ),
-        final_text="开始生成计划。",
-    )
-    _assert_tools(ready.trace, "pregnancy.plan_intake.advance")
-    assert scenario.workflow("pregnancy_plan").state["phase"] == "ready_to_generate"
-
-    created = scenario.run_turn(
-        text="没有更多信息，请生成计划。",
-        handlers=handlers,
-        tool_invocations=(
             scripted_tool_invocation(
                 "pregnancy.plan.propose",
                 {"summary": "按孕周安排产检、待产和日常准备。"},
@@ -169,7 +159,7 @@ def test_observed_pregnancy_plan_creates_durable_form_then_applies_one_plan() ->
         final_text="孕期计划已生成。",
     )
 
-    _assert_tools(created.trace, "pregnancy.plan.propose")
+    _assert_tools(created.trace, "pregnancy.plan_intake.advance", "pregnancy.plan.propose")
     _assert_actions(created.trace, ("pregnancy.plan.create", "applied", "plan"))
     _assert_event_types(created.trace, required={"action.applied", "pregnancy_plan.changed", "artifact.created"})
     _assert_event_types(created.trace, forbidden={"action.confirmation_required"})

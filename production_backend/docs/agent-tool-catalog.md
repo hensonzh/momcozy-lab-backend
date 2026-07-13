@@ -47,7 +47,7 @@
 | `pump_recommendation` | 1 | 0 | 1 | 用户购买前询问吸奶器型号、差异、价格或如何选择时使用。 |
 | `device_support` | 3 | 2 | 1 | 用户查看设备状态、需要官方指导、排查问题或联系售后时使用。 |
 | `health_consultation` | 1 | 0 | 1 | 用户希望联系 IBCLC 哺乳顾问或进一步人工咨询时使用。 |
-| `pregnancy_diary` | 4 | 0 | 4 | 用户查看、记录、补充、修改或删除孕期日记时使用。 |
+| `pregnancy_diary` | 1 | 1 | 0 | 用户查看、记录、补充、修改或删除孕期日记时使用。 |
 
 ## 4. `milk_management`
 
@@ -116,14 +116,11 @@
 
 ## 10. `pregnancy_diary`
 
-这个 namespace 独立于全部 service skill。模型可按用户意图直接检索和调用，不需要先加载健康咨询或其他 skill。读取和写入均使用“宝宝和我”页面同一份 `pregnancy_diary_entries` 数据。
+这个 namespace 独立于全部 service skill。统一工具始终 eager 可见，可按用户意图直接调用，不需要先加载健康咨询或其他 skill。读取和写入均使用“宝宝和我”页面同一份 `pregnancy_diary_entries` 数据。
 
 | Canonical contract | 模型看到的 SDK name | 加载 | 读写 | 需确认 | 用途 |
 | --- | --- | --- | --- | --- | --- |
-| `pregnancy_diary.entries.read` | `pregnancy_diary_entries_read` | deferred | read | 否 | 用户查看、回顾、整理历史日记或需要核对某日原文时读取指定日期或日期范围。 |
-| `pregnancy_diary.entry.create` | `pregnancy_diary_entry_create` | deferred | write | 否 | 用户明确保存一篇新孕期记录时同步创建；同日已有记录时返回现有记录供继续更新。 |
-| `pregnancy_diary.entry.update` | `pregnancy_diary_entry_update` | deferred | write | 否 | 用户明确补充或修改已有日记时同步更新；正文支持追加或替换。 |
-| `pregnancy_diary.entry.delete` | `pregnancy_diary_entry_delete` | deferred | write | 否 | 用户明确要求且 owner-scoped 日期唯一确定时直接同步删除；目标含糊时先追问。 |
+| `pregnancy_diary.manage` | `pregnancy_diary_manage` | eager | write* | 否 | 全局统一管理孕期日记的 read/list/write/update/delete；同日写入时由模型结合旧正文完整重写，删除要求 `confirmed=true`。`read/list` 在运行时按读取事件处理。 |
 
 ## 11. Skill 与工具的关系
 
@@ -139,7 +136,7 @@ service skill 只通过 `recommended_tools` 向模型提示常用工具，不拥
 
 这张映射刻意允许跨 namespace 推荐。例如 `birth-prep` 可以推荐位于 `milk_management` 的 `plans.task_complete.propose`，`health-consultation` 可以推荐位于 `milk_management` 的 `records.milk_status.read`。
 
-孕期日记工具不出现在任何 skill 的 `recommended_tools` 中。它们由全局 `pregnancy_diary` namespace 独立提供，不参与 skill 加载、驻留或业务事实投影。
+孕期日记工具不出现在任何 skill 的 `recommended_tools` 中。它由全局 `pregnancy_diary` namespace 独立提供，不参与 skill 加载、驻留或业务事实投影。
 
 ## 12. 不暴露给模型的内部 Handler
 

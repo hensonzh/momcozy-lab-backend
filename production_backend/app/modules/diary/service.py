@@ -70,14 +70,12 @@ class DiaryService:
         entry_date: date,
         values: dict[str, Any],
         request_id: str = "",
-        content_mode: str = "replace",
     ) -> PregnancyDiaryEntry:
         mutation = await self.update_entry_with_status(
             owner_user_id=owner_user_id,
             entry_date=entry_date,
             values=values,
             request_id=request_id,
-            content_mode=content_mode,
         )
         return mutation.entry
 
@@ -88,25 +86,20 @@ class DiaryService:
         entry_date: date,
         values: dict[str, Any],
         request_id: str = "",
-        content_mode: str = "replace",
     ) -> DiaryEntryMutation:
         _require_values(values)
-        if content_mode not in {"append", "replace"}:
-            raise ApiError(code="validation_failed", message="content_mode must be append or replace.", status=422)
         update_with_status = getattr(self.repository, "update_entry_with_status", None)
         if callable(update_with_status):
             mutation = await update_with_status(
                 owner_user_id=owner_user_id,
                 entry_date=entry_date,
                 values=values,
-                content_mode=content_mode,
             )
         else:
             entry = await self.repository.update_entry(
                 owner_user_id=owner_user_id,
                 entry_date=entry_date,
                 values=values,
-                content_mode=content_mode,
             )
             mutation = DiaryEntryMutation(entry=entry, changed=True) if entry is not None else None
         if mutation is None:

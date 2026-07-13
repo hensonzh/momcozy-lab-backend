@@ -371,10 +371,7 @@ def test_model_tool_schema_registry_has_no_internal_or_legacy_orphans() -> None:
         ("records.growth_record_update.propose", "write", False, "deferred"),
         ("plans.task_complete.propose", "write", False, "deferred"),
         ("plans.milk_plan.propose", "write", True, "deferred"),
-        ("pregnancy_diary.entries.read", "read", False, "deferred"),
-        ("pregnancy_diary.entry.create", "write", False, "deferred"),
-        ("pregnancy_diary.entry.update", "write", False, "deferred"),
-        ("pregnancy_diary.entry.delete", "write", False, "deferred"),
+        ("pregnancy_diary.manage", "write", False, "eager"),
         ("hospital_bag_card_create", "write", False, "deferred"),
         ("support.ticket.propose", "write", True, "deferred"),
     ],
@@ -486,10 +483,7 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
     growth_read_schema = registry.get("records.growth.read").input_schema
     plans_schema = registry.get("plans.current.read").input_schema
     calendar_schema = registry.get("plans.calendar.read").input_schema
-    diary_read_schema = registry.get("pregnancy_diary.entries.read").input_schema
-    diary_create_schema = registry.get("pregnancy_diary.entry.create").input_schema
-    diary_update_schema = registry.get("pregnancy_diary.entry.update").input_schema
-    diary_delete_schema = registry.get("pregnancy_diary.entry.delete").input_schema
+    diary_schema = registry.get("pregnancy_diary.manage").input_schema
     devices_schema = registry.get("devices.pump_status.read").input_schema
     device_guidance_schema = registry.get("devices.guidance.read").input_schema
     image_inspect_schema = registry.get("images.inspect").input_schema
@@ -544,18 +538,16 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
     assert plans_schema["properties"]["limit"]["maximum"] == 20
     assert calendar_schema["properties"]["task_date"]["maxLength"] == 20
     assert calendar_schema["properties"]["status"]["maxLength"] == 32
-    assert diary_read_schema["additionalProperties"] is False
-    assert diary_read_schema["properties"]["limit"]["maximum"] == 14
-    assert diary_create_schema["required"] == ["entry_date"]
-    assert diary_create_schema["properties"]["content"]["maxLength"] == 5000
-    assert diary_update_schema["required"] == ["entry_date"]
-    assert diary_update_schema["properties"]["symptom_tags"]["type"] == "array"
-    assert diary_update_schema["properties"]["content_mode"]["default"] == "append"
-    assert diary_delete_schema["required"] == ["entry_date"]
-    for schema in (diary_create_schema, diary_update_schema, diary_delete_schema):
-        assert "idempotency_key" not in schema["properties"]
-        assert "locale" not in schema["properties"]
-        assert "timezone" not in schema["properties"]
+    assert diary_schema["additionalProperties"] is False
+    assert diary_schema["required"] == ["action"]
+    assert diary_schema["properties"]["action"]["enum"] == ["read", "list", "write", "update", "delete"]
+    assert diary_schema["properties"]["limit"]["maximum"] == 30
+    assert diary_schema["properties"]["content"]["maxLength"] == 5000
+    assert diary_schema["properties"]["confirmed"]["default"] is False
+    assert "content_mode" not in diary_schema["properties"]
+    assert "idempotency_key" not in diary_schema["properties"]
+    assert "locale" not in diary_schema["properties"]
+    assert "timezone" not in diary_schema["properties"]
     assert devices_schema["additionalProperties"] is False
     assert devices_schema["properties"]["limit"]["maximum"] == 20
     assert device_guidance_schema["additionalProperties"] is False
@@ -764,6 +756,7 @@ def test_context_builder_projects_dynamic_context_after_selected_history() -> No
         "runtime_context": {
             "user_context": {"current_time": "2026-07-08T12:00:00+08:00", "timezone": "Asia/Shanghai"},
             "memory": [],
+            "workflow_context": [],
             "working_context": {
                 "skills": [{"id": "milk-management", "instructions": "milk instructions"}],
                 "ongoing_work": [],
