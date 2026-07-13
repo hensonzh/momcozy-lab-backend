@@ -80,6 +80,60 @@ def test_reschedule_service_rejects_stale_preview_before_any_write() -> None:
 
     assert exc_info.value.code == "milk_schedule_conflict"
     assert repository.update_calls == []
+    assert repository.locked_dates == [date(2026, 7, 14)]
+
+
+def test_reschedule_service_rechecks_a_concurrently_occupied_target_slot_before_any_write() -> None:
+    service, repository, plan, tasks = _fixture()
+    conflicting_task = PlanTask(
+        id=uuid4(),
+        owner_user_id=plan.owner_user_id,
+        plan_id=None,
+        task_date=date(2026, 7, 14),
+        task_time="07:30",
+        title="刚新增的日程",
+        status="pending",
+        payload={"duration_minutes": 30},
+    )
+    repository.tasks[conflicting_task.id] = conflicting_task
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            service.reschedule_milk_tasks(
+                owner_user_id=plan.owner_user_id,
+                plan_id=plan.id,
+                updates=[_update(tasks[0], new_time="07:30")],
+            )
+        )
+
+    assert exc_info.value.code == "milk_schedule_conflict"
+    assert repository.update_calls == []
+
+
+def test_reschedule_service_ignores_another_owners_task_in_the_target_slot() -> None:
+    service, repository, plan, tasks = _fixture()
+    foreign_task = PlanTask(
+        id=uuid4(),
+        owner_user_id=uuid4(),
+        plan_id=None,
+        task_date=date(2026, 7, 14),
+        task_time="07:30",
+        title="其他用户的日程",
+        status="pending",
+        payload={"duration_minutes": 30},
+    )
+    repository.tasks[foreign_task.id] = foreign_task
+
+    applied = asyncio.run(
+        service.reschedule_milk_tasks(
+            owner_user_id=plan.owner_user_id,
+            plan_id=plan.id,
+            updates=[_update(tasks[0], new_time="07:30")],
+        )
+    )
+
+    assert applied[0].task_time == "07:30"
+    assert repository.update_calls == [(tasks[0].id, "07:30")]
 
 
 def test_reschedule_service_hides_cross_owner_task_and_does_not_write() -> None:
@@ -103,6 +157,7 @@ class MemoryPlansRepository:
         self.plan = plan
         self.tasks = {task.id: task for task in tasks}
         self.update_calls: list[tuple[object, str]] = []
+        self.locked_dates: list[date] = []
 
     async def get_plan_for_owner(self, *, plan_id, owner_user_id):
         if plan_id == self.plan.id and owner_user_id == self.plan.owner_user_id:
@@ -112,6 +167,24 @@ class MemoryPlansRepository:
     async def get_task_for_owner(self, *, task_id, owner_user_id):
         task = self.tasks.get(task_id)
         return task if task is not None and task.owner_user_id == owner_user_id else None
+
+    async def list_tasks_for_milk_reschedule_for_update(self, *, owner_user_id, task_ids, task_dates):
+        dates = set(task_dates)
+        ids = set(task_ids)
+        return sorted(
+            (
+                task
+                for task in self.tasks.values()
+                if task.owner_user_id == owner_user_id
+                and task.deleted_at is None
+                and (task.id in ids or task.task_date in dates)
+            ),
+            key=lambda task: str(task.id),
+        )
+
+    async def lock_milk_schedule_dates(self, *, owner_user_id, task_dates):
+        assert owner_user_id == self.plan.owner_user_id
+        self.locked_dates = sorted(set(task_dates))
 
     async def update_task(self, *, task_id, owner_user_id, updates):
         task = await self.get_task_for_owner(task_id=task_id, owner_user_id=owner_user_id)

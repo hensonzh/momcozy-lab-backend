@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
@@ -33,6 +33,8 @@ class MilkPlanCreateActionHandler:
         self.service = service
 
     async def __call__(self, action: AgentAction) -> AgentActionApplyResult:
+        if _is_expired(action.expires_at):
+            raise PermanentJobError("milk_analysis_expired_before_plan")
         payload = dict(action.apply_payload or {})
         title = _text(payload, "title")
         if not title:
@@ -462,6 +464,13 @@ def _milk_plan_affected_dates(plan: Any) -> list[str]:
 
 def _text(payload: dict[str, Any], key: str) -> str:
     return str(payload.get(key) or "").strip()
+
+
+def _is_expired(expires_at: datetime | None) -> bool:
+    if expires_at is None:
+        return False
+    comparable = expires_at if expires_at.tzinfo is not None else expires_at.replace(tzinfo=timezone.utc)
+    return comparable <= datetime.now(timezone.utc)
 
 
 def _required_uuid(payload: dict[str, Any], key: str, missing_code: str, invalid_code: str) -> UUID:

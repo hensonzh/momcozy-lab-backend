@@ -199,38 +199,70 @@ class PlansService:
         if plan.plan_type != "milk_management":
             raise ApiError(code="validation_failed", message="Plan is not a milk-management plan.", status=422)
 
-        parsed_updates: list[tuple[PlanTask, date, str]] = []
+        parsed_updates: list[dict[str, Any]] = []
         seen_task_ids: set[UUID] = set()
         for update in updates:
             task_id = _required_uuid_value(update.get("task_id"), code="invalid_task_id")
             if task_id in seen_task_ids:
                 raise ApiError(code="validation_failed", message="Duplicate task update.", status=422)
             seen_task_ids.add(task_id)
-            locked_loader = getattr(self.repository, "get_task_for_owner_for_update", None)
-            task = (
-                await locked_loader(task_id=task_id, owner_user_id=owner_user_id)
-                if callable(locked_loader)
-                else await self.repository.get_task_for_owner(task_id=task_id, owner_user_id=owner_user_id)
+            expected_plan_id = _required_uuid_value(update.get("expected_plan_id"), code="invalid_expected_plan_id")
+            expected_date = _required_date_value(update.get("expected_task_date"), code="invalid_expected_task_date")
+            expected_time = _required_time_value(update.get("expected_task_time"), code="invalid_expected_task_time")
+            new_date = _required_date_value(update.get("new_task_date"), code="invalid_new_task_date")
+            new_time = _required_time_value(update.get("new_task_time"), code="invalid_new_task_time")
+            parsed_updates.append(
+                {
+                    "task_id": task_id,
+                    "expected_plan_id": expected_plan_id,
+                    "expected_date": expected_date,
+                    "expected_time": expected_time,
+                    "new_date": new_date,
+                    "new_time": new_time,
+                }
             )
+
+        affected_dates = sorted(
+            {item["expected_date"] for item in parsed_updates} | {item["new_date"] for item in parsed_updates}
+        )
+        await self.repository.lock_milk_schedule_dates(
+            owner_user_id=owner_user_id,
+            task_dates=affected_dates,
+        )
+        locked_tasks = await self.repository.list_tasks_for_milk_reschedule_for_update(
+            owner_user_id=owner_user_id,
+            task_ids=sorted(seen_task_ids, key=str),
+            task_dates=affected_dates,
+        )
+        locked_by_id = {task.id: task for task in locked_tasks}
+        tasks_to_move: list[tuple[PlanTask, date, str]] = []
+        for update in parsed_updates:
+            task = locked_by_id.get(update["task_id"])
             if task is None:
                 raise ApiError(code="not_found", message="Plan task not found.", status=404)
             if task.plan_id != plan_id or task.status != "pending":
                 raise ApiError(code="owner_scope_violation", message="Task is outside the requested active milk plan.", status=403)
-            expected_plan_id = _required_uuid_value(update.get("expected_plan_id"), code="invalid_expected_plan_id")
-            expected_date = _required_date_value(update.get("expected_task_date"), code="invalid_expected_task_date")
-            expected_time = _required_time_value(update.get("expected_task_time"), code="invalid_expected_task_time")
-            if expected_plan_id != plan_id or task.task_date != expected_date or task.task_time != expected_time:
+            if (
+                update["expected_plan_id"] != plan_id
+                or task.task_date != update["expected_date"]
+                or task.task_time != update["expected_time"]
+            ):
                 raise ApiError(
                     code="milk_schedule_conflict",
                     message="The milk schedule changed after preview. Create a fresh preview before applying.",
                     status=409,
                 )
-            new_date = _required_date_value(update.get("new_task_date"), code="invalid_new_task_date")
-            new_time = _required_time_value(update.get("new_task_time"), code="invalid_new_task_time")
-            parsed_updates.append((task, new_date, new_time))
+            tasks_to_move.append((task, update["new_date"], update["new_time"]))
+
+        if _milk_schedule_has_target_conflict(tasks_to_move=tasks_to_move, locked_tasks=locked_tasks):
+            raise ApiError(
+                code="milk_schedule_conflict",
+                message="A target milk-schedule slot is no longer available. Create a fresh preview before applying.",
+                status=409,
+            )
 
         applied: list[PlanTask] = []
-        for task, new_date, new_time in parsed_updates:
+        for task, new_date, new_time in tasks_to_move:
             updated = await self.repository.update_task(
                 task_id=task.id,
                 owner_user_id=owner_user_id,
@@ -476,6 +508,58 @@ class PlansService:
     def _validate_limit(self, limit: int) -> None:
         if limit < 1 or limit > 100:
             raise ApiError(code="validation_failed", message="limit must be between 1 and 100.", status=422)
+
+
+def _milk_schedule_has_target_conflict(
+    *,
+    tasks_to_move: list[tuple[PlanTask, date, str]],
+    locked_tasks: list[PlanTask],
+) -> bool:
+    proposed = {task.id: (new_date, new_time) for task, new_date, new_time in tasks_to_move}
+    scheduled: dict[UUID, tuple[date, int, int]] = {}
+    for task in locked_tasks:
+        if task.status != "pending":
+            continue
+        task_date, task_time = proposed.get(task.id, (task.task_date, task.task_time))
+        if task_date is None:
+            continue
+        start = _task_time_minutes(task_time)
+        if start is None:
+            continue
+        scheduled[task.id] = (task_date, start, start + _task_duration_minutes(task))
+
+    for task_id in proposed:
+        moving = scheduled.get(task_id)
+        if moving is None:
+            continue
+        moving_date, moving_start, moving_end = moving
+        for other_id, (other_date, other_start, other_end) in scheduled.items():
+            if other_id == task_id or other_date != moving_date:
+                continue
+            if moving_start < other_end and moving_end > other_start:
+                return True
+    return False
+
+
+def _task_duration_minutes(task: PlanTask) -> int:
+    payload = task.payload if isinstance(task.payload, dict) else {}
+    try:
+        return max(1, min(int(payload.get("duration_minutes") or 30), 240))
+    except (TypeError, ValueError):
+        return 30
+
+
+def _task_time_minutes(value: Any) -> int | None:
+    token = str(value or "").strip()
+    if len(token) != 5 or token[2] != ":":
+        return None
+    try:
+        hour, minute = int(token[:2]), int(token[3:])
+    except ValueError:
+        return None
+    if hour not in range(24) or minute not in range(60):
+        return None
+    return hour * 60 + minute
 
 
 def _utcnow() -> datetime:

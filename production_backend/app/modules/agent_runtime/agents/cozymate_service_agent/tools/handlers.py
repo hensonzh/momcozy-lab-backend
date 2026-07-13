@@ -105,6 +105,7 @@ _DIARY_ENTRY_VALUE_FIELDS = (
 )
 _MAX_MEDIA_VOICE_ITEMS = 2
 _DEVICE_GUIDANCE_IMAGE_SPOKEN_LABEL = "我放了一张当前步骤的对照图，你可以边看图边完成这一步。"
+_MILK_ANALYSIS_PLAN_TTL = timedelta(minutes=30)
 
 
 class ProfileReadToolHandler:
@@ -896,6 +897,10 @@ class MilkAnalysisEvaluateToolHandler:
             assessment = build_milk_analysis_assessment(existing_state)
         except MilkAnalysisFlowError as exc:
             raise ApiError(code=str(exc), message="Complete milk analysis intake first.", status=409) from exc
+        assessment = {
+            **assessment,
+            "valid_until": (datetime.now(timezone.utc) + _MILK_ANALYSIS_PLAN_TTL).isoformat(),
+        }
         card = dict(assessment["card"])
         artifact = await self.runtime_service.create_artifact(
             owner_user_id=context.actor.user_id,
@@ -1831,6 +1836,13 @@ class MilkPlanProposeToolHandler:
                 message="The latest milk analysis context changed. Evaluate it again before creating a plan.",
                 status=409,
             )
+        valid_until = _datetime_value(assessment.get("valid_until"))
+        if valid_until is None or valid_until <= datetime.now(timezone.utc):
+            raise ApiError(
+                code="milk_analysis_expired_before_plan",
+                message="The latest milk analysis expired. Refresh it before creating a plan.",
+                status=409,
+            )
         if decision.get("can_start_plan") is not True:
             raise ApiError(code="milk_plan_not_eligible", message="The latest milk analysis does not allow a plan.", status=409)
         requested_direction = _text(context.args, "direction")
@@ -1858,6 +1870,7 @@ class MilkPlanProposeToolHandler:
             side_effect_level="medium",
             preview_payload=preview_payload,
             apply_payload=apply_payload,
+            expires_at=valid_until,
             idempotency_key=_text(context.args, "idempotency_key")
             or _stable_payload_key(
                 "milk-plan",
@@ -2706,7 +2719,21 @@ def _ibclc_decision_question(text: str) -> bool:
 
 
 def _previous_assistant_offered_ibclc(text: str) -> bool:
-    if any(token in text for token in ("不能帮你", "无法帮你", "不帮你", "不会推荐", "不能推荐", "无法推荐")):
+    if any(
+        token in text
+        for token in (
+            "不能帮你",
+            "无法帮你",
+            "不帮你",
+            "不会推荐",
+            "不能推荐",
+            "无法推荐",
+            "不需要我",
+            "无需我",
+            "不用我",
+            "不必我",
+        )
+    ):
         return False
     has_subject = any(token in text for token in ("ibclc", "哺乳顾问", "泌乳顾问", "咨询入口", "在线咨询"))
     has_offer = any(token in text for token in ("需要我", "要我", "可以帮你", "帮你推荐", "帮你打开", "是否要"))
@@ -3413,6 +3440,16 @@ async def _propose_action_reusing_idempotency(
 
 def _text(payload: dict[str, Any], key: str) -> str:
     return str(payload.get(key) or "").strip()
+
+
+def _datetime_value(value: Any) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def _dict(payload: dict[str, Any], key: str) -> dict[str, Any]:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from copy import deepcopy
 from typing import Any
 
@@ -204,17 +205,59 @@ def _has_maternal_red_flags(answer: str) -> bool:
     text = answer.replace(" ", "")
     if not text:
         return True
-    contrast_parts = [part for token in ("但是", "但", "不过", "可是") for part in text.split(token)[1:] if part]
-    if contrast_parts:
-        return any(_positive_red_flag_text(part) for part in contrast_parts)
-    if text.startswith(("没有", "无", "未出现", "都没有", "并没有", "不")):
-        return False
-    return _positive_red_flag_text(text)
+    negative_list_open = False
+    for clause in re.split(r"但是|不过|可是|然而|却|但|[，,。；;！？!?]", text):
+        if not _positive_red_flag_text(clause):
+            continue
+        if _red_flag_clause_is_negated(clause):
+            negative_list_open = True
+            continue
+        if negative_list_open and _red_flag_clause_continues_list(clause):
+            continue
+        return True
+    return False
 
 
 def _positive_red_flag_text(text: str) -> bool:
     positive_phrases = ("发热", "发烧", "寒战", "红肿", "硬块", "疼痛加重", "越来越痛")
     return any(phrase in text for phrase in positive_phrases)
+
+
+def _red_flag_clause_is_negated(clause: str) -> bool:
+    negative_tokens = (
+        "没有",
+        "并没有",
+        "都没有",
+        "未出现",
+        "未见",
+        "不伴",
+        "否认",
+        "不发热",
+        "不发烧",
+        "不寒战",
+        "不红肿",
+        "未发热",
+        "未发烧",
+        "无",
+    )
+    negative_positions = [clause.find(token) for token in negative_tokens if token in clause]
+    if not negative_positions:
+        return False
+    first_negative = min(negative_positions)
+    positive_assertions = [
+        match.start()
+        for match in re.finditer(r"(?<!没)(?<!无)有|(?<!未)出现|伴有|摸到|越来越", clause)
+    ]
+    return not any(position > first_negative for position in positive_assertions)
+
+
+def _red_flag_clause_continues_list(clause: str) -> bool:
+    remainder = clause
+    for phrase in ("疼痛加重", "越来越痛", "发热", "发烧", "寒战", "红肿", "硬块"):
+        remainder = remainder.replace(phrase, "")
+    for token in ("、", "和", "或", "及", "与", "也", "均", "都"):
+        remainder = remainder.replace(token, "")
+    return not remainder
 
 
 def _has_infant_intake_risk(answers: dict[str, Any]) -> bool:

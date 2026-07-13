@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import date, datetime
 from typing import Any, cast
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import Plan, PlanTask
@@ -128,6 +129,32 @@ class PlansRepository:
             .with_for_update()
         )
         return cast(PlanTask | None, await self.session.scalar(statement))
+
+    async def list_tasks_for_milk_reschedule_for_update(
+        self,
+        *,
+        owner_user_id: UUID,
+        task_ids: list[UUID],
+        task_dates: list[date],
+    ) -> list[PlanTask]:
+        statement = (
+            select(PlanTask)
+            .where(
+                PlanTask.owner_user_id == owner_user_id,
+                PlanTask.deleted_at.is_(None),
+                or_(PlanTask.id.in_(task_ids), PlanTask.task_date.in_(task_dates)),
+            )
+            .order_by(PlanTask.id.asc())
+            .with_for_update()
+        )
+        result = await self.session.scalars(statement)
+        return list(result.all())
+
+    async def lock_milk_schedule_dates(self, *, owner_user_id: UUID, task_dates: list[date]) -> None:
+        for task_date in sorted(set(task_dates)):
+            digest = hashlib.sha256(f"{owner_user_id}:{task_date.isoformat()}".encode()).digest()
+            lock_key = int.from_bytes(digest[:8], byteorder="big", signed=True)
+            await self.session.execute(select(func.pg_advisory_xact_lock(lock_key)))
 
     async def list_tasks(
         self,

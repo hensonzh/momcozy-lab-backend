@@ -92,6 +92,37 @@ def test_explicit_maternal_red_flags_block_plan_eligibility_but_negation_does_no
     }
 
 
+@pytest.mark.parametrize(
+    "red_flags",
+    [
+        "没有发热、寒战，乳房有硬块",
+        "没有发烧和寒战，有红肿",
+        "无发热，但右侧乳房越来越痛",
+    ],
+)
+def test_mixed_negated_and_positive_maternal_red_flags_still_block_plan(red_flags: str) -> None:
+    assessment = build_milk_analysis_assessment(_complete_intake(red_flags=red_flags))
+
+    assert assessment["risk"]["maternal_red_flags"] is True
+    assert assessment["plan_decision"]["can_start_plan"] is False
+
+
+@pytest.mark.parametrize(
+    "red_flags",
+    [
+        "没有发热、寒战、红肿、硬块或疼痛加重",
+        "没有发热，寒战、红肿和硬块也都没有",
+        "乳房没有红肿或硬块",
+        "目前不发热，也没有寒战或硬块",
+    ],
+)
+def test_maternal_red_flag_negation_can_cover_an_explicit_symptom_list(red_flags: str) -> None:
+    assessment = build_milk_analysis_assessment(_complete_intake(red_flags=red_flags))
+
+    assert assessment["risk"]["maternal_red_flags"] is False
+    assert assessment["plan_decision"]["can_start_plan"] is True
+
+
 def test_infant_signal_negation_does_not_create_a_false_safety_block() -> None:
     assessment = build_milk_analysis_assessment(_complete_intake(wet_diapers="尿布没有明显变少，24 小时大约 7 片"))
 

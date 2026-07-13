@@ -1,5 +1,5 @@
 import asyncio
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from uuid import uuid4
 
 import pytest
@@ -692,6 +692,8 @@ def test_milk_analysis_intake_is_durable_and_evaluation_emits_an_analysis_card()
     assert evaluated.output["artifact_type"] == "milk_analysis_card"
     assert "analysis_context_fingerprint" not in evaluated.output
     assert runtime_service.workflow_state.state["assessment"]["analysis_context_fingerprint"]
+    valid_until = datetime.fromisoformat(runtime_service.workflow_state.state["assessment"]["valid_until"])
+    assert valid_until > datetime.now(timezone.utc)
     assert runtime_service.artifact.payload["card_type"] == "milk_analysis_card"
     assert "analysis_context_fingerprint" not in runtime_service.artifact.payload
     assert evaluated.output["_deferred_agent_events"][0]["event_type"] == "artifact.created"
@@ -1273,6 +1275,7 @@ def test_milk_plan_propose_tool_handler_creates_confirmation_action() -> None:
         "answers": {"maternal_red_flags": "没有这些情况"},
     }
     analysis_fingerprint = milk_analysis_context_fingerprint(analysis_context)
+    valid_until = datetime.now(timezone.utc) + timedelta(minutes=20)
     runtime_service.workflow_state = AgentWorkflowState(
         id=uuid4(),
         thread_id=context.thread_id,
@@ -1286,6 +1289,7 @@ def test_milk_plan_propose_tool_handler_creates_confirmation_action() -> None:
             "assessment": {
                 "analysis_context": analysis_context,
                 "analysis_context_fingerprint": analysis_fingerprint,
+                "valid_until": valid_until.isoformat(),
                 "plan_decision": {"can_start_plan": True, "recommended_direction": "maintain"},
             },
         },
@@ -1309,6 +1313,7 @@ def test_milk_plan_propose_tool_handler_creates_confirmation_action() -> None:
     }
     assert runtime_service.calls[0]["target_type"] == "plan"
     assert runtime_service.calls[0]["side_effect_level"] == "medium"
+    assert runtime_service.calls[0]["expires_at"] == valid_until
     assert runtime_service.calls[0]["apply_payload"]["payload"] == {
         "direction": "maintain",
         "start_date": "2026-07-13",
@@ -1351,6 +1356,7 @@ def test_milk_plan_proposal_rejects_a_tampered_analysis_fingerprint() -> None:
             "assessment": {
                 "analysis_context": {"records_snapshot": {"status": "normal"}, "answers": {}},
                 "analysis_context_fingerprint": "tampered",
+                "valid_until": (datetime.now(timezone.utc) + timedelta(minutes=20)).isoformat(),
                 "plan_decision": {"can_start_plan": True, "recommended_direction": "maintain"},
             },
         },
@@ -1361,6 +1367,46 @@ def test_milk_plan_proposal_rejects_a_tampered_analysis_fingerprint() -> None:
         asyncio.run(MilkPlanProposeToolHandler(runtime_service=runtime_service)(context))
 
     assert exc_info.value.code == "milk_analysis_fingerprint_mismatch"
+
+
+def test_milk_plan_proposal_rejects_an_expired_analysis_before_creating_an_action() -> None:
+    actor = _user()
+    runtime_service = FakeAgentRuntimeService()
+    context = _context(
+        actor=actor,
+        args={
+            "title": "稳奶计划",
+            "direction": "maintain",
+            "days": 1,
+            "tasks": [{"title": "吸奶", "time": "08:00", "task_type": "pumping"}],
+        },
+    )
+    analysis_context = {"records_snapshot": {"status": "normal"}, "answers": {}}
+    runtime_service.workflow_state = AgentWorkflowState(
+        id=uuid4(),
+        thread_id=context.thread_id,
+        owner_user_id=actor.user_id,
+        run_id=context.run_id,
+        workflow_type="milk_analysis",
+        status="ready",
+        schema_version="milk_analysis.v1",
+        state={
+            "phase": "assessment_complete",
+            "assessment": {
+                "analysis_context": analysis_context,
+                "analysis_context_fingerprint": milk_analysis_context_fingerprint(analysis_context),
+                "valid_until": (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat(),
+                "plan_decision": {"can_start_plan": True, "recommended_direction": "maintain"},
+            },
+        },
+        active_step="assessment_complete",
+    )
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(MilkPlanProposeToolHandler(runtime_service=runtime_service)(context))
+
+    assert exc_info.value.code == "milk_analysis_expired_before_plan"
+    assert runtime_service.calls == []
 
 
 def test_milk_schedule_proposal_is_owner_scoped_and_contains_freshness_guards() -> None:
@@ -1506,7 +1552,18 @@ def test_ibclc_card_handler_accepts_legacy_short_affirmation_after_previous_offe
     assert result["status"] == "created"
 
 
-def test_ibclc_card_handler_rejects_short_affirmation_after_negated_previous_offer() -> None:
+@pytest.mark.parametrize(
+    "previous_assistant_text",
+    [
+        "我现在不能帮你推荐 IBCLC 哺乳顾问。",
+        "目前不需要我帮你打开 IBCLC 在线咨询入口。",
+        "现在无需我帮你推荐 IBCLC 哺乳顾问。",
+        "暂时不用我帮你联系泌乳顾问。",
+    ],
+)
+def test_ibclc_card_handler_rejects_short_affirmation_after_negated_previous_offer(
+    previous_assistant_text: str,
+) -> None:
     runtime_service = FakeAgentRuntimeService()
 
     result = asyncio.run(
@@ -1515,7 +1572,7 @@ def test_ibclc_card_handler_rejects_short_affirmation_after_negated_previous_off
                 args={
                     "reason": "Latch pain",
                     "trusted_current_user_text": "好的",
-                    "trusted_previous_assistant_text": "我现在不能帮你推荐 IBCLC 哺乳顾问。",
+                    "trusted_previous_assistant_text": previous_assistant_text,
                 }
             )
         )

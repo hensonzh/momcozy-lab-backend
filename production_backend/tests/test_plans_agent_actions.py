@@ -1,6 +1,6 @@
 import asyncio
 import json
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from uuid import uuid4
 
 import pytest
@@ -142,6 +142,26 @@ def test_milk_plan_create_action_handler_rejects_a_plan_that_cannot_reach_schedu
         )
 
     assert exc_info.value.code == "invalid_milk_plan_schedule"
+
+
+def test_milk_plan_create_action_handler_rejects_an_expired_analysis_before_side_effects() -> None:
+    service = FakePlansService()
+    action = _action(
+        apply_payload={
+            "title": "Expired milk plan",
+            "payload": {
+                "days": 1,
+                "tasks": [{"title": "Morning pump", "time": "08:00", "task_type": "pumping"}],
+            },
+        },
+        expires_at=datetime.now(timezone.utc) - timedelta(seconds=1),
+    )
+
+    with pytest.raises(PermanentJobError) as exc_info:
+        asyncio.run(MilkPlanCreateActionHandler(service=service)(action))
+
+    assert exc_info.value.code == "milk_analysis_expired_before_plan"
+    assert service.create_plan_kwargs == {}
 
 
 def test_milk_schedule_reschedule_action_emits_authoritative_change_event() -> None:
@@ -534,7 +554,13 @@ class FakePlansService:
         return [self.task]
 
 
-def _action(*, apply_payload: dict, action_type: str = MILK_PLAN_CREATE_ACTION, target_type: str = "plan") -> AgentAction:
+def _action(
+    *,
+    apply_payload: dict,
+    action_type: str = MILK_PLAN_CREATE_ACTION,
+    target_type: str = "plan",
+    expires_at: datetime | None = None,
+) -> AgentAction:
     return AgentAction(
         id=uuid4(),
         run_id=uuid4(),
@@ -547,5 +573,6 @@ def _action(*, apply_payload: dict, action_type: str = MILK_PLAN_CREATE_ACTION, 
         preview_payload={},
         apply_payload=apply_payload,
         idempotency_key="idem-action",
+        expires_at=expires_at,
         error_code="",
     )
