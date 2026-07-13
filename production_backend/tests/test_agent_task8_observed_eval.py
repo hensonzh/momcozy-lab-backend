@@ -138,9 +138,7 @@ def test_observed_pregnancy_plan_creates_durable_form_then_applies_one_plan() ->
     skipped = scenario.run_turn(
         text="暂时没有产检记录，先跳过。",
         handlers=handlers,
-        tool_invocations=(
-            scripted_tool_invocation("pregnancy.plan_intake.advance", {"action": "skip_checkup_records"}),
-        ),
+        tool_invocations=(scripted_tool_invocation("pregnancy.plan_intake.advance", {"action": "skip_checkup_records"}),),
         final_text="还有其他需要补充的信息吗？",
     )
     _assert_tools(skipped.trace, "pregnancy.plan_intake.advance")
@@ -346,9 +344,7 @@ def test_observed_milk_analysis_plan_and_schedule_persist_real_action_lifecycles
                 {
                     "plan_id": str(plan.id),
                     "target_date": "2026-07-14",
-                    "busy_windows": [
-                        {"date": "2026-07-14", "start_time": "10:30", "end_time": "12:30", "title": "会议"}
-                    ],
+                    "busy_windows": [{"date": "2026-07-14", "start_time": "10:30", "end_time": "12:30", "title": "会议"}],
                 },
             ),
         ),
@@ -516,8 +512,13 @@ def test_observed_complex_health_web_search_emits_allowlisted_citations() -> Non
     request = provider.requests[0]
     assert request.web_search_required is True
     assert request.web_search_allowed_domains == tuple(HEALTH_GUIDANCE_ALLOWED_DOMAINS)
-    status_event = _event(result.trace, "CUSTOM", name="momcozy.agent.web_search")
-    assert status_event["payload"]["value"] == {"status": "completed"}
+    status_events = _events(result.trace, "CUSTOM", name="momcozy.agent.web_search")
+    assert [event["payload"]["value"] for event in status_events] == [
+        {"status": "searching"},
+        {"status": "completed"},
+    ]
+    assert status_events[0]["payload"]["semantic"]["label"] == "我在查专业资料～"
+    assert status_events[-1]["payload"]["semantic"]["label"] == "我查好专业资料啦"
     citation_event = _event(result.trace, "CUSTOM", name="momcozy.web_search.citations")
     assert citation_event["payload"]["value"]["citations"] == [
         {
@@ -539,8 +540,12 @@ def test_observed_complex_health_provider_failure_is_bounded_and_side_effect_fre
     assert result.execution_result.final_text == COMPLEX_HEALTH_SEARCH_UNAVAILABLE_RESPONSE
     assert result.trace.tool_calls == []
     assert result.trace.actions == []
-    status_event = _event(result.trace, "CUSTOM", name="momcozy.agent.web_search")
-    assert status_event["payload"]["value"] == {"status": "failed"}
+    status_events = _events(result.trace, "CUSTOM", name="momcozy.agent.web_search")
+    assert [event["payload"]["value"] for event in status_events] == [
+        {"status": "searching"},
+        {"status": "failed"},
+    ]
+    assert status_events[-1]["payload"]["semantic"]["label"] == "专业资料暂时没查好"
 
 
 def test_observed_medical_red_flag_is_blocked_before_runtime_execution() -> None:
@@ -560,9 +565,7 @@ def test_observed_ibclc_requires_semantic_consent_and_creates_no_support_action(
     blocked = scenario.run_turn(
         text="IBCLC 是什么？",
         handlers=handlers,
-        tool_invocations=(
-            scripted_tool_invocation("ibclc_consult_card_create", {"reason": "衔乳疼痛"}),
-        ),
+        tool_invocations=(scripted_tool_invocation("ibclc_consult_card_create", {"reason": "衔乳疼痛"}),),
         final_text="IBCLC 是国际认证哺乳顾问。",
     )
     _assert_tools(blocked.trace, "ibclc_consult_card_create")
@@ -578,9 +581,7 @@ def test_observed_ibclc_requires_semantic_consent_and_creates_no_support_action(
     negated_offer = scenario.run_turn(
         text="好的",
         handlers=handlers,
-        tool_invocations=(
-            scripted_tool_invocation("ibclc_consult_card_create", {"reason": "衔乳疼痛"}),
-        ),
+        tool_invocations=(scripted_tool_invocation("ibclc_consult_card_create", {"reason": "衔乳疼痛"}),),
         final_text="当前不创建咨询入口。",
     )
     _assert_tools(negated_offer.trace, "ibclc_consult_card_create")
@@ -1053,9 +1054,7 @@ class RecordingRuntimeRepository:
             (
                 workflow
                 for workflow in reversed(self.workflow_states)
-                if workflow.thread_id == thread_id
-                and workflow.owner_user_id == owner_user_id
-                and workflow.workflow_type == workflow_type
+                if workflow.thread_id == thread_id and workflow.owner_user_id == owner_user_id and workflow.workflow_type == workflow_type
             ),
             None,
         )
@@ -1142,7 +1141,9 @@ class RecordingPlansService:
         return [task for task in self.tasks if task.plan_id == plan_id and task.task_date in task_dates and task.status == status][:limit]
 
     async def list_tasks(self, *, owner_user_id: UUID, task_date: date, status: str, limit: int):
-        return [task for task in self.tasks if task.owner_user_id == owner_user_id and task.task_date == task_date and task.status == status][:limit]
+        return [
+            task for task in self.tasks if task.owner_user_id == owner_user_id and task.task_date == task_date and task.status == status
+        ][:limit]
 
     async def reschedule_milk_tasks(self, *, owner_user_id: UUID, plan_id: UUID, updates: list[dict[str, Any]], request_id: str):
         del request_id
@@ -1260,9 +1261,7 @@ class FailingHealthBackend:
 
 
 def _assert_tools(trace: AgentEvalTrace, *expected: str) -> None:
-    assert [(call["tool_name"], call["status"]) for call in trace.tool_calls] == [
-        (tool_name, "completed") for tool_name in expected
-    ]
+    assert [(call["tool_name"], call["status"]) for call in trace.tool_calls] == [(tool_name, "completed") for tool_name in expected]
 
 
 def _assert_actions(trace: AgentEvalTrace, *expected: tuple[str, str, str]) -> None:
@@ -1281,20 +1280,16 @@ def _assert_event_types(
 
 
 def _assert_artifact_events(trace: AgentEvalTrace, *artifact_types: str) -> None:
-    observed = [
-        event["payload"].get("artifact_type")
-        for event in trace.events
-        if event["type"] == "artifact.created"
-    ]
+    observed = [event["payload"].get("artifact_type") for event in trace.events if event["type"] == "artifact.created"]
     assert observed == list(artifact_types)
 
 
 def _event(trace: AgentEvalTrace, event_type: str, *, name: str) -> dict[str, Any]:
-    return next(
-        event
-        for event in trace.events
-        if event["type"] == event_type and event["payload"].get("name") == name
-    )
+    return next(event for event in trace.events if event["type"] == event_type and event["payload"].get("name") == name)
+
+
+def _events(trace: AgentEvalTrace, event_type: str, *, name: str) -> list[dict[str, Any]]:
+    return [event for event in trace.events if event["type"] == event_type and event["payload"].get("name") == name]
 
 
 def _event_by_type(trace: AgentEvalTrace, event_type: str) -> dict[str, Any]:

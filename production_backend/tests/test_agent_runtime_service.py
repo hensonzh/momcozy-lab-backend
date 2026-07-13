@@ -57,6 +57,15 @@ def test_agent_runtime_service_creates_run_with_thread_message_events_and_idempo
     assert [event.event_type for event in repository.events] == ["run.queued", "message.completed"]
     assert repository.events[0].payload["phase"] == "queued"
     assert repository.events[0].payload["label"] == "我已经收到你的消息啦～"
+    assert repository.events[0].payload["semantic"] == {
+        "phase": "thinking",
+        "label": "我已经收到你的消息啦～",
+        "surface": "status_bar",
+        "visibility": "status",
+        "merge_key": f"run:{run.id}",
+        "priority": 10,
+        "lifecycle": "running",
+    }
     assert repository.touched_thread == repository.thread
     assert repository.touched_updated_at is not None
     assert controls.active_run == (repository.thread.id, run.id)
@@ -95,6 +104,8 @@ def test_agent_runtime_service_blocks_unsafe_run_before_queueing_model_work() ->
     assert blocked_payload["response_template_key"] == "maternal_infant_health_escalation"
     assert blocked_payload["response_template_version"] == "safety-response.v1"
     assert blocked_payload["handoff_type"] == "medical_or_emergency_support"
+    assert repository.events[2].payload["semantic"]["phase"] == "error"
+    assert repository.events[2].payload["semantic"]["label"] == "这轮暂时没处理好"
     assert controls.active_run is None
     assert controls.queued_run_ids == []
 
@@ -785,9 +796,7 @@ class FakeFactService:
         self.queued_extractions = []
 
     async def sync_form_submission(self, **kwargs):
-        self.form_submissions.append(
-            {key: value for key, value in kwargs.items() if key not in {"observed_at", "request_id"}}
-        )
+        self.form_submissions.append({key: value for key, value in kwargs.items() if key not in {"observed_at", "request_id"}})
 
     async def enqueue_conversation_extraction(self, **kwargs):
         self.queued_extractions.append(kwargs)

@@ -151,8 +151,9 @@ def test_tool_executor_persists_safe_args_and_output() -> None:
         "issue_summary": "Pump does not start",
         "payload": {"api_token": "[redacted]"},
     }
-    assert repository.events[0].payload["semantic"]["surface"] == "status_bar"
-    assert repository.events[0].payload["semantic"]["label"] == "我先准备售后工单草稿～"
+    assert repository.events[0].payload["semantic"]["surface"] == "work_item"
+    assert repository.events[0].payload["semantic"]["visibility"] == "work_item"
+    assert repository.events[0].payload["semantic"]["label"] == "我先帮你准备售后信息表～"
     assert repository.events[1].payload["tool_output_id"] == str(repository.output.id)
     assert repository.events[1].payload["safe_output"] == repository.output.safe_output
     assert repository.events[1].payload["semantic"]["label"] == "我已经准备好预览，等你确认～"
@@ -347,9 +348,7 @@ def test_pregnancy_diary_write_and_changed_event_share_one_commit_boundary() -> 
         repository=repository,
         event_sink=AgentEventSink(repository=repository, after_append=commit),
         handlers={
-            "pregnancy_diary.manage": PregnancyDiaryManageToolHandler(
-                diary_service=FakeDiaryMutationService(owner_user_id=actor.user_id)
-            )
+            "pregnancy_diary.manage": PregnancyDiaryManageToolHandler(diary_service=FakeDiaryMutationService(owner_user_id=actor.user_id))
         },
     )
 
@@ -432,9 +431,7 @@ def test_pregnancy_diary_write_safe_args_omit_health_narrative() -> None:
         registry=default_tool_registry(),
         repository=repository,
         handlers={
-            "pregnancy_diary.manage": PregnancyDiaryManageToolHandler(
-                diary_service=FakeDiaryMutationService(owner_user_id=actor.user_id)
-            )
+            "pregnancy_diary.manage": PregnancyDiaryManageToolHandler(diary_service=FakeDiaryMutationService(owner_user_id=actor.user_id))
         },
     )
 
@@ -465,9 +462,7 @@ def test_pregnancy_diary_read_keeps_private_content_in_ephemeral_tool_output() -
         registry=default_tool_registry(),
         repository=repository,
         handlers={
-            "pregnancy_diary.manage": PregnancyDiaryManageToolHandler(
-                diary_service=FakeDiaryMutationService(owner_user_id=actor.user_id)
-            )
+            "pregnancy_diary.manage": PregnancyDiaryManageToolHandler(diary_service=FakeDiaryMutationService(owner_user_id=actor.user_id))
         },
     )
 
@@ -756,9 +751,7 @@ def test_pregnancy_diary_manage_delete_applies_after_confirmation_and_emits_chan
     executor = ToolExecutor(
         registry=default_tool_registry(),
         repository=repository,
-        handlers={
-            "pregnancy_diary.manage": PregnancyDiaryManageToolHandler(diary_service=diary_service)
-        },
+        handlers={"pregnancy_diary.manage": PregnancyDiaryManageToolHandler(diary_service=diary_service)},
     )
 
     result = asyncio.run(

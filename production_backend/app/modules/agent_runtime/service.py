@@ -14,6 +14,7 @@ from .actions.executor import AgentActionExecutor
 from .actions.policy import AgentActionPolicy, action_presentation_payload
 from .client_context import sanitize_agent_client_context
 from .facts.service import AgentFactService
+from .event_semantics import with_run_event_semantic
 from .memory.service import AgentMemoryService
 from .run_lifecycle.controls import AgentRunControls
 from .run_lifecycle.state_store import AgentRuntimeStateStore
@@ -97,6 +98,7 @@ class AgentRuntimeService:
             active_step=active_step,
             expires_at=expires_at,
         )
+
     async def create_thread(
         self,
         *,
@@ -897,6 +899,7 @@ class AgentRuntimeService:
         )
 
     async def _append_event(self, *, thread_id: UUID, run_id: UUID, event_type: str, payload: dict[str, Any]) -> AgentEvent:
+        payload = with_run_event_semantic(payload, event_type=event_type, run_id=str(run_id))
         event = await self.repository.append_event(thread_id=thread_id, run_id=run_id, event_type=event_type, payload=payload)
         if self.controls is not None:
             await self.controls.set_stream_cursor(run_id=run_id, sequence=event.sequence)

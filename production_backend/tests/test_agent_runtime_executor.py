@@ -134,6 +134,7 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result(capl
         "context_loading",
         "context_ready",
         "model_reasoning",
+        "response_finalizing",
     ]
     timing_payloads = [
         json.loads(record.getMessage())
@@ -241,7 +242,14 @@ def test_agent_runtime_executor_emits_web_search_citation_custom_event() -> None
     citation_events = [
         event for event in repository.events if event.event_type == "CUSTOM" and event.payload.get("name") == "momcozy.web_search.citations"
     ]
+    status_events = [
+        event for event in repository.events if event.event_type == "CUSTOM" and event.payload.get("name") == "momcozy.agent.web_search"
+    ]
     assert result.status == "completed"
+    assert [event.payload["value"]["status"] for event in status_events] == ["searching", "completed"]
+    assert status_events[0].payload["semantic"]["label"] == "我在查专业资料～"
+    assert status_events[0].payload["semantic"]["visibility"] == "work_item"
+    assert status_events[1].payload["semantic"]["label"] == "我查好专业资料啦"
     assert citation_events[0].payload["message_id"] == str(result.assistant_message_id)
     assert citation_events[0].payload["value"]["citations"] == [
         {
@@ -300,10 +308,11 @@ def test_agent_runtime_executor_uses_bounded_fallback_when_required_web_search_f
     assert result.status == "completed"
     assert result.final_text == COMPLEX_HEALTH_SEARCH_UNAVAILABLE_RESPONSE
     assert len(backend.requests) == 1
-    status_event = next(
+    status_events = [
         event for event in repository.events if event.event_type == "CUSTOM" and event.payload.get("name") == "momcozy.agent.web_search"
-    )
-    assert status_event.payload["value"]["status"] == "failed"
+    ]
+    assert [event.payload["value"]["status"] for event in status_events] == ["searching", "failed"]
+    assert status_events[-1].payload["semantic"]["label"] == "专业资料暂时没查好"
 
 
 def test_agent_runtime_executor_injects_trusted_ibclc_consent_context() -> None:
@@ -789,13 +798,27 @@ def test_agent_runtime_executor_publishes_final_text_deltas_to_transient_stream(
             "semantic": transient_stream.progresses[2]["semantic"],
             "dedupe_key": f"{run.id}:run.progress:progress:model_reasoning",
         },
+        {
+            "thread_id": thread_id,
+            "run_id": run.id,
+            "phase": "response_finalizing",
+            "label": "我在组织回复～",
+            "semantic": transient_stream.progresses[3]["semantic"],
+            "dedupe_key": f"{run.id}:run.progress:progress:response_finalizing",
+        },
     ]
     assert all(event.event_type != "message.delta" for event in repository.events)
-    assert all(event.event_type != "run.progress" for event in repository.events)
+    assert [event.payload["phase"] for event in repository.events if event.event_type == "run.progress"] == [
+        "context_loading",
+        "context_ready",
+        "model_reasoning",
+        "response_finalizing",
+    ]
     assert [progress["phase"] for progress in transient_stream.progresses] == [
         "context_loading",
         "context_ready",
         "model_reasoning",
+        "response_finalizing",
     ]
     assert transient_stream.progresses[0]["semantic"]["surface"] == "status_bar"
     assert transient_stream.progresses[2]["semantic"]["surface"] == "thinking_note"
@@ -918,7 +941,7 @@ def test_agent_runtime_executor_does_not_append_unclosed_provider_json_tail() ->
     assert [item["delta"] for item in transient_stream.deltas] == ["Safe answer."]
 
 
-def test_agent_runtime_executor_keeps_progress_transient_when_event_sink_is_configured() -> None:
+def test_agent_runtime_executor_persists_progress_when_event_sink_is_configured() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)
     current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="Stream please", sequence=1)
@@ -941,8 +964,14 @@ def test_agent_runtime_executor_keeps_progress_transient_when_event_sink_is_conf
         "context_loading",
         "context_ready",
         "model_reasoning",
+        "response_finalizing",
     ]
-    assert all(event.event_type != "run.progress" for event in repository.events)
+    assert [event.payload["phase"] for event in repository.events if event.event_type == "run.progress"] == [
+        "context_loading",
+        "context_ready",
+        "model_reasoning",
+        "response_finalizing",
+    ]
 
 
 def test_agent_runtime_executor_requires_current_user_message() -> None:
@@ -1319,7 +1348,10 @@ def test_agent_runtime_executor_generates_quick_replies_with_finalizer() -> None
         {"thread_id": thread_id, "run_id": run.id, "delta": "已经", "message_stream_id": str(result.assistant_message_id)},
         {"thread_id": thread_id, "run_id": run.id, "delta": "整理好了。", "message_stream_id": str(result.assistant_message_id)},
     ]
-    assert "response_finalizing" not in [progress["phase"] for progress in transient_stream.progresses]
+    assert [progress["phase"] for progress in transient_stream.progresses][-2:] == [
+        "response_finalizing",
+        "quick_replies_preparing",
+    ]
 
 
 def test_agent_runtime_executor_requires_exactly_three_finalizer_quick_replies() -> None:
@@ -2152,7 +2184,11 @@ def test_agent_runtime_executor_real_tool_executor_uses_run_actor_role_permissio
     assert tool_events[1].payload["label"] == "个人资料"
     assert tool_events[0].payload["semantic"]["label"] == "我先看看你的基础信息～"
     assert tool_events[1].payload["semantic"]["label"] == "我把基础信息看好啦"
-    assert "model_reasoning_after_tool" in _progress_phases(repository)
+    assert [
+        event.payload["phase"]
+        for event in repository.events
+        if event.event_type == "run.progress" and event.payload["phase"] in {"model_followup", "model_reasoning_after_tool"}
+    ] == ["model_followup", "model_reasoning_after_tool"]
     assert result.final_text == "Profile context loaded."
     assert repository.run_summaries == []
 
@@ -2588,9 +2624,7 @@ def test_agent_runtime_executor_injects_the_current_pregnancy_workflow_before_to
                     ),
                 }
             ]
-            advance_tool = next(
-                tool for tool in request.tools if tool.contract_name == "pregnancy.plan_intake.advance"
-            )
+            advance_tool = next(tool for tool in request.tools if tool.contract_name == "pregnancy.plan_intake.advance")
             await advance_tool.invoke(json.dumps({"action": "submit_personalized_followup"}))
             return SdkNodeResult(final_text="好的，我会把双胎类型记为待产检确认。")
 
@@ -2696,9 +2730,7 @@ def test_agent_runtime_executor_generates_the_plan_in_the_same_final_confirmatio
                 "allowed_actions": ["confirm_ready_to_generate", "submit_final_additional_info", "abandon"],
             }
             assert "pregnancy.plan.propose in the same run" in workflow_context["instruction"]
-            advance_tool = next(
-                tool for tool in request.tools if tool.contract_name == "pregnancy.plan_intake.advance"
-            )
+            advance_tool = next(tool for tool in request.tools if tool.contract_name == "pregnancy.plan_intake.advance")
             invocation = await advance_tool.invoke(json.dumps({"action": "confirm_ready_to_generate"}))
             model_output = json.loads(invocation.output_json)
             assert model_output["workflow_phase"] == "ready_to_generate"

@@ -3,10 +3,14 @@ from uuid import uuid4
 import pytest
 
 from production_backend.app.modules.agent_runtime.event_semantics import (
+    action_event_payload_semantic,
+    artifact_event_payload_semantic,
     progress_live_dedupe_key,
+    run_event_payload_semantic,
     run_progress_payload,
     tool_event_semantic,
 )
+from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.tools.registry import default_tool_registry
 
 
 def test_run_progress_payload_uses_status_bar_semantic_for_visible_progress() -> None:
@@ -41,6 +45,24 @@ def test_run_progress_payload_keeps_model_reasoning_out_of_status_bar() -> None:
     assert payload["semantic"]["label"] == "我想一下"
 
 
+def test_after_tool_progress_preserves_legacy_status_and_thinking_layers() -> None:
+    followup = run_progress_payload(phase="model_followup", label="我接着处理下一步")
+    reasoning = run_progress_payload(phase="model_reasoning_after_tool", label="我想一下")
+
+    assert followup["semantic"] == {
+        "phase": "thinking",
+        "label": "我接着处理下一步",
+        "surface": "status_bar",
+        "visibility": "status",
+        "merge_key": "progress:model_followup",
+        "priority": 55,
+        "lifecycle": "running",
+    }
+    assert reasoning["semantic"]["surface"] == "thinking_note"
+    assert reasoning["semantic"]["visibility"] == "hidden"
+    assert reasoning["semantic"]["label"] == "我想一下"
+
+
 def test_tool_event_semantic_uses_tool_specific_copy() -> None:
     semantic = tool_event_semantic(
         event_type="tool.started",
@@ -50,8 +72,75 @@ def test_tool_event_semantic_uses_tool_specific_copy() -> None:
 
     assert semantic["phase"] == "reading"
     assert semantic["label"] == "我先看看今天的奶量状态～"
-    assert semantic["surface"] == "status_bar"
+    assert semantic["surface"] == "work_item"
+    assert semantic["visibility"] == "work_item"
     assert semantic["lifecycle"] == "running"
+
+
+def test_tool_event_semantic_uses_one_merge_key_for_the_whole_call() -> None:
+    started = tool_event_semantic(
+        event_type="tool.started",
+        tool_name="records.milk_status.read",
+        tool_call_id="call-1",
+        read_or_write="read",
+    )
+    completed = tool_event_semantic(
+        event_type="tool.completed",
+        tool_name="records.milk_status.read",
+        tool_call_id="call-1",
+        safe_output={"status": "completed"},
+        read_or_write="read",
+    )
+
+    assert started["merge_key"] == "tool:call-1"
+    assert completed["merge_key"] == "tool:call-1"
+
+
+def test_every_registered_tool_has_specific_started_copy() -> None:
+    registry = default_tool_registry()
+
+    for contract in registry.list():
+        semantic = tool_event_semantic(
+            event_type="tool.started",
+            tool_name=contract.name,
+            safe_args={"action": "read"} if contract.name == "pregnancy_diary.manage" else {},
+            read_or_write=contract.read_or_write,
+        )
+
+        assert semantic["label"] not in {"我按当前场景继续处理～", "我先看看相关信息～", "我先准备相关信息～"}, contract.name
+
+
+@pytest.mark.parametrize(
+    ("action", "started_label", "status", "completed_label"),
+    [
+        ("read", "我先看看孕期日记～", "diary_list_read", "我看好孕期日记啦"),
+        ("write", "我先帮你保存孕期日记～", "diary_entry_created", "我已经保存好孕期日记啦"),
+        ("update", "我先帮你保存孕期日记～", "diary_entry_updated", "我已经保存好孕期日记啦"),
+        ("delete", "我先帮你删除孕期日记～", "diary_entry_deleted", "我已经删除这条孕期日记啦"),
+    ],
+)
+def test_pregnancy_diary_semantics_follow_action_and_result(
+    action: str,
+    started_label: str,
+    status: str,
+    completed_label: str,
+) -> None:
+    started = tool_event_semantic(
+        event_type="tool.started",
+        tool_name="pregnancy_diary.manage",
+        safe_args={"action": action},
+        read_or_write="write",
+    )
+    completed = tool_event_semantic(
+        event_type="tool.completed",
+        tool_name="pregnancy_diary.manage",
+        safe_args={"action": action},
+        safe_output={"status": status},
+        read_or_write="write",
+    )
+
+    assert started["label"] == started_label
+    assert completed["label"] == completed_label
 
 
 def test_image_inspect_tool_event_semantic_uses_image_copy() -> None:
@@ -134,3 +223,30 @@ def test_pregnancy_diary_no_op_completion_does_not_claim_write_success(
 
     assert semantic["lifecycle"] == "completed"
     assert forbidden_success_copy not in semantic["label"]
+
+
+def test_artifact_and_confirmation_semantics_use_legacy_visible_surfaces() -> None:
+    artifact = artifact_event_payload_semantic(artifact_type="hospital_bag_card", artifact_id="artifact-1")
+    action = action_event_payload_semantic(action_status="pending", action_id="action-1")
+
+    assert artifact["label"] == "我已经帮你生成好待产包清单啦"
+    assert artifact["surface"] == "artifact"
+    assert artifact["visibility"] == "artifact"
+    assert artifact["merge_key"] == "artifact:artifact-1"
+    assert action["label"] == "我需要你确认一下，再继续处理"
+    assert action["surface"] == "action"
+    assert action["visibility"] == "action"
+    assert action["merge_key"] == "action:action-1"
+
+
+def test_run_events_carry_legacy_terminal_semantics() -> None:
+    started = run_event_payload_semantic(event_type="run.started", run_id="run-1")
+    failed = run_event_payload_semantic(event_type="run.failed", run_id="run-1")
+    completed = run_event_payload_semantic(event_type="run.completed", run_id="run-1")
+
+    assert started["label"] == "我已经收到你的消息啦～"
+    assert started["visibility"] == "status"
+    assert failed["label"] == "这轮暂时没处理好"
+    assert failed["visibility"] == "status"
+    assert completed["label"] == "我处理好啦"
+    assert completed["visibility"] == "hidden"
