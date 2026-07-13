@@ -1106,6 +1106,39 @@ def test_tool_executor_marks_tool_call_failed_on_handler_error() -> None:
     assert repository.events[-1].payload["semantic"]["label"] == "个人资料暂时没处理好"
 
 
+def test_tool_executor_logs_safe_exception_type_for_unexpected_handler_error(caplog) -> None:
+    actor = _user(permissions={"profile:read:self"})
+    repository = FakeToolRepository()
+
+    async def unexpected_handler(_context):
+        raise TypeError("private payload must not enter logs")
+
+    executor = ToolExecutor(
+        registry=default_tool_registry(),
+        repository=repository,
+        handlers={"profile.read": unexpected_handler},
+    )
+
+    with caplog.at_level("INFO", logger="production_backend.agent_runtime"):
+        with pytest.raises(ApiError) as exc_info:
+            asyncio.run(
+                executor.execute(
+                    actor=actor,
+                    run_id=uuid4(),
+                    tool_name="profile.read",
+                    call_id="call-unexpected-error",
+                    args={},
+                )
+            )
+
+    assert exc_info.value.code == "tool_failed"
+    records = [json.loads(record.message) for record in caplog.records if record.message.startswith("{")]
+    failure = next(record for record in records if record.get("event") == "agent.tool.unexpected_failure")
+    assert failure["tool_name"] == "profile.read"
+    assert failure["exception_type"] == "TypeError"
+    assert "private payload" not in caplog.text
+
+
 def test_tool_executor_records_success_and_actor_scope_failure_metrics() -> None:
     actor = _user(permissions={"profile:read:self"})
     metrics = RequestMetrics()
