@@ -71,6 +71,43 @@ def test_ongoing_work_supports_multiple_known_workflows_and_ignores_internal_typ
     assert projected[1]["next_step"] == "读取 guide.parts 的设备指导资料并继续。"
 
 
+def test_milk_analysis_projection_keeps_the_current_question_available_for_recovery() -> None:
+    workflow = _workflow(
+        workflow_type="milk_analysis",
+        active_step="diaper_output",
+        state={
+            "phase": "collecting_intake",
+            "current_field": "diaper_output",
+            "next_question": "宝宝最近 24 小时大约有几片湿尿布？",
+            "answers": {"records": "private answer"},
+        },
+    )
+
+    projected = project_ongoing_work([workflow], resident_skill_ids={"milk-management"})
+
+    assert projected == [
+        {
+            "name": "奶量分析",
+            "progress": "奶量分析信息仍在采集中。",
+            "next_step": "宝宝最近 24 小时大约有几片湿尿布？",
+        }
+    ]
+    assert "private answer" not in str(projected)
+
+
+def test_milk_analysis_projection_omits_completed_assessments() -> None:
+    workflow = _workflow(
+        workflow_type="milk_analysis",
+        active_step="assessment_complete",
+        state={
+            "phase": "assessment_complete",
+            "assessment": {"plan_decision": {"can_start_plan": True}},
+        },
+    )
+
+    assert project_ongoing_work([workflow], resident_skill_ids={"milk-management"}) == []
+
+
 def _workflow(*, workflow_type: str, active_step: str, state: dict) -> AgentWorkflowState:
     now = datetime(2026, 7, 12, 12, 0, tzinfo=timezone.utc)
     return AgentWorkflowState(

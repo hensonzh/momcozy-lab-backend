@@ -238,9 +238,7 @@ def test_agent_runtime_executor_emits_web_search_citation_custom_event() -> None
     )
 
     citation_events = [
-        event
-        for event in repository.events
-        if event.event_type == "CUSTOM" and event.payload.get("name") == "momcozy.web_search.citations"
+        event for event in repository.events if event.event_type == "CUSTOM" and event.payload.get("name") == "momcozy.web_search.citations"
     ]
     assert result.status == "completed"
     assert citation_events[0].payload["message_id"] == str(result.assistant_message_id)
@@ -302,9 +300,7 @@ def test_agent_runtime_executor_uses_bounded_fallback_when_required_web_search_f
     assert result.final_text == COMPLEX_HEALTH_SEARCH_UNAVAILABLE_RESPONSE
     assert len(backend.requests) == 1
     status_event = next(
-        event
-        for event in repository.events
-        if event.event_type == "CUSTOM" and event.payload.get("name") == "momcozy.agent.web_search"
+        event for event in repository.events if event.event_type == "CUSTOM" and event.payload.get("name") == "momcozy.agent.web_search"
     )
     assert status_event.payload["value"]["status"] == "failed"
 
@@ -365,9 +361,7 @@ def test_agent_runtime_executor_projects_recent_ibclc_client_event_into_next_tur
     client_events = _runtime_context(backend.requests[0])["working_context"]["client_events"]
     assert client_events == [{"type": "ibclc_consult_completed"}]
     assert "private health detail" not in str(client_events)
-    assert repository.client_event_queries == [
-        {"thread_id": thread_id, "owner_user_id": run.actor_user_id, "limit": 10}
-    ]
+    assert repository.client_event_queries == [{"thread_id": thread_id, "owner_user_id": run.actor_user_id, "limit": 10}]
 
 
 @pytest.mark.parametrize(
@@ -633,9 +627,7 @@ def test_agent_runtime_executor_loads_birth_prep_with_structured_business_fact_r
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            business_facts_projector=BusinessFactsProjector(
-                handlers={"pregnancy.plan_context.read": pregnancy_context_handler}
-            ),
+            business_facts_projector=BusinessFactsProjector(handlers={"pregnancy.plan_context.read": pregnancy_context_handler}),
             sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
         ).execute(run=run)
     )
@@ -2471,6 +2463,220 @@ def test_agent_runtime_executor_injects_current_workflow_and_authenticated_check
     }
 
 
+@pytest.mark.parametrize(
+    ("workflow_type", "workflow_status", "active_step", "state", "tool_name", "tool_args"),
+    [
+        (
+            "pregnancy_plan",
+            "waiting",
+            "personalized_followup",
+            {
+                "phase": "personalized_followup",
+                "visible_question": "目前双胎类型确认了吗？",
+                "followup_topics": [],
+                "personalized_followup_records": [],
+            },
+            "pregnancy.plan_intake.advance",
+            {"action": "submit_personalized_followup"},
+        ),
+        (
+            "milk_analysis",
+            "collecting",
+            "diaper_output",
+            {
+                "phase": "collecting_intake",
+                "current_field": "diaper_output",
+                "next_question": "宝宝最近 24 小时大约有几片湿尿布？",
+            },
+            "records.milk_analysis.intake",
+            {"action": "answer"},
+        ),
+        (
+            "device_unboxing",
+            "waiting",
+            "guide.controls",
+            {"phase": "guiding", "device_model": "Air1", "completed_steps": ["guide.parts"]},
+            "devices.unboxing.advance",
+            {"model": "Air1", "action": "complete_current"},
+        ),
+    ],
+)
+def test_agent_runtime_executor_rejects_stale_replies_without_failing_the_run(
+    workflow_type: str,
+    workflow_status: str,
+    active_step: str,
+    state: dict[str, Any],
+    tool_name: str,
+    tool_args: dict[str, Any],
+) -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    workflow = AgentWorkflowState(
+        id=uuid4(),
+        thread_id=thread_id,
+        owner_user_id=run.actor_user_id,
+        run_id=uuid4(),
+        workflow_type=workflow_type,
+        status=workflow_status,
+        schema_version="v1",
+        state=state,
+        active_step=active_step,
+        revision=5,
+        step_token="current-step-token",
+    )
+    current_user = _message(
+        thread_id=thread_id,
+        run_id=run.id,
+        role="user",
+        text="这是上一道问题的延迟回复。",
+        sequence=2,
+        content_overrides={
+            "client_context": {
+                "workflow_reply": {
+                    "workflow_state_id": str(workflow.id),
+                    "workflow_type": workflow_type,
+                    "revision": 4,
+                    "step_token": "old-step-token",
+                }
+            }
+        },
+    )
+    repository = FakeRuntimeRepository(
+        messages=[current_user],
+        current_message=current_user,
+        run=run,
+        workflow_states=[workflow],
+    )
+    handler_called = False
+
+    async def guarded_handler(_context: ToolHandlerContext) -> dict[str, Any]:
+        nonlocal handler_called
+        handler_called = True
+        return {"status": "should_not_run"}
+
+    class RecoveringBackend:
+        def __init__(self) -> None:
+            self.error_code = ""
+
+        async def run(self, request: SdkNodeRequest) -> SdkNodeResult:
+            tool = next(item for item in request.tools if item.contract_name == tool_name)
+            try:
+                await tool.invoke(json.dumps(tool_args))
+            except ApiError as exc:
+                self.error_code = exc.code
+            return SdkNodeResult(final_text="刚才的问题已经变化，请按当前问题继续。")
+
+    backend = RecoveringBackend()
+    registry = default_tool_registry()
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            tool_registry=registry,
+            tool_executor=ToolExecutor(
+                registry=registry,
+                repository=repository,
+                handlers={tool_name: guarded_handler},
+            ),
+        ).execute(run=run)
+    )
+
+    assert result.status == "completed"
+    assert backend.error_code == "stale_workflow_step"
+    assert handler_called is False
+    assert result.workflow_reply == {
+        "workflow_state_id": str(workflow.id),
+        "workflow_type": workflow_type,
+        "revision": 5,
+        "step_token": "current-step-token",
+    }
+
+
+def test_agent_runtime_executor_reissues_the_rejected_workflow_cursor_when_multiple_flows_are_active() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    pregnancy_workflow = AgentWorkflowState(
+        id=uuid4(),
+        thread_id=thread_id,
+        owner_user_id=run.actor_user_id,
+        run_id=uuid4(),
+        workflow_type="pregnancy_plan",
+        status="waiting",
+        schema_version="v1",
+        state={
+            "phase": "personalized_followup",
+            "visible_question": "目前双胎类型确认了吗？",
+            "followup_topics": [],
+            "personalized_followup_records": [],
+        },
+        active_step="personalized_followup",
+        revision=7,
+        step_token="pregnancy-current-token",
+    )
+    device_workflow = AgentWorkflowState(
+        id=uuid4(),
+        thread_id=thread_id,
+        owner_user_id=run.actor_user_id,
+        run_id=uuid4(),
+        workflow_type="device_unboxing",
+        status="waiting",
+        schema_version="v1",
+        state={"phase": "guiding", "device_model": "Air1", "completed_steps": []},
+        active_step="guide.parts",
+        revision=3,
+        step_token="device-current-token",
+    )
+    current_user = _message(
+        thread_id=thread_id,
+        run_id=run.id,
+        role="user",
+        text="这是对孕期问题的延迟回复。",
+        sequence=2,
+        content_overrides={
+            "client_context": {
+                "workflow_reply": {
+                    "workflow_state_id": str(device_workflow.id),
+                    "workflow_type": "device_unboxing",
+                    "revision": 3,
+                    "step_token": "device-current-token",
+                }
+            }
+        },
+    )
+    repository = FakeRuntimeRepository(
+        messages=[current_user],
+        current_message=current_user,
+        run=run,
+        workflow_states=[device_workflow, pregnancy_workflow],
+    )
+
+    class RecoveringBackend:
+        async def run(self, request: SdkNodeRequest) -> SdkNodeResult:
+            tool = next(item for item in request.tools if item.contract_name == "pregnancy.plan_intake.advance")
+            with pytest.raises(ApiError) as exc_info:
+                await tool.invoke(json.dumps({"action": "submit_personalized_followup"}))
+            assert exc_info.value.code == "stale_workflow_step"
+            return SdkNodeResult(final_text="孕期计划的问题已经变化，请按当前问题继续。")
+
+    registry = default_tool_registry()
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=RecoveringBackend()),
+            tool_registry=registry,
+            tool_executor=ToolExecutor(registry=registry, repository=repository, handlers={}),
+        ).execute(run=run)
+    )
+
+    assert result.status == "completed"
+    assert result.workflow_reply == {
+        "workflow_state_id": str(pregnancy_workflow.id),
+        "workflow_type": "pregnancy_plan",
+        "revision": 7,
+        "step_token": "pregnancy-current-token",
+    }
+
+
 def test_agent_runtime_executor_preserves_initial_analysis_then_one_checkup_upload_prompt() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)
@@ -3343,14 +3549,8 @@ class FakeRuntimeRepository:
         return [message for message in self.messages if message.thread_id == thread_id][:limit]
 
     async def list_client_events_for_thread(self, *, thread_id, owner_user_id, limit=10):
-        self.client_event_queries.append(
-            {"thread_id": thread_id, "owner_user_id": owner_user_id, "limit": limit}
-        )
-        return [
-            event
-            for event in self.events
-            if event.thread_id == thread_id and event.event_type == "client.event"
-        ][-limit:]
+        self.client_event_queries.append({"thread_id": thread_id, "owner_user_id": owner_user_id, "limit": limit})
+        return [event for event in self.events if event.thread_id == thread_id and event.event_type == "client.event"][-limit:]
 
     async def get_run(self, *, run_id):
         if self.run is not None and self.run.id == run_id:

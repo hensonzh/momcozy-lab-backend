@@ -27,6 +27,8 @@ def test_state_store_creates_workflow_state_as_json_safe_process_state() -> None
     assert workflow_state.workflow_type == "milk_analysis_intake"
     assert workflow_state.status == "collecting"
     assert workflow_state.active_step == "collect_daily_volume"
+    assert workflow_state.revision == 1
+    assert workflow_state.step_token
     assert workflow_state.state == {
         "current_field": "daily_volume",
         "record_ids": [str(nested_id)],
@@ -80,6 +82,7 @@ def test_state_store_upserts_one_active_workflow_per_thread_and_type() -> None:
             active_step="guide.parts",
         )
     )
+    initial_step_token = created.step_token
     updated_run_id = uuid4()
     updated = asyncio.run(
         store.upsert_active_workflow(
@@ -98,6 +101,8 @@ def test_state_store_upserts_one_active_workflow_per_thread_and_type() -> None:
     assert updated.status == "waiting"
     assert updated.active_step == "guide.controls"
     assert updated.state["completed_steps"] == ["guide.parts"]
+    assert updated.revision == 2
+    assert updated.step_token != initial_step_token
     assert len(repository.workflow_states) == 1
 
 

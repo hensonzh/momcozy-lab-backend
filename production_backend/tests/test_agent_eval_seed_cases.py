@@ -244,7 +244,7 @@ def test_product_agent_eval_seed_covers_working_context_and_durable_workflows() 
         {
             "contract": "devices.unboxing.advance",
             "timing": "after_user_completes_current_step",
-            "args_subset": {"action": "complete_current", "expected_step": "guide.parts"},
+            "args_subset": {"action": "complete_current"},
         }
     ]
 

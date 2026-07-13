@@ -212,7 +212,29 @@ class OpenAIResponsesApiBackend:
                         details={"sdk_tool_name": function_call["name"]},
                     )
                 args_json = function_call["arguments"]
-                invocation = await tool.invoke(args_json)
+                try:
+                    invocation = await tool.invoke(args_json)
+                except ApiError as exc:
+                    if _fatal_tool_error(exc):
+                        raise
+                    error_output = _tool_error_model_output(exc)
+                    context.append(
+                        {
+                            "type": "function_call_output",
+                            "call_id": function_call["call_id"],
+                            "output": error_output,
+                        }
+                    )
+                    observed_tool_calls.append(
+                        {
+                            "tool_name": tool.contract_name,
+                            "status": "failed",
+                            "args": _json_object_or_raw(args_json),
+                            "error_code": exc.code,
+                            "safe_output": _json_object_or_raw(error_output),
+                        }
+                    )
+                    continue
                 context.append(
                     {
                         "type": "function_call_output",
@@ -1048,12 +1070,9 @@ def _build_function_tool(
                 )
             return _agents_sdk_tool_model_output(invocation)
         except ApiError as exc:
-            if exc.code == "tool_commit_failed":
+            if _fatal_tool_error(exc):
                 raise
-            return json.dumps(
-                {"error": {"code": exc.code, "message": "Tool call was rejected by application policy."}},
-                sort_keys=True,
-            )
+            return _tool_error_model_output(exc)
 
     return function_tool_cls(
         name=definition.sdk_name,
@@ -1061,6 +1080,17 @@ def _build_function_tool(
         params_json_schema=definition.params_json_schema,
         on_invoke_tool=invoke_tool,
         strict_json_schema=False,
+    )
+
+
+def _fatal_tool_error(exc: ApiError) -> bool:
+    return exc.code == "tool_commit_failed" or exc.details.get("fatal") is True
+
+
+def _tool_error_model_output(exc: ApiError) -> str:
+    return json.dumps(
+        {"error": {"code": exc.code, "message": "Tool call was rejected by application policy."}},
+        sort_keys=True,
     )
 
 

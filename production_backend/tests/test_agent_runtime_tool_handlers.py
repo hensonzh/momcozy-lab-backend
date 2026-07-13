@@ -1040,7 +1040,7 @@ def test_device_unboxing_advance_tool_completes_current_step_and_returns_next_st
             _context(
                 actor=actor,
                 thread_id=thread_id,
-                args={"model": "Air1", "action": "complete_current", "expected_step": "guide.parts"},
+                args={"model": "Air1", "action": "complete_current"},
             )
         )
     )
@@ -1050,37 +1050,6 @@ def test_device_unboxing_advance_tool_completes_current_step_and_returns_next_st
     assert result["workflow"]["current_step"] == "guide.controls"
     assert result["guidance"]["current_step"]["id"] == "guide.controls"
     assert runtime_service.workflow_state.active_step == "guide.controls"
-
-
-def test_device_unboxing_advance_tool_rejects_stale_expected_step() -> None:
-    actor = _user()
-    thread_id = uuid4()
-    runtime_service = FakeAgentRuntimeService()
-    runtime_service.workflow_state = AgentWorkflowState(
-        id=uuid4(),
-        thread_id=thread_id,
-        owner_user_id=actor.user_id,
-        run_id=uuid4(),
-        workflow_type="device_unboxing",
-        status="waiting",
-        schema_version="v1",
-        state={"phase": "guiding", "device_model": "Air1", "completed_steps": ["guide.parts"]},
-        active_step="guide.controls",
-    )
-    handler = DeviceUnboxingAdvanceToolHandler(runtime_service=runtime_service, asset_service=FakeAssetService())
-
-    with pytest.raises(ApiError) as exc_info:
-        asyncio.run(
-            handler(
-                _context(
-                    actor=actor,
-                    thread_id=thread_id,
-                    args={"model": "Air1", "action": "complete_current", "expected_step": "guide.parts"},
-                )
-            )
-        )
-
-    assert exc_info.value.code == "stale_device_unboxing_step"
 
 
 def test_image_inspect_tool_handler_loads_visible_packaged_image_as_transient_model_context() -> None:
@@ -2286,6 +2255,53 @@ def test_pregnancy_plan_intake_advance_exposes_one_followup_with_full_reasoning_
     assert "高龄孕产妇属于产科管理分层" in model_context
     assert "计划会更早关注血压血糖" in model_context
     assert model_context.count("有没有已经被提醒过或正在复查的项目") == 1
+
+
+@pytest.mark.parametrize("model_topic", [None, "multiple_pregnancy_type"])
+def test_pregnancy_plan_intake_advance_binds_the_runtime_current_followup_topic(model_topic: str | None) -> None:
+    runtime_service = FakeAgentRuntimeService()
+    workflow = {
+        "phase": "personalized_followup",
+        "source_form_artifact_id": "form-1",
+        "source_form_submission_id": "submission-1",
+        "analysis_run_id": "analysis-run",
+        "plan_context": {"current_week": "25周", "fetus_count": "双胎"},
+        "analysis": {"stage": {"id": "second_trimester"}, "focuses": []},
+        "followup_topics": [
+            {
+                "id": "multiple_pregnancy_monitoring",
+                "observation": "多胎妊娠需要更密切地关注复查节奏。",
+                "management_meaning": "双胎类型会影响监测重点。",
+                "plan_impact": "计划会纳入对应的复查与异常联系路径。",
+                "question": "目前双胎类型确认了吗？",
+                "reply_options": ["单绒双羊", "双绒双羊", "还没确认"],
+            }
+        ],
+        "personalized_followup_records": [],
+    }
+
+    model_args = {
+        "action": "submit_personalized_followup",
+        "answer": "模型转述不应成为可信答案",
+        "trusted_current_user_text": "双胎类型还没完全确认",
+        "runtime_workflow_context": workflow,
+        "runtime_checkup_attachment_count": 0,
+    }
+    if model_topic is not None:
+        model_args["topic"] = model_topic
+
+    result = asyncio.run(PregnancyPlanIntakeAdvanceToolHandler(runtime_service=runtime_service)(_context(args=model_args)))
+
+    assert isinstance(result, ToolHandlerResult)
+    assert runtime_service.workflow_state is not None
+    assert runtime_service.workflow_state.state["personalized_followup_records"] == [
+        {
+            "topic": "multiple_pregnancy_monitoring",
+            "question": "目前双胎类型确认了吗？",
+            "answer": "双胎类型还没完全确认",
+            "plan_impact": "计划会纳入对应的复查与异常联系路径。",
+        }
+    ]
 
 
 def test_pregnancy_plan_intake_upload_cannot_be_forged_without_runtime_verified_attachment() -> None:

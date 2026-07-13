@@ -594,6 +594,8 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
         "submit_final_additional_info",
         "abandon",
     }
+    assert "topic" not in pregnancy_intake_advance_schema["properties"]
+    assert "expected_step" not in registry.get("devices.unboxing.advance").input_schema["properties"]
     assert "runtime_workflow_context" not in pregnancy_intake_advance_schema["properties"]
     assert "runtime_checkup_attachment_count" not in pregnancy_intake_advance_schema["properties"]
     assert task_create_schema["additionalProperties"] is False
@@ -1206,6 +1208,118 @@ def test_responses_runner_appends_trusted_developer_context_after_tool_output(mo
         "role": "developer",
         "content": "validated milk-management skill instructions",
     }
+
+
+def test_responses_runner_returns_recoverable_tool_errors_to_the_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_openai = types.ModuleType("openai")
+    fake_openai.__spec__ = ModuleSpec("openai", loader=None)
+    fake_openai.AsyncOpenAI = FakeAsyncOpenAI
+    monkeypatch.setitem(sys.modules, "openai", fake_openai)
+    FakeAsyncOpenAI.reset(
+        [
+            FakeOpenAIResponse(
+                id="resp_1",
+                output=[
+                    {
+                        "type": "function_call",
+                        "name": "pregnancy_plan_intake_advance",
+                        "call_id": "call_1",
+                        "arguments": '{"action":"submit_personalized_followup"}',
+                    }
+                ],
+            ),
+            FakeOpenAIResponse(id="resp_2", output=[], output_text="我会按当前步骤继续处理。"),
+        ]
+    )
+
+    async def invoke(_args_json: str) -> SdkToolInvocationResult:
+        raise ApiError(
+            code="pregnancy_plan_workflow_action_not_allowed",
+            message="private workflow details",
+            status=409,
+        )
+
+    request = SdkNodeRequest(
+        run_id="run_1",
+        thread_id="thread_1",
+        actor_user_id="user_1",
+        instructions="Continue the current workflow.",
+        model_input=[{"role": "user", "content": "还没确认"}],
+        tools=(
+            SdkToolDefinition(
+                contract_name="pregnancy.plan_intake.advance",
+                sdk_name="pregnancy_plan_intake_advance",
+                description="Advance the active intake.",
+                params_json_schema={"type": "object", "properties": {}},
+                invoke=invoke,
+            ),
+        ),
+    )
+
+    result = asyncio.run(OpenAIResponsesRunner(model="gpt-test").run_reasoning(request))
+
+    assert result.final_text == "我会按当前步骤继续处理。"
+    error_output = json.loads(FakeAsyncOpenAI.calls[1]["input"][-1]["output"])
+    assert error_output == {
+        "error": {
+            "code": "pregnancy_plan_workflow_action_not_allowed",
+            "message": "Tool call was rejected by application policy.",
+        }
+    }
+    assert "private workflow details" not in FakeAsyncOpenAI.calls[1]["input"][-1]["output"]
+
+
+def test_responses_runner_keeps_tool_commit_failures_fatal(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_openai = types.ModuleType("openai")
+    fake_openai.__spec__ = ModuleSpec("openai", loader=None)
+    fake_openai.AsyncOpenAI = FakeAsyncOpenAI
+    monkeypatch.setitem(sys.modules, "openai", fake_openai)
+    FakeAsyncOpenAI.reset(
+        [
+            FakeOpenAIResponse(
+                id="resp_1",
+                output=[
+                    {
+                        "type": "function_call",
+                        "name": "pregnancy_plan_intake_advance",
+                        "call_id": "call_1",
+                        "arguments": "{}",
+                    }
+                ],
+            )
+        ]
+    )
+
+    async def invoke(_args_json: str) -> SdkToolInvocationResult:
+        raise ApiError(
+            code="tool_commit_failed",
+            message="Tool result could not be committed.",
+            status=503,
+            details={"fatal": True},
+        )
+
+    request = SdkNodeRequest(
+        run_id="run_1",
+        thread_id="thread_1",
+        actor_user_id="user_1",
+        instructions="Continue the current workflow.",
+        model_input=[{"role": "user", "content": "继续"}],
+        tools=(
+            SdkToolDefinition(
+                contract_name="pregnancy.plan_intake.advance",
+                sdk_name="pregnancy_plan_intake_advance",
+                description="Advance the active intake.",
+                params_json_schema={"type": "object", "properties": {}},
+                invoke=invoke,
+            ),
+        ),
+    )
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(OpenAIResponsesRunner(model="gpt-test").run_reasoning(request))
+
+    assert exc_info.value.code == "tool_commit_failed"
+    assert len(FakeAsyncOpenAI.calls) == 1
 
 
 def test_responses_runner_preserves_multimodal_context_added_after_tool_output(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -120,6 +120,31 @@ def test_agent_run_worker_attaches_quick_replies_to_transient_completed_message_
     ]
 
 
+def test_agent_run_worker_persists_workflow_reply_cursor_on_completed_message() -> None:
+    repository = FakeAgentRuntimeRepository()
+    workflow_reply = {
+        "workflow_state_id": str(uuid4()),
+        "workflow_type": "milk_analysis",
+        "revision": 3,
+        "step_token": "opaque-step-token",
+    }
+
+    async def handler(_run: AgentRun) -> AgentRunWorkerResult:
+        return AgentRunWorkerResult(
+            status="completed",
+            final_text="请告诉我宝宝最近的尿布情况。",
+            workflow_reply=workflow_reply,
+        )
+
+    asyncio.run(AgentRunWorker(repository=repository, handler=handler).run_once(run_id=repository.run.id))
+
+    assert repository.messages[0].content == {
+        "text": "请告诉我宝宝最近的尿布情况。",
+        "workflow_reply": workflow_reply,
+    }
+    assert repository.events[1].payload["workflow_reply"] == workflow_reply
+
+
 def test_agent_run_worker_cancels_before_handler_when_cancel_requested() -> None:
     repository = FakeAgentRuntimeRepository()
     controls = FakeAgentRunControls(cancel_requested=True)

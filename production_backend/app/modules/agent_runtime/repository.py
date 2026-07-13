@@ -724,6 +724,8 @@ class AgentRuntimeRepository:
         schema_version: str,
         state: dict[str, Any],
         active_step: str,
+        revision: int,
+        step_token: str,
         expires_at: datetime | None,
     ) -> AgentWorkflowState:
         workflow_state = AgentWorkflowState(
@@ -735,6 +737,8 @@ class AgentRuntimeRepository:
             schema_version=schema_version,
             state=state,
             active_step=active_step,
+            revision=revision,
+            step_token=step_token,
             expires_at=expires_at,
         )
         self.session.add(workflow_state)
@@ -748,6 +752,8 @@ class AgentRuntimeRepository:
         status: str | None = None,
         state: dict[str, Any] | None = None,
         active_step: str | None = None,
+        revision: int | None = None,
+        step_token: str | None = None,
         completed_at: datetime | None = None,
         expires_at: datetime | None = None,
     ) -> AgentWorkflowState:
@@ -757,6 +763,10 @@ class AgentRuntimeRepository:
             workflow_state.state = state
         if active_step is not None:
             workflow_state.active_step = active_step
+        if revision is not None:
+            workflow_state.revision = revision
+        if step_token is not None:
+            workflow_state.step_token = step_token
         if completed_at is not None:
             workflow_state.completed_at = completed_at
         if expires_at is not None:

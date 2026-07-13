@@ -78,6 +78,13 @@ from ..models import AgentAction, AgentArtifact, AgentEvent, AgentMessage, Agent
 from ..payloads import DEFAULT_MAX_INLINE_PAYLOAD_BYTES, maybe_externalize_json_payload
 from ..repository import AgentRuntimeRepository
 from ..response_text import AppendOnlyAgentResponseProjector, agent_response_text_integrity
+from ..workflow_reply import (
+    build_workflow_reply_context,
+    guarded_workflow_type,
+    normalize_workflow_reply_context,
+    validate_workflow_reply_context,
+    workflow_accepts_reply,
+)
 from ..sdk import (
     AgentModelRunner,
     SdkNodeRequest,
@@ -224,6 +231,9 @@ class AgentRuntimeExecutor:
         self._run_visible_image_urls: dict[UUID, tuple[str, ...]] = {}
         self._run_hospital_bag_cart_groups: dict[UUID, list[dict[str, Any]] | None] = {}
         self._run_text_segment_counts: dict[UUID, int] = {}
+        self._run_workflow_replies: dict[UUID, dict[str, Any]] = {}
+        self._run_guarded_workflow_types: dict[UUID, list[str]] = {}
+        self._run_workflow_reply_recovery_types: dict[UUID, str] = {}
         self._unified_load_service_skill = isinstance(self.tool_executor, ToolExecutor)
 
     async def __call__(self, run: AgentRun) -> AgentRunExecutionResult:
@@ -245,6 +255,12 @@ class AgentRuntimeExecutor:
             self._run_trusted_form_submissions[run.id] = _trusted_form_submissions(turn_context.current_message)
             self._run_checkup_attachment_counts[run.id] = _runtime_checkup_attachment_count(turn_context.current_message)
             self._run_current_user_text[run.id] = _message_text(turn_context.current_message)
+            self._run_workflow_replies[run.id] = _workflow_reply_for_turn(
+                current_message=turn_context.current_message,
+                messages=turn_context.messages,
+            )
+            self._run_guarded_workflow_types[run.id] = []
+            self._run_workflow_reply_recovery_types[run.id] = ""
             self._run_previous_assistant_text[run.id] = _latest_assistant_text_before(
                 messages=turn_context.messages,
                 before_sequence=turn_context.current_message.sequence,
@@ -265,9 +281,7 @@ class AgentRuntimeExecutor:
                 self._run_current_user_text[run.id],
                 loaded_skill_ids,
             )
-            health_web_search_required = complex_health and not needs_breast_triage_first(
-                self._run_current_user_text[run.id]
-            )
+            health_web_search_required = complex_health and not needs_breast_triage_first(self._run_current_user_text[run.id])
             prepared_turn = self._prepare_model_turn(
                 turn_context=turn_context,
                 health_context_lines=health_context_lines,
@@ -339,6 +353,9 @@ class AgentRuntimeExecutor:
             self._run_visible_image_urls.pop(run.id, None)
             self._run_hospital_bag_cart_groups.pop(run.id, None)
             self._run_text_segment_counts.pop(run.id, None)
+            self._run_workflow_replies.pop(run.id, None)
+            self._run_guarded_workflow_types.pop(run.id, None)
+            self._run_workflow_reply_recovery_types.pop(run.id, None)
 
     async def _load_turn_context(self, *, run: AgentRun) -> _AgentTurnContext:
         timings_ms: dict[str, float] = {}
@@ -597,11 +614,13 @@ class AgentRuntimeExecutor:
             final_text_length=len(final_text),
             quick_reply_count=len(quick_replies),
         )
+        workflow_reply = await self._completed_turn_workflow_reply(run=run)
         return AgentRunExecutionResult(
             status="completed",
             final_text=final_text,
             assistant_message_id=self._run_assistant_message_ids.get(run.id),
             quick_replies=quick_replies,
+            workflow_reply=workflow_reply,
             stream_segment_count=self._run_text_segment_counts.get(run.id, 0),
         )
 
@@ -932,7 +951,7 @@ class AgentRuntimeExecutor:
             "call_id": f"sdk-{sdk_name}-{uuid4().hex}",
             "args": args,
         }
-        trusted_args = await self._trusted_tool_args(run=run, contract_name=contract_name)
+        trusted_args = await self._trusted_tool_args(run=run, contract_name=contract_name, args=args)
         if trusted_args:
             execute_kwargs["trusted_args"] = trusted_args
         if contract_name == LOAD_SERVICE_SKILL_TOOL_NAME and isinstance(self.tool_executor, ToolExecutor):
@@ -959,7 +978,29 @@ class AgentRuntimeExecutor:
             model_context=result.model_context,
         )
 
-    async def _trusted_tool_args(self, *, run: AgentRun, contract_name: str) -> dict[str, Any]:
+    async def _trusted_tool_args(
+        self,
+        *,
+        run: AgentRun,
+        contract_name: str,
+        args: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        guarded_type = guarded_workflow_type(contract_name, args or {})
+        if guarded_type is not None:
+            guarded_types = self._run_guarded_workflow_types.setdefault(run.id, [])
+            if not guarded_types or guarded_types[-1] != guarded_type:
+                guarded_types.append(guarded_type)
+            guarded_workflow = await self._latest_workflow_state(run=run, workflow_type=guarded_type)
+            if guarded_workflow is not None:
+                try:
+                    validate_workflow_reply_context(
+                        guarded_workflow,
+                        self._run_workflow_replies.get(run.id, {}),
+                    )
+                except ApiError as exc:
+                    if exc.code in {"missing_workflow_reply_context", "stale_workflow_step"}:
+                        self._run_workflow_reply_recovery_types[run.id] = guarded_type
+                    raise
         if contract_name == "records.milk_analysis.intake":
             return {"trusted_current_user_text": self._run_current_user_text.get(run.id, "")}
         expected_form_id = FORM_TOOL_IDS.get(contract_name)
@@ -1047,27 +1088,64 @@ class AgentRuntimeExecutor:
         return facts
 
     async def _latest_pregnancy_plan_workflow(self, *, run: AgentRun) -> dict[str, Any]:
-        loader = getattr(self.repository, "get_latest_workflow_state_for_thread", None)
-        if not callable(loader):
-            return {}
-        workflow = await loader(
-            thread_id=run.thread_id,
-            owner_user_id=run.actor_user_id,
-            workflow_type=PREGNANCY_PLAN_WORKFLOW_TYPE,
-        )
+        workflow = await self._latest_workflow_state(run=run, workflow_type=PREGNANCY_PLAN_WORKFLOW_TYPE)
         if workflow is None:
             return {}
-        expires_at = workflow.expires_at
-        if expires_at is not None:
-            normalized_expires_at = expires_at if expires_at.tzinfo is not None else expires_at.replace(tzinfo=timezone.utc)
-            if normalized_expires_at <= datetime.now(timezone.utc):
-                return {}
         return {
             "workflow_state_id": str(workflow.id),
             "run_id": str(workflow.run_id or ""),
             "status": workflow.status,
             "state": dict(workflow.state) if isinstance(workflow.state, dict) else {},
         }
+
+    async def _latest_workflow_state(self, *, run: AgentRun, workflow_type: str) -> AgentWorkflowState | None:
+        loader = getattr(self.repository, "get_latest_workflow_state_for_thread", None)
+        if not callable(loader):
+            return None
+        workflow = await loader(
+            thread_id=run.thread_id,
+            owner_user_id=run.actor_user_id,
+            workflow_type=workflow_type,
+        )
+        if workflow is None:
+            return None
+        expires_at = workflow.expires_at
+        if expires_at is not None:
+            normalized_expires_at = expires_at if expires_at.tzinfo is not None else expires_at.replace(tzinfo=timezone.utc)
+            if normalized_expires_at <= datetime.now(timezone.utc):
+                return None
+        return workflow
+
+    async def _completed_turn_workflow_reply(self, *, run: AgentRun) -> dict[str, Any]:
+        loader = getattr(self.repository, "list_active_workflow_states_for_thread", None)
+        if not callable(loader):
+            return {}
+        workflows = await loader(
+            thread_id=run.thread_id,
+            owner_user_id=run.actor_user_id,
+            limit=10,
+        )
+        requested_type = _text(self._run_workflow_replies.get(run.id, {}), "workflow_type")
+        recovery_type = self._run_workflow_reply_recovery_types.get(run.id, "")
+        guarded_types = self._run_guarded_workflow_types.get(run.id, [])
+        preferred_types = [
+            recovery_type,
+            *(workflow.workflow_type for workflow in workflows if workflow.run_id == run.id),
+            *reversed(guarded_types),
+            requested_type,
+        ]
+        checked_types: set[str] = set()
+        for workflow_type in preferred_types:
+            if not workflow_type or workflow_type in checked_types:
+                continue
+            checked_types.add(workflow_type)
+            for workflow in workflows:
+                if workflow.workflow_type != workflow_type or not workflow_accepts_reply(workflow):
+                    continue
+                reply = build_workflow_reply_context(workflow)
+                if reply:
+                    return reply
+        return {}
 
     async def _pregnancy_plan_pre_model_urgent_signal_ids(
         self,
@@ -1525,11 +1603,7 @@ def _history_messages_before(*, messages: list[AgentMessage], before_sequence: i
 
 def _latest_assistant_text_before(*, messages: list[AgentMessage], before_sequence: int) -> str:
     return next(
-        (
-            _message_text(message)
-            for message in reversed(messages)
-            if message.sequence < before_sequence and message.role == "assistant"
-        ),
+        (_message_text(message) for message in reversed(messages) if message.sequence < before_sequence and message.role == "assistant"),
         "",
     )
 
@@ -1830,6 +1904,28 @@ def _message_text(message: AgentMessage) -> str:
     return ""
 
 
+def _workflow_reply_for_turn(
+    *,
+    current_message: AgentMessage,
+    messages: list[AgentMessage],
+) -> dict[str, Any]:
+    current_content = current_message.content if isinstance(current_message.content, dict) else {}
+    client_context = current_content.get("client_context")
+    if isinstance(client_context, dict):
+        supplied = normalize_workflow_reply_context(client_context.get("workflow_reply"))
+        if supplied:
+            return supplied
+    for message in sorted(messages, key=lambda item: item.sequence, reverse=True):
+        if message.sequence >= current_message.sequence or message.role != "assistant":
+            continue
+        content = message.content if isinstance(message.content, dict) else {}
+        reply = normalize_workflow_reply_context(content.get("workflow_reply"))
+        if reply:
+            return reply
+        break
+    return {}
+
+
 def _trusted_form_submissions(message: AgentMessage) -> dict[str, dict[str, Any]]:
     content = message.content if isinstance(message.content, dict) else {}
     attachments = content.get("attachments")
@@ -1930,11 +2026,7 @@ def _birth_prep_form_default_values(facts: dict[str, Any]) -> dict[str, Any]:
         "medical_notes": _text(owner, "medical_notes"),
         "doctor_notes": _text(owner, "doctor_notes"),
     }
-    active_notes = [
-        note
-        for note in (_text(owner, "medical_notes"), _text(owner, "doctor_notes"))
-        if note
-    ]
+    active_notes = [note for note in (_text(owner, "medical_notes"), _text(owner, "doctor_notes")) if note]
     if active_notes:
         active_defaults["pregnancy_history_or_notes"] = active_notes
     for key, value in active_defaults.items():

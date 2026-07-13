@@ -3,6 +3,8 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from .workflow_reply import normalize_workflow_reply_context
+
 
 _MAX_CART_GROUPS = 12
 _MAX_CART_ITEMS = 120
@@ -27,6 +29,9 @@ def sanitize_agent_client_context(value: Any) -> dict[str, Any]:
     cart = _hospital_bag_cart(value.get("hospital_bag_cart"))
     if cart is not None:
         context["hospital_bag_cart"] = cart
+    workflow_reply = normalize_workflow_reply_context(value.get("workflow_reply"))
+    if workflow_reply:
+        context["workflow_reply"] = workflow_reply
     return context
 
 

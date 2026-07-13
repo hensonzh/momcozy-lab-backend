@@ -49,6 +49,7 @@ class AgentRuntimeGraphRunner:
                 final_text=str(final_state.get("final_text") or ""),
                 assistant_message_id=_uuid_or_none(final_state.get("assistant_message_id")),
                 quick_replies=_list_of_dicts(final_state.get("quick_replies")),
+                workflow_reply=_dict(final_state.get("workflow_reply")),
                 stream_segment_count=_non_negative_int(final_state.get("stream_segment_count")),
             )
         if status == "waiting_for_confirmation":
@@ -76,6 +77,7 @@ class AgentRuntimeGraphRunner:
                 pending_action_id=str(result.pending_action_id) if result.pending_action_id else None,
                 assistant_message_id=str(result.assistant_message_id) if result.assistant_message_id else None,
                 quick_replies=result.quick_replies,
+                workflow_reply=result.workflow_reply,
                 stream_segment_count=result.stream_segment_count,
             )
             await self._save_checkpoint(run=run, node_name="sdk_reasoning", state=cast(AgentGraphState, state | update))
@@ -145,3 +147,7 @@ def _list_of_dicts(value: object) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
     return [dict(item) for item in value if isinstance(item, dict)]
+
+
+def _dict(value: object) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}

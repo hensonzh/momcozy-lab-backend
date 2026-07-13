@@ -6,6 +6,7 @@ from uuid import UUID
 
 from ..models import AgentContextProjection, AgentRun, AgentWorkflowState
 from ..repository import AgentRuntimeRepository
+from ..workflow_reply import new_workflow_step_token
 
 
 class AgentRuntimeStateStore:
@@ -34,6 +35,8 @@ class AgentRuntimeStateStore:
             schema_version=schema_version,
             state=_json_compatible(state),
             active_step=active_step,
+            revision=1,
+            step_token=new_workflow_step_token(),
             expires_at=expires_at,
         )
 
@@ -69,11 +72,15 @@ class AgentRuntimeStateStore:
             )
         workflow.run_id = run_id
         workflow.schema_version = schema_version
+        current_revision = getattr(workflow, "revision", None)
+        next_revision = (current_revision if isinstance(current_revision, int) and current_revision > 0 else 0) + 1
         return await self.repository.update_workflow_state(
             workflow_state=workflow,
             status=status,
             state=_json_compatible(state),
             active_step=active_step,
+            revision=next_revision,
+            step_token=new_workflow_step_token(),
             expires_at=expires_at,
         )
 

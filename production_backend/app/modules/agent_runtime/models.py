@@ -365,6 +365,8 @@ class AgentWorkflowState(Base):
         nullable=False,
     )
     active_step: Mapped[str] = mapped_column(String(120), default="", server_default="", nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, default=1, server_default="1", nullable=False)
+    step_token: Mapped[str] = mapped_column(String(128), default="", server_default="", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

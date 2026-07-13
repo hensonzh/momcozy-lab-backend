@@ -20,6 +20,7 @@ class AgentRunExecutionResult:
     completion_reason: str = ""
     assistant_message_id: UUID | None = None
     quick_replies: list[dict[str, Any]] = field(default_factory=list)
+    workflow_reply: dict[str, Any] = field(default_factory=dict)
     stream_segment_count: int = 0
 
 

@@ -9,6 +9,7 @@ from ..models import AgentWorkflowState
 PREGNANCY_PLAN_WORKFLOW_TYPE = "pregnancy_plan"
 HOSPITAL_BAG_WORKFLOW_TYPE = "hospital_bag"
 DEVICE_UNBOXING_WORKFLOW_TYPE = "device_unboxing"
+MILK_ANALYSIS_WORKFLOW_TYPE = "milk_analysis"
 _ACTIVE_WORKFLOW_STATUSES = frozenset({"collecting", "ready", "waiting", "paused"})
 
 
@@ -21,11 +22,13 @@ def project_ongoing_work(
         PREGNANCY_PLAN_WORKFLOW_TYPE: _project_pregnancy_plan,
         HOSPITAL_BAG_WORKFLOW_TYPE: _project_hospital_bag,
         DEVICE_UNBOXING_WORKFLOW_TYPE: _project_device_unboxing,
+        MILK_ANALYSIS_WORKFLOW_TYPE: _project_milk_analysis,
     }
     required_skills = {
         PREGNANCY_PLAN_WORKFLOW_TYPE: "birth-prep",
         HOSPITAL_BAG_WORKFLOW_TYPE: "birth-prep",
         DEVICE_UNBOXING_WORKFLOW_TYPE: "device-guidance",
+        MILK_ANALYSIS_WORKFLOW_TYPE: "milk-management",
     }
     projected: list[dict[str, str]] = []
     for workflow_state in workflow_states:
@@ -111,6 +114,22 @@ def _project_device_unboxing(workflow: AgentWorkflowState, skill_loaded: bool) -
         "name": f"{model} 开箱指导",
         "progress": progress,
         "next_step": _with_skill_reload(next_step, required_skill="device-guidance", skill_loaded=skill_loaded),
+    }
+
+
+def _project_milk_analysis(workflow: AgentWorkflowState, skill_loaded: bool) -> dict[str, str] | None:
+    state = _state(workflow)
+    if _text(state, "phase") != "collecting_intake" or not _text(state, "current_field"):
+        return None
+    next_question = _text(state, "next_question") or "继续当前奶量分析问题。"
+    return {
+        "name": "奶量分析",
+        "progress": "奶量分析信息仍在采集中。",
+        "next_step": _with_skill_reload(
+            next_question,
+            required_skill="milk-management",
+            skill_loaded=skill_loaded,
+        ),
     }
 
 

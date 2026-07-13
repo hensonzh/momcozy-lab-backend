@@ -458,7 +458,7 @@ def test_observed_device_unboxing_advances_exactly_one_persisted_step() -> None:
         tool_invocations=(
             scripted_tool_invocation(
                 "devices.unboxing.advance",
-                {"model": "Air1", "action": "complete_current", "expected_step": "guide.parts"},
+                {"model": "Air1", "action": "complete_current"},
             ),
         ),
         final_text="下一步熟悉主机按键。",
@@ -467,7 +467,6 @@ def test_observed_device_unboxing_advances_exactly_one_persisted_step() -> None:
     assert advanced.trace.tool_calls[0]["safe_args"] == {
         "model": "Air1",
         "action": "complete_current",
-        "expected_step": "guide.parts",
     }
     assert scenario.workflow("device_unboxing").active_step == "guide.controls"
     assert advanced.trace.actions == []
@@ -683,6 +682,23 @@ class ObservedScenario:
             )
         )
         run.status = result.execution_result.status
+        if result.execution_result.status == "completed" and result.execution_result.final_text:
+            content: dict[str, Any] = {"text": result.execution_result.final_text}
+            if result.execution_result.workflow_reply:
+                content["workflow_reply"] = dict(result.execution_result.workflow_reply)
+            self.repository.messages.append(
+                AgentMessage(
+                    id=result.execution_result.assistant_message_id,
+                    thread_id=self.thread_id,
+                    run_id=run.id,
+                    role="assistant",
+                    message_type="text",
+                    content=content,
+                    status="completed",
+                    sequence=len(self.repository.messages) + 1,
+                    created_at=datetime.now(timezone.utc),
+                )
+            )
         return ObservedTurn(execution_result=result.execution_result, trace=result.trace)
 
     def pregnancy_handlers(self) -> dict[str, Any]:
@@ -1042,7 +1058,7 @@ class RecordingRuntimeRepository:
         return workflow
 
     async def update_workflow_state(self, *, workflow_state: AgentWorkflowState, **kwargs):
-        for field in ("status", "state", "active_step", "expires_at"):
+        for field in ("status", "state", "active_step", "revision", "step_token", "expires_at"):
             if field in kwargs:
                 setattr(workflow_state, field, kwargs[field])
         return workflow_state

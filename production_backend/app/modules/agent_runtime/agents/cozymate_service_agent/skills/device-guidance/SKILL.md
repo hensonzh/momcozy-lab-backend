@@ -67,7 +67,7 @@ Air1 设备资料必须通过当前 `device_support` namespace 中的 `devices.g
 4. 拿到工具返回结果后，先介绍产品亮点，接着提供 Quick Start PDF 和指导视频链接给用户参考，最后再询问用户是否需要一步步指导。
 5. 用户确认前，不要进入分步指导流程；用户确认后，调用 `devices.unboxing.advance`，传入 `action=start`。
 6. 工具返回的 `workflow.current_step` 是唯一当前主步骤；不要仅根据聊天历史自行跳步。
-7. 用户完成当前主步骤的全部动作和核对点后，调用 `devices.unboxing.advance`，传入 `action=complete_current` 和当前 `expected_step`。工具会持久化进度并返回下一步骤资料。
+7. 用户完成当前主步骤的全部动作和核对点后，调用 `devices.unboxing.advance`，传入 `action=complete_current`。runtime 会绑定并校验当前步骤，工具会持久化进度并返回下一步骤资料。
 8. 进入分步指导后，每个新的视觉步骤首次展示当前步骤图片；同一视觉步骤内的后续轮次不要重复展示同一张图，使用“对照上图”继续即可。
 9. 分步指导以 manual.md 里的 `guide.*` 模块作为一轮主步骤；模块内的 bullet 是同一步的子动作，通常在同一轮合并给出。只有 manual 明确要求多轮、用户卡住或存在安全风险时，才拆成更小轮次。
 

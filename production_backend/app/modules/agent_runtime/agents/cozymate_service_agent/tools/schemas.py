@@ -325,11 +325,6 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
                 "enum": ["start", "resume", "complete_current", "cancel"],
                 "description": "开始新流程、恢复当前流程、确认完成当前主步骤，或取消流程。",
             },
-            "expected_step": {
-                "type": "string",
-                "maxLength": 80,
-                "description": "complete_current 时模型认为用户刚完成的当前步骤，例如 guide.parts，用于防止过期回复跳错步骤。",
-            },
         },
     },
     "images.inspect": {
@@ -465,7 +460,6 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
                     "abandon",
                 ],
             },
-            "topic": {"type": "string", "maxLength": 120},
             "answer": {"type": "string", "maxLength": 2000},
             "summary": {"type": "string", "maxLength": 2000},
             "additional_info": {"type": "string", "maxLength": 2000},

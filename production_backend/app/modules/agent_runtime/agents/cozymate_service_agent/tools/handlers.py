@@ -580,8 +580,6 @@ class PregnancyPlanIntakeAdvanceToolHandler:
             for key, value in context.args.items()
             if key
             in {
-                "topic",
-                "followup_id",
                 "answer",
                 "summary",
                 "additional_info",
@@ -589,8 +587,11 @@ class PregnancyPlanIntakeAdvanceToolHandler:
             }
         }
         trusted_current_user_text = _text(context.args, "trusted_current_user_text")
-        if action == "submit_personalized_followup" and trusted_current_user_text:
-            payload["answer"] = trusted_current_user_text
+        if action == "submit_personalized_followup":
+            if completed_followup is not None:
+                payload["topic"] = _text(completed_followup, "id")
+            if trusted_current_user_text:
+                payload["answer"] = trusted_current_user_text
         elif action == "submit_final_additional_info" and trusted_current_user_text:
             payload["additional_info"] = trusted_current_user_text
         try:
@@ -1444,9 +1445,6 @@ class DeviceUnboxingAdvanceToolHandler:
         workflow = _require_active_device_unboxing(existing)
         state = dict(workflow.state) if isinstance(workflow.state, dict) else {}
         current_step = workflow.active_step
-        expected_step = _text(context.args, "expected_step")
-        if expected_step and expected_step != current_step:
-            raise ApiError(code="stale_device_unboxing_step", message="The device unboxing step has already changed.", status=409)
         if current_step not in AIR1_UNBOXING_STEPS:
             raise ApiError(code="invalid_device_unboxing_step", message="The current device unboxing step is invalid.", status=409)
         normalized_model = _text(state, "device_model") or model

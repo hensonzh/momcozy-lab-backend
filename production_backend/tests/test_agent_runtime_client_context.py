@@ -1,7 +1,10 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from production_backend.app.modules.agent_runtime.client_context import sanitize_agent_client_context
+from production_backend.app.modules.agent_runtime.client_context import (
+    project_agent_client_context,
+    sanitize_agent_client_context,
+)
 from production_backend.app.modules.agent_runtime.models import AgentMessage
 from production_backend.app.modules.agent_runtime.run_lifecycle.executor import _user_context
 
@@ -60,3 +63,27 @@ def test_user_context_projects_the_current_cart_without_transport_metadata() -> 
     assert context["locale"] == "zh-CN"
     assert context["hospital_bag_cart"]["groups"][0]["items"][0]["id"] == "pump-custom"
     assert "source" not in context
+
+
+def test_client_context_preserves_workflow_reply_without_projecting_it_to_the_model() -> None:
+    workflow_state_id = uuid4()
+    raw_context = {
+        "locale": "zh-CN",
+        "workflow_reply": {
+            "workflow_state_id": str(workflow_state_id),
+            "workflow_type": "pregnancy_plan",
+            "revision": 7,
+            "step_token": "opaque-step-token",
+            "unexpected": "drop-me",
+        },
+    }
+
+    sanitized = sanitize_agent_client_context(raw_context)
+
+    assert sanitized["workflow_reply"] == {
+        "workflow_state_id": str(workflow_state_id),
+        "workflow_type": "pregnancy_plan",
+        "revision": 7,
+        "step_token": "opaque-step-token",
+    }
+    assert project_agent_client_context(raw_context) == {"locale": "zh-CN"}
