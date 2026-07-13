@@ -3751,9 +3751,11 @@ def _plan_payload(plan: Plan) -> dict[str, Any]:
 
 def _pregnancy_plan_context_payload(plan: Plan) -> dict[str, Any]:
     output = _plan_payload(plan)
-    payload = plan.payload if isinstance(plan.payload, dict) else {}
-    card = payload.get("card") if isinstance(payload.get("card"), dict) else {}
-    owner = card.get("owner") if isinstance(card.get("owner"), dict) else {}
+    payload: dict[str, Any] = plan.payload if isinstance(plan.payload, dict) else {}
+    card_value = payload.get("card")
+    card: dict[str, Any] = card_value if isinstance(card_value, dict) else {}
+    owner_value = card.get("owner")
+    owner: dict[str, Any] = owner_value if isinstance(owner_value, dict) else {}
     allowed_owner_keys = {
         "due_date_or_week",
         "current_week",
