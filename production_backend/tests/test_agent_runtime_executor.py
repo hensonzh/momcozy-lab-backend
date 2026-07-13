@@ -21,6 +21,10 @@ from production_backend.app.modules.agent_runtime.models import (
 )
 from production_backend.app.modules.agent_runtime.event_stream.sink import AgentEventSink
 from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent import ServiceSkillId
+from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.health_guidance import (
+    COMPLEX_HEALTH_SEARCH_UNAVAILABLE_RESPONSE,
+    HEALTH_GUIDANCE_ALLOWED_DOMAINS,
+)
 from production_backend.app.modules.agent_runtime.run_lifecycle.executor import (
     AgentRuntimeExecutor,
     _pregnancy_runtime_plan_context,
@@ -138,6 +142,166 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result(capl
     assert "working_context" in timing_payloads[-1]["timings_ms"]
     assert "model_reasoning" in timing_payloads[-1]["timings_ms"]
     assert "total_before_finalize" in timing_payloads[-1]["timings_ms"]
+
+
+def test_agent_runtime_executor_requires_allowlisted_web_search_for_complex_health_question() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(
+        thread_id=thread_id,
+        run_id=run.id,
+        role="user",
+        text="宝宝黄疸一直不退怎么办？",
+        sequence=1,
+    )
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    backend = CapturingSdkBackend(result=SdkNodeResult(final_text="请结合宝宝日龄和胆红素数值判断。"))
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, provider="openai", use_responses=True),
+        ).execute(run=run)
+    )
+
+    assert result.status == "completed"
+    request = backend.requests[0]
+    assert request.web_search_enabled is True
+    assert request.web_search_required is True
+    assert request.web_search_allowed_domains == tuple(HEALTH_GUIDANCE_ALLOWED_DOMAINS)
+    assert request.on_text_delta is None
+    assert "health_guidance_context" in json.dumps(request.model_input, ensure_ascii=False)
+    assert "优先使用 web_search 检索" in json.dumps(request.model_input, ensure_ascii=False)
+
+
+def test_agent_runtime_executor_suppresses_web_search_for_first_breast_lump_triage_turn() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(
+        thread_id=thread_id,
+        run_id=run.id,
+        role="user",
+        text="乳房有硬块而且疼，怎么办？",
+        sequence=1,
+    )
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    backend = CapturingSdkBackend(result=SdkNodeResult(final_text="我先确认一下，你有发烧、寒战或一片红热痛吗？"))
+
+    asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, provider="openai", use_responses=True),
+        ).execute(run=run)
+    )
+
+    request = backend.requests[0]
+    assert request.web_search_enabled is False
+    assert request.web_search_required is False
+    assert "不需要 web_search" in json.dumps(request.model_input, ensure_ascii=False)
+
+
+def test_agent_runtime_executor_emits_web_search_citation_custom_event() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(
+        thread_id=thread_id,
+        run_id=run.id,
+        role="user",
+        text="哺乳期用药会不会影响宝宝？",
+        sequence=1,
+    )
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    backend = CapturingSdkBackend(
+        result=SdkNodeResult(
+            final_text="需要结合具体药物判断。",
+            web_search_used=True,
+            web_search_citations=[
+                {
+                    "url": "https://www.ncbi.nlm.nih.gov/books/NBK501922/",
+                    "title": "Drugs and Lactation Database",
+                },
+                {"url": "https://example.com/not-allowed", "title": "Untrusted"},
+            ],
+        )
+    )
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, provider="openai", use_responses=True),
+        ).execute(run=run)
+    )
+
+    citation_events = [
+        event
+        for event in repository.events
+        if event.event_type == "CUSTOM" and event.payload.get("name") == "momcozy.web_search.citations"
+    ]
+    assert result.status == "completed"
+    assert citation_events[0].payload["message_id"] == str(result.assistant_message_id)
+    assert citation_events[0].payload["value"]["citations"] == [
+        {
+            "index": 1,
+            "url": "https://www.ncbi.nlm.nih.gov/books/NBK501922/",
+            "title": "Drugs and Lactation Database",
+        }
+    ]
+
+
+def test_agent_runtime_executor_uses_bounded_fallback_when_provider_cannot_web_search() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(
+        thread_id=thread_id,
+        run_id=run.id,
+        role="user",
+        text="宝宝黄疸一直不退怎么办？",
+        sequence=1,
+    )
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    backend = CapturingSdkBackend(result=SdkNodeResult(final_text="不应该调用模型。"))
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, provider="minimax", use_responses=False),
+        ).execute(run=run)
+    )
+
+    assert result.status == "completed"
+    assert result.final_text == COMPLEX_HEALTH_SEARCH_UNAVAILABLE_RESPONSE
+    assert backend.requests == []
+
+
+def test_agent_runtime_executor_uses_bounded_fallback_when_required_web_search_fails() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(
+        thread_id=thread_id,
+        run_id=run.id,
+        role="user",
+        text="哺乳期用药会不会影响宝宝？",
+        sequence=1,
+    )
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    backend = FailingSdkBackend(ApiError(code="sdk_provider_unavailable", message="provider down", status=503))
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, provider="openai", use_responses=True),
+        ).execute(run=run)
+    )
+
+    assert result.status == "completed"
+    assert result.final_text == COMPLEX_HEALTH_SEARCH_UNAVAILABLE_RESPONSE
+    assert len(backend.requests) == 1
+    status_event = next(
+        event
+        for event in repository.events
+        if event.event_type == "CUSTOM" and event.payload.get("name") == "momcozy.agent.web_search"
+    )
+    assert status_event.payload["value"]["status"] == "failed"
 
 
 def test_agent_runtime_executor_projects_only_current_user_images_into_model_input() -> None:
@@ -2810,6 +2974,16 @@ class CapturingSdkBackend:
     async def run(self, request: SdkNodeRequest) -> SdkNodeResult:
         self.requests.append(request)
         return self.result
+
+
+class FailingSdkBackend:
+    def __init__(self, error: ApiError) -> None:
+        self.error = error
+        self.requests = []
+
+    async def run(self, request: SdkNodeRequest) -> SdkNodeResult:
+        self.requests.append(request)
+        raise self.error
 
 
 def _runtime_context(request: SdkNodeRequest) -> dict:

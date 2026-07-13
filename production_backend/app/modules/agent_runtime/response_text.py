@@ -73,6 +73,7 @@ def _stable_response_prefix_end(text: str) -> int:
             _unclosed_json_start(text),
             _unclosed_fence_start(text),
             _possible_quick_reply_header_start(text),
+            _unclosed_citation_start(text),
             _trailing_whitespace_start(text),
         )
         if start is not None
@@ -135,6 +136,13 @@ def _possible_quick_reply_header_start(text: str) -> int | None:
             return line_start
         if normalized.startswith(header) and normalized[len(header) :].strip(" \t:：") == "":
             return line_start
+    return None
+
+
+def _unclosed_citation_start(text: str) -> int | None:
+    start = text.rfind("\ue200cite\ue202")
+    if start >= 0 and text.find("\ue201", start) < 0:
+        return start
     return None
 
 
@@ -306,7 +314,11 @@ def _balanced_json_end(text: str, start: int) -> int | None:
 
 def _clean_response_text(text: str) -> str:
     cleaned = re.sub(r"```(?:json)?\s*```", "", text, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\ue200cite\ue202[\s\S]{0,240}?\ue201", "", cleaned)
+    cleaned = re.sub(r"【[^】\n\r]{0,160}†[^】\n\r]{0,160}】", "", cleaned)
     cleaned = re.sub(r"(?im)^\s*(快捷回复|推荐回复|quick replies|quick_replies|replies)\s*[:：]\s*$", "", cleaned)
+    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+    cleaned = re.sub(r"[ \t]+([，。！？；：,.!?;:])", r"\1", cleaned)
     cleaned = re.sub(r"[ \t]+\n", "\n", cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     return cleaned.strip()

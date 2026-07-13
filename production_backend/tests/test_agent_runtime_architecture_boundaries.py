@@ -966,6 +966,89 @@ def test_sdk_runner_uses_responses_namespace_backend_for_tool_search(monkeypatch
     assert FakeAsyncOpenAI.calls[1]["include"] == ["reasoning.encrypted_content"]
 
 
+def test_responses_backend_forces_allowlisted_health_web_search_and_returns_citations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_openai = types.ModuleType("openai")
+    fake_openai.__spec__ = ModuleSpec("openai", loader=None)
+    fake_openai.AsyncOpenAI = FakeAsyncOpenAI
+    monkeypatch.setitem(sys.modules, "openai", fake_openai)
+    FakeAsyncOpenAI.reset(
+        [
+            FakeOpenAIResponse(
+                id="resp_health",
+                output=[
+                    {
+                        "type": "web_search_call",
+                        "status": "completed",
+                        "action": {
+                            "sources": [
+                                {
+                                    "url": "https://www.ncbi.nlm.nih.gov/books/NBK501922/",
+                                    "title": "Drugs and Lactation Database",
+                                }
+                            ]
+                        },
+                    },
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": "需要结合具体药物判断。",
+                                "annotations": [
+                                    {
+                                        "type": "url_citation",
+                                        "url": "https://www.ncbi.nlm.nih.gov/books/NBK501922/",
+                                        "title": "Drugs and Lactation Database",
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                ],
+                output_text="需要结合具体药物判断。",
+            )
+        ]
+    )
+    request = SdkNodeRequest(
+        run_id="run_health",
+        thread_id="thread_health",
+        actor_user_id="user_health",
+        instructions="Search professional medical sources.",
+        model_input=[{"role": "user", "content": "哺乳期用药会不会影响宝宝？"}],
+        web_search_enabled=True,
+        web_search_required=True,
+        web_search_allowed_domains=("www.ncbi.nlm.nih.gov", "www.who.int"),
+    )
+
+    result = asyncio.run(OpenAIResponsesRunner(model="gpt-test").run_reasoning(request))
+
+    assert responses_tools_payload(request) == [
+        {
+            "type": "web_search",
+            "filters": {"allowed_domains": ["www.ncbi.nlm.nih.gov", "www.who.int"]},
+        }
+    ]
+    assert FakeAsyncOpenAI.calls[0]["tool_choice"] == {
+        "type": "allowed_tools",
+        "mode": "required",
+        "tools": [{"type": "web_search"}],
+    }
+    assert FakeAsyncOpenAI.calls[0]["include"] == [
+        "reasoning.encrypted_content",
+        "web_search_call.action.sources",
+    ]
+    assert result.web_search_used is True
+    assert result.web_search_citations == [
+        {
+            "url": "https://www.ncbi.nlm.nih.gov/books/NBK501922/",
+            "title": "Drugs and Lactation Database",
+        }
+    ]
+
+
 def test_sdk_runner_routes_responses_function_call_by_namespace_and_name(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_openai = types.ModuleType("openai")
     fake_openai.__spec__ = ModuleSpec("openai", loader=None)

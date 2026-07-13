@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -223,9 +224,39 @@ def _normalize(text: str) -> str:
 
 def _first_match(text: str, terms: tuple[str, ...]) -> str:
     for term in terms:
-        if term.lower() in text:
-            return term
+        normalized_term = term.lower()
+        for match in re.finditer(re.escape(normalized_term), text):
+            if normalized_term in EXPLICIT_ABSENCE_RED_FLAG_TERMS or not _is_negated(text, match.start()):
+                return term
     return ""
+
+
+EXPLICIT_ABSENCE_RED_FLAG_TERMS = {
+    "baby not moving",
+    "no fetal movement",
+    "no wet diapers",
+    "没有胎动",
+    "没有尿湿尿布",
+}
+_NEGATION_CLAUSE_BOUNDARIES = re.compile(r"[。！？!?；;，,]|\b(?:but|however|yet)\b|但是|不过|但(?=今|现|这|已|又)")
+_DIRECT_NEGATION = re.compile(
+    r"(?:没有|没|无|未见|否认|不)(?:出现|伴有|感觉|觉得|是|再)?\s*$"
+    r"|(?:no|not|without|deny|denies|denied|do not have|does not have|did not have|don't have|doesn't have|didn't have)"
+    r"(?:\s+(?:any|a|an|the|my|his|her|their|our|its|baby|infant|newborn|breast))*\s*$",
+    re.IGNORECASE,
+)
+_COORDINATED_NEGATION = re.compile(
+    r"(?:没有|没|无|未见|否认)(?:出现|伴有)?"
+    r"|\b(?:no|without|deny|denies|denied|do not have|does not have|did not have|don't have|doesn't have|didn't have)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_negated(text: str, match_start: int) -> bool:
+    prefix = text[:match_start]
+    boundaries = list(_NEGATION_CLAUSE_BOUNDARIES.finditer(prefix))
+    clause_prefix = prefix[boundaries[-1].end() :] if boundaries else prefix
+    return bool(_DIRECT_NEGATION.search(clause_prefix[-64:]) or _COORDINATED_NEGATION.search(clause_prefix[-64:]))
 
 
 def _evidence(matched_term: str) -> dict[str, object]:

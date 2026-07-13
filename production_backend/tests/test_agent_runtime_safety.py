@@ -50,6 +50,38 @@ def test_deterministic_safety_guard_escalates_health_red_flag() -> None:
 @pytest.mark.parametrize(
     "text",
     [
+        "堵奶疼，但是没有发烧，也没有乳房红肿。",
+        "宝宝没有发烧，只是有点吐奶。",
+        "I do not have a fever or breast redness.",
+        "My baby has no fever and is breathing normally.",
+    ],
+)
+def test_deterministic_safety_guard_does_not_escalate_negated_health_red_flags(text: str) -> None:
+    decision = DeterministicSafetyGuard().evaluate(text)
+
+    assert decision.category == "none"
+    assert decision.decision == "allow"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "昨天没有发烧，但今天开始发烧了。",
+        "I did not have a fever yesterday, but I have a fever now.",
+        "没有发烧，但是乳房红肿了。",
+        "No fever, but I have breast redness now.",
+    ],
+)
+def test_deterministic_safety_guard_escalates_current_red_flag_after_prior_negation(text: str) -> None:
+    decision = DeterministicSafetyGuard().evaluate(text)
+
+    assert decision.category == "health_red_flag"
+    assert decision.decision == "escalate"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
         "I have a fever and worsening breast redness.",
         "Can you make my hospital bag list? Also I am bleeding a lot right now.",
         "I have severe headache and vision changes.",

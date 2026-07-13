@@ -40,7 +40,21 @@ def test_sanitize_agent_response_text_keeps_non_tool_json_content() -> None:
     result = sanitize_agent_response_text('参考这个列表：["补水","休息"]')
 
     assert result.text == '参考这个列表：["补水","休息"]'
+
+
+def test_sanitize_agent_response_text_removes_raw_web_search_citation_markers() -> None:
+    result = sanitize_agent_response_text("参考 \ue200cite\ue202turn0search0\ue201 专业资料【1†source】，先联系医生。")
+
+    assert result.text == "参考 专业资料，先联系医生。"
     assert result.quick_replies == []
+
+
+def test_append_only_projector_never_emits_partial_web_search_citation_marker() -> None:
+    projector = AppendOnlyAgentResponseProjector()
+
+    assert projector.push("先观察。\ue200cite\ue202turn0") == "先观察。"
+    assert projector.push("search0\ue201 再联系医生。") == " 再联系医生。"
+    assert projector.text == "先观察。 再联系医生。"
 
 
 def test_append_only_projector_hides_partial_tool_json_after_visible_text() -> None:

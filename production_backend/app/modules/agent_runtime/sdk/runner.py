@@ -62,6 +62,9 @@ class SdkNodeRequest:
     service_skill_id: str = "cozymate_service_agent"
     on_text_delta: SdkTextDeltaHandler | None = None
     response_text_format: dict[str, Any] | None = None
+    web_search_enabled: bool = False
+    web_search_required: bool = False
+    web_search_allowed_domains: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -71,6 +74,8 @@ class SdkNodeResult:
     action_proposals: list[dict[str, Any]] = field(default_factory=list)
     artifacts: list[dict[str, Any]] = field(default_factory=list)
     safety_decision: dict[str, Any] | None = None
+    web_search_used: bool = False
+    web_search_citations: list[dict[str, Any]] = field(default_factory=list)
 
 
 class SdkRunnerBackend(Protocol):
@@ -81,6 +86,8 @@ class AgentModelRunner(Protocol):
     async def run_reasoning(self, request: SdkNodeRequest) -> SdkNodeResult: ...
 
     def supports_tool_namespaces(self) -> bool: ...
+
+    def supports_web_search(self) -> bool: ...
 
 
 class OpenAIResponsesApiBackend:
@@ -155,6 +162,8 @@ class OpenAIResponsesApiBackend:
                     reasoning_effort=self.reasoning_effort,
                     store_responses=self.store_responses,
                     response_text_format=request.response_text_format,
+                    web_search_enabled=request.web_search_enabled,
+                    web_search_required=request.web_search_required,
                     on_text_delta=request.on_text_delta,
                 )
             else:
@@ -168,6 +177,8 @@ class OpenAIResponsesApiBackend:
                         reasoning_effort=self.reasoning_effort,
                         store_responses=self.store_responses,
                         response_text_format=request.response_text_format,
+                        web_search_enabled=request.web_search_enabled,
+                        web_search_required=request.web_search_required,
                     )
                 )
             output_items = _response_output_items(latest_response)
@@ -181,7 +192,12 @@ class OpenAIResponsesApiBackend:
                 sanitized_text = final_text.strip() if request.response_text_format is not None else _sanitize_model_text(final_text)
                 if not emitted_stream:
                     await _emit_buffered_text_deltas(sanitized_text, request.on_text_delta)
-                return SdkNodeResult(final_text=sanitized_text, tool_calls=observed_tool_calls)
+                return SdkNodeResult(
+                    final_text=sanitized_text,
+                    tool_calls=observed_tool_calls,
+                    web_search_used=_response_used_web_search(output_items),
+                    web_search_citations=_web_search_citations_from_response(latest_response),
+                )
 
             context.extend(_response_output_items_for_input(output_items))
             for function_call in function_calls:
@@ -283,6 +299,9 @@ class OpenAIResponsesRunner:
     def supports_tool_namespaces(self) -> bool:
         return True
 
+    def supports_web_search(self) -> bool:
+        return True
+
     def _record(self, *, outcome: str, error_code: str, started_at: float) -> None:
         if self.metrics is not None:
             self.metrics.record_agent_sdk(
@@ -316,6 +335,12 @@ class OpenAIAgentsSdkBackend:
         self.buffer_streamed_tool_calls = buffer_streamed_tool_calls
 
     async def run(self, request: SdkNodeRequest) -> SdkNodeResult:
+        if request.web_search_enabled:
+            raise ApiError(
+                code="sdk_web_search_provider_not_supported",
+                message="Web search requires the OpenAI Responses backend.",
+                status=503,
+            )
         if request.tool_search_enabled or any(tool.defer_loading for tool in request.tools):
             raise ApiError(
                 code="sdk_tool_search_requires_responses_backend",
@@ -457,8 +482,13 @@ class OpenAIAgentsSdkRunner:
     def supports_tool_namespaces(self) -> bool:
         return self.provider == "openai" and self.use_responses is not False
 
+    def supports_web_search(self) -> bool:
+        return self.provider == "openai" and self.use_responses is not False
+
     def _default_backend(self, request: SdkNodeRequest) -> SdkRunnerBackend:
-        if self.provider == "openai" and (self.use_responses is True or self.use_responses is None and request.tool_search_enabled):
+        if self.provider == "openai" and (
+            self.use_responses is True or self.use_responses is None and (request.tool_search_enabled or request.web_search_enabled)
+        ):
             return OpenAIResponsesApiBackend(
                 model=self.model,
                 max_turns=self.max_turns,
@@ -486,6 +516,8 @@ def responses_tools_payload(request: SdkNodeRequest) -> list[dict[str, Any]]:
         flat_payload = [_responses_function_tool_payload(tool) for tool in request.tools]
         if request.tool_search_enabled:
             flat_payload.append({"type": "tool_search"})
+        if request.web_search_enabled:
+            flat_payload.append(_responses_web_search_tool_payload(request.web_search_allowed_domains))
         return flat_payload
 
     payload: list[dict[str, Any]] = []
@@ -513,6 +545,15 @@ def responses_tools_payload(request: SdkNodeRequest) -> list[dict[str, Any]]:
         )
     if request.tool_search_enabled:
         payload.append({"type": "tool_search"})
+    if request.web_search_enabled:
+        payload.append(_responses_web_search_tool_payload(request.web_search_allowed_domains))
+    return payload
+
+
+def _responses_web_search_tool_payload(allowed_domains: tuple[str, ...]) -> dict[str, Any]:
+    payload: dict[str, Any] = {"type": "web_search"}
+    if allowed_domains:
+        payload["filters"] = {"allowed_domains": list(allowed_domains)}
     return payload
 
 
@@ -554,6 +595,8 @@ async def _create_response_streamed(
     reasoning_effort: str,
     store_responses: bool,
     response_text_format: dict[str, Any] | None,
+    web_search_enabled: bool,
+    web_search_required: bool,
     on_text_delta: SdkTextDeltaHandler | None = None,
 ) -> tuple[Any | None, str, bool]:
     kwargs = _responses_request_kwargs(
@@ -564,6 +607,8 @@ async def _create_response_streamed(
         reasoning_effort=reasoning_effort,
         store_responses=store_responses,
         response_text_format=response_text_format,
+        web_search_enabled=web_search_enabled,
+        web_search_required=web_search_required,
     )
     response, streamed_text, emitted_stream = await _consume_response_stream(
         await _maybe_await(stream_response(**kwargs)),
@@ -583,6 +628,8 @@ def _responses_request_kwargs(
     reasoning_effort: str,
     store_responses: bool,
     response_text_format: dict[str, Any] | None,
+    web_search_enabled: bool = False,
+    web_search_required: bool = False,
 ) -> dict[str, Any]:
     kwargs: dict[str, Any] = {
         "model": model,
@@ -595,6 +642,14 @@ def _responses_request_kwargs(
     }
     if not store_responses:
         kwargs["include"] = ["reasoning.encrypted_content"]
+    if web_search_enabled:
+        kwargs.setdefault("include", []).append("web_search_call.action.sources")
+    if web_search_required:
+        kwargs["tool_choice"] = {
+            "type": "allowed_tools",
+            "mode": "required",
+            "tools": [{"type": "web_search"}],
+        }
     if response_text_format is not None:
         kwargs["text"] = {"format": response_text_format}
     return kwargs
@@ -788,6 +843,69 @@ def _response_output_text(response: Any, *, output_items: list[Any]) -> str:
             if isinstance(text, str):
                 text_parts.append(text)
     return "".join(text_parts)
+
+
+def _response_used_web_search(output_items: list[Any]) -> bool:
+    return any(_item_value(item, "type", "") == "web_search_call" for item in output_items)
+
+
+def _web_search_citations_from_response(response: Any) -> list[dict[str, Any]]:
+    output_items = _response_output_items(response)
+    citations: list[dict[str, Any]] = []
+    for item in output_items:
+        if _item_value(item, "type") != "message":
+            continue
+        content = _item_value(item, "content", [])
+        if not isinstance(content, list | tuple):
+            continue
+        for part in content:
+            annotations = _item_value(part, "annotations", [])
+            if not isinstance(annotations, list | tuple):
+                continue
+            for annotation in annotations:
+                citation = _web_search_citation(annotation)
+                if citation is not None:
+                    citations = _merge_web_search_citations(citations, [citation])
+    if citations:
+        return citations
+    for item in output_items:
+        action = _item_value(item, "action", None)
+        for container in (action, item):
+            for key in ("sources", "results"):
+                sources = _item_value(container, key, [])
+                if not isinstance(sources, list | tuple):
+                    continue
+                citations = _merge_web_search_citations(
+                    citations,
+                    [citation for source in sources if (citation := _web_search_citation(source)) is not None],
+                )
+    return citations
+
+
+def _web_search_citation(value: Any) -> dict[str, Any] | None:
+    url = _item_value(value, "url", "")
+    if not isinstance(url, str) or not url.strip().startswith(("https://", "http://")):
+        return None
+    title = _item_value(value, "title", "")
+    return {
+        "url": url.strip(),
+        "title": str(title or "").strip() or "参考来源",
+    }
+
+
+def _merge_web_search_citations(*groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    merged: list[dict[str, Any]] = []
+    seen_urls: set[str] = set()
+    for group in groups:
+        for item in group:
+            url = str(item.get("url") or "").strip()
+            if not url or url in seen_urls:
+                continue
+            seen_urls.add(url)
+            merged.append(dict(item))
+            if len(merged) >= 8:
+                return merged
+    return merged
 
 
 def _response_content_texts(content: Any) -> list[str]:

@@ -14,6 +14,7 @@ from production_backend.app.modules.agent_runtime.models import (
     AgentThread,
 )
 from production_backend.app.modules.agent_runtime.service import AgentRuntimeService
+from production_backend.app.modules.agent_runtime.safety import AgentSafetyService
 from production_backend.app.modules.audit.models import IdempotencyKey
 from production_backend.app.modules.files.models import FileObject
 
@@ -65,6 +66,61 @@ def test_agent_runtime_service_creates_run_with_thread_message_events_and_idempo
     assert controls.queued_run_ids == [run.id]
     assert idempotency_service.reserve_kwargs["scope"] == "agent.runs.create"
     assert idempotency_service.completed_response_ref == str(run.id)
+
+
+def test_agent_runtime_service_blocks_unsafe_run_before_queueing_model_work() -> None:
+    owner_user_id = uuid4()
+    repository = FakeAgentRuntimeRepository()
+    controls = FakeAgentRunControls()
+    service = AgentRuntimeService(
+        repository=repository,
+        controls=controls,
+        safety_service=AgentSafetyService(repository=repository),
+    )
+
+    run = asyncio.run(
+        service.create_run(
+            actor_user_id=owner_user_id,
+            thread_id=None,
+            message="我现在胸痛，而且呼吸困难。",
+        )
+    )
+
+    assert run.status == "failed"
+    assert run.error_code == "health_red_flag"
+    assert repository.safety_event is not None
+    assert repository.safety_event.run_id == run.id
+    assert [event.event_type for event in repository.events] == ["message.completed", "safety.blocked", "run.failed"]
+    blocked_payload = repository.events[1].payload
+    assert blocked_payload["response_template_key"] == "maternal_infant_health_escalation"
+    assert blocked_payload["response_template_version"] == "safety-response.v1"
+    assert blocked_payload["handoff_type"] == "medical_or_emergency_support"
+    assert controls.active_run is None
+    assert controls.queued_run_ids == []
+
+
+def test_agent_runtime_service_allows_negated_health_red_flags_to_queue_normally() -> None:
+    owner_user_id = uuid4()
+    repository = FakeAgentRuntimeRepository()
+    controls = FakeAgentRunControls()
+    service = AgentRuntimeService(
+        repository=repository,
+        controls=controls,
+        safety_service=AgentSafetyService(repository=repository),
+    )
+
+    run = asyncio.run(
+        service.create_run(
+            actor_user_id=owner_user_id,
+            thread_id=None,
+            message="堵奶疼，但是没有发烧，也没有乳房红肿。",
+        )
+    )
+
+    assert run.status == "queued"
+    assert repository.safety_event is None
+    assert [event.event_type for event in repository.events] == ["run.queued", "message.completed"]
+    assert controls.active_run == (repository.thread.id, run.id)
 
 
 def test_agent_runtime_service_validates_authenticated_inline_image_and_owned_pdf_attachments() -> None:

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from time import perf_counter
 from typing import Any
+from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -29,6 +30,13 @@ from ..agents.cozymate_service_agent.skill_registry import (
     default_service_skill_registry,
 )
 from ..agents.cozymate_service_agent.service_skills import ServiceSkillId
+from ..agents.cozymate_service_agent.health_guidance import (
+    COMPLEX_HEALTH_SEARCH_UNAVAILABLE_RESPONSE,
+    HEALTH_GUIDANCE_ALLOWED_DOMAINS,
+    health_guidance_request_context_lines,
+    needs_breast_triage_first,
+    should_use_complex_health_web_search,
+)
 from ..agents.cozymate_service_agent.tools import (
     ToolContractRegistry,
     ToolExecutor,
@@ -108,6 +116,16 @@ MODEL_IMAGE_DATA_URL_PATTERN = re.compile(
     r"^data:image/(?:png|jpe?g|webp|gif);base64,",
     re.IGNORECASE,
 )
+HEALTH_WEB_SEARCH_FALLBACK_ERROR_CODES = {
+    "dependency_not_configured",
+    "sdk_auth_failed",
+    "sdk_bad_request",
+    "sdk_provider_unavailable",
+    "sdk_rate_limited",
+    "sdk_run_failed",
+    "sdk_run_timed_out",
+    "sdk_web_search_provider_not_supported",
+}
 
 
 @dataclass(frozen=True)
@@ -226,7 +244,26 @@ class AgentRuntimeExecutor:
             self._run_hospital_bag_cart_groups[run.id] = _current_hospital_bag_cart_groups(turn_context.current_message)
             tool_catalog = self._tool_catalog_for_turn()
             await self._append_progress(run=run, phase="context_ready", label="我先理解一下你的需求～")
-            prepared_turn = self._prepare_model_turn(turn_context=turn_context)
+            loaded_skill_ids = [
+                skill.service_skill_id
+                for skill in turn_context.working_context_state.skills
+                if turn_context.working_context_state.turn_index <= skill.expires_after_turn
+            ]
+            health_context_lines = health_guidance_request_context_lines(
+                self._run_current_user_text[run.id],
+                loaded_skill_ids,
+            )
+            complex_health = should_use_complex_health_web_search(
+                self._run_current_user_text[run.id],
+                loaded_skill_ids,
+            )
+            health_web_search_required = complex_health and not needs_breast_triage_first(
+                self._run_current_user_text[run.id]
+            )
+            prepared_turn = self._prepare_model_turn(
+                turn_context=turn_context,
+                health_context_lines=health_context_lines,
+            )
             urgent_signal_ids = await self._pregnancy_plan_pre_model_urgent_signal_ids(
                 run=run,
                 current_user_text=self._run_current_user_text[run.id],
@@ -242,13 +279,32 @@ class AgentRuntimeExecutor:
             if urgent_signal_ids:
                 self._run_authoritative_final_text[run.id] = PREGNANCY_PLAN_URGENT_RESPONSE
                 result = SdkNodeResult(final_text=PREGNANCY_PLAN_URGENT_RESPONSE)
+            elif health_web_search_required and not _runner_supports_web_search(self.sdk_runner):
+                self._run_authoritative_final_text[run.id] = COMPLEX_HEALTH_SEARCH_UNAVAILABLE_RESPONSE
+                result = SdkNodeResult(final_text=COMPLEX_HEALTH_SEARCH_UNAVAILABLE_RESPONSE)
             else:
-                result = await self._run_model_turn(
-                    run=run,
-                    turn_context=turn_context,
-                    tool_catalog=tool_catalog,
-                    prepared_turn=prepared_turn,
-                )
+                try:
+                    result = await self._run_model_turn(
+                        run=run,
+                        turn_context=turn_context,
+                        tool_catalog=tool_catalog,
+                        prepared_turn=prepared_turn,
+                        health_web_search_required=health_web_search_required,
+                    )
+                except ApiError as exc:
+                    if not health_web_search_required or exc.code not in HEALTH_WEB_SEARCH_FALLBACK_ERROR_CODES:
+                        raise
+                    LOGGER.warning("Required health web search failed; using bounded fallback.", extra={"error_code": exc.code})
+                    self._run_authoritative_final_text[run.id] = COMPLEX_HEALTH_SEARCH_UNAVAILABLE_RESPONSE
+                    result = SdkNodeResult(final_text=COMPLEX_HEALTH_SEARCH_UNAVAILABLE_RESPONSE)
+                if health_web_search_required and not result.web_search_used and not result.web_search_citations:
+                    self._run_authoritative_final_text[run.id] = COMPLEX_HEALTH_SEARCH_UNAVAILABLE_RESPONSE
+                    result = SdkNodeResult(final_text=COMPLEX_HEALTH_SEARCH_UNAVAILABLE_RESPONSE)
+            await self._emit_health_web_search_events(
+                run=run,
+                required=health_web_search_required,
+                result=result,
+            )
             return await self._finalize_turn_result(
                 run=run,
                 turn_context=turn_context,
@@ -338,6 +394,7 @@ class AgentRuntimeExecutor:
         self,
         *,
         turn_context: _AgentTurnContext,
+        health_context_lines: list[str] | None = None,
     ) -> _PreparedModelTurn:
         projection = ContextProjection(
             stable_system_prompt=self.config.stable_system_prompt,
@@ -359,6 +416,11 @@ class AgentRuntimeExecutor:
                 include_image_attachments=True,
             ),
         )
+        if health_context_lines:
+            model_input.insert(
+                max(len(model_input) - 1, 0),
+                {"role": "developer", "content": "\n".join(health_context_lines)},
+            )
         return _PreparedModelTurn(projection=projection, model_input=model_input)
 
     async def _run_model_turn(
@@ -368,6 +430,7 @@ class AgentRuntimeExecutor:
         turn_context: _AgentTurnContext,
         tool_catalog: _AgentTurnToolCatalog,
         prepared_turn: _PreparedModelTurn,
+        health_web_search_required: bool = False,
     ) -> Any:
         await self._append_progress(run=run, phase="model_reasoning", label="我想一下")
         model_started_at = perf_counter()
@@ -385,11 +448,53 @@ class AgentRuntimeExecutor:
                 prompt_version=run.prompt_version,
                 trace_id=run.trace_id,
                 service_skill_id=COZYMATE_AGENT_ID,
-                on_text_delta=self._text_delta_handler(run=run),
+                on_text_delta=None if health_web_search_required else self._text_delta_handler(run=run),
+                web_search_enabled=health_web_search_required,
+                web_search_required=health_web_search_required,
+                web_search_allowed_domains=HEALTH_GUIDANCE_ALLOWED_DOMAINS if health_web_search_required else (),
             )
         )
         turn_context.timings_ms["model_reasoning"] = _elapsed_ms(model_started_at)
         return result
+
+    async def _emit_health_web_search_events(
+        self,
+        *,
+        run: AgentRun,
+        required: bool,
+        result: SdkNodeResult,
+    ) -> None:
+        if not required:
+            return
+        status = "completed" if result.web_search_used or result.web_search_citations else "failed"
+        await self._append_event(
+            thread_id=run.thread_id,
+            run_id=run.id,
+            event_type="CUSTOM",
+            payload={
+                "name": "momcozy.agent.web_search",
+                "value": {"status": status},
+                "semantic": {
+                    "phase": "done" if status == "completed" else "error",
+                    "label": "我查好专业资料啦" if status == "completed" else "专业资料检索暂时不可用",
+                    "surface": "work_item",
+                    "merge_key": "web_search:current",
+                },
+            },
+        )
+        citations = _allowed_health_web_search_citations(result.web_search_citations)
+        if not citations:
+            return
+        await self._append_event(
+            thread_id=run.thread_id,
+            run_id=run.id,
+            event_type="CUSTOM",
+            payload={
+                "name": "momcozy.web_search.citations",
+                "message_id": str(self._run_assistant_message_ids[run.id]),
+                "value": {"citations": citations},
+            },
+        )
 
     async def _finalize_turn_result(
         self,
@@ -1854,3 +1959,33 @@ def _run_actor(run: AgentRun) -> CurrentUser:
         roles=frozenset({"user"}),
         permissions=frozenset(),
     )
+
+
+def _runner_supports_web_search(runner: AgentModelRunner) -> bool:
+    supports = getattr(runner, "supports_web_search", None)
+    return bool(supports()) if callable(supports) else False
+
+
+def _allowed_health_web_search_citations(citations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    allowed_domains = set(HEALTH_GUIDANCE_ALLOWED_DOMAINS)
+    allowed: list[dict[str, Any]] = []
+    seen_urls: set[str] = set()
+    for citation in citations:
+        url = str(citation.get("url") or "").strip()
+        try:
+            host = (urlsplit(url).hostname or "").lower()
+        except ValueError:
+            continue
+        if host not in allowed_domains or url in seen_urls:
+            continue
+        seen_urls.add(url)
+        allowed.append(
+            {
+                "index": len(allowed) + 1,
+                "url": url,
+                "title": str(citation.get("title") or "").strip() or "参考来源",
+            }
+        )
+        if len(allowed) >= 8:
+            break
+    return allowed
