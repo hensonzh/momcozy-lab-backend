@@ -1,7 +1,7 @@
 from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.tools.hospital_bag_flow import (
     build_hospital_bag_card_json,
     build_hospital_bag_followup,
-    ensure_hospital_bag_cart_link,
+    ensure_hospital_bag_completion_followup,
 )
 
 
@@ -13,12 +13,47 @@ def _item(card: dict, label: str) -> dict:
     return next(item for item in _items(card) if item["label"] == label)
 
 
-def test_hospital_bag_cart_link_finalizer_is_append_only_and_idempotent() -> None:
+def test_hospital_bag_completion_finalizer_appends_explanation_before_link_and_is_idempotent() -> None:
     link = "**[打开待产包购物车](/hospital-bag-cart)**"
+    original = "待产包清单已生成。"
 
-    assert ensure_hospital_bag_cart_link("待产包清单已生成。") == f"待产包清单已生成。\n\n{link}"
-    assert ensure_hospital_bag_cart_link(f"待产包清单已生成。\n\n{link}") == f"待产包清单已生成。\n\n{link}"
-    assert ensure_hospital_bag_cart_link("") == link
+    completed = ensure_hospital_bag_completion_followup(original)
+
+    assert completed.startswith(original)
+    assert "我只保留和孕周、喂养、医院确认真正相关的非常规物品" in completed
+    assert "不用一次买完" in completed
+    assert completed.index("不用一次买完") < completed.index(link)
+    assert completed.endswith(link)
+    assert ensure_hospital_bag_completion_followup(completed) == completed
+
+
+def test_hospital_bag_completion_finalizer_uses_structured_card_decisions() -> None:
+    card = {
+        "owner": {
+            "birth_path": "剖宫产",
+            "feeding_intention": "混合",
+            "return_to_work_timing": "6周后返工",
+            "fetus_count": "双胎",
+        },
+        "packing_groups": [
+            {
+                "items": [
+                    {"label": "高腰宽松内裤"},
+                    {"label": "便携式吸奶器"},
+                    {"label": "冷藏包/冰袋"},
+                ]
+            }
+        ],
+    }
+
+    completed = ensure_hospital_bag_completion_followup("待产包清单已生成。", card=card)
+
+    assert "考虑到你倾向剖宫产" in completed
+    assert "考虑到你准备母乳或混合喂养" in completed
+    assert "冷藏包/冰袋" in completed
+    assert "考虑到这次是双胎" in completed
+    assert completed.index("特殊物品我按这几个情况做了取舍") < completed.index("不用一次买完")
+    assert completed.index("不用一次买完") < completed.index("/hospital-bag-cart")
 
 
 def test_hospital_bag_card_personalizes_all_legacy_high_impact_inputs() -> None:

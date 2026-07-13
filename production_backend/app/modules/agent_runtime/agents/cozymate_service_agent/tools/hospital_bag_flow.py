@@ -24,12 +24,36 @@ _REQUIRED_FIELDS = {
 }
 
 
-def ensure_hospital_bag_cart_link(text: str) -> str:
+def ensure_hospital_bag_completion_followup(
+    text: str,
+    *,
+    card: dict[str, Any] | None = None,
+) -> str:
     normalized = str(text or "").strip()
     if "/hospital-bag-cart" in normalized:
         return normalized
-    link = f"**{HOSPITAL_BAG_CART_LINK}**"
-    return f"{normalized}\n\n{link}" if normalized else link
+    followup = build_hospital_bag_followup(card or {})["message"]
+    paragraphs = [paragraph.strip() for paragraph in followup.split("\n\n") if paragraph.strip()]
+    suffix = [
+        paragraph
+        for index, paragraph in enumerate(paragraphs)
+        if (not normalized or index > 0) and not _hospital_bag_followup_paragraph_present(normalized, paragraph)
+    ]
+    if not suffix:
+        return normalized
+    return "\n\n".join([normalized, *suffix]) if normalized else "\n\n".join(suffix)
+
+
+def _hospital_bag_followup_paragraph_present(text: str, paragraph: str) -> bool:
+    if "/hospital-bag-cart" in paragraph:
+        return "/hospital-bag-cart" in text
+    if paragraph.startswith("特殊物品我按这几个情况做了取舍"):
+        return "特殊物品我按这几个情况做了取舍" in text
+    if paragraph.startswith("我只保留和孕周、喂养、医院确认真正相关的非常规物品"):
+        return "我只保留和孕周、喂养、医院确认真正相关的非常规物品" in text
+    if "不用一次买完" in paragraph:
+        return "不用一次买完" in text and "购物车" in text
+    return paragraph in text
 
 
 def build_hospital_bag_card_json(
