@@ -13,7 +13,7 @@ from io import BytesIO
 from typing import Any
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from .auth import verify_api_key
 from .responses import (
@@ -1379,6 +1379,51 @@ async def prewarm_ag_ui_thread(request: Request) -> dict[str, Any]:
     return data if isinstance(data, dict) else {"status": "warmed", "conversation_id": thread_id, "thread_id": thread_id}
 
 
+@router.post("/api/ag-ui-cancel")
+async def cancel_ag_ui_thread(request: Request) -> JSONResponse:
+    verify_api_key(request)
+    body = await _json_body_or_error(request, basic=True)
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="ag-ui cancel requires a JSON object")
+
+    thread_id = str(
+        body.get("thread_id")
+        or body.get("threadId")
+        or body.get("conversation_id")
+        or body.get("conversationId")
+        or ""
+    ).strip()
+    if not thread_id:
+        raise HTTPException(status_code=400, detail="ag-ui cancel requires thread_id")
+
+    url = _ag_ui_cancel_forward_url()
+    if not url or url.lower() in {"none", "disabled", "off"}:
+        return JSONResponse({"status": "disabled", "conversation_id": thread_id, "thread_id": thread_id})
+
+    try:
+        import httpx
+    except ImportError as exc:
+        raise HTTPException(status_code=501, detail="httpx is not installed") from exc
+
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=1.0, read=3.0, write=1.0, pool=1.0), trust_env=False) as client:
+            response = await client.post(url, json=body)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"failed to cancel ag-ui run: {exc}") from exc
+
+    try:
+        data = response.json()
+    except ValueError:
+        data = {}
+    payload = data if isinstance(data, dict) else {"status": "cancel_forwarded", "thread_id": thread_id}
+    if response.status_code < 200 or response.status_code >= 300:
+        preview = response.text[:300]
+        if response.status_code == 404:
+            return JSONResponse(payload or {"status": "not_found", "thread_id": thread_id})
+        raise HTTPException(status_code=502, detail=f"ag-ui cancel failed: {response.status_code} {preview}".strip())
+    return JSONResponse(payload)
+
+
 @router.post("/api/hospital-bag/cart-update")
 async def update_hospital_bag_cart_direct(request: Request) -> dict[str, Any]:
     verify_api_key(request)
@@ -1704,6 +1749,18 @@ def _client_event_forward_url() -> str:
             return f"{chat_sse_url[:-len('/api/ag-ui')]}/api/client-event"
         return chat_sse_url.rstrip("/") + "/api/client-event"
     return "http://127.0.0.1:8768/api/client-event"
+
+
+def _ag_ui_cancel_forward_url() -> str:
+    explicit = (os.getenv("MOMCOZY_AGENT_CANCEL_URL") or "").strip()
+    if explicit:
+        return explicit
+    chat_sse_url = (os.getenv("MOMCOZY_CHAT_SSE_URL") or "").strip()
+    if chat_sse_url:
+        if chat_sse_url.endswith("/api/ag-ui"):
+            return f"{chat_sse_url[:-len('/api/ag-ui')]}/api/ag-ui-cancel"
+        return chat_sse_url.rstrip("/") + "/api/ag-ui-cancel"
+    return "http://127.0.0.1:8768/api/ag-ui-cancel"
 
 
 def _build_notify_query_response(*, status: int, message: str, error: int, notify_list: Any = None) -> dict[str, Any]:

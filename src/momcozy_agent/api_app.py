@@ -69,6 +69,7 @@ def _service_info() -> dict[str, object]:
         "endpoints": {
             "ag_ui_ws": "/api/ag-ui-ws",
             "ag_ui_prewarm": "/api/ag-ui-prewarm",
+            "ag_ui_cancel": "/api/ag-ui-cancel",
             "client_event": "/api/client-event",
             "support_ticket_submit": "/api/support-ticket-submit",
             "skill_assets": "/skill-assets/{skill_id}/{asset_path}",
