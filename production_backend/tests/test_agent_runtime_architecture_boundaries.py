@@ -295,7 +295,8 @@ def test_service_skills_capture_legacy_domain_flow_semantics() -> None:
     assert "还有其他需要补充的信息吗？如果没有，我就基于目前的信息开始为你制定孕期计划啦。" in pregnancy
     assert "birth_journey_plan_card_create" not in pregnancy
     assert "plans.plan_delete.propose" in pregnancy
-    assert "plans.task_complete.propose" in pregnancy
+    assert "pregnancy.plan_todo.propose" in pregnancy
+    assert "version_conflict" in pregnancy
     assert "hospital_bag_form_create" in pregnancy
     assert "hospital_bag_card_create" in pregnancy
     assert "labor_communication_card_create" in pregnancy
@@ -490,6 +491,7 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
     image_inspect_schema = registry.get("images.inspect").input_schema
     milk_plan_schema = registry.get("plans.milk_plan.propose").input_schema
     pregnancy_plan_schema = registry.get("pregnancy.plan.propose").input_schema
+    pregnancy_todo_schema = registry.get("pregnancy.plan_todo.propose").input_schema
     pregnancy_intake_start_schema = registry.get("pregnancy.plan_intake.start").input_schema
     pregnancy_intake_analyze_schema = registry.get("pregnancy.plan_intake.analyze").input_schema
     pregnancy_intake_advance_schema = registry.get("pregnancy.plan_intake.advance").input_schema
@@ -583,6 +585,9 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
     assert "payload" not in pregnancy_plan_schema["properties"]
     assert pregnancy_plan_schema["properties"]["scope"]["enum"] == ["full", "prenatal_only", "short_range"]
     assert pregnancy_plan_schema["properties"]["additional_info"]["maxLength"] == 2000
+    assert pregnancy_todo_schema["additionalProperties"] is False
+    assert pregnancy_todo_schema["required"] == ["plan_id", "item_id", "completed", "expected_version"]
+    assert pregnancy_todo_schema["properties"]["expected_version"]["minimum"] == 1
     assert pregnancy_intake_start_schema["additionalProperties"] is False
     assert pregnancy_intake_start_schema["properties"]["restart"]["type"] == "boolean"
     assert pregnancy_intake_analyze_schema == {"type": "object", "additionalProperties": False, "properties": {}}

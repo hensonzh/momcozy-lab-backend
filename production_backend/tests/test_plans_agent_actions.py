@@ -16,10 +16,12 @@ from production_backend.app.modules.plans.agent_actions import (
     PLAN_TASK_DELETE_ACTION,
     PLAN_TASK_UPDATE_ACTION,
     PLAN_DELETE_ACTION,
+    PREGNANCY_PLAN_TODO_UPDATE_ACTION,
     PREGNANCY_PLAN_CREATE_ACTION,
     MilkPlanCreateActionHandler,
     MilkScheduleRescheduleActionHandler,
     PlanDeleteActionHandler,
+    PregnancyPlanTodoUpdateActionHandler,
     PlanTaskCompleteActionHandler,
     PlanTaskCreateActionHandler,
     PlanTaskDeleteActionHandler,
@@ -447,6 +449,72 @@ def test_plan_delete_action_handler_deletes_plan_through_service() -> None:
     assert service.delete_plan_kwargs["plan_id"] == plan_id
 
 
+def test_pregnancy_plan_todo_update_action_updates_embedded_item_and_emits_change() -> None:
+    service = FakePlansService()
+    service.plan.plan_type = "pregnancy"
+    service.plan.version = 3
+    action = _action(
+        action_type=PREGNANCY_PLAN_TODO_UPDATE_ACTION,
+        target_type="plan",
+        apply_payload={
+            "plan_id": str(service.plan.id),
+            "item_id": "prepare-hospital-bag",
+            "completed": True,
+            "expected_version": 2,
+        },
+    )
+    service.plan.owner_user_id = action.actor_user_id
+
+    result = asyncio.run(PregnancyPlanTodoUpdateActionHandler(service=service)(action))
+
+    assert service.update_plan_todo_completion_kwargs == {
+        "owner_user_id": action.actor_user_id,
+        "plan_id": service.plan.id,
+        "item_id": "prepare-hospital-bag",
+        "completed": True,
+        "expected_version": 2,
+        "request_id": f"agent-action:{action.id}",
+        "idempotency_key": action.idempotency_key,
+    }
+    assert result.resource_type == "plan"
+    assert result.resource_id == str(service.plan.id)
+    assert result.details["version"] == 3
+    assert result.application_events[0].event_type == PREGNANCY_PLAN_CHANGED_EVENT
+    assert result.application_events[0].payload == {
+        "operation": "updated",
+        "reason": "todo_completion_changed",
+        "plan_id": str(service.plan.id),
+        "plan_type": "pregnancy",
+        "source": "agent_action",
+        "version": 3,
+        "item_ids": ["prepare-hospital-bag"],
+    }
+
+
+def test_pregnancy_plan_delete_emits_deleted_change_event() -> None:
+    service = FakePlansService()
+    service.plan.plan_type = "pregnancy"
+    owner = uuid4()
+    service.plan.owner_user_id = owner
+    action = _action(
+        action_type=PLAN_DELETE_ACTION,
+        target_type="plan",
+        apply_payload={"plan_id": str(service.plan.id)},
+    )
+    action.actor_user_id = owner
+
+    result = asyncio.run(PlanDeleteActionHandler(service=service)(action))
+
+    assert result.application_events[0].event_type == PREGNANCY_PLAN_CHANGED_EVENT
+    assert result.application_events[0].payload == {
+        "operation": "deleted",
+        "reason": "plan_deleted",
+        "plan_id": str(service.plan.id),
+        "plan_type": "pregnancy",
+        "source": "agent_action",
+    }
+
+
 def test_milk_task_update_delete_and_plan_delete_emit_change_operations() -> None:
     service = FakePlansService()
     owner = uuid4()
@@ -542,6 +610,7 @@ class FakePlansService:
         self.delete_task_kwargs = {}
         self.delete_plan_kwargs = {}
         self.reschedule_milk_tasks_kwargs = {}
+        self.update_plan_todo_completion_kwargs = {}
 
     async def create_plan(self, **kwargs):
         self.create_plan_kwargs = kwargs
@@ -593,6 +662,11 @@ class FakePlansService:
 
     async def delete_plan(self, **kwargs):
         self.delete_plan_kwargs = kwargs
+
+    async def update_plan_todo_completion(self, **kwargs):
+        self.update_plan_todo_completion_kwargs = kwargs
+        self.plan.version = kwargs["expected_version"] + 1
+        return self.plan
 
     async def reschedule_milk_tasks(self, **kwargs):
         self.reschedule_milk_tasks_kwargs = kwargs

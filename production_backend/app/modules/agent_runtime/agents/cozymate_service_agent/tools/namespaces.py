@@ -94,6 +94,7 @@ SCENARIO_NAMESPACE_DEFINITIONS: tuple[ToolNamespace, ...] = (
             "pregnancy.plan_intake.analyze",
             "pregnancy.plan_intake.advance",
             "pregnancy.plan.propose",
+            "pregnancy.plan_todo.propose",
             "plans.plan_delete.propose",
             "plans.task_update.propose",
             "plans.task_delete.propose",

@@ -801,6 +801,7 @@ def _tool_event_label(tool_name: str, payload: dict[str, Any] | None = None) -> 
         "plans.milk_plan.propose": "泌乳计划草稿",
         "plans.task_create.propose": "任务草稿",
         "plans.task_complete.propose": "任务状态",
+        "pregnancy.plan_todo.propose": "孕期计划事项",
         "pregnancy.plan_context.read": "孕期计划上下文",
         "pregnancy.plan_intake.start": "孕期计划信息表",
         "pregnancy.plan_intake.analyze": "孕期计划信息分析",

@@ -43,6 +43,7 @@ from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.
     ProfileUpdateToolHandler,
     PumpingRecordProposeToolHandler,
     PregnancyPlanContextReadToolHandler,
+    PregnancyPlanTodoUpdateProposeToolHandler,
     PregnancyPlanIntakeAdvanceToolHandler,
     PregnancyPlanIntakeAnalyzeToolHandler,
     PregnancyPlanIntakeStartToolHandler,
@@ -67,6 +68,7 @@ from production_backend.app.modules.plans.agent_actions import (
     PLAN_TASK_UPDATE_ACTION,
     PLAN_DELETE_ACTION,
     PREGNANCY_PLAN_CREATE_ACTION,
+    PREGNANCY_PLAN_TODO_UPDATE_ACTION,
 )
 from production_backend.app.modules.plans.models import Plan, PlanTask
 from production_backend.app.modules.profiles.models import InfantProfile, UserProfile
@@ -791,6 +793,46 @@ def test_plans_current_read_tool_handler_returns_bounded_owner_scoped_summary() 
     assert result["counts"] == {"plans": 1, "tasks": 1}
 
 
+def test_pregnancy_plan_context_exposes_bounded_embedded_todos_for_agent_updates() -> None:
+    actor = _user()
+    plans_service = FakePlansService(owner_user_id=actor.user_id)
+    plans_service.plan_payload = {
+        "card": {
+            "card_json": {
+                "todo_plan": {
+                    "periods": [
+                        {
+                            "status": "current",
+                            "items": [
+                                {
+                                    "item_id": "prepare-hospital-bag",
+                                    "title": "准备待产包",
+                                    "completed": False,
+                                }
+                            ],
+                        }
+                    ]
+                }
+            }
+        }
+    }
+    result = asyncio.run(
+        PregnancyPlanContextReadToolHandler(
+            profile_service=FakeProfileService(profile=None, infants=[]),
+            plans_service=plans_service,
+        )(_context(actor=actor, args={}))
+    )
+
+    assert result["plans"][0]["current_todos"] == [
+        {
+            "item_id": "prepare-hospital-bag",
+            "number": 1,
+            "title": "准备待产包",
+            "completed": False,
+        }
+    ]
+
+
 def test_plans_calendar_read_tool_handler_filters_by_date_and_status() -> None:
     actor = _user()
     plans_service = FakePlansService(owner_user_id=actor.user_id)
@@ -841,6 +883,7 @@ def test_pregnancy_plan_context_read_tool_handler_returns_bounded_owner_scoped_s
     assert plans_service.plan_type == "pregnancy"
     assert result["profile"]["delivery_date"] == "2026-09-20"
     assert result["plans"][0]["title"] == "Birth plan"
+    assert result["plans"][0]["version"] == 1
     assert result["tasks"][0]["title"] == "Call clinic"
     assert "recent_diary_entries" not in result
     assert result["counts"] == {"plans": 1, "tasks": 1}
@@ -2662,6 +2705,35 @@ def test_plan_task_complete_propose_tool_handler_creates_confirmation_action() -
     assert runtime_service.calls[0]["apply_payload"]["metadata"] == {"timezone": "Asia/Shanghai"}
 
 
+def test_pregnancy_plan_todo_update_propose_targets_embedded_plan_item() -> None:
+    runtime_service = FakeAgentRuntimeService()
+    plan_id = uuid4()
+
+    result = asyncio.run(
+        PregnancyPlanTodoUpdateProposeToolHandler(runtime_service=runtime_service)(
+            _context(
+                args={
+                    "plan_id": str(plan_id),
+                    "item_id": "prepare-hospital-bag",
+                    "completed": True,
+                    "expected_version": 2,
+                }
+            )
+        )
+    )
+
+    assert result["action_type"] == PREGNANCY_PLAN_TODO_UPDATE_ACTION
+    assert result["action_status"] == "applied"
+    assert result["preview_payload"] == {
+        "plan_id": str(plan_id),
+        "item_id": "prepare-hospital-bag",
+        "completed": True,
+        "expected_version": 2,
+    }
+    assert runtime_service.calls[-1]["target_type"] == "plan"
+    assert runtime_service.calls[-1]["target_id"] == str(plan_id)
+
+
 def test_plan_task_update_delete_and_plan_delete_tool_handlers_create_confirmation_actions() -> None:
     actor = _user()
     runtime_service = FakeAgentRuntimeService()
@@ -3000,6 +3072,7 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
         "pregnancy.plan_intake.advance",
         "pregnancy.plan_intake.start",
         "pregnancy.plan.propose",
+        "pregnancy.plan_todo.propose",
         "records.feeding_record.propose",
         "records.pumping_record.propose",
         "support.ticket.propose",
@@ -3469,6 +3542,7 @@ class FakeAgentRuntimeService:
                         "records.growth_record.update",
                         "records.growth_record.delete",
                         "pregnancy.plan.create",
+                        "pregnancy.plan_todo.update",
                         "plans.task.create",
                         "plans.task.complete",
                         "plans.task.update",

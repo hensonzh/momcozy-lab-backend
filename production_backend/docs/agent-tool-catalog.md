@@ -79,6 +79,7 @@
 | `pregnancy.plan_intake.analyze` | `pregnancy_plan_intake_analyze` | deferred | write | 否 | 只消费应用侧已校验的孕期计划表单提交，按风险/信息缺口进入 0..3 轮不重复个性化追问或产检资料步骤。 |
 | `pregnancy.plan_intake.advance` | `pregnancy_plan_intake_advance` | deferred | write | 否 | 只推进当前可信步骤：个性化追问、孕早期产检确认、当前 run 附件上传/跳过、最终补充确认。 |
 | `pregnancy.plan.propose` | `pregnancy_plan_propose` | deferred | write | 否 | intake 完成产检资料步骤并进入 `ready_to_generate` 后，在当前 agent tool 事务中基于可信快照同步创建计划；失败时返回明确失败且不消费 workflow。 |
+| `pregnancy.plan_todo.propose` | `pregnancy_plan_todo_propose` | deferred | write | 否 | 用户明确完成或取消完成当前孕期计划事项，且可信上下文能唯一提供 `plan_id`、`item_id` 与 `version` 时同步更新嵌入卡片的待办状态。 |
 | `plans.plan_delete.propose` | `plans_plan_delete_propose` | deferred | write | 否 | 用户当前明确删除且 owner-scoped `plan_id` 唯一确定时立即同步删除，不再追加口头/通用确认；仅目标含糊时澄清。 |
 | `plans.task_update.propose` | `plans_task_update_propose` | deferred | write | 否 | 用户明确调整 owner-scoped 唯一单项任务时同步更新；批量修改不走该工具。 |
 | `plans.task_delete.propose` | `plans_task_delete_propose` | deferred | write | 否 | 用户明确删除 owner-scoped 唯一单项任务时同步软删除；目标含糊时先澄清。 |
@@ -129,12 +130,12 @@ service skill 只通过 `recommended_tools` 向模型提示常用工具，不拥
 | Service skill | 当前 recommended tool contract |
 | --- | --- |
 | `milk-management` | `milk_management` namespace 的全部 17 个工具 |
-| `birth-prep` | `pregnancy.plan_intake.start`、`pregnancy.plan_intake.analyze`、`pregnancy.plan_intake.advance`、`pregnancy.plan.propose`、`plans.plan_delete.propose`、`plans.task_complete.propose`、`plans.task_update.propose`、`plans.task_delete.propose`、4 个分娩沟通/待产包表单与卡片工具、`hospital_bag_cart_update`、`hospital_bag_pump_recommend` |
+| `birth-prep` | `pregnancy.plan_intake.start`、`pregnancy.plan_intake.analyze`、`pregnancy.plan_intake.advance`、`pregnancy.plan.propose`、`pregnancy.plan_todo.propose`、`plans.plan_delete.propose`、`plans.task_update.propose`、`plans.task_delete.propose`、4 个分娩沟通/待产包表单与卡片工具、`hospital_bag_cart_update`、`hospital_bag_pump_recommend` |
 | `health-consultation` | `records.milk_status.read`、`ibclc_consult_card_create` |
 | `emotion-support` | 空；当前没有专属 recommended tool |
 | `device-guidance` | `device_support` namespace 的全部 3 个工具 |
 
-这张映射刻意允许跨 namespace 推荐。例如 `birth-prep` 可以推荐位于 `milk_management` 的 `plans.task_complete.propose`，`health-consultation` 可以推荐位于 `milk_management` 的 `records.milk_status.read`。
+这张映射刻意允许跨 namespace 推荐。例如 `health-consultation` 可以推荐位于 `milk_management` 的 `records.milk_status.read`；孕期计划卡片待办则使用 `birth_prep` 自己的 `pregnancy.plan_todo.propose`，不与普通 `PlanTask` 混用 ID。
 
 孕期日记工具不出现在任何 skill 的 `recommended_tools` 中。它由全局 `pregnancy_diary` namespace 独立提供，不参与 skill 加载、驻留或业务事实投影。
 

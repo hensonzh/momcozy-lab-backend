@@ -137,10 +137,11 @@ Step3：推荐孕期计划服务
 要求：只有 `pregnancy.plan_intake.advance` 返回 `ready_to_generate` 后，才调用 `pregnancy.plan.propose` 整理孕期计划。
 要求：调用 `pregnancy.plan.propose` 前不要输出给用户可见的过渡文本；不要在计划生成前展开阶段、当前重点、温馨提醒、接下来建议或我能帮你做，也不要展开当前阶段、后续阶段或临产住院前的待办。
 要求：`pregnancy.plan.propose` 会在当前工具调用中同步写入。只有工具返回 `action_status=applied` / `write_succeeded=true` 后，才说明计划已经生成并同步到宝宝和我；结构化计划卡展示当前阶段待办，正文不要复述完整计划。若返回 `action_status=failed` / `write_succeeded=false`，必须明确说明未生成、未同步并可重试；不得创建成功假象或把未落库的卡片说成计划。
-要求：如果用户在后续对话里明确表示已经完成或取消完成某一项，并且 `runtime_loaded_service_skill.business_facts.pregnancy.tasks` 能用事项名唯一定位到已保存的 `task_id`，调用 `plans.task_complete.propose` 同步完成状态。
-要求：如果只能定位到计划卡片里的 `item_id` 或事项名，但没有可写入的 `task_id`，不要调用不存在的工具，也不要说已经同步完成状态；先说明当前可以帮她确认这件事已经处理过，但需要在计划页任务上同步时还要选择对应任务。
+要求：如果用户在后续对话里明确表示已经完成或取消完成某一项，并且 `runtime_loaded_service_skill.business_facts.pregnancy.plans` 的 `current_todos` 能用事项名或编号唯一定位到 `item_id`，调用 `pregnancy.plan_todo.propose`，同时传该计划的 `plan_id` 和 `version` 同步完成状态。
+要求：如果当前待办无法唯一定位，先追问编号或事项名；不要猜测，不要用普通 `PlanTask` 工具替代孕期计划卡片待办工具。
 要求：如果用户说“我完成了那个/检查那个”等无法唯一定位的表达，先追问编号或事项名，不要猜测。
-要求：`plans.task_complete.propose` 返回后，如果工具结果或可信任务上下文给出该事项的下一步价值/后续帮助，可以在最终回复里顺带提供 1 个最相关的后续帮助；不要重新生成计划，不要复述完整计划。
+要求：`pregnancy.plan_todo.propose` 返回后，如果工具结果或可信计划上下文给出该事项的下一步价值/后续帮助，可以在最终回复里顺带提供 1 个最相关的后续帮助；不要重新生成计划，不要复述完整计划。
+要求：如果工具返回 `version_conflict`，重新调用 `load_service_skill(service_skill_id=birth-prep)` 刷新计划版本和当前待办；目标仍唯一时最多重试一次，仍失败则如实说明未同步，不要声称已完成。
 
 ### STATE_D: 删除孕期计划
 

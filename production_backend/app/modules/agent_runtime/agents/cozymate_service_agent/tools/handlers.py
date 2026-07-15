@@ -32,6 +32,7 @@ from production_backend.app.modules.plans.agent_actions import (
     PLAN_TASK_UPDATE_ACTION,
     PLAN_DELETE_ACTION,
     PREGNANCY_PLAN_CREATE_ACTION,
+    PREGNANCY_PLAN_TODO_UPDATE_ACTION,
 )
 from production_backend.app.modules.plans.models import Plan, PlanTask
 from production_backend.app.modules.plans.milk_plan_schedule import (
@@ -2210,6 +2211,34 @@ class PlanTaskCompleteProposeToolHandler:
         return _proposal_result(action=action, preview_payload=preview_payload)
 
 
+class PregnancyPlanTodoUpdateProposeToolHandler:
+    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
+        self.runtime_service = runtime_service
+
+    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
+        apply_payload = _pregnancy_plan_todo_apply_payload(context.args)
+        for key in ("plan_id", "item_id"):
+            if not _text(apply_payload, key):
+                raise ApiError(code="validation_failed", message=f"{key} is required.", status=422)
+        expected_version = apply_payload.get("expected_version")
+        if isinstance(expected_version, bool) or not isinstance(expected_version, int) or expected_version < 1:
+            raise ApiError(code="validation_failed", message="expected_version must be a positive integer.", status=422)
+        preview_payload = _pregnancy_plan_todo_preview_payload(apply_payload)
+        action = await self.runtime_service.propose_action(
+            owner_user_id=context.actor.user_id,
+            run_id=context.run_id,
+            action_type=PREGNANCY_PLAN_TODO_UPDATE_ACTION,
+            target_type="plan",
+            target_id=_text(apply_payload, "plan_id"),
+            side_effect_level="medium",
+            preview_payload=preview_payload,
+            apply_payload=apply_payload,
+            idempotency_key=_text(context.args, "idempotency_key")
+            or f"{context.run_id}:{context.call_id}:pregnancy-plan-todo",
+        )
+        return _proposal_result(action=action, preview_payload=preview_payload)
+
+
 class PlanTaskUpdateProposeToolHandler:
     def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
         self.runtime_service = runtime_service
@@ -2376,6 +2405,7 @@ def build_default_tool_handlers(
         "pregnancy.plan.propose": PregnancyPlanProposeToolHandler(runtime_service=agent_runtime_service),
         "plans.task_create.propose": PlanTaskCreateProposeToolHandler(runtime_service=agent_runtime_service),
         "plans.task_complete.propose": PlanTaskCompleteProposeToolHandler(runtime_service=agent_runtime_service),
+        "pregnancy.plan_todo.propose": PregnancyPlanTodoUpdateProposeToolHandler(runtime_service=agent_runtime_service),
         "plans.task_update.propose": PlanTaskUpdateProposeToolHandler(runtime_service=agent_runtime_service),
         "plans.task_delete.propose": PlanTaskDeleteProposeToolHandler(runtime_service=agent_runtime_service),
         "plans.milk_task_update.propose": PlanTaskUpdateProposeToolHandler(runtime_service=agent_runtime_service),
@@ -3392,6 +3422,24 @@ def _plan_task_complete_preview_payload(apply_payload: dict[str, Any]) -> dict[s
     }
 
 
+def _pregnancy_plan_todo_apply_payload(args: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "plan_id": _text(args, "plan_id"),
+        "item_id": _text(args, "item_id"),
+        "completed": args.get("completed"),
+        "expected_version": args.get("expected_version"),
+    }
+
+
+def _pregnancy_plan_todo_preview_payload(apply_payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "plan_id": _text(apply_payload, "plan_id"),
+        "item_id": _text(apply_payload, "item_id"),
+        "completed": apply_payload.get("completed") is True,
+        "expected_version": apply_payload.get("expected_version"),
+    }
+
+
 def _plan_task_update_apply_payload(args: dict[str, Any]) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "task_id": _text(args, "task_id"),
@@ -3952,6 +4000,7 @@ def _plan_payload(plan: Plan) -> dict[str, Any]:
 
 def _pregnancy_plan_context_payload(plan: Plan) -> dict[str, Any]:
     output = _plan_payload(plan)
+    output["version"] = plan.version if isinstance(plan.version, int) and plan.version >= 1 else 1
     payload: dict[str, Any] = plan.payload if isinstance(plan.payload, dict) else {}
     card_value = payload.get("card")
     card: dict[str, Any] = card_value if isinstance(card_value, dict) else {}
@@ -3974,7 +4023,47 @@ def _pregnancy_plan_context_payload(plan: Plan) -> dict[str, Any]:
     safe_owner = {key: value for key, value in owner.items() if key in allowed_owner_keys and value not in ("", None)}
     if safe_owner:
         output["owner"] = safe_owner
+    current_todos = _pregnancy_plan_current_todos(card)
+    if current_todos:
+        output["current_todos"] = current_todos
     return output
+
+
+def _pregnancy_plan_current_todos(card: dict[str, Any]) -> list[dict[str, Any]]:
+    card_json = card.get("card_json")
+    if not isinstance(card_json, dict):
+        return []
+    todo_plan = card_json.get("todo_plan")
+    if not isinstance(todo_plan, dict):
+        return []
+    periods = todo_plan.get("periods")
+    if not isinstance(periods, list):
+        return []
+    current = next(
+        (period for period in periods if isinstance(period, dict) and period.get("status") == "current"),
+        next((period for period in periods if isinstance(period, dict)), None),
+    )
+    if not isinstance(current, dict) or not isinstance(current.get("items"), list):
+        return []
+    todos: list[dict[str, Any]] = []
+    for item in current["items"]:
+        if not isinstance(item, dict):
+            continue
+        item_id = _text(item, "item_id")
+        title = _text(item, "title")
+        if not item_id or not title:
+            continue
+        todos.append(
+            {
+                "item_id": item_id,
+                "number": len(todos) + 1,
+                "title": title,
+                "completed": item.get("completed") is True,
+            }
+        )
+        if len(todos) >= 10:
+            break
+    return todos
 
 
 def _task_payload(task: PlanTask) -> dict[str, Any]:

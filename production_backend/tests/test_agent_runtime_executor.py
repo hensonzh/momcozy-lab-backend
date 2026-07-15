@@ -720,8 +720,8 @@ def test_agent_runtime_executor_loads_birth_prep_with_structured_business_fact_r
                 "pregnancy_plan_intake_analyze",
                 "pregnancy_plan_intake_advance",
                 "pregnancy_plan_propose",
+                "pregnancy_plan_todo_propose",
                 "plans_plan_delete_propose",
-                "plans_task_complete_propose",
                 "plans_task_update_propose",
                 "plans_task_delete_propose",
                 "birth_plan_form_create",
@@ -1114,6 +1114,7 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
         "pregnancy_plan_intake_advance",
         "pregnancy_plan_intake_analyze",
         "pregnancy_plan_intake_start",
+        "pregnancy_plan_todo_propose",
         "pregnancy_diary_manage",
         "profile_read",
         "profile_update",
@@ -1159,6 +1160,12 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert backend.tool_schemas["plans_plan_delete_propose"]["required"] == ["plan_id"]
     assert backend.tool_schemas["plans_task_complete_propose"]["required"] == ["task_id"]
     assert backend.tool_schemas["plans_task_complete_propose"]["properties"]["completed"]["type"] == "boolean"
+    assert backend.tool_schemas["pregnancy_plan_todo_propose"]["required"] == [
+        "plan_id",
+        "item_id",
+        "completed",
+        "expected_version",
+    ]
     assert backend.tool_schemas["plans_task_create_propose"]["required"] == ["title"]
     assert backend.tool_schemas["plans_task_delete_propose"]["required"] == ["task_id"]
     assert backend.tool_schemas["plans_task_update_propose"]["required"] == ["task_id"]

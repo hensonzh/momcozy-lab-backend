@@ -368,6 +368,8 @@ class PlansService:
         )
         if plan is None:
             raise ApiError(code="not_found", message="Plan not found.", status=404)
+        if plan.plan_type != "pregnancy":
+            raise ApiError(code="validation_failed", message="Plan is not a pregnancy plan.", status=422)
         if plan.version != expected_version:
             raise ApiError(
                 code="version_conflict",

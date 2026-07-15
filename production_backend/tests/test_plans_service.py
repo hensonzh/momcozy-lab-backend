@@ -322,6 +322,26 @@ def test_todo_completion_hides_cross_owner_plan_as_not_found() -> None:
     assert exc_info.value.code == "not_found"
 
 
+def test_todo_completion_rejects_non_pregnancy_plan() -> None:
+    owner_user_id = uuid4()
+    plan = _plan(owner_user_id=owner_user_id)
+    plan.plan_type = "milk"
+    service = PlansService(repository=FakePlansRepository(plan=plan))
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            service.update_plan_todo_completion(
+                owner_user_id=owner_user_id,
+                plan_id=plan.id,
+                item_id="prepare-hospital-bag",
+                completed=True,
+                expected_version=1,
+            )
+        )
+
+    assert exc_info.value.code == "validation_failed"
+
+
 def test_todo_completion_idempotency_replay_returns_authoritative_plan_without_second_update() -> None:
     owner_user_id = uuid4()
     plan = _pregnancy_plan(owner_user_id=owner_user_id)
