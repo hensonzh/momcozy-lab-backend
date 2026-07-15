@@ -21,6 +21,7 @@ from .run_lifecycle.state_store import AgentRuntimeStateStore
 from .models import AgentAction, AgentArtifact, AgentEvent, AgentRun, AgentThread, AgentWorkflowState
 from .repository import AgentRuntimeRepository
 from .safety import AgentSafetyService
+from .safety.templates import get_safety_response_template
 
 
 AGENT_RUN_CREATE_IDEMPOTENCY_SCOPE = "agent.runs.create"
@@ -291,19 +292,40 @@ class AgentRuntimeService:
                 "handoff_type": decision.handoff_type,
             },
         )
-        failed = await self.repository.mark_run_failed(
-            run=run,
-            completed_at=_utcnow(),
-            error_code=decision.category,
-            error_details={"decision": decision.decision, "severity": decision.severity},
+        response_text = get_safety_response_template(decision.response_template_key).response_text
+        response_message = await self.repository.create_message(
+            thread_id=run.thread_id,
+            run_id=run.id,
+            role="assistant",
+            message_type="text",
+            content={
+                "text": response_text,
+                "safety_category": decision.category,
+                "response_template_key": decision.response_template_key,
+                "response_template_version": decision.response_template_version,
+                "handoff_type": decision.handoff_type,
+            },
+            status="completed",
         )
         await self._append_event(
             thread_id=run.thread_id,
             run_id=run.id,
-            event_type="run.failed",
-            payload={"code": decision.category, "decision": decision.decision},
+            event_type="message.completed",
+            payload={
+                "message_id": str(response_message.id),
+                "role": "assistant",
+                "text": response_text,
+                "safety_category": decision.category,
+            },
         )
-        return failed
+        completed = await self.repository.mark_run_completed(run=run, completed_at=_utcnow())
+        await self._append_event(
+            thread_id=run.thread_id,
+            run_id=run.id,
+            event_type="run.completed",
+            payload={"safety_category": decision.category, "decision": decision.decision},
+        )
+        return completed
 
     async def _sync_verified_form_facts(
         self,

@@ -36,7 +36,7 @@ def test_deterministic_safety_guard_escalates_crisis_variants(text: str) -> None
     assert decision.decision == "escalate"
     assert decision.should_block_normal_flow is True
     assert decision.response_template_key == "emotional_crisis_escalation"
-    assert decision.response_template_version == "safety-response.v1"
+    assert decision.response_template_version == "safety-response.v2"
     assert decision.handoff_type == "crisis_support"
 
 
@@ -102,7 +102,7 @@ def test_deterministic_safety_guard_escalates_health_variants(text: str) -> None
     assert decision.decision == "escalate"
     assert decision.should_block_normal_flow is True
     assert decision.response_template_key == "maternal_infant_health_escalation"
-    assert decision.response_template_version == "safety-response.v1"
+    assert decision.response_template_version == "safety-response.v2"
     assert decision.handoff_type == "medical_or_emergency_support"
 
 
@@ -121,8 +121,13 @@ def test_safety_response_template_registry_defines_keys_versions_and_handoffs() 
     )
     for key, template in SAFETY_RESPONSE_TEMPLATES.items():
         assert template.key == key
-        assert template.version == "safety-response.v1"
+        assert template.version == "safety-response.v2"
         assert template.display_intent
+        if key != "none":
+            assert template.response_text
+    health = SAFETY_RESPONSE_TEMPLATES["maternal_infant_health_escalation"]
+    assert "立即" in health.response_text
+    assert "不能替代现场医疗评估" in health.response_text
 
 
 def test_agent_safety_service_records_non_allow_decisions_only() -> None:

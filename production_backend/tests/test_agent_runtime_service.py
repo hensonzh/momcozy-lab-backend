@@ -77,7 +77,7 @@ def test_agent_runtime_service_creates_run_with_thread_message_events_and_idempo
     assert idempotency_service.completed_response_ref == str(run.id)
 
 
-def test_agent_runtime_service_blocks_unsafe_run_before_queueing_model_work() -> None:
+def test_agent_runtime_service_completes_unsafe_run_with_visible_safety_response() -> None:
     owner_user_id = uuid4()
     repository = FakeAgentRuntimeRepository()
     controls = FakeAgentRunControls()
@@ -95,17 +95,32 @@ def test_agent_runtime_service_blocks_unsafe_run_before_queueing_model_work() ->
         )
     )
 
-    assert run.status == "failed"
-    assert run.error_code == "health_red_flag"
+    assert run.status == "completed"
+    assert run.error_code == ""
     assert repository.safety_event is not None
     assert repository.safety_event.run_id == run.id
-    assert [event.event_type for event in repository.events] == ["message.completed", "safety.blocked", "run.failed"]
+    assert [message.role for message in repository.messages] == ["user", "assistant"]
+    safety_text = repository.messages[1].content["text"]
+    assert "立即" in safety_text
+    assert "急救" in safety_text
+    assert "不能替代现场医疗评估" in safety_text
+    assert [event.event_type for event in repository.events] == [
+        "message.completed",
+        "safety.blocked",
+        "message.completed",
+        "run.completed",
+    ]
     blocked_payload = repository.events[1].payload
     assert blocked_payload["response_template_key"] == "maternal_infant_health_escalation"
-    assert blocked_payload["response_template_version"] == "safety-response.v1"
+    assert blocked_payload["response_template_version"] == "safety-response.v2"
     assert blocked_payload["handoff_type"] == "medical_or_emergency_support"
-    assert repository.events[2].payload["semantic"]["phase"] == "error"
-    assert repository.events[2].payload["semantic"]["label"] == "这轮暂时没处理好"
+    assert repository.events[2].payload == {
+        "message_id": str(repository.messages[1].id),
+        "role": "assistant",
+        "text": safety_text,
+        "safety_category": "health_red_flag",
+    }
+    assert repository.events[3].payload["semantic"]["phase"] == "done"
     assert controls.active_run is None
     assert controls.queued_run_ids == []
 

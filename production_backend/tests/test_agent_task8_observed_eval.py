@@ -552,11 +552,19 @@ def test_observed_medical_red_flag_is_blocked_before_runtime_execution() -> None
     scenario = ObservedScenario()
     trace, run = scenario.create_safety_blocked_run("我发烧而且乳房红肿越来越严重。")
 
-    assert run.status == "failed"
+    assert run.status == "completed"
     assert trace.safety_decision == "escalate"
     assert trace.tool_calls == []
     assert trace.actions == []
-    assert [event["type"] for event in trace.events] == ["message.completed", "safety.blocked", "run.failed"]
+    assert [event["type"] for event in trace.events] == [
+        "message.completed",
+        "safety.blocked",
+        "message.completed",
+        "run.completed",
+    ]
+    assistant_event = trace.events[2]
+    assert assistant_event["payload"]["role"] == "assistant"
+    assert "立即" in assistant_event["payload"]["text"]
 
 
 def test_observed_ibclc_requires_semantic_consent_and_creates_no_support_action() -> None:
@@ -1032,6 +1040,20 @@ class RecordingRuntimeRepository:
         self.artifacts.append(artifact)
         return artifact
 
+    async def create_message(self, **kwargs):
+        message = AgentMessage(
+            id=kwargs.get("message_id") or uuid4(),
+            thread_id=kwargs["thread_id"],
+            run_id=kwargs["run_id"],
+            role=kwargs["role"],
+            message_type=kwargs["message_type"],
+            content=kwargs["content"],
+            status=kwargs["status"],
+            sequence=len(self.messages) + 1,
+        )
+        self.messages.append(message)
+        return message
+
     async def list_artifacts_for_run(self, *, run_id: UUID):
         return [artifact for artifact in self.artifacts if artifact.run_id == run_id]
 
@@ -1092,6 +1114,13 @@ class RecordingRuntimeRepository:
         run.completed_at = completed_at
         run.error_code = error_code
         run.error_details = error_details
+        return run
+
+    async def mark_run_completed(self, *, run: AgentRun, completed_at: datetime):
+        run.status = "completed"
+        run.completed_at = completed_at
+        run.error_code = ""
+        run.error_details = {}
         return run
 
 
