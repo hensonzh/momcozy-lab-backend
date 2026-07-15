@@ -346,8 +346,8 @@ def default_tool_registry() -> ToolContractRegistry:
             name="plans.milk_schedule.propose",
             domain="plans",
             description=(
-                "读取当前用户指定奶量计划的待执行任务，避开一个或多个明确不可用时间段，"
-                "用户明确日期和不可用时间、要求调整日程时调用；生成保持间隔的单日或批量重排预览并发起待确认动作。"
+                "用户明确要求新增会议、外出等生活事项或避开已有不可用时段时调用；读取当前奶量计划并生成重排预览。"
+                "本轮新增事项放入 calendar_events，runtime 会在确认后将事项与奶量任务调整原子写入。"
             ),
             read_or_write="write",
             side_effect_level="medium",

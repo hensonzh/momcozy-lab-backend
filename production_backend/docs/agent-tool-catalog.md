@@ -67,6 +67,7 @@
 | `plans.current.read` | `plans_current_read` | eager | read | 否 | 用户查看当前计划、待办或后续安排时读取生效计划和近期任务。 |
 | `plans.calendar.read` | `plans_calendar_read` | eager | read | 否 | 用户询问某天安排、待完成事项或任务状态时按日期和状态读取日程。 |
 | `plans.milk_plan.propose` | `plans_milk_plan_propose` | deferred | write | 是 | 用户确认奶量计划方向后提交方向和明确约束，由 runtime 生成待确认的可执行计划；覆盖日期已有未来任务时，必须由用户明确选择追加或替换，确认后同事务写入 Plan 与 PlanTask。 |
+| `plans.milk_schedule.propose` | `plans_milk_schedule_propose` | deferred | write | 是 | 用户新增生活事项或要求避开已有不可用时段时生成奶量日程重排预览；确认后新增事项与奶量任务调整在同一事务写入。 |
 | `plans.task_complete.propose` | `plans_task_complete_propose` | deferred | write | 否 | 用户明确表示唯一指定的单项任务已完成/取消完成时同步更新。 |
 | `plans.task_create.propose` | `plans_task_create_propose` | deferred | write | 否 | 用户明确要求新增一项内容和归属清晰的待办时同步创建；批量或含糊范围先澄清。 |
 | `notifications.milk_reminder.propose` | `notifications_milk_reminder_propose` | deferred | write | 是 | 用户要求在指定时间收到奶量、喂养或吸奶提醒时创建确认。 |

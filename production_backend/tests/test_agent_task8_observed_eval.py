@@ -336,20 +336,19 @@ def test_observed_milk_analysis_plan_and_schedule_persist_real_action_lifecycles
         handlers=handlers,
         tool_invocations=(
             scripted_tool_invocation(
-                    "plans.milk_schedule.propose",
-                    {
-                        "plan_id": str(plan.id),
-                        "target_date": plan_date_text,
-                        "busy_windows": [
-                            {
-                                "date": plan_date_text,
-                                "start_time": "10:30",
-                                "end_time": "12:30",
-                                "title": "会议",
-                            }
-                        ],
-                    },
-                ),
+                "plans.milk_schedule.propose",
+                {
+                    "plan_id": str(plan.id),
+                    "calendar_events": [
+                        {
+                            "date": plan_date_text,
+                            "start_time": "10:30",
+                            "end_time": "12:30",
+                            "title": "会议",
+                        }
+                    ],
+                },
+            ),
         ),
         final_text="请确认日程调整。",
     )
@@ -362,7 +361,10 @@ def test_observed_milk_analysis_plan_and_schedule_persist_real_action_lifecycles
     _assert_actions(schedule_trace, ("plans.milk_schedule.reschedule", "applied", "plan"))
     rescheduled = _event_by_type(schedule_trace, "milk_plan.changed")
     assert rescheduled["payload"]["operation"] == "rescheduled"
-    assert [task.task_time for task in scenario.plans.tasks] == ["08:00", "10:00", "14:00"]
+    assert rescheduled["payload"]["created_calendar_event_count"] == 1
+    assert [task.task_time for task in scenario.plans.tasks] == ["08:00", "10:00", "14:00", "10:30"]
+    assert scenario.plans.tasks[-1].title == "会议"
+    assert scenario.plans.tasks[-1].plan_id is None
 
 
 def test_observed_milk_red_flags_block_plan_action_and_artifact() -> None:

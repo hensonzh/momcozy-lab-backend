@@ -1719,8 +1719,14 @@ def test_milk_schedule_proposal_is_owner_scoped_and_contains_freshness_guards() 
                 actor=actor,
                 args={
                     "plan_id": str(plans_service.plan.id),
-                    "target_date": "2026-07-14",
-                    "busy_windows": [{"date": "2026-07-14", "start_time": "10:30", "end_time": "12:30", "title": "会议"}],
+                    "calendar_events": [
+                        {
+                            "date": "2026-07-14",
+                            "start_time": "10:30",
+                            "end_time": "12:30",
+                            "title": "会议",
+                        }
+                    ],
                 },
             )
         )
@@ -1732,7 +1738,51 @@ def test_milk_schedule_proposal_is_owner_scoped_and_contains_freshness_guards() 
     update = runtime_service.calls[0]["apply_payload"]["updates"][0]
     assert update["task_id"] == str(plans_service.tasks[1].id)
     assert update["expected_task_time"] == "11:00"
+    assert runtime_service.calls[0]["apply_payload"]["calendar_events"] == [
+        {
+            "date": "2026-07-14",
+            "start_time": "10:30",
+            "end_time": "12:30",
+            "title": "会议",
+            "duration_minutes": 120,
+        }
+    ]
+    assert result["calendar_event_count"] == 1
     assert result["_deferred_agent_events"][0]["event_type"] == "artifact.created"
+
+
+def test_milk_schedule_proposal_keeps_a_new_calendar_event_when_no_milk_task_moves() -> None:
+    actor = _user()
+    runtime_service = FakeAgentRuntimeService()
+    plans_service = FakeMilkSchedulePlansService(owner_user_id=actor.user_id)
+
+    result = asyncio.run(
+        MilkScheduleRescheduleProposeToolHandler(
+            runtime_service=runtime_service,
+            plans_service=plans_service,
+        )(
+            _context(
+                actor=actor,
+                args={
+                    "plan_id": str(plans_service.plan.id),
+                    "calendar_events": [
+                        {
+                            "date": "2026-07-14",
+                            "start_time": "16:00",
+                            "end_time": "17:00",
+                            "title": "晚餐",
+                        }
+                    ],
+                },
+            )
+        )
+    )
+
+    assert result["action_status"] == "confirmation_required"
+    assert result["updated_count"] == 0
+    assert result["calendar_event_count"] == 1
+    assert result["affected_dates"] == ["2026-07-14"]
+    assert runtime_service.action.apply_payload["updates"] == []
 
 
 def test_ibclc_card_handler_creates_artifact() -> None:

@@ -14,6 +14,10 @@ from .milk_plan_schedule import (
     normalize_milk_plan_payload,
     scheduled_task_dates,
 )
+from .milk_schedule_calendar import (
+    MilkScheduleCalendarEventError,
+    normalize_milk_schedule_calendar_events,
+)
 
 
 MILK_PLAN_CREATE_ACTION = "plans.milk_plan.create"
@@ -145,16 +149,57 @@ class MilkScheduleRescheduleActionHandler:
         if not isinstance(updates, list) or not all(isinstance(item, dict) for item in updates):
             raise PermanentJobError("invalid_milk_schedule_updates")
         try:
-            tasks = await self.service.reschedule_milk_tasks(
-                owner_user_id=action.actor_user_id,
-                plan_id=plan_id,
-                updates=[dict(item) for item in updates],
-                request_id=f"agent-action:{action.id}",
-            )
+            calendar_events = normalize_milk_schedule_calendar_events(payload.get("calendar_events"))
+        except MilkScheduleCalendarEventError as exc:
+            raise PermanentJobError(str(exc)) from exc
+        if not updates and not calendar_events:
+            raise PermanentJobError("empty_milk_schedule_adjustment")
+        tasks: list[Any] = []
+        calendar_event_tasks: list[Any] = []
+        try:
+            if updates:
+                tasks = await self.service.reschedule_milk_tasks(
+                    owner_user_id=action.actor_user_id,
+                    plan_id=plan_id,
+                    updates=[dict(item) for item in updates],
+                    request_id=f"agent-action:{action.id}",
+                )
+            else:
+                plan = await self.service.get_plan(owner_user_id=action.actor_user_id, plan_id=plan_id)
+                if plan.plan_type != "milk_management":
+                    raise ApiError(code="validation_failed", message="Plan is not a milk-management plan.", status=422)
+            for index, event in enumerate(calendar_events):
+                calendar_event_tasks.append(
+                    await self.service.create_task(
+                        owner_user_id=action.actor_user_id,
+                        plan_id=None,
+                        task_date=date.fromisoformat(str(event["date"])),
+                        task_time=str(event["start_time"]),
+                        title=str(event["title"]),
+                        description=str(event.get("description") or ""),
+                        payload={
+                            "task_type": "other",
+                            "calendar_kind": "custom_event",
+                            "end_time": str(event["end_time"]),
+                            "duration_minutes": int(event["duration_minutes"]),
+                            "source": "agent_action",
+                            "agent_action_id": str(action.id),
+                            "agent_run_id": str(action.run_id),
+                        },
+                        request_id=f"agent-action:{action.id}",
+                        idempotency_key=f"agent-action:{action.id}:calendar-event:{index}",
+                    )
+                )
         except ApiError as exc:
             raise PermanentJobError(exc.code) from exc
         affected_dates = sorted(
-            {str(value) for item in updates for value in (item.get("expected_task_date"), item.get("new_task_date")) if value}
+            {
+                str(value)
+                for item in updates
+                for value in (item.get("expected_task_date"), item.get("new_task_date"))
+                if value
+            }
+            | {str(event["date"]) for event in calendar_events}
         )
         return AgentActionApplyResult(
             resource_type="plan",
@@ -162,6 +207,7 @@ class MilkScheduleRescheduleActionHandler:
             details={
                 "plan_type": "milk_management",
                 "task_count": len(tasks),
+                "calendar_event_count": len(calendar_event_tasks),
                 "agent_action_id": str(action.id),
                 "agent_run_id": str(action.run_id),
             },
@@ -176,6 +222,8 @@ class MilkScheduleRescheduleActionHandler:
                         "source": "agent_action",
                         "affected_dates": affected_dates,
                         "task_ids": [str(task.id) for task in tasks],
+                        "calendar_event_task_ids": [str(task.id) for task in calendar_event_tasks],
+                        "created_calendar_event_count": len(calendar_event_tasks),
                     },
                 ),
             ),

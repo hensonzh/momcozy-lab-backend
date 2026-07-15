@@ -490,6 +490,7 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
     device_guidance_schema = registry.get("devices.guidance.read").input_schema
     image_inspect_schema = registry.get("images.inspect").input_schema
     milk_plan_schema = registry.get("plans.milk_plan.propose").input_schema
+    milk_schedule_schema = registry.get("plans.milk_schedule.propose").input_schema
     pregnancy_plan_schema = registry.get("pregnancy.plan.propose").input_schema
     pregnancy_todo_schema = registry.get("pregnancy.plan_todo.propose").input_schema
     pregnancy_intake_start_schema = registry.get("pregnancy.plan_intake.start").input_schema
@@ -585,6 +586,14 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
     assert milk_plan_schema["properties"]["calendar_write_strategy"]["enum"] == [
         "append",
         "replace_future_plan_tasks",
+    ]
+    assert milk_schedule_schema["required"] == ["plan_id"]
+    assert milk_schedule_schema["properties"]["calendar_events"]["maxItems"] == 21
+    assert milk_schedule_schema["properties"]["calendar_events"]["items"]["required"] == [
+        "date",
+        "start_time",
+        "end_time",
+        "title",
     ]
     assert pregnancy_plan_schema["additionalProperties"] is False
     assert "title" not in pregnancy_plan_schema["properties"]

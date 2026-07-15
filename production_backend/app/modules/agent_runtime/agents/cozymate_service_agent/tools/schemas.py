@@ -357,7 +357,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
     "plans.milk_schedule.propose": {
         "type": "object",
         "additionalProperties": False,
-        "required": ["plan_id", "busy_windows"],
+        "required": ["plan_id"],
         "properties": {
             "plan_id": {"type": "string", "format": "uuid"},
             "target_date": {"type": "string", "format": "date"},
@@ -372,6 +372,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
                 "type": "array",
                 "minItems": 1,
                 "maxItems": 21,
+                "description": "已经存在于其它日程、仅用于避让且本轮不重复创建的不可用时段。",
                 "items": {
                     "type": "object",
                     "additionalProperties": False,
@@ -381,6 +382,24 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
                         "start_time": {"type": "string", "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$"},
                         "end_time": {"type": "string", "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$"},
                         "title": {"type": "string", "maxLength": 120},
+                    },
+                },
+            },
+            "calendar_events": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 21,
+                "description": "用户本轮明确新增并希望同步到日程的生活事项；runtime 会同时把它作为不可用时段参与重排。",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["date", "start_time", "end_time", "title"],
+                    "properties": {
+                        "date": {"type": "string", "format": "date"},
+                        "start_time": {"type": "string", "pattern": "^(?:[01]?\\d|2[0-3]):[0-5]\\d$"},
+                        "end_time": {"type": "string", "pattern": "^(?:[01]?\\d|2[0-3]):[0-5]\\d$"},
+                        "title": {"type": "string", "minLength": 1, "maxLength": 120},
+                        "description": {"type": "string", "maxLength": 500},
                     },
                 },
             },

@@ -272,6 +272,15 @@ def test_milk_schedule_reschedule_action_emits_authoritative_change_event() -> N
                     "new_task_time": "07:30",
                 }
             ],
+            "calendar_events": [
+                {
+                    "date": "2026-07-14",
+                    "start_time": "10:30",
+                    "end_time": "12:30",
+                    "title": "团队会议",
+                    "duration_minutes": 120,
+                }
+            ],
         },
     )
 
@@ -279,6 +288,25 @@ def test_milk_schedule_reschedule_action_emits_authoritative_change_event() -> N
 
     assert result.resource_id == str(service.plan.id)
     assert service.reschedule_milk_tasks_kwargs["owner_user_id"] == action.actor_user_id
+    assert service.create_task_kwargs == {
+        "owner_user_id": action.actor_user_id,
+        "plan_id": None,
+        "task_date": date(2026, 7, 14),
+        "task_time": "10:30",
+        "title": "团队会议",
+        "description": "",
+        "payload": {
+            "task_type": "other",
+            "calendar_kind": "custom_event",
+            "end_time": "12:30",
+            "duration_minutes": 120,
+            "source": "agent_action",
+            "agent_action_id": str(action.id),
+            "agent_run_id": str(action.run_id),
+        },
+        "request_id": f"agent-action:{action.id}",
+        "idempotency_key": f"agent-action:{action.id}:calendar-event:0",
+    }
     assert result.application_events[0].event_type == MILK_PLAN_CHANGED_EVENT
     assert result.application_events[0].payload == {
         "operation": "rescheduled",
@@ -288,7 +316,38 @@ def test_milk_schedule_reschedule_action_emits_authoritative_change_event() -> N
         "source": "agent_action",
         "affected_dates": ["2026-07-14"],
         "task_ids": [str(service.task.id)],
+        "calendar_event_task_ids": [str(service.task.id)],
+        "created_calendar_event_count": 1,
     }
+
+
+def test_milk_schedule_action_can_create_a_calendar_event_without_rescheduling_tasks() -> None:
+    service = FakePlansService()
+    action = _action(
+        action_type=MILK_SCHEDULE_RESCHEDULE_ACTION,
+        target_type="plan",
+        apply_payload={
+            "plan_id": str(service.plan.id),
+            "updates": [],
+            "calendar_events": [
+                {
+                    "date": "2026-07-14",
+                    "start_time": "10:30",
+                    "end_time": "12:30",
+                    "title": "团队会议",
+                    "duration_minutes": 120,
+                }
+            ],
+        },
+    )
+    service.plan.owner_user_id = action.actor_user_id
+
+    result = asyncio.run(MilkScheduleRescheduleActionHandler(service=service)(action))
+
+    assert service.reschedule_milk_tasks_kwargs == {}
+    assert service.create_task_kwargs["title"] == "团队会议"
+    assert result.details["task_count"] == 0
+    assert result.details["calendar_event_count"] == 1
 
 
 def test_pregnancy_plan_create_action_handler_creates_plan_through_service() -> None:

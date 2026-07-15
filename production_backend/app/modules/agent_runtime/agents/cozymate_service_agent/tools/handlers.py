@@ -41,6 +41,10 @@ from production_backend.app.modules.plans.milk_plan_builder import MilkPlanDraft
 from production_backend.app.modules.plans.milk_plan_schedule import (
     normalize_milk_plan_payload,
 )
+from production_backend.app.modules.plans.milk_schedule_calendar import (
+    MilkScheduleCalendarEventError,
+    normalize_milk_schedule_calendar_events,
+)
 from production_backend.app.modules.plans.service import PlansService
 from production_backend.app.modules.profiles.models import InfantProfile, UserProfile
 from production_backend.app.modules.profiles.service import ProfileService
@@ -2042,6 +2046,13 @@ class MilkScheduleRescheduleProposeToolHandler:
         if plan_id is None:
             raise ApiError(code="validation_failed", message="plan_id is required.", status=422)
         target_dates = _milk_schedule_target_dates(context.args)
+        try:
+            calendar_events = normalize_milk_schedule_calendar_events(
+                context.args.get("calendar_events"),
+                allowed_dates=target_dates,
+            )
+        except MilkScheduleCalendarEventError as exc:
+            raise ApiError(code=str(exc), message="A calendar event could not be created.", status=422) from exc
         plan = await self.plans_service.get_plan(owner_user_id=context.actor.user_id, plan_id=plan_id)
         if plan.plan_type != "milk_management":
             raise ApiError(code="validation_failed", message="Plan is not a milk-management plan.", status=422)
@@ -2068,14 +2079,25 @@ class MilkScheduleRescheduleProposeToolHandler:
                 tasks=tasks,
                 fixed_tasks=fixed_tasks,
                 target_dates=target_dates,
-                busy_windows=list(context.args.get("busy_windows") or []),
+                busy_windows=_milk_schedule_busy_windows(
+                    busy_windows=context.args.get("busy_windows"),
+                    calendar_events=calendar_events,
+                ),
                 min_gap_minutes=int(context.args.get("min_gap_minutes") or 90),
                 default_duration_minutes=int(context.args.get("default_duration_minutes") or 30),
             )
         except (MilkScheduleAdjustmentError, TypeError, ValueError) as exc:
             code = str(exc) if isinstance(exc, MilkScheduleAdjustmentError) else "invalid_milk_schedule_adjustment"
             raise ApiError(code=code, message="A milk schedule preview could not be created.", status=422) from exc
-        if not preview["updates"]:
+        preview = {
+            **preview,
+            "affected_dates": sorted(
+                set(preview["affected_dates"]) | {str(event["date"]) for event in calendar_events}
+            ),
+            "calendar_events": calendar_events,
+            "calendar_event_count": len(calendar_events),
+        }
+        if not preview["updates"] and not calendar_events:
             return {
                 "status": "milk_schedule_no_changes",
                 "plan_id": str(plan_id),
@@ -2096,11 +2118,17 @@ class MilkScheduleRescheduleProposeToolHandler:
                 "plan_id": str(plan_id),
                 "updates": preview["updates"],
                 "affected_dates": preview["affected_dates"],
+                "calendar_events": calendar_events,
             },
             idempotency_key=_text(context.args, "idempotency_key")
             or _stable_payload_key(
                 "milk-schedule-reschedule",
-                {"owner": str(context.actor.user_id), "plan_id": str(plan_id), "updates": preview["updates"]},
+                {
+                    "owner": str(context.actor.user_id),
+                    "plan_id": str(plan_id),
+                    "updates": preview["updates"],
+                    "calendar_events": calendar_events,
+                },
             ),
         )
         artifact_payload = {**preview, "action_id": str(action.id), "title": "奶量计划日程调整预览"}
@@ -2120,6 +2148,7 @@ class MilkScheduleRescheduleProposeToolHandler:
             "plan_id": str(plan_id),
             "conflict_count": preview["conflict_count"],
             "updated_count": preview["updated_count"],
+            "calendar_event_count": len(calendar_events),
             "affected_dates": preview["affected_dates"],
             DEFERRED_AGENT_EVENTS_KEY: [_deferred_artifact_created_event(artifact)],
         }
@@ -3761,6 +3790,15 @@ def _milk_schedule_target_dates(payload: dict[str, Any]) -> list[date]:
     target_date = _text(payload, "target_date")
     if target_date:
         raw_dates.append(target_date)
+    for key in ("busy_windows", "calendar_events"):
+        rows = payload.get(key)
+        if not isinstance(rows, list):
+            continue
+        raw_dates.extend(
+            str(row.get("date") or "").strip()
+            for row in rows
+            if isinstance(row, dict) and row.get("date")
+        )
     parsed: list[date] = []
     for value in raw_dates:
         try:
@@ -3773,6 +3811,38 @@ def _milk_schedule_target_dates(payload: dict[str, Any]) -> list[date]:
     if not parsed or len(parsed) > 7:
         raise ApiError(code="validation_failed", message="One to seven target dates are required.", status=422)
     return parsed
+
+
+def _milk_schedule_busy_windows(*, busy_windows: Any, calendar_events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized = [dict(item) for item in busy_windows if isinstance(item, dict)] if isinstance(busy_windows, list) else []
+    seen = {
+        (
+            _text(item, "date"),
+            _text(item, "start_time"),
+            _text(item, "end_time"),
+            _text(item, "title"),
+        )
+        for item in normalized
+    }
+    for event in calendar_events:
+        key = (
+            _text(event, "date"),
+            _text(event, "start_time"),
+            _text(event, "end_time"),
+            _text(event, "title"),
+        )
+        if key in seen:
+            continue
+        normalized.append(
+            {
+                "date": key[0],
+                "start_time": key[1],
+                "end_time": key[2],
+                "title": key[3],
+            }
+        )
+        seen.add(key)
+    return normalized
 
 
 def _packaged_image_asset_for_url(*, asset_service: ProductAssetService, image_url: str) -> ProductAsset | None:
