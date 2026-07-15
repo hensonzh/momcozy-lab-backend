@@ -1,0 +1,124 @@
+from __future__ import annotations
+
+import hashlib
+import json
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Any
+from uuid import UUID
+
+from ...core.errors import ApiError
+from .models import AuditLog, IdempotencyKey
+from .repository import AuditRepository
+
+
+@dataclass(frozen=True)
+class IdempotencyDecision:
+    status: str
+    record: IdempotencyKey
+
+
+class AuditService:
+    def __init__(self, *, repository: AuditRepository) -> None:
+        self.repository = repository
+
+    async def record(
+        self,
+        *,
+        actor_user_id: UUID | None,
+        actor_type: str | None = None,
+        actor_service: str = "",
+        action: str,
+        resource_type: str,
+        resource_id: str = "",
+        request_id: str = "",
+        outcome: str = "succeeded",
+        details: dict[str, Any] | None = None,
+    ) -> AuditLog:
+        return await self.repository.record_audit(
+            actor_user_id=actor_user_id,
+            actor_type=actor_type or ("user" if actor_user_id is not None else "system"),
+            actor_service=actor_service.strip(),
+            action=action,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            request_id=request_id,
+            outcome=outcome,
+            details=details or {},
+        )
+
+
+class IdempotencyService:
+    def __init__(self, *, repository: AuditRepository) -> None:
+        self.repository = repository
+
+    async def reserve(
+        self,
+        *,
+        actor_user_id: UUID,
+        scope: str,
+        key: str,
+        request_hash: str,
+        expires_at: datetime,
+    ) -> IdempotencyDecision:
+        normalized_scope = scope.strip()
+        normalized_key = key.strip()
+        if not normalized_scope:
+            raise ApiError(code="validation_failed", message="Idempotency scope is required.", status=422)
+        if len(normalized_scope) > 120:
+            raise ApiError(code="validation_failed", message="Idempotency scope is too long.", status=422)
+        if not normalized_key:
+            raise ApiError(code="validation_failed", message="Idempotency key is required.", status=422)
+        if len(normalized_key) > 255:
+            raise ApiError(code="validation_failed", message="Idempotency key is too long.", status=422)
+
+        existing = await self.repository.get_idempotency_key(
+            actor_user_id=actor_user_id,
+            scope=normalized_scope,
+            key=normalized_key,
+        )
+        if existing is None:
+            created = await self.repository.create_idempotency_key(
+                actor_user_id=actor_user_id,
+                scope=normalized_scope,
+                key=normalized_key,
+                request_hash=request_hash,
+                expires_at=expires_at,
+            )
+            return IdempotencyDecision(status="reserved", record=created)
+
+        if _is_expired(existing.expires_at):
+            raise ApiError(code="idempotency_key_expired", message="Idempotency key has expired; retry with a new key.", status=409)
+
+        if existing.request_hash != request_hash:
+            raise ApiError(code="idempotency_conflict", message="Idempotency key was reused with a different request.", status=409)
+
+        return IdempotencyDecision(status="replay", record=existing)
+
+    async def mark_completed(self, *, record: IdempotencyKey, response_ref: str) -> IdempotencyKey:
+        return await self.repository.mark_idempotency_completed(idempotency_key=record, response_ref=response_ref)
+
+    async def release(self, *, record: IdempotencyKey) -> None:
+        await self.repository.delete_idempotency_key(idempotency_key=record)
+
+
+def request_hash(payload: Any) -> str:
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def parse_idempotency_response_ref(response_ref: str) -> UUID:
+    if not response_ref:
+        raise ApiError(code="idempotency_in_progress", message="Request is still in progress.", status=409)
+    try:
+        return UUID(response_ref)
+    except ValueError as exc:
+        raise ApiError(code="conflict", message="Idempotency response reference is invalid.", status=409) from exc
+
+
+def _is_expired(expires_at: datetime) -> bool:
+    now = datetime.now(timezone.utc)
+    comparable_expires_at = expires_at
+    if comparable_expires_at.tzinfo is None:
+        comparable_expires_at = comparable_expires_at.replace(tzinfo=timezone.utc)
+    return comparable_expires_at <= now

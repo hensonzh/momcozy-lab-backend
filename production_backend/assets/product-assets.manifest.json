@@ -1,0 +1,333 @@
+{
+  "schema_version": "product_assets.v1",
+  "assets": [
+    {
+      "id": "asset_856e6c6bf6b6992c",
+      "label": "air1 unboxing step1 components overview",
+      "domain": "device_guidance",
+      "content_type": "image/png",
+      "size_bytes": 73449,
+      "object_key": "product-assets/device-guidance/assets/air1/faq-images/air1_unboxing_step1_components_overview.png"
+    },
+    {
+      "id": "asset_94d6d60b9460d42f",
+      "label": "air1 unboxing step2 button indicator guide",
+      "domain": "device_guidance",
+      "content_type": "image/png",
+      "size_bytes": 36650,
+      "object_key": "product-assets/device-guidance/assets/air1/faq-images/air1_unboxing_step2_button_indicator_guide.png"
+    },
+    {
+      "id": "asset_8a008a3ec7274262",
+      "label": "air1 unboxing step5 disassembly guide",
+      "domain": "device_guidance",
+      "content_type": "image/png",
+      "size_bytes": 23776,
+      "object_key": "product-assets/device-guidance/assets/air1/faq-images/air1_unboxing_step5_disassembly_guide.png"
+    },
+    {
+      "id": "asset_fde7e7824eba6374",
+      "label": "air1 unboxing step6 cleanable parts guide",
+      "domain": "device_guidance",
+      "content_type": "image/png",
+      "size_bytes": 23776,
+      "object_key": "product-assets/device-guidance/assets/air1/faq-images/air1_unboxing_step6_cleanable_parts_guide.png"
+    },
+    {
+      "id": "asset_2665e11d0cc04cc6",
+      "label": "air1 unboxing step6 disinfection methods guide",
+      "domain": "device_guidance",
+      "content_type": "image/png",
+      "size_bytes": 149622,
+      "object_key": "product-assets/device-guidance/assets/air1/faq-images/air1_unboxing_step6_disinfection_methods_guide.png"
+    },
+    {
+      "id": "asset_bb380429aa21c4ef",
+      "label": "air1 unboxing step7 nipple measurement guide",
+      "domain": "device_guidance",
+      "content_type": "image/png",
+      "size_bytes": 10748,
+      "object_key": "product-assets/device-guidance/assets/air1/faq-images/air1_unboxing_step7_nipple_measurement_guide.png"
+    },
+    {
+      "id": "asset_62cdf97afb8abaa4",
+      "label": "air1 unboxing step8 assembly guide",
+      "domain": "device_guidance",
+      "content_type": "image/png",
+      "size_bytes": 15063,
+      "object_key": "product-assets/device-guidance/assets/air1/faq-images/air1_unboxing_step8_assembly_guide.png"
+    },
+    {
+      "id": "asset_5e85f006d0e6b0ef",
+      "label": "image1",
+      "domain": "device_guidance",
+      "content_type": "image/png",
+      "size_bytes": 73449,
+      "object_key": "product-assets/device-guidance/assets/air1/faq-images/image1.png"
+    },
+    {
+      "id": "asset_97091e313fcea4a8",
+      "label": "image10",
+      "domain": "device_guidance",
+      "content_type": "image/png",
+      "size_bytes": 10748,
+      "object_key": "product-assets/device-guidance/assets/air1/faq-images/image10.png"
+    },
+    {
+      "id": "asset_04bdd4662d5faf17",
+      "label": "image11",
+      "domain": "device_guidance",
+      "content_type": "image/png",
+      "size_bytes": 11971,
+      "object_key": "product-assets/device-guidance/assets/air1/faq-images/image11.png"
+    },
+    {
+      "id": "asset_4f9b5474f36f2acd",
+      "label": "image12",
+      "domain": "device_guidance",
+      "content_type": "image/png",
+      "size_bytes": 20921,
+      "object_key": "product-assets/device-guidance/assets/air1/faq-images/image12.png"
+    },
+    {
+      "id": "asset_e2cc1ebbb4e692da",
+      "label": "image13",
+      "domain": "device_guidance",
+      "content_type": "image/png",
+      "size_bytes": 11960,
+      "object_key": "product-assets/device-guidance/assets/air1/faq-images/image13.png"
+    },
+    {
+      "id": "asset_d895d51ea9c58f3d",
+      "label": "image14",
+      "domain": "device_guidance",
+      "content_type": "image/png",
+      "size_bytes": 11657,
+      "object_key": "product-assets/device-guidance/assets/air1/faq-images/image14.png"
+    },
+    {
+      "id": "asset_02055f8d1ab75f57",
+      "label": "image15",
+      "domain": "device_guidance",
+      "content_type": "image/png",
+      "size_bytes": 12063,
+      "object_key": "product-assets/device-guidance/assets/air1/faq-images/image15.png"
+    },
+    {
+      "id": "asset_de8808855594d124",
+      "label": "image16",
+      "domain": "device_guidance",
+      "content_type": "image/png",
+      "size_bytes": 67204,
+      "object_key": "product-assets/device-guidance/assets/air1/faq-images/image16.png"
+    },
+    {
+      "id": "asset_b390995036d1e245",
+      "label": "image17",
+      "domain": "device_guidance",
+      "content_type": "image/png",
+      "size_bytes": 15063,
+      "object_key": "product-assets/device-guidance/assets/air1/faq-images/image17.png"
+    },
+    {
+      "id": "asset_1c3fc4b9fbea7f0d",
+      "label": "image18",
+      "domain": "device_guidance",
+      "content_type": "image/png",
+      "size_bytes": 65189,
+      "object_key": "product-assets/device-guidance/assets/air1/faq-images/image18.png"
+    },
+    {
+      "id": "asset_3d447492fc27e8d6",
+      "label": "image2",
+      "domain": "device_guidance",
+      "content_type": "image/png",
+      "size_bytes": 36650,
+      "object_key": "product-assets/device-guidance/assets/air1/faq-images/image2.png"
+    },
+    {
+      "id": "asset_282517c3a1891d39",
+      "label": "image3",
+      "domain": "device_guidance",
+      "content_type": "image/png",
+      "size_bytes": 23776,
+      "object_key": "product-assets/device-guidance/assets/air1/faq-images/image3.png"
+    },
+    {
+      "id": "asset_8e2e60b209075b98",
+      "label": "image4",
+      "domain": "device_guidance",
+      "content_type": "image/png",
+      "size_bytes": 4536,
+      "object_key": "product-assets/device-guidance/assets/air1/faq-images/image4.png"
+    },
+    {
+      "id": "asset_23049cf7a846c298",
+      "label": "image5",
+      "domain": "device_guidance",
+      "content_type": "image/png",
+      "size_bytes": 5867,
+      "object_key": "product-assets/device-guidance/assets/air1/faq-images/image5.png"
+    },
+    {
+      "id": "asset_77065d893201c1f1",
+      "label": "image6",
+      "domain": "device_guidance",
+      "content_type": "image/png",
+      "size_bytes": 9383,
+      "object_key": "product-assets/device-guidance/assets/air1/faq-images/image6.png"
+    },
+    {
+      "id": "asset_866a8832972bb42d",
+      "label": "image7",
+      "domain": "device_guidance",
+      "content_type": "image/png",
+      "size_bytes": 21827,
+      "object_key": "product-assets/device-guidance/assets/air1/faq-images/image7.png"
+    },
+    {
+      "id": "asset_dc3eabdeb3d96911",
+      "label": "image8",
+      "domain": "device_guidance",
+      "content_type": "image/png",
+      "size_bytes": 22993,
+      "object_key": "product-assets/device-guidance/assets/air1/faq-images/image8.png"
+    },
+    {
+      "id": "asset_b568db1b04d02213",
+      "label": "image9",
+      "domain": "device_guidance",
+      "content_type": "image/png",
+      "size_bytes": 149622,
+      "object_key": "product-assets/device-guidance/assets/air1/faq-images/image9.png"
+    },
+    {
+      "id": "asset_633c27571f687dd5",
+      "label": "air1 guide app control bilateral",
+      "domain": "device_guidance",
+      "content_type": "image/png",
+      "size_bytes": 1104425,
+      "object_key": "product-assets/device-guidance/assets/air1/images/air1_guide_app_control_bilateral.png"
+    },
+    {
+      "id": "asset_a0d2f0b9b4ddaef3",
+      "label": "air1 guide app control main",
+      "domain": "device_guidance",
+      "content_type": "image/png",
+      "size_bytes": 1432725,
+      "object_key": "product-assets/device-guidance/assets/air1/images/air1_guide_app_control_main.png"
+    },
+    {
+      "id": "asset_24d11908ae0b44d7",
+      "label": "air1 guide assembly steps",
+      "domain": "device_guidance",
+      "content_type": "image/png",
+      "size_bytes": 1751738,
+      "object_key": "product-assets/device-guidance/assets/air1/images/air1_guide_assembly_steps.png"
+    },
+    {
+      "id": "asset_d92d895b2fd76700",
+      "label": "air1 guide bluetooth pairing",
+      "domain": "device_guidance",
+      "content_type": "image/png",
+      "size_bytes": 769211,
+      "object_key": "product-assets/device-guidance/assets/air1/images/air1_guide_bluetooth_pairing.png"
+    },
+    {
+      "id": "asset_e448b077374eaae6",
+      "label": "air1 guide charging methods",
+      "domain": "device_guidance",
+      "content_type": "image/png",
+      "size_bytes": 1026920,
+      "object_key": "product-assets/device-guidance/assets/air1/images/air1_guide_charging_methods.png"
+    },
+    {
+      "id": "asset_d8e786df83018ed6",
+      "label": "air1 guide cleaning disinfection methods",
+      "domain": "device_guidance",
+      "content_type": "image/png",
+      "size_bytes": 760975,
+      "object_key": "product-assets/device-guidance/assets/air1/images/air1_guide_cleaning_disinfection_methods.png"
+    },
+    {
+      "id": "asset_ab3f85b69fceb5b0",
+      "label": "air1 guide cleaning washable parts",
+      "domain": "device_guidance",
+      "content_type": "image/png",
+      "size_bytes": 196640,
+      "object_key": "product-assets/device-guidance/assets/air1/images/air1_guide_cleaning_washable_parts.png"
+    },
+    {
+      "id": "asset_be6af6e86c43efa4",
+      "label": "air1 guide controls button indicator",
+      "domain": "device_guidance",
+      "content_type": "image/png",
+      "size_bytes": 685203,
+      "object_key": "product-assets/device-guidance/assets/air1/images/air1_guide_controls_button_indicator.png"
+    },
+    {
+      "id": "asset_dbec13cce163cac0",
+      "label": "air1 guide disassembly steps",
+      "domain": "device_guidance",
+      "content_type": "image/png",
+      "size_bytes": 369804,
+      "object_key": "product-assets/device-guidance/assets/air1/images/air1_guide_disassembly_steps.png"
+    },
+    {
+      "id": "asset_a2bac01d33748b78",
+      "label": "air1 guide finish storage pouring",
+      "domain": "device_guidance",
+      "content_type": "image/png",
+      "size_bytes": 1627643,
+      "object_key": "product-assets/device-guidance/assets/air1/images/air1_guide_finish_storage_pouring.png"
+    },
+    {
+      "id": "asset_fd57111fedf097f9",
+      "label": "air1 guide flange measurement",
+      "domain": "device_guidance",
+      "content_type": "image/png",
+      "size_bytes": 495146,
+      "object_key": "product-assets/device-guidance/assets/air1/images/air1_guide_flange_measurement.png"
+    },
+    {
+      "id": "asset_b856bfefcfe6d6f6",
+      "label": "air1 guide flange size card",
+      "domain": "device_guidance",
+      "content_type": "image/png",
+      "size_bytes": 74235,
+      "object_key": "product-assets/device-guidance/assets/air1/images/air1_guide_flange_size_card.png"
+    },
+    {
+      "id": "asset_70d7a658058c3f9c",
+      "label": "air1 guide parts components",
+      "domain": "device_guidance",
+      "content_type": "image/png",
+      "size_bytes": 1476429,
+      "object_key": "product-assets/device-guidance/assets/air1/images/air1_guide_parts_components.png"
+    },
+    {
+      "id": "asset_6318503920ef824b",
+      "label": "air1 guide wearing start",
+      "domain": "device_guidance",
+      "content_type": "image/png",
+      "size_bytes": 857556,
+      "object_key": "product-assets/device-guidance/assets/air1/images/air1_guide_wearing_start.png"
+    },
+    {
+      "id": "asset_c9c21eed86fec7b3",
+      "label": "momcozy air1 quick start guidance",
+      "domain": "device_guidance",
+      "content_type": "application/pdf",
+      "size_bytes": 11632590,
+      "object_key": "product-assets/device-guidance/assets/air1/quick-start/momcozy-air1-quick-start-guidance.pdf"
+    },
+    {
+      "id": "asset_5e6ac33bed62ea1d",
+      "label": "air1 operation zh",
+      "domain": "device_guidance",
+      "content_type": "video/mp4",
+      "size_bytes": 74395925,
+      "object_key": "product-assets/device-guidance/assets/air1/videos/air1-operation-zh.mp4"
+    }
+  ]
+}

@@ -1,0 +1,172 @@
+{
+  "version": "0.1.0",
+  "base_path": "/v1",
+  "rules": {
+    "auth_header": "Authorization: Bearer ${access_token}",
+    "service_header": "X-Service-Key: ${service_api_key}",
+    "idempotency_header": "Idempotency-Key: ${unique_idempotency_key}",
+    "no_tokens_in_urls": true
+  },
+  "flows": [
+    {
+      "name": "auth_session",
+      "steps": [
+        {
+          "method": "POST",
+          "path": "/v1/auth/invite-login",
+          "body": {
+            "invite_code": "${invite_code}",
+            "device_id": "flutter-smoke-invite-device"
+          },
+          "captures": {
+            "access_token": "$.access_token",
+            "refresh_token": "$.refresh_token"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/v1/auth/signup",
+          "body": {
+            "email": "smoke+${run_id}@example.test",
+            "password": "${strong_password}",
+            "display_name": "Smoke User",
+            "device_id": "flutter-smoke"
+          },
+          "captures": {
+            "access_token": "$.access_token",
+            "refresh_token": "$.refresh_token"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/v1/auth/refresh",
+          "body": {
+            "refresh_token": "${refresh_token}"
+          },
+          "captures": {
+            "access_token": "$.access_token",
+            "refresh_token": "$.refresh_token"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/v1/auth/logout",
+          "headers": ["${auth_header}"]
+        }
+      ]
+    },
+    {
+      "name": "core_records_plans_files",
+      "steps": [
+        {
+          "method": "POST",
+          "path": "/v1/files/upload",
+          "headers": ["${auth_header}", "${idempotency_header}"],
+          "multipart": {
+            "file": {
+              "filename": "smoke.txt",
+              "content_type": "text/plain",
+              "body": "hello smoke"
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/v1/records/feeding",
+          "headers": ["${auth_header}", "${idempotency_header}"],
+          "body": {
+            "feed_time": "${iso_now}",
+            "feed_type": "bottle",
+            "feed_action": "fed",
+            "volume_ml": 60,
+            "title": "Smoke feeding"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/v1/plans",
+          "headers": ["${auth_header}", "${idempotency_header}"],
+          "body": {
+            "plan_type": "birth_journey",
+            "title": "Smoke plan",
+            "source": "smoke"
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/v1/records/feeding",
+          "headers": ["${auth_header}"]
+        }
+      ]
+    },
+    {
+      "name": "agent_replay",
+      "steps": [
+        {
+          "method": "POST",
+          "path": "/v1/agent/threads",
+          "headers": ["${auth_header}"],
+          "body": {
+            "title": "Smoke agent thread"
+          },
+          "captures": {
+            "thread_id": "$.id"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/v1/agent/runs",
+          "headers": ["${auth_header}", "${idempotency_header}"],
+          "body": {
+            "thread_id": "${thread_id}",
+            "message": "Create a smoke-test run without external side effects."
+          },
+          "captures": {
+            "run_id": "$.id"
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/v1/agent/runs/${run_id}/events",
+          "headers": ["${auth_header}"]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/agent/runs/${run_id}/stream?after_sequence=0&limit=200",
+          "headers": ["${auth_header}"],
+          "assertions": ["no token query parameter"]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/agent/runs/${run_id}/stream?after_sequence=0&limit=200&follow=true&poll_interval_seconds=0.5&max_wait_seconds=1",
+          "headers": ["${auth_header}"],
+          "assertions": ["no token query parameter", "returns persisted application events only"]
+        }
+      ]
+    },
+    {
+      "name": "voice_contract",
+      "steps": [
+        {
+          "method": "POST",
+          "path": "/v1/speech/transcribe-chunk",
+          "headers": ["${auth_header}"],
+          "multipart": {
+            "file": {
+              "filename": "speech.wav",
+              "content_type": "audio/wav",
+              "body": "voice smoke"
+            }
+          },
+          "assertions": ["returns text field or stable voice_provider_disabled error"]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/realtime-voice-stream?text=hello",
+          "headers": ["${auth_header}"],
+          "assertions": ["no token query parameter", "returns audio/pcm or stable voice_provider_disabled error"]
+        }
+      ]
+    }
+  ]
+}

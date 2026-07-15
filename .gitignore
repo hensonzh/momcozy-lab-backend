@@ -10,10 +10,20 @@ __pycache__/
 .ruff_cache/
 .venv/
 .runtime-venv/
+production_backend/.venv/
+production_backend/env/*.env
+!production_backend/env/*.env.example
 
 data/*.db
 .worktree-runtime/*.db
 logs/
+.runlogs/
+tmp/
+legacy_backend/data/*.db
+legacy_backend/logs/
+legacy_backend/runlogs/
+legacy_backend/upload_files/*
+legacy_backend/tmp/
 
 dist/
 build/
