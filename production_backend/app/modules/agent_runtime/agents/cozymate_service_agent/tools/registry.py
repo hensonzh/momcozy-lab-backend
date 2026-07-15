@@ -328,7 +328,7 @@ def default_tool_registry() -> ToolContractRegistry:
             name="plans.milk_plan.propose",
             domain="plans",
             description=(
-                "奶量评估允许制定计划且用户同意推荐方向后调用；模型只提交方向和用户明确给出的周期、目标或时间约束，"
+                "奶量评估允许制定计划且用户同意推荐方向时调用；模型只提交方向和用户明确给出的周期、目标或时间约束，"
                 "runtime 负责生成完整计划与任务。未来已有奶量任务时，先让用户明确选择追加或替换。"
             ),
             read_or_write="write",
@@ -779,7 +779,7 @@ def default_tool_registry() -> ToolContractRegistry:
             name="support.ticket.propose",
             domain="support",
             description=(
-                "在用户明确同意创建售后工单后，整理可编辑的 Momcozy 售后信息表。"
+                "用户明确同意创建售后工单时调用，用于整理可编辑的 Momcozy 售后信息表。"
                 "表单由用户确认并直接提交，不再发起第二次 action 确认。"
             ),
             read_or_write="write",
