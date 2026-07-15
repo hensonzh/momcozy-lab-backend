@@ -328,33 +328,30 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
     "plans.milk_plan.propose": {
         "type": "object",
         "additionalProperties": False,
-        "required": ["title", "direction", "tasks"],
+        "required": ["direction"],
         "properties": {
-            "title": {"type": "string", "minLength": 1, "maxLength": 255},
-            "summary": {"type": "string", "maxLength": 2000},
-            "direction": {"type": "string", "enum": ["increase", "maintain", "decrease", "observe", "unknown"]},
+            "direction": {"type": "string", "enum": ["increase", "maintain", "decrease"]},
             "start_date": {"type": "string", "maxLength": 20},
             "days": {"type": "integer", "minimum": 1, "maximum": 30, "default": 7},
-            "tasks": {
+            "target_daily_ml": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 5000,
+                "description": "仅当用户明确给出阶段日目标时传入；未给出时由 runtime 根据近 7 天实测吸奶均值保守计算。",
+            },
+            "preferred_pumping_times": {
                 "type": "array",
                 "minItems": 1,
-                "maxItems": 16,
-                "items": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["title", "time", "task_type"],
-                    "properties": {
-                        "title": {"type": "string", "minLength": 1, "maxLength": 255},
-                        "time": {"type": "string", "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$"},
-                        "task_type": {"type": "string", "enum": ["pumping", "feeding", "other"]},
-                        "description": {"type": "string", "maxLength": 2000},
-                        "date": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$"},
-                        "day": {"type": "integer", "minimum": 1, "maximum": 30},
-                        "duration_minutes": {"type": "integer", "minimum": 1, "maximum": 240},
-                    },
-                },
+                "maxItems": 10,
+                "uniqueItems": True,
+                "items": {"type": "string", "pattern": "^(?:[01]?\\d|2[0-3]):[0-5]\\d$"},
+                "description": "仅传用户明确指定的可执行吸奶时间；未指定时由 runtime 复用近期节奏。",
             },
-            "reminders": {"type": "array", "maxItems": 40, "items": {"type": "object", "additionalProperties": True}},
+            "calendar_write_strategy": {
+                "type": "string",
+                "enum": ["append", "replace_future_plan_tasks"],
+                "description": "未来已有奶量任务且用户明确选择后传入；不能替用户默认追加或替换。",
+            },
         },
     },
     "plans.milk_schedule.propose": {

@@ -64,6 +64,8 @@ def test_milk_plan_create_action_handler_creates_plan_through_service() -> None:
     assert result.details == {
         "plan_type": "milk_management",
         "task_count": 2,
+        "replaced_task_count": 0,
+        "calendar_write_strategy": "append",
         "agent_action_id": str(action.id),
         "agent_run_id": str(action.run_id),
     }
@@ -92,10 +94,45 @@ def test_milk_plan_create_action_handler_creates_plan_through_service() -> None:
         "plan_type": "milk_management",
         "source": "agent_action",
         "affected_dates": ["2026-07-13", "2026-07-14"],
+        "replaced_task_count": 0,
     }
     rendered_event = json.dumps(changed_event.payload, ensure_ascii=False)
     assert "Pump after morning and evening feeds" not in rendered_event
     assert "Morning pump" not in rendered_event
+
+
+def test_milk_plan_create_replaces_only_the_future_tasks_from_the_confirmed_preview() -> None:
+    service = FakePlansService()
+    replaced_task_ids = [uuid4(), uuid4()]
+    action = _action(
+        apply_payload={
+            "title": "7 天稳奶计划",
+            "summary": "保持近期节奏。",
+            "calendar_write_strategy": "replace_future_plan_tasks",
+            "expected_replaced_task_ids": [str(task_id) for task_id in replaced_task_ids],
+            "payload": {
+                "direction": "maintain",
+                "analysis_context_fingerprint": "fingerprint",
+                "analysis_workflow_state_id": MILK_ANALYSIS_WORKFLOW_STATE_ID,
+                "start_date": "2026-07-13",
+                "days": 2,
+                "tasks": [{"title": "稳奶吸奶", "time": "08:00", "task_type": "pumping"}],
+            },
+        }
+    )
+
+    result = asyncio.run(MilkPlanCreateActionHandler(service=service)(action))
+
+    assert service.replace_future_milk_plan_tasks_kwargs == {
+        "owner_user_id": action.actor_user_id,
+        "start_date": date(2026, 7, 13),
+        "end_date": date(2026, 7, 14),
+        "expected_task_ids": replaced_task_ids,
+        "request_id": f"agent-action:{action.id}",
+    }
+    assert result.details["replaced_task_count"] == 2
+    assert result.details["calendar_write_strategy"] == "replace_future_plan_tasks"
+    assert result.application_events[0].payload["replaced_task_count"] == 2
 
 
 def test_milk_plan_changed_event_contains_only_bounded_dates_and_no_private_plan_content() -> None:
@@ -611,6 +648,7 @@ class FakePlansService:
         self.delete_plan_kwargs = {}
         self.reschedule_milk_tasks_kwargs = {}
         self.update_plan_todo_completion_kwargs = {}
+        self.replace_future_milk_plan_tasks_kwargs = {}
 
     async def create_plan(self, **kwargs):
         self.create_plan_kwargs = kwargs
@@ -675,6 +713,10 @@ class FakePlansService:
         self.task.task_time = update["new_task_time"]
         self.task.owner_user_id = kwargs["owner_user_id"]
         return [self.task]
+
+    async def replace_future_milk_plan_tasks(self, **kwargs):
+        self.replace_future_milk_plan_tasks_kwargs = kwargs
+        return [PlanTask(id=task_id, owner_user_id=kwargs["owner_user_id"], title="旧任务") for task_id in kwargs["expected_task_ids"]]
 
 
 def _action(

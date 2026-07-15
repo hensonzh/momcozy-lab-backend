@@ -19,6 +19,8 @@ from .milk_plan_schedule import (
 MILK_PLAN_CREATE_ACTION = "plans.milk_plan.create"
 MILK_PLAN_CHANGED_EVENT = "milk_plan.changed"
 MILK_SCHEDULE_RESCHEDULE_ACTION = "plans.milk_schedule.reschedule"
+MILK_PLAN_CALENDAR_APPEND = "append"
+MILK_PLAN_CALENDAR_REPLACE = "replace_future_plan_tasks"
 PREGNANCY_PLAN_CREATE_ACTION = "pregnancy.plan.create"
 PREGNANCY_PLAN_CHANGED_EVENT = "pregnancy_plan.changed"
 PREGNANCY_PLAN_TODO_UPDATE_ACTION = "pregnancy.plan_todo.update"
@@ -49,7 +51,26 @@ class MilkPlanCreateActionHandler:
             normalized_plan_payload, scheduled_tasks = normalize_milk_plan_payload(plan_payload)
         except MilkPlanScheduleValidationError as exc:
             raise PermanentJobError("invalid_milk_plan_schedule") from exc
+        calendar_write_strategy = _text(payload, "calendar_write_strategy") or MILK_PLAN_CALENDAR_APPEND
+        if calendar_write_strategy not in {MILK_PLAN_CALENDAR_APPEND, MILK_PLAN_CALENDAR_REPLACE}:
+            raise PermanentJobError("invalid_milk_plan_calendar_write_strategy")
+        replaced_tasks: list[Any] = []
         try:
+            if calendar_write_strategy == MILK_PLAN_CALENDAR_REPLACE:
+                expected_task_ids = _required_uuid_list(
+                    payload,
+                    "expected_replaced_task_ids",
+                    "invalid_expected_replaced_task_ids",
+                )
+                start_date = date.fromisoformat(str(normalized_plan_payload["start_date"]))
+                end_date = start_date + timedelta(days=int(normalized_plan_payload["days"]) - 1)
+                replaced_tasks = await self.service.replace_future_milk_plan_tasks(
+                    owner_user_id=action.actor_user_id,
+                    start_date=start_date,
+                    end_date=end_date,
+                    expected_task_ids=expected_task_ids,
+                    request_id=f"agent-action:{action.id}",
+                )
             plan = await self.service.create_plan(
                 owner_user_id=action.actor_user_id,
                 plan_type="milk_management",
@@ -91,6 +112,8 @@ class MilkPlanCreateActionHandler:
             details={
                 "plan_type": plan.plan_type,
                 "task_count": len(scheduled_tasks),
+                "replaced_task_count": len(replaced_tasks),
+                "calendar_write_strategy": calendar_write_strategy,
                 "agent_action_id": str(action.id),
                 "agent_run_id": str(action.run_id),
             },
@@ -104,6 +127,7 @@ class MilkPlanCreateActionHandler:
                         "plan_type": plan.plan_type,
                         "source": "agent_action",
                         "affected_dates": scheduled_task_dates(scheduled_tasks),
+                        "replaced_task_count": len(replaced_tasks),
                     },
                 ),
             ),
@@ -602,6 +626,22 @@ def _required_positive_int(payload: dict[str, Any], key: str, code: str) -> int:
         raise PermanentJobError(code) from exc
     if parsed < 1:
         raise PermanentJobError(code)
+    return parsed
+
+
+def _required_uuid_list(payload: dict[str, Any], key: str, code: str) -> list[UUID]:
+    values = payload.get(key)
+    if not isinstance(values, list):
+        raise PermanentJobError(code)
+    parsed: list[UUID] = []
+    for value in values:
+        try:
+            item = UUID(str(value or ""))
+        except ValueError as exc:
+            raise PermanentJobError(code) from exc
+        if item in parsed:
+            raise PermanentJobError(code)
+        parsed.append(item)
     return parsed
 
 

@@ -24,6 +24,8 @@ from production_backend.app.modules.diary.service import DiaryService
 from production_backend.app.modules.hospital_bag import HOSPITAL_BAG_CART_UPDATE_ACTION
 from production_backend.app.modules.notifications.agent_actions import MILK_REMINDER_CREATE_ACTION
 from production_backend.app.modules.plans.agent_actions import (
+    MILK_PLAN_CALENDAR_APPEND,
+    MILK_PLAN_CALENDAR_REPLACE,
     MILK_PLAN_CREATE_ACTION,
     MILK_SCHEDULE_RESCHEDULE_ACTION,
     PLAN_TASK_COMPLETE_ACTION,
@@ -35,8 +37,8 @@ from production_backend.app.modules.plans.agent_actions import (
     PREGNANCY_PLAN_TODO_UPDATE_ACTION,
 )
 from production_backend.app.modules.plans.models import Plan, PlanTask
+from production_backend.app.modules.plans.milk_plan_builder import MilkPlanDraftError, build_milk_plan_draft
 from production_backend.app.modules.plans.milk_plan_schedule import (
-    MilkPlanScheduleValidationError,
     normalize_milk_plan_payload,
 )
 from production_backend.app.modules.plans.service import PlansService
@@ -1886,14 +1888,14 @@ class GrowthRecordDeleteProposeToolHandler:
 
 
 class MilkPlanProposeToolHandler:
-    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
+    def __init__(self, *, runtime_service: AgentRuntimeService, plans_service: PlansService) -> None:
         self.runtime_service = runtime_service
+        self.plans_service = plans_service
 
-    async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
-        apply_payload = _milk_plan_apply_payload(context.args)
-        title = _text(apply_payload, "title")
-        if not title:
-            raise ApiError(code="validation_failed", message="title is required.", status=422)
+    async def __call__(self, context: ToolHandlerContext) -> ToolHandlerResult | dict[str, Any]:
+        requested_direction = _text(context.args, "direction")
+        if not requested_direction:
+            raise ApiError(code="validation_failed", message="direction is required.", status=422)
         if context.thread_id is None:
             raise ApiError(code="validation_failed", message="A thread is required for a milk plan.", status=422)
         workflow = await self.runtime_service.get_latest_workflow_state(
@@ -1933,28 +1935,63 @@ class MilkPlanProposeToolHandler:
             )
         if decision.get("can_start_plan") is not True:
             raise ApiError(code="milk_plan_not_eligible", message="The latest milk analysis does not allow a plan.", status=409)
-        requested_direction = _text(context.args, "direction")
         recommended_direction = _text(decision, "recommended_direction")
-        if not requested_direction:
-            raise ApiError(
-                code="milk_plan_direction_required",
-                message="Use the recommended direction from the latest milk analysis.",
-                status=409,
-            )
         if requested_direction and requested_direction != recommended_direction:
             raise ApiError(
                 code="milk_plan_direction_mismatch",
                 message="The proposed direction does not match the latest milk analysis.",
                 status=409,
             )
-        raw_plan_payload = apply_payload.get("payload")
-        plan_payload: dict[str, Any] = dict(cast(dict[str, Any], raw_plan_payload)) if isinstance(raw_plan_payload, dict) else {}
-        apply_payload["payload"] = {
-            **plan_payload,
-            "analysis_context_fingerprint": fingerprint,
-            "analysis_workflow_state_id": str(workflow.id),
+        try:
+            draft = build_milk_plan_draft(
+                analysis_context=analysis_context,
+                direction=requested_direction,
+                timezone_name=_text(context.args, "runtime_timezone") or "UTC",
+                start_date=_text(context.args, "start_date"),
+                days=_optional_int(context.args, "days") or 7,
+                target_daily_ml=_optional_number(context.args, "target_daily_ml"),
+                preferred_pumping_times=_string_list(context.args.get("preferred_pumping_times")),
+                today=_optional_date_arg(context.args, "runtime_local_date"),
+            )
+        except MilkPlanDraftError as exc:
+            raise ApiError(code="validation_failed", message=str(exc), status=422) from exc
+        plan_payload = dict(cast(dict[str, Any], draft["payload"]))
+        start_date = date.fromisoformat(str(plan_payload["start_date"]))
+        end_date = start_date + timedelta(days=int(plan_payload["days"]) - 1)
+        existing_tasks = await self.plans_service.list_future_milk_plan_tasks(
+            owner_user_id=context.actor.user_id,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        calendar_write_strategy = _text(context.args, "calendar_write_strategy")
+        allowed_strategies = [MILK_PLAN_CALENDAR_APPEND, MILK_PLAN_CALENDAR_REPLACE]
+        if calendar_write_strategy and calendar_write_strategy not in allowed_strategies:
+            raise ApiError(code="validation_failed", message="calendar_write_strategy is invalid.", status=422)
+        if existing_tasks and not calendar_write_strategy:
+            return ToolHandlerResult(
+                output={
+                    "status": "milk_plan_calendar_strategy_required",
+                    "existing_future_task_count": len(existing_tasks),
+                    "allowed_strategies": allowed_strategies,
+                    "question": "未来日程已有奶量计划任务。你希望把新计划追加进去，还是替换这些未来未完成任务？",
+                }
+            )
+        calendar_write_strategy = calendar_write_strategy or MILK_PLAN_CALENDAR_APPEND
+        apply_payload = {
+            "title": _text(draft, "title"),
+            "summary": _text(draft, "summary"),
+            "calendar_write_strategy": calendar_write_strategy,
+            "expected_replaced_task_ids": [str(task.id) for task in existing_tasks],
+            "payload": {
+                **plan_payload,
+                "analysis_context_fingerprint": fingerprint,
+                "analysis_workflow_state_id": str(workflow.id),
+            },
         }
-        preview_payload = _milk_plan_preview_payload(apply_payload)
+        preview_payload = {
+            **_milk_plan_preview_payload(apply_payload),
+            "existing_future_task_count": len(existing_tasks),
+        }
         action = await _propose_action_reusing_idempotency(
             self.runtime_service,
             owner_user_id=context.actor.user_id,
@@ -2415,7 +2452,10 @@ def build_default_tool_handlers(
             reference_service=guidance_reference_service,
         ),
         "images.inspect": ImageInspectToolHandler(asset_service=asset_service, object_storage=object_storage),
-        "plans.milk_plan.propose": MilkPlanProposeToolHandler(runtime_service=agent_runtime_service),
+        "plans.milk_plan.propose": MilkPlanProposeToolHandler(
+            runtime_service=agent_runtime_service,
+            plans_service=plans_service,
+        ),
         "plans.milk_schedule.propose": MilkScheduleRescheduleProposeToolHandler(
             runtime_service=agent_runtime_service,
             plans_service=plans_service,
@@ -3102,24 +3142,6 @@ def _growth_update_fields(payload: dict[str, Any]) -> list[str]:
     return sorted(key for key in ("infant_id", "measured_at", "height_cm", "weight_kg", "head_cm") if key in payload)
 
 
-def _milk_plan_apply_payload(args: dict[str, Any]) -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "title": _text(args, "title"),
-        "summary": _text(args, "summary"),
-    }
-    plan_payload: dict[str, Any] = {}
-    for key in ("direction", "start_date", "days", "tasks", "reminders"):
-        value = args.get(key)
-        if value not in (None, "", []):
-            plan_payload[key] = value
-    try:
-        normalized_plan_payload, _ = normalize_milk_plan_payload(plan_payload)
-    except MilkPlanScheduleValidationError as exc:
-        raise ApiError(code="validation_failed", message=str(exc), status=422) from exc
-    payload["payload"] = normalized_plan_payload
-    return {key: value for key, value in payload.items() if value not in ("", None, {})}
-
-
 def _milk_plan_preview_payload(apply_payload: dict[str, Any]) -> dict[str, Any]:
     plan_payload = _dict(apply_payload, "payload")
     _, scheduled_tasks = normalize_milk_plan_payload(plan_payload)
@@ -3131,7 +3153,7 @@ def _milk_plan_preview_payload(apply_payload: dict[str, Any]) -> dict[str, Any]:
         "start_date": _text(plan_payload, "start_date"),
         "days": plan_payload.get("days"),
         "scheduled_task_count": len(scheduled_tasks),
-        "calendar_write_strategy": "create_schedule_tasks",
+        "calendar_write_strategy": _text(apply_payload, "calendar_write_strategy") or MILK_PLAN_CALENDAR_APPEND,
     }
     return {key: value for key, value in preview.items() if value not in ("", None)}
 
@@ -3146,11 +3168,20 @@ def _milk_plan_artifact_payload(apply_payload: dict[str, Any]) -> dict[str, Any]
         "start_date": _text(plan_payload, "start_date"),
         "days": _optional_int(plan_payload, "days"),
         "scheduled_task_count": len(scheduled_tasks),
-        "calendar_write_strategy": "create_schedule_tasks",
+        "calendar_write_strategy": _text(apply_payload, "calendar_write_strategy") or MILK_PLAN_CALENDAR_APPEND,
     }
-    for key in ("tasks", "reminders"):
+    for key in (
+        "tasks",
+        "reminders",
+        "goal",
+        "strategy_summary",
+        "checkpoints",
+        "observation_items",
+        "safety_notes",
+        "generation",
+    ):
         value = plan_payload.get(key)
-        if isinstance(value, list):
+        if isinstance(value, list | dict | str):
             payload[key] = value
     return {key: value for key, value in payload.items() if value not in ("", None, [], {})}
 

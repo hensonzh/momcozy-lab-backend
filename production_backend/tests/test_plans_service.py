@@ -367,6 +367,72 @@ def test_todo_completion_idempotency_replay_returns_authoritative_plan_without_s
     assert repository.update_plan_payload_kwargs == {}
 
 
+def test_future_milk_tasks_are_owner_scoped_and_replacement_requires_fresh_preview() -> None:
+    owner_user_id = uuid4()
+    plan_id = uuid4()
+    first = _task(owner_user_id=owner_user_id, plan_id=plan_id)
+    second = _task(owner_user_id=owner_user_id, plan_id=plan_id)
+    second.task_date = date(2026, 7, 3)
+    repository = FakePlansRepository(tasks=[first, second])
+    service = PlansService(repository=repository)
+
+    listed = asyncio.run(
+        service.list_future_milk_plan_tasks(
+            owner_user_id=owner_user_id,
+            start_date=date(2026, 7, 2),
+            end_date=date(2026, 7, 8),
+        )
+    )
+
+    assert listed == [first, second]
+    assert repository.list_future_milk_tasks_kwargs["for_update"] is False
+
+    with pytest.raises(ApiError) as stale:
+        asyncio.run(
+            service.replace_future_milk_plan_tasks(
+                owner_user_id=owner_user_id,
+                start_date=date(2026, 7, 2),
+                end_date=date(2026, 7, 8),
+                expected_task_ids=[first.id],
+            )
+        )
+    assert stale.value.code == "milk_plan_calendar_conflict"
+    assert repository.soft_deleted_task_ids == []
+
+    replaced = asyncio.run(
+        service.replace_future_milk_plan_tasks(
+            owner_user_id=owner_user_id,
+            start_date=date(2026, 7, 2),
+            end_date=date(2026, 7, 8),
+            expected_task_ids=[first.id, second.id],
+        )
+    )
+
+    assert replaced == [first, second]
+    assert repository.locked_task_dates == [date(2026, 7, 2), date(2026, 7, 3), date(2026, 7, 4), date(2026, 7, 5), date(2026, 7, 6), date(2026, 7, 7), date(2026, 7, 8)]
+    assert repository.soft_deleted_task_ids == [first.id, second.id]
+
+
+def test_future_milk_task_query_rejects_a_truncated_conflict_set() -> None:
+    owner_user_id = uuid4()
+    repository = FakePlansRepository(
+        tasks=[_task(owner_user_id=owner_user_id, plan_id=uuid4()) for _ in range(501)]
+    )
+    service = PlansService(repository=repository)
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            service.list_future_milk_plan_tasks(
+                owner_user_id=owner_user_id,
+                start_date=date(2026, 7, 2),
+                end_date=date(2026, 7, 8),
+            )
+        )
+
+    assert exc_info.value.code == "milk_plan_calendar_capacity_exceeded"
+    assert repository.list_future_milk_tasks_kwargs["limit"] == 501
+
+
 def _now() -> datetime:
     return datetime(2026, 7, 2, tzinfo=timezone.utc)
 
@@ -417,6 +483,9 @@ class FakePlansRepository:
         self.set_task_state_kwargs = {}
         self.list_plans_kwargs = {}
         self.update_plan_payload_kwargs = {}
+        self.list_future_milk_tasks_kwargs = {}
+        self.locked_task_dates = []
+        self.soft_deleted_task_ids = []
 
     async def create_plan(self, **kwargs):
         self.plan = _plan(owner_user_id=kwargs["owner_user_id"])
@@ -445,6 +514,13 @@ class FakePlansRepository:
 
     async def list_tasks(self, **kwargs):
         return self.tasks
+
+    async def list_future_milk_plan_tasks(self, **kwargs):
+        self.list_future_milk_tasks_kwargs = kwargs
+        return self.tasks
+
+    async def lock_milk_schedule_dates(self, *, owner_user_id, task_dates):
+        self.locked_task_dates = task_dates
 
     async def set_task_completed(self, **kwargs):
         self.task.status = "completed" if kwargs["completed"] else "pending"
@@ -479,9 +555,13 @@ class FakePlansRepository:
         return self.task
 
     async def soft_delete_task(self, **kwargs):
-        self.task.status = "deleted"
-        self.task.deleted_at = kwargs["deleted_at"]
-        return self.task
+        task = next((item for item in self.tasks if item.id == kwargs["task_id"]), self.task)
+        if task is None:
+            return None
+        task.status = "deleted"
+        task.deleted_at = kwargs["deleted_at"]
+        self.soft_deleted_task_ids.append(task.id)
+        return task
 
 
 class FakeIdempotencyService:

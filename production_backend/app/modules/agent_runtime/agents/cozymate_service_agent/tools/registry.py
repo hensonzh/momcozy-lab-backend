@@ -327,7 +327,10 @@ def default_tool_registry() -> ToolContractRegistry:
         _tool_contract(
             name="plans.milk_plan.propose",
             domain="plans",
-            description="创建当前用户的奶量计划预览并发起待确认动作。用户明确希望制定泌乳、喂养或吸奶计划时调用。",
+            description=(
+                "奶量评估允许制定计划且用户同意推荐方向后调用；模型只提交方向和用户明确给出的周期、目标或时间约束，"
+                "runtime 负责生成完整计划与任务。未来已有奶量任务时，先让用户明确选择追加或替换。"
+            ),
             read_or_write="write",
             side_effect_level="medium",
             blocking_policy="wait_for_confirmation",

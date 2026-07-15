@@ -574,12 +574,18 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
     assert image_inspect_schema["required"] == ["image_url"]
     assert image_inspect_schema["properties"]["detail"]["enum"] == ["low", "high"]
     assert milk_plan_schema["additionalProperties"] is False
-    assert milk_plan_schema["required"] == ["title", "direction", "tasks"]
+    assert milk_plan_schema["required"] == ["direction"]
     assert "payload" not in milk_plan_schema["properties"]
-    assert milk_plan_schema["properties"]["tasks"]["maxItems"] == 16
-    assert milk_plan_schema["properties"]["tasks"]["minItems"] == 1
-    assert milk_plan_schema["properties"]["tasks"]["items"]["required"] == ["title", "time", "task_type"]
-    assert milk_plan_schema["properties"]["direction"]["enum"] == ["increase", "maintain", "decrease", "observe", "unknown"]
+    assert "title" not in milk_plan_schema["properties"]
+    assert "summary" not in milk_plan_schema["properties"]
+    assert "tasks" not in milk_plan_schema["properties"]
+    assert milk_plan_schema["properties"]["days"]["maximum"] == 30
+    assert milk_plan_schema["properties"]["preferred_pumping_times"]["maxItems"] == 10
+    assert milk_plan_schema["properties"]["direction"]["enum"] == ["increase", "maintain", "decrease"]
+    assert milk_plan_schema["properties"]["calendar_write_strategy"]["enum"] == [
+        "append",
+        "replace_future_plan_tasks",
+    ]
     assert pregnancy_plan_schema["additionalProperties"] is False
     assert "title" not in pregnancy_plan_schema["properties"]
     assert "payload" not in pregnancy_plan_schema["properties"]

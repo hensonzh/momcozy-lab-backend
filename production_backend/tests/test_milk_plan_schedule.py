@@ -64,6 +64,41 @@ def test_missing_start_date_is_resolved_once_before_confirmation() -> None:
     assert tasks[0].task_date == date(2026, 7, 13)
 
 
+def test_runtime_generation_metadata_is_bounded_and_preserved() -> None:
+    normalized, _ = normalize_milk_plan_payload(
+        {
+            "direction": "maintain",
+            "start_date": "2026-07-13",
+            "days": 7,
+            "tasks": [{"title": "稳奶吸奶", "time": "08:00", "task_type": "pumping"}],
+            "goal": {
+                "basis": "measured_pumping_average_7d",
+                "current_daily_ml": 500.0,
+                "target_daily_ml": 500.0,
+            },
+            "strategy_summary": "沿用近期可执行节奏",
+            "checkpoints": [3, 7],
+            "observation_items": ["宝宝尿布和精神状态"],
+            "safety_notes": ["有红旗症状时暂停计划。"],
+            "generation": {"mode": "runtime_deterministic", "timezone": "Asia/Shanghai"},
+            "ignored": "not persisted",
+        },
+        today=date(2026, 7, 12),
+    )
+
+    assert normalized["goal"] == {
+        "basis": "measured_pumping_average_7d",
+        "current_daily_ml": 500.0,
+        "target_daily_ml": 500.0,
+    }
+    assert normalized["strategy_summary"] == "沿用近期可执行节奏"
+    assert normalized["checkpoints"] == [3, 7]
+    assert normalized["observation_items"] == ["宝宝尿布和精神状态"]
+    assert normalized["safety_notes"] == ["有红旗症状时暂停计划。"]
+    assert normalized["generation"] == {"mode": "runtime_deterministic", "timezone": "Asia/Shanghai"}
+    assert "ignored" not in normalized
+
+
 @pytest.mark.parametrize(
     "payload",
     [

@@ -89,6 +89,8 @@ def normalize_milk_plan_payload(
     reminders = payload.get("reminders")
     if isinstance(reminders, list) and reminders:
         normalized["reminders"] = [dict(item) for item in reminders[:40] if isinstance(item, dict)]
+    runtime_metadata = _runtime_generation_metadata(payload, days=days)
+    normalized.update(runtime_metadata)
     return normalized, scheduled_tasks
 
 
@@ -222,6 +224,58 @@ def _optional_int(value: Any) -> int | None:
     if isinstance(value, bool):
         return None
     return int(value) if isinstance(value, (int, float)) else None
+
+
+def _runtime_generation_metadata(payload: dict[str, Any], *, days: int) -> dict[str, Any]:
+    metadata: dict[str, Any] = {}
+    goal = payload.get("goal")
+    if isinstance(goal, dict):
+        basis = _text(goal.get("basis"))[:80]
+        current = _bounded_number(goal.get("current_daily_ml"), field="goal.current_daily_ml")
+        target = _bounded_number(goal.get("target_daily_ml"), field="goal.target_daily_ml")
+        metadata["goal"] = {
+            "basis": basis,
+            "current_daily_ml": current,
+            "target_daily_ml": target,
+        }
+    strategy_summary = _text(payload.get("strategy_summary"))
+    if strategy_summary:
+        metadata["strategy_summary"] = strategy_summary[:500]
+    checkpoints = payload.get("checkpoints")
+    if isinstance(checkpoints, list):
+        normalized_checkpoints = sorted(
+            {
+                _bounded_int(value, default=1, minimum=1, maximum=days, field="checkpoint")
+                for value in checkpoints[:10]
+            }
+        )
+        if normalized_checkpoints:
+            metadata["checkpoints"] = normalized_checkpoints
+    for key in ("observation_items", "safety_notes"):
+        values = payload.get(key)
+        if isinstance(values, list):
+            normalized_values = [_text(value)[:500] for value in values[:8] if _text(value)]
+            if normalized_values:
+                metadata[key] = normalized_values
+    generation = payload.get("generation")
+    if isinstance(generation, dict) and _text(generation.get("mode")) == "runtime_deterministic":
+        metadata["generation"] = {
+            "mode": "runtime_deterministic",
+            "timezone": _text(generation.get("timezone"))[:80] or "UTC",
+        }
+    return metadata
+
+
+def _bounded_number(value: Any, *, field: str) -> float:
+    if isinstance(value, bool):
+        raise MilkPlanScheduleValidationError(f"{field} must be a number")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise MilkPlanScheduleValidationError(f"{field} must be a number") from exc
+    if parsed < 0 or parsed > 5000:
+        raise MilkPlanScheduleValidationError(f"{field} must be between 0 and 5000")
+    return round(parsed, 1)
 
 
 def _text(value: Any) -> str:

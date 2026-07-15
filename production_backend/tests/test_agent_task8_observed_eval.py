@@ -306,16 +306,9 @@ def test_observed_milk_analysis_plan_and_schedule_persist_real_action_lifecycles
             scripted_tool_invocation(
                 "plans.milk_plan.propose",
                 {
-                    "title": "温和稳奶计划",
-                    "summary": "保持舒适并观察宝宝信号。",
                     "direction": "maintain",
-                    "start_date": "2026-07-14",
                     "days": 1,
-                    "tasks": [
-                        {"title": "早间吸奶", "time": "08:00", "task_type": "pumping"},
-                        {"title": "午间吸奶", "time": "11:00", "task_type": "pumping"},
-                        {"title": "下午吸奶", "time": "14:00", "task_type": "pumping"},
-                    ],
+                    "preferred_pumping_times": ["08:00", "11:00", "14:00"],
                 },
             ),
         ),
@@ -335,18 +328,28 @@ def test_observed_milk_analysis_plan_and_schedule_persist_real_action_lifecycles
     assert len(scenario.plans.tasks) == 3
 
     plan = scenario.plans.plans[0]
+    plan_date = scenario.plans.tasks[0].task_date
+    assert plan_date is not None
+    plan_date_text = plan_date.isoformat()
     schedule_turn = scenario.run_turn(
         text="明天 10:30 到 12:30 开会，把冲突的吸奶安排挪开。",
         handlers=handlers,
         tool_invocations=(
             scripted_tool_invocation(
-                "plans.milk_schedule.propose",
-                {
-                    "plan_id": str(plan.id),
-                    "target_date": "2026-07-14",
-                    "busy_windows": [{"date": "2026-07-14", "start_time": "10:30", "end_time": "12:30", "title": "会议"}],
-                },
-            ),
+                    "plans.milk_schedule.propose",
+                    {
+                        "plan_id": str(plan.id),
+                        "target_date": plan_date_text,
+                        "busy_windows": [
+                            {
+                                "date": plan_date_text,
+                                "start_time": "10:30",
+                                "end_time": "12:30",
+                                "title": "会议",
+                            }
+                        ],
+                    },
+                ),
         ),
         final_text="请确认日程调整。",
     )
@@ -404,11 +407,7 @@ def test_observed_milk_red_flags_block_plan_action_and_artifact() -> None:
             tool_invocations=(
                 scripted_tool_invocation(
                     "plans.milk_plan.propose",
-                    {
-                        "title": "不应创建的计划",
-                        "direction": "increase",
-                        "tasks": [{"title": "吸奶", "time": "08:00", "task_type": "pumping"}],
-                    },
+                    {"direction": "increase"},
                 ),
             ),
             final_text="不应成功。",
@@ -762,7 +761,10 @@ class ObservedScenario:
                 runtime_service=self.runtime_service,
             ),
             "records.milk_analysis.evaluate": MilkAnalysisEvaluateToolHandler(runtime_service=self.runtime_service),
-            "plans.milk_plan.propose": MilkPlanProposeToolHandler(runtime_service=self.runtime_service),
+            "plans.milk_plan.propose": MilkPlanProposeToolHandler(
+                runtime_service=self.runtime_service,
+                plans_service=self.plans,
+            ),
             "plans.milk_schedule.propose": MilkScheduleRescheduleProposeToolHandler(
                 runtime_service=self.runtime_service,
                 plans_service=self.plans,
@@ -1173,6 +1175,28 @@ class RecordingPlansService:
         return [
             task for task in self.tasks if task.owner_user_id == owner_user_id and task.task_date == task_date and task.status == status
         ][:limit]
+
+    async def list_future_milk_plan_tasks(
+        self,
+        *,
+        owner_user_id: UUID,
+        start_date: date,
+        end_date: date,
+    ):
+        milk_plan_ids = {
+            plan.id
+            for plan in self.plans
+            if plan.owner_user_id == owner_user_id and plan.plan_type == "milk_management" and plan.status == "active"
+        }
+        return [
+            task
+            for task in self.tasks
+            if task.owner_user_id == owner_user_id
+            and task.plan_id in milk_plan_ids
+            and task.status == "pending"
+            and task.task_date is not None
+            and start_date <= task.task_date <= end_date
+        ]
 
     async def reschedule_milk_tasks(self, *, owner_user_id: UUID, plan_id: UUID, updates: list[dict[str, Any]], request_id: str):
         del request_id

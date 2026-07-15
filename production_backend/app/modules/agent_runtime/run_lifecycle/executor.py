@@ -230,6 +230,7 @@ class AgentRuntimeExecutor:
         self._run_authoritative_final_text: dict[UUID, str] = {}
         self._run_current_user_text: dict[UUID, str] = {}
         self._run_local_dates: dict[UUID, str] = {}
+        self._run_timezones: dict[UUID, str] = {}
         self._run_previous_assistant_text: dict[UUID, str] = {}
         self._run_trusted_form_submissions: dict[UUID, dict[str, dict[str, Any]]] = {}
         self._run_checkup_attachment_counts: dict[UUID, int] = {}
@@ -292,6 +293,7 @@ class AgentRuntimeExecutor:
                 health_context_lines=health_context_lines,
             )
             self._run_local_dates[run.id] = _user_context_local_date(prepared_turn.projection.user_context)
+            self._run_timezones[run.id] = _text(prepared_turn.projection.user_context, "timezone") or "UTC"
             urgent_signal_ids = await self._pregnancy_plan_pre_model_urgent_signal_ids(
                 run=run,
                 current_user_text=self._run_current_user_text[run.id],
@@ -353,6 +355,7 @@ class AgentRuntimeExecutor:
             self._run_authoritative_final_text.pop(run.id, None)
             self._run_current_user_text.pop(run.id, None)
             self._run_local_dates.pop(run.id, None)
+            self._run_timezones.pop(run.id, None)
             self._run_previous_assistant_text.pop(run.id, None)
             self._run_trusted_form_submissions.pop(run.id, None)
             self._run_checkup_attachment_counts.pop(run.id, None)
@@ -1054,6 +1057,11 @@ class AgentRuntimeExecutor:
             return {"runtime_local_date": local_date} if local_date else {}
         if contract_name == "records.milk_analysis.intake":
             return {"trusted_current_user_text": self._run_current_user_text.get(run.id, "")}
+        if contract_name == "plans.milk_plan.propose":
+            return {
+                "runtime_local_date": self._run_local_dates.get(run.id, ""),
+                "runtime_timezone": self._run_timezones.get(run.id, "UTC"),
+            }
         if contract_name == "support.ticket.propose":
             return {"trusted_current_user_text": self._run_current_user_text.get(run.id, "")}
         expected_form_id = FORM_TOOL_IDS.get(contract_name)

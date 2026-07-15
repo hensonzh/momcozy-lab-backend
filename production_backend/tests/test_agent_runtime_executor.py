@@ -1156,7 +1156,12 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert backend.tool_schemas["notifications_milk_reminder_propose"]["required"] == ["title"]
     assert backend.tool_schemas["plans_calendar_read"]["properties"]["task_date"]["maxLength"] == 20
     assert backend.tool_schemas["plans_current_read"]["properties"]["limit"]["maximum"] == 20
-    assert backend.tool_schemas["plans_milk_plan_propose"]["required"] == ["title", "direction", "tasks"]
+    assert backend.tool_schemas["plans_milk_plan_propose"]["required"] == ["direction"]
+    assert "tasks" not in backend.tool_schemas["plans_milk_plan_propose"]["properties"]
+    assert backend.tool_schemas["plans_milk_plan_propose"]["properties"]["calendar_write_strategy"]["enum"] == [
+        "append",
+        "replace_future_plan_tasks",
+    ]
     assert backend.tool_schemas["plans_plan_delete_propose"]["required"] == ["plan_id"]
     assert backend.tool_schemas["plans_task_complete_propose"]["required"] == ["task_id"]
     assert backend.tool_schemas["plans_task_complete_propose"]["properties"]["completed"]["type"] == "boolean"
