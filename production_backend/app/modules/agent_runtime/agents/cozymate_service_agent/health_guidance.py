@@ -207,6 +207,24 @@ _COMPLEX_HEALTH_TERMS = (
     "冷冻",
 )
 
+_REQUIRED_HEALTH_EVIDENCE_TERMS = (
+    "用药",
+    "药",
+    "疫苗",
+    "补剂",
+    "黄疸",
+    "电导率",
+    "检查",
+    "报告",
+    "指标",
+    "数值",
+    "处方",
+    "治疗",
+    "指南",
+    "专业",
+    "依据",
+)
+
 _NON_HEALTH_PRODUCT_TERMS = (
     "待产包",
     "入院包",
@@ -254,6 +272,13 @@ def should_use_complex_health_web_search(message: str, loaded_skill_ids: list[st
         return False
     return any(term in normalized for term in _HEALTH_DOMAIN_TERMS) and any(
         term in normalized for term in _COMPLEX_HEALTH_TERMS
+    )
+
+
+def should_require_complex_health_web_search(message: str, loaded_skill_ids: list[str] | None = None) -> bool:
+    normalized = str(message or "").strip()
+    return should_use_complex_health_web_search(normalized, loaded_skill_ids) and any(
+        term in normalized for term in _REQUIRED_HEALTH_EVIDENCE_TERMS
     )
 
 

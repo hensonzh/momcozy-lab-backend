@@ -36,6 +36,7 @@ from ..agents.cozymate_service_agent.health_guidance import (
     HEALTH_GUIDANCE_ALLOWED_DOMAINS,
     health_guidance_request_context_lines,
     needs_breast_triage_first,
+    should_require_complex_health_web_search,
     should_use_complex_health_web_search,
 )
 from ..agents.cozymate_service_agent.tools import (
@@ -287,7 +288,12 @@ class AgentRuntimeExecutor:
                 self._run_current_user_text[run.id],
                 loaded_skill_ids,
             )
-            health_web_search_required = complex_health and not needs_breast_triage_first(self._run_current_user_text[run.id])
+            health_search_candidate = complex_health and not needs_breast_triage_first(self._run_current_user_text[run.id])
+            health_web_search_required = health_search_candidate and should_require_complex_health_web_search(
+                self._run_current_user_text[run.id],
+                loaded_skill_ids,
+            )
+            health_web_search_enabled = health_search_candidate and _runner_supports_web_search(self.sdk_runner)
             prepared_turn = self._prepare_model_turn(
                 turn_context=turn_context,
                 health_context_lines=health_context_lines,
@@ -318,6 +324,7 @@ class AgentRuntimeExecutor:
                         turn_context=turn_context,
                         tool_catalog=tool_catalog,
                         prepared_turn=prepared_turn,
+                        health_web_search_enabled=health_web_search_enabled,
                         health_web_search_required=health_web_search_required,
                     )
                 except ApiError as exc:
@@ -331,6 +338,7 @@ class AgentRuntimeExecutor:
                     result = SdkNodeResult(final_text=COMPLEX_HEALTH_SEARCH_UNAVAILABLE_RESPONSE)
             await self._emit_health_web_search_events(
                 run=run,
+                enabled=health_web_search_enabled,
                 required=health_web_search_required,
                 result=result,
             )
@@ -487,6 +495,7 @@ class AgentRuntimeExecutor:
         turn_context: _AgentTurnContext,
         tool_catalog: _AgentTurnToolCatalog,
         prepared_turn: _PreparedModelTurn,
+        health_web_search_enabled: bool = False,
         health_web_search_required: bool = False,
     ) -> Any:
         await self._append_progress(run=run, phase="model_reasoning", label="我想一下")
@@ -508,9 +517,9 @@ class AgentRuntimeExecutor:
                 trace_id=run.trace_id,
                 service_skill_id=COZYMATE_AGENT_ID,
                 on_text_delta=self._text_delta_handler(run=run),
-                web_search_enabled=health_web_search_required,
+                web_search_enabled=health_web_search_enabled,
                 web_search_required=health_web_search_required,
-                web_search_allowed_domains=HEALTH_GUIDANCE_ALLOWED_DOMAINS if health_web_search_required else (),
+                web_search_allowed_domains=HEALTH_GUIDANCE_ALLOWED_DOMAINS if health_web_search_enabled else (),
             )
         )
         turn_context.timings_ms["model_reasoning"] = _elapsed_ms(model_started_at)
@@ -520,13 +529,15 @@ class AgentRuntimeExecutor:
         self,
         *,
         run: AgentRun,
+        enabled: bool,
         required: bool,
         result: SdkNodeResult,
     ) -> None:
-        if not required:
+        if not enabled and not required:
             return
-        status = "completed" if result.web_search_used or result.web_search_citations else "failed"
-        await self._append_health_web_search_status(run=run, status=status)
+        if required:
+            status = "completed" if result.web_search_used or result.web_search_citations else "failed"
+            await self._append_health_web_search_status(run=run, status=status)
         citations = _allowed_health_web_search_citations(result.web_search_citations)
         if not citations:
             return

@@ -192,6 +192,33 @@ def test_agent_runtime_executor_requires_allowlisted_web_search_for_complex_heal
     assert "优先使用 web_search 检索" in json.dumps(request.model_input, ensure_ascii=False)
 
 
+def test_agent_runtime_executor_keeps_low_risk_health_reply_when_optional_search_is_not_used() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(
+        thread_id=thread_id,
+        run_id=run.id,
+        role="user",
+        text="没有出血或发烧，疼痛也没有加重，宝宝胎动正常。今天散步后只是有一点轻微牵拉感。",
+        sequence=1,
+    )
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    backend = CapturingSdkBackend(result=SdkNodeResult(final_text="先休息并继续观察变化。"))
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, provider="openai", use_responses=True),
+        ).execute(run=run)
+    )
+
+    assert result.final_text == "先休息并继续观察变化。"
+    request = backend.requests[0]
+    assert request.web_search_enabled is True
+    assert request.web_search_required is False
+    assert request.web_search_allowed_domains == tuple(HEALTH_GUIDANCE_ALLOWED_DOMAINS)
+
+
 def test_agent_runtime_executor_keeps_streamed_health_text_when_required_search_is_not_observed() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)

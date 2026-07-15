@@ -27,10 +27,12 @@ from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.
     MilkAnalysisIntakeToolHandler,
     MilkPlanProposeToolHandler,
     MilkScheduleRescheduleProposeToolHandler,
+    PregnancyDiaryManageToolHandler,
     PregnancyPlanIntakeAdvanceToolHandler,
     PregnancyPlanIntakeAnalyzeToolHandler,
     PregnancyPlanIntakeStartToolHandler,
     PregnancyPlanProposeToolHandler,
+    SupportTicketProposeToolHandler,
     ToolExecutor,
     default_tool_registry,
 )
@@ -66,6 +68,7 @@ from production_backend.app.modules.agent_runtime.sdk import (
 )
 from production_backend.app.modules.agent_runtime.service import AgentRuntimeService
 from production_backend.app.modules.assets.models import ProductAsset
+from production_backend.app.modules.diary.models import PregnancyDiaryEntry
 from production_backend.app.modules.hospital_bag.agent_actions import HospitalBagCartUpdateActionHandler
 from production_backend.app.modules.plans.agent_actions import (
     MilkPlanCreateActionHandler,
@@ -479,6 +482,83 @@ def test_observed_known_device_guidance_reads_official_guidance_without_write() 
     assert result.trace.final_text
 
 
+def test_observed_device_aftersales_requires_confirmation_then_creates_editable_draft() -> None:
+    scenario = ObservedScenario()
+    handlers = scenario.support_handlers()
+    offered = scenario.run_turn(
+        text="Air1 开箱后发现少了一个配件，我很着急。",
+        handlers=handlers,
+        tool_invocations=(
+            scripted_tool_invocation("load_service_skill", {"service_skill_id": "device-guidance"}),
+            scripted_tool_invocation(
+                "support.ticket.propose",
+                {
+                    "issue_type": "missing_parts",
+                    "issue_summary": "Air1 开箱后缺少配件",
+                    "product_model": "Air1",
+                    "user_emotion": "着急",
+                    "user_confirmed": False,
+                },
+            ),
+        ),
+        final_text="这件事确实很影响使用体验，我可以帮你创建一个售后工单。需要我现在帮你创建吗？",
+    )
+
+    _assert_tools(offered.trace, "load_service_skill", "support.ticket.propose")
+    _assert_event_types(offered.trace, forbidden={"artifact.created", "action.confirmation_required"})
+    assert scenario.repository.artifacts == []
+
+    confirmed = scenario.run_turn(
+        text="好的，请帮我创建。",
+        handlers=handlers,
+        tool_invocations=(
+            scripted_tool_invocation(
+                "support.ticket.propose",
+                {
+                    "issue_type": "missing_parts",
+                    "issue_summary": "Air1 开箱后缺少配件",
+                    "product_model": "Air1",
+                    "user_emotion": "着急",
+                    "user_confirmed": True,
+                },
+            ),
+        ),
+        final_text="我已经把售后信息整理好了，你可以检查并提交。",
+    )
+
+    _assert_tools(confirmed.trace, "support.ticket.propose")
+    _assert_artifact_events(confirmed.trace, "support_ticket_draft")
+    assert confirmed.trace.actions == []
+    assert scenario.repository.artifacts[-1].payload["submit_label"] == "确认并提交"
+
+
+def test_observed_health_consultation_can_write_user_facts_then_continue_replying() -> None:
+    scenario = ObservedScenario()
+    result = scenario.run_turn(
+        text="没有出血或发烧，疼痛也没有加重，宝宝胎动正常。今天散步后只是有一点轻微牵拉感。",
+        handlers=scenario.diary_handlers(),
+        tool_invocations=(
+            scripted_tool_invocation("load_service_skill", {"service_skill_id": "health-consultation"}),
+            scripted_tool_invocation(
+                "pregnancy_diary.manage",
+                {
+                    "action": "write",
+                    "content": "今天散步后有一点轻微牵拉感；没有出血或发烧，疼痛没有加重，宝宝胎动正常。",
+                },
+            ),
+        ),
+        final_text="我已经记下来了。先休息并观察；如果牵拉感加重、出现出血或胎动异常，请及时联系产科。",
+    )
+
+    _assert_tools(result.trace, "load_service_skill", "pregnancy_diary.manage")
+    _assert_event_types(result.trace, required={"pregnancy_diary.changed"})
+    assert result.trace.final_text.startswith("我已经记下来了")
+    assert scenario.diary.entries[0].content == (
+        "今天散步后有一点轻微牵拉感；没有出血或发烧，疼痛没有加重，宝宝胎动正常。"
+    )
+    assert "建议" not in scenario.diary.entries[0].content
+
+
 def test_observed_device_electrical_hazard_bypasses_model_tools_and_actions() -> None:
     scenario = ObservedScenario()
     result = scenario.run_turn(
@@ -670,6 +750,7 @@ class ObservedScenario:
         self.assets = RecordingAssetService()
         self.records = RecordingRecordsService(owner_user_id=self.actor_user_id)
         self.profiles = RecordingProfileService()
+        self.diary = RecordingDiaryService(owner_user_id=self.actor_user_id)
 
     def run_turn(
         self,
@@ -754,6 +835,12 @@ class ObservedScenario:
 
     def ibclc_handlers(self) -> dict[str, Any]:
         return {"ibclc_consult_card_create": IbclcConsultCardCreateToolHandler(runtime_service=self.runtime_service)}
+
+    def support_handlers(self) -> dict[str, Any]:
+        return {"support.ticket.propose": SupportTicketProposeToolHandler(runtime_service=self.runtime_service)}
+
+    def diary_handlers(self) -> dict[str, Any]:
+        return {"pregnancy_diary.manage": PregnancyDiaryManageToolHandler(diary_service=self.diary)}
 
     def milk_handlers(self) -> dict[str, Any]:
         return {
@@ -1212,6 +1299,37 @@ class RecordingPlansService:
             task.task_time = update["new_task_time"]
             changed.append(task)
         return changed
+
+
+class RecordingDiaryService:
+    def __init__(self, *, owner_user_id: UUID) -> None:
+        self.owner_user_id = owner_user_id
+        self.entries: list[PregnancyDiaryEntry] = []
+
+    async def create_entry(self, *, owner_user_id: UUID, entry_date: date, values: dict[str, Any], request_id: str):
+        del request_id
+        assert owner_user_id == self.owner_user_id
+        if any(entry.entry_date == entry_date for entry in self.entries):
+            raise ApiError(code="conflict", message="Diary entry already exists.", status=409)
+        entry = PregnancyDiaryEntry(
+            id=uuid4(),
+            owner_user_id=owner_user_id,
+            entry_date=entry_date,
+            content=str(values.get("content") or ""),
+            symptom_tags=[],
+            attachments=[],
+        )
+        self.entries.append(entry)
+        return entry
+
+    async def get_entry(self, *, owner_user_id: UUID, entry_date: date):
+        entry = next(
+            (item for item in self.entries if item.owner_user_id == owner_user_id and item.entry_date == entry_date),
+            None,
+        )
+        if entry is None:
+            raise ApiError(code="not_found", message="Diary entry not found.", status=404)
+        return entry
 
 
 class RecordingRecordsService:

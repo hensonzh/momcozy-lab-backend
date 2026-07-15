@@ -4,6 +4,7 @@ from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.
     HEALTH_GUIDANCE_ALLOWED_DOMAINS,
     health_guidance_request_context_lines,
     needs_breast_triage_first,
+    should_require_complex_health_web_search,
     should_use_complex_health_web_search,
 )
 
@@ -19,6 +20,25 @@ from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.
 )
 def test_complex_health_questions_require_controlled_web_search(message: str) -> None:
     assert should_use_complex_health_web_search(message) is True
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "宝宝黄疸一直不退怎么办？",
+        "乳汁电导率持续升高可能是什么原因？",
+        "哺乳期用药会不会影响宝宝？",
+    ],
+)
+def test_evidence_sensitive_health_questions_require_web_search(message: str) -> None:
+    assert should_require_complex_health_web_search(message) is True
+
+
+def test_low_risk_health_update_can_continue_without_mandatory_web_search() -> None:
+    message = "没有出血或发烧，疼痛也没有加重，宝宝胎动正常。今天散步后只是有一点轻微牵拉感。"
+
+    assert should_use_complex_health_web_search(message) is True
+    assert should_require_complex_health_web_search(message) is False
 
 
 @pytest.mark.parametrize(
