@@ -148,7 +148,7 @@ def default_tool_registry() -> ToolContractRegistry:
             domain="records",
             description=(
                 "用户要求完整分析奶量，或回答上一轮奶量分析问题时调用；开始、恢复或推进当前线程的六项采集。"
-                "每轮只回答工具返回的 current_field，直到 can_evaluate 为 true。"
+                "回答时用 observed_answers 标注本轮原话明确覆盖的全部采集项，未明确回答的项目继续按 current_field 逐项追问，直到 can_evaluate 为 true。"
             ),
             loading_mode="eager",
             read_or_write="write",

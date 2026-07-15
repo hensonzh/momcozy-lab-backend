@@ -1192,7 +1192,14 @@ class RecordingRecordsService:
     def __init__(self, *, owner_user_id: UUID) -> None:
         self.owner_user_id = owner_user_id
 
-    async def list_feedings(self, *, owner_user_id: UUID, limit: int):
+    async def list_feedings(
+        self,
+        *,
+        owner_user_id: UUID,
+        start_at: datetime | None = None,
+        end_at: datetime | None = None,
+        limit: int,
+    ):
         assert owner_user_id == self.owner_user_id
         return [
             FeedingRecord(
@@ -1208,7 +1215,14 @@ class RecordingRecordsService:
             )
         ][:limit]
 
-    async def list_pumpings(self, *, owner_user_id: UUID, limit: int):
+    async def list_pumpings(
+        self,
+        *,
+        owner_user_id: UUID,
+        start_at: datetime | None = None,
+        end_at: datetime | None = None,
+        limit: int,
+    ):
         assert owner_user_id == self.owner_user_id
         return [
             PumpingRecord(

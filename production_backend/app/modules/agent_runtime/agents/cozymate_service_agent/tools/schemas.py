@@ -115,8 +115,34 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
                 "default": "start",
                 "description": "开始、恢复、回答当前唯一问题，或明确重置六项奶量分析采集。",
             },
-            "days": {"type": "integer", "minimum": 1, "maximum": 30, "default": 7},
-            "limit": {"type": "integer", "minimum": 1, "maximum": 20, "default": 8},
+            "observed_answers": {
+                "type": "array",
+                "maxItems": 5,
+                "description": "action=answer 时，列出本轮用户原话中明确回答到的一个或多个采集字段；evidence 必须逐字来自本轮消息。",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["field", "evidence"],
+                    "properties": {
+                        "field": {
+                            "type": "string",
+                            "enum": [
+                                "infant_wet_diapers",
+                                "infant_state_or_satisfaction",
+                                "infant_growth_signal",
+                                "maternal_red_flags",
+                                "maternal_breast_comfort",
+                            ],
+                        },
+                        "evidence": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500,
+                            "description": "能够支持该字段的本轮用户原话片段，不改写、不推断。",
+                        },
+                    },
+                },
+            },
         },
     },
     "records.milk_analysis.evaluate": {

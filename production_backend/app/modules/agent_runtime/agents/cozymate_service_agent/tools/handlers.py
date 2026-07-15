@@ -79,6 +79,7 @@ from .pregnancy_plan_flow import (
     pregnancy_plan_urgent_signal_ids,
 )
 from .milk_analysis_flow import (
+    MILK_ANALYSIS_FIELDS,
     MILK_ANALYSIS_SCHEMA_VERSION,
     MILK_ANALYSIS_WORKFLOW_TYPE,
     MilkAnalysisFlowError,
@@ -759,16 +760,27 @@ class MilkAnalysisReadToolHandler:
     async def __call__(self, context: ToolHandlerContext) -> ToolHandlerResult:
         owner_user_id = context.actor.user_id
         days = _limit(context.args.get("days"), default=7, max_limit=30)
-        limit = _limit(context.args.get("limit"), default=8, max_limit=20)
-        feedings = await self.records_service.list_feedings(owner_user_id=owner_user_id, limit=limit)
-        pumpings = await self.records_service.list_pumpings(owner_user_id=owner_user_id, limit=limit)
-        growth = await self.records_service.list_growth(owner_user_id=owner_user_id, limit=limit)
+        detail_limit = _limit(context.args.get("limit"), default=8, max_limit=20)
+        start_at, end_at = _milk_analysis_window(days=days)
+        feedings = await self.records_service.list_feedings(
+            owner_user_id=owner_user_id,
+            start_at=start_at,
+            end_at=end_at,
+            limit=100,
+        )
+        pumpings = await self.records_service.list_pumpings(
+            owner_user_id=owner_user_id,
+            start_at=start_at,
+            end_at=end_at,
+            limit=100,
+        )
+        growth = await self.records_service.list_growth(owner_user_id=owner_user_id, limit=detail_limit)
         trends = await self.records_service.get_milk_trends(owner_user_id=owner_user_id, days=days, include_today=True)
         infants = await self.profile_service.list_infants(owner_user_id=owner_user_id)
         trend_items = [_milk_trend_payload(item) for item in trends.items]
         status = _milk_status_payload(
             days=days,
-            limit=limit,
+            limit=detail_limit,
             feedings=feedings,
             pumpings=pumpings,
             trend_items=trend_items,
@@ -781,8 +793,8 @@ class MilkAnalysisReadToolHandler:
             "volumes": status["volumes"],
             "latest": status["latest"],
             "observation_flags": status["observation_flags"],
-            "recent_feedings": [_feeding_payload(record) for record in feedings],
-            "recent_pumpings": [_pumping_payload(record) for record in pumpings],
+            "recent_feedings": [_feeding_payload(record) for record in feedings[:detail_limit]],
+            "recent_pumpings": [_pumping_payload(record) for record in pumpings[:detail_limit]],
             "recent_growth": [_growth_payload(record) for record in growth],
             "pumping_trends": trend_items,
             "analysis": _milk_analysis_payload(status=status, growth=growth),
@@ -831,9 +843,14 @@ class MilkAnalysisIntakeToolHandler:
             workflow = existing_state
             if action == "answer":
                 answer = _text(context.args, "trusted_current_user_text")
+                raw_observed_answers = context.args.get("observed_answers")
+                observed_answers = _grounded_milk_analysis_answers(
+                    raw_observed_answers,
+                    trusted_current_user_text=answer,
+                )
                 turn_key = _stable_payload_key(
                     "milk-analysis-answer",
-                    {"run_id": str(context.run_id), "answer": answer},
+                    {"run_id": str(context.run_id), "answer": answer, "observed_answers": observed_answers},
                 )
                 processed_turn_keys = list(workflow.get("processed_turn_keys") or [])
                 if turn_key in processed_turn_keys:
@@ -842,7 +859,11 @@ class MilkAnalysisIntakeToolHandler:
                     processed_turn_keys.append(turn_key)
                 try:
                     if action == "answer":
-                        workflow = advance_milk_analysis_intake(workflow, answer=answer)
+                        workflow = advance_milk_analysis_intake(
+                            workflow,
+                            answer="" if observed_answers else answer,
+                            answers=observed_answers,
+                        )
                 except MilkAnalysisFlowError as exc:
                     raise ApiError(code=str(exc), message="Milk analysis intake could not advance.", status=409) from exc
                 workflow["processed_turn_keys"] = processed_turn_keys[-16:]
@@ -3905,6 +3926,43 @@ def _milk_data_coverage(*, has_feedings: bool, has_pumpings: bool, days: int, da
     if has_feedings and has_pumpings and days_with_pumping >= min(days, 2):
         return "ready"
     return "limited"
+
+
+def _milk_analysis_window(*, days: int) -> tuple[datetime, datetime]:
+    today = datetime.now(timezone.utc).date()
+    start_at = datetime.combine(today - timedelta(days=days - 1), datetime.min.time(), tzinfo=timezone.utc)
+    end_at = datetime.combine(today + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
+    return start_at, end_at
+
+
+def _grounded_milk_analysis_answers(
+    value: Any,
+    *,
+    trusted_current_user_text: str,
+) -> dict[str, str]:
+    if value in (None, []):
+        return {}
+    if not isinstance(value, list):
+        raise ApiError(code="validation_failed", message="observed_answers must be a list.", status=422)
+    trusted = re.sub(r"\s+", "", trusted_current_user_text)
+    allowed_fields = set(MILK_ANALYSIS_FIELDS[1:])
+    grounded: dict[str, str] = {}
+    for item in value:
+        if not isinstance(item, dict):
+            raise ApiError(code="validation_failed", message="observed_answers entries must be objects.", status=422)
+        field = _text(item, "field")
+        evidence = _text(item, "evidence")
+        normalized_evidence = re.sub(r"\s+", "", evidence)
+        if field not in allowed_fields or not normalized_evidence:
+            raise ApiError(code="validation_failed", message="Each observed answer requires a valid field and evidence.", status=422)
+        if not trusted or normalized_evidence not in trusted:
+            raise ApiError(
+                code="milk_analysis_answer_not_grounded",
+                message="Observed milk-analysis answers must quote the current user message.",
+                status=422,
+            )
+        grounded[field] = evidence
+    return grounded
 
 
 def _milk_trend_direction(trend_items: list[dict[str, Any]]) -> str:

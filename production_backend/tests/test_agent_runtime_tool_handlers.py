@@ -745,6 +745,68 @@ def test_milk_analysis_intake_is_durable_and_evaluation_emits_an_analysis_card()
     assert "evaluation_artifact_id" not in runtime_service.workflow_state.state
 
 
+def test_milk_analysis_intake_absorbs_only_current_turn_grounded_answers() -> None:
+    actor = _user()
+    runtime_service = FakeAgentRuntimeService()
+    records_service = FakeRecordsService(owner_user_id=actor.user_id)
+    handler = MilkAnalysisIntakeToolHandler(
+        records_service=records_service,
+        profile_service=FakeProfileService(profile=None, infants=[]),
+        runtime_service=runtime_service,
+    )
+    base_context = _context(actor=actor, args={"action": "start"})
+
+    asyncio.run(handler(base_context))
+    current_text = "宝宝近 24 小时有 7 片湿尿布，精神很好，吃完能安稳，最近体重增长正常"
+    advanced = asyncio.run(
+        handler(
+            _context(
+                actor=actor,
+                thread_id=base_context.thread_id,
+                args={
+                    "action": "answer",
+                    "observed_answers": [
+                        {"field": "infant_wet_diapers", "evidence": "近 24 小时有 7 片湿尿布"},
+                        {"field": "infant_state_or_satisfaction", "evidence": "精神很好，吃完能安稳"},
+                        {"field": "infant_growth_signal", "evidence": "最近体重增长正常"},
+                    ],
+                    "trusted_current_user_text": current_text,
+                },
+            )
+        )
+    )
+
+    assert advanced.output["current_field"] == "maternal_red_flags"
+    assert advanced.output["progress"] == {
+        "index": 5,
+        "total": 6,
+        "completed_count": 4,
+        "remaining_count": 2,
+    }
+    assert records_service.feeding_query["limit"] == 100
+    assert records_service.pumping_query["limit"] == 100
+    assert records_service.feeding_query["start_at"] is not None
+    assert records_service.feeding_query["end_at"] is not None
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            handler(
+                _context(
+                    actor=actor,
+                    thread_id=base_context.thread_id,
+                    args={
+                        "action": "answer",
+                        "observed_answers": [
+                            {"field": "maternal_red_flags", "evidence": "没有发热和红肿"},
+                        ],
+                        "trusted_current_user_text": "我还不确定",
+                    },
+                )
+            )
+        )
+    assert exc_info.value.code == "milk_analysis_answer_not_grounded"
+
+
 def test_milk_plan_proposal_rejects_missing_durable_analysis_even_with_valid_plan_args() -> None:
     with pytest.raises(ApiError) as exc_info:
         asyncio.run(
@@ -3154,9 +3216,17 @@ class FakeRecordsService:
         self.owner_user_id = None
         self._owner_user_id = owner_user_id
         self.growth_infant_id = None
+        self.feeding_query = {}
+        self.pumping_query = {}
 
-    async def list_feedings(self, *, owner_user_id, limit):
+    async def list_feedings(self, *, owner_user_id, start_at=None, end_at=None, limit):
         self.owner_user_id = owner_user_id
+        self.feeding_query = {
+            "owner_user_id": owner_user_id,
+            "start_at": start_at,
+            "end_at": end_at,
+            "limit": limit,
+        }
         return [
             FeedingRecord(
                 id=uuid4(),
@@ -3171,7 +3241,13 @@ class FakeRecordsService:
             )
         ]
 
-    async def list_pumpings(self, *, owner_user_id, limit):
+    async def list_pumpings(self, *, owner_user_id, start_at=None, end_at=None, limit):
+        self.pumping_query = {
+            "owner_user_id": owner_user_id,
+            "start_at": start_at,
+            "end_at": end_at,
+            "limit": limit,
+        }
         return [
             PumpingRecord(
                 id=uuid4(),

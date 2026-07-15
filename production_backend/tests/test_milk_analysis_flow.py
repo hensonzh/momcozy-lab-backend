@@ -40,7 +40,7 @@ def _complete_intake(
     return workflow
 
 
-def test_six_step_intake_is_ordered_and_only_advances_one_answer_at_a_time() -> None:
+def test_six_step_intake_is_ordered_and_advances_the_current_answer() -> None:
     workflow = initialize_milk_analysis_intake(records_snapshot=_records_snapshot())
 
     assert [item["id"] for item in workflow["checklist"]] == list(MILK_ANALYSIS_FIELDS)
@@ -53,6 +53,27 @@ def test_six_step_intake_is_ordered_and_only_advances_one_answer_at_a_time() -> 
     assert advanced["answers"] == {"infant_wet_diapers": "24 小时有 7 片湿尿布"}
     assert advanced["current_field"] == "infant_state_or_satisfaction"
     assert advanced["progress"]["index"] == 3
+
+
+def test_intake_absorbs_multiple_model_classified_answers_from_one_turn() -> None:
+    workflow = initialize_milk_analysis_intake(records_snapshot=_records_snapshot())
+
+    advanced = advance_milk_analysis_intake(
+        workflow,
+        answers={
+            "infant_wet_diapers": "近 24 小时有 7 片湿尿布",
+            "infant_state_or_satisfaction": "精神很好，吃完能安稳",
+            "infant_growth_signal": "最近体重增长正常",
+        },
+    )
+
+    assert advanced["answers"] == {
+        "infant_wet_diapers": "近 24 小时有 7 片湿尿布",
+        "infant_state_or_satisfaction": "精神很好，吃完能安稳",
+        "infant_growth_signal": "最近体重增长正常",
+    }
+    assert advanced["current_field"] == "maternal_red_flags"
+    assert advanced["progress"] == {"index": 5, "total": 6, "completed_count": 4, "remaining_count": 2}
 
 
 def test_assessment_requires_complete_intake_and_fingerprints_the_exact_context() -> None:

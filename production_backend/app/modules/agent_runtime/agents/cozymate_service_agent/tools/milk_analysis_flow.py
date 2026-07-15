@@ -41,18 +41,32 @@ def initialize_milk_analysis_intake(*, records_snapshot: dict[str, Any]) -> dict
     return _project_intake(workflow)
 
 
-def advance_milk_analysis_intake(workflow: dict[str, Any], *, answer: str) -> dict[str, Any]:
+def advance_milk_analysis_intake(
+    workflow: dict[str, Any],
+    *,
+    answer: str = "",
+    answers: dict[str, str] | None = None,
+) -> dict[str, Any]:
     projected = _project_intake(workflow)
     current_field = _text(projected.get("current_field"))
     if not current_field:
         raise MilkAnalysisFlowError("milk_analysis_intake_already_complete")
-    normalized_answer = _text(answer)
-    if not normalized_answer:
-        raise MilkAnalysisFlowError("milk_analysis_answer_required")
     raw_answers = projected.get("answers")
-    answers: dict[str, Any] = dict(raw_answers) if isinstance(raw_answers, dict) else {}
-    answers[current_field] = normalized_answer
-    projected["answers"] = answers
+    collected: dict[str, Any] = dict(raw_answers) if isinstance(raw_answers, dict) else {}
+    accepted = 0
+    for field in MILK_ANALYSIS_FIELDS[1:]:
+        value = _text((answers or {}).get(field))
+        if not value:
+            continue
+        collected[field] = value
+        accepted += 1
+    normalized_answer = _text(answer)
+    if accepted == 0 and normalized_answer:
+        collected[current_field] = normalized_answer
+        accepted = 1
+    if accepted == 0:
+        raise MilkAnalysisFlowError("milk_analysis_answer_required")
+    projected["answers"] = collected
     return _project_intake(projected)
 
 
