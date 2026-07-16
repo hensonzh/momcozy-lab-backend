@@ -52,7 +52,6 @@ def test_agent_runtime_uses_explicit_internal_subdomains() -> None:
         "agents",
         "evals",
         "event_stream",
-        "graphs",
         "memory",
         "routing",
         "run_lifecycle",
