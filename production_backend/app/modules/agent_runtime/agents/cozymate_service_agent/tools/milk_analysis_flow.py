@@ -58,7 +58,13 @@ def advance_milk_analysis_intake(
         value = _text((answers or {}).get(field))
         if not value:
             continue
-        collected[field] = value
+        if field == "maternal_red_flags":
+            collected[field] = _merge_maternal_red_flag_evidence(
+                previous=_text(collected.get(field)),
+                current=value,
+            )
+        else:
+            collected[field] = value
         accepted += 1
     normalized_answer = _text(answer)
     if accepted == 0 and normalized_answer:
@@ -242,6 +248,36 @@ def _has_maternal_red_flags(answer: str) -> bool:
 def _positive_red_flag_text(text: str) -> bool:
     positive_phrases = ("发热", "发烧", "寒战", "红肿", "硬块", "疼痛加重", "越来越痛")
     return any(phrase in text for phrase in positive_phrases)
+
+
+def _merge_maternal_red_flag_evidence(*, previous: str, current: str) -> str:
+    if not previous or previous == current:
+        return current or previous
+    if _is_complete_red_flag_correction(previous=previous, current=current):
+        return current
+    return f"{previous}；后续补充：{current}"
+
+
+def _is_complete_red_flag_correction(*, previous: str, current: str) -> bool:
+    correction_markers = ("刚才说错了", "之前说错了", "前面说错了", "我说错了", "更正", "纠正")
+    if not any(marker in current for marker in correction_markers):
+        return False
+    if _has_maternal_red_flags(current):
+        return False
+    previous_categories = _mentioned_red_flag_categories(previous)
+    corrected_categories = _mentioned_red_flag_categories(current)
+    return bool(previous_categories) and previous_categories <= corrected_categories
+
+
+def _mentioned_red_flag_categories(text: str) -> set[str]:
+    phrases = {
+        "fever": ("发热", "发烧"),
+        "chills": ("寒战",),
+        "redness": ("红肿",),
+        "lump": ("硬块",),
+        "worsening_pain": ("疼痛加重", "越来越痛"),
+    }
+    return {category for category, terms in phrases.items() if any(term in text for term in terms)}
 
 
 def _red_flag_clause_is_negated(clause: str) -> bool:
