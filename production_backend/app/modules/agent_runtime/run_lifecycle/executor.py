@@ -72,7 +72,7 @@ from ..event_semantics import (
     web_search_event_semantic,
     with_tool_event_semantic,
 )
-from ..graphs import AgentGraphRegistry, default_graph_registry
+from ..runtime_registry import AgentRuntimeRegistry, default_runtime_registry
 from ..facts import AgentFactService
 from ..memory.service import AgentMemoryService
 from ..models import AgentAction, AgentArtifact, AgentEvent, AgentMessage, AgentRun, AgentWorkflowState
@@ -184,7 +184,7 @@ class AgentRuntimeExecutor:
         *,
         repository: AgentRuntimeRepository,
         sdk_runner: AgentModelRunner,
-        graph_registry: AgentGraphRegistry | None = None,
+        runtime_registry: AgentRuntimeRegistry | None = None,
         tool_registry: ToolContractRegistry | None = None,
         tool_namespace_registry: ToolNamespaceRegistry | None = None,
         tool_executor: ToolExecutor | None = None,
@@ -205,7 +205,7 @@ class AgentRuntimeExecutor:
     ) -> None:
         self.repository = repository
         self.sdk_runner = sdk_runner
-        self.graph_registry = graph_registry or default_graph_registry()
+        self.runtime_registry = runtime_registry or default_runtime_registry()
         self.state_store = AgentRuntimeStateStore(repository=repository)
         self.tool_registry = tool_registry or default_tool_registry()
         self.tool_namespace_registry = tool_namespace_registry or default_tool_namespace_registry(self.tool_registry)
@@ -248,9 +248,13 @@ class AgentRuntimeExecutor:
 
     async def execute(self, *, run: AgentRun) -> AgentRunExecutionResult:
         run_started_at = perf_counter()
-        graph = self.graph_registry.get(run.graph_version)
-        if graph.runtime_pattern != run.runtime_pattern:
-            raise ApiError(code="runtime_graph_mismatch", message="Run runtime pattern does not match graph version.", status=409)
+        runtime = self.runtime_registry.get(run.runtime_version)
+        if runtime.runtime_pattern != run.runtime_pattern:
+            raise ApiError(
+                code="runtime_pattern_mismatch",
+                message="Run runtime pattern does not match its runtime version.",
+                status=409,
+            )
         self._run_assistant_message_ids[run.id] = uuid4()
         self._run_text_projectors[run.id] = AppendOnlyAgentResponseProjector()
         self._run_text_stream_emitted[run.id] = ""

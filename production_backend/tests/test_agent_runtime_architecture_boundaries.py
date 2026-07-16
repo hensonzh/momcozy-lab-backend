@@ -9,7 +9,7 @@ import pytest
 
 from production_backend.app.core.errors import ApiError
 from production_backend.app.core.metrics import RequestMetrics
-from production_backend.app.modules.agent_runtime.graphs import default_graph_registry
+from production_backend.app.modules.agent_runtime.runtime_registry import default_runtime_registry
 from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent import ServiceSkillId
 from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.prompts import (
     BASE_AGENT_INSTRUCTIONS,
@@ -50,12 +50,11 @@ from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.
 PRODUCTION_BACKEND = Path(__file__).resolve().parents[1]
 
 
-def test_default_graph_registry_uses_langgraph_sdk_pattern() -> None:
-    graph = default_graph_registry().get("momcozy-agent-v1")
+def test_default_runtime_registry_uses_sdk_only_pattern() -> None:
+    runtime = default_runtime_registry().get("momcozy-agent-v1")
 
-    assert graph.runtime_pattern == "langgraph_sdk"
-    assert graph.node_names == ("sdk_reasoning", "finish")
-    assert "sdk_reasoning" in graph.node_names
+    assert runtime.runtime_pattern == "sdk_only"
+    assert runtime.version == "momcozy-agent-v1"
 
 
 def test_service_skill_registry_is_the_model_facing_entrypoint() -> None:
@@ -142,28 +141,26 @@ def test_service_skills_do_not_reference_legacy_tool_namespaces() -> None:
 
 
 def test_production_runtime_does_not_ship_dormant_langgraph_runner() -> None:
-    runtime_init = (PRODUCTION_BACKEND / "app" / "modules" / "agent_runtime" / "__init__.py").read_text()
-    graphs_init = (PRODUCTION_BACKEND / "app" / "modules" / "agent_runtime" / "graphs" / "__init__.py").read_text()
+    runtime_root = PRODUCTION_BACKEND / "app" / "modules" / "agent_runtime"
+    runtime_init = (runtime_root / "__init__.py").read_text()
     worker_source = (PRODUCTION_BACKEND / "scripts" / "run_agent_worker.py").read_text()
     requirements = (PRODUCTION_BACKEND / "requirements.txt").read_text()
 
     assert "AgentRuntimeGraphRunner" not in runtime_init
-    assert "AgentRuntimeGraphRunner" not in graphs_init
     assert "AgentRuntimeGraphRunner" not in worker_source
-    assert not (PRODUCTION_BACKEND / "app" / "modules" / "agent_runtime" / "graphs" / "runner.py").exists()
+    assert not list((runtime_root / "graphs").glob("*.py"))
     assert "langgraph" not in requirements
 
 
 def test_production_runtime_does_not_ship_unused_graph_checkpoint_code() -> None:
     runtime_root = PRODUCTION_BACKEND / "app" / "modules" / "agent_runtime"
     runtime_init = (runtime_root / "__init__.py").read_text()
-    graphs_init = (runtime_root / "graphs" / "__init__.py").read_text()
+    runtime_registry = (runtime_root / "runtime_registry.py").read_text()
 
-    assert not (runtime_root / "graphs" / "checkpoints.py").exists()
-    assert not (runtime_root / "graphs" / "state.py").exists()
+    assert not list((runtime_root / "graphs").glob("*.py"))
     for obsolete_name in ("AgentGraphCheckpointStore", "GraphCheckpointRef", "AgentContextCheckpoint"):
         assert obsolete_name not in runtime_init
-        assert obsolete_name not in graphs_init
+        assert obsolete_name not in runtime_registry
 
 
 def test_service_skill_tool_references_are_registered_contracts() -> None:

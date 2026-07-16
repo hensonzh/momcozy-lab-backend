@@ -146,6 +146,43 @@ def test_idempotency_service_replays_same_request_hash() -> None:
     assert decision.record is existing
 
 
+def test_idempotency_service_replays_compatible_historical_request_hash() -> None:
+    existing = _idempotency_key(request_hash_value="legacy-hash")
+    service = IdempotencyService(repository=FakeAuditRepository(existing_idempotency=existing))
+
+    decision = asyncio.run(
+        service.reserve(
+            actor_user_id=existing.actor_user_id,
+            scope=existing.scope,
+            key=existing.key,
+            request_hash="canonical-hash",
+            compatible_request_hashes=("legacy-hash",),
+            expires_at=_expires_at(),
+        )
+    )
+
+    assert decision.status == "replay"
+    assert decision.record is existing
+
+
+def test_idempotency_service_stores_canonical_hash_for_new_compatible_request() -> None:
+    repository = FakeAuditRepository()
+    service = IdempotencyService(repository=repository)
+
+    asyncio.run(
+        service.reserve(
+            actor_user_id=uuid4(),
+            scope="agent.runs.create",
+            key="idem-runtime-contract",
+            request_hash="canonical-hash",
+            compatible_request_hashes=("legacy-hash",),
+            expires_at=_expires_at(),
+        )
+    )
+
+    assert repository.created_idempotency.request_hash == "canonical-hash"
+
+
 def test_idempotency_service_rejects_expired_key_before_replay() -> None:
     existing = _idempotency_key(request_hash_value="hash-1", expires_at=datetime.now(timezone.utc) - timedelta(seconds=1))
     service = IdempotencyService(repository=FakeAuditRepository(existing_idempotency=existing))

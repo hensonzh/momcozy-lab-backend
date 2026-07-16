@@ -56,7 +56,7 @@ def _run(run: AgentRun) -> dict[str, Any]:
         "actor_user_id": str(run.actor_user_id),
         "status": run.status,
         "runtime_pattern": run.runtime_pattern,
-        "graph_version": run.graph_version,
+        "runtime_version": run.runtime_version,
         "prompt_version": run.prompt_version,
         "request_id": run.request_id,
         "trace_id": run.trace_id,

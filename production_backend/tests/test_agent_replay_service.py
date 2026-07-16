@@ -21,6 +21,9 @@ def test_agent_replay_service_exports_redacted_bundle_by_default() -> None:
     bundle = asyncio.run(AgentReplayService(repository=repository).export_run_bundle(run_id=repository.run.id))
 
     assert bundle["run"]["id"] == str(repository.run.id)
+    assert bundle["run"]["runtime_pattern"] == "sdk_only"
+    assert bundle["run"]["runtime_version"] == "momcozy-agent-v1"
+    assert "graph_version" not in bundle["run"]
     assert bundle["messages"][0]["content"] == {"redacted": True}
     assert bundle["events"][0]["type"] == "run.started"
     assert bundle["events"][0]["thread_id"] == str(repository.run.thread_id)
@@ -113,8 +116,8 @@ class FakeReplayRepository:
             thread_id=uuid4(),
             actor_user_id=uuid4(),
             status="completed",
-            runtime_pattern="langgraph_sdk",
-            graph_version="momcozy-agent-v1",
+            runtime_pattern="sdk_only",
+            runtime_version="momcozy-agent-v1",
             prompt_version="prompt-v1",
             request_id="req",
             trace_id="trace",
