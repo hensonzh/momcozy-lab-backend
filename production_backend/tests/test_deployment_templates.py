@@ -9,6 +9,7 @@ COMPOSE_PROD_ENV = PRODUCTION_BACKEND / "env" / "compose.prod.env.example"
 LOCAL_COMPOSE = PRODUCTION_BACKEND / "docker-compose.local.yml"
 TEST_COMPOSE = PRODUCTION_BACKEND / "docker-compose.test.yml"
 PROD_COMPOSE = PRODUCTION_BACKEND / "docker-compose.prod.yml"
+NGINX_CONFIG = PRODUCTION_BACKEND / "deploy" / "nginx" / "momcozy-api.conf"
 
 
 def test_dockerfile_runs_isolated_production_backend() -> None:
@@ -18,6 +19,23 @@ def test_dockerfile_runs_isolated_production_backend() -> None:
     assert "production_backend/requirements.txt" in dockerfile
     assert "production_backend.app.main:app" in dockerfile
     assert "momcozy" + "_agent" not in dockerfile
+
+
+def test_nginx_proxy_keeps_api_private_and_supports_streaming_transports() -> None:
+    config = NGINX_CONFIG.read_text()
+
+    assert "server 127.0.0.1:8000;" in config
+    assert "listen 80 default_server;" in config
+    assert "return 444;" in config
+    assert "client_max_body_size 16m;" in config
+    assert "proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;" in config
+    assert "proxy_set_header X-Forwarded-Proto $scheme;" in config
+    assert "proxy_set_header X-Request-ID $request_id;" in config
+    assert "location = /v1/realtime-voice-session" in config
+    assert "proxy_set_header Upgrade $http_upgrade;" in config
+    assert 'proxy_set_header Connection "upgrade";' in config
+    assert "proxy_buffering off;" in config
+    assert "proxy_read_timeout 3600s;" in config
 
 
 def test_compose_uses_local_infra_service_names_not_localhost() -> None:

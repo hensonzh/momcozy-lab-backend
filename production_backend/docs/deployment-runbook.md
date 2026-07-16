@@ -133,6 +133,32 @@ docker compose -f production_backend/docker-compose.prod.yml up -d --scale agent
 External traffic routers should probe `/v1/health/ready`, not only container
 liveness, because readiness verifies configured infrastructure.
 
+## Nginx Edge Proxy
+
+Use `production_backend/deploy/nginx/momcozy-api.conf` as the public edge
+template. Before installing it, replace `api.example.com` with the public API
+hostname and change upstream port `8000` only when the compose host bind uses a
+different loopback port. Keep the application bound to `127.0.0.1`.
+
+The template rejects unknown hosts, forwards client/protocol/request IDs,
+disables buffering for SSE endpoints, and preserves WebSocket upgrade headers
+for `/v1/realtime-voice-session`. Its 16 MiB edge limit leaves multipart
+overhead above the default 10 MiB application upload limit.
+
+Install and validate the site before switching traffic:
+
+```bash
+sudo cp production_backend/deploy/nginx/momcozy-api.conf /etc/nginx/sites-available/momcozy-api
+sudo ln -sfn /etc/nginx/sites-available/momcozy-api /etc/nginx/sites-enabled/momcozy-api
+sudo rm -f /etc/nginx/sites-enabled/default
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+After DNS and firewall rules allow inbound TCP 80 and 443, provision TLS with
+the environment's certificate automation and redirect HTTP to HTTPS. Never
+publish the loopback API port, Postgres, Redis, or object storage directly.
+
 ## Server Test Docker Compose
 
 `production_backend/docker-compose.test.yml` is for a test server where the app
