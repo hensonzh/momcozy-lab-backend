@@ -26,8 +26,14 @@ def test_nginx_proxy_keeps_api_private_and_supports_streaming_transports() -> No
 
     assert "server 127.0.0.1:8000;" in config
     assert "listen 80 default_server;" in config
+    assert "listen 443 ssl default_server;" in config
+    assert "listen 443 ssl http2;" in config
     assert "return 444;" in config
     assert "client_max_body_size 16m;" in config
+    assert "ssl_certificate /etc/nginx/tls/momcozy-api/fullchain.pem;" in config
+    assert "ssl_certificate_key /etc/nginx/tls/momcozy-api/privkey.pem;" in config
+    assert "ssl_protocols TLSv1.2 TLSv1.3;" in config
+    assert "ssl_session_tickets off;" in config
     assert "proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;" in config
     assert "proxy_set_header X-Forwarded-Proto $scheme;" in config
     assert "proxy_set_header X-Request-ID $request_id;" in config

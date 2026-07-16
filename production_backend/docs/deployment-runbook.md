@@ -143,7 +143,21 @@ different loopback port. Keep the application bound to `127.0.0.1`.
 The template rejects unknown hosts, forwards client/protocol/request IDs,
 disables buffering for SSE endpoints, and preserves WebSocket upgrade headers
 for `/v1/realtime-voice-session`. Its 16 MiB edge limit leaves multipart
-overhead above the default 10 MiB application upload limit.
+overhead above the default 10 MiB application upload limit. It listens on both
+80 and 443 and permits only TLS 1.2 and TLS 1.3.
+
+Before enabling the site, provision the certificate and private key referenced
+by the template:
+
+```text
+/etc/nginx/tls/momcozy-api/fullchain.pem
+/etc/nginx/tls/momcozy-api/privkey.pem
+```
+
+Use a trusted certificate for public traffic. A short-lived self-signed
+bootstrap certificate is acceptable only to preflight a closed staging ingress;
+do not enable HTTP-to-HTTPS redirects or HSTS until a trusted certificate is
+installed.
 
 Install and validate the site before switching traffic:
 
@@ -155,8 +169,15 @@ sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-After DNS and firewall rules allow inbound TCP 80 and 443, provision TLS with
-the environment's certificate automation and redirect HTTP to HTTPS. Never
+After DNS and firewall rules allow inbound TCP 80 and 443, replace any bootstrap
+certificate through the environment's certificate automation. For Certbot,
+request the certificate through the Nginx plugin and enable the redirect:
+
+```bash
+sudo certbot --nginx -d api.example.com --redirect
+```
+
+Then verify automatic renewal and add HSTS only after HTTPS is trusted. Never
 publish the loopback API port, Postgres, Redis, or object storage directly.
 
 ## Server Test Docker Compose
