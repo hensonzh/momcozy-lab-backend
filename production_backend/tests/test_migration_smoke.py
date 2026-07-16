@@ -4,6 +4,13 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
+CHECKPOINT_ARCHIVE_MIGRATION = (
+    ROOT
+    / "production_backend"
+    / "migrations"
+    / "versions"
+    / "20260716_0034_archive_agent_context_checkpoints.py"
+)
 
 
 def test_alembic_offline_upgrade_head_generates_empty_database_sql() -> None:
@@ -49,3 +56,11 @@ def test_alembic_offline_upgrade_head_generates_empty_database_sql() -> None:
         "UPDATE alembic_version SET version_num='20260702_0026'",
     ]:
         assert phrase in sql
+
+
+def test_checkpoint_retirement_archives_existing_rows_without_dropping_them() -> None:
+    source = CHECKPOINT_ARCHIVE_MIGRATION.read_text()
+
+    assert 'op.rename_table("agent_context_checkpoints", "legacy_agent_context_checkpoints")' in source
+    assert 'op.rename_table("legacy_agent_context_checkpoints", "agent_context_checkpoints")' in source
+    assert "op.drop_table" not in source
