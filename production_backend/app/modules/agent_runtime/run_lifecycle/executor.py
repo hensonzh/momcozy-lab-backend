@@ -49,8 +49,6 @@ from ..agents.cozymate_service_agent.tools.hospital_bag_flow import (
     ensure_hospital_bag_completion_followup,
 )
 from ..agents.cozymate_service_agent.tools.pregnancy_plan_flow import (
-    PREGNANCY_PLAN_FINAL_QUESTION,
-    PREGNANCY_PLAN_FINAL_QUICK_REPLIES,
     PREGNANCY_PLAN_WORKFLOW_TYPE,
     ensure_pregnancy_plan_final_question,
 )
@@ -551,8 +549,11 @@ class AgentRuntimeExecutor:
         if not final_text:
             raise ApiError(code="empty_agent_response", message="Agent runtime returned an empty response.", status=502)
         finish_timings_ms = _timings_with_total(turn_context.timings_ms, run_started_at)
+        workflow_finalization_started_at = perf_counter()
+        workflow_reply, quick_reply_workflow = await self._completed_turn_workflow_finalization(run=run)
+        finish_timings_ms["workflow_finalization"] = _elapsed_ms(workflow_finalization_started_at)
         quick_reply_started_at = perf_counter()
-        if not authoritative_final_text and (self.quick_reply_finalizer is not None or final_text.endswith(PREGNANCY_PLAN_FINAL_QUESTION)):
+        if not authoritative_final_text and self.quick_reply_finalizer is not None:
             await self._append_progress(
                 run=run,
                 phase="quick_replies_preparing",
@@ -566,6 +567,8 @@ class AgentRuntimeExecutor:
                 turn_context=turn_context,
                 final_text=final_text,
                 artifacts=list(result.artifacts or []),
+                tool_calls=list(result.tool_calls or []),
+                active_workflow=quick_reply_workflow,
             )
         )
         finish_timings_ms["quick_reply_finalizer"] = _elapsed_ms(quick_reply_started_at)
@@ -576,7 +579,6 @@ class AgentRuntimeExecutor:
             final_text_length=len(final_text),
             quick_reply_count=len(quick_replies),
         )
-        workflow_reply = await self._completed_turn_workflow_reply(run=run)
         return AgentRunExecutionResult(
             status="completed",
             final_text=final_text,
@@ -1107,10 +1109,10 @@ class AgentRuntimeExecutor:
                 return None
         return workflow
 
-    async def _completed_turn_workflow_reply(self, *, run: AgentRun) -> dict[str, Any]:
+    async def _completed_turn_workflow_finalization(self, *, run: AgentRun) -> tuple[dict[str, Any], dict[str, Any]]:
         loader = getattr(self.repository, "list_active_workflow_states_for_thread", None)
         if not callable(loader):
-            return {}
+            return {}, {}
         workflows = await loader(
             thread_id=run.thread_id,
             owner_user_id=run.actor_user_id,
@@ -1126,17 +1128,37 @@ class AgentRuntimeExecutor:
             requested_type,
         ]
         checked_types: set[str] = set()
+        preferred_workflow: AgentWorkflowState | None = None
+        reply_workflow: AgentWorkflowState | None = None
+        workflow_reply: dict[str, Any] = {}
         for workflow_type in preferred_types:
             if not workflow_type or workflow_type in checked_types:
                 continue
             checked_types.add(workflow_type)
-            for workflow in workflows:
-                if workflow.workflow_type != workflow_type or not workflow_accepts_reply(workflow):
+            matching = [workflow for workflow in workflows if workflow.workflow_type == workflow_type]
+            if preferred_workflow is None and matching:
+                preferred_workflow = matching[0]
+            for workflow in matching:
+                if not workflow_accepts_reply(workflow):
                     continue
                 reply = build_workflow_reply_context(workflow)
                 if reply:
-                    return reply
-        return {}
+                    workflow_reply = reply
+                    reply_workflow = workflow
+                    break
+            if workflow_reply:
+                break
+
+        selected_workflow = reply_workflow or preferred_workflow
+        if selected_workflow is None:
+            return workflow_reply, {}
+        projected = project_workflow_context(
+            [selected_workflow],
+            trusted_form_submissions=self._run_trusted_form_submissions.get(run.id, {}),
+            checkup_attachment_count=self._run_checkup_attachment_counts.get(run.id, 0),
+            workflow_reply=workflow_reply,
+        )
+        return workflow_reply, dict(projected[0]) if projected else {}
 
     async def _latest_hospital_bag_cart_groups(self, *, run: AgentRun) -> list[dict[str, Any]] | None:
         loader = getattr(self.repository, "get_latest_artifact_for_thread", None)
@@ -1177,9 +1199,9 @@ class AgentRuntimeExecutor:
         turn_context: _AgentTurnContext,
         final_text: str,
         artifacts: list[dict[str, Any]],
+        tool_calls: list[dict[str, Any]],
+        active_workflow: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        if final_text.endswith(PREGNANCY_PLAN_FINAL_QUESTION):
-            return [{"text": text} for text in PREGNANCY_PLAN_FINAL_QUICK_REPLIES]
         if self.quick_reply_finalizer is None:
             return []
         try:
@@ -1189,6 +1211,8 @@ class AgentRuntimeExecutor:
                 current_message=turn_context.current_message,
                 final_text=final_text,
                 artifacts=artifacts,
+                tool_calls=tool_calls,
+                active_workflow=active_workflow,
             )
         except Exception:
             LOGGER.warning("Failed to generate quick replies.", exc_info=True)

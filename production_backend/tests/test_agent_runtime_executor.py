@@ -35,7 +35,12 @@ from production_backend.app.modules.agent_runtime.run_lifecycle.working_context 
     RetainedKnownInformation,
     RetainedServiceSkill,
 )
-from production_backend.app.modules.agent_runtime.run_lifecycle.quick_replies import QUICK_REPLY_RESPONSE_FORMAT, QuickReplyFinalizer
+from production_backend.app.modules.agent_runtime.run_lifecycle.quick_replies import (
+    QUICK_REPLY_FINALIZER_INSTRUCTIONS,
+    QUICK_REPLY_RESPONSE_FORMAT,
+    QuickReplyFinalizer,
+    QuickReplyFinalizerConfig,
+)
 from production_backend.app.modules.agent_runtime.sdk import (
     OpenAIAgentsSdkRunner,
     SdkNodeRequest,
@@ -54,6 +59,7 @@ from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.
 )
 from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.tools.pregnancy_plan_flow import (
     PREGNANCY_PLAN_CHECKUP_UPLOAD_QUESTION,
+    PREGNANCY_PLAN_FINAL_QUESTION,
     PREGNANCY_PLAN_URGENT_RESPONSE,
 )
 
@@ -1411,13 +1417,50 @@ def test_agent_runtime_executor_generates_quick_replies_with_finalizer() -> None
     prior_user = _message(thread_id=thread_id, run_id=uuid4(), role="user", text="我想看看今天奶量", sequence=1)
     prior_assistant = _message(thread_id=thread_id, run_id=uuid4(), role="assistant", text="我帮你看一下。", sequence=2)
     current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="那下一步呢？", sequence=3)
-    repository = FakeRuntimeRepository(messages=[prior_user, prior_assistant, current_user], current_message=current_user)
+    workflow = AgentWorkflowState(
+        id=uuid4(),
+        thread_id=thread_id,
+        owner_user_id=run.actor_user_id,
+        run_id=run.id,
+        workflow_type="milk_analysis",
+        status="collecting",
+        schema_version="v1",
+        state={
+            "phase": "collecting_intake",
+            "current_field": "maternal_red_flags",
+            "next_question": "最近有没有发热、寒战或乳房红肿硬块？",
+        },
+        active_step="maternal_red_flags",
+    )
+    repository = FakeRuntimeRepository(
+        messages=[prior_user, prior_assistant, current_user],
+        current_message=current_user,
+        workflow_states=[workflow],
+    )
     transient_stream = FakeTransientStream()
     backend = ScriptedSdkBackend(
         [
             scripted_sdk_response(
                 final_text="已经整理好了。",
                 text_deltas=("已经", "整理好了。"),
+                tool_calls=(
+                    {
+                        "tool_name": "records.milk_analysis.intake",
+                        "status": "completed",
+                        "safe_output": {
+                            "status": "intake_question_ready",
+                            "next_question": "最近有没有发热、寒战或乳房红肿硬块？",
+                            "internal_debug_payload": "must-not-reach-finalizer",
+                        },
+                    },
+                ),
+                artifacts=(
+                    {
+                        "artifact_type": "milk_analysis_summary",
+                        "status": "created",
+                        "payload": {"internal": "must-not-reach-finalizer"},
+                    },
+                ),
             )
         ]
     )
@@ -1449,8 +1492,35 @@ def test_agent_runtime_executor_generates_quick_replies_with_finalizer() -> None
     assert quick_reply_backend.requests[0].tool_names == ()
     assert quick_reply_backend.requests[0].response_text_format == QUICK_REPLY_RESPONSE_FORMAT
     finalizer_payload = json.loads(quick_reply_backend.requests[0].model_input[0]["content"])
-    assert finalizer_payload["assistant_final_text"] == "已经整理好了。"
-    assert [item["text"] for item in finalizer_payload["dialogue"]] == ["我想看看今天奶量", "我帮你看一下。", "那下一步呢？"]
+    assert finalizer_payload["current_turn"] == {
+        "user_message": "那下一步呢？",
+        "assistant_final_text": "已经整理好了。",
+    }
+    assert [item["text"] for item in finalizer_payload["recent_history"]] == ["我想看看今天奶量", "我帮你看一下。"]
+    assert finalizer_payload["turn_outcome"] == {
+        "tools": [
+            {
+                "name": "records.milk_analysis.intake",
+                "execution_status": "completed",
+                "result": {
+                    "status": "intake_question_ready",
+                    "next_question": "最近有没有发热、寒战或乳房红肿硬块？",
+                },
+            }
+        ],
+        "artifacts": [{"type": "milk_analysis_summary", "status": "created"}],
+        "active_workflow": {
+            "workflow_type": "milk_analysis",
+            "status": "collecting",
+            "phase": "collecting_intake",
+            "current_step": {
+                "name": "maternal_red_flags",
+                "visible_question": "最近有没有发热、寒战或乳房红肿硬块？",
+            },
+            "allowed_actions": ["answer"],
+        },
+    }
+    assert repository.active_workflow_queries == 2
     assert transient_stream.deltas == [
         {"thread_id": thread_id, "run_id": run.id, "delta": "已经", "message_stream_id": str(result.assistant_message_id)},
         {"thread_id": thread_id, "run_id": run.id, "delta": "整理好了。", "message_stream_id": str(result.assistant_message_id)},
@@ -1458,6 +1528,78 @@ def test_agent_runtime_executor_generates_quick_replies_with_finalizer() -> None
     assert [progress["phase"] for progress in transient_stream.progresses][-2:] == [
         "response_finalizing",
         "quick_replies_preparing",
+    ]
+
+
+def test_quick_reply_finalizer_preserves_the_end_of_a_long_final_response() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="接下来怎么办？", sequence=1)
+    quick_reply_backend = ScriptedSdkBackend(
+        [
+            scripted_sdk_response(
+                final_text='{"replies":[{"text":"先调整吸奶时间"},{"text":"看看今天安排"},{"text":"我想补充情况"}]}',
+            )
+        ]
+    )
+    finalizer = QuickReplyFinalizer(
+        sdk_runner=OpenAIAgentsSdkRunner(backend=quick_reply_backend),
+        config=QuickReplyFinalizerConfig(max_final_text_chars=120),
+    )
+    final_text = f"{'这是正文开头。' * 20}{'中间分析。' * 20}最后想确认一下：你要先调整今晚的吸奶时间吗？"
+
+    replies = asyncio.run(
+        finalizer.generate(
+            run=run,
+            messages=[current_user],
+            current_message=current_user,
+            final_text=final_text,
+        )
+    )
+
+    payload = json.loads(quick_reply_backend.requests[0].model_input[0]["content"])
+    bounded_text = payload["current_turn"]["assistant_final_text"]
+    assert bounded_text.startswith("这是正文开头。")
+    assert bounded_text.endswith("最后想确认一下：你要先调整今晚的吸奶时间吗？")
+    assert "中间内容已省略" in bounded_text
+    assert len(bounded_text) <= 120
+    assert [reply["text"] for reply in replies] == ["先调整吸奶时间", "看看今天安排", "我想补充情况"]
+
+
+def test_quick_reply_finalizer_prompt_prioritizes_grounded_current_turn_intents() -> None:
+    assert "当前轮次" in QUICK_REPLY_FINALIZER_INSTRUCTIONS
+    assert "active_workflow" in QUICK_REPLY_FINALIZER_INSTRUCTIONS
+    assert "可以表达保存、提交、确认、取消、转接或替换等用户意图" in QUICK_REPLY_FINALIZER_INSTRUCTIONS
+    assert "不能写成已经执行完成" in QUICK_REPLY_FINALIZER_INSTRUCTIONS
+
+
+def test_pregnancy_final_question_uses_the_finalizer_instead_of_hardcoded_replies() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="继续吧", sequence=1)
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    backend = ScriptedSdkBackend([scripted_sdk_response(final_text=PREGNANCY_PLAN_FINAL_QUESTION)])
+    quick_reply_backend = ScriptedSdkBackend(
+        [
+            scripted_sdk_response(
+                final_text='{"replies":[{"text":"开始制定孕期计划"},{"text":"我还想补充检查结果"},{"text":"我先核对一下信息"}]}',
+            )
+        ]
+    )
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            quick_reply_finalizer=QuickReplyFinalizer(sdk_runner=OpenAIAgentsSdkRunner(backend=quick_reply_backend)),
+        ).execute(run=run)
+    )
+
+    assert len(quick_reply_backend.requests) == 1
+    assert [reply["text"] for reply in result.quick_replies] == [
+        "开始制定孕期计划",
+        "我还想补充检查结果",
+        "我先核对一下信息",
     ]
 
 
@@ -3940,6 +4082,7 @@ class FakeRuntimeRepository:
         self.workflow_states = list(workflow_states or [])
         self.latest_thread_artifact = None
         self.client_event_queries = []
+        self.active_workflow_queries = 0
 
     async def get_latest_user_message_for_run(self, *, run_id):
         if self.current_message is not None and self.current_message.run_id == run_id:
@@ -4075,6 +4218,7 @@ class FakeRuntimeRepository:
         return [(self.tool_call, self.tool_output)]
 
     async def list_active_workflow_states_for_thread(self, *, thread_id, owner_user_id, limit=5):
+        self.active_workflow_queries += 1
         return [
             workflow for workflow in self.workflow_states if workflow.thread_id == thread_id and workflow.owner_user_id == owner_user_id
         ][:limit]

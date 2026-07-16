@@ -19,7 +19,6 @@ PREGNANCY_PLAN_CHECKUP_UPLOAD_QUESTION = (
     "如果暂时没有或不方便上传，也可以直接跳过。"
 )
 PREGNANCY_PLAN_FINAL_QUESTION = "还有其他需要补充的信息吗？如果没有，我就基于目前的信息开始为你制定孕期计划啦。"
-PREGNANCY_PLAN_FINAL_QUICK_REPLIES = ("没有了，开始制定", "我想补充一点", "稍等我再看看")
 PREGNANCY_PLAN_URGENT_RESPONSE = (
     "你填写的信息里出现了需要优先线下确认的急症信号。请先停止制定计划，立即联系产科医生、医院产房或急诊；"
     "如果症状严重、正在加重或无法及时联系，请呼叫当地急救服务。"
