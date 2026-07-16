@@ -135,10 +135,11 @@ liveness, because readiness verifies configured infrastructure.
 
 ## Nginx Edge Proxy
 
-Use `production_backend/deploy/nginx/momcozy-api.conf` as the public edge
-template. Before installing it, replace `api.example.com` with the public API
-hostname and change upstream port `8000` only when the compose host bind uses a
-different loopback port. Keep the application bound to `127.0.0.1`.
+`production_backend/deploy/nginx/momcozy-api.conf` is the versioned edge
+configuration for `momcozylab.luteos.cloud`. Change its upstream port `8000`
+only when the compose host bind uses a different loopback port, and change its
+`server_name` only as part of a controlled domain migration. Keep the
+application bound to `127.0.0.1`.
 
 The template rejects unknown hosts, forwards client/protocol/request IDs,
 disables buffering for SSE endpoints, and preserves WebSocket upgrade headers

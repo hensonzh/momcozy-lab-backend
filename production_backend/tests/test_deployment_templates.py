@@ -25,6 +25,7 @@ def test_nginx_proxy_keeps_api_private_and_supports_streaming_transports() -> No
     config = NGINX_CONFIG.read_text()
 
     assert "server 127.0.0.1:8000;" in config
+    assert "server_name momcozylab.luteos.cloud;" in config
     assert "listen 8443 ssl default_server;" in config
     assert "listen 8443 ssl http2;" in config
     assert "listen 80" not in config
@@ -266,6 +267,7 @@ def test_production_compose_uses_production_env_and_safe_api_bind() -> None:
     assert "stop_grace_period: 60s" in compose
     assert "APP_ENV=production" in env
     assert "OBJECT_STORAGE_PROVIDER=oss" in env
+    assert "TRUSTED_HOSTS=momcozylab.luteos.cloud" in env
     assert "OUTBOX_WORKER_ENABLED=true" in env
 
 
