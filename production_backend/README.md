@@ -106,9 +106,8 @@ uncached rebuild, run `BACKEND_BUILD_FLAGS=--no-cache make backend-local-up`.
 `AGENT_RUNTIME_WORKER_ENABLED=false` in `env/compose.local.env.example`. The
 local `agent-worker` Compose service enables the worker when the `workers`
 profile is started, so your private `env/compose.local.env` must include the
-configured model provider credentials. `AGENT_MODEL_PROVIDER=openai` is the
-default. When the worker is enabled with the default provider, `OPENAI_API_KEY`
-must be set. The default main runtime uses `gpt-5.6-terra` with low reasoning,
+configured OpenAI credentials. When the worker is enabled, `OPENAI_API_KEY`
+must be set. The main runtime uses `gpt-5.6-terra` with low reasoning,
 does not retain provider-side Responses state, and uses the native Responses
 runner. Namespace/deferred tool loading uses hosted `tool_search` while keeping
 the declared tool surface stable between model turns. The quick reply finalizer
@@ -118,7 +117,6 @@ model to consolidate the previous local day's completed conversations into a
 small runtime snapshot.
 
 ```env
-AGENT_MODEL_PROVIDER=openai
 OPENAI_API_KEY=...
 OPENAI_MODEL=gpt-5.6-terra
 OPENAI_REASONING_EFFORT=low
@@ -142,24 +140,6 @@ AGENT_MEMORY_CONSOLIDATION_HOUR=3
 
 `OPENAI_AGENT_USE_RESPONSES=false` selects the temporary OpenAI Agents SDK
 rollback path and should not be used for normal local or production traffic.
-
-Minimax is available as an experimental OpenAI-compatible provider. To test it,
-set these values in a private env file and run the provider eval before using it
-for production traffic:
-
-```env
-AGENT_MODEL_PROVIDER=minimax
-AGENT_FACT_EXTRACTION_ENABLED=false
-MINIMAX_API_KEY=...
-MINIMAX_BASE_URL=https://api.minimax.io/v1
-MINIMAX_MODEL=MiniMax-M3
-```
-
-The Minimax path uses the OpenAI Agents SDK with an OpenAI-compatible provider
-base URL and currently pins the SDK model path to Chat Completions compatibility
-for flat tool calling and streaming validation; it does not advertise deferred
-tool loading in runtime metadata. Turn-level fact extraction remains OpenAI-only;
-leave it disabled for a Minimax-only smoke or also configure `OPENAI_API_KEY`.
 
 Voice playback follows the legacy Doubao/Volcengine realtime TTS path. Use
 `VOICE_PROVIDER=doubao`, set `VOICE_API_KEY`, and keep the default bidirectional
@@ -186,7 +166,6 @@ also required:
 ```env
 AGENT_RUNTIME_WORKER_ENABLED=true
 OUTBOX_WORKER_ENABLED=true
-AGENT_MODEL_PROVIDER=openai
 OPENAI_API_KEY=...
 OPENAI_MODEL=gpt-5.6-terra
 OPENAI_REASONING_EFFORT=low

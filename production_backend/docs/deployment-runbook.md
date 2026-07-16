@@ -146,34 +146,16 @@ Prepare a private test env file:
 cp production_backend/env/compose.test.env.example production_backend/env/compose.test.env
 ```
 
-Enable the agent worker only after adding a test provider key:
+Enable the agent worker only after adding an OpenAI key:
 
 ```env
 AGENT_RUNTIME_WORKER_ENABLED=true
-AGENT_MODEL_PROVIDER=openai
 OPENAI_API_KEY=...
 ```
 
-With `AGENT_MODEL_PROVIDER=openai`, runtime requests that include namespace /
-deferred tool loading use the Responses API adapter and hosted `tool_search`.
-
-For an experimental Minimax smoke test, switch only the provider block in the
-private env file:
-
-```env
-AGENT_RUNTIME_WORKER_ENABLED=true
-AGENT_MODEL_PROVIDER=minimax
-AGENT_FACT_EXTRACTION_ENABLED=false
-MINIMAX_API_KEY=...
-MINIMAX_BASE_URL=https://api.minimax.io/v1
-MINIMAX_MODEL=MiniMax-M3
-```
-
-The Minimax path remains the flat OpenAI-compatible Agents SDK tool path; runtime
-metadata keeps `tool_search_enabled=false` there.
-Turn-level fact extraction always uses the OpenAI Responses adapter. Keep it
-disabled for a Minimax-only smoke as shown above, or retain a separate
-`OPENAI_API_KEY` and the `AGENT_FACT_*` settings when testing both lanes.
+Runtime requests that include namespace/deferred tool loading use the Responses
+API adapter and hosted `tool_search`. Turn-level fact extraction uses a separate
+OpenAI Responses request configured by the `AGENT_FACT_*` settings.
 
 Start the full test stack:
 

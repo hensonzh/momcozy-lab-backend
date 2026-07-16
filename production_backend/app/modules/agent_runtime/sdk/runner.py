@@ -24,7 +24,6 @@ class SdkToolInvocationResult:
 
 SdkToolInvoker = Callable[[str], Awaitable[SdkToolInvocationResult]]
 SdkTextDeltaHandler = Callable[[str], Awaitable[None]]
-THINK_TAG = "<think>"
 
 
 @dataclass(frozen=True)
@@ -95,7 +94,6 @@ class OpenAIResponsesApiBackend:
         *,
         model: str,
         max_turns: int = 10,
-        provider: str = "openai",
         api_key: str = "",
         base_url: str = "",
         reasoning_effort: str = "low",
@@ -103,19 +101,12 @@ class OpenAIResponsesApiBackend:
     ) -> None:
         self.model = model
         self.max_turns = max_turns
-        self.provider = provider
         self.api_key = api_key
         self.base_url = base_url
         self.reasoning_effort = reasoning_effort
         self.store_responses = store_responses
 
     async def run(self, request: SdkNodeRequest) -> SdkNodeResult:
-        if self.provider != "openai":
-            raise ApiError(
-                code="sdk_tool_search_provider_not_supported",
-                message=f"Responses tool search is not supported for provider '{self.provider}'.",
-                status=503,
-            )
         try:
             openai_module = importlib.import_module("openai")
         except ImportError as exc:
@@ -124,7 +115,7 @@ class OpenAIResponsesApiBackend:
         async_openai_cls = getattr(openai_module, "AsyncOpenAI", None)
         if async_openai_cls is None:
             raise ApiError(code="dependency_not_configured", message="OpenAI Python SDK AsyncOpenAI is unavailable.", status=503)
-        if _is_real_openai_module(openai_module) and not _has_provider_credentials(provider=self.provider, api_key=self.api_key):
+        if _is_real_openai_module(openai_module) and not _has_openai_credentials(api_key=self.api_key):
             raise ApiError(
                 code="dependency_not_configured",
                 message="OpenAI SDK credentials are not configured for Responses tool search.",
@@ -337,7 +328,6 @@ class OpenAIAgentsSdkBackend:
         model: str,
         max_turns: int = 10,
         trace_enabled: bool = False,
-        provider: str = "openai",
         api_key: str = "",
         base_url: str = "",
         use_responses: bool | None = None,
@@ -346,7 +336,6 @@ class OpenAIAgentsSdkBackend:
         self.model = model
         self.max_turns = max_turns
         self.trace_enabled = trace_enabled
-        self.provider = provider
         self.api_key = api_key
         self.base_url = base_url
         self.use_responses = use_responses
@@ -374,10 +363,10 @@ class OpenAIAgentsSdkBackend:
         runner_cls = getattr(agents_module, "Runner", None)
         if agent_cls is None or runner_cls is None:
             raise ApiError(code="dependency_not_configured", message="OpenAI Agents SDK Agent/Runner is unavailable.", status=503)
-        if _is_real_agents_module(agents_module) and not _has_provider_credentials(provider=self.provider, api_key=self.api_key):
+        if _is_real_agents_module(agents_module) and not _has_openai_credentials(api_key=self.api_key):
             raise ApiError(
                 code="dependency_not_configured",
-                message=f"OpenAI Agents SDK credentials are not configured for provider '{self.provider}'.",
+                message="OpenAI Agents SDK credentials are not configured.",
                 status=503,
             )
 
@@ -395,16 +384,12 @@ class OpenAIAgentsSdkBackend:
                 for definition in request.tools
             ],
         }
-        model_settings = _build_agent_model_settings(agents_module=agents_module, provider=self.provider)
-        if model_settings is not None:
-            agent_kwargs["model_settings"] = model_settings
         agent = agent_cls(**agent_kwargs)
         run_kwargs: dict[str, Any] = {"max_turns": self.max_turns}
         run_config = _build_run_config(
             agents_module=agents_module,
             request=request,
             trace_enabled=self.trace_enabled,
-            provider=self.provider,
             api_key=self.api_key,
             base_url=self.base_url,
             use_responses=self.use_responses,
@@ -441,7 +426,6 @@ class OpenAIAgentsSdkRunner:
         max_turns: int = 10,
         timeout_seconds: float = 60,
         trace_enabled: bool = False,
-        provider: str = "openai",
         api_key: str = "",
         base_url: str = "",
         use_responses: bool | None = None,
@@ -456,7 +440,7 @@ class OpenAIAgentsSdkRunner:
         self.max_turns = max_turns
         self.timeout_seconds = timeout_seconds
         self.trace_enabled = trace_enabled
-        self.provider = provider
+        self.provider = "openai"
         self.api_key = api_key
         self.base_url = base_url
         self.use_responses = use_responses
@@ -498,19 +482,17 @@ class OpenAIAgentsSdkRunner:
             )
 
     def supports_tool_namespaces(self) -> bool:
-        return self.provider == "openai" and self.use_responses is not False
+        return self.use_responses is not False
 
     def supports_web_search(self) -> bool:
-        return self.provider == "openai" and self.use_responses is not False
+        return self.use_responses is not False
 
     def _default_backend(self, request: SdkNodeRequest) -> SdkRunnerBackend:
-        if self.provider == "openai" and (
-            self.use_responses is True or self.use_responses is None and (request.tool_search_enabled or request.web_search_enabled)
-        ):
+        responses_required = request.tool_search_enabled or request.web_search_enabled
+        if self.use_responses is True or (self.use_responses is None and responses_required):
             return OpenAIResponsesApiBackend(
                 model=self.model,
                 max_turns=self.max_turns,
-                provider=self.provider,
                 api_key=self.api_key,
                 base_url=self.base_url,
                 reasoning_effort=self.reasoning_effort,
@@ -520,7 +502,6 @@ class OpenAIAgentsSdkRunner:
             model=self.model,
             max_turns=self.max_turns,
             trace_enabled=self.trace_enabled,
-            provider=self.provider,
             api_key=self.api_key,
             base_url=self.base_url,
             use_responses=self.use_responses,
@@ -1104,7 +1085,6 @@ def _build_run_config(
     agents_module: Any,
     request: SdkNodeRequest,
     trace_enabled: bool,
-    provider: str,
     api_key: str,
     base_url: str,
     use_responses: bool | None,
@@ -1119,18 +1099,11 @@ def _build_run_config(
         )
     model_provider = _build_model_provider(
         agents_module=agents_module,
-        provider=provider,
         api_key=api_key,
         base_url=base_url,
         use_responses=use_responses,
         buffer_streamed_tool_calls=buffer_streamed_tool_calls,
     )
-    if provider != "openai" and model_provider is None:
-        raise ApiError(
-            code="sdk_provider_not_supported",
-            message=f"OpenAI Agents SDK provider '{provider}' is not supported by the installed SDK.",
-            status=503,
-        )
     try:
         kwargs: dict[str, Any] = {
             "tracing_disabled": not trace_enabled,
@@ -1147,7 +1120,7 @@ def _build_run_config(
                 "tool_names": list(request.tool_names),
                 "tool_namespace_names": [namespace.name for namespace in request.tool_namespaces],
                 "tool_search_enabled": request.tool_search_enabled,
-                "model_provider": provider,
+                "model_provider": "openai",
             },
         }
         if model_provider is not None:
@@ -1160,12 +1133,6 @@ def _build_run_config(
         try:
             return run_config_cls(**safe_fallback_kwargs)
         except TypeError as fallback_exc:
-            if provider != "openai":
-                raise ApiError(
-                    code="sdk_provider_not_supported",
-                    message=f"OpenAI Agents SDK RunConfig does not support provider '{provider}'.",
-                    status=503,
-                ) from fallback_exc
             try:
                 return run_config_cls(tracing_disabled=True)
             except TypeError:
@@ -1176,22 +1143,9 @@ def _build_run_config(
                 ) from fallback_exc
 
 
-def _build_agent_model_settings(*, agents_module: Any, provider: str) -> Any | None:
-    model_settings_cls = getattr(agents_module, "ModelSettings", None)
-    if provider != "minimax" or model_settings_cls is None:
-        return None
-    return model_settings_cls(
-        extra_body={
-            "thinking": {"type": "disabled"},
-            "service_tier": "priority",
-        }
-    )
-
-
 def _build_model_provider(
     *,
     agents_module: Any,
-    provider: str,
     api_key: str,
     base_url: str,
     use_responses: bool | None,
@@ -1200,28 +1154,15 @@ def _build_model_provider(
     openai_provider_cls = getattr(agents_module, "OpenAIProvider", None)
     if openai_provider_cls is None:
         return None
-    if provider == "openai":
-        return _instantiate_openai_provider(
-            openai_provider_cls,
-            {
-                "api_key": api_key or None,
-                "base_url": base_url or None,
-                "use_responses": use_responses,
-                "buffer_streamed_tool_calls": buffer_streamed_tool_calls,
-            },
-        )
-    if provider == "minimax":
-        return _instantiate_openai_provider(
-            openai_provider_cls,
-            {
-                "api_key": api_key or None,
-                "base_url": base_url or None,
-                "use_responses": False if use_responses is None else use_responses,
-                "strict_feature_validation": False,
-                "buffer_streamed_tool_calls": True if not buffer_streamed_tool_calls else buffer_streamed_tool_calls,
-            },
-        )
-    return None
+    return _instantiate_openai_provider(
+        openai_provider_cls,
+        {
+            "api_key": api_key or None,
+            "base_url": base_url or None,
+            "use_responses": use_responses,
+            "buffer_streamed_tool_calls": buffer_streamed_tool_calls,
+        },
+    )
 
 
 def _instantiate_openai_provider(openai_provider_cls: Any, kwargs: dict[str, Any]) -> Any | None:
@@ -1243,11 +1184,9 @@ def _is_real_openai_module(openai_module: Any) -> bool:
     return bool(getattr(openai_module, "__file__", ""))
 
 
-def _has_provider_credentials(*, provider: str, api_key: str) -> bool:
+def _has_openai_credentials(*, api_key: str) -> bool:
     if api_key:
         return True
-    if provider == "minimax":
-        return bool(os.getenv("MINIMAX_API_KEY"))
     return bool(os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_ADMIN_KEY"))
 
 

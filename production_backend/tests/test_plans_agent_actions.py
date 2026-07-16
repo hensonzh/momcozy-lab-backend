@@ -16,10 +16,12 @@ from production_backend.app.modules.plans.agent_actions import (
     PLAN_TASK_DELETE_ACTION,
     PLAN_TASK_UPDATE_ACTION,
     PLAN_DELETE_ACTION,
+    PREGNANCY_PLAN_TODO_UPDATE_ACTION,
     PREGNANCY_PLAN_CREATE_ACTION,
     MilkPlanCreateActionHandler,
     MilkScheduleRescheduleActionHandler,
     PlanDeleteActionHandler,
+    PregnancyPlanTodoUpdateActionHandler,
     PlanTaskCompleteActionHandler,
     PlanTaskCreateActionHandler,
     PlanTaskDeleteActionHandler,
@@ -62,6 +64,8 @@ def test_milk_plan_create_action_handler_creates_plan_through_service() -> None:
     assert result.details == {
         "plan_type": "milk_management",
         "task_count": 2,
+        "replaced_task_count": 0,
+        "calendar_write_strategy": "append",
         "agent_action_id": str(action.id),
         "agent_run_id": str(action.run_id),
     }
@@ -90,10 +94,45 @@ def test_milk_plan_create_action_handler_creates_plan_through_service() -> None:
         "plan_type": "milk_management",
         "source": "agent_action",
         "affected_dates": ["2026-07-13", "2026-07-14"],
+        "replaced_task_count": 0,
     }
     rendered_event = json.dumps(changed_event.payload, ensure_ascii=False)
     assert "Pump after morning and evening feeds" not in rendered_event
     assert "Morning pump" not in rendered_event
+
+
+def test_milk_plan_create_replaces_only_the_future_tasks_from_the_confirmed_preview() -> None:
+    service = FakePlansService()
+    replaced_task_ids = [uuid4(), uuid4()]
+    action = _action(
+        apply_payload={
+            "title": "7 天稳奶计划",
+            "summary": "保持近期节奏。",
+            "calendar_write_strategy": "replace_future_plan_tasks",
+            "expected_replaced_task_ids": [str(task_id) for task_id in replaced_task_ids],
+            "payload": {
+                "direction": "maintain",
+                "analysis_context_fingerprint": "fingerprint",
+                "analysis_workflow_state_id": MILK_ANALYSIS_WORKFLOW_STATE_ID,
+                "start_date": "2026-07-13",
+                "days": 2,
+                "tasks": [{"title": "稳奶吸奶", "time": "08:00", "task_type": "pumping"}],
+            },
+        }
+    )
+
+    result = asyncio.run(MilkPlanCreateActionHandler(service=service)(action))
+
+    assert service.replace_future_milk_plan_tasks_kwargs == {
+        "owner_user_id": action.actor_user_id,
+        "start_date": date(2026, 7, 13),
+        "end_date": date(2026, 7, 14),
+        "expected_task_ids": replaced_task_ids,
+        "request_id": f"agent-action:{action.id}",
+    }
+    assert result.details["replaced_task_count"] == 2
+    assert result.details["calendar_write_strategy"] == "replace_future_plan_tasks"
+    assert result.application_events[0].payload["replaced_task_count"] == 2
 
 
 def test_milk_plan_changed_event_contains_only_bounded_dates_and_no_private_plan_content() -> None:
@@ -233,6 +272,15 @@ def test_milk_schedule_reschedule_action_emits_authoritative_change_event() -> N
                     "new_task_time": "07:30",
                 }
             ],
+            "calendar_events": [
+                {
+                    "date": "2026-07-14",
+                    "start_time": "10:30",
+                    "end_time": "12:30",
+                    "title": "团队会议",
+                    "duration_minutes": 120,
+                }
+            ],
         },
     )
 
@@ -240,6 +288,25 @@ def test_milk_schedule_reschedule_action_emits_authoritative_change_event() -> N
 
     assert result.resource_id == str(service.plan.id)
     assert service.reschedule_milk_tasks_kwargs["owner_user_id"] == action.actor_user_id
+    assert service.create_task_kwargs == {
+        "owner_user_id": action.actor_user_id,
+        "plan_id": None,
+        "task_date": date(2026, 7, 14),
+        "task_time": "10:30",
+        "title": "团队会议",
+        "description": "",
+        "payload": {
+            "task_type": "other",
+            "calendar_kind": "custom_event",
+            "end_time": "12:30",
+            "duration_minutes": 120,
+            "source": "agent_action",
+            "agent_action_id": str(action.id),
+            "agent_run_id": str(action.run_id),
+        },
+        "request_id": f"agent-action:{action.id}",
+        "idempotency_key": f"agent-action:{action.id}:calendar-event:0",
+    }
     assert result.application_events[0].event_type == MILK_PLAN_CHANGED_EVENT
     assert result.application_events[0].payload == {
         "operation": "rescheduled",
@@ -249,7 +316,38 @@ def test_milk_schedule_reschedule_action_emits_authoritative_change_event() -> N
         "source": "agent_action",
         "affected_dates": ["2026-07-14"],
         "task_ids": [str(service.task.id)],
+        "calendar_event_task_ids": [str(service.task.id)],
+        "created_calendar_event_count": 1,
     }
+
+
+def test_milk_schedule_action_can_create_a_calendar_event_without_rescheduling_tasks() -> None:
+    service = FakePlansService()
+    action = _action(
+        action_type=MILK_SCHEDULE_RESCHEDULE_ACTION,
+        target_type="plan",
+        apply_payload={
+            "plan_id": str(service.plan.id),
+            "updates": [],
+            "calendar_events": [
+                {
+                    "date": "2026-07-14",
+                    "start_time": "10:30",
+                    "end_time": "12:30",
+                    "title": "团队会议",
+                    "duration_minutes": 120,
+                }
+            ],
+        },
+    )
+    service.plan.owner_user_id = action.actor_user_id
+
+    result = asyncio.run(MilkScheduleRescheduleActionHandler(service=service)(action))
+
+    assert service.reschedule_milk_tasks_kwargs == {}
+    assert service.create_task_kwargs["title"] == "团队会议"
+    assert result.details["task_count"] == 0
+    assert result.details["calendar_event_count"] == 1
 
 
 def test_pregnancy_plan_create_action_handler_creates_plan_through_service() -> None:
@@ -447,6 +545,72 @@ def test_plan_delete_action_handler_deletes_plan_through_service() -> None:
     assert service.delete_plan_kwargs["plan_id"] == plan_id
 
 
+def test_pregnancy_plan_todo_update_action_updates_embedded_item_and_emits_change() -> None:
+    service = FakePlansService()
+    service.plan.plan_type = "pregnancy"
+    service.plan.version = 3
+    action = _action(
+        action_type=PREGNANCY_PLAN_TODO_UPDATE_ACTION,
+        target_type="plan",
+        apply_payload={
+            "plan_id": str(service.plan.id),
+            "item_id": "prepare-hospital-bag",
+            "completed": True,
+            "expected_version": 2,
+        },
+    )
+    service.plan.owner_user_id = action.actor_user_id
+
+    result = asyncio.run(PregnancyPlanTodoUpdateActionHandler(service=service)(action))
+
+    assert service.update_plan_todo_completion_kwargs == {
+        "owner_user_id": action.actor_user_id,
+        "plan_id": service.plan.id,
+        "item_id": "prepare-hospital-bag",
+        "completed": True,
+        "expected_version": 2,
+        "request_id": f"agent-action:{action.id}",
+        "idempotency_key": action.idempotency_key,
+    }
+    assert result.resource_type == "plan"
+    assert result.resource_id == str(service.plan.id)
+    assert result.details["version"] == 3
+    assert result.application_events[0].event_type == PREGNANCY_PLAN_CHANGED_EVENT
+    assert result.application_events[0].payload == {
+        "operation": "updated",
+        "reason": "todo_completion_changed",
+        "plan_id": str(service.plan.id),
+        "plan_type": "pregnancy",
+        "source": "agent_action",
+        "version": 3,
+        "item_ids": ["prepare-hospital-bag"],
+    }
+
+
+def test_pregnancy_plan_delete_emits_deleted_change_event() -> None:
+    service = FakePlansService()
+    service.plan.plan_type = "pregnancy"
+    owner = uuid4()
+    service.plan.owner_user_id = owner
+    action = _action(
+        action_type=PLAN_DELETE_ACTION,
+        target_type="plan",
+        apply_payload={"plan_id": str(service.plan.id)},
+    )
+    action.actor_user_id = owner
+
+    result = asyncio.run(PlanDeleteActionHandler(service=service)(action))
+
+    assert result.application_events[0].event_type == PREGNANCY_PLAN_CHANGED_EVENT
+    assert result.application_events[0].payload == {
+        "operation": "deleted",
+        "reason": "plan_deleted",
+        "plan_id": str(service.plan.id),
+        "plan_type": "pregnancy",
+        "source": "agent_action",
+    }
+
+
 def test_milk_task_update_delete_and_plan_delete_emit_change_operations() -> None:
     service = FakePlansService()
     owner = uuid4()
@@ -542,6 +706,8 @@ class FakePlansService:
         self.delete_task_kwargs = {}
         self.delete_plan_kwargs = {}
         self.reschedule_milk_tasks_kwargs = {}
+        self.update_plan_todo_completion_kwargs = {}
+        self.replace_future_milk_plan_tasks_kwargs = {}
 
     async def create_plan(self, **kwargs):
         self.create_plan_kwargs = kwargs
@@ -594,6 +760,11 @@ class FakePlansService:
     async def delete_plan(self, **kwargs):
         self.delete_plan_kwargs = kwargs
 
+    async def update_plan_todo_completion(self, **kwargs):
+        self.update_plan_todo_completion_kwargs = kwargs
+        self.plan.version = kwargs["expected_version"] + 1
+        return self.plan
+
     async def reschedule_milk_tasks(self, **kwargs):
         self.reschedule_milk_tasks_kwargs = kwargs
         update = kwargs["updates"][0]
@@ -601,6 +772,10 @@ class FakePlansService:
         self.task.task_time = update["new_task_time"]
         self.task.owner_user_id = kwargs["owner_user_id"]
         return [self.task]
+
+    async def replace_future_milk_plan_tasks(self, **kwargs):
+        self.replace_future_milk_plan_tasks_kwargs = kwargs
+        return [PlanTask(id=task_id, owner_user_id=kwargs["owner_user_id"], title="旧任务") for task_id in kwargs["expected_task_ids"]]
 
 
 def _action(

@@ -13,6 +13,7 @@ from ...plans.agent_actions import (
     PLAN_TASK_DELETE_ACTION,
     PLAN_TASK_UPDATE_ACTION,
     PREGNANCY_PLAN_CREATE_ACTION,
+    PREGNANCY_PLAN_TODO_UPDATE_ACTION,
     MilkPlanCreateActionHandler,
     MilkScheduleRescheduleActionHandler,
     PlanDeleteActionHandler,
@@ -21,6 +22,7 @@ from ...plans.agent_actions import (
     PlanTaskDeleteActionHandler,
     PlanTaskUpdateActionHandler,
     PregnancyPlanCreateActionHandler,
+    PregnancyPlanTodoUpdateActionHandler,
 )
 from ...records.agent_actions import (
     FEEDING_RECORD_CREATE_ACTION,
@@ -55,6 +57,7 @@ def build_agent_action_handlers(
         MILK_PLAN_CREATE_ACTION: MilkPlanCreateActionHandler(service=plans_service),
         MILK_SCHEDULE_RESCHEDULE_ACTION: MilkScheduleRescheduleActionHandler(service=plans_service),
         PREGNANCY_PLAN_CREATE_ACTION: PregnancyPlanCreateActionHandler(service=plans_service),
+        PREGNANCY_PLAN_TODO_UPDATE_ACTION: PregnancyPlanTodoUpdateActionHandler(service=plans_service),
         PLAN_TASK_CREATE_ACTION: PlanTaskCreateActionHandler(service=plans_service),
         PLAN_TASK_COMPLETE_ACTION: PlanTaskCompleteActionHandler(service=plans_service),
         PLAN_TASK_UPDATE_ACTION: PlanTaskUpdateActionHandler(service=plans_service),

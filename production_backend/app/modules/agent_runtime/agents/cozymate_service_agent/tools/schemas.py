@@ -115,8 +115,34 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
                 "default": "start",
                 "description": "开始、恢复、回答当前唯一问题，或明确重置六项奶量分析采集。",
             },
-            "days": {"type": "integer", "minimum": 1, "maximum": 30, "default": 7},
-            "limit": {"type": "integer", "minimum": 1, "maximum": 20, "default": 8},
+            "observed_answers": {
+                "type": "array",
+                "maxItems": 5,
+                "description": "action=answer 时，列出本轮用户原话中明确回答到的一个或多个采集字段；evidence 必须逐字来自本轮消息。",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["field", "evidence"],
+                    "properties": {
+                        "field": {
+                            "type": "string",
+                            "enum": [
+                                "infant_wet_diapers",
+                                "infant_state_or_satisfaction",
+                                "infant_growth_signal",
+                                "maternal_red_flags",
+                                "maternal_breast_comfort",
+                            ],
+                        },
+                        "evidence": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500,
+                            "description": "能够支持该字段的本轮用户原话片段，不改写、不推断。",
+                        },
+                    },
+                },
+            },
         },
     },
     "records.milk_analysis.evaluate": {
@@ -280,7 +306,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             },
         },
     },
-    "images.inspect": {
+    "conversation_history.image.load": {
         "type": "object",
         "additionalProperties": False,
         "required": ["image_url"],
@@ -289,7 +315,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 2048,
-                "description": "当前可见对话历史中已经展示过的图片 URL。",
+                "description": "当前可见对话历史中由智能体此前回复展示过的目标图片 URL。",
             },
             "detail": {
                 "type": "string",
@@ -302,39 +328,36 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
     "plans.milk_plan.propose": {
         "type": "object",
         "additionalProperties": False,
-        "required": ["title", "direction", "tasks"],
+        "required": ["direction"],
         "properties": {
-            "title": {"type": "string", "minLength": 1, "maxLength": 255},
-            "summary": {"type": "string", "maxLength": 2000},
-            "direction": {"type": "string", "enum": ["increase", "maintain", "decrease", "observe", "unknown"]},
+            "direction": {"type": "string", "enum": ["increase", "maintain", "decrease"]},
             "start_date": {"type": "string", "maxLength": 20},
             "days": {"type": "integer", "minimum": 1, "maximum": 30, "default": 7},
-            "tasks": {
+            "target_daily_ml": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 5000,
+                "description": "仅当用户明确给出阶段日目标时传入；未给出时由 runtime 根据近 7 天实测吸奶均值保守计算。",
+            },
+            "preferred_pumping_times": {
                 "type": "array",
                 "minItems": 1,
-                "maxItems": 16,
-                "items": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["title", "time", "task_type"],
-                    "properties": {
-                        "title": {"type": "string", "minLength": 1, "maxLength": 255},
-                        "time": {"type": "string", "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$"},
-                        "task_type": {"type": "string", "enum": ["pumping", "feeding", "other"]},
-                        "description": {"type": "string", "maxLength": 2000},
-                        "date": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$"},
-                        "day": {"type": "integer", "minimum": 1, "maximum": 30},
-                        "duration_minutes": {"type": "integer", "minimum": 1, "maximum": 240},
-                    },
-                },
+                "maxItems": 10,
+                "uniqueItems": True,
+                "items": {"type": "string", "pattern": "^(?:[01]?\\d|2[0-3]):[0-5]\\d$"},
+                "description": "仅传用户明确指定的可执行吸奶时间；未指定时由 runtime 复用近期节奏。",
             },
-            "reminders": {"type": "array", "maxItems": 40, "items": {"type": "object", "additionalProperties": True}},
+            "calendar_write_strategy": {
+                "type": "string",
+                "enum": ["append", "replace_future_plan_tasks"],
+                "description": "未来已有奶量任务且用户明确选择后传入；不能替用户默认追加或替换。",
+            },
         },
     },
     "plans.milk_schedule.propose": {
         "type": "object",
         "additionalProperties": False,
-        "required": ["plan_id", "busy_windows"],
+        "required": ["plan_id"],
         "properties": {
             "plan_id": {"type": "string", "format": "uuid"},
             "target_date": {"type": "string", "format": "date"},
@@ -349,6 +372,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
                 "type": "array",
                 "minItems": 1,
                 "maxItems": 21,
+                "description": "已经存在于其它日程、仅用于避让且本轮不重复创建的不可用时段。",
                 "items": {
                     "type": "object",
                     "additionalProperties": False,
@@ -358,6 +382,24 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
                         "start_time": {"type": "string", "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$"},
                         "end_time": {"type": "string", "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$"},
                         "title": {"type": "string", "maxLength": 120},
+                    },
+                },
+            },
+            "calendar_events": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 21,
+                "description": "用户本轮明确新增并希望同步到日程的生活事项；runtime 会同时把它作为不可用时段参与重排。",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["date", "start_time", "end_time", "title"],
+                    "properties": {
+                        "date": {"type": "string", "format": "date"},
+                        "start_time": {"type": "string", "pattern": "^(?:[01]?\\d|2[0-3]):[0-5]\\d$"},
+                        "end_time": {"type": "string", "pattern": "^(?:[01]?\\d|2[0-3]):[0-5]\\d$"},
+                        "title": {"type": "string", "minLength": 1, "maxLength": 120},
+                        "description": {"type": "string", "maxLength": 500},
                     },
                 },
             },
@@ -446,6 +488,18 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "completed": {"type": "boolean", "default": True},
             "locale": {"type": "string", "maxLength": 35},
             "timezone": {"type": "string", "maxLength": 80},
+            "idempotency_key": {"type": "string", "maxLength": 255},
+        },
+    },
+    "pregnancy.plan_todo.propose": {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["plan_id", "item_id", "completed", "expected_version"],
+        "properties": {
+            "plan_id": {"type": "string", "minLength": 1, "maxLength": 80},
+            "item_id": {"type": "string", "minLength": 1, "maxLength": 160},
+            "completed": {"type": "boolean"},
+            "expected_version": {"type": "integer", "minimum": 1},
             "idempotency_key": {"type": "string", "maxLength": 255},
         },
     },

@@ -59,7 +59,6 @@ OBJECT_STORAGE_BUCKET=...
 OBJECT_STORAGE_ENDPOINT_URL=...
 OBJECT_STORAGE_ACCESS_KEY_ID=...
 OBJECT_STORAGE_SECRET_ACCESS_KEY=...
-AGENT_MODEL_PROVIDER=openai|minimax
 OPENAI_API_KEY=...
 OPENAI_MODEL=gpt-5.6-terra
 OPENAI_REASONING_EFFORT=low
@@ -79,15 +78,12 @@ AGENT_FACT_WORKER_MAX_ATTEMPTS=3
 AGENT_MEMORY_CONSOLIDATION_MODEL=gpt-5.4-nano
 AGENT_MEMORY_CONSOLIDATION_TIMEZONE=Asia/Shanghai
 AGENT_MEMORY_CONSOLIDATION_HOUR=3
-MINIMAX_API_KEY=...
-MINIMAX_BASE_URL=https://api.minimax.io/v1
-MINIMAX_MODEL=MiniMax-M3
 VISION_PROVIDER=disabled|openai
 VISION_OPENAI_MODEL=gpt-5.4-mini
 VISION_REQUEST_TIMEOUT_SECONDS=20
 ```
 
-The OpenAI production path uses the native Responses runner. Keep
+The Agent runtime uses the native OpenAI Responses runner. Keep
 `OPENAI_AGENT_USE_RESPONSES=true` for normal traffic; setting it to `false`
 selects the temporary Agents SDK rollback path. `OPENAI_RESPONSES_STORE=false`
 keeps conversation authority in the application database, while the runtime
@@ -96,10 +92,8 @@ round-trips required response and reasoning items within the active run.
 The main agent uses `OPENAI_MODEL` and `OPENAI_REASONING_EFFORT`. Quick replies
 use `AGENT_QUICK_REPLY_MODEL` as a separate lightweight finalizer and do not
 persist to the message database. Turn-level form-prefill fact extraction is a
-separate OpenAI Responses lane inside `agent-worker`, even when the main Agent
-provider is Minimax. A Minimax-only deployment must set
-`AGENT_FACT_EXTRACTION_ENABLED=false`; an enabled fact lane requires
-`OPENAI_API_KEY`. Its lease must remain greater than its provider timeout.
+separate OpenAI Responses lane inside `agent-worker` and requires
+`OPENAI_API_KEY`. Its lease must remain greater than its model request timeout.
 Long-term memory extraction is also outside
 the live run path: the independent `memory-worker` reads only completed
 conversations for the previous local day, uses

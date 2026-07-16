@@ -14,13 +14,20 @@ from .milk_plan_schedule import (
     normalize_milk_plan_payload,
     scheduled_task_dates,
 )
+from .milk_schedule_calendar import (
+    MilkScheduleCalendarEventError,
+    normalize_milk_schedule_calendar_events,
+)
 
 
 MILK_PLAN_CREATE_ACTION = "plans.milk_plan.create"
 MILK_PLAN_CHANGED_EVENT = "milk_plan.changed"
 MILK_SCHEDULE_RESCHEDULE_ACTION = "plans.milk_schedule.reschedule"
+MILK_PLAN_CALENDAR_APPEND = "append"
+MILK_PLAN_CALENDAR_REPLACE = "replace_future_plan_tasks"
 PREGNANCY_PLAN_CREATE_ACTION = "pregnancy.plan.create"
 PREGNANCY_PLAN_CHANGED_EVENT = "pregnancy_plan.changed"
+PREGNANCY_PLAN_TODO_UPDATE_ACTION = "pregnancy.plan_todo.update"
 PLAN_TASK_CREATE_ACTION = "plans.task.create"
 PLAN_TASK_COMPLETE_ACTION = "plans.task.complete"
 PLAN_TASK_UPDATE_ACTION = "plans.task.update"
@@ -48,7 +55,26 @@ class MilkPlanCreateActionHandler:
             normalized_plan_payload, scheduled_tasks = normalize_milk_plan_payload(plan_payload)
         except MilkPlanScheduleValidationError as exc:
             raise PermanentJobError("invalid_milk_plan_schedule") from exc
+        calendar_write_strategy = _text(payload, "calendar_write_strategy") or MILK_PLAN_CALENDAR_APPEND
+        if calendar_write_strategy not in {MILK_PLAN_CALENDAR_APPEND, MILK_PLAN_CALENDAR_REPLACE}:
+            raise PermanentJobError("invalid_milk_plan_calendar_write_strategy")
+        replaced_tasks: list[Any] = []
         try:
+            if calendar_write_strategy == MILK_PLAN_CALENDAR_REPLACE:
+                expected_task_ids = _required_uuid_list(
+                    payload,
+                    "expected_replaced_task_ids",
+                    "invalid_expected_replaced_task_ids",
+                )
+                start_date = date.fromisoformat(str(normalized_plan_payload["start_date"]))
+                end_date = start_date + timedelta(days=int(normalized_plan_payload["days"]) - 1)
+                replaced_tasks = await self.service.replace_future_milk_plan_tasks(
+                    owner_user_id=action.actor_user_id,
+                    start_date=start_date,
+                    end_date=end_date,
+                    expected_task_ids=expected_task_ids,
+                    request_id=f"agent-action:{action.id}",
+                )
             plan = await self.service.create_plan(
                 owner_user_id=action.actor_user_id,
                 plan_type="milk_management",
@@ -90,6 +116,8 @@ class MilkPlanCreateActionHandler:
             details={
                 "plan_type": plan.plan_type,
                 "task_count": len(scheduled_tasks),
+                "replaced_task_count": len(replaced_tasks),
+                "calendar_write_strategy": calendar_write_strategy,
                 "agent_action_id": str(action.id),
                 "agent_run_id": str(action.run_id),
             },
@@ -103,6 +131,7 @@ class MilkPlanCreateActionHandler:
                         "plan_type": plan.plan_type,
                         "source": "agent_action",
                         "affected_dates": scheduled_task_dates(scheduled_tasks),
+                        "replaced_task_count": len(replaced_tasks),
                     },
                 ),
             ),
@@ -120,16 +149,57 @@ class MilkScheduleRescheduleActionHandler:
         if not isinstance(updates, list) or not all(isinstance(item, dict) for item in updates):
             raise PermanentJobError("invalid_milk_schedule_updates")
         try:
-            tasks = await self.service.reschedule_milk_tasks(
-                owner_user_id=action.actor_user_id,
-                plan_id=plan_id,
-                updates=[dict(item) for item in updates],
-                request_id=f"agent-action:{action.id}",
-            )
+            calendar_events = normalize_milk_schedule_calendar_events(payload.get("calendar_events"))
+        except MilkScheduleCalendarEventError as exc:
+            raise PermanentJobError(str(exc)) from exc
+        if not updates and not calendar_events:
+            raise PermanentJobError("empty_milk_schedule_adjustment")
+        tasks: list[Any] = []
+        calendar_event_tasks: list[Any] = []
+        try:
+            if updates:
+                tasks = await self.service.reschedule_milk_tasks(
+                    owner_user_id=action.actor_user_id,
+                    plan_id=plan_id,
+                    updates=[dict(item) for item in updates],
+                    request_id=f"agent-action:{action.id}",
+                )
+            else:
+                plan = await self.service.get_plan(owner_user_id=action.actor_user_id, plan_id=plan_id)
+                if plan.plan_type != "milk_management":
+                    raise ApiError(code="validation_failed", message="Plan is not a milk-management plan.", status=422)
+            for index, event in enumerate(calendar_events):
+                calendar_event_tasks.append(
+                    await self.service.create_task(
+                        owner_user_id=action.actor_user_id,
+                        plan_id=None,
+                        task_date=date.fromisoformat(str(event["date"])),
+                        task_time=str(event["start_time"]),
+                        title=str(event["title"]),
+                        description=str(event.get("description") or ""),
+                        payload={
+                            "task_type": "other",
+                            "calendar_kind": "custom_event",
+                            "end_time": str(event["end_time"]),
+                            "duration_minutes": int(event["duration_minutes"]),
+                            "source": "agent_action",
+                            "agent_action_id": str(action.id),
+                            "agent_run_id": str(action.run_id),
+                        },
+                        request_id=f"agent-action:{action.id}",
+                        idempotency_key=f"agent-action:{action.id}:calendar-event:{index}",
+                    )
+                )
         except ApiError as exc:
             raise PermanentJobError(exc.code) from exc
         affected_dates = sorted(
-            {str(value) for item in updates for value in (item.get("expected_task_date"), item.get("new_task_date")) if value}
+            {
+                str(value)
+                for item in updates
+                for value in (item.get("expected_task_date"), item.get("new_task_date"))
+                if value
+            }
+            | {str(event["date"]) for event in calendar_events}
         )
         return AgentActionApplyResult(
             resource_type="plan",
@@ -137,6 +207,7 @@ class MilkScheduleRescheduleActionHandler:
             details={
                 "plan_type": "milk_management",
                 "task_count": len(tasks),
+                "calendar_event_count": len(calendar_event_tasks),
                 "agent_action_id": str(action.id),
                 "agent_run_id": str(action.run_id),
             },
@@ -151,6 +222,8 @@ class MilkScheduleRescheduleActionHandler:
                         "source": "agent_action",
                         "affected_dates": affected_dates,
                         "task_ids": [str(task.id) for task in tasks],
+                        "calendar_event_task_ids": [str(task.id) for task in calendar_event_tasks],
+                        "created_calendar_event_count": len(calendar_event_tasks),
                     },
                 ),
             ),
@@ -204,6 +277,60 @@ class PregnancyPlanCreateActionHandler:
                         "plan_id": str(plan.id),
                         "plan_type": plan.plan_type,
                         "source": plan.source,
+                    },
+                ),
+            ),
+        )
+
+
+class PregnancyPlanTodoUpdateActionHandler:
+    def __init__(self, *, service: PlansService) -> None:
+        self.service = service
+
+    async def __call__(self, action: AgentAction) -> AgentActionApplyResult:
+        payload = dict(action.apply_payload or {})
+        plan_id = _required_uuid(payload, "plan_id", "missing_plan_id", "invalid_plan_id")
+        item_id = _text(payload, "item_id")
+        if not item_id:
+            raise PermanentJobError("missing_todo_item_id")
+        completed = _optional_bool(payload, "completed", default=True, code="invalid_completed")
+        expected_version = _required_positive_int(payload, "expected_version", "invalid_expected_version")
+        try:
+            plan = await self.service.update_plan_todo_completion(
+                owner_user_id=action.actor_user_id,
+                plan_id=plan_id,
+                item_id=item_id,
+                completed=completed,
+                expected_version=expected_version,
+                request_id=f"agent-action:{action.id}",
+                idempotency_key=action.idempotency_key or f"agent-action:{action.id}",
+            )
+        except ApiError as exc:
+            raise PermanentJobError(exc.code) from exc
+        if plan.plan_type != "pregnancy":
+            raise PermanentJobError("invalid_pregnancy_plan")
+        return AgentActionApplyResult(
+            resource_type="plan",
+            resource_id=str(plan.id),
+            details={
+                "plan_type": "pregnancy",
+                "item_id": item_id,
+                "completed": completed,
+                "version": plan.version,
+                "agent_action_id": str(action.id),
+                "agent_run_id": str(action.run_id),
+            },
+            application_events=(
+                AgentApplicationEvent(
+                    event_type=PREGNANCY_PLAN_CHANGED_EVENT,
+                    payload={
+                        "operation": "updated",
+                        "reason": "todo_completion_changed",
+                        "plan_id": str(plan.id),
+                        "plan_type": "pregnancy",
+                        "source": "agent_action",
+                        "version": plan.version,
+                        "item_ids": [item_id],
                     },
                 ),
             ),
@@ -408,6 +535,19 @@ class PlanDeleteActionHandler:
                     },
                 ),
             )
+        elif plan is not None and plan.plan_type == "pregnancy":
+            application_events = (
+                AgentApplicationEvent(
+                    event_type=PREGNANCY_PLAN_CHANGED_EVENT,
+                    payload={
+                        "operation": "deleted",
+                        "reason": "plan_deleted",
+                        "plan_id": str(plan.id),
+                        "plan_type": "pregnancy",
+                        "source": "agent_action",
+                    },
+                ),
+            )
         return AgentActionApplyResult(
             resource_type="plan",
             resource_id=str(plan_id),
@@ -522,6 +662,35 @@ def _optional_bool(payload: dict[str, Any], key: str, *, default: bool, code: st
     if isinstance(value, bool):
         return value
     raise PermanentJobError(code)
+
+
+def _required_positive_int(payload: dict[str, Any], key: str, code: str) -> int:
+    value = payload.get(key)
+    if isinstance(value, bool):
+        raise PermanentJobError(code)
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise PermanentJobError(code) from exc
+    if parsed < 1:
+        raise PermanentJobError(code)
+    return parsed
+
+
+def _required_uuid_list(payload: dict[str, Any], key: str, code: str) -> list[UUID]:
+    values = payload.get(key)
+    if not isinstance(values, list):
+        raise PermanentJobError(code)
+    parsed: list[UUID] = []
+    for value in values:
+        try:
+            item = UUID(str(value or ""))
+        except ValueError as exc:
+            raise PermanentJobError(code) from exc
+        if item in parsed:
+            raise PermanentJobError(code)
+        parsed.append(item)
+    return parsed
 
 
 def _task_updates(payload: dict[str, Any]) -> dict[str, Any]:

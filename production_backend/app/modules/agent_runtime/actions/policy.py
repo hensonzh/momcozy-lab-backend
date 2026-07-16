@@ -99,6 +99,12 @@ DEFAULT_AGENT_ACTION_RULES: Mapping[str, AgentActionPolicyRule] = {
         side_effect_level="medium",
         requires_confirmation=False,
     ),
+    "pregnancy.plan_todo.update": AgentActionPolicyRule(
+        action_type="pregnancy.plan_todo.update",
+        target_type="plan",
+        side_effect_level="medium",
+        requires_confirmation=False,
+    ),
     "plans.task.create": AgentActionPolicyRule(
         action_type="plans.task.create",
         target_type="plan_task",

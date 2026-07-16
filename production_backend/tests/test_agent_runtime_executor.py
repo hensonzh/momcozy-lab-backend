@@ -201,7 +201,7 @@ def test_agent_runtime_executor_exposes_optional_allowlisted_web_search_without_
         AgentRuntimeExecutor(
             repository=repository,
             transient_stream=transient_stream,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, provider="openai", use_responses=True),
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, use_responses=True),
         ).execute(run=run)
     )
 
@@ -237,7 +237,7 @@ def test_agent_runtime_executor_keeps_model_health_response_when_optional_search
         AgentRuntimeExecutor(
             repository=repository,
             transient_stream=transient_stream,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, provider="openai", use_responses=True),
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, use_responses=True),
         ).execute(run=run)
     )
 
@@ -261,7 +261,7 @@ def test_agent_runtime_executor_does_not_content_route_first_breast_lump_turn() 
     asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, provider="openai", use_responses=True),
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, use_responses=True),
         ).execute(run=run)
     )
 
@@ -299,7 +299,7 @@ def test_agent_runtime_executor_emits_web_search_citation_custom_event() -> None
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, provider="openai", use_responses=True),
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, use_responses=True),
         ).execute(run=run)
     )
 
@@ -338,7 +338,7 @@ def test_agent_runtime_executor_calls_model_when_provider_cannot_web_search() ->
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, provider="minimax", use_responses=False),
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, use_responses=False),
         ).execute(run=run)
     )
 
@@ -366,7 +366,7 @@ def test_agent_runtime_executor_propagates_model_failure_without_content_based_f
         asyncio.run(
             AgentRuntimeExecutor(
                 repository=repository,
-                sdk_runner=OpenAIAgentsSdkRunner(backend=backend, provider="openai", use_responses=True),
+                sdk_runner=OpenAIAgentsSdkRunner(backend=backend, use_responses=True),
             ).execute(run=run)
         )
 
@@ -406,6 +406,25 @@ def test_agent_runtime_executor_injects_trusted_support_ticket_confirmation_text
     trusted_args = asyncio.run(executor._trusted_tool_args(run=run, contract_name="support.ticket.propose"))
 
     assert trusted_args == {"trusted_current_user_text": "好的，请现在帮我创建售后工单"}
+
+
+def test_agent_runtime_executor_injects_runtime_timezone_into_milk_analysis_snapshot() -> None:
+    run = _run(thread_id=uuid4())
+    executor = AgentRuntimeExecutor(
+        repository=FakeRuntimeRepository(messages=[], current_message=None),
+        sdk_runner=OpenAIAgentsSdkRunner(backend=CapturingSdkBackend(result=SdkNodeResult(final_text=""))),
+    )
+    executor._run_current_user_text[run.id] = "帮我分析奶量"
+    executor._run_timezones[run.id] = "Asia/Shanghai"
+
+    trusted_args = asyncio.run(
+        executor._trusted_tool_args(run=run, contract_name="records.milk_analysis.intake")
+    )
+
+    assert trusted_args == {
+        "trusted_current_user_text": "帮我分析奶量",
+        "runtime_timezone": "Asia/Shanghai",
+    }
 
 
 def test_agent_runtime_executor_projects_recent_ibclc_client_event_into_next_turn() -> None:
@@ -735,8 +754,8 @@ def test_agent_runtime_executor_loads_birth_prep_with_structured_business_fact_r
                 "pregnancy_plan_intake_analyze",
                 "pregnancy_plan_intake_advance",
                 "pregnancy_plan_propose",
+                "pregnancy_plan_todo_propose",
                 "plans_plan_delete_propose",
-                "plans_task_complete_propose",
                 "plans_task_update_propose",
                 "plans_task_delete_propose",
                 "birth_plan_form_create",
@@ -1103,6 +1122,7 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert backend.tool_names == (
         "load_service_skill",
         "birth_plan_form_create",
+        "conversation_history_image_load",
         "devices_guidance_read",
         "devices_pump_status_read",
         "devices_unboxing_advance",
@@ -1111,7 +1131,6 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
         "hospital_bag_form_create",
         "hospital_bag_pump_recommend",
         "ibclc_consult_card_create",
-        "images_inspect",
         "labor_communication_card_create",
         "notifications_milk_reminder_propose",
         "plans_calendar_read",
@@ -1129,6 +1148,7 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
         "pregnancy_plan_intake_advance",
         "pregnancy_plan_intake_analyze",
         "pregnancy_plan_intake_start",
+        "pregnancy_plan_todo_propose",
         "pregnancy_diary_manage",
         "profile_read",
         "profile_update",
@@ -1164,16 +1184,27 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert backend.tool_schemas["pregnancy_diary_manage"]["properties"]["limit"]["maximum"] == 30
     assert backend.tool_schemas["pregnancy_diary_manage"]["properties"]["content"]["maxLength"] == 5000
     assert backend.tool_schemas["pregnancy_diary_manage"]["properties"]["confirmed"]["default"] is False
-    assert backend.tool_schemas["images_inspect"]["required"] == ["image_url"]
+    assert backend.tool_schemas["conversation_history_image_load"]["required"] == ["image_url"]
     assert backend.tool_schemas["hospital_bag_cart_update"]["additionalProperties"] is False
     assert "groups" not in backend.tool_schemas["hospital_bag_cart_update"]["properties"]
     assert backend.tool_schemas["notifications_milk_reminder_propose"]["required"] == ["title"]
     assert backend.tool_schemas["plans_calendar_read"]["properties"]["task_date"]["maxLength"] == 20
     assert backend.tool_schemas["plans_current_read"]["properties"]["limit"]["maximum"] == 20
-    assert backend.tool_schemas["plans_milk_plan_propose"]["required"] == ["title", "direction", "tasks"]
+    assert backend.tool_schemas["plans_milk_plan_propose"]["required"] == ["direction"]
+    assert "tasks" not in backend.tool_schemas["plans_milk_plan_propose"]["properties"]
+    assert backend.tool_schemas["plans_milk_plan_propose"]["properties"]["calendar_write_strategy"]["enum"] == [
+        "append",
+        "replace_future_plan_tasks",
+    ]
     assert backend.tool_schemas["plans_plan_delete_propose"]["required"] == ["plan_id"]
     assert backend.tool_schemas["plans_task_complete_propose"]["required"] == ["task_id"]
     assert backend.tool_schemas["plans_task_complete_propose"]["properties"]["completed"]["type"] == "boolean"
+    assert backend.tool_schemas["pregnancy_plan_todo_propose"]["required"] == [
+        "plan_id",
+        "item_id",
+        "completed",
+        "expected_version",
+    ]
     assert backend.tool_schemas["plans_task_create_propose"]["required"] == ["title"]
     assert backend.tool_schemas["plans_task_delete_propose"]["required"] == ["task_id"]
     assert backend.tool_schemas["plans_task_update_propose"]["required"] == ["task_id"]
@@ -1245,7 +1276,7 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert backend.tool_namespaces["pregnancy_diary"]["deferred_tool_names"] == []
     assert backend.tool_namespace_by_contract["profile.read"] == ""
     assert backend.tool_namespace_by_contract["profile_update"] == ""
-    assert backend.tool_namespace_by_contract["images.inspect"] == ""
+    assert backend.tool_namespace_by_contract["conversation_history.image.load"] == ""
     assert backend.tool_namespace_by_contract["records.milk_status.read"] == "milk_management"
     assert backend.tool_namespace_by_contract["pregnancy_diary.manage"] == "pregnancy_diary"
     assert backend.tool_deferred_by_contract["records.milk_status.read"] is False
@@ -1328,7 +1359,7 @@ def test_agent_runtime_executor_adds_model_selected_visible_image_to_current_loo
         safe_output={"status": "image_context_ready", "image_url": image_url, "detail": "low"},
         model_context=model_context,
     )
-    backend = ImageInspectingSdkBackend(image_url=image_url)
+    backend = ConversationHistoryImageLoadingSdkBackend(image_url=image_url)
 
     result = asyncio.run(
         AgentRuntimeExecutor(
@@ -1567,7 +1598,7 @@ def test_agent_runtime_executor_allows_service_tool_after_skill_load() -> None:
     assert repository.run_summaries == []
 
 
-def test_agent_runtime_executor_does_not_advertise_tool_search_when_runner_cannot_use_namespaces() -> None:
+def test_agent_runtime_executor_does_not_advertise_tool_search_when_responses_is_disabled() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)
     current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="Read my profile", sequence=1)
@@ -1578,7 +1609,7 @@ def test_agent_runtime_executor_does_not_advertise_tool_search_when_runner_canno
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, provider="minimax", use_responses=False),
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, use_responses=False),
             tool_executor=tool_executor,
         ).execute(run=run)
     )
@@ -4405,13 +4436,15 @@ class CapturingDiaryToolOutputSdkBackend:
         return SdkNodeResult(final_text="我已经读到这篇日记。")
 
 
-class ImageInspectingSdkBackend:
+class ConversationHistoryImageLoadingSdkBackend:
     def __init__(self, *, image_url: str) -> None:
         self.image_url = image_url
         self.model_context = ()
 
     async def run(self, request: SdkNodeRequest) -> SdkNodeResult:
-        image_tool = next(tool for tool in request.tools if tool.contract_name == "images.inspect")
+        image_tool = next(
+            tool for tool in request.tools if tool.contract_name == "conversation_history.image.load"
+        )
         invocation = await image_tool.invoke(json.dumps({"image_url": self.image_url}))
         self.model_context = invocation.model_context
         return SdkNodeResult(final_text="图中有四个主要部件。")

@@ -307,7 +307,8 @@ def test_service_skills_capture_legacy_domain_flow_semantics() -> None:
     assert "还有其他需要补充的信息吗？如果没有，我就基于目前的信息开始为你制定孕期计划啦。" in pregnancy
     assert "birth_journey_plan_card_create" not in pregnancy
     assert "plans.plan_delete.propose" in pregnancy
-    assert "plans.task_complete.propose" in pregnancy
+    assert "pregnancy.plan_todo.propose" in pregnancy
+    assert "version_conflict" in pregnancy
     assert "hospital_bag_form_create" in pregnancy
     assert "hospital_bag_card_create" in pregnancy
     assert "labor_communication_card_create" in pregnancy
@@ -411,7 +412,7 @@ def test_tool_contracts_are_exported_as_responses_namespaces() -> None:
 
     assert len(assigned_contracts) == len(set(assigned_contracts))
     assert root_contracts == [
-        "images.inspect",
+        "conversation_history.image.load",
         "load_service_skill",
         "profile.read",
         "profile_update",
@@ -499,9 +500,12 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
     diary_schema = registry.get("pregnancy_diary.manage").input_schema
     devices_schema = registry.get("devices.pump_status.read").input_schema
     device_guidance_schema = registry.get("devices.guidance.read").input_schema
-    image_inspect_schema = registry.get("images.inspect").input_schema
+    history_image_contract = registry.get("conversation_history.image.load")
+    history_image_schema = history_image_contract.input_schema
     milk_plan_schema = registry.get("plans.milk_plan.propose").input_schema
+    milk_schedule_schema = registry.get("plans.milk_schedule.propose").input_schema
     pregnancy_plan_schema = registry.get("pregnancy.plan.propose").input_schema
+    pregnancy_todo_schema = registry.get("pregnancy.plan_todo.propose").input_schema
     pregnancy_intake_start_schema = registry.get("pregnancy.plan_intake.start").input_schema
     pregnancy_intake_analyze_schema = registry.get("pregnancy.plan_intake.analyze").input_schema
     pregnancy_intake_advance_schema = registry.get("pregnancy.plan_intake.advance").input_schema
@@ -581,20 +585,41 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
     assert device_guidance_schema["properties"]["model"]["type"] == "string"
     assert device_guidance_schema["properties"]["topic"]["type"] == "string"
     assert device_guidance_schema["properties"]["measured_nipple_mm"]["type"] == "number"
-    assert image_inspect_schema["required"] == ["image_url"]
-    assert image_inspect_schema["properties"]["detail"]["enum"] == ["low", "high"]
+    assert history_image_schema["required"] == ["image_url"]
+    assert history_image_schema["properties"]["detail"]["enum"] == ["low", "high"]
+    assert history_image_contract.description == (
+        "将当前可见对话历史中由智能体回复展示过的一张图片重新加载到本轮模型上下文。"
+        "当用户追问此前智能体回复里的某张图片内容，需要基于该历史图片进行视觉理解时调用。"
+    )
     assert milk_plan_schema["additionalProperties"] is False
-    assert milk_plan_schema["required"] == ["title", "direction", "tasks"]
+    assert milk_plan_schema["required"] == ["direction"]
     assert "payload" not in milk_plan_schema["properties"]
-    assert milk_plan_schema["properties"]["tasks"]["maxItems"] == 16
-    assert milk_plan_schema["properties"]["tasks"]["minItems"] == 1
-    assert milk_plan_schema["properties"]["tasks"]["items"]["required"] == ["title", "time", "task_type"]
-    assert milk_plan_schema["properties"]["direction"]["enum"] == ["increase", "maintain", "decrease", "observe", "unknown"]
+    assert "title" not in milk_plan_schema["properties"]
+    assert "summary" not in milk_plan_schema["properties"]
+    assert "tasks" not in milk_plan_schema["properties"]
+    assert milk_plan_schema["properties"]["days"]["maximum"] == 30
+    assert milk_plan_schema["properties"]["preferred_pumping_times"]["maxItems"] == 10
+    assert milk_plan_schema["properties"]["direction"]["enum"] == ["increase", "maintain", "decrease"]
+    assert milk_plan_schema["properties"]["calendar_write_strategy"]["enum"] == [
+        "append",
+        "replace_future_plan_tasks",
+    ]
+    assert milk_schedule_schema["required"] == ["plan_id"]
+    assert milk_schedule_schema["properties"]["calendar_events"]["maxItems"] == 21
+    assert milk_schedule_schema["properties"]["calendar_events"]["items"]["required"] == [
+        "date",
+        "start_time",
+        "end_time",
+        "title",
+    ]
     assert pregnancy_plan_schema["additionalProperties"] is False
     assert "title" not in pregnancy_plan_schema["properties"]
     assert "payload" not in pregnancy_plan_schema["properties"]
     assert pregnancy_plan_schema["properties"]["scope"]["enum"] == ["full", "prenatal_only", "short_range"]
     assert pregnancy_plan_schema["properties"]["additional_info"]["maxLength"] == 2000
+    assert pregnancy_todo_schema["additionalProperties"] is False
+    assert pregnancy_todo_schema["required"] == ["plan_id", "item_id", "completed", "expected_version"]
+    assert pregnancy_todo_schema["properties"]["expected_version"]["minimum"] == 1
     assert pregnancy_intake_start_schema["additionalProperties"] is False
     assert pregnancy_intake_start_schema["properties"]["restart"]["type"] == "boolean"
     assert pregnancy_intake_analyze_schema == {"type": "object", "additionalProperties": False, "properties": {}}
@@ -1352,7 +1377,7 @@ def test_responses_runner_preserves_multimodal_context_added_after_tool_output(m
                 output=[
                     {
                         "type": "function_call",
-                        "name": "images_inspect",
+                        "name": "conversation_history_image_load",
                         "call_id": "call_image",
                         "arguments": '{"image_url":"/v1/assets/asset-image"}',
                     }
@@ -1388,9 +1413,9 @@ def test_responses_runner_preserves_multimodal_context_added_after_tool_output(m
         model_input=[{"role": "user", "content": "这张图里有什么？"}],
         tools=(
             SdkToolDefinition(
-                contract_name="images.inspect",
-                sdk_name="images_inspect",
-                description="查看历史图片。",
+                contract_name="conversation_history.image.load",
+                sdk_name="conversation_history_image_load",
+                description="加载对话历史中由智能体回复展示过的图片。",
                 params_json_schema={"type": "object", "properties": {}},
                 invoke=invoke,
             ),

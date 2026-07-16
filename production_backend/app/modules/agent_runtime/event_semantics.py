@@ -511,10 +511,10 @@ _TOOL_COPY: dict[str, dict[str, str]] = {
         "started": "我继续带你完成这一步～",
         "completed": "这一步已经衔接好啦",
     },
-    "images.inspect": {
+    "conversation_history.image.load": {
         "phase": "reading",
-        "started": "我先看看图片内容～",
-        "completed": "我把图片内容看好啦",
+        "started": "我回看一下之前的图片～",
+        "completed": "我看清之前那张图片啦",
     },
     "birth_plan_form_create": {
         "phase": "planning",
@@ -545,6 +545,11 @@ _TOOL_COPY: dict[str, dict[str, str]] = {
         "phase": "planning",
         "started": "我先帮你整理孕期计划～",
         "completed": "我已经准备好孕期计划预览，等你确认～",
+    },
+    "pregnancy.plan_todo.propose": {
+        "phase": "planning",
+        "started": "我先帮你更新孕期计划事项～",
+        "completed": "孕期计划事项已经更新好啦",
     },
     "plans.milk_plan.propose": {
         "phase": "planning",

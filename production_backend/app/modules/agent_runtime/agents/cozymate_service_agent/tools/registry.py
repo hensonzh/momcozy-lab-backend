@@ -148,7 +148,7 @@ def default_tool_registry() -> ToolContractRegistry:
             domain="records",
             description=(
                 "用户要求完整分析奶量，或回答上一轮奶量分析问题时调用；开始、恢复或推进当前线程的六项采集。"
-                "每轮只回答工具返回的 current_field，直到 can_evaluate 为 true。"
+                "回答时用 observed_answers 标注本轮原话明确覆盖的全部采集项，未明确回答的项目继续按 current_field 逐项追问，直到 can_evaluate 为 true。"
             ),
             loading_mode="eager",
             read_or_write="write",
@@ -306,11 +306,11 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="images.inspect",
+            name="conversation_history.image.load",
             domain="images",
             description=(
-                "查看当前可见对话历史中已经展示过的一张图片。"
-                "用户询问上图、这张图或历史回复中某张具体图片的可见内容时调用，并传入对应 image_url。"
+                "将当前可见对话历史中由智能体回复展示过的一张图片重新加载到本轮模型上下文。"
+                "当用户追问此前智能体回复里的某张图片内容，需要基于该历史图片进行视觉理解时调用。"
             ),
             loading_mode="eager",
             read_or_write="read",
@@ -327,7 +327,10 @@ def default_tool_registry() -> ToolContractRegistry:
         _tool_contract(
             name="plans.milk_plan.propose",
             domain="plans",
-            description="创建当前用户的奶量计划预览并发起待确认动作。用户明确希望制定泌乳、喂养或吸奶计划时调用。",
+            description=(
+                "奶量评估允许制定计划且用户同意推荐方向时调用；模型只提交方向和用户明确给出的周期、目标或时间约束，"
+                "runtime 负责生成完整计划与任务。未来已有奶量任务时，先让用户明确选择追加或替换。"
+            ),
             read_or_write="write",
             side_effect_level="medium",
             blocking_policy="wait_for_confirmation",
@@ -343,8 +346,8 @@ def default_tool_registry() -> ToolContractRegistry:
             name="plans.milk_schedule.propose",
             domain="plans",
             description=(
-                "读取当前用户指定奶量计划的待执行任务，避开一个或多个明确不可用时间段，"
-                "用户明确日期和不可用时间、要求调整日程时调用；生成保持间隔的单日或批量重排预览并发起待确认动作。"
+                "用户明确要求新增会议、外出等生活事项或避开已有不可用时段时调用；读取当前奶量计划并生成重排预览。"
+                "本轮新增事项放入 calendar_events，runtime 会在确认后将事项与奶量任务调整原子写入。"
             ),
             read_or_write="write",
             side_effect_level="medium",
@@ -448,6 +451,24 @@ def default_tool_registry() -> ToolContractRegistry:
             name="plans.task_complete.propose",
             domain="plans",
             description="把当前用户唯一指定的单项计划任务标记为完成或取消完成。用户明确表达状态且 trusted task target 唯一时调用并同步执行。",
+            read_or_write="write",
+            side_effect_level="medium",
+            blocking_policy="must_wait",
+            result_dependency="final_response",
+            requires_confirmation=False,
+            idempotency_required=True,
+            audit_required=True,
+            timeout_seconds=15,
+        )
+    )
+    registry.register(
+        _tool_contract(
+            name="pregnancy.plan_todo.propose",
+            domain="plans",
+            description=(
+                "更新当前用户 active 孕期计划卡片中唯一指定事项的完成状态。用户明确表示某项已完成或取消完成，"
+                "并且 trusted pregnancy plan context 能唯一提供 plan_id、item_id 和 version 时调用并同步执行。"
+            ),
             read_or_write="write",
             side_effect_level="medium",
             blocking_policy="must_wait",
@@ -758,7 +779,7 @@ def default_tool_registry() -> ToolContractRegistry:
             name="support.ticket.propose",
             domain="support",
             description=(
-                "在用户明确同意创建售后工单后，整理可编辑的 Momcozy 售后信息表。"
+                "用户明确同意创建售后工单时调用，用于整理可编辑的 Momcozy 售后信息表。"
                 "表单由用户确认并直接提交，不再发起第二次 action 确认。"
             ),
             read_or_write="write",

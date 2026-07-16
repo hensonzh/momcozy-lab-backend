@@ -23,10 +23,12 @@ from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.
     MilkAnalysisIntakeToolHandler,
     MilkPlanProposeToolHandler,
     MilkScheduleRescheduleProposeToolHandler,
+    PregnancyDiaryManageToolHandler,
     PregnancyPlanIntakeAdvanceToolHandler,
     PregnancyPlanIntakeAnalyzeToolHandler,
     PregnancyPlanIntakeStartToolHandler,
     PregnancyPlanProposeToolHandler,
+    SupportTicketProposeToolHandler,
     ToolExecutor,
     default_tool_registry,
 )
@@ -60,6 +62,7 @@ from production_backend.app.modules.agent_runtime.sdk import (
 )
 from production_backend.app.modules.agent_runtime.service import AgentRuntimeService
 from production_backend.app.modules.assets.models import ProductAsset
+from production_backend.app.modules.diary.models import PregnancyDiaryEntry
 from production_backend.app.modules.hospital_bag.agent_actions import HospitalBagCartUpdateActionHandler
 from production_backend.app.modules.plans.agent_actions import (
     MilkPlanCreateActionHandler,
@@ -299,16 +302,9 @@ def test_observed_milk_analysis_plan_and_schedule_persist_real_action_lifecycles
             scripted_tool_invocation(
                 "plans.milk_plan.propose",
                 {
-                    "title": "温和稳奶计划",
-                    "summary": "保持舒适并观察宝宝信号。",
                     "direction": "maintain",
-                    "start_date": "2026-07-14",
                     "days": 1,
-                    "tasks": [
-                        {"title": "早间吸奶", "time": "08:00", "task_type": "pumping"},
-                        {"title": "午间吸奶", "time": "11:00", "task_type": "pumping"},
-                        {"title": "下午吸奶", "time": "14:00", "task_type": "pumping"},
-                    ],
+                    "preferred_pumping_times": ["08:00", "11:00", "14:00"],
                 },
             ),
         ),
@@ -328,6 +324,9 @@ def test_observed_milk_analysis_plan_and_schedule_persist_real_action_lifecycles
     assert len(scenario.plans.tasks) == 3
 
     plan = scenario.plans.plans[0]
+    plan_date = scenario.plans.tasks[0].task_date
+    assert plan_date is not None
+    plan_date_text = plan_date.isoformat()
     schedule_turn = scenario.run_turn(
         text="明天 10:30 到 12:30 开会，把冲突的吸奶安排挪开。",
         handlers=handlers,
@@ -336,8 +335,14 @@ def test_observed_milk_analysis_plan_and_schedule_persist_real_action_lifecycles
                 "plans.milk_schedule.propose",
                 {
                     "plan_id": str(plan.id),
-                    "target_date": "2026-07-14",
-                    "busy_windows": [{"date": "2026-07-14", "start_time": "10:30", "end_time": "12:30", "title": "会议"}],
+                    "calendar_events": [
+                        {
+                            "date": plan_date_text,
+                            "start_time": "10:30",
+                            "end_time": "12:30",
+                            "title": "会议",
+                        }
+                    ],
                 },
             ),
         ),
@@ -352,7 +357,10 @@ def test_observed_milk_analysis_plan_and_schedule_persist_real_action_lifecycles
     _assert_actions(schedule_trace, ("plans.milk_schedule.reschedule", "applied", "plan"))
     rescheduled = _event_by_type(schedule_trace, "milk_plan.changed")
     assert rescheduled["payload"]["operation"] == "rescheduled"
-    assert [task.task_time for task in scenario.plans.tasks] == ["08:00", "10:00", "14:00"]
+    assert rescheduled["payload"]["created_calendar_event_count"] == 1
+    assert [task.task_time for task in scenario.plans.tasks] == ["08:00", "10:00", "14:00", "10:30"]
+    assert scenario.plans.tasks[-1].title == "会议"
+    assert scenario.plans.tasks[-1].plan_id is None
 
 
 def test_observed_milk_red_flags_block_plan_action_and_artifact() -> None:
@@ -397,11 +405,7 @@ def test_observed_milk_red_flags_block_plan_action_and_artifact() -> None:
             tool_invocations=(
                 scripted_tool_invocation(
                     "plans.milk_plan.propose",
-                    {
-                        "title": "不应创建的计划",
-                        "direction": "increase",
-                        "tasks": [{"title": "吸奶", "time": "08:00", "task_type": "pumping"}],
-                    },
+                    {"direction": "increase"},
                 ),
             ),
             final_text="不应成功。",
@@ -469,6 +473,83 @@ def test_observed_known_device_guidance_reads_official_guidance_without_write() 
     _assert_tools(result.trace, "load_service_skill", "devices.guidance.read")
     assert result.trace.actions == []
     assert result.trace.final_text
+
+
+def test_observed_device_aftersales_requires_confirmation_then_creates_editable_draft() -> None:
+    scenario = ObservedScenario()
+    handlers = scenario.support_handlers()
+    offered = scenario.run_turn(
+        text="Air1 开箱后发现少了一个配件，我很着急。",
+        handlers=handlers,
+        tool_invocations=(
+            scripted_tool_invocation("load_service_skill", {"service_skill_id": "device-guidance"}),
+            scripted_tool_invocation(
+                "support.ticket.propose",
+                {
+                    "issue_type": "missing_parts",
+                    "issue_summary": "Air1 开箱后缺少配件",
+                    "product_model": "Air1",
+                    "user_emotion": "着急",
+                    "user_confirmed": False,
+                },
+            ),
+        ),
+        final_text="这件事确实很影响使用体验，我可以帮你创建一个售后工单。需要我现在帮你创建吗？",
+    )
+
+    _assert_tools(offered.trace, "load_service_skill", "support.ticket.propose")
+    _assert_event_types(offered.trace, forbidden={"artifact.created", "action.confirmation_required"})
+    assert scenario.repository.artifacts == []
+
+    confirmed = scenario.run_turn(
+        text="好的，请帮我创建。",
+        handlers=handlers,
+        tool_invocations=(
+            scripted_tool_invocation(
+                "support.ticket.propose",
+                {
+                    "issue_type": "missing_parts",
+                    "issue_summary": "Air1 开箱后缺少配件",
+                    "product_model": "Air1",
+                    "user_emotion": "着急",
+                    "user_confirmed": True,
+                },
+            ),
+        ),
+        final_text="我已经把售后信息整理好了，你可以检查并提交。",
+    )
+
+    _assert_tools(confirmed.trace, "support.ticket.propose")
+    _assert_artifact_events(confirmed.trace, "support_ticket_draft")
+    assert confirmed.trace.actions == []
+    assert scenario.repository.artifacts[-1].payload["submit_label"] == "确认并提交"
+
+
+def test_observed_health_consultation_can_write_user_facts_then_continue_replying() -> None:
+    scenario = ObservedScenario()
+    result = scenario.run_turn(
+        text="没有出血或发烧，疼痛也没有加重，宝宝胎动正常。今天散步后只是有一点轻微牵拉感。",
+        handlers=scenario.diary_handlers(),
+        tool_invocations=(
+            scripted_tool_invocation("load_service_skill", {"service_skill_id": "health-consultation"}),
+            scripted_tool_invocation(
+                "pregnancy_diary.manage",
+                {
+                    "action": "write",
+                    "content": "今天散步后有一点轻微牵拉感；没有出血或发烧，疼痛没有加重，宝宝胎动正常。",
+                },
+            ),
+        ),
+        final_text="我已经记下来了。先休息并观察；如果牵拉感加重、出现出血或胎动异常，请及时联系产科。",
+    )
+
+    _assert_tools(result.trace, "load_service_skill", "pregnancy_diary.manage")
+    _assert_event_types(result.trace, required={"pregnancy_diary.changed"})
+    assert result.trace.final_text.startswith("我已经记下来了")
+    assert scenario.diary.entries[0].content == (
+        "今天散步后有一点轻微牵拉感；没有出血或发烧，疼痛没有加重，宝宝胎动正常。"
+    )
+    assert "建议" not in scenario.diary.entries[0].content
 
 
 def test_observed_device_electrical_hazard_enters_model_without_runtime_block() -> None:
@@ -651,6 +732,7 @@ class ObservedScenario:
         self.assets = RecordingAssetService()
         self.records = RecordingRecordsService(owner_user_id=self.actor_user_id)
         self.profiles = RecordingProfileService()
+        self.diary = RecordingDiaryService(owner_user_id=self.actor_user_id)
 
     def run_turn(
         self,
@@ -736,6 +818,12 @@ class ObservedScenario:
     def ibclc_handlers(self) -> dict[str, Any]:
         return {"ibclc_consult_card_create": IbclcConsultCardCreateToolHandler(runtime_service=self.runtime_service)}
 
+    def support_handlers(self) -> dict[str, Any]:
+        return {"support.ticket.propose": SupportTicketProposeToolHandler(runtime_service=self.runtime_service)}
+
+    def diary_handlers(self) -> dict[str, Any]:
+        return {"pregnancy_diary.manage": PregnancyDiaryManageToolHandler(diary_service=self.diary)}
+
     def milk_handlers(self) -> dict[str, Any]:
         return {
             "records.milk_analysis.intake": MilkAnalysisIntakeToolHandler(
@@ -744,7 +832,10 @@ class ObservedScenario:
                 runtime_service=self.runtime_service,
             ),
             "records.milk_analysis.evaluate": MilkAnalysisEvaluateToolHandler(runtime_service=self.runtime_service),
-            "plans.milk_plan.propose": MilkPlanProposeToolHandler(runtime_service=self.runtime_service),
+            "plans.milk_plan.propose": MilkPlanProposeToolHandler(
+                runtime_service=self.runtime_service,
+                plans_service=self.plans,
+            ),
             "plans.milk_schedule.propose": MilkScheduleRescheduleProposeToolHandler(
                 runtime_service=self.runtime_service,
                 plans_service=self.plans,
@@ -1001,6 +1092,20 @@ class RecordingRuntimeRepository:
         self.artifacts.append(artifact)
         return artifact
 
+    async def create_message(self, **kwargs):
+        message = AgentMessage(
+            id=kwargs.get("message_id") or uuid4(),
+            thread_id=kwargs["thread_id"],
+            run_id=kwargs["run_id"],
+            role=kwargs["role"],
+            message_type=kwargs["message_type"],
+            content=kwargs["content"],
+            status=kwargs["status"],
+            sequence=len(self.messages) + 1,
+        )
+        self.messages.append(message)
+        return message
+
     async def list_artifacts_for_run(self, *, run_id: UUID):
         return [artifact for artifact in self.artifacts if artifact.run_id == run_id]
 
@@ -1055,6 +1160,13 @@ class RecordingRuntimeRepository:
         run.error_details = error_details
         return run
 
+    async def mark_run_completed(self, *, run: AgentRun, completed_at: datetime):
+        run.status = "completed"
+        run.completed_at = completed_at
+        run.error_code = ""
+        run.error_details = {}
+        return run
+
 
 class RecordingPlansService:
     def __init__(self, *, owner_user_id: UUID) -> None:
@@ -1106,6 +1218,28 @@ class RecordingPlansService:
             task for task in self.tasks if task.owner_user_id == owner_user_id and task.task_date == task_date and task.status == status
         ][:limit]
 
+    async def list_future_milk_plan_tasks(
+        self,
+        *,
+        owner_user_id: UUID,
+        start_date: date,
+        end_date: date,
+    ):
+        milk_plan_ids = {
+            plan.id
+            for plan in self.plans
+            if plan.owner_user_id == owner_user_id and plan.plan_type == "milk_management" and plan.status == "active"
+        }
+        return [
+            task
+            for task in self.tasks
+            if task.owner_user_id == owner_user_id
+            and task.plan_id in milk_plan_ids
+            and task.status == "pending"
+            and task.task_date is not None
+            and start_date <= task.task_date <= end_date
+        ]
+
     async def reschedule_milk_tasks(self, *, owner_user_id: UUID, plan_id: UUID, updates: list[dict[str, Any]], request_id: str):
         del request_id
         await self.get_plan(owner_user_id=owner_user_id, plan_id=plan_id)
@@ -1120,11 +1254,49 @@ class RecordingPlansService:
         return changed
 
 
+class RecordingDiaryService:
+    def __init__(self, *, owner_user_id: UUID) -> None:
+        self.owner_user_id = owner_user_id
+        self.entries: list[PregnancyDiaryEntry] = []
+
+    async def create_entry(self, *, owner_user_id: UUID, entry_date: date, values: dict[str, Any], request_id: str):
+        del request_id
+        assert owner_user_id == self.owner_user_id
+        if any(entry.entry_date == entry_date for entry in self.entries):
+            raise ApiError(code="conflict", message="Diary entry already exists.", status=409)
+        entry = PregnancyDiaryEntry(
+            id=uuid4(),
+            owner_user_id=owner_user_id,
+            entry_date=entry_date,
+            content=str(values.get("content") or ""),
+            symptom_tags=[],
+            attachments=[],
+        )
+        self.entries.append(entry)
+        return entry
+
+    async def get_entry(self, *, owner_user_id: UUID, entry_date: date):
+        entry = next(
+            (item for item in self.entries if item.owner_user_id == owner_user_id and item.entry_date == entry_date),
+            None,
+        )
+        if entry is None:
+            raise ApiError(code="not_found", message="Diary entry not found.", status=404)
+        return entry
+
+
 class RecordingRecordsService:
     def __init__(self, *, owner_user_id: UUID) -> None:
         self.owner_user_id = owner_user_id
 
-    async def list_feedings(self, *, owner_user_id: UUID, limit: int):
+    async def list_feedings(
+        self,
+        *,
+        owner_user_id: UUID,
+        start_at: datetime | None = None,
+        end_at: datetime | None = None,
+        limit: int,
+    ):
         assert owner_user_id == self.owner_user_id
         return [
             FeedingRecord(
@@ -1140,7 +1312,14 @@ class RecordingRecordsService:
             )
         ][:limit]
 
-    async def list_pumpings(self, *, owner_user_id: UUID, limit: int):
+    async def list_pumpings(
+        self,
+        *,
+        owner_user_id: UUID,
+        start_at: datetime | None = None,
+        end_at: datetime | None = None,
+        limit: int,
+    ):
         assert owner_user_id == self.owner_user_id
         return [
             PumpingRecord(

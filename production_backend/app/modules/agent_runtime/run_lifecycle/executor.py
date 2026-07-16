@@ -100,7 +100,7 @@ from .working_context import (
 
 
 LOAD_SERVICE_SKILL_TOOL_NAME = "load_service_skill"
-IMAGE_INSPECT_TOOL_NAME = "images.inspect"
+CONVERSATION_HISTORY_IMAGE_LOAD_TOOL_NAME = "conversation_history.image.load"
 COZYMATE_AGENT_ID = "cozymate_service_agent"
 LOGGER = logging.getLogger("production_backend.agent_runtime.executor")
 DEFAULT_RESIDENT_SERVICE_SKILL_TTL_TURNS = 3
@@ -212,6 +212,7 @@ class AgentRuntimeExecutor:
         self._run_authoritative_final_text: dict[UUID, str] = {}
         self._run_current_user_text: dict[UUID, str] = {}
         self._run_local_dates: dict[UUID, str] = {}
+        self._run_timezones: dict[UUID, str] = {}
         self._run_previous_assistant_text: dict[UUID, str] = {}
         self._run_trusted_form_submissions: dict[UUID, dict[str, dict[str, Any]]] = {}
         self._run_checkup_attachment_counts: dict[UUID, int] = {}
@@ -261,6 +262,7 @@ class AgentRuntimeExecutor:
             await self._append_progress(run=run, phase="context_ready", label="我先理解一下你的需求～")
             prepared_turn = self._prepare_model_turn(turn_context=turn_context)
             self._run_local_dates[run.id] = _user_context_local_date(prepared_turn.projection.user_context)
+            self._run_timezones[run.id] = _text(prepared_turn.projection.user_context, "timezone") or "UTC"
             result = await self._run_model_turn(
                 run=run,
                 turn_context=turn_context,
@@ -290,6 +292,7 @@ class AgentRuntimeExecutor:
             self._run_authoritative_final_text.pop(run.id, None)
             self._run_current_user_text.pop(run.id, None)
             self._run_local_dates.pop(run.id, None)
+            self._run_timezones.pop(run.id, None)
             self._run_previous_assistant_text.pop(run.id, None)
             self._run_trusted_form_submissions.pop(run.id, None)
             self._run_checkup_attachment_counts.pop(run.id, None)
@@ -980,7 +983,15 @@ class AgentRuntimeExecutor:
             local_date = self._run_local_dates.get(run.id, "")
             return {"runtime_local_date": local_date} if local_date else {}
         if contract_name == "records.milk_analysis.intake":
-            return {"trusted_current_user_text": self._run_current_user_text.get(run.id, "")}
+            return {
+                "trusted_current_user_text": self._run_current_user_text.get(run.id, ""),
+                "runtime_timezone": self._run_timezones.get(run.id, "UTC"),
+            }
+        if contract_name == "plans.milk_plan.propose":
+            return {
+                "runtime_local_date": self._run_local_dates.get(run.id, ""),
+                "runtime_timezone": self._run_timezones.get(run.id, "UTC"),
+            }
         if contract_name == "support.ticket.propose":
             return {"trusted_current_user_text": self._run_current_user_text.get(run.id, "")}
         expected_form_id = FORM_TOOL_IDS.get(contract_name)
@@ -1055,7 +1066,7 @@ class AgentRuntimeExecutor:
                 "trusted_current_user_text": self._run_current_user_text.get(run.id, ""),
                 "trusted_previous_assistant_text": self._run_previous_assistant_text.get(run.id, ""),
             }
-        if contract_name == IMAGE_INSPECT_TOOL_NAME:
+        if contract_name == CONVERSATION_HISTORY_IMAGE_LOAD_TOOL_NAME:
             return {"visible_image_urls": list(self._run_visible_image_urls.get(run.id, ()))}
         return {}
 
@@ -1671,8 +1682,8 @@ SERVICE_SKILL_RECOMMENDED_TOOL_CONTRACTS: dict[ServiceSkillId, tuple[str, ...]] 
         "pregnancy.plan_intake.analyze",
         "pregnancy.plan_intake.advance",
         "pregnancy.plan.propose",
+        "pregnancy.plan_todo.propose",
         "plans.plan_delete.propose",
-        "plans.task_complete.propose",
         "plans.task_update.propose",
         "plans.task_delete.propose",
         "birth_plan_form_create",

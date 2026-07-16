@@ -16,6 +16,7 @@ PLAN_TASK_CREATE_IDEMPOTENCY_SCOPE = "plans.tasks.create"
 PLAN_TODO_COMPLETION_IDEMPOTENCY_SCOPE = "plans.todos.completion"
 PLAN_TASK_STATES = frozenset({"pending", "completed", "skipped"})
 MAX_MILK_SCHEDULE_RESCHEDULE_TASKS = 100
+MAX_FUTURE_MILK_PLAN_TASKS = 500
 
 
 class PlansService:
@@ -188,6 +189,66 @@ class PlansService:
             status=status,
             limit=limit,
         )
+
+    async def list_future_milk_plan_tasks(
+        self,
+        *,
+        owner_user_id: UUID,
+        start_date: date,
+        end_date: date,
+    ) -> list[PlanTask]:
+        _milk_plan_schedule_dates(start_date=start_date, end_date=end_date)
+        tasks = await self.repository.list_future_milk_plan_tasks(
+            owner_user_id=owner_user_id,
+            start_date=start_date,
+            end_date=end_date,
+            for_update=False,
+            limit=MAX_FUTURE_MILK_PLAN_TASKS + 1,
+        )
+        return _bounded_future_milk_plan_tasks(tasks)
+
+    async def replace_future_milk_plan_tasks(
+        self,
+        *,
+        owner_user_id: UUID,
+        start_date: date,
+        end_date: date,
+        expected_task_ids: list[UUID],
+        request_id: str = "",
+    ) -> list[PlanTask]:
+        task_dates = _milk_plan_schedule_dates(start_date=start_date, end_date=end_date)
+        await self._lock_task_schedule_dates(owner_user_id=owner_user_id, task_dates=task_dates)
+        tasks = await self.repository.list_future_milk_plan_tasks(
+            owner_user_id=owner_user_id,
+            start_date=start_date,
+            end_date=end_date,
+            for_update=True,
+            limit=MAX_FUTURE_MILK_PLAN_TASKS + 1,
+        )
+        tasks = _bounded_future_milk_plan_tasks(tasks)
+        if {task.id for task in tasks} != set(expected_task_ids):
+            raise ApiError(
+                code="milk_plan_calendar_conflict",
+                message="Future milk-plan tasks changed after preview. Create a fresh preview before applying.",
+                status=409,
+            )
+        deleted_at = _utcnow()
+        for task in tasks:
+            deleted = await self.repository.soft_delete_task(
+                task_id=task.id,
+                owner_user_id=owner_user_id,
+                deleted_at=deleted_at,
+            )
+            if deleted is None:
+                raise ApiError(code="milk_plan_calendar_conflict", message="A future milk-plan task changed during apply.", status=409)
+            await self._audit(
+                owner_user_id=owner_user_id,
+                action="plans.milk_plan.replace_future_tasks",
+                resource_type="plan_task",
+                resource_id=str(task.id),
+                request_id=request_id,
+            )
+        return tasks
 
     async def reschedule_milk_tasks(
         self,
@@ -368,6 +429,8 @@ class PlansService:
         )
         if plan is None:
             raise ApiError(code="not_found", message="Plan not found.", status=404)
+        if plan.plan_type != "pregnancy":
+            raise ApiError(code="validation_failed", message="Plan is not a pregnancy plan.", status=422)
         if plan.version != expected_version:
             raise ApiError(
                 code="version_conflict",
@@ -576,6 +639,22 @@ def _milk_schedule_has_target_conflict(
             if moving_start < other_end and moving_end > other_start:
                 return True
     return False
+
+
+def _milk_plan_schedule_dates(*, start_date: date, end_date: date) -> list[date]:
+    if end_date < start_date or (end_date - start_date).days >= 30:
+        raise ApiError(code="validation_failed", message="Milk plan date range must contain 1 to 30 days.", status=422)
+    return [start_date + timedelta(days=offset) for offset in range((end_date - start_date).days + 1)]
+
+
+def _bounded_future_milk_plan_tasks(tasks: list[PlanTask]) -> list[PlanTask]:
+    if len(tasks) > MAX_FUTURE_MILK_PLAN_TASKS:
+        raise ApiError(
+            code="milk_plan_calendar_capacity_exceeded",
+            message="Too many future milk-plan tasks overlap this date range. Remove older plans before continuing.",
+            status=409,
+        )
+    return tasks
 
 
 def _task_duration_minutes(task: PlanTask) -> int:

@@ -8,6 +8,7 @@ from production_backend.app.core.errors import ApiError
 from production_backend.app.modules.agent_runtime.models import AgentAction, AgentArtifact, AgentWorkflowState
 from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.tools import (
     BusinessContextReadToolHandler,
+    ConversationHistoryImageLoadToolHandler,
     DeviceGuidanceReadToolHandler,
     DeviceUnboxingAdvanceToolHandler,
     DevicesPumpStatusReadToolHandler,
@@ -21,7 +22,6 @@ from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.
     HospitalBagCartUpdateProposeToolHandler,
     HospitalBagFormCreateToolHandler,
     IbclcConsultCardCreateToolHandler,
-    ImageInspectToolHandler,
     LegacyArtifactToolHandler,
     MilkAnalysisEvaluateToolHandler,
     MilkAnalysisIntakeToolHandler,
@@ -43,6 +43,7 @@ from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.
     ProfileUpdateToolHandler,
     PumpingRecordProposeToolHandler,
     PregnancyPlanContextReadToolHandler,
+    PregnancyPlanTodoUpdateProposeToolHandler,
     PregnancyPlanIntakeAdvanceToolHandler,
     PregnancyPlanIntakeAnalyzeToolHandler,
     PregnancyPlanIntakeStartToolHandler,
@@ -67,6 +68,7 @@ from production_backend.app.modules.plans.agent_actions import (
     PLAN_TASK_UPDATE_ACTION,
     PLAN_DELETE_ACTION,
     PREGNANCY_PLAN_CREATE_ACTION,
+    PREGNANCY_PLAN_TODO_UPDATE_ACTION,
 )
 from production_backend.app.modules.plans.models import Plan, PlanTask
 from production_backend.app.modules.profiles.models import InfantProfile, UserProfile
@@ -671,6 +673,60 @@ def test_milk_analysis_read_tool_handler_returns_growth_and_next_step_snapshot()
     assert result["analysis"]["recommended_next_step"] == "先确认宝宝资料或体重/尿布等摄入信号。"
 
 
+def test_milk_analysis_reader_summarizes_rhythm_from_full_window_not_display_slice() -> None:
+    actor = _user()
+
+    class FullWindowRecordsService(FakeRecordsService):
+        async def list_pumpings(self, *, owner_user_id, start_at=None, end_at=None, limit):
+            self.pumping_query = {
+                "owner_user_id": owner_user_id,
+                "start_at": start_at,
+                "end_at": end_at,
+                "limit": limit,
+            }
+            times = [
+                datetime(2026, 7, 2, 12, tzinfo=timezone.utc),
+                datetime(2026, 7, 2, 8, tzinfo=timezone.utc),
+                datetime(2026, 7, 2, 4, tzinfo=timezone.utc),
+                datetime(2026, 7, 1, 20, tzinfo=timezone.utc),
+                datetime(2026, 7, 1, 16, tzinfo=timezone.utc),
+                datetime(2026, 7, 1, 12, tzinfo=timezone.utc),
+                datetime(2026, 7, 1, 8, tzinfo=timezone.utc),
+                datetime(2026, 7, 1, 4, tzinfo=timezone.utc),
+                datetime(2026, 7, 1, 0, tzinfo=timezone.utc),
+            ]
+            return [
+                PumpingRecord(
+                    id=uuid4(),
+                    owner_user_id=self._owner_user_id,
+                    pump_start_time=value,
+                    pump_end_time=None,
+                    milk_volume_ml=80,
+                    pump_type="electric",
+                    duration_seconds=900,
+                    source="device",
+                    title="Pump session",
+                )
+                for value in times[:limit]
+            ]
+
+    handler = MilkAnalysisReadToolHandler(
+        records_service=FullWindowRecordsService(owner_user_id=actor.user_id),
+        profile_service=FakeProfileService(profile=None, infants=[]),
+    )
+
+    result = asyncio.run(
+        handler(_context(actor=actor, args={"days": 7, "limit": 8, "runtime_timezone": "UTC"}))
+    )
+
+    assert len(result["recent_pumpings"]) == 8
+    assert result["pumping_rhythm"] == {
+        "timezone": "UTC",
+        "representative_date": "2026-07-01",
+        "representative_times": ["00:00", "04:00", "08:00", "12:00", "16:00", "20:00"],
+    }
+
+
 def test_milk_analysis_intake_is_durable_and_evaluation_emits_an_analysis_card() -> None:
     actor = _user()
     runtime_service = FakeAgentRuntimeService()
@@ -743,16 +799,81 @@ def test_milk_analysis_intake_is_durable_and_evaluation_emits_an_analysis_card()
     assert "evaluation_artifact_id" not in runtime_service.workflow_state.state
 
 
-def test_milk_plan_proposal_rejects_missing_durable_analysis_even_with_valid_plan_args() -> None:
+def test_milk_analysis_intake_absorbs_only_current_turn_grounded_answers() -> None:
+    actor = _user()
+    runtime_service = FakeAgentRuntimeService()
+    records_service = FakeRecordsService(owner_user_id=actor.user_id)
+    handler = MilkAnalysisIntakeToolHandler(
+        records_service=records_service,
+        profile_service=FakeProfileService(profile=None, infants=[]),
+        runtime_service=runtime_service,
+    )
+    base_context = _context(actor=actor, args={"action": "start"})
+
+    asyncio.run(handler(base_context))
+    current_text = "宝宝近 24 小时有 7 片湿尿布，精神很好，吃完能安稳，最近体重增长正常"
+    advanced = asyncio.run(
+        handler(
+            _context(
+                actor=actor,
+                thread_id=base_context.thread_id,
+                args={
+                    "action": "answer",
+                    "observed_answers": [
+                        {"field": "infant_wet_diapers", "evidence": "近 24 小时有 7 片湿尿布"},
+                        {"field": "infant_state_or_satisfaction", "evidence": "精神很好，吃完能安稳"},
+                        {"field": "infant_growth_signal", "evidence": "最近体重增长正常"},
+                    ],
+                    "trusted_current_user_text": current_text,
+                },
+            )
+        )
+    )
+
+    assert advanced.output["current_field"] == "maternal_red_flags"
+    assert advanced.output["progress"] == {
+        "index": 5,
+        "total": 6,
+        "completed_count": 4,
+        "remaining_count": 2,
+    }
+    assert records_service.feeding_query["limit"] == 100
+    assert records_service.pumping_query["limit"] == 100
+    assert records_service.feeding_query["start_at"] is not None
+    assert records_service.feeding_query["end_at"] is not None
+
     with pytest.raises(ApiError) as exc_info:
         asyncio.run(
-            MilkPlanProposeToolHandler(runtime_service=FakeAgentRuntimeService())(
+            handler(
                 _context(
+                    actor=actor,
+                    thread_id=base_context.thread_id,
                     args={
-                        "title": "追奶计划",
+                        "action": "answer",
+                        "observed_answers": [
+                            {"field": "maternal_red_flags", "evidence": "没有发热和红肿"},
+                        ],
+                        "trusted_current_user_text": "我还不确定",
+                    },
+                )
+            )
+        )
+    assert exc_info.value.code == "milk_analysis_answer_not_grounded"
+
+
+def test_milk_plan_proposal_rejects_missing_durable_analysis_even_with_valid_plan_args() -> None:
+    actor = _user()
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            MilkPlanProposeToolHandler(
+                runtime_service=FakeAgentRuntimeService(),
+                plans_service=FakePlansService(owner_user_id=actor.user_id),
+            )(
+                _context(
+                    actor=actor,
+                    args={
                         "direction": "increase",
                         "days": 1,
-                        "tasks": [{"title": "吸奶", "time": "08:00", "task_type": "pumping"}],
                     }
                 )
             )
@@ -789,6 +910,46 @@ def test_plans_current_read_tool_handler_returns_bounded_owner_scoped_summary() 
     assert result["plans"][0]["title"] == "Birth plan"
     assert result["tasks"][0]["task_date"] == "2026-07-03"
     assert result["counts"] == {"plans": 1, "tasks": 1}
+
+
+def test_pregnancy_plan_context_exposes_bounded_embedded_todos_for_agent_updates() -> None:
+    actor = _user()
+    plans_service = FakePlansService(owner_user_id=actor.user_id)
+    plans_service.plan_payload = {
+        "card": {
+            "card_json": {
+                "todo_plan": {
+                    "periods": [
+                        {
+                            "status": "current",
+                            "items": [
+                                {
+                                    "item_id": "prepare-hospital-bag",
+                                    "title": "准备待产包",
+                                    "completed": False,
+                                }
+                            ],
+                        }
+                    ]
+                }
+            }
+        }
+    }
+    result = asyncio.run(
+        PregnancyPlanContextReadToolHandler(
+            profile_service=FakeProfileService(profile=None, infants=[]),
+            plans_service=plans_service,
+        )(_context(actor=actor, args={}))
+    )
+
+    assert result["plans"][0]["current_todos"] == [
+        {
+            "item_id": "prepare-hospital-bag",
+            "number": 1,
+            "title": "准备待产包",
+            "completed": False,
+        }
+    ]
 
 
 def test_plans_calendar_read_tool_handler_filters_by_date_and_status() -> None:
@@ -841,6 +1002,7 @@ def test_pregnancy_plan_context_read_tool_handler_returns_bounded_owner_scoped_s
     assert plans_service.plan_type == "pregnancy"
     assert result["profile"]["delivery_date"] == "2026-09-20"
     assert result["plans"][0]["title"] == "Birth plan"
+    assert result["plans"][0]["version"] == 1
     assert result["tasks"][0]["title"] == "Call clinic"
     assert "recent_diary_entries" not in result
     assert result["counts"] == {"plans": 1, "tasks": 1}
@@ -1123,9 +1285,12 @@ def test_device_unboxing_advance_tool_completes_current_step_and_returns_next_st
     assert runtime_service.workflow_state.active_step == "guide.controls"
 
 
-def test_image_inspect_tool_handler_loads_visible_packaged_image_as_transient_model_context() -> None:
+def test_conversation_history_image_load_handler_adds_visible_image_to_model_context() -> None:
     storage = FakeImageObjectStorage(body=b"image")
-    handler = ImageInspectToolHandler(asset_service=FakeImageAssetService(), object_storage=storage)
+    handler = ConversationHistoryImageLoadToolHandler(
+        asset_service=FakeImageAssetService(),
+        object_storage=storage,
+    )
     image_url = "/skill-assets/device-guidance/air1/images/guide.png"
 
     result = asyncio.run(
@@ -1152,7 +1317,7 @@ def test_image_inspect_tool_handler_loads_visible_packaged_image_as_transient_mo
             "content": [
                 {
                     "type": "input_text",
-                    "text": "这是你选择查看的历史图片。请结合当前用户问题，只依据图片中可见内容回答。",
+                    "text": "这是当前对话历史中由智能体此前展示的目标图片。请结合当前用户问题，只依据图片中可见内容回答。",
                 },
                 {
                     "type": "input_image",
@@ -1164,8 +1329,8 @@ def test_image_inspect_tool_handler_loads_visible_packaged_image_as_transient_mo
     )
 
 
-def test_image_inspect_tool_handler_rejects_url_not_visible_to_model() -> None:
-    handler = ImageInspectToolHandler(
+def test_conversation_history_image_load_handler_rejects_url_not_visible_to_model() -> None:
+    handler = ConversationHistoryImageLoadToolHandler(
         asset_service=FakeImageAssetService(),
         object_storage=FakeImageObjectStorage(body=b"image"),
     )
@@ -1297,16 +1462,16 @@ def test_record_delete_and_growth_propose_tool_handlers_create_actions() -> None
 def test_milk_plan_propose_tool_handler_creates_confirmation_action() -> None:
     actor = _user()
     runtime_service = FakeAgentRuntimeService()
+    plans_service = FakePlansService(owner_user_id=actor.user_id)
     context = _context(
         actor=actor,
         args={
-            "title": "Increase pumping consistency",
-            "summary": "Pump after morning and evening feeds for the next week.",
             "direction": "maintain",
             "start_date": "2026-07-13",
             "days": 2,
-            "tasks": [{"title": "Pump at 20:00", "time": "20:00", "task_type": "pumping"}],
-            "reminders": [{"title": "Drink water"}],
+            "preferred_pumping_times": ["08:00", "20:00"],
+            "runtime_local_date": "2026-07-12",
+            "runtime_timezone": "Asia/Shanghai",
         },
     )
     analysis_context = {
@@ -1336,39 +1501,139 @@ def test_milk_plan_propose_tool_handler_creates_confirmation_action() -> None:
         active_step="assessment_complete",
     )
 
-    result = asyncio.run(MilkPlanProposeToolHandler(runtime_service=runtime_service)(context))
+    result = asyncio.run(
+        MilkPlanProposeToolHandler(runtime_service=runtime_service, plans_service=plans_service)(context)
+    )
 
     assert result["action_type"] == MILK_PLAN_CREATE_ACTION
     assert result["action_status"] == "confirmation_required"
     assert result["user_visible"] is True
     assert result["preview_payload"] == {
         "plan_type": "milk_management",
-        "title": "Increase pumping consistency",
-        "summary": "Pump after morning and evening feeds for the next week.",
+        "title": "2 天稳奶计划",
+        "summary": "2 天稳奶安排：沿用近期可执行节奏，保持记录和复盘。近期实测奶量不足以给出可靠数字目标，本轮先按节奏和身体反应复盘。",
         "has_payload": True,
         "start_date": "2026-07-13",
         "days": 2,
-        "scheduled_task_count": 2,
-        "calendar_write_strategy": "create_schedule_tasks",
+        "scheduled_task_count": 4,
+        "calendar_write_strategy": "append",
+        "existing_future_task_count": 0,
     }
     assert runtime_service.calls[0]["target_type"] == "plan"
     assert runtime_service.calls[0]["side_effect_level"] == "medium"
     assert runtime_service.calls[0]["expires_at"] == valid_until
-    assert runtime_service.calls[0]["apply_payload"]["payload"] == {
-        "direction": "maintain",
-        "start_date": "2026-07-13",
-        "days": 2,
-        "tasks": [{"title": "Pump at 20:00", "time": "20:00", "task_type": "pumping"}],
-        "reminders": [{"title": "Drink water"}],
-        "analysis_context_fingerprint": analysis_fingerprint,
-        "analysis_workflow_state_id": str(runtime_service.workflow_state.id),
-    }
+    apply_payload = runtime_service.calls[0]["apply_payload"]
+    assert apply_payload["calendar_write_strategy"] == "append"
+    assert apply_payload["expected_replaced_task_ids"] == []
+    assert apply_payload["payload"]["direction"] == "maintain"
+    assert apply_payload["payload"]["tasks"] == [
+        {
+            "title": "稳奶吸奶",
+            "time": "08:00",
+            "task_type": "pumping",
+            "description": "保持近期可执行节奏，并记录实际完成和身体感受。",
+        },
+        {
+            "title": "稳奶吸奶",
+            "time": "20:00",
+            "task_type": "pumping",
+            "description": "保持近期可执行节奏，并记录实际完成和身体感受。",
+        },
+    ]
+    assert apply_payload["payload"]["analysis_context_fingerprint"] == analysis_fingerprint
+    assert apply_payload["payload"]["analysis_workflow_state_id"] == str(runtime_service.workflow_state.id)
     assert result["artifact_type"] == "milk_plan_preview"
-    assert result["task_count"] == 2
-    assert runtime_service.artifact.payload["scheduled_task_count"] == 2
+    assert result["task_count"] == 4
+    assert runtime_service.artifact.payload["scheduled_task_count"] == 4
+    assert runtime_service.artifact.payload["goal"]["basis"] == "measured_pumping_average_7d"
+    assert runtime_service.artifact.payload["safety_notes"]
     assert runtime_service.artifact.payload["action_id"] == result["action_id"]
     assert "analysis_context_fingerprint" not in result
     assert result["_deferred_agent_events"][0]["event_type"] == "artifact.created"
+
+
+def test_milk_plan_proposal_requires_an_explicit_append_or_replace_choice_when_future_tasks_exist() -> None:
+    actor = _user()
+    runtime_service = FakeAgentRuntimeService()
+    plans_service = FakePlansService(owner_user_id=actor.user_id)
+    plans_service.future_milk_tasks = [
+        PlanTask(
+            id=uuid4(),
+            owner_user_id=actor.user_id,
+            plan_id=uuid4(),
+            task_date=date(2026, 7, 14),
+            task_time="08:00",
+            title="旧稳奶任务",
+            status="pending",
+            payload={},
+        )
+    ]
+    context = _context(
+        actor=actor,
+        args={
+            "direction": "maintain",
+            "start_date": "2026-07-13",
+            "days": 2,
+            "runtime_local_date": "2026-07-12",
+        },
+    )
+    analysis_context = {
+        "schema_version": "milk_analysis.v1",
+        "records_snapshot": {"status": {"data_coverage": "ready", "pumping_trend": "stable"}},
+        "answers": {"maternal_red_flags": "没有这些情况"},
+    }
+    fingerprint = milk_analysis_context_fingerprint(analysis_context)
+    runtime_service.workflow_state = AgentWorkflowState(
+        id=uuid4(),
+        thread_id=context.thread_id,
+        owner_user_id=actor.user_id,
+        run_id=context.run_id,
+        workflow_type="milk_analysis",
+        status="ready",
+        schema_version="milk_analysis.v1",
+        state={
+            "phase": "assessment_complete",
+            "assessment": {
+                "analysis_context": analysis_context,
+                "analysis_context_fingerprint": fingerprint,
+                "valid_until": (datetime.now(timezone.utc) + timedelta(minutes=20)).isoformat(),
+                "plan_decision": {"can_start_plan": True, "recommended_direction": "maintain"},
+            },
+        },
+        active_step="assessment_complete",
+    )
+    handler = MilkPlanProposeToolHandler(runtime_service=runtime_service, plans_service=plans_service)
+
+    needs_choice = asyncio.run(handler(context))
+
+    assert isinstance(needs_choice, ToolHandlerResult)
+    assert needs_choice.output == {
+        "status": "milk_plan_calendar_strategy_required",
+        "existing_future_task_count": 1,
+        "allowed_strategies": ["append", "replace_future_plan_tasks"],
+        "question": "未来日程已有奶量计划任务。你希望把新计划追加进去，还是替换这些未来未完成任务？",
+    }
+    assert runtime_service.calls == []
+
+    confirmed = asyncio.run(
+        handler(
+            _context(
+                actor=actor,
+                thread_id=context.thread_id,
+                args={
+                    "direction": "maintain",
+                    "start_date": "2026-07-13",
+                    "days": 2,
+                    "calendar_write_strategy": "replace_future_plan_tasks",
+                    "runtime_local_date": "2026-07-12",
+                },
+            )
+        )
+    )
+    assert confirmed["action_status"] == "confirmation_required"
+    assert runtime_service.action.apply_payload["expected_replaced_task_ids"] == [
+        str(plans_service.future_milk_tasks[0].id)
+    ]
 
 
 def test_milk_plan_proposal_rejects_a_tampered_analysis_fingerprint() -> None:
@@ -1377,10 +1642,8 @@ def test_milk_plan_proposal_rejects_a_tampered_analysis_fingerprint() -> None:
     context = _context(
         actor=actor,
         args={
-            "title": "稳奶计划",
             "direction": "maintain",
             "days": 1,
-            "tasks": [{"title": "吸奶", "time": "08:00", "task_type": "pumping"}],
         },
     )
     runtime_service.workflow_state = AgentWorkflowState(
@@ -1404,7 +1667,12 @@ def test_milk_plan_proposal_rejects_a_tampered_analysis_fingerprint() -> None:
     )
 
     with pytest.raises(ApiError) as exc_info:
-        asyncio.run(MilkPlanProposeToolHandler(runtime_service=runtime_service)(context))
+        asyncio.run(
+            MilkPlanProposeToolHandler(
+                runtime_service=runtime_service,
+                plans_service=FakePlansService(owner_user_id=actor.user_id),
+            )(context)
+        )
 
     assert exc_info.value.code == "milk_analysis_fingerprint_mismatch"
 
@@ -1415,10 +1683,8 @@ def test_milk_plan_proposal_rejects_an_expired_analysis_before_creating_an_actio
     context = _context(
         actor=actor,
         args={
-            "title": "稳奶计划",
             "direction": "maintain",
             "days": 1,
-            "tasks": [{"title": "吸奶", "time": "08:00", "task_type": "pumping"}],
         },
     )
     analysis_context = {"records_snapshot": {"status": "normal"}, "answers": {}}
@@ -1443,7 +1709,12 @@ def test_milk_plan_proposal_rejects_an_expired_analysis_before_creating_an_actio
     )
 
     with pytest.raises(ApiError) as exc_info:
-        asyncio.run(MilkPlanProposeToolHandler(runtime_service=runtime_service)(context))
+        asyncio.run(
+            MilkPlanProposeToolHandler(
+                runtime_service=runtime_service,
+                plans_service=FakePlansService(owner_user_id=actor.user_id),
+            )(context)
+        )
 
     assert exc_info.value.code == "milk_analysis_expired_before_plan"
     assert runtime_service.calls == []
@@ -1455,9 +1726,7 @@ def test_milk_plan_proposal_requires_the_assessment_direction() -> None:
     context = _context(
         actor=actor,
         args={
-            "title": "稳奶计划",
             "days": 1,
-            "tasks": [{"title": "吸奶", "time": "08:00", "task_type": "pumping"}],
         },
     )
     analysis_context = {"records_snapshot": {"status": "normal"}, "answers": {}}
@@ -1482,9 +1751,14 @@ def test_milk_plan_proposal_requires_the_assessment_direction() -> None:
     )
 
     with pytest.raises(ApiError) as exc_info:
-        asyncio.run(MilkPlanProposeToolHandler(runtime_service=runtime_service)(context))
+        asyncio.run(
+            MilkPlanProposeToolHandler(
+                runtime_service=runtime_service,
+                plans_service=FakePlansService(owner_user_id=actor.user_id),
+            )(context)
+        )
 
-    assert exc_info.value.code == "milk_plan_direction_required"
+    assert exc_info.value.code == "validation_failed"
     assert runtime_service.calls == []
 
 
@@ -1502,8 +1776,14 @@ def test_milk_schedule_proposal_is_owner_scoped_and_contains_freshness_guards() 
                 actor=actor,
                 args={
                     "plan_id": str(plans_service.plan.id),
-                    "target_date": "2026-07-14",
-                    "busy_windows": [{"date": "2026-07-14", "start_time": "10:30", "end_time": "12:30", "title": "会议"}],
+                    "calendar_events": [
+                        {
+                            "date": "2026-07-14",
+                            "start_time": "10:30",
+                            "end_time": "12:30",
+                            "title": "会议",
+                        }
+                    ],
                 },
             )
         )
@@ -1515,7 +1795,51 @@ def test_milk_schedule_proposal_is_owner_scoped_and_contains_freshness_guards() 
     update = runtime_service.calls[0]["apply_payload"]["updates"][0]
     assert update["task_id"] == str(plans_service.tasks[1].id)
     assert update["expected_task_time"] == "11:00"
+    assert runtime_service.calls[0]["apply_payload"]["calendar_events"] == [
+        {
+            "date": "2026-07-14",
+            "start_time": "10:30",
+            "end_time": "12:30",
+            "title": "会议",
+            "duration_minutes": 120,
+        }
+    ]
+    assert result["calendar_event_count"] == 1
     assert result["_deferred_agent_events"][0]["event_type"] == "artifact.created"
+
+
+def test_milk_schedule_proposal_keeps_a_new_calendar_event_when_no_milk_task_moves() -> None:
+    actor = _user()
+    runtime_service = FakeAgentRuntimeService()
+    plans_service = FakeMilkSchedulePlansService(owner_user_id=actor.user_id)
+
+    result = asyncio.run(
+        MilkScheduleRescheduleProposeToolHandler(
+            runtime_service=runtime_service,
+            plans_service=plans_service,
+        )(
+            _context(
+                actor=actor,
+                args={
+                    "plan_id": str(plans_service.plan.id),
+                    "calendar_events": [
+                        {
+                            "date": "2026-07-14",
+                            "start_time": "16:00",
+                            "end_time": "17:00",
+                            "title": "晚餐",
+                        }
+                    ],
+                },
+            )
+        )
+    )
+
+    assert result["action_status"] == "confirmation_required"
+    assert result["updated_count"] == 0
+    assert result["calendar_event_count"] == 1
+    assert result["affected_dates"] == ["2026-07-14"]
+    assert runtime_service.action.apply_payload["updates"] == []
 
 
 def test_ibclc_card_handler_creates_artifact() -> None:
@@ -2662,6 +2986,35 @@ def test_plan_task_complete_propose_tool_handler_creates_confirmation_action() -
     assert runtime_service.calls[0]["apply_payload"]["metadata"] == {"timezone": "Asia/Shanghai"}
 
 
+def test_pregnancy_plan_todo_update_propose_targets_embedded_plan_item() -> None:
+    runtime_service = FakeAgentRuntimeService()
+    plan_id = uuid4()
+
+    result = asyncio.run(
+        PregnancyPlanTodoUpdateProposeToolHandler(runtime_service=runtime_service)(
+            _context(
+                args={
+                    "plan_id": str(plan_id),
+                    "item_id": "prepare-hospital-bag",
+                    "completed": True,
+                    "expected_version": 2,
+                }
+            )
+        )
+    )
+
+    assert result["action_type"] == PREGNANCY_PLAN_TODO_UPDATE_ACTION
+    assert result["action_status"] == "applied"
+    assert result["preview_payload"] == {
+        "plan_id": str(plan_id),
+        "item_id": "prepare-hospital-bag",
+        "completed": True,
+        "expected_version": 2,
+    }
+    assert runtime_service.calls[-1]["target_type"] == "plan"
+    assert runtime_service.calls[-1]["target_id"] == str(plan_id)
+
+
 def test_plan_task_update_delete_and_plan_delete_tool_handlers_create_confirmation_actions() -> None:
     actor = _user()
     runtime_service = FakeAgentRuntimeService()
@@ -2852,23 +3205,53 @@ def test_feeding_and_pumping_record_propose_tool_handlers_require_quantity() -> 
     assert pumping_exc.value.code == "validation_failed"
 
 
-def test_milk_plan_propose_tool_handler_requires_title() -> None:
-    with pytest.raises(ApiError) as exc_info:
-        asyncio.run(MilkPlanProposeToolHandler(runtime_service=FakeAgentRuntimeService())(_context(args={})))
-
-    assert exc_info.value.code == "validation_failed"
-
-
-def test_milk_plan_propose_rejects_unschedulable_tasks_before_confirmation() -> None:
+def test_milk_plan_propose_tool_handler_requires_direction() -> None:
+    actor = _user()
     with pytest.raises(ApiError) as exc_info:
         asyncio.run(
-            MilkPlanProposeToolHandler(runtime_service=FakeAgentRuntimeService())(
-                _context(args={"title": "Broken plan", "tasks": [{"title": "Missing time"}]})
-            )
+            MilkPlanProposeToolHandler(
+                runtime_service=FakeAgentRuntimeService(),
+                plans_service=FakePlansService(owner_user_id=actor.user_id),
+            )(_context(actor=actor, args={}))
         )
 
     assert exc_info.value.code == "validation_failed"
-    assert "HH:mm" in exc_info.value.message
+
+
+def test_milk_plan_propose_rejects_invalid_preferred_time_before_confirmation() -> None:
+    actor = _user()
+    runtime_service = FakeAgentRuntimeService()
+    context = _context(actor=actor, args={"direction": "maintain", "preferred_pumping_times": ["25:00"]})
+    analysis_context = {"records_snapshot": {"status": "normal"}, "answers": {}}
+    runtime_service.workflow_state = AgentWorkflowState(
+        id=uuid4(),
+        thread_id=context.thread_id,
+        owner_user_id=actor.user_id,
+        run_id=context.run_id,
+        workflow_type="milk_analysis",
+        status="ready",
+        schema_version="milk_analysis.v1",
+        state={
+            "phase": "assessment_complete",
+            "assessment": {
+                "analysis_context": analysis_context,
+                "analysis_context_fingerprint": milk_analysis_context_fingerprint(analysis_context),
+                "valid_until": (datetime.now(timezone.utc) + timedelta(minutes=20)).isoformat(),
+                "plan_decision": {"can_start_plan": True, "recommended_direction": "maintain"},
+            },
+        },
+        active_step="assessment_complete",
+    )
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            MilkPlanProposeToolHandler(
+                runtime_service=runtime_service,
+                plans_service=FakePlansService(owner_user_id=actor.user_id),
+            )(context)
+        )
+
+    assert exc_info.value.code == "validation_failed"
+    assert "preferred" in exc_info.value.message
 
 
 def test_plan_task_propose_tool_handlers_require_required_fields() -> None:
@@ -2984,7 +3367,7 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
         "devices.guidance.read",
         "devices.pump_status.read",
         "devices.unboxing.advance",
-        "images.inspect",
+        "conversation_history.image.load",
         "notifications.milk_reminder.propose",
         "plans.milk_plan.propose",
         "plans.milk_schedule.propose",
@@ -3000,6 +3383,7 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
         "pregnancy.plan_intake.advance",
         "pregnancy.plan_intake.start",
         "pregnancy.plan.propose",
+        "pregnancy.plan_todo.propose",
         "records.feeding_record.propose",
         "records.pumping_record.propose",
         "support.ticket.propose",
@@ -3081,9 +3465,17 @@ class FakeRecordsService:
         self.owner_user_id = None
         self._owner_user_id = owner_user_id
         self.growth_infant_id = None
+        self.feeding_query = {}
+        self.pumping_query = {}
 
-    async def list_feedings(self, *, owner_user_id, limit):
+    async def list_feedings(self, *, owner_user_id, start_at=None, end_at=None, limit):
         self.owner_user_id = owner_user_id
+        self.feeding_query = {
+            "owner_user_id": owner_user_id,
+            "start_at": start_at,
+            "end_at": end_at,
+            "limit": limit,
+        }
         return [
             FeedingRecord(
                 id=uuid4(),
@@ -3098,7 +3490,13 @@ class FakeRecordsService:
             )
         ]
 
-    async def list_pumpings(self, *, owner_user_id, limit):
+    async def list_pumpings(self, *, owner_user_id, start_at=None, end_at=None, limit):
+        self.pumping_query = {
+            "owner_user_id": owner_user_id,
+            "start_at": start_at,
+            "end_at": end_at,
+            "limit": limit,
+        }
         return [
             PumpingRecord(
                 id=uuid4(),
@@ -3149,6 +3547,8 @@ class FakePlansService:
         self.task_status = None
         self.limit = None
         self.plan_payload = {}
+        self.future_milk_tasks = []
+        self.future_milk_tasks_query = {}
 
     async def list_plans(self, *, owner_user_id, limit, status="active", plan_type=""):
         self.owner_user_id = owner_user_id
@@ -3185,6 +3585,10 @@ class FakePlansService:
                 status="pending",
             )
         ]
+
+    async def list_future_milk_plan_tasks(self, **kwargs):
+        self.future_milk_tasks_query = kwargs
+        return self.future_milk_tasks
 
 
 class FakeMilkSchedulePlansService:
@@ -3469,6 +3873,7 @@ class FakeAgentRuntimeService:
                         "records.growth_record.update",
                         "records.growth_record.delete",
                         "pregnancy.plan.create",
+                        "pregnancy.plan_todo.update",
                         "plans.task.create",
                         "plans.task.complete",
                         "plans.task.update",

@@ -40,7 +40,7 @@ def _complete_intake(
     return workflow
 
 
-def test_six_step_intake_is_ordered_and_only_advances_one_answer_at_a_time() -> None:
+def test_six_step_intake_is_ordered_and_advances_the_current_answer() -> None:
     workflow = initialize_milk_analysis_intake(records_snapshot=_records_snapshot())
 
     assert [item["id"] for item in workflow["checklist"]] == list(MILK_ANALYSIS_FIELDS)
@@ -53,6 +53,106 @@ def test_six_step_intake_is_ordered_and_only_advances_one_answer_at_a_time() -> 
     assert advanced["answers"] == {"infant_wet_diapers": "24 小时有 7 片湿尿布"}
     assert advanced["current_field"] == "infant_state_or_satisfaction"
     assert advanced["progress"]["index"] == 3
+
+
+def test_intake_absorbs_multiple_model_classified_answers_from_one_turn() -> None:
+    workflow = initialize_milk_analysis_intake(records_snapshot=_records_snapshot())
+
+    advanced = advance_milk_analysis_intake(
+        workflow,
+        answers={
+            "infant_wet_diapers": "近 24 小时有 7 片湿尿布",
+            "infant_state_or_satisfaction": "精神很好，吃完能安稳",
+            "infant_growth_signal": "最近体重增长正常",
+        },
+    )
+
+    assert advanced["answers"] == {
+        "infant_wet_diapers": "近 24 小时有 7 片湿尿布",
+        "infant_state_or_satisfaction": "精神很好，吃完能安稳",
+        "infant_growth_signal": "最近体重增长正常",
+    }
+    assert advanced["current_field"] == "maternal_red_flags"
+    assert advanced["progress"] == {"index": 5, "total": 6, "completed_count": 4, "remaining_count": 2}
+
+
+def test_later_partial_safety_answer_preserves_previously_observed_red_flags() -> None:
+    workflow = initialize_milk_analysis_intake(records_snapshot=_records_snapshot())
+    workflow = advance_milk_analysis_intake(
+        workflow,
+        answers={
+            "infant_wet_diapers": "近 24 小时有 7 片湿尿布",
+            "infant_state_or_satisfaction": "精神很好，吃完能安稳",
+            "infant_growth_signal": "最近体重增长正常",
+            "maternal_red_flags": "有寒战和硬块",
+        },
+    )
+
+    completed = advance_milk_analysis_intake(
+        workflow,
+        answers={
+            "maternal_red_flags": "没有发烧",
+            "maternal_breast_comfort": "吸完舒服些",
+        },
+    )
+    assessment = build_milk_analysis_assessment(completed)
+
+    assert "有寒战和硬块" in completed["answers"]["maternal_red_flags"]
+    assert "没有发烧" in completed["answers"]["maternal_red_flags"]
+    assert assessment["risk"]["maternal_red_flags"] is True
+    assert assessment["plan_decision"]["can_start_plan"] is False
+
+
+def test_explicit_safety_correction_can_replace_previous_red_flag_evidence() -> None:
+    workflow = initialize_milk_analysis_intake(records_snapshot=_records_snapshot())
+    workflow = advance_milk_analysis_intake(
+        workflow,
+        answers={
+            "infant_wet_diapers": "近 24 小时有 7 片湿尿布",
+            "infant_state_or_satisfaction": "精神很好，吃完能安稳",
+            "infant_growth_signal": "最近体重增长正常",
+            "maternal_red_flags": "有寒战和硬块",
+        },
+    )
+
+    completed = advance_milk_analysis_intake(
+        workflow,
+        answers={
+            "maternal_red_flags": "我刚才说错了，其实没有寒战和硬块",
+            "maternal_breast_comfort": "吸完舒服些",
+        },
+    )
+    assessment = build_milk_analysis_assessment(completed)
+
+    assert completed["answers"]["maternal_red_flags"] == "我刚才说错了，其实没有寒战和硬块"
+    assert assessment["risk"]["maternal_red_flags"] is False
+    assert assessment["plan_decision"]["can_start_plan"] is True
+
+
+def test_partial_safety_correction_does_not_clear_other_previous_red_flags() -> None:
+    workflow = initialize_milk_analysis_intake(records_snapshot=_records_snapshot())
+    workflow = advance_milk_analysis_intake(
+        workflow,
+        answers={
+            "infant_wet_diapers": "近 24 小时有 7 片湿尿布",
+            "infant_state_or_satisfaction": "精神很好，吃完能安稳",
+            "infant_growth_signal": "最近体重增长正常",
+            "maternal_red_flags": "有发烧和硬块",
+        },
+    )
+
+    completed = advance_milk_analysis_intake(
+        workflow,
+        answers={
+            "maternal_red_flags": "纠正一下，其实没有发烧",
+            "maternal_breast_comfort": "吸完舒服些",
+        },
+    )
+    assessment = build_milk_analysis_assessment(completed)
+
+    assert "有发烧和硬块" in completed["answers"]["maternal_red_flags"]
+    assert assessment["risk"]["maternal_red_flags"] is True
+    assert assessment["plan_decision"]["can_start_plan"] is False
 
 
 def test_assessment_requires_complete_intake_and_fingerprints_the_exact_context() -> None:

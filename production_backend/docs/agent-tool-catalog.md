@@ -2,7 +2,7 @@
 
 本文档是当前 MomCozy Agent 模型可见工具与 namespace 的审查快照，便于评审工具是否必要、命名是否清晰、分组是否合理，以及后续变更是否意外扩大模型工具面。
 
-快照基线：`feat/test1`，2026-07-12，以本文档所在 commit 为准。
+快照基线：`feat/test1`，2026-07-16，以本文档所在 commit 为准。
 
 ## 1. 口径与运行时语义
 
@@ -35,7 +35,7 @@
 | `load_service_skill` | `load_service_skill` | eager | read | 否 | 用户请求需要进入服务流程且技能尚未驻留时，按 `service_skill_id` 加载技能说明、建议工具和业务事实包。 |
 | `profile.read` | `profile_read` | eager | read | 否 | 用户问题或后续动作需要核对姓名、年龄、孕产状态或宝宝资料时，读取当前用户及宝宝的资料投影。 |
 | `profile_update` | `profile_update` | eager | write | 否 | 用户明确提供或更正姓名、年龄或 onboarding 状态时更新资料。 |
-| `images.inspect` | `images_inspect` | eager | read | 否 | 用户询问当前可见历史中的某张图片时，由模型选择对应 `image_url`，让当前 agent loop 追加图片并进行多模态理解。 |
+| `conversation_history.image.load` | `conversation_history_image_load` | eager | read | 否 | 用户追问此前智能体回复中展示的某张图片时，由模型选择对应 `image_url`，将该历史图片重新加载到当前 agent loop 进行多模态理解。 |
 
 ## 3. 全局 Namespace
 
@@ -66,7 +66,8 @@
 | `records.growth_record_delete.propose` | `records_growth_record_delete_propose` | deferred | write | 否 | 用户明确要求且 owner-scoped 记录唯一确定时同步软删除。 |
 | `plans.current.read` | `plans_current_read` | eager | read | 否 | 用户查看当前计划、待办或后续安排时读取生效计划和近期任务。 |
 | `plans.calendar.read` | `plans_calendar_read` | eager | read | 否 | 用户询问某天安排、待完成事项或任务状态时按日期和状态读取日程。 |
-| `plans.milk_plan.propose` | `plans_milk_plan_propose` | deferred | write | 是 | 用户明确希望制定泌乳、喂养或吸奶计划时创建含日期、时间和类型的待确认日程草稿；确认后 Plan 与展开的 PlanTask 同事务写入。 |
+| `plans.milk_plan.propose` | `plans_milk_plan_propose` | deferred | write | 是 | 用户确认奶量计划方向后提交方向和明确约束，由 runtime 生成待确认的可执行计划；覆盖日期已有未来任务时，必须由用户明确选择追加或替换，确认后同事务写入 Plan 与 PlanTask。 |
+| `plans.milk_schedule.propose` | `plans_milk_schedule_propose` | deferred | write | 是 | 用户新增生活事项或要求避开已有不可用时段时生成奶量日程重排预览；确认后新增事项与奶量任务调整在同一事务写入。 |
 | `plans.task_complete.propose` | `plans_task_complete_propose` | deferred | write | 否 | 用户明确表示唯一指定的单项任务已完成/取消完成时同步更新。 |
 | `plans.task_create.propose` | `plans_task_create_propose` | deferred | write | 否 | 用户明确要求新增一项内容和归属清晰的待办时同步创建；批量或含糊范围先澄清。 |
 | `notifications.milk_reminder.propose` | `notifications_milk_reminder_propose` | deferred | write | 是 | 用户要求在指定时间收到奶量、喂养或吸奶提醒时创建确认。 |
@@ -79,6 +80,7 @@
 | `pregnancy.plan_intake.analyze` | `pregnancy_plan_intake_analyze` | deferred | write | 否 | 只消费应用侧已校验的孕期计划表单提交，按风险/信息缺口进入 0..3 轮不重复个性化追问或产检资料步骤。 |
 | `pregnancy.plan_intake.advance` | `pregnancy_plan_intake_advance` | deferred | write | 否 | 只推进当前可信步骤：个性化追问、孕早期产检确认、当前 run 附件上传/跳过、最终补充确认。 |
 | `pregnancy.plan.propose` | `pregnancy_plan_propose` | deferred | write | 否 | intake 完成产检资料步骤并进入 `ready_to_generate` 后，在当前 agent tool 事务中基于可信快照同步创建计划；失败时返回明确失败且不消费 workflow。 |
+| `pregnancy.plan_todo.propose` | `pregnancy_plan_todo_propose` | deferred | write | 否 | 用户明确完成或取消完成当前孕期计划事项，且可信上下文能唯一提供 `plan_id`、`item_id` 与 `version` 时同步更新嵌入卡片的待办状态。 |
 | `plans.plan_delete.propose` | `plans_plan_delete_propose` | deferred | write | 否 | 用户当前明确删除且 owner-scoped `plan_id` 唯一确定时立即同步删除，不再追加口头/通用确认；仅目标含糊时澄清。 |
 | `plans.task_update.propose` | `plans_task_update_propose` | deferred | write | 否 | 用户明确调整 owner-scoped 唯一单项任务时同步更新；批量修改不走该工具。 |
 | `plans.task_delete.propose` | `plans_task_delete_propose` | deferred | write | 否 | 用户明确删除 owner-scoped 唯一单项任务时同步软删除；目标含糊时先澄清。 |
@@ -129,12 +131,12 @@ service skill 只通过 `recommended_tools` 向模型提示常用工具，不拥
 | Service skill | 当前 recommended tool contract |
 | --- | --- |
 | `milk-management` | `milk_management` namespace 的全部 17 个工具 |
-| `birth-prep` | `pregnancy.plan_intake.start`、`pregnancy.plan_intake.analyze`、`pregnancy.plan_intake.advance`、`pregnancy.plan.propose`、`plans.plan_delete.propose`、`plans.task_complete.propose`、`plans.task_update.propose`、`plans.task_delete.propose`、4 个分娩沟通/待产包表单与卡片工具、`hospital_bag_cart_update`、`hospital_bag_pump_recommend` |
+| `birth-prep` | `pregnancy.plan_intake.start`、`pregnancy.plan_intake.analyze`、`pregnancy.plan_intake.advance`、`pregnancy.plan.propose`、`pregnancy.plan_todo.propose`、`plans.plan_delete.propose`、`plans.task_update.propose`、`plans.task_delete.propose`、4 个分娩沟通/待产包表单与卡片工具、`hospital_bag_cart_update`、`hospital_bag_pump_recommend` |
 | `health-consultation` | `records.milk_status.read`、`ibclc_consult_card_create` |
 | `emotion-support` | 空；当前没有专属 recommended tool |
 | `device-guidance` | `device_support` namespace 的全部 3 个工具 |
 
-这张映射刻意允许跨 namespace 推荐。例如 `birth-prep` 可以推荐位于 `milk_management` 的 `plans.task_complete.propose`，`health-consultation` 可以推荐位于 `milk_management` 的 `records.milk_status.read`。
+这张映射刻意允许跨 namespace 推荐。例如 `health-consultation` 可以推荐位于 `milk_management` 的 `records.milk_status.read`；孕期计划卡片待办则使用 `birth_prep` 自己的 `pregnancy.plan_todo.propose`，不与普通 `PlanTask` 混用 ID。
 
 孕期日记工具不出现在任何 skill 的 `recommended_tools` 中。它由全局 `pregnancy_diary` namespace 独立提供，不参与 skill 加载、驻留或业务事实投影。
 
