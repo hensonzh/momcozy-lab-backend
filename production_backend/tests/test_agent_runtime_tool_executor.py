@@ -807,14 +807,14 @@ def test_tool_executor_returns_model_context_without_persisting_it() -> None:
     executor = ToolExecutor(
         registry=default_tool_registry(),
         repository=repository,
-        handlers={"images.inspect": image_context_handler},
+        handlers={"conversation_history.image.load": image_context_handler},
     )
 
     result = asyncio.run(
         executor.execute(
             actor=actor,
             run_id=uuid4(),
-            tool_name="images.inspect",
+            tool_name="conversation_history.image.load",
             call_id="call-image",
             args={"image_url": "/v1/assets/asset-image"},
         )

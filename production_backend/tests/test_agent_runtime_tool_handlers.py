@@ -8,6 +8,7 @@ from production_backend.app.core.errors import ApiError
 from production_backend.app.modules.agent_runtime.models import AgentAction, AgentArtifact, AgentWorkflowState
 from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.tools import (
     BusinessContextReadToolHandler,
+    ConversationHistoryImageLoadToolHandler,
     DeviceGuidanceReadToolHandler,
     DeviceUnboxingAdvanceToolHandler,
     DevicesPumpStatusReadToolHandler,
@@ -21,7 +22,6 @@ from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.
     HospitalBagCartUpdateProposeToolHandler,
     HospitalBagFormCreateToolHandler,
     IbclcConsultCardCreateToolHandler,
-    ImageInspectToolHandler,
     LegacyArtifactToolHandler,
     MilkAnalysisEvaluateToolHandler,
     MilkAnalysisIntakeToolHandler,
@@ -1285,9 +1285,12 @@ def test_device_unboxing_advance_tool_completes_current_step_and_returns_next_st
     assert runtime_service.workflow_state.active_step == "guide.controls"
 
 
-def test_image_inspect_tool_handler_loads_visible_packaged_image_as_transient_model_context() -> None:
+def test_conversation_history_image_load_handler_adds_visible_image_to_model_context() -> None:
     storage = FakeImageObjectStorage(body=b"image")
-    handler = ImageInspectToolHandler(asset_service=FakeImageAssetService(), object_storage=storage)
+    handler = ConversationHistoryImageLoadToolHandler(
+        asset_service=FakeImageAssetService(),
+        object_storage=storage,
+    )
     image_url = "/skill-assets/device-guidance/air1/images/guide.png"
 
     result = asyncio.run(
@@ -1314,7 +1317,7 @@ def test_image_inspect_tool_handler_loads_visible_packaged_image_as_transient_mo
             "content": [
                 {
                     "type": "input_text",
-                    "text": "这是你选择查看的历史图片。请结合当前用户问题，只依据图片中可见内容回答。",
+                    "text": "这是当前对话历史中由智能体此前展示的目标图片。请结合当前用户问题，只依据图片中可见内容回答。",
                 },
                 {
                     "type": "input_image",
@@ -1326,8 +1329,8 @@ def test_image_inspect_tool_handler_loads_visible_packaged_image_as_transient_mo
     )
 
 
-def test_image_inspect_tool_handler_rejects_url_not_visible_to_model() -> None:
-    handler = ImageInspectToolHandler(
+def test_conversation_history_image_load_handler_rejects_url_not_visible_to_model() -> None:
+    handler = ConversationHistoryImageLoadToolHandler(
         asset_service=FakeImageAssetService(),
         object_storage=FakeImageObjectStorage(body=b"image"),
     )
@@ -3364,7 +3367,7 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
         "devices.guidance.read",
         "devices.pump_status.read",
         "devices.unboxing.advance",
-        "images.inspect",
+        "conversation_history.image.load",
         "notifications.milk_reminder.propose",
         "plans.milk_plan.propose",
         "plans.milk_schedule.propose",

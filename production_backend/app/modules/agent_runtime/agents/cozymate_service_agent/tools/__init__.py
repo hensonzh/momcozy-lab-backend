@@ -2,6 +2,7 @@ from .contracts import ToolContract
 from .executor import RetainedToolInformation, ToolExecutionResult, ToolExecutor, ToolHandlerContext, ToolHandlerResult
 from .handlers import (
     BusinessContextReadToolHandler,
+    ConversationHistoryImageLoadToolHandler,
     DeviceGuidanceReadToolHandler,
     DeviceUnboxingAdvanceToolHandler,
     DevicesPumpStatusReadToolHandler,
@@ -15,7 +16,6 @@ from .handlers import (
     HospitalBagCartUpdateProposeToolHandler,
     HospitalBagFormCreateToolHandler,
     IbclcConsultCardCreateToolHandler,
-    ImageInspectToolHandler,
     LegacyArtifactToolHandler,
     MilkAnalysisReadToolHandler,
     MilkAnalysisIntakeToolHandler,
@@ -51,6 +51,7 @@ from .namespaces import ToolNamespace, ToolNamespaceRegistry, default_tool_names
 
 __all__ = [
     "BusinessContextReadToolHandler",
+    "ConversationHistoryImageLoadToolHandler",
     "DeviceGuidanceReadToolHandler",
     "DeviceUnboxingAdvanceToolHandler",
     "DevicesPumpStatusReadToolHandler",
@@ -64,7 +65,6 @@ __all__ = [
     "HospitalBagCartUpdateProposeToolHandler",
     "HospitalBagFormCreateToolHandler",
     "IbclcConsultCardCreateToolHandler",
-    "ImageInspectToolHandler",
     "LegacyArtifactToolHandler",
     "MilkAnalysisReadToolHandler",
     "MilkAnalysisIntakeToolHandler",

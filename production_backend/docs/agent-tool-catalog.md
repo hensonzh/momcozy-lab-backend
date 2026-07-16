@@ -2,7 +2,7 @@
 
 本文档是当前 MomCozy Agent 模型可见工具与 namespace 的审查快照，便于评审工具是否必要、命名是否清晰、分组是否合理，以及后续变更是否意外扩大模型工具面。
 
-快照基线：`feat/test1`，2026-07-12，以本文档所在 commit 为准。
+快照基线：`feat/test1`，2026-07-16，以本文档所在 commit 为准。
 
 ## 1. 口径与运行时语义
 
@@ -35,7 +35,7 @@
 | `load_service_skill` | `load_service_skill` | eager | read | 否 | 用户请求需要进入服务流程且技能尚未驻留时，按 `service_skill_id` 加载技能说明、建议工具和业务事实包。 |
 | `profile.read` | `profile_read` | eager | read | 否 | 用户问题或后续动作需要核对姓名、年龄、孕产状态或宝宝资料时，读取当前用户及宝宝的资料投影。 |
 | `profile_update` | `profile_update` | eager | write | 否 | 用户明确提供或更正姓名、年龄或 onboarding 状态时更新资料。 |
-| `images.inspect` | `images_inspect` | eager | read | 否 | 用户询问当前可见历史中的某张图片时，由模型选择对应 `image_url`，让当前 agent loop 追加图片并进行多模态理解。 |
+| `conversation_history.image.load` | `conversation_history_image_load` | eager | read | 否 | 用户追问此前智能体回复中展示的某张图片时，由模型选择对应 `image_url`，将该历史图片重新加载到当前 agent loop 进行多模态理解。 |
 
 ## 3. 全局 Namespace
 

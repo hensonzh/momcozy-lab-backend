@@ -306,11 +306,11 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="images.inspect",
+            name="conversation_history.image.load",
             domain="images",
             description=(
-                "查看当前可见对话历史中已经展示过的一张图片。"
-                "用户询问上图、这张图或历史回复中某张具体图片的可见内容时调用，并传入对应 image_url。"
+                "将当前可见对话历史中由智能体回复展示过的一张图片重新加载到本轮模型上下文。"
+                "当用户追问此前智能体回复里的某张图片内容，需要基于该历史图片进行视觉理解时调用。"
             ),
             loading_mode="eager",
             read_or_write="read",

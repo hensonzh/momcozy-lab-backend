@@ -1671,7 +1671,7 @@ class DeviceUnboxingAdvanceToolHandler:
         )
 
 
-class ImageInspectToolHandler:
+class ConversationHistoryImageLoadToolHandler:
     def __init__(self, *, asset_service: ProductAssetService, object_storage: ObjectStorage | None) -> None:
         self.asset_service = asset_service
         self.object_storage = object_storage
@@ -1721,7 +1721,7 @@ class ImageInspectToolHandler:
                     "content": [
                         {
                             "type": "input_text",
-                            "text": "这是你选择查看的历史图片。请结合当前用户问题，只依据图片中可见内容回答。",
+                            "text": "这是当前对话历史中由智能体此前展示的目标图片。请结合当前用户问题，只依据图片中可见内容回答。",
                         },
                         {
                             "type": "input_image",
@@ -2489,7 +2489,10 @@ def build_default_tool_handlers(
             asset_service=asset_service,
             reference_service=guidance_reference_service,
         ),
-        "images.inspect": ImageInspectToolHandler(asset_service=asset_service, object_storage=object_storage),
+        "conversation_history.image.load": ConversationHistoryImageLoadToolHandler(
+            asset_service=asset_service,
+            object_storage=object_storage,
+        ),
         "plans.milk_plan.propose": MilkPlanProposeToolHandler(
             runtime_service=agent_runtime_service,
             plans_service=plans_service,

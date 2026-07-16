@@ -1217,6 +1217,7 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert backend.tool_names == (
         "load_service_skill",
         "birth_plan_form_create",
+        "conversation_history_image_load",
         "devices_guidance_read",
         "devices_pump_status_read",
         "devices_unboxing_advance",
@@ -1225,7 +1226,6 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
         "hospital_bag_form_create",
         "hospital_bag_pump_recommend",
         "ibclc_consult_card_create",
-        "images_inspect",
         "labor_communication_card_create",
         "notifications_milk_reminder_propose",
         "plans_calendar_read",
@@ -1279,7 +1279,7 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert backend.tool_schemas["pregnancy_diary_manage"]["properties"]["limit"]["maximum"] == 30
     assert backend.tool_schemas["pregnancy_diary_manage"]["properties"]["content"]["maxLength"] == 5000
     assert backend.tool_schemas["pregnancy_diary_manage"]["properties"]["confirmed"]["default"] is False
-    assert backend.tool_schemas["images_inspect"]["required"] == ["image_url"]
+    assert backend.tool_schemas["conversation_history_image_load"]["required"] == ["image_url"]
     assert backend.tool_schemas["hospital_bag_cart_update"]["additionalProperties"] is False
     assert "groups" not in backend.tool_schemas["hospital_bag_cart_update"]["properties"]
     assert backend.tool_schemas["notifications_milk_reminder_propose"]["required"] == ["title"]
@@ -1371,7 +1371,7 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert backend.tool_namespaces["pregnancy_diary"]["deferred_tool_names"] == []
     assert backend.tool_namespace_by_contract["profile.read"] == ""
     assert backend.tool_namespace_by_contract["profile_update"] == ""
-    assert backend.tool_namespace_by_contract["images.inspect"] == ""
+    assert backend.tool_namespace_by_contract["conversation_history.image.load"] == ""
     assert backend.tool_namespace_by_contract["records.milk_status.read"] == "milk_management"
     assert backend.tool_namespace_by_contract["pregnancy_diary.manage"] == "pregnancy_diary"
     assert backend.tool_deferred_by_contract["records.milk_status.read"] is False
@@ -1454,7 +1454,7 @@ def test_agent_runtime_executor_adds_model_selected_visible_image_to_current_loo
         safe_output={"status": "image_context_ready", "image_url": image_url, "detail": "low"},
         model_context=model_context,
     )
-    backend = ImageInspectingSdkBackend(image_url=image_url)
+    backend = ConversationHistoryImageLoadingSdkBackend(image_url=image_url)
 
     result = asyncio.run(
         AgentRuntimeExecutor(
@@ -4554,13 +4554,15 @@ class CapturingDiaryToolOutputSdkBackend:
         return SdkNodeResult(final_text="我已经读到这篇日记。")
 
 
-class ImageInspectingSdkBackend:
+class ConversationHistoryImageLoadingSdkBackend:
     def __init__(self, *, image_url: str) -> None:
         self.image_url = image_url
         self.model_context = ()
 
     async def run(self, request: SdkNodeRequest) -> SdkNodeResult:
-        image_tool = next(tool for tool in request.tools if tool.contract_name == "images.inspect")
+        image_tool = next(
+            tool for tool in request.tools if tool.contract_name == "conversation_history.image.load"
+        )
         invocation = await image_tool.invoke(json.dumps({"image_url": self.image_url}))
         self.model_context = invocation.model_context
         return SdkNodeResult(final_text="图中有四个主要部件。")

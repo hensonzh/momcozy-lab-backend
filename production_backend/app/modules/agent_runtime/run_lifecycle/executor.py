@@ -110,7 +110,7 @@ from .working_context import (
 
 
 LOAD_SERVICE_SKILL_TOOL_NAME = "load_service_skill"
-IMAGE_INSPECT_TOOL_NAME = "images.inspect"
+CONVERSATION_HISTORY_IMAGE_LOAD_TOOL_NAME = "conversation_history.image.load"
 COZYMATE_AGENT_ID = "cozymate_service_agent"
 LOGGER = logging.getLogger("production_backend.agent_runtime.executor")
 DEFAULT_RESIDENT_SERVICE_SKILL_TTL_TURNS = 3
@@ -1218,7 +1218,7 @@ class AgentRuntimeExecutor:
                 "trusted_current_user_text": self._run_current_user_text.get(run.id, ""),
                 "trusted_previous_assistant_text": self._run_previous_assistant_text.get(run.id, ""),
             }
-        if contract_name == IMAGE_INSPECT_TOOL_NAME:
+        if contract_name == CONVERSATION_HISTORY_IMAGE_LOAD_TOOL_NAME:
             return {"visible_image_urls": list(self._run_visible_image_urls.get(run.id, ()))}
         return {}
 

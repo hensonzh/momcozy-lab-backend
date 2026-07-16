@@ -143,21 +143,21 @@ def test_pregnancy_diary_semantics_follow_action_and_result(
     assert completed["label"] == completed_label
 
 
-def test_image_inspect_tool_event_semantic_uses_image_copy() -> None:
+def test_conversation_history_image_load_event_semantic_uses_history_image_copy() -> None:
     started = tool_event_semantic(
         event_type="tool.started",
-        tool_name="images.inspect",
+        tool_name="conversation_history.image.load",
         read_or_write="read",
     )
     completed = tool_event_semantic(
         event_type="tool.completed",
-        tool_name="images.inspect",
+        tool_name="conversation_history.image.load",
         safe_output={"status": "image_context_ready"},
         read_or_write="read",
     )
 
-    assert started["label"] == "我先看看图片内容～"
-    assert completed["label"] == "我把图片内容看好啦"
+    assert started["label"] == "我回看一下之前的图片～"
+    assert completed["label"] == "我看清之前那张图片啦"
 
 
 def test_tool_event_semantic_maps_confirmation_outputs() -> None:

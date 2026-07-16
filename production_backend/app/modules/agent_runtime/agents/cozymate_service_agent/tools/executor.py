@@ -809,7 +809,7 @@ def _tool_event_label(tool_name: str, payload: dict[str, Any] | None = None) -> 
         "devices.pump_status.read": "设备状态",
         "devices.guidance.read": "设备指导资料",
         "devices.unboxing.advance": "设备开箱步骤",
-        "images.inspect": "图片内容",
+        "conversation_history.image.load": "历史图片",
         "birth_plan_form_create": "我先帮你准备确认内容～",
         "labor_communication_card_create": "我先帮你整理分娩沟通单～",
         "hospital_bag_form_create": "我先帮你准备确认内容～",

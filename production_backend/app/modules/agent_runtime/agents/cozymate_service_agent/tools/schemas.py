@@ -306,7 +306,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             },
         },
     },
-    "images.inspect": {
+    "conversation_history.image.load": {
         "type": "object",
         "additionalProperties": False,
         "required": ["image_url"],
@@ -315,7 +315,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 2048,
-                "description": "当前可见对话历史中已经展示过的图片 URL。",
+                "description": "当前可见对话历史中由智能体此前回复展示过的目标图片 URL。",
             },
             "detail": {
                 "type": "string",

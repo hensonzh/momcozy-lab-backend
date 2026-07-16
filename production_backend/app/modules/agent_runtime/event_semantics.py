@@ -511,10 +511,10 @@ _TOOL_COPY: dict[str, dict[str, str]] = {
         "started": "我继续带你完成这一步～",
         "completed": "这一步已经衔接好啦",
     },
-    "images.inspect": {
+    "conversation_history.image.load": {
         "phase": "reading",
-        "started": "我先看看图片内容～",
-        "completed": "我把图片内容看好啦",
+        "started": "我回看一下之前的图片～",
+        "completed": "我看清之前那张图片啦",
     },
     "birth_plan_form_create": {
         "phase": "planning",

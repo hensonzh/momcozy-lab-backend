@@ -400,7 +400,7 @@ def test_tool_contracts_are_exported_as_responses_namespaces() -> None:
 
     assert len(assigned_contracts) == len(set(assigned_contracts))
     assert root_contracts == [
-        "images.inspect",
+        "conversation_history.image.load",
         "load_service_skill",
         "profile.read",
         "profile_update",
@@ -488,7 +488,8 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
     diary_schema = registry.get("pregnancy_diary.manage").input_schema
     devices_schema = registry.get("devices.pump_status.read").input_schema
     device_guidance_schema = registry.get("devices.guidance.read").input_schema
-    image_inspect_schema = registry.get("images.inspect").input_schema
+    history_image_contract = registry.get("conversation_history.image.load")
+    history_image_schema = history_image_contract.input_schema
     milk_plan_schema = registry.get("plans.milk_plan.propose").input_schema
     milk_schedule_schema = registry.get("plans.milk_schedule.propose").input_schema
     pregnancy_plan_schema = registry.get("pregnancy.plan.propose").input_schema
@@ -572,8 +573,12 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
     assert device_guidance_schema["properties"]["model"]["type"] == "string"
     assert device_guidance_schema["properties"]["topic"]["type"] == "string"
     assert device_guidance_schema["properties"]["measured_nipple_mm"]["type"] == "number"
-    assert image_inspect_schema["required"] == ["image_url"]
-    assert image_inspect_schema["properties"]["detail"]["enum"] == ["low", "high"]
+    assert history_image_schema["required"] == ["image_url"]
+    assert history_image_schema["properties"]["detail"]["enum"] == ["low", "high"]
+    assert history_image_contract.description == (
+        "将当前可见对话历史中由智能体回复展示过的一张图片重新加载到本轮模型上下文。"
+        "当用户追问此前智能体回复里的某张图片内容，需要基于该历史图片进行视觉理解时调用。"
+    )
     assert milk_plan_schema["additionalProperties"] is False
     assert milk_plan_schema["required"] == ["direction"]
     assert "payload" not in milk_plan_schema["properties"]
@@ -1360,7 +1365,7 @@ def test_responses_runner_preserves_multimodal_context_added_after_tool_output(m
                 output=[
                     {
                         "type": "function_call",
-                        "name": "images_inspect",
+                        "name": "conversation_history_image_load",
                         "call_id": "call_image",
                         "arguments": '{"image_url":"/v1/assets/asset-image"}',
                     }
@@ -1396,9 +1401,9 @@ def test_responses_runner_preserves_multimodal_context_added_after_tool_output(m
         model_input=[{"role": "user", "content": "这张图里有什么？"}],
         tools=(
             SdkToolDefinition(
-                contract_name="images.inspect",
-                sdk_name="images_inspect",
-                description="查看历史图片。",
+                contract_name="conversation_history.image.load",
+                sdk_name="conversation_history_image_load",
+                description="加载对话历史中由智能体回复展示过的图片。",
                 params_json_schema={"type": "object", "properties": {}},
                 invoke=invoke,
             ),
