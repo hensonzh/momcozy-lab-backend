@@ -1,11 +1,7 @@
 # MomCozy Production Backend
 
-This directory contains the MomCozy production backend.
-
-The legacy backend has been moved under the repository-level `legacy_backend/`
-directory. New production code should be built here first so the target
-architecture can evolve without inheriting the legacy agent loop, in-memory
-session, SQLite data store, or static API-key user boundary.
+This directory contains the MomCozy production backend. It is the only backend
+runtime maintained in this repository.
 
 ## Boundary Rules
 
@@ -15,14 +11,8 @@ session, SQLite data store, or static API-key user boundary.
 - Current contracts, architecture conventions, and runbooks live under
   `production_backend/docs/`.
 - Development and migration scripts live under `production_backend/scripts/`.
-- The old demo backend, old tests, old scripts, old skill prompts, and local
-  legacy runtime artifacts live under repository-level `legacy_backend/`.
-- Do not import legacy runtime modules from
-  `legacy_backend/src/momcozy_agent/` in production code. The production backend
-  has no legacy bridge fallback; migrate behavior into explicit modules,
-  services, repositories, tools, and tests instead.
 - Do not use `previous_response_id`, provider session, in-memory `ChatSession`,
-  or the legacy Responses API loop as a production fallback.
+  or a provider-managed conversation loop as a production fallback.
 
 ## Environment Contract
 
@@ -141,7 +131,7 @@ AGENT_MEMORY_CONSOLIDATION_HOUR=3
 `OPENAI_AGENT_USE_RESPONSES=false` selects the temporary OpenAI Agents SDK
 rollback path and should not be used for normal local or production traffic.
 
-Voice playback follows the legacy Doubao/Volcengine realtime TTS path. Use
+Voice playback uses the Doubao/Volcengine realtime TTS path. Use
 `VOICE_PROVIDER=doubao`, set `VOICE_API_KEY`, and keep the default bidirectional
 TTS endpoint/resource/voice values unless the provider account changes. The App
 requests `/v1/realtime-voice-stream` and plays PCM chunks locally. `local_stub`
@@ -248,13 +238,6 @@ production_backend/
   tests/
   docs/
   scripts/
-
-legacy_backend/
-  src/
-  skills/
-  tests/
-  scripts/
-  web_data/
 ```
 
 Agent runtime is a domain module with explicit internal subdomains:

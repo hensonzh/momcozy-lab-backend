@@ -6,7 +6,7 @@ APP_ROOT = ROOT / "production_backend" / "app"
 AGENT_RUNTIME_ROOT = APP_ROOT / "modules" / "agent_runtime"
 
 
-def test_production_backend_app_does_not_depend_on_legacy_runtime_or_sqlite() -> None:
+def test_production_backend_app_does_not_depend_on_retired_runtime_or_sqlite() -> None:
     banned_tokens = {
         "previous_response_id",
         "src.momcozy_agent",
@@ -25,11 +25,10 @@ def test_production_backend_app_does_not_depend_on_legacy_runtime_or_sqlite() ->
     assert offenders == []
 
 
-def test_legacy_backend_is_isolated_from_project_root() -> None:
-    assert (ROOT / "legacy_backend" / "src" / "momcozy_agent").is_dir()
-
-    legacy_root_dirs = {
+def test_retired_backend_layout_is_absent_from_project_root() -> None:
+    retired_root_dirs = {
         "data",
+        "legacy_backend",
         "scripts",
         "skills",
         "src",
@@ -37,12 +36,12 @@ def test_legacy_backend_is_isolated_from_project_root() -> None:
         "upload_files",
         "web_data",
     }
-    leaked_dirs = sorted(name for name in legacy_root_dirs if (ROOT / name).exists())
+    leaked_dirs = sorted(name for name in retired_root_dirs if (ROOT / name).exists())
 
     assert leaked_dirs == []
 
 
-def test_production_backend_has_no_legacy_bridge_fallback() -> None:
+def test_production_backend_has_no_retired_runtime_bridge() -> None:
     assert not (ROOT / "production_backend" / "legacy_bridge").exists()
 
 
