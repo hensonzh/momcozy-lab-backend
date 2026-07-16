@@ -136,7 +136,7 @@ liveness, because readiness verifies configured infrastructure.
 ## Nginx Edge Proxy
 
 `production_backend/deploy/nginx/momcozy-api.conf` is the versioned edge
-configuration for `momcozylab.luteos.cloud`. Change its upstream port `8000`
+configuration for `lute-momcozylab.luteos.cloud`. Change its upstream port `8000`
 only when the compose host bind uses a different loopback port, and change its
 `server_name` only as part of a controlled domain migration. Keep the
 application bound to `127.0.0.1`.
