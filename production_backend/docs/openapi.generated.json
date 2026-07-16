@@ -236,10 +236,6 @@
             "title": "Expected Behavior",
             "type": "object"
           },
-          "expected_safety_decision": {
-            "title": "Expected Safety Decision",
-            "type": "string"
-          },
           "expected_tool_calls": {
             "items": {},
             "title": "Expected Tool Calls",
@@ -292,7 +288,6 @@
           "input_payload",
           "expected_behavior",
           "expected_tool_calls",
-          "expected_safety_decision",
           "status",
           "owner_team"
         ],
@@ -714,14 +709,6 @@
             "title": "Run",
             "type": "object"
           },
-          "safety_events": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Safety Events",
-            "type": "array"
-          },
           "tool_calls": {
             "items": {
               "additionalProperties": true,
@@ -748,8 +735,7 @@
           "artifacts",
           "checkpoints",
           "workflow_states",
-          "context_projections",
-          "safety_events"
+          "context_projections"
         ],
         "title": "AgentReplayBundle",
         "type": "object"

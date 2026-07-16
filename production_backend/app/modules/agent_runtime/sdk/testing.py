@@ -22,7 +22,6 @@ class ScriptedSdkResponse:
     tool_calls: tuple[dict[str, Any], ...] = ()
     action_proposals: tuple[dict[str, Any], ...] = ()
     artifacts: tuple[dict[str, Any], ...] = ()
-    safety_decision: dict[str, Any] | None = None
     expected_available_tools: tuple[str, ...] = ()
 
 
@@ -46,7 +45,6 @@ class ScriptedSdkBackend(SdkRunnerBackend):
             tool_calls=[*response.tool_calls, *invoked_tool_calls],
             action_proposals=[*response.action_proposals],
             artifacts=[*response.artifacts],
-            safety_decision=response.safety_decision,
         )
 
 
@@ -62,7 +60,6 @@ def scripted_sdk_response(
     tool_calls: tuple[dict[str, Any], ...] = (),
     action_proposals: tuple[dict[str, Any], ...] = (),
     artifacts: tuple[dict[str, Any], ...] = (),
-    safety_decision: dict[str, Any] | None = None,
     expected_available_tools: tuple[str, ...] = (),
 ) -> ScriptedSdkResponse:
     return ScriptedSdkResponse(
@@ -72,7 +69,6 @@ def scripted_sdk_response(
         tool_calls=tool_calls,
         action_proposals=action_proposals,
         artifacts=artifacts,
-        safety_decision=safety_decision,
         expected_available_tools=expected_available_tools,
     )
 

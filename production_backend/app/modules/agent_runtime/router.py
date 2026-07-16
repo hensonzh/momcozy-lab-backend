@@ -46,7 +46,6 @@ from .schemas import (
     AgentThreadRead,
 )
 from .service import AgentRuntimeService
-from .safety import AgentSafetyService
 from .run_lifecycle.controls import AgentRunControls
 from .event_stream.sse import encode_sse_events, encode_transient_sse_events
 from .event_stream.transient import AgentTransientStream, AgentTransientStreamEvent
@@ -81,10 +80,6 @@ def get_agent_runtime_service(request: Request, session: AsyncSession = Depends(
         controls=AgentRunControls(request.app.state.redis_client),
         fact_service=fact_service,
         memory_service=memory_service,
-        safety_service=AgentSafetyService(
-            repository=repository,
-            metrics=request.app.state.request_metrics,
-        ),
     )
 
 

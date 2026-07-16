@@ -13,7 +13,6 @@ from ..models import (
     AgentEvent,
     AgentMessage,
     AgentRun,
-    AgentSafetyEvent,
     AgentToolCall,
     AgentWorkflowState,
 )
@@ -36,7 +35,6 @@ class AgentReplayService:
         checkpoints = await self.repository.list_context_checkpoints_for_run(run_id=run.id)
         workflow_states = await self.repository.list_workflow_states_for_run(run_id=run.id)
         context_projections = await self.repository.list_context_projections_for_run(run_id=run.id)
-        safety_events = await self.repository.list_safety_events_for_run(run_id=run.id)
         return {
             "run": _run(run),
             "messages": [_message(message, include_content=include_message_content) for message in messages],
@@ -47,7 +45,6 @@ class AgentReplayService:
             "checkpoints": [_checkpoint(checkpoint) for checkpoint in checkpoints],
             "workflow_states": [_workflow_state(workflow_state) for workflow_state in workflow_states],
             "context_projections": [_context_projection(context_projection) for context_projection in context_projections],
-            "safety_events": [_safety_event(safety_event) for safety_event in safety_events],
         }
 
 
@@ -207,17 +204,6 @@ def _context_projection(context_projection: AgentContextProjection) -> dict[str,
         "projection_summary": _redact_replay_value(context_projection.projection_summary),
         "token_estimate": context_projection.token_estimate,
         "created_at": context_projection.created_at.isoformat() if context_projection.created_at else None,
-    }
-
-
-def _safety_event(safety_event: AgentSafetyEvent) -> dict[str, Any]:
-    return {
-        "id": str(safety_event.id),
-        "category": safety_event.category,
-        "severity": safety_event.severity,
-        "decision": safety_event.decision,
-        "evidence": _redact_replay_value(safety_event.evidence),
-        "evidence_ref": safety_event.evidence_ref,
     }
 
 

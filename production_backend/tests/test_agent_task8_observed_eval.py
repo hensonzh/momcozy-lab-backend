@@ -9,11 +9,7 @@ import pytest
 
 from production_backend.app.core.errors import ApiError
 from production_backend.app.modules.agent_runtime.actions.executor import AgentActionExecutor
-from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.device_guidance import (
-    DEVICE_ELECTRICAL_HAZARD_RESPONSE,
-)
 from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.health_guidance import (
-    COMPLEX_HEALTH_SEARCH_UNAVAILABLE_RESPONSE,
     HEALTH_GUIDANCE_ALLOWED_DOMAINS,
 )
 from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.tools import (
@@ -48,14 +44,12 @@ from production_backend.app.modules.agent_runtime.models import (
     AgentEvent,
     AgentMessage,
     AgentRun,
-    AgentSafetyEvent,
     AgentThread,
     AgentToolCall,
     AgentToolOutput,
     AgentWorkflowState,
 )
 from production_backend.app.modules.agent_runtime.run_lifecycle.executor import AgentRuntimeExecutor
-from production_backend.app.modules.agent_runtime.safety import AgentSafetyService
 from production_backend.app.modules.agent_runtime.sdk import (
     OpenAIAgentsSdkRunner,
     SdkNodeRequest,
@@ -82,7 +76,6 @@ EMPTY_CASE = {
     "name": "runtime-generated trace",
     "expected_tool_calls": [],
     "forbidden_tool_calls": [],
-    "expected_safety_decision": "allow",
     "expected_behavior": {},
 }
 
@@ -167,7 +160,7 @@ def test_observed_pregnancy_plan_creates_durable_form_then_applies_one_plan() ->
     assert scenario.workflow("pregnancy_plan").status == "completed"
 
 
-def test_observed_pregnancy_plan_urgent_turn_has_no_model_tool_or_side_effect() -> None:
+def test_observed_pregnancy_plan_urgent_turn_enters_model_before_tool_safety_result() -> None:
     scenario = ObservedScenario()
     scenario.seed_pregnancy_workflow(
         phase="awaiting_additional_information",
@@ -182,10 +175,10 @@ def test_observed_pregnancy_plan_urgent_turn_has_no_model_tool_or_side_effect() 
     )
 
     assert result.execution_result.final_text == PREGNANCY_PLAN_URGENT_RESPONSE
-    assert result.trace.tool_calls == []
+    _assert_tools(result.trace, "pregnancy.plan.propose")
     assert result.trace.actions == []
     assert scenario.repository.artifacts == []
-    assert scenario.workflow("pregnancy_plan").status == "failed"
+    assert scenario.workflow("pregnancy_plan").status == "waiting"
 
 
 def test_observed_hospital_bag_form_card_and_cart_use_runtime_ledgers() -> None:
@@ -478,19 +471,19 @@ def test_observed_known_device_guidance_reads_official_guidance_without_write() 
     assert result.trace.final_text
 
 
-def test_observed_device_electrical_hazard_bypasses_model_tools_and_actions() -> None:
+def test_observed_device_electrical_hazard_enters_model_without_runtime_block() -> None:
     scenario = ObservedScenario()
+    provider = CapturingHealthBackend(result=SdkNodeResult(final_text="请立即停止使用，并在安全时断开电源。"))
     result = scenario.run_turn(
         text="Air1 充电时有烧焦味。",
         handlers=scenario.device_handlers(),
-        tool_invocations=(scripted_tool_invocation("devices.guidance.read", {"model": "Air1"}),),
-        final_text="不应调用模型。",
+        backend=provider,
     )
 
-    assert result.execution_result.final_text == DEVICE_ELECTRICAL_HAZARD_RESPONSE
+    assert len(provider.requests) == 1
+    assert result.execution_result.final_text == "请立即停止使用，并在安全时断开电源。"
     assert result.trace.tool_calls == []
     assert result.trace.actions == []
-    _assert_event_types(result.trace, forbidden={"safety.blocked"})
 
 
 def test_observed_complex_health_web_search_emits_allowlisted_citations() -> None:
@@ -510,14 +503,11 @@ def test_observed_complex_health_web_search_emits_allowlisted_citations() -> Non
     assert result.trace.tool_calls == []
     assert result.trace.actions == []
     request = provider.requests[0]
-    assert request.web_search_required is True
+    assert request.web_search_enabled is True
+    assert request.web_search_required is False
     assert request.web_search_allowed_domains == tuple(HEALTH_GUIDANCE_ALLOWED_DOMAINS)
     status_events = _events(result.trace, "CUSTOM", name="momcozy.agent.web_search")
-    assert [event["payload"]["value"] for event in status_events] == [
-        {"status": "searching"},
-        {"status": "completed"},
-    ]
-    assert status_events[0]["payload"]["semantic"]["label"] == "我在查专业资料～"
+    assert [event["payload"]["value"] for event in status_events] == [{"status": "completed"}]
     assert status_events[-1]["payload"]["semantic"]["label"] == "我查好专业资料啦"
     citation_event = _event(result.trace, "CUSTOM", name="momcozy.web_search.citations")
     assert citation_event["payload"]["value"]["citations"] == [
@@ -529,34 +519,34 @@ def test_observed_complex_health_web_search_emits_allowlisted_citations() -> Non
     ]
 
 
-def test_observed_complex_health_provider_failure_is_bounded_and_side_effect_free() -> None:
+def test_observed_complex_health_provider_failure_is_not_replaced_by_content_fallback() -> None:
     scenario = ObservedScenario()
+    provider = FailingHealthBackend()
+    with pytest.raises(ApiError) as exc_info:
+        scenario.run_turn(
+            text="哺乳期用药会不会影响宝宝？",
+            handlers={},
+            backend=provider,
+        )
+
+    assert exc_info.value.code == "sdk_provider_unavailable"
+    assert len(provider.requests) == 1
+
+
+def test_observed_medical_red_flag_enters_model_before_response() -> None:
+    scenario = ObservedScenario()
+    provider = CapturingHealthBackend(result=SdkNodeResult(final_text="请尽快联系医生或急诊评估。"))
     result = scenario.run_turn(
-        text="哺乳期用药会不会影响宝宝？",
+        text="我发烧而且乳房红肿越来越严重。",
         handlers={},
-        backend=FailingHealthBackend(),
+        backend=provider,
     )
 
-    assert result.execution_result.final_text == COMPLEX_HEALTH_SEARCH_UNAVAILABLE_RESPONSE
+    assert len(provider.requests) == 1
+    assert result.execution_result.status == "completed"
     assert result.trace.tool_calls == []
     assert result.trace.actions == []
-    status_events = _events(result.trace, "CUSTOM", name="momcozy.agent.web_search")
-    assert [event["payload"]["value"] for event in status_events] == [
-        {"status": "searching"},
-        {"status": "failed"},
-    ]
-    assert status_events[-1]["payload"]["semantic"]["label"] == "专业资料暂时没查好"
-
-
-def test_observed_medical_red_flag_is_blocked_before_runtime_execution() -> None:
-    scenario = ObservedScenario()
-    trace, run = scenario.create_safety_blocked_run("我发烧而且乳房红肿越来越严重。")
-
-    assert run.status == "failed"
-    assert trace.safety_decision == "escalate"
-    assert trace.tool_calls == []
-    assert trace.actions == []
-    assert [event["type"] for event in trace.events] == ["message.completed", "safety.blocked", "run.failed"]
+    _assert_event_types(result.trace, forbidden={"run.failed"})
 
 
 def test_observed_ibclc_requires_semantic_consent_and_creates_no_support_action() -> None:
@@ -796,26 +786,6 @@ class ObservedScenario:
         self.repository.workflow_states.append(workflow)
         return workflow
 
-    def create_safety_blocked_run(self, text: str) -> tuple[AgentEvalTrace, AgentRun]:
-        run = self.repository.add_run(text=text)
-        assert self.repository.tool_calls_for(run.id) == []
-        assert self.repository.events_for(run.id) == []
-        assert self.repository.actions_for(run.id) == []
-        safety_service = AgentSafetyService(repository=self.repository)
-        runtime_service = AgentRuntimeService(repository=self.repository, safety_service=safety_service)
-        message = self.repository.current_message
-        blocked = asyncio.run(
-            runtime_service._apply_input_safety_gate(  # noqa: SLF001 - focused service-boundary eval
-                owner_user_id=self.actor_user_id,
-                run=run,
-                message_record_id=message.id,
-                text=text,
-            )
-        )
-        assert blocked is run
-        trace = asyncio.run(AgentEvalRuntimeTraceCollector(repository=self.repository).collect(run_id=run.id))
-        return trace, run
-
 
 class RecordingRuntimeRepository:
     def __init__(self, *, actor_user_id: UUID, thread_id: UUID) -> None:
@@ -834,7 +804,6 @@ class RecordingRuntimeRepository:
         self.actions: list[AgentAction] = []
         self.artifacts: list[AgentArtifact] = []
         self.events: list[AgentEvent] = []
-        self.safety_events: list[AgentSafetyEvent] = []
         self.workflow_states: list[AgentWorkflowState] = []
 
     @property
@@ -1078,14 +1047,6 @@ class RecordingRuntimeRepository:
             if field in kwargs:
                 setattr(workflow_state, field, kwargs[field])
         return workflow_state
-
-    async def record_safety_event(self, **kwargs):
-        event = AgentSafetyEvent(id=uuid4(), **kwargs)
-        self.safety_events.append(event)
-        return event
-
-    async def list_safety_events_for_run(self, *, run_id: UUID):
-        return [event for event in self.safety_events if event.run_id == run_id]
 
     async def mark_run_failed(self, *, run: AgentRun, completed_at: datetime, error_code: str, error_details: dict[str, Any]):
         run.status = "failed"

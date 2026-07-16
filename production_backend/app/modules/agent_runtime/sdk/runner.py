@@ -73,7 +73,6 @@ class SdkNodeResult:
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
     action_proposals: list[dict[str, Any]] = field(default_factory=list)
     artifacts: list[dict[str, Any]] = field(default_factory=list)
-    safety_decision: dict[str, Any] | None = None
     web_search_used: bool = False
     web_search_citations: list[dict[str, Any]] = field(default_factory=list)
 

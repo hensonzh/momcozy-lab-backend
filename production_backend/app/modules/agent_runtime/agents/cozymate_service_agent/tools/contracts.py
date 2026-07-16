@@ -16,7 +16,7 @@ class ToolContract(BaseModel):
     read_or_write: Literal["read", "write"]
     side_effect_level: Literal["none", "low", "medium", "high"]
     blocking_policy: Literal["must_wait", "enqueue_and_continue", "wait_for_confirmation"]
-    result_dependency: Literal["none", "final_response", "next_tool_call", "resource_id", "safety_decision"]
+    result_dependency: Literal["none", "final_response", "next_tool_call", "resource_id"]
     requires_confirmation: bool
     idempotency_required: bool
     audit_required: bool

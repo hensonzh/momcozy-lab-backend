@@ -19,7 +19,6 @@ from ...auth import CurrentUser
 from ..actions.policy import AgentActionPolicy, AgentActionPolicyDecision
 from ..client_context import project_agent_client_context
 from ..agents.cozymate_service_agent.context import BusinessFactsProjector
-from ..agents.cozymate_service_agent.device_guidance import device_electrical_hazard_response
 from ..agents.cozymate_service_agent.prompts import (
     ContextProjection,
     DEFAULT_STABLE_SYSTEM_PROMPT,
@@ -32,11 +31,7 @@ from ..agents.cozymate_service_agent.skill_registry import (
 )
 from ..agents.cozymate_service_agent.service_skills import ServiceSkillId
 from ..agents.cozymate_service_agent.health_guidance import (
-    COMPLEX_HEALTH_SEARCH_UNAVAILABLE_RESPONSE,
     HEALTH_GUIDANCE_ALLOWED_DOMAINS,
-    health_guidance_request_context_lines,
-    needs_breast_triage_first,
-    should_use_complex_health_web_search,
 )
 from ..agents.cozymate_service_agent.tools import (
     ToolContractRegistry,
@@ -56,11 +51,8 @@ from ..agents.cozymate_service_agent.tools.hospital_bag_flow import (
 from ..agents.cozymate_service_agent.tools.pregnancy_plan_flow import (
     PREGNANCY_PLAN_FINAL_QUESTION,
     PREGNANCY_PLAN_FINAL_QUICK_REPLIES,
-    PREGNANCY_PLAN_URGENT_RESPONSE,
-    PREGNANCY_PLAN_WORKFLOW_SCHEMA_VERSION,
     PREGNANCY_PLAN_WORKFLOW_TYPE,
     ensure_pregnancy_plan_final_question,
-    pregnancy_plan_urgent_signal_ids,
 )
 from ..event_stream.sink import AgentEventSink
 from ..event_stream.transient import AgentTransientStream
@@ -128,16 +120,6 @@ MODEL_IMAGE_DATA_URL_PATTERN = re.compile(
     r"^data:image/(?:png|jpe?g|webp|gif);base64,",
     re.IGNORECASE,
 )
-HEALTH_WEB_SEARCH_FALLBACK_ERROR_CODES = {
-    "dependency_not_configured",
-    "sdk_auth_failed",
-    "sdk_bad_request",
-    "sdk_provider_unavailable",
-    "sdk_rate_limited",
-    "sdk_run_failed",
-    "sdk_run_timed_out",
-    "sdk_web_search_provider_not_supported",
-}
 
 
 @dataclass(frozen=True)
@@ -273,65 +255,16 @@ class AgentRuntimeExecutor:
             self._run_hospital_bag_cart_groups[run.id] = _current_hospital_bag_cart_groups(turn_context.current_message)
             tool_catalog = self._tool_catalog_for_turn()
             await self._append_progress(run=run, phase="context_ready", label="我先理解一下你的需求～")
-            loaded_skill_ids = [
-                skill.service_skill_id
-                for skill in turn_context.working_context_state.skills
-                if turn_context.working_context_state.turn_index <= skill.expires_after_turn
-            ]
-            health_context_lines = health_guidance_request_context_lines(
-                self._run_current_user_text[run.id],
-                loaded_skill_ids,
-            )
-            complex_health = should_use_complex_health_web_search(
-                self._run_current_user_text[run.id],
-                loaded_skill_ids,
-            )
-            health_web_search_required = complex_health and not needs_breast_triage_first(self._run_current_user_text[run.id])
-            prepared_turn = self._prepare_model_turn(
-                turn_context=turn_context,
-                health_context_lines=health_context_lines,
-            )
+            prepared_turn = self._prepare_model_turn(turn_context=turn_context)
             self._run_local_dates[run.id] = _user_context_local_date(prepared_turn.projection.user_context)
-            urgent_signal_ids = await self._pregnancy_plan_pre_model_urgent_signal_ids(
+            result = await self._run_model_turn(
                 run=run,
-                current_user_text=self._run_current_user_text[run.id],
-                workflow_state=next(
-                    (workflow for workflow in turn_context.workflow_states if workflow.workflow_type == PREGNANCY_PLAN_WORKFLOW_TYPE),
-                    None,
-                ),
+                turn_context=turn_context,
+                tool_catalog=tool_catalog,
+                prepared_turn=prepared_turn,
+                web_search_enabled=_runner_supports_web_search(self.sdk_runner),
             )
-            if urgent_signal_ids:
-                self._run_authoritative_final_text[run.id] = PREGNANCY_PLAN_URGENT_RESPONSE
-                result = SdkNodeResult(final_text=PREGNANCY_PLAN_URGENT_RESPONSE)
-            elif device_hazard_response := device_electrical_hazard_response(self._run_current_user_text[run.id]):
-                self._run_authoritative_final_text[run.id] = device_hazard_response
-                result = SdkNodeResult(final_text=device_hazard_response)
-            elif health_web_search_required and not _runner_supports_web_search(self.sdk_runner):
-                self._run_authoritative_final_text[run.id] = COMPLEX_HEALTH_SEARCH_UNAVAILABLE_RESPONSE
-                result = SdkNodeResult(final_text=COMPLEX_HEALTH_SEARCH_UNAVAILABLE_RESPONSE)
-            else:
-                try:
-                    result = await self._run_model_turn(
-                        run=run,
-                        turn_context=turn_context,
-                        tool_catalog=tool_catalog,
-                        prepared_turn=prepared_turn,
-                        health_web_search_required=health_web_search_required,
-                    )
-                except ApiError as exc:
-                    if not health_web_search_required or exc.code not in HEALTH_WEB_SEARCH_FALLBACK_ERROR_CODES:
-                        raise
-                    LOGGER.warning("Required health web search failed; using bounded fallback.", extra={"error_code": exc.code})
-                    self._run_authoritative_final_text[run.id] = COMPLEX_HEALTH_SEARCH_UNAVAILABLE_RESPONSE
-                    result = SdkNodeResult(final_text=COMPLEX_HEALTH_SEARCH_UNAVAILABLE_RESPONSE)
-                if health_web_search_required and not result.web_search_used and not result.web_search_citations:
-                    self._run_authoritative_final_text[run.id] = COMPLEX_HEALTH_SEARCH_UNAVAILABLE_RESPONSE
-                    result = SdkNodeResult(final_text=COMPLEX_HEALTH_SEARCH_UNAVAILABLE_RESPONSE)
-            await self._emit_health_web_search_events(
-                run=run,
-                required=health_web_search_required,
-                result=result,
-            )
+            await self._emit_web_search_events(run=run, result=result)
             return await self._finalize_turn_result(
                 run=run,
                 turn_context=turn_context,
@@ -444,7 +377,6 @@ class AgentRuntimeExecutor:
         self,
         *,
         turn_context: _AgentTurnContext,
-        health_context_lines: list[str] | None = None,
     ) -> _PreparedModelTurn:
         working_context = project_working_context(
             turn_context.working_context_state,
@@ -470,11 +402,6 @@ class AgentRuntimeExecutor:
                 include_image_attachments=True,
             ),
         )
-        if health_context_lines:
-            model_input.insert(
-                max(len(model_input) - 1, 0),
-                {"role": "developer", "content": "\n".join(health_context_lines)},
-            )
         return _PreparedModelTurn(projection=projection, model_input=model_input)
 
     async def _run_model_turn(
@@ -484,11 +411,9 @@ class AgentRuntimeExecutor:
         turn_context: _AgentTurnContext,
         tool_catalog: _AgentTurnToolCatalog,
         prepared_turn: _PreparedModelTurn,
-        health_web_search_required: bool = False,
+        web_search_enabled: bool = False,
     ) -> Any:
         await self._append_progress(run=run, phase="model_reasoning", label="我想一下")
-        if health_web_search_required:
-            await self._append_health_web_search_status(run=run, status="searching")
         model_started_at = perf_counter()
         result = await self.sdk_runner.run_reasoning(
             SdkNodeRequest(
@@ -505,25 +430,23 @@ class AgentRuntimeExecutor:
                 trace_id=run.trace_id,
                 service_skill_id=COZYMATE_AGENT_ID,
                 on_text_delta=self._text_delta_handler(run=run),
-                web_search_enabled=health_web_search_required,
-                web_search_required=health_web_search_required,
-                web_search_allowed_domains=HEALTH_GUIDANCE_ALLOWED_DOMAINS if health_web_search_required else (),
+                web_search_enabled=web_search_enabled,
+                web_search_required=False,
+                web_search_allowed_domains=HEALTH_GUIDANCE_ALLOWED_DOMAINS if web_search_enabled else (),
             )
         )
         turn_context.timings_ms["model_reasoning"] = _elapsed_ms(model_started_at)
         return result
 
-    async def _emit_health_web_search_events(
+    async def _emit_web_search_events(
         self,
         *,
         run: AgentRun,
-        required: bool,
         result: SdkNodeResult,
     ) -> None:
-        if not required:
+        if not result.web_search_used and not result.web_search_citations:
             return
-        status = "completed" if result.web_search_used or result.web_search_citations else "failed"
-        await self._append_health_web_search_status(run=run, status=status)
+        await self._append_web_search_status(run=run, status="completed")
         citations = _allowed_health_web_search_citations(result.web_search_citations)
         if not citations:
             return
@@ -538,7 +461,7 @@ class AgentRuntimeExecutor:
             },
         )
 
-    async def _append_health_web_search_status(self, *, run: AgentRun, status: str) -> None:
+    async def _append_web_search_status(self, *, run: AgentRun, status: str) -> None:
         await self._append_event(
             thread_id=run.thread_id,
             run_id=run.id,
@@ -1199,71 +1122,6 @@ class AgentRuntimeExecutor:
                 if reply:
                     return reply
         return {}
-
-    async def _pregnancy_plan_pre_model_urgent_signal_ids(
-        self,
-        *,
-        run: AgentRun,
-        current_user_text: str,
-        workflow_state: AgentWorkflowState | None,
-    ) -> list[str]:
-        workflow_payload = dict(workflow_state.state) if workflow_state is not None and isinstance(workflow_state.state, dict) else {}
-        submission = self._run_trusted_form_submissions.get(run.id, {}).get("birth_journey_basic_info_intake")
-        submission_values = _dict(submission or {}, "values")
-        signal_ids = pregnancy_plan_urgent_signal_ids(submission_values)
-        if signal_ids:
-            await self._record_pregnancy_plan_safety_interruption(
-                run=run,
-                workflow_payload=workflow_payload,
-                form_artifact_id=_text(submission or {}, "artifact_id"),
-                form_submission_id=_text(submission or {}, "submission_id"),
-            )
-            return signal_ids
-        if _text(workflow_payload, "phase") not in {
-            "personalized_followup",
-            "checkup_done_question",
-            "checkup_records_upload",
-            "final_plan_confirmation",
-            "awaiting_additional_information",
-        } or _text(workflow_payload, "consumed_by_action_id"):
-            return []
-        signal_ids = pregnancy_plan_urgent_signal_ids({"additional_info": current_user_text})
-        if signal_ids:
-            await self._record_pregnancy_plan_safety_interruption(
-                run=run,
-                workflow_payload=workflow_payload,
-                form_artifact_id=_text(workflow_payload, "source_form_artifact_id"),
-                form_submission_id=_text(workflow_payload, "source_form_submission_id"),
-            )
-        return signal_ids
-
-    async def _record_pregnancy_plan_safety_interruption(
-        self,
-        *,
-        run: AgentRun,
-        workflow_payload: dict[str, Any],
-        form_artifact_id: str,
-        form_submission_id: str,
-    ) -> None:
-        if workflow_payload.get("interrupted_by_safety_signal") is True:
-            return
-        await self.state_store.upsert_active_workflow(
-            thread_id=run.thread_id,
-            owner_user_id=run.actor_user_id,
-            run_id=run.id,
-            workflow_type=PREGNANCY_PLAN_WORKFLOW_TYPE,
-            status="failed",
-            schema_version=PREGNANCY_PLAN_WORKFLOW_SCHEMA_VERSION,
-            state={
-                **workflow_payload,
-                "phase": _text(workflow_payload, "phase") or "collecting_intake",
-                "interrupted_by_safety_signal": True,
-                "source_form_artifact_id": form_artifact_id,
-                "source_form_submission_id": form_submission_id,
-                "form_id": "birth_journey_basic_info_intake",
-            },
-            active_step="",
-        )
 
     async def _latest_hospital_bag_cart_groups(self, *, run: AgentRun) -> list[dict[str, Any]] | None:
         loader = getattr(self.repository, "get_latest_artifact_for_thread", None)

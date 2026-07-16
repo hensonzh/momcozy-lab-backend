@@ -22,7 +22,7 @@ def test_product_agent_eval_seed_covers_required_suites() -> None:
     assert len(cases) >= len(REQUIRED_PRODUCT_AGENT_EVAL_SUITES)
 
 
-def test_product_agent_eval_seed_cases_have_action_and_safety_contracts() -> None:
+def test_product_agent_eval_seed_cases_have_action_and_response_contracts() -> None:
     cases = load_product_agent_eval_seed_cases(PRODUCT_AGENT_EVAL_SEED)
 
     for case in cases:
@@ -38,7 +38,6 @@ def test_product_agent_eval_seed_cases_have_action_and_safety_contracts() -> Non
             "emotion-support",
         }
         assert isinstance(behavior["requires_confirmation_before_write"], bool)
-        assert case["expected_safety_decision"] in {"allow", "escalate", "block"}
         assert "messages" in case["input"]
         assert isinstance(case["expected_tool_calls"], list)
 
@@ -283,7 +282,6 @@ def test_product_agent_eval_seed_splits_device_hazard_from_ibclc_artifact_contra
     ibclc_contracts = {tool_call["contract"] for tool_call in by_suite["ibclc_consult"]["expected_tool_calls"]}
 
     assert support_contracts == set()
-    assert by_suite["device_support_handoff"]["expected_safety_decision"] == "allow"
     assert {call["contract"] for call in by_suite["device_support_handoff"]["forbidden_tool_calls"]} == {
         "devices.guidance.read",
         "support.ticket.propose",
@@ -347,13 +345,12 @@ def test_product_agent_eval_seed_covers_critical_health_and_emotion_regressions(
     by_suite = {case["suite"]: case for case in cases}
 
     for suite in ("health_consultation", "infant_health_red_flag", "emotion_support", "emotion_harm_baby"):
-        assert by_suite[suite]["expected_safety_decision"] == "escalate"
         assert by_suite[suite]["expected_tool_calls"] == []
         assert by_suite[suite]["expected_behavior"]["requires_confirmation_before_write"] is False
+        assert by_suite[suite]["expected_behavior"]["forbids_side_effects"] is True
 
     web_search = by_suite["complex_health_web_search"]
     assert web_search["expected_tool_calls"] == []
-    assert web_search["expected_safety_decision"] == "allow"
     assert web_search["expected_events"] == [
         {"type": "CUSTOM", "name": "momcozy.agent.web_search"},
         {"type": "CUSTOM", "name": "momcozy.web_search.citations"},
@@ -362,7 +359,7 @@ def test_product_agent_eval_seed_covers_critical_health_and_emotion_regressions(
 
 def test_product_agent_eval_seed_loader_rejects_missing_required_suite() -> None:
     payload = {
-        "schema_version": "agent_eval_seed.v1",
+        "schema_version": "agent_eval_seed.v2",
         "cases": [
             {
                 "suite": "birth_prep",
@@ -371,7 +368,6 @@ def test_product_agent_eval_seed_loader_rejects_missing_required_suite() -> None
                 "input": {"messages": []},
                 "expected_behavior": {"intent": "birth_prep", "route": "structured_service", "requires_confirmation_before_write": True},
                 "expected_tool_calls": [],
-                "expected_safety_decision": "allow",
             }
         ],
     }

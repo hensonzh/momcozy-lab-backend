@@ -40,42 +40,6 @@ AIR1_UNBOXING_STEPS = (
     "guide.bluetooth",
     "guide.finish_storage",
 )
-DEVICE_ELECTRICAL_HAZARD_RESPONSE = (
-    "先立即停止使用。若设备正在充电，并且可以安全接近，请先从墙上插座拔下电源适配器，再断开设备；"
-    "不要继续通电、充电或使用，也不要自行拆机或更换电池。把设备放到远离易燃物的位置，等它完全冷却。"
-    "这个情况需要升级产品支持，我可以帮你创建售后工单，客服团队会在 24 小时内联系你。需要我现在帮你创建吗？"
-)
-_DEVICE_ELECTRICAL_HAZARD_TERMS = (
-    "冒烟",
-    "烧焦味",
-    "焦糊味",
-    "烧焦气味",
-    "电火花",
-    "漏电",
-    "电池鼓包",
-    "电池膨胀",
-    "充电线破损",
-    "充电线开裂",
-    "充电线断裂",
-    "适配器破损",
-    "适配器开裂",
-    "异常发热",
-    "烫手",
-)
-_DEVICE_HAZARD_CLAUSE_BOUNDARY = re.compile(r"[。！？!?；;，,]|但是|不过|\b(?:but|however|yet)\b", re.IGNORECASE)
-_DEVICE_HAZARD_NEGATION = re.compile(r"(?:没有|没|无|未见|并未|不)(?:出现|闻到|发现|感觉|是)?\s*$")
-
-
-def device_electrical_hazard_response(text: str) -> str:
-    normalized = re.sub(r"\s+", "", str(text or "").strip().lower())
-    for term in _DEVICE_ELECTRICAL_HAZARD_TERMS:
-        for match in re.finditer(re.escape(term), normalized):
-            prefix = normalized[: match.start()]
-            boundaries = list(_DEVICE_HAZARD_CLAUSE_BOUNDARY.finditer(prefix))
-            clause_prefix = prefix[boundaries[-1].end() :] if boundaries else prefix
-            if not _DEVICE_HAZARD_NEGATION.search(clause_prefix[-24:]):
-                return DEVICE_ELECTRICAL_HAZARD_RESPONSE
-    return ""
 
 
 @dataclass(frozen=True)

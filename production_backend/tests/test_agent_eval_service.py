@@ -25,7 +25,6 @@ def test_agent_eval_service_creates_draft_case_from_replay_bundle() -> None:
     assert eval_case.input_payload["replay_bundle"]["messages"][0]["content"] == {"redacted": True}
     assert eval_case.expected_behavior["event_types"] == ["run.started", "action.confirmation_required"]
     assert eval_case.expected_tool_calls == [{"tool_name": "profile.read", "status": "completed"}]
-    assert eval_case.expected_safety_decision == "allow"
 
 
 class FakeEvalRepository:
@@ -38,7 +37,6 @@ class FakeEvalRepository:
             input_payload=kwargs["input_payload"],
             expected_behavior=kwargs["expected_behavior"],
             expected_tool_calls=kwargs["expected_tool_calls"],
-            expected_safety_decision=kwargs["expected_safety_decision"],
             source_run_id=kwargs["source_run_id"],
             status=kwargs["status"],
             owner_team=kwargs["owner_team"],
@@ -62,5 +60,4 @@ class FakeReplayService:
             "checkpoints": [],
             "workflow_states": [],
             "context_projections": [],
-            "safety_events": [{"decision": "allow"}],
         }

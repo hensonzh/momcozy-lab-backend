@@ -18,7 +18,6 @@ def test_run_agent_replay_eval_writes_passing_report(tmp_path: Path) -> None:
                 "events": [],
                 "tool_calls": [],
                 "actions": [],
-                "safety_events": [{"decision": "allow"}],
             }
         )
     )
@@ -44,7 +43,6 @@ def test_run_agent_replay_eval_reports_blocking_failures(tmp_path: Path) -> None
                 "events": [],
                 "tool_calls": [{"tool_name": "profile_update", "status": "completed"}],
                 "actions": [],
-                "safety_events": [{"decision": "allow"}],
             }
         )
     )

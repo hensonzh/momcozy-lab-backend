@@ -118,7 +118,6 @@ def _trace_from_payload(payload: dict[str, Any]) -> AgentEvalTrace:
         tool_calls=_list_of_dicts(payload.get("tool_calls")),
         events=_list_of_dicts(payload.get("events")),
         actions=_list_of_dicts(payload.get("actions")),
-        safety_decision=str(payload.get("safety_decision") or ""),
         final_text=str(payload.get("final_text") or ""),
         service_skill_id=str(payload.get("service_skill_id") or ""),
     )

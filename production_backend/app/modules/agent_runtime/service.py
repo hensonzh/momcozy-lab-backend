@@ -20,7 +20,6 @@ from .run_lifecycle.controls import AgentRunControls
 from .run_lifecycle.state_store import AgentRuntimeStateStore
 from .models import AgentAction, AgentArtifact, AgentEvent, AgentRun, AgentThread, AgentWorkflowState
 from .repository import AgentRuntimeRepository
-from .safety import AgentSafetyService
 
 
 AGENT_RUN_CREATE_IDEMPOTENCY_SCOPE = "agent.runs.create"
@@ -48,7 +47,6 @@ class AgentRuntimeService:
         action_policy: AgentActionPolicy | None = None,
         fact_service: AgentFactService | None = None,
         memory_service: AgentMemoryService | None = None,
-        safety_service: AgentSafetyService | None = None,
     ) -> None:
         self.repository = repository
         self.idempotency_service = idempotency_service
@@ -59,7 +57,6 @@ class AgentRuntimeService:
         self.state_store = AgentRuntimeStateStore(repository=repository)
         self.fact_service = fact_service
         self.memory_service = memory_service
-        self.safety_service = safety_service
 
     async def get_latest_workflow_state(
         self,
@@ -195,16 +192,6 @@ class AgentRuntimeService:
             status="completed",
         )
         await self.repository.touch_thread(thread=thread, updated_at=_utcnow())
-        safety_blocked = await self._apply_input_safety_gate(
-            owner_user_id=actor_user_id,
-            run=run,
-            message_record_id=message_record.id,
-            text=normalized_message,
-        )
-        if safety_blocked is not None:
-            await self._complete_idempotency(idempotency_record=idempotency_record, response_ref=str(safety_blocked.id))
-            return safety_blocked
-
         fact_job_enqueued = False
         if await self._fact_capture_enabled(owner_user_id=actor_user_id):
             await self._sync_verified_form_facts(
@@ -253,57 +240,6 @@ class AgentRuntimeService:
                 self._register_fact_queue_wakeup(run_id=run.id)
         await self._complete_idempotency(idempotency_record=idempotency_record, response_ref=str(run.id))
         return run
-
-    async def _apply_input_safety_gate(
-        self,
-        *,
-        owner_user_id: UUID,
-        run: AgentRun,
-        message_record_id: UUID,
-        text: str,
-    ) -> AgentRun | None:
-        if self.safety_service is None:
-            return None
-        decision, safety_event = await self.safety_service.evaluate_and_record(
-            owner_user_id=owner_user_id,
-            text=text,
-            run_id=run.id,
-        )
-        if not decision.should_block_normal_flow:
-            return None
-        await self._append_event(
-            thread_id=run.thread_id,
-            run_id=run.id,
-            event_type="message.completed",
-            payload={"message_id": str(message_record_id), "role": "user"},
-        )
-        await self._append_event(
-            thread_id=run.thread_id,
-            run_id=run.id,
-            event_type="safety.blocked",
-            payload={
-                "category": decision.category,
-                "severity": decision.severity,
-                "decision": decision.decision,
-                "safety_event_id": str(safety_event.id) if safety_event else "",
-                "response_template_key": decision.response_template_key,
-                "response_template_version": decision.response_template_version,
-                "handoff_type": decision.handoff_type,
-            },
-        )
-        failed = await self.repository.mark_run_failed(
-            run=run,
-            completed_at=_utcnow(),
-            error_code=decision.category,
-            error_details={"decision": decision.decision, "severity": decision.severity},
-        )
-        await self._append_event(
-            thread_id=run.thread_id,
-            run_id=run.id,
-            event_type="run.failed",
-            payload={"code": decision.category, "decision": decision.decision},
-        )
-        return failed
 
     async def _sync_verified_form_facts(
         self,

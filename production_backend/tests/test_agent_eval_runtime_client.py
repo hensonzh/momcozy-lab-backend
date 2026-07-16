@@ -12,7 +12,6 @@ from production_backend.app.modules.agent_runtime.models import (
     AgentEvent,
     AgentMessage,
     AgentRun,
-    AgentSafetyEvent,
     AgentToolCall,
 )
 from production_backend.app.modules.agent_runtime.run_lifecycle.executor import AgentRuntimeExecutor
@@ -71,7 +70,6 @@ def test_agent_eval_runtime_client_executes_run_and_evaluates_seed_case() -> Non
         "name": "supported action trace",
         "expected_tool_calls": [{"contract": "support.ticket.propose"}],
         "forbidden_tool_calls": [],
-        "expected_safety_decision": "allow",
         "expected_behavior": {
             "service_skill_id": "cozymate_service_agent",
             "requires_confirmation_before_write": True,
@@ -125,7 +123,6 @@ class FakeEvalRuntimeRepository:
         self.tool_calls = tool_calls
         self.actions: list[AgentAction] = []
         self.events: list[AgentEvent] = []
-        self.safety_events: list[AgentSafetyEvent] = []
 
     async def get_latest_user_message_for_run(self, *, run_id: UUID):
         return self.current_message if self.current_message.run_id == run_id else None
@@ -207,9 +204,6 @@ class FakeEvalRuntimeRepository:
 
     async def list_tool_calls_for_run(self, *, run_id: UUID):
         return [tool_call for tool_call in self.tool_calls if tool_call.run_id == run_id]
-
-    async def list_safety_events_for_run(self, *, run_id: UUID):
-        return [event for event in self.safety_events if event.run_id == run_id]
 
     async def list_recent_run_summaries(self, **kwargs):
         return []

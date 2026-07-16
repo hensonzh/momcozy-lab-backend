@@ -9,7 +9,6 @@ from production_backend.app.modules.agent_runtime.models import (
     AgentEvent,
     AgentMessage,
     AgentRun,
-    AgentSafetyEvent,
     AgentToolCall,
     AgentWorkflowState,
 )
@@ -34,7 +33,6 @@ def test_agent_replay_service_exports_redacted_bundle_by_default() -> None:
     assert bundle["checkpoints"][0]["thread_id"] == str(repository.run.thread_id)
     assert bundle["workflow_states"][0]["workflow_type"] == "milk_analysis_intake"
     assert bundle["context_projections"][0]["projection_summary"]["state_keys"] == ["run_id"]
-    assert bundle["safety_events"][0]["decision"] == "allow"
 
 
 def test_agent_replay_service_can_include_message_content_when_explicitly_requested() -> None:
@@ -57,7 +55,6 @@ def test_agent_replay_service_redacts_pii_from_export_payloads() -> None:
     repository.artifact.payload = {"shipping_address": "1 Main Street", "title": "Birth plan"}
     repository.workflow_state.state = {"phone_number": "4155551212", "step": "collect"}
     repository.context_projection.projection_summary = {"email": "parent@example.com", "state_keys": ["run_id"]}
-    repository.safety_event.evidence = {"matched_term": "fever", "patient_phone": "+1 415 555 1212"}
 
     bundle = asyncio.run(
         AgentReplayService(repository=repository).export_run_bundle(run_id=repository.run.id, include_message_content=True)
@@ -71,7 +68,6 @@ def test_agent_replay_service_redacts_pii_from_export_payloads() -> None:
     assert bundle["artifacts"][0]["payload"] == {"shipping_address": "[redacted]", "title": "Birth plan"}
     assert bundle["workflow_states"][0]["state"] == {"phone_number": "[redacted]", "step": "collect"}
     assert bundle["context_projections"][0]["projection_summary"] == {"email": "[redacted]", "state_keys": ["run_id"]}
-    assert bundle["safety_events"][0]["evidence"] == {"matched_term": "fever", "patient_phone": "[redacted]"}
 
 
 def test_agent_replay_service_projects_pregnancy_workflow_state_without_health_facts() -> None:
@@ -174,16 +170,6 @@ class FakeReplayRepository:
             payload={"title": "Birth plan"},
             raw_payload_ref="",
         )
-        self.safety_event = AgentSafetyEvent(
-            id=uuid4(),
-            run_id=self.run.id,
-            owner_user_id=self.run.actor_user_id,
-            category="none",
-            severity="low",
-            decision="allow",
-            evidence={},
-            evidence_ref="",
-        )
         self.checkpoint = AgentContextCheckpoint(
             id=uuid4(),
             thread_id=self.run.thread_id,
@@ -245,6 +231,3 @@ class FakeReplayRepository:
 
     async def list_context_projections_for_run(self, *, run_id):
         return [self.context_projection] if run_id == self.run.id else []
-
-    async def list_safety_events_for_run(self, *, run_id):
-        return [self.safety_event] if run_id == self.run.id else []

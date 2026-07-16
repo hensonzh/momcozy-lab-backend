@@ -16,7 +16,6 @@ class AgentEvalTrace:
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
     events: list[dict[str, Any]] = field(default_factory=list)
     actions: list[dict[str, Any]] = field(default_factory=list)
-    safety_decision: str = ""
     final_text: str = ""
     service_skill_id: str = ""
 
@@ -52,7 +51,6 @@ class AgentEvalSeedAssertionEngine:
         failures.extend(_tool_argument_failures(case=case, trace=trace))
         failures.extend(_forbidden_tool_failures(case=case, trace=trace))
         failures.extend(_required_event_failures(case=case, trace=trace))
-        failures.extend(_safety_decision_failures(case=case, trace=trace))
         failures.extend(_service_skill_routing_failures(case=case, trace=trace))
         failures.extend(_confirmation_failures(case=case, trace=trace))
         failures.extend(_forbidden_side_effect_failures(case=case, trace=trace))
@@ -81,15 +79,12 @@ class AgentEvalRuntimeTraceCollector:
         tool_calls = await self.repository.list_tool_calls_for_run(run_id=run_id)
         events = await self.repository.list_events_for_run(run_id=run_id)
         actions = await self.repository.list_actions_for_run(run_id=run_id)
-        safety_events = await self.repository.list_safety_events_for_run(run_id=run_id)
         run_getter = getattr(self.repository, "get_run", None)
         run = await run_getter(run_id=run_id) if run_getter is not None else None
-        safety_decision = safety_events[-1].decision if safety_events else "allow"
         return AgentEvalTrace(
             tool_calls=[_tool_call_trace(tool_call) for tool_call in tool_calls],
             events=[_event_trace(event) for event in events],
             actions=[_action_trace(action) for action in actions],
-            safety_decision=safety_decision,
             final_text=final_text,
             service_skill_id=_runtime_trace_service_skill_id(run=run, events=events),
         )
@@ -119,7 +114,6 @@ def agent_eval_trace_from_replay_bundle(bundle: dict[str, Any]) -> AgentEvalTrac
         tool_calls=_list_of_dicts(bundle.get("tool_calls")),
         events=_list_of_dicts(bundle.get("events")),
         actions=_list_of_dicts(bundle.get("actions")),
-        safety_decision=_last_safety_decision(bundle),
         final_text=_last_assistant_text(bundle),
         service_skill_id=_run_service_skill_id(bundle),
     )
@@ -153,14 +147,13 @@ class AgentEvalService:
             expected_tool_calls=[
                 {"tool_name": tool_call["tool_name"], "status": tool_call["status"]} for tool_call in bundle["tool_calls"]
             ],
-            expected_safety_decision=_last_safety_decision(bundle),
             source_run_id=run_id,
             status="draft",
             owner_team=owner_team,
         )
 
 
-PRODUCT_AGENT_EVAL_SEED_SCHEMA_VERSION = "agent_eval_seed.v1"
+PRODUCT_AGENT_EVAL_SEED_SCHEMA_VERSION = "agent_eval_seed.v2"
 REQUIRED_PRODUCT_AGENT_EVAL_SUITES = (
     "birth_prep",
     "hospital_bag_cart_update",
@@ -196,9 +189,7 @@ REQUIRED_PRODUCT_AGENT_EVAL_CASE_FIELDS = (
     "input",
     "expected_behavior",
     "expected_tool_calls",
-    "expected_safety_decision",
 )
-ALLOWED_PRODUCT_AGENT_SAFETY_DECISIONS = frozenset({"allow", "escalate", "block"})
 COZYMATE_WRAPPER_AGENT_ID = "cozymate_service_agent"
 SCENE_SERVICE_SKILL_IDS = frozenset(
     {
@@ -241,35 +232,19 @@ def validate_product_agent_eval_seed_payload(payload: dict[str, Any]) -> list[di
         if missing_fields:
             raise ValueError(f"Agent eval seed case {index} is missing fields: {', '.join(missing_fields)}.")
         suite = _require_non_empty_string(case["suite"], field_name=f"cases[{index}].suite")
-        safety_decision = _require_non_empty_string(
-            case["expected_safety_decision"],
-            field_name=f"cases[{index}].expected_safety_decision",
-        )
-        if safety_decision not in ALLOWED_PRODUCT_AGENT_SAFETY_DECISIONS:
-            raise ValueError(f"Agent eval seed case {index} has unsupported expected_safety_decision.")
         if not isinstance(case["input"], dict):
             raise ValueError(f"Agent eval seed case {index} input must be an object.")
         if not isinstance(case["expected_behavior"], dict):
             raise ValueError(f"Agent eval seed case {index} expected_behavior must be an object.")
         if not isinstance(case["expected_tool_calls"], list):
             raise ValueError(f"Agent eval seed case {index} expected_tool_calls must be a list.")
-        normalized_cases.append(case | {"suite": suite, "expected_safety_decision": safety_decision})
+        normalized_cases.append(case | {"suite": suite})
 
     suites = {case["suite"] for case in normalized_cases}
     missing_suites = [suite for suite in REQUIRED_PRODUCT_AGENT_EVAL_SUITES if suite not in suites]
     if missing_suites:
         raise ValueError(f"Agent eval seed is missing required suites: {', '.join(missing_suites)}.")
     return normalized_cases
-
-
-def _last_safety_decision(bundle: dict[str, Any]) -> str:
-    safety_events = bundle.get("safety_events")
-    if not isinstance(safety_events, list) or not safety_events:
-        return ""
-    last = safety_events[-1]
-    if not isinstance(last, dict):
-        return ""
-    return str(last.get("decision") or "")
 
 
 def _tool_call_trace(tool_call: Any) -> dict[str, Any]:
@@ -452,20 +427,6 @@ def _event_matches_expected(*, event: dict[str, Any], expected: dict[str, Any]) 
     return all(event.get(key, payload.get(key)) == value for key, value in expected.items())
 
 
-def _safety_decision_failures(*, case: dict[str, Any], trace: AgentEvalTrace) -> list[AgentEvalFailure]:
-    expected = str(case.get("expected_safety_decision") or "")
-    if not expected or trace.safety_decision == expected:
-        return []
-    return [
-        AgentEvalFailure(
-            category="safety_mismatch",
-            assertion="safety.decision",
-            expected=expected,
-            observed=trace.safety_decision or "<none>",
-        )
-    ]
-
-
 def _service_skill_routing_failures(*, case: dict[str, Any], trace: AgentEvalTrace) -> list[AgentEvalFailure]:
     raw_behavior = case.get("expected_behavior")
     behavior = raw_behavior if isinstance(raw_behavior, dict) else {}
@@ -507,9 +468,10 @@ def _confirmation_failures(*, case: dict[str, Any], trace: AgentEvalTrace) -> li
 
 
 def _forbidden_side_effect_failures(*, case: dict[str, Any], trace: AgentEvalTrace) -> list[AgentEvalFailure]:
-    expected_decision = str(case.get("expected_safety_decision") or "")
+    raw_behavior = case.get("expected_behavior")
+    behavior = raw_behavior if isinstance(raw_behavior, dict) else {}
     expected_contracts = [_contract(tool_call) for tool_call in case.get("expected_tool_calls", []) if _contract(tool_call)]
-    if expected_decision not in {"block", "escalate"} or expected_contracts:
+    if not bool(behavior.get("forbids_side_effects")) or expected_contracts:
         return []
     observed_write_tools = _observed_write_tool_contracts(trace)
     if not observed_write_tools and not trace.actions:

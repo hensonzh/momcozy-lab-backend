@@ -175,7 +175,6 @@ class AgentReplayBundle(BaseModel):
     checkpoints: list[dict[str, Any]]
     workflow_states: list[dict[str, Any]]
     context_projections: list[dict[str, Any]]
-    safety_events: list[dict[str, Any]]
 
 
 class AgentEvalCaseCreate(BaseModel):
@@ -193,7 +192,6 @@ class AgentEvalCaseRead(BaseModel):
     input_payload: dict[str, Any]
     expected_behavior: dict[str, Any]
     expected_tool_calls: list[Any]
-    expected_safety_decision: str
     source_run_id: UUID | None = None
     status: str
     owner_team: str

@@ -628,7 +628,6 @@ class FakeReplayService:
             "checkpoints": [],
             "workflow_states": [],
             "context_projections": [],
-            "safety_events": [],
         }
 
 
@@ -647,7 +646,6 @@ class FakeEvalService:
             input_payload={},
             expected_behavior={},
             expected_tool_calls=[],
-            expected_safety_decision="",
             source_run_id=kwargs["run_id"],
             status="draft",
             owner_team=kwargs["owner_team"],

@@ -45,7 +45,6 @@ def test_run_agent_seed_eval_accepts_runtime_replay_trace(tmp_path: Path) -> Non
                             "tool_calls": [],
                             "events": [{"type": "message.completed"}],
                             "actions": [],
-                            "safety_decision": "allow",
                             "final_text": "好的，之后我会先说重点。",
                             "service_skill_id": "cozymate_service_agent",
                         },
@@ -81,7 +80,6 @@ def test_run_agent_seed_eval_reports_forbidden_observed_tool(tmp_path: Path) -> 
                         },
                         "trace": {
                             "tool_calls": [{"tool_name": "profile_update", "status": "completed"}],
-                            "safety_decision": "allow",
                         },
                     }
                 ]

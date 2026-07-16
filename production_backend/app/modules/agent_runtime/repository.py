@@ -21,7 +21,6 @@ from .models import (
     AgentRunSummary,
     AgentRoutingDecision,
     AgentRun,
-    AgentSafetyEvent,
     AgentThread,
     AgentToolCall,
     AgentToolOutput,
@@ -948,11 +947,6 @@ class AgentRuntimeRepository:
         summaries.reverse()
         return summaries
 
-    async def list_safety_events_for_run(self, *, run_id: UUID) -> list[AgentSafetyEvent]:
-        statement = select(AgentSafetyEvent).where(AgentSafetyEvent.run_id == run_id).order_by(AgentSafetyEvent.created_at, AgentSafetyEvent.id)
-        result = await self.session.scalars(statement)
-        return list(result.all())
-
     async def fail_tool_call(
         self,
         *,
@@ -988,30 +982,6 @@ class AgentRuntimeRepository:
         result = await self.session.execute(statement)
         return [(cast(AgentToolCall, call), cast(AgentToolOutput, output)) for call, output in result.all()]
 
-    async def record_safety_event(
-        self,
-        *,
-        run_id: UUID | None,
-        owner_user_id: UUID,
-        category: str,
-        severity: str,
-        decision: str,
-        evidence: dict[str, Any],
-        evidence_ref: str = "",
-    ) -> AgentSafetyEvent:
-        event = AgentSafetyEvent(
-            run_id=run_id,
-            owner_user_id=owner_user_id,
-            category=category,
-            severity=severity,
-            decision=decision,
-            evidence=evidence,
-            evidence_ref=evidence_ref,
-        )
-        self.session.add(event)
-        await self.session.flush()
-        return event
-
     async def create_eval_case(
         self,
         *,
@@ -1021,7 +991,6 @@ class AgentRuntimeRepository:
         input_payload: dict[str, Any],
         expected_behavior: dict[str, Any],
         expected_tool_calls: list[Any],
-        expected_safety_decision: str,
         source_run_id: UUID | None,
         status: str,
         owner_team: str,
@@ -1033,7 +1002,6 @@ class AgentRuntimeRepository:
             input_payload=input_payload,
             expected_behavior=expected_behavior,
             expected_tool_calls=expected_tool_calls,
-            expected_safety_decision=expected_safety_decision,
             source_run_id=source_run_id,
             status=status,
             owner_team=owner_team,

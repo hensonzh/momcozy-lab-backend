@@ -576,30 +576,6 @@ class AgentMemoryConsolidationRun(Base):
     )
 
 
-class AgentSafetyEvent(Base):
-    __tablename__ = "agent_safety_events"
-    __table_args__ = (
-        Index("ix_agent_safety_events_run_created", "run_id", "created_at"),
-        Index("ix_agent_safety_events_owner_category_created", "owner_user_id", "category", "created_at"),
-    )
-
-    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
-    run_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("agent_runs.id"), nullable=True)
-    owner_user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    category: Mapped[str] = mapped_column(String(120), nullable=False)
-    severity: Mapped[str] = mapped_column(String(32), nullable=False)
-    decision: Mapped[str] = mapped_column(String(64), nullable=False)
-    evidence: Mapped[dict[str, Any]] = mapped_column(
-        "evidence_json",
-        postgresql.JSONB,
-        default=dict,
-        server_default=text("'{}'::jsonb"),
-        nullable=False,
-    )
-    evidence_ref: Mapped[str] = mapped_column(String(512), default="", server_default="", nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-
-
 class AgentEvalCase(Base):
     __tablename__ = "agent_eval_cases"
     __table_args__ = (
@@ -632,7 +608,6 @@ class AgentEvalCase(Base):
         server_default=text("'[]'::jsonb"),
         nullable=False,
     )
-    expected_safety_decision: Mapped[str] = mapped_column(String(64), default="", server_default="", nullable=False)
     source_run_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("agent_runs.id"), nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="draft", server_default="draft", nullable=False)
     owner_team: Mapped[str] = mapped_column(String(120), default="", server_default="", nullable=False)
