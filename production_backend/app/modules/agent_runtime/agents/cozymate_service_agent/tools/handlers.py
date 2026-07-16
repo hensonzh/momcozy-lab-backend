@@ -37,7 +37,11 @@ from production_backend.app.modules.plans.agent_actions import (
     PREGNANCY_PLAN_TODO_UPDATE_ACTION,
 )
 from production_backend.app.modules.plans.models import Plan, PlanTask
-from production_backend.app.modules.plans.milk_plan_builder import MilkPlanDraftError, build_milk_plan_draft
+from production_backend.app.modules.plans.milk_plan_builder import (
+    MilkPlanDraftError,
+    build_milk_plan_draft,
+    summarize_pumping_rhythm,
+)
 from production_backend.app.modules.plans.milk_plan_schedule import (
     normalize_milk_plan_payload,
 )
@@ -792,6 +796,7 @@ class MilkAnalysisReadToolHandler:
             trend_items=trend_items,
             infant_count=len(infants),
         )
+        pumping_payloads = [_pumping_payload(record) for record in pumpings]
         output = {
             "window": status["window"],
             "status": status["status"],
@@ -800,7 +805,11 @@ class MilkAnalysisReadToolHandler:
             "latest": status["latest"],
             "observation_flags": status["observation_flags"],
             "recent_feedings": [_feeding_payload(record) for record in feedings[:detail_limit]],
-            "recent_pumpings": [_pumping_payload(record) for record in pumpings[:detail_limit]],
+            "recent_pumpings": pumping_payloads[:detail_limit],
+            "pumping_rhythm": summarize_pumping_rhythm(
+                pumping_payloads,
+                timezone_name=_text(context.args, "runtime_timezone") or "UTC",
+            ),
             "recent_growth": [_growth_payload(record) for record in growth],
             "pumping_trends": trend_items,
             "analysis": _milk_analysis_payload(status=status, growth=growth),

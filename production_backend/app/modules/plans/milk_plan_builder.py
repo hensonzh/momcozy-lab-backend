@@ -4,6 +4,8 @@ from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from .milk_plan_schedule import MAX_MILK_PLAN_SCHEDULED_TASKS
+
 
 SUPPORTED_MILK_PLAN_DIRECTIONS = frozenset({"increase", "maintain", "decrease"})
 DEFAULT_PUMPING_TIMES = ("07:00", "10:00", "13:00", "16:00", "19:00", "22:00")
@@ -39,9 +41,16 @@ def build_milk_plan_draft(
     )
 
     explicit_times = _normalized_times(preferred_pumping_times or [])
+    rhythm_times = _pumping_rhythm_times(analysis_context, timezone_name=timezone_name)
     recent_times = _recent_pumping_times(analysis_context, timezone_name=timezone_name)
-    base_times = explicit_times or recent_times or list(DEFAULT_PUMPING_TIMES)
-    pumping_times = _direction_times(base_times, direction=normalized_direction)
+    requested_base_times = explicit_times or rhythm_times or recent_times or list(DEFAULT_PUMPING_TIMES)
+    daily_time_limit = max(1, MAX_MILK_PLAN_SCHEDULED_TASKS // normalized_days)
+    base_times = _fit_times_to_limit(requested_base_times, limit=daily_time_limit)
+    pumping_times = _direction_times(
+        base_times,
+        direction=normalized_direction,
+        max_times=daily_time_limit,
+    )
     tasks = [
         {
             "title": _task_title(normalized_direction),
@@ -51,8 +60,13 @@ def build_milk_plan_draft(
         }
         for task_time in pumping_times
     ]
+    increase_strategy = (
+        "在近期可执行节奏上温和增加 1 个吸奶时点"
+        if len(pumping_times) > len(base_times)
+        else "在计划任务上限内沿用当前吸奶时点，结合奶量与身体反应复盘"
+    )
     labels = {
-        "increase": ("追奶", "在近期可执行节奏上温和增加 1 个吸奶时点"),
+        "increase": ("追奶", increase_strategy),
         "maintain": ("稳奶", "沿用近期可执行节奏，保持记录和复盘"),
         "decrease": ("温和减奶", "在近期节奏上先减少 1 个吸奶时点并观察舒适度"),
     }
@@ -166,6 +180,10 @@ def _recent_pumping_times(analysis_context: dict[str, Any], *, timezone_name: st
     pumpings = snapshot.get("recent_pumpings")
     if not isinstance(pumpings, list):
         return []
+    return list(summarize_pumping_rhythm(pumpings, timezone_name=timezone_name)["representative_times"])
+
+
+def summarize_pumping_rhythm(pumpings: list[dict[str, Any]], *, timezone_name: str) -> dict[str, Any]:
     timezone_info = _timezone(timezone_name)
     values_by_date: dict[date, list[str]] = {}
     for pumping in pumpings:
@@ -182,12 +200,32 @@ def _recent_pumping_times(analysis_context: dict[str, Any], *, timezone_name: st
             parsed = parsed.astimezone(timezone_info)
         values_by_date.setdefault(parsed.date(), []).append(parsed.strftime("%H:%M"))
     if not values_by_date:
-        return []
+        return {
+            "timezone": _timezone_name(timezone_name),
+            "representative_date": None,
+            "representative_times": [],
+        }
     representative_date = max(
         values_by_date,
         key=lambda item: (len(values_by_date[item]), item),
     )
-    return sorted(set(values_by_date[representative_date]))[:MAX_PUMPING_TIMES]
+    return {
+        "timezone": _timezone_name(timezone_name),
+        "representative_date": representative_date.isoformat(),
+        "representative_times": sorted(set(values_by_date[representative_date]))[:MAX_PUMPING_TIMES],
+    }
+
+
+def _pumping_rhythm_times(analysis_context: dict[str, Any], *, timezone_name: str) -> list[str]:
+    snapshot = analysis_context.get("records_snapshot")
+    snapshot = snapshot if isinstance(snapshot, dict) else {}
+    rhythm = snapshot.get("pumping_rhythm")
+    if not isinstance(rhythm, dict):
+        return []
+    if str(rhythm.get("timezone") or "").strip() != _timezone_name(timezone_name):
+        return []
+    values = rhythm.get("representative_times")
+    return _normalized_times(values) if isinstance(values, list) else []
 
 
 def _normalized_times(values: list[str]) -> list[str]:
@@ -208,12 +246,12 @@ def _normalized_times(values: list[str]) -> list[str]:
     return sorted(normalized)
 
 
-def _direction_times(base_times: list[str], *, direction: str) -> list[str]:
+def _direction_times(base_times: list[str], *, direction: str, max_times: int = MAX_PUMPING_TIMES) -> list[str]:
     values = _normalized_times(base_times)
     if direction == "maintain" or not values:
         return values or list(DEFAULT_PUMPING_TIMES)
     if direction == "increase":
-        if len(values) >= MAX_PUMPING_TIMES:
+        if len(values) >= min(MAX_PUMPING_TIMES, max_times):
             return values
         occupied = [_minutes(value) for value in values]
         candidates = range(6 * 60, 23 * 60, 30)
@@ -223,6 +261,16 @@ def _direction_times(base_times: list[str], *, direction: str) -> list[str]:
         return values
     removable = next((value for value in reversed(values) if _minutes(value) >= 21 * 60 or _minutes(value) < 6 * 60), values[-1])
     return [value for value in values if value != removable]
+
+
+def _fit_times_to_limit(values: list[str], *, limit: int) -> list[str]:
+    normalized = _normalized_times(values)
+    if len(normalized) <= limit:
+        return normalized
+    if limit <= 1:
+        return [normalized[len(normalized) // 2]]
+    indexes = [round(index * (len(normalized) - 1) / (limit - 1)) for index in range(limit)]
+    return [normalized[index] for index in indexes]
 
 
 def _minutes(value: str) -> int:

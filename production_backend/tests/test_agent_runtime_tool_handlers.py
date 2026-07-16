@@ -673,6 +673,60 @@ def test_milk_analysis_read_tool_handler_returns_growth_and_next_step_snapshot()
     assert result["analysis"]["recommended_next_step"] == "先确认宝宝资料或体重/尿布等摄入信号。"
 
 
+def test_milk_analysis_reader_summarizes_rhythm_from_full_window_not_display_slice() -> None:
+    actor = _user()
+
+    class FullWindowRecordsService(FakeRecordsService):
+        async def list_pumpings(self, *, owner_user_id, start_at=None, end_at=None, limit):
+            self.pumping_query = {
+                "owner_user_id": owner_user_id,
+                "start_at": start_at,
+                "end_at": end_at,
+                "limit": limit,
+            }
+            times = [
+                datetime(2026, 7, 2, 12, tzinfo=timezone.utc),
+                datetime(2026, 7, 2, 8, tzinfo=timezone.utc),
+                datetime(2026, 7, 2, 4, tzinfo=timezone.utc),
+                datetime(2026, 7, 1, 20, tzinfo=timezone.utc),
+                datetime(2026, 7, 1, 16, tzinfo=timezone.utc),
+                datetime(2026, 7, 1, 12, tzinfo=timezone.utc),
+                datetime(2026, 7, 1, 8, tzinfo=timezone.utc),
+                datetime(2026, 7, 1, 4, tzinfo=timezone.utc),
+                datetime(2026, 7, 1, 0, tzinfo=timezone.utc),
+            ]
+            return [
+                PumpingRecord(
+                    id=uuid4(),
+                    owner_user_id=self._owner_user_id,
+                    pump_start_time=value,
+                    pump_end_time=None,
+                    milk_volume_ml=80,
+                    pump_type="electric",
+                    duration_seconds=900,
+                    source="device",
+                    title="Pump session",
+                )
+                for value in times[:limit]
+            ]
+
+    handler = MilkAnalysisReadToolHandler(
+        records_service=FullWindowRecordsService(owner_user_id=actor.user_id),
+        profile_service=FakeProfileService(profile=None, infants=[]),
+    )
+
+    result = asyncio.run(
+        handler(_context(actor=actor, args={"days": 7, "limit": 8, "runtime_timezone": "UTC"}))
+    )
+
+    assert len(result["recent_pumpings"]) == 8
+    assert result["pumping_rhythm"] == {
+        "timezone": "UTC",
+        "representative_date": "2026-07-01",
+        "representative_times": ["00:00", "04:00", "08:00", "12:00", "16:00", "20:00"],
+    }
+
+
 def test_milk_analysis_intake_is_durable_and_evaluation_emits_an_analysis_card() -> None:
     actor = _user()
     runtime_service = FakeAgentRuntimeService()
