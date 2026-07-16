@@ -144,7 +144,8 @@ The template rejects unknown hosts, forwards client/protocol/request IDs,
 disables buffering for SSE endpoints, and preserves WebSocket upgrade headers
 for `/v1/realtime-voice-session`. Its 16 MiB edge limit leaves multipart
 overhead above the default 10 MiB application upload limit. It listens on both
-80 and 443 and permits only TLS 1.2 and TLS 1.3.
+IPv4 and IPv6 port 8443, permits only TLS 1.2 and TLS 1.3, and is intended to
+receive traffic only from an approved load balancer, WAF, or source network.
 
 Before enabling the site, provision the certificate and private key referenced
 by the template:
@@ -154,10 +155,10 @@ by the template:
 /etc/nginx/tls/momcozy-api/privkey.pem
 ```
 
-Use a trusted certificate for public traffic. A short-lived self-signed
-bootstrap certificate is acceptable only to preflight a closed staging ingress;
-do not enable HTTP-to-HTTPS redirects or HSTS until a trusted certificate is
-installed.
+Use a trusted public or internal certificate according to the ingress TLS
+mode. A short-lived self-signed bootstrap certificate is acceptable only to
+preflight a closed staging ingress; the upstream load balancer must not trust
+it as a permanent credential.
 
 Install and validate the site before switching traffic:
 
@@ -169,16 +170,15 @@ sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-After DNS and firewall rules allow inbound TCP 80 and 443, replace any bootstrap
-certificate through the environment's certificate automation. For Certbot,
-request the certificate through the Nginx plugin and enable the redirect:
+Configure the public load balancer or WAF to forward the API route to private
+TCP 8443. Restrict the server firewall or security group so that 8443 accepts
+traffic only from that ingress or an explicitly approved source range. Preserve
+the original Host header and SNI when using HTTPS re-encryption.
 
-```bash
-sudo certbot --nginx -d api.example.com --redirect
-```
-
-Then verify automatic renewal and add HSTS only after HTTPS is trusted. Never
-publish the loopback API port, Postgres, Redis, or object storage directly.
+The standard ACME HTTP-01 flow cannot validate a service exposed only on 8443.
+Terminate public TLS with a managed certificate at the load balancer, or import
+an approved certificate for end-to-end TLS. Never publish the loopback API port,
+Postgres, Redis, or object storage directly.
 
 ## Server Test Docker Compose
 
