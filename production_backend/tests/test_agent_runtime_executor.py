@@ -28,6 +28,7 @@ from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.
 from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.health_guidance import (
     COMPLEX_HEALTH_SEARCH_UNAVAILABLE_RESPONSE,
     HEALTH_GUIDANCE_ALLOWED_DOMAINS,
+    OPTIONAL_HEALTH_RESPONSE_UNAVAILABLE_RESPONSE,
 )
 from production_backend.app.modules.agent_runtime.run_lifecycle.executor import (
     AgentRuntimeExecutor,
@@ -217,6 +218,88 @@ def test_agent_runtime_executor_keeps_low_risk_health_reply_when_optional_search
     assert request.web_search_enabled is True
     assert request.web_search_required is False
     assert request.web_search_allowed_domains == tuple(HEALTH_GUIDANCE_ALLOWED_DOMAINS)
+
+
+def test_agent_runtime_executor_retries_optional_health_search_without_search_after_provider_failure() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(
+        thread_id=thread_id,
+        run_id=run.id,
+        role="user",
+        text="产后恶露持续很多天正常吗？",
+        sequence=1,
+    )
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    backend = FailingOnceSdkBackend(
+        error=ApiError(code="sdk_rate_limited", message="rate limited", status=429),
+        result=SdkNodeResult(final_text="可以先结合颜色、气味、出血量和是否伴随不适继续观察。"),
+    )
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, provider="openai", use_responses=True),
+        ).execute(run=run)
+    )
+
+    assert result.final_text == "可以先结合颜色、气味、出血量和是否伴随不适继续观察。"
+    assert [request.web_search_enabled for request in backend.requests] == [True, False]
+    retry_context = json.dumps(backend.requests[1].model_input, ensure_ascii=False)
+    assert "已提供 Responses API web_search" not in retry_context
+    assert "当前未启用 web_search" in retry_context
+
+
+def test_agent_runtime_executor_uses_capability_accurate_health_context_without_responses_search() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(
+        thread_id=thread_id,
+        run_id=run.id,
+        role="user",
+        text="产后恶露持续很多天正常吗？",
+        sequence=1,
+    )
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    backend = CapturingSdkBackend(result=SdkNodeResult(final_text="我先帮你看几个需要观察的变化。"))
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, provider="minimax", use_responses=False),
+        ).execute(run=run)
+    )
+
+    assert result.final_text == "我先帮你看几个需要观察的变化。"
+    request = backend.requests[0]
+    assert request.web_search_enabled is False
+    context = json.dumps(request.model_input, ensure_ascii=False)
+    assert "已提供 Responses API web_search" not in context
+    assert "当前未启用 web_search" in context
+
+
+def test_agent_runtime_executor_bounds_optional_health_reply_when_provider_retry_also_fails() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(
+        thread_id=thread_id,
+        run_id=run.id,
+        role="user",
+        text="产后恶露持续很多天正常吗？",
+        sequence=1,
+    )
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    backend = FailingSdkBackend(ApiError(code="sdk_provider_unavailable", message="provider down", status=503))
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, provider="openai", use_responses=True),
+        ).execute(run=run)
+    )
+
+    assert result.final_text == OPTIONAL_HEALTH_RESPONSE_UNAVAILABLE_RESPONSE
+    assert [request.web_search_enabled for request in backend.requests] == [True, False]
 
 
 def test_agent_runtime_executor_keeps_streamed_health_text_when_required_search_is_not_observed() -> None:
@@ -414,6 +497,25 @@ def test_agent_runtime_executor_injects_trusted_support_ticket_confirmation_text
     trusted_args = asyncio.run(executor._trusted_tool_args(run=run, contract_name="support.ticket.propose"))
 
     assert trusted_args == {"trusted_current_user_text": "好的，请现在帮我创建售后工单"}
+
+
+def test_agent_runtime_executor_injects_runtime_timezone_into_milk_analysis_snapshot() -> None:
+    run = _run(thread_id=uuid4())
+    executor = AgentRuntimeExecutor(
+        repository=FakeRuntimeRepository(messages=[], current_message=None),
+        sdk_runner=OpenAIAgentsSdkRunner(backend=CapturingSdkBackend(result=SdkNodeResult(final_text=""))),
+    )
+    executor._run_current_user_text[run.id] = "帮我分析奶量"
+    executor._run_timezones[run.id] = "Asia/Shanghai"
+
+    trusted_args = asyncio.run(
+        executor._trusted_tool_args(run=run, contract_name="records.milk_analysis.intake")
+    )
+
+    assert trusted_args == {
+        "trusted_current_user_text": "帮我分析奶量",
+        "runtime_timezone": "Asia/Shanghai",
+    }
 
 
 def test_agent_runtime_executor_projects_recent_ibclc_client_event_into_next_turn() -> None:
@@ -3905,6 +4007,19 @@ class FailingSdkBackend:
     async def run(self, request: SdkNodeRequest) -> SdkNodeResult:
         self.requests.append(request)
         raise self.error
+
+
+class FailingOnceSdkBackend:
+    def __init__(self, *, error: ApiError, result: SdkNodeResult) -> None:
+        self.error = error
+        self.result = result
+        self.requests = []
+
+    async def run(self, request: SdkNodeRequest) -> SdkNodeResult:
+        self.requests.append(request)
+        if len(self.requests) == 1:
+            raise self.error
+        return self.result
 
 
 def _runtime_context(request: SdkNodeRequest) -> dict:

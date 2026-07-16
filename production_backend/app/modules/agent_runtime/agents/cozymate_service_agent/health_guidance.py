@@ -27,6 +27,12 @@ COMPLEX_HEALTH_SEARCH_UNAVAILABLE_RESPONSE = (
     "如有大量出血、胸痛、呼吸困难、晕厥，或宝宝呼吸困难、嘴唇发紫、嗜睡叫不醒等情况，请立即就医或呼叫急救。"
 )
 
+OPTIONAL_HEALTH_RESPONSE_UNAVAILABLE_RESPONSE = (
+    "这次专业资料检索和回答服务暂时没有完成。你可以先记录症状出现时间、变化、疼痛或出血情况、体温，"
+    "以及妈妈或宝宝的整体状态；先不要自行用药或做激进处理。"
+    "如果症状持续、加重，或妈妈/宝宝状态不对，请尽快联系医生。"
+)
+
 _HEALTH_DOMAIN_TERMS = (
     "孕期",
     "怀孕",
@@ -294,18 +300,28 @@ def needs_breast_triage_first(message: str) -> bool:
 def health_guidance_request_context_lines(
     message: str,
     loaded_skill_ids: list[str] | None = None,
+    *,
+    web_search_enabled: bool,
 ) -> list[str]:
     if not should_use_complex_health_web_search(message, loaded_skill_ids):
         return []
     lines = ["health_guidance_context:"]
     if needs_breast_triage_first(message):
         lines.append("- 本轮像是乳房硬块/疼痛的第一步；还没确认几个要紧情况，先问一句关键问题，不需要 web_search。")
-    else:
+    elif web_search_enabled:
         lines.extend(
             [
                 "- 本轮问题像是相对复杂的母婴健康咨询；已提供 Responses API web_search，且限制在专业资料 allowlist 域名内。",
                 "- 回答前优先使用 web_search 检索 WHO、NICE、ACOG、ABM、CDC、AAP、国家卫健委等来源；不要基于记忆硬答复杂健康判断。",
                 "- 普通健康咨询的目标是先帮用户完成当前可执行的一步：解释可能方向、给低风险处理/观察/记录建议；不要把医生、儿科、药师或 IBCLC 当成默认结论。",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "- 本轮问题像是相对复杂的母婴健康咨询；当前未启用 web_search，不要声称已检索或编造资料来源。",
+                "- 只基于用户已经提供的信息给有限、低风险的解释、观察和记录建议；信息不足时明确说明并追问关键问题。",
+                "- 普通健康咨询的目标是先帮用户完成当前可执行的一步；不要把医生、儿科、药师或 IBCLC 当成默认结论。",
             ]
         )
     lines.extend(

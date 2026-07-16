@@ -34,6 +34,7 @@ from ..agents.cozymate_service_agent.service_skills import ServiceSkillId
 from ..agents.cozymate_service_agent.health_guidance import (
     COMPLEX_HEALTH_SEARCH_UNAVAILABLE_RESPONSE,
     HEALTH_GUIDANCE_ALLOWED_DOMAINS,
+    OPTIONAL_HEALTH_RESPONSE_UNAVAILABLE_RESPONSE,
     health_guidance_request_context_lines,
     needs_breast_triage_first,
     should_require_complex_health_web_search,
@@ -280,10 +281,6 @@ class AgentRuntimeExecutor:
                 for skill in turn_context.working_context_state.skills
                 if turn_context.working_context_state.turn_index <= skill.expires_after_turn
             ]
-            health_context_lines = health_guidance_request_context_lines(
-                self._run_current_user_text[run.id],
-                loaded_skill_ids,
-            )
             complex_health = should_use_complex_health_web_search(
                 self._run_current_user_text[run.id],
                 loaded_skill_ids,
@@ -293,7 +290,13 @@ class AgentRuntimeExecutor:
                 self._run_current_user_text[run.id],
                 loaded_skill_ids,
             )
-            health_web_search_enabled = health_search_candidate and _runner_supports_web_search(self.sdk_runner)
+            runner_supports_web_search = _runner_supports_web_search(self.sdk_runner)
+            health_web_search_enabled = health_search_candidate and runner_supports_web_search
+            health_context_lines = health_guidance_request_context_lines(
+                self._run_current_user_text[run.id],
+                loaded_skill_ids,
+                web_search_enabled=health_web_search_enabled,
+            )
             prepared_turn = self._prepare_model_turn(
                 turn_context=turn_context,
                 health_context_lines=health_context_lines,
@@ -314,7 +317,7 @@ class AgentRuntimeExecutor:
             elif device_hazard_response := device_electrical_hazard_response(self._run_current_user_text[run.id]):
                 self._run_authoritative_final_text[run.id] = device_hazard_response
                 result = SdkNodeResult(final_text=device_hazard_response)
-            elif health_web_search_required and not _runner_supports_web_search(self.sdk_runner):
+            elif health_web_search_required and not runner_supports_web_search:
                 self._run_authoritative_final_text[run.id] = COMPLEX_HEALTH_SEARCH_UNAVAILABLE_RESPONSE
                 result = SdkNodeResult(final_text=COMPLEX_HEALTH_SEARCH_UNAVAILABLE_RESPONSE)
             else:
@@ -328,11 +331,22 @@ class AgentRuntimeExecutor:
                         health_web_search_required=health_web_search_required,
                     )
                 except ApiError as exc:
-                    if not health_web_search_required or exc.code not in HEALTH_WEB_SEARCH_FALLBACK_ERROR_CODES:
+                    if exc.code not in HEALTH_WEB_SEARCH_FALLBACK_ERROR_CODES:
                         raise
-                    LOGGER.warning("Required health web search failed; using bounded fallback.", extra={"error_code": exc.code})
-                    self._run_authoritative_final_text[run.id] = COMPLEX_HEALTH_SEARCH_UNAVAILABLE_RESPONSE
-                    result = SdkNodeResult(final_text=COMPLEX_HEALTH_SEARCH_UNAVAILABLE_RESPONSE)
+                    if health_web_search_required:
+                        LOGGER.warning("Required health web search failed; using bounded fallback.", extra={"error_code": exc.code})
+                        self._run_authoritative_final_text[run.id] = COMPLEX_HEALTH_SEARCH_UNAVAILABLE_RESPONSE
+                        result = SdkNodeResult(final_text=COMPLEX_HEALTH_SEARCH_UNAVAILABLE_RESPONSE)
+                    elif health_web_search_enabled:
+                        result = await self._retry_optional_health_without_search(
+                            run=run,
+                            turn_context=turn_context,
+                            tool_catalog=tool_catalog,
+                            loaded_skill_ids=loaded_skill_ids,
+                            first_error=exc,
+                        )
+                    else:
+                        raise
                 if health_web_search_required and not result.web_search_used and not result.web_search_citations:
                     self._run_authoritative_final_text[run.id] = COMPLEX_HEALTH_SEARCH_UNAVAILABLE_RESPONSE
                     result = SdkNodeResult(final_text=COMPLEX_HEALTH_SEARCH_UNAVAILABLE_RESPONSE)
@@ -497,33 +511,87 @@ class AgentRuntimeExecutor:
         prepared_turn: _PreparedModelTurn,
         health_web_search_enabled: bool = False,
         health_web_search_required: bool = False,
+        stream_text: bool = True,
     ) -> Any:
         await self._append_progress(run=run, phase="model_reasoning", label="我想一下")
         if health_web_search_required:
             await self._append_health_web_search_status(run=run, status="searching")
         model_started_at = perf_counter()
-        result = await self.sdk_runner.run_reasoning(
-            SdkNodeRequest(
-                run_id=str(run.id),
-                thread_id=str(run.thread_id),
-                actor_user_id=str(run.actor_user_id),
-                instructions=_sdk_instructions(projection=prepared_turn.projection),
-                model_input=prepared_turn.model_input,
-                tool_names=tool_catalog.tool_names,
-                tool_namespaces=_sdk_tool_namespaces(tool_catalog.tool_namespaces),
-                tool_search_enabled=_tool_search_enabled(tool_catalog.tool_namespaces),
-                tools=self._sdk_tools(run=run, tool_names=tool_catalog.tool_names, tool_namespaces=tool_catalog.tool_namespaces),
-                prompt_version=run.prompt_version,
-                trace_id=run.trace_id,
-                service_skill_id=COZYMATE_AGENT_ID,
-                on_text_delta=self._text_delta_handler(run=run),
-                web_search_enabled=health_web_search_enabled,
-                web_search_required=health_web_search_required,
-                web_search_allowed_domains=HEALTH_GUIDANCE_ALLOWED_DOMAINS if health_web_search_enabled else (),
+        try:
+            return await self.sdk_runner.run_reasoning(
+                SdkNodeRequest(
+                    run_id=str(run.id),
+                    thread_id=str(run.thread_id),
+                    actor_user_id=str(run.actor_user_id),
+                    instructions=_sdk_instructions(projection=prepared_turn.projection),
+                    model_input=prepared_turn.model_input,
+                    tool_names=tool_catalog.tool_names,
+                    tool_namespaces=_sdk_tool_namespaces(tool_catalog.tool_namespaces),
+                    tool_search_enabled=_tool_search_enabled(tool_catalog.tool_namespaces),
+                    tools=self._sdk_tools(
+                        run=run,
+                        tool_names=tool_catalog.tool_names,
+                        tool_namespaces=tool_catalog.tool_namespaces,
+                    ),
+                    prompt_version=run.prompt_version,
+                    trace_id=run.trace_id,
+                    service_skill_id=COZYMATE_AGENT_ID,
+                    on_text_delta=self._text_delta_handler(run=run) if stream_text else None,
+                    web_search_enabled=health_web_search_enabled,
+                    web_search_required=health_web_search_required,
+                    web_search_allowed_domains=HEALTH_GUIDANCE_ALLOWED_DOMAINS if health_web_search_enabled else (),
+                )
             )
+        finally:
+            turn_context.timings_ms["model_reasoning"] = round(
+                turn_context.timings_ms.get("model_reasoning", 0.0) + _elapsed_ms(model_started_at),
+                2,
+            )
+
+    async def _retry_optional_health_without_search(
+        self,
+        *,
+        run: AgentRun,
+        turn_context: _AgentTurnContext,
+        tool_catalog: _AgentTurnToolCatalog,
+        loaded_skill_ids: list[str],
+        first_error: ApiError,
+    ) -> SdkNodeResult:
+        LOGGER.warning(
+            "Optional health web search failed; retrying without search.",
+            extra={"error_code": first_error.code},
         )
-        turn_context.timings_ms["model_reasoning"] = _elapsed_ms(model_started_at)
-        return result
+        if self._run_provider_text_delta_seen.get(run.id, False):
+            self._run_authoritative_final_text[run.id] = OPTIONAL_HEALTH_RESPONSE_UNAVAILABLE_RESPONSE
+            return SdkNodeResult(final_text=OPTIONAL_HEALTH_RESPONSE_UNAVAILABLE_RESPONSE)
+        fallback_context_lines = health_guidance_request_context_lines(
+            self._run_current_user_text[run.id],
+            loaded_skill_ids,
+            web_search_enabled=False,
+        )
+        fallback_turn = self._prepare_model_turn(
+            turn_context=turn_context,
+            health_context_lines=fallback_context_lines,
+        )
+        try:
+            return await self._run_model_turn(
+                run=run,
+                turn_context=turn_context,
+                tool_catalog=tool_catalog,
+                prepared_turn=fallback_turn,
+                health_web_search_enabled=False,
+                health_web_search_required=False,
+                stream_text=False,
+            )
+        except ApiError as retry_error:
+            if retry_error.code not in HEALTH_WEB_SEARCH_FALLBACK_ERROR_CODES:
+                raise
+            LOGGER.warning(
+                "Optional health retry failed; using bounded fallback.",
+                extra={"error_code": retry_error.code},
+            )
+            self._run_authoritative_final_text[run.id] = OPTIONAL_HEALTH_RESPONSE_UNAVAILABLE_RESPONSE
+            return SdkNodeResult(final_text=OPTIONAL_HEALTH_RESPONSE_UNAVAILABLE_RESPONSE)
 
     async def _emit_health_web_search_events(
         self,
@@ -1067,7 +1135,10 @@ class AgentRuntimeExecutor:
             local_date = self._run_local_dates.get(run.id, "")
             return {"runtime_local_date": local_date} if local_date else {}
         if contract_name == "records.milk_analysis.intake":
-            return {"trusted_current_user_text": self._run_current_user_text.get(run.id, "")}
+            return {
+                "trusted_current_user_text": self._run_current_user_text.get(run.id, ""),
+                "runtime_timezone": self._run_timezones.get(run.id, "UTC"),
+            }
         if contract_name == "plans.milk_plan.propose":
             return {
                 "runtime_local_date": self._run_local_dates.get(run.id, ""),

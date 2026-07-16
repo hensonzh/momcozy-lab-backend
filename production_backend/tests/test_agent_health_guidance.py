@@ -62,8 +62,24 @@ def test_first_breast_lump_turn_suppresses_web_search_until_triage_is_answered()
     assert should_use_complex_health_web_search(first_turn) is True
     assert needs_breast_triage_first(answered_turn) is False
     assert should_use_complex_health_web_search(answered_turn) is True
-    assert "不需要 web_search" in "\n".join(health_guidance_request_context_lines(first_turn))
-    assert "优先使用 web_search 检索" in "\n".join(health_guidance_request_context_lines(answered_turn))
+    assert "不需要 web_search" in "\n".join(
+        health_guidance_request_context_lines(first_turn, web_search_enabled=False)
+    )
+    assert "优先使用 web_search 检索" in "\n".join(
+        health_guidance_request_context_lines(answered_turn, web_search_enabled=True)
+    )
+
+
+def test_health_context_does_not_claim_web_search_when_runner_cannot_provide_it() -> None:
+    lines = health_guidance_request_context_lines(
+        "产后恶露持续很多天正常吗？",
+        web_search_enabled=False,
+    )
+    context = "\n".join(lines)
+
+    assert "已提供 Responses API web_search" not in context
+    assert "优先使用 web_search 检索" not in context
+    assert "当前未启用 web_search" in context
 
 
 def test_milk_intake_field_explanation_stays_in_loaded_milk_service() -> None:
