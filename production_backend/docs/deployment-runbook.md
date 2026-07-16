@@ -148,6 +148,19 @@ overhead above the default 10 MiB application upload limit. It listens on both
 IPv4 and IPv6 port 8443, permits only TLS 1.2 and TLS 1.3, and is intended to
 receive traffic only from an approved load balancer, WAF, or source network.
 
+The same virtual host serves the generated Android download bundle under
+`/app/` from `/var/www/momcozy/android-apk/`. APK requests are handled as static
+files with the Android package MIME type and an attachment disposition; they
+must never be proxied to FastAPI. Publish a generated bundle with:
+
+```bash
+sudo install -d -o deploy -g www-data -m 0755 /var/www/momcozy/android-apk
+rsync -av --delete dist/android-apk/ deploy@api.example.com:/var/www/momcozy/android-apk/
+```
+
+Replace the example deployment user and host for the target environment. Keep
+the directory readable by Nginx and do not enable directory listing.
+
 Before enabling the site, provision the certificate and private key referenced
 by the template:
 

@@ -46,6 +46,21 @@ def test_nginx_proxy_keeps_api_private_and_supports_streaming_transports() -> No
     assert "proxy_read_timeout 3600s;" in config
 
 
+def test_nginx_serves_android_download_artifacts_without_api_proxying() -> None:
+    config = NGINX_CONFIG.read_text()
+
+    assert "location /app/" in config
+    assert "alias /var/www/momcozy/android-apk/;" in config
+    assert "index index.html;" in config
+    assert "autoindex off;" in config
+    assert "location ~ ^/app/releases/" in config
+    assert "alias /var/www/momcozy/android-apk/releases/$apk_file;" in config
+    assert "application/vnd.android.package-archive" in config
+    assert "Content-Disposition" in config
+    assert "attachment; filename=\"$apk_file\"" in config
+    assert "X-Content-Type-Options nosniff always;" in config
+
+
 def test_compose_uses_local_infra_service_names_not_localhost() -> None:
     compose = LOCAL_COMPOSE.read_text()
     env = COMPOSE_LOCAL_ENV.read_text()
