@@ -141,14 +141,17 @@ def test_service_skills_do_not_reference_legacy_tool_namespaces() -> None:
     assert violations == []
 
 
-def test_production_runtime_packages_do_not_eagerly_import_langgraph_runner() -> None:
+def test_production_runtime_does_not_ship_dormant_langgraph_runner() -> None:
     runtime_init = (PRODUCTION_BACKEND / "app" / "modules" / "agent_runtime" / "__init__.py").read_text()
     graphs_init = (PRODUCTION_BACKEND / "app" / "modules" / "agent_runtime" / "graphs" / "__init__.py").read_text()
     worker_source = (PRODUCTION_BACKEND / "scripts" / "run_agent_worker.py").read_text()
+    requirements = (PRODUCTION_BACKEND / "requirements.txt").read_text()
 
     assert "AgentRuntimeGraphRunner" not in runtime_init
     assert "AgentRuntimeGraphRunner" not in graphs_init
     assert "AgentRuntimeGraphRunner" not in worker_source
+    assert not (PRODUCTION_BACKEND / "app" / "modules" / "agent_runtime" / "graphs" / "runner.py").exists()
+    assert "langgraph" not in requirements
 
 
 def test_service_skill_tool_references_are_registered_contracts() -> None:
