@@ -215,6 +215,54 @@ def test_doubao_realtime_voice_session_keeps_one_bidirectional_tts_connection() 
     assert task_payload["req_params"]["audio_params"] == {"format": "pcm", "sample_rate": 24000, "speech_rate": 10}
 
 
+def test_doubao_realtime_voice_session_resets_timeout_while_audio_is_active(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level("INFO", logger="production_backend.voice")
+    spoken_text = "这是一段持续时间超过固定截止窗口的语音。"
+    client = _FakeRealtimeVoiceClient(
+        [
+            {"type": "append", "text": spoken_text},
+            {"type": "finish"},
+        ]
+    )
+    provider = DoubaoRealtimeVoiceProvider(
+        Settings(
+            app_env="test",
+            voice_provider="doubao",
+            voice_api_key="doubao-test",
+            voice_request_timeout_seconds=1,
+        ),
+        connect=_fake_slow_active_session_connect,
+    )
+
+    asyncio.run(provider.run_realtime_session(actor_user_id=uuid4(), client=client))
+
+    assert client.bytes_frames == [b"pcm-1", b"pcm-2", b"pcm-3"]
+    assert [frame["type"] for frame in client.json_frames] == ["ready", "done"]
+    assert "outcome=completed" in caplog.text
+    assert "segments=1" in caplog.text
+    assert spoken_text not in caplog.text
+
+
+def test_doubao_realtime_voice_session_still_times_out_after_inactivity() -> None:
+    async def run_scenario() -> None:
+        upstream_task = asyncio.create_task(asyncio.sleep(3600))
+        try:
+            with pytest.raises(RuntimeError, match="became inactive"):
+                await providers._wait_for_doubao_session_completion(
+                    session_done=asyncio.Event(),
+                    session_activity=asyncio.Event(),
+                    upstream_task=upstream_task,
+                    inactivity_timeout_seconds=0.01,
+                )
+        finally:
+            upstream_task.cancel()
+            await asyncio.gather(upstream_task, return_exceptions=True)
+
+    asyncio.run(run_scenario())
+
+
 async def _collect_events(stream):
     return [event async for event in stream]
 
@@ -379,6 +427,54 @@ def _fake_session_connect(url: str, **kwargs) -> _FakeDoubaoSessionWebSocket:
     _FakeDoubaoSessionWebSocket.last_url = url
     _FakeDoubaoSessionWebSocket.last_kwargs = kwargs
     return _FakeDoubaoSessionWebSocket()
+
+
+class _SlowActiveDoubaoSessionWebSocket:
+    def __init__(self) -> None:
+        self._queue: asyncio.Queue[bytes] = asyncio.Queue()
+        self._producer: asyncio.Task[None] | None = None
+
+    async def __aenter__(self) -> "_SlowActiveDoubaoSessionWebSocket":
+        return self
+
+    async def __aexit__(self, exc_type, exc, exc_tb) -> None:
+        if self._producer is not None and not self._producer.done():
+            self._producer.cancel()
+            await asyncio.gather(self._producer, return_exceptions=True)
+
+    async def send(self, payload: bytes) -> None:
+        event = _parse_client_frame(payload)["event"]
+        if event == providers.DOUBAO_EVENT_START_CONNECTION:
+            await self._queue.put(_server_frame(providers.DOUBAO_EVENT_CONNECTION_STARTED))
+        elif event == providers.DOUBAO_EVENT_START_SESSION:
+            await self._queue.put(_server_frame(providers.DOUBAO_EVENT_SESSION_STARTED))
+        elif event == providers.DOUBAO_EVENT_FINISH_SESSION:
+            self._producer = asyncio.create_task(self._emit_active_audio())
+
+    async def _emit_active_audio(self) -> None:
+        for index in range(1, 4):
+            await asyncio.sleep(0.4)
+            await self._queue.put(
+                _server_frame(
+                    providers.DOUBAO_EVENT_TTS_RESPONSE,
+                    message_type=providers.DOUBAO_WS_AUDIO_ONLY_RESPONSE,
+                    payload=f"pcm-{index}".encode(),
+                )
+            )
+        await self._queue.put(_server_frame(providers.DOUBAO_EVENT_SESSION_FINISHED))
+
+    async def recv(self) -> bytes:
+        return await self._queue.get()
+
+    def __aiter__(self) -> "_SlowActiveDoubaoSessionWebSocket":
+        return self
+
+    async def __anext__(self) -> bytes:
+        return await self._queue.get()
+
+
+def _fake_slow_active_session_connect(url: str, **kwargs) -> _SlowActiveDoubaoSessionWebSocket:
+    return _SlowActiveDoubaoSessionWebSocket()
 
 
 class _FakeRealtimeVoiceClient:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 from io import BytesIO
 from collections.abc import AsyncGenerator, AsyncIterator
 from dataclasses import dataclass
@@ -11,6 +12,9 @@ from uuid import UUID, uuid4
 
 from ...core.errors import ApiError
 from ...core.settings import Settings
+
+
+LOGGER = logging.getLogger("production_backend.voice")
 
 
 DOUBAO_TTS_MAX_INPUT_CHARS = 4096
@@ -449,8 +453,14 @@ async def _run_doubao_realtime_voice_session(
 ) -> None:
     session_id = uuid4().hex
     session_done = asyncio.Event()
+    session_activity = asyncio.Event()
     send_lock = asyncio.Lock()
     upstream_error: RuntimeError | None = None
+    submitted_segments = 0
+    submitted_characters = 0
+    delivered_pcm_bytes = 0
+    session_outcome = "failed"
+    session_started_at = asyncio.get_running_loop().time()
 
     async with connect(
         settings.ws_url,
@@ -477,8 +487,9 @@ async def _run_doubao_realtime_voice_session(
         )
 
         async def upstream_reader() -> None:
-            nonlocal upstream_error
+            nonlocal delivered_pcm_bytes, upstream_error
             async for raw in ws:
+                session_activity.set()
                 response = _doubao_parse_response(raw)
                 event = int(response.get("event") or 0)
                 message_type = int(response.get("message_type") or 0)
@@ -495,14 +506,18 @@ async def _run_doubao_realtime_voice_session(
                     payload = response.get("payload")
                     if isinstance(payload, bytes) and payload:
                         await client.send_bytes(payload)
+                        delivered_pcm_bytes += len(payload)
+                        session_activity.set()
                     continue
                 if event in {DOUBAO_EVENT_TTS_SENTENCE_START, DOUBAO_EVENT_TTS_SENTENCE_END}:
                     continue
                 if event == DOUBAO_EVENT_SESSION_FINISHED:
                     session_done.set()
+                    session_activity.set()
                     return
 
         async def client_reader() -> None:
+            nonlocal submitted_characters, submitted_segments
             while True:
                 raw = await client.receive_text()
                 try:
@@ -526,6 +541,8 @@ async def _run_doubao_realtime_voice_session(
                                 text=text[:DOUBAO_TTS_MAX_INPUT_CHARS],
                                 user_id=user_id,
                             )
+                        submitted_segments += 1
+                        submitted_characters += len(text[:DOUBAO_TTS_MAX_INPUT_CHARS])
                     continue
                 if event_type in {"finish", "cancel"}:
                     async with send_lock:
@@ -548,10 +565,16 @@ async def _run_doubao_realtime_voice_session(
                 client_task.cancel()
                 raise RuntimeError("Doubao realtime TTS session closed")
             if client_task in done:
-                await asyncio.wait_for(session_done.wait(), timeout=settings.response_timeout_seconds)
+                await _wait_for_doubao_session_completion(
+                    session_done=session_done,
+                    session_activity=session_activity,
+                    upstream_task=upstream_task,
+                    inactivity_timeout_seconds=settings.response_timeout_seconds,
+                )
                 if upstream_error is not None:
                     raise upstream_error
                 await client.send_json({"type": "done", "session_id": session_id})
+                session_outcome = "completed"
         finally:
             for task in tasks:
                 if not task.done():
@@ -559,6 +582,49 @@ async def _run_doubao_realtime_voice_session(
             await asyncio.gather(*tasks, return_exceptions=True)
             with contextlib.suppress(Exception):
                 await _doubao_finish_connection(ws)
+            LOGGER.info(
+                "Realtime voice session ended outcome=%s segments=%d characters=%d pcm_bytes=%d duration_ms=%d",
+                session_outcome,
+                submitted_segments,
+                submitted_characters,
+                delivered_pcm_bytes,
+                int((asyncio.get_running_loop().time() - session_started_at) * 1000),
+            )
+
+
+async def _wait_for_doubao_session_completion(
+    *,
+    session_done: asyncio.Event,
+    session_activity: asyncio.Event,
+    upstream_task: asyncio.Task[None],
+    inactivity_timeout_seconds: float,
+) -> None:
+    while not session_done.is_set():
+        if upstream_task.done():
+            error = upstream_task.exception()
+            if error is not None:
+                raise error
+            if session_done.is_set():
+                return
+            raise RuntimeError("Doubao realtime TTS session closed")
+
+        session_activity.clear()
+        if session_done.is_set():
+            return
+        session_waiter = asyncio.create_task(session_done.wait())
+        activity_waiter = asyncio.create_task(session_activity.wait())
+        done, _pending = await asyncio.wait(
+            {session_waiter, activity_waiter, upstream_task},
+            timeout=inactivity_timeout_seconds,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for waiter in (session_waiter, activity_waiter):
+            if not waiter.done():
+                waiter.cancel()
+        await asyncio.gather(session_waiter, activity_waiter, return_exceptions=True)
+
+        if not done:
+            raise RuntimeError("Doubao realtime TTS session became inactive before completion")
 
 
 async def _doubao_start_connection(ws: Any) -> None:

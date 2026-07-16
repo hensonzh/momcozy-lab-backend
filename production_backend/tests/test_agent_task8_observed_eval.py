@@ -312,7 +312,10 @@ def test_observed_milk_analysis_plan_and_schedule_persist_real_action_lifecycles
     )
     _assert_tools(plan_turn.trace, "plans.milk_plan.propose")
     _assert_actions(plan_turn.trace, ("plans.milk_plan.create", "confirmation_required", "plan"))
-    _assert_event_types(plan_turn.trace, required={"action.confirmation_required", "artifact.created"})
+    _assert_event_types(
+        plan_turn.trace,
+        required={"action.confirmation_required", "artifact.created", "run.waiting_for_confirmation"},
+    )
     _assert_artifact_events(plan_turn.trace, "milk_plan_preview")
 
     plan_trace = scenario.confirm_and_apply(plan_turn.trace.actions[0]["action_type"])
@@ -772,6 +775,22 @@ class ObservedScenario:
             )
         )
         run.status = result.execution_result.status
+        trace = result.trace
+        if result.execution_result.status == "waiting_for_confirmation":
+            asyncio.run(
+                self.repository.append_event(
+                    thread_id=run.thread_id,
+                    run_id=run.id,
+                    event_type="run.waiting_for_confirmation",
+                    payload={"action_id": str(result.execution_result.pending_action_id or "")},
+                )
+            )
+            trace = asyncio.run(
+                AgentEvalRuntimeTraceCollector(repository=self.repository).collect(
+                    run_id=run.id,
+                    final_text=str(result.execution_result.final_text or ""),
+                )
+            )
         if result.execution_result.status == "completed" and result.execution_result.final_text:
             content: dict[str, Any] = {"text": result.execution_result.final_text}
             if result.execution_result.workflow_reply:
@@ -789,7 +808,7 @@ class ObservedScenario:
                     created_at=datetime.now(timezone.utc),
                 )
             )
-        return ObservedTurn(execution_result=result.execution_result, trace=result.trace)
+        return ObservedTurn(execution_result=result.execution_result, trace=trace)
 
     def pregnancy_handlers(self) -> dict[str, Any]:
         return {

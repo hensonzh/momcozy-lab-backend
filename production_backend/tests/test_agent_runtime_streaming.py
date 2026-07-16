@@ -5,6 +5,7 @@ import logging
 from dataclasses import dataclass
 from uuid import uuid4
 
+import production_backend.app.modules.agent_runtime.router as agent_runtime_router
 from production_backend.app.modules.agent_runtime.models import AgentEvent
 from production_backend.app.modules.agent_runtime.router import (
     _persisted_fallback_poll_interval_seconds,
@@ -227,6 +228,101 @@ def test_stream_run_event_chunks_yields_transient_delta_while_following() -> Non
     payloads = _sse_payloads(chunk)
     assert [payload["type"] for payload in payloads] == ["message.delta"]
     assert payloads[0]["payload"]["delta"] == "hello"
+
+
+def test_milk_plan_stream_resumes_after_follow_window_and_reaches_confirmation(monkeypatch) -> None:
+    thread_id = uuid4()
+    run_id = uuid4()
+    progress = AgentEvent(
+        event_id=uuid4(),
+        thread_id=thread_id,
+        run_id=run_id,
+        sequence=1,
+        event_type="run.progress",
+        payload={"phase": "tool_running", "label": "正在生成追奶计划"},
+    )
+    resumed_events = [
+        AgentEvent(
+            event_id=uuid4(),
+            thread_id=thread_id,
+            run_id=run_id,
+            sequence=2,
+            event_type="tool.completed",
+            payload={"tool_name": "plans.milk_plan.propose"},
+        ),
+        AgentEvent(
+            event_id=uuid4(),
+            thread_id=thread_id,
+            run_id=run_id,
+            sequence=3,
+            event_type="artifact.created",
+            payload={"artifact_type": "milk_plan_preview"},
+        ),
+        AgentEvent(
+            event_id=uuid4(),
+            thread_id=thread_id,
+            run_id=run_id,
+            sequence=4,
+            event_type="action.confirmation_required",
+            payload={"action_type": "plans.milk_plan.create"},
+        ),
+        AgentEvent(
+            event_id=uuid4(),
+            thread_id=thread_id,
+            run_id=run_id,
+            sequence=5,
+            event_type="message.completed",
+            payload={"role": "assistant", "text": "请确认后创建追奶计划。"},
+        ),
+        AgentEvent(
+            event_id=uuid4(),
+            thread_id=thread_id,
+            run_id=run_id,
+            sequence=6,
+            event_type="run.waiting_for_confirmation",
+            payload={"action_id": str(uuid4())},
+        ),
+    ]
+    service = FakeAgentRuntimeService([[progress]])
+    tick = -0.25
+
+    def monotonic() -> float:
+        nonlocal tick
+        tick += 0.25
+        return tick
+
+    monkeypatch.setattr(agent_runtime_router, "monotonic", monotonic)
+
+    async def collect(*, after_sequence: int) -> list[str]:
+        return [
+            chunk
+            async for chunk in _stream_run_event_chunks(
+                service=service,
+                owner_user_id=uuid4(),
+                run_id=run_id,
+                after_sequence=after_sequence,
+                limit=20,
+                follow=True,
+                poll_interval_seconds=0.01,
+                max_wait_seconds=1,
+            )
+        ]
+
+    first_window = asyncio.run(collect(after_sequence=0))
+    service.batches.append(resumed_events)
+    resumed_window = asyncio.run(collect(after_sequence=1))
+
+    assert [payload["type"] for payload in _sse_payloads(first_window[0])] == ["run.progress"]
+    resumed_payloads = [payload for chunk in resumed_window for payload in _sse_payloads(chunk)]
+    assert [payload["type"] for payload in resumed_payloads] == [
+        "tool.completed",
+        "artifact.created",
+        "action.confirmation_required",
+        "message.completed",
+        "run.waiting_for_confirmation",
+    ]
+    assert service.calls[0]["after_sequence"] == 0
+    assert service.calls[-1]["after_sequence"] == 1
 
 
 def test_stream_run_event_chunks_logs_stream_timing(caplog) -> None:
