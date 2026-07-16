@@ -299,12 +299,3 @@ app/modules/agent_runtime/
   sdk/
   tools/
 ```
-
-## First Milestone
-
-The first milestone is not feature migration. It is the production shell:
-
-1. Create the app factory and health endpoints.
-2. Add typed settings and request/error primitives.
-3. Inventory legacy API, DB, tools, events, and side effects.
-4. Add baseline contract tests before moving behavior.

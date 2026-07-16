@@ -773,18 +773,6 @@
             "title": "Client Context",
             "type": "object"
           },
-          "graph_version": {
-            "anyOf": [
-              {
-                "maxLength": 80,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Graph Version"
-          },
           "idempotency_key": {
             "anyOf": [
               {
@@ -818,7 +806,7 @@
           "runtime_pattern": {
             "anyOf": [
               {
-                "const": "langgraph_sdk",
+                "const": "sdk_only",
                 "type": "string"
               },
               {
@@ -826,6 +814,18 @@
               }
             ],
             "title": "Runtime Pattern"
+          },
+          "runtime_version": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runtime Version"
           },
           "thread_id": {
             "anyOf": [
@@ -893,10 +893,6 @@
             "title": "Error Code",
             "type": "string"
           },
-          "graph_version": {
-            "title": "Graph Version",
-            "type": "string"
-          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -912,6 +908,10 @@
           },
           "runtime_pattern": {
             "title": "Runtime Pattern",
+            "type": "string"
+          },
+          "runtime_version": {
+            "title": "Runtime Version",
             "type": "string"
           },
           "started_at": {
@@ -946,7 +946,7 @@
           "actor_user_id",
           "status",
           "runtime_pattern",
-          "graph_version",
+          "runtime_version",
           "prompt_version",
           "request_id",
           "trace_id",

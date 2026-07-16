@@ -16,6 +16,7 @@ from .client_context import sanitize_agent_client_context
 from .facts.service import AgentFactService
 from .event_semantics import with_run_event_semantic
 from .memory.service import AgentMemoryService
+from .runtime_registry import DEFAULT_RUNTIME_VERSION, SDK_ONLY_RUNTIME_PATTERN
 from .run_lifecycle.controls import AgentRunControls
 from .run_lifecycle.state_store import AgentRuntimeStateStore
 from .models import AgentAction, AgentArtifact, AgentEvent, AgentRun, AgentThread, AgentWorkflowState
@@ -23,8 +24,8 @@ from .repository import AgentRuntimeRepository
 
 
 AGENT_RUN_CREATE_IDEMPOTENCY_SCOPE = "agent.runs.create"
-DEFAULT_RUNTIME_PATTERN = "langgraph_sdk"
-DEFAULT_GRAPH_VERSION = "momcozy-agent-v1"
+DEFAULT_RUNTIME_PATTERN = SDK_ONLY_RUNTIME_PATTERN
+LEGACY_RUNTIME_PATTERN = "langgraph_sdk"
 TERMINAL_RUN_STATUSES = {"completed", "failed", "cancelled", "expired"}
 MAX_AGENT_RUN_ATTACHMENTS = 20
 MAX_FORM_SUBMISSION_BYTES = 16_384
@@ -128,30 +129,39 @@ class AgentRuntimeService:
         attachments: list[dict[str, Any]] | None = None,
         client_context: dict[str, Any] | None = None,
         runtime_pattern: str | None = None,
-        graph_version: str | None = None,
+        runtime_version: str | None = None,
         prompt_version: str | None = None,
         request_id: str = "",
         trace_id: str = "",
         idempotency_key: str | None = None,
     ) -> AgentRun:
-        normalized_runtime_pattern = runtime_pattern or DEFAULT_RUNTIME_PATTERN
+        normalized_runtime_pattern = _normalize_runtime_pattern(runtime_pattern)
         if normalized_runtime_pattern != DEFAULT_RUNTIME_PATTERN:
-            raise ApiError(code="validation_failed", message="Only langgraph_sdk runtime is supported.", status=422)
+            raise ApiError(code="validation_failed", message="Only the sdk_only runtime pattern is supported.", status=422)
+        normalized_runtime_version = runtime_version or DEFAULT_RUNTIME_VERSION
         normalized_message = _normalize_text(message, max_length=8000, required=True)
         requested_attachments = attachments or []
         safe_client_context = sanitize_agent_client_context(client_context)
+        idempotency_payload = {
+            "thread_id": str(thread_id or ""),
+            "message": normalized_message,
+            "attachments": requested_attachments,
+            "client_context": safe_client_context,
+            "runtime_pattern": normalized_runtime_pattern,
+            "runtime_version": normalized_runtime_version,
+            "prompt_version": prompt_version or "",
+        }
+        legacy_idempotency_payload = {
+            **idempotency_payload,
+            "runtime_pattern": LEGACY_RUNTIME_PATTERN,
+            "graph_version": normalized_runtime_version,
+        }
+        legacy_idempotency_payload.pop("runtime_version")
         idempotency_record = await self._reserve_run_idempotency(
             actor_user_id=actor_user_id,
             key=idempotency_key,
-            payload={
-                "thread_id": str(thread_id or ""),
-                "message": normalized_message,
-                "attachments": requested_attachments,
-                "client_context": safe_client_context,
-                "runtime_pattern": normalized_runtime_pattern,
-                "graph_version": graph_version or DEFAULT_GRAPH_VERSION,
-                "prompt_version": prompt_version or "",
-            },
+            payload=idempotency_payload,
+            compatible_payloads=(legacy_idempotency_payload,),
         )
         if idempotency_record is not None and idempotency_record.response_ref:
             return await self._replay_run(owner_user_id=actor_user_id, response_ref=idempotency_record.response_ref)
@@ -172,7 +182,7 @@ class AgentRuntimeService:
             thread_id=thread.id,
             actor_user_id=actor_user_id,
             runtime_pattern=normalized_runtime_pattern,
-            graph_version=graph_version or DEFAULT_GRAPH_VERSION,
+            runtime_version=normalized_runtime_version,
             prompt_version=prompt_version or "",
             request_id=request_id,
             trace_id=trace_id,
@@ -841,7 +851,14 @@ class AgentRuntimeService:
             await self.controls.set_stream_cursor(run_id=run_id, sequence=event.sequence)
         return event
 
-    async def _reserve_run_idempotency(self, *, actor_user_id: UUID, key: str | None, payload: dict[str, Any]) -> IdempotencyKey | None:
+    async def _reserve_run_idempotency(
+        self,
+        *,
+        actor_user_id: UUID,
+        key: str | None,
+        payload: dict[str, Any],
+        compatible_payloads: tuple[dict[str, Any], ...] = (),
+    ) -> IdempotencyKey | None:
         if not key:
             return None
         if self.idempotency_service is None:
@@ -852,6 +869,7 @@ class AgentRuntimeService:
             key=key,
             request_hash=request_hash(payload),
             expires_at=_utcnow() + timedelta(hours=24),
+            compatible_request_hashes=tuple(request_hash(item) for item in compatible_payloads),
         )
         if decision.status == "replay" and not decision.record.response_ref:
             raise ApiError(code="idempotency_in_progress", message="Request is still in progress.", status=409)
@@ -929,6 +947,13 @@ def _normalize_text(value: str | None, *, max_length: int, required: bool = Fals
         raise ApiError(code="validation_failed", message="value is required.", status=422)
     if len(normalized) > max_length:
         raise ApiError(code="validation_failed", message="value is too long.", status=422)
+    return normalized
+
+
+def _normalize_runtime_pattern(value: str | None) -> str:
+    normalized = str(value or DEFAULT_RUNTIME_PATTERN).strip()
+    if normalized == LEGACY_RUNTIME_PATTERN:
+        return DEFAULT_RUNTIME_PATTERN
     return normalized
 
 

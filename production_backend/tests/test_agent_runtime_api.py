@@ -91,7 +91,9 @@ def test_create_run_uses_current_user_request_id_and_idempotency_key(caplog) -> 
     )
 
     assert response.status_code == 201
-    assert response.json()["runtime_pattern"] == "langgraph_sdk"
+    assert response.json()["runtime_pattern"] == "sdk_only"
+    assert response.json()["runtime_version"] == "momcozy-agent-v1"
+    assert "graph_version" not in response.json()
     assert fake_service.create_run_kwargs["actor_user_id"] == user_id
     assert fake_service.create_run_kwargs["request_id"] == "req_agent"
     assert fake_service.create_run_kwargs["prompt_version"] == "prompt-default"
@@ -104,6 +106,49 @@ def test_create_run_uses_current_user_request_id_and_idempotency_key(caplog) -> 
     assert timing["thread_id"] == str(fake_service.thread_id)
     assert timing["status"] == "queued"
     assert timing["duration_ms"] >= 0
+
+
+def test_create_run_accepts_legacy_runtime_contract_and_returns_canonical_fields() -> None:
+    user_id = uuid4()
+    fake_service = FakeAgentRuntimeService(user_id=user_id)
+    app = create_app(Settings(app_env="test"))
+    _override_current_user(app, user_id)
+    app.dependency_overrides[get_agent_runtime_service] = lambda: fake_service
+
+    response = TestClient(app).post(
+        "/v1/agent/runs",
+        json={
+            "message": "Legacy app request",
+            "runtime_pattern": "langgraph_sdk",
+            "graph_version": "momcozy-agent-v1",
+        },
+    )
+
+    assert response.status_code == 201
+    assert fake_service.create_run_kwargs["runtime_pattern"] == "sdk_only"
+    assert fake_service.create_run_kwargs["runtime_version"] == "momcozy-agent-v1"
+    assert response.json()["runtime_pattern"] == "sdk_only"
+    assert response.json()["runtime_version"] == "momcozy-agent-v1"
+    assert "graph_version" not in response.json()
+
+
+def test_create_run_rejects_conflicting_runtime_and_legacy_versions() -> None:
+    user_id = uuid4()
+    fake_service = FakeAgentRuntimeService(user_id=user_id)
+    app = create_app(Settings(app_env="test"))
+    _override_current_user(app, user_id)
+    app.dependency_overrides[get_agent_runtime_service] = lambda: fake_service
+
+    response = TestClient(app).post(
+        "/v1/agent/runs",
+        json={
+            "message": "Conflicting runtime versions",
+            "runtime_version": "momcozy-agent-v2",
+            "graph_version": "momcozy-agent-v1",
+        },
+    )
+
+    assert response.status_code == 422
 
 
 def test_agent_thread_run_events_and_cancel_use_current_user_scope() -> None:
@@ -490,8 +535,8 @@ class FakeAgentRuntimeService:
             thread_id=self.thread_id,
             actor_user_id=self.user_id,
             status="queued",
-            runtime_pattern="langgraph_sdk",
-            graph_version="momcozy-agent-v1",
+            runtime_pattern="sdk_only",
+            runtime_version="momcozy-agent-v1",
             prompt_version="",
             request_id="req_agent",
             trace_id="req_agent",

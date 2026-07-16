@@ -4,6 +4,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from collections.abc import Collection
 from typing import Any
 from uuid import UUID
 
@@ -60,6 +61,7 @@ class IdempotencyService:
         key: str,
         request_hash: str,
         expires_at: datetime,
+        compatible_request_hashes: Collection[str] = (),
     ) -> IdempotencyDecision:
         normalized_scope = scope.strip()
         normalized_key = key.strip()
@@ -90,7 +92,7 @@ class IdempotencyService:
         if _is_expired(existing.expires_at):
             raise ApiError(code="idempotency_key_expired", message="Idempotency key has expired; retry with a new key.", status=409)
 
-        if existing.request_hash != request_hash:
+        if existing.request_hash != request_hash and existing.request_hash not in compatible_request_hashes:
             raise ApiError(code="idempotency_conflict", message="Idempotency key was reused with a different request.", status=409)
 
         return IdempotencyDecision(status="replay", record=existing)

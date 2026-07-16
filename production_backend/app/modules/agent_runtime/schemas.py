@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class AgentThreadCreate(BaseModel):
@@ -31,10 +31,26 @@ class AgentRunCreate(BaseModel):
     message: str = Field(min_length=1, max_length=8000)
     attachments: list[dict[str, Any]] = Field(default_factory=list)
     client_context: dict[str, Any] = Field(default_factory=dict)
-    runtime_pattern: Literal["langgraph_sdk"] | None = None
-    graph_version: str | None = Field(default=None, max_length=80)
+    runtime_pattern: Literal["sdk_only"] | None = None
+    runtime_version: str | None = Field(default=None, max_length=80)
     prompt_version: str | None = Field(default=None, max_length=80)
     idempotency_key: str | None = Field(default=None, max_length=255)
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_legacy_runtime_contract(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        normalized = dict(value)
+        legacy_version = normalized.pop("graph_version", None)
+        runtime_version = normalized.get("runtime_version")
+        if runtime_version is not None and legacy_version is not None and runtime_version != legacy_version:
+            raise ValueError("runtime_version conflicts with legacy graph_version")
+        if runtime_version is None and legacy_version is not None:
+            normalized["runtime_version"] = legacy_version
+        if normalized.get("runtime_pattern") == "langgraph_sdk":
+            normalized["runtime_pattern"] = "sdk_only"
+        return normalized
 
 
 class AgentRunRead(BaseModel):
@@ -43,7 +59,7 @@ class AgentRunRead(BaseModel):
     actor_user_id: UUID
     status: str
     runtime_pattern: str
-    graph_version: str
+    runtime_version: str
     prompt_version: str
     request_id: str
     trace_id: str

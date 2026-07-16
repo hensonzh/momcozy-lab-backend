@@ -186,7 +186,7 @@ class InMemoryAgentRuntimeRepository:
             actor_user_id=kwargs["actor_user_id"],
             status="queued",
             runtime_pattern=kwargs["runtime_pattern"],
-            graph_version=kwargs["graph_version"],
+            runtime_version=kwargs["runtime_version"],
             prompt_version=kwargs["prompt_version"],
             request_id=kwargs["request_id"],
             trace_id=kwargs["trace_id"],

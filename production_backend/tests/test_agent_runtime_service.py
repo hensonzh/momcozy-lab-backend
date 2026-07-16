@@ -14,6 +14,7 @@ from production_backend.app.modules.agent_runtime.models import (
 )
 from production_backend.app.modules.agent_runtime.service import AgentRuntimeService
 from production_backend.app.modules.audit.models import IdempotencyKey
+from production_backend.app.modules.audit.service import request_hash
 from production_backend.app.modules.files.models import FileObject
 
 
@@ -49,7 +50,8 @@ def test_agent_runtime_service_creates_run_with_thread_message_events_and_idempo
     )
 
     assert run.actor_user_id == owner_user_id
-    assert run.runtime_pattern == "langgraph_sdk"
+    assert run.runtime_pattern == "sdk_only"
+    assert run.runtime_version == "momcozy-agent-v1"
     assert repository.messages[0].content["text"] == "Review my pumping pattern"
     assert repository.messages[0].content["client_context"]["hospital_bag_cart"]["groups"][0]["items"][0]["id"] == "pump-custom"
     assert [event.event_type for event in repository.events] == ["run.queued", "message.completed"]
@@ -72,7 +74,49 @@ def test_agent_runtime_service_creates_run_with_thread_message_events_and_idempo
     asyncio.run(repository.run_after_commit_callbacks())
     assert controls.queued_run_ids == [run.id]
     assert idempotency_service.reserve_kwargs["scope"] == "agent.runs.create"
+    assert idempotency_service.reserve_kwargs["request_hash"] == request_hash(
+        {
+            "thread_id": "",
+            "message": "Review my pumping pattern",
+            "attachments": [],
+            "client_context": repository.messages[0].content["client_context"],
+            "runtime_pattern": "sdk_only",
+            "runtime_version": "momcozy-agent-v1",
+            "prompt_version": "",
+        }
+    )
+    assert idempotency_service.reserve_kwargs["compatible_request_hashes"] == (
+        request_hash(
+            {
+                "thread_id": "",
+                "message": "Review my pumping pattern",
+                "attachments": [],
+                "client_context": repository.messages[0].content["client_context"],
+                "runtime_pattern": "langgraph_sdk",
+                "graph_version": "momcozy-agent-v1",
+                "prompt_version": "",
+            }
+        ),
+    )
     assert idempotency_service.completed_response_ref == str(run.id)
+
+
+def test_agent_runtime_service_normalizes_legacy_runtime_pattern() -> None:
+    repository = FakeAgentRuntimeRepository()
+    service = AgentRuntimeService(repository=repository)
+
+    run = asyncio.run(
+        service.create_run(
+            actor_user_id=uuid4(),
+            thread_id=None,
+            message="Hello",
+            runtime_pattern="langgraph_sdk",
+            runtime_version="momcozy-agent-v1",
+        )
+    )
+
+    assert run.runtime_pattern == "sdk_only"
+    assert run.runtime_version == "momcozy-agent-v1"
 
 
 @pytest.mark.parametrize(
@@ -442,7 +486,7 @@ def test_agent_runtime_conversation_main_flow_replays_client_events_cancels_and_
         )
     )
 
-    assert first_run.runtime_pattern == "langgraph_sdk"
+    assert first_run.runtime_pattern == "sdk_only"
     assert [event.event_type for event in initial_events] == ["run.queued", "message.completed"]
     assert client_event.sequence == 3
     assert [event.event_type for event in after_initial_cursor] == ["client.event"]
@@ -628,8 +672,8 @@ def _run(*, thread_id: UUID, actor_user_id: UUID) -> AgentRun:
         thread_id=thread_id,
         actor_user_id=actor_user_id,
         status="queued",
-        runtime_pattern="langgraph_sdk",
-        graph_version="momcozy-agent-v1",
+        runtime_pattern="sdk_only",
+        runtime_version="momcozy-agent-v1",
         prompt_version="",
         request_id="",
         trace_id="",
@@ -680,7 +724,7 @@ class FakeAgentRuntimeRepository:
     async def create_run(self, **kwargs):
         self.run = _run(thread_id=kwargs["thread_id"], actor_user_id=kwargs["actor_user_id"])
         self.run.runtime_pattern = kwargs["runtime_pattern"]
-        self.run.graph_version = kwargs["graph_version"]
+        self.run.runtime_version = kwargs["runtime_version"]
         self.run.prompt_version = kwargs["prompt_version"]
         self.run.request_id = kwargs["request_id"]
         self.runs.append(self.run)

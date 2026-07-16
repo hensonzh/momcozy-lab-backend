@@ -183,7 +183,7 @@ async def create_run(
         attachments=payload.attachments,
         client_context=payload.client_context,
         runtime_pattern=payload.runtime_pattern,
-        graph_version=payload.graph_version,
+        runtime_version=payload.runtime_version,
         prompt_version=payload.prompt_version or settings.openai_agent_prompt_version,
         request_id=str(getattr(request.state, "request_id", "") or ""),
         trace_id=str(getattr(request.state, "request_id", "") or ""),
