@@ -178,7 +178,7 @@ def test_agent_runtime_executor_requires_allowlisted_web_search_for_complex_heal
         AgentRuntimeExecutor(
             repository=repository,
             transient_stream=transient_stream,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, provider="openai", use_responses=True),
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, use_responses=True),
         ).execute(run=run)
     )
 
@@ -209,7 +209,7 @@ def test_agent_runtime_executor_keeps_low_risk_health_reply_when_optional_search
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, provider="openai", use_responses=True),
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, use_responses=True),
         ).execute(run=run)
     )
 
@@ -239,7 +239,7 @@ def test_agent_runtime_executor_retries_optional_health_search_without_search_af
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, provider="openai", use_responses=True),
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, use_responses=True),
         ).execute(run=run)
     )
 
@@ -266,7 +266,7 @@ def test_agent_runtime_executor_uses_capability_accurate_health_context_without_
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, provider="minimax", use_responses=False),
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, use_responses=False),
         ).execute(run=run)
     )
 
@@ -294,7 +294,7 @@ def test_agent_runtime_executor_bounds_optional_health_reply_when_provider_retry
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, provider="openai", use_responses=True),
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, use_responses=True),
         ).execute(run=run)
     )
 
@@ -323,7 +323,7 @@ def test_agent_runtime_executor_keeps_streamed_health_text_when_required_search_
         AgentRuntimeExecutor(
             repository=repository,
             transient_stream=transient_stream,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, provider="openai", use_responses=True),
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, use_responses=True),
         ).execute(run=run)
     )
 
@@ -351,7 +351,7 @@ def test_agent_runtime_executor_suppresses_web_search_for_first_breast_lump_tria
     asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, provider="openai", use_responses=True),
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, use_responses=True),
         ).execute(run=run)
     )
 
@@ -389,7 +389,7 @@ def test_agent_runtime_executor_emits_web_search_citation_custom_event() -> None
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, provider="openai", use_responses=True),
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, use_responses=True),
         ).execute(run=run)
     )
 
@@ -414,7 +414,7 @@ def test_agent_runtime_executor_emits_web_search_citation_custom_event() -> None
     ]
 
 
-def test_agent_runtime_executor_uses_bounded_fallback_when_provider_cannot_web_search() -> None:
+def test_agent_runtime_executor_uses_bounded_fallback_when_responses_web_search_is_disabled() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)
     current_user = _message(
@@ -430,7 +430,7 @@ def test_agent_runtime_executor_uses_bounded_fallback_when_provider_cannot_web_s
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, provider="minimax", use_responses=False),
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, use_responses=False),
         ).execute(run=run)
     )
 
@@ -455,7 +455,7 @@ def test_agent_runtime_executor_uses_bounded_fallback_when_required_web_search_f
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, provider="openai", use_responses=True),
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, use_responses=True),
         ).execute(run=run)
     )
 
@@ -1693,7 +1693,7 @@ def test_agent_runtime_executor_allows_service_tool_after_skill_load() -> None:
     assert repository.run_summaries == []
 
 
-def test_agent_runtime_executor_does_not_advertise_tool_search_when_runner_cannot_use_namespaces() -> None:
+def test_agent_runtime_executor_does_not_advertise_tool_search_when_responses_is_disabled() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)
     current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="Read my profile", sequence=1)
@@ -1704,7 +1704,7 @@ def test_agent_runtime_executor_does_not_advertise_tool_search_when_runner_canno
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, provider="minimax", use_responses=False),
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, use_responses=False),
             tool_executor=tool_executor,
         ).execute(run=run)
     )

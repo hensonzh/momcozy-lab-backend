@@ -1,5 +1,4 @@
 import asyncio
-import sys
 import types
 
 import pytest
@@ -7,7 +6,6 @@ import pytest
 from production_backend.app.core.errors import ApiError
 from production_backend.app.core.settings import Settings
 from production_backend.app.modules.agent_runtime.sdk import (
-    OpenAIAgentsSdkBackend,
     OpenAIAgentsSdkRunner,
     OpenAIResponsesRunner,
     SdkNodeRequest,
@@ -194,34 +192,10 @@ def test_agent_sdk_runner_preserves_sanitized_provider_error_details() -> None:
     assert "[redacted]" in exc_info.value.details["message_excerpt"]
 
 
-def test_agent_sdk_runner_factory_selects_minimax_provider_config() -> None:
-    runner = create_agent_sdk_runner(
-        settings=Settings(
-            app_env="test",
-            agent_model_provider="minimax",
-            minimax_api_key="minimax-key",
-            minimax_base_url="https://api.minimax.io/v1",
-            minimax_model="MiniMax-M3",
-            openai_agent_max_turns=6,
-            openai_agent_timeout_seconds=30,
-        )
-    )
-
-    assert runner.provider == "minimax"
-    assert runner.model == "MiniMax-M3"
-    assert runner.api_key == "minimax-key"
-    assert runner.base_url == "https://api.minimax.io/v1"
-    assert runner.use_responses is False
-    assert runner.buffer_streamed_tool_calls is True
-    assert runner.max_turns == 6
-    assert runner.timeout_seconds == 30
-
-
 def test_agent_sdk_runner_factory_selects_responses_contract_for_openai() -> None:
     runner = create_agent_sdk_runner(
         settings=Settings(
             app_env="test",
-            agent_model_provider="openai",
             openai_api_key="openai-key",
             openai_model="gpt-5.6-terra",
             openai_reasoning_effort="low",
@@ -242,7 +216,6 @@ def test_agent_model_runner_factory_allows_low_latency_reasoning_override() -> N
     runner = create_agent_sdk_runner(
         settings=Settings(
             app_env="test",
-            agent_model_provider="openai",
             openai_api_key="openai-key",
             openai_reasoning_effort="low",
         ),
@@ -259,7 +232,6 @@ def test_agent_sdk_runner_factory_keeps_explicit_openai_sdk_rollback_path() -> N
     runner = create_agent_sdk_runner(
         settings=Settings(
             app_env="test",
-            agent_model_provider="openai",
             openai_api_key="openai-key",
             openai_model="gpt-test",
             openai_agent_use_responses=False,
@@ -269,86 +241,6 @@ def test_agent_sdk_runner_factory_keeps_explicit_openai_sdk_rollback_path() -> N
     assert isinstance(runner, OpenAIAgentsSdkRunner)
     assert runner.provider == "openai"
     assert runner.use_responses is False
-
-
-def test_minimax_backend_uses_openai_compatible_model_provider(monkeypatch: pytest.MonkeyPatch) -> None:
-    class FakeOpenAIProvider:
-        def __init__(self, **kwargs: object) -> None:
-            self.kwargs = kwargs
-
-    class FakeRunConfig:
-        instances: list["FakeRunConfig"] = []
-
-        def __init__(self, **kwargs: object) -> None:
-            self.kwargs = kwargs
-            self.instances.append(self)
-
-    class FakeModelSettings:
-        def __init__(self, **kwargs: object) -> None:
-            self.kwargs = kwargs
-
-    class FakeAgent:
-        def __init__(self, **kwargs: object) -> None:
-            self.kwargs = kwargs
-
-    class FakeRunner:
-        calls: list[dict[str, object]] = []
-
-        @staticmethod
-        async def run(agent: FakeAgent, model_input: str, **kwargs: object) -> object:
-            FakeRunner.calls.append({"agent": agent, "model_input": model_input, "kwargs": kwargs})
-            return types.SimpleNamespace(final_output="minimax ok")
-
-    fake_agents = types.SimpleNamespace(
-        Agent=FakeAgent,
-        Runner=FakeRunner,
-        RunConfig=FakeRunConfig,
-        OpenAIProvider=FakeOpenAIProvider,
-        ModelSettings=FakeModelSettings,
-    )
-    monkeypatch.setitem(sys.modules, "agents", fake_agents)
-
-    backend = OpenAIAgentsSdkBackend(
-        model="MiniMax-M3",
-        provider="minimax",
-        api_key="minimax-key",
-        base_url="https://api.minimax.io/v1",
-        use_responses=False,
-        buffer_streamed_tool_calls=True,
-    )
-    result = asyncio.run(
-        backend.run(
-            SdkNodeRequest(
-                run_id="run_1",
-                thread_id="thread_1",
-                actor_user_id="user_1",
-                instructions="Use tools.",
-                model_input=[{"role": "user", "content": "hello"}],
-                trace_id="trace_1",
-            )
-        )
-    )
-
-    assert result.final_text == "minimax ok"
-    assert FakeRunner.calls
-    run_config = FakeRunner.calls[0]["kwargs"]["run_config"]
-    assert isinstance(run_config, FakeRunConfig)
-    model_provider = run_config.kwargs["model_provider"]
-    assert isinstance(model_provider, FakeOpenAIProvider)
-    assert model_provider.kwargs["api_key"] == "minimax-key"
-    assert model_provider.kwargs["base_url"] == "https://api.minimax.io/v1"
-    assert model_provider.kwargs["use_responses"] is False
-    assert model_provider.kwargs["buffer_streamed_tool_calls"] is True
-    agent = FakeRunner.calls[0]["agent"]
-    assert isinstance(agent, FakeAgent)
-    model_settings = agent.kwargs["model_settings"]
-    assert isinstance(model_settings, FakeModelSettings)
-    assert model_settings.kwargs["extra_body"] == {
-        "thinking": {"type": "disabled"},
-        "service_tier": "priority",
-    }
-    assert run_config.kwargs["trace_metadata"]["model_provider"] == "minimax"
-    assert run_config.kwargs["trace_include_sensitive_data"] is False
 
 
 def test_agents_sdk_legacy_run_config_falls_back_to_tracing_disabled() -> None:
@@ -366,7 +258,6 @@ def test_agents_sdk_legacy_run_config_falls_back_to_tracing_disabled() -> None:
             model_input=[],
         ),
         trace_enabled=True,
-        provider="openai",
         api_key="",
         base_url="",
         use_responses=False,
@@ -397,7 +288,6 @@ def test_agents_sdk_run_config_fails_closed_when_private_tracing_cannot_be_enfor
                 agents_module=agents_module,
                 request=request,
                 trace_enabled=True,
-                provider="openai",
                 api_key="",
                 base_url="",
                 use_responses=False,
@@ -405,113 +295,3 @@ def test_agents_sdk_run_config_fails_closed_when_private_tracing_cannot_be_enfor
             )
 
         assert exc_info.value.code == "sdk_trace_privacy_not_supported"
-
-
-def test_minimax_backend_strips_thinking_blocks_from_final_output(monkeypatch: pytest.MonkeyPatch) -> None:
-    class FakeOpenAIProvider:
-        def __init__(self, **_kwargs: object) -> None:
-            pass
-
-    class FakeRunConfig:
-        def __init__(self, **_kwargs: object) -> None:
-            pass
-
-    class FakeAgent:
-        def __init__(self, **_kwargs: object) -> None:
-            pass
-
-    class FakeRunner:
-        @staticmethod
-        async def run(_agent: FakeAgent, _model_input: str, **_kwargs: object) -> object:
-            return types.SimpleNamespace(final_output="<think>private reasoning</think>\n\n用户可见回复")
-
-    fake_agents = types.SimpleNamespace(
-        Agent=FakeAgent,
-        Runner=FakeRunner,
-        RunConfig=FakeRunConfig,
-        OpenAIProvider=FakeOpenAIProvider,
-    )
-    monkeypatch.setitem(sys.modules, "agents", fake_agents)
-
-    result = asyncio.run(
-        OpenAIAgentsSdkBackend(
-            model="MiniMax-M3",
-            provider="minimax",
-            api_key="minimax-key",
-            base_url="https://api.minimaxi.com/v1",
-            use_responses=False,
-        ).run(
-            SdkNodeRequest(
-                run_id="run_1",
-                thread_id="thread_1",
-                actor_user_id="user_1",
-                instructions="Use tools.",
-                model_input=[{"role": "user", "content": "hello"}],
-            )
-        )
-    )
-
-    assert result.final_text == "用户可见回复"
-
-
-def test_minimax_backend_strips_thinking_blocks_from_streamed_deltas(monkeypatch: pytest.MonkeyPatch) -> None:
-    class FakeOpenAIProvider:
-        def __init__(self, **_kwargs: object) -> None:
-            pass
-
-    class FakeRunConfig:
-        def __init__(self, **_kwargs: object) -> None:
-            pass
-
-    class FakeAgent:
-        def __init__(self, **_kwargs: object) -> None:
-            pass
-
-    class FakeStreamedResult:
-        final_output = "<think>hidden</think>\n\n可见回复"
-
-        async def stream_events(self) -> object:
-            for delta in ("<thi", "nk>hidden", "</think>\n\n可", "见回复"):
-                yield types.SimpleNamespace(
-                    type="raw_response_event",
-                    data=types.SimpleNamespace(type="response.output_text.delta", delta=delta),
-                )
-
-    class FakeRunner:
-        @staticmethod
-        def run_streamed(_agent: FakeAgent, _model_input: str, **_kwargs: object) -> FakeStreamedResult:
-            return FakeStreamedResult()
-
-    fake_agents = types.SimpleNamespace(
-        Agent=FakeAgent,
-        Runner=FakeRunner,
-        RunConfig=FakeRunConfig,
-        OpenAIProvider=FakeOpenAIProvider,
-    )
-    monkeypatch.setitem(sys.modules, "agents", fake_agents)
-    deltas: list[str] = []
-
-    async def on_text_delta(delta: str) -> None:
-        deltas.append(delta)
-
-    result = asyncio.run(
-        OpenAIAgentsSdkBackend(
-            model="MiniMax-M3",
-            provider="minimax",
-            api_key="minimax-key",
-            base_url="https://api.minimaxi.com/v1",
-            use_responses=False,
-        ).run(
-            SdkNodeRequest(
-                run_id="run_1",
-                thread_id="thread_1",
-                actor_user_id="user_1",
-                instructions="Use tools.",
-                model_input=[{"role": "user", "content": "hello"}],
-                on_text_delta=on_text_delta,
-            )
-        )
-    )
-
-    assert result.final_text == "可见回复"
-    assert "".join(deltas) == "可见回复"
