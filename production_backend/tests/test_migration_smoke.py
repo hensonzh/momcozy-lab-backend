@@ -11,6 +11,13 @@ CHECKPOINT_ARCHIVE_MIGRATION = (
     / "versions"
     / "20260716_0034_archive_agent_context_checkpoints.py"
 )
+RUNTIME_CONTRACT_MIGRATION = (
+    ROOT
+    / "production_backend"
+    / "migrations"
+    / "versions"
+    / "20260716_0035_rename_agent_runtime_contract.py"
+)
 
 
 def test_alembic_offline_upgrade_head_generates_empty_database_sql() -> None:
@@ -63,4 +70,15 @@ def test_checkpoint_retirement_archives_existing_rows_without_dropping_them() ->
 
     assert 'op.rename_table("agent_context_checkpoints", "legacy_agent_context_checkpoints")' in source
     assert 'op.rename_table("legacy_agent_context_checkpoints", "agent_context_checkpoints")' in source
+    assert "op.drop_table" not in source
+
+
+def test_runtime_contract_migration_is_data_preserving_and_reversible() -> None:
+    source = RUNTIME_CONTRACT_MIGRATION.read_text()
+
+    assert '"graph_version",\n        new_column_name="runtime_version"' in source
+    assert '"runtime_version",\n        new_column_name="graph_version"' in source
+    assert "SET runtime_pattern = 'sdk_only' WHERE runtime_pattern = 'langgraph_sdk'" in source
+    assert "SET runtime_pattern = 'langgraph_sdk' WHERE runtime_pattern = 'sdk_only'" in source
+    assert "op.drop_column" not in source
     assert "op.drop_table" not in source
