@@ -154,6 +154,18 @@ def test_production_runtime_does_not_ship_dormant_langgraph_runner() -> None:
     assert "langgraph" not in requirements
 
 
+def test_production_runtime_does_not_ship_unused_graph_checkpoint_code() -> None:
+    runtime_root = PRODUCTION_BACKEND / "app" / "modules" / "agent_runtime"
+    runtime_init = (runtime_root / "__init__.py").read_text()
+    graphs_init = (runtime_root / "graphs" / "__init__.py").read_text()
+
+    assert not (runtime_root / "graphs" / "checkpoints.py").exists()
+    assert not (runtime_root / "graphs" / "state.py").exists()
+    for obsolete_name in ("AgentGraphCheckpointStore", "GraphCheckpointRef", "AgentContextCheckpoint"):
+        assert obsolete_name not in runtime_init
+        assert obsolete_name not in graphs_init
+
+
 def test_service_skill_tool_references_are_registered_contracts() -> None:
     registry = default_tool_registry()
     registry_names = set(registry.names_for_sdk())

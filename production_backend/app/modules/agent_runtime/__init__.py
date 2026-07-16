@@ -6,7 +6,6 @@ from .evals.service import (
     AgentEvalService,
 )
 from .run_lifecycle.execution import AgentRunExecutionResult
-from .graphs import AgentGraphCheckpointStore, GraphCheckpointRef
 from .actions.policy import AgentActionPolicy, AgentActionPolicyDecision, AgentActionPolicyRule
 from .agents.cozymate_service_agent.context import BusinessFactsProjector, BusinessFactsProjectorConfig
 from .agents.cozymate_service_agent.skill_registry import (
@@ -18,7 +17,6 @@ from .memory.service import AgentMemoryRepository, AgentMemoryService
 from .models import (
     AgentAction,
     AgentArtifact,
-    AgentContextCheckpoint,
     AgentContextProjection,
     AgentEvalCase,
     AgentEvent,
@@ -51,7 +49,6 @@ __all__ = [
     "AgentEvalRuntimeCaseResult",
     "AgentEvalRuntimeClient",
     "AgentEvalRuntimeTraceCollector",
-    "AgentGraphCheckpointStore",
     "AgentMemory",
     "AgentMemoryConsolidationRun",
     "AgentMemorySettings",
@@ -60,8 +57,6 @@ __all__ = [
     "AgentMemoryService",
     "AgentRunControls",
     "AgentRunExecutionResult",
-    "GraphCheckpointRef",
-    "AgentContextCheckpoint",
     "AgentContextProjection",
     "AgentEvalCase",
     "AgentEvent",

@@ -316,31 +316,6 @@ class AgentAction(Base):
     )
 
 
-class AgentContextCheckpoint(Base):
-    __tablename__ = "agent_context_checkpoints"
-    __table_args__ = (
-        UniqueConstraint("checkpoint_namespace", "checkpoint_id", name="uq_agent_context_checkpoints_namespace_id"),
-        Index("ix_agent_context_checkpoints_thread_created", "thread_id", "created_at"),
-        Index("ix_agent_context_checkpoints_run_created", "run_id", "created_at"),
-    )
-
-    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
-    thread_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("agent_threads.id"), nullable=False)
-    run_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("agent_runs.id"), nullable=True)
-    checkpoint_namespace: Mapped[str] = mapped_column(String(120), nullable=False)
-    checkpoint_id: Mapped[str] = mapped_column(String(120), nullable=False)
-    graph_version: Mapped[str] = mapped_column(String(80), default="", server_default="", nullable=False)
-    state_ref: Mapped[str] = mapped_column(String(512), default="", server_default="", nullable=False)
-    state_summary: Mapped[dict[str, Any]] = mapped_column(
-        "state_summary_json",
-        postgresql.JSONB,
-        default=dict,
-        server_default=text("'{}'::jsonb"),
-        nullable=False,
-    )
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-
-
 class AgentWorkflowState(Base):
     __tablename__ = "agent_workflow_states"
     __table_args__ = (

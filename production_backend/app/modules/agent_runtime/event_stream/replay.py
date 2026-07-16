@@ -8,7 +8,6 @@ from ....core.errors import ApiError
 from ..models import (
     AgentAction,
     AgentArtifact,
-    AgentContextCheckpoint,
     AgentContextProjection,
     AgentEvent,
     AgentMessage,
@@ -33,7 +32,6 @@ class AgentReplayService:
         tool_calls = await self.repository.list_tool_calls_for_run(run_id=run.id)
         actions = await self.repository.list_actions_for_run(run_id=run.id)
         artifacts = await self.repository.list_artifacts_for_run(run_id=run.id)
-        checkpoints = await self.repository.list_context_checkpoints_for_run(run_id=run.id)
         workflow_states = await self.repository.list_workflow_states_for_run(run_id=run.id)
         context_projections = await self.repository.list_context_projections_for_run(run_id=run.id)
         safety_events = await self.repository.list_safety_events_for_run(run_id=run.id)
@@ -44,7 +42,7 @@ class AgentReplayService:
             "tool_calls": [_tool_call(tool_call) for tool_call in tool_calls],
             "actions": [_action(action) for action in actions],
             "artifacts": [_artifact(artifact) for artifact in artifacts],
-            "checkpoints": [_checkpoint(checkpoint) for checkpoint in checkpoints],
+            "checkpoints": [],
             "workflow_states": [_workflow_state(workflow_state) for workflow_state in workflow_states],
             "context_projections": [_context_projection(context_projection) for context_projection in context_projections],
             "safety_events": [_safety_event(safety_event) for safety_event in safety_events],
@@ -154,20 +152,6 @@ def _pregnancy_plan_workflow_replay_state(state: Any) -> dict[str, Any]:
         projected["focus_count"] = focus_count
         projected["personalized"] = focus_count > 1
     return projected
-
-
-def _checkpoint(checkpoint: AgentContextCheckpoint) -> dict[str, Any]:
-    return {
-        "id": str(checkpoint.id),
-        "thread_id": str(checkpoint.thread_id),
-        "run_id": str(checkpoint.run_id) if checkpoint.run_id else None,
-        "checkpoint_namespace": checkpoint.checkpoint_namespace,
-        "checkpoint_id": checkpoint.checkpoint_id,
-        "graph_version": checkpoint.graph_version,
-        "state_ref": checkpoint.state_ref,
-        "state_summary": _redact_replay_value(checkpoint.state_summary),
-        "created_at": checkpoint.created_at.isoformat() if checkpoint.created_at else None,
-    }
 
 
 def _workflow_state(workflow_state: AgentWorkflowState) -> dict[str, Any]:

@@ -13,7 +13,6 @@ from .models import (
     ACTIVE_RUN_STATUSES,
     AgentAction,
     AgentArtifact,
-    AgentContextCheckpoint,
     AgentContextProjection,
     AgentEvent,
     AgentEvalCase,
@@ -642,76 +641,6 @@ class AgentRuntimeRepository:
         artifact.status = "deleted"
         await self.session.flush()
         return artifact
-
-    async def create_context_checkpoint(
-        self,
-        *,
-        thread_id: UUID,
-        run_id: UUID | None,
-        checkpoint_namespace: str,
-        checkpoint_id: str,
-        graph_version: str,
-        state_ref: str,
-        state_summary: dict[str, Any],
-    ) -> AgentContextCheckpoint:
-        checkpoint = AgentContextCheckpoint(
-            thread_id=thread_id,
-            run_id=run_id,
-            checkpoint_namespace=checkpoint_namespace,
-            checkpoint_id=checkpoint_id,
-            graph_version=graph_version,
-            state_ref=state_ref,
-            state_summary=state_summary,
-        )
-        self.session.add(checkpoint)
-        await self.session.flush()
-        return checkpoint
-
-    async def get_context_checkpoint(
-        self,
-        *,
-        checkpoint_namespace: str,
-        checkpoint_id: str,
-    ) -> AgentContextCheckpoint | None:
-        statement = select(AgentContextCheckpoint).where(
-            AgentContextCheckpoint.checkpoint_namespace == checkpoint_namespace,
-            AgentContextCheckpoint.checkpoint_id == checkpoint_id,
-        )
-        return cast(AgentContextCheckpoint | None, await self.session.scalar(statement))
-
-    async def get_latest_context_checkpoint_for_thread(
-        self,
-        *,
-        thread_id: UUID,
-        checkpoint_namespace: str,
-    ) -> AgentContextCheckpoint | None:
-        statement = (
-            select(AgentContextCheckpoint)
-            .where(
-                AgentContextCheckpoint.thread_id == thread_id,
-                AgentContextCheckpoint.checkpoint_namespace == checkpoint_namespace,
-            )
-            .order_by(AgentContextCheckpoint.created_at.desc(), AgentContextCheckpoint.id.desc())
-            .limit(1)
-        )
-        return cast(AgentContextCheckpoint | None, await self.session.scalar(statement))
-
-    async def get_latest_context_checkpoint_for_run(self, *, run_id: UUID) -> AgentContextCheckpoint | None:
-        statement = (
-            select(AgentContextCheckpoint)
-            .where(AgentContextCheckpoint.run_id == run_id)
-            .order_by(AgentContextCheckpoint.created_at.desc(), AgentContextCheckpoint.id.desc())
-            .limit(1)
-        )
-        return cast(AgentContextCheckpoint | None, await self.session.scalar(statement))
-
-    async def list_context_checkpoints_for_run(self, *, run_id: UUID) -> list[AgentContextCheckpoint]:
-        statement = select(AgentContextCheckpoint).where(AgentContextCheckpoint.run_id == run_id).order_by(
-            AgentContextCheckpoint.created_at,
-            AgentContextCheckpoint.id,
-        )
-        result = await self.session.scalars(statement)
-        return list(result.all())
 
     async def create_workflow_state(
         self,

@@ -4,7 +4,6 @@ from uuid import uuid4
 from production_backend.app.modules.agent_runtime.models import (
     AgentAction,
     AgentArtifact,
-    AgentContextCheckpoint,
     AgentContextProjection,
     AgentEvent,
     AgentMessage,
@@ -30,8 +29,7 @@ def test_agent_replay_service_exports_redacted_bundle_by_default() -> None:
     assert bundle["actions"][0]["status"] == "confirmation_required"
     assert bundle["artifacts"][0]["artifact_type"] == "care_plan"
     assert bundle["artifacts"][0]["payload"] == {"title": "Birth plan"}
-    assert bundle["checkpoints"][0]["state_summary"]["node_name"] == "sdk_reasoning"
-    assert bundle["checkpoints"][0]["thread_id"] == str(repository.run.thread_id)
+    assert bundle["checkpoints"] == []
     assert bundle["workflow_states"][0]["workflow_type"] == "milk_analysis_intake"
     assert bundle["context_projections"][0]["projection_summary"]["state_keys"] == ["run_id"]
     assert bundle["safety_events"][0]["decision"] == "allow"
@@ -184,16 +182,6 @@ class FakeReplayRepository:
             evidence={},
             evidence_ref="",
         )
-        self.checkpoint = AgentContextCheckpoint(
-            id=uuid4(),
-            thread_id=self.run.thread_id,
-            run_id=self.run.id,
-            checkpoint_namespace=f"agent-runtime:{self.run.graph_version}:{self.run.thread_id}",
-            checkpoint_id="checkpoint-1",
-            graph_version=self.run.graph_version,
-            state_ref="",
-            state_summary={"node_name": "sdk_reasoning"},
-        )
         self.workflow_state = AgentWorkflowState(
             id=uuid4(),
             thread_id=self.run.thread_id,
@@ -236,9 +224,6 @@ class FakeReplayRepository:
 
     async def list_artifacts_for_run(self, *, run_id):
         return [self.artifact] if run_id == self.run.id else []
-
-    async def list_context_checkpoints_for_run(self, *, run_id):
-        return [self.checkpoint] if run_id == self.run.id else []
 
     async def list_workflow_states_for_run(self, *, run_id):
         return [self.workflow_state] if run_id == self.run.id else []

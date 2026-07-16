@@ -22,7 +22,6 @@ def test_agent_runtime_ledger_tables_are_registered() -> None:
         "agent_events",
         "agent_artifacts",
         "agent_actions",
-        "agent_context_checkpoints",
         "agent_workflow_states",
         "agent_context_projections",
         "agent_run_summaries",
@@ -78,7 +77,6 @@ def test_agent_ledger_has_no_provider_state_dependency_columns() -> None:
         "agent_messages",
         "agent_tool_calls",
         "agent_events",
-        "agent_context_checkpoints",
         "agent_workflow_states",
         "agent_context_projections",
         "agent_run_summaries",
@@ -88,11 +86,10 @@ def test_agent_ledger_has_no_provider_state_dependency_columns() -> None:
         assert columns.isdisjoint(forbidden)
 
 
-def test_agent_actions_and_checkpoints_have_runtime_indexes() -> None:
+def test_agent_runtime_state_tables_have_required_indexes() -> None:
     runs = Base.metadata.tables["agent_runs"]
     routing_decisions = Base.metadata.tables["agent_routing_decisions"]
     actions = Base.metadata.tables["agent_actions"]
-    checkpoints = Base.metadata.tables["agent_context_checkpoints"]
     workflow_states = Base.metadata.tables["agent_workflow_states"]
     context_projections = Base.metadata.tables["agent_context_projections"]
     run_summaries = Base.metadata.tables["agent_run_summaries"]
@@ -114,7 +111,6 @@ def test_agent_actions_and_checkpoints_have_runtime_indexes() -> None:
     assert "ix_agent_routing_decisions_service_skill_created" in {index.name for index in routing_decisions.indexes}
     assert "ix_agent_actions_run_status" in {index.name for index in actions.indexes}
     assert "ix_agent_actions_idempotency_key" in {index.name for index in actions.indexes}
-    assert "uq_agent_context_checkpoints_namespace_id" in {constraint.name for constraint in checkpoints.constraints}
     assert "ix_agent_workflow_states_owner_type_status" in {index.name for index in workflow_states.indexes}
     assert "ix_agent_context_projections_run_created" in {index.name for index in context_projections.indexes}
     assert "uq_agent_run_summaries_run_type" in {constraint.name for constraint in run_summaries.constraints}
