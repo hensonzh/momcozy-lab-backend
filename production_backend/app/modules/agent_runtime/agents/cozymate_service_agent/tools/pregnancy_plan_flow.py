@@ -415,8 +415,8 @@ def _pregnancy_plan_followup_topics(plan_context: dict[str, Any]) -> list[dict[s
                 "doctor_special_notes_followup",
                 "医生已经给了需要优先落实的特殊提醒。",
                 "这会直接影响复查时间、观察重点和异常联系路径。",
-                "这项提醒具体对应什么复查或观察要求、计划在什么时候完成？如果暂时不清楚，可以说“还不确定”。",
-                ("我补充具体安排", "还不确定", "先放进待确认"),
+                "医生有没有说明这项提醒要在什么时候复查？还不清楚也可以。",
+                ("我补充复查时间", "还不清楚", "先放进待确认"),
             )
         )
     if _contains_any(prior_history, ("剖", "c-section", "cesarean")):
@@ -425,8 +425,8 @@ def _pregnancy_plan_followup_topics(plan_context: dict[str, Any]) -> list[dict[s
                 "prior_c_section_birth_path_detail",
                 "既往剖宫产经历会影响这次分娩方式评估和孕晚期准备。",
                 "计划需要纳入上次剖宫产原因、这次评估节点和入院准备。",
-                "上次剖宫产的主要原因是什么，这次目前倾向顺产还是再次剖宫产？不确定也可以先记为待确认。",
-                ("我补充上次原因", "还不确定", "先放进待确认"),
+                "上次剖宫产的主要原因是什么？记不清也可以先放进待确认。",
+                ("我补充上次原因", "记不清", "先放进待确认"),
             )
         )
     if _contains_any(prior_history, ("早产", "preterm", "premature")):
@@ -435,8 +435,8 @@ def _pregnancy_plan_followup_topics(plan_context: dict[str, Any]) -> list[dict[s
                 "prior_preterm_monitoring_detail",
                 "既往早产经历会让这次更关注宫颈、宫缩和早产信号。",
                 "计划会把相关复查、异常联系路径和提前准备适当前置。",
-                "上次大约在多少孕周早产，这次有没有已经在复查宫颈或被提醒关注宫缩？暂不清楚也可以。",
-                ("我补充孕周/复查", "还不确定", "先放进待确认"),
+                "上次大约是在孕多少周生产的？记不清也可以先放进待确认。",
+                ("我补充孕周", "记不清", "先放进待确认"),
             )
         )
     if _meaningful(medical_notes):
@@ -445,8 +445,8 @@ def _pregnancy_plan_followup_topics(plan_context: dict[str, Any]) -> list[dict[s
                 "chronic_medical_condition_coordination",
                 "基础疾病或长期用药需要和产科复查、相关专科保持一致。",
                 "计划会纳入用药安全确认、专科复查和异常指标联系路径。",
-                "目前长期吃药的名称或用途是什么，下一次用药确认或相关专科复查安排在什么时候？还不确定也可以。",
-                ("我补充用药/复查", "还不确定", "先放进待确认"),
+                "医生有没有安排下一次用药确认或相关复查？还没确定也可以。",
+                ("已经安排", "还没确定", "先放进待确认"),
             )
         )
     if age is not None and age >= 35 and is_multiple:
@@ -455,8 +455,8 @@ def _pregnancy_plan_followup_topics(plan_context: dict[str, Any]) -> list[dict[s
                 "age_35_plus_multiple_monitoring",
                 f"你 {age} 岁且是多胎妊娠，这会同时影响产科管理分层和多胎监测重点。",
                 "计划会更早关注血压血糖、胎儿生长差异、宫颈长度、复查频率和早产信号。",
-                "目前产检记录里的多胎类型、宫颈长度或胎儿生长差异有没有已经确认的结果？暂无异常或还没确认都可以。",
-                ("暂无异常", "还没确认", "我补充一下"),
+                "最近一次产检，医生有没有特别交代要重点复查哪一项？没有或还没确认都可以。",
+                ("有重点复查", "没有特别提醒", "还没确认"),
             )
         )
     elif is_multiple:
@@ -465,7 +465,7 @@ def _pregnancy_plan_followup_topics(plan_context: dict[str, Any]) -> list[dict[s
                 "multiple_pregnancy_monitoring",
                 "多胎妊娠会更关注胎儿生长差异、宫颈情况、复查频率和早产信号。",
                 "计划会把多胎类型对应的复查节奏和异常联系路径纳入近期安排。",
-                "目前产检记录里的双胎类型是单绒双羊、双绒双羊，还是还没确认？",
+                "医生有没有确认过双胎类型（比如单绒或双绒）？还没确认也可以。",
                 ("单绒双羊", "双绒双羊", "还没确认"),
             )
         )
@@ -475,8 +475,8 @@ def _pregnancy_plan_followup_topics(plan_context: dict[str, Any]) -> list[dict[s
                 "prior_birth_history_detail",
                 "既往分娩和恢复经历会影响这次分娩沟通、入院准备和产后支持。",
                 "计划会保留仍适用的经验，并把上次出现的问题提前纳入准备。",
-                "上一胎的分娩方式，以及早产、产后出血或恢复困难等情况有需要纳入这次计划的吗？暂无也可以。",
-                ("没有特殊情况", "我补充一下", "先放进待确认"),
+                "上次生产或恢复，有没有哪件事是医生特别提醒、或你这次想提前准备的？没有或记不清都可以。",
+                ("有，我补充一下", "没有", "记不清"),
             )
         )
     if age is not None and age >= 35 and not is_multiple:
@@ -485,8 +485,8 @@ def _pregnancy_plan_followup_topics(plan_context: dict[str, Any]) -> list[dict[s
                 "age_35_plus_checkup_detail",
                 f"你 {age} 岁，在产科管理上通常会被归入高龄孕产妇范围。",
                 "计划会更早关注筛查选择、血压血糖、胎儿生长和复查节奏。",
-                "血压/血糖、胎儿生长或甲状腺/免疫或长期用药方面，有没有已经被提醒过或正在复查的项目？暂无异常也可以。",
-                ("暂无异常", "正在复查", "还不确定"),
+                "这次产检有没有被医生提醒要特别留意哪项复查？没有或还没确认都可以。",
+                ("有，我补充一下", "没有特别提醒", "还没确认"),
             )
         )
     if _is_yes(plan_context.get("ivf")):
@@ -495,8 +495,8 @@ def _pregnancy_plan_followup_topics(plan_context: dict[str, Any]) -> list[dict[s
                 "ivf_week_confirmation",
                 "IVF/辅助生殖会影响孕周和预产期的确认口径，也可能关联用药复查。",
                 "计划会优先对齐医生确认的孕周、移植日期口径、用药与复查节点。",
-                "移植日期/孕周口径是否已经由医生确认，目前还有黄体支持或其他需要复核的用药吗？不确定也可以。",
-                ("已经确认", "还在用药", "还不确定"),
+                "你现在还有医生让你继续用的药吗？不记得药名也没关系。",
+                ("还在用药", "已经停了", "不记得药名"),
             )
         )
     if "剖" in str(plan_context.get("birth_path") or "") and not _contains_any(prior_history, ("剖", "c-section", "cesarean")):
@@ -505,8 +505,8 @@ def _pregnancy_plan_followup_topics(plan_context: dict[str, Any]) -> list[dict[s
                 "planned_c_section_detail",
                 "计划剖宫产会影响孕晚期沟通、入院时间和术后支持准备。",
                 "计划会提前安排手术评估、术前检查、入院要求和恢复支持。",
-                "计划剖宫产主要是因为什么，目前手术评估或大致时间有没有确定？还没确定也可以。",
-                ("我补充原因", "时间已确定", "还不确定"),
+                "医生有没有和你说过大致的手术时间？还没确定也可以。",
+                ("时间已确定", "还没确定", "我再和医生确认"),
             )
         )
     return topics

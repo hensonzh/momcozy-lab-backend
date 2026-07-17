@@ -2455,7 +2455,9 @@ def test_pregnancy_plan_intake_analyze_uses_verified_form_and_returns_private_mo
     assert "医生提醒复查胎儿生长" in trusted
     assert "医生已经给了需要优先落实的特殊提醒" in trusted
     assert "这会直接影响复查时间、观察重点和异常联系路径" in trusted
-    assert "这项提醒具体对应什么复查或观察要求" in trusted
+    assert "医生有没有说明这项提醒要在什么时候复查" in trusted
+    assert "Briefly connect it to the plan in plain, supportive language" in trusted
+    assert "do not list observation, management_meaning, or plan_impact separately" in trusted
     assert "还有其他需要补充的信息吗" not in trusted
     workflow = runtime_service.workflow_state
     assert workflow.workflow_type == "pregnancy_plan"
@@ -2497,7 +2499,8 @@ def test_pregnancy_plan_initial_analysis_bridges_to_checkup_upload_before_asking
     assert isinstance(result, ToolHandlerResult)
     assert result.output["workflow_phase"] == "checkup_records_upload"
     trusted = result.model_context[0]["content"]
-    assert "Briefly explain the 1-2 most material items from analysis" in trusted
+    assert "Briefly acknowledge the submitted information in plain, supportive language" in trusted
+    assert "without listing risk factors or repeating fields" in trusted
     assert "Then ask exactly visible_question and stop" in trusted
     assert "请上传目前能找到的产检记录" in trusted
     assert "还有其他需要补充的信息吗" not in trusted

@@ -3315,8 +3315,9 @@ def _pregnancy_plan_workflow_result(
     visible_question = _text(workflow, "visible_question")
     if phase == PregnancyPlanPhase.PERSONALIZED_FOLLOWUP.value:
         instruction = (
-            "Use current_followup only. First explain its observation, management_meaning, and plan_impact in supportive "
-            "language; then ask exactly its question and stop. Ask only one question and do not repeat any asked_followups."
+            "Use current_followup only. Briefly connect it to the plan in plain, supportive language, then ask exactly its "
+            "question and stop. Ask one information point only; do not list observation, management_meaning, or plan_impact "
+            "separately, and do not repeat any asked_followups."
         )
     elif phase == PregnancyPlanPhase.READY_TO_GENERATE.value:
         instruction = (
@@ -3325,9 +3326,9 @@ def _pregnancy_plan_workflow_result(
         )
     elif initial_analysis:
         instruction = (
-            "Briefly explain the 1-2 most material items from analysis as management meaning and plan impact, without "
-            "diagnosing or repeating fields. Then ask exactly visible_question and stop; ask no other question and do not "
-            "call pregnancy.plan.propose."
+            "Briefly acknowledge the submitted information in plain, supportive language, without listing risk factors or "
+            "repeating fields. Then ask exactly visible_question and stop; ask no other question and do not call "
+            "pregnancy.plan.propose."
         )
     else:
         instruction = (

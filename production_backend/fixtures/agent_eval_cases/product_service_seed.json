@@ -544,7 +544,7 @@
     },
     {
       "suite": "pregnancy_plan_intake_analysis",
-      "name": "verified form starts one personalized followup before checkup steps",
+      "name": "verified form starts a relevant personalized followup before checkup steps",
       "domain": "birth-prep",
       "owner_team": "agent",
       "input": {
@@ -579,15 +579,16 @@
         "requires_final_response_after_tools": true,
         "service_skill_id": "birth-prep",
         "must_include": [
-          "management_meaning",
-          "plan_impact",
+          "plain_language_acknowledgement",
           "one_followup_question",
-          "max_three_rounds"
+          "dynamic_zero_to_three_followups"
         ],
         "must_not": [
           "diagnosis",
           "repeat_form_fields",
           "repeat_asked_topic",
+          "medical_jargon_pileup",
+          "compound_followup_question",
           "final_confirmation_before_checkup_step",
           "plan_preview_before_user_reply"
         ]
@@ -613,7 +614,7 @@
         "messages": [
           {
             "role": "assistant",
-            "content": "目前产检记录里的双胎类型是单绒双羊、双绒双羊，还是还没确认？"
+            "content": "医生有没有确认过双胎类型（比如单绒或双绒）？还没确认也可以。"
           },
           {
             "role": "user",
@@ -622,7 +623,7 @@
         ],
         "fixtures": {
           "latest_workflow_phase": "personalized_followup",
-          "current_followup_topic": "age_35_plus_checkup_detail",
+          "current_followup_topic": "multiple_pregnancy_monitoring",
           "asked_followup_topics": []
         }
       },
@@ -632,14 +633,15 @@
         "requires_confirmation_before_write": false,
         "service_skill_id": "birth-prep",
         "must_include": [
-          "observation",
-          "management_meaning",
-          "plan_impact",
-          "one_followup_question"
+          "plain_language_bridge",
+          "one_followup_question",
+          "workflow_continuity"
         ],
         "must_not": [
           "repeat_asked_topic",
           "more_than_three_followups",
+          "medical_jargon_pileup",
+          "compound_followup_question",
           "direct_plan_proposal"
         ]
       },

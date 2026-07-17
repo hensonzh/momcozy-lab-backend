@@ -103,6 +103,62 @@ def test_pregnancy_plan_workflow_asks_at_most_three_non_repeating_risk_followups
     assert workflow["phase"] == PregnancyPlanPhase.CHECKUP_RECORDS_UPLOAD.value
 
 
+@pytest.mark.parametrize(
+    ("values", "expected_topic", "expected_question"),
+    [
+        (
+            {"doctor_notes": "医生提醒复查胎儿生长"},
+            "doctor_special_notes_followup",
+            "医生有没有说明这项提醒要在什么时候复查？还不清楚也可以。",
+        ),
+        (
+            {"first_birth": "否", "prior_birth_history": "没有异常孕产史"},
+            "prior_birth_history_detail",
+            "上次生产或恢复，有没有哪件事是医生特别提醒、或你这次想提前准备的？没有或记不清都可以。",
+        ),
+        (
+            {"age": 36},
+            "age_35_plus_checkup_detail",
+            "这次产检有没有被医生提醒要特别留意哪项复查？没有或还没确认都可以。",
+        ),
+        (
+            {"ivf": "是"},
+            "ivf_week_confirmation",
+            "你现在还有医生让你继续用的药吗？不记得药名也没关系。",
+        ),
+        (
+            {"birth_path": "剖宫产"},
+            "planned_c_section_detail",
+            "医生有没有和你说过大致的手术时间？还没确定也可以。",
+        ),
+    ],
+)
+def test_pregnancy_plan_followups_keep_one_material_point_in_plain_language(
+    values: dict[str, object], expected_topic: str, expected_question: str
+) -> None:
+    workflow = initialize_pregnancy_plan_workflow(
+        {
+            "current_week": "28周",
+            "ivf": "否",
+            "fetus_count": "单胎",
+            "age": 30,
+            "first_birth": "是",
+            "birth_path": "顺产",
+            **values,
+        },
+        form_artifact_id="form-1",
+        form_submission_id="submission-1",
+        analysis_run_id="run-1",
+    )
+
+    followup = pregnancy_plan_current_followup(workflow)
+
+    assert followup is not None
+    assert followup["id"] == expected_topic
+    assert followup["question"] == expected_question
+    assert followup["question"].count("？") == 1
+
+
 def test_pregnancy_plan_workflow_early_stage_asks_checkup_done_then_upload_or_skip() -> None:
     workflow = initialize_pregnancy_plan_workflow(
         {

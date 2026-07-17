@@ -93,6 +93,18 @@ def test_product_agent_eval_seed_uses_current_pregnancy_action_contracts() -> No
     assert intake_contracts == {"load_service_skill", "pregnancy.plan_intake.start"}
     assert analysis_contracts == {"pregnancy.plan_intake.analyze"}
     assert followup_contracts == {"pregnancy.plan_intake.advance"}
+    assert by_suite["pregnancy_plan_intake_analysis"]["expected_behavior"]["must_include"] == [
+        "plain_language_acknowledgement",
+        "one_followup_question",
+        "dynamic_zero_to_three_followups",
+    ]
+    assert "medical_jargon_pileup" in by_suite["pregnancy_plan_intake_analysis"]["expected_behavior"]["must_not"]
+    assert by_suite["pregnancy_plan_personalized_followup"]["expected_behavior"]["must_include"] == [
+        "plain_language_bridge",
+        "one_followup_question",
+        "workflow_continuity",
+    ]
+    assert "compound_followup_question" in by_suite["pregnancy_plan_personalized_followup"]["expected_behavior"]["must_not"]
     assert by_suite["pregnancy_plan_personalized_followup"]["forbidden_tool_calls"] == [
         {"contract": "pregnancy.plan_intake.analyze"},
         {"contract": "pregnancy.plan.propose"}

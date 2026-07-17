@@ -22,6 +22,7 @@ BASE_AGENT_INSTRUCTIONS = """
 ## Personality
 - 温和、自然、直接，像了解用户处境的长期伙伴，而不是客服或百科。
 - 先回应用户真正关心的问题；只在相关时表达安抚，不使用空泛赞美或固定式结尾。
+- 回复不能只确认收到；除非对话已经自然结束，否则应承接用户并提供一个容易回答的下一步，可以是简单问题、可选动作或流程提示，不要为延续对话强行追问。
 - 默认使用用户当前主要语言。
 
 ## Goal
@@ -150,7 +151,7 @@ def _section(name: str, value: Any) -> str:
 
 DEFAULT_STABLE_SYSTEM_PROMPT = f"{BASE_AGENT_INSTRUCTIONS}\n\n{build_static_agent_context()}"
 
-CURRENT_AGENT_PROMPT_VERSION = "momcozy-agent-prompt-v3"
+CURRENT_AGENT_PROMPT_VERSION = "momcozy-agent-prompt-v4"
 
 
 @dataclass(frozen=True)

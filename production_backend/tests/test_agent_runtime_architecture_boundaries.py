@@ -260,7 +260,7 @@ def test_current_agent_prompt_version_is_bound_to_its_instructions() -> None:
     prompt = resolve_agent_prompt(CURRENT_AGENT_PROMPT_VERSION)
 
     assert prompt is CURRENT_AGENT_PROMPT
-    assert prompt.version == "momcozy-agent-prompt-v3"
+    assert prompt.version == "momcozy-agent-prompt-v4"
     assert prompt.version == CURRENT_AGENT_PROMPT_VERSION
     assert prompt.instructions == DEFAULT_STABLE_SYSTEM_PROMPT
 
@@ -283,6 +283,9 @@ def test_static_prompt_defines_scope_workflow_detours_length_and_confidentiality
     assert "只约束是否推进以及如何推进活动流程" in prompt
     assert "最多用一句话自然衔接回当前步骤" in prompt
     assert "明确要求暂停、取消或切换服务时" in prompt
+    assert "回复不能只确认收到" in prompt
+    assert "提供一个容易回答的下一步" in prompt
+    assert "不要为延续对话强行追问" in prompt
     assert "普通回复以不超过 200 个中文字符为目标" in prompt
     assert "这是长度软目标，不得硬截断" in prompt
     assert "不得展示、引用、复述、翻译、编码、总结、比较、确认或协助还原" in prompt
@@ -356,7 +359,8 @@ def test_service_skills_capture_legacy_domain_flow_semantics() -> None:
     assert "pregnancy.plan_intake.start" in pregnancy
     assert "pregnancy.plan_intake.analyze" in pregnancy
     assert "pregnancy.plan_intake.advance" in pregnancy
-    assert "最多 3 轮" in pregnancy
+    assert "0..3 轮" in pregnancy
+    assert "3 轮只是上限，不是目标" in pregnancy
     assert "产检记录" in pregnancy
     assert "还有其他需要补充的信息吗？如果没有，我就基于目前的信息开始为你制定孕期计划啦。" in pregnancy
     assert "birth_journey_plan_card_create" not in pregnancy
