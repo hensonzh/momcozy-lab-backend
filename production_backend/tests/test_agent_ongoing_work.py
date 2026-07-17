@@ -110,7 +110,18 @@ def test_workflow_context_rehydrates_other_long_running_service_steps() -> None:
     assert "private_rows" not in str(projected[0])
     assert projected[1]["device_model"] == "Air1"
     assert projected[1]["completed_steps"] == ["guide.parts", "guide.controls"]
-    assert projected[1]["current_step"] == {"name": "guide.charging"}
+    assert projected[1]["current_step"] == {
+        "name": "guide.charging",
+        "awaiting": "completion_confirmation",
+    }
+    assert projected[1]["next_transition"] == {
+        "tool": "devices.unboxing.advance",
+        "allowed_actions": ["complete_current", "cancel"],
+        "on_completion": "complete_current",
+        "on_problem": "stay_current_step",
+    }
+    assert "semantically confirms completion" in projected[1]["instruction"]
+    assert "reports a problem" in projected[1]["instruction"]
 
 
 def test_workflow_context_does_not_bind_a_stale_reply_cursor_to_the_current_step() -> None:
@@ -148,7 +159,10 @@ def test_ongoing_work_requests_skill_reload_without_losing_business_progress() -
         {
             "name": "Air1 开箱指导",
             "progress": "已完成 2 个主步骤，当前停留在 guide.charging。",
-            "next_step": "先调用 load_service_skill 加载 device-guidance；然后读取 guide.charging 的设备指导资料并继续。",
+            "next_step": (
+                "先调用 load_service_skill 加载 device-guidance；然后若用户确认当前主步骤已完成，"
+                "调用 devices.unboxing.advance 推进一步；否则继续协助当前步骤。"
+            ),
         }
     ]
 
@@ -172,7 +186,9 @@ def test_ongoing_work_supports_multiple_known_workflows_and_ignores_internal_typ
 
     assert [item["name"] for item in projected] == ["待产包", "Air1 开箱指导"]
     assert projected[0]["next_step"] == "等待用户提交待产包基础信息表单。"
-    assert projected[1]["next_step"] == "读取 guide.parts 的设备指导资料并继续。"
+    assert projected[1]["next_step"] == (
+        "若用户确认当前主步骤已完成，调用 devices.unboxing.advance 推进一步；否则继续协助当前步骤。"
+    )
 
 
 def test_milk_analysis_projection_keeps_the_current_question_available_for_recovery() -> None:

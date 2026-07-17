@@ -248,6 +248,7 @@ def test_product_agent_eval_seed_covers_working_context_and_durable_workflows() 
     assert redis_loss["input"]["fixtures"]["working_context_redis_available"] is False
 
     device = by_suite["device_unboxing_step_continuation"]
+    assert device["input"]["messages"][-1]["content"] == "继续"
     assert device["expected_tool_calls"] == [
         {
             "contract": "devices.unboxing.advance",
@@ -255,6 +256,10 @@ def test_product_agent_eval_seed_covers_working_context_and_durable_workflows() 
             "args_subset": {"action": "complete_current"},
         }
     ]
+
+    incomplete_device = by_suite["device_unboxing_incomplete_step"]
+    assert incomplete_device["expected_tool_calls"] == []
+    assert incomplete_device["forbidden_tool_calls"] == [{"contract": "devices.unboxing.advance"}]
 
     hospital_bag = by_suite["hospital_bag_form_to_card_workflow"]
     assert [call["contract"] for call in hospital_bag["expected_tool_calls"]] == [

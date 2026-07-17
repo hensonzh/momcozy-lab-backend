@@ -439,7 +439,7 @@ def test_observed_device_unboxing_advances_exactly_one_persisted_step() -> None:
     assert scenario.workflow("device_unboxing").active_step == "guide.parts"
 
     advanced = scenario.run_turn(
-        text="部件核对好了，继续。",
+        text="继续",
         handlers=handlers,
         tool_invocations=(
             scripted_tool_invocation(
