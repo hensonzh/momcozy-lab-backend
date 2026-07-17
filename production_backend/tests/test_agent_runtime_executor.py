@@ -1453,6 +1453,27 @@ def test_agent_runtime_executor_allows_service_tool_without_skill_load() -> None
     assert tool_executor.calls[0]["args"] == {}
 
 
+def test_agent_runtime_executor_skips_quick_reply_progress_without_finalizer() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="接下来呢？", sequence=1)
+    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
+    transient_stream = FakeTransientStream()
+    backend = ScriptedSdkBackend([scripted_sdk_response(final_text="这是最终回复。")])
+
+    result = asyncio.run(
+        AgentRuntimeExecutor(
+            repository=repository,
+            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            transient_stream=transient_stream,
+        ).execute(run=run)
+    )
+
+    assert result.status == "completed"
+    assert result.quick_replies == []
+    assert "quick_replies_preparing" not in [progress["phase"] for progress in transient_stream.progresses]
+
+
 def test_agent_runtime_executor_generates_quick_replies_with_finalizer() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)

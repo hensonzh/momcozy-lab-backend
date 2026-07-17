@@ -156,6 +156,13 @@ def test_production_runtime_does_not_ship_dormant_langgraph_runner() -> None:
     assert "langgraph" not in requirements
 
 
+def test_production_worker_does_not_wire_generated_quick_replies() -> None:
+    worker_source = (PRODUCTION_BACKEND / "scripts" / "run_agent_worker.py").read_text()
+
+    assert "QuickReplyFinalizer" not in worker_source
+    assert 'metrics_node_name="quick_reply_finalizer"' not in worker_source
+
+
 def test_production_runtime_does_not_ship_unused_graph_checkpoint_code() -> None:
     runtime_root = PRODUCTION_BACKEND / "app" / "modules" / "agent_runtime"
     runtime_init = (runtime_root / "__init__.py").read_text()

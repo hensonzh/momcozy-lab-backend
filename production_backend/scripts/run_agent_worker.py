@@ -41,7 +41,6 @@ from production_backend.app.modules.agent_runtime.facts.worker import (
 from production_backend.app.modules.agent_runtime.repository import AgentRuntimeRepository
 from production_backend.app.modules.agent_runtime.run_lifecycle.controls import AgentRunControls
 from production_backend.app.modules.agent_runtime.run_lifecycle.executor import AgentRuntimeExecutor
-from production_backend.app.modules.agent_runtime.run_lifecycle.quick_replies import QuickReplyFinalizer
 from production_backend.app.modules.agent_runtime.run_lifecycle.working_context import RedisAgentWorkingContextStore
 from production_backend.app.modules.agent_runtime.sdk import OpenAIResponsesRunner, create_agent_model_runner
 from production_backend.app.modules.agent_runtime.service import AgentRuntimeService
@@ -715,16 +714,7 @@ async def _execute_agent_run(
             transient_stream=transient_stream,
         )
         sdk_runner = create_agent_model_runner(settings=settings, metrics=metrics)
-        quick_reply_runner = create_agent_model_runner(
-            settings=settings,
-            metrics=metrics,
-            trace_enabled=False,
-            model=settings.agent_quick_reply_model or None,
-            max_turns=1,
-            timeout_seconds=settings.agent_quick_reply_timeout_seconds,
-            reasoning_effort="none",
-            metrics_node_name="quick_reply_finalizer",
-        )
+        # Generated quick replies are temporarily disabled while the follow-up UX is redesigned.
         runtime_executor = AgentRuntimeExecutor(
             repository=repository,
             tool_registry=tool_registry,
@@ -733,7 +723,6 @@ async def _execute_agent_run(
             memory_service=memory_service,
             business_facts_projector=BusinessFactsProjector(handlers=tool_handlers),
             transient_stream=transient_stream,
-            quick_reply_finalizer=QuickReplyFinalizer(sdk_runner=quick_reply_runner),
             working_context_store=RedisAgentWorkingContextStore(redis_client),
             fact_service=fact_service,
             sdk_runner=sdk_runner,
