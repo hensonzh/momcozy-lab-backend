@@ -2936,6 +2936,50 @@
         "title": "PregnancyDiaryEntryUpdate",
         "type": "object"
       },
+      "PregnancyDiarySettingsRead": {
+        "properties": {
+          "auto_capture_enabled": {
+            "title": "Auto Capture Enabled",
+            "type": "boolean"
+          },
+          "owner_user_id": {
+            "format": "uuid",
+            "title": "Owner User Id",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "owner_user_id",
+          "auto_capture_enabled"
+        ],
+        "title": "PregnancyDiarySettingsRead",
+        "type": "object"
+      },
+      "PregnancyDiarySettingsUpdate": {
+        "properties": {
+          "auto_capture_enabled": {
+            "title": "Auto Capture Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "auto_capture_enabled"
+        ],
+        "title": "PregnancyDiarySettingsUpdate",
+        "type": "object"
+      },
       "ProductAssetListResponse": {
         "properties": {
           "items": {
@@ -8566,6 +8610,88 @@
           }
         ],
         "summary": "Update Entry",
+        "tags": [
+          "pregnancy-diary"
+        ],
+        "x-momcozy-api-surface": "public_app_api",
+        "x-momcozy-client": [
+          "flutter"
+        ],
+        "x-momcozy-owner": "pregnancy-diary",
+        "x-momcozy-stability": "stable"
+      }
+    },
+    "/v1/pregnancy-diary/settings": {
+      "get": {
+        "operationId": "get_settings_v1_pregnancy_diary_settings_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PregnancyDiarySettingsRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Settings",
+        "tags": [
+          "pregnancy-diary"
+        ],
+        "x-momcozy-api-surface": "public_app_api",
+        "x-momcozy-client": [
+          "flutter"
+        ],
+        "x-momcozy-owner": "pregnancy-diary",
+        "x-momcozy-stability": "stable"
+      },
+      "put": {
+        "operationId": "update_settings_v1_pregnancy_diary_settings_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PregnancyDiarySettingsUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PregnancyDiarySettingsRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Settings",
         "tags": [
           "pregnancy-diary"
         ],

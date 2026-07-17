@@ -8,7 +8,7 @@ from sqlalchemy.exc import IntegrityError
 
 from ...core.errors import ApiError
 from ..audit import AuditService
-from .models import PregnancyDiaryEntry
+from .models import PregnancyDiaryEntry, PregnancyDiarySettings
 from .repository import DiaryEntryMutation, DiaryRepository
 
 
@@ -16,6 +16,34 @@ class DiaryService:
     def __init__(self, *, repository: DiaryRepository, audit_service: AuditService | None = None) -> None:
         self.repository = repository
         self.audit_service = audit_service
+
+    async def get_settings(self, *, owner_user_id: UUID) -> PregnancyDiarySettings:
+        settings = await self.repository.get_settings(owner_user_id=owner_user_id)
+        if settings is not None:
+            return settings
+        return PregnancyDiarySettings(owner_user_id=owner_user_id, auto_capture_enabled=False)
+
+    async def update_settings(
+        self,
+        *,
+        owner_user_id: UUID,
+        auto_capture_enabled: bool,
+        request_id: str = "",
+    ) -> PregnancyDiarySettings:
+        if not isinstance(auto_capture_enabled, bool):
+            raise ApiError(code="validation_failed", message="auto_capture_enabled must be a boolean.", status=422)
+        settings = await self.repository.upsert_settings(
+            owner_user_id=owner_user_id,
+            auto_capture_enabled=auto_capture_enabled,
+        )
+        await self._audit(
+            owner_user_id=owner_user_id,
+            action="pregnancy_diary.settings.update",
+            resource_id=str(owner_user_id),
+            request_id=request_id,
+            resource_type="pregnancy_diary_settings",
+        )
+        return settings
 
     async def get_entry(self, *, owner_user_id: UUID, entry_date: date) -> PregnancyDiaryEntry:
         entry = await self.repository.get_entry_by_date(owner_user_id=owner_user_id, entry_date=entry_date)
@@ -135,12 +163,20 @@ class DiaryService:
         )
         return deleted
 
-    async def _audit(self, *, owner_user_id: UUID, action: str, resource_id: str, request_id: str) -> None:
+    async def _audit(
+        self,
+        *,
+        owner_user_id: UUID,
+        action: str,
+        resource_id: str,
+        request_id: str,
+        resource_type: str = "pregnancy_diary_entry",
+    ) -> None:
         if self.audit_service is not None:
             await self.audit_service.record(
                 actor_user_id=owner_user_id,
                 action=action,
-                resource_type="pregnancy_diary_entry",
+                resource_type=resource_type,
                 resource_id=resource_id,
                 request_id=request_id,
             )

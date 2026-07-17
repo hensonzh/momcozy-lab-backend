@@ -16,6 +16,7 @@ from ....core.errors import ApiError
 from ....core.logging import log_agent_runtime_event
 from ....infrastructure.object_storage.base import ObjectStorage
 from ...auth import CurrentUser
+from ...diary.service import DiaryService
 from ..actions.policy import AgentActionPolicy, AgentActionPolicyDecision
 from ..client_context import project_agent_client_context
 from ..agents.cozymate_service_agent.context import BusinessFactsProjector
@@ -144,6 +145,7 @@ class _AgentTurnContext:
     checkup_attachment_count: int
     workflow_reply: dict[str, Any]
     recent_client_events: list[dict[str, str]]
+    diary_auto_capture_enabled: bool | None
     timings_ms: dict[str, float]
 
 
@@ -173,6 +175,7 @@ class AgentRuntimeExecutor:
         event_sink: AgentEventSink | None = None,
         action_policy: AgentActionPolicy | None = None,
         memory_service: AgentMemoryService | None = None,
+        diary_service: DiaryService | None = None,
         service_skill_registry: AgentServiceSkillRegistry | None = None,
         business_facts_projector: BusinessFactsProjector | None = None,
         transient_stream: AgentTransientStream | None = None,
@@ -195,6 +198,7 @@ class AgentRuntimeExecutor:
         self.event_sink = event_sink
         self.action_policy = action_policy or AgentActionPolicy()
         self.memory_service = memory_service
+        self.diary_service = diary_service
         self.service_skill_registry = service_skill_registry or default_service_skill_registry()
         self.business_facts_projector = business_facts_projector
         self.transient_stream = transient_stream
@@ -211,6 +215,7 @@ class AgentRuntimeExecutor:
         self._run_text_stream_emitted: dict[UUID, str] = {}
         self._run_authoritative_final_text: dict[UUID, str] = {}
         self._run_current_user_text: dict[UUID, str] = {}
+        self._run_diary_auto_capture_enabled: dict[UUID, bool] = {}
         self._run_local_dates: dict[UUID, str] = {}
         self._run_timezones: dict[UUID, str] = {}
         self._run_previous_assistant_text: dict[UUID, str] = {}
@@ -251,6 +256,7 @@ class AgentRuntimeExecutor:
             self._run_trusted_form_submissions[run.id] = turn_context.trusted_form_submissions
             self._run_checkup_attachment_counts[run.id] = turn_context.checkup_attachment_count
             self._run_current_user_text[run.id] = _message_text(turn_context.current_message)
+            self._run_diary_auto_capture_enabled[run.id] = bool(turn_context.diary_auto_capture_enabled)
             self._run_workflow_replies[run.id] = turn_context.workflow_reply
             self._run_guarded_workflow_types[run.id] = []
             self._run_workflow_reply_recovery_types[run.id] = ""
@@ -292,6 +298,7 @@ class AgentRuntimeExecutor:
             self._run_text_stream_emitted.pop(run.id, None)
             self._run_authoritative_final_text.pop(run.id, None)
             self._run_current_user_text.pop(run.id, None)
+            self._run_diary_auto_capture_enabled.pop(run.id, None)
             self._run_local_dates.pop(run.id, None)
             self._run_timezones.pop(run.id, None)
             self._run_previous_assistant_text.pop(run.id, None)
@@ -350,6 +357,7 @@ class AgentRuntimeExecutor:
             owner_user_id=run.actor_user_id,
             limit=10,
         )
+        diary_auto_capture_enabled = await self._diary_auto_capture_setting(run=run)
         timings_ms["ongoing_work"] = _elapsed_ms(ongoing_work_started_at)
 
         return _AgentTurnContext(
@@ -365,8 +373,22 @@ class AgentRuntimeExecutor:
             checkup_attachment_count=checkup_attachment_count,
             workflow_reply=workflow_reply,
             recent_client_events=_recent_ibclc_client_event_context(client_events),
+            diary_auto_capture_enabled=diary_auto_capture_enabled,
             timings_ms=timings_ms,
         )
+
+    async def _diary_auto_capture_setting(self, *, run: AgentRun) -> bool | None:
+        if self.diary_service is None:
+            return None
+        try:
+            settings = await self.diary_service.get_settings(owner_user_id=run.actor_user_id)
+        except Exception:
+            LOGGER.exception(
+                "Failed to load pregnancy diary auto-capture setting; defaulting to disabled.",
+                extra={"run_id": str(run.id), "owner_user_id": str(run.actor_user_id)},
+            )
+            return False
+        return bool(settings.auto_capture_enabled)
 
     def _tool_catalog_for_turn(self) -> _AgentTurnToolCatalog:
         tool_namespaces: tuple[ToolNamespace, ...] = (
@@ -393,6 +415,11 @@ class AgentRuntimeExecutor:
         )
         if turn_context.recent_client_events:
             working_context["client_events"] = turn_context.recent_client_events
+        if turn_context.diary_auto_capture_enabled is not None:
+            working_context["pregnancy_diary"] = {
+                "auto_capture_enabled": turn_context.diary_auto_capture_enabled,
+                "instruction": "Automatic diary capture is allowed only when auto_capture_enabled is true.",
+            }
         projection = ContextProjection(
             stable_system_prompt=prompt.instructions,
             selected_conversation_history=_history_before(
@@ -988,6 +1015,7 @@ class AgentRuntimeExecutor:
         if contract_name == "pregnancy_diary.manage":
             local_date = self._run_local_dates.get(run.id, "")
             trusted_args = {"trusted_current_user_text": self._run_current_user_text.get(run.id, "")}
+            trusted_args["runtime_auto_capture_enabled"] = self._run_diary_auto_capture_enabled.get(run.id, False)
             if local_date:
                 trusted_args["runtime_local_date"] = local_date
             return trusted_args

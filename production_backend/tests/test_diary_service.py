@@ -5,7 +5,7 @@ from uuid import UUID, uuid4
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import IntegrityError
 
-from production_backend.app.modules.diary.models import PregnancyDiaryEntry
+from production_backend.app.modules.diary.models import PregnancyDiaryEntry, PregnancyDiarySettings
 from production_backend.app.modules.diary.repository import DiaryEntryMutation, DiaryRepository
 from production_backend.app.modules.diary.service import DiaryService
 
@@ -83,6 +83,27 @@ def test_diary_service_full_replacement_is_idempotent_for_identical_content() ->
     assert mutation.entry.content == "Existing fact rewritten together with the new fact"
     assert mutation.changed is False
     assert audit_service.record_kwargs == {}
+
+
+def test_diary_auto_capture_settings_default_off_and_persist_with_audit() -> None:
+    owner_user_id = uuid4()
+    repository = FakeDiaryRepository()
+    audit_service = FakeAuditService()
+    service = DiaryService(repository=repository, audit_service=audit_service)
+
+    default_settings = asyncio.run(service.get_settings(owner_user_id=owner_user_id))
+    updated_settings = asyncio.run(
+        service.update_settings(
+            owner_user_id=owner_user_id,
+            auto_capture_enabled=True,
+            request_id="req_settings",
+        )
+    )
+
+    assert default_settings.auto_capture_enabled is False
+    assert updated_settings.auto_capture_enabled is True
+    assert audit_service.record_kwargs["action"] == "pregnancy_diary.settings.update"
+    assert audit_service.record_kwargs["request_id"] == "req_settings"
 
 
 def test_diary_repository_create_restores_soft_deleted_entry_without_stale_values() -> None:
@@ -188,6 +209,17 @@ class FakeDiaryRepository:
     def __init__(self, *, entry=None, entries=None) -> None:
         self.entry = entry
         self.entries = entries or []
+        self.settings: PregnancyDiarySettings | None = None
+
+    async def get_settings(self, *, owner_user_id: UUID):
+        return self.settings
+
+    async def upsert_settings(self, *, owner_user_id: UUID, auto_capture_enabled: bool):
+        self.settings = PregnancyDiarySettings(
+            owner_user_id=owner_user_id,
+            auto_capture_enabled=auto_capture_enabled,
+        )
+        return self.settings
 
     async def get_entry_by_date(self, *, owner_user_id: UUID, entry_date: date):
         return self.entry

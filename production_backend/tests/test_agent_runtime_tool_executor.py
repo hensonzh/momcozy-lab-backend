@@ -292,11 +292,21 @@ def test_tool_executor_emits_deferred_artifact_events_after_tool_completed() -> 
     ("args", "expected_operation"),
     [
         (
-            {"action": "write", "entry_date": "2026-07-04", "content": PRIVATE_DIARY_CONTENT},
+            {
+                "action": "write",
+                "entry_date": "2026-07-04",
+                "content": PRIVATE_DIARY_CONTENT,
+                "capture_mode": "automatic",
+            },
             "created",
         ),
         (
-            {"action": "update", "entry_date": "2026-07-04", "content": PRIVATE_DIARY_CONTENT},
+            {
+                "action": "update",
+                "entry_date": "2026-07-04",
+                "content": PRIVATE_DIARY_CONTENT,
+                "capture_mode": "automatic",
+            },
             "updated",
         ),
     ],
@@ -321,6 +331,7 @@ def test_pregnancy_diary_committed_write_emits_durable_changed_event_after_tool_
             tool_name="pregnancy_diary.manage",
             call_id=f"call-{args['action']}",
             args=args,
+            trusted_args={"runtime_auto_capture_enabled": True},
         )
     )
 
@@ -363,7 +374,13 @@ def test_pregnancy_diary_write_and_changed_event_share_one_commit_boundary() -> 
             run_id=uuid4(),
             tool_name="pregnancy_diary.manage",
             call_id="call-atomic-create",
-            args={"action": "write", "entry_date": "2026-07-04", "content": PRIVATE_DIARY_CONTENT},
+            args={
+                "action": "write",
+                "entry_date": "2026-07-04",
+                "content": PRIVATE_DIARY_CONTENT,
+                "capture_mode": "automatic",
+            },
+            trusted_args={"runtime_auto_capture_enabled": True},
         )
     )
 
@@ -380,15 +397,30 @@ def test_pregnancy_diary_write_and_changed_event_share_one_commit_boundary() -> 
     ("args", "service_mode"),
     [
         (
-            {"action": "write", "entry_date": "2026-07-04", "content": PRIVATE_DIARY_CONTENT},
+            {
+                "action": "write",
+                "entry_date": "2026-07-04",
+                "content": PRIVATE_DIARY_CONTENT,
+                "capture_mode": "automatic",
+            },
             "success",
         ),
         (
-            {"action": "write", "entry_date": "2026-07-04", "content": "new diary narrative"},
+            {
+                "action": "write",
+                "entry_date": "2026-07-04",
+                "content": "new diary narrative",
+                "capture_mode": "automatic",
+            },
             "create_conflict",
         ),
         (
-            {"action": "update", "entry_date": "2026-07-04", "content": PRIVATE_DIARY_CONTENT},
+            {
+                "action": "update",
+                "entry_date": "2026-07-04",
+                "content": PRIVATE_DIARY_CONTENT,
+                "capture_mode": "automatic",
+            },
             "success",
         ),
         (
@@ -420,6 +452,7 @@ def test_pregnancy_diary_tool_completed_safe_output_omits_diary_content(
             tool_name="pregnancy_diary.manage",
             call_id=f"call-safe-{args['action']}",
             args=args,
+            trusted_args={"runtime_auto_capture_enabled": True},
         )
     )
 
@@ -450,7 +483,9 @@ def test_pregnancy_diary_write_safe_args_omit_health_narrative() -> None:
                 "action": "write",
                 "entry_date": "2026-07-04",
                 "content": PRIVATE_DIARY_CONTENT,
+                "capture_mode": "automatic",
             },
+            trusted_args={"runtime_auto_capture_enabled": True},
         )
     )
 
@@ -535,17 +570,32 @@ def test_pregnancy_diary_ephemeral_model_output_is_bounded_and_omits_attachment_
     ("args", "service_mode", "expected_status"),
     [
         (
-            {"action": "write", "entry_date": "2026-07-04", "content": PRIVATE_DIARY_CONTENT},
+            {
+                "action": "write",
+                "entry_date": "2026-07-04",
+                "content": PRIVATE_DIARY_CONTENT,
+                "capture_mode": "automatic",
+            },
             "create_conflict",
             "entry_already_exists",
         ),
         (
-            {"action": "update", "entry_date": "2026-07-04", "content": PRIVATE_DIARY_CONTENT},
+            {
+                "action": "update",
+                "entry_date": "2026-07-04",
+                "content": PRIVATE_DIARY_CONTENT,
+                "capture_mode": "automatic",
+            },
             "update_not_found",
             "entry_not_found",
         ),
         (
-            {"action": "update", "entry_date": "2026-07-04", "content": PRIVATE_DIARY_CONTENT},
+            {
+                "action": "update",
+                "entry_date": "2026-07-04",
+                "content": PRIVATE_DIARY_CONTENT,
+                "capture_mode": "automatic",
+            },
             "update_unchanged",
             "entry_unchanged",
         ),
@@ -575,6 +625,7 @@ def test_pregnancy_diary_no_op_write_does_not_emit_changed_event(
             tool_name="pregnancy_diary.manage",
             call_id=f"call-no-op-{args['action']}",
             args=args,
+            trusted_args={"runtime_auto_capture_enabled": True},
         )
     )
 
@@ -602,7 +653,13 @@ def test_pregnancy_diary_failed_write_does_not_emit_changed_event() -> None:
                 run_id=uuid4(),
                 tool_name="pregnancy_diary.manage",
                 call_id="call-create-failed",
-                args={"action": "write", "entry_date": "2026-07-04", "content": PRIVATE_DIARY_CONTENT},
+                args={
+                    "action": "write",
+                    "entry_date": "2026-07-04",
+                    "content": PRIVATE_DIARY_CONTENT,
+                    "capture_mode": "automatic",
+                },
+                trusted_args={"runtime_auto_capture_enabled": True},
             )
         )
 

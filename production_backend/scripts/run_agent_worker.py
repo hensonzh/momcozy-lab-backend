@@ -731,6 +731,7 @@ async def _execute_agent_run(
             tool_executor=tool_executor,
             event_sink=event_sink,
             memory_service=memory_service,
+            diary_service=diary_service,
             business_facts_projector=BusinessFactsProjector(handlers=tool_handlers),
             transient_stream=transient_stream,
             quick_reply_finalizer=QuickReplyFinalizer(sdk_runner=quick_reply_runner),

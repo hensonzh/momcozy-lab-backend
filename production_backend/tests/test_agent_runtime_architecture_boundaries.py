@@ -621,6 +621,7 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
     assert diary_schema["properties"]["content"]["maxLength"] == 5000
     assert diary_schema["properties"]["confirmed"]["default"] is False
     assert diary_schema["properties"]["confirmation_evidence"]["maxLength"] == 500
+    assert diary_schema["properties"]["capture_mode"]["enum"] == ["explicit_request", "automatic"]
     assert "content_mode" not in diary_schema["properties"]
     assert "idempotency_key" not in diary_schema["properties"]
     assert "locale" not in diary_schema["properties"]
