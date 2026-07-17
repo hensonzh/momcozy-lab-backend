@@ -540,7 +540,6 @@ def test_observed_health_consultation_can_write_user_facts_then_continue_replyin
                 {
                     "action": "write",
                     "content": "今天散步后有一点轻微牵拉感；没有出血或发烧，疼痛没有加重，宝宝胎动正常。",
-                    "capture_mode": "automatic",
                 },
             ),
         ),
@@ -768,7 +767,6 @@ class ObservedScenario:
             sdk_runner=OpenAIAgentsSdkRunner(backend=scripted_backend),
             tool_registry=registry,
             tool_executor=tool_executor,
-            diary_service=self.diary,
         )
         result = asyncio.run(
             AgentEvalRuntimeClient(executor=executor, repository=self.repository).execute_case(
@@ -1279,10 +1277,6 @@ class RecordingDiaryService:
     def __init__(self, *, owner_user_id: UUID) -> None:
         self.owner_user_id = owner_user_id
         self.entries: list[PregnancyDiaryEntry] = []
-
-    async def get_settings(self, *, owner_user_id: UUID):
-        assert owner_user_id == self.owner_user_id
-        return SimpleNamespace(auto_capture_enabled=True)
 
     async def create_entry(self, *, owner_user_id: UUID, entry_date: date, values: dict[str, Any], request_id: str):
         del request_id

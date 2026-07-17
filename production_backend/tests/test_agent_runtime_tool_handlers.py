@@ -3096,9 +3096,6 @@ def test_pregnancy_diary_manage_write_creates_content_only() -> None:
             "action": "write",
             "entry_date": "2026-07-04",
             "content": "Today I felt steady.",
-            "capture_mode": "explicit_request",
-            "capture_evidence": "Save this to my diary.",
-            "trusted_current_user_text": "Save this to my diary.",
         },
     )
 
@@ -3123,9 +3120,6 @@ def test_pregnancy_diary_manage_write_bounds_long_model_call_id_for_audit() -> N
             "action": "write",
             "entry_date": "2026-07-04",
             "content": "Today I felt steady.",
-            "capture_mode": "explicit_request",
-            "capture_evidence": "Save this to my diary.",
-            "trusted_current_user_text": "Save this to my diary.",
         },
     )
 
@@ -3142,17 +3136,7 @@ def test_pregnancy_diary_manage_write_returns_full_existing_entry_on_date_confli
 
     result = asyncio.run(
         PregnancyDiaryManageToolHandler(diary_service=diary_service)(
-            _context(
-                actor=actor,
-                args={
-                    "action": "write",
-                    "entry_date": "2026-07-02",
-                    "content": "New content",
-                    "capture_mode": "explicit_request",
-                    "capture_evidence": "Keep that memory.",
-                    "trusted_current_user_text": "Keep that memory.",
-                },
-            )
+            _context(actor=actor, args={"action": "write", "entry_date": "2026-07-02", "content": "New content"})
         )
     )
 
@@ -3176,9 +3160,6 @@ def test_pregnancy_diary_manage_update_replaces_with_complete_content() -> None:
                     "action": "update",
                     "entry_date": "2026-07-02",
                     "content": "Earlier facts and the new fact rewritten as one complete entry.",
-                    "capture_mode": "explicit_request",
-                    "capture_evidence": "Keep that memory.",
-                    "trusted_current_user_text": "Keep that memory.",
                 },
             )
         )
@@ -3190,78 +3171,6 @@ def test_pregnancy_diary_manage_update_replaces_with_complete_content() -> None:
         "content": "Earlier facts and the new fact rewritten as one complete entry."
     }
     assert "content_mode" not in diary_service.update_kwargs
-
-
-def test_pregnancy_diary_automatic_capture_requires_persisted_opt_in() -> None:
-    actor = _user()
-    diary_service = FakeDiaryService(owner_user_id=actor.user_id)
-
-    result = asyncio.run(
-        PregnancyDiaryManageToolHandler(diary_service=diary_service)(
-            _context(
-                actor=actor,
-                args={
-                    "action": "write",
-                    "entry_date": "2026-07-04",
-                    "content": "Today the baby kicked after lunch.",
-                    "capture_mode": "automatic",
-                    "runtime_auto_capture_enabled": False,
-                },
-            )
-        )
-    )
-
-    assert result["status"] == "auto_capture_consent_required"
-    assert result["side_effect_performed"] is False
-    assert diary_service.create_kwargs == {}
-
-
-def test_pregnancy_diary_automatic_capture_writes_after_persisted_opt_in() -> None:
-    actor = _user()
-    diary_service = FakeDiaryService(owner_user_id=actor.user_id)
-
-    result = asyncio.run(
-        PregnancyDiaryManageToolHandler(diary_service=diary_service)(
-            _context(
-                actor=actor,
-                args={
-                    "action": "write",
-                    "entry_date": "2026-07-04",
-                    "content": "Today the baby kicked after lunch.",
-                    "capture_mode": "automatic",
-                    "runtime_auto_capture_enabled": True,
-                },
-            )
-        )
-    )
-
-    assert result["status"] == "entry_created"
-    assert diary_service.create_kwargs["values"] == {"content": "Today the baby kicked after lunch."}
-
-
-def test_pregnancy_diary_explicit_capture_requires_current_message_evidence() -> None:
-    actor = _user()
-    diary_service = FakeDiaryService(owner_user_id=actor.user_id)
-
-    result = asyncio.run(
-        PregnancyDiaryManageToolHandler(diary_service=diary_service)(
-            _context(
-                actor=actor,
-                args={
-                    "action": "write",
-                    "entry_date": "2026-07-04",
-                    "content": "Today the baby kicked after lunch.",
-                    "capture_mode": "explicit_request",
-                    "capture_evidence": "Save this to my diary.",
-                    "trusted_current_user_text": "Today the baby kicked after lunch.",
-                },
-            )
-        )
-    )
-
-    assert result["status"] == "explicit_capture_request_required"
-    assert result["side_effect_performed"] is False
-    assert diary_service.create_kwargs == {}
 
 
 def test_support_ticket_propose_tool_handler_requires_summary() -> None:

@@ -1171,9 +1171,6 @@ class PregnancyDiaryManageToolHandler:
     async def _write(self, context: ToolHandlerContext) -> ToolHandlerResult:
         entry_date = _diary_entry_date(context.args)
         content = _required_diary_content(context.args)
-        capture_guard = _pregnancy_diary_capture_guard(context, entry_date=entry_date)
-        if capture_guard is not None:
-            return capture_guard
         try:
             entry = await self.diary_service.create_entry(
                 owner_user_id=context.actor.user_id,
@@ -1199,8 +1196,7 @@ class PregnancyDiaryManageToolHandler:
                 context_key=f"pregnancy_diary:entry:{entry_date.isoformat()}",
                 guidance=(
                     "Combine the existing full diary content with only the user's new facts into one coherent complete diary entry, "
-                    "then call pregnancy_diary.manage with action=update and preserve capture_mode and its evidence. "
-                    "Do not append a supplement and do not claim it was saved yet."
+                    "then call pregnancy_diary.manage with action=update. Do not append a supplement and do not claim it was saved yet."
                 ),
             )
         output = {
@@ -1220,9 +1216,6 @@ class PregnancyDiaryManageToolHandler:
     async def _update(self, context: ToolHandlerContext) -> ToolHandlerResult:
         entry_date = _diary_entry_date(context.args)
         content = _required_diary_content(context.args)
-        capture_guard = _pregnancy_diary_capture_guard(context, entry_date=entry_date)
-        if capture_guard is not None:
-            return capture_guard
         try:
             mutation = await self.diary_service.update_entry_with_status(
                 owner_user_id=context.actor.user_id,
@@ -3655,66 +3648,6 @@ def _required_diary_content(args: dict[str, Any]) -> str:
     if not content:
         raise ApiError(code="validation_failed", message="Diary content is required for write and update.", status=422)
     return content
-
-
-def _pregnancy_diary_capture_guard(
-    context: ToolHandlerContext,
-    *,
-    entry_date: date,
-) -> ToolHandlerResult | None:
-    capture_mode = _text(context.args, "capture_mode")
-    if capture_mode == "automatic":
-        if context.args.get("runtime_auto_capture_enabled") is True:
-            return None
-        return _pregnancy_diary_retained_result(
-            {
-                "status": "auto_capture_consent_required",
-                "action": _text(context.args, "action"),
-                "side_effect_performed": False,
-                "entry_date": entry_date.isoformat(),
-                "auto_capture_enabled": False,
-            },
-            context_key="pregnancy_diary:settings",
-            guidance=(
-                "Do not claim the diary was saved. Briefly explain that automatic diary capture is off and can be enabled "
-                "from Pregnancy Diary settings. Still answer the user's main request."
-            ),
-        )
-    if capture_mode == "explicit_request":
-        if _diary_capture_evidence_is_trusted(context.args):
-            return None
-        return _pregnancy_diary_retained_result(
-            {
-                "status": "explicit_capture_request_required",
-                "action": _text(context.args, "action"),
-                "side_effect_performed": False,
-                "entry_date": entry_date.isoformat(),
-            },
-            context_key=f"pregnancy_diary:entry:{entry_date.isoformat()}",
-            guidance=(
-                "Do not claim the diary was saved. If the current user message explicitly asks to save it, retry with "
-                "capture_mode=explicit_request and quote that request verbatim in capture_evidence; otherwise do not write."
-            ),
-        )
-    return _pregnancy_diary_retained_result(
-        {
-            "status": "capture_mode_required",
-            "action": _text(context.args, "action"),
-            "side_effect_performed": False,
-            "entry_date": entry_date.isoformat(),
-        },
-        context_key=f"pregnancy_diary:entry:{entry_date.isoformat()}",
-        guidance=(
-            "Do not claim the diary was saved. Retry with capture_mode=explicit_request and verbatim capture_evidence "
-            "only for an explicit save request; use automatic only when the trusted auto-capture setting is enabled."
-        ),
-    )
-
-
-def _diary_capture_evidence_is_trusted(args: dict[str, Any]) -> bool:
-    evidence = _normalize_confirmation_evidence(args.get("capture_evidence"))
-    current_user_text = _normalize_confirmation_evidence(args.get("trusted_current_user_text"))
-    return bool(evidence and current_user_text and evidence in current_user_text)
 
 
 def _diary_delete_confirmation_evidence_is_trusted(args: dict[str, Any]) -> bool:

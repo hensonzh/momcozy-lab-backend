@@ -51,15 +51,3 @@ class PregnancyDiaryEntryUpdate(PregnancyDiaryEntryValues):
 
 class PregnancyDiaryEntryListResponse(BaseModel):
     items: list[PregnancyDiaryEntryRead]
-
-
-class PregnancyDiarySettingsRead(BaseModel):
-    owner_user_id: UUID
-    auto_capture_enabled: bool
-    updated_at: datetime | None = None
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-class PregnancyDiarySettingsUpdate(BaseModel):
-    auto_capture_enabled: bool

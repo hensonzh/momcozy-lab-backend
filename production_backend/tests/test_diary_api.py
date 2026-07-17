@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from production_backend.app.core.settings import Settings
 from production_backend.app.factory import create_app
 from production_backend.app.modules.auth import CurrentUser
-from production_backend.app.modules.diary.models import PregnancyDiaryEntry, PregnancyDiarySettings
+from production_backend.app.modules.diary.models import PregnancyDiaryEntry
 from production_backend.app.modules.diary.router import get_diary_service
 
 
@@ -65,31 +65,6 @@ def test_list_and_delete_entries_use_current_user_scope() -> None:
     assert fake_service.delete_kwargs["request_id"] == "req_delete"
 
 
-def test_diary_auto_capture_settings_default_off_and_update_for_current_user() -> None:
-    user_id = uuid4()
-    fake_service = FakeDiaryService(user_id=user_id)
-    app = create_app(Settings(app_env="test"))
-    _override_current_user(app, user_id)
-    app.dependency_overrides[get_diary_service] = lambda: fake_service
-
-    get_response = TestClient(app).get("/v1/pregnancy-diary/settings")
-    put_response = TestClient(app).put(
-        "/v1/pregnancy-diary/settings",
-        headers={"X-Request-ID": "req_diary_settings"},
-        json={"auto_capture_enabled": True},
-    )
-
-    assert get_response.status_code == 200
-    assert get_response.json()["auto_capture_enabled"] is False
-    assert put_response.status_code == 200
-    assert put_response.json()["auto_capture_enabled"] is True
-    assert fake_service.settings_kwargs == {
-        "owner_user_id": user_id,
-        "auto_capture_enabled": True,
-        "request_id": "req_diary_settings",
-    }
-
-
 def _override_current_user(app, user_id: UUID) -> None:
     from production_backend.app.api.dependencies import require_current_user
 
@@ -113,7 +88,6 @@ class FakeDiaryService:
         self.update_kwargs = {}
         self.list_kwargs = {}
         self.delete_kwargs = {}
-        self.settings_kwargs = {}
 
     async def get_entry(self, **kwargs):
         return self._entry()
@@ -132,16 +106,6 @@ class FakeDiaryService:
 
     async def delete_entry(self, **kwargs):
         self.delete_kwargs = kwargs
-
-    async def get_settings(self, *, owner_user_id):
-        return PregnancyDiarySettings(owner_user_id=owner_user_id, auto_capture_enabled=False)
-
-    async def update_settings(self, **kwargs):
-        self.settings_kwargs = kwargs
-        return PregnancyDiarySettings(
-            owner_user_id=kwargs["owner_user_id"],
-            auto_capture_enabled=kwargs["auto_capture_enabled"],
-        )
 
     def _entry(self) -> PregnancyDiaryEntry:
         return PregnancyDiaryEntry(

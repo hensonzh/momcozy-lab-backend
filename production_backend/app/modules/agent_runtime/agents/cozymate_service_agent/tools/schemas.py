@@ -223,16 +223,6 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
                 "maxLength": 5000,
                 "description": "write/update 使用的完整正文；update 必须包含旧正文和本轮新增事实的完整重写结果。",
             },
-            "capture_mode": {
-                "type": "string",
-                "enum": ["explicit_request", "automatic"],
-                "description": "write/update 必填：用户本轮明确要求保存时用 explicit_request；仅因普通叙述而自动记录时用 automatic。",
-            },
-            "capture_evidence": {
-                "type": "string",
-                "maxLength": 500,
-                "description": "capture_mode=explicit_request 时，逐字引用当前用户消息中要求保存日记的短原文。",
-            },
             "confirmed": {
                 "type": "boolean",
                 "default": False,

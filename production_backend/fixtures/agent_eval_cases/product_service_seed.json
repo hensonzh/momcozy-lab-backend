@@ -860,7 +860,8 @@
           "args_subset": {
             "action": "delete",
             "entry_date": "2026-07-04",
-            "confirmed": true
+            "confirmed": true,
+            "confirmation_evidence": "Delete the July 4 pregnancy diary entry now."
           }
         }
       ]
@@ -1006,8 +1007,7 @@
           }
         ],
         "fixtures": {
-          "timezone": "Asia/Shanghai",
-          "diary_auto_capture_enabled": false
+          "timezone": "Asia/Shanghai"
         }
       },
       "expected_behavior": {
@@ -1029,8 +1029,7 @@
           "contract": "pregnancy_diary.manage",
           "timing": "after_user_record_intent",
           "args_subset": {
-            "action": "write",
-            "capture_mode": "explicit_request"
+            "action": "write"
           }
         }
       ],
@@ -1054,8 +1053,7 @@
         ],
         "fixtures": {
           "timezone": "Asia/Shanghai",
-          "entry_for_local_date_exists": false,
-          "diary_auto_capture_enabled": true
+          "entry_for_local_date_exists": false
         }
       },
       "expected_behavior": {
@@ -1079,54 +1077,13 @@
           "contract": "pregnancy_diary.manage",
           "timing": "after_diary_worthy_narrative",
           "args_subset": {
-            "action": "write",
-            "capture_mode": "automatic"
+            "action": "write"
           }
         }
       ],
       "forbidden_tool_calls": [
         {
           "contract": "load_service_skill"
-        }
-      ]
-    },
-    {
-      "suite": "pregnancy_diary_implicit_without_opt_in",
-      "name": "concrete pregnancy narrative is not stored before automatic capture opt in",
-      "domain": "pregnancy-diary",
-      "owner_team": "agent",
-      "input": {
-        "messages": [
-          {
-            "role": "user",
-            "content": "Today at 32 weeks, the baby kicked a lot after lunch and my lower back felt a little sore."
-          }
-        ],
-        "fixtures": {
-          "timezone": "Asia/Shanghai",
-          "entry_for_local_date_exists": false,
-          "diary_auto_capture_enabled": false
-        }
-      },
-      "expected_behavior": {
-        "intent": "pregnancy_diary_implicit_without_opt_in",
-        "route": "respond_without_diary_write",
-        "requires_confirmation_before_write": false,
-        "service_skill_id": "cozymate_service_agent",
-        "must_include": [
-          "answer_current_request",
-          "optional_auto_capture_opt_in_hint"
-        ],
-        "must_not": [
-          "create_diary_entry",
-          "update_diary_entry",
-          "claim_diary_saved"
-        ]
-      },
-      "expected_tool_calls": [],
-      "forbidden_tool_calls": [
-        {
-          "contract": "pregnancy_diary.manage"
         }
       ]
     },
@@ -1144,8 +1101,7 @@
         ],
         "fixtures": {
           "timezone": "Asia/Shanghai",
-          "entry_for_local_date_exists": true,
-          "diary_auto_capture_enabled": false
+          "entry_for_local_date_exists": true
         }
       },
       "expected_behavior": {
@@ -1171,16 +1127,14 @@
           "contract": "pregnancy_diary.manage",
           "timing": "first_write_attempt",
           "args_subset": {
-            "action": "write",
-            "capture_mode": "explicit_request"
+            "action": "write"
           }
         },
         {
           "contract": "pregnancy_diary.manage",
           "timing": "after_entry_already_exists",
           "args_subset": {
-            "action": "update",
-            "capture_mode": "explicit_request"
+            "action": "update"
           }
         }
       ],
@@ -1318,8 +1272,7 @@
         "fixtures": {
           "timezone": "Asia/Shanghai",
           "active_service_skill_id": "health-consultation",
-          "entry_for_local_date_exists": false,
-          "diary_auto_capture_enabled": true
+          "entry_for_local_date_exists": false
         }
       },
       "expected_behavior": {
@@ -1344,8 +1297,7 @@
           "contract": "pregnancy_diary.manage",
           "timing": "as_adjunct_to_health_response",
           "args_subset": {
-            "action": "write",
-            "capture_mode": "automatic"
+            "action": "write"
           }
         }
       ]

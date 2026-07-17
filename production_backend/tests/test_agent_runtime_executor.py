@@ -1351,7 +1351,6 @@ def test_agent_runtime_executor_uses_ephemeral_model_output_for_private_diary_re
     assert tool_executor.calls[0]["trusted_args"] == {
         "runtime_local_date": "2026-07-12",
         "trusted_current_user_text": "Read today's diary",
-        "runtime_auto_capture_enabled": False,
     }
 
 
@@ -1369,34 +1368,6 @@ def test_agent_runtime_executor_injects_current_user_text_for_diary_confirmation
     assert trusted_args == {
         "runtime_local_date": "2026-07-12",
         "trusted_current_user_text": "请删除 7 月 4 日的日记",
-        "runtime_auto_capture_enabled": False,
-    }
-
-
-def test_agent_runtime_executor_projects_persisted_diary_auto_capture_setting() -> None:
-    thread_id = uuid4()
-    run = _run(thread_id=thread_id)
-    current_user = _message(
-        thread_id=thread_id,
-        run_id=run.id,
-        role="user",
-        text="Today the baby kicked after lunch.",
-        sequence=1,
-    )
-    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
-    backend = CapturingSdkBackend(result=SdkNodeResult(final_text="Thanks for sharing."))
-
-    asyncio.run(
-        AgentRuntimeExecutor(
-            repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
-            diary_service=FakeDiarySettingsService(enabled=True),
-        ).execute(run=run)
-    )
-
-    assert _runtime_context(backend.requests[0])["working_context"]["pregnancy_diary"] == {
-        "auto_capture_enabled": True,
-        "instruction": "Automatic diary capture is allowed only when auto_capture_enabled is true.",
     }
 
 
@@ -4542,19 +4513,6 @@ class FakeToolExecutor:
             model_output=self.model_output,
             retained_information=self.retained_information,
         )
-
-
-class FakeDiarySettingsService:
-    def __init__(self, *, enabled: bool) -> None:
-        self.enabled = enabled
-
-    async def get_settings(self, *, owner_user_id):
-        return FakeDiarySettings(auto_capture_enabled=self.enabled)
-
-
-class FakeDiarySettings:
-    def __init__(self, *, auto_capture_enabled: bool) -> None:
-        self.auto_capture_enabled = auto_capture_enabled
 
 
 class FakeFactService:

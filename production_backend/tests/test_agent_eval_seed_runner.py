@@ -46,11 +46,7 @@ def test_agent_eval_seed_assertion_engine_accepts_synchronous_diary_write() -> N
     case = _case("pregnancy_diary_entry")
     trace = AgentEvalTrace(
         tool_calls=[
-            {
-                "tool_name": "pregnancy_diary.manage",
-                "status": "completed",
-                "safe_args": {"action": "write", "capture_mode": "explicit_request"},
-            }
+            {"tool_name": "pregnancy_diary.manage", "status": "completed", "safe_args": {"action": "write"}}
         ],
         final_text="Saved.",
     )

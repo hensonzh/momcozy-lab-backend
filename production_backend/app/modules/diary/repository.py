@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 from typing import Any, cast
 from uuid import UUID
 
@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import PregnancyDiaryEntry, PregnancyDiarySettings
+from .models import PregnancyDiaryEntry
 
 
 _ENTRY_DEFAULTS: dict[str, Any] = {
@@ -35,24 +35,6 @@ class DiaryEntryMutation:
 class DiaryRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
-
-    async def get_settings(self, *, owner_user_id: UUID) -> PregnancyDiarySettings | None:
-        return await self.session.get(PregnancyDiarySettings, owner_user_id)
-
-    async def upsert_settings(
-        self,
-        *,
-        owner_user_id: UUID,
-        auto_capture_enabled: bool,
-    ) -> PregnancyDiarySettings:
-        settings = await self.get_settings(owner_user_id=owner_user_id)
-        if settings is None:
-            settings = PregnancyDiarySettings(owner_user_id=owner_user_id)
-            self.session.add(settings)
-        settings.auto_capture_enabled = auto_capture_enabled
-        settings.updated_at = datetime.now(timezone.utc)
-        await self.session.flush()
-        return settings
 
     async def get_entry_by_date(
         self,

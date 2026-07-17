@@ -233,10 +233,9 @@ def default_tool_registry() -> ToolContractRegistry:
             domain="pregnancy_diary",
             description=(
                 "按日期读取、列出、写入、更新或删除当前用户的孕期日记，用户需要处理孕期日记时调用。"
-                "write/update 必须传 capture_mode。用户本轮明确要求记录时传 explicit_request，并用 capture_evidence 逐字引用当前消息中的保存请求；"
-                "只有 working_context.pregnancy_diary.auto_capture_enabled=true 时，才可因普通叙述传 automatic 自动记录。未授权时不要写入，可友好提示用户在孕期日记中开启自动记录。"
+                "用户明确要求记录时可用 action=write；自动记录的授权规则由运行时提供，未获授权时不要将普通叙述作为写入请求。"
                 "正文只保存用户明确表达的事实和感受，不写入模型建议、安抚、风险判断、医疗提醒、观察计划或诊断。"
-                "write 遇到同日记录会返回 entry_already_exists 和旧日记正文；此时不能说已经保存，必须结合旧正文与本轮新增事实重新组织完整正文，并用相同 capture_mode 和证据继续调用 action=update。"
+                "write 遇到同日记录会返回 entry_already_exists 和旧日记正文；此时不能说已经保存，必须结合旧正文与本轮新增事实重新组织完整正文，并继续调用 action=update。"
                 "update 只接受整合后的完整正文，不能追加‘补充’或只传增量。"
                 "delete 仅在日期明确且用户已确认时传 confirmed=true，并用 confirmation_evidence 逐字引用当前用户消息中表达删除确认的短原文；运行时会校验证据。"
             ),

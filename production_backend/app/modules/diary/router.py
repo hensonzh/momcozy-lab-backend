@@ -18,8 +18,6 @@ from .schemas import (
     PregnancyDiaryEntryListResponse,
     PregnancyDiaryEntryRead,
     PregnancyDiaryEntryUpdate,
-    PregnancyDiarySettingsRead,
-    PregnancyDiarySettingsUpdate,
 )
 from .service import DiaryService
 
@@ -36,30 +34,6 @@ def get_diary_service(session: AsyncSession = Depends(get_session)) -> DiaryServ
         repository=DiaryRepository(session),
         audit_service=AuditService(repository=AuditRepository(session)),
     )
-
-
-@router.get("/settings", response_model=PregnancyDiarySettingsRead)
-async def get_settings(
-    current_user: CurrentUser = Depends(require_current_user),
-    service: DiaryService = Depends(get_diary_service),
-) -> PregnancyDiarySettingsRead:
-    settings = await service.get_settings(owner_user_id=current_user.user_id)
-    return PregnancyDiarySettingsRead.model_validate(settings)
-
-
-@router.put("/settings", response_model=PregnancyDiarySettingsRead)
-async def update_settings(
-    payload: PregnancyDiarySettingsUpdate,
-    request: Request,
-    current_user: CurrentUser = Depends(require_current_user),
-    service: DiaryService = Depends(get_diary_service),
-) -> PregnancyDiarySettingsRead:
-    settings = await service.update_settings(
-        owner_user_id=current_user.user_id,
-        auto_capture_enabled=payload.auto_capture_enabled,
-        request_id=str(getattr(request.state, "request_id", "") or ""),
-    )
-    return PregnancyDiarySettingsRead.model_validate(settings)
 
 
 @router.get("/entries", response_model=PregnancyDiaryEntryListResponse)

@@ -124,6 +124,7 @@ def test_product_agent_eval_seed_uses_current_pregnancy_action_contracts() -> No
                 "action": "delete",
                 "entry_date": "2026-07-04",
                 "confirmed": True,
+                "confirmation_evidence": "Delete the July 4 pregnancy diary entry now.",
             },
         }
     ]
@@ -174,11 +175,7 @@ def test_product_agent_eval_seed_covers_implicit_opt_out_negative_and_health_mix
 
     implicit = by_suite["pregnancy_diary_implicit_entry"]
     assert {call["contract"] for call in implicit["expected_tool_calls"]} == {diary_manage}
-    assert implicit["input"]["fixtures"]["diary_auto_capture_enabled"] is True
-    assert implicit["expected_tool_calls"][0]["args_subset"] == {
-        "action": "write",
-        "capture_mode": "automatic",
-    }
+    assert implicit["expected_tool_calls"][0]["args_subset"] == {"action": "write"}
     assert "require_explicit_save_phrase" in implicit["expected_behavior"]["must_not"]
     assert implicit["expected_behavior"]["requires_confirmation_before_write"] is False
 
@@ -188,14 +185,8 @@ def test_product_agent_eval_seed_covers_implicit_opt_out_negative_and_health_mix
     existing = by_suite["pregnancy_diary_existing_entry"]
     assert [call["contract"] for call in existing["expected_tool_calls"]] == [diary_manage, diary_manage]
     assert [call["args_subset"] for call in existing["expected_tool_calls"]] == [
-        {
-            "action": "write",
-            "capture_mode": "explicit_request",
-        },
-        {
-            "action": "update",
-            "capture_mode": "explicit_request",
-        },
+        {"action": "write"},
+        {"action": "update"},
     ]
     assert "complete_rewrite_preserving_existing_user_facts" in existing["expected_behavior"]["must_include"]
     assert "append_increment_or_supplement" in existing["expected_behavior"]["must_not"]
@@ -212,11 +203,6 @@ def test_product_agent_eval_seed_covers_implicit_opt_out_negative_and_health_mix
     assert mixed["expected_behavior"]["service_skill_id"] == "health-consultation"
     assert mixed["expected_behavior"]["requires_final_response_after_tools"] is True
     assert "continue_health_consultation_after_write" in mixed["expected_behavior"]["must_include"]
-
-    implicit_without_opt_in = by_suite["pregnancy_diary_implicit_without_opt_in"]
-    assert implicit_without_opt_in["input"]["fixtures"]["diary_auto_capture_enabled"] is False
-    assert implicit_without_opt_in["expected_tool_calls"] == []
-    assert implicit_without_opt_in["forbidden_tool_calls"] == [{"contract": diary_manage}]
     assert "stop_after_diary_success" in mixed["expected_behavior"]["must_not"]
 
 
