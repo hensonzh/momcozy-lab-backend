@@ -228,6 +228,11 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
                 "default": False,
                 "description": "只有用户明确确认删除时才为 true；其他动作保持 false 或省略。",
             },
+            "confirmation_evidence": {
+                "type": "string",
+                "maxLength": 500,
+                "description": "delete 且 confirmed=true 时，逐字引用当前用户消息中表达删除确认的短原文。",
+            },
         },
     },
     "devices.pump_status.read": {

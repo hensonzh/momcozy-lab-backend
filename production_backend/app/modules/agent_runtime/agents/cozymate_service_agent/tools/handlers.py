@@ -1264,7 +1264,7 @@ class PregnancyDiaryManageToolHandler:
                 output,
                 context_key=f"pregnancy_diary:entry:{entry_date.isoformat()}",
             )
-        if context.args.get("confirmed") is not True:
+        if context.args.get("confirmed") is not True or not _diary_delete_confirmation_evidence_is_trusted(context.args):
             return _pregnancy_diary_retained_result(
                 {
                     "status": "needs_delete_confirmation",
@@ -1274,7 +1274,10 @@ class PregnancyDiaryManageToolHandler:
                     "entry": _diary_reference_payload(existing),
                 },
                 context_key=f"pregnancy_diary:entry:{entry_date.isoformat()}",
-                guidance="Ask for explicit confirmation before deleting this diary entry.",
+                guidance=(
+                    "Ask for explicit confirmation before deleting this diary entry. On confirmation, pass confirmed=true and "
+                    "quote the confirming part of the current user message verbatim in confirmation_evidence."
+                ),
             )
         try:
             entry = await self.diary_service.delete_entry(
@@ -3645,6 +3648,16 @@ def _required_diary_content(args: dict[str, Any]) -> str:
     if not content:
         raise ApiError(code="validation_failed", message="Diary content is required for write and update.", status=422)
     return content
+
+
+def _diary_delete_confirmation_evidence_is_trusted(args: dict[str, Any]) -> bool:
+    evidence = _normalize_confirmation_evidence(args.get("confirmation_evidence"))
+    current_user_text = _normalize_confirmation_evidence(args.get("trusted_current_user_text"))
+    return bool(evidence and current_user_text and evidence in current_user_text)
+
+
+def _normalize_confirmation_evidence(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value or "")).strip().casefold()
 
 
 def _diary_tool_request_id(context: ToolHandlerContext) -> str:

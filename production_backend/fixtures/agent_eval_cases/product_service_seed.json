@@ -860,7 +860,8 @@
           "args_subset": {
             "action": "delete",
             "entry_date": "2026-07-04",
-            "confirmed": true
+            "confirmed": true,
+            "confirmation_evidence": "Delete the July 4 pregnancy diary entry now."
           }
         }
       ]

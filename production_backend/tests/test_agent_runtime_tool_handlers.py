@@ -3297,13 +3297,46 @@ def test_pregnancy_diary_manage_delete_requires_confirmation() -> None:
     assert diary_service.delete_kwargs == {}
 
 
+def test_pregnancy_diary_manage_delete_rejects_model_only_confirmation() -> None:
+    actor = _user()
+    diary_service = FakeDiaryService(owner_user_id=actor.user_id)
+
+    result = asyncio.run(
+        PregnancyDiaryManageToolHandler(diary_service=diary_service)(
+            _context(
+                actor=actor,
+                args={
+                    "action": "delete",
+                    "entry_date": "2026-07-04",
+                    "confirmed": True,
+                    "confirmation_evidence": "请删除 7 月 4 日的日记",
+                    "trusted_current_user_text": "我想看看 7 月 4 日的日记",
+                },
+            )
+        )
+    )
+
+    assert result["status"] == "needs_delete_confirmation"
+    assert result["side_effect_performed"] is False
+    assert diary_service.delete_kwargs == {}
+
+
 def test_pregnancy_diary_manage_delete_deletes_confirmed_entry_synchronously() -> None:
     actor = _user()
     diary_service = FakeDiaryService(owner_user_id=actor.user_id)
 
     result = asyncio.run(
         PregnancyDiaryManageToolHandler(diary_service=diary_service)(
-            _context(actor=actor, args={"action": "delete", "entry_date": "2026-07-04", "confirmed": True})
+            _context(
+                actor=actor,
+                args={
+                    "action": "delete",
+                    "entry_date": "2026-07-04",
+                    "confirmed": True,
+                    "confirmation_evidence": "请删除 7 月 4 日的日记",
+                    "trusted_current_user_text": "请删除 7 月 4 日的日记",
+                },
+            )
         )
     )
 

@@ -987,7 +987,10 @@ class AgentRuntimeExecutor:
                     raise
         if contract_name == "pregnancy_diary.manage":
             local_date = self._run_local_dates.get(run.id, "")
-            return {"runtime_local_date": local_date} if local_date else {}
+            trusted_args = {"trusted_current_user_text": self._run_current_user_text.get(run.id, "")}
+            if local_date:
+                trusted_args["runtime_local_date"] = local_date
+            return trusted_args
         if contract_name == "records.milk_analysis.intake":
             return {
                 "trusted_current_user_text": self._run_current_user_text.get(run.id, ""),

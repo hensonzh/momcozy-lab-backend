@@ -1348,7 +1348,27 @@ def test_agent_runtime_executor_uses_ephemeral_model_output_for_private_diary_re
     assert tool_executor.calls[0]["run_id"] == run.id
     assert tool_executor.calls[0]["tool_name"] == "pregnancy_diary.manage"
     assert tool_executor.calls[0]["args"] == {"action": "read", "entry_date": "2026-07-12"}
-    assert tool_executor.calls[0]["trusted_args"] == {"runtime_local_date": "2026-07-12"}
+    assert tool_executor.calls[0]["trusted_args"] == {
+        "runtime_local_date": "2026-07-12",
+        "trusted_current_user_text": "Read today's diary",
+    }
+
+
+def test_agent_runtime_executor_injects_current_user_text_for_diary_confirmation_evidence() -> None:
+    run = _run(thread_id=uuid4())
+    executor = AgentRuntimeExecutor(
+        repository=FakeRuntimeRepository(messages=[], current_message=None),
+        sdk_runner=OpenAIAgentsSdkRunner(backend=CapturingSdkBackend(result=SdkNodeResult(final_text=""))),
+    )
+    executor._run_current_user_text[run.id] = "请删除 7 月 4 日的日记"
+    executor._run_local_dates[run.id] = "2026-07-12"
+
+    trusted_args = asyncio.run(executor._trusted_tool_args(run=run, contract_name="pregnancy_diary.manage"))
+
+    assert trusted_args == {
+        "runtime_local_date": "2026-07-12",
+        "trusted_current_user_text": "请删除 7 月 4 日的日记",
+    }
 
 
 def test_agent_runtime_executor_adds_model_selected_visible_image_to_current_loop() -> None:

@@ -120,7 +120,12 @@ def test_product_agent_eval_seed_uses_current_pregnancy_action_contracts() -> No
         {
             "contract": "pregnancy_diary.manage",
             "timing": "on_explicit_intent_and_exact_target",
-            "args_subset": {"action": "delete", "entry_date": "2026-07-04", "confirmed": True},
+            "args_subset": {
+                "action": "delete",
+                "entry_date": "2026-07-04",
+                "confirmed": True,
+                "confirmation_evidence": "Delete the July 4 pregnancy diary entry now.",
+            },
         }
     ]
     assert by_suite["pregnancy_diary_delete_ambiguous"]["expected_tool_calls"] == []

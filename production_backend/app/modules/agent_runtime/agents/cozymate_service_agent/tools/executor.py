@@ -81,6 +81,7 @@ _PREGNANCY_DIARY_PRIVATE_FIELDS = frozenset(
         "nutrition_note",
         "content",
         "content_summary",
+        "confirmation_evidence",
         "attachments",
     }
 )
@@ -638,8 +639,10 @@ def _safe_payload(value: Any) -> Any:
 
 
 def _safe_tool_args(*, tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
-    if tool_name != _PREGNANCY_DIARY_TOOL or str(args.get("action") or "").strip() not in _PREGNANCY_DIARY_WRITE_ACTIONS:
+    if tool_name != _PREGNANCY_DIARY_TOOL:
         return _safe_payload(args)
+    if str(args.get("action") or "").strip() not in _PREGNANCY_DIARY_WRITE_ACTIONS:
+        return _without_private_diary_fields(_safe_payload(args))
     safe_args: dict[str, Any] = {}
     for key in ("action", "entry_date"):
         if key in args:

@@ -765,12 +765,19 @@ def test_pregnancy_diary_manage_delete_applies_after_confirmation_and_emits_chan
             run_id=uuid4(),
             tool_name="pregnancy_diary.manage",
             call_id="call-delete",
-            args={"action": "delete", "entry_date": "2026-07-04", "confirmed": True},
+            args={
+                "action": "delete",
+                "entry_date": "2026-07-04",
+                "confirmed": True,
+                "confirmation_evidence": "请删除 7 月 4 日的日记",
+            },
+            trusted_args={"trusted_current_user_text": "请删除 7 月 4 日的日记"},
         )
     )
 
     assert result.safe_output["status"] == "entry_deleted"
     assert diary_service.delete_kwargs["owner_user_id"] == actor.user_id
+    assert "confirmation_evidence" not in repository.tool_call.safe_args
     assert [event.event_type for event in repository.events] == [
         "tool.started",
         "tool.completed",
@@ -793,7 +800,13 @@ def test_pregnancy_diary_manage_delete_reports_missing_entry_without_changed_eve
             run_id=uuid4(),
             tool_name="pregnancy_diary.manage",
             call_id="call-delete-missing",
-            args={"action": "delete", "entry_date": "2026-07-04", "confirmed": True},
+            args={
+                "action": "delete",
+                "entry_date": "2026-07-04",
+                "confirmed": True,
+                "confirmation_evidence": "请删除 7 月 4 日的日记",
+            },
+            trusted_args={"trusted_current_user_text": "请删除 7 月 4 日的日记"},
         )
     )
 
