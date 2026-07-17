@@ -22,6 +22,10 @@ from production_backend.app.modules.agent_runtime.models import (
 from production_backend.app.modules.agent_runtime.event_stream.sink import AgentEventSink
 from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent import ServiceSkillId
 from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.context import BusinessFactsProjector
+from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.prompts import (
+    CURRENT_AGENT_PROMPT,
+    CURRENT_AGENT_PROMPT_VERSION,
+)
 from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.health_guidance import (
     HEALTH_GUIDANCE_ALLOWED_DOMAINS,
 )
@@ -67,7 +71,7 @@ from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.
 def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result(caplog) -> None:
     caplog.set_level(logging.INFO, logger="production_backend.agent_runtime")
     thread_id = uuid4()
-    run = _run(thread_id=thread_id, prompt_version="prompt-v2")
+    run = _run(thread_id=thread_id, prompt_version=CURRENT_AGENT_PROMPT_VERSION)
     prior_user = _message(thread_id=thread_id, run_id=uuid4(), role="user", text="What did we discuss?", sequence=1)
     prior_assistant = _message(thread_id=thread_id, run_id=uuid4(), role="assistant", text="Your care plan.", sequence=2)
     current_user = _message(
@@ -99,7 +103,8 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result(capl
     request = backend.requests[0]
     assert request.run_id == str(run.id)
     assert request.thread_id == str(thread_id)
-    assert request.prompt_version == "prompt-v2"
+    assert request.prompt_version == CURRENT_AGENT_PROMPT_VERSION
+    assert request.instructions == CURRENT_AGENT_PROMPT.instructions
     assert request.service_skill_id == "cozymate_service_agent"
     assert "你是 CozyMate，来自 Momcozy 团队" in request.instructions
     assert "制定孕期计划" not in request.instructions
@@ -153,6 +158,23 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result(capl
     assert "working_context" in timing_payloads[-1]["timings_ms"]
     assert "model_reasoning" in timing_payloads[-1]["timings_ms"]
     assert "total_before_finalize" in timing_payloads[-1]["timings_ms"]
+
+
+def test_agent_runtime_executor_rejects_an_unregistered_prompt_version() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id, prompt_version="unregistered-prompt")
+    backend = CapturingSdkBackend(result=SdkNodeResult(final_text="must not run"))
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            AgentRuntimeExecutor(
+                repository=FakeRuntimeRepository(messages=[], current_message=None),
+                sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            ).execute(run=run)
+        )
+
+    assert exc_info.value.code == "unsupported_prompt_version"
+    assert backend.requests == []
 
 
 @pytest.mark.parametrize(

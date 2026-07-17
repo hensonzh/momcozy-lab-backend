@@ -12,11 +12,15 @@ from production_backend.app.core.metrics import RequestMetrics
 from production_backend.app.modules.agent_runtime.runtime_registry import default_runtime_registry
 from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent import ServiceSkillId
 from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.prompts import (
+    CURRENT_AGENT_PROMPT,
+    CURRENT_AGENT_PROMPT_VERSION,
     BASE_AGENT_INSTRUCTIONS,
     ContextProjection,
     DEFAULT_STABLE_SYSTEM_PROMPT,
     ModelInputBuilder,
+    UnknownAgentPromptVersionError,
     build_static_agent_context,
+    resolve_agent_prompt,
 )
 from production_backend.app.modules.agent_runtime.sdk import (
     OpenAIAgentsSdkRunner,
@@ -243,6 +247,21 @@ def test_static_prompt_keeps_outcome_and_progressive_loading_boundaries() -> Non
     assert "birth_journey_intake_manage" not in global_prompt
     assert "milk_analysis_intake_manage" not in global_prompt
     assert "device_manual_search" not in global_prompt
+
+
+def test_current_agent_prompt_version_is_bound_to_its_instructions() -> None:
+    prompt = resolve_agent_prompt(CURRENT_AGENT_PROMPT_VERSION)
+
+    assert prompt is CURRENT_AGENT_PROMPT
+    assert prompt.version == CURRENT_AGENT_PROMPT_VERSION
+    assert prompt.instructions == DEFAULT_STABLE_SYSTEM_PROMPT
+
+
+def test_unknown_agent_prompt_version_is_rejected() -> None:
+    with pytest.raises(UnknownAgentPromptVersionError) as exc_info:
+        resolve_agent_prompt("unregistered-prompt")
+
+    assert exc_info.value.version == "unregistered-prompt"
 
 
 def test_static_skill_manifests_are_derived_from_skill_directories() -> None:

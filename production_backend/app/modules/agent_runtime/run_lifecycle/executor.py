@@ -20,9 +20,11 @@ from ..actions.policy import AgentActionPolicy, AgentActionPolicyDecision
 from ..client_context import project_agent_client_context
 from ..agents.cozymate_service_agent.context import BusinessFactsProjector
 from ..agents.cozymate_service_agent.prompts import (
+    AgentPromptDefinition,
     ContextProjection,
-    DEFAULT_STABLE_SYSTEM_PROMPT,
     ModelInputBuilder,
+    UnknownAgentPromptVersionError,
+    resolve_agent_prompt,
 )
 from ..agents.cozymate_service_agent.skill_registry import (
     AgentServiceSkill,
@@ -122,7 +124,6 @@ MODEL_IMAGE_DATA_URL_PATTERN = re.compile(
 
 @dataclass(frozen=True)
 class AgentRuntimeExecutorConfig:
-    stable_system_prompt: str = DEFAULT_STABLE_SYSTEM_PROMPT
     history_limit: int = 40
     memory_limit: int = 5
     resident_service_skill_ttl_turns: int = DEFAULT_RESIDENT_SERVICE_SKILL_TTL_TURNS
@@ -156,6 +157,7 @@ class _AgentTurnToolCatalog:
 class _PreparedModelTurn:
     projection: ContextProjection
     model_input: list[dict[str, Any]]
+    prompt_version: str
 
 
 class AgentRuntimeExecutor:
@@ -236,6 +238,7 @@ class AgentRuntimeExecutor:
                 message="Run runtime pattern does not match its runtime version.",
                 status=409,
             )
+        prompt = _resolve_run_prompt(run.prompt_version)
         self._run_assistant_message_ids[run.id] = uuid4()
         self._run_text_projectors[run.id] = AppendOnlyAgentResponseProjector()
         self._run_text_stream_emitted[run.id] = ""
@@ -258,7 +261,7 @@ class AgentRuntimeExecutor:
             self._run_hospital_bag_cart_groups[run.id] = _current_hospital_bag_cart_groups(turn_context.current_message)
             tool_catalog = self._tool_catalog_for_turn()
             await self._append_progress(run=run, phase="context_ready", label="我先理解一下你的需求～")
-            prepared_turn = self._prepare_model_turn(turn_context=turn_context)
+            prepared_turn = self._prepare_model_turn(turn_context=turn_context, prompt=prompt)
             self._run_local_dates[run.id] = _user_context_local_date(prepared_turn.projection.user_context)
             self._run_timezones[run.id] = _text(prepared_turn.projection.user_context, "timezone") or "UTC"
             result = await self._run_model_turn(
@@ -382,6 +385,7 @@ class AgentRuntimeExecutor:
         self,
         *,
         turn_context: _AgentTurnContext,
+        prompt: AgentPromptDefinition,
     ) -> _PreparedModelTurn:
         working_context = project_working_context(
             turn_context.working_context_state,
@@ -390,7 +394,7 @@ class AgentRuntimeExecutor:
         if turn_context.recent_client_events:
             working_context["client_events"] = turn_context.recent_client_events
         projection = ContextProjection(
-            stable_system_prompt=self.config.stable_system_prompt,
+            stable_system_prompt=prompt.instructions,
             selected_conversation_history=_history_before(
                 messages=turn_context.messages,
                 before_sequence=turn_context.current_message.sequence,
@@ -407,7 +411,7 @@ class AgentRuntimeExecutor:
                 include_image_attachments=True,
             ),
         )
-        return _PreparedModelTurn(projection=projection, model_input=model_input)
+        return _PreparedModelTurn(projection=projection, model_input=model_input, prompt_version=prompt.version)
 
     async def _run_model_turn(
         self,
@@ -431,7 +435,7 @@ class AgentRuntimeExecutor:
                 tool_namespaces=_sdk_tool_namespaces(tool_catalog.tool_namespaces),
                 tool_search_enabled=_tool_search_enabled(tool_catalog.tool_namespaces),
                 tools=self._sdk_tools(run=run, tool_names=tool_catalog.tool_names, tool_namespaces=tool_catalog.tool_namespaces),
-                prompt_version=run.prompt_version,
+                prompt_version=prepared_turn.prompt_version,
                 trace_id=run.trace_id,
                 service_skill_id=COZYMATE_AGENT_ID,
                 on_text_delta=self._text_delta_handler(run=run),
@@ -1776,6 +1780,18 @@ def _recommended_tools_for_service_skill(
 
 def _sdk_instructions(*, projection: ContextProjection) -> str:
     return projection.stable_system_prompt
+
+
+def _resolve_run_prompt(version: str) -> AgentPromptDefinition:
+    try:
+        return resolve_agent_prompt(version)
+    except UnknownAgentPromptVersionError as exc:
+        raise ApiError(
+            code="unsupported_prompt_version",
+            message="The requested agent prompt version is not registered.",
+            status=409,
+            details={"prompt_version": exc.version},
+        ) from exc
 
 
 def _to_model_message(

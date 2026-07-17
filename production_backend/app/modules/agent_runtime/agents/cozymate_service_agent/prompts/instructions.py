@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -139,3 +140,32 @@ def _section(name: str, value: Any) -> str:
 
 
 DEFAULT_STABLE_SYSTEM_PROMPT = f"{BASE_AGENT_INSTRUCTIONS}\n\n{build_static_agent_context()}"
+
+CURRENT_AGENT_PROMPT_VERSION = "momcozy-agent-prompt-v1"
+
+
+@dataclass(frozen=True)
+class AgentPromptDefinition:
+    version: str
+    instructions: str
+
+
+class UnknownAgentPromptVersionError(ValueError):
+    def __init__(self, version: str) -> None:
+        super().__init__(f"Unknown agent prompt version: {version}")
+        self.version = version
+
+
+CURRENT_AGENT_PROMPT = AgentPromptDefinition(
+    version=CURRENT_AGENT_PROMPT_VERSION,
+    instructions=DEFAULT_STABLE_SYSTEM_PROMPT,
+)
+_AGENT_PROMPTS_BY_VERSION = {CURRENT_AGENT_PROMPT.version: CURRENT_AGENT_PROMPT}
+
+
+def resolve_agent_prompt(version: str | None = None) -> AgentPromptDefinition:
+    selected_version = version or CURRENT_AGENT_PROMPT_VERSION
+    try:
+        return _AGENT_PROMPTS_BY_VERSION[selected_version]
+    except KeyError as exc:
+        raise UnknownAgentPromptVersionError(selected_version) from exc

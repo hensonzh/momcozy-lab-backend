@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from production_backend.app.core.settings import Settings
 from production_backend.app.factory import create_app
+from production_backend.app.modules.agent_runtime.agents.cozymate_service_agent.prompts import CURRENT_AGENT_PROMPT_VERSION
 from production_backend.app.modules.agent_runtime.models import (
     AgentEvalCase,
     AgentEvent,
@@ -64,7 +65,7 @@ def test_create_run_uses_current_user_request_id_and_idempotency_key(caplog) -> 
     caplog.set_level(logging.INFO, logger="production_backend.agent_runtime")
     user_id = uuid4()
     fake_service = FakeAgentRuntimeService(user_id=user_id)
-    app = create_app(Settings(app_env="test", openai_agent_prompt_version="prompt-default"))
+    app = create_app(Settings(app_env="test"))
     _override_current_user(app, user_id)
     app.dependency_overrides[get_agent_runtime_service] = lambda: fake_service
 
@@ -96,7 +97,7 @@ def test_create_run_uses_current_user_request_id_and_idempotency_key(caplog) -> 
     assert "graph_version" not in response.json()
     assert fake_service.create_run_kwargs["actor_user_id"] == user_id
     assert fake_service.create_run_kwargs["request_id"] == "req_agent"
-    assert fake_service.create_run_kwargs["prompt_version"] == "prompt-default"
+    assert fake_service.create_run_kwargs["prompt_version"] == CURRENT_AGENT_PROMPT_VERSION
     assert fake_service.create_run_kwargs["idempotency_key"] == "idem-run"
     assert fake_service.create_run_kwargs["client_context"]["hospital_bag_cart"]["groups"][0]["items"][0]["id"] == "pump-custom"
     payloads = [json.loads(record.getMessage()) for record in caplog.records if record.name == "production_backend.agent_runtime"]
@@ -106,6 +107,23 @@ def test_create_run_uses_current_user_request_id_and_idempotency_key(caplog) -> 
     assert timing["thread_id"] == str(fake_service.thread_id)
     assert timing["status"] == "queued"
     assert timing["duration_ms"] >= 0
+
+
+def test_create_run_rejects_an_unregistered_prompt_version() -> None:
+    user_id = uuid4()
+    fake_service = FakeAgentRuntimeService(user_id=user_id)
+    app = create_app(Settings(app_env="test"))
+    _override_current_user(app, user_id)
+    app.dependency_overrides[get_agent_runtime_service] = lambda: fake_service
+
+    response = TestClient(app).post(
+        "/v1/agent/runs",
+        json={"message": "Hello", "prompt_version": "unregistered-prompt"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "unsupported_prompt_version"
+    assert fake_service.create_run_kwargs == {}
 
 
 def test_create_run_accepts_legacy_runtime_contract_and_returns_canonical_fields() -> None:

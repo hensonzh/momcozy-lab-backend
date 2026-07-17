@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...api.dependencies import normalize_idempotency_key, optional_idempotency_key, require_current_user, require_service_client
 from ...api.surface import SurfaceAPIRouter, api_surface
+from ...core.errors import ApiError
 from ...core.logging import log_agent_runtime_event
 from ...infrastructure.db import get_session
 from ..audit import AuditService, IdempotencyService
@@ -18,6 +19,7 @@ from ..audit.repository import AuditRepository
 from ..auth import CurrentUser, ServiceClient
 from ..files.repository import FileRepository
 from .evals.service import AgentEvalService
+from .agents.cozymate_service_agent.prompts import UnknownAgentPromptVersionError, resolve_agent_prompt
 from .facts import AgentFactRepository, AgentFactService
 from .memory.service import AgentMemoryRepository, AgentMemoryService
 from .repository import AgentRuntimeRepository
@@ -175,6 +177,15 @@ async def create_run(
     service: AgentRuntimeService = Depends(get_agent_runtime_service),
 ) -> AgentRunRead:
     settings = request.app.state.settings
+    try:
+        prompt = resolve_agent_prompt(payload.prompt_version or settings.openai_agent_prompt_version)
+    except UnknownAgentPromptVersionError as exc:
+        raise ApiError(
+            code="unsupported_prompt_version",
+            message="The requested agent prompt version is not registered.",
+            status=409,
+            details={"prompt_version": exc.version},
+        ) from exc
     started_at = monotonic()
     run = await service.create_run(
         actor_user_id=current_user.user_id,
@@ -184,7 +195,7 @@ async def create_run(
         client_context=payload.client_context,
         runtime_pattern=payload.runtime_pattern,
         runtime_version=payload.runtime_version,
-        prompt_version=payload.prompt_version or settings.openai_agent_prompt_version,
+        prompt_version=prompt.version,
         request_id=str(getattr(request.state, "request_id", "") or ""),
         trace_id=str(getattr(request.state, "request_id", "") or ""),
         idempotency_key=idempotency_key or normalize_idempotency_key(payload.idempotency_key),
