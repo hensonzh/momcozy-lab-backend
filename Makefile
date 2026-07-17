@@ -11,7 +11,7 @@ TEST_COMPOSE = MOMCOZY_BACKEND_ENV_FILE=$(TEST_COMPOSE_ENV_FILE_FOR_COMPOSE) doc
 PROD_COMPOSE_ENV_FILE_FOR_COMPOSE = $(patsubst production_backend/%,%,$(PROD_COMPOSE_ENV_FILE))
 PROD_COMPOSE = MOMCOZY_BACKEND_ENV_FILE=$(PROD_COMPOSE_ENV_FILE_FOR_COMPOSE) docker compose -f production_backend/docker-compose.prod.yml
 
-.PHONY: backend-local-build backend-build backend-local-up backend-up backend-down backend-local-migrate backend-migrate backend-local-workers backend-workers backend-local-minio backend-test-build backend-test-migrate backend-test-up backend-test-services backend-test-down backend-test-ps backend-test-logs backend-prod-build backend-prod-migrate backend-prod-up backend-prod-services backend-prod-down backend-prod-ps backend-prod-logs backend-export-contracts backend-check-infra backend-productization-status backend-smoke backend-test-smoke backend-prod-readiness backend-worker-backlog backend-agent-recover-stuck-runs backend-env-print
+.PHONY: backend-local-build backend-build backend-local-up backend-up backend-down backend-local-migrate backend-migrate backend-local-workers backend-workers backend-local-minio backend-test-build backend-test-migrate backend-test-up backend-test-services backend-test-down backend-test-ps backend-test-logs backend-prod-build backend-prod-migrate backend-prod-up backend-prod-services backend-prod-down backend-prod-ps backend-prod-logs backend-export-contracts backend-check-infra backend-productization-status backend-smoke backend-agent-device-decision-eval backend-test-smoke backend-prod-readiness backend-worker-backlog backend-agent-recover-stuck-runs backend-env-print
 
 backend-local-build:
 	$(MAKE) backend-build
@@ -117,6 +117,14 @@ backend-smoke:
 	$(PYTHON) production_backend/scripts/check_productization_status.py
 	$(PYTHON) -m pytest -q production_backend/tests/test_agent_task8_observed_eval.py
 	$(PYTHON) production_backend/scripts/run_agent_fact_eval.py
+
+backend-agent-device-decision-eval:
+	set -a; . $(BACKEND_ENV_FILE); set +a; \
+	$(PYTHON) production_backend/scripts/run_device_unboxing_decision_eval.py \
+		--output /tmp/device-unboxing-decision-eval.json \
+		--trace-output /tmp/device-unboxing-decision-traces.json
+	@echo "report: /tmp/device-unboxing-decision-eval.json"
+	@echo "provider traces: /tmp/device-unboxing-decision-traces.json"
 
 backend-test-smoke:
 	$(MAKE) backend-productization-status

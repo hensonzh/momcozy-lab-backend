@@ -35,6 +35,7 @@ production_backend/.venv/bin/python
 | 基础设施验收 | `make backend-check-infra` | database / Redis / object storage / product asset checks |
 | 后端产品化门禁 | `make backend-productization-status` | `check_productization_status.py` |
 | 后端 smoke | `make backend-smoke` | productization status + seed eval + fact extraction eval |
+| 设备开箱决策 provider-live 评测 | `make backend-agent-device-decision-eval` | 使用当前 provider、系统提示词、skill、workflow context 和工具 schema 验证继续/求助决策 |
 | Server test smoke | `make backend-test-smoke` | productization status + infra checks |
 | Production readiness | `make backend-prod-readiness` | productization status + infra checks |
 
@@ -56,6 +57,7 @@ production_backend/.venv/bin/python
 | `run_agent_replay_eval.py` | 用已保存的 replay bundle 对单个 seed case 做回放断言。 | 线上问题复盘、事故回归、专题修复验证。 | `python production_backend/scripts/run_agent_replay_eval.py --replay <bundle.json> --suite <suite> --name <case-name>` |
 | `run_agent_seed_eval.py` | 对已捕获的真实 runtime/provider trace 执行历史 seed 断言，可输出 JSON/JUnit；缺少 observed trace 时会 fail closed。 | 线上问题复盘、provider-live/nightly 回放，不作为无 trace 的 PR gate。 | `python production_backend/scripts/run_agent_seed_eval.py --trace-fixtures <observed-traces.json> --output /tmp/agent-seed-eval.json --junit-output /tmp/agent-seed-eval.junit.xml` |
 | `run_agent_fact_eval.py` | 通过真实 `AgentFactExtractor` 与确定性 scripted backend 运行聊天事实提取 eval，可输出 JSON/JUnit。 | 每次 PR CI、本地 smoke、改动事实目录/提取规则时。 | `python production_backend/scripts/run_agent_fact_eval.py --output /tmp/agent-fact-eval.json --junit-output /tmp/agent-fact-eval.junit.xml` |
+| `run_device_unboxing_decision_eval.py` | 使用当前真实模型 provider，以及生产系统提示词、设备 skill、workflow context 和工具 schema，验证“完整展示后继续”“遇到问题”“步骤未完整展示却说继续”三类决策；不使用 scripted backend 预设工具调用。 | provider-live/nightly 或设备开箱提示词、skill、上下文投影变化后手动运行。 | `make backend-agent-device-decision-eval`，或 `python production_backend/scripts/run_device_unboxing_decision_eval.py --output /tmp/device-unboxing-decision-eval.json --trace-output /tmp/device-unboxing-decision-traces.json` |
 | `run_agent_worker.py` | 独立 agent run worker 进程入口，扫描可运行 run 并执行 LangGraph + OpenAI Agents SDK runtime。 | `make backend-local-up` 或单独 worker 服务启动时运行。 | `python -m production_backend.scripts.run_agent_worker`; 本地完整启动推荐 `make backend-local-up`，单独重启推荐 `make backend-local-workers` |
 | `run_outbox_worker.py` | 独立通用 outbox worker 进程入口；当前只处理文件对象清理等非 Agent action 的持久副作用与重试。Agent action 由 agent worker 在 run 内同步执行。 | `make backend-local-up` 或单独 worker 服务启动时运行。 | `python -m production_backend.scripts.run_outbox_worker`; 本地完整启动推荐 `make backend-local-up`，单独重启推荐 `make backend-local-workers` |
 | `run_memory_consolidation.py` | 独立夜间记忆 worker；读取前一日本地自然日的已完成对话，幂等更新长期记忆与 bounded snapshot。 | 启动时补跑一次，此后按配置小时运行；也可手工 backfill。 | `python -m production_backend.scripts.run_memory_consolidation`; 单次补跑用 `--once --date YYYY-MM-DD` |
@@ -84,6 +86,7 @@ PR 级别通常需要：
 
 - `run_agent_seed_eval.py --trace-fixtures <observed-traces.json>`
 - `run_agent_replay_eval.py`
+- `make backend-agent-device-decision-eval`（provider-live，不纳入普通 smoke）
 - `backend-test-smoke`
 - `backend-prod-readiness`
 

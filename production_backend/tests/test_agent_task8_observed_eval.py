@@ -423,7 +423,7 @@ def test_observed_milk_red_flags_block_plan_action_and_artifact() -> None:
     assert "tool.failed" in {event.event_type for event in scenario.repository.events_for(failed_run.id)}
 
 
-def test_observed_device_unboxing_advances_exactly_one_persisted_step() -> None:
+def test_observed_device_unboxing_complete_current_advances_exactly_one_persisted_step() -> None:
     scenario = ObservedScenario()
     handlers = scenario.device_handlers()
     started = scenario.run_turn(
@@ -433,13 +433,13 @@ def test_observed_device_unboxing_advances_exactly_one_persisted_step() -> None:
             scripted_tool_invocation("load_service_skill", {"service_skill_id": "device-guidance"}),
             scripted_tool_invocation("devices.unboxing.advance", {"model": "Air1", "action": "start"}),
         ),
-        final_text="先核对包装内的部件。",
+        final_text="请完成当前主步骤的全部部件核对。",
     )
     _assert_tools(started.trace, "load_service_skill", "devices.unboxing.advance")
     assert scenario.workflow("device_unboxing").active_step == "guide.parts"
 
     advanced = scenario.run_turn(
-        text="继续",
+        text="当前主步骤已经全部完成。",
         handlers=handlers,
         tool_invocations=(
             scripted_tool_invocation(

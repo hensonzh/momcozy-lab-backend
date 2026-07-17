@@ -2076,6 +2076,50 @@
       ]
     },
     {
+      "suite": "device_unboxing_incomplete_delivery",
+      "name": "active unboxing does not advance when the current step was not fully delivered",
+      "domain": "device-guidance",
+      "owner_team": "agent",
+      "input": {
+        "messages": [
+          {
+            "role": "assistant",
+            "content": "第一步先核对包装内的部件。"
+          },
+          {
+            "role": "user",
+            "content": "继续"
+          }
+        ],
+        "fixtures": {
+          "resident_service_skill": "device-guidance",
+          "active_workflow": {
+            "workflow_type": "device_unboxing",
+            "active_step": "guide.parts"
+          }
+        }
+      },
+      "expected_behavior": {
+        "intent": "device_unboxing_incomplete_delivery",
+        "route": "durable_workflow_current_step_support",
+        "requires_confirmation_before_write": false,
+        "service_skill_id": "device-guidance",
+        "must_include": [
+          "complete_current_step_guidance"
+        ],
+        "must_not": [
+          "advance_unboxing",
+          "infer_completion_from_workflow_state"
+        ]
+      },
+      "expected_tool_calls": [],
+      "forbidden_tool_calls": [
+        {
+          "contract": "devices.unboxing.advance"
+        }
+      ]
+    },
+    {
       "suite": "hospital_bag_form_to_card_workflow",
       "name": "hospital bag form and card share one durable workflow",
       "domain": "birth-prep",

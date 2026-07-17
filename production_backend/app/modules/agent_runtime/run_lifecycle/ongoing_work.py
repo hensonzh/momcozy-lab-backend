@@ -265,21 +265,18 @@ def _project_device_unboxing_context(workflow: AgentWorkflowState) -> dict[str, 
         **_workflow_context_base(workflow, phase=phase),
         "device_model": _text(state, "device_model", max_length=120),
         "completed_steps": completed_steps,
-        "current_step": {
-            "name": _safe_step(workflow.active_step or _text(state, "current_step")),
-            "awaiting": "completion_confirmation",
-        },
+        "current_step": {"name": _safe_step(workflow.active_step or _text(state, "current_step"))},
         "next_transition": {
             "tool": "devices.unboxing.advance",
             "allowed_actions": ["complete_current", "cancel"],
-            "on_completion": "complete_current",
-            "on_problem": "stay_current_step",
         },
         "instruction": (
-            "Continue the persisted device-unboxing step. If the current message is linked to this step, decide whether it "
-            "semantically confirms completion or reports a problem. On completion, call devices.unboxing.advance with "
-            "action=complete_current exactly once before presenting the next step; do not restate the completed step. If it "
-            "reports a problem, stay on the current step and help with that problem. Do not restart completed steps."
+            "The workflow reply relation proves only that the user replied to the current workflow revision; it does not "
+            "prove that the step was fully presented or completed. Use the immediately preceding assistant message and the "
+            "current user message to decide semantically whether the complete current step and its completion request were "
+            "delivered and then confirmed. Only then call devices.unboxing.advance with action=complete_current exactly once. "
+            "If delivery or completion is unclear, stay on the current step and provide the missing guidance or answer the "
+            "user's problem. Do not infer completion from workflow state alone or restart completed steps."
         ),
     }
     return projected
@@ -515,7 +512,10 @@ def _project_device_unboxing(workflow: AgentWorkflowState, skill_loaded: bool) -
     completed_count = len(completed_steps) if isinstance(completed_steps, list) else 0
     if step:
         progress = f"已完成 {completed_count} 个主步骤，当前停留在 {step}。"
-        next_step = "若用户确认当前主步骤已完成，调用 devices.unboxing.advance 推进一步；否则继续协助当前步骤。"
+        next_step = (
+            "结合上一条 assistant 实际回复，语义判断当前主步骤是否已完整展示并请求完成确认；"
+            "只有用户随后确认已完成，才调用 devices.unboxing.advance 推进一步；否则补全或继续协助当前步骤。"
+        )
     else:
         progress = "开箱指导已经开始，当前步骤待确认。"
         next_step = "先确认设备型号和当前开箱步骤。"

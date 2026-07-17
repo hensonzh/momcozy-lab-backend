@@ -266,6 +266,11 @@ def test_product_agent_eval_seed_covers_working_context_and_durable_workflows() 
     assert incomplete_device["expected_tool_calls"] == []
     assert incomplete_device["forbidden_tool_calls"] == [{"contract": "devices.unboxing.advance"}]
 
+    incomplete_delivery = by_suite["device_unboxing_incomplete_delivery"]
+    assert incomplete_delivery["input"]["messages"][-1]["content"] == "继续"
+    assert incomplete_delivery["expected_tool_calls"] == []
+    assert incomplete_delivery["forbidden_tool_calls"] == [{"contract": "devices.unboxing.advance"}]
+
     hospital_bag = by_suite["hospital_bag_form_to_card_workflow"]
     assert [call["contract"] for call in hospital_bag["expected_tool_calls"]] == [
         "load_service_skill",
