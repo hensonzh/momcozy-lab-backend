@@ -97,6 +97,7 @@ class OpenAIResponsesApiBackend:
         api_key: str = "",
         base_url: str = "",
         reasoning_effort: str = "low",
+        text_verbosity: str = "low",
         store_responses: bool = False,
     ) -> None:
         self.model = model
@@ -104,6 +105,7 @@ class OpenAIResponsesApiBackend:
         self.api_key = api_key
         self.base_url = base_url
         self.reasoning_effort = reasoning_effort
+        self.text_verbosity = text_verbosity
         self.store_responses = store_responses
 
     async def run(self, request: SdkNodeRequest) -> SdkNodeResult:
@@ -150,6 +152,7 @@ class OpenAIResponsesApiBackend:
                     context=context,
                     tools_payload=tools_payload,
                     reasoning_effort=self.reasoning_effort,
+                    text_verbosity=self.text_verbosity,
                     store_responses=self.store_responses,
                     response_text_format=request.response_text_format,
                     web_search_enabled=request.web_search_enabled,
@@ -164,6 +167,7 @@ class OpenAIResponsesApiBackend:
                         context=context,
                         tools_payload=tools_payload,
                         reasoning_effort=self.reasoning_effort,
+                        text_verbosity=self.text_verbosity,
                         store_responses=self.store_responses,
                         response_text_format=request.response_text_format,
                         web_search_enabled=request.web_search_enabled,
@@ -259,6 +263,7 @@ class OpenAIResponsesRunner:
         api_key: str = "",
         base_url: str = "",
         reasoning_effort: str = "low",
+        text_verbosity: str = "low",
         store_responses: bool = False,
         metrics_node_name: str = "openai_responses",
     ) -> None:
@@ -271,6 +276,7 @@ class OpenAIResponsesRunner:
         self.api_key = api_key
         self.base_url = base_url
         self.reasoning_effort = reasoning_effort
+        self.text_verbosity = text_verbosity
         self.store_responses = store_responses
         self.use_responses = True
         self.metrics_node_name = metrics_node_name
@@ -284,6 +290,7 @@ class OpenAIResponsesRunner:
                 api_key=self.api_key,
                 base_url=self.base_url,
                 reasoning_effort=self.reasoning_effort,
+                text_verbosity=self.text_verbosity,
                 store_responses=self.store_responses,
             )
             result = await asyncio.wait_for(backend.run(request), timeout=self.timeout_seconds)
@@ -432,6 +439,7 @@ class OpenAIAgentsSdkRunner:
         buffer_streamed_tool_calls: bool = False,
         metrics_node_name: str = "openai_agents_sdk",
         reasoning_effort: str = "low",
+        text_verbosity: str = "low",
         store_responses: bool = False,
     ) -> None:
         self.backend = backend
@@ -447,6 +455,7 @@ class OpenAIAgentsSdkRunner:
         self.buffer_streamed_tool_calls = buffer_streamed_tool_calls
         self.metrics_node_name = metrics_node_name
         self.reasoning_effort = reasoning_effort
+        self.text_verbosity = text_verbosity
         self.store_responses = store_responses
 
     async def run_reasoning(self, request: SdkNodeRequest) -> SdkNodeResult:
@@ -496,6 +505,7 @@ class OpenAIAgentsSdkRunner:
                 api_key=self.api_key,
                 base_url=self.base_url,
                 reasoning_effort=self.reasoning_effort,
+                text_verbosity=self.text_verbosity,
                 store_responses=self.store_responses,
             )
         return OpenAIAgentsSdkBackend(
@@ -595,6 +605,7 @@ async def _create_response_streamed(
     context: list[Any],
     tools_payload: list[dict[str, Any]],
     reasoning_effort: str,
+    text_verbosity: str,
     store_responses: bool,
     response_text_format: dict[str, Any] | None,
     web_search_enabled: bool,
@@ -607,6 +618,7 @@ async def _create_response_streamed(
         context=context,
         tools_payload=tools_payload,
         reasoning_effort=reasoning_effort,
+        text_verbosity=text_verbosity,
         store_responses=store_responses,
         response_text_format=response_text_format,
         web_search_enabled=web_search_enabled,
@@ -630,6 +642,7 @@ def _responses_request_kwargs(
     context: list[Any],
     tools_payload: list[dict[str, Any]],
     reasoning_effort: str,
+    text_verbosity: str,
     store_responses: bool,
     response_text_format: dict[str, Any] | None,
     web_search_enabled: bool = False,
@@ -642,6 +655,7 @@ def _responses_request_kwargs(
         "tools": tools_payload,
         "parallel_tool_calls": False,
         "reasoning": {"effort": reasoning_effort},
+        "text": {"verbosity": text_verbosity},
         "store": store_responses,
     }
     if not store_responses:
@@ -655,7 +669,7 @@ def _responses_request_kwargs(
             "tools": [{"type": "web_search"}],
         }
     if response_text_format is not None:
-        kwargs["text"] = {"format": response_text_format}
+        kwargs["text"]["format"] = response_text_format
     return kwargs
 
 

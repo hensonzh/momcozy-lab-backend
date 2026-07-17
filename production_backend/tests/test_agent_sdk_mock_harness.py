@@ -208,6 +208,7 @@ def test_agent_sdk_runner_factory_selects_responses_contract_for_openai() -> Non
     assert isinstance(runner, OpenAIResponsesRunner)
     assert runner.model == "gpt-5.6-terra"
     assert runner.reasoning_effort == "low"
+    assert runner.text_verbosity == "low"
     assert runner.store_responses is False
     assert runner.use_responses is True
 

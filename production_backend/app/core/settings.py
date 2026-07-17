@@ -81,7 +81,7 @@ class Settings:
     openai_agent_max_turns: int = 10
     openai_agent_timeout_seconds: int = 60
     openai_agent_trace_enabled: bool = False
-    openai_agent_prompt_version: str = "momcozy-agent-prompt-v1"
+    openai_agent_prompt_version: str = "momcozy-agent-prompt-v2"
     agent_quick_reply_model: str = "gpt-5.4-nano"
     agent_quick_reply_timeout_seconds: float = 3.0
     agent_fact_extraction_enabled: bool = True

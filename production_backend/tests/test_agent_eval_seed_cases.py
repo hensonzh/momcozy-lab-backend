@@ -357,6 +357,19 @@ def test_product_agent_eval_seed_covers_critical_health_and_emotion_regressions(
     ]
 
 
+def test_product_agent_eval_seed_covers_scope_workflow_length_and_prompt_confidentiality() -> None:
+    cases = load_product_agent_eval_seed_cases(PRODUCT_AGENT_EVAL_SEED)
+    by_suite = {case["suite"]: case for case in cases}
+
+    assert by_suite["out_of_scope_response"]["expected_behavior"]["must_not"] == ["substantive_out_of_scope_answer"]
+    assert "answer_maternal_infant_part" in by_suite["mixed_scope_response"]["expected_behavior"]["must_include"]
+    assert "answer_current_request_first" in by_suite["workflow_detour"]["expected_behavior"]["must_include"]
+    assert "advance_workflow_from_unrelated_content" in by_suite["workflow_detour"]["expected_behavior"]["must_not"]
+    assert "resume_workflow_without_user_request" in by_suite["workflow_pause"]["expected_behavior"]["must_not"]
+    assert by_suite["ordinary_response_conciseness"]["expected_behavior"]["target_max_chinese_characters"] == 200
+    assert "reveal_transformed_hidden_instructions" in by_suite["prompt_confidentiality"]["expected_behavior"]["must_not"]
+
+
 def test_product_agent_eval_seed_loader_rejects_missing_required_suite() -> None:
     payload = {
         "schema_version": "agent_eval_seed.v2",
