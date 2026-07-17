@@ -1989,8 +1989,12 @@
       "input": {
         "messages": [
           {
+            "role": "assistant",
+            "content": "请把当前步骤里的部件全部取出并核对完整，完成后回复继续。"
+          },
+          {
             "role": "user",
-            "content": "I finished checking the Air1 parts. Continue to the next step."
+            "content": "继续"
           }
         ],
         "fixtures": {
@@ -2023,6 +2027,51 @@
           "args_subset": {
             "action": "complete_current"
           }
+        }
+      ]
+    },
+    {
+      "suite": "device_unboxing_incomplete_step",
+      "name": "active unboxing stays on the current step when the user reports a problem",
+      "domain": "device-guidance",
+      "owner_team": "agent",
+      "input": {
+        "messages": [
+          {
+            "role": "assistant",
+            "content": "请把当前步骤里的部件全部取出并核对完整，完成后回复继续。"
+          },
+          {
+            "role": "user",
+            "content": "还没完成，磁吸充电线好像没找到。"
+          }
+        ],
+        "fixtures": {
+          "resident_service_skill": "device-guidance",
+          "active_workflow": {
+            "workflow_type": "device_unboxing",
+            "active_step": "guide.parts"
+          }
+        }
+      },
+      "expected_behavior": {
+        "intent": "device_unboxing_incomplete_step",
+        "route": "durable_workflow_current_step_support",
+        "requires_confirmation_before_write": false,
+        "service_skill_id": "device-guidance",
+        "must_include": [
+          "stay_on_current_step",
+          "help_with_missing_item"
+        ],
+        "must_not": [
+          "advance_unboxing",
+          "restart_unboxing"
+        ]
+      },
+      "expected_tool_calls": [],
+      "forbidden_tool_calls": [
+        {
+          "contract": "devices.unboxing.advance"
         }
       ]
     },

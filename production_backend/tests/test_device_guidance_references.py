@@ -28,6 +28,15 @@ def test_device_guidance_reference_service_uses_first_unboxing_step_when_topic_h
     assert result["current_step"]["id"] == "guide.parts"
 
 
+def test_device_guidance_parts_step_treats_direct_continue_as_completion_confirmation() -> None:
+    result = DeviceGuidanceReferenceService().read(model="Air1", step="guide.parts")
+
+    completion_condition = result["current_step"]["completion_condition"]
+    assert "回复‘继续’" in completion_condition
+    assert "进入 `guide.controls`" in completion_condition
+    assert "仍然停留在 `guide.parts`" not in completion_condition
+
+
 def test_device_guidance_reference_service_returns_bounded_faq_matches() -> None:
     result = DeviceGuidanceReferenceService().read(model="Air1", topic="faq", query="充电时可以使用吸奶器吗", limit=3)
 

@@ -265,14 +265,21 @@ def _project_device_unboxing_context(workflow: AgentWorkflowState) -> dict[str, 
         **_workflow_context_base(workflow, phase=phase),
         "device_model": _text(state, "device_model", max_length=120),
         "completed_steps": completed_steps,
-        "current_step": {"name": _safe_step(workflow.active_step or _text(state, "current_step"))},
+        "current_step": {
+            "name": _safe_step(workflow.active_step or _text(state, "current_step")),
+            "awaiting": "completion_confirmation",
+        },
         "next_transition": {
             "tool": "devices.unboxing.advance",
             "allowed_actions": ["complete_current", "cancel"],
+            "on_completion": "complete_current",
+            "on_problem": "stay_current_step",
         },
         "instruction": (
-            "Continue the persisted device-unboxing step. Do not restart completed steps; use the current device model and "
-            "step when advancing."
+            "Continue the persisted device-unboxing step. If the current message is linked to this step, decide whether it "
+            "semantically confirms completion or reports a problem. On completion, call devices.unboxing.advance with "
+            "action=complete_current exactly once before presenting the next step; do not restate the completed step. If it "
+            "reports a problem, stay on the current step and help with that problem. Do not restart completed steps."
         ),
     }
     return projected
@@ -508,7 +515,7 @@ def _project_device_unboxing(workflow: AgentWorkflowState, skill_loaded: bool) -
     completed_count = len(completed_steps) if isinstance(completed_steps, list) else 0
     if step:
         progress = f"已完成 {completed_count} 个主步骤，当前停留在 {step}。"
-        next_step = f"读取 {step} 的设备指导资料并继续。"
+        next_step = "若用户确认当前主步骤已完成，调用 devices.unboxing.advance 推进一步；否则继续协助当前步骤。"
     else:
         progress = "开箱指导已经开始，当前步骤待确认。"
         next_step = "先确认设备型号和当前开箱步骤。"
