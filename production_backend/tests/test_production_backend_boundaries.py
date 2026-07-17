@@ -51,10 +51,9 @@ def test_agent_runtime_uses_explicit_internal_subdomains() -> None:
         "agents",
         "evals",
         "event_stream",
+        "facts",
         "memory",
-        "routing",
         "run_lifecycle",
-        "safety",
         "sdk",
     }
     missing_subdomains = sorted(name for name in expected_subdomains if not (AGENT_RUNTIME_ROOT / name).is_dir())
