@@ -1,15 +1,12 @@
-COMPOSE_ENV_FILE ?= production_backend/env/compose.local.env
-TEST_COMPOSE_ENV_FILE ?= production_backend/env/compose.test.env
-PROD_COMPOSE_ENV_FILE ?= production_backend/env/compose.prod.env
+COMPOSE_ENV_FILE ?= env/compose.local.env
+TEST_COMPOSE_ENV_FILE ?= env/compose.test.env
+PROD_COMPOSE_ENV_FILE ?= env/compose.prod.env
 BACKEND_ENV_FILE ?= $(COMPOSE_ENV_FILE)
-PYTHON ?= production_backend/.venv/bin/python
+PYTHON ?= .venv/bin/python
 BACKEND_BUILD_FLAGS ?=
-COMPOSE_ENV_FILE_FOR_COMPOSE = $(patsubst production_backend/%,%,$(COMPOSE_ENV_FILE))
-COMPOSE = MOMCOZY_BACKEND_ENV_FILE=$(COMPOSE_ENV_FILE_FOR_COMPOSE) docker compose -f production_backend/docker-compose.local.yml
-TEST_COMPOSE_ENV_FILE_FOR_COMPOSE = $(patsubst production_backend/%,%,$(TEST_COMPOSE_ENV_FILE))
-TEST_COMPOSE = MOMCOZY_BACKEND_ENV_FILE=$(TEST_COMPOSE_ENV_FILE_FOR_COMPOSE) docker compose -f production_backend/docker-compose.test.yml
-PROD_COMPOSE_ENV_FILE_FOR_COMPOSE = $(patsubst production_backend/%,%,$(PROD_COMPOSE_ENV_FILE))
-PROD_COMPOSE = MOMCOZY_BACKEND_ENV_FILE=$(PROD_COMPOSE_ENV_FILE_FOR_COMPOSE) docker compose -f production_backend/docker-compose.prod.yml
+COMPOSE = MOMCOZY_BACKEND_ENV_FILE=$(COMPOSE_ENV_FILE) docker compose -f docker-compose.local.yml
+TEST_COMPOSE = MOMCOZY_BACKEND_ENV_FILE=$(TEST_COMPOSE_ENV_FILE) docker compose -f docker-compose.test.yml
+PROD_COMPOSE = MOMCOZY_BACKEND_ENV_FILE=$(PROD_COMPOSE_ENV_FILE) docker compose -f docker-compose.prod.yml
 
 .PHONY: backend-local-build backend-build backend-local-up backend-up backend-down backend-local-migrate backend-migrate backend-local-workers backend-workers backend-local-minio backend-test-build backend-test-migrate backend-test-up backend-test-services backend-test-down backend-test-ps backend-test-logs backend-prod-build backend-prod-migrate backend-prod-up backend-prod-services backend-prod-down backend-prod-ps backend-prod-logs backend-export-contracts backend-check-infra backend-productization-status backend-smoke backend-agent-device-decision-eval backend-test-smoke backend-prod-readiness backend-worker-backlog backend-agent-recover-stuck-runs backend-env-print
 
@@ -100,27 +97,27 @@ backend-prod-logs:
 	$(PROD_COMPOSE) logs -f api agent-worker outbox-worker memory-worker
 
 backend-export-contracts:
-	$(PYTHON) production_backend/scripts/export_openapi.py --output production_backend/docs/openapi.generated.json
-	$(PYTHON) production_backend/scripts/export_api_surface_catalog.py --openapi-input production_backend/docs/openapi.generated.json --output production_backend/docs/api-surface-catalog.md
+	$(PYTHON) scripts/export_openapi.py --output docs/openapi.generated.json
+	$(PYTHON) scripts/export_api_surface_catalog.py --openapi-input docs/openapi.generated.json --output docs/api-surface-catalog.md
 
 backend-check-infra:
 	set -a; . $(BACKEND_ENV_FILE); set +a; \
-	$(PYTHON) production_backend/scripts/check_database_profile.py; \
-	$(PYTHON) production_backend/scripts/check_redis_runtime_controls.py; \
-	$(PYTHON) production_backend/scripts/check_object_storage_profile.py; \
-	$(PYTHON) production_backend/scripts/check_product_asset_storage.py
+	$(PYTHON) scripts/check_database_profile.py; \
+	$(PYTHON) scripts/check_redis_runtime_controls.py; \
+	$(PYTHON) scripts/check_object_storage_profile.py; \
+	$(PYTHON) scripts/check_product_asset_storage.py
 
 backend-productization-status:
-	$(PYTHON) production_backend/scripts/check_productization_status.py
+	$(PYTHON) scripts/check_productization_status.py
 
 backend-smoke:
-	$(PYTHON) production_backend/scripts/check_productization_status.py
-	$(PYTHON) -m pytest -q production_backend/tests/test_agent_task8_observed_eval.py
-	$(PYTHON) production_backend/scripts/run_agent_fact_eval.py
+	$(PYTHON) scripts/check_productization_status.py
+	$(PYTHON) -m pytest -q tests/test_agent_task8_observed_eval.py
+	$(PYTHON) scripts/run_agent_fact_eval.py
 
 backend-agent-device-decision-eval:
 	set -a; . $(BACKEND_ENV_FILE); set +a; \
-	$(PYTHON) production_backend/scripts/run_device_unboxing_decision_eval.py \
+	$(PYTHON) scripts/run_device_unboxing_decision_eval.py \
 		--output /tmp/device-unboxing-decision-eval.json \
 		--trace-output /tmp/device-unboxing-decision-traces.json
 	@echo "report: /tmp/device-unboxing-decision-eval.json"
@@ -136,11 +133,11 @@ backend-prod-readiness:
 
 backend-worker-backlog:
 	set -a; . $(BACKEND_ENV_FILE); set +a; \
-	$(PYTHON) production_backend/scripts/inspect_worker_backlog.py
+	$(PYTHON) scripts/inspect_worker_backlog.py
 
 backend-agent-recover-stuck-runs:
 	set -a; . $(BACKEND_ENV_FILE); set +a; \
-	$(PYTHON) production_backend/scripts/recover_stuck_agent_runs.py
+	$(PYTHON) scripts/recover_stuck_agent_runs.py
 
 backend-env-print:
 	@echo "BACKEND_ENV_FILE=$(BACKEND_ENV_FILE)"

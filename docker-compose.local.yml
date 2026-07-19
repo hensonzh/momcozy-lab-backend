@@ -1,0 +1,152 @@
+name: momcozy-production-backend
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - ${MOMCOZY_BACKEND_ENV_FILE:-env/compose.local.env}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/v1/health/live', timeout=2)\"",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python -m alembic -c alembic.ini upgrade head
+    env_file:
+      - ${MOMCOZY_BACKEND_ENV_FILE:-env/compose.local.env}
+    profiles:
+      - tools
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  agent-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python -m scripts.run_agent_worker
+    env_file:
+      - ${MOMCOZY_BACKEND_ENV_FILE:-env/compose.local.env}
+    environment:
+      AGENT_RUNTIME_WORKER_ENABLED: "true"
+    profiles:
+      - workers
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+
+  outbox-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python -m scripts.run_outbox_worker
+    env_file:
+      - ${MOMCOZY_BACKEND_ENV_FILE:-env/compose.local.env}
+    environment:
+      OUTBOX_WORKER_ENABLED: "true"
+    profiles:
+      - workers
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+
+  memory-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python -m scripts.run_memory_consolidation
+    env_file:
+      - ${MOMCOZY_BACKEND_ENV_FILE:-env/compose.local.env}
+    environment:
+      AGENT_MEMORY_CONSOLIDATION_ENABLED: "true"
+    profiles:
+      - workers
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: momcozy
+      POSTGRES_PASSWORD: momcozy
+      POSTGRES_DB: momcozy
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U momcozy -d momcozy"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --address ":9000"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+    volumes:
+      - minio_data:/data
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_started
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 minioadmin minioadmin; do
+        sleep 1;
+      done;
+      mc mb --ignore-existing local/momcozy-local;
+      mc mirror --overwrite /seed/product-assets local/momcozy-local/product-assets;
+      "
+    volumes:
+      - ./.local/object_storage/product-assets:/seed/product-assets:ro
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:

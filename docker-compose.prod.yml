@@ -1,0 +1,56 @@
+name: momcozy-production-backend
+
+x-backend-image: &backend-image
+  image: ${MOMCOZY_BACKEND_IMAGE:-momcozy-production-backend:latest}
+  build:
+    context: .
+    dockerfile: Dockerfile
+  env_file:
+    - ${MOMCOZY_BACKEND_ENV_FILE:-env/compose.prod.env}
+
+services:
+  api:
+    <<: *backend-image
+    restart: unless-stopped
+    init: true
+    ports:
+      - "${MOMCOZY_API_BIND:-127.0.0.1:8000}:8000"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/v1/health/live', timeout=2)\"",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  migrate:
+    <<: *backend-image
+    command: python -m alembic -c alembic.ini upgrade head
+    profiles:
+      - tools
+
+  agent-worker:
+    <<: *backend-image
+    command: python -m scripts.run_agent_worker
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 60s
+
+  outbox-worker:
+    <<: *backend-image
+    command: python -m scripts.run_outbox_worker
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 60s
+
+  memory-worker:
+    <<: *backend-image
+    command: python -m scripts.run_memory_consolidation
+    environment:
+      AGENT_MEMORY_CONSOLIDATION_ENABLED: "true"
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 60s

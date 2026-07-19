@@ -13,7 +13,7 @@ logs
 data
 tmp
 upload_files
-production_backend/fixtures/product_assets
+fixtures/product_assets
 
 dist
 build

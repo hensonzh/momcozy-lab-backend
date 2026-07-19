@@ -3,14 +3,14 @@ name: production-backend-ci
 on:
   pull_request:
     paths:
-      - "production_backend/**"
+      - "**"
       - ".github/workflows/production-backend-ci.yml"
   push:
     branches:
       - main
       - "feat/**"
     paths:
-      - "production_backend/**"
+      - "**"
       - ".github/workflows/production-backend-ci.yml"
 
 jobs:
@@ -24,20 +24,20 @@ jobs:
           python-version: "3.13"
 
       - name: Install backend dependencies
-        run: python -m pip install -r production_backend/requirements-dev.txt
+        run: python -m pip install -r requirements-dev.txt
 
       - name: Lint production backend
-        run: cd production_backend && python -m ruff check app tests scripts
+        run: python -m ruff check app tests scripts
 
       - name: Type-check production backend
-        run: cd production_backend && python -m mypy app scripts
+        run: python -m mypy app scripts
 
       - name: Run backend tests
-        run: python -m pytest production_backend/tests
+        run: python -m pytest tests
 
       - name: Run observed agent service eval
         run: >
-          python -m pytest -q production_backend/tests/test_agent_task8_observed_eval.py
+          python -m pytest -q tests/test_agent_task8_observed_eval.py
           --junitxml=/tmp/agent-service-observed-eval.junit.xml
 
       - name: Upload observed agent service eval report
@@ -49,7 +49,7 @@ jobs:
 
       - name: Run observed agent fact extraction eval
         run: >
-          python production_backend/scripts/run_agent_fact_eval.py
+          python scripts/run_agent_fact_eval.py
           --output /tmp/agent-fact-eval.json
           --junit-output /tmp/agent-fact-eval.junit.xml
 
@@ -63,25 +63,25 @@ jobs:
             /tmp/agent-fact-eval.junit.xml
 
       - name: Check Alembic head
-        run: python -m alembic -c production_backend/alembic.ini heads
+        run: python -m alembic -c alembic.ini heads
 
       - name: Check empty database migration SQL
-        run: python -m alembic -c production_backend/alembic.ini upgrade head --sql > /tmp/upgrade-head.sql
+        run: python -m alembic -c alembic.ini upgrade head --sql > /tmp/upgrade-head.sql
 
       - name: Check backup restore hook manifest
-        run: python production_backend/scripts/check_backup_restore_hooks.py
+        run: python scripts/check_backup_restore_hooks.py
 
       - name: Check OpenAPI snapshot
         run: |
-          python production_backend/scripts/export_openapi.py --output /tmp/openapi.generated.json
-          diff -u production_backend/docs/openapi.generated.json /tmp/openapi.generated.json
-          python production_backend/scripts/export_api_surface_catalog.py --openapi-input /tmp/openapi.generated.json --output /tmp/api-surface-catalog.md
-          diff -u production_backend/docs/api-surface-catalog.md /tmp/api-surface-catalog.md
+          python scripts/export_openapi.py --output /tmp/openapi.generated.json
+          diff -u docs/openapi.generated.json /tmp/openapi.generated.json
+          python scripts/export_api_surface_catalog.py --openapi-input /tmp/openapi.generated.json --output /tmp/api-surface-catalog.md
+          diff -u docs/api-surface-catalog.md /tmp/api-surface-catalog.md
 
       - name: Scan production backend for legacy runtime references
         run: |
           ! grep -R -E 'previous_response_id|ChatSession|ENTRY_API_KEY|query_params.get\("user_id"|momcozy_agent' \
-            production_backend/app production_backend/migrations production_backend/tests
+            app migrations tests
 
   container:
     runs-on: ubuntu-latest
@@ -89,10 +89,10 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Validate docker compose
-        run: docker compose -f production_backend/docker-compose.local.yml config
+        run: docker compose -f docker-compose.local.yml config
 
       - name: Build backend image
-        run: docker build -f production_backend/Dockerfile .
+        run: docker build -f Dockerfile .
 
   postgres-migration:
     runs-on: ubuntu-latest
@@ -122,10 +122,10 @@ jobs:
           python-version: "3.13"
 
       - name: Install backend dependencies
-        run: python -m pip install -r production_backend/requirements-dev.txt
+        run: python -m pip install -r requirements-dev.txt
 
       - name: Upgrade live Postgres to head
-        run: python -m alembic -c production_backend/alembic.ini upgrade head
+        run: python -m alembic -c alembic.ini upgrade head
 
       - name: Verify migrated tables
         run: |
@@ -133,7 +133,7 @@ jobs:
           import asyncio
           from sqlalchemy import text
           from sqlalchemy.ext.asyncio import create_async_engine
-          from production_backend.app.core.settings import Settings
+          from app.core.settings import Settings
 
           async def main():
               engine = create_async_engine(Settings.from_env().database_url)
@@ -177,10 +177,10 @@ jobs:
           python-version: "3.13"
 
       - name: Install backend dependencies
-        run: python -m pip install -r production_backend/requirements-dev.txt
+        run: python -m pip install -r requirements-dev.txt
 
       - name: Check live Redis runtime controls
-        run: python production_backend/scripts/check_redis_runtime_controls.py
+        run: python scripts/check_redis_runtime_controls.py
 
   object-storage-integration:
     runs-on: ubuntu-latest
@@ -199,7 +199,7 @@ jobs:
           python-version: "3.13"
 
       - name: Install backend dependencies
-        run: python -m pip install -r production_backend/requirements-dev.txt
+        run: python -m pip install -r requirements-dev.txt
 
       - name: Start MinIO
         run: |
@@ -218,4 +218,4 @@ jobs:
           exit 1
 
       - name: Check object storage profile
-        run: python production_backend/scripts/check_object_storage_profile.py
+        run: python scripts/check_object_storage_profile.py
