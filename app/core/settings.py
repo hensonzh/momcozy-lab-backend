@@ -79,7 +79,6 @@ class Settings:
     openai_responses_store: bool = False
     openai_agent_max_turns: int = 10
     openai_agent_timeout_seconds: int = 60
-    openai_agent_prompt_version: str = "momcozy-agent-prompt-v5"
     agent_quick_reply_model: str = "gpt-5.4-nano"
     agent_quick_reply_timeout_seconds: float = 3.0
     agent_fact_extraction_enabled: bool = True
@@ -178,7 +177,6 @@ class Settings:
             openai_responses_store=_env_bool("OPENAI_RESPONSES_STORE", cls.openai_responses_store),
             openai_agent_max_turns=_env_int("OPENAI_AGENT_MAX_TURNS", cls.openai_agent_max_turns),
             openai_agent_timeout_seconds=_env_int("OPENAI_AGENT_TIMEOUT_SECONDS", cls.openai_agent_timeout_seconds),
-            openai_agent_prompt_version=_env("OPENAI_AGENT_PROMPT_VERSION", cls.openai_agent_prompt_version),
             agent_quick_reply_model=_env("AGENT_QUICK_REPLY_MODEL", cls.agent_quick_reply_model),
             agent_quick_reply_timeout_seconds=_env_float(
                 "AGENT_QUICK_REPLY_TIMEOUT_SECONDS",
@@ -335,10 +333,6 @@ class Settings:
             errors.append("OPENAI_AGENT_MAX_TURNS must be positive")
         if self.openai_agent_timeout_seconds < 1:
             errors.append("OPENAI_AGENT_TIMEOUT_SECONDS must be positive")
-        if not self.openai_agent_prompt_version:
-            errors.append("OPENAI_AGENT_PROMPT_VERSION is required")
-        if len(self.openai_agent_prompt_version) > 80:
-            errors.append("OPENAI_AGENT_PROMPT_VERSION must be at most 80 characters")
         if self.agent_quick_reply_timeout_seconds <= 0:
             errors.append("AGENT_QUICK_REPLY_TIMEOUT_SECONDS must be positive")
         if self.agent_fact_extraction_enabled and not self.agent_fact_extraction_model:

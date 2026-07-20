@@ -792,18 +792,6 @@
             "title": "Message",
             "type": "string"
           },
-          "prompt_version": {
-            "anyOf": [
-              {
-                "maxLength": 80,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Prompt Version"
-          },
           "runtime_pattern": {
             "anyOf": [
               {
@@ -899,10 +887,6 @@
             "title": "Id",
             "type": "string"
           },
-          "prompt_version": {
-            "title": "Prompt Version",
-            "type": "string"
-          },
           "request_id": {
             "title": "Request Id",
             "type": "string"
@@ -948,7 +932,6 @@
           "status",
           "runtime_pattern",
           "runtime_version",
-          "prompt_version",
           "request_id",
           "trace_id",
           "error_code"

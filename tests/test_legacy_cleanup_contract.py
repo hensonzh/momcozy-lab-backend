@@ -36,3 +36,14 @@ def test_quick_reply_generation_chain_is_intentionally_preserved() -> None:
     assert quick_replies.is_file()
     assert "QuickReplyFinalizer" in executor_source
     assert "quick_reply_finalizer" in executor_source
+
+
+def test_main_agent_prompt_has_no_version_selection_layer() -> None:
+    prompt_source = (
+        ROOT / "app/modules/agent_runtime/agents/cozymate_service_agent/prompts/instructions.py"
+    ).read_text(encoding="utf-8")
+    settings_source = (ROOT / "app/core/settings.py").read_text(encoding="utf-8")
+
+    assert "CURRENT_AGENT_PROMPT_VERSION" not in prompt_source
+    assert "resolve_agent_prompt" not in prompt_source
+    assert "OPENAI_AGENT_PROMPT_VERSION" not in settings_source

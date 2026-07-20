@@ -81,7 +81,6 @@ def test_agent_runtime_service_creates_run_with_thread_message_events_and_idempo
             "client_context": repository.messages[0].content["client_context"],
             "runtime_pattern": "sdk_only",
             "runtime_version": "momcozy-agent-v1",
-            "prompt_version": "",
         }
     )
     assert "compatible_request_hashes" not in idempotency_service.reserve_kwargs
@@ -712,7 +711,7 @@ class FakeAgentRuntimeRepository:
         self.run = _run(thread_id=kwargs["thread_id"], actor_user_id=kwargs["actor_user_id"])
         self.run.runtime_pattern = kwargs["runtime_pattern"]
         self.run.runtime_version = kwargs["runtime_version"]
-        self.run.prompt_version = kwargs["prompt_version"]
+        self.run.prompt_version = ""
         self.run.request_id = kwargs["request_id"]
         self.runs.append(self.run)
         return self.run

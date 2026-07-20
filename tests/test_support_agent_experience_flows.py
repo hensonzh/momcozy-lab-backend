@@ -187,7 +187,7 @@ class InMemoryAgentRuntimeRepository:
             status="queued",
             runtime_pattern=kwargs["runtime_pattern"],
             runtime_version=kwargs["runtime_version"],
-            prompt_version=kwargs["prompt_version"],
+            prompt_version="",
             request_id=kwargs["request_id"],
             trace_id=kwargs["trace_id"],
             error_code="",

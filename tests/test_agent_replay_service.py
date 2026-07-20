@@ -23,6 +23,7 @@ def test_agent_replay_service_exports_redacted_bundle_by_default() -> None:
     assert bundle["run"]["runtime_pattern"] == "sdk_only"
     assert bundle["run"]["runtime_version"] == "momcozy-agent-v1"
     assert "graph_version" not in bundle["run"]
+    assert "prompt_version" not in bundle["run"]
     assert bundle["messages"][0]["content"] == {"redacted": True}
     assert bundle["events"][0]["type"] == "run.started"
     assert bundle["events"][0]["thread_id"] == str(repository.run.thread_id)
@@ -34,6 +35,7 @@ def test_agent_replay_service_exports_redacted_bundle_by_default() -> None:
     assert bundle["checkpoints"] == []
     assert bundle["workflow_states"][0]["workflow_type"] == "milk_analysis_intake"
     assert bundle["context_projections"][0]["projection_summary"]["state_keys"] == ["run_id"]
+    assert "prompt_version" not in bundle["context_projections"][0]
 
 
 def test_agent_replay_service_can_include_message_content_when_explicitly_requested() -> None:

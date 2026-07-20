@@ -81,7 +81,6 @@ class AgentRuntimeRepository:
         actor_user_id: UUID,
         runtime_pattern: str,
         runtime_version: str,
-        prompt_version: str,
         request_id: str,
         trace_id: str,
     ) -> AgentRun:
@@ -90,7 +89,6 @@ class AgentRuntimeRepository:
             actor_user_id=actor_user_id,
             runtime_pattern=runtime_pattern,
             runtime_version=runtime_version,
-            prompt_version=prompt_version,
             request_id=request_id,
             trace_id=trace_id,
         )

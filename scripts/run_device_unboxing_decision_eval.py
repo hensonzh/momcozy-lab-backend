@@ -19,8 +19,8 @@ from app.modules.agent_runtime.agents.cozymate_service_agent.device_guidance imp
 )
 from app.modules.agent_runtime.agents.cozymate_service_agent.prompts import (  # noqa: E402
     ContextProjection,
+    DEFAULT_STABLE_SYSTEM_PROMPT,
     ModelInputBuilder,
-    resolve_agent_prompt,
 )
 from app.modules.agent_runtime.agents.cozymate_service_agent.skill_registry import (  # noqa: E402
     default_service_skill_registry,
@@ -92,12 +92,11 @@ async def run_device_unboxing_decision_eval(
     if missing:
         raise ValueError(f"Device unboxing decision eval is missing seed cases: {', '.join(missing)}")
 
-    prompt = resolve_agent_prompt()
     assertion_engine = AgentEvalSeedAssertionEngine()
     results: list[dict[str, Any]] = []
     traces: list[dict[str, Any]] = []
     for decision_case in DEVICE_UNBOXING_DECISION_CASES:
-        request = _decision_request(case=decision_case, prompt_version=prompt.version, instructions=prompt.instructions)
+        request = _decision_request(case=decision_case, instructions=DEFAULT_STABLE_SYSTEM_PROMPT)
         model_result = await runner.run_reasoning(request)
         trace = AgentEvalTrace(
             tool_calls=[dict(item) for item in model_result.tool_calls],
@@ -123,7 +122,6 @@ async def run_device_unboxing_decision_eval(
                     "capture_mode": "provider_live",
                     "run_id": request.run_id,
                     "model": model_name,
-                    "prompt_version": prompt.version,
                 },
                 "trace": {
                     "tool_calls": trace.tool_calls,
@@ -139,7 +137,6 @@ async def run_device_unboxing_decision_eval(
         "schema_version": "device_unboxing_decision_eval.v1",
         "execution_mode": "provider_live",
         "model": model_name,
-        "prompt_version": prompt.version,
         "total": len(results),
         "passed": sum(1 for result in results if result["passed"]),
         "failed": sum(1 for result in results if not result["passed"]),
@@ -159,7 +156,6 @@ async def run_device_unboxing_decision_eval(
 def _decision_request(
     *,
     case: DeviceUnboxingDecisionCase,
-    prompt_version: str,
     instructions: str,
 ) -> SdkNodeRequest:
     run_id = uuid4()
@@ -244,7 +240,6 @@ def _decision_request(
                 namespace_name=namespace.name,
             ),
         ),
-        prompt_version=prompt_version,
         trace_id=f"device-unboxing-decision-eval-{run_id}",
         service_skill_id="cozymate_service_agent",
     )

@@ -33,7 +33,6 @@ class AgentRunCreate(BaseModel):
     client_context: dict[str, Any] = Field(default_factory=dict)
     runtime_pattern: Literal["sdk_only"] | None = None
     runtime_version: str | None = Field(default=None, max_length=80)
-    prompt_version: str | None = Field(default=None, max_length=80)
     idempotency_key: str | None = Field(default=None, max_length=255)
 
     model_config = ConfigDict(extra="forbid")
@@ -46,7 +45,6 @@ class AgentRunRead(BaseModel):
     status: str
     runtime_pattern: str
     runtime_version: str
-    prompt_version: str
     request_id: str
     trace_id: str
     error_code: str

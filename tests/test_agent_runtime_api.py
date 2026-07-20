@@ -9,7 +9,6 @@ from fastapi.testclient import TestClient
 
 from app.core.settings import Settings
 from app.factory import create_app
-from app.modules.agent_runtime.agents.cozymate_service_agent.prompts import CURRENT_AGENT_PROMPT_VERSION
 from app.modules.agent_runtime.models import (
     AgentEvalCase,
     AgentEvent,
@@ -95,9 +94,10 @@ def test_create_run_uses_current_user_request_id_and_idempotency_key(caplog) -> 
     assert response.json()["runtime_pattern"] == "sdk_only"
     assert response.json()["runtime_version"] == "momcozy-agent-v1"
     assert "graph_version" not in response.json()
+    assert "prompt_version" not in response.json()
     assert fake_service.create_run_kwargs["actor_user_id"] == user_id
     assert fake_service.create_run_kwargs["request_id"] == "req_agent"
-    assert fake_service.create_run_kwargs["prompt_version"] == CURRENT_AGENT_PROMPT_VERSION
+    assert "prompt_version" not in fake_service.create_run_kwargs
     assert fake_service.create_run_kwargs["idempotency_key"] == "idem-run"
     assert fake_service.create_run_kwargs["client_context"]["hospital_bag_cart"]["groups"][0]["items"][0]["id"] == "pump-custom"
     payloads = [json.loads(record.getMessage()) for record in caplog.records if record.name == "production_backend.agent_runtime"]
@@ -109,7 +109,7 @@ def test_create_run_uses_current_user_request_id_and_idempotency_key(caplog) -> 
     assert timing["duration_ms"] >= 0
 
 
-def test_create_run_rejects_an_unregistered_prompt_version() -> None:
+def test_create_run_rejects_retired_prompt_version_field() -> None:
     user_id = uuid4()
     fake_service = FakeAgentRuntimeService(user_id=user_id)
     app = create_app(Settings(app_env="test"))
@@ -121,8 +121,7 @@ def test_create_run_rejects_an_unregistered_prompt_version() -> None:
         json={"message": "Hello", "prompt_version": "unregistered-prompt"},
     )
 
-    assert response.status_code == 409
-    assert response.json()["error"]["code"] == "unsupported_prompt_version"
+    assert response.status_code == 422
     assert fake_service.create_run_kwargs == {}
 
 

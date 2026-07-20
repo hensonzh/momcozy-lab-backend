@@ -20,11 +20,9 @@ from ..actions.policy import AgentActionPolicy, AgentActionPolicyDecision
 from ..client_context import project_agent_client_context
 from ..agents.cozymate_service_agent.context import BusinessFactsProjector
 from ..agents.cozymate_service_agent.prompts import (
-    AgentPromptDefinition,
     ContextProjection,
+    DEFAULT_STABLE_SYSTEM_PROMPT,
     ModelInputBuilder,
-    UnknownAgentPromptVersionError,
-    resolve_agent_prompt,
 )
 from ..agents.cozymate_service_agent.skill_registry import (
     AgentServiceSkill,
@@ -157,7 +155,6 @@ class _AgentTurnToolCatalog:
 class _PreparedModelTurn:
     projection: ContextProjection
     model_input: list[dict[str, Any]]
-    prompt_version: str
     selected_message_ids: tuple[UUID, ...]
 
 
@@ -239,7 +236,6 @@ class AgentRuntimeExecutor:
                 message="Run runtime pattern does not match its runtime version.",
                 status=409,
             )
-        prompt = _resolve_run_prompt(run.prompt_version)
         self._run_assistant_message_ids[run.id] = uuid4()
         self._run_text_projectors[run.id] = AppendOnlyAgentResponseProjector()
         self._run_text_stream_emitted[run.id] = ""
@@ -262,7 +258,7 @@ class AgentRuntimeExecutor:
             self._run_hospital_bag_cart_groups[run.id] = _current_hospital_bag_cart_groups(turn_context.current_message)
             tool_catalog = self._tool_catalog_for_turn()
             await self._append_progress(run=run, phase="context_ready", label="我先理解一下你的需求～")
-            prepared_turn = self._prepare_model_turn(turn_context=turn_context, prompt=prompt)
+            prepared_turn = self._prepare_model_turn(turn_context=turn_context)
             await self._record_model_context_projection(
                 run=run,
                 turn_context=turn_context,
@@ -392,7 +388,6 @@ class AgentRuntimeExecutor:
         self,
         *,
         turn_context: _AgentTurnContext,
-        prompt: AgentPromptDefinition,
     ) -> _PreparedModelTurn:
         working_context = project_working_context(
             turn_context.working_context_state,
@@ -405,7 +400,7 @@ class AgentRuntimeExecutor:
             before_sequence=turn_context.current_message.sequence,
         )
         projection = ContextProjection(
-            stable_system_prompt=prompt.instructions,
+            stable_system_prompt=DEFAULT_STABLE_SYSTEM_PROMPT,
             selected_conversation_history=[_to_model_message(message) for message in history_messages],
             user_context=_user_context(current_message=turn_context.current_message, now=self.clock()),
             memory_projection=turn_context.memory_projection,
@@ -422,7 +417,6 @@ class AgentRuntimeExecutor:
         return _PreparedModelTurn(
             projection=projection,
             model_input=model_input,
-            prompt_version=prompt.version,
             selected_message_ids=tuple(message.id for message in [*history_messages, turn_context.current_message]),
         )
 
@@ -502,7 +496,6 @@ class AgentRuntimeExecutor:
                 tool_namespaces=_sdk_tool_namespaces(tool_catalog.tool_namespaces),
                 tool_search_enabled=_tool_search_enabled(tool_catalog.tool_namespaces),
                 tools=self._sdk_tools(run=run, tool_names=tool_catalog.tool_names, tool_namespaces=tool_catalog.tool_namespaces),
-                prompt_version=prepared_turn.prompt_version,
                 trace_id=run.trace_id,
                 service_skill_id=COZYMATE_AGENT_ID,
                 on_text_delta=self._text_delta_handler(run=run),
@@ -1855,18 +1848,6 @@ def _recommended_tools_for_service_skill(
 
 def _sdk_instructions(*, projection: ContextProjection) -> str:
     return projection.stable_system_prompt
-
-
-def _resolve_run_prompt(version: str) -> AgentPromptDefinition:
-    try:
-        return resolve_agent_prompt(version)
-    except UnknownAgentPromptVersionError as exc:
-        raise ApiError(
-            code="unsupported_prompt_version",
-            message="The requested agent prompt version is not registered.",
-            status=409,
-            details={"prompt_version": exc.version},
-        ) from exc
 
 
 def _to_model_message(

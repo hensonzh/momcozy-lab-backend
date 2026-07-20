@@ -129,7 +129,6 @@ class AgentRuntimeService:
         client_context: dict[str, Any] | None = None,
         runtime_pattern: str | None = None,
         runtime_version: str | None = None,
-        prompt_version: str | None = None,
         request_id: str = "",
         trace_id: str = "",
         idempotency_key: str | None = None,
@@ -148,7 +147,6 @@ class AgentRuntimeService:
             "client_context": safe_client_context,
             "runtime_pattern": normalized_runtime_pattern,
             "runtime_version": normalized_runtime_version,
-            "prompt_version": prompt_version or "",
         }
         idempotency_record = await self._reserve_run_idempotency(
             actor_user_id=actor_user_id,
@@ -175,7 +173,6 @@ class AgentRuntimeService:
             actor_user_id=actor_user_id,
             runtime_pattern=normalized_runtime_pattern,
             runtime_version=normalized_runtime_version,
-            prompt_version=prompt_version or "",
             request_id=request_id,
             trace_id=trace_id,
         )

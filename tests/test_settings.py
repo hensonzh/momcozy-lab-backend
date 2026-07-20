@@ -154,7 +154,7 @@ def test_settings_from_env_reads_agent_worker_controls(monkeypatch: pytest.Monke
     assert settings.openai_responses_store is False
     assert settings.openai_agent_max_turns == 7
     assert settings.openai_agent_timeout_seconds == 45
-    assert settings.openai_agent_prompt_version == "prompt-v2"
+    assert not hasattr(settings, "openai_agent_prompt_version")
     assert settings.agent_quick_reply_model == "quick-reply-test"
     assert settings.agent_quick_reply_timeout_seconds == 0.8
     assert settings.agent_fact_extraction_enabled is True
@@ -344,8 +344,6 @@ def test_settings_reject_invalid_openai_agent_controls() -> None:
         Settings(openai_agent_max_turns=0).validate_for_startup()
     with pytest.raises(ValueError, match="OPENAI_AGENT_TIMEOUT_SECONDS"):
         Settings(openai_agent_timeout_seconds=0).validate_for_startup()
-    with pytest.raises(ValueError, match="OPENAI_AGENT_PROMPT_VERSION"):
-        Settings(openai_agent_prompt_version="x" * 81).validate_for_startup()
     with pytest.raises(ValueError, match="AGENT_QUICK_REPLY_TIMEOUT_SECONDS"):
         Settings(agent_quick_reply_timeout_seconds=0).validate_for_startup()
     with pytest.raises(ValueError, match="AGENT_MEMORY_CONSOLIDATION_HOUR"):
