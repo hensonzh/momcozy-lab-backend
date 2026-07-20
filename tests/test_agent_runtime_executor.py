@@ -46,7 +46,7 @@ from app.modules.agent_runtime.run_lifecycle.quick_replies import (
     QuickReplyFinalizerConfig,
 )
 from app.modules.agent_runtime.sdk import (
-    OpenAIAgentsSdkRunner,
+    OpenAIResponsesRunner,
     SdkNodeRequest,
     SdkNodeResult,
     ScriptedSdkBackend,
@@ -93,7 +93,7 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result(capl
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
             clock=lambda: fixed_now,
         ).execute(run=run)
     )
@@ -106,7 +106,7 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result(capl
     assert request.prompt_version == CURRENT_AGENT_PROMPT_VERSION
     assert request.instructions == CURRENT_AGENT_PROMPT.instructions
     assert request.service_skill_id == "cozymate_service_agent"
-    assert "你是 CozyMate，来自 Momcozy 团队" in request.instructions
+    assert "你是 CozyMate，Momcozy 打造的母婴智能陪伴顾问" in request.instructions
     assert "制定孕期计划" not in request.instructions
     assert "奶量管理仅处理三类任务" not in request.instructions
     assert "已选择服务技能" not in request.instructions
@@ -133,7 +133,17 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result(capl
         "locale": "zh-CN",
         "location": {"country": "CN", "region": "Shanghai", "city": "Shanghai"},
     }
-    assert repository.routing_decisions == []
+    assert len(repository.context_projections) == 1
+    projection = repository.context_projections[0]
+    assert projection["selected_message_ids"] == [str(prior_user.id), str(prior_assistant.id), str(current_user.id)]
+    assert projection["source_refs"] == {
+        "workflow_state_ids": [],
+        "service_skill_ids": [],
+        "known_information_sources": [],
+    }
+    assert projection["projection_summary"]["history_message_count"] == 2
+    assert projection["projection_summary"]["model_input_item_count"] == 4
+    assert projection["token_estimate"] > 0
     assert repository.latest_workflow_queries == 0
     assert request.model_input[-1] == {"role": "user", "content": "Summarize it."}
     assert repository.run_summaries == []
@@ -169,7 +179,7 @@ def test_agent_runtime_executor_rejects_an_unregistered_prompt_version() -> None
         asyncio.run(
             AgentRuntimeExecutor(
                 repository=FakeRuntimeRepository(messages=[], current_message=None),
-                sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+                sdk_runner=OpenAIResponsesRunner(backend=backend),
             ).execute(run=run)
         )
 
@@ -196,7 +206,7 @@ def test_agent_runtime_executor_sends_content_flags_to_model(message: str) -> No
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
         ).execute(run=run)
     )
 
@@ -229,7 +239,7 @@ def test_agent_runtime_executor_exposes_optional_allowlisted_web_search_without_
         AgentRuntimeExecutor(
             repository=repository,
             transient_stream=transient_stream,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, use_responses=True),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
         ).execute(run=run)
     )
 
@@ -265,7 +275,7 @@ def test_agent_runtime_executor_keeps_model_health_response_when_optional_search
         AgentRuntimeExecutor(
             repository=repository,
             transient_stream=transient_stream,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, use_responses=True),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
         ).execute(run=run)
     )
 
@@ -289,7 +299,7 @@ def test_agent_runtime_executor_does_not_content_route_first_breast_lump_turn() 
     asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, use_responses=True),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
         ).execute(run=run)
     )
 
@@ -327,7 +337,7 @@ def test_agent_runtime_executor_emits_web_search_citation_custom_event() -> None
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, use_responses=True),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
         ).execute(run=run)
     )
 
@@ -350,7 +360,7 @@ def test_agent_runtime_executor_emits_web_search_citation_custom_event() -> None
     ]
 
 
-def test_agent_runtime_executor_calls_model_when_provider_cannot_web_search() -> None:
+def test_agent_runtime_executor_enables_web_search_for_responses_runner() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)
     current_user = _message(
@@ -366,14 +376,15 @@ def test_agent_runtime_executor_calls_model_when_provider_cannot_web_search() ->
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, use_responses=False),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
         ).execute(run=run)
     )
 
     assert result.status == "completed"
     assert result.final_text == "我会基于当前信息谨慎回答。"
     assert len(backend.requests) == 1
-    assert backend.requests[0].web_search_enabled is False
+    assert backend.requests[0].web_search_enabled is True
+    assert backend.requests[0].web_search_allowed_domains
     assert backend.requests[0].web_search_required is False
 
 
@@ -394,7 +405,7 @@ def test_agent_runtime_executor_propagates_model_failure_without_content_based_f
         asyncio.run(
             AgentRuntimeExecutor(
                 repository=repository,
-                sdk_runner=OpenAIAgentsSdkRunner(backend=backend, use_responses=True),
+                sdk_runner=OpenAIResponsesRunner(backend=backend),
             ).execute(run=run)
         )
 
@@ -410,7 +421,7 @@ def test_agent_runtime_executor_injects_trusted_ibclc_consent_context() -> None:
     run = _run(thread_id=uuid4())
     executor = AgentRuntimeExecutor(
         repository=FakeRuntimeRepository(messages=[], current_message=None),
-        sdk_runner=OpenAIAgentsSdkRunner(backend=CapturingSdkBackend(result=SdkNodeResult(final_text=""))),
+        sdk_runner=OpenAIResponsesRunner(backend=CapturingSdkBackend(result=SdkNodeResult(final_text=""))),
     )
     executor._run_current_user_text[run.id] = "好的"
     executor._run_previous_assistant_text[run.id] = "需要我帮你打开 IBCLC 在线咨询入口吗？"
@@ -427,7 +438,7 @@ def test_agent_runtime_executor_injects_trusted_support_ticket_confirmation_text
     run = _run(thread_id=uuid4())
     executor = AgentRuntimeExecutor(
         repository=FakeRuntimeRepository(messages=[], current_message=None),
-        sdk_runner=OpenAIAgentsSdkRunner(backend=CapturingSdkBackend(result=SdkNodeResult(final_text=""))),
+        sdk_runner=OpenAIResponsesRunner(backend=CapturingSdkBackend(result=SdkNodeResult(final_text=""))),
     )
     executor._run_current_user_text[run.id] = "好的，请现在帮我创建售后工单"
 
@@ -440,7 +451,7 @@ def test_agent_runtime_executor_injects_runtime_timezone_into_milk_analysis_snap
     run = _run(thread_id=uuid4())
     executor = AgentRuntimeExecutor(
         repository=FakeRuntimeRepository(messages=[], current_message=None),
-        sdk_runner=OpenAIAgentsSdkRunner(backend=CapturingSdkBackend(result=SdkNodeResult(final_text=""))),
+        sdk_runner=OpenAIResponsesRunner(backend=CapturingSdkBackend(result=SdkNodeResult(final_text=""))),
     )
     executor._run_current_user_text[run.id] = "帮我分析奶量"
     executor._run_timezones[run.id] = "Asia/Shanghai"
@@ -487,7 +498,7 @@ def test_agent_runtime_executor_projects_recent_ibclc_client_event_into_next_tur
     asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
         ).execute(run=run)
     )
 
@@ -518,7 +529,7 @@ def test_agent_runtime_executor_passes_electrical_hazard_to_model(message: str) 
         AgentRuntimeExecutor(
             repository=repository,
             transient_stream=transient_stream,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
         ).execute(run=run)
     )
 
@@ -544,7 +555,7 @@ def test_agent_runtime_executor_does_not_trigger_device_hazard_for_negated_burnt
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
         ).execute(run=run)
     )
 
@@ -599,7 +610,7 @@ def test_agent_runtime_executor_projects_only_current_user_images_into_model_inp
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
         ).execute(run=run)
     )
 
@@ -637,7 +648,7 @@ def test_agent_runtime_executor_projects_precomputed_memory_snapshot_into_dynami
         AgentRuntimeExecutor(
             repository=repository,
             memory_service=memory_service,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
         ).execute(run=run)
     )
 
@@ -665,7 +676,7 @@ def test_agent_runtime_executor_loads_base_context_without_parallel_shared_sessi
         AgentRuntimeExecutor(
             repository=repository,
             memory_service=memory_service,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
         ).execute(run=run)
     )
 
@@ -701,7 +712,7 @@ def test_agent_runtime_executor_load_service_skill_returns_facts_and_records_led
             repository=repository,
             business_facts_projector=business_facts_projector,
             working_context_store=working_context_store,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
         ).execute(run=run)
     )
 
@@ -760,7 +771,7 @@ def test_agent_runtime_executor_loads_birth_prep_with_structured_business_fact_r
         AgentRuntimeExecutor(
             repository=repository,
             business_facts_projector=BusinessFactsProjector(handlers={"pregnancy.plan_context.read": pregnancy_context_handler}),
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
         ).execute(run=run)
     )
 
@@ -834,7 +845,7 @@ def test_service_skill_recommendations_are_small_non_authoritative_provider_tool
     asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
         ).execute(run=run)
     )
 
@@ -870,7 +881,7 @@ def test_agent_runtime_executor_publishes_final_text_deltas_to_transient_stream(
         AgentRuntimeExecutor(
             repository=repository,
             transient_stream=transient_stream,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
         ).execute(run=run)
     )
 
@@ -965,7 +976,7 @@ def test_agent_runtime_executor_persists_all_text_shown_before_and_after_tool_tu
         AgentRuntimeExecutor(
             repository=repository,
             transient_stream=transient_stream,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
         ).execute(run=run)
     )
 
@@ -985,7 +996,7 @@ def test_agent_runtime_executor_streams_missing_provider_suffix_before_finalizin
         AgentRuntimeExecutor(
             repository=repository,
             transient_stream=transient_stream,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
         ).execute(run=run)
     )
 
@@ -1005,7 +1016,7 @@ def test_agent_runtime_executor_does_not_overwrite_streamed_text_with_conflictin
         AgentRuntimeExecutor(
             repository=repository,
             transient_stream=transient_stream,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
         ).execute(run=run)
     )
 
@@ -1035,7 +1046,7 @@ def test_agent_runtime_executor_never_streams_partial_tool_json_after_visible_te
         AgentRuntimeExecutor(
             repository=repository,
             transient_stream=transient_stream,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
         ).execute(run=run)
     )
 
@@ -1055,7 +1066,7 @@ def test_agent_runtime_executor_does_not_append_unclosed_provider_json_tail() ->
         AgentRuntimeExecutor(
             repository=repository,
             transient_stream=transient_stream,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
         ).execute(run=run)
     )
 
@@ -1077,7 +1088,7 @@ def test_agent_runtime_executor_persists_progress_when_event_sink_is_configured(
             repository=repository,
             event_sink=event_sink,
             transient_stream=transient_stream,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
         ).execute(run=run)
     )
 
@@ -1105,7 +1116,7 @@ def test_agent_runtime_executor_requires_current_user_message() -> None:
         asyncio.run(
             AgentRuntimeExecutor(
                 repository=repository,
-                sdk_runner=OpenAIAgentsSdkRunner(backend=CapturingSdkBackend(result=SdkNodeResult(final_text="hello"))),
+                sdk_runner=OpenAIResponsesRunner(backend=CapturingSdkBackend(result=SdkNodeResult(final_text="hello"))),
             ).execute(run=run)
         )
 
@@ -1122,7 +1133,7 @@ def test_agent_runtime_executor_rejects_empty_sdk_response() -> None:
         asyncio.run(
             AgentRuntimeExecutor(
                 repository=repository,
-                sdk_runner=OpenAIAgentsSdkRunner(backend=CapturingSdkBackend(result=SdkNodeResult(final_text="  "))),
+                sdk_runner=OpenAIResponsesRunner(backend=CapturingSdkBackend(result=SdkNodeResult(final_text="  "))),
             ).execute(run=run)
         )
 
@@ -1140,7 +1151,7 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
             tool_executor=tool_executor,
         ).execute(run=run)
     )
@@ -1330,7 +1341,7 @@ def test_agent_runtime_executor_uses_ephemeral_model_output_for_private_diary_re
     asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
             tool_executor=tool_executor,
             clock=lambda: datetime(2026, 7, 12, 4, 0, tzinfo=timezone.utc),
         ).execute(run=run)
@@ -1358,7 +1369,7 @@ def test_agent_runtime_executor_injects_current_user_text_for_diary_confirmation
     run = _run(thread_id=uuid4())
     executor = AgentRuntimeExecutor(
         repository=FakeRuntimeRepository(messages=[], current_message=None),
-        sdk_runner=OpenAIAgentsSdkRunner(backend=CapturingSdkBackend(result=SdkNodeResult(final_text=""))),
+        sdk_runner=OpenAIResponsesRunner(backend=CapturingSdkBackend(result=SdkNodeResult(final_text=""))),
     )
     executor._run_current_user_text[run.id] = "请删除 7 月 4 日的日记"
     executor._run_local_dates[run.id] = "2026-07-12"
@@ -1412,7 +1423,7 @@ def test_agent_runtime_executor_adds_model_selected_visible_image_to_current_loo
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
             tool_executor=tool_executor,
         ).execute(run=run)
     )
@@ -1442,7 +1453,7 @@ def test_agent_runtime_executor_allows_service_tool_without_skill_load() -> None
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
             tool_executor=tool_executor,
         ).execute(run=run)
     )
@@ -1464,7 +1475,7 @@ def test_agent_runtime_executor_skips_quick_reply_progress_without_finalizer() -
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
             transient_stream=transient_stream,
         ).execute(run=run)
     )
@@ -1538,8 +1549,8 @@ def test_agent_runtime_executor_generates_quick_replies_with_finalizer() -> None
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
-            quick_reply_finalizer=QuickReplyFinalizer(sdk_runner=OpenAIAgentsSdkRunner(backend=quick_reply_backend)),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
+            quick_reply_finalizer=QuickReplyFinalizer(sdk_runner=OpenAIResponsesRunner(backend=quick_reply_backend)),
             transient_stream=transient_stream,
         ).execute(run=run)
     )
@@ -1606,7 +1617,7 @@ def test_quick_reply_finalizer_preserves_the_end_of_a_long_final_response() -> N
         ]
     )
     finalizer = QuickReplyFinalizer(
-        sdk_runner=OpenAIAgentsSdkRunner(backend=quick_reply_backend),
+        sdk_runner=OpenAIResponsesRunner(backend=quick_reply_backend),
         config=QuickReplyFinalizerConfig(max_final_text_chars=120),
     )
     final_text = f"{'这是正文开头。' * 20}{'中间分析。' * 20}最后想确认一下：你要先调整今晚的吸奶时间吗？"
@@ -1653,8 +1664,8 @@ def test_pregnancy_final_question_uses_the_finalizer_instead_of_hardcoded_replie
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
-            quick_reply_finalizer=QuickReplyFinalizer(sdk_runner=OpenAIAgentsSdkRunner(backend=quick_reply_backend)),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
+            quick_reply_finalizer=QuickReplyFinalizer(sdk_runner=OpenAIResponsesRunner(backend=quick_reply_backend)),
         ).execute(run=run)
     )
 
@@ -1683,8 +1694,8 @@ def test_agent_runtime_executor_requires_exactly_three_finalizer_quick_replies()
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
-            quick_reply_finalizer=QuickReplyFinalizer(sdk_runner=OpenAIAgentsSdkRunner(backend=quick_reply_backend)),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
+            quick_reply_finalizer=QuickReplyFinalizer(sdk_runner=OpenAIResponsesRunner(backend=quick_reply_backend)),
         ).execute(run=run)
     )
 
@@ -1708,7 +1719,7 @@ def test_agent_runtime_executor_does_not_use_quick_replies_from_final_text_json(
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
         ).execute(run=run)
     )
 
@@ -1735,7 +1746,7 @@ def test_agent_runtime_executor_suppresses_streamed_structured_json_deltas() -> 
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
             transient_stream=transient_stream,
         ).execute(run=run)
     )
@@ -1761,7 +1772,7 @@ def test_agent_runtime_executor_does_not_add_fallback_quick_replies_when_model_s
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
         ).execute(run=run)
     )
 
@@ -1791,7 +1802,7 @@ def test_agent_runtime_executor_allows_service_tool_after_skill_load() -> None:
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
             tool_executor=tool_executor,
         ).execute(run=run)
     )
@@ -1803,7 +1814,7 @@ def test_agent_runtime_executor_allows_service_tool_after_skill_load() -> None:
     assert repository.run_summaries == []
 
 
-def test_agent_runtime_executor_does_not_advertise_tool_search_when_responses_is_disabled() -> None:
+def test_agent_runtime_executor_advertises_tool_search_for_responses_runner() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)
     current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="Read my profile", sequence=1)
@@ -1814,16 +1825,16 @@ def test_agent_runtime_executor_does_not_advertise_tool_search_when_responses_is
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend, use_responses=False),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
             tool_executor=tool_executor,
         ).execute(run=run)
     )
 
     assert result.status == "completed"
-    assert backend.tool_search_enabled is False
-    assert backend.tool_namespaces == {}
+    assert backend.tool_search_enabled is True
+    assert backend.tool_namespaces
     assert backend.tool_namespace_by_contract["profile.read"] == ""
-    assert all(defer_loading is False for defer_loading in backend.tool_deferred_by_contract.values())
+    assert backend.tool_deferred_by_contract["profile.read"] is False
     assert tool_executor.calls[0]["tool_name"] == "profile.read"
 
 
@@ -1837,7 +1848,7 @@ def test_agent_runtime_executor_does_not_inject_service_skill_before_model_loads
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
         ).execute(run=run)
     )
 
@@ -1852,7 +1863,7 @@ def test_agent_runtime_executor_does_not_inject_service_skill_before_model_loads
         "ongoing_work": [],
         "known_information": [],
     }
-    assert repository.routing_decisions == []
+    assert len(repository.context_projections) == 1
     assert repository.run_summaries == []
     assert request.tool_names == ("load_service_skill",)
 
@@ -1867,7 +1878,7 @@ def test_agent_runtime_executor_continues_when_working_context_redis_is_unavaila
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
             working_context_store=FakeWorkingContextStore(fail=True),
         ).execute(run=run)
     )
@@ -1894,7 +1905,7 @@ def test_agent_runtime_executor_projects_loaded_skill_from_working_context() -> 
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
             working_context_store=working_context_store,
         ).execute(run=run)
     )
@@ -1937,7 +1948,7 @@ def test_agent_runtime_executor_projects_retained_tool_information_without_inter
     asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
             working_context_store=FakeWorkingContextStore(state=state),
         ).execute(run=run)
     )
@@ -1989,7 +2000,7 @@ def test_agent_runtime_executor_projects_active_workflow_as_minimal_ongoing_work
     asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
             working_context_store=working_context_store,
         ).execute(run=run)
     )
@@ -2020,7 +2031,7 @@ def test_agent_runtime_executor_injects_only_model_visible_skill_fields() -> Non
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
             working_context_store=working_context_store,
         ).execute(run=run)
     )
@@ -2061,7 +2072,7 @@ def test_agent_runtime_executor_allows_service_tool_with_resident_loaded_skill()
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
             tool_executor=tool_executor,
             working_context_store=working_context_store,
         ).execute(run=run)
@@ -2100,7 +2111,7 @@ def test_agent_runtime_executor_retains_handler_projected_tool_information() -> 
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
             tool_executor=tool_executor,
             working_context_store=working_context_store,
         ).execute(run=run)
@@ -2141,7 +2152,7 @@ def test_agent_runtime_executor_expires_resident_loaded_skill_after_three_follow
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
             working_context_store=working_context_store,
         ).execute(run=run)
     )
@@ -2176,7 +2187,7 @@ def test_agent_runtime_executor_keeps_recent_loaded_skill_hint_for_default_route
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
             working_context_store=working_context_store,
         ).execute(run=run)
     )
@@ -2205,7 +2216,7 @@ def test_agent_runtime_executor_loads_birth_prep_skill_only_when_model_calls_too
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
         ).execute(run=run)
     )
 
@@ -2269,7 +2280,7 @@ def test_agent_runtime_executor_ignores_legacy_run_summaries() -> None:
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
         ).execute(run=run)
     )
 
@@ -2327,7 +2338,7 @@ def test_agent_runtime_executor_uses_history_without_reinjecting_run_summary_fac
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
         ).execute(run=run)
     )
 
@@ -2381,7 +2392,7 @@ def test_agent_runtime_executor_does_not_restore_missing_history_from_run_summar
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
         ).execute(run=run)
     )
 
@@ -2415,7 +2426,7 @@ def test_agent_runtime_executor_loads_device_skill_only_when_model_calls_tool() 
     asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
         ).execute(run=run)
     )
 
@@ -2446,7 +2457,7 @@ def test_agent_runtime_executor_excludes_tool_messages_from_conversation_history
     asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
         ).execute(run=run)
     )
 
@@ -2480,7 +2491,7 @@ def test_agent_runtime_executor_real_tool_executor_uses_run_actor_role_permissio
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
             tool_executor=tool_executor,
         ).execute(run=run)
     )
@@ -2517,7 +2528,7 @@ def test_agent_runtime_executor_loads_skill_through_unified_tool_executor() -> N
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
             tool_registry=registry,
             tool_executor=tool_executor,
         ).execute(run=run)
@@ -2604,7 +2615,7 @@ def test_agent_runtime_executor_injects_verified_form_submission_as_non_persiste
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
             tool_registry=registry,
             tool_executor=tool_executor,
             transient_stream=transient_stream,
@@ -2701,7 +2712,7 @@ def test_agent_runtime_executor_injects_pregnancy_intake_submission_and_latest_w
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
             tool_registry=registry,
             tool_executor=tool_executor,
         ).execute(run=run)
@@ -2797,7 +2808,7 @@ def test_agent_runtime_executor_injects_current_workflow_and_authenticated_check
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
             tool_registry=registry,
             tool_executor=tool_executor,
         ).execute(run=run)
@@ -2943,7 +2954,7 @@ def test_agent_runtime_executor_injects_the_current_pregnancy_workflow_before_to
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=CurrentPhaseBackend()),
+            sdk_runner=OpenAIResponsesRunner(backend=CurrentPhaseBackend()),
             tool_registry=registry,
             tool_executor=ToolExecutor(
                 registry=registry,
@@ -3055,7 +3066,7 @@ def test_agent_runtime_executor_generates_the_plan_in_the_same_final_confirmatio
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=FinalConfirmationBackend()),
+            sdk_runner=OpenAIResponsesRunner(backend=FinalConfirmationBackend()),
             tool_registry=registry,
             tool_executor=ToolExecutor(
                 registry=registry,
@@ -3183,7 +3194,7 @@ def test_agent_runtime_executor_rejects_stale_replies_without_failing_the_run(
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
             tool_registry=registry,
             tool_executor=ToolExecutor(
                 registry=registry,
@@ -3274,7 +3285,7 @@ def test_agent_runtime_executor_reissues_the_rejected_workflow_cursor_when_multi
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=RecoveringBackend()),
+            sdk_runner=OpenAIResponsesRunner(backend=RecoveringBackend()),
             tool_registry=registry,
             tool_executor=ToolExecutor(registry=registry, repository=repository, handlers={}),
         ).execute(run=run)
@@ -3347,7 +3358,7 @@ def test_agent_runtime_executor_preserves_initial_analysis_then_one_checkup_uplo
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
             tool_registry=registry,
             tool_executor=tool_executor,
         ).execute(run=run)
@@ -3416,7 +3427,7 @@ def test_agent_runtime_executor_passes_urgent_text_to_model_while_awaiting_plan_
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
             tool_registry=registry,
             tool_executor=tool_executor,
         ).execute(run=run)
@@ -3484,7 +3495,7 @@ def test_agent_runtime_executor_passes_verified_intake_with_urgent_signal_to_mod
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
         ).execute(run=run)
     )
 
@@ -3535,7 +3546,7 @@ def test_agent_runtime_executor_prefills_form_from_runtime_business_facts_withou
     asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
             tool_registry=registry,
             tool_executor=tool_executor,
             business_facts_projector=business_facts_projector,
@@ -3592,7 +3603,7 @@ def test_agent_runtime_executor_prefills_pregnancy_form_from_reliable_same_turn_
     asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
             tool_registry=registry,
             tool_executor=tool_executor,
             business_facts_projector=FakeBusinessFactsProjector(facts={}),
@@ -3701,7 +3712,7 @@ def test_expired_pregnancy_workflow_is_not_reused_as_trusted_intake_context() ->
     )
     executor = AgentRuntimeExecutor(
         repository=repository,
-        sdk_runner=OpenAIAgentsSdkRunner(backend=CapturingSdkBackend(result=SdkNodeResult(final_text=""))),
+        sdk_runner=OpenAIResponsesRunner(backend=CapturingSdkBackend(result=SdkNodeResult(final_text=""))),
     )
 
     result = asyncio.run(executor._latest_pregnancy_plan_workflow(run=run))
@@ -3812,7 +3823,7 @@ def test_agent_runtime_executor_injects_latest_cart_state_without_exposing_group
     asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
             tool_registry=registry,
             tool_executor=tool_executor,
         ).execute(run=run)
@@ -3868,7 +3879,7 @@ def test_agent_runtime_executor_prefers_explicit_empty_client_cart_over_persiste
     asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
             tool_registry=registry,
             tool_executor=tool_executor,
         ).execute(run=run)
@@ -3901,7 +3912,7 @@ def test_agent_runtime_executor_persists_sdk_action_proposal_and_waits_for_confi
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
         ).execute(run=run)
     )
 
@@ -3942,7 +3953,7 @@ def test_agent_runtime_executor_rejects_unsupported_sdk_action_proposal_before_p
         asyncio.run(
             AgentRuntimeExecutor(
                 repository=repository,
-                sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+                sdk_runner=OpenAIResponsesRunner(backend=backend),
             ).execute(run=run)
         )
 
@@ -3974,7 +3985,7 @@ def test_agent_runtime_executor_rejects_direct_apply_sdk_action_proposal_before_
         asyncio.run(
             AgentRuntimeExecutor(
                 repository=repository,
-                sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+                sdk_runner=OpenAIResponsesRunner(backend=backend),
             ).execute(run=run)
         )
 
@@ -4003,7 +4014,7 @@ def test_agent_runtime_executor_rejects_multiple_sdk_action_proposals_before_sid
         asyncio.run(
             AgentRuntimeExecutor(
                 repository=repository,
-                sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+                sdk_runner=OpenAIResponsesRunner(backend=backend),
             ).execute(run=run)
         )
 
@@ -4034,7 +4045,7 @@ def test_agent_runtime_executor_persists_sdk_artifacts_and_emits_events() -> Non
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
         ).execute(run=run)
     )
 
@@ -4070,7 +4081,7 @@ def test_agent_runtime_executor_externalizes_large_sdk_artifacts() -> None:
     result = asyncio.run(
         AgentRuntimeExecutor(
             repository=repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=backend),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
             object_storage=storage,
             max_inline_artifact_payload_bytes=80,
         ).execute(run=run)
@@ -4137,7 +4148,7 @@ class FakeRuntimeRepository:
         self.actions = []
         self.artifacts = []
         self.events = []
-        self.routing_decisions = []
+        self.context_projections = []
         self.latest_workflow_queries = 0
         self.tool_call = None
         self.tool_output = None
@@ -4167,21 +4178,8 @@ class FakeRuntimeRepository:
             return self.run
         return None
 
-    async def record_routing_decision(self, **kwargs):
-        self.routing_decisions.append(kwargs)
-        run = await self.get_run(run_id=kwargs["run_id"])
-        if run is not None:
-            run.service_skill_id = kwargs["selected_skill_id"]
-            run.routing_source = kwargs["routing_source"]
-            run.routing_confidence_score = int(float(kwargs["confidence"]) * 100)
-            run.routing_summary = {
-                "execution_mode": kwargs["execution_mode"],
-                "intents": kwargs["intents"],
-                "reason_codes": kwargs["reason_codes"],
-                "safety_flags": kwargs["safety_flags"],
-                "needs_clarification": kwargs["needs_clarification"],
-                "tool_scope_version": kwargs["tool_scope_version"],
-            }
+    async def create_context_projection(self, **kwargs):
+        self.context_projections.append(kwargs)
         return kwargs
 
     async def start_tool_call(self, **kwargs):

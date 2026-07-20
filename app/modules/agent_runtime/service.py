@@ -25,7 +25,6 @@ from .repository import AgentRuntimeRepository
 
 AGENT_RUN_CREATE_IDEMPOTENCY_SCOPE = "agent.runs.create"
 DEFAULT_RUNTIME_PATTERN = SDK_ONLY_RUNTIME_PATTERN
-LEGACY_RUNTIME_PATTERN = "langgraph_sdk"
 TERMINAL_RUN_STATUSES = {"completed", "failed", "cancelled", "expired"}
 MAX_AGENT_RUN_ATTACHMENTS = 20
 MAX_FORM_SUBMISSION_BYTES = 16_384
@@ -151,17 +150,10 @@ class AgentRuntimeService:
             "runtime_version": normalized_runtime_version,
             "prompt_version": prompt_version or "",
         }
-        legacy_idempotency_payload = {
-            **idempotency_payload,
-            "runtime_pattern": LEGACY_RUNTIME_PATTERN,
-            "graph_version": normalized_runtime_version,
-        }
-        legacy_idempotency_payload.pop("runtime_version")
         idempotency_record = await self._reserve_run_idempotency(
             actor_user_id=actor_user_id,
             key=idempotency_key,
             payload=idempotency_payload,
-            compatible_payloads=(legacy_idempotency_payload,),
         )
         if idempotency_record is not None and idempotency_record.response_ref:
             return await self._replay_run(owner_user_id=actor_user_id, response_ref=idempotency_record.response_ref)
@@ -230,7 +222,6 @@ class AgentRuntimeService:
                     "phase": "thinking",
                     "label": "我已经收到你的消息啦～",
                     "surface": "status_bar",
-                    "visibility": "status",
                     "merge_key": f"run:{run.id}",
                     "priority": 10,
                     "lifecycle": "running",
@@ -860,7 +851,6 @@ class AgentRuntimeService:
         actor_user_id: UUID,
         key: str | None,
         payload: dict[str, Any],
-        compatible_payloads: tuple[dict[str, Any], ...] = (),
     ) -> IdempotencyKey | None:
         if not key:
             return None
@@ -872,7 +862,6 @@ class AgentRuntimeService:
             key=key,
             request_hash=request_hash(payload),
             expires_at=_utcnow() + timedelta(hours=24),
-            compatible_request_hashes=tuple(request_hash(item) for item in compatible_payloads),
         )
         if decision.status == "replay" and not decision.record.response_ref:
             raise ApiError(code="idempotency_in_progress", message="Request is still in progress.", status=409)
@@ -954,10 +943,7 @@ def _normalize_text(value: str | None, *, max_length: int, required: bool = Fals
 
 
 def _normalize_runtime_pattern(value: str | None) -> str:
-    normalized = str(value or DEFAULT_RUNTIME_PATTERN).strip()
-    if normalized == LEGACY_RUNTIME_PATTERN:
-        return DEFAULT_RUNTIME_PATTERN
-    return normalized
+    return str(value or DEFAULT_RUNTIME_PATTERN).strip()
 
 
 def _parse_uuid(value: Any, *, error_code: str) -> UUID:

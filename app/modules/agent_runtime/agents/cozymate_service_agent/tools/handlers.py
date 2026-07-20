@@ -65,9 +65,9 @@ from app.modules.records.models import FeedingRecord, GrowthRecord, PumpingRecor
 from app.modules.records.service import RecordsService
 from ..device_guidance import AIR1_UNBOXING_STEPS, DeviceGuidanceReferenceService
 from .executor import DEFERRED_AGENT_EVENTS_KEY, RetainedToolInformation, ToolHandler, ToolHandlerContext, ToolHandlerResult
-from .legacy_artifacts import (
-    artifact_record_from_legacy_result,
-    create_legacy_artifact_result,
+from .birth_preparation_artifacts import (
+    artifact_record_from_birth_preparation_result,
+    create_birth_preparation_artifact_result,
     hospital_bag_cart_update_result,
 )
 from .hospital_bag_flow import HOSPITAL_BAG_FORM_ID, HOSPITAL_BAG_WORKFLOW_SCHEMA_VERSION, HOSPITAL_BAG_WORKFLOW_TYPE
@@ -227,22 +227,22 @@ class HospitalBagCartUpdateProposeToolHandler:
         self.runtime_service = runtime_service
 
     async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
-        legacy_result: dict[str, Any] = {}
+        artifact_result: dict[str, Any] = {}
         cart_update = context.args.get("cart_update")
         if not isinstance(cart_update, dict) or not cart_update:
             if not _text(context.args, "action"):
                 raise ApiError(code="validation_failed", message="action is required.", status=422)
-            legacy_result = hospital_bag_cart_update_result(context.args)
-            if _text(legacy_result, "status") not in {"cart_updated"}:
-                return legacy_result
-            cart_update = legacy_result.get("cart_update")
+            artifact_result = hospital_bag_cart_update_result(context.args)
+            if _text(artifact_result, "status") not in {"cart_updated"}:
+                return artifact_result
+            cart_update = artifact_result.get("cart_update")
             if not isinstance(cart_update, dict) or not cart_update:
-                return legacy_result
+                return artifact_result
         apply_payload = _hospital_bag_cart_apply_payload(
             {
                 **context.args,
                 "cart_update": cart_update,
-                "summary": _text(context.args, "summary") or _text(legacy_result, "summary"),
+                "summary": _text(context.args, "summary") or _text(artifact_result, "summary"),
             }
         )
         cart_update = apply_payload.get("cart_update")
@@ -267,7 +267,7 @@ class HospitalBagCartUpdateProposeToolHandler:
         else:
             action = await self.runtime_service.propose_action(**action_kwargs)
         return {
-            **legacy_result,
+            **artifact_result,
             **_proposal_result(action=action, preview_payload=preview_payload),
             "cart_update": cart_update,
         }
@@ -312,14 +312,14 @@ class IbclcConsultCardCreateToolHandler:
         return result
 
 
-class LegacyArtifactToolHandler:
+class BirthPreparationArtifactToolHandler:
     def __init__(self, *, runtime_service: AgentRuntimeService, tool_name: str) -> None:
         self.runtime_service = runtime_service
         self.tool_name = tool_name
 
     async def __call__(self, context: ToolHandlerContext) -> dict[str, Any]:
-        result = create_legacy_artifact_result(self.tool_name, context.args)
-        artifact_record = artifact_record_from_legacy_result(result)
+        result = create_birth_preparation_artifact_result(self.tool_name, context.args)
+        artifact_record = artifact_record_from_birth_preparation_result(result)
         if artifact_record is None:
             return result
 
@@ -344,7 +344,7 @@ class LegacyArtifactToolHandler:
 class HospitalBagFormCreateToolHandler:
     def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
         self.runtime_service = runtime_service
-        self.artifact_handler = LegacyArtifactToolHandler(
+        self.artifact_handler = BirthPreparationArtifactToolHandler(
             runtime_service=runtime_service,
             tool_name="hospital_bag_form_create",
         )
@@ -377,7 +377,7 @@ class HospitalBagFormCreateToolHandler:
 class HospitalBagCardCreateToolHandler:
     def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
         self.runtime_service = runtime_service
-        self.artifact_handler = LegacyArtifactToolHandler(
+        self.artifact_handler = BirthPreparationArtifactToolHandler(
             runtime_service=runtime_service,
             tool_name="hospital_bag_card_create",
         )
@@ -2210,7 +2210,7 @@ class PregnancyPlanProposeToolHandler:
             raise ApiError(code="validation_failed", message="title is required.", status=422)
         plan_payload = _dict(apply_payload, "payload")
         plan_result = build_pregnancy_plan_result(_dict(plan_payload, "plan_context"))
-        artifact_record = artifact_record_from_legacy_result(plan_result)
+        artifact_record = artifact_record_from_birth_preparation_result(plan_result)
         if artifact_record is None:
             raise ApiError(code="tool_failed", message="Pregnancy plan preview could not be created.", status=500)
         plan_payload["card"] = _dict(plan_result, "card")
@@ -2533,8 +2533,8 @@ def build_default_tool_handlers(
         "records.growth_record.propose": GrowthRecordProposeToolHandler(runtime_service=agent_runtime_service),
         "records.growth_record_update.propose": GrowthRecordUpdateProposeToolHandler(runtime_service=agent_runtime_service),
         "records.growth_record_delete.propose": GrowthRecordDeleteProposeToolHandler(runtime_service=agent_runtime_service),
-        "birth_plan_form_create": LegacyArtifactToolHandler(runtime_service=agent_runtime_service, tool_name="birth_plan_form_create"),
-        "labor_communication_card_create": LegacyArtifactToolHandler(
+        "birth_plan_form_create": BirthPreparationArtifactToolHandler(runtime_service=agent_runtime_service, tool_name="birth_plan_form_create"),
+        "labor_communication_card_create": BirthPreparationArtifactToolHandler(
             runtime_service=agent_runtime_service, tool_name="labor_communication_card_create"
         ),
         "hospital_bag_form_create": HospitalBagFormCreateToolHandler(runtime_service=agent_runtime_service),
@@ -2542,7 +2542,7 @@ def build_default_tool_handlers(
         "hospital_bag_cart_update": HospitalBagCartUpdateProposeToolHandler(
             runtime_service=agent_runtime_service
         ),
-        "hospital_bag_pump_recommend": LegacyArtifactToolHandler(
+        "hospital_bag_pump_recommend": BirthPreparationArtifactToolHandler(
             runtime_service=agent_runtime_service, tool_name="hospital_bag_pump_recommend"
         ),
         "ibclc_consult_card_create": IbclcConsultCardCreateToolHandler(runtime_service=agent_runtime_service),

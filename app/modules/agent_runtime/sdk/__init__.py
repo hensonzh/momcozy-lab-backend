@@ -1,8 +1,6 @@
-from .factory import create_agent_model_runner, create_agent_sdk_runner
+from .factory import create_agent_model_runner
 from .runner import (
     AgentModelRunner,
-    OpenAIAgentsSdkBackend,
-    OpenAIAgentsSdkRunner,
     OpenAIResponsesApiBackend,
     OpenAIResponsesRunner,
     SdkNodeRequest,
@@ -17,8 +15,6 @@ from .testing import ScriptedSdkBackend, ScriptedSdkResponse, ScriptedToolInvoca
 
 __all__ = [
     "AgentModelRunner",
-    "OpenAIAgentsSdkBackend",
-    "OpenAIAgentsSdkRunner",
     "OpenAIResponsesApiBackend",
     "OpenAIResponsesRunner",
     "SdkNodeRequest",
@@ -30,7 +26,6 @@ __all__ = [
     "ScriptedSdkResponse",
     "ScriptedToolInvocation",
     "create_agent_model_runner",
-    "create_agent_sdk_runner",
     "responses_tools_payload",
     "scripted_sdk_response",
     "scripted_tool_invocation",

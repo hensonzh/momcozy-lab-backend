@@ -126,7 +126,7 @@ def test_create_run_rejects_an_unregistered_prompt_version() -> None:
     assert fake_service.create_run_kwargs == {}
 
 
-def test_create_run_accepts_legacy_runtime_contract_and_returns_canonical_fields() -> None:
+def test_create_run_rejects_retired_runtime_contract() -> None:
     user_id = uuid4()
     fake_service = FakeAgentRuntimeService(user_id=user_id)
     app = create_app(Settings(app_env="test"))
@@ -142,15 +142,11 @@ def test_create_run_accepts_legacy_runtime_contract_and_returns_canonical_fields
         },
     )
 
-    assert response.status_code == 201
-    assert fake_service.create_run_kwargs["runtime_pattern"] == "sdk_only"
-    assert fake_service.create_run_kwargs["runtime_version"] == "momcozy-agent-v1"
-    assert response.json()["runtime_pattern"] == "sdk_only"
-    assert response.json()["runtime_version"] == "momcozy-agent-v1"
-    assert "graph_version" not in response.json()
+    assert response.status_code == 422
+    assert fake_service.create_run_kwargs == {}
 
 
-def test_create_run_rejects_conflicting_runtime_and_legacy_versions() -> None:
+def test_create_run_rejects_retired_graph_version_field() -> None:
     user_id = uuid4()
     fake_service = FakeAgentRuntimeService(user_id=user_id)
     app = create_app(Settings(app_env="test"))

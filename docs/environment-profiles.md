@@ -63,7 +63,6 @@ OPENAI_API_KEY=...
 OPENAI_MODEL=gpt-5.6-terra
 OPENAI_REASONING_EFFORT=low
 OPENAI_RESPONSES_STORE=false
-OPENAI_AGENT_USE_RESPONSES=true
 AGENT_QUICK_REPLY_MODEL=gpt-5.4-nano
 AGENT_QUICK_REPLY_TIMEOUT_SECONDS=3.0
 AGENT_FACT_EXTRACTION_ENABLED=true
@@ -83,9 +82,7 @@ VISION_OPENAI_MODEL=gpt-5.4-mini
 VISION_REQUEST_TIMEOUT_SECONDS=20
 ```
 
-The Agent runtime uses the native OpenAI Responses runner. Keep
-`OPENAI_AGENT_USE_RESPONSES=true` for normal traffic; setting it to `false`
-selects the temporary Agents SDK rollback path. `OPENAI_RESPONSES_STORE=false`
+The Agent runtime uses the native OpenAI Responses runner exclusively. `OPENAI_RESPONSES_STORE=false`
 keeps conversation authority in the application database, while the runtime
 round-trips required response and reasoning items within the active run.
 

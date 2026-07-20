@@ -158,6 +158,7 @@ class _PreparedModelTurn:
     projection: ContextProjection
     model_input: list[dict[str, Any]]
     prompt_version: str
+    selected_message_ids: tuple[UUID, ...]
 
 
 class AgentRuntimeExecutor:
@@ -262,6 +263,12 @@ class AgentRuntimeExecutor:
             tool_catalog = self._tool_catalog_for_turn()
             await self._append_progress(run=run, phase="context_ready", label="我先理解一下你的需求～")
             prepared_turn = self._prepare_model_turn(turn_context=turn_context, prompt=prompt)
+            await self._record_model_context_projection(
+                run=run,
+                turn_context=turn_context,
+                tool_catalog=tool_catalog,
+                prepared_turn=prepared_turn,
+            )
             self._run_local_dates[run.id] = _user_context_local_date(prepared_turn.projection.user_context)
             self._run_timezones[run.id] = _text(prepared_turn.projection.user_context, "timezone") or "UTC"
             result = await self._run_model_turn(
@@ -393,12 +400,13 @@ class AgentRuntimeExecutor:
         )
         if turn_context.recent_client_events:
             working_context["client_events"] = turn_context.recent_client_events
+        history_messages = _history_messages_before(
+            messages=turn_context.messages,
+            before_sequence=turn_context.current_message.sequence,
+        )
         projection = ContextProjection(
             stable_system_prompt=prompt.instructions,
-            selected_conversation_history=_history_before(
-                messages=turn_context.messages,
-                before_sequence=turn_context.current_message.sequence,
-            ),
+            selected_conversation_history=[_to_model_message(message) for message in history_messages],
             user_context=_user_context(current_message=turn_context.current_message, now=self.clock()),
             memory_projection=turn_context.memory_projection,
             workflow_context=turn_context.workflow_context,
@@ -411,7 +419,66 @@ class AgentRuntimeExecutor:
                 include_image_attachments=True,
             ),
         )
-        return _PreparedModelTurn(projection=projection, model_input=model_input, prompt_version=prompt.version)
+        return _PreparedModelTurn(
+            projection=projection,
+            model_input=model_input,
+            prompt_version=prompt.version,
+            selected_message_ids=tuple(message.id for message in [*history_messages, turn_context.current_message]),
+        )
+
+    async def _record_model_context_projection(
+        self,
+        *,
+        run: AgentRun,
+        turn_context: _AgentTurnContext,
+        tool_catalog: _AgentTurnToolCatalog,
+        prepared_turn: _PreparedModelTurn,
+    ) -> None:
+        if not callable(getattr(self.repository, "create_context_projection", None)):
+            return
+        workflow_state_ids = [workflow.id for workflow in turn_context.workflow_states]
+        skill_ids = sorted({skill.service_skill_id for skill in turn_context.working_context_state.skills})
+        known_information_sources = sorted(
+            {
+                item.source
+                for item in turn_context.working_context_state.known_information
+                if str(item.source or "").strip()
+            }
+        )
+        model_input_chars = len(
+            json.dumps(
+                prepared_turn.model_input,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+                default=str,
+            )
+        )
+        await self.state_store.record_context_projection(
+            run=run,
+            selected_message_ids=list(prepared_turn.selected_message_ids),
+            active_workflow_state_id=workflow_state_ids[0] if workflow_state_ids else None,
+            context_schema_version="cozymate-context-v1",
+            tool_schema_version="cozymate-tools-v1",
+            source_refs={
+                "workflow_state_ids": workflow_state_ids,
+                "service_skill_ids": skill_ids,
+                "known_information_sources": known_information_sources,
+            },
+            projection_summary={
+                "history_message_count": max(0, len(prepared_turn.selected_message_ids) - 1),
+                "memory_item_count": len(turn_context.memory_projection),
+                "workflow_count": len(turn_context.workflow_states),
+                "workflow_types": sorted({workflow.workflow_type for workflow in turn_context.workflow_states}),
+                "ongoing_work_count": len(turn_context.ongoing_work),
+                "service_skill_count": len(skill_ids),
+                "known_information_count": len(turn_context.working_context_state.known_information),
+                "model_input_item_count": len(prepared_turn.model_input),
+                "tool_namespace_names": [namespace.name for namespace in tool_catalog.tool_namespaces],
+                "tool_count": len(tool_catalog.tool_names),
+            },
+            token_estimate=(model_input_chars + 3) // 4,
+        )
 
     async def _run_model_turn(
         self,

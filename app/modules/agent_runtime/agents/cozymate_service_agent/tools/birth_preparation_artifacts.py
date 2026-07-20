@@ -468,7 +468,7 @@ HOSPITAL_BAG_CART_REPLACEMENT_ORIGINAL_BY_ID = {
 }
 
 
-def create_legacy_artifact_result(tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
+def create_birth_preparation_artifact_result(tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
     if tool_name == "hospital_bag_form_create":
         return hospital_bag_form_result(args)
     if tool_name == "birth_plan_form_create":
@@ -481,10 +481,10 @@ def create_legacy_artifact_result(tool_name: str, args: dict[str, Any]) -> dict[
         return hospital_bag_cart_update_result(args)
     if tool_name == "hospital_bag_pump_recommend":
         return hospital_bag_pump_recommend_result(args)
-    raise ValueError(f"Unsupported legacy artifact tool: {tool_name}")
+    raise ValueError(f"Unsupported birth-preparation artifact tool: {tool_name}")
 
 
-def artifact_record_from_legacy_result(result: dict[str, Any]) -> dict[str, Any] | None:
+def artifact_record_from_birth_preparation_result(result: dict[str, Any]) -> dict[str, Any] | None:
     status = _text(result.get("status"))
     if status not in {"form_created", "card_created", "existing_plan_found", "cart_updated", "cart_unchanged"}:
         return None

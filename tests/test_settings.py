@@ -126,10 +126,8 @@ def test_settings_from_env_reads_agent_worker_controls(monkeypatch: pytest.Monke
     monkeypatch.setenv("OPENAI_MODEL", "gpt-test")
     monkeypatch.setenv("OPENAI_REASONING_EFFORT", "low")
     monkeypatch.setenv("OPENAI_RESPONSES_STORE", "false")
-    monkeypatch.setenv("OPENAI_AGENT_USE_RESPONSES", "true")
     monkeypatch.setenv("OPENAI_AGENT_MAX_TURNS", "7")
     monkeypatch.setenv("OPENAI_AGENT_TIMEOUT_SECONDS", "45")
-    monkeypatch.setenv("OPENAI_AGENT_TRACE_ENABLED", "true")
     monkeypatch.setenv("OPENAI_AGENT_PROMPT_VERSION", "prompt-v2")
     monkeypatch.setenv("AGENT_QUICK_REPLY_MODEL", "quick-reply-test")
     monkeypatch.setenv("AGENT_QUICK_REPLY_TIMEOUT_SECONDS", "0.8")
@@ -154,10 +152,8 @@ def test_settings_from_env_reads_agent_worker_controls(monkeypatch: pytest.Monke
     assert settings.openai_model == "gpt-test"
     assert settings.openai_reasoning_effort == "low"
     assert settings.openai_responses_store is False
-    assert settings.openai_agent_use_responses is True
     assert settings.openai_agent_max_turns == 7
     assert settings.openai_agent_timeout_seconds == 45
-    assert settings.openai_agent_trace_enabled is True
     assert settings.openai_agent_prompt_version == "prompt-v2"
     assert settings.agent_quick_reply_model == "quick-reply-test"
     assert settings.agent_quick_reply_timeout_seconds == 0.8
@@ -247,8 +243,7 @@ def test_settings_from_env_reads_voice_provider(monkeypatch: pytest.MonkeyPatch)
     assert settings.voice_request_timeout_seconds == 45
 
 
-def test_settings_from_env_keeps_legacy_volc_tts_aliases(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("VOICE_PROVIDER", "doubao")
+def test_settings_from_env_ignores_retired_volc_tts_aliases(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("VOLC_TTS_API_KEY", "legacy-volc-key")
     monkeypatch.setenv("VOLC_TTS_WS_URL", "wss://legacy.example.test/tts")
     monkeypatch.setenv("VOLC_TTS_RESOURCE_ID", "legacy-resource")
@@ -259,25 +254,23 @@ def test_settings_from_env_keeps_legacy_volc_tts_aliases(monkeypatch: pytest.Mon
 
     settings = Settings.from_env()
 
-    assert settings.voice_api_key == "legacy-volc-key"
-    assert settings.voice_base_url == "wss://legacy.example.test/tts"
-    assert settings.voice_tts_resource_id == "legacy-resource"
-    assert settings.voice_tts_voice_type == "legacy-speaker"
+    assert settings.voice_api_key == ""
+    assert settings.voice_base_url == Settings.voice_base_url
+    assert settings.voice_tts_resource_id == Settings.voice_tts_resource_id
+    assert settings.voice_tts_voice_type == Settings.voice_tts_voice_type
     assert settings.voice_tts_audio_format == "pcm"
     assert settings.voice_tts_sample_rate == 24000
     assert settings.voice_tts_speed_ratio == 1.1
 
 
-def test_settings_from_env_keeps_legacy_volc_app_access_key_aliases(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("VOICE_PROVIDER", "doubao")
+def test_settings_from_env_ignores_retired_volc_app_access_key_aliases(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("VOLC_TTS_APP_ID", "legacy-app-id")
     monkeypatch.setenv("VOLC_TTS_ACCESS_TOKEN", "legacy-access-token")
 
     settings = Settings.from_env()
 
-    assert settings.voice_app_id == "legacy-app-id"
-    assert settings.voice_access_key == "legacy-access-token"
-    settings.validate_for_startup()
+    assert settings.voice_app_id == ""
+    assert settings.voice_access_key == ""
 
 
 def test_settings_from_env_reads_vision_provider(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -312,12 +305,12 @@ def test_settings_from_env_reads_outbox_worker_controls(monkeypatch: pytest.Monk
     assert settings.outbox_worker_lease_seconds == 90
 
 
-def test_settings_from_env_accepts_legacy_agent_recover_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_settings_from_env_ignores_retired_agent_recover_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AGENT_RUNTIME_RECOVER_RUNNING_OLDER_THAN_SECONDS", "180")
 
     settings = Settings.from_env()
 
-    assert settings.agent_runtime_interrupt_running_older_than_seconds == 180
+    assert settings.agent_runtime_interrupt_running_older_than_seconds == 900
 
 
 def test_settings_reject_invalid_agent_worker_controls() -> None:

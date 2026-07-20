@@ -79,15 +79,6 @@ class AgentRun(Base):
     runtime_version: Mapped[str] = mapped_column(String(80), default="", server_default="", nullable=False)
     prompt_version: Mapped[str] = mapped_column(String(80), default="", server_default="", nullable=False)
     service_skill_id: Mapped[str] = mapped_column(String(80), default="", server_default="", nullable=False)
-    routing_source: Mapped[str] = mapped_column(String(80), default="", server_default="", nullable=False)
-    routing_confidence_score: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
-    routing_summary: Mapped[dict[str, Any]] = mapped_column(
-        "routing_summary_json",
-        postgresql.JSONB,
-        default=dict,
-        server_default=text("'{}'::jsonb"),
-        nullable=False,
-    )
     request_id: Mapped[str] = mapped_column(String(80), default="", server_default="", nullable=False)
     trace_id: Mapped[str] = mapped_column(String(120), default="", server_default="", nullable=False)
     error_code: Mapped[str] = mapped_column(String(120), default="", server_default="", nullable=False)
@@ -103,50 +94,6 @@ class AgentRun(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
-
-
-class AgentRoutingDecision(Base):
-    __tablename__ = "agent_routing_decisions"
-    __table_args__ = (
-        UniqueConstraint("run_id", "message_id", name="uq_agent_routing_decisions_run_message"),
-        Index("ix_agent_routing_decisions_run_created", "run_id", "created_at"),
-        Index("ix_agent_routing_decisions_thread_created", "thread_id", "created_at"),
-        Index("ix_agent_routing_decisions_service_skill_created", "selected_skill_id", "created_at"),
-    )
-
-    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
-    run_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("agent_runs.id"), nullable=False)
-    thread_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("agent_threads.id"), nullable=False)
-    actor_user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    message_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("agent_messages.id"), nullable=False)
-    selected_skill_id: Mapped[str] = mapped_column(String(80), nullable=False)
-    routing_source: Mapped[str] = mapped_column(String(80), nullable=False)
-    confidence_score: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
-    execution_mode: Mapped[str] = mapped_column(String(40), default="passthrough", server_default="passthrough", nullable=False)
-    intents: Mapped[list[Any]] = mapped_column(
-        "intents_json",
-        postgresql.JSONB,
-        default=list,
-        server_default=text("'[]'::jsonb"),
-        nullable=False,
-    )
-    reason_codes: Mapped[list[Any]] = mapped_column(
-        "reason_codes_json",
-        postgresql.JSONB,
-        default=list,
-        server_default=text("'[]'::jsonb"),
-        nullable=False,
-    )
-    safety_flags: Mapped[list[Any]] = mapped_column(
-        "safety_flags_json",
-        postgresql.JSONB,
-        default=list,
-        server_default=text("'[]'::jsonb"),
-        nullable=False,
-    )
-    needs_clarification: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"), nullable=False)
-    tool_scope_version: Mapped[str] = mapped_column(String(80), default="default", server_default="default", nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
 class AgentMessage(Base):

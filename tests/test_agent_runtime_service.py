@@ -61,7 +61,6 @@ def test_agent_runtime_service_creates_run_with_thread_message_events_and_idempo
         "phase": "thinking",
         "label": "我已经收到你的消息啦～",
         "surface": "status_bar",
-        "visibility": "status",
         "merge_key": f"run:{run.id}",
         "priority": 10,
         "lifecycle": "running",
@@ -85,38 +84,26 @@ def test_agent_runtime_service_creates_run_with_thread_message_events_and_idempo
             "prompt_version": "",
         }
     )
-    assert idempotency_service.reserve_kwargs["compatible_request_hashes"] == (
-        request_hash(
-            {
-                "thread_id": "",
-                "message": "Review my pumping pattern",
-                "attachments": [],
-                "client_context": repository.messages[0].content["client_context"],
-                "runtime_pattern": "langgraph_sdk",
-                "graph_version": "momcozy-agent-v1",
-                "prompt_version": "",
-            }
-        ),
-    )
+    assert "compatible_request_hashes" not in idempotency_service.reserve_kwargs
     assert idempotency_service.completed_response_ref == str(run.id)
 
 
-def test_agent_runtime_service_normalizes_legacy_runtime_pattern() -> None:
+def test_agent_runtime_service_rejects_retired_runtime_pattern() -> None:
     repository = FakeAgentRuntimeRepository()
     service = AgentRuntimeService(repository=repository)
 
-    run = asyncio.run(
-        service.create_run(
-            actor_user_id=uuid4(),
-            thread_id=None,
-            message="Hello",
-            runtime_pattern="langgraph_sdk",
-            runtime_version="momcozy-agent-v1",
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            service.create_run(
+                actor_user_id=uuid4(),
+                thread_id=None,
+                message="Hello",
+                runtime_pattern="langgraph_sdk",
+                runtime_version="momcozy-agent-v1",
+            )
         )
-    )
 
-    assert run.runtime_pattern == "sdk_only"
-    assert run.runtime_version == "momcozy-agent-v1"
+    assert exc_info.value.code == "validation_failed"
 
 
 @pytest.mark.parametrize(

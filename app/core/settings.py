@@ -77,11 +77,9 @@ class Settings:
     openai_model: str = "gpt-5.6-terra"
     openai_reasoning_effort: str = "low"
     openai_responses_store: bool = False
-    openai_agent_use_responses: bool = True
     openai_agent_max_turns: int = 10
     openai_agent_timeout_seconds: int = 60
-    openai_agent_trace_enabled: bool = False
-    openai_agent_prompt_version: str = "momcozy-agent-prompt-v4"
+    openai_agent_prompt_version: str = "momcozy-agent-prompt-v5"
     agent_quick_reply_model: str = "gpt-5.4-nano"
     agent_quick_reply_timeout_seconds: float = 3.0
     agent_fact_extraction_enabled: bool = True
@@ -163,8 +161,8 @@ class Settings:
             agent_runtime_worker_batch_limit=_env_int("AGENT_RUNTIME_WORKER_BATCH_LIMIT", cls.agent_runtime_worker_batch_limit),
             agent_runtime_worker_concurrency=_env_int("AGENT_RUNTIME_WORKER_CONCURRENCY", cls.agent_runtime_worker_concurrency),
             agent_runtime_worker_idle_seconds=_env_float("AGENT_RUNTIME_WORKER_IDLE_SECONDS", cls.agent_runtime_worker_idle_seconds),
-            agent_runtime_interrupt_running_older_than_seconds=_env_int_first(
-                ("AGENT_RUNTIME_INTERRUPT_RUNNING_OLDER_THAN_SECONDS", "AGENT_RUNTIME_RECOVER_RUNNING_OLDER_THAN_SECONDS"),
+            agent_runtime_interrupt_running_older_than_seconds=_env_int(
+                "AGENT_RUNTIME_INTERRUPT_RUNNING_OLDER_THAN_SECONDS",
                 cls.agent_runtime_interrupt_running_older_than_seconds,
             ),
             agent_runtime_max_inline_payload_bytes=_env_int(
@@ -178,10 +176,8 @@ class Settings:
             openai_model=_env("OPENAI_MODEL", cls.openai_model),
             openai_reasoning_effort=_env("OPENAI_REASONING_EFFORT", cls.openai_reasoning_effort).lower(),
             openai_responses_store=_env_bool("OPENAI_RESPONSES_STORE", cls.openai_responses_store),
-            openai_agent_use_responses=_env_bool("OPENAI_AGENT_USE_RESPONSES", cls.openai_agent_use_responses),
             openai_agent_max_turns=_env_int("OPENAI_AGENT_MAX_TURNS", cls.openai_agent_max_turns),
             openai_agent_timeout_seconds=_env_int("OPENAI_AGENT_TIMEOUT_SECONDS", cls.openai_agent_timeout_seconds),
-            openai_agent_trace_enabled=_env_bool("OPENAI_AGENT_TRACE_ENABLED", cls.openai_agent_trace_enabled),
             openai_agent_prompt_version=_env("OPENAI_AGENT_PROMPT_VERSION", cls.openai_agent_prompt_version),
             agent_quick_reply_model=_env("AGENT_QUICK_REPLY_MODEL", cls.agent_quick_reply_model),
             agent_quick_reply_timeout_seconds=_env_float(
@@ -257,31 +253,16 @@ class Settings:
                 cls.agent_memory_consolidation_extractor_version,
             ),
             voice_provider=_env("VOICE_PROVIDER", cls.voice_provider).lower(),
-            voice_api_key=_env_first(
-                ("VOICE_API_KEY", "VOLC_TTS_API_KEY", "VOLC_REALTIME_VOICE_API_KEY", "VOLCENGINE_TTS_API_KEY"),
-                cls.voice_api_key,
-            ),
-            voice_app_id=_env_first(("VOICE_APP_ID", "VOLC_TTS_APP_ID", "VOLC_REALTIME_VOICE_APP_ID"), cls.voice_app_id),
-            voice_access_key=_env_first(
-                (
-                    "VOICE_ACCESS_KEY",
-                    "VOLC_TTS_ACCESS_TOKEN",
-                    "VOLC_TTS_ACCESS_KEY",
-                    "VOLC_REALTIME_VOICE_ACCESS_TOKEN",
-                    "VOLC_REALTIME_VOICE_ACCESS_KEY",
-                ),
-                cls.voice_access_key,
-            ),
-            voice_base_url=_env_first(("VOICE_BASE_URL", "VOLC_TTS_WS_URL"), cls.voice_base_url),
+            voice_api_key=_env("VOICE_API_KEY", cls.voice_api_key),
+            voice_app_id=_env("VOICE_APP_ID", cls.voice_app_id),
+            voice_access_key=_env("VOICE_ACCESS_KEY", cls.voice_access_key),
+            voice_base_url=_env("VOICE_BASE_URL", cls.voice_base_url),
             voice_transcribe_model=_env("VOICE_TRANSCRIBE_MODEL", cls.voice_transcribe_model),
-            voice_tts_resource_id=_env_first(
-                ("VOICE_TTS_RESOURCE_ID", "VOICE_TTS_MODEL", "VOLC_TTS_RESOURCE_ID"),
-                cls.voice_tts_resource_id,
-            ),
-            voice_tts_voice_type=_env_first(("VOICE_TTS_VOICE_TYPE", "VOLC_TTS_VOICE_TYPE"), cls.voice_tts_voice_type),
-            voice_tts_audio_format=_env_first(("VOICE_TTS_AUDIO_FORMAT", "VOLC_TTS_AUDIO_FORMAT"), cls.voice_tts_audio_format).lower(),
-            voice_tts_sample_rate=_env_int_first(("VOICE_TTS_SAMPLE_RATE", "VOLC_TTS_SAMPLE_RATE"), cls.voice_tts_sample_rate),
-            voice_tts_speed_ratio=_env_float_first(("VOICE_TTS_SPEED_RATIO", "VOLC_TTS_SPEED_RATIO"), cls.voice_tts_speed_ratio),
+            voice_tts_resource_id=_env("VOICE_TTS_RESOURCE_ID", cls.voice_tts_resource_id),
+            voice_tts_voice_type=_env("VOICE_TTS_VOICE_TYPE", cls.voice_tts_voice_type),
+            voice_tts_audio_format=_env("VOICE_TTS_AUDIO_FORMAT", cls.voice_tts_audio_format).lower(),
+            voice_tts_sample_rate=_env_int("VOICE_TTS_SAMPLE_RATE", cls.voice_tts_sample_rate),
+            voice_tts_speed_ratio=_env_float("VOICE_TTS_SPEED_RATIO", cls.voice_tts_speed_ratio),
             voice_tts_first_chunk_timeout_seconds=_env_int(
                 "VOICE_TTS_FIRST_CHUNK_TIMEOUT_SECONDS",
                 cls.voice_tts_first_chunk_timeout_seconds,
@@ -474,14 +455,6 @@ def _env(name: str, default: str) -> str:
     return os.getenv(name, default).strip() or default
 
 
-def _env_first(names: tuple[str, ...], default: str) -> str:
-    for name in names:
-        raw = os.getenv(name)
-        if raw is not None and raw.strip():
-            return raw.strip()
-    return default
-
-
 def _env_bool(name: str, default: bool) -> bool:
     raw = os.getenv(name)
     if raw is None:
@@ -504,17 +477,6 @@ def _env_int(name: str, default: int) -> int:
         raise ValueError(f"{name} must be an integer") from None
 
 
-def _env_int_first(names: tuple[str, ...], default: int) -> int:
-    for name in names:
-        raw = os.getenv(name)
-        if raw is not None:
-            try:
-                return int(raw.strip())
-            except ValueError:
-                raise ValueError(f"{name} must be an integer") from None
-    return default
-
-
 def _env_float(name: str, default: float) -> float:
     raw = os.getenv(name)
     if raw is None:
@@ -523,17 +485,6 @@ def _env_float(name: str, default: float) -> float:
         return float(raw.strip())
     except ValueError:
         raise ValueError(f"{name} must be a number") from None
-
-
-def _env_float_first(names: tuple[str, ...], default: float) -> float:
-    for name in names:
-        raw = os.getenv(name)
-        if raw is not None:
-            try:
-                return float(raw.strip())
-            except ValueError:
-                raise ValueError(f"{name} must be a number") from None
-    return default
 
 
 def _env_csv(name: str, default: tuple[str, ...]) -> tuple[str, ...]:

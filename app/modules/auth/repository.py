@@ -30,18 +30,7 @@ class AuthAccountRepository:
             .options(selectinload(AuthIdentity.user))
             .where(AuthIdentity.provider == "invite", AuthIdentity.subject == invite_code)
         )
-        identity = cast(AuthIdentity | None, await self.session.scalar(statement))
-        if identity is not None:
-            return identity
-
-        legacy_statement = (
-            select(AuthIdentity)
-            .options(selectinload(AuthIdentity.user))
-            .where(AuthIdentity.provider == "invite", AuthIdentity.subject.startswith(f"{invite_code}:", autoescape=True))
-            .order_by(AuthIdentity.created_at.asc(), AuthIdentity.id.asc())
-            .limit(1)
-        )
-        return cast(AuthIdentity | None, await self.session.scalar(legacy_statement))
+        return cast(AuthIdentity | None, await self.session.scalar(statement))
 
     async def get_user(self, *, user_id: UUID) -> User | None:
         return await self.session.get(User, user_id)

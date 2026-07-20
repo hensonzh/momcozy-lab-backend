@@ -759,6 +759,7 @@
         "type": "object"
       },
       "AgentRunCreate": {
+        "additionalProperties": false,
         "properties": {
           "attachments": {
             "items": {

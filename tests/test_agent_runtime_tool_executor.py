@@ -157,7 +157,6 @@ def test_tool_executor_persists_safe_args_and_output() -> None:
         "user_contact": "mai@example.com",
     }
     assert repository.events[0].payload["semantic"]["surface"] == "work_item"
-    assert repository.events[0].payload["semantic"]["visibility"] == "work_item"
     assert repository.events[0].payload["semantic"]["label"] == "我先帮你准备售后信息表～"
     assert repository.events[1].payload["tool_output_id"] == str(repository.output.id)
     assert repository.events[1].payload["safe_output"] == repository.output.safe_output

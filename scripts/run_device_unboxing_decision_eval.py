@@ -297,7 +297,6 @@ def main() -> None:
         settings=settings,
         model=model_name,
         max_turns=3,
-        trace_enabled=False,
         metrics_node_name="device_unboxing_decision_eval",
     )
     report = asyncio.run(

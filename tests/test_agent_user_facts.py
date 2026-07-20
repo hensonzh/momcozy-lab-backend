@@ -20,8 +20,8 @@ from app.modules.agent_runtime.facts.service import (
     AgentFactService,
     FactInput,
 )
-from app.modules.agent_runtime.sdk import OpenAIAgentsSdkRunner, ScriptedSdkBackend, scripted_sdk_response
-from app.modules.agent_runtime.agents.cozymate_service_agent.tools.legacy_artifacts import (
+from app.modules.agent_runtime.sdk import OpenAIResponsesRunner, ScriptedSdkBackend, scripted_sdk_response
+from app.modules.agent_runtime.agents.cozymate_service_agent.tools.birth_preparation_artifacts import (
     BIRTH_PLAN_FORM_FIELDS,
     HOSPITAL_BAG_FORM_FIELDS,
     birth_plan_form_result,
@@ -583,7 +583,7 @@ def test_fact_extractor_uses_strict_schema_and_drops_non_explicit_or_unknown_can
             )
         ]
     )
-    extractor = AgentFactExtractor(model_runner=OpenAIAgentsSdkRunner(backend=backend))
+    extractor = AgentFactExtractor(model_runner=OpenAIResponsesRunner(backend=backend))
 
     facts = asyncio.run(
         extractor.extract(
@@ -628,7 +628,7 @@ def test_fact_extractor_rejects_evidence_not_present_in_current_user_message() -
             )
         ]
     )
-    extractor = AgentFactExtractor(model_runner=OpenAIAgentsSdkRunner(backend=backend))
+    extractor = AgentFactExtractor(model_runner=OpenAIResponsesRunner(backend=backend))
 
     facts = asyncio.run(
         extractor.extract(
@@ -668,7 +668,7 @@ def test_fact_extractor_rejects_third_party_fact_even_when_evidence_is_present()
             )
         ]
     )
-    extractor = AgentFactExtractor(model_runner=OpenAIAgentsSdkRunner(backend=backend))
+    extractor = AgentFactExtractor(model_runner=OpenAIResponsesRunner(backend=backend))
 
     facts = asyncio.run(
         extractor.extract(
@@ -708,7 +708,7 @@ def test_fact_extractor_does_not_turn_sensitive_medical_notes_into_conversation_
             )
         ]
     )
-    extractor = AgentFactExtractor(model_runner=OpenAIAgentsSdkRunner(backend=backend))
+    extractor = AgentFactExtractor(model_runner=OpenAIResponsesRunner(backend=backend))
 
     facts = asyncio.run(
         extractor.extract(
@@ -734,7 +734,7 @@ def _extract_scripted_candidates(*, source_text: str, candidates: list[dict]) ->
             )
         ]
     )
-    extractor = AgentFactExtractor(model_runner=OpenAIAgentsSdkRunner(backend=backend))
+    extractor = AgentFactExtractor(model_runner=OpenAIResponsesRunner(backend=backend))
     return asyncio.run(
         extractor.extract(
             context=FactExtractionContext(

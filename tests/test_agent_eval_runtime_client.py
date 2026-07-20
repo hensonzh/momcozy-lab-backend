@@ -15,7 +15,7 @@ from app.modules.agent_runtime.models import (
     AgentToolCall,
 )
 from app.modules.agent_runtime.run_lifecycle.executor import AgentRuntimeExecutor
-from app.modules.agent_runtime.sdk import OpenAIAgentsSdkRunner, ScriptedSdkBackend, scripted_sdk_response
+from app.modules.agent_runtime.sdk import OpenAIResponsesRunner, ScriptedSdkBackend, scripted_sdk_response
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -64,7 +64,7 @@ def test_agent_eval_runtime_client_executes_run_and_evaluates_seed_case() -> Non
             )
         ]
     )
-    executor = AgentRuntimeExecutor(repository=repository, sdk_runner=OpenAIAgentsSdkRunner(backend=backend))
+    executor = AgentRuntimeExecutor(repository=repository, sdk_runner=OpenAIResponsesRunner(backend=backend))
     case = {
         "suite": "runtime_trace_collection",
         "name": "supported action trace",
@@ -149,21 +149,6 @@ class FakeEvalRuntimeRepository:
 
     async def get_run(self, *, run_id: UUID):
         return self.run if self.run.id == run_id else None
-
-    async def record_routing_decision(self, **kwargs):
-        if self.run.id == kwargs["run_id"]:
-            self.run.service_skill_id = kwargs["selected_skill_id"]
-            self.run.routing_source = kwargs["routing_source"]
-            self.run.routing_confidence_score = int(float(kwargs["confidence"]) * 100)
-            self.run.routing_summary = {
-                "execution_mode": kwargs["execution_mode"],
-                "intents": kwargs["intents"],
-                "reason_codes": kwargs["reason_codes"],
-                "safety_flags": kwargs["safety_flags"],
-                "needs_clarification": kwargs["needs_clarification"],
-                "tool_scope_version": kwargs["tool_scope_version"],
-            }
-        return kwargs
 
     async def create_action(self, **kwargs):
         action = AgentAction(

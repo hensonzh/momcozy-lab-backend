@@ -23,7 +23,6 @@ from app.modules.agent_runtime.agents.cozymate_service_agent.prompts import (
     resolve_agent_prompt,
 )
 from app.modules.agent_runtime.sdk import (
-    OpenAIAgentsSdkRunner,
     OpenAIResponsesRunner,
     SdkNodeRequest,
     SdkNodeResult,
@@ -225,7 +224,7 @@ def test_static_prompt_keeps_outcome_and_progressive_loading_boundaries() -> Non
     assert DEFAULT_STABLE_SYSTEM_PROMPT == f"{BASE_AGENT_INSTRUCTIONS}\n\n{static_context}"
     assert "# CozyMate" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "## Role" in DEFAULT_STABLE_SYSTEM_PROMPT
-    assert "你是 CozyMate，来自 Momcozy 团队" in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert "你是 CozyMate，Momcozy 打造的母婴智能陪伴顾问" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "温和、自然、直接" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "当前请求的成功条件已经满足时，直接给出最终回复" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "工具调用前不要输出面向用户的过渡文本" in DEFAULT_STABLE_SYSTEM_PROMPT
@@ -260,7 +259,7 @@ def test_current_agent_prompt_version_is_bound_to_its_instructions() -> None:
     prompt = resolve_agent_prompt(CURRENT_AGENT_PROMPT_VERSION)
 
     assert prompt is CURRENT_AGENT_PROMPT
-    assert prompt.version == "momcozy-agent-prompt-v4"
+    assert prompt.version == "momcozy-agent-prompt-v5"
     assert prompt.version == CURRENT_AGENT_PROMPT_VERSION
     assert prompt.instructions == DEFAULT_STABLE_SYSTEM_PROMPT
 
@@ -842,7 +841,7 @@ def _code_span_references(text: str) -> list[str]:
 
 def test_context_builder_projects_dynamic_context_after_selected_history() -> None:
     assert "CozyMate" in DEFAULT_STABLE_SYSTEM_PROMPT
-    assert "你是 CozyMate，来自 Momcozy 团队" in DEFAULT_STABLE_SYSTEM_PROMPT
+    assert "你是 CozyMate，Momcozy 打造的母婴智能陪伴顾问" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "根据当前消息、对话历史和 skill manifest 自主判断" in DEFAULT_STABLE_SYSTEM_PROMPT
 
     model_input = ModelInputBuilder().build(
@@ -886,7 +885,7 @@ def test_sdk_runner_uses_injected_backend_and_never_legacy_loop() -> None:
         tool_names=("profile.read",),
     )
 
-    result = asyncio.run(OpenAIAgentsSdkRunner(backend=FakeSdkBackend()).run_reasoning(request))
+    result = asyncio.run(OpenAIResponsesRunner(backend=FakeSdkBackend()).run_reasoning(request))
 
     assert result.final_text == "hello"
     assert result.tool_calls == [{"tool_name": "profile.read"}]
@@ -1042,11 +1041,10 @@ def test_sdk_runner_uses_responses_namespace_backend_for_tool_search(monkeypatch
     )
 
     result = asyncio.run(
-        OpenAIAgentsSdkRunner(
+        OpenAIResponsesRunner(
             model="gpt-test",
             reasoning_effort="low",
             store_responses=False,
-            use_responses=True,
         ).run_reasoning(request)
     )
 
@@ -1243,7 +1241,7 @@ def test_sdk_runner_routes_responses_function_call_by_namespace_and_name(monkeyp
         ),
     )
 
-    result = asyncio.run(OpenAIAgentsSdkRunner(model="gpt-test", use_responses=True).run_reasoning(request))
+    result = asyncio.run(OpenAIResponsesRunner(model="gpt-test").run_reasoning(request))
 
     assert result.final_text == "已读取。"
     assert invoked == ["milk"]
@@ -1556,7 +1554,7 @@ def test_sdk_runner_uses_responses_backend_without_deferred_tools(monkeypatch: p
         model_input=[{"role": "user", "content": "hello"}],
     )
 
-    result = asyncio.run(OpenAIAgentsSdkRunner(model="gpt-test", use_responses=True).run_reasoning(request))
+    result = asyncio.run(OpenAIResponsesRunner(model="gpt-test").run_reasoning(request))
 
     assert result.final_text == "hello"
     assert len(FakeAsyncOpenAI.calls) == 1
@@ -1637,7 +1635,7 @@ def test_sdk_runner_streams_responses_api_text_deltas(monkeypatch: pytest.Monkey
         on_text_delta=on_text_delta,
     )
 
-    result = asyncio.run(OpenAIAgentsSdkRunner(model="gpt-test").run_reasoning(request))
+    result = asyncio.run(OpenAIResponsesRunner(model="gpt-test").run_reasoning(request))
 
     assert deltas == ["hel", "lo"]
     assert result.final_text == "hello"
@@ -1855,7 +1853,7 @@ def test_sdk_runner_streams_text_without_changing_tools_between_tool_turns(monke
         on_text_delta=on_text_delta,
     )
 
-    result = asyncio.run(OpenAIAgentsSdkRunner(model="gpt-test").run_reasoning(request))
+    result = asyncio.run(OpenAIResponsesRunner(model="gpt-test").run_reasoning(request))
 
     assert deltas == ["工具轮文本。", "保存好了。"]
     assert result.final_text == "保存好了。"
@@ -2031,7 +2029,7 @@ def test_sdk_runner_streams_each_turn_before_response_completed(monkeypatch: pyt
         on_text_delta=on_text_delta,
     )
 
-    result = asyncio.run(OpenAIAgentsSdkRunner(model="gpt-test").run_reasoning(request))
+    result = asyncio.run(OpenAIResponsesRunner(model="gpt-test").run_reasoning(request))
 
     assert deltas == ["工具轮草稿。", "已经", "整理好了。"]
     assert callback_events == ["delta:工具轮草稿。", "delta:已经", "after_delta_before_completed", "delta:整理好了。"]
@@ -2076,40 +2074,12 @@ def test_sdk_runner_uses_streamed_text_when_response_completed_event_is_missing(
         on_text_delta=on_text_delta,
     )
 
-    result = asyncio.run(OpenAIAgentsSdkRunner(model="gpt-test").run_reasoning(request))
+    result = asyncio.run(OpenAIResponsesRunner(model="gpt-test").run_reasoning(request))
 
     assert deltas == ["直接实时发。"]
     assert result.final_text == "直接实时发。"
     assert FakeAsyncOpenAI.calls == []
 
-
-def test_sdk_runner_rejects_deferred_tool_loading_when_responses_backend_disabled() -> None:
-    async def invoke_json(args_json: str) -> SdkToolInvocationResult:
-        return SdkToolInvocationResult(output_json=args_json)
-
-    request = SdkNodeRequest(
-        run_id="run_1",
-        thread_id="thread_1",
-        actor_user_id="user_1",
-        instructions="Use tools.",
-        model_input=[{"role": "user", "content": "hello"}],
-        tool_search_enabled=True,
-        tools=(
-            SdkToolDefinition(
-                contract_name="records.feeding_record.propose",
-                sdk_name=sdk_tool_name("records.feeding_record.propose"),
-                description="提出喂养记录草稿。",
-                params_json_schema={"type": "object", "properties": {}},
-                invoke=invoke_json,
-                defer_loading=True,
-            ),
-        ),
-    )
-
-    with pytest.raises(ApiError) as exc_info:
-        asyncio.run(OpenAIAgentsSdkRunner(model="gpt-test", use_responses=False).run_reasoning(request))
-
-    assert exc_info.value.code == "sdk_tool_search_requires_responses_backend"
 
 
 def test_sdk_runner_reports_missing_backend_as_dependency_error() -> None:
@@ -2122,262 +2092,10 @@ def test_sdk_runner_reports_missing_backend_as_dependency_error() -> None:
     )
 
     with pytest.raises(ApiError) as exc_info:
-        asyncio.run(OpenAIAgentsSdkRunner().run_reasoning(request))
+        asyncio.run(OpenAIResponsesRunner().run_reasoning(request))
 
     assert exc_info.value.code == "dependency_not_configured"
 
-
-def test_sdk_runner_uses_real_agents_sdk_shape_when_package_is_available(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake_agents = types.ModuleType("agents")
-    fake_agents.__spec__ = ModuleSpec("agents", loader=None)
-    fake_agents.Agent = FakeAgentsSdkAgent
-    fake_agents.FunctionTool = FakeAgentsSdkFunctionTool
-    fake_agents.RunConfig = FakeAgentsSdkRunConfig
-    fake_agents.Runner = FakeAgentsSdkRunner
-    monkeypatch.setitem(sys.modules, "agents", fake_agents)
-    request = SdkNodeRequest(
-        run_id="run_1",
-        thread_id="thread_1",
-        actor_user_id="user_1",
-        instructions="Be concise.",
-        model_input=[{"role": "user", "content": "hello"}],
-        tool_names=("profile.read",),
-        prompt_version="prompt-v2",
-        trace_id="trace_1",
-        service_skill_id="cozymate_service_agent",
-    )
-
-    result = asyncio.run(OpenAIAgentsSdkRunner(model="gpt-test", max_turns=3, trace_enabled=True).run_reasoning(request))
-
-    assert result.final_text == "sdk final"
-    assert FakeAgentsSdkAgent.created["model"] == "gpt-test"
-    assert FakeAgentsSdkAgent.created["instructions"] == "Be concise."
-    assert FakeAgentsSdkRunner.last_input == "user: hello"
-    assert FakeAgentsSdkRunner.last_max_turns == 3
-    assert FakeAgentsSdkRunner.last_run_config.tracing_disabled is False
-    assert FakeAgentsSdkRunner.last_run_config.trace_include_sensitive_data is False
-    assert FakeAgentsSdkRunner.last_run_config.trace_id == "trace_1"
-    assert FakeAgentsSdkRunner.last_run_config.group_id == "thread_1"
-    assert FakeAgentsSdkRunner.last_run_config.trace_metadata["run_id"] == "run_1"
-    assert FakeAgentsSdkRunner.last_run_config.trace_metadata["prompt_version"] == "prompt-v2"
-    assert FakeAgentsSdkRunner.last_run_config.trace_metadata["service_skill_id"] == "cozymate_service_agent"
-    assert FakeAgentsSdkRunner.last_run_config.trace_metadata["tool_names"] == ["profile.read"]
-    assert FakeAgentsSdkRunner.last_previous_response_id is None
-    assert FakeAgentsSdkRunner.last_auto_previous_response_id is False
-    assert FakeAgentsSdkRunner.last_conversation_id is None
-    assert FakeAgentsSdkRunner.last_session is None
-
-
-def test_sdk_runner_disables_provider_tracing_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake_agents = types.ModuleType("agents")
-    fake_agents.__spec__ = ModuleSpec("agents", loader=None)
-    fake_agents.Agent = FakeAgentsSdkAgent
-    fake_agents.FunctionTool = FakeAgentsSdkFunctionTool
-    fake_agents.RunConfig = FakeAgentsSdkRunConfig
-    fake_agents.Runner = FakeAgentsSdkRunner
-    monkeypatch.setitem(sys.modules, "agents", fake_agents)
-
-    asyncio.run(
-        OpenAIAgentsSdkRunner(model="gpt-test").run_reasoning(
-            SdkNodeRequest(
-                run_id="run_1",
-                thread_id="thread_1",
-                actor_user_id="user_1",
-                instructions="Be concise.",
-                model_input=[{"role": "user", "content": "hello"}],
-            )
-        )
-    )
-
-    assert FakeAgentsSdkRunner.last_run_config.tracing_disabled is True
-
-
-def test_sdk_runner_maps_streamed_text_deltas_to_callback(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake_agents = types.ModuleType("agents")
-    fake_agents.__spec__ = ModuleSpec("agents", loader=None)
-    fake_agents.Agent = FakeAgentsSdkAgent
-    fake_agents.FunctionTool = FakeAgentsSdkFunctionTool
-    fake_agents.RunConfig = FakeAgentsSdkRunConfig
-    fake_agents.Runner = StreamingAgentsSdkRunner
-    monkeypatch.setitem(sys.modules, "agents", fake_agents)
-    deltas = []
-
-    async def on_text_delta(delta: str) -> None:
-        deltas.append(delta)
-
-    result = asyncio.run(
-        OpenAIAgentsSdkRunner(model="gpt-test").run_reasoning(
-            SdkNodeRequest(
-                run_id="run_1",
-                thread_id="thread_1",
-                actor_user_id="user_1",
-                instructions="Be concise.",
-                model_input=[{"role": "user", "content": "hello"}],
-                on_text_delta=on_text_delta,
-            )
-        )
-    )
-
-    assert deltas == ["hel", "lo"]
-    assert result.final_text == "hello"
-    assert StreamingAgentsSdkRunner.last_input == "user: hello"
-
-
-def test_sdk_runner_flattens_structured_context_as_stable_json(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake_agents = types.ModuleType("agents")
-    fake_agents.__spec__ = ModuleSpec("agents", loader=None)
-    fake_agents.Agent = FakeAgentsSdkAgent
-    fake_agents.FunctionTool = FakeAgentsSdkFunctionTool
-    fake_agents.RunConfig = FakeAgentsSdkRunConfig
-    fake_agents.Runner = FakeAgentsSdkRunner
-    monkeypatch.setitem(sys.modules, "agents", fake_agents)
-    request = SdkNodeRequest(
-        run_id="run_1",
-        thread_id="thread_1",
-        actor_user_id="user_1",
-        instructions="Be concise.",
-        model_input=[
-            {"role": "developer", "content": {"state": {"z": 2, "a": 1}}},
-            {"role": "user", "content": "hello"},
-        ],
-    )
-
-    asyncio.run(OpenAIAgentsSdkRunner(model="gpt-test").run_reasoning(request))
-
-    assert FakeAgentsSdkRunner.last_input == 'developer: {"state":{"a":1,"z":2}}\nuser: hello'
-
-
-def test_agents_sdk_runner_preserves_initial_user_image_input(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake_agents = types.ModuleType("agents")
-    fake_agents.__spec__ = ModuleSpec("agents", loader=None)
-    fake_agents.Agent = FakeAgentsSdkAgent
-    fake_agents.FunctionTool = FakeAgentsSdkFunctionTool
-    fake_agents.RunConfig = FakeAgentsSdkRunConfig
-    fake_agents.Runner = FakeAgentsSdkRunner
-    monkeypatch.setitem(sys.modules, "agents", fake_agents)
-    multimodal_input = {
-        "role": "user",
-        "content": [
-            {"type": "input_text", "text": "请看这张图片"},
-            {
-                "type": "input_image",
-                "image_url": "data:image/jpeg;base64,aW1hZ2U=",
-                "detail": "auto",
-            },
-        ],
-    }
-    request = SdkNodeRequest(
-        run_id="run_1",
-        thread_id="thread_1",
-        actor_user_id="user_1",
-        instructions="Describe only visible image content.",
-        model_input=[
-            {"role": "developer", "content": {"runtime_context": {"skills": []}}},
-            multimodal_input,
-        ],
-    )
-
-    result = asyncio.run(OpenAIAgentsSdkRunner(model="gpt-test").run_reasoning(request))
-
-    assert result.final_text == "sdk final"
-    assert FakeAgentsSdkRunner.last_input == [
-        {"role": "developer", "content": '{"runtime_context":{"skills":[]}}'},
-        multimodal_input,
-    ]
-
-
-def test_sdk_runner_wraps_application_tool_executor_for_agents_sdk(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake_agents = types.ModuleType("agents")
-    fake_agents.__spec__ = ModuleSpec("agents", loader=None)
-    fake_agents.Agent = FakeAgentsSdkAgent
-    fake_agents.FunctionTool = FakeAgentsSdkFunctionTool
-    fake_agents.RunConfig = FakeAgentsSdkRunConfig
-    fake_agents.Runner = ToolCallingAgentsSdkRunner
-    monkeypatch.setitem(sys.modules, "agents", fake_agents)
-
-    async def invoke_json(args_json: str) -> SdkToolInvocationResult:
-        return SdkToolInvocationResult(output_json=f"tool-output:{args_json}")
-
-    request = SdkNodeRequest(
-        run_id="run_1",
-        thread_id="thread_1",
-        actor_user_id="user_1",
-        instructions="Use tools.",
-        model_input=[{"role": "user", "content": "read profile"}],
-        tools=(
-            SdkToolDefinition(
-                contract_name="profile.read",
-                sdk_name=sdk_tool_name("profile.read"),
-                description="Read profile.",
-                params_json_schema={"type": "object", "properties": {}},
-                invoke=invoke_json,
-            ),
-        ),
-    )
-
-    result = asyncio.run(OpenAIAgentsSdkRunner(model="gpt-test").run_reasoning(request))
-
-    assert result.final_text == 'tool-output:{"owner_user_id": "user_1"}'
-    assert result.tool_calls == [
-        {
-            "tool_name": "profile.read",
-            "status": "completed",
-            "args": {"owner_user_id": "user_1"},
-            "safe_output": 'tool-output:{"owner_user_id": "user_1"}',
-        }
-    ]
-    assert FakeAgentsSdkAgent.created["tools"][0].name == "profile_read"
-    assert FakeAgentsSdkAgent.created["tools"][0].params_json_schema == {"type": "object", "properties": {}}
-    assert FakeAgentsSdkAgent.created["tools"][0].strict_json_schema is False
-
-
-def test_agents_sdk_flat_tool_fallback_preserves_transient_model_context(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake_agents = types.ModuleType("agents")
-    fake_agents.__spec__ = ModuleSpec("agents", loader=None)
-    fake_agents.Agent = FakeAgentsSdkAgent
-    fake_agents.FunctionTool = FakeAgentsSdkFunctionTool
-    fake_agents.RunConfig = FakeAgentsSdkRunConfig
-    fake_agents.Runner = ToolCallingAgentsSdkRunner
-    monkeypatch.setitem(sys.modules, "agents", fake_agents)
-
-    async def invoke_json(_args_json: str) -> SdkToolInvocationResult:
-        return SdkToolInvocationResult(
-            output_json='{"status":"intake_analyzed"}',
-            safe_output_json='{"status":"intake_analyzed"}',
-            model_context=(
-                {
-                    "role": "developer",
-                    "content": '{"trusted_pregnancy_plan_intake":{"facts":{"age":36}}}',
-                },
-            ),
-        )
-
-    result = asyncio.run(
-        OpenAIAgentsSdkRunner(model="gpt-test").run_reasoning(
-            SdkNodeRequest(
-                run_id="run_1",
-                thread_id="thread_1",
-                actor_user_id="user_1",
-                instructions="Use tools.",
-                model_input=[{"role": "user", "content": "analyze"}],
-                tools=(
-                    SdkToolDefinition(
-                        contract_name="pregnancy.plan_intake.analyze",
-                        sdk_name=sdk_tool_name("pregnancy.plan_intake.analyze"),
-                        description="Analyze intake.",
-                        params_json_schema={"type": "object", "properties": {}},
-                        invoke=invoke_json,
-                    ),
-                ),
-            )
-        )
-    )
-
-    output = json.loads(result.final_text)
-    assert output["result"] == {"status": "intake_analyzed"}
-    assert output["trusted_model_context"][0]["role"] == "developer"
-    assert '"age":36' in output["trusted_model_context"][0]["content"]
-    assert result.tool_calls[0]["safe_output"] == {"status": "intake_analyzed"}
 
 
 def test_sdk_runner_records_backend_metrics() -> None:
@@ -2391,12 +2109,12 @@ def test_sdk_runner_records_backend_metrics() -> None:
         tool_names=("profile.read",),
     )
 
-    asyncio.run(OpenAIAgentsSdkRunner(backend=FakeSdkBackend(), metrics=metrics).run_reasoning(request))
+    asyncio.run(OpenAIResponsesRunner(backend=FakeSdkBackend(), metrics=metrics).run_reasoning(request))
     with pytest.raises(ApiError):
-        asyncio.run(OpenAIAgentsSdkRunner(metrics=metrics).run_reasoning(request))
+        asyncio.run(OpenAIResponsesRunner(metrics=metrics).run_reasoning(request))
 
     sdk_metrics = metrics.snapshot()["agent_sdk"][0]
-    assert sdk_metrics["node_name"] == "openai_agents_sdk"
+    assert sdk_metrics["node_name"] == "openai_responses"
     assert sdk_metrics["outcome_counts"]["completed"] == 1
     assert sdk_metrics["outcome_counts"]["failed"] == 1
     assert sdk_metrics["error_code_counts"]["dependency_not_configured"] == 1
@@ -2413,7 +2131,7 @@ def test_sdk_runner_times_out_slow_backend() -> None:
     )
 
     with pytest.raises(ApiError) as exc_info:
-        asyncio.run(OpenAIAgentsSdkRunner(backend=SlowSdkBackend(), metrics=metrics, timeout_seconds=0.001).run_reasoning(request))
+        asyncio.run(OpenAIResponsesRunner(backend=SlowSdkBackend(), metrics=metrics, timeout_seconds=0.001).run_reasoning(request))
 
     assert exc_info.value.code == "sdk_run_timed_out"
     sdk_metrics = metrics.snapshot()["agent_sdk"][0]
@@ -2442,7 +2160,7 @@ def test_sdk_runner_maps_provider_errors_to_stable_codes(status_code: int | None
     )
 
     with pytest.raises(ApiError) as exc_info:
-        asyncio.run(OpenAIAgentsSdkRunner(backend=FailingSdkBackend(exc), metrics=metrics).run_reasoning(request))
+        asyncio.run(OpenAIResponsesRunner(backend=FailingSdkBackend(exc), metrics=metrics).run_reasoning(request))
 
     assert exc_info.value.code == expected_code
     sdk_metrics = metrics.snapshot()["agent_sdk"][0]
@@ -2577,121 +2295,3 @@ class FakeOpenAIResponseStream:
 
     async def get_final_response(self):
         return self._final_response
-
-
-class FakeAgentsSdkAgent:
-    created = {}
-
-    def __init__(self, *, name: str, instructions: str, model: str, tools=()) -> None:
-        self.name = name
-        self.instructions = instructions
-        self.model = model
-        self.tools = tools
-        FakeAgentsSdkAgent.created = {"name": name, "instructions": instructions, "model": model, "tools": tools}
-
-
-class FakeAgentsSdkFunctionTool:
-    def __init__(
-        self,
-        *,
-        name: str,
-        description: str,
-        params_json_schema: dict,
-        on_invoke_tool,
-        strict_json_schema: bool = True,
-    ) -> None:
-        self.name = name
-        self.description = description
-        self.params_json_schema = params_json_schema
-        self.on_invoke_tool = on_invoke_tool
-        self.strict_json_schema = strict_json_schema
-
-
-class FakeAgentsSdkRunConfig:
-    def __init__(
-        self,
-        *,
-        tracing_disabled: bool,
-        trace_include_sensitive_data: bool,
-        trace_id: str | None,
-        group_id: str | None,
-        workflow_name: str,
-        trace_metadata: dict,
-    ) -> None:
-        self.tracing_disabled = tracing_disabled
-        self.trace_include_sensitive_data = trace_include_sensitive_data
-        self.trace_id = trace_id
-        self.group_id = group_id
-        self.workflow_name = workflow_name
-        self.trace_metadata = trace_metadata
-
-
-class FakeAgentsSdkRunner:
-    last_input = ""
-    last_max_turns = None
-    last_run_config = None
-    last_previous_response_id = None
-    last_auto_previous_response_id = None
-    last_conversation_id = None
-    last_session = None
-
-    @staticmethod
-    async def run(
-        agent: FakeAgentsSdkAgent,
-        input: str,
-        *,
-        max_turns=None,
-        run_config=None,
-        previous_response_id=None,
-        auto_previous_response_id=False,
-        conversation_id=None,
-        session=None,
-    ):
-        FakeAgentsSdkRunner.last_input = input
-        FakeAgentsSdkRunner.last_max_turns = max_turns
-        FakeAgentsSdkRunner.last_run_config = run_config
-        FakeAgentsSdkRunner.last_previous_response_id = previous_response_id
-        FakeAgentsSdkRunner.last_auto_previous_response_id = auto_previous_response_id
-        FakeAgentsSdkRunner.last_conversation_id = conversation_id
-        FakeAgentsSdkRunner.last_session = session
-        return FakeAgentsSdkResult(final_output="sdk final")
-
-
-class StreamingAgentsSdkRunner:
-    last_input = ""
-
-    @staticmethod
-    def run_streamed(agent: FakeAgentsSdkAgent, input: str, *, max_turns=None, run_config=None):
-        StreamingAgentsSdkRunner.last_input = input
-        return FakeAgentsSdkStreamingResult(final_output="hello")
-
-
-class FakeAgentsSdkStreamingResult:
-    def __init__(self, *, final_output: str) -> None:
-        self.final_output = final_output
-
-    async def stream_events(self):
-        yield types.SimpleNamespace(
-            type="raw_response_event",
-            data=types.SimpleNamespace(type="response.output_text.delta", delta="hel"),
-        )
-        yield types.SimpleNamespace(
-            type="raw_response_event",
-            data=types.SimpleNamespace(type="response.output_text.delta", delta="lo"),
-        )
-        yield types.SimpleNamespace(
-            type="run_item_stream_event",
-            data=types.SimpleNamespace(type="not_a_text_delta", delta="ignored"),
-        )
-
-
-class ToolCallingAgentsSdkRunner:
-    @staticmethod
-    async def run(agent: FakeAgentsSdkAgent, input: str, *, max_turns=None, run_config=None):
-        output = await agent.tools[0].on_invoke_tool(None, '{"owner_user_id": "user_1"}')
-        return FakeAgentsSdkResult(final_output=output)
-
-
-class FakeAgentsSdkResult:
-    def __init__(self, *, final_output: str) -> None:
-        self.final_output = final_output

@@ -76,7 +76,7 @@ def _check_environment_profiles(backend: Path) -> list[CheckResult]:
             "REDIS_URL=redis://redis",
             "OBJECT_STORAGE_PROVIDER=minio",
             "OBJECT_STORAGE_ENDPOINT_URL=http://minio:9000",
-            "OPENAI_AGENT_USE_RESPONSES=true",
+            "OPENAI_MODEL=gpt-5.6-terra",
             "AGENT_MEMORY_CONSOLIDATION_MODEL=gpt-5.4-nano",
         ],
         "env/compose.test.env.example": [
@@ -85,7 +85,7 @@ def _check_environment_profiles(backend: Path) -> list[CheckResult]:
             "REDIS_URL=redis://redis",
             "OBJECT_STORAGE_PROVIDER=minio",
             "OBJECT_STORAGE_ENDPOINT_URL=http://minio:9000",
-            "OPENAI_AGENT_USE_RESPONSES=true",
+            "OPENAI_MODEL=gpt-5.6-terra",
             "AGENT_MEMORY_CONSOLIDATION_MODEL=gpt-5.4-nano",
         ],
         "env/compose.prod.env.example": [
@@ -94,7 +94,7 @@ def _check_environment_profiles(backend: Path) -> list[CheckResult]:
             "AUTH_REQUIRE_ACTIVE_SESSION=true",
             "METRICS_REQUIRE_SERVICE_KEY=true",
             "OUTBOX_WORKER_ENABLED=true",
-            "OPENAI_AGENT_USE_RESPONSES=true",
+            "OPENAI_MODEL=gpt-5.6-terra",
             "AGENT_MEMORY_CONSOLIDATION_MODEL=gpt-5.4-nano",
         ],
     }

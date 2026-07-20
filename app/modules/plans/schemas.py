@@ -4,7 +4,7 @@ from datetime import date
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class PlanRead(BaseModel):
@@ -17,11 +17,6 @@ class PlanRead(BaseModel):
     source: str
     payload: dict[str, Any]
     version: int
-
-    @field_validator("version", mode="before")
-    @classmethod
-    def default_legacy_version(cls, value: object) -> int:
-        return value if isinstance(value, int) and value >= 1 else 1
 
     model_config = ConfigDict(from_attributes=True)
 

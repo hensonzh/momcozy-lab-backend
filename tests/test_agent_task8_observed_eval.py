@@ -53,7 +53,7 @@ from app.modules.agent_runtime.models import (
 )
 from app.modules.agent_runtime.run_lifecycle.executor import AgentRuntimeExecutor
 from app.modules.agent_runtime.sdk import (
-    OpenAIAgentsSdkRunner,
+    OpenAIResponsesRunner,
     SdkNodeRequest,
     SdkNodeResult,
     ScriptedSdkBackend,
@@ -764,7 +764,7 @@ class ObservedScenario:
         )
         executor = AgentRuntimeExecutor(
             repository=self.repository,
-            sdk_runner=OpenAIAgentsSdkRunner(backend=scripted_backend),
+            sdk_runner=OpenAIResponsesRunner(backend=scripted_backend),
             tool_registry=registry,
             tool_executor=tool_executor,
         )
@@ -977,22 +977,6 @@ class RecordingRuntimeRepository:
     async def get_run_for_owner(self, *, run_id: UUID, owner_user_id: UUID):
         run = await self.get_run(run_id=run_id)
         return run if run is not None and run.actor_user_id == owner_user_id else None
-
-    async def record_routing_decision(self, **kwargs):
-        run = await self.get_run(run_id=kwargs["run_id"])
-        assert run is not None
-        run.service_skill_id = kwargs["selected_skill_id"]
-        run.routing_source = kwargs["routing_source"]
-        run.routing_confidence_score = int(float(kwargs["confidence"]) * 100)
-        run.routing_summary = {
-            "execution_mode": kwargs["execution_mode"],
-            "intents": kwargs["intents"],
-            "reason_codes": kwargs["reason_codes"],
-            "safety_flags": kwargs["safety_flags"],
-            "needs_clarification": kwargs["needs_clarification"],
-            "tool_scope_version": kwargs["tool_scope_version"],
-        }
-        return kwargs
 
     async def start_tool_call(self, **kwargs):
         call = AgentToolCall(

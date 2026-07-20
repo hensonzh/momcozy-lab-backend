@@ -20,7 +20,6 @@ def test_run_progress_payload_uses_status_bar_semantic_for_visible_progress() ->
         "phase": "replying",
         "label": "我在组织回复～",
         "surface": "status_bar",
-        "visibility": "status",
         "merge_key": "progress:response_finalizing",
         "priority": 80,
         "lifecycle": "running",
@@ -28,24 +27,22 @@ def test_run_progress_payload_uses_status_bar_semantic_for_visible_progress() ->
     assert progress_live_dedupe_key(run_id=uuid4(), semantic=payload["semantic"])
 
 
-def test_run_progress_payload_aligns_context_ready_with_legacy_routing_copy() -> None:
+def test_run_progress_payload_aligns_context_ready_with_canonical_surface() -> None:
     payload = run_progress_payload(phase="context_ready", label="我先理解一下你的需求～")
 
     assert payload["label"] == "我先理解一下你的需求～"
     assert payload["semantic"]["label"] == "我先理解一下你的需求～"
     assert payload["semantic"]["surface"] == "status_bar"
-    assert payload["semantic"]["visibility"] == "status"
 
 
 def test_run_progress_payload_keeps_model_reasoning_out_of_status_bar() -> None:
     payload = run_progress_payload(phase="model_reasoning", label="我想一下")
 
     assert payload["semantic"]["surface"] == "thinking_note"
-    assert payload["semantic"]["visibility"] == "hidden"
     assert payload["semantic"]["label"] == "我想一下"
 
 
-def test_after_tool_progress_preserves_legacy_status_and_thinking_layers() -> None:
+def test_after_tool_progress_preserves_status_and_thinking_layers() -> None:
     followup = run_progress_payload(phase="model_followup", label="我接着处理下一步")
     reasoning = run_progress_payload(phase="model_reasoning_after_tool", label="我想一下")
 
@@ -53,13 +50,11 @@ def test_after_tool_progress_preserves_legacy_status_and_thinking_layers() -> No
         "phase": "thinking",
         "label": "我接着处理下一步",
         "surface": "status_bar",
-        "visibility": "status",
         "merge_key": "progress:model_followup",
         "priority": 55,
         "lifecycle": "running",
     }
     assert reasoning["semantic"]["surface"] == "thinking_note"
-    assert reasoning["semantic"]["visibility"] == "hidden"
     assert reasoning["semantic"]["label"] == "我想一下"
 
 
@@ -73,7 +68,6 @@ def test_tool_event_semantic_uses_tool_specific_copy() -> None:
     assert semantic["phase"] == "reading"
     assert semantic["label"] == "我先看看今天的奶量状态～"
     assert semantic["surface"] == "work_item"
-    assert semantic["visibility"] == "work_item"
     assert semantic["lifecycle"] == "running"
 
 
@@ -225,28 +219,23 @@ def test_pregnancy_diary_no_op_completion_does_not_claim_write_success(
     assert forbidden_success_copy not in semantic["label"]
 
 
-def test_artifact_and_confirmation_semantics_use_legacy_visible_surfaces() -> None:
+def test_artifact_and_confirmation_semantics_use_canonical_visible_surfaces() -> None:
     artifact = artifact_event_payload_semantic(artifact_type="hospital_bag_card", artifact_id="artifact-1")
     action = action_event_payload_semantic(action_status="pending", action_id="action-1")
 
     assert artifact["label"] == "我已经帮你生成好待产包清单啦"
     assert artifact["surface"] == "artifact"
-    assert artifact["visibility"] == "artifact"
     assert artifact["merge_key"] == "artifact:artifact-1"
     assert action["label"] == "我需要你确认一下，再继续处理"
     assert action["surface"] == "action"
-    assert action["visibility"] == "action"
     assert action["merge_key"] == "action:action-1"
 
 
-def test_run_events_carry_legacy_terminal_semantics() -> None:
+def test_run_events_carry_canonical_terminal_semantics() -> None:
     started = run_event_payload_semantic(event_type="run.started", run_id="run-1")
     failed = run_event_payload_semantic(event_type="run.failed", run_id="run-1")
     completed = run_event_payload_semantic(event_type="run.completed", run_id="run-1")
 
     assert started["label"] == "我已经收到你的消息啦～"
-    assert started["visibility"] == "status"
     assert failed["label"] == "这轮暂时没处理好"
-    assert failed["visibility"] == "status"
     assert completed["label"] == "我处理好啦"
-    assert completed["visibility"] == "hidden"

@@ -278,7 +278,6 @@ class OpenAIResponsesRunner:
         self.reasoning_effort = reasoning_effort
         self.text_verbosity = text_verbosity
         self.store_responses = store_responses
-        self.use_responses = True
         self.metrics_node_name = metrics_node_name
 
     async def run_reasoning(self, request: SdkNodeRequest) -> SdkNodeResult:
@@ -326,197 +325,6 @@ class OpenAIResponsesRunner:
                 error_code=error_code,
                 duration_ms=(perf_counter() - started_at) * 1000,
             )
-
-
-class OpenAIAgentsSdkBackend:
-    def __init__(
-        self,
-        *,
-        model: str,
-        max_turns: int = 10,
-        trace_enabled: bool = False,
-        api_key: str = "",
-        base_url: str = "",
-        use_responses: bool | None = None,
-        buffer_streamed_tool_calls: bool = False,
-    ) -> None:
-        self.model = model
-        self.max_turns = max_turns
-        self.trace_enabled = trace_enabled
-        self.api_key = api_key
-        self.base_url = base_url
-        self.use_responses = use_responses
-        self.buffer_streamed_tool_calls = buffer_streamed_tool_calls
-
-    async def run(self, request: SdkNodeRequest) -> SdkNodeResult:
-        if request.web_search_enabled:
-            raise ApiError(
-                code="sdk_web_search_provider_not_supported",
-                message="Web search requires the OpenAI Responses backend.",
-                status=503,
-            )
-        if request.tool_search_enabled or any(tool.defer_loading for tool in request.tools):
-            raise ApiError(
-                code="sdk_tool_search_requires_responses_backend",
-                message="Deferred tool loading requires the OpenAI Responses namespace backend.",
-                status=503,
-            )
-        try:
-            agents_module = importlib.import_module("agents")
-        except ImportError as exc:
-            raise ApiError(code="dependency_not_configured", message="OpenAI Agents SDK is not installed.", status=503) from exc
-
-        agent_cls = getattr(agents_module, "Agent", None)
-        runner_cls = getattr(agents_module, "Runner", None)
-        if agent_cls is None or runner_cls is None:
-            raise ApiError(code="dependency_not_configured", message="OpenAI Agents SDK Agent/Runner is unavailable.", status=503)
-        if _is_real_agents_module(agents_module) and not _has_openai_credentials(api_key=self.api_key):
-            raise ApiError(
-                code="dependency_not_configured",
-                message="OpenAI Agents SDK credentials are not configured.",
-                status=503,
-            )
-
-        observed_tool_calls: list[dict[str, Any]] = []
-        agent_kwargs: dict[str, Any] = {
-            "name": "MomCozy assistant",
-            "instructions": request.instructions,
-            "model": self.model,
-            "tools": [
-                _build_function_tool(
-                    agents_module=agents_module,
-                    definition=definition,
-                    observed_tool_calls=observed_tool_calls,
-                )
-                for definition in request.tools
-            ],
-        }
-        agent = agent_cls(**agent_kwargs)
-        run_kwargs: dict[str, Any] = {"max_turns": self.max_turns}
-        run_config = _build_run_config(
-            agents_module=agents_module,
-            request=request,
-            trace_enabled=self.trace_enabled,
-            api_key=self.api_key,
-            base_url=self.base_url,
-            use_responses=self.use_responses,
-            buffer_streamed_tool_calls=self.buffer_streamed_tool_calls,
-        )
-        if run_config is not None:
-            run_kwargs["run_config"] = run_config
-        if request.on_text_delta is not None and hasattr(runner_cls, "run_streamed"):
-            result = await _run_streamed(
-                runner_cls=runner_cls,
-                agent=agent,
-                model_input=_agents_sdk_input(request.model_input),
-                run_kwargs=run_kwargs,
-                on_text_delta=request.on_text_delta,
-            )
-            result.tool_calls.extend(observed_tool_calls)
-            return result
-
-        result = await runner_cls.run(agent, _agents_sdk_input(request.model_input), **run_kwargs)
-        final_output = getattr(result, "final_output", "")
-        return SdkNodeResult(
-            final_text=_sanitize_model_text(str(final_output or "")),
-            tool_calls=observed_tool_calls,
-        )
-
-
-class OpenAIAgentsSdkRunner:
-    def __init__(
-        self,
-        *,
-        backend: SdkRunnerBackend | None = None,
-        metrics: RequestMetrics | None = None,
-        model: str = "gpt-5.6-terra",
-        max_turns: int = 10,
-        timeout_seconds: float = 60,
-        trace_enabled: bool = False,
-        api_key: str = "",
-        base_url: str = "",
-        use_responses: bool | None = None,
-        buffer_streamed_tool_calls: bool = False,
-        metrics_node_name: str = "openai_agents_sdk",
-        reasoning_effort: str = "low",
-        text_verbosity: str = "low",
-        store_responses: bool = False,
-    ) -> None:
-        self.backend = backend
-        self.metrics = metrics
-        self.model = model
-        self.max_turns = max_turns
-        self.timeout_seconds = timeout_seconds
-        self.trace_enabled = trace_enabled
-        self.provider = "openai"
-        self.api_key = api_key
-        self.base_url = base_url
-        self.use_responses = use_responses
-        self.buffer_streamed_tool_calls = buffer_streamed_tool_calls
-        self.metrics_node_name = metrics_node_name
-        self.reasoning_effort = reasoning_effort
-        self.text_verbosity = text_verbosity
-        self.store_responses = store_responses
-
-    async def run_reasoning(self, request: SdkNodeRequest) -> SdkNodeResult:
-        started_at = perf_counter()
-        try:
-            backend = self.backend or self._default_backend(request)
-            result = await asyncio.wait_for(backend.run(request), timeout=self.timeout_seconds)
-            self._record(outcome="completed", error_code="", started_at=started_at)
-            return result
-        except TimeoutError as exc:
-            self._record(outcome="failed", error_code="sdk_run_timed_out", started_at=started_at)
-            raise ApiError(code="sdk_run_timed_out", message="OpenAI Agents SDK run timed out.", status=504) from exc
-        except ApiError as exc:
-            self._record(outcome="failed", error_code=exc.code, started_at=started_at)
-            raise
-        except Exception as exc:
-            mapped = _provider_error_mapping(exc)
-            self._record(outcome="failed", error_code=mapped.code, started_at=started_at)
-            raise ApiError(
-                code=mapped.code,
-                message=mapped.message,
-                status=mapped.status,
-                details=_provider_error_details(exc),
-            ) from exc
-
-    def _record(self, *, outcome: str, error_code: str, started_at: float) -> None:
-        if self.metrics is not None:
-            self.metrics.record_agent_sdk(
-                node_name=self.metrics_node_name,
-                outcome=outcome,
-                error_code=error_code,
-                duration_ms=(perf_counter() - started_at) * 1000,
-            )
-
-    def supports_tool_namespaces(self) -> bool:
-        return self.use_responses is not False
-
-    def supports_web_search(self) -> bool:
-        return self.use_responses is not False
-
-    def _default_backend(self, request: SdkNodeRequest) -> SdkRunnerBackend:
-        responses_required = request.tool_search_enabled or request.web_search_enabled
-        if self.use_responses is True or (self.use_responses is None and responses_required):
-            return OpenAIResponsesApiBackend(
-                model=self.model,
-                max_turns=self.max_turns,
-                api_key=self.api_key,
-                base_url=self.base_url,
-                reasoning_effort=self.reasoning_effort,
-                text_verbosity=self.text_verbosity,
-                store_responses=self.store_responses,
-            )
-        return OpenAIAgentsSdkBackend(
-            model=self.model,
-            max_turns=self.max_turns,
-            trace_enabled=self.trace_enabled,
-            api_key=self.api_key,
-            base_url=self.base_url,
-            use_responses=self.use_responses,
-            buffer_streamed_tool_calls=self.buffer_streamed_tool_calls,
-        )
 
 
 def responses_tools_payload(request: SdkNodeRequest) -> list[dict[str, Any]]:
@@ -960,69 +768,6 @@ def _response_id(response: Any | None) -> str:
     return str(_item_value(response, "id", "") or "")
 
 
-def _flatten_model_input(model_input: list[dict[str, Any]]) -> str:
-    lines: list[str] = []
-    for item in model_input:
-        role = str(item.get("role") or "user")
-        content = item.get("content")
-        lines.append(f"{role}: {_stringify_content(content)}")
-    return "\n".join(lines)
-
-
-def _agents_sdk_input(model_input: list[dict[str, Any]]) -> str | list[dict[str, Any]]:
-    if any(isinstance(item.get("content"), list) for item in model_input):
-        return _responses_input_items(model_input)
-    return _flatten_model_input(model_input)
-
-
-async def _run_streamed(
-    *,
-    runner_cls: Any,
-    agent: Any,
-    model_input: str | list[dict[str, Any]],
-    run_kwargs: dict[str, Any],
-    on_text_delta: SdkTextDeltaHandler,
-) -> SdkNodeResult:
-    streamed = runner_cls.run_streamed(agent, model_input, **run_kwargs)
-    raw_text = ""
-    projector = AppendOnlyAgentResponseProjector()
-    async for event in streamed.stream_events():
-        delta = _text_delta_from_stream_event(event)
-        if delta:
-            raw_text += delta
-            sanitized_delta = projector.push(delta)
-            if sanitized_delta:
-                await on_text_delta(sanitized_delta)
-    final_delta = projector.finalize()
-    if final_delta:
-        await on_text_delta(final_delta)
-    final_output = getattr(streamed, "final_output", "")
-    sanitized_text = _sanitize_model_text(str(final_output or "") or raw_text)
-    return SdkNodeResult(final_text=sanitized_text)
-
-
-def _text_delta_from_stream_event(event: Any) -> str:
-    if str(getattr(event, "type", "") or "") != "raw_response_event":
-        return ""
-    data = getattr(event, "data", None)
-    event_type = str(getattr(data, "type", "") or "")
-    if event_type and "delta" not in event_type:
-        return ""
-    for attr in ("delta", "text", "content"):
-        value = getattr(data, attr, None)
-        if isinstance(value, str) and value:
-            return value
-    return ""
-
-
-def _stringify_content(content: object) -> str:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, dict | list):
-        return json.dumps(content, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
-    return str(content)
-
-
 def _sanitize_model_text(text: str) -> str:
     return sanitize_agent_response_text(text).text
 
@@ -1030,43 +775,6 @@ def _sanitize_model_text(text: str) -> str:
 def sdk_tool_name(contract_name: str) -> str:
     normalized = re.sub(r"[^a-zA-Z0-9_-]+", "_", contract_name).strip("_")
     return normalized or "tool"
-
-
-def _build_function_tool(
-    *,
-    agents_module: Any,
-    definition: SdkToolDefinition,
-    observed_tool_calls: list[dict[str, Any]] | None = None,
-) -> Any:
-    function_tool_cls = getattr(agents_module, "FunctionTool", None)
-    if function_tool_cls is None:
-        raise ApiError(code="dependency_not_configured", message="OpenAI Agents SDK FunctionTool is unavailable.", status=503)
-
-    async def invoke_tool(_ctx: Any, args: str) -> str:
-        try:
-            invocation = await definition.invoke(args)
-            if observed_tool_calls is not None:
-                observed_tool_calls.append(
-                    {
-                        "tool_name": definition.contract_name,
-                        "status": "completed",
-                        "args": _json_object_or_raw(args),
-                        "safe_output": _json_object_or_raw(invocation.safe_output_json or invocation.output_json),
-                    }
-                )
-            return _agents_sdk_tool_model_output(invocation)
-        except ApiError as exc:
-            if _fatal_tool_error(exc):
-                raise
-            return _tool_error_model_output(exc)
-
-    return function_tool_cls(
-        name=definition.sdk_name,
-        description=definition.description,
-        params_json_schema=definition.params_json_schema,
-        on_invoke_tool=invoke_tool,
-        strict_json_schema=False,
-    )
 
 
 def _fatal_tool_error(exc: ApiError) -> bool:
@@ -1078,120 +786,6 @@ def _tool_error_model_output(exc: ApiError) -> str:
         {"error": {"code": exc.code, "message": "Tool call was rejected by application policy."}},
         sort_keys=True,
     )
-
-
-def _agents_sdk_tool_model_output(invocation: SdkToolInvocationResult) -> str:
-    if not invocation.model_context:
-        return invocation.output_json
-    return json.dumps(
-        {
-            "result": _json_object_or_raw(invocation.output_json),
-            "trusted_model_context": [dict(item) for item in invocation.model_context],
-        },
-        ensure_ascii=False,
-        separators=(",", ":"),
-        sort_keys=True,
-    )
-
-
-def _build_run_config(
-    *,
-    agents_module: Any,
-    request: SdkNodeRequest,
-    trace_enabled: bool,
-    api_key: str,
-    base_url: str,
-    use_responses: bool | None,
-    buffer_streamed_tool_calls: bool,
-) -> Any | None:
-    run_config_cls = getattr(agents_module, "RunConfig", None)
-    if run_config_cls is None:
-        raise ApiError(
-            code="sdk_trace_privacy_not_supported",
-            message="OpenAI Agents SDK RunConfig is required to enforce private tracing defaults.",
-            status=503,
-        )
-    model_provider = _build_model_provider(
-        agents_module=agents_module,
-        api_key=api_key,
-        base_url=base_url,
-        use_responses=use_responses,
-        buffer_streamed_tool_calls=buffer_streamed_tool_calls,
-    )
-    try:
-        kwargs: dict[str, Any] = {
-            "tracing_disabled": not trace_enabled,
-            "trace_include_sensitive_data": False,
-            "trace_id": request.trace_id or None,
-            "group_id": request.thread_id or None,
-            "workflow_name": "MomCozy agent runtime",
-            "trace_metadata": {
-                "run_id": request.run_id,
-                "thread_id": request.thread_id,
-                "actor_user_id": request.actor_user_id,
-                "prompt_version": request.prompt_version,
-                "service_skill_id": request.service_skill_id,
-                "tool_names": list(request.tool_names),
-                "tool_namespace_names": [namespace.name for namespace in request.tool_namespaces],
-                "tool_search_enabled": request.tool_search_enabled,
-                "model_provider": "openai",
-            },
-        }
-        if model_provider is not None:
-            kwargs["model_provider"] = model_provider
-        return run_config_cls(**kwargs)
-    except TypeError:
-        safe_fallback_kwargs = dict(kwargs)
-        safe_fallback_kwargs.pop("trace_include_sensitive_data", None)
-        safe_fallback_kwargs["tracing_disabled"] = True
-        try:
-            return run_config_cls(**safe_fallback_kwargs)
-        except TypeError as fallback_exc:
-            try:
-                return run_config_cls(tracing_disabled=True)
-            except TypeError:
-                raise ApiError(
-                    code="sdk_trace_privacy_not_supported",
-                    message="OpenAI Agents SDK cannot enforce private tracing defaults.",
-                    status=503,
-                ) from fallback_exc
-
-
-def _build_model_provider(
-    *,
-    agents_module: Any,
-    api_key: str,
-    base_url: str,
-    use_responses: bool | None,
-    buffer_streamed_tool_calls: bool,
-) -> Any | None:
-    openai_provider_cls = getattr(agents_module, "OpenAIProvider", None)
-    if openai_provider_cls is None:
-        return None
-    return _instantiate_openai_provider(
-        openai_provider_cls,
-        {
-            "api_key": api_key or None,
-            "base_url": base_url or None,
-            "use_responses": use_responses,
-            "buffer_streamed_tool_calls": buffer_streamed_tool_calls,
-        },
-    )
-
-
-def _instantiate_openai_provider(openai_provider_cls: Any, kwargs: dict[str, Any]) -> Any | None:
-    try:
-        return openai_provider_cls(**kwargs)
-    except TypeError:
-        compatible_kwargs = {key: value for key, value in kwargs.items() if key in {"api_key", "base_url", "use_responses"}}
-        try:
-            return openai_provider_cls(**compatible_kwargs)
-        except TypeError:
-            return None
-
-
-def _is_real_agents_module(agents_module: Any) -> bool:
-    return bool(getattr(agents_module, "__file__", ""))
 
 
 def _is_real_openai_module(openai_module: Any) -> bool:
@@ -1218,30 +812,30 @@ def _provider_error_mapping(exc: Exception) -> _ProviderErrorMapping:
     if status_code == 429 or "rate" in name and "limit" in name or "rate limit" in text:
         return _ProviderErrorMapping(
             code="sdk_rate_limited",
-            message="OpenAI Agents SDK provider rate limit was reached.",
+            message="OpenAI Responses provider rate limit was reached.",
             status=429,
         )
     if status_code in {401, 403} or "auth" in name or "permission" in name:
         return _ProviderErrorMapping(
             code="sdk_auth_failed",
-            message="OpenAI Agents SDK provider authentication failed.",
+            message="OpenAI Responses provider authentication failed.",
             status=503,
         )
     if status_code is not None and status_code >= 500:
         return _ProviderErrorMapping(
             code="sdk_provider_unavailable",
-            message="OpenAI Agents SDK provider is unavailable.",
+            message="OpenAI Responses provider is unavailable.",
             status=503,
         )
     if status_code in {400, 422}:
         return _ProviderErrorMapping(
             code="sdk_bad_request",
-            message="OpenAI Agents SDK provider rejected the request.",
+            message="OpenAI Responses provider rejected the request.",
             status=502,
         )
     return _ProviderErrorMapping(
         code="sdk_run_failed",
-        message="OpenAI Agents SDK run failed.",
+        message="OpenAI Responses run failed.",
         status=502,
     )
 

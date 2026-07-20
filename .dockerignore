@@ -26,6 +26,7 @@ data
 tmp
 upload_files
 fixtures/product_assets
+production_backend
 
 dist
 build

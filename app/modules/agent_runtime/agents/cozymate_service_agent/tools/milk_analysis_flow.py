@@ -118,9 +118,9 @@ def build_milk_analysis_assessment(workflow: dict[str, Any]) -> dict[str, Any]:
         }
     else:
         reason = {
-            "increase": "recent_milk_below_expected_without_safety_block",
-            "maintain": "recent_milk_stable_without_safety_block",
-            "decrease": "recent_milk_above_expected_without_safety_block",
+            "increase": "recent_milk_below_expected_eligible_for_plan",
+            "maintain": "recent_milk_stable_eligible_for_plan",
+            "decrease": "recent_milk_above_expected_eligible_for_plan",
         }[direction]
         plan_decision = {"can_start_plan": True, "recommended_direction": direction, "reason": reason}
 

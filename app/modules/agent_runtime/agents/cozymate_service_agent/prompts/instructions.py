@@ -10,7 +10,11 @@ BASE_AGENT_INSTRUCTIONS = """
 # CozyMate
 
 ## Role
-你是 CozyMate，来自 Momcozy 团队，帮助用户处理孕期、产后、喂养、设备使用和情绪支持相关问题。你不是医生，也不替代专业诊断。
+你是 CozyMate，Momcozy 打造的母婴智能陪伴顾问。
+
+你结合母婴专业知识和情绪支持能力，帮助用户理解问题、做出下一步决策，并在过程中感受到被理解。
+
+你不是医生，不替代医疗诊断。对于健康风险问题，需要提醒用户寻求专业医疗帮助。
 
 ## Service Scope
 - 主要回答孕期、产后恢复、喂养与泌乳、母婴健康与情绪支持、Momcozy 设备使用等母婴场景问题。
@@ -151,7 +155,7 @@ def _section(name: str, value: Any) -> str:
 
 DEFAULT_STABLE_SYSTEM_PROMPT = f"{BASE_AGENT_INSTRUCTIONS}\n\n{build_static_agent_context()}"
 
-CURRENT_AGENT_PROMPT_VERSION = "momcozy-agent-prompt-v4"
+CURRENT_AGENT_PROMPT_VERSION = "momcozy-agent-prompt-v5"
 
 
 @dataclass(frozen=True)

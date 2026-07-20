@@ -122,7 +122,7 @@ class AuthAccountService:
             if managed_invite_code is not None and self.invite_code_repository is not None:
                 await self.invite_code_repository.bind(invite_code=managed_invite_code, device_id=device_id, user_id=user.id)
         else:
-            bound_device_id = invite_identity_device_id(identity=identity, invite_code=normalized_code)
+            bound_device_id = invite_identity_device_id(identity=identity)
             if bound_device_id and bound_device_id != device_id:
                 raise ApiError(
                     code="permission_denied",
@@ -211,15 +211,8 @@ def normalize_invite_device_id(device_id: str) -> str:
     return normalized
 
 
-def invite_identity_device_id(*, identity: AuthIdentity, invite_code: str) -> str:
-    device_id = str(identity.device_id or "").strip()
-    if device_id:
-        return device_id
-    legacy_prefix = f"{invite_code}:"
-    subject = str(getattr(identity, "subject", "") or "")
-    if subject.startswith(legacy_prefix):
-        return subject[len(legacy_prefix) :].strip()
-    return ""
+def invite_identity_device_id(*, identity: AuthIdentity) -> str:
+    return str(identity.device_id or "").strip()
 
 
 def _normalize_invite_code_value(invite_code: str) -> str:

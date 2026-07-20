@@ -90,7 +90,6 @@ def run_progress_semantic(*, phase: str, label: str) -> dict[str, Any]:
         "phase": str(preset["phase"]),
         "label": display_label,
         "surface": surface,
-        "visibility": _legacy_visibility(surface),
         "merge_key": f"progress:{phase or 'unknown'}",
         "priority": preset["priority"],
         "lifecycle": "running",
@@ -150,7 +149,6 @@ def tool_event_semantic(
         "phase": phase,
         "label": display_label,
         "surface": surface,
-        "visibility": _legacy_visibility(surface),
         "merge_key": f"tool:{str(tool_call_id or '').strip() or normalized_tool_name or 'unknown'}",
         "priority": priority,
         "lifecycle": lifecycle,
@@ -186,7 +184,6 @@ def artifact_event_payload_semantic(*, artifact_type: str, artifact_id: str = ""
         "phase": "done",
         "label": _artifact_completed_label(normalized_type),
         "surface": ARTIFACT,
-        "visibility": ARTIFACT,
         "merge_key": f"artifact:{str(artifact_id or '').strip() or normalized_type or 'unknown'}",
         "priority": 70,
         "lifecycle": "completed",
@@ -208,7 +205,6 @@ def action_event_payload_semantic(*, action_status: str, action_id: str = "") ->
         "phase": "saving" if normalized_status in {"queued", "applied"} else "planning",
         "label": label,
         "surface": ACTION,
-        "visibility": ACTION,
         "merge_key": f"action:{str(action_id or '').strip() or normalized_status or 'pending'}",
         "priority": 75,
         "lifecycle": lifecycle,
@@ -234,7 +230,6 @@ def run_event_payload_semantic(*, event_type: str, run_id: str) -> dict[str, Any
         "phase": phase,
         "label": label,
         "surface": surface,
-        "visibility": _legacy_visibility(surface),
         "merge_key": f"run:{normalized_run_id}",
         "priority": priority,
         "lifecycle": lifecycle,
@@ -261,7 +256,6 @@ def web_search_event_semantic(*, status: str) -> dict[str, Any]:
         "phase": phase,
         "label": label,
         "surface": WORK_ITEM,
-        "visibility": WORK_ITEM,
         "merge_key": "web_search:current",
         "priority": 55,
         "lifecycle": lifecycle,
@@ -345,15 +339,6 @@ def _tool_lifecycle(event_type: str) -> str:
 def _display_subject(label: str) -> str:
     normalized = str(label or "").strip()
     return normalized or "相关信息"
-
-
-def _legacy_visibility(surface: str) -> str:
-    return {
-        STATUS_BAR: "status",
-        WORK_ITEM: "work_item",
-        ARTIFACT: "artifact",
-        ACTION: "action",
-    }.get(surface, "hidden")
 
 
 def _tool_phase(*, tool_copy: dict[str, str] | None, read_or_write: str) -> str:

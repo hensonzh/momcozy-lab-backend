@@ -232,7 +232,6 @@ def test_agent_run_worker_preserves_waiting_for_confirmation_state() -> None:
     assert repository.events[-1].event_type == "run.waiting_for_confirmation"
     assert repository.events[-1].payload["action_id"] == str(action_id)
     assert repository.events[-1].payload["semantic"]["phase"] == "confirming"
-    assert repository.events[-1].payload["semantic"]["visibility"] == "action"
 
 
 def test_agent_run_worker_does_not_resume_existing_running_run() -> None:

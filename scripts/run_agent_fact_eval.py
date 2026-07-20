@@ -21,7 +21,7 @@ from app.modules.agent_runtime.facts.extraction import (  # noqa: E402
     fact_inputs_to_candidate_payload,
 )
 from app.modules.agent_runtime.sdk import (  # noqa: E402
-    OpenAIAgentsSdkRunner,
+    OpenAIResponsesRunner,
     ScriptedSdkBackend,
     scripted_sdk_response,
 )
@@ -101,7 +101,7 @@ async def _run_case(case: dict[str, Any]) -> dict[str, Any]:
     backend = ScriptedSdkBackend(
         [scripted_sdk_response(final_text=json.dumps(model_output, ensure_ascii=False, sort_keys=True))]
     )
-    extractor = AgentFactExtractor(model_runner=OpenAIAgentsSdkRunner(backend=backend))
+    extractor = AgentFactExtractor(model_runner=OpenAIResponsesRunner(backend=backend))
     observed_inputs = await extractor.extract(
         context=FactExtractionContext(
             owner_user_id=uuid5(NAMESPACE_URL, f"{case['id']}:owner"),

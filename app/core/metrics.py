@@ -62,25 +62,6 @@ class OperationMetrics:
         }
 
 
-@dataclass
-class SafetyMetrics:
-    count: int = 0
-    decision_counts: dict[str, int] = field(default_factory=dict)
-    severity_counts: dict[str, int] = field(default_factory=dict)
-
-    def record(self, *, decision: str, severity: str) -> None:
-        self.count += 1
-        self.decision_counts[decision] = self.decision_counts.get(decision, 0) + 1
-        self.severity_counts[severity] = self.severity_counts.get(severity, 0) + 1
-
-    def to_body(self) -> dict[str, Any]:
-        return {
-            "count": self.count,
-            "decision_counts": dict(sorted(self.decision_counts.items())),
-            "severity_counts": dict(sorted(self.severity_counts.items())),
-        }
-
-
 class RequestMetrics:
     def __init__(self) -> None:
         self._lock = Lock()
@@ -90,7 +71,6 @@ class RequestMetrics:
         self._worker_jobs: dict[str, OperationMetrics] = {}
         self._agent_tools: dict[str, OperationMetrics] = {}
         self._agent_sdk: dict[str, OperationMetrics] = {}
-        self._agent_safety: dict[str, SafetyMetrics] = {}
 
     def record(self, *, method: str, route: str, status_code: int, duration_ms: float) -> None:
         key = (method.upper(), route)
@@ -128,11 +108,6 @@ class RequestMetrics:
             duration_ms=duration_ms,
         )
 
-    def record_agent_safety(self, *, category: str, decision: str, severity: str) -> None:
-        with self._lock:
-            safety_metrics = self._agent_safety.setdefault(category, SafetyMetrics())
-            safety_metrics.record(decision=decision, severity=severity)
-
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
             routes = [
@@ -149,7 +124,6 @@ class RequestMetrics:
                 "workers": _operation_snapshot(self._worker_jobs, key_name="job_type"),
                 "agent_tools": _operation_snapshot(self._agent_tools, key_name="tool_name"),
                 "agent_sdk": _operation_snapshot(self._agent_sdk, key_name="node_name"),
-                "agent_safety": _safety_snapshot(self._agent_safety),
             }
 
     def _record_operation(
@@ -168,7 +142,3 @@ class RequestMetrics:
 
 def _operation_snapshot(bucket: dict[str, OperationMetrics], *, key_name: str) -> list[dict[str, Any]]:
     return [{key_name: key, **metrics.to_body()} for key, metrics in sorted(bucket.items())]
-
-
-def _safety_snapshot(bucket: dict[str, SafetyMetrics]) -> list[dict[str, Any]]:
-    return [{"category": category, **metrics.to_body()} for category, metrics in sorted(bucket.items())]

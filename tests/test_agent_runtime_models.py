@@ -16,7 +16,6 @@ def test_agent_runtime_ledger_tables_are_registered() -> None:
         "agent_threads",
         "agent_runs",
         "agent_messages",
-        "agent_routing_decisions",
         "agent_tool_calls",
         "agent_tool_outputs",
         "agent_events",
@@ -88,7 +87,6 @@ def test_agent_ledger_has_no_provider_state_dependency_columns() -> None:
 
 def test_agent_runtime_state_tables_have_required_indexes() -> None:
     runs = Base.metadata.tables["agent_runs"]
-    routing_decisions = Base.metadata.tables["agent_routing_decisions"]
     actions = Base.metadata.tables["agent_actions"]
     workflow_states = Base.metadata.tables["agent_workflow_states"]
     context_projections = Base.metadata.tables["agent_context_projections"]
@@ -101,14 +99,11 @@ def test_agent_runtime_state_tables_have_required_indexes() -> None:
 
     assert "uq_agent_runs_thread_active" in {index.name for index in runs.indexes}
     assert "service_skill_id" in runs.columns
-    assert "routing_source" in runs.columns
-    assert "routing_confidence_score" in runs.columns
-    assert "routing_summary_json" in runs.columns
+    assert "routing_source" not in runs.columns
+    assert "routing_confidence_score" not in runs.columns
+    assert "routing_summary_json" not in runs.columns
     assert "ix_agent_runs_service_skill_started" in {index.name for index in runs.indexes}
     assert "ix_agent_runs_runnable_created" in {index.name for index in runs.indexes}
-    assert "uq_agent_routing_decisions_run_message" in {constraint.name for constraint in routing_decisions.constraints}
-    assert "selected_skill_id" in routing_decisions.columns
-    assert "ix_agent_routing_decisions_service_skill_created" in {index.name for index in routing_decisions.indexes}
     assert "ix_agent_actions_run_status" in {index.name for index in actions.indexes}
     assert "ix_agent_actions_idempotency_key" in {index.name for index in actions.indexes}
     assert "ix_agent_workflow_states_owner_type_status" in {index.name for index in workflow_states.indexes}

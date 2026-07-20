@@ -170,7 +170,7 @@ def test_assessment_requires_complete_intake_and_fingerprints_the_exact_context(
     assert first["plan_decision"] == {
         "can_start_plan": True,
         "recommended_direction": "increase",
-        "reason": "recent_milk_below_expected_without_safety_block",
+        "reason": "recent_milk_below_expected_eligible_for_plan",
     }
     assert first["card"]["title"] == "奶量分析"
     assert "analysis_context_fingerprint" not in first["card"]

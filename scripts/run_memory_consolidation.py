@@ -64,7 +64,6 @@ async def run_memory_consolidation_once(
         model_runner=create_agent_model_runner(
             settings=resolved_settings,
             metrics=metrics,
-            trace_enabled=False,
             model=resolved_settings.agent_memory_consolidation_model,
             max_turns=1,
             timeout_seconds=resolved_settings.agent_memory_consolidation_timeout_seconds,

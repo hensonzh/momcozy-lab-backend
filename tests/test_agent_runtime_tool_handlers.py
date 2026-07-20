@@ -22,7 +22,7 @@ from app.modules.agent_runtime.agents.cozymate_service_agent.tools import (
     HospitalBagCartUpdateProposeToolHandler,
     HospitalBagFormCreateToolHandler,
     IbclcConsultCardCreateToolHandler,
-    LegacyArtifactToolHandler,
+    BirthPreparationArtifactToolHandler,
     MilkAnalysisEvaluateToolHandler,
     MilkAnalysisIntakeToolHandler,
     MilkAnalysisReadToolHandler,
@@ -417,12 +417,12 @@ def test_hospital_bag_card_rejects_stale_form_submission() -> None:
     assert exc_info.value.code == "stale_hospital_bag_intake"
 
 
-def test_legacy_artifact_tool_handler_returns_old_form_card_and_cart_envelopes() -> None:
+def test_birth_preparation_artifact_handler_returns_form_card_and_cart_envelopes() -> None:
     actor = _user()
     runtime_service = FakeAgentRuntimeService()
 
     form_result = asyncio.run(
-        LegacyArtifactToolHandler(runtime_service=runtime_service, tool_name="hospital_bag_form_create")(
+        BirthPreparationArtifactToolHandler(runtime_service=runtime_service, tool_name="hospital_bag_form_create")(
             _context(actor=actor, args={"default_values": {"due_date_or_week": "36 周"}})
         )
     )
@@ -432,7 +432,7 @@ def test_legacy_artifact_tool_handler_returns_old_form_card_and_cart_envelopes()
     assert form_result["form"]["submit_label"] == "提交"
 
     card_result = asyncio.run(
-        LegacyArtifactToolHandler(runtime_service=runtime_service, tool_name="hospital_bag_card_create")(
+        BirthPreparationArtifactToolHandler(runtime_service=runtime_service, tool_name="hospital_bag_card_create")(
             _context(
                 actor=actor,
                 args={
@@ -463,7 +463,7 @@ def test_legacy_artifact_tool_handler_returns_old_form_card_and_cart_envelopes()
     assert runtime_service.calls[-1]["emit_event"] is False
 
     cart_result = asyncio.run(
-        LegacyArtifactToolHandler(runtime_service=runtime_service, tool_name="hospital_bag_cart_update")(
+        BirthPreparationArtifactToolHandler(runtime_service=runtime_service, tool_name="hospital_bag_cart_update")(
             _context(actor=actor, args={"action": "reset_cart"})
         )
     )
@@ -476,12 +476,12 @@ def test_legacy_artifact_tool_handler_returns_old_form_card_and_cart_envelopes()
     assert cart_result["cart_update"]["totals"]["total"] > 0
 
 
-def test_legacy_artifact_tool_handler_matches_old_cart_and_pump_actions() -> None:
+def test_birth_preparation_artifact_handler_matches_cart_and_pump_actions() -> None:
     actor = _user()
     runtime_service = FakeAgentRuntimeService()
 
     pump_result = asyncio.run(
-        LegacyArtifactToolHandler(runtime_service=runtime_service, tool_name="hospital_bag_pump_recommend")(
+        BirthPreparationArtifactToolHandler(runtime_service=runtime_service, tool_name="hospital_bag_pump_recommend")(
             _context(
                 actor=actor,
                 args={
@@ -507,7 +507,7 @@ def test_legacy_artifact_tool_handler_matches_old_cart_and_pump_actions() -> Non
     assert "不能把 Air 1 描述为降低预算" in pump_result["price_guidance"]
 
     replace_result = asyncio.run(
-        LegacyArtifactToolHandler(runtime_service=runtime_service, tool_name="hospital_bag_cart_update")(
+        BirthPreparationArtifactToolHandler(runtime_service=runtime_service, tool_name="hospital_bag_cart_update")(
             _context(actor=actor, args={"action": "replace_pump_model", "product_sku_id": "pump-m9"})
         )
     )
@@ -518,7 +518,7 @@ def test_legacy_artifact_tool_handler_matches_old_cart_and_pump_actions() -> Non
     assert replace_result["cart_update"]["replaced_items"][0]["from_item_id"] == "milk-pump"
 
     budget_result = asyncio.run(
-        LegacyArtifactToolHandler(runtime_service=runtime_service, tool_name="hospital_bag_cart_update")(
+        BirthPreparationArtifactToolHandler(runtime_service=runtime_service, tool_name="hospital_bag_cart_update")(
             _context(actor=actor, args={"action": "optimize_budget", "target_budget": 1000, "budget_mode": "under"})
         )
     )
