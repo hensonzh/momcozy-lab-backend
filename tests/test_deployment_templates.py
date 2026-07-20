@@ -18,6 +18,8 @@ def test_dockerfile_runs_isolated_production_backend() -> None:
     assert "python:3.13-slim" in dockerfile
     assert "requirements.txt" in dockerfile
     assert "app.main:app" in dockerfile
+    assert "COPY --chown=app:app . ." in dockerfile
+    assert "chown -R" not in dockerfile
     assert "momcozy" + "_agent" not in dockerfile
 
 
@@ -151,6 +153,31 @@ def test_docker_context_excludes_product_asset_blobs_from_worker_images() -> Non
     dockerignore = (ROOT / ".dockerignore").read_text()
 
     assert "fixtures/product_assets" in dockerignore
+
+
+def test_docker_context_excludes_nested_python_environment_artifacts() -> None:
+    dockerignore = (ROOT / ".dockerignore").read_text().splitlines()
+
+    for pattern in [
+        "**/.venv",
+        "**/.runtime-venv",
+        "**/.local",
+        "**/.worktree-runtime",
+        "**/.runlogs",
+        "**/.pytest_cache",
+        "**/.mypy_cache",
+        "**/.ruff_cache",
+        "**/__pycache__",
+        "**/*.pyc",
+    ]:
+        assert pattern in dockerignore
+
+
+def test_docker_context_excludes_private_compose_environment_files() -> None:
+    dockerignore = (ROOT / ".dockerignore").read_text().splitlines()
+
+    assert "env/*.env" in dockerignore
+    assert "!env/*.env.example" in dockerignore
 
 
 def test_compose_env_declares_disabled_agent_worker_controls() -> None:

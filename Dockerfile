@@ -11,9 +11,8 @@ RUN addgroup --system app && adduser --system --ingroup app app
 COPY requirements.txt requirements.txt
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
-COPY . .
-RUN mkdir -p /workspace/.local/object_storage \
-    && chown -R app:app /workspace
+COPY --chown=app:app . .
+RUN install -d -o app -g app /workspace/.local/object_storage
 
 USER app
 

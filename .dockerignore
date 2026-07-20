@@ -5,10 +5,22 @@
 .ruff_cache
 __pycache__
 *.pyc
+**/.venv
+**/.runtime-venv
+**/.local
+**/.worktree-runtime
+**/.runlogs
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/__pycache__
+**/*.pyc
 .DS_Store
 
 .env
 .env.*
+env/*.env
+!env/*.env.example
 logs
 data
 tmp
