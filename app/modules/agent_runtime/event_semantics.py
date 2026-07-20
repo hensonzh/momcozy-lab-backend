@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, TypedDict
 from uuid import UUID
 
 
@@ -10,6 +10,13 @@ WORK_ITEM = "work_item"
 ARTIFACT = "artifact"
 ACTION = "action"
 HIDDEN = "hidden"
+
+
+class _RunProgressPreset(TypedDict):
+    phase: str
+    label: str
+    surface: str
+    priority: int
 
 
 def run_progress_payload(*, phase: str, label: str) -> dict[str, Any]:
@@ -24,7 +31,7 @@ def run_progress_payload(*, phase: str, label: str) -> dict[str, Any]:
 
 
 def run_progress_semantic(*, phase: str, label: str) -> dict[str, Any]:
-    defaults = {
+    defaults: dict[str, _RunProgressPreset] = {
         "context_loading": {
             "phase": "thinking",
             "label": "我已经收到你的消息啦～",
@@ -85,7 +92,7 @@ def run_progress_semantic(*, phase: str, label: str) -> dict[str, Any]:
         "surface": surface,
         "visibility": _legacy_visibility(surface),
         "merge_key": f"progress:{phase or 'unknown'}",
-        "priority": int(preset["priority"]),
+        "priority": preset["priority"],
         "lifecycle": "running",
     }
 

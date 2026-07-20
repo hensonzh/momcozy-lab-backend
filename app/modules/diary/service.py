@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from sqlalchemy.exc import IntegrityError
@@ -89,11 +89,15 @@ class DiaryService:
     ) -> DiaryEntryMutation:
         _require_values(values)
         update_with_status = getattr(self.repository, "update_entry_with_status", None)
+        mutation: DiaryEntryMutation | None
         if callable(update_with_status):
-            mutation = await update_with_status(
-                owner_user_id=owner_user_id,
-                entry_date=entry_date,
-                values=values,
+            mutation = cast(
+                DiaryEntryMutation | None,
+                await update_with_status(
+                    owner_user_id=owner_user_id,
+                    entry_date=entry_date,
+                    values=values,
+                ),
             )
         else:
             entry = await self.repository.update_entry(

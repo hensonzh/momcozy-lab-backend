@@ -192,14 +192,15 @@ class AgentEventPublisher:
             LOGGER.warning("Failed to publish live message.delta event.", exc_info=True)
 
     async def clear_active_run(self, *, thread_id: UUID, run_id: UUID) -> None:
-        if self.controls is None:
+        controls = self.controls
+        if controls is None:
             return
         add_after_commit_callback = getattr(self.repository, "add_after_commit_callback", None)
         if self.after_append is None and callable(add_after_commit_callback):
 
             async def clear_after_commit() -> None:
-                await self.controls.clear_active_run(thread_id=thread_id, run_id=run_id)
+                await controls.clear_active_run(thread_id=thread_id, run_id=run_id)
 
             add_after_commit_callback(clear_after_commit)
             return
-        await self.controls.clear_active_run(thread_id=thread_id, run_id=run_id)
+        await controls.clear_active_run(thread_id=thread_id, run_id=run_id)

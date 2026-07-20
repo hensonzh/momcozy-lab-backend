@@ -5,7 +5,7 @@ import base64
 import importlib
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -279,7 +279,7 @@ def _openai_client_factory() -> OpenAIClientFactory:
             message="OpenAI Python SDK AsyncOpenAI is unavailable.",
             status=503,
         )
-    return async_openai
+    return cast(OpenAIClientFactory, async_openai)
 
 
 def _image_data_url(*, body: bytes, content_type: str) -> str:

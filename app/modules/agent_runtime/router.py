@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from time import monotonic
 from uuid import UUID
 
@@ -682,7 +682,7 @@ def _first_event_ms(*, first_event_ms: float | None, stream_started_at: float) -
     return first_event_ms if first_event_ms is not None else _elapsed_monotonic_ms(stream_started_at)
 
 
-def _first_final_event_index(events: list[object]) -> int:
+def _first_final_event_index(events: Sequence[object]) -> int:
     for index, event in enumerate(events):
         if _is_final_stream_event(event):
             return index
@@ -717,13 +717,13 @@ async def _read_transient_events(
 
 
 def _filter_events_seen_in_transient_stream(
-    events: list[object],
+    events: Sequence[object],
     *,
     run_id: UUID,
     dedupe_keys: set[str],
 ) -> list[object]:
     if not dedupe_keys:
-        return events
+        return list(events)
     return [event for event in events if _persisted_event_dedupe_key(event, run_id=run_id) not in dedupe_keys]
 
 

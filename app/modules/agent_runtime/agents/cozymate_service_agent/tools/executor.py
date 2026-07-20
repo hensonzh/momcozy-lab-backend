@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from time import perf_counter
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from app.core.errors import ApiError
@@ -378,7 +378,7 @@ class ToolExecutor:
     ) -> AgentToolCall | None:
         get_tool_call = getattr(self.repository, "get_tool_call", None)
         if tool_call_id is not None and callable(get_tool_call):
-            return await get_tool_call(tool_call_id=tool_call_id)
+            return cast(AgentToolCall | None, await get_tool_call(tool_call_id=tool_call_id))
         return fallback
 
     async def _recover_failed_commit(self, *, run_id: UUID, tool_call_id: UUID | None) -> None:
@@ -500,7 +500,7 @@ class ToolExecutor:
         if self.event_sink is not None:
             stage_events = getattr(self.event_sink, "stage_events", None)
             if callable(stage_events):
-                return await stage_events(thread_id=thread_id, run_id=run_id, events=events)
+                return cast(tuple[Any, ...], await stage_events(thread_id=thread_id, run_id=run_id, events=events))
             await self.event_sink.append_events(thread_id=thread_id, run_id=run_id, events=events)
             return ()
         appended: list[Any] = []
@@ -569,10 +569,10 @@ async def _maybe_await(
 
 
 class _NoopToolScope:
-    async def __aenter__(self):
+    async def __aenter__(self) -> _NoopToolScope:
         return self
 
-    async def __aexit__(self, exc_type, exc, traceback):
+    async def __aexit__(self, exc_type: Any, exc: Any, traceback: Any) -> bool:
         return False
 
 
@@ -640,9 +640,9 @@ def _safe_payload(value: Any) -> Any:
 
 def _safe_tool_args(*, tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
     if tool_name != _PREGNANCY_DIARY_TOOL:
-        return _safe_payload(args)
+        return cast(dict[str, Any], _safe_payload(args))
     if str(args.get("action") or "").strip() not in _PREGNANCY_DIARY_WRITE_ACTIONS:
-        return _without_private_diary_fields(_safe_payload(args))
+        return cast(dict[str, Any], _without_private_diary_fields(_safe_payload(args)))
     safe_args: dict[str, Any] = {}
     for key in ("action", "entry_date"):
         if key in args:
@@ -652,10 +652,10 @@ def _safe_tool_args(*, tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
 
 
 def _safe_tool_output(*, tool_name: str, output: dict[str, Any]) -> dict[str, Any]:
-    safe = _safe_payload(output)
+    safe = cast(dict[str, Any], _safe_payload(output))
     if not tool_name.startswith("pregnancy_diary."):
         return safe
-    return _without_private_diary_fields(safe)
+    return cast(dict[str, Any], _without_private_diary_fields(safe))
 
 
 def _without_private_diary_fields(value: Any) -> Any:

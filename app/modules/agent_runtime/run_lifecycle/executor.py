@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from time import perf_counter
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -927,7 +927,7 @@ class AgentRuntimeExecutor:
         if self.tool_executor is None:
             raise ApiError(code="unsupported_operation", message="Tool executor is not configured.", status=501)
         args = _json_object(args_json)
-        execute_kwargs = {
+        execute_kwargs: dict[str, Any] = {
             "actor": _run_actor(run),
             "run_id": run.id,
             "tool_name": contract_name,
@@ -987,10 +987,12 @@ class AgentRuntimeExecutor:
                     raise
         if contract_name == "pregnancy_diary.manage":
             local_date = self._run_local_dates.get(run.id, "")
-            trusted_args = {"trusted_current_user_text": self._run_current_user_text.get(run.id, "")}
+            diary_trusted_args: dict[str, Any] = {
+                "trusted_current_user_text": self._run_current_user_text.get(run.id, "")
+            }
             if local_date:
-                trusted_args["runtime_local_date"] = local_date
-            return trusted_args
+                diary_trusted_args["runtime_local_date"] = local_date
+            return diary_trusted_args
         if contract_name == "records.milk_analysis.intake":
             return {
                 "trusted_current_user_text": self._run_current_user_text.get(run.id, ""),
@@ -1008,23 +1010,23 @@ class AgentRuntimeExecutor:
             submission = self._run_trusted_form_submissions.get(run.id, {}).get(expected_form_id)
             if submission is None:
                 return {}
-            trusted_args: dict[str, Any] = {
+            form_trusted_args: dict[str, Any] = {
                 "confirmed_form_data": _dict(submission, "values"),
                 "form_submission_id": _text(submission, "submission_id"),
             }
             if contract_name == "pregnancy.plan_intake.analyze":
-                trusted_args["form_artifact_id"] = _text(submission, "artifact_id")
+                form_trusted_args["form_artifact_id"] = _text(submission, "artifact_id")
                 facts = await self._birth_prep_business_facts(run=run)
                 workflow = await self._latest_pregnancy_plan_workflow(run=run)
-                trusted_args["runtime_plan_context"] = _pregnancy_runtime_plan_context(facts, workflow=workflow)
-                trusted_args["runtime_workflow_context"] = _dict(workflow, "state")
+                form_trusted_args["runtime_plan_context"] = _pregnancy_runtime_plan_context(facts, workflow=workflow)
+                form_trusted_args["runtime_workflow_context"] = _dict(workflow, "state")
             elif contract_name == "hospital_bag_card_create":
                 workflow = await self._latest_hospital_bag_workflow(run=run)
-                trusted_args["form_artifact_id"] = _text(submission, "artifact_id")
+                form_trusted_args["form_artifact_id"] = _text(submission, "artifact_id")
                 workflow_state = _dict(workflow, "state")
                 if workflow_state:
-                    trusted_args["runtime_workflow_context"] = workflow_state
-            return trusted_args
+                    form_trusted_args["runtime_workflow_context"] = workflow_state
+            return form_trusted_args
         if contract_name == "pregnancy.plan.propose":
             facts = await self._birth_prep_business_facts(run=run)
             workflow = await self._latest_pregnancy_plan_workflow(run=run)
@@ -1053,17 +1055,17 @@ class AgentRuntimeExecutor:
             same_turn_defaults = _birth_prep_same_turn_form_default_values(self._run_current_user_text.get(run.id, ""))
             for key, value in same_turn_defaults.items():
                 default_values.setdefault(key, value)
-            trusted_args = {"default_values": default_values} if default_values else {}
+            creation_trusted_args: dict[str, Any] = {"default_values": default_values} if default_values else {}
             if contract_name == "pregnancy.plan_intake.start":
                 workflow = await self._latest_pregnancy_plan_workflow(run=run)
-                trusted_args["runtime_plan_context"] = _pregnancy_runtime_plan_context(facts, workflow=workflow)
-                trusted_args["runtime_workflow_context"] = _dict(workflow, "state")
+                creation_trusted_args["runtime_plan_context"] = _pregnancy_runtime_plan_context(facts, workflow=workflow)
+                creation_trusted_args["runtime_workflow_context"] = _dict(workflow, "state")
             elif contract_name == "hospital_bag_form_create":
                 workflow = await self._latest_hospital_bag_workflow(run=run)
                 workflow_state = _dict(workflow, "state")
                 if workflow_state:
-                    trusted_args["runtime_workflow_context"] = workflow_state
-            return trusted_args
+                    creation_trusted_args["runtime_workflow_context"] = workflow_state
+            return creation_trusted_args
         if contract_name == "hospital_bag_cart_update":
             client_groups = self._run_hospital_bag_cart_groups.get(run.id)
             if client_groups is not None:
@@ -1114,7 +1116,7 @@ class AgentRuntimeExecutor:
             normalized_expires_at = expires_at if expires_at.tzinfo is not None else expires_at.replace(tzinfo=timezone.utc)
             if normalized_expires_at <= datetime.now(timezone.utc):
                 return None
-        return workflow
+        return cast(AgentWorkflowState, workflow)
 
     async def _completed_turn_workflow_finalization(self, *, run: AgentRun) -> tuple[dict[str, Any], dict[str, Any]]:
         loader = getattr(self.repository, "list_active_workflow_states_for_thread", None)
@@ -1281,7 +1283,7 @@ class AgentRuntimeExecutor:
             completed = await self.repository.complete_tool_call(tool_call=tool_call, completed_at=_utcnow())
             tool_output = await self.repository.create_tool_output(tool_call_id=completed.id, safe_output=output, raw_output_ref="")
             await self._retain_service_skill(thread_id=run.thread_id, skill=skill)
-            completed_payload = {
+            completed_payload: dict[str, Any] = {
                 "tool_call_id": str(completed.id),
                 "tool_output_id": str(tool_output.id),
                 "tool_name": LOAD_SERVICE_SKILL_TOOL_NAME,
@@ -1499,10 +1501,13 @@ class AgentRuntimeExecutor:
         loader = getattr(self.repository, "list_active_workflow_states_for_thread", None)
         if not callable(loader):
             return []
-        return await loader(
-            thread_id=run.thread_id,
-            owner_user_id=run.actor_user_id,
-            limit=5,
+        return cast(
+            list[AgentWorkflowState],
+            await loader(
+                thread_id=run.thread_id,
+                owner_user_id=run.actor_user_id,
+                limit=5,
+            ),
         )
 
     async def _retain_service_skill(self, *, thread_id: UUID, skill: AgentServiceSkill) -> None:

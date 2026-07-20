@@ -6,6 +6,7 @@ import json
 import sys
 from contextlib import suppress
 from pathlib import Path
+from typing import Any, Awaitable, cast
 from uuid import uuid4
 
 
@@ -30,7 +31,7 @@ async def run_check() -> dict[str, object]:
     connected = False
 
     try:
-        await client.ping()
+        await cast(Awaitable[Any], client.ping())
         connected = True
 
         await controls.set_active_run(thread_id=thread_id, run_id=run_id, ttl_seconds=60)

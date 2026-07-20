@@ -532,7 +532,8 @@ class AgentRuntimeService:
             target_type=_normalize_text(target_type, max_length=120),
             side_effect_level=_normalize_text(side_effect_level, max_length=32),
         )
-        if not decision.requires_confirmation and self.action_executor is None:
+        action_executor = self.action_executor
+        if not decision.requires_confirmation and action_executor is None:
             raise ApiError(code="action_executor_not_configured", message="Agent action executor is not configured.", status=500)
         normalized_idempotency_key = _normalize_text(idempotency_key, max_length=255)
         if normalized_idempotency_key and reuse_existing:
@@ -549,7 +550,8 @@ class AgentRuntimeService:
                 )
                 if existing is not None:
                     if not decision.requires_confirmation and existing.status in {"confirmed", "applying"}:
-                        outcome = await self.action_executor.apply(existing)
+                        assert action_executor is not None
+                        outcome = await action_executor.apply(existing)
                         return outcome.action, False
                     return existing, False
         initial_status = "confirmation_required" if decision.requires_confirmation else "proposed"
@@ -567,6 +569,7 @@ class AgentRuntimeService:
             expires_at=expires_at,
         )
         if not decision.requires_confirmation:
+            assert action_executor is not None
             action_idempotency_key = action.idempotency_key or f"agent-action:{action.id}"
             confirmed = await self.repository.mark_action_confirmed(
                 action=action,
@@ -574,7 +577,7 @@ class AgentRuntimeService:
                 apply_payload=None,
                 idempotency_key=action_idempotency_key,
             )
-            outcome = await self.action_executor.apply(confirmed)
+            outcome = await action_executor.apply(confirmed)
             return outcome.action, True
         await self._append_event(
             thread_id=run.thread_id,

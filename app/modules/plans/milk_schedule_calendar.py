@@ -51,7 +51,7 @@ def normalize_milk_schedule_calendar_events(
             **({"description": description} if description else {}),
             "duration_minutes": end_minutes - start_minutes,
         }
-        event_key = (event["date"], start_time, end_time, title)
+        event_key = (event_date.isoformat(), start_time, end_time, title)
         if event_key in seen:
             raise MilkScheduleCalendarEventError("duplicate_milk_schedule_calendar_event")
         seen.add(event_key)

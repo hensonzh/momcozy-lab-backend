@@ -194,6 +194,6 @@ async def _read_object_byte_range(
 ) -> bytes:
     reader = getattr(object_storage, "get_byte_range", None)
     if callable(reader):
-        return await reader(key=key, start=byte_range.start, end=byte_range.end)
+        return cast(bytes, await reader(key=key, start=byte_range.start, end=byte_range.end))
     body = await object_storage.get_bytes(key=key)
     return body[byte_range.start : byte_range.end + 1]

@@ -8,7 +8,7 @@ import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from time import perf_counter
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from ....core.metrics import RequestMetrics
 from ....core.errors import ApiError
@@ -810,7 +810,7 @@ def _response_output_item_for_input(item: Any) -> dict[str, Any]:
             exclude_none=True,
             exclude=getattr(item, "__api_exclude__", None),
         )
-    return _strip_sdk_only_response_fields(payload)
+    return cast(dict[str, Any], _strip_sdk_only_response_fields(payload))
 
 
 def _strip_sdk_only_response_fields(value: Any) -> Any:

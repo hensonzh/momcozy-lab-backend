@@ -250,7 +250,7 @@ class HospitalBagCartUpdateProposeToolHandler:
             raise ApiError(code="validation_failed", message="cart_update is required.", status=422)
 
         preview_payload = _hospital_bag_cart_preview_payload(apply_payload)
-        action_kwargs = {
+        action_kwargs: dict[str, Any] = {
             "owner_user_id": context.actor.user_id,
             "run_id": context.run_id,
             "action_type": HOSPITAL_BAG_CART_UPDATE_ACTION,
@@ -1029,7 +1029,7 @@ class GrowthRecordsReadToolHandler:
             infant_id=infant_id,
             limit=limit,
         )
-        output = {
+        output: dict[str, Any] = {
             "growth": [_growth_payload(record) for record in growth],
             "count": len(growth),
             "infant_id": str(infant_id) if infant_id is not None else "",
@@ -1051,7 +1051,7 @@ class PlansCurrentReadToolHandler:
         limit = _limit(context.args.get("limit"), default=5, max_limit=20)
         plans = await self.plans_service.list_plans(owner_user_id=owner_user_id, status="active", limit=limit)
         tasks = await self.plans_service.list_tasks(owner_user_id=owner_user_id, limit=limit)
-        output = {
+        output: dict[str, Any] = {
             "plans": [_plan_payload(plan) for plan in plans],
             "tasks": [_task_payload(task) for task in tasks],
             "counts": {
@@ -1081,7 +1081,7 @@ class PlansCalendarReadToolHandler:
             status=status,
             limit=limit,
         )
-        output = {
+        output: dict[str, Any] = {
             "tasks": [_task_payload(task) for task in tasks],
             "count": len(tasks),
             "filters": {
@@ -1331,7 +1331,7 @@ class PregnancyPlanContextReadToolHandler:
             limit=limit,
         )
         tasks = await self.plans_service.list_tasks(owner_user_id=owner_user_id, limit=limit)
-        output = {
+        output: dict[str, Any] = {
             "profile": _profile_payload(profile=profile, actor_user_id=owner_user_id),
             "plans": [_pregnancy_plan_context_payload(plan) for plan in plans],
             "tasks": [_task_payload(task) for task in tasks],
@@ -1363,7 +1363,7 @@ class DevicesPumpStatusReadToolHandler:
         devices = await self.devices_service.list_devices(owner_user_id=owner_user_id)
         telemetry = await self.devices_service.list_telemetry_events(owner_user_id=owner_user_id, limit=limit)
         bounded_devices = devices[:limit]
-        output = {
+        output: dict[str, Any] = {
             "pumps": [_device_payload(device) for device in bounded_devices],
             "telemetry": [_telemetry_payload(event) for event in telemetry],
             "counts": {
@@ -1446,7 +1446,7 @@ class DeviceGuidanceReadToolHandler:
         if retained_step:
             context_key = f"device_guidance:step:{reference['device_model'].lower()}"
             ttl_turns: int | None = None
-            invalidate_prefixes = ("device_guidance:step:",)
+            invalidate_prefixes: tuple[str, ...] = ("device_guidance:step:",)
         else:
             context_key = f"device_guidance:reference:{reference['device_model'].lower()}:{topic or 'query'}"
             ttl_turns = 3
@@ -1515,6 +1515,7 @@ class DeviceUnboxingAdvanceToolHandler:
         existing: AgentWorkflowState | None,
         started: bool,
     ) -> ToolHandlerResult:
+        thread_id = _required_thread_id(context)
         if existing is not None and existing.status in {"collecting", "ready", "waiting", "paused"}:
             state = dict(existing.state) if isinstance(existing.state, dict) else {}
             current_step = existing.active_step or _text(state, "current_step")
@@ -1533,7 +1534,7 @@ class DeviceUnboxingAdvanceToolHandler:
             status = "unboxing_started" if started else "unboxing_resumed"
         workflow = await self.runtime_service.upsert_workflow_state(
             owner_user_id=context.actor.user_id,
-            thread_id=context.thread_id,
+            thread_id=thread_id,
             run_id=context.run_id,
             workflow_type=self.WORKFLOW_TYPE,
             status="waiting",
@@ -1550,6 +1551,7 @@ class DeviceUnboxingAdvanceToolHandler:
         model: str,
         existing: AgentWorkflowState | None,
     ) -> ToolHandlerResult:
+        thread_id = _required_thread_id(context)
         workflow = _require_active_device_unboxing(existing)
         state = dict(workflow.state) if isinstance(workflow.state, dict) else {}
         current_step = workflow.active_step
@@ -1573,7 +1575,7 @@ class DeviceUnboxingAdvanceToolHandler:
         )
         updated = await self.runtime_service.upsert_workflow_state(
             owner_user_id=context.actor.user_id,
-            thread_id=context.thread_id,
+            thread_id=thread_id,
             run_id=context.run_id,
             workflow_type=self.WORKFLOW_TYPE,
             status="waiting",
@@ -1591,6 +1593,7 @@ class DeviceUnboxingAdvanceToolHandler:
         existing: AgentWorkflowState | None,
         phase: str,
     ) -> ToolHandlerResult:
+        thread_id = _required_thread_id(context)
         workflow = _require_active_device_unboxing(existing)
         state = dict(workflow.state) if isinstance(workflow.state, dict) else {}
         current_step = workflow.active_step
@@ -1606,7 +1609,7 @@ class DeviceUnboxingAdvanceToolHandler:
         )
         updated = await self.runtime_service.upsert_workflow_state(
             owner_user_id=context.actor.user_id,
-            thread_id=context.thread_id,
+            thread_id=thread_id,
             run_id=context.run_id,
             workflow_type=self.WORKFLOW_TYPE,
             status="completed",
@@ -1919,6 +1922,12 @@ class MilkPlanProposeToolHandler:
             thread_id=context.thread_id,
             workflow_type=MILK_ANALYSIS_WORKFLOW_TYPE,
         )
+        if workflow is None:
+            raise ApiError(
+                code="milk_analysis_required_before_plan",
+                message="Complete the durable milk analysis before creating a plan.",
+                status=409,
+            )
         state = dict(workflow.state) if workflow is not None and isinstance(workflow.state, dict) else {}
         raw_assessment = state.get("assessment")
         assessment: dict[str, Any] = dict(cast(dict[str, Any], raw_assessment)) if isinstance(raw_assessment, dict) else {}
@@ -2207,7 +2216,7 @@ class PregnancyPlanProposeToolHandler:
         plan_payload["card"] = _dict(plan_result, "card")
         apply_payload["payload"] = plan_payload
         preview_payload = _pregnancy_plan_preview_payload(apply_payload)
-        action_kwargs = {
+        action_kwargs: dict[str, Any] = {
             "owner_user_id": context.actor.user_id,
             "run_id": context.run_id,
             "action_type": PREGNANCY_PLAN_CREATE_ACTION,
@@ -2656,6 +2665,12 @@ def _require_active_device_unboxing(workflow: AgentWorkflowState | None) -> Agen
     if workflow is None or workflow.status not in {"collecting", "ready", "waiting", "paused"}:
         raise ApiError(code="device_unboxing_not_active", message="No active device unboxing workflow was found.", status=409)
     return workflow
+
+
+def _required_thread_id(context: ToolHandlerContext) -> UUID:
+    if context.thread_id is None:
+        raise ApiError(code="missing_thread_context", message="Device unboxing requires a thread context.", status=409)
+    return context.thread_id
 
 
 def _device_unboxing_workflow_payload(workflow: AgentWorkflowState) -> dict[str, Any]:
@@ -4122,8 +4137,10 @@ def _milk_observation_flags(
 
 
 def _milk_analysis_payload(*, status: dict[str, Any], growth: list[GrowthRecord]) -> dict[str, Any]:
-    status_payload = status.get("status") if isinstance(status.get("status"), dict) else {}
-    flags = status.get("observation_flags") if isinstance(status.get("observation_flags"), list) else []
+    raw_status_payload = status.get("status")
+    status_payload = cast(dict[str, Any], raw_status_payload) if isinstance(raw_status_payload, dict) else {}
+    raw_flags = status.get("observation_flags")
+    flags = raw_flags if isinstance(raw_flags, list) else []
     data_coverage = _text(status_payload, "data_coverage")
     trend = _text(status_payload, "pumping_trend")
     if "no_infant_profile" in flags:

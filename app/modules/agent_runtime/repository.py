@@ -6,7 +6,7 @@ from typing import Any, cast
 from uuid import UUID
 
 from sqlalchemy import func, or_, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, AsyncSessionTransaction
 
 from ...infrastructure.db.session import add_after_commit_callback
 from .models import (
@@ -31,7 +31,7 @@ class AgentRuntimeRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    def begin_nested(self):
+    def begin_nested(self) -> AsyncSessionTransaction:
         return self.session.begin_nested()
 
     async def rollback(self) -> None:

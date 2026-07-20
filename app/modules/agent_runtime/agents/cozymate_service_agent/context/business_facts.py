@@ -87,7 +87,9 @@ class BusinessFactsProjector:
         return source, payload
 
 
-async def _maybe_await(value: Awaitable[dict[str, Any]] | dict[str, Any]) -> dict[str, Any]:
+async def _maybe_await(
+    value: Awaitable[ToolHandlerResult | dict[str, Any]] | ToolHandlerResult | dict[str, Any],
+) -> ToolHandlerResult | dict[str, Any]:
     if hasattr(value, "__await__"):
         return await value
     return value

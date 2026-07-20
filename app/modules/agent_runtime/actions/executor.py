@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -175,7 +175,7 @@ def _utcnow() -> datetime:
 
 
 @asynccontextmanager
-async def _action_apply_scope(repository: Any):
+async def _action_apply_scope(repository: Any) -> AsyncIterator[None]:
     begin_nested = getattr(repository, "begin_nested", None)
     if not callable(begin_nested):
         yield

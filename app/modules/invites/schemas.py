@@ -28,12 +28,12 @@ class InviteCodeRead(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]  # Pydantic decorator wraps a property.
     @property
     def is_bound(self) -> bool:
         return bool(str(self.bound_device_id or "").strip() or self.bound_user_id)
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]  # Pydantic decorator wraps a property.
     @property
     def is_available(self) -> bool:
         if self.status != "active":

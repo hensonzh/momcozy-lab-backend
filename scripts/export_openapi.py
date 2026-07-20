@@ -4,7 +4,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -18,7 +18,7 @@ def build_openapi_schema(*, app_env: str = "test") -> dict[str, Any]:
     from app.factory import create_app
 
     app = create_app(Settings(app_env=app_env))
-    return cast(dict[str, Any], app.openapi())
+    return app.openapi()
 
 
 def write_openapi_schema(*, output: Path, app_env: str = "test") -> None:

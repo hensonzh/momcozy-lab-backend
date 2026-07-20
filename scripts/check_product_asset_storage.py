@@ -94,7 +94,7 @@ async def _stored_size(*, storage: "ObjectStorage", key: str) -> int:
         path = storage._path_for_key(key)
         if not path.exists():
             raise FileNotFoundError(key)
-        return cast(int, path.stat().st_size)
+        return path.stat().st_size
 
     if isinstance(storage, S3ObjectStorage):
         try:

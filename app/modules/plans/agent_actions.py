@@ -666,7 +666,7 @@ def _optional_bool(payload: dict[str, Any], key: str, *, default: bool, code: st
 
 def _required_positive_int(payload: dict[str, Any], key: str, code: str) -> int:
     value = payload.get(key)
-    if isinstance(value, bool):
+    if value is None or isinstance(value, bool):
         raise PermanentJobError(code)
     try:
         parsed = int(value)

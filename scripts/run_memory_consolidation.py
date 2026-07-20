@@ -16,10 +16,14 @@ from app.modules.agent_runtime.memory import (
     AgentMemoryExtractor,
     AgentMemoryRepository,
     AgentMemoryService,
+    MemoryConsolidationApplyResult,
+    MemoryConsolidationBatch,
+    MemoryConsolidationPreparation,
     apply_memory_consolidation,
     fail_memory_consolidation,
     prepare_memory_consolidation,
 )
+from app.modules.agent_runtime.memory.consolidation import MemoryCandidate
 from app.modules.agent_runtime.sdk import create_agent_model_runner
 from scripts.worker_runtime import install_stop_signal_handlers, sleep_until_stop
 
@@ -201,7 +205,7 @@ async def _prepare_owner(
     range_end: datetime,
     extractor_version: str,
     message_limit: int,
-):
+) -> MemoryConsolidationPreparation:
     async with session_factory() as session:
         repository = repository_factory(session)
         try:
@@ -225,9 +229,9 @@ async def _apply_owner(
     *,
     session_factory: Any,
     repository_factory: Callable[[Any], AgentMemoryRepository],
-    batch: Any,
-    candidates: Any,
-):
+    batch: MemoryConsolidationBatch,
+    candidates: list[MemoryCandidate],
+) -> MemoryConsolidationApplyResult:
     async with session_factory() as session:
         repository = repository_factory(session)
         try:

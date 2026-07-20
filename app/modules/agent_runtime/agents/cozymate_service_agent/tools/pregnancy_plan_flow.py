@@ -680,8 +680,8 @@ def invalid_pregnancy_plan_intake_fields(values: dict[str, Any]) -> list[str]:
         if value and value not in options:
             invalid.append(field_id)
     for field_id in PREGNANCY_PLAN_INTAKE_FIELD_IDS:
-        value = values.get(field_id)
-        if isinstance(value, str) and len(value) > 2000:
+        raw_value = values.get(field_id)
+        if isinstance(raw_value, str) and len(raw_value) > 2000:
             invalid.append(field_id)
     return list(dict.fromkeys(invalid))
 

@@ -138,6 +138,7 @@ def _normalize_task_template(
         if explicit_date != expected_date:
             raise MilkPlanScheduleValidationError(f"milk plan task {index + 1} date and day do not match")
 
+    target_dates: tuple[date, ...]
     if explicit_date is not None:
         target_dates = (explicit_date,)
     elif day_number is not None:

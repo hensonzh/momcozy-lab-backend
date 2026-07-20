@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from sqlalchemy import or_, select
@@ -182,7 +182,7 @@ class AgentMemoryRepository:
             AgentMemoryConsolidationRun.source_hash == source_hash,
             AgentMemoryConsolidationRun.extractor_version == extractor_version,
         )
-        return await self.session.scalar(statement)
+        return cast(AgentMemoryConsolidationRun | None, await self.session.scalar(statement))
 
     async def create_consolidation_run(
         self,
