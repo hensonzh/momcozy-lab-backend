@@ -42,7 +42,7 @@ runtime_context
 当前实现已经具备以下能力：
 
 - 从客户端上下文构造当前时间、用户时区、语言、消息发送时间和地理位置。
-- 当前用户消息和当前图片附件以原始形式进入模型。
+- 当前用户文本按原始形式进入模型；图片在上下文中只保留稳定 `asset_id`，由 Provider Adapter 在调用前临时解析为 HTTPS 签名 URL。
 - 每轮从数据库重新读取活动工作流并构造 `workflow_context`。
 - 从活动工作流生成简洁的 `ongoing_work`。
 - 在 Redis working context 中短期保留已加载的 Skill 和工具查询结果。
@@ -102,8 +102,8 @@ runtime_context
 
 - 从本轮 run 对应的持久化用户消息读取。
 - 保留原始文本，不做摘要。
-- 当前图片附件直接作为多模态输入提供给模型。
-- 历史附件保留可回查的消息或附件引用，不长期重复注入大体积内容。
+- 当前图片附件以 `asset_id` 多模态引用进入 Agent 上下文，不存储 Base64 或签名 URL。
+- 历史消息继续保留同一个 `asset_id`；Provider Adapter 在实际调用模型时复用 `thread_id + asset_id` 对应的持久化 URL 租约。
 
 ### 4.2 `user_context`
 

@@ -2,20 +2,25 @@ import asyncio
 from pathlib import Path
 from uuid import UUID, uuid4
 
-from app.modules.agent_runtime.evals.service import (
+from app.agent_runtime.evals.service import (
     AgentEvalRuntimeClient,
     AgentEvalRuntimeTraceCollector,
+)
+from app.agents.cozymate.evals import (
+    COZYMATE_AGENT_ID,
+    create_cozymate_eval_assertion_engine,
     load_product_agent_eval_seed_cases,
 )
-from app.modules.agent_runtime.models import (
+from app.agent_runtime.context.items import ContextItemAppend, message_context_item
+from app.agent_runtime.runs.models import (
     AgentAction,
     AgentEvent,
     AgentMessage,
     AgentRun,
     AgentToolCall,
 )
-from app.modules.agent_runtime.run_lifecycle.executor import AgentRuntimeExecutor
-from app.modules.agent_runtime.sdk import OpenAIResponsesRunner, ScriptedSdkBackend, scripted_sdk_response
+from app.agents.cozymate.executor import CozymateAgentExecutor
+from app.agent_runtime.providers import OpenAIResponsesRunner, ScriptedSdkBackend, scripted_sdk_response
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -48,43 +53,34 @@ def test_agent_eval_runtime_client_executes_run_and_evaluates_seed_case() -> Non
             )
         ],
     )
-    backend = ScriptedSdkBackend(
-        [
-            scripted_sdk_response(
-                action_proposals=(
-                    {
-                        "action_type": "support.ticket.create",
-                        "target_type": "support_ticket",
-                        "side_effect_level": "medium",
-                        "preview_payload": {"issue_summary": "Device will not start"},
-                        "apply_payload": {"issue_summary": "Device will not start"},
-                        "idempotency_key": "idem-support-ticket",
-                    },
-                )
-            )
-        ]
-    )
-    executor = AgentRuntimeExecutor(repository=repository, sdk_runner=OpenAIResponsesRunner(backend=backend))
+    backend = ScriptedSdkBackend([scripted_sdk_response(final_text="Please confirm the editable support form.")])
+    executor = CozymateAgentExecutor(repository=repository, sdk_runner=OpenAIResponsesRunner(backend=backend))
     case = {
         "suite": "runtime_trace_collection",
-        "name": "supported action trace",
+        "name": "support draft tool trace",
         "expected_tool_calls": [{"contract": "support.ticket.propose"}],
         "forbidden_tool_calls": [],
         "expected_behavior": {
             "service_skill_id": "cozymate_service_agent",
-            "requires_confirmation_before_write": True,
+            "requires_confirmation_before_write": False,
             "must_not": [],
         },
     }
 
-    result = asyncio.run(AgentEvalRuntimeClient(executor=executor, repository=repository).execute_case(run=run, case=case))
+    result = asyncio.run(
+        AgentEvalRuntimeClient(
+            executor=executor,
+            repository=repository,
+            assertion_engine=create_cozymate_eval_assertion_engine(),
+            default_service_skill_id=COZYMATE_AGENT_ID,
+        ).execute_case(run=run, case=case)
+    )
 
-    assert result.execution_result.status == "waiting_for_confirmation"
+    assert result.execution_result.status == "completed"
     assert result.eval_result.passed is True
-    assert result.trace.service_skill_id == "cozymate_service_agent"
+    assert result.trace.service_skill_id == COZYMATE_AGENT_ID
     assert result.trace.tool_calls[0]["tool_name"] == "support.ticket.propose"
-    assert any(event["type"] == "action.confirmation_required" for event in result.trace.events)
-    assert result.trace.actions[0]["action_type"] == "support.ticket.create"
+    assert result.trace.actions == []
 
 
 def test_agent_eval_trace_uses_latest_loaded_service_skill_event() -> None:
@@ -123,12 +119,29 @@ class FakeEvalRuntimeRepository:
         self.tool_calls = tool_calls
         self.actions: list[AgentAction] = []
         self.events: list[AgentEvent] = []
+        self.context_items = [
+            ContextItemAppend(
+                item_key=f"message:{message.id}",
+                item=message_context_item(role=message.role, content=message.content),
+            )
+            for message in messages
+            if message.role in {"user", "assistant"}
+        ]
 
     async def get_latest_user_message_for_run(self, *, run_id: UUID):
         return self.current_message if self.current_message.run_id == run_id else None
 
     async def list_messages_for_thread(self, *, thread_id: UUID, limit: int = 40):
         return [message for message in self.messages if message.thread_id == thread_id][:limit]
+
+    async def list_context_items_for_thread(self, *, thread_id: UUID):
+        return list(self.context_items) if thread_id == self.run.thread_id else []
+
+    async def append_context_items(self, *, thread_id: UUID, run_id: UUID, items):
+        assert thread_id == self.run.thread_id
+        assert run_id == self.run.id
+        self.context_items.extend(items)
+        return list(items)
 
     async def list_client_events_for_thread(
         self,

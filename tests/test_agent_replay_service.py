@@ -1,17 +1,18 @@
 import asyncio
 from uuid import uuid4
 
-from app.modules.agent_runtime.models import (
+from app.agents.cozymate.replay import project_cozymate_workflow_replay_state
+from app.agent_runtime.runs.models import (
     AgentAction,
     AgentArtifact,
-    AgentContextProjection,
+    AgentContextItem,
     AgentEvent,
     AgentMessage,
     AgentRun,
     AgentToolCall,
     AgentWorkflowState,
 )
-from app.modules.agent_runtime.event_stream.replay import AgentReplayService
+from app.agent_runtime.events.replay import AgentReplayService
 
 
 def test_agent_replay_service_exports_redacted_bundle_by_default() -> None:
@@ -25,6 +26,11 @@ def test_agent_replay_service_exports_redacted_bundle_by_default() -> None:
     assert "graph_version" not in bundle["run"]
     assert "prompt_version" not in bundle["run"]
     assert bundle["messages"][0]["content"] == {"redacted": True}
+    assert [item["item_type"] for item in bundle["context_items"]] == [
+        "message",
+        "function_call_output",
+    ]
+    assert bundle["context_items"][0]["item"] == {"redacted": True}
     assert bundle["events"][0]["type"] == "run.started"
     assert bundle["events"][0]["thread_id"] == str(repository.run.thread_id)
     assert bundle["events"][0]["run_id"] == str(repository.run.id)
@@ -34,8 +40,7 @@ def test_agent_replay_service_exports_redacted_bundle_by_default() -> None:
     assert bundle["artifacts"][0]["payload"] == {"title": "Birth plan"}
     assert bundle["checkpoints"] == []
     assert bundle["workflow_states"][0]["workflow_type"] == "milk_analysis_intake"
-    assert bundle["context_projections"][0]["projection_summary"]["state_keys"] == ["run_id"]
-    assert "prompt_version" not in bundle["context_projections"][0]
+    assert "context_projections" not in bundle
 
 
 def test_agent_replay_service_can_include_message_content_when_explicitly_requested() -> None:
@@ -46,6 +51,7 @@ def test_agent_replay_service_can_include_message_content_when_explicitly_reques
     )
 
     assert bundle["messages"][0]["content"] == {"text": "hello"}
+    assert bundle["context_items"][0]["item"] == {"role": "user", "content": "hello"}
 
 
 def test_agent_replay_service_redacts_pii_from_export_payloads() -> None:
@@ -57,7 +63,7 @@ def test_agent_replay_service_redacts_pii_from_export_payloads() -> None:
     repository.action.preview_payload = {"user_contact": "parent@example.com", "summary": "Pump issue"}
     repository.artifact.payload = {"shipping_address": "1 Main Street", "title": "Birth plan"}
     repository.workflow_state.state = {"phone_number": "4155551212", "step": "collect"}
-    repository.context_projection.projection_summary = {"email": "parent@example.com", "state_keys": ["run_id"]}
+    repository.context_items[1].item["output"] = '{"email":"parent@example.com"}'
 
     bundle = asyncio.run(
         AgentReplayService(repository=repository).export_run_bundle(run_id=repository.run.id, include_message_content=True)
@@ -70,7 +76,7 @@ def test_agent_replay_service_redacts_pii_from_export_payloads() -> None:
     assert bundle["actions"][0]["preview_payload"] == {"user_contact": "[redacted]", "summary": "Pump issue"}
     assert bundle["artifacts"][0]["payload"] == {"shipping_address": "[redacted]", "title": "Birth plan"}
     assert bundle["workflow_states"][0]["state"] == {"phone_number": "[redacted]", "step": "collect"}
-    assert bundle["context_projections"][0]["projection_summary"] == {"email": "[redacted]", "state_keys": ["run_id"]}
+    assert bundle["context_items"][1]["item"]["output"] == "[redacted]"
 
 
 def test_agent_replay_service_projects_pregnancy_workflow_state_without_health_facts() -> None:
@@ -95,7 +101,12 @@ def test_agent_replay_service_projects_pregnancy_workflow_state_without_health_f
         },
     }
 
-    bundle = asyncio.run(AgentReplayService(repository=repository).export_run_bundle(run_id=repository.run.id))
+    bundle = asyncio.run(
+        AgentReplayService(
+            repository=repository,
+            workflow_state_projector=project_cozymate_workflow_replay_state,
+        ).export_run_bundle(run_id=repository.run.id)
+    )
 
     assert bundle["workflow_states"][0]["state"] == {
         "phase": "awaiting_additional_information",
@@ -184,25 +195,39 @@ class FakeReplayRepository:
             state={"current_field": "daily_volume"},
             active_step="collect_daily_volume",
         )
-        self.context_projection = AgentContextProjection(
-            id=uuid4(),
-            run_id=self.run.id,
-            thread_id=self.run.thread_id,
-            context_schema_version="v1",
-            prompt_version=self.run.prompt_version,
-            tool_schema_version="default",
-            selected_message_ids=[str(self.message.id)],
-            active_workflow_state_id=self.workflow_state.id,
-            source_refs={"run_id": str(self.run.id)},
-            projection_summary={"state_keys": ["run_id"]},
-            token_estimate=123,
-        )
+        self.context_items = [
+            AgentContextItem(
+                id=uuid4(),
+                thread_id=self.run.thread_id,
+                run_id=self.run.id,
+                item_key=f"message:{self.message.id}",
+                item_type="message",
+                item={"role": "user", "content": "hello"},
+                sequence=1,
+            ),
+            AgentContextItem(
+                id=uuid4(),
+                thread_id=self.run.thread_id,
+                run_id=self.run.id,
+                item_key="run:1:function_call_output:call_1",
+                item_type="function_call_output",
+                item={
+                    "type": "function_call_output",
+                    "call_id": "call_1",
+                    "output": '{"profile":{"display_name":"Mai"}}',
+                },
+                sequence=2,
+            ),
+        ]
 
     async def get_run(self, *, run_id):
         return self.run if run_id == self.run.id else None
 
     async def list_messages_for_thread(self, *, thread_id):
         return [self.message] if thread_id == self.run.thread_id else []
+
+    async def list_context_items_for_thread(self, *, thread_id):
+        return list(self.context_items) if thread_id == self.run.thread_id else []
 
     async def list_events_for_run(self, *, run_id):
         return [self.event] if run_id == self.run.id else []
@@ -218,6 +243,3 @@ class FakeReplayRepository:
 
     async def list_workflow_states_for_run(self, *, run_id):
         return [self.workflow_state] if run_id == self.run.id else []
-
-    async def list_context_projections_for_run(self, *, run_id):
-        return [self.context_projection] if run_id == self.run.id else []

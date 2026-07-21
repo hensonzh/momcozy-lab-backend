@@ -16,12 +16,10 @@ def test_image_upload_vision_and_delete_main_flow() -> None:
     repository = InMemoryFileRepository()
     storage = InMemoryObjectStorage()
     audit_service = FlowAuditService()
-    outbox_service = CapturingOutboxService()
     file_service = FileService(
         repository=repository,
         object_storage=storage,
         audit_service=audit_service,
-        outbox_service=outbox_service,
     )
     vision_service = FileVisionService(
         repository=repository,
@@ -55,8 +53,7 @@ def test_image_upload_vision_and_delete_main_flow() -> None:
     with pytest.raises(ApiError) as exc_info:
         asyncio.run(vision_service.events_for_owner(file_id=uploaded.id, owner_user_id=owner_user_id))
     assert exc_info.value.code == "not_found"
-    assert outbox_service.enqueue_kwargs["job_type"] == "files.object_delete"
-    assert outbox_service.enqueue_kwargs["payload"]["object_key"] == uploaded.object_key
+    assert uploaded.object_key not in storage.objects
     assert [entry["action"] for entry in audit_service.entries] == ["files.upload", "files.delete"]
 
 
@@ -119,15 +116,6 @@ class InMemoryObjectStorage:
 
     async def delete(self, *, key: str):
         self.objects.pop(key, None)
-
-
-class CapturingOutboxService:
-    def __init__(self) -> None:
-        self.enqueue_kwargs = {}
-
-    async def enqueue(self, **kwargs):
-        self.enqueue_kwargs = kwargs
-        return None
 
 
 class FlowAuditService:

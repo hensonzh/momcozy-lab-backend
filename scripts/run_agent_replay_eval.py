@@ -11,9 +11,12 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.modules.agent_runtime.evals.service import (  # noqa: E402
-    AgentEvalReplayAssertionRunner,
+from app.agents.cozymate.evals import (  # noqa: E402
+    create_cozymate_eval_assertion_engine,
     load_product_agent_eval_seed_cases,
+)
+from app.agent_runtime.evals.service import (  # noqa: E402
+    AgentEvalReplayAssertionRunner,
 )
 
 DEFAULT_CASES = Path("fixtures/agent_eval_cases/product_service_seed.json")
@@ -30,7 +33,7 @@ def run_replay_eval(
     cases = load_product_agent_eval_seed_cases(cases_path)
     case = _select_case(cases=cases, suite=suite, name=name)
     replay_bundle = json.loads(replay_path.read_text())
-    result = AgentEvalReplayAssertionRunner().evaluate_bundle(case=case, replay_bundle=replay_bundle)
+    result = AgentEvalReplayAssertionRunner(assertion_engine=create_cozymate_eval_assertion_engine()).evaluate_bundle(case=case, replay_bundle=replay_bundle)
     report = {
         "suite": result.suite,
         "name": result.name,

@@ -108,7 +108,7 @@ The source of truth is each FastAPI route's OpenAPI extension metadata.
 
 | Method | Path | Owner | Clients | Stability | Summary |
 |---|---|---|---|---|---|
-| POST | `/v1/notifications` | notifications | agent-worker, outbox-worker | stable | Create Notification |
+| POST | `/v1/notifications` | notifications | agent-worker | stable | Create Notification |
 
 ## admin_ops_api
 

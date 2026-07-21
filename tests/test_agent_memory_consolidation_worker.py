@@ -5,7 +5,7 @@ from uuid import uuid4
 import pytest
 
 from app.core.settings import Settings
-from app.modules.agent_runtime.memory.consolidation import (
+from app.agent_runtime.context.memory.consolidation import (
     MemoryConsolidationApplyResult,
     MemoryConsolidationBatch,
     MemoryConsolidationPreparation,

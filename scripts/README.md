@@ -1,7 +1,7 @@
 # Production Backend Scripts
 
-本目录放显式执行的开发、回归、验收、运维脚本。除 `run_agent_worker.py`、
-`run_outbox_worker.py` 和 `run_memory_consolidation.py` 会作为独立 worker 进程入口外，其他脚本不会随着
+本目录放显式执行的开发、回归、验收、运维脚本。`run_agent_worker.py` 和
+`run_memory_consolidation.py` 会作为独立 worker 进程入口，其他脚本不会随着
 FastAPI API 服务启动自动运行。
 
 ## 使用原则
@@ -29,9 +29,9 @@ set -a; . env/compose.local.env.example; set +a
 
 | 场景 | 推荐命令 | 会运行的脚本 |
 |---|---|---|
-| 本地启动完整后端 | `make backend-local-up` | Compose 启动基础设施，运行 Alembic migration，然后启动 API、agent-worker、outbox-worker、memory-worker |
+| 本地启动完整后端 | `make backend-local-up` | Compose 启动基础设施，运行 Alembic migration，然后启动 API、agent-worker、memory-worker |
 | 本地单独迁移数据库 | `make backend-local-migrate` | Alembic migration，不走本目录脚本 |
-| 本地单独启动/重启 worker | `make backend-local-workers` | `run_agent_worker.py`, `run_outbox_worker.py`, `run_memory_consolidation.py` |
+| 本地单独启动/重启 worker | `make backend-local-workers` | `run_agent_worker.py`, `run_memory_consolidation.py` |
 | 基础设施验收 | `make backend-check-infra` | database / Redis / object storage / product asset checks |
 | 后端产品化门禁 | `make backend-productization-status` | `check_productization_status.py` |
 | 后端 smoke | `make backend-smoke` | productization status + seed eval + fact extraction eval |
@@ -52,16 +52,15 @@ set -a; . env/compose.local.env.example; set +a
 | `check_redis_runtime_controls.py` | 检查 Redis lock、cancel flag、stream cursor 等 agent runtime 控制能力。 | `backend-check-infra`、CI Redis 集成测试、staging/production readiness。 | `python scripts/check_redis_runtime_controls.py` |
 | `export_openapi.py` | 导出当前 FastAPI OpenAPI schema，用于契约快照比对。 | API 契约变化时手动更新；CI 中生成临时文件并和 docs 快照 diff。 | `python scripts/export_openapi.py --output docs/openapi.generated.json` |
 | `export_api_surface_catalog.py` | 从 OpenAPI 扩展字段导出 App/API/运维/内部接口分类目录。 | API surface 变化时，在导出 OpenAPI 后同步更新。 | `python scripts/export_api_surface_catalog.py --openapi-input docs/openapi.generated.json --output docs/api-surface-catalog.md` |
-| `inspect_worker_backlog.py` | 只读查看 durable outbox 和 agent run backlog 数量，不修改状态。 | 本地/线上排查 worker 堆积、发布后观察。 | `set -a; . <env-file>; set +a; python scripts/inspect_worker_backlog.py` |
+| `inspect_worker_backlog.py` | 只读查看 agent run 和 fact extraction backlog 数量，不修改状态。 | 本地/线上排查 worker 堆积、发布后观察。 | `set -a; . <env-file>; set +a; python scripts/inspect_worker_backlog.py` |
 | `recover_stuck_agent_runs.py` | 查找长时间停留在 `running` 的 agent run；默认 dry run，`--apply` 后标记失败并清理 Redis 控制状态。 | 运维恢复卡住的 run 时手动执行。 | `python scripts/recover_stuck_agent_runs.py --limit 20`; 真正修改用 `--apply` |
 | `run_agent_replay_eval.py` | 用已保存的 replay bundle 对单个 seed case 做回放断言。 | 线上问题复盘、事故回归、专题修复验证。 | `python scripts/run_agent_replay_eval.py --replay <bundle.json> --suite <suite> --name <case-name>` |
 | `run_agent_seed_eval.py` | 对已捕获的真实 runtime/provider trace 执行历史 seed 断言，可输出 JSON/JUnit；缺少 observed trace 时会 fail closed。 | 线上问题复盘、provider-live/nightly 回放，不作为无 trace 的 PR gate。 | `python scripts/run_agent_seed_eval.py --trace-fixtures <observed-traces.json> --output /tmp/agent-seed-eval.json --junit-output /tmp/agent-seed-eval.junit.xml` |
 | `run_agent_fact_eval.py` | 通过真实 `AgentFactExtractor` 与确定性 scripted backend 运行聊天事实提取 eval，可输出 JSON/JUnit。 | 每次 PR CI、本地 smoke、改动事实目录/提取规则时。 | `python scripts/run_agent_fact_eval.py --output /tmp/agent-fact-eval.json --junit-output /tmp/agent-fact-eval.junit.xml` |
 | `run_device_unboxing_decision_eval.py` | 使用当前真实模型 provider，以及生产系统提示词、设备 skill、workflow context 和工具 schema，验证“完整展示后继续”“遇到问题”“步骤未完整展示却说继续”三类决策；不使用 scripted backend 预设工具调用。 | provider-live/nightly 或设备开箱提示词、skill、上下文投影变化后手动运行。 | `make backend-agent-device-decision-eval`，或 `python scripts/run_device_unboxing_decision_eval.py --output /tmp/device-unboxing-decision-eval.json --trace-output /tmp/device-unboxing-decision-traces.json` |
 | `run_agent_worker.py` | 独立 agent run worker 进程入口，扫描可运行 run 并执行原生 OpenAI Responses runtime。 | `make backend-local-up` 或单独 worker 服务启动时运行。 | `python -m scripts.run_agent_worker`; 本地完整启动推荐 `make backend-local-up`，单独重启推荐 `make backend-local-workers` |
-| `run_outbox_worker.py` | 独立通用 outbox worker 进程入口；当前只处理文件对象清理等非 Agent action 的持久副作用与重试。Agent action 由 agent worker 在 run 内同步执行。 | `make backend-local-up` 或单独 worker 服务启动时运行。 | `python -m scripts.run_outbox_worker`; 本地完整启动推荐 `make backend-local-up`，单独重启推荐 `make backend-local-workers` |
 | `run_memory_consolidation.py` | 独立夜间记忆 worker；读取前一日本地自然日的已完成对话，幂等更新长期记忆与 bounded snapshot。 | 启动时补跑一次，此后按配置小时运行；也可手工 backfill。 | `python -m scripts.run_memory_consolidation`; 单次补跑用 `--once --date YYYY-MM-DD` |
-| `worker_runtime.py` | worker 共享运行时工具，负责 stop signal 和 sleep 控制。 | 不单独启动；被三个 worker 入口 import。 | 不直接执行 |
+| `worker_runtime.py` | worker 共享运行时工具，负责 stop signal 和 sleep 控制。 | 不单独启动；被两个 worker 入口 import。 | 不直接执行 |
 
 ## 回归测试分层
 

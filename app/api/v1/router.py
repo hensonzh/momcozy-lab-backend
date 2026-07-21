@@ -8,7 +8,7 @@ from sqlalchemy import text
 from ...core.errors import ApiError
 from ...core.settings import Settings
 from ..surface import SurfaceAPIRouter, api_surface
-from ...modules.agent_runtime.router import router as agent_runtime_router
+from ...agent_runtime.api.router import router as agent_runtime_router
 from ...modules.assets.router import router as assets_router
 from ...modules.auth import authenticate_service_key
 from ...modules.auth.router import router as auth_router

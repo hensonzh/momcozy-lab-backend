@@ -29,13 +29,5 @@ def test_audit_indexes_support_replay_and_resource_lookup() -> None:
     assert "ix_idempotency_keys_expires_at" in idempotency_indexes
 
 
-def test_outbox_jobs_have_worker_indexes_and_idempotency() -> None:
-    table = Base.metadata.tables["outbox_jobs"]
-    index_names = {index.name for index in table.indexes}
-    constraint_names = {constraint.name for constraint in table.constraints}
-
-    assert "uq_outbox_jobs_idempotency_key" in constraint_names
-    assert "ix_outbox_jobs_status_next_attempt" in index_names
-    assert "ix_outbox_jobs_locked_until" in index_names
-    assert "payload_json" in table.columns
-    assert table.columns["status"].nullable is False
+def test_retired_outbox_table_is_not_part_of_runtime_metadata() -> None:
+    assert "outbox_jobs" not in Base.metadata.tables

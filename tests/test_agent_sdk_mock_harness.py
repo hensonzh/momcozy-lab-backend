@@ -2,11 +2,11 @@ import asyncio
 import pytest
 from app.core.errors import ApiError
 from app.core.settings import Settings
-from app.modules.agent_runtime.sdk import (
+from app.agent_runtime.tools.result import ToolResult, ToolTextOutput
+from app.agent_runtime.providers import (
     OpenAIResponsesRunner,
     SdkNodeRequest,
     SdkToolDefinition,
-    SdkToolInvocationResult,
     ScriptedSdkBackend,
     create_agent_model_runner,
     scripted_sdk_response,
@@ -18,9 +18,9 @@ from app.modules.agent_runtime.sdk import (
 def test_scripted_sdk_backend_invokes_application_tool_contracts() -> None:
     invoked_args: list[str] = []
 
-    async def invoke_json(args_json: str) -> SdkToolInvocationResult:
+    async def invoke_json(args_json: str) -> ToolResult:
         invoked_args.append(args_json)
-        return SdkToolInvocationResult(output_json='{"profile":{"display_name":"Mai"}}')
+        return ToolResult.json({"profile": {"display_name": "Mai"}})
 
     backend = ScriptedSdkBackend(
         [
@@ -65,18 +65,20 @@ def test_scripted_sdk_backend_invokes_application_tool_contracts() -> None:
 
 
 def test_scripted_sdk_backend_keeps_private_model_output_out_of_observed_trace() -> None:
-    async def invoke_json(_args_json: str) -> SdkToolInvocationResult:
-        return SdkToolInvocationResult(
-            output_json='{"entry":{"content":"private diary content"},"status":"entry_read"}',
-            safe_output_json='{"entry_date":"2026-07-12","status":"entry_read"}',
+    async def invoke_json(_args_json: str) -> ToolResult:
+        return ToolResult(
+            output=(
+                ToolTextOutput(text='{"entry":{"content":"private diary content"},"status":"entry_read"}'),
+            ),
+            audit_output={"entry_date": "2026-07-12", "status": "entry_read"},
         )
 
     backend = ScriptedSdkBackend(
         [
             scripted_sdk_response(
                 final_text="I found the entry.",
-                tool_invocations=(scripted_tool_invocation("pregnancy_diary.manage", {"action": "read"}),),
-                expected_available_tools=("pregnancy_diary.manage",),
+                tool_invocations=(scripted_tool_invocation("pregnancy_diary.query", {}),),
+                expected_available_tools=("pregnancy_diary.query",),
             )
         ]
     )
@@ -86,11 +88,11 @@ def test_scripted_sdk_backend_keeps_private_model_output_out_of_observed_trace()
         actor_user_id="user_1",
         instructions="Use tools.",
         model_input=[{"role": "user", "content": "read my diary"}],
-        tool_names=("pregnancy_diary.manage",),
+        tool_names=("pregnancy_diary.query",),
         tools=(
             SdkToolDefinition(
-                contract_name="pregnancy_diary.manage",
-                sdk_name=sdk_tool_name("pregnancy_diary.manage"),
+                contract_name="pregnancy_diary.query",
+                sdk_name=sdk_tool_name("pregnancy_diary.query"),
                 description="Read diary.",
                 params_json_schema={"type": "object", "properties": {}},
                 invoke=invoke_json,

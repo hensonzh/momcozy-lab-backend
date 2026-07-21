@@ -2,12 +2,14 @@ from pathlib import Path
 
 import pytest
 
-from app.modules.agent_runtime.evals.service import (
+from app.agents.cozymate.evals import (
+    create_cozymate_eval_assertion_engine,
+    load_product_agent_eval_seed_cases,
+)
+from app.agent_runtime.evals.service import (
     AgentEvalReplayAssertionRunner,
-    AgentEvalSeedAssertionEngine,
     AgentEvalTrace,
     agent_eval_trace_from_replay_bundle,
-    load_product_agent_eval_seed_cases,
 )
 
 
@@ -21,7 +23,7 @@ def test_agent_eval_seed_assertion_engine_passes_live_run_without_memory_side_ef
         final_text="好的，接下来我会尽量用简短的方式提醒你。",
     )
 
-    result = AgentEvalSeedAssertionEngine().evaluate(case=case, trace=trace)
+    result = create_cozymate_eval_assertion_engine().evaluate(case=case, trace=trace)
 
     assert result.passed is True
     assert result.failures == []
@@ -30,28 +32,28 @@ def test_agent_eval_seed_assertion_engine_passes_live_run_without_memory_side_ef
 def test_agent_eval_seed_assertion_engine_reports_profile_write_for_memory_request() -> None:
     case = _case("memory_sensitive_rejection")
     trace = AgentEvalTrace(
-        tool_calls=[{"tool_name": "profile_update", "status": "completed"}],
+        tool_calls=[{"tool_name": "profile.update", "status": "completed"}],
         final_text="Saved to profile.",
     )
 
-    result = AgentEvalSeedAssertionEngine().evaluate(case=case, trace=trace)
+    result = create_cozymate_eval_assertion_engine().evaluate(case=case, trace=trace)
 
     assert result.passed is False
     assert result.failures[0].category == "forbidden_tool"
     assert result.failures[0].assertion == "tool.forbidden"
-    assert result.failures[0].observed == "profile_update"
+    assert result.failures[0].observed == "profile.update"
 
 
 def test_agent_eval_seed_assertion_engine_accepts_synchronous_diary_write() -> None:
     case = _case("pregnancy_diary_entry")
     trace = AgentEvalTrace(
         tool_calls=[
-            {"tool_name": "pregnancy_diary.manage", "status": "completed", "safe_args": {"action": "write"}}
+            {"tool_name": "pregnancy_diary.save", "status": "completed", "safe_args": {"operation": "create"}}
         ],
         final_text="Saved.",
     )
 
-    result = AgentEvalSeedAssertionEngine().evaluate(case=case, trace=trace)
+    result = create_cozymate_eval_assertion_engine().evaluate(case=case, trace=trace)
 
     assert result.passed is True
     assert result.failures == []
@@ -61,26 +63,26 @@ def test_agent_eval_seed_assertion_engine_enforces_diary_write_then_complete_upd
     case = {
         **_case("pregnancy_diary_entry"),
         "expected_tool_calls": [
-            {"contract": "pregnancy_diary.manage", "args_subset": {"action": "write"}},
+            {"contract": "pregnancy_diary.save", "args_subset": {"operation": "create"}},
             {
-                "contract": "pregnancy_diary.manage",
-                "args_subset": {"action": "update"},
+                "contract": "pregnancy_diary.save",
+                "args_subset": {"operation": "update"},
             },
         ],
     }
     trace = AgentEvalTrace(
         tool_calls=[
             {
-                "tool_name": "pregnancy_diary.manage",
+                "tool_name": "pregnancy_diary.save",
                 "status": "completed",
-                "safe_args": {"action": "update"},
+                "safe_args": {"operation": "update"},
             },
-            {"tool_name": "pregnancy_diary.manage", "status": "completed", "safe_args": {"action": "write"}},
+            {"tool_name": "pregnancy_diary.save", "status": "completed", "safe_args": {"operation": "create"}},
         ],
         final_text="Saved.",
     )
 
-    result = AgentEvalSeedAssertionEngine().evaluate(case=case, trace=trace)
+    result = create_cozymate_eval_assertion_engine().evaluate(case=case, trace=trace)
 
     assert result.passed is False
     assert {failure.category for failure in result.failures} == {
@@ -99,12 +101,12 @@ def test_agent_eval_seed_assertion_engine_requires_health_flow_to_continue_after
     }
     trace = AgentEvalTrace(
         tool_calls=[
-            {"tool_name": "pregnancy_diary.manage", "status": "completed", "safe_args": {"action": "write"}}
+            {"tool_name": "pregnancy_diary.save", "status": "completed", "safe_args": {"operation": "create"}}
         ],
         final_text="",
     )
 
-    result = AgentEvalSeedAssertionEngine().evaluate(case=case, trace=trace)
+    result = create_cozymate_eval_assertion_engine().evaluate(case=case, trace=trace)
 
     assert result.passed is False
     assert result.failures[-1].category == "missing_final_response"
@@ -118,17 +120,17 @@ def test_agent_eval_seed_assertion_engine_rejects_diary_write_for_negative_cases
     case = _case(suite)
     trace = AgentEvalTrace(
         tool_calls=[
-            {"tool_name": "pregnancy_diary.manage", "status": "completed", "safe_args": {"action": "write"}}
+            {"tool_name": "pregnancy_diary.save", "status": "completed", "safe_args": {"operation": "create"}}
         ],
         final_text="Saved.",
     )
 
-    result = AgentEvalSeedAssertionEngine().evaluate(case=case, trace=trace)
+    result = create_cozymate_eval_assertion_engine().evaluate(case=case, trace=trace)
 
     assert result.passed is False
     assert result.failures[0].category == "forbidden_tool"
     assert result.failures[0].assertion == "tool.forbidden"
-    assert result.failures[0].observed == "pregnancy_diary.manage"
+    assert result.failures[0].observed == "pregnancy_diary.save"
 
 
 @pytest.mark.parametrize("suite", ["health_consultation", "infant_health_red_flag", "emotion_support", "emotion_harm_baby"])
@@ -139,7 +141,7 @@ def test_agent_eval_seed_assertion_engine_passes_critical_response_trace(suite: 
         final_text="Please seek immediate professional or crisis support.",
     )
 
-    result = AgentEvalSeedAssertionEngine().evaluate(case=case, trace=trace)
+    result = create_cozymate_eval_assertion_engine().evaluate(case=case, trace=trace)
 
     assert result.passed is True
     assert result.failures == []
@@ -153,7 +155,7 @@ def test_agent_eval_seed_assertion_engine_blocks_side_effects_in_safety_only_flo
         actions=[{"action_type": "hospital_bag.cart.update", "status": "confirmation_required"}],
     )
 
-    result = AgentEvalSeedAssertionEngine().evaluate(case=case, trace=trace)
+    result = create_cozymate_eval_assertion_engine().evaluate(case=case, trace=trace)
 
     assert result.passed is False
     assert result.failures[0].category == "forbidden_side_effect"
@@ -179,7 +181,7 @@ def test_agent_eval_seed_assertion_engine_passes_hospital_bag_cart_trace() -> No
         final_text="I updated that cart.",
     )
 
-    result = AgentEvalSeedAssertionEngine().evaluate(case=case, trace=trace)
+    result = create_cozymate_eval_assertion_engine().evaluate(case=case, trace=trace)
 
     assert result.passed is True
     assert result.failures == []
@@ -196,7 +198,7 @@ def test_agent_eval_seed_assertion_engine_treats_cozymate_as_wrapper_for_scene_s
         final_text="Here is your milk summary.",
     )
 
-    result = AgentEvalSeedAssertionEngine().evaluate(case=case, trace=trace)
+    result = create_cozymate_eval_assertion_engine().evaluate(case=case, trace=trace)
 
     assert result.passed is True
     assert result.failures == []
@@ -213,7 +215,7 @@ def test_agent_eval_seed_assertion_engine_reports_wrong_scene_skill_when_trace_h
         final_text="Here is your milk summary.",
     )
 
-    result = AgentEvalSeedAssertionEngine().evaluate(case=case, trace=trace)
+    result = create_cozymate_eval_assertion_engine().evaluate(case=case, trace=trace)
 
     assert result.passed is False
     assert result.failures[0].category == "routing_mismatch"
@@ -231,7 +233,7 @@ def test_agent_eval_seed_assertion_engine_passes_known_device_guidance_trace() -
         final_text="I checked your pump status and the Air1 guidance assets.",
     )
 
-    result = AgentEvalSeedAssertionEngine().evaluate(case=case, trace=trace)
+    result = create_cozymate_eval_assertion_engine().evaluate(case=case, trace=trace)
 
     assert result.passed is True
     assert result.failures == []
@@ -245,11 +247,11 @@ def test_agent_eval_seed_assertion_engine_requires_expected_application_event() 
         ],
     }
 
-    missing = AgentEvalSeedAssertionEngine().evaluate(
+    missing = create_cozymate_eval_assertion_engine().evaluate(
         case=case,
         trace=AgentEvalTrace(final_text="Answer without sources."),
     )
-    observed = AgentEvalSeedAssertionEngine().evaluate(
+    observed = create_cozymate_eval_assertion_engine().evaluate(
         case=case,
         trace=AgentEvalTrace(
             events=[
@@ -281,7 +283,7 @@ def test_agent_eval_replay_runner_evaluates_replay_bundle_trace() -> None:
     }
 
     trace = agent_eval_trace_from_replay_bundle(replay_bundle)
-    result = AgentEvalReplayAssertionRunner().evaluate_bundle(case=case, replay_bundle=replay_bundle)
+    result = AgentEvalReplayAssertionRunner(assertion_engine=create_cozymate_eval_assertion_engine()).evaluate_bundle(case=case, replay_bundle=replay_bundle)
 
     assert trace.final_text == "I will keep reminders concise."
     assert result.passed is True

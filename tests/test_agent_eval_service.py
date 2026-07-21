@@ -1,8 +1,8 @@
 import asyncio
 from uuid import uuid4
 
-from app.modules.agent_runtime.evals.service import AgentEvalService
-from app.modules.agent_runtime.models import AgentEvalCase
+from app.agent_runtime.evals.service import AgentEvalService
+from app.agent_runtime.runs.models import AgentEvalCase
 
 
 def test_agent_eval_service_creates_draft_case_from_replay_bundle() -> None:
@@ -59,5 +59,5 @@ class FakeReplayService:
             "artifacts": [],
             "checkpoints": [],
             "workflow_states": [],
-            "context_projections": [],
+            "context_items": [],
         }

@@ -26,8 +26,10 @@ environment variables, not code changes:
 - `OBJECT_STORAGE_BUCKET`
 - `OBJECT_STORAGE_REGION`
 - `OBJECT_STORAGE_ENDPOINT_URL`
+- `OBJECT_STORAGE_PUBLIC_ENDPOINT_URL`
 - `OBJECT_STORAGE_ACCESS_KEY_ID`
 - `OBJECT_STORAGE_SECRET_ACCESS_KEY`
+- `AGENT_IMAGE_SIGNED_URL_TTL_SECONDS`
 - `AUTH_JWT_SECRET`
 - `AUTH_JWT_ISSUER`
 - `AUTH_JWT_AUDIENCE`
@@ -84,10 +86,19 @@ should provide managed `DATABASE_URL`, `REDIS_URL`, and managed
 `OBJECT_STORAGE_*` values through environment variables; no code change is
 required to switch providers.
 
+Agent image messages use a stable internal `asset_id`; Base64 image bytes and
+signed URLs are never stored in the model conversation. Before the first run
+for an image, the backend creates one HTTPS signed-URL binding for the
+`thread_id + asset_id` pair and reuses the exact URL until it expires. Configure
+`OBJECT_STORAGE_PUBLIC_ENDPOINT_URL` with an OpenAI-reachable HTTPS object
+storage host. `AGENT_IMAGE_SIGNED_URL_TTL_SECONDS` defaults to `604800` (seven
+days, the S3-compatible presign ceiling); after expiry, the next run rotates the
+binding once and then reuses the new URL.
+
 Agent runs are processed by a separate worker process, not by the API lifespan.
 `make backend-local-up` first builds the local `migrate`, `api`,
-`agent-worker`, and `outbox-worker` images from the current source tree, then
-starts infrastructure, runs Alembic migrations, and starts the four runtime
+`agent-worker`, and `memory-worker` images from the current source tree, then
+starts infrastructure, runs Alembic migrations, and starts the three runtime
 services with recreated containers. The worker processes still run as separate
 Compose services, so they can be restarted or scaled independently. For a fully
 uncached rebuild, run `BACKEND_BUILD_FLAGS=--no-cache make backend-local-up`.
@@ -143,15 +154,12 @@ quality smoke pass are ready. `VISION_PROVIDER=local_stub` is deterministic,
 local/test-only, and rejected in production. See
 `docs/vision-provider-integration.md`.
 
-Durable file-object cleanup jobs are processed by the separate outbox worker.
-Agent action writes execute synchronously inside the Agent worker run and never
-use that outbox. Both workers are disabled by default in the example env; enable
-the Agent worker for Agent runs and the outbox worker when local file cleanup is
-also required:
+File deletion removes the owner-scoped object synchronously in the API request.
+Agent action writes execute synchronously inside the Agent worker run. Enable
+the Agent worker when local Agent runs are required:
 
 ```env
 AGENT_RUNTIME_WORKER_ENABLED=true
-OUTBOX_WORKER_ENABLED=true
 OPENAI_API_KEY=...
 OPENAI_MODEL=gpt-5.6-terra
 OPENAI_REASONING_EFFORT=low
@@ -184,7 +192,7 @@ python -m scripts.run_memory_consolidation --once --date 2026-07-10
 
 Use `docker-compose.prod.yml` on a server when Postgres,
 Redis, and object storage are managed outside the compose project. The production
-compose starts `api`, `agent-worker`, `outbox-worker`, and `memory-worker`; the one-time
+compose starts `api`, `agent-worker`, and `memory-worker`; the one-time
 `migrate` service is available through the `tools` profile.
 
 ```bash
@@ -193,7 +201,7 @@ make backend-prod-up
 ```
 
 `backend-prod-up` builds local runtime images, runs Alembic migrations, and then
-starts the four runtime services with recreated containers. Use
+starts the three runtime services with recreated containers. Use
 `backend-prod-services` for restarts that should not run migrations again; it
 still builds runtime images before restart. See
 `docs/deployment-runbook.md` for reverse proxy, scaling, and
@@ -213,7 +221,7 @@ make backend-test-up
 
 `backend-test-up` builds local runtime images, starts `postgres`, `redis`,
 `minio`, initializes the test bucket, runs Alembic migrations, and then starts
-`api`, `agent-worker`, and `outbox-worker` with recreated containers. The API
+`api`, `agent-worker`, and `memory-worker` with recreated containers. The API
 binds to `127.0.0.1:8001` by default so a reverse proxy can expose a test domain
 without exposing DB/Redis/MinIO ports.
 
@@ -224,6 +232,8 @@ MomCozyAgent/
   app/
     main.py
     factory.py
+    agent_runtime/
+    agents/
     core/
     api/
     modules/
@@ -235,24 +245,29 @@ MomCozyAgent/
   scripts/
 ```
 
-Agent runtime is a domain module with explicit internal subdomains:
+Agent runtime is the shared execution layer. Concrete agent behavior lives under `app/agents/`:
 
 ```text
-app/modules/agent_runtime/
-  router.py
-  service.py
-  repository.py
-  models.py
-  schemas.py
+app/agents/
+  cozymate/
+    actions/
+    context/
+    prompts/
+    skills/
+    tools/
+    workflows/
+    executor.py
+    factory.py
+
+app/agent_runtime/
   actions/
-  event_stream/
-  run_lifecycle/
-  memory/
+  api/
+  context/
   evals/
-  safety/
-  graphs/
-  prompts/
-  routing/
-  sdk/
+  events/
+  providers/
+  runs/
   tools/
 ```
+
+Dependency direction is one-way: concrete agents may depend on runtime primitives and business services; runtime never imports a concrete agent or product domain. Product policies and handler wiring are owned by `app/agents/cozymate/factory.py`. `app/workers/` owns only process execution, while scripts remain thin launchers.

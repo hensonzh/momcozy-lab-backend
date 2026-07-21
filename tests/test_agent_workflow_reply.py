@@ -3,12 +3,12 @@ from uuid import uuid4
 import pytest
 
 from app.core.errors import ApiError
-from app.modules.agent_runtime.models import AgentWorkflowState
-from app.modules.agent_runtime.workflow_reply import (
+from app.agent_runtime.runs.models import AgentWorkflowState
+from app.agent_runtime.context.workflow_reply import (
     build_workflow_reply_context,
-    guarded_workflow_type,
     validate_workflow_reply_context,
 )
+from app.agents.cozymate.workflows.reply import guarded_workflow_type
 
 
 def test_workflow_reply_context_contains_only_the_opaque_cursor() -> None:

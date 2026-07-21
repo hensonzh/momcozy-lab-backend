@@ -13,7 +13,7 @@ router.py
 
 service.py
   Application service / use-case orchestration. Owns permission checks,
-  owner-scope checks, idempotency, transaction coordination, audit, outbox, and
+  owner-scope checks, idempotency, transaction coordination, audit, and
   repository/client calls.
 
 domain.py
@@ -37,6 +37,10 @@ Add `domain.py` when a module has rules that are:
 - calculations over records, state transitions, or payload normalization.
 
 For small CRUD-only modules, `domain.py` can wait until rules emerge.
+
+## Agent Integration Boundary
+
+Business modules expose models, domain rules, repositories, and application services. Agent-specific Action handlers and Tool handlers live under `app/agents/cozymate/` and call those services; business modules do not import `app.agent_runtime`, `app.agents`, or `app.workers`. Shared execution contracts belong to `app/agent_runtime/`, and background process mechanics belong to `app/workers/`.
 
 ## Current Example
 

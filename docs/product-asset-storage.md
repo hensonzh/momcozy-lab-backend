@@ -73,7 +73,7 @@ the manifest is committed, while bytes are published to object storage.
 
 ## Worker Boundary
 
-Agent and outbox workers receive the same `ObjectStorage` provider as the API
-process, but they do not need product asset blobs on disk. This keeps worker
+Agent workers receive the same `ObjectStorage` provider as the API process, but
+they do not need product asset blobs on disk. This keeps worker
 images small and makes asset rollout an object-storage operation instead of an
 application redeploy.

@@ -11,8 +11,8 @@ from ...api.surface import SurfaceAPIRouter, api_surface
 from ...core.errors import ApiError
 from ...infrastructure.db import get_session
 from ...infrastructure.object_storage import ObjectStorage
-from ..audit import AuditService, IdempotencyService, OutboxService
-from ..audit.repository import AuditRepository, OutboxRepository
+from ..audit import AuditService, IdempotencyService
+from ..audit.repository import AuditRepository
 from ..auth import CurrentUser
 from .repository import FileRepository
 from .schemas import FileListResponse, FileRead
@@ -41,7 +41,6 @@ def get_file_service(
         object_storage=object_storage,
         audit_service=AuditService(repository=audit_repository),
         idempotency_service=IdempotencyService(repository=audit_repository),
-        outbox_service=OutboxService(repository=OutboxRepository(session)),
         max_upload_bytes=request.app.state.settings.file_upload_max_bytes,
     )
 

@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
+from .agents.cozymate.context.client import sanitize_cozymate_client_context
+from .agents.cozymate.replay import project_cozymate_workflow_replay_state
+from .agents.cozymate.actions import cozymate_action_policy
+from .agents.cozymate.actions.support_form import create_agent_form_ticket
 from .api.error_handlers import install_error_handlers
 from .api.v1.router import router as v1_router
 from .core.cors import install_cors_middleware
@@ -24,6 +28,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = resolved_settings
     app.state.request_metrics = RequestMetrics()
+    app.state.agent_client_context_sanitizer = sanitize_cozymate_client_context
+    app.state.agent_workflow_replay_projector = project_cozymate_workflow_replay_state
+    app.state.agent_action_policy = cozymate_action_policy()
+    app.state.support_agent_form_submitter = create_agent_form_ticket
     install_trusted_host_middleware(app, resolved_settings)
     install_cors_middleware(app, resolved_settings)
     install_http_middleware(app)

@@ -6,10 +6,10 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from app.modules.agent_runtime.facts.repository import FactExtractionJobClaim
-from app.modules.agent_runtime.facts.types import FactApplyResult, FactInput
-from app.modules.agent_runtime.facts.worker import AgentFactExtractionWorker
-from app.modules.agent_runtime.facts import worker as worker_module
+from app.agent_runtime.context.facts.repository import FactExtractionJobClaim
+from app.agent_runtime.context.facts.types import FactApplyResult, FactInput
+from app.agent_runtime.context.facts.worker import AgentFactExtractionWorker
+from app.agent_runtime.context.facts import worker as worker_module
 
 
 NOW = datetime(2026, 7, 13, 8, 0, tzinfo=timezone.utc)

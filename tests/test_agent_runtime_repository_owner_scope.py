@@ -1,7 +1,7 @@
 import asyncio
 from uuid import uuid4
 
-from app.modules.agent_runtime.repository import AgentRuntimeRepository
+from app.agent_runtime.runs.repository import AgentRuntimeRepository
 
 
 def test_recent_client_event_query_is_scoped_to_thread_owner() -> None:

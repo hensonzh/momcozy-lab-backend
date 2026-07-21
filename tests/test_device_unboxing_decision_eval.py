@@ -2,7 +2,7 @@ import asyncio
 import json
 from pathlib import Path
 
-from app.modules.agent_runtime.sdk import SdkNodeResult
+from app.agent_runtime.providers import SdkNodeResult
 from scripts.run_device_unboxing_decision_eval import (
     DEVICE_UNBOXING_DECISION_CASES,
     run_device_unboxing_decision_eval,
@@ -50,11 +50,20 @@ def test_device_unboxing_live_eval_uses_model_decisions_and_writes_provider_trac
     assert len(runner.requests) == 3
     assert json.loads(report_path.read_text()) == report
 
-    runtime_context = runner.requests[0].model_input[-2]["content"]["runtime_context"]
-    assert runtime_context["workflow_context"][0]["current_message_relation"] == "reply_to_current_step"
-    assert "completion_confirmation" not in json.dumps(runtime_context)
+    model_input = runner.requests[0].model_input
+    assert [item.get("type") or item.get("role") for item in model_input] == [
+        "function_call",
+        "function_call_output",
+        "function_call",
+        "function_call_output",
+        "assistant",
+        "user",
+    ]
+    start_result = json.loads(model_input[3]["output"])
+    assert start_result["workflow"]["current_message_relation"] == "reply_to_current_step"
+    assert "completion_confirmation" not in json.dumps(start_result)
     assert runner.requests[0].model_input[-1] == {"role": "user", "content": "继续"}
-    assert runner.requests[2].model_input[0]["content"] == "第一步先核对包装内的部件。"
+    assert runner.requests[2].model_input[-2]["content"] == "第一步先核对包装内的部件。"
 
     traces = json.loads(trace_path.read_text())
     assert traces["schema_version"] == "agent_eval_observed_trace.v1"

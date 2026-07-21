@@ -1,4 +1,4 @@
-from app.modules.agent_runtime.agents.cozymate_service_agent.tools.hospital_bag_flow import (
+from app.agents.cozymate.tools.hospital_bag_flow import (
     build_hospital_bag_card_json,
     build_hospital_bag_followup,
     ensure_hospital_bag_completion_followup,

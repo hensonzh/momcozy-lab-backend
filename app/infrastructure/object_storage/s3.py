@@ -16,6 +16,7 @@ class S3ObjectStorage:
         bucket: str,
         region: str = "",
         endpoint_url: str = "",
+        public_endpoint_url: str = "",
         access_key_id: str = "",
         secret_access_key: str = "",
     ) -> None:
@@ -30,6 +31,18 @@ class S3ObjectStorage:
             aws_secret_access_key=secret_access_key or None,
             config=Config(signature_version="s3v4"),
         )
+        normalized_public_endpoint = public_endpoint_url or endpoint_url
+        if normalized_public_endpoint and normalized_public_endpoint != endpoint_url:
+            self.public_client = boto3.client(
+                "s3",
+                region_name=self.region,
+                endpoint_url=normalized_public_endpoint,
+                aws_access_key_id=access_key_id or None,
+                aws_secret_access_key=secret_access_key or None,
+                config=Config(signature_version="s3v4"),
+            )
+        else:
+            self.public_client = self.client
 
     async def put_bytes(self, *, key: str, body: bytes, content_type: str) -> StoredObject:
         normalized_key = LocalObjectStorage._normalize_key(key)
@@ -63,6 +76,17 @@ class S3ObjectStorage:
         )
         body = response["Body"]
         return await asyncio.to_thread(body.read)
+
+    async def create_presigned_get_url(self, *, key: str, expires_in_seconds: int) -> str:
+        normalized_key = LocalObjectStorage._normalize_key(key)
+        return str(
+            await asyncio.to_thread(
+                self.public_client.generate_presigned_url,
+                ClientMethod="get_object",
+                Params={"Bucket": self.bucket, "Key": normalized_key},
+                ExpiresIn=expires_in_seconds,
+            )
+        )
 
     async def delete(self, *, key: str) -> None:
         normalized_key = LocalObjectStorage._normalize_key(key)

@@ -41,6 +41,8 @@ def test_alembic_offline_upgrade_head_generates_empty_database_sql() -> None:
         "CREATE TABLE users",
         "CREATE TABLE files",
         "CREATE TABLE agent_runs",
+        "CREATE TABLE agent_context_items",
+        "CREATE TABLE agent_image_accesses",
         "CREATE TABLE agent_eval_cases",
         "CREATE TABLE agent_workflow_states",
         "CREATE TABLE agent_context_projections",
@@ -61,6 +63,8 @@ def test_alembic_offline_upgrade_head_generates_empty_database_sql() -> None:
         "UPDATE alembic_version SET version_num='20260702_0026'",
     ]:
         assert phrase in sql
+    assert "DROP TABLE agent_context_projections" in sql
+    assert "DROP TABLE outbox_jobs" in sql
 
 
 def test_checkpoint_retirement_archives_existing_rows_without_dropping_them() -> None:

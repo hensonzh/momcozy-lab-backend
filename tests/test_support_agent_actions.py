@@ -3,10 +3,10 @@ from uuid import uuid4
 
 import pytest
 
-from app.modules.agent_runtime.models import AgentAction
-from app.modules.support.agent_actions import SUPPORT_TICKET_CREATE_ACTION, SupportTicketCreateActionHandler
+from app.agent_runtime.runs.models import AgentAction
+from app.agents.cozymate.actions.support import SUPPORT_TICKET_CREATE_ACTION, SupportTicketCreateActionHandler
 from app.modules.support.models import SupportTicket
-from app.workers.errors import PermanentJobError
+from app.agent_runtime.actions.errors import PermanentActionError
 
 
 def test_support_ticket_create_action_handler_creates_ticket_through_service() -> None:
@@ -35,7 +35,7 @@ def test_support_ticket_create_action_handler_creates_ticket_through_service() -
 def test_support_ticket_create_action_handler_rejects_missing_summary() -> None:
     action = _action(apply_payload={})
 
-    with pytest.raises(PermanentJobError) as exc_info:
+    with pytest.raises(PermanentActionError) as exc_info:
         asyncio.run(SupportTicketCreateActionHandler(service=FakeSupportTicketsService())(action))
 
     assert exc_info.value.code == "missing_issue_summary"

@@ -17,6 +17,7 @@ def create_object_storage(settings: Settings) -> ObjectStorage:
             bucket=settings.object_storage_bucket,
             region=settings.object_storage_region,
             endpoint_url=settings.object_storage_endpoint_url,
+            public_endpoint_url=settings.object_storage_public_endpoint_url,
             access_key_id=settings.object_storage_access_key_id,
             secret_access_key=settings.object_storage_secret_access_key,
         )

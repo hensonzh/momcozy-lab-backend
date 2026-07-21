@@ -3,13 +3,17 @@ from uuid import uuid4
 
 import pytest
 
+from app.agents.cozymate.actions import cozymate_action_policy
 from app.core.errors import ApiError
-from app.modules.agent_runtime.actions.executor import (
+from app.agent_runtime.actions.executor import (
     AgentActionApplyResult,
     AgentActionExecutor,
     AgentApplicationEvent,
 )
-from app.modules.agent_runtime.models import AgentAction, AgentEvent, AgentRun
+from app.agent_runtime.runs.models import AgentAction, AgentEvent, AgentRun
+
+
+ACTION_POLICY = cozymate_action_policy()
 
 
 def test_action_executor_applies_in_process_and_marks_direct_event_non_visible() -> None:
@@ -26,7 +30,7 @@ def test_action_executor_applies_in_process_and_marks_direct_event_non_visible()
             ),
         )
 
-    executor = AgentActionExecutor(repository=repository, handlers={repository.action.action_type: apply})
+    executor = AgentActionExecutor(action_policy=ACTION_POLICY, repository=repository, handlers={repository.action.action_type: apply})
 
     outcome = asyncio.run(executor.apply(repository.action))
 
@@ -58,7 +62,7 @@ def test_action_executor_replays_applied_action_without_calling_handler_or_emitt
     async def should_not_run(_action: AgentAction) -> AgentActionApplyResult:
         raise AssertionError("applied actions must not execute twice")
 
-    executor = AgentActionExecutor(repository=repository, handlers={repository.action.action_type: should_not_run})
+    executor = AgentActionExecutor(action_policy=ACTION_POLICY, repository=repository, handlers={repository.action.action_type: should_not_run})
 
     outcome = asyncio.run(executor.apply(repository.action))
 
@@ -71,7 +75,7 @@ def test_action_executor_rejects_corrupt_owner_even_for_applied_replay() -> None
     repository = FakeActionRepository(action_status="applied")
     repository.owner_scope_valid = False
 
-    executor = AgentActionExecutor(repository=repository, handlers={})
+    executor = AgentActionExecutor(action_policy=ACTION_POLICY, repository=repository, handlers={})
 
     with pytest.raises(ApiError) as exc_info:
         asyncio.run(executor.apply(repository.action))
@@ -91,7 +95,7 @@ def test_action_executor_rolls_back_domain_and_success_events_before_recording_f
             )
         )
 
-    executor = AgentActionExecutor(repository=repository, handlers={repository.action.action_type: apply})
+    executor = AgentActionExecutor(action_policy=ACTION_POLICY, repository=repository, handlers={repository.action.action_type: apply})
 
     outcome = asyncio.run(executor.apply(repository.action))
 
@@ -111,7 +115,7 @@ def test_action_executor_terminally_fails_corrupt_scope_without_handler_or_cross
         calls.append(action.id)
         return AgentActionApplyResult()
 
-    executor = AgentActionExecutor(repository=repository, handlers={repository.action.action_type: apply})
+    executor = AgentActionExecutor(action_policy=ACTION_POLICY, repository=repository, handlers={repository.action.action_type: apply})
 
     outcome = asyncio.run(executor.apply(repository.action))
 

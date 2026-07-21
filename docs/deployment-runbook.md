@@ -59,7 +59,7 @@ Start incident and release debugging from these IDs when available:
 6. Run the release smoke checklist.
 7. Watch 5xx rate, latency, auth failures, worker failures, and agent run
    failures for at least one SLO window.
-8. During rolling restarts, let agent and outbox workers receive SIGTERM/SIGINT
+8. During rolling restarts, let agent and memory workers receive SIGTERM/SIGINT
    and stop at the next idle point before force killing the process.
 
 ## Production Docker Compose
@@ -90,7 +90,7 @@ make backend-prod-up
 ```
 
 `backend-prod-up` builds the local `migrate`, `api`, `agent-worker`, and
-`outbox-worker` images before running migrations and recreating runtime
+`memory-worker` images before running migrations and recreating runtime
 containers. Add `BACKEND_BUILD_FLAGS=--no-cache` when the server should ignore
 Docker cache completely.
 
@@ -284,8 +284,7 @@ lose its lease under normal timing.
 
 1. Check `/v1/health/metrics` with `X-Service-Key` in production for worker
    outcomes and error codes.
-2. Inspect queued and locked non-Agent `outbox_jobs`, Agent runs, and durable
-   fact-extraction jobs with
+2. Inspect Agent runs and durable fact-extraction jobs with
    `make backend-worker-backlog BACKEND_ENV_FILE=<env file>`.
 3. Confirm Redis and external providers are reachable.
 4. If jobs are locked by a dead worker, wait for lease expiry or release them
@@ -294,10 +293,7 @@ lose its lease under normal timing.
    `queued`/`running`; repeated `dead_lettered` jobs require checking provider,
    consent, source ownership, and lease settings without copying message or
    fact values into incident tickets.
-6. Agent action writes are not outbox jobs; inspect `agent_runs` and
-   `agent_actions` instead. For repeated permanent failures in remaining
-   generic jobs, move affected jobs to dead-letter and open
-   a repair ticket with `job_id`, `job_type`, and `request_id`.
+6. Inspect `agent_runs` and `agent_actions` for action execution failures.
 
 ## Agent Run Recovery
 

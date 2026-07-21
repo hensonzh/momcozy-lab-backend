@@ -20,8 +20,8 @@ make backend-check-infra
 ```
 
 `backend-local-up` first builds `migrate`, `api`, `agent-worker`, and
-`outbox-worker` from the current source tree, then starts local infrastructure,
-runs migrations, and starts the API plus agent/outbox workers with recreated
+`memory-worker` from the current source tree, then starts local infrastructure,
+runs migrations, and starts the API plus both workers with recreated
 containers. `backend-local-migrate` and `backend-local-workers` remain available
 for explicit maintenance, retries, and debugging; they also build the relevant
 runtime image before running. Use `BACKEND_BUILD_FLAGS=--no-cache` when you want

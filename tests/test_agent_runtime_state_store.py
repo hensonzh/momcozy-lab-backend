@@ -2,8 +2,8 @@ import asyncio
 from datetime import date
 from uuid import uuid4
 
-from app.modules.agent_runtime.models import AgentContextProjection, AgentRun, AgentWorkflowState
-from app.modules.agent_runtime.run_lifecycle.state_store import AgentRuntimeStateStore
+from app.agent_runtime.runs.models import AgentWorkflowState
+from app.agent_runtime.runs.state_store import AgentRuntimeStateStore
 
 
 def test_state_store_creates_workflow_state_as_json_safe_process_state() -> None:
@@ -34,35 +34,6 @@ def test_state_store_creates_workflow_state_as_json_safe_process_state() -> None
         "record_ids": [str(nested_id)],
         "as_of": "2026-07-02",
     }
-
-
-def test_state_store_records_context_projection_as_derived_view() -> None:
-    repository = FakeStateRepository()
-    run = _run()
-    message_id = uuid4()
-    workflow_state_id = uuid4()
-
-    projection = asyncio.run(
-        AgentRuntimeStateStore(repository=repository).record_context_projection(
-            run=run,
-            selected_message_ids=[message_id],
-            active_workflow_state_id=workflow_state_id,
-            source_refs={"workflow_state_id": workflow_state_id},
-            projection_summary={"state": {"run_id": run.id}},
-            tool_schema_version="tools-v1",
-            token_estimate=-1,
-        )
-    )
-
-    assert projection.run_id == run.id
-    assert projection.thread_id == run.thread_id
-    assert projection.prompt_version == "prompt-v1"
-    assert projection.tool_schema_version == "tools-v1"
-    assert projection.selected_message_ids == [str(message_id)]
-    assert projection.active_workflow_state_id == workflow_state_id
-    assert projection.source_refs == {"workflow_state_id": str(workflow_state_id)}
-    assert projection.projection_summary == {"state": {"run_id": str(run.id)}}
-    assert projection.token_estimate == 0
 
 
 def test_state_store_upserts_one_active_workflow_per_thread_and_type() -> None:
@@ -134,22 +105,6 @@ def test_state_store_lists_only_repository_selected_active_workflows() -> None:
     assert repository.list_active_kwargs["limit"] == 3
 
 
-def _run() -> AgentRun:
-    return AgentRun(
-        id=uuid4(),
-        thread_id=uuid4(),
-        actor_user_id=uuid4(),
-        status="running",
-        runtime_pattern="sdk_only",
-        runtime_version="momcozy-agent-v1",
-        prompt_version="prompt-v1",
-        request_id="req",
-        trace_id="trace",
-        error_code="",
-        error_details={},
-    )
-
-
 class FakeStateRepository:
     def __init__(self) -> None:
         self.workflow_states = []
@@ -183,6 +138,3 @@ class FakeStateRepository:
             for workflow in self.workflow_states
             if workflow.thread_id == kwargs["thread_id"] and workflow.owner_user_id == kwargs["owner_user_id"]
         ][: kwargs["limit"]]
-
-    async def create_context_projection(self, **kwargs):
-        return AgentContextProjection(id=uuid4(), **kwargs)

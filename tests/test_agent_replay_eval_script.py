@@ -41,7 +41,7 @@ def test_run_agent_replay_eval_reports_blocking_failures(tmp_path: Path) -> None
             {
                 "messages": [{"role": "assistant", "content": {"text": "Saved."}}],
                 "events": [],
-                "tool_calls": [{"tool_name": "profile_update", "status": "completed"}],
+                "tool_calls": [{"tool_name": "profile.update", "status": "completed"}],
                 "actions": [],
             }
         )

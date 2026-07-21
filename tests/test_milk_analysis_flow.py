@@ -1,6 +1,6 @@
 import pytest
 
-from app.modules.agent_runtime.agents.cozymate_service_agent.tools.milk_analysis_flow import (
+from app.agents.cozymate.tools.milk_analysis_flow import (
     MILK_ANALYSIS_FIELDS,
     MilkAnalysisFlowError,
     advance_milk_analysis_intake,

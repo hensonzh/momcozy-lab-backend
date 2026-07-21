@@ -1,4 +1,4 @@
-from app.modules.agent_runtime.response_text import AppendOnlyAgentResponseProjector, sanitize_agent_response_text
+from app.agent_runtime.runs.response_text import AppendOnlyAgentResponseProjector, sanitize_agent_response_text
 
 
 def test_sanitize_agent_response_text_removes_tool_output_json() -> None:

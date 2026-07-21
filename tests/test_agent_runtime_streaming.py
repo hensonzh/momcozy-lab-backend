@@ -5,15 +5,15 @@ import logging
 from dataclasses import dataclass
 from uuid import uuid4
 
-import app.modules.agent_runtime.router as agent_runtime_router
-from app.modules.agent_runtime.models import AgentEvent
-from app.modules.agent_runtime.router import (
+import app.agent_runtime.api.router as agent_runtime_router
+from app.agent_runtime.runs.models import AgentEvent
+from app.agent_runtime.api.router import (
     _persisted_fallback_poll_interval_seconds,
     _stream_run_event_chunks,
     _transient_block_ms,
 )
-from app.modules.agent_runtime.event_stream.sse import encode_sse_events, encode_transient_sse_events
-from app.modules.agent_runtime.event_stream.transient import AgentTransientStream, AgentTransientStreamEvent
+from app.agent_runtime.events.sse import encode_sse_events, encode_transient_sse_events
+from app.agent_runtime.events.transient import AgentTransientStream, AgentTransientStreamEvent
 
 
 def test_encode_sse_events_uses_application_event_envelope() -> None:

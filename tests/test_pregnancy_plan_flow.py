@@ -2,7 +2,7 @@ from datetime import date, datetime, timezone
 
 import pytest
 
-from app.modules.agent_runtime.agents.cozymate_service_agent.tools.pregnancy_plan_flow import (
+from app.agents.cozymate.tools.pregnancy_plan_flow import (
     PREGNANCY_PLAN_CHECKUP_DONE_QUESTION,
     PREGNANCY_PLAN_CHECKUP_UPLOAD_QUESTION,
     PREGNANCY_PLAN_FINAL_QUESTION,

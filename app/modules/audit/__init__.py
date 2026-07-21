@@ -1,5 +1,4 @@
-from .models import AuditLog, IdempotencyKey, OutboxJob
-from .outbox import OutboxRetryPolicy, OutboxService
+from .models import AuditLog, IdempotencyKey
 from .service import AuditService, IdempotencyDecision, IdempotencyService, parse_idempotency_response_ref, request_hash
 
 __all__ = [
@@ -8,9 +7,6 @@ __all__ = [
     "IdempotencyDecision",
     "IdempotencyKey",
     "IdempotencyService",
-    "OutboxJob",
-    "OutboxRetryPolicy",
-    "OutboxService",
     "parse_idempotency_response_ref",
     "request_hash",
 ]

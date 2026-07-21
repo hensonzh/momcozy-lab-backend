@@ -6,8 +6,8 @@ from uuid import uuid4
 import pytest
 
 from app.core.errors import ApiError
-from app.modules.agent_runtime.models import AgentAction
-from app.modules.plans.agent_actions import (
+from app.agent_runtime.runs.models import AgentAction
+from app.agents.cozymate.actions.plans import (
     MILK_PLAN_CREATE_ACTION,
     MILK_PLAN_CHANGED_EVENT,
     MILK_SCHEDULE_RESCHEDULE_ACTION,
@@ -29,8 +29,8 @@ from app.modules.plans.agent_actions import (
     PregnancyPlanCreateActionHandler,
 )
 from app.modules.plans.models import Plan, PlanTask
-from app.workers.errors import PermanentJobError
-from app.modules.agent_runtime.agents.cozymate_service_agent.tools.pregnancy_plan_flow import (
+from app.agent_runtime.actions.errors import PermanentActionError
+from app.agents.cozymate.tools.pregnancy_plan_flow import (
     build_pregnancy_plan_result,
 )
 
@@ -173,14 +173,14 @@ def test_milk_plan_changed_event_contains_only_bounded_dates_and_no_private_plan
 
 
 def test_milk_plan_create_action_handler_rejects_missing_title() -> None:
-    with pytest.raises(PermanentJobError) as exc_info:
+    with pytest.raises(PermanentActionError) as exc_info:
         asyncio.run(MilkPlanCreateActionHandler(service=FakePlansService())(_action(apply_payload={})))
 
     assert exc_info.value.code == "missing_plan_title"
 
 
 def test_milk_plan_create_action_handler_rejects_a_plan_that_cannot_reach_schedule() -> None:
-    with pytest.raises(PermanentJobError) as exc_info:
+    with pytest.raises(PermanentActionError) as exc_info:
         asyncio.run(
             MilkPlanCreateActionHandler(service=FakePlansService())(
                 _action(
@@ -225,7 +225,7 @@ def test_milk_plan_create_action_handler_rechecks_analysis_lineage(plan_payload:
     service = FakePlansService()
     action = _action(apply_payload={"title": "Milk plan", "payload": plan_payload})
 
-    with pytest.raises(PermanentJobError) as exc_info:
+    with pytest.raises(PermanentActionError) as exc_info:
         asyncio.run(MilkPlanCreateActionHandler(service=service)(action))
 
     assert exc_info.value.code == "invalid_milk_analysis_lineage"
@@ -245,7 +245,7 @@ def test_milk_plan_create_action_handler_rejects_an_expired_analysis_before_side
         expires_at=datetime.now(timezone.utc) - timedelta(seconds=1),
     )
 
-    with pytest.raises(PermanentJobError) as exc_info:
+    with pytest.raises(PermanentActionError) as exc_info:
         asyncio.run(MilkPlanCreateActionHandler(service=service)(action))
 
     assert exc_info.value.code == "milk_analysis_expired_before_plan"
@@ -658,7 +658,7 @@ def test_milk_task_update_delete_and_plan_delete_emit_change_operations() -> Non
 
 
 def test_plan_task_create_action_handler_rejects_missing_title() -> None:
-    with pytest.raises(PermanentJobError) as exc_info:
+    with pytest.raises(PermanentActionError) as exc_info:
         asyncio.run(
             PlanTaskCreateActionHandler(service=FakePlansService())(
                 _action(action_type=PLAN_TASK_CREATE_ACTION, target_type="plan_task", apply_payload={})
@@ -669,7 +669,7 @@ def test_plan_task_create_action_handler_rejects_missing_title() -> None:
 
 
 def test_plan_task_complete_action_handler_rejects_missing_task_id() -> None:
-    with pytest.raises(PermanentJobError) as exc_info:
+    with pytest.raises(PermanentActionError) as exc_info:
         asyncio.run(
             PlanTaskCompleteActionHandler(service=FakePlansService())(
                 _action(action_type=PLAN_TASK_COMPLETE_ACTION, target_type="plan_task", apply_payload={})

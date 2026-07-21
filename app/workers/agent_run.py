@@ -9,15 +9,16 @@ from typing import Any
 from uuid import UUID
 
 from ..core.errors import ApiError
-from ..modules.agent_runtime.actions.executor import AgentActionExecutor
-from ..modules.agent_runtime.event_stream.publisher import AgentEventPublisher
-from ..modules.agent_runtime.event_stream.transient import AgentTransientStream
-from ..modules.agent_runtime.event_semantics import with_run_event_semantic
-from ..modules.agent_runtime.run_lifecycle.controls import AgentRunControls
-from ..modules.agent_runtime.run_lifecycle.execution import AgentRunExecutionResult, AgentRunHandler
-from ..modules.agent_runtime.models import AgentAction, AgentEvent, AgentRun
-from ..modules.agent_runtime.repository import AgentRuntimeRepository
-from ..modules.agent_runtime.response_text import (
+from ..agent_runtime.actions.executor import AgentActionExecutor
+from ..agent_runtime.context.items import ContextItemAppend, message_context_item
+from ..agent_runtime.events.publisher import AgentEventPublisher
+from ..agent_runtime.events.semantics import with_run_event_semantic
+from ..agent_runtime.events.transient import AgentTransientStream
+from ..agent_runtime.runs.controls import AgentRunControls
+from ..agent_runtime.runs.execution import AgentRunExecutionResult, AgentRunHandler
+from ..agent_runtime.runs.models import AgentAction, AgentEvent, AgentRun
+from ..agent_runtime.runs.repository import AgentRuntimeRepository
+from ..agent_runtime.runs.response_text import (
     APPEND_ONLY_TEXT_STREAM_SCHEMA_VERSION,
     agent_response_text_integrity,
 )
@@ -207,6 +208,16 @@ class AgentRunWorker:
                     message_type="text",
                     content=content,
                     status="completed",
+                )
+                await self.repository.append_context_items(
+                    thread_id=run.thread_id,
+                    run_id=run.id,
+                    items=(
+                        ContextItemAppend(
+                            item_key=f"message:{message.id}",
+                            item=message_context_item(role="assistant", content=content),
+                        ),
+                    ),
                 )
                 text_integrity = agent_response_text_integrity(result.final_text)
                 payload: dict[str, Any] = {

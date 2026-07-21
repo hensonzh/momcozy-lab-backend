@@ -5,8 +5,8 @@ from uuid import UUID, uuid4
 import pytest
 
 from app.core.errors import ApiError
-from app.modules.agent_runtime.memory.service import AgentMemoryService
-from app.modules.agent_runtime.models import AgentMemory, AgentMemorySettings, AgentMemorySnapshot
+from app.agent_runtime.context.memory.service import AgentMemoryService
+from app.agent_runtime.runs.models import AgentMemory, AgentMemorySettings, AgentMemorySnapshot
 
 
 def test_agent_memory_service_creates_owner_scoped_memory() -> None:

@@ -5,7 +5,7 @@ from uuid import uuid4
 
 from sqlalchemy.dialects import postgresql
 
-from app.modules.agent_runtime.facts.repository import AgentFactRepository
+from app.agent_runtime.context.facts.repository import AgentFactRepository
 
 
 NOW = datetime(2026, 7, 13, tzinfo=timezone.utc)

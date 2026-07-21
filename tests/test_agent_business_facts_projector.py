@@ -3,12 +3,12 @@ import json
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from app.modules.agent_runtime.agents.cozymate_service_agent.context import (
+from app.agents.cozymate.context import (
     BusinessFactsProjector,
     BusinessFactsProjectorConfig,
 )
-from app.modules.agent_runtime.agents.cozymate_service_agent import ServiceSkillId
-from app.modules.agent_runtime.agents.cozymate_service_agent.tools import ToolHandlerResult
+from app.agents.cozymate import ServiceSkillId
+from app.agent_runtime.tools.result import ToolResult
 from app.modules.auth import CurrentUser
 
 
@@ -17,11 +17,11 @@ def test_business_facts_projector_projects_lactation_sources() -> None:
 
     async def profile_handler(context):
         calls.append({"tool_name": context.tool_name, "args": context.args})
-        return {"profile": {"display_name": "Mai"}, "assistant_hint": "do not project"}
+        return ToolResult.json({"profile": {"display_name": "Mai"}, "assistant_hint": "do not project"})
 
     async def milk_status_handler(context):
         calls.append({"tool_name": context.tool_name, "args": context.args})
-        return {"totals": {"trend_pumped_volume_ml": 420}}
+        return ToolResult.json({"totals": {"trend_pumped_volume_ml": 420}})
 
     run_id = uuid4()
     facts = asyncio.run(
@@ -62,14 +62,14 @@ def test_business_facts_projector_reads_sources_without_parallel_shared_session_
     async def profile_handler(context):
         await session_guard.enter("profile.read")
         try:
-            return {"profile": {"display_name": "Mai"}}
+            return ToolResult.json({"profile": {"display_name": "Mai"}})
         finally:
             session_guard.exit("profile.read")
 
     async def milk_status_handler(context):
         await session_guard.enter("records.milk_status.read")
         try:
-            return {"totals": {"trend_pumped_volume_ml": 420}}
+            return ToolResult.json({"totals": {"trend_pumped_volume_ml": 420}})
         finally:
             session_guard.exit("records.milk_status.read")
 
@@ -101,7 +101,7 @@ def test_business_facts_projector_uses_compact_postpartum_limits() -> None:
 
     async def handler(context):
         calls.append({"tool_name": context.tool_name, "args": context.args})
-        return {"ok": True}
+        return ToolResult.json({"ok": True})
 
     asyncio.run(
         BusinessFactsProjector(
@@ -137,10 +137,10 @@ def test_business_facts_projector_returns_empty_when_no_handlers_are_available()
     assert facts == {}
 
 
-def test_business_facts_projector_unwraps_structured_tool_handler_results() -> None:
+def test_business_facts_projector_unwraps_standard_tool_results() -> None:
     async def pregnancy_context_handler(_context):
-        return ToolHandlerResult(
-            output={
+        return ToolResult.json(
+            {
                 "profile": {"age": 32},
                 "plans": [],
                 "assistant_hint": "do not project",

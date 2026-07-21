@@ -33,6 +33,7 @@ def test_settings_from_env_reads_infrastructure_configuration(monkeypatch: pytes
     monkeypatch.setenv("OBJECT_STORAGE_BUCKET", "momcozy-staging")
     monkeypatch.setenv("OBJECT_STORAGE_REGION", "us-west-2")
     monkeypatch.setenv("OBJECT_STORAGE_ENDPOINT_URL", "https://s3.example.test")
+    monkeypatch.setenv("OBJECT_STORAGE_PUBLIC_ENDPOINT_URL", "https://images.example.test")
     monkeypatch.setenv("OBJECT_STORAGE_ACCESS_KEY_ID", "access-key")
     monkeypatch.setenv("OBJECT_STORAGE_SECRET_ACCESS_KEY", "secret-key")
     monkeypatch.setenv("PRODUCT_ASSET_MANIFEST_PATH", "/etc/momcozy/product-assets.manifest.json")
@@ -46,6 +47,7 @@ def test_settings_from_env_reads_infrastructure_configuration(monkeypatch: pytes
     assert settings.object_storage_provider == "s3"
     assert settings.object_storage_bucket == "momcozy-staging"
     assert settings.object_storage_endpoint_url == "https://s3.example.test"
+    assert settings.object_storage_public_endpoint_url == "https://images.example.test"
     assert settings.product_asset_manifest_path == "/etc/momcozy/product-assets.manifest.json"
     assert settings.product_asset_local_root == "/tmp/momcozy-assets"
 
@@ -56,6 +58,21 @@ def test_settings_from_env_reads_file_upload_limit(monkeypatch: pytest.MonkeyPat
     settings = Settings.from_env()
 
     assert settings.file_upload_max_bytes == 12345
+
+
+def test_settings_from_env_reads_agent_image_signed_url_ttl(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENT_IMAGE_SIGNED_URL_TTL_SECONDS", "86400")
+
+    settings = Settings.from_env()
+
+    assert settings.agent_image_signed_url_ttl_seconds == 86400
+
+
+def test_settings_reject_insecure_public_object_storage_endpoint() -> None:
+    settings = Settings(object_storage_public_endpoint_url="http://images.example.test")
+
+    with pytest.raises(ValueError, match="OBJECT_STORAGE_PUBLIC_ENDPOINT_URL"):
+        settings.validate_for_startup()
 
 
 def test_settings_from_env_rejects_invalid_integer(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -293,18 +310,6 @@ def test_settings_from_env_reads_active_session_auth_gate(monkeypatch: pytest.Mo
     assert settings.auth_require_active_session is True
 
 
-def test_settings_from_env_reads_outbox_worker_controls(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("OUTBOX_WORKER_ENABLED", "true")
-    monkeypatch.setenv("OUTBOX_WORKER_IDLE_SECONDS", "4")
-    monkeypatch.setenv("OUTBOX_WORKER_LEASE_SECONDS", "90")
-
-    settings = Settings.from_env()
-
-    assert settings.outbox_worker_enabled is True
-    assert settings.outbox_worker_idle_seconds == 4
-    assert settings.outbox_worker_lease_seconds == 90
-
-
 def test_settings_from_env_ignores_retired_agent_recover_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AGENT_RUNTIME_RECOVER_RUNNING_OLDER_THAN_SECONDS", "180")
 
@@ -350,13 +355,6 @@ def test_settings_reject_invalid_openai_agent_controls() -> None:
         Settings(agent_memory_consolidation_hour=24).validate_for_startup()
     with pytest.raises(ValueError, match="AGENT_MEMORY_CONSOLIDATION_TIMEZONE"):
         Settings(agent_memory_consolidation_timezone="Mars/Base").validate_for_startup()
-
-
-def test_settings_reject_invalid_outbox_worker_controls() -> None:
-    settings = Settings(outbox_worker_lease_seconds=0)
-
-    with pytest.raises(ValueError, match="OUTBOX_WORKER_LEASE_SECONDS"):
-        settings.validate_for_startup()
 
 
 def test_settings_reject_invalid_rate_limit_controls() -> None:

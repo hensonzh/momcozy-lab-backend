@@ -2,18 +2,21 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
-from app.modules.agent_runtime.actions.executor import AgentActionExecutor
-from app.modules.agent_runtime.models import AgentAction, AgentEvent, AgentMessage, AgentRun, AgentThread
-from app.modules.agent_runtime.service import AgentRuntimeService
+from app.agents.cozymate.actions import cozymate_action_policy
+from app.agent_runtime.actions.executor import AgentActionExecutor
+from app.agent_runtime.runs.models import AgentAction, AgentEvent, AgentMessage, AgentRun, AgentThread
+from app.agent_runtime.runs.service import AgentRuntimeService
 from app.modules.audit.models import IdempotencyKey
-from app.modules.hospital_bag import HOSPITAL_BAG_CART_UPDATE_ACTION, HospitalBagCartUpdateActionHandler
-from app.modules.support.agent_actions import SUPPORT_TICKET_CREATE_ACTION, SupportTicketCreateActionHandler
+from app.agents.cozymate.actions.hospital_bag import HOSPITAL_BAG_CART_UPDATE_ACTION, HospitalBagCartUpdateActionHandler
+from app.agents.cozymate.actions.support import SUPPORT_TICKET_CREATE_ACTION, SupportTicketCreateActionHandler
 from app.modules.support.models import SupportTicket
 from app.modules.support.service import SupportTicketsService
-from app.workers.agent_run import AgentRunWorker
 
 
-def test_agent_support_ticket_confirmation_requeues_same_run_and_worker_applies() -> None:
+ACTION_POLICY = cozymate_action_policy()
+
+
+def test_agent_support_ticket_explicit_form_intent_applies_without_second_confirmation() -> None:
     owner_user_id = uuid4()
     runtime_repository = InMemoryAgentRuntimeRepository()
     support_repository = InMemorySupportTicketsRepository()
@@ -23,11 +26,11 @@ def test_agent_support_ticket_confirmation_requeues_same_run_and_worker_applies(
         audit_service=support_audit,
         idempotency_service=FlowIdempotencyService(),
     )
-    action_executor = AgentActionExecutor(
+    action_executor = AgentActionExecutor(action_policy=ACTION_POLICY,
         repository=runtime_repository,
         handlers={SUPPORT_TICKET_CREATE_ACTION: SupportTicketCreateActionHandler(service=support_service)},
     )
-    runtime_service = AgentRuntimeService(repository=runtime_repository, action_executor=action_executor)
+    runtime_service = AgentRuntimeService(action_policy=ACTION_POLICY, repository=runtime_repository, action_executor=action_executor)
 
     run = asyncio.run(
         runtime_service.create_run(
@@ -52,23 +55,14 @@ def test_agent_support_ticket_confirmation_requeues_same_run_and_worker_applies(
                 "product_model": "Air1",
                 "urgency": "high",
             },
-        )
-    )
-    run.status = "waiting_for_confirmation"
-
-    confirmed = asyncio.run(
-        runtime_service.confirm_action(
-            owner_user_id=owner_user_id,
-            action_id=action.id,
             idempotency_key="idem-support-action",
         )
     )
-    asyncio.run(AgentRunWorker(repository=runtime_repository, action_executor=action_executor).run_once(run_id=run.id))
 
     ticket = support_repository.tickets[0]
     event_types = [event.event_type for event in runtime_repository.events]
 
-    assert confirmed.status == "applied"
+    assert action.status == "applied"
     assert ticket.owner_user_id == owner_user_id
     assert ticket.issue_summary == "Air1 pump does not turn on after charging"
     assert ticket.source == "agent_action"
@@ -76,13 +70,7 @@ def test_agent_support_ticket_confirmation_requeues_same_run_and_worker_applies(
     assert event_types == [
         "run.queued",
         "message.completed",
-        "action.confirmation_required",
-        "action.confirmed",
-        "run.queued",
-        "run.started",
         "action.applied",
-        "message.completed",
-        "run.completed",
     ]
     applied_event = next(event for event in runtime_repository.events if event.event_type == "action.applied")
     assert applied_event.payload["resource_type"] == "support_ticket"
@@ -93,11 +81,11 @@ def test_agent_support_ticket_confirmation_requeues_same_run_and_worker_applies(
 def test_agent_hospital_bag_cart_main_flow_applies_inside_current_tool_transaction() -> None:
     owner_user_id = uuid4()
     runtime_repository = InMemoryAgentRuntimeRepository()
-    action_executor = AgentActionExecutor(
+    action_executor = AgentActionExecutor(action_policy=ACTION_POLICY,
         repository=runtime_repository,
         handlers={HOSPITAL_BAG_CART_UPDATE_ACTION: HospitalBagCartUpdateActionHandler()},
     )
-    runtime_service = AgentRuntimeService(repository=runtime_repository, action_executor=action_executor)
+    runtime_service = AgentRuntimeService(action_policy=ACTION_POLICY, repository=runtime_repository, action_executor=action_executor)
 
     run = asyncio.run(
         runtime_service.create_run(
@@ -150,6 +138,7 @@ class InMemoryAgentRuntimeRepository:
         self.thread: AgentThread | None = None
         self.run: AgentRun | None = None
         self.messages: list[AgentMessage] = []
+        self.context_items: list[object] = []
         self.actions: list[AgentAction] = []
         self.events: list[AgentEvent] = []
 
@@ -168,6 +157,10 @@ class InMemoryAgentRuntimeRepository:
     async def touch_thread(self, *, thread: AgentThread, updated_at):
         thread.updated_at = updated_at
         return thread
+
+    async def append_context_items(self, *, thread_id: UUID, run_id: UUID, items: tuple[object, ...]):
+        self.context_items.extend(items)
+        return list(items)
 
     async def get_active_run_for_thread(self, *, thread_id: UUID, owner_user_id: UUID):
         if (

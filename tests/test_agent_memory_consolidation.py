@@ -3,7 +3,7 @@ import json
 from datetime import date, datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
-from app.modules.agent_runtime.memory.consolidation import (
+from app.agent_runtime.context.memory.consolidation import (
     AgentMemoryExtractor,
     MemoryCandidate,
     MemoryConsolidationBatch,
@@ -12,15 +12,15 @@ from app.modules.agent_runtime.memory.consolidation import (
     apply_memory_consolidation,
     prepare_memory_consolidation,
 )
-from app.modules.agent_runtime.memory.service import AgentMemoryService
-from app.modules.agent_runtime.models import (
+from app.agent_runtime.context.memory.service import AgentMemoryService
+from app.agent_runtime.runs.models import (
     AgentMemory,
     AgentMemoryConsolidationRun,
     AgentMemorySettings,
     AgentMemorySnapshot,
     AgentMessage,
 )
-from app.modules.agent_runtime.sdk import SdkNodeResult
+from app.agent_runtime.providers import SdkNodeResult
 
 
 def test_memory_extractor_keeps_only_safe_user_evidenced_operations() -> None:

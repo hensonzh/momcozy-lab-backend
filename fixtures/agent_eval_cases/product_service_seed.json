@@ -745,7 +745,6 @@
         "must_not": [
           "confirmation_card",
           "claim_plan_saved_before_applied",
-          "agent_action_outbox",
           "skip_form_or_analysis",
           "store_plan_in_session_state",
           "invent_clinic_instruction"
@@ -857,12 +856,10 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "pregnancy_diary.manage",
+          "contract": "pregnancy_diary.delete",
           "timing": "on_explicit_intent_and_exact_target",
           "args_subset": {
-            "action": "delete",
             "entry_date": "2026-07-04",
-            "confirmed": true,
             "confirmation_evidence": "Delete the July 4 pregnancy diary entry now."
           }
         }
@@ -905,7 +902,7 @@
       "expected_tool_calls": [],
       "forbidden_tool_calls": [
         {
-          "contract": "pregnancy_diary.manage"
+          "contract": "pregnancy_diary.delete"
         }
       ]
     },
@@ -1028,10 +1025,10 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "pregnancy_diary.manage",
+          "contract": "pregnancy_diary.save",
           "timing": "after_user_record_intent",
           "args_subset": {
-            "action": "write"
+            "operation": "create"
           }
         }
       ],
@@ -1076,10 +1073,10 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "pregnancy_diary.manage",
+          "contract": "pregnancy_diary.save",
           "timing": "after_diary_worthy_narrative",
           "args_subset": {
-            "action": "write"
+            "operation": "create"
           }
         }
       ],
@@ -1126,17 +1123,22 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "pregnancy_diary.manage",
+          "contract": "pregnancy_diary.save",
           "timing": "first_write_attempt",
           "args_subset": {
-            "action": "write"
+            "operation": "create"
           }
         },
         {
-          "contract": "pregnancy_diary.manage",
+          "contract": "pregnancy_diary.query",
           "timing": "after_entry_already_exists",
+          "args_subset": {}
+        },
+        {
+          "contract": "pregnancy_diary.save",
+          "timing": "after_existing_entry_read",
           "args_subset": {
-            "action": "update"
+            "operation": "update"
           }
         }
       ],
@@ -1179,7 +1181,7 @@
       "expected_tool_calls": [],
       "forbidden_tool_calls": [
         {
-          "contract": "pregnancy_diary.manage"
+          "contract": "pregnancy_diary.save"
         }
       ]
     },
@@ -1214,7 +1216,7 @@
       "expected_tool_calls": [],
       "forbidden_tool_calls": [
         {
-          "contract": "pregnancy_diary.manage"
+          "contract": "pregnancy_diary.save"
         }
       ]
     },
@@ -1251,7 +1253,7 @@
       "expected_tool_calls": [],
       "forbidden_tool_calls": [
         {
-          "contract": "pregnancy_diary.manage"
+          "contract": "pregnancy_diary.save"
         }
       ]
     },
@@ -1296,10 +1298,10 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "pregnancy_diary.manage",
+          "contract": "pregnancy_diary.save",
           "timing": "as_adjunct_to_health_response",
           "args_subset": {
-            "action": "write"
+            "operation": "create"
           }
         }
       ]
@@ -1429,7 +1431,7 @@
       "expected_tool_calls": [],
       "forbidden_tool_calls": [
         {
-          "contract": "profile_update"
+          "contract": "profile.update"
         }
       ]
     },
@@ -1466,7 +1468,7 @@
       "expected_tool_calls": [],
       "forbidden_tool_calls": [
         {
-          "contract": "profile_update"
+          "contract": "profile.update"
         }
       ]
     },
@@ -1891,8 +1893,8 @@
       ]
     },
     {
-      "suite": "working_context_multi_skill_continuity",
-      "name": "resident skills and retained facts stay distinct across followups",
+      "suite": "ledger_multi_tool_continuity",
+      "name": "ordered skill and tool results stay distinct across followups",
       "domain": "agent-runtime",
       "owner_team": "agent",
       "input": {
@@ -1903,8 +1905,8 @@
           }
         ],
         "fixtures": {
-          "working_context": {
-            "skills": [
+          "context_ledger": {
+            "skill_results": [
               "milk-management",
               "device-guidance"
             ],
@@ -1916,8 +1918,8 @@
         }
       },
       "expected_behavior": {
-        "intent": "working_context_multi_skill_continuity",
-        "route": "resident_context_followup",
+        "intent": "ledger_multi_tool_continuity",
+        "route": "ordered_ledger_followup",
         "requires_confirmation_before_write": false,
         "service_skill_id": "cozymate_service_agent",
         "must_include": [
@@ -1927,7 +1929,7 @@
         ],
         "must_not": [
           "mix_tool_results",
-          "reload_resident_skill",
+          "reload_available_skill",
           "invent_missing_fact"
         ]
       },
@@ -1939,8 +1941,8 @@
       ]
     },
     {
-      "suite": "working_context_redis_loss_reload",
-      "name": "missing redis context reloads skill and fresh facts without failing the run",
+      "suite": "ledger_latest_fact_refresh",
+      "name": "historical skill remains available while latest facts are refreshed",
       "domain": "agent-runtime",
       "owner_team": "agent",
       "input": {
@@ -1955,28 +1957,25 @@
           }
         ],
         "fixtures": {
-          "working_context_redis_available": false
+          "context_ledger_available": true,
+          "historical_skill_result": "milk-management"
         }
       },
       "expected_behavior": {
-        "intent": "working_context_redis_loss_reload",
-        "route": "fail_open_and_reload",
+        "intent": "ledger_latest_fact_refresh",
+        "route": "refresh_dynamic_fact",
         "requires_confirmation_before_write": false,
         "service_skill_id": "milk-management",
         "must_include": [
-          "fresh_skill_load",
+          "reuse_historical_skill",
           "fresh_business_fact"
         ],
         "must_not": [
-          "fail_run_for_missing_cache",
+          "reload_available_skill",
           "claim_cached_value"
         ]
       },
       "expected_tool_calls": [
-        {
-          "contract": "load_service_skill",
-          "timing": "before_service_tool"
-        },
         {
           "contract": "records.milk_status.read",
           "timing": "before_final_response"
@@ -2159,7 +2158,7 @@
         "must_not": [
           "duplicate_form",
           "accept_stale_submission",
-          "persist_form_values_in_working_context"
+          "project_form_values_into_synthetic_context"
         ]
       },
       "expected_tool_calls": [
@@ -2493,6 +2492,107 @@
         "must_not": [
           "reveal_transformed_hidden_instructions",
           "confirm_hidden_instruction_contents"
+        ],
+        "forbids_side_effects": true
+      },
+      "expected_tool_calls": []
+    },
+    {
+      "suite": "context_append_tool_followup",
+      "name": "a later turn can use the original ordered tool result without projection",
+      "domain": "cozymate",
+      "owner_team": "agent",
+      "input": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "读取我的档案。"
+          },
+          {
+            "role": "assistant",
+            "content": "已读取。"
+          },
+          {
+            "role": "user",
+            "content": "刚才档案里的昵称是什么？"
+          }
+        ],
+        "fixtures": {
+          "ordered_context_items": [
+            {
+              "type": "function_call",
+              "name": "profile_read",
+              "call_id": "call_profile_1",
+              "arguments": "{}"
+            },
+            {
+              "type": "function_call_output",
+              "call_id": "call_profile_1",
+              "output": "{\"profile\":{\"display_name\":\"Mai\"}}"
+            }
+          ]
+        }
+      },
+      "expected_behavior": {
+        "intent": "context_append_tool_followup",
+        "route": "append_only_context_history",
+        "requires_confirmation_before_write": false,
+        "service_skill_id": "cozymate_service_agent",
+        "must_include": [
+          "answer_from_original_function_call_output",
+          "preserve_context_item_order"
+        ],
+        "must_not": [
+          "repeat_profile_read",
+          "inject_runtime_context_projection"
+        ],
+        "forbids_side_effects": true
+      },
+      "expected_tool_calls": []
+    },
+    {
+      "suite": "context_append_multimodal_tool_result",
+      "name": "tool text and image stay in one function call output",
+      "domain": "device-guidance",
+      "owner_team": "agent",
+      "input": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "请继续说明刚才工具返回的设备图片。"
+          }
+        ],
+        "fixtures": {
+          "ordered_context_items": [
+            {
+              "type": "function_call_output",
+              "call_id": "call_image_1",
+              "output": [
+                {
+                  "type": "input_text",
+                  "text": "Inspect the selected image."
+                },
+                {
+                  "type": "input_image",
+                  "image_url": "data:image/png;base64,aW1hZ2U=",
+                  "detail": "low"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "expected_behavior": {
+        "intent": "context_append_multimodal_tool_result",
+        "route": "append_only_context_history",
+        "requires_confirmation_before_write": false,
+        "service_skill_id": "cozymate_service_agent",
+        "must_include": [
+          "use_text_and_image_from_same_function_output"
+        ],
+        "must_not": [
+          "convert_tool_image_to_user_message",
+          "inject_runtime_context_projection"
         ],
         "forbids_side_effects": true
       },

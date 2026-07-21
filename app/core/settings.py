@@ -14,6 +14,7 @@ LOCAL_OBJECT_STORAGE_ROOT = ".local/object_storage"
 LOCAL_PRODUCT_ASSET_MANIFEST_PATH = "assets/product-assets.manifest.json"
 DEFAULT_FILE_UPLOAD_MAX_BYTES = 10 * 1024 * 1024
 DEFAULT_AGENT_RUNTIME_MAX_INLINE_PAYLOAD_BYTES = 32 * 1024
+DEFAULT_AGENT_IMAGE_SIGNED_URL_TTL_SECONDS = 7 * 24 * 60 * 60
 DEFAULT_DOUBAO_TTS_WS_URL = "wss://openspeech.bytedance.com/api/v3/tts/bidirection"
 DEFAULT_DOUBAO_TTS_RESOURCE_ID = "seed-tts-2.0"
 DEFAULT_DOUBAO_TTS_VOICE_TYPE = "saturn_zh_female_qingyingduoduo_cs_tob"
@@ -40,6 +41,7 @@ class Settings:
     object_storage_bucket: str = ""
     object_storage_region: str = ""
     object_storage_endpoint_url: str = ""
+    object_storage_public_endpoint_url: str = ""
     object_storage_access_key_id: str = ""
     object_storage_secret_access_key: str = ""
     object_storage_local_root: str = LOCAL_OBJECT_STORAGE_ROOT
@@ -70,9 +72,7 @@ class Settings:
     agent_runtime_worker_idle_seconds: float = 0.1
     agent_runtime_interrupt_running_older_than_seconds: int = 900
     agent_runtime_max_inline_payload_bytes: int = DEFAULT_AGENT_RUNTIME_MAX_INLINE_PAYLOAD_BYTES
-    outbox_worker_enabled: bool = False
-    outbox_worker_idle_seconds: int = 2
-    outbox_worker_lease_seconds: int = 60
+    agent_image_signed_url_ttl_seconds: int = DEFAULT_AGENT_IMAGE_SIGNED_URL_TTL_SECONDS
     openai_api_key: str = ""
     openai_model: str = "gpt-5.6-terra"
     openai_reasoning_effort: str = "low"
@@ -129,6 +129,10 @@ class Settings:
             object_storage_bucket=_env("OBJECT_STORAGE_BUCKET", cls.object_storage_bucket),
             object_storage_region=_env("OBJECT_STORAGE_REGION", cls.object_storage_region),
             object_storage_endpoint_url=_env("OBJECT_STORAGE_ENDPOINT_URL", cls.object_storage_endpoint_url),
+            object_storage_public_endpoint_url=_env(
+                "OBJECT_STORAGE_PUBLIC_ENDPOINT_URL",
+                cls.object_storage_public_endpoint_url,
+            ),
             object_storage_access_key_id=_env("OBJECT_STORAGE_ACCESS_KEY_ID", cls.object_storage_access_key_id),
             object_storage_secret_access_key=_env("OBJECT_STORAGE_SECRET_ACCESS_KEY", cls.object_storage_secret_access_key),
             object_storage_local_root=_env("OBJECT_STORAGE_LOCAL_ROOT", cls.object_storage_local_root),
@@ -168,9 +172,10 @@ class Settings:
                 "AGENT_RUNTIME_MAX_INLINE_PAYLOAD_BYTES",
                 cls.agent_runtime_max_inline_payload_bytes,
             ),
-            outbox_worker_enabled=_env_bool("OUTBOX_WORKER_ENABLED", cls.outbox_worker_enabled),
-            outbox_worker_idle_seconds=_env_int("OUTBOX_WORKER_IDLE_SECONDS", cls.outbox_worker_idle_seconds),
-            outbox_worker_lease_seconds=_env_int("OUTBOX_WORKER_LEASE_SECONDS", cls.outbox_worker_lease_seconds),
+            agent_image_signed_url_ttl_seconds=_env_int(
+                "AGENT_IMAGE_SIGNED_URL_TTL_SECONDS",
+                cls.agent_image_signed_url_ttl_seconds,
+            ),
             openai_api_key=_env("OPENAI_API_KEY", cls.openai_api_key),
             openai_model=_env("OPENAI_MODEL", cls.openai_model),
             openai_reasoning_effort=_env("OPENAI_REASONING_EFFORT", cls.openai_reasoning_effort).lower(),
@@ -313,10 +318,12 @@ class Settings:
             errors.append("AGENT_RUNTIME_INTERRUPT_RUNNING_OLDER_THAN_SECONDS must be positive")
         if self.agent_runtime_max_inline_payload_bytes < 1:
             errors.append("AGENT_RUNTIME_MAX_INLINE_PAYLOAD_BYTES must be positive")
-        if self.outbox_worker_idle_seconds < 0:
-            errors.append("OUTBOX_WORKER_IDLE_SECONDS must be non-negative")
-        if self.outbox_worker_lease_seconds < 1:
-            errors.append("OUTBOX_WORKER_LEASE_SECONDS must be positive")
+        if not 60 <= self.agent_image_signed_url_ttl_seconds <= DEFAULT_AGENT_IMAGE_SIGNED_URL_TTL_SECONDS:
+            errors.append("AGENT_IMAGE_SIGNED_URL_TTL_SECONDS must be between 60 and 604800")
+        if self.object_storage_public_endpoint_url:
+            public_storage_url = urlparse(self.object_storage_public_endpoint_url)
+            if public_storage_url.scheme != "https" or not public_storage_url.netloc:
+                errors.append("OBJECT_STORAGE_PUBLIC_ENDPOINT_URL must be an absolute HTTPS URL")
         if self.rate_limit_requests < 1:
             errors.append("RATE_LIMIT_REQUESTS must be positive")
         if self.rate_limit_window_seconds < 1:

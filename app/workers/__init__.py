@@ -1,2 +1,1 @@
-"""Worker entrypoints for background jobs."""
-
+"""Background process and per-run execution mechanics."""

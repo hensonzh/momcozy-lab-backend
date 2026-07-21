@@ -79,7 +79,7 @@ def test_run_agent_seed_eval_reports_forbidden_observed_tool(tmp_path: Path) -> 
                             "run_id": "00000000-0000-4000-8000-000000000002",
                         },
                         "trace": {
-                            "tool_calls": [{"tool_name": "profile_update", "status": "completed"}],
+                            "tool_calls": [{"tool_name": "profile.update", "status": "completed"}],
                         },
                     }
                 ]

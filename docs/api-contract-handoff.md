@@ -149,7 +149,7 @@ The confirm API records authorization, emits `action.confirmed`, and moves the
 same run back to `queued`; it never writes domain state in the HTTP request.
 The agent worker resumes that run, executes the action synchronously, persists
 the domain mutation plus action/domain events, returns an explicit result, and
-only then completes the run. There is no `agent.action.apply` outbox job.
+only then completes the run. The run queue is the only action-apply execution path.
 
 Action API responses likewise expose preview/status metadata only. They do not
 return server-side `apply_payload` or action idempotency keys.

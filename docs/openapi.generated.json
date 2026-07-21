@@ -680,12 +680,12 @@
             "title": "Checkpoints",
             "type": "array"
           },
-          "context_projections": {
+          "context_items": {
             "items": {
               "additionalProperties": true,
               "type": "object"
             },
-            "title": "Context Projections",
+            "title": "Context Items",
             "type": "array"
           },
           "events": {
@@ -729,13 +729,13 @@
         "required": [
           "run",
           "messages",
+          "context_items",
           "events",
           "tool_calls",
           "actions",
           "artifacts",
           "checkpoints",
-          "workflow_states",
-          "context_projections"
+          "workflow_states"
         ],
         "title": "AgentReplayBundle",
         "type": "object"
@@ -7413,8 +7413,7 @@
         ],
         "x-momcozy-api-surface": "internal_service_api",
         "x-momcozy-client": [
-          "agent-worker",
-          "outbox-worker"
+          "agent-worker"
         ],
         "x-momcozy-owner": "notifications",
         "x-momcozy-stability": "stable"

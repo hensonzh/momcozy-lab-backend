@@ -1,6 +1,6 @@
 # Agent Fact Catalog
 
-This catalog is the single source of truth for reusable information collected by the pregnancy-plan, hospital-bag, and birth-plan forms. Runtime code lives in `app/modules/agent_runtime/facts/catalog.py`.
+This catalog is the single source of truth for reusable information collected by the pregnancy-plan, hospital-bag, and birth-plan forms. Runtime code lives in `app/agent_runtime/context/facts/catalog.py`.
 
 ## Lifecycle
 

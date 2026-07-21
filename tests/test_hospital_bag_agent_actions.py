@@ -3,10 +3,10 @@ from uuid import uuid4
 
 import pytest
 
-from app.modules.agent_runtime.models import AgentAction
-from app.modules.hospital_bag import HOSPITAL_BAG_CART_UPDATE_ACTION, HospitalBagCartUpdateActionHandler
-from app.modules.hospital_bag.agent_actions import HOSPITAL_BAG_CART_CHANGED_EVENT
-from app.workers.errors import PermanentJobError
+from app.agent_runtime.runs.models import AgentAction
+from app.agents.cozymate.actions.hospital_bag import HOSPITAL_BAG_CART_UPDATE_ACTION, HospitalBagCartUpdateActionHandler
+from app.agents.cozymate.actions.hospital_bag import HOSPITAL_BAG_CART_CHANGED_EVENT
+from app.agent_runtime.actions.errors import PermanentActionError
 
 
 def test_hospital_bag_cart_update_action_handler_applies_confirmed_cart_delta() -> None:
@@ -37,7 +37,7 @@ def test_hospital_bag_cart_update_action_handler_applies_confirmed_cart_delta() 
 def test_hospital_bag_cart_update_action_handler_rejects_missing_cart_delta() -> None:
     action = _action(apply_payload={})
 
-    with pytest.raises(PermanentJobError) as exc_info:
+    with pytest.raises(PermanentActionError) as exc_info:
         asyncio.run(HospitalBagCartUpdateActionHandler()(action))
 
     assert exc_info.value.code == "missing_cart_update"

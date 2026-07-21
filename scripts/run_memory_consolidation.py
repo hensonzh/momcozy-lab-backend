@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 from app.core.metrics import RequestMetrics
 from app.core.settings import Settings
 from app.infrastructure.db.session import create_db_engine, create_session_factory
-from app.modules.agent_runtime.memory import (
+from app.agent_runtime.context.memory import (
     AgentMemoryExtractor,
     AgentMemoryRepository,
     AgentMemoryService,
@@ -23,8 +23,8 @@ from app.modules.agent_runtime.memory import (
     fail_memory_consolidation,
     prepare_memory_consolidation,
 )
-from app.modules.agent_runtime.memory.consolidation import MemoryCandidate
-from app.modules.agent_runtime.sdk import create_agent_model_runner
+from app.agent_runtime.context.memory.consolidation import MemoryCandidate
+from app.agent_runtime.providers import create_agent_model_runner
 from scripts.worker_runtime import install_stop_signal_handlers, sleep_until_stop
 
 

@@ -3,8 +3,8 @@ import hashlib
 from uuid import uuid4
 
 from app.core.errors import ApiError
-from app.modules.agent_runtime.actions.executor import AgentActionExecutionOutcome
-from app.modules.agent_runtime.models import AgentAction, AgentEvent, AgentMessage, AgentRun
+from app.agent_runtime.actions.executor import AgentActionExecutionOutcome
+from app.agent_runtime.runs.models import AgentAction, AgentEvent, AgentMessage, AgentRun
 from app.workers.agent_run import INTERRUPTED_RUN_ERROR_CODE, AgentRunQueueWorker, AgentRunWorkerResult, AgentRunWorker
 
 
@@ -39,6 +39,9 @@ def test_agent_run_worker_completes_run_with_assistant_message_events_and_lock()
     assert repository.events[2].payload["semantic"]["surface"] == "hidden"
     assert repository.events[2].payload["semantic"]["lifecycle"] == "completed"
     assert repository.messages[0].content == {"text": "Here is the summary."}
+    assert [item.item for item in repository.context_items] == [
+        {"role": "assistant", "content": "Here is the summary."}
+    ]
     assert repository.events[1].payload == {
         "message_id": str(repository.messages[0].id),
         "message_stream_id": str(repository.messages[0].id),
@@ -367,6 +370,7 @@ class FakeAgentRuntimeRepository:
         )
         self.runs = [self.run]
         self.messages = []
+        self.context_items = []
         self.events = []
         self.actions = []
         self.operations = []
@@ -483,6 +487,10 @@ class FakeAgentRuntimeRepository:
             (message for message in reversed(self.messages) if message.run_id == run_id and message.role == "assistant"),
             None,
         )
+
+    async def append_context_items(self, *, thread_id, run_id, items):
+        self.context_items.extend(items)
+        return list(items)
 
     async def append_event(self, **kwargs):
         self.operations.append(f"db:{kwargs['event_type']}")

@@ -68,7 +68,6 @@ class RequestMetrics:
         self._total = 0
         self._error_count = 0
         self._routes: dict[tuple[str, str], RouteMetrics] = {}
-        self._worker_jobs: dict[str, OperationMetrics] = {}
         self._agent_tools: dict[str, OperationMetrics] = {}
         self._agent_sdk: dict[str, OperationMetrics] = {}
 
@@ -80,15 +79,6 @@ class RequestMetrics:
                 self._error_count += 1
             route_metrics = self._routes.setdefault(key, RouteMetrics())
             route_metrics.record(status_code=status_code, duration_ms=duration_ms)
-
-    def record_worker_job(self, *, job_type: str, outcome: str, error_code: str = "", duration_ms: float = 0.0) -> None:
-        self._record_operation(
-            bucket=self._worker_jobs,
-            key=job_type,
-            outcome=outcome,
-            error_code=error_code,
-            duration_ms=duration_ms,
-        )
 
     def record_agent_tool(self, *, tool_name: str, outcome: str, error_code: str = "", duration_ms: float = 0.0) -> None:
         self._record_operation(
@@ -121,7 +111,6 @@ class RequestMetrics:
                     "error_count": self._error_count,
                 },
                 "routes": routes,
-                "workers": _operation_snapshot(self._worker_jobs, key_name="job_type"),
                 "agent_tools": _operation_snapshot(self._agent_tools, key_name="tool_name"),
                 "agent_sdk": _operation_snapshot(self._agent_sdk, key_name="node_name"),
             }

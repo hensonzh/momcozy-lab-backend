@@ -3,13 +3,13 @@ from uuid import uuid4
 
 import pytest
 
-from app.modules.agent_runtime.models import AgentAction
-from app.modules.notifications.agent_actions import (
+from app.agent_runtime.runs.models import AgentAction
+from app.agents.cozymate.actions.notifications import (
     MILK_REMINDER_CREATE_ACTION,
     MilkReminderCreateActionHandler,
 )
 from app.modules.notifications.models import Notification
-from app.workers.errors import PermanentJobError
+from app.agent_runtime.actions.errors import PermanentActionError
 
 
 def test_milk_reminder_create_action_handler_creates_notification_through_service() -> None:
@@ -45,7 +45,7 @@ def test_milk_reminder_create_action_handler_creates_notification_through_servic
 
 
 def test_milk_reminder_create_action_handler_rejects_missing_title() -> None:
-    with pytest.raises(PermanentJobError) as exc_info:
+    with pytest.raises(PermanentActionError) as exc_info:
         asyncio.run(MilkReminderCreateActionHandler(service=FakeNotificationsService())(_action(apply_payload={})))
 
     assert exc_info.value.code == "missing_reminder_title"

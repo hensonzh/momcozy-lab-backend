@@ -7,14 +7,13 @@ from uuid import UUID, uuid4
 
 from ...core.errors import ApiError
 from ...infrastructure.object_storage import ObjectStorage
-from ..audit import AuditService, IdempotencyService, OutboxService, parse_idempotency_response_ref, request_hash
+from ..audit import AuditService, IdempotencyService, parse_idempotency_response_ref, request_hash
 from .models import FileObject
 from .repository import FileRepository
 
 
 FILE_UPLOAD_IDEMPOTENCY_SCOPE = "files.upload"
 FILE_DELETE_IDEMPOTENCY_SCOPE = "files.delete"
-FILE_OBJECT_DELETE_JOB = "files.object_delete"
 IDEMPOTENCY_TTL = timedelta(hours=24)
 DEFAULT_MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 
@@ -27,14 +26,12 @@ class FileService:
         object_storage: ObjectStorage,
         audit_service: AuditService | None = None,
         idempotency_service: IdempotencyService | None = None,
-        outbox_service: OutboxService | None = None,
         max_upload_bytes: int = DEFAULT_MAX_UPLOAD_BYTES,
     ) -> None:
         self.repository = repository
         self.object_storage = object_storage
         self.audit_service = audit_service
         self.idempotency_service = idempotency_service
-        self.outbox_service = outbox_service
         self.max_upload_bytes = max_upload_bytes
 
     async def upload(
@@ -150,17 +147,7 @@ class FileService:
         if deleted is None:
             raise ApiError(code="not_found", message="File not found.", status=404)
 
-        if self.outbox_service is not None:
-            await self.outbox_service.enqueue(
-                job_type=FILE_OBJECT_DELETE_JOB,
-                payload={
-                    "file_id": str(deleted.id),
-                    "owner_user_id": str(owner_user_id),
-                    "object_key": deleted.object_key,
-                },
-                idempotency_key=f"{FILE_OBJECT_DELETE_JOB}:{deleted.id}",
-                request_id=request_id,
-            )
+        await self.object_storage.delete(key=deleted.object_key)
         if self.audit_service is not None:
             await self.audit_service.record(
                 actor_user_id=owner_user_id,
@@ -168,7 +155,7 @@ class FileService:
                 resource_type="file",
                 resource_id=str(deleted.id),
                 request_id=request_id,
-                details={"object_cleanup": "queued" if self.outbox_service is not None else "not_configured"},
+                details={"object_cleanup": "deleted"},
             )
         if idempotency_record is not None and self.idempotency_service is not None:
             await self.idempotency_service.mark_completed(record=idempotency_record, response_ref=str(deleted.id))

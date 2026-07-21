@@ -14,36 +14,35 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.core.settings import Settings  # noqa: E402
-from app.modules.agent_runtime.agents.cozymate_service_agent.device_guidance import (  # noqa: E402
+from app.agents.cozymate.evals import (  # noqa: E402
+    create_cozymate_eval_assertion_engine,
+    load_product_agent_eval_seed_cases,
+)
+from app.agents.cozymate.device_guidance import (  # noqa: E402
     DeviceGuidanceReferenceService,
 )
-from app.modules.agent_runtime.agents.cozymate_service_agent.prompts import (  # noqa: E402
-    ContextProjection,
+from app.agents.cozymate.prompts import (  # noqa: E402
     DEFAULT_STABLE_SYSTEM_PROMPT,
-    ModelInputBuilder,
 )
-from app.modules.agent_runtime.agents.cozymate_service_agent.skill_registry import (  # noqa: E402
+from app.agents.cozymate.skill_registry import (  # noqa: E402
     default_service_skill_registry,
 )
-from app.modules.agent_runtime.agents.cozymate_service_agent.tools import (  # noqa: E402
+from app.agents.cozymate.tools import (  # noqa: E402
     default_tool_namespace_registry,
     default_tool_registry,
 )
-from app.modules.agent_runtime.evals.service import (  # noqa: E402
-    AgentEvalSeedAssertionEngine,
+from app.agent_runtime.evals.service import (  # noqa: E402
     AgentEvalTrace,
-    load_product_agent_eval_seed_cases,
 )
-from app.modules.agent_runtime.models import AgentWorkflowState  # noqa: E402
-from app.modules.agent_runtime.run_lifecycle.ongoing_work import (  # noqa: E402
-    project_ongoing_work,
+from app.agent_runtime.runs.models import AgentWorkflowState  # noqa: E402
+from app.agent_runtime.tools.result import ToolResult  # noqa: E402
+from app.agents.cozymate.workflows.ongoing_work import (  # noqa: E402
     project_workflow_context,
 )
-from app.modules.agent_runtime.sdk import (  # noqa: E402
+from app.agent_runtime.providers import (  # noqa: E402
     AgentModelRunner,
     SdkNodeRequest,
     SdkToolDefinition,
-    SdkToolInvocationResult,
     SdkToolNamespace,
     create_agent_model_runner,
     sdk_tool_name,
@@ -92,7 +91,7 @@ async def run_device_unboxing_decision_eval(
     if missing:
         raise ValueError(f"Device unboxing decision eval is missing seed cases: {', '.join(missing)}")
 
-    assertion_engine = AgentEvalSeedAssertionEngine()
+    assertion_engine = create_cozymate_eval_assertion_engine()
     results: list[dict[str, Any]] = []
     traces: list[dict[str, Any]] = []
     for decision_case in DEVICE_UNBOXING_DECISION_CASES:
@@ -182,37 +181,37 @@ def _decision_request(
     }
     skill = default_service_skill_registry().get("device-guidance")
     reference = DeviceGuidanceReferenceService().read(model="Air1", step="guide.parts")
-    projection = ContextProjection(
-        stable_system_prompt=instructions,
-        selected_conversation_history=[{"role": "assistant", "content": case.previous_assistant_text}],
-        user_context={"locale": "zh-CN", "timezone": "Asia/Shanghai"},
-        memory_projection=[],
-        workflow_context=project_workflow_context([workflow], workflow_reply=workflow_reply),
-        working_context={
-            "skills": [{"id": skill.service_skill_id, "instructions": skill.prompt_block()}],
-            "ongoing_work": project_ongoing_work([workflow], resident_skill_ids={skill.service_skill_id}),
-            "known_information": [
-                {
-                    "source": "devices.unboxing.advance",
-                    "information": {
-                        "status": "unboxing_started",
-                        "workflow": {
-                            "device_model": "Air1",
-                            "phase": "guiding",
-                            "current_step": "guide.parts",
-                            "completed_steps": [],
-                        },
-                        "guidance": reference,
-                    },
-                    "guidance": "Use this official reference until the current unboxing step or device model changes.",
-                }
-            ],
-        },
-    )
-    model_input = ModelInputBuilder().build(
-        projection=projection,
-        current_user_message={"role": "user", "content": case.user_text},
-    )
+    model_input = [
+        *_historical_tool_result(
+            call_id="load-device-guidance",
+            tool_name="load_service_skill",
+            args={"service_skill_id": skill.service_skill_id},
+            output={
+                "schema_version": "service_skill_load.v2",
+                "service_skill_id": skill.service_skill_id,
+                "skill_version": skill.version,
+                "skill": {
+                    "service_skill_id": skill.service_skill_id,
+                    "name": skill.name,
+                    "description": skill.description,
+                    "instructions": skill.prompt_block(),
+                },
+                "business_facts": {},
+            },
+        ),
+        *_historical_tool_result(
+            call_id="start-device-unboxing",
+            tool_name=sdk_tool_name("devices.unboxing.advance"),
+            args={"action": "start", "device_model": "Air1"},
+            output={
+                "status": "unboxing_started",
+                "workflow": project_workflow_context([workflow], workflow_reply=workflow_reply)[0],
+                "guidance": reference,
+            },
+        ),
+        {"role": "assistant", "content": case.previous_assistant_text},
+        {"role": "user", "content": case.user_text},
+    ]
     tool_registry = default_tool_registry()
     tool_contract = tool_registry.get("devices.unboxing.advance")
     namespace = default_tool_namespace_registry(tool_registry).get("device_support")
@@ -245,7 +244,29 @@ def _decision_request(
     )
 
 
-async def _advance_tool_result(args_json: str) -> SdkToolInvocationResult:
+def _historical_tool_result(
+    *,
+    call_id: str,
+    tool_name: str,
+    args: dict[str, Any],
+    output: dict[str, Any],
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "type": "function_call",
+            "call_id": call_id,
+            "name": tool_name,
+            "arguments": json.dumps(args, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
+        },
+        {
+            "type": "function_call_output",
+            "call_id": call_id,
+            "output": ToolResult.json(output).to_function_call_output(),
+        },
+    ]
+
+
+async def _advance_tool_result(args_json: str) -> ToolResult:
     args = json.loads(args_json)
     output = {
         "status": "unboxing_step_advanced",
@@ -265,8 +286,7 @@ async def _advance_tool_result(args_json: str) -> SdkToolInvocationResult:
     }
     if args.get("action") != "complete_current":
         output = {"status": "unexpected_action", "received_action": args.get("action")}
-    serialized = json.dumps(output, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
-    return SdkToolInvocationResult(output_json=serialized, safe_output_json=serialized)
+    return ToolResult.json(output)
 
 
 def _write_json(path: Path | None, payload: dict[str, Any]) -> None:

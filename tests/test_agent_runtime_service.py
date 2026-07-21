@@ -4,15 +4,16 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from app.agents.cozymate.context.client import sanitize_cozymate_client_context
 from app.core.errors import ApiError
-from app.modules.agent_runtime.models import (
+from app.agent_runtime.runs.models import (
     AgentArtifact,
     AgentEvent,
     AgentMessage,
     AgentRun,
     AgentThread,
 )
-from app.modules.agent_runtime.service import AgentRuntimeService
+from app.agent_runtime.runs.service import AgentRuntimeService
 from app.modules.audit.models import IdempotencyKey
 from app.modules.audit.service import request_hash
 from app.modules.files.models import FileObject
@@ -23,7 +24,12 @@ def test_agent_runtime_service_creates_run_with_thread_message_events_and_idempo
     repository = FakeAgentRuntimeRepository()
     idempotency_service = FakeIdempotencyService(status="reserved")
     controls = FakeAgentRunControls()
-    service = AgentRuntimeService(repository=repository, idempotency_service=idempotency_service, controls=controls)
+    service = AgentRuntimeService(
+        repository=repository,
+        idempotency_service=idempotency_service,
+        controls=controls,
+        client_context_sanitizer=sanitize_cozymate_client_context,
+    )
 
     run = asyncio.run(
         service.create_run(
@@ -53,6 +59,10 @@ def test_agent_runtime_service_creates_run_with_thread_message_events_and_idempo
     assert run.runtime_pattern == "sdk_only"
     assert run.runtime_version == "momcozy-agent-v1"
     assert repository.messages[0].content["text"] == "Review my pumping pattern"
+    assert repository.context_items[0].item == {
+        "role": "user",
+        "content": "Review my pumping pattern",
+    }
     assert repository.messages[0].content["client_context"]["hospital_bag_cart"]["groups"][0]["items"][0]["id"] == "pump-custom"
     assert [event.event_type for event in repository.events] == ["run.queued", "message.completed"]
     assert repository.events[0].payload["phase"] == "queued"
@@ -158,9 +168,18 @@ def test_agent_runtime_service_allows_negated_health_red_flags_to_queue_normally
     assert controls.active_run == (repository.thread.id, run.id)
 
 
-def test_agent_runtime_service_validates_authenticated_inline_image_and_owned_pdf_attachments() -> None:
+def test_agent_runtime_service_validates_owned_image_asset_and_pdf_attachments() -> None:
     owner_user_id = uuid4()
     repository = FakeAgentRuntimeRepository()
+    image = FileObject(
+        id=uuid4(),
+        owner_user_id=owner_user_id,
+        object_key=f"users/{owner_user_id}/files/checkup.png",
+        original_filename="checkup.png",
+        content_type="image/png",
+        size_bytes=7,
+        status="active",
+    )
     pdf = FileObject(
         id=uuid4(),
         owner_user_id=owner_user_id,
@@ -170,7 +189,12 @@ def test_agent_runtime_service_validates_authenticated_inline_image_and_owned_pd
         size_bytes=123,
         status="active",
     )
-    service = AgentRuntimeService(repository=repository, file_repository=FakeFileRepository(pdf))
+    image_access_service = FakeImageAccessService()
+    service = AgentRuntimeService(
+        repository=repository,
+        file_repository=FakeFileRepository(image, pdf),
+        image_access_service=image_access_service,
+    )
 
     asyncio.run(
         service.create_run(
@@ -180,7 +204,7 @@ def test_agent_runtime_service_validates_authenticated_inline_image_and_owned_pd
             attachments=[
                 {
                     "type": "image",
-                    "data_url": "data:image/png;base64,Y2hlY2t1cA==",
+                    "asset_id": str(image.id),
                     "detail": "high",
                     "verified": True,
                     "runtime_validated": True,
@@ -194,11 +218,12 @@ def test_agent_runtime_service_validates_authenticated_inline_image_and_owned_pd
     attachments = repository.messages[0].content["attachments"]
     assert attachments[0] == {
         "type": "image",
-        "data_url": "data:image/png;base64,Y2hlY2t1cA==",
+        "asset_id": str(image.id),
         "content_type": "image/png",
+        "original_filename": "checkup.png",
         "detail": "high",
         "runtime_validated": True,
-        "trust_source": "authenticated_inline_upload",
+        "trust_source": "owned_image_asset",
     }
     assert attachments[1] == {
         "type": "file",
@@ -208,6 +233,49 @@ def test_agent_runtime_service_validates_authenticated_inline_image_and_owned_pd
         "runtime_validated": True,
         "trust_source": "owned_file_record",
     }
+    assert repository.context_items[0].item == {
+        "role": "user",
+        "content": [
+            {"type": "input_text", "text": "我上传了产检资料。"},
+            {
+                "type": "input_image",
+                "asset_id": str(image.id),
+                "detail": "high",
+            },
+        ],
+    }
+    assert image_access_service.calls == [
+        {
+            "thread_id": repository.thread.id,
+            "owner_user_id": owner_user_id,
+            "asset_id": image.id,
+        }
+    ]
+
+
+def test_agent_runtime_service_rejects_inline_base64_image_attachments() -> None:
+    service = AgentRuntimeService(
+        repository=FakeAgentRuntimeRepository(),
+        file_repository=FakeFileRepository(),
+        image_access_service=FakeImageAccessService(),
+    )
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            service.create_run(
+                actor_user_id=uuid4(),
+                thread_id=None,
+                message="请看图片。",
+                attachments=[
+                    {
+                        "type": "image",
+                        "data_url": "data:image/png;base64,Y2hlY2t1cA==",
+                    }
+                ],
+            )
+        )
+
+    assert exc_info.value.code == "invalid_agent_attachment"
 
 
 def test_agent_runtime_service_rejects_forged_or_cross_owner_checkup_media() -> None:
@@ -674,6 +742,7 @@ class FakeAgentRuntimeRepository:
         self.run = None
         self.runs = []
         self.messages = []
+        self.context_items = []
         self.events = []
         self.artifact = None
         self.deleted_artifact = None
@@ -745,6 +814,10 @@ class FakeAgentRuntimeRepository:
         self.messages.append(message)
         return message
 
+    async def append_context_items(self, **kwargs):
+        self.context_items.extend(kwargs["items"])
+        return list(kwargs["items"])
+
     async def append_event(self, **kwargs):
         event = AgentEvent(
             event_id=uuid4(),
@@ -789,13 +862,23 @@ class FakeAgentRuntimeRepository:
         return self.run
 
 class FakeFileRepository:
-    def __init__(self, file_object: FileObject) -> None:
-        self.file_object = file_object
+    def __init__(self, *file_objects: FileObject) -> None:
+        self.file_objects = {file_object.id: file_object for file_object in file_objects}
 
     async def get_for_owner(self, *, file_id, owner_user_id):
-        if self.file_object.id != file_id or self.file_object.owner_user_id != owner_user_id:
+        file_object = self.file_objects.get(file_id)
+        if file_object is None or file_object.owner_user_id != owner_user_id:
             return None
-        return self.file_object
+        return file_object
+
+
+class FakeImageAccessService:
+    def __init__(self) -> None:
+        self.calls = []
+
+    async def ensure_for_thread(self, **kwargs):
+        self.calls.append(kwargs)
+        return "https://images.example.test/stable-signed-url"
 
 
 class FakeFactService:

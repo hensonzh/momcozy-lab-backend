@@ -36,7 +36,7 @@ def get_notifications_service(session: AsyncSession = Depends(get_session)) -> N
     "",
     response_model=NotificationRead,
     status_code=status.HTTP_201_CREATED,
-    openapi_extra=api_surface("internal_service_api", owner="notifications", clients=["agent-worker", "outbox-worker"]),
+    openapi_extra=api_surface("internal_service_api", owner="notifications", clients=["agent-worker"]),
 )
 async def create_notification(
     payload: NotificationServiceCreate,

@@ -43,6 +43,28 @@ def test_s3_object_storage_requests_only_the_selected_byte_range() -> None:
     ]
 
 
+def test_s3_object_storage_creates_https_presigned_get_url() -> None:
+    storage = object.__new__(S3ObjectStorage)
+    storage.bucket = "bucket"
+    storage.public_client = _FakeS3Client(body=b"")
+
+    image_url = asyncio.run(
+        storage.create_presigned_get_url(
+            key="users/user/files/image.png",
+            expires_in_seconds=604800,
+        )
+    )
+
+    assert image_url == "https://images.example.test/signed"
+    assert storage.public_client.presign_calls == [
+        {
+            "ClientMethod": "get_object",
+            "Params": {"Bucket": "bucket", "Key": "users/user/files/image.png"},
+            "ExpiresIn": 604800,
+        }
+    ]
+
+
 def test_local_object_storage_rejects_path_traversal(tmp_path) -> None:
     storage = LocalObjectStorage(tmp_path)
 
@@ -112,10 +134,15 @@ class _FakeS3Client:
     def __init__(self, *, body: bytes) -> None:
         self.body = body
         self.calls: list[dict[str, str]] = []
+        self.presign_calls: list[dict[str, object]] = []
 
     def get_object(self, **kwargs):
         self.calls.append(kwargs)
         return {"Body": _FakeS3Body(self.body)}
+
+    def generate_presigned_url(self, **kwargs):
+        self.presign_calls.append(kwargs)
+        return "https://images.example.test/signed"
 
 
 class _FakeS3Body:

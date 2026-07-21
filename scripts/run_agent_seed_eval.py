@@ -12,12 +12,14 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.modules.agent_runtime.evals.service import (  # noqa: E402
+from app.agents.cozymate.evals import (  # noqa: E402
+    create_cozymate_eval_assertion_engine,
+    load_product_agent_eval_seed_cases,
+)
+from app.agent_runtime.evals.service import (  # noqa: E402
     AgentEvalFailure,
     AgentEvalRunResult,
-    AgentEvalSeedAssertionEngine,
     AgentEvalTrace,
-    load_product_agent_eval_seed_cases,
 )
 
 DEFAULT_CASES = Path("fixtures/agent_eval_cases/product_service_seed.json")
@@ -35,7 +37,7 @@ def run_seed_eval(
     if suite:
         cases = [case for case in cases if case.get("suite") == suite]
     traces = _load_trace_fixtures(trace_fixtures_path)
-    engine = AgentEvalSeedAssertionEngine()
+    engine = create_cozymate_eval_assertion_engine()
     results: list[dict[str, Any]] = []
     for case in cases:
         trace = traces.get(_case_key(case))

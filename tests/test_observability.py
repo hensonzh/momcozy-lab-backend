@@ -78,17 +78,15 @@ def test_agent_runtime_log_is_structured(caplog) -> None:
     }
 
 
-def test_backend_metrics_record_worker_tool_and_sdk_operations() -> None:
+def test_backend_metrics_record_tool_and_sdk_operations() -> None:
     metrics = RequestMetrics()
 
-    metrics.record_worker_job(job_type="files.cleanup", outcome="completed", duration_ms=2.0)
     metrics.record_agent_tool(tool_name="profile.read", outcome="failed", error_code="permission_denied", duration_ms=3.0)
     metrics.record_agent_sdk(node_name="openai_responses", outcome="failed", error_code="dependency_not_configured", duration_ms=4.0)
 
     snapshot = metrics.snapshot()
 
-    assert snapshot["workers"][0]["job_type"] == "files.cleanup"
-    assert snapshot["workers"][0]["outcome_counts"]["completed"] == 1
+    assert "workers" not in snapshot
     assert snapshot["agent_tools"][0]["error_code_counts"]["permission_denied"] == 1
     assert snapshot["agent_sdk"][0]["error_code_counts"]["dependency_not_configured"] == 1
     assert "agent_safety" not in snapshot

@@ -56,18 +56,6 @@ services:
       minio-init:
         condition: service_completed_successfully
 
-  outbox-worker:
-    <<: *backend-image
-    command: python -m scripts.run_outbox_worker
-    restart: unless-stopped
-    init: true
-    stop_grace_period: 60s
-    depends_on:
-      postgres:
-        condition: service_healthy
-      minio-init:
-        condition: service_completed_successfully
-
   memory-worker:
     <<: *backend-image
     command: python -m scripts.run_memory_consolidation

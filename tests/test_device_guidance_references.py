@@ -1,7 +1,7 @@
 import pytest
 
 from app.core.errors import ApiError
-from app.modules.agent_runtime.agents.cozymate_service_agent.device_guidance import (
+from app.agents.cozymate.device_guidance import (
     DeviceGuidanceReferenceService,
 )
 

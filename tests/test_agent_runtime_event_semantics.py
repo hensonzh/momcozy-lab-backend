@@ -2,15 +2,17 @@ from uuid import uuid4
 
 import pytest
 
-from app.modules.agent_runtime.event_semantics import (
-    action_event_payload_semantic,
+from app.agents.cozymate.event_semantics import (
     artifact_event_payload_semantic,
+    tool_event_semantic,
+)
+from app.agent_runtime.events.semantics import (
+    action_event_payload_semantic,
     progress_live_dedupe_key,
     run_event_payload_semantic,
     run_progress_payload,
-    tool_event_semantic,
 )
-from app.modules.agent_runtime.agents.cozymate_service_agent.tools.registry import default_tool_registry
+from app.agents.cozymate.tools.registry import default_tool_registry
 
 
 def test_run_progress_payload_uses_status_bar_semantic_for_visible_progress() -> None:
@@ -62,7 +64,7 @@ def test_tool_event_semantic_uses_tool_specific_copy() -> None:
     semantic = tool_event_semantic(
         event_type="tool.started",
         tool_name="records.milk_status.read",
-        read_or_write="read",
+        effect_scope="none",
     )
 
     assert semantic["phase"] == "reading"
@@ -76,14 +78,14 @@ def test_tool_event_semantic_uses_one_merge_key_for_the_whole_call() -> None:
         event_type="tool.started",
         tool_name="records.milk_status.read",
         tool_call_id="call-1",
-        read_or_write="read",
+        effect_scope="none",
     )
     completed = tool_event_semantic(
         event_type="tool.completed",
         tool_name="records.milk_status.read",
         tool_call_id="call-1",
         safe_output={"status": "completed"},
-        read_or_write="read",
+        effect_scope="none",
     )
 
     assert started["merge_key"] == "tool:call-1"
@@ -97,40 +99,38 @@ def test_every_registered_tool_has_specific_started_copy() -> None:
         semantic = tool_event_semantic(
             event_type="tool.started",
             tool_name=contract.name,
-            safe_args={"action": "read"} if contract.name == "pregnancy_diary.manage" else {},
-            read_or_write=contract.read_or_write,
+            safe_args={},
+            effect_scope=contract.effect_scope,
         )
 
         assert semantic["label"] not in {"我按当前场景继续处理～", "我先看看相关信息～", "我先准备相关信息～"}, contract.name
 
 
 @pytest.mark.parametrize(
-    ("action", "started_label", "status", "completed_label"),
+    ("tool_name", "effect_scope", "started_label", "status", "completed_label"),
     [
-        ("read", "我先看看孕期日记～", "diary_list_read", "我看好孕期日记啦"),
-        ("write", "我先帮你保存孕期日记～", "diary_entry_created", "我已经保存好孕期日记啦"),
-        ("update", "我先帮你保存孕期日记～", "diary_entry_updated", "我已经保存好孕期日记啦"),
-        ("delete", "我先帮你删除孕期日记～", "diary_entry_deleted", "我已经删除这条孕期日记啦"),
+        ("pregnancy_diary.query", "none", "我先看看孕期日记～", "entries_read", "我看好孕期日记啦"),
+        ("pregnancy_diary.save", "user_resource", "我先帮你保存孕期日记～", "entry_saved", "我已经保存好孕期日记啦"),
+        ("pregnancy_diary.delete", "user_resource", "我先帮你删除孕期日记～", "entry_deleted", "我已经删除这条孕期日记啦"),
     ],
 )
 def test_pregnancy_diary_semantics_follow_action_and_result(
-    action: str,
+    tool_name: str,
+    effect_scope: str,
     started_label: str,
     status: str,
     completed_label: str,
 ) -> None:
     started = tool_event_semantic(
         event_type="tool.started",
-        tool_name="pregnancy_diary.manage",
-        safe_args={"action": action},
-        read_or_write="write",
+        tool_name=tool_name,
+        effect_scope=effect_scope,
     )
     completed = tool_event_semantic(
         event_type="tool.completed",
-        tool_name="pregnancy_diary.manage",
-        safe_args={"action": action},
+        tool_name=tool_name,
         safe_output={"status": status},
-        read_or_write="write",
+        effect_scope=effect_scope,
     )
 
     assert started["label"] == started_label
@@ -141,13 +141,13 @@ def test_conversation_history_image_load_event_semantic_uses_history_image_copy(
     started = tool_event_semantic(
         event_type="tool.started",
         tool_name="conversation_history.image.load",
-        read_or_write="read",
+        effect_scope="none",
     )
     completed = tool_event_semantic(
         event_type="tool.completed",
         tool_name="conversation_history.image.load",
         safe_output={"status": "image_context_ready"},
-        read_or_write="read",
+        effect_scope="none",
     )
 
     assert started["label"] == "我回看一下之前的图片～"
@@ -159,8 +159,7 @@ def test_tool_event_semantic_maps_confirmation_outputs() -> None:
         event_type="tool.completed",
         tool_name="plans.task_create.propose",
         safe_output={"requires_confirmation": True},
-        read_or_write="write",
-        requires_confirmation=True,
+        effect_scope="user_resource",
     )
 
     assert semantic["phase"] == "planning"
@@ -172,22 +171,19 @@ def test_plan_tool_event_semantics_use_single_preview_and_confirmation_lifecycle
     milk_started = tool_event_semantic(
         event_type="tool.started",
         tool_name="plans.milk_plan.propose",
-        read_or_write="write",
-        requires_confirmation=True,
+        effect_scope="user_resource",
     )
     pregnancy_completed = tool_event_semantic(
         event_type="tool.completed",
         tool_name="pregnancy.plan.propose",
         safe_output={"requires_confirmation": True},
-        read_or_write="write",
-        requires_confirmation=True,
+        effect_scope="user_resource",
     )
     existing_plan = tool_event_semantic(
         event_type="tool.completed",
         tool_name="pregnancy.plan.propose",
         safe_output={"status": "existing_plan_found"},
-        read_or_write="write",
-        requires_confirmation=True,
+        effect_scope="user_resource",
     )
 
     assert milk_started["label"] == "我先帮你整理奶量计划～"
@@ -198,9 +194,8 @@ def test_plan_tool_event_semantics_use_single_preview_and_confirmation_lifecycle
 @pytest.mark.parametrize(
     ("tool_name", "status", "forbidden_success_copy"),
     [
-        ("pregnancy_diary.manage", "entry_already_exists", "已经保存好"),
-        ("pregnancy_diary.manage", "entry_not_found", "已经更新好"),
-        ("pregnancy_diary.manage", "entry_unchanged", "已经保存好"),
+        ("pregnancy_diary.save", "action_failed", "已经保存好"),
+        ("pregnancy_diary.query", "entry_not_found", "已经更新好"),
     ],
 )
 def test_pregnancy_diary_no_op_completion_does_not_claim_write_success(
@@ -212,7 +207,7 @@ def test_pregnancy_diary_no_op_completion_does_not_claim_write_success(
         event_type="tool.completed",
         tool_name=tool_name,
         safe_output={"status": status},
-        read_or_write="write",
+        effect_scope="user_resource",
     )
 
     assert semantic["lifecycle"] == "completed"

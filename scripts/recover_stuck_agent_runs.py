@@ -19,9 +19,9 @@ if str(ROOT) not in sys.path:
 from app.core.settings import Settings  # noqa: E402
 from app.infrastructure.db.session import create_db_engine, create_session_factory  # noqa: E402
 from app.infrastructure.redis.client import close_redis_client, create_redis_client  # noqa: E402
-from app.modules.agent_runtime.models import AgentRun  # noqa: E402
-from app.modules.agent_runtime.repository import AgentRuntimeRepository  # noqa: E402
-from app.modules.agent_runtime.run_lifecycle.controls import AgentRunControls  # noqa: E402
+from app.agent_runtime.runs.models import AgentRun  # noqa: E402
+from app.agent_runtime.runs.repository import AgentRuntimeRepository  # noqa: E402
+from app.agent_runtime.runs.controls import AgentRunControls  # noqa: E402
 
 
 RECOVERY_ERROR_CODE = "runtime_interrupted"

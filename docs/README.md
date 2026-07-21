@@ -6,6 +6,8 @@ legacy-route comparison documents do not belong here.
 
 ## Agent And Product
 
+- `main-agent-design.md`: discussion draft for the simplified main-agent,
+  bounded capability tools, specialist handoffs, and response ownership.
 - `agent-context-construction-design.md`: proposed context projection,
   conversation-continuity state, and durable-workflow boundaries.
 - `agent-tool-catalog.md`: model-visible global tools, namespaces, loading

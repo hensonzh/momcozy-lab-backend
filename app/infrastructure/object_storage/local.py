@@ -36,6 +36,11 @@ class LocalObjectStorage:
 
         return await asyncio.to_thread(_read_range)
 
+    async def create_presigned_get_url(self, *, key: str, expires_in_seconds: int) -> str:
+        self._normalize_key(key)
+        del expires_in_seconds
+        raise RuntimeError("local object storage has no public HTTPS endpoint")
+
     async def delete(self, *, key: str) -> None:
         path = self._path_for_key(key)
         if path.exists():

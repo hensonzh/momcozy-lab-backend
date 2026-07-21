@@ -15,12 +15,12 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.modules.agent_runtime.facts.extraction import (  # noqa: E402
+from app.agent_runtime.context.facts.extraction import (  # noqa: E402
     AgentFactExtractor,
     FactExtractionContext,
     fact_inputs_to_candidate_payload,
 )
-from app.modules.agent_runtime.sdk import (  # noqa: E402
+from app.agent_runtime.providers import (  # noqa: E402
     OpenAIResponsesRunner,
     ScriptedSdkBackend,
     scripted_sdk_response,

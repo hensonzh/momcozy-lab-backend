@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from app.core.metrics import RequestMetrics
 from app.core.settings import Settings
-from scripts.run_agent_worker import (
+from app.workers.agent_process import (
     AgentRunProcessResult,
     RunnableAgentRunRef,
     _expire_due_fact_candidates,
@@ -21,7 +21,7 @@ from scripts.run_agent_worker import (
     _with_metrics,
     run_agent_worker,
 )
-from scripts import run_agent_worker as worker_module
+from app.workers import agent_process as worker_module
 from scripts.worker_runtime import sleep_until_stop
 
 

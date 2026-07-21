@@ -7,12 +7,13 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from app.agents.cozymate.actions import cozymate_action_policy
 from app.core.errors import ApiError
-from app.modules.agent_runtime.actions.executor import AgentActionExecutor
-from app.modules.agent_runtime.agents.cozymate_service_agent.health_guidance import (
+from app.agent_runtime.actions.executor import AgentActionExecutor
+from app.agents.cozymate.health_guidance import (
     HEALTH_GUIDANCE_ALLOWED_DOMAINS,
 )
-from app.modules.agent_runtime.agents.cozymate_service_agent.tools import (
+from app.agents.cozymate.tools import (
     DeviceGuidanceReadToolHandler,
     DeviceUnboxingAdvanceToolHandler,
     HospitalBagCardCreateToolHandler,
@@ -23,24 +24,25 @@ from app.modules.agent_runtime.agents.cozymate_service_agent.tools import (
     MilkAnalysisIntakeToolHandler,
     MilkPlanProposeToolHandler,
     MilkScheduleRescheduleProposeToolHandler,
-    PregnancyDiaryManageToolHandler,
+    PregnancyDiarySaveToolHandler,
     PregnancyPlanIntakeAdvanceToolHandler,
     PregnancyPlanIntakeAnalyzeToolHandler,
     PregnancyPlanIntakeStartToolHandler,
     PregnancyPlanProposeToolHandler,
     SupportTicketProposeToolHandler,
-    ToolExecutor,
+    CozymateToolExecutor,
     default_tool_registry,
 )
-from app.modules.agent_runtime.agents.cozymate_service_agent.tools.pregnancy_plan_flow import (
+from app.agents.cozymate.tools.pregnancy_plan_flow import (
     PREGNANCY_PLAN_URGENT_RESPONSE,
 )
-from app.modules.agent_runtime.evals.service import (
+from app.agent_runtime.evals.service import (
     AgentEvalRuntimeClient,
     AgentEvalRuntimeTraceCollector,
     AgentEvalTrace,
 )
-from app.modules.agent_runtime.models import (
+from app.agent_runtime.context.items import ContextItemAppend, message_context_item
+from app.agent_runtime.runs.models import (
     AgentAction,
     AgentArtifact,
     AgentEvent,
@@ -51,8 +53,8 @@ from app.modules.agent_runtime.models import (
     AgentToolOutput,
     AgentWorkflowState,
 )
-from app.modules.agent_runtime.run_lifecycle.executor import AgentRuntimeExecutor
-from app.modules.agent_runtime.sdk import (
+from app.agents.cozymate.executor import CozymateAgentExecutor
+from app.agent_runtime.providers import (
     OpenAIResponsesRunner,
     SdkNodeRequest,
     SdkNodeResult,
@@ -60,11 +62,12 @@ from app.modules.agent_runtime.sdk import (
     scripted_sdk_response,
     scripted_tool_invocation,
 )
-from app.modules.agent_runtime.service import AgentRuntimeService
+from app.agent_runtime.runs.service import AgentRuntimeService
 from app.modules.assets.models import ProductAsset
 from app.modules.diary.models import PregnancyDiaryEntry
-from app.modules.hospital_bag.agent_actions import HospitalBagCartUpdateActionHandler
-from app.modules.plans.agent_actions import (
+from app.agents.cozymate.actions.diary import PregnancyDiarySaveActionHandler
+from app.agents.cozymate.actions.hospital_bag import HospitalBagCartUpdateActionHandler
+from app.agents.cozymate.actions.plans import (
     MilkPlanCreateActionHandler,
     MilkScheduleRescheduleActionHandler,
     PregnancyPlanCreateActionHandler,
@@ -74,6 +77,7 @@ from app.modules.records.models import FeedingRecord, GrowthRecord, PumpingRecor
 from app.modules.records.schemas import MilkTrendDayRead, MilkTrendListResponse
 
 
+ACTION_POLICY = cozymate_action_policy()
 EMPTY_CASE = {
     "suite": "task8_observed_runtime",
     "name": "runtime-generated trace",
@@ -536,9 +540,9 @@ def test_observed_health_consultation_can_write_user_facts_then_continue_replyin
         tool_invocations=(
             scripted_tool_invocation("load_service_skill", {"service_skill_id": "health-consultation"}),
             scripted_tool_invocation(
-                "pregnancy_diary.manage",
+                "pregnancy_diary.save",
                 {
-                    "action": "write",
+                    "operation": "create",
                     "content": "今天散步后有一点轻微牵拉感；没有出血或发烧，疼痛没有加重，宝宝胎动正常。",
                 },
             ),
@@ -546,7 +550,7 @@ def test_observed_health_consultation_can_write_user_facts_then_continue_replyin
         final_text="我已经记下来了。先休息并观察；如果牵拉感加重、出现出血或胎动异常，请及时联系产科。",
     )
 
-    _assert_tools(result.trace, "load_service_skill", "pregnancy_diary.manage")
+    _assert_tools(result.trace, "load_service_skill", "pregnancy_diary.save")
     _assert_event_types(result.trace, required={"pregnancy_diary.changed"})
     assert result.trace.final_text.startswith("我已经记下来了")
     assert scenario.diary.entries[0].content == (
@@ -719,23 +723,24 @@ class ObservedScenario:
         self.thread_id = uuid4()
         self.repository = RecordingRuntimeRepository(actor_user_id=self.actor_user_id, thread_id=self.thread_id)
         self.plans = RecordingPlansService(owner_user_id=self.actor_user_id)
-        self.action_executor = AgentActionExecutor(
+        self.diary = RecordingDiaryService(owner_user_id=self.actor_user_id)
+        self.action_executor = AgentActionExecutor(action_policy=ACTION_POLICY,
             repository=self.repository,
             handlers={
                 "hospital_bag.cart.update": HospitalBagCartUpdateActionHandler(),
                 "plans.milk_plan.create": MilkPlanCreateActionHandler(service=self.plans),
                 "plans.milk_schedule.reschedule": MilkScheduleRescheduleActionHandler(service=self.plans),
                 "pregnancy.plan.create": PregnancyPlanCreateActionHandler(service=self.plans),
+                "pregnancy_diary.entry.save": PregnancyDiarySaveActionHandler(service=self.diary),
             },
         )
-        self.runtime_service = AgentRuntimeService(
+        self.runtime_service = AgentRuntimeService(action_policy=ACTION_POLICY,
             repository=self.repository,
             action_executor=self.action_executor,
         )
         self.assets = RecordingAssetService()
         self.records = RecordingRecordsService(owner_user_id=self.actor_user_id)
         self.profiles = RecordingProfileService()
-        self.diary = RecordingDiaryService(owner_user_id=self.actor_user_id)
 
     def run_turn(
         self,
@@ -752,7 +757,7 @@ class ObservedScenario:
         assert self.repository.events_for(run.id) == []
         assert self.repository.actions_for(run.id) == []
         registry = default_tool_registry()
-        tool_executor = ToolExecutor(registry=registry, repository=self.repository, handlers=handlers)
+        tool_executor = CozymateToolExecutor(registry=registry, repository=self.repository, handlers=handlers)
         scripted_backend = backend or ScriptedSdkBackend(
             [
                 scripted_sdk_response(
@@ -762,7 +767,7 @@ class ObservedScenario:
                 )
             ]
         )
-        executor = AgentRuntimeExecutor(
+        executor = CozymateAgentExecutor(
             repository=self.repository,
             sdk_runner=OpenAIResponsesRunner(backend=scripted_backend),
             tool_registry=registry,
@@ -841,7 +846,7 @@ class ObservedScenario:
         return {"support.ticket.propose": SupportTicketProposeToolHandler(runtime_service=self.runtime_service)}
 
     def diary_handlers(self) -> dict[str, Any]:
-        return {"pregnancy_diary.manage": PregnancyDiaryManageToolHandler(diary_service=self.diary)}
+        return {"pregnancy_diary.save": PregnancyDiarySaveToolHandler(runtime_service=self.runtime_service)}
 
     def milk_handlers(self) -> dict[str, Any]:
         return {
@@ -915,6 +920,7 @@ class RecordingRuntimeRepository:
         self.artifacts: list[AgentArtifact] = []
         self.events: list[AgentEvent] = []
         self.workflow_states: list[AgentWorkflowState] = []
+        self.context_items: list[ContextItemAppend] = []
 
     @property
     def current_message(self) -> AgentMessage:
@@ -935,17 +941,22 @@ class RecordingRuntimeRepository:
             error_details={},
         )
         self.runs.append(run)
-        self.messages.append(
-            AgentMessage(
-                id=uuid4(),
-                thread_id=self.thread.id,
-                run_id=run.id,
-                role="user",
-                message_type="text",
-                content={"text": text, "attachments": attachments or []},
-                status="completed",
-                sequence=len(self.messages) + 1,
-                created_at=datetime.now(timezone.utc),
+        message = AgentMessage(
+            id=uuid4(),
+            thread_id=self.thread.id,
+            run_id=run.id,
+            role="user",
+            message_type="text",
+            content={"text": text, "attachments": attachments or []},
+            status="completed",
+            sequence=len(self.messages) + 1,
+            created_at=datetime.now(timezone.utc),
+        )
+        self.messages.append(message)
+        self.context_items.append(
+            ContextItemAppend(
+                item_key=f"message:{message.id}",
+                item=message_context_item(role="user", content=message.content),
             )
         )
         return run
@@ -964,6 +975,15 @@ class RecordingRuntimeRepository:
 
     async def list_messages_for_thread(self, *, thread_id: UUID, limit: int = 40):
         return [message for message in self.messages if message.thread_id == thread_id][-limit:]
+
+    async def list_context_items_for_thread(self, *, thread_id: UUID):
+        return list(self.context_items) if thread_id == self.thread.id else []
+
+    async def append_context_items(self, *, thread_id: UUID, run_id: UUID, items):
+        assert thread_id == self.thread.id
+        assert any(run.id == run_id for run in self.runs)
+        self.context_items.extend(items)
+        return list(items)
 
     async def list_client_events_for_thread(self, **_kwargs):
         return []

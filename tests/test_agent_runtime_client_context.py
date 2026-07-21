@@ -1,16 +1,16 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from app.modules.agent_runtime.client_context import (
-    project_agent_client_context,
-    sanitize_agent_client_context,
+from app.agents.cozymate.context.client import (
+    project_cozymate_client_context,
+    sanitize_cozymate_client_context,
 )
-from app.modules.agent_runtime.models import AgentMessage
-from app.modules.agent_runtime.run_lifecycle.executor import _user_context
+from app.agent_runtime.runs.models import AgentMessage
+from app.agents.cozymate.executor import _user_context
 
 
 def test_client_context_preserves_an_explicit_empty_cart_and_sanitizes_unknown_fields() -> None:
-    context = sanitize_agent_client_context(
+    context = sanitize_cozymate_client_context(
         {
             "source": "flutter-agent-hub",
             "locale": "zh-CN",
@@ -78,7 +78,7 @@ def test_client_context_preserves_workflow_reply_without_projecting_it_to_the_mo
         },
     }
 
-    sanitized = sanitize_agent_client_context(raw_context)
+    sanitized = sanitize_cozymate_client_context(raw_context)
 
     assert sanitized["workflow_reply"] == {
         "workflow_state_id": str(workflow_state_id),
@@ -86,4 +86,4 @@ def test_client_context_preserves_workflow_reply_without_projecting_it_to_the_mo
         "revision": 7,
         "step_token": "opaque-step-token",
     }
-    assert project_agent_client_context(raw_context) == {"locale": "zh-CN"}
+    assert project_cozymate_client_context(raw_context) == {"locale": "zh-CN"}

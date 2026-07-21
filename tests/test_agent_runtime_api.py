@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from app.core.settings import Settings
 from app.factory import create_app
-from app.modules.agent_runtime.models import (
+from app.agent_runtime.runs.models import (
     AgentEvalCase,
     AgentEvent,
     AgentMemory,
@@ -17,7 +17,7 @@ from app.modules.agent_runtime.models import (
     AgentRun,
     AgentThread,
 )
-from app.modules.agent_runtime.router import (
+from app.agent_runtime.api.router import (
     _stream_run_event_chunks,
     get_agent_eval_service,
     get_agent_fact_service,
@@ -25,7 +25,7 @@ from app.modules.agent_runtime.router import (
     get_agent_replay_service,
     get_agent_runtime_service,
 )
-from app.modules.agent_runtime.facts.models import UserFact
+from app.agent_runtime.context.facts.models import UserFact
 from app.modules.auth import CurrentUser
 
 
@@ -568,7 +568,7 @@ class FakeAgentRuntimeService:
         )
 
     def _action(self):
-        from app.modules.agent_runtime.models import AgentAction
+        from app.agent_runtime.runs.models import AgentAction
 
         return AgentAction(
             id=self.action_id,
@@ -685,7 +685,7 @@ class FakeReplayService:
             "artifacts": [],
             "checkpoints": [],
             "workflow_states": [],
-            "context_projections": [],
+            "context_items": [],
         }
 
 

@@ -1,9 +1,8 @@
 import asyncio
 from uuid import uuid4
 
-from app.modules.agent_runtime.event_stream.publisher import AgentEventPublisher
-from app.modules.agent_runtime.event_stream.sink import AgentEventSink
-from app.modules.agent_runtime.models import AgentEvent
+from app.agent_runtime.events.publisher import AgentEventPublisher
+from app.agent_runtime.runs.models import AgentEvent
 
 
 def test_agent_event_sink_appends_event_and_updates_stream_cursor() -> None:
@@ -16,7 +15,7 @@ def test_agent_event_sink_appends_event_and_updates_stream_cursor() -> None:
         commits.append("commit")
 
     event = asyncio.run(
-        AgentEventSink(repository=repository, controls=controls, after_append=after_append).append_event(
+        AgentEventPublisher(repository=repository, controls=controls, after_append=after_append).append_event(
             thread_id=uuid4(),
             run_id=run_id,
             event_type="tool.completed",
@@ -39,11 +38,11 @@ def test_agent_event_sink_batches_related_events_into_one_commit() -> None:
         repository.operations.append("commit")
 
     events = asyncio.run(
-        AgentEventSink(repository=repository, controls=controls, after_append=after_append).append_events(
+        AgentEventPublisher(repository=repository, controls=controls, after_append=after_append).append_events(
             thread_id=uuid4(),
             run_id=run_id,
             events=(
-                ("tool.completed", {"tool_name": "pregnancy_diary.manage"}),
+                ("tool.completed", {"tool_name": "pregnancy_diary.query"}),
                 ("pregnancy_diary.changed", {"operation": "created"}),
             ),
         )
@@ -68,12 +67,12 @@ def test_agent_event_sink_can_stage_batch_inside_caller_savepoint_before_commit(
         repository.operations.append("commit")
 
     async def exercise() -> None:
-        sink = AgentEventSink(repository=repository, controls=controls, after_append=after_append)
+        sink = AgentEventPublisher(repository=repository, controls=controls, after_append=after_append)
         events = await sink.stage_events(
             thread_id=uuid4(),
             run_id=run_id,
             events=(
-                ("tool.completed", {"tool_name": "pregnancy_diary.manage"}),
+                ("tool.completed", {"tool_name": "pregnancy_diary.query"}),
                 ("pregnancy_diary.changed", {"operation": "created"}),
             ),
         )

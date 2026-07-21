@@ -167,20 +167,19 @@ def test_file_service_upload_conflicts_when_replay_is_in_progress() -> None:
         )
 
 
-def test_file_service_delete_soft_deletes_audits_and_queues_cleanup() -> None:
+def test_file_service_delete_soft_deletes_object_and_records_audit() -> None:
     owner_user_id = uuid4()
     file_id = uuid4()
     file_object = _file(owner_user_id=owner_user_id, file_id=file_id, object_key="users/u/files/f/photo.png")
     repository = FakeFileRepository(file_to_delete=file_object)
     idempotency_service = FakeIdempotencyService(status="reserved")
     audit_service = FakeAuditService()
-    outbox_service = FakeOutboxService()
+    storage = FakeObjectStorage()
     service = FileService(
         repository=repository,
-        object_storage=FakeObjectStorage(),
+        object_storage=storage,
         audit_service=audit_service,
         idempotency_service=idempotency_service,
-        outbox_service=outbox_service,
     )
 
     asyncio.run(
@@ -194,9 +193,9 @@ def test_file_service_delete_soft_deletes_audits_and_queues_cleanup() -> None:
 
     assert file_object.status == "deleted"
     assert repository.delete_kwargs["file_id"] == file_id
-    assert outbox_service.enqueue_kwargs["job_type"] == "files.object_delete"
-    assert outbox_service.enqueue_kwargs["payload"]["object_key"] == "users/u/files/f/photo.png"
+    assert storage.delete_calls == ["users/u/files/f/photo.png"]
     assert audit_service.record_kwargs["action"] == "files.delete"
+    assert audit_service.record_kwargs["details"] == {"object_cleanup": "deleted"}
     assert idempotency_service.completed_response_ref == str(file_id)
 
 
@@ -218,6 +217,39 @@ def test_file_service_delete_raises_not_found() -> None:
 
     with pytest.raises(ApiError, match="File not found"):
         asyncio.run(service.delete_for_owner(file_id=uuid4(), owner_user_id=uuid4()))
+
+
+def test_file_service_delete_does_not_report_success_when_object_cleanup_fails() -> None:
+    owner_user_id = uuid4()
+    file_id = uuid4()
+    repository = FakeFileRepository(
+        file_to_delete=_file(
+            owner_user_id=owner_user_id,
+            file_id=file_id,
+            object_key="users/u/files/f/photo.png",
+        )
+    )
+    idempotency_service = FakeIdempotencyService(status="reserved")
+    audit_service = FakeAuditService()
+    service = FileService(
+        repository=repository,
+        object_storage=FakeObjectStorage(delete_error=RuntimeError("storage unavailable")),
+        audit_service=audit_service,
+        idempotency_service=idempotency_service,
+    )
+
+    with pytest.raises(RuntimeError, match="storage unavailable"):
+        asyncio.run(
+            service.delete_for_owner(
+                file_id=file_id,
+                owner_user_id=owner_user_id,
+                request_id="req_delete",
+                idempotency_key="idem-delete",
+            )
+        )
+
+    assert audit_service.record_kwargs == {}
+    assert idempotency_service.completed_response_ref == ""
 
 
 class FakeFileRepository:
@@ -255,9 +287,10 @@ class FakeFileRepository:
 
 
 class FakeObjectStorage:
-    def __init__(self) -> None:
+    def __init__(self, *, delete_error: Exception | None = None) -> None:
         self.put_calls = []
         self.delete_calls = []
+        self.delete_error = delete_error
 
     async def put_bytes(self, **kwargs):
         self.put_calls.append(kwargs)
@@ -266,6 +299,8 @@ class FakeObjectStorage:
         return b""
 
     async def delete(self, *, key: str):
+        if self.delete_error is not None:
+            raise self.delete_error
         self.delete_calls.append(key)
 
 
@@ -308,15 +343,6 @@ class FakeAuditService:
 
     async def record(self, **kwargs):
         self.record_kwargs = kwargs
-        return None
-
-
-class FakeOutboxService:
-    def __init__(self) -> None:
-        self.enqueue_kwargs = {}
-
-    async def enqueue(self, **kwargs):
-        self.enqueue_kwargs = kwargs
         return None
 
 

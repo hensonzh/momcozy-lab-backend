@@ -4,37 +4,39 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from app.agents.cozymate.actions import cozymate_action_policy
 from app.core.errors import ApiError
-from app.modules.agent_runtime.actions.executor import (
+from app.agent_runtime.actions.executor import (
     AgentActionApplyResult,
     AgentActionExecutor,
 )
-from app.modules.agent_runtime.models import AgentAction
-from app.modules.agent_runtime.service import AgentRuntimeService
-from app.modules.plans.agent_actions import (
+from app.agent_runtime.runs.models import AgentAction
+from app.agent_runtime.runs.service import AgentRuntimeService
+from app.agents.cozymate.actions.plans import (
     PREGNANCY_PLAN_CREATE_ACTION,
     PregnancyPlanCreateActionHandler,
 )
 from app.modules.plans.models import Plan
-from app.modules.records.agent_actions import FEEDING_RECORD_CREATE_ACTION, FeedingRecordCreateActionHandler
+from app.agents.cozymate.actions.records import FEEDING_RECORD_CREATE_ACTION, FeedingRecordCreateActionHandler
 from app.modules.records.models import FeedingRecord
 from tests.test_agent_runtime_service import FakeAgentRuntimeRepository
 
 
 PREGNANCY_PLAN_CHANGED_EVENT = "pregnancy_plan.changed"
+ACTION_POLICY = cozymate_action_policy()
 
 
 def test_confirmation_only_authorizes_and_requeues_same_run_without_domain_apply() -> None:
     owner_user_id = uuid4()
     repository = FakeActionRepository()
-    service = AgentRuntimeService(repository=repository)
+    service = AgentRuntimeService(action_policy=ACTION_POLICY, repository=repository)
     run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Create ticket"))
     action = asyncio.run(
         service.propose_action(
             owner_user_id=owner_user_id,
             run_id=run.id,
-            action_type="support.ticket.create",
-            target_type="support_ticket",
+            action_type="notifications.milk_reminder.create",
+            target_type="notification",
             preview_payload={"summary": "Pump does not turn on"},
             apply_payload={"issue_summary": "Pump does not turn on"},
         )
@@ -78,9 +80,11 @@ def test_confirmation_only_authorizes_and_requeues_same_run_without_domain_apply
 def test_duplicate_confirmation_is_idempotent_and_does_not_requeue_twice() -> None:
     owner_user_id = uuid4()
     repository = FakeActionRepository()
-    service = AgentRuntimeService(repository=repository)
+    service = AgentRuntimeService(action_policy=ACTION_POLICY, repository=repository)
     run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Create ticket"))
-    action = asyncio.run(service.propose_action(owner_user_id=owner_user_id, run_id=run.id, action_type="support.ticket.create"))
+    action = asyncio.run(
+        service.propose_action(owner_user_id=owner_user_id, run_id=run.id, action_type="notifications.milk_reminder.create")
+    )
     run.status = "waiting_for_confirmation"
 
     first = asyncio.run(service.confirm_action(owner_user_id=owner_user_id, action_id=action.id))
@@ -98,7 +102,7 @@ def test_duplicate_confirmation_is_idempotent_and_does_not_requeue_twice() -> No
 def test_milk_actions_reject_confirmation_payload_edits(action_type: str) -> None:
     owner_user_id = uuid4()
     repository = FakeActionRepository()
-    service = AgentRuntimeService(repository=repository)
+    service = AgentRuntimeService(action_policy=ACTION_POLICY, repository=repository)
     run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Create milk plan"))
     original_payload = {"title": "稳奶计划", "payload": {"direction": "maintain"}}
     action = asyncio.run(
@@ -130,9 +134,11 @@ def test_milk_actions_reject_confirmation_payload_edits(action_type: str) -> Non
 def test_cross_owner_cannot_read_or_confirm_action() -> None:
     owner_user_id = uuid4()
     repository = FakeActionRepository()
-    service = AgentRuntimeService(repository=repository)
+    service = AgentRuntimeService(action_policy=ACTION_POLICY, repository=repository)
     run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Create ticket"))
-    action = asyncio.run(service.propose_action(owner_user_id=owner_user_id, run_id=run.id, action_type="support.ticket.create"))
+    action = asyncio.run(
+        service.propose_action(owner_user_id=owner_user_id, run_id=run.id, action_type="notifications.milk_reminder.create")
+    )
     run.status = "waiting_for_confirmation"
 
     with pytest.raises(ApiError) as exc_info:
@@ -145,9 +151,11 @@ def test_cross_owner_cannot_read_or_confirm_action() -> None:
 def test_reject_and_expire_finish_waiting_run_without_apply() -> None:
     owner_user_id = uuid4()
     repository = FakeActionRepository()
-    service = AgentRuntimeService(repository=repository)
+    service = AgentRuntimeService(action_policy=ACTION_POLICY, repository=repository)
     run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Create ticket"))
-    rejected_action = asyncio.run(service.propose_action(owner_user_id=owner_user_id, run_id=run.id, action_type="support.ticket.create"))
+    rejected_action = asyncio.run(
+        service.propose_action(owner_user_id=owner_user_id, run_id=run.id, action_type="notifications.milk_reminder.create")
+    )
     run.status = "waiting_for_confirmation"
     rejected = asyncio.run(service.reject_action(owner_user_id=owner_user_id, action_id=rejected_action.id, reason="not now"))
 
@@ -166,7 +174,7 @@ def test_reject_and_expire_finish_waiting_run_without_apply() -> None:
         service.propose_action(
             owner_user_id=owner_user_id,
             run_id=second_run.id,
-            action_type="support.ticket.create",
+            action_type="notifications.milk_reminder.create",
             expires_at=datetime.now(timezone.utc) - timedelta(seconds=1),
         )
     )
@@ -184,7 +192,7 @@ def test_reject_and_expire_finish_waiting_run_without_apply() -> None:
 def test_direct_action_requires_in_process_executor_before_persisting() -> None:
     owner_user_id = uuid4()
     repository = FakeActionRepository()
-    service = AgentRuntimeService(repository=repository)
+    service = AgentRuntimeService(action_policy=ACTION_POLICY, repository=repository)
     run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Track feeding"))
 
     with pytest.raises(ApiError) as exc_info:
@@ -218,6 +226,7 @@ def test_direct_action_requires_in_process_executor_before_persisting() -> None:
         ("plans.task.complete", "plan_task", "medium"),
         ("plans.task.update", "plan_task", "medium"),
         ("plans.task.delete", "plan_task", "medium"),
+        ("support.ticket.create", "support_ticket", "medium"),
     ],
 )
 def test_explicit_intent_actions_apply_synchronously_without_confirmation_card(
@@ -231,8 +240,8 @@ def test_explicit_intent_actions_apply_synchronously_without_confirmation_card(
     async def apply(_action: AgentAction) -> AgentActionApplyResult:
         return AgentActionApplyResult(resource_type=target_type, resource_id="resource-1")
 
-    executor = AgentActionExecutor(repository=repository, handlers={action_type: apply})
-    service = AgentRuntimeService(repository=repository, action_executor=executor)
+    executor = AgentActionExecutor(action_policy=ACTION_POLICY, repository=repository, handlers={action_type: apply})
+    service = AgentRuntimeService(action_policy=ACTION_POLICY, repository=repository, action_executor=executor)
     run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Do the exact action"))
 
     action = asyncio.run(
@@ -258,7 +267,6 @@ def test_explicit_intent_actions_apply_synchronously_without_confirmation_card(
 @pytest.mark.parametrize(
     ("action_type", "target_type"),
     [
-        ("support.ticket.create", "support_ticket"),
         ("plans.milk_plan.create", "plan"),
         ("notifications.milk_reminder.create", "notification"),
     ],
@@ -266,7 +274,7 @@ def test_explicit_intent_actions_apply_synchronously_without_confirmation_card(
 def test_value_bearing_preview_actions_still_require_one_confirmation(action_type: str, target_type: str) -> None:
     owner_user_id = uuid4()
     repository = FakeActionRepository()
-    service = AgentRuntimeService(repository=repository)
+    service = AgentRuntimeService(action_policy=ACTION_POLICY, repository=repository)
     run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Prepare action"))
 
     action = asyncio.run(
@@ -287,11 +295,11 @@ def test_direct_feeding_apply_and_idempotent_replay_do_not_duplicate_domain_writ
     owner_user_id = uuid4()
     repository = FakeActionRepository()
     records_service = FakeAgentRecordsService()
-    executor = AgentActionExecutor(
+    executor = AgentActionExecutor(action_policy=ACTION_POLICY,
         repository=repository,
         handlers={FEEDING_RECORD_CREATE_ACTION: FeedingRecordCreateActionHandler(service=records_service)},
     )
-    service = AgentRuntimeService(repository=repository, action_executor=executor)
+    service = AgentRuntimeService(action_policy=ACTION_POLICY, repository=repository, action_executor=executor)
     run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Add a 90 ml bottle feeding"))
     kwargs = {
         "owner_user_id": owner_user_id,
@@ -323,11 +331,11 @@ def test_pregnancy_plan_applies_synchronously_and_changed_event_replays_once() -
     owner_user_id = uuid4()
     repository = FakeActionRepository()
     plans_service = FakeAgentPlansService()
-    executor = AgentActionExecutor(
+    executor = AgentActionExecutor(action_policy=ACTION_POLICY,
         repository=repository,
         handlers={PREGNANCY_PLAN_CREATE_ACTION: PregnancyPlanCreateActionHandler(service=plans_service)},
     )
-    service = AgentRuntimeService(repository=repository, action_executor=executor)
+    service = AgentRuntimeService(action_policy=ACTION_POLICY, repository=repository, action_executor=executor)
     run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Create a third trimester plan"))
 
     action = asyncio.run(

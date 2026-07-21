@@ -4,8 +4,8 @@ from uuid import uuid4
 
 import pytest
 
-from app.modules.agent_runtime.models import AgentAction
-from app.modules.records.agent_actions import (
+from app.agent_runtime.runs.models import AgentAction
+from app.agents.cozymate.actions.records import (
     FEEDING_RECORD_CREATE_ACTION,
     FEEDING_RECORD_DELETE_ACTION,
     GROWTH_RECORD_CREATE_ACTION,
@@ -18,7 +18,7 @@ from app.modules.records.agent_actions import (
     PumpingRecordCreateActionHandler,
 )
 from app.modules.records.models import FeedingRecord, GrowthRecord, PumpingRecord
-from app.workers.errors import PermanentJobError
+from app.agent_runtime.actions.errors import PermanentActionError
 
 
 def test_feeding_record_create_action_handler_creates_record_through_service() -> None:
@@ -60,7 +60,7 @@ def test_feeding_record_create_action_handler_rejects_missing_quantity() -> None
         },
     )
 
-    with pytest.raises(PermanentJobError) as exc_info:
+    with pytest.raises(PermanentActionError) as exc_info:
         asyncio.run(FeedingRecordCreateActionHandler(service=FakeRecordsService())(action))
 
     assert exc_info.value.code == "missing_feeding_quantity"
@@ -78,7 +78,7 @@ def test_feeding_record_create_action_handler_rejects_invalid_infant_id() -> Non
         },
     )
 
-    with pytest.raises(PermanentJobError) as exc_info:
+    with pytest.raises(PermanentActionError) as exc_info:
         asyncio.run(FeedingRecordCreateActionHandler(service=FakeRecordsService())(action))
 
     assert exc_info.value.code == "invalid_infant_id"
@@ -122,7 +122,7 @@ def test_pumping_record_create_action_handler_rejects_invalid_start_time() -> No
         },
     )
 
-    with pytest.raises(PermanentJobError) as exc_info:
+    with pytest.raises(PermanentActionError) as exc_info:
         asyncio.run(PumpingRecordCreateActionHandler(service=FakeRecordsService())(action))
 
     assert exc_info.value.code == "invalid_pump_start_time"
@@ -138,7 +138,7 @@ def test_pumping_record_create_action_handler_rejects_negative_quantity() -> Non
         },
     )
 
-    with pytest.raises(PermanentJobError) as exc_info:
+    with pytest.raises(PermanentActionError) as exc_info:
         asyncio.run(PumpingRecordCreateActionHandler(service=FakeRecordsService())(action))
 
     assert exc_info.value.code == "invalid_milk_volume_ml"
@@ -207,7 +207,7 @@ def test_growth_record_update_action_handler_updates_growth_through_service() ->
 
 
 def test_growth_record_create_action_handler_rejects_missing_measurement() -> None:
-    with pytest.raises(PermanentJobError) as exc_info:
+    with pytest.raises(PermanentActionError) as exc_info:
         asyncio.run(
             GrowthRecordCreateActionHandler(service=FakeRecordsService())(
                 _action(

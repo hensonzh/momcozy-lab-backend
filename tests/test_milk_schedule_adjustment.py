@@ -3,7 +3,7 @@ from uuid import uuid4
 
 import pytest
 
-from app.modules.agent_runtime.agents.cozymate_service_agent.tools.milk_schedule_adjustment import (
+from app.agents.cozymate.tools.milk_schedule_adjustment import (
     MilkScheduleAdjustmentError,
     build_milk_schedule_preview,
 )

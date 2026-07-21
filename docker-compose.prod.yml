@@ -39,13 +39,6 @@ services:
     init: true
     stop_grace_period: 60s
 
-  outbox-worker:
-    <<: *backend-image
-    command: python -m scripts.run_outbox_worker
-    restart: unless-stopped
-    init: true
-    stop_grace_period: 60s
-
   memory-worker:
     <<: *backend-image
     command: python -m scripts.run_memory_consolidation

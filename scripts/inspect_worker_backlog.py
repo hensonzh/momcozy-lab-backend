@@ -19,9 +19,8 @@ if str(ROOT) not in sys.path:
 
 from app.core.settings import Settings  # noqa: E402
 from app.infrastructure.db.session import create_db_engine, create_session_factory  # noqa: E402
-from app.modules.agent_runtime.models import AgentRun  # noqa: E402
-from app.modules.agent_runtime.facts.models import UserFactExtractionRun  # noqa: E402
-from app.modules.audit.models import OutboxJob  # noqa: E402
+from app.agent_runtime.runs.models import AgentRun  # noqa: E402
+from app.agent_runtime.context.facts.models import UserFactExtractionRun  # noqa: E402
 
 
 async def inspect_worker_backlog(*, settings: Settings | None = None) -> dict[str, Any]:
@@ -35,11 +34,6 @@ async def inspect_worker_backlog(*, settings: Settings | None = None) -> dict[st
             stale_cutoff = now - timedelta(seconds=resolved_settings.agent_runtime_interrupt_running_older_than_seconds)
             return {
                 "status": "ok",
-                "outbox": {
-                    "by_status": await _outbox_by_status(session),
-                    "by_type_status": await _outbox_by_type_status(session),
-                    "due_or_expired_locked": await _due_or_expired_locked_outbox_count(session, now=now),
-                },
                 "agent_runs": {
                     "by_status": await _agent_runs_by_status(session),
                     "stale_running": await _stale_running_agent_run_count(session, cutoff=stale_cutoff),
@@ -61,40 +55,6 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Inspect durable worker backlog without mutating state.")
     parser.parse_args()
     print(json.dumps(asyncio.run(inspect_worker_backlog()), indent=2, sort_keys=True))
-
-
-async def _outbox_by_status(session: AsyncSession) -> dict[str, int]:
-    statement = select(OutboxJob.status, func.count()).group_by(OutboxJob.status).order_by(OutboxJob.status)
-    rows = (await session.execute(statement)).all()
-    return _status_counts_from_rows((str(status), int(count)) for status, count in rows)
-
-
-async def _outbox_by_type_status(session: AsyncSession) -> list[dict[str, object]]:
-    statement = (
-        select(OutboxJob.job_type, OutboxJob.status, func.count())
-        .group_by(OutboxJob.job_type, OutboxJob.status)
-        .order_by(OutboxJob.job_type, OutboxJob.status)
-    )
-    rows = (await session.execute(statement)).all()
-    return [
-        {
-            "job_type": str(job_type),
-            "status": str(status),
-            "count": int(count),
-        }
-        for job_type, status, count in rows
-    ]
-
-
-async def _due_or_expired_locked_outbox_count(session: AsyncSession, *, now: datetime) -> int:
-    statement = select(func.count()).select_from(OutboxJob).where(
-        or_(
-            and_(OutboxJob.status == "queued", OutboxJob.next_attempt_at <= now),
-            and_(OutboxJob.status == "locked", OutboxJob.locked_until <= now),
-        )
-    )
-    count = await session.scalar(statement)
-    return int(count or 0)
 
 
 async def _agent_runs_by_status(session: AsyncSession) -> dict[str, int]:

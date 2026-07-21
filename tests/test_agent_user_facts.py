@@ -5,28 +5,28 @@ from uuid import uuid4
 
 import pytest
 
-from app.modules.agent_runtime.facts.catalog import (
+from app.agent_runtime.context.facts.catalog import (
     FACT_CATALOG_VERSION,
     FORM_FIELD_MAPPINGS,
     facts_to_form_defaults,
     form_values_to_fact_inputs,
 )
-from app.modules.agent_runtime.facts.extraction import (
+from app.agent_runtime.context.facts.extraction import (
     FACT_EXTRACTOR_RESPONSE_FORMAT,
     AgentFactExtractor,
     FactExtractionContext,
 )
-from app.modules.agent_runtime.facts.service import (
+from app.agent_runtime.context.facts.service import (
     AgentFactService,
     FactInput,
 )
-from app.modules.agent_runtime.sdk import OpenAIResponsesRunner, ScriptedSdkBackend, scripted_sdk_response
-from app.modules.agent_runtime.agents.cozymate_service_agent.tools.birth_preparation_artifacts import (
+from app.agent_runtime.providers import OpenAIResponsesRunner, ScriptedSdkBackend, scripted_sdk_response
+from app.agents.cozymate.tools.birth_preparation_artifacts import (
     BIRTH_PLAN_FORM_FIELDS,
     HOSPITAL_BAG_FORM_FIELDS,
     birth_plan_form_result,
 )
-from app.modules.agent_runtime.agents.cozymate_service_agent.tools.pregnancy_plan_flow import (
+from app.agents.cozymate.tools.pregnancy_plan_flow import (
     PREGNANCY_PLAN_INTAKE_FIELDS,
 )
 

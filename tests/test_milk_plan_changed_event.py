@@ -2,10 +2,11 @@ import asyncio
 from datetime import date
 from uuid import uuid4
 
+from app.agents.cozymate.actions import cozymate_action_policy
 from app.core.errors import ApiError
-from app.modules.agent_runtime.actions.executor import AgentActionExecutor
-from app.modules.agent_runtime.models import AgentAction, AgentEvent, AgentRun
-from app.modules.plans.agent_actions import (
+from app.agent_runtime.actions.executor import AgentActionExecutor
+from app.agent_runtime.runs.models import AgentAction, AgentEvent, AgentRun
+from app.agents.cozymate.actions.plans import (
     MILK_PLAN_CHANGED_EVENT,
     MILK_PLAN_CREATE_ACTION,
     MILK_SCHEDULE_RESCHEDULE_ACTION,
@@ -20,6 +21,7 @@ MILK_ANALYSIS_LINEAGE = {
     "analysis_context_fingerprint": "fingerprint",
     "analysis_workflow_state_id": "00000000-0000-4000-8000-000000000001",
 }
+ACTION_POLICY = cozymate_action_policy()
 
 
 def test_milk_plan_event_is_persisted_once_and_applied_replay_is_side_effect_free() -> None:
@@ -35,7 +37,7 @@ def test_milk_plan_event_is_persisted_once_and_applied_replay_is_side_effect_fre
             "tasks": [{"title": "private task", "time": "08:00", "task_type": "pumping"}],
         },
     }
-    executor = AgentActionExecutor(
+    executor = AgentActionExecutor(action_policy=ACTION_POLICY,
         repository=repository,
         handlers={MILK_PLAN_CREATE_ACTION: MilkPlanCreateActionHandler(service=plan_service)},
     )
@@ -73,7 +75,7 @@ def test_milk_plan_event_failure_rolls_back_plan_and_success_events_before_durab
             "tasks": [{"title": "吸奶", "time": "08:00", "task_type": "pumping"}],
         },
     }
-    executor = AgentActionExecutor(
+    executor = AgentActionExecutor(action_policy=ACTION_POLICY,
         repository=repository,
         handlers={MILK_PLAN_CREATE_ACTION: MilkPlanCreateActionHandler(service=plan_service)},
     )
@@ -101,7 +103,7 @@ def test_milk_plan_task_failure_rolls_back_the_plan_and_all_earlier_tasks() -> N
             ],
         },
     }
-    executor = AgentActionExecutor(
+    executor = AgentActionExecutor(action_policy=ACTION_POLICY,
         repository=repository,
         handlers={MILK_PLAN_CREATE_ACTION: MilkPlanCreateActionHandler(service=plan_service)},
     )
@@ -132,7 +134,7 @@ def test_milk_schedule_reschedule_confirmation_replay_is_idempotent() -> None:
         ],
     }
     service = IdempotentRescheduleService(task_id=task_id, plan_id=plan_id)
-    executor = AgentActionExecutor(
+    executor = AgentActionExecutor(action_policy=ACTION_POLICY,
         repository=repository,
         handlers={MILK_SCHEDULE_RESCHEDULE_ACTION: MilkScheduleRescheduleActionHandler(service=service)},
     )
