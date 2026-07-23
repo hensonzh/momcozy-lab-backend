@@ -40,14 +40,21 @@ class BusinessFactsProjector:
         self.config = config or BusinessFactsProjectorConfig()
         self.clock = clock or _utcnow
 
-    async def project(self, *, actor: CurrentUser, run_id: UUID, service_skill_id: ServiceSkillId | None) -> dict[str, Any]:
+    async def project(
+        self,
+        *,
+        actor: CurrentUser,
+        run_id: UUID,
+        service_skill_id: ServiceSkillId | None,
+    ) -> dict[str, Any]:
         if service_skill_id is None:
             return {}
         sources = _sources_for_skill(skill_id=service_skill_id, config=self.config)
         if not sources:
             return {}
 
-        loaded_at = self.clock().astimezone(timezone.utc).isoformat()
+        loaded_at_datetime = self.clock().astimezone(timezone.utc)
+        loaded_at = loaded_at_datetime.isoformat()
         facts: dict[str, Any] = {
             "schema_version": "v1",
             "loaded_at": loaded_at,
@@ -58,6 +65,15 @@ class BusinessFactsProjector:
         for source in sources:
             if source.tool_name not in self.handlers:
                 continue
+            if source.tool_name == "lactation_context_read":
+                source = BusinessFactSource(
+                    tool_name=source.tool_name,
+                    context_key=source.context_key,
+                    args={
+                        **source.args,
+                        "runtime_local_date": loaded_at_datetime.date().isoformat(),
+                    },
+                )
             source, payload = await self._project_source(actor=actor, run_id=run_id, source=source)
             facts[source.context_key] = strip_instructional_tool_output_keys(payload)
             facts["sources"].append({"key": source.context_key, "tool_name": source.tool_name})
@@ -101,7 +117,7 @@ def _sources_for_skill(*, skill_id: ServiceSkillId, config: BusinessFactsProject
         return (BusinessFactSource("pregnancy_plan_context_read", "pregnancy", {"limit": default_limit}),)
     if skill_id == ServiceSkillId.MILK_MANAGEMENT:
         return (
-            BusinessFactSource("profile_read", "profile"),
+            BusinessFactSource("lactation_context_read", "lactation_context"),
             BusinessFactSource("records_milk_status_read", "milk_status", {"days": config.milk_days, "limit": default_limit}),
         )
     if skill_id == ServiceSkillId.HEALTH_CONSULTATION:

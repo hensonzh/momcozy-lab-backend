@@ -19,6 +19,8 @@ _PROFILE_UPDATE_FIELDS = {
 }
 _INFANT_PROFILE_UPDATE_FIELDS = {
     "birth_date",
+    "birth_weight_kg",
+    "gestational_age_at_birth_days",
     "name",
     "sex_at_birth",
 }

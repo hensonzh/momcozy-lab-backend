@@ -24,6 +24,7 @@ from app.modules.plans.milk_schedule_calendar import (
     normalize_milk_schedule_calendar_events,
 )
 from app.modules.plans.service import PlansService
+from app.modules.profiles.lactation_context import LactationContextService
 from app.modules.profiles.service import ProfileService
 from app.agents.cozymate.actions.records import (
     FEEDING_RECORD_CREATE_ACTION,
@@ -422,24 +423,15 @@ class MilkAnalysisEvaluateToolHandler(_StandardToolHandler):
         return output
 
 
-class GrowthRecordsReadToolHandler(_StandardToolHandler):
-    def __init__(self, *, records_service: RecordsService) -> None:
-        self.records_service = records_service
+class LactationContextReadToolHandler(_StandardToolHandler):
+    def __init__(self, *, service: LactationContextService) -> None:
+        self.service = service
 
     async def execute(self, context: ToolHandlerContext) -> dict[str, Any]:
-        infant_id = _optional_uuid_arg(context.args, "infant_id")
-        limit = _limit(context.args.get("limit"), default=5, max_limit=20)
-        growth = await self.records_service.list_growth(
+        return await self.service.read(
             owner_user_id=context.actor.user_id,
-            infant_id=infant_id,
-            limit=limit,
+            as_of_date=_optional_date_arg(context.args, "runtime_local_date"),
         )
-        output: dict[str, Any] = {
-            "growth": [_growth_payload(record) for record in growth],
-            "count": len(growth),
-            "infant_id": str(infant_id) if infant_id is not None else "",
-        }
-        return output
 
 
 class FeedingRecordProposeToolHandler(_StandardToolHandler):

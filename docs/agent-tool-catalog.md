@@ -62,7 +62,7 @@ Tool Contract 与 Responses API 函数名使用同一个 canonical `snake_case` 
 
 ### `none`
 
-`load_service_skill`、`profile_read`、`records_milk_summary_read`、`records_milk_status_read`、`records_milk_analysis_read`、`records_growth_read`、`plans_current_read`、`plans_calendar_read`、`pregnancy_diary_query`、`devices_pump_status_read`、`devices_guidance_read`、`conversation_history_image_load`。
+`load_service_skill`、`profile_read`、`lactation_context_read`、`records_milk_summary_read`、`records_milk_status_read`、`records_milk_analysis_read`、`plans_current_read`、`plans_calendar_read`、`pregnancy_diary_query`、`devices_pump_status_read`、`devices_guidance_read`、`conversation_history_image_load`。
 
 ### `agent_internal`
 
@@ -101,7 +101,8 @@ Tool Contract 与 Responses API 函数名使用同一个 canonical `snake_case` 
 ## 7. Profile 与孕期日记
 
 - `profile_read` 一次返回当前用户与全部宝宝的基础资料；宝宝使用稳定的 `infant_id`。
-- `profile_update` 以 `user` 和 `infants` 两个可选对象执行 PATCH，可在同一 Action 中原子更新用户与指定宝宝；`ProfileUpdateActionHandler` 是唯一业务写入入口。
+- `lactation_context_read` 从通用妈妈/宝宝档案、泌乳专用状态和每个当前宝宝的最新有效生长记录组装奶量分析上下文；宝宝按 `birth_order` 分组返回，并包含 `sex_at_birth`，产后天数及各宝宝日龄/月龄均在读取时派生。该 Tool 在 Contract 上注册嵌套 Output Schema，所有输出字段均包含含义、单位、枚举、可空或派生说明，Executor 在输出进入模型上下文前校验。缺失字段和数据质量问题使用固定 `{code, birth_order}` 结构。
+- `profile_update` 以 `user` 和 `infants` 两个可选对象执行 PATCH，可在同一 Action 中原子更新用户与指定宝宝；宝宝字段包含出生体重与出生孕周，`ProfileUpdateActionHandler` 是该 Tool 的唯一业务写入入口。
 - 孕期日记拆成 `pregnancy_diary_query` / `pregnancy_diary_save` / `pregnancy_diary_delete`，不再使用一个混合读写工具。
 - `save` 只接受 `operation=create|update`；`update` 传完整重写正文。
 - `delete` 在 Tool Handler 中校验当前用户消息的 `confirmation_evidence`，证据成立后直接执行 Action，不再生成第二张确认卡。
@@ -117,6 +118,7 @@ Tool Contract 与 Responses API 函数名使用同一个 canonical `snake_case` 
 
 - Tool Contract：`app/agents/cozymate/tools/registry.py`
 - Input Schema：`app/agents/cozymate/tools/schemas.py`
+- Output Schema：`app/agents/cozymate/tools/output_schemas.py`（当前先覆盖 `lactation_context_read`）
 - Namespace：`app/agents/cozymate/tools/namespaces.py`
 - Tool Handler：`app/agents/cozymate/tools/handlers/`（按业务能力分组）
 - Action Policy：`app/agents/cozymate/actions/policy.py`

@@ -15,9 +15,9 @@ from app.modules.auth import CurrentUser
 def test_business_facts_projector_projects_lactation_sources() -> None:
     calls = []
 
-    async def profile_handler(context):
+    async def lactation_context_handler(context):
         calls.append({"tool_name": context.tool_name, "args": context.args})
-        return ToolResult.json({"profile": {"preferred_name": "Mai"}, "assistant_hint": "do not project"})
+        return ToolResult.json({"mother": {"age": 31}, "assistant_hint": "do not project"})
 
     async def milk_status_handler(context):
         calls.append({"tool_name": context.tool_name, "args": context.args})
@@ -27,7 +27,7 @@ def test_business_facts_projector_projects_lactation_sources() -> None:
     facts = asyncio.run(
         BusinessFactsProjector(
             handlers={
-                "profile_read": profile_handler,
+                "lactation_context_read": lactation_context_handler,
                 "records_milk_status_read": milk_status_handler,
             },
             clock=lambda: datetime(2026, 7, 8, 8, 0, tzinfo=timezone.utc),
@@ -39,7 +39,10 @@ def test_business_facts_projector_projects_lactation_sources() -> None:
     )
 
     assert calls == [
-        {"tool_name": "profile_read", "args": {}},
+        {
+            "tool_name": "lactation_context_read",
+            "args": {"runtime_local_date": "2026-07-08"},
+        },
         {"tool_name": "records_milk_status_read", "args": {"days": 7, "limit": 5}},
     ]
     assert facts == {
@@ -47,24 +50,24 @@ def test_business_facts_projector_projects_lactation_sources() -> None:
         "loaded_at": "2026-07-08T08:00:00+00:00",
         "service_skill_id": "milk-management",
         "sources": [
-            {"key": "profile", "tool_name": "profile_read"},
+            {"key": "lactation_context", "tool_name": "lactation_context_read"},
             {"key": "milk_status", "tool_name": "records_milk_status_read"},
         ],
-        "profile": {"profile": {"preferred_name": "Mai"}},
+        "lactation_context": {"mother": {"age": 31}},
         "milk_status": {"totals": {"trend_pumped_volume_ml": 420}},
     }
-    assert "assistant_hint" not in facts["profile"]
+    assert "assistant_hint" not in facts["lactation_context"]
 
 
 def test_business_facts_projector_reads_sources_without_parallel_shared_session_access() -> None:
     session_guard = FakeSharedSessionGuard()
 
-    async def profile_handler(context):
-        await session_guard.enter("profile_read")
+    async def lactation_context_handler(context):
+        await session_guard.enter("lactation_context_read")
         try:
-            return ToolResult.json({"profile": {"preferred_name": "Mai"}})
+            return ToolResult.json({"mother": {"age": 31}})
         finally:
-            session_guard.exit("profile_read")
+            session_guard.exit("lactation_context_read")
 
     async def milk_status_handler(context):
         await session_guard.enter("records_milk_status_read")
@@ -76,7 +79,7 @@ def test_business_facts_projector_reads_sources_without_parallel_shared_session_
     facts = asyncio.run(
         BusinessFactsProjector(
             handlers={
-                "profile_read": profile_handler,
+                "lactation_context_read": lactation_context_handler,
                 "records_milk_status_read": milk_status_handler,
             },
             clock=lambda: datetime(2026, 7, 8, 8, 0, tzinfo=timezone.utc),
@@ -87,12 +90,12 @@ def test_business_facts_projector_reads_sources_without_parallel_shared_session_
         )
     )
 
-    assert session_guard.calls == ["profile_read", "records_milk_status_read"]
+    assert session_guard.calls == ["lactation_context_read", "records_milk_status_read"]
     assert facts["sources"] == [
-        {"key": "profile", "tool_name": "profile_read"},
+        {"key": "lactation_context", "tool_name": "lactation_context_read"},
         {"key": "milk_status", "tool_name": "records_milk_status_read"},
     ]
-    assert facts["profile"] == {"profile": {"preferred_name": "Mai"}}
+    assert facts["lactation_context"] == {"mother": {"age": 31}}
     assert facts["milk_status"] == {"totals": {"trend_pumped_volume_ml": 420}}
 
 

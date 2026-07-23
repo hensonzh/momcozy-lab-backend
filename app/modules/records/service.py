@@ -8,7 +8,7 @@ from ...core.errors import ApiError
 from ..audit import AuditService, IdempotencyService, parse_idempotency_response_ref, request_hash
 from . import domain
 from .models import FeedingRecord, GrowthRecord, PumpingRecord
-from .repository import RecordsRepository
+from .repository import LatestGrowthMeasurement, RecordsRepository
 from .schemas import MilkTrendDayRead, MilkTrendListResponse
 
 
@@ -422,6 +422,23 @@ class RecordsService:
         ):
             raise ApiError(code="owner_scope_violation", message="Infant profile is outside the current user scope.", status=403)
         return await self.repository.list_growth(owner_user_id=owner_user_id, infant_id=infant_id, limit=limit)
+
+    async def list_latest_growth_by_infant_ids(
+        self,
+        *,
+        owner_user_id: UUID,
+        infant_ids: list[UUID],
+    ) -> dict[UUID, LatestGrowthMeasurement]:
+        if len(infant_ids) > 10 or len(set(infant_ids)) != len(infant_ids):
+            raise ApiError(
+                code="validation_failed",
+                message="infant_ids must contain at most 10 unique IDs.",
+                status=422,
+            )
+        return await self.repository.list_latest_growth_by_infant_ids(
+            owner_user_id=owner_user_id,
+            infant_ids=infant_ids,
+        )
 
     async def update_growth(
         self,

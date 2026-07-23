@@ -1,15 +1,25 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, cast
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..profiles.models import InfantProfile
 from ..plans.models import PlanTask
 from .models import FeedingRecord, GrowthRecord, PumpingRecord
+
+
+@dataclass(frozen=True)
+class LatestGrowthMeasurement:
+    infant_id: UUID
+    measured_at: datetime
+    height_cm: float | None
+    weight_kg: float | None
+    head_cm: float | None
 
 
 class RecordsRepository:
@@ -252,6 +262,61 @@ class RecordsRepository:
         statement = select(GrowthRecord).where(*conditions).order_by(GrowthRecord.measured_at.desc()).limit(limit)
         result = await self.session.scalars(statement)
         return list(result.all())
+
+    async def list_latest_growth_by_infant_ids(
+        self,
+        *,
+        owner_user_id: UUID,
+        infant_ids: list[UUID],
+    ) -> dict[UUID, LatestGrowthMeasurement]:
+        if not infant_ids:
+            return {}
+        ranked = (
+            select(
+                GrowthRecord.infant_id.label("infant_id"),
+                GrowthRecord.measured_at.label("measured_at"),
+                GrowthRecord.height_cm.label("height_cm"),
+                GrowthRecord.weight_kg.label("weight_kg"),
+                GrowthRecord.head_cm.label("head_cm"),
+                func.row_number()
+                .over(
+                    partition_by=GrowthRecord.infant_id,
+                    order_by=(
+                        GrowthRecord.measured_at.desc(),
+                        GrowthRecord.id.desc(),
+                    ),
+                )
+                .label("record_rank"),
+            )
+            .join(InfantProfile, InfantProfile.id == GrowthRecord.infant_id)
+            .where(
+                GrowthRecord.owner_user_id == owner_user_id,
+                GrowthRecord.infant_id.in_(infant_ids),
+                GrowthRecord.status == "active",
+                GrowthRecord.deleted_at.is_(None),
+                InfantProfile.owner_user_id == owner_user_id,
+                InfantProfile.deleted_at.is_(None),
+            )
+            .subquery()
+        )
+        statement = select(
+            ranked.c.infant_id,
+            ranked.c.measured_at,
+            ranked.c.height_cm,
+            ranked.c.weight_kg,
+            ranked.c.head_cm,
+        ).where(ranked.c.record_rank == 1)
+        rows = (await self.session.execute(statement)).all()
+        return {
+            row.infant_id: LatestGrowthMeasurement(
+                infant_id=row.infant_id,
+                measured_at=row.measured_at,
+                height_cm=row.height_cm,
+                weight_kg=row.weight_kg,
+                head_cm=row.head_cm,
+            )
+            for row in rows
+        }
 
     async def soft_delete_growth(
         self,

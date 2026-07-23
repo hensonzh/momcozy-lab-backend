@@ -25,6 +25,8 @@ def test_profile_update_action_handler_updates_profile_through_service() -> None
                     "name": "Nori",
                     "sex_at_birth": "female",
                     "birth_date": "2026-01-10",
+                    "birth_weight_kg": 3.2,
+                    "gestational_age_at_birth_days": 258,
                 }
             ],
         }
@@ -46,6 +48,8 @@ def test_profile_update_action_handler_updates_profile_through_service() -> None
                     "name": "Nori",
                     "sex_at_birth": "female",
                     "birth_date": date(2026, 1, 10),
+                    "birth_weight_kg": 3.2,
+                    "gestational_age_at_birth_days": 258,
                 },
             }
         ],
@@ -58,7 +62,13 @@ def test_profile_update_action_handler_updates_profile_through_service() -> None
         "infants": [
             {
                 "infant_id": str(infant_id),
-                "fields": ["birth_date", "name", "sex_at_birth"],
+                "fields": [
+                    "birth_date",
+                    "birth_weight_kg",
+                    "gestational_age_at_birth_days",
+                    "name",
+                    "sex_at_birth",
+                ],
             }
         ],
     }

@@ -13,12 +13,12 @@ SCENARIO_NAMESPACE_DEFINITIONS: tuple[ToolNamespace, ...] = (
             "用户要查看数据、记录一次喂养/吸奶/生长、分析趋势，或创建和调整相关计划与提醒时使用。"
         ),
         tool_contracts=(
+            "lactation_context_read",
             "records_milk_status_read",
             "records_milk_summary_read",
             "records_milk_analysis_read",
             "records_milk_analysis_intake",
             "records_milk_analysis_evaluate",
-            "records_growth_read",
             "records_feeding_record_propose",
             "records_feeding_record_delete_propose",
             "records_pumping_record_propose",

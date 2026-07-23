@@ -86,6 +86,23 @@ def test_product_agent_eval_seed_uses_current_milk_action_contracts() -> None:
     assert "milk_plan_proposal" not in plan_contracts
 
 
+def test_product_agent_eval_seed_covers_compact_lactation_context() -> None:
+    cases = load_product_agent_eval_seed_cases(PRODUCT_AGENT_EVAL_SEED)
+    by_suite = {case["suite"]: case for case in cases}
+    case = by_suite["lactation_context_read"]
+
+    assert {call["contract"] for call in case["expected_tool_calls"]} == {"lactation_context_read"}
+    assert case["expected_behavior"]["requires_confirmation_before_write"] is False
+    assert len(case["input"]["fixtures"]["current_infants"]) == 2
+    assert "separate_context_for_each_birth_order" in case["expected_behavior"]["must_include"]
+    assert "sex_at_birth_for_each_infant" in case["expected_behavior"]["must_include"]
+    assert "stable_machine_readable_missing_and_quality_codes" in case["expected_behavior"]["must_include"]
+    assert {infant["infant_profile"]["sex_at_birth"] for infant in case["input"]["fixtures"]["current_infants"]} == {"female", "male"}
+    assert "return_delivery_history" in case["expected_behavior"]["must_not"]
+    assert "expose_internal_infant_id" in case["expected_behavior"]["must_not"]
+    assert "dynamic_path_strings_in_missing_or_quality_fields" in case["expected_behavior"]["must_not"]
+
+
 def test_product_agent_eval_seed_uses_current_pregnancy_action_contracts() -> None:
     cases = load_product_agent_eval_seed_cases(PRODUCT_AGENT_EVAL_SEED)
     by_suite = {case["suite"]: case for case in cases}
@@ -93,9 +110,7 @@ def test_product_agent_eval_seed_uses_current_pregnancy_action_contracts() -> No
     plan_contracts = {tool_call["contract"] for tool_call in by_suite["pregnancy_plan_creation"]["expected_tool_calls"]}
     intake_contracts = {tool_call["contract"] for tool_call in by_suite["pregnancy_plan_intake_start"]["expected_tool_calls"]}
     analysis_contracts = {tool_call["contract"] for tool_call in by_suite["pregnancy_plan_intake_analysis"]["expected_tool_calls"]}
-    followup_contracts = {
-        tool_call["contract"] for tool_call in by_suite["pregnancy_plan_personalized_followup"]["expected_tool_calls"]
-    }
+    followup_contracts = {tool_call["contract"] for tool_call in by_suite["pregnancy_plan_personalized_followup"]["expected_tool_calls"]}
     task_contracts = {tool_call["contract"] for tool_call in by_suite["pregnancy_task_completion"]["expected_tool_calls"]}
     diary_contracts = {tool_call["contract"] for tool_call in by_suite["pregnancy_diary_entry"]["expected_tool_calls"]}
 
@@ -120,7 +135,7 @@ def test_product_agent_eval_seed_uses_current_pregnancy_action_contracts() -> No
     assert "compound_followup_question" in by_suite["pregnancy_plan_personalized_followup"]["expected_behavior"]["must_not"]
     assert by_suite["pregnancy_plan_personalized_followup"]["forbidden_tool_calls"] == [
         {"contract": "pregnancy_plan_intake_analyze"},
-        {"contract": "pregnancy_plan_propose"}
+        {"contract": "pregnancy_plan_propose"},
     ]
     attachment_guard = by_suite["pregnancy_plan_checkup_attachment_guard"]
     assert attachment_guard["input"]["fixtures"]["current_run_authenticated_attachments"] == []
@@ -152,9 +167,7 @@ def test_product_agent_eval_seed_uses_current_pregnancy_action_contracts() -> No
         }
     ]
     assert by_suite["pregnancy_diary_delete_ambiguous"]["expected_tool_calls"] == []
-    assert by_suite["pregnancy_diary_delete_ambiguous"]["forbidden_tool_calls"] == [
-        {"contract": "pregnancy_diary_delete"}
-    ]
+    assert by_suite["pregnancy_diary_delete_ambiguous"]["forbidden_tool_calls"] == [{"contract": "pregnancy_diary_delete"}]
 
     plan_delete = by_suite["pregnancy_plan_delete_exact"]
     assert plan_delete["input"]["fixtures"]["trusted_exact_target"]["owner_scoped"] is True
@@ -170,9 +183,7 @@ def test_product_agent_eval_seed_uses_current_pregnancy_action_contracts() -> No
         }
     ]
     assert by_suite["pregnancy_plan_delete_ambiguous"]["expected_tool_calls"] == []
-    assert by_suite["pregnancy_plan_delete_ambiguous"]["forbidden_tool_calls"] == [
-        {"contract": "plans_plan_delete_propose"}
-    ]
+    assert by_suite["pregnancy_plan_delete_ambiguous"]["forbidden_tool_calls"] == [{"contract": "plans_plan_delete_propose"}]
 
     task_exact = by_suite["pregnancy_task_completion"]
     assert task_exact["input"]["fixtures"]["trusted_exact_target"]["owner_scoped"] is True

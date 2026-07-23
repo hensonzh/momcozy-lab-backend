@@ -1576,6 +1576,32 @@
             ],
             "title": "Birth Date"
           },
+          "birth_weight_kg": {
+            "anyOf": [
+              {
+                "maximum": 10.0,
+                "minimum": 0.2,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Birth Weight Kg"
+          },
+          "gestational_age_at_birth_days": {
+            "anyOf": [
+              {
+                "maximum": 315.0,
+                "minimum": 140.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gestational Age At Birth Days"
+          },
           "name": {
             "maxLength": 120,
             "minLength": 1,
@@ -1636,6 +1662,28 @@
               }
             ],
             "title": "Birth Date"
+          },
+          "birth_weight_kg": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Birth Weight Kg"
+          },
+          "gestational_age_at_birth_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gestational Age At Birth Days"
           },
           "id": {
             "format": "uuid",
@@ -1921,6 +1969,200 @@
           }
         },
         "title": "LogoutResponse",
+        "type": "object"
+      },
+      "MaternalLactationInfantLink": {
+        "additionalProperties": false,
+        "properties": {
+          "birth_order": {
+            "maximum": 10.0,
+            "minimum": 1.0,
+            "title": "Birth Order",
+            "type": "integer"
+          },
+          "infant_id": {
+            "format": "uuid",
+            "title": "Infant Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "infant_id",
+          "birth_order"
+        ],
+        "title": "MaternalLactationInfantLink",
+        "type": "object"
+      },
+      "MaternalLactationProfileRead": {
+        "properties": {
+          "actual_delivery_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actual Delivery Date"
+          },
+          "current_delivery_method": {
+            "anyOf": [
+              {
+                "enum": [
+                  "vaginal",
+                  "cesarean",
+                  "assisted_vaginal",
+                  "other",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Delivery Method"
+          },
+          "current_feeding_mode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "exclusive_breastfeeding",
+                  "expressed_milk_feeding",
+                  "mixed_feeding",
+                  "formula_feeding",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Feeding Mode"
+          },
+          "current_infants": {
+            "items": {
+              "$ref": "#/components/schemas/MaternalLactationInfantLink"
+            },
+            "maxItems": 10,
+            "title": "Current Infants",
+            "type": "array"
+          },
+          "delivery_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delivery Count"
+          },
+          "has_cesarean_history": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Has Cesarean History"
+          }
+        },
+        "title": "MaternalLactationProfileRead",
+        "type": "object"
+      },
+      "MaternalLactationProfileUpdate": {
+        "additionalProperties": false,
+        "minProperties": 1,
+        "properties": {
+          "actual_delivery_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actual Delivery Date"
+          },
+          "current_delivery_method": {
+            "anyOf": [
+              {
+                "enum": [
+                  "vaginal",
+                  "cesarean",
+                  "assisted_vaginal",
+                  "other",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Delivery Method"
+          },
+          "current_feeding_mode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "exclusive_breastfeeding",
+                  "expressed_milk_feeding",
+                  "mixed_feeding",
+                  "formula_feeding",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Feeding Mode"
+          },
+          "current_infants": {
+            "items": {
+              "$ref": "#/components/schemas/MaternalLactationInfantLink"
+            },
+            "maxItems": 10,
+            "title": "Current Infants",
+            "type": "array"
+          },
+          "delivery_count": {
+            "anyOf": [
+              {
+                "maximum": 20.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delivery Count"
+          },
+          "has_cesarean_history": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Has Cesarean History"
+          }
+        },
+        "title": "MaternalLactationProfileUpdate",
         "type": "object"
       },
       "MilkTrendDayRead": {
@@ -8629,6 +8871,88 @@
           }
         ],
         "summary": "Create My Infant",
+        "tags": [
+          "profile"
+        ],
+        "x-momcozy-api-surface": "public_app_api",
+        "x-momcozy-client": [
+          "flutter"
+        ],
+        "x-momcozy-owner": "profiles",
+        "x-momcozy-stability": "stable"
+      }
+    },
+    "/v1/profile/lactation": {
+      "get": {
+        "operationId": "get_my_maternal_lactation_profile_v1_profile_lactation_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaternalLactationProfileRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get My Maternal Lactation Profile",
+        "tags": [
+          "profile"
+        ],
+        "x-momcozy-api-surface": "public_app_api",
+        "x-momcozy-client": [
+          "flutter"
+        ],
+        "x-momcozy-owner": "profiles",
+        "x-momcozy-stability": "stable"
+      },
+      "patch": {
+        "operationId": "update_my_maternal_lactation_profile_v1_profile_lactation_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MaternalLactationProfileUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaternalLactationProfileRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update My Maternal Lactation Profile",
         "tags": [
           "profile"
         ],

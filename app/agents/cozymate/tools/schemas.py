@@ -90,6 +90,26 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
                                 {"type": "null"},
                             ]
                         },
+                        "birth_weight_kg": {
+                            "anyOf": [
+                                {
+                                    "type": "number",
+                                    "minimum": 0.2,
+                                    "maximum": 10,
+                                },
+                                {"type": "null"},
+                            ]
+                        },
+                        "gestational_age_at_birth_days": {
+                            "anyOf": [
+                                {
+                                    "type": "integer",
+                                    "minimum": 140,
+                                    "maximum": 315,
+                                },
+                                {"type": "null"},
+                            ]
+                        },
                     },
                 },
             },
@@ -200,19 +220,10 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
         "additionalProperties": False,
         "properties": {},
     },
-    "records_growth_read": {
+    "lactation_context_read": {
         "type": "object",
         "additionalProperties": False,
-        "properties": {
-            "infant_id": {"type": "string", "maxLength": 80},
-            "limit": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 20,
-                "default": 5,
-                "description": "最多返回的宝宝生长记录数。",
-            },
-        },
+        "properties": {},
     },
     "plans_current_read": {
         "type": "object",

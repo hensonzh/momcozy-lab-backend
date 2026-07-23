@@ -492,6 +492,88 @@
       ]
     },
     {
+      "suite": "lactation_context_read",
+      "name": "milk analysis reads compact persisted maternal and multi-infant context",
+      "domain": "milk-management",
+      "owner_team": "agent",
+      "input": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "Before analyzing my milk supply, check the current maternal background and both babies."
+          }
+        ],
+        "fixtures": {
+          "maternal_profile": {
+            "delivery_count": 2,
+            "current_delivery_method": "cesarean",
+            "actual_delivery_date": "2026-05-10",
+            "has_cesarean_history": true
+          },
+          "lactation_profile": {
+            "current_feeding_mode": "mixed_feeding"
+          },
+          "current_infants": [
+            {
+              "birth_order": 1,
+              "infant_profile": {
+                "sex_at_birth": "female",
+                "birth_weight_kg": 2.45,
+                "gestational_age_at_birth_days": 258
+              },
+              "latest_growth_record": {
+                "weight_kg": 5.1,
+                "height_cm": 57.5,
+                "head_circumference_cm": 38.2,
+                "measured_at": "2026-07-20T08:30:00Z"
+              }
+            },
+            {
+              "birth_order": 2,
+              "infant_profile": {
+                "sex_at_birth": "male",
+                "birth_weight_kg": 2.3,
+                "gestational_age_at_birth_days": 258
+              },
+              "latest_growth_record": {
+                "weight_kg": 4.9,
+                "height_cm": 56.8,
+                "head_circumference_cm": 37.9,
+                "measured_at": "2026-07-21T09:00:00Z"
+              }
+            }
+          ]
+        }
+      },
+      "expected_behavior": {
+        "intent": "lactation_context_read",
+        "route": "read_only_context",
+        "requires_confirmation_before_write": false,
+        "service_skill_id": "milk-management",
+        "must_include": [
+          "derived_postpartum_and_infant_age",
+          "separate_context_for_each_birth_order",
+          "sex_at_birth_for_each_infant",
+          "birth_gestational_age",
+          "latest_growth_measurement",
+          "stable_machine_readable_missing_and_quality_codes"
+        ],
+        "must_not": [
+          "return_delivery_history",
+          "return_growth_history",
+          "expose_internal_infant_id",
+          "dynamic_path_strings_in_missing_or_quality_fields"
+        ],
+        "forbids_side_effects": true
+      },
+      "expected_tool_calls": [
+        {
+          "contract": "lactation_context_read",
+          "timing": "before_final_response"
+        }
+      ]
+    },
+    {
       "suite": "pregnancy_plan_intake_start",
       "name": "pregnancy plan starts with one trusted form",
       "domain": "birth-prep",

@@ -6,7 +6,7 @@ import pytest
 
 from app.core.errors import ApiError
 from app.modules.audit.models import IdempotencyKey
-from app.modules.profiles.models import InfantProfile, UserProfile
+from app.modules.profiles.models import InfantProfile, MaternalProfile, UserProfile
 from app.modules.profiles.service import ProfileService
 
 
@@ -137,6 +137,38 @@ def test_profile_service_resolves_all_infants_before_mutating_user_profile() -> 
     assert repository.upsert_user_profile_kwargs == {}
 
 
+def test_profile_service_rejects_current_infant_birth_date_mismatch() -> None:
+    user_id = uuid4()
+    infant = _infant(
+        owner_user_id=user_id,
+        birth_date=date(2026, 5, 10),
+    )
+    repository = FakeProfileRepository(
+        infant=infant,
+        maternal_profile=MaternalProfile(
+            owner_user_id=user_id,
+            latest_delivery_date=date(2026, 5, 10),
+        ),
+        current_lactation_infant_ids={infant.id},
+    )
+    service = ProfileService(repository=repository)
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            service.update_profile(
+                user_id=user_id,
+                infant_updates=[
+                    {
+                        "infant_id": infant.id,
+                        "values": {"birth_date": date(2026, 5, 11)},
+                    }
+                ],
+            )
+        )
+
+    assert exc_info.value.code == "validation_failed"
+
+
 def test_profile_service_creates_infant_with_idempotency_and_audit() -> None:
     owner_user_id = uuid4()
     repository = FakeProfileRepository()
@@ -154,6 +186,8 @@ def test_profile_service_creates_infant_with_idempotency_and_audit() -> None:
             name="Baby",
             sex_at_birth="female",
             birth_date=date(2026, 6, 1),
+            birth_weight_kg=3.2,
+            gestational_age_at_birth_days=258,
             request_id="req_infant",
             idempotency_key="idem-infant",
         )
@@ -161,6 +195,8 @@ def test_profile_service_creates_infant_with_idempotency_and_audit() -> None:
 
     assert infant.owner_user_id == owner_user_id
     assert infant.name == "Baby"
+    assert infant.birth_weight_kg == 3.2
+    assert infant.gestational_age_at_birth_days == 258
     assert idempotency_service.reserve_kwargs["scope"] == "profiles.infants.create"
     assert idempotency_service.completed_response_ref == str(infant.id)
     assert audit_service.record_kwargs["action"] == "profiles.infant.create"
@@ -176,18 +212,25 @@ def test_profile_service_replays_completed_infant_create() -> None:
         idempotency_service=FakeIdempotencyService(status="replay", response_ref=str(infant_id)),
     )
 
-    returned = asyncio.run(
-        service.create_infant(owner_user_id=owner_user_id, name="Baby", idempotency_key="idem-infant")
-    )
+    returned = asyncio.run(service.create_infant(owner_user_id=owner_user_id, name="Baby", idempotency_key="idem-infant"))
 
     assert returned is existing
     assert repository.created_infant_kwargs == {}
 
 
 class FakeProfileRepository:
-    def __init__(self, *, profile=None, infant=None) -> None:
+    def __init__(
+        self,
+        *,
+        profile=None,
+        infant=None,
+        maternal_profile=None,
+        current_lactation_infant_ids=None,
+    ) -> None:
         self.profile = profile
         self.infant = infant
+        self.maternal_profile = maternal_profile
+        self.current_lactation_infant_ids = current_lactation_infant_ids or set()
         self.created_infant_kwargs = {}
         self.upsert_user_profile_kwargs = {}
 
@@ -208,6 +251,17 @@ class FakeProfileRepository:
     async def get_infant_for_owner(self, *, infant_id: UUID, owner_user_id: UUID):
         return self.infant
 
+    async def get_maternal_profile(self, *, owner_user_id: UUID):
+        return self.maternal_profile
+
+    async def is_current_delivery_infant(
+        self,
+        *,
+        owner_user_id: UUID,
+        infant_id: UUID,
+    ):
+        return infant_id in self.current_lactation_infant_ids
+
     async def create_infant(self, **kwargs):
         self.created_infant_kwargs = kwargs
         self.infant = _infant(
@@ -215,6 +269,8 @@ class FakeProfileRepository:
             name=kwargs["name"],
             sex_at_birth=kwargs["sex_at_birth"],
             birth_date=kwargs["birth_date"],
+            birth_weight_kg=kwargs["birth_weight_kg"],
+            gestational_age_at_birth_days=kwargs["gestational_age_at_birth_days"],
         )
         return self.infant
 
@@ -271,6 +327,8 @@ def _infant(
     name: str = "Baby",
     sex_at_birth: str = "female",
     birth_date: date | None = None,
+    birth_weight_kg: float | None = None,
+    gestational_age_at_birth_days: int | None = None,
 ) -> InfantProfile:
     return InfantProfile(
         id=infant_id or uuid4(),
@@ -278,4 +336,6 @@ def _infant(
         name=name,
         sex_at_birth=sex_at_birth,
         birth_date=birth_date,
+        birth_weight_kg=birth_weight_kg,
+        gestational_age_at_birth_days=gestational_age_at_birth_days,
     )

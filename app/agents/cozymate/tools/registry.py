@@ -5,11 +5,17 @@ from typing import Any
 from app.agent_runtime.tools.contracts import ToolContract
 from app.agent_runtime.tools.registry import ToolContractRegistry
 
+from .output_schemas import output_schema_for_tool
 from .schemas import input_schema_for_tool
 
 
 def _tool_contract(*, name: str, **values: Any) -> ToolContract:
-    return ToolContract(name=name, input_schema=input_schema_for_tool(name), **values)
+    return ToolContract(
+        name=name,
+        input_schema=input_schema_for_tool(name),
+        output_schema=output_schema_for_tool(name),
+        **values,
+    )
 
 
 def default_tool_registry() -> ToolContractRegistry:
@@ -51,7 +57,8 @@ def default_tool_registry() -> ToolContractRegistry:
             domain="global",
             description=(
                 "更新当前用户和指定宝宝的基础资料。用户明确提供、更正或要求清空用户称呼、年龄、预产期，"
-                "或宝宝姓名、出生日期、出生时性别时调用；更新宝宝必须使用 profile_read 返回的 infant_id。"
+                "或宝宝姓名、出生日期、出生时性别、出生体重、出生孕周时调用；"
+                "更新宝宝必须使用 profile_read 返回的 infant_id。"
             ),
             loading_mode="eager",
             effect_scope="user_resource",
@@ -128,9 +135,15 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="records_growth_read",
-            domain="records",
-            description="读取当前用户宝宝的身高、体重和头围等生长记录。用户要查看宝宝近期生长数据或趋势时调用。",
+            name="lactation_context_read",
+            domain="profiles",
+            description=(
+                "用户要开始奶量分析或核对当前母婴泌乳基础情况时调用。读取妈妈年龄、分娩次数、"
+                "本次分娩方式和日期、剖宫产史、产后天数、喂养模式，以及本次分娩每个宝宝的"
+                "出生顺序、出生时性别、日龄/月龄、出生体重、出生孕周和最近一次身高体重头围。"
+                "只返回紧凑的当前上下文，"
+                "不返回历次分娩或生长记录历史。"
+            ),
             loading_mode="eager",
             effect_scope="none",
             blocking_policy="must_wait",
