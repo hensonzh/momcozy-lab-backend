@@ -28,9 +28,34 @@ Tool 只有一个领域归属，但公共 Tool 和有界专业能力可以按 Al
 
 `profile_read`、`profile_update`、`plans_current_read`、`plans_calendar_read`、`plans_task_create_propose`、`plans_task_complete_propose`、`plans_task_update_propose`、`plans_task_delete_propose`、`plans_plan_delete_propose`、`pregnancy_diary_query`、`pregnancy_diary_save`、`pregnancy_diary_delete`、`conversation_history_image_load`
 
-### 产前服务智能体（8）
+### 产前服务智能体（5）
 
-`pregnancy_plan_intake_start`、`pregnancy_plan_intake_analyze`、`pregnancy_plan_intake_advance`、`pregnancy_plan_propose`、`pregnancy_plan_todo_propose`、`hospital_bag_form_create`、`hospital_bag_card_create`、`hospital_bag_cart_update`。
+`pregnancy_plan_workflow`、`pregnancy_plan_todo_propose`、`hospital_bag_form_create`、`hospital_bag_card_create`、`hospital_bag_cart_update`。
+
+其中 `pregnancy_plan_workflow` 是唯一对模型和 App 暴露的孕期计划流程入口。原开始采集、分析表单、推进追问和生成计划四个操作只作为内部 Handler 保留，不再是 Tool Contract。
+
+## 孕期计划 Workflow Contract
+
+`pregnancy_plan_workflow` 每次只执行一个命令：
+
+`start_or_resume`、`submit_form`、`answer_current`、`edit_answer`、`pause`、`resume`、`abandon`、`generate_plan`。
+
+运行时以用户维度持久化唯一的活动孕期计划，状态不设自动过期时间。每次转换都增加 `revision`、更新一次性 `step_token`，并写入 append-only workflow event；因此新会话和 App 重启后仍可在已完成步骤上继续，也可以修改历史回答并使依赖它的后续步骤失效后重算。
+
+当前内部测试阶段采用 fresh-cutover：首次部署 `20260723_0043` 前必须重建测试数据库或清空测试 Compose volumes，不迁移上线前的孕期 workflow。该 migration 会在发现任何既有 `pregnancy_plan` 状态时明确失败，不会归并、复活、删除或清除旧状态的 `expires_at`。进入真实用户生产环境前，需要重新评审并制定正式的数据迁移策略。
+
+每轮实际使用的消息、成对 Tool call/output、上下文条目引用、裁剪策略和有界 workflow 投影会写入 model-context snapshot，workflow 转换的命令、交互摘要、revision 和失效步骤则留在 append-only event ledger，便于按当时输入重放和审计。完整历史不会在后续每轮重复塞回模型：默认最多选择 64 个上下文条目、约 12,000 token，并为所有活动 workflow 单独保留约 1,200 token 的投影预算。
+
+工作流回复分成两个独立部分：
+
+- `workflow_reply`：仅含工作流 ID、类型、revision 和不透明 step token，用于拒绝重复点击及过期页面提交。
+- `workflow_prompt`：仅含当前问题、稳定选项 ID、是否允许当前步骤的专用文字补充、可编辑步骤和允许命令，供 App 渲染，不包含内部状态 ID、token、模型指令或完整状态。
+
+App 的选项点击、表单提交、暂停、恢复和历史修改通过 `pregnancy_plan_command.v1` 结构化指令进入确定性执行路径，不调用模型。普通输入框不附带孕期计划游标，继续作为自由对话；运行时会把有界工作流摘要作为权威上下文提供给模型，使其回答旁支问题但不推进流程，并在回复后重新返回最新 `workflow_prompt`。用户需要针对当前问题自由补充时，由工作流卡片内的专用输入框显式提交，避免把普通旁支问题误记为流程答案。
+
+检测到需要优先处理的医疗安全信号时，安全回复覆盖普通计划回复，workflow 保留当前步骤并进入暂停态；用户后续显式恢复时继续原步骤，不把已采集内容标成失败或清空。
+
+最终 `generate_plan` 仍经过 `pregnancy.plan.create` Action 边界；只有 `write_succeeded=true` 才能声称已生成并同步。
 
 ### 泌乳服务智能体（19）
 

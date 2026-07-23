@@ -24,14 +24,14 @@
 
 | 项目 | 数量 |
 | --- | ---: |
-| 模型可见 Tool Contract | 46 |
+| 模型可见 Tool Contract | 43 |
 | 顶层工具 | 4 |
 | Namespace | 7 |
-| Namespace 内工具 | 42 |
+| Namespace 内工具 | 39 |
 | eager | 18 |
-| deferred | 28 |
+| deferred | 25 |
 | `none` | 12 |
-| `agent_internal` | 11 |
+| `agent_internal` | 9 |
 | `user_resource` | 23 |
 | Action-backed Tool 对应的唯一 Action Type | 21 |
 
@@ -51,7 +51,7 @@ Tool Contract 与 Responses API 函数名使用同一个 canonical `snake_case` 
 | Namespace | Tool 数 | deferred | 用途 |
 | --- | ---: | ---: | --- |
 | `milk_management` | 22 | 14 | 奶量、喂养、吸奶、生长、计划与提醒 |
-| `birth_prep` | 10 | 10 | 孕期计划、待产包 |
+| `birth_prep` | 7 | 7 | 孕期计划、待产包 |
 | `hospital_bag_cart` | 1 | 1 | 待产包购物车 |
 | `pump_recommendation` | 1 | 1 | 吸奶器推荐 |
 | `device_support` | 4 | 1 | 设备状态、官方指导、开箱、售后草稿 |
@@ -66,7 +66,7 @@ Tool Contract 与 Responses API 函数名使用同一个 canonical `snake_case` 
 
 ### `agent_internal`
 
-`records_milk_analysis_intake`、`records_milk_analysis_evaluate`、`devices_unboxing_advance`、`pregnancy_plan_intake_start`、`pregnancy_plan_intake_analyze`、`pregnancy_plan_intake_advance`、`hospital_bag_form_create`、`hospital_bag_card_create`、`hospital_bag_pump_recommend`、`support_ticket_propose`、`ibclc_consult_card_create`。
+`records_milk_analysis_intake`、`records_milk_analysis_evaluate`、`devices_unboxing_advance`、`pregnancy_plan_workflow`（除 `generate_plan` 外）、`hospital_bag_form_create`、`hospital_bag_card_create`、`hospital_bag_pump_recommend`、`support_ticket_propose`、`ibclc_consult_card_create`。
 
 `agent_internal` 仍可以写 Agent Runtime 自身的 Workflow 或 Artifact，但不允许从 Tool Handler 直接修改 Profile、Diary、Plan、Record、Notification 等用户业务资源。
 
@@ -79,7 +79,7 @@ Tool Contract 与 Responses API 函数名使用同一个 canonical `snake_case` 
 | `pregnancy_diary_delete` | `pregnancy_diary.entry.delete` |
 | `plans_milk_plan_propose` | `plans.milk_plan.create` |
 | `plans_milk_schedule_propose` | `plans.milk_schedule.reschedule` |
-| `pregnancy_plan_propose` | `pregnancy.plan.create` |
+| `pregnancy_plan_workflow`（`generate_plan`） | `pregnancy.plan.create` |
 | `plans_task_create_propose` | `plans.task.create` |
 | `plans_task_complete_propose` | `plans.task.complete` |
 | `pregnancy_plan_todo_propose` | `pregnancy.plan_todo.update` |

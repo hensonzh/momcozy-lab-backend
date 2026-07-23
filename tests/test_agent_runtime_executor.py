@@ -31,6 +31,7 @@ from app.agents.cozymate.health_guidance import (
 )
 from app.agents.cozymate.executor import (
     CozymateAgentExecutor,
+    CozymateAgentExecutorConfig,
     _birth_prep_form_default_values,
     _pregnancy_runtime_plan_context,
 )
@@ -58,6 +59,7 @@ from app.agents.cozymate.tools.pregnancy_plan_flow import (
     PREGNANCY_PLAN_CHECKUP_UPLOAD_QUESTION,
     PREGNANCY_PLAN_FINAL_QUESTION,
     PREGNANCY_PLAN_URGENT_RESPONSE,
+    pregnancy_plan_workflow_context,
 )
 
 
@@ -176,6 +178,206 @@ def test_agent_runtime_executor_uses_ordered_context_items_without_runtime_proje
 
     assert backend.requests[0].model_input == context_items
     assert not any(item.get("role") == "developer" for item in backend.requests[0].model_input)
+
+
+def test_executor_injects_bounded_owner_workflow_context_without_advancing_side_question() -> None:
+    current_run = _run(thread_id=uuid4())
+    original_run = _run(thread_id=uuid4())
+    original_run.actor_user_id = current_run.actor_user_id
+    workflow = _pregnancy_workflow(
+        run=original_run,
+        state={
+            "phase": "personalized_followup",
+            "visible_question": "目前双胎类型确认了吗？",
+            "plan_context": {
+                "current_week": "25周",
+                "medical_notes": "甲状腺用药 " + ("很长的既往信息 " * 600),
+            },
+            "analysis": {
+                "stage": {"id": "second_trimester", "current_week": 25},
+                "focuses": [
+                    {
+                        "id": f"focus-{index}",
+                        "title": "复查重点",
+                        "management_meaning": "说明 " * 500,
+                        "plan_impact": "影响 " * 500,
+                    }
+                    for index in range(12)
+                ],
+            },
+            "followup_topics": [
+                {
+                    "id": "multiple_pregnancy_monitoring",
+                    "question": "目前双胎类型确认了吗？",
+                    "reply_options": ["单绒双羊", "双绒双羊", "还没确认"],
+                }
+            ],
+            "personalized_followup_records": [],
+        },
+    )
+    workflow.revision = 4
+    workflow.step_token = "must-not-enter-model-context"
+    current_user = _message(
+        thread_id=current_run.thread_id,
+        run_id=current_run.id,
+        role="user",
+        text="先不说计划，感冒时能喝温水吗？",
+        sequence=1,
+    )
+    repository = FakeRuntimeRepository(
+        messages=[current_user],
+        current_message=current_user,
+        run=current_run,
+        workflow_states=[workflow],
+    )
+    backend = CapturingSdkBackend(
+        result=SdkNodeResult(final_text="可以少量多次喝温水。")
+    )
+    config = CozymateAgentExecutorConfig(
+        context_item_fetch_limit=20,
+        model_context_item_limit=10,
+        model_context_token_budget=500,
+        workflow_context_token_budget=500,
+    )
+
+    result = asyncio.run(
+        CozymateAgentExecutor(
+            repository=repository,
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
+            config=config,
+        ).execute(run=current_run)
+    )
+
+    assert result.final_text == "可以少量多次喝温水。"
+    assert result.workflow_reply == {
+        "workflow_state_id": str(workflow.id),
+        "workflow_type": "pregnancy_plan",
+        "revision": 4,
+        "step_token": "must-not-enter-model-context",
+    }
+    assert result.workflow_prompt["current_step"]["id"] == "followup:multiple_pregnancy_monitoring"
+    assert [item["role"] for item in backend.requests[0].model_input] == [
+        "developer",
+        "user",
+    ]
+    runtime_context = backend.requests[0].model_input[0]["content"][
+        "runtime_context"
+    ]
+    assert runtime_context["active_workflows"][0]["workflow_type"] == "pregnancy_plan"
+    assert (
+        runtime_context["active_workflows"][0]["current_step"]["id"]
+        == "followup:multiple_pregnancy_monitoring"
+    )
+    assert "current_message_relation" not in runtime_context["active_workflows"][0]
+    assert "must-not-enter-model-context" not in str(runtime_context)
+    assert "workflow_state_id" not in str(runtime_context)
+    assert workflow.revision == 4
+    assert workflow.run_id == original_run.id
+    snapshot = repository.model_context_snapshots[0]
+    assert snapshot["item_refs"][0]["item_key"] == f"message:{current_user.id}"
+    assert snapshot["dynamic_context"]["model_input_position"] == 0
+    assert snapshot["estimated_input_tokens"] <= 1000
+    assert len(snapshot["model_input_sha256"]) == 64
+
+
+def test_executor_runs_structured_pregnancy_choice_without_calling_the_model() -> None:
+    run = _run(thread_id=uuid4())
+    workflow = _pregnancy_workflow(
+        run=run,
+        state={
+            "phase": "checkup_done_question",
+            "visible_question": "你目前做过产检了吗？",
+            "plan_context": {"current_week": "25周"},
+            "personalized_followup_records": [],
+        },
+    )
+    workflow.active_step = "checkup_done"
+    workflow.revision = 4
+    workflow.step_token = "current-step-token"
+    current_user = _message(
+        thread_id=run.thread_id,
+        run_id=run.id,
+        role="user",
+        text="还没做过",
+        sequence=1,
+        content_overrides={
+            "client_context": {
+                "workflow_reply": {
+                    "workflow_state_id": str(workflow.id),
+                    "workflow_type": "pregnancy_plan",
+                    "revision": 4,
+                    "step_token": "current-step-token",
+                },
+                "workflow_command": {
+                    "schema_version": "pregnancy_plan_command.v1",
+                    "workflow_type": "pregnancy_plan",
+                    "command": "answer_current",
+                    "step_id": "checkup_done",
+                    "choice_id": "confirm_no_checkup_yet",
+                },
+            }
+        },
+    )
+    repository = FakeRuntimeRepository(
+        messages=[current_user],
+        current_message=current_user,
+        run=run,
+        workflow_states=[workflow],
+    )
+
+    class MutatingWorkflowToolExecutor:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        async def execute(self, **kwargs):
+            self.calls.append(kwargs)
+            workflow.state = {
+                **workflow.state,
+                "phase": "final_plan_confirmation",
+                "visible_question": PREGNANCY_PLAN_FINAL_QUESTION,
+                "checkup_status": "还没做过产检",
+                "plan_context": {
+                    **workflow.state["plan_context"],
+                    "checkup_status": "还没做过产检",
+                },
+            }
+            workflow.active_step = "final_confirmation"
+            workflow.revision = 5
+            workflow.step_token = "next-step-token"
+            safe_output = {
+                "status": "intake_in_progress",
+                "workflow_context": pregnancy_plan_workflow_context(workflow.state),
+            }
+            return SimpleNamespace(safe_output=safe_output)
+
+    tool_executor = MutatingWorkflowToolExecutor()
+    backend = CapturingSdkBackend(result=SdkNodeResult(final_text="不应调用模型"))
+
+    result = asyncio.run(
+        CozymateAgentExecutor(
+            repository=repository,
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
+            tool_executor=tool_executor,
+        ).execute(run=run)
+    )
+
+    assert backend.requests == []
+    assert repository.model_context_snapshots == []
+    assert len(tool_executor.calls) == 1
+    assert tool_executor.calls[0]["args"] == {
+        "command": "answer_current",
+        "choice_id": "confirm_no_checkup_yet",
+        "step_id": "checkup_done",
+    }
+    assert result.final_text == PREGNANCY_PLAN_FINAL_QUESTION
+    assert result.quick_replies == []
+    assert result.workflow_reply == {
+        "workflow_state_id": str(workflow.id),
+        "workflow_type": "pregnancy_plan",
+        "revision": 5,
+        "step_token": "next-step-token",
+    }
+    assert result.workflow_prompt["current_step"]["id"] == "final_confirmation"
 
 
 def test_agent_runtime_executor_rejects_an_empty_context_ledger_instead_of_rebuilding_messages() -> None:
@@ -776,14 +978,11 @@ def test_agent_runtime_executor_loads_birth_prep_with_structured_business_fact_r
 @pytest.mark.parametrize(
     ("service_skill_id", "expected_tool_names"),
     [
-        (
-            "birth-prep",
-            {
-                "pregnancy_plan_intake_start",
-                "pregnancy_plan_intake_analyze",
-                "pregnancy_plan_intake_advance",
-                "pregnancy_plan_propose",
-                "pregnancy_plan_todo_propose",
+            (
+                "birth-prep",
+                {
+                    "pregnancy_plan_workflow",
+                    "pregnancy_plan_todo_propose",
                 "plans_plan_delete_propose",
                 "plans_task_update_propose",
                 "plans_task_delete_propose",
@@ -1191,7 +1390,17 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert backend.tool_schemas["plans_task_create_propose"]["required"] == ["title"]
     assert backend.tool_schemas["plans_task_delete_propose"]["required"] == ["task_id"]
     assert backend.tool_schemas["plans_task_update_propose"]["required"] == ["task_id"]
-    assert "title" not in backend.tool_schemas["pregnancy_plan_propose"]["properties"]
+    assert backend.tool_schemas["pregnancy_plan_workflow"]["required"] == ["command"]
+    assert backend.tool_schemas["pregnancy_plan_workflow"]["properties"]["command"]["enum"] == [
+        "start_or_resume",
+        "submit_form",
+        "answer_current",
+        "edit_answer",
+        "pause",
+        "resume",
+        "abandon",
+        "generate_plan",
+    ]
     assert backend.tool_schemas["profile_read"]["additionalProperties"] is False
     assert backend.tool_schemas["profile_read"]["properties"] == {}
     assert backend.tool_schemas["profile_update"]["properties"]["user"]["properties"]["age"]["anyOf"][0]["maximum"] == 70
@@ -1556,7 +1765,7 @@ def test_agent_runtime_executor_generates_quick_replies_with_finalizer() -> None
             "allowed_actions": ["answer"],
         },
     }
-    assert repository.active_workflow_queries == 1
+    assert repository.active_workflow_queries == 2
     assert transient_stream.deltas == [
         {"thread_id": thread_id, "run_id": run.id, "delta": "已经", "message_stream_id": str(result.assistant_message_id)},
         {"thread_id": thread_id, "run_id": run.id, "delta": "整理好了。", "message_stream_id": str(result.assistant_message_id)},
@@ -1838,7 +2047,7 @@ def test_agent_runtime_executor_does_not_inject_dynamic_context_before_model_loa
     assert request.tool_names == ("load_service_skill",)
 
 
-def test_agent_runtime_executor_does_not_auto_project_active_workflow() -> None:
+def test_agent_runtime_executor_projects_active_workflow_before_model_selection() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)
     current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="继续", sequence=1)
@@ -1871,7 +2080,17 @@ def test_agent_runtime_executor_does_not_auto_project_active_workflow() -> None:
         ).execute(run=run)
     )
 
-    assert backend.requests[0].model_input == [{"role": "user", "content": "继续"}]
+    assert [item["role"] for item in backend.requests[0].model_input] == [
+        "developer",
+        "user",
+    ]
+    runtime_context = backend.requests[0].model_input[0]["content"][
+        "runtime_context"
+    ]
+    assert runtime_context["active_workflows"][0]["workflow_type"] == "pregnancy_plan"
+    assert runtime_context["active_workflows"][0]["phase"] == "personalized_followup"
+    assert "step_token" not in str(runtime_context)
+    assert "workflow_state_id" not in str(runtime_context)
 
 
 def test_agent_runtime_executor_exposes_service_tool_without_skill_projection() -> None:
@@ -2383,6 +2602,23 @@ def test_agent_runtime_executor_passes_verified_pregnancy_inputs_only_to_tool() 
             "form_id": "birth_journey_basic_info_intake",
         },
     )
+    workflow.active_step = "basic_intake"
+    workflow.revision = 3
+    workflow.step_token = "pregnancy-form-step"
+    current_user.content["client_context"] = {
+        "workflow_reply": {
+            "workflow_state_id": str(workflow.id),
+            "workflow_type": "pregnancy_plan",
+            "revision": 3,
+            "step_token": "pregnancy-form-step",
+        },
+        "workflow_command": {
+            "schema_version": "pregnancy_plan_command.v1",
+            "workflow_type": "pregnancy_plan",
+            "command": "submit_form",
+            "step_id": "basic_intake",
+        },
+    }
     repository = FakeRuntimeRepository(
         messages=[current_user],
         current_message=current_user,
@@ -2399,13 +2635,13 @@ def test_agent_runtime_executor_passes_verified_pregnancy_inputs_only_to_tool() 
     tool_executor = CozymateToolExecutor(
         registry=registry,
         repository=repository,
-        handlers={"pregnancy_plan_intake_analyze": capture_handler},
+        handlers={"pregnancy_plan_workflow": capture_handler},
     )
     backend = ScriptedSdkBackend(
         [
             scripted_sdk_response(
                 final_text="这些因素会影响复查节奏。我想再确认一个会改变计划安排的点。",
-                tool_invocations=(scripted_tool_invocation("pregnancy_plan_intake_analyze", {}),),
+                tool_invocations=(),
             )
         ]
     )
@@ -2421,22 +2657,20 @@ def test_agent_runtime_executor_passes_verified_pregnancy_inputs_only_to_tool() 
 
     attachment = current_user.content["attachments"][0]
     assert result.status == "completed"
-    assert repository.tool_call.safe_args == {}
-    assert captured_args == {
-        "confirmed_form_data": attachment["values"],
-        "form_submission_id": attachment["submission_id"],
-        "form_artifact_id": str(form_artifact_id),
-        "runtime_plan_context": {
-            "has_active_plan": False,
-            "workflow_phase": "collecting_intake",
-            "source_form_artifact_id": str(form_artifact_id),
-        },
-        "runtime_workflow_context": workflow.state,
+    assert repository.tool_call.safe_args == {"command": "submit_form", "step_id": "basic_intake"}
+    assert captured_args["command"] == "submit_form"
+    assert captured_args["confirmed_form_data"] == attachment["values"]
+    assert captured_args["form_submission_id"] == attachment["submission_id"]
+    assert captured_args["form_artifact_id"] == str(form_artifact_id)
+    assert captured_args["runtime_plan_context"] == {
+        "has_active_plan": False,
+        "workflow_phase": "collecting_intake",
+        "source_form_artifact_id": str(form_artifact_id),
     }
-    assert result.final_text == "这些因素会影响复查节奏。我想再确认一个会改变计划安排的点。"
-    assert backend.requests[0].model_input == [
-        {"role": "user", "content": "我已提交信息采集表单，请继续分析。"}
-    ]
+    assert captured_args["runtime_workflow_context"] == workflow.state
+    assert captured_args["runtime_structured_workflow_command"] is True
+    assert result.final_text == "孕期计划已更新，请按下方当前步骤继续。"
+    assert backend.requests == []
 
 
 def test_agent_runtime_executor_injects_current_workflow_and_authenticated_checkup_attachment_count() -> None:
@@ -2469,6 +2703,24 @@ def test_agent_runtime_executor_injects_current_workflow_and_authenticated_check
             "plan_context": {"current_week": "20周"},
         },
     )
+    workflow.active_step = "checkup_records"
+    workflow.revision = 4
+    workflow.step_token = "checkup-records-step"
+    current_user.content["client_context"] = {
+        "workflow_reply": {
+            "workflow_state_id": str(workflow.id),
+            "workflow_type": "pregnancy_plan",
+            "revision": 4,
+            "step_token": "checkup-records-step",
+        },
+        "workflow_command": {
+            "schema_version": "pregnancy_plan_command.v1",
+            "workflow_type": "pregnancy_plan",
+            "command": "answer_current",
+            "step_id": "checkup_records",
+            "choice_id": "mark_checkup_records_uploaded",
+        },
+    }
     repository = FakeRuntimeRepository(
         messages=[current_user],
         current_message=current_user,
@@ -2485,18 +2737,13 @@ def test_agent_runtime_executor_injects_current_workflow_and_authenticated_check
     tool_executor = CozymateToolExecutor(
         registry=registry,
         repository=repository,
-        handlers={"pregnancy_plan_intake_advance": capture_handler},
+        handlers={"pregnancy_plan_workflow": capture_handler},
     )
     backend = ScriptedSdkBackend(
         [
             scripted_sdk_response(
                 final_text="资料已收到。还有其他需要补充的信息吗？",
-                tool_invocations=(
-                    scripted_tool_invocation(
-                        "pregnancy_plan_intake_advance",
-                        {"action": "mark_checkup_records_uploaded"},
-                    ),
-                ),
+                tool_invocations=(),
             )
         ]
     )
@@ -2511,12 +2758,14 @@ def test_agent_runtime_executor_injects_current_workflow_and_authenticated_check
     )
 
     assert result.status == "completed"
-    assert captured_args == {
-        "action": "mark_checkup_records_uploaded",
-        "runtime_workflow_context": workflow.state,
-        "trusted_current_user_text": "我已经上传了这份产检记录。",
-        "runtime_checkup_attachment_count": 1,
-    }
+    assert backend.requests == []
+    assert captured_args["command"] == "answer_current"
+    assert captured_args["choice_id"] == "mark_checkup_records_uploaded"
+    assert captured_args["step_id"] == "checkup_records"
+    assert captured_args["runtime_workflow_context"] == workflow.state
+    assert captured_args["trusted_current_user_text"] == "我已经上传了这份产检记录。"
+    assert captured_args["runtime_checkup_attachment_count"] == 1
+    assert captured_args["runtime_structured_workflow_command"] is True
 
 
 def test_agent_runtime_executor_injects_the_current_pregnancy_workflow_before_tool_selection() -> None:
@@ -2589,11 +2838,18 @@ def test_agent_runtime_executor_injects_the_current_pregnancy_workflow_before_to
         async def run(self, request: SdkNodeRequest) -> SdkNodeResult:
             assert not getattr(request, "required_tool_names", ())
             available_tools = {tool.contract_name for tool in request.tools}
-            assert "pregnancy_plan_intake_analyze" in available_tools
-            assert "pregnancy_plan_intake_advance" in available_tools
-            assert request.model_input == [{"role": "user", "content": "我还没确认双胎类型呢"}]
-            advance_tool = next(tool for tool in request.tools if tool.contract_name == "pregnancy_plan_intake_advance")
-            await advance_tool.invoke(json.dumps({"action": "submit_personalized_followup"}))
+            assert "pregnancy_plan_workflow" in available_tools
+            assert "pregnancy_plan_intake_analyze" not in available_tools
+            assert request.model_input[-1] == {"role": "user", "content": "我还没确认双胎类型呢"}
+            workflow_tool = next(tool for tool in request.tools if tool.contract_name == "pregnancy_plan_workflow")
+            await workflow_tool.invoke(
+                json.dumps(
+                    {
+                        "command": "answer_current",
+                        "answer": "我还没确认双胎类型呢",
+                    }
+                )
+            )
             return SdkNodeResult(final_text="好的，我会把双胎类型记为待产检确认。")
 
     result = asyncio.run(
@@ -2604,18 +2860,17 @@ def test_agent_runtime_executor_injects_the_current_pregnancy_workflow_before_to
             tool_executor=CozymateToolExecutor(
                 registry=registry,
                 repository=repository,
-                handlers={"pregnancy_plan_intake_advance": capture_handler},
+                handlers={"pregnancy_plan_workflow": capture_handler},
             ),
         ).execute(run=run)
     )
 
     assert result.status == "completed"
-    assert captured_args == {
-        "action": "submit_personalized_followup",
-        "runtime_workflow_context": workflow.state,
-        "trusted_current_user_text": "我还没确认双胎类型呢",
-        "runtime_checkup_attachment_count": 0,
-    }
+    assert captured_args["command"] == "answer_current"
+    assert captured_args["answer"] == "我还没确认双胎类型呢"
+    assert captured_args["runtime_workflow_context"] == workflow.state
+    assert captured_args["trusted_current_user_text"] == "我还没确认双胎类型呢"
+    assert captured_args["runtime_checkup_attachment_count"] == 0
 
 
 def test_agent_runtime_executor_generates_the_plan_in_the_same_final_confirmation_turn() -> None:
@@ -2646,7 +2901,14 @@ def test_agent_runtime_executor_generates_the_plan_in_the_same_final_confirmatio
                     "workflow_type": "pregnancy_plan",
                     "revision": 5,
                     "step_token": "final-confirmation-step",
-                }
+                },
+                "workflow_command": {
+                    "schema_version": "pregnancy_plan_command.v1",
+                    "workflow_type": "pregnancy_plan",
+                    "command": "answer_current",
+                    "step_id": "final_confirmation",
+                    "choice_id": "confirm_ready_to_generate",
+                },
             }
         },
     )
@@ -2659,18 +2921,19 @@ def test_agent_runtime_executor_generates_the_plan_in_the_same_final_confirmatio
     registry = default_tool_registry()
     propose_args: list[dict[str, Any]] = []
 
-    async def advance_handler(context: ToolHandlerContext) -> ToolResult:
-        assert context.args["action"] == "confirm_ready_to_generate"
-        workflow.state = {**workflow.state, "phase": "ready_to_generate"}
-        workflow.status = "ready"
-        workflow.active_step = "ready_to_generate"
-        return ToolResult.json({
-            "status": "ready_to_generate",
-            "workflow_phase": "ready_to_generate",
-            "requires_user_reply": False,
-        })
-
-    async def propose_handler(context: ToolHandlerContext) -> ToolResult:
+    async def workflow_handler(context: ToolHandlerContext) -> ToolResult:
+        if context.args["command"] == "answer_current":
+            assert context.args["choice_id"] == "confirm_ready_to_generate"
+            workflow.state = {**workflow.state, "phase": "ready_to_generate"}
+            workflow.status = "ready"
+            workflow.active_step = "generate_plan"
+            return ToolResult.json(
+                {
+                    "status": "ready_to_generate",
+                    "workflow_context": pregnancy_plan_workflow_context(workflow.state),
+                }
+            )
+        assert context.args["command"] == "generate_plan"
         propose_args.append(dict(context.args))
         workflow.state = {
             **workflow.state,
@@ -2678,51 +2941,31 @@ def test_agent_runtime_executor_generates_the_plan_in_the_same_final_confirmatio
         }
         workflow.status = "completed"
         workflow.active_step = ""
-        return ToolResult.json({
-            "status": "created",
-            "action_status": "applied",
-            "write_succeeded": True,
-        })
+        return ToolResult.json(
+            {
+                "status": "created",
+                "action_status": "applied",
+                "write_succeeded": True,
+            }
+        )
 
-    class FinalConfirmationBackend:
-        async def run(self, request: SdkNodeRequest) -> SdkNodeResult:
-            assert not getattr(request, "required_tool_names", ())
-            available_tools = {tool.contract_name for tool in request.tools}
-            assert "pregnancy_plan_intake_advance" in available_tools
-            assert "pregnancy_plan_propose" in available_tools
-            assert request.model_input == [{"role": "user", "content": "没有了，开始制定"}]
-            advance_tool = next(tool for tool in request.tools if tool.contract_name == "pregnancy_plan_intake_advance")
-            invocation = await advance_tool.invoke(json.dumps({"action": "confirm_ready_to_generate"}))
-            function_output = invocation.to_function_call_output()
-            assert isinstance(function_output, str)
-            model_output = json.loads(function_output)
-            assert model_output["workflow_phase"] == "ready_to_generate"
-            assert "automatic_plan_generation" not in model_output
-            propose_tool = next(tool for tool in request.tools if tool.contract_name == "pregnancy_plan_propose")
-            proposed = await propose_tool.invoke("{}")
-            proposed_output = proposed.to_function_call_output()
-            assert isinstance(proposed_output, str)
-            assert json.loads(proposed_output)["write_succeeded"] is True
-            return SdkNodeResult(final_text="孕期计划已经生成并同步到宝宝和我。")
-
+    backend = CapturingSdkBackend(result=SdkNodeResult(final_text="不应调用模型"))
     result = asyncio.run(
         CozymateAgentExecutor(
             repository=repository,
-            sdk_runner=OpenAIResponsesRunner(backend=FinalConfirmationBackend()),
+            sdk_runner=OpenAIResponsesRunner(backend=backend),
             tool_registry=registry,
             tool_executor=CozymateToolExecutor(
                 registry=registry,
                 repository=repository,
-                handlers={
-                    "pregnancy_plan_intake_advance": advance_handler,
-                    "pregnancy_plan_propose": propose_handler,
-                },
+                handlers={"pregnancy_plan_workflow": workflow_handler},
             ),
         ).execute(run=run)
     )
 
     assert result.status == "completed"
-    assert result.final_text == "孕期计划已经生成并同步到宝宝和我。"
+    assert result.final_text == "孕期计划已生成，并同步到「宝宝和我」。"
+    assert backend.requests == []
     assert len(propose_args) == 1
     assert propose_args[0]["runtime_plan_context"]["workflow_phase"] == "ready_to_generate"
     assert propose_args[0]["runtime_workflow_context"]["phase"] == "ready_to_generate"
@@ -2741,8 +2984,8 @@ def test_agent_runtime_executor_generates_the_plan_in_the_same_final_confirmatio
                 "followup_topics": [],
                 "personalized_followup_records": [],
             },
-            "pregnancy_plan_intake_advance",
-            {"action": "submit_personalized_followup"},
+            "pregnancy_plan_workflow",
+            {"command": "answer_current", "answer": "这是上一道问题的延迟回复。"},
         ),
         (
             "milk_analysis",
@@ -2917,9 +3160,16 @@ def test_agent_runtime_executor_reissues_the_rejected_workflow_cursor_when_multi
 
     class RecoveringBackend:
         async def run(self, request: SdkNodeRequest) -> SdkNodeResult:
-            tool = next(item for item in request.tools if item.contract_name == "pregnancy_plan_intake_advance")
+            tool = next(item for item in request.tools if item.contract_name == "pregnancy_plan_workflow")
             with pytest.raises(ApiError) as exc_info:
-                await tool.invoke(json.dumps({"action": "submit_personalized_followup"}))
+                await tool.invoke(
+                    json.dumps(
+                        {
+                            "command": "answer_current",
+                            "answer": "这是对孕期问题的延迟回复。",
+                        }
+                    )
+                )
             assert exc_info.value.code == "stale_workflow_step"
             return SdkNodeResult(final_text="孕期计划的问题已经变化，请按当前问题继续。")
 
@@ -2981,14 +3231,19 @@ def test_agent_runtime_executor_preserves_initial_analysis_then_one_checkup_uplo
     tool_executor = CozymateToolExecutor(
         registry=registry,
         repository=repository,
-        handlers={"pregnancy_plan_intake_analyze": capture_handler},
+        handlers={"pregnancy_plan_workflow": capture_handler},
     )
     final_text = f"孕中期检查有明确时间窗，我会按孕周安排检查和结果复核。\n\n{PREGNANCY_PLAN_CHECKUP_UPLOAD_QUESTION}"
     backend = ScriptedSdkBackend(
         [
             scripted_sdk_response(
                 final_text=final_text,
-                tool_invocations=(scripted_tool_invocation("pregnancy_plan_intake_analyze", {}),),
+                tool_invocations=(
+                    scripted_tool_invocation(
+                        "pregnancy_plan_workflow",
+                        {"command": "submit_form"},
+                    ),
+                ),
             )
         ]
     )
@@ -3051,13 +3306,18 @@ def test_agent_runtime_executor_passes_urgent_text_to_model_while_awaiting_plan_
     tool_executor = CozymateToolExecutor(
         registry=registry,
         repository=repository,
-        handlers={"pregnancy_plan_propose": urgent_handler},
+        handlers={"pregnancy_plan_workflow": urgent_handler},
     )
     backend = ScriptedSdkBackend(
         [
             scripted_sdk_response(
                 final_text="计划已经生成，请继续。",
-                tool_invocations=(scripted_tool_invocation("pregnancy_plan_propose", {}),),
+                tool_invocations=(
+                    scripted_tool_invocation(
+                        "pregnancy_plan_workflow",
+                        {"command": "generate_plan"},
+                    ),
+                ),
             )
         ]
     )
@@ -3227,13 +3487,18 @@ def test_agent_runtime_executor_prefills_pregnancy_form_from_reliable_same_turn_
     tool_executor = CozymateToolExecutor(
         registry=registry,
         repository=repository,
-        handlers={"pregnancy_plan_intake_start": capture_handler},
+        handlers={"pregnancy_plan_workflow": capture_handler},
     )
     backend = ScriptedSdkBackend(
         [
             scripted_sdk_response(
                 final_text="信息采集表已准备好。",
-                tool_invocations=(scripted_tool_invocation("pregnancy_plan_intake_start", {}),),
+                tool_invocations=(
+                    scripted_tool_invocation(
+                        "pregnancy_plan_workflow",
+                        {"command": "start_or_resume"},
+                    ),
+                ),
             )
         ]
     )
@@ -3356,6 +3621,47 @@ def test_expired_pregnancy_workflow_is_not_reused_as_trusted_intake_context() ->
     result = asyncio.run(executor._latest_pregnancy_plan_workflow(run=run))
 
     assert result == {}
+
+
+def test_pregnancy_workflow_is_recovered_for_the_owner_across_threads() -> None:
+    original_thread_id = uuid4()
+    current_run = _run(thread_id=uuid4())
+    original_run = _run(thread_id=original_thread_id)
+    original_run.actor_user_id = current_run.actor_user_id
+    workflow = _pregnancy_workflow(
+        run=original_run,
+        status="waiting",
+        state={
+            "phase": "personalized_followup",
+            "source_form_artifact_id": "form-across-threads",
+        },
+    )
+    current_user = _message(
+        thread_id=current_run.thread_id,
+        run_id=current_run.id,
+        role="user",
+        text="继续我的孕期计划",
+        sequence=1,
+    )
+    repository = FakeRuntimeRepository(
+        messages=[current_user],
+        current_message=current_user,
+        run=current_run,
+        workflow_states=[workflow],
+    )
+    executor = CozymateAgentExecutor(
+        repository=repository,
+        sdk_runner=OpenAIResponsesRunner(
+            backend=CapturingSdkBackend(result=SdkNodeResult(final_text=""))
+        ),
+    )
+
+    result = asyncio.run(
+        executor._latest_pregnancy_plan_workflow(run=current_run)
+    )
+
+    assert result["workflow_state_id"] == str(workflow.id)
+    assert result["state"]["source_form_artifact_id"] == "form-across-threads"
 
 
 def test_pregnancy_runtime_plan_context_recovers_analyzed_intake_from_workflow_state() -> None:
@@ -3647,15 +3953,33 @@ class FakeRuntimeRepository:
         context_items: list[dict[str, Any]] | None = None,
     ) -> None:
         self.messages = messages
-        self.context_items = (
-            list(context_items)
-            if context_items is not None
-            else [
-                message_context_item(role=message.role, content=message.content)
+        if context_items is None:
+            message_records = [
+                (
+                    f"message:{message.id}",
+                    message_context_item(role=message.role, content=message.content),
+                )
                 for message in messages
                 if message.role in {"user", "assistant"}
             ]
-        )
+        else:
+            message_records = [
+                (
+                    f"context:{index}",
+                    dict(item),
+                )
+                for index, item in enumerate(context_items, start=1)
+            ]
+        self.context_items = [item for _, item in message_records]
+        self.context_item_records = [
+            SimpleNamespace(
+                item=item,
+                item_key=item_key,
+                item_type=str(item.get("type") or "message"),
+                sequence=index,
+            )
+            for index, (item_key, item) in enumerate(message_records, start=1)
+        ]
         self.current_message = current_message
         self.run = run
         self.actions = []
@@ -3666,6 +3990,8 @@ class FakeRuntimeRepository:
         self.tool_output = None
         self.run_summaries = list(run_summaries or [])
         self.workflow_states = list(workflow_states or [])
+        self.workflow_events = []
+        self.model_context_snapshots = []
         self.latest_thread_artifact = None
         self.client_event_queries = []
         self.active_workflow_queries = 0
@@ -3678,12 +4004,29 @@ class FakeRuntimeRepository:
     async def list_messages_for_thread(self, *, thread_id, limit=40):
         return [message for message in self.messages if message.thread_id == thread_id][:limit]
 
-    async def list_context_items_for_thread(self, *, thread_id):
-        return [SimpleNamespace(item=item) for item in self.context_items]
+    async def list_context_items_for_thread(self, *, thread_id, limit=None):
+        del thread_id
+        records = self.context_item_records
+        return list(records[-limit:] if isinstance(limit, int) else records)
 
     async def append_context_items(self, *, thread_id, run_id, items):
-        self.context_items.extend(dict(item.item) for item in items)
+        del thread_id, run_id
+        for pending in items:
+            item = dict(pending.item)
+            self.context_items.append(item)
+            self.context_item_records.append(
+                SimpleNamespace(
+                    item=item,
+                    item_key=pending.item_key,
+                    item_type=pending.item_type,
+                    sequence=len(self.context_item_records) + 1,
+                )
+            )
         return list(items)
+
+    async def append_model_context_snapshot(self, **kwargs):
+        self.model_context_snapshots.append(kwargs)
+        return kwargs
 
     async def list_client_events_for_thread(self, *, thread_id, owner_user_id, limit=10):
         self.client_event_queries.append({"thread_id": thread_id, "owner_user_id": owner_user_id, "limit": limit})
@@ -3799,7 +4142,15 @@ class FakeRuntimeRepository:
             workflow for workflow in self.workflow_states if workflow.thread_id == thread_id and workflow.owner_user_id == owner_user_id
         ][:limit]
 
-    async def get_latest_workflow_state_for_thread(self, *, thread_id, owner_user_id, workflow_type):
+    async def get_latest_workflow_state_for_thread(
+        self,
+        *,
+        thread_id,
+        owner_user_id,
+        workflow_type,
+        for_update=False,
+    ):
+        del for_update
         self.latest_workflow_queries += 1
         matches = [
             workflow
@@ -3807,6 +4158,41 @@ class FakeRuntimeRepository:
             if workflow.thread_id == thread_id and workflow.owner_user_id == owner_user_id and workflow.workflow_type == workflow_type
         ]
         return matches[-1] if matches else None
+
+    async def lock_workflow_owner(self, *, owner_user_id):
+        del owner_user_id
+
+    async def get_latest_workflow_state_for_owner(
+        self,
+        *,
+        owner_user_id,
+        workflow_type,
+        for_update=False,
+    ):
+        del for_update
+        self.latest_workflow_queries += 1
+        matches = [
+            workflow
+            for workflow in self.workflow_states
+            if workflow.owner_user_id == owner_user_id
+            and workflow.workflow_type == workflow_type
+        ]
+        return matches[-1] if matches else None
+
+    async def list_active_workflow_states_for_owner(
+        self,
+        *,
+        owner_user_id,
+        workflow_type=None,
+        limit=5,
+    ):
+        return [
+            workflow
+            for workflow in reversed(self.workflow_states)
+            if workflow.owner_user_id == owner_user_id
+            and (workflow_type is None or workflow.workflow_type == workflow_type)
+            and workflow.status in {"collecting", "ready", "waiting", "paused"}
+        ][:limit]
 
     async def create_workflow_state(self, **kwargs):
         workflow = AgentWorkflowState(id=uuid4(), **kwargs)
@@ -3820,7 +4206,16 @@ class FakeRuntimeRepository:
             workflow_state.state = state
         if active_step is not None:
             workflow_state.active_step = active_step
+        for field in ("revision", "step_token", "completed_at", "expires_at"):
+            if field in kwargs and kwargs[field] is not None:
+                setattr(workflow_state, field, kwargs[field])
+        if kwargs.get("clear_expires_at") is True:
+            workflow_state.expires_at = None
         return workflow_state
+
+    async def append_workflow_event(self, **kwargs):
+        self.workflow_events.append(kwargs)
+        return kwargs
 
 
 class FakeSharedSessionGuard:
@@ -3872,6 +4267,47 @@ class SessionGuardedRuntimeRepository(FakeRuntimeRepository):
             )
 
         return await self.session_guard.run("active_workflows", load_active_workflows)
+
+    async def get_latest_workflow_state_for_owner(
+        self,
+        *,
+        owner_user_id,
+        workflow_type,
+        for_update=False,
+    ):
+        async def load_owner_workflow():
+            return await super(
+                SessionGuardedRuntimeRepository,
+                self,
+            ).get_latest_workflow_state_for_owner(
+                owner_user_id=owner_user_id,
+                workflow_type=workflow_type,
+                for_update=for_update,
+            )
+
+        return await self.session_guard.run("owner_workflow", load_owner_workflow)
+
+    async def list_active_workflow_states_for_owner(
+        self,
+        *,
+        owner_user_id,
+        workflow_type=None,
+        limit=5,
+    ):
+        async def load_owner_workflows():
+            return await super(
+                SessionGuardedRuntimeRepository,
+                self,
+            ).list_active_workflow_states_for_owner(
+                owner_user_id=owner_user_id,
+                workflow_type=workflow_type,
+                limit=limit,
+            )
+
+        return await self.session_guard.run(
+            "owner_active_workflows",
+            load_owner_workflows,
+        )
 
 
 class FakeBusinessFactsProjector:

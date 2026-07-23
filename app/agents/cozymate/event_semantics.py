@@ -216,9 +216,15 @@ def _dynamic_tool_completed_label(
             "entry_saved": "我已经保存好孕期日记啦",
             "entry_deleted": "我已经删除这条孕期日记啦",
         }.get(status, "孕期日记这一步处理好了")
-    if tool_name == "pregnancy_plan_intake_advance":
+    if tool_name == "pregnancy_plan_workflow":
         return {
             "ready_to_generate": "孕期计划信息已经确认好啦",
+            "form_created": "孕期计划信息表已经准备好啦",
+            "intake_in_progress": "我整理好这一步信息啦",
+            "pregnancy_plan_workflow_paused": "孕期计划已暂停",
+            "pregnancy_plan_workflow_resumed": "孕期计划已恢复",
+            "existing_plan_found": "我找到已有的孕期计划啦",
+            "card_created": "孕期计划已生成",
             "blocked_by_symptoms": "我先帮你确认当前情况",
         }.get(status, "我整理好这一步信息啦")
     if tool_name == "hospital_bag_cart_update" and status in {"needs_clarification", "cart_unchanged"}:
@@ -352,25 +358,10 @@ _TOOL_COPY: dict[str, dict[str, str]] = {
         "started": "我回看一下之前的图片～",
         "completed": "我看清之前那张图片啦",
     },
-    "pregnancy_plan_intake_start": {
+    "pregnancy_plan_workflow": {
         "phase": "planning",
-        "started": "我先帮你准备孕期计划信息表～",
-        "completed": "孕期计划信息表已经准备好啦",
-    },
-    "pregnancy_plan_intake_analyze": {
-        "phase": "planning",
-        "started": "我先按你填写的信息做针对性分析～",
-        "completed": "我已经把会影响计划的重点分析好啦",
-    },
-    "pregnancy_plan_intake_advance": {
-        "phase": "planning",
-        "started": "我先整理孕期计划信息～",
-        "completed": "我整理好这一步信息啦",
-    },
-    "pregnancy_plan_propose": {
-        "phase": "planning",
-        "started": "我先帮你整理孕期计划～",
-        "completed": "我已经准备好孕期计划预览，等你确认～",
+        "started": "我继续处理孕期计划这一步～",
+        "completed": "我整理好孕期计划这一步啦",
     },
     "pregnancy_plan_todo_propose": {
         "phase": "planning",

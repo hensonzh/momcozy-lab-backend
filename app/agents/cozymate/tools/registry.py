@@ -301,53 +301,12 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="pregnancy_plan_intake_start",
+            name="pregnancy_plan_workflow",
             domain="birth_prep",
             description=(
-                "为当前用户创建孕期计划基础信息表单。用户同意开始制定孕期计划且当前没有 active 孕期计划时调用；"
-                "不要先在聊天里逐项收集表单字段。"
-            ),
-            effect_scope="agent_internal",
-            blocking_policy="must_wait",
-            result_dependency="final_response",
-            timeout_seconds=15,
-        )
-    )
-    registry.register(
-        _tool_contract(
-            name="pregnancy_plan_intake_analyze",
-            domain="birth_prep",
-            description=(
-                "分析应用侧已校验的孕期计划基础表单提交。当前用户消息包含 birth_journey_basic_info_intake 提交时调用，"
-                "工具参数保持空对象；工具会按风险和信息缺口进入最多三轮个性化追问，或直接进入产检资料步骤。"
-            ),
-            effect_scope="agent_internal",
-            blocking_policy="must_wait",
-            result_dependency="final_response",
-            timeout_seconds=15,
-        )
-    )
-    registry.register(
-        _tool_contract(
-            name="pregnancy_plan_intake_advance",
-            domain="birth_prep",
-            description=(
-                "推进当前用户已验证的孕期计划 intake，用户回答当前可见步骤时调用。只提交一项回答：个性化追问、"
-                "孕早期产检确认、产检资料上传/跳过或最终补充；不要在参数中伪造 workflow 或附件。"
-            ),
-            effect_scope="agent_internal",
-            blocking_policy="must_wait",
-            result_dependency="final_response",
-            timeout_seconds=15,
-        )
-    )
-    registry.register(
-        _tool_contract(
-            name="pregnancy_plan_propose",
-            domain="plans",
-            description=(
-                "基于当前用户已完成个性化追问、产检资料步骤和最终补充确认的可信 intake 创建孕期计划。"
-                "只在 pregnancy_plan_intake_advance 返回 ready_to_generate 时调用。"
+                "用户开始、继续或修改孕期计划时调用，管理完整标准流程：恢复、处理可信表单、回答当前步骤、暂停、返回修改和生成计划。"
+                "每次只提交一个 command；工具会从持久状态决定当前步骤和下一步，禁止在参数中伪造 workflow、附件或用户身份。"
+                "只有工具返回 ready_to_generate 后才用 generate_plan；计划写入仍由受保护的 pregnancy.plan.create action 执行。"
             ),
             effect_scope="user_resource",
             action_type="pregnancy.plan.create",

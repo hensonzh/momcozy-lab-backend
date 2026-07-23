@@ -20,11 +20,13 @@ from .models import (
     AgentEvalCase,
     AgentImageAccess,
     AgentMessage,
+    AgentModelContextSnapshot,
     AgentRunSummary,
     AgentRun,
     AgentThread,
     AgentToolCall,
     AgentToolOutput,
+    AgentWorkflowEvent,
     AgentWorkflowState,
 )
 
@@ -280,11 +282,79 @@ class AgentRuntimeRepository:
         await self.session.flush()
         return appended
 
-    async def list_context_items_for_thread(self, *, thread_id: UUID) -> list[AgentContextItem]:
-        result = await self.session.scalars(
+    async def list_context_items_for_thread(
+        self,
+        *,
+        thread_id: UUID,
+        limit: int | None = None,
+    ) -> list[AgentContextItem]:
+        statement = (
             select(AgentContextItem)
             .where(AgentContextItem.thread_id == thread_id)
-            .order_by(AgentContextItem.sequence.asc())
+            .order_by(AgentContextItem.sequence.desc())
+        )
+        if limit is not None:
+            statement = statement.limit(max(1, min(int(limit), 500)))
+        result = await self.session.scalars(statement)
+        items = list(result.all())
+        items.reverse()
+        return items
+
+    async def append_model_context_snapshot(
+        self,
+        *,
+        run_id: UUID,
+        thread_id: UUID,
+        owner_user_id: UUID,
+        schema_version: str,
+        item_refs: list[dict[str, Any]],
+        dynamic_context: dict[str, Any],
+        selection_policy: dict[str, Any],
+        input_item_count: int,
+        estimated_input_tokens: int,
+        model_input_sha256: str,
+    ) -> AgentModelContextSnapshot:
+        await self.session.scalar(
+            select(AgentRun.id).where(AgentRun.id == run_id).with_for_update()
+        )
+        sequence = int(
+            await self.session.scalar(
+                select(
+                    func.coalesce(
+                        func.max(AgentModelContextSnapshot.sequence),
+                        0,
+                    )
+                    + 1
+                ).where(AgentModelContextSnapshot.run_id == run_id)
+            )
+            or 1
+        )
+        snapshot = AgentModelContextSnapshot(
+            run_id=run_id,
+            thread_id=thread_id,
+            owner_user_id=owner_user_id,
+            sequence=sequence,
+            schema_version=schema_version,
+            item_refs=item_refs,
+            dynamic_context=dynamic_context,
+            selection_policy=selection_policy,
+            input_item_count=input_item_count,
+            estimated_input_tokens=estimated_input_tokens,
+            model_input_sha256=model_input_sha256,
+        )
+        self.session.add(snapshot)
+        await self.session.flush()
+        return snapshot
+
+    async def list_model_context_snapshots_for_run(
+        self,
+        *,
+        run_id: UUID,
+    ) -> list[AgentModelContextSnapshot]:
+        result = await self.session.scalars(
+            select(AgentModelContextSnapshot)
+            .where(AgentModelContextSnapshot.run_id == run_id)
+            .order_by(AgentModelContextSnapshot.sequence.asc())
         )
         return list(result.all())
 
@@ -704,6 +774,7 @@ class AgentRuntimeRepository:
         step_token: str | None = None,
         completed_at: datetime | None = None,
         expires_at: datetime | None = None,
+        clear_expires_at: bool = False,
     ) -> AgentWorkflowState:
         if status is not None:
             workflow_state.status = status
@@ -717,7 +788,7 @@ class AgentRuntimeRepository:
             workflow_state.step_token = step_token
         if completed_at is not None:
             workflow_state.completed_at = completed_at
-        if expires_at is not None:
+        if expires_at is not None or clear_expires_at:
             workflow_state.expires_at = expires_at
         await self.session.flush()
         return workflow_state
@@ -740,6 +811,7 @@ class AgentRuntimeRepository:
         thread_id: UUID,
         owner_user_id: UUID,
         workflow_type: str,
+        for_update: bool = False,
     ) -> AgentWorkflowState | None:
         statement = (
             select(AgentWorkflowState)
@@ -751,6 +823,39 @@ class AgentRuntimeRepository:
             .order_by(AgentWorkflowState.updated_at.desc(), AgentWorkflowState.id.desc())
             .limit(1)
         )
+        if for_update:
+            statement = statement.with_for_update()
+        return cast(AgentWorkflowState | None, await self.session.scalar(statement))
+
+    async def lock_workflow_owner(self, *, owner_user_id: UUID) -> None:
+        """Serialize owner-scoped workflow creation even when no state row exists yet."""
+
+        await self.session.scalar(
+            select(
+                func.pg_advisory_xact_lock(
+                    owner_user_id.int & 0x7FFF_FFFF_FFFF_FFFF
+                )
+            )
+        )
+
+    async def get_latest_workflow_state_for_owner(
+        self,
+        *,
+        owner_user_id: UUID,
+        workflow_type: str,
+        for_update: bool = False,
+    ) -> AgentWorkflowState | None:
+        statement = (
+            select(AgentWorkflowState)
+            .where(
+                AgentWorkflowState.owner_user_id == owner_user_id,
+                AgentWorkflowState.workflow_type == workflow_type,
+            )
+            .order_by(AgentWorkflowState.updated_at.desc(), AgentWorkflowState.id.desc())
+            .limit(1)
+        )
+        if for_update:
+            statement = statement.with_for_update()
         return cast(AgentWorkflowState | None, await self.session.scalar(statement))
 
     async def list_active_workflow_states_for_thread(
@@ -770,6 +875,92 @@ class AgentRuntimeRepository:
             )
             .order_by(AgentWorkflowState.updated_at.desc(), AgentWorkflowState.id.desc())
             .limit(max(1, min(int(limit), 20)))
+        )
+        result = await self.session.scalars(statement)
+        return list(result.all())
+
+    async def list_active_workflow_states_for_owner(
+        self,
+        *,
+        owner_user_id: UUID,
+        workflow_type: str | None = None,
+        limit: int = 5,
+    ) -> list[AgentWorkflowState]:
+        filters = [
+            AgentWorkflowState.owner_user_id == owner_user_id,
+            AgentWorkflowState.status.in_(("collecting", "ready", "waiting", "paused")),
+            or_(AgentWorkflowState.expires_at.is_(None), AgentWorkflowState.expires_at > func.now()),
+        ]
+        if workflow_type:
+            filters.append(AgentWorkflowState.workflow_type == workflow_type)
+        statement = (
+            select(AgentWorkflowState)
+            .where(*filters)
+            .order_by(AgentWorkflowState.updated_at.desc(), AgentWorkflowState.id.desc())
+            .limit(max(1, min(int(limit), 20)))
+        )
+        result = await self.session.scalars(statement)
+        return list(result.all())
+
+    async def append_workflow_event(
+        self,
+        *,
+        workflow_state_id: UUID,
+        owner_user_id: UUID,
+        thread_id: UUID,
+        run_id: UUID | None,
+        workflow_type: str,
+        event_type: str,
+        from_revision: int,
+        to_revision: int,
+        payload: dict[str, Any],
+    ) -> AgentWorkflowEvent:
+        sequence = int(
+            await self.session.scalar(
+                select(func.coalesce(func.max(AgentWorkflowEvent.sequence), 0) + 1).where(
+                    AgentWorkflowEvent.workflow_state_id == workflow_state_id
+                )
+            )
+            or 1
+        )
+        event = AgentWorkflowEvent(
+            workflow_state_id=workflow_state_id,
+            owner_user_id=owner_user_id,
+            thread_id=thread_id,
+            run_id=run_id,
+            workflow_type=workflow_type,
+            sequence=sequence,
+            event_type=event_type,
+            from_revision=from_revision,
+            to_revision=to_revision,
+            payload=payload,
+        )
+        self.session.add(event)
+        await self.session.flush()
+        return event
+
+    async def list_workflow_events_for_state(
+        self,
+        *,
+        workflow_state_id: UUID,
+        owner_user_id: UUID,
+    ) -> list[AgentWorkflowEvent]:
+        statement = (
+            select(AgentWorkflowEvent)
+            .where(
+                AgentWorkflowEvent.workflow_state_id == workflow_state_id,
+                AgentWorkflowEvent.owner_user_id == owner_user_id,
+            )
+            .order_by(AgentWorkflowEvent.sequence.asc())
+        )
+        result = await self.session.scalars(statement)
+        return list(result.all())
+
+    async def list_workflow_events_for_run(self, *, run_id: UUID) -> list[AgentWorkflowEvent]:
+        statement = (
+            select(AgentWorkflowEvent)
+            .where(AgentWorkflowEvent.run_id == run_id)
+            .order_by(AgentWorkflowEvent.created_at.asc(), AgentWorkflowEvent.id.asc())
         )
         result = await self.session.scalars(statement)
         return list(result.all())

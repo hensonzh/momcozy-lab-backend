@@ -12,8 +12,10 @@ from app.agent_runtime.runs.models import (
     AgentContextItem,
     AgentEvent,
     AgentMessage,
+    AgentModelContextSnapshot,
     AgentRun,
     AgentToolCall,
+    AgentWorkflowEvent,
     AgentWorkflowState,
 )
 from app.agent_runtime.runs.repository import AgentRuntimeRepository
@@ -40,6 +42,22 @@ class AgentReplayService:
         actions = await self.repository.list_actions_for_run(run_id=run.id)
         artifacts = await self.repository.list_artifacts_for_run(run_id=run.id)
         workflow_states = await self.repository.list_workflow_states_for_run(run_id=run.id)
+        workflow_event_loader = getattr(self.repository, "list_workflow_events_for_run", None)
+        workflow_events = (
+            await workflow_event_loader(run_id=run.id)
+            if callable(workflow_event_loader)
+            else []
+        )
+        context_snapshot_loader = getattr(
+            self.repository,
+            "list_model_context_snapshots_for_run",
+            None,
+        )
+        context_snapshots = (
+            await context_snapshot_loader(run_id=run.id)
+            if callable(context_snapshot_loader)
+            else []
+        )
         return {
             "run": _run(run),
             "messages": [_message(message, include_content=include_message_content) for message in messages],
@@ -55,6 +73,20 @@ class AgentReplayService:
             "workflow_states": [
                 _workflow_state(workflow_state, projector=self.workflow_state_projector)
                 for workflow_state in workflow_states
+            ],
+            "workflow_events": [
+                _workflow_event(
+                    workflow_event,
+                    include_content=include_message_content,
+                )
+                for workflow_event in workflow_events
+            ],
+            "model_context_snapshots": [
+                _model_context_snapshot(
+                    snapshot,
+                    include_content=include_message_content,
+                )
+                for snapshot in context_snapshots
             ],
         }
 
@@ -169,6 +201,68 @@ def _workflow_state(
         "state": state,
         "created_at": workflow_state.created_at.isoformat() if workflow_state.created_at else None,
         "updated_at": workflow_state.updated_at.isoformat() if workflow_state.updated_at else None,
+    }
+
+
+def _workflow_event(
+    workflow_event: AgentWorkflowEvent,
+    *,
+    include_content: bool,
+) -> dict[str, Any]:
+    payload = _redact_replay_value(workflow_event.payload)
+    if not include_content and isinstance(payload, dict):
+        payload = dict(payload)
+        for boundary in ("before", "after"):
+            snapshot = payload.get(boundary)
+            if isinstance(snapshot, dict) and "state" in snapshot:
+                payload[boundary] = {
+                    **snapshot,
+                    "state": {"redacted": True},
+                }
+        interaction = payload.get("interaction")
+        if isinstance(interaction, dict) and "answer" in interaction:
+            payload["interaction"] = {
+                **interaction,
+                "answer": "[redacted]",
+            }
+    return {
+        "id": str(workflow_event.id),
+        "workflow_state_id": str(workflow_event.workflow_state_id),
+        "thread_id": str(workflow_event.thread_id),
+        "run_id": str(workflow_event.run_id) if workflow_event.run_id else None,
+        "workflow_type": workflow_event.workflow_type,
+        "sequence": workflow_event.sequence,
+        "event_type": workflow_event.event_type,
+        "from_revision": workflow_event.from_revision,
+        "to_revision": workflow_event.to_revision,
+        "payload": payload,
+        "created_at": workflow_event.created_at.isoformat() if workflow_event.created_at else None,
+    }
+
+
+def _model_context_snapshot(
+    snapshot: AgentModelContextSnapshot,
+    *,
+    include_content: bool,
+) -> dict[str, Any]:
+    return {
+        "id": str(snapshot.id),
+        "run_id": str(snapshot.run_id),
+        "thread_id": str(snapshot.thread_id),
+        "owner_user_id": str(snapshot.owner_user_id),
+        "sequence": snapshot.sequence,
+        "schema_version": snapshot.schema_version,
+        "item_refs": _redact_replay_value(snapshot.item_refs),
+        "dynamic_context": (
+            _redact_replay_value(snapshot.dynamic_context)
+            if include_content
+            else {"redacted": True}
+        ),
+        "selection_policy": _redact_replay_value(snapshot.selection_policy),
+        "input_item_count": snapshot.input_item_count,
+        "estimated_input_tokens": snapshot.estimated_input_tokens,
+        "model_input_sha256": snapshot.model_input_sha256,
+        "created_at": snapshot.created_at.isoformat() if snapshot.created_at else None,
     }
 
 

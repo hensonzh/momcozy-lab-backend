@@ -366,4 +366,6 @@ def test_makefile_exposes_server_test_compose_targets() -> None:
     assert "$(TEST_COMPOSE) up -d postgres redis minio minio-init" in makefile
     assert "$(TEST_COMPOSE) up -d --force-recreate api agent-worker memory-worker" in makefile
     assert "backend-test-services:" in makefile
+    assert "backend-test-reset:" in makefile
+    assert "$(TEST_COMPOSE) down --volumes --remove-orphans" in makefile
     assert "backend-test-logs:" in makefile

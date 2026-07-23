@@ -505,7 +505,7 @@ def build_birth_journey_plan_result(plan_context: dict[str, Any]) -> dict[str, A
     if isinstance(owner, dict):
         card_json["owner"] = {key: value for key, value in owner.items() if _has_value(value)}
     return {
-        "tool_name": "pregnancy_plan_propose",
+        "tool_name": "pregnancy_plan_workflow",
         "status": "card_created",
         "card": {"card_type": "birth_journey_plan_card", "schema_version": "1.0", "card_json": card_json},
         "plan": {"payload": card_json, "status": "active"},

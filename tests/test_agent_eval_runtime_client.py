@@ -134,8 +134,14 @@ class FakeEvalRuntimeRepository:
     async def list_messages_for_thread(self, *, thread_id: UUID, limit: int = 40):
         return [message for message in self.messages if message.thread_id == thread_id][:limit]
 
-    async def list_context_items_for_thread(self, *, thread_id: UUID):
-        return list(self.context_items) if thread_id == self.run.thread_id else []
+    async def list_context_items_for_thread(
+        self,
+        *,
+        thread_id: UUID,
+        limit: int | None = None,
+    ):
+        items = list(self.context_items) if thread_id == self.run.thread_id else []
+        return items[-limit:] if isinstance(limit, int) else items
 
     async def append_context_items(self, *, thread_id: UUID, run_id: UUID, items):
         assert thread_id == self.run.thread_id

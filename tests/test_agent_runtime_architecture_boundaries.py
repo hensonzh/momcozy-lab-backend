@@ -164,6 +164,7 @@ def test_cozymate_tool_handlers_are_grouped_by_business_capability() -> None:
         "devices.py",
         "milk.py",
         "plans_diary.py",
+        "pregnancy_plan.py",
         "registry.py",
         "shared.py",
     }
@@ -467,10 +468,11 @@ def test_service_skills_capture_legacy_domain_flow_semantics() -> None:
     after_sales = registry.get("device-guidance").prompt_block()
     safety = registry.get("emotion-support").prompt_block()
 
-    assert "pregnancy_plan_propose" in pregnancy
-    assert "pregnancy_plan_intake_start" in pregnancy
-    assert "pregnancy_plan_intake_analyze" in pregnancy
-    assert "pregnancy_plan_intake_advance" in pregnancy
+    assert "pregnancy_plan_workflow" in pregnancy
+    assert "pregnancy_plan_intake_start" not in pregnancy
+    assert "pregnancy_plan_intake_analyze" not in pregnancy
+    assert "pregnancy_plan_intake_advance" not in pregnancy
+    assert "pregnancy_plan_propose" not in pregnancy
     assert "0..3 轮" in pregnancy
     assert "3 轮只是上限，不是目标" in pregnancy
     assert "产检记录" in pregnancy
@@ -519,10 +521,13 @@ def test_tool_contract_registry_contains_only_model_visible_tools_and_loading_po
         }
     )
     assert "plans_milk_plan_propose" in registered_names
-    assert "pregnancy_plan_propose" in registered_names
-    assert "pregnancy_plan_intake_start" in registered_names
-    assert "pregnancy_plan_intake_analyze" in registered_names
-    assert "pregnancy_plan_intake_advance" in registered_names
+    assert "pregnancy_plan_workflow" in registered_names
+    assert {
+        "pregnancy_plan_propose",
+        "pregnancy_plan_intake_start",
+        "pregnancy_plan_intake_analyze",
+        "pregnancy_plan_intake_advance",
+    }.isdisjoint(registered_names)
     assert {contract.loading_mode for contract in registry.list()} == {"eager", "deferred"}
     assert set(registry.eager_names()).isdisjoint(registry.deferred_names())
     assert set(registry.eager_names()) | set(registry.deferred_names()) == registered_names
@@ -565,6 +570,7 @@ def test_model_tool_contract_names_are_provider_safe_canonical_names() -> None:
         ("records_growth_record_update_propose", "user_resource", "records.growth_record.update", "deferred"),
         ("plans_task_complete_propose", "user_resource", "plans.task.complete", "deferred"),
         ("plans_milk_plan_propose", "user_resource", "plans.milk_plan.create", "deferred"),
+        ("pregnancy_plan_workflow", "user_resource", "pregnancy.plan.create", "deferred"),
         ("pregnancy_diary_save", "user_resource", "pregnancy_diary.entry.save", "eager"),
         ("hospital_bag_card_create", "agent_internal", None, "deferred"),
         ("support_ticket_propose", "agent_internal", None, "deferred"),
@@ -613,10 +619,13 @@ def test_tool_contracts_are_exported_as_responses_namespaces() -> None:
     assert "records_milk_analysis_read" not in namespaces["milk_management"].deferred_tool_contracts
     assert "records_growth_read" not in namespaces["milk_management"].deferred_tool_contracts
     assert "plans_milk_plan_propose" in namespaces["milk_management"].deferred_tool_contracts
-    assert "pregnancy_plan_propose" in namespaces["birth_prep"].deferred_tool_contracts
-    assert "pregnancy_plan_intake_start" in namespaces["birth_prep"].deferred_tool_contracts
-    assert "pregnancy_plan_intake_analyze" in namespaces["birth_prep"].deferred_tool_contracts
-    assert "pregnancy_plan_intake_advance" in namespaces["birth_prep"].deferred_tool_contracts
+    assert "pregnancy_plan_workflow" in namespaces["birth_prep"].deferred_tool_contracts
+    assert {
+        "pregnancy_plan_propose",
+        "pregnancy_plan_intake_start",
+        "pregnancy_plan_intake_analyze",
+        "pregnancy_plan_intake_advance",
+    }.isdisjoint(namespaces["birth_prep"].tool_contracts)
     assert "plans_calendar_read" not in namespaces["milk_management"].deferred_tool_contracts
     assert "plans_task_update_propose" in namespaces["birth_prep"].deferred_tool_contracts
     assert "hospital_bag_cart_update" in namespaces["hospital_bag_cart"].deferred_tool_contracts
@@ -685,11 +694,8 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
     history_image_schema = history_image_contract.input_schema
     milk_plan_schema = registry.get("plans_milk_plan_propose").input_schema
     milk_schedule_schema = registry.get("plans_milk_schedule_propose").input_schema
-    pregnancy_plan_schema = registry.get("pregnancy_plan_propose").input_schema
+    pregnancy_plan_schema = registry.get("pregnancy_plan_workflow").input_schema
     pregnancy_todo_schema = registry.get("pregnancy_plan_todo_propose").input_schema
-    pregnancy_intake_start_schema = registry.get("pregnancy_plan_intake_start").input_schema
-    pregnancy_intake_analyze_schema = registry.get("pregnancy_plan_intake_analyze").input_schema
-    pregnancy_intake_advance_schema = registry.get("pregnancy_plan_intake_advance").input_schema
     task_create_schema = registry.get("plans_task_create_propose").input_schema
     task_complete_schema = registry.get("plans_task_complete_propose").input_schema
     task_update_schema = registry.get("plans_task_update_propose").input_schema
@@ -802,33 +808,29 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
         "title",
     ]
     assert pregnancy_plan_schema["additionalProperties"] is False
+    assert pregnancy_plan_schema["required"] == ["command"]
     assert "title" not in pregnancy_plan_schema["properties"]
     assert "payload" not in pregnancy_plan_schema["properties"]
+    assert set(pregnancy_plan_schema["properties"]["command"]["enum"]) == {
+        "start_or_resume",
+        "submit_form",
+        "answer_current",
+        "edit_answer",
+        "pause",
+        "resume",
+        "abandon",
+        "generate_plan",
+    }
     assert pregnancy_plan_schema["properties"]["scope"]["enum"] == ["full", "prenatal_only", "short_range"]
     assert pregnancy_plan_schema["properties"]["additional_info"]["maxLength"] == 2000
     assert pregnancy_todo_schema["additionalProperties"] is False
     assert pregnancy_todo_schema["required"] == ["plan_id", "item_id", "completed", "expected_version"]
     assert pregnancy_todo_schema["properties"]["expected_version"]["minimum"] == 1
-    assert pregnancy_intake_start_schema["additionalProperties"] is False
-    assert pregnancy_intake_start_schema["properties"]["restart"]["type"] == "boolean"
-    assert pregnancy_intake_analyze_schema == {"type": "object", "additionalProperties": False, "properties": {}}
-    assert pregnancy_intake_advance_schema["required"] == ["action"]
-    assert set(pregnancy_intake_advance_schema["properties"]["action"]["enum"]) == {
-        "submit_personalized_followup",
-        "finish_personalized_followups",
-        "confirm_checkup_done",
-        "confirm_no_checkup_yet",
-        "confirm_checkup_unknown",
-        "mark_checkup_records_uploaded",
-        "skip_checkup_records",
-        "confirm_ready_to_generate",
-        "submit_final_additional_info",
-        "abandon",
-    }
-    assert "topic" not in pregnancy_intake_advance_schema["properties"]
+    assert pregnancy_plan_schema["properties"]["restart"]["type"] == "boolean"
+    assert "topic" not in pregnancy_plan_schema["properties"]
     assert "expected_step" not in registry.get("devices_unboxing_advance").input_schema["properties"]
-    assert "runtime_workflow_context" not in pregnancy_intake_advance_schema["properties"]
-    assert "runtime_checkup_attachment_count" not in pregnancy_intake_advance_schema["properties"]
+    assert "runtime_workflow_context" not in pregnancy_plan_schema["properties"]
+    assert "runtime_checkup_attachment_count" not in pregnancy_plan_schema["properties"]
     assert task_create_schema["additionalProperties"] is False
     assert task_create_schema["required"] == ["title"]
     assert task_create_schema["properties"]["task_date"]["type"] == "string"
@@ -1408,9 +1410,9 @@ def test_responses_runner_returns_recoverable_tool_errors_to_the_model(monkeypat
                 output=[
                     {
                         "type": "function_call",
-                        "name": "pregnancy_plan_intake_advance",
+                        "name": "pregnancy_plan_workflow",
                         "call_id": "call_1",
-                        "arguments": '{"action":"submit_personalized_followup"}',
+                        "arguments": '{"command":"answer_current"}',
                     }
                 ],
             ),
@@ -1433,7 +1435,7 @@ def test_responses_runner_returns_recoverable_tool_errors_to_the_model(monkeypat
         model_input=[{"role": "user", "content": "还没确认"}],
         tools=(
             SdkToolDefinition(
-                contract_name="pregnancy_plan_intake_advance",
+                contract_name="pregnancy_plan_workflow",
                 description="Advance the active intake.",
                 params_json_schema={"type": "object", "properties": {}},
                 invoke=invoke,
@@ -1466,9 +1468,9 @@ def test_responses_runner_keeps_tool_commit_failures_fatal(monkeypatch: pytest.M
                 output=[
                     {
                         "type": "function_call",
-                        "name": "pregnancy_plan_intake_advance",
+                        "name": "pregnancy_plan_workflow",
                         "call_id": "call_1",
-                        "arguments": "{}",
+                        "arguments": '{"command":"answer_current"}',
                     }
                 ],
             )
@@ -1491,7 +1493,7 @@ def test_responses_runner_keeps_tool_commit_failures_fatal(monkeypatch: pytest.M
         model_input=[{"role": "user", "content": "继续"}],
         tools=(
             SdkToolDefinition(
-                contract_name="pregnancy_plan_intake_advance",
+                contract_name="pregnancy_plan_workflow",
                 description="Advance the active intake.",
                 params_json_schema={"type": "object", "properties": {}},
                 invoke=invoke,

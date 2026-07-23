@@ -22,9 +22,6 @@ from .birth_support import (
     BirthPreparationArtifactToolHandler,
     HospitalBagFormCreateToolHandler,
     HospitalBagCardCreateToolHandler,
-    PregnancyPlanIntakeStartToolHandler,
-    PregnancyPlanIntakeAnalyzeToolHandler,
-    PregnancyPlanIntakeAdvanceToolHandler,
 )
 from .milk import (
     BusinessContextReadToolHandler,
@@ -51,7 +48,6 @@ from .plans_diary import (
     PregnancyDiarySaveToolHandler,
     PregnancyDiaryDeleteToolHandler,
     PregnancyPlanContextReadToolHandler,
-    PregnancyPlanProposeToolHandler,
     PlanTaskCreateProposeToolHandler,
     PlanTaskCompleteProposeToolHandler,
     PregnancyPlanTodoUpdateProposeToolHandler,
@@ -60,6 +56,7 @@ from .plans_diary import (
     PlanDeleteProposeToolHandler,
     MilkReminderProposeToolHandler,
 )
+from .pregnancy_plan import PregnancyPlanWorkflowToolHandler
 from .devices import (
     DevicesPumpStatusReadToolHandler,
     DeviceGuidanceReadToolHandler,
@@ -139,10 +136,7 @@ def build_default_tool_handlers(
             runtime_service=agent_runtime_service,
             plans_service=plans_service,
         ),
-        "pregnancy_plan_intake_start": PregnancyPlanIntakeStartToolHandler(runtime_service=agent_runtime_service),
-        "pregnancy_plan_intake_analyze": PregnancyPlanIntakeAnalyzeToolHandler(runtime_service=agent_runtime_service),
-        "pregnancy_plan_intake_advance": PregnancyPlanIntakeAdvanceToolHandler(runtime_service=agent_runtime_service),
-        "pregnancy_plan_propose": PregnancyPlanProposeToolHandler(runtime_service=agent_runtime_service),
+        "pregnancy_plan_workflow": PregnancyPlanWorkflowToolHandler(runtime_service=agent_runtime_service),
         "plans_task_create_propose": PlanTaskCreateProposeToolHandler(runtime_service=agent_runtime_service),
         "plans_task_complete_propose": PlanTaskCompleteProposeToolHandler(runtime_service=agent_runtime_service),
         "pregnancy_plan_todo_propose": PregnancyPlanTodoUpdateProposeToolHandler(runtime_service=agent_runtime_service),

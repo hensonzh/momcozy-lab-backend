@@ -152,6 +152,37 @@ def test_agent_run_worker_persists_workflow_reply_cursor_on_completed_message() 
     assert repository.events[1].payload["workflow_reply"] == workflow_reply
 
 
+def test_agent_run_worker_persists_workflow_prompt_on_completed_message() -> None:
+    repository = FakeAgentRuntimeRepository()
+    workflow_prompt = {
+        "schema_version": "pregnancy_plan_workflow_context.v1",
+        "workflow_type": "pregnancy_plan",
+        "status": "active",
+        "phase": "checkup_done_question",
+        "current_step": {
+            "id": "checkup_done",
+            "kind": "single_choice",
+            "question": "你做过产检了吗？",
+            "allow_free_text": False,
+            "options": [{"id": "confirm_checkup_done", "label": "做过产检"}],
+        },
+        "editable_steps": [],
+        "allowed_commands": ["answer_current", "pause", "abandon"],
+    }
+
+    async def handler(_run: AgentRun) -> AgentRunWorkerResult:
+        return AgentRunWorkerResult(
+            status="completed",
+            final_text="你做过产检了吗？",
+            workflow_prompt=workflow_prompt,
+        )
+
+    asyncio.run(AgentRunWorker(repository=repository, handler=handler).run_once(run_id=repository.run.id))
+
+    assert repository.messages[0].content["workflow_prompt"] == workflow_prompt
+    assert repository.events[1].payload["workflow_prompt"] == workflow_prompt
+
+
 def test_agent_run_worker_cancels_before_handler_when_cancel_requested() -> None:
     repository = FakeAgentRuntimeRepository()
     controls = FakeAgentRunControls(cancel_requested=True)

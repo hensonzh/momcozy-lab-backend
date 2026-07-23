@@ -175,6 +175,8 @@ class AgentReplayBundle(BaseModel):
     artifacts: list[dict[str, Any]]
     checkpoints: list[dict[str, Any]]
     workflow_states: list[dict[str, Any]]
+    workflow_events: list[dict[str, Any]] = Field(default_factory=list)
+    model_context_snapshots: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class AgentEvalCaseCreate(BaseModel):

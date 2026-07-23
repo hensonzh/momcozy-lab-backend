@@ -25,10 +25,7 @@ from app.agents.cozymate.tools import (
     MilkPlanProposeToolHandler,
     MilkScheduleRescheduleProposeToolHandler,
     PregnancyDiarySaveToolHandler,
-    PregnancyPlanIntakeAdvanceToolHandler,
-    PregnancyPlanIntakeAnalyzeToolHandler,
-    PregnancyPlanIntakeStartToolHandler,
-    PregnancyPlanProposeToolHandler,
+    PregnancyPlanWorkflowToolHandler,
     SupportTicketProposeToolHandler,
     CozymateToolExecutor,
     default_tool_registry,
@@ -42,6 +39,7 @@ from app.agent_runtime.evals.service import (
     AgentEvalTrace,
 )
 from app.agent_runtime.context.items import ContextItemAppend, message_context_item
+from app.agent_runtime.context.workflow_reply import build_workflow_reply_context
 from app.agent_runtime.runs.models import (
     AgentAction,
     AgentArtifact,
@@ -96,12 +94,12 @@ def test_observed_pregnancy_plan_creates_durable_form_then_applies_one_plan() ->
         handlers=handlers,
         tool_invocations=(
             scripted_tool_invocation("load_service_skill", {"service_skill_id": "birth-prep"}),
-            scripted_tool_invocation("pregnancy_plan_intake_start", {}),
+            scripted_tool_invocation("pregnancy_plan_workflow", {"command": "start_or_resume"}),
         ),
         final_text="请先填写孕期基本信息表。",
     )
 
-    _assert_tools(started.trace, "load_service_skill", "pregnancy_plan_intake_start")
+    _assert_tools(started.trace, "load_service_skill", "pregnancy_plan_workflow")
     _assert_artifact_events(started.trace, "form")
     workflow = scenario.workflow("pregnancy_plan")
     assert workflow.status == "collecting"
@@ -129,35 +127,32 @@ def test_observed_pregnancy_plan_creates_durable_form_then_applies_one_plan() ->
                 "verified": True,
             }
         ],
-        tool_invocations=(scripted_tool_invocation("pregnancy_plan_intake_analyze", {}),),
-        final_text="我已完成分析，请继续补充。",
+        client_context=scenario.pregnancy_command_context(command="submit_form"),
     )
-    _assert_tools(analyzed.trace, "pregnancy_plan_intake_analyze")
+    _assert_tools(analyzed.trace, "pregnancy_plan_workflow")
     assert scenario.workflow("pregnancy_plan").state["source_form_submission_id"] == "pregnancy-submission-1"
 
     skipped = scenario.run_turn(
         text="暂时没有产检记录，先跳过。",
         handlers=handlers,
-        tool_invocations=(scripted_tool_invocation("pregnancy_plan_intake_advance", {"action": "skip_checkup_records"}),),
-        final_text="还有其他需要补充的信息吗？",
+        client_context=scenario.pregnancy_command_context(
+            command="answer_current",
+            choice_id="skip_checkup_records",
+        ),
     )
-    _assert_tools(skipped.trace, "pregnancy_plan_intake_advance")
+    _assert_tools(skipped.trace, "pregnancy_plan_workflow")
     assert scenario.workflow("pregnancy_plan").state["phase"] == "final_plan_confirmation"
 
     created = scenario.run_turn(
         text="没有更多信息，请生成。",
         handlers=handlers,
-        tool_invocations=(
-            scripted_tool_invocation("pregnancy_plan_intake_advance", {"action": "confirm_ready_to_generate"}),
-            scripted_tool_invocation(
-                "pregnancy_plan_propose",
-                {"summary": "按孕周安排产检、待产和日常准备。"},
-            ),
+        client_context=scenario.pregnancy_command_context(
+            command="answer_current",
+            choice_id="confirm_ready_to_generate",
         ),
-        final_text="孕期计划已生成。",
     )
 
-    _assert_tools(created.trace, "pregnancy_plan_intake_advance", "pregnancy_plan_propose")
+    _assert_tools(created.trace, "pregnancy_plan_workflow", "pregnancy_plan_workflow")
     _assert_actions(created.trace, ("pregnancy.plan.create", "applied", "plan"))
     _assert_event_types(created.trace, required={"action.applied", "pregnancy_plan.changed", "artifact.created"})
     _assert_event_types(created.trace, forbidden={"action.confirmation_required"})
@@ -177,15 +172,55 @@ def test_observed_pregnancy_plan_urgent_turn_enters_model_before_tool_safety_res
     result = scenario.run_turn(
         text="我现在大量出血",
         handlers=scenario.pregnancy_handlers(),
-        tool_invocations=(scripted_tool_invocation("pregnancy_plan_propose", {}),),
+        tool_invocations=(
+            scripted_tool_invocation(
+                "pregnancy_plan_workflow",
+                {"command": "generate_plan"},
+            ),
+        ),
         final_text="不应返回这段模型文本。",
     )
 
     assert result.execution_result.final_text == PREGNANCY_PLAN_URGENT_RESPONSE
-    _assert_tools(result.trace, "pregnancy_plan_propose")
+    _assert_tools(result.trace, "pregnancy_plan_workflow")
     assert result.trace.actions == []
     assert scenario.repository.artifacts == []
-    assert scenario.workflow("pregnancy_plan").status == "waiting"
+    assert scenario.workflow("pregnancy_plan").status == "paused"
+    assert scenario.workflow("pregnancy_plan").active_step == "workflow_paused"
+    assert scenario.workflow("pregnancy_plan").state["resume_phase"] == "awaiting_additional_information"
+
+
+def test_observed_pregnancy_plan_urgent_historical_edit_interrupts_before_revision() -> None:
+    scenario = ObservedScenario()
+    scenario.seed_pregnancy_workflow(
+        phase="ready_to_generate",
+        state={
+            "final_plan_confirmed": True,
+            "plan_context": {"final_additional_info": "没有其他补充"},
+        },
+    )
+
+    result = scenario.run_turn(
+        text="修改最后补充",
+        handlers=scenario.pregnancy_handlers(),
+        client_context=scenario.pregnancy_command_context(
+            command="edit_answer",
+            step_id="final_confirmation",
+            choice_id="submit_final_additional_info",
+            answer="我现在大量出血",
+        ),
+        final_text="不应返回这段模型文本。",
+    )
+
+    assert result.execution_result.final_text == PREGNANCY_PLAN_URGENT_RESPONSE
+    _assert_tools(result.trace, "pregnancy_plan_workflow")
+    assert result.trace.actions == []
+    assert scenario.repository.artifacts == []
+    workflow = scenario.workflow("pregnancy_plan")
+    assert workflow.status == "paused"
+    assert workflow.active_step == "workflow_paused"
+    assert workflow.state["resume_phase"] == "ready_to_generate"
+    assert workflow.state["plan_context"]["final_additional_info"] == "没有其他补充"
 
 
 def test_observed_hospital_bag_form_card_and_cart_use_runtime_ledgers() -> None:
@@ -750,9 +785,14 @@ class ObservedScenario:
         tool_invocations: tuple[Any, ...] = (),
         final_text: str = "",
         attachments: list[dict[str, Any]] | None = None,
+        client_context: dict[str, Any] | None = None,
         backend: Any | None = None,
     ) -> ObservedTurn:
-        run = self.repository.add_run(text=text, attachments=attachments or [])
+        run = self.repository.add_run(
+            text=text,
+            attachments=attachments or [],
+            client_context=client_context,
+        )
         assert self.repository.tool_calls_for(run.id) == []
         assert self.repository.events_for(run.id) == []
         assert self.repository.actions_for(run.id) == []
@@ -815,12 +855,35 @@ class ObservedScenario:
             )
         return ObservedTurn(execution_result=result.execution_result, trace=trace)
 
+    def pregnancy_command_context(
+        self,
+        *,
+        command: str,
+        choice_id: str = "",
+        answer: str = "",
+        step_id: str = "",
+    ) -> dict[str, Any]:
+        workflow = self.workflow("pregnancy_plan")
+        command_payload = {
+            "schema_version": "pregnancy_plan_command.v1",
+            "workflow_type": "pregnancy_plan",
+            "command": command,
+        }
+        resolved_step_id = step_id or (workflow.active_step if command == "answer_current" else "")
+        if resolved_step_id:
+            command_payload["step_id"] = resolved_step_id
+        if choice_id:
+            command_payload["choice_id"] = choice_id
+        if answer:
+            command_payload["answer"] = answer
+        return {
+            "workflow_reply": build_workflow_reply_context(workflow),
+            "workflow_command": command_payload,
+        }
+
     def pregnancy_handlers(self) -> dict[str, Any]:
         return {
-            "pregnancy_plan_intake_start": PregnancyPlanIntakeStartToolHandler(runtime_service=self.runtime_service),
-            "pregnancy_plan_intake_analyze": PregnancyPlanIntakeAnalyzeToolHandler(runtime_service=self.runtime_service),
-            "pregnancy_plan_intake_advance": PregnancyPlanIntakeAdvanceToolHandler(runtime_service=self.runtime_service),
-            "pregnancy_plan_propose": PregnancyPlanProposeToolHandler(runtime_service=self.runtime_service),
+            "pregnancy_plan_workflow": PregnancyPlanWorkflowToolHandler(runtime_service=self.runtime_service),
         }
 
     def hospital_bag_handlers(self) -> dict[str, Any]:
@@ -926,7 +989,13 @@ class RecordingRuntimeRepository:
     def current_message(self) -> AgentMessage:
         return self.messages[-1]
 
-    def add_run(self, *, text: str, attachments: list[dict[str, Any]] | None = None) -> AgentRun:
+    def add_run(
+        self,
+        *,
+        text: str,
+        attachments: list[dict[str, Any]] | None = None,
+        client_context: dict[str, Any] | None = None,
+    ) -> AgentRun:
         run = AgentRun(
             id=uuid4(),
             thread_id=self.thread.id,
@@ -941,13 +1010,16 @@ class RecordingRuntimeRepository:
             error_details={},
         )
         self.runs.append(run)
+        content: dict[str, Any] = {"text": text, "attachments": attachments or []}
+        if client_context:
+            content["client_context"] = dict(client_context)
         message = AgentMessage(
             id=uuid4(),
             thread_id=self.thread.id,
             run_id=run.id,
             role="user",
             message_type="text",
-            content={"text": text, "attachments": attachments or []},
+            content=content,
             status="completed",
             sequence=len(self.messages) + 1,
             created_at=datetime.now(timezone.utc),
@@ -976,8 +1048,14 @@ class RecordingRuntimeRepository:
     async def list_messages_for_thread(self, *, thread_id: UUID, limit: int = 40):
         return [message for message in self.messages if message.thread_id == thread_id][-limit:]
 
-    async def list_context_items_for_thread(self, *, thread_id: UUID):
-        return list(self.context_items) if thread_id == self.thread.id else []
+    async def list_context_items_for_thread(
+        self,
+        *,
+        thread_id: UUID,
+        limit: int | None = None,
+    ):
+        items = list(self.context_items) if thread_id == self.thread.id else []
+        return items[-limit:] if isinstance(limit, int) else items
 
     async def append_context_items(self, *, thread_id: UUID, run_id: UUID, items):
         assert thread_id == self.thread.id
@@ -1146,12 +1224,41 @@ class RecordingRuntimeRepository:
             None,
         )
 
-    async def get_latest_workflow_state_for_thread(self, *, thread_id: UUID, owner_user_id: UUID, workflow_type: str):
+    async def get_latest_workflow_state_for_thread(
+        self,
+        *,
+        thread_id: UUID,
+        owner_user_id: UUID,
+        workflow_type: str,
+        for_update: bool = False,
+    ):
+        del for_update
         return next(
             (
                 workflow
                 for workflow in reversed(self.workflow_states)
                 if workflow.thread_id == thread_id and workflow.owner_user_id == owner_user_id and workflow.workflow_type == workflow_type
+            ),
+            None,
+        )
+
+    async def lock_workflow_owner(self, *, owner_user_id: UUID):
+        del owner_user_id
+
+    async def get_latest_workflow_state_for_owner(
+        self,
+        *,
+        owner_user_id: UUID,
+        workflow_type: str,
+        for_update: bool = False,
+    ):
+        del for_update
+        return next(
+            (
+                workflow
+                for workflow in reversed(self.workflow_states)
+                if workflow.owner_user_id == owner_user_id
+                and workflow.workflow_type == workflow_type
             ),
             None,
         )
@@ -1165,6 +1272,21 @@ class RecordingRuntimeRepository:
             and workflow.status not in {"completed", "expired", "failed"}
         ][:limit]
 
+    async def list_active_workflow_states_for_owner(
+        self,
+        *,
+        owner_user_id: UUID,
+        workflow_type: str | None = None,
+        limit: int = 5,
+    ):
+        return [
+            workflow
+            for workflow in reversed(self.workflow_states)
+            if workflow.owner_user_id == owner_user_id
+            and (workflow_type is None or workflow.workflow_type == workflow_type)
+            and workflow.status not in {"completed", "expired", "failed"}
+        ][:limit]
+
     async def create_workflow_state(self, **kwargs):
         workflow = AgentWorkflowState(id=uuid4(), **kwargs)
         self.workflow_states.append(workflow)
@@ -1175,6 +1297,9 @@ class RecordingRuntimeRepository:
             if field in kwargs:
                 setattr(workflow_state, field, kwargs[field])
         return workflow_state
+
+    async def append_workflow_event(self, **kwargs):
+        return kwargs
 
     async def mark_run_failed(self, *, run: AgentRun, completed_at: datetime, error_code: str, error_details: dict[str, Any]):
         run.status = "failed"

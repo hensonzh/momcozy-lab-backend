@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 from typing import Any
+from uuid import UUID
 
 from app.core.errors import ApiError
 from app.agent_runtime.runs.service import AgentRuntimeService
@@ -16,6 +17,7 @@ from app.agents.cozymate.tools.birth_preparation_artifacts import (
 )
 from app.agents.cozymate.tools.hospital_bag_flow import HOSPITAL_BAG_FORM_ID
 from app.agents.cozymate.tools.pregnancy_plan_flow import (
+    PREGNANCY_PLAN_INTAKE_FORM_ID,
     PregnancyPlanPhase,
     advance_pregnancy_plan_workflow,
     build_pregnancy_plan_intake_form,
@@ -25,6 +27,7 @@ from app.agents.cozymate.tools.pregnancy_plan_flow import (
     missing_pregnancy_plan_intake_fields,
     pregnancy_plan_current_followup,
     pregnancy_plan_urgent_signal_ids,
+    pregnancy_plan_workflow_context,
 )
 
 
@@ -39,6 +42,7 @@ from .shared import (
     _hospital_bag_cart_apply_payload,
     _hospital_bag_cart_idempotency_key,
     _hospital_bag_cart_preview_payload,
+    _interrupt_pregnancy_plan_for_safety,
     _ibclc_consult_card_payload,
     _ibclc_consult_consent,
     _infant_payload,
@@ -420,10 +424,50 @@ class PregnancyPlanIntakeStartToolHandler(_StandardToolHandler):
             workflow = {}
         phase = _text(workflow, "phase")
         if phase == PregnancyPlanPhase.COLLECTING_INTAKE.value:
-            return {
-                "status": "pregnancy_plan_intake_already_started",
-                "form_artifact_id": _text(workflow, "source_form_artifact_id"),
-            }
+            raw_artifact_id = _text(workflow, "source_form_artifact_id")
+            try:
+                artifact_id = UUID(raw_artifact_id)
+            except ValueError:
+                artifact_id = None
+            form_artifact = (
+                await self.runtime_service.get_artifact_for_owner(
+                    owner_user_id=context.actor.user_id,
+                    artifact_id=artifact_id,
+                )
+                if artifact_id is not None
+                else None
+            )
+            artifact_payload = (
+                form_artifact.payload
+                if form_artifact is not None and isinstance(form_artifact.payload, dict)
+                else {}
+            )
+            form = artifact_payload.get("form")
+            if (
+                form_artifact is not None
+                and form_artifact.status != "deleted"
+                and form_artifact.artifact_type == "form"
+                and artifact_payload.get("tool_name") == "pregnancy_plan_workflow"
+                and isinstance(form, dict)
+                and form.get("id") == PREGNANCY_PLAN_INTAKE_FORM_ID
+            ):
+                await _upsert_pregnancy_plan_workflow(
+                    runtime_service=self.runtime_service,
+                    context=context,
+                    workflow=workflow,
+                )
+                return {
+                    "tool_name": "ui_form_create",
+                    "status": "pregnancy_plan_intake_already_started",
+                    "form": form,
+                    "artifact_id": str(form_artifact.id),
+                    "artifact_type": form_artifact.artifact_type,
+                    "schema_version": form_artifact.schema_version,
+                    "workflow_context": pregnancy_plan_workflow_context(workflow),
+                    DEFERRED_AGENT_EVENTS_KEY: [
+                        _deferred_artifact_created_event(form_artifact)
+                    ],
+                }
         if phase == "awaiting_additional_information" or phase in {
             item.value for item in PregnancyPlanPhase if item is not PregnancyPlanPhase.COLLECTING_INTAKE
         }:
@@ -439,13 +483,40 @@ class PregnancyPlanIntakeStartToolHandler(_StandardToolHandler):
             artifact_type="form",
             schema_version="1.0",
             status="created",
-            payload={"tool_name": "pregnancy_plan_intake_start", "form": form},
+            payload={"tool_name": "pregnancy_plan_workflow", "form": form},
             emit_event=False,
         )
+        snapshot: dict[str, Any] = collecting_intake_snapshot(form_artifact_id=str(form_artifact.id))
+        prior_workflow = _dict(context.args, "prior_workflow_context")
+        if _text(context.args, "edit_step_id") == "basic_intake" and prior_workflow:
+            revisions = prior_workflow.get("answer_revisions")
+            revision_items = (
+                [dict(item) for item in revisions if isinstance(item, dict)]
+                if isinstance(revisions, list)
+                else []
+            )
+            revision_items.append(
+                {
+                    "revision": len(revision_items) + 1,
+                    "step_id": "basic_intake",
+                    "previous_answer": "已提交",
+                    "answer": "等待重新提交",
+                    "choice_id": "",
+                    "invalidated_step_ids": [
+                        "personalized_followups",
+                        "checkup_done",
+                        "checkup_records",
+                        "final_confirmation",
+                        "generate_plan",
+                    ],
+                }
+            )
+            snapshot["answer_revisions"] = revision_items[-20:]
+            snapshot["editing_step_id"] = "basic_intake"
         await _upsert_pregnancy_plan_workflow(
             runtime_service=self.runtime_service,
             context=context,
-            workflow=collecting_intake_snapshot(form_artifact_id=str(form_artifact.id)),
+            workflow=snapshot,
         )
         return {
             "tool_name": "ui_form_create",
@@ -454,6 +525,7 @@ class PregnancyPlanIntakeStartToolHandler(_StandardToolHandler):
             "artifact_id": str(form_artifact.id),
             "artifact_type": form_artifact.artifact_type,
             "schema_version": form_artifact.schema_version,
+            "workflow_context": pregnancy_plan_workflow_context(snapshot),
             DEFERRED_AGENT_EVENTS_KEY: [_deferred_artifact_created_event(form_artifact)],
         }
 
@@ -477,6 +549,12 @@ class PregnancyPlanIntakeAnalyzeToolHandler(_StandardToolHandler):
 
         urgent_signal_ids = pregnancy_plan_urgent_signal_ids(form_values)
         if urgent_signal_ids:
+            await _interrupt_pregnancy_plan_for_safety(
+                runtime_service=self.runtime_service,
+                context=context,
+                workflow=workflow,
+                signal_ids=urgent_signal_ids,
+            )
             return _pregnancy_plan_urgent_result(urgent_signal_ids)
 
         runtime_plan_context = _dict(context.args, "runtime_plan_context")
@@ -582,6 +660,12 @@ class PregnancyPlanIntakeAdvanceToolHandler(_StandardToolHandler):
 
         urgent_signal_ids = pregnancy_plan_urgent_signal_ids({"additional_info": _text(context.args, "trusted_current_user_text")})
         if urgent_signal_ids:
+            await _interrupt_pregnancy_plan_for_safety(
+                runtime_service=self.runtime_service,
+                context=context,
+                workflow=workflow,
+                signal_ids=urgent_signal_ids,
+            )
             return _pregnancy_plan_urgent_result(urgent_signal_ids)
 
         completed_followup = pregnancy_plan_current_followup(workflow)
@@ -603,12 +687,24 @@ class PregnancyPlanIntakeAdvanceToolHandler(_StandardToolHandler):
             }
         }
         trusted_current_user_text = _text(context.args, "trusted_current_user_text")
+        structured_workflow_command = (
+            context.args.get("runtime_structured_workflow_command") is True
+        )
         if action == "submit_personalized_followup":
             if completed_followup is not None:
                 payload["topic"] = _text(completed_followup, "id")
-            if trusted_current_user_text:
+            if trusted_current_user_text and (
+                not structured_workflow_command or not _text(payload, "answer")
+            ):
                 payload["answer"] = trusted_current_user_text
-        elif action == "submit_final_additional_info" and trusted_current_user_text:
+        elif (
+            action == "submit_final_additional_info"
+            and trusted_current_user_text
+            and (
+                not structured_workflow_command
+                or not _text(payload, "additional_info")
+            )
+        ):
             payload["additional_info"] = trusted_current_user_text
         try:
             advanced = advance_pregnancy_plan_workflow(workflow, action=action, payload=payload)
@@ -626,4 +722,5 @@ class PregnancyPlanIntakeAdvanceToolHandler(_StandardToolHandler):
         return _pregnancy_plan_workflow_result(
             advanced,
             completed_followup=completed_followup,
+            checkup_attachment_count=_optional_int(context.args, "runtime_checkup_attachment_count") or 0,
         )

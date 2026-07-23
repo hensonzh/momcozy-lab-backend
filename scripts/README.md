@@ -36,6 +36,7 @@ set -a; . env/compose.local.env.example; set +a
 | 后端产品化门禁 | `make backend-productization-status` | `check_productization_status.py` |
 | 后端 smoke | `make backend-smoke` | productization status + seed eval + fact extraction eval |
 | 设备开箱决策 provider-live 评测 | `make backend-agent-device-decision-eval` | 使用当前 provider、系统提示词、skill、workflow context 和工具 schema 验证继续/求助决策 |
+| Server test 数据重置 | `make backend-test-reset` | 停止 server-test Compose 并删除其 Postgres、Redis、MinIO volumes；仅用于可丢弃数据环境 |
 | Server test smoke | `make backend-test-smoke` | productization status + infra checks |
 | Production readiness | `make backend-prod-readiness` | productization status + infra checks |
 

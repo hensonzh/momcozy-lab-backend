@@ -52,7 +52,7 @@
         "turn_outcome": {
           "tools": [
             {
-              "name": "pregnancy_plan_intake_advance",
+              "name": "pregnancy_plan_workflow",
               "execution_status": "completed",
               "result": {
                 "status": "ready_to_generate"

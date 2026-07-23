@@ -54,6 +54,7 @@ from .handlers import (
     PumpingRecordDeleteProposeToolHandler,
     PumpingRecordProposeToolHandler,
     PregnancyPlanProposeToolHandler,
+    PregnancyPlanWorkflowToolHandler,
     SupportTicketProposeToolHandler,
     build_default_tool_handlers,
 )
@@ -105,6 +106,7 @@ __all__ = [
     "PumpingRecordDeleteProposeToolHandler",
     "PumpingRecordProposeToolHandler",
     "PregnancyPlanProposeToolHandler",
+    "PregnancyPlanWorkflowToolHandler",
     "SupportTicketProposeToolHandler",
     "ToolContract",
     "ToolContractRegistry",

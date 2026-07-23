@@ -43,6 +43,7 @@ from .shared import (
     _dict,
     _existing_pregnancy_plan_result,
     _failed_action_result,
+    _interrupt_pregnancy_plan_for_safety,
     _limit,
     _milk_reminder_apply_payload,
     _milk_reminder_preview_payload,
@@ -309,6 +310,14 @@ class PregnancyPlanProposeToolHandler(_StandardToolHandler):
             }
         )
         if urgent_signal_ids:
+            workflow = _dict(context.args, "runtime_workflow_context")
+            if workflow:
+                await _interrupt_pregnancy_plan_for_safety(
+                    runtime_service=self.runtime_service,
+                    context=context,
+                    workflow=workflow,
+                    signal_ids=urgent_signal_ids,
+                )
             return _pregnancy_plan_urgent_result(urgent_signal_ids)
         runtime_plan_context = _dict(context.args, "runtime_plan_context")
         existing = _existing_pregnancy_plan_result(runtime_plan_context)

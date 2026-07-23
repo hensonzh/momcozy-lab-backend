@@ -704,6 +704,14 @@
             "title": "Messages",
             "type": "array"
           },
+          "model_context_snapshots": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Model Context Snapshots",
+            "type": "array"
+          },
           "run": {
             "additionalProperties": true,
             "title": "Run",
@@ -715,6 +723,14 @@
               "type": "object"
             },
             "title": "Tool Calls",
+            "type": "array"
+          },
+          "workflow_events": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Workflow Events",
             "type": "array"
           },
           "workflow_states": {

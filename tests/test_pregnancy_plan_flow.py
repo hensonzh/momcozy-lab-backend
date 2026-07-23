@@ -18,8 +18,13 @@ from app.agents.cozymate.tools.pregnancy_plan_flow import (
     ensure_pregnancy_plan_final_question,
     initialize_pregnancy_plan_workflow,
     normalize_pregnancy_plan_generation_context,
+    pause_pregnancy_plan_workflow,
     pregnancy_plan_current_followup,
+    pregnancy_plan_current_step,
     pregnancy_plan_urgent_signal_ids,
+    resolve_pregnancy_plan_answer,
+    resume_pregnancy_plan_workflow,
+    revise_pregnancy_plan_workflow,
 )
 
 
@@ -33,7 +38,125 @@ def test_pregnancy_plan_flow_matches_legacy_visible_pregeneration_phases() -> No
         "ready_to_generate",
     ]
     assert PREGNANCY_PLAN_FOLLOWUP_MAX_ROUNDS == 3
-    assert PREGNANCY_PLAN_WORKFLOW_SCHEMA_VERSION == "v2"
+    assert PREGNANCY_PLAN_WORKFLOW_SCHEMA_VERSION == "v3"
+
+
+def test_pregnancy_plan_current_step_exposes_stable_choice_ids() -> None:
+    workflow = {
+        "phase": "checkup_done_question",
+        "visible_question": PREGNANCY_PLAN_CHECKUP_DONE_QUESTION,
+    }
+
+    step = pregnancy_plan_current_step(workflow)
+
+    assert step["id"] == "checkup_done"
+    assert step["kind"] == "single_choice"
+    assert step["question"] == PREGNANCY_PLAN_CHECKUP_DONE_QUESTION
+    assert step["allow_free_text"] is False
+    assert step["options"] == [
+        {"id": "confirm_checkup_done", "label": "做过产检"},
+        {"id": "confirm_no_checkup_yet", "label": "还没做过"},
+        {"id": "confirm_checkup_unknown", "label": "不确定"},
+    ]
+
+
+def test_pregnancy_plan_followup_choice_resolves_to_one_grounded_answer() -> None:
+    workflow = {
+        "phase": "personalized_followup",
+        "followup_topics": [
+            {
+                "id": "doctor_special_notes_followup",
+                "question": "医生有没有说明什么时候复查？",
+                "reply_options": ["已经安排", "还没确定", "先放进待确认"],
+            }
+        ],
+        "personalized_followup_records": [],
+    }
+    step = pregnancy_plan_current_step(workflow)
+
+    action, payload = resolve_pregnancy_plan_answer(
+        workflow,
+        choice_id=step["options"][1]["id"],
+        free_text="",
+    )
+
+    assert action == "submit_personalized_followup"
+    assert payload == {"answer": "还没确定"}
+    assert step["options"][-1] == {
+        "id": "finish_personalized_followups",
+        "label": "跳过剩余问题",
+    }
+
+
+def test_pregnancy_plan_pause_and_resume_preserve_the_exact_step() -> None:
+    workflow = {
+        "phase": "checkup_records_upload",
+        "visible_question": PREGNANCY_PLAN_CHECKUP_UPLOAD_QUESTION,
+        "plan_context": {"current_week": "20周"},
+    }
+
+    paused = pause_pregnancy_plan_workflow(workflow)
+    resumed = resume_pregnancy_plan_workflow(paused)
+
+    assert paused["paused"] is True
+    assert paused["resume_phase"] == "checkup_records_upload"
+    assert pregnancy_plan_current_step(paused)["id"] == "workflow_paused"
+    assert resumed["phase"] == "checkup_records_upload"
+    assert "paused" not in resumed
+    assert resumed["visible_question"] == PREGNANCY_PLAN_CHECKUP_UPLOAD_QUESTION
+
+
+def test_revising_a_historical_followup_keeps_unaffected_answers_and_invalidates_downstream() -> None:
+    workflow = {
+        "phase": "ready_to_generate",
+        "analysis": {"stage": {"id": "second_trimester"}},
+        "followup_topics": [
+            {"id": "topic_a", "question": "A?", "reply_options": ["A1", "A2"]},
+            {"id": "topic_b", "question": "B?", "reply_options": ["B1", "B2"]},
+        ],
+        "personalized_followup_records": [
+            {"topic": "topic_a", "question": "A?", "answer": "旧答案", "plan_impact": "impact-a"},
+            {"topic": "topic_b", "question": "B?", "answer": "保留答案", "plan_impact": "impact-b"},
+        ],
+        "plan_context": {
+            "personalized_followup_records": [
+                {"topic": "topic_a", "question": "A?", "answer": "旧答案", "plan_impact": "impact-a"},
+                {"topic": "topic_b", "question": "B?", "answer": "保留答案", "plan_impact": "impact-b"},
+            ],
+            "checkup_status": "暂不上传",
+            "final_additional_info": "旧补充",
+        },
+        "checkup_status": "暂不上传",
+        "final_plan_confirmed": True,
+    }
+
+    revised = revise_pregnancy_plan_workflow(
+        workflow,
+        step_id="followup:topic_a",
+        choice_id="",
+        answer="新答案",
+    )
+
+    assert [record["answer"] for record in revised["personalized_followup_records"]] == [
+        "新答案",
+        "保留答案",
+    ]
+    assert revised["phase"] == "checkup_records_upload"
+    assert "checkup_status" not in revised
+    assert "final_plan_confirmed" not in revised
+    assert revised["answer_revisions"][-1] == {
+        "revision": 1,
+        "step_id": "followup:topic_a",
+        "previous_answer": "旧答案",
+        "answer": "新答案",
+        "choice_id": "",
+        "invalidated_step_ids": [
+            "checkup_done",
+            "checkup_records",
+            "final_confirmation",
+            "generate_plan",
+        ],
+    }
 
 
 def test_pregnancy_plan_workflow_asks_zero_followups_when_the_form_has_no_material_gap() -> None:
@@ -500,7 +623,7 @@ def test_pregnancy_plan_result_keeps_legacy_envelope_and_injected_timestamp() ->
         now=datetime(2026, 7, 12, 8, 30, tzinfo=timezone.utc),
     )
 
-    assert result["tool_name"] == "pregnancy_plan_propose"
+    assert result["tool_name"] == "pregnancy_plan_workflow"
     assert result["status"] == "card_created"
     card_json = result["card"]["card_json"]
     assert card_json["owner"]["due_date_or_week"] == "32周"

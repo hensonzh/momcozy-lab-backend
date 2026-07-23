@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .workflow_command import normalize_workflow_command
 from .workflow_reply import normalize_workflow_reply_context
 
 
@@ -23,6 +24,9 @@ def sanitize_agent_client_context(value: Any) -> dict[str, Any]:
     workflow_reply = normalize_workflow_reply_context(value.get("workflow_reply"))
     if workflow_reply:
         context["workflow_reply"] = workflow_reply
+    workflow_command = normalize_workflow_command(value.get("workflow_command"))
+    if workflow_command:
+        context["workflow_command"] = workflow_command
     return context
 
 
