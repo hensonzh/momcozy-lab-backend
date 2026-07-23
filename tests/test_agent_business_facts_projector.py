@@ -1,5 +1,4 @@
 import asyncio
-import json
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -137,19 +136,10 @@ def test_business_facts_projector_returns_empty_when_no_handlers_are_available()
     assert facts == {}
 
 
-def test_business_facts_projector_unwraps_standard_tool_results() -> None:
-    async def pregnancy_context_handler(_context):
-        return ToolResult.json(
-            {
-                "profile": {"age": 32},
-                "plans": [],
-                "assistant_hint": "do not project",
-            }
-        )
-
+def test_business_facts_projector_does_not_project_birth_prep_context() -> None:
     facts = asyncio.run(
         BusinessFactsProjector(
-            handlers={"pregnancy_plan_context_read": pregnancy_context_handler},
+            handlers={},
             clock=lambda: datetime(2026, 7, 13, 8, 0, tzinfo=timezone.utc),
         ).project(
             actor=_actor(),
@@ -158,11 +148,7 @@ def test_business_facts_projector_unwraps_standard_tool_results() -> None:
         )
     )
 
-    assert facts["pregnancy"] == {
-        "profile": {"age": 32},
-        "plans": [],
-    }
-    assert json.loads(json.dumps(facts, ensure_ascii=False)) == facts
+    assert facts == {}
 
 
 class FakeSharedSessionGuard:

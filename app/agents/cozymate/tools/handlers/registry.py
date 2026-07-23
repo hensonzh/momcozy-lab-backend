@@ -24,7 +24,6 @@ from .birth_support import (
     HospitalBagCardCreateToolHandler,
 )
 from .milk import (
-    BusinessContextReadToolHandler,
     MilkSummaryReadToolHandler,
     MilkStatusReadToolHandler,
     MilkAnalysisReadToolHandler,
@@ -47,10 +46,8 @@ from .plans_diary import (
     PregnancyDiaryQueryToolHandler,
     PregnancyDiarySaveToolHandler,
     PregnancyDiaryDeleteToolHandler,
-    PregnancyPlanContextReadToolHandler,
     PlanTaskCreateProposeToolHandler,
     PlanTaskCompleteProposeToolHandler,
-    PregnancyPlanTodoUpdateProposeToolHandler,
     PlanTaskUpdateProposeToolHandler,
     PlanTaskDeleteProposeToolHandler,
     PlanDeleteProposeToolHandler,
@@ -81,11 +78,6 @@ def build_default_tool_handlers(
     handlers: dict[str, ToolHandler] = {
         "profile_read": ProfileReadToolHandler(service=profile_service),
         "profile_update": ProfileUpdateToolHandler(runtime_service=agent_runtime_service),
-        "business_context_read": BusinessContextReadToolHandler(
-            records_service=records_service,
-            plans_service=plans_service,
-            devices_service=devices_service,
-        ),
         "records_milk_summary_read": MilkSummaryReadToolHandler(
             records_service=records_service,
             profile_service=profile_service,
@@ -110,10 +102,6 @@ def build_default_tool_handlers(
         "pregnancy_diary_query": PregnancyDiaryQueryToolHandler(diary_service=diary_service),
         "pregnancy_diary_save": PregnancyDiarySaveToolHandler(runtime_service=agent_runtime_service),
         "pregnancy_diary_delete": PregnancyDiaryDeleteToolHandler(runtime_service=agent_runtime_service),
-        "pregnancy_plan_context_read": PregnancyPlanContextReadToolHandler(
-            profile_service=profile_service,
-            plans_service=plans_service,
-        ),
         "devices_pump_status_read": DevicesPumpStatusReadToolHandler(devices_service=devices_service),
         "devices_guidance_read": DeviceGuidanceReadToolHandler(
             asset_service=asset_service,
@@ -139,7 +127,6 @@ def build_default_tool_handlers(
         "pregnancy_plan_workflow": PregnancyPlanWorkflowToolHandler(runtime_service=agent_runtime_service),
         "plans_task_create_propose": PlanTaskCreateProposeToolHandler(runtime_service=agent_runtime_service),
         "plans_task_complete_propose": PlanTaskCompleteProposeToolHandler(runtime_service=agent_runtime_service),
-        "pregnancy_plan_todo_propose": PregnancyPlanTodoUpdateProposeToolHandler(runtime_service=agent_runtime_service),
         "plans_task_update_propose": PlanTaskUpdateProposeToolHandler(runtime_service=agent_runtime_service),
         "plans_task_delete_propose": PlanTaskDeleteProposeToolHandler(runtime_service=agent_runtime_service),
         "plans_milk_task_update_propose": PlanTaskUpdateProposeToolHandler(runtime_service=agent_runtime_service),

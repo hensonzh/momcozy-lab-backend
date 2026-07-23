@@ -28,9 +28,9 @@ Tool 只有一个领域归属，但公共 Tool 和有界专业能力可以按 Al
 
 `profile_read`、`profile_update`、`plans_current_read`、`plans_calendar_read`、`plans_task_create_propose`、`plans_task_complete_propose`、`plans_task_update_propose`、`plans_task_delete_propose`、`plans_plan_delete_propose`、`pregnancy_diary_query`、`pregnancy_diary_save`、`pregnancy_diary_delete`、`conversation_history_image_load`
 
-### 产前服务智能体（5）
+### 产前服务智能体（4）
 
-`pregnancy_plan_workflow`、`pregnancy_plan_todo_propose`、`hospital_bag_form_create`、`hospital_bag_card_create`、`hospital_bag_cart_update`。
+`pregnancy_plan_workflow`、`hospital_bag_form_create`、`hospital_bag_card_create`、`hospital_bag_cart_update`。
 
 其中 `pregnancy_plan_workflow` 是唯一对模型和 App 暴露的孕期计划流程入口。原开始采集、分析表单、推进追问和生成计划四个操作只作为内部 Handler 保留，不再是 Tool Contract。
 
@@ -65,9 +65,9 @@ App 的选项点击、表单提交、暂停、恢复和历史修改通过 `pregn
 
 `devices_pump_status_read`、`devices_guidance_read`、`devices_unboxing_advance`、`hospital_bag_pump_recommend`、`support_ticket_propose`。
 
-### 已移除（2）
+### 已移除（5）
 
-`birth_plan_form_create`、`labor_communication_card_create` 及分娩沟通单表单、卡片、Fact、Skill 和 Eval 链路已删除。
+`birth_plan_form_create`、`labor_communication_card_create`、`business_context_read`、`pregnancy_plan_context_read`、`pregnancy_plan_todo_propose` 及其表单、卡片、上下文投影、Action、Fact、Skill 和 Eval 链路已删除。
 
 ### 重构后移除（1）
 
@@ -91,7 +91,7 @@ App 的选项点击、表单提交、暂停、恢复和历史修改通过 `pregn
 
 ## Tool 之外的能力
 
-`health-consultation` 和 `emotion-support` 当前是 Skill，`business_context_read` 与 `pregnancy_plan_context_read` 是内部 Handler，Health Web Search 是 Provider 能力。
+`health-consultation` 和 `emotion-support` 当前是 Skill，Health Web Search 是 Provider 能力。
 
 ## 跨域边界
 

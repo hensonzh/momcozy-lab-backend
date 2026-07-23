@@ -26,7 +26,6 @@ MILK_PLAN_CALENDAR_APPEND = "append"
 MILK_PLAN_CALENDAR_REPLACE = "replace_future_plan_tasks"
 PREGNANCY_PLAN_CREATE_ACTION = "pregnancy.plan.create"
 PREGNANCY_PLAN_CHANGED_EVENT = "pregnancy_plan.changed"
-PREGNANCY_PLAN_TODO_UPDATE_ACTION = "pregnancy.plan_todo.update"
 PLAN_TASK_CREATE_ACTION = "plans.task.create"
 PLAN_TASK_COMPLETE_ACTION = "plans.task.complete"
 PLAN_TASK_UPDATE_ACTION = "plans.task.update"
@@ -276,60 +275,6 @@ class PregnancyPlanCreateActionHandler:
                         "plan_id": str(plan.id),
                         "plan_type": plan.plan_type,
                         "source": plan.source,
-                    },
-                ),
-            ),
-        )
-
-
-class PregnancyPlanTodoUpdateActionHandler:
-    def __init__(self, *, service: PlansService) -> None:
-        self.service = service
-
-    async def __call__(self, action: AgentAction) -> AgentActionApplyResult:
-        payload = dict(action.apply_payload or {})
-        plan_id = _required_uuid(payload, "plan_id", "missing_plan_id", "invalid_plan_id")
-        item_id = _text(payload, "item_id")
-        if not item_id:
-            raise PermanentActionError("missing_todo_item_id")
-        completed = _optional_bool(payload, "completed", default=True, code="invalid_completed")
-        expected_version = _required_positive_int(payload, "expected_version", "invalid_expected_version")
-        try:
-            plan = await self.service.update_plan_todo_completion(
-                owner_user_id=action.actor_user_id,
-                plan_id=plan_id,
-                item_id=item_id,
-                completed=completed,
-                expected_version=expected_version,
-                request_id=f"agent-action:{action.id}",
-                idempotency_key=action.idempotency_key or f"agent-action:{action.id}",
-            )
-        except ApiError as exc:
-            raise PermanentActionError(exc.code) from exc
-        if plan.plan_type != "pregnancy":
-            raise PermanentActionError("invalid_pregnancy_plan")
-        return AgentActionApplyResult(
-            resource_type="plan",
-            resource_id=str(plan.id),
-            details={
-                "plan_type": "pregnancy",
-                "item_id": item_id,
-                "completed": completed,
-                "version": plan.version,
-                "agent_action_id": str(action.id),
-                "agent_run_id": str(action.run_id),
-            },
-            application_events=(
-                AgentApplicationEvent(
-                    event_type=PREGNANCY_PLAN_CHANGED_EVENT,
-                    payload={
-                        "operation": "updated",
-                        "reason": "todo_completion_changed",
-                        "plan_id": str(plan.id),
-                        "plan_type": "pregnancy",
-                        "source": "agent_action",
-                        "version": plan.version,
-                        "item_ids": [item_id],
                     },
                 ),
             ),
@@ -661,19 +606,6 @@ def _optional_bool(payload: dict[str, Any], key: str, *, default: bool, code: st
     if isinstance(value, bool):
         return value
     raise PermanentActionError(code)
-
-
-def _required_positive_int(payload: dict[str, Any], key: str, code: str) -> int:
-    value = payload.get(key)
-    if value is None or isinstance(value, bool):
-        raise PermanentActionError(code)
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError) as exc:
-        raise PermanentActionError(code) from exc
-    if parsed < 1:
-        raise PermanentActionError(code)
-    return parsed
 
 
 def _required_uuid_list(payload: dict[str, Any], key: str, code: str) -> list[UUID]:

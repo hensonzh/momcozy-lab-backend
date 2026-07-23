@@ -371,7 +371,7 @@ def create_birth_preparation_artifact_result(tool_name: str, args: dict[str, Any
 
 def artifact_record_from_birth_preparation_result(result: dict[str, Any]) -> dict[str, Any] | None:
     status = _text(result.get("status"))
-    if status not in {"form_created", "card_created", "existing_plan_found", "cart_updated", "cart_unchanged"}:
+    if status not in {"form_created", "card_created", "cart_updated", "cart_unchanged"}:
         return None
     form = _dict(result.get("form"))
     if form:

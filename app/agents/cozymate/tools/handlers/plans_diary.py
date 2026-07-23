@@ -15,10 +15,8 @@ from app.agents.cozymate.actions.plans import (
     PLAN_TASK_UPDATE_ACTION,
     PLAN_DELETE_ACTION,
     PREGNANCY_PLAN_CREATE_ACTION,
-    PREGNANCY_PLAN_TODO_UPDATE_ACTION,
 )
 from app.modules.plans.service import PlansService
-from app.modules.profiles.service import ProfileService
 from app.agents.cozymate.tools.birth_preparation_artifacts import (
     artifact_record_from_birth_preparation_result,
 )
@@ -41,7 +39,6 @@ from .shared import (
     _diary_entry_date,
     _diary_payload,
     _dict,
-    _existing_pregnancy_plan_result,
     _failed_action_result,
     _interrupt_pregnancy_plan_for_safety,
     _limit,
@@ -62,12 +59,8 @@ from .shared import (
     _plan_task_update_preview_payload,
     _pregnancy_plan_action_idempotency_key,
     _pregnancy_plan_apply_payload,
-    _pregnancy_plan_context_payload,
     _pregnancy_plan_preview_payload,
-    _pregnancy_plan_todo_apply_payload,
-    _pregnancy_plan_todo_preview_payload,
     _pregnancy_plan_urgent_result,
-    _profile_payload,
     _proposal_result,
     _propose_action_reusing_idempotency,
     _require_pregnancy_plan_thread_id,
@@ -258,39 +251,6 @@ class PregnancyDiaryDeleteToolHandler(_StandardToolHandler):
         return output
 
 
-class PregnancyPlanContextReadToolHandler(_StandardToolHandler):
-    def __init__(
-        self,
-        *,
-        profile_service: ProfileService,
-        plans_service: PlansService,
-    ) -> None:
-        self.profile_service = profile_service
-        self.plans_service = plans_service
-
-    async def execute(self, context: ToolHandlerContext) -> dict[str, Any]:
-        owner_user_id = context.actor.user_id
-        limit = _limit(context.args.get("limit"), default=5, max_limit=20)
-        profile = await self.profile_service.get_user_profile(user_id=owner_user_id)
-        plans = await self.plans_service.list_plans(
-            owner_user_id=owner_user_id,
-            plan_type="pregnancy",
-            status="active",
-            limit=limit,
-        )
-        tasks = await self.plans_service.list_tasks(owner_user_id=owner_user_id, limit=limit)
-        output: dict[str, Any] = {
-            "profile": _profile_payload(profile=profile, actor_user_id=owner_user_id),
-            "plans": [_pregnancy_plan_context_payload(plan) for plan in plans],
-            "tasks": [_task_payload(task) for task in tasks],
-            "counts": {
-                "plans": len(plans),
-                "tasks": len(tasks),
-            },
-        }
-        return output
-
-
 class PregnancyPlanProposeToolHandler(_StandardToolHandler):
     def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
         self.runtime_service = runtime_service
@@ -320,9 +280,6 @@ class PregnancyPlanProposeToolHandler(_StandardToolHandler):
                 )
             return _pregnancy_plan_urgent_result(urgent_signal_ids)
         runtime_plan_context = _dict(context.args, "runtime_plan_context")
-        existing = _existing_pregnancy_plan_result(runtime_plan_context)
-        if existing is not None:
-            return existing
         workflow_phase = _text(runtime_plan_context, "workflow_phase")
         if workflow_phase == PregnancyPlanPhase.COLLECTING_INTAKE.value or not workflow_phase:
             return {"status": "needs_pregnancy_plan_intake"}
@@ -439,34 +396,6 @@ class PlanTaskCompleteProposeToolHandler(_StandardToolHandler):
             preview_payload=preview_payload,
             apply_payload=apply_payload,
             idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:plan-task-complete",
-        )
-        return _proposal_result(action=action, preview_payload=preview_payload)
-
-
-class PregnancyPlanTodoUpdateProposeToolHandler(_StandardToolHandler):
-    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
-        self.runtime_service = runtime_service
-
-    async def execute(self, context: ToolHandlerContext) -> dict[str, Any]:
-        apply_payload = _pregnancy_plan_todo_apply_payload(context.args)
-        for key in ("plan_id", "item_id"):
-            if not _text(apply_payload, key):
-                raise ApiError(code="validation_failed", message=f"{key} is required.", status=422)
-        expected_version = apply_payload.get("expected_version")
-        if isinstance(expected_version, bool) or not isinstance(expected_version, int) or expected_version < 1:
-            raise ApiError(code="validation_failed", message="expected_version must be a positive integer.", status=422)
-        preview_payload = _pregnancy_plan_todo_preview_payload(apply_payload)
-        action = await self.runtime_service.propose_action(
-            owner_user_id=context.actor.user_id,
-            run_id=context.run_id,
-            action_type=PREGNANCY_PLAN_TODO_UPDATE_ACTION,
-            target_type="plan",
-            target_id=_text(apply_payload, "plan_id"),
-            side_effect_level="medium",
-            preview_payload=preview_payload,
-            apply_payload=apply_payload,
-            idempotency_key=_text(context.args, "idempotency_key")
-            or f"{context.run_id}:{context.call_id}:pregnancy-plan-todo",
         )
         return _proposal_result(action=action, preview_payload=preview_payload)
 

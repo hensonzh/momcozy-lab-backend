@@ -561,18 +561,6 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "idempotency_key": {"type": "string", "maxLength": 255},
         },
     },
-    "pregnancy_plan_todo_propose": {
-        "type": "object",
-        "additionalProperties": False,
-        "required": ["plan_id", "item_id", "completed", "expected_version"],
-        "properties": {
-            "plan_id": {"type": "string", "minLength": 1, "maxLength": 80},
-            "item_id": {"type": "string", "minLength": 1, "maxLength": 160},
-            "completed": {"type": "boolean"},
-            "expected_version": {"type": "integer", "minimum": 1},
-            "idempotency_key": {"type": "string", "maxLength": 255},
-        },
-    },
     "plans_task_update_propose": {
         "type": "object",
         "additionalProperties": False,

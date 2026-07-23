@@ -32,8 +32,7 @@ from app.agents.cozymate.health_guidance import (
 from app.agents.cozymate.executor import (
     CozymateAgentExecutor,
     CozymateAgentExecutorConfig,
-    _birth_prep_form_default_values,
-    _pregnancy_runtime_plan_context,
+    _pregnancy_workflow_runtime_context,
 )
 from app.agents.cozymate.quick_replies import (
     QUICK_REPLY_FINALIZER_INSTRUCTIONS,
@@ -940,14 +939,11 @@ def test_agent_runtime_executor_load_service_skill_returns_facts_and_records_led
     assert repository.run_summaries == []
 
 
-def test_agent_runtime_executor_loads_birth_prep_with_structured_business_fact_result() -> None:
+def test_agent_runtime_executor_loads_birth_prep_without_implicit_business_facts() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)
     current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="帮我生成孕期计划", sequence=1)
     repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
-
-    async def pregnancy_context_handler(_context):
-        return ToolResult.json({"profile": {"age": 32}, "plans": [], "tasks": []})
 
     backend = ScriptedSdkBackend(
         [
@@ -962,17 +958,13 @@ def test_agent_runtime_executor_loads_birth_prep_with_structured_business_fact_r
     result = asyncio.run(
         CozymateAgentExecutor(
             repository=repository,
-            business_facts_projector=BusinessFactsProjector(handlers={"pregnancy_plan_context_read": pregnancy_context_handler}),
+            business_facts_projector=BusinessFactsProjector(handlers={}),
             sdk_runner=OpenAIResponsesRunner(backend=backend),
         ).execute(run=run)
     )
 
     assert result.status == "completed"
-    assert repository.tool_output.safe_output["business_facts"]["pregnancy"] == {
-        "profile": {"age": 32},
-        "plans": [],
-        "tasks": [],
-    }
+    assert repository.tool_output.safe_output["business_facts"] == {}
 
 
 @pytest.mark.parametrize(
@@ -982,16 +974,15 @@ def test_agent_runtime_executor_loads_birth_prep_with_structured_business_fact_r
                 "birth-prep",
                 {
                     "pregnancy_plan_workflow",
-                    "pregnancy_plan_todo_propose",
-                "plans_plan_delete_propose",
-                "plans_task_update_propose",
-                "plans_task_delete_propose",
-                "hospital_bag_form_create",
-                "hospital_bag_card_create",
-                "hospital_bag_cart_update",
-                "hospital_bag_pump_recommend",
-            },
-        ),
+                    "plans_plan_delete_propose",
+                    "plans_task_update_propose",
+                    "plans_task_delete_propose",
+                    "hospital_bag_form_create",
+                    "hospital_bag_card_create",
+                    "hospital_bag_cart_update",
+                    "hospital_bag_pump_recommend",
+                },
+            ),
         (
             "health-consultation",
             {
@@ -1028,7 +1019,6 @@ def test_service_skill_recommendations_are_small_non_authoritative_provider_tool
             )
         ]
     )
-
     asyncio.run(
         CozymateAgentExecutor(
             repository=repository,
@@ -1381,12 +1371,6 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert backend.tool_schemas["plans_plan_delete_propose"]["required"] == ["plan_id"]
     assert backend.tool_schemas["plans_task_complete_propose"]["required"] == ["task_id"]
     assert backend.tool_schemas["plans_task_complete_propose"]["properties"]["completed"]["type"] == "boolean"
-    assert backend.tool_schemas["pregnancy_plan_todo_propose"]["required"] == [
-        "plan_id",
-        "item_id",
-        "completed",
-        "expected_version",
-    ]
     assert backend.tool_schemas["plans_task_create_propose"]["required"] == ["title"]
     assert backend.tool_schemas["plans_task_delete_propose"]["required"] == ["task_id"]
     assert backend.tool_schemas["plans_task_update_propose"]["required"] == ["task_id"]
@@ -2663,7 +2647,6 @@ def test_agent_runtime_executor_passes_verified_pregnancy_inputs_only_to_tool() 
     assert captured_args["form_submission_id"] == attachment["submission_id"]
     assert captured_args["form_artifact_id"] == str(form_artifact_id)
     assert captured_args["runtime_plan_context"] == {
-        "has_active_plan": False,
         "workflow_phase": "collecting_intake",
         "source_form_artifact_id": str(form_artifact_id),
     }
@@ -3407,7 +3390,7 @@ def test_agent_runtime_executor_passes_verified_intake_with_urgent_signal_to_mod
     }
 
 
-def test_agent_runtime_executor_prefills_form_from_runtime_business_facts_without_model_args() -> None:
+def test_agent_runtime_executor_prefills_form_without_birth_prep_business_projection() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)
     current_user = _message(
@@ -3456,13 +3439,13 @@ def test_agent_runtime_executor_prefills_form_from_runtime_business_facts_withou
     assert captured_args == {
         "default_values": {
             "age": 34,
-            "current_week": "2026-09-18",
-            "due_date_or_week": "2026-09-18",
+            "current_week": "25周",
+            "due_date_or_week": "30周",
             "feeding_intention": "混合喂养",
             "first_birth": "否",
         }
     }
-    assert business_facts_projector.calls[0]["service_skill_id"] == ServiceSkillId.BIRTH_PREP
+    assert business_facts_projector.calls == []
     assert fact_service.requested_form_ids == ["hospital_bag_intake"]
 
 
@@ -3502,6 +3485,7 @@ def test_agent_runtime_executor_prefills_pregnancy_form_from_reliable_same_turn_
             )
         ]
     )
+    business_facts_projector = FakeBusinessFactsProjector(facts={})
 
     asyncio.run(
         CozymateAgentExecutor(
@@ -3509,7 +3493,7 @@ def test_agent_runtime_executor_prefills_pregnancy_form_from_reliable_same_turn_
             sdk_runner=OpenAIResponsesRunner(backend=backend),
             tool_registry=registry,
             tool_executor=tool_executor,
-            business_facts_projector=FakeBusinessFactsProjector(facts={}),
+            business_facts_projector=business_facts_projector,
         ).execute(run=run)
     )
 
@@ -3518,83 +3502,9 @@ def test_agent_runtime_executor_prefills_pregnancy_form_from_reliable_same_turn_
         "current_week": "25+3周",
         "due_date_or_week": "25+3周",
     }
-    assert captured_args["runtime_plan_context"] == {"has_active_plan": False}
+    assert captured_args["runtime_plan_context"] == {}
     assert captured_args["runtime_workflow_context"] == {}
-
-
-def test_birth_prep_prefill_uses_verified_profile_then_active_plan_owner_without_exposing_payload() -> None:
-    defaults = _birth_prep_form_default_values(
-        {
-            "pregnancy": {
-                "profile": {"estimated_due_date": "2026-09-18", "age": 33},
-                "plans": [
-                    {
-                        "status": "active",
-                        "plan_type": "pregnancy",
-                        "owner": {
-                            "due_date_or_week": "31周",
-                            "age": 35,
-                            "ivf": "是",
-                            "fetus_count": "双胎",
-                            "first_birth": "否",
-                            "birth_path": "剖宫产",
-                            "birth_setting": "市妇幼",
-                            "feeding_intention": "混合",
-                            "support_person": "伴侣",
-                        },
-                    }
-                ],
-            }
-        }
-    )
-
-    assert defaults == {
-        "due_date_or_week": "2026-09-18",
-        "current_week": "2026-09-18",
-        "age": 33,
-        "ivf": "是",
-        "fetus_count": "双胎",
-        "first_birth": "否",
-        "birth_path": "剖宫产",
-        "birth_hospital": "市妇幼",
-        "feeding_intention": "混合",
-        "support_person": "伴侣",
-    }
-
-
-def test_pregnancy_runtime_plan_context_ignores_active_non_pregnancy_plans() -> None:
-    context = _pregnancy_runtime_plan_context(
-        {
-            "pregnancy": {
-                "profile": {"estimated_due_date": "2026-09-18"},
-                "plans": [
-                    {"id": "milk-plan", "plan_type": "milk_management", "status": "active", "title": "追奶计划"},
-                    {"id": "pregnancy-plan", "plan_type": "pregnancy", "status": "active", "title": "孕期计划"},
-                ],
-            }
-        }
-    )
-
-    assert context == {
-        "has_active_plan": True,
-        "estimated_due_date": "2026-09-18",
-        "active_plan_id": "pregnancy-plan",
-        "active_plan_title": "孕期计划",
-    }
-
-
-def test_pregnancy_runtime_plan_context_allows_creation_when_only_other_plan_types_are_active() -> None:
-    context = _pregnancy_runtime_plan_context(
-        {
-            "pregnancy": {
-                "plans": [
-                    {"id": "milk-plan", "plan_type": "milk_management", "status": "active", "title": "追奶计划"},
-                ],
-            }
-        }
-    )
-
-    assert context == {"has_active_plan": False}
+    assert business_facts_projector.calls == []
 
 
 def test_expired_pregnancy_workflow_is_not_reused_as_trusted_intake_context() -> None:
@@ -3664,9 +3574,8 @@ def test_pregnancy_workflow_is_recovered_for_the_owner_across_threads() -> None:
     assert result["state"]["source_form_artifact_id"] == "form-across-threads"
 
 
-def test_pregnancy_runtime_plan_context_recovers_analyzed_intake_from_workflow_state() -> None:
-    context = _pregnancy_runtime_plan_context(
-        {"pregnancy": {"profile": {"estimated_due_date": "2026-09-18"}, "plans": []}},
+def test_pregnancy_workflow_runtime_context_recovers_analyzed_intake_from_workflow_state() -> None:
+    context = _pregnancy_workflow_runtime_context(
         workflow={
             "workflow_state_id": "workflow-1",
             "run_id": "analysis-run-1",
@@ -3687,8 +3596,6 @@ def test_pregnancy_runtime_plan_context_recovers_analyzed_intake_from_workflow_s
     )
 
     assert context == {
-        "has_active_plan": False,
-        "estimated_due_date": "2026-09-18",
         "workflow_phase": "awaiting_additional_information",
         "analysis_run_id": "analysis-run-1",
         "source_form_artifact_id": "form-1",
@@ -3702,9 +3609,8 @@ def test_pregnancy_runtime_plan_context_recovers_analyzed_intake_from_workflow_s
     }
 
 
-def test_pregnancy_runtime_plan_context_does_not_resurrect_consumed_intake_after_plan_deletion() -> None:
-    context = _pregnancy_runtime_plan_context(
-        {"pregnancy": {"profile": {"estimated_due_date": "2026-09-18"}, "plans": []}},
+def test_pregnancy_workflow_runtime_context_does_not_resurrect_consumed_intake() -> None:
+    context = _pregnancy_workflow_runtime_context(
         workflow={
             "workflow_state_id": "consumed-1",
             "state": {
@@ -3717,10 +3623,7 @@ def test_pregnancy_runtime_plan_context_does_not_resurrect_consumed_intake_after
         },
     )
 
-    assert context == {
-        "has_active_plan": False,
-        "estimated_due_date": "2026-09-18",
-    }
+    assert context == {}
 
 
 def test_agent_runtime_executor_injects_latest_cart_state_without_exposing_groups_to_model() -> None:

@@ -24,16 +24,16 @@
 
 | 项目 | 数量 |
 | --- | ---: |
-| 模型可见 Tool Contract | 43 |
+| 模型可见 Tool Contract | 42 |
 | 顶层工具 | 4 |
 | Namespace | 7 |
-| Namespace 内工具 | 39 |
+| Namespace 内工具 | 38 |
 | eager | 18 |
-| deferred | 25 |
+| deferred | 24 |
 | `none` | 12 |
-| `agent_internal` | 9 |
-| `user_resource` | 23 |
-| Action-backed Tool 对应的唯一 Action Type | 21 |
+| `agent_internal` | 8 |
+| `user_resource` | 22 |
+| Action-backed Tool 对应的唯一 Action Type | 20 |
 
 ## 3. 顶层工具
 
@@ -51,7 +51,7 @@ Tool Contract 与 Responses API 函数名使用同一个 canonical `snake_case` 
 | Namespace | Tool 数 | deferred | 用途 |
 | --- | ---: | ---: | --- |
 | `milk_management` | 22 | 14 | 奶量、喂养、吸奶、生长、计划与提醒 |
-| `birth_prep` | 7 | 7 | 孕期计划、待产包 |
+| `birth_prep` | 6 | 6 | 孕期计划、待产包 |
 | `hospital_bag_cart` | 1 | 1 | 待产包购物车 |
 | `pump_recommendation` | 1 | 1 | 吸奶器推荐 |
 | `device_support` | 4 | 1 | 设备状态、官方指导、开箱、售后草稿 |
@@ -82,7 +82,6 @@ Tool Contract 与 Responses API 函数名使用同一个 canonical `snake_case` 
 | `pregnancy_plan_workflow`（`generate_plan`） | `pregnancy.plan.create` |
 | `plans_task_create_propose` | `plans.task.create` |
 | `plans_task_complete_propose` | `plans.task.complete` |
-| `pregnancy_plan_todo_propose` | `pregnancy.plan_todo.update` |
 | `plans_task_update_propose` | `plans.task.update` |
 | `plans_task_delete_propose` | `plans.task.delete` |
 | `plans_milk_task_update_propose` | `plans.task.update` |

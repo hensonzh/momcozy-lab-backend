@@ -62,7 +62,7 @@ def test_pregnancy_plan_workflow_is_the_only_intake_contract_in_birth_prep_names
 
     assert PREGNANCY_PLAN_WORKFLOW_TOOL in birth_prep
     assert LEGACY_PREGNANCY_PLAN_TOOLS.isdisjoint(birth_prep)
-    assert "pregnancy_plan_todo_propose" in birth_prep
+    assert "pregnancy_plan_todo_propose" not in birth_prep
 
 
 def test_pregnancy_plan_workflow_effect_is_dynamic_but_action_binding_remains_static() -> None:

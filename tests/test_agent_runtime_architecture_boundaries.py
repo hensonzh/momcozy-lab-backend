@@ -479,8 +479,8 @@ def test_service_skills_capture_legacy_domain_flow_semantics() -> None:
     assert "还有其他需要补充的信息吗？如果没有，我就基于目前的信息开始为你制定孕期计划啦。" in pregnancy
     assert "birth_journey_plan_card_create" not in pregnancy
     assert "plans_plan_delete_propose" in pregnancy
-    assert "pregnancy_plan_todo_propose" in pregnancy
-    assert "version_conflict" in pregnancy
+    assert "pregnancy_plan_todo_propose" not in pregnancy
+    assert "version_conflict" not in pregnancy
     assert "hospital_bag_form_create" in pregnancy
     assert "hospital_bag_card_create" in pregnancy
     assert "birth_plan_form_create" not in pregnancy
@@ -514,6 +514,7 @@ def test_tool_contract_registry_contains_only_model_visible_tools_and_loading_po
             "birth_plan_form_create",
             "labor_communication_card_create",
             "pregnancy_plan_context_read",
+            "pregnancy_plan_todo_propose",
             "memory.create.propose",
             "plans.milk_plan_preview.create",
             "pregnancy.plan_create.propose",
@@ -695,7 +696,6 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
     milk_plan_schema = registry.get("plans_milk_plan_propose").input_schema
     milk_schedule_schema = registry.get("plans_milk_schedule_propose").input_schema
     pregnancy_plan_schema = registry.get("pregnancy_plan_workflow").input_schema
-    pregnancy_todo_schema = registry.get("pregnancy_plan_todo_propose").input_schema
     task_create_schema = registry.get("plans_task_create_propose").input_schema
     task_complete_schema = registry.get("plans_task_complete_propose").input_schema
     task_update_schema = registry.get("plans_task_update_propose").input_schema
@@ -823,9 +823,6 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
     }
     assert pregnancy_plan_schema["properties"]["scope"]["enum"] == ["full", "prenatal_only", "short_range"]
     assert pregnancy_plan_schema["properties"]["additional_info"]["maxLength"] == 2000
-    assert pregnancy_todo_schema["additionalProperties"] is False
-    assert pregnancy_todo_schema["required"] == ["plan_id", "item_id", "completed", "expected_version"]
-    assert pregnancy_todo_schema["properties"]["expected_version"]["minimum"] == 1
     assert pregnancy_plan_schema["properties"]["restart"]["type"] == "boolean"
     assert "topic" not in pregnancy_plan_schema["properties"]
     assert "expected_step" not in registry.get("devices_unboxing_advance").input_schema["properties"]

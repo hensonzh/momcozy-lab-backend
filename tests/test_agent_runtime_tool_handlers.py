@@ -8,7 +8,6 @@ from app.core.errors import ApiError
 from app.agent_runtime.runs.models import AgentAction, AgentArtifact, AgentWorkflowState
 from app.agent_runtime.tools.result import ToolResult
 from app.agents.cozymate.tools import (
-    BusinessContextReadToolHandler,
     ConversationHistoryImageLoadToolHandler,
     DeviceGuidanceReadToolHandler,
     DeviceUnboxingAdvanceToolHandler,
@@ -45,8 +44,6 @@ from app.agents.cozymate.tools import (
     ProfileReadToolHandler,
     ProfileUpdateToolHandler,
     PumpingRecordProposeToolHandler,
-    PregnancyPlanContextReadToolHandler,
-    PregnancyPlanTodoUpdateProposeToolHandler,
     PregnancyPlanIntakeAdvanceToolHandler,
     PregnancyPlanIntakeAnalyzeToolHandler,
     PregnancyPlanIntakeStartToolHandler,
@@ -70,7 +67,6 @@ from app.agents.cozymate.actions.plans import (
     PLAN_TASK_UPDATE_ACTION,
     PLAN_DELETE_ACTION,
     PREGNANCY_PLAN_CREATE_ACTION,
-    PREGNANCY_PLAN_TODO_UPDATE_ACTION,
 )
 from app.modules.plans.models import Plan, PlanTask
 from app.modules.profiles.models import InfantProfile, UserProfile
@@ -592,30 +588,6 @@ def test_birth_preparation_artifact_handler_matches_cart_and_pump_actions() -> N
     assert budget_result["cart_update"]["totals"]["itemCount"] < budget_result["cart_update"]["before_totals"]["itemCount"]
 
 
-def test_business_context_read_tool_handler_returns_bounded_owner_scoped_summary() -> None:
-    actor = _user()
-    records_service = FakeRecordsService(owner_user_id=actor.user_id)
-    plans_service = FakePlansService(owner_user_id=actor.user_id)
-    devices_service = FakeDevicesService(owner_user_id=actor.user_id)
-    handler = BusinessContextReadToolHandler(
-        records_service=records_service,
-        plans_service=plans_service,
-        devices_service=devices_service,
-    )
-
-    result = asyncio.run(handler.execute(_context(actor=actor, args={"limit": 2, "owner_user_id": str(uuid4())})))
-
-    assert records_service.owner_user_id == actor.user_id
-    assert result["records"]["feedings"][0]["feed_time"] == "2026-07-02T08:00:00+00:00"
-    assert result["records"]["pumpings"][0]["milk_volume_ml"] == 80
-    assert result["records"]["growth"][0]["weight_kg"] == 6.2
-    assert result["plans"]["plans"][0]["title"] == "Birth plan"
-    assert result["plans"]["tasks"][0]["task_date"] == "2026-07-03"
-    assert "diary" not in result
-    assert result["devices"]["pumps"][0]["device_id"] == "pump-1"
-    assert result["devices"]["telemetry"][0]["payload"] == {"mode": "stimulation"}
-
-
 def test_milk_summary_read_tool_handler_returns_bounded_owner_scoped_summary() -> None:
     actor = _user()
     records_service = FakeRecordsService(owner_user_id=actor.user_id)
@@ -967,46 +939,6 @@ def test_plans_current_read_tool_handler_returns_bounded_owner_scoped_summary() 
     assert result["counts"] == {"plans": 1, "tasks": 1}
 
 
-def test_pregnancy_plan_context_exposes_bounded_embedded_todos_for_agent_updates() -> None:
-    actor = _user()
-    plans_service = FakePlansService(owner_user_id=actor.user_id)
-    plans_service.plan_payload = {
-        "card": {
-            "card_json": {
-                "todo_plan": {
-                    "periods": [
-                        {
-                            "status": "current",
-                            "items": [
-                                {
-                                    "item_id": "prepare-hospital-bag",
-                                    "title": "准备待产包",
-                                    "completed": False,
-                                }
-                            ],
-                        }
-                    ]
-                }
-            }
-        }
-    }
-    result = asyncio.run(
-        PregnancyPlanContextReadToolHandler(
-            profile_service=FakeProfileService(profile=None, infants=[]),
-            plans_service=plans_service,
-        ).execute(_context(actor=actor, args={}))
-    )
-
-    assert result["plans"][0]["current_todos"] == [
-        {
-            "item_id": "prepare-hospital-bag",
-            "number": 1,
-            "title": "准备待产包",
-            "completed": False,
-        }
-    ]
-
-
 def test_plans_calendar_read_tool_handler_filters_by_date_and_status() -> None:
     actor = _user()
     plans_service = FakePlansService(owner_user_id=actor.user_id)
@@ -1032,66 +964,6 @@ def test_pregnancy_diary_read_tool_handler_returns_owner_scoped_entry() -> None:
     assert result["status"] == "entry_read"
     assert result["entry"]["entry_date"] == "2026-07-02"
     assert result["entry"]["content"] == "x" * 600
-
-
-def test_pregnancy_plan_context_read_tool_handler_returns_bounded_owner_scoped_summary() -> None:
-    actor = _user()
-    profile = UserProfile(
-        user_id=actor.user_id,
-        preferred_name="Mai",
-        age=31,
-        estimated_due_date=date(2026, 9, 20),
-    )
-    profile_service = FakeProfileService(profile=profile, infants=[])
-    plans_service = FakePlansService(owner_user_id=actor.user_id)
-    handler = PregnancyPlanContextReadToolHandler(
-        profile_service=profile_service,
-        plans_service=plans_service,
-    )
-
-    result = asyncio.run(handler.execute(_context(actor=actor, args={"limit": 2, "owner_user_id": str(uuid4())})))
-
-    assert profile_service.profile_user_id == actor.user_id
-    assert plans_service.owner_user_id == actor.user_id
-    assert plans_service.plan_status == "active"
-    assert plans_service.plan_type == "pregnancy"
-    assert result["profile"]["estimated_due_date"] == "2026-09-20"
-    assert result["plans"][0]["title"] == "Birth plan"
-    assert result["plans"][0]["version"] == 1
-    assert result["tasks"][0]["title"] == "Call clinic"
-    assert "recent_diary_entries" not in result
-    assert result["counts"] == {"plans": 1, "tasks": 1}
-
-
-def test_pregnancy_plan_context_exposes_only_active_plan_owner_defaults_for_birth_prep_prefill() -> None:
-    actor = _user()
-    profile_service = FakeProfileService(profile=None, infants=[])
-    plans_service = FakePlansService(owner_user_id=actor.user_id)
-    plans_service.plan_payload = {
-        "card": {
-            "owner": {
-                "due_date_or_week": "31周",
-                "birth_path": "剖宫产",
-                "birth_setting": "市妇幼",
-                "feeding_intention": "混合",
-                "support_person": "伴侣",
-            },
-            "medical_notes": "must not be projected",
-        }
-    }
-    handler = PregnancyPlanContextReadToolHandler(profile_service=profile_service, plans_service=plans_service)
-
-    result = asyncio.run(handler.execute(_context(actor=actor, args={})))
-
-    assert result["plans"][0]["owner"] == {
-        "due_date_or_week": "31周",
-        "birth_path": "剖宫产",
-        "birth_setting": "市妇幼",
-        "feeding_intention": "混合",
-        "support_person": "伴侣",
-    }
-    assert "payload" not in result["plans"][0]
-    assert "medical_notes" not in str(result["plans"][0])
 
 
 def test_devices_pump_status_read_tool_handler_returns_bounded_owner_scoped_summary() -> None:
@@ -2117,7 +1989,6 @@ def test_pregnancy_plan_propose_tool_handler_applies_without_duplicate_confirmat
             "birth_path": "剖宫产",
             "additional_info": "模型臆造的补充不得覆盖耐久工作流事实",
             "runtime_plan_context": {
-                "has_active_plan": False,
                 "estimated_due_date": "2026-09-18",
                 "current_week": "32周",
                 "due_date_or_week": "32周",
@@ -2218,7 +2089,6 @@ def test_failed_pregnancy_plan_apply_does_not_create_card_or_consume_workflow() 
         args={
             "summary": "Prepare appointments and bag tasks.",
             "runtime_plan_context": {
-                "has_active_plan": False,
                 "current_week": "32周",
                 "workflow_phase": "ready_to_generate",
                 "analysis_run_id": str(uuid4()),
@@ -2249,7 +2119,7 @@ def test_pregnancy_plan_intake_start_creates_one_form_and_durable_workflow_state
         actor=actor,
         args={
             "default_values": {"current_week": "32周", "age": 36},
-            "runtime_plan_context": {"has_active_plan": False},
+            "runtime_plan_context": {},
         },
     )
 
@@ -2293,27 +2163,6 @@ def test_pregnancy_plan_intake_start_creates_one_form_and_durable_workflow_state
     ]
 
 
-def test_pregnancy_plan_intake_start_reuses_existing_active_plan() -> None:
-    runtime_service = FakeAgentRuntimeService()
-
-    result = asyncio.run(
-        PregnancyPlanIntakeStartToolHandler(runtime_service=runtime_service).execute(
-            _context(
-                args={
-                    "runtime_plan_context": {
-                        "has_active_plan": True,
-                        "active_plan_id": "plan-1",
-                        "active_plan_title": "我的孕期计划",
-                    }
-                }
-            )
-        )
-    )
-
-    assert result == {"status": "existing_plan_found", "plan_id": "plan-1", "title": "我的孕期计划"}
-    assert runtime_service.calls == []
-
-
 @pytest.mark.parametrize(
     ("workflow", "expected"),
     [
@@ -2336,7 +2185,7 @@ def test_pregnancy_plan_intake_start_does_not_reset_an_existing_workflow(
         PregnancyPlanIntakeStartToolHandler(runtime_service=runtime_service).execute(
             _context(
                 args={
-                    "runtime_plan_context": {"has_active_plan": False},
+                    "runtime_plan_context": {},
                     "runtime_workflow_context": workflow,
                 }
             )
@@ -2357,7 +2206,7 @@ def test_pregnancy_plan_intake_start_replays_the_owned_form_when_collecting_inta
                 actor=actor,
                 args={
                     "default_values": {"current_week": "32周", "age": 36},
-                    "runtime_plan_context": {"has_active_plan": False},
+                    "runtime_plan_context": {},
                 },
             )
         )
@@ -2370,7 +2219,7 @@ def test_pregnancy_plan_intake_start_replays_the_owned_form_when_collecting_inta
             _context(
                 actor=actor,
                 args={
-                    "runtime_plan_context": {"has_active_plan": False},
+                    "runtime_plan_context": {},
                     "runtime_workflow_context": dict(runtime_service.workflow_state.state),
                 },
             )
@@ -2414,7 +2263,7 @@ def test_pregnancy_plan_intake_start_replaces_a_collecting_form_not_owned_by_the
             _context(
                 actor=actor,
                 args={
-                    "runtime_plan_context": {"has_active_plan": False},
+                    "runtime_plan_context": {},
                     "runtime_workflow_context": {
                         "phase": "collecting_intake",
                         "source_form_artifact_id": str(foreign_form_artifact.id),
@@ -2437,7 +2286,7 @@ def test_pregnancy_plan_intake_start_creates_a_fresh_form_after_prior_intake_was
         PregnancyPlanIntakeStartToolHandler(runtime_service=runtime_service).execute(
             _context(
                 args={
-                    "runtime_plan_context": {"has_active_plan": False},
+                    "runtime_plan_context": {},
                     "runtime_workflow_context": {
                         "phase": "awaiting_additional_information",
                         "consumed_by_action_id": "action-from-deleted-plan",
@@ -2461,7 +2310,7 @@ def test_pregnancy_plan_intake_start_creates_a_fresh_form_after_safety_interrupt
         PregnancyPlanIntakeStartToolHandler(runtime_service=runtime_service).execute(
             _context(
                 args={
-                    "runtime_plan_context": {"has_active_plan": False},
+                    "runtime_plan_context": {},
                     "runtime_workflow_context": {
                         "phase": "collecting_intake",
                         "interrupted_by_safety_signal": True,
@@ -2487,7 +2336,7 @@ def test_pregnancy_plan_intake_start_restarts_only_when_explicitly_requested() -
             _context(
                 args={
                     "restart": True,
-                    "runtime_plan_context": {"has_active_plan": False},
+                    "runtime_plan_context": {},
                     "runtime_workflow_context": {
                         "phase": "collecting_intake",
                         "source_form_artifact_id": old_form_id,
@@ -2550,7 +2399,7 @@ def test_pregnancy_plan_intake_analyze_returns_verified_form_in_tool_result() ->
                 "medical_notes": "甲状腺用药",
                 "doctor_notes": "医生提醒复查胎儿生长",
             },
-            "runtime_plan_context": {"has_active_plan": False},
+            "runtime_plan_context": {},
             "runtime_workflow_context": {
                 "phase": "collecting_intake",
                 "source_form_artifact_id": form_artifact_id,
@@ -2621,7 +2470,7 @@ def test_pregnancy_plan_initial_analysis_bridges_to_checkup_upload_before_asking
                         "first_birth": "是",
                         "birth_path": "顺产",
                     },
-                    "runtime_plan_context": {"has_active_plan": False},
+                    "runtime_plan_context": {},
                     "runtime_workflow_context": {
                         "phase": "collecting_intake",
                         "source_form_artifact_id": "form-1",
@@ -2661,7 +2510,7 @@ def test_pregnancy_plan_intake_analyze_rejects_missing_required_and_stale_submis
                         "form_artifact_id": "form-1",
                         "form_submission_id": "submission-1",
                         "confirmed_form_data": {**valid_values, "current_week": ""},
-                        "runtime_plan_context": {"has_active_plan": False},
+                        "runtime_plan_context": {},
                         "runtime_workflow_context": {
                             "phase": "collecting_intake",
                             "source_form_artifact_id": "form-1",
@@ -2681,7 +2530,7 @@ def test_pregnancy_plan_intake_analyze_rejects_missing_required_and_stale_submis
                         "form_artifact_id": "form-1",
                         "form_submission_id": "submission-1",
                         "confirmed_form_data": {**valid_values, "age": 999},
-                        "runtime_plan_context": {"has_active_plan": False},
+                        "runtime_plan_context": {},
                         "runtime_workflow_context": {
                             "phase": "collecting_intake",
                             "source_form_artifact_id": "form-1",
@@ -2701,7 +2550,7 @@ def test_pregnancy_plan_intake_analyze_rejects_missing_required_and_stale_submis
                         "form_artifact_id": "form-old",
                         "form_submission_id": "submission-old",
                         "confirmed_form_data": valid_values,
-                        "runtime_plan_context": {"has_active_plan": False},
+                        "runtime_plan_context": {},
                         "runtime_workflow_context": {
                             "phase": "collecting_intake",
                             "source_form_artifact_id": "form-new",
@@ -2753,7 +2602,7 @@ def test_pregnancy_plan_intake_analyze_reuses_the_same_submission_snapshot() -> 
                         "first_birth": "否",
                         "birth_path": "顺产",
                     },
-                    "runtime_plan_context": {"has_active_plan": False},
+                    "runtime_plan_context": {},
                     "runtime_workflow_context": workflow,
                 }
             )
@@ -2936,7 +2785,7 @@ def test_pregnancy_plan_intake_analyze_stops_for_urgent_signals_without_advancin
                         "birth_path": "顺产",
                         "doctor_notes": "刚刚胎动明显减少",
                     },
-                    "runtime_plan_context": {"has_active_plan": False},
+                    "runtime_plan_context": {},
                     "runtime_workflow_context": {
                         "phase": "collecting_intake",
                         "source_form_artifact_id": "form-1",
@@ -2977,7 +2826,7 @@ def test_pregnancy_plan_propose_requires_workflow_ready_to_generate() -> None:
                 thread_id=uuid4(),
                 tool_name="pregnancy_plan_propose",
                 call_id="call-1",
-                args={"runtime_plan_context": {"has_active_plan": False, "workflow_phase": "collecting_intake"}},
+                args={"runtime_plan_context": {"workflow_phase": "collecting_intake"}},
             )
         )
     )
@@ -2993,7 +2842,6 @@ def test_pregnancy_plan_propose_requires_workflow_ready_to_generate() -> None:
                 call_id="call-2",
                 args={
                     "runtime_plan_context": {
-                        "has_active_plan": False,
                         "workflow_phase": "final_plan_confirmation",
                         "current_week": "32周",
                     }
@@ -3014,7 +2862,6 @@ def test_pregnancy_plan_propose_stops_for_urgent_supplemental_information() -> N
                 args={
                     "additional_info": "我刚刚破水了",
                     "runtime_plan_context": {
-                        "has_active_plan": False,
                         "workflow_phase": "awaiting_additional_information",
                         "analysis_run_id": str(uuid4()),
                         "current_week": "32周",
@@ -3040,7 +2887,6 @@ def test_pregnancy_plan_propose_uses_trusted_current_message_for_urgent_guard_wh
                 args={
                     "trusted_current_user_text": "我现在大量出血",
                     "runtime_plan_context": {
-                        "has_active_plan": False,
                         "workflow_phase": "awaiting_additional_information",
                         "analysis_run_id": str(uuid4()),
                         "current_week": "32周",
@@ -3054,27 +2900,6 @@ def test_pregnancy_plan_propose_uses_trusted_current_message_for_urgent_guard_wh
     assert result.audit_output is not None
     assert result.audit_output["status"] == "urgent_care_required"
     assert result.audit_output["signal_ids"] == ["heavy_bleeding"]
-    assert runtime_service.calls == []
-
-
-def test_pregnancy_plan_propose_tool_handler_reuses_existing_active_plan() -> None:
-    runtime_service = FakeAgentRuntimeService()
-
-    result = asyncio.run(
-        PregnancyPlanProposeToolHandler(runtime_service=runtime_service).execute(
-            _context(
-                args={
-                    "runtime_plan_context": {
-                        "has_active_plan": True,
-                        "active_plan_id": "plan-1",
-                        "active_plan_title": "我的孕期计划",
-                    }
-                }
-            )
-        )
-    )
-
-    assert result == {"status": "existing_plan_found", "plan_id": "plan-1", "title": "我的孕期计划"}
     assert runtime_service.calls == []
 
 
@@ -3141,35 +2966,6 @@ def test_plan_task_complete_propose_tool_handler_creates_confirmation_action() -
     assert runtime_service.calls[0]["apply_payload"]["task_id"] == str(task_id)
     assert runtime_service.calls[0]["apply_payload"]["completed"] is False
     assert runtime_service.calls[0]["apply_payload"]["metadata"] == {"timezone": "Asia/Shanghai"}
-
-
-def test_pregnancy_plan_todo_update_propose_targets_embedded_plan_item() -> None:
-    runtime_service = FakeAgentRuntimeService()
-    plan_id = uuid4()
-
-    result = asyncio.run(
-        PregnancyPlanTodoUpdateProposeToolHandler(runtime_service=runtime_service).execute(
-            _context(
-                args={
-                    "plan_id": str(plan_id),
-                    "item_id": "prepare-hospital-bag",
-                    "completed": True,
-                    "expected_version": 2,
-                }
-            )
-        )
-    )
-
-    assert result["action_type"] == PREGNANCY_PLAN_TODO_UPDATE_ACTION
-    assert result["action_status"] == "applied"
-    assert result["preview_payload"] == {
-        "plan_id": str(plan_id),
-        "item_id": "prepare-hospital-bag",
-        "completed": True,
-        "expected_version": 2,
-    }
-    assert runtime_service.calls[-1]["target_type"] == "plan"
-    assert runtime_service.calls[-1]["target_id"] == str(plan_id)
 
 
 def test_plan_task_update_delete_and_plan_delete_tool_handlers_create_confirmation_actions() -> None:
@@ -3492,7 +3288,6 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
         "hospital_bag_pump_recommend",
         "profile_read",
         "profile_update",
-        "business_context_read",
         "ibclc_consult_card_create",
         "records_growth_read",
         "records_growth_record_propose",
@@ -3524,9 +3319,7 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
         "plans_task_delete_propose",
         "plans_task_update_propose",
         "plans_plan_delete_propose",
-        "pregnancy_plan_context_read",
         "pregnancy_plan_workflow",
-        "pregnancy_plan_todo_propose",
         "records_feeding_record_propose",
         "records_pumping_record_propose",
         "support_ticket_propose",
@@ -4012,7 +3805,6 @@ class FakeAgentRuntimeService:
                         "records.growth_record.update",
                         "records.growth_record.delete",
                         "pregnancy.plan.create",
-                        "pregnancy.plan_todo.update",
                         "plans.task.create",
                         "plans.task.complete",
                         "plans.task.update",

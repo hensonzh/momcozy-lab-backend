@@ -38,7 +38,6 @@ from .base import (
 from .shared import (
     _deferred_artifact_created_event,
     _dict,
-    _existing_pregnancy_plan_result,
     _hospital_bag_cart_apply_payload,
     _hospital_bag_cart_idempotency_key,
     _hospital_bag_cart_preview_payload,
@@ -409,10 +408,6 @@ class PregnancyPlanIntakeStartToolHandler(_StandardToolHandler):
 
     async def execute(self, context: ToolHandlerContext) -> dict[str, Any]:
         _require_pregnancy_plan_thread_id(context)
-        runtime_plan_context = _dict(context.args, "runtime_plan_context")
-        existing = _existing_pregnancy_plan_result(runtime_plan_context)
-        if existing is not None:
-            return existing
         workflow = _dict(context.args, "runtime_workflow_context")
         restart = context.args.get("restart") is True
         if (
@@ -556,11 +551,6 @@ class PregnancyPlanIntakeAnalyzeToolHandler(_StandardToolHandler):
                 signal_ids=urgent_signal_ids,
             )
             return _pregnancy_plan_urgent_result(urgent_signal_ids)
-
-        runtime_plan_context = _dict(context.args, "runtime_plan_context")
-        existing = _existing_pregnancy_plan_result(runtime_plan_context)
-        if existing is not None:
-            return existing
 
         if _text(workflow, "consumed_by_action_id"):
             return {

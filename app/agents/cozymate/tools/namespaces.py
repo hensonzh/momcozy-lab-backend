@@ -42,7 +42,6 @@ SCENARIO_NAMESPACE_DEFINITIONS: tuple[ToolNamespace, ...] = (
         description="处理当前用户的孕期计划和待产包表单/卡片。用户要制定或调整孕期待办或整理待产包时使用。",
         tool_contracts=(
             "pregnancy_plan_workflow",
-            "pregnancy_plan_todo_propose",
             "plans_plan_delete_propose",
             "plans_task_update_propose",
             "plans_task_delete_propose",

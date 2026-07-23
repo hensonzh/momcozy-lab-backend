@@ -1174,10 +1174,9 @@ class CozymateAgentExecutor:
         if contract_name == "support_ticket_propose":
             return {"trusted_current_user_text": self._turn_state(run.id).current_user_text}
         if contract_name == "pregnancy_plan_workflow":
-            facts = await self._birth_prep_business_facts(run=run)
             workflow = await self._latest_pregnancy_plan_workflow(run=run)
             trusted_args: dict[str, Any] = {
-                "runtime_plan_context": _pregnancy_runtime_plan_context(facts, workflow=workflow),
+                "runtime_plan_context": _pregnancy_workflow_runtime_context(workflow=workflow),
                 "runtime_workflow_context": _dict(workflow, "state"),
                 "trusted_current_user_text": self._turn_state(run.id).current_user_text,
                 "runtime_checkup_attachment_count": self._turn_state(run.id).checkup_attachment_count,
@@ -1196,7 +1195,7 @@ class CozymateAgentExecutor:
                         }
                     )
             if command == "start_or_resume":
-                default_values = _birth_prep_form_default_values(facts)
+                default_values: dict[str, Any] = {}
                 if self.fact_service is not None:
                     stored_defaults = await self.fact_service.form_defaults(
                         owner_user_id=run.actor_user_id,
@@ -1229,19 +1228,20 @@ class CozymateAgentExecutor:
                     form_trusted_args["runtime_workflow_context"] = workflow_state
             return form_trusted_args
         if contract_name in FORM_CREATION_TOOL_NAMES:
-            facts = await self._birth_prep_business_facts(run=run)
-            default_values = _birth_prep_form_default_values(facts)
+            form_default_values: dict[str, Any] = {}
             if self.fact_service is not None:
                 stored_defaults = await self.fact_service.form_defaults(
                     owner_user_id=run.actor_user_id,
                     form_id=FORM_CREATION_IDS[contract_name],
                 )
                 for key, value in stored_defaults.items():
-                    default_values.setdefault(key, value)
+                    form_default_values.setdefault(key, value)
             same_turn_defaults = _birth_prep_same_turn_form_default_values(self._turn_state(run.id).current_user_text)
             for key, value in same_turn_defaults.items():
-                default_values.setdefault(key, value)
-            creation_trusted_args: dict[str, Any] = {"default_values": default_values} if default_values else {}
+                form_default_values.setdefault(key, value)
+            creation_trusted_args: dict[str, Any] = (
+                {"default_values": form_default_values} if form_default_values else {}
+            )
             if contract_name == "hospital_bag_form_create":
                 workflow = await self._latest_hospital_bag_workflow(run=run)
                 workflow_state = _dict(workflow, "state")
@@ -1262,14 +1262,6 @@ class CozymateAgentExecutor:
         if contract_name == CONVERSATION_HISTORY_IMAGE_LOAD_TOOL_NAME:
             return {"visible_image_urls": list(self._turn_state(run.id).visible_image_urls)}
         return {}
-
-    async def _birth_prep_business_facts(self, *, run: AgentRun) -> dict[str, Any]:
-        cached = self._turn_state(run.id).business_facts.get(ServiceSkillId.BIRTH_PREP)
-        if cached is not None:
-            return cached
-        facts = await self._fresh_business_facts_for_skill(run=run, skill_id=ServiceSkillId.BIRTH_PREP)
-        self._turn_state(run.id).business_facts[ServiceSkillId.BIRTH_PREP] = facts
-        return facts
 
     async def _latest_pregnancy_plan_workflow(self, *, run: AgentRun) -> dict[str, Any]:
         workflow = await self._latest_workflow_state(run=run, workflow_type=PREGNANCY_PLAN_WORKFLOW_TYPE)
@@ -1571,16 +1563,6 @@ class CozymateAgentExecutor:
             text_segment_count=self._turn_state(run.id).text_segment_count,
             error_type=error_type,
         )
-
-    async def _fresh_business_facts_for_skill(self, *, run: AgentRun, skill_id: ServiceSkillId) -> dict[str, Any]:
-        if self.business_facts_projector is None:
-            return {}
-        return await self.business_facts_projector.project(
-            actor=_run_actor(run),
-            run_id=run.id,
-            service_skill_id=skill_id,
-        )
-
 
 def _latest_assistant_text_before(*, messages: list[AgentMessage], before_sequence: int) -> str:
     return next(
@@ -1885,7 +1867,6 @@ def _timings_with_total(timings_ms: dict[str, float], run_started_at: float) -> 
 SERVICE_SKILL_RECOMMENDED_TOOL_CONTRACTS: dict[ServiceSkillId, tuple[str, ...]] = {
     ServiceSkillId.BIRTH_PREP: (
         "pregnancy_plan_workflow",
-        "pregnancy_plan_todo_propose",
         "plans_plan_delete_propose",
         "plans_task_update_propose",
         "plans_task_delete_propose",
@@ -2112,8 +2093,6 @@ def _pregnancy_workflow_command_final_text(safe_output: dict[str, Any]) -> str:
         return "请先填写下方的孕期基础信息表。提交后，我会按当前状态继续下一步。"
     if status == "pregnancy_plan_intake_abandoned":
         return "已结束这次孕期计划采集。以后需要时可以重新开始。"
-    if status == "existing_plan_found":
-        return "你已经有一份进行中的孕期计划，我不会重复创建。"
     workflow_context = _dict(safe_output, "workflow_context")
     current_step = _dict(workflow_context, "current_step")
     question = _text(current_step, "question")
@@ -2130,65 +2109,6 @@ def _current_hospital_bag_cart_groups(message: AgentMessage) -> list[dict[str, A
     cart = client_context.get("hospital_bag_cart")
     groups = cart.get("groups") if isinstance(cart, dict) else None
     return [dict(group) for group in groups if isinstance(group, dict)] if isinstance(groups, list) else None
-
-
-def _birth_prep_form_default_values(facts: dict[str, Any]) -> dict[str, Any]:
-    pregnancy = _dict(facts, "pregnancy")
-    profile = _dict(pregnancy, "profile") or _dict(facts, "profile")
-    due_date_or_week = next(
-        (
-            value
-            for value in (
-                _text(pregnancy, "due_date_or_week"),
-                _text(pregnancy, "current_week"),
-                _text(profile, "estimated_due_date"),
-            )
-            if value
-        ),
-        "",
-    )
-    defaults: dict[str, Any] = {}
-    if due_date_or_week:
-        defaults["due_date_or_week"] = due_date_or_week
-        defaults["current_week"] = due_date_or_week
-    age = profile.get("age")
-    if isinstance(age, (int, float)) and 12 <= int(age) <= 70:
-        defaults["age"] = int(age)
-    plans = pregnancy.get("plans")
-    active_plan = (
-        next(
-            (
-                plan
-                for plan in plans
-                if isinstance(plan, dict) and _text(plan, "status") == "active" and _text(plan, "plan_type") == "pregnancy"
-            ),
-            None,
-        )
-        if isinstance(plans, list)
-        else None
-    )
-    owner = _dict(active_plan or {}, "owner")
-    active_defaults = {
-        "due_date_or_week": _text(owner, "due_date_or_week") or _text(owner, "current_week"),
-        "current_week": _text(owner, "current_week") or _text(owner, "due_date_or_week"),
-        "age": owner.get("age"),
-        "ivf": _text(owner, "ivf"),
-        "fetus_count": _text(owner, "fetus_count"),
-        "first_birth": _text(owner, "first_birth"),
-        "birth_path": _text(owner, "birth_path"),
-        "birth_hospital": _text(owner, "birth_setting"),
-        "feeding_intention": _text(owner, "feeding_intention"),
-        "support_person": _text(owner, "support_person"),
-        "medical_notes": _text(owner, "medical_notes"),
-        "doctor_notes": _text(owner, "doctor_notes"),
-    }
-    active_notes = [note for note in (_text(owner, "medical_notes"), _text(owner, "doctor_notes")) if note]
-    if active_notes:
-        active_defaults["pregnancy_history_or_notes"] = active_notes
-    for key, value in active_defaults.items():
-        if value not in ("", None):
-            defaults.setdefault(key, value)
-    return defaults
 
 
 def _birth_prep_same_turn_form_default_values(text: str) -> dict[str, Any]:
@@ -2209,26 +2129,8 @@ def _birth_prep_same_turn_form_default_values(text: str) -> dict[str, Any]:
     return defaults
 
 
-def _pregnancy_runtime_plan_context(
-    facts: dict[str, Any],
-    *,
-    workflow: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    pregnancy = _dict(facts, "pregnancy")
-    profile = _dict(pregnancy, "profile") or _dict(facts, "profile")
-    plans = pregnancy.get("plans")
-    active_plans = (
-        [item for item in plans if isinstance(item, dict) and _text(item, "status") == "active" and _text(item, "plan_type") == "pregnancy"]
-        if isinstance(plans, list)
-        else []
-    )
-    context: dict[str, Any] = {
-        "has_active_plan": bool(active_plans),
-        "estimated_due_date": _text(profile, "estimated_due_date"),
-    }
-    if active_plans:
-        context["active_plan_id"] = _text(active_plans[0], "id")
-        context["active_plan_title"] = _text(active_plans[0], "title")
+def _pregnancy_workflow_runtime_context(*, workflow: dict[str, Any] | None = None) -> dict[str, Any]:
+    context: dict[str, Any] = {}
     workflow_payload = _dict(workflow or {}, "state")
     if workflow_payload:
         if _text(workflow_payload, "consumed_by_action_id") or workflow_payload.get("interrupted_by_safety_signal") is True:

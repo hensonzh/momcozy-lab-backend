@@ -137,8 +137,6 @@ def _completed_tool_semantic(
         return "planning", "这一天还没有可更新的记录"
     if output_status == "entry_unchanged":
         return "reading", "这一天的记录没有变化"
-    if output_status == "existing_plan_found":
-        return "reading", "我找到已有的孕期计划啦"
     if safe_output.get("requires_confirmation") is True:
         return "planning", "我已经准备好预览，等你确认～"
     if tool_copy is not None and tool_copy.get("completed"):
@@ -223,7 +221,6 @@ def _dynamic_tool_completed_label(
             "intake_in_progress": "我整理好这一步信息啦",
             "pregnancy_plan_workflow_paused": "孕期计划已暂停",
             "pregnancy_plan_workflow_resumed": "孕期计划已恢复",
-            "existing_plan_found": "我找到已有的孕期计划啦",
             "card_created": "孕期计划已生成",
             "blocked_by_symptoms": "我先帮你确认当前情况",
         }.get(status, "我整理好这一步信息啦")
@@ -272,11 +269,6 @@ _TOOL_COPY: dict[str, dict[str, str]] = {
         "phase": "saving",
         "started": "我先帮你记一下基础信息～",
         "completed": "我已经保存好基础信息啦",
-    },
-    "business_context_read": {
-        "phase": "reading",
-        "started": "我先看看相关业务信息～",
-        "completed": "我把相关业务信息整理好啦",
     },
     "records_milk_status_read": {
         "phase": "reading",
@@ -333,11 +325,6 @@ _TOOL_COPY: dict[str, dict[str, str]] = {
         "started": "我先帮你删除孕期日记～",
         "completed": "我已经删除这条孕期日记啦",
     },
-    "pregnancy_plan_context_read": {
-        "phase": "reading",
-        "started": "我先看看孕期计划上下文～",
-        "completed": "我把孕期计划上下文整理好啦",
-    },
     "devices_pump_status_read": {
         "phase": "reading",
         "started": "我先看看设备状态～",
@@ -362,11 +349,6 @@ _TOOL_COPY: dict[str, dict[str, str]] = {
         "phase": "planning",
         "started": "我继续处理孕期计划这一步～",
         "completed": "我整理好孕期计划这一步啦",
-    },
-    "pregnancy_plan_todo_propose": {
-        "phase": "planning",
-        "started": "我先帮你更新孕期计划事项～",
-        "completed": "孕期计划事项已经更新好啦",
     },
     "plans_milk_plan_propose": {
         "phase": "planning",

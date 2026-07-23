@@ -341,21 +341,6 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="pregnancy_plan_todo_propose",
-            domain="plans",
-            description=(
-                "更新当前用户 active 孕期计划卡片中唯一指定事项的完成状态。用户明确表示某项已完成或取消完成，"
-                "并且 trusted pregnancy plan context 能唯一提供 plan_id、item_id 和 version 时调用并同步执行。"
-            ),
-            effect_scope="user_resource",
-            action_type="pregnancy.plan_todo.update",
-            blocking_policy="must_wait",
-            result_dependency="final_response",
-            timeout_seconds=15,
-        )
-    )
-    registry.register(
-        _tool_contract(
             name="plans_task_update_propose",
             domain="plans",
             description="同步修改当前用户唯一指定的单项计划任务。用户明确要求调整且 trusted task target 唯一时调用；目标含糊或批量修改时先澄清。",

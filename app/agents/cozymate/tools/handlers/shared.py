@@ -716,16 +716,6 @@ def _pregnancy_plan_action_idempotency_key(
     return f"pregnancy-plan:{hashlib.sha256(canonical.encode('utf-8')).hexdigest()}"
 
 
-def _existing_pregnancy_plan_result(runtime_plan_context: dict[str, Any]) -> dict[str, Any] | None:
-    if runtime_plan_context.get("has_active_plan") is not True:
-        return None
-    return {
-        "status": "existing_plan_found",
-        "plan_id": _text(runtime_plan_context, "active_plan_id"),
-        "title": _text(runtime_plan_context, "active_plan_title") or "孕期计划",
-    }
-
-
 def _pregnancy_plan_workflow_result(
     workflow: dict[str, Any],
     *,
@@ -1058,24 +1048,6 @@ def _plan_task_complete_preview_payload(apply_payload: dict[str, Any]) -> dict[s
     return {
         "task_id": _text(apply_payload, "task_id"),
         "completed": bool(apply_payload.get("completed", True)),
-    }
-
-
-def _pregnancy_plan_todo_apply_payload(args: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "plan_id": _text(args, "plan_id"),
-        "item_id": _text(args, "item_id"),
-        "completed": args.get("completed"),
-        "expected_version": args.get("expected_version"),
-    }
-
-
-def _pregnancy_plan_todo_preview_payload(apply_payload: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "plan_id": _text(apply_payload, "plan_id"),
-        "item_id": _text(apply_payload, "item_id"),
-        "completed": apply_payload.get("completed") is True,
-        "expected_version": apply_payload.get("expected_version"),
     }
 
 
@@ -1713,74 +1685,6 @@ def _plan_payload(plan: Plan) -> dict[str, Any]:
         "source": plan.source,
         "updated_at": _datetime_iso(plan.updated_at),
     }
-
-
-def _pregnancy_plan_context_payload(plan: Plan) -> dict[str, Any]:
-    output = _plan_payload(plan)
-    output["version"] = plan.version if isinstance(plan.version, int) and plan.version >= 1 else 1
-    payload: dict[str, Any] = plan.payload if isinstance(plan.payload, dict) else {}
-    card_value = payload.get("card")
-    card: dict[str, Any] = card_value if isinstance(card_value, dict) else {}
-    owner_value = card.get("owner")
-    owner: dict[str, Any] = owner_value if isinstance(owner_value, dict) else {}
-    allowed_owner_keys = {
-        "due_date_or_week",
-        "current_week",
-        "age",
-        "ivf",
-        "fetus_count",
-        "first_birth",
-        "birth_path",
-        "birth_setting",
-        "feeding_intention",
-        "support_person",
-        "medical_notes",
-        "doctor_notes",
-    }
-    safe_owner = {key: value for key, value in owner.items() if key in allowed_owner_keys and value not in ("", None)}
-    if safe_owner:
-        output["owner"] = safe_owner
-    current_todos = _pregnancy_plan_current_todos(card)
-    if current_todos:
-        output["current_todos"] = current_todos
-    return output
-
-
-def _pregnancy_plan_current_todos(card: dict[str, Any]) -> list[dict[str, Any]]:
-    card_json = card.get("card_json")
-    if not isinstance(card_json, dict):
-        return []
-    todo_plan = card_json.get("todo_plan")
-    if not isinstance(todo_plan, dict):
-        return []
-    periods = todo_plan.get("periods")
-    if not isinstance(periods, list):
-        return []
-    current = next(
-        (period for period in periods if isinstance(period, dict) and period.get("status") == "current"),
-        next((period for period in periods if isinstance(period, dict)), None),
-    )
-    if not isinstance(current, dict) or not isinstance(current.get("items"), list):
-        return []
-    todos: list[dict[str, Any]] = []
-    for item in current["items"]:
-        if not isinstance(item, dict):
-            continue
-        item_id = _text(item, "item_id")
-        title = _text(item, "title")
-        if not item_id or not title:
-            continue
-        todos.append(
-            {
-                "item_id": item_id,
-                "number": len(todos) + 1,
-                "title": title,
-                "completed": item.get("completed") is True,
-            }
-        )
-        if len(todos) >= 10:
-            break
-    return todos
 
 
 def _task_payload(task: PlanTask) -> dict[str, Any]:

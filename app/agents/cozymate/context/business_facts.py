@@ -97,8 +97,6 @@ async def _maybe_await(
 def _sources_for_skill(*, skill_id: ServiceSkillId, config: BusinessFactsProjectorConfig) -> tuple[BusinessFactSource, ...]:
     default_limit = config.default_limit
     recent_limit = config.recent_limit
-    if skill_id == ServiceSkillId.BIRTH_PREP:
-        return (BusinessFactSource("pregnancy_plan_context_read", "pregnancy", {"limit": default_limit}),)
     if skill_id == ServiceSkillId.MILK_MANAGEMENT:
         return (
             BusinessFactSource("profile_read", "profile"),
