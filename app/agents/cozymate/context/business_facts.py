@@ -113,10 +113,7 @@ def _sources_for_skill(*, skill_id: ServiceSkillId, config: BusinessFactsProject
     if skill_id == ServiceSkillId.EMOTION_SUPPORT:
         return (BusinessFactSource("profile_read", "profile"),)
     if skill_id == ServiceSkillId.DEVICE_GUIDANCE:
-        return (
-            BusinessFactSource("profile_read", "profile"),
-            BusinessFactSource("devices_pump_status_read", "devices", {"limit": default_limit}),
-        )
+        return (BusinessFactSource("profile_read", "profile"),)
     return ()
 
 

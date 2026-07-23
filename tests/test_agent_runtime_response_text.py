@@ -8,8 +8,8 @@ def test_sanitize_agent_response_text_removes_tool_output_json() -> None:
     assert result.quick_replies == []
 
 
-def test_sanitize_agent_response_text_removes_service_skill_json_after_text() -> None:
-    result = sanitize_agent_response_text('我先帮你看一下。\n{"service_skill_id":"milk-management","status":"service_skill_loaded"}')
+def test_sanitize_agent_response_text_removes_tool_json_after_text() -> None:
+    result = sanitize_agent_response_text('我先帮你看一下。\n{"tool_name":"profile_read","safe_output":{"preferred_name":"Mai"}}')
 
     assert result.text == "我先帮你看一下。"
     assert result.quick_replies == []
@@ -60,8 +60,8 @@ def test_append_only_projector_never_emits_partial_web_search_citation_marker() 
 def test_append_only_projector_hides_partial_tool_json_after_visible_text() -> None:
     projector = AppendOnlyAgentResponseProjector()
 
-    assert projector.push('我先帮你看一下。\n{"service_skill_id":') == "我先帮你看一下。"
-    assert projector.push('"milk-management","status":"service_skill_loaded"}') == ""
+    assert projector.push('我先帮你看一下。\n{"tool_name":') == "我先帮你看一下。"
+    assert projector.push('"profile_read","safe_output":{"preferred_name":"Mai"}}') == ""
     assert projector.finalize() == ""
     assert projector.text == "我先帮你看一下。"
 
@@ -86,7 +86,7 @@ def test_append_only_projector_ignores_brackets_inside_json_strings() -> None:
 def test_append_only_projector_drops_unclosed_structured_tail_when_finalized() -> None:
     projector = AppendOnlyAgentResponseProjector()
 
-    assert projector.push('我先帮你看一下。\n{"service_skill_id":') == "我先帮你看一下。"
+    assert projector.push('我先帮你看一下。\n{"tool_name":') == "我先帮你看一下。"
     assert projector.finalize() == ""
     assert projector.text == "我先帮你看一下。"
 

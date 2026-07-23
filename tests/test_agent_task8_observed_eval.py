@@ -14,8 +14,7 @@ from app.agents.cozymate.health_guidance import (
     HEALTH_GUIDANCE_ALLOWED_DOMAINS,
 )
 from app.agents.cozymate.tools import (
-    DeviceGuidanceReadToolHandler,
-    DeviceUnboxingAdvanceToolHandler,
+    DeviceGuidanceToolHandler,
     HospitalBagCardCreateToolHandler,
     HospitalBagCartUpdateProposeToolHandler,
     HospitalBagFormCreateToolHandler,
@@ -95,13 +94,12 @@ def test_observed_pregnancy_plan_creates_durable_form_then_applies_one_plan() ->
         text="我现在32周，想制定孕期计划。",
         handlers=handlers,
         tool_invocations=(
-            scripted_tool_invocation("load_service_skill", {"service_skill_id": "birth-prep"}),
             scripted_tool_invocation("pregnancy_plan_intake_start", {}),
         ),
         final_text="请先填写孕期基本信息表。",
     )
 
-    _assert_tools(started.trace, "load_service_skill", "pregnancy_plan_intake_start")
+    _assert_tools(started.trace, "pregnancy_plan_intake_start")
     _assert_artifact_events(started.trace, "form")
     workflow = scenario.workflow("pregnancy_plan")
     assert workflow.status == "collecting"
@@ -195,12 +193,11 @@ def test_observed_hospital_bag_form_card_and_cart_use_runtime_ledgers() -> None:
         text="帮我准备待产包。",
         handlers=handlers,
         tool_invocations=(
-            scripted_tool_invocation("load_service_skill", {"service_skill_id": "birth-prep"}),
             scripted_tool_invocation("hospital_bag_form_create", {}),
         ),
         final_text="请填写待产包信息。",
     )
-    _assert_tools(form.trace, "load_service_skill", "hospital_bag_form_create")
+    _assert_tools(form.trace, "hospital_bag_form_create")
     _assert_artifact_events(form.trace, "form")
     workflow = scenario.workflow("hospital_bag")
     form_artifact_id = workflow.state["source_form_artifact_id"]
@@ -260,12 +257,11 @@ def test_observed_milk_analysis_plan_and_schedule_persist_real_action_lifecycles
         text="帮我完整分析奶量。",
         handlers=handlers,
         tool_invocations=(
-            scripted_tool_invocation("load_service_skill", {"service_skill_id": "milk-management"}),
             scripted_tool_invocation("records_milk_analysis_intake", {"action": "start"}),
         ),
         final_text="先确认宝宝近 24 小时的湿尿布。",
     )
-    _assert_tools(started.trace, "load_service_skill", "records_milk_analysis_intake")
+    _assert_tools(started.trace, "records_milk_analysis_intake")
     assert scenario.workflow("milk_analysis").active_step == "infant_wet_diapers"
 
     answers = (
@@ -434,12 +430,14 @@ def test_observed_device_unboxing_complete_current_advances_exactly_one_persiste
         text="Air1 刚开箱，从哪里开始？",
         handlers=handlers,
         tool_invocations=(
-            scripted_tool_invocation("load_service_skill", {"service_skill_id": "device-guidance"}),
-            scripted_tool_invocation("devices_unboxing_advance", {"model": "Air1", "action": "start"}),
+            scripted_tool_invocation(
+                "devices_guidance",
+                {"model": "Air1", "operation": "start_or_resume"},
+            ),
         ),
         final_text="请完成当前主步骤的全部部件核对。",
     )
-    _assert_tools(started.trace, "load_service_skill", "devices_unboxing_advance")
+    _assert_tools(started.trace, "devices_guidance")
     assert scenario.workflow("device_unboxing").active_step == "guide.parts"
 
     advanced = scenario.run_turn(
@@ -447,37 +445,36 @@ def test_observed_device_unboxing_complete_current_advances_exactly_one_persiste
         handlers=handlers,
         tool_invocations=(
             scripted_tool_invocation(
-                "devices_unboxing_advance",
-                {"model": "Air1", "action": "complete_current"},
+                "devices_guidance",
+                {"model": "Air1", "operation": "complete_current"},
             ),
         ),
         final_text="下一步熟悉主机按键。",
     )
-    _assert_tools(advanced.trace, "devices_unboxing_advance")
+    _assert_tools(advanced.trace, "devices_guidance")
     assert advanced.trace.tool_calls[0]["safe_args"] == {
         "model": "Air1",
-        "action": "complete_current",
+        "operation": "complete_current",
     }
     assert scenario.workflow("device_unboxing").active_step == "guide.controls"
     assert advanced.trace.actions == []
 
 
-def test_observed_known_device_guidance_reads_official_guidance_without_write() -> None:
+def test_observed_known_device_guidance_reads_official_manual_without_write() -> None:
     scenario = ObservedScenario()
     result = scenario.run_turn(
-        text="Air1 吸力变弱，我应该检查什么？",
+        text="Air1 怎么连接蓝牙？",
         handlers=scenario.device_handlers(),
         tool_invocations=(
-            scripted_tool_invocation("load_service_skill", {"service_skill_id": "device-guidance"}),
             scripted_tool_invocation(
-                "devices_guidance_read",
-                {"model": "Air1", "topic": "troubleshooting", "query": "weak suction"},
+                "devices_guidance",
+                {"model": "Air1", "operation": "read", "topic": "bluetooth"},
             ),
         ),
-        final_text="请先检查安装密封和耗材状态。",
+        final_text="请先让主机进入蓝牙配对模式。",
     )
 
-    _assert_tools(result.trace, "load_service_skill", "devices_guidance_read")
+    _assert_tools(result.trace, "devices_guidance")
     assert result.trace.actions == []
     assert result.trace.final_text
 
@@ -489,7 +486,6 @@ def test_observed_device_aftersales_requires_confirmation_then_creates_editable_
         text="Air1 开箱后发现少了一个配件，我很着急。",
         handlers=handlers,
         tool_invocations=(
-            scripted_tool_invocation("load_service_skill", {"service_skill_id": "device-guidance"}),
             scripted_tool_invocation(
                 "support_ticket_propose",
                 {
@@ -504,7 +500,7 @@ def test_observed_device_aftersales_requires_confirmation_then_creates_editable_
         final_text="这件事确实很影响使用体验，我可以帮你创建一个售后工单。需要我现在帮你创建吗？",
     )
 
-    _assert_tools(offered.trace, "load_service_skill", "support_ticket_propose")
+    _assert_tools(offered.trace, "support_ticket_propose")
     _assert_event_types(offered.trace, forbidden={"artifact.created", "action.confirmation_required"})
     assert scenario.repository.artifacts == []
 
@@ -538,7 +534,6 @@ def test_observed_health_consultation_can_write_user_facts_then_continue_replyin
         text="没有出血或发烧，疼痛也没有加重，宝宝胎动正常。今天散步后只是有一点轻微牵拉感。",
         handlers=scenario.diary_handlers(),
         tool_invocations=(
-            scripted_tool_invocation("load_service_skill", {"service_skill_id": "health-consultation"}),
             scripted_tool_invocation(
                 "pregnancy_diary_save",
                 {
@@ -550,7 +545,7 @@ def test_observed_health_consultation_can_write_user_facts_then_continue_replyin
         final_text="我已经记下来了。先休息并观察；如果牵拉感加重、出现出血或胎动异常，请及时联系产科。",
     )
 
-    _assert_tools(result.trace, "load_service_skill", "pregnancy_diary_save")
+    _assert_tools(result.trace, "pregnancy_diary_save")
     _assert_event_types(result.trace, required={"pregnancy_diary.changed"})
     assert result.trace.final_text.startswith("我已经记下来了")
     assert scenario.diary.entries[0].content == (
@@ -832,8 +827,7 @@ class ObservedScenario:
 
     def device_handlers(self) -> dict[str, Any]:
         return {
-            "devices_guidance_read": DeviceGuidanceReadToolHandler(asset_service=self.assets),
-            "devices_unboxing_advance": DeviceUnboxingAdvanceToolHandler(
+            "devices_guidance": DeviceGuidanceToolHandler(
                 runtime_service=self.runtime_service,
                 asset_service=self.assets,
             ),

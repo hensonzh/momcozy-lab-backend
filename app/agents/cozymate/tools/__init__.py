@@ -4,17 +4,13 @@ from app.agent_runtime.tools import (
     ToolExecutionResult,
     ToolHandler,
     ToolHandlerContext,
-    ToolNamespace,
-    ToolNamespaceRegistry,
 )
 
 from .executor import CozymateToolExecutor
 from .handlers import (
     BusinessContextReadToolHandler,
     ConversationHistoryImageLoadToolHandler,
-    DeviceGuidanceReadToolHandler,
-    DeviceUnboxingAdvanceToolHandler,
-    DevicesPumpStatusReadToolHandler,
+    DeviceGuidanceToolHandler,
     FeedingRecordDeleteProposeToolHandler,
     FeedingRecordProposeToolHandler,
     GrowthRecordDeleteProposeToolHandler,
@@ -58,14 +54,11 @@ from .handlers import (
     build_default_tool_handlers,
 )
 from .registry import default_tool_registry
-from .namespaces import default_tool_namespace_registry
 
 __all__ = [
     "BusinessContextReadToolHandler",
     "ConversationHistoryImageLoadToolHandler",
-    "DeviceGuidanceReadToolHandler",
-    "DeviceUnboxingAdvanceToolHandler",
-    "DevicesPumpStatusReadToolHandler",
+    "DeviceGuidanceToolHandler",
     "FeedingRecordDeleteProposeToolHandler",
     "FeedingRecordProposeToolHandler",
     "GrowthRecordDeleteProposeToolHandler",
@@ -112,9 +105,6 @@ __all__ = [
     "CozymateToolExecutor",
     "ToolHandler",
     "ToolHandlerContext",
-    "ToolNamespace",
-    "ToolNamespaceRegistry",
     "build_default_tool_handlers",
-    "default_tool_namespace_registry",
     "default_tool_registry",
 ]

@@ -38,7 +38,8 @@ def guarded_workflow_type(tool_name: str, args: dict[str, Any]) -> str | None:
         return "pregnancy_plan"
     if tool_name == "records_milk_analysis_intake" and action == "answer":
         return "milk_analysis"
-    if tool_name == "devices_unboxing_advance" and action in {"complete_current", "cancel"}:
+    operation = str(args.get("operation") or "").strip()
+    if tool_name == "devices_guidance" and operation in {"complete_current", "cancel"}:
         return "device_unboxing"
     return None
 

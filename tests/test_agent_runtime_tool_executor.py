@@ -23,44 +23,6 @@ from app.modules.diary.repository import DiaryEntryMutation
 PRIVATE_DIARY_CONTENT = "private diary narrative that must not enter safe event output"
 
 
-def test_load_service_skill_returns_full_result_once_as_function_call_output() -> None:
-    actor = _user()
-    repository = FakeToolRepository()
-    facts = {"milk_status": {"totals": {"trend_pumped_volume_ml": 420}}}
-
-    async def handler(_context: ToolHandlerContext):
-        return ToolResult.json(
-            {
-                "schema_version": "service_skill_load.v2",
-                "service_skill_id": "milk-management",
-                "skill_version": "v1",
-                "loaded_at": "2026-07-12T00:00:00+00:00",
-                "skill": {"instructions": "full skill instructions"},
-                "recommended_tools": [],
-                "business_facts": facts,
-            }
-        )
-
-    result = asyncio.run(
-        CozymateToolExecutor(
-            registry=default_tool_registry(),
-            repository=repository,
-            handlers={"load_service_skill": handler},
-        ).execute(
-            actor=actor,
-            run_id=uuid4(),
-            tool_name="load_service_skill",
-            call_id="call-load-skill",
-            args={"service_skill_id": "milk-management"},
-        )
-    )
-
-    assert repository.output.safe_output["business_facts"] == facts
-    serialized_model_input = str(result.tool_result.to_function_call_output())
-    assert serialized_model_input.count("business_facts") == 1
-    assert "full skill instructions" in serialized_model_input
-
-
 def test_tool_executor_persists_safe_args_and_output() -> None:
     actor = _user(permissions={"support_ticket:create:self"})
     repository = FakeToolRepository()

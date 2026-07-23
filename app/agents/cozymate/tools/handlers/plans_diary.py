@@ -87,7 +87,10 @@ class PlansCurrentReadToolHandler(_StandardToolHandler):
         plans = await self.plans_service.list_plans(owner_user_id=owner_user_id, status="active", limit=limit)
         tasks = await self.plans_service.list_tasks(owner_user_id=owner_user_id, limit=limit)
         output: dict[str, Any] = {
-            "plans": [_plan_payload(plan) for plan in plans],
+            "plans": [
+                _pregnancy_plan_context_payload(plan) if plan.plan_type == "pregnancy" else _plan_payload(plan)
+                for plan in plans
+            ],
             "tasks": [_task_payload(task) for task in tasks],
             "counts": {
                 "plans": len(plans),

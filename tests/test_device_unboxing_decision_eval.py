@@ -20,9 +20,9 @@ def test_device_unboxing_live_eval_uses_model_decisions_and_writes_provider_trac
                 final_text="下一步认识主机按键。",
                 tool_calls=[
                     {
-                        "tool_name": "devices_unboxing_advance",
+                        "tool_name": "devices_guidance",
                         "status": "completed",
-                        "args": {"model": "Air1", "action": "complete_current"},
+                        "args": {"model": "Air1", "operation": "complete_current"},
                     }
                 ],
             ),
@@ -54,12 +54,11 @@ def test_device_unboxing_live_eval_uses_model_decisions_and_writes_provider_trac
     assert [item.get("type") or item.get("role") for item in model_input] == [
         "function_call",
         "function_call_output",
-        "function_call",
-        "function_call_output",
         "assistant",
         "user",
     ]
-    start_result = json.loads(model_input[3]["output"])
+    assert "每轮给 1 个主步骤" in runner.requests[0].instructions
+    start_result = json.loads(model_input[1]["output"])
     assert start_result["workflow"]["current_message_relation"] == "reply_to_current_step"
     assert "completion_confirmation" not in json.dumps(start_result)
     assert runner.requests[0].model_input[-1] == {"role": "user", "content": "继续"}
@@ -107,9 +106,6 @@ class RecordingDecisionRunner:
     async def run_reasoning(self, request):
         self.requests.append(request)
         return self.results.pop(0)
-
-    def supports_tool_namespaces(self) -> bool:
-        return True
 
     def supports_web_search(self) -> bool:
         return False

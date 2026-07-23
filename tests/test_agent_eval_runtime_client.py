@@ -83,21 +83,11 @@ def test_agent_eval_runtime_client_executes_run_and_evaluates_seed_case() -> Non
     assert result.trace.actions == []
 
 
-def test_agent_eval_trace_uses_latest_loaded_service_skill_event() -> None:
+def test_agent_eval_trace_uses_run_service_skill_id() -> None:
     thread_id = uuid4()
-    run = _run(thread_id=thread_id)
+    run = _run(thread_id=thread_id, service_skill_id="device-guidance")
     current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="Continue setup.", sequence=1)
     repository = FakeEvalRuntimeRepository(run=run, messages=[current_user], current_message=current_user, tool_calls=[])
-    repository.events.append(
-        AgentEvent(
-            event_id=uuid4(),
-            thread_id=thread_id,
-            run_id=run.id,
-            sequence=1,
-            event_type="skill.loaded",
-            payload={"service_skill_id": "device-guidance"},
-        )
-    )
 
     trace = asyncio.run(AgentEvalRuntimeTraceCollector(repository=repository).collect(run_id=run.id))
 
@@ -211,7 +201,7 @@ def _case(suite: str) -> dict:
     return next(case for case in load_product_agent_eval_seed_cases(PRODUCT_AGENT_EVAL_SEED) if case["suite"] == suite)
 
 
-def _run(*, thread_id: UUID) -> AgentRun:
+def _run(*, thread_id: UUID, service_skill_id: str = "") -> AgentRun:
     return AgentRun(
         id=uuid4(),
         thread_id=thread_id,
@@ -222,6 +212,7 @@ def _run(*, thread_id: UUID) -> AgentRun:
         prompt_version="",
         request_id="req",
         trace_id="trace",
+        service_skill_id=service_skill_id,
         error_code="",
         error_details={},
     )

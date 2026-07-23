@@ -78,7 +78,7 @@ def _load_default_service_skills() -> tuple[AgentServiceSkill, ...]:
     skill_paths = tuple(sorted(SERVICE_SKILLS_ROOT.glob(f"*/{SERVICE_SKILL_FILE_NAME}")))
     if not skill_paths:
         raise ValueError(f"no agent service skills found under {SERVICE_SKILLS_ROOT}")
-    skills = tuple(load_service_skill(path) for path in skill_paths)
+    skills = tuple(parse_service_skill_file(path) for path in skill_paths)
     by_service_skill_id = {skill.service_skill_id: skill for skill in skills}
     expected_ids = set(SERVICE_SKILL_ORDER)
     actual_ids = set(by_service_skill_id)
@@ -89,7 +89,7 @@ def _load_default_service_skills() -> tuple[AgentServiceSkill, ...]:
     return tuple(by_service_skill_id[skill_id] for skill_id in SERVICE_SKILL_ORDER)
 
 
-def load_service_skill(path: Path) -> AgentServiceSkill:
+def parse_service_skill_file(path: Path) -> AgentServiceSkill:
     metadata, body = _split_frontmatter(path.read_text(encoding="utf-8"), path=path)
     _validate_metadata(metadata=metadata, path=path)
     service_skill_id = metadata.get("service_skill_id") or metadata.get("name") or path.parent.name

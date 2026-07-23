@@ -24,7 +24,6 @@ from app.agent_runtime.context.items import message_context_item
 from app.agent_runtime.events.publisher import AgentEventPublisher
 from app.agent_runtime.tools.result import ToolImageOutput, ToolResult, ToolTextOutput
 from app.agents.cozymate import ServiceSkillId
-from app.agents.cozymate.context import BusinessFactsProjector
 from app.agents.cozymate.prompts import DEFAULT_STABLE_SYSTEM_PROMPT
 from app.agents.cozymate.health_guidance import (
     HEALTH_GUIDANCE_ALLOWED_DOMAINS,
@@ -103,7 +102,7 @@ def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result(capl
     assert "制定孕期计划" not in request.instructions
     assert "奶量管理仅处理三类任务" not in request.instructions
     assert "已选择服务技能" not in request.instructions
-    assert request.tool_names == ("load_service_skill",)
+    assert request.tool_names == ()
     assert [item["role"] for item in request.model_input] == ["user", "assistant", "user"]
     assert request.instructions.startswith("# CozyMate")
     assert request.model_input[0] == {"role": "user", "content": "What did we discuss?"}
@@ -688,162 +687,6 @@ def test_agent_runtime_executor_loads_base_context_without_parallel_shared_sessi
     assert session_guard.calls[:2] == ["thread_messages", "active_workflows"]
 
 
-def test_agent_runtime_executor_load_service_skill_returns_facts_and_records_ledger() -> None:
-    thread_id = uuid4()
-    run = _run(thread_id=thread_id)
-    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="今天奶量怎么样？", sequence=1)
-    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
-    backend = ScriptedSdkBackend(
-        [
-            scripted_sdk_response(
-                final_text="我看了最近奶量状态。",
-                tool_invocations=(scripted_tool_invocation("load_service_skill", {"service_skill_id": "milk-management"}),),
-                expected_available_tools=("load_service_skill",),
-            )
-        ]
-    )
-    business_facts_projector = FakeBusinessFactsProjector(
-        facts={"schema_version": "v1", "milk_status": {"totals": {"trend_pumped_volume_ml": 420}}}
-    )
-
-    result = asyncio.run(
-        CozymateAgentExecutor(
-            repository=repository,
-            business_facts_projector=business_facts_projector,
-            sdk_runner=OpenAIResponsesRunner(backend=backend),
-        ).execute(run=run)
-    )
-
-    assert result.status == "completed"
-    assert backend.requests[0].model_input == [{"role": "user", "content": "今天奶量怎么样？"}]
-    assert business_facts_projector.calls == [
-        {
-            "actor_user_id": run.actor_user_id,
-            "run_id": run.id,
-            "service_skill_id": ServiceSkillId.MILK_MANAGEMENT,
-        }
-    ]
-    assert repository.tool_call.tool_name == "load_service_skill"
-    assert repository.tool_output.safe_output["service_skill_id"] == "milk-management"
-    assert "instructions" not in repository.tool_output.safe_output["skill"]
-    assert "tool_scope" not in repository.tool_output.safe_output
-    assert {"namespace": "milk_management", "name": "records_milk_status_read"} in repository.tool_output.safe_output["recommended_tools"]
-    assert repository.tool_output.safe_output["business_facts"] == {
-        "schema_version": "v1",
-        "milk_status": {"totals": {"trend_pumped_volume_ml": 420}},
-    }
-    skill_loaded_events = [event for event in repository.events if event.event_type == "skill.loaded"]
-    assert skill_loaded_events[0].payload["service_skill_id"] == "milk-management"
-    assert "records_milk_status_read" in skill_loaded_events[0].payload["recommended_tool_contracts"]
-    assert repository.run_summaries == []
-
-
-def test_agent_runtime_executor_loads_birth_prep_with_structured_business_fact_result() -> None:
-    thread_id = uuid4()
-    run = _run(thread_id=thread_id)
-    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="帮我生成孕期计划", sequence=1)
-    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
-
-    async def pregnancy_context_handler(_context):
-        return ToolResult.json({"profile": {"age": 32}, "plans": [], "tasks": []})
-
-    backend = ScriptedSdkBackend(
-        [
-            scripted_sdk_response(
-                final_text="我可以帮你制定孕期计划。",
-                tool_invocations=(scripted_tool_invocation("load_service_skill", {"service_skill_id": "birth-prep"}),),
-                expected_available_tools=("load_service_skill",),
-            )
-        ]
-    )
-
-    result = asyncio.run(
-        CozymateAgentExecutor(
-            repository=repository,
-            business_facts_projector=BusinessFactsProjector(handlers={"pregnancy_plan_context_read": pregnancy_context_handler}),
-            sdk_runner=OpenAIResponsesRunner(backend=backend),
-        ).execute(run=run)
-    )
-
-    assert result.status == "completed"
-    assert repository.tool_output.safe_output["business_facts"]["pregnancy"] == {
-        "profile": {"age": 32},
-        "plans": [],
-        "tasks": [],
-    }
-
-
-@pytest.mark.parametrize(
-    ("service_skill_id", "expected_tool_names"),
-    [
-        (
-            "birth-prep",
-            {
-                "pregnancy_plan_intake_start",
-                "pregnancy_plan_intake_analyze",
-                "pregnancy_plan_intake_advance",
-                "pregnancy_plan_propose",
-                "pregnancy_plan_todo_propose",
-                "plans_plan_delete_propose",
-                "plans_task_update_propose",
-                "plans_task_delete_propose",
-                "birth_plan_form_create",
-                "labor_communication_card_create",
-                "hospital_bag_form_create",
-                "hospital_bag_card_create",
-                "hospital_bag_cart_update",
-                "hospital_bag_pump_recommend",
-            },
-        ),
-        (
-            "health-consultation",
-            {
-                "records_milk_status_read",
-                "ibclc_consult_card_create",
-            },
-        ),
-        ("emotion-support", set()),
-        (
-            "device-guidance",
-            {
-                "devices_pump_status_read",
-                "devices_guidance_read",
-                "devices_unboxing_advance",
-                "support_ticket_propose",
-            },
-        ),
-    ],
-)
-def test_service_skill_recommendations_are_small_non_authoritative_provider_tool_hints(
-    service_skill_id: str,
-    expected_tool_names: set[str],
-) -> None:
-    thread_id = uuid4()
-    run = _run(thread_id=thread_id)
-    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="继续", sequence=1)
-    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
-    backend = ScriptedSdkBackend(
-        [
-            scripted_sdk_response(
-                final_text="我来继续处理。",
-                tool_invocations=(scripted_tool_invocation("load_service_skill", {"service_skill_id": service_skill_id}),),
-                expected_available_tools=("load_service_skill",),
-            )
-        ]
-    )
-
-    asyncio.run(
-        CozymateAgentExecutor(
-            repository=repository,
-            sdk_runner=OpenAIResponsesRunner(backend=backend),
-        ).execute(run=run)
-    )
-
-    recommendations = repository.tool_output.safe_output["recommended_tools"]
-    assert {item["name"] for item in recommendations} == expected_tool_names
-    assert all(set(item) == {"namespace", "name"} for item in recommendations)
-
-
 def test_default_service_skills_are_file_backed() -> None:
     registry = default_service_skill_registry()
 
@@ -1025,8 +868,8 @@ def test_agent_runtime_executor_never_streams_partial_tool_json_after_visible_te
             scripted_sdk_response(
                 final_text="我先帮你看一下。",
                 text_deltas=(
-                    '我先帮你看一下。\n{"service_skill_id":',
-                    '"milk-management","status":"service_skill_loaded"}',
+                    '我先帮你看一下。\n{"tool_name":',
+                    '"profile_read","safe_output":{"preferred_name":"Mai"}}',
                 ),
             )
         ]
@@ -1148,10 +991,7 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
 
     assert result.status == "completed"
     assert result.final_text == "我已经整理好了。"
-    assert backend.tool_names == (
-        "load_service_skill",
-        *(name for name in default_tool_registry().names_for_sdk() if name != "load_service_skill"),
-    )
+    assert backend.tool_names == default_tool_registry().names_for_sdk()
     contracts = {contract.name: contract for contract in default_tool_registry().list()}
     assert backend.tool_descriptions_by_contract == {contract_name: contract.description for contract_name, contract in contracts.items()}
     assert backend.tool_schemas_by_contract == {contract_name: contract.input_schema for contract_name, contract in contracts.items()}
@@ -1162,9 +1002,13 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
         "immediate",
     ]
     assert backend.tool_schemas["hospital_bag_cart_update"]["required"] == ["action"]
-    assert backend.tool_schemas["devices_guidance_read"]["properties"]["limit"]["maximum"] == 20
-    assert backend.tool_schemas["devices_guidance_read"]["properties"]["content_type"]["type"] == "string"
-    assert backend.tool_schemas["devices_pump_status_read"]["properties"]["limit"]["maximum"] == 20
+    assert backend.tool_schemas["devices_guidance"]["required"] == ["model", "operation"]
+    assert backend.tool_schemas["devices_guidance"]["properties"]["operation"]["enum"] == [
+        "read",
+        "start_or_resume",
+        "complete_current",
+        "cancel",
+    ]
     assert backend.tool_schemas["pregnancy_diary_query"]["properties"]["limit"]["maximum"] == 30
     assert backend.tool_schemas["pregnancy_diary_save"]["required"] == ["operation", "content"]
     assert backend.tool_schemas["pregnancy_diary_save"]["properties"]["content"]["maxLength"] == 5000
@@ -1210,76 +1054,11 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert backend.tool_schemas["records_pumping_record_delete_propose"]["required"] == ["record_id"]
     assert backend.tool_schemas["support_ticket_propose"]["required"] == ["issue_summary", "user_confirmed"]
     assert backend.tool_schemas["support_ticket_propose"]["additionalProperties"] is False
-    assert backend.tool_search_enabled is True
-    assert "milk_management" in backend.tool_namespaces
-    assert backend.tool_namespaces["milk_management"]["tool_names"] == [
-        "records_milk_status_read",
-        "records_milk_summary_read",
-        "records_milk_analysis_read",
-        "records_milk_analysis_intake",
-        "records_milk_analysis_evaluate",
-        "records_growth_read",
-        "records_feeding_record_propose",
-        "records_feeding_record_delete_propose",
-        "records_pumping_record_propose",
-        "records_pumping_record_delete_propose",
-        "records_growth_record_propose",
-        "records_growth_record_update_propose",
-        "records_growth_record_delete_propose",
-        "plans_current_read",
-        "plans_calendar_read",
-        "plans_milk_plan_propose",
-        "plans_milk_schedule_propose",
-        "plans_task_complete_propose",
-        "plans_task_create_propose",
-        "plans_milk_task_update_propose",
-        "plans_milk_task_delete_propose",
-        "notifications_milk_reminder_propose",
-    ]
-    assert backend.tool_namespaces["milk_management"]["deferred_tool_names"] == [
-        "records_feeding_record_propose",
-        "records_feeding_record_delete_propose",
-        "records_pumping_record_propose",
-        "records_pumping_record_delete_propose",
-        "records_growth_record_propose",
-        "records_growth_record_update_propose",
-        "records_growth_record_delete_propose",
-        "plans_milk_plan_propose",
-        "plans_milk_schedule_propose",
-        "plans_task_complete_propose",
-        "plans_task_create_propose",
-        "plans_milk_task_update_propose",
-        "plans_milk_task_delete_propose",
-        "notifications_milk_reminder_propose",
-    ]
-    assert backend.tool_namespaces["device_support"]["tool_names"] == [
-        "devices_pump_status_read",
-        "devices_guidance_read",
-        "devices_unboxing_advance",
+    assert {
+        "devices_guidance",
+        "hospital_bag_pump_recommend",
         "support_ticket_propose",
-    ]
-    assert backend.tool_namespaces["pregnancy_diary"]["tool_names"] == [
-        "pregnancy_diary_query",
-        "pregnancy_diary_save",
-        "pregnancy_diary_delete",
-    ]
-    assert backend.tool_namespaces["pregnancy_diary"]["deferred_tool_names"] == []
-    assert backend.tool_namespace_by_contract["profile_read"] == ""
-    assert backend.tool_namespace_by_contract["profile_update"] == ""
-    assert backend.tool_namespace_by_contract["conversation_history_image_load"] == ""
-    assert backend.tool_namespace_by_contract["records_milk_status_read"] == "milk_management"
-    assert backend.tool_namespace_by_contract["pregnancy_diary_query"] == "pregnancy_diary"
-    assert backend.tool_namespace_by_contract["pregnancy_diary_save"] == "pregnancy_diary"
-    assert backend.tool_namespace_by_contract["pregnancy_diary_delete"] == "pregnancy_diary"
-    assert backend.tool_deferred_by_contract["records_milk_status_read"] is False
-    assert backend.tool_deferred_by_contract["records_milk_analysis_read"] is False
-    assert backend.tool_deferred_by_contract["records_growth_read"] is False
-    assert backend.tool_deferred_by_contract["records_feeding_record_propose"] is True
-    assert backend.tool_deferred_by_contract["plans_task_update_propose"] is True
-    assert backend.tool_deferred_by_contract["support_ticket_propose"] is True
-    assert backend.tool_deferred_by_contract["pregnancy_diary_query"] is False
-    assert backend.tool_deferred_by_contract["pregnancy_diary_save"] is False
-    assert backend.tool_deferred_by_contract["pregnancy_diary_delete"] is False
+    } <= set(backend.tool_names)
 
 
 def test_agent_runtime_executor_uses_ephemeral_model_output_for_private_diary_read() -> None:
@@ -1409,7 +1188,7 @@ def test_agent_runtime_executor_allows_service_tool_without_skill_load() -> None
             scripted_sdk_response(
                 final_text="最近奶量是 420ml。",
                 tool_invocations=(scripted_tool_invocation("records_milk_status_read"),),
-                expected_available_tools=("load_service_skill", "records_milk_status_read"),
+                expected_available_tools=("records_milk_status_read",),
             )
         ]
     )
@@ -1526,7 +1305,7 @@ def test_agent_runtime_executor_generates_quick_replies_with_finalizer() -> None
         {"id": "qr_2", "text": "先不保存"},
         {"id": "qr_3", "text": "换简单版"},
     ]
-    assert backend.requests[0].tool_names == ("load_service_skill",)
+    assert backend.requests[0].tool_names == ()
     assert quick_reply_backend.requests[0].tool_names == ()
     assert quick_reply_backend.requests[0].response_text_format == QUICK_REPLY_RESPONSE_FORMAT
     finalizer_payload = json.loads(quick_reply_backend.requests[0].model_input[0]["content"])
@@ -1744,54 +1523,7 @@ def test_agent_runtime_executor_does_not_add_fallback_quick_replies_when_model_s
     assert result.quick_replies == []
 
 
-def test_agent_runtime_executor_allows_service_tool_after_skill_load() -> None:
-    thread_id = uuid4()
-    run = _run(thread_id=thread_id)
-    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="今天奶量怎么样？", sequence=1)
-    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
-    registry = default_tool_registry()
-    tool_calls: list[dict[str, Any]] = []
-
-    async def milk_status_handler(context: ToolHandlerContext) -> ToolResult:
-        tool_calls.append({"tool_name": context.tool_name, "args": context.args})
-        return ToolResult.json({"milk_status": {"total_ml": 420}})
-
-    tool_executor = CozymateToolExecutor(
-        registry=registry,
-        repository=repository,
-        handlers={"records_milk_status_read": milk_status_handler},
-    )
-    backend = ScriptedSdkBackend(
-        [
-            scripted_sdk_response(
-                final_text="最近奶量是 420ml。",
-                tool_invocations=(
-                    scripted_tool_invocation("load_service_skill", {"service_skill_id": "milk-management"}),
-                    scripted_tool_invocation("records_milk_status_read", {"days": 7, "limit": 5}),
-                ),
-                expected_available_tools=("load_service_skill", "records_milk_status_read"),
-            )
-        ]
-    )
-
-    result = asyncio.run(
-        CozymateAgentExecutor(
-            repository=repository,
-            sdk_runner=OpenAIResponsesRunner(backend=backend),
-            tool_registry=registry,
-            tool_executor=tool_executor,
-        ).execute(run=run)
-    )
-
-    assert result.status == "completed"
-    assert repository.tool_output.safe_output == {"milk_status": {"total_ml": 420}}
-    assert tool_calls == [
-        {"tool_name": "records_milk_status_read", "args": {"days": 7, "limit": 5}}
-    ]
-    assert repository.run_summaries == []
-
-
-def test_agent_runtime_executor_advertises_tool_search_for_responses_runner() -> None:
+def test_agent_runtime_executor_exposes_tools_directly_to_responses_runner() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)
     current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="Read my profile", sequence=1)
@@ -1808,14 +1540,11 @@ def test_agent_runtime_executor_advertises_tool_search_for_responses_runner() ->
     )
 
     assert result.status == "completed"
-    assert backend.tool_search_enabled is True
-    assert backend.tool_namespaces
-    assert backend.tool_namespace_by_contract["profile_read"] == ""
-    assert backend.tool_deferred_by_contract["profile_read"] is False
+    assert backend.tool_names == default_tool_registry().names_for_sdk()
     assert tool_executor.calls[0]["tool_name"] == "profile_read"
 
 
-def test_agent_runtime_executor_does_not_inject_dynamic_context_before_model_loads_skill() -> None:
+def test_agent_runtime_executor_does_not_inject_dynamic_service_context() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)
     current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="今天奶量怎么样？", sequence=1)
@@ -1837,7 +1566,7 @@ def test_agent_runtime_executor_does_not_inject_dynamic_context_before_model_loa
     assert "当前已接入官方资料的型号：Air1" not in request.instructions
     assert request.model_input == [{"role": "user", "content": "今天奶量怎么样？"}]
     assert repository.run_summaries == []
-    assert request.tool_names == ("load_service_skill",)
+    assert request.tool_names == ()
 
 
 def test_agent_runtime_executor_does_not_auto_project_active_workflow() -> None:
@@ -1887,7 +1616,7 @@ def test_agent_runtime_executor_exposes_service_tool_without_skill_projection() 
             scripted_sdk_response(
                 final_text="最近奶量是 420ml。",
                 tool_invocations=(scripted_tool_invocation("records_milk_status_read", {"days": 7, "limit": 5}),),
-                expected_available_tools=("load_service_skill", "records_milk_status_read"),
+                expected_available_tools=("records_milk_status_read",),
             )
         ]
     )
@@ -1903,42 +1632,6 @@ def test_agent_runtime_executor_exposes_service_tool_without_skill_projection() 
     assert result.status == "completed"
     assert tool_executor.calls[0]["tool_name"] == "records_milk_status_read"
     assert tool_executor.calls[0]["args"] == {"days": 7, "limit": 5}
-
-
-def test_agent_runtime_executor_loads_birth_prep_skill_only_when_model_calls_tool() -> None:
-    thread_id = uuid4()
-    run = _run(thread_id=thread_id)
-    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="帮我准备待产包和分娩沟通单", sequence=1)
-    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
-    backend = ScriptedSdkBackend(
-        [
-            scripted_sdk_response(
-                final_text="我先帮你确认关键信息。",
-                tool_invocations=(scripted_tool_invocation("load_service_skill", {"service_skill_id": "birth-prep"}),),
-                expected_available_tools=("load_service_skill",),
-            )
-        ]
-    )
-
-    result = asyncio.run(
-        CozymateAgentExecutor(
-            repository=repository,
-            sdk_runner=OpenAIResponsesRunner(backend=backend),
-        ).execute(run=run)
-    )
-
-    request = backend.requests[0]
-    loaded_skill = repository.tool_output.safe_output["skill"]
-    assert result.status == "completed"
-    assert request.service_skill_id == "cozymate_service_agent"
-    assert "CozyMate" in request.instructions
-    assert "待产包清单" not in request.instructions
-    assert loaded_skill["service_skill_id"] == "birth-prep"
-    assert "instructions" not in loaded_skill
-    assert "奶量管理仅处理三类任务" not in request.instructions
-    assert "当前已接入官方资料的型号：Air1" not in request.instructions
-    assert request.tool_names == ("load_service_skill",)
-    assert repository.run_summaries == []
 
 
 def test_agent_runtime_executor_ignores_legacy_run_summaries() -> None:
@@ -2104,45 +1797,6 @@ def test_agent_runtime_executor_does_not_restore_missing_history_from_run_summar
     ]
 
 
-def test_agent_runtime_executor_loads_device_skill_only_when_model_calls_tool() -> None:
-    thread_id = uuid4()
-    run = _run(thread_id=thread_id)
-    current_user = _message(
-        thread_id=thread_id,
-        run_id=run.id,
-        role="user",
-        text="My Air1 pump suction feels weak today. What should I check?",
-        sequence=1,
-    )
-    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
-    backend = ScriptedSdkBackend(
-        [
-            scripted_sdk_response(
-                final_text="I will check device status.",
-                tool_invocations=(scripted_tool_invocation("load_service_skill", {"service_skill_id": "device-guidance"}),),
-                expected_available_tools=("load_service_skill",),
-            )
-        ]
-    )
-
-    asyncio.run(
-        CozymateAgentExecutor(
-            repository=repository,
-            sdk_runner=OpenAIResponsesRunner(backend=backend),
-        ).execute(run=run)
-    )
-
-    request = backend.requests[0]
-    loaded_skill = repository.tool_output.safe_output["skill"]
-    assert request.service_skill_id == "cozymate_service_agent"
-    assert "每轮给 1 个主步骤" not in request.instructions
-    assert loaded_skill["service_skill_id"] == "device-guidance"
-    assert "instructions" not in loaded_skill
-    assert "待产包清单" not in request.instructions
-    assert "奶量管理仅处理三类任务" not in request.instructions
-    assert repository.run_summaries == []
-
-
 def test_agent_runtime_executor_excludes_tool_messages_from_conversation_history() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)
@@ -2216,43 +1870,6 @@ def test_agent_runtime_executor_real_tool_executor_uses_run_actor_role_permissio
     ] == ["model_followup", "model_reasoning_after_tool"]
     assert result.final_text == "Profile context loaded."
     assert repository.run_summaries == []
-
-
-def test_agent_runtime_executor_loads_skill_through_unified_tool_executor() -> None:
-    thread_id = uuid4()
-    run = _run(thread_id=thread_id)
-    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="帮我看看最近奶量", sequence=1)
-    repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user, run=run)
-    registry = default_tool_registry()
-    tool_executor = CozymateToolExecutor(registry=registry, repository=repository, handlers={})
-    backend = ServiceSkillLoadingSdkBackend(service_skill_id="milk-management")
-
-    result = asyncio.run(
-        CozymateAgentExecutor(
-            repository=repository,
-            sdk_runner=OpenAIResponsesRunner(backend=backend),
-            tool_registry=registry,
-            tool_executor=tool_executor,
-        ).execute(run=run)
-    )
-
-    assert result.status == "completed"
-    assert repository.tool_call is not None
-    assert repository.tool_call.tool_name == "load_service_skill"
-    assert repository.tool_call.status == "completed"
-    assert repository.tool_output.safe_output["service_skill_id"] == "milk-management"
-    assert "instructions" not in repository.tool_output.safe_output["skill"]
-    assert isinstance(backend.function_output, str)
-    loaded_tool_result = json.loads(backend.function_output)
-    assert loaded_tool_result["service_skill_id"] == "milk-management"
-    assert "奶量管理仅处理三类任务" in loaded_tool_result["skill"]["instructions"]
-    assert {"namespace": "milk_management", "name": "records_milk_status_read"} in repository.tool_output.safe_output["recommended_tools"]
-    assert [event.event_type for event in repository.events if event.event_type.startswith("tool.")] == [
-        "tool.started",
-        "tool.completed",
-    ]
-    loaded_event = next(event for event in repository.events if event.event_type == "skill.loaded")
-    assert "records_milk_status_read" in loaded_event.payload["recommended_tool_contracts"]
 
 
 def test_agent_runtime_executor_injects_verified_form_submission_as_non_persistent_trusted_tool_args() -> None:
@@ -2763,8 +2380,8 @@ def test_agent_runtime_executor_generates_the_plan_in_the_same_final_confirmatio
             "waiting",
             "guide.controls",
             {"phase": "guiding", "device_model": "Air1", "completed_steps": ["guide.parts"]},
-            "devices_unboxing_advance",
-            {"model": "Air1", "action": "complete_current"},
+            "devices_guidance",
+            {"model": "Air1", "operation": "complete_current"},
         ),
     ],
 )
@@ -4037,26 +3654,12 @@ class InvokingSdkBackend:
         self.tool_schemas = {}
         self.tool_schemas_by_contract = {}
         self.tool_descriptions_by_contract = {}
-        self.tool_namespaces = {}
-        self.tool_search_enabled = False
-        self.tool_namespace_by_contract = {}
-        self.tool_deferred_by_contract = {}
 
     async def run(self, request: SdkNodeRequest) -> SdkNodeResult:
         self.tool_names = tuple(tool.contract_name for tool in request.tools)
         self.tool_schemas = {tool.contract_name: tool.params_json_schema for tool in request.tools}
         self.tool_schemas_by_contract = {tool.contract_name: tool.params_json_schema for tool in request.tools}
         self.tool_descriptions_by_contract = {tool.contract_name: tool.description for tool in request.tools}
-        self.tool_namespaces = {
-            namespace.name: {
-                "tool_names": list(namespace.tool_names),
-                "deferred_tool_names": list(namespace.deferred_tool_names),
-            }
-            for namespace in request.tool_namespaces
-        }
-        self.tool_search_enabled = request.tool_search_enabled
-        self.tool_namespace_by_contract = {tool.contract_name: tool.namespace_name for tool in request.tools}
-        self.tool_deferred_by_contract = {tool.contract_name: tool.defer_loading for tool in request.tools}
         profile_tool = next(tool for tool in request.tools if tool.contract_name == "profile_read")
         invocation = await profile_tool.invoke("{}")
         return SdkNodeResult(final_text=str(invocation.to_function_call_output()))
@@ -4087,18 +3690,6 @@ class ConversationHistoryImageLoadingSdkBackend:
         invocation = await image_tool.invoke(json.dumps({"image_url": self.image_url}))
         self.function_output = invocation.to_function_call_output()
         return SdkNodeResult(final_text="图中有四个主要部件。")
-
-
-class ServiceSkillLoadingSdkBackend:
-    def __init__(self, *, service_skill_id: str) -> None:
-        self.service_skill_id = service_skill_id
-        self.function_output: str | list[dict[str, Any]] = ""
-
-    async def run(self, request: SdkNodeRequest) -> SdkNodeResult:
-        load_skill_tool = next(tool for tool in request.tools if tool.contract_name == "load_service_skill")
-        invocation = await load_skill_tool.invoke(json.dumps({"service_skill_id": self.service_skill_id}))
-        self.function_output = invocation.to_function_call_output()
-        return SdkNodeResult(final_text="我来看看最近奶量。")
 
 
 async def profile_read_handler(context: ToolHandlerContext):

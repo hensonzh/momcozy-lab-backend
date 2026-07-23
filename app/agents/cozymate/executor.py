@@ -31,7 +31,6 @@ from app.agent_runtime.providers import (
     SdkNodeRequest,
     SdkNodeResult,
     SdkToolDefinition,
-    SdkToolNamespace,
 )
 from app.agent_runtime.runs.execution import AgentRunExecutionResult
 from app.agent_runtime.runs.models import AgentAction, AgentArtifact, AgentEvent, AgentMessage, AgentRun, AgentWorkflowState
@@ -39,13 +38,7 @@ from app.agents.cozymate.quick_replies import QuickReplyFinalizer
 from app.agent_runtime.runs.registry import validate_runtime
 from app.agent_runtime.runs.repository import AgentRuntimeRepository
 from app.agent_runtime.runs.response_text import AppendOnlyAgentResponseProjector, agent_response_text_integrity
-from app.agent_runtime.tools import (
-    ToolContractRegistry,
-    ToolHandlerContext,
-    ToolNamespace,
-    ToolNamespaceRegistry,
-    ToolResult,
-)
+from app.agent_runtime.tools import ToolContractRegistry, ToolResult
 from app.agent_runtime.tools.payloads import DEFAULT_MAX_INLINE_PAYLOAD_BYTES, maybe_externalize_json_payload
 from app.modules.auth import CurrentUser
 
@@ -58,14 +51,8 @@ from .event_semantics import (
 from .health_guidance import HEALTH_GUIDANCE_ALLOWED_DOMAINS
 from .prompts import DEFAULT_STABLE_SYSTEM_PROMPT
 from .service_skills import ServiceSkillId
-from .skill_registry import (
-    AgentServiceSkill,
-    AgentServiceSkillRegistry,
-    default_service_skill_registry,
-)
 from .tools import (
     CozymateToolExecutor,
-    default_tool_namespace_registry,
     default_tool_registry,
 )
 from .tools.hospital_bag_flow import (
@@ -80,7 +67,6 @@ from .workflows.ongoing_work import project_workflow_context
 from .workflows.reply import guarded_workflow_type, workflow_accepts_reply
 
 
-LOAD_SERVICE_SKILL_TOOL_NAME = "load_service_skill"
 CONVERSATION_HISTORY_IMAGE_LOAD_TOOL_NAME = "conversation_history_image_load"
 COZYMATE_AGENT_ID = "cozymate_service_agent"
 LOGGER = logging.getLogger("production_backend.agent_runtime.executor")
@@ -117,7 +103,6 @@ class _AgentTurnContext:
 
 @dataclass(frozen=True)
 class _AgentTurnToolCatalog:
-    tool_namespaces: tuple[ToolNamespace, ...]
     tool_names: tuple[str, ...]
 
 
@@ -156,11 +141,9 @@ class CozymateAgentExecutor:
         repository: AgentRuntimeRepository,
         sdk_runner: AgentModelRunner,
         tool_registry: ToolContractRegistry | None = None,
-        tool_namespace_registry: ToolNamespaceRegistry | None = None,
         tool_executor: CozymateToolExecutor | None = None,
         event_sink: AgentEventPublisher | None = None,
         action_policy: AgentActionPolicy | None = None,
-        service_skill_registry: AgentServiceSkillRegistry | None = None,
         business_facts_projector: BusinessFactsProjector | None = None,
         transient_stream: AgentTransientStream | None = None,
         quick_reply_finalizer: QuickReplyFinalizer | None = None,
@@ -173,10 +156,8 @@ class CozymateAgentExecutor:
         self.repository = repository
         self.sdk_runner = sdk_runner
         self.tool_registry = tool_registry or default_tool_registry()
-        self.tool_namespace_registry = tool_namespace_registry or default_tool_namespace_registry(self.tool_registry)
         self.event_sink = event_sink
         self.action_policy = action_policy or cozymate_action_policy()
-        self.service_skill_registry = service_skill_registry or default_service_skill_registry()
         self.business_facts_projector = business_facts_projector
         self.transient_stream = transient_stream
         self.quick_reply_finalizer = quick_reply_finalizer
@@ -290,17 +271,11 @@ class CozymateAgentExecutor:
         )
 
     def _tool_catalog_for_turn(self) -> _AgentTurnToolCatalog:
-        tool_namespaces: tuple[ToolNamespace, ...] = (
-            self.tool_namespace_registry.list() if self._business_tools_enabled and self.sdk_runner.supports_tool_namespaces() else ()
-        )
         if not self._business_tools_enabled:
-            business_tool_names: tuple[str, ...] = ()
+            tool_names: tuple[str, ...] = ()
         else:
-            business_tool_names = tuple(
-                tool_name for tool_name in self.tool_registry.names_for_sdk() if tool_name != LOAD_SERVICE_SKILL_TOOL_NAME
-            )
-        tool_names = (LOAD_SERVICE_SKILL_TOOL_NAME, *business_tool_names)
-        return _AgentTurnToolCatalog(tool_namespaces=tool_namespaces, tool_names=tool_names)
+            tool_names = self.tool_registry.names_for_sdk()
+        return _AgentTurnToolCatalog(tool_names=tool_names)
 
     def _prepare_model_turn(
         self,
@@ -332,9 +307,7 @@ class CozymateAgentExecutor:
                 instructions=DEFAULT_STABLE_SYSTEM_PROMPT,
                 model_input=prepared_turn.model_input,
                 tool_names=tool_catalog.tool_names,
-                tool_namespaces=_sdk_tool_namespaces(tool_catalog.tool_namespaces),
-                tool_search_enabled=_tool_search_enabled(tool_catalog.tool_namespaces),
-                tools=self._sdk_tools(run=run, tool_names=tool_catalog.tool_names, tool_namespaces=tool_catalog.tool_namespaces),
+                tools=self._sdk_tools(run=run, tool_names=tool_catalog.tool_names),
                 trace_id=run.trace_id,
                 service_skill_id=COZYMATE_AGENT_ID,
                 on_text_delta=self._text_delta_handler(run=run),
@@ -638,30 +611,20 @@ class CozymateAgentExecutor:
         *,
         run: AgentRun,
         tool_names: tuple[str, ...],
-        tool_namespaces: tuple[ToolNamespace, ...],
     ) -> tuple[SdkToolDefinition, ...]:
-        namespace_by_tool = _namespace_by_tool(tool_namespaces)
-        business_tools = tuple(
+        return tuple(
             self._sdk_tool_definition(
                 run=run,
                 tool_name=tool_name,
-                namespace=namespace_by_tool.get(tool_name),
             )
             for tool_name in tool_names
-            if tool_name != LOAD_SERVICE_SKILL_TOOL_NAME
         )
-        load_service_skill = self._sdk_tool_definition(
-            run=run,
-            tool_name=LOAD_SERVICE_SKILL_TOOL_NAME,
-        )
-        return (load_service_skill, *business_tools)
 
     def _sdk_tool_definition(
         self,
         *,
         run: AgentRun,
         tool_name: str,
-        namespace: ToolNamespace | None = None,
     ) -> SdkToolDefinition:
         contract = self.tool_registry.get(tool_name)
         async def invoke(args_json: str) -> ToolResult:
@@ -672,49 +635,7 @@ class CozymateAgentExecutor:
             description=contract.description,
             params_json_schema=contract.input_schema,
             invoke=invoke,
-            namespace_name=namespace.name if namespace is not None else "",
-            defer_loading=namespace is not None and contract.loading_mode == "deferred",
         )
-
-    async def _load_service_skill_handler(self, context: ToolHandlerContext) -> ToolResult:
-        raw_skill_id = _text(context.args, "service_skill_id")
-        try:
-            skill_id = ServiceSkillId(raw_skill_id)
-        except ValueError as exc:
-            raise ApiError(code="invalid_service_skill", message="Unsupported service_skill_id.", status=422) from exc
-        skill = self.service_skill_registry.get(skill_id.value)
-        facts = (
-            await self.business_facts_projector.project(
-                actor=context.actor,
-                run_id=context.run_id,
-                service_skill_id=skill_id,
-            )
-            if self.business_facts_projector is not None
-            else {}
-        )
-        self._turn_state(context.run_id).business_facts[skill_id] = facts
-        output = _load_service_skill_output(
-            skill=skill,
-            recommended_tools=_recommended_tools_for_service_skill(
-                tool_registry=self.tool_registry,
-                tool_namespace_registry=self.tool_namespace_registry,
-                skill_id=skill_id,
-            ),
-            business_facts=facts,
-            loaded_at=self.clock(),
-        )
-        output["_deferred_agent_events"] = [
-            {
-                "event_type": "skill.loaded",
-                "payload": {
-                    "service_skill_id": skill.service_skill_id,
-                    "skill_version": skill.version,
-                    "loaded_at": output["loaded_at"],
-                    "recommended_tool_contracts": list(_recommended_tool_contracts(skill_id)),
-                },
-            }
-        ]
-        return ToolResult.json(output)
 
     async def _invoke_sdk_tool(
         self,
@@ -734,13 +655,7 @@ class CozymateAgentExecutor:
         trusted_args = await self._trusted_tool_args(run=run, contract_name=contract_name, args=args)
         if trusted_args:
             execute_kwargs["trusted_args"] = trusted_args
-        if contract_name == LOAD_SERVICE_SKILL_TOOL_NAME:
-            result = await self.tool_executor.execute(
-                **execute_kwargs,
-                handler_override=self._load_service_skill_handler,
-            )
-        else:
-            result = await self.tool_executor.execute(**execute_kwargs)
+        result = await self.tool_executor.execute(**execute_kwargs)
         if _text(result.safe_output, "status") == "urgent_care_required":
             required_response = _text(result.safe_output, "required_response")
             if required_response:
@@ -1030,43 +945,6 @@ class CozymateAgentExecutor:
             return await self.event_sink.append_event(thread_id=thread_id, run_id=run_id, event_type=event_type, payload=payload)
         return await self.repository.append_event(thread_id=thread_id, run_id=run_id, event_type=event_type, payload=payload)
 
-    async def _publish_optimistic_tool_event(
-        self,
-        *,
-        thread_id: UUID,
-        run_id: UUID,
-        event_type: str,
-        payload: dict[str, Any],
-    ) -> None:
-        dedupe_key = _tool_live_dedupe_key(run_id=run_id, event_type=event_type, payload=payload)
-        if not dedupe_key:
-            return
-        if self.event_sink is not None:
-            await self.event_sink.publish_application_event(
-                thread_id=thread_id,
-                run_id=run_id,
-                event_type=event_type,
-                payload=payload,
-                dedupe_key=dedupe_key,
-                optimistic=True,
-                durable=False,
-            )
-            return
-        if self.transient_stream is None:
-            return
-        try:
-            await self.transient_stream.publish_application_event(
-                thread_id=thread_id,
-                run_id=run_id,
-                event_type=event_type,
-                payload=payload,
-                dedupe_key=dedupe_key,
-                optimistic=True,
-                durable=False,
-            )
-        except Exception:
-            LOGGER.warning("Failed to publish optimistic load_service_skill event.", exc_info=True)
-
     async def _append_progress(self, *, run: AgentRun, phase: str, label: str) -> None:
         payload = run_progress_payload(phase=phase, label=label)
         semantic = payload.get("semantic")
@@ -1164,29 +1042,6 @@ def _visible_assistant_image_urls(*, messages: list[AgentMessage], before_sequen
     return tuple(urls)
 
 
-def _load_service_skill_output(
-    *,
-    skill: AgentServiceSkill,
-    recommended_tools: list[dict[str, str]],
-    business_facts: dict[str, Any],
-    loaded_at: datetime,
-) -> dict[str, Any]:
-    return {
-        "schema_version": "service_skill_load.v2",
-        "service_skill_id": skill.service_skill_id,
-        "skill_version": skill.version,
-        "loaded_at": _aware_datetime(loaded_at).astimezone(timezone.utc).isoformat(),
-        "skill": {
-            "service_skill_id": skill.service_skill_id,
-            "name": skill.name,
-            "description": skill.description,
-            "instructions": skill.prompt_block(),
-        },
-        "recommended_tools": recommended_tools,
-        "business_facts": business_facts,
-    }
-
-
 def _artifact_event_payload(artifact: AgentArtifact) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "artifact_id": str(artifact.id),
@@ -1211,26 +1066,6 @@ def _artifact_event_payload(artifact: AgentArtifact) -> dict[str, Any]:
         artifact_id=str(artifact.id),
     )
     return payload
-
-
-def _sdk_tool_namespaces(tool_namespaces: tuple[ToolNamespace, ...]) -> tuple[SdkToolNamespace, ...]:
-    return tuple(
-        SdkToolNamespace(
-            name=namespace.name,
-            description=namespace.description,
-            tool_names=namespace.tool_contracts,
-            deferred_tool_names=namespace.deferred_tool_contracts,
-        )
-        for namespace in tool_namespaces
-    )
-
-
-def _tool_search_enabled(tool_namespaces: tuple[ToolNamespace, ...]) -> bool:
-    return any(namespace.deferred_tool_contracts for namespace in tool_namespaces)
-
-
-def _namespace_by_tool(tool_namespaces: tuple[ToolNamespace, ...]) -> dict[str, ToolNamespace]:
-    return {tool_name: namespace for namespace in tool_namespaces for tool_name in namespace.tool_contracts}
 
 
 def _elapsed_ms(started_at: float) -> float:
@@ -1277,80 +1112,6 @@ def _hospital_bag_tool_output(tool_call: dict[str, Any]) -> dict[str, Any]:
 
 def _timings_with_total(timings_ms: dict[str, float], run_started_at: float) -> dict[str, float]:
     return {**timings_ms, "total_before_finalize": _elapsed_ms(run_started_at)}
-
-
-SERVICE_SKILL_RECOMMENDED_TOOL_CONTRACTS: dict[ServiceSkillId, tuple[str, ...]] = {
-    ServiceSkillId.BIRTH_PREP: (
-        "pregnancy_plan_intake_start",
-        "pregnancy_plan_intake_analyze",
-        "pregnancy_plan_intake_advance",
-        "pregnancy_plan_propose",
-        "pregnancy_plan_todo_propose",
-        "plans_plan_delete_propose",
-        "plans_task_update_propose",
-        "plans_task_delete_propose",
-        "birth_plan_form_create",
-        "labor_communication_card_create",
-        "hospital_bag_form_create",
-        "hospital_bag_card_create",
-        "hospital_bag_cart_update",
-        "hospital_bag_pump_recommend",
-    ),
-    ServiceSkillId.MILK_MANAGEMENT: (
-        "records_milk_status_read",
-        "records_milk_summary_read",
-        "records_milk_analysis_read",
-        "records_growth_read",
-        "records_feeding_record_propose",
-        "records_feeding_record_delete_propose",
-        "records_pumping_record_propose",
-        "records_pumping_record_delete_propose",
-        "records_growth_record_propose",
-        "records_growth_record_update_propose",
-        "records_growth_record_delete_propose",
-        "plans_current_read",
-        "plans_calendar_read",
-        "plans_milk_plan_propose",
-        "plans_task_complete_propose",
-        "plans_task_create_propose",
-        "notifications_milk_reminder_propose",
-    ),
-    ServiceSkillId.HEALTH_CONSULTATION: (
-        "records_milk_status_read",
-        "ibclc_consult_card_create",
-    ),
-    ServiceSkillId.EMOTION_SUPPORT: (),
-    ServiceSkillId.DEVICE_GUIDANCE: (
-        "devices_pump_status_read",
-        "devices_guidance_read",
-        "devices_unboxing_advance",
-        "support_ticket_propose",
-    ),
-}
-
-
-def _recommended_tool_contracts(skill_id: ServiceSkillId) -> tuple[str, ...]:
-    return SERVICE_SKILL_RECOMMENDED_TOOL_CONTRACTS.get(skill_id, ())
-
-
-def _recommended_tools_for_service_skill(
-    *,
-    tool_registry: ToolContractRegistry,
-    tool_namespace_registry: ToolNamespaceRegistry,
-    skill_id: ServiceSkillId,
-) -> list[dict[str, str]]:
-    namespace_by_tool = _namespace_by_tool(tool_namespace_registry.list())
-    recommendations: list[dict[str, str]] = []
-    for contract_name in _recommended_tool_contracts(skill_id):
-        contract = tool_registry.get(contract_name)
-        namespace = namespace_by_tool.get(contract_name)
-        recommendations.append(
-            {
-                "namespace": namespace.name if namespace is not None else "",
-                "name": contract.name,
-            }
-        )
-    return recommendations
 
 
 def _user_context(*, current_message: AgentMessage, now: datetime) -> dict[str, Any]:
@@ -1640,13 +1401,6 @@ def _list_of_dicts(payload: dict[str, Any], key: str) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
     return [dict(item) for item in value if isinstance(item, dict)]
-
-
-def _tool_live_dedupe_key(*, run_id: UUID, event_type: str, payload: dict[str, Any]) -> str:
-    if event_type not in {"tool.started", "tool.completed", "tool.failed"}:
-        return ""
-    tool_call_id = str(payload.get("tool_call_id") or payload.get("call_id") or "").strip()
-    return f"{run_id}:{event_type}:{tool_call_id}" if tool_call_id else ""
 
 
 def _json_object(raw: str) -> dict[str, Any]:

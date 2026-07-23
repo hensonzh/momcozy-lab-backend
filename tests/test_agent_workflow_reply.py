@@ -71,12 +71,12 @@ def test_workflow_reply_guard_accepts_the_current_cursor() -> None:
         ("pregnancy_plan_intake_advance", "submit_personalized_followup", "pregnancy_plan"),
         ("pregnancy_plan_intake_advance", "skip_checkup_records", "pregnancy_plan"),
         ("records_milk_analysis_intake", "answer", "milk_analysis"),
-        ("devices_unboxing_advance", "complete_current", "device_unboxing"),
-        ("devices_unboxing_advance", "cancel", "device_unboxing"),
+        ("devices_guidance", "complete_current", "device_unboxing"),
+        ("devices_guidance", "cancel", "device_unboxing"),
         ("records_milk_analysis_intake", "start", None),
         ("records_milk_analysis_intake", "resume", None),
-        ("devices_unboxing_advance", "start", None),
-        ("devices_unboxing_advance", "resume", None),
+        ("devices_guidance", "read", None),
+        ("devices_guidance", "start_or_resume", None),
     ],
 )
 def test_only_reply_driven_workflow_actions_require_a_cursor(
@@ -84,7 +84,8 @@ def test_only_reply_driven_workflow_actions_require_a_cursor(
     action: str,
     workflow_type: str | None,
 ) -> None:
-    assert guarded_workflow_type(tool_name, {"action": action}) == workflow_type
+    args = {"operation": action} if tool_name == "devices_guidance" else {"action": action}
+    assert guarded_workflow_type(tool_name, args) == workflow_type
 
 
 def _workflow(*, workflow_type: str, revision: int, step_token: str) -> AgentWorkflowState:

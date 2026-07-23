@@ -189,13 +189,6 @@ class AgentEvalService:
 
 
 def _runtime_trace_service_skill_id(*, run: Any, events: list[Any], default_service_skill_id: str = "") -> str:
-    for event in reversed(events):
-        if str(getattr(event, "event_type", "") or "") != "skill.loaded":
-            continue
-        payload = getattr(event, "payload", {})
-        service_skill_id = str(payload.get("service_skill_id") or "").strip() if isinstance(payload, dict) else ""
-        if service_skill_id:
-            return service_skill_id
     return str(getattr(run, "service_skill_id", "") or "").strip() or default_service_skill_id
 
 
@@ -282,7 +275,12 @@ def _tool_call_sequence_label(tool_call: Any, *, expected: bool) -> str:
         return contract
     args = tool_call.get("args_subset") if expected else _observed_tool_args(tool_call)
     action = str(args.get("action") or "").strip() if isinstance(args, dict) else ""
-    return f"{contract}[action={action}]" if action else contract
+    operation = str(args.get("operation") or "").strip() if isinstance(args, dict) else ""
+    if action:
+        return f"{contract}[action={action}]"
+    if operation:
+        return f"{contract}[operation={operation}]"
+    return contract
 
 
 def _observed_tool_args(tool_call: Any) -> dict[str, Any]:
@@ -331,21 +329,39 @@ def _tool_argument_failures(*, case: dict[str, Any], trace: AgentEvalTrace) -> l
 
 
 def _forbidden_tool_failures(*, case: dict[str, Any], trace: AgentEvalTrace) -> list[AgentEvalFailure]:
-    forbidden_contracts = [_contract(tool_call) for tool_call in case.get("forbidden_tool_calls", []) if _contract(tool_call)]
-    if not forbidden_contracts:
+    forbidden_calls = [tool_call for tool_call in case.get("forbidden_tool_calls", []) if _contract(tool_call)]
+    if not forbidden_calls:
         return []
-    observed_contracts = {_observed_tool_contract(tool_call) for tool_call in trace.tool_calls}
-    observed_contracts.discard("")
-    return [
-        AgentEvalFailure(
-            category="forbidden_tool",
-            assertion="tool.forbidden",
-            expected=f"do not call {contract}",
-            observed=contract,
+    failures: list[AgentEvalFailure] = []
+    for forbidden_call in forbidden_calls:
+        matched_call = next(
+            (
+                observed_call
+                for observed_call in trace.tool_calls
+                if _tool_call_matches_expected(
+                    expected_call=forbidden_call,
+                    observed_call=observed_call,
+                )
+            ),
+            None,
         )
-        for contract in forbidden_contracts
-        if contract in observed_contracts
-    ]
+        if matched_call is None:
+            continue
+        forbidden_args = forbidden_call.get("args_subset") if isinstance(forbidden_call, dict) else None
+        observed_label = (
+            _tool_call_sequence_label(matched_call, expected=False)
+            if isinstance(forbidden_args, dict) and forbidden_args
+            else _observed_tool_contract(matched_call)
+        )
+        failures.append(
+            AgentEvalFailure(
+                category="forbidden_tool",
+                assertion="tool.forbidden",
+                expected=f"do not call {_tool_call_sequence_label(forbidden_call, expected=True)}",
+                observed=observed_label,
+            )
+        )
+    return failures
 
 
 def _required_event_failures(*, case: dict[str, Any], trace: AgentEvalTrace) -> list[AgentEvalFailure]:

@@ -6,7 +6,6 @@ from typing import Any, cast
 from app.core.errors import ApiError
 from app.agent_runtime.runs.service import AgentRuntimeService
 from app.agent_runtime.tools.executor import DEFERRED_AGENT_EVENTS_KEY, ToolHandlerContext
-from app.modules.devices.service import DevicesService
 from app.agents.cozymate.actions.plans import (
     MILK_PLAN_CALENDAR_APPEND,
     MILK_PLAN_CALENDAR_REPLACE,
@@ -55,7 +54,6 @@ from .base import (
 from .shared import (
     _datetime_value,
     _deferred_artifact_created_event,
-    _device_payload,
     _feeding_payload,
     _feeding_record_apply_payload,
     _feeding_record_preview_payload,
@@ -93,7 +91,6 @@ from .shared import (
     _stable_payload_key,
     _string_list,
     _task_payload,
-    _telemetry_payload,
     _text,
 )
 
@@ -104,11 +101,9 @@ class BusinessContextReadToolHandler(_StandardToolHandler):
         *,
         records_service: RecordsService,
         plans_service: PlansService,
-        devices_service: DevicesService,
     ) -> None:
         self.records_service = records_service
         self.plans_service = plans_service
-        self.devices_service = devices_service
 
     async def execute(self, context: ToolHandlerContext) -> dict[str, Any]:
         limit = _limit(context.args.get("limit"), default=5, max_limit=20)
@@ -118,8 +113,6 @@ class BusinessContextReadToolHandler(_StandardToolHandler):
         growth = await self.records_service.list_growth(owner_user_id=owner_user_id, limit=limit)
         plans = await self.plans_service.list_plans(owner_user_id=owner_user_id, limit=limit)
         tasks = await self.plans_service.list_tasks(owner_user_id=owner_user_id, limit=limit)
-        devices = await self.devices_service.list_devices(owner_user_id=owner_user_id)
-        telemetry = await self.devices_service.list_telemetry_events(owner_user_id=owner_user_id, limit=limit)
         return {
             "records": {
                 "feedings": [_feeding_payload(record) for record in feedings],
@@ -129,10 +122,6 @@ class BusinessContextReadToolHandler(_StandardToolHandler):
             "plans": {
                 "plans": [_plan_payload(plan) for plan in plans],
                 "tasks": [_task_payload(task) for task in tasks],
-            },
-            "devices": {
-                "pumps": [_device_payload(device) for device in devices[:limit]],
-                "telemetry": [_telemetry_payload(event) for event in telemetry],
             },
         }
 

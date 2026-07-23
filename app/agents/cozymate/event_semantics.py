@@ -253,12 +253,6 @@ def _artifact_completed_label(artifact_type: str) -> str:
 
 
 _TOOL_COPY: dict[str, dict[str, str]] = {
-    "load_service_skill": {
-        "phase": "planning",
-        "started": "我先准备一下这个场景～",
-        "completed": "我准备好继续处理啦",
-        "failed": "这个场景暂时没准备好",
-    },
     "profile_read": {
         "phase": "reading",
         "started": "我先看看你的基础信息～",
@@ -334,20 +328,10 @@ _TOOL_COPY: dict[str, dict[str, str]] = {
         "started": "我先看看孕期计划上下文～",
         "completed": "我把孕期计划上下文整理好啦",
     },
-    "devices_pump_status_read": {
+    "devices_guidance": {
         "phase": "reading",
-        "started": "我先看看设备状态～",
-        "completed": "我把设备状态看好啦",
-    },
-    "devices_guidance_read": {
-        "phase": "reading",
-        "started": "我先看看设备说明～",
-        "completed": "我把设备说明整理好啦",
-    },
-    "devices_unboxing_advance": {
-        "phase": "planning",
-        "started": "我继续带你完成这一步～",
-        "completed": "这一步已经衔接好啦",
+        "started": "我先看看设备指导～",
+        "completed": "我把设备指导整理好啦",
     },
     "conversation_history_image_load": {
         "phase": "reading",

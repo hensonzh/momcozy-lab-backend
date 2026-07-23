@@ -226,17 +226,62 @@ def test_agent_eval_seed_assertion_engine_reports_wrong_scene_skill_when_trace_h
 def test_agent_eval_seed_assertion_engine_passes_known_device_guidance_trace() -> None:
     case = _case("device_known_guidance")
     trace = AgentEvalTrace(
-        tool_calls=[
-            {"tool_name": "devices_pump_status_read", "status": "completed"},
-            {"tool_name": "devices_guidance_read", "status": "completed"},
-        ],
-        final_text="I checked your pump status and the Air1 guidance assets.",
+        tool_calls=[{"tool_name": "devices_guidance", "status": "completed"}],
+        final_text="I checked the official Air1 guidance assets.",
     )
 
     result = create_cozymate_eval_assertion_engine().evaluate(case=case, trace=trace)
 
     assert result.passed is True
     assert result.failures == []
+
+
+def test_agent_eval_seed_assertion_engine_forbids_only_matching_device_guidance_operation() -> None:
+    case = {
+        **_case("device_unboxing_incomplete_step"),
+        "forbidden_tool_calls": [
+            {
+                "contract": "devices_guidance",
+                "args_subset": {"operation": "complete_current"},
+            }
+        ],
+    }
+    read_trace = AgentEvalTrace(
+        tool_calls=[
+            {
+                "tool_name": "devices_guidance",
+                "status": "completed",
+                "safe_args": {
+                    "model": "Air1",
+                    "operation": "read",
+                    "step": "guide.parts",
+                },
+            }
+        ],
+        final_text="Let us stay on this step and find the missing cable.",
+    )
+    advance_trace = AgentEvalTrace(
+        tool_calls=[
+            {
+                "tool_name": "devices_guidance",
+                "status": "completed",
+                "safe_args": {
+                    "model": "Air1",
+                    "operation": "complete_current",
+                },
+            }
+        ],
+        final_text="Here is the next step.",
+    )
+
+    read_result = create_cozymate_eval_assertion_engine().evaluate(case=case, trace=read_trace)
+    advance_result = create_cozymate_eval_assertion_engine().evaluate(case=case, trace=advance_trace)
+
+    assert read_result.passed is True
+    assert read_result.failures == []
+    assert advance_result.passed is False
+    assert advance_result.failures[0].category == "forbidden_tool"
+    assert advance_result.failures[0].observed == "devices_guidance[operation=complete_current]"
 
 
 def test_agent_eval_seed_assertion_engine_requires_expected_application_event() -> None:

@@ -236,14 +236,14 @@ def _project_device_unboxing_context(workflow: AgentWorkflowState) -> dict[str, 
         "completed_steps": completed_steps,
         "current_step": {"name": _safe_step(workflow.active_step or _text(state, "current_step"))},
         "next_transition": {
-            "tool": "devices_unboxing_advance",
-            "allowed_actions": ["complete_current", "cancel"],
+            "tool": "devices_guidance",
+            "allowed_operations": ["complete_current", "cancel"],
         },
         "instruction": (
             "The workflow reply relation proves only that the user replied to the current workflow revision; it does not "
             "prove that the step was fully presented or completed. Use the immediately preceding assistant message and the "
             "current user message to decide semantically whether the complete current step and its completion request were "
-            "delivered and then confirmed. Only then call devices_unboxing_advance with action=complete_current exactly once. "
+            "delivered and then confirmed. Only then call devices_guidance with operation=complete_current exactly once. "
             "If delivery or completion is unclear, stay on the current step and provide the missing guidance or answer the "
             "user's problem. Do not infer completion from workflow state alone or restart completed steps."
         ),

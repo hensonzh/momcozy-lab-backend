@@ -51,7 +51,6 @@ class CozymateToolExecutionPolicy(ToolExecutionPolicy):
                 "pregnancy_diary_delete": "删除孕期日记",
             }[tool_name]
         return {
-            "load_service_skill": "加载服务技能",
             "profile_read": "个人资料",
             "profile_update": "更新个人资料",
             "business_context_read": "业务上下文",
@@ -68,9 +67,7 @@ class CozymateToolExecutionPolicy(ToolExecutionPolicy):
             "pregnancy_plan_intake_start": "孕期计划信息表",
             "pregnancy_plan_intake_analyze": "孕期计划信息分析",
             "pregnancy_plan_propose": "孕期计划草稿",
-            "devices_pump_status_read": "设备状态",
-            "devices_guidance_read": "设备指导资料",
-            "devices_unboxing_advance": "设备开箱步骤",
+            "devices_guidance": "设备指导",
             "conversation_history_image_load": "历史图片",
             "birth_plan_form_create": "我先帮你准备确认内容～",
             "labor_communication_card_create": "我先帮你整理分娩沟通单～",

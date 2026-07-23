@@ -250,11 +250,6 @@ def _looks_like_tool_or_runtime_json(value: Any) -> bool:
         "tool_name",
         "safe_args",
         "safe_output",
-        "service_skill_id",
-        "skill_version",
-        "tool_scope",
-        "recommended_tools",
-        "business_facts",
         "preferred_name",
         "profile",
         "quick_replies",
@@ -263,7 +258,7 @@ def _looks_like_tool_or_runtime_json(value: Any) -> bool:
     }:
         return True
     status = str(value.get("status") or "")
-    if status == "service_skill_loaded" or status.startswith("needs_"):
+    if status.startswith("needs_"):
         return True
     nested = [item for item in value.values() if isinstance(item, dict | list)]
     return bool(nested) and all(_looks_like_tool_or_runtime_json(item) for item in nested)

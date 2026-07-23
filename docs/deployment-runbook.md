@@ -214,8 +214,8 @@ AGENT_RUNTIME_WORKER_ENABLED=true
 OPENAI_API_KEY=...
 ```
 
-Runtime requests that include namespace/deferred tool loading use the Responses
-API adapter and hosted `tool_search`. Turn-level fact extraction uses a separate
+Runtime requests expose each agent's static Tool Allowlist as top-level Responses
+API function tools. Turn-level fact extraction uses a separate
 OpenAI Responses request configured by the `AGENT_FACT_*` settings.
 
 Start the full test stack:

@@ -24,53 +24,32 @@
 
 | 项目 | 数量 |
 | --- | ---: |
-| 模型可见 Tool Contract | 48 |
-| 顶层工具 | 4 |
-| Namespace | 7 |
-| Namespace 内工具 | 44 |
-| eager | 18 |
-| deferred | 30 |
-| `none` | 12 |
+| 模型可见 Tool Contract | 45 |
+| 顶层工具 | 45 |
+| `none` | 9 |
 | `agent_internal` | 13 |
 | `user_resource` | 23 |
 | Action-backed Tool 对应的唯一 Action Type | 21 |
 
-## 3. 顶层工具
+## 3. 工具暴露方式
 
-| Tool Contract | effect_scope | Action Type |
-| --- | --- | --- |
-| `load_service_skill` | `none` | — |
-| `profile_read` | `none` | — |
-| `profile_update` | `user_resource` | `profile.update` |
-| `conversation_history_image_load` | `none` | — |
+全部 45 个 Tool Contract 都以顶层函数工具直接暴露给对应智能体。每个智能体只接收其静态 Tool Allowlist，不使用 Namespace、deferred loading 或 `tool_search`。
 
-Tool Contract 与 Responses API 函数名使用同一个 canonical `snake_case` 名称；namespace 和 Action Type 分别使用独立字段表达。
+Tool Contract 与 Responses API 函数名使用同一个 canonical `snake_case` 名称；Action Type 使用独立字段表达。
 
-## 4. Namespace
-
-| Namespace | Tool 数 | deferred | 用途 |
-| --- | ---: | ---: | --- |
-| `milk_management` | 22 | 14 | 奶量、喂养、吸奶、生长、计划与提醒 |
-| `birth_prep` | 12 | 12 | 孕期计划、分娩沟通、待产包 |
-| `hospital_bag_cart` | 1 | 1 | 待产包购物车 |
-| `pump_recommendation` | 1 | 1 | 吸奶器推荐 |
-| `device_support` | 4 | 1 | 设备状态、官方指导、开箱、售后草稿 |
-| `health_consultation` | 1 | 1 | IBCLC 咨询入口 |
-| `pregnancy_diary` | 3 | 0 | 孕期日记查询、保存、删除 |
-
-## 5. 无业务写入工具
+## 4. 无业务写入工具
 
 ### `none`
 
-`load_service_skill`、`profile_read`、`records_milk_summary_read`、`records_milk_status_read`、`records_milk_analysis_read`、`records_growth_read`、`plans_current_read`、`plans_calendar_read`、`pregnancy_diary_query`、`devices_pump_status_read`、`devices_guidance_read`、`conversation_history_image_load`。
+`profile_read`、`records_milk_summary_read`、`records_milk_status_read`、`records_milk_analysis_read`、`records_growth_read`、`plans_current_read`、`plans_calendar_read`、`pregnancy_diary_query`、`conversation_history_image_load`。
 
 ### `agent_internal`
 
-`records_milk_analysis_intake`、`records_milk_analysis_evaluate`、`devices_unboxing_advance`、`pregnancy_plan_intake_start`、`pregnancy_plan_intake_analyze`、`pregnancy_plan_intake_advance`、`birth_plan_form_create`、`labor_communication_card_create`、`hospital_bag_form_create`、`hospital_bag_card_create`、`hospital_bag_pump_recommend`、`support_ticket_propose`、`ibclc_consult_card_create`。
+`records_milk_analysis_intake`、`records_milk_analysis_evaluate`、`devices_guidance`、`pregnancy_plan_intake_start`、`pregnancy_plan_intake_analyze`、`pregnancy_plan_intake_advance`、`birth_plan_form_create`、`labor_communication_card_create`、`hospital_bag_form_create`、`hospital_bag_card_create`、`hospital_bag_pump_recommend`、`support_ticket_propose`、`ibclc_consult_card_create`。
 
 `agent_internal` 仍可以写 Agent Runtime 自身的 Workflow 或 Artifact，但不允许从 Tool Handler 直接修改 Profile、Diary、Plan、Record、Notification 等用户业务资源。
 
-## 6. Action-backed Tool
+## 5. Action-backed Tool
 
 | Tool Contract | Action Type |
 | --- | --- |
@@ -98,7 +77,7 @@ Tool Contract 与 Responses API 函数名使用同一个 canonical `snake_case` 
 | `records_growth_record_delete_propose` | `records.growth_record.delete` |
 | `hospital_bag_cart_update` | `hospital_bag.cart.update` |
 
-## 7. Profile 与孕期日记
+## 6. Profile 与孕期日记
 
 - `profile_read` 一次返回当前用户与全部宝宝的基础资料；宝宝使用稳定的 `infant_id`。
 - `profile_update` 以 `user` 和 `infants` 两个可选对象执行 PATCH，可在同一 Action 中原子更新用户与指定宝宝；`ProfileUpdateActionHandler` 是唯一业务写入入口。
@@ -107,17 +86,16 @@ Tool Contract 与 Responses API 函数名使用同一个 canonical `snake_case` 
 - `delete` 在 Tool Handler 中校验当前用户消息的 `confirmation_evidence`，证据成立后直接执行 Action，不再生成第二张确认卡。
 - `pregnancy_diary.changed` 由 Action Handler / Action Executor 产生，不再由 Tool Handler 伪造领域变更事件。
 
-## 8. 售后提交
+## 7. 售后提交
 
 `support_ticket_propose` 只生成 `support_ticket_draft` Artifact，不直接创建工单。用户在 Flutter 表单点击“确认并提交”后，`POST /v1/support/tickets` 以 `source=agent_form` 和 `artifact_id` 验证 owner/run/thread 归属，然后同步产生并执行 `support.ticket.create` Action。该点击已是可信用户意图，不再追加二次确认。
 
 普通、非 Agent 表单来源的 Support API 仍是应用命令，不强制伪装成 Agent Action。
 
-## 9. 权威代码位置
+## 8. 权威代码位置
 
 - Tool Contract：`app/agents/cozymate/tools/registry.py`
 - Input Schema：`app/agents/cozymate/tools/schemas.py`
-- Namespace：`app/agents/cozymate/tools/namespaces.py`
 - Tool Handler：`app/agents/cozymate/tools/handlers/`（按业务能力分组）
 - Action Policy：`app/agents/cozymate/actions/policy.py`
 - Action Handler 组装：`app/agents/cozymate/actions/registry.py`
